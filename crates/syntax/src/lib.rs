@@ -6,6 +6,7 @@ pub mod bms;
 pub mod copy;
 pub mod lexer;
 pub mod parser;
+pub mod report;
 pub mod source;
 pub mod sql;
 pub mod system;

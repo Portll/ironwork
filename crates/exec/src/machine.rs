@@ -24,6 +24,7 @@ mod cics_files;
 mod cics_services;
 mod file_io;
 mod le_services;
+mod report;
 mod sql;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -105,6 +106,7 @@ pub struct Machine<'p, 'u, 'w> {
     main: bool,
     /// HANDLE CONDITION, IGNORE CONDITION and HANDLE ABEND, which belong to the program level.
     cics_handlers: cics::Handlers,
+    report_writer: &'p crate::report::Writer,
     unit: &'u mut RunUnit<'w>,
 }
 
@@ -213,6 +215,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             local_base: 0,
             main,
             cics_handlers: cics::Handlers::default(),
+            report_writer: &compiled.report_writer,
             unit,
         };
         if compiled.layout.local_size > 0 {
@@ -254,11 +257,11 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     pub fn run_procedure(&mut self) -> R<Ending> {
-        if self.program.paragraphs.is_empty() {
+        let mut start = self.program.report_writer.procedure_start;
+        if self.program.paragraphs.len() <= start {
             return Ok(Ending::EndOfProgram);
         }
         let last = self.program.paragraphs.len() - 1;
-        let mut start = 0;
         loop {
             match self.run_paragraphs(start, last)? {
                 Flow::End(e) => return Ok(e),
@@ -394,6 +397,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Stmt::Exec(block) if block.declarative() => {}
             Stmt::Exec(block) if block.kind == ExecKind::Cics => return self.cics(block),
             Stmt::Exec(block) if block.kind == ExecKind::Sql => return self.sql(block),
+            Stmt::Report(r) => return self.report_statement(r),
             Stmt::Exec(block) => {
                 let kind = match block.kind {
                     ExecKind::Sql => "SQL",

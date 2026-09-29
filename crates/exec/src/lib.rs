@@ -9,6 +9,7 @@ pub mod layout;
 pub mod le;
 pub mod machine;
 pub mod picture;
+pub mod report;
 pub mod sql;
 pub mod strings;
 pub mod terminal;
@@ -28,6 +29,7 @@ pub struct Compiled {
     pub layout: Layout,
     pub options: Options,
     pub ssrange: bool,
+    pub report_writer: report::Writer,
 }
 
 const FUNCTIONS: &[&str] = &[
@@ -36,8 +38,9 @@ const FUNCTIONS: &[&str] = &[
 ];
 
 /// Checks and lays out a parsed program. `flags` are this compiler's own, such as `-silent`.
-pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error>> {
+pub fn compile(mut program: Program, flags: &[String]) -> Result<Compiled, Vec<Error>> {
     let mut errors = Vec::new();
+    let drafts = report::prepare(&mut program, &mut errors);
     let mut options = Options::default();
     let mut ssrange = false;
     for option in &program.options {
@@ -79,6 +82,7 @@ pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error
             errors.push(Error::at(Pos::default(), format!("PROCEDURE DIVISION USING {}: not an 01 or 77 item of the LINKAGE SECTION", param.name)));
         }
     }
+    let report_writer = report::resolve(&program, &layout, drafts, &mut errors);
     let mut check = Check { layout: &layout, program: &program, errors: &mut errors };
     for k in 0..program.files.len() {
         check.file_keys(k);
@@ -90,17 +94,20 @@ pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error
         check.statements(&p.statements);
     }
     if errors.is_empty() {
-        Ok(Compiled { program, layout, options, ssrange })
+        Ok(Compiled { program, layout, options, ssrange, report_writer })
     } else {
         Err(errors.into_iter().map(|e| e.in_files(&program.sources)).collect())
     }
 }
 
 /// The last paragraph of the section that paragraph `i` is in, or `i` when there are no sections.
+/// END DECLARATIVES ends a section as a section header does.
 pub(crate) fn section_end(program: &Program, i: usize) -> usize {
     let paragraphs = &program.paragraphs;
-    let Some(header) = (0..=i).rev().find(|&j| paragraphs[j].is_section) else { return i };
-    (header + 1..paragraphs.len()).take_while(|&j| !paragraphs[j].is_section).last().unwrap_or(header)
+    let declaratives = program.report_writer.procedure_start;
+    let (floor, ceiling) = if i < declaratives { (0, declaratives) } else { (declaratives, paragraphs.len()) };
+    let Some(header) = (floor..=i).rev().find(|&j| paragraphs[j].is_section) else { return i };
+    (header + 1..ceiling).take_while(|&j| !paragraphs[j].is_section).last().unwrap_or(header)
 }
 
 /// The first and last paragraph a procedure name covers: one paragraph, or a whole section.
@@ -445,6 +452,7 @@ impl Check<'_> {
                 }
             }
             Stmt::Exec(block) => self.exec_block(block),
+            Stmt::Report(r) => report::check_statement(self.program, r, self.errors),
             Stmt::Goback { .. } | Stmt::StopRun { .. } | Stmt::ExitProgram { .. } | Stmt::Continue | Stmt::Exit(_) | Stmt::NextSentence | Stmt::SentenceEnd => {}
         }
     }

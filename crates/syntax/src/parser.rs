@@ -2,6 +2,8 @@ use crate::ast::*;
 use crate::lexer::{Tok, Token};
 use crate::{Error, Pos};
 
+mod report;
+
 /// Every program in the source, first to last, with nested programs after the one containing them.
 pub fn parse(tokens: &[Token], options: Vec<String>) -> Result<Vec<Program>, Error> {
     let mut parser = Parser { tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default() };
@@ -21,6 +23,7 @@ const VERBS: &[&str] = &[
     "MOVE", "COMPUTE", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "IF", "PERFORM", "DISPLAY", "INITIALIZE", "GO", "GOBACK", "STOP",
     "CONTINUE", "EXIT", "EVALUATE", "SET", "CALL", "ACCEPT", "STRING", "UNSTRING", "INSPECT", "READ", "WRITE", "OPEN", "CLOSE",
     "REWRITE", "DELETE", "START", "SEARCH", "SORT", "MERGE", "RETURN", "RELEASE", "CANCEL", "EXEC", "NEXT",
+    "INITIATE", "GENERATE", "TERMINATE", "SUPPRESS",
 ];
 
 /// Words that end a phrase or a nested block.
@@ -211,6 +214,7 @@ impl Parser<'_> {
             files = self.environment()?;
         }
         let (mut working_storage, mut local_storage, mut linkage) = (Vec::new(), Vec::new(), Vec::new());
+        let mut report_writer = crate::report::ReportWriter::default();
         if self.at_division(&["DATA"]) {
             self.at += 2;
             self.expect(&Tok::Period, "a period")?;
@@ -226,6 +230,7 @@ impl Parser<'_> {
                     "LINKAGE" => linkage = self.data_entries()?,
                     "LOCAL-STORAGE" => local_storage = self.data_entries()?,
                     "FILE" => self.file_section(&mut files)?,
+                    "REPORT" => report_writer.reports.extend(self.report_section()?),
                     other => return Err(self.error(format!("the {other} SECTION is not supported yet"))),
                 }
             }
@@ -250,7 +255,7 @@ impl Parser<'_> {
                 returning = Some(self.name("a RETURNING item")?);
             }
             self.expect(&Tok::Period, "a period after the PROCEDURE DIVISION header")?;
-            self.paragraphs()?
+            self.procedure_paragraphs(&mut report_writer)?
         } else {
             Vec::new()
         };
@@ -286,6 +291,7 @@ impl Parser<'_> {
             files,
             sources: Vec::new(),
             exec_declarations,
+            report_writer,
         });
         out.extend(nested);
         Ok(())
@@ -330,6 +336,7 @@ impl Parser<'_> {
             record_min: None,
             record_max: None,
             records: Vec::new(),
+            reports: Vec::new(),
             pos,
         };
         while !self.accept(&Tok::Period) {
@@ -466,9 +473,13 @@ impl Parser<'_> {
                             self.reference()?;
                         }
                     }
+                    "REPORT" | "REPORTS" => {
+                        let names = self.report_names()?;
+                        files[index].reports.extend(names);
+                    }
                     _ => {
                         while self.peek().is_some() && self.peek() != Some(&Tok::Period)
-                            && !self.word().is_some_and(|w| matches!(w, "RECORDING" | "RECORD" | "BLOCK" | "LABEL" | "DATA" | "VALUE"))
+                            && !self.word().is_some_and(|w| matches!(w, "RECORDING" | "RECORD" | "BLOCK" | "LABEL" | "DATA" | "VALUE" | "REPORT" | "REPORTS"))
                         {
                             self.at += 1;
                         }
@@ -1028,6 +1039,7 @@ impl Parser<'_> {
                 Stmt::GoTo { target: self.proc_name()?, pos }
             }
             "EVALUATE" => self.evaluate(pos)?,
+            "INITIATE" | "GENERATE" | "TERMINATE" | "SUPPRESS" => Stmt::Report(Box::new(self.report_statement(&verb, pos)?)),
             "GOBACK" => Stmt::Goback { pos },
             "STOP" => {
                 self.expect_word("RUN")?;

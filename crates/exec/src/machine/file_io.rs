@@ -63,7 +63,7 @@ impl<'p> Machine<'p, '_, '_> {
         Ok(Flow::Next)
     }
 
-    fn area(&self, k: usize) -> (usize, usize) {
+    pub(super) fn area(&self, k: usize) -> (usize, usize) {
         let (offset, size) = self.layout.file_areas[k];
         (self.base + offset as usize, size as usize)
     }
@@ -416,7 +416,7 @@ impl<'p> Machine<'p, '_, '_> {
         self.conclude(k, code, invalid, '2', "WRITE", pos)
     }
 
-    fn write_stream(&mut self, k: usize, loc: Loc, advancing: Option<&Advancing>, pos: Pos) -> R<()> {
+    pub(super) fn write_stream(&mut self, k: usize, loc: Loc, advancing: Option<&Advancing>, pos: Pos) -> R<()> {
         let name = self.program.files[k].name.clone();
         let Some(mut f) = self.unit.programs[self.me].files[k].take() else {
             return self.io_status(k, "48", format!("WRITE {name}: {}", meaning("48")), pos);

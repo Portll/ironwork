@@ -1,6 +1,8 @@
 use super::*;
 use std::collections::BTreeMap;
 
+mod report;
+
 fn program(options: &str, data: &str, procedure: &str) -> String {
     let card = if options.is_empty() { String::new() } else { format!("       CBL {options}\n") };
     format!(
@@ -635,6 +637,9 @@ const FRAGMENTS: &[&str] = &[
     "NOT INVALID KEY ", "READ NEXT ", "OPEN I-O ", "EXEC CICS READ FILE('F') INTO(X) RIDFLD(K) END-EXEC", "EXEC CICS STARTBR FILE('F') RIDFLD(K) GTEQ END-EXEC",
     "EXEC CICS READNEXT FILE('F') INTO(X) RIDFLD(K) END-EXEC", "EXEC CICS WRITEQ TS QUEUE('Q') FROM(X) END-EXEC", "EXEC CICS FORMATTIME ABSTIME(T) ",
     "EXEC CICS RETURN TRANSID('T') COMMAREA(X) END-EXEC", "EXEC CICS HANDLE ABEND LABEL(P) END-EXEC", "EXEC CICS PUSH HANDLE END-EXEC", "EXEC SQL INCLUDE SQLCA END-EXEC", ":B.C", "EXEC CICS HANDLE CONDITION ERROR(P) END-EXEC", "END PROGRAM X.", "\n       IDENTIFICATION DIVISION.\n       PROGRAM-ID. Y.\n", "IS RECURSIVE", "RETURN-CODE",
+    "REPORT SECTION.", "\n       RD  R ", "REPORT IS R", "TYPE CF ", "TYPE PH ", "LINE PLUS ", "LINE 0 ", "NEXT PAGE ", "NEXT GROUP ", "COLUMN + ", "COLUMN RIGHT ", "SUM ",
+    "UPON ", "RESET ON ", "GROUP INDICATE ", "PAGE LIMIT 3 ", "FIRST DETAIL 9 ", "FOOTING +", "CODE 'X' ", "GENERATE ", "INITIATE ", "TERMINATE ",
+    "DECLARATIVES.", "USE BEFORE REPORTING ", "END DECLARATIVES.", "SUPPRESS PRINTING ", "LINE-COUNTER", "PAGE-COUNTER",
 ];
 
 fn mutate(base: &str, next: &mut impl FnMut() -> u64) -> String {
@@ -723,6 +728,26 @@ fn mutated_programs_never_panic_the_front_end() {
                     line("INSPECT S TALLYING N FOR ALL 'A' REPLACING FIRST 'B' BY 'C'"),
                     line("SEARCH ALL E WHEN E(IX) = 'B' NEXT SENTENCE END-SEARCH"),
                     line("GOBACK."),
+                ]
+                .concat(),
+            ),
+            file_program(
+                "           SELECT P ASSIGN TO PDD.\n",
+                "       FD  P REPORT IS R.\n",
+                &[
+                    "       01  K PIC X.\n       01  N PIC 9.\n       REPORT SECTION.\n       RD  R CONTROLS FINAL K PAGE 9 FIRST DETAIL 3 FOOTING 8.\n",
+                    "       01  TYPE PH LINE 1 COLUMN 1 PIC 9 SOURCE PAGE-COUNTER.\n       01  D TYPE DE LINE PLUS 1.\n",
+                    "           05 COLUMN 1 PIC X SOURCE K GROUP INDICATE.\n           05 R-N COLUMN + 2 PIC 9 SOURCE N.\n",
+                    "       01  TYPE CF K NEXT GROUP NEXT PAGE LINE PLUS 2\n           COLUMN 1 PIC 99 SUM R-N RESET ON FINAL.\n",
+                    "       01  TYPE RF LINE 4 NEXT PAGE COLUMN 1 VALUE 'END'.\n",
+                ]
+                .concat(),
+                &[
+                    "       DECLARATIVES.\n       U SECTION.\n           USE BEFORE REPORTING D.\n       U-1.\n           SUPPRESS PRINTING.\n       END DECLARATIVES.\n",
+                    "       M SECTION.\n",
+                    &line("OPEN OUTPUT P INITIATE R GENERATE D"),
+                    &line("GENERATE R TERMINATE R CLOSE P"),
+                    &line("GOBACK."),
                 ]
                 .concat(),
             ),

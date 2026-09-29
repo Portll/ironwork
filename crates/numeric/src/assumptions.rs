@@ -73,6 +73,19 @@ pub const LE_CENTURY_WINDOW: &str = "L11";
 pub const LE_RETURN_CODE_UNCHANGED: &str = "L12";
 pub const LE_MESSAGE_AND_DUMP_FILES: &str = "L13";
 pub const LE_HEAP: &str = "L14";
+pub const REPORT_WRITER_PRECOMPILER: &str = "RW1";
+pub const REPORT_TOTALS_BEFORE_PAGE_FIT: &str = "RW2";
+pub const REPORT_SOURCE_SUM_CORRELATION: &str = "RW3";
+pub const REPORT_PAGE_REGION_DEFAULTS: &str = "RW4";
+pub const REPORT_LINE_WRITES: &str = "RW5";
+pub const REPORT_NO_CARRIAGE_CONTROL: &str = "RW6";
+pub const REPORT_RECORD_LENGTH: &str = "RW7";
+pub const REPORT_SUM_OVERFLOW: &str = "RW8";
+pub const REPORT_SOURCE_OVERFLOW: &str = "RW9";
+pub const REPORT_SUPPRESS_PRINTING: &str = "RW10";
+pub const REPORT_NEW_PAGES: &str = "RW11";
+pub const REPORT_OUT_OF_ORDER: &str = "RW12";
+pub const REPORT_CONTROL_AREA: &str = "RW13";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -366,6 +379,84 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: LE_HEAP,
         claim: "CEEGTST gives zeroed run-unit storage on a doubleword from heap 0 only, refuses a request above 256 MiB with CEE0PD, and keeps the storage until the run ends; CEEFRST marks it free, and it is not reused",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: REPORT_WRITER_PRECOMPILER,
+        claim: "Enterprise COBOL takes the REPORT SECTION, the FD REPORT clause, INITIATE, GENERATE, TERMINATE, PAGE-COUNTER, LINE-COUNTER, PRINT-SWITCH and USE BEFORE REPORTING only through the COBOL Report Writer Precompiler, 5798-DYR (Migration Guide GC27-8715-04, pp. 69-70); a Report Writer program runs as the precompiler's generated COBOL runs, with the precompiler as supplied, option OSVS on (SC26-4301-04, 1.1.3)",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: REPORT_TOTALS_BEFORE_PAGE_FIT,
+        claim: "Under OSVS a report group's totalling (cross-footing, subtotalling, rolling forward) comes before its USE BEFORE REPORTING procedure and its page-fit test, so a group that forces a new page is already in the totals the PAGE FOOTING shows (SC26-4301-04, 4.2.4)",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: REPORT_SOURCE_SUM_CORRELATION,
+        claim: "Under OSVS a SUM of an item outside the REPORT SECTION that a DETAIL group has as a SOURCE is added only when such a DETAIL is generated, and once for each such DETAIL on GENERATE report-name; UPON names the DETAILs outright; any other such operand is added on every GENERATE (SC26-4301-04, 3.23.5 and 4.2.3)",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: REPORT_PAGE_REGION_DEFAULTS,
+        claim: "With no FOOTING, LAST CONTROL FOOTING is LAST DETAIL when that is written, else the line before the PAGE FOOTING (for a relative PAGE FOOTING, the line that puts its last line on PAGE LIMIT), else PAGE LIMIT; the standard would take PAGE LIMIT. With no LAST DETAIL it is FOOTING; a PAGE LIMIT below either is raised to it (SC26-4301-04, 2.9.3 and message RW-031)",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: REPORT_LINE_WRITES,
+        claim: "Each report line is one WRITE AFTER ADVANCING: the first line of a page AFTER ADVANCING PAGE when it is line 1, otherwise after a record of spaces, with no CODE, written AFTER ADVANCING PAGE; every other line after the distance from the last; a report with no PAGE LIMIT never skips to a new page. The manual shows this for its file handlers and says the direct output also writes line 1 at the top of the page (SC26-4301-04, 5.3.8 and 6.3)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: REPORT_NO_CARRIAGE_CONTROL,
+        claim: "Report lines go through ironwork's WRITE ... ADVANCING, which puts no printer control character in the record: a fixed or variable record holds the CODE and the line, and a text DD takes line feeds and form feeds. Under Enterprise COBOL's default ADV each record would carry one byte more, the control character, first",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: REPORT_RECORD_LENGTH,
+        claim: "A report file whose FD has no RECORD CONTAINS has records as long as the longest line of its reports, rounded up to a multiple of 4, plus the CODE (SC26-4301-04, 2.2.3 rule 7); under RECORDING MODE V each record ends after its last printed field (rule 9)",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: REPORT_SUM_OVERFLOW,
+        claim: "A SUM total is a signed binary item with the integer and decimal places of its SUM entry, widened to those of a REPORT SECTION item it totals, and packed decimal beyond 18 digits (SC26-4301-04, 3.23.4); an addition that would overflow it is not made and run-time error 11 is logged, as 2.8.3 says for SUM OVERFLOW STANDARD, though 3.23.8 says the field then prints blank",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: REPORT_SOURCE_OVERFLOW,
+        claim: "A SOURCE arithmetic expression that overflows its field or divides by zero leaves the field blank and logs run-time error 10, OVERFLOW PROCEDURE IS STANDARD being the default (SC26-4301-04, 2.8.3)",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: REPORT_SUPPRESS_PRINTING,
+        claim: "SUPPRESS PRINTING, or PRINT-SWITCH left non-zero by a USE BEFORE REPORTING procedure, stops the group's lines, page-fit test and NEXT GROUP, but its totals are still reset; 4.5.3 and 4.7.3 of SC26-4301-04 say so, while 4.2.4 step 9 says no further action is taken",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: REPORT_NEW_PAGES,
+        claim: "LINE ... NEXT PAGE skips to a new page only when a body group is already on the page; a REPORT FOOTING on a page of its own gets no PAGE HEADING or PAGE FOOTING; a page holding the REPORT HEADING alone gets no PAGE FOOTING (SC26-4301-04, 3.24.3)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: REPORT_OUT_OF_ORDER,
+        claim: "GENERATE for a report not initiated logs run-time error 14 and initiates it (SC26-4301-04, message RW-142); INITIATE of an active report starts it afresh; TERMINATE of an inactive report does nothing",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: REPORT_CONTROL_AREA,
+        claim: "PAGE-COUNTER, LINE-COUNTER and PRINT-SWITCH are S9(9) COMP items (PAGE-COUNTER's PICTURE is in SC26-4301-04, 3.15.2); each report's control area, fields and totals are WORKING-STORAGE after the program's own items, so CANCEL and IS INITIAL start the report afresh",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

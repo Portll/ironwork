@@ -85,6 +85,19 @@ The subset the interpreter runs today:
   or INVALID KEY; WRITE [FROM] with ADVANCING or INVALID KEY; REWRITE, DELETE and START with
   INVALID KEY; CLOSE; OPTIONAL files, and the file status codes for each outcome. A sequential file
   opened I-O can be REWRITTEN in place.
+- **Report Writer**, run as the output of IBM's COBOL Report Writer Precompiler would run, since
+  Enterprise COBOL takes a REPORT SECTION only through that precompiler: FD REPORT IS; RD with
+  CONTROLS (FINAL included), PAGE LIMIT, HEADING, FIRST DETAIL, LAST DETAIL, FOOTING, LINE LIMIT
+  and a literal CODE; report groups of every TYPE with LINE (absolute, PLUS, NEXT PAGE), NEXT
+  GROUP, COLUMN (absolute, PLUS, RIGHT, CENTER), PICTURE with editing, SOURCE (an identifier or an
+  arithmetic expression, ROUNDED), VALUE, SUM with UPON and RESET ON, GROUP INDICATE, BLANK WHEN
+  ZERO, JUSTIFIED and SIGN; PAGE-COUNTER and LINE-COUNTER; INITIATE, GENERATE of a DETAIL group or
+  of the report (summary reporting), and TERMINATE, with control footings minor to major and
+  headings major to minor, and page footing and heading on each new page; DECLARATIVES holding USE
+  BEFORE REPORTING, with SUPPRESS PRINTING and PRINT-SWITCH. Each line is a WRITE AFTER ADVANCING
+  to the report's file, whose record carries no printer control byte. The precompiler's extensions
+  (OCCURS, PRESENT WHEN, multiple LINES and COLUMNS, OR PAGE, STYLE, FUNCTION and the rest) are
+  refused by name; assumptions RW1 to RW13 hold what the manuals leave open.
 
 - **EXEC SQL and EXEC CICS** are read and checked: every SQL host variable and every CICS argument
   that names data must resolve; EXEC SQL INCLUDE works as COPY; a program with EXEC CICS gets

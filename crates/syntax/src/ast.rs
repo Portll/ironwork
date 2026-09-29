@@ -22,6 +22,8 @@ pub struct Program {
     pub sources: Vec<String>,
     /// EXEC blocks in the DATA DIVISION: SQL declarations, cursors and DECLARE SECTION markers.
     pub exec_declarations: Vec<ExecBlock>,
+    /// The REPORT SECTION, and the DECLARATIVES that serve it.
+    pub report_writer: crate::report::ReportWriter,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,6 +66,8 @@ pub struct FileDecl {
     pub record_min: Option<u32>,
     pub record_max: Option<u32>,
     pub records: Vec<DataEntry>,
+    /// FD ... REPORT IS: the reports written to the file.
+    pub reports: Vec<String>,
     pub pos: Pos,
 }
 
@@ -346,6 +350,7 @@ pub enum Stmt {
     /// A separator period in the PROCEDURE DIVISION: where NEXT SENTENCE resumes.
     SentenceEnd,
     Exec(Box<ExecBlock>),
+    Report(Box<crate::report::ReportStmt>),
     StopRun { pos: Pos },
     Continue,
     Exit(ExitKind),
