@@ -3,6 +3,7 @@
 //! services. The CALL side, which reads and writes the arguments, is machine/le_services.rs. What
 //! the manual leaves open is `numeric::assumptions` L1 to L18.
 
+use crate::calendar::{civil, days_in_month, is_leap, lilian, weekday, LAST_LILIAN, LILIAN_ZERO, MILLIS_PER_DAY, SECONDS_PER_DAY};
 use numeric::precision::{Fixed, Places};
 use zarch::check::ProgramMask;
 use zarch::ebcdic::{self, CodePage};
@@ -137,42 +138,6 @@ impl Condition {
     }
 }
 
-const fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let (y, m) = if month <= 2 { (year - 1, month + 9) } else { (year, month - 3) };
-    let era = y.div_euclid(400);
-    let yoe = y.rem_euclid(400);
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + (153 * m + 2) / 5 + day - 1;
-    era * 146_097 + doe - 719_468
-}
-
-/// Day 0 of the Lilian calendar, 14 October 1582, in days since 1970-01-01.
-const LILIAN_ZERO: i64 = days_from_civil(1582, 10, 14);
-/// 31 December 9999.
-pub const LAST_LILIAN: i64 = days_from_civil(9999, 12, 31) - LILIAN_ZERO;
-const DAY_MS: i64 = 86_400_000;
-
-fn leap(year: i64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
-}
-
-fn days_in_month(year: i64, month: u32) -> u32 {
-    match month {
-        2 if leap(year) => 29,
-        2 => 28,
-        4 | 6 | 9 | 11 => 30,
-        _ => 31,
-    }
-}
-
-pub fn lilian(year: i64, month: u32, day: u32) -> i64 {
-    days_from_civil(year, i64::from(month), i64::from(day)) - LILIAN_ZERO
-}
-
-/// 1 Sunday to 7 Saturday; day 1 was a Friday.
-pub fn weekday(lilian: i64) -> u32 {
-    ((lilian + 4).rem_euclid(7) + 1) as u32
-}
-
 /// An instant as a Lilian day and the milliseconds into it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Stamp {
@@ -183,25 +148,25 @@ pub struct Stamp {
 impl Stamp {
     /// The clock's reading: Unix seconds and hundredths.
     pub fn from_unix(seconds: i64, hundredths: u32) -> Self {
-        Self { lilian: seconds.div_euclid(86_400) - LILIAN_ZERO, millis: seconds.rem_euclid(86_400) * 1000 + i64::from(hundredths.min(99)) * 10 }
+        Self { lilian: seconds.div_euclid(SECONDS_PER_DAY) - LILIAN_ZERO, millis: seconds.rem_euclid(SECONDS_PER_DAY) * 1000 + i64::from(hundredths.min(99)) * 10 }
     }
 
     pub fn from_millis(ms: i64) -> Self {
-        Self { lilian: ms.div_euclid(DAY_MS), millis: ms.rem_euclid(DAY_MS) }
+        Self { lilian: ms.div_euclid(MILLIS_PER_DAY), millis: ms.rem_euclid(MILLIS_PER_DAY) }
     }
 
     pub fn total_millis(self) -> i64 {
-        self.lilian.saturating_mul(DAY_MS).saturating_add(self.millis)
+        self.lilian.saturating_mul(MILLIS_PER_DAY).saturating_add(self.millis)
     }
 
     pub fn fields(self) -> Fields {
-        let (year, month, day, _, _, _, yday, _) = crate::unit::civil(self.lilian.saturating_add(LILIAN_ZERO).saturating_mul(86_400));
+        let c = civil(self.lilian.saturating_add(LILIAN_ZERO).saturating_mul(SECONDS_PER_DAY));
         let s = self.millis / 1000;
         Fields {
-            year,
-            month,
-            day,
-            yday,
+            year: c.year,
+            month: c.month,
+            day: c.day,
+            yday: c.day_of_year,
             weekday: weekday(self.lilian),
             hour: (s / 3600) as u32,
             minute: (s / 60 % 60) as u32,
@@ -449,7 +414,7 @@ pub fn date(lilian: i64, picture: &[u8], page: &CodePage) -> (Vec<u8>, Option<Co
 /// CEEDATM: Lilian seconds in the picture's form, 80 bytes, and the condition if any.
 pub fn timestamp(seconds: [u8; 8], picture: &[u8], page: &CodePage) -> (Vec<u8>, Option<Condition>) {
     let blanks = vec![ebcdic::SPACE; 80];
-    let Some(ms) = hfp_millis(seconds).filter(|ms| (DAY_MS..(LAST_LILIAN + 1) * DAY_MS).contains(ms)) else {
+    let Some(ms) = hfp_millis(seconds).filter(|ms| (MILLIS_PER_DAY..(LAST_LILIAN + 1) * MILLIS_PER_DAY).contains(ms)) else {
         return (blanks, Some(SECONDS_RANGE));
     };
     let terms = terms(&picture_or_default(picture, DEFAULT_TIMESTAMP, page), page);
@@ -582,7 +547,7 @@ pub fn read(input: &[u8], picture: &[u8], reading: Reading, window: i64, page: &
     let year = if two_digit { window + (year - window).rem_euclid(100) } else { year };
     let lilian = match (p.month, p.day, p.yday) {
         (_, _, Some(yday)) if p.month.is_none() || p.day.is_none() => {
-            let length = if leap(year) { 366 } else { 365 };
+            let length = if is_leap(year) { 366 } else { 365 };
             if !(1..=length).contains(&yday) {
                 return Err(DATE_VALUE);
             }

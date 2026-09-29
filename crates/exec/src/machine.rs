@@ -2,6 +2,7 @@
 //! reference can reach anywhere in that memory, as a program compiled without SSRANGE can on
 //! z/OS, but never outside it.
 
+use crate::calendar::{civil, days_from_civil, days_in_month, SECONDS_PER_DAY};
 use crate::layout::{Item, Kind, Layout, Resolved};
 use crate::unit::{ADDRESS_BASE, LoadError, RETURN_CODE, RunUnit};
 use crate::Compiled;
@@ -1250,7 +1251,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     fn accept(&mut self, target: &Ref, from: AcceptFrom, pos: Pos) -> R<()> {
         let dest = self.locate_receiving(target)?;
         let (seconds, hundredths) = self.unit.now();
-        let (year, month, day, hour, minute, second, yday, wday) = crate::unit::civil(seconds);
+        let c = crate::calendar::civil(seconds);
+        let (year, month, day, hour, minute, second, yday, wday) = (c.year, c.month, c.day, c.hour, c.minute, c.second, c.day_of_year, c.weekday);
         let digits = |text: String| Val::Num(literal_fixed(&text).expect("digits"));
         let val = match from {
             AcceptFrom::Date { four_digit_year: true } => digits(format!("{year:04}{month:02}{day:02}")),
@@ -1391,7 +1393,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 arity(1..=1)?;
                 let n = self.integer(&f.args[0], pos)?;
                 let (y, m, d) = (n / 10000, n / 100 % 100, n % 100);
-                if !(1601..=9999).contains(&y) || !(1..=12).contains(&m) || !(1..=days_in_month(y, m)).contains(&d) {
+                if !(1601..=9999).contains(&y) || !(1..=12).contains(&m) || !(1..=i64::from(days_in_month(y, m as u32))).contains(&d) {
                     return Err(Abend::ironwork(format!("FUNCTION INTEGER-OF-DATE({n}): not a date from 1601 to 9999"), pos));
                 }
                 Val::Num(Fixed::new((days_from_civil(y, m, d) - days_from_civil(1600, 12, 31)) as i128, Places::new(7, 0)))
@@ -1402,14 +1404,14 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 if !(1..=3_067_671).contains(&n) {
                     return Err(Abend::ironwork(format!("FUNCTION DATE-OF-INTEGER({n}): outside 1 to 3067671"), pos));
                 }
-                let (y, m, d, ..) = crate::unit::civil((days_from_civil(1600, 12, 31) + n) * 86_400);
-                Val::Num(Fixed::new((y * 10000 + m as i64 * 100 + d as i64) as i128, Places::new(8, 0)))
+                let c = civil((days_from_civil(1600, 12, 31) + n) * SECONDS_PER_DAY);
+                Val::Num(Fixed::new((c.year * 10000 + i64::from(c.month) * 100 + i64::from(c.day)) as i128, Places::new(8, 0)))
             }
             "CURRENT-DATE" => {
                 arity(0..=0)?;
                 let (seconds, hundredths) = self.unit.now();
-                let (y, mo, d, h, mi, s, _, _) = crate::unit::civil(seconds);
-                let text = format!("{y:04}{mo:02}{d:02}{h:02}{mi:02}{s:02}{hundredths:02}+0000");
+                let c = civil(seconds);
+                let text = format!("{:04}{:02}{:02}{:02}{:02}{:02}{hundredths:02}+0000", c.year, c.month, c.day, c.hour, c.minute, c.second);
                 Val::Bytes(self.page.encode(&text).map_err(|e| Abend::ironwork(e.to_string(), pos))?)
             }
             "UPPER-CASE" | "LOWER-CASE" | "REVERSE" => {
@@ -2086,24 +2088,6 @@ fn key_term<'c>(terms: &[&'c Cond], key: &str) -> Option<(&'c Expr, &'c Expr)> {
         Cond::Rel(a, RelOp::Eq, b) if is_key(b) => Some((b, a)),
         _ => None,
     })
-}
-
-/// Days since 1970-01-01 of a proleptic Gregorian date.
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let (y, m) = if month <= 2 { (year - 1, month + 9) } else { (year, month - 3) };
-    let era = y.div_euclid(400);
-    let yoe = y.rem_euclid(400);
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + (153 * m + 2) / 5 + day - 1;
-    era * 146_097 + doe - 719_468
-}
-
-fn days_in_month(year: i64, month: i64) -> i64 {
-    match month {
-        2 if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 => 29,
-        2 => 28,
-        4 | 6 | 9 | 11 => 30,
-        _ => 31,
-    }
 }
 
 /// NUMVAL and NUMVAL-C: spaces, one sign (leading + or -, trailing + - CR or DB), digits with at most

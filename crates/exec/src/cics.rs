@@ -3,7 +3,7 @@
 //! what they act on.
 
 use crate::files::{Dd, Format, KeySpan, Keying};
-use crate::unit;
+use crate::calendar::{civil, EPOCH_1900_TO_1970_MILLIS, EPOCH_1900_TO_1970_SECONDS, SECONDS_PER_DAY};
 pub use crate::terminal::Terminal;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::OpenOptions;
@@ -258,28 +258,28 @@ impl Task {
 
 /// Milliseconds from 1900-01-01T00:00:00 to a Unix time given as seconds and hundredths.
 pub fn abstime(seconds: i64, hundredths: u32) -> i64 {
-    2_208_988_800_000 + seconds * 1000 + hundredths as i64 * 10
+    EPOCH_1900_TO_1970_MILLIS + seconds * 1000 + hundredths as i64 * 10
 }
 
 /// Unix seconds (rounded down) of an ABSTIME.
 pub fn unix_seconds(abstime: i64) -> i64 {
-    (abstime - 2_208_988_800_000).div_euclid(1000)
+    (abstime - EPOCH_1900_TO_1970_MILLIS).div_euclid(1000)
 }
 
 /// EIBDATE's value for an ABSTIME: 0CYYDDD as a decimal number.
 pub fn eib_date(abstime: i64) -> i64 {
     let secs = unix_seconds(abstime);
-    let (year, _, _, _, _, _, doy, _) = unit::civil(secs);
-    let c = if year >= 2000 { 1 } else { 0 };
-    let yy = year % 100;
-    c * 100_000 + yy * 1_000 + doy as i64
+    let date = civil(secs);
+    let c = if date.year >= 2000 { 1 } else { 0 };
+    let yy = date.year % 100;
+    c * 100_000 + yy * 1_000 + i64::from(date.day_of_year)
 }
 
 /// EIBTIME's value for an ABSTIME: 0HHMMSS as a decimal number.
 pub fn eib_time(abstime: i64) -> i64 {
     let secs = unix_seconds(abstime);
-    let (_, _, _, hour, minute, second, _, _) = unit::civil(secs);
-    hour as i64 * 10_000 + minute as i64 * 100 + second as i64
+    let time = civil(secs);
+    i64::from(time.hour) * 10_000 + i64::from(time.minute) * 100 + i64::from(time.second)
 }
 
 /// A FORMATTIME output: text for the date and time forms, a number for the counts.
@@ -293,7 +293,8 @@ pub enum FormatValue {
 /// `datesep` and `timesep` are the separators when DATESEP / TIMESEP were given.
 pub fn format_time(abstime: i64, option: &str, datesep: Option<char>, timesep: Option<char>) -> Option<FormatValue> {
     let secs = unix_seconds(abstime);
-    let (year, month, day, hour, minute, second, doy, weekday) = unit::civil(secs);
+    let c = civil(secs);
+    let (year, month, day, hour, minute, second, doy) = (c.year, c.month, c.day, c.hour, c.minute, c.second, c.day_of_year);
 
     let yy = format!("{:02}", year % 100);
     let yyyy = format!("{:04}", year);
@@ -333,11 +334,8 @@ pub fn format_time(abstime: i64, option: &str, datesep: Option<char>, timesep: O
         "YYYYDDD" => Some(FormatValue::Text(join(&[&yyyy, &ddd], datesep))),
         "DATEFORM" => Some(FormatValue::Text("MMDDYY".to_string())),
         "TIME" => Some(FormatValue::Text(join(&[&hh, &mi, &ss], timesep))),
-        "DAYCOUNT" => Some(FormatValue::Number((secs + 2_208_988_800) / 86_400)),
-        "DAYOFWEEK" => {
-            let dow = if weekday == 7 { 0 } else { weekday as i64 - 1 };
-            Some(FormatValue::Number(dow))
-        }
+        "DAYCOUNT" => Some(FormatValue::Number((secs + EPOCH_1900_TO_1970_SECONDS) / SECONDS_PER_DAY)),
+        "DAYOFWEEK" => Some(FormatValue::Number(c.cics_weekday())),
         "DAYOFMONTH" => Some(FormatValue::Number(day as i64)),
         "MONTHOFYEAR" => Some(FormatValue::Number(month as i64)),
         "YEAR" => Some(FormatValue::Number(year)),

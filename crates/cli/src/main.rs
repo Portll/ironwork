@@ -618,11 +618,6 @@ fn parse_clock(text: &str) -> Option<exec::unit::Clock> {
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 || hundredths > 99 {
         return None;
     }
-    let (y, m) = if month <= 2 { (year - 1, month + 9) } else { (year, month - 3) };
-    let era = y.div_euclid(400);
-    let yoe = y.rem_euclid(400);
-    let doy = (153 * m + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146_097 + doe - 719_468;
-    Some(exec::unit::Clock::Fixed(days * 86_400 + hour * 3600 + minute * 60 + second, hundredths))
+    let days = exec::calendar::days_from_civil(year, month, day);
+    Some(exec::unit::Clock::Fixed(days * exec::calendar::SECONDS_PER_DAY + hour * 3600 + minute * 60 + second, hundredths))
 }

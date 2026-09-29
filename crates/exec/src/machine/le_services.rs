@@ -186,7 +186,7 @@ impl<'p> Machine<'p, '_, '_> {
 
     fn ceedywk(&mut self, call: &LeCall) -> Outcome {
         let lilian = i64::from(self.le_fullword(call, 0)?);
-        let (day, failed) = if (1..=le::LAST_LILIAN).contains(&lilian) { (le::weekday(lilian) as i32, None) } else { (0, Some(le::LILIAN_RANGE)) };
+        let (day, failed) = if (1..=crate::calendar::LAST_LILIAN).contains(&lilian) { (crate::calendar::weekday(lilian) as i32, None) } else { (0, Some(le::LILIAN_RANGE)) };
         self.le_output(call, 1, &day.to_be_bytes())?;
         Ok(failed)
     }

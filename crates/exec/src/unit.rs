@@ -207,37 +207,3 @@ impl<'w> RunUnit<'w> {
         }
     }
 }
-
-/// Calendar fields of a UTC time: year, month, day, hour, minute, second, day of year (1-based),
-/// and day of week (1 Monday to 7 Sunday).
-pub fn civil(seconds: i64) -> (i64, u32, u32, u32, u32, u32, u32, u32) {
-    let days = seconds.div_euclid(86_400);
-    let secs = seconds.rem_euclid(86_400) as u32;
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy_march = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy_march + 2) / 153;
-    let day = (doy_march - (153 * mp + 2) / 5 + 1) as u32;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
-    let before = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334][month as usize - 1] + u32::from(leap && month > 2);
-    let weekday = ((days + 3).rem_euclid(7) + 1) as u32;
-    (year, month, day, secs / 3600, secs / 60 % 60, secs % 60, before + day, weekday)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn civil_dates() {
-        assert_eq!(civil(0), (1970, 1, 1, 0, 0, 0, 1, 4));
-        let t = 1_790_510_400;
-        let (y, m, d, _, _, _, yday, wday) = civil(t);
-        assert_eq!((y, m, d, yday, wday), (2026, 9, 27, 270, 7));
-        assert_eq!(civil(951_782_400).6, 60);
-    }
-}

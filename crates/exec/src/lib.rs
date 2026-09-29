@@ -1,6 +1,7 @@
 //! ironwork for COBOL: WORKING-STORAGE laid out as IBM lays it out, and an interpreter that runs a
 //! program against it in EBCDIC with the numeric model of `ironwork-numeric`.
 
+pub mod calendar;
 pub mod cics;
 pub mod codec;
 pub mod collating;
