@@ -17,6 +17,8 @@ mod sort;
 pub mod sql;
 pub mod strings;
 pub mod terminal;
+#[cfg(test)]
+mod testing;
 pub mod tn3270;
 pub mod unit;
 

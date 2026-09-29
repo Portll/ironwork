@@ -36,18 +36,12 @@ fn client(repository: &[&str], data: &str, body: &[&str]) -> String {
 
 /// Runs the first program of `main` with the rest of its programs, and `classes`, in its run unit.
 fn run_oo(main: &str, classes: &[String]) -> (String, String, Result<(Ending, i16), Abend>) {
-    let mut programs = syntax::parse_all_with(main, &Default::default()).unwrap_or_else(|e| panic!("{e}"));
-    let compiled = compile(programs.remove(0), &[]).unwrap_or_else(|e| panic!("{e:?}"));
-    programs.extend(classes.iter().map(|c| syntax::parse(c).unwrap_or_else(|e| panic!("{e}\n{c}"))));
-    let library = unit::Library { programs, ..Default::default() };
-    let (mut out, mut err) = (Vec::new(), Vec::new());
-    let ending = compiled.execute(library, files::Dds::default(), None, unit::Clock::Fixed(0, 0), &mut out, &mut err);
-    (String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap(), ending)
+    let o = Harness::source(main).classes(classes).clock(unit::Clock::Fixed(0, 0)).run(Executor::Interpreter);
+    (o.out, o.err, o.ending.map(|e| (e, o.return_code)))
 }
 
 fn errors(source: &str) -> String {
-    let parsed = syntax::parse(source).unwrap_or_else(|e| panic!("{e}"));
-    compile(parsed, &[]).err().map(|e| e.iter().map(|e| e.message.clone()).collect::<Vec<_>>().join("\n")).unwrap_or_default()
+    compile_errors(source)
 }
 
 fn account() -> String {

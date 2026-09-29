@@ -1,4 +1,5 @@
 use super::*;
+use crate::testing::{Executor, Harness, compile_errors, ebcdic, line};
 use std::collections::BTreeMap;
 
 mod collating;
@@ -16,22 +17,14 @@ fn program(options: &str, data: &str, procedure: &str) -> String {
 }
 
 fn run_with(source: &str, flags: &[&str]) -> (String, String, Result<Ending, Abend>) {
-    let parsed = syntax::parse(source).unwrap_or_else(|e| panic!("{e}"));
-    let flags: Vec<String> = flags.iter().map(|f| f.to_string()).collect();
-    let compiled = compile(parsed, &flags).unwrap_or_else(|e| panic!("{e:?}"));
-    let (mut out, mut err) = (Vec::new(), Vec::new());
-    let ending = compiled.run(&mut out, &mut err);
-    (String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap(), ending)
+    let o = Harness::source(source).flags(flags).run(Executor::Interpreter);
+    (o.out, o.err, o.ending)
 }
 
 fn run(source: &str) -> String {
     let (out, err, ending) = run_with(source, &[]);
     assert!(ending.is_ok(), "{ending:?}\n{err}");
     out
-}
-
-fn line(s: &str) -> String {
-    format!("           {s}\n")
 }
 
 #[test]
@@ -201,10 +194,8 @@ fn file_program(select: &str, fd: &str, data: &str, procedure: &str) -> String {
 }
 
 fn run_files(source: &str, dds: &[String]) -> (String, String, Result<Ending, Abend>) {
-    let compiled = compile(syntax::parse(source).unwrap_or_else(|e| panic!("{e}")), &[]).unwrap_or_else(|e| panic!("{e:?}"));
-    let (mut out, mut err) = (Vec::new(), Vec::new());
-    let ending = compiled.run_with(files::Dds::new(dds, false).unwrap(), &mut out, &mut err);
-    (String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap(), ending)
+    let o = Harness::source(source).dds(dds).run(Executor::Interpreter);
+    (o.out, o.err, o.ending)
 }
 
 fn temp(name: &str) -> std::path::PathBuf {
@@ -840,15 +831,8 @@ fn the_oracle_programs_run_and_match_the_model() {
 }
 
 fn run_unit(source: &str, dirs: Vec<std::path::PathBuf>, sysin: &str) -> (String, String, Result<(Ending, i16), Abend>) {
-    let mut programs = syntax::parse_all_with(source, &syntax::copy::Libraries::default()).unwrap_or_else(|e| panic!("{e}"));
-    let first = programs.remove(0);
-    let compiled = compile(first, &[]).unwrap_or_else(|e| panic!("{e:?}"));
-    let library = unit::Library { programs, dirs, ..Default::default() };
-    let (mut out, mut err) = (Vec::new(), Vec::new());
-    let input: Box<dyn std::io::BufRead> = Box::new(std::io::Cursor::new(sysin.as_bytes().to_vec()));
-    let clock = unit::Clock::Fixed(1_790_510_400, 42);
-    let ending = compiled.execute(library, files::Dds::default(), Some(input), clock, &mut out, &mut err);
-    (String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap(), ending)
+    let o = Harness::source(source).dirs(dirs).sysin(sysin).clock(unit::Clock::Fixed(1_790_510_400, 42)).run(Executor::Interpreter);
+    (o.out, o.err, o.ending.map(|e| (e, o.return_code)))
 }
 
 fn two_programs(main_data: &str, main_body: &str, sub_head: &str, sub_data: &str, sub_body: &str) -> String {
@@ -1183,23 +1167,16 @@ fn cics_program(id: &str, data: &str, linkage: &str, procedure: &str) -> String 
 }
 
 fn run_cics(source: &str, task: cics::Task, commarea: Option<&str>, clock: unit::Clock) -> (String, Result<(Ending, cics::Task), Abend>) {
-    let mut programs = syntax::parse_all_with(source, &syntax::copy::Libraries::default()).unwrap_or_else(|e| panic!("{e}"));
-    let first = programs.remove(0);
-    let compiled = compile(first, &[]).unwrap_or_else(|e| panic!("{e:?}"));
-    let library = unit::Library { programs, ..Default::default() };
-    let page = compiled.options.code_page();
-    let task = cics::Task { commarea: commarea.map(|c| page.encode(c).unwrap()), ..task };
-    let (mut out, mut err) = (Vec::new(), Vec::new());
-    let ending = compiled.execute_cics(library, files::Dds::default(), task, clock, &mut out, &mut err);
-    (String::from_utf8(out).unwrap(), ending)
+    let mut harness = Harness::source(source).task(task).clock(clock);
+    if let Some(commarea) = commarea {
+        harness = harness.commarea(commarea);
+    }
+    let o = harness.run(Executor::Interpreter);
+    (o.out, o.ending.map(|e| (e, o.task.unwrap())))
 }
 
 fn task(transid: &str) -> cics::Task {
     cics::Task { transid: transid.into(), termid: "T001".into(), userid: "USER01".into(), applid: "IRONWORK".into(), sysid: "IRON".into(), number: 7, ..Default::default() }
-}
-
-fn ebcdic(text: &str) -> Vec<u8> {
-    zarch::ebcdic::CodePage::by_ccsid(1140).unwrap().encode(text).unwrap()
 }
 
 #[test]

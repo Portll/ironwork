@@ -1,16 +1,9 @@
 use super::*;
-use crate::{Abend, Ending, compile, files, unit};
+use crate::testing::{Executor, Harness, line, page};
+use crate::{Abend, Ending, unit};
 
 /// 2026-09-27 13:05:09.25 UTC, a Sunday.
 const CLOCK: unit::Clock = unit::Clock::Fixed(1_790_514_309, 25);
-
-fn page() -> &'static CodePage {
-    CodePage::by_ccsid(1140).unwrap()
-}
-
-fn line(s: &str) -> String {
-    format!("           {s}\n")
-}
 
 const DATA: &str = "       01  IN-STR.\n           05 IN-LEN PIC S9(4) BINARY.\n           05 IN-TEXT PIC X(60).\n       01  PIC-STR.\n           05 PIC-LEN PIC S9(4) BINARY.\n           05 PIC-TEXT PIC X(60).\n       01  LILIAN PIC 9(9) BINARY.\n       01  DAY-NO PIC 9(9) BINARY.\n       01  SECS COMP-2.\n       01  SECS-X REDEFINES SECS PIC X(8).\n       01  SECS-N PIC 9(11)V999.\n       01  GREG PIC X(17).\n       01  OUT-80 PIC X(80) VALUE SPACES.\n       01  FC.\n           05 FC-SEV PIC 9(4) BINARY.\n           05 FC-MSG PIC 9(4) BINARY.\n           05 FC-CTL PIC X.\n           05 FC-FAC PIC X(3).\n           05 FC-ISI PIC 9(9) BINARY.\n       01  FC-X REDEFINES FC PIC X(12).\n";
 
@@ -29,13 +22,8 @@ fn set(item: &str, text: &str) -> Vec<String> {
 }
 
 fn run(source: &str, dds: &[String]) -> (String, String, Result<(Ending, i16), Abend>) {
-    let mut programs = syntax::parse_all_with(source, &syntax::copy::Libraries::default()).unwrap_or_else(|e| panic!("{e}"));
-    let first = programs.remove(0);
-    let compiled = compile(first, &[]).unwrap_or_else(|e| panic!("{e:?}"));
-    let library = unit::Library { programs, ..Default::default() };
-    let (mut out, mut err) = (Vec::new(), Vec::new());
-    let ending = compiled.execute(library, files::Dds::new(dds, false).unwrap(), None, CLOCK, &mut out, &mut err);
-    (String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap(), ending)
+    let o = Harness::source(source).dds(dds).clock(CLOCK).run(Executor::Interpreter);
+    (o.out, o.err, o.ending.map(|e| (e, o.return_code)))
 }
 
 /// The run's DISPLAY lines, trailing blanks removed.
@@ -315,15 +303,10 @@ fn cee3abd_ends_the_run_with_a_user_abend() {
 }
 
 fn run_cics(source: &str, dds: &[String]) -> (String, Result<(Ending, crate::cics::Task), Abend>) {
-    let mut programs = syntax::parse_all_with(source, &syntax::copy::Libraries::default()).unwrap_or_else(|e| panic!("{e}"));
-    let first = programs.remove(0);
-    let compiled = compile(first, &[]).unwrap_or_else(|e| panic!("{e:?}"));
-    let library = unit::Library { programs, ..Default::default() };
     let task = crate::cics::Task { transid: "LE01".into(), termid: "T001".into(), ..Default::default() };
-    let (mut out, mut err) = (Vec::new(), Vec::new());
-    let ending = compiled.execute_cics(library, files::Dds::new(dds, false).unwrap(), task, CLOCK, &mut out, &mut err);
-    assert!(err.is_empty(), "{}", String::from_utf8_lossy(&err));
-    (String::from_utf8(out).unwrap(), ending)
+    let o = Harness::source(source).dds(dds).task(task).clock(CLOCK).run(Executor::Interpreter);
+    assert!(o.err.is_empty(), "{}", o.err);
+    (o.out, o.ending.map(|e| (e, o.task.unwrap())))
 }
 
 #[test]
