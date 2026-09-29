@@ -6,7 +6,12 @@ members = ["crates/*"]
 edition = "2024"
 version = "0.1.0"
 license = "AGPL-3.0-or-later"
-publish = false
+publish = true
+repository = "https://github.com/Portll/ironwork"
+homepage = "https://github.com/Portll/ironwork"
+readme = "README.md"
+keywords = ["cobol", "compiler", "mainframe", "ebcdic", "zos"]
+categories = ["compilers", "emulators"]
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

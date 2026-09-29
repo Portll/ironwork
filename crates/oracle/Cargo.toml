@@ -5,10 +5,15 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
-numeric = { package = "ironwork-numeric", path = "../numeric" }
-zarch = { package = "ironwork-zarch", path = "../zarch" }
+numeric = { package = "ironwork-numeric", path = "../numeric", version = "0.1.0" }
+zarch = { package = "ironwork-zarch", path = "../zarch", version = "0.1.0" }
 
 [lints]
 workspace = true
