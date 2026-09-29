@@ -23,6 +23,7 @@ mod cics_bms;
 mod cics_files;
 mod cics_services;
 mod file_io;
+mod sql;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Abend {
@@ -391,6 +392,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Stmt::NextSentence => return Ok(Flow::NextSentence),
             Stmt::Exec(block) if block.declarative() => {}
             Stmt::Exec(block) if block.kind == ExecKind::Cics => return self.cics(block),
+            Stmt::Exec(block) if block.kind == ExecKind::Sql => return self.sql(block),
             Stmt::Exec(block) => {
                 let kind = match block.kind {
                     ExecKind::Sql => "SQL",
@@ -642,53 +644,17 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Kind::Float(p) => Val::Float(Hfp::from_bytes(p, bytes)),
             Kind::Binary { digits, signed, native, .. } => Val::Num(Fixed::new(Binary { digits: digits as u8, signed, native }.load(bytes), places)),
             Kind::Packed { signed, .. } => {
-                let mut p = bytes.to_vec();
-                if !signed && self.options.numproc == Numproc::Nopfd {
-                    *p.last_mut().unwrap() |= 0x0F;
-                }
-                Val::Num(self.decode(&p, places, pos)?)
+                let d = crate::codec::packed(bytes, signed, self.options.numproc).map_err(|c| Abend::check(c, pos))?;
+                Val::Num(fixed(d.negative, U256::from_u128(d.magnitude), places))
             }
             Kind::Zoned { digits, signed, sign, .. } => Val::Num(self.zoned_value(bytes, digits, signed, sign, places, pos)?),
         })
     }
 
-    fn decode(&self, packed: &[u8], places: Places, pos: Pos) -> R<Fixed> {
-        let d = decimal::decode(packed).map_err(|c| Abend::check(c, pos))?;
-        Ok(fixed(d.negative, U256::from_u128(d.magnitude), places))
-    }
-
     /// A zoned operand enters arithmetic through PACK, which keeps only the sign's zone.
     fn zoned_value(&self, bytes: &[u8], digits: u32, signed: bool, sign: Option<SignClause>, places: Places, pos: Pos) -> R<Fixed> {
-        let mut zoned = bytes.to_vec();
-        let mut separate_negative = None;
-        match sign {
-            Some(SignClause { separate: true, position }) => {
-                let s = if position == SignPosition::Leading { zoned.remove(0) } else { zoned.pop().unwrap() };
-                separate_negative = Some(match s {
-                    0x60 => true,
-                    0x4E => false,
-                    _ => return Err(Abend::check(ProgramCheck::Data, pos)),
-                });
-                *zoned.last_mut().unwrap() |= 0xF0;
-            }
-            Some(SignClause { separate: false, position: SignPosition::Leading }) => {
-                let zone = zoned[0] & 0xF0;
-                zoned[0] |= 0xF0;
-                let last = zoned.len() - 1;
-                zoned[last] = zone | (zoned[last] & 0x0F);
-            }
-            _ => {}
-        }
-        let mut packed = vec![0u8; digits as usize / 2 + 1];
-        decimal::pack(&mut packed, &zoned).map_err(|c| Abend::check(c, pos))?;
-        if !signed && self.options.numproc == Numproc::Nopfd {
-            *packed.last_mut().unwrap() |= 0x0F;
-        }
-        let v = self.decode(&packed, places, pos)?;
-        Ok(match separate_negative {
-            Some(negative) => fixed(negative, v.magnitude, places),
-            None => v,
-        })
+        let d = crate::codec::zoned(bytes, digits, signed, sign, self.options.numproc).map_err(|c| Abend::check(c, pos))?;
+        Ok(fixed(d.negative, U256::from_u128(d.magnitude), places))
     }
 
     fn operand_with_loc(&mut self, op: &Operand, pos: Pos) -> R<(Val, Option<Loc>)> {

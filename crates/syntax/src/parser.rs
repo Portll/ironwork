@@ -4,7 +4,7 @@ use crate::{Error, Pos};
 
 /// Every program in the source, first to last, with nested programs after the one containing them.
 pub fn parse(tokens: &[Token], options: Vec<String>) -> Result<Vec<Program>, Error> {
-    let mut parser = Parser { tokens, at: 0, exec_declarations: Vec::new(), cics: false };
+    let mut parser = Parser { tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default() };
     let mut programs = Vec::new();
     parser.program(&options, &mut programs)?;
     while parser.peek().is_some() {
@@ -68,6 +68,16 @@ struct Parser<'a> {
     exec_declarations: Vec<ExecBlock>,
     /// Whether the program being parsed has EXEC CICS, so the translator's additions apply.
     cics: bool,
+    sql: SqlState,
+}
+
+/// The WHENEVER actions in force, which carry on in listing order, and the EXEC SQL blocks the
+/// program being parsed has so far.
+#[derive(Default)]
+struct SqlState {
+    whenever: crate::sql::Whenever,
+    blocks: u32,
+    cursors: crate::sql::Cursors,
 }
 
 type R<T> = Result<T, Error>;
@@ -161,9 +171,9 @@ impl Parser<'_> {
     }
 
     fn program(&mut self, options: &[String], out: &mut Vec<Program>) -> R<()> {
-        let outer = (std::mem::take(&mut self.exec_declarations), std::mem::take(&mut self.cics));
+        let outer = (std::mem::take(&mut self.exec_declarations), std::mem::take(&mut self.cics), std::mem::take(&mut self.sql.blocks));
         let parsed = self.one_program(options, out);
-        (self.exec_declarations, self.cics) = outer;
+        (self.exec_declarations, self.cics, self.sql.blocks) = outer;
         parsed
     }
 
@@ -510,7 +520,7 @@ impl Parser<'_> {
         };
         let words: Vec<String> = body.split_whitespace().map(|w| w.to_ascii_uppercase()).collect();
         let word = |i: usize| words.get(i).map(String::as_str).unwrap_or("");
-        let mut block = ExecBlock { kind, command: word(0).to_owned(), options: Vec::new(), host_variables: Vec::new(), text: text.to_owned(), pos };
+        let mut block = ExecBlock { kind, command: word(0).to_owned(), options: Vec::new(), host_variables: Vec::new(), sql: None, text: text.to_owned(), pos };
         match kind {
             ExecKind::Sql => {
                 block.command = match (word(0), word(1), word(2)) {
@@ -520,7 +530,19 @@ impl Parser<'_> {
                     ("BEGIN" | "END", "DECLARE", "SECTION") => format!("{} DECLARE SECTION", word(0)),
                     (first, _, _) => first.into(),
                 };
-                block.host_variables = host_variables(body, pos);
+                let statement = self.sql.cursors.resolve(crate::sql::parse(body, pos));
+                if let crate::sql::Statement::Whenever { condition, action } = &statement {
+                    self.sql.whenever.set(*condition, action.clone());
+                }
+                block.host_variables = match &statement {
+                    crate::sql::Statement::Unsupported(_)
+                    | crate::sql::Statement::Malformed(_)
+                    | crate::sql::Statement::Declaration
+                    | crate::sql::Statement::DeclareUnsupported { .. } => host_variables(body, pos),
+                    typed => typed.references().into_iter().cloned().collect(),
+                };
+                self.sql.blocks += 1;
+                block.sql = Some(crate::sql::Sql { statement, ordinal: self.sql.blocks, whenever: self.sql.whenever.clone() });
             }
             ExecKind::Cics => {
                 self.cics = true;
@@ -1941,7 +1963,7 @@ fn cics_options(body: &str) -> Vec<(String, Option<ExecArg>)> {
 fn operand_of(text: &str, pos: Pos) -> Option<Operand> {
     let source = crate::source::Source { text: text.to_owned(), positions: vec![pos; text.chars().count()], options: Vec::new() };
     let tokens = crate::lexer::lex(&source).ok()?;
-    let mut p = Parser { tokens: &tokens, at: 0, exec_declarations: Vec::new(), cics: false };
+    let mut p = Parser { tokens: &tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default() };
     let op = p.operand().ok()?;
     (p.at == tokens.len()).then_some(op)
 }
@@ -1954,7 +1976,7 @@ fn system_entries(member: &str) -> R<Vec<DataEntry>> {
 fn system_text_entries(text: &str) -> R<Vec<DataEntry>> {
     let source = crate::source::read(text)?;
     let tokens = crate::lexer::lex(&source)?;
-    Parser { tokens: &tokens, at: 0, exec_declarations: Vec::new(), cics: false }.data_entries()
+    Parser { tokens: &tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default() }.data_entries()
 }
 
 /// Words that begin a SELECT clause, and so end the one before.

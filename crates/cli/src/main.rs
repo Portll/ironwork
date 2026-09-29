@@ -4,6 +4,7 @@ use std::{env, fs, io};
 const USAGE: &str = "ironwork for COBOL
 usage:
   ironwork run <program.cbl> [-silent] [-I <dir>]... [-L <dir>]... [--dd NAME=path[:format]]... [--clock <time>]
+               [--sql-replay path [--sql-replay-mode strict|keyed]]
                                                        compile and run; CBL and PROCESS cards set the options
   ironwork check <program.cbl> [-I <dir>]...           compile only
   ironwork cics <program.cbl> [run flags] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
@@ -25,6 +26,12 @@ flags:
   --clock YYYY-MM-DDTHH:MM:SS[.hh]
              the time ACCEPT FROM DATE, TIME and FUNCTION CURRENT-DATE report, for a run that must
              repeat; without it they report the system clock in UTC
+  --sql-replay path
+             answer EXEC SQL from a recording instead of a database. A call the recording does not
+             hold next abends SQLR, naming both calls. With cics, not with --serve
+  --sql-replay-mode strict|keyed
+             strict (the default) answers call n from the recording's call n; keyed answers each
+             call from the first unused recorded call with the same statement and inputs
 cics flags:
   --transid, --termid, --userid, --applid, --sysid
              who and what started the task, as EIBTRNID, EIBTRMID and ASSIGN report them
@@ -49,7 +56,8 @@ cics flags:
              script. The program runs as --transid's first task with no COMMAREA; RETURN TRANSID
              waits for the operator's next AID key and runs that transaction with the COMMAREA
              RETURN gave. A task that ends without TRANSID, an abend, or a transaction that is not
-             defined ends the conversation. Not with --screens, --commarea or --commarea-out
+             defined ends the conversation. Not with --screens, --commarea, --commarea-out or
+             --sql-replay
   --transaction TRAN=PROGRAM
              with --serve, the program a transaction runs: a program of the source, or one found
              through -L. --transid names the given program; each program compiles once
@@ -74,6 +82,7 @@ fn driver() -> ExitCode {
     let (mut flags, mut rest, mut libraries, mut dds) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let (mut program_dirs, mut clock) = (Vec::new(), exec::unit::Clock::System);
     let mut cics_options: Vec<(String, String)> = Vec::new();
+    let (mut replay, mut keyed) = (None, false);
     while let Some(a) = args.next() {
         match a.as_str() {
             "-h" | "--help" => {
@@ -95,6 +104,15 @@ fn driver() -> ExitCode {
             "--clock" => match args.next().as_deref().map(parse_clock) {
                 Some(Some(c)) => clock = c,
                 _ => return usage_error("--clock needs YYYY-MM-DDTHH:MM:SS[.hh]"),
+            },
+            "--sql-replay" => match args.next() {
+                Some(file) => replay = Some(file),
+                None => return usage_error("--sql-replay needs a recording"),
+            },
+            "--sql-replay-mode" => match args.next().as_deref() {
+                Some("strict") => keyed = false,
+                Some("keyed") => keyed = true,
+                _ => return usage_error("--sql-replay-mode needs strict or keyed"),
             },
             o if CICS_OPTIONS.contains(&o) => match args.next() {
                 Some(value) => cics_options.push((a.clone(), value)),
@@ -152,8 +170,18 @@ fn driver() -> ExitCode {
         Ok(d) => d,
         Err(e) => return usage_error(&e),
     };
+    let database: Option<Box<dyn exec::sql::Database>> = match replay {
+        Some(file) => match fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|text| exec::sql::Replay::parse(&text, keyed)) {
+            Ok(r) => Some(Box::new(r)),
+            Err(e) => {
+                eprintln!("ironwork: --sql-replay {file}: {e}");
+                return ExitCode::from(2);
+            }
+        },
+        None => None,
+    };
     if command == "cics" {
-        return run_cics(&compiled, path, library, dds, clock, &cics_options);
+        return run_cics(&compiled, path, library, dds, clock, database, &cics_options);
     }
     let sysin: Box<dyn io::BufRead> = match dds.get("SYSIN") {
         Some(dd) => match fs::File::open(&dd.path) {
@@ -166,7 +194,7 @@ fn driver() -> ExitCode {
         None => Box::new(io::stdin().lock()),
     };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
-    match compiled.execute(library, dds, Some(sysin), clock, &mut out, &mut err) {
+    match compiled.execute_with(library, dds, Some(sysin), clock, database, &mut out, &mut err) {
         Ok((_, return_code)) => ExitCode::from(return_code as u8),
         Err(abend) if abend.code == exec::machine::CLOSED_OUTPUT => ExitCode::SUCCESS,
         Err(abend) => report_abend(&compiled, path, &abend),
@@ -403,12 +431,20 @@ fn conversation(
 
 /// Runs the program as a CICS task built from the cics flags; reports RETURN TRANSID and writes
 /// RETURN's COMMAREA where --commarea-out says.
-fn run_cics(compiled: &exec::Compiled, path: &str, library: exec::unit::Library, dds: exec::files::Dds, clock: exec::unit::Clock, options: &[(String, String)]) -> ExitCode {
+fn run_cics(
+    compiled: &exec::Compiled,
+    path: &str,
+    library: exec::unit::Library,
+    dds: exec::files::Dds,
+    clock: exec::unit::Clock,
+    database: Option<Box<dyn exec::sql::Database>>,
+    options: &[(String, String)],
+) -> ExitCode {
     let page = compiled.options.code_page();
     let get = |name: &str| options.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone());
     if get("--serve").is_some() {
-        if get("--screens").is_some() || get("--commarea").is_some() || get("--commarea-out").is_some() {
-            return usage_error("--serve cannot be combined with --screens, --commarea or --commarea-out");
+        if get("--screens").is_some() || get("--commarea").is_some() || get("--commarea-out").is_some() || database.is_some() {
+            return usage_error("--serve cannot be combined with --screens, --commarea, --commarea-out or --sql-replay");
         }
         return serve_cics(compiled, library, dds, clock, options);
     }
@@ -457,7 +493,7 @@ fn run_cics(compiled: &exec::Compiled, path: &str, library: exec::unit::Library,
         }
     };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
-    let ran = compiled.execute_cics(library, dds, task, clock, &mut out, &mut err);
+    let ran = compiled.execute_cics_with(library, dds, task, clock, database, &mut out, &mut err);
     drop(out);
     print_screens();
     match ran {

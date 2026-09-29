@@ -70,6 +70,8 @@ pub struct RunUnit<'w> {
     pub cics: Option<crate::cics::Task>,
     pub eib: usize,
     pub cics_files: HashMap<String, Open>,
+    /// The database EXEC SQL statements reach, when the run has one.
+    pub sql: Option<crate::sql::Session<'w>>,
 }
 
 fn member_name(name: &str) -> bool {
@@ -92,6 +94,7 @@ impl<'w> RunUnit<'w> {
             cics: None,
             eib: 0,
             cics_files: HashMap::new(),
+            sql: None,
         }
     }
 

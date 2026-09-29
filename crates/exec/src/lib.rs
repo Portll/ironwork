@@ -2,11 +2,13 @@
 //! program against it in EBCDIC with the numeric model of `ironwork-numeric`.
 
 pub mod cics;
+pub mod codec;
 pub mod edit;
 pub mod files;
 pub mod layout;
 pub mod machine;
 pub mod picture;
+pub mod sql;
 pub mod strings;
 pub mod terminal;
 pub mod tn3270;
@@ -138,11 +140,29 @@ impl Compiled {
         out: &'w mut dyn Write,
         err: &'w mut dyn Write,
     ) -> Result<(Ending, i16), Abend> {
+        self.execute_with(library, dds, sysin, clock, None, out, err)
+    }
+
+    /// Runs as [`Compiled::execute`] does, with EXEC SQL answered by `database`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_with<'w>(
+        &self,
+        library: unit::Library,
+        dds: files::Dds,
+        sysin: Option<Box<dyn BufRead + 'w>>,
+        clock: unit::Clock,
+        database: Option<Box<dyn sql::Database + 'w>>,
+        out: &'w mut dyn Write,
+        err: &'w mut dyn Write,
+    ) -> Result<(Ending, i16), Abend> {
         let mut run_unit = unit::RunUnit::new(library, dds, sysin, clock, out, err);
+        run_unit.sql = database.map(sql::Session::new);
         let me = run_unit.add(None, &self.program, self.layout.size as usize);
         let ending = machine::Machine::activation(self, me, &mut run_unit, true).and_then(|mut m| m.run_procedure());
+        let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(&self.program.id, ending.is_ok()).map(drop));
         let closed = run_unit.close_all();
         let ending = ending?;
+        settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default() })?;
         closed.map_err(|m| Abend { code: "IRONWORK".into(), message: m, pos: Pos::default() })?;
         Ok((ending, run_unit.return_code()))
     }
@@ -156,12 +176,29 @@ impl Compiled {
         &self,
         library: unit::Library,
         dds: files::Dds,
-        mut task: cics::Task,
+        task: cics::Task,
         clock: unit::Clock,
         out: &'w mut dyn Write,
         err: &'w mut dyn Write,
     ) -> Result<(Ending, cics::Task), Abend> {
+        self.execute_cics_with(library, dds, task, clock, None, out, err)
+    }
+
+    /// A CICS task with a database: SYNCPOINT commits, and the end of the task commits, or rolls
+    /// back after an abend.
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_cics_with<'w>(
+        &self,
+        library: unit::Library,
+        dds: files::Dds,
+        mut task: cics::Task,
+        clock: unit::Clock,
+        database: Option<Box<dyn sql::Database + 'w>>,
+        out: &'w mut dyn Write,
+        err: &'w mut dyn Write,
+    ) -> Result<(Ending, cics::Task), Abend> {
         let mut run_unit = unit::RunUnit::new(library, dds, None, clock, out, err);
+        run_unit.sql = database.map(sql::Session::new);
         let me = run_unit.add(None, &self.program, self.layout.size as usize);
         run_unit.eib = run_unit.push_temporary(&[0; cics::EIB_LEN]);
         let commarea = task.commarea.take();
@@ -172,6 +209,7 @@ impl Compiled {
             m.begin_task(commarea, length);
             m.run_procedure()
         });
+        let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(&self.program.id, ending.is_ok()).map(drop));
         let mut closed = run_unit.close_all();
         for (name, f) in run_unit.cics_files.drain() {
             if let Err(e) = f.close() {
@@ -186,6 +224,7 @@ impl Compiled {
             Some(_) => Abend { message: format!("{} ({}, which CICS reports as ASRA)", a.message, a.code), code: "ASRA".into(), pos: a.pos },
             None => a,
         })?;
+        settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default() })?;
         closed.map_err(|m| Abend { code: "IRONWORK".into(), message: m, pos: Pos::default() })?;
         Ok((ending, task))
     }
@@ -540,7 +579,16 @@ impl Check<'_> {
 
     /// Every host variable and every CICS argument that names data must resolve.
     fn exec_block(&mut self, block: &ExecBlock) {
-        block.host_variables.iter().for_each(|r| self.reference_unsubscripted(r));
+        if let Some(syntax::sql::Sql { statement: syntax::sql::Statement::Malformed(why), .. }) = &block.sql {
+            self.errors.push(Error::at(block.pos, format!("EXEC SQL {}: {why}", block.command)));
+        }
+        for r in &block.host_variables {
+            if r.subscripts.is_empty() {
+                self.reference_unsubscripted(r);
+            } else {
+                self.reference(r);
+            }
+        }
         for (_, arg) in &block.options {
             if let Some(ExecArg::Operand(op)) = arg {
                 self.operand(op);

@@ -525,6 +525,8 @@ pub struct ExecBlock {
     pub options: Vec<(String, Option<ExecArg>)>,
     /// SQL host variables and indicator variables.
     pub host_variables: Vec<Ref>,
+    /// The typed SQL statement, for EXEC SQL.
+    pub sql: Option<crate::sql::Sql>,
     pub text: String,
     pub pos: Pos,
 }
