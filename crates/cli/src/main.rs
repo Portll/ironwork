@@ -11,6 +11,7 @@ usage:
                [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]... [--td QUEUE=path]...
                [--screens path | --serve HOST:PORT [--transaction TRAN=PROGRAM]...]
                                                        run as the first program of a CICS task
+  ironwork assumptions [--c-series]                    list the register of assumptions, one per line
   ironwork --version
 flags:
   -silent    stop the checked-mode reports: TRUNC(OPT) stores whose result depends on the
@@ -74,6 +75,10 @@ cics flags:
   --transaction TRAN=PROGRAM
              with --serve, the program a transaction runs: a program of the source, or one found
              through -L. --transid names the given program; each program compiles once
+assumptions flags:
+  --c-series
+             put each entry's number in one C series first, its position in the register, with the
+             original id beside it (C36 L1); the stored ids do not change
 exit status: RETURN-CODE when the run ends normally; 12 compile errors, 16 an abend, 2 usage";
 
 const FLAGS: &[&str] = &["-silent", "-strict-sort-keys"];
@@ -82,6 +87,27 @@ const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid",
 fn usage_error(message: &str) -> ExitCode {
     eprintln!("ironwork: {message}\n{USAGE}");
     ExitCode::from(2)
+}
+
+fn list_assumptions(c_series: bool) -> ExitCode {
+    use numeric::assumptions::{Basis, Oracle};
+    for (n, a) in numeric::assumptions::c_series() {
+        let basis = match a.basis {
+            Basis::Documented => "documented",
+            Basis::Recalled => "recalled",
+            Basis::Chosen => "chosen",
+        };
+        let oracle = match a.oracle {
+            Oracle::Hercules => "hercules",
+            Oracle::EnterpriseCobol => "enterprise-cobol",
+        };
+        if c_series {
+            println!("C{n}\t{}\t{basis}\t{oracle}\t{}", a.id, a.claim);
+        } else {
+            println!("{}\t{basis}\t{oracle}\t{}", a.id, a.claim);
+        }
+    }
+    ExitCode::SUCCESS
 }
 
 /// The interpreter recurses as COBOL PERFORMs and CALLs nest, so it runs on a thread whose stack
@@ -97,6 +123,7 @@ fn driver() -> ExitCode {
     let mut cics_options: Vec<(String, String)> = Vec::new();
     let (mut replay, mut keyed) = (None, false);
     let (mut sql_db, mut sql_record) = (None, None);
+    let mut c_series = false;
     while let Some(a) = args.next() {
         match a.as_str() {
             "-h" | "--help" => {
@@ -140,6 +167,7 @@ fn driver() -> ExitCode {
                 Some(value) => cics_options.push((a.clone(), value)),
                 None => return usage_error(&format!("{o} needs a value")),
             },
+            "--c-series" => c_series = true,
             "-I" => match args.next() {
                 Some(dir) => libraries.push(std::path::PathBuf::from(dir)),
                 None => return usage_error("-I needs a directory"),
@@ -148,6 +176,12 @@ fn driver() -> ExitCode {
             f if f.starts_with('-') && f.len() > 1 => flags.push(a),
             _ => rest.push(a),
         }
+    }
+    if rest == ["assumptions"] {
+        return list_assumptions(c_series);
+    }
+    if c_series {
+        return usage_error("unknown flag --c-series");
     }
     let (command, path) = match rest.as_slice() {
         [c, p] if c == "run" || c == "check" || c == "cics" => (c.as_str(), p.as_str()),

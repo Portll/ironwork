@@ -175,6 +175,9 @@ anywhere in the run unit's storage, as on z/OS, but never outside it.
 `tools/census.py` runs `ironwork check` over a sample of a COBOL corpus and tallies why programs are
 refused, which is how the next gaps are chosen.
 
+`ironwork assumptions` lists the register of assumptions (`numeric::assumptions::ASSUMPTIONS`), one
+per line; `--c-series` puts each entry's number in a single C series first, with its own id beside it.
+
 ## Code pages
 
 `zarch/ucm/` holds IBM's tables as ICU publishes them, pinned to

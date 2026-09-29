@@ -48,7 +48,8 @@ assistant asks again on your next pull request.
   `numeric::assumptions::ASSUMPTIONS` with its basis — *recalled* (IBM documents it, and it was
   written from memory, so check it against the manual) or *chosen* (IBM does not document it) —
   and the oracle that settles it: Hercules for a bare machine instruction, Enterprise COBOL for
-  anything the compiler decides.
+  anything the compiler decides. The register is append-only: never reorder, remove or insert
+  entries, because the C-series numbers of `ironwork assumptions --c-series` are positions in it.
 - **The real compiler settles a prediction; GnuCOBOL does not.**
   `cargo run -p ironwork-oracle -- smoke <dir>` is a syntax check only: GnuCOBOL is ASCII and
   IEEE, and its results are not IBM's. `cargo run -p ironwork-oracle -- check <dir>` scores saved

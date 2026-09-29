@@ -669,6 +669,12 @@ pub fn get(id: &str) -> &'static Assumption {
     ASSUMPTIONS.iter().find(|a| a.id == id).unwrap_or_else(|| panic!("no assumption {id}"))
 }
 
+/// The register as one C series: each entry's number is its 1-based position, so the numbers hold
+/// only while the register is appended to and never reordered or trimmed.
+pub fn c_series() -> impl Iterator<Item = (usize, &'static Assumption)> {
+    ASSUMPTIONS.iter().enumerate().map(|(i, a)| (i + 1, a))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -679,5 +685,19 @@ mod tests {
         ids.sort();
         ids.dedup();
         assert_eq!(ids.len(), ASSUMPTIONS.len());
+    }
+
+    #[test]
+    fn c_series_numbers_run_from_one_without_gaps() {
+        let numbers: Vec<usize> = c_series().map(|(n, _)| n).collect();
+        assert_eq!(numbers, (1..=ASSUMPTIONS.len()).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn c_series_keeps_every_id_once_and_leaves_the_register_alone() {
+        let before: Vec<&str> = ASSUMPTIONS.iter().map(|a| a.id).collect();
+        let seen: Vec<&str> = c_series().map(|(_, a)| a.id).collect();
+        assert_eq!(seen, before);
+        assert_eq!(ASSUMPTIONS.iter().map(|a| a.id).collect::<Vec<_>>(), before);
     }
 }
