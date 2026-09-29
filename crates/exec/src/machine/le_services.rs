@@ -10,6 +10,8 @@ use std::io::Write;
 const HEAP_LIMIT: usize = 1 << 28;
 /// MSGFILE's default ddname, where CEEMOUT writes.
 const MSGFILE: &str = "SYSOUT";
+/// The transient data queue that takes a CICS task's LE messages and dumps in place of any DD.
+const CESE: &str = "CESE";
 
 type Outcome = R<Option<Condition>>;
 
@@ -142,6 +144,9 @@ impl<'p> Machine<'p, '_, '_> {
             _ => "without clean-up",
         };
         let user = (code as u32) & 0xFFF;
+        if self.unit.cics.is_some() {
+            return Abend { code: format!("{user:04}"), message: format!("CALL CEE3ABD: transaction abend {user:04}"), pos: call.pos };
+        }
         Abend { code: format!("U{user:04}"), message: format!("CALL CEE3ABD: user abend {user} {how}"), pos: call.pos }
     }
 
@@ -271,8 +276,14 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     /// Writes lines to a DD as UTF-8 text, the run's first write replacing the file, or to standard
-    /// error when the DD is not given.
+    /// error when the DD is not given; in a CICS task, each line is an item on TD queue CESE.
     fn le_write(&mut self, dd: &str, lines: &[String], pos: Pos) -> R<()> {
+        if let Some(task) = self.unit.cics.as_mut() {
+            for line in lines {
+                task.writeq_td(CESE, &self.page.encode(line).unwrap_or_default());
+            }
+            return Ok(());
+        }
         let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
         let Some(file) = self.unit.dds.get(dd) else {
             return self.unit.err.write_all(text.as_bytes()).map_err(|e| Abend::ironwork(format!("writing to standard error: {e}"), pos));

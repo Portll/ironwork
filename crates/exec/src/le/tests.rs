@@ -314,6 +314,50 @@ fn cee3abd_ends_the_run_with_a_user_abend() {
     assert_eq!((abend.code.as_str(), abend.message.as_str()), ("U0005", "CALL CEE3ABD: user abend 5 with normal enclave termination"));
 }
 
+fn run_cics(source: &str, dds: &[String]) -> (String, Result<(Ending, crate::cics::Task), Abend>) {
+    let mut programs = syntax::parse_all_with(source, &syntax::copy::Libraries::default()).unwrap_or_else(|e| panic!("{e}"));
+    let first = programs.remove(0);
+    let compiled = compile(first, &[]).unwrap_or_else(|e| panic!("{e:?}"));
+    let library = unit::Library { programs, ..Default::default() };
+    let task = crate::cics::Task { transid: "LE01".into(), termid: "T001".into(), ..Default::default() };
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let ending = compiled.execute_cics(library, files::Dds::new(dds, false).unwrap(), task, CLOCK, &mut out, &mut err);
+    assert!(err.is_empty(), "{}", String::from_utf8_lossy(&err));
+    (String::from_utf8(out).unwrap(), ending)
+}
+
+#[test]
+fn cee3abd_in_a_cics_task_is_a_transaction_abend_named_by_the_code() {
+    let data = "       01  ABCODE PIC S9(9) BINARY.\n       01  TIMING PIC S9(9) BINARY.\n";
+    let body = [line("MOVE 0 TO TIMING"), line("MOVE 999 TO ABCODE"), line("CALL 'CEE3ABD' USING ABCODE, TIMING"), line("DISPLAY 'NOT REACHED'")];
+    let (out, ending) = run_cics(&program(data, &body), &[]);
+    assert_eq!(out, "");
+    let abend = ending.unwrap_err();
+    assert_eq!((abend.code.as_str(), abend.message.as_str()), ("0999", "CALL CEE3ABD: transaction abend 0999"));
+    let body = [line("MOVE 1 TO TIMING"), line("MOVE 4101 TO ABCODE"), line("CALL 'CEE3ABD' USING ABCODE TIMING")];
+    assert_eq!(run_cics(&program(data, &body), &[]).1.unwrap_err().code, "0005");
+}
+
+#[test]
+fn ceemout_and_cee3dmp_in_a_cics_task_write_to_cese_and_no_dd() {
+    let data = "       01  DEST PIC S9(9) BINARY VALUE 2.\n       01  TITLE PIC X(80) VALUE 'CICS DUMP'.\n       01  OPTS PIC X(255) VALUE 'FNAME(MYDUMP)'.\n";
+    let mut body = set("IN", "Hello from CEEMOUT");
+    body.push(line("CALL 'CEEMOUT' USING IN-STR DEST FC"));
+    body.push(line("CALL 'CEE3DMP' USING TITLE OPTS FC"));
+    body.push(line("DISPLAY FC-MSG"));
+    let (sysout, dump) = (temp("cics-sysout.txt"), temp("cics-mydump.txt"));
+    let dds = [format!("SYSOUT={}", sysout.display()), format!("MYDUMP={}", dump.display())];
+    let (out, ending) = run_cics(&program(data, &body), &dds);
+    let (_, task) = ending.unwrap_or_else(|a| panic!("{a:?}"));
+    assert_eq!(out, "0000\n");
+    assert!(!sysout.exists() && !dump.exists());
+    let cese: Vec<String> = task.td.get("CESE").expect("CESE written").iter().map(|item| page().decode(item)).collect();
+    assert_eq!(cese[0], "Hello from CEEMOUT");
+    assert!(cese[1].starts_with("CEE3DMP: CICS DUMP") && cese[1].contains("2026-09-27 13:05:09"), "{cese:?}");
+    assert_eq!(cese[2], "Options: FNAME(MYDUMP)");
+    assert_eq!(cese[4], "  T");
+}
+
 #[test]
 fn a_service_is_called_through_an_identifier_and_a_program_of_its_name_comes_first() {
     let data = "       01  SERVICE PIC X(8) VALUE 'CEEDAYS'.\n";

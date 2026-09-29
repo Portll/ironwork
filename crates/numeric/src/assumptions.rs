@@ -73,6 +73,7 @@ pub const LE_CENTURY_WINDOW: &str = "L11";
 pub const LE_RETURN_CODE_UNCHANGED: &str = "L12";
 pub const LE_MESSAGE_AND_DUMP_FILES: &str = "L13";
 pub const LE_HEAP: &str = "L14";
+pub const LE_UNDER_CICS: &str = "L15";
 pub const REPORT_WRITER_PRECOMPILER: &str = "RW1";
 pub const REPORT_TOTALS_BEFORE_PAGE_FIT: &str = "RW2";
 pub const REPORT_SOURCE_SUM_CORRELATION: &str = "RW3";
@@ -407,6 +408,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: LE_HEAP,
         claim: "CEEGTST gives zeroed run-unit storage on a doubleword from heap 0 only, refuses a request above 256 MiB with CEE0PD, and keeps the storage until the run ends; CEEFRST marks it free, and it is not reused",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_UNDER_CICS,
+        claim: "In a CICS task, CEE3ABD ends the task as EXEC CICS ABEND CANCEL would, with abcode modulo 4096 as a four-digit decimal ABCODE, so HANDLE ABEND does not catch it; CEEMOUT and CEE3DMP write each line as one item on transient data queue CESE, as MSGFILE and any DD are ignored under CICS (SA38-0683-60), without the terminal, transaction and time prefix CICS may put on a CESE record",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
