@@ -104,10 +104,12 @@ fn report(findings: &[Finding]) -> bool {
             Basis::Documented => "documented",
             Basis::Recalled => "recalled",
             Basis::Chosen => "chosen",
+            Basis::Observed => "observed",
         };
         let oracle = match a.oracle {
             Oracle::Hercules => "Hercules",
             Oracle::EnterpriseCobol => "Enterprise COBOL",
+            Oracle::Db2 => "Db2 for z/OS",
         };
         println!("{:<11} {held:>4}  {broken:>6}  {basis:<9} {oracle:<17} {}", a.id, a.claim);
     }

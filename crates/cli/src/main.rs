@@ -97,10 +97,12 @@ fn list_assumptions(c_series: bool) -> ExitCode {
             Basis::Documented => "documented",
             Basis::Recalled => "recalled",
             Basis::Chosen => "chosen",
+            Basis::Observed => "observed",
         };
         let oracle = match a.oracle {
             Oracle::Hercules => "hercules",
             Oracle::EnterpriseCobol => "enterprise-cobol",
+            Oracle::Db2 => "db2",
         };
         if c_series {
             println!("C{n}\t{}\t{basis}\t{oracle}\t{}", a.id, a.claim);

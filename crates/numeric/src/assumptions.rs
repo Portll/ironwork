@@ -4,6 +4,8 @@ pub enum Oracle {
     Hercules,
     /// Only a program compiled by Enterprise COBOL, on the pinned target, settles it.
     EnterpriseCobol,
+    /// Only a program run against Db2 for z/OS settles it.
+    Db2,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -14,6 +16,9 @@ pub enum Basis {
     Recalled,
     /// Not stated anywhere; the documentation leaves it to the generated code.
     Chosen,
+    /// Seen on a related system the claim names, which is not the oracle, and not contradicted by the
+    /// oracle's documentation.
+    Observed,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -114,6 +119,18 @@ pub const EXPIRED_REFERENCE_ABENDS: &str = "J17";
 pub const LOCAL_FRAMES: &str = "J18";
 pub const OO_OPTIONS_SEVERITY: &str = "J19";
 pub const REFERENCES_KEPT: &str = "J20";
+pub const SQL_COMMIT_AT_NORMAL_END: &str = "SQ1";
+pub const SQL_WHENEVER_ORDER: &str = "SQ2";
+pub const SQL_TRUNCATED_INDICATOR: &str = "SQ3";
+pub const SQL_POSTGRES_ERRORS: &str = "SQ4";
+pub const SQL_DIALECT_REWRITES: &str = "SQ5";
+pub const SQL_INTO_WITHOUT_COLONS: &str = "SQ7";
+pub const SQL_DECLARATIONS_CROSS_NESTED_PROGRAMS: &str = "SQ8";
+pub const SQL_DOUBLE_TO_HFP_TRUNCATES: &str = "SQ9";
+pub const SQL_ZONED_IS_DECIMAL: &str = "SQ10";
+pub const SQL_ISO_DATETIME: &str = "SQ11";
+pub const SQL_TRAILING_BLANKS_SENT: &str = "SQ12";
+pub const SQL_FETCH_ROW_COUNT: &str = "SQ13";
 pub const SORT_EQUAL_KEYS_IN_ORDER: &str = "S1";
 pub const MERGE_EQUAL_KEYS_BY_FILE: &str = "S2";
 pub const MERGE_OUT_OF_SEQUENCE_FAILS: &str = "S3";
@@ -781,6 +798,78 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         claim: "Every reference made is kept for the rest of the run, so that an expired one can say where it expired, and a run unit that makes more than 8,388,608 of them abends; the JVM reuses a freed reference's slot",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SQL_COMMIT_AT_NORMAL_END,
+        claim: "A batch run unit commits at a normal end and rolls back at an abend: \"In all Db2 environments, the normal termination of a process is an implicit commit operation\" (Db2 12 for z/OS SQL Reference, COMMIT). Db2 for Linux rolls back instead",
+        basis: Basis::Documented,
+        oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: SQL_WHENEVER_ORDER,
+        claim: "WHENEVER tests SQLERROR (SQLCODE < 0), NOT FOUND (100) and SQLWARNING (SQLWARN0 W, or > 0 and not 100); the precompiler tests warning before not-found, and the three exclude one another (Db2 12.1.5 for Linux, tools/db2-probe)",
+        basis: Basis::Observed,
+        oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: SQL_TRUNCATED_INDICATOR,
+        claim: "A string cut to fit its host variable sets the indicator to its original length, SQLWARN0 and SQLWARN1, and SQLSTATE 01004; trailing blanks cut from a CHAR count (Db2 12.1.5 for Linux, tools/db2-probe)",
+        basis: Basis::Observed,
+        oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: SQL_POSTGRES_ERRORS,
+        claim: "PostgreSQL's SQLSTATEs map to Db2 SQLCODEs as sql-runtime.md §9 tabulates; Db2 for Linux agrees except -433 for -404 and -801 for -802, where the table keeps z/OS's documented codes (Db2 12.1.5 for Linux, tools/db2-probe)",
+        basis: Basis::Observed,
+        oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: SQL_DIALECT_REWRITES,
+        claim: "Db2 SQL is rewritten for PostgreSQL by the table in sql-runtime.md §9, and any other text runs unchanged",
+        basis: Basis::Chosen,
+        oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: SQL_INTO_WITHOUT_COLONS,
+        claim: "A name in an INTO list written without its colon is a host variable, as older precompilers read it",
+        basis: Basis::Recalled,
+        oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: SQL_DECLARATIONS_CROSS_NESTED_PROGRAMS,
+        claim: "WHENEVER and cursor declarations carry on in listing order across nested programs, as the precompiler reads the source in order",
+        basis: Basis::Chosen,
+        oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: SQL_DOUBLE_TO_HFP_TRUNCATES,
+        claim: "An IEEE double stored into COMP-1 or COMP-2 drops the low-order bits that do not fit, rather than rounding",
+        basis: Basis::Chosen,
+        oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: SQL_ZONED_IS_DECIMAL,
+        claim: "A zoned DISPLAY host variable without SIGN SEPARATE is DECIMAL to Db2, as SIGN LEADING SEPARATE is",
+        basis: Basis::Chosen,
+        oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: SQL_ISO_DATETIME,
+        claim: "Dates and times reach character host variables as YYYY-MM-DD, HH.MM.SS and YYYY-MM-DD-HH.MM.SS.NNNNNN, DSNHDECP's DATE(ISO) and TIME(ISO); the forms are as seen under DATETIME(ISO), and the default is an installation's (Db2 12.1.5 for Linux, tools/db2-probe)",
+        basis: Basis::Observed,
+        oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: SQL_TRAILING_BLANKS_SENT,
+        claim: "Character inputs are sent with their trailing blanks, since Db2 compares strings as if blank-padded (Db2 12.1.5 for Linux, tools/db2-probe)",
+        basis: Basis::Observed,
+        oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: SQL_FETCH_ROW_COUNT,
+        claim: "A single-row FETCH that returns a row sets SQLERRD(3) to 1; Db2 for z/OS documents SQLERRD(3) for a rowset FETCH only (Db2 12.1.5 for Linux, tools/db2-probe)",
+        basis: Basis::Observed,
+        oracle: Oracle::Db2,
     },
 ];
 
