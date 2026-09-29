@@ -6,13 +6,13 @@ Report privately through [GitHub's advisory form](https://github.com/Portll/iron
 or by email to <john@portll.net>. Please do not open a public issue for a vulnerability.
 
 Expect an acknowledgement within three working days and an assessment within ten. If a report is
-valid, the fix and the advisory are published together, and you will be credited unless you ask not to be.
+valid, the fix and the advisory are published together, and you will be credited unless you ask
+not to be.
 
 ## Supported versions
 
-ironwork for COBOL is before 1.0 and is in public preview.
-The `main` branch is the supported version; 
-Fixes are not backported.
+ironwork for COBOL is before 1.0 and is in public preview. The `main` branch is the supported
+version, and fixes are not backported.
 
 ## What counts as a vulnerability here
 
