@@ -11,6 +11,7 @@ pub mod le;
 pub mod machine;
 pub mod oo;
 pub mod picture;
+pub mod printer;
 pub mod report;
 mod sort;
 pub mod sql;
@@ -35,6 +36,8 @@ pub struct Compiled {
     pub report_writer: report::Writer,
     /// The PROGRAM COLLATING SEQUENCE, or EBCDIC.
     pub collating: collating::Sequence,
+    /// Each file's printer control character, when it is a print file.
+    pub carriage: Vec<Option<printer::Carriage>>,
 }
 
 const FUNCTIONS: &[&str] = &[
@@ -49,7 +52,6 @@ pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error
     }
     let mut program = sort::with_special_registers(program);
     let mut errors = Vec::new();
-    let drafts = report::prepare(&mut program, &mut errors);
     let mut options = Options::default();
     let mut ssrange = false;
     for option in &program.options {
@@ -79,6 +81,7 @@ pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error
         errors.push(Error::at(Pos::default(), m));
         collating::Sequence::native()
     });
+    let drafts = report::prepare(&mut program, options.adv, &mut errors);
     let files: Vec<(&[DataEntry], Option<u32>)> = program.files.iter().map(|f| (f.records.as_slice(), f.record_max)).collect();
     let shared = layout::record_area_owners(&program.files, &program.environment).unwrap_or_else(|e| {
         errors.push(e);
@@ -107,6 +110,7 @@ pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error
         }
     }
     let report_writer = report::resolve(&program, &layout, drafts, &mut errors);
+    let carriage = printer::carriages(&program, &layout, options.adv);
     let mut check = Check { layout: &layout, program: &program, errors: &mut errors };
     for k in 0..program.files.len() {
         check.file_keys(k);
@@ -119,7 +123,7 @@ pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error
     }
     oo::check(&layout, &program, &mut errors);
     if errors.is_empty() {
-        Ok(Compiled { program, layout, options, ssrange, report_writer, collating })
+        Ok(Compiled { program, layout, options, ssrange, report_writer, collating, carriage })
     } else {
         Err(errors.into_iter().map(|e| e.in_files(&program.sources)).collect())
     }
@@ -380,6 +384,12 @@ impl Check<'_> {
                 }
                 if let Some(op) = from {
                     self.operand(op);
+                }
+                if let Stmt::Write { advancing: Some(a), .. } = s {
+                    if let Advancing::Lines { count, .. } = a {
+                        self.expr(count);
+                    }
+                    printer::check_write(self.program, self.layout, record, a, *pos, self.errors);
                 }
                 self.handlers(invalid);
             }

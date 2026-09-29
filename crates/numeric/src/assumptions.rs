@@ -86,7 +86,7 @@ pub const REPORT_TOTALS_BEFORE_PAGE_FIT: &str = "RW2";
 pub const REPORT_SOURCE_SUM_CORRELATION: &str = "RW3";
 pub const REPORT_PAGE_REGION_DEFAULTS: &str = "RW4";
 pub const REPORT_LINE_WRITES: &str = "RW5";
-pub const REPORT_NO_CARRIAGE_CONTROL: &str = "RW6";
+pub const REPORT_CARRIAGE_CONTROL: &str = "RW6";
 pub const REPORT_RECORD_LENGTH: &str = "RW7";
 pub const REPORT_SUM_OVERFLOW: &str = "RW8";
 pub const REPORT_SOURCE_OVERFLOW: &str = "RW9";
@@ -122,6 +122,10 @@ pub const FASTSRT_FILES: &str = "S11";
 pub const FASTSRT_STATUS: &str = "S12";
 pub const FASTSRT_FAILURE: &str = "S13";
 pub const SAME_AREA_VSAM: &str = "S14";
+pub const PRINT_CONTROL_CHARACTER: &str = "C40";
+pub const PRINT_SPACING_RECORDS: &str = "C41";
+pub const PRINT_CONTROL_RUN_TIME: &str = "C42";
+pub const TEXT_PRINT_LINES: &str = "C43";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -455,14 +459,14 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
-        id: REPORT_NO_CARRIAGE_CONTROL,
-        claim: "Report lines go through ironwork's WRITE ... ADVANCING, which puts no printer control character in the record: a fixed or variable record holds the CODE and the line, and a text DD takes line feeds and form feeds. Under Enterprise COBOL's default ADV each record would carry one byte more, the control character, first",
+        id: REPORT_CARRIAGE_CONTROL,
+        claim: "A report file is written AFTER ADVANCING, so each report record carries an ASA control character (PRINT_CONTROL_CHARACTER): under ADV a byte before the record, under NOADV the record's first byte, which the precompiler leaves for it (SC26-4301-04, 2.2.3 rules 7 to 9, 2.7.2 rule 3). The CODE comes after the control character, as 5.3.2 says of the PRNT handler, which prints as no handler does, though 2.5.3 rule 2 puts it before",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
         id: REPORT_RECORD_LENGTH,
-        claim: "A report file whose FD has no RECORD CONTAINS has records as long as the longest line of its reports, rounded up to a multiple of 4, plus the CODE (SC26-4301-04, 2.2.3 rule 7); under RECORDING MODE V each record ends after its last printed field (rule 9)",
+        claim: "A report file whose FD has no RECORD CONTAINS has records as long as the longest line of its reports, rounded up to a multiple of 4, plus the CODE and the control character (SC26-4301-04, 2.2.3 rule 7), the FD's record holding the control character only under NOADV (rule 8, 2.7.2 rule 3), so that under ADV a RECORD CONTAINS length is the line and CODE alone; under RECORDING MODE V each record ends after its last printed field (rule 9)",
         basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -709,6 +713,30 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: LE_SHORT_ARGUMENT_LIST,
         claim: "A CALL of a service with fewer arguments than its syntax lists, CEE3ABD with no USING among them, ends the run with ironwork's own abend, not a modelled one: IBM calls a short list invalid with unpredictable results (SA38-0683-60, General usage notes for callable services) and says nothing of register 1 at a CALL without USING, whose own CALL and CEEPCALL macros leave it unaltered when no parameter is coded (MVS Assembler Services Reference SA22-7606-13, CALL; SA38-0682-60, CEEPCALL); the service then reads its arguments through whatever register 1 and the storage past the list hold, so neither S0C4 nor any other result follows. A missing fc is not taken as OMITTED, nor a missing clean-up as none",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PRINT_CONTROL_CHARACTER,
+        claim: "A sequential file that a WRITE with ADVANCING in the program names, or whose FD has LINAGE, is a print file: every record written to it carries a printer control character, a WRITE without ADVANCING being AFTER ADVANCING 1 LINE; ASA characters when every WRITE ... ADVANCING of the file says AFTER, machine codes when any says BEFORE (Language Reference SC27-8713-03, p. 479). Under ADV, the default, the character is a byte before the record; under NOADV it is the record's own first byte; a LINAGE file is ADV whatever the option (p. 480; Programming Guide SC27-8714-03, pp. 178-179, 346). ASA ' ', '0' and '-' space 1 to 3 lines before printing, '+' none, '1' to '9' and 'A' to 'C' skip to channels 1 to 12, PAGE and C01 being channel 1 and CSP '+'; machine codes print then space, X'01', X'09', X'11', X'19', or skip, X'89' + 8(n-1) for channel n; AFP-5A is X'5A' (z/OS DFSMS Macro Instructions for Data Sets SC23-6852-60, pp. 397-398; Language Reference pp. 126-127, 483). SPECIAL-NAMES of a program apply to the programs it contains (p. 13)",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PRINT_SPACING_RECORDS,
+        claim: "A movement one control character cannot give is made with records that only move the paper, each as long as the line's record and blank after its control character: in an ASA file AFTER ADVANCING n lines above 3 is preceded by (n-1)/3 records with '-', the line taking the rest; in a machine-code file BEFORE ADVANCING n above 3 prints with X'19' and is followed by records spacing the rest without printing, three lines at a time (X'1B', then X'0B' or X'13'), and AFTER ADVANCING is such records, or X'8B' + 8(n-1) for channel n, then the line with X'01'",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PRINT_CONTROL_RUN_TIME,
+        claim: "Under NOADV the control character is stored in the first byte of the record area, where the program sees it after the WRITE; an ADVANCING count below zero spaces no lines; under ADV a READ of a print file in the program that writes it skips the added byte",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: TEXT_PRINT_LINES,
+        claim: "A text DD shows a print file's records without the control character, which it reads as line spacing, as the POSIX asa utility does: ' ', '0' and '-' put the line one, two or three lines below the last, the DD's first line starting on its first; '+' and X'01' overprint, after a carriage return when both lines show something; a skip to channel 1 is a form feed before the line; a skip to channels 2 to 12, or AFP-5A page mode data, is one line, a text DD having no forms control buffer; a machine code moves the paper after its line. Any other file's records are a line each",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

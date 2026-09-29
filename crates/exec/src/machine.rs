@@ -113,6 +113,8 @@ pub struct Machine<'p, 'u, 'w> {
     /// HANDLE CONDITION, IGNORE CONDITION and HANDLE ABEND, which belong to the program level.
     cics_handlers: cics::Handlers,
     report_writer: &'p crate::report::Writer,
+    /// Each file's printer control character, when it is a print file.
+    carriage: &'p [Option<crate::printer::Carriage>],
     /// The method this activation runs, if it is one: its class and SELF.
     oo: oo::Frame,
     /// The SORT or MERGE whose input or output procedure is running.
@@ -227,6 +229,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             main,
             cics_handlers: cics::Handlers::default(),
             report_writer: &compiled.report_writer,
+            carriage: &compiled.carriage,
             oo: oo::Frame::default(),
             sort: None,
             unit,

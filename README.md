@@ -38,6 +38,14 @@ in a key are a data exception; `-strict-sort-keys` reads each key as the program
 a key that is not a valid number abends S0C7. FASTSRT and NOFASTSRT (the default) on a CBL or
 PROCESS card choose who does the I/O of USING and GIVING files, as on z/OS.
 
+A sequential file that a WRITE ... ADVANCING names, whose FD has LINAGE, or that holds a report is a
+print file: each record written to it carries a printer control character, ASA when every WRITE ...
+ADVANCING of the file says AFTER and a machine code when one says BEFORE, as Enterprise COBOL
+chooses. Under ADV (the default) the character is a byte before the record, so the DD's records are
+a byte longer than the FD's; NOADV on a CBL or PROCESS card makes it the record's first byte. A
+`:text` DD shows the characters as line feeds, form feeds and carriage returns. Assumptions C40 to
+C43 hold what the manuals leave open.
+
 Exit status: RETURN-CODE when the run ends normally; 12 compile errors; 16 an abend, whose message
 names the system completion code (S0C7 for a data exception, S0C4 for a LINKAGE item with no
 address, S806 for a program CALL cannot find), the user completion code (U0999 from CEE3ABD, U4038
@@ -95,10 +103,12 @@ The subset the interpreter runs today:
   SELECT/ASSIGN/FILE STATUS, ORGANIZATION, ACCESS SEQUENTIAL/RANDOM/DYNAMIC, RECORD KEY, ALTERNATE
   RECORD KEY [WITH DUPLICATES], RELATIVE KEY; FD with RECORDING MODE F or V and RECORD
   CONTAINS/VARYING; OPEN INPUT/OUTPUT/EXTEND/I-O; READ [NEXT|PREVIOUS] [INTO] [KEY IS] with AT END
-  or INVALID KEY; WRITE [FROM] with ADVANCING or INVALID KEY; REWRITE, DELETE and START with
-  INVALID KEY; CLOSE; OPTIONAL files, and the file status codes for each outcome. A sequential file
-  opened I-O can be REWRITTEN in place. The files of a SAME RECORD AREA clause share one record
-  area, and so do the VSAM files of a SAME AREA clause.
+  or INVALID KEY; WRITE [FROM] with ADVANCING (lines, PAGE, or a mnemonic-name for C01 to C12, CSP or
+  AFP-5A) or INVALID KEY; REWRITE, DELETE and START with INVALID KEY; CLOSE; OPTIONAL files, and the
+  file status codes for each outcome. LINAGE makes a print file, but its page body, LINAGE-COUNTER
+  and END-OF-PAGE are not supported yet. A sequential file opened I-O can be REWRITTEN in place.
+  The files of a SAME RECORD AREA clause share one record area, and so do the VSAM files of a SAME
+  AREA clause.
 - **Sort and merge:** SD files; SORT and MERGE on ascending and descending keys anywhere in the
   record (alphanumeric keys by the COLLATING SEQUENCE phrase, else for a file by the program
   collating sequence, else in EBCDIC order; zoned and packed keys as DFSORT compares them; other
@@ -117,9 +127,10 @@ The subset the interpreter runs today:
   of the report (summary reporting), and TERMINATE, with control footings minor to major and
   headings major to minor, and page footing and heading on each new page; DECLARATIVES holding USE
   BEFORE REPORTING, with SUPPRESS PRINTING and PRINT-SWITCH. Each line is a WRITE AFTER ADVANCING
-  to the report's file, whose record carries no printer control byte. The precompiler's extensions
-  (OCCURS, PRESENT WHEN, multiple LINES and COLUMNS, OR PAGE, STYLE, FUNCTION and the rest) are
-  refused by name; assumptions RW1 to RW13 hold what the manuals leave open.
+  to the report's file, so its records carry ASA control characters, the CODE after the character.
+  The precompiler's extensions (OCCURS, PRESENT WHEN, multiple LINES and COLUMNS, OR PAGE, STYLE,
+  FUNCTION and the rest) are refused by name; assumptions RW1 to RW13 hold what the manuals leave
+  open.
 - **Object-oriented COBOL,** as Enterprise COBOL has it for Java interoperability: class
   definitions (CLASS-ID ... INHERITS, the REPOSITORY paragraph, FACTORY and OBJECT paragraphs with
   their WORKING-STORAGE, METHOD-ID with PROCEDURE DIVISION USING BY VALUE and RETURNING), USAGE

@@ -1,10 +1,12 @@
 //! The report writer at run time: INITIATE, GENERATE, TERMINATE and SUPPRESS PRINTING over a
 //! report control area in WORKING-STORAGE. Each line is written with WRITE ... AFTER ADVANCING
-//! through the report file, as the Report Writer Precompiler's generated code writes it
-//! ([`numeric::assumptions::REPORT_LINE_WRITES`], [`numeric::assumptions::REPORT_NO_CARRIAGE_CONTROL`]).
+//! through the report file, as the Report Writer Precompiler's generated code writes it, so each
+//! record carries a printer control character
+//! ([`numeric::assumptions::REPORT_LINE_WRITES`], [`numeric::assumptions::REPORT_CARRIAGE_CONTROL`]).
 
 use super::*;
 use crate::files::Format;
+use crate::printer::Space;
 use crate::report::{Adding, Field, FieldContent, Group, GroupKind, Line, Origin, Report, state};
 use syntax::report::{LineNumber, NextGroup, ReportStmt};
 
@@ -21,8 +23,8 @@ enum Trigger {
     Other,
 }
 
-fn lines(n: i64) -> Advancing {
-    Advancing::Lines { before: false, count: Expr::Operand(Operand::Literal(Literal::Number(n.max(0).to_string()))) }
+fn lines(n: i64) -> Space {
+    Space::Lines(n.max(0) as u64)
 }
 
 impl<'p> Machine<'p, '_, '_> {
@@ -690,10 +692,10 @@ impl<'p> Machine<'p, '_, '_> {
         let vertical = self.fullword(ri, state::VERTICAL);
         if paged && vertical == 0 {
             if target > 1 {
-                self.write_report_record(ri, None, Advancing::Page { before: false }, pos)?;
+                self.write_report_record(ri, None, Space::Channel(1), pos)?;
                 self.write_report_record(ri, Some((text, end)), lines(target - 1), pos)?;
             } else {
-                self.write_report_record(ri, Some((text, end)), Advancing::Page { before: false }, pos)?;
+                self.write_report_record(ri, Some((text, end)), Space::Channel(1), pos)?;
             }
         } else {
             self.write_report_record(ri, Some((text, end)), lines(target - vertical), pos)?;
@@ -703,13 +705,16 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     /// One record through the report file's record area: the CODE, then the line; all spaces for
-    /// the blank record at the top of a page. A variable-length record ends after its last field.
-    fn write_report_record(&mut self, ri: usize, line: Option<(&[u8], usize)>, advancing: Advancing, pos: Pos) -> R<()> {
+    /// the blank record at the top of a page. Under NOADV both follow the control character's byte.
+    /// A variable-length record ends after its last field.
+    fn write_report_record(&mut self, ri: usize, line: Option<(&[u8], usize)>, space: Space, pos: Pos) -> R<()> {
         let r = self.report(ri);
         let k = r.file;
         let (offset, size) = self.area(k);
         let mut record = vec![ebcdic::SPACE; size];
         let variable = self.unit.programs[self.me].files[k].as_ref().is_some_and(|f| f.format == Format::Variable);
+        let reserved = usize::from(self.carriage[k].is_some_and(|c| c.reserved)).min(size);
+        let shortest = (self.program.files[k].record_min.unwrap_or(1) as usize).max(reserved);
         let mut len = size;
         if let Some((text, end)) = line {
             let code = match &r.code {
@@ -719,18 +724,18 @@ impl<'p> Machine<'p, '_, '_> {
                 },
                 None => Vec::new(),
             };
-            let c = code.len().min(size);
-            record[..c].copy_from_slice(&code[..c]);
+            let c = reserved + code.len().min(size - reserved);
+            record[reserved..c].copy_from_slice(&code[..c - reserved]);
             let n = text.len().min(size - c);
             record[c..c + n].copy_from_slice(&text[..n]);
             if variable {
-                len = (c + end.min(n)).max(self.program.files[k].record_min.unwrap_or(1) as usize).min(size);
+                len = (c + end.min(n)).max(shortest).min(size);
             }
         } else if variable {
-            len = (self.program.files[k].record_min.unwrap_or(1) as usize).min(size);
+            len = shortest.min(size);
         }
         self.unit.mem[offset..offset + size].copy_from_slice(&record);
         let loc = Loc { offset, len, kind: Kind::Alnum { justified: false }, item: usize::MAX };
-        self.write_stream(k, loc, Some(&advancing), pos)
+        self.write_stream(k, loc, false, space, pos)
     }
 }

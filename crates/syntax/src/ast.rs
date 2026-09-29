@@ -74,6 +74,8 @@ pub struct FileDecl {
     pub records: Vec<DataEntry>,
     /// FD ... REPORT IS: the reports written to the file.
     pub reports: Vec<String>,
+    /// FD ... LINAGE: its page geometry is not read yet, only that the clause is there.
+    pub linage: bool,
     /// Described by SD: a sort or merge file, which needs no data set.
     pub sort: bool,
     pub pos: Pos,
@@ -91,6 +93,17 @@ pub enum OpenMode {
 pub enum Advancing {
     Lines { before: bool, count: Expr },
     Page { before: bool },
+    /// A mnemonic-name of SPECIAL-NAMES, with the environment-name it stands for: C01 to C12,
+    /// CSP, S01 to S05 or AFP-5A.
+    Mnemonic { before: bool, name: String, environment: String },
+}
+
+impl Advancing {
+    pub fn before(&self) -> bool {
+        match self {
+            Self::Lines { before, .. } | Self::Page { before } | Self::Mnemonic { before, .. } => *before,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -623,6 +636,9 @@ pub struct Environment {
     /// I-O-CONTROL SAME RECORD AREA and SAME AREA clauses, each with the files it names.
     pub same_record_areas: Vec<Vec<String>>,
     pub same_areas: Vec<Vec<String>>,
+    /// SPECIAL-NAMES entries naming a printer channel, space suppression, a punch pocket or AFP:
+    /// each mnemonic-name and its environment-name.
+    pub mnemonics: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

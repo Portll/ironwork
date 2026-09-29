@@ -1,7 +1,8 @@
 //! Files. ASSIGN names a DD, and only the operator maps a DD to a host file, as JCL does, so a
 //! program reaches no file it was not given. A binary DD holds z/OS records byte for byte:
 //! fixed-length records back to back, or variable-length records each behind a 4-byte RDW. A text
-//! DD holds UTF-8 lines, converted through the program's code page. Sequential files stream;
+//! DD holds UTF-8 lines, converted through the program's code page, and placed as a printer would
+//! place them ([`Open::print`]). Sequential files stream;
 //! indexed and relative files are held in memory (see [`Keyed`]).
 
 use std::cmp::Ordering;
@@ -394,7 +395,7 @@ impl Keyed {
 
     fn save(&self, format: Format) -> io::Result<()> {
         let Some(path) = self.path.as_ref().filter(|_| self.dirty) else { return Ok(()) };
-        let mut out = Open { mode: OpenMode::Output, format, handle: Handle::Writer(BufWriter::new(File::create(path)?)) };
+        let mut out = Open { mode: OpenMode::Output, format, handle: Handle::Writer(BufWriter::new(File::create(path)?)), head: Head::Start };
         let empty = match format {
             Format::Fixed => vec![0; self.record_len],
             Format::Variable => Vec::new(),
@@ -418,6 +419,23 @@ pub struct Open {
     pub mode: OpenMode,
     pub format: Format,
     handle: Handle,
+    head: Head,
+}
+
+/// A movement of the paper, as a text DD shows it: line feeds, or a form feed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Move {
+    Lines(u64),
+    Page,
+}
+
+/// Where a text DD's print position is: before its first line, on a line not yet ended (and
+/// whether anything shows on it), or at the start of a line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Head {
+    Start,
+    OnLine(bool),
+    Fresh,
 }
 
 /// What a READ found.
@@ -451,7 +469,7 @@ pub fn open_keyed(dd: Option<&Dd>, mode: OpenMode, format: Format, keying: Keyin
         }
         keyed.dirty = false;
     }
-    Ok(Open { mode, format, handle: Handle::Keyed(Box::new(keyed)) })
+    Ok(Open { mode, format, handle: Handle::Keyed(Box::new(keyed)), head: Head::Start })
 }
 
 pub fn open(dd: &Dd, mode: OpenMode, format: Format) -> io::Result<Open> {
@@ -461,12 +479,12 @@ pub fn open(dd: &Dd, mode: OpenMode, format: Format) -> io::Result<Open> {
         OpenMode::Extend => Handle::Writer(BufWriter::new(OpenOptions::new().append(true).create(true).open(&dd.path)?)),
         OpenMode::InputOutput => return Err(io::Error::new(io::ErrorKind::Unsupported, "OPEN I-O of a line-sequential file")),
     };
-    Ok(Open { mode, format, handle })
+    Ok(Open { mode, format, handle, head: Head::Start })
 }
 
 /// An OPTIONAL input file with no DD: every READ is at end.
 pub fn absent() -> Open {
-    Open { mode: OpenMode::Input, format: Format::Fixed, handle: Handle::Empty }
+    Open { mode: OpenMode::Input, format: Format::Fixed, handle: Handle::Empty, head: Head::Start }
 }
 
 impl Open {
@@ -539,9 +557,55 @@ impl Open {
         }
     }
 
+    /// Writes a line to a text DD where a printer would put it: after `before`, over a line not
+    /// yet ended when nothing moved the paper (after a carriage return, unless one of the two is
+    /// blank), then `after`. The first line of the DD takes one line of `before` as its own start,
+    /// as a printer at the top of a form prints a single-spaced first line on line 1.
+    pub fn print(&mut self, before: Option<Move>, line: &str, after: Option<Move>) -> io::Result<()> {
+        if let Some(m) = before {
+            self.feed(m)?;
+        }
+        let Handle::Writer(w) = &mut self.handle else {
+            return Err(io::Error::other("WRITE to a file not opened for output"));
+        };
+        let shown = matches!(self.head, Head::OnLine(true));
+        if shown && !line.is_empty() {
+            w.write_all(b"\r")?;
+        }
+        w.write_all(line.as_bytes())?;
+        self.head = Head::OnLine(shown || !line.is_empty());
+        match after {
+            Some(m) => self.feed(m),
+            None => Ok(()),
+        }
+    }
+
+    fn feed(&mut self, m: Move) -> io::Result<()> {
+        let Handle::Writer(w) = &mut self.handle else {
+            return Err(io::Error::other("WRITE to a file not opened for output"));
+        };
+        match (m, self.head) {
+            (Move::Lines(0), _) => return Ok(()),
+            (Move::Lines(n), head) => {
+                for _ in 0..n - u64::from(head == Head::Start) {
+                    w.write_all(b"\n")?;
+                }
+            }
+            (Move::Page, Head::OnLine(_)) => w.write_all(b"\n\x0c")?,
+            (Move::Page, _) => w.write_all(b"\x0c")?,
+        }
+        self.head = Head::Fresh;
+        Ok(())
+    }
+
     pub fn close(self) -> io::Result<()> {
         match self.handle {
-            Handle::Writer(mut w) => w.flush(),
+            Handle::Writer(mut w) => {
+                if matches!(self.head, Head::OnLine(_)) {
+                    w.write_all(b"\n")?;
+                }
+                w.flush()
+            }
             Handle::Keyed(k) => k.save(self.format),
             _ => Ok(()),
         }

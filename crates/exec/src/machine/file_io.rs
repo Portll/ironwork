@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::files::{self, Format, KeySpan, Keyed, Keying, Record};
+use crate::printer::{self, Space};
 
 /// What a failing file status means, for the message when no FILE STATUS or phrase takes it.
 fn meaning(code: &str) -> &'static str {
@@ -333,7 +334,8 @@ impl<'p> Machine<'p, '_, '_> {
         let Some(mut f) = self.unit.programs[self.me].files[k].take() else {
             return self.conclude(k, "47", &r.at_end, '1', "READ", pos);
         };
-        let read = f.read(size);
+        let added = self.carriage[k].is_some_and(|c| !c.reserved) && f.format != Format::Text;
+        let read = f.read(size + usize::from(added));
         let format = f.format;
         let input = f.mode == OpenMode::Input;
         self.unit.programs[self.me].files[k] = Some(f);
@@ -350,6 +352,7 @@ impl<'p> Machine<'p, '_, '_> {
             Ok(Record::Data(bytes)) => (bytes, false),
             Ok(Record::WrongLength(bytes)) => (bytes, true),
         };
+        let record = if added { record.get(1..).unwrap_or_default().to_vec() } else { record };
         let record = if format == Format::Text {
             let unknown = self.page.encode_char('?').unwrap_or(0x6F);
             String::from_utf8_lossy(&record).chars().map(|c| self.page.encode_char(c).unwrap_or(unknown)).collect()
@@ -368,7 +371,11 @@ impl<'p> Machine<'p, '_, '_> {
     /// WRITE of the record at `loc` to file k.
     pub(super) fn write_record(&mut self, k: usize, loc: Loc, advancing: Option<&Advancing>, invalid: &'p Handlers, pos: Pos) -> R<Flow> {
         if !self.is_held(k) {
-            self.write_stream(k, loc, advancing, pos)?;
+            let (before, space) = match advancing {
+                Some(a) => self.advance(a, pos)?,
+                None => (false, Space::Lines(1)),
+            };
+            self.write_stream(k, loc, before, space, pos)?;
             return Ok(Flow::Next);
         }
         let program = self.program;
@@ -420,7 +427,22 @@ impl<'p> Machine<'p, '_, '_> {
         self.conclude(k, code, invalid, '2', "WRITE", pos)
     }
 
-    pub(super) fn write_stream(&mut self, k: usize, loc: Loc, advancing: Option<&Advancing>, pos: Pos) -> R<()> {
+    /// A WRITE's ADVANCING phrase as a movement, BEFORE or AFTER the line; a count below zero
+    /// moves as zero ([`numeric::assumptions::PRINT_CONTROL_RUN_TIME`]).
+    fn advance(&mut self, a: &Advancing, pos: Pos) -> R<(bool, Space)> {
+        Ok(match a {
+            Advancing::Lines { before, count } => (*before, Space::Lines(self.integer(count, pos)?.max(0) as u64)),
+            Advancing::Page { before } => (*before, Space::Channel(1)),
+            Advancing::Mnemonic { before, name, environment } => {
+                let space = printer::mnemonic_space(environment).ok_or_else(|| Abend::ironwork(format!("ADVANCING {name}: {environment} is not a printer channel"), pos))?;
+                (*before, space)
+            }
+        })
+    }
+
+    /// A WRITE to a sequential file: a print file's records carry the control character, a text
+    /// DD shows it as line and form feeds.
+    pub(super) fn write_stream(&mut self, k: usize, loc: Loc, before: bool, space: Space, pos: Pos) -> R<()> {
         let name = self.program.files[k].name.clone();
         let Some(mut f) = self.unit.programs[self.me].files[k].take() else {
             return self.io_status(k, "48", format!("WRITE {name}: {}", meaning("48")), pos);
@@ -429,23 +451,30 @@ impl<'p> Machine<'p, '_, '_> {
             self.unit.programs[self.me].files[k] = Some(f);
             return self.io_status(k, "48", format!("WRITE {name}: {}", meaning("48")), pos);
         }
+        let carriage = self.carriage[k];
+        let controls = carriage.map(|c| printer::controls(c.machine, before, space));
+        let reserved = usize::from(carriage.is_some_and(|c| c.reserved));
+        if let Some(c) = controls.filter(|_| reserved == 1 && loc.len > 0) {
+            self.unit.mem[loc.offset] = c.data;
+        }
         let bytes = self.record_bytes(k, loc, f.format);
-        let written = match f.format {
-            Format::Fixed | Format::Variable => f.write(&bytes),
-            Format::Text => {
-                let line = self.page.decode(&bytes).trim_end().to_owned();
-                let lines = |n: i64| "\n".repeat(n.max(0) as usize);
-                let text = match advancing {
-                    None => format!("{line}\n"),
-                    Some(Advancing::Page { before: false }) => format!("\u{c}{line}\n"),
-                    Some(Advancing::Page { before: true }) => format!("{line}\n\u{c}"),
-                    Some(Advancing::Lines { before, count }) => {
-                        let n = self.integer(count, pos)?;
-                        if *before { format!("{line}{}", lines(n)) } else { format!("{}{line}\n", lines(n - 1)) }
-                    }
-                };
-                f.write(text.as_bytes())
+        let written = match (f.format, controls) {
+            (Format::Text, _) => {
+                let line = self.page.decode(bytes.get(reserved..).unwrap_or_default()).trim_end().to_owned();
+                let (ahead, behind) = printer::text_motion(before, space);
+                f.print(ahead, &line, behind)
             }
+            (_, None) => f.write(&bytes),
+            (_, Some(c)) => c.records().try_for_each(|(control, line)| {
+                let mut record = Vec::with_capacity(bytes.len() + 1);
+                record.push(control);
+                if line {
+                    record.extend_from_slice(&bytes[reserved.min(bytes.len())..]);
+                } else {
+                    record.resize(bytes.len() + 1 - reserved.min(bytes.len()), ebcdic::SPACE);
+                }
+                f.write(&record)
+            }),
         };
         self.unit.programs[self.me].files[k] = Some(f);
         match written {

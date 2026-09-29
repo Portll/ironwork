@@ -77,6 +77,9 @@ pub struct Options {
     /// FASTSRT: DFSORT does the I/O of a SORT's USING and GIVING files where IBM's rules allow.
     pub fastsrt: bool,
     pub sort_keys: SortKeys,
+    /// ADV: a print file's printer control character is a byte added before each record; under
+    /// NOADV it is the record's own first byte.
+    pub adv: bool,
 }
 
 impl Default for Options {
@@ -89,6 +92,7 @@ impl Default for Options {
             trunc_check: TruncCheck::default(),
             fastsrt: false,
             sort_keys: SortKeys::default(),
+            adv: true,
         }
     }
 }
@@ -155,6 +159,8 @@ impl Options {
             }
             "FASTSRT" | "FSRT" => self.fastsrt = true,
             "NOFASTSRT" | "NOFSRT" => self.fastsrt = false,
+            "ADV" => self.adv = true,
+            "NOADV" => self.adv = false,
             _ => return Ok(false),
         }
         Ok(true)
@@ -182,7 +188,17 @@ mod tests {
     #[test]
     fn defaults_are_ibms() {
         let o = Options::default();
-        assert_eq!((o.arith, o.trunc, o.numproc, o.codepage, o.fastsrt), (Arith::Compat, Trunc::Std, Numproc::Nopfd, 1140, false));
+        assert_eq!((o.arith, o.trunc, o.numproc, o.codepage, o.fastsrt, o.adv), (Arith::Compat, Trunc::Std, Numproc::Nopfd, 1140, false, true));
+    }
+
+    #[test]
+    fn adv_and_noadv_have_no_abbreviations() {
+        let mut o = Options::default();
+        assert_eq!(o.apply("noadv"), Ok(true));
+        assert!(!o.adv);
+        assert_eq!(o.apply("ADV"), Ok(true));
+        assert!(o.adv);
+        assert_eq!(o.apply("NOAD"), Ok(false));
     }
 
     #[test]

@@ -262,9 +262,31 @@ fn report_records_are_ebcdic_bytes_with_the_code_and_a_blank_record_at_the_top_o
         &["    OPEN OUTPUT RPT", "    INITIATE CARDS", "    GENERATE CARD", "    GENERATE CARD", "    TERMINATE CARDS", "    CLOSE RPT", "    GOBACK."],
     );
     let (_, file) = run_report(&source, "rw-cards.dat", false);
-    let blank = [0x40u8; 5];
-    let card = [0xE7, 0xC1, 0xC2, 0x40, 0x40];
+    let blank = [0xF1, 0x40, 0x40, 0x40, 0x40, 0x40];
+    let card = [0xF0, 0xE7, 0xC1, 0xC2, 0x40, 0x40];
     assert_eq!(file, [blank, card, blank, card].concat());
+}
+
+#[test]
+fn under_noadv_the_report_record_keeps_its_first_byte_for_the_control_character() {
+    let cards = |fd: &str| {
+        report_program(
+            fd,
+            &[],
+            &["RD  CARDS CODE 'X' PAGE LIMIT 5.", "01  CARD TYPE DE LINE 3.", "    05 COLUMN 1 VALUE 'AB'."],
+            &["    OPEN OUTPUT RPT", "    INITIATE CARDS", "    GENERATE CARD", "    TERMINATE CARDS", "    CLOSE RPT", "    GOBACK."],
+        )
+    };
+    let noadv = |source: String| format!("       CBL NOADV\n{source}");
+    let (_, derived) = run_report(&noadv(cards("FD  RPT REPORT IS CARDS.")), "rw-noadv.dat", false);
+    assert_eq!(derived, [0xF1, 0x40, 0x40, 0x40, 0x40, 0x40, 0xF0, 0xE7, 0xC1, 0xC2, 0x40, 0x40]);
+    let fixed = "FD  RPT RECORD CONTAINS 6 CHARACTERS REPORT IS CARDS.";
+    let (_, adv) = run_report(&cards(fixed), "rw-adv6.dat", false);
+    assert_eq!(adv, [0xF1, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0xF0, 0xE7, 0xC1, 0xC2, 0x40, 0x40, 0x40]);
+    let (_, noadv6) = run_report(&noadv(cards(fixed)), "rw-noadv6.dat", false);
+    assert_eq!(noadv6, [0xF1, 0x40, 0x40, 0x40, 0x40, 0x40, 0xF0, 0xE7, 0xC1, 0xC2, 0x40, 0x40]);
+    let (_, text) = run_report(&noadv(cards(fixed)), "rw-noadv6.txt", true);
+    assert_eq!(String::from_utf8(text).unwrap(), "\u{c}\n\nXAB\n");
 }
 
 #[test]
@@ -277,7 +299,7 @@ fn a_variable_length_report_record_ends_after_its_last_field() {
     );
     let (_, file) = run_report(&source, "rw-slip.dat", false);
     let long = [0xD3, 0xD6, 0xD5, 0xC7, 0x40, 0xD3, 0xC9, 0xD5, 0xC5];
-    assert_eq!(file, [&[0, 7, 0, 0, 0xD5, 0x7E, 0xF7][..], &[0, 13, 0, 0], &long].concat());
+    assert_eq!(file, [&[0, 8, 0, 0, 0x40, 0xD5, 0x7E, 0xF7][..], &[0, 14, 0, 0, 0x40], &long].concat());
 }
 
 #[test]

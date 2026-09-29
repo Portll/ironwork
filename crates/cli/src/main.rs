@@ -26,9 +26,10 @@ flags:
   --dd NAME=path[:format]
              the file a DD name stands for, as JCL would give it; DD_NAME in the environment also
              works. Binary files hold z/OS records (fixed, or variable behind 4-byte RDWs); :text
-             reads and writes UTF-8 lines through the program's code page. An indexed or relative
-             file's DD holds its records in key order, as a REPRO unload does. DD SYSIN is what
-             ACCEPT reads; without it, ACCEPT reads standard input
+             reads and writes UTF-8 lines through the program's code page. A print file's records
+             carry a printer control character, which :text shows as line spacing. An indexed or
+             relative file's DD holds its records in key order, as a REPRO unload does. DD SYSIN is
+             what ACCEPT reads; without it, ACCEPT reads standard input
   --clock YYYY-MM-DDTHH:MM:SS[.hh]
              the time ACCEPT FROM DATE, TIME and FUNCTION CURRENT-DATE report, for a run that must
              repeat; without it they report the system clock in UTC

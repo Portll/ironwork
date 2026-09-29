@@ -43,7 +43,7 @@ pub struct Report {
     pub name: String,
     pub file: usize,
     pub code: Option<Literal>,
-    /// Bytes of a line: the record less the CODE.
+    /// Bytes of a line: the record less the CODE, and under NOADV the control character.
     pub width: usize,
     pub page: Option<Page>,
     /// Level 1 is the most major control; level 0 is FINAL.
@@ -277,7 +277,8 @@ fn report_entry(reports: &[rw::Report], current: usize, operand: &Ref) -> Option
 
 /// Places every report's lines and fields and adds its storage to WORKING-STORAGE; gives each
 /// report file a record length when its FD has none ([`numeric::assumptions::REPORT_RECORD_LENGTH`]).
-pub(crate) fn prepare(program: &mut Program, errors: &mut Vec<Error>) -> Vec<Draft> {
+/// Under NOADV (`adv` false) a report record's first byte is its printer control character.
+pub(crate) fn prepare(program: &mut Program, adv: bool, errors: &mut Vec<Error>) -> Vec<Draft> {
     let reports = program.report_writer.reports.clone();
     if reports.is_empty() {
         return Vec::new();
@@ -332,7 +333,8 @@ pub(crate) fn prepare(program: &mut Program, errors: &mut Vec<Error>) -> Vec<Dra
         if mine.is_empty() {
             continue;
         }
-        let code = |ri: usize| code_bytes(&reports[ri].code);
+        let reserved = usize::from(crate::printer::reserves_first_byte(f, adv));
+        let code = |ri: usize| reserved + code_bytes(&reports[ri].code);
         let longest = mine.iter().map(|&ri| line_end(&drafts[ri])).max().unwrap_or(0);
         let record = match f.record_max {
             Some(n) => n as usize,

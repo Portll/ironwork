@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 mod collating;
 mod data;
 mod oo;
+mod printer;
 mod report;
 mod sort;
 

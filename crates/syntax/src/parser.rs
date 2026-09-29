@@ -8,7 +8,7 @@ mod sort;
 
 /// Every program in the source, first to last, with nested programs after the one containing them.
 pub fn parse(tokens: &[Token], options: Vec<String>) -> Result<Vec<Program>, Error> {
-    let mut parser = Parser { tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default() };
+    let mut parser = Parser { tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default(), mnemonics: Vec::new() };
     let mut programs = Vec::new();
     parser.program(&options, &mut programs)?;
     while parser.peek().is_some() {
@@ -38,6 +38,13 @@ const PHRASE_WORDS: &[&str] = &[
     "REPLACING", "CONVERTING", "INITIAL", "FOR", "CHARACTERS", "LEADING", "FIRST", "ALL", "END-STRING", "END-UNSTRING", "END-SEARCH",
     "NEXT", "INVALID", "KEY", "END-REWRITE", "END-DELETE", "END-START", "END-INVOKE", "END-RETURN",
 ];
+
+/// The environment-names a WRITE ADVANCING mnemonic-name can stand for (Language Reference,
+/// SPECIAL-NAMES, Table 5): channels C01 to C12, CSP, pockets S01 to S05, and AFP-5A.
+fn advancing_environment_name(word: &str) -> bool {
+    let numbered = |prefix: char, last: u8| word.len() == 3 && word.starts_with(prefix) && word[1..].parse::<u8>().is_ok_and(|n| (1..=last).contains(&n));
+    matches!(word, "CSP" | "AFP-5A") || numbered('C', 12) || numbered('S', 5)
+}
 
 fn figurative(word: &str) -> Option<Figurative> {
     Some(match word {
@@ -87,6 +94,9 @@ struct Parser<'a> {
     exec_declarations: Vec<ExecBlock>,
     /// Whether the program being parsed has EXEC CICS, so the translator's additions apply.
     cics: bool,
+    /// The WRITE ADVANCING mnemonic-names in scope: the program's own, then those of the programs
+    /// containing it, whose configuration section applies to it too.
+    mnemonics: Vec<(String, String)>,
     sql: SqlState,
 }
 
@@ -190,9 +200,9 @@ impl Parser<'_> {
     }
 
     fn program(&mut self, options: &[String], out: &mut Vec<Program>) -> R<()> {
-        let outer = (std::mem::take(&mut self.exec_declarations), std::mem::take(&mut self.cics), std::mem::take(&mut self.sql.blocks));
+        let outer = (std::mem::take(&mut self.exec_declarations), std::mem::take(&mut self.cics), std::mem::take(&mut self.sql.blocks), self.mnemonics.clone());
         let parsed = self.one_program(options, out);
-        (self.exec_declarations, self.cics, self.sql.blocks) = outer;
+        (self.exec_declarations, self.cics, self.sql.blocks, self.mnemonics) = outer;
         parsed
     }
 
@@ -238,6 +248,7 @@ impl Parser<'_> {
         if self.at_division(&["ENVIRONMENT"]) {
             (files, repository) = self.environment(&mut environment)?;
         }
+        self.mnemonics.splice(0..0, environment.mnemonics.iter().cloned());
         let (mut working_storage, mut local_storage, mut linkage) = (Vec::new(), Vec::new(), Vec::new());
         let mut report_writer = crate::report::ReportWriter::default();
         if self.at_division(&["DATA"]) {
@@ -343,6 +354,14 @@ impl Parser<'_> {
             if self.environment_clause(clauses)? {
                 continue;
             }
+            if let Some(environment) = self.word().filter(|w| advancing_environment_name(w)).map(str::to_owned) {
+                let at_name = if self.word_at(1) == Some("IS") { 2 } else { 1 };
+                if let Some(name) = self.word_at(at_name).map(str::to_owned) {
+                    self.at += at_name + 1;
+                    clauses.mnemonics.push((name, environment));
+                    continue;
+                }
+            }
             if self.accept_word("SELECT") {
                 files.push(self.select()?);
                 continue;
@@ -375,6 +394,7 @@ impl Parser<'_> {
             record_max: None,
             records: Vec::new(),
             reports: Vec::new(),
+            linage: false,
             sort: false,
             pos,
         };
@@ -518,9 +538,10 @@ impl Parser<'_> {
                         let names = self.report_names()?;
                         files[index].reports.extend(names);
                     }
-                    _ => {
+                    other => {
+                        files[index].linage |= other == "LINAGE";
                         while self.peek().is_some() && self.peek() != Some(&Tok::Period)
-                            && !self.word().is_some_and(|w| matches!(w, "RECORDING" | "RECORD" | "BLOCK" | "LABEL" | "DATA" | "VALUE" | "REPORT" | "REPORTS"))
+                            && !self.word().is_some_and(|w| matches!(w, "RECORDING" | "RECORD" | "BLOCK" | "LABEL" | "DATA" | "VALUE" | "REPORT" | "REPORTS" | "LINAGE"))
                         {
                             self.at += 1;
                         }
@@ -1072,8 +1093,12 @@ impl Parser<'_> {
                 if let Some(side) = self.accept_any(&["BEFORE", "AFTER"]) {
                     let before = side == "BEFORE";
                     self.accept_word("ADVANCING");
+                    let mnemonic = self.word().and_then(|w| self.mnemonics.iter().find(|(name, _)| name == w)).cloned();
                     advancing = Some(if self.accept_word("PAGE") {
                         Advancing::Page { before }
+                    } else if let Some((name, environment)) = mnemonic {
+                        self.at += 1;
+                        Advancing::Mnemonic { before, name, environment }
                     } else {
                         let count = self.expr()?;
                         self.accept_any(&["LINE", "LINES"]);
@@ -2025,7 +2050,7 @@ fn cics_options(body: &str) -> Vec<(String, Option<ExecArg>)> {
 fn operand_of(text: &str, pos: Pos) -> Option<Operand> {
     let source = crate::source::Source { text: text.to_owned(), positions: vec![pos; text.chars().count()], options: Vec::new() };
     let tokens = crate::lexer::lex(&source).ok()?;
-    let mut p = Parser { tokens: &tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default() };
+    let mut p = Parser { tokens: &tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default(), mnemonics: Vec::new() };
     let op = p.operand().ok()?;
     (p.at == tokens.len()).then_some(op)
 }
@@ -2038,7 +2063,7 @@ fn system_entries(member: &str) -> R<Vec<DataEntry>> {
 fn system_text_entries(text: &str) -> R<Vec<DataEntry>> {
     let source = crate::source::read(text)?;
     let tokens = crate::lexer::lex(&source)?;
-    Parser { tokens: &tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default() }.data_entries()
+    Parser { tokens: &tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default(), mnemonics: Vec::new() }.data_entries()
 }
 
 /// Words that begin a SELECT clause, and so end the one before.
@@ -2173,5 +2198,34 @@ mod tests {
     fn unsupported_statements_are_named() {
         let text = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       PROCEDURE DIVISION.\n           MOVE CORRESPONDING A TO B.\n";
         assert!(crate::parse(text).unwrap_err().message.contains("MOVE CORRESPONDING"));
+    }
+
+    #[test]
+    fn advancing_mnemonic_names_reach_contained_programs_and_linage_is_noted() {
+        let text = [
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OUTER.\n       ENVIRONMENT DIVISION.\n",
+            "       CONFIGURATION SECTION.\n       SPECIAL-NAMES.\n           C01 IS TOP-OF-PAGE CSP NO-SPACE\n",
+            "           AFP-5A IS PAGE-MODE UPSI-0 IS SWITCH-0 ON STATUS IS SW-ON.\n",
+            "       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n           SELECT P ASSIGN TO PDD.\n",
+            "       DATA DIVISION.\n       FILE SECTION.\n       FD  P LINAGE IS 60.\n       01  P-REC PIC X.\n",
+            "       PROCEDURE DIVISION.\n           WRITE P-REC AFTER TOP-OF-PAGE\n",
+            "           WRITE P-REC BEFORE ADVANCING NO-SPACE\n           WRITE P-REC AFTER ADVANCING PAGE-COUNT LINES.\n",
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. INNER.\n       PROCEDURE DIVISION.\n",
+            "           WRITE P-REC AFTER ADVANCING PAGE-MODE.\n       END PROGRAM INNER.\n       END PROGRAM OUTER.\n",
+        ]
+        .concat();
+        let programs = crate::parse_all_with(&text, &crate::copy::Libraries::default()).unwrap_or_else(|e| panic!("{e}"));
+        let (outer, inner) = (&programs[0], &programs[1]);
+        let pairs = |p: &Program| p.environment.mnemonics.iter().map(|(n, e)| format!("{n}={e}")).collect::<Vec<_>>();
+        assert_eq!(pairs(outer), ["TOP-OF-PAGE=C01", "NO-SPACE=CSP", "PAGE-MODE=AFP-5A"]);
+        assert!(outer.files[0].linage);
+        let advancing = |p: &Program, i: usize| match &p.paragraphs[0].statements[i] {
+            Stmt::Write { advancing: Some(a), .. } => a.clone(),
+            other => panic!("{other:?}"),
+        };
+        assert!(matches!(advancing(outer, 0), Advancing::Mnemonic { before: false, environment, .. } if environment == "C01"));
+        assert!(matches!(advancing(outer, 1), Advancing::Mnemonic { before: true, environment, .. } if environment == "CSP"));
+        assert!(matches!(advancing(outer, 2), Advancing::Lines { before: false, .. }));
+        assert!(matches!(advancing(inner, 0), Advancing::Mnemonic { environment, .. } if environment == "AFP-5A"));
     }
 }

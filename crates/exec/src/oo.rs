@@ -510,7 +510,7 @@ fn handlers(h: &Handlers) -> [&[Stmt]; 2] {
     [opt(&h.on), opt(&h.not_on)]
 }
 
-fn bodies(s: &Stmt) -> Vec<&[Stmt]> {
+pub(crate) fn bodies(s: &Stmt) -> Vec<&[Stmt]> {
     match s {
         Stmt::If { then, otherwise, .. } => vec![then, otherwise],
         Stmt::PerformInline { body, .. } => vec![body],
