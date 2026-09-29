@@ -155,7 +155,7 @@ It is zero-dependency Rust.
 | # | Item | Repo | Size | Note |
 |---|---|---|---|---|
 | 11 | The VM (§6) | ironwork | XL | After SQL, by ruling |
-| 12 | The PostgreSQL backend (SQL step 7) | ironwork | L | Built, without TLS (D2 open); Q5 passes against PostgreSQL 14.19 |
+| 12 | The PostgreSQL backend (SQL step 7) | ironwork | L | Built; TLS in the separate `tls/` build (D2); Q5 passes against PostgreSQL 14.19 |
 | 13 | The build gate running `ironwork check` (E1) | cobolwork | S | `ironwork check` exists now, exiting 12 on a compile error |
 | 14 | A CICS region defined by a CSD, for the TN3270 server (E6) | ironwork | S | cobolwork already parses CSDs; share fixtures |
 | 15 | Crash-fuzzing programs through ironwork (E5) | Both | L | S0C7, S0C4 and SSRANGE become findings, each with its input |

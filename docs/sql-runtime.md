@@ -3,8 +3,8 @@
 A specification for running embedded SQL, turning the plan decided in
 [exec-sql-cics.md](exec-sql-cics.md) into work that can be built and checked.
 
-**Status:** steps 1 to 7 of §15 are built (2026-09-30); step 8 waits for a lawful Db2. It follows
-that plan's decisions of 2026-09-28:
+**Status:** all eight steps of §15 are done (2026-09-30), step 8 as far as Db2 for Linux reaches.
+It follows that plan's decisions of 2026-09-28:
 
 - no dependencies;
 - record and replay first, then the PostgreSQL wire protocol written in-house;
@@ -126,7 +126,7 @@ Output rules:
 |---|---|
 | NULL into a host variable with an indicator | The indicator is -1 and the host variable is left as it was |
 | NULL into a host variable with no indicator | SQLCODE -305 |
-| A string longer than its host variable | Truncated. SQLWARN1 and SQLWARN0 are set to `W`, and the indicator holds the original length (assumption S3) |
+| A string longer than its host variable | Truncated. SQLWARN1 and SQLWARN0 are set to `W`, and the indicator holds the original length (assumption SQ3) |
 | A number outside its host variable's range | SQLCODE -304 |
 | More result columns than host variables | SQLWARN3 and SQLWARN0 are set to `W` |
 | Floats | Converted between hexadecimal floating point in storage and IEEE at the boundary, with `zarch`'s HFP model |
@@ -145,8 +145,10 @@ Input rules:
   - SQLWARN0 to SQLWARNA.
 - **No SQLCA.** A program with no SQLCA, but with a standalone SQLCODE and SQLSTATE as STDSQL(YES)
   declares them, gets those two fields.
-- **Codes the runtime raises itself.** They are to be confirmed against Db2 13 for z/OS Codes before
-  step 3 lands:
+- **Warnings.** With SQLCODE 0, a truncated string sets SQLSTATE 01004, and an INTO list shorter
+  than the select list sets SQLWARN3 and SQLSTATE 01503.
+- **Codes the runtime raises itself.** Db2 12.1 for Linux gave each of these that it can (§10); the
+  CICS ones wait for CICS:
 
 | Situation | SQLCODE | SQLSTATE |
 |---|---|---|
@@ -172,7 +174,7 @@ Input rules:
   before its next row. **ROLLBACK** rolls back and closes every open cursor, as does a -911 answer.
 - **Positioning.** A cursor is on a row after a FETCH that returned one, and not after OPEN, a
   FETCH that returned none, a positioned DELETE, or a COMMIT.
-- **Batch.** A normal end of the run unit commits; an abend rolls back. This is assumption S1,
+- **Batch.** A normal end of the run unit commits; an abend rolls back. This is assumption SQ1,
   basis `Chosen`, until a Db2 run settles it. Only work since the last COMMIT or ROLLBACK is
   committed or rolled back, so a run that ends with its own COMMIT asks nothing more. The call
   names the run unit's first program with ordinal 0.
@@ -248,10 +250,14 @@ Input rules:
 - **Authentication.** SCRAM-SHA-256 (RFC 5802 and RFC 7677), with SHA-256, HMAC and the PBKDF2 `Hi`
   function written in-house and tested against the RFCs' test vectors. A cleartext password is
   answered too; MD5 is refused, naming SCRAM. The client nonce comes from `std`'s OS-seeded
-  `RandomState` keys, the process and the clock, which needs no `unsafe` (assumption S6).
-- **No TLS.** There is no TLS without a dependency, so the backend connects over a local socket, a
-  trusted network, or a TLS-terminating proxy. This is D2.
-- **Dialect.** Statement text passes through a short, documented rewrite table (assumption S5):
+  `RandomState` keys, the process and the clock, which needs no `unsafe` (assumption SQ6).
+- **TLS** is a separate build, so that ironwork's own keeps no dependencies (D2). `tls/` is a
+  workspace of its own, as `fuzz/` is. It builds the same command with rustls and the ring
+  provider, verifying the server's certificate chain and name (`sslmode=verify-full`) against
+  `sslrootcert` or the Mozilla roots. ironwork's own build refuses verify-full, naming tls/. libpq's
+  `require`, `verify-ca`, `prefer` and `allow` are refused, since none of them checks both the chain
+  and the name.
+- **Dialect.** Statement text passes through a short, documented rewrite table (assumption SQ5):
   - `CURRENT DATE` becomes `CURRENT_DATE`; `CURRENT TIME` and `CURRENT TIMESTAMP` (and their
     underscored forms) become `LOCALTIME` and `LOCALTIMESTAMP`, since Db2's special registers
     carry no time zone;
@@ -266,9 +272,9 @@ Input rules:
   Anything else passes through unchanged. `SYSIBM.SYSDUMMY1` needs no rewrite: the test schema
   provides schema `SYSIBM` and a one-row view `SYSDUMMY1`.
 - **Values.** Dates and times reach a character host variable in Db2's ISO forms (assumption
-  S11): `YYYY-MM-DD`, `HH.MM.SS` and `YYYY-MM-DD-HH.MM.SS.NNNNNN`. A character input in those forms
+  SQ11): `YYYY-MM-DD`, `HH.MM.SS` and `YYYY-MM-DD-HH.MM.SS.NNNNNN`. A character input in those forms
   sent to a time or timestamp parameter is given PostgreSQL's.
-- **Errors.** PostgreSQL SQLSTATEs map to Db2 SQLCODEs through a table (assumption S4):
+- **Errors.** PostgreSQL SQLSTATEs map to Db2 SQLCODEs through a table (assumption SQ4):
 
   | PostgreSQL | Db2 SQLCODE | Db2 SQLSTATE |
   |---|---|---|
@@ -291,27 +297,37 @@ Input rules:
 
 ## 10. Assumptions
 
-These are new registry entries under a new prefix, **S**. They need a new `Oracle::Db2` variant,
-because neither Hercules nor Enterprise COBOL can settle them.
+These are registry entries under the prefix **SQ** (S is SORT's), with a new `Oracle::Db2`
+variant, because neither Hercules nor Enterprise COBOL can settle them. *Observed* means Db2 12.1.5
+for Linux (Community Edition, 2026-09-30) gave the result, through embedded SQL in C, and Db2 for
+z/OS documents the same or says nothing to the contrary. Where the two disagree, ironwork follows
+z/OS and the row says so. [`tools/db2-probe/`](../tools/db2-probe/run.sh) runs the probes again,
+and its `observed-12.1.5.txt` is what Db2 answered.
 
 | ID | Claim | Basis |
 |---|---|---|
-| S1 | A batch run unit commits on normal end and rolls back on abend | Chosen |
-| S2 | WHENEVER's tests run in the order and with the conditions §3 gives | Documented, via precompile.md |
-| S3 | A truncated string's indicator holds its original length | Recalled |
-| S4 | The PostgreSQL SQLSTATE to Db2 SQLCODE table | Chosen |
-| S5 | The dialect rewrite table | Chosen |
-| S6 | The SCRAM client nonce source | Chosen |
-| S7 | A name in an INTO list written without its colon is a host variable, as older precompilers assumed. Real programs do it (`FETCH C INTO CSR-ENTITY, CSR-PROJ-ID`) | Recalled |
-| S8 | WHENEVER and cursor declarations carry on in listing order across nested programs, since the precompiler reads the source in order | Chosen |
-| S9 | An IEEE double stored into COMP-1 or COMP-2 drops the low-order bits that do not fit, rather than rounding | Chosen |
-| S10 | A zoned DISPLAY item without SIGN SEPARATE is a DECIMAL host variable, as SIGN LEADING SEPARATE is | Chosen |
-| S11 | Dates and times reach character host variables in the ISO forms, as DSNHDECP's default DATE(ISO) and TIME(ISO) give | Chosen |
-| S12 | Character inputs are sent with their trailing blanks. Db2 compares strings as if blank-padded, while PostgreSQL does so only for CHAR(n), so test schemas declare CHAR(n) where Db2's has CHAR | Chosen |
+| SQ1 | A batch run unit commits on normal end and rolls back on abend | Documented: "In all Db2 environments, the normal termination of a process is an implicit commit operation" (Db2 12 for z/OS SQL, COMMIT). Db2 for Linux rolls back instead, on a normal end and on a bad return code alike |
+| SQ2 | WHENEVER's tests run in the order and with the conditions §3 gives | Observed: the precompiler tests SQLERROR (`< 0`), then SQLWARNING (`> 0` and not 100, or 0 with SQLWARN0 `W`), then NOT FOUND (100). The three exclude one another, so they take the branches §3's order takes |
+| SQ3 | A truncated string's indicator holds its original length | Observed: 18 for an 18-character value cut to 5, into a C string and a VARCHAR alike, with SQLWARN0 and SQLWARN1 `W` and SQLSTATE 01004. Trailing blanks cut from a CHAR count as truncation |
+| SQ4 | The PostgreSQL SQLSTATE to Db2 SQLCODE table | Observed for -803, -407, -530, -104, -204 (42704) and -206. Db2 for Linux gives -433 where z/OS documents -404 for a string too long for its column, and -801 where z/OS documents -802 (22012) for division by zero; the table keeps z/OS's. -911 is not provoked |
+| SQ5 | The dialect rewrite table | Chosen |
+| SQ6 | The SCRAM client nonce source | Chosen |
+| SQ7 | A name in an INTO list written without its colon is a host variable, as older precompilers assumed. Real programs do it (`FETCH C INTO CSR-ENTITY, CSR-PROJ-ID`) | Recalled |
+| SQ8 | WHENEVER and cursor declarations carry on in listing order across nested programs, since the precompiler reads the source in order | Chosen |
+| SQ9 | An IEEE double stored into COMP-1 or COMP-2 drops the low-order bits that do not fit, rather than rounding | Chosen |
+| SQ10 | A zoned DISPLAY item without SIGN SEPARATE is a DECIMAL host variable, as SIGN LEADING SEPARATE is | Chosen |
+| SQ11 | Dates and times reach character host variables in the ISO forms, as DSNHDECP's default DATE(ISO) and TIME(ISO) give | Observed for the forms, under the precompiler's DATETIME(ISO): `2020-01-02`, `13.45.06` and `2020-01-02-03.04.05.500000`. The default is an installation's choice; Db2 for Linux's US territory gives `13:45:06` |
+| SQ12 | Character inputs are sent with their trailing blanks. Db2 compares strings as if blank-padded, while PostgreSQL does so only for CHAR(n), so test schemas declare CHAR(n) where Db2's has CHAR | Observed: Db2 matches `'SHORT   '` to a VARCHAR holding `SHORT` |
+| SQ13 | A single-row FETCH that returns a row sets SQLERRD(3) to 1 | Observed. Db2 for z/OS documents SQLERRD(3) for a rowset FETCH only |
 
-IBM Db2 Community Edition for Linux is a candidate oracle for S2 to S4. Read its licence terms
-before using it, and note that Db2 for Linux is not Db2 for z/OS: a result from it settles an
-assumption only where the two are documented to agree.
+Also observed, and matching §6 and the runtime: +100 for no row, and for a searched UPDATE or
+DELETE that changes none; -811, -305, -304; -501 for FETCH or CLOSE of a cursor never opened, and
+after a COMMIT closes it; -502, -507 and -508; a held cursor fetching after COMMIT; and SQLWARN3
+with SQLSTATE 01503 when an INTO list is shorter than the select list.
+
+Not settled here: SQ5 and SQ6 are ironwork's own choices; SQ7 to SQ10 need Db2 for z/OS and its
+COBOL precompiler; -925 and -926 need CICS. IBM's COBOL for Linux trial cannot serve, as its licence
+is for evaluation only.
 
 ## 11. Invariants
 
@@ -322,7 +338,7 @@ assumption only where the two are documented to agree.
 4. **No third-party dependency and no `unsafe`.**
 5. **The runtime owns cursor-state errors.** -501, -502, -507 and -508 come from the runtime, not
    the backend.
-6. **Every SQLCODE the runtime writes is either in §6 or in S4's table.**
+6. **Every SQLCODE the runtime writes is either in §6 or in SQ4's table.**
 
 ## 12. Specification (BDD)
 
@@ -384,11 +400,11 @@ assumption only where the two are documented to agree.
 ## 14. Decisions for the operator
 
 - **D1.** The recording format of §8, and strict replay as the default.
-- **D2.** A PostgreSQL backend without TLS: local socket, trusted network or proxy only. The
-  alternative is relaxing the dependency rule for TLS.
+- **D2.** Settled 2026-09-30: TLS as a separate, optional build on rustls (§9), not in-house TLS,
+  and not in ironwork's own build.
 - **D3.** Refuse CONNECT and DISCONNECT at compile time as not Db2, where today they are checked and
   pass.
-- **D4.** Add the S prefix and `Oracle::Db2` to the assumptions registry.
+- **D4.** Add the SQ prefix and `Oracle::Db2` to the assumptions registry.
 
 ## 15. Execution plan
 
@@ -397,7 +413,7 @@ assumption only where the two are documented to agree.
 Step 1: `syntax/src/sql.rs`, a `sql` field on `ExecBlock`, WHENEVER state in the parser, and
 `Check` reporting malformed statements. Two things the corpus taught are now assumptions:
 - cursor names take hyphens (`PROGRAMS-CSR`);
-- an INTO list may omit colons (S7).
+- an INTO list may omit colons (SQ7).
 
 Checked against a build of `main` over the 3,494 programs in the 500-repository corpus that hold
 EXEC SQL, both builds accept the same 362 programs.
@@ -425,7 +441,7 @@ Step 4:
 Step 5:
 - the parser reads cursors against the DECLAREs before them (`Cursors` in `syntax/src/sql.rs`);
 - the runtime keeps cursor state in `Session` and answers -501, -502, -507 and -508 itself;
-- a normal end commits pending work and an abend rolls it back (S1).
+- a normal end commits pending work and an abend rolls it back (SQ1).
 
 Checked over the same 3,494 programs, step 4's build and step 5's accept 450 and 449. The one
 refused is an Open-COBOL-ESQL test that opens a cursor it never declares
@@ -449,6 +465,11 @@ The runtime answers a searched UPDATE or DELETE that changes no row with +100, a
 PostgreSQL 14.19: a recorded run covers a cursor loop with a NULL, a timestamp, -803, +100,
 `WITH UR`, `SYSIBM.SYSDUMMY1` and -811, and replaying it gives identical output.
 
+Step 8, on Db2 12.1.5 for Linux (Community Edition, whose licence allows internal non-production
+development and test): SQ1 to SQ4 and SQ11 to SQ13 are settled or their disagreement recorded
+(§10). The runtime now sets SQLSTATE 01004 and 01503 with their warnings, and SQLERRD(3) after a
+FETCH, as Db2 does.
+
 The work came after M8 (BMS and the 3270 terminal) and before the VM (operator, 2026-09-29). It
 lives in new files (`syntax/src/sql.rs`, `exec/src/machine/sql.rs` and `exec/src/sql/`), with the
 smallest hooks in the shared ones.
@@ -462,4 +483,4 @@ smallest hooks in the shared ones.
 | 5 | Cursors | Q4 |
 | 6 | CICS SYNCPOINT and task-end units of work | Q3 (CICS) |
 | 7 | The PostgreSQL backend: wire protocol, SCRAM, rewrites, and the SQLSTATE table | Q5 against a live PostgreSQL |
-| 8 | Settle S1 to S4 on a lawful Db2 | Each assumption's basis updated, or its disagreement recorded |
+| 8 | Settle SQ1 to SQ4 on a lawful Db2 | Each assumption's basis updated, or its disagreement recorded |

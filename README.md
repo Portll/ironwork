@@ -88,9 +88,13 @@ The subset the interpreter runs today:
 - **EXEC SQL and EXEC CICS** are read and checked: every SQL host variable and every CICS argument
   that names data must resolve; EXEC SQL INCLUDE works as COPY; a program with EXEC CICS gets
   DFHEIBLK and DFHCOMMAREA as the translator adds them; `DFHRESP(condition)` is its EIBRESP number;
-  SQLCA, SQLDA, DFHEIBLK, DFHAID and DFHBMSCA are built in when no library holds them. SQL is not
-  run yet: declarations do nothing, and reaching any other EXEC SQL statement ends the run.
-  [docs/exec-sql-cics.md](docs/exec-sql-cics.md) is the plan for running them.
+  SQLCA, SQLDA, DFHEIBLK, DFHAID and DFHBMSCA are built in when no library holds them.
+- **EXEC SQL runs** against PostgreSQL (`--sql-db`) or a recording of a run (`--sql-replay`, made
+  with `--sql-record`): single-row statements, cursors with WITH HOLD and positioned changes, COMMIT
+  and ROLLBACK, CICS SYNCPOINT, host variables and indicators converted by Db2's rules, the SQLCA
+  and WHENEVER. A normal end commits and an abend rolls back. TLS to PostgreSQL is in a separate
+  build, [tls/](tls/README.md), so that this one keeps no dependencies.
+  [docs/sql-runtime.md](docs/sql-runtime.md) specifies it, with what Db2 12.1 for Linux settled.
 - **CICS, run as a harness** (`ironwork cics`): one task, with the transaction ID, terminal, user
   and COMMAREA the command line gives, and the EXEC interface block in IBM's layout. Program
   control (RETURN with TRANSID and COMMAREA, LINK, XCTL, ABEND); exception conditions (RESP, RESP2,
