@@ -1,0 +1,15 @@
+[package]
+name = "ironwork-rt"
+description = "ironwork for COBOL: the runtime a compiled program links, under the runtime exception"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
