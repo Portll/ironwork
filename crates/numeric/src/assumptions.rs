@@ -95,7 +95,7 @@ pub const REPORT_NEW_PAGES: &str = "RW11";
 pub const REPORT_OUT_OF_ORDER: &str = "RW12";
 pub const REPORT_CONTROL_AREA: &str = "RW13";
 pub const OBJECT_REFERENCE_VALUE: &str = "J1";
-pub const LOCAL_REFERENCES_KEPT: &str = "J2";
+pub const LOCAL_REFERENCES_EXPIRE: &str = "J2";
 pub const OBJECTS_NEVER_FREED: &str = "J3";
 pub const INSTANCE_DATA_START: &str = "J4";
 pub const FACTORY_DATA_START: &str = "J5";
@@ -106,8 +106,14 @@ pub const NO_METHOD_ABEND: &str = "J9";
 pub const FACTORY_SELF: &str = "J10";
 pub const CLASS_SEARCH: &str = "J11";
 pub const INVOKE_KEEPS_RETURN_CODE: &str = "J12";
-pub const OO_OPTIONS_NOT_REQUIRED: &str = "J13";
+pub const OO_OPTIONS_REQUIRED: &str = "J13";
 pub const CHAR_FROM_DISPLAY: &str = "J14";
+pub const LOCAL_REFERENCES_OUTSIDE_METHODS: &str = "J15";
+pub const SELF_IS_LOCAL: &str = "J16";
+pub const EXPIRED_REFERENCE_ABENDS: &str = "J17";
+pub const LOCAL_FRAMES: &str = "J18";
+pub const OO_OPTIONS_SEVERITY: &str = "J19";
+pub const REFERENCES_KEPT: &str = "J20";
 pub const SORT_EQUAL_KEYS_IN_ORDER: &str = "S1";
 pub const MERGE_EQUAL_KEYS_BY_FILE: &str = "S2";
 pub const MERGE_OUT_OF_SEQUENCE_FAILS: &str = "S3";
@@ -508,14 +514,14 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: OBJECT_REFERENCE_VALUE,
-        claim: "An object reference is four bytes, as under LP(32): zero for NULL, otherwise a number that names one object for the rest of the run unit, so two references to one object are equal byte for byte",
+        claim: "An object reference is four bytes, as under LP(32): zero for NULL, otherwise the number of the local or global reference it holds, never reused in the run unit; each NEW, RETURNING value, argument received, SELF and reference a JNI service makes is a new number, so two references to one object can differ byte for byte, and = compares the objects they identify (Language Reference SC27-8713-03, p. 282)",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
-        id: LOCAL_REFERENCES_KEPT,
-        claim: "A local object reference stays valid after the method that obtained it returns, and the JNI services NewGlobalRef, NewLocalRef, DeleteGlobalRef and DeleteLocalRef change nothing; IBM frees a method's local references when it returns (Programming Guide, Managing local and global references), so a method that keeps one in OBJECT, FACTORY or method WORKING-STORAGE without NewGlobalRef fails on z/OS and runs here",
-        basis: Basis::Chosen,
+        id: LOCAL_REFERENCES_EXPIRE,
+        claim: "The object references a method receives as arguments, gets back as INVOKE RETURNING values or from JNI services, and makes with INVOKE ... NEW are local references, valid until the method returns, whatever kind the invoked method returned; NewGlobalRef makes a global reference, valid until DeleteGlobalRef, and DeleteLocalRef frees a local reference at once (Programming Guide SC27-8714-03, pp. 702-703 and 721-723; Language Reference SC27-8713-03, p. 365). SET copies a reference and converts nothing (Language Reference p. 451), so the Guide's 'use a SET statement to convert' (p. 722) is read as the CALL of NewGlobalRef it shows on p. 702, and a local reference kept in OBJECT, FACTORY or method WORKING-STORAGE expires, which p. 722 calls an error",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
@@ -579,9 +585,9 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
-        id: OO_OPTIONS_NOT_REQUIRED,
-        claim: "A program or class with object-oriented syntax is checked whatever THREAD, DLL and RECURSIVE say: IBM requires THREAD, DLL and RENT for it, and under THREAD a RECURSIVE program, which an installation's defaults may supply",
-        basis: Basis::Chosen,
+        id: OO_OPTIONS_REQUIRED,
+        claim: "A class definition, and a program with INVOKE or an object reference, is compiled with THREAD, DLL, RENT and DBCS (Programming Guide SC27-8714-03, pp. 291, 295, 363, 588, 591, 694; Language Reference SC27-8713-03, p. 89), and NORENT with THREAD or DLL is a conflict IBM resolves as RENT (Guide pp. 344-345). Under THREAD a program is RECURSIVE ('an error will occur', Guide p. 591; Language Reference p. 103), and INITIAL, nested programs, SORT of a file and MERGE are diagnosed as errors (Guide p. 418; Language Reference pp. 85, 103, 400, 452); a table SORT is allowed (p. 453), and a method is recursive without it (p. 94). The options are the CBL and PROCESS cards' over IBM's defaults NOTHREAD, NODLL, RENT and DBCS",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
@@ -737,6 +743,42 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: TEXT_PRINT_LINES,
         claim: "A text DD shows a print file's records without the control character, which it reads as line spacing, as the POSIX asa utility does: ' ', '0' and '-' put the line one, two or three lines below the last, the DD's first line starting on its first; '+' and X'01' overprint, after a carriage return when both lines show something; a skip to channel 1 is a form feed before the line; a skip to channels 2 to 12, or AFP-5A page mode data, is one line, a text DD having no forms control buffer; a machine code moves the paper after its line. Any other file's records are a line each",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LOCAL_REFERENCES_OUTSIDE_METHODS,
+        claim: "A local reference made by a program that is not a method belongs to the method running when it runs, freed when that method returns; with no method running it belongs to the run unit and stays valid until the run ends, as the JNI keeps a thread's local references outside any native method, and the Guide asks for NewGlobalRef only 'if the client code is within a method' (Programming Guide SC27-8714-03, p. 703)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SELF_IS_LOCAL,
+        claim: "SELF is a local reference of the method's own frame, made with the invocation, as the JNI passes a native method its object, and it expires when the method returns; the Guide's list of local references names arguments, RETURNING values, JNI results and NEW only (Programming Guide SC27-8714-03, p. 721)",
+        basis: Basis::Recalled,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: EXPIRED_REFERENCE_ABENDS,
+        claim: "Using a reference after it was freed ends the run with abend IRONWORK naming the item that holds it, how the reference was made and where it was freed: INVOKE on it, passing it to INVOKE or a JNI service, a method's RETURNING it, and comparing it with another object reference or SELF use it; SET, MOVE and CALL between programs copy its bytes without looking, and a comparison with NULL tests only its bytes. On z/OS a freed reference's slot is reused, and the Guide says only that 'an error occurs' (Programming Guide SC27-8714-03, p. 722)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LOCAL_FRAMES,
+        claim: "The JNI reference services run as the JNI specification defines them: NewLocalRef and NewGlobalRef make a new reference to the object, NULL for NULL; DeleteLocalRef and DeleteGlobalRef free one and ignore NULL, and one given the other kind of reference ends the run; IsSameObject compares objects; GetObjectRefType answers 0 for NULL, 1 for local and 2 for global; PushLocalFrame opens a frame whose local references PopLocalFrame frees, giving back a local reference in the frame below to its argument's object, and EnsureLocalCapacity succeeds. PopLocalFrame with no frame of PushLocalFrame's open ends the run, and a method's return frees the frames it left open. The Guide documents NewGlobalRef, DeleteGlobalRef and DeleteLocalRef only (Programming Guide SC27-8714-03, pp. 722-723)",
+        basis: Basis::Recalled,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: OO_OPTIONS_SEVERITY,
+        claim: "IBM names no message for object-oriented syntax compiled without THREAD, DLL, RENT or DBCS, nor for THREAD without RECURSIVE, which it calls an error (Messages and Codes SC27-4648-02, p. v, lists only some messages); each rule of J13 refuses the program as a compile error. A program that reaches Java through JNIENVPTR alone, with no INVOKE or object reference, is held to none of them, as IBM builds its Bank-of-Z IBTRAN with DLL and without THREAD",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: REFERENCES_KEPT,
+        claim: "Every reference made is kept for the rest of the run, so that an expired one can say where it expired, and a run unit that makes more than 8,388,608 of them abends; the JVM reuses a freed reference's slot",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

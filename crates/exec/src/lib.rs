@@ -50,6 +50,12 @@ pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error
     if program.oo.as_ref().is_some_and(|o| o.class().is_some()) {
         return oo::compile_class_definition(program, flags);
     }
+    compile_program(program, flags, true)
+}
+
+/// `whole` is false for the parts a class definition is compiled into, which IBM's rules for
+/// compiler options do not apply to one by one.
+pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -> Result<Compiled, Vec<Error>> {
     let mut program = sort::with_special_registers(program);
     let mut errors = Vec::new();
     let mut options = Options::default();
@@ -82,6 +88,9 @@ pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error
         collating::Sequence::native()
     });
     let drafts = report::prepare(&mut program, options.adv, &mut errors);
+    if whole {
+        oo::option_rules(&program, &options, &mut errors);
+    }
     let files: Vec<(&[DataEntry], Option<u32>)> = program.files.iter().map(|f| (f.records.as_slice(), f.record_max)).collect();
     let shared = layout::record_area_owners(&program.files, &program.environment).unwrap_or_else(|e| {
         errors.push(e);

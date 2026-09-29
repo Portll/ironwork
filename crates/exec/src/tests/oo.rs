@@ -1,10 +1,13 @@
 use super::*;
 
+/// The options IBM compiles object-oriented COBOL with; RENT and DBCS are its defaults.
+const OO_CARD: &str = "       CBL THREAD,DLL\n";
+
 /// A class definition: its REPOSITORY entries, then FACTORY and OBJECT paragraphs as written.
 fn class(head: &str, repository: &[&str], parts: &str) -> String {
     let entries: Vec<String> = repository.iter().map(|e| format!("           CLASS {e}")).collect();
     format!(
-        "       IDENTIFICATION DIVISION.\n       CLASS-ID. {head}.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       REPOSITORY.\n{}.\n{parts}       END CLASS {}.\n",
+        "{OO_CARD}       IDENTIFICATION DIVISION.\n       CLASS-ID. {head}.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       REPOSITORY.\n{}.\n{parts}       END CLASS {}.\n",
         entries.join("\n"),
         head.split_whitespace().next().unwrap()
     )
@@ -26,16 +29,16 @@ fn client(repository: &[&str], data: &str, body: &[&str]) -> String {
     let entries: Vec<String> = repository.iter().map(|e| format!("           CLASS {e}")).collect();
     let body: String = body.iter().map(|l| line(l)).collect();
     format!(
-        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. CLIENT RECURSIVE.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       REPOSITORY.\n{}.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n{data}       PROCEDURE DIVISION.\n{body}",
+        "{OO_CARD}       IDENTIFICATION DIVISION.\n       PROGRAM-ID. CLIENT RECURSIVE.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       REPOSITORY.\n{}.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n{data}       PROCEDURE DIVISION.\n{body}",
         entries.join("\n")
     )
 }
 
-/// Runs `main` with `classes` among the programs of its run unit.
+/// Runs the first program of `main` with the rest of its programs, and `classes`, in its run unit.
 fn run_oo(main: &str, classes: &[String]) -> (String, String, Result<(Ending, i16), Abend>) {
-    let first = syntax::parse(main).unwrap_or_else(|e| panic!("{e}"));
-    let compiled = compile(first, &[]).unwrap_or_else(|e| panic!("{e:?}"));
-    let programs = classes.iter().map(|c| syntax::parse(c).unwrap_or_else(|e| panic!("{e}\n{c}"))).collect();
+    let mut programs = syntax::parse_all_with(main, &Default::default()).unwrap_or_else(|e| panic!("{e}"));
+    let compiled = compile(programs.remove(0), &[]).unwrap_or_else(|e| panic!("{e:?}"));
+    programs.extend(classes.iter().map(|c| syntax::parse(c).unwrap_or_else(|e| panic!("{e}\n{c}"))));
     let library = unit::Library { programs, ..Default::default() };
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let ending = compiled.execute(library, files::Dds::default(), None, unit::Clock::Fixed(0, 0), &mut out, &mut err);
@@ -264,6 +267,7 @@ fn method_storage_persists_local_storage_does_not_and_invoke_keeps_return_code()
 #[test]
 fn jni_reference_services_run_and_the_rest_need_the_jvm() {
     let main = [
+        OO_CARD,
         "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. JNIUSER RECURSIVE.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       REPOSITORY.\n           CLASS Account IS \"Account\".\n",
         "       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n",
         ACCOUNT_DATA,
@@ -342,7 +346,8 @@ fn what_enterprise_cobol_refuses_is_refused() {
 fn a_report_takes_no_object_reference_as_source_or_control() {
     let report = |control: &str, source: &str| {
         [
-            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. REPORTS.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       REPOSITORY.\n           CLASS Account IS \"Account\".\n",
+            OO_CARD,
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. REPORTS RECURSIVE.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       REPOSITORY.\n           CLASS Account IS \"Account\".\n",
             "       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n           SELECT P ASSIGN TO PDD.\n       DATA DIVISION.\n       FILE SECTION.\n       FD  P REPORT IS R.\n",
             "       WORKING-STORAGE SECTION.\n       01  A USAGE OBJECT REFERENCE Account.\n       01  K PIC X.\n       REPORT SECTION.\n",
             &format!("       RD  R CONTROLS {control}.\n       01  D TYPE DE LINE PLUS 1.\n           05 COLUMN 1 PIC X(8) SOURCE {source}.\n"),
@@ -419,4 +424,222 @@ fn factory_methods_are_inherited_and_self_in_one_is_its_own_class() {
     let (out, err, ending) = run_oo(&main, &[maker, sub]);
     assert!(ending.is_ok(), "{ending:?}\n{err}");
     assert_eq!(out, "MAKER 1\nSUBMAKER\nMAKER 1\nMAKER 2\n");
+}
+
+const ENVIRONMENT: [&str; 2] = ["SET ADDRESS OF JNIENV TO JNIENVPTR", "SET ADDRESS OF JNINATIVEINTERFACE TO JNIENV"];
+
+/// A class that keeps an Account in its instance data: as a method receives it, makes it, or makes
+/// it global; and SELF.
+fn holder() -> String {
+    let jni = "       LINKAGE SECTION.\n           COPY JNI.\n";
+    let account = "       01  A USAGE OBJECT REFERENCE Account.\n";
+    let balance = "       LINKAGE SECTION.\n       01  B PIC S9(9) BINARY.\n";
+    class(
+        "Holder INHERITS Base",
+        &["Base IS \"java.lang.Object\"", "Account IS \"Account\"", "Holder IS \"Holder\""],
+        &part(
+            "OBJECT",
+            "       01  KEPT USAGE OBJECT REFERENCE Account.\n       01  ME USAGE OBJECT REFERENCE Holder.\n",
+            &[
+                method("keep", &format!("       LINKAGE SECTION.\n{account}"), " USING BY VALUE A", &["SET KEPT TO A."]),
+                method("keepGlobal", &format!("{jni}{account}"), " USING BY VALUE A", &[ENVIRONMENT[0], ENVIRONMENT[1], "CALL NewGlobalRef USING BY VALUE JNIENVPTR A", "    RETURNING KEPT."]),
+                method("drop", jni, "", &[ENVIRONMENT[0], ENVIRONMENT[1], "CALL DeleteGlobalRef USING BY VALUE JNIENVPTR KEPT."]),
+                method("make", "", "", &["INVOKE Account NEW RETURNING KEPT."]),
+                method("remember", "", "", &["SET ME TO SELF."]),
+                method("balance", balance, " RETURNING B", &["INVOKE KEPT \"getBalance\" RETURNING B."]),
+                method("again", balance, " RETURNING B", &["INVOKE ME \"balance\" RETURNING B."]),
+                method("kept", "       LINKAGE SECTION.\n       01  R USAGE OBJECT REFERENCE Account.\n", " RETURNING R", &["SET R TO KEPT."]),
+            ],
+        ),
+    )
+}
+
+/// A client whose line 23 is the first statement after it makes a Holder, H, and an Account, A1.
+fn holder_client(body: &[&str]) -> (String, Result<(Ending, i16), Abend>) {
+    let data = [ACCOUNT_DATA, "       01  H USAGE OBJECT REFERENCE Holder.\n"].concat();
+    let body = [&["INVOKE Holder NEW RETURNING H", "INVOKE Account NEW RETURNING A1"], body, &["GOBACK."]].concat();
+    let main = client(&["Account IS \"Account\"", "Holder IS \"Holder\""], &data, &body);
+    let (out, _, ending) = run_oo(&main, &[account(), holder()]);
+    (out, ending)
+}
+
+fn abend(ending: Result<(Ending, i16), Abend>) -> String {
+    let abend = ending.unwrap_err();
+    assert_eq!(abend.code, "IRONWORK", "{abend:?}");
+    abend.message
+}
+
+#[test]
+fn a_local_reference_a_method_keeps_expires_when_the_method_returns() {
+    let invoked = |m: &str| format!("method \"{m}\" of Holder, invoked at line 23 of CLIENT");
+    let message = abend(holder_client(&["INVOKE H \"keep\" USING BY VALUE A1", "INVOKE H \"balance\" RETURNING BAL"]).1);
+    let expected = format!(
+        "INVOKE KEPT \"getBalance\": KEPT holds a local reference to an Account object, received as argument 1 by {}; it expired when {}, returned, and IBM leaves using it unpredictable (see J17)",
+        invoked("keep"),
+        invoked("keep")
+    );
+    assert_eq!(message, expected);
+    let message = abend(holder_client(&["INVOKE H \"make\"", "INVOKE H \"balance\" RETURNING BAL"]).1);
+    assert!(message.contains(&format!("KEPT holds a local reference to an Account object, made by INVOKE Account NEW at line 50 of Holder.make; it expired when {}, returned", invoked("make"))), "{message}");
+    let message = abend(holder_client(&["INVOKE H \"remember\"", "INVOKE H \"again\" RETURNING BAL"]).1);
+    assert!(message.starts_with(&format!("INVOKE ME \"balance\": ME holds a local reference to a Holder object, SELF of {}; it expired when", invoked("remember"))), "{message}");
+    let message = abend(holder_client(&["INVOKE H \"keep\" USING BY VALUE A1", "INVOKE H \"kept\" RETURNING A2"]).1);
+    assert!(message.starts_with("INVOKE H \"kept\": R, the RETURNING item of method \"kept\", holds a local reference"), "{message}");
+}
+
+#[test]
+fn a_global_reference_lasts_until_deleted_and_a_returned_one_is_the_invokers_own() {
+    let (out, ending) = holder_client(&[
+        "INVOKE H \"keepGlobal\" USING BY VALUE A1",
+        "INVOKE H \"balance\" RETURNING BAL",
+        "MOVE BAL TO SHOWN DISPLAY SHOWN",
+        "INVOKE H \"kept\" RETURNING A2",
+        "IF A1 = A2 DISPLAY 'SAME OBJECT' END-IF",
+        "INVOKE H \"drop\"",
+        "INVOKE A2 \"getBalance\" RETURNING BAL",
+        "MOVE BAL TO SHOWN DISPLAY SHOWN",
+        "INVOKE H \"balance\" RETURNING BAL",
+    ]);
+    assert_eq!(out, " 100\nSAME OBJECT\n 100\n");
+    let message = abend(ending);
+    assert!(message.contains("KEPT holds a global reference to an Account object, made by NewGlobalRef at line 34 of Holder.keepGlobal; it was deleted by DeleteGlobalRef at line 45 of Holder.drop"), "{message}");
+}
+
+/// A client with the JNI's function table in its LINKAGE SECTION.
+fn jni_client(body: &[&str]) -> (String, Result<(Ending, i16), Abend>) {
+    let data = [ACCOUNT_DATA, "       01  B USAGE OBJECT REFERENCE Account.\n       01  N PIC S9(9) COMP-5.\n       LINKAGE SECTION.\n           COPY JNI.\n"].concat();
+    let main = client(&["Account IS \"Account\""], &data, &[&ENVIRONMENT[..], body, &["GOBACK."]].concat());
+    let (out, _, ending) = run_oo(&main, &[account()]);
+    (out, ending)
+}
+
+#[test]
+fn jni_services_make_delete_and_frame_references() {
+    let (out, ending) = jni_client(&[
+        "INVOKE Account NEW RETURNING A1",
+        "CALL NewGlobalRef USING BY VALUE JNIENVPTR A1 RETURNING A2",
+        "CALL GetObjectRefType USING BY VALUE JNIENVPTR A1 RETURNING N",
+        "DISPLAY N",
+        "CALL GetObjectRefType USING BY VALUE JNIENVPTR A2 RETURNING N",
+        "DISPLAY N",
+        "CALL GetObjectRefType USING BY VALUE JNIENVPTR U RETURNING N",
+        "DISPLAY N",
+        "IF A1 = A2 DISPLAY 'ONE OBJECT' END-IF",
+        "CALL NewLocalRef USING BY VALUE JNIENVPTR A2 RETURNING U",
+        "CALL DeleteGlobalRef USING BY VALUE JNIENVPTR A2",
+        "INVOKE U \"getBalance\" RETURNING BAL",
+        "CALL DeleteLocalRef USING BY VALUE JNIENVPTR A1",
+        "IF A1 NOT = NULL DISPLAY 'NOT NULL' END-IF",
+        "CALL PushLocalFrame USING BY VALUE JNIENVPTR 4 RETURNING N",
+        "INVOKE Account NEW RETURNING A1",
+        "INVOKE Account \"open\" RETURNING B",
+        "CALL PopLocalFrame USING BY VALUE JNIENVPTR A1 RETURNING A1",
+        "INVOKE A1 \"getBalance\" RETURNING BAL",
+        "MOVE BAL TO SHOWN DISPLAY SHOWN",
+        "INVOKE B \"getBalance\" RETURNING BAL",
+    ]);
+    assert_eq!(out, "000000000A\n000000000B\n000000000{\nONE OBJECT\nNOT NULL\n 100\n");
+    let message = abend(ending);
+    assert!(
+        message.starts_with("INVOKE B \"getBalance\": B holds a local reference to an Account object, returned by method \"open\" of Account, invoked at line 41 of CLIENT; it expired when PopLocalFrame at line 42 of CLIENT freed its frame"),
+        "{message}"
+    );
+    let deleted = abend(jni_client(&["INVOKE Account NEW RETURNING A1", "SET A2 TO A1", "CALL DeleteLocalRef USING BY VALUE JNIENVPTR A1", "IF A2 = A1 CONTINUE END-IF"]).1);
+    assert!(deleted.starts_with("A2 = A1: A2 holds a local reference to an Account object, made by INVOKE Account NEW at line 25 of CLIENT; it was deleted by DeleteLocalRef at line 27 of CLIENT"), "{deleted}");
+    let wrong_kind = abend(jni_client(&["INVOKE Account NEW RETURNING A1", "CALL NewGlobalRef USING BY VALUE JNIENVPTR A1 RETURNING A2", "CALL DeleteLocalRef USING BY VALUE JNIENVPTR A2"]).1);
+    assert!(wrong_kind.contains("A2 holds a global reference, which DeleteLocalRef does not delete"), "{wrong_kind}");
+    let unpushed = abend(jni_client(&["CALL PopLocalFrame USING BY VALUE JNIENVPTR U RETURNING U"]).1);
+    assert!(unpushed.contains("no frame PushLocalFrame pushed is open"), "{unpushed}");
+}
+
+#[test]
+fn a_program_that_is_not_a_method_makes_its_references_in_the_running_methods_frame() {
+    let maker = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. MAKER RECURSIVE.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       REPOSITORY.\n           CLASS Account IS \"Account\".\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  M USAGE OBJECT REFERENCE Account.\n       01  B PIC S9(9) BINARY.\n       01  SHOWN PIC ZZZ9.\n       PROCEDURE DIVISION.\n";
+    let maker = [
+        maker,
+        &line("IF M = NULL INVOKE Account NEW RETURNING M DISPLAY 'MADE'"),
+        &line("ELSE INVOKE M \"getBalance\" RETURNING B MOVE B TO SHOWN"),
+        &line("    DISPLAY 'USED ' SHOWN END-IF"),
+        &line("GOBACK."),
+        "       END PROGRAM MAKER.\n",
+    ]
+    .concat();
+    let caller = class("Caller INHERITS Base", &["Base IS \"java.lang.Object\""], &part("OBJECT", "", &[method("call", "", "", &["CALL 'MAKER'."])]));
+    let main = |body: &[&str]| {
+        let data = "       01  C USAGE OBJECT REFERENCE Caller.\n";
+        [client(&["Caller"], data, &[body, &["GOBACK."]].concat()), "       END PROGRAM CLIENT.\n".into(), maker.clone()].concat()
+    };
+    let (out, err, ending) = run_oo(&main(&["CALL 'MAKER'", "CALL 'MAKER'"]), &[account(), caller.clone()]);
+    assert!(ending.is_ok(), "{ending:?}\n{err}");
+    assert_eq!(out, "MADE\nUSED  100\n");
+    let (out, _, ending) = run_oo(&main(&["INVOKE Caller NEW RETURNING C", "INVOKE C \"call\"", "CALL 'MAKER'"]), &[account(), caller]);
+    assert_eq!(out, "MADE\n");
+    let message = abend(ending);
+    assert!(
+        message.starts_with("INVOKE M \"getBalance\": M holds a local reference to an Account object, made by INVOKE Account NEW at line 29 of MAKER; it expired when method \"call\" of CALLER, invoked at line 13 of CLIENT, returned"),
+        "{message}"
+    );
+}
+
+#[test]
+fn object_oriented_programs_need_the_options_ibm_compiles_them_with() {
+    let with = |card: &str, id: &str| errors(&client(&["Account IS \"Account\""], ACCOUNT_DATA, &["INVOKE Account NEW RETURNING A1", "GOBACK."]).replacen(OO_CARD, card, 1).replacen("CLIENT RECURSIVE", id, 1));
+    let needs = |missing: &str| format!("program CLIENT uses object-oriented syntax, which IBM compiles only with THREAD, DLL, RENT and DBCS: {missing} missing from its CBL or PROCESS cards (see J13 and J19)");
+    assert_eq!(with(OO_CARD, "CLIENT RECURSIVE"), "");
+    assert_eq!(with("", "CLIENT"), needs("THREAD, DLL"));
+    assert_eq!(with("       CBL THREAD\n", "CLIENT RECURSIVE"), needs("DLL"));
+    assert_eq!(with("       PROCESS DLL\n", "CLIENT"), needs("THREAD"));
+    assert_eq!(with("       CBL THREAD,DLL,NODBCS\n", "CLIENT RECURSIVE"), needs("DBCS"));
+    assert_eq!(with("       CBL NORENT\n", "CLIENT"), needs("THREAD, DLL, RENT"));
+    assert!(with("       CBL THREAD,DLL,NORENT\n", "CLIENT RECURSIVE").starts_with("NORENT conflicts with THREAD and DLL, which IBM compiles only as RENT"));
+    assert_eq!(with(OO_CARD, "CLIENT"), "program CLIENT is compiled with THREAD, which requires RECURSIVE in its PROGRAM-ID paragraph");
+    assert_eq!(with(OO_CARD, "CLIENT RECURSIVE INITIAL"), "program CLIENT is INITIAL, which THREAD does not allow");
+    let nested = [client(&["Account IS \"Account\""], ACCOUNT_DATA, &["GOBACK."]), "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. INNER.\n       PROCEDURE DIVISION.\n           GOBACK.\n       END PROGRAM INNER.\n       END PROGRAM CLIENT.\n".into()].concat();
+    assert_eq!(errors(&nested), "program CLIENT contains program INNER, and THREAD does not allow nested programs");
+    let bare = account().replacen(OO_CARD, "", 1);
+    assert!(errors(&bare).contains("class ACCOUNT uses object-oriented syntax, which IBM compiles only with THREAD, DLL, RENT and DBCS: THREAD, DLL missing"), "{}", errors(&bare));
+    let loaded = client(&["Account IS \"Account\""], ACCOUNT_DATA, &["INVOKE Account NEW RETURNING A1", "GOBACK."]);
+    let refused = run_oo(&loaded, &[bare]).2.unwrap_err().message;
+    assert!(refused.starts_with("class Account does not compile: ") && refused.contains("THREAD, DLL missing"), "{refused}");
+}
+
+#[test]
+fn thread_needs_recursive_and_refuses_initial_and_file_sorts() {
+    let t = |card: &str, head: &str, body: &[&str]| {
+        let text = [
+            card,
+            &format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. {head}.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n"),
+            "           SELECT S ASSIGN TO SORTWK1.\n           SELECT F ASSIGN TO FDD.\n           SELECT G ASSIGN TO GDD.\n       DATA DIVISION.\n       FILE SECTION.\n",
+            "       SD  S.\n       01  S-REC PIC X(4).\n       FD  F.\n       01  F-REC PIC X(4).\n       FD  G.\n       01  G-REC PIC X(4).\n",
+            "       WORKING-STORAGE SECTION.\n       01  T.\n           05 E PIC X OCCURS 3.\n       PROCEDURE DIVISION.\n",
+            &body.iter().map(|l| line(l)).collect::<String>(),
+            &line("GOBACK."),
+        ]
+        .concat();
+        errors(&text)
+    };
+    let sort = ["SORT S ON ASCENDING KEY S-REC", "    USING F GIVING G"];
+    let merge = ["MERGE S ON ASCENDING KEY S-REC", "    USING F G GIVING G"];
+    assert_eq!(t("", "T", &sort), "");
+    assert_eq!(t("", "T IS INITIAL", &merge), "");
+    assert_eq!(t("       CBL THREAD\n", "T", &[]), "program T is compiled with THREAD, which requires RECURSIVE in its PROGRAM-ID paragraph");
+    assert_eq!(t("       CBL THREAD\n", "T RECURSIVE INITIAL", &[]), "program T is INITIAL, which THREAD does not allow");
+    assert_eq!(t("       CBL THREAD\n", "T RECURSIVE", &["SORT E ON ASCENDING KEY E"]), "");
+    assert_eq!(t("       CBL THREAD\n", "T RECURSIVE", &sort), "SORT of a file is not allowed in a program compiled with THREAD");
+    assert_eq!(t("       CBL THREAD\n", "T RECURSIVE", &merge), "MERGE is not allowed in a program compiled with THREAD");
+}
+
+#[test]
+fn a_program_that_reaches_java_only_through_the_jni_needs_no_thread_or_dll() {
+    let text = [
+        "       CBL LIST,MAP,XREF\n       IDENTIFICATION DIVISION.\n       PROGRAM-ID. BRIDGE.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       REPOSITORY.\n           CLASS Hist IS \"com.acme.Hist\".\n",
+        "       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  CLASS-REF PIC 9(18) COMP-5 VALUE 0.\n       01  CNAME PIC X(14) VALUE Z'com/acme/Hist'.\n       LINKAGE SECTION.\n           COPY JNI.\n       PROCEDURE DIVISION.\n",
+        &line(ENVIRONMENT[0]),
+        &line(ENVIRONMENT[1]),
+        &line("CALL FindClass USING BY VALUE JNIENVPTR ADDRESS OF CNAME"),
+        &line("    RETURNING CLASS-REF"),
+        &line("GOBACK."),
+    ]
+    .concat();
+    assert_eq!(errors(&text), "");
 }

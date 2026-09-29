@@ -1916,6 +1916,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         {
             return sign::compare_packed(self.bytes(x), self.bytes(y), Numproc::Pfd).map_err(|c| Abend::check(c, pos));
         }
+        if let Some(o) = self.compare_references(a, b, (&va, la), (&vb, lb), pos)? {
+            return Ok(o);
+        }
         let address = |v: &Val| match v {
             Val::Address(a) => Some(*a),
             Val::Fig(Figurative::Null) => Some(0),

@@ -80,6 +80,11 @@ pub struct Options {
     /// ADV: a print file's printer control character is a byte added before each record; under
     /// NOADV it is the record's own first byte.
     pub adv: bool,
+    /// THREAD, DLL, RENT and DBCS, which object-oriented programs are compiled with.
+    pub thread: bool,
+    pub dll: bool,
+    pub rent: bool,
+    pub dbcs: bool,
 }
 
 impl Default for Options {
@@ -93,6 +98,10 @@ impl Default for Options {
             fastsrt: false,
             sort_keys: SortKeys::default(),
             adv: true,
+            thread: false,
+            dll: false,
+            rent: true,
+            dbcs: true,
         }
     }
 }
@@ -161,6 +170,10 @@ impl Options {
             "NOFASTSRT" | "NOFSRT" => self.fastsrt = false,
             "ADV" => self.adv = true,
             "NOADV" => self.adv = false,
+            "THREAD" | "NOTHREAD" => self.thread = name == "THREAD",
+            "DLL" | "NODLL" => self.dll = name == "DLL",
+            "RENT" | "NORENT" => self.rent = name == "RENT",
+            "DBCS" | "NODBCS" => self.dbcs = name == "DBCS",
             _ => return Ok(false),
         }
         Ok(true)
@@ -189,6 +202,7 @@ mod tests {
     fn defaults_are_ibms() {
         let o = Options::default();
         assert_eq!((o.arith, o.trunc, o.numproc, o.codepage, o.fastsrt, o.adv), (Arith::Compat, Trunc::Std, Numproc::Nopfd, 1140, false, true));
+        assert_eq!((o.thread, o.dll, o.rent, o.dbcs), (false, false, true, true));
     }
 
     #[test]
@@ -199,6 +213,19 @@ mod tests {
         assert_eq!(o.apply("ADV"), Ok(true));
         assert!(o.adv);
         assert_eq!(o.apply("NOAD"), Ok(false));
+    }
+
+    #[test]
+    fn thread_dll_rent_and_dbcs_and_their_negatives() {
+        let mut o = Options::default();
+        for option in ["thread", "DLL", "NORENT", "NODBCS"] {
+            assert_eq!(o.apply(option), Ok(true));
+        }
+        assert_eq!((o.thread, o.dll, o.rent, o.dbcs), (true, true, false, false));
+        for option in ["NOTHREAD", "NODLL", "RENT", "DBCS"] {
+            assert_eq!(o.apply(option), Ok(true));
+        }
+        assert_eq!((o.thread, o.dll, o.rent, o.dbcs), (false, false, true, true));
     }
 
     #[test]

@@ -6,7 +6,9 @@
 
 use crate::layout::{Kind, Layout, Resolved};
 use crate::{Check, Compiled};
-use std::collections::HashSet;
+use numeric::Options;
+use numeric::assumptions::{OO_OPTIONS_REQUIRED, OO_OPTIONS_SEVERITY, REFERENCES_KEPT};
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use syntax::ast::*;
 use syntax::{Error, Pos};
@@ -15,15 +17,58 @@ pub const JAVA_LANG_OBJECT: &str = "java.lang.Object";
 
 /// Objects a run unit may create before it abends; they are never freed.
 pub const MAX_OBJECTS: usize = 1_000_000;
+/// References a run unit may make before it abends; each is kept, so that an expired one can say
+/// where it expired.
+pub const MAX_REFERENCES: usize = 1 << 23;
 /// Run-unit memory past which creating objects and classes abends.
 pub const MAX_MEMORY: usize = 1 << 30;
 
-/// The run unit's classes and objects, and the JNI environment once a program uses JNIENVPTR.
+/// The frame a global reference belongs to.
+const GLOBAL: u32 = u32::MAX;
+
+/// The run unit's classes and objects, the references to them, and the JNI environment once a
+/// program uses JNIENVPTR.
 #[derive(Default)]
 pub struct Objects {
     pub(crate) classes: Vec<LoadedClass>,
     pub(crate) objects: Vec<Instance>,
     pub(crate) jni: Option<usize>,
+    /// Every reference made, local or global; an object reference holds a reference's position
+    /// plus one, and positions are never reused.
+    references: Vec<Reference>,
+    /// Local reference frames above the run unit's own, innermost last.
+    frames: Vec<LocalFrame>,
+    serials: u32,
+    /// How references were made and how they expired, each told once.
+    events: Vec<String>,
+    event_index: HashMap<String, u32>,
+}
+
+struct Reference {
+    /// The object's position plus one.
+    object: u32,
+    /// The serial of the local frame it belongs to (0 for the run unit's own), or GLOBAL.
+    frame: u32,
+    made: u32,
+    /// The event that freed it, plus one; 0 while it is valid.
+    freed: u32,
+}
+
+struct LocalFrame {
+    serial: u32,
+    /// The first reference made after the frame was pushed.
+    first: u32,
+    /// Pushed by PushLocalFrame, not by a method's invocation.
+    pushed: bool,
+}
+
+/// What an object reference's four bytes name.
+pub(crate) enum Referent {
+    Null,
+    Object(u32),
+    /// A reference that was freed, and the message that says how.
+    Expired(String),
+    Unknown,
 }
 
 pub(crate) struct LoadedClass {
@@ -51,9 +96,9 @@ impl Objects {
         self.classes.iter().position(|c| c.external == external)
     }
 
-    /// The object a reference names; references are the object's position plus one, and 0 is NULL.
-    pub(crate) fn object(&self, reference: u32) -> Option<&Instance> {
-        (reference as usize).checked_sub(1).and_then(|i| self.objects.get(i))
+    /// An object by its position plus one.
+    pub(crate) fn object(&self, id: u32) -> Option<&Instance> {
+        (id as usize).checked_sub(1).and_then(|i| self.objects.get(i))
     }
 
     pub(crate) fn add_object(&mut self, object: Instance) -> Result<u32, String> {
@@ -62,6 +107,106 @@ impl Objects {
         }
         self.objects.push(object);
         Ok(self.objects.len() as u32)
+    }
+
+    /// An event's number, the same for the same words.
+    pub(crate) fn event(&mut self, text: String) -> u32 {
+        if let Some(&n) = self.event_index.get(&text) {
+            return n;
+        }
+        let n = self.events.len() as u32;
+        self.event_index.insert(text.clone(), n);
+        self.events.push(text);
+        n
+    }
+
+    pub(crate) fn told(&self, event: u32) -> &str {
+        self.events.get(event as usize).map_or("", String::as_str)
+    }
+
+    fn make(&mut self, object: u32, frame: u32, made: u32) -> Result<u32, String> {
+        if self.references.len() >= MAX_REFERENCES {
+            return Err(format!(
+                "the run unit made more than {MAX_REFERENCES} object references, which ironwork for COBOL keeps so that an expired one can say where it expired (see {REFERENCES_KEPT})"
+            ));
+        }
+        self.references.push(Reference { object, frame, made, freed: 0 });
+        Ok(self.references.len() as u32)
+    }
+
+    /// A local reference in the innermost frame.
+    pub(crate) fn local(&mut self, object: u32, made: u32) -> Result<u32, String> {
+        let frame = self.frames.last().map_or(0, |f| f.serial);
+        self.make(object, frame, made)
+    }
+
+    /// A local reference in the frame with this serial.
+    pub(crate) fn local_in(&mut self, frame: u32, object: u32, made: u32) -> Result<u32, String> {
+        self.make(object, frame, made)
+    }
+
+    pub(crate) fn global(&mut self, object: u32, made: u32) -> Result<u32, String> {
+        self.make(object, GLOBAL, made)
+    }
+
+    /// A new local frame, for a method's invocation or PushLocalFrame: its depth and serial.
+    pub(crate) fn push_frame(&mut self, pushed: bool) -> (usize, u32) {
+        self.serials = if self.serials >= GLOBAL - 1 { 1 } else { self.serials + 1 };
+        self.frames.push(LocalFrame { serial: self.serials, first: self.references.len() as u32, pushed });
+        (self.frames.len() - 1, self.serials)
+    }
+
+    /// Pops the frame at `depth` and every frame above it, freeing their local references.
+    pub(crate) fn pop_frames(&mut self, depth: usize, event: u32) {
+        let Some(first) = self.frames.get(depth).map(|f| f.first as usize) else { return };
+        let serials: Vec<u32> = self.frames.drain(depth..).map(|f| f.serial).collect();
+        for r in self.references.iter_mut().skip(first) {
+            if r.freed == 0 && serials.contains(&r.frame) {
+                r.freed = event + 1;
+            }
+        }
+    }
+
+    /// The depth of the innermost frame when PushLocalFrame pushed it.
+    pub(crate) fn pushed_frame(&self) -> Option<usize> {
+        self.frames.last().filter(|f| f.pushed).map(|_| self.frames.len() - 1)
+    }
+
+    pub(crate) fn referent(&self, value: u32) -> Referent {
+        if value == 0 {
+            return Referent::Null;
+        }
+        match self.references.get(value as usize - 1) {
+            None => Referent::Unknown,
+            Some(r) if r.freed == 0 => Referent::Object(r.object),
+            Some(r) => Referent::Expired(format!("{}; it {}", self.described(r), self.told(r.freed - 1))),
+        }
+    }
+
+    pub(crate) fn is_global(&self, value: u32) -> bool {
+        (value as usize).checked_sub(1).and_then(|i| self.references.get(i)).is_some_and(|r| r.frame == GLOBAL)
+    }
+
+    /// Frees a valid reference, as DeleteLocalRef or DeleteGlobalRef does.
+    pub(crate) fn free(&mut self, value: u32, event: u32) {
+        if let Some(r) = (value as usize).checked_sub(1).and_then(|i| self.references.get_mut(i)) {
+            r.freed = event + 1;
+        }
+    }
+
+    /// `a local reference to an Account object, made by ...`
+    fn described(&self, r: &Reference) -> String {
+        let kind = if r.frame == GLOBAL { "global" } else { "local" };
+        let object = match self.object(r.object) {
+            Some(o) if o.factory => format!("the factory object of {}", self.classes[o.class].external),
+            Some(o) => {
+                let class = &self.classes[o.class].external;
+                let article = if class.starts_with(['A', 'E', 'I', 'O', 'U', 'a', 'e', 'i', 'o', 'u']) { "an" } else { "a" };
+                format!("{article} {class} object")
+            }
+            None => "an object".into(),
+        };
+        format!("a {kind} reference to {object}, {}", self.told(r.made))
     }
 }
 
@@ -95,10 +240,82 @@ pub(crate) struct MethodCode {
 pub(crate) fn compile_class_definition(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error>> {
     let mut shell = program.clone();
     shell.oo = None;
-    let mut compiled = crate::compile(shell, flags)?;
+    let mut compiled = crate::compile_program(shell, flags, false)?;
     class_code(&program, flags)?;
     compiled.program = program;
     Ok(compiled)
+}
+
+/// A class definition, INVOKE or an object reference; the JNI reached through JNIENVPTR alone is
+/// not object-oriented syntax.
+fn object_oriented(program: &Program) -> bool {
+    let files = program.files.iter().flat_map(|f| f.records.iter());
+    let mut data = program.working_storage.iter().chain(&program.local_storage).chain(&program.linkage).chain(files);
+    let mut invoke = false;
+    for p in &program.paragraphs {
+        each(&p.statements, &mut |s| invoke |= matches!(s, Stmt::Invoke(_)));
+    }
+    program.oo.as_deref().is_some_and(|o| o.class().is_some()) || invoke || data.any(|e| e.usage == Some(Usage::ObjectReference))
+}
+
+/// IBM's rules for the options a program is compiled with (see [`OO_OPTIONS_REQUIRED`]): object-
+/// oriented syntax needs THREAD, DLL, RENT and DBCS, NORENT conflicts with THREAD and DLL, and under
+/// THREAD a program is RECURSIVE, not INITIAL, contains no program, and SORTs or MERGEs no file. A
+/// method answers only for its statements; its class answers for the options.
+pub(crate) fn option_rules(program: &Program, options: &Options, errors: &mut Vec<Error>) {
+    let oo = program.oo.as_deref();
+    let method = oo.and_then(Oo::method).is_some();
+    let who = match oo.and_then(Oo::class) {
+        Some(c) => format!("class {}", c.name),
+        None => format!("program {}", program.id),
+    };
+    if !method {
+        let forcing: Vec<&str> = [(options.thread, "THREAD"), (options.dll, "DLL")].into_iter().filter(|(on, _)| *on).map(|(_, o)| o).collect();
+        if !options.rent && !forcing.is_empty() {
+            errors.push(Error::at(Pos::default(), format!("NORENT conflicts with {}, which IBM compiles only as RENT (see {OO_OPTIONS_REQUIRED})", forcing.join(" and "))));
+        }
+        if object_oriented(program) {
+            let missing: Vec<&str> = [(options.thread, "THREAD"), (options.dll, "DLL"), (options.rent || !forcing.is_empty(), "RENT"), (options.dbcs, "DBCS")]
+                .into_iter()
+                .filter(|(on, _)| !*on)
+                .map(|(_, o)| o)
+                .collect();
+            if !missing.is_empty() {
+                errors.push(Error::at(
+                    Pos::default(),
+                    format!(
+                        "{who} uses object-oriented syntax, which IBM compiles only with THREAD, DLL, RENT and DBCS: {} missing from its CBL or PROCESS cards (see {OO_OPTIONS_REQUIRED} and {OO_OPTIONS_SEVERITY})",
+                        missing.join(", ")
+                    ),
+                ));
+            }
+        }
+    }
+    if !options.thread {
+        return;
+    }
+    if !method && oo.and_then(Oo::class).is_none() {
+        if !program.recursive {
+            errors.push(Error::at(Pos::default(), format!("{who} is compiled with THREAD, which requires RECURSIVE in its PROGRAM-ID paragraph")));
+        }
+        if program.initial {
+            errors.push(Error::at(Pos::default(), format!("{who} is INITIAL, which THREAD does not allow")));
+        }
+        if let Some(inner) = program.nested.first() {
+            errors.push(Error::at(Pos::default(), format!("{who} contains program {inner}, and THREAD does not allow nested programs")));
+        }
+    }
+    for p in &program.paragraphs {
+        each(&p.statements, &mut |s| {
+            if let Stmt::Sorting(so) = s
+                && let Sorting::Sort(st) = &**so
+                && (st.merge || program.files.iter().any(|f| f.name == st.subject.name))
+            {
+                let verb = if st.merge { "MERGE" } else { "SORT of a file" };
+                errors.push(Error::at(st.pos, format!("{verb} is not allowed in a program compiled with THREAD")));
+            }
+        });
+    }
 }
 
 pub(crate) fn refuse_to_run(program: &Program) -> Result<(), crate::Abend> {
@@ -137,6 +354,11 @@ pub(crate) fn class_code(program: &Program, flags: &[String]) -> Result<ClassCod
     let Some(oo) = program.oo.as_deref() else { return Err(vec![Error::at(Pos::default(), "not a class definition")]) };
     let Some(def) = oo.class() else { return Err(vec![Error::at(Pos::default(), "not a class definition")]) };
     let mut errors = Vec::new();
+    let mut options = Options::default();
+    for option in &program.options {
+        options.apply(option).ok();
+    }
+    option_rules(program, &options, &mut errors);
     let external = defined_class(program).unwrap_or_default();
     let parent = match oo.external(&def.inherits) {
         Some(e) => e.to_owned(),
@@ -160,7 +382,7 @@ pub(crate) fn class_code(program: &Program, flags: &[String]) -> Result<ClassCod
         let mut data = base.clone();
         data.working_storage = part.working_storage.clone();
         data.oo = Some(Box::new(Oo { repository: oo.repository.clone(), unit: OoUnit::Program }));
-        match crate::compile(data, flags) {
+        match crate::compile_program(data, flags, false) {
             Ok(c) => {
                 let offsets = c.layout.items.iter().filter(|i| i.parent.is_none()).take(records(&part.working_storage)).map(|i| i.offset).collect();
                 let compiled = Part { data: Rc::new(c), records: offsets };

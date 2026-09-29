@@ -302,9 +302,11 @@ impl Parser<'_> {
             self.translator_additions(&mut linkage, &mut using)?;
         }
         let exec_declarations = std::mem::take(&mut self.exec_declarations);
-        let mut nested = Vec::new();
+        let (mut nested, mut contained) = (Vec::new(), Vec::new());
         while self.at_division(&["IDENTIFICATION", "ID"]) {
+            let first = nested.len();
             self.program(options, &mut nested)?;
+            contained.extend(nested.get(first).map(|p: &Program| p.id.clone()));
         }
         oo::share_repository(&repository, &mut nested)?;
         for inner in &mut nested {
@@ -334,6 +336,7 @@ impl Parser<'_> {
             report_writer,
             oo: oo::program_oo(repository),
             environment,
+            nested: contained,
         });
         out.extend(nested);
         Ok(())
@@ -2112,6 +2115,15 @@ mod tests {
         assert_eq!(p.paragraphs.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["MAIN-LINE", "P2"]);
         let Stmt::If { otherwise, .. } = &p.paragraphs[1].statements[0] else { panic!() };
         assert!(matches!(otherwise[0], Stmt::If { .. }));
+    }
+
+    #[test]
+    fn a_program_names_the_programs_it_directly_contains() {
+        let program = |id: &str, inner: &str| format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. {id}.\n       PROCEDURE DIVISION.\n           GOBACK.\n{inner}       END PROGRAM {id}.\n");
+        let text = program("OUTER", &[program("A", &program("A1", "")), program("B", "")].concat());
+        let all = crate::parse_all_with(&text, &Default::default()).unwrap_or_else(|e| panic!("{e}"));
+        let contained: Vec<(&str, &[String])> = all.iter().map(|p| (p.id.as_str(), p.nested.as_slice())).collect();
+        assert_eq!(contained, [("OUTER", &["A".to_owned(), "B".to_owned()][..]), ("A", &["A1".to_owned()][..]), ("A1", &[][..]), ("B", &[][..])]);
     }
 
     #[test]

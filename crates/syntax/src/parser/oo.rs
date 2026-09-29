@@ -98,6 +98,7 @@ impl Parser<'_> {
             report_writer: Default::default(),
             oo: Some(Box::new(Oo { repository, unit: OoUnit::Class(Box::new(def)) })),
             environment: Environment::default(),
+            nested: Vec::new(),
         });
         Ok(())
     }

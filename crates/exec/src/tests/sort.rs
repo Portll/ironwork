@@ -413,7 +413,9 @@ fn object_references_are_no_sort_keys_and_an_sd_writes_no_report() {
         ]
         .concat()
     };
-    assert_eq!(compile_errors(&source("S-X", "GOBACK.")), "");
+    // Object references need THREAD, which refuses a file SORT, so the options are always wrong.
+    let baseline = compile_errors(&source("S-X", "GOBACK."));
+    assert!(!baseline.is_empty() && baseline.lines().all(|l| l.contains("object-oriented syntax")), "{baseline}");
     assert!(compile_errors(&source("S-O", "GOBACK.")).contains("S-O: a POINTER, INDEX, object reference or function-pointer item cannot be a sort key"));
     assert!(compile_errors(&source("S-X", "SORT E ON ASCENDING KEY E-O.")).contains("E-O: a POINTER, INDEX, object reference or function-pointer item cannot be a sort key"));
     assert!(compile_errors(&source("S-X", "RELEASE S-REC FROM A.")).contains("A is an object reference"));

@@ -30,6 +30,8 @@ pub struct Program {
     /// The REPOSITORY's classes, and for a class definition or a method what it is.
     pub oo: Option<Box<Oo>>,
     pub environment: Environment,
+    /// The PROGRAM-IDs of the programs it directly contains.
+    pub nested: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

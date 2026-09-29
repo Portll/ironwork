@@ -1,11 +1,13 @@
 //! INVOKE, SELF and SUPER, and the JNI environment, at run time. A COBOL class runs here: its
 //! factory data, each object's instance data and each method's WORKING-STORAGE are storage of the
-//! run unit that is never released. A Java class, or a JNI service that needs a JVM, ends the run
-//! with abend JAVA naming what was reached.
+//! run unit that is never released. An object reference holds a local or global reference, as the
+//! JNI hands them out; a method's local references are freed when it returns. A Java class, or a
+//! JNI service that needs a JVM, ends the run with abend JAVA naming what was reached.
 
 use super::*;
-use crate::oo::{self as classes, Instance, JAVA_LANG_OBJECT, LoadedClass, MAX_MEMORY, Part};
+use crate::oo::{self as classes, Instance, JAVA_LANG_OBJECT, LoadedClass, MAX_MEMORY, Part, Referent};
 use crate::unit::Loaded;
+use numeric::assumptions::{EXPIRED_REFERENCE_ABENDS, LOCAL_FRAMES};
 use std::rc::Rc;
 
 /// The method an activation runs.
@@ -19,13 +21,18 @@ pub(super) struct Running {
     /// The run-unit class that defines the method.
     pub class: usize,
     pub factory: bool,
-    /// SELF: the object, or the class's factory object.
+    /// The object SELF refers to, or the class's factory object.
     pub this: u32,
-    /// Where SELF's four bytes are.
+    /// Where SELF's four bytes are: zero until the method first reads SELF, then a local reference
+    /// of the method's frame.
     pub cell: usize,
+    /// The serial of the method's local frame.
+    pub frame: u32,
+    /// The event that tells which method this is and where it was invoked.
+    pub invoked: u32,
 }
 
-/// What an INVOKE is sent to.
+/// What an INVOKE is sent to: a class, or an object by its position plus one.
 enum Receiver {
     Class(usize),
     Object(u32),
@@ -39,6 +46,13 @@ enum Found {
     ObjectEquals,
     Java(String),
     Missing,
+}
+
+/// An INVOKE argument: the bytes of a Java primitive, or the object an object reference identifies,
+/// which the method receives as a new local reference.
+enum Argument {
+    Bytes(Vec<u8>),
+    Object(Option<u32>),
 }
 
 /// A JNI function-table slot's value: this plus the slot, above any storage address.
@@ -66,6 +80,15 @@ fn java(what: String, class: &str, pos: Pos) -> Abend {
     }
 }
 
+/// An object reference's Java type, as a JNI signature spells it.
+fn is_reference(java: &str) -> bool {
+    java.starts_with('L') || java.starts_with('[')
+}
+
+fn int(n: i128) -> Val {
+    Val::Num(Fixed::new(n, Places::new(9, 0)))
+}
+
 impl<'p> Machine<'p, '_, '_> {
     /// SELF in a method, and JNIENVPTR; None for anything else.
     pub(super) fn oo_register(&mut self, r: &Ref) -> R<Option<Loc>> {
@@ -74,10 +97,64 @@ impl<'p> Machine<'p, '_, '_> {
         }
         if r.name == "SELF" {
             let Some(m) = self.oo.method else { return Err(Abend::ironwork("SELF outside a method", r.pos)) };
+            if self.unit.mem[m.cell..m.cell + 4] == [0; 4] {
+                let made = self.unit.oo.event(format!("SELF of {}", self.unit.oo.told(m.invoked)));
+                let reference = self.unit.oo.local_in(m.frame, m.this, made).map_err(|e| Abend::ironwork(e, r.pos))?;
+                self.unit.mem[m.cell..m.cell + 4].copy_from_slice(&reference.to_be_bytes());
+            }
             return Ok(Some(Loc { offset: m.cell, len: 4, kind: Kind::ObjectReference, item: usize::MAX }));
         }
         let cell = self.jni_environment(r.pos)?;
         Ok(Some(Loc { offset: cell, len: 4, kind: Kind::Pointer, item: usize::MAX }))
+    }
+
+    /// `line 12 of CLIENT`, or `line 30 of Account.credit` in a method.
+    fn site(&self, pos: Pos) -> String {
+        match self.oo.method {
+            Some(m) => format!("line {} of {}.{}", pos.line, self.unit.oo.classes[m.class].external, self.program.id),
+            None => format!("line {} of {}", pos.line, self.program.id),
+        }
+    }
+
+    /// The object an object reference's value identifies, None for NULL. A reference that was
+    /// freed, or four bytes no reference was given, end the run (see [`EXPIRED_REFERENCE_ABENDS`]).
+    fn referent(&self, value: u32, what: &str, holder: &str, pos: Pos) -> R<Option<u32>> {
+        match self.unit.oo.referent(value) {
+            Referent::Null => Ok(None),
+            Referent::Object(o) => Ok(Some(o)),
+            Referent::Expired(told) => Err(Abend::ironwork(format!("{what}: {holder} holds {told}, and IBM leaves using it unpredictable (see {EXPIRED_REFERENCE_ABENDS})"), pos)),
+            Referent::Unknown => Err(Abend::ironwork(format!("{what}: {holder} holds X'{value:08X}', which is not an object reference"), pos)),
+        }
+    }
+
+    /// A new local reference in the innermost frame.
+    fn local_reference(&mut self, object: u32, made: String, pos: Pos) -> R<u32> {
+        let made = self.unit.oo.event(made);
+        self.unit.oo.local(object, made).map_err(|m| Abend::ironwork(m, pos))
+    }
+
+    /// The object SELF refers to, as the method's SELF reference says once it has been read.
+    fn self_object(&self, m: Running, what: &str, pos: Pos) -> R<u32> {
+        let value = u32::from_be_bytes(self.unit.mem[m.cell..m.cell + 4].try_into().unwrap_or_default());
+        Ok(self.referent(value, what, "SELF", pos)?.unwrap_or(m.this))
+    }
+
+    /// Two object references compare equal when they identify the same object (Language Reference
+    /// SC27-8713-03, p. 282), so each is looked up; one compared with the figurative constant NULL
+    /// is only tested for NULL.
+    pub(super) fn compare_references(&self, a: &Expr, b: &Expr, x: (&Val, Option<Loc>), y: (&Val, Option<Loc>), pos: Pos) -> R<Option<Ordering>> {
+        let reference = |l: Option<Loc>| l.is_some_and(|l| l.kind == Kind::ObjectReference);
+        let (Val::Address(p), Val::Address(q)) = (x.0, y.0) else { return Ok(None) };
+        if !reference(x.1) && !reference(y.1) {
+            return Ok(None);
+        }
+        let name = |e: &Expr| match e {
+            Expr::Operand(Operand::Ref(r)) => r.name.clone(),
+            _ => String::new(),
+        };
+        let what = format!("{} = {}", name(a), name(b));
+        let same = self.referent(*p, &what, &name(a), pos)? == self.referent(*q, &what, &name(b), pos)?;
+        Ok(Some(if same { Ordering::Equal } else { Ordering::Less }))
     }
 
     fn room(&self, size: usize, pos: Pos) -> R<()> {
@@ -178,27 +255,21 @@ impl<'p> Machine<'p, '_, '_> {
         out
     }
 
-    fn object(&self, reference: u32, what: &str, pos: Pos) -> R<(usize, bool)> {
-        if reference == 0 {
-            return Err(Abend::ironwork(format!("INVOKE {what}: the object reference is NULL"), pos));
-        }
-        self.unit
-            .oo
-            .object(reference)
-            .map(|o| (o.class, o.factory))
-            .ok_or_else(|| Abend::ironwork(format!("INVOKE {what}: X'{reference:08X}' is not a reference to an object"), pos))
+    fn object(&self, id: u32, what: &str, pos: Pos) -> R<(usize, bool)> {
+        self.unit.oo.object(id).map(|o| (o.class, o.factory)).ok_or_else(|| Abend::ironwork(format!("{what}: no object {id}"), pos))
     }
 
-    fn receiver(&mut self, i: &Invoke) -> R<Receiver> {
+    fn receiver(&mut self, i: &Invoke, what: &str) -> R<Receiver> {
         let t = &i.target;
         let plain = t.qualifiers.is_empty() && t.subscripts.is_empty() && t.refmod.is_none();
         if plain && matches!(t.name.as_str(), "SELF" | "SUPER") && self.layout.resolve(&t.name, &[], t.pos).is_err() {
             let Some(m) = self.oo.method else { return Err(Abend::ironwork(format!("INVOKE {} outside a method", t.name), i.pos)) };
+            let this = self.self_object(m, what, i.pos)?;
             if t.name == "SELF" {
-                return Ok(Receiver::Object(m.this));
+                return Ok(Receiver::Object(this));
             }
             let start = self.unit.oo.classes[m.class].parent.ok_or_else(|| Abend::ironwork("INVOKE SUPER: the class has no parent", i.pos))?;
-            return Ok(Receiver::Super { this: m.this, start, factory: m.factory });
+            return Ok(Receiver::Super { this, start, factory: m.factory });
         }
         let program = self.program;
         if plain
@@ -208,9 +279,13 @@ impl<'p> Machine<'p, '_, '_> {
             return Ok(Receiver::Class(self.load_class(external, i.pos)?));
         }
         let loc = self.locate(t)?;
-        match <[u8; 4]>::try_from(self.bytes(loc)) {
-            Ok(bytes) if loc.kind == Kind::ObjectReference => Ok(Receiver::Object(u32::from_be_bytes(bytes))),
-            _ => Err(Abend::ironwork(format!("INVOKE {}: not an object reference", t.name), i.pos)),
+        let value = match <[u8; 4]>::try_from(self.bytes(loc)) {
+            Ok(bytes) if loc.kind == Kind::ObjectReference => u32::from_be_bytes(bytes),
+            _ => return Err(Abend::ironwork(format!("INVOKE {}: not an object reference", t.name), i.pos)),
+        };
+        match self.referent(value, what, &t.name, i.pos)? {
+            Some(object) => Ok(Receiver::Object(object)),
+            None => Err(Abend::ironwork(format!("{what}: the object reference {} is NULL", t.name), i.pos)),
         }
     }
 
@@ -301,16 +376,25 @@ impl<'p> Machine<'p, '_, '_> {
 
     pub(super) fn invoke(&mut self, i: &'p Invoke) -> R<Flow> {
         let pos = i.pos;
-        let receiver = self.receiver(i)?;
         let name = self.method_name(&i.method, pos)?;
         let what = format!("INVOKE {} \"{name}\"", i.target.name);
+        let receiver = self.receiver(i, &what)?;
         let (program, layout) = (self.program, self.layout);
         let oo = program.oo.as_deref();
         let mut params = Vec::new();
         let mut arguments = Vec::new();
-        for op in &i.using {
+        for (n, op) in i.using.iter().enumerate() {
             let java = classes::operand_type(layout, oo, op).map_err(|m| Abend::ironwork(m, pos))?;
-            arguments.push(self.argument(op, &java, pos)?);
+            let bytes = self.argument(op, &java, pos)?;
+            arguments.push(if is_reference(&java) {
+                let holder = match op {
+                    Operand::Ref(r) => r.name.clone(),
+                    _ => format!("argument {}", n + 1),
+                };
+                Argument::Object(self.referent(u32::from_be_bytes(bytes.as_slice().try_into().unwrap_or_default()), &what, &holder, pos)?)
+            } else {
+                Argument::Bytes(bytes)
+            });
             params.push(java);
         }
         if i.method == InvokeMethod::New {
@@ -326,9 +410,9 @@ impl<'p> Machine<'p, '_, '_> {
         };
         let (this, start, factory) = match receiver {
             Receiver::Class(c) => (self.unit.oo.classes[c].factory_object, c, true),
-            Receiver::Object(reference) => {
-                let (class, factory) = self.object(reference, &i.target.name, pos)?;
-                (reference, class, factory)
+            Receiver::Object(object) => {
+                let (class, factory) = self.object(object, &what, pos)?;
+                (object, class, factory)
             }
             Receiver::Super { this, start, factory } => (this, start, factory),
         };
@@ -336,8 +420,7 @@ impl<'p> Machine<'p, '_, '_> {
             Found::Missing => self.no_method(i, what),
             Found::Java(class) => Err(java(what, &class, pos)),
             Found::ObjectEquals => {
-                let other = u32::from_be_bytes(arguments[0].as_slice().try_into().unwrap_or_default());
-                let same = other != 0 && self.unit.oo.object(other).is_some() && other == this;
+                let same = matches!(arguments.first(), Some(Argument::Object(Some(other))) if *other == this);
                 if let Some(r) = &i.returning {
                     let dest = self.locate(r)?;
                     self.assign(dest, Val::Bytes(vec![u8::from(same)]), None, pos)?;
@@ -346,7 +429,7 @@ impl<'p> Machine<'p, '_, '_> {
             }
             Found::Cobol { class, method } => {
                 self.nest(pos)?;
-                let flow = self.run_method(i, class, method, this, arguments);
+                let flow = self.run_method(i, class, method, this, arguments, &what);
                 self.unit.depth -= 1;
                 flow
             }
@@ -373,7 +456,9 @@ impl<'p> Machine<'p, '_, '_> {
                 parts.push((c, self.part_storage(part, pos)?));
             }
         }
-        let reference = self.unit.oo.add_object(Instance { class, factory: false, parts }).map_err(|m| Abend::ironwork(m, pos))?;
+        let object = self.unit.oo.add_object(Instance { class, factory: false, parts }).map_err(|m| Abend::ironwork(m, pos))?;
+        let made = format!("made by INVOKE {} NEW at {}", self.unit.oo.classes[class].external, self.site(pos));
+        let reference = self.local_reference(object, made, pos)?;
         if let Some(r) = &i.returning {
             let dest = self.locate(r)?;
             self.assign(dest, Val::Address(reference), None, pos)?;
@@ -382,8 +467,11 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     /// Runs a COBOL method as a called program runs, with the data of its paragraph as the records
-    /// after its own LINKAGE, its arguments BY VALUE and SELF.
-    fn run_method(&mut self, i: &'p Invoke, class: usize, k: usize, this: u32, arguments: Vec<Vec<u8>>) -> R<Flow> {
+    /// after its own LINKAGE, its arguments BY VALUE and SELF, in a local frame of its own: the
+    /// object references it receives are new local references there, and every local reference
+    /// made there is freed when it returns. A returned object reference reaches the invoker as a
+    /// new local reference of the invoker's frame.
+    fn run_method(&mut self, i: &'p Invoke, class: usize, k: usize, this: u32, arguments: Vec<Argument>, what: &str) -> R<Flow> {
         let pos = i.pos;
         let code = self.unit.oo.classes[class].code.clone().ok_or_else(|| Abend::ironwork("not a COBOL class", pos))?;
         let method = &code.methods[k];
@@ -405,8 +493,22 @@ impl<'p> Machine<'p, '_, '_> {
         let base = data.map(|d| self.unit.programs[d].base);
         let return_code = [self.unit.mem[RETURN_CODE], self.unit.mem[RETURN_CODE + 1]];
         let mark = self.unit.mem.len();
-        let addresses: Vec<Option<usize>> = arguments.iter().map(|b| Some(self.unit.push_temporary(b))).collect();
-        let cell = self.unit.push_temporary(&this.to_be_bytes());
+        let invoked_text = format!("method \"{}\" of {}, invoked at {}", method.name, self.unit.oo.classes[class].external, self.site(pos));
+        let invoked = self.unit.oo.event(invoked_text.clone());
+        let (depth, frame) = self.unit.oo.push_frame(false);
+        let mut addresses = Vec::new();
+        for (n, argument) in arguments.into_iter().enumerate() {
+            let bytes = match argument {
+                Argument::Bytes(b) => b,
+                Argument::Object(None) => vec![0; 4],
+                Argument::Object(Some(object)) => {
+                    let made = self.unit.oo.event(format!("received as argument {} by {invoked_text}", n + 1));
+                    self.unit.oo.local_in(frame, object, made).map_err(|m| Abend::ironwork(m, pos))?.to_be_bytes().to_vec()
+                }
+            };
+            addresses.push(Some(self.unit.push_temporary(&bytes)));
+        }
+        let cell = self.unit.push_temporary(&[0; 4]);
         let compiled = method.code.clone();
         let outcome = {
             let mut callee = Machine::activation(&compiled, storage, &mut *self.unit, false)?;
@@ -419,7 +521,7 @@ impl<'p> Machine<'p, '_, '_> {
             }
             callee.bind(&addresses);
             callee.bind_returning();
-            callee.oo = Frame { method: Some(Running { class, factory: method.factory, this, cell }) };
+            callee.oo = Frame { method: Some(Running { class, factory: method.factory, this, cell, frame, invoked }) };
             let ending = callee.run_procedure();
             let returned = match (&compiled.program.returning, &ending) {
                 (Some(item), Ok(_)) => Some(callee.returned(item, pos)?),
@@ -429,9 +531,23 @@ impl<'p> Machine<'p, '_, '_> {
         };
         self.unit.programs[storage].active = false;
         self.unit.release_temporaries(mark);
-        let (ending, returned) = outcome;
+        let (ending, mut returned) = outcome;
         if ending? == Ending::StopRun {
             return Ok(Flow::End(Ending::StopRun));
+        }
+        let mut returned_object = None;
+        if let (Some(Val::Address(value)), Some(item)) = (&returned, compiled.program.returning.as_ref().filter(|_| method.returns.as_deref().is_some_and(is_reference))) {
+            let holder = format!("{item}, the RETURNING item of method \"{}\",", method.name);
+            returned_object = Some(self.referent(*value, what, &holder, pos)?);
+        }
+        let expired = self.unit.oo.event(format!("expired when {invoked_text}, returned"));
+        self.unit.oo.pop_frames(depth, expired);
+        if let Some(object) = returned_object {
+            let value = match object {
+                None => 0,
+                Some(o) => self.local_reference(o, format!("returned by {invoked_text}"), pos)?,
+            };
+            returned = Some(Val::Address(value));
         }
         self.unit.mem[RETURN_CODE..RETURN_CODE + 2].copy_from_slice(&return_code);
         if let (Some(target), Some(val)) = (&i.returning, returned) {
@@ -442,7 +558,8 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     /// CALL through a FUNCTION-POINTER or PROCEDURE-POINTER: a JNI service from the function
-    /// table, run here when it needs no JVM. None when the CALL names a program.
+    /// table, run here when it needs no JVM. None when the CALL names a program. The reference
+    /// services keep the JNI's rules for local and global references (see [`LOCAL_FRAMES`]).
     pub(super) fn call_through_pointer(&mut self, c: &'p Call) -> R<Option<Flow>> {
         let Operand::Ref(r) = &c.target else { return Ok(None) };
         let Ok(Resolved::Item(item)) = self.resolve(r) else { return Ok(None) };
@@ -465,18 +582,77 @@ impl<'p> Machine<'p, '_, '_> {
                 None => Val::Address(0),
             });
         }
-        let reference = |n: usize| match args.get(n) {
+        let what = format!("CALL {service}");
+        let holder = |n: usize| match c.using.get(n).and_then(|a| a.value.as_ref()) {
+            Some(Operand::Ref(r)) => r.name.clone(),
+            _ => format!("argument {n}"),
+        };
+        let value = |n: usize| match args.get(n) {
             Some(Val::Address(a)) => Ok(*a),
             Some(Val::Fig(Figurative::Null)) => Ok(0),
             _ => Err(Abend::ironwork(format!("CALL {service}: argument {n} is not an object reference"), pos)),
         };
+        let here = self.site(pos);
         let result = match service {
-            "NewGlobalRef" | "NewLocalRef" | "PopLocalFrame" => Some(Val::Address(reference(1)?)),
-            "DeleteGlobalRef" | "DeleteLocalRef" | "ExceptionClear" => None,
-            "IsSameObject" => Some(Val::Bytes(vec![u8::from(reference(1)? == reference(2)?)])),
+            "NewGlobalRef" | "NewLocalRef" => {
+                let object = self.referent(value(1)?, &what, &holder(1), pos)?;
+                let reference = match object {
+                    None => 0,
+                    Some(o) => {
+                        let made = self.unit.oo.event(format!("made by {service} at {here}"));
+                        let made = if service == "NewGlobalRef" { self.unit.oo.global(o, made) } else { self.unit.oo.local(o, made) };
+                        made.map_err(|m| Abend::ironwork(m, pos))?
+                    }
+                };
+                Some(Val::Address(reference))
+            }
+            "DeleteGlobalRef" | "DeleteLocalRef" => {
+                let reference = value(1)?;
+                if self.referent(reference, &what, &holder(1), pos)?.is_some() {
+                    let global = service == "DeleteGlobalRef";
+                    if self.unit.oo.is_global(reference) != global {
+                        let kind = if global { "local" } else { "global" };
+                        return Err(Abend::ironwork(format!("{what}: {} holds a {kind} reference, which {service} does not delete (see {LOCAL_FRAMES})", holder(1)), pos));
+                    }
+                    let event = self.unit.oo.event(format!("was deleted by {service} at {here}"));
+                    self.unit.oo.free(reference, event);
+                }
+                None
+            }
+            "IsSameObject" => {
+                let same = self.referent(value(1)?, &what, &holder(1), pos)? == self.referent(value(2)?, &what, &holder(2), pos)?;
+                Some(Val::Bytes(vec![u8::from(same)]))
+            }
+            "GetObjectRefType" => {
+                let reference = value(1)?;
+                let kind = match self.referent(reference, &what, &holder(1), pos)? {
+                    None => 0,
+                    Some(_) if self.unit.oo.is_global(reference) => 2,
+                    Some(_) => 1,
+                };
+                Some(int(kind))
+            }
+            "PushLocalFrame" => {
+                self.unit.oo.push_frame(true);
+                Some(int(0))
+            }
+            "PopLocalFrame" => {
+                let Some(depth) = self.unit.oo.pushed_frame() else {
+                    return Err(Abend::ironwork(format!("{what}: no frame PushLocalFrame pushed is open here (see {LOCAL_FRAMES})"), pos));
+                };
+                let object = self.referent(value(1)?, &what, &holder(1), pos)?;
+                let expired = self.unit.oo.event(format!("expired when PopLocalFrame at {here} freed its frame"));
+                self.unit.oo.pop_frames(depth, expired);
+                let reference = match object {
+                    None => 0,
+                    Some(o) => self.local_reference(o, format!("returned by PopLocalFrame at {here}"), pos)?,
+                };
+                Some(Val::Address(reference))
+            }
+            "EnsureLocalCapacity" => Some(int(0)),
             "ExceptionOccurred" => Some(Val::Address(0)),
             "ExceptionCheck" => Some(Val::Bytes(vec![0])),
-            "EnsureLocalCapacity" | "PushLocalFrame" => Some(Val::Num(Fixed::new(0, Places::new(9, 0)))),
+            "ExceptionClear" => None,
             _ => {
                 return Err(Abend {
                     code: "JAVA".into(),

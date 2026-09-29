@@ -140,11 +140,18 @@ The subset the interpreter runs today:
   written in COBOL run in the run unit: NEW gives an object its instance data from the VALUE
   clauses, factory data is one copy per class, a method's WORKING-STORAGE persists between
   invocations, and INVOKE finds a method by its name and Java signature up the INHERITS chain, as
-  the JNI does. A class is found as a CALLed program is, among the programs read and in the program
-  libraries (Account.cbl for Account or com.acme.Account). Java classes are checked, not run:
-  reaching one ends the run with abend JAVA naming the class and method, while java.lang.Object's
-  NEW and equals, and the JNI's reference services such as NewGlobalRef and IsSameObject, run
-  without a JVM. The run-time choices are assumptions J1 to J14.
+  the JNI does. Object references are the JNI's local and global references: those a method
+  receives, gets back, makes with NEW or holds as SELF are freed when it returns, unless
+  NewGlobalRef makes a global one; DeleteLocalRef, DeleteGlobalRef, PushLocalFrame and
+  PopLocalFrame free them as the JNI does; and using a freed one ends the run with an abend that
+  says where it was made and where it was freed. A class is found as a CALLed program is, among the
+  programs read and in the program libraries (Account.cbl for Account or com.acme.Account). Java
+  classes are checked, not run: reaching one ends the run with abend JAVA naming the class and
+  method, while java.lang.Object's NEW and equals, and the JNI's reference services, run without a
+  JVM. As IBM requires, a class definition, or a program with INVOKE or object references, carries
+  THREAD and DLL on a CBL or PROCESS card (RENT and DBCS are the defaults), and a program compiled
+  with THREAD is RECURSIVE and has no INITIAL, nested program, or SORT or MERGE of a file; otherwise
+  it is refused. The choices are assumptions J1 to J20.
 
 - **EXEC SQL and EXEC CICS** are read and checked: every SQL host variable and every CICS argument
   that names data must resolve; EXEC SQL INCLUDE works as COPY; a program with EXEC CICS gets
