@@ -2,13 +2,24 @@
 
 A specification for compiling COBOL ahead of time, and for the runtime that compiled programs link.
 
-**Status:** draft, 2026-09-29, for the operator's review. Nothing here is built. It builds on the
-operator's rulings of the same day:
+**Status:** draft, updated 2026-09-30, for the operator's review. Step 0 is measured; nothing else is
+built. It builds on the operator's rulings of 2026-09-29:
 
 - **The runtime licence.** The runtime is AGPL-3.0-or-later with a runtime exception, so a program
-  compiled by ironwork is not bound by the AGPL.
-- **SQL comes first.** SQL ([sql-runtime.md](sql-runtime.md)) is built before any of this.
+  compiled by ironwork is not bound by the AGPL. The exception is published as
+  [RUNTIME-EXCEPTION.md](../RUNTIME-EXCEPTION.md), version 1.0.
+- **SQL comes first.** SQL ([sql-runtime.md](sql-runtime.md)) is built before any of this. Steps 1 to 7
+  have landed.
 - **The interpreter stays.** It remains an option beside the VM, and is not retired.
+
+The detail lives in four companion documents:
+
+| Document | Covers |
+|---|---|
+| [benchmarks.md](benchmarks.md) | Step 0: the four benchmark programs and the walker and `cobc -O2` baselines |
+| [semantics-library.md](semantics-library.md) | Step 1: every `Machine` method classified, the AST leaks, the `rt` layout, the boundary test and the extraction order |
+| [lir.md](lir.md) | Step 2: the LIR types, the lowering of every statement, PERFORM exits (V1, V2) and the debug table |
+| [load-module.md](load-module.md) | Step 4: the `.iwm` format, its encoding, reproducibility, and loading and CALL |
 
 ---
 
@@ -38,12 +49,16 @@ operator's rulings of the same day:
 | Target code | A load module, or Rust source emitted from LIR together with the object code built from it |
 | Semantics library | The functions both executors call: storage access, MOVE, compare, editing, arithmetic stores, abends, and the file, CICS, BMS and SQL services. Today these are methods on `Machine` |
 | Executor | What walks a program: the interpreter (`Machine` over the AST, kept as `--interpret`) or the VM (over LIR) |
+| Place | The LIR's static description of a data reference: base, constant offset, subscript and reference-modification expressions, ODO, and SSRANGE checks |
+| Loc | A Place evaluated at run time: a concrete offset, length and kind. The semantics library takes `Loc`s, never Places or AST types |
 
 ## 3. Constraints the tree sets
 
-- **No third-party dependencies.** Every crate depends only on path crates, and the only exception
-  is `libfuzzer-sys` in the separate fuzz workspace. This rules out Cranelift and LLVM, unless the
-  operator relaxes the rule on purpose (D3).
+- **No third-party dependencies.** Every crate in the workspace depends only on path crates. The
+  exceptions sit in separate workspaces with their own lockfiles: `libfuzzer-sys` in `fuzz/`, and
+  rustls in `tls/`, the optional TLS build of the PostgreSQL backend. The runtime crates stay
+  dependency-free. This rules out Cranelift and LLVM, unless the operator relaxes the rule on
+  purpose (D3).
 - **No `unsafe`.** `[workspace.lints.rust] unsafe_code = "forbid"`. This rules out emitting C that
   calls a Rust runtime, because the FFI boundary needs `unsafe`. Any generated Rust inherits the
   rule.
@@ -119,8 +134,9 @@ Lowering consumes `Compiled` after `Check` has passed, and produces per program:
   `Machine::arithmetic` now works out on every execution.
 - **Control flow** as basic blocks per paragraph, with explicit `PerformEnter(range, loop)` and an
   exit check at the end of every paragraph that can close an active range. How an overlapping range
-  or a GO TO out of a range resolves is a new assumption, C28, recorded with basis `Chosen` until
-  the oracle settles it.
+  or a GO TO out of a range resolves is a new assumption, V1, and how a SORT input or output
+  procedure exits is V2. Both are in a new V series for lowering and the VM, recorded with basis
+  `Chosen` until the oracle settles them. The walker's current behaviour is the baseline.
 - **Service calls**, named and typed: file verbs with their FD, ACCEPT and DISPLAY, CALL and CANCEL,
   EXEC CICS commands as `Machine::cics` dispatches them, and EXEC SQL statements as
   `sql-runtime.md` types them.
@@ -153,7 +169,9 @@ Lowering consumes `Compiled` after `Check` has passed, and produces per program:
 - **Plugins.** ironwork has no plugin or IR-export interface. If one is added, the eligibility
   condition must stop target code produced through a non-free pass from qualifying, which is the
   hole GCC's condition closes.
-- **Wording.** The text itself needs a practitioner, and this specification does not draft it.
+- **Wording.** Published as [RUNTIME-EXCEPTION.md](../RUNTIME-EXCEPTION.md), version 1.0, with a
+  copy and SPDX naming in each crate. Its "Compiled Program" includes intermediate code, so a load
+  module qualifies.
 
 ## 10. Invariants
 
@@ -186,10 +204,10 @@ Lowering consumes `Compiled` after `Check` has passed, and produces per program:
 - **Given** the front-end fuzz target extended to run what it compiles with a step limit **when** a
   program runs in both modes **then** the modes agree, or both stop at the step limit.
 
-### B3: PERFORM exits (C28)
+### B3: PERFORM exits (V1)
 
 - **Given** `PERFORM A THRU C` where B does `GO TO D` **when** it runs **then** the result is what
-  C28 records. The walker's current result is recorded beside it, and any difference is reported as
+  V1 records. The walker's current result is recorded beside it, and any difference is reported as
   a change of semantics, not hidden.
 - **Given** two overlapping ranges **then** the same applies.
 
@@ -222,8 +240,7 @@ Lowering consumes `Compiled` after `Check` has passed, and produces per program:
 - **A debugger interface.** The debug table makes one possible later.
 
 SORT and MERGE, Language Environment callable services, Report Writer and object-oriented COBOL are
-being built in the interpreter now (plan `ironwork-sort-le-report-oo`). The LIR has to lower each of
-them, and step 2 lists them.
+integrated in the interpreter and landing on main. The LIR lowers each of them ([lir.md](lir.md)).
 
 ## 13. Decisions for the operator
 
@@ -232,21 +249,45 @@ them, and step 2 lists them.
 - **D2.** Accept a Rust toolchain as a build-time requirement for native output.
 - **D3.** Keep the no-dependencies rule, which excludes Cranelift and LLVM.
 - **D4.** Keep the BMS parser in the compiler, with map models in the runtime.
-- **D5.** Have a practitioner draft the exception text and its eligibility condition.
+- **D5.** Have a practitioner review the published exception text and its eligibility condition.
+
+The companion documents carry their own open questions for the operator, listed in §15.
 
 ## 14. Execution plan
 
 | Step | Work | Done when |
 |---|---|---|
-| 0 | **Measure.** Write four benchmark programs: sequential file read and write, packed arithmetic, table search, and CALL-heavy code. Time the walker and `cobc -O2` on them. | Numbers recorded in this file; B6 targets confirmed or revised |
+| 0 | **Measure.** Write four benchmark programs: sequential file read and write, packed arithmetic, table search, and CALL-heavy code. Time the walker and `cobc -O2` on them. | Done: [benchmarks.md](benchmarks.md). The walker takes 1.6 to 234 times `cobc -O2`; B6 holds, with the VM target to be stated per program class |
 | 1 | **Extract the semantics library and split `rt`** out of `exec`, with no change of behaviour. This waits for M8, the SORT, LE, Report Writer and OO integration, and SQL (whose runtime is written as a library service from the start). Add the boundary test. | All tests pass; the boundary test passes |
-| 2 | **Build the LIR and the lowering** from `Compiled`, covering everything the interpreter runs by then, including SORT and MERGE, LE services, Report Writer, OO COBOL and EXEC SQL. Add assumption C28. | Every test program lowers |
+| 2 | **Build the LIR and the lowering** from `Compiled`, covering everything the interpreter runs by then, including SORT and MERGE, LE services, Report Writer, OO COBOL and EXEC SQL. Add assumptions V1 and V2. | Every test program lowers |
 | 3 | **Build the VM** in `rt` on the semantics library. Run the interpreter and the VM on every test and oracle case as a permanent CI job. Extend the fuzz target. | B2 passes |
 | 4 | **Add the load module**, `ironwork compile`, and module loading in `RunUnit`. | B1 and B4 pass |
 | 5 | **Make the VM the default.** `ironwork run file.cbl` compiles in memory and runs the VM; `--interpret` keeps the interpreter. | Tests pass in both executors |
 | 6 | **Emit Rust**, only if step 3's measurements miss B6. | B5, and B6 native |
-| 7 | **Publish the exception.** A practitioner drafts it; add `RUNTIME-EXCEPTION`, SPDX headers, and README and NOTICE. | Text reviewed by a practitioner |
+| 7 | **Publish the exception.** `RUNTIME-EXCEPTION.md`, SPDX headers, and README and NOTICE are on main (6a6da25). | Text reviewed by a practitioner (D5) |
 
-**Verification.** Every step keeps today's tests and oracle cases passing. C28, and any assumption
-lowering forces, is recorded in `numeric::assumptions::ASSUMPTIONS` with its basis, and settled only
-by an Enterprise COBOL run, as the numeric model's are.
+**Verification.** Every step keeps today's tests and oracle cases passing. V1, V2, and any assumption
+lowering forces, are recorded in `numeric::assumptions::ASSUMPTIONS` with their basis, and settled
+only by an Enterprise COBOL run, as the numeric model's are.
+
+## 15. Open questions from the companion documents
+
+Each is argued in the document named, and none blocks step 1.
+
+| # | Doc | Question |
+|---|---|---|
+| Q1 | [lir](lir.md) | Which oracle settles V1 (PERFORM-range exits), and must it be settled before step 5 makes the VM the default? |
+| Q2 | lir | Does the VM keep Rust recursion for CALL, INVOKE, SORT procedures and USE BEFORE REPORTING, or keep its own stack? |
+| Q3 | lir | Are the walker's five known divergences from IBM fixed in step 2, or only once an oracle confirms them? |
+| Q4 | lir | Does an abend carry its program, so that its file name is right in a multi-program run? |
+| Q5 | lir | Are MOVE CORRESPONDING, PERFORM VARYING … AFTER and GO TO … DEPENDING ON, which the parser refuses today, added in step 2 or later? |
+| Q6 | [sem](semantics-library.md) | Does `syntax` depend on `rt` for the shared vocabulary (recommended), or convert at lowering? |
+| Q7 | sem | Does the runtime exception cover `tn3270.rs`, the TN3270 server? |
+| Q8 | [lm](load-module.md) | Is a reader kept for the previous major version of the format? |
+| Q9 | lm | Is a checksum enough, or do modules carry a keyed signature? |
+| Q10 | lm | Are modules without a debug table (`--strip-debug`) allowed? |
+| Q11 | lm | Does a stale `NAME.iwm` shadow newer source in the same library? |
+| Q12 | lm | Is an unresolved NODYNAM CALL a compile error, and do LE services bind statically? |
+| Q13 | lm | Does ironwork adopt IBM's program scope (non-COMMON nested programs hidden, duplicate ids an error), and how far does COMMON reach? |
+| Q14 | lm | Does Enterprise COBOL agree with the chosen CANCEL of static and nested callees? |
+| Q15 | lm | Is a bare file name in abend lines acceptable, given that modules record no absolute paths? |

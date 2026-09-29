@@ -113,7 +113,9 @@ It is zero-dependency Rust.
 **In flight**
 - **Four branches:** SORT/MERGE, LE callable services, Report Writer and OO COBOL, integrated and
   landing (cobolwork-c2).
-- **Specs:** [codegen-runtime.md](codegen-runtime.md), a draft.
+- **Specs:** [codegen-runtime.md](codegen-runtime.md), a draft, with its detail in
+  [lir.md](lir.md), [semantics-library.md](semantics-library.md) and
+  [load-module.md](load-module.md). Step 0 is measured in [benchmarks.md](benchmarks.md).
 
 ## 4. What becomes an alternate
 
@@ -181,13 +183,13 @@ These are the steps of [codegen-runtime.md](codegen-runtime.md), with the interp
 |---|---|---|
 | 0 | Benchmarks (file I/O, packed arithmetic, table search, CALL-heavy code) and baseline times for the interpreter and `cobc -O2` | S |
 | 1 | Extract the semantics library from `Machine` (storage access, MOVE, compare, editing, arithmetic stores, abends and every service) and split out `rt`. The boundary test. SQL, built first, is already library-shaped | L |
-| 2 | The LIR: resolved places, arithmetic plans, basic blocks with explicit PERFORM exits (C28), typed service calls and a debug table. The lowering from `Compiled`, covering everything the interpreter runs by then, including SORT, LE, Report Writer, OO and SQL | L |
+| 2 | The LIR: resolved places, arithmetic plans, basic blocks with explicit PERFORM exits (V1, V2), typed service calls and a debug table. The lowering from `Compiled`, covering everything the interpreter runs by then, including SORT, LE, Report Writer, OO and SQL | L |
 | 3 | The VM executor in `rt` | L |
 | 4 | A permanent differential CI job running every test and oracle case in both executors, plus differential fuzzing | M |
 | 5 | The load module: binary format, writer and reader, reproducibility | M |
 | 6 | `RunUnit` loading modules; static and dynamic CALL | M |
 | 7 | The VM as default, with `--interpret` kept | XS |
-| 8 | An oracle case for C28, settled when goldens exist | S, blocked by P0 #5 |
+| 8 | Oracle cases for V1 and V2, settled when goldens exist | S, blocked by P0 #5 |
 
 Total: XL, about seven to nine milestones. Step 1 decides the rest. If every result is decided in
 the semantics library, the VM is a second walker of the same calls, and keeping the interpreter
