@@ -70,7 +70,7 @@ It is zero-dependency Rust.
 
 | Overlap | cobolwork | ironwork | Proposal |
 |---|---|---|---|
-| Compiler option table | `provenance/compiler-options.json`, `lib/options.mjs` | `numeric::Options`, CBL/PROCESS parsing | Share the table (P1, E2). The ironwork README promises this sharing, and nothing implements it yet |
+| Compiler option table | `provenance/enterprise-options.json` (IBM's Table 45, each row cited), which generates `lib/enterprise-options.mjs` | `numeric::options` reads its spellings from the vendored `crates/numeric/data/enterprise-options.tsv` | Shared since 2026-09-30: cobolwork generates the table, ironwork vendors it byte for byte, and each side tests its option reading against it |
 | CICS command table | `provenance/precompile.json` (each command cites IBM), `lib/cics-commands.mjs` | Hand-written in `machine/cics*.rs` | ironwork checks its dispatch against the shared table |
 | Reserved words | `provenance/words.json` (each word sourced) | `syntax/src/lexer.rs` | ironwork's lexer tested against the shared list |
 | BMS | `lib/bms.mjs` (453 lines) | `syntax/src/bms.rs` (914 lines) | Keep both. Shared map fixtures, with ironwork's symbolic maps as the expected output |
@@ -136,7 +136,7 @@ It is zero-dependency Rust.
 
 | # | Item | Repo | Size | Note |
 |---|---|---|---|---|
-| 1 | Fix the Windows test that builds `D:\D:\…` from a URL | cobolwork | XS | The only CI failure |
+| 1 | Fix the Windows test that builds `D:\D:\…` from a URL | cobolwork | XS | Done: cobolwork's CI is green |
 | 2 | Commit approval: the cobolwork-web split | Operator | XS | M8, SQL and these specs have landed; the four-branch integration is landing |
 | 3 | M8: the TN3270 server | ironwork | M | Done |
 | 4 | Integrate SORT/MERGE, LE, Report Writer and OO | ironwork | M | In flight |
@@ -148,7 +148,7 @@ It is zero-dependency Rust.
 |---|---|---|---|---|
 | 6 | SQL, [sql-runtime.md](sql-runtime.md) steps 1–6: typed statements (S), conversion (M), SQLCA, WHENEVER and single-row statements (M), the recording format and `--sql-replay` (S), cursors (S), CICS SYNCPOINT (XS), all six built | ironwork | L | Next by ruling. Written as a library service for both executors |
 | 7 | Publish cobolwork: public repository, tagged release, npm decision, the PolyForm links fixed | cobolwork | S | Needs the operator's go-ahead |
-| 8 | Shared data (E2): option table, CICS command table, reserved words, BMS and SQL fixtures, with drift tests | Both | M | Fulfils the README's promise |
+| 8 | Shared data (E2): option table, CICS command table, reserved words, BMS and SQL fixtures, with drift tests | Both | M | The option table is shared (2026-09-30); the CICS command table, reserved words and fixtures remain |
 | 9 | Rules from ironwork's model (E3): TRUNC(OPT) binary overflow, EBCDIC-dependent order and comparison, intermediates over 30 digits (31 under ARITH(EXTEND)) | cobolwork | M | None exists yet |
 | 10 | A hand-labelled flow corpus: the independent witness for cobolwork's precision | cobolwork | L | Banks will ask for it |
 

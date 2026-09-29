@@ -249,8 +249,9 @@ Input rules:
   work, where PostgreSQL would abort all of it. A -911 rolls back the whole unit, as Db2 does.
 - **Authentication.** SCRAM-SHA-256 (RFC 5802 and RFC 7677), with SHA-256, HMAC and the PBKDF2 `Hi`
   function written in-house and tested against the RFCs' test vectors. A cleartext password is
-  answered too; MD5 is refused, naming SCRAM. The client nonce comes from `std`'s OS-seeded
-  `RandomState` keys, the process and the clock, which needs no `unsafe` (assumption SQ6).
+  answered too; MD5 is refused, naming SCRAM. The client nonce is 18 bytes from `/dev/urandom` on
+  Unix; elsewhere it comes from `std`'s OS-seeded `RandomState` keys, the process and the clock
+  (assumption SQ6). Neither needs `unsafe`.
 - **TLS** is a separate build, so that ironwork's own keeps no dependencies (D2). `tls/` is a
   workspace of its own, as `fuzz/` is. It builds the same command with rustls and the ring
   provider, verifying the server's certificate chain and name (`sslmode=verify-full`) against
@@ -297,12 +298,13 @@ Input rules:
 
 ## 10. Assumptions
 
-These are registry entries under the prefix **SQ** (S is SORT's), with a new `Oracle::Db2`
-variant, because neither Hercules nor Enterprise COBOL can settle them. *Observed* means Db2 12.1.5
-for Linux (Community Edition, 2026-09-30) gave the result, through embedded SQL in C, and Db2 for
-z/OS documents the same or says nothing to the contrary. Where the two disagree, ironwork follows
-z/OS and the row says so. [`tools/db2-probe/`](../tools/db2-probe/run.sh) runs the probes again,
-and its `observed-12.1.5.txt` is what Db2 answered.
+These are registry entries under the prefix **SQ** (S is SORT's), with the oracle `Oracle::Db2`,
+because neither Hercules nor Enterprise COBOL can settle them, and the basis `Observed`. SQ6 stays
+in this document only: it is ironwork's own choice, and nothing settles it. *Observed* means Db2
+12.1.5 for Linux (Community Edition, 2026-09-30) gave the result, through embedded SQL in C, and Db2
+for z/OS documents the same or says nothing to the contrary. Where the two disagree, ironwork
+follows z/OS and the row says so. [`tools/db2-probe/`](../tools/db2-probe/run.sh) runs the probes
+again, and its `observed-12.1.5.txt` is what Db2 answered.
 
 | ID | Claim | Basis |
 |---|---|---|
@@ -311,7 +313,7 @@ and its `observed-12.1.5.txt` is what Db2 answered.
 | SQ3 | A truncated string's indicator holds its original length | Observed: 18 for an 18-character value cut to 5, into a C string and a VARCHAR alike, with SQLWARN0 and SQLWARN1 `W` and SQLSTATE 01004. Trailing blanks cut from a CHAR count as truncation |
 | SQ4 | The PostgreSQL SQLSTATE to Db2 SQLCODE table | Observed for -803, -407, -530, -104, -204 (42704) and -206. Db2 for Linux gives -433 where z/OS documents -404 for a string too long for its column, and -801 where z/OS documents -802 (22012) for division by zero; the table keeps z/OS's. -911 is not provoked |
 | SQ5 | The dialect rewrite table | Chosen |
-| SQ6 | The SCRAM client nonce source | Chosen |
+| SQ6 | The SCRAM client nonce, where there is no `/dev/urandom` (Windows), comes from `std`'s OS-seeded `RandomState` keys, the process and the clock | Chosen |
 | SQ7 | A name in an INTO list written without its colon is a host variable, as older precompilers assumed. Real programs do it (`FETCH C INTO CSR-ENTITY, CSR-PROJ-ID`) | Recalled |
 | SQ8 | WHENEVER and cursor declarations carry on in listing order across nested programs, since the precompiler reads the source in order | Chosen |
 | SQ9 | An IEEE double stored into COMP-1 or COMP-2 drops the low-order bits that do not fit, rather than rounding | Chosen |
@@ -404,7 +406,8 @@ is for evaluation only.
   and not in ironwork's own build.
 - **D3.** Refuse CONNECT and DISCONNECT at compile time as not Db2, where today they are checked and
   pass.
-- **D4.** Add the SQ prefix and `Oracle::Db2` to the assumptions registry.
+- **D4.** Done 2026-09-30: the SQ prefix, `Oracle::Db2` and the `Observed` basis are in the
+  assumptions registry.
 
 ## 15. Execution plan
 
