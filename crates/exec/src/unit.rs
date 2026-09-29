@@ -60,7 +60,7 @@ pub struct RunUnit<'w> {
     pub depth: usize,
     pub programs: Vec<Loaded>,
     names: HashMap<String, usize>,
-    library: Library,
+    pub(crate) library: Library,
     pub dds: Dds,
     pub sysin: Option<Box<dyn BufRead + 'w>>,
     pub clock: Clock,
@@ -74,6 +74,8 @@ pub struct RunUnit<'w> {
     pub sql: Option<crate::sql::Session<'w>>,
     /// Language Environment's heap storage and message files.
     pub le: crate::le::State,
+    /// Classes, objects and the JNI environment of the run unit's object-oriented programs.
+    pub oo: crate::oo::Objects,
 }
 
 fn member_name(name: &str) -> bool {
@@ -98,6 +100,7 @@ impl<'w> RunUnit<'w> {
             cics_files: HashMap::new(),
             sql: None,
             le: crate::le::State::default(),
+            oo: Default::default(),
         }
     }
 

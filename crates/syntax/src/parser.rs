@@ -2,6 +2,7 @@ use crate::ast::*;
 use crate::lexer::{Tok, Token};
 use crate::{Error, Pos};
 
+mod oo;
 mod report;
 
 /// Every program in the source, first to last, with nested programs after the one containing them.
@@ -22,7 +23,7 @@ pub fn parse(tokens: &[Token], options: Vec<String>) -> Result<Vec<Program>, Err
 const VERBS: &[&str] = &[
     "MOVE", "COMPUTE", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "IF", "PERFORM", "DISPLAY", "INITIALIZE", "GO", "GOBACK", "STOP",
     "CONTINUE", "EXIT", "EVALUATE", "SET", "CALL", "ACCEPT", "STRING", "UNSTRING", "INSPECT", "READ", "WRITE", "OPEN", "CLOSE",
-    "REWRITE", "DELETE", "START", "SEARCH", "SORT", "MERGE", "RETURN", "RELEASE", "CANCEL", "EXEC", "NEXT",
+    "REWRITE", "DELETE", "START", "SEARCH", "SORT", "MERGE", "RETURN", "RELEASE", "CANCEL", "EXEC", "NEXT", "INVOKE",
     "INITIATE", "GENERATE", "TERMINATE", "SUPPRESS",
 ];
 
@@ -34,7 +35,7 @@ const PHRASE_WORDS: &[&str] = &[
     "BEFORE", "AFTER", "ADVANCING", "INPUT", "OUTPUT", "EXTEND", "I-O", "REVERSED", "USING", "RETURNING", "EXCEPTION", "OVERFLOW",
     "END-CALL", "OMITTED", "CONTENT", "REFERENCE", "VALUE", "UP", "DOWN", "DELIMITED", "DELIMITER", "COUNT", "POINTER", "TALLYING",
     "REPLACING", "CONVERTING", "INITIAL", "FOR", "CHARACTERS", "LEADING", "FIRST", "ALL", "END-STRING", "END-UNSTRING", "END-SEARCH",
-    "NEXT", "INVALID", "KEY", "END-REWRITE", "END-DELETE", "END-START",
+    "NEXT", "INVALID", "KEY", "END-REWRITE", "END-DELETE", "END-START", "END-INVOKE",
 ];
 
 fn figurative(word: &str) -> Option<Figurative> {
@@ -60,6 +61,7 @@ fn usage_word(word: &str) -> Option<Usage> {
         "NATIONAL" => Usage::National,
         "POINTER" => Usage::Pointer,
         "INDEX" => Usage::Index,
+        "FUNCTION-POINTER" | "PROCEDURE-POINTER" => Usage::ProgramPointer,
         _ => return None,
     })
 }
@@ -186,6 +188,9 @@ impl Parser<'_> {
         }
         self.expect_word("DIVISION")?;
         self.expect(&Tok::Period, "a period")?;
+        if self.is_word("CLASS-ID") {
+            return self.class_definition(options, out);
+        }
         self.expect_word("PROGRAM-ID")?;
         self.accept(&Tok::Period);
         let id = match self.peek() {
@@ -206,12 +211,18 @@ impl Parser<'_> {
             recursive |= self.is_word("RECURSIVE");
             self.at += 1;
         }
+        self.program_body(id, initial, recursive, options, out, false)
+    }
+
+    /// The rest of a program, or of a method after its METHOD-ID paragraph; a method's END METHOD
+    /// is left for its class to read.
+    fn program_body(&mut self, id: String, initial: bool, recursive: bool, options: &[String], out: &mut Vec<Program>, method: bool) -> R<()> {
         while self.peek().is_some() && !self.at_division(&["ENVIRONMENT", "DATA", "PROCEDURE", "IDENTIFICATION", "ID"]) && !self.at_end_program() {
             self.at += 1;
         }
-        let mut files = Vec::new();
+        let (mut files, mut repository) = (Vec::new(), Vec::new());
         if self.at_division(&["ENVIRONMENT"]) {
-            files = self.environment()?;
+            (files, repository) = self.environment()?;
         }
         let (mut working_storage, mut local_storage, mut linkage) = (Vec::new(), Vec::new(), Vec::new());
         let mut report_writer = crate::report::ReportWriter::default();
@@ -270,7 +281,8 @@ impl Parser<'_> {
         while self.at_division(&["IDENTIFICATION", "ID"]) {
             self.program(options, &mut nested)?;
         }
-        if self.at_end_program() {
+        oo::share_repository(&repository, &mut nested)?;
+        if !method && self.at_end_program() && self.word_at(1) == Some("PROGRAM") {
             self.at += 2;
             if self.word().is_some() || matches!(self.peek(), Some(Tok::Alnum(_))) {
                 self.at += 1;
@@ -292,19 +304,20 @@ impl Parser<'_> {
             sources: Vec::new(),
             exec_declarations,
             report_writer,
+            oo: oo::program_oo(repository),
         });
         out.extend(nested);
         Ok(())
     }
 
     fn at_end_program(&self) -> bool {
-        self.is_word("END") && self.word_at(1) == Some("PROGRAM")
+        self.is_word("END") && matches!(self.word_at(1), Some("PROGRAM" | "METHOD"))
     }
 
-    /// The ENVIRONMENT DIVISION: SELECT entries of FILE-CONTROL; everything else is skipped, except
-    /// what would change the meaning of the rest of the program.
-    fn environment(&mut self) -> R<Vec<FileDecl>> {
-        let mut files = Vec::new();
+    /// The ENVIRONMENT DIVISION: SELECT entries of FILE-CONTROL and the REPOSITORY's classes;
+    /// everything else is skipped, except what would change the meaning of the rest of the program.
+    fn environment(&mut self) -> R<(Vec<FileDecl>, Vec<ClassEntry>)> {
+        let (mut files, mut repository) = (Vec::new(), Vec::new());
         while self.peek().is_some() && !self.at_division(&["DATA", "PROCEDURE"]) {
             if self.is_word("DECIMAL-POINT") {
                 return Err(self.error("DECIMAL-POINT IS COMMA is not supported yet"));
@@ -313,9 +326,13 @@ impl Parser<'_> {
                 files.push(self.select()?);
                 continue;
             }
+            if self.accept_word("REPOSITORY") {
+                repository = self.repository()?;
+                continue;
+            }
             self.at += 1;
         }
-        Ok(files)
+        Ok((files, repository))
     }
 
     fn select(&mut self) -> R<FileDecl> {
@@ -615,6 +632,7 @@ impl Parser<'_> {
             indexed_by: Vec::new(),
             keys: Vec::new(),
             condition_values: Vec::new(),
+            object_class: None,
             pos,
         };
         if let Some(w) = self.word()
@@ -641,8 +659,13 @@ impl Parser<'_> {
                 "USAGE" => {
                     self.accept_word("IS");
                     let w = self.name("a usage")?;
-                    e.usage = Some(usage_word(&w).ok_or_else(|| Error::at(pos, format!("USAGE {w} is not supported yet")))?);
+                    if w == "OBJECT" {
+                        self.object_reference(&mut e)?;
+                    } else {
+                        e.usage = Some(usage_word(&w).ok_or_else(|| Error::at(pos, format!("USAGE {w} is not supported yet")))?);
+                    }
                 }
+                "OBJECT" => self.object_reference(&mut e)?,
                 "VALUE" | "VALUES" => {
                     self.accept_word("IS");
                     self.accept_word("ARE");
@@ -880,6 +903,7 @@ impl Parser<'_> {
             }
             "INITIALIZE" => Stmt::Initialize { targets: self.refs()?, pos },
             "CALL" => Stmt::Call(Box::new(self.call(pos)?)),
+            "INVOKE" => Stmt::Invoke(Box::new(self.invoke(pos)?)),
             "CANCEL" => {
                 let mut targets = Vec::new();
                 while self.starts_operand() {
@@ -1046,8 +1070,9 @@ impl Parser<'_> {
                 Stmt::StopRun { pos }
             }
             "CONTINUE" => Stmt::Continue,
-            "EXIT" => match self.accept_any(&["PROGRAM", "PARAGRAPH", "SECTION", "PERFORM"]).as_deref() {
+            "EXIT" => match self.accept_any(&["PROGRAM", "PARAGRAPH", "SECTION", "PERFORM", "METHOD"]).as_deref() {
                 Some("PROGRAM") => Stmt::ExitProgram { pos },
+                Some("METHOD") => Stmt::ExitMethod { pos },
                 Some("PARAGRAPH") => Stmt::Exit(ExitKind::Paragraph),
                 Some("SECTION") => Stmt::Exit(ExitKind::Section),
                 Some(_) if self.accept_word("CYCLE") => Stmt::Exit(ExitKind::PerformCycle),

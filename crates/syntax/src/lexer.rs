@@ -107,6 +107,11 @@ impl Lexer<'_> {
                 let text = self.quoted(pos)?;
                 self.emit(Tok::National(text), pos);
             }
+            'Z' | 'z' if quote_next => {
+                self.at += 1;
+                let text = self.quoted(pos)?;
+                self.emit(Tok::Alnum(format!("{text}\0")), pos);
+            }
             '.' if self.separator_follows(1) => {
                 self.at += 1;
                 self.emit(Tok::Period, pos);
@@ -285,6 +290,11 @@ mod tests {
     #[test]
     fn literals() {
         assert_eq!(toks("           'IT''S' X'F1C1' N'AB'"), [Tok::Alnum("IT'S".into()), Tok::Hex(vec![0xF1, 0xC1]), Tok::National("AB".into())]);
+    }
+
+    #[test]
+    fn a_null_terminated_literal_ends_with_x00() {
+        assert_eq!(toks("           Z'ABC' z\"(I)V\""), [Tok::Alnum("ABC\0".into()), Tok::Alnum("(I)V\0".into())]);
     }
 
     #[test]

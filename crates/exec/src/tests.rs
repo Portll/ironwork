@@ -1,6 +1,7 @@
 use super::*;
 use std::collections::BTreeMap;
 
+mod oo;
 mod report;
 
 fn program(options: &str, data: &str, procedure: &str) -> String {
@@ -640,6 +641,10 @@ const FRAGMENTS: &[&str] = &[
     "REPORT SECTION.", "\n       RD  R ", "REPORT IS R", "TYPE CF ", "TYPE PH ", "LINE PLUS ", "LINE 0 ", "NEXT PAGE ", "NEXT GROUP ", "COLUMN + ", "COLUMN RIGHT ", "SUM ",
     "UPON ", "RESET ON ", "GROUP INDICATE ", "PAGE LIMIT 3 ", "FIRST DETAIL 9 ", "FOOTING +", "CODE 'X' ", "GENERATE ", "INITIATE ", "TERMINATE ",
     "DECLARATIVES.", "USE BEFORE REPORTING ", "END DECLARATIVES.", "SUPPRESS PRINTING ", "LINE-COUNTER", "PAGE-COUNTER",
+    "INVOKE ", "NEW ", "SELF ", "SUPER ", "OBJECT REFERENCE ", "USAGE OBJECT REFERENCE X ", "FUNCTION-POINTER", "USING BY VALUE ", "END-INVOKE",
+    "ON EXCEPTION ", "EXIT METHOD", "END METHOD \"m\".", "METHOD-ID. \"m\".", "\n       IDENTIFICATION DIVISION.\n       METHOD-ID. \"m\".\n",
+    "\n       IDENTIFICATION DIVISION.\n       OBJECT.\n", "END OBJECT.", "END FACTORY.", "END CLASS ", "CLASS-ID. ", "INHERITS ", "REPOSITORY. ",
+    "CLASS X IS \"java.lang.Object\" ", "JNIENVPTR", "COPY JNI.",
 ];
 
 fn mutate(base: &str, next: &mut impl FnMut() -> u64) -> String {
@@ -759,6 +764,7 @@ fn mutated_programs_never_panic_the_front_end() {
                 &["       PROCEDURE DIVISION USING LA BY VALUE LP RETURNING LA.\n", &line("SET ADDRESS OF LA TO LP"), &line("GOBACK.")].concat(),
             ),
         ])
+        .chain(oo::fuzz_seeds())
         .collect();
     let mut seed = 0x853C_49E6_748F_EA9Bu64;
     let mut next = move || {

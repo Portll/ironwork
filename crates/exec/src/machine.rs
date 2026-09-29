@@ -24,6 +24,7 @@ mod cics_files;
 mod cics_services;
 mod file_io;
 mod le_services;
+mod oo;
 mod report;
 mod sql;
 
@@ -107,6 +108,8 @@ pub struct Machine<'p, 'u, 'w> {
     /// HANDLE CONDITION, IGNORE CONDITION and HANDLE ABEND, which belong to the program level.
     cics_handlers: cics::Handlers,
     report_writer: &'p crate::report::Writer,
+    /// The method this activation runs, if it is one: its class and SELF.
+    oo: oo::Frame,
     unit: &'u mut RunUnit<'w>,
 }
 
@@ -216,6 +219,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             main,
             cics_handlers: cics::Handlers::default(),
             report_writer: &compiled.report_writer,
+            oo: oo::Frame::default(),
             unit,
         };
         if compiled.layout.local_size > 0 {
@@ -370,7 +374,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 for r in targets {
                     let loc = self.locate(r)?;
                     if loc.item == usize::MAX {
-                        self.write(loc, &[0, 0]);
+                        self.write(loc, &vec![0; loc.len]);
                     } else {
                         self.initialize(loc.item, loc.offset, *pos)?;
                     }
@@ -411,6 +415,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     pos: block.pos,
                 });
             }
+            Stmt::Invoke(i) => return self.invoke(i),
+            Stmt::ExitMethod { .. } => return Ok(Flow::End(Ending::Goback)),
             Stmt::SentenceEnd => {}
             Stmt::StopRun { .. } => return Ok(Flow::End(Ending::StopRun)),
             Stmt::Exit(ExitKind::Paragraph) => return Ok(Flow::ExitParagraph),
@@ -541,6 +547,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn locate(&mut self, r: &Ref) -> R<Loc> {
+        if let Some(loc) = self.oo_register(r)? {
+            return Ok(loc);
+        }
         if r.name == "RETURN-CODE" && r.qualifiers.is_empty() && !self.layout.items.iter().any(|i| i.name.as_deref() == Some("RETURN-CODE")) {
             return Ok(Loc { offset: RETURN_CODE, len: 2, kind: Kind::Binary { digits: 4, scale: 0, signed: true, native: false }, item: usize::MAX });
         }
@@ -644,7 +653,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         Ok(match loc.kind {
             Kind::Group | Kind::Alnum { .. } | Kind::NumericEdited { .. } | Kind::AlnumEdited { .. } => Val::Bytes(bytes.to_vec()),
             Kind::National => Val::National(bytes.to_vec()),
-            Kind::Pointer => Val::Address(u32::from_be_bytes(bytes.try_into().unwrap())),
+            Kind::Pointer | Kind::ObjectReference | Kind::ProgramPointer => Val::Address(u32::from_be_bytes(bytes.try_into().unwrap())),
             Kind::Index => Val::Num(Fixed::new(i32::from_be_bytes(bytes.try_into().unwrap()) as i128, Places::new(9, 0))),
             Kind::Float(p) => Val::Float(Hfp::from_bytes(p, bytes)),
             Kind::Binary { digits, signed, native, .. } => Val::Num(Fixed::new(Binary { digits: digits as u8, signed, native }.load(bytes), places)),
@@ -976,6 +985,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn call(&mut self, c: &'p Call) -> R<Flow> {
+        if let Some(flow) = self.call_through_pointer(c)? {
+            return Ok(flow);
+        }
         let pos = c.pos;
         let name = self.program_name(&c.target, pos)?;
         let index = match self.unit.load(&name) {
@@ -1689,7 +1701,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 }
                 self.write(dest, &out);
             }
-            Kind::Pointer => match val {
+            Kind::Pointer | Kind::ObjectReference | Kind::ProgramPointer => match val {
                 Val::Address(a) => self.write(dest, &a.to_be_bytes()),
                 Val::Fig(Figurative::Null) => self.write(dest, &[0; 4]),
                 _ => return Err(Abend::ironwork("a pointer takes an address: use SET ... TO ADDRESS OF or NULL", pos)),
@@ -1949,7 +1961,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                             text.push_str(&self.page.decode(&shown));
                         }
                         Kind::Float(_) => return Err(Abend::ironwork("DISPLAY of a floating-point item is not supported yet", r.pos)),
-                        Kind::Pointer | Kind::Index => return Err(Abend::ironwork("DISPLAY of a pointer or index is not supported", r.pos)),
+                        Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer => {
+                            return Err(Abend::ironwork("DISPLAY of a pointer, index or object reference is not supported", r.pos));
+                        }
                         _ => text.push_str(&self.page.decode(self.bytes(loc))),
                     }
                 }
@@ -1974,7 +1988,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     fn initialize(&mut self, index: usize, offset: usize, pos: Pos) -> R<()> {
         let layout = self.layout;
         let item = &layout.items[index];
-        if item.kind == Kind::Index {
+        if matches!(item.kind, Kind::Index | Kind::ObjectReference | Kind::ProgramPointer) {
             return Ok(());
         }
         if item.kind != Kind::Group {

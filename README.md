@@ -98,6 +98,20 @@ The subset the interpreter runs today:
   to the report's file, whose record carries no printer control byte. The precompiler's extensions
   (OCCURS, PRESENT WHEN, multiple LINES and COLUMNS, OR PAGE, STYLE, FUNCTION and the rest) are
   refused by name; assumptions RW1 to RW13 hold what the manuals leave open.
+- **Object-oriented COBOL,** as Enterprise COBOL has it for Java interoperability: class
+  definitions (CLASS-ID ... INHERITS, the REPOSITORY paragraph, FACTORY and OBJECT paragraphs with
+  their WORKING-STORAGE, METHOD-ID with PROCEDURE DIVISION USING BY VALUE and RETURNING), USAGE
+  OBJECT REFERENCE, INVOKE (NEW, a method named by a literal or a data item, SELF, SUPER, USING BY
+  VALUE, RETURNING, ON EXCEPTION), SET and = or NOT = on object references, EXIT METHOD,
+  FUNCTION-POINTER and PROCEDURE-POINTER items, JNIENVPTR, COPY JNI and Z'...' literals. Classes
+  written in COBOL run in the run unit: NEW gives an object its instance data from the VALUE
+  clauses, factory data is one copy per class, a method's WORKING-STORAGE persists between
+  invocations, and INVOKE finds a method by its name and Java signature up the INHERITS chain, as
+  the JNI does. A class is found as a CALLed program is, among the programs read and in the program
+  libraries (Account.cbl for Account or com.acme.Account). Java classes are checked, not run:
+  reaching one ends the run with abend JAVA naming the class and method, while java.lang.Object's
+  NEW and equals, and the JNI's reference services such as NewGlobalRef and IsSameObject, run
+  without a JVM. The run-time choices are assumptions J1 to J14.
 
 - **EXEC SQL and EXEC CICS** are read and checked: every SQL host variable and every CICS argument
   that names data must resolve; EXEC SQL INCLUDE works as COPY; a program with EXEC CICS gets

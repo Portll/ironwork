@@ -8,6 +8,7 @@ pub mod files;
 pub mod layout;
 pub mod le;
 pub mod machine;
+pub mod oo;
 pub mod picture;
 pub mod report;
 pub mod sql;
@@ -39,6 +40,9 @@ const FUNCTIONS: &[&str] = &[
 
 /// Checks and lays out a parsed program. `flags` are this compiler's own, such as `-silent`.
 pub fn compile(mut program: Program, flags: &[String]) -> Result<Compiled, Vec<Error>> {
+    if program.oo.as_ref().is_some_and(|o| o.class().is_some()) {
+        return oo::compile_class_definition(program, flags);
+    }
     let mut errors = Vec::new();
     let drafts = report::prepare(&mut program, &mut errors);
     let mut options = Options::default();
@@ -93,6 +97,7 @@ pub fn compile(mut program: Program, flags: &[String]) -> Result<Compiled, Vec<E
     for p in &program.paragraphs {
         check.statements(&p.statements);
     }
+    oo::check(&layout, &program, &mut errors);
     if errors.is_empty() {
         Ok(Compiled { program, layout, options, ssrange, report_writer })
     } else {
@@ -163,6 +168,7 @@ impl Compiled {
         out: &'w mut dyn Write,
         err: &'w mut dyn Write,
     ) -> Result<(Ending, i16), Abend> {
+        oo::refuse_to_run(&self.program)?;
         let mut run_unit = unit::RunUnit::new(library, dds, sysin, clock, out, err);
         run_unit.sql = database.map(sql::Session::new);
         let me = run_unit.add(None, &self.program, self.layout.size as usize);
@@ -205,6 +211,7 @@ impl Compiled {
         out: &'w mut dyn Write,
         err: &'w mut dyn Write,
     ) -> Result<(Ending, cics::Task), Abend> {
+        oo::refuse_to_run(&self.program)?;
         let mut run_unit = unit::RunUnit::new(library, dds, None, clock, out, err);
         run_unit.sql = database.map(sql::Session::new);
         let me = run_unit.add(None, &self.program, self.layout.size as usize);
@@ -453,7 +460,8 @@ impl Check<'_> {
             }
             Stmt::Exec(block) => self.exec_block(block),
             Stmt::Report(r) => report::check_statement(self.program, r, self.errors),
-            Stmt::Goback { .. } | Stmt::StopRun { .. } | Stmt::ExitProgram { .. } | Stmt::Continue | Stmt::Exit(_) | Stmt::NextSentence | Stmt::SentenceEnd => {}
+            Stmt::Invoke(i) => self.invoke(i),
+            Stmt::Goback { .. } | Stmt::StopRun { .. } | Stmt::ExitProgram { .. } | Stmt::ExitMethod { .. } | Stmt::Continue | Stmt::Exit(_) | Stmt::NextSentence | Stmt::SentenceEnd => {}
         }
     }
 
@@ -567,6 +575,9 @@ impl Check<'_> {
 
     fn reference(&mut self, r: &Ref) {
         if r.name == "RETURN-CODE" && r.qualifiers.is_empty() && self.layout.resolve(&r.name, &r.qualifiers, r.pos).is_err() {
+            return;
+        }
+        if oo::special_register(self.layout, r) {
             return;
         }
         match self.layout.resolve(&r.name, &r.qualifiers, r.pos) {

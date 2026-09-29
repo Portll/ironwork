@@ -1,5 +1,8 @@
 use crate::Pos;
 
+mod oo;
+pub use oo::*;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Program {
     pub id: String,
@@ -24,6 +27,8 @@ pub struct Program {
     pub exec_declarations: Vec<ExecBlock>,
     /// The REPORT SECTION, and the DECLARATIVES that serve it.
     pub report_writer: crate::report::ReportWriter,
+    /// The REPOSITORY's classes, and for a class definition or a method what it is.
+    pub oo: Option<Box<Oo>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -98,6 +103,9 @@ pub enum Usage {
     National,
     Pointer,
     Index,
+    ObjectReference,
+    /// FUNCTION-POINTER or PROCEDURE-POINTER.
+    ProgramPointer,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -137,6 +145,8 @@ pub struct DataEntry {
     /// Level 88: the values that make the condition true.
     /// Each value, or the low and high ends of a THRU range.
     pub condition_values: Vec<(Literal, Option<Literal>)>,
+    /// USAGE OBJECT REFERENCE class-name: the class; None for a universal reference.
+    pub object_class: Option<String>,
     pub pos: Pos,
 }
 
@@ -351,6 +361,8 @@ pub enum Stmt {
     SentenceEnd,
     Exec(Box<ExecBlock>),
     Report(Box<crate::report::ReportStmt>),
+    Invoke(Box<Invoke>),
+    ExitMethod { pos: Pos },
     StopRun { pos: Pos },
     Continue,
     Exit(ExitKind),

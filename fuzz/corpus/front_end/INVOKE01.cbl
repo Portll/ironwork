@@ -1,0 +1,31 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. INVOKE01 RECURSIVE.
+       ENVIRONMENT DIVISION.
+       CONFIGURATION SECTION.
+       REPOSITORY.
+           CLASS Counter IS "com.example.Counter"
+           CLASS JString IS "java.lang.String".
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  C USAGE OBJECT REFERENCE Counter.
+       01  U USAGE OBJECT REFERENCE.
+       01  S USAGE OBJECT REFERENCE JString.
+       01  N PIC S9(4) COMP-5 VALUE 5.
+       01  R PIC S9(9) BINARY.
+       01  M PIC X(8) VALUE 'add'.
+       LINKAGE SECTION.
+           COPY JNI.
+       PROCEDURE DIVISION.
+           SET ADDRESS OF JNIENV TO JNIENVPTR
+           SET ADDRESS OF JNINATIVEINTERFACE TO JNIENV
+           INVOKE Counter "make" RETURNING C
+           INVOKE C "add" USING BY VALUE N RETURNING R
+               ON EXCEPTION DISPLAY 'NO ADD'
+               NOT ON EXCEPTION DISPLAY R
+           END-INVOKE
+           SET U TO C
+           IF U = C CALL NewGlobalRef USING BY VALUE JNIENVPTR U
+               RETURNING U END-IF
+           INVOKE U M USING BY VALUE N RETURNING R
+           INVOKE S "length" RETURNING R
+           GOBACK.

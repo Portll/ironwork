@@ -225,6 +225,7 @@ fn entry(level: u8, name: Option<String>, picture: Option<String>, usage: Option
         indexed_by: Vec::new(),
         keys: Vec::new(),
         condition_values: Vec::new(),
+        object_class: None,
         pos,
     }
 }

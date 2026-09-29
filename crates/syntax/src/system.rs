@@ -146,6 +146,7 @@ pub fn member(name: &str) -> Option<String> {
         }
         "DFHAID" => constants("DFHAID", DFHAID),
         "DFHBMSCA" => constants("DFHBMSCA", DFHBMSCA),
+        "JNI" => crate::jni::member(),
         _ => return None,
     })
 }

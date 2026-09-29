@@ -23,6 +23,10 @@ pub enum Kind {
     Pointer,
     /// An index name or USAGE INDEX item, holding an occurrence number in four bytes.
     Index,
+    /// USAGE OBJECT REFERENCE: four bytes naming an object, as under LP(32).
+    ObjectReference,
+    /// USAGE FUNCTION-POINTER or PROCEDURE-POINTER, four bytes.
+    ProgramPointer,
 }
 
 impl Kind {
@@ -74,6 +78,8 @@ pub struct Item {
     /// The LINKAGE record the item belongs to, by its position among LINKAGE 01 and 77 items; its
     /// offset is from that record's start, wherever the caller's argument puts it.
     pub linkage: Option<u16>,
+    /// The class-name of a typed object reference.
+    pub object_class: Option<String>,
     pub pos: Pos,
 }
 
@@ -188,6 +194,7 @@ pub fn build(entries: &[DataEntry], files: &[(&[DataEntry], Option<u32>)], linka
             } else {
                 None
             },
+            object_class: e.object_class.clone(),
             pos: e.pos,
         });
         if (e.level == 1 || e.level == 77) && e.occurs.is_some() {
@@ -230,6 +237,7 @@ pub fn build(entries: &[DataEntry], files: &[(&[DataEntry], Option<u32>)], linka
                 redefines: None,
                 file: None,
                 linkage: None,
+                object_class: None,
                 pos: e.pos,
             });
         }
@@ -313,12 +321,19 @@ pub fn build(entries: &[DataEntry], files: &[(&[DataEntry], Option<u32>)], linka
 fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, edits: &mut Vec<Vec<Sym>>) -> Result<Kind, Error> {
     let err = |m: String| Error::at(e.pos, m);
     let usage = usage.unwrap_or_default();
-    let elementary = e.picture.is_some() || matches!(usage, Usage::Float1 | Usage::Float2 | Usage::Pointer | Usage::Index) && item.children.is_empty();
+    let handle = matches!(usage, Usage::ObjectReference | Usage::ProgramPointer);
+    let elementary = e.picture.is_some() || (handle || matches!(usage, Usage::Float1 | Usage::Float2 | Usage::Pointer | Usage::Index)) && item.children.is_empty();
     if !elementary {
         return if item.children.is_empty() { Err(err("an elementary item needs a PICTURE".into())) } else { Ok(Kind::Group) };
     }
     if !item.children.is_empty() {
         return Err(err("a group item cannot have a PICTURE".into()));
+    }
+    if handle {
+        if e.picture.is_some() || e.value.as_ref().is_some_and(|v| *v != Literal::Figurative(syntax::ast::Figurative::Null)) {
+            return Err(err("an object reference, function-pointer or procedure-pointer takes no PICTURE and only VALUE NULL".into()));
+        }
+        return Ok(if usage == Usage::ObjectReference { Kind::ObjectReference } else { Kind::ProgramPointer });
     }
     if let Usage::Pointer | Usage::Index = usage {
         if e.picture.is_some() {
@@ -374,7 +389,7 @@ fn elementary_size(item: &Item, e_size: Option<u32>) -> u32 {
             _ => 8,
         },
         Kind::Float(p) => p.bytes() as u32,
-        Kind::Pointer | Kind::Index => 4,
+        Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer => 4,
     }
 }
 

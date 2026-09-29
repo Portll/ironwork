@@ -105,7 +105,8 @@ fn option_card(line: &str) -> Option<Vec<String>> {
     let sequence: String = line.chars().take(6).collect();
     let line = if sequence.len() == 6 && sequence.chars().all(|c| c.is_ascii_digit() || c == ' ') { &line[6..] } else { line };
     let trimmed = line.trim_start();
-    let rest = trimmed.strip_prefix("CBL ").or_else(|| trimmed.strip_prefix("PROCESS ")).or_else(|| (trimmed == "CBL" || trimmed == "PROCESS").then_some(""))?;
+    let keyword = trimmed.split(' ').next().unwrap_or("");
+    let rest = (keyword.eq_ignore_ascii_case("CBL") || keyword.eq_ignore_ascii_case("PROCESS")).then(|| &trimmed[keyword.len()..])?;
     let (mut options, mut current, mut depth) = (Vec::new(), String::new(), 0i32);
     for c in rest.chars() {
         match c {
@@ -156,6 +157,11 @@ mod tests {
         let s = read(&text).unwrap();
         let literal = &s.text[s.text.find('\'').unwrap()..];
         assert_eq!(literal.trim_end(), format!("'ABC{}DEF'.", " ".repeat(40)));
+    }
+
+    #[test]
+    fn an_option_card_may_be_lowercase() {
+        assert_eq!(read(" cbl dll,thread\n process ssrange\n").unwrap().options, ["dll", "thread", "ssrange"]);
     }
 
     #[test]

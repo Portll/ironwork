@@ -86,6 +86,20 @@ pub const REPORT_SUPPRESS_PRINTING: &str = "RW10";
 pub const REPORT_NEW_PAGES: &str = "RW11";
 pub const REPORT_OUT_OF_ORDER: &str = "RW12";
 pub const REPORT_CONTROL_AREA: &str = "RW13";
+pub const OBJECT_REFERENCE_VALUE: &str = "J1";
+pub const LOCAL_REFERENCES_KEPT: &str = "J2";
+pub const OBJECTS_NEVER_FREED: &str = "J3";
+pub const INSTANCE_DATA_START: &str = "J4";
+pub const FACTORY_DATA_START: &str = "J5";
+pub const METHOD_LOOKUP: &str = "J6";
+pub const METHOD_NAME_ITEM: &str = "J7";
+pub const INVOKE_NULL: &str = "J8";
+pub const NO_METHOD_ABEND: &str = "J9";
+pub const FACTORY_SELF: &str = "J10";
+pub const CLASS_SEARCH: &str = "J11";
+pub const INVOKE_KEEPS_RETURN_CODE: &str = "J12";
+pub const OO_OPTIONS_NOT_REQUIRED: &str = "J13";
+pub const CHAR_FROM_DISPLAY: &str = "J14";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -457,6 +471,90 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: REPORT_CONTROL_AREA,
         claim: "PAGE-COUNTER, LINE-COUNTER and PRINT-SWITCH are S9(9) COMP items (PAGE-COUNTER's PICTURE is in SC26-4301-04, 3.15.2); each report's control area, fields and totals are WORKING-STORAGE after the program's own items, so CANCEL and IS INITIAL start the report afresh",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: OBJECT_REFERENCE_VALUE,
+        claim: "An object reference is four bytes, as under LP(32): zero for NULL, otherwise a number that names one object for the rest of the run unit, so two references to one object are equal byte for byte",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LOCAL_REFERENCES_KEPT,
+        claim: "A local object reference stays valid after the method that obtained it returns, and the JNI services NewGlobalRef, NewLocalRef, DeleteGlobalRef and DeleteLocalRef change nothing; IBM frees a method's local references when it returns (Programming Guide, Managing local and global references), so a method that keeps one in OBJECT, FACTORY or method WORKING-STORAGE without NewGlobalRef fails on z/OS and runs here",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: OBJECTS_NEVER_FREED,
+        claim: "Objects are never freed, and a run unit that creates more than 1,000,000 of them abends, where Java's garbage collector reclaims objects no longer referred to",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: INSTANCE_DATA_START,
+        claim: "INVOKE class NEW gives each COBOL class in the new object's hierarchy its own copy of its OBJECT WORKING-STORAGE, set to X'00' and then to its VALUE clauses; IBM documents only the VALUE clauses",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FACTORY_DATA_START,
+        claim: "A class's FACTORY WORKING-STORAGE is set to X'00' and then to its VALUE clauses when the run unit first uses the class, and its one copy serves every INVOKE of the class's factory methods, through a subclass too",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: METHOD_LOOKUP,
+        claim: "INVOKE selects the method by its name, case kept, and the Java types of its arguments and RETURNING item (void without one), a universal object reference counting as java.lang.Object; the search starts at the class of the object itself, not the class its reference is typed with, and goes up the INHERITS chain; SUPER starts at the parent of the class that defines the running method",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: METHOD_NAME_ITEM,
+        claim: "A method name held in a data item is the item's content without its trailing spaces",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: INVOKE_NULL,
+        claim: "INVOKE on a NULL object reference, or on four bytes that name no object, ends the run with an abend; IBM leaves the result undefined",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: NO_METHOD_ABEND,
+        claim: "An INVOKE without ON EXCEPTION that finds no method raises IBM's severity-3 Language Environment condition, which ends the run with abend U4038",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FACTORY_SELF,
+        claim: "SELF in a factory method is the factory object of the class that defines the method, and INVOKE on a reference to a factory object runs factory methods",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CLASS_SEARCH,
+        claim: "A class is a COBOL class when a class definition with its external name is among the programs read or in the program libraries, as a member named with its simple name or its full name with periods as underscores, as IBM names the class's DLL; any other class is a Java class",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: INVOKE_KEEPS_RETURN_CODE,
+        claim: "INVOKE leaves the invoking program's RETURN-CODE as it was (Language Reference, INVOKE statement, RETURNING phrase)",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: OO_OPTIONS_NOT_REQUIRED,
+        claim: "A program or class with object-oriented syntax is checked whatever THREAD, DLL and RECURSIVE say: IBM requires THREAD, DLL and RENT for it, and under THREAD a RECURSIVE program, which an installation's defaults may supply",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CHAR_FROM_DISPLAY,
+        claim: "A one-byte reference modification of a display item passed to INVOKE becomes a Java char through the program's code page",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

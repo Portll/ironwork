@@ -223,7 +223,11 @@ impl<'p> Machine<'p, '_, '_> {
         let options = self.page.decode(&self.le_load(at, 255, call.pos)?);
         let (dd, invalid) = le::dump_options(&options);
         let now = self.le_now().fields();
-        let active: Vec<String> = self.unit.programs.iter().filter(|p| p.active).map(|p| format!("  {}", p.name)).collect();
+        let unit_name = |p: &crate::unit::Loaded| match p.compiled.as_ref().and_then(|c| c.program.oo.as_deref()).and_then(|o| o.method()) {
+            Some(m) => format!("{}.{}", m.class, m.name),
+            None => p.name.clone(),
+        };
+        let active: Vec<String> = self.unit.programs.iter().filter(|p| p.active).map(|p| format!("  {}", unit_name(p))).collect();
         let mut lines = vec![
             format!("CEE3DMP: {:<60}  {:04}-{:02}-{:02} {:02}:{:02}:{:02}", title.chars().take(60).collect::<String>().trim_end(), now.year, now.month, now.day, now.hour, now.minute, now.second),
             format!("Options: {}", options.trim_end()),
