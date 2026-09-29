@@ -23,6 +23,7 @@ mod cics_bms;
 mod cics_files;
 mod cics_services;
 mod file_io;
+mod le_services;
 mod sql;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -975,10 +976,11 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let name = self.program_name(&c.target, pos)?;
         let index = match self.unit.load(&name) {
             Ok(i) => i,
+            Err(LoadError::NotFound) if crate::le::provides(&name) => return self.le_call(c, &name),
             Err(LoadError::NotFound) => {
                 return match &c.on_exception {
                     Some(body) => self.run_block(body),
-                    None => Err(Abend { code: "S806".into(), message: format!("CALL {name}: no such program in the run unit or its program libraries"), pos }),
+                    None => Err(Abend { code: "S806".into(), message: crate::le::missing(&name), pos }),
                 };
             }
             Err(LoadError::Compile(message)) => return Err(Abend::ironwork(format!("CALL {name}: {message}"), pos)),

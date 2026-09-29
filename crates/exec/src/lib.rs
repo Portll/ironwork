@@ -6,6 +6,7 @@ pub mod codec;
 pub mod edit;
 pub mod files;
 pub mod layout;
+pub mod le;
 pub mod machine;
 pub mod picture;
 pub mod sql;

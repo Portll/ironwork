@@ -35,8 +35,9 @@ otherwise the system clock in UTC.
 
 Exit status: RETURN-CODE when the run ends normally; 12 compile errors; 16 an abend, whose message
 names the system completion code (S0C7 for a data exception, S0C4 for a LINKAGE item with no
-address, S806 for a program CALL cannot find) or the file status of an unhandled I/O failure; 2
-usage.
+address, S806 for a program CALL cannot find), the user completion code (U0999 from CEE3ABD, U4038
+for a Language Environment condition nothing handled) or the file status of an unhandled I/O
+failure; 2 usage.
 
 ## Crates
 
@@ -114,6 +115,16 @@ The subset the interpreter runs today:
   HOST:PORT` is a TN3270 server a 3270 emulator such as c3270 or x3270 connects to, running
   pseudo-conversations task after task (`--transaction TRAN=PROGRAM` names the programs RETURN
   TRANSID leads to). The choices made without a z/OS to observe are assumptions C28 to C33.
+- **Language Environment callable services:** a CALL that finds no program of the name reaches
+  the service. CEE3ABD ends the run with user abend U*abcode*; CEEDAYS, CEEDATE, CEEDATM,
+  CEESECS and CEEDYWK convert between text, Lilian days and Lilian seconds (a COMP-2, in HFP) by
+  picture strings of years, months and month names, days, day of year and weekday names, hours,
+  minutes, seconds, fractions and AM/PM; CEELOCT, CEEGMT, CEEUTC and CEEGMTO read the `--clock`,
+  taking local time as UTC; CEEMOUT writes to DD SYSOUT and CEE3DMP to DD CEEDUMP, or both to
+  standard error; CEEGTST and CEEFRST get and free heap storage. Each returns its 12-byte
+  feedback code, and with the feedback code OMITTED a failure ends the run with U4038. Any other
+  LE service ends the run S806, which names it as one ironwork does not provide yet. The choices
+  are assumptions L1 to L14.
 
 Anything else is refused by name at compile time.
 SSRANGE is honoured, including for OCCURS DEPENDING ON counts; without it a subscript can reach

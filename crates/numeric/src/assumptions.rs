@@ -59,6 +59,20 @@ pub const BMS_EXTENDED_ORDER: &str = "C30";
 pub const BMS_CONSTANTS_UNVERIFIED: &str = "C31";
 pub const BMS_SEND_DATA_CHOICE: &str = "C32";
 pub const CICS_INITIAL_AID: &str = "C33";
+pub const LE_SERVICE_AFTER_PROGRAMS: &str = "L1";
+pub const LE_ARGUMENTS_BY_ADDRESS: &str = "L2";
+pub const LE_FEEDBACK_TOKEN: &str = "L3";
+pub const LE_FEEDBACK_NO_INSTANCE_INFO: &str = "L4";
+pub const LE_OMITTED_FC_ABENDS: &str = "L5";
+pub const LE_CEE3ABD: &str = "L6";
+pub const LE_LOCAL_TIME_IS_UTC: &str = "L7";
+pub const LE_SECONDS_HFP: &str = "L8";
+pub const LE_PICTURE_OUTPUT: &str = "L9";
+pub const LE_PICTURE_INPUT: &str = "L10";
+pub const LE_CENTURY_WINDOW: &str = "L11";
+pub const LE_RETURN_CODE_UNCHANGED: &str = "L12";
+pub const LE_MESSAGE_AND_DUMP_FILES: &str = "L13";
+pub const LE_HEAP: &str = "L14";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -268,6 +282,90 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: REWRITE_SHARED_ALTERNATE,
         claim: "REWRITE gives 02 whenever another record shares one of the record's alternate keys that allow duplicates, whether or not that key changed",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_SERVICE_AFTER_PROGRAMS,
+        claim: "A CALL that finds no program of its name in the run unit or its program libraries reaches the Language Environment callable service of that name, as a link-edit that finds the name in no user library resolves it from SCEELKED; a user program of the same name comes first",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_ARGUMENTS_BY_ADDRESS,
+        claim: "A callable service reads and stores each parameter at its argument's address for the length SA38-0683-60 gives it (fullword, halfword-prefixed string, 8-byte COMP-2, 17- or 80-byte string, 12-byte feedback code), whatever the argument's own length; an OMITTED parameter other than fc is a protection exception (S0C4), and a store past the end of the run unit's storage is lost",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_FEEDBACK_TOKEN,
+        claim: "A feedback code is 12 bytes: severity and message number as halfwords, a byte of case 1, severity and control 001 (X'59' at severity 3), the facility CEE in EBCDIC, then the instance-specific word; twelve zero bytes are CEE000, success (SA38-0683-60, _FEEDBACK in Table 20; so CEE2EB, severity 3 and message 2507, is X'000309CB59C3C5C5')",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_FEEDBACK_NO_INSTANCE_INFO,
+        claim: "The instance-specific word of every feedback code the provided services return is zero",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_OMITTED_FC_ABENDS,
+        claim: "With fc OMITTED a failing service signals its condition (SA38-0683-60, Invoking callable services); nothing handles it, so one of severity 2 or more ends the run as the default ABTERMENC(ABEND) does, with user abend U4038, and one of severity 1 lets the run continue",
+        basis: Basis::Recalled,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_CEE3ABD,
+        claim: "CEE3ABD ends the run with user abend abcode modulo 4096, the ABEND macro's user completion code, to which SA38-0683-60 says abcode passes unchecked; every clean-up value ends it alike: open files are closed as at any ironwork abend, and neither a CEEDUMP nor a system dump is written",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_LOCAL_TIME_IS_UTC,
+        claim: "Local time is UTC: CEELOCT and CEEGMT read the clock that ACCEPT FROM DATE and TIME and CURRENT-DATE read, and CEEGMTO reports a zero offset, as CURRENT-DATE reports +0000",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_SECONDS_HFP,
+        claim: "Lilian seconds are the whole number of milliseconds converted to long HFP and divided by 1000, truncating as FLOAT_FROM_DECIMAL does, so a MOVE of CEESECS's result to a decimal item can show a millisecond less; seconds given to CEEDATM are taken to the nearest millisecond",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_PICTURE_OUTPUT,
+        claim: "CEEDATE and CEEDATM write the terms of SA38-0683-60 Table 34 and copy anything else as it stands, with English month and day names; MM after an hour term is minutes (Table 28); CEEDATE writes time terms as zero and AP as AM (Table 27, where Table 35 says blank); the eras <JJJJ>, <CCCC> and YYY are not provided and give CEE2EM; a null or blank picture is the COUNTRY(US) default of Table 33",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_PICTURE_INPUT,
+        claim: "CEEDAYS and CEESECS read a numeric term followed by a delimiter as up to its width of digits (6/2/88 for MM/DD/YY) and any other as exactly its width, leading blanks allowed; a delimiter takes one character, whatever it is; a month name is three or more of its letters; input that ends before the date is complete is CEE2EB, before the time is complete, zeros; a non-digit is CEE2EO (CEE2ET for CEESECS)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_CENTURY_WINDOW,
+        claim: "A two-digit year falls in the hundred years starting 80 years before the current year (SA38-0683-60, CEEDAYS and CEESECS); CEESCEN, which moves the window, is not provided",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_RETURN_CODE_UNCHANGED,
+        claim: "A CALL of a callable service leaves RETURN-CODE as it was; SA38-0683-60 leaves register 15 undefined on return",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_MESSAGE_AND_DUMP_FILES,
+        claim: "CEEMOUT writes to DD SYSOUT, MSGFILE's default ddname, and CEE3DMP to DD CEEDUMP or the ddname FNAME gives, as UTF-8 text lines, the run's first write replacing the file, or to standard error without the DD; CEE3DMP writes its title, date and time, options and the active programs, not storage or control blocks",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_HEAP,
+        claim: "CEEGTST gives zeroed run-unit storage on a doubleword from heap 0 only, refuses a request above 256 MiB with CEE0PD, and keeps the storage until the run ends; CEEFRST marks it free, and it is not reused",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

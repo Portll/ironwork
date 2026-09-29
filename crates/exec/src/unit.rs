@@ -72,6 +72,8 @@ pub struct RunUnit<'w> {
     pub cics_files: HashMap<String, Open>,
     /// The database EXEC SQL statements reach, when the run has one.
     pub sql: Option<crate::sql::Session<'w>>,
+    /// Language Environment's heap storage and message files.
+    pub le: crate::le::State,
 }
 
 fn member_name(name: &str) -> bool {
@@ -95,6 +97,7 @@ impl<'w> RunUnit<'w> {
             eib: 0,
             cics_files: HashMap::new(),
             sql: None,
+            le: crate::le::State::default(),
         }
     }
 
@@ -121,9 +124,9 @@ impl<'w> RunUnit<'w> {
         at
     }
 
-    /// Releases arguments pushed since `mark`, unless a program was loaded behind them.
+    /// Releases arguments pushed since `mark`, unless a program or heap storage was placed behind them.
     pub fn release_temporaries(&mut self, mark: usize) {
-        if self.programs.iter().all(|p| p.base < mark) {
+        if self.programs.iter().all(|p| p.base < mark) && self.le.heap_end() <= mark {
             self.mem.truncate(mark.max(RESERVED));
         }
     }
