@@ -1,0 +1,51 @@
+== the SQLCA after each statement
+connect                    code=0 state=00000 warn=     errd3=0 ind=0 value=[]
+no row                     code=100 state=02000 warn=     errd3=0 ind=0 value=[]
+two rows                   code=-811 state=21000 warn=     errd3=0 ind=0 value=[]
+null, no indicator         code=-305 state=22002 warn=     errd3=0 ind=0 value=[]
+varchar cut, C string      code=0 state=01004 warn=WW   errd3=0 ind=18 value=[A LONG]
+varchar cut, VARCHAR       code=0 state=01004 warn=WW   errd3=0 ind=18 value=[A LON len=5]
+char blanks cut            code=0 state=01004 warn=WW   errd3=0 ind=10 value=[ADAMS A LONG]
+char fits                  code=0 state=00000 warn=     errd3=0 ind=0 value=[ADAMS     ]
+out of range               code=-304 state=22003 warn=     errd3=0 ind=0 value=[]
+timestamp and time         code=0 state=00000 warn=     errd3=0 ind=0 value=[2020-01-02-03.04.05.500000|13:45:06]
+duplicate key              code=-803 state=23505 warn=     errd3=0 ind=0 value=[]
+null into not null         code=-407 state=23502 warn=     errd3=0 ind=-1 value=[]
+foreign key                code=-530 state=23503 warn=     errd3=0 ind=0 value=[]
+input too long             code=-433 state=22001 warn=     errd3=0 ind=0 value=[]
+division by zero           code=-801 state=22012 warn=     errd3=0 ind=0 value=[]
+syntax error               code=-104 state=42601 warn=     errd3=0 ind=0 value=[SELEC 1 FROM sysibm.sysdummy1]
+undefined table            code=-204 state=42704 warn=     errd3=0 ind=0 value=[DELETE FROM nosuch]
+undefined column           code=-206 state=42703 warn=     errd3=0 ind=0 value=[UPDATE emp SET nosuch = 1]
+update, no row             code=100 state=02000 warn=     errd3=0 ind=0 value=[]
+update, two rows           code=0 state=00000 warn=     errd3=2 ind=0 value=[]
+delete, no row             code=100 state=02000 warn=     errd3=0 ind=0 value=[]
+fetch, never opened        code=-501 state=24501 warn=     errd3=0 ind=0 value=[]
+close, never opened        code=-501 state=24501 warn=     errd3=0 ind=0 value=[]
+open, already open         code=-502 state=24502 warn=     errd3=0 ind=0 value=[]
+delete of, not open        code=-507 state=24501 warn=     errd3=0 ind=0 value=[]
+delete of, not on a row    code=-508 state=24504 warn=     errd3=0 ind=0 value=[]
+update of, on a row        code=0 state=00000 warn=     errd3=1 ind=0 value=[ADAMS     ]
+fetch c1 after commit      code=-501 state=24501 warn=     errd3=0 ind=0 value=[]
+fetch held after commit    code=0 state=00000 warn=     errd3=1 ind=0 value=[ADAMS     ]
+update of, after commit    code=-507 state=24501 warn=     errd3=0 ind=0 value=[]
+fetch past the end         code=100 state=02000 warn=     errd3=0 ind=0 value=[]
+insert, then end           code=0 state=00000 warn=     errd3=1 ind=0 value=[]
+== a normal end without COMMIT, then exit(8) (SQ1)
+insert code=0
+row kept:           0
+insert code=0
+row kept:           0
+== DATETIME(ISO) (SQ11)
+code=0 time=[13.45.06] date=[2020-01-02]
+== an INTO list shorter than the select list
+code=0 state=01503 warn0=W warn3=W name=[ADAMS     ]
+== blank-padded comparison (SQ12):           1
+== the precompiler's WHENEVER tests (SQ2)
+  if (sqlca.sqlcode < 0)
+    goto failed;
+  if (((sqlca.sqlcode > 0) && (sqlca.sqlcode != 100)) ||
+      ((sqlca.sqlcode == 0) && (sqlca.sqlwarn[0] == 'W')))
+    goto warned;
+  if (sqlca.sqlcode == 100)
+    goto none;

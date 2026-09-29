@@ -1,0 +1,11 @@
+#include <stdio.h>
+EXEC SQL INCLUDE SQLCA;
+EXEC SQL BEGIN DECLARE SECTION;
+  char name[11];
+EXEC SQL END DECLARE SECTION;
+int main(void) {
+  EXEC SQL CONNECT TO testdb;
+  EXEC SQL SELECT name, amt INTO :name FROM emp WHERE id = 1;
+  printf("code=%d state=%.5s warn0=%c warn3=%c name=[%s]\n", (int)sqlca.sqlcode, sqlca.sqlstate, sqlca.sqlwarn[0] ? sqlca.sqlwarn[0] : ' ', sqlca.sqlwarn[3] ? sqlca.sqlwarn[3] : ' ', name);
+  return 0;
+}

@@ -29,7 +29,7 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
             return Err(refused("no database is attached to the run".into()));
         }
         let mut warnings = Warnings::default();
-        let outcome = match &sql.statement {
+        let mut outcome = match &sql.statement {
             Statement::Query { text, inputs, into } => match self.sql_inputs(inputs, &block.command)? {
                 Err(e) => Outcome::error(e.code, e.state),
                 Ok(values) => {
@@ -89,7 +89,8 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
                     if let Some(open) = self.session().cursor(program, cursor) {
                         open.positioned = on_row;
                     }
-                    self.sql_single_row(answer, into, &mut warnings, &block.command)?
+                    let fetched = self.sql_single_row(answer, into, &mut warnings, &block.command)?;
+                    Outcome { affected: i64::from(on_row), ..fetched }
                 }
             }
             Statement::Close { cursor } => {
@@ -127,6 +128,13 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
             self.session().rolled_back();
         }
         warnings[0] = warnings[1..].iter().any(|&w| w);
+        if outcome.sqlcode == 0 && outcome.sqlstate == "00000" {
+            if warnings[TRUNCATED] {
+                outcome.sqlstate = "01004".into();
+            } else if warnings[COLUMN_COUNT] {
+                outcome.sqlstate = "01503".into();
+            }
+        }
         self.sqlca(&outcome, &warnings, pos)?;
         self.whenever(&sql.whenever, outcome.sqlcode, warnings[0], pos)
     }
@@ -405,6 +413,28 @@ mod tests {
         let long = vec![vec![Value::Char("ABCDEFGHIJKL".into()), Value::Int(0)]];
         let shown = run(&select(":WS-NAME:WS-IND, :WS-AMT"), vec![Outcome::rows(long)]).0.unwrap();
         assert_eq!(shown, "ABCDEFGHIJ| 00000.00| 000| 012|WW \n");
+    }
+
+    /// As Db2 12.1 for Linux answers them (sql-runtime.md step 8).
+    #[test]
+    fn warnings_carry_their_sqlstate_and_a_fetch_counts_its_row() {
+        let long = vec![vec![Value::Char("ABCDEFGHIJKL".into())]];
+        let procedure = "           EXEC SQL SELECT NAME INTO :WS-NAME FROM T END-EXEC.\n           DISPLAY SQLSTATE.\n           GOBACK.\n";
+        assert_eq!(run(procedure, vec![Outcome::rows(long)]).0.as_deref(), Ok("01004\n"));
+        let extra = vec![vec![Value::Char("A".into()), Value::Int(1)]];
+        assert_eq!(run(procedure, vec![Outcome::rows(extra)]).0.as_deref(), Ok("01503\n"));
+        let procedure = [
+            "           EXEC SQL DECLARE C1 CURSOR FOR SELECT NAME FROM T\n                    END-EXEC.\n",
+            "           EXEC SQL OPEN C1 END-EXEC.\n",
+            "           EXEC SQL FETCH C1 INTO :WS-NAME END-EXEC.\n",
+            "           MOVE SQLERRD(3) TO E-CODE.\n           DISPLAY E-CODE.\n",
+            "           EXEC SQL FETCH C1 INTO :WS-NAME END-EXEC.\n",
+            "           MOVE SQLERRD(3) TO E-CODE.\n           DISPLAY E-CODE.\n",
+            "           GOBACK.\n",
+        ]
+        .concat();
+        let answers = vec![Outcome::ok(), Outcome::rows(vec![vec![Value::Char("X".into())]]), Outcome::rows(Vec::new())];
+        assert_eq!(run(&procedure, answers).0.as_deref(), Ok(" 001\n 000\n"));
     }
 
     #[test]

@@ -1,5 +1,5 @@
-//! Db2 statement text as PostgreSQL reads it (assumption S5), values as the text PostgreSQL's wire
-//! carries, and PostgreSQL's SQLSTATEs as Db2's SQLCODEs (assumption S4).
+//! Db2 statement text as PostgreSQL reads it (assumption SQ5), values as the text PostgreSQL's wire
+//! carries, and PostgreSQL's SQLSTATEs as Db2's SQLCODEs (assumption SQ4).
 
 use crate::sql::Value;
 

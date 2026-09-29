@@ -171,7 +171,7 @@ fn float(value: &Value) -> Result<f64, SqlError> {
 }
 
 /// An IEEE double as a hexadecimal floating-point storage image, low-order bits that do not fit
-/// the short form dropped (assumption S9). None when the exponent is outside HFP's range.
+/// the short form dropped (assumption SQ9). None when the exponent is outside HFP's range.
 fn hfp_image(f: f64, precision: Precision) -> Option<Vec<u8>> {
     let len = precision.bytes();
     if f == 0.0 {

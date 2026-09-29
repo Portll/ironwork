@@ -96,7 +96,7 @@ pub fn unbase64(text: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// A client nonce from `std`'s OS-seeded hasher keys, the process and the clock (assumption S6).
+/// A client nonce from `std`'s OS-seeded hasher keys, the process and the clock (assumption SQ6).
 pub fn nonce() -> String {
     use std::hash::{BuildHasher, Hasher};
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());

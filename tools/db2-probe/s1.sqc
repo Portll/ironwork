@@ -1,0 +1,10 @@
+#include <stdio.h>
+EXEC SQL INCLUDE SQLCA;
+int main(int argc, char **argv) {
+  EXEC SQL CONNECT TO testdb;
+  EXEC SQL DELETE FROM emp WHERE id = 50;
+  EXEC SQL COMMIT;
+  EXEC SQL INSERT INTO emp (id, name) VALUES (50, 'PENDING');
+  printf("insert code=%d\n", (int)sqlca.sqlcode);
+  return argc > 1 ? 8 : 0;
+}

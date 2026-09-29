@@ -1,0 +1,124 @@
+#include <stdio.h>
+#include <string.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+EXEC SQL BEGIN DECLARE SECTION;
+  char name[11];
+  char name5[6];
+  char note5[6];
+  struct { short len; char data[5]; } vnote;
+  short ind;
+  short small;
+  sqlint32 num;
+  char big[16];
+  char stmt[100];
+  char stamp[27];
+  char tval[9];
+  double dbl;
+EXEC SQL END DECLARE SECTION;
+
+static char mark(char c) { return c ? c : ' '; }
+
+static void show(const char *label, const char *value) {
+  printf("%-26s code=%d state=%.5s warn=%c%c%c%c errd3=%d ind=%d value=[%s]\n", label, (int)sqlca.sqlcode,
+         sqlca.sqlstate, mark(sqlca.sqlwarn[0]), mark(sqlca.sqlwarn[1]), mark(sqlca.sqlwarn[2]),
+         mark(sqlca.sqlwarn[3]), (int)sqlca.sqlerrd[2], (int)ind, value);
+  ind = 0;
+}
+
+static void immediate(const char *label, const char *text) {
+  strcpy(stmt, text);
+  EXEC SQL EXECUTE IMMEDIATE :stmt;
+  show(label, text);
+}
+
+int main(void) {
+  char buf[64];
+  EXEC SQL CONNECT TO testdb;
+  show("connect", "");
+
+  EXEC SQL SELECT name INTO :name FROM emp WHERE id = 99;
+  show("no row", "");
+  EXEC SQL SELECT name INTO :name FROM emp;
+  show("two rows", "");
+  EXEC SQL SELECT amt INTO :dbl FROM emp WHERE id = 2;
+  show("null, no indicator", "");
+  EXEC SQL SELECT note INTO :note5:ind FROM emp WHERE id = 1;
+  show("varchar cut, C string", note5);
+  EXEC SQL SELECT note INTO :vnote:ind FROM emp WHERE id = 1;
+  sprintf(buf, "%.*s len=%d", vnote.len, vnote.data, vnote.len);
+  show("varchar cut, VARCHAR", buf);
+  EXEC SQL SELECT name INTO :name5:ind FROM emp WHERE id = 1;
+  show("char blanks cut", name5);
+  EXEC SQL SELECT name INTO :name:ind FROM emp WHERE id = 1;
+  show("char fits", name);
+  EXEC SQL SELECT 100000 INTO :small FROM sysibm.sysdummy1;
+  show("out of range", "");
+  EXEC SQL SELECT stamp, t INTO :stamp, :tval FROM emp WHERE id = 1;
+  sprintf(buf, "%s|%s", stamp, tval);
+  show("timestamp and time", buf);
+
+  EXEC SQL INSERT INTO emp (id, name) VALUES (1, 'DUP');
+  show("duplicate key", "");
+  ind = -1;
+  EXEC SQL INSERT INTO emp (id, name) VALUES (7, :name:ind);
+  show("null into not null", "");
+  EXEC SQL INSERT INTO asg VALUES (99);
+  show("foreign key", "");
+  strcpy(big, "FIFTEEN CHARS!!");
+  EXEC SQL INSERT INTO emp (id, name) VALUES (8, :big);
+  show("input too long", "");
+  num = 0;
+  EXEC SQL SELECT 1 / :num INTO :num FROM sysibm.sysdummy1;
+  show("division by zero", "");
+  immediate("syntax error", "SELEC 1 FROM sysibm.sysdummy1");
+  immediate("undefined table", "DELETE FROM nosuch");
+  immediate("undefined column", "UPDATE emp SET nosuch = 1");
+  EXEC SQL UPDATE emp SET amt = amt WHERE id = 99;
+  show("update, no row", "");
+  EXEC SQL UPDATE emp SET amt = amt WHERE id < 3;
+  show("update, two rows", "");
+  EXEC SQL DELETE FROM emp WHERE id = 99;
+  show("delete, no row", "");
+
+  EXEC SQL DECLARE c1 CURSOR FOR SELECT name FROM emp ORDER BY id;
+  EXEC SQL DECLARE c2 CURSOR FOR SELECT name FROM emp FOR UPDATE;
+  EXEC SQL DECLARE c3 CURSOR WITH HOLD FOR SELECT name FROM emp ORDER BY id;
+  EXEC SQL FETCH c1 INTO :name;
+  show("fetch, never opened", "");
+  EXEC SQL CLOSE c1;
+  show("close, never opened", "");
+  EXEC SQL OPEN c1;
+  EXEC SQL OPEN c1;
+  show("open, already open", "");
+  EXEC SQL DELETE FROM emp WHERE CURRENT OF c2;
+  show("delete of, not open", "");
+  EXEC SQL OPEN c2;
+  EXEC SQL DELETE FROM emp WHERE CURRENT OF c2;
+  show("delete of, not on a row", "");
+  EXEC SQL FETCH c2 INTO :name;
+  EXEC SQL UPDATE emp SET amt = amt WHERE CURRENT OF c2;
+  show("update of, on a row", name);
+  EXEC SQL OPEN c3;
+  EXEC SQL COMMIT;
+  EXEC SQL FETCH c1 INTO :name;
+  show("fetch c1 after commit", "");
+  EXEC SQL FETCH c3 INTO :name;
+  show("fetch held after commit", name);
+  EXEC SQL UPDATE emp SET amt = amt WHERE CURRENT OF c2;
+  show("update of, after commit", "");
+  EXEC SQL CLOSE c3;
+  EXEC SQL OPEN c1;
+  EXEC SQL FETCH c1 INTO :name;
+  EXEC SQL FETCH c1 INTO :name;
+  EXEC SQL FETCH c1 INTO :name;
+  EXEC SQL FETCH c1 INTO :name;
+  show("fetch past the end", "");
+  EXEC SQL CLOSE c1;
+  EXEC SQL ROLLBACK;
+
+  EXEC SQL INSERT INTO emp (id, name) VALUES (50, 'LAST');
+  show("insert, then end", "");
+  return 0;
+}

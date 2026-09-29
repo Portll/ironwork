@@ -1,0 +1,14 @@
+EXEC SQL INCLUDE SQLCA;
+EXEC SQL BEGIN DECLARE SECTION;
+  char name[11];
+EXEC SQL END DECLARE SECTION;
+int main(void) {
+  EXEC SQL WHENEVER SQLERROR GOTO failed;
+  EXEC SQL WHENEVER NOT FOUND GOTO none;
+  EXEC SQL WHENEVER SQLWARNING GOTO warned;
+  EXEC SQL SELECT name INTO :name FROM emp WHERE id = 1;
+  return 0;
+failed: return 1;
+none: return 2;
+warned: return 3;
+}

@@ -1,0 +1,12 @@
+#include <stdio.h>
+EXEC SQL INCLUDE SQLCA;
+EXEC SQL BEGIN DECLARE SECTION;
+  char tval[9];
+  char dval[11];
+EXEC SQL END DECLARE SECTION;
+int main(void) {
+  EXEC SQL CONNECT TO testdb;
+  EXEC SQL SELECT t, DATE(stamp) INTO :tval, :dval FROM emp WHERE id = 1;
+  printf("code=%d time=[%s] date=[%s]\n", (int)sqlca.sqlcode, tval, dval);
+  return 0;
+}
