@@ -9,6 +9,16 @@ What exists: a model of what the machine and IBM's compiler do with the bytes, a
 that model against the real compiler, and a front end and interpreter that run a first subset of
 COBOL on EBCDIC storage through that model. Code generation does not exist yet.
 
+Install it from whichever registry you already use; each gives you the `ironwork` command:
+
+    cargo install ironwork
+    pip install ironwork
+    npm install -g @portll/ironwork
+
+The PyPI and npm packages carry builds for Linux (static, x64 and arm64), macOS (arm64 and x64) and
+Windows (x64). The same builds are attached to each [release](https://github.com/Portll/ironwork/releases).
+From a checkout:
+
     cargo run -p ironwork -- run program.cbl [-silent] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
     cargo run -p ironwork -- check program.cbl [-I copylib]...
 

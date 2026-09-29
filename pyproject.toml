@@ -1,0 +1,30 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "ironwork"
+description = "ironwork for COBOL: a COBOL compiler and interpreter whose target is IBM Enterprise COBOL for z/OS"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "AGPL-3.0-or-later AND Unicode-3.0"
+license-files = ["LICENSE", "NOTICE", "RUNTIME-EXCEPTION.md", "THIRD-PARTY-NOTICES.md"]
+keywords = ["cobol", "compiler", "mainframe", "ebcdic", "zos"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Rust",
+  "Topic :: Software Development :: Compilers",
+  "Topic :: Software Development :: Interpreters",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/Portll/ironwork"
+Source = "https://github.com/Portll/ironwork"
+Issues = "https://github.com/Portll/ironwork/issues"
+
+[tool.maturin]
+manifest-path = "crates/cli/Cargo.toml"
+bindings = "bin"

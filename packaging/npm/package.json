@@ -1,0 +1,33 @@
+{
+  "name": "@portll/ironwork",
+  "version": "0.0.0",
+  "description": "ironwork for COBOL: a COBOL compiler and interpreter whose target is IBM Enterprise COBOL for z/OS",
+  "license": "AGPL-3.0-or-later AND Unicode-3.0",
+  "author": "Portll <john@portll.net>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Portll/ironwork.git"
+  },
+  "homepage": "https://github.com/Portll/ironwork#readme",
+  "bugs": {
+    "url": "https://github.com/Portll/ironwork/issues"
+  },
+  "keywords": ["cobol", "compiler", "mainframe", "ebcdic", "zos"],
+  "bin": {
+    "ironwork": "bin/ironwork.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "LICENSE",
+    "NOTICE",
+    "RUNTIME-EXCEPTION.md",
+    "THIRD-PARTY-NOTICES.md",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": ["darwin", "linux", "win32"],
+  "cpu": ["x64", "arm64"]
+}
