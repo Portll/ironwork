@@ -58,6 +58,18 @@ impl From<std::cmp::Ordering> for Cc {
     }
 }
 
+impl Cc {
+    /// The comparison a code 0, 1 or 2 stands for.
+    pub fn ordering(self) -> Option<std::cmp::Ordering> {
+        match self.0 {
+            0 => Some(std::cmp::Ordering::Equal),
+            1 => Some(std::cmp::Ordering::Less),
+            2 => Some(std::cmp::Ordering::Greater),
+            _ => None,
+        }
+    }
+}
+
 /// The four PSW program-mask bits. A masked-off condition completes the instruction without an
 /// interruption.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -88,8 +88,7 @@ impl Fixed {
     }
 
     pub fn to_i128(self) -> Option<i128> {
-        let m = i128::try_from(self.magnitude.to_u128()?).ok()?;
-        Some(if self.negative { -m } else { m })
+        zarch::wide::signed_i128(self.negative, self.magnitude)
     }
 
     /// Keeps `to.dec` decimal places, truncating the rest, and `to.int` integer places, dropping

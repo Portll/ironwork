@@ -25,6 +25,11 @@ pub struct Decimal {
 }
 
 impl Decimal {
+    /// The signed value; `decode` bounds the magnitude to 31 digits, which fits.
+    pub fn to_i128(self) -> i128 {
+        if self.negative { -(self.magnitude as i128) } else { self.magnitude as i128 }
+    }
+
     fn neg(self) -> Self {
         Self { negative: !self.negative, ..self }
     }
@@ -151,12 +156,7 @@ pub fn sp(op1: &mut [u8], op2: &[u8]) -> Result<Cc, ProgramCheck> {
 /// COMPARE DECIMAL: algebraic, so +0 equals -0 and X'1F' equals X'1C'.
 pub fn cp(op1: &[u8], op2: &[u8]) -> Result<Cc, ProgramCheck> {
     let (a, b) = (decode(op1)?, decode(op2)?);
-    let signed = |d: Decimal| if d.negative { -(d.magnitude as i128) } else { d.magnitude as i128 };
-    Ok(Cc(match signed(a).cmp(&signed(b)) {
-        Ordering::Equal => 0,
-        Ordering::Less => 1,
-        Ordering::Greater => 2,
-    }))
+    Ok(Cc::from(a.to_i128().cmp(&b.to_i128())))
 }
 
 fn check_multiplier_len(op1: &[u8], op2: &[u8]) -> Result<(), ProgramCheck> {
@@ -216,16 +216,12 @@ pub fn srp(op1: &mut [u8], shift: u8, rounding: u8) -> Result<Cc, ProgramCheck> 
 
 /// CONVERT TO BINARY (32-bit).
 pub fn cvb(op2: &[u8; 8]) -> Result<i32, ProgramCheck> {
-    let d = decode(op2)?;
-    let v = if d.negative { -(d.magnitude as i128) } else { d.magnitude as i128 };
-    i32::try_from(v).map_err(|_| ProgramCheck::FixedPointDivide)
+    i32::try_from(decode(op2)?.to_i128()).map_err(|_| ProgramCheck::FixedPointDivide)
 }
 
 /// CONVERT TO BINARY (64-bit).
 pub fn cvbg(op2: &[u8; 16]) -> Result<i64, ProgramCheck> {
-    let d = decode(op2)?;
-    let v = if d.negative { -(d.magnitude as i128) } else { d.magnitude as i128 };
-    i64::try_from(v).map_err(|_| ProgramCheck::FixedPointDivide)
+    i64::try_from(decode(op2)?.to_i128()).map_err(|_| ProgramCheck::FixedPointDivide)
 }
 
 pub fn cvd(value: i32) -> [u8; 8] {

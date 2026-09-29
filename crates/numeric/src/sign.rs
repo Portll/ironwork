@@ -30,11 +30,7 @@ pub fn move_packed(source: &[u8], receiver_signed: bool, numproc: Numproc) -> Ve
 /// A comparison between packed items of the same length and scale.
 pub fn compare_packed(a: &[u8], b: &[u8], numproc: Numproc) -> Result<Ordering, ProgramCheck> {
     match numproc {
-        Numproc::Nopfd => Ok(match decimal::cp(a, b)?.0 {
-            0 => Ordering::Equal,
-            1 => Ordering::Less,
-            _ => Ordering::Greater,
-        }),
+        Numproc::Nopfd => Ok(decimal::cp(a, b)?.ordering().unwrap_or(Ordering::Greater)),
         Numproc::Pfd => Ok(a.cmp(b)),
     }
 }
