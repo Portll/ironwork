@@ -1,7 +1,7 @@
 //! Language Environment callable services (SA38-0683-60): which ones ironwork provides, their
 //! condition tokens, Lilian dates and seconds, and the picture strings of the date and time
 //! services. The CALL side, which reads and writes the arguments, is machine/le_services.rs. What
-//! the manual leaves open is `numeric::assumptions` L1 to L14.
+//! the manual leaves open is `numeric::assumptions` L1 to L18.
 
 use numeric::precision::{Fixed, Places};
 use zarch::check::ProgramMask;
@@ -99,20 +99,14 @@ pub const TIMESTAMP_TRUNCATED: Condition = condition(2, 2527);
 pub const DUMP_OPTIONS: Condition = condition(2, 3102);
 
 impl Condition {
-    /// The symbolic feedback code: CEE and the message number in base 32.
     pub fn symbol(self) -> String {
-        let digit = |d: u16| char::from_digit(u32::from(d), 32).unwrap_or('0').to_ascii_uppercase();
-        let n = self.number;
-        format!("CEE{}{}{}", digit(n / 1024 % 32), digit(n / 32 % 32), digit(n % 32))
+        syntax::feedback::symbol(self.number)
     }
 
-    /// The 12-byte condition token: case 1, facility CEE, no instance-specific information.
+    /// The 12-byte condition token, with no instance-specific information.
     pub fn token(self) -> [u8; 12] {
         let mut t = [0u8; 12];
-        t[0..2].copy_from_slice(&u16::from(self.severity).to_be_bytes());
-        t[2..4].copy_from_slice(&self.number.to_be_bytes());
-        t[4] = 0x40 | (self.severity & 7) << 3 | 0x01;
-        t[5..8].copy_from_slice(&[0xC3, 0xC5, 0xC5]);
+        t[..8].copy_from_slice(&syntax::feedback::token(self.severity, self.number));
         t
     }
 

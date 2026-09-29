@@ -4,6 +4,7 @@
 pub mod ast;
 pub mod bms;
 pub mod copy;
+pub mod feedback;
 pub mod jni;
 pub mod lexer;
 pub mod parser;

@@ -51,9 +51,12 @@ impl<'p> Machine<'p, '_, '_> {
     fn le_service(&mut self, name: &str, args: &[Option<usize>], pos: Pos) -> R<()> {
         let params = le::parameters(name).unwrap_or_default();
         let required = params.iter().filter(|p| **p != "fc").count();
-        let needed = if name == "CEE3ABD" { 1 } else { required };
-        if args.len() < needed {
-            return Err(Abend::ironwork(format!("CALL {name} passes {} arguments; {name} takes {}", args.len(), params.join(", ")), pos));
+        if args.len() < params.len() {
+            let passed = match args.len() {
+                1 => "1 argument".to_owned(),
+                n => format!("{n} arguments"),
+            };
+            return Err(Abend::ironwork(format!("CALL {name} passes {passed}; {name} takes {}, and with fewer z/OS is unpredictable", params.join(", ")), pos));
         }
         let call = LeCall { name, args, pos };
         let failed = match name {

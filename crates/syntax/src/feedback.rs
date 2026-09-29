@@ -1,0 +1,125 @@
+//! Language Environment feedback codes: the condition tokens of facility CEE, their symbolic names,
+//! and CEEIGZCT, ironwork's own declaration of them for a COPY CEEIGZCT that no library answers.
+//! The conditions are those the z/OS Language Environment Runtime Messages (SA38-0686-60, chapter 1)
+//! give a symbolic feedback code; the token is the case 1 layout of the Programming Reference
+//! (SA38-0683-60, CEENCOD and Table 20). Assumptions L16 and L17 record the sources and the
+//! choices where the manuals disagree.
+
+/// Each condition by its message identifier less the facility: the number and the severity letter.
+const MESSAGES: &str = "\
+    0000I 0102S 0110S 0111S 0112S 0113S 0198S 0199W 0201I 0250S 0252W 0253W 0254W 0255S 0256W 0257S 0259S 0260S 0264S 0277W \
+    0355C 0356C 0374C 0398W 0399W 0400E 0401S 0402S 0403S 0404W 0450S 0451S 0452S 0454S 0455W 0457S 0458S 0459S 0460W 0461S \
+    0462S 0463S 0464S 0502S 0553S 0554W 0802C 0803S 0804S 0805S 0806S 0807S 0808S 0809S 0810S 0812S 0813S 0814S 0815E 1000S \
+    1001E 2001E 2002E 2003E 2004E 2005E 2006E 2007E 2008E 2009E 2010E 2011E 2012E 2013E 2014E 2015E 2016E 2017E 2018E 2019E \
+    2020E 2021E 2022E 2024E 2025W 2028E 2029E 2030E 2031E 2040E 2041E 2042E 2043E 2050S 2051S 2052S 2053S 2502S 2503S 2505S \
+    2506S 2507S 2508S 2509S 2510S 2511S 2512S 2513S 2514S 2515S 2516S 2517S 2518S 2519S 2520S 2521S 2522S 2523W 2524S 2525S \
+    2526E 2527E 2529S 2530S 2531S 2533S 2534W 2535S 2600I 2601I 2602I 2603I 2604I 2606E 2607E 2608E 2701S 2702S 2999C 3098S \
+    3100E 3101E 3102E 3103S 3104S 3105S 3106S 3107E 3108E 3110E 3111I 3186E 3191E 3192C 3193I 3194E 3195W 3196W 3197W 3198S \
+    3199S 3200S 3201S 3202S 3203S 3204S 3205S 3206S 3207S 3208S 3209S 3210S 3211S 3212S 3213S 3214S 3215S 3216S 3217S 3218S \
+    3219S 3220S 3221S 3222S 3223S 3224S 3225S 3226S 3227S 3228S 3229S 3230E 3231S 3232S 3233S 3234S 3235S 3236S 3237S 3238S \
+    3239S 3240S 3250C 3251I 3253C 3254C 3255C 3260W 3261W 3262W 3263C 3264S 3292W 3293C 3294E 3295E 3296E 3297E 3298E 3299E \
+    3300E 3301E 3303E 3350S 3351S 3352E 3353S 3354S 3355S 3356S 3357S 3358E 3359E 3360S 3361W 3362S 3363S 3364W 3365S 3367E \
+    3370W 3380W 3400W 3401W 3402E 3403E 3404I 3405I 3406S 3407S 3408E 3424S 3425S 3426S 3427S 3428S 3429S 3449S 3450E 3451S \
+    3452S 3454S 3455E 3456S 3457S 3458E 3459S 3460E 3461E 3462E 3463E 3464E 3465E 3466E 3467E 3468E 3469E 3470E 3471E 3472S \
+    3473S 3475S 3476S 3480S 3481S 3482S 3484E 3485S 3486S 3487S 3488S 3489S 3490S 3491S 3492S 3493W 3494S 3495S 3496I 3497E \
+    3498I 3499E 3500S 3501S 3502S 3503S 3504S 3505S 3506S 3507S 3508S 3509S 3510S 3511S 3512S 3513S 3514C 3515I 3517S 3518S \
+    3519S 3530S 3531S 3532S 3533S 3534S 3535S 3536S 3537S 3538S 3539S 3540S 3541S 3542S 3543E 3544E 3545E 3546E 3547E 3548E \
+    3549S 3550S 3551S 3552S 3553S 3554S 3555S 3556S 3557S 3558S 3559S 3560S 3561S 3562S 3563S 3564S 3565I 3566I 3567I 3568I \
+    3569E 3570S 3571S 3572I 3573I 3574I 3575I 3576I 3577I 3578I 3579S 3580S 3581S 3582S 3583S 3584E 3585E 3586S 3587S 3588S \
+    3589S 3590I 3591I 3592I 3593I 3594I 3595S 3600S 3601I 3602I 3603I 3604I 3605I 3606I 3607I 3608I 3609I 3610I 3611I 3612I \
+    3613I 3614I 3616I 3617I 3618I 3619I 3620I 3621I 3622I 3623I 3624I 3625I 3626I 3627I 3628I 3629I 3630I 3631I 3632I 3633W \
+    3634I 3635I 3636I 3637I 3638I 3639I 3640W 3641I 3642I 3643I 3644I 3645I 3646I 3647I 3648S 3649W 3700I 3701W 3702S 3703I \
+    3704I 3705I 3706I 3707I 3708I 3709I 3710I 3711I 3712I 3713I 3714I 3715W 3716I 3717I 3728S 3730I 3731I 3732I 3733I 3734I \
+    3735I 3736I 3737I 3738I 3739I 3740I 3741I 3742I 3743I 3744I 3745I 3746I 3748I 3749I 3751I 3752I 3753I 3754S 3755I 3760E \
+    3761I 3762I 3765I 3766I 3767I 3768I 3769I 3770I 3771I 3772I 3775W 3781I 3782E 3783I 3784I 3785I 3786I 3787I 3788I 3789I \
+    3790I 3791I 3792I 3793I 3794I 3795I 3799I 3800S 3817E 3818E 3819I 3821I 3825I 3836I 3837I 3838I 3839I 3840I 3841I 3842I \
+    3843I 3845I 3846I 3854I 3858I 3880I 3900S 3901S 3910S 3911S 3912S 3913S 3914I 3915S 3916S 3917S 3918I 3919S 3930W 3931W \
+    3932W 3935I 4001S 4015S 4086S 4087S 5001S 5002S 5101C 5102E 5103W 5104S 5105S 5106S 5151S 5152S 5154S 5155S 5161S 5162S \
+    5176S 5177S 5178S 5179S 5180I 5201S 5202S 5203S 5204S 5205S 5206S 5207E 5208S 5209S 5210S 5211S 5212C 5213S 5214S 5215W \
+    5216W 5217S 5218S 5219W 5220S 5221S 5222S 5223W 5224W 5225S 5226W 5227S 5228S 5229W 5230S 5231S 5232S 5233S 5234I 5235I \
+    5236I 5237I 5238I 5239S 5301S 5302S 5401S 5402I 5403I 5404I 5405I 5526S 5527S 5528S 5529S 5530S 5531S 5532S 5533S 5551S \
+    5552S 5553S 5601S 5602S 5603S 5604S 5605S 5606S 5607S 5608S 5609S 5612S 5613S 5626S 5627S 5628S 5629S 5651S 5701S 5702S \
+    5703S 5704C 5705S 5706S 5707I 5708S 5709S 5710S 5711S 5712S 5713S 5714S 5715S 5716C 5717C 5718C 5719S 5720C 5721C 5722I \
+    5724I 5726S 5727S 5728C 5729S 5730S 5731S 5732S 5733S 5734S 5735S 5736I 5737S 5738S 5739S 5740S 5741C 5742S 5743S 5744S \
+    5745C 5746S 5747S 5748S 5749S 5750S 5751C 5761C 5762C 5763C 5764S 5765S 5766S 5767S 5768S 5769S 5770S 5771S 5772S 5773S \
+    5774S 5775S 5776S 5777S 5778S 5779S 5780S 5781S 5782S 5783C 5784I 5785I 5786S 5787I 5788I 5789I 5790S 5791C 5792I 5793I \
+    5794S 5795S 5796S";
+
+/// I, W, E, S and C are severities 0 to 4.
+fn severity(letter: &str) -> Option<u8> {
+    ["I", "W", "E", "S", "C"].iter().position(|l| *l == letter).map(|s| s as u8)
+}
+
+/// Each condition's message number and severity, in number order.
+pub fn conditions() -> impl Iterator<Item = (u16, u8)> {
+    MESSAGES.split_whitespace().filter_map(|id| {
+        let (number, letter) = id.split_at_checked(4)?;
+        Some((number.parse().ok()?, severity(letter)?))
+    })
+}
+
+/// The symbolic feedback code: the facility and the message number in base 32.
+pub fn symbol(number: u16) -> String {
+    let digit = |d: u16| char::from_digit(u32::from(d), 32).unwrap_or('0').to_ascii_uppercase();
+    format!("CEE{}{}{}", digit(number / 1024 % 32), digit(number / 32 % 32), digit(number % 32))
+}
+
+/// The first 8 bytes of the condition token, which a symbolic feedback code stands for: severity
+/// and message number as halfwords, case 1, the severity again and control 1 (an IBM facility) in
+/// one byte, and the facility in EBCDIC. CEE000, success, is all zeros.
+pub fn token(severity: u8, number: u16) -> [u8; 8] {
+    if number == 0 {
+        return [0; 8];
+    }
+    let mut t = [0u8; 8];
+    t[0..2].copy_from_slice(&u16::from(severity).to_be_bytes());
+    t[2..4].copy_from_slice(&number.to_be_bytes());
+    t[4] = 0x40 | (severity & 7) << 3 | 0x01;
+    t[5..8].copy_from_slice(&[0xC3, 0xC5, 0xC5]);
+    t
+}
+
+/// CEEIGZCT: a condition name per condition, for the COPY that follows the 8-byte group the
+/// condition token begins with (SA38-0682-60, Figure 76).
+pub fn member() -> String {
+    conditions()
+        .map(|(number, severity)| {
+            let hex: String = token(severity, number).iter().map(|b| format!("{b:02X}")).collect();
+            format!("           88 {} VALUE X'{hex}'.\n", symbol(number))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_message_identifier_is_read_once_in_number_order() {
+        let all: Vec<(u16, u8)> = conditions().collect();
+        assert_eq!(all.len(), MESSAGES.split_whitespace().count());
+        assert_eq!(all.len(), 723);
+        assert!(all.windows(2).all(|w| w[0].0 < w[1].0));
+        assert_eq!((all[0], all[722]), ((0, 0), (5796, 3)));
+        assert!(all.contains(&(2507, 3)) && all.contains(&(2526, 2)) && all.contains(&(455, 1)) && all.contains(&(356, 4)));
+    }
+
+    #[test]
+    fn a_symbolic_feedback_code_is_the_message_number_in_base_32() {
+        assert_eq!([symbol(0), symbol(2507), symbol(3102), symbol(2011), symbol(803)], ["CEE000", "CEE2EB", "CEE30U", "CEE1UR", "CEE0P3"]);
+        assert_eq!(token(3, 2507), [0x00, 0x03, 0x09, 0xCB, 0x59, 0xC3, 0xC5, 0xC5]);
+        assert_eq!(token(1, 455), [0x00, 0x01, 0x01, 0xC7, 0x49, 0xC3, 0xC5, 0xC5]);
+        assert_eq!(token(0, 0), [0; 8]);
+    }
+
+    #[test]
+    fn the_member_names_each_condition_in_area_b() {
+        let member = member();
+        let lines: Vec<&str> = member.lines().collect();
+        assert_eq!(lines.len(), 723);
+        assert_eq!(lines[0], "           88 CEE000 VALUE X'0000000000000000'.");
+        assert!(lines.contains(&"           88 CEE2EB VALUE X'000309CB59C3C5C5'."));
+        assert!(lines.contains(&"           88 CEE5KB VALUE X'0003168B59C3C5C5'."));
+        assert!(lines.iter().all(|l| l.len() <= 72));
+    }
+}

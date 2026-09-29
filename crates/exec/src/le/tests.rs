@@ -358,6 +358,24 @@ fn ceemout_and_cee3dmp_in_a_cics_task_write_to_cese_and_no_dd() {
     assert_eq!(cese[4], "  T");
 }
 
+/// CardDemo's batch programs end with CALL 'CEE3ABD' and no USING.
+#[test]
+fn a_service_given_fewer_arguments_than_it_takes_is_ironworks_own_abend() {
+    let data = "       01  ABCODE PIC S9(9) BINARY VALUE 999.\n";
+    let cases = [
+        ("CALL 'CEE3ABD'", "CALL CEE3ABD passes 0 arguments; CEE3ABD takes abcode, clean-up"),
+        ("CALL 'CEE3ABD' USING ABCODE", "CALL CEE3ABD passes 1 argument; CEE3ABD takes abcode, clean-up"),
+        ("CALL 'CEEDATE' USING LILIAN PIC-STR OUT-80", "CALL CEEDATE passes 3 arguments; CEEDATE takes input_Lilian_date, picture_string, output_char_date, fc"),
+    ];
+    for (call, message) in cases {
+        let body = [line("DISPLAY 'ABENDING'"), line(call), line("DISPLAY 'NOT REACHED'")];
+        let (out, _, ending) = run(&program(data, &body), &[]);
+        assert_eq!(out, "ABENDING\n");
+        let abend = ending.unwrap_err();
+        assert_eq!((abend.code.as_str(), abend.message), ("IRONWORK", format!("{message}, and with fewer z/OS is unpredictable")));
+    }
+}
+
 #[test]
 fn a_service_is_called_through_an_identifier_and_a_program_of_its_name_comes_first() {
     let data = "       01  SERVICE PIC X(8) VALUE 'CEEDAYS'.\n";
@@ -448,6 +466,42 @@ fn ceegtst_storage_outlives_the_call_that_got_it_and_ceefrst_frees_it() {
 fn the_carddemo_date_check_runs() {
     let source = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. CSUTLDTC.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n         01 WS-DATE-TO-TEST.\n              02  Vstring-length      PIC S9(4) BINARY.\n              02  Vstring-text.\n                  03  Vstring-char    PIC X\n                              OCCURS 0 TO 256 TIMES\n                              DEPENDING ON Vstring-length\n                                 of WS-DATE-TO-TEST.\n         01 WS-DATE-FORMAT.\n              02  Vstring-length      PIC S9(4) BINARY.\n              02  Vstring-text.\n                  03  Vstring-char    PIC X\n                              OCCURS 0 TO 256 TIMES\n                              DEPENDING ON Vstring-length\n                                 of WS-DATE-FORMAT.\n         01 OUTPUT-LILLIAN    PIC S9(9) USAGE IS BINARY.\n          01 FEEDBACK-CODE.\n           02  FEEDBACK-TOKEN-VALUE.\n             88  FC-INVALID-DATE       VALUE X'0000000000000000'.\n             88  FC-BAD-DATE-VALUE     VALUE X'000309CC59C3C5C5'.\n             88  FC-INVALID-MONTH      VALUE X'000309D559C3C5C5'.\n               03  SEVERITY        PIC S9(4) BINARY.\n               03  MSG-NO          PIC S9(4) BINARY.\n               03  CASE-SEV-CTL    PIC X.\n               03  FACILITY-ID     PIC XXX.\n           02  I-S-INFO        PIC S9(9) BINARY.\n       01  DATES PIC X(30) VALUE '2024-02-292024-02-302024-13-01'.\n       01  I PIC 99.\n       PROCEDURE DIVISION.\n           PERFORM VARYING I FROM 1 BY 10 UNTIL I > 30\n             MOVE 10 TO VSTRING-LENGTH OF WS-DATE-TO-TEST\n             MOVE DATES(I:10) TO VSTRING-TEXT OF WS-DATE-TO-TEST\n             MOVE 10 TO VSTRING-LENGTH OF WS-DATE-FORMAT\n             MOVE 'YYYY-MM-DD' TO VSTRING-TEXT OF WS-DATE-FORMAT\n             CALL \"CEEDAYS\" USING WS-DATE-TO-TEST, WS-DATE-FORMAT,\n                  OUTPUT-LILLIAN, FEEDBACK-CODE\n             EVALUATE TRUE\n               WHEN FC-INVALID-DATE DISPLAY 'Date is valid'\n               WHEN FC-BAD-DATE-VALUE DISPLAY 'Datevalue error'\n               WHEN FC-INVALID-MONTH DISPLAY 'Invalid month'\n               WHEN OTHER DISPLAY 'Date is invalid'\n             END-EVALUATE\n           END-PERFORM\n           GOBACK.\n";
     assert_eq!(lines(source), ["Date is valid", "Datevalue error", "Invalid month"]);
+}
+
+/// CBSA's CRECUST and EBUD03 copy CEEIGZCT into the token's first 8 bytes and test CEE000 OF FC.
+#[test]
+fn copy_ceeigzct_names_each_symbolic_feedback_code() {
+    let token = "           02 CONDITION-TOKEN-VALUE.\n           COPY CEEIGZCT.\n              03 SEVERITY PIC S9(4) BINARY.\n              03 MSG-NO PIC S9(4) BINARY.\n              03 CASE-SEV-CTL PIC X.\n              03 FACILITY-ID PIC XXX.\n           02 I-S-INFO PIC S9(9) BINARY.\n";
+    let whole = "       01  FW.\n           COPY CEEIGZCT.\n           02 FW-TOKEN PIC X(8).\n           02 FW-ISI PIC S9(9) BINARY.\n";
+    let data = format!("       01  FB.\n{token}{whole}");
+    let mut body = Vec::new();
+    for date in ["2024-02-29", "2024-02-30", "2024-13-01", "          "] {
+        body.extend(set("IN", date));
+        body.extend(set("PIC", "YYYY-MM-DD"));
+        body.push(line("CALL 'CEEDAYS' USING IN-STR PIC-STR LILIAN FB"));
+        body.push(line("EVALUATE TRUE"));
+        for name in ["CEE000", "CEE2EB", "CEE2EC", "CEE2EL"] {
+            body.push(line(&format!("  WHEN {name} OF FB DISPLAY '{name}'")));
+        }
+        body.push(line("  WHEN OTHER DISPLAY MSG-NO OF FB"));
+        body.push(line("END-EVALUATE"));
+    }
+    body.push(line("MOVE LOW-VALUES TO FW"));
+    body.push(line("IF NOT CEE000 OF FW DISPLAY 'TWELVE BYTES' END-IF"));
+    assert_eq!(lines(&program(&data, &body)), ["CEE000", "CEE2EC", "CEE2EL", "CEE2EB", "TWELVE BYTES"]);
+}
+
+#[test]
+fn ceeigzct_holds_every_condition_the_services_return() {
+    let named: Vec<(u16, u8)> = syntax::feedback::conditions().collect();
+    let returned = [
+        DESTINATION, HEAP_ID, HEAP_SIZE, FREE_ADDRESS, HEAP_SHORT, SECONDS_RANGE, INSUFFICIENT, DATE_VALUE, HOURS, LILIAN_RANGE, DATE_RANGE,
+        MINUTES, MONTH, PICTURE, SECONDS_VALUE, DAYS_NONNUMERIC, SECS_NONNUMERIC, DATE_TRUNCATED, TIMESTAMP_TRUNCATED, DUMP_OPTIONS,
+    ];
+    for c in returned {
+        assert!(named.contains(&(c.number, c.severity)), "{c:?}");
+        assert!(!c.text().is_empty(), "{c:?}");
+    }
 }
 
 /// IBM's IGYTSALE sample builds its report heading from one 80-character picture.

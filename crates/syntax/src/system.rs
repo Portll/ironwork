@@ -1,8 +1,9 @@
 //! The copy members IBM's translators and products supply, as ironwork's own declarations of the
 //! layouts and names IBM documents: Db2 13 for z/OS SQL Reference ("The included SQLCA", "The
 //! included SQLDA"), CICS TS Data Areas ("EIB - EXEC interface block") and CICS TS Application
-//! Programming Reference, "BMS-related constants" (DFHAID, DFHBMSCA). A library member of the same
-//! name is found first, as it would be ahead of the system library on z/OS.
+//! Programming Reference, "BMS-related constants" (DFHAID, DFHBMSCA); and CEEIGZCT, Language
+//! Environment's symbolic feedback codes (`crate::feedback`). A library member of the same name is
+//! found first, as it would be ahead of the system library on z/OS.
 
 /// The EXEC interface block the CICS translator adds to a program's LINKAGE SECTION, in IBM's
 /// order: EIBCALEN at X'18', EIBFN at X'1B', EIBRCODE at X'1D', EIBRESP at X'4C'. IBM names neither
@@ -147,6 +148,7 @@ pub fn member(name: &str) -> Option<String> {
         "DFHAID" => constants("DFHAID", DFHAID),
         "DFHBMSCA" => constants("DFHBMSCA", DFHBMSCA),
         "JNI" => crate::jni::member(),
+        "CEEIGZCT" => crate::feedback::member(),
         _ => return None,
     })
 }

@@ -171,11 +171,15 @@ The subset the interpreter runs today:
   minutes, seconds, fractions and AM/PM; CEELOCT, CEEGMT, CEEUTC and CEEGMTO read the `--clock`,
   taking local time as UTC; CEEMOUT writes to DD SYSOUT and CEE3DMP to DD CEEDUMP, or both to
   standard error; CEEGTST and CEEFRST get and free heap storage. Each returns its 12-byte
-  feedback code, and with the feedback code OMITTED a failure ends the run with U4038. Any other
-  LE service ends the run S806, which names it as one ironwork does not provide yet. In a CICS
-  task, CEE3ABD is a transaction abend with *abcode* as its four-digit ABCODE, and CEEMOUT and
-  CEE3DMP write to transient data queue CESE instead of any DD. The choices are assumptions L1
-  to L15.
+  feedback code, and with the feedback code OMITTED a failure ends the run with U4038. A CALL
+  that passes fewer arguments than the service takes, as `CALL 'CEE3ABD'` with no USING does,
+  ends the run with ironwork's own abend, since what z/OS does then is unpredictable. COPY
+  CEEIGZCT, when no library holds it, names the 723 symbolic feedback codes of the Language
+  Environment Runtime Messages, written from IBM's manuals rather than taken from IBM's member.
+  Any other LE service ends the run S806, which names it as one ironwork does not provide yet. In
+  a CICS task, CEE3ABD is a transaction abend with *abcode* as its four-digit ABCODE, and CEEMOUT
+  and CEE3DMP write to transient data queue CESE instead of any DD. The choices are assumptions
+  L1 to L18.
 
 Anything else is refused by name at compile time.
 SSRANGE is honoured, including for OCCURS DEPENDING ON counts; without it a subscript can reach

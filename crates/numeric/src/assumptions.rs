@@ -78,6 +78,9 @@ pub const LE_RETURN_CODE_UNCHANGED: &str = "L12";
 pub const LE_MESSAGE_AND_DUMP_FILES: &str = "L13";
 pub const LE_HEAP: &str = "L14";
 pub const LE_UNDER_CICS: &str = "L15";
+pub const LE_CEEIGZCT: &str = "L16";
+pub const LE_CEEIGZCT_DISAGREEMENTS: &str = "L17";
+pub const LE_SHORT_ARGUMENT_LIST: &str = "L18";
 pub const REPORT_WRITER_PRECOMPILER: &str = "RW1";
 pub const REPORT_TOTALS_BEFORE_PAGE_FIT: &str = "RW2";
 pub const REPORT_SOURCE_SUM_CORRELATION: &str = "RW3";
@@ -688,6 +691,24 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: ALPHABET_LITERALS,
         claim: "Among an ALPHABET clause's literals HIGH-VALUE, LOW-VALUE, SPACE, ZERO and QUOTE are the EBCDIC characters X'FF', X'00', X'40', X'F0' and X'7F', whatever the alphabet makes HIGH-VALUE and LOW-VALUE, and a numeric literal n is the character at ordinal n of EBCDIC, whose ordinals SC27-8713-03 points to (p. 128)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_CEEIGZCT,
+        claim: "A COPY CEEIGZCT that no library answers gives a level-88 condition name for each of the 723 conditions whose entry in the Language Environment Runtime Messages (SA38-0686-60, chapter 1) shows a symbolic feedback code, severity from its message's I, W, E, S or C; the name is CEE and the message number in base 32 (Programming Guide SA38-0682-60, CEEBLDTX :msgname.), the value the token's first 8 bytes as LE_FEEDBACK_TOKEN lays them out (Programming Reference SA38-0683-60, CEENCOD), and CEE000 is all zeros (SA38-0682-60, testing a condition token for success); it is meant to follow the 8-byte group the token starts with (SA38-0682-60, Figure 76). It is written from those manuals alone, not from IBM's CEEIGZCT",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_CEEIGZCT_DISAGREEMENTS,
+        claim: "Where the manuals disagree CEEIGZCT follows the message: its severity letter over a service's table in SA38-0683-60 (CEE07V, CEE317, CEE35S, CEE36V to CEE374), and its number over the code SA38-0686-60 prints beside it (CEE0356C shows CEE0BA, CEE5722I CEE5IP, CEE5771S CEE5KC); the eight messages printed with no code (CEE3252E, CEE3257E to CEE3259E, CEE3596S, CEE3796I to CEE3798I) have no name",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_SHORT_ARGUMENT_LIST,
+        claim: "A CALL of a service with fewer arguments than its syntax lists, CEE3ABD with no USING among them, ends the run with ironwork's own abend, not a modelled one: IBM calls a short list invalid with unpredictable results (SA38-0683-60, General usage notes for callable services) and says nothing of register 1 at a CALL without USING, whose own CALL and CEEPCALL macros leave it unaltered when no parameter is coded (MVS Assembler Services Reference SA22-7606-13, CALL; SA38-0682-60, CEEPCALL); the service then reads its arguments through whatever register 1 and the storage past the list hold, so neither S0C4 nor any other result follows. A missing fc is not taken as OMITTED, nor a missing clean-up as none",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
