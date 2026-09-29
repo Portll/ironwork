@@ -4,7 +4,7 @@ use std::{env, fs, io};
 const USAGE: &str = "ironwork for COBOL
 usage:
   ironwork run <program.cbl> [-silent] [-I <dir>]... [-L <dir>]... [--dd NAME=path[:format]]... [--clock <time>]
-               [--sql-replay path [--sql-replay-mode strict|keyed]]
+               [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                                                        compile and run; CBL and PROCESS cards set the options
   ironwork check <program.cbl> [-I <dir>]...           compile only
   ironwork cics <program.cbl> [run flags] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
@@ -26,9 +26,15 @@ flags:
   --clock YYYY-MM-DDTHH:MM:SS[.hh]
              the time ACCEPT FROM DATE, TIME and FUNCTION CURRENT-DATE report, for a run that must
              repeat; without it they report the system clock in UTC
+  --sql-db postgres://user[:password]@host[:port]/database[?host=/socket/directory]
+             run EXEC SQL against PostgreSQL, over TCP or a Unix socket and without TLS; the
+             password may come from PGPASSWORD instead. A normal end commits and an abend rolls back
+  --sql-record path
+             with --sql-db, write each call and its answer to path, for --sql-replay
   --sql-replay path
              answer EXEC SQL from a recording instead of a database. A call the recording does not
-             hold next abends SQLR, naming both calls. With cics, not with --serve
+             hold next abends SQLR, naming both calls. --sql-db and --sql-replay work with cics,
+             not with --serve
   --sql-replay-mode strict|keyed
              strict (the default) answers call n from the recording's call n; keyed answers each
              call from the first unused recorded call with the same statement and inputs
@@ -56,8 +62,8 @@ cics flags:
              script. The program runs as --transid's first task with no COMMAREA; RETURN TRANSID
              waits for the operator's next AID key and runs that transaction with the COMMAREA
              RETURN gave. A task that ends without TRANSID, an abend, or a transaction that is not
-             defined ends the conversation. Not with --screens, --commarea, --commarea-out or
-             --sql-replay
+             defined ends the conversation. Not with --screens, --commarea, --commarea-out, --sql-db
+             or --sql-replay
   --transaction TRAN=PROGRAM
              with --serve, the program a transaction runs: a program of the source, or one found
              through -L. --transid names the given program; each program compiles once
@@ -83,6 +89,7 @@ fn driver() -> ExitCode {
     let (mut program_dirs, mut clock) = (Vec::new(), exec::unit::Clock::System);
     let mut cics_options: Vec<(String, String)> = Vec::new();
     let (mut replay, mut keyed) = (None, false);
+    let (mut sql_db, mut sql_record) = (None, None);
     while let Some(a) = args.next() {
         match a.as_str() {
             "-h" | "--help" => {
@@ -108,6 +115,14 @@ fn driver() -> ExitCode {
             "--sql-replay" => match args.next() {
                 Some(file) => replay = Some(file),
                 None => return usage_error("--sql-replay needs a recording"),
+            },
+            "--sql-db" => match args.next() {
+                Some(url) => sql_db = Some(url),
+                None => return usage_error("--sql-db needs a postgres:// URL"),
+            },
+            "--sql-record" => match args.next() {
+                Some(file) => sql_record = Some(file),
+                None => return usage_error("--sql-record needs a path"),
             },
             "--sql-replay-mode" => match args.next().as_deref() {
                 Some("strict") => keyed = false,
@@ -170,15 +185,24 @@ fn driver() -> ExitCode {
         Ok(d) => d,
         Err(e) => return usage_error(&e),
     };
-    let database: Option<Box<dyn exec::sql::Database>> = match replay {
-        Some(file) => match fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|text| exec::sql::Replay::parse(&text, keyed)) {
-            Ok(r) => Some(Box::new(r)),
+    let database = match (replay, sql_db, sql_record) {
+        (Some(_), Some(_), _) => return usage_error("--sql-replay and --sql-db are two databases; give one"),
+        (_, None, Some(_)) => return usage_error("--sql-record needs --sql-db"),
+        (Some(file), None, None) => match fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|text| exec::sql::Replay::parse(&text, keyed)) {
+            Ok(r) => Some(Box::new(r) as Box<dyn exec::sql::Database>),
             Err(e) => {
                 eprintln!("ironwork: --sql-replay {file}: {e}");
                 return ExitCode::from(2);
             }
         },
-        None => None,
+        (None, Some(url), record) => match live_database(&url, record.as_deref()) {
+            Ok(db) => Some(db),
+            Err(e) => {
+                eprintln!("ironwork: {e}");
+                return ExitCode::from(2);
+            }
+        },
+        (None, None, None) => None,
     };
     if command == "cics" {
         return run_cics(&compiled, path, library, dds, clock, database, &cics_options);
@@ -199,6 +223,16 @@ fn driver() -> ExitCode {
         Err(abend) if abend.code == exec::machine::CLOSED_OUTPUT => ExitCode::SUCCESS,
         Err(abend) => report_abend(&compiled, path, &abend),
     }
+}
+
+/// PostgreSQL, or PostgreSQL behind a recorder writing to `record`.
+fn live_database(url: &str, record: Option<&str>) -> Result<Box<dyn exec::sql::Database>, String> {
+    let postgres = exec::sql::Postgres::connect(url).map_err(|e| format!("--sql-db: {e}"))?;
+    let Some(path) = record else { return Ok(Box::new(postgres)) };
+    let file = fs::File::create(path).map_err(|e| format!("--sql-record {path}: {e}"))?;
+    let source = postgres.source().to_owned();
+    let recorder = exec::sql::Recorder::new(Box::new(postgres), Box::new(io::BufWriter::new(file)), &source).map_err(|e| format!("--sql-record {path}: {e}"))?;
+    Ok(Box::new(recorder))
 }
 
 fn report_abend(compiled: &exec::Compiled, path: &str, abend: &exec::machine::Abend) -> ExitCode {
@@ -444,7 +478,7 @@ fn run_cics(
     let get = |name: &str| options.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone());
     if get("--serve").is_some() {
         if get("--screens").is_some() || get("--commarea").is_some() || get("--commarea-out").is_some() || database.is_some() {
-            return usage_error("--serve cannot be combined with --screens, --commarea, --commarea-out or --sql-replay");
+            return usage_error("--serve cannot be combined with --screens, --commarea, --commarea-out, --sql-db or --sql-replay");
         }
         return serve_cics(compiled, library, dds, clock, options);
     }
