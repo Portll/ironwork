@@ -595,3 +595,45 @@ fn fastsrt_names_why_it_cannot_apply() {
     assert!(report("SORT S-FILE ASCENDING S-REC USING IN-A GIVING IN-A").1.contains("GIVING IN-A: it is also the USING file"));
     assert!(report("MERGE S-FILE ASCENDING S-REC USING IN-A IN-B GIVING OUT-F").1.contains("USING IN-A: it applies only to SORT"));
 }
+
+#[test]
+fn fastsrt_leaves_linage_and_adv_print_output_to_cobol() {
+    let input = text_file("fastsrt-print-in.txt", &["B2", "A1"]);
+    let out = temp("fastsrt-print-out.bin");
+    let dds = [dd("ADD", &input), format!("ODD={}", out.display())];
+    let run = |options: &str, fd: &str| {
+        let source = format!(
+            "       CBL {options}\n{}",
+            file_program(
+                &[SELECT_SD, "           SELECT IN-A ASSIGN TO ADD.\n           SELECT OUT-F ASSIGN TO ODD FILE STATUS FS-O.\n"].concat(),
+                &["       SD  S-FILE.\n       01  S-REC PIC X(2).\n       FD  IN-A.\n       01  A-REC PIC X(2).\n", fd, "       01  O-REC PIC X(2).\n"].concat(),
+                "       01  FS-O PIC XX VALUE 'YY'.\n       01  RC PIC 99.\n",
+                &[
+                    line("SORT S-FILE ASCENDING S-REC USING IN-A GIVING OUT-F"),
+                    line("MOVE SORT-RETURN TO RC"),
+                    line("DISPLAY RC ' ' FS-O"),
+                    line("GOBACK."),
+                    "       NEVER-RUN.\n".into(),
+                    line("WRITE O-REC AFTER ADVANCING 2 LINES."),
+                ]
+                .concat(),
+            )
+        );
+        let _ = std::fs::remove_file(&out);
+        let (stdout, err, ending) = run_flagged(&source, &dds, &[]);
+        assert!(ending.is_ok(), "{ending:?} {err}");
+        (stdout, err, std::fs::read(&out).unwrap_or_default())
+    };
+    let cobol_writes = [0x40, 0xC1, 0xF1, 0x40, 0xC2, 0xF2];
+    let (stdout, err, written) = run("FASTSRT", "       FD  OUT-F.\n");
+    assert!(err.contains("FASTSRT does not apply to GIVING OUT-F: it is a print file, whose records ADV makes a byte longer than its FD's 2; COBOL does its I/O"), "{err}");
+    assert_eq!((stdout.as_str(), written.as_slice()), ("00 00\n", &cobol_writes[..]));
+    let (stdout, err, _) = run("FASTSRT,NOADV", "       FD  OUT-F.\n");
+    assert!(err.contains("FASTSRT: DFSORT does the I/O of GIVING OUT-F, so its FILE STATUS FS-O is not updated by the SORT"), "{err}");
+    assert_eq!(stdout, "00 YY\n");
+    for options in ["FASTSRT", "FASTSRT,NOADV"] {
+        let (stdout, err, written) = run(options, "       FD  OUT-F LINAGE IS 60.\n");
+        assert!(err.contains("FASTSRT does not apply to GIVING OUT-F: its FD has LINAGE; COBOL does its I/O"), "{options}: {err}");
+        assert_eq!((stdout.as_str(), written.as_slice()), ("00 00\n", &cobol_writes[..]), "{options}");
+    }
+}

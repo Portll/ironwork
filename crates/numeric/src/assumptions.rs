@@ -658,7 +658,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: FASTSRT_FILES,
-        claim: "Under FASTSRT DFSORT does the I/O of a SORT's only USING file and its only GIVING file, except a MERGE's, a line-sequential or variable-length relative file, one whose records differ from the SD's in format (fixed or variable) or largest length, and a GIVING file that is also the USING file; COBOL does the rest as under NOFASTSRT (Programming Guide SC27-8714-03, pp. 232-233, 369)",
+        claim: "Under FASTSRT DFSORT does the I/O of a SORT's only USING file and its only GIVING file, except a MERGE's, a line-sequential or variable-length relative file, a GIVING file whose FD has LINAGE (p. 233), a print file under ADV, one whose records differ from the SD's in format (fixed or variable) or largest length, and a GIVING file that is also the USING file; COBOL does the rest as under NOFASTSRT (Programming Guide SC27-8714-03, pp. 232-233, 369). A print file under ADV is left to COBOL because ADV adds a byte to its record length for the printer control character (p. 346), which the DD's LRECL counts (p. 185): p. 233 wants the SD's and the FD's largest records the same length and p. 232 the DD to match the FD, so with the FD's record as long as the SD's the data set's records are a byte longer than DFSORT's, and with it a byte shorter the FD's and the SD's differ; under NOADV the character is inside the FD's record and the lengths rule alone applies",
         basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },

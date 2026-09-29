@@ -464,6 +464,10 @@ impl<'p> Machine<'p, '_, '_> {
             "it is a line-sequential file".into()
         } else if decl.organization == Organization::Relative && !self.fixed_length(k) {
             "it is a variable-length relative file".into()
+        } else if !input && decl.linage {
+            "its FD has LINAGE".into()
+        } else if self.carriage[k].is_some_and(|c| !c.reserved) {
+            format!("it is a print file, whose records ADV makes a byte longer than its FD's {}", self.area(k).1)
         } else if self.fixed_length(k) != self.fixed_length(sd) {
             format!("its records are {}-length and the SD's {}-length", format(k), format(sd))
         } else if self.area(k).1 != self.area(sd).1 {
