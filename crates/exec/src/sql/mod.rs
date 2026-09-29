@@ -8,7 +8,7 @@ mod replay;
 
 pub use convert::{ReadError, Written, read, write};
 pub use database::{Abandoned, Answer, Call, Database, OpenCursor, Outcome, Session};
-pub use postgres::Postgres;
+pub use postgres::{Postgres, Stream, Tls};
 pub use replay::{Recorder, Replay};
 
 use crate::layout::{Kind, Layout};

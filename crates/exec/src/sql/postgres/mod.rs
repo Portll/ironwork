@@ -7,6 +7,7 @@ mod wire;
 
 use super::{Abandoned, Answer, Call, Database, Outcome, Value};
 use std::collections::HashMap;
+pub use wire::{Stream, Tls};
 use wire::{Connection, Described, Failure, Target};
 
 pub struct Postgres {
@@ -25,10 +26,12 @@ fn abandon(f: Failure) -> Abandoned {
 }
 
 impl Postgres {
-    pub fn connect(url: &str) -> Result<Self, String> {
+    /// `tls` is None in ironwork's own build, which then connects without TLS.
+    pub fn connect(url: &str, tls: Option<&dyn Tls>) -> Result<Self, String> {
         let target = Target::parse(url)?;
-        let conn = Connection::open(&target)?;
-        let source = format!("PostgreSQL {} at {}:{}/{}", conn.server_version, target.host, target.port, target.database);
+        let conn = Connection::open(&target, tls)?;
+        let over = if conn.encrypted { " over TLS" } else { "" };
+        let source = format!("PostgreSQL {} at {}:{}/{}{over}", conn.server_version, target.host, target.port, target.database);
         Ok(Self { conn, prepared: HashMap::new(), source })
     }
 
@@ -238,9 +241,9 @@ mod tests {
     #[test]
     fn a_recorded_postgresql_run_replays_identically() {
         let Some(url) = url() else { return };
-        let mut setup = Postgres::connect(&url).expect("connects");
+        let mut setup = Postgres::connect(&url, None).expect("connects");
         setup.conn.simple(SCHEMA).expect("the schema loads");
-        let postgres = Postgres::connect(&url).expect("connects");
+        let postgres = Postgres::connect(&url, None).expect("connects");
         let source = postgres.source().to_owned();
         assert!(source.starts_with("PostgreSQL 14"), "{source}");
         let recording = Rc::new(RefCell::new(Vec::new()));
@@ -256,7 +259,7 @@ mod tests {
         let Some(url) = url() else { return };
         let Some((head, tail)) = url.split_once('@') else { return };
         let wrong = format!("{}:wrong@{tail}", head.rsplit_once(':').map_or(head, |(user, _)| user));
-        let refused = Postgres::connect(&wrong).err().expect("refused");
+        let refused = Postgres::connect(&wrong, None).err().expect("refused");
         assert!(refused.contains("28P01"), "{refused}");
     }
 }

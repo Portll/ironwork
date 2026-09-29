@@ -2,7 +2,29 @@
 //! cycle, and the extended one (Parse, Describe, Bind, Execute, Sync) with text values.
 
 use super::scram::{Scram, nonce};
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufReader, Read, Write};
+use std::net::TcpStream;
+use std::path::{Path, PathBuf};
+
+/// A duplex byte stream: a socket, or TLS over one.
+pub trait Stream: Read + Write + Send {}
+
+impl<T: Read + Write + Send> Stream for T {}
+
+/// Wraps a connected socket in TLS, verifying the server's certificate chain against `roots` (a PEM
+/// file) or built-in roots, and its name as `host`. ironwork's own build has no implementation, so
+/// that it keeps no dependencies; the build in `tls/` supplies one.
+pub trait Tls: Send + Sync {
+    fn wrap(&self, socket: TcpStream, host: &str, roots: Option<&Path>) -> std::io::Result<Box<dyn Stream>>;
+}
+
+/// The URL's `sslmode`: the two of libpq's modes that ironwork offers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SslMode {
+    Disable,
+    /// TLS, with the server's certificate chain and name verified.
+    VerifyFull,
+}
 
 /// Where and as whom to connect.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -12,11 +34,15 @@ pub struct Target {
     pub user: String,
     pub password: Option<String>,
     pub database: String,
+    /// None where the URL does not say.
+    pub ssl: Option<SslMode>,
+    pub root_cert: Option<PathBuf>,
 }
 
 impl Target {
-    /// `postgres://user[:password]@host[:port]/database[?host=/socket/directory]`. A host that
-    /// starts with `/` is a Unix socket's directory; the password may come from PGPASSWORD instead.
+    /// `postgres://user[:password]@host[:port]/database[?option=value&...]`, with the options
+    /// `host` (a directory, for a Unix socket), `sslmode` and `sslrootcert`. The password may come
+    /// from PGPASSWORD instead.
     pub fn parse(url: &str) -> Result<Self, String> {
         let rest = url.strip_prefix("postgres://").or_else(|| url.strip_prefix("postgresql://")).ok_or("a database URL starts postgres://")?;
         let (rest, query) = rest.split_once('?').unwrap_or((rest, ""));
@@ -30,9 +56,16 @@ impl Target {
             Some((h, p)) => (h.to_owned(), p.parse().map_err(|_| format!("{p} is not a port"))?),
             None => (hostport.to_owned(), 5432),
         };
+        let (mut ssl, mut root_cert) = (None, None);
         for pair in query.split('&').filter(|p| !p.is_empty()) {
             match pair.split_once('=') {
                 Some(("host", h)) => host = decode(h)?,
+                Some(("sslmode", "disable")) => ssl = Some(SslMode::Disable),
+                Some(("sslmode", "verify-full")) => ssl = Some(SslMode::VerifyFull),
+                Some(("sslmode", other)) => {
+                    return Err(format!("sslmode={other} is not offered: disable, or verify-full, which checks the server's certificate and name"));
+                }
+                Some(("sslrootcert", path)) => root_cert = Some(PathBuf::from(decode(path)?)),
                 _ => return Err(format!("{pair} is not a URL option ironwork reads")),
             }
         }
@@ -46,6 +79,8 @@ impl Target {
             database: if database.is_empty() { user.clone() } else { decode(database)? },
             password: password.or_else(|| std::env::var("PGPASSWORD").ok()),
             user,
+            ssl,
+            root_cert,
         })
     }
 }
@@ -94,9 +129,11 @@ pub struct Described {
 }
 
 pub struct Connection {
-    reader: BufReader<Box<dyn Read>>,
-    writer: BufWriter<Box<dyn Write>>,
+    stream: BufReader<Box<dyn Stream>>,
+    /// Messages waiting for the next flush.
+    out: Vec<u8>,
     pub server_version: String,
+    pub encrypted: bool,
     /// ReadyForQuery's transaction status: `I` idle, `T` in a transaction, `E` in a failed one.
     pub status: u8,
 }
@@ -155,16 +192,36 @@ fn refusal(body: &[u8]) -> Failure {
 }
 
 impl Connection {
-    pub fn open(target: &Target) -> Result<Self, String> {
-        let broken = |e: std::io::Error| format!("cannot reach PostgreSQL at {}:{}: {e}", target.host, target.port);
-        let (reader, writer): (Box<dyn Read>, Box<dyn Write>) = if target.host.starts_with('/') {
-            unix_socket(target).map_err(broken)?
-        } else {
-            let stream = std::net::TcpStream::connect((target.host.as_str(), target.port)).map_err(broken)?;
-            stream.set_nodelay(true).map_err(broken)?;
-            (Box::new(stream.try_clone().map_err(broken)?), Box::new(stream))
+    /// Connects, over TLS where `sslmode` asks for it. Without an sslmode, a TCP connection uses TLS
+    /// when this build has it, and a Unix socket never does.
+    pub fn open(target: &Target, tls: Option<&dyn Tls>) -> Result<Self, String> {
+        let at = format!("PostgreSQL at {}:{}", target.host, target.port);
+        let broken = |e: std::io::Error| format!("cannot reach {at}: {e}");
+        let socket = target.host.starts_with('/');
+        let mode = match (target.ssl, tls) {
+            (Some(mode), _) => mode,
+            (None, Some(_)) if !socket => SslMode::VerifyFull,
+            (None, _) => SslMode::Disable,
         };
-        let mut conn = Self { reader: BufReader::new(reader), writer: BufWriter::new(writer), server_version: String::new(), status: b'I' };
+        let stream: Box<dyn Stream> = match (mode, socket, tls) {
+            (SslMode::Disable, true, _) => unix_socket(target).map_err(broken)?,
+            (SslMode::VerifyFull, true, _) => return Err("sslmode=verify-full is for TCP; a Unix socket needs no TLS".into()),
+            (SslMode::VerifyFull, false, None) => {
+                return Err("sslmode=verify-full needs TLS, which this build of ironwork leaves out to keep it free of dependencies; build tls/ for it".into());
+            }
+            (SslMode::Disable, false, _) => Box::new(tcp(target).map_err(broken)?),
+            (SslMode::VerifyFull, false, Some(tls)) => {
+                let mut socket = tcp(target).map_err(broken)?;
+                socket.write_all(&[0, 0, 0, 8, 0x04, 0xD2, 0x16, 0x2F]).map_err(broken)?;
+                let mut answer = [0u8];
+                socket.read_exact(&mut answer).map_err(broken)?;
+                if answer[0] != b'S' {
+                    return Err(format!("{at} does not offer TLS; give sslmode=disable to connect without it"));
+                }
+                tls.wrap(socket, &target.host, target.root_cert.as_deref()).map_err(|e| format!("TLS with {at} failed: {e}"))?
+            }
+        };
+        let mut conn = Self { stream: BufReader::new(stream), out: Vec::new(), server_version: String::new(), encrypted: mode == SslMode::VerifyFull, status: b'I' };
         conn.start(target).map_err(|f| match f {
             Failure::Refused { state, message } => format!("PostgreSQL refused the connection ({state}): {message}"),
             Failure::Broken(m) => m,
@@ -188,9 +245,9 @@ impl Connection {
             cstr(&mut body, value);
         }
         body.push(0);
-        self.writer.write_all(&(body.len() as i32 + 4).to_be_bytes())?;
-        self.writer.write_all(&body)?;
-        self.writer.flush()?;
+        self.out.extend_from_slice(&(body.len() as i32 + 4).to_be_bytes());
+        self.out.extend_from_slice(&body);
+        self.flush()?;
         let password = || target.password.clone().ok_or_else(|| Failure::Broken("PostgreSQL asks for a password: give one in the URL or PGPASSWORD".into()));
         let mut scram = None;
         loop {
@@ -203,7 +260,7 @@ impl Connection {
                         let mut reply = Vec::new();
                         cstr(&mut reply, &password()?);
                         self.send(b'p', &reply)?;
-                        self.writer.flush()?;
+                        self.flush()?;
                     }
                     10 => {
                         let mechanisms: Vec<String> = std::iter::from_fn(|| b.cstr().ok().filter(|m| !m.is_empty())).collect();
@@ -217,14 +274,14 @@ impl Connection {
                         reply.extend_from_slice(&(first.len() as i32).to_be_bytes());
                         reply.extend_from_slice(first.as_bytes());
                         self.send(b'p', &reply)?;
-                        self.writer.flush()?;
+                        self.flush()?;
                         scram = Some(exchange);
                     }
                     11 => {
                         let exchange = scram.as_mut().ok_or_else(|| Failure::Broken("PostgreSQL continued a SASL exchange that had not begun".into()))?;
                         let reply = exchange.client_final(&String::from_utf8_lossy(b.rest())).map_err(Failure::Broken)?;
                         self.send(b'p', reply.as_bytes())?;
-                        self.writer.flush()?;
+                        self.flush()?;
                     }
                     12 => {
                         let exchange = scram.as_ref().ok_or_else(|| Failure::Broken("PostgreSQL ended a SASL exchange that had not begun".into()))?;
@@ -244,18 +301,26 @@ impl Connection {
     }
 
     fn send(&mut self, kind: u8, body: &[u8]) -> Result<(), Failure> {
-        self.writer.write_all(&[kind])?;
-        self.writer.write_all(&(body.len() as i32 + 4).to_be_bytes())?;
-        self.writer.write_all(body)?;
+        self.out.push(kind);
+        self.out.extend_from_slice(&(body.len() as i32 + 4).to_be_bytes());
+        self.out.extend_from_slice(body);
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<(), Failure> {
+        let stream = self.stream.get_mut();
+        stream.write_all(&self.out)?;
+        stream.flush()?;
+        self.out.clear();
         Ok(())
     }
 
     fn receive(&mut self) -> Result<(u8, Vec<u8>), Failure> {
         let mut head = [0u8; 5];
-        self.reader.read_exact(&mut head)?;
+        self.stream.read_exact(&mut head)?;
         let len = i32::from_be_bytes([head[1], head[2], head[3], head[4]]);
         let mut body = vec![0u8; (len.max(4) - 4) as usize];
-        self.reader.read_exact(&mut body)?;
+        self.stream.read_exact(&mut body)?;
         Ok((head[0], body))
     }
 
@@ -293,7 +358,7 @@ impl Connection {
         let mut body = Vec::new();
         cstr(&mut body, sql);
         self.send(b'Q', &body)?;
-        self.writer.flush()?;
+        self.flush()?;
         self.until_ready(|_, _| Ok(()))
     }
 
@@ -307,7 +372,7 @@ impl Connection {
         cstr(&mut describe, name);
         self.send(b'D', &describe)?;
         self.send(b'S', &[])?;
-        self.writer.flush()?;
+        self.flush()?;
         let mut described = Described::default();
         self.until_ready(|kind, body| {
             let mut b = Body { bytes: body, at: 0 };
@@ -356,7 +421,7 @@ impl Connection {
         execute.extend_from_slice(&max_rows.to_be_bytes());
         self.send(b'E', &execute)?;
         self.send(b'S', &[])?;
-        self.writer.flush()?;
+        self.flush()?;
         let mut executed = Executed::default();
         self.until_ready(|kind, body| {
             let mut b = Body { bytes: body, at: 0 };
@@ -379,14 +444,19 @@ impl Connection {
     }
 }
 
+fn tcp(target: &Target) -> std::io::Result<TcpStream> {
+    let socket = TcpStream::connect((target.host.as_str(), target.port))?;
+    socket.set_nodelay(true)?;
+    Ok(socket)
+}
+
 #[cfg(unix)]
-fn unix_socket(target: &Target) -> std::io::Result<(Box<dyn Read>, Box<dyn Write>)> {
-    let stream = std::os::unix::net::UnixStream::connect(format!("{}/.s.PGSQL.{}", target.host, target.port))?;
-    Ok((Box::new(stream.try_clone()?), Box::new(stream)))
+fn unix_socket(target: &Target) -> std::io::Result<Box<dyn Stream>> {
+    Ok(Box::new(std::os::unix::net::UnixStream::connect(format!("{}/.s.PGSQL.{}", target.host, target.port))?))
 }
 
 #[cfg(not(unix))]
-fn unix_socket(_: &Target) -> std::io::Result<(Box<dyn Read>, Box<dyn Write>)> {
+fn unix_socket(_: &Target) -> std::io::Result<Box<dyn Stream>> {
     Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "Unix sockets need a Unix system"))
 }
 
@@ -397,7 +467,11 @@ mod tests {
     #[test]
     fn urls() {
         let t = Target::parse("postgres://ironwork:p%40ss@db.example:6543/payroll").unwrap();
-        assert_eq!(t, Target { host: "db.example".into(), port: 6543, user: "ironwork".into(), password: Some("p@ss".into()), database: "payroll".into() });
+        let expected = Target { host: "db.example".into(), port: 6543, user: "ironwork".into(), password: Some("p@ss".into()), database: "payroll".into(), ssl: None, root_cert: None };
+        assert_eq!(t, expected);
+        let t = Target::parse("postgres://me@db/payroll?sslmode=verify-full&sslrootcert=/etc/ca.pem").unwrap();
+        assert_eq!((t.ssl, t.root_cert.as_deref()), (Some(SslMode::VerifyFull), Some(Path::new("/etc/ca.pem"))));
+        assert!(Target::parse("postgres://me@db/payroll?sslmode=require").unwrap_err().contains("verify-full"));
         let t = Target::parse("postgres://me@/payroll?host=/var/run/postgresql").unwrap();
         assert_eq!((t.host.as_str(), t.port, t.database.as_str()), ("/var/run/postgresql", 5432, "payroll"));
         assert!(Target::parse("mysql://x").is_err());

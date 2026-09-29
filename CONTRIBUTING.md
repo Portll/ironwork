@@ -39,8 +39,9 @@ assistant asks again on your next pull request.
   carries the same two lines.
 - **No dependencies.** The workspace has none outside its own crates: every package in
   `Cargo.lock` is one of the workspace's `ironwork-*` crates. A change that needs one needs a
-  reason first. `fuzz/` is a separate workspace that depends on `libfuzzer-sys`; nothing built
-  from `crates/` does.
+  reason first. `fuzz/` is a separate workspace that depends on `libfuzzer-sys`, and `tls/` is
+  another, which builds the same `ironwork` command with rustls for `--sql-db` over TLS; nothing
+  built from `crates/` depends on either.
 - **The front end must not panic.** `cargo test` mutates real programs and fails on any panic;
   run it longer with `IRONWORK_FUZZ_ITERATIONS=30000 cargo test -p ironwork-exec mutated`.
 - **A question the manuals leave open is an assumption, not a constant.** It goes in

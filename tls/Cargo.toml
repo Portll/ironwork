@@ -1,0 +1,28 @@
+[package]
+name = "ironwork-tls"
+description = "ironwork for COBOL with TLS for --sql-db, through rustls"
+version = "0.1.1"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+repository = "https://github.com/Portll/ironwork"
+
+[[bin]]
+name = "ironwork"
+path = "../crates/cli/src/main.rs"
+
+[dependencies]
+exec = { package = "ironwork-exec", path = "../crates/exec" }
+syntax = { package = "ironwork-syntax", path = "../crates/syntax" }
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1.0.9"
+
+[dev-dependencies]
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem", "crypto"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(ironwork_tls)"] }
+
+[workspace]
+members = ["."]

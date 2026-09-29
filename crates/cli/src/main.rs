@@ -26,9 +26,11 @@ flags:
   --clock YYYY-MM-DDTHH:MM:SS[.hh]
              the time ACCEPT FROM DATE, TIME and FUNCTION CURRENT-DATE report, for a run that must
              repeat; without it they report the system clock in UTC
-  --sql-db postgres://user[:password]@host[:port]/database[?host=/socket/directory]
-             run EXEC SQL against PostgreSQL, over TCP or a Unix socket and without TLS; the
-             password may come from PGPASSWORD instead. A normal end commits and an abend rolls back
+  --sql-db postgres://user[:password]@host[:port]/database[?option=value&...]
+             run EXEC SQL against PostgreSQL. The options are host=/socket/directory,
+             sslmode=disable|verify-full and sslrootcert=path.pem; the password may come from
+             PGPASSWORD instead. verify-full needs the TLS build (tls/ in the source), which uses it
+             by default over TCP. A normal end commits and an abend rolls back
   --sql-record path
              with --sql-db, write each call and its answer to path, for --sql-replay
   --sql-replay path
@@ -225,9 +227,20 @@ fn driver() -> ExitCode {
     }
 }
 
+/// ironwork's own build has no TLS; the build in tls/ compiles this file with `ironwork_tls` set.
+#[cfg(not(ironwork_tls))]
+fn tls() -> Option<Box<dyn exec::sql::Tls>> {
+    None
+}
+
+#[cfg(ironwork_tls)]
+fn tls() -> Option<Box<dyn exec::sql::Tls>> {
+    Some(Box::new(ironwork_tls::Rustls))
+}
+
 /// PostgreSQL, or PostgreSQL behind a recorder writing to `record`.
 fn live_database(url: &str, record: Option<&str>) -> Result<Box<dyn exec::sql::Database>, String> {
-    let postgres = exec::sql::Postgres::connect(url).map_err(|e| format!("--sql-db: {e}"))?;
+    let postgres = exec::sql::Postgres::connect(url, tls().as_deref()).map_err(|e| format!("--sql-db: {e}"))?;
     let Some(path) = record else { return Ok(Box::new(postgres)) };
     let file = fs::File::create(path).map_err(|e| format!("--sql-record {path}: {e}"))?;
     let source = postgres.source().to_owned();

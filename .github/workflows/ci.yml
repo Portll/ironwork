@@ -25,3 +25,8 @@ jobs:
         run: cargo test --workspace --locked
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # tls/ is a workspace of its own with rustls, so the one above stays free of dependencies.
+      - name: Test the TLS build
+        run: cargo test --locked --manifest-path tls/Cargo.toml
+      - name: Clippy the TLS build
+        run: cargo clippy --locked --all-targets --manifest-path tls/Cargo.toml -- -D warnings
