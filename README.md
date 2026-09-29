@@ -184,10 +184,11 @@ uses. The flag `-silent` keeps the stored value the same and suppresses the repo
 
 ## Licence
 
-ironwork for COBOL is published under AGPL-3.0-or-later ([LICENSE](LICENSE)). A commercial licence
-is available for those whose policy or product cannot accept the AGPL; its tiers are being settled
-([NOTICE](NOTICE)). Contributions need the [CLA](CLA.md). The code-page tables are ICU data under
-the Unicode License v3 ([THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)).
+ironwork for COBOL is published under AGPL-3.0-or-later ([LICENSE](LICENSE)) with the
+[Runtime Exception](RUNTIME-EXCEPTION.md): programs you compile, check or run with ironwork are not
+covered by the AGPL. PolyForm Internal Use is available for a fee, and a negotiated licence for
+other uses ([LICENSING.md](LICENSING.md)). Contributions need the [CLA](CLA.md). The code-page tables
+are ICU data under the Unicode License v3 ([THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)).
 
 ## Tests
 

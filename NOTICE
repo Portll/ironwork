@@ -5,8 +5,12 @@ This program is free software: you can redistribute it and/or modify it under th
 GNU Affero General Public License as published by the Free Software Foundation, either version 3
 of the License, or (at your option) any later version. See LICENSE.
 
-A commercial licence is available for those whose policy or product cannot accept the AGPL.
-Contact john@portll.net.
+As an additional permission under section 7 of that licence, programs compiled, checked or run
+with ironwork, and what ironwork produces from them, are not covered by it. See
+RUNTIME-EXCEPTION.md.
+
+PolyForm Internal Use 1.0.0 is available for a fee, and a negotiated commercial licence for other
+uses. See LICENSING.md, or contact john@portll.net.
 
 The code-page tables in crates/zarch/ucm/ are ICU data under the Unicode License v3, and are not
 covered by the licence above. See THIRD-PARTY-NOTICES.md.
