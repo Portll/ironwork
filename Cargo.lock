@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "ironwork"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ironwork-exec",
  "ironwork-syntax",
@@ -12,7 +12,7 @@ dependencies = [
 
 [[package]]
 name = "ironwork-exec"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ironwork-numeric",
  "ironwork-oracle",
@@ -22,14 +22,14 @@ dependencies = [
 
 [[package]]
 name = "ironwork-numeric"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ironwork-zarch",
 ]
 
 [[package]]
 name = "ironwork-oracle"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ironwork-numeric",
  "ironwork-zarch",
@@ -37,8 +37,8 @@ dependencies = [
 
 [[package]]
 name = "ironwork-syntax"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "ironwork-zarch"
-version = "0.1.0"
+version = "0.1.1"
