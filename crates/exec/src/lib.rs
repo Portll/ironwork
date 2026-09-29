@@ -8,6 +8,8 @@ pub mod layout;
 pub mod machine;
 pub mod picture;
 pub mod strings;
+pub mod terminal;
+pub mod tn3270;
 pub mod unit;
 
 pub use machine::{Abend, Ending};

@@ -179,6 +179,10 @@ impl<'w> RunUnit<'w> {
         Ok(())
     }
 
+    pub fn copy_libraries(&self) -> &copy::Libraries {
+        &self.library.copy
+    }
+
     pub fn return_code(&self) -> i16 {
         i16::from_be_bytes([self.mem[RETURN_CODE], self.mem[RETURN_CODE + 1]])
     }

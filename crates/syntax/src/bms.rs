@@ -469,7 +469,8 @@ fn attrb(ops: &Operands) -> Result<Attrb, Error> {
 }
 
 /// How many bytes a PICTURE string covers on the screen.
-fn picture_size(pic: &str) -> u32 {
+/// The bytes a PICIN or PICOUT picture occupies: S and V take none.
+pub fn picture_size(pic: &str) -> u32 {
     let chars: Vec<char> = pic.chars().collect();
     let (mut size, mut i) = (0, 0);
     while i < chars.len() {
@@ -585,6 +586,69 @@ fn position(ops: &Operands, map: &Map) ->Result<(u16, u16), Error> {
 const SUFFIX: &[(&str, char)] = &[("COLOR", 'C'), ("PS", 'P'), ("HILIGHT", 'H'), ("VALIDN", 'V'), ("OUTLINE", 'U'), ("SOSI", 'M'), ("TRANSP", 'T')];
 
 /// The COBOL a program COPYs for the mapset: each map's input and output structures.
+/// Where one occurrence of a named field lies in a map's symbolic structure: the offsets of its L
+/// and F/A bytes and extended attributes (for the first member of a group, or a lone field), and
+/// of its data. They are the offsets `symbolic_map` declares, which SEND MAP and RECEIVE MAP use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Slot {
+    pub field: usize,
+    pub occurrence: u16,
+    pub control: Option<usize>,
+    pub extended: usize,
+    pub data: usize,
+    pub size: usize,
+}
+
+impl Slot {
+    /// The L halfword, then the F/A byte, when the slot has them.
+    pub fn length_at(&self) -> Option<usize> {
+        self.control
+    }
+
+    pub fn attribute_at(&self) -> Option<usize> {
+        self.control.map(|c| c + 2)
+    }
+}
+
+/// The DSATTS attributes a map's symbolic structure carries, in their order.
+pub fn extended_attributes(map: &Map) -> Vec<&'static str> {
+    SUFFIX.iter().filter(|(a, _)| map.dsatts.iter().any(|d| d == a)).map(|(a, _)| *a).collect()
+}
+
+/// Every named field's slots, in structure order, sized for the input side (PICIN) or the output
+/// side (PICOUT).
+pub fn slots(map: &Map, input: bool) -> Vec<Slot> {
+    let k = extended_attributes(map).len();
+    let mut at = if map.tioapfx { 12 } else { 0 };
+    let mut out = Vec::new();
+    let mut group: Option<&str> = None;
+    for (i, f) in map.fields.iter().enumerate().filter(|(_, f)| f.name.is_some()) {
+        let lead = match &f.group {
+            Some(g) => {
+                let first = group != Some(g.as_str());
+                group = Some(g);
+                first
+            }
+            None => {
+                group = None;
+                true
+            }
+        };
+        let picture = if input { &f.picin } else { &f.picout };
+        let size = picture.as_deref().map_or(usize::from(f.length), |p| picture_size(p) as usize);
+        let copies = if f.group.is_none() { f.occurs.max(1) } else { 1 };
+        for occurrence in 0..copies {
+            let control = lead.then_some(at);
+            if lead {
+                at += 3 + k;
+            }
+            out.push(Slot { field: i, occurrence, control, extended: at - k, data: at, size });
+            at += size;
+        }
+    }
+    out
+}
+
 pub fn symbolic_map(mapset: &Mapset) -> String {
     let mut out = String::new();
     for map in &mapset.maps {
@@ -689,6 +753,22 @@ fn output_items(out: &mut String, map: &Map, f: &Field, level: usize, lead: bool
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slots_match_the_symbolic_map() {
+        let sets = parse(&realistic()).unwrap();
+        let map = &sets[0].maps[0];
+        let slots = slots(map, true);
+        let k = extended_attributes(map).len();
+        let first = slots[0];
+        assert_eq!(first.length_at(), Some(if map.tioapfx { 12 } else { 0 }));
+        assert_eq!(first.data, first.length_at().unwrap() + 3 + k);
+        for pair in slots.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            let gap = if b.control.is_some() { 3 + k } else { 0 };
+            assert_eq!(b.data, a.data + a.size + gap);
+        }
+    }
 
     /// A line with X in column 72.
     fn cont(line: &str) -> String {

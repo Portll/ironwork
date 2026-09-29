@@ -8,6 +8,7 @@ usage:
   ironwork check <program.cbl> [-I <dir>]...           compile only
   ironwork cics <program.cbl> [run flags] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
                [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]... [--td QUEUE=path]...
+               [--screens path | --serve HOST:PORT [--transaction TRAN=PROGRAM]...]
                                                        run as the first program of a CICS task
   ironwork --version
 flags:
@@ -38,10 +39,24 @@ cics flags:
              is written back when the task ends
   --td QUEUE=path
              a transient-data queue appended to path as text lines when the task ends
+  --screens path
+             a 3270 terminal (24x80) played from a script: `type ROW COL text`, `eof ROW COL`,
+             `cursor ROW COL`, and an AID key (ENTER, CLEAR, PA1-PA3, PF1-PF24) ending each turn;
+             every screen the task sends is printed when it ends. BMS maps are read from the copy
+             libraries as NAME.bms
+  --serve HOST:PORT
+             serve TN3270 on the address, one terminal at a time until interrupted, instead of a
+             script. The program runs as --transid's first task with no COMMAREA; RETURN TRANSID
+             waits for the operator's next AID key and runs that transaction with the COMMAREA
+             RETURN gave. A task that ends without TRANSID, an abend, or a transaction that is not
+             defined ends the conversation. Not with --screens, --commarea or --commarea-out
+  --transaction TRAN=PROGRAM
+             with --serve, the program a transaction runs: a program of the source, or one found
+             through -L. --transid names the given program; each program compiles once
 exit status: RETURN-CODE when the run ends normally; 12 compile errors, 16 an abend, 2 usage";
 
 const FLAGS: &[&str] = &["-silent"];
-const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid", "--sysid", "--commarea", "--commarea-out", "--file", "--td"];
+const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid", "--sysid", "--commarea", "--commarea-out", "--file", "--td", "--screens", "--serve", "--transaction"];
 
 fn usage_error(message: &str) -> ExitCode {
     eprintln!("ironwork: {message}\n{USAGE}");
@@ -164,10 +179,8 @@ fn report_abend(compiled: &exec::Compiled, path: &str, abend: &exec::machine::Ab
     ExitCode::from(16)
 }
 
-/// Runs the program as a CICS task built from the cics flags; reports RETURN TRANSID and writes
-/// RETURN's COMMAREA where --commarea-out says.
-fn run_cics(compiled: &exec::Compiled, path: &str, library: exec::unit::Library, dds: exec::files::Dds, clock: exec::unit::Clock, options: &[(String, String)]) -> ExitCode {
-    let page = compiled.options.code_page();
+/// A task with the identity, files and queues the cics flags give.
+fn cics_task(options: &[(String, String)], number: u32) -> Result<exec::cics::Task, String> {
     let get = |name: &str| options.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone());
     let mut task = exec::cics::Task {
         transid: get("--transid").unwrap_or_else(|| "TRAN".into()).to_ascii_uppercase(),
@@ -175,26 +188,237 @@ fn run_cics(compiled: &exec::Compiled, path: &str, library: exec::unit::Library,
         userid: get("--userid").unwrap_or_else(|| "CICSUSER".into()).to_ascii_uppercase(),
         applid: get("--applid").unwrap_or_else(|| "IRONWORK".into()).to_ascii_uppercase(),
         sysid: get("--sysid").unwrap_or_else(|| "IRON".into()).to_ascii_uppercase(),
-        number: 1,
+        number,
         ..Default::default()
     };
     for (name, value) in options {
         match name.as_str() {
-            "--file" => match exec::cics::parse_file(value) {
-                Ok((file, def)) => {
-                    task.files.insert(file, def);
-                }
-                Err(e) => return usage_error(&format!("--file {e}")),
-            },
+            "--file" => {
+                let (file, def) = exec::cics::parse_file(value).map_err(|e| format!("--file {e}"))?;
+                task.files.insert(file, def);
+            }
             "--td" => match value.split_once('=') {
                 Some((queue, file)) => {
                     task.td_files.insert(queue.to_ascii_uppercase(), std::path::PathBuf::from(file));
                 }
-                None => return usage_error("--td needs QUEUE=path"),
+                None => return Err("--td needs QUEUE=path".into()),
             },
             _ => {}
         }
     }
+    Ok(task)
+}
+
+/// The programs a served terminal's transactions run, each compiled the first time it is needed.
+struct Transactions {
+    library: exec::unit::Library,
+    table: std::collections::HashMap<String, String>,
+    compiled: std::collections::HashMap<String, std::rc::Rc<exec::Compiled>>,
+}
+
+impl Transactions {
+    /// The program by name: one of the source's programs, else a member of a -L directory.
+    fn program(&mut self, name: &str) -> Result<std::rc::Rc<exec::Compiled>, String> {
+        let name = name.to_ascii_uppercase();
+        if let Some(c) = self.compiled.get(&name) {
+            return Ok(c.clone());
+        }
+        let found = self.library.programs.iter().position(|p| p.id.eq_ignore_ascii_case(&name));
+        let index = match found {
+            Some(i) => i,
+            None => {
+                let names = [name.clone(), name.to_ascii_lowercase()];
+                let path = self
+                    .library
+                    .dirs
+                    .iter()
+                    .flat_map(|d| names.iter().flat_map(move |n| ["", ".cbl", ".CBL", ".cob", ".COB"].iter().map(move |e| d.join(format!("{n}{e}")))))
+                    .find(|p| p.is_file())
+                    .ok_or_else(|| format!("program {name} not found"))?;
+                let shown = path.display().to_string();
+                let text = fs::read(&path).map(|b| syntax::copy::decode(&b)).map_err(|e| format!("{shown}: {e}"))?;
+                let parsed = syntax::parse_all_with(&text, &self.library.copy).map_err(|e| e.place(&shown))?;
+                let at = self.library.programs.len();
+                self.library.programs.extend(parsed);
+                at
+            }
+        };
+        let compiled = exec::compile(self.library.programs[index].clone(), &self.library.flags)
+            .map_err(|errors| format!("{name} does not compile: {}", errors.first().map(|e| e.place(&name)).unwrap_or_default()))?;
+        let compiled = std::rc::Rc::new(compiled);
+        self.compiled.insert(name, compiled.clone());
+        Ok(compiled)
+    }
+}
+
+/// Serves TN3270 on --serve's address, one connection at a time, running pseudo-conversations.
+fn serve_cics(first: &exec::Compiled, mut library: exec::unit::Library, dds: exec::files::Dds, clock: exec::unit::Clock, options: &[(String, String)]) -> ExitCode {
+    let get = |name: &str| options.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone());
+    let address = get("--serve").unwrap_or_default();
+    if let Err(e) = cics_task(options, 1) {
+        return usage_error(&e);
+    }
+    let mut table = std::collections::HashMap::new();
+    table.insert(get("--transid").unwrap_or_else(|| "TRAN".into()).to_ascii_uppercase(), first.program.id.to_ascii_uppercase());
+    for (_, spec) in options.iter().filter(|(n, _)| n == "--transaction") {
+        match spec.split_once('=') {
+            Some((tran, program)) if !tran.is_empty() && !program.is_empty() => {
+                table.insert(tran.to_ascii_uppercase(), program.to_ascii_uppercase());
+            }
+            _ => return usage_error("--transaction needs TRAN=PROGRAM"),
+        }
+    }
+    library.programs.insert(0, first.program.clone());
+    let page = first.options.code_page();
+    let listener = match std::net::TcpListener::bind(&address) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("ironwork: --serve {address}: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    eprintln!("ironwork: serving TN3270 on {}", listener.local_addr().map_or(address, |a| a.to_string()));
+    let mut transactions = Transactions { library, table, compiled: Default::default() };
+    for connection in listener.incoming() {
+        let stream = match connection {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("ironwork: accept: {e}");
+                continue;
+            }
+        };
+        let peer = stream.peer_addr().map_or_else(|_| "a terminal".to_string(), |a| a.to_string());
+        match exec::tn3270::negotiate(stream) {
+            Ok(terminal) => {
+                eprintln!("ironwork: {peer} connected as {}", terminal.terminal_type);
+                converse(&mut transactions, std::rc::Rc::new(std::cell::RefCell::new(terminal)), &dds, clock, options, &|c| page.encode_char(c));
+                eprintln!("ironwork: {peer} disconnected");
+            }
+            Err(e) => eprintln!("ironwork: {peer}: {e}"),
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+/// One terminal's session: pseudo-conversations one after another. Each task borrows the terminal
+/// through `Shared`, so the loop keeps it between tasks and reads the operator's next input itself.
+/// A conversation that ends leaves its last screen, or its error message, on the terminal, and the
+/// operator's next key starts the first transaction again, until the terminal disconnects.
+fn converse(
+    transactions: &mut Transactions,
+    terminal: std::rc::Rc<std::cell::RefCell<exec::tn3270::Tn3270>>,
+    dds: &exec::files::Dds,
+    clock: exec::unit::Clock,
+    options: &[(String, String)],
+    encode: &dyn Fn(char) -> Option<u8>,
+) {
+    let show = |text: &str| {
+        eprintln!("ironwork: {text}");
+        let (_, columns) = exec::cics::Terminal::size(&*terminal.borrow());
+        let mut stream = vec![exec::terminal::ERASE_WRITE, exec::terminal::WCC_RESTORE, exec::terminal::SBA];
+        stream.extend(exec::terminal::encode_address(0));
+        let shown = text.chars().map(|c| if c.is_control() { ' ' } else { c }).take(columns);
+        stream.extend(shown.map(|c| encode(c).unwrap_or(0x6F)));
+        if let Err(e) = exec::cics::Terminal::send(&mut *terminal.borrow_mut(), &stream) {
+            eprintln!("ironwork: {e}");
+        }
+    };
+    loop {
+        match conversation(transactions, &terminal, dds, clock, options) {
+            Conversation::Ended => {}
+            Conversation::Failed(text) => show(&text),
+            Conversation::Disconnected => return,
+        }
+        let received = exec::cics::Terminal::receive(&mut *terminal.borrow_mut());
+        match received {
+            Ok(Some(_)) => {}
+            Ok(None) => return,
+            Err(e) => return eprintln!("ironwork: {e}"),
+        }
+    }
+}
+
+enum Conversation {
+    Ended,
+    Failed(String),
+    Disconnected,
+}
+
+/// Tasks from the first transaction on, each started by RETURN TRANSID and the operator's next
+/// key, until one returns without TRANSID.
+fn conversation(
+    transactions: &mut Transactions,
+    terminal: &std::rc::Rc<std::cell::RefCell<exec::tn3270::Tn3270>>,
+    dds: &exec::files::Dds,
+    clock: exec::unit::Clock,
+    options: &[(String, String)],
+) -> Conversation {
+    let get = |name: &str| options.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone());
+    let mut transid = get("--transid").unwrap_or_else(|| "TRAN".into()).to_ascii_uppercase();
+    let (mut commarea, mut aid) = (None, None);
+    for number in 1.. {
+        let Some(program) = transactions.table.get(&transid).cloned() else {
+            return Conversation::Failed(format!("TRANSACTION {transid} IS NOT DEFINED"));
+        };
+        let compiled = match transactions.program(&program) {
+            Ok(c) => c,
+            Err(e) => return Conversation::Failed(format!("{transid}: {e}")),
+        };
+        let mut task = match cics_task(options, number) {
+            Ok(t) => t,
+            Err(e) => return Conversation::Failed(e),
+        };
+        task.transid = transid.clone();
+        task.commarea = commarea.take();
+        task.initial_aid = aid;
+        task.terminal = Some(Box::new(exec::tn3270::Shared(terminal.clone())));
+        eprintln!("ironwork: task {number}: {transid} runs {program}");
+        let (mut out, mut err) = (io::stdout().lock(), io::stderr());
+        let ran = compiled.execute_cics(transactions.library.clone(), dds.clone(), task, clock, &mut out, &mut err);
+        drop(out);
+        let task = match ran {
+            Ok((_, task)) => task,
+            Err(abend) => return Conversation::Failed(format!("{transid}: ABEND {}: {} at {}", abend.code, abend.message, abend.pos)),
+        };
+        let Some(next) = task.next_transid.as_deref().map(|t| t.trim().to_ascii_uppercase()) else {
+            return Conversation::Ended;
+        };
+        let received = exec::cics::Terminal::receive(&mut *terminal.borrow_mut());
+        match received {
+            Ok(Some(record)) => {
+                aid = record.first().copied();
+                terminal.borrow_mut().push_back(record);
+            }
+            Ok(None) => return Conversation::Disconnected,
+            Err(e) => {
+                eprintln!("ironwork: {e}");
+                return Conversation::Disconnected;
+            }
+        }
+        transid = next;
+        commarea = task.returned_commarea;
+    }
+    Conversation::Ended
+}
+
+/// Runs the program as a CICS task built from the cics flags; reports RETURN TRANSID and writes
+/// RETURN's COMMAREA where --commarea-out says.
+fn run_cics(compiled: &exec::Compiled, path: &str, library: exec::unit::Library, dds: exec::files::Dds, clock: exec::unit::Clock, options: &[(String, String)]) -> ExitCode {
+    let page = compiled.options.code_page();
+    let get = |name: &str| options.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone());
+    if get("--serve").is_some() {
+        if get("--screens").is_some() || get("--commarea").is_some() || get("--commarea-out").is_some() {
+            return usage_error("--serve cannot be combined with --screens, --commarea or --commarea-out");
+        }
+        return serve_cics(compiled, library, dds, clock, options);
+    }
+    if get("--transaction").is_some() {
+        return usage_error("--transaction needs --serve");
+    }
+    let mut task = match cics_task(options, 1) {
+        Ok(t) => t,
+        Err(e) => return usage_error(&e),
+    };
     let commarea = match get("--commarea") {
         None => None,
         Some(spec) => {
@@ -217,8 +441,26 @@ fn run_cics(compiled: &exec::Compiled, path: &str, library: exec::unit::Library,
         }
     };
     task.commarea = commarea;
+    let mut shown = None;
+    if let Some(file) = get("--screens") {
+        let script = match fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|t| exec::terminal::parse_script(&t)) {
+            Ok(s) => s,
+            Err(e) => return usage_error(&format!("--screens {file}: {e}")),
+        };
+        let terminal = exec::terminal::Scripted::new(24, 80, script, page);
+        shown = Some(terminal.shown.clone());
+        task.terminal = Some(Box::new(terminal));
+    }
+    let print_screens = || {
+        for (n, screen) in shown.iter().flat_map(|s| s.borrow().clone()).enumerate() {
+            println!("--- screen {} ---\n{screen}", n + 1);
+        }
+    };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
-    match compiled.execute_cics(library, dds, task, clock, &mut out, &mut err) {
+    let ran = compiled.execute_cics(library, dds, task, clock, &mut out, &mut err);
+    drop(out);
+    print_screens();
+    match ran {
         Ok((_, task)) => {
             match &task.next_transid {
                 Some(t) => eprintln!("ironwork: RETURN TRANSID({t}) with a {}-byte COMMAREA", task.returned_commarea.as_ref().map_or(0, Vec::len)),

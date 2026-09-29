@@ -90,8 +90,16 @@ The subset the interpreter runs today:
   OPERATOR; temporary-storage and transient-data queues; and file control over VSAM KSDS and RRDS
   files (READ with GENERIC, GTEQ and UPDATE, WRITE, REWRITE, DELETE, UNLOCK, and browsing with
   STARTBR, READNEXT, READPREV, RESETBR and ENDBR). The task ends with RETURN TRANSID's COMMAREA
-  written out, so a pseudo-conversation runs one task at a time. BMS maps and the 3270 terminal
-  come next.
+  written out, so a pseudo-conversation runs one task at a time.
+- **BMS maps and a 3270 terminal.** COPY of a mapset reads `NAME.bms` (DFHMSD, DFHMDI, DFHMDF) from
+  the copy libraries and gives the symbolic map the BMS assembly would; DFHAID and DFHBMSCA carry
+  their values. SEND MAP (ERASE, MAPONLY, DATAONLY, CURSOR, symbolic cursor, FREEKB, ALARM, FRSET),
+  RECEIVE MAP (MAPFAIL, JUSTIFY, EIBAID, EIBCPOSN), SEND CONTROL and RECEIVE work on a 3270
+  display that speaks the 3270 data stream. `--screens FILE` plays an operator from a script
+  (`type ROW COL text`, `eof`, `cursor`, then an AID key) and prints every screen; `--serve
+  HOST:PORT` is a TN3270 server a 3270 emulator such as c3270 or x3270 connects to, running
+  pseudo-conversations task after task (`--transaction TRAN=PROGRAM` names the programs RETURN
+  TRANSID leads to). The choices made without a z/OS to observe are assumptions C28 to C33.
 
 Anything else is refused by name at compile time.
 SSRANGE is honoured, including for OCCURS DEPENDING ON counts; without it a subscript can reach

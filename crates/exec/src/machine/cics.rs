@@ -23,7 +23,9 @@ pub(super) const EIBDATE: usize = 0x04;
 pub(super) const EIBTRNID: usize = 0x08;
 pub(super) const EIBTASKN: usize = 0x0C;
 pub(super) const EIBTRMID: usize = 0x10;
+pub(super) const EIBCPOSN: usize = 0x16;
 pub(super) const EIBCALEN: usize = 0x18;
+pub(super) const EIBAID: usize = 0x1A;
 pub(super) const EIBFN: usize = 0x1B;
 pub(super) const EIBRSRCE: usize = 0x33;
 pub(super) const EIBRESP: usize = 0x4C;
@@ -127,6 +129,10 @@ impl<'p> Machine<'p, '_, '_> {
             },
             "HANDLE ABEND" => self.handle_abend(block),
             "HANDLE AID" => self.cics_ok(block),
+            "SEND" | "SEND MAP" if has(block, "MAP") || block.command == "SEND MAP" => self.send_map(block),
+            "RECEIVE" | "RECEIVE MAP" if has(block, "MAP") || block.command == "RECEIVE MAP" => self.receive_map(block),
+            "SEND CONTROL" => self.send_control(block),
+            "RECEIVE" => self.receive_raw(block),
             _ => self.cics_service(block),
         }
     }
@@ -414,6 +420,9 @@ impl<'p> Machine<'p, '_, '_> {
         self.eib_packed(EIBTASKN, i64::from(number));
         self.eib_text(EIBTRMID, 4, &termid);
         self.eib_halfword(EIBCALEN, length as i16);
+        if let Some(aid) = self.unit.cics.as_ref().and_then(|t| t.initial_aid) {
+            self.eib_bytes(EIBAID, &[aid]);
+        }
         let eib = self.unit.eib;
         self.bind(&[Some(eib), commarea]);
     }

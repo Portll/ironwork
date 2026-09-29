@@ -53,6 +53,12 @@ pub const CICS_HANDLE_ABEND_CATCHES_CONDITIONS: &str = "C24";
 pub const CICS_LENGTH_DEFAULTS_TO_INTO: &str = "C25";
 pub const CICS_PROGRAM_CHECK_IS_ASRA: &str = "C26";
 pub const CICS_BROWSE_SKIP: &str = "C27";
+pub const BMS_RECEIVE_NULLS: &str = "C28";
+pub const BMS_INPUT_JUSTIFY: &str = "C29";
+pub const BMS_EXTENDED_ORDER: &str = "C30";
+pub const BMS_CONSTANTS_UNVERIFIED: &str = "C31";
+pub const BMS_SEND_DATA_CHOICE: &str = "C32";
+pub const CICS_INITIAL_AID: &str = "C33";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -220,6 +226,42 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: CICS_BROWSE_SKIP,
         claim: "READNEXT after the program changed RIDFLD to a key the browse is not at continues from the first record at or after the new RIDFLD (skip-sequential)",
+        basis: Basis::Recalled,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: BMS_RECEIVE_NULLS,
+        claim: "RECEIVE MAP sets the input map to nulls, then fills only the fields the operator modified; a field erased to empty gets F = X'80' and L = 0",
+        basis: Basis::Recalled,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: BMS_INPUT_JUSTIFY,
+        claim: "Input data lands left-justified and blank-filled unless JUSTIFY says otherwise, and a NUM field right-justified and zero-filled, the defaults IBM documents for JUSTIFY",
+        basis: Basis::Recalled,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: BMS_EXTENDED_ORDER,
+        claim: "A field's extended attribute bytes in the symbolic map follow its A byte in the order COLOR, PS, HILIGHT, VALIDN, OUTLINE, SOSI, TRANSP",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: BMS_CONSTANTS_UNVERIFIED,
+        claim: "DFHNULL is X'00', and DFHBMPEM, DFHBMPNL, DFHBMPFF and DFHBMPCR are X'19', X'15', X'0C' and X'0D'",
+        basis: Basis::Recalled,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: BMS_SEND_DATA_CHOICE,
+        claim: "SEND MAP without MAPONLY or DATAONLY sends a field's symbolic data when its first byte is not X'00', else the map's INITIAL, and a non-null A byte replaces ATTRB",
+        basis: Basis::Recalled,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CICS_INITIAL_AID,
+        claim: "A task started by terminal input sees that input's AID in EIBAID before any RECEIVE",
         basis: Basis::Recalled,
         oracle: Oracle::EnterpriseCobol,
     },

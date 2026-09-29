@@ -103,6 +103,15 @@ pub struct TsQueue {
     pub next: usize,
 }
 
+/// The task's terminal: SEND writes a 3270 data stream to it, and RECEIVE reads the stream the
+/// operator's next AID key sends back.
+pub trait Terminal: std::fmt::Debug {
+    fn size(&self) -> (usize, usize);
+    fn send(&mut self, stream: &[u8]) -> Result<(), String>;
+    /// None when the operator has nothing more to send.
+    fn receive(&mut self) -> Result<Option<Vec<u8>>, String>;
+}
+
 /// A browse's position: the key it is at, and whether the record there is itself next (after
 /// STARTBR or RESETBR) or was the last returned.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -131,6 +140,11 @@ pub struct Task {
     pub held: HashMap<String, Vec<u8>>,
     /// Open browses by file and REQID.
     pub browses: HashMap<(String, i64), Browse>,
+    pub terminal: Option<Box<dyn Terminal>>,
+    /// The AID key whose input started the task, as EIBAID shows it before any RECEIVE.
+    pub initial_aid: Option<u8>,
+    /// Mapsets already read from the copy libraries, by name.
+    pub mapsets: HashMap<String, syntax::bms::Mapset>,
     /// RETURN TRANSID and COMMAREA, when the task ended that way.
     pub next_transid: Option<String>,
     pub returned_commarea: Option<Vec<u8>>,

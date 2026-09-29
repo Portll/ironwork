@@ -1399,3 +1399,69 @@ fn cics_file_control_reads_writes_rewrites_deletes_and_browses_a_ksds() {
     );
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "002BOB\n003CAROLINE\n004DAVE\n");
 }
+
+fn bms_line(text: &str, continued: bool) -> String {
+    if continued { format!("{text:<71}X\n") } else { format!("{text}\n") }
+}
+
+#[test]
+fn bms_maps_send_and_receive_through_a_scripted_terminal() {
+    let dir = temp("bms");
+    std::fs::create_dir_all(&dir).unwrap();
+    let bms = [
+        bms_line("ORDSET   DFHMSD TYPE=&SYSPARM,MODE=INOUT,LANG=COBOL,STORAGE=AUTO,", true),
+        bms_line("               CTRL=(FREEKB,FRSET)", false),
+        bms_line("ORDMAP   DFHMDI SIZE=(24,80),LINE=1,COLUMN=1", false),
+        bms_line("         DFHMDF POS=(1,1),LENGTH=12,ATTRB=(ASKIP,BRT),", true),
+        bms_line("               INITIAL='ORDER ENTRY'", false),
+        bms_line("         DFHMDF POS=(3,1),LENGTH=9,ATTRB=ASKIP,INITIAL='CUSTOMER:'", false),
+        bms_line("CUST     DFHMDF POS=(3,11),LENGTH=8,ATTRB=(UNPROT,IC)", false),
+        bms_line("         DFHMDF POS=(3,20),LENGTH=1,ATTRB=ASKIP", false),
+        bms_line("QTY      DFHMDF POS=(4,11),LENGTH=3,ATTRB=(UNPROT,NUM)", false),
+        bms_line("         DFHMDF POS=(4,15),LENGTH=1,ATTRB=ASKIP", false),
+        bms_line("MSG      DFHMDF POS=(6,1),LENGTH=30,ATTRB=(ASKIP,BRT)", false),
+        bms_line("         DFHMSD TYPE=FINAL", false),
+        bms_line("         END", false),
+    ]
+    .concat();
+    std::fs::write(dir.join("ORDSET.bms"), bms).unwrap();
+    let source = cics_program(
+        "ORDERS",
+        "           COPY ORDSET.\n           COPY DFHAID.\n       01  WS-RESP PIC S9(8) COMP.\n",
+        "",
+        &[
+            line("MOVE LOW-VALUES TO ORDMAPO"),
+            line("MOVE 'ENTER AN ORDER' TO MSGO"),
+            line("EXEC CICS SEND MAP('ORDMAP') MAPSET('ORDSET') ERASE"),
+            line("    END-EXEC"),
+            line("EXEC CICS RECEIVE MAP('ORDMAP') MAPSET('ORDSET') END-EXEC"),
+            line("DISPLAY 'CUST ' CUSTI ' L=' CUSTL ' QTY ' QTYI"),
+            line("IF EIBAID = DFHENTER DISPLAY 'ENTER' END-IF"),
+            line("EXEC CICS RECEIVE MAP('ORDMAP') MAPSET('ORDSET')"),
+            line("    RESP(WS-RESP) END-EXEC"),
+            line("IF WS-RESP = DFHRESP(MAPFAIL) DISPLAY 'MAPFAIL' END-IF"),
+            line("IF EIBAID = DFHCLEAR DISPLAY 'CLEAR' END-IF"),
+            line("EXEC CICS RETURN END-EXEC."),
+        ]
+        .concat(),
+    );
+    let libraries = syntax::copy::Libraries::new(vec![dir.clone()]);
+    let mut programs = syntax::parse_all_with(&source, &libraries).unwrap_or_else(|e| panic!("{e}"));
+    let compiled = compile(programs.remove(0), &[]).unwrap_or_else(|e| panic!("{e:?}"));
+    let page = compiled.options.code_page();
+    let script = terminal::parse_script("type 3 12 ACME\ntype 4 12 7\nENTER\nCLEAR\n").unwrap();
+    let scripted = terminal::Scripted::new(24, 80, script, page);
+    let shown = scripted.shown.clone();
+    let t = cics::Task { terminal: Some(Box::new(scripted)), ..task("ORD1") };
+    let library = unit::Library { programs, copy: libraries, ..Default::default() };
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let ending = compiled.execute_cics(library, files::Dds::default(), t, unit::Clock::System, &mut out, &mut err);
+    let out = String::from_utf8(out).unwrap();
+    assert!(ending.is_ok(), "{ending:?}\n{out}");
+    assert_eq!(out, "CUST ACME     L=000D QTY 007\nENTER\nMAPFAIL\nCLEAR\n");
+    let screen = shown.borrow()[0].clone();
+    let rows: Vec<&str> = screen.lines().collect();
+    assert_eq!(rows[0], " ORDER ENTRY");
+    assert_eq!(rows[2], " CUSTOMER:");
+    assert_eq!(rows[5], " ENTER AN ORDER");
+}

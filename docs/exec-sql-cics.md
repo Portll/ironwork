@@ -104,9 +104,10 @@ programs.
 Parse, don't run is built: EXEC SQL and EXEC CICS are read and checked. Indexed and relative files
 are built. CICS Tiers 1 and 2 run as a harness (`ironwork cics`): program control, exception
 conditions, time and storage services, temporary-storage and transient-data queues, and file
-control over VSAM, with the choices recorded as assumptions C22 to C27. Tier 3, BMS maps and the
-3270 terminal, is next; then SQL, record and replay first. Reaching an EXEC SQL statement at run
-time still ends the run, naming the command.
+control over VSAM, with the choices recorded as assumptions C22 to C27. Tier 3 runs too: BMS maps
+(COPY of a mapset gives its symbolic map), SEND MAP and RECEIVE MAP on a 3270 display, played from
+a script or served over TN3270 to a real emulator (assumptions C28 to C33). SQL is next, record and
+replay first. Reaching an EXEC SQL statement at run time still ends the run, naming the command.
 
 ## Verification
 

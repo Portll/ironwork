@@ -19,6 +19,7 @@ use zarch::hfp::{Hfp, Precision};
 use zarch::wide::U256;
 
 mod cics;
+mod cics_bms;
 mod cics_files;
 mod cics_services;
 mod file_io;
