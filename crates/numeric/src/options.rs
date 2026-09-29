@@ -2,6 +2,54 @@ use std::fmt;
 use zarch::ebcdic::CodePage;
 use zarch::hfp::Precision;
 
+/// Enterprise COBOL's compiler options, from Table 45 of IBM's Programming Guide, vendored byte for
+/// byte from cobolwork's provenance/enterprise-options.tsv (tools/sync-option-table.sh).
+const TABLE: &str = include_str!("../data/enterprise-options.tsv");
+
+/// An option in IBM's table: the spellings it answers to, and where it may be given.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Documented {
+    pub name: &'static str,
+    spellings: &'static str,
+    /// Whether a CBL or PROCESS statement may give it.
+    pub process: bool,
+    /// Whether a CBL or PROCESS statement may give it only before a batch compilation's first program.
+    pub first_program_only: bool,
+    pub installation_default: bool,
+    /// The page of its section in the Enterprise COBOL 6.4 Programming Guide.
+    pub page: u16,
+}
+
+impl Documented {
+    pub fn spellings(&self) -> impl Iterator<Item = &'static str> {
+        self.spellings.split(' ')
+    }
+}
+
+/// Every option in IBM's table.
+pub fn documented() -> impl Iterator<Item = Documented> {
+    TABLE.lines().filter(|l| !l.starts_with('#')).map(|line| {
+        let f: Vec<&'static str> = line.split('\t').collect();
+        let yes = |i: usize| f[i] == "yes";
+        Documented { name: f[0], spellings: f[2], process: yes(3), first_program_only: yes(4), installation_default: yes(5), page: f[6].parse().expect("the table's pages are numbers") }
+    })
+}
+
+/// The option IBM documents under `spelling`, and whether the spelling turns the option off: a
+/// spelling beginning NO that is not the option's own name.
+pub fn spelled(spelling: &str) -> Option<(Documented, bool)> {
+    let o = documented().find(|o| o.spellings().any(|s| s == spelling))?;
+    Some((o, spelling.starts_with("NO") && !o.name.split('/').any(|n| n == spelling)))
+}
+
+/// Whether `option`, as a CBL or PROCESS statement writes it, sets the on-off option `name`, and to
+/// which: `SSR(ZLEN)` gives Some(true) for SSRANGE, `NOSSR` Some(false), and TRUNC(OPT) None.
+pub fn switch(option: &str, name: &str) -> Option<bool> {
+    let option = option.trim().to_ascii_uppercase();
+    let word = option.split('(').next().unwrap_or("").trim();
+    spelled(word).filter(|(o, _)| o.name == name).map(|(_, off)| !off)
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Arith {
     #[default]
@@ -137,8 +185,9 @@ impl Options {
             None => (option.as_str(), ""),
         };
         let bad = || OptionError::BadSuboption { option: name.to_owned(), given: sub.to_owned() };
-        match name {
-            "ARITH" | "AR" => {
+        let Some((documented, off)) = spelled(name) else { return Ok(false) };
+        match documented.name {
+            "ARITH" => {
                 self.arith = match sub {
                     "COMPAT" | "C" => Arith::Compat,
                     "EXTEND" | "E" => Arith::Extend,
@@ -161,19 +210,17 @@ impl Options {
                     _ => return Err(bad()),
                 }
             }
-            "CODEPAGE" | "CP" => {
+            "CODEPAGE" => {
                 let ccsid: u16 = sub.parse().map_err(|_| bad())?;
                 CodePage::by_ccsid(ccsid).ok_or(OptionError::UnsupportedCodePage(ccsid))?;
                 self.codepage = ccsid;
             }
-            "FASTSRT" | "FSRT" => self.fastsrt = true,
-            "NOFASTSRT" | "NOFSRT" => self.fastsrt = false,
-            "ADV" => self.adv = true,
-            "NOADV" => self.adv = false,
-            "THREAD" | "NOTHREAD" => self.thread = name == "THREAD",
-            "DLL" | "NODLL" => self.dll = name == "DLL",
-            "RENT" | "NORENT" => self.rent = name == "RENT",
-            "DBCS" | "NODBCS" => self.dbcs = name == "DBCS",
+            "FASTSRT" => self.fastsrt = !off,
+            "ADV" => self.adv = !off,
+            "THREAD" => self.thread = !off,
+            "DLL" => self.dll = !off,
+            "RENT" => self.rent = !off,
+            "DBCS" => self.dbcs = !off,
             _ => return Ok(false),
         }
         Ok(true)
@@ -238,6 +285,54 @@ mod tests {
         assert_eq!((o.arith, o.codepage, o.trunc, o.fastsrt), (Arith::Extend, 1047, Trunc::Bin, true));
         assert_eq!(o.apply("NOFASTSRT"), Ok(true));
         assert!(!o.fastsrt);
+    }
+
+    #[test]
+    fn ibms_table_is_whole_and_no_spelling_names_two_options() {
+        let all: Vec<Documented> = documented().collect();
+        assert_eq!(all.len(), 85, "Table 45 lists 85 options");
+        let mut seen = std::collections::HashMap::new();
+        for o in &all {
+            for s in o.spellings() {
+                assert!(seen.insert(s, o.name).is_none(), "{s} names {} and {}", seen[s], o.name);
+            }
+        }
+        assert!(TABLE.lines().nth(1).is_some_and(|l| l.contains("cobolwork's provenance/enterprise-options.json")));
+        let adata = all.iter().find(|o| o.name == "ADATA").unwrap();
+        assert!(!adata.process && adata.page == 345);
+    }
+
+    #[test]
+    fn every_spelling_ibm_documents_for_an_option_read_here_is_read() {
+        let suboption = |name| match name {
+            "ARITH" => "(E)",
+            "CODEPAGE" => "(1047)",
+            "TRUNC" => "(OPT)",
+            "NUMPROC" => "(PFD)",
+            _ => "",
+        };
+        for name in ["ARITH", "CODEPAGE", "TRUNC", "NUMPROC", "FASTSRT"] {
+            let o = documented().find(|o| o.name == name).unwrap();
+            for s in o.spellings() {
+                assert_eq!(Options::default().apply(&format!("{s}{}", suboption(name))), Ok(true), "{s}");
+            }
+        }
+        let mut o = Options::default();
+        o.apply("FSRT").unwrap();
+        o.apply("NOFSRT").unwrap();
+        assert!(!o.fastsrt);
+        assert_eq!(switch("ssr(zlen)", "SSRANGE"), Some(true));
+        assert_eq!(switch("SSRANGE(NOZLEN,MSG)", "SSRANGE"), Some(true));
+        assert_eq!(switch("NOSSR", "SSRANGE"), Some(false));
+        assert_eq!(switch("TRUNC(OPT)", "SSRANGE"), None);
+    }
+
+    /// Run with IRONWORK_COBOLWORK_DIR naming a cobolwork checkout to check the vendored copy.
+    #[test]
+    fn the_vendored_table_is_cobolworks() {
+        let Ok(dir) = std::env::var("IRONWORK_COBOLWORK_DIR") else { return };
+        let theirs = std::fs::read_to_string(std::path::Path::new(&dir).join("provenance/enterprise-options.tsv")).expect("cobolwork's table");
+        assert!(theirs == TABLE, "crates/numeric/data/enterprise-options.tsv differs from cobolwork's: run tools/sync-option-table.sh");
     }
 
     #[test]

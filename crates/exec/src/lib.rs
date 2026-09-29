@@ -64,11 +64,8 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
     let mut options = Options::default();
     let mut ssrange = false;
     for option in &program.options {
-        let upper = option.to_ascii_uppercase();
-        if upper.starts_with("SSRANGE") || upper == "SSR" {
-            ssrange = true;
-        } else if upper == "NOSSRANGE" || upper == "NOSSR" {
-            ssrange = false;
+        if let Some(on) = numeric::options::switch(option, "SSRANGE") {
+            ssrange = on;
         }
         if let Err(e) = options.apply(option) {
             errors.push(Error::at(Pos::default(), format!("CBL {option}: {e}")));

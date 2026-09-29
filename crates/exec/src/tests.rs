@@ -605,6 +605,8 @@ fn ssrange_catches_what_ibm_would_catch() {
     let body = [line("MOVE 'A' TO T(I)"), line("GOBACK.")].concat();
     assert!(run_with(&program("", data, &body), &[]).2.is_ok());
     assert!(run_with(&program("SSRANGE", data, &body), &[]).2.unwrap_err().message.contains("SSRANGE"));
+    assert!(run_with(&program("SSR(ZLEN)", data, &body), &[]).2.unwrap_err().message.contains("SSRANGE"));
+    assert!(run_with(&program("SSR,NOSSR", data, &body), &[]).2.is_ok());
 }
 
 #[test]
