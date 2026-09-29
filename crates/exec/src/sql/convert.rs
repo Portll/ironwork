@@ -38,7 +38,7 @@ pub fn read(bytes: &[u8], ty: &HostType, page: &CodePage, numproc: Numproc) -> R
             i64::try_from(v).map_or(Value::Decimal { value: v, scale: 0 }, Value::Int)
         }
         HostType::Decimal { scale, signed, .. } => as_value(codec::packed(bytes, signed, numproc).map_err(ReadError::Check)?, scale),
-        HostType::Zoned { digits, scale, signed, sign } => as_value(codec::zoned(bytes, digits, signed, sign, numproc).map_err(ReadError::Check)?, scale),
+        HostType::Zoned { scale, signed, sign, .. } => as_value(codec::zoned(bytes, signed, sign, numproc).map_err(ReadError::Check)?, scale),
         HostType::Real => Value::Double(Hfp::from_bytes(Precision::Short, bytes).approx()),
         HostType::Double => Value::Double(Hfp::from_bytes(Precision::Long, bytes).approx()),
         HostType::Char(_) => Value::Char(page.decode(bytes)),

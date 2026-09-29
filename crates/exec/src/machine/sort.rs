@@ -5,6 +5,7 @@
 use super::*;
 use crate::files::{Format, Record};
 use numeric::{SortKeys, TruncCheck, assumptions};
+use std::rc::Rc;
 
 /// The signal a RELEASE or RETURN raises to stop the operation: control passes to the statement
 /// after the SORT or MERGE, whose message is the reason.
@@ -33,13 +34,16 @@ enum Phase {
 }
 
 /// A key's place in the record (or table element) and how it reads.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Key {
     ascending: bool,
     offset: usize,
     len: usize,
     kind: Kind,
     item: usize,
+    /// Each character's position in the collating sequence of an alphanumeric key, when it is not
+    /// EBCDIC.
+    positions: Option<Rc<[u8; 256]>>,
 }
 
 struct Entry {
@@ -53,6 +57,8 @@ enum KeyValue {
     /// A zoned or packed key as DFSORT reads a ZD, PD, CLO, CSL or CST field: its sign, and its
     /// digit nibbles as they stand.
     Decimal { negative: bool, digits: Vec<u8> },
+    /// An alphanumeric key as the position of each of its characters in the collating sequence.
+    Collated(Vec<u8>),
 }
 
 enum Input {
@@ -86,6 +92,7 @@ fn order(a: &[KeyValue], b: &[KeyValue], keys: &[Key]) -> Ordering {
             (KeyValue::Read(Val::Float(x)), KeyValue::Read(Val::Float(y))) => float_order(*x, *y),
             (KeyValue::Read(Val::National(x)), KeyValue::Read(Val::National(y))) => compare_national(x, y),
             (KeyValue::Read(Val::Bytes(x)), KeyValue::Read(Val::Bytes(y))) => ebcdic::compare_alphanumeric(x, y, &Collation::Native),
+            (KeyValue::Collated(x), KeyValue::Collated(y)) => x.cmp(y),
             (KeyValue::Decimal { negative: false, digits: x }, KeyValue::Decimal { negative: false, digits: y }) => x.cmp(y),
             (KeyValue::Decimal { negative: true, digits: x }, KeyValue::Decimal { negative: true, digits: y }) => y.cmp(x),
             (KeyValue::Decimal { negative, .. }, KeyValue::Decimal { .. }) => if *negative { Ordering::Less } else { Ordering::Greater },
@@ -176,29 +183,50 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     /// The keys of SD `sd`, placed within its records.
-    fn file_keys(&mut self, sd: usize, keys: &[(bool, Ref)], pos: Pos) -> R<Vec<Key>> {
+    fn file_keys(&mut self, st: &SortStmt, sd: usize, pos: Pos) -> R<Vec<Key>> {
         let area = self.layout.file_areas[sd].0 as usize;
+        let positions = self.key_positions(st, true)?;
         let mut out = Vec::new();
-        for (ascending, r) in keys {
+        for (ascending, r) in &st.keys {
             let Resolved::Item(i) = self.resolve(r)? else {
                 return Err(Abend::ironwork(format!("{} is not a data item", r.name), pos));
             };
             let item = &self.layout.items[i];
             let offset = (item.offset as usize).checked_sub(area).ok_or_else(|| Abend::ironwork(format!("{} is not in the sort file's records", r.name), pos))?;
-            out.push(Key { ascending: *ascending, offset, len: item.size as usize, kind: item.kind, item: i });
+            let positions = positions.clone().filter(|_| crate::sort::collates(item.kind));
+            out.push(Key { ascending: *ascending, offset, len: item.size as usize, kind: item.kind, item: i, positions });
         }
         Ok(out)
     }
 
+    /// The collating sequence of the alphanumeric keys when it is not EBCDIC: the COLLATING
+    /// SEQUENCE phrase's, else a file SORT's or MERGE's PROGRAM COLLATING SEQUENCE
+    /// (SC27-8713-03, p. 123); see TABLE_SORT_COLLATION in numeric::assumptions for a table SORT.
+    fn key_positions(&self, st: &SortStmt, file: bool) -> R<Option<Rc<[u8; 256]>>> {
+        let named;
+        let sequence = match &st.collating {
+            Some(name) => {
+                named = crate::collating::Sequence::named(&self.program.environment, name, self.page)
+                    .map_err(|m| Abend::ironwork(format!("COLLATING SEQUENCE {name}: {m}"), st.pos))?;
+                &named
+            }
+            None if file => self.collating,
+            None => return Ok(None),
+        };
+        Ok((!sequence.is_native()).then(|| Rc::new(sequence.positions())))
+    }
+
     /// Each key's value, from storage at `base`: a zoned or packed key as DFSORT reads it when
-    /// `dfsort`, every other key as the program would read it.
+    /// `dfsort`, an alphanumeric key by its collating sequence, every other key as the program
+    /// would read it.
     fn key_values(&mut self, base: usize, keys: &[Key], dfsort: bool, pos: Pos) -> R<Vec<KeyValue>> {
         let mut out = Vec::with_capacity(keys.len());
         for k in keys {
             let loc = Loc { offset: base + k.offset, len: k.len, kind: k.kind, item: k.item };
-            out.push(match dfsort.then(|| dfsort_decimal(self.bytes(loc), k.kind)).flatten() {
-                Some((negative, digits)) => KeyValue::Decimal { negative, digits },
-                None => KeyValue::Read(self.read(loc, pos)?),
+            out.push(match (dfsort.then(|| dfsort_decimal(self.bytes(loc), k.kind)).flatten(), &k.positions) {
+                (Some((negative, digits)), _) => KeyValue::Decimal { negative, digits },
+                (None, Some(positions)) => KeyValue::Collated(self.bytes(loc).iter().map(|&b| positions[b as usize]).collect()),
+                (None, None) => KeyValue::Read(self.read(loc, pos)?),
             });
         }
         Ok(out)
@@ -532,7 +560,7 @@ impl<'p> Machine<'p, '_, '_> {
         self.refuse_control_statements(pos)?;
         let sort_return = self.register("SORT-RETURN", pos);
         self.set_integer(&sort_return, 0, pos)?;
-        let keys = self.file_keys(sd, &st.keys, pos)?;
+        let keys = self.file_keys(st, sd, pos)?;
         let plan = self.fastsrt_plan(st, sd, pos)?;
         self.report_fastsrt(st, &plan);
         let mut entries = match &st.input {
@@ -593,7 +621,7 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     fn release(&mut self, record: &Ref, from: Option<&Operand>, pos: Pos) -> R<()> {
-        let loc = self.locate(record)?;
+        let mut loc = if from.is_some() { self.locate_receiving(record)? } else { self.locate(record)? };
         let file = self.layout.items.get(loc.item).and_then(|i| i.file).map(usize::from);
         let Some(Active { sd, keys, phase: Phase::Input(_) }) = &self.sort else {
             return Err(Abend::ironwork(format!("RELEASE {}: no SORT input procedure is running", record.name), pos));
@@ -608,6 +636,7 @@ impl<'p> Machine<'p, '_, '_> {
         if let Some(op) = from {
             let (val, src) = self.operand_with_loc(op, pos)?;
             self.assign(loc, val, src, pos)?;
+            loc = self.locate(record)?;
         }
         let bytes = if self.fixed_length(sd) {
             let (area, size) = self.area(sd);
@@ -658,7 +687,7 @@ impl<'p> Machine<'p, '_, '_> {
             self.unit.mem[area + len..area + size].fill(ebcdic::SPACE);
         }
         if let Some(r) = into {
-            let dest = self.locate(r)?;
+            let dest = self.locate_receiving(r)?;
             let bytes = self.unit.mem[area..area + if self.fixed_length(sd) { size } else { len }].to_vec();
             self.assign(dest, Val::Bytes(bytes), None, pos)?;
         }
@@ -686,11 +715,13 @@ impl<'p> Machine<'p, '_, '_> {
             return Err(Abend::ironwork(format!("SORT {} reaches outside the run unit's storage", st.subject.name), pos));
         }
         let named = if st.keys.is_empty() { &table.keys } else { &st.keys };
+        let positions = self.key_positions(st, false)?;
         let mut keys = Vec::new();
         for (ascending, r) in named {
             let k = crate::sort::table_key(layout, t, &r.name).ok_or_else(|| Abend::ironwork(format!("{} is not a key of {}", r.name, st.subject.name), pos))?;
             let item = &layout.items[k];
-            keys.push(Key { ascending: *ascending, offset: item.offset.saturating_sub(table.offset) as usize, len: item.size as usize, kind: item.kind, item: k });
+            let positions = positions.clone().filter(|_| crate::sort::collates(item.kind));
+            keys.push(Key { ascending: *ascending, offset: item.offset.saturating_sub(table.offset) as usize, len: item.size as usize, kind: item.kind, item: k, positions });
         }
         let mut entries = Vec::with_capacity(count);
         for i in 0..count {

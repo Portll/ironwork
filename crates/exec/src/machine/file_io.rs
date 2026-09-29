@@ -167,17 +167,16 @@ impl<'p> Machine<'p, '_, '_> {
         bytes
     }
 
-    /// The file a record belongs to, after FROM has moved into it.
+    /// The file a record belongs to, and the record as it stands once FROM has moved into it.
     fn record_of(&mut self, record: &Ref, from: Option<&Operand>, verb: &str, pos: Pos) -> R<(usize, Loc)> {
-        let loc = self.locate(record)?;
-        let Some(k) = self.layout.items.get(loc.item).and_then(|i| i.file).map(|k| k as usize) else {
+        let dest = if from.is_some() { self.locate_receiving(record)? } else { self.locate(record)? };
+        let Some(k) = self.layout.items.get(dest.item).and_then(|i| i.file).map(|k| k as usize) else {
             return Err(Abend::ironwork(format!("{verb} {}: not a record of a file", record.name), pos));
         };
-        if let Some(op) = from {
-            let (val, src) = self.operand_with_loc(op, pos)?;
-            self.assign(loc, val, src, pos)?;
-        }
-        Ok((k, loc))
+        let Some(op) = from else { return Ok((k, dest)) };
+        let (val, src) = self.operand_with_loc(op, pos)?;
+        self.assign(dest, val, src, pos)?;
+        Ok((k, self.locate(record)?))
     }
 
     /// Moves a record into file k's area, and to INTO's item; a variable-length record fills only
@@ -190,7 +189,7 @@ impl<'p> Machine<'p, '_, '_> {
             self.unit.mem[offset + n..offset + size].fill(ebcdic::SPACE);
         }
         if let Some(r) = into {
-            let dest = self.locate(r)?;
+            let dest = self.locate_receiving(r)?;
             let bytes = self.unit.mem[offset..offset + if variable { n } else { size }].to_vec();
             self.assign(dest, Val::Bytes(bytes), None, pos)?;
         }

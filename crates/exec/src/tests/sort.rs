@@ -269,29 +269,56 @@ fn table_sort_by_its_occurs_keys_by_named_keys_and_by_the_element() {
     assert_eq!(out, "ADEBC \nBCEDA \nABCDE\nEDCBA\n");
 }
 
+/// A file SORT's alphanumeric keys follow its COLLATING SEQUENCE, else the PROGRAM COLLATING
+/// SEQUENCE; a table SORT's follow only the phrase (TABLE_SORT_COLLATION).
 #[test]
-fn what_is_not_modelled_is_refused_by_name() {
-    let collating = |alphabet: &str, key: &str| {
-        let source = [
+fn collating_sequences_order_alphanumeric_sort_keys() {
+    let source = |sorts: &str| {
+        [
             "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n",
-            &format!("       SPECIAL-NAMES. ALPHABET ALPHA IS {alphabet}.\n"),
+            "       OBJECT-COMPUTER. IBM-370 PROGRAM COLLATING SEQUENCE IS BACK.\n",
+            "       SPECIAL-NAMES. ALPHABET BACK IS 'Z' THROUGH 'A'\n           ALPHABET ASCII IS STANDARD-1.\n",
             "       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n",
             SELECT_SD,
-            "       DATA DIVISION.\n       FILE SECTION.\n       SD  S-FILE.\n       01  S-REC.\n           05 S-X PIC X(2).\n           05 S-N PIC 9(2).\n",
-            "       PROCEDURE DIVISION.\n",
-            &line(&format!("SORT S-FILE ASCENDING {key} COLLATING SEQUENCE ALPHA")),
-            &line("    INPUT PROCEDURE P OUTPUT PROCEDURE P."),
-            "       P.\n",
-            &line("EXIT."),
+            "       DATA DIVISION.\n       FILE SECTION.\n       SD  S-FILE.\n       01  S-REC.\n           05 S-X PIC X(2).\n           05 S-N PIC 9.\n",
+            "       WORKING-STORAGE SECTION.\n       01  T VALUE 'a1A111B1'.\n           05 E PIC X(2) OCCURS 4.\n       01  DONE PIC X.\n",
+            "       PROCEDURE DIVISION.\n       MAIN-LINE.\n",
+            sorts,
+            &line("GOBACK."),
+            "       FEED.\n",
+            &line("MOVE 'a1' TO S-X RELEASE S-REC MOVE 'A1' TO S-X RELEASE S-REC"),
+            &line("MOVE '11' TO S-X RELEASE S-REC"),
+            &line("MOVE 'B1' TO S-X RELEASE S-REC."),
+            "       SHOW.\n",
+            &line("MOVE 'N' TO DONE"),
+            &line("PERFORM UNTIL DONE = 'Y'"),
+            &line("    RETURN S-FILE AT END MOVE 'Y' TO DONE"),
+            &line("    NOT AT END DISPLAY S-X WITH NO ADVANCING END-RETURN"),
+            &line("END-PERFORM"),
+            &line("DISPLAY ' '."),
         ]
-        .concat();
-        compile_errors(&source)
+        .concat()
     };
-    assert!(collating("STANDARD-1", "S-X").contains("COLLATING SEQUENCE ALPHA (STANDARD-1) for SORT or MERGE keys is not supported yet"));
-    assert!(collating("'A' THRU 'Z'", "S-X").contains("(literal)"));
-    assert_eq!(collating("STANDARD-1", "S-N"), "");
-    assert_eq!(collating("EBCDIC", "S-X"), "");
+    let sorts = [
+        line("SORT S-FILE ASCENDING S-X COLLATING SEQUENCE ASCII"),
+        line("    INPUT PROCEDURE FEED OUTPUT PROCEDURE SHOW"),
+        line("SORT S-FILE ASCENDING S-X INPUT PROCEDURE FEED"),
+        line("    OUTPUT PROCEDURE SHOW"),
+        line("SORT E ASCENDING KEY E"),
+        line("DISPLAY T"),
+        line("SORT E ASCENDING KEY E COLLATING SEQUENCE ASCII"),
+        line("DISPLAY T"),
+    ]
+    .concat();
+    let (out, err, ending) = run_files(&source(&sorts), &[]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(out, "11A1B1a1 \nB1A1a111 \na1A1B111\n11A1B1a1\n");
+    let undefined = source(&line("SORT E ASCENDING KEY E COLLATING SEQUENCE NOPE"));
+    assert!(compile_errors(&undefined).contains("COLLATING SEQUENCE NOPE: not an alphabet-name of SPECIAL-NAMES"));
+}
 
+#[test]
+fn what_is_not_modelled_is_refused_by_name() {
     let errors = |fd: &str, data: &str, body: &str| {
         let select = [SELECT_SD, "           SELECT F ASSIGN TO FDD.\n"].concat();
         let fd = ["       SD  S-FILE.\n       01  S-REC.\n           05 S-K PIC X(2).\n       FD  F.\n       01  F-REC PIC X(2).\n", fd].concat();

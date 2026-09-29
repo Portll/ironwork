@@ -51,6 +51,19 @@ fn figurative(word: &str) -> Option<Figurative> {
     })
 }
 
+/// A contained program has the alphabets and collating sequence of the program containing it,
+/// whose configuration section is the only one (Language Reference SC27-8713-03, p. 121).
+fn share_configuration(outer: &Environment, inner: &mut Environment) {
+    if inner.collating_sequence.is_none() {
+        inner.collating_sequence.clone_from(&outer.collating_sequence);
+    }
+    for (name, alphabet) in &outer.alphabets {
+        if !inner.alphabets.iter().any(|(n, _)| n == name) {
+            inner.alphabets.push((name.clone(), alphabet.clone()));
+        }
+    }
+}
+
 fn usage_word(word: &str) -> Option<Usage> {
     Some(match word {
         "DISPLAY" => Usage::Display,
@@ -283,6 +296,9 @@ impl Parser<'_> {
             self.program(options, &mut nested)?;
         }
         oo::share_repository(&repository, &mut nested)?;
+        for inner in &mut nested {
+            share_configuration(&environment, &mut inner.environment);
+        }
         if !method && self.at_end_program() && self.word_at(1) == Some("PROGRAM") {
             self.at += 2;
             if self.word().is_some() || matches!(self.peek(), Some(Tok::Alnum(_))) {

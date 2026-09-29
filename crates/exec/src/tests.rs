@@ -1,6 +1,8 @@
 use super::*;
 use std::collections::BTreeMap;
 
+mod collating;
+mod data;
 mod oo;
 mod report;
 mod sort;
@@ -648,6 +650,7 @@ const FRAGMENTS: &[&str] = &[
     "CLASS X IS \"java.lang.Object\" ", "JNIENVPTR", "COPY JNI.",
     "SD ", "SORT ", "MERGE ", "RELEASE ", "RETURN ", "ON ASCENDING KEY ", "DESCENDING ", "WITH DUPLICATES IN ORDER ", "COLLATING SEQUENCE ",
     "INPUT PROCEDURE ", "OUTPUT PROCEDURE IS ", "GIVING ", "END-RETURN", "SORT-RETURN", "ALPHABET A IS STANDARD-1 ", "PROGRAM COLLATING SEQUENCE ",
+    "ALPHABET B IS 'Z' THRU 'A' 'Q' ALSO 256 ALSO HIGH-VALUE ", "THROUGH ", "OCCURS 1 TO 20 DEPENDING ON ", "PIC 9(18) ", "PIC S9(31) ",
     "I-O-CONTROL. SAME RECORD AREA FOR ", "SAME AREA ", "\n       CBL FASTSRT\n",
 ];
 
@@ -788,6 +791,7 @@ fn mutated_programs_never_panic_the_front_end() {
             ),
         ])
         .chain(oo::fuzz_seeds())
+        .chain(collating::fuzz_seeds())
         .collect();
     let mut seed = 0x853C_49E6_748F_EA9Bu64;
     let mut next = move || {

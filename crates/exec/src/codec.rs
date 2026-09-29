@@ -16,7 +16,7 @@ pub fn packed(bytes: &[u8], signed: bool, numproc: Numproc) -> Result<Decimal, P
 }
 
 /// A zoned field, entering through PACK, which keeps only the sign's zone.
-pub fn zoned(bytes: &[u8], digits: u32, signed: bool, sign: Option<SignClause>, numproc: Numproc) -> Result<Decimal, ProgramCheck> {
+pub fn zoned(bytes: &[u8], signed: bool, sign: Option<SignClause>, numproc: Numproc) -> Result<Decimal, ProgramCheck> {
     let mut zoned = bytes.to_vec();
     let mut separate_negative = None;
     match sign {
@@ -37,8 +37,7 @@ pub fn zoned(bytes: &[u8], digits: u32, signed: bool, sign: Option<SignClause>, 
         }
         _ => {}
     }
-    let mut p = vec![0u8; digits as usize / 2 + 1];
-    decimal::pack(&mut p, &zoned)?;
+    let p = numeric::zoned::pack(&zoned)?;
     let value = packed(&p, signed, numproc)?;
     Ok(match separate_negative {
         Some(negative) => Decimal { negative, ..value },

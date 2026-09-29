@@ -64,7 +64,15 @@ The subset the interpreter runs today:
   PACKED-DECIMAL, COMP-1, COMP-2, NATIONAL, POINTER and INDEX; numeric-edited and
   alphanumeric-edited PICTUREs (zero suppression, `*`, floating `$ + -`, CR, DB, insertion, BLANK
   WHEN ZERO); VALUE, REDEFINES, OCCURS with KEY, INDEXED BY and DEPENDING ON, SIGN, and level-88
-  conditions with THRU ranges.
+  conditions with THRU ranges. A zoned item longer than one PACK takes, up to 31 digits, is packed
+  in parts (assumption C34). A group that holds the object of its own OCCURS DEPENDING ON receives
+  data at its maximum length, as IBM lists for MOVE, ACCEPT, STRING, UNSTRING, READ and RETURN
+  INTO, and WRITE, REWRITE and RELEASE FROM.
+- **Collating sequences:** SPECIAL-NAMES ALPHABET (EBCDIC, NATIVE, STANDARD-1, STANDARD-2, or
+  literals with THROUGH and ALSO) and OBJECT-COMPUTER PROGRAM COLLATING SEQUENCE, which a contained
+  program shares. The program's sequence orders alphanumeric relation and condition-name
+  conditions, EVALUATE, SEARCH ALL, MAX and MIN, and gives HIGH-VALUE, LOW-VALUE, CHAR and ORD;
+  national and numeric comparisons keep their own order. The choices are assumptions C35 to C37.
 - **Procedure:** sections and paragraphs; MOVE (with editing and de-editing), COMPUTE, ADD,
   SUBTRACT, MULTIPLY, DIVIDE (GIVING, REMAINDER, ROUNDED, ON SIZE ERROR), IF, EVALUATE (ALSO,
   THRU, ANY, TRUE/FALSE, OTHER), PERFORM (procedures, sections, THRU, TIMES, UNTIL, VARYING,
@@ -92,12 +100,13 @@ The subset the interpreter runs today:
   opened I-O can be REWRITTEN in place. The files of a SAME RECORD AREA clause share one record
   area, and so do the VSAM files of a SAME AREA clause.
 - **Sort and merge:** SD files; SORT and MERGE on ascending and descending keys anywhere in the
-  record (alphanumeric keys in EBCDIC order, zoned and packed keys as DFSORT compares them, other
+  record (alphanumeric keys by the COLLATING SEQUENCE phrase, else for a file by the program
+  collating sequence, else in EBCDIC order; zoned and packed keys as DFSORT compares them; other
   numeric keys by value), WITH DUPLICATES IN ORDER, USING and GIVING files or INPUT and OUTPUT
   PROCEDURE with RELEASE and RETURN, and FASTSRT; SORT of a table by its keys; SORT-RETURN and the
   other sort special registers. Records are sorted in memory,
-  and records with equal keys keep their input order. A COLLATING SEQUENCE other than EBCDIC or
-  NATIVE is refused, and a DD holding sort control statements (IGZSRTCD) stops the run.
+  and records with equal keys keep their input order. A DD holding sort control statements
+  (IGZSRTCD) stops the run.
 - **Report Writer**, run as the output of IBM's COBOL Report Writer Precompiler would run, since
   Enterprise COBOL takes a REPORT SECTION only through that precompiler: FD REPORT IS; RD with
   CONTROLS (FINAL included), PAGE LIMIT, HEADING, FIRST DETAIL, LAST DETAIL, FOOTING, LINE LIMIT

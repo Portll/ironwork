@@ -11,9 +11,8 @@ const IO_CONTROL_CLAUSES: &[&str] = &["SAME", "RERUN", "MULTIPLE", "APPLY"];
 
 impl Parser<'_> {
     /// SPECIAL-NAMES ALPHABET, OBJECT-COMPUTER PROGRAM COLLATING SEQUENCE and the I-O-CONTROL
-    /// SAME clauses; false when the cursor is at none of them. A literal alphabet is kept as
-    /// "literal", its literals left unread. SAME SORT AREA and SAME SORT-MERGE AREA are read and
-    /// dropped: IBM checks their syntax only.
+    /// SAME clauses; false when the cursor is at none of them. SAME SORT AREA and SAME SORT-MERGE
+    /// AREA are read and dropped: IBM checks their syntax only.
     pub(super) fn environment_clause(&mut self, clauses: &mut Environment) -> R<bool> {
         if self.accept_word("SAME") {
             let kind = self.accept_any(&["RECORD", "SORT", "SORT-MERGE"]);
@@ -40,14 +39,14 @@ impl Parser<'_> {
                 self.accept_word("ALPHANUMERIC");
             }
             self.accept_word("IS");
-            let kind = match self.word() {
-                Some(w @ ("EBCDIC" | "NATIVE" | "STANDARD-1" | "STANDARD-2")) => w.to_owned(),
-                _ => "literal".to_owned(),
+            let alphabet = match self.accept_any(&["EBCDIC", "NATIVE", "STANDARD-1", "STANDARD-2"]).as_deref() {
+                Some("EBCDIC") => Alphabet::Ebcdic,
+                Some("NATIVE") => Alphabet::Native,
+                Some("STANDARD-1") => Alphabet::Standard1,
+                Some("STANDARD-2") => Alphabet::Standard2,
+                _ => Alphabet::Literal(self.alphabet_entries()?),
             };
-            if kind != "literal" {
-                self.at += 1;
-            }
-            clauses.alphabets.push((name, kind));
+            clauses.alphabets.push((name, alphabet));
             return Ok(true);
         }
         if self.is_word("PROGRAM") && self.word_at(1) == Some("COLLATING") {
@@ -63,6 +62,43 @@ impl Parser<'_> {
         self.accept_word("IS");
         clauses.collating_sequence = Some(self.name("an alphabet-name")?);
         Ok(true)
+    }
+
+    /// The literals of an ALPHABET clause, up to the first token that is not one.
+    fn alphabet_entries(&mut self) -> R<Vec<AlphabetEntry>> {
+        let mut entries = Vec::new();
+        while let Some(first) = self.alphabet_literal() {
+            let entry = if self.accept_any(&["THROUGH", "THRU"]).is_some() {
+                let last = self.alphabet_literal().ok_or_else(|| self.error("a literal after THROUGH"))?;
+                AlphabetEntry::Through(first, last)
+            } else if self.is_word("ALSO") {
+                let mut also = vec![first];
+                while self.accept_word("ALSO") {
+                    also.push(self.alphabet_literal().ok_or_else(|| self.error("a literal after ALSO"))?);
+                }
+                AlphabetEntry::Also(also)
+            } else {
+                AlphabetEntry::Literal(first)
+            };
+            entries.push(entry);
+        }
+        if entries.is_empty() {
+            return Err(self.error("expected STANDARD-1, STANDARD-2, NATIVE, EBCDIC or literals for the alphabet"));
+        }
+        Ok(entries)
+    }
+
+    fn alphabet_literal(&mut self) -> Option<Literal> {
+        let literal = match self.peek()? {
+            Tok::Alnum(s) => Literal::Alnum(s.clone()),
+            Tok::Hex(b) => Literal::Hex(b.clone()),
+            Tok::National(s) => Literal::National(s.clone()),
+            Tok::Number(n) => Literal::Number(n.clone()),
+            Tok::Word(w) => Literal::Figurative(figurative(w).filter(|&f| f != Figurative::Null)?),
+            _ => return None,
+        };
+        self.at += 1;
+        Some(literal)
     }
 
     pub(super) fn sorting(&mut self, verb: &str, pos: Pos) -> R<Sorting> {
@@ -239,8 +275,10 @@ mod tests {
         assert_eq!((p.files[0].record_min, p.files[0].record_max), (Some(2), Some(4)));
         assert_eq!((p.files[1].recording, p.files[2].recording), (Some('V'), None));
         assert_eq!(p.environment.collating_sequence.as_deref(), Some("EB"));
-        let alphabets: Vec<(&str, &str)> = p.environment.alphabets.iter().map(|(n, k)| (n.as_str(), k.as_str())).collect();
+        let alphabets: Vec<(&str, &str)> = p.environment.alphabets.iter().map(|(n, k)| (n.as_str(), k.name())).collect();
         assert_eq!(alphabets, [("EB", "EBCDIC"), ("AS", "STANDARD-1"), ("MINE", "literal")]);
+        let a = |s: &str| Literal::Alnum(s.into());
+        assert_eq!(p.environment.alphabets[2].1, Alphabet::Literal(vec![AlphabetEntry::Through(a("A"), a("Z"))]));
         assert!(sort(&p.paragraphs[0].statements[0]).merge);
         let refused = crate::parse(&format!("{HEAD}           MERGE W ON ASCENDING KEY W-K1 INPUT PROCEDURE P.\n")).unwrap_err();
         assert!(refused.message.contains("not an INPUT PROCEDURE"), "{}", refused.message);
@@ -248,6 +286,34 @@ mod tests {
         let p = crate::parse(&HEAD.replace("       DATA DIVISION.", io_control)).unwrap();
         assert_eq!(p.environment.same_record_areas, [vec!["W".to_owned(), "A".to_owned()]]);
         assert_eq!(p.environment.same_areas, [vec!["A".to_owned(), "B".to_owned()]]);
+    }
+
+    #[test]
+    fn literal_alphabets_and_a_nested_program_takes_the_configuration() {
+        let source = concat!(
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OUTER.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n",
+            "       OBJECT-COMPUTER. IBM-370 PROGRAM COLLATING SEQUENCE IS FUN.\n",
+            "       SPECIAL-NAMES. ALPHABET FUN IS 'F' 'UN' ALSO HIGH-VALUE, ALSO 1\n",
+            "           'Z' THROUGH 'X' X'C1'\n           ALPHABET TWO IS NATIVE.\n",
+            "       PROCEDURE DIVISION.\n           GOBACK.\n",
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. INNER.\n       PROCEDURE DIVISION.\n           GOBACK.\n",
+            "       END PROGRAM INNER.\n       END PROGRAM OUTER.\n",
+        );
+        let programs = crate::parse_all_with(source, &Default::default()).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(programs.len(), 2);
+        let a = |s: &str| Literal::Alnum(s.into());
+        let expected = Alphabet::Literal(vec![
+            AlphabetEntry::Literal(a("F")),
+            AlphabetEntry::Also(vec![a("UN"), Literal::Figurative(Figurative::HighValue), Literal::Number("1".into())]),
+            AlphabetEntry::Through(a("Z"), a("X")),
+            AlphabetEntry::Literal(Literal::Hex(vec![0xC1])),
+        ]);
+        for p in &programs {
+            assert_eq!(p.environment.collating_sequence.as_deref(), Some("FUN"), "{}", p.id);
+            assert_eq!(p.environment.alphabets, [("FUN".to_owned(), expected.clone()), ("TWO".to_owned(), Alphabet::Native)], "{}", p.id);
+        }
+        let refused = crate::parse(&HEAD.replace("ALPHABET MINE IS 'A' THRU 'Z'", "ALPHABET MINE IS 'A' THRU")).unwrap_err();
+        assert!(refused.message.contains("a literal after THROUGH"), "{}", refused.message);
     }
 
     #[test]

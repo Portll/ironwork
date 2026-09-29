@@ -59,6 +59,10 @@ pub const BMS_EXTENDED_ORDER: &str = "C30";
 pub const BMS_CONSTANTS_UNVERIFIED: &str = "C31";
 pub const BMS_SEND_DATA_CHOICE: &str = "C32";
 pub const CICS_INITIAL_AID: &str = "C33";
+pub const LONG_ZONED_BY_PACKS: &str = "C34";
+pub const ASCII_COLLATION: &str = "C35";
+pub const TABLE_SORT_COLLATION: &str = "C36";
+pub const ALPHABET_LITERALS: &str = "C37";
 pub const LE_SERVICE_AFTER_PROGRAMS: &str = "L1";
 pub const LE_ARGUMENTS_BY_ADDRESS: &str = "L2";
 pub const LE_FEEDBACK_TOKEN: &str = "L3";
@@ -661,6 +665,30 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: SAME_AREA_VSAM,
         claim: "SAME AREA makes the VSAM (indexed and relative) files it names share one record area, as SAME RECORD AREA does, and is documentation for the others (Language Reference SC27-8713-03, p. 156)",
         basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LONG_ZONED_BY_PACKS,
+        claim: "A zoned item of more than 16 digits, too long for one PACK (SA22-7832-14: each operand at most 16 bytes), enters arithmetic through two or three PACKs, the high-order part first and each lower PACK overwriting the byte the part above it ended in, so it packs as ZONED_BY_PACK says one PACK would: every zone but the sign's discarded and no digit checked until the arithmetic uses it. An alphanumeric sender longer than 31 characters moved to a numeric item is packed from its rightmost 31, the most any receiver holds",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ASCII_COLLATION,
+        claim: "STANDARD-1 and STANDARD-2 put the characters of 7-bit ASCII in its order (Language Reference SC27-8713-03, Table 82, p. 754; Programming Guide SC27-8714-03, p. 7), each found in the program's code page; the characters that are not 7-bit ASCII follow them in EBCDIC order, as the characters an ALPHABET literal leaves out do",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: TABLE_SORT_COLLATION,
+        claim: "A table SORT without a COLLATING SEQUENCE phrase orders alphanumeric keys in EBCDIC, as the SORT statement's format 2 rules say (SC27-8713-03, p. 450), though its rules for the phrase in both formats put the PROGRAM COLLATING SEQUENCE in the phrase's place (p. 451)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ALPHABET_LITERALS,
+        claim: "Among an ALPHABET clause's literals HIGH-VALUE, LOW-VALUE, SPACE, ZERO and QUOTE are the EBCDIC characters X'FF', X'00', X'40', X'F0' and X'7F', whatever the alphabet makes HIGH-VALUE and LOW-VALUE, and a numeric literal n is the character at ordinal n of EBCDIC, whose ordinals SC27-8713-03 points to (p. 128)",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

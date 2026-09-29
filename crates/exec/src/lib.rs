@@ -3,6 +3,7 @@
 
 pub mod cics;
 pub mod codec;
+pub mod collating;
 pub mod edit;
 pub mod files;
 pub mod layout;
@@ -32,6 +33,8 @@ pub struct Compiled {
     pub options: Options,
     pub ssrange: bool,
     pub report_writer: report::Writer,
+    /// The PROGRAM COLLATING SEQUENCE, or EBCDIC.
+    pub collating: collating::Sequence,
 }
 
 const FUNCTIONS: &[&str] = &[
@@ -65,6 +68,17 @@ pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error
             errors.push(Error::at(Pos::default(), e.to_string()));
         }
     }
+    for (name, alphabet) in &program.environment.alphabets {
+        if program.environment.collating_sequence.as_ref() != Some(name)
+            && let Err(m) = collating::Sequence::of(alphabet, options.code_page())
+        {
+            errors.push(Error::at(Pos::default(), format!("ALPHABET {name}: {m}")));
+        }
+    }
+    let collating = collating::Sequence::program(&program.environment, options.code_page()).unwrap_or_else(|m| {
+        errors.push(Error::at(Pos::default(), m));
+        collating::Sequence::native()
+    });
     let files: Vec<(&[DataEntry], Option<u32>)> = program.files.iter().map(|f| (f.records.as_slice(), f.record_max)).collect();
     let shared = layout::record_area_owners(&program.files, &program.environment).unwrap_or_else(|e| {
         errors.push(e);
@@ -105,7 +119,7 @@ pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error
     }
     oo::check(&layout, &program, &mut errors);
     if errors.is_empty() {
-        Ok(Compiled { program, layout, options, ssrange, report_writer })
+        Ok(Compiled { program, layout, options, ssrange, report_writer, collating })
     } else {
         Err(errors.into_iter().map(|e| e.in_files(&program.sources)).collect())
     }

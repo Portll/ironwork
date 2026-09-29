@@ -581,12 +581,43 @@ pub struct ReadStmt {
     pub pos: Pos,
 }
 
+/// What an ALPHABET clause relates its alphabet-name to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Alphabet {
+    Ebcdic,
+    Native,
+    Standard1,
+    Standard2,
+    /// A collating sequence of the program's own, lowest position first.
+    Literal(Vec<AlphabetEntry>),
+}
+
+impl Alphabet {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Ebcdic => "EBCDIC",
+            Self::Native => "NATIVE",
+            Self::Standard1 => "STANDARD-1",
+            Self::Standard2 => "STANDARD-2",
+            Self::Literal(_) => "literal",
+        }
+    }
+}
+
+/// One literal of an ALPHABET clause: its characters in successive positions, a THROUGH range of
+/// characters in successive positions, or characters that ALSO share one position.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AlphabetEntry {
+    Literal(Literal),
+    Through(Literal, Literal),
+    Also(Vec<Literal>),
+}
+
 /// ENVIRONMENT DIVISION clauses beyond SELECT that the program's meaning depends on.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Environment {
-    /// SPECIAL-NAMES ALPHABET: each alphabet-name and what it is: EBCDIC, NATIVE, STANDARD-1,
-    /// STANDARD-2, or a literal.
-    pub alphabets: Vec<(String, String)>,
+    /// SPECIAL-NAMES ALPHABET: each alphabet-name and what it is.
+    pub alphabets: Vec<(String, Alphabet)>,
     /// OBJECT-COMPUTER PROGRAM COLLATING SEQUENCE.
     pub collating_sequence: Option<String>,
     /// I-O-CONTROL SAME RECORD AREA and SAME AREA clauses, each with the files it names.

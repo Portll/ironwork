@@ -8,5 +8,6 @@ pub mod float;
 pub mod options;
 pub mod precision;
 pub mod sign;
+pub mod zoned;
 
 pub use options::{Arith, Numproc, Options, SortKeys, Trunc, TruncCheck};

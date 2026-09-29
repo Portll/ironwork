@@ -49,6 +49,9 @@ impl Abend {
 type R<T> = Result<T, Abend>;
 
 const DIVIDE_BY_ZERO: &str = "DIVIDE-BY-ZERO";
+/// The most digits a numeric item holds, under ARITH(EXTEND): all an alphanumeric sender can give
+/// one (LONG_ZONED_BY_PACKS in numeric::assumptions).
+const MAX_DIGITS: usize = 31;
 /// The reader of DISPLAY output went away, as `head` does: not the program's failure.
 pub const CLOSED_OUTPUT: &str = "CLOSED-OUTPUT";
 
@@ -96,6 +99,7 @@ pub struct Machine<'p, 'u, 'w> {
     options: Options,
     ssrange: bool,
     page: &'static CodePage,
+    collating: &'p crate::collating::Sequence,
     resolved: HashMap<(String, Vec<String>), Resolved>,
     /// This program's place in the run unit, and where its storage starts.
     me: usize,
@@ -214,6 +218,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             options: compiled.options,
             ssrange: compiled.ssrange,
             page: compiled.options.code_page(),
+            collating: &compiled.collating,
             resolved: HashMap::new(),
             me,
             base,
@@ -325,7 +330,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         match s {
             Stmt::Move { from, to, pos } => {
                 for r in to {
-                    let dest = self.locate(r)?;
+                    let dest = self.locate_receiving(r)?;
                     let (val, src) = self.operand_with_loc(from, *pos)?;
                     self.assign(dest, val, src, *pos)?;
                 }
@@ -552,6 +557,17 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn locate(&mut self, r: &Ref) -> R<Loc> {
+        self.locate_as(r, false)
+    }
+
+    /// The receiving item of MOVE, ACCEPT, STRING, UNSTRING, READ and RETURN INTO, and WRITE,
+    /// REWRITE and RELEASE FROM: a group holding the object of its own OCCURS DEPENDING ON is its
+    /// maximum length (Language Reference SC27-8713-03, pp. 205-206).
+    fn locate_receiving(&mut self, r: &Ref) -> R<Loc> {
+        self.locate_as(r, true)
+    }
+
+    fn locate_as(&mut self, r: &Ref, receiving: bool) -> R<Loc> {
         if let Some(loc) = self.oo_register(r)? {
             return Ok(loc);
         }
@@ -584,7 +600,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             offset += (s - 1) * stride as i64;
         }
         let (mut len, mut kind) = (item.size as i64, item.kind);
-        if let Some(t) = item.odo {
+        if let Some(t) = item.odo
+            && !(receiving && r.refmod.is_none() && self.object_within(t, index)?)
+        {
             let table = &layout.items[t];
             let current = self.occurrences(t, r.pos)?;
             len -= (table.occurs - current) as i64 * table.size as i64;
@@ -606,6 +624,22 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             return Err(Abend::ironwork(format!("{} reaches outside the run unit's storage", r.name), r.pos));
         }
         Ok(Loc { offset: offset as usize, len: len as usize, kind, item: index })
+    }
+
+    /// Whether the object of table `t`'s OCCURS DEPENDING ON lies within item `group`.
+    fn object_within(&mut self, t: usize, group: usize) -> R<bool> {
+        let layout = self.layout;
+        let Some(object) = &layout.items[t].depending_on else { return Ok(false) };
+        let Resolved::Item(mut at) = self.resolve(object)? else { return Ok(false) };
+        loop {
+            if at == group {
+                return Ok(true);
+            }
+            match layout.items[at].parent {
+                Some(p) => at = p,
+                None => return Ok(false),
+            }
+        }
     }
 
     /// The current count of an OCCURS DEPENDING ON table, kept within its declared maximum so that
@@ -666,13 +700,13 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 let d = crate::codec::packed(bytes, signed, self.options.numproc).map_err(|c| Abend::check(c, pos))?;
                 Val::Num(fixed(d.negative, U256::from_u128(d.magnitude), places))
             }
-            Kind::Zoned { digits, signed, sign, .. } => Val::Num(self.zoned_value(bytes, digits, signed, sign, places, pos)?),
+            Kind::Zoned { signed, sign, .. } => Val::Num(self.zoned_value(bytes, signed, sign, places, pos)?),
         })
     }
 
     /// A zoned operand enters arithmetic through PACK, which keeps only the sign's zone.
-    fn zoned_value(&self, bytes: &[u8], digits: u32, signed: bool, sign: Option<SignClause>, places: Places, pos: Pos) -> R<Fixed> {
-        let d = crate::codec::zoned(bytes, digits, signed, sign, self.options.numproc).map_err(|c| Abend::check(c, pos))?;
+    fn zoned_value(&self, bytes: &[u8], signed: bool, sign: Option<SignClause>, places: Places, pos: Pos) -> R<Fixed> {
+        let d = crate::codec::zoned(bytes, signed, sign, self.options.numproc).map_err(|c| Abend::check(c, pos))?;
         Ok(fixed(d.negative, U256::from_u128(d.magnitude), places))
     }
 
@@ -709,7 +743,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
         Ok(match self.operand(op, pos)? {
             Val::Bytes(b) | Val::All(b) | Val::National(b) => b,
-            Val::Fig(f) => vec![figurative_byte(f)],
+            Val::Fig(f) => vec![self.collating.figurative(f)],
             Val::Num(f) => zoned_digits(f.magnitude.to_u128().unwrap_or(0), f.places.total() as usize, decimal::UNSIGNED),
             _ => return Err(Abend::ironwork("this operand has no characters to work on", pos)),
         })
@@ -729,7 +763,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     fn string_stmt(&mut self, st: &'p StringStmt) -> R<Flow> {
         let pos = st.pos;
-        let dest = self.locate(&st.into)?;
+        let dest = self.locate_receiving(&st.into)?;
         let mut pointer = match &st.pointer {
             Some(r) => self.integer(&Expr::Operand(Operand::Ref(r.clone())), pos)?,
             None => 1,
@@ -780,7 +814,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     break;
                 }
                 let start = pointer as usize - 1;
-                let dest = self.locate(&into.target)?;
+                let dest = self.locate_receiving(&into.target)?;
                 let (end, matched) = if delimiters.is_empty() {
                     ((start + dest.len).min(source.len()), None)
                 } else {
@@ -792,7 +826,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 self.assign(dest, Val::Bytes(source[start..end].to_vec()), None, pos)?;
                 let delimiter = matched.map(|k| delimiters[k].1.clone());
                 if let Some(r) = &into.delimiter_in {
-                    let d = self.locate(r)?;
+                    let d = self.locate_receiving(r)?;
                     self.assign(d, delimiter.clone().map_or(Val::Fig(Figurative::Space), Val::Bytes), None, pos)?;
                 }
                 if let Some(r) = &into.count_in {
@@ -874,7 +908,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             };
             let len = pattern.len().max(1);
             let by = match &p.by {
-                Some(Operand::Literal(Literal::Figurative(f))) => Some(vec![figurative_byte(*f); len]),
+                Some(Operand::Literal(Literal::Figurative(f))) => Some(vec![self.collating.figurative(*f); len]),
                 Some(op) => Some(self.natural_bytes(op, pos)?),
                 None => None,
             };
@@ -1105,7 +1139,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
         Ok(match self.operand(op, pos)? {
             Val::Bytes(b) | Val::All(b) | Val::National(b) => b,
-            Val::Fig(f) => vec![figurative_byte(f)],
+            Val::Fig(f) => vec![self.collating.figurative(f)],
             Val::Address(a) => a.to_be_bytes().to_vec(),
             Val::Num(f) if matches!(op, Operand::LengthOf(_)) => (align(&f, 0, false).and_then(|m| m.to_u128()).unwrap_or(0) as u32).to_be_bytes().to_vec(),
             Val::Num(f) => {
@@ -1211,7 +1245,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn accept(&mut self, target: &Ref, from: AcceptFrom, pos: Pos) -> R<()> {
-        let dest = self.locate(target)?;
+        let dest = self.locate_receiving(target)?;
         let (seconds, hundredths) = self.unit.now();
         let (year, month, day, hour, minute, second, yday, wday) = crate::unit::civil(seconds);
         let digits = |text: String| Val::Num(literal_fixed(&text).expect("digits"));
@@ -1248,25 +1282,24 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let arity = |n: std::ops::RangeInclusive<usize>| {
             if n.contains(&args.len()) { Ok(()) } else { Err(Abend::ironwork(format!("FUNCTION {} takes {n:?} arguments", f.name), pos)) }
         };
+        let collating = self.collating;
         let bytes_of = |v: &Val| match v {
             Val::Bytes(b) | Val::All(b) => Ok(b.clone()),
-            Val::Fig(fig) => Ok(vec![figurative_byte(*fig)]),
+            Val::Fig(fig) => Ok(vec![collating.figurative(*fig)]),
             _ => Err(Abend::ironwork(format!("FUNCTION {} needs an alphanumeric argument", f.name), pos)),
         };
         let value = match f.name.as_str() {
             "CHAR" => {
                 arity(1..=1)?;
                 let n = self.integer(&f.args[0], pos)?;
-                if !(1..=256).contains(&n) {
-                    return Err(Abend::ironwork(format!("FUNCTION CHAR({n}) is outside 1 to 256"), pos));
-                }
-                Val::Bytes(vec![(n - 1) as u8])
+                let c = collating.character(n).ok_or_else(|| Abend::ironwork(format!("FUNCTION CHAR({n}) is outside 1 to {}", collating.count()), pos))?;
+                Val::Bytes(vec![c])
             }
             "ORD" => {
                 arity(1..=1)?;
                 let b = bytes_of(&args[0])?;
                 let first = *b.first().ok_or_else(|| Abend::ironwork("FUNCTION ORD of an empty argument", pos))?;
-                Val::Num(Fixed::new(first as i128 + 1, Places::new(3, 0)))
+                Val::Num(Fixed::new(collating.ordinal(first) as i128, Places::new(3, 0)))
             }
             "NATIONAL-OF" => {
                 arity(1..=2)?;
@@ -1343,7 +1376,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 for i in 1..args.len() {
                     let o = match (&args[i], &args[best]) {
                         (Val::Num(x), Val::Num(y)) => compare_fixed(x, y),
-                        (x, y) => bytes_of(x)?.cmp(&bytes_of(y)?),
+                        (x, y) => ebcdic::compare_alphanumeric(&bytes_of(x)?, &bytes_of(y)?, collating.collation()),
                     };
                     if o == want {
                         best = i;
@@ -1740,7 +1773,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     self.store_fixed(dest, &f, false, pos)?;
                 }
                 Val::Fig(Figurative::Zero) => self.store_fixed(dest, &Fixed::new(0, Places::new(1, 0)), false, pos)?,
-                Val::Fig(f) => self.write(dest, &vec![figurative_byte(f); dest.len]),
+                Val::Fig(f) => self.write(dest, &vec![self.collating.figurative(f); dest.len]),
                 Val::All(b) => {
                     let fill: Vec<u8> = b.iter().copied().cycle().take(dest.len).collect();
                     self.write(dest, &fill);
@@ -1752,8 +1785,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                             fixed(negative, U256::from_u128(magnitude), Places::new(digits - scale, scale))
                         }
                         _ => {
-                            let places = Places::new(b.len() as u32, 0);
-                            self.zoned_value(&b, b.len() as u32, false, None, places, pos)?
+                            let digits = &b[b.len().saturating_sub(MAX_DIGITS)..];
+                            self.zoned_value(digits, false, None, Places::new(digits.len() as u32, 0), pos)?
                         }
                     };
                     self.store_fixed(dest, &v, false, pos)?;
@@ -1780,7 +1813,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         Ok(match val {
             Val::Bytes(b) => b.clone(),
             Val::All(b) => b.iter().copied().cycle().take(len.max(b.len())).collect(),
-            Val::Fig(f) => vec![figurative_byte(*f); len],
+            Val::Fig(f) => vec![self.collating.figurative(*f); len],
             Val::Num(f) if f.places.dec == 0 => {
                 let digits = src.and_then(|s| s.kind.digits_scale()).map_or(f.places.total(), |(d, _)| d);
                 zoned_digits(f.magnitude.to_u128().unwrap_or(0), digits as usize, decimal::UNSIGNED)
@@ -1911,7 +1944,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 let len = self.image_len(&va, la).max(self.image_len(&vb, lb));
                 let x = self.alnum_image(&va, la, len, pos)?;
                 let y = self.alnum_image(&vb, lb, len, pos)?;
-                Ok(ebcdic::compare_alphanumeric(&x, &y, &Collation::Native))
+                Ok(ebcdic::compare_alphanumeric(&x, &y, self.collating.collation()))
             }
         }
     }
@@ -1976,7 +2009,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 other => match self.operand(other, pos)? {
                     Val::Bytes(b) | Val::All(b) => text.push_str(&self.page.decode(&b)),
                     Val::National(b) => text.push_str(&utf16_text(&b)),
-                    Val::Fig(f) => text.push(self.page.decode_byte(figurative_byte(f))),
+                    Val::Fig(f) => text.push(self.page.decode_byte(self.collating.figurative(f))),
                     Val::Num(f) => text.push_str(&self.page.decode(&zoned_digits(f.magnitude.to_u128().unwrap_or(0), f.places.total() as usize, decimal::UNSIGNED))),
                     Val::Float(_) => return Err(Abend::ironwork("DISPLAY of a floating-point value is not supported yet", pos)),
                     Val::Address(_) => return Err(Abend::ironwork("DISPLAY of a pointer is not supported", pos)),

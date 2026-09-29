@@ -50,7 +50,7 @@ pub(crate) fn table_key(layout: &Layout, table: usize, name: &str) -> Option<usi
 }
 
 /// Keys whose comparison a collating sequence changes: alphanumeric and edited ones.
-fn collates(kind: Kind) -> bool {
+pub(crate) fn collates(kind: Kind) -> bool {
     matches!(kind, Kind::Group | Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::NumericEdited { .. })
 }
 
@@ -98,7 +98,6 @@ impl Check<'_> {
             fail(self, st.pos, format!("{verb} {name}: no ASCENDING or DESCENDING KEY"));
         }
         let layout = self.layout;
-        let mut kinds = Vec::new();
         for (_, key) in &st.keys {
             if key.name == *name {
                 fail(self, key.pos, format!("{verb} {name}: KEY needs a data name"));
@@ -114,9 +113,8 @@ impl Check<'_> {
             } else if matches!(item.kind, Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer) {
                 fail(self, key.pos, format!("{}: a POINTER, INDEX, object reference or function-pointer item cannot be a sort key", key.name));
             }
-            kinds.push(item.kind);
         }
-        self.collating_sequence(st, &kinds, true);
+        self.collating_sequence(st);
         let files = |c: &mut Self, io: &Option<SortIo>, phrase: &str, procedure: &str| match io {
             None => fail(c, st.pos, format!("{verb} {name}: no {phrase} or {procedure}")),
             Some(SortIo::Procedure { from, thru }) => {
@@ -171,7 +169,6 @@ impl Check<'_> {
         if keys.is_empty() {
             fail(self, st.pos, format!("SORT {name}: no KEY phrase, and its OCCURS has none"));
         }
-        let mut kinds = Vec::new();
         for (_, key) in &keys {
             let Some(k) = table_key(layout, t, &key.name) else {
                 fail(self, key.pos, format!("{}: a key of SORT {name} must be its element or an item within it", key.name));
@@ -183,22 +180,17 @@ impl Check<'_> {
             } else if matches!(item.kind, Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer) {
                 fail(self, key.pos, format!("{}: a POINTER, INDEX, object reference or function-pointer item cannot be a sort key", key.name));
             }
-            kinds.push(item.kind);
         }
-        self.collating_sequence(st, &kinds, false);
+        self.collating_sequence(st);
     }
 
-    /// Only the native EBCDIC sequence is modelled. A table SORT ignores PROGRAM COLLATING SEQUENCE.
-    fn collating_sequence(&mut self, st: &SortStmt, kinds: &[Kind], program_applies: bool) {
-        let (phrase, alphabet) = match (&st.collating, &self.program.environment.collating_sequence) {
-            (Some(a), _) => ("COLLATING SEQUENCE", a),
-            (None, Some(a)) if program_applies => ("PROGRAM COLLATING SEQUENCE", a),
-            _ => return,
-        };
-        match self.program.environment.alphabets.iter().find(|(n, _)| n == alphabet) {
-            None => self.errors.push(Error::at(st.pos, format!("{phrase} {alphabet}: not an alphabet-name of SPECIAL-NAMES"))),
-            Some((_, kind)) if kind == "EBCDIC" || kind == "NATIVE" || !kinds.iter().any(|&k| collates(k)) => {}
-            Some((_, kind)) => self.errors.push(Error::at(st.pos, format!("{phrase} {alphabet} ({kind}) for SORT or MERGE keys is not supported yet"))),
+    /// The COLLATING SEQUENCE phrase names an alphabet of SPECIAL-NAMES, which `compile` has checked
+    /// with the rest.
+    fn collating_sequence(&mut self, st: &SortStmt) {
+        if let Some(alphabet) = &st.collating
+            && !self.program.environment.alphabets.iter().any(|(n, _)| n == alphabet)
+        {
+            self.errors.push(Error::at(st.pos, format!("COLLATING SEQUENCE {alphabet}: not an alphabet-name of SPECIAL-NAMES")));
         }
     }
 }
