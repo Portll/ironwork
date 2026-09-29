@@ -442,3 +442,33 @@ impl<'p> Machine<'p, '_, '_> {
         self.bind(&[Some(eib), commarea]);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eib_offsets_match_the_dfheiblk_layout() {
+        let source = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. EIBT.\n       PROCEDURE DIVISION.\n           EXEC CICS RETURN END-EXEC.\n";
+        let program = syntax::parse_all_with(source, &syntax::copy::Libraries::default()).unwrap().remove(0);
+        let compiled = crate::compile(program, &[]).unwrap_or_else(|e| panic!("{e:?}"));
+        let offset = |name: &str| compiled.layout.items.iter().find(|i| i.name.as_deref() == Some(name)).map(|i| i.offset as usize);
+        let fields = [
+            ("EIBTIME", EIBTIME),
+            ("EIBDATE", EIBDATE),
+            ("EIBTRNID", EIBTRNID),
+            ("EIBTASKN", EIBTASKN),
+            ("EIBTRMID", EIBTRMID),
+            ("EIBCPOSN", EIBCPOSN),
+            ("EIBCALEN", EIBCALEN),
+            ("EIBAID", EIBAID),
+            ("EIBFN", EIBFN),
+            ("EIBRSRCE", EIBRSRCE),
+            ("EIBRESP", EIBRESP),
+            ("EIBRESP2", EIBRESP2),
+        ];
+        for (name, at) in fields {
+            assert_eq!(offset(name), Some(at), "{name}");
+        }
+    }
+}
