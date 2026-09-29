@@ -19,7 +19,7 @@ The PyPI and npm packages carry builds for Linux (static, x64 and arm64), macOS 
 Windows (x64). The same builds are attached to each [release](https://github.com/Portll/ironwork/releases).
 From a checkout:
 
-    cargo run -p ironwork -- run program.cbl [-silent] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
+    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
     cargo run -p ironwork -- check program.cbl [-I copylib]...
 
 CBL and PROCESS cards set the options. COPY members are found in the program's own directory, then
@@ -32,6 +32,11 @@ unload of the cluster does (a relative file's empty slot is a record of zero byt
 held in memory from OPEN to CLOSE, and CLOSE writes it back when it changed. Any DD can be
 `:text`, UTF-8 lines converted through the code page, which suits fixtures written by hand. `--clock` fixes the time ACCEPT FROM DATE/TIME and FUNCTION CURRENT-DATE report, which is
 otherwise the system clock in UTC.
+
+A SORT or MERGE compares zoned and packed keys as DFSORT compares ZD and PD fields, so no bytes
+in a key are a data exception; `-strict-sort-keys` reads each key as the program would instead, so
+a key that is not a valid number abends S0C7. FASTSRT and NOFASTSRT (the default) on a CBL or
+PROCESS card choose who does the I/O of USING and GIVING files, as on z/OS.
 
 Exit status: RETURN-CODE when the run ends normally; 12 compile errors; 16 an abend, whose message
 names the system completion code (S0C7 for a data exception, S0C4 for a LINKAGE item with no
@@ -84,11 +89,13 @@ The subset the interpreter runs today:
   CONTAINS/VARYING; OPEN INPUT/OUTPUT/EXTEND/I-O; READ [NEXT|PREVIOUS] [INTO] [KEY IS] with AT END
   or INVALID KEY; WRITE [FROM] with ADVANCING or INVALID KEY; REWRITE, DELETE and START with
   INVALID KEY; CLOSE; OPTIONAL files, and the file status codes for each outcome. A sequential file
-  opened I-O can be REWRITTEN in place.
+  opened I-O can be REWRITTEN in place. The files of a SAME RECORD AREA clause share one record
+  area, and so do the VSAM files of a SAME AREA clause.
 - **Sort and merge:** SD files; SORT and MERGE on ascending and descending keys anywhere in the
-  record (alphanumeric keys in EBCDIC order, numeric keys by value in any USAGE), WITH DUPLICATES
-  IN ORDER, USING and GIVING files or INPUT and OUTPUT PROCEDURE with RELEASE and RETURN; SORT of a
-  table by its keys; SORT-RETURN and the other sort special registers. Records are sorted in memory,
+  record (alphanumeric keys in EBCDIC order, zoned and packed keys as DFSORT compares them, other
+  numeric keys by value), WITH DUPLICATES IN ORDER, USING and GIVING files or INPUT and OUTPUT
+  PROCEDURE with RELEASE and RETURN, and FASTSRT; SORT of a table by its keys; SORT-RETURN and the
+  other sort special registers. Records are sorted in memory,
   and records with equal keys keep their input order. A COLLATING SEQUENCE other than EBCDIC or
   NATIVE is refused, and a DD holding sort control statements (IGZSRTCD) stops the run.
 - **Report Writer**, run as the output of IBM's COBOL Report Writer Precompiler would run, since
@@ -238,7 +245,10 @@ may appear) and conformance fixtures.
 
 A binary store under TRUNC(OPT) whose value exceeds the PICTURE is reported, because decimal and
 binary truncation give different results and the program depends on which one the generated code
-uses. The flag `-silent` keeps the stored value the same and suppresses the report.
+uses. So is a SORT whose outcome FASTSRT changes: a USING or GIVING file whose I/O DFSORT does, or
+would do, under FASTSRT, and whose FILE STATUS (or a GIVING relative file's RELATIVE KEY) the SORT
+then leaves alone; and, under FASTSRT, each USING or GIVING file IBM's rules keep from DFSORT, with
+the reason. The flag `-silent` suppresses the reports and changes nothing else.
 
 ## Licence
 

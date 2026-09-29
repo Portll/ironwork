@@ -395,3 +395,174 @@ fn object_references_are_no_sort_keys_and_an_sd_writes_no_report() {
     let sd_report = file_program(SELECT_SD, "       SD  S-FILE REPORT IS R.\n       01  S-REC PIC X.\n", "", &line("GOBACK."));
     assert!(syntax::parse(&sd_report).unwrap_err().message.contains("SD S-FILE: a sort or merge file takes no REPORT clause"));
 }
+
+fn run_flagged(source: &str, dds: &[String], flags: &[&str]) -> (String, String, Result<Ending, Abend>) {
+    let flags: Vec<String> = flags.iter().map(|f| f.to_string()).collect();
+    let compiled = compile(syntax::parse(source).unwrap_or_else(|e| panic!("{e}")), &flags).unwrap_or_else(|e| panic!("{e:?}"));
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let ending = compiled.run_with(files::Dds::new(dds, false).unwrap(), &mut out, &mut err);
+    (String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap(), ending)
+}
+
+#[test]
+fn same_record_area_shares_one_area_and_same_area_shares_among_vsam_files() {
+    let input = text_file("same-in.txt", &["ABCD"]);
+    let (out, k1, k2) = (temp("same-out.txt"), temp("same-k1.txt"), temp("same-k2.txt"));
+    let source = file_program(
+        &[
+            SELECT_SD,
+            "           SELECT IN-F ASSIGN TO IDD.\n           SELECT OUT-F ASSIGN TO ODD.\n",
+            "           SELECT K1 ASSIGN TO K1DD ORGANIZATION INDEXED\n               RECORD KEY K1-ID.\n",
+            "           SELECT K2 ASSIGN TO K2DD ORGANIZATION INDEXED\n               RECORD KEY K2-ID.\n",
+            "       I-O-CONTROL.\n           SAME RECORD AREA FOR IN-F OUT-F S-FILE\n           SAME K1 K2 OUT-F.\n",
+        ]
+        .concat(),
+        concat!(
+            "       SD  S-FILE.\n       01  S-REC PIC X(4).\n       FD  IN-F.\n       01  IN-REC PIC X(4).\n",
+            "       FD  OUT-F.\n       01  OUT-REC PIC X(6).\n       FD  K1.\n       01  K1-ID PIC XX.\n       FD  K2.\n       01  K2-ID PIC XX.\n",
+        ),
+        "",
+        &[
+            "       MAIN-LINE.\n",
+            &line("MOVE ALL '*' TO OUT-REC"),
+            &line("OPEN INPUT IN-F OUTPUT OUT-F"),
+            &line("READ IN-F"),
+            &line("DISPLAY OUT-REC ' ' S-REC"),
+            &line("WRITE OUT-REC"),
+            &line("CLOSE IN-F OUT-F"),
+            &line("MOVE 'K1' TO K1-ID"),
+            &line("DISPLAY K2-ID ' ' OUT-REC"),
+            &line("SORT S-FILE ON DESCENDING KEY S-REC"),
+            &line("    INPUT PROCEDURE P-IN OUTPUT PROCEDURE P-OUT"),
+            &line("GOBACK."),
+            "       P-IN.\n",
+            &line("OPEN INPUT IN-F READ IN-F RELEASE S-REC CLOSE IN-F"),
+            &line("MOVE 'ZZZZ' TO S-REC RELEASE S-REC."),
+            "       P-OUT.\n",
+            &line("RETURN S-FILE AT END CONTINUE END-RETURN"),
+            &line("DISPLAY IN-REC."),
+        ]
+        .concat(),
+    );
+    let dds = [dd("IDD", &input), dd("ODD", &out), dd("K1DD", &k1), dd("K2DD", &k2)];
+    let (stdout, err, ending) = run_files(&source, &dds);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(stdout, "ABCD** ABCD\nK1 ABCD**\nZZZZ\n");
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), "ABCD**\n");
+    let refused = compile_errors(&source.replace("SAME K1 K2 OUT-F.", "SAME K1 NOPE."));
+    assert!(refused.contains("SAME AREA names NOPE, which is not a file"), "{refused}");
+}
+
+#[test]
+fn zoned_and_packed_keys_compare_as_dfsort_does_unless_strict() {
+    let records = |zoned: bool| {
+        let key = |z: &str, p: &str| format!("X'{}'", if zoned { z } else { p });
+        [key("F0F1D5", "015D"), key("F0F0DA", "00AD"), key("F0F0D0", "000D"), key("F0F0C0", "000C"), key("404040", "0004"), key("F1F2F3", "123C")]
+    };
+    for zoned in [true, false] {
+        let usage = if zoned { "" } else { " COMP-3" };
+        let feed: String = records(zoned)
+            .iter()
+            .zip(["F", "E", "A", "B", "C", "D"])
+            .rev()
+            .map(|(key, tag)| [line(&format!("MOVE {key} TO S-KX MOVE '{tag}' TO S-T")), line("RELEASE S-REC")].concat())
+            .collect();
+        let source = file_program(
+            SELECT_SD,
+            &format!("       SD  S-FILE.\n       01  S-REC.\n           05 S-K PIC S9(3){usage}.\n           05 S-KX REDEFINES S-K PIC X({}).\n           05 S-T PIC X.\n", if zoned { 3 } else { 2 }),
+            "       01  DONE PIC X VALUE 'N'.\n",
+            &[
+                "       MAIN-LINE.\n",
+                &line("SORT S-FILE ASCENDING S-K INPUT PROCEDURE P-IN"),
+                &line("    OUTPUT PROCEDURE P-OUT"),
+                &line("DISPLAY ' '"),
+                &line("GOBACK."),
+                "       P-IN.\n",
+                &feed,
+                "       P-OUT.\n",
+                &line("PERFORM UNTIL DONE = 'Y'"),
+                &line("    RETURN S-FILE AT END MOVE 'Y' TO DONE"),
+                &line("    NOT AT END DISPLAY S-T WITH NO ADVANCING END-RETURN"),
+                &line("END-PERFORM."),
+            ]
+            .concat(),
+        );
+        let (out, err, ending) = run_flagged(&source, &[], &[]);
+        assert!(ending.is_ok(), "{ending:?} {err}");
+        assert_eq!(out, "FEACBD \n", "zoned {zoned}");
+        let (_, _, strict) = run_flagged(&source, &[], &["-strict-sort-keys"]);
+        assert_eq!(strict.unwrap_err().code, "S0C7", "zoned {zoned}");
+    }
+}
+
+fn fastsrt_program(select: &str, fd: &str, sort: &str) -> String {
+    file_program(
+        &[SELECT_SD, select].concat(),
+        &["       SD  S-FILE.\n       01  S-REC PIC X(2).\n", fd].concat(),
+        "       01  FS-A PIC XX VALUE 'XX'.\n       01  FS-O PIC XX VALUE 'YY'.\n       01  RK PIC 9(4) VALUE 7.\n       01  RC PIC 99.\n",
+        &[line(sort), line("MOVE SORT-RETURN TO RC"), line("DISPLAY RC ' ' FS-A ' ' FS-O ' ' RK"), line("GOBACK.")].concat(),
+    )
+}
+
+#[test]
+fn fastsrt_leaves_file_status_and_relative_key_alone_and_fails_the_sort_on_an_io_error() {
+    let input = text_file("fastsrt-in.txt", &["B2", "A1"]);
+    let (out, rel) = (temp("fastsrt-out.txt"), temp("fastsrt-rel.txt"));
+    let select = "           SELECT IN-A ASSIGN TO ADD FILE STATUS FS-A.\n           SELECT OUT-F ASSIGN TO ODD FILE STATUS FS-O.\n           SELECT R-F ASSIGN TO RDD ORGANIZATION RELATIVE\n               RELATIVE KEY RK.\n";
+    let fd = "       FD  IN-A.\n       01  A-REC PIC X(2).\n       FD  OUT-F.\n       01  O-REC PIC X(2).\n       FD  R-F.\n       01  R-REC PIC X(2).\n";
+    let dds = [dd("ADD", &input), dd("ODD", &out), dd("RDD", &rel)];
+    let using_giving = fastsrt_program(select, fd, "SORT S-FILE ASCENDING S-REC USING IN-A GIVING OUT-F");
+    let (stdout, err, ending) = run_flagged(&format!("       CBL FASTSRT\n{using_giving}"), &dds, &[]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(stdout, "00 XX YY 0007\n");
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), "A1\nB2\n");
+    assert!(err.contains("FASTSRT: DFSORT does the I/O of USING IN-A, so its FILE STATUS FS-A is not updated by the SORT"), "{err}");
+    let (stdout, err, _) = run_flagged(&using_giving, &dds, &[]);
+    assert_eq!(stdout, "00 00 00 0007\n");
+    assert!(err.contains("under FASTSRT, DFSORT would do the I/O of GIVING OUT-F and its FILE STATUS FS-O would not be updated by the SORT"), "{err}");
+    let (_, err, _) = run_flagged(&using_giving, &dds, &["-silent"]);
+    assert!(err.is_empty(), "{err}");
+
+    let relative = fastsrt_program(select, fd, "SORT S-FILE ASCENDING S-REC USING IN-A GIVING R-F");
+    let (stdout, err, _) = run_flagged(&format!("       CBL FASTSRT\n{relative}"), &dds, &[]);
+    assert_eq!(stdout, "00 XX YY 0007\n");
+    assert!(err.contains("RELATIVE KEY RK is not updated"), "{err}");
+    assert_eq!(run_flagged(&relative, &dds, &[]).0, "00 00 YY 0002\n");
+
+    let missing = fastsrt_program(
+        "           SELECT IN-A ASSIGN TO NODD.\n           SELECT OUT-F ASSIGN TO ODD.\n",
+        "       FD  IN-A.\n       01  A-REC PIC X(2).\n       FD  OUT-F.\n       01  O-REC PIC X(2).\n",
+        "SORT S-FILE ASCENDING S-REC USING IN-A GIVING OUT-F",
+    );
+    let (stdout, err, ending) = run_flagged(&format!("       CBL FASTSRT\n{missing}"), &dds, &[]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(stdout, "16 XX YY 0007\n");
+    assert_eq!(run_flagged(&missing, &dds, &[]).2.unwrap_err().code, "IO-35");
+}
+
+#[test]
+fn fastsrt_names_why_it_cannot_apply() {
+    let (a, b) = (text_file("fastsrt-a.txt", &["A1"]), text_file("fastsrt-b.txt", &["B1"]));
+    let out = temp("fastsrt-out2.txt");
+    let dds = [dd("ADD", &a), dd("BDD", &b), dd("ODD", &out), dd("LDD", &b), dd("WDD", &b)];
+    let select = [
+        "           SELECT IN-A ASSIGN TO ADD FILE STATUS FS-A.\n           SELECT IN-B ASSIGN TO BDD.\n",
+        "           SELECT OUT-F ASSIGN TO ODD FILE STATUS FS-O.\n           SELECT LS-F ASSIGN TO LDD\n               ORGANIZATION LINE SEQUENTIAL.\n",
+        "           SELECT WIDE ASSIGN TO WDD.\n",
+    ]
+    .concat();
+    let fd = "       FD  IN-A.\n       01  A-REC PIC X(2).\n       FD  IN-B.\n       01  B-REC PIC X(2).\n       FD  OUT-F.\n       01  O-REC PIC X(2).\n       FD  LS-F.\n       01  L-REC PIC X(2).\n       FD  WIDE.\n       01  W-REC PIC X(3).\n";
+    let report = |sort: &str| {
+        let source = format!("       CBL FASTSRT\n{}", fastsrt_program(&select, fd, sort));
+        let (stdout, err, ending) = run_flagged(&source, &dds, &[]);
+        assert!(ending.is_ok(), "{ending:?} {err}");
+        (stdout, err)
+    };
+    let (stdout, err) = report("SORT S-FILE ASCENDING S-REC USING IN-A IN-B GIVING OUT-F");
+    assert_eq!(stdout, "00 00 YY 0007\n");
+    assert!(err.contains("FASTSRT does not apply to USING IN-A: USING names more than one file; COBOL does its I/O"), "{err}");
+    assert!(report("SORT S-FILE ASCENDING S-REC USING LS-F GIVING OUT-F").1.contains("USING LS-F: it is a line-sequential file"));
+    assert!(report("SORT S-FILE ASCENDING S-REC USING WIDE GIVING OUT-F").1.contains("its largest record is 3 bytes and the SD's 2"));
+    assert!(report("SORT S-FILE ASCENDING S-REC USING IN-A GIVING IN-A").1.contains("GIVING IN-A: it is also the USING file"));
+    assert!(report("MERGE S-FILE ASCENDING S-REC USING IN-A IN-B GIVING OUT-F").1.contains("USING IN-A: it applies only to SORT"));
+}

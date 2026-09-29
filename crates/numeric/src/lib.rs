@@ -9,4 +9,4 @@ pub mod options;
 pub mod precision;
 pub mod sign;
 
-pub use options::{Arith, Numproc, Options, Trunc, TruncCheck};
+pub use options::{Arith, Numproc, Options, SortKeys, Trunc, TruncCheck};

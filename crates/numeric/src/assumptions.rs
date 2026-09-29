@@ -104,10 +104,16 @@ pub const SORT_EQUAL_KEYS_IN_ORDER: &str = "S1";
 pub const MERGE_EQUAL_KEYS_BY_FILE: &str = "S2";
 pub const MERGE_OUT_OF_SEQUENCE_FAILS: &str = "S3";
 pub const SORT_FILE_FAILURE: &str = "S4";
-pub const SORT_NUMERIC_KEYS: &str = "S5";
+pub const SORT_DECIMAL_KEYS: &str = "S5";
 pub const SORT_RECORD_LENGTHS: &str = "S6";
 pub const SORT_RETURN_STOPS: &str = "S7";
 pub const RETURN_AFTER_END: &str = "S8";
+pub const SORT_KEY_INVALID_DIGITS: &str = "S9";
+pub const SORT_NEGATIVE_ZERO: &str = "S10";
+pub const FASTSRT_FILES: &str = "S11";
+pub const FASTSRT_STATUS: &str = "S12";
+pub const FASTSRT_FAILURE: &str = "S13";
+pub const SAME_AREA_VSAM: &str = "S14";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -591,9 +597,9 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
-        id: SORT_NUMERIC_KEYS,
-        claim: "A numeric sort key compares by the value the program reads from it, a binary key at its full width as DFSORT's BI and FI formats compare it; a zoned or packed key that is not a valid number is a data exception (S0C7)",
-        basis: Basis::Chosen,
+        id: SORT_DECIMAL_KEYS,
+        claim: "A file SORT or MERGE compares a zoned or packed key as DFSORT compares ZD, PD, CLO, CSL and CST fields (z/OS DFSORT Application Programming Guide SC23-6878-50, Appendix C, pp. 825-828): sign nibbles F, E, C, A, 8, 6, 4, 2 and 0 are positive and D, B, 9, 7, 5, 3 and 1 negative, a separate sign is negative only when it is '-', the zones of the other digits are ignored, and no key is a data exception; a binary key compares at its full width (BI, FI) and a floating-point one by value (FL). -strict-sort-keys reads the key as the program would, so an invalid one is S0C7; a table SORT always compares as a relation condition does",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
@@ -612,6 +618,42 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: RETURN_AFTER_END,
         claim: "A RETURN after the AT END condition takes the AT END phrase again",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SORT_KEY_INVALID_DIGITS,
+        claim: "A digit nibble A to F in a zoned or packed sort key collates above 9 in its place; DFSORT does not say where such a key collates",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SORT_NEGATIVE_ZERO,
+        claim: "A zoned or packed sort key of -0 collates before +0 in ascending order, as under DFSORT's SZERO=YES (Installation and Customization SC23-6881-70, p. 99), the IBM-supplied default",
+        basis: Basis::Recalled,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FASTSRT_FILES,
+        claim: "Under FASTSRT DFSORT does the I/O of a SORT's only USING file and its only GIVING file, except a MERGE's, a line-sequential or variable-length relative file, one whose records differ from the SD's in format (fixed or variable) or largest length, and a GIVING file that is also the USING file; COBOL does the rest as under NOFASTSRT (Programming Guide SC27-8714-03, pp. 232-233, 369)",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FASTSRT_STATUS,
+        claim: "A file whose I/O DFSORT does keeps the FILE STATUS it had through the SORT, and a GIVING relative file's RELATIVE KEY is not set (Programming Guide SC27-8714-03, pp. 232-233)",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FASTSRT_FAILURE,
+        claim: "A failure on a file whose I/O DFSORT does, including an empty VSAM input file, fails the SORT with SORT-RETURN 16 and the run goes on, with or without a FILE STATUS",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SAME_AREA_VSAM,
+        claim: "SAME AREA makes the VSAM (indexed and relative) files it names share one record area, as SAME RECORD AREA does, and is documentation for the others (Language Reference SC27-8713-03, p. 156)",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

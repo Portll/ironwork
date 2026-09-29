@@ -3,7 +3,7 @@
 //! level starts.
 
 use crate::picture::{self, Category, Sym};
-use syntax::ast::{DataEntry, Literal, SignClause, Usage};
+use syntax::ast::{DataEntry, Environment, FileDecl, Literal, Organization, SignClause, Usage};
 use syntax::{Error, Pos};
 use zarch::hfp::Precision;
 
@@ -115,8 +115,9 @@ const LEVEL_ALIGNMENT: u32 = 8;
 pub const MAX_STORAGE: u32 = 128 << 20;
 
 /// Lays out WORKING-STORAGE, then each file's record area, which all its 01 records share and
-/// which is at least `record_max` bytes.
-pub fn build(entries: &[DataEntry], files: &[(&[DataEntry], Option<u32>)], linkage: &[DataEntry], local: &[DataEntry]) -> Result<Layout, Error> {
+/// which is at least `record_max` bytes. Files whose `shared` entry names the same file share one
+/// area, as large as the largest of them (see [`record_area_owners`]).
+pub fn build(entries: &[DataEntry], files: &[(&[DataEntry], Option<u32>)], shared: &[usize], linkage: &[DataEntry], local: &[DataEntry]) -> Result<Layout, Error> {
     let mut items: Vec<Item> = Vec::new();
     let mut usages: Vec<Option<Usage>> = Vec::new();
     let mut conditions = Vec::new();
@@ -256,9 +257,20 @@ pub fn build(entries: &[DataEntry], files: &[(&[DataEntry], Option<u32>)], linka
         }
         place(&mut items, r, start, Vec::new());
     }
+    let owner = |k: usize| shared.get(k).copied().filter(|&g| g < files.len()).unwrap_or(k);
+    let mut own: Vec<u32> = files.iter().map(|f| f.1.unwrap_or(0)).collect();
+    for &r in &roots {
+        if let Some(k) = items[r].file {
+            own[k as usize] = own[k as usize].max(items[r].size);
+        }
+    }
+    let mut area_size = vec![0u32; files.len()];
+    for (k, &size) in own.iter().enumerate() {
+        area_size[owner(k)] = area_size[owner(k)].max(size);
+    }
     let mut cursor = 0u32;
     let mut root_offsets: Vec<(String, u32)> = Vec::new();
-    let mut file_areas: Vec<Option<(u32, u32)>> = vec![None; files.len()];
+    let mut area_starts: Vec<Option<u32>> = vec![None; files.len()];
     for &r in &roots {
         if items[r].local {
             continue;
@@ -268,11 +280,9 @@ pub fn build(entries: &[DataEntry], files: &[(&[DataEntry], Option<u32>)], linka
             continue;
         }
         if let Some(k) = items[r].file {
-            let k = k as usize;
-            let (start, size) = *file_areas[k].get_or_insert((cursor.div_ceil(LEVEL_ALIGNMENT) * LEVEL_ALIGNMENT, files[k].1.unwrap_or(0)));
-            let size = size.max(items[r].size);
-            file_areas[k] = Some((start, size));
-            cursor = cursor.max(start + size);
+            let g = owner(k as usize);
+            let start = *area_starts[g].get_or_insert(cursor.div_ceil(LEVEL_ALIGNMENT) * LEVEL_ALIGNMENT);
+            cursor = cursor.max(start + area_size[g]);
             if cursor > MAX_STORAGE {
                 return Err(Error::at(items[r].pos, format!("storage exceeds the interpreter's {MAX_STORAGE} bytes")));
             }
@@ -307,13 +317,18 @@ pub fn build(entries: &[DataEntry], files: &[(&[DataEntry], Option<u32>)], linka
         }
     }
     let mut areas = Vec::new();
-    for (k, area) in file_areas.into_iter().enumerate() {
-        let area = area.unwrap_or_else(|| {
-            let start = cursor.div_ceil(LEVEL_ALIGNMENT) * LEVEL_ALIGNMENT;
-            (start, files[k].1.unwrap_or(0))
-        });
-        cursor = cursor.max(area.0 + area.1);
-        areas.push(area);
+    for (k, &size) in own.iter().enumerate() {
+        let g = owner(k);
+        let start = match area_starts[g] {
+            Some(start) => start,
+            None => {
+                let start = cursor.div_ceil(LEVEL_ALIGNMENT) * LEVEL_ALIGNMENT;
+                area_starts[g] = Some(start);
+                cursor = cursor.max(start + area_size[g]);
+                start
+            }
+        };
+        areas.push((start, size));
     }
     Ok(Layout { items, conditions, edits, file_areas: areas, linkage_roots, local_size: local_cursor, size: cursor })
 }
@@ -467,4 +482,32 @@ impl Layout {
 
 fn declared_size(e: &DataEntry) -> Option<u32> {
     e.picture.as_deref().and_then(|p| picture::analyse(p).ok()).map(|p| p.size)
+}
+
+/// The file whose record area each file uses: its own, or the first file of its SAME RECORD AREA
+/// clause. SAME AREA shares the record area of the VSAM (indexed and relative) files it names and
+/// is documentation for the rest: SAME_AREA_VSAM in numeric::assumptions.
+pub fn record_area_owners(files: &[FileDecl], environment: &Environment) -> Result<Vec<usize>, Error> {
+    let mut owner: Vec<usize> = (0..files.len()).collect();
+    let root = |owner: &[usize], mut k: usize| {
+        while owner[k] != k {
+            k = owner[k];
+        }
+        k
+    };
+    let clauses = environment.same_record_areas.iter().map(|c| ("SAME RECORD AREA", c)).chain(environment.same_areas.iter().map(|c| ("SAME AREA", c)));
+    for (clause, names) in clauses {
+        let mut members = Vec::new();
+        for name in names {
+            let k = files.iter().position(|f| f.name == *name).ok_or_else(|| Error::at(Pos::default(), format!("{clause} names {name}, which is not a file")))?;
+            if clause == "SAME RECORD AREA" || matches!(files[k].organization, Organization::Indexed | Organization::Relative) {
+                members.push(k);
+            }
+        }
+        for pair in members.windows(2) {
+            let (a, b) = (root(&owner, pair[0]), root(&owner, pair[1]));
+            owner[a.max(b)] = a.min(b);
+        }
+    }
+    Ok((0..files.len()).map(|k| root(&owner, k)).collect())
 }

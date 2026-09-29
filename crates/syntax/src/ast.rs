@@ -29,7 +29,7 @@ pub struct Program {
     pub report_writer: crate::report::ReportWriter,
     /// The REPOSITORY's classes, and for a class definition or a method what it is.
     pub oo: Option<Box<Oo>>,
-    pub collating: Collating,
+    pub environment: Environment,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -581,12 +581,17 @@ pub struct ReadStmt {
     pub pos: Pos,
 }
 
-/// The alphabets SPECIAL-NAMES declares, and the PROGRAM COLLATING SEQUENCE of OBJECT-COMPUTER.
+/// ENVIRONMENT DIVISION clauses beyond SELECT that the program's meaning depends on.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Collating {
-    /// Each alphabet-name and what it is: EBCDIC, NATIVE, STANDARD-1, STANDARD-2, or a literal.
+pub struct Environment {
+    /// SPECIAL-NAMES ALPHABET: each alphabet-name and what it is: EBCDIC, NATIVE, STANDARD-1,
+    /// STANDARD-2, or a literal.
     pub alphabets: Vec<(String, String)>,
-    pub program: Option<String>,
+    /// OBJECT-COMPUTER PROGRAM COLLATING SEQUENCE.
+    pub collating_sequence: Option<String>,
+    /// I-O-CONTROL SAME RECORD AREA and SAME AREA clauses, each with the files it names.
+    pub same_record_areas: Vec<Vec<String>>,
+    pub same_areas: Vec<Vec<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

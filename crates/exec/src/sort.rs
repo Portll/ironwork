@@ -190,12 +190,12 @@ impl Check<'_> {
 
     /// Only the native EBCDIC sequence is modelled. A table SORT ignores PROGRAM COLLATING SEQUENCE.
     fn collating_sequence(&mut self, st: &SortStmt, kinds: &[Kind], program_applies: bool) {
-        let (phrase, alphabet) = match (&st.collating, &self.program.collating.program) {
+        let (phrase, alphabet) = match (&st.collating, &self.program.environment.collating_sequence) {
             (Some(a), _) => ("COLLATING SEQUENCE", a),
             (None, Some(a)) if program_applies => ("PROGRAM COLLATING SEQUENCE", a),
             _ => return,
         };
-        match self.program.collating.alphabets.iter().find(|(n, _)| n == alphabet) {
+        match self.program.environment.alphabets.iter().find(|(n, _)| n == alphabet) {
             None => self.errors.push(Error::at(st.pos, format!("{phrase} {alphabet}: not an alphabet-name of SPECIAL-NAMES"))),
             Some((_, kind)) if kind == "EBCDIC" || kind == "NATIVE" || !kinds.iter().any(|&k| collates(k)) => {}
             Some((_, kind)) => self.errors.push(Error::at(st.pos, format!("{phrase} {alphabet} ({kind}) for SORT or MERGE keys is not supported yet"))),

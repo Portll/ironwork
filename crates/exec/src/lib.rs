@@ -66,7 +66,11 @@ pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error
         }
     }
     let files: Vec<(&[DataEntry], Option<u32>)> = program.files.iter().map(|f| (f.records.as_slice(), f.record_max)).collect();
-    let layout = match layout::build(&program.working_storage, &files, &program.linkage, &program.local_storage) {
+    let shared = layout::record_area_owners(&program.files, &program.environment).unwrap_or_else(|e| {
+        errors.push(e);
+        (0..files.len()).collect()
+    });
+    let layout = match layout::build(&program.working_storage, &files, &shared, &program.linkage, &program.local_storage) {
         Ok(l) => l,
         Err(e) => {
             errors.push(e);

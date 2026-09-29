@@ -1,18 +1,38 @@
-//! SORT, MERGE, RELEASE and RETURN, and the alphabets a COLLATING SEQUENCE names.
+//! SORT, MERGE, RELEASE and RETURN, and the ENVIRONMENT DIVISION clauses around them: the
+//! alphabets a COLLATING SEQUENCE names, and the SAME clauses of I-O-CONTROL.
 
 use super::*;
 
 /// Words that end a list of keys in SORT and MERGE, beyond the phrase words.
 const SORT_PHRASES: &[&str] = &["ASCENDING", "DESCENDING", "DUPLICATES", "COLLATING", "SEQUENCE"];
 
+/// Words that begin an I-O-CONTROL clause, and so end the file list of the one before.
+const IO_CONTROL_CLAUSES: &[&str] = &["SAME", "RERUN", "MULTIPLE", "APPLY"];
+
 impl Parser<'_> {
-    /// The ENVIRONMENT DIVISION clauses that bear on sorting: SPECIAL-NAMES ALPHABET and
-    /// OBJECT-COMPUTER PROGRAM COLLATING SEQUENCE, and SAME RECORD AREA, which is refused. False
-    /// when the cursor is at none of them. A literal alphabet is kept as "literal", its literals
-    /// left unread.
-    pub(super) fn sort_environment(&mut self, collating: &mut Collating) -> R<bool> {
-        if self.is_word("SAME") && self.word_at(1) == Some("RECORD") {
-            return Err(self.error("SAME RECORD AREA is not supported yet"));
+    /// SPECIAL-NAMES ALPHABET, OBJECT-COMPUTER PROGRAM COLLATING SEQUENCE and the I-O-CONTROL
+    /// SAME clauses; false when the cursor is at none of them. A literal alphabet is kept as
+    /// "literal", its literals left unread. SAME SORT AREA and SAME SORT-MERGE AREA are read and
+    /// dropped: IBM checks their syntax only.
+    pub(super) fn environment_clause(&mut self, clauses: &mut Environment) -> R<bool> {
+        if self.accept_word("SAME") {
+            let kind = self.accept_any(&["RECORD", "SORT", "SORT-MERGE"]);
+            self.accept_word("AREA");
+            self.accept_word("FOR");
+            let mut files = Vec::new();
+            while let Some(w) = self.word().filter(|w| !IO_CONTROL_CLAUSES.contains(w)) {
+                if self.at_division(&["DATA", "PROCEDURE"]) {
+                    break;
+                }
+                files.push(w.to_owned());
+                self.at += 1;
+            }
+            match kind.as_deref() {
+                Some("RECORD") => clauses.same_record_areas.push(files),
+                None => clauses.same_areas.push(files),
+                Some(_) => {}
+            }
+            return Ok(true);
         }
         if self.accept_word("ALPHABET") {
             let name = self.name("an alphabet-name")?;
@@ -27,7 +47,7 @@ impl Parser<'_> {
             if kind != "literal" {
                 self.at += 1;
             }
-            collating.alphabets.push((name, kind));
+            clauses.alphabets.push((name, kind));
             return Ok(true);
         }
         if self.is_word("PROGRAM") && self.word_at(1) == Some("COLLATING") {
@@ -41,7 +61,7 @@ impl Parser<'_> {
             self.accept_word("ALPHANUMERIC");
         }
         self.accept_word("IS");
-        collating.program = Some(self.name("an alphabet-name")?);
+        clauses.collating_sequence = Some(self.name("an alphabet-name")?);
         Ok(true)
     }
 
@@ -218,14 +238,16 @@ mod tests {
         assert!(p.files[0].sort && !p.files[1].sort);
         assert_eq!((p.files[0].record_min, p.files[0].record_max), (Some(2), Some(4)));
         assert_eq!((p.files[1].recording, p.files[2].recording), (Some('V'), None));
-        assert_eq!(p.collating.program.as_deref(), Some("EB"));
-        let alphabets: Vec<(&str, &str)> = p.collating.alphabets.iter().map(|(n, k)| (n.as_str(), k.as_str())).collect();
+        assert_eq!(p.environment.collating_sequence.as_deref(), Some("EB"));
+        let alphabets: Vec<(&str, &str)> = p.environment.alphabets.iter().map(|(n, k)| (n.as_str(), k.as_str())).collect();
         assert_eq!(alphabets, [("EB", "EBCDIC"), ("AS", "STANDARD-1"), ("MINE", "literal")]);
         assert!(sort(&p.paragraphs[0].statements[0]).merge);
         let refused = crate::parse(&format!("{HEAD}           MERGE W ON ASCENDING KEY W-K1 INPUT PROCEDURE P.\n")).unwrap_err();
         assert!(refused.message.contains("not an INPUT PROCEDURE"), "{}", refused.message);
-        let shared = HEAD.replace("       DATA DIVISION.", "       I-O-CONTROL.\n           SAME RECORD AREA FOR W A.\n       DATA DIVISION.");
-        assert!(crate::parse(&shared).unwrap_err().message.contains("SAME RECORD AREA is not supported yet"));
+        let io_control = "       I-O-CONTROL.\n           SAME RECORD AREA FOR W, A SAME SORT W B\n           SAME A B.\n       DATA DIVISION.";
+        let p = crate::parse(&HEAD.replace("       DATA DIVISION.", io_control)).unwrap();
+        assert_eq!(p.environment.same_record_areas, [vec!["W".to_owned(), "A".to_owned()]]);
+        assert_eq!(p.environment.same_areas, [vec!["A".to_owned(), "B".to_owned()]]);
     }
 
     #[test]

@@ -97,7 +97,7 @@ impl Parser<'_> {
             exec_declarations: Vec::new(),
             report_writer: Default::default(),
             oo: Some(Box::new(Oo { repository, unit: OoUnit::Class(Box::new(def)) })),
-            collating: Collating::default(),
+            environment: Environment::default(),
         });
         Ok(())
     }

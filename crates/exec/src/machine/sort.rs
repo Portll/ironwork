@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::files::{Format, Record};
-use numeric::assumptions;
+use numeric::{SortKeys, TruncCheck, assumptions};
 
 /// The signal a RELEASE or RETURN raises to stop the operation: control passes to the statement
 /// after the SORT or MERGE, whose message is the reason.
@@ -44,7 +44,15 @@ struct Key {
 
 struct Entry {
     record: Vec<u8>,
-    keys: Vec<Val>,
+    keys: Vec<KeyValue>,
+}
+
+/// A key's value as the comparison sees it.
+enum KeyValue {
+    Read(Val),
+    /// A zoned or packed key as DFSORT reads a ZD, PD, CLO, CSL or CST field: its sign, and its
+    /// digit nibbles as they stand.
+    Decimal { negative: bool, digits: Vec<u8> },
 }
 
 enum Input {
@@ -53,18 +61,34 @@ enum Input {
     Failed(String),
 }
 
+/// A USING or GIVING file of a SORT or MERGE, and why FASTSRT cannot give DFSORT its I/O.
+struct Fastsrt {
+    input: bool,
+    file: usize,
+    refusal: Option<String>,
+}
+
+impl Fastsrt {
+    fn dfsort(&self, fastsrt: bool) -> bool {
+        fastsrt && self.refusal.is_none()
+    }
+}
+
 /// How a SORT or MERGE ended: Err holds why it failed.
 type Outcome = Result<(), String>;
 
 /// The order of two records by their key values, most significant key first. Every comparison is
 /// exact, so the order is total.
-fn order(a: &[Val], b: &[Val], keys: &[Key]) -> Ordering {
+fn order(a: &[KeyValue], b: &[KeyValue], keys: &[Key]) -> Ordering {
     for ((x, y), key) in a.iter().zip(b).zip(keys) {
         let o = match (x, y) {
-            (Val::Num(x), Val::Num(y)) => compare_fixed(x, y),
-            (Val::Float(x), Val::Float(y)) => float_order(*x, *y),
-            (Val::National(x), Val::National(y)) => compare_national(x, y),
-            (Val::Bytes(x), Val::Bytes(y)) => ebcdic::compare_alphanumeric(x, y, &Collation::Native),
+            (KeyValue::Read(Val::Num(x)), KeyValue::Read(Val::Num(y))) => compare_fixed(x, y),
+            (KeyValue::Read(Val::Float(x)), KeyValue::Read(Val::Float(y))) => float_order(*x, *y),
+            (KeyValue::Read(Val::National(x)), KeyValue::Read(Val::National(y))) => compare_national(x, y),
+            (KeyValue::Read(Val::Bytes(x)), KeyValue::Read(Val::Bytes(y))) => ebcdic::compare_alphanumeric(x, y, &Collation::Native),
+            (KeyValue::Decimal { negative: false, digits: x }, KeyValue::Decimal { negative: false, digits: y }) => x.cmp(y),
+            (KeyValue::Decimal { negative: true, digits: x }, KeyValue::Decimal { negative: true, digits: y }) => y.cmp(x),
+            (KeyValue::Decimal { negative, .. }, KeyValue::Decimal { .. }) => if *negative { Ordering::Less } else { Ordering::Greater },
             _ => Ordering::Equal,
         };
         let o = if key.ascending { o } else { o.reverse() };
@@ -95,6 +119,28 @@ fn float_order(a: Hfp, b: Hfp) -> Ordering {
         Ordering::Equal if sa < 0 => (eb, fb).cmp(&(ea, fa)),
         Ordering::Equal => (ea, fa).cmp(&(eb, fb)),
         other => other,
+    }
+}
+
+/// A zoned or packed key's sign and digit nibbles as DFSORT reads them, or None for other keys. See
+/// SORT_DECIMAL_KEYS, SORT_KEY_INVALID_DIGITS and SORT_NEGATIVE_ZERO in numeric::assumptions.
+fn dfsort_decimal(bytes: &[u8], kind: Kind) -> Option<(bool, Vec<u8>)> {
+    let negative = |sign: u8| sign % 2 == 1 && sign != 0xF;
+    let low = |b: &[u8]| b.iter().map(|b| b & 0x0F).collect();
+    match kind {
+        Kind::Packed { .. } => {
+            let (last, body) = bytes.split_last()?;
+            let mut digits: Vec<u8> = body.iter().flat_map(|b| [b >> 4, b & 0x0F]).collect();
+            digits.push(last >> 4);
+            Some((negative(last & 0x0F), digits))
+        }
+        Kind::Zoned { sign: Some(SignClause { separate: true, position }), .. } => {
+            let (sign, body) = if position == SignPosition::Leading { bytes.split_first()? } else { bytes.split_last()? };
+            Some((*sign == 0x60, low(body)))
+        }
+        Kind::Zoned { sign: Some(SignClause { separate: false, position: SignPosition::Leading }), .. } => Some((negative(bytes.first()? >> 4), low(bytes))),
+        Kind::Zoned { .. } => Some((negative(bytes.last()? >> 4), low(bytes))),
+        _ => None,
     }
 }
 
@@ -144,11 +190,16 @@ impl<'p> Machine<'p, '_, '_> {
         Ok(out)
     }
 
-    /// Each key's value, read from storage at `base` as the program would read it.
-    fn key_values(&mut self, base: usize, keys: &[Key], pos: Pos) -> R<Vec<Val>> {
+    /// Each key's value, from storage at `base`: a zoned or packed key as DFSORT reads it when
+    /// `dfsort`, every other key as the program would read it.
+    fn key_values(&mut self, base: usize, keys: &[Key], dfsort: bool, pos: Pos) -> R<Vec<KeyValue>> {
         let mut out = Vec::with_capacity(keys.len());
         for k in keys {
-            out.push(self.read(Loc { offset: base + k.offset, len: k.len, kind: k.kind, item: k.item }, pos)?);
+            let loc = Loc { offset: base + k.offset, len: k.len, kind: k.kind, item: k.item };
+            out.push(match dfsort.then(|| dfsort_decimal(self.bytes(loc), k.kind)).flatten() {
+                Some((negative, digits)) => KeyValue::Decimal { negative, digits },
+                None => KeyValue::Read(self.read(loc, pos)?),
+            });
         }
         Ok(out)
     }
@@ -171,7 +222,7 @@ impl<'p> Machine<'p, '_, '_> {
             return Ok(Err(format!("a record of {} bytes ends inside a key", record.len())));
         }
         self.unit.mem[area..area + record.len()].copy_from_slice(&record);
-        let keys = self.key_values(area, keys, pos)?;
+        let keys = self.key_values(area, keys, self.options.sort_keys == SortKeys::Dfsort, pos)?;
         Ok(Ok(Entry { record, keys }))
     }
 
@@ -241,69 +292,194 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     /// Reads every USING file to its end, in order. A MERGE's files must each be in the merge order.
-    fn gather(&mut self, st: &SortStmt, sd: usize, keys: &[Key], files: &[String]) -> R<Result<Vec<Entry>, String>> {
-        let pos = st.pos;
+    fn gather(&mut self, st: &SortStmt, sd: usize, keys: &[Key], plan: &[Fastsrt]) -> R<Result<Vec<Entry>, String>> {
         let mut entries: Vec<Entry> = Vec::new();
-        for name in files {
-            let Some(k) = self.program.files.iter().position(|f| f.name == *name) else {
-                return Err(Abend::ironwork(format!("no file named {name}"), pos));
+        for f in plan.iter().filter(|f| f.input) {
+            let read = if f.dfsort(self.options.fastsrt) {
+                self.by_dfsort(f.file, |m| m.read_using(st, sd, keys, f.file, true))?
+            } else {
+                self.read_using(st, sd, keys, f.file, false)?
             };
-            if let Err(why) = self.open_for_sort(k, OpenMode::Input, pos)? {
-                return Ok(Err(why));
-            }
-            let first = entries.len();
-            loop {
-                let failure = match self.next_input(k, pos)? {
-                    Input::End => break,
-                    Input::Failed(why) => why,
-                    Input::Record(r) => match self.entry(sd, keys, r, pos)? {
-                        Ok(e) => {
-                            entries.push(e);
-                            continue;
-                        }
-                        Err(why) => format!("{name}: {why}"),
-                    },
-                };
-                self.close_file(name, pos)?;
-                return Ok(Err(failure));
-            }
-            if let Err(why) = self.close_for_sort(k, pos)? {
-                return Ok(Err(why));
-            }
-            if st.merge
-                && let Some(n) = entries[first..].windows(2).position(|w| order(&w[0].keys, &w[1].keys, keys) == Ordering::Greater)
-            {
-                return Ok(Err(format!("record {} of {name} is out of the merge order (see {})", n + 2, assumptions::MERGE_OUT_OF_SEQUENCE_FAILS)));
+            match read {
+                Ok(records) => entries.extend(records),
+                Err(why) => return Ok(Err(why)),
             }
         }
         Ok(Ok(entries))
     }
 
-    /// Writes every record to each GIVING file, as WRITE without phrases would.
-    fn scatter(&mut self, records: &[Vec<u8>], files: &[String], pos: Pos) -> R<Outcome> {
-        for name in files {
-            let Some(k) = self.program.files.iter().position(|f| f.name == *name) else {
-                return Err(Abend::ironwork(format!("no file named {name}"), pos));
+    /// One USING file, opened, read to its end and closed.
+    fn read_using(&mut self, st: &SortStmt, sd: usize, keys: &[Key], k: usize, dfsort: bool) -> R<Result<Vec<Entry>, String>> {
+        let pos = st.pos;
+        let program = self.program;
+        let name = &program.files[k].name;
+        if let Err(why) = self.open_for_sort(k, OpenMode::Input, pos)? {
+            return Ok(Err(why));
+        }
+        let mut entries = Vec::new();
+        loop {
+            let failure = match self.next_input(k, pos)? {
+                Input::End => break,
+                Input::Failed(why) => why,
+                Input::Record(r) => match self.entry(sd, keys, r, pos)? {
+                    Ok(e) => {
+                        entries.push(e);
+                        continue;
+                    }
+                    Err(why) => format!("{name}: {why}"),
+                },
             };
-            if let Err(why) = self.open_for_sort(k, OpenMode::Output, pos)? {
-                return Ok(Err(why));
-            }
-            let (area, size) = self.area(k);
-            for record in records {
-                let len = record.len().min(size);
-                self.unit.mem[area..area + len].copy_from_slice(&record[..len]);
-                let loc = Loc { offset: area, len, kind: Kind::Alnum { justified: false }, item: usize::MAX };
-                self.write_record(k, loc, None, &NO_HANDLERS, pos)?;
-                if self.status_failed(k)? {
-                    self.close_file(name, pos)?;
-                    return Ok(Err(format!("WRITE {name} failed")));
-                }
-            }
-            if let Err(why) = self.close_for_sort(k, pos)? {
-                return Ok(Err(why));
+            self.close_file(name, pos)?;
+            return Ok(Err(failure));
+        }
+        if let Err(why) = self.close_for_sort(k, pos)? {
+            return Ok(Err(why));
+        }
+        if dfsort && entries.is_empty() && matches!(program.files[k].organization, Organization::Indexed | Organization::Relative) {
+            return Ok(Err(format!("{name} is an empty VSAM file, which FASTSRT cannot take as input (see {})", assumptions::FASTSRT_FAILURE)));
+        }
+        if st.merge
+            && let Some(n) = entries.windows(2).position(|w| order(&w[0].keys, &w[1].keys, keys) == Ordering::Greater)
+        {
+            return Ok(Err(format!("record {} of {name} is out of the merge order (see {})", n + 2, assumptions::MERGE_OUT_OF_SEQUENCE_FAILS)));
+        }
+        Ok(Ok(entries))
+    }
+
+    /// Writes every record to each GIVING file, as WRITE without phrases would.
+    fn scatter(&mut self, records: &[Vec<u8>], plan: &[Fastsrt], pos: Pos) -> R<Outcome> {
+        for f in plan.iter().filter(|f| !f.input) {
+            let written = if f.dfsort(self.options.fastsrt) {
+                self.by_dfsort(f.file, |m| m.write_giving(records, f.file, pos))?
+            } else {
+                self.write_giving(records, f.file, pos)?
+            };
+            if written.is_err() {
+                return Ok(written);
             }
         }
         Ok(Ok(()))
+    }
+
+    /// One GIVING file, opened, written and closed.
+    fn write_giving(&mut self, records: &[Vec<u8>], k: usize, pos: Pos) -> R<Outcome> {
+        let program = self.program;
+        let name = &program.files[k].name;
+        if let Err(why) = self.open_for_sort(k, OpenMode::Output, pos)? {
+            return Ok(Err(why));
+        }
+        let (area, size) = self.area(k);
+        for record in records {
+            let len = record.len().min(size);
+            self.unit.mem[area..area + len].copy_from_slice(&record[..len]);
+            let loc = Loc { offset: area, len, kind: Kind::Alnum { justified: false }, item: usize::MAX };
+            self.write_record(k, loc, None, &NO_HANDLERS, pos)?;
+            if self.status_failed(k)? {
+                self.close_file(name, pos)?;
+                return Ok(Err(format!("WRITE {name} failed")));
+            }
+        }
+        self.close_for_sort(k, pos)
+    }
+
+    /// Runs `op` on file k as DFSORT does its I/O under FASTSRT: the file's FILE STATUS and RELATIVE
+    /// KEY keep the values they had, and a failure fails the sort rather than the run. See
+    /// FASTSRT_STATUS and FASTSRT_FAILURE in numeric::assumptions.
+    fn by_dfsort<T>(&mut self, k: usize, op: impl FnOnce(&mut Self) -> R<Result<T, String>>) -> R<Result<T, String>> {
+        let program = self.program;
+        let decl = &program.files[k];
+        let mut kept = Vec::new();
+        for r in decl.status.iter().chain(&decl.relative_key) {
+            let loc = self.locate(r)?;
+            kept.push((loc, self.bytes(loc).to_vec()));
+        }
+        let was_open = self.is_open(k);
+        let result = match op(self) {
+            Err(a) if a.code.starts_with("IO-") => Ok(Err(a.message)),
+            other => other,
+        };
+        if !was_open && let Some(f) = self.unit.programs[self.me].files[k].take() {
+            let _ = f.close();
+        }
+        for (loc, bytes) in kept {
+            self.write(loc, &bytes);
+        }
+        result
+    }
+
+    /// Each USING and GIVING file, and whether IBM's rules let FASTSRT give DFSORT its I/O
+    /// (FASTSRT_FILES in numeric::assumptions).
+    fn fastsrt_plan(&self, st: &SortStmt, sd: usize, pos: Pos) -> R<Vec<Fastsrt>> {
+        let mut plan = Vec::new();
+        for (input, io) in [(true, &st.input), (false, &st.output)] {
+            let Some(SortIo::Files(names)) = io else { continue };
+            for name in names {
+                let Some(k) = self.program.files.iter().position(|f| f.name == *name) else {
+                    return Err(Abend::ironwork(format!("no file named {name}"), pos));
+                };
+                let refusal = self.fastsrt_refusal(st, sd, k, input, names.len(), &plan);
+                plan.push(Fastsrt { input, file: k, refusal });
+            }
+        }
+        Ok(plan)
+    }
+
+    fn fastsrt_refusal(&self, st: &SortStmt, sd: usize, k: usize, input: bool, count: usize, earlier: &[Fastsrt]) -> Option<String> {
+        let decl = &self.program.files[k];
+        let format = |k: usize| if self.fixed_length(k) { "fixed" } else { "variable" };
+        let dfsort_reads = |f: &Fastsrt| f.input && f.refusal.is_none() && (f.file == k || self.program.files[f.file].assign == decl.assign);
+        Some(if st.merge {
+            "it applies only to SORT".into()
+        } else if count > 1 {
+            format!("{} names more than one file", if input { "USING" } else { "GIVING" })
+        } else if decl.organization == Organization::LineSequential {
+            "it is a line-sequential file".into()
+        } else if decl.organization == Organization::Relative && !self.fixed_length(k) {
+            "it is a variable-length relative file".into()
+        } else if self.fixed_length(k) != self.fixed_length(sd) {
+            format!("its records are {}-length and the SD's {}-length", format(k), format(sd))
+        } else if self.area(k).1 != self.area(sd).1 {
+            format!("its largest record is {} bytes and the SD's {}", self.area(k).1, self.area(sd).1)
+        } else if !input && earlier.iter().any(dfsort_reads) {
+            "it is also the USING file, whose I/O DFSORT does".into()
+        } else {
+            return None;
+        })
+    }
+
+    /// Checked mode: where FASTSRT changes what the program sees of a SORT, and where FASTSRT was
+    /// asked for and cannot apply.
+    fn report_fastsrt(&mut self, st: &SortStmt, plan: &[Fastsrt]) {
+        if self.options.trunc_check == TruncCheck::Silent {
+            return;
+        }
+        let verb = if st.merge { "MERGE" } else { "SORT" };
+        let fastsrt = self.options.fastsrt;
+        let program = self.program;
+        for f in plan {
+            let decl = &program.files[f.file];
+            let phrase = if f.input { "USING" } else { "GIVING" };
+            let report = match &f.refusal {
+                Some(why) if fastsrt => format!("FASTSRT does not apply to {phrase} {}: {why}; COBOL does its I/O", decl.name),
+                Some(_) => continue,
+                None => {
+                    let mut kept: Vec<String> = decl.status.iter().map(|r| format!("FILE STATUS {}", r.name)).collect();
+                    if !f.input && decl.organization == Organization::Relative {
+                        kept.extend(decl.relative_key.iter().map(|r| format!("RELATIVE KEY {}", r.name)));
+                    }
+                    if kept.is_empty() {
+                        continue;
+                    }
+                    let kept = kept.join(" and ");
+                    if fastsrt {
+                        format!("FASTSRT: DFSORT does the I/O of {phrase} {}, so its {kept} is not updated by the {verb}", decl.name)
+                    } else {
+                        format!("under FASTSRT, DFSORT would do the I/O of {phrase} {} and its {kept} would not be updated by the {verb}", decl.name)
+                    }
+                }
+            };
+            let _ = writeln!(self.unit.err, "ironwork: {}: {verb} {}: {report} (-silent stops these reports)", st.pos, st.subject.name);
+        }
     }
 
     /// Runs an input or output procedure with `active` in progress. An Err outcome is a stop
@@ -357,8 +533,10 @@ impl<'p> Machine<'p, '_, '_> {
         let sort_return = self.register("SORT-RETURN", pos);
         self.set_integer(&sort_return, 0, pos)?;
         let keys = self.file_keys(sd, &st.keys, pos)?;
+        let plan = self.fastsrt_plan(st, sd, pos)?;
+        self.report_fastsrt(st, &plan);
         let mut entries = match &st.input {
-            Some(SortIo::Files(files)) => match self.gather(st, sd, &keys, files)? {
+            Some(SortIo::Files(_)) => match self.gather(st, sd, &keys, &plan)? {
                 Ok(entries) => entries,
                 Err(why) => return self.sort_end(st, Err(why)),
             },
@@ -385,8 +563,8 @@ impl<'p> Machine<'p, '_, '_> {
         entries.sort_by(|a, b| order(&a.keys, &b.keys, &keys));
         let records: Vec<Vec<u8>> = entries.into_iter().map(|e| e.record).collect();
         match &st.output {
-            Some(SortIo::Files(files)) => {
-                let outcome = self.scatter(&records, files, pos)?;
+            Some(SortIo::Files(_)) => {
+                let outcome = self.scatter(&records, &plan, pos)?;
                 self.sort_end(st, outcome)
             }
             Some(SortIo::Procedure { from, thru }) => {
@@ -517,7 +695,7 @@ impl<'p> Machine<'p, '_, '_> {
         let mut entries = Vec::with_capacity(count);
         for i in 0..count {
             let at = base + i * stride;
-            let values = self.key_values(at, &keys, pos)?;
+            let values = self.key_values(at, &keys, false, pos)?;
             entries.push(Entry { record: self.unit.mem[at..at + stride].to_vec(), keys: values });
         }
         entries.sort_by(|a, b| order(&a.keys, &b.keys, &keys));

@@ -221,9 +221,9 @@ impl Parser<'_> {
         while self.peek().is_some() && !self.at_division(&["ENVIRONMENT", "DATA", "PROCEDURE", "IDENTIFICATION", "ID"]) && !self.at_end_program() {
             self.at += 1;
         }
-        let (mut files, mut repository, mut collating) = (Vec::new(), Vec::new(), Collating::default());
+        let (mut files, mut repository, mut environment) = (Vec::new(), Vec::new(), Environment::default());
         if self.at_division(&["ENVIRONMENT"]) {
-            (files, repository) = self.environment(&mut collating)?;
+            (files, repository) = self.environment(&mut environment)?;
         }
         let (mut working_storage, mut local_storage, mut linkage) = (Vec::new(), Vec::new(), Vec::new());
         let mut report_writer = crate::report::ReportWriter::default();
@@ -306,7 +306,7 @@ impl Parser<'_> {
             exec_declarations,
             report_writer,
             oo: oo::program_oo(repository),
-            collating,
+            environment,
         });
         out.extend(nested);
         Ok(())
@@ -318,13 +318,13 @@ impl Parser<'_> {
 
     /// The ENVIRONMENT DIVISION: SELECT entries of FILE-CONTROL and the REPOSITORY's classes;
     /// everything else is skipped, except what would change the meaning of the rest of the program.
-    fn environment(&mut self, collating: &mut Collating) -> R<(Vec<FileDecl>, Vec<ClassEntry>)> {
+    fn environment(&mut self, clauses: &mut Environment) -> R<(Vec<FileDecl>, Vec<ClassEntry>)> {
         let (mut files, mut repository) = (Vec::new(), Vec::new());
         while self.peek().is_some() && !self.at_division(&["DATA", "PROCEDURE"]) {
             if self.is_word("DECIMAL-POINT") {
                 return Err(self.error("DECIMAL-POINT IS COMMA is not supported yet"));
             }
-            if self.sort_environment(collating)? {
+            if self.environment_clause(clauses)? {
                 continue;
             }
             if self.accept_word("SELECT") {

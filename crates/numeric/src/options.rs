@@ -47,13 +47,24 @@ pub enum Numproc {
     Pfd,
 }
 
-/// Whether a store that TRUNC(OPT) leaves to the generated code is reported when decimal and binary
-/// truncation disagree. `-silent` turns the reports off.
+/// Whether checked mode reports: a store that TRUNC(OPT) leaves to the generated code, when decimal
+/// and binary truncation disagree, and a SORT whose outcome FASTSRT changes. `-silent` turns the
+/// reports off.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TruncCheck {
     #[default]
     Report,
     Silent,
+}
+
+/// How SORT and MERGE compare a zoned or packed key: as DFSORT compares ZD and PD fields, so no
+/// bytes are invalid, or (`-strict-sort-keys`) as the program reads the item, so an invalid one is a
+/// data exception.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SortKeys {
+    #[default]
+    Dfsort,
+    Strict,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,11 +74,22 @@ pub struct Options {
     pub numproc: Numproc,
     pub codepage: u16,
     pub trunc_check: TruncCheck,
+    /// FASTSRT: DFSORT does the I/O of a SORT's USING and GIVING files where IBM's rules allow.
+    pub fastsrt: bool,
+    pub sort_keys: SortKeys,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self { arith: Arith::default(), trunc: Trunc::default(), numproc: Numproc::default(), codepage: 1140, trunc_check: TruncCheck::default() }
+        Self {
+            arith: Arith::default(),
+            trunc: Trunc::default(),
+            numproc: Numproc::default(),
+            codepage: 1140,
+            trunc_check: TruncCheck::default(),
+            fastsrt: false,
+            sort_keys: SortKeys::default(),
+        }
     }
 }
 
@@ -131,6 +153,8 @@ impl Options {
                 CodePage::by_ccsid(ccsid).ok_or(OptionError::UnsupportedCodePage(ccsid))?;
                 self.codepage = ccsid;
             }
+            "FASTSRT" | "FSRT" => self.fastsrt = true,
+            "NOFASTSRT" | "NOFSRT" => self.fastsrt = false,
             _ => return Ok(false),
         }
         Ok(true)
@@ -140,6 +164,7 @@ impl Options {
     pub fn apply_flag(&mut self, flag: &str) -> Result<(), OptionError> {
         match flag {
             "-silent" => self.trunc_check = TruncCheck::Silent,
+            "-strict-sort-keys" => self.sort_keys = SortKeys::Strict,
             _ => return Err(OptionError::UnknownFlag(flag.to_owned())),
         }
         Ok(())
@@ -157,7 +182,7 @@ mod tests {
     #[test]
     fn defaults_are_ibms() {
         let o = Options::default();
-        assert_eq!((o.arith, o.trunc, o.numproc, o.codepage), (Arith::Compat, Trunc::Std, Numproc::Nopfd, 1140));
+        assert_eq!((o.arith, o.trunc, o.numproc, o.codepage, o.fastsrt), (Arith::Compat, Trunc::Std, Numproc::Nopfd, 1140, false));
     }
 
     #[test]
@@ -166,7 +191,10 @@ mod tests {
         assert_eq!(o.apply("ar(e)"), Ok(true));
         assert_eq!(o.apply("CP(1047)"), Ok(true));
         assert_eq!(o.apply("TRUNC(BIN)"), Ok(true));
-        assert_eq!((o.arith, o.codepage, o.trunc), (Arith::Extend, 1047, Trunc::Bin));
+        assert_eq!(o.apply("fsrt"), Ok(true));
+        assert_eq!((o.arith, o.codepage, o.trunc, o.fastsrt), (Arith::Extend, 1047, Trunc::Bin, true));
+        assert_eq!(o.apply("NOFASTSRT"), Ok(true));
+        assert!(!o.fastsrt);
     }
 
     #[test]
@@ -187,6 +215,8 @@ mod tests {
         let mut o = Options::default();
         o.apply_flag("-silent").unwrap();
         assert_eq!(o.trunc_check, TruncCheck::Silent);
+        o.apply_flag("-strict-sort-keys").unwrap();
+        assert_eq!(o.sort_keys, SortKeys::Strict);
         assert!(o.apply_flag("-quiet").is_err());
     }
 }

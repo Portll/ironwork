@@ -648,6 +648,7 @@ const FRAGMENTS: &[&str] = &[
     "CLASS X IS \"java.lang.Object\" ", "JNIENVPTR", "COPY JNI.",
     "SD ", "SORT ", "MERGE ", "RELEASE ", "RETURN ", "ON ASCENDING KEY ", "DESCENDING ", "WITH DUPLICATES IN ORDER ", "COLLATING SEQUENCE ",
     "INPUT PROCEDURE ", "OUTPUT PROCEDURE IS ", "GIVING ", "END-RETURN", "SORT-RETURN", "ALPHABET A IS STANDARD-1 ", "PROGRAM COLLATING SEQUENCE ",
+    "I-O-CONTROL. SAME RECORD AREA FOR ", "SAME AREA ", "\n       CBL FASTSRT\n",
 ];
 
 fn mutate(base: &str, next: &mut impl FnMut() -> u64) -> String {
@@ -760,7 +761,7 @@ fn mutated_programs_never_panic_the_front_end() {
                 .concat(),
             ),
             file_program(
-                "           SELECT S ASSIGN TO SORTWK1.\n           SELECT F ASSIGN TO FDD.\n           SELECT G ASSIGN TO GDD.\n",
+                "           SELECT S ASSIGN TO SORTWK1.\n           SELECT F ASSIGN TO FDD.\n           SELECT G ASSIGN TO GDD.\n       I-O-CONTROL.\n           SAME RECORD AREA FOR S F.\n",
                 "       SD  S.\n       01  S-REC.\n           05 S-K PIC S9(3) COMP-3.\n           05 S-X PIC X.\n       FD  F.\n       01  F-REC PIC X(3).\n       FD  G.\n       01  G-REC PIC X(3).\n",
                 "       01  T.\n           05 E PIC X OCCURS 3 ASCENDING KEY E.\n",
                 &[
