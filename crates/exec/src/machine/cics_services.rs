@@ -136,13 +136,8 @@ impl<'p> Machine<'p, '_, '_> {
 
     /// FROM's bytes cut to LENGTH (or TEXT and TEXTLENGTH for WRITE OPERATOR).
     pub(super) fn sent_bytes(&mut self, block: &ExecBlock, from: &str, length: &str) -> R<Vec<u8>> {
-        let Some(mut bytes) = self.arg_bytes(block, from)? else {
-            return Err(Abend::ironwork(format!("EXEC CICS {} needs {from}", block.command), block.pos));
-        };
-        if let Some(n) = self.arg_int(block, length)? {
-            bytes.truncate(n.max(0) as usize);
-        }
-        Ok(bytes)
+        self.arg_bytes_cut(block, from, length)?
+            .ok_or_else(|| Abend::ironwork(format!("EXEC CICS {} needs {from}", block.command), block.pos))
     }
 
     fn cics_send_text(&mut self, block: &ExecBlock) -> R<Flow> {
@@ -160,10 +155,7 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     fn queue_name(&mut self, block: &ExecBlock) -> R<String> {
-        let name = match self.arg_text(block, "QUEUE")? {
-            Some(n) => Some(n),
-            None => self.arg_text(block, "QNAME")?,
-        };
+        let name = self.arg_text_any(block, &["QUEUE", "QNAME"])?;
         name.ok_or_else(|| Abend::ironwork(format!("EXEC CICS {} needs QUEUE", block.command), block.pos))
     }
 

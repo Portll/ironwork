@@ -20,6 +20,17 @@ pub enum Format {
     Text,
 }
 
+impl Format {
+    pub fn from_keyword(word: &str) -> Option<Format> {
+        match word.to_ascii_lowercase().as_str() {
+            "text" => Some(Format::Text),
+            "fixed" | "f" => Some(Format::Fixed),
+            "variable" | "v" => Some(Format::Variable),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dd {
     pub path: PathBuf,
@@ -34,12 +45,7 @@ pub struct Dds {
 }
 
 fn dd_value(value: &str) -> Result<Dd, String> {
-    let (path, format) = match value.rsplit_once(':') {
-        Some((p, "text")) => (p, Some(Format::Text)),
-        Some((p, "fixed" | "f" | "F")) => (p, Some(Format::Fixed)),
-        Some((p, "variable" | "v" | "V")) => (p, Some(Format::Variable)),
-        _ => (value, None),
-    };
+    let (path, format) = value.rsplit_once(':').and_then(|(p, word)| Some((p, Some(Format::from_keyword(word)?)))).unwrap_or((value, None));
     if path.is_empty() {
         return Err(format!("DD {value}: no path"));
     }
@@ -365,10 +371,7 @@ impl Keyed {
 
     fn inbound(&self, raw: Vec<u8>, format: Format) -> Vec<u8> {
         let mut record = match format {
-            Format::Text => {
-                let unknown = self.page.encode_char('?').unwrap_or(0x6F);
-                String::from_utf8_lossy(&raw).chars().map(|c| self.page.encode_char(c).unwrap_or(unknown)).collect()
-            }
+            Format::Text => self.page.encode_lossy(&String::from_utf8_lossy(&raw)),
             _ => raw,
         };
         if format != Format::Variable {

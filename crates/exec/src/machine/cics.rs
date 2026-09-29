@@ -149,6 +149,15 @@ impl<'p> Machine<'p, '_, '_> {
         })
     }
 
+    /// An argument's bytes, cut to a length option when that is shorter.
+    pub(super) fn arg_bytes_cut(&mut self, block: &ExecBlock, data: &str, length: &str) -> R<Option<Vec<u8>>> {
+        let Some(mut bytes) = self.arg_bytes(block, data)? else { return Ok(None) };
+        if let Some(n) = self.arg_int(block, length)? {
+            bytes.truncate(n.max(0) as usize);
+        }
+        Ok(Some(bytes))
+    }
+
     pub(super) fn arg_int(&mut self, block: &ExecBlock, name: &str) -> R<Option<i64>> {
         match operand(block, name) {
             Some(op) => Ok(Some(self.integer(&Expr::Operand(op.clone()), block.pos)?)),
@@ -162,6 +171,16 @@ impl<'p> Machine<'p, '_, '_> {
             return Ok(Some(t.trim().trim_matches(|c| c == '\'' || c == '"').to_owned()));
         }
         Ok(self.arg_bytes(block, name)?.map(|b| self.page.decode(&b).trim_end().to_owned()))
+    }
+
+    /// The first of several alternative options (FILE or DATASET) that is given, as `arg_text`.
+    pub(super) fn arg_text_any(&mut self, block: &ExecBlock, names: &[&str]) -> R<Option<String>> {
+        for name in names {
+            if let Some(text) = self.arg_text(block, name)? {
+                return Ok(Some(text));
+            }
+        }
+        Ok(None)
     }
 
     /// MOVEs bytes into the data item an option names, as INTO and the like receive them.
@@ -320,11 +339,7 @@ impl<'p> Machine<'p, '_, '_> {
 
     /// COMMAREA's bytes, cut to LENGTH when LENGTH is shorter.
     fn commarea(&mut self, block: &ExecBlock) -> R<Option<Vec<u8>>> {
-        let Some(mut bytes) = self.arg_bytes(block, "COMMAREA")? else { return Ok(None) };
-        if let Some(n) = self.arg_int(block, "LENGTH")? {
-            bytes.truncate(n.max(0) as usize);
-        }
-        Ok(Some(bytes))
+        self.arg_bytes_cut(block, "COMMAREA", "LENGTH")
     }
 
     /// RETURN ends this program. At the task's top level TRANSID and COMMAREA name the next task

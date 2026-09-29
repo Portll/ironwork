@@ -4,6 +4,15 @@
 
 use zarch::ebcdic::CodePage;
 
+/// The task's terminal: SEND writes a 3270 data stream to it, and RECEIVE reads the stream the
+/// operator's next AID key sends back.
+pub trait Terminal: std::fmt::Debug {
+    fn size(&self) -> (usize, usize);
+    fn send(&mut self, stream: &[u8]) -> Result<(), String>;
+    /// None when the operator has nothing more to send.
+    fn receive(&mut self) -> Result<Option<Vec<u8>>, String>;
+}
+
 pub const WRITE: u8 = 0xF1;
 pub const ERASE_WRITE: u8 = 0xF5;
 pub const ERASE_WRITE_ALTERNATE: u8 = 0x7E;
@@ -431,7 +440,7 @@ impl Scripted {
     }
 }
 
-impl crate::cics::Terminal for Scripted {
+impl Terminal for Scripted {
     fn size(&self) -> (usize, usize) {
         (self.screen.rows, self.screen.columns)
     }
@@ -446,7 +455,7 @@ impl crate::cics::Terminal for Scripted {
         while let Some(action) = self.actions.pop_front() {
             match action {
                 Action::Type { row, column, text } => {
-                    let bytes: Vec<u8> = text.chars().map(|c| self.page.encode_char(c).unwrap_or(0x6F)).collect();
+                    let bytes = self.page.encode_lossy(&text);
                     self.screen.type_at(self.screen.address(row, column), &bytes)?;
                 }
                 Action::EraseEof { row, column } => self.screen.erase_eof(self.screen.address(row, column))?,
@@ -464,6 +473,22 @@ mod tests {
 
     fn page() -> &'static CodePage {
         CodePage::by_ccsid(37).unwrap()
+    }
+
+    #[test]
+    fn aid_bytes_match_the_dfhaid_copybook() {
+        let copybook = syntax::system::member("DFHAID").unwrap();
+        let dfh = |name: &str| -> u8 {
+            let line = copybook.lines().find(|l| l.split_whitespace().nth(1) == Some(name)).unwrap();
+            let hex = line.split("X'").nth(1).unwrap().split('\'').next().unwrap();
+            u8::from_str_radix(hex, 16).unwrap()
+        };
+        for (name, aid) in [("DFHENTER", AID_ENTER), ("DFHCLEAR", AID_CLEAR), ("DFHPA1", AID_PA1), ("DFHPA2", AID_PA2), ("DFHPA3", AID_PA3)] {
+            assert_eq!(dfh(name), aid, "{name}");
+        }
+        for n in 1..=24 {
+            assert_eq!(aid_of(&format!("PF{n}")), Some(dfh(&format!("DFHPF{n}"))), "PF{n}");
+        }
     }
 
     #[test]

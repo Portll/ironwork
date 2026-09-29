@@ -4,6 +4,7 @@
 
 use crate::files::{Dd, Format, KeySpan, Keying};
 use crate::unit;
+pub use crate::terminal::Terminal;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -41,8 +42,8 @@ impl FileDef {
     }
 }
 
-/// Parses `NAME=path,KSDS,key=OFFSET:LENGTH,len=RECLEN[,text|,variable]` or
-/// `NAME=path,RRDS,len=RECLEN[,text|,variable]`.
+/// Parses `NAME=path,KSDS,key=OFFSET:LENGTH,len=RECLEN[,text|,fixed|,variable]` or
+/// `NAME=path,RRDS,len=RECLEN[,text|,fixed|,variable]`.
 pub fn parse_file(spec: &str) -> Result<(String, FileDef), String> {
     let parts: Vec<&str> = spec.split(',').collect();
     if parts.len() < 3 {
@@ -73,10 +74,8 @@ pub fn parse_file(spec: &str) -> Result<(String, FileDef), String> {
                 val.parse()
                     .map_err(|_| format!("{spec}: bad record length {val}"))?,
             );
-        } else if part.eq_ignore_ascii_case("text") {
-            format = Some(Format::Text);
-        } else if part.eq_ignore_ascii_case("variable") {
-            format = Some(Format::Variable);
+        } else if let Some(f) = Format::from_keyword(part) {
+            format = Some(f);
         } else {
             return Err(format!("{spec}: unknown field {part}"));
         }
@@ -101,15 +100,6 @@ pub fn parse_file(spec: &str) -> Result<(String, FileDef), String> {
 pub struct TsQueue {
     pub items: Vec<Vec<u8>>,
     pub next: usize,
-}
-
-/// The task's terminal: SEND writes a 3270 data stream to it, and RECEIVE reads the stream the
-/// operator's next AID key sends back.
-pub trait Terminal: std::fmt::Debug {
-    fn size(&self) -> (usize, usize);
-    fn send(&mut self, stream: &[u8]) -> Result<(), String>;
-    /// None when the operator has nothing more to send.
-    fn receive(&mut self) -> Result<Option<Vec<u8>>, String>;
 }
 
 /// A browse's position: the key it is at, and whether the record there is itself next (after

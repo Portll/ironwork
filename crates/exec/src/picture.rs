@@ -31,6 +31,21 @@ pub enum Sym {
     Char,
 }
 
+impl Sym {
+    pub fn is_digit(&self) -> bool {
+        matches!(self, Sym::Nine | Sym::Z | Sym::Star | Sym::Float(_))
+    }
+
+    /// Character positions the symbol occupies in the edited item.
+    pub fn width(&self) -> usize {
+        match self {
+            Sym::Implied => 0,
+            Sym::Cr | Sym::Db => 2,
+            _ => 1,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Picture {
     pub category: Category,
@@ -146,17 +161,12 @@ fn edited(text: &str, runs: &[(char, u64)]) -> Result<Picture, String> {
     if points > 1 {
         return bad("more than one decimal point");
     }
-    let is_digit = |s: &Sym| matches!(s, Sym::Nine | Sym::Z | Sym::Star | Sym::Float(_));
-    let digits = syms.iter().filter(|s| is_digit(s)).count() as u32;
-    let scale = syms.iter().skip_while(|s| !matches!(s, Sym::Point | Sym::Implied)).filter(|s| is_digit(s)).count() as u32;
+    let digits = syms.iter().filter(|s| s.is_digit()).count() as u32;
+    let scale = syms.iter().skip_while(|s| !matches!(s, Sym::Point | Sym::Implied)).filter(|s| s.is_digit()).count() as u32;
     if digits == 0 || digits > 31 {
         return bad("a numeric-edited PICTURE needs 1 to 31 digit positions");
     }
-    let size = syms.iter().map(|s| match s {
-        Sym::Implied => 0,
-        Sym::Cr | Sym::Db => 2,
-        _ => 1,
-    }).sum();
+    let size = syms.iter().map(|s| s.width() as u32).sum();
     Ok(Picture { category: Category::NumericEdited, size, digits, scale, signed: false, edit: Some(syms) })
 }
 

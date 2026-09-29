@@ -15,6 +15,9 @@ fn find(keyed: &Keyed, key: &[u8], generic: bool, gteq: bool) -> Option<(Vec<u8>
     (matches || gteq).then_some((k, r))
 }
 
+/// A keyed store's insert or replace.
+type Put = fn(&mut Keyed, Vec<u8>, Vec<u8>) -> Result<bool, &'static str>;
+
 /// The CICS condition a keyed store's failure raises.
 fn condition_of(status: &str) -> &'static str {
     match status {
@@ -26,10 +29,7 @@ fn condition_of(status: &str) -> &'static str {
 
 impl<'p> Machine<'p, '_, '_> {
     pub(super) fn cics_file(&mut self, block: &'p ExecBlock) -> R<Flow> {
-        let named = match self.arg_text(block, "FILE")? {
-            Some(f) => Some(f),
-            None => self.arg_text(block, "DATASET")?,
-        };
+        let named = self.arg_text_any(block, &["FILE", "DATASET"])?;
         let Some(file) = named.map(|f| f.to_ascii_uppercase()) else {
             return Err(Abend::ironwork(format!("EXEC CICS {} needs FILE", block.command), block.pos));
         };
@@ -136,15 +136,20 @@ impl<'p> Machine<'p, '_, '_> {
         self.deliver_record(block, &record)
     }
 
-    /// WRITE adds a record at RIDFLD. For a KSDS the record's own key must be RIDFLD's.
-    fn file_write(&mut self, block: &ExecBlock, file: &str) -> R<Flow> {
-        self.eib_bytes(EIBFN, &[0x06, 0x04]);
-        let record = self.sent_bytes(block, "FROM", "LENGTH")?;
+    /// Stores `record` under the key `key_of` yields, by `put`; for a KSDS the record's own key must match it.
+    fn store_record(
+        &mut self,
+        block: &ExecBlock,
+        file: &str,
+        record: Vec<u8>,
+        key_of: impl FnOnce(&mut Self, &Keyed) -> R<Vec<u8>>,
+        put: Put,
+    ) -> R<Flow> {
         let outcome = self.on_file(file, |m, keyed| {
-            let (key, _) = m.ridfld(block, &keyed.keying)?;
+            let key = key_of(m, keyed)?;
             Ok(match keyed.prime_key(&record) {
                 Some(own) if own != key => Err("INVREQ"),
-                _ => keyed.insert(key, record).map(|_| ()).map_err(condition_of),
+                _ => put(keyed, key, record).map(|_| ()).map_err(condition_of),
             })
         })?;
         match outcome {
@@ -153,20 +158,18 @@ impl<'p> Machine<'p, '_, '_> {
         }
     }
 
+    /// WRITE adds a record at RIDFLD. For a KSDS the record's own key must be RIDFLD's.
+    fn file_write(&mut self, block: &ExecBlock, file: &str) -> R<Flow> {
+        self.eib_bytes(EIBFN, &[0x06, 0x04]);
+        let record = self.sent_bytes(block, "FROM", "LENGTH")?;
+        self.store_record(block, file, record, |m, keyed| Ok(m.ridfld(block, &keyed.keying)?.0), Keyed::insert)
+    }
+
     /// REWRITE replaces the record a READ UPDATE holds; its key may not change.
     fn file_rewrite(&mut self, block: &ExecBlock, file: &str) -> R<Flow> {
         let Some(key) = self.release_hold(file) else { return self.raise(block, "INVREQ", 0) };
         let record = self.sent_bytes(block, "FROM", "LENGTH")?;
-        let outcome = self.on_file(file, |_, keyed| {
-            Ok(match keyed.prime_key(&record) {
-                Some(own) if own != key => Err("INVREQ"),
-                _ => keyed.replace(key, record).map(|_| ()).map_err(condition_of),
-            })
-        })?;
-        match outcome {
-            Err(c) | Ok(Err(c)) => self.raise(block, c, 0),
-            Ok(Ok(())) => self.cics_ok(block),
-        }
+        self.store_record(block, file, record, |_, _| Ok(key), Keyed::replace)
     }
 
     /// DELETE removes the record at RIDFLD (every record starting with it, when GENERIC, counted

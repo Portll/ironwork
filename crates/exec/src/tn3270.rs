@@ -1,7 +1,7 @@
 //! A `Terminal` over a TCP connection speaking TN3270 (RFC 1576): telnet negotiation of the
 //! terminal type, EOR and BINARY, then 3270 data streams as records ended by IAC EOR.
 
-use crate::cics::Terminal;
+use crate::terminal::Terminal;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io::{Read, Write};

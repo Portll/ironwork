@@ -3,19 +3,11 @@
 
 use crate::picture::Sym;
 
-fn is_digit(s: &Sym) -> bool {
-    matches!(s, Sym::Nine | Sym::Z | Sym::Star | Sym::Float(_))
-}
-
 /// The characters a numeric-edited item holds for a value. `magnitude` is already aligned to the
 /// PICTURE's decimal places and within its digit positions.
 pub fn numeric(syms: &[Sym], digits: u32, negative: bool, magnitude: u128, blank_when_zero: bool) -> String {
-    let size: usize = syms.iter().map(|s| match s {
-        Sym::Implied => 0,
-        Sym::Cr | Sym::Db => 2,
-        _ => 1,
-    }).sum();
-    let digit_syms: Vec<&Sym> = syms.iter().filter(|s| is_digit(s)).collect();
+    let size: usize = syms.iter().map(Sym::width).sum();
+    let digit_syms: Vec<&Sym> = syms.iter().filter(|s| s.is_digit()).collect();
     if magnitude == 0 && (blank_when_zero || digit_syms.iter().all(|s| matches!(s, Sym::Z | Sym::Float(_)))) {
         return " ".repeat(size);
     }
@@ -118,7 +110,7 @@ pub fn de_edit(syms: &[Sym], text: &str) -> (bool, u128) {
                 at += 2;
                 continue;
             }
-            _ if is_digit(s) => magnitude = magnitude * 10 + c.to_digit(10).unwrap_or(0) as u128,
+            _ if s.is_digit() => magnitude = magnitude * 10 + c.to_digit(10).unwrap_or(0) as u128,
             Sym::Sign(_) | Sym::FloatLead(_) | Sym::Float(_) => negative |= c == '-',
             _ => {}
         }

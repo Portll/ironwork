@@ -57,6 +57,12 @@ impl CodePage {
         text.chars().map(|ch| self.encode_char(ch).ok_or(Unmappable { ch, ccsid: self.ccsid })).collect()
     }
 
+    /// Encodes `text`, substituting the page's `?` for characters it cannot map.
+    pub fn encode_lossy(&self, text: &str) -> Vec<u8> {
+        let unknown = self.encode_char('?').unwrap_or(0x6F);
+        text.chars().map(|ch| self.encode_char(ch).unwrap_or(unknown)).collect()
+    }
+
     /// What `FUNCTION NATIONAL-OF` yields for these bytes: UTF-16 big-endian.
     pub fn to_utf16be(&self, bytes: &[u8]) -> Vec<u8> {
         let mut out = Vec::with_capacity(bytes.len() * 2);
@@ -109,6 +115,12 @@ mod tests {
                 assert_eq!(page.encode_char(ch), Some(b), "CCSID {} byte {b:02X}", page.ccsid);
             }
         }
+    }
+
+    #[test]
+    fn encode_lossy_substitutes_question_mark() {
+        let page = CodePage::by_ccsid(37).unwrap();
+        assert_eq!(page.encode_lossy("A\u{1F600}"), [0xC1, 0x6F]);
     }
 
     #[test]
