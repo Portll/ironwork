@@ -325,7 +325,7 @@ impl Operands<'_> {
         if let Some(list) = self.words("DSATTS") {
             let mut out: Vec<String> = Vec::new();
             for a in list {
-                if !EXTENDED.contains(&a.as_str()) {
+                if !EXTENDED.iter().any(|(name, _, _)| *name == a) {
                     return Err(fail(self.line, format!("DSATTS={a} is not an extended attribute")));
                 }
                 if !out.contains(&a) {
@@ -336,14 +336,13 @@ impl Operands<'_> {
         }
         Ok(match self.word("EXTATT")?.as_deref() {
             None => None,
-            Some("YES") => Some(["COLOR", "HILIGHT", "PS", "VALIDN"].map(String::from).to_vec()),
+            Some("YES") => Some(EXTENDED.iter().filter(|(_, _, implied)| *implied).map(|(a, _, _)| a.to_string()).collect()),
             Some("NO" | "MAPONLY") => Some(Vec::new()),
             Some(other) => return Err(fail(self.line, format!("EXTATT={other}: NO, MAPONLY or YES"))),
         })
     }
 }
 
-const EXTENDED: &[&str] = &["COLOR", "HILIGHT", "OUTLINE", "PS", "SOSI", "TRANSP", "VALIDN"];
 const MAX_NAME: usize = 30;
 
 struct OpenSet {
@@ -583,7 +582,16 @@ fn position(ops: &Operands, map: &Map) ->Result<(u16, u16), Error> {
     Ok(((offset / columns + 1) as u16, (offset % columns + 1) as u16))
 }
 
-const SUFFIX: &[(&str, char)] = &[("COLOR", 'C'), ("PS", 'P'), ("HILIGHT", 'H'), ("VALIDN", 'V'), ("OUTLINE", 'U'), ("SOSI", 'M'), ("TRANSP", 'T')];
+/// The extended attributes in symbolic-map order: name, field-name suffix, and whether EXTATT=YES implies it.
+const EXTENDED: &[(&str, char, bool)] = &[
+    ("COLOR", 'C', true),
+    ("PS", 'P', true),
+    ("HILIGHT", 'H', true),
+    ("VALIDN", 'V', true),
+    ("OUTLINE", 'U', false),
+    ("SOSI", 'M', false),
+    ("TRANSP", 'T', false),
+];
 
 /// The COBOL a program COPYs for the mapset: each map's input and output structures.
 /// Where one occurrence of a named field lies in a map's symbolic structure: the offsets of its L
@@ -612,7 +620,7 @@ impl Slot {
 
 /// The DSATTS attributes a map's symbolic structure carries, in their order.
 pub fn extended_attributes(map: &Map) -> Vec<&'static str> {
-    SUFFIX.iter().filter(|(a, _)| map.dsatts.iter().any(|d| d == a)).map(|(a, _)| *a).collect()
+    EXTENDED.iter().filter(|(a, _, _)| map.dsatts.iter().any(|d| d == a)).map(|(a, _, _)| *a).collect()
 }
 
 /// Every named field's slots, in structure order, sized for the input side (PICIN) or the output
@@ -722,7 +730,7 @@ fn input_items(out: &mut String, map: &Map, f: &Field, level: usize, lead: bool)
         entry(out, level, &format!("{n}F"), "PICTURE X");
         entry(out, level, "FILLER", &format!("REDEFINES {n}F"));
         entry(out, level + 1, &format!("{n}A"), "PICTURE X");
-        let k = SUFFIX.iter().filter(|(a, _)| map.dsatts.iter().any(|d| d == a)).count();
+        let k = extended_attributes(map).len();
         if k > 0 {
             entry(out, level, "FILLER", &format!("PICTURE X({k})"));
         }
@@ -740,7 +748,7 @@ fn output_items(out: &mut String, map: &Map, f: &Field, level: usize, lead: bool
             entry(out, level, "FILLER", "PICTURE X(2)");
             entry(out, level, &format!("{n}A"), "PICTURE X");
         }
-        for (a, s) in SUFFIX {
+        for (a, s, _) in EXTENDED {
             if map.dsatts.iter().any(|d| d == a) {
                 entry(out, level, &format!("{n}{s}"), "PICTURE X");
             }
