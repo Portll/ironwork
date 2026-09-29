@@ -524,6 +524,10 @@ fn bodies(s: &Stmt) -> Vec<&[Stmt]> {
         Stmt::String(st) => vec![opt(&st.on_overflow), opt(&st.not_on_overflow)],
         Stmt::Unstring(u) => vec![opt(&u.on_overflow), opt(&u.not_on_overflow)],
         Stmt::Search(se) => se.whens.iter().map(|(_, b)| b.as_slice()).chain([opt(&se.at_end)]).collect(),
+        Stmt::Sorting(so) => match &**so {
+            Sorting::Return { at_end, .. } => handlers(at_end).to_vec(),
+            _ => Vec::new(),
+        },
         _ => Vec::new(),
     }
 }
@@ -595,6 +599,11 @@ impl Rules<'_> {
             Stmt::ExitMethod { pos } if !self.method => self.errors.push(Error::at(*pos, "EXIT METHOD can be used only in a method")),
             Stmt::ExitProgram { pos } if self.method => self.errors.push(Error::at(*pos, "EXIT PROGRAM cannot be used in a method: use EXIT METHOD or GOBACK")),
             Stmt::Invoke(_) => self.uses_oo = true,
+            Stmt::Sorting(so) => match &**so {
+                Sorting::Release { from: Some(op), pos, .. } => self.plain(op, *pos),
+                Sorting::Return { into: Some(r), pos, .. } => self.receiver(r, *pos),
+                _ => {}
+            },
             _ => {}
         }
     }

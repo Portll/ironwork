@@ -11,6 +11,7 @@ pub mod machine;
 pub mod oo;
 pub mod picture;
 pub mod report;
+mod sort;
 pub mod sql;
 pub mod strings;
 pub mod terminal;
@@ -39,10 +40,11 @@ const FUNCTIONS: &[&str] = &[
 ];
 
 /// Checks and lays out a parsed program. `flags` are this compiler's own, such as `-silent`.
-pub fn compile(mut program: Program, flags: &[String]) -> Result<Compiled, Vec<Error>> {
+pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error>> {
     if program.oo.as_ref().is_some_and(|o| o.class().is_some()) {
         return oo::compile_class_definition(program, flags);
     }
+    let mut program = sort::with_special_registers(program);
     let mut errors = Vec::new();
     let drafts = report::prepare(&mut program, &mut errors);
     let mut options = Options::default();
@@ -461,6 +463,7 @@ impl Check<'_> {
             Stmt::Exec(block) => self.exec_block(block),
             Stmt::Report(r) => report::check_statement(self.program, r, self.errors),
             Stmt::Invoke(i) => self.invoke(i),
+            Stmt::Sorting(s) => self.sorting(s),
             Stmt::Goback { .. } | Stmt::StopRun { .. } | Stmt::ExitProgram { .. } | Stmt::ExitMethod { .. } | Stmt::Continue | Stmt::Exit(_) | Stmt::NextSentence | Stmt::SentenceEnd => {}
         }
     }

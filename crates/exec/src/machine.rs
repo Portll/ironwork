@@ -26,6 +26,7 @@ mod file_io;
 mod le_services;
 mod oo;
 mod report;
+mod sort;
 mod sql;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -110,6 +111,8 @@ pub struct Machine<'p, 'u, 'w> {
     report_writer: &'p crate::report::Writer,
     /// The method this activation runs, if it is one: its class and SELF.
     oo: oo::Frame,
+    /// The SORT or MERGE whose input or output procedure is running.
+    sort: Option<sort::Active>,
     unit: &'u mut RunUnit<'w>,
 }
 
@@ -220,6 +223,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             cics_handlers: cics::Handlers::default(),
             report_writer: &compiled.report_writer,
             oo: oo::Frame::default(),
+            sort: None,
             unit,
         };
         if compiled.layout.local_size > 0 {
@@ -397,6 +401,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Stmt::Unstring(u) => return self.unstring(u),
             Stmt::Inspect(i) => self.inspect(i)?,
             Stmt::Search(se) => return self.search(se),
+            Stmt::Sorting(s) => return self.sorting(s),
             Stmt::NextSentence => return Ok(Flow::NextSentence),
             Stmt::Exec(block) if block.declarative() => {}
             Stmt::Exec(block) if block.kind == ExecKind::Cics => return self.cics(block),

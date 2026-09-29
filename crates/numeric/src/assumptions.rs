@@ -100,6 +100,14 @@ pub const CLASS_SEARCH: &str = "J11";
 pub const INVOKE_KEEPS_RETURN_CODE: &str = "J12";
 pub const OO_OPTIONS_NOT_REQUIRED: &str = "J13";
 pub const CHAR_FROM_DISPLAY: &str = "J14";
+pub const SORT_EQUAL_KEYS_IN_ORDER: &str = "S1";
+pub const MERGE_EQUAL_KEYS_BY_FILE: &str = "S2";
+pub const MERGE_OUT_OF_SEQUENCE_FAILS: &str = "S3";
+pub const SORT_FILE_FAILURE: &str = "S4";
+pub const SORT_NUMERIC_KEYS: &str = "S5";
+pub const SORT_RECORD_LENGTHS: &str = "S6";
+pub const SORT_RETURN_STOPS: &str = "S7";
+pub const RETURN_AFTER_END: &str = "S8";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -555,6 +563,54 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: CHAR_FROM_DISPLAY,
         claim: "A one-byte reference modification of a display item passed to INVOKE becomes a Java char through the program's code page",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SORT_EQUAL_KEYS_IN_ORDER,
+        claim: "Records with equal keys leave a SORT in the order they entered it whether or not WITH DUPLICATES IN ORDER is written, as under DFSORT's EQUALS; a table SORT keeps equal elements in their order too",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: MERGE_EQUAL_KEYS_BY_FILE,
+        claim: "Records with equal keys leave a MERGE in the order of the USING files, and each file's in its own order",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: MERGE_OUT_OF_SEQUENCE_FAILS,
+        claim: "A MERGE input file whose records are out of the merge order makes the MERGE fail with SORT-RETURN 16 before any record is output, as DFSORT's ICE068A ends a merge",
+        basis: Basis::Recalled,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SORT_FILE_FAILURE,
+        claim: "An I/O failure on a USING or GIVING file with a FILE STATUS sets the status and makes the SORT or MERGE fail with SORT-RETURN 16, leaving the rest undone; without a FILE STATUS it ends the run as the same failure on OPEN, READ, WRITE or CLOSE does",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SORT_NUMERIC_KEYS,
+        claim: "A numeric sort key compares by the value the program reads from it, a binary key at its full width as DFSORT's BI and FI formats compare it; a zoned or packed key that is not a valid number is a data exception (S0C7)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SORT_RECORD_LENGTHS,
+        claim: "A record shorter than a fixed-length SD or GIVING record is padded with spaces and a longer one cut to that length; a variable-length record that ends inside a key makes the SORT or MERGE fail with SORT-RETURN 16, as DFSORT does without VLSHRT",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SORT_RETURN_STOPS,
+        claim: "SORT-RETURN is 0 when a SORT or MERGE starts; 16 moved to it in an input or output procedure stops the operation at the next RELEASE or RETURN, which does nothing, or when the input procedure ends",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: RETURN_AFTER_END,
+        claim: "A RETURN after the AT END condition takes the AT END phrase again",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

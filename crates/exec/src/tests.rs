@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 
 mod oo;
 mod report;
+mod sort;
 
 fn program(options: &str, data: &str, procedure: &str) -> String {
     let card = if options.is_empty() { String::new() } else { format!("       CBL {options}\n") };
@@ -645,6 +646,8 @@ const FRAGMENTS: &[&str] = &[
     "ON EXCEPTION ", "EXIT METHOD", "END METHOD \"m\".", "METHOD-ID. \"m\".", "\n       IDENTIFICATION DIVISION.\n       METHOD-ID. \"m\".\n",
     "\n       IDENTIFICATION DIVISION.\n       OBJECT.\n", "END OBJECT.", "END FACTORY.", "END CLASS ", "CLASS-ID. ", "INHERITS ", "REPOSITORY. ",
     "CLASS X IS \"java.lang.Object\" ", "JNIENVPTR", "COPY JNI.",
+    "SD ", "SORT ", "MERGE ", "RELEASE ", "RETURN ", "ON ASCENDING KEY ", "DESCENDING ", "WITH DUPLICATES IN ORDER ", "COLLATING SEQUENCE ",
+    "INPUT PROCEDURE ", "OUTPUT PROCEDURE IS ", "GIVING ", "END-RETURN", "SORT-RETURN", "ALPHABET A IS STANDARD-1 ", "PROGRAM COLLATING SEQUENCE ",
 ];
 
 fn mutate(base: &str, next: &mut impl FnMut() -> u64) -> String {
@@ -753,6 +756,25 @@ fn mutated_programs_never_panic_the_front_end() {
                     &line("OPEN OUTPUT P INITIATE R GENERATE D"),
                     &line("GENERATE R TERMINATE R CLOSE P"),
                     &line("GOBACK."),
+                ]
+                .concat(),
+            ),
+            file_program(
+                "           SELECT S ASSIGN TO SORTWK1.\n           SELECT F ASSIGN TO FDD.\n           SELECT G ASSIGN TO GDD.\n",
+                "       SD  S.\n       01  S-REC.\n           05 S-K PIC S9(3) COMP-3.\n           05 S-X PIC X.\n       FD  F.\n       01  F-REC PIC X(3).\n       FD  G.\n       01  G-REC PIC X(3).\n",
+                "       01  T.\n           05 E PIC X OCCURS 3 ASCENDING KEY E.\n",
+                &[
+                    line("SORT S ON ASCENDING KEY S-K DESCENDING S-X"),
+                    line("    WITH DUPLICATES IN ORDER"),
+                    line("    INPUT PROCEDURE P-IN OUTPUT PROCEDURE P-OUT"),
+                    line("MERGE S ON DESCENDING KEY S-X USING F G GIVING F"),
+                    line("SORT E"),
+                    line("IF SORT-RETURN NOT = 0 DISPLAY 'FAILED' END-IF."),
+                    "       P-IN.\n".into(),
+                    line("RELEASE S-REC FROM F-REC."),
+                    "       P-OUT.\n".into(),
+                    line("RETURN S INTO G-REC AT END CONTINUE"),
+                    line("    NOT AT END CONTINUE END-RETURN."),
                 ]
                 .concat(),
             ),

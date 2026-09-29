@@ -28,7 +28,7 @@ impl<'p> Machine<'p, '_, '_> {
         self.program.files.iter().position(|f| f.name == name).ok_or_else(|| Abend::ironwork(format!("no file named {name}"), pos))
     }
 
-    fn set_status(&mut self, k: usize, code: &str, pos: Pos) -> R<()> {
+    pub(super) fn set_status(&mut self, k: usize, code: &str, pos: Pos) -> R<()> {
         if let Some(r) = &self.program.files[k].status {
             let loc = self.locate(r)?;
             let bytes = self.page.encode(code).map_err(|e| Abend::ironwork(e.to_string(), pos))?;
@@ -38,7 +38,7 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     /// Records an I/O status; with no FILE STATUS to hold it, a failing status ends the run.
-    fn io_status(&mut self, k: usize, code: &str, message: String, pos: Pos) -> R<()> {
+    pub(super) fn io_status(&mut self, k: usize, code: &str, message: String, pos: Pos) -> R<()> {
         self.set_status(k, code, pos)?;
         if self.program.files[k].status.is_none() && !code.starts_with('0') {
             return Err(Abend { code: format!("IO-{code}"), message, pos });
@@ -363,6 +363,11 @@ impl<'p> Machine<'p, '_, '_> {
 
     pub(super) fn write_stmt(&mut self, record: &Ref, from: Option<&Operand>, advancing: Option<&Advancing>, invalid: &'p Handlers, pos: Pos) -> R<Flow> {
         let (k, loc) = self.record_of(record, from, "WRITE", pos)?;
+        self.write_record(k, loc, advancing, invalid, pos)
+    }
+
+    /// WRITE of the record at `loc` to file k.
+    pub(super) fn write_record(&mut self, k: usize, loc: Loc, advancing: Option<&Advancing>, invalid: &'p Handlers, pos: Pos) -> R<Flow> {
         if !self.is_held(k) {
             self.write_stream(k, loc, advancing, pos)?;
             return Ok(Flow::Next);

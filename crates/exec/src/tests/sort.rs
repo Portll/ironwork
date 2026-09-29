@@ -1,0 +1,397 @@
+use super::*;
+
+fn text_file(name: &str, lines: &[&str]) -> std::path::PathBuf {
+    let path = temp(name);
+    std::fs::write(&path, lines.iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+    path
+}
+
+fn dd(name: &str, path: &std::path::Path) -> String {
+    format!("{name}={}:text", path.display())
+}
+
+fn compile_errors(source: &str) -> String {
+    let parsed = syntax::parse(source).unwrap_or_else(|e| panic!("{e}"));
+    compile(parsed, &[]).err().map(|e| e.iter().map(|e| e.message.clone()).collect::<Vec<_>>().join("\n")).unwrap_or_default()
+}
+
+const SELECT_SD: &str = "           SELECT S-FILE ASSIGN TO SORTWK1.\n";
+
+#[test]
+fn sort_using_two_files_giving_one_by_mixed_keys() {
+    let (a, b, out) = (text_file("sort-a.txt", &["D1050X", "D2010Y", "D1200Z"]), text_file("sort-b.txt", &["D2300W", "D1050V"]), temp("sort-out.txt"));
+    let source = file_program(
+        &[SELECT_SD, "           SELECT IN-A ASSIGN TO ADD FILE STATUS FS-A.\n", "           SELECT IN-B ASSIGN TO BDD.\n", "           SELECT OUT-F ASSIGN TO ODD.\n"].concat(),
+        concat!(
+            "       SD  S-FILE.\n       01  S-REC.\n           05 S-DEPT PIC X(2).\n           05 S-AMT PIC 9(3).\n           05 S-TAG PIC X.\n",
+            "       FD  IN-A.\n       01  A-REC PIC X(6).\n       FD  IN-B.\n       01  B-REC PIC X(6).\n       FD  OUT-F.\n       01  O-REC PIC X(6).\n",
+        ),
+        "       01  FS-A PIC XX.\n       01  RC PIC 99.\n",
+        &[
+            line("SORT S-FILE ON ASCENDING KEY S-DEPT DESCENDING KEY S-AMT"),
+            line("    USING IN-A IN-B GIVING OUT-F"),
+            line("MOVE SORT-RETURN TO RC"),
+            line("DISPLAY RC ' ' FS-A"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    );
+    let (stdout, err, ending) = run_files(&source, &[dd("ADD", &a), dd("BDD", &b), dd("ODD", &out)]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(stdout, "00 00\n");
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), "D1200Z\nD1050X\nD1050V\nD2300W\nD2010Y\n");
+}
+
+#[test]
+fn input_and_output_procedures_with_packed_and_binary_keys() {
+    let source = file_program(
+        SELECT_SD,
+        "       SD  S-FILE.\n       01  S-REC.\n           05 S-P PIC S9(3) COMP-3.\n           05 S-B PIC S9(4) COMP.\n           05 S-T PIC X.\n",
+        "       01  DONE PIC X VALUE 'N'.\n       01  E-P PIC ---9.\n       01  E-B PIC ----9.\n       01  W PIC X(5).\n",
+        &[
+            "       MAIN-LINE.\n",
+            &line("SORT S-FILE ASCENDING S-P DESCENDING S-B"),
+            &line("    WITH DUPLICATES IN ORDER"),
+            &line("    INPUT PROCEDURE IS FEED OUTPUT PROCEDURE SHOW-ALL"),
+            &line("DISPLAY 'AFTER ' SORT-RETURN"),
+            &line("GOBACK."),
+            "       FEED.\n",
+            &line("MOVE -5 TO S-P MOVE 10 TO S-B MOVE 'A' TO S-T RELEASE S-REC"),
+            &line("MOVE 3 TO S-P MOVE -2 TO S-B MOVE 'B' TO S-T RELEASE S-REC"),
+            &line("MOVE -5 TO S-P MOVE 300 TO S-B MOVE 'C' TO S-T RELEASE S-REC"),
+            &line("MOVE -100 TO S-P MOVE 0 TO S-B MOVE 'D' TO S-T RELEASE S-REC"),
+            &line("MOVE 3 TO S-P MOVE -2 TO S-B MOVE 'E' TO S-T RELEASE S-REC"),
+            &line("MOVE 0 TO S-P MOVE -7 TO S-B MOVE 'F' TO S-T RELEASE S-REC"),
+            &line("MOVE 'G' TO S-T MOVE -5 TO S-P MOVE 10 TO S-B"),
+            &line("MOVE S-REC TO W MOVE SPACES TO S-REC"),
+            &line("RELEASE S-REC FROM W."),
+            "       SHOW-ALL.\n",
+            &line("PERFORM UNTIL DONE = 'Y'"),
+            &line("    RETURN S-FILE INTO W AT END MOVE 'Y' TO DONE"),
+            &line("    NOT AT END MOVE S-P TO E-P MOVE S-B TO E-B"),
+            &line("        DISPLAY S-T E-P E-B"),
+            &line("    END-RETURN"),
+            &line("END-PERFORM"),
+            &line("RETURN S-FILE AT END DISPLAY 'STILL AT END' END-RETURN."),
+        ]
+        .concat(),
+    );
+    let (out, err, ending) = run_files(&source, &[]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(out, "D-100    0\nC  -5  300\nA  -5   10\nG  -5   10\nF   0   -7\nB   3   -2\nE   3   -2\nSTILL AT END\nAFTER 000{\n");
+}
+
+#[test]
+fn a_go_to_out_of_an_input_procedure_comes_back_through_its_end() {
+    let source = file_program(
+        SELECT_SD,
+        "       SD  S-FILE.\n       01  S-REC PIC X.\n",
+        "       01  DONE PIC X VALUE 'N'.\n",
+        &[
+            "       MAIN-LINE.\n",
+            &line("SORT S-FILE DESCENDING S-REC"),
+            &line("    INPUT PROCEDURE P-IN THRU P-EXIT OUTPUT PROCEDURE P-OUT"),
+            &line("DISPLAY 'END'"),
+            &line("GOBACK."),
+            "       P-IN.\n",
+            &line("MOVE 'A' TO S-REC RELEASE S-REC"),
+            &line("GO TO OUTSIDE."),
+            "       P-EXIT.\n",
+            &line("EXIT."),
+            "       P-OUT.\n",
+            &line("PERFORM UNTIL DONE = 'Y'"),
+            &line("    RETURN S-FILE AT END MOVE 'Y' TO DONE"),
+            &line("    NOT AT END DISPLAY S-REC END-RETURN"),
+            &line("END-PERFORM."),
+            "       OUTSIDE.\n",
+            &line("MOVE 'B' TO S-REC RELEASE S-REC"),
+            &line("GO TO P-EXIT."),
+        ]
+        .concat(),
+    );
+    let (out, err, ending) = run_files(&source, &[]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(out, "B\nA\nEND\n");
+}
+
+#[test]
+fn merge_two_ordered_files_and_refuse_one_out_of_order() {
+    let (a, b, c, out) = (
+        text_file("merge-a.txt", &["A1a", "B1a", "D1a"]),
+        text_file("merge-b.txt", &["B1b", "C1b", "D1b"]),
+        text_file("merge-c.txt", &["B1c", "A1c"]),
+        temp("merge-out.txt"),
+    );
+    let fd = |f: &str| format!("       FD  {f}.\n       01  {f}-REC PIC X(3).\n");
+    let source = file_program(
+        &[SELECT_SD, "           SELECT IN-A ASSIGN TO ADD.\n", "           SELECT IN-B ASSIGN TO BDD.\n", "           SELECT IN-C ASSIGN TO CDD.\n", "           SELECT OUT-F ASSIGN TO ODD.\n"].concat(),
+        &["       SD  S-FILE.\n       01  S-REC.\n           05 S-K PIC X(2).\n           05 S-T PIC X.\n", &fd("IN-A"), &fd("IN-B"), &fd("IN-C"), &fd("OUT-F")].concat(),
+        "       01  RC PIC 99.\n",
+        &[
+            "       MAIN-LINE.\n",
+            &line("MERGE S-FILE ON ASCENDING KEY S-K USING IN-A IN-B"),
+            &line("    GIVING OUT-F"),
+            &line("MOVE SORT-RETURN TO RC"),
+            &line("DISPLAY 'FIRST ' RC"),
+            &line("MERGE S-FILE ON ASCENDING KEY S-K USING IN-A IN-C"),
+            &line("    OUTPUT PROCEDURE SHOW-ONE"),
+            &line("MOVE SORT-RETURN TO RC"),
+            &line("DISPLAY 'SECOND ' RC"),
+            &line("GOBACK."),
+            "       SHOW-ONE.\n",
+            &line("RETURN S-FILE AT END CONTINUE NOT AT END DISPLAY S-REC."),
+        ]
+        .concat(),
+    );
+    let (stdout, err, ending) = run_files(&source, &[dd("ADD", &a), dd("BDD", &b), dd("CDD", &c), dd("ODD", &out)]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(stdout, "FIRST 00\nSECOND 16\n");
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), "A1a\nB1a\nB1b\nC1b\nD1a\nD1b\n");
+    assert!(err.contains("record 2 of IN-C is out of the merge order"), "{err}");
+}
+
+#[test]
+fn sort_return_16_stops_the_sort_and_failures_set_it() {
+    let source = file_program(
+        &[SELECT_SD, "           SELECT OPTIONAL IN-A ASSIGN TO NODD FILE STATUS FS-A.\n", "           SELECT IN-B ASSIGN TO NODD2 FILE STATUS FS-B.\n"].concat(),
+        concat!(
+            "       SD  S-FILE RECORD VARYING FROM 2 TO 6.\n       01  S-SHORT PIC X(2).\n       01  S-LONG.\n           05 S-A PIC X(2).\n           05 S-K PIC X(4).\n",
+            "       FD  IN-A.\n       01  A-REC PIC X(6).\n       FD  IN-B.\n       01  B-REC PIC X(6).\n",
+        ),
+        "       01  FS-A PIC XX.\n       01  FS-B PIC XX.\n       01  RC PIC 99.\n",
+        &[
+            "       MAIN-LINE.\n",
+            &line("SORT S-FILE ON ASCENDING KEY S-K"),
+            &line("    INPUT PROCEDURE FEED-THEN-STOP"),
+            &line("    OUTPUT PROCEDURE NEVER-RUN"),
+            &line("MOVE SORT-RETURN TO RC"),
+            &line("DISPLAY 'STOPPED ' RC"),
+            &line("SORT S-FILE ON ASCENDING KEY S-K INPUT PROCEDURE SHORT-ONE"),
+            &line("    OUTPUT PROCEDURE NEVER-RUN"),
+            &line("MOVE SORT-RETURN TO RC"),
+            &line("DISPLAY 'SHORT ' RC"),
+            &line("SORT S-FILE ON ASCENDING KEY S-K USING IN-A GIVING IN-B"),
+            &line("MOVE SORT-RETURN TO RC"),
+            &line("DISPLAY 'OPTIONAL EMPTY ' RC ' ' FS-A ' ' FS-B"),
+            &line("SORT S-FILE ON ASCENDING KEY S-K USING IN-B GIVING IN-A"),
+            &line("MOVE SORT-RETURN TO RC"),
+            &line("DISPLAY 'NO DD ' RC ' ' FS-B"),
+            &line("GOBACK."),
+            "       FEED-THEN-STOP.\n",
+            &line("MOVE 'AAKKKK' TO S-LONG RELEASE S-LONG"),
+            &line("MOVE 16 TO SORT-RETURN"),
+            &line("DISPLAY 'STOPPING'"),
+            &line("RELEASE S-LONG"),
+            &line("DISPLAY 'NOT REACHED'."),
+            "       SHORT-ONE.\n",
+            &line("RELEASE S-SHORT FROM 'XY'."),
+            "       NEVER-RUN.\n",
+            &line("DISPLAY 'NEVER'."),
+        ]
+        .concat(),
+    );
+    let (out, err, ending) = run_files(&source, &[]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(out, "STOPPING\nSTOPPED 16\nSHORT 16\nOPTIONAL EMPTY 16 00 35\nNO DD 16 35\n");
+    assert!(err.contains("ends inside a key"), "{err}");
+}
+
+#[test]
+fn a_using_file_with_no_dd_and_no_file_status_ends_the_run() {
+    let source = file_program(
+        &[SELECT_SD, "           SELECT IN-A ASSIGN TO NODD.\n           SELECT OUT-F ASSIGN TO NODD2.\n"].concat(),
+        "       SD  S-FILE.\n       01  S-REC PIC X(4).\n       FD  IN-A.\n       01  A-REC PIC X(4).\n       FD  OUT-F.\n       01  O-REC PIC X(4).\n",
+        "",
+        &[line("SORT S-FILE ON ASCENDING KEY S-REC USING IN-A GIVING OUT-F"), line("GOBACK.")].concat(),
+    );
+    let (_, _, ending) = run_files(&source, &[]);
+    assert_eq!(ending.unwrap_err().code, "IO-35");
+}
+
+#[test]
+fn giving_indexed_and_relative_files() {
+    let (input, ksds, rrds) = (text_file("sort-kin.txt", &["C3", "A1", "B2"]), temp("sort-ksds.txt"), temp("sort-rrds.txt"));
+    let _ = (std::fs::remove_file(&ksds), std::fs::remove_file(&rrds));
+    let source = file_program(
+        &[
+            SELECT_SD,
+            "           SELECT IN-F ASSIGN TO IDD.\n",
+            "           SELECT K-F ASSIGN TO KDD ORGANIZATION INDEXED\n               RECORD KEY K-ID.\n",
+            "           SELECT R-F ASSIGN TO RDD ORGANIZATION RELATIVE\n               RELATIVE KEY RK.\n",
+        ]
+        .concat(),
+        concat!(
+            "       SD  S-FILE.\n       01  S-REC PIC X(2).\n       FD  IN-F.\n       01  I-REC PIC X(2).\n",
+            "       FD  K-F.\n       01  K-REC.\n           05 K-ID PIC X.\n           05 FILLER PIC X.\n       FD  R-F.\n       01  R-REC PIC X(2).\n",
+        ),
+        "       01  RK PIC 9(4).\n",
+        &[line("SORT S-FILE ON ASCENDING KEY S-REC USING IN-F GIVING K-F R-F"), line("DISPLAY RK ' ' SORT-RETURN"), line("GOBACK.")].concat(),
+    );
+    let (out, err, ending) = run_files(&source, &[dd("IDD", &input), dd("KDD", &ksds), dd("RDD", &rrds)]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(out, "0003 000{\n");
+    assert_eq!(std::fs::read_to_string(&ksds).unwrap(), "A1\nB2\nC3\n");
+    assert_eq!(std::fs::read_to_string(&rrds).unwrap(), "A1\nB2\nC3\n");
+}
+
+#[test]
+fn table_sort_by_its_occurs_keys_by_named_keys_and_by_the_element() {
+    let out = run(&program(
+        "",
+        concat!(
+            "       01  T.\n           05 E OCCURS 5 ASCENDING KEY IS E-K.\n",
+            "              10 E-K PIC S9(3) COMP-3.\n              10 E-N PIC X.\n              10 E-F COMP-2.\n",
+            "       01  G VALUE 'DBEAC'.\n           05 L PIC X OCCURS 5.\n",
+            "       01  I PIC 9.\n",
+        ),
+        &[
+            line("MOVE 30 TO E-K(1) MOVE 'C' TO E-N(1) MOVE 2.5 TO E-F(1)"),
+            line("MOVE -4 TO E-K(2) MOVE 'A' TO E-N(2) MOVE -1 TO E-F(2)"),
+            line("MOVE 12 TO E-K(3) MOVE 'B' TO E-N(3) MOVE 100 TO E-F(3)"),
+            line("MOVE -4 TO E-K(4) MOVE 'D' TO E-N(4) MOVE 0 TO E-F(4)"),
+            line("MOVE 7 TO E-K(5) MOVE 'E' TO E-N(5) MOVE 0.25 TO E-F(5)"),
+            line("SORT E"),
+            line("PERFORM VARYING I FROM 1 BY 1 UNTIL I > 5"),
+            line("    DISPLAY E-N(I) WITH NO ADVANCING END-PERFORM"),
+            line("DISPLAY ' '"),
+            line("SORT E ON DESCENDING KEY E-F"),
+            line("PERFORM VARYING I FROM 1 BY 1 UNTIL I > 5"),
+            line("    DISPLAY E-N(I) WITH NO ADVANCING END-PERFORM"),
+            line("DISPLAY ' '"),
+            line("SORT L ON ASCENDING KEY"),
+            line("DISPLAY G"),
+            line("SORT L DESCENDING"),
+            line("DISPLAY G"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    ));
+    assert_eq!(out, "ADEBC \nBCEDA \nABCDE\nEDCBA\n");
+}
+
+#[test]
+fn what_is_not_modelled_is_refused_by_name() {
+    let collating = |alphabet: &str, key: &str| {
+        let source = [
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n",
+            &format!("       SPECIAL-NAMES. ALPHABET ALPHA IS {alphabet}.\n"),
+            "       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n",
+            SELECT_SD,
+            "       DATA DIVISION.\n       FILE SECTION.\n       SD  S-FILE.\n       01  S-REC.\n           05 S-X PIC X(2).\n           05 S-N PIC 9(2).\n",
+            "       PROCEDURE DIVISION.\n",
+            &line(&format!("SORT S-FILE ASCENDING {key} COLLATING SEQUENCE ALPHA")),
+            &line("    INPUT PROCEDURE P OUTPUT PROCEDURE P."),
+            "       P.\n",
+            &line("EXIT."),
+        ]
+        .concat();
+        compile_errors(&source)
+    };
+    assert!(collating("STANDARD-1", "S-X").contains("COLLATING SEQUENCE ALPHA (STANDARD-1) for SORT or MERGE keys is not supported yet"));
+    assert!(collating("'A' THRU 'Z'", "S-X").contains("(literal)"));
+    assert_eq!(collating("STANDARD-1", "S-N"), "");
+    assert_eq!(collating("EBCDIC", "S-X"), "");
+
+    let errors = |fd: &str, data: &str, body: &str| {
+        let select = [SELECT_SD, "           SELECT F ASSIGN TO FDD.\n"].concat();
+        let fd = ["       SD  S-FILE.\n       01  S-REC.\n           05 S-K PIC X(2).\n       FD  F.\n       01  F-REC PIC X(2).\n", fd].concat();
+        compile_errors(&file_program(&select, &fd, data, &[line(body), "       P.\n".into(), line("EXIT.")].concat()))
+    };
+    assert!(errors("", "", "SORT F ON ASCENDING KEY F-REC USING F GIVING F.").contains("not a sort or merge file (SD)"));
+    assert!(errors("", "", "SORT S-FILE ON ASCENDING KEY F-REC USING F GIVING F.").contains("must be in its records"));
+    assert!(errors("", "", "SORT S-FILE ON ASCENDING KEY S-K USING S-FILE GIVING F.").contains("a sort or merge file (SD) cannot be one"));
+    assert!(errors("", "", "SORT S-FILE ON ASCENDING KEY S-K USING F.").contains("no GIVING or OUTPUT PROCEDURE"));
+    assert!(errors("", "", "MERGE S-FILE ON ASCENDING KEY S-K USING F GIVING F.").contains("USING names at least two files"));
+    assert!(errors("", "", "RELEASE F-REC.").contains("not a record of a sort file"));
+    assert!(errors("", "", "RETURN F AT END CONTINUE.").contains("not a sort or merge file"));
+    assert!(errors("", "       01  T.\n           05 E PIC X OCCURS 3.\n", "SORT E ON ASCENDING KEY E USING F.").contains("a table SORT takes no USING"));
+    assert!(errors("", "       01  T.\n           05 E PIC X OCCURS 3.\n", "SORT E.").contains("no KEY phrase"));
+    assert!(errors("", "       01  W PIC X.\n", "SORT W ON ASCENDING KEY W.").contains("not a table"));
+    assert!(errors("", "", "SORT S-FILE ON ASCENDING KEY S-K INPUT PROCEDURE P GIVING F.").is_empty());
+}
+
+#[test]
+fn release_outside_an_input_procedure_and_a_sort_control_dd_stop_the_run() {
+    let control = text_file("sort-igzsrtcd.txt", &[" OPTION EQUALS"]);
+    let source = file_program(
+        &[SELECT_SD, "           SELECT F ASSIGN TO FDD.\n"].concat(),
+        "       SD  S-FILE.\n       01  S-REC PIC X(2).\n       FD  F.\n       01  F-REC PIC X(2).\n",
+        "",
+        &["       MAIN-LINE.\n", &line("RELEASE S-REC"), &line("GOBACK."), "       P.\n", &line("EXIT.")].concat(),
+    );
+    let (_, _, ending) = run_files(&source, &[]);
+    assert!(ending.unwrap_err().message.contains("no SORT input procedure is running"));
+    let sorting = source.replace("RELEASE S-REC", "SORT S-FILE ON ASCENDING KEY S-REC INPUT PROCEDURE P GIVING F");
+    let (_, _, ending) = run_files(&sorting, &[dd("IGZSRTCD", &control)]);
+    assert!(ending.unwrap_err().message.contains("DD IGZSRTCD holds sort control statements"));
+}
+
+#[test]
+fn an_output_procedure_generates_a_report_whose_declaratives_come_first() {
+    let out = temp("sort-report.txt");
+    let _ = std::fs::remove_file(&out);
+    let source = file_program(
+        &[SELECT_SD, "           SELECT P ASSIGN TO PDD.\n"].concat(),
+        "       SD  S-FILE.\n       01  S-REC.\n           05 S-K PIC X.\n       FD  P REPORT IS R.\n",
+        concat!(
+            "       01  DONE PIC X VALUE 'N'.\n       01  SEEN PIC 9 VALUE 0.\n       REPORT SECTION.\n       RD  R.\n",
+            "       01  D TYPE DE LINE PLUS 1.\n           05 COLUMN 1 PIC X SOURCE S-K.\n           05 COLUMN 3 PIC 9 SOURCE SEEN.\n",
+        ),
+        &[
+            "       DECLARATIVES.\n       U SECTION.\n           USE BEFORE REPORTING D.\n       U-1.\n",
+            &line("ADD 1 TO SEEN."),
+            "       END DECLARATIVES.\n       M SECTION.\n",
+            &line("OPEN OUTPUT P INITIATE R"),
+            &line("SORT S-FILE ON DESCENDING KEY S-K"),
+            &line("    INPUT PROCEDURE FEED OUTPUT PROCEDURE SHOW"),
+            &line("TERMINATE R CLOSE P"),
+            &line("DISPLAY 'SEEN ' SEEN"),
+            &line("GOBACK."),
+            "       FEED SECTION.\n",
+            &line("MOVE 'A' TO S-K RELEASE S-REC"),
+            &line("MOVE 'C' TO S-K RELEASE S-REC"),
+            &line("MOVE 'B' TO S-K RELEASE S-REC."),
+            "       SHOW SECTION.\n",
+            &line("PERFORM UNTIL DONE = 'Y'"),
+            &line("    RETURN S-FILE AT END MOVE 'Y' TO DONE"),
+            &line("    NOT AT END GENERATE D END-RETURN"),
+            &line("END-PERFORM."),
+        ]
+        .concat(),
+    );
+    let (stdout, err, ending) = run_files(&source, &[dd("PDD", &out)]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(stdout, "SEEN 3\n");
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), "C 1\nB 2\nA 3\n");
+}
+
+#[test]
+fn object_references_are_no_sort_keys_and_an_sd_writes_no_report() {
+    let source = |key: &str, body: &str| {
+        [
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       REPOSITORY.\n           CLASS Account IS \"Account\".\n",
+            "       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n",
+            SELECT_SD,
+            "       DATA DIVISION.\n       FILE SECTION.\n       SD  S-FILE.\n       01  S-REC.\n           05 S-X PIC X(4).\n           05 S-O USAGE OBJECT REFERENCE Account.\n",
+            "       WORKING-STORAGE SECTION.\n       01  A USAGE OBJECT REFERENCE Account.\n       01  DONE PIC X.\n",
+            "       01  T.\n           05 E OCCURS 3.\n               10 E-O USAGE OBJECT REFERENCE Account.\n",
+            "       PROCEDURE DIVISION.\n",
+            &line(&format!("SORT S-FILE ASCENDING {key} INPUT PROCEDURE P")),
+            &line("    OUTPUT PROCEDURE Q"),
+            &line(body),
+            "       P.\n",
+            &line("RELEASE S-REC."),
+            "       Q.\n",
+            &line("RETURN S-FILE AT END MOVE 'Y' TO DONE END-RETURN."),
+        ]
+        .concat()
+    };
+    assert_eq!(compile_errors(&source("S-X", "GOBACK.")), "");
+    assert!(compile_errors(&source("S-O", "GOBACK.")).contains("S-O: a POINTER, INDEX, object reference or function-pointer item cannot be a sort key"));
+    assert!(compile_errors(&source("S-X", "SORT E ON ASCENDING KEY E-O.")).contains("E-O: a POINTER, INDEX, object reference or function-pointer item cannot be a sort key"));
+    assert!(compile_errors(&source("S-X", "RELEASE S-REC FROM A.")).contains("A is an object reference"));
+    assert!(compile_errors(&source("S-X", "RETURN S-FILE INTO A AT END CONTINUE END-RETURN.")).contains("A is an object reference"));
+    assert!(compile_errors(&source("S-X", "RETURN S-FILE AT END MOVE A TO DONE END-RETURN.")).contains("A is an object reference"));
+    let sd_report = file_program(SELECT_SD, "       SD  S-FILE REPORT IS R.\n       01  S-REC PIC X.\n", "", &line("GOBACK."));
+    assert!(syntax::parse(&sd_report).unwrap_err().message.contains("SD S-FILE: a sort or merge file takes no REPORT clause"));
+}

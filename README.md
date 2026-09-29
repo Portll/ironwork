@@ -85,6 +85,12 @@ The subset the interpreter runs today:
   or INVALID KEY; WRITE [FROM] with ADVANCING or INVALID KEY; REWRITE, DELETE and START with
   INVALID KEY; CLOSE; OPTIONAL files, and the file status codes for each outcome. A sequential file
   opened I-O can be REWRITTEN in place.
+- **Sort and merge:** SD files; SORT and MERGE on ascending and descending keys anywhere in the
+  record (alphanumeric keys in EBCDIC order, numeric keys by value in any USAGE), WITH DUPLICATES
+  IN ORDER, USING and GIVING files or INPUT and OUTPUT PROCEDURE with RELEASE and RETURN; SORT of a
+  table by its keys; SORT-RETURN and the other sort special registers. Records are sorted in memory,
+  and records with equal keys keep their input order. A COLLATING SEQUENCE other than EBCDIC or
+  NATIVE is refused, and a DD holding sort control statements (IGZSRTCD) stops the run.
 - **Report Writer**, run as the output of IBM's COBOL Report Writer Precompiler would run, since
   Enterprise COBOL takes a REPORT SECTION only through that precompiler: FD REPORT IS; RD with
   CONTROLS (FINAL included), PAGE LIMIT, HEADING, FIRST DETAIL, LAST DETAIL, FOOTING, LINE LIMIT

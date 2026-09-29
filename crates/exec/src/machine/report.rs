@@ -690,13 +690,13 @@ impl<'p> Machine<'p, '_, '_> {
         let vertical = self.fullword(ri, state::VERTICAL);
         if paged && vertical == 0 {
             if target > 1 {
-                self.write_record(ri, None, Advancing::Page { before: false }, pos)?;
-                self.write_record(ri, Some((text, end)), lines(target - 1), pos)?;
+                self.write_report_record(ri, None, Advancing::Page { before: false }, pos)?;
+                self.write_report_record(ri, Some((text, end)), lines(target - 1), pos)?;
             } else {
-                self.write_record(ri, Some((text, end)), Advancing::Page { before: false }, pos)?;
+                self.write_report_record(ri, Some((text, end)), Advancing::Page { before: false }, pos)?;
             }
         } else {
-            self.write_record(ri, Some((text, end)), lines(target - vertical), pos)?;
+            self.write_report_record(ri, Some((text, end)), lines(target - vertical), pos)?;
         }
         self.set_fullword(ri, state::VERTICAL, target.max(1));
         Ok(())
@@ -704,7 +704,7 @@ impl<'p> Machine<'p, '_, '_> {
 
     /// One record through the report file's record area: the CODE, then the line; all spaces for
     /// the blank record at the top of a page. A variable-length record ends after its last field.
-    fn write_record(&mut self, ri: usize, line: Option<(&[u8], usize)>, advancing: Advancing, pos: Pos) -> R<()> {
+    fn write_report_record(&mut self, ri: usize, line: Option<(&[u8], usize)>, advancing: Advancing, pos: Pos) -> R<()> {
         let r = self.report(ri);
         let k = r.file;
         let (offset, size) = self.area(k);

@@ -4,6 +4,7 @@ use crate::{Error, Pos};
 
 mod oo;
 mod report;
+mod sort;
 
 /// Every program in the source, first to last, with nested programs after the one containing them.
 pub fn parse(tokens: &[Token], options: Vec<String>) -> Result<Vec<Program>, Error> {
@@ -35,7 +36,7 @@ const PHRASE_WORDS: &[&str] = &[
     "BEFORE", "AFTER", "ADVANCING", "INPUT", "OUTPUT", "EXTEND", "I-O", "REVERSED", "USING", "RETURNING", "EXCEPTION", "OVERFLOW",
     "END-CALL", "OMITTED", "CONTENT", "REFERENCE", "VALUE", "UP", "DOWN", "DELIMITED", "DELIMITER", "COUNT", "POINTER", "TALLYING",
     "REPLACING", "CONVERTING", "INITIAL", "FOR", "CHARACTERS", "LEADING", "FIRST", "ALL", "END-STRING", "END-UNSTRING", "END-SEARCH",
-    "NEXT", "INVALID", "KEY", "END-REWRITE", "END-DELETE", "END-START", "END-INVOKE",
+    "NEXT", "INVALID", "KEY", "END-REWRITE", "END-DELETE", "END-START", "END-INVOKE", "END-RETURN",
 ];
 
 fn figurative(word: &str) -> Option<Figurative> {
@@ -220,9 +221,9 @@ impl Parser<'_> {
         while self.peek().is_some() && !self.at_division(&["ENVIRONMENT", "DATA", "PROCEDURE", "IDENTIFICATION", "ID"]) && !self.at_end_program() {
             self.at += 1;
         }
-        let (mut files, mut repository) = (Vec::new(), Vec::new());
+        let (mut files, mut repository, mut collating) = (Vec::new(), Vec::new(), Collating::default());
         if self.at_division(&["ENVIRONMENT"]) {
-            (files, repository) = self.environment()?;
+            (files, repository) = self.environment(&mut collating)?;
         }
         let (mut working_storage, mut local_storage, mut linkage) = (Vec::new(), Vec::new(), Vec::new());
         let mut report_writer = crate::report::ReportWriter::default();
@@ -305,6 +306,7 @@ impl Parser<'_> {
             exec_declarations,
             report_writer,
             oo: oo::program_oo(repository),
+            collating,
         });
         out.extend(nested);
         Ok(())
@@ -316,11 +318,14 @@ impl Parser<'_> {
 
     /// The ENVIRONMENT DIVISION: SELECT entries of FILE-CONTROL and the REPOSITORY's classes;
     /// everything else is skipped, except what would change the meaning of the rest of the program.
-    fn environment(&mut self) -> R<(Vec<FileDecl>, Vec<ClassEntry>)> {
+    fn environment(&mut self, collating: &mut Collating) -> R<(Vec<FileDecl>, Vec<ClassEntry>)> {
         let (mut files, mut repository) = (Vec::new(), Vec::new());
         while self.peek().is_some() && !self.at_division(&["DATA", "PROCEDURE"]) {
             if self.is_word("DECIMAL-POINT") {
                 return Err(self.error("DECIMAL-POINT IS COMMA is not supported yet"));
+            }
+            if self.sort_environment(collating)? {
+                continue;
             }
             if self.accept_word("SELECT") {
                 files.push(self.select()?);
@@ -354,6 +359,7 @@ impl Parser<'_> {
             record_max: None,
             records: Vec::new(),
             reports: Vec::new(),
+            sort: false,
             pos,
         };
         while !self.accept(&Tok::Period) {
@@ -445,15 +451,13 @@ impl Parser<'_> {
     /// record descriptions.
     fn file_section(&mut self, files: &mut [FileDecl]) -> R<()> {
         while self.is_word("FD") || self.is_word("SD") {
-            if self.is_word("SD") {
-                return Err(self.error("SD (sort files) is not supported yet"));
-            }
-            self.at += 1;
+            let indicator = self.name("FD or SD")?;
             let pos = self.pos();
             let name = self.name("a file name")?;
             let Some(index) = files.iter().position(|f| f.name == name) else {
-                return Err(Error::at(pos, format!("FD {name} has no SELECT")));
+                return Err(Error::at(pos, format!("{indicator} {name} has no SELECT")));
             };
+            files[index].sort = indicator == "SD";
             while !self.accept(&Tok::Period) {
                 match self.name("an FD clause or a period")?.as_str() {
                     "RECORDING" => {
@@ -466,6 +470,7 @@ impl Parser<'_> {
                         self.accept_word("CONTAINS");
                         self.accept_word("IS");
                         if self.accept_word("VARYING") {
+                            files[index].recording.get_or_insert('V');
                             self.accept_word("IN");
                             self.accept_word("SIZE");
                             self.accept_word("FROM");
@@ -482,14 +487,17 @@ impl Parser<'_> {
                         };
                         let first = number(self)?;
                         let second = if self.accept_word("TO") { number(self)? } else { None };
-                        files[index].record_min = first;
-                        files[index].record_max = second.or(first);
+                        if first.is_some() {
+                            files[index].record_min = first;
+                            files[index].record_max = second.or(first);
+                        }
                         self.accept_word("CHARACTERS");
                         if self.accept_word("DEPENDING") {
                             self.accept_word("ON");
                             self.reference()?;
                         }
                     }
+                    "REPORT" | "REPORTS" if files[index].sort => return Err(Error::at(pos, format!("SD {name}: a sort or merge file takes no REPORT clause"))),
                     "REPORT" | "REPORTS" => {
                         let names = self.report_names()?;
                         files[index].reports.extend(names);
@@ -919,6 +927,7 @@ impl Parser<'_> {
             "UNSTRING" => Stmt::Unstring(Box::new(self.unstring(pos)?)),
             "INSPECT" => Stmt::Inspect(Box::new(self.inspect(pos)?)),
             "SEARCH" => Stmt::Search(Box::new(self.search(pos)?)),
+            "SORT" | "MERGE" | "RELEASE" | "RETURN" => Stmt::Sorting(Box::new(self.sorting(&verb, pos)?)),
             "NEXT" => {
                 self.expect_word("SENTENCE")?;
                 Stmt::NextSentence
@@ -2146,7 +2155,7 @@ mod tests {
 
     #[test]
     fn unsupported_statements_are_named() {
-        let text = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       PROCEDURE DIVISION.\n           SORT F ON ASCENDING KEY K USING A GIVING B.\n";
-        assert!(crate::parse(text).unwrap_err().message.contains("SORT"));
+        let text = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       PROCEDURE DIVISION.\n           MOVE CORRESPONDING A TO B.\n";
+        assert!(crate::parse(text).unwrap_err().message.contains("MOVE CORRESPONDING"));
     }
 }

@@ -29,6 +29,7 @@ pub struct Program {
     pub report_writer: crate::report::ReportWriter,
     /// The REPOSITORY's classes, and for a class definition or a method what it is.
     pub oo: Option<Box<Oo>>,
+    pub collating: Collating,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,6 +74,8 @@ pub struct FileDecl {
     pub records: Vec<DataEntry>,
     /// FD ... REPORT IS: the reports written to the file.
     pub reports: Vec<String>,
+    /// Described by SD: a sort or merge file, which needs no data set.
+    pub sort: bool,
     pub pos: Pos,
 }
 
@@ -363,6 +366,7 @@ pub enum Stmt {
     Report(Box<crate::report::ReportStmt>),
     Invoke(Box<Invoke>),
     ExitMethod { pos: Pos },
+    Sorting(Box<Sorting>),
     StopRun { pos: Pos },
     Continue,
     Exit(ExitKind),
@@ -575,5 +579,42 @@ pub struct ReadStmt {
     pub at_end: Handlers,
     pub invalid: Handlers,
     pub pos: Pos,
+}
+
+/// The alphabets SPECIAL-NAMES declares, and the PROGRAM COLLATING SEQUENCE of OBJECT-COMPUTER.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Collating {
+    /// Each alphabet-name and what it is: EBCDIC, NATIVE, STANDARD-1, STANDARD-2, or a literal.
+    pub alphabets: Vec<(String, String)>,
+    pub program: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Sorting {
+    Sort(SortStmt),
+    Release { record: Ref, from: Option<Operand>, pos: Pos },
+    Return { file: String, into: Option<Ref>, at_end: Handlers, pos: Pos },
+}
+
+/// SORT or MERGE of an SD file, or SORT of a table (no input or output then).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SortStmt {
+    pub merge: bool,
+    /// The SD file, or the table.
+    pub subject: Ref,
+    /// Each key and whether it ascends, most significant first.
+    pub keys: Vec<(bool, Ref)>,
+    pub duplicates: bool,
+    pub collating: Option<String>,
+    pub input: Option<SortIo>,
+    pub output: Option<SortIo>,
+    pub pos: Pos,
+}
+
+/// USING or GIVING files, or an input or output procedure.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SortIo {
+    Files(Vec<String>),
+    Procedure { from: ProcName, thru: Option<ProcName> },
 }
 
