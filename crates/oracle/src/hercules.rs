@@ -3,13 +3,13 @@
 //! each record is compared with what `zarch` computes. Agreement is evidence, not proof: Hercules
 //! is itself an implementation of the same manual.
 
-use std::cmp::Ordering;
+use crate::unhex;
 use std::fs::{self, File};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use zarch::check::{Cc, ProgramCheck, ProgramMask};
-use zarch::decimal;
+use zarch::decimal::{self, Decimal};
 use zarch::hfp::{Hfp, Precision};
 
 pub struct Case {
@@ -378,7 +378,7 @@ pub fn image(cases: &[Case]) -> Vec<u8> {
         let (op1, op2, mask) = operands(&case.op);
         put(area, &op1);
         put(area + usize::from(OFF_OP2), &op2);
-        put(area + usize::from(OFF_MASK), &[mask & 0xF, 0, 0, 0]);
+        put(area + usize::from(OFF_MASK), &[ProgramMask::from_bits(mask).bits(), 0, 0, 0]);
     }
     code.extend(lpswe(R4, 0));
     put(CODE, &code);
@@ -471,57 +471,21 @@ fn decimal_model(op: &Op) -> Outcome {
     }
 }
 
-fn sign_cc(r: Hfp) -> u8 {
-    match (r.fraction == 0, r.negative) {
-        (true, _) => 0,
-        (false, true) => 1,
-        (false, false) => 2,
-    }
-}
-
-/// HALVE: the fraction shifted right one bit, through a guard digit, then normalized.
-fn halve(x: Hfp, mask: ProgramMask) -> Result<Hfp, ProgramCheck> {
-    let d = x.precision.digits();
-    if x.fraction == 0 {
-        return Ok(Hfp::zero(x.precision));
-    }
-    let wide = x.fraction << 3;
-    let (mut fraction, mut expo) =
-        if wide >> (4 * d) != 0 { (wide >> 4, i32::from(x.characteristic)) } else { (wide, i32::from(x.characteristic) - 1) };
-    while fraction >> (4 * (d - 1)) == 0 {
-        fraction <<= 4;
-        expo -= 1;
-    }
-    if expo < 0 {
-        return if mask.hfp_exponent_underflow { Err(ProgramCheck::HfpExponentUnderflow) } else { Ok(Hfp::zero(x.precision)) };
-    }
-    Ok(Hfp { characteristic: expo as u8, fraction, ..x })
-}
-
 fn hfp_model(inst: HfpInst, op1: &[u8], op2: &[u8], mask: u8) -> Outcome {
     use HfpInst::*;
     let s = shape(inst);
-    let pm = ProgramMask {
-        fixed_point_overflow: mask & 8 != 0,
-        decimal_overflow: mask & 4 != 0,
-        hfp_exponent_underflow: mask & 2 != 0,
-        hfp_significance: mask & 1 != 0,
-    };
+    let pm = ProgramMask::from_bits(mask);
     let a = Hfp::from_bytes(s.p1, op1);
     let b = Hfp::from_bytes(s.p2, op2);
     let target = s.result.unwrap_or(s.p1);
     let computed: Result<(Option<Hfp>, Option<u8>), ProgramCheck> = match inst {
-        Aer | Adr | Axr => a.add(b, pm).map(|r| (Some(r), Some(sign_cc(r)))),
-        Ser | Sdr | Sxr => a.sub(b, pm).map(|r| (Some(r), Some(sign_cc(r)))),
-        Aur | Awr => a.add_unnormalized(b, pm).map(|r| (Some(r), Some(sign_cc(r)))),
+        Aer | Adr | Axr => a.add(b, pm).map(|r| (Some(r), Some(r.sign_cc().0))),
+        Ser | Sdr | Sxr => a.sub(b, pm).map(|r| (Some(r), Some(r.sign_cc().0))),
+        Aur | Awr => a.add_unnormalized(b, pm).map(|r| (Some(r), Some(r.sign_cc().0))),
         Mer | Mdr | Mxr | Mxdr => a.mul(b, target, pm).map(|r| (Some(r), None)),
         Der | Ddr => a.div(b, pm).map(|r| (Some(r), None)),
-        Cer | Cdr => Ok((None, Some(match a.compare(b) {
-            Ordering::Equal => 0,
-            Ordering::Less => 1,
-            Ordering::Greater => 2,
-        }))),
-        Her | Hdr => halve(b, pm).map(|r| (Some(r), None)),
+        Cer | Cdr => Ok((None, Some(Cc::from(a.compare(b)).0))),
+        Her | Hdr => b.halve(pm).map(|r| (Some(r), None)),
         Ledr | Ldxr => b.round(target).map(|r| (Some(r), None)),
     };
     match computed {
@@ -555,11 +519,13 @@ impl Rng {
 }
 
 fn bytes(text: &str) -> Vec<u8> {
-    (0..text.len()).step_by(2).map(|i| u8::from_str_radix(&text[i..i + 2], 16).expect("hex")).collect()
+    unhex(text).expect("hex")
 }
 
 fn packed_of(value: i128, len: usize) -> Vec<u8> {
-    bytes(&format!("{:0w$}{}", value.unsigned_abs(), if value < 0 { 'D' } else { 'C' }, w = 2 * len - 1))
+    let mut packed = vec![0; len];
+    decimal::encode(&mut packed, Decimal { negative: value < 0, magnitude: value.unsigned_abs() }).expect("packed length");
+    packed
 }
 
 fn random_packed(rng: &mut Rng, len: usize) -> Vec<u8> {
@@ -835,10 +801,7 @@ pub fn run(dir: &Path, hercules: &str) -> Result<Vec<(Case, Outcome, Outcome)>, 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex(bytes: &[u8]) -> String {
-        crate::hex(bytes)
-    }
+    use crate::hex;
 
     #[test]
     fn instruction_encodings_are_exact() {

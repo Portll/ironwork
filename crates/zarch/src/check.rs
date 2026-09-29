@@ -48,6 +48,16 @@ impl std::error::Error for ProgramCheck {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Cc(pub u8);
 
+impl From<std::cmp::Ordering> for Cc {
+    fn from(ordering: std::cmp::Ordering) -> Self {
+        Self(match ordering {
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Less => 1,
+            std::cmp::Ordering::Greater => 2,
+        })
+    }
+}
+
 /// The four PSW program-mask bits. A masked-off condition completes the instruction without an
 /// interruption.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -59,6 +69,24 @@ pub struct ProgramMask {
 }
 
 impl ProgramMask {
+    /// From the PSW mask nibble: 8 fixed-point overflow, 4 decimal overflow, 2 HFP exponent
+    /// underflow, 1 significance.
+    pub const fn from_bits(bits: u8) -> Self {
+        Self {
+            fixed_point_overflow: bits & 8 != 0,
+            decimal_overflow: bits & 4 != 0,
+            hfp_exponent_underflow: bits & 2 != 0,
+            hfp_significance: bits & 1 != 0,
+        }
+    }
+
+    pub const fn bits(self) -> u8 {
+        (self.fixed_point_overflow as u8) << 3
+            | (self.decimal_overflow as u8) << 2
+            | (self.hfp_exponent_underflow as u8) << 1
+            | self.hfp_significance as u8
+    }
+
     pub fn decimal(self, cc: Cc) -> Result<Cc, ProgramCheck> {
         if cc.0 == 3 && self.decimal_overflow { Err(ProgramCheck::DecimalOverflow) } else { Ok(cc) }
     }

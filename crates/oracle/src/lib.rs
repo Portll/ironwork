@@ -190,8 +190,8 @@ pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02X}")).collect()
 }
 
-fn unhex(text: &str) -> Option<Vec<u8>> {
-    if !text.len().is_multiple_of(2) {
+pub(crate) fn unhex(text: &str) -> Option<Vec<u8>> {
+    if !text.len().is_multiple_of(2) || !text.is_ascii() {
         return None;
     }
     (0..text.len()).step_by(2).map(|i| u8::from_str_radix(&text[i..i + 2], 16).ok()).collect()
@@ -229,6 +229,14 @@ pub fn check(programs: &[Program], observed: &BTreeMap<String, Vec<u8>>) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unhex_rejects_non_ascii_and_odd_text_without_panicking() {
+        assert_eq!(unhex("0aFf"), Some(vec![0x0A, 0xFF]));
+        assert_eq!(unhex("é1"), None);
+        assert_eq!(unhex("1é"), None);
+        assert_eq!(unhex("abc"), None);
+    }
 
     #[test]
     fn every_program_renders_within_column_72_in_invariant_characters() {

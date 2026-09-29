@@ -113,6 +113,12 @@ impl Shr<u32> for U256 {
     }
 }
 
+/// A sign and magnitude as an `i128`, or `None` when the magnitude does not fit.
+pub fn signed_i128(negative: bool, magnitude: U256) -> Option<i128> {
+    let m = i128::try_from(magnitude.to_u128()?).ok()?;
+    Some(if negative { -m } else { m })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

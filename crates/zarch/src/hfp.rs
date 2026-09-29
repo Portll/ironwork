@@ -2,8 +2,8 @@
 //! intermediates. Value = (-1)^sign × 0.fraction × 16^(characteristic − 64). Arithmetic keeps one
 //! guard digit and truncates; only LOAD ROUNDED rounds.
 
-use crate::check::{ProgramCheck, ProgramMask};
-use crate::wide::U256;
+use crate::check::{Cc, ProgramCheck, ProgramMask};
+use crate::wide::{signed_i128, U256};
 use std::cmp::Ordering;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -58,6 +58,14 @@ fn normalize(mut fraction: u128, mut expo: i32, digits: u32) -> (u128, i32) {
         expo -= 1;
     }
     (fraction, expo)
+}
+
+fn sign_order(negative: bool, fraction: u128) -> Ordering {
+    match (fraction == 0, negative) {
+        (true, _) => Ordering::Equal,
+        (false, true) => Ordering::Less,
+        (false, false) => Ordering::Greater,
+    }
 }
 
 fn word(bytes: &[u8]) -> u128 {
@@ -236,19 +244,31 @@ impl Hfp {
     /// past the guard digit take no part.
     pub fn compare(self, other: Self) -> Ordering {
         self.same_precision(other);
-        let by_sign = |negative: bool, fraction: u128| match (fraction == 0, negative) {
-            (true, _) => Ordering::Equal,
-            (false, true) => Ordering::Less,
-            (false, false) => Ordering::Greater,
-        };
         match (self.is_true_zero(), other.is_true_zero()) {
-            (_, true) => by_sign(self.negative, self.fraction),
-            (true, false) => by_sign(other.negative, other.fraction).reverse(),
+            (_, true) => sign_order(self.negative, self.fraction),
+            (true, false) => sign_order(other.negative, other.fraction).reverse(),
             (false, false) => {
                 let (negative, diff, _) = self.aligned_sum(Self { negative: !other.negative, ..other });
-                by_sign(negative, diff)
+                sign_order(negative, diff)
             }
         }
+    }
+
+    /// The condition code an arithmetic result sets: zero, negative or positive.
+    pub fn sign_cc(self) -> Cc {
+        sign_order(self.negative, self.fraction).into()
+    }
+
+    /// HALVE: the fraction shifted right one bit through a guard digit, then normalized.
+    pub fn halve(self, mask: ProgramMask) -> Result<Self, ProgramCheck> {
+        let d = self.digits();
+        if self.fraction == 0 {
+            return Ok(Self::zero(self.precision));
+        }
+        let wide = self.fraction << 3;
+        let (fraction, expo) = if wide >> digit_bits(d) != 0 { (wide >> 4, self.characteristic as i32) } else { (wide, self.characteristic as i32 - 1) };
+        let (fraction, expo) = normalize(fraction, expo, d);
+        Self::finish(self.precision, self.negative, expo, fraction, mask)
     }
 
     /// LOAD LENGTHENED: exact.
@@ -314,8 +334,7 @@ impl Hfp {
     /// CONVERT TO FIXED, or `None` when the result does not fit.
     pub fn to_integer(self, rounding: Rounding) -> Option<i128> {
         let (negative, magnitude) = self.to_scaled_integer(0, rounding)?;
-        let m = i128::try_from(magnitude.to_u128()?).ok()?;
-        Some(if negative { -m } else { m })
+        signed_i128(negative, magnitude)
     }
 
     pub fn approx(self) -> f64 {
@@ -383,6 +402,23 @@ mod tests {
         assert_eq!(bits_short(tiny.mul(tiny, Precision::Short, NO_MASK).unwrap()), 0);
         let mask = ProgramMask { hfp_exponent_underflow: true, ..NO_MASK };
         assert_eq!(tiny.mul(tiny, Precision::Short, mask), Err(ProgramCheck::HfpExponentUnderflow));
+    }
+
+    #[test]
+    fn halve_shifts_one_bit_and_normalizes() {
+        assert_eq!(bits_short(short(0x4110_0000).halve(NO_MASK).unwrap()), 0x4080_0000);
+        assert_eq!(bits_short(short(0xC120_0000).halve(NO_MASK).unwrap()), 0xC110_0000);
+        assert_eq!(bits_short(short(0x4180_0000).halve(NO_MASK).unwrap()), 0x4140_0000);
+        assert_eq!(bits_short(short(0x4100_0000).halve(NO_MASK).unwrap()), 0);
+    }
+
+    #[test]
+    fn halve_underflow_gives_a_true_zero_unless_the_mask_enables_it() {
+        let smallest = short(0x0010_0000);
+        assert_eq!(bits_short(smallest.halve(NO_MASK).unwrap()), 0);
+        let mask = ProgramMask { hfp_exponent_underflow: true, ..NO_MASK };
+        assert_eq!(smallest.halve(mask), Err(ProgramCheck::HfpExponentUnderflow));
+        assert_eq!(bits_short(short(0x0120_0000).halve(mask).unwrap()), 0x0110_0000);
     }
 
     #[test]
