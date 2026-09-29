@@ -1,0 +1,14 @@
+[package]
+name = "ironwork"
+description = "ironwork for COBOL: the compiler driver"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+exec = { package = "ironwork-exec", path = "../exec" }
+syntax = { package = "ironwork-syntax", path = "../syntax" }
+
+[lints]
+workspace = true

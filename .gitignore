@@ -1,0 +1,7 @@
+target/
+/out/
+/goldens/
+.DS_Store
+
+# Documents held back from publication until they are reviewed.
+/review/

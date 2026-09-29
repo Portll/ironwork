@@ -1,0 +1,12 @@
+ironwork for COBOL — a COBOL compiler and interpreter whose target is IBM Enterprise COBOL for z/OS
+Copyright (C) 2026 Portll <john@portll.net>
+
+This program is free software: you can redistribute it and/or modify it under the terms of the
+GNU Affero General Public License as published by the Free Software Foundation, either version 3
+of the License, or (at your option) any later version. See LICENSE.
+
+A commercial licence is available for those whose policy or product cannot accept the AGPL.
+Contact john@portll.net.
+
+The code-page tables in crates/zarch/ucm/ are ICU data under the Unicode License v3, and are not
+covered by the licence above. See THIRD-PARTY-NOTICES.md.

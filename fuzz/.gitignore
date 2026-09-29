@@ -1,0 +1,7 @@
+target/
+corpus/*
+!corpus/front_end/
+corpus/front_end/*
+!corpus/front_end/ORAC0*.cbl
+artifacts/
+coverage/

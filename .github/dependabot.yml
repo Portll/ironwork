@@ -1,0 +1,12 @@
+# The workspace has no dependencies outside its own crates. The only versioned things here are the
+# actions the workflow pins.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: daily
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(ci)"

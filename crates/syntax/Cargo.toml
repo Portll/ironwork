@@ -1,0 +1,10 @@
+[package]
+name = "ironwork-syntax"
+description = "ironwork for COBOL: fixed-format source reader, lexer and parser"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

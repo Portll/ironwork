@@ -1,0 +1,23 @@
+[package]
+name = "ironwork-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+exec = { package = "ironwork-exec", path = "../crates/exec" }
+syntax = { package = "ironwork-syntax", path = "../crates/syntax" }
+
+[[bin]]
+name = "front_end"
+path = "fuzz_targets/front_end.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

@@ -1,0 +1,560 @@
+use crate::Pos;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Program {
+    pub id: String,
+    /// Options from CBL and PROCESS cards, in the order written.
+    pub options: Vec<String>,
+    /// PROGRAM-ID ... IS INITIAL: WORKING-STORAGE starts afresh on every CALL.
+    pub initial: bool,
+    pub recursive: bool,
+    pub working_storage: Vec<DataEntry>,
+    /// LOCAL-STORAGE: fresh for every activation of the program.
+    pub local_storage: Vec<DataEntry>,
+    pub linkage: Vec<DataEntry>,
+    /// PROCEDURE DIVISION USING: the LINKAGE items the caller's arguments address.
+    pub using: Vec<Param>,
+    pub returning: Option<String>,
+    pub paragraphs: Vec<Paragraph>,
+    /// Files declared by SELECT and described by FD, with their record descriptions.
+    pub files: Vec<FileDecl>,
+    /// The program's source file, then each COPY member, as positions index them.
+    pub sources: Vec<String>,
+    /// EXEC blocks in the DATA DIVISION: SQL declarations, cursors and DECLARE SECTION markers.
+    pub exec_declarations: Vec<ExecBlock>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Param {
+    pub by_value: bool,
+    pub name: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Organization {
+    Sequential,
+    LineSequential,
+    Indexed,
+    Relative,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Access {
+    #[default]
+    Sequential,
+    Random,
+    Dynamic,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileDecl {
+    pub name: String,
+    /// The DD name ASSIGN gives, with any `UT-S-` style prefix removed.
+    pub assign: String,
+    pub organization: Organization,
+    pub access: Access,
+    pub record_key: Option<Ref>,
+    /// ALTERNATE RECORD KEY items, and whether each allows duplicates.
+    pub alternate_keys: Vec<(Ref, bool)>,
+    pub relative_key: Option<Ref>,
+    pub optional: bool,
+    pub status: Option<Ref>,
+    /// RECORDING MODE: F, V, U or S.
+    pub recording: Option<char>,
+    pub record_min: Option<u32>,
+    pub record_max: Option<u32>,
+    pub records: Vec<DataEntry>,
+    pub pos: Pos,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpenMode {
+    Input,
+    Output,
+    Extend,
+    InputOutput,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Advancing {
+    Lines { before: bool, count: Expr },
+    Page { before: bool },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Usage {
+    #[default]
+    Display,
+    Binary,
+    /// COMP-5: binary, never truncated to the PICTURE.
+    NativeBinary,
+    Packed,
+    Float1,
+    Float2,
+    National,
+    Pointer,
+    Index,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignPosition {
+    Leading,
+    Trailing,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SignClause {
+    pub position: SignPosition,
+    pub separate: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DataEntry {
+    pub level: u8,
+    /// None for FILLER or an unnamed entry.
+    pub name: Option<String>,
+    pub picture: Option<String>,
+    /// None when no USAGE is written; the item then inherits its group's.
+    pub usage: Option<Usage>,
+    pub value: Option<Literal>,
+    pub redefines: Option<String>,
+    /// OCCURS: the number of occurrences, or the most of them for OCCURS DEPENDING ON.
+    pub occurs: Option<u32>,
+    /// OCCURS ... DEPENDING ON: the item that holds how many occurrences there are.
+    pub depending_on: Option<Ref>,
+    pub sign: Option<SignClause>,
+    pub justified: bool,
+    pub sync: bool,
+    pub blank_when_zero: bool,
+    /// OCCURS ... INDEXED BY: the index names the table declares.
+    pub indexed_by: Vec<String>,
+    /// OCCURS ... ASCENDING/DESCENDING KEY: each key and whether it ascends, for SEARCH ALL.
+    pub keys: Vec<(bool, Ref)>,
+    /// Level 88: the values that make the condition true.
+    /// Each value, or the low and high ends of a THRU range.
+    pub condition_values: Vec<(Literal, Option<Literal>)>,
+    pub pos: Pos,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Figurative {
+    Zero,
+    Space,
+    HighValue,
+    LowValue,
+    Quote,
+    Null,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Literal {
+    Alnum(String),
+    Hex(Vec<u8>),
+    National(String),
+    /// As written: optional sign, digits, optional decimal point.
+    Number(String),
+    Figurative(Figurative),
+    All(Box<Literal>),
+}
+
+/// A paragraph, or a section header holding the statements before the section's first paragraph.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Paragraph {
+    pub name: String,
+    pub statements: Vec<Stmt>,
+    /// The section the paragraph belongs to, or the section's own name for its header.
+    pub section: Option<String>,
+    pub is_section: bool,
+    pub pos: Pos,
+}
+
+/// A procedure name as written, with the section that qualifies it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcName {
+    pub name: String,
+    pub section: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExitKind {
+    Plain,
+    Paragraph,
+    Section,
+    Perform,
+    PerformCycle,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Subject {
+    Bool(bool),
+    Expr(Expr),
+    Cond(Cond),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Object {
+    Any,
+    Bool(bool),
+    Cond(Cond),
+    Value { not: bool, from: Expr, thru: Option<Expr> },
+}
+
+/// One WHEN group: any of its alternatives, each with an object per subject, selects the body.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct When {
+    pub alternatives: Vec<Vec<Object>>,
+    pub body: Vec<Stmt>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ref {
+    pub name: String,
+    pub qualifiers: Vec<String>,
+    pub subscripts: Vec<Expr>,
+    pub refmod: Option<RefMod>,
+    pub pos: Pos,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RefMod {
+    pub start: Box<Expr>,
+    pub length: Option<Box<Expr>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FunctionCall {
+    pub name: String,
+    pub args: Vec<Expr>,
+    /// A keyword argument, as in FUNCTION TRIM(X LEADING).
+    pub modifier: Option<String>,
+    pub refmod: Option<RefMod>,
+    pub pos: Pos,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Operand {
+    Ref(Ref),
+    Literal(Literal),
+    Function(FunctionCall),
+    LengthOf(Ref),
+    AddressOf(Ref),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Pow,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Expr {
+    Operand(Operand),
+    Neg(Box<Expr>),
+    Bin(Box<Expr>, BinOp, Box<Expr>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RelOp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Class {
+    Numeric,
+    Alphabetic,
+    Positive,
+    Negative,
+    Zero,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Cond {
+    Rel(Expr, RelOp, Expr),
+    Class(Expr, Class),
+    Name(Ref),
+    /// After AND or OR, a bare name that is either a condition-name or the object of an
+    /// abbreviated relation; which one depends on what the name resolves to.
+    NameOrRel { subject: Expr, op: RelOp, name: Ref },
+    Not(Box<Cond>),
+    And(Box<Cond>, Box<Cond>),
+    Or(Box<Cond>, Box<Cond>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Target {
+    pub r: Ref,
+    pub rounded: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Varying {
+    pub var: Ref,
+    pub from: Expr,
+    pub by: Expr,
+    pub until: Cond,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Loop {
+    Once,
+    Times(Expr),
+    Until { cond: Cond, test_after: bool },
+    Varying { varying: Box<Varying>, test_after: bool },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Stmt {
+    Move { from: Operand, to: Vec<Ref>, pos: Pos },
+    Compute { targets: Vec<Target>, expr: Expr, size_error: Option<SizeError>, pos: Pos },
+    /// ADD, SUBTRACT, MULTIPLY and DIVIDE, reduced to their arithmetic.
+    Arith(Box<Arith>),
+    If { cond: Cond, then: Vec<Stmt>, otherwise: Vec<Stmt>, pos: Pos },
+    PerformInline { body: Vec<Stmt>, repeat: Loop, pos: Pos },
+    PerformProc { from: ProcName, thru: Option<ProcName>, repeat: Loop, pos: Pos },
+    Evaluate { subjects: Vec<Subject>, whens: Vec<When>, other: Vec<Stmt>, pos: Pos },
+    Display { items: Vec<Operand>, no_advancing: bool, pos: Pos },
+    Open { files: Vec<(OpenMode, String)>, pos: Pos },
+    Close { files: Vec<String>, pos: Pos },
+    Read(Box<ReadStmt>),
+    Write { record: Ref, from: Option<Operand>, advancing: Option<Advancing>, invalid: Handlers, pos: Pos },
+    Rewrite { record: Ref, from: Option<Operand>, invalid: Handlers, pos: Pos },
+    Delete { file: String, invalid: Handlers, pos: Pos },
+    Start { file: String, key: Option<(RelOp, Ref)>, invalid: Handlers, pos: Pos },
+    Initialize { targets: Vec<Ref>, pos: Pos },
+    GoTo { target: ProcName, pos: Pos },
+    Goback { pos: Pos },
+    /// EXIT PROGRAM: returns from a called program; in the first program it does nothing.
+    ExitProgram { pos: Pos },
+    Call(Box<Call>),
+    Cancel { targets: Vec<Operand>, pos: Pos },
+    Set { set: SetStmt, pos: Pos },
+    Accept { target: Ref, from: AcceptFrom, pos: Pos },
+    String(Box<StringStmt>),
+    Unstring(Box<Unstring>),
+    Inspect(Box<Inspect>),
+    Search(Box<Search>),
+    /// NEXT SENTENCE: control passes to the statement after the next separator period.
+    NextSentence,
+    /// A separator period in the PROCEDURE DIVISION: where NEXT SENTENCE resumes.
+    SentenceEnd,
+    Exec(Box<ExecBlock>),
+    StopRun { pos: Pos },
+    Continue,
+    Exit(ExitKind),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SizeError {
+    pub on: Vec<Stmt>,
+    pub not_on: Vec<Stmt>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArithVerb {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+}
+
+/// One arithmetic statement: `targets` each receive `expr`, which is written in terms of the
+/// statement's operands and, for the forms without GIVING, the target itself (`Operand::Ref` of
+/// the target, placed by the parser).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Arith {
+    pub verb: ArithVerb,
+    pub computations: Vec<(Target, Expr)>,
+    pub remainder: Option<(Target, Expr, Expr)>,
+    pub size_error: Option<SizeError>,
+    pub pos: Pos,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArgMode {
+    Reference,
+    Content,
+    Value,
+}
+
+/// One CALL argument; `value` is None for OMITTED.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Arg {
+    pub mode: ArgMode,
+    pub value: Option<Operand>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Call {
+    pub target: Operand,
+    pub using: Vec<Arg>,
+    pub returning: Option<Ref>,
+    pub on_exception: Option<Vec<Stmt>>,
+    pub not_on_exception: Option<Vec<Stmt>>,
+    pub pos: Pos,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SetStmt {
+    ConditionTrue(Vec<Ref>),
+    /// SET targets TO value: an index or integer to a number, a pointer to ADDRESS OF, NULL or another pointer.
+    To { targets: Vec<Ref>, value: Operand },
+    /// SET ADDRESS OF targets TO pointer.
+    AddressOf { targets: Vec<Ref>, value: Operand },
+    UpDown { targets: Vec<Ref>, down: bool, by: Expr },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AcceptFrom {
+    Sysin,
+    Date { four_digit_year: bool },
+    Day { four_digit_year: bool },
+    DayOfWeek,
+    Time,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Delimiter {
+    Size,
+    By(Operand),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StringStmt {
+    pub sources: Vec<(Operand, Delimiter)>,
+    pub into: Ref,
+    pub pointer: Option<Ref>,
+    pub on_overflow: Option<Vec<Stmt>>,
+    pub not_on_overflow: Option<Vec<Stmt>>,
+    pub pos: Pos,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnstringInto {
+    pub target: Ref,
+    pub delimiter_in: Option<Ref>,
+    pub count_in: Option<Ref>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Unstring {
+    pub source: Ref,
+    /// Each delimiter, and whether ALL makes a run of it one delimiter.
+    pub delimiters: Vec<(bool, Operand)>,
+    pub into: Vec<UnstringInto>,
+    pub pointer: Option<Ref>,
+    pub tallying: Option<Ref>,
+    pub on_overflow: Option<Vec<Stmt>>,
+    pub not_on_overflow: Option<Vec<Stmt>>,
+    pub pos: Pos,
+}
+
+/// BEFORE or AFTER INITIAL value: where in the inspected item a phrase applies.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Bound {
+    pub after: bool,
+    pub value: Operand,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InspectMode {
+    Characters,
+    All,
+    Leading,
+    First,
+}
+
+/// One TALLYING or REPLACING phrase. `pattern` is None for CHARACTERS; `by` is None for TALLYING.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InspectPhrase {
+    pub mode: InspectMode,
+    pub pattern: Option<Operand>,
+    pub by: Option<Operand>,
+    pub counter: Option<Ref>,
+    pub bounds: Vec<Bound>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Inspect {
+    pub target: Ref,
+    pub tallying: Vec<InspectPhrase>,
+    pub replacing: Vec<InspectPhrase>,
+    pub converting: Option<(Operand, Operand, Vec<Bound>)>,
+    pub pos: Pos,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Search {
+    pub table: Ref,
+    pub all: bool,
+    pub varying: Option<Ref>,
+    pub at_end: Option<Vec<Stmt>>,
+    pub whens: Vec<(Cond, Vec<Stmt>)>,
+    pub pos: Pos,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExecKind {
+    Sql,
+    Cics,
+    Dli,
+    Other,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExecArg {
+    Operand(Operand),
+    /// An argument that is not data: a paragraph for HANDLE CONDITION, or text that did not parse.
+    Text(String),
+}
+
+/// An EXEC ... END-EXEC block, read but not translated.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExecBlock {
+    pub kind: ExecKind,
+    /// The command: SELECT, INCLUDE, DECLARE CURSOR, LINK, SEND MAP and so on.
+    pub command: String,
+    /// CICS options, each with its argument.
+    pub options: Vec<(String, Option<ExecArg>)>,
+    /// SQL host variables and indicator variables.
+    pub host_variables: Vec<Ref>,
+    pub text: String,
+    pub pos: Pos,
+}
+
+impl ExecBlock {
+    /// Whether the block only declares, so a precompiler turns it into data or nothing.
+    pub fn declarative(&self) -> bool {
+        self.kind == ExecKind::Sql
+            && matches!(self.command.as_str(), "INCLUDE" | "BEGIN DECLARE SECTION" | "END DECLARE SECTION" | "WHENEVER" | "DECLARE CURSOR" | "DECLARE TABLE" | "DECLARE STATEMENT")
+    }
+}
+
+/// The statements of an ON phrase (AT END, INVALID KEY, ...) and of its NOT ON phrase.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Handlers {
+    pub on: Option<Vec<Stmt>>,
+    pub not_on: Option<Vec<Stmt>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadStmt {
+    pub file: String,
+    /// READ NEXT or PREVIOUS: the next record by the key of reference, even under dynamic access.
+    pub next: bool,
+    pub previous: bool,
+    pub into: Option<Ref>,
+    /// READ ... KEY IS: the key of reference for a random read.
+    pub key: Option<Ref>,
+    pub at_end: Handlers,
+    pub invalid: Handlers,
+    pub pos: Pos,
+}
+

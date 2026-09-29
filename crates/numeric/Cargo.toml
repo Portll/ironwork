@@ -1,0 +1,13 @@
+[package]
+name = "ironwork-numeric"
+description = "ironwork for COBOL: IBM Enterprise COBOL numeric semantics under ARITH, TRUNC, NUMPROC and CODEPAGE"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+zarch = { package = "ironwork-zarch", path = "../zarch" }
+
+[lints]
+workspace = true

@@ -1,0 +1,18 @@
+[package]
+name = "ironwork-exec"
+description = "ironwork for COBOL: storage layout and an interpreter over EBCDIC storage"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+numeric = { package = "ironwork-numeric", path = "../numeric" }
+syntax = { package = "ironwork-syntax", path = "../syntax" }
+zarch = { package = "ironwork-zarch", path = "../zarch" }
+
+[dev-dependencies]
+oracle = { package = "ironwork-oracle", path = "../oracle" }
+
+[lints]
+workspace = true
