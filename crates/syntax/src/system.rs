@@ -41,32 +41,50 @@ pub const EIB: &[(&str, &str)] = &[
     ("EIBRLDBK", "X(1)"),
 ];
 
-const DFHAID: &[&str] = &[
-    "DFHENTER", "DFHCLEAR", "DFHPA1", "DFHPA2", "DFHPA3", "DFHPF1", "DFHPF2", "DFHPF3", "DFHPF4", "DFHPF5", "DFHPF6", "DFHPF7", "DFHPF8",
-    "DFHPF9", "DFHPF10", "DFHPF11", "DFHPF12", "DFHPF13", "DFHPF14", "DFHPF15", "DFHPF16", "DFHPF17", "DFHPF18", "DFHPF19", "DFHPF20",
-    "DFHPF21", "DFHPF22", "DFHPF23", "DFHPF24", "DFHOPID", "DFHMSRE", "DFHTRIG", "DFHPEN", "DFHCLRP", "DFHSTRF",
+const DFHAID: &[(&str, Option<&str>)] = &[
+    ("DFHNULL", Some("00")), ("DFHENTER", Some("7D")), ("DFHCLEAR", Some("6D")), ("DFHCLRP", Some("6A")), ("DFHPEN", Some("7E")),
+    ("DFHOPID", Some("E6")), ("DFHMSRE", Some("E7")), ("DFHSTRF", Some("88")), ("DFHTRIG", Some("7F")), ("DFHPA1", Some("6C")),
+    ("DFHPA2", Some("6E")), ("DFHPA3", Some("6B")), ("DFHPF1", Some("F1")), ("DFHPF2", Some("F2")), ("DFHPF3", Some("F3")),
+    ("DFHPF4", Some("F4")), ("DFHPF5", Some("F5")), ("DFHPF6", Some("F6")), ("DFHPF7", Some("F7")), ("DFHPF8", Some("F8")),
+    ("DFHPF9", Some("F9")), ("DFHPF10", Some("7A")), ("DFHPF11", Some("7B")), ("DFHPF12", Some("7C")), ("DFHPF13", Some("C1")),
+    ("DFHPF14", Some("C2")), ("DFHPF15", Some("C3")), ("DFHPF16", Some("C4")), ("DFHPF17", Some("C5")), ("DFHPF18", Some("C6")),
+    ("DFHPF19", Some("C7")), ("DFHPF20", Some("C8")), ("DFHPF21", Some("C9")), ("DFHPF22", Some("4A")), ("DFHPF23", Some("4B")),
+    ("DFHPF24", Some("4C")),
 ];
 
-const DFHBMSCA: &[&str] = &[
-    "DFHBMPEM", "DFHBMPNL", "DFHBMPFF", "DFHBMPCR", "DFHBMASK", "DFHBMUNP", "DFHBMUNN", "DFHBMPRO", "DFHBMBRY", "DFHBMDAR", "DFHBMFSE",
-    "DFHBMPRF", "DFHBMASF", "DFHBMASB", "DFHBMPSO", "DFHBMPSI", "DFHBMEOF", "DFHBMCUR", "DFHBMEC", "DFHBMFLG", "DFHBMDET", "DFHSA",
-    "DFHERROR", "DFHCOLOR", "DFHPS", "DFHHLT", "DFH3270", "DFHVAL", "DFHOUTLN", "DFHBKTRN", "DFHALL", "DFHDFT", "DFHDFCOL", "DFHBLUE",
-    "DFHRED", "DFHPINK", "DFHGREEN", "DFHTURQ", "DFHYELLO", "DFHNEUTR", "DFHBASE", "DFHDFHI", "DFHBLINK", "DFHREVRS", "DFHUNDLN",
-    "DFHMFIL", "DFHMENT", "DFHMFE", "DFHMT", "DFHMFT", "DFHMET", "DFHMFET", "DFHUNNOD", "DFHUNIMD", "DFHUNNUM", "DFHUNNUB", "DFHUNINT",
-    "DFHUNNON", "DFHPROTI", "DFHPROTN", "DFHDFFR", "DFHUNDER", "DFHRIGHT", "DFHOVER", "DFHLEFT", "DFHBOX", "DFHSOSI", "DFHTRANS",
-    "DFHOPAQ",
+/// IBM's "BMS-related constants", each with its byte where one is known here. DFHBMFLG carries the
+/// conditions DFHERASE and DFHCURSR instead of a value.
+const DFHBMSCA: &[(&str, Option<&str>)] = &[
+    ("DFHBMPEM", Some("19")), ("DFHBMPNL", Some("15")), ("DFHBMPFF", Some("0C")), ("DFHBMPCR", Some("0D")), ("DFHBMASK", Some("F0")),
+    ("DFHBMUNP", Some("40")), ("DFHBMUNN", Some("50")), ("DFHBMPRO", Some("60")), ("DFHBMBRY", Some("C8")), ("DFHBMDAR", Some("4C")),
+    ("DFHBMFSE", Some("C1")), ("DFHBMPRF", Some("61")), ("DFHBMASF", Some("F1")), ("DFHBMASB", Some("F8")), ("DFHBMPSO", Some("0E")),
+    ("DFHBMPSI", Some("0F")), ("DFHBMEOF", Some("80")), ("DFHBMCUR", Some("02")), ("DFHBMEC", Some("82")), ("DFHBMFLG", None),
+    ("DFHBMDET", None), ("DFHSA", Some("28")), ("DFHERROR", None), ("DFHCOLOR", Some("42")), ("DFHPS", Some("43")), ("DFHHLT", Some("41")),
+    ("DFH3270", Some("C0")), ("DFHVAL", Some("C1")), ("DFHOUTLN", Some("C2")), ("DFHBKTRN", Some("46")), ("DFHALL", None),
+    ("DFHDFT", Some("FF")), ("DFHDFCOL", None), ("DFHBLUE", Some("F1")), ("DFHRED", Some("F2")), ("DFHPINK", Some("F3")),
+    ("DFHGREEN", Some("F4")), ("DFHTURQ", Some("F5")), ("DFHYELLO", Some("F6")), ("DFHNEUTR", Some("F7")), ("DFHBASE", None),
+    ("DFHDFHI", None), ("DFHBLINK", Some("F1")), ("DFHREVRS", Some("F2")), ("DFHUNDLN", Some("F4")), ("DFHMFIL", None),
+    ("DFHMENT", None), ("DFHMFE", None), ("DFHMT", None), ("DFHMFT", None), ("DFHMET", None), ("DFHMFET", None), ("DFHUNNOD", None),
+    ("DFHUNIMD", None), ("DFHUNNUM", None), ("DFHUNNUB", None), ("DFHUNINT", None), ("DFHUNNON", None), ("DFHPROTI", None),
+    ("DFHPROTN", None), ("DFHDFFR", None), ("DFHUNDER", None), ("DFHRIGHT", None), ("DFHOVER", None), ("DFHLEFT", None), ("DFHBOX", None),
+    ("DFHSOSI", None), ("DFHTRANS", None), ("DFHOPAQ", None),
 ];
 
-fn constants(group: &str, names: &[&str]) -> String {
+fn constants(group: &str, names: &[(&str, Option<&str>)]) -> String {
     let mut out = format!("       01  {group}.\n");
-    for n in names {
-        out.push_str(&format!("           02 {n} PIC X.\n"));
+    for (n, value) in names {
+        match value {
+            Some(v) => out.push_str(&format!("           02 {n} PIC X VALUE X'{v}'.\n")),
+            None => out.push_str(&format!("           02 {n} PIC X.\n")),
+        }
+        if *n == "DFHBMFLG" {
+            out.push_str("              88 DFHERASE VALUES X'80' X'82'.\n              88 DFHCURSR VALUES X'02' X'82'.\n");
+        }
     }
     out
 }
 
-/// The text of a system member, for a COPY or EXEC SQL INCLUDE no library answers. The AID and
-/// attribute constants are declared by name only; their values arrive with the terminal support.
+/// The text of a system member, for a COPY or EXEC SQL INCLUDE no library answers.
 pub fn member(name: &str) -> Option<String> {
     Some(match name.to_ascii_uppercase().as_str() {
         "SQLCA" => [

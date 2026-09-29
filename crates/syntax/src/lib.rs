@@ -2,6 +2,7 @@
 //! storage or execution.
 
 pub mod ast;
+pub mod bms;
 pub mod copy;
 pub mod lexer;
 pub mod parser;

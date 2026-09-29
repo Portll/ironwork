@@ -2,6 +2,7 @@
 //! text-words, as the standard defines them, and replacement edits the text itself, so a
 //! pseudo-text such as `==:TAG:==` can replace part of a word like `:TAG:-RECORD`.
 
+use crate::bms;
 use crate::source::{self, Source};
 use crate::system;
 use crate::{Error, Pos};
@@ -22,6 +23,14 @@ impl Libraries {
     }
 
     fn find(&self, name: &str, library: Option<&str>) -> Option<PathBuf> {
+        self.find_with(name, library, EXTENSIONS)
+    }
+
+    pub(crate) fn find_bms(&self, name: &str, library: Option<&str>) -> Option<PathBuf> {
+        self.find_with(name, library, &[".bms", ".BMS"])
+    }
+
+    fn find_with(&self, name: &str, library: Option<&str>, extensions: &[&str]) -> Option<PathBuf> {
         let mut places: Vec<PathBuf> = Vec::new();
         for d in &self.dirs {
             if let Some(lib) = library {
@@ -30,7 +39,7 @@ impl Libraries {
             places.push(d.clone());
         }
         let names = [name.to_owned(), name.to_ascii_uppercase(), name.to_ascii_lowercase()];
-        places.iter().flat_map(|p| names.iter().flat_map(move |n| EXTENSIONS.iter().map(move |e| p.join(format!("{n}{e}"))))).find(|p| p.is_file())
+        places.iter().flat_map(|p| names.iter().flat_map(move |n| extensions.iter().map(move |e| p.join(format!("{n}{e}"))))).find(|p| p.is_file())
     }
 }
 
@@ -273,9 +282,16 @@ fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>,
         let own = sql && matches!(name.to_ascii_uppercase().as_str(), "SQLCA" | "SQLDA");
         let path = if own { None } else { libraries.find(&name, library.as_deref()) };
         let verb = if sql { "EXEC SQL INCLUDE" } else { "COPY" };
-        let (key, member) = match path {
-            Some(path) => (path.display().to_string(), read_member(&path, pos, files)?),
-            None => {
+        let mapset = if own || path.is_some() { None } else { bms::load(libraries, &name, library.as_deref()) };
+        let (key, member) = match (path, mapset) {
+            (Some(path), _) => (path.display().to_string(), read_member(&path, pos, files)?),
+            (None, Some((path, mapset))) => {
+                let mapset = mapset.map_err(|e| Error::at(pos, format!("{verb} {name}: {}", e.place(&path.display().to_string()))))?;
+                let file = u16::try_from(files.len()).map_err(|_| Error::at(pos, "more than 65535 copy members"))?;
+                files.push(path.display().to_string());
+                (path.display().to_string(), source::read_file(&bms::symbolic_map(&mapset), file)?)
+            }
+            (None, None) => {
                 let text = system::member(&name).ok_or_else(|| Error::at(pos, format!("{verb} {name}: no such member in the copy libraries")))?;
                 let key = format!("(system member {})", name.to_ascii_uppercase());
                 let file = u16::try_from(files.len()).map_err(|_| Error::at(pos, "more than 65535 copy members"))?;
