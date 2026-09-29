@@ -96,8 +96,14 @@ pub fn unbase64(text: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// A client nonce from `std`'s OS-seeded hasher keys, the process and the clock (assumption SQ6).
+/// A client nonce: 18 bytes from the operating system's random generator where std can read one
+/// (/dev/urandom on Unix), and elsewhere from std's OS-seeded hasher keys, the process and the clock
+/// (assumption SQ6).
 pub fn nonce() -> String {
+    let mut bytes = [0u8; 18];
+    if system_random(&mut bytes) {
+        return base64(&bytes);
+    }
     use std::hash::{BuildHasher, Hasher};
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
     let bytes: Vec<u8> = (0..3u64)
@@ -110,6 +116,17 @@ pub fn nonce() -> String {
         })
         .collect();
     base64(&bytes)
+}
+
+#[cfg(unix)]
+fn system_random(bytes: &mut [u8]) -> bool {
+    use std::io::Read;
+    std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(bytes)).is_ok()
+}
+
+#[cfg(not(unix))]
+fn system_random(_: &mut [u8]) -> bool {
+    false
 }
 
 /// One SCRAM-SHA-256 exchange, without channel binding.
@@ -216,5 +233,13 @@ mod tests {
     #[test]
     fn nonces_differ() {
         assert_ne!(nonce(), nonce());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_unix_nonce_is_the_systems_randomness() {
+        let mut bytes = [0u8; 18];
+        assert!(system_random(&mut bytes));
+        assert_eq!(nonce().len(), 24);
     }
 }
