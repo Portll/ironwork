@@ -126,17 +126,7 @@ pub enum Usage {
     ProgramPointer,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SignPosition {
-    Leading,
-    Trailing,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SignClause {
-    pub position: SignPosition,
-    pub separate: bool,
-}
+pub use rt::vocab::{SignClause, SignPosition};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DataEntry {
@@ -499,13 +489,7 @@ pub struct Bound {
     pub value: Operand,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum InspectMode {
-    Characters,
-    All,
-    Leading,
-    First,
-}
+pub use rt::vocab::InspectMode;
 
 /// One TALLYING or REPLACING phrase. `pattern` is None for CHARACTERS; `by` is None for TALLYING.
 #[derive(Clone, Debug, PartialEq, Eq)]

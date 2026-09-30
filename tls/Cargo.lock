@@ -137,6 +137,7 @@ name = "ironwork-exec"
 version = "0.1.1"
 dependencies = [
  "ironwork-numeric",
+ "ironwork-rt",
  "ironwork-syntax",
  "ironwork-zarch",
 ]
@@ -149,8 +150,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ironwork-rt"
+version = "0.1.1"
+dependencies = [
+ "ironwork-numeric",
+ "ironwork-zarch",
+]
+
+[[package]]
 name = "ironwork-syntax"
 version = "0.1.1"
+dependencies = [
+ "ironwork-rt",
+]
 
 [[package]]
 name = "ironwork-tls"

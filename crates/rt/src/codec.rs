@@ -2,7 +2,7 @@
 //! share it, so a host variable sends exactly the value a COMPUTE would read.
 
 use numeric::Numproc;
-use syntax::ast::{SignClause, SignPosition};
+use crate::vocab::{SignClause, SignPosition};
 use zarch::check::ProgramCheck;
 use zarch::decimal::{self, Decimal};
 

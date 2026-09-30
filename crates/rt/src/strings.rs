@@ -1,6 +1,6 @@
 //! The byte-level work of STRING, UNSTRING and INSPECT, apart from storage and operands.
 
-use syntax::ast::InspectMode;
+use crate::vocab::InspectMode;
 
 /// One INSPECT phrase, resolved to bytes: `pattern` is empty for CHARACTERS.
 pub struct Phrase {

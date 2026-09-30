@@ -11,5 +11,8 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[dependencies]
+rt = { package = "ironwork-rt", path = "../rt", version = "0.1.1" }
+
 [lints]
 workspace = true

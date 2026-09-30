@@ -4,7 +4,7 @@
 pub mod abend;
 pub use rt::calendar;
 pub mod cics;
-pub mod codec;
+pub use rt::codec;
 pub mod collating;
 pub mod edit;
 pub mod files;
@@ -17,7 +17,7 @@ pub mod printer;
 pub mod report;
 mod sort;
 pub mod sql;
-pub mod strings;
+pub use rt::strings;
 pub mod terminal;
 #[cfg(test)]
 mod testing;

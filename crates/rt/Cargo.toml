@@ -11,5 +11,9 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[dependencies]
+numeric = { package = "ironwork-numeric", path = "../numeric", version = "0.1.1" }
+zarch = { package = "ironwork-zarch", path = "../zarch", version = "0.1.1" }
+
 [lints]
 workspace = true
