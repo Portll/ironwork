@@ -842,7 +842,8 @@ impl Parser<'_> {
     }
 
     fn section_header(&self) -> bool {
-        self.tokens.get(self.at).is_some_and(|t| matches!(t.tok, Tok::Word(_))) && self.word_at(1) == Some("SECTION")
+        // EXIT SECTION is a statement; EXIT, reserved, names no section.
+        self.tokens.get(self.at).is_some_and(|t| matches!(t.tok, Tok::Word(_))) && self.word_at(0) != Some("EXIT") && self.word_at(1) == Some("SECTION")
     }
 
     fn paragraphs(&mut self) -> R<Vec<Paragraph>> {
@@ -2255,5 +2256,13 @@ mod tests {
         assert!(matches!(advancing(outer, 1), Advancing::Mnemonic { before: true, environment, .. } if environment == "CSP"));
         assert!(matches!(advancing(outer, 2), Advancing::Lines { before: false, .. }));
         assert!(matches!(advancing(inner, 0), Advancing::Mnemonic { environment, .. } if environment == "AFP-5A"));
+    }
+
+    #[test]
+    fn exit_section_opening_a_paragraph_is_a_statement_not_a_section() {
+        let p = program("       PROCEDURE DIVISION.\n       MAIN-LINE SECTION.\n       SKIPPED.\n           EXIT SECTION.\n       NEVER.\n           GOBACK.\n");
+        let names: Vec<&str> = p.paragraphs.iter().map(|q| q.name.as_str()).collect();
+        assert_eq!(names, ["MAIN-LINE", "SKIPPED", "NEVER"]);
+        assert!(matches!(p.paragraphs[1].statements[..], [Stmt::Exit(ExitKind::Section), Stmt::SentenceEnd]), "{:?}", p.paragraphs[1].statements);
     }
 }
