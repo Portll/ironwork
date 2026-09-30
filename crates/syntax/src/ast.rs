@@ -338,8 +338,9 @@ pub enum Cond {
     Class(Expr, Class),
     Name(Ref),
     /// After AND or OR, a bare name that is either a condition-name or the object of an
-    /// abbreviated relation; which one depends on what the name resolves to.
-    NameOrRel { subject: Expr, op: RelOp, name: Ref },
+    /// abbreviated relation; which one depends on what the name resolves to. `negated` is a NOT
+    /// the relational operator carries, as in NOT =.
+    NameOrRel { subject: Expr, op: RelOp, negated: bool, name: Ref },
     Not(Box<Cond>),
     And(Box<Cond>, Box<Cond>),
     Or(Box<Cond>, Box<Cond>),

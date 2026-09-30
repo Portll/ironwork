@@ -537,3 +537,26 @@ fn a_paragraph_name_in_two_sections_is_the_referencing_sections_own() {
     assert_eq!(out, "FIRST\nFIRST\nSECOND\n");
     assert!(compile_errors(&sections("PERFORM P1.")).contains("P1 names more than one paragraph"));
 }
+
+#[test]
+fn abbreviated_relations_keep_the_subject_the_operator_and_its_not() {
+    let data = "       01  S PIC XX VALUE '61'.\n       01  D PIC 999 VALUE 15.\n       01  P PIC 9V999 VALUE .2.\n       01  B PIC 999 VALUE 20.\n";
+    let out = run(&program(
+        "",
+        data,
+        &[
+            line("IF S = ('02' OR '03' OR '61') DISPLAY 'LIST'."),
+            line("IF S = ('02' OR NOT '61') DISPLAY 'NO'."),
+            line("IF D < 1 OR = 14 OR = 15 DISPLAY 'OR ='."),
+            line("IF (P >= .15 AND <= .202) DISPLAY 'RANGE'."),
+            line("IF D > 10 AND NOT > 20 DISPLAY 'NOT >'."),
+            line("IF D NOT = 10 AND 15 DISPLAY 'NO'."),
+            line("IF D NOT = 10 AND 16 DISPLAY 'NOT = LITERAL'."),
+            line("IF D NOT < 10 AND B DISPLAY 'NO'."),
+            line("IF D NOT > 10 OR B DISPLAY 'NOT > ITEM'."),
+            line("GOBACK."),
+        ]
+        .concat(),
+    ));
+    assert_eq!(out, "LIST\nOR =\nRANGE\nNOT >\nNOT = LITERAL\nNOT > ITEM\n");
+}

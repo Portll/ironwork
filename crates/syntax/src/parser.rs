@@ -30,6 +30,12 @@ const VERBS: &[&str] = &[
 ];
 
 /// Words that end a phrase or a nested block.
+/// `subject op object`, negated when the operator carries NOT.
+fn relation(subject: Expr, op: RelOp, negated: bool, object: Expr) -> Cond {
+    let c = Cond::Rel(subject, op, object);
+    if negated { Cond::Not(Box::new(c)) } else { c }
+}
+
 /// A number written as digits alone, which can be a procedure-name.
 fn digits(t: &Tok) -> bool {
     matches!(t, Tok::Number(n) if n.bytes().all(|b| b.is_ascii_digit()))
@@ -2641,7 +2647,7 @@ impl Parser<'_> {
         self.or_cond(&mut last)
     }
 
-    fn or_cond(&mut self, last: &mut Option<(Expr, RelOp)>) -> R<Cond> {
+    fn or_cond(&mut self, last: &mut Option<(Expr, RelOp, bool)>) -> R<Cond> {
         let mut left = self.and_cond(last)?;
         while self.accept_word("OR") {
             left = Cond::Or(Box::new(left), Box::new(self.and_cond(last)?));
@@ -2649,7 +2655,7 @@ impl Parser<'_> {
         Ok(left)
     }
 
-    fn and_cond(&mut self, last: &mut Option<(Expr, RelOp)>) -> R<Cond> {
+    fn and_cond(&mut self, last: &mut Option<(Expr, RelOp, bool)>) -> R<Cond> {
         let mut left = self.not_cond(last)?;
         while self.accept_word("AND") {
             left = Cond::And(Box::new(left), Box::new(self.not_cond(last)?));
@@ -2657,7 +2663,7 @@ impl Parser<'_> {
         Ok(left)
     }
 
-    fn not_cond(&mut self, last: &mut Option<(Expr, RelOp)>) -> R<Cond> {
+    fn not_cond(&mut self, last: &mut Option<(Expr, RelOp, bool)>) -> R<Cond> {
         if self.is_word("NOT") && !self.relop_ahead(1) {
             self.at += 1;
             return Ok(Cond::Not(Box::new(self.not_cond(last)?)));
@@ -2670,7 +2676,14 @@ impl Parser<'_> {
             || matches!(self.word_at(ahead), Some("EQUAL" | "GREATER" | "LESS"))
     }
 
-    fn primary_cond(&mut self, last: &mut Option<(Expr, RelOp)>) -> R<Cond> {
+    fn primary_cond(&mut self, last: &mut Option<(Expr, RelOp, bool)>) -> R<Cond> {
+        if let Some((subject, ..)) = last.clone()
+            && (self.relop_ahead(0) || self.is_word("NOT") && self.relop_ahead(1))
+        {
+            let negated = self.accept_word("NOT");
+            let op = self.relop()?.ok_or_else(|| self.error("a relational operator"))?;
+            return self.objects(subject, op, negated, last);
+        }
         if self.peek() == Some(&Tok::LParen) {
             let save = self.at;
             self.at += 1;
@@ -2693,9 +2706,7 @@ impl Parser<'_> {
         };
         let wrap = |c: Cond| if negated { Cond::Not(Box::new(c)) } else { c };
         if let Some(op) = self.relop()? {
-            let right = self.expr()?;
-            *last = Some((left.clone(), op));
-            return Ok(wrap(Cond::Rel(left, op, right)));
+            return self.objects(left, op, negated, last);
         }
         if let Some(class) = self.accept_any(&["NUMERIC", "ALPHABETIC", "POSITIVE", "NEGATIVE", "ZERO"]) {
             let class = match class.as_str() {
@@ -2711,11 +2722,66 @@ impl Parser<'_> {
             return Err(self.error("a relational operator or class after NOT"));
         }
         match (left, last.clone()) {
-            (Expr::Operand(Operand::Ref(name)), Some((subject, op))) if self.abbreviation_context() => Ok(Cond::NameOrRel { subject, op, name }),
-            (right, Some((subject, op))) if !matches!(&right, Expr::Operand(Operand::Ref(_))) => Ok(Cond::Rel(subject, op, right)),
+            (Expr::Operand(Operand::Ref(name)), Some((subject, op, negated))) if self.abbreviation_context() => Ok(Cond::NameOrRel { subject, op, negated, name }),
+            (right, Some((subject, op, negated))) if !matches!(&right, Expr::Operand(Operand::Ref(_))) => Ok(relation(subject, op, negated, right)),
             (Expr::Operand(Operand::Ref(r)), _) => Ok(Cond::Name(r)),
             (_, _) => Err(self.error("a relational operator")),
         }
+    }
+
+    /// The object of a relation, or a parenthesised list of objects the operator is distributed
+    /// over. The subject and operator stay current for the abbreviated relations that follow.
+    fn objects(&mut self, subject: Expr, op: RelOp, negated: bool, last: &mut Option<(Expr, RelOp, bool)>) -> R<Cond> {
+        *last = Some((subject.clone(), op, negated));
+        let start = self.at;
+        match self.distributed(&subject, op, negated) {
+            Ok(Some(c)) => return Ok(c),
+            _ => self.at = start,
+        }
+        let object = self.expr()?;
+        Ok(relation(subject, op, negated, object))
+    }
+
+    /// `(` objects joined by AND, OR and NOT `)`, each compared with the subject; None when the
+    /// parentheses hold no AND or OR, and so group an arithmetic expression.
+    fn distributed(&mut self, subject: &Expr, op: RelOp, negated: bool) -> R<Option<Cond>> {
+        let start = self.at;
+        if !self.accept(&Tok::LParen) {
+            return Ok(None);
+        }
+        let mut logical = false;
+        let mut any = self.distributed_all(subject, op, negated, &mut logical)?;
+        while self.accept_word("OR") {
+            logical = true;
+            any = Cond::Or(Box::new(any), Box::new(self.distributed_all(subject, op, negated, &mut logical)?));
+        }
+        if !logical || !self.accept(&Tok::RParen) {
+            self.at = start;
+            return Ok(None);
+        }
+        Ok(Some(any))
+    }
+
+    fn distributed_all(&mut self, subject: &Expr, op: RelOp, negated: bool, logical: &mut bool) -> R<Cond> {
+        let mut all = self.distributed_object(subject, op, negated)?;
+        while self.accept_word("AND") {
+            *logical = true;
+            all = Cond::And(Box::new(all), Box::new(self.distributed_object(subject, op, negated)?));
+        }
+        Ok(all)
+    }
+
+    fn distributed_object(&mut self, subject: &Expr, op: RelOp, negated: bool) -> R<Cond> {
+        if self.accept_word("NOT") {
+            return Ok(Cond::Not(Box::new(self.distributed_object(subject, op, negated)?)));
+        }
+        let start = self.at;
+        match self.distributed(subject, op, negated) {
+            Ok(Some(group)) => return Ok(group),
+            _ => self.at = start,
+        }
+        let object = self.expr()?;
+        Ok(relation(subject.clone(), op, negated, object))
     }
 
     /// After AND or OR, an operand with no operator of its own continues an abbreviated relation.

@@ -1319,9 +1319,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Cond::And(a, b) => self.condition(a, pos)? && self.condition(b, pos)?,
             Cond::Or(a, b) => self.condition(a, pos)? || self.condition(b, pos)?,
             Cond::Class(e, class) => self.class(e, *class, pos)?,
-            Cond::NameOrRel { subject, op, name } => match self.resolve(name)? {
+            Cond::NameOrRel { subject, op, negated, name } => match self.resolve(name)? {
                 Resolved::Condition(_) => self.condition(&Cond::Name(name.clone()), pos)?,
-                Resolved::Item(_) => self.condition(&Cond::Rel(subject.clone(), *op, Expr::Operand(Operand::Ref(name.clone()))), pos)?,
+                Resolved::Item(_) => self.condition(&Cond::Rel(subject.clone(), *op, Expr::Operand(Operand::Ref(name.clone()))), pos)? != *negated,
             },
             Cond::Name(r) => {
                 let Resolved::Condition(index) = self.resolve(r)? else {

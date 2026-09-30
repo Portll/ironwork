@@ -69,8 +69,9 @@ impl Lower<'_> {
             Cond::And(a, b) => Test::And(Box::new(self.test(a, pos)?), Box::new(self.test(b, pos)?)),
             Cond::Or(a, b) => Test::Or(Box::new(self.test(a, pos)?), Box::new(self.test(b, pos)?)),
             Cond::Class(e, class) => self.class(e, *class, pos)?,
-            Cond::NameOrRel { subject, op, name } => match self.layout.resolve(&name.name, &name.qualifiers, name.pos) {
+            Cond::NameOrRel { subject, op, negated, name } => match self.layout.resolve(&name.name, &name.qualifiers, name.pos) {
                 Ok(Resolved::Condition(_)) => self.condition_name(name, pos)?,
+                Ok(Resolved::Item(_)) if *negated => self.relation(subject, *op, &Expr::Operand(Operand::Ref(name.clone())), pos)?.not(),
                 Ok(Resolved::Item(_)) => self.relation(subject, *op, &Expr::Operand(Operand::Ref(name.clone())), pos)?,
                 Err(e) => Test::Abend(self.ironwork(&e.message)?, name.pos),
             },
