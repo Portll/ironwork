@@ -209,6 +209,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     env:
       VERSION: ${{ needs.version.outputs.version }}
       TAG: ${{ github.ref_name }}
@@ -229,7 +231,7 @@ jobs:
         with:
           name: npm
           path: npm/
-      - name: Archive and publish
+      - name: Archive
         run: |
           mkdir out
           for dir in bin/*/; do
@@ -252,5 +254,12 @@ jobs:
           done
           cp npm/portll-ironwork-*.tgz out/
           (cd out && sha256sum -- * > SHA256SUMS)
+      # SLSA build provenance for each archive, signed through GitHub's OIDC identity:
+      # gh attestation verify <file> -R Portll/ironwork
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: 'out/*'
+      - name: Publish
+        run: |
           gh release create "$TAG" out/* --verify-tag --title "ironwork $VERSION" \
-            --notes "ironwork for COBOL $VERSION. Builds for Linux (static), macOS and Windows, and the npm package @portll/ironwork. The ironwork-tls archives are the same builds with TLS for --sql-db (rustls, sslmode=verify-full). The Python package is on PyPI as ironwork, and the crates are on crates.io."
+            --notes "ironwork for COBOL $VERSION. Builds for Linux (static), macOS and Windows, and the npm package @portll/ironwork. The ironwork-tls archives are the same builds with TLS for --sql-db (rustls, sslmode=verify-full). The Python package is on PyPI as ironwork, and the crates are on crates.io. Each file carries SLSA build provenance: gh attestation verify <file> -R Portll/ironwork."
