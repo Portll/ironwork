@@ -219,7 +219,8 @@ The subset the interpreter runs today:
   events to its processing procedure, in segments through END-OF-INPUT, with XML-TEXT, XML-NTEXT and
   the namespace registers, and XMLSS's codes in XML-CODE (C118). XML GENERATE, with COUNT, ENCODING,
   XML-DECLARATION, ATTRIBUTES, NAMESPACE and its prefix, NAME, TYPE, SUPPRESS and ON EXCEPTION, sets
-  XML-CODE (C119). What is not Enterprise COBOL is refused as such:
+  XML-CODE (C119). JSON PARSE, with NAME and OMITTED, SUPPRESS, CONVERTING, INDICATING, IGNORING and
+  ENCODING, moves each matched value by MOVE's rules and sets JSON-CODE and JSON-STATUS (C170). What is not Enterprise COBOL is refused as such:
   `<>`, literals joined with `&`, SET ENVIRONMENT and ACCEPT ... FROM ENVIRONMENT.
 - **Subprograms:** several and nested programs per source; CALL (static and dynamic) USING BY
   REFERENCE, BY CONTENT, BY VALUE and OMITTED, RETURNING, ON EXCEPTION; PROCEDURE DIVISION USING

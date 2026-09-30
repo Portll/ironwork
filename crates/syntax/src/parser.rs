@@ -47,7 +47,7 @@ const PHRASE_WORDS: &[&str] = &[
 
 /// The phrases of JSON GENERATE, which end a list of NAME or SUPPRESS operands; NAME, INDICATING
 /// and ENCODING are not reserved words, so they are phrases only here.
-const JSON_PHRASES: &[&str] = &["COUNT", "INDICATING", "ENCODING", "NAME", "SUPPRESS", "CONVERTING", "ON", "NOT", "EXCEPTION", "END-JSON", "ALSO"];
+const JSON_PHRASES: &[&str] = &["COUNT", "INDICATING", "ENCODING", "NAME", "SUPPRESS", "CONVERTING", "IGNORING", "WITH", "DETAIL", "ON", "NOT", "EXCEPTION", "END-JSON", "ALSO"];
 
 /// The phrases of XML GENERATE, which end a list of NAME, TYPE or SUPPRESS operands.
 const XML_PHRASES: &[&str] =
@@ -1197,6 +1197,7 @@ impl Parser<'_> {
             "CALL" => Stmt::Call(Box::new(self.call(pos)?)),
             "INVOKE" => Stmt::Invoke(Box::new(self.invoke(pos)?)),
             "JSON" if self.accept_word("GENERATE") => Stmt::JsonGenerate(Box::new(self.json_generate(pos)?)),
+            "JSON" if self.accept_word("PARSE") => Stmt::JsonParse(Box::new(self.json_parse(pos)?)),
             "XML" if self.accept_word("PARSE") => Stmt::XmlParse(Box::new(self.xml_parse(pos)?)),
             "XML" if self.accept_word("GENERATE") => Stmt::XmlGenerate(Box::new(self.xml_generate(pos)?)),
             "CANCEL" => {
@@ -1745,6 +1746,132 @@ impl Parser<'_> {
         self.accept_word("END-JSON");
         (g.on_exception, g.not_on_exception) = (h.on, h.not_on);
         Ok(g)
+    }
+
+    /// USING and a condition-name, two joined by AND, or two literals joined by AND; with `inside`,
+    /// the literals take IN and their item.
+    fn flag(&mut self, inside: bool) -> R<(Flag, Option<Ref>)> {
+        self.expect_word("USING")?;
+        if self.starts_ref() {
+            let first = self.reference()?;
+            if self.accept_word("AND") {
+                return Ok((Flag::Conditions(first, self.reference()?), None));
+            }
+            return Ok((Flag::Condition(first), None));
+        }
+        let on = self.literal()?;
+        self.expect_word("AND")?;
+        let off = self.literal()?;
+        let item = if inside {
+            self.expect_word("IN")?;
+            Some(self.reference()?)
+        } else {
+            None
+        };
+        Ok((Flag::Literals(on, off), item))
+    }
+
+    fn json_parse(&mut self, pos: Pos) -> R<JsonParse> {
+        let source = self.reference()?;
+        self.expect_word("INTO")?;
+        let into = self.reference()?;
+        let mut j = JsonParse {
+            source,
+            into,
+            detail: false,
+            ignoring: Vec::new(),
+            indicating: Vec::new(),
+            encoding: None,
+            names: Vec::new(),
+            suppress: Vec::new(),
+            converting: Vec::new(),
+            on_exception: None,
+            not_on_exception: None,
+            pos,
+        };
+        loop {
+            if self.accept_word("WITH") || self.is_word("DETAIL") {
+                self.expect_word("DETAIL")?;
+                j.detail = true;
+            } else if self.accept_word("IGNORING") {
+                loop {
+                    self.accept_word("JSON");
+                    self.expect_word("NULL")?;
+                    self.expect_word("FOR")?;
+                    j.ignoring.push(if self.accept_word("ALL") { None } else { Some(self.reference()?) });
+                    if !self.accept_word("ALSO") {
+                        break;
+                    }
+                }
+            } else if self.accept_word("INDICATING") {
+                loop {
+                    let item = self.reference()?;
+                    self.accept_word("IS");
+                    self.accept_word("JSON");
+                    self.expect_word("NULL")?;
+                    let (flag, indicator) = self.flag(true)?;
+                    j.indicating.push((item, flag, indicator));
+                    if !self.accept_word("ALSO") {
+                        break;
+                    }
+                }
+            } else if self.accept_word("ENCODING") {
+                j.encoding = Some(if self.accept_word("FROM") {
+                    self.expect_word("CODEPAGE")?;
+                    Encoding::FromCodepage
+                } else {
+                    Encoding::Ccsid(self.operand()?)
+                });
+            } else if self.accept_word("NAME") {
+                self.accept_word("OF");
+                loop {
+                    let item = self.reference()?;
+                    self.accept_word("IS");
+                    let name = if self.accept_word("OMITTED") { None } else { Some(self.literal()?) };
+                    j.names.push((item, name));
+                    if !self.json_operand_follows() {
+                        break;
+                    }
+                }
+            } else if self.accept_word("SUPPRESS") {
+                loop {
+                    j.suppress.push(self.reference()?);
+                    if !self.json_operand_follows() {
+                        break;
+                    }
+                }
+            } else if self.accept_word("CONVERTING") {
+                loop {
+                    let item = self.reference()?;
+                    self.expect_word("FROM")?;
+                    self.accept_word("JSON");
+                    let conversion = if self.accept_word("NULL") {
+                        self.expect_word("USING")?;
+                        let [f] = self.figurative_list()?[..] else { return Err(self.error("one figurative constant after USING")) };
+                        ParseConversion::Null(f)
+                    } else {
+                        if self.accept_any(&["BOOLEAN", "BOOL"]).is_none() {
+                            return Err(self.error("BOOLEAN or NULL"));
+                        }
+                        ParseConversion::Boolean(Box::new(self.flag(false)?.0))
+                    };
+                    j.converting.push((item, conversion));
+                    if !self.accept_word("ALSO") {
+                        break;
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+        let [h] = self.on_phrases(&["ON", "EXCEPTION"], &["END-JSON"], |p| {
+            p.accept_word("ON");
+            p.expect_word("EXCEPTION")?;
+            Ok(0)
+        })?;
+        self.accept_word("END-JSON");
+        (j.on_exception, j.not_on_exception) = (h.on, h.not_on);
+        Ok(j)
     }
 
     fn xml_operand_follows(&self) -> bool {

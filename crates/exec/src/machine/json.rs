@@ -3,6 +3,8 @@
 
 use super::*;
 use rt::json as text;
+
+mod parse;
 use std::collections::{HashMap, HashSet};
 
 const RECEIVER_TOO_SMALL: i64 = 1;
@@ -288,10 +290,13 @@ impl<'p> Machine<'p, '_, '_> {
 
     fn json_member(&mut self, item: usize, offset: usize, subscripts: &mut Vec<u32>, p: &Phrases, pos: Pos) -> R<Option<String>> {
         let name = text::string(&self.json_name(item, p).unwrap_or_default());
-        let (table, size) = (self.layout.items[item].table, self.layout.items[item].size as usize);
-        if !table {
-            return Ok(self.json_value(item, offset, subscripts, p, pos)?.map(|v| format!("{name}:{v}")));
-        }
+        let value = if self.layout.items[item].table { self.json_array(item, offset, subscripts, p, pos)? } else { self.json_value(item, offset, subscripts, p, pos)? };
+        Ok(value.map(|v| format!("{name}:{v}")))
+    }
+
+    /// A table's occurrences as an array; `None` when every one is suppressed.
+    fn json_array(&mut self, item: usize, offset: usize, subscripts: &mut Vec<u32>, p: &Phrases, pos: Pos) -> R<Option<String>> {
+        let size = self.layout.items[item].size as usize;
         let count = self.occurrences(item, pos)?;
         let mut elements = Vec::with_capacity(count as usize);
         let mut all_suppressed = count > 0;
@@ -304,17 +309,28 @@ impl<'p> Machine<'p, '_, '_> {
                 elements.push(e);
             }
         }
-        Ok((!all_suppressed).then(|| format!("{name}:[{}]", elements.join(","))))
+        Ok((!all_suppressed).then(|| format!("[{}]", elements.join(","))))
+    }
+
+    /// The item a JSON statement names, the offset of its occurrence and its subscripts' values; a
+    /// table named without its last subscript is the whole table, from its first element.
+    pub(super) fn json_root(&mut self, r: &Ref, pos: Pos) -> R<(usize, usize, Vec<u32>, bool)> {
+        let item = self.item_of(r)?;
+        let i = &self.layout.items[item];
+        let whole = i.table && i.dims.len() == r.subscripts.len() + 1;
+        let first = Expr::Operand(Operand::Literal(Literal::Number("1".into())));
+        let located = if whole { Ref { subscripts: r.subscripts.iter().cloned().chain([first]).collect(), ..r.clone() } } else { r.clone() };
+        let offset = self.locate(&located)?.offset;
+        let mut subscripts = Vec::with_capacity(r.subscripts.len());
+        for s in &r.subscripts {
+            subscripts.push(self.integer(s, pos)? as u32);
+        }
+        Ok((item, offset, subscripts, whole))
     }
 
     fn json_document(&mut self, g: &JsonGenerate, p: &Phrases) -> R<String> {
-        let from = self.item_of(&g.from)?;
-        let loc = self.locate(&g.from)?;
-        let mut subscripts = Vec::with_capacity(g.from.subscripts.len());
-        for s in &g.from.subscripts {
-            subscripts.push(self.integer(s, g.pos)? as u32);
-        }
-        let value = self.json_value(from, loc.offset, &mut subscripts, p, g.pos)?.unwrap_or_else(|| "{}".into());
+        let (from, offset, mut subscripts, whole) = self.json_root(&g.from, g.pos)?;
+        let value = if whole { self.json_array(from, offset, &mut subscripts, p, g.pos)?.unwrap_or_else(|| "[]".into()) } else { self.json_value(from, offset, &mut subscripts, p, g.pos)?.unwrap_or_else(|| "{}".into()) };
         Ok(match self.json_name(from, p) {
             Some(name) => format!("{{{}:{value}}}", text::string(&name)),
             None => value,

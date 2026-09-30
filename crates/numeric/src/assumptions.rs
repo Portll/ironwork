@@ -210,6 +210,7 @@ pub const CURRENCY_SIGNS: &str = "C102";
 pub const JSON_GENERATE_RULES: &str = "C117";
 pub const XML_PARSE_RULES: &str = "C118";
 pub const XML_GENERATE_RULES: &str = "C119";
+pub const JSON_PARSE_RULES: &str = "C170";
 pub const CORRESPONDING_PAIRS: &str = "C130";
 pub const CORRESPONDING_CHOICES: &str = "C131";
 pub const NUMPROC_MIG_WARNS: &str = "C120";
@@ -1303,6 +1304,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: XML_GENERATE_RULES,
         claim: "Where the Language Reference (SC27-8713-03, pp. 484-494) and the Programming Guide (SC27-8714-03, pp. 663-669, 817) are silent, XML GENERATE: trims alphanumeric-edited and numeric-edited values of trailing spaces only, as items of class alphanumeric; puts an unnamed group's members in its parent's element; places TYPE CONTENT items in the parent's content in the order of the data description, among its child elements; writes an element with no content as a start and an end tag, never an empty-element tag, as the Programming Guide's examples show, and keeps a group with no attributes and no content unless a SUPPRESS phrase is given; lets an item's own SUPPRESS ... WHEN decide for it in place of every EVERY phrase; writes a value holding a character XML 1.0 cannot hold as the item's storage in upper-case hexadecimal under its name prefixed hex., sets 417 and goes to ON EXCEPTION once the whole document is written, with 400 before 417 and 417 before 418; drops a namespace's trailing spaces, escapes it as an attribute value, gives 416 for a character XML cannot hold, and ignores NAMESPACE-PREFIX when the namespace is empty; names an EBCDIC CCSID in the XML declaration as IBM- and at least three digits, as the Programming Guide's IBM-037 shows; makes a national item in a document in an EBCDIC code page exception 420 at run time, where the manual makes it a compile-time rule, and a character the code page lacks its ? with 418; and leaves the receiver and COUNT unchanged for 411, 414, 415, 416, 419 and 420",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: JSON_PARSE_RULES,
+        claim: "Where the Language Reference (SC27-8713-03, pp. 382-396) and the Programming Guide (SC27-8714-03, pp. 609-617, 819-822) are silent, JSON PARSE: takes only an object or an array as the outermost value (100 otherwise); gives 104 for an object or array where an elementary item stands, and for any other value where a group or table stands; lets a pair that names a suppressed item pass without status 2; reads an unnamed group's members as its parent's and leaves an unnamed table alone; compares duplicate pairs as parsed values, 4 when equal and 103 when not, the first staying; ends the walk at an exception, leaving what it set, with JSON-STATUS as far as it got, and gives 106 when no value reached an elementary item or a null; sets an INDICATING indicator whenever its item's pair is met, the first value for null and the second otherwise; reads a string for a numeric receiver as spaces, a sign, digits with at most one decimal point, and spaces (the form of APAR PH65883); moves a number into an alphanumeric or national receiver only as an integer, as MOVE moves an integer literal, the sign dropped; truncates fraction digits beyond the receiver's; sets 128 when a numeric receiver loses high-order digits, 256 when a string loses characters other than spaces or an integer loses digits, and 512 with X'3F' for each character the code page lacks; rounds a number once into COMP-1 or COMP-2; accepts WITH DETAIL without issuing the IGZ messages; and, as JSON GENERATE does, takes a table named without its last subscript as the whole table",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

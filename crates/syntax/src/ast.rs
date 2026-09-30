@@ -417,6 +417,7 @@ pub enum Stmt {
     Report(Box<crate::report::ReportStmt>),
     Invoke(Box<Invoke>),
     JsonGenerate(Box<JsonGenerate>),
+    JsonParse(Box<JsonParse>),
     XmlParse(Box<XmlParse>),
     XmlGenerate(Box<XmlGenerate>),
     ExitMethod { pos: Pos },
@@ -785,6 +786,42 @@ pub struct NullIndicator {
 pub enum Encoding {
     Ccsid(Operand),
     FromCodepage,
+}
+
+/// JSON PARSE (Language Reference SC27-8713-03, pp. 382-396).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JsonParse {
+    pub source: Ref,
+    pub into: Ref,
+    pub detail: bool,
+    /// IGNORING JSON NULL FOR an item, or `None` FOR ALL.
+    pub ignoring: Vec<Option<Ref>>,
+    /// INDICATING item IS JSON NULL USING values, with IN and the indicator for two literals.
+    pub indicating: Vec<(Ref, Flag, Option<Ref>)>,
+    pub encoding: Option<Encoding>,
+    /// NAME OF item IS literal; `None` for OMITTED.
+    pub names: Vec<(Ref, Option<Literal>)>,
+    pub suppress: Vec<Ref>,
+    pub converting: Vec<(Ref, ParseConversion)>,
+    pub on_exception: Option<Vec<Stmt>>,
+    pub not_on_exception: Option<Vec<Stmt>>,
+    pub pos: Pos,
+}
+
+/// What a USING phrase of JSON PARSE sets for true, or for null, and for false, or not null: a
+/// condition-name set to true or to its WHEN SET TO FALSE value, one of two condition-names set to
+/// true, or one of two literals moved in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Flag {
+    Condition(Ref),
+    Conditions(Ref, Ref),
+    Literals(Literal, Literal),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ParseConversion {
+    Boolean(Box<Flag>),
+    Null(Figurative),
 }
 
 /// XML GENERATE (Language Reference SC27-8713-03, pp. 484-494).

@@ -5,6 +5,8 @@ use std::ops::{Div, Mul};
 use zarch::hfp::Hfp;
 use zarch::wide::U256;
 
+pub mod parse;
+
 /// A fixed-point value as if moved to a numeric-edited item of `integers` integer positions (at
 /// least one), `scale` decimal places after an actual period, and a leading minus sign; then
 /// trimmed of leading zeros up to the digit before the point, and of the sign's space.

@@ -420,6 +420,15 @@ fn literal_digits(t: &str) -> usize {
 }
 
 /// Resolves every name before the program runs, so a misspelling is a compile error.
+/// The condition-names a JSON PARSE USING phrase names.
+fn flag_conditions(flag: &Flag) -> Vec<&Ref> {
+    match flag {
+        Flag::Condition(c) => vec![c],
+        Flag::Conditions(on, off) => vec![on, off],
+        Flag::Literals(..) => Vec::new(),
+    }
+}
+
 struct Check<'a> {
     layout: &'a Layout,
     program: &'a Program,
@@ -688,6 +697,28 @@ impl Check<'_> {
                 self.statements(x.on_exception.as_deref().unwrap_or_default());
                 self.statements(x.not_on_exception.as_deref().unwrap_or_default());
             }
+            Stmt::JsonParse(j) => {
+                self.reference(&j.source);
+                self.whole_table_reference(&j.into);
+                let mut named: Vec<&Ref> = j.names.iter().map(|(r, _)| r).chain(&j.suppress).chain(j.ignoring.iter().flatten()).collect();
+                for (item, flag, indicator) in &j.indicating {
+                    named.push(item);
+                    named.extend(indicator);
+                    named.extend(flag_conditions(flag));
+                }
+                for (item, conversion) in &j.converting {
+                    named.push(item);
+                    if let ParseConversion::Boolean(flag) = conversion {
+                        named.extend(flag_conditions(flag));
+                    }
+                }
+                named.into_iter().for_each(|r| self.reference_unsubscripted(r));
+                if let Some(Encoding::Ccsid(op)) = &j.encoding {
+                    self.operand(op);
+                }
+                self.statements(j.on_exception.as_deref().unwrap_or_default());
+                self.statements(j.not_on_exception.as_deref().unwrap_or_default());
+            }
             Stmt::XmlGenerate(x) => {
                 for r in [&x.receiver, &x.from].into_iter().chain(&x.count) {
                     self.reference(r);
@@ -702,9 +733,10 @@ impl Check<'_> {
                 self.statements(x.not_on_exception.as_deref().unwrap_or_default());
             }
             Stmt::JsonGenerate(g) => {
-                for r in [&g.receiver, &g.from].into_iter().chain(&g.count) {
+                for r in [&g.receiver].into_iter().chain(&g.count) {
                     self.reference(r);
                 }
+                self.whole_table_reference(&g.from);
                 let mut named: Vec<&Ref> = g.names.iter().map(|(r, _)| r).collect();
                 for s in &g.suppress {
                     if let Suppression::Item { item, .. } = s {
@@ -903,6 +935,19 @@ impl Check<'_> {
     }
 
     /// SEARCH names a table without a subscript.
+    /// JSON GENERATE's and JSON PARSE's own item, which may name a whole table by leaving out its
+    /// last subscript (Programming Guide SC27-8714-03, pp. 612-614, 619-620).
+    fn whole_table_reference(&mut self, r: &Ref) {
+        if let Ok(layout::Resolved::Item(i)) = self.layout.resolve(&r.name, &r.qualifiers, r.pos)
+            && self.layout.items[i].table
+            && self.layout.items[i].dims.len() == r.subscripts.len() + 1
+        {
+            r.subscripts.iter().for_each(|e| self.expr(e));
+            return;
+        }
+        self.reference(r);
+    }
+
     fn reference_unsubscripted(&mut self, r: &Ref) {
         if let Err(e) = self.layout.resolve(&r.name, &r.qualifiers, r.pos) {
             self.errors.push(e);

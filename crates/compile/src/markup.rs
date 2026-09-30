@@ -39,7 +39,7 @@ fn declared(program: &Program) -> Vec<String> {
 
 pub(crate) fn with_special_registers(mut program: Program) -> Program {
     let uses = |found: &dyn Fn(&Stmt) -> bool| program.paragraphs.iter().any(|p| any(&p.statements, &found));
-    let wanted: Vec<&str> = [(uses(&|s| matches!(s, Stmt::JsonGenerate(_))), JSON_REGISTERS), (uses(&|s| matches!(s, Stmt::XmlParse(_) | Stmt::XmlGenerate(_))), XML_REGISTERS)]
+    let wanted: Vec<&str> = [(uses(&|s| matches!(s, Stmt::JsonGenerate(_) | Stmt::JsonParse(_))), JSON_REGISTERS), (uses(&|s| matches!(s, Stmt::XmlParse(_) | Stmt::XmlGenerate(_))), XML_REGISTERS)]
         .into_iter()
         .filter_map(|(used, text)| used.then_some(text))
         .collect();

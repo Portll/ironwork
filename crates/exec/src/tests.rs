@@ -14,6 +14,7 @@ mod declaratives;
 mod diagnostics;
 mod intrinsic;
 mod json;
+mod json_parse;
 mod linage;
 mod oo;
 mod printer;
