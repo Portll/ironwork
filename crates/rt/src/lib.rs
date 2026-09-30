@@ -4,6 +4,7 @@
 //! [`module`] reads and writes the load modules such a program is shipped as.
 
 pub mod calendar;
+pub mod cics_tables;
 pub mod codec;
 pub mod digest;
 pub mod edit;
