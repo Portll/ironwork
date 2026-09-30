@@ -67,8 +67,10 @@ rewritten.
 Exit status: RETURN-CODE when the run ends normally; for `check`, and for a run the compile refuses,
 the compile's return code (below); 16 an abend, whose message names the system completion code
 (S0C7 for a data exception, S0C4 for a LINKAGE item with no address, S806 for a program CALL cannot
-find), the user completion code (U0999 from CEE3ABD, U4038 for a Language Environment condition
-nothing handled) or the file status of an unhandled I/O failure; 2 usage.
+find, S0CB, S0C9 or S0CF for a zero divisor no ON SIZE ERROR takes, as the division is decimal,
+binary or floating-point, assumption C55), the user completion code (U0999 from CEE3ABD, U4038 for
+a Language Environment condition nothing handled) or the file status of an unhandled I/O failure; 2
+usage.
 
 ## Compiler messages
 
@@ -145,19 +147,26 @@ The subset the interpreter runs today:
   national and numeric comparisons keep their own order. The choices are assumptions C35 to C37.
 - **Procedure:** sections and paragraphs; MOVE (with editing and de-editing), COMPUTE, ADD,
   SUBTRACT, MULTIPLY, DIVIDE (GIVING, REMAINDER, ROUNDED, ON SIZE ERROR), IF, EVALUATE (ALSO,
-  THRU, ANY, TRUE/FALSE, OTHER), PERFORM (procedures, sections, THRU, TIMES, UNTIL, VARYING,
-  inline), EXIT PARAGRAPH/SECTION/PERFORM [CYCLE], NEXT SENTENCE, STRING, UNSTRING, INSPECT
-  (TALLYING, REPLACING, CONVERTING, BEFORE/AFTER INITIAL), SEARCH and SEARCH ALL (a binary search
-  on the table's keys, as IBM's is, so an unsorted table misses what a serial search finds),
-  DISPLAY, ACCEPT (SYSIN, DATE, DAY,
+  THRU, ANY, TRUE/FALSE, OTHER), PERFORM (procedures, sections, THRU, TIMES, UNTIL, VARYING with
+  up to six AFTER phrases on a performed procedure, inline), EXIT PARAGRAPH/SECTION/PERFORM
+  [CYCLE], NEXT SENTENCE, STRING, UNSTRING, INSPECT (TALLYING, REPLACING, CONVERTING, BEFORE/AFTER
+  INITIAL), SEARCH and SEARCH ALL (a binary search on the table's keys, as IBM's is, so an unsorted
+  table misses what a serial search finds), DISPLAY [UPON] [WITH] NO ADVANCING (to standard output,
+  as a z/OS UNIX program writes it: assumption C53), ACCEPT (SYSIN, DATE, DAY,
   DAY-OF-WEEK, TIME), INITIALIZE, SET (condition TO TRUE, index TO/UP BY/DOWN BY, pointer TO
-  ADDRESS OF/NULL, ADDRESS OF TO pointer), GO TO, GOBACK, STOP RUN; subscripts, reference
-  modification, LENGTH OF, ADDRESS OF, and the functions ABS, CHAR, CURRENT-DATE,
-  DATE-OF-INTEGER, INTEGER, INTEGER-OF-DATE, INTEGER-PART, LENGTH, LOWER-CASE, MAX, MIN, MOD,
-  NATIONAL-OF, NUMVAL, NUMVAL-C, ORD, REM, REVERSE, TRIM and UPPER-CASE.
+  ADDRESS OF/NULL, ADDRESS OF TO pointer), GO TO [DEPENDING ON], ALTER and the altered GO TO (put
+  back by CANCEL, IS INITIAL and entry to an independent segment: assumption C52), GOBACK, STOP
+  RUN; subscripts, reference modification, LENGTH OF, ADDRESS OF, and the functions ABS, CHAR,
+  CURRENT-DATE, DATE-OF-INTEGER, INTEGER, INTEGER-OF-DATE, INTEGER-PART, LENGTH, LOWER-CASE, MAX,
+  MIN, MOD, NATIONAL-OF, NUMVAL, NUMVAL-C, ORD, RANDOM (a generator of ironwork's choosing,
+  assumption C54), REM, REVERSE, TRIM and UPPER-CASE. What is not Enterprise COBOL is refused as
+  such: `<>`, literals joined with `&`, SET ENVIRONMENT and ACCEPT ... FROM ENVIRONMENT.
 - **Subprograms:** several and nested programs per source; CALL (static and dynamic) USING BY
   REFERENCE, BY CONTENT, BY VALUE and OMITTED, RETURNING, ON EXCEPTION; PROCEDURE DIVISION USING
-  and RETURNING; CANCEL; IS INITIAL and IS RECURSIVE; EXIT PROGRAM; RETURN-CODE. Every program in
+  and RETURNING; ENTRY [USING], whose name a CALL begins at and whose USING list alone gives LINKAGE
+  addresses, a static CALL entering the program's one copy and a dynamic CALL (an identifier, or a
+  literal under DYNAM) a copy of its own for each entry name (assumptions C50 and C51); CANCEL; IS
+  INITIAL and IS RECURSIVE; EXIT PROGRAM; RETURN-CODE. Every program in
   a run shares one memory, as on z/OS, and a called program keeps its WORKING-STORAGE and open files
   between CALLs until it is cancelled; its LOCAL-STORAGE starts afresh on every CALL. PERFORMs and
   CALLs nest at most 100 deep.

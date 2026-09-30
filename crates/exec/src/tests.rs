@@ -7,6 +7,7 @@ mod data;
 mod linage;
 mod oo;
 mod printer;
+mod procedure;
 mod report;
 mod sort;
 
@@ -671,6 +672,8 @@ const FRAGMENTS: &[&str] = &[
     "I-O-CONTROL. SAME RECORD AREA FOR ", "SAME AREA ", "\n       CBL FASTSRT\n", "\n       CBL THREAD,DLL\n", ",NORENT", ",NODBCS", "NOTHREAD",
     " IS INITIAL", "\n       END PROGRAM ", "LINAGE IS ", "LINAGE 0 ", "WITH FOOTING AT ", "LINES AT TOP ", "LINES AT BOTTOM ", "AT END-OF-PAGE ",
     "NOT AT EOP ", "LINAGE-COUNTER", " IN P ", "ADVANCING PAGE ", "BEFORE ADVANCING ",
+    "ENTRY 'E' ", "ENTRY ", "ALTER ", "TO PROCEED TO ", "GO TO.", "GO TO ", " DEPENDING ON ",
+    " AFTER ", "NO ADVANCING", "FUNCTION RANDOM", "FUNCTION RANDOM(", " <> ", " & ", "SECTION 50.", "SECTION 99", "\n       CBL DYNAM\n",
 ];
 
 fn mutate(base: &str, next: &mut impl FnMut() -> u64) -> String {
@@ -824,6 +827,7 @@ fn mutated_programs_never_panic_the_front_end() {
         ])
         .chain(oo::fuzz_seeds())
         .chain(collating::fuzz_seeds())
+        .chain(procedure::fuzz_seeds())
         .collect();
     let mut seed = 0x853C_49E6_748F_EA9Bu64;
     let mut next = move || {

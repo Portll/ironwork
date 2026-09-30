@@ -31,8 +31,6 @@ pub enum AbendCode {
 /// Control flow passed up as an error to the statement that takes it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Signal {
-    /// A zero divisor: the arithmetic statement takes it as a size error or a program check.
-    DivideByZero,
     /// STOP RUN in a USE BEFORE REPORTING procedure: the report statement that ran it ends the run.
     StopRun,
     /// GOBACK in a USE BEFORE REPORTING procedure.
@@ -44,11 +42,10 @@ pub enum Signal {
 }
 
 impl Signal {
-    const ALL: [Self; 5] = [Self::DivideByZero, Self::StopRun, Self::GoBack, Self::SortStopped, Self::ClosedOutput];
+    const ALL: [Self; 4] = [Self::StopRun, Self::GoBack, Self::SortStopped, Self::ClosedOutput];
 
     fn text(self) -> &'static str {
         match self {
-            Self::DivideByZero => "DIVIDE-BY-ZERO",
             Self::StopRun => "REPORT-STOP-RUN",
             Self::GoBack => "REPORT-GOBACK",
             Self::SortStopped => "SORT-STOPPED",
@@ -109,6 +106,12 @@ impl AbendCode {
     /// For SORT's FASTSRT reader, which still tests the text.
     pub fn starts_with(&self, prefix: &str) -> bool {
         self.as_str().starts_with(prefix)
+    }
+
+    /// The program check a zero divisor raises: decimal, fixed-point or HFP divide. An arithmetic
+    /// statement with ON SIZE ERROR takes it as a size error instead.
+    pub fn zero_divisor(&self) -> bool {
+        matches!(self, Self::Check(ProgramCheck::DecimalDivide | ProgramCheck::FixedPointDivide | ProgramCheck::HfpDivide))
     }
 }
 

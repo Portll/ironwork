@@ -163,6 +163,8 @@ pub struct Options {
     pub rent: bool,
     pub dbcs: bool,
     pub warnings: Warnings,
+    /// DYNAM: a CALL of a literal loads the program at run time, as a CALL of an identifier does.
+    pub dynam: bool,
 }
 
 impl Default for Options {
@@ -182,6 +184,7 @@ impl Default for Options {
             rent: true,
             dbcs: true,
             warnings: Warnings::default(),
+            dynam: false,
         }
     }
 }
@@ -253,6 +256,7 @@ impl Options {
             "DLL" => self.dll = !off,
             "RENT" => self.rent = !off,
             "DBCS" => self.dbcs = !off,
+            "DYNAM" => self.dynam = !off,
             _ => return Ok(false),
         }
         Ok(true)
@@ -284,7 +288,16 @@ mod tests {
     fn defaults_are_ibms() {
         let o = Options::default();
         assert_eq!((o.arith, o.trunc, o.numproc, o.codepage, o.fastsrt, o.adv), (Arith::Compat, Trunc::Std, Numproc::Nopfd, 1140, false, true));
-        assert_eq!((o.thread, o.dll, o.rent, o.dbcs), (false, false, true, true));
+        assert_eq!((o.thread, o.dll, o.rent, o.dbcs, o.dynam), (false, false, true, true, false));
+    }
+
+    #[test]
+    fn dynam_and_its_abbreviations() {
+        let mut o = Options::default();
+        assert_eq!(o.apply("DYN"), Ok(true));
+        assert!(o.dynam);
+        assert_eq!(o.apply("NODYNAM"), Ok(true));
+        assert!(!o.dynam);
     }
 
     #[test]

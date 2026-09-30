@@ -293,7 +293,7 @@ impl<'p> Machine<'p, '_, '_> {
     fn accumulate(&mut self, ri: usize, sum: usize, origin: &Origin, pos: Pos) -> R<()> {
         let value = match origin {
             Origin::Source(e) => match self.expr_value(e, pos) {
-                Err(Abend { code: AbendCode::Signal(Signal::DivideByZero), .. }) => {
+                Err(a) if a.code.zero_divisor() => {
                     let _ = writeln!(self.unit.err, "ironwork: {pos}: report writer run-time error 10: a SOURCE expression divided by zero; nothing was added to the total");
                     return Ok(());
                 }
@@ -660,7 +660,7 @@ impl<'p> Machine<'p, '_, '_> {
             }
             FieldContent::Source(e) => {
                 let overflow = match self.expr_value(e, pos) {
-                    Err(Abend { code: AbendCode::Signal(Signal::DivideByZero), .. }) => true,
+                    Err(a) if a.code.zero_divisor() => true,
                     Err(a) => return Err(a),
                     Ok(v) => self.store_value(dest, v, f.rounded, true, pos)?,
                 };

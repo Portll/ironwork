@@ -27,6 +27,11 @@ pub struct Loaded {
     pub files: Vec<Option<Open>>,
     pub initialized: bool,
     pub active: bool,
+    /// For a copy a dynamic CALL of an ENTRY name loaded, that entry (numbered as
+    /// [`Compiled::entries`] numbers them); None for the program loaded by its PROGRAM-ID.
+    pub entry: Option<usize>,
+    /// Where each paragraph's GO TO goes since an ALTER, by paragraph; empty until one runs.
+    pub altered: Vec<Option<usize>>,
 }
 
 /// Where CALL finds programs: the other programs of the first program's source, then program
@@ -88,6 +93,8 @@ pub struct RunUnit<'w> {
     pub oo: crate::oo::Objects,
     /// Told what the run opens, closes and loads, when a caller keeps evidence of it.
     pub observer: Option<Observer<'w>>,
+    /// FUNCTION RANDOM's generator, one for the run unit, from the first reference on.
+    pub random: Option<u32>,
 }
 
 fn member_name(name: &str) -> bool {
@@ -114,6 +121,7 @@ impl<'w> RunUnit<'w> {
             le: crate::le::State::default(),
             oo: Default::default(),
             observer: None,
+            random: None,
         }
     }
 
@@ -125,12 +133,41 @@ impl<'w> RunUnit<'w> {
 
     /// Adds a program to the run unit and gives it its storage.
     pub fn add(&mut self, compiled: Option<Rc<Compiled>>, program: &Program, size: usize) -> usize {
+        self.add_named(compiled, program.id.to_ascii_uppercase(), program.files.len(), size)
+    }
+
+    fn add_named(&mut self, compiled: Option<Rc<Compiled>>, name: String, files: usize, size: usize) -> usize {
         let base = self.allocate(size);
         let index = self.programs.len();
-        let name = program.id.to_ascii_uppercase();
         self.names.insert(name.clone(), index);
-        self.programs.push(Loaded { compiled, name, base, files: program.files.iter().map(|_| None).collect(), initialized: false, active: false });
+        self.programs.push(Loaded { compiled, name, base, files: (0..files).map(|_| None).collect(), initialized: false, active: false, entry: None, altered: Vec::new() });
         index
+    }
+
+    /// The program a CALL of `name` enters, and which of its ENTRY statements when `name` is not
+    /// its PROGRAM-ID. A static CALL of an entry name enters the one copy of the program; a dynamic
+    /// CALL gets a copy of its own for each entry name (assumption C51).
+    pub fn load_entry(&mut self, name: &str, dynamic: bool) -> Result<(usize, Option<usize>), LoadError> {
+        let name = name.to_ascii_uppercase();
+        if let Some(i) = self.find(&name) {
+            return Ok((i, self.programs[i].entry));
+        }
+        let index = match self.programs.iter().position(|p| p.compiled.as_ref().is_some_and(|c| c.entries.iter().any(|e| e.name == name))) {
+            Some(i) => i,
+            None => {
+                let holder = self.library.programs.iter().find(|p| crate::entry_points(p).iter().any(|e| e.name == name)).map(|p| p.id.to_ascii_uppercase());
+                self.load(holder.as_deref().unwrap_or(&name))?
+            }
+        };
+        let Some(compiled) = self.programs[index].compiled.clone() else { return Ok((index, None)) };
+        let Some(entry) = compiled.entries.iter().position(|e| e.name == name) else { return Ok((index, None)) };
+        if !dynamic {
+            return Ok((index, Some(entry)));
+        }
+        let (files, size) = (compiled.program.files.len(), compiled.layout.size as usize);
+        let copy = self.add_named(Some(compiled), name, files, size);
+        self.programs[copy].entry = Some(entry);
+        Ok((copy, Some(entry)))
     }
 
     /// Storage for a BY CONTENT or BY VALUE argument, at the end of memory.

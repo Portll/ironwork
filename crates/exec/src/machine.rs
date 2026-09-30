@@ -99,7 +99,15 @@ pub struct Machine<'p, 'u, 'w> {
     oo: oo::Frame,
     /// The SORT or MERGE whose input or output procedure is running.
     sort: Option<sort::Active>,
+    /// The priority-number of the segment the running paragraph is in.
+    segment: u8,
     unit: &'u mut RunUnit<'w>,
+}
+
+enum Step {
+    Again,
+    Leave,
+    Out(Flow),
 }
 
 fn figurative_byte(f: Figurative) -> u8 {
@@ -212,6 +220,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             carriage: &compiled.carriage,
             oo: oo::Frame::default(),
             sort: None,
+            segment: 0,
             unit,
         };
         if compiled.layout.local_size > 0 {
@@ -222,6 +231,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             m.unit.mem[base..base + compiled.layout.size as usize].fill(0);
             m.initialize_values(false)?;
             m.unit.programs[me].initialized = true;
+            m.unit.programs[me].altered.clear();
         }
         Ok(m)
     }
@@ -253,25 +263,46 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     pub fn run_procedure(&mut self) -> R<Ending> {
-        let mut start = self.program.report_writer.procedure_start;
+        self.run_from(None)
+    }
+
+    /// Runs the procedure from its start, or from paragraph and statement `at`.
+    fn run_from(&mut self, at: Option<(usize, usize)>) -> R<Ending> {
+        let (mut start, mut skip) = at.unwrap_or((self.program.report_writer.procedure_start, 0));
         if self.program.paragraphs.len() <= start {
             return Ok(Ending::EndOfProgram);
         }
+        self.segment = self.program.paragraphs[start].priority;
         let last = self.program.paragraphs.len() - 1;
         loop {
-            match self.run_paragraphs(start, last)? {
+            match self.run_paragraphs_from(start, skip, last)? {
                 Flow::End(e) => return Ok(e),
-                Flow::GoTo(t) => start = t,
+                Flow::GoTo(t) => (start, skip) = (t, 0),
                 _ => return Ok(Ending::EndOfProgram),
             }
         }
     }
 
     fn run_paragraphs(&mut self, from: usize, to: usize) -> R<Flow> {
+        self.run_paragraphs_from(from, 0, to)
+    }
+
+    /// Paragraphs `from` to `to`, the first from its statement `skip`. A range that ends normally
+    /// hands control back to the segment that ran it; a paragraph an ALTER changed goes where it said.
+    fn run_paragraphs_from(&mut self, from: usize, mut skip: usize, to: usize) -> R<Flow> {
         let program = self.program;
+        let segment = self.segment;
         let mut i = from;
         while i <= to {
-            match self.run_sentences(&program.paragraphs[i].statements)? {
+            self.enter_segment(program.paragraphs[i].priority);
+            let altered = self.unit.programs[self.me].altered.get(i).copied().flatten();
+            let statements = &program.paragraphs[i].statements;
+            let flow = match altered {
+                Some(t) => Flow::GoTo(t),
+                None => self.run_sentences(&statements[skip.min(statements.len())..])?,
+            };
+            skip = 0;
+            match flow {
                 Flow::Next | Flow::ExitParagraph => i += 1,
                 Flow::ExitSection => i = crate::section_end(program, i) + 1,
                 Flow::GoTo(t) if (from..=to).contains(&t) => i = t,
@@ -279,7 +310,25 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 other => return Ok(other),
             }
         }
+        self.segment = segment;
         Ok(Flow::Next)
+    }
+
+    /// Control reaching a paragraph of segment `priority`: an independent segment entered from
+    /// another is in its initial state, so its altered GO TOs are as written (assumption C52).
+    fn enter_segment(&mut self, priority: u8) {
+        if priority == self.segment {
+            return;
+        }
+        self.segment = priority;
+        if priority >= 50 {
+            let program = self.program;
+            for (i, target) in self.unit.programs[self.me].altered.iter_mut().enumerate() {
+                if program.paragraphs[i].priority == priority {
+                    *target = None;
+                }
+            }
+        }
     }
 
     /// A paragraph's statements: NEXT SENTENCE resumes after the next separator period.
@@ -372,7 +421,23 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     }
                 }
             }
-            Stmt::GoTo { target, pos } => return Ok(Flow::GoTo(self.procedure(target, *pos)?.0)),
+            Stmt::GoTo { target: Some(target), pos } => return Ok(Flow::GoTo(self.procedure(target, *pos)?.0)),
+            Stmt::GoTo { target: None, .. } | Stmt::Entry { .. } => {}
+            Stmt::GoToDepending { targets, on, pos } => {
+                let n = self.integer(&Expr::Operand(Operand::Ref(on.clone())), *pos)?;
+                if let Some(target) = usize::try_from(n).ok().and_then(|n| targets.get(n.wrapping_sub(1))) {
+                    return Ok(Flow::GoTo(self.procedure(target, *pos)?.0));
+                }
+            }
+            Stmt::Alter { pairs, pos } => {
+                for (paragraph, target) in pairs {
+                    let (at, to) = (self.procedure(paragraph, *pos)?.0, self.procedure(target, *pos)?.0);
+                    let paragraphs = self.program.paragraphs.len();
+                    let altered = &mut self.unit.programs[self.me].altered;
+                    altered.resize(paragraphs, None);
+                    altered[at] = Some(to);
+                }
+            }
             Stmt::Goback { .. } => return Ok(Flow::End(Ending::Goback)),
             Stmt::ExitProgram { .. } if self.main => {}
             Stmt::ExitProgram { .. } => return Ok(Flow::End(Ending::Goback)),
@@ -463,11 +528,6 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn repeat_nested(&mut self, repeat: &'p Loop, pos: Pos, body: &mut dyn FnMut(&mut Self) -> R<Flow>) -> R<Flow> {
-        enum Step {
-            Again,
-            Leave,
-            Out(Flow),
-        }
         let mut run = |m: &mut Self| -> R<Step> {
             Ok(match body(m)? {
                 Flow::Next | Flow::ExitPerformCycle => Step::Again,
@@ -502,31 +562,58 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     break;
                 }
             },
-            Loop::Varying { varying, test_after } => {
-                let var = self.locate(&varying.var)?;
-                let start = self.expr_value(&varying.from, pos)?;
-                self.assign(var, start, None, pos)?;
-                loop {
-                    if !test_after && self.condition(&varying.until, pos)? {
-                        break;
-                    }
-                    match run(self)? {
-                        Step::Again => {}
-                        Step::Leave => break,
-                        Step::Out(f) => return Ok(f),
-                    }
-                    if *test_after && self.condition(&varying.until, pos)? {
-                        break;
-                    }
-                    let var = self.locate(&varying.var)?;
-                    let step = Expr::Bin(Box::new(Expr::Operand(Operand::Ref(varying.var.clone()))), BinOp::Add, Box::new(varying.by.clone()));
-                    let dmax = var.kind.digits_scale().map_or(0, |(_, s)| s).max(self.dmax(&step)?);
-                    let next = self.eval_fixed(&step, dmax, pos)?;
-                    self.store_fixed(var, &next, false, pos)?;
+            Loop::Varying { varying, after, test_after } => {
+                let levels: Vec<&'p Varying> = std::iter::once(&**varying).chain(after).collect();
+                let count = if *test_after { 1 } else { levels.len() };
+                for v in &levels[..count] {
+                    self.vary_from(v, pos)?;
+                }
+                if let Step::Out(f) = self.vary(&levels, *test_after, pos, &mut run)? {
+                    return Ok(f);
                 }
             }
         }
         Ok(Flow::Next)
+    }
+
+    /// The loop of `levels[0]`, each pass running the loops of the levels inside it, in the order of
+    /// the Language Reference's figures for TEST BEFORE and TEST AFTER (SC27-8713-03, pp. 425-428):
+    /// an outer variable is augmented before the one inside it is set to its FROM value again.
+    fn vary(&mut self, levels: &[&'p Varying], test_after: bool, pos: Pos, run: &mut dyn FnMut(&mut Self) -> R<Step>) -> R<Step> {
+        let Some((level, inner)) = levels.split_first() else { return run(self) };
+        loop {
+            if !test_after && self.condition(&level.until, pos)? {
+                return Ok(Step::Again);
+            }
+            if test_after && let Some(next) = inner.first() {
+                self.vary_from(next, pos)?;
+            }
+            match self.vary(inner, test_after, pos, run)? {
+                Step::Again => {}
+                other => return Ok(other),
+            }
+            if test_after && self.condition(&level.until, pos)? {
+                return Ok(Step::Again);
+            }
+            self.vary_by(level, pos)?;
+            if !test_after && let Some(next) = inner.first() {
+                self.vary_from(next, pos)?;
+            }
+        }
+    }
+
+    fn vary_from(&mut self, v: &Varying, pos: Pos) -> R<()> {
+        let var = self.locate(&v.var)?;
+        let start = self.expr_value(&v.from, pos)?;
+        self.assign(var, start, None, pos)
+    }
+
+    fn vary_by(&mut self, v: &Varying, pos: Pos) -> R<()> {
+        let var = self.locate(&v.var)?;
+        let step = Expr::Bin(Box::new(Expr::Operand(Operand::Ref(v.var.clone()))), BinOp::Add, Box::new(v.by.clone()));
+        let dmax = var.kind.digits_scale().map_or(0, |(_, s)| s).max(self.dmax(&step)?);
+        let next = self.eval_fixed(&step, dmax, pos)?;
+        self.store_fixed(var, &next, false, pos)
     }
 
     fn resolve(&mut self, r: &Ref) -> R<Resolved> {
@@ -1012,7 +1099,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
         let pos = c.pos;
         let name = self.program_name(&c.target, pos)?;
-        let index = match self.unit.load(&name) {
+        let dynamic = self.options.dynam || !matches!(c.target, Operand::Literal(_));
+        let (index, entry) = match self.unit.load_entry(&name, dynamic) {
             Ok(i) => i,
             Err(LoadError::NotFound) if crate::le::provides(&name) => return self.le_call(c, &name),
             Err(LoadError::NotFound) => {
@@ -1030,12 +1118,12 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             return Err(Abend::ironwork(format!("CALL {name}: the program is already active and is not RECURSIVE"), pos));
         }
         self.nest(pos)?;
-        let result = self.call_nested(c, index, compiled);
+        let result = self.call_nested(c, index, entry, compiled);
         self.unit.depth -= 1;
         result
     }
 
-    fn call_nested(&mut self, c: &'p Call, index: usize, compiled: std::rc::Rc<Compiled>) -> R<Flow> {
+    fn call_nested(&mut self, c: &'p Call, index: usize, entry: Option<usize>, compiled: std::rc::Rc<Compiled>) -> R<Flow> {
         let pos = c.pos;
         let mark = self.unit.mem.len();
         let mut addresses = Vec::new();
@@ -1062,9 +1150,10 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
         let outcome = {
             let mut callee = Machine::activation(&compiled, index, &mut *self.unit, false)?;
-            callee.bind(&addresses);
+            let entry = entry.and_then(|k| compiled.entries.get(k));
+            callee.bind_using(entry.map_or(&compiled.program.using, |e| &e.using), &addresses);
             callee.bind_returning();
-            let ending = callee.run_procedure();
+            let ending = callee.run_from(entry.map(|e| (e.paragraph, e.statement)));
             let returned = match (&compiled.program.returning, &ending) {
                 (Some(item), Ok(_)) => Some(callee.returned(item, pos)?),
                 _ => None,
@@ -1092,7 +1181,14 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     /// Gives each PROCEDURE DIVISION USING item the address of the argument in its position.
     fn bind(&mut self, addresses: &[Option<usize>]) {
-        for (param, address) in self.program.using.iter().zip(addresses) {
+        let program = self.program;
+        self.bind_using(&program.using, addresses);
+    }
+
+    /// Gives each item of a PROCEDURE DIVISION or ENTRY USING list the address of the argument in
+    /// its position.
+    fn bind_using(&mut self, using: &[Param], addresses: &[Option<usize>]) {
+        for (param, address) in using.iter().zip(addresses) {
             if let Some(ordinal) = self.layout.linkage_roots.iter().position(|&i| self.layout.items[i].name.as_deref() == Some(param.name.as_str())) {
                 self.linkage[ordinal] = *address;
             }
@@ -1403,6 +1499,14 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 };
                 Val::Bytes(self.page.encode(&changed).map_err(|e| Abend::ironwork(e.to_string(), pos))?)
             }
+            "RANDOM" => {
+                arity(0..=1)?;
+                let seed = match f.args.first() {
+                    Some(a) => Some(self.integer(a, pos)?),
+                    None => None,
+                };
+                Val::Float(self.random(seed, pos)?)
+            }
             other => return Err(Abend::ironwork(format!("FUNCTION {other} is not supported yet"), pos)),
         };
         match (&f.refmod, value) {
@@ -1417,6 +1521,22 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             }
             (Some(_), _) => Err(Abend::ironwork("reference modification of a non-alphanumeric function result", pos)),
         }
+    }
+
+    /// FUNCTION RANDOM: the next number of the run unit's sequence, as long HFP. A seed starts a
+    /// new sequence (Language Reference SC27-8713-03, p. 629); the generator is assumption C54.
+    fn random(&mut self, seed: Option<i64>, pos: Pos) -> R<Hfp> {
+        const MODULUS: u64 = 2_147_483_647;
+        let state = match (seed, self.unit.random) {
+            (Some(n), _) if n < 0 => return Err(Abend::ironwork(format!("FUNCTION RANDOM({n}): the seed must be zero or a positive integer"), pos)),
+            (Some(n), _) => n as u64 % (MODULUS - 1) + 1,
+            (None, Some(s)) => u64::from(s),
+            (None, None) => 1,
+        };
+        let next = state * 16807 % MODULUS;
+        self.unit.random = Some(next as u32);
+        let (x, m) = (Hfp::from_integer(next as i128, Precision::Long), Hfp::from_integer(MODULUS as i128, Precision::Long));
+        x.div(m, ProgramMask::default()).map_err(|c| Abend::check(c, pos))
     }
 
     fn expr_value(&mut self, e: &Expr, pos: Pos) -> R<Val> {
@@ -1439,6 +1559,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     fn uses_float(&mut self, e: &Expr) -> R<bool> {
         Ok(match e {
+            Expr::Operand(Operand::Function(f)) => f.name == "RANDOM",
             Expr::Operand(op) => matches!(self.operand_kind(op)?, Some(Kind::Float(_))),
             Expr::Neg(inner) => self.uses_float(inner)?,
             Expr::Bin(a, _, b) => self.uses_float(a)? || self.uses_float(b)?,
@@ -1460,13 +1581,14 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let arith = self.options.arith;
         let wrap = |r: Result<Fixed, ArithError>| {
             r.map_err(|e| match e {
-                ArithError::DivideByZero => Abend { code: AbendCode::Signal(Signal::DivideByZero), message: "division by zero".into(), pos },
+                ArithError::DivideByZero => Abend::check(ProgramCheck::DecimalDivide, pos),
                 ArithError::BeyondModel => Abend::ironwork("an intermediate result wider than 256 bits", pos),
             })
         };
         match e {
             Expr::Operand(op) => match self.operand(op, pos)? {
                 Val::Num(f) => Ok(f),
+                Val::Float(h) => Ok(float::to_fixed(h, Places::new(MAX_DIGITS as u32 - dmax.min(MAX_DIGITS as u32), dmax), false).0),
                 Val::Fig(Figurative::Zero) => Ok(Fixed::new(0, Places::new(1, 0))),
                 _ => Err(Abend::ironwork("a non-numeric operand in arithmetic", pos)),
             },
@@ -1488,6 +1610,10 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     return Ok(acc);
                 }
                 let y = self.eval_fixed(b, dmax, pos)?;
+                if *op == BinOp::Div && y.magnitude.is_zero() {
+                    let check = if self.binary_division(a, b)? { ProgramCheck::FixedPointDivide } else { ProgramCheck::DecimalDivide };
+                    return Err(Abend::check(check, pos));
+                }
                 wrap(match op {
                     BinOp::Add => x.add(y, dmax, arith),
                     BinOp::Sub => x.sub(y, dmax, arith),
@@ -1496,6 +1622,33 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 })
             }
         }
+    }
+
+    /// Whether the compiler divides `a` by `b` with the fixed-point divide instruction: every
+    /// operand of both an integer binary item or an integer literal, and one of them an item
+    /// (assumption C55). Otherwise a fixed-point division is decimal.
+    fn binary_division(&mut self, a: &Expr, b: &Expr) -> R<bool> {
+        let mut items = 0;
+        Ok(self.binary_operands(a, &mut items)? && self.binary_operands(b, &mut items)? && items > 0)
+    }
+
+    fn binary_operands(&mut self, e: &Expr, items: &mut usize) -> R<bool> {
+        Ok(match e {
+            Expr::Operand(Operand::Literal(Literal::Number(t))) => !t.contains('.'),
+            Expr::Operand(Operand::Literal(Literal::Figurative(Figurative::Zero))) => true,
+            Expr::Operand(Operand::LengthOf(_)) => {
+                *items += 1;
+                true
+            }
+            Expr::Operand(op @ Operand::Ref(_)) => {
+                let binary = matches!(self.operand_kind(op)?, Some(Kind::Binary { scale: 0, .. } | Kind::Index));
+                *items += usize::from(binary);
+                binary
+            }
+            Expr::Operand(_) => false,
+            Expr::Neg(inner) => self.binary_operands(inner, items)?,
+            Expr::Bin(x, _, y) => self.binary_operands(x, items)? && self.binary_operands(y, items)?,
+        })
     }
 
     fn eval_float(&mut self, e: &Expr, p: Precision, pos: Pos) -> R<Hfp> {
@@ -1549,10 +1702,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 self.eval_fixed(e, dmax, pos).map(Val::Num)
             };
             let value = match outcome {
-                Err(Abend { code: AbendCode::Signal(Signal::DivideByZero), .. }) => {
-                    if handler.is_none() {
-                        return Err(Abend::check(ProgramCheck::DecimalDivide, pos));
-                    }
+                Err(a) if handler.is_some() && a.code.zero_divisor() => {
                     size_error = true;
                     continue;
                 }

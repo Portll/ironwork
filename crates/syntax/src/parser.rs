@@ -25,7 +25,7 @@ const VERBS: &[&str] = &[
     "MOVE", "COMPUTE", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "IF", "PERFORM", "DISPLAY", "INITIALIZE", "GO", "GOBACK", "STOP",
     "CONTINUE", "EXIT", "EVALUATE", "SET", "CALL", "ACCEPT", "STRING", "UNSTRING", "INSPECT", "READ", "WRITE", "OPEN", "CLOSE",
     "REWRITE", "DELETE", "START", "SEARCH", "SORT", "MERGE", "RETURN", "RELEASE", "CANCEL", "EXEC", "NEXT", "INVOKE",
-    "INITIATE", "GENERATE", "TERMINATE", "SUPPRESS",
+    "INITIATE", "GENERATE", "TERMINATE", "SUPPRESS", "ALTER", "ENTRY",
 ];
 
 /// Words that end a phrase or a nested block.
@@ -272,17 +272,7 @@ impl Parser<'_> {
         let paragraphs = if self.at_division(&["PROCEDURE"]) {
             self.at += 2;
             if self.accept_word("USING") {
-                let mut by_value = false;
-                loop {
-                    if self.accept_word("BY") {
-                        by_value = self.accept_any(&["REFERENCE", "VALUE"]).as_deref() == Some("VALUE");
-                        continue;
-                    }
-                    if !self.starts_ref() {
-                        break;
-                    }
-                    using.push(Param { by_value, name: self.name("a LINKAGE item")? });
-                }
+                using = self.parameters()?;
             }
             if self.accept_word("RETURNING") {
                 returning = Some(self.name("a RETURNING item")?);
@@ -304,6 +294,13 @@ impl Parser<'_> {
             let first = nested.len();
             self.program(options, &mut nested)?;
             contained.extend(nested.get(first).map(|p: &Program| p.id.clone()));
+        }
+        let entry = nested.iter().flat_map(|p: &Program| &p.paragraphs).flat_map(|p| &p.statements).find_map(|s| match s {
+            Stmt::Entry { pos, .. } => Some(*pos),
+            _ => None,
+        });
+        if let Some(pos) = entry {
+            return Err(Error::at(pos, "ENTRY cannot be used in a nested program"));
         }
         oo::share_repository(&repository, &mut nested)?;
         for inner in &mut nested {
@@ -337,6 +334,21 @@ impl Parser<'_> {
         });
         out.extend(nested);
         Ok(())
+    }
+
+    /// The LINKAGE items of a PROCEDURE DIVISION or ENTRY USING list, each BY REFERENCE or BY VALUE.
+    fn parameters(&mut self) -> R<Vec<Param>> {
+        let (mut using, mut by_value) = (Vec::new(), false);
+        loop {
+            if self.accept_word("BY") {
+                by_value = self.accept_any(&["REFERENCE", "VALUE"]).as_deref() == Some("VALUE");
+                continue;
+            }
+            if !self.starts_ref() {
+                return Ok(using);
+            }
+            using.push(Param { by_value, name: self.name("a LINKAGE item")? });
+        }
     }
 
     fn at_end_program(&self) -> bool {
@@ -920,19 +932,21 @@ impl Parser<'_> {
             let pos = self.pos();
             let name = self.name("a section name")?;
             self.at += 1;
-            if matches!(self.peek(), Some(Tok::Number(_))) {
+            let mut priority = 0;
+            if let Some(Tok::Number(n)) = self.peek() {
+                priority = n.trim_start_matches('+').parse().ok().filter(|p| *p <= 99).ok_or_else(|| self.error("a priority-number from 0 to 99"))?;
                 self.at += 1;
             }
             self.expect(&Tok::Period, "a period after the section header")?;
-            paragraphs.push(Paragraph { section: Some(name.clone()), name, statements: Vec::new(), is_section: true, pos });
+            paragraphs.push(Paragraph { section: Some(name.clone()), name, statements: Vec::new(), is_section: true, priority, pos });
             return Ok(true);
         }
         if self.paragraph_header() {
             let pos = self.pos();
             let name = self.name("a paragraph name")?;
             self.at += 1;
-            let section = paragraphs.last().and_then(|p| p.section.clone());
-            paragraphs.push(Paragraph { name, statements: Vec::new(), section, is_section: false, pos });
+            let (section, priority) = paragraphs.last().map_or((None, 0), |p| (p.section.clone(), p.priority));
+            paragraphs.push(Paragraph { name, statements: Vec::new(), section, is_section: false, priority, pos });
             return Ok(false);
         }
         if self.accept(&Tok::Period) {
@@ -948,7 +962,7 @@ impl Parser<'_> {
             return Err(self.error("a statement"));
         }
         if paragraphs.is_empty() {
-            paragraphs.push(Paragraph { name: String::new(), statements: Vec::new(), section: None, is_section: false, pos: self.pos() });
+            paragraphs.push(Paragraph { name: String::new(), statements: Vec::new(), section: None, is_section: false, priority: 0, pos: self.pos() });
         }
         paragraphs.last_mut().unwrap().statements.extend(block);
         Ok(false)
@@ -1010,16 +1024,20 @@ impl Parser<'_> {
             "PERFORM" => self.perform(pos)?,
             "DISPLAY" => {
                 let mut items = Vec::new();
-                while self.starts_operand() {
+                let no_advancing_ahead = |p: &Self| p.is_word("NO") && p.word_at(1) == Some("ADVANCING");
+                while self.starts_operand() && !no_advancing_ahead(self) {
                     items.push(self.operand()?);
                 }
                 if self.accept_word("UPON") {
                     self.name("a mnemonic name")?;
                 }
-                let no_advancing = self.accept_word("WITH") | self.is_word("NO");
+                let no_advancing = self.accept_word("WITH") | no_advancing_ahead(self);
                 if no_advancing {
                     self.expect_word("NO")?;
                     self.expect_word("ADVANCING")?;
+                    if self.is_word("UPON") {
+                        return Err(self.error("the end of DISPLAY: Enterprise COBOL takes UPON before WITH NO ADVANCING"));
+                    }
                 }
                 self.accept_word("END-DISPLAY");
                 Stmt::Display { items, no_advancing, pos }
@@ -1049,6 +1067,9 @@ impl Parser<'_> {
             }
             "ACCEPT" => {
                 let target = self.reference()?;
+                if self.is_word("FROM") && self.word_at(1) == Some("ENVIRONMENT") {
+                    return Err(Error::at(pos, "ACCEPT ... FROM ENVIRONMENT is GnuCOBOL's, not Enterprise COBOL's"));
+                }
                 let from = if self.accept_word("FROM") {
                     match self.name("SYSIN, DATE, DAY, DAY-OF-WEEK or TIME")?.as_str() {
                         "DATE" => AcceptFrom::Date { four_digit_year: self.accept_word("YYYYMMDD") },
@@ -1188,7 +1209,43 @@ impl Parser<'_> {
             }
             "GO" => {
                 self.accept_word("TO");
-                Stmt::GoTo { target: self.proc_name()?, pos }
+                if self.peek() == Some(&Tok::Period) {
+                    return Ok(Stmt::GoTo { target: None, pos });
+                }
+                let target = self.proc_name()?;
+                if !self.starts_ref() && !self.is_word("DEPENDING") {
+                    return Ok(Stmt::GoTo { target: Some(target), pos });
+                }
+                let mut targets = vec![target];
+                while self.starts_ref() && !self.is_word("DEPENDING") {
+                    targets.push(self.proc_name()?);
+                }
+                self.expect_word("DEPENDING")?;
+                self.accept_word("ON");
+                Stmt::GoToDepending { targets, on: self.reference()?, pos }
+            }
+            "ALTER" => {
+                let mut pairs = Vec::new();
+                loop {
+                    let paragraph = self.proc_name()?;
+                    self.expect_word("TO")?;
+                    if self.accept_word("PROCEED") {
+                        self.expect_word("TO")?;
+                    }
+                    pairs.push((paragraph, self.proc_name()?));
+                    if !self.starts_ref() {
+                        break;
+                    }
+                }
+                Stmt::Alter { pairs, pos }
+            }
+            "ENTRY" => {
+                let Some(Tok::Alnum(name)) = self.peek().cloned() else {
+                    return Err(self.error("an alphanumeric literal naming the entry point"));
+                };
+                self.at += 1;
+                let using = if self.accept_word("USING") { self.parameters()? } else { Vec::new() };
+                Stmt::Entry { name: name.to_ascii_uppercase(), using, pos }
             }
             "EVALUATE" => self.evaluate(pos)?,
             "INITIATE" | "GENERATE" | "TERMINATE" | "SUPPRESS" => Stmt::Report(Box::new(self.report_statement(&verb, pos)?)),
@@ -1356,6 +1413,9 @@ impl Parser<'_> {
             return Ok(Stmt::PerformProc { from, thru, repeat, pos });
         }
         let repeat = self.repeat()?;
+        if matches!(&repeat, Loop::Varying { after, .. } if !after.is_empty()) {
+            return Err(Error::at(pos, "an inline PERFORM cannot have AFTER phrases: Enterprise COBOL takes them only when PERFORM names a procedure"));
+        }
         let body = self.block(&["END-PERFORM"])?;
         self.expect_word("END-PERFORM")?;
         Ok(Stmt::PerformInline { body, repeat, pos })
@@ -1633,6 +1693,9 @@ impl Parser<'_> {
     }
 
     fn set(&mut self) -> R<SetStmt> {
+        if self.is_word("ENVIRONMENT") {
+            return Err(Error::at(self.pos(), "SET ENVIRONMENT is GnuCOBOL's, not Enterprise COBOL's"));
+        }
         if self.is_word("ADDRESS") && self.word_at(1) == Some("OF") {
             let mut targets = Vec::new();
             while self.is_word("ADDRESS") && self.word_at(1) == Some("OF") {
@@ -1733,17 +1796,16 @@ impl Parser<'_> {
             return Ok(Loop::Until { cond: self.cond()?, test_after });
         }
         if self.accept_word("VARYING") {
-            let var = self.reference()?;
-            self.expect_word("FROM")?;
-            let from = self.expr()?;
-            self.expect_word("BY")?;
-            let by = self.expr()?;
-            self.expect_word("UNTIL")?;
-            let until = self.cond()?;
-            if self.is_word("AFTER") {
-                return Err(self.error("PERFORM VARYING ... AFTER is not supported yet"));
+            let varying = Box::new(self.varying()?);
+            let mut after = Vec::new();
+            while self.is_word("AFTER") {
+                if after.len() == 6 {
+                    return Err(self.error("the end of the PERFORM: Enterprise COBOL takes at most six AFTER phrases"));
+                }
+                self.at += 1;
+                after.push(self.varying()?);
             }
-            return Ok(Loop::Varying { varying: Box::new(Varying { var, from, by, until }), test_after });
+            return Ok(Loop::Varying { varying, after, test_after });
         }
         if self.starts_operand() && self.word_at(1) == Some("TIMES") || matches!(self.peek(), Some(Tok::Number(_))) {
             let count = self.expr()?;
@@ -1751,6 +1813,17 @@ impl Parser<'_> {
             return Ok(Loop::Times(count));
         }
         Ok(Loop::Once)
+    }
+
+    /// One VARYING or AFTER phrase, after its keyword.
+    fn varying(&mut self) -> R<Varying> {
+        let var = self.reference()?;
+        self.expect_word("FROM")?;
+        let from = self.expr()?;
+        self.expect_word("BY")?;
+        let by = self.expr()?;
+        self.expect_word("UNTIL")?;
+        Ok(Varying { var, from, by, until: self.cond()? })
     }
 
     fn starts_ref(&self) -> bool {
@@ -2002,6 +2075,9 @@ impl Parser<'_> {
     }
 
     fn relop(&mut self) -> R<Option<RelOp>> {
+        if self.peek() == Some(&Tok::Lt) && self.peek_at(1) == Some(&Tok::Gt) {
+            return Err(Error::at(self.pos(), "<> is not an Enterprise COBOL relational operator: it writes NOT ="));
+        }
         let op = match self.peek() {
             Some(Tok::Eq) => RelOp::Eq,
             Some(Tok::Lt) => RelOp::Lt,
@@ -2296,6 +2372,21 @@ mod tests {
         assert!(invalid.on.is_some() && invalid.not_on.is_some());
         assert!(matches!(&s[3], Stmt::Rewrite { invalid, .. } if invalid.on.is_some()));
         assert!(matches!(&s[4], Stmt::Delete { .. }));
+    }
+
+    #[test]
+    fn entry_alter_the_go_to_forms_and_section_priorities() {
+        let p = program(
+            "       01  D PIC 9.\n       LINKAGE SECTION.\n       01  L PIC X.\n       PROCEDURE DIVISION.\n       S SECTION 50.\n       P1.\n           ENTRY 'Alt' USING BY VALUE L.\n           ALTER P2 TO PROCEED TO P1 P3 TO P1\n           GO TO P1 P2 DEPENDING ON D.\n       P2.\n           GO TO.\n       P3.\n           GO TO P1.\n       T SECTION.\n",
+        );
+        let priorities: Vec<(&str, u8)> = p.paragraphs.iter().map(|q| (q.name.as_str(), q.priority)).collect();
+        assert_eq!(priorities, [("S", 50), ("P1", 50), ("P2", 50), ("P3", 50), ("T", 0)]);
+        let s = &p.paragraphs[1].statements;
+        assert!(matches!(&s[0], Stmt::Entry { name, using, .. } if name == "ALT" && using == &[Param { by_value: true, name: "L".into() }]));
+        assert!(matches!(&s[2], Stmt::Alter { pairs, .. } if pairs.len() == 2 && pairs[1].0.name == "P3"));
+        assert!(matches!(&s[3], Stmt::GoToDepending { targets, on, .. } if targets.len() == 2 && on.name == "D"));
+        assert!(matches!(&p.paragraphs[2].statements[0], Stmt::GoTo { target: None, .. }));
+        assert!(matches!(&p.paragraphs[3].statements[0], Stmt::GoTo { target: Some(t), .. } if t.name == "P1"));
     }
 
     #[test]

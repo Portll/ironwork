@@ -195,6 +195,8 @@ pub struct Paragraph {
     /// The section the paragraph belongs to, or the section's own name for its header.
     pub section: Option<String>,
     pub is_section: bool,
+    /// The section's priority-number, 0 when it has none: 50 to 99 is an independent segment.
+    pub priority: u8,
     pub pos: Pos,
 }
 
@@ -320,7 +322,8 @@ pub enum Loop {
     Once,
     Times(Expr),
     Until { cond: Cond, test_after: bool },
-    Varying { varying: Box<Varying>, test_after: bool },
+    /// VARYING, and each AFTER phrase, outermost first.
+    Varying { varying: Box<Varying>, after: Vec<Varying>, test_after: bool },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -342,7 +345,14 @@ pub enum Stmt {
     Delete { file: String, invalid: Handlers, pos: Pos },
     Start { file: String, key: Option<(RelOp, Ref)>, invalid: Handlers, pos: Pos },
     Initialize { targets: Vec<Ref>, pos: Pos },
-    GoTo { target: ProcName, pos: Pos },
+    /// GO TO; with no target, the altered GO TO that only an ALTER gives one.
+    GoTo { target: Option<ProcName>, pos: Pos },
+    /// GO TO ... DEPENDING ON: the procedure the item's value numbers, or on when none does.
+    GoToDepending { targets: Vec<ProcName>, on: Ref, pos: Pos },
+    /// ALTER: each paragraph whose GO TO is to go instead to the procedure paired with it.
+    Alter { pairs: Vec<(ProcName, ProcName)>, pos: Pos },
+    /// ENTRY: where a CALL of `name` begins, and the LINKAGE items its USING list addresses.
+    Entry { name: String, using: Vec<Param>, pos: Pos },
     Goback { pos: Pos },
     /// EXIT PROGRAM: returns from a called program; in the first program it does nothing.
     ExitProgram { pos: Pos },

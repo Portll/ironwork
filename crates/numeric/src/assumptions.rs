@@ -171,6 +171,12 @@ pub const LINAGE_VALUES: &str = "C73";
 pub const LINAGE_EXTEND: &str = "C74";
 pub const LINAGE_COUNTER_BETWEEN_WRITES: &str = "C75";
 pub const PRINT_FILE_UPDATE: &str = "C76";
+pub const ENTRY_IN_SEQUENCE: &str = "C50";
+pub const ENTRY_CALLS: &str = "C51";
+pub const ALTERED_GO_TO_RESET: &str = "C52";
+pub const DISPLAY_STREAM: &str = "C53";
+pub const RANDOM_GENERATOR: &str = "C54";
+pub const ZERO_DIVISOR_CHECK: &str = "C55";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1022,6 +1028,42 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: PRINT_FILE_UPDATE,
         claim: "A print file opened I-O under ADV holds the control character a byte before each FD record, as it was written (PRINT_CONTROL_CHARACTER): READ skips the byte as PRINT_CONTROL_RUN_TIME says, REWRITE writes the record behind the byte it was read with, REWRITE having no ADVANCING phrase, and WRITE, with or without ADVANCING, fails with file status 48, a sequential file's WRITE needing OUTPUT or EXTEND (Language Reference SC27-8713-03, pp. 471, 476; Table 34, p. 302); LINAGE has no effect on it (p. 189). IBM does not say what REWRITE does with the byte",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ENTRY_IN_SEQUENCE,
+        claim: "Control that reaches an ENTRY statement in the program's own sequence passes it as it passes CONTINUE: nothing is bound and no storage changes. The Language Reference says only where a CALL of the entry begins, at the first executable statement after it (SC27-8713-03, pp. 339-340)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ENTRY_CALLS,
+        claim: "A CALL of an ENTRY name begins at the statement after the ENTRY and binds the entry's USING list alone, so a LINKAGE item only the PROCEDURE DIVISION USING names has no address (Language Reference SC27-8713-03, pp. 264, 320, 339-340). A static CALL, of a literal under NODYNAM, enters the one copy of the program that its PROGRAM-ID enters, in its last-used state (Programming Guide SC27-8714-03, pp. 548, 553-554); a dynamic CALL, of an identifier or of a literal under DYNAM, gets for each entry name a copy of the program with WORKING-STORAGE of its own, as if a separate compile unit were called (p. 560), which a CANCEL of that name resets, where p. 549 says only that a second entry point must not be called dynamically without a CANCEL between. CALL finds an entry name among the programs of the source and those already loaded, then in a program library as a member of that name, an alias, as NAME(ALIAS) or binder ALIAS statements make one (pp. 548, 560)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ALTERED_GO_TO_RESET,
+        claim: "Altered GO TOs are put back as written whenever the program's WORKING-STORAGE is initialized: its first CALL, the first after a CANCEL of it, and every CALL of an INITIAL program (Language Reference SC27-8713-03, pp. 103, 318), and not on another CALL (Programming Guide SC27-8714-03, p. 548). Those of an independent segment, priority 50 to 99, are put back when control reaches the segment from a paragraph of another priority by falling into it, GO TO, PERFORM or a SORT or MERGE procedure, but not when a PERFORM made from it returns, nor when a CALL of the program begins in it: p. 265 says 'from a segment with a different priority-number', p. 318 'from another independent segment', and neither names a PERFORM's return",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: DISPLAY_STREAM,
+        claim: "DISPLAY writes to standard output as a program under z/OS UNIX does with its OUTDD ddname unallocated and _IGZ_SYSOUT unset: one stream of characters, a newline after each DISPLAY except one WITH NO ADVANCING (Programming Guide SC27-8714-03, pp. 36-37; Language Reference SC27-8713-03, pp. 333-335), and UPON any device writes to the same stream. To a ddname IBM writes a record for each DISPLAY, whose first byte is ' ', or '+' after one WITH NO ADVANCING (Programming Guide p. 37); that route is not modelled",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: RANDOM_GENERATOR,
+        claim: "FUNCTION RANDOM is Park and Miller's minimal standard generator. An argument n starts a sequence at state n mod 2147483646 + 1, a first reference without one starts it as 0 does, and each reference sets the state s to 16807 s mod 2147483647 and returns the new state divided by 2147483647 in long HFP, which is exclusively between zero and one; so the arguments 0 to 2,147,483,645 give distinct sequences and larger ones repeat them. IBM documents the interface (Language Reference SC27-8713-03, p. 629), a long floating-point result under either ARITH (Programming Guide SC27-8714-03, p. 58), and that its generator is not CEERAN0's, 950706376 s mod 2147483647 (Programming Reference SA38-0683-60, pp. 343-344), but not the generator. A fractional argument is truncated to an integer, and a negative one ends the run with abend IRONWORK",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ZERO_DIVISOR_CHECK,
+        claim: "A zero divisor that no ON SIZE ERROR phrase takes, in an arithmetic statement without one or in an expression outside an arithmetic statement (a condition, a subscript, a reference modifier), is the program check of the instruction the compiler divides with: HFP divide, S0CF, when the expression is evaluated in floating point; fixed-point divide, S0C9, when the dividend and the divisor are made only of integer binary items and integer literals, at least one an item; decimal divide, S0CB, otherwise. The size error condition belongs to the arithmetic statements alone, and with ON SIZE ERROR any zero divisor, floating-point too, is one (Language Reference SC27-8713-03, p. 296; Programming Guide SC27-8714-03, p. 242); the manuals do not say which instructions the compiler divides with",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

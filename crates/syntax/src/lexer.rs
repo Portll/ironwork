@@ -149,6 +149,9 @@ impl Lexer<'_> {
                     ('(', _) => (Tok::LParen, 1),
                     (')', _) => (Tok::RParen, 1),
                     (':', _) => (Tok::Colon, 1),
+                    ('&', _) if matches!(self.tokens.last().map(|t| &t.tok), Some(Tok::Alnum(_) | Tok::Hex(_) | Tok::National(_))) => {
+                        return Err(Error::at(pos, "literal concatenation with & is not Enterprise COBOL's"));
+                    }
                     _ => return Err(Error::at(pos, format!("unexpected character {c:?}"))),
                 };
                 self.at += len;
@@ -345,6 +348,13 @@ mod tests {
     #[test]
     fn a_continuation_that_opens_a_quote_after_a_closed_literal_is_a_second_literal() {
         assert_eq!(toks("           VALUE 'ABC'\n      -    'DEF'."), [w("VALUE"), Tok::Alnum("ABC".into()), Tok::Alnum("DEF".into()), Tok::Period]);
+    }
+
+    #[test]
+    fn an_ampersand_after_a_literal_is_named_as_concatenation() {
+        let error = |text: &str| lex(&source::read(text).unwrap()).unwrap_err().message;
+        assert!(error("           'A' & 'B'").contains("literal concatenation with & is not Enterprise COBOL's"));
+        assert!(error("           NOTIFY=&SYSUID").contains("unexpected character '&'"));
     }
 
     #[test]

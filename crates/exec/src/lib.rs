@@ -49,11 +49,37 @@ pub struct Compiled {
     pub carriage: Vec<Option<printer::Carriage>>,
     /// The warnings and informational messages of a program that compiled.
     pub diagnostics: Vec<Error>,
+    /// The program's ENTRY statements, in source order.
+    pub entries: Vec<EntryPoint>,
+}
+
+/// An alternate entry point: a CALL of `name` begins at statement `statement` of paragraph
+/// `paragraph`, the one after the ENTRY statement, with `using` addressing LINKAGE.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EntryPoint {
+    pub name: String,
+    pub paragraph: usize,
+    pub statement: usize,
+    pub using: Vec<Param>,
+    pub pos: Pos,
+}
+
+/// The ENTRY statements of a program, each a sentence of its own paragraph's.
+pub fn entry_points(program: &Program) -> Vec<EntryPoint> {
+    let mut out = Vec::new();
+    for (paragraph, p) in program.paragraphs.iter().enumerate() {
+        for (k, s) in p.statements.iter().enumerate() {
+            if let Stmt::Entry { name, using, pos } = s {
+                out.push(EntryPoint { name: name.clone(), paragraph, statement: k + 1, using: using.clone(), pos: *pos });
+            }
+        }
+    }
+    out
 }
 
 const FUNCTIONS: &[&str] = &[
     "CHAR", "ORD", "NATIONAL-OF", "LENGTH", "UPPER-CASE", "LOWER-CASE", "REVERSE", "CURRENT-DATE", "NUMVAL", "NUMVAL-C", "TRIM", "MOD", "REM",
-    "INTEGER", "INTEGER-PART", "ABS", "MIN", "MAX", "INTEGER-OF-DATE", "DATE-OF-INTEGER",
+    "INTEGER", "INTEGER-PART", "ABS", "MIN", "MAX", "INTEGER-OF-DATE", "DATE-OF-INTEGER", "RANDOM",
 ];
 
 /// Checks and lays out a parsed program. `flags` are this compiler's own, such as `-silent`. A
@@ -146,12 +172,14 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
     for p in &program.paragraphs {
         check.statements(&p.statements);
     }
+    let entries = entry_points(&program);
+    procedure_rules(&program, &layout, &entries, &options, &mut errors);
     oo::check(&layout, &program, &mut errors);
     let errors: Vec<Error> = errors.into_iter().map(|e| e.in_files(&program.sources)).collect();
     if refused(&errors, &options) {
         Err(errors)
     } else {
-        Ok(Compiled { program, layout, options, ssrange, report_writer, collating, carriage, diagnostics: errors })
+        Ok(Compiled { program, layout, options, ssrange, report_writer, collating, carriage, diagnostics: errors, entries })
     }
 }
 
@@ -163,6 +191,89 @@ pub(crate) fn refused(messages: &[Error], options: &Options) -> bool {
         numeric::options::Warnings::Block => Severity::Warning,
     };
     messages.iter().any(|m| m.severity >= floor)
+}
+
+/// The rules of the ENTRY statement (Language Reference SC27-8713-03, pp. 339-340), and of ALTER
+/// and the GO TO it alters (pp. 318, 346-348).
+fn procedure_rules(program: &Program, layout: &Layout, entries: &[EntryPoint], options: &Options, errors: &mut Vec<Error>) {
+    let method = program.oo.as_ref().is_some_and(|o| matches!(o.unit, OoUnit::Method(_)));
+    for (k, e) in entries.iter().enumerate() {
+        if program.returning.is_some() {
+            errors.push(Error::at(e.pos, format!("ENTRY '{}': a program with PROCEDURE DIVISION RETURNING cannot have ENTRY statements", e.name)));
+        }
+        if e.name.eq_ignore_ascii_case(&program.id) || entries[..k].iter().any(|f| f.name == e.name) {
+            errors.push(Error::at(e.pos, format!("ENTRY '{}': the name is already the program's or another ENTRY's", e.name)));
+        }
+        for param in &e.using {
+            if !layout.linkage_roots.iter().any(|&i| layout.items[i].name.as_deref() == Some(param.name.as_str())) {
+                errors.push(Error::at(e.pos, format!("ENTRY '{}' USING {}: not an 01 or 77 item of the LINKAGE SECTION", e.name, param.name)));
+            }
+        }
+    }
+    let why_no_alter = if program.recursive {
+        Some("a RECURSIVE program")
+    } else if options.thread {
+        Some("a program compiled with THREAD")
+    } else {
+        method.then_some("a method")
+    };
+    for p in &program.paragraphs {
+        for s in &p.statements {
+            let mut inner = Vec::new();
+            oo::bodies(s).into_iter().for_each(|body| inner_statements(body, &mut inner));
+            for (t, nested) in std::iter::once((s, false)).chain(inner.into_iter().map(|t| (t, true))) {
+                match t {
+                    Stmt::Entry { name, pos, .. } if nested => {
+                        errors.push(Error::at(*pos, format!("ENTRY '{name}' must be a sentence of its own, not inside another statement")));
+                    }
+                    Stmt::GoTo { target: None, pos } => {
+                        if let Some(why) = why_no_alter {
+                            errors.push(Error::at(*pos, format!("a GO TO with no procedure-name cannot be used in {why}")));
+                        }
+                        if nested || !lone_go_to(p) {
+                            errors.push(Error::at(*pos, "a GO TO with no procedure-name must be its paragraph's only sentence"));
+                        }
+                    }
+                    Stmt::Alter { pairs, pos } => {
+                        if let Some(why) = why_no_alter {
+                            errors.push(Error::at(*pos, format!("ALTER cannot be used in {why}")));
+                        }
+                        for (from, to) in pairs {
+                            altered_paragraph(program, from, *pos, errors);
+                            if let Err(m) = procedure(program, to) {
+                                errors.push(Error::at(*pos, m));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+/// Every statement inside `stmts`, at any depth.
+fn inner_statements<'s>(stmts: &'s [Stmt], out: &mut Vec<&'s Stmt>) {
+    for s in stmts {
+        out.push(s);
+        oo::bodies(s).into_iter().for_each(|body| inner_statements(body, out));
+    }
+}
+
+/// A paragraph ALTER can name: one sentence, a GO TO without DEPENDING ON.
+fn altered_paragraph(program: &Program, name: &ProcName, pos: Pos, errors: &mut Vec<Error>) {
+    match procedure(program, name) {
+        Err(m) => errors.push(Error::at(pos, m)),
+        Ok((i, _)) if program.paragraphs[i].is_section => errors.push(Error::at(pos, format!("ALTER {}: a section, where ALTER names a paragraph", name.name))),
+        Ok((i, _)) if !lone_go_to(&program.paragraphs[i]) => {
+            errors.push(Error::at(pos, format!("ALTER {}: the paragraph must hold one sentence, a GO TO without DEPENDING ON", name.name)));
+        }
+        Ok(_) => {}
+    }
+}
+
+fn lone_go_to(p: &Paragraph) -> bool {
+    matches!(p.statements.as_slice(), [Stmt::GoTo { .. }] | [Stmt::GoTo { .. }, Stmt::SentenceEnd])
 }
 
 /// The last paragraph of the section that paragraph `i` is in, or `i` when there are no sections.
@@ -470,7 +581,12 @@ impl Check<'_> {
                 self.handlers(invalid);
             }
             Stmt::Initialize { targets, .. } => targets.iter().for_each(|r| self.reference(r)),
-            Stmt::GoTo { target, pos } => self.procedure(target, *pos),
+            Stmt::GoTo { target: Some(target), pos } => self.procedure(target, *pos),
+            Stmt::GoToDepending { targets, on, pos } => {
+                targets.iter().for_each(|t| self.procedure(t, *pos));
+                self.reference(on);
+            }
+            Stmt::GoTo { target: None, .. } | Stmt::Alter { .. } | Stmt::Entry { .. } => {}
             Stmt::Call(c) => {
                 self.operand(&c.target);
                 for arg in &c.using {
@@ -568,11 +684,13 @@ impl Check<'_> {
             Loop::Once => {}
             Loop::Times(e) => self.expr(e),
             Loop::Until { cond, .. } => self.cond(cond),
-            Loop::Varying { varying, .. } => {
-                self.reference(&varying.var);
-                self.expr(&varying.from);
-                self.expr(&varying.by);
-                self.cond(&varying.until);
+            Loop::Varying { varying, after, .. } => {
+                for v in std::iter::once(&**varying).chain(after) {
+                    self.reference(&v.var);
+                    self.expr(&v.from);
+                    self.expr(&v.by);
+                    self.cond(&v.until);
+                }
             }
         }
     }

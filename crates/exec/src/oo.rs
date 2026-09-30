@@ -805,7 +805,7 @@ impl Rules<'_> {
             Stmt::If { cond, pos, .. } => self.cond(cond, *pos),
             Stmt::PerformInline { repeat, pos, .. } | Stmt::PerformProc { repeat, pos, .. } => match repeat {
                 Loop::Until { cond, .. } => self.cond(cond, *pos),
-                Loop::Varying { varying, .. } => self.cond(&varying.until, *pos),
+                Loop::Varying { varying, after, .. } => std::iter::once(&**varying).chain(after).for_each(|v| self.cond(&v.until, *pos)),
                 _ => {}
             },
             Stmt::Evaluate { subjects, whens, pos, .. } => {
