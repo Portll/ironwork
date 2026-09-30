@@ -336,10 +336,11 @@ impl Journal {
         let duration = i64::try_from(self.started.elapsed().as_millis()).unwrap_or(i64::MAX);
         self.append("close", fields([("exit", exit.map_or(Value::Null, Value::Int)), ("counts", Value::Obj(counts)), ("durationMs", Value::Int(duration)), ("ledger", ledger.into())]))?;
         self.file.sync_all()?;
-        if let Err(reason) = held {
-            return Ok(Ledger::Unrecorded(reason));
-        }
-        let result = append_ledger(&self.dir, &self.id, &self.chain);
+        let broken = match held {
+            Ok(broken) => broken,
+            Err(reason) => return Ok(Ledger::Unrecorded(reason)),
+        };
+        let result = append_ledger(&self.dir, &self.id, &self.chain, broken);
         let _ = fs::remove_file(&lock);
         match result {
             Ok(()) => Ok(Ledger::Recorded),
@@ -348,20 +349,31 @@ impl Journal {
     }
 }
 
+/// A lock that was broken: the pid it names and its age.
+struct Broken {
+    pid: i64,
+    age_ms: i64,
+}
+
 /// The ledger lock. A lock older than a minute was left by a writer that died holding it, and is
-/// broken, as cobolwork breaks it.
-fn take_lock(path: &Path) -> Result<(), String> {
+/// broken, as cobolwork breaks it; the break goes into the ledger.
+fn take_lock(path: &Path) -> Result<Option<Broken>, String> {
+    let mut broken = None;
     let deadline = Instant::now() + std::time::Duration::from_secs(5);
     loop {
         match open_new(path) {
             Ok(mut f) => {
                 let _ = writeln!(f, "{} {}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis());
-                return Ok(());
+                return Ok(broken);
             }
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                let stale = fs::symlink_metadata(path).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > std::time::Duration::from_secs(60));
-                if stale && fs::remove_file(path).is_ok() {
-                    continue;
+                let age = fs::symlink_metadata(path).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok());
+                if let Some(age) = age.filter(|a| *a > std::time::Duration::from_secs(60)) {
+                    let pid = fs::read_to_string(path).ok().and_then(|t| t.split_whitespace().next().and_then(|p| p.parse().ok())).unwrap_or(0);
+                    if fs::remove_file(path).is_ok() {
+                        broken = Some(Broken { pid, age_ms: i64::try_from(age.as_millis()).unwrap_or(i64::MAX) });
+                        continue;
+                    }
                 }
                 if Instant::now() >= deadline {
                     return Err("the ledger lock could not be had".into());
@@ -409,7 +421,7 @@ fn field_of(line: &str, key: &str) -> Option<String> {
     Some(rest.chars().take_while(|c| c.is_ascii_digit()).collect())
 }
 
-fn append_ledger(dir: &Path, run: &str, journal: &Chain) -> io::Result<()> {
+fn append_ledger(dir: &Path, run: &str, journal: &Chain, broken: Option<Broken>) -> io::Result<()> {
     let path = dir.join(LEDGER);
     refuse_link(&path)?;
     let mut chain = match ledger_tail(&path)? {
@@ -425,6 +437,9 @@ fn append_ledger(dir: &Path, run: &str, journal: &Chain) -> io::Result<()> {
     let now = iso_now();
     if chain.seq == 0 {
         out.push_str(&chain.record("genesis", fields([("createdAt", now.clone().into())]), &now)?);
+    }
+    if let Some(b) = broken {
+        out.push_str(&chain.record("lock-broken", fields([("holderPid", Value::Int(b.pid)), ("ageMs", Value::Int(b.age_ms))]), &now)?);
     }
     out.push_str(&chain.record(
         "run",
@@ -512,6 +527,8 @@ mod tests {
         drop(lock);
         assert_eq!(closed(&ev), Ledger::Recorded);
         assert!(!ev.join(LOCK).exists());
+        let kinds: Vec<String> = fs::read_to_string(ev.join(LEDGER)).unwrap().lines().map(|l| field_of(l, "kind").unwrap()).collect();
+        assert_eq!(kinds, ["genesis", "lock-broken", "run"]);
         fs::remove_dir_all(dir).unwrap();
     }
 
