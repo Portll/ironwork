@@ -70,6 +70,10 @@ pub struct Layout {
     /// Bytes of LOCAL-STORAGE each activation gets.
     pub local_size: u32,
     pub size: u32,
+    /// Each FD and SD name, in declaration order: the highest qualifier of its records.
+    pub file_names: Vec<String>,
+    /// The LINAGE-COUNTER item of each file whose FD has LINAGE, which its file-name qualifies.
+    pub linage_counters: Vec<Option<usize>>,
 }
 
 const LEVEL_ALIGNMENT: u32 = 8;
@@ -292,7 +296,7 @@ pub fn build(entries: &[DataEntry], files: &[(&[DataEntry], Option<u32>)], share
         };
         areas.push((start, size));
     }
-    Ok(Layout { items, conditions, edits, file_areas: areas, linkage_roots, local_size: local_cursor, size: cursor })
+    Ok(Layout { items, conditions, edits, file_areas: areas, linkage_roots, local_size: local_cursor, size: cursor, file_names: Vec::new(), linage_counters: Vec::new() })
 }
 
 fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, edits: &mut Vec<Vec<Sym>>) -> Result<Kind, Error> {
@@ -412,8 +416,26 @@ fn place(items: &mut [Item], index: usize, offset: u32, mut dims: Vec<(u32, u32)
 }
 
 impl Layout {
+    /// Names the files, so that a file-name qualifies its records and its LINAGE-COUNTER.
+    pub fn name_files(&mut self, files: &[FileDecl], linage_counters: Vec<Option<usize>>) {
+        self.file_names = files.iter().map(|f| f.name.clone()).collect();
+        self.linage_counters = linage_counters;
+    }
+
+    /// The file whose name qualifies item `i`: the file of its record, or the one it is the
+    /// LINAGE-COUNTER of.
+    fn file_qualifying(&self, mut i: usize) -> Option<&str> {
+        while let Some(p) = self.items[i].parent {
+            i = p;
+        }
+        let k = self.items[i].file.map(usize::from).or_else(|| self.linage_counters.iter().position(|&c| c == Some(i)))?;
+        self.file_names.get(k).map(String::as_str)
+    }
+
+    /// A data item, condition-name or LINAGE-COUNTER named with its qualifiers, the last of which
+    /// may be the file-name of an FD or SD (Language Reference SC27-8713-03, pp. 69-70).
     pub fn resolve(&self, name: &str, qualifiers: &[String], pos: Pos) -> Result<Resolved, Error> {
-        let within = |mut at: Option<usize>| {
+        let within = |mut at: Option<usize>, own: usize| {
             let mut wanted = qualifiers.iter();
             let mut next = wanted.next();
             while let (Some(q), Some(i)) = (next, at) {
@@ -422,17 +444,20 @@ impl Layout {
                 }
                 at = self.items[i].parent;
             }
-            next.is_none()
+            match next {
+                None => true,
+                Some(file) => wanted.next().is_none() && self.file_qualifying(own) == Some(file.as_str()),
+            }
         };
         let mut found: Vec<Resolved> = self
             .items
             .iter()
             .enumerate()
-            .filter(|(_, it)| it.name.as_deref() == Some(name) && within(it.parent))
+            .filter(|(i, it)| it.name.as_deref() == Some(name) && within(it.parent, *i))
             .map(|(i, _)| Resolved::Item(i))
             .collect();
         found.extend(
-            self.conditions.iter().enumerate().filter(|(_, c)| c.name == name && within(Some(c.item))).map(|(i, _)| Resolved::Condition(i)),
+            self.conditions.iter().enumerate().filter(|(_, c)| c.name == name && within(Some(c.item), c.item)).map(|(i, _)| Resolved::Condition(i)),
         );
         match found.as_slice() {
             [one] => Ok(*one),

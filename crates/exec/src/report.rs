@@ -208,7 +208,7 @@ struct DraftField {
     category: Category,
 }
 
-fn entry(level: u8, name: Option<String>, picture: Option<String>, usage: Option<Usage>, pos: Pos) -> DataEntry {
+pub(crate) fn entry(level: u8, name: Option<String>, picture: Option<String>, usage: Option<Usage>, pos: Pos) -> DataEntry {
     DataEntry {
         level,
         name,

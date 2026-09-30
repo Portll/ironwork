@@ -109,6 +109,15 @@ pub fn controls(machine: bool, before: bool, space: Space) -> Controls {
     }
 }
 
+/// The control characters of a WRITE to a LINAGE file, which moves the paper `ahead` lines before
+/// its line and `behind` lines after it. An ASA file has no WRITE BEFORE, so moves nothing after.
+pub fn moving(machine: bool, ahead: u64, behind: u64) -> Controls {
+    if !machine {
+        return controls(false, false, Space::Lines(ahead));
+    }
+    Controls { lead: Spacing::machine(ahead), data: PRINT_THEN_SPACE[behind.min(3) as usize], trail: Spacing::machine(behind.saturating_sub(3)) }
+}
+
 /// How a text DD moves the paper before and after a record's line: as the control characters of
 /// a print file say, and for any other file a line of its own
 /// ([`numeric::assumptions::TEXT_PRINT_LINES`]).
@@ -140,7 +149,7 @@ pub(crate) fn carriages(program: &Program, layout: &Layout, adv: bool) -> Vec<Op
         .iter()
         .zip(uses)
         .map(|(f, (advancing, before))| {
-            let print = f.organization == Organization::Sequential && !f.sort && (advancing || f.linage || !f.reports.is_empty());
+            let print = f.organization == Organization::Sequential && !f.sort && (advancing || f.linage.is_some() || !f.reports.is_empty());
             print.then_some(Carriage { machine: before, reserved: reserves_first_byte(f, adv) })
         })
         .collect()
@@ -149,7 +158,7 @@ pub(crate) fn carriages(program: &Program, layout: &Layout, adv: bool) -> Vec<Op
 /// Whether a print file's control character is its records' own first byte: under NOADV, unless
 /// LINAGE makes the file ADV.
 pub(crate) fn reserves_first_byte(f: &FileDecl, adv: bool) -> bool {
-    !adv && !f.linage && f.organization == Organization::Sequential && !f.sort
+    !adv && f.linage.is_none() && f.organization == Organization::Sequential && !f.sort
 }
 
 fn file_of(layout: &Layout, record: &Ref) -> Option<usize> {
@@ -209,6 +218,16 @@ mod tests {
         assert_eq!(bytes(true, false, Space::Lines(4)), [(0x1B, false), (0x0B, false), (0x01, true)]);
         assert_eq!(bytes(true, false, Space::Channel(1)), [(0x8B, false), (0x01, true)]);
         assert_eq!(bytes(true, false, Space::Channel(2)), [(0x93, false), (0x01, true)]);
+    }
+
+    #[test]
+    fn a_linage_movement_spaces_before_and_after_the_line() {
+        let records = |machine, ahead, behind| moving(machine, ahead, behind).records().collect::<Vec<_>>();
+        assert_eq!(records(false, 5, 0), [(0x60, false), (0xF0, true)]);
+        assert_eq!(records(false, 0, 0), [(0x4E, true)]);
+        assert_eq!(records(true, 0, 5), [(0x19, true), (0x13, false)]);
+        assert_eq!(records(true, 4, 1), [(0x1B, false), (0x0B, false), (0x09, true)]);
+        assert_eq!(records(true, 2, 0), [(0x13, false), (0x01, true)]);
     }
 
     #[test]

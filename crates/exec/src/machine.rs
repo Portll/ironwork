@@ -358,7 +358,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 }
             }
             Stmt::Read(r) => return self.read_stmt(r),
-            Stmt::Write { record, from, advancing, invalid, pos } => return self.write_stmt(record, from.as_ref(), advancing.as_ref(), invalid, *pos),
+            Stmt::Write { record, from, advancing, invalid, end_of_page, pos } => return self.write_stmt(record, from.as_ref(), advancing.as_ref(), invalid, end_of_page, *pos),
             Stmt::Rewrite { record, from, invalid, pos } => return self.rewrite_stmt(record, from.as_ref(), invalid, *pos),
             Stmt::Delete { file, invalid, pos } => return self.delete_stmt(file, invalid, *pos),
             Stmt::Start { file, key, invalid, pos } => return self.start_stmt(file, key.as_ref(), invalid, *pos),

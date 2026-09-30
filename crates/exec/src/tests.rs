@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 mod collating;
 mod data;
+mod linage;
 mod oo;
 mod printer;
 mod report;
@@ -668,7 +669,8 @@ const FRAGMENTS: &[&str] = &[
     "INPUT PROCEDURE ", "OUTPUT PROCEDURE IS ", "GIVING ", "END-RETURN", "SORT-RETURN", "ALPHABET A IS STANDARD-1 ", "PROGRAM COLLATING SEQUENCE ",
     "ALPHABET B IS 'Z' THRU 'A' 'Q' ALSO 256 ALSO HIGH-VALUE ", "THROUGH ", "OCCURS 1 TO 20 DEPENDING ON ", "PIC 9(18) ", "PIC S9(31) ",
     "I-O-CONTROL. SAME RECORD AREA FOR ", "SAME AREA ", "\n       CBL FASTSRT\n", "\n       CBL THREAD,DLL\n", ",NORENT", ",NODBCS", "NOTHREAD",
-    " IS INITIAL", "\n       END PROGRAM ",
+    " IS INITIAL", "\n       END PROGRAM ", "LINAGE IS ", "LINAGE 0 ", "WITH FOOTING AT ", "LINES AT TOP ", "LINES AT BOTTOM ", "AT END-OF-PAGE ",
+    "NOT AT EOP ", "LINAGE-COUNTER", " IN P ", "ADVANCING PAGE ", "BEFORE ADVANCING ",
 ];
 
 fn mutate(base: &str, next: &mut impl FnMut() -> u64) -> String {
@@ -796,6 +798,19 @@ fn mutated_programs_never_panic_the_front_end() {
                     "       P-OUT.\n".into(),
                     line("RETURN S INTO G-REC AT END CONTINUE"),
                     line("    NOT AT END CONTINUE END-RETURN."),
+                ]
+                .concat(),
+            ),
+            file_program(
+                "           SELECT P ASSIGN TO PDD.\n",
+                "       FD  P LINAGE IS N LINES WITH FOOTING AT 4\n           LINES AT TOP 1 LINES AT BOTTOM T.\n       01  P-REC PIC X(3).\n",
+                "       01  N PIC 99 VALUE 6.\n       01  T PIC 9 COMP-3.\n",
+                &[
+                    line("OPEN OUTPUT P"),
+                    line("WRITE P-REC IN P BEFORE ADVANCING 2 LINES AT END-OF-PAGE"),
+                    line("    DISPLAY LINAGE-COUNTER OF P NOT AT EOP CONTINUE END-WRITE"),
+                    line("WRITE P-REC AFTER ADVANCING PAGE CLOSE P"),
+                    line("GOBACK."),
                 ]
                 .concat(),
             ),

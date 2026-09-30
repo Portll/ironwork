@@ -76,11 +76,27 @@ pub struct FileDecl {
     pub records: Vec<DataEntry>,
     /// FD ... REPORT IS: the reports written to the file.
     pub reports: Vec<String>,
-    /// FD ... LINAGE: its page geometry is not read yet, only that the clause is there.
-    pub linage: bool,
+    /// FD ... LINAGE: the logical page. An SD's is read and dropped, as IBM ignores it.
+    pub linage: Option<Linage>,
     /// Described by SD: a sort or merge file, which needs no data set.
     pub sort: bool,
     pub pos: Pos,
+}
+
+/// LINAGE IS lines [WITH FOOTING AT footing] [LINES AT TOP top] [LINES AT BOTTOM bottom].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Linage {
+    pub lines: LinageValue,
+    pub footing: Option<LinageValue>,
+    pub top: Option<LinageValue>,
+    pub bottom: Option<LinageValue>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LinageValue {
+    /// The digits as written, whose count sizes LINAGE-COUNTER.
+    Integer(String),
+    Data(Ref),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -321,7 +337,7 @@ pub enum Stmt {
     Open { files: Vec<(OpenMode, String)>, pos: Pos },
     Close { files: Vec<String>, pos: Pos },
     Read(Box<ReadStmt>),
-    Write { record: Ref, from: Option<Operand>, advancing: Option<Advancing>, invalid: Handlers, pos: Pos },
+    Write { record: Ref, from: Option<Operand>, advancing: Option<Advancing>, invalid: Handlers, end_of_page: Handlers, pos: Pos },
     Rewrite { record: Ref, from: Option<Operand>, invalid: Handlers, pos: Pos },
     Delete { file: String, invalid: Handlers, pos: Pos },
     Start { file: String, key: Option<(RelOp, Ref)>, invalid: Handlers, pos: Pos },

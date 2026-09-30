@@ -541,7 +541,7 @@ impl<'p> Machine<'p, '_, '_> {
             "it is a line-sequential file".into()
         } else if decl.organization == Organization::Relative && !self.fixed_length(k) {
             "it is a variable-length relative file".into()
-        } else if !input && decl.linage {
+        } else if !input && decl.linage.is_some() {
             "its FD has LINAGE".into()
         } else if self.carriage[k].is_some_and(|c| !c.reserved) && self.options.fastsrt_adv_print == FastsrtAdvPrint::Exclude {
             format!("it is a print file, whose records ADV makes a byte longer than its FD's {} ({})", self.area(k).1, FastsrtAdvPrint::Exclude.flag())

@@ -12,6 +12,7 @@ pub mod edit;
 pub mod files;
 pub mod layout;
 pub mod le;
+pub mod linage;
 pub mod machine;
 pub mod oo;
 pub mod picture;
@@ -99,6 +100,7 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
         collating::Sequence::native()
     });
     let drafts = report::prepare(&mut program, options.adv, &mut errors);
+    let linage_counters = linage::add_counters(&mut program);
     if whole {
         oo::option_rules(&program, &options, &mut errors);
     }
@@ -107,13 +109,15 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
         errors.push(e);
         (0..files.len()).collect()
     });
-    let layout = match layout::build(&program.working_storage, &files, &shared, &program.linkage, &program.local_storage) {
+    let mut layout = match layout::build(&program.working_storage, &files, &shared, &program.linkage, &program.local_storage) {
         Ok(l) => l,
         Err(e) => {
             errors.push(e);
             return Err(errors.into_iter().map(|e| e.in_files(&program.sources)).collect());
         }
     };
+    let counter_item = |entry: usize| program.working_storage[..entry].iter().filter(|e| e.level != 88).count();
+    layout.name_files(&program.files, linage_counters.iter().map(|c| c.map(counter_item)).collect());
     for item in &layout.items {
         if let Some(object) = &item.depending_on {
             match layout.resolve(&object.name, &object.qualifiers, object.pos) {
@@ -134,6 +138,7 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
     let mut check = Check { layout: &layout, program: &program, errors: &mut errors };
     for k in 0..program.files.len() {
         check.file_keys(k);
+        linage::check_file(check.program, check.layout, k, check.errors);
     }
     for block in &program.exec_declarations {
         check.exec_block(block);
@@ -334,6 +339,7 @@ impl Check<'_> {
     }
 
     fn statement(&mut self, s: &Stmt) {
+        linage::check_receivers(self.layout, s, self.errors);
         match s {
             Stmt::Move { from, to, .. } => {
                 self.operand(from);
@@ -435,11 +441,15 @@ impl Check<'_> {
                 if let Some(op) = from {
                     self.operand(op);
                 }
-                if let Stmt::Write { advancing: Some(a), .. } = s {
-                    if let Advancing::Lines { count, .. } = a {
-                        self.expr(count);
+                if let Stmt::Write { advancing, end_of_page, .. } = s {
+                    if let Some(a) = advancing {
+                        if let Advancing::Lines { count, .. } = a {
+                            self.expr(count);
+                        }
+                        printer::check_write(self.program, self.layout, record, a, *pos, self.errors);
                     }
-                    printer::check_write(self.program, self.layout, record, a, *pos, self.errors);
+                    linage::check_write(self.program, self.layout, record, advancing.as_ref(), end_of_page, *pos, self.errors);
+                    self.handlers(end_of_page);
                 }
                 self.handlers(invalid);
             }

@@ -2,7 +2,8 @@
 //! a sequential file opened I-O, is held in memory ([`files::Keyed`]).
 
 use super::*;
-use crate::files::{self, FileStatus, Format, KeySpan, Keyed, Keying, Record};
+use crate::files::{self, FileStatus, Format, KeySpan, Keyed, Keying, Move, Open, Record};
+use crate::linage::{Geometry, Motion, Page};
 use crate::unit::Event;
 use crate::printer::{self, Space};
 
@@ -145,6 +146,12 @@ impl<'p> Machine<'p, '_, '_> {
         self.unit.programs[self.me].files[k].as_ref().is_some_and(|f| f.is_keyed())
     }
 
+    /// Whether file k is a print file opened I-O whose records hold the byte ADV adds
+    /// ([`numeric::assumptions::PRINT_FILE_UPDATE`]).
+    fn held_control_byte(&self, k: usize) -> bool {
+        self.unit.programs[self.me].files[k].as_ref().is_some_and(|f| f.is_keyed() && self.adds_control_byte(k, f.format))
+    }
+
     /// A record as WRITE or REWRITE puts it in the file: a fixed record at the length of the area.
     fn record_bytes(&self, k: usize, loc: Loc, format: Format) -> Vec<u8> {
         let mut bytes = self.bytes(loc).to_vec();
@@ -211,6 +218,10 @@ impl<'p> Machine<'p, '_, '_> {
         if self.unit.programs[self.me].files[k].is_some() {
             return self.io_status(k, FileStatus::AlreadyOpen, format!("{name} is already open"), pos);
         }
+        let page = match (&decl.linage, mode) {
+            (Some(_), OpenMode::Output | OpenMode::Extend) => Some(Page::opened(self.geometry(k, pos)?)),
+            _ => None,
+        };
         let default = self.described_format(k);
         let dd = self.unit.dds.get(&decl.assign);
         if let Some(d) = &dd {
@@ -231,24 +242,19 @@ impl<'p> Machine<'p, '_, '_> {
             };
             let keying = self.keying(k, pos)?;
             let format = dd.as_ref().and_then(|d| d.format).unwrap_or(default);
-            return match files::open_keyed(dd.as_ref(), mode, format, keying, self.area(k).1, self.page) {
-                Ok(f) => {
-                    self.unit.programs[self.me].files[k] = Some(f);
-                    self.set_status(k, status, pos)
-                }
+            let record_len = self.area(k).1 + usize::from(self.adds_control_byte(k, format));
+            return match files::open_keyed(dd.as_ref(), mode, format, keying, record_len, self.page) {
+                Ok(f) => self.opened(k, f, status, pos),
                 Err(e) => self.io_status(k, FileStatus::PermanentError, format!("{name}: {e}"), pos),
             };
         }
         match dd {
-            None if decl.optional && mode == OpenMode::Input => {
-                self.unit.programs[self.me].files[k] = Some(files::absent());
-                self.set_status(k, FileStatus::SuccessOptional, pos)
-            }
+            None if decl.optional && mode == OpenMode::Input => self.opened(k, files::absent(), FileStatus::SuccessOptional, pos),
             None => self.io_status(k, FileStatus::FileNotFound, no_dd, pos),
             Some(dd) => match files::open(&dd, mode, dd.format.unwrap_or(default)) {
-                Ok(f) => {
-                    self.unit.programs[self.me].files[k] = Some(f);
-                    self.set_status(k, FileStatus::Success, pos)
+                Ok(mut f) => {
+                    f.page = page;
+                    self.opened(k, f, FileStatus::Success, pos)
                 }
                 Err(e) => {
                     let status = match e.kind() {
@@ -260,6 +266,49 @@ impl<'p> Machine<'p, '_, '_> {
                 }
             },
         }
+    }
+
+    /// Holds file k open; OPEN sets a LINAGE file's LINAGE-COUNTER to 1 (Language Reference
+    /// SC27-8713-03, p. 24).
+    fn opened(&mut self, k: usize, f: Open, status: FileStatus, pos: Pos) -> R<()> {
+        self.unit.programs[self.me].files[k] = Some(f);
+        self.set_linage_counter(k, 1, pos)?;
+        self.set_status(k, status, pos)
+    }
+
+    /// The page file k's LINAGE clause gives as its data items stand now.
+    fn geometry(&mut self, k: usize, pos: Pos) -> R<Geometry> {
+        let program = self.program;
+        let decl = &program.files[k];
+        let Some(linage) = &decl.linage else { return Err(Abend::ironwork(format!("{} has no LINAGE clause", decl.name), pos)) };
+        let body = self.linage_value(&linage.lines, pos)?;
+        let footing = match &linage.footing {
+            Some(v) => Some(self.linage_value(v, pos)?),
+            None => None,
+        };
+        let top = match &linage.top {
+            Some(v) => self.linage_value(v, pos)?,
+            None => 0,
+        };
+        let bottom = match &linage.bottom {
+            Some(v) => self.linage_value(v, pos)?,
+            None => 0,
+        };
+        Geometry::new(body, footing, top, bottom).map_err(|why| Abend::ironwork(format!("{}: {why} ({})", decl.name, numeric::assumptions::LINAGE_VALUES), pos))
+    }
+
+    fn linage_value(&mut self, v: &LinageValue, pos: Pos) -> R<i64> {
+        match v {
+            LinageValue::Integer(n) => n.parse().map_err(|_| Abend::ironwork(format!("LINAGE {n} is too large"), pos)),
+            LinageValue::Data(r) => self.integer(&Expr::Operand(Operand::Ref(r.clone())), pos),
+        }
+    }
+
+    fn set_linage_counter(&mut self, k: usize, value: u64, pos: Pos) -> R<()> {
+        let Some(i) = self.layout.linage_counters.get(k).copied().flatten() else { return Ok(()) };
+        let item = &self.layout.items[i];
+        let loc = Loc { offset: self.base + item.offset as usize, len: item.size as usize, kind: item.kind, item: i };
+        self.store_fixed(loc, &Fixed::new(value as i128, Places::new(19, 0)), false, pos)
     }
 
     pub(super) fn close_file(&mut self, name: &str, pos: Pos) -> R<()> {
@@ -288,6 +337,7 @@ impl<'p> Machine<'p, '_, '_> {
         let program = self.program;
         let decl = &program.files[k];
         let sequential = self.sequential(k) || decl.access == Access::Dynamic && r.next;
+        let added = self.held_control_byte(k);
         let (status, found, variable) = self
             .held(k, |m, mode, format, keyed| {
                 let variable = format == Format::Variable;
@@ -333,7 +383,8 @@ impl<'p> Machine<'p, '_, '_> {
             {
                 self.set_integer(rk, files::number_of(&found.key) as i64, pos)?;
             }
-            if self.deliver(k, &found.record, variable, r.into.as_ref(), pos)? && status == FileStatus::Success {
+            let record = found.record.get(usize::from(added)..).unwrap_or_default();
+            if self.deliver(k, record, variable, r.into.as_ref(), pos)? && status == FileStatus::Success {
                 status = FileStatus::SuccessWrongLength;
             }
         }
@@ -375,13 +426,53 @@ impl<'p> Machine<'p, '_, '_> {
         self.conclude(k, if wrong_length || long { FileStatus::SuccessWrongLength } else { FileStatus::Success }, &r.at_end, '1', "READ", pos)
     }
 
-    pub(super) fn write_stmt(&mut self, record: &Ref, from: Option<&Operand>, advancing: Option<&Advancing>, invalid: &'p Handlers, pos: Pos) -> R<Flow> {
+    pub(super) fn write_stmt(&mut self, record: &Ref, from: Option<&Operand>, advancing: Option<&Advancing>, invalid: &'p Handlers, end_of_page: &'p Handlers, pos: Pos) -> R<Flow> {
         let (k, loc) = self.record_of(record, from, "WRITE", pos)?;
+        if self.paged(k) {
+            return self.write_page(k, loc, advancing, Some(end_of_page), pos);
+        }
         self.write_record(k, loc, advancing, invalid, pos)
+    }
+
+    fn paged(&self, k: usize) -> bool {
+        self.unit.programs[self.me].files[k].as_ref().is_some_and(|f| f.page.is_some())
+    }
+
+    /// A WRITE to a LINAGE file: the page decides how far the paper moves, and once the record is
+    /// written LINAGE-COUNTER changes and an END-OF-PAGE phrase runs (Language Reference
+    /// SC27-8713-03, pp. 474-475; Programming Guide SC27-8714-03, p. 178).
+    fn write_page(&mut self, k: usize, loc: Loc, advancing: Option<&Advancing>, end_of_page: Option<&'p Handlers>, pos: Pos) -> R<Flow> {
+        let (before, motion) = match advancing {
+            None => (false, Motion::Lines(1)),
+            Some(Advancing::Lines { before, count }) => (*before, Motion::Lines(self.integer(count, pos)?.max(0) as u64)),
+            Some(Advancing::Page { before }) => (*before, Motion::Page),
+            Some(Advancing::Mnemonic { name, .. }) => {
+                return Err(Abend::ironwork(format!("ADVANCING {name} on {}, whose FD has LINAGE, is not supported yet", self.program.files[k].name), pos));
+            }
+        };
+        let Some(mut page) = self.unit.programs[self.me].files[k].as_ref().and_then(|f| f.page) else { return Ok(Flow::Next) };
+        let step = page.write(before, motion, || self.geometry(k, pos))?;
+        let controls = self.carriage[k].map(|c| printer::moving(c.machine, step.ahead, step.behind));
+        let text = (Some(Move::Lines(step.ahead)), before.then_some(Move::Lines(step.behind)));
+        if !self.put_line(k, loc, controls, text, pos)? {
+            return Ok(Flow::Next);
+        }
+        if let Some(f) = self.unit.programs[self.me].files[k].as_mut() {
+            f.page = Some(page);
+        }
+        self.set_linage_counter(k, page.counter, pos)?;
+        let phrase = end_of_page.and_then(|h| if step.end_of_page { h.on.as_deref() } else { h.not_on.as_deref() });
+        match phrase {
+            Some(body) => self.run_block(body),
+            None => Ok(Flow::Next),
+        }
     }
 
     /// WRITE of the record at `loc` to file k.
     pub(super) fn write_record(&mut self, k: usize, loc: Loc, advancing: Option<&Advancing>, invalid: &'p Handlers, pos: Pos) -> R<Flow> {
+        if self.paged(k) {
+            return self.write_page(k, loc, advancing, None, pos);
+        }
         if !self.is_held(k) {
             let (before, space) = match advancing {
                 Some(a) => self.advance(a, pos)?,
@@ -455,17 +546,24 @@ impl<'p> Machine<'p, '_, '_> {
     /// A WRITE to a sequential file: a print file's records carry the control character, a text
     /// DD shows it as line and form feeds.
     pub(super) fn write_stream(&mut self, k: usize, loc: Loc, before: bool, space: Space, pos: Pos) -> R<()> {
+        let controls = self.carriage[k].map(|c| printer::controls(c.machine, before, space));
+        self.put_line(k, loc, controls, printer::text_motion(before, space), pos).map(drop)
+    }
+
+    /// Writes the record at `loc` to sequential file k behind `controls`, or to a text DD with the
+    /// paper moved as `text` says before and after its line. True when it was written.
+    fn put_line(&mut self, k: usize, loc: Loc, controls: Option<printer::Controls>, text: (Option<Move>, Option<Move>), pos: Pos) -> R<bool> {
         let name = self.program.files[k].name.clone();
         let Some(mut f) = self.unit.programs[self.me].files[k].take() else {
-            return self.io_status(k, FileStatus::NotOpenOutput, format!("WRITE {name}: {}", FileStatus::NotOpenOutput.meaning()), pos);
+            self.io_status(k, FileStatus::NotOpenOutput, format!("WRITE {name}: {}", FileStatus::NotOpenOutput.meaning()), pos)?;
+            return Ok(false);
         };
         if f.mode == OpenMode::Input {
             self.unit.programs[self.me].files[k] = Some(f);
-            return self.io_status(k, FileStatus::NotOpenOutput, format!("WRITE {name}: {}", FileStatus::NotOpenOutput.meaning()), pos);
+            self.io_status(k, FileStatus::NotOpenOutput, format!("WRITE {name}: {}", FileStatus::NotOpenOutput.meaning()), pos)?;
+            return Ok(false);
         }
-        let carriage = self.carriage[k];
-        let controls = carriage.map(|c| printer::controls(c.machine, before, space));
-        let reserved = usize::from(carriage.is_some_and(|c| c.reserved));
+        let reserved = usize::from(self.carriage[k].is_some_and(|c| c.reserved));
         if let Some(c) = controls.filter(|_| reserved == 1 && loc.len > 0) {
             self.unit.mem[loc.offset] = c.data;
         }
@@ -473,8 +571,7 @@ impl<'p> Machine<'p, '_, '_> {
         let written = match (f.format, controls) {
             (Format::Text, _) => {
                 let line = self.page.decode(bytes.get(reserved..).unwrap_or_default()).trim_end().to_owned();
-                let (ahead, behind) = printer::text_motion(before, space);
-                f.print(ahead, &line, behind)
+                f.print(text.0, &line, text.1)
             }
             (_, None) => f.write(&bytes),
             (_, Some(c)) => c.records().try_for_each(|(control, line)| {
@@ -490,20 +587,25 @@ impl<'p> Machine<'p, '_, '_> {
         };
         self.unit.programs[self.me].files[k] = Some(f);
         match written {
-            Ok(()) => self.set_status(k, FileStatus::Success, pos),
-            Err(e) => self.io_status(k, FileStatus::PermanentError, format!("WRITE {name}: {e}"), pos),
+            Ok(()) => self.set_status(k, FileStatus::Success, pos).map(|()| true),
+            Err(e) => self.io_status(k, FileStatus::PermanentError, format!("WRITE {name}: {e}"), pos).map(|()| false),
         }
     }
 
     pub(super) fn rewrite_stmt(&mut self, record: &Ref, from: Option<&Operand>, invalid: &'p Handlers, pos: Pos) -> R<Flow> {
         let (k, loc) = self.record_of(record, from, "REWRITE", pos)?;
         let sequential = self.sequential(k);
+        let added = self.held_control_byte(k);
         let status = self
             .held(k, |m, mode, format, keyed| {
                 if mode != OpenMode::InputOutput {
                     return Ok(FileStatus::NotOpenInputOutput);
                 }
-                let bytes = m.record_bytes(k, loc, format);
+                let mut bytes = m.record_bytes(k, loc, format);
+                if added {
+                    let control = keyed.last_read.as_ref().and_then(|key| keyed.record(key)).and_then(|old| old.first().copied()).unwrap_or(ebcdic::SPACE);
+                    bytes.insert(0, control);
+                }
                 let prior = keyed.last_read.take();
                 let key = if sequential {
                     let Some(prior) = prior else { return Ok(FileStatus::NoPriorRead) };

@@ -164,6 +164,13 @@ pub const COPY_SEARCH_ROUNDS: &str = "C85";
 pub const COPY_NOT_THE_PROGRAM: &str = "C86";
 pub const COPY_LITERAL_AS_WRITTEN: &str = "C87";
 pub const COPY_DOUBLED_PERIOD: &str = "C88";
+pub const LINAGE_COUNTER: &str = "C70";
+pub const LINAGE_PAGE_MOVEMENT: &str = "C71";
+pub const LINAGE_END_OF_PAGE: &str = "C72";
+pub const LINAGE_VALUES: &str = "C73";
+pub const LINAGE_EXTEND: &str = "C74";
+pub const LINAGE_COUNTER_BETWEEN_WRITES: &str = "C75";
+pub const PRINT_FILE_UPDATE: &str = "C76";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -756,7 +763,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: PRINT_CONTROL_CHARACTER,
-        claim: "A sequential file that a WRITE with ADVANCING in the program names, or whose FD has LINAGE, is a print file: every record written to it carries a printer control character, a WRITE without ADVANCING being AFTER ADVANCING 1 LINE; ASA characters when every WRITE ... ADVANCING of the file says AFTER, machine codes when any says BEFORE (Language Reference SC27-8713-03, p. 479). Under ADV, the default, the character is a byte before the record; under NOADV it is the record's own first byte; a LINAGE file is ADV whatever the option (p. 480; Programming Guide SC27-8714-03, pp. 178-179, 346). ASA ' ', '0' and '-' space 1 to 3 lines before printing, '+' none, '1' to '9' and 'A' to 'C' skip to channels 1 to 12, PAGE and C01 being channel 1 and CSP '+'; machine codes print then space, X'01', X'09', X'11', X'19', or skip, X'89' + 8(n-1) for channel n; AFP-5A is X'5A' (z/OS DFSMS Macro Instructions for Data Sets SC23-6852-60, pp. 397-398; Language Reference pp. 126-127, 483). SPECIAL-NAMES of a program apply to the programs it contains (p. 13)",
+        claim: "A sequential file that a WRITE with ADVANCING in the program names, or whose FD has LINAGE, is a print file: every record written to it carries a printer control character, a WRITE without ADVANCING being AFTER ADVANCING 1 LINE; ASA characters when every WRITE ... ADVANCING of the file says AFTER, machine codes when any says BEFORE (Language Reference SC27-8713-03, p. 479). Under ADV, the default, the character is a byte before the record; under NOADV it is the record's own first byte; a LINAGE file is ADV whatever the option (p. 480; Programming Guide SC27-8714-03, pp. 178-179, 346). ASA ' ', '0' and '-' space 1 to 3 lines before printing, '+' none, '1' to '9' and 'A' to 'C' skip to channels 1 to 12, PAGE and C01 being channel 1, except that PAGE moves a LINAGE file's paper in lines (LINAGE_PAGE_MOVEMENT), and CSP '+'; machine codes print then space, X'01', X'09', X'11', X'19', or skip, X'89' + 8(n-1) for channel n; AFP-5A is X'5A' (z/OS DFSMS Macro Instructions for Data Sets SC23-6852-60, pp. 397-398; Language Reference pp. 126-127, 483). SPECIAL-NAMES of a program apply to the programs it contains (p. 13)",
         basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -973,6 +980,48 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: COPY_DOUBLED_PERIOD,
         claim: "COPY X.. is refused, naming X.: a COPY statement ends with a separator period (Language Reference SC27-8713-03, p. 697), which is a period followed by a space (pp. 49-50), so the name is X., not X. A text-name or library-name for a data set holds only letters, digits and hyphens (p. 696); in z/OS UNIX directories any COBOL character may appear (p. 697), and X. would then name X..cpy and the like, not X's file. The manuals do not say whether Enterprise COBOL instead reads X and a separator period, leaving the second period in the text, as GnuCOBOL 3.2 does",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LINAGE_COUNTER,
+        claim: "LINAGE IS n LINES [WITH FOOTING AT f] [LINES AT TOP t] [LINES AT BOTTOM b] describes a logical page of t + n + b lines, each page following the last with no spacing; TOP and BOTTOM default to 0, and each value is an unsigned integer, at most 99,999,999, or an unsigned integer data item (Language Reference SC27-8713-03, pp. 189-190, 747). OPEN OUTPUT or EXTEND takes all four for the first page, and a WRITE ... ADVANCING PAGE or a page overflow takes the data items' values again for the next page (p. 190). LINAGE-COUNTER, one for each LINAGE file and qualified by its file-name when there are two, has the PICTURE and USAGE of the page body's data item, or is binary with as many digits as its integer; OPEN sets it to 1, it is the line of the page body the printer is at, and no statement may change it (pp. 23-24, 70). A WRITE adds its ADVANCING lines to it, 1 without ADVANCING; a WRITE that would take it past the page body puts its line on the next page's first line, after the printer moves there (AFTER) or before (BEFORE), as ADVANCING PAGE does, and sets it to 1 (pp. 474-475). END-OF-PAGE, which needs LINAGE, runs once the line is written when LINAGE-COUNTER has reached the footing line or the page overflowed, only an overflow counting when FOOTING is not given, and NOT END-OF-PAGE otherwise, neither after a WRITE that failed (p. 475; Programming Guide SC27-8714-03, p. 178). LINAGE takes effect only for a file opened OUTPUT or EXTEND (p. 189), and an SD's does nothing (p. 190)",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LINAGE_PAGE_MOVEMENT,
+        claim: "A WRITE to a LINAGE file moves the paper in lines, never by a skip to a channel, the logical page not being the printer's form (Language Reference SC27-8713-03, p. 190). When OPEN ends the printer is at the first page's first line, t lines of top margin above line 1 of its page body, so the first WRITE moves those t lines besides its own; a WRITE that starts a new page, by overflow or ADVANCING PAGE, moves the lines left in the page body, the bottom margin, the next page's top margin and one line more, to that page's line 1. The lines are written as any WRITE ... ADVANCING writes them, as control characters and spacing records (PRINT_CONTROL_CHARACTER, PRINT_SPACING_RECORDS), so the margins are blank lines, and a text DD shows them as line feeds (TEXT_PRINT_LINES). OPEN and CLOSE write nothing: a file closed with no WRITE is empty, and the last page is not spaced out",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LINAGE_END_OF_PAGE,
+        claim: "The end-of-page condition is judged by LINAGE-COUNTER once the WRITE is done, as the Language Reference words it (SC27-8713-03, p. 475): a WRITE ... ADVANCING PAGE, which leaves LINAGE-COUNTER at 1, raises it only when the next page's FOOTING is 1, whatever line it printed on, and a WRITE ... ADVANCING 0 LINES in the footing area raises it again",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LINAGE_VALUES,
+        claim: "A page body under 1 line, a footing line outside the page body or a margin below 0 that data items give at OPEN or at a new page ends the run with ironwork's own abend naming the file: the Language Reference states the rule (SC27-8713-03, p. 189) but no file status for breaking it (Table 34, pp. 300-303), and the Language Environment Runtime Messages (SA38-0686-60) have no message for it. Integers that break it are compile errors",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LINAGE_EXTEND,
+        claim: "OPEN EXTEND of a LINAGE file starts a new logical page as OPEN OUTPUT does, top margin first and LINAGE-COUNTER at 1 (Language Reference SC27-8713-03, p. 24), whatever line the data set's last page ended on",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LINAGE_COUNTER_BETWEEN_WRITES,
+        claim: "LINAGE-COUNTER is zero until the file is first opened and keeps its value after CLOSE; a WRITE that fails leaves it and the page where they were; OPEN INPUT and I-O set it to 1 as OPEN OUTPUT does, since the Language Reference says so of any OPEN (SC27-8713-03, p. 24)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PRINT_FILE_UPDATE,
+        claim: "A print file opened I-O under ADV holds the control character a byte before each FD record, as it was written (PRINT_CONTROL_CHARACTER): READ skips the byte as PRINT_CONTROL_RUN_TIME says, REWRITE writes the record behind the byte it was read with, REWRITE having no ADVANCING phrase, and WRITE, with or without ADVANCING, fails with file status 48, a sequential file's WRITE needing OUTPUT or EXTEND (Language Reference SC27-8713-03, pp. 471, 476; Table 34, p. 302); LINAGE has no effect on it (p. 189). IBM does not say what REWRITE does with the byte",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

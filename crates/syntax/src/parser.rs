@@ -36,7 +36,7 @@ const PHRASE_WORDS: &[&str] = &[
     "BEFORE", "AFTER", "ADVANCING", "INPUT", "OUTPUT", "EXTEND", "I-O", "REVERSED", "USING", "RETURNING", "EXCEPTION", "OVERFLOW",
     "END-CALL", "OMITTED", "CONTENT", "REFERENCE", "VALUE", "UP", "DOWN", "DELIMITED", "DELIMITER", "COUNT", "POINTER", "TALLYING",
     "REPLACING", "CONVERTING", "INITIAL", "FOR", "CHARACTERS", "LEADING", "FIRST", "ALL", "END-STRING", "END-UNSTRING", "END-SEARCH",
-    "NEXT", "INVALID", "KEY", "END-REWRITE", "END-DELETE", "END-START", "END-INVOKE", "END-RETURN",
+    "NEXT", "INVALID", "KEY", "END-REWRITE", "END-DELETE", "END-START", "END-INVOKE", "END-RETURN", "END-OF-PAGE", "EOP",
 ];
 
 /// The environment-names a WRITE ADVANCING mnemonic-name can stand for (Language Reference,
@@ -394,7 +394,7 @@ impl Parser<'_> {
             record_max: None,
             records: Vec::new(),
             reports: Vec::new(),
-            linage: false,
+            linage: None,
             sort: false,
             pos,
         };
@@ -538,8 +538,14 @@ impl Parser<'_> {
                         let names = self.report_names()?;
                         files[index].reports.extend(names);
                     }
-                    other => {
-                        files[index].linage |= other == "LINAGE";
+                    "LINAGE" => {
+                        let linage = self.linage()?;
+                        if files[index].linage.is_some() {
+                            return Err(Error::at(pos, format!("{indicator} {name}: LINAGE is given twice")));
+                        }
+                        files[index].linage = (indicator == "FD").then_some(linage);
+                    }
+                    _ => {
                         while self.peek().is_some() && self.peek() != Some(&Tok::Period) && !self.word().is_some_and(|w| FD_WORDS.contains(&w)) {
                             self.at += 1;
                         }
@@ -549,6 +555,57 @@ impl Parser<'_> {
             files[index].records = self.data_entries()?;
         }
         Ok(())
+    }
+
+    /// The LINAGE clause after its keyword; FOOTING, TOP and BOTTOM are taken in any order.
+    fn linage(&mut self) -> R<Linage> {
+        self.accept_word("IS");
+        let lines = self.linage_value("LINAGE")?;
+        self.accept_word("LINES");
+        let mut linage = Linage { lines, footing: None, top: None, bottom: None };
+        loop {
+            let start = self.at;
+            self.accept_word("WITH");
+            self.accept_word("LINES");
+            self.accept_word("AT");
+            let Some(phrase) = self.accept_any(&["FOOTING", "TOP", "BOTTOM"]) else {
+                self.at = start;
+                return Ok(linage);
+            };
+            if phrase == "FOOTING" {
+                self.accept_word("AT");
+            }
+            let value = Some(self.linage_value(&phrase)?);
+            let slot = match phrase.as_str() {
+                "FOOTING" => &mut linage.footing,
+                "TOP" => &mut linage.top,
+                _ => &mut linage.bottom,
+            };
+            if slot.is_some() {
+                return Err(self.error(format!("LINAGE: {phrase} is given twice")));
+            }
+            *slot = value;
+        }
+    }
+
+    /// An unsigned integer, or a data-name that may be qualified.
+    fn linage_value(&mut self, phrase: &str) -> R<LinageValue> {
+        match self.peek() {
+            Some(Tok::Number(n)) if n.bytes().all(|b| b.is_ascii_digit()) => {
+                let n = n.clone();
+                self.at += 1;
+                Ok(LinageValue::Integer(n))
+            }
+            Some(Tok::Number(n)) => Err(self.error(format!("LINAGE: {phrase} {n} is not an unsigned integer"))),
+            Some(Tok::Word(_)) if self.starts_ref() => {
+                let r = self.reference()?;
+                if !r.subscripts.is_empty() || r.refmod.is_some() {
+                    return Err(Error::at(r.pos, format!("LINAGE: {phrase} {} takes no subscript or reference modification", r.name)));
+                }
+                Ok(LinageValue::Data(r))
+            }
+            _ => Err(self.error(format!("an integer or a data-name after {phrase}"))),
+        }
     }
 
     /// An EXEC block among DATA DIVISION entries, kept as a declaration with its period.
@@ -1113,8 +1170,21 @@ impl Parser<'_> {
                         Advancing::Lines { before, count }
                     });
                 }
-                let invalid = self.invalid_key("END-WRITE")?;
-                Stmt::Write { record, from, advancing, invalid, pos }
+                let eop_ahead = |p: &Self, i: usize| {
+                    let at = usize::from(p.word_at(i) == Some("AT"));
+                    matches!(p.word_at(i + at), Some("END-OF-PAGE" | "EOP"))
+                };
+                let [end_of_page, invalid] = self.phrases_opening(|p, i| eop_ahead(p, i) || p.word_at(i) == Some("INVALID"), &["END-WRITE"], |p| {
+                    if p.accept_word("INVALID") {
+                        p.accept_word("KEY");
+                        return Ok(1);
+                    }
+                    p.accept_word("AT");
+                    p.at += 1;
+                    Ok(0)
+                })?;
+                self.accept_word("END-WRITE");
+                Stmt::Write { record, from, advancing, invalid, end_of_page, pos }
             }
             "GO" => {
                 self.accept_word("TO");
@@ -1293,11 +1363,16 @@ impl Parser<'_> {
 
     /// ON and NOT ON phrases, each opening with one of `starts`; `head` reads its words and picks the handlers it fills.
     fn on_phrases<const N: usize>(&mut self, starts: &[&str], ends: &[&str], head: impl Fn(&mut Self) -> R<usize>) -> R<[Handlers; N]> {
+        self.phrases_opening(|p, i| p.word_at(i).is_some_and(|w| starts.contains(&w)), ends, head)
+    }
+
+    /// ON and NOT ON phrases, each where `opens` finds one `i` words ahead.
+    fn phrases_opening<const N: usize>(&mut self, opens: impl Fn(&Self, usize) -> bool, ends: &[&str], head: impl Fn(&mut Self) -> R<usize>) -> R<[Handlers; N]> {
         let stops = [&["NOT"][..], ends].concat();
         let mut handlers = std::array::from_fn(|_| Handlers::default());
         loop {
-            let negated = self.is_word("NOT") && self.word_at(1).is_some_and(|w| starts.contains(&w));
-            if !negated && !self.word().is_some_and(|w| starts.contains(&w)) {
+            let negated = self.is_word("NOT") && opens(self, 1);
+            if !negated && !opens(self, 0) {
                 return Ok(handlers);
             }
             self.at += usize::from(negated);
@@ -2247,7 +2322,7 @@ mod tests {
         let (outer, inner) = (&programs[0], &programs[1]);
         let pairs = |p: &Program| p.environment.mnemonics.iter().map(|(n, e)| format!("{n}={e}")).collect::<Vec<_>>();
         assert_eq!(pairs(outer), ["TOP-OF-PAGE=C01", "NO-SPACE=CSP", "PAGE-MODE=AFP-5A"]);
-        assert!(outer.files[0].linage);
+        assert_eq!(outer.files[0].linage.as_ref().map(|l| &l.lines), Some(&LinageValue::Integer("60".into())));
         let advancing = |p: &Program, i: usize| match &p.paragraphs[0].statements[i] {
             Stmt::Write { advancing: Some(a), .. } => a.clone(),
             other => panic!("{other:?}"),
@@ -2264,5 +2339,60 @@ mod tests {
         let names: Vec<&str> = p.paragraphs.iter().map(|q| q.name.as_str()).collect();
         assert_eq!(names, ["MAIN-LINE", "SKIPPED", "NEVER"]);
         assert!(matches!(p.paragraphs[1].statements[..], [Stmt::Exit(ExitKind::Section), Stmt::SentenceEnd]), "{:?}", p.paragraphs[1].statements);
+    }
+
+    fn linage_program(fds: &str, procedure: &str) -> String {
+        [
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n",
+            "           SELECT P ASSIGN TO PDD.\n           SELECT S ASSIGN TO SDD.\n           SELECT Q ASSIGN TO QDD.\n",
+            "       DATA DIVISION.\n       FILE SECTION.\n",
+            fds,
+            "       WORKING-STORAGE SECTION.\n       01  SIZES.\n           05 BODY PIC 99.\n       01  T-M PIC 9.\n       PROCEDURE DIVISION.\n",
+            procedure,
+        ]
+        .concat()
+    }
+
+    #[test]
+    fn linage_phrases_come_in_any_order_and_an_sds_is_dropped() {
+        let fds = [
+            "       FD  P LINAGE IS BODY OF SIZES LINES LINES AT BOTTOM 6\n           WITH FOOTING AT 45 TOP T-M.\n       01  P-REC PIC X.\n",
+            "       SD  S LINAGE 10.\n       01  S-REC PIC X.\n",
+            "       FD  Q LABEL RECORDS STANDARD LINAGE 5 RECORDING MODE F.\n       01  Q-REC PIC X.\n",
+        ]
+        .concat();
+        let p = crate::parse(&linage_program(&fds, "           GOBACK.\n")).unwrap_or_else(|e| panic!("{e}"));
+        let l = p.files[0].linage.as_ref().unwrap();
+        assert!(matches!(&l.lines, LinageValue::Data(r) if r.name == "BODY" && r.qualifiers == ["SIZES"]));
+        assert_eq!((&l.footing, &l.bottom), (&Some(LinageValue::Integer("45".into())), &Some(LinageValue::Integer("6".into()))));
+        assert!(matches!(&l.top, Some(LinageValue::Data(r)) if r.name == "T-M"));
+        assert_eq!(p.files[1].linage, None);
+        assert_eq!((p.files[2].linage.as_ref().map(|l| &l.lines), p.files[2].recording), (Some(&LinageValue::Integer("5".into())), Some('F')));
+        for (fd, expected) in [("LINAGE 5 TOP 1 TOP 2", "TOP is given twice"), ("LINAGE 5.5", "not an unsigned integer"), ("LINAGE 5 FOOTING", "after FOOTING")] {
+            let text = linage_program(&format!("       FD  P {fd}.\n       01  P-REC PIC X.\n"), "           GOBACK.\n");
+            let e = crate::parse(&text).unwrap_err();
+            assert!(e.message.contains(expected), "{fd}: {}", e.message);
+        }
+    }
+
+    #[test]
+    fn end_of_page_phrases_leave_a_read_its_not_at_end() {
+        let procedure = [
+            "           READ Q AT END WRITE P-REC\n",
+            "               NOT AT END WRITE P-REC AT EOP CONTINUE END-WRITE\n           END-READ\n",
+            "           WRITE P-REC BEFORE ADVANCING 2 LINES END-OF-PAGE CONTINUE\n",
+            "               NOT AT END-OF-PAGE CONTINUE\n           END-WRITE\n",
+            "           WRITE P-REC INVALID KEY CONTINUE NOT EOP CONTINUE.\n",
+        ]
+        .concat();
+        let fds = "       FD  P LINAGE 5.\n       01  P-REC PIC X.\n       FD  Q.\n       01  Q-REC PIC X.\n";
+        let p = crate::parse(&linage_program(fds, &procedure)).unwrap_or_else(|e| panic!("{e}"));
+        let s = &p.paragraphs[0].statements;
+        let Stmt::Read(r) = &s[0] else { panic!("{:?}", s[0]) };
+        let (Some(on), Some(not_on)) = (&r.at_end.on, &r.at_end.not_on) else { panic!("{r:?}") };
+        assert!(matches!(&on[0], Stmt::Write { end_of_page, .. } if *end_of_page == Handlers::default()));
+        assert!(matches!(&not_on[0], Stmt::Write { end_of_page, .. } if end_of_page.on.is_some() && end_of_page.not_on.is_none()));
+        assert!(matches!(&s[1], Stmt::Write { advancing: Some(Advancing::Lines { before: true, .. }), end_of_page, .. } if end_of_page.on.is_some() && end_of_page.not_on.is_some()));
+        assert!(matches!(&s[2], Stmt::Write { invalid, end_of_page, .. } if invalid.on.is_some() && end_of_page.not_on.is_some()));
     }
 }

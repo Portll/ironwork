@@ -55,6 +55,15 @@ a byte longer than the FD's; NOADV on a CBL or PROCESS card makes it the record'
 `:text` DD shows the characters as line feeds, form feeds and carriage returns. Assumptions C40 to
 C43 hold what the manuals leave open.
 
+LINAGE gives a print file logical pages: OPEN OUTPUT or EXTEND reads the page body, footing line
+and margins from the FD's integers or data items, and each new page reads the data items again.
+LINAGE-COUNTER (qualified by the file-name when two FDs have LINAGE) is the line of the page body
+the printer is at; a WRITE that would pass the page body, or ADVANCING PAGE, moves the paper in
+lines past the bottom and top margins to the next page's first line, and AT END-OF-PAGE and NOT AT
+END-OF-PAGE run once the line is written. Assumptions C70 to C76 hold what the manuals leave open.
+A print file opened I-O reads past its control characters and keeps them when a record is
+rewritten.
+
 Exit status: RETURN-CODE when the run ends normally; for `check`, and for a run the compile refuses,
 the compile's return code (below); 16 an abend, whose message names the system completion code
 (S0C7 for a data exception, S0C4 for a LINKAGE item with no address, S806 for a program CALL cannot
@@ -157,9 +166,11 @@ The subset the interpreter runs today:
   RECORD KEY [WITH DUPLICATES], RELATIVE KEY; FD with RECORDING MODE F or V and RECORD
   CONTAINS/VARYING; OPEN INPUT/OUTPUT/EXTEND/I-O; READ [NEXT|PREVIOUS] [INTO] [KEY IS] with AT END
   or INVALID KEY; WRITE [FROM] with ADVANCING (lines, PAGE, or a mnemonic-name for C01 to C12, CSP or
-  AFP-5A) or INVALID KEY; REWRITE, DELETE and START with INVALID KEY; CLOSE; OPTIONAL files, and the
-  file status codes for each outcome. LINAGE makes a print file, but its page body, LINAGE-COUNTER
-  and END-OF-PAGE are not supported yet. A sequential file opened I-O can be REWRITTEN in place.
+  AFP-5A), AT END-OF-PAGE or INVALID KEY; REWRITE, DELETE and START with INVALID KEY; CLOSE;
+  OPTIONAL files, and the file status codes for each outcome. FD LINAGE with FOOTING, TOP and
+  BOTTOM, integers or data items, and LINAGE-COUNTER; a mnemonic-name ADVANCING on a LINAGE file,
+  and LINAGE on a report file, are not supported yet. A record can be qualified by its file-name. A
+  sequential file opened I-O can be REWRITTEN in place.
   The files of a SAME RECORD AREA clause share one record area, and so do the VSAM files of a SAME
   AREA clause.
 - **Sort and merge:** SD files; SORT and MERGE on ascending and descending keys anywhere in the
