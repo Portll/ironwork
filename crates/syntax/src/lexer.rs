@@ -318,6 +318,36 @@ mod tests {
     }
 
     #[test]
+    fn a_comment_entry_holds_any_character() {
+        let program = concat!(
+            "       IDENTIFICATION DIVISION.\n",
+            "       PROGRAM-ID. CE3.\n",
+            "       AUTHOR. Smith & Jones @ ACME #1, Café O'Grady.\n",
+            "       INSTALLATION. \"HQ\n",
+            "           ~ ^ ` { } | \\ ?\n",
+            "       DATE-WRITTEN. 01/01/99.\n",
+            "       PROCEDURE DIVISION.\n",
+            "           GOBACK.\n",
+        );
+        let words = [w("IDENTIFICATION"), w("DIVISION"), Tok::Period, w("PROGRAM-ID"), Tok::Period, w("CE3"), Tok::Period];
+        let paragraphs = [w("AUTHOR"), Tok::Period, w("INSTALLATION"), Tok::Period, w("DATE-WRITTEN"), Tok::Period];
+        let procedure = [w("PROCEDURE"), w("DIVISION"), Tok::Period, w("GOBACK"), Tok::Period];
+        assert_eq!(toks(program), [&words[..], &paragraphs[..], &procedure[..]].concat());
+    }
+
+    #[test]
+    fn a_literal_continued_between_the_quotes_of_a_doubled_quote() {
+        let head = "           \"A+0B-1C*2D";
+        let text = format!("{head}{}\"\n      -    \"\"9K(L)M>N<O\".\n", "=".repeat(72 - head.len() - 1));
+        assert_eq!(toks(&text), [Tok::Alnum(format!("A+0B-1C*2D{}\"9K(L)M>N<O", "=".repeat(72 - head.len() - 1))), Tok::Period]);
+    }
+
+    #[test]
+    fn a_continuation_that_opens_a_quote_after_a_closed_literal_is_a_second_literal() {
+        assert_eq!(toks("           VALUE 'ABC'\n      -    'DEF'."), [w("VALUE"), Tok::Alnum("ABC".into()), Tok::Alnum("DEF".into()), Tok::Period]);
+    }
+
+    #[test]
     fn area_a_is_marked() {
         let t = lex(&source::read("       PARA.\n           MOVE").unwrap()).unwrap();
         assert!(t[0].area_a);

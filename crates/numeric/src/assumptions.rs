@@ -156,6 +156,10 @@ pub const COMPILER_SEVERITIES: &str = "C44";
 pub const REFUSALS_ARE_SEVERE: &str = "C45";
 pub const REFUSED_FROM_E: &str = "C46";
 pub const WARNINGS_BLOCK: &str = "C47";
+pub const COMMENT_ENTRY_EXTENT: &str = "C80";
+pub const COMMENT_ENTRY_HEADERS: &str = "C81";
+pub const COMMENT_ENTRY_REMARKS: &str = "C82";
+pub const CONTINUED_LITERAL_QUOTES: &str = "C83";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -918,6 +922,30 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: WARNINGS_BLOCK,
         claim: "-warnings-block is ironwork's own flag: with it, run and cics refuse a program whose compile gave a warning, and the return code stays 4. IBM has no option that makes warnings refuse a program: FLAG(x,y) chooses only which messages are listed (Programming Guide SC27-8714-03, pp. 369-370); NOCOMPILE(W) stops object code at the first W-level message, leaving the return code 4 (p. 355), and ironwork does not read COMPILE from a CBL or PROCESS card; and a MSGEXIT user exit of the EXIT option can raise a W or I message to any severity up to S, one message at a time, which changes the return code (pp. 836-837)",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: COMMENT_ENTRY_EXTENT,
+        claim: "The comment-entry of AUTHOR, INSTALLATION, DATE-WRITTEN, DATE-COMPILED or SECURITY is any characters at all, written in Area B on one or more lines and never in Area A (Language Reference SC27-8713-03, p. 117), and a COPY or REPLACE in it, or where it can appear, is part of it (pp. 700, 708). So a comment-entry runs from its paragraph header's period to the next line, not a comment or blank line, with a character in Area A, whatever the lines between hold; NIST's OBNC1M tests this with a whole program written in Area B inside a SECURITY comment-entry",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: COMMENT_ENTRY_HEADERS,
+        claim: "ironwork takes a line in an IDENTIFICATION DIVISION as a comment-entry paragraph's header when its first word is the paragraph's name and a period follows, in whatever column the name starts, though a paragraph header belongs in Area A (Language Reference SC27-8713-03, p. 55); with no period the paragraph's text is read as program text. A line with a hyphen in column 7 inside a comment-entry, which p. 117 does not permit, is taken as more of the comment-entry rather than refused: the manual does not say how severe Enterprise COBOL's message for either is",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: COMMENT_ENTRY_REMARKS,
+        claim: "Enterprise COBOL has no REMARKS paragraph: the Language Reference SC27-8713-03 names neither the paragraph (pp. 101, 117) nor the word anywhere. ironwork reads a REMARKS paragraph in an IDENTIFICATION DIVISION as it reads a comment-entry paragraph, as OS/VS COBOL did, where Enterprise COBOL presumably refuses the program",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CONTINUED_LITERAL_QUOTES,
+        claim: "A continuation line of an alphanumeric or national literal left open at column 72 has a hyphen in column 7 and a quotation mark as its first nonblank character, and the literal resumes after that mark. When a literal's closing quotation mark is in column 72 and the continuation line starts with two, the pair stands for one quotation mark in one literal; otherwise, a quotation mark that starts a continuation line after a closed literal starts a second literal (Language Reference SC27-8713-03, p. 58). The rules hold for apostrophes alike, and ironwork gives the pair precedence where both could apply",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
 ];
