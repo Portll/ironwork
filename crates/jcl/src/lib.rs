@@ -1,11 +1,13 @@
-//! A job's JCL as the z/OS MVS JCL Reference describes it: the JOB statement, EXEC PGM= steps, DD
-//! statements with their data sets, dispositions and in-stream data, and IF/THEN/ELSE/ENDIF. What
-//! the reader does not model (procedures, symbolic parameters, INCLUDE, generation data groups,
-//! backward references) it refuses by name rather than reading it some other way.
+//! A job's JCL as the z/OS MVS JCL Reference describes it: the JOB statement, EXEC steps, DD
+//! statements with their data sets, dispositions and in-stream data, IF/THEN/ELSE/ENDIF, and
+//! procedures (in-stream and cataloged, with symbolic parameters, SET, JCLLIB, INCLUDE, and EXEC
+//! and DD overrides) expanded into the steps they run. What the reader does not model (generation
+//! data groups, backward references) it refuses by name rather than reading it some other way.
 
 pub mod cond;
 
 use cond::Cond;
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct Job {
@@ -17,7 +19,8 @@ pub struct Job {
 #[derive(Debug)]
 pub enum Item {
     Step(Step),
-    If { expr: cond::Expr, line: usize },
+    /// `caller` is the step that called the procedure the IF is in.
+    If { expr: cond::Expr, caller: Option<String>, line: usize },
     Else { line: usize },
     EndIf { line: usize },
 }
@@ -25,11 +28,24 @@ pub enum Item {
 #[derive(Debug)]
 pub struct Step {
     pub name: Option<String>,
+    /// The job step whose EXEC called the procedure this step is in.
+    pub caller: Option<String>,
     pub pgm: String,
     pub parm: Option<String>,
     pub cond: Cond,
     pub dds: Vec<Dd>,
     pub line: usize,
+}
+
+impl Step {
+    /// The name the job log and COND and IF use: stepname, or stepname.procstepname.
+    pub fn shown(&self) -> String {
+        match (&self.caller, &self.name) {
+            (Some(c), Some(n)) => format!("{c}.{n}"),
+            (Some(c), None) => format!("{c}."),
+            (None, n) => n.clone().unwrap_or_default(),
+        }
+    }
 }
 
 /// A DD statement and the unnamed DD statements concatenated after it.
@@ -120,7 +136,7 @@ fn err<T>(line: usize, message: impl Into<String>) -> Result<T, Error> {
     Err(Error { line, message: message.into() })
 }
 
-/// A name in the name field, a DD name, a step or program name, a member or a qualifier's shape.
+/// A name in the name field, a DD name, a step or program name, a member or a symbol's shape.
 pub fn is_name(s: &str) -> bool {
     let b = s.as_bytes();
     !b.is_empty() && b.len() <= 8 && matches!(b[0], b'A'..=b'Z' | b'#' | b'$' | b'@') && b[1..].iter().all(|c| matches!(c, b'A'..=b'Z' | b'0'..=b'9' | b'#' | b'$' | b'@'))
@@ -135,11 +151,15 @@ pub fn is_dsn(s: &str) -> bool {
         })
 }
 
-struct Statement {
+/// A statement as written, continuation lines joined, with the in-stream data after a DD * or
+/// DD DATA.
+#[derive(Debug, Clone)]
+struct Raw {
     line: usize,
     name: Option<String>,
     operation: String,
     operands: String,
+    data: Option<Vec<String>>,
 }
 
 /// Columns 1-71 of a statement; 72 holds a comment's continuation mark and 73-80 a sequence number.
@@ -209,9 +229,10 @@ fn split_operands(text: &str, line: usize) -> Result<Vec<String>, Error> {
     Ok(out)
 }
 
-/// `KEY=value` as (Some(KEY), value); a positional operand as (None, operand).
+/// `KEY=value` as (Some(KEY), value); a positional operand as (None, operand). A key may be
+/// qualified by a procedure step, as in PARM.STEP1=.
 fn keyword(operand: &str) -> (Option<&str>, &str) {
-    let key_end = operand.find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '#' | '$' | '@' | '-')));
+    let key_end = operand.find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '#' | '$' | '@' | '-' | '.')));
     match key_end {
         Some(i) if i > 0 && operand[i..].starts_with('=') => (Some(&operand[..i]), &operand[i + 1..]),
         _ => (None, operand),
@@ -225,22 +246,47 @@ fn unquote(value: &str) -> String {
     }
 }
 
-fn has_symbol(text: &str) -> bool {
-    let mut quoted = false;
-    let b = text.as_bytes();
-    for (i, &c) in b.iter().enumerate() {
-        match c {
-            b'\'' => quoted = !quoted,
-            b'&' if !quoted => {
-                let temp = b.get(i + 1) == Some(&b'&') || (i > 0 && b[i - 1] == b'&');
-                if !temp {
-                    return true;
-                }
+/// `text` with each `&NAME` outside apostrophes replaced by its value; a period after the name
+/// ends it and is dropped. `&&` begins a temporary data set name and is kept.
+fn substitute(text: &str, symbols: &HashMap<String, String>, line: usize) -> Result<String, Error> {
+    let chars: Vec<char> = text.chars().collect();
+    let (mut out, mut i, mut quoted) = (String::new(), 0, false);
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\'' {
+            quoted = !quoted;
+        }
+        if c != '&' || quoted {
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if chars.get(i + 1) == Some(&'&') {
+            out.push_str("&&");
+            i += 2;
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || matches!(chars[i], '#' | '$' | '@')) {
+                out.push(chars[i]);
+                i += 1;
             }
-            _ => {}
+            continue;
+        }
+        let start = i + 1;
+        let mut end = start;
+        while end < chars.len() && end - start < 8 && (chars[end].is_ascii_uppercase() || chars[end].is_ascii_digit() || matches!(chars[end], '#' | '$' | '@')) {
+            end += 1;
+        }
+        let name: String = chars[start..end].iter().collect();
+        if !is_name(&name) {
+            return err(line, format!("& is not followed by a symbolic parameter name in {text}"));
+        }
+        let Some(value) = symbols.get(&name) else { return err(line, format!("symbolic parameter &{name} has no value")) };
+        out.push_str(value);
+        i = end;
+        if chars.get(i) == Some(&'.') {
+            i += 1;
         }
     }
-    false
+    Ok(out)
 }
 
 struct Reader<'a> {
@@ -253,16 +299,29 @@ impl<'a> Reader<'a> {
         self.lines.get(self.at).copied()
     }
 
+    /// Every statement up to the null statement or the end, with its in-stream data.
+    fn all(&mut self) -> Result<Vec<Raw>, Error> {
+        let mut out = Vec::new();
+        while let Some(mut raw) = self.statement()? {
+            if raw.operation == "DD" {
+                let operands = split_operands(&raw.operands, raw.line)?;
+                let positional = |w: &str| operands.iter().any(|o| o == w);
+                let dlm = operands.iter().find_map(|o| o.strip_prefix("DLM=")).map(unquote);
+                if positional("*") || positional("DATA") {
+                    raw.data = Some(self.in_stream(positional("*"), dlm.as_deref()));
+                }
+            }
+            out.push(raw);
+        }
+        Ok(out)
+    }
+
     /// The next statement, joining continuation lines; None at the end of the job.
-    fn statement(&mut self) -> Result<Option<Statement>, Error> {
+    fn statement(&mut self) -> Result<Option<Raw>, Error> {
         while let Some(raw) = self.peek() {
             let line = self.at + 1;
             let text = statement_columns(raw);
-            if text.starts_with("//*") {
-                self.at += 1;
-                continue;
-            }
-            if text.starts_with("/*") {
+            if text.starts_with("//*") || text.starts_with("/*") {
                 self.at += 1;
                 continue;
             }
@@ -301,19 +360,19 @@ impl<'a> Reader<'a> {
             if last.chars().nth(71).is_some_and(|c| c != ' ') && self.peek().is_some_and(|l| l.starts_with("//")) {
                 self.at += 1;
             }
-            return Ok(Some(Statement { line, name, operation, operands }));
+            return Ok(Some(Raw { line, name, operation, operands, data: None }));
         }
         Ok(None)
     }
 
-    fn if_statement(&mut self, line: usize, name: Option<String>, first: &str) -> Result<Statement, Error> {
+    fn if_statement(&mut self, line: usize, name: Option<String>, first: &str) -> Result<Raw, Error> {
         let mut expr = String::new();
         let mut text = first.to_string();
         loop {
             let words: Vec<&str> = text.split_whitespace().collect();
             if let Some(then) = words.iter().position(|w| *w == "THEN") {
                 expr.push_str(&words[..then].join(" "));
-                return Ok(Statement { line, name, operation: "IF".into(), operands: expr });
+                return Ok(Raw { line, name, operation: "IF".into(), operands: expr, data: None });
             }
             expr.push_str(&words.join(" "));
             expr.push(' ');
@@ -353,18 +412,31 @@ impl<'a> Reader<'a> {
     }
 }
 
+fn read(text: &str) -> Result<Vec<Raw>, Error> {
+    Reader { lines: text.lines().collect(), at: 0 }.all()
+}
+
 const JOB_IGNORED: &[&str] = &["CLASS", "MSGCLASS", "MSGLEVEL", "NOTIFY", "REGION", "TIME", "PRTY", "USER", "GROUP", "JOBRC", "LINES", "ADDRSPC", "BYTES", "CARDS", "PAGES", "PERFORM", "RD", "SCHENV", "SECLABEL", "SYSAFF", "SYSTEM", "UJOBCORR", "MEMLIMIT", "EMAIL"];
 const EXEC_IGNORED: &[&str] = &["REGION", "TIME", "ACCT", "ADDRSPC", "DYNAMNBR", "PERFORM", "RD", "MEMLIMIT", "CCSID", "REGIONX", "TVSMSG", "TVSAMCOM"];
 const DD_IGNORED: &[&str] = &[
     "DCB", "SPACE", "UNIT", "VOL", "VOLUME", "LRECL", "RECFM", "BLKSIZE", "DSORG", "LABEL", "RETPD", "EXPDT", "STORCLAS", "MGMTCLAS", "DATACLAS", "AVGREC", "FREE", "HOLD", "OUTLIM", "COPIES", "DEST", "DSNTYPE", "BUFNO", "KEYLEN", "EATTR", "FCB", "UCS", "OUTPUT", "SPIN", "SEGMENT", "BLKSZLIM", "DSID",
 ];
-const NOT_SUPPORTED_STATEMENTS: &[&str] = &["PROC", "PEND", "SET", "INCLUDE", "CNTL", "ENDCNTL", "EXPORT", "SCHEDULE", "XMIT", "COMMAND"];
+const NOT_SUPPORTED_STATEMENTS: &[&str] = &["CNTL", "ENDCNTL", "EXPORT", "SCHEDULE", "XMIT", "COMMAND"];
 
-/// Reads one job. Every value is kept as written, and names must be in upper case as z/OS
-/// requires.
+/// Finds a member of a procedure library: `(order, member)` gives the JCLLIB ORDER data sets in
+/// force and the member's name, and answers the member's text, or None when no library holds it.
+pub type Libraries<'a> = dyn Fn(&[String], &str) -> Result<Option<String>, String> + 'a;
+
+/// Reads one job with no procedure libraries.
 pub fn parse(text: &str) -> Result<Job, Error> {
-    let mut reader = Reader { lines: text.lines().collect(), at: 0 };
-    let Some(first) = reader.statement()? else { return err(1, "no JOB statement") };
+    parse_with(text, &|_, _| Ok(None))
+}
+
+/// Reads one job, finding cataloged procedures and INCLUDE members through `libraries`. Names
+/// must be in upper case, as z/OS requires.
+pub fn parse_with(text: &str, libraries: &Libraries<'_>) -> Result<Job, Error> {
+    let raws = read(text)?;
+    let Some(first) = raws.first() else { return err(1, "no JOB statement") };
     if first.operation != "JOB" {
         return err(first.line, "the first statement is not a JOB statement");
     }
@@ -372,40 +444,19 @@ pub fn parse(text: &str) -> Result<Job, Error> {
         Some(n) if is_name(n) => n.clone(),
         _ => return err(first.line, "the JOB statement needs a job name of one to eight characters"),
     };
-    let job_cond = job_operands(&first)?;
-    if has_symbol(&first.operands) {
-        return err(first.line, "symbolic parameters are not supported yet");
-    }
-    let mut items = Vec::new();
-    while let Some(st) = reader.statement()? {
-        if has_symbol(&st.operands) && st.operation != "IF" {
-            return err(st.line, "symbolic parameters are not supported yet");
-        }
-        match st.operation.as_str() {
-            "EXEC" => items.push(Item::Step(exec_statement(&st)?)),
-            "DD" => {
-                let Some(Item::Step(step)) = items.last_mut() else { return err(st.line, "a DD statement that follows no EXEC statement") };
-                dd_statement(&st, step, &mut reader)?;
-            }
-            "IF" => items.push(Item::If { expr: cond::parse_expr(&st.operands).map_err(|m| Error { line: st.line, message: m })?, line: st.line }),
-            "ELSE" => items.push(Item::Else { line: st.line }),
-            "ENDIF" => items.push(Item::EndIf { line: st.line }),
-            "JOB" => return err(st.line, "a second JOB statement; give one job a file"),
-            "JCLLIB" | "OUTPUT" => {}
-            op if NOT_SUPPORTED_STATEMENTS.contains(&op) => return err(st.line, format!("{op} statements are not supported yet")),
-            op => return err(st.line, format!("{op} is not a JCL statement")),
-        }
-    }
-    check_nesting(&items)?;
-    Ok(Job { name, cond: job_cond, items })
+    let cond = job_operands(first)?;
+    let mut expander = Expander { libraries, procs: HashMap::new(), order: Vec::new(), symbols: HashMap::new(), items: Vec::new() };
+    expander.statements(&raws[1..], None, &HashMap::new(), 0)?;
+    check_nesting(&expander.items)?;
+    Ok(Job { name, cond, items: expander.items })
 }
 
-fn job_operands(st: &Statement) -> Result<Cond, Error> {
+fn job_operands(st: &Raw) -> Result<Cond, Error> {
     let mut cond = Cond::default();
-    if st.operands.is_empty() {
-        return Ok(cond);
-    }
     for op in split_operands(&st.operands, st.line)? {
+        if op.contains('&') && !op.contains('\'') {
+            return err(st.line, "symbolic parameters on the JOB statement are not supported yet");
+        }
         match keyword(&op) {
             (None, _) => {}
             (Some("COND"), value) => {
@@ -423,34 +474,289 @@ fn job_operands(st: &Statement) -> Result<Cond, Error> {
     Ok(cond)
 }
 
-fn exec_statement(st: &Statement) -> Result<Step, Error> {
-    if let Some(n) = &st.name
-        && !is_name(n)
-    {
-        return err(st.line, format!("{n} is not a step name"));
-    }
-    let (mut pgm, mut parm, mut cond) = (None, None, Cond::default());
-    for (i, op) in split_operands(&st.operands, st.line)?.iter().enumerate() {
-        match keyword(op) {
-            (Some("PGM"), v) if v.starts_with("*.") => return err(st.line, "PGM=*.stepname.ddname is not supported yet"),
-            (Some("PGM"), v) if is_name(v) => pgm = Some(v.to_string()),
-            (Some("PGM"), v) => return err(st.line, format!("{v} is not a program name")),
-            (Some("PROC"), _) => return err(st.line, "EXEC of a procedure is not supported yet"),
-            (None, _) if i == 0 => return err(st.line, "EXEC of a procedure is not supported yet"),
-            (Some("PARM"), v) => {
-                let v = v.strip_prefix('(').and_then(|v| v.strip_suffix(')')).unwrap_or(v);
-                parm = Some(unquote(v));
-            }
-            (Some("PARMDD"), _) => return err(st.line, "PARMDD is not supported yet"),
-            (Some("COND"), v) => cond = cond::parse_cond(v).map_err(|m| Error { line: st.line, message: m })?,
-            (Some(k), _) if EXEC_IGNORED.contains(&k) => {}
-            (Some(k), _) if k.contains('.') => return err(st.line, "EXEC keywords qualified by a procedure step are not supported yet"),
-            (Some(k), _) => return err(st.line, format!("EXEC keyword {k} is not supported yet")),
-            (None, v) => return err(st.line, format!("an EXEC operand {v} this reader does not know")),
+/// A procedure's statements between its PROC and PEND, and the defaults its PROC statement gives.
+struct Procedure {
+    defaults: HashMap<String, String>,
+    body: Vec<Raw>,
+}
+
+struct Expander<'a, 'l> {
+    libraries: &'a Libraries<'l>,
+    procs: HashMap<String, Vec<Raw>>,
+    order: Vec<String>,
+    /// Values from SET statements, in force from the SET onward.
+    symbols: HashMap<String, String>,
+    items: Vec<Item>,
+}
+
+/// The EXEC keywords that are not symbolic parameters when they call a procedure.
+fn exec_keyword(key: &str) -> bool {
+    let base = key.split('.').next().unwrap_or(key);
+    matches!(base, "PGM" | "PROC" | "PARM" | "PARMDD" | "COND") || EXEC_IGNORED.contains(&base)
+}
+
+fn symbol_assignments(operands: &[String], line: usize) -> Result<Vec<(String, String)>, Error> {
+    operands
+        .iter()
+        .map(|op| match keyword(op) {
+            (Some(k), v) if is_name(k) => Ok((k.to_string(), v.to_string())),
+            _ => err(line, format!("{op} is not NAME=value")),
+        })
+        .collect()
+}
+
+/// Maps an error inside a member or procedure to the statement that brought it in.
+fn inside(what: &str, line: usize) -> impl Fn(Error) -> Error + '_ {
+    move |e| Error { line, message: format!("{what} line {}: {}", e.line, e.message) }
+}
+
+impl Expander<'_, '_> {
+    fn member(&self, name: &str, line: usize) -> Result<Vec<Raw>, Error> {
+        match (self.libraries)(&self.order, name) {
+            Ok(Some(text)) => read(&text).map_err(inside(name, line)),
+            Ok(None) => err(line, format!("no procedure library holds member {name}")),
+            Err(e) => err(line, format!("member {name}: {e}")),
         }
     }
-    let Some(pgm) = pgm else { return err(st.line, "EXEC needs PGM=") };
-    Ok(Step { name: st.name.clone(), pgm, parm, cond, dds: Vec::new(), line: st.line })
+
+    fn procedure(&self, name: &str, line: usize) -> Result<Procedure, Error> {
+        let raws = match self.procs.get(name) {
+            Some(r) => r.clone(),
+            None => self.member(name, line)?,
+        };
+        let mut body: &[Raw] = &raws;
+        let mut defaults = HashMap::new();
+        if let Some(first) = body.first()
+            && first.operation == "PROC"
+        {
+            for (k, v) in symbol_assignments(&split_operands(&first.operands, first.line)?, first.line).map_err(inside(name, line))? {
+                defaults.insert(k, v);
+            }
+            body = &body[1..];
+        }
+        if body.last().is_some_and(|r| r.operation == "PEND") {
+            body = &body[..body.len() - 1];
+        }
+        if let Some(r) = body.iter().find(|r| matches!(r.operation.as_str(), "PROC" | "PEND" | "JOB")) {
+            return Err(inside(name, line)(Error { line: r.line, message: format!("a {} statement inside a procedure", r.operation) }));
+        }
+        Ok(Procedure { defaults, body: body.to_vec() })
+    }
+
+    /// Expands `raws` into items. `caller` is the job step whose EXEC called the procedure being
+    /// expanded, and `local` the symbolic parameters in force inside it.
+    fn statements(&mut self, raws: &[Raw], caller: Option<&str>, local: &HashMap<String, String>, depth: usize) -> Result<(), Error> {
+        if depth > 15 {
+            return err(raws.first().map_or(0, |r| r.line), "procedures and INCLUDE members nest more than 15 deep");
+        }
+        let mut i = 0;
+        while i < raws.len() {
+            let raw = &raws[i];
+            i += 1;
+            let mut symbols = self.symbols.clone();
+            symbols.extend(local.iter().map(|(k, v)| (k.clone(), v.clone())));
+            let operands = if matches!(raw.operation.as_str(), "PROC" | "IF") { raw.operands.clone() } else { substitute(&raw.operands, &symbols, raw.line)? };
+            match raw.operation.as_str() {
+                "PROC" if caller.is_none() && depth == 0 => {
+                    let Some(name) = raw.name.clone().filter(|n| is_name(n)) else { return err(raw.line, "an in-stream PROC needs a name") };
+                    let end = raws[i..].iter().position(|r| r.operation == "PEND").ok_or_else(|| Error { line: raw.line, message: format!("PROC {name} has no PEND") })?;
+                    let mut body = vec![raw.clone()];
+                    body.extend(raws[i..i + end].iter().cloned());
+                    self.procs.insert(name, body);
+                    i += end + 1;
+                }
+                "PROC" | "PEND" => return err(raw.line, format!("{} is out of place", raw.operation)),
+                "SET" => {
+                    for (k, v) in symbol_assignments(&split_operands(&operands, raw.line)?, raw.line)? {
+                        self.symbols.insert(k, v);
+                    }
+                }
+                "JCLLIB" => {
+                    let ops = split_operands(&operands, raw.line)?;
+                    let order = match ops.as_slice() {
+                        [o] => o.strip_prefix("ORDER=").ok_or_else(|| Error { line: raw.line, message: "JCLLIB takes ORDER=".into() })?,
+                        _ => return err(raw.line, "JCLLIB takes ORDER="),
+                    };
+                    let inner = order.strip_prefix('(').and_then(|o| o.strip_suffix(')')).unwrap_or(order);
+                    self.order = inner.split(',').map(unquote).collect();
+                    if let Some(bad) = self.order.iter().find(|d| !is_dsn(d)) {
+                        return err(raw.line, format!("{bad} is not a data set name"));
+                    }
+                }
+                "INCLUDE" => {
+                    let Some(member) = operands.strip_prefix("MEMBER=").filter(|m| is_name(m)) else { return err(raw.line, "INCLUDE takes MEMBER=name") };
+                    let body = self.member(member, raw.line)?;
+                    if let Some(r) = body.iter().find(|r| matches!(r.operation.as_str(), "JOB" | "PROC" | "PEND" | "JCLLIB" | "INCLUDE")) {
+                        return Err(inside(member, raw.line)(Error { line: r.line, message: format!("a {} statement in an INCLUDE member is not supported", r.operation) }));
+                    }
+                    self.statements(&body, caller, local, depth + 1).map_err(inside(member, raw.line))?;
+                }
+                "EXEC" => {
+                    let overrides_end = raws[i..].iter().position(|r| r.operation != "DD").map_or(raws.len(), |p| i + p);
+                    match exec_program(raw, &operands, caller)? {
+                        Some(step) => self.items.push(Item::Step(step)),
+                        None => {
+                            self.call(raw, &operands, &raws[i..overrides_end], caller, &symbols, depth)?;
+                            i = overrides_end;
+                        }
+                    }
+                }
+                "DD" => {
+                    let Some(Item::Step(step)) = self.items.last_mut() else { return err(raw.line, "a DD statement that follows no EXEC statement") };
+                    let part = dd_part(raw, &operands)?;
+                    add_dd(step, raw, part)?;
+                }
+                "IF" => {
+                    let expr = cond::parse_expr(&operands).map_err(|m| Error { line: raw.line, message: m })?;
+                    self.items.push(Item::If { expr, caller: caller.map(str::to_string), line: raw.line });
+                }
+                "ELSE" => self.items.push(Item::Else { line: raw.line }),
+                "ENDIF" => self.items.push(Item::EndIf { line: raw.line }),
+                "JOB" => return err(raw.line, "a second JOB statement; give one job a file"),
+                "OUTPUT" => {}
+                op if NOT_SUPPORTED_STATEMENTS.contains(&op) => return err(raw.line, format!("{op} statements are not supported yet")),
+                op => return err(raw.line, format!("{op} is not a JCL statement")),
+            }
+        }
+        Ok(())
+    }
+
+    /// EXEC of a procedure: its steps with the call's symbolic parameters, then the call's PARM
+    /// and COND and the DD overrides and additions after it.
+    fn call(&mut self, exec: &Raw, operands: &str, overrides: &[Raw], caller: Option<&str>, outer: &HashMap<String, String>, depth: usize) -> Result<(), Error> {
+        let ops = split_operands(operands, exec.line)?;
+        let name = match keyword(&ops[0]) {
+            (Some("PROC"), n) | (None, n) => n.to_string(),
+            _ => return err(exec.line, "EXEC starts with PGM=, PROC= or a procedure name"),
+        };
+        if !is_name(&name) {
+            return err(exec.line, format!("{name} is not a procedure name"));
+        }
+        let procedure = self.procedure(&name, exec.line)?;
+        let mut local = procedure.defaults.clone();
+        let mut exec_parms: Vec<(Option<String>, String)> = Vec::new();
+        let mut exec_conds: Vec<(Option<String>, Cond)> = Vec::new();
+        for op in &ops[1..] {
+            let (Some(key), value) = keyword(op) else { return err(exec.line, format!("an EXEC operand {op} this reader does not know")) };
+            let (base, step) = match key.split_once('.') {
+                Some((b, s)) => (b, Some(s.to_string())),
+                None => (key, None),
+            };
+            match base {
+                "PARM" => exec_parms.push((step, parm_value(value))),
+                "COND" => exec_conds.push((step, cond::parse_cond(value).map_err(|m| Error { line: exec.line, message: m })?)),
+                "PARMDD" => return err(exec.line, "PARMDD is not supported yet"),
+                k if EXEC_IGNORED.contains(&k) => {}
+                _ if !exec_keyword(key) && is_name(key) => {
+                    let used = local.contains_key(key) || procedure.body.iter().any(|r| r.operands.contains(&format!("&{key}")));
+                    if !used {
+                        return err(exec.line, format!("procedure {name} does not use symbolic parameter {key}"));
+                    }
+                    local.insert(key.to_string(), value.to_string());
+                }
+                _ => return err(exec.line, format!("EXEC keyword {key} is not supported yet")),
+            }
+        }
+        let start = self.items.len();
+        let caller_name = caller.map(str::to_string).or_else(|| exec.name.clone());
+        self.statements(&procedure.body, caller_name.as_deref(), &local, depth + 1).map_err(inside(&name, exec.line))?;
+        let steps: Vec<usize> = (start..self.items.len()).filter(|&k| matches!(self.items[k], Item::Step(_))).collect();
+        let Some(&first) = steps.first() else { return err(exec.line, format!("procedure {name} has no steps")) };
+        let find = |items: &[Item], s: &str| steps.iter().copied().find(|&k| matches!(&items[k], Item::Step(st) if st.name.as_deref() == Some(s)));
+        for (step, parm) in exec_parms {
+            match step {
+                Some(s) => match find(&self.items, &s) {
+                    Some(k) => as_step(&mut self.items[k]).parm = Some(parm),
+                    None => return err(exec.line, format!("PARM.{s}: procedure {name} has no step {s}")),
+                },
+                None => {
+                    for &k in &steps {
+                        as_step(&mut self.items[k]).parm = None;
+                    }
+                    as_step(&mut self.items[first]).parm = Some(parm);
+                }
+            }
+        }
+        for (step, cond) in exec_conds {
+            match step {
+                Some(s) => match find(&self.items, &s) {
+                    Some(k) => as_step(&mut self.items[k]).cond = cond,
+                    None => return err(exec.line, format!("COND.{s}: procedure {name} has no step {s}")),
+                },
+                None => {
+                    for &k in &steps {
+                        as_step(&mut self.items[k]).cond = cond.clone();
+                    }
+                }
+            }
+        }
+        let mut target: Option<(usize, String, usize)> = None;
+        for raw in overrides {
+            let operands = substitute(&raw.operands, outer, raw.line)?;
+            let (k, dd, index) = match &raw.name {
+                Some(n) => {
+                    let (step, dd) = match n.split_once('.') {
+                        Some((s, d)) => (find(&self.items, s).ok_or_else(|| Error { line: raw.line, message: format!("procedure {name} has no step {s}") })?, d.to_string()),
+                        None => (first, n.clone()),
+                    };
+                    if !is_name(&dd) {
+                        return err(raw.line, format!("{dd} is not a DD name"));
+                    }
+                    (step, dd, 0)
+                }
+                None => match &target {
+                    Some((k, dd, index)) => (*k, dd.clone(), index + 1),
+                    None => return err(raw.line, "an unnamed DD statement with nothing to concatenate to"),
+                },
+            };
+            target = Some((k, dd.clone(), index));
+            override_dd(as_step(&mut self.items[k]), &dd, index, raw, &operands)?;
+        }
+        Ok(())
+    }
+}
+
+fn as_step(item: &mut Item) -> &mut Step {
+    match item {
+        Item::Step(s) => s,
+        _ => unreachable!("only steps are looked up"),
+    }
+}
+
+fn parm_value(v: &str) -> String {
+    let v = v.strip_prefix('(').and_then(|v| v.strip_suffix(')')).unwrap_or(v);
+    unquote(v)
+}
+
+/// The step an EXEC PGM= runs, or None for an EXEC that calls a procedure.
+fn exec_program(raw: &Raw, operands: &str, caller: Option<&str>) -> Result<Option<Step>, Error> {
+    if let Some(n) = &raw.name
+        && !is_name(n)
+    {
+        return err(raw.line, format!("{n} is not a step name"));
+    }
+    let ops = split_operands(operands, raw.line)?;
+    match ops.first().map(|o| keyword(o)) {
+        None => return err(raw.line, "EXEC needs PGM= or a procedure"),
+        Some((Some("PGM"), _)) => {}
+        Some(_) => return Ok(None),
+    }
+    let (mut pgm, mut parm, mut cond) = (None, None, Cond::default());
+    for op in &ops {
+        match keyword(op) {
+            (Some("PGM"), v) if v.starts_with("*.") => return err(raw.line, "PGM=*.stepname.ddname is not supported yet"),
+            (Some("PGM"), v) if is_name(v) => pgm = Some(v.to_string()),
+            (Some("PGM"), v) => return err(raw.line, format!("{v} is not a program name")),
+            (Some("PARM"), v) => parm = Some(parm_value(v)),
+            (Some("PARMDD"), _) => return err(raw.line, "PARMDD is not supported yet"),
+            (Some("COND"), v) => cond = cond::parse_cond(v).map_err(|m| Error { line: raw.line, message: m })?,
+            (Some(k), _) if EXEC_IGNORED.contains(&k) => {}
+            (Some(k), _) => return err(raw.line, format!("EXEC keyword {k} is not supported yet")),
+            (None, v) => return err(raw.line, format!("an EXEC operand {v} this reader does not know")),
+        }
+    }
+    let pgm = pgm.expect("the first operand is PGM=");
+    Ok(Some(Step { name: raw.name.clone(), caller: caller.map(str::to_string), pgm, parm, cond, dds: Vec::new(), line: raw.line }))
 }
 
 fn dataset(value: &str, line: usize) -> Result<Source, Error> {
@@ -515,46 +821,50 @@ fn disp(value: &str, line: usize) -> Result<Disp, Error> {
     Ok(Disp { status, normal, abnormal })
 }
 
-fn dd_statement(st: &Statement, step: &mut Step, reader: &mut Reader<'_>) -> Result<(), Error> {
-    let (mut source, mut disposition, mut in_stream, mut dlm) = (None, None, None, None);
-    for op in split_operands(&st.operands, st.line)? {
+/// What a DD statement says: its data (a data set, in-stream data, DUMMY or SYSOUT) and its
+/// DISP, each None where the statement does not say.
+fn dd_fields(raw: &Raw, operands: &str) -> Result<(Option<Source>, Option<Disp>), Error> {
+    let (mut source, mut disposition) = (None, None);
+    for op in split_operands(operands, raw.line)? {
         match keyword(&op) {
-            (None, "*") => in_stream = Some(true),
-            (None, "DATA") => in_stream = Some(false),
+            (None, "*" | "DATA") => source = Some(Source::InStream(raw.data.clone().unwrap_or_default())),
             (None, "DUMMY") => source = Some(Source::Dummy),
-            (None, v) => return err(st.line, format!("a DD operand {v} this reader does not know")),
+            (None, v) => return err(raw.line, format!("a DD operand {v} this reader does not know")),
             (Some("DSN" | "DSNAME"), v) => {
                 if source != Some(Source::Dummy) {
-                    source = Some(dataset(v, st.line)?);
+                    source = Some(dataset(v, raw.line)?);
                 }
             }
-            (Some("DISP"), v) => disposition = Some(disp(v, st.line)?),
+            (Some("DISP"), v) => disposition = Some(disp(v, raw.line)?),
             (Some("SYSOUT"), _) => source = Some(Source::Sysout),
             (Some("DLM"), v) => {
-                let d = unquote(v);
-                if d.chars().count() != 2 {
-                    return err(st.line, "DLM takes two characters");
+                if unquote(v).chars().count() != 2 {
+                    return err(raw.line, "DLM takes two characters");
                 }
-                dlm = Some(d);
             }
             (Some(k), _) if DD_IGNORED.contains(&k) => {}
-            (Some(k), _) => return err(st.line, format!("DD keyword {k} is not supported yet")),
+            (Some(k), _) => return err(raw.line, format!("DD keyword {k} is not supported yet")),
         }
     }
-    if let Some(star) = in_stream {
-        source = Some(Source::InStream(reader.in_stream(star, dlm.as_deref())));
+    if disposition.is_some() && source.as_ref().is_some_and(|s| !matches!(s, Source::Dataset { .. } | Source::Temporary { .. })) {
+        return err(raw.line, "DISP applies to a data set");
     }
-    let Some(source) = source else { return err(st.line, "the DD statement names no data set, in-stream data, DUMMY or SYSOUT") };
-    if disposition.is_some() && !matches!(source, Source::Dataset { .. } | Source::Temporary { .. }) {
-        return err(st.line, "DISP applies to a data set");
-    }
-    let part = Part { source, disp: disposition.unwrap_or_default(), line: st.line };
-    match &st.name {
-        Some(n) if n.contains('.') => err(st.line, "a DD override for a procedure step is not supported yet"),
-        Some(n) if !is_name(n) => err(st.line, format!("{n} is not a DD name")),
+    Ok((source, disposition))
+}
+
+fn dd_part(raw: &Raw, operands: &str) -> Result<Part, Error> {
+    let (source, disp) = dd_fields(raw, operands)?;
+    let Some(source) = source else { return err(raw.line, "the DD statement names no data set, in-stream data, DUMMY or SYSOUT") };
+    Ok(Part { source, disp: disp.unwrap_or_default(), line: raw.line })
+}
+
+fn add_dd(step: &mut Step, raw: &Raw, part: Part) -> Result<(), Error> {
+    match &raw.name {
+        Some(n) if n.contains('.') => err(raw.line, format!("DD {n} overrides a procedure step, but the EXEC before it runs a program")),
+        Some(n) if !is_name(n) => err(raw.line, format!("{n} is not a DD name")),
         Some(n) => {
             if step.dds.iter().any(|d| d.name == *n) {
-                return err(st.line, format!("DD {n} appears twice in the step"));
+                return err(raw.line, format!("DD {n} appears twice in the step"));
             }
             step.dds.push(Dd { name: n.clone(), parts: vec![part] });
             Ok(())
@@ -564,8 +874,41 @@ fn dd_statement(st: &Statement, step: &mut Step, reader: &mut Reader<'_>) -> Res
                 dd.parts.push(part);
                 Ok(())
             }
-            None => err(st.line, "an unnamed DD statement with nothing to concatenate to"),
+            None => err(raw.line, "an unnamed DD statement with nothing to concatenate to"),
         },
+    }
+}
+
+/// A DD override changes what it states of the procedure's DD, part `index` of a concatenation,
+/// and keeps the rest; a DD the step does not have is added to it.
+fn override_dd(step: &mut Step, name: &str, index: usize, raw: &Raw, operands: &str) -> Result<(), Error> {
+    let (source, disposition) = dd_fields(raw, operands)?;
+    match step.dds.iter_mut().find(|d| d.name == name) {
+        Some(dd) if index < dd.parts.len() => {
+            let part = &mut dd.parts[index];
+            if let Some(s) = source {
+                if !matches!(s, Source::Dataset { .. } | Source::Temporary { .. }) {
+                    part.disp = Disp::default();
+                }
+                part.source = s;
+            }
+            if let Some(d) = disposition {
+                part.disp = d;
+            }
+            part.line = raw.line;
+            Ok(())
+        }
+        Some(dd) => {
+            let part = dd_part(raw, operands)?;
+            dd.parts.push(part);
+            Ok(())
+        }
+        None if index == 0 => {
+            let part = dd_part(raw, operands)?;
+            step.dds.push(Dd { name: name.to_string(), parts: vec![part] });
+            Ok(())
+        }
+        None => err(raw.line, "an unnamed DD statement with nothing to concatenate to"),
     }
 }
 

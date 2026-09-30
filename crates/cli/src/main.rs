@@ -13,7 +13,7 @@ usage:
                [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]... [--td QUEUE=path]...
                [--screens path | --serve HOST:PORT [--transaction TRAN=PROGRAM]... [--csd path]]
                                                        run as the first program of a CICS task
-  ironwork job <job.jcl> --datasets DIR[:text] [run flags] [-I <dir>]... [-L <dir>]... [--clock <time>] [--sql-replay path]
+  ironwork job <job.jcl> --datasets DIR[:text] [--proclib DIR]... [run flags] [-I <dir>]... [-L <dir>]... [--clock <time>] [--sql-replay path]
                                                        run a job's steps in order
   ironwork assumptions [--c-series]                    list the register of assumptions, one per line
   ironwork --version
@@ -115,9 +115,13 @@ job flags:
              control statements; DISP creates, keeps and deletes data sets as each step ends, and
              COND and IF/THEN/ELSE choose the steps. A step's DISPLAY output and its SYSOUT DDs go
              to standard output, a line per step to standard error. What the job uses that
-             ironwork does not run (procedures, symbolic parameters, PARM, DISP=MOD, SORT, IDCAMS
-             and IBM's other programs) is refused before any step runs. Exit status: the highest
-             return code, 16 when a step abended or a JCL error ended the job, 2 for a job refused
+             ironwork does not run (PARM, DISP=MOD, generation data groups, SORT, IDCAMS and IBM's
+             other programs) is refused before any step runs. Exit status: the highest return
+             code, 16 when a step abended or a JCL error ended the job, 2 for a job refused
+  --proclib DIR
+             a procedure library, searched for cataloged procedures and INCLUDE members after the
+             data sets JCLLIB ORDER names: member M is the file DIR/M or DIR/M.jcl. In-stream
+             procedures, SET, symbolic parameters and EXEC and DD overrides are expanded
 assumptions flags:
   --c-series
              put each entry's number in one C series first, its position in the register, with the
@@ -202,6 +206,7 @@ fn driver() -> ExitCode {
     let (mut compare_base, mut compare_head, mut declare, mut statement) = (None, None, None, None);
     let mut expected: Vec<(String, std::path::PathBuf)> = Vec::new();
     let mut datasets: Option<String> = None;
+    let mut proclibs: Vec<std::path::PathBuf> = Vec::new();
     while let Some(a) = args.next() {
         match a.as_str() {
             "-h" | "--help" => {
@@ -239,6 +244,10 @@ fn driver() -> ExitCode {
             "--datasets" => match args.next() {
                 Some(dir) => datasets = Some(dir),
                 None => return usage_error("--datasets needs a directory"),
+            },
+            "--proclib" => match args.next() {
+                Some(dir) => proclibs.push(std::path::PathBuf::from(dir)),
+                None => return usage_error("--proclib needs a directory"),
             },
             "--dd" => match args.next() {
                 Some(spec) => dds.push(spec),
@@ -325,10 +334,10 @@ fn driver() -> ExitCode {
             Some(d) => (d.to_string(), true),
             None => (dir, false),
         };
-        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, flags, clock, replay: replay.map(std::path::PathBuf::from) });
+        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, flags, clock, replay: replay.map(std::path::PathBuf::from) });
     }
-    if datasets.is_some() {
-        return usage_error("--datasets is for job");
+    if datasets.is_some() || !proclibs.is_empty() {
+        return usage_error("--datasets and --proclib are for job");
     }
     if compare_base.is_some() || compare_head.is_some() || !expected.is_empty() || declare.is_some() || statement.is_some() {
         return usage_error("--base, --head, --expected, --declare and --statement are for compare");

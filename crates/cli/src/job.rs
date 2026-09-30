@@ -1,4 +1,5 @@
-//! `ironwork job`: a job's steps run in order against a directory of data sets. Each EXEC PGM=
+//! `ironwork job`: a job's steps run in order against a directory of data sets, procedures
+//! expanded into the steps they run. Each EXEC PGM=
 //! runs a COBOL program from the program libraries, or IEFBR14 or IEBGENER; DD statements become
 //! the files a step's DDs stand for, and dispositions create, keep and delete them as the step
 //! ends. COND and IF/THEN/ELSE decide which steps run, from the return codes and abends before.
@@ -19,6 +20,8 @@ pub struct Request {
     pub text: bool,
     pub libraries: Vec<PathBuf>,
     pub program_dirs: Vec<PathBuf>,
+    /// Procedure libraries searched after the job's JCLLIB, each a directory of members.
+    pub proclibs: Vec<PathBuf>,
     pub flags: Vec<String>,
     pub clock: exec::unit::Clock,
     pub replay: Option<PathBuf>,
@@ -147,7 +150,7 @@ impl Runner<'_> {
     /// or a concatenation. A data set that must exist and does not, or must not and does, is a
     /// JCL error.
     fn allocate(&mut self, step: &Step, dd: &Dd, disposals: &mut Vec<Disposal>) -> Result<Allocated, String> {
-        let label = format!("{}.{}", step.name.as_deref().unwrap_or("STEP"), dd.name);
+        let label = format!("{}.{}", step.shown(), dd.name);
         let mut paths = Vec::new();
         let mut text = self.req.text;
         let mut sysout = false;
@@ -295,7 +298,18 @@ pub fn run(req: Request) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let job = match jcl::parse(&text) {
+    let libraries = |order: &[String], member: &str| -> Result<Option<String>, String> {
+        let dirs = order.iter().map(|dsn| req.datasets.join(dsn)).chain(req.proclibs.iter().cloned());
+        for dir in dirs {
+            for path in [dir.join(member), dir.join(format!("{member}.jcl"))] {
+                if path.is_file() {
+                    return fs::read_to_string(&path).map(Some).map_err(|e| format!("{}: {e}", path.display()));
+                }
+            }
+        }
+        Ok(None)
+    };
+    let job = match jcl::parse_with(&text, &libraries) {
         Ok(j) => j,
         Err(e) => {
             eprintln!("ironwork: {shown}:{}: {}", e.line, e.message);
@@ -349,9 +363,9 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
     let mut ended = false;
     for item in &job.items {
         match item {
-            Item::If { expr, .. } => {
+            Item::If { expr, caller, .. } => {
                 let parent = frames.last().is_none_or(|f| f.active);
-                let value = cond::eval(expr, &ran);
+                let value = cond::eval(expr, &ran, caller.as_deref());
                 frames.push(Frame { active: parent && value, parent, value, abend_aware: cond::tests_abend(expr) });
             }
             Item::Else { .. } => {
@@ -363,7 +377,8 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                 frames.pop();
             }
             Item::Step(step) => {
-                let name = step.name.as_deref().unwrap_or("");
+                let shown = step.shown();
+                let name = shown.as_str();
                 if ended {
                     log(name, &step.pgm, "BYPASSED: the job ended".into());
                     continue;
@@ -372,13 +387,13 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                     log(name, &step.pgm, "BYPASSED: its IF branch is not taken".into());
                     continue;
                 }
-                if let Some(reason) = cond::bypassed_by_cond(&job.cond, &ran, false) {
+                if let Some(reason) = cond::bypassed_by_cond(&job.cond, &ran, false, None) {
                     log(name, &step.pgm, format!("BYPASSED: the JOB statement's {reason}; the job ends"));
                     ended = true;
                     continue;
                 }
                 let abend_tested = frames.iter().any(|f| f.abend_aware);
-                if let Some(reason) = cond::bypassed_by_cond(&step.cond, &ran, abended && !abend_tested) {
+                if let Some(reason) = cond::bypassed_by_cond(&step.cond, &ran, abended && !abend_tested, step.caller.as_deref()) {
                     log(name, &step.pgm, format!("BYPASSED: {reason}"));
                     continue;
                 }
@@ -418,13 +433,13 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                         let rc = rc.clamp(0, 4095) as u16;
                         log(name, &step.pgm, format!("RC={rc:04}"));
                         runner.dispose(disposals, false);
-                        ran.push(Ran { name: step.name.clone(), rc: Some(rc), abend: None });
+                        ran.push(Ran { name: step.name.clone(), caller: step.caller.clone(), rc: Some(rc), abend: None });
                     }
                     Err((code, message)) => {
                         log(name, &step.pgm, format!("ABEND {code}: {message}"));
                         runner.dispose(disposals, true);
                         abended = true;
-                        ran.push(Ran { name: step.name.clone(), rc: None, abend: Some(code.to_string()) });
+                        ran.push(Ran { name: step.name.clone(), caller: step.caller.clone(), rc: None, abend: Some(code.to_string()) });
                     }
                 }
             }

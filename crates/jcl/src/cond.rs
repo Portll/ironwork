@@ -35,11 +35,57 @@ impl Op {
     }
 }
 
+/// `stepname` or `stepname.procstepname`. Inside a procedure a bare stepname is one of the
+/// procedure's own steps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StepRef {
+    pub step: String,
+    pub procstep: Option<String>,
+}
+
+impl StepRef {
+    fn parse(text: &str) -> Result<StepRef, String> {
+        let (step, procstep) = match text.split_once('.') {
+            Some((s, p)) => (s, Some(p)),
+            None => (text, None),
+        };
+        for n in std::iter::once(step).chain(procstep) {
+            if !crate::is_name(n) {
+                return Err(format!("{n} is not a step name"));
+            }
+        }
+        Ok(StepRef { step: step.to_string(), procstep: procstep.map(str::to_string) })
+    }
+
+    fn shown(&self) -> String {
+        match &self.procstep {
+            Some(p) => format!("{}.{p}", self.step),
+            None => self.step.clone(),
+        }
+    }
+
+    /// The steps this names, latest first. A bare stepname that names no step where it is used
+    /// but called a procedure names every step of that call.
+    fn find<'r>(&self, ran: &'r [Ran], context: Option<&str>) -> Vec<&'r Ran> {
+        let named = |r: &&Ran| match &self.procstep {
+            Some(p) => r.caller.as_deref() == Some(&self.step) && r.name.as_deref() == Some(p),
+            None => r.caller.as_deref() == context && r.name.as_deref() == Some(&self.step),
+        };
+        if let Some(r) = ran.iter().rev().find(named) {
+            return vec![r];
+        }
+        if self.procstep.is_none() && context.is_none() {
+            return ran.iter().rev().filter(|r| r.caller.as_deref() == Some(&self.step)).collect();
+        }
+        Vec::new()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Test {
     pub code: u16,
     pub op: Op,
-    pub step: Option<String>,
+    pub step: Option<StepRef>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -62,22 +108,24 @@ pub enum Expr {
     And(Box<Expr>, Box<Expr>),
     Or(Box<Expr>, Box<Expr>),
     Compare(Value, Op, u16),
-    Abend(Option<String>),
+    Abend(Option<StepRef>),
     AbendCc(String),
-    Run(String),
+    Run(StepRef),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
     /// RC alone: the highest return code of the steps that ran.
     MaxRc,
-    StepRc(String),
+    StepRc(StepRef),
 }
 
-/// A step that ran, in order: its return code, or its abend code when it abended.
+/// A step that ran, in order: its return code, or its abend code when it abended. `caller` is
+/// the job step that called the procedure it is in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ran {
     pub name: Option<String>,
+    pub caller: Option<String>,
     pub rc: Option<u16>,
     pub abend: Option<String>,
 }
@@ -106,12 +154,7 @@ fn cond_test(text: &str) -> Result<Test, String> {
     if !(2..=3).contains(&parts.len()) {
         return Err(format!("COND test ({text}) is not (code,operator) or (code,operator,stepname)"));
     }
-    let step = match parts.get(2) {
-        Some(s) if s.contains('.') => return Err("stepname.procstepname in COND is not supported yet".into()),
-        Some(s) if crate::is_name(s) => Some(s.to_string()),
-        Some(s) => return Err(format!("{s} is not a step name")),
-        None => None,
-    };
+    let step = parts.get(2).map(|s| StepRef::parse(s)).transpose()?;
     Ok(Test { code: code(parts[0])?, op: cond_op(parts[1])?, step })
 }
 
@@ -329,11 +372,12 @@ impl Parser {
             Some((k, v)) => (k, Some(v)),
             None => (w, None),
         };
-        let step = |s: &str| if crate::is_name(s) { Ok(s.to_string()) } else { Err(format!("{s} is not a step name")) };
-        match key.split('.').collect::<Vec<_>>().as_slice() {
-            ["RC"] => self.comparison(Value::MaxRc),
-            ["ABEND"] => truth(Expr::Abend(None), value),
-            ["ABENDCC"] => {
+        let (target, keyword) = key.rsplit_once('.').map_or((None, key), |(t, k)| (Some(t), k));
+        let step = || StepRef::parse(target.unwrap_or(""));
+        match (target, keyword) {
+            (None, "RC") => self.comparison(Value::MaxRc),
+            (None, "ABEND") => truth(Expr::Abend(None), value),
+            (None, "ABENDCC") => {
                 let v = value.unwrap_or("");
                 let valid = match v.as_bytes() {
                     [b'S', rest @ ..] => rest.len() == 3 && rest.iter().all(u8::is_ascii_hexdigit),
@@ -342,11 +386,10 @@ impl Parser {
                 };
                 if valid { Ok(Expr::AbendCc(v.to_string())) } else { Err(format!("ABENDCC={v} is not Sxxx or Unnnn")) }
             }
-            [s, "RC"] => self.comparison(Value::StepRc(step(s)?)),
-            [s, "ABEND"] => truth(Expr::Abend(Some(step(s)?)), value),
-            [s, "RUN"] => truth(Expr::Run(step(s)?), value),
-            [_, _, "RC" | "ABEND" | "RUN" | "ABENDCC"] => Err("stepname.procstepname in an IF expression is not supported yet".into()),
-            [_, "ABENDCC"] => Err("stepname.ABENDCC is not supported yet".into()),
+            (Some(_), "RC") => self.comparison(Value::StepRc(step()?)),
+            (Some(_), "ABEND") => truth(Expr::Abend(Some(step()?)), value),
+            (Some(_), "RUN") => truth(Expr::Run(step()?), value),
+            (Some(_), "ABENDCC") => Err("stepname.ABENDCC is not supported yet".into()),
             _ => Err(format!("{w} is not RC, ABEND, ABENDCC or a stepname.RC, .ABEND or .RUN")),
         }
     }
@@ -366,7 +409,8 @@ pub fn parse_expr(text: &str) -> Result<Expr, String> {
 /// Why a step is bypassed, or None when it runs. After an abend a step runs only under EVEN or
 /// ONLY; ONLY runs only after one. A test naming a step that did not run, or abended, is not
 /// made; a test naming none is made against every step that ran.
-pub fn bypassed_by_cond(cond: &Cond, ran: &[Ran], abended: bool) -> Option<String> {
+/// `context` is the job step whose procedure the step is in.
+pub fn bypassed_by_cond(cond: &Cond, ran: &[Ran], abended: bool, context: Option<&str>) -> Option<String> {
     match (cond.mode, abended) {
         (Mode::Plain, true) => return Some("an earlier step abended".into()),
         (Mode::Only, false) => return Some("COND=ONLY and no earlier step abended".into()),
@@ -374,29 +418,32 @@ pub fn bypassed_by_cond(cond: &Cond, ran: &[Ran], abended: bool) -> Option<Strin
     }
     for t in &cond.tests {
         let hit = match &t.step {
-            Some(s) => ran.iter().rev().find(|r| r.name.as_deref() == Some(s)).and_then(|r| r.rc).is_some_and(|rc| t.op.holds(t.code, rc)),
+            Some(s) => s.find(ran, context).iter().filter_map(|r| r.rc).any(|rc| t.op.holds(t.code, rc)),
             None => ran.iter().filter_map(|r| r.rc).any(|rc| t.op.holds(t.code, rc)),
         };
         if hit {
-            let step = t.step.as_ref().map_or(String::new(), |s| format!(",{s}"));
+            let step = t.step.as_ref().map_or(String::new(), |s| format!(",{}", s.shown()));
             return Some(format!("COND=({},{}{step}) is true", t.code, t.op.word()));
         }
     }
     None
 }
 
-pub fn eval(expr: &Expr, ran: &[Ran]) -> bool {
-    let last = |s: &str| ran.iter().rev().find(|r| r.name.as_deref() == Some(s));
+/// A stepname.RC that names a call of a procedure is the highest return code of its steps.
+pub fn eval(expr: &Expr, ran: &[Ran], context: Option<&str>) -> bool {
     match expr {
-        Expr::Not(e) => !eval(e, ran),
-        Expr::And(a, b) => eval(a, ran) && eval(b, ran),
-        Expr::Or(a, b) => eval(a, ran) || eval(b, ran),
+        Expr::Not(e) => !eval(e, ran, context),
+        Expr::And(a, b) => eval(a, ran, context) && eval(b, ran, context),
+        Expr::Or(a, b) => eval(a, ran, context) || eval(b, ran, context),
         Expr::Compare(Value::MaxRc, op, n) => op.holds(ran.iter().filter_map(|r| r.rc).max().unwrap_or(0), *n),
-        Expr::Compare(Value::StepRc(s), op, n) => last(s).and_then(|r| r.rc).is_some_and(|rc| op.holds(rc, *n)),
+        Expr::Compare(Value::StepRc(s), op, n) => {
+            let found = s.find(ran, context);
+            !found.is_empty() && found.iter().all(|r| r.rc.is_some()) && op.holds(found.iter().filter_map(|r| r.rc).max().unwrap_or(0), *n)
+        }
         Expr::Abend(None) => ran.iter().any(|r| r.abend.is_some()),
-        Expr::Abend(Some(s)) => last(s).is_some_and(|r| r.abend.is_some()),
+        Expr::Abend(Some(s)) => s.find(ran, context).iter().any(|r| r.abend.is_some()),
         Expr::AbendCc(c) => ran.iter().any(|r| r.abend.as_deref() == Some(c)),
-        Expr::Run(s) => last(s).is_some(),
+        Expr::Run(s) => !s.find(ran, context).is_empty(),
     }
 }
 
@@ -416,18 +463,18 @@ mod tests {
     use super::*;
 
     fn ran(name: &str, rc: Option<u16>, abend: Option<&str>) -> Ran {
-        Ran { name: Some(name.into()), rc, abend: abend.map(Into::into) }
+        Ran { name: Some(name.into()), caller: None, rc, abend: abend.map(Into::into) }
     }
 
     #[test]
     fn cond_forms() {
         assert_eq!(parse_cond("EVEN").unwrap().mode, Mode::Even);
         assert_eq!(parse_cond("(4,LT)").unwrap().tests, [Test { code: 4, op: Op::Lt, step: None }]);
-        assert_eq!(parse_cond("(4,LT,STEP1)").unwrap().tests[0].step.as_deref(), Some("STEP1"));
+        assert_eq!(parse_cond("(4,LT,STEP1.PSTEP)").unwrap().tests[0].step, Some(StepRef { step: "STEP1".into(), procstep: Some("PSTEP".into()) }));
         let c = parse_cond("((4,LT),(8,GT,STEP1),EVEN)").unwrap();
         assert_eq!((c.tests.len(), c.mode), (2, Mode::Even));
         assert_eq!(parse_cond("((0,NE,S1),ONLY)").unwrap().mode, Mode::Only);
-        for bad in ["(4,LT),EVEN", "(4096,LT)", "(4,XX)", "((4,LT),EVEN,(8,GT))", "(4)", "(4,LT,S1.P1)", "4,LT", &format!("({})", ["(0,EQ)"; 9].join(","))] {
+        for bad in ["(4,LT),EVEN", "(4096,LT)", "(4,XX)", "((4,LT),EVEN,(8,GT))", "(4)", "(4,LT,S1.P1.X)", "4,LT", &format!("({})", ["(0,EQ)"; 9].join(","))] {
             assert!(parse_cond(bad).is_err(), "{bad}");
         }
     }
@@ -436,14 +483,14 @@ mod tests {
     fn cond_decides_from_the_steps_that_ran() {
         let history = [ran("S1", Some(0), None), ran("S2", Some(8), None)];
         let c = |t: &str| parse_cond(t).unwrap();
-        assert!(bypassed_by_cond(&c("(4,LT)"), &history, false).is_some());
-        assert!(bypassed_by_cond(&c("(4,LT,S1)"), &history, false).is_none());
-        assert!(bypassed_by_cond(&c("(0,EQ,NOSTEP)"), &history, false).is_none());
-        assert!(bypassed_by_cond(&Cond::default(), &history, true).is_some());
-        assert!(bypassed_by_cond(&c("EVEN"), &history, true).is_none());
-        assert!(bypassed_by_cond(&c("ONLY"), &history, false).is_some());
+        assert!(bypassed_by_cond(&c("(4,LT)"), &history, false, None).is_some());
+        assert!(bypassed_by_cond(&c("(4,LT,S1)"), &history, false, None).is_none());
+        assert!(bypassed_by_cond(&c("(0,EQ,NOSTEP)"), &history, false, None).is_none());
+        assert!(bypassed_by_cond(&Cond::default(), &history, true, None).is_some());
+        assert!(bypassed_by_cond(&c("EVEN"), &history, true, None).is_none());
+        assert!(bypassed_by_cond(&c("ONLY"), &history, false, None).is_some());
         let abended = [ran("S1", None, Some("S0C7"))];
-        assert!(bypassed_by_cond(&c("((0,LE,S1),EVEN)"), &abended, true).is_none());
+        assert!(bypassed_by_cond(&c("((0,LE,S1),EVEN)"), &abended, true, None).is_none());
     }
 
     #[test]
@@ -452,13 +499,13 @@ mod tests {
         assert!(matches!(e, Expr::Or(_, _)));
         assert_eq!(parse_expr("¬ABEND").unwrap(), Expr::Not(Box::new(Expr::Abend(None))));
         assert_eq!(parse_expr("ABEND=FALSE").unwrap(), parse_expr("NOT ABEND").unwrap());
-        assert_eq!(parse_expr("S1.RUN=TRUE").unwrap(), Expr::Run("S1".into()));
+        assert_eq!(parse_expr("S1.RUN=TRUE").unwrap(), Expr::Run(StepRef { step: "S1".into(), procstep: None }));
         assert_eq!(parse_expr("ABENDCC=S0C7").unwrap(), Expr::AbendCc("S0C7".into()));
         for (text, op) in [("RC GT 4", Op::Gt), ("RC>4", Op::Gt), ("RC NG 4", Op::Le), ("RC ¬> 4", Op::Le), ("RC NL 4", Op::Ge), ("RC ¬< 4", Op::Ge), ("RC ¬= 4", Op::Ne), ("RC<=4", Op::Le)] {
             assert_eq!(parse_expr(text).unwrap(), Expr::Compare(Value::MaxRc, op, 4), "{text}");
         }
         assert_eq!(parse_expr("NOT RC = 0").unwrap(), Expr::Not(Box::new(Expr::Compare(Value::MaxRc, Op::Eq, 0))));
-        for bad in ["RC", "RC = 4096", "4 = RC", "S1.P1.RC = 0", "ABENDCC=S0CX", "(RC = 0", "RC = 0)", "S1.ABEND=MAYBE"] {
+        for bad in ["RC", "RC = 4096", "4 = RC", "S1.ABENDCC=S0C7", "ABENDCC=S0CX", "(RC = 0", "RC = 0)", "S1.ABEND=MAYBE"] {
             assert!(parse_expr(bad).is_err(), "{bad}");
         }
         assert!(parse_expr(&format!("{}RC = 0{}", "(".repeat(15), ")".repeat(15))).is_ok());
@@ -468,12 +515,27 @@ mod tests {
     #[test]
     fn if_decides_from_the_steps_that_ran() {
         let history = [ran("S1", Some(4), None), ran("S2", None, Some("S0C7"))];
-        let t = |text: &str| eval(&parse_expr(text).unwrap(), &history);
+        let t = |text: &str| eval(&parse_expr(text).unwrap(), &history, None);
         assert!(t("RC = 4"));
         assert!(!t("S2.RC = 0") && !t("S2.RC ¬= 0"));
         assert!(t("S2.ABEND & ABENDCC=S0C7 & S1.RUN & ¬S3.RUN"));
         assert!(!t("S1.ABEND"));
-        assert!(eval(&parse_expr("RC = 0").unwrap(), &[]));
+        assert!(eval(&parse_expr("RC = 0").unwrap(), &[], None));
         assert!(tests_abend(&parse_expr("RC = 0 | ¬S1.RUN").unwrap()) && !tests_abend(&parse_expr("RC = 0").unwrap()));
+    }
+
+    #[test]
+    fn procedure_steps_are_named_through_their_caller() {
+        let history = [
+            Ran { name: Some("P1".into()), caller: Some("CALL".into()), rc: Some(4), abend: None },
+            Ran { name: Some("P2".into()), caller: Some("CALL".into()), rc: Some(8), abend: None },
+            ran("P1", Some(0), None),
+        ];
+        let t = |text: &str, context| eval(&parse_expr(text).unwrap(), &history, context);
+        assert!(t("CALL.P1.RC = 4", None) && t("P1.RC = 0", None));
+        assert!(t("P1.RC = 4", Some("CALL")) && t("CALL.RC = 8", None) && t("CALL.RUN", None));
+        assert!(!t("P2.RC = 8", None));
+        let c = |text: &str, context| bypassed_by_cond(&parse_cond(text).unwrap(), &history, false, context).is_some();
+        assert!(c("(4,EQ,P1)", Some("CALL")) && !c("(4,EQ,P1)", None) && c("(8,EQ,CALL.P2)", None));
     }
 }

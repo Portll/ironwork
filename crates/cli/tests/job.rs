@@ -75,12 +75,17 @@ fn divide(dir: &Path) {
 }
 
 fn job(dir: &Path, jcl: &str) -> Output {
+    job_with(dir, jcl, &[])
+}
+
+fn job_with(dir: &Path, jcl: &str, extra: &[&str]) -> Output {
     let path = dir.join("job.jcl");
     fs::write(&path, format!("//TESTJOB JOB (1),'T',CLASS=A\n{jcl}")).unwrap();
     Command::new(env!("CARGO_BIN_EXE_ironwork"))
         .args(["job", path.to_str().unwrap(), "--datasets"])
         .arg(format!("{}:text", dir.join("data").display()))
         .args(["-L", dir.join("lib").to_str().unwrap(), "--clock", "2026-01-01T00:00:00"])
+        .args(extra)
         .output()
         .unwrap()
 }
@@ -223,5 +228,41 @@ fn what_ironwork_does_not_run_is_refused_before_any_step() {
     assert!(!dir.join("data/MADE.EARLY").exists());
     let o = job(&dir, "//S1 EXEC MYPROC\n");
     assert_eq!(o.status.code(), Some(2));
-    assert!(log(&o).contains("job.jcl:2: EXEC of a procedure is not supported yet"), "{}", log(&o));
+    assert!(log(&o).contains("job.jcl:2: no procedure library holds member MYPROC"), "{}", log(&o));
+}
+
+#[test]
+fn procedures_from_jcllib_and_proclib_run_with_their_overrides() {
+    let dir = temp("procs");
+    upcase(&dir);
+    fs::create_dir_all(dir.join("data/SITE.PROCLIB")).unwrap();
+    fs::create_dir_all(dir.join("sys")).unwrap();
+    fs::write(dir.join("data/IN.NAMES"), "gamma\n").unwrap();
+    fs::write(dir.join("data/SITE.PROCLIB/UPPROC"), concat!(
+        "//UPPROC  PROC OUT=OUT.DEFAULT\n",
+        "//UP      EXEC PGM=UPCASE\n",
+        "//IN      DD DSN=IN.NAMES,DISP=SHR\n",
+        "//OUT     DD DSN=&OUT,DISP=(NEW,CATLG)\n",
+        "//SYSIN   DD DUMMY\n",
+        "//AFTER   EXEC TIDY\n",
+    )).unwrap();
+    fs::write(dir.join("sys/TIDY.jcl"), "//TIDY PROC\n//GONE EXEC PGM=IEFBR14,COND=(0,NE,UP)\n").unwrap();
+    let o = job_with(
+        &dir,
+        concat!(
+            "//LIBS    JCLLIB ORDER=SITE.PROCLIB\n",
+            "//        SET TARGET=OUT.SET\n",
+            "//RUN     EXEC UPPROC,OUT=&TARGET\n",
+            "//UP.SYSIN DD *\n",
+            "0002\n",
+            "// IF (RUN.UP.RC = 2) THEN\n",
+            "//YES     EXEC PGM=IEFBR14\n",
+            "// ENDIF\n",
+        ),
+        &["--proclib", dir.join("sys").to_str().unwrap()],
+    );
+    let l = log(&o);
+    assert_eq!(o.status.code(), Some(2), "{l}");
+    assert_eq!(fs::read_to_string(dir.join("data/OUT.SET")).unwrap(), "GAMMA\n");
+    assert!(l.contains("RUN.UP PGM=UPCASE RC=0002") && l.contains("RUN.GONE PGM=IEFBR14 BYPASSED: COND=(0,NE,UP) is true") && l.contains("YES PGM=IEFBR14 RC=0000"), "{l}");
 }
