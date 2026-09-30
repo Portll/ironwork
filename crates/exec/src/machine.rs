@@ -30,6 +30,7 @@ mod declaratives;
 mod file_io;
 mod le_services;
 mod oo;
+mod perform;
 mod report;
 mod sort;
 mod sql;
@@ -49,6 +50,10 @@ enum Flow {
     ExitPerform,
     ExitPerformCycle,
     NextSentence,
+    /// Returning, at this paragraph and statement, after a PERFORM whose range control left.
+    Resume(usize, usize),
+    /// Returning to the active PERFORM with this frame number.
+    Return(u64),
 }
 
 pub struct Machine<'p, 'u, 'w> {
@@ -81,6 +86,7 @@ pub struct Machine<'p, 'u, 'w> {
     segment: u8,
     declaratives: &'p crate::declaratives::Table,
     uses: declaratives::State,
+    returns: perform::Returns,
     unit: &'u mut RunUnit<'w>,
 }
 
@@ -218,6 +224,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             segment: 0,
             declaratives: &compiled.declaratives,
             uses: declaratives::State::default(),
+            returns: perform::Returns::new(compiled.program.paragraphs.len()),
             unit,
         };
         if compiled.layout.local_size > 0 {
@@ -261,74 +268,6 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     pub fn run_procedure(&mut self) -> R<Ending> {
         self.run_from(None)
-    }
-
-    /// Runs the procedure from its start, or from paragraph and statement `at`.
-    fn run_from(&mut self, at: Option<(usize, usize)>) -> R<Ending> {
-        let (mut start, mut skip) = at.unwrap_or((self.program.report_writer.procedure_start, 0));
-        if self.program.paragraphs.len() <= start {
-            return Ok(Ending::EndOfProgram);
-        }
-        self.segment = self.program.paragraphs[start].priority;
-        let last = self.program.paragraphs.len() - 1;
-        self.uses.arrival = declaratives::Arrival::Start;
-        loop {
-            match self.run_paragraphs_from(start, skip, last)? {
-                Flow::End(e) => return Ok(e),
-                Flow::GoTo(t) => {
-                    (start, skip) = (t, 0);
-                    self.uses.arrival = declaratives::Arrival::GoTo;
-                }
-                _ => return Ok(Ending::EndOfProgram),
-            }
-        }
-    }
-
-    /// Paragraphs `from` to `to`, as control reaching `from` in the way `uses.arrival` says.
-    fn run_paragraphs(&mut self, from: usize, to: usize) -> R<Flow> {
-        self.run_paragraphs_from(from, 0, to)
-    }
-
-    /// Paragraphs `from` to `to`, the first from its statement `skip`. A range that ends normally
-    /// hands control back to the segment that ran it; a paragraph an ALTER changed goes where it said.
-    fn run_paragraphs_from(&mut self, from: usize, mut skip: usize, to: usize) -> R<Flow> {
-        let program = self.program;
-        let segment = self.segment;
-        let mut i = from;
-        let mut arrival = std::mem::take(&mut self.uses.arrival);
-        while i <= to {
-            self.enter_segment(program.paragraphs[i].priority);
-            if !self.declaratives.triggers.is_empty() {
-                if skip == 0
-                    && let Some(flow) = self.debug_before(i, arrival)?
-                {
-                    return Ok(flow);
-                }
-                if program.paragraphs[i].is_section {
-                    self.uses.line = program.paragraphs[i].pos;
-                }
-                arrival = declaratives::Arrival::FallThrough;
-            }
-            let altered = self.unit.programs[self.me].altered.get(i).copied().flatten();
-            let statements = &program.paragraphs[i].statements;
-            let flow = match altered {
-                Some(t) => Flow::GoTo(t),
-                None => self.run_sentences(&statements[skip.min(statements.len())..])?,
-            };
-            skip = 0;
-            match flow {
-                Flow::Next | Flow::ExitParagraph => i += 1,
-                Flow::ExitSection => i = crate::section_end(program, i) + 1,
-                Flow::GoTo(t) if (from..=to).contains(&t) => {
-                    i = t;
-                    arrival = declaratives::Arrival::GoTo;
-                }
-                Flow::ExitPerform | Flow::ExitPerformCycle => i += 1,
-                other => return Ok(other),
-            }
-        }
-        self.segment = segment;
-        Ok(Flow::Next)
     }
 
     /// Control reaching a paragraph of segment `priority`: an independent segment entered from
@@ -422,9 +361,10 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     Some(t) => self.procedure(t, *pos)?.1,
                     None => first_end,
                 };
+                let statement = if matches!(repeat, Loop::Once) { self.after(s) } else { None };
                 return self.repeat(repeat, *pos, &mut |m: &mut Self| {
                     m.uses.line = *pos;
-                    m.run_paragraphs(start, end)
+                    m.perform_range(start, end, None, statement)
                 });
             }
             Stmt::PerformInline { body, repeat, pos } => return self.repeat(repeat, *pos, &mut |m: &mut Self| m.run_block(body)),

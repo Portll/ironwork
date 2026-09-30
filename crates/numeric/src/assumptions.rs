@@ -196,6 +196,7 @@ pub const DECIMAL_COMMA_DISPLAY_LITERAL: &str = "C95";
 pub const ARITH_DIGIT_LIMITS: &str = "C96";
 pub const MULTIPLE_RESULTS: &str = "C97";
 pub const ALTER_DEBUGGING: &str = "C98";
+pub const PERFORM_RETURN_POINTS: &str = "C99";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1197,6 +1198,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: ALTER_DEBUGGING,
         claim: "Once an ALTER has run, the debugging section that serves each paragraph it alters runs, once for each TO [PROCEED TO] phrase in the order written, with DEBUG-LINE the ALTER, DEBUG-NAME the altered paragraph as DEBUG_NAME_FORM gives it, and DEBUG-CONTENTS the procedure-name after TO PROCEED TO, a qualifier after OF (Language Reference SC27-8713-03, pp. 19-20, 716). A procedure named only after TO PROCEED TO gets no debugging section from the ALTER: p. 716 says an ALTER 'referring to the named procedure', and Table 2 on p. 20 has an ALTER row for procedure-name-1 alone, as CCVS85 DB105A expects under ALL PROCEDURES. Under ALL PROCEDURES an ALTER in the declaratives runs none, as p. 716 says; there an ALTER of a paragraph that a USE FOR DEBUGGING names still runs its section, as p. 716 makes no exception for it",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PERFORM_RETURN_POINTS,
+        claim: "An out-of-line PERFORM arms a return point at the end of its range's last paragraph (Language Reference SC27-8713-03, p. 419), one per activation, since a CALL resets return points (Programming Guide SC27-8714-03, p. 547). Control that passes that end by any path, falling through or by GO TO, returns to the PERFORM, so PERFORM B THRU A with A before B returns when control reaches the end of A, and a range that passes the end of another active PERFORM's range returns there to that PERFORM. Neither manual says what a PERFORM that control leaves by GO TO leaves behind: its return point stays armed, as the Programming Guide's warning against ranges that keep control from the end implies (p. 772), until control passes it and returns after that PERFORM, which then puts back the point it displaced; ironwork refuses at run time to return so into a PERFORM that repeats or is inside another statement. EXIT SECTION goes to the end of the section, past the return point of a performed paragraph in it (LR p. 345)",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

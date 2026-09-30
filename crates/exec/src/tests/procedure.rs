@@ -368,3 +368,119 @@ fn what_is_not_enterprise_cobol_is_refused_as_such() {
         assert!(message.contains(named) && !message.contains("not supported"), "{body}: {message}");
     }
 }
+
+fn perform_program(procedure: &[&str]) -> String {
+    program("", "       01  K PIC 9 VALUE 0.\n", &procedure.concat())
+}
+
+#[test]
+fn a_perform_range_returns_when_control_reaches_its_end_by_go_to() {
+    let out = run(&perform_program(&[
+        "       M.\n",
+        &line("PERFORM B THRU C"),
+        &line("DISPLAY 'BACK'"),
+        &line("PERFORM D THRU A"),
+        &line("DISPLAY 'BACK AGAIN'"),
+        &line("STOP RUN."),
+        "       A.\n",
+        &line("DISPLAY 'A'."),
+        "       B.\n",
+        &line("DISPLAY 'B'"),
+        &line("GO TO X."),
+        "       C.\n",
+        &line("DISPLAY 'C'."),
+        "       D.\n",
+        &line("DISPLAY 'D'"),
+        &line("GO TO A."),
+        "       X.\n",
+        &line("DISPLAY 'X'"),
+        &line("GO TO C."),
+    ]));
+    assert_eq!(out, "B\nX\nC\nBACK\nD\nA\nBACK AGAIN\n");
+}
+
+#[test]
+fn a_perform_left_by_go_to_returns_when_control_later_passes_its_end() {
+    let out = run(&perform_program(&[
+        "       M.\n",
+        &line("PERFORM P2"),
+        &line("DISPLAY 'BACK ' K"),
+        &line("GO TO P2."),
+        "       P1.\n",
+        &line("DISPLAY 'P1'."),
+        "       P2.\n",
+        &line("ADD 1 TO K"),
+        &line("IF K = 1"),
+        &line("    GO TO P1"),
+        &line("END-IF"),
+        &line("DISPLAY 'P2 ' K."),
+        "       P3.\n",
+        &line("DISPLAY 'P3'"),
+        &line("STOP RUN."),
+    ]));
+    assert_eq!(out, "P1\nP2 2\nBACK 2\nP2 3\nP3\n");
+}
+
+#[test]
+fn passing_the_end_of_an_active_perform_returns_to_it_from_a_range_inside_it() {
+    let out = run(&perform_program(&[
+        "       M.\n",
+        &line("PERFORM A THRU B"),
+        &line("DISPLAY 'M'"),
+        &line("PERFORM A THRU C"),
+        &line("DISPLAY 'M2'"),
+        &line("STOP RUN."),
+        "       A.\n",
+        &line("DISPLAY 'A'"),
+        &line("PERFORM B THRU C"),
+        &line("DISPLAY 'A2'."),
+        "       B.\n",
+        &line("DISPLAY 'B'."),
+        "       C.\n",
+        &line("DISPLAY 'C'."),
+    ]));
+    assert_eq!(out, "A\nB\nM\nA\nB\nC\nA2\nB\nC\nM2\n");
+}
+
+#[test]
+fn exit_section_in_a_performed_paragraph_goes_past_its_return_to_the_end_of_the_section() {
+    let out = run(&perform_program(&[
+        "       MAIN SECTION.\n",
+        "       M.\n",
+        &line("PERFORM S1-A"),
+        &line("DISPLAY 'BACK'"),
+        &line("STOP RUN."),
+        "       S1 SECTION.\n",
+        "       S1-A.\n",
+        &line("DISPLAY 'A'"),
+        &line("EXIT SECTION."),
+        "       S1-B.\n",
+        &line("DISPLAY 'B'."),
+        "       S2 SECTION.\n",
+        "       S2-A.\n",
+        &line("DISPLAY 'S2'"),
+        &line("STOP RUN."),
+    ]));
+    assert_eq!(out, "A\nS2\n");
+}
+
+#[test]
+fn passing_the_end_of_a_repeated_perform_left_by_go_to_is_refused() {
+    let (out, _, ending) = run_with(
+        &perform_program(&[
+            "       M.\n",
+            &line("PERFORM P2 2 TIMES"),
+            &line("STOP RUN."),
+            "       P1.\n",
+            &line("DISPLAY 'P1'."),
+            "       P2.\n",
+            &line("ADD 1 TO K"),
+            &line("IF K = 1"),
+            &line("    GO TO P1"),
+            &line("END-IF."),
+        ]),
+        &[],
+    );
+    assert_eq!(out, "P1\n");
+    assert!(ending.unwrap_err().message.starts_with("control passed the end of P2, which is armed to return to a PERFORM that control left by GO TO"));
+}

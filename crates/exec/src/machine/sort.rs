@@ -677,23 +677,10 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     /// Paragraphs `start` to `end` as a procedure's range: a GO TO out of it carries on where it
-    /// went, and the procedure ends when control falls through the end of paragraph `end`.
+    /// went, and the procedure ends when control passes the end of paragraph `end`.
     fn procedure_range(&mut self, start: usize, end: usize, arrival: declaratives::Arrival) -> R<Flow> {
-        let last = self.program.paragraphs.len() - 1;
         self.uses.arrival = arrival;
-        let mut flow = self.run_paragraphs(start, end)?;
-        while let Flow::GoTo(t) = flow {
-            self.uses.arrival = declaratives::Arrival::GoTo;
-            flow = if t <= end {
-                self.run_paragraphs(t, end)?
-            } else {
-                match self.run_paragraphs(t, last)? {
-                    Flow::Next => Flow::End(Ending::EndOfProgram),
-                    other => other,
-                }
-            };
-        }
-        Ok(flow)
+        self.perform_range(start, end, Some((0, self.program.paragraphs.len() - 1)), None)
     }
 
     fn sort_file(&mut self, st: &'p SortStmt, sd: usize) -> R<Flow> {
