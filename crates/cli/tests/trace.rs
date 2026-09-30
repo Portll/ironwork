@@ -149,6 +149,66 @@ fn a_traced_cics_task_records_the_commands_its_commarea_reached() {
 }
 
 #[test]
+fn a_scripted_pseudo_conversation_runs_the_returned_transaction_on_the_same_terminal() {
+    let dir = temp("conversation");
+    let mapset = [
+        "NAMEMS   DFHMSD TYPE=&SYSPARM,MODE=INOUT,LANG=COBOL,TIOAPFX=YES",
+        "NAMEM    DFHMDI SIZE=(24,80),LINE=1,COLUMN=1",
+        "         DFHMDF POS=(3,1),LENGTH=5,ATTRB=ASKIP,INITIAL='NAME:'",
+        "NAME     DFHMDF POS=(3,7),LENGTH=12,ATTRB=(UNPROT,IC)",
+        "         DFHMDF POS=(3,20),LENGTH=1,ATTRB=ASKIP",
+        "         DFHMSD TYPE=FINAL",
+        "         END",
+    ];
+    fs::write(dir.join("src/NAMEMS.bms"), mapset.join("\n") + "\n").unwrap();
+    let program = [
+        "       IDENTIFICATION DIVISION.",
+        "       PROGRAM-ID. NAMEPGM.",
+        "       DATA DIVISION.",
+        "       WORKING-STORAGE SECTION.",
+        "       COPY NAMEMS.",
+        "       01 WS-MSG PIC X(12).",
+        "       01 WS-STATE PIC X VALUE 'S'.",
+        "       LINKAGE SECTION.",
+        "       01 DFHCOMMAREA PIC X.",
+        "       PROCEDURE DIVISION.",
+        "           IF EIBCALEN = 0",
+        "               MOVE LOW-VALUES TO NAMEMO",
+        "               EXEC CICS SEND MAP('NAMEM') MAPSET('NAMEMS')",
+        "               ERASE END-EXEC",
+        "               EXEC CICS RETURN TRANSID('NAME')",
+        "               COMMAREA(WS-STATE) END-EXEC",
+        "           END-IF",
+        "           EXEC CICS RECEIVE MAP('NAMEM') MAPSET('NAMEMS')",
+        "               INTO(NAMEMI) END-EXEC",
+        "           MOVE NAMEI TO WS-MSG",
+        "           EXEC CICS WRITEQ TD QUEUE('LOGQ') FROM(WS-MSG)",
+        "           END-EXEC",
+        "           EXEC CICS RETURN END-EXEC.",
+    ];
+    fs::write(dir.join("src/NAMEPGM.cbl"), program.join("\n") + "\n").unwrap();
+    fs::write(dir.join("data/screens"), format!("type 3 8 {MARKER}\nENTER\n")).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_ironwork"))
+        .arg("cics")
+        .arg(dir.join("src/NAMEPGM.cbl"))
+        .args(["--transid", "NAME", "--screens"])
+        .arg(dir.join("data/screens"))
+        .arg("--td")
+        .arg(format!("LOGQ={}", dir.join("data/logq").display()))
+        .arg("--evidence")
+        .arg(dir.join("ev"))
+        .args(["--trace-marker", MARKER])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("task 2: NAME runs NAMEPGM"));
+    assert_eq!(fs::read_to_string(dir.join("data/logq")).unwrap().trim_end(), MARKER);
+    assert_eq!(fs::read_dir(dir.join("ev/runs")).unwrap().count(), 1, "one journal for the conversation");
+    assert_eq!(sinks(&journal(&dir)), vec![("log".to_string(), "NAMEPGM.cbl".to_string(), 21, true)]);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn an_untraced_run_records_no_sinks() {
     let dir = temp("untraced");
     write_program(&dir);

@@ -190,3 +190,46 @@ fn an_abend_in_a_method_names_the_class_source_on_stderr_and_in_the_journal() {
     assert_eq!((field(abend, "file"), field(abend, "line")), (Some("Divider.cbl"), Some("19")), "{abend}");
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn an_abend_names_the_file_and_line_it_happened_at_in_the_program_or_a_library_program() {
+    let dir = temp("abend-file");
+    let failing = |id: &str| {
+        [
+            "       IDENTIFICATION DIVISION.".to_string(),
+            format!("       PROGRAM-ID. {id}."),
+            "       DATA DIVISION.".into(),
+            "       WORKING-STORAGE SECTION.".into(),
+            "       01 WS-A PIC X(3) VALUE '***'.".into(),
+            "       01 WS-N REDEFINES WS-A PIC 9(3).".into(),
+            "       01 WS-T PIC 9(3) VALUE 0.".into(),
+            "       PROCEDURE DIVISION.".into(),
+            "           ADD WS-N TO WS-T.".into(),
+            "           GOBACK.".into(),
+        ]
+        .join("\n")
+            + "\n"
+    };
+    fs::write(dir.join("src/SELFAB.cbl"), failing("SELFAB")).unwrap();
+    fs::write(dir.join("lib/HELPAB.cbl"), failing("HELPAB")).unwrap();
+    fs::write(dir.join("src/CALLAB.cbl"), "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. CALLAB.\n       PROCEDURE DIVISION.\n           CALL 'HELPAB'.\n           GOBACK.\n").unwrap();
+    for (program, file) in [("SELFAB", "SELFAB.cbl"), ("CALLAB", "HELPAB.cbl")] {
+        let ev = dir.join(format!("ev-{program}"));
+        let status = Command::new(env!("CARGO_BIN_EXE_ironwork"))
+            .arg("run")
+            .arg(dir.join(format!("src/{program}.cbl")))
+            .arg("-L")
+            .arg(dir.join("lib"))
+            .arg("--evidence")
+            .arg(&ev)
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert_eq!(status.code(), Some(16));
+        let run = fs::read_dir(ev.join("runs")).unwrap().next().unwrap().unwrap().path();
+        let journal = fs::read_to_string(run).unwrap();
+        let abend = journal.lines().find(|l| field(l, "kind") == Some("abend")).unwrap();
+        assert_eq!((field(abend, "code"), field(abend, "file"), field(abend, "line")), (Some("S0C7"), Some(file), Some("9")), "{program}");
+    }
+    fs::remove_dir_all(dir).unwrap();
+}

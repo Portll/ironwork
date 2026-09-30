@@ -259,13 +259,21 @@ impl Screen {
     }
 
     /// The operator typing `text` (EBCDIC) at an address: it must be in an unprotected field, and
-    /// it sets the field's modified bit. Typing stops at the end of the field.
+    /// it sets the field's modified bit. Typing stops at the end of the field. An unformatted screen
+    /// takes typing anywhere, wrapping at its end.
     pub fn type_at(&mut self, address: usize, text: &[u8]) -> Result<(), String> {
+        let size = self.size();
+        if self.fields().is_empty() {
+            for (i, &b) in text.iter().take(size).enumerate() {
+                self.data[(address + i) % size] = b;
+            }
+            self.cursor = (address + text.len().min(size)) % size;
+            return Ok(());
+        }
         let field = self.field_at(address).ok_or("the screen has no fields")?;
         if field.attribute & PROTECTED != 0 || field.attribute_at == address {
             return Err(format!("row {} column {} is protected", self.position(address).0, self.position(address).1));
         }
-        let size = self.size();
         let offset = (address + size - field.start) % size;
         for (i, &b) in text.iter().take(field.len - offset).enumerate() {
             self.data[(address + i) % size] = b;
@@ -298,7 +306,13 @@ impl Screen {
         }
         let mut out = vec![aid];
         out.extend(encode_address(self.cursor));
-        for f in self.fields().iter().filter(|f| f.attribute & MDT != 0) {
+        let fields = self.fields();
+        // An unformatted screen sends its whole buffer, nulls suppressed, with no buffer addresses.
+        if fields.is_empty() {
+            out.extend(self.data.iter().copied().filter(|&b| b != 0));
+            return out;
+        }
+        for f in fields.iter().filter(|f| f.attribute & MDT != 0) {
             out.push(SBA);
             out.extend(encode_address(f.start));
             out.extend(self.field_data(f).into_iter().filter(|&b| b != 0));
@@ -426,6 +440,8 @@ pub struct Scripted {
     actions: std::collections::VecDeque<Action>,
     page: &'static CodePage,
     pub shown: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+    /// What an AID key sent between two tasks, which the next task's RECEIVE reads.
+    pending: Option<Vec<u8>>,
 }
 
 impl std::fmt::Debug for Scripted {
@@ -436,7 +452,30 @@ impl std::fmt::Debug for Scripted {
 
 impl Scripted {
     pub fn new(rows: usize, columns: usize, actions: Vec<Action>, page: &'static CodePage) -> Self {
-        Self { screen: Screen::new(rows, columns), actions: actions.into(), page, shown: Default::default() }
+        Self { screen: Screen::new(rows, columns), actions: actions.into(), page, shown: Default::default(), pending: None }
+    }
+
+    /// Keeps what an AID key sent for the next RECEIVE, as CICS keeps the input that starts a task.
+    pub fn push_back(&mut self, record: Vec<u8>) {
+        self.pending = Some(record);
+    }
+}
+
+/// A scripted terminal the caller keeps between the tasks of a pseudo-conversation.
+#[derive(Clone, Debug)]
+pub struct SharedScript(pub std::rc::Rc<std::cell::RefCell<Scripted>>);
+
+impl Terminal for SharedScript {
+    fn size(&self) -> (usize, usize) {
+        self.0.borrow().size()
+    }
+
+    fn send(&mut self, stream: &[u8]) -> Result<(), String> {
+        self.0.borrow_mut().send(stream)
+    }
+
+    fn receive(&mut self) -> Result<Option<Vec<u8>>, String> {
+        self.0.borrow_mut().receive()
     }
 }
 
@@ -452,6 +491,9 @@ impl Terminal for Scripted {
     }
 
     fn receive(&mut self) -> Result<Option<Vec<u8>>, String> {
+        if let Some(record) = self.pending.take() {
+            return Ok(Some(record));
+        }
         while let Some(action) = self.actions.pop_front() {
             match action {
                 Action::Type { row, column, text } => {
@@ -508,6 +550,15 @@ mod tests {
         assert_eq!((read.aid, read.cursor), (AID_ENTER, Some(12)));
         assert_eq!(read.fields, vec![(7, page().encode("SMITH").unwrap())]);
         assert_eq!(s.read_modified(AID_CLEAR), vec![AID_CLEAR]);
+    }
+
+    #[test]
+    fn an_unformatted_screen_takes_typing_anywhere_and_sends_its_whole_buffer() {
+        let mut s = Screen::new(24, 80);
+        s.type_at(0, &page().encode("SSC1 HELLO").unwrap()).unwrap();
+        let inbound = s.read_modified(AID_ENTER);
+        assert_eq!(inbound[0], AID_ENTER);
+        assert_eq!(&inbound[3..], page().encode("SSC1 HELLO").unwrap().as_slice());
     }
 
     #[test]

@@ -169,7 +169,8 @@ impl Run {
         }
         if let Some((code, file, line)) = abend {
             let mut f = fields([("code", code.into())]);
-            if let Some(file) = file.filter(|f| !f.is_empty()) {
+            // The program's own source is file 0, which the compile leaves unnamed.
+            if let Some(file) = file.map(|f| if f.is_empty() { self.program.as_str() } else { f }).filter(|f| !f.is_empty() && line > 0) {
                 f.insert("file".into(), relative(Path::new(file), &self.roots).into());
                 f.insert("line".into(), Value::Int(line));
             }

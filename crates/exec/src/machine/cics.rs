@@ -406,6 +406,7 @@ impl<'p> Machine<'p, '_, '_> {
         self.unit.programs[index].active = false;
         self.unit.release_temporaries(mark);
         self.eib_halfword(EIBCALEN, saved);
+        let ending = ending.map_err(|a| self.in_loaded(index, &compiled, a));
         match ending? {
             Ending::StopRun => Ok(Flow::End(Ending::StopRun)),
             _ if xctl => Ok(Flow::End(Ending::Goback)),

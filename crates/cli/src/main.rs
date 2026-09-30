@@ -115,7 +115,9 @@ cics flags:
              a 3270 terminal (24x80) played from a script: `type ROW COL text`, `eof ROW COL`,
              `cursor ROW COL`, and an AID key (ENTER, CLEAR, PA1-PA3, PF1-PF24) ending each turn;
              every screen the task sends is printed when it ends. BMS maps are read from the copy
-             libraries as NAME.bms
+             libraries as NAME.bms. A task that returns TRANSID is followed, on the same screen,
+             by that transaction's task, started by the script's next AID key with the COMMAREA
+             RETURN gave, until a task ends without TRANSID or the script has no key left
   --serve HOST:PORT
              serve TN3270 on the address, one terminal at a time until interrupted, instead of a
              script. The program runs as --transid's first task with no COMMAREA; RETURN TRANSID
@@ -124,12 +126,13 @@ cics flags:
              defined ends the conversation. Each task is its own unit of work. Not with --screens,
              --commarea or --commarea-out
   --transaction TRAN=PROGRAM
-             with --serve, the program a transaction runs: a program of the source, or one found
-             through -L. --transid names the given program; each program compiles once
+             with --serve or --screens, the program a transaction runs: a program of the source,
+             or one found through -L. --transid names the given program; each program compiles
+             once
   --csd path
-             with --serve, the region's transactions from a CICS system definition, as DFHCSDUP
-             reads it: each DEFINE TRANSACTION runs its PROGRAM. --transid and --transaction win
-             over it
+             with --serve or --screens, the region's transactions from a CICS system definition,
+             as DFHCSDUP reads it: each DEFINE TRANSACTION runs its PROGRAM. --transid and
+             --transaction win over it
 job flags:
   --datasets DIR[:text]
              the job's data sets: DSN=A.B is the file DIR/A.B and DSN=A.B(M) the file DIR/A.B/M, a
@@ -705,22 +708,10 @@ fn serve_cics(
     if let Err(e) = cics_task(options, 1) {
         return usage_error(&e);
     }
-    let mut table = std::collections::HashMap::new();
-    if let Some(file) = get("--csd") {
-        match fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|text| syntax::csd::parse(&text).map_err(|e| e.to_string())) {
-            Ok(csd) => table.extend(csd.transactions.into_iter().filter_map(|(tran, t)| Some((tran, t.program?)))),
-            Err(e) => return usage_error(&format!("--csd {file}: {e}")),
-        }
-    }
-    table.insert(get("--transid").unwrap_or_else(|| "TRAN".into()).to_ascii_uppercase(), first.program.id.to_ascii_uppercase());
-    for (_, spec) in options.iter().filter(|(n, _)| n == "--transaction") {
-        match spec.split_once('=') {
-            Some((tran, program)) if !tran.is_empty() && !program.is_empty() => {
-                table.insert(tran.to_ascii_uppercase(), program.to_ascii_uppercase());
-            }
-            _ => return usage_error("--transaction needs TRAN=PROGRAM"),
-        }
-    }
+    let table = match transaction_table(first, options) {
+        Ok(t) => t,
+        Err(e) => return usage_error(&e),
+    };
     library.programs.insert(0, first.program.clone());
     let page = first.options.code_page();
     let listener = match std::net::TcpListener::bind(&address) {
@@ -751,6 +742,27 @@ fn serve_cics(
         }
     }
     ExitCode::SUCCESS
+}
+
+/// The program each transaction runs: --csd's DEFINE TRANSACTIONs, then --transid for the first
+/// program, then each --transaction.
+fn transaction_table(first: &exec::Compiled, options: &[(String, String)]) -> Result<std::collections::HashMap<String, String>, String> {
+    let get = |name: &str| options.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone());
+    let mut table = std::collections::HashMap::new();
+    if let Some(file) = get("--csd") {
+        let csd = fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|text| syntax::csd::parse(&text).map_err(|e| e.to_string())).map_err(|e| format!("--csd {file}: {e}"))?;
+        table.extend(csd.transactions.into_iter().filter_map(|(tran, t)| Some((tran, t.program?))));
+    }
+    table.insert(get("--transid").unwrap_or_else(|| "TRAN".into()).to_ascii_uppercase(), first.program.id.to_ascii_uppercase());
+    for (_, spec) in options.iter().filter(|(n, _)| n == "--transaction") {
+        match spec.split_once('=') {
+            Some((tran, program)) if !tran.is_empty() && !program.is_empty() => {
+                table.insert(tran.to_ascii_uppercase(), program.to_ascii_uppercase());
+            }
+            _ => return Err("--transaction needs TRAN=PROGRAM".into()),
+        }
+    }
+    Ok(table)
 }
 
 /// One terminal's session: pseudo-conversations one after another. Each task borrows the terminal
@@ -856,7 +868,9 @@ fn conversation(
 }
 
 /// Runs the program as a CICS task built from the cics flags; reports RETURN TRANSID and writes
-/// RETURN's COMMAREA where --commarea-out says.
+/// RETURN's COMMAREA where --commarea-out says. With --screens, a task that returns TRANSID is
+/// followed by that transaction's task on the same terminal, started by the script's next AID key,
+/// until one ends without TRANSID or the script has no key left; one journal records them all.
 #[allow(clippy::too_many_arguments)]
 fn run_cics(
     compiled: &exec::Compiled,
@@ -876,9 +890,13 @@ fn run_cics(
         }
         return serve_cics(compiled, library, dds, clock, database, options);
     }
-    if get("--transaction").is_some() || get("--csd").is_some() {
-        return usage_error("--transaction and --csd need --serve");
+    if (get("--transaction").is_some() || get("--csd").is_some()) && get("--screens").is_none() {
+        return usage_error("--transaction and --csd need --serve or --screens");
     }
+    let table = match transaction_table(compiled, options) {
+        Ok(t) => t,
+        Err(e) => return usage_error(&e),
+    };
     let mut task = match cics_task(options, 1) {
         Ok(t) => t,
         Err(e) => return usage_error(&e),
@@ -906,29 +924,72 @@ fn run_cics(
     };
     task.commarea = commarea;
     let mut shown = None;
+    let mut conversation = None;
     if let Some(file) = get("--screens") {
         let script = match fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|t| exec::terminal::parse_script(&t)) {
             Ok(s) => s,
             Err(e) => return usage_error(&format!("--screens {file}: {e}")),
         };
-        let terminal = exec::terminal::Scripted::new(24, 80, script, page);
-        shown = Some(terminal.shown.clone());
-        task.terminal = Some(Box::new(terminal));
+        let terminal = std::rc::Rc::new(std::cell::RefCell::new(exec::terminal::Scripted::new(24, 80, script, page)));
+        shown = Some(terminal.borrow().shown.clone());
+        task.terminal = Some(Box::new(exec::terminal::SharedScript(terminal.clone())));
+        conversation = Some(terminal);
     }
     let print_screens = || {
         for (n, screen) in shown.iter().flat_map(|s| s.borrow().clone()).enumerate() {
             println!("--- screen {} ---\n{screen}", n + 1);
         }
     };
+    let mut library = library;
+    library.programs.insert(0, compiled.program.clone());
+    let mut transactions = Transactions { library, table, compiled: Default::default(), database: database.take() };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
     let shared = evidence.map(|run| std::rc::Rc::new(std::cell::RefCell::new(run)));
-    let observer = shared.clone().map(|run| Box::new(move |event: exec::unit::Event<'_>| run.borrow_mut().observe(event)) as exec::unit::Observer<'_>);
-    let ran = compiled.execute_cics_observed(library, dds, task, clock, database.as_deref_mut(), &mut out, &mut err, observer);
+    let mut current: Option<std::rc::Rc<exec::Compiled>> = None;
+    let mut number = 1;
+    let ran = loop {
+        let program = current.as_deref().unwrap_or(compiled);
+        let observer = shared.clone().map(|run| Box::new(move |event: exec::unit::Event<'_>| run.borrow_mut().observe(event)) as exec::unit::Observer<'_>);
+        let ran = program.execute_cics_observed(transactions.library.clone(), dds.clone(), task, clock, transactions.database.as_deref_mut(), &mut out, &mut err, observer);
+        let (Some(terminal), Ok((_, ended))) = (&conversation, &ran) else { break ran };
+        let Some(next) = ended.next_transid.as_deref().map(|t| t.trim().to_ascii_uppercase()) else { break ran };
+        let record = match exec::terminal::Terminal::receive(&mut *terminal.borrow_mut()) {
+            Ok(Some(r)) => r,
+            Ok(None) => break ran,
+            Err(e) => {
+                eprintln!("ironwork: {e}");
+                break ran;
+            }
+        };
+        let Some(name) = transactions.table.get(&next).cloned() else {
+            eprintln!("ironwork: TRANSACTION {next} IS NOT DEFINED");
+            break ran;
+        };
+        match transactions.program(&name) {
+            Ok(c) => current = Some(c),
+            Err(e) => {
+                eprintln!("ironwork: {next}: {e}");
+                break ran;
+            }
+        }
+        number += 1;
+        task = match cics_task(options, number) {
+            Ok(t) => t,
+            Err(e) => return usage_error(&e),
+        };
+        eprintln!("ironwork: task {number}: {next} runs {name}");
+        task.transid = next;
+        task.commarea = ended.returned_commarea.clone();
+        task.initial_aid = record.first().copied();
+        terminal.borrow_mut().push_back(record);
+        task.terminal = Some(Box::new(exec::terminal::SharedScript(terminal.clone())));
+    };
     drop(out);
     print_screens();
+    let compiled = current.as_deref().unwrap_or(compiled);
     if let Some(run) = shared.and_then(|r| std::rc::Rc::try_unwrap(r).ok()) {
         let abend = ran.as_ref().err().filter(|a| !matches!(a.code, AbendCode::Signal(Signal::ClosedOutput)));
-        let file = abend.and_then(|a| compiled.program.sources.get(a.pos.file as usize)).map(String::as_str);
+        let file = abend.and_then(|a| abend_file(compiled, a));
         let journal = run.into_inner().end(abend.map(|a| (a.code.to_string(), file, i64::from(a.pos.line))));
         evidence::finish(Some(journal), if abend.is_some() { 16 } else { 0 });
     }

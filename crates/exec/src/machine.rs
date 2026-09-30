@@ -818,6 +818,20 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         self.unit.notify(Event::Sink { kind, file, line: pos.line, operand });
     }
 
+    /// An abend from a program CALL or LINK loaded from a library, named by that program's files,
+    /// which the caller's file table would misname.
+    pub(crate) fn in_loaded(&self, index: usize, compiled: &Compiled, mut abend: Abend) -> Abend {
+        if abend.file.is_none()
+            && let Some(source) = &self.unit.programs[index].source
+        {
+            abend.file = Some(match abend.pos.file {
+                0 => source.display().to_string(),
+                i => compiled.program.sources.get(i as usize).cloned().unwrap_or_default(),
+            });
+        }
+        abend
+    }
+
     /// The bytes a CALL passes, one argument after another, as the code page reads them.
     fn arguments_text(&mut self, c: &Call) -> R<String> {
         let mut text = String::new();
@@ -919,6 +933,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
         self.unit.release_temporaries(mark);
         let (ending, returned) = outcome;
+        let ending = ending.map_err(|a| self.in_loaded(index, &compiled, a));
         if ending? == Ending::StopRun {
             return Ok(Flow::End(Ending::StopRun));
         }

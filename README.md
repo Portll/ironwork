@@ -315,17 +315,18 @@ The subset the interpreter runs today:
   FORMATTIME, ASSIGN, GETMAIN, FREEMAIN, ADDRESS, SYNCPOINT, ENQ, DEQ, DELAY, SEND TEXT and WRITE
   OPERATOR; temporary-storage and transient-data queues; and file control over VSAM KSDS and RRDS
   files (READ with GENERIC, GTEQ and UPDATE, WRITE, REWRITE, DELETE, UNLOCK, and browsing with
-  STARTBR, READNEXT, READPREV, RESETBR and ENDBR). The task ends with RETURN TRANSID's COMMAREA
-  written out, so a pseudo-conversation runs one task at a time.
+  STARTBR, READNEXT, READPREV, RESETBR and ENDBR). Without a screen script the task ends with
+  RETURN TRANSID's COMMAREA written out, so a pseudo-conversation runs one task at a time.
 - **BMS maps and a 3270 terminal.** COPY of a mapset reads `NAME.bms` (DFHMSD, DFHMDI, DFHMDF) from
   the copy libraries and gives the symbolic map the BMS assembly would; DFHAID and DFHBMSCA carry
   their values. SEND MAP (ERASE, MAPONLY, DATAONLY, CURSOR, symbolic cursor, FREEKB, ALARM, FRSET),
   RECEIVE MAP (MAPFAIL, JUSTIFY, EIBAID, EIBCPOSN), SEND CONTROL and RECEIVE work on a 3270
   display that speaks the 3270 data stream. `--screens FILE` plays an operator from a script
   (`type ROW COL text`, `eof`, `cursor`, then an AID key) and prints every screen; `--serve
-  HOST:PORT` is a TN3270 server a 3270 emulator such as c3270 or x3270 connects to, running
-  pseudo-conversations task after task (`--transaction TRAN=PROGRAM` names the programs RETURN
-  TRANSID leads to, and `--csd FILE` takes them from the region's DEFINE TRANSACTIONs).
+  HOST:PORT` is a TN3270 server a 3270 emulator such as c3270 or x3270 connects to. Both run
+  pseudo-conversations task after task on one screen (`--transaction TRAN=PROGRAM` names the
+  programs RETURN TRANSID leads to, and `--csd FILE` takes them from the region's DEFINE
+  TRANSACTIONs); a script's next AID key starts the next task.
   The choices made without a z/OS to observe are assumptions C28 to C33.
 - **Language Environment callable services:** a CALL that finds no program of the name reaches
   the service. CEE3ABD ends the run with user abend U*abcode*; CEEDAYS, CEEDATE, CEEDATM,
