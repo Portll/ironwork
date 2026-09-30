@@ -56,10 +56,11 @@ fn fixed(value: i128, int: u32, dec: u32) -> Fixed {
 const SIGN: SignClause = SignClause { position: SignPosition::Trailing, separate: true };
 const PACKED: StorePlan = StorePlan::Packed { digits: 9, scale: 2, signed: true };
 const ODO: Odo = Odo { object: IntExpr::Item(3), max: 50, element: 12, check: true };
-const REFMOD: RefMod = RefMod { start: IntExpr::Const(2), length: Some(IntExpr::Fixed { expr: 4, dmax: 0 }), check: false };
+const REFMOD: RefMod = RefMod { start: IntExpr::Const(2), length: Some(IntExpr::Fixed { expr: 4, dmax: 0, prepass: Vec::new() }), check: false };
 const ALNUM: MovePlan = MovePlan::Alnum { image: Image::Bytes, justified: false };
 const FILL: MovePlan = MovePlan::Alnum { image: Image::Figurative, justified: false };
 const TALLY: StepPlan = StepPlan { dmax: 0, store: PACKED };
+const FLOAT_EXPR: Comparand = Comparand::Expr { expr: 1, dmax: 0, mode: Mode::Float(Precision::Long), prepass: Vec::new() };
 const INTEGER: HostType = HostType::Integer { signed: true };
 
 #[test]
@@ -179,13 +180,27 @@ fn abend_codes_round_trip_with_every_tag() {
         FileStatus::NotOpenInputOutput,
     ];
     every_variant(&statuses, 21);
-    round_trip(&[AbendText { code: AbendCode::Exec, message: 9 }]);
+    round_trip(&[AbendText { code: AbendCode::Exec, message: 9, at: None }, AbendText { code: AbendCode::Ironwork, message: 2, at: Some(4) }]);
+}
+
+/// A sequence that puts X'C1' and X'81' first, sharing a position, then every other byte in EBCDIC order.
+fn letters_first() -> Sequence {
+    let order: Vec<u8> = [0xC1, 0x81].into_iter().chain((0..=255u8).filter(|b| ![0xC1, 0x81].contains(b))).collect();
+    let mut positions = Box::new([0u8; 256]);
+    for (k, &b) in order.iter().enumerate() {
+        positions[usize::from(b)] = k.saturating_sub(1) as u8;
+    }
+    let characters = std::iter::once(0xC1).chain(order[2..].iter().copied()).collect();
+    Sequence { positions, characters, high_value: 0xFF, low_value: 0xC1 }
 }
 
 #[test]
 fn program_shape_round_trips() {
-    let options = ProgramOptions { options: Options::default(), ssrange: true, dynam: true, cards: vec!["TRUNC(OPT)".into(), "SSR".into()] };
-    round_trip(&[options]);
+    let cards = vec!["TRUNC(OPT)".into(), "SSR".into()];
+    let options = ProgramOptions { options: Options::default(), ssrange: true, dynam: true, cards, collating: Collating::Native };
+    let sequenced = ProgramOptions { collating: Collating::Sequence(letters_first()), ..options.clone() };
+    round_trip(&[options, sequenced]);
+    every_variant(&[Collating::Native, Collating::Sequence(letters_first())], 2);
     let storage = Storage {
         size: 3,
         image: vec![0x40, 0xF0, 0x0C],
@@ -264,12 +279,28 @@ fn a_slab_size_that_differs_from_its_image_is_malformed() {
 }
 
 #[test]
+fn a_collating_sequence_that_is_not_one_is_malformed() {
+    let refusal = |sequence: Sequence| {
+        let (bytes, strings) = encoded(&sequence);
+        refused::<Sequence>(&bytes, &strings).1
+    };
+    let short = Sequence { characters: letters_first().characters[..254].to_vec(), ..letters_first() };
+    assert_eq!(refusal(short), "X'FF' at position 254 of a sequence of 254");
+    let mut characters = letters_first().characters;
+    characters[1] = 0x81;
+    assert_eq!(refusal(Sequence { characters, ..letters_first() }), "character 1 of the sequence, X'81', is at position 0");
+    assert_eq!(refusal(Sequence { high_value: 0xC1, ..letters_first() }), "HIGH-VALUE X'C1' or LOW-VALUE X'C1' is not at the sequence's end");
+    let also_first = Sequence { characters: [&[0x81][..], &letters_first().characters[1..]].concat(), low_value: 0x81, ..letters_first() };
+    round_trip(&[also_first]);
+}
+
+#[test]
 fn places_round_trip_with_every_base() {
     let bases =
         [Base::Program, Base::Local, Base::Linkage(2), Base::ReturnCode, Base::Eib, Base::SelfRef, Base::JniEnv];
     every_variant(&bases, 7);
     let subscript = Subscript { stride: 12, value: IntExpr::Item(1), check: Some(50) };
-    round_trip(&[subscript, Subscript { stride: 4, value: IntExpr::Const(-1), check: None }]);
+    round_trip(&[subscript.clone(), Subscript { stride: 4, value: IntExpr::Const(-1), check: None }]);
     round_trip(&[ODO, Odo { check: false, ..ODO }]);
     round_trip(&[REFMOD, RefMod { length: None, ..REFMOD }]);
     let place = Place {
@@ -277,7 +308,7 @@ fn places_round_trip_with_every_base() {
         offset: 16,
         len: 12,
         kind: Kind::Alnum { justified: false },
-        subscripts: vec![subscript, subscript],
+        subscripts: vec![subscript.clone(), subscript],
         odo: Some(ODO),
         refmod: Some(REFMOD),
         name: 3,
@@ -299,13 +330,14 @@ fn values_and_conditions_round_trip_with_every_tag() {
         Const::All(vec![]),
     ];
     every_variant(&consts, 5);
-    every_variant(&[IntExpr::Const(i64::MIN), IntExpr::Item(0), IntExpr::Fixed { expr: 2, dmax: 3 }], 3);
+    every_variant(&[IntExpr::Const(i64::MIN), IntExpr::Item(0), IntExpr::Fixed { expr: 2, dmax: 3, prepass: vec![1, 4] }], 3);
     let exprs = [Expr::Operand(Operand::Load(0)), Expr::Neg(0), Expr::Bin(0, BinOp::Div, 1), Expr::Pow(1, IntExpr::Const(2))];
     every_variant(&exprs, 4);
     let conds = [
-        Cond::Rel { a: Comparand::Operand(Operand::Load(0)), op: RelOp::Ge, b: Comparand::Expr(3), how: Compare::Fixed },
+        Cond::Rel { a: Comparand::Operand(Operand::Load(0)), op: RelOp::Ge, b: Comparand::Expr { expr: 3, dmax: 2, mode: Mode::Fixed, prepass: vec![0, 5] }, how: Compare::Fixed },
         Cond::Class { place: 1, test: ByteClass::Packed { signed: true } },
-        Cond::Sign { value: 2, test: SignTest::Negative },
+        Cond::Sign { value: Comparand::Operand(Operand::Load(2)), test: SignTest::Negative },
+        Cond::Sign { value: FLOAT_EXPR, test: SignTest::Zero },
         Cond::Name { subject: 0, values: vec![(1, None), (2, Some(3))], how: Compare::Alphanumeric },
         Cond::Not(0),
         Cond::And(0, 1),
@@ -315,7 +347,7 @@ fn values_and_conditions_round_trip_with_every_tag() {
         Cond::Sql(SqlTest::NotFound),
     ];
     every_variant(&conds, 10);
-    every_variant(&[Comparand::Operand(Operand::Const(0)), Comparand::Expr(1)], 2);
+    every_variant(&[Comparand::Operand(Operand::Const(0)), FLOAT_EXPR], 2);
     let compares = [
         Compare::PackedPfd,
         Compare::Address,
@@ -373,7 +405,7 @@ fn control_flow_round_trips_with_every_tag() {
         Op::Arith(0),
         Op::SetAddress { record: 1, address: Operand::AddressOf(2) },
         Op::SetUpDown { target: 1, by: IntExpr::Const(-2), down: true, plan: StepPlan { dmax: 0, store: StorePlan::Index } },
-        Op::Step { var: 1, by: 0, plan: StepPlan { dmax: 0, store: PACKED } },
+        Op::Step { var: 1, by: 0, plan: StepPlan { dmax: 0, store: PACKED }, prepass: vec![2, 3] },
         Op::SetInt { target: 1, value: IntExpr::Const(1) },
         Op::Inspect(0),
         Op::String(0),
@@ -415,7 +447,8 @@ fn control_flow_round_trips_with_every_tag() {
     every_variant(&[RangeKind::Perform, RangeKind::SortProcedure, RangeKind::UseBeforeReporting], 3);
     let kinds = [FrameKind::Main, FrameKind::Perform, FrameKind::SortProcedure, FrameKind::UseBeforeReporting { at: 4 }];
     every_variant(&kinds, 4);
-    round_trip(&[Frame { first: 0, last: 9, kind: FrameKind::Main, ret: 0, depth: 0 }, Frame { first: 2, last: 3, kind: kinds[3], ret: 5, depth: 2 }]);
+    let main = Frame { first: 0, last: 9, kind: FrameKind::Main, ret: 0, depth: 0, temps: vec![] };
+    round_trip(&[main, Frame { first: 2, last: 3, kind: kinds[3], ret: 5, depth: 2, temps: vec![3, 0, -1] }]);
     every_variant(&[Ending::Goback, Ending::StopRun, Ending::EndOfProgram], 3);
     let accepts = [
         AcceptFrom::Sysin,
@@ -514,8 +547,8 @@ fn initialize_display_and_search_all_round_trip_with_every_tag() {
     ];
     every_variant(&items, 6);
     round_trip(&[DisplayPlan { items: items.to_vec(), no_advancing: true }, DisplayPlan { items: vec![], no_advancing: false }]);
-    let key = SearchKey { ascending: true, key: Comparand::Operand(Operand::Load(5)), value: Comparand::Expr(2), how: Compare::Alphanumeric };
-    let descending = SearchKey { ascending: false, how: Compare::Refused(1), ..key };
+    let key = SearchKey { ascending: true, key: Comparand::Operand(Operand::Load(5)), value: FLOAT_EXPR, how: Compare::Alphanumeric };
+    let descending = SearchKey { ascending: false, how: Compare::Refused(1), ..key.clone() };
     let plan = SearchAllPlan { index: 6, store: StorePlan::Index, count: Count::Odo(ODO), keys: vec![key, descending] };
     let fixed = SearchAllPlan { count: Count::Fixed(20), keys: vec![], ..plan.clone() };
     round_trip(&[plan, fixed]);

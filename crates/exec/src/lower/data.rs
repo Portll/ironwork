@@ -4,7 +4,7 @@ use super::{Lower, R, is_static, push, unsupported};
 use crate::layout::Resolved;
 use crate::machine::literal_fixed;
 use numeric::precision::Fixed;
-use rt::lir::{self, ConstId, ExprId, IntExpr, PlaceId};
+use rt::lir::{self, Comparand, ConstId, ExprId, IntExpr, Mode, PlaceId};
 use rt::storage::Kind;
 use syntax::Pos;
 use syntax::ast::{BinOp, Expr, Figurative, Literal, Operand, Ref};
@@ -225,9 +225,37 @@ impl Lower<'_> {
             }
             _ => {}
         }
-        self.prepass_safe(e, pos)?;
         let dmax = self.dmax(e)?;
-        Ok(IntExpr::Fixed { expr: self.expr(e, pos)?, dmax })
+        let prepass = self.dmax_places(e)?;
+        Ok(IntExpr::Fixed { expr: self.expr(e, pos)?, dmax, prepass })
+    }
+
+    /// An expression other than an operand, as `Machine::expr_value` evaluates it: the float test
+    /// locates operands up to the first floating-point one, then a fixed-point expression's dmax pass
+    /// locates its operands again.
+    pub(super) fn computed(&mut self, e: &Expr, pos: Pos) -> R<Comparand> {
+        let mut prepass = self.float_probe(e)?;
+        let (mode, dmax) = if self.uses_float(e)? {
+            (Mode::Float(self.c.options.arith.float_intermediate()), 0)
+        } else {
+            prepass.extend(self.dmax_places(e)?);
+            (Mode::Fixed, self.dmax(e)?)
+        };
+        Ok(Comparand::Expr { expr: self.expr(e, pos)?, dmax, mode, prepass })
+    }
+
+    /// The places `Machine::dmax` locates, in its order, static ones left out.
+    pub(super) fn dmax_places(&mut self, e: &Expr) -> R<Vec<PlaceId>> {
+        let mut refs = Vec::new();
+        dmax_refs(e, &mut refs);
+        let mut places = Vec::new();
+        for r in refs {
+            let p = self.place(r, false)?;
+            if !self.is_static(p) {
+                places.push(p);
+            }
+        }
+        Ok(places)
     }
 
     /// The walker's `dmax`: the most decimal places among the operands, divisors and exponents aside.
@@ -277,23 +305,6 @@ impl Lower<'_> {
             }
         }
         Ok(probe)
-    }
-
-    /// The walker locates an expression's operands in a pre-pass (`dmax`, `uses_float`) before it
-    /// evaluates them, and only `ArithPlan` records that pre-pass. Elsewhere the order is kept only
-    /// where it cannot show: every operand after the first is a place that cannot abend.
-    pub(super) fn prepass_safe(&mut self, e: &Expr, pos: Pos) -> R<()> {
-        let mut ops = Vec::new();
-        leaves(e, &mut ops);
-        for op in ops.into_iter().skip(1) {
-            if let Operand::Ref(r) = op {
-                let p = self.place(r, false)?;
-                if !self.is_static(p) {
-                    return unsupported("an expression whose later operand can abend when located (no pre-pass outside ArithPlan)", pos);
-                }
-            }
-        }
-        Ok(())
     }
 
     pub(super) fn expr(&mut self, e: &Expr, pos: Pos) -> R<ExprId> {

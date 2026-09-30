@@ -5,7 +5,7 @@ use super::data::{Side, Value};
 use super::{Lower, LowerError, R, push};
 use crate::layout::Resolved;
 use numeric::Numproc;
-use rt::lir::{self, AbendId, ByteClass, Comparand, Compare, CondId, SignTest};
+use rt::lir::{self, AbendId, ByteClass, Comparand, Compare, CondId, Mode, SignTest};
 use rt::storage::Kind;
 use syntax::Pos;
 use syntax::ast::{Class, Cond, Expr, Figurative, Operand, Ref, RelOp};
@@ -91,9 +91,12 @@ impl Lower<'_> {
             let lowered = self.operand(op, pos)?;
             return Ok((Comparand::Operand(lowered.operand), lowered.side));
         }
-        self.prepass_safe(e, pos)?;
-        let value = if self.uses_float(e)? { Value::Float } else { Value::Num(None) };
-        Ok((Comparand::Expr(self.expr(e, pos)?), Side { value, src: None, digits: 0 }))
+        let computed = self.computed(e, pos)?;
+        let value = match computed {
+            Comparand::Expr { mode: Mode::Float(_), .. } => Value::Float,
+            _ => Value::Num(None),
+        };
+        Ok((computed, Side { value, src: None, digits: 0 }))
     }
 
     /// The branch of `Machine::compare` two operands take, decided by what each reads as.
@@ -140,10 +143,10 @@ impl Lower<'_> {
             };
             return Ok(Test::Cond(self.cond(lir::Cond::Class { place, test })?));
         }
-        if !matches!(e, Expr::Operand(_)) {
-            self.prepass_safe(e, pos)?;
-        }
-        let value = self.expr(e, pos)?;
+        let value = match e {
+            Expr::Operand(op) => Comparand::Operand(self.operand(op, pos)?.operand),
+            _ => self.computed(e, pos)?,
+        };
         let test = match class {
             Class::Positive => SignTest::Positive,
             Class::Negative => SignTest::Negative,
@@ -198,11 +201,10 @@ impl Lower<'_> {
             return Ok(Test::Cond(self.cond(lir::Cond::Name { subject, values, how })?));
         }
         // Values of different categories: each compared as the walker compares it, in its order.
-        let load = Comparand::Operand(lir::Operand::Load(subject));
         let mut hows = hows.into_iter();
         let mut rel = |lower: &mut Self, op: RelOp, value| -> R<Test> {
             let how = hows.next().unwrap_or(how);
-            Ok(Test::Cond(lower.cond(lir::Cond::Rel { a: load, op, b: Comparand::Operand(lir::Operand::Const(value)), how })?))
+            Ok(Test::Cond(lower.cond(lir::Cond::Rel { a: Comparand::Operand(lir::Operand::Load(subject)), op, b: Comparand::Operand(lir::Operand::Const(value)), how })?))
         };
         let mut alternatives = Vec::new();
         for (low, high) in values {

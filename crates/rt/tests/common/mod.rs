@@ -69,7 +69,7 @@ pub fn payroll() -> Program {
         },
         Block { ops: vec![], end: Terminator::Branch { cond: 0, then: 2, otherwise: 4 } },
         Block { ops: vec![Op::DecTemp(0)], end: Terminator::PerformEnter { range: 0, ret: 3 } },
-        Block { ops: vec![Op::Step { var: WS_I, by: 3, plan: step_i }], end: Terminator::Jump(1) },
+        Block { ops: vec![Op::Step { var: WS_I, by: 3, plan: step_i, prepass: vec![] }], end: Terminator::Jump(1) },
         Block { ops: vec![Op::Unnest(1)], end: Terminator::End(Ending::StopRun) },
         Block { ops: vec![Op::Arith(0)], end: Terminator::Select(vec![6, 7]) },
         Block { ops: vec![], end: Terminator::Jump(8) },
@@ -115,7 +115,7 @@ pub fn payroll() -> Program {
 
     Program {
         id: 0,
-        options: ProgramOptions { options: Options::default(), ssrange: true, dynam: false, cards: vec!["SSRANGE".into()] },
+        options: ProgramOptions { options: Options::default(), ssrange: true, dynam: false, cards: vec!["SSRANGE".into()], collating: Collating::Native },
         initial: false,
         recursive: false,
         storage,

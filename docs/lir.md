@@ -103,7 +103,28 @@ pub struct Program {
 /// Fixed at compile time (codegen-runtime.md §10, invariant 7). `ssrange` is `Compiled.ssrange`
 /// (exec/src/lib.rs:29). `dynam` makes a literal CALL resolve at run time, as the walker does every
 /// CALL (load-module.md §8.3). `cards` are the CBL and PROCESS cards as written (ast.rs:7).
-pub struct ProgramOptions { pub options: numeric::Options, pub ssrange: bool, pub dynam: bool, pub cards: Vec<String> }
+/// `collating` is `Compiled.collating` (exec/src/lib.rs, after 79a199e).
+pub struct ProgramOptions {
+    pub options: numeric::Options, pub ssrange: bool, pub dynam: bool, pub cards: Vec<String>,
+    pub collating: Collating,
+}
+
+/// The sequence PROGRAM COLLATING SEQUENCE names, from an ALPHABET clause of SPECIAL-NAMES, as
+/// `collating::Sequence` builds it (exec/src/collating.rs, after 79a199e): alphanumeric comparisons,
+/// HIGH-VALUE and LOW-VALUE, FUNCTION CHAR and ORD, and a file SORT without its own COLLATING
+/// SEQUENCE phrase follow it.
+pub enum Collating {
+    /// EBCDIC, and an ALPHABET of EBCDIC or NATIVE: each byte its own position, HIGH-VALUE X'FF',
+    /// LOW-VALUE X'00'.
+    Native,
+    Sequence(Sequence),
+}
+
+/// `positions` gives each byte's position from 0, characters that collate equal (ALSO) sharing one;
+/// `characters` the first character given each position, which CHAR returns (ORD is a byte's
+/// position + 1); HIGH-VALUE is the last character of the highest position, LOW-VALUE the first of
+/// the lowest.
+pub struct Sequence { pub positions: Box<[u8; 256]>, pub characters: Vec<u8>, pub high_value: u8, pub low_value: u8 }
 
 pub struct Storage {
     /// The slab's size (`Layout.size`), then the slab and LOCAL-STORAGE as VALUE clauses leave them.
@@ -127,8 +148,10 @@ pub struct Item {
     pub depending_on: Option<u32>, pub keys: Vec<(bool, u32)>, pub at: DebugId,
 }
 
-/// `code` is the typed abend code of semantics-library.md §7, DRY-3.
-pub struct AbendText { pub code: AbendCode, pub message: SymId }
+/// `code` is the typed abend code of semantics-library.md §7, DRY-3. `at` is None where the op or
+/// terminator that raises the abend gives its position (§10), and the failing data entry's
+/// position for `Storage.init_abend`, which no op raises.
+pub struct AbendText { pub code: AbendCode, pub message: SymId, pub at: Option<DebugId> }
 
 /// `section_end` is the last paragraph of its section (exec/src/lib.rs:99-103).
 pub struct Paragraph { pub name: SymId, pub is_section: bool, pub entry: BlockId, pub section_end: ParaId, pub at: DebugId }
@@ -136,9 +159,14 @@ pub struct Block { pub ops: Vec<Op>, pub end: Terminator }
 ```
 
 - **The initial image is exact.** VALUE initialization (machine.rs:230-244) depends only on
-  literals, kinds and options, so lowering runs it once and keeps the bytes, the TRUNC(OPT) reports
-  it printed (numeric/src/binary.rs:57-69) and any abend, with the bytes as they stand at it. The
-  VM replays them at each fresh activation (machine.rs:198-227).
+  literals, kinds, options and the collating sequence, so lowering runs it once and keeps the
+  bytes, the TRUNC(OPT) reports it printed (numeric/src/binary.rs:57-69) and any abend, with the
+  bytes as they stand at it and the position of the data entry it names. The VM replays them at
+  each fresh activation (machine.rs:198-227).
+- **The collating sequence is data.** Lowering keeps `Compiled.collating` whole, so an executor
+  compares, fills HIGH-VALUE and LOW-VALUE and answers CHAR and ORD without the ALPHABET clause.
+  A load module's OPTIONS section holds it after the cards; load-module.md §5.1 does not list it
+  yet.
 - **No literal text reaches run time.** Lowering parses every numeric literal (`Const::Number`,
   §6); VALUE clauses reach the runtime only as the image, and 88-level values as constants of
   `Cond::Name`. The item table records DEPENDING ON objects and keys; places evaluate them (§5.4).
@@ -233,7 +261,8 @@ reference-modification start, then length (default: to the end), then its check;
 bound. The checks are library functions over the evaluated integers, which `locate` and the VM both
 call (semantics-library.md §8, E10b). The DEPENDING ON object is an `IntExpr` because the walker
 evaluates it as an expression (machine.rs:598), so an object written with subscripts lowers as the
-walker runs it.
+walker runs it. Each `IntExpr::Fixed` among them locates its `prepass` before it is evaluated
+(§7.5), so a place nested in a subscript is evaluated in the walker's order too.
 
 A place is **static** when its base is Program, Local or ReturnCode and it has no subscripts, no
 OCCURS DEPENDING ON and no reference modification. It cannot abend, and its address is the
@@ -265,7 +294,8 @@ pub enum Operand {
 pub enum Const { Bytes(Vec<u8>), National(Vec<u8>), Number(Fixed), Figurative(Figurative), All(Vec<u8>) }
 
 /// A subscript, bound, TIMES count or exponent, as `integer()` gives it (machine.rs:613-619).
-pub enum IntExpr { Const(i64), Item(PlaceId), Fixed { expr: ExprId, dmax: u32 } }
+/// `Fixed` locates each place of `prepass`, then evaluates `expr` with `dmax` (§7.5).
+pub enum IntExpr { Const(i64), Item(PlaceId), Fixed { expr: ExprId, dmax: u32, prepass: Vec<PlaceId> } }
 
 pub enum Expr {
     Operand(Operand), Neg(ExprId), Bin(ExprId, BinOp, ExprId),
@@ -277,8 +307,9 @@ pub enum Cond {
     Rel { a: Comparand, op: RelOp, b: Comparand, how: Compare },
     /// NUMERIC or ALPHABETIC of a data item: a byte test chosen by its kind (machine.rs:1825-1839).
     Class { place: PlaceId, test: ByteClass },
-    /// POSITIVE, NEGATIVE, ZERO, and a class test of anything but a data item (machine.rs:1840-1849).
-    Sign { value: ExprId, test: SignTest },
+    /// POSITIVE, NEGATIVE, ZERO, and a class test of anything but a data item (machine.rs:1840-1849):
+    /// an operand's value as it reads, or an expression's as `Comparand::Expr` evaluates it.
+    Sign { value: Comparand, test: SignTest },
     /// A level-88 name: equal to any value, or within any THRU pair (machine.rs:1791-1820).
     Name { subject: PlaceId, values: Vec<(ConstId, Option<ConstId>)>, how: Compare },
     Not(CondId),
@@ -293,7 +324,12 @@ pub enum Cond {
 }
 
 /// An operand keeps its place for the comparison; an expression does not (machine.rs:1906-1911).
-pub enum Comparand { Operand(Operand), Expr(ExprId) }
+/// `Expr` is `expr_value`'s evaluation, fixed at lowering: `prepass` holds the places its float
+/// test and, in `Mode::Fixed`, its dmax pass locate, and `dmax` is 0 in `Mode::Float` (§7.5).
+pub enum Comparand {
+    Operand(Operand),
+    Expr { expr: ExprId, dmax: u32, mode: Mode, prepass: Vec<PlaceId> },
+}
 
 /// The branch of `compare` (machine.rs:1852-1894) the two sides take, fixed by their kinds:
 /// packed bytes under NUMPROC(PFD); addresses; extended float when either side is COMP-1 or
@@ -306,11 +342,23 @@ pub enum Count { Fixed(u32), Odo(Odo) }
 ```
 
 - **Subscripts and bounds** are `IntExpr`: a literal is `Const`, a plain integer item `Item`, and
-  anything else `Fixed`, its dmax found at lowering rather than on every call (machine.rs:614).
+  anything else `Fixed`, its dmax and the places its dmax pass locates found at lowering rather
+  than on every call (machine.rs:614).
+- **Sign conditions.** The walker reads an operand directly and evaluates anything else with
+  `expr_value`, so an operand stays `Comparand::Operand`, read as its kind: ZERO or an
+  alphanumeric item keeps the walker's sign-condition abend rather than arithmetic's.
 - **Condition-names.** `Name` holds the conditional variable's place, with the 88-level reference's
   subscripts, and each VALUE as a constant, a THRU pair as `(low, Some(high))`. The walker reads the
   subject once per value (machine.rs:1806-1818) and the VM once, with the same result, since nothing
   is stored between. SET TO TRUE moves the first value's low end (machine.rs:1132-1137).
+- **Condition-names of mixed categories.** `Name` has one `Compare` for all its values. When the
+  values take different branches of `compare` (a numeric subject with the values ZERO and SPACE,
+  say), lowering writes the test out as the walker runs it: an `Or` of one alternative
+  per value, in the order of the VALUE clause, each `Rel { Load(subject) = value }` or, for a THRU
+  pair, `And(Rel ≥ low, Rel ≤ high)`, each with its own `Compare`. `Or` and `And` evaluate left to
+  right and stop at the first alternative that holds, as the walker's loop returns at its first hit,
+  so the reads, the abends (a `Compare::Refused` value abends only when reached) and the result are
+  the walker's.
 - **Abbreviated relations.** `Cond::NameOrRel` (syntax/src/ast.rs:283-285), decided at run time by
   what the name resolves to (machine.rs:1787-1790), lowers to `Name` or `Rel`.
 - **Arithmetic expressions** are `Expr` trees for `eval_fixed` and `eval_float`
@@ -409,6 +457,30 @@ gives and what storage holds at it. The plans keep them:
 
 Static places cannot abend, and are left out of both lists.
 
+### 7.5 The same passes outside a statement's plan
+
+The walker makes the same passes wherever it evaluates an expression, not only in the arithmetic
+verbs, and the types that hold those expressions keep them the same way: a `prepass` list, in the
+walker's order, static places left out, which an executor evaluates to `Loc`s and discards before it
+evaluates the expression. Without it, an operand whose locate abends (an SSRANGE subscript, an
+unbound LINKAGE record, invalid data in a subscript) would abend after an earlier operand was read,
+rather than before.
+
+| Where | The walker | `prepass` | dmax and mode |
+|---|---|---|---|
+| `IntExpr::Fixed`: a subscript, reference-modification bound, DEPENDING ON object, TIMES count or exponent | `integer`: the dmax pass, then `eval_fixed` (machine.rs:613-619) | The dmax pass's places | `dmax`; always fixed |
+| `Comparand::Expr`: an expression compared | `expr_value`: the float test, then for a fixed-point expression the dmax pass (machine.rs:1382-1391, 1400-1417) | The float test's places, then in `Mode::Fixed` the dmax pass's, so a place both reach is listed twice | `dmax`, 0 in `Mode::Float`; `mode` as `ArithStep.mode` |
+| `Cond::Sign` of an expression | `class`, through `expr_value` (machine.rs:1840-1849) | As `Comparand::Expr`, which it holds | As `Comparand::Expr` |
+| `Op::Step`: PERFORM VARYING's increment | Locates the variable, then the dmax pass over variable + BY, then `eval_fixed` (machine.rs:517-521) | The places of BY's dmax pass, located after the variable | `StepPlan.dmax`; always fixed |
+
+- **The dmax pass** locates every operand of the expression except divisors and exponents, left to
+  right (`dmax_refs`); **the float test** every operand, left to right, up to and including the
+  first floating-point one.
+- **An exponent in float mode.** `eval_float` evaluates an exponent as a float and then abends
+  (machine.rs:1483), so it never makes the exponent's own dmax pass: in `Mode::Float` an executor
+  evaluates `Pow`'s `IntExpr::Fixed` exponent as a float expression and does not locate its
+  `prepass`.
+
 ## 8. Control flow
 
 ### 8.1 Ops, terminators and ranges
@@ -420,8 +492,9 @@ pub enum Op {
     Arith(ArithId),
     SetAddress { record: u16, address: Operand },
     SetUpDown { target: PlaceId, by: IntExpr, down: bool, plan: StepPlan },
-    /// PERFORM VARYING's increment.
-    Step { var: PlaceId, by: ExprId, plan: StepPlan },
+    /// PERFORM VARYING's increment: `var` located, then each place of `prepass` (§7.5), then
+    /// `var + by` computed with `plan.dmax` and stored.
+    Step { var: PlaceId, by: ExprId, plan: StepPlan, prepass: Vec<PlaceId> },
     /// SEARCH's index steps, SORT-RETURN.
     SetInt { target: PlaceId, value: IntExpr },
     Inspect(InspectId), String(StringId), Unstring(UnstringId), SearchAll(SearchAllId),
@@ -498,11 +571,17 @@ b3: Unnest(1); Jump next                  b3: Step I by 1; Jump b1
 ```
 
 - **Once:** `Nest; PerformEnter r -> b1`, `b1: Unnest(1)`.
-- **TIMES:** the count is evaluated once and below zero counts as zero (machine.rs:480).
+- **TIMES:** the count is evaluated once and below zero counts as zero (machine.rs:480). Each
+  TIMES statement has its own `TempId`, and its counter lives in the frame the statement runs under
+  (`Frame.temps`, §8.4), not in the program: a paragraph can PERFORM itself, directly or through
+  others, and the walker's `for` loop in `repeat_nested` gives each activation of the statement a
+  count of its own (machine.rs:480). A counter in the program would let the inner PERFORM reset
+  the outer one's.
 - **UNTIL:** VARYING without the Move and the Step. **TEST AFTER** moves the Branch after the body,
   and for VARYING before the Step (machine.rs:497, 514-521).
 - **VARYING:** FROM is stored with MOVE rules (machine.rs:502-504); each step re-evaluates the
-  variable's place and stores with `StepPlan`, no ROUNDED and no size error (machine.rs:517-521).
+  variable's place, locates the places of BY in `Op::Step.prepass` (§7.5), and stores with
+  `StepPlan`, no ROUNDED and no size error (machine.rs:517-521).
 - **VARYING … AFTER** is refused by the parser (syntax/src/parser.rs:1596-1598), so the walker has
   no baseline. It lowers to one loop per variable, the innermost varying fastest; the order in which
   an inner variable is reset and the outer one stepped becomes an assumption when the front end
@@ -514,12 +593,15 @@ b3: Unnest(1); Jump next                  b3: Step I by 1; Jump b1
 /// The VM's record of an active range: `ret` runs when it completes, and its paragraphs run at
 /// `depth` (§8.7). Main is the program's own run and holds every paragraph, since the walker
 /// restarts its run at any GO TO target.
-struct Frame { first: ParaId, last: ParaId, kind: FrameKind, ret: BlockId, depth: u32 }
+/// `temps` holds the TIMES counters of the statements running under the frame, by `TempId`.
+struct Frame { first: ParaId, last: ParaId, kind: FrameKind, ret: BlockId, depth: u32, temps: Vec<i64> }
 enum FrameKind { Main, Perform, SortProcedure, UseBeforeReporting { at: DebugId } }
 ```
 
 - **PerformEnter { range, ret }** pushes a Perform frame and goes to the entry of `first`. A range
   whose `last` precedes `first` runs nothing and goes straight to `ret`.
+- **TIMES counters** are the top frame's: `SetTemp` sets one there, and `DecTemp` and `Counter`
+  read it there. A new frame starts with none set, and a popped frame's go with it (§8.3).
 - **ParagraphEnd { next }:** if `next` ≤ the top frame's `last`, go to `next`. Otherwise pop the
   frame and complete it: a Perform frame goes to its `ret`; Main ends the run with EndOfProgram; a
   callback frame returns to its service (§9.6).
@@ -1019,7 +1101,7 @@ position comes from where the walker takes it:
 | A FUNCTION's own failure | The function (machine.rs:1220) | The plan's `at` |
 | EXEC CICS, EXEC SQL, other EXEC | The EXEC block | The op's entry |
 | Invalid data in any SQL input | The first host variable (machine/sql.rs:212) | The op's entry, which holds that position |
-| VALUE initialization | The data entry (machine.rs:239-240) | `Storage.init_abend` |
+| VALUE initialization | The data entry (machine.rs:239-240) | `Storage.init_abend`'s `AbendText.at` |
 | GO TO out of USE BEFORE REPORTING | The report statement (report.rs:382 (int)) | The frame's `at` |
 | Settling SQL, closing files at the end | No position (exec/src/lib.rs:165-166) | No position |
 
@@ -1044,7 +1126,7 @@ executors and recorded.
 | 3 | MOVE to several receivers reads the sender again for each, after earlier stores | machine.rs:315-318 | The sender's subscripts are evaluated once, before the first receiver | One `Move` per receiver |
 | 4 | COMPUTE with several receivers evaluates the expression again for each (machine.rs:321-323); ADD and SUBTRACT with several receivers read shared operands again after earlier stores | machine.rs:1503-1522 | Computed once, then stored into each | One `ArithStep` per receiver |
 | 5 | INITIALIZE gives an alphanumeric-edited item ZERO | machine.rs:1976-1980 | SPACE | The walker's values in the plan |
-| 6 | The dmax pre-pass and the float test locate receivers and operands before any store or evaluation | machine.rs:1494-1506 | - | `ArithPlan.prepass` and `ArithStep.probe` (§7.4) |
+| 6 | The dmax pre-pass and the float test locate receivers and operands before any store or evaluation, and `integer`, `expr_value` and the VARYING step locate operands before they evaluate them | machine.rs:1494-1506, 613-619, 517-521 | - | `ArithPlan.prepass` and `ArithStep.probe` (§7.4); the `prepass` of `IntExpr::Fixed`, `Comparand::Expr` and `Op::Step` (§7.5) |
 | 7 | EVALUATE evaluates a subject again at each comparison | machine.rs:420-442 | Once | As the walker; a subject may be cached only where evaluating it cannot abend and calls no FUNCTION |
 
 ## 12. Invariants and verification
@@ -1067,10 +1149,21 @@ executors and recorded.
 
 ### 12.2 What a lowering test asserts
 
-- **Every test program lowers.** The helpers that compile test programs call `lower` and fail the
-  test on a `LowerError`: `run_with` in exec/src/tests.rs:11-18, `run` and `run_task` in
-  machine/sql.rs:356-365 and 551-559, and the helpers of tests/sort.rs, tests/report.rs,
-  tests/oo.rs and le/tests.rs (int) when that branch lands.
+- **Every test program lowers.** The test `Harness` (exec/src/testing.rs), which `run_with` in
+  exec/src/tests.rs and the helpers of tests/report.rs, tests/printer.rs, tests/oo.rs and
+  le/tests.rs use, lowers each program after it compiles it and before it runs it: the program it
+  runs, and each program of the run unit's library, compiled as a CALL would compile it. A lowered
+  program must pass `verify`, come back equal from the load-module codec and encode again to the
+  same bytes, and lower again the same; any other `LowerError`, or a panic, fails the test and
+  names the program. While step 2 is under way `Unsupported` is accepted, and the check never
+  changes a test's outcome otherwise. A test in lower/tests.rs puts bench/*.cbl through the same
+  check. `run` and `run_task` in machine/sql.rs, `run_flagged` in tests/sort.rs and tests that
+  compile without running do not use the Harness, so their programs are not lowered yet.
+- **Coverage.** With `IRONWORK_LOWER_REPORT=<file>` set, the check appends one line per program:
+  the test (or bench file), PROGRAM-ID, a fingerprint of the source and flags, and `ok`,
+  `unsupported` with the construct, or `error`. `tools/lower-coverage.sh` runs exec's tests one at
+  a time with it set and prints how many programs lower and the constructs the rest lack. Step 2 is
+  done when it reports every program lowered.
 - **A verifier passes** on every lowered program, checking invariants 3 to 6. It runs inside `lower`
   in debug builds, and on every program the module reader decodes, since a module is untrusted input
   (load-module.md §4.8).

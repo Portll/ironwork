@@ -2,7 +2,7 @@
 //! Plans (lir.md §7 and §9): what `Machine::assign`, `arithmetic`, `store_fixed_checked`,
 //! `initialize` and `display` decide from kinds on each execution, decided once.
 
-use super::data::{Side, Value, dmax_refs, scale};
+use super::data::{Side, Value, scale};
 use super::{Lower, R, push, unsupported};
 use numeric::{Numproc, Trunc};
 use rt::lir::{
@@ -104,14 +104,7 @@ impl Lower<'_> {
             if !self.is_static(target) {
                 prepass.push(target);
             }
-            let mut refs = Vec::new();
-            dmax_refs(e, &mut refs);
-            for r in refs {
-                let p = self.place(r, false)?;
-                if !self.is_static(p) {
-                    prepass.push(p);
-                }
-            }
+            prepass.extend(self.dmax_places(e)?);
             dmax = dmax.max(scale(self.kind_of(target))).max(self.dmax(e)?);
         }
         let arith = self.c.options.arith;

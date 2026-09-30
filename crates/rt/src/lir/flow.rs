@@ -15,8 +15,9 @@ pub enum Op {
     Arith(ArithId),
     SetAddress { record: u16, address: Operand },
     SetUpDown { target: PlaceId, by: IntExpr, down: bool, plan: StepPlan },
-    /// PERFORM VARYING's increment.
-    Step { var: PlaceId, by: ExprId, plan: StepPlan },
+    /// PERFORM VARYING's increment: `var` located, then each place of `prepass`, then `var + by`
+    /// computed and stored.
+    Step { var: PlaceId, by: ExprId, plan: StepPlan, prepass: Vec<PlaceId> },
     /// SEARCH's index steps, SORT-RETURN.
     SetInt { target: PlaceId, value: IntExpr },
     Inspect(InspectId),
@@ -86,14 +87,17 @@ pub enum RangeKind {
     UseBeforeReporting,
 }
 
-/// An active range: `ret` runs when it completes, and its paragraphs run at `depth`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// An active range: `ret` runs when it completes, and its paragraphs run at `depth`. `temps` are the
+/// TIMES counters of the statements that run under it, by `TempId`: a paragraph can PERFORM itself,
+/// and each activation counts its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Frame {
     pub first: ParaId,
     pub last: ParaId,
     pub kind: FrameKind,
     pub ret: BlockId,
     pub depth: u32,
+    pub temps: Vec<i64>,
 }
 
 /// Main is the program's own run and holds every paragraph.
@@ -118,7 +122,7 @@ codec_enum!(Op {
     Arith(id) = 2,
     SetAddress { record, address } = 3,
     SetUpDown { target, by, down, plan } = 4,
-    Step { var, by, plan } = 5,
+    Step { var, by, plan, prepass } = 5,
     SetInt { target, value } = 6,
     Inspect(id) = 7,
     String(id) = 8,
@@ -156,6 +160,6 @@ codec_enum!(Terminator {
 });
 codec_struct!(Range { first, last, kind });
 codec_enum!(RangeKind { Perform = 0, SortProcedure = 1, UseBeforeReporting = 2 });
-codec_struct!(Frame { first, last, kind, ret, depth });
+codec_struct!(Frame { first, last, kind, ret, depth, temps });
 codec_enum!(FrameKind { Main = 0, Perform = 1, SortProcedure = 2, UseBeforeReporting { at } = 3 });
 codec_enum!(Ending { Goback = 0, StopRun = 1, EndOfProgram = 2 });

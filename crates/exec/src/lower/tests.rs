@@ -1,11 +1,10 @@
 use super::*;
-use crate::testing::line;
+use crate::testing::{check_lowering, encoded, line};
 use rt::lir::{
-    ArithPlan, Base, Cond as LirCond, Const, DisplayItem, Image, IntExpr, Mode, MovePlan, NationalFrom, NumericFrom, Op, Operand as LirOperand, Place,
-    Program, StorePlan, Terminator,
+    ArithPlan, Base, Collating, Comparand, Cond as LirCond, Const, DisplayItem, Image, IntExpr, Mode, MovePlan, NationalFrom, NumericFrom, Op,
+    Operand as LirOperand, Place, Program, SignTest, StorePlan, Terminator,
 };
-use rt::module::codec::{Encode, Writer, decode_all};
-use rt::module::StringTable;
+use rt::module::codec::decode_all;
 
 fn program(options: &str, data: &str, procedure: &str) -> String {
     let card = if options.is_empty() { String::new() } else { format!("       CBL {options}\n") };
@@ -22,14 +21,8 @@ fn lowered(source: &str) -> Program {
     p
 }
 
-fn encoded(p: &Program) -> (Vec<u8>, StringTable) {
-    let mut w = Writer::new();
-    p.encode(&mut w);
-    (w.take(), w.strings().clone())
-}
-
 /// The program through the load-module codec, checked to encode again to the same bytes.
-pub(super) fn round_trip(p: &Program) -> Program {
+fn round_trip(p: &Program) -> Program {
     let (bytes, strings) = encoded(p);
     let decoded = decode_all::<Program>("LIR", &bytes, &strings).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(encoded(&decoded), (bytes, strings));
@@ -172,12 +165,12 @@ fn subscripts_reference_modification_and_odo_carry_checks_only_under_ssrange() {
         assert_eq!(e.subscripts.len(), 1);
         assert_eq!(e.subscripts[0].stride, 4);
         assert_eq!(e.subscripts[0].check, ssrange.then_some(5));
-        let refmod = e.refmod.unwrap();
+        let refmod = e.refmod.clone().unwrap();
         assert_eq!(refmod.start, IntExpr::Const(2));
         assert!(matches!(refmod.length, Some(IntExpr::Item(_))));
         assert_eq!(refmod.check, ssrange);
         let t = place_named(&p, "T");
-        let odo = t.iter().find_map(|q| q.odo).unwrap();
+        let odo = t.iter().find_map(|q| q.odo.clone()).unwrap();
         assert_eq!((odo.max, odo.element, odo.check), (5, 4, ssrange));
     }
 }
@@ -403,131 +396,6 @@ fn lowering_is_deterministic() {
     assert_eq!(encoded(&lower(&c).unwrap()), encoded(&lower(&c).unwrap()));
 }
 
-/// Only the statements and program-wide features this slice lowers, found without lowering.
-fn in_slice(c: &Compiled) -> bool {
-    fn statements(stmts: &[ast::Stmt]) -> bool {
-        stmts.iter().all(|s| {
-            use ast::Stmt::*;
-            let shape = matches!(
-                s,
-                Move { .. } | Compute { .. } | Arith(_) | If { .. } | Evaluate { .. } | PerformInline { .. } | PerformProc { .. } | Display { .. } | Initialize { .. }
-                    | GoTo { .. } | Goback { .. } | StopRun { .. } | ExitProgram { .. } | Continue | Exit(_) | NextSentence | SentenceEnd
-            );
-            let text = format!("{s:?}");
-            shape && !text.contains("Function(FunctionCall") && !text.contains("name: \"SELF\"") && !text.contains("name: \"JNIENVPTR\"") && crate::oo::bodies(s).into_iter().all(statements)
-        })
-    }
-    let p = &c.program;
-    p.oo.as_ref().is_none_or(|o| o.class().is_none())
-        && p.report_writer.reports.is_empty()
-        && c.collating.is_native()
-        && p.exec_declarations.is_empty()
-        && !c.layout.items.iter().any(|i| i.kind == rt::storage::Kind::ObjectReference)
-        && p.paragraphs.iter().all(|para| statements(&para.statements))
-}
-
-#[derive(Default)]
-struct Tally {
-    compiled: usize,
-    lowered: usize,
-    unparsed: usize,
-    uncompiled: usize,
-    reasons: std::collections::BTreeMap<&'static str, usize>,
-    failures: Vec<String>,
-}
-
-impl Tally {
-    /// Lowers each program of one source, as the harness compiles them: the first, and the rest
-    /// as the run unit's library.
-    fn source(&mut self, origin: &str, text: &str, flags: &[String]) {
-        let programs = match syntax::parse_all_with(text, &syntax::copy::Libraries::default()) {
-            Ok(p) => p,
-            Err(e) => {
-                if std::env::var_os("LOWER_DEBUG").is_some() {
-                    println!("UNPARSED {origin}: {e}");
-                }
-                self.unparsed += 1;
-                return;
-            }
-        };
-        for program in programs {
-            let c = match crate::compile(program, flags) {
-                Ok(c) => c,
-                Err(e) => {
-                    if std::env::var_os("LOWER_DEBUG").is_some() {
-                        println!("UNCOMPILED {origin}: {}", e[0].message);
-                    }
-                    self.uncompiled += 1;
-                    continue;
-                }
-            };
-            self.compiled += 1;
-            match lower(&c) {
-                Ok(p) => {
-                    self.lowered += 1;
-                    if round_trip(&p) != p {
-                        self.failures.push(format!("{origin} ({}): the codec does not round-trip", c.program.id));
-                    }
-                    if lower(&c).as_ref() != Ok(&p) {
-                        self.failures.push(format!("{origin} ({}): lowering twice differs", c.program.id));
-                    }
-                }
-                Err(LowerError::Unsupported(what, pos)) => {
-                    *self.reasons.entry(what).or_default() += 1;
-                    if in_slice(&c) {
-                        self.failures.push(format!("{origin} ({}): uses only the slice but {what} at {pos}", c.program.id));
-                    }
-                }
-                Err(e) => self.failures.push(format!("{origin} ({}): {e}", c.program.id)),
-            }
-        }
-    }
-}
-
-#[test]
-fn every_test_and_bench_program_lowers_or_names_what_it_lacks() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let corpus = corpus::read(&root.join("src"), &root.join("src").join("lower"));
-    let mut suite = Tally::default();
-    for s in &corpus.sources {
-        suite.source(&s.origin, &s.text, &[]);
-    }
-    for p in oracle::programs() {
-        suite.source(&format!("oracle {}", p.name), &p.source(false), &["-silent".to_owned()]);
-    }
-    let mut bench = Tally::default();
-    let mut benches: Vec<_> = std::fs::read_dir(root.join("../../bench")).unwrap().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "cbl")).collect();
-    benches.sort();
-    for path in &benches {
-        let text = syntax::copy::decode(&std::fs::read(path).unwrap());
-        bench.source(&path.display().to_string(), &text, &[]);
-    }
-    let reasons = |t: &Tally| {
-        let mut r: Vec<_> = t.reasons.iter().collect();
-        r.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
-        r.iter().map(|(what, n)| format!("{what}: {n}")).collect::<Vec<_>>().join(", ")
-    };
-    println!(
-        "lowering: the test suite's programs: {} of {} lower ({} sources read from {} tests, {} tests with none; {} sources do not parse, {} programs do not compile)",
-        suite.lowered,
-        suite.compiled,
-        corpus.sources.len(),
-        corpus.tests,
-        corpus.silent.len(),
-        suite.unparsed,
-        suite.uncompiled
-    );
-    println!("lowering: the test suite's unsupported constructs: {}", reasons(&suite));
-    if std::env::var_os("LOWER_DEBUG").is_some() {
-        corpus.silent.iter().for_each(|t| println!("SILENT {t}"));
-    }
-    println!("lowering: bench/*.cbl: {} of {} lower; unsupported: {}", bench.lowered, bench.compiled, reasons(&bench));
-    assert!(corpus.sources.len() >= 100, "only {} programs read from the test sources", corpus.sources.len());
-    assert!(bench.compiled >= benches.len());
-    let failures: Vec<_> = suite.failures.iter().chain(&bench.failures).collect();
-    assert!(failures.is_empty(), "{} programs:\n{}", failures.len(), failures.iter().map(|f| f.as_str()).collect::<Vec<_>>().join("\n"));
-}
-
 #[test]
 fn local_storage_and_linkage_places_have_their_own_bases() {
     let source = [
@@ -546,4 +414,106 @@ fn local_storage_and_linkage_places_have_their_own_bases() {
     assert_eq!((p.storage.linkage.as_slice(), p.storage.using.as_slice()), (&[3][..], &[0][..]));
     assert_eq!(p.storage.local_image, [0xF0, 0xF0, 0xF7]);
     assert_eq!(&p.storage.image[..3], &[0xE6; 3]);
+}
+
+const TABLE: &str = "       01  T.\n           05 V PIC 9(3) OCCURS 3.\n       01  J PIC 9 VALUE 4.\n       01  A PIC 9(3)V9 VALUE 1.\n       01  X COMP-2.\n";
+
+#[test]
+fn a_subscript_or_exponent_expression_locates_its_operands_before_it_evaluates_them() {
+    let p = lowered(&program("SSRANGE", TABLE, &[line("MOVE V(A + V(J)) TO A"), line("COMPUTE A = A ** (V(J) - A)"), line("GOBACK.")].concat()));
+    let fixed: Vec<_> = p.places.iter().flat_map(|q| &q.subscripts).map(|s| &s.value).filter(|v| matches!(v, IntExpr::Fixed { .. })).collect();
+    let IntExpr::Fixed { dmax, prepass, .. } = fixed[0] else { unreachable!() };
+    assert_eq!(*dmax, 1);
+    assert_eq!(prepass.len(), 1, "A is static; V(J) is located before A is read");
+    assert_eq!(p.symbols[p.places[prepass[0] as usize].name as usize], "V");
+    let pow = p.exprs.iter().find_map(|e| if let lir::Expr::Pow(_, n) = e { Some(n.clone()) } else { None }).unwrap();
+    assert!(matches!(pow, IntExpr::Fixed { dmax: 1, ref prepass, .. } if prepass.len() == 1), "{pow:?}");
+}
+
+#[test]
+fn a_compared_expression_keeps_its_float_test_its_dmax_pass_and_its_mode() {
+    let p = lowered(&program("SSRANGE", TABLE, &[line("IF A + V(J) > 5 DISPLAY 'F' END-IF"), line("IF X * V(J) < 1 DISPLAY 'X' END-IF"), line("GOBACK.")].concat()));
+    let exprs: Vec<_> = p.conds.iter().filter_map(|c| if let LirCond::Rel { a, how, .. } = c { Some((a.clone(), *how)) } else { None }).collect();
+    let (Comparand::Expr { dmax, mode, prepass, .. }, how) = &exprs[0] else { panic!("{:?}", exprs[0]) };
+    assert_eq!((*dmax, *mode, *how), (1, Mode::Fixed, lir::Compare::Fixed));
+    assert_eq!(prepass.len(), 2, "V(J) by the float test, then again by the dmax pass");
+    assert_eq!(prepass[0], prepass[1]);
+    let (Comparand::Expr { dmax, mode, prepass, .. }, how) = &exprs[1] else { panic!("{:?}", exprs[1]) };
+    assert_eq!((*dmax, *how), (0, lir::Compare::Float));
+    assert!(matches!(mode, Mode::Float(_)));
+    assert!(prepass.is_empty(), "the float test stops at X, which is static, and float mode has no dmax pass");
+}
+
+#[test]
+fn a_sign_condition_reads_an_operand_and_evaluates_an_expression() {
+    let p = lowered(&program("SSRANGE", TABLE, &[line("IF A IS POSITIVE DISPLAY 'P' END-IF"), line("IF A - V(J) IS NEGATIVE DISPLAY 'N' END-IF"), line("GOBACK.")].concat()));
+    let signs: Vec<_> = p.conds.iter().filter_map(|c| if let LirCond::Sign { value, test } = c { Some((value.clone(), *test)) } else { None }).collect();
+    assert!(matches!(signs[0], (Comparand::Operand(LirOperand::Load(_)), SignTest::Positive)));
+    assert!(matches!(&signs[1], (Comparand::Expr { mode: Mode::Fixed, dmax: 1, prepass, .. }, SignTest::Negative) if prepass.len() == 2));
+}
+
+#[test]
+fn perform_varying_by_a_subscripted_item_locates_it_before_the_add() {
+    let p = lowered(&program("SSRANGE", TABLE, &[line("PERFORM VARYING A FROM 1 BY V(J) UNTIL A > 9"), line("    CONTINUE"), line("END-PERFORM"), line("GOBACK.")].concat()));
+    let (plan, prepass) = ops(&p).find_map(|op| if let Op::Step { plan, prepass, .. } = op { Some((*plan, prepass.clone())) } else { None }).unwrap();
+    assert_eq!(plan.dmax, 1);
+    assert_eq!(prepass.len(), 1);
+    assert_eq!(p.symbols[p.places[prepass[0] as usize].name as usize], "V");
+}
+
+#[test]
+fn a_value_clause_s_abend_names_its_data_entry() {
+    let p = lowered(&program("", "       01  A PIC X(3) VALUE 'AB'.\n       01  N PIC X VALUE 'ą'.\n", &line("GOBACK.")));
+    let abend = &p.abends[p.storage.init_abend.unwrap() as usize];
+    let at = p.debug.positions[abend.at.unwrap() as usize];
+    assert_eq!((at.line, at.col), (6, 8));
+    assert_eq!(&p.storage.image[..3], &[0xC1, 0xC2, 0x40]);
+}
+
+#[test]
+fn the_program_collating_sequence_lowers_as_the_program_s_own() {
+    let source = concat!(
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n",
+        "       OBJECT-COMPUTER. IBM-370 PROGRAM COLLATING SEQUENCE IS PCS.\n",
+        "       SPECIAL-NAMES.\n           ALPHABET PCS IS 'Z' THROUGH 'A' '0' ALSO '9', HIGH-VALUE.\n",
+        "       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  C PIC X VALUE HIGH-VALUE.\n",
+        "       PROCEDURE DIVISION.\n           IF C > 'A' MOVE LOW-VALUE TO C END-IF\n           GOBACK.\n",
+    );
+    let p = lowered(source);
+    let Collating::Sequence(s) = &p.options.collating else { panic!("{:?}", p.options.collating) };
+    let c = compiled(source);
+    assert_eq!(*s.positions, c.collating.positions());
+    assert_eq!((s.high_value, s.low_value), (c.collating.high_value, c.collating.low_value));
+    assert_eq!((s.characters.len(), s.characters[0], s.low_value), (c.collating.count(), 0xE9, 0xE9));
+    assert_eq!(s.positions[0xF0], s.positions[0xF9]);
+    assert_eq!(p.storage.image, [c.collating.high_value]);
+    let native = lowered(&program("", "", &line("GOBACK.")));
+    assert_eq!(native.options.collating, Collating::Native);
+}
+
+/// Each program of bench/*.cbl, through the check the Harness makes of every test program.
+#[test]
+fn bench_programs_lower_or_name_what_they_lack() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bench");
+    let mut benches: Vec<_> = std::fs::read_dir(&root).unwrap().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "cbl")).collect();
+    benches.sort();
+    assert!(!benches.is_empty());
+    for path in &benches {
+        let text = syntax::copy::decode(&std::fs::read(path).unwrap());
+        let origin = format!("bench/{}", path.file_name().unwrap().to_string_lossy());
+        for program in syntax::parse_all_with(&text, &syntax::copy::Libraries::default()).unwrap_or_else(|e| panic!("{origin}: {e}")) {
+            let c = crate::compile(program, &[]).unwrap_or_else(|e| panic!("{origin}: {e:?}"));
+            check_lowering(&c, rt::sql::fingerprint(&text), Some(&origin));
+        }
+    }
+}
+
+#[test]
+fn a_condition_name_whose_values_compare_differently_is_an_or_of_relations_in_value_order() {
+    let p = lowered(&program("", "       01  N PIC 9.\n          88 NONE VALUE ZERO SPACE.\n", &[line("IF NONE DISPLAY 'NONE' END-IF"), line("GOBACK.")].concat()));
+    assert!(!p.conds.iter().any(|c| matches!(c, LirCond::Name { .. })));
+    let hows: Vec<_> = p.conds.iter().filter_map(|c| if let LirCond::Rel { op: ast::RelOp::Eq, how, .. } = c { Some(*how) } else { None }).collect();
+    assert_eq!(hows, [lir::Compare::Fixed, lir::Compare::Alphanumeric]);
+    let or = p.conds.iter().find_map(|c| if let LirCond::Or(a, b) = c { Some((*a, *b)) } else { None }).unwrap();
+    assert_eq!(or, (0, 1));
 }

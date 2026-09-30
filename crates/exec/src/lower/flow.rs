@@ -481,11 +481,11 @@ impl Lower<'_> {
                 let plan = self.move_plan(&Side { src: None, ..from.side }, kind, item)?;
                 self.op(Op::Move { from: from.operand, to: var, plan }, pos)?;
                 let step = Expr::Bin(Box::new(Expr::Operand(Operand::Ref(varying.var.clone()))), BinOp::Add, Box::new(varying.by.clone()));
-                self.prepass_safe(&step, pos)?;
                 let dmax = scale(kind).max(self.dmax(&step)?);
+                let prepass = self.dmax_places(&varying.by)?;
                 let by = self.expr(&varying.by, pos)?;
                 let store = self.store_plan(kind, item)?;
-                let step = Op::Step { var, by, plan: lir::StepPlan { dmax, store } };
+                let step = Op::Step { var, by, plan: lir::StepPlan { dmax, store }, prepass };
                 let until = self.test(&varying.until, pos)?;
                 let (run, cont) = (self.new_block()?, self.new_block()?);
                 if *test_after {

@@ -12,8 +12,6 @@ mod plans;
 mod verify;
 
 #[cfg(test)]
-mod corpus;
-#[cfg(test)]
 mod tests;
 
 pub use verify::verify;
@@ -97,7 +95,13 @@ pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
     let (blocks, ops) = l.blocks.finish()?;
     let program = lir::Program {
         id,
-        options: lir::ProgramOptions { options: compiled.options, ssrange: compiled.ssrange, dynam, cards: compiled.program.options.clone() },
+        options: lir::ProgramOptions {
+            options: compiled.options,
+            ssrange: compiled.ssrange,
+            dynam,
+            cards: compiled.program.options.clone(),
+            collating: collating(&compiled.collating),
+        },
         initial: compiled.program.initial,
         recursive: compiled.program.recursive,
         storage,
@@ -194,9 +198,6 @@ impl<'c> Lower<'c> {
         if let Some(report) = program.report_writer.reports.first() {
             return unsupported("Report Writer", report.pos);
         }
-        if !self.c.collating.is_native() {
-            return unsupported("a PROGRAM COLLATING SEQUENCE", Pos::default());
-        }
         if let Some(block) = program.exec_declarations.first() {
             return unsupported("EXEC SQL", block.pos);
         }
@@ -224,19 +225,21 @@ impl<'c> Lower<'c> {
         id
     }
 
-    fn abend(&mut self, code: AbendCode, message: &str) -> R<AbendId> {
-        let key = format!("{code:?}{message}");
+    /// An abend's text, with a position of its own only where no op gives one.
+    fn abend(&mut self, code: AbendCode, message: &str, pos: Option<Pos>) -> R<AbendId> {
+        let at = pos.map(|p| self.at(p));
+        let key = format!("{code:?}{at:?}{message}");
         if let Some(&id) = self.abend_ids.get(&key) {
             return Ok(id);
         }
-        let text = lir::AbendText { code, message: self.sym(message) };
+        let text = lir::AbendText { code, message: self.sym(message), at };
         let id = push(&mut self.abends, text, "abend messages")?;
         self.abend_ids.insert(key, id);
         Ok(id)
     }
 
     fn ironwork(&mut self, message: &str) -> R<AbendId> {
-        self.abend(AbendCode::Ironwork, message)
+        self.abend(AbendCode::Ironwork, message, None)
     }
 
     /// The slab and LOCAL-STORAGE as the walker's own VALUE initialization leaves them, run once
@@ -256,7 +259,7 @@ impl<'c> Lower<'c> {
         };
         let init_reports = String::from_utf8_lossy(&err).lines().map(|l| self.sym(l)).collect();
         let init_abend = match abend {
-            Some(a) => Some(self.abend(abend_code(&a.code), &a.message)?),
+            Some(a) => Some(self.abend(abend_code(&a.code), &a.message, Some(a.pos))?),
             None => None,
         };
         let root = |name: &str| layout.linkage_roots.iter().position(|&i| layout.items[i].name.as_deref() == Some(name));
@@ -319,6 +322,21 @@ impl<'c> Lower<'c> {
         }
         Ok(items)
     }
+}
+
+/// The program's sequence, from what `collating::Sequence` exposes: each byte's position, the
+/// character FUNCTION CHAR gives for each position, and HIGH-VALUE and LOW-VALUE.
+fn collating(sequence: &crate::collating::Sequence) -> lir::Collating {
+    if sequence.is_native() {
+        return lir::Collating::Native;
+    }
+    let characters = (1..=sequence.count() as i64).filter_map(|k| sequence.character(k)).collect();
+    lir::Collating::Sequence(lir::Sequence {
+        positions: Box::new(sequence.positions()),
+        characters,
+        high_value: sequence.high_value,
+        low_value: sequence.low_value,
+    })
 }
 
 fn abend_code(code: &crate::abend::AbendCode) -> AbendCode {

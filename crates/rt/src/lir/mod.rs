@@ -4,6 +4,7 @@ mod abend;
 mod arith;
 mod call;
 mod codec;
+mod collating;
 mod debug;
 mod flow;
 mod payload;
@@ -15,6 +16,7 @@ mod value;
 pub use abend::{AbendCode, FileStatus, Signal};
 pub use arith::{ArithPlan, ArithStep, Mode, RemainderPlan, StepPlan, StorePlan};
 pub use call::{CallArg, CallPlan, CallTarget, LeService};
+pub use collating::{Collating, Sequence};
 pub use debug::Debug;
 pub use flow::{Ending, Frame, FrameKind, Op, Range, RangeKind, Step, Terminator};
 pub use payload::{
@@ -44,6 +46,7 @@ pub type ConstId = u32;
 pub type SymId = u32;
 pub type DebugId = u32;
 pub type AbendId = u32;
+/// A PERFORM TIMES counter, held in the frame the statement runs under (`Frame.temps`).
 pub type TempId = u16;
 pub type SqlId = u32;
 pub type ArithId = u32;
@@ -95,6 +98,7 @@ pub struct ProgramOptions {
     pub dynam: bool,
     /// The CBL and PROCESS cards as written.
     pub cards: Vec<String>,
+    pub collating: Collating,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -136,10 +140,13 @@ pub struct Item {
     pub at: DebugId,
 }
 
+/// `at` is None where the op or terminator that raises the abend gives its position, and the data
+/// entry's for `Storage.init_abend`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AbendText {
     pub code: AbendCode,
     pub message: SymId,
+    pub at: Option<DebugId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -188,14 +195,14 @@ codec_struct!(Program {
     id, options, initial, recursive, storage, items, paragraphs, procedure_start, ranges, blocks, places, exprs,
     conds, consts, plans, services, sql, abends, edits, symbols, debug,
 } check program_valid);
-codec_struct!(ProgramOptions { options, ssrange, dynam, cards });
+codec_struct!(ProgramOptions { options, ssrange, dynam, cards, collating });
 codec_struct!(Storage {
     size, image, local_image, init_reports, init_abend, linkage, using, returning, file_areas,
 } check storage_valid);
 codec_struct!(Item {
     name, level, parent, offset, size, occurs, dims, kind, local, linkage, redefines, depending_on, keys, at,
 });
-codec_struct!(AbendText { code, message });
+codec_struct!(AbendText { code, message, at });
 codec_struct!(Paragraph { name, is_section, entry, section_end, at });
 codec_struct!(Block { ops, end });
 codec_struct!(Plans { arith, init, display, inspect, string, unstring, search_all, function });

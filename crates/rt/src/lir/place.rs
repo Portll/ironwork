@@ -32,14 +32,14 @@ pub enum Base {
 }
 
 /// `check` is the occurrence count, present only under SSRANGE.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Subscript {
     pub stride: u32,
     pub value: IntExpr,
     pub check: Option<u32>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Odo {
     pub object: IntExpr,
     pub max: u32,
@@ -47,7 +47,7 @@ pub struct Odo {
     pub check: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RefMod {
     pub start: IntExpr,
     pub length: Option<IntExpr>,

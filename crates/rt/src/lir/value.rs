@@ -1,6 +1,6 @@
 //! Values, expressions and conditions (lir.md §6).
 
-use super::{AbendId, CondId, ConstId, ExprId, FunctionId, Odo, PlaceId, TempId};
+use super::{AbendId, CondId, ConstId, ExprId, FunctionId, Mode, Odo, PlaceId, TempId};
 use crate::codec_enum;
 use crate::vocab::{BinOp, Figurative, RelOp};
 use numeric::precision::Fixed;
@@ -23,14 +23,16 @@ pub enum Const {
     All(Vec<u8>),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// `Fixed` locates each place of `prepass` before it evaluates `expr`, as the walker's dmax pass
+/// does; static places are left out.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IntExpr {
     Const(i64),
     Item(PlaceId),
-    Fixed { expr: ExprId, dmax: u32 },
+    Fixed { expr: ExprId, dmax: u32, prepass: Vec<PlaceId> },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Expr {
     Operand(Operand),
     Neg(ExprId),
@@ -43,7 +45,7 @@ pub enum Expr {
 pub enum Cond {
     Rel { a: Comparand, op: RelOp, b: Comparand, how: Compare },
     Class { place: PlaceId, test: ByteClass },
-    Sign { value: ExprId, test: SignTest },
+    Sign { value: Comparand, test: SignTest },
     /// A level-88 name: equal to any value, or within any THRU pair.
     Name { subject: PlaceId, values: Vec<(ConstId, Option<ConstId>)>, how: Compare },
     Not(CondId),
@@ -54,10 +56,12 @@ pub enum Cond {
     Sql(SqlTest),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// `Expr` locates each place of `prepass` (the float test's, then for `Mode::Fixed` the dmax pass's,
+/// static ones left out) before it evaluates `expr` in `mode`.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Comparand {
     Operand(Operand),
-    Expr(ExprId),
+    Expr { expr: ExprId, dmax: u32, mode: Mode, prepass: Vec<PlaceId> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,7 +90,7 @@ pub enum SignTest {
     Zero,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Count {
     Fixed(u32),
     Odo(Odo),
@@ -102,7 +106,7 @@ pub enum SqlTest {
 
 codec_enum!(Operand { Load(place) = 0, Const(id) = 1, LengthOf(place) = 2, AddressOf(place) = 3, Function(id) = 4 });
 codec_enum!(Const { Bytes(b) = 0, National(n) = 1, Number(f) = 2, Figurative(f) = 3, All(b) = 4 });
-codec_enum!(IntExpr { Const(n) = 0, Item(place) = 1, Fixed { expr, dmax } = 2 });
+codec_enum!(IntExpr { Const(n) = 0, Item(place) = 1, Fixed { expr, dmax, prepass } = 2 });
 codec_enum!(Expr { Operand(o) = 0, Neg(e) = 1, Bin(a, op, b) = 2, Pow(base, exponent) = 3 });
 codec_enum!(Cond {
     Rel { a, op, b, how } = 0,
@@ -116,7 +120,7 @@ codec_enum!(Cond {
     InTable { index, count } = 8,
     Sql(test) = 9,
 });
-codec_enum!(Comparand { Operand(o) = 0, Expr(e) = 1 });
+codec_enum!(Comparand { Operand(o) = 0, Expr { expr, dmax, mode, prepass } = 1 });
 codec_enum!(Compare {
     PackedPfd = 0,
     Address = 1,

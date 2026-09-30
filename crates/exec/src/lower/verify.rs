@@ -11,10 +11,11 @@ pub fn verify(p: &Program) -> Result<(), String> {
     let expr = |id| within("expression", id, p.exprs.len());
     let cond = |id| within("condition", id, p.conds.len());
     let abend = |id| within("abend", id, p.abends.len());
-    let int = |e: &IntExpr| match *e {
+    let places = |qs: &[u32]| qs.iter().try_for_each(|&q| place(q));
+    let int = |e: &IntExpr| match e {
         IntExpr::Const(_) => Ok(()),
-        IntExpr::Item(q) => place(q),
-        IntExpr::Fixed { expr: e, .. } => expr(e),
+        IntExpr::Item(q) => place(*q),
+        IntExpr::Fixed { expr: e, prepass, .. } => expr(*e).and_then(|()| places(prepass)),
     };
     let operand = |o: &Operand| match *o {
         Operand::Load(q) | Operand::LengthOf(q) | Operand::AddressOf(q) => place(q),
@@ -23,7 +24,7 @@ pub fn verify(p: &Program) -> Result<(), String> {
     };
     let comparand = |c: &Comparand| match c {
         Comparand::Operand(o) => operand(o),
-        Comparand::Expr(e) => expr(*e),
+        Comparand::Expr { expr: e, prepass, .. } => expr(*e).and_then(|()| places(prepass)),
     };
     let ssrange = p.options.ssrange;
 
@@ -71,7 +72,7 @@ pub fn verify(p: &Program) -> Result<(), String> {
                 comparand(b)?;
             }
             Cond::Class { place: q, .. } => place(*q)?,
-            Cond::Sign { value, .. } => expr(*value)?,
+            Cond::Sign { value, .. } => comparand(value)?,
             Cond::Name { subject, values, .. } => {
                 place(*subject)?;
                 for &(low, high) in values {
@@ -88,12 +89,15 @@ pub fn verify(p: &Program) -> Result<(), String> {
             Cond::InTable { index, .. } => place(*index)?,
         }
     }
+    for a in &p.abends {
+        a.at.map_or(Ok(()), |at| within("debug entry", at, p.debug.positions.len()))?;
+    }
     for a in &p.plans.arith {
-        a.prepass.iter().try_for_each(|&q| place(q))?;
+        places(&a.prepass)?;
         for s in &a.steps {
             place(s.target)?;
             expr(s.expr)?;
-            s.probe.iter().try_for_each(|&q| place(q))?;
+            places(&s.probe)?;
         }
         if let Some(r) = &a.remainder {
             place(r.target)?;
@@ -134,9 +138,10 @@ pub fn verify(p: &Program) -> Result<(), String> {
                     within("INITIALIZE plan", *plan, p.plans.init.len())?;
                 }
                 Op::Arith(a) => within("arithmetic plan", *a, p.plans.arith.len())?,
-                Op::Step { var, by, .. } => {
+                Op::Step { var, by, prepass, .. } => {
                     place(*var)?;
                     expr(*by)?;
+                    places(prepass)?;
                 }
                 Op::SetTemp(_, n) => int(n)?,
                 Op::Display(d) => within("DISPLAY plan", *d, p.plans.display.len())?,
