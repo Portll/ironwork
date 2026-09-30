@@ -13,6 +13,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use exec::evidence::{canonical, fields, Value};
+
 pub struct Request {
     pub jcl: PathBuf,
     pub datasets: PathBuf,
@@ -25,6 +27,11 @@ pub struct Request {
     pub flags: Vec<String>,
     pub clock: exec::unit::Clock,
     pub replay: Option<PathBuf>,
+    /// Production's outputs, a directory laid out as --datasets is: the job runs on a copy of the
+    /// data sets and each file here is compared with the data set the job left.
+    pub expected: Option<PathBuf>,
+    pub declare: Option<PathBuf>,
+    pub statement: Option<PathBuf>,
 }
 
 /// IBM programs a job can name that ironwork does not run; each is refused before the job starts.
@@ -135,6 +142,7 @@ struct Disposal {
 
 struct Runner<'a> {
     req: &'a Request,
+    datasets: PathBuf,
     scratch: PathBuf,
     temporaries: BTreeMap<String, PathBuf>,
     /// Data sets this job created that are only passed so far: deleted when the job ends.
@@ -151,14 +159,14 @@ impl Runner<'_> {
     /// The file of a catalogued data set, or of one member: NAME or NAME(MEMBER).
     fn catalog_path(&self, name: &str) -> PathBuf {
         match name.split_once('(') {
-            Some((dsn, member)) => self.req.datasets.join(dsn).join(member.trim_end_matches(')')),
-            None => self.req.datasets.join(name),
+            Some((dsn, member)) => self.datasets.join(dsn).join(member.trim_end_matches(')')),
+            None => self.datasets.join(name),
         }
     }
 
     fn dataset_path(&self, source: &Source) -> Option<PathBuf> {
         match source {
-            Source::Dataset { dsn, member } => Some(member.as_ref().map_or_else(|| self.req.datasets.join(dsn), |m| self.req.datasets.join(dsn).join(m))),
+            Source::Dataset { dsn, member } => Some(member.as_ref().map_or_else(|| self.datasets.join(dsn), |m| self.datasets.join(dsn).join(m))),
             Source::Temporary { name, member } => {
                 let base = self.temporaries.get(name).cloned().unwrap_or_else(|| self.scratch.join(format!("temp-{name}")));
                 Some(member.as_ref().map_or(base.clone(), |m| base.join(m)))
@@ -487,22 +495,50 @@ pub fn run(req: Request) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let mut runner = Runner { req: &req, scratch, temporaries: BTreeMap::new(), passed_new: BTreeSet::new(), files: 0 };
-    let status = run_job(&job, &mut runner, replay.as_mut().map(|r| r as &mut dyn exec::sql::Database));
+    let declared = match &req.declare {
+        Some(file) => match fs::read_to_string(file).map_err(|e| e.to_string()).and_then(|t| crate::compare::parse_declared(&t)) {
+            Ok(d) => d,
+            Err(e) => return crate::usage_error(&format!("--declare {}: {e}", file.display())),
+        },
+        None => Vec::new(),
+    };
+    let datasets = match &req.expected {
+        Some(_) => {
+            let copy = scratch.join("datasets");
+            if let Err(e) = copy_tree(&req.datasets, &copy) {
+                eprintln!("ironwork: copying --datasets {}: {e}", req.datasets.display());
+                let _ = fs::remove_dir_all(&scratch);
+                return ExitCode::from(2);
+            }
+            copy
+        }
+        None => req.datasets.clone(),
+    };
+    let inputs = files_under(&req.datasets);
+    let mut runner = Runner { req: &req, datasets, scratch, temporaries: BTreeMap::new(), passed_new: BTreeSet::new(), files: 0 };
+    let report = run_job(&job, &mut runner, replay.as_mut().map(|r| r as &mut dyn exec::sql::Database));
     for path in std::mem::take(&mut runner.passed_new) {
         let _ = if path.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };
     }
+    let code = match &req.expected {
+        Some(expected) => equivalence(&req, &job, &report, expected, &runner.datasets, &inputs, &declared),
+        None => ExitCode::from(report.status),
+    };
     let _ = fs::remove_dir_all(&runner.scratch);
-    ExitCode::from(status)
+    code
 }
 
 /// Runs every step the job's conditions allow; the exit status is the highest return code, or
 /// 16 when a step abended or the job ended on a JCL error.
-fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exec::sql::Database>) -> u8 {
+fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exec::sql::Database>) -> Report {
     let (mut ran, mut abended, mut failed) = (Vec::<Ran>::new(), false, false);
     let mut frames: Vec<Frame> = Vec::new();
     let mut stdout = std::io::stdout().lock();
-    let log = |name: &str, pgm: &str, what: String| eprintln!("ironwork job {}: {name} PGM={pgm} {what}", job.name);
+    let (mut steps, mut gaps, mut programs) = (Vec::new(), Vec::new(), BTreeSet::new());
+    let mut log = |name: &str, pgm: &str, what: String| {
+        eprintln!("ironwork job {}: {name} PGM={pgm} {what}", job.name);
+        steps.push(Value::Obj(fields([("step", name.into()), ("pgm", pgm.into()), ("outcome", what.into())])));
+    };
     let mut ended = false;
     for item in &job.items {
         match item {
@@ -563,7 +599,10 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                     Program::Iefbr14 => Ok(0),
                     Program::Iebgener => iebgener(&dds),
                     Program::Idcams => Ok(idcams(runner, &dds)),
-                    Program::Cobol(path) => run_cobol(&path, runner.req, &dds, database.as_deref_mut(), &mut stdout),
+                    Program::Cobol(path) => {
+                        programs.insert(path.clone());
+                        run_cobol(&path, runner.req, &dds, database.as_deref_mut(), &mut stdout)
+                    }
                     Program::Missing => Err((AbendCode::ModuleNotFound, format!("program {} is not in the program libraries", step.pgm))),
                 };
                 for d in dds.iter().filter(|d| d.sysout) {
@@ -580,6 +619,9 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                         ran.push(Ran { name: step.name.clone(), caller: step.caller.clone(), rc: Some(rc), abend: None });
                     }
                     Err((code, message)) => {
+                        if code == AbendCode::Ironwork {
+                            gaps.push(format!("step {name} reached what ironwork does not model: {message}"));
+                        }
                         log(name, &step.pgm, format!("ABEND {code}: {message}"));
                         runner.dispose(disposals, true);
                         abended = true;
@@ -589,8 +631,132 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
             }
         }
     }
-    if abended || failed {
-        return 16;
+    let status = if abended || failed { 16 } else { ran.iter().filter_map(|r| r.rc).max().map_or(0, |rc| rc.min(255) as u8) };
+    Report { status, steps, gaps, programs }
+}
+
+/// What a job did: its exit status, a record per step, what it reached that ironwork does not
+/// model, and the COBOL programs it ran.
+struct Report {
+    status: u8,
+    steps: Vec<Value>,
+    gaps: Vec<String>,
+    programs: BTreeSet<PathBuf>,
+}
+
+fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            copy_tree(&entry.path(), &to.join(entry.file_name()))?;
+        } else if kind.is_file() {
+            fs::copy(entry.path(), to.join(entry.file_name()))?;
+        }
     }
-    ran.iter().filter_map(|r| r.rc).max().map_or(0, |rc| rc.min(255) as u8)
+    Ok(())
+}
+
+/// The files under `dir` by data set name, A.B or A.B(M), in order.
+fn files_under(dir: &Path) -> Vec<(String, PathBuf)> {
+    let mut out = Vec::new();
+    let Ok(entries) = fs::read_dir(dir) else { return out };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = entry.path();
+        if path.is_dir() {
+            for member in fs::read_dir(&path).into_iter().flatten().flatten() {
+                if member.path().is_file() {
+                    out.push((format!("{name}({})", member.file_name().to_string_lossy()), member.path()));
+                }
+            }
+        } else if path.is_file() {
+            out.push((name, path));
+        }
+    }
+    out.sort();
+    out
+}
+
+pub const JOB_PREDICATE: &str = "https://github.com/Portll/ironwork/blob/main/docs/evidence.md#job-equivalence-v1";
+
+/// Each data set production left, compared with the one the job left: an in-toto statement whose
+/// subjects are the JCL and the programs the job ran. Exit 0 equivalent or equivalent as
+/// declared, 1 diverged, 3 inconclusive.
+fn equivalence(req: &Request, job: &Job, report: &Report, expected: &Path, left: &Path, inputs: &[(String, PathBuf)], declared: &[crate::compare::Declared]) -> ExitCode {
+    use crate::compare::{digest_of, first_difference};
+    let (mut results, mut undeclared, mut declared_hit) = (Vec::new(), 0usize, 0usize);
+    let wanted = files_under(expected);
+    if wanted.is_empty() {
+        return crate::usage_error(&format!("--expected {}: no data sets to compare", expected.display()));
+    }
+    for (name, path) in &wanted {
+        let want = fs::read(path).ok();
+        let (dsn, member) = match name.split_once('(') {
+            Some((d, m)) => (d, Some(m.trim_end_matches(')'))),
+            None => (name.as_str(), None),
+        };
+        let got = fs::read(member.map_or_else(|| left.join(dsn), |m| left.join(dsn).join(m))).ok();
+        let diff = match (&want, &got) {
+            (Some(a), Some(b)) => first_difference(a, b),
+            _ => Some((1, 0)),
+        };
+        let what = format!("DATASET {name}");
+        let mut r = fields([("what", what.clone().into()), ("same", diff.is_none().into()), ("expected", digest_of(want.as_deref())), ("actual", digest_of(got.as_deref()))]);
+        if let Some((line, offset)) = diff {
+            r.insert("firstDifference".into(), Value::Obj(fields([("line", Value::Int(line as i64)), ("offset", Value::Int(offset as i64))])));
+            match declared.iter().find(|d| d.what == what && d.lines.is_none_or(|(a, b)| (a..=b).contains(&line))) {
+                Some(d) => {
+                    declared_hit += 1;
+                    r.insert("declared".into(), d.reason.clone().into());
+                }
+                None => undeclared += 1,
+            }
+        }
+        results.push(Value::Obj(r));
+    }
+    let verdict = if !report.gaps.is_empty() {
+        "inconclusive"
+    } else if undeclared > 0 {
+        "diverged"
+    } else if declared_hit > 0 {
+        "equivalent-as-declared"
+    } else {
+        "equivalent"
+    };
+    let subject = |name: String, path: &Path| Value::Obj(fields([("name", name.into()), ("digest", Value::Obj(fields([("sha256", digest_of(fs::read(path).ok().as_deref()))])))]));
+    let file_name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut subjects = vec![subject(format!("job:{}", file_name(&req.jcl)), &req.jcl)];
+    subjects.extend(report.programs.iter().map(|p| subject(format!("program:{}", file_name(p)), p)));
+    let predicate = fields([
+        ("verdict", verdict.into()),
+        ("job", job.name.clone().into()),
+        ("inputs", Value::Arr(inputs.iter().map(|(n, p)| Value::Obj(fields([("dataset", n.clone().into()), ("sha256", digest_of(fs::read(p).ok().as_deref()))]))).collect())),
+        ("sqlRecording", req.replay.as_ref().map_or(Value::Null, |p| digest_of(fs::read(p).ok().as_deref()))),
+        ("steps", Value::Arr(report.steps.clone())),
+        ("results", Value::Arr(results)),
+        ("declared", Value::Arr(declared.iter().map(|d| Value::Obj(fields([("what", d.what.clone().into()), ("reason", d.reason.clone().into())]))).collect())),
+        ("inconclusive", Value::Arr(report.gaps.iter().map(|g| Value::Str(g.clone())).collect())),
+        ("coverage", Value::Null),
+        ("ironwork", env!("CARGO_PKG_VERSION").into()),
+        ("limit", crate::compare::LIMIT.into()),
+    ]);
+    let statement = Value::Obj(fields([("_type", "https://in-toto.io/Statement/v1".into()), ("subject", Value::Arr(subjects)), ("predicateType", JOB_PREDICATE.into()), ("predicate", Value::Obj(predicate))]));
+    let text = format!("{}\n", canonical(&statement));
+    match &req.statement {
+        Some(file) => {
+            if let Err(e) = fs::write(file, &text) {
+                eprintln!("ironwork: --statement {}: {e}", file.display());
+                return ExitCode::from(2);
+            }
+        }
+        None => print!("{text}"),
+    }
+    eprintln!("ironwork job {}: {verdict}{}", job.name, if undeclared > 0 { format!(", {undeclared} undeclared divergence(s)") } else { String::new() });
+    ExitCode::from(match verdict {
+        "equivalent" | "equivalent-as-declared" => 0,
+        "diverged" => 1,
+        _ => 3,
+    })
 }

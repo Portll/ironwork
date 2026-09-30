@@ -303,3 +303,30 @@ fn idcams_deletes_defines_and_copies_with_its_condition_codes() {
         assert!(out.contains(want), "{want} in {out}");
     }
 }
+
+#[test]
+fn a_job_is_equivalent_to_production_when_its_data_sets_match() {
+    let dir = temp("equiv");
+    upcase(&dir);
+    fs::write(dir.join("data/IN.NAMES"), "alpha\nbeta\n").unwrap();
+    fs::create_dir_all(dir.join("prod")).unwrap();
+    let jcl = "//UP EXEC PGM=UPCASE\n//IN DD DSN=IN.NAMES,DISP=(OLD,DELETE)\n//OUT DD DSN=OUT.NAMES,DISP=(NEW,CATLG)\n";
+    let expect = |want: &str, extra: &[&str]| {
+        fs::write(dir.join("prod/OUT.NAMES"), want).unwrap();
+        let mut args = vec!["--expected".to_string(), format!("DATASETS={}", dir.join("prod").display()), "--statement".into(), dir.join("st.json").display().to_string()];
+        args.extend(extra.iter().map(|s| s.to_string()));
+        let o = job_with(&dir, jcl, &args.iter().map(String::as_str).collect::<Vec<_>>());
+        (o.status.code(), fs::read_to_string(dir.join("st.json")).unwrap_or_default(), log(&o))
+    };
+    let (code, st, l) = expect("ALPHA\nBETA\n", &[]);
+    assert_eq!(code, Some(0), "{l}");
+    assert!(st.contains("\"verdict\":\"equivalent\"") && st.contains("job-equivalence-v1") && st.contains("\"name\":\"program:UPCASE.cbl\""), "{st}");
+    assert!(dir.join("data/IN.NAMES").exists() && !dir.join("data/OUT.NAMES").exists(), "production's data sets are not touched");
+    let (code, st, _) = expect("ALPHA\nBETX\n", &[]);
+    assert_eq!(code, Some(1));
+    assert!(st.contains("\"firstDifference\":{\"line\":2,\"offset\":9}"), "{st}");
+    fs::write(dir.join("declare.txt"), "DATASET OUT.NAMES lines 2-2 the second name is spelt as production spelt it\n").unwrap();
+    let (code, st, _) = expect("ALPHA\nBETX\n", &["--declare", dir.join("declare.txt").to_str().unwrap()]);
+    assert_eq!(code, Some(0));
+    assert!(st.contains("equivalent-as-declared"), "{st}");
+}

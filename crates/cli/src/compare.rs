@@ -14,7 +14,7 @@ use exec::digest::{hex, sha256};
 use exec::evidence::{canonical, fields, Value};
 
 pub const PREDICATE: &str = "https://github.com/Portll/ironwork/blob/main/docs/evidence.md#equivalence-v1";
-const LIMIT: &str = "Equivalence is under ironwork's model of Enterprise COBOL, on the inputs recorded here; the oracle holds no Enterprise COBOL goldens yet, and paragraph coverage is not measured (coverage null), so a verdict of equivalent covers these inputs only.";
+pub(crate) const LIMIT: &str = "Equivalence is under ironwork's model of Enterprise COBOL, on the inputs recorded here; the oracle holds no Enterprise COBOL goldens yet, and paragraph coverage is not measured (coverage null), so a verdict of equivalent covers these inputs only.";
 
 pub struct Request {
     pub base: Option<PathBuf>,
@@ -32,13 +32,15 @@ pub struct Request {
 
 /// A divergence the change means to make: a DD (optionally one line range of it), the DISPLAY
 /// output or the RETURN-CODE, with the reason.
-struct Declared {
-    what: String,
-    lines: Option<(usize, usize)>,
-    reason: String,
+pub(crate) struct Declared {
+    pub what: String,
+    pub lines: Option<(usize, usize)>,
+    pub reason: String,
 }
 
-fn parse_declared(text: &str) -> Result<Vec<Declared>, String> {
+/// Declarations, one a line: `DD NAME`, `DATASET DSN`, `DISPLAY` or `RETURN-CODE`, optionally
+/// `lines A-B`, then the reason.
+pub(crate) fn parse_declared(text: &str) -> Result<Vec<Declared>, String> {
     let mut out = Vec::new();
     for (n, raw) in text.lines().enumerate() {
         let line = raw.trim();
@@ -49,12 +51,12 @@ fn parse_declared(text: &str) -> Result<Vec<Declared>, String> {
         let head = words.next().unwrap_or_default().to_ascii_uppercase();
         let rest = words.next().unwrap_or("").trim();
         let (what, rest) = match head.as_str() {
-            "DD" => {
+            "DD" | "DATASET" => {
                 let mut w = rest.splitn(2, char::is_whitespace);
-                (format!("DD {}", w.next().unwrap_or_default().to_ascii_uppercase()), w.next().unwrap_or("").trim())
+                (format!("{head} {}", w.next().unwrap_or_default().to_ascii_uppercase()), w.next().unwrap_or("").trim())
             }
             "DISPLAY" | "RETURN-CODE" => (head.clone(), rest),
-            _ => return Err(format!("line {}: a declaration starts DD, DISPLAY or RETURN-CODE", n + 1)),
+            _ => return Err(format!("line {}: a declaration starts DD, DATASET, DISPLAY or RETURN-CODE", n + 1)),
         };
         let (lines, reason) = match rest.strip_prefix("lines ") {
             Some(r) => {
@@ -178,13 +180,13 @@ fn run_side(program: &Path, req: &Request, specs: &[Spec], dir: &Path) -> Outcom
 }
 
 /// The first line (1-based) and byte offset where two outputs differ, or None when they do not.
-fn first_difference(a: &[u8], b: &[u8]) -> Option<(usize, usize)> {
+pub(crate) fn first_difference(a: &[u8], b: &[u8]) -> Option<(usize, usize)> {
     let at = a.iter().zip(b).position(|(x, y)| x != y).or((a.len() != b.len()).then(|| a.len().min(b.len())))?;
     let line = a[..at.min(a.len())].iter().filter(|&&c| c == b'\n').count() + 1;
     Some((line, at))
 }
 
-fn digest_of(bytes: Option<&[u8]>) -> Value {
+pub(crate) fn digest_of(bytes: Option<&[u8]>) -> Value {
     bytes.map_or(Value::Null, |b| hex(&sha256(b)).into())
 }
 

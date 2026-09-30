@@ -118,6 +118,12 @@ job flags:
              ironwork does not run (PARM, DISP=MOD, generation data groups, SORT, other IDCAMS
              commands and IBM's other programs) is refused before any step runs. Exit status: the highest return
              code, 16 when a step abended or a JCL error ended the job, 2 for a job refused
+  --expected DATASETS=DIR
+             migration equivalence: the job runs on a copy of --datasets with a fixed clock
+             (--clock, or 2026-01-01), and each file in DIR, laid out as --datasets is, is compared
+             byte for byte with the data set the job left. --declare names intended divergences
+             (DATASET DSN [lines A-B] reason) and --statement where the in-toto statement goes;
+             exit status 0 equivalent, 1 diverged, 3 inconclusive
   --proclib DIR
              a procedure library, searched for cataloged procedures and INCLUDE members after the
              data sets JCLLIB ORDER names: member M is the file DIR/M or DIR/M.jcl. In-stream
@@ -328,14 +334,23 @@ fn driver() -> ExitCode {
         && c == "job"
     {
         let Some(dir) = datasets else { return usage_error("job needs --datasets DIR") };
-        if !dds.is_empty() || sql_db.is_some() || evidence_dir.is_some() || provenance_file.is_some() || !cics_options.is_empty() {
+        if !dds.is_empty() || sql_db.is_some() || evidence_dir.is_some() || provenance_file.is_some() || !cics_options.is_empty() || compare_base.is_some() || compare_head.is_some() {
             return usage_error("job takes its DDs from the JCL; --dd, --sql-db, --evidence, --provenance and the cics flags are not for job");
         }
         let (dir, text) = match dir.strip_suffix(":text") {
             Some(d) => (d.to_string(), true),
             None => (dir, false),
         };
-        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, flags, clock, replay: replay.map(std::path::PathBuf::from) });
+        let expected_dir = match expected.as_slice() {
+            [] => None,
+            [(name, path)] if name.eq_ignore_ascii_case("DATASETS") => Some(path.clone()),
+            _ => return usage_error("job takes --expected DATASETS=DIR, a directory of production's data sets"),
+        };
+        let clock = match (clock, &expected_dir) {
+            (exec::unit::Clock::System, Some(_)) => exec::unit::Clock::Fixed(1_767_225_600, 0),
+            (c, _) => c,
+        };
+        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, flags, clock, replay: replay.map(std::path::PathBuf::from), expected: expected_dir, declare, statement });
     }
     if datasets.is_some() || !proclibs.is_empty() {
         return usage_error("--datasets and --proclib are for job");
