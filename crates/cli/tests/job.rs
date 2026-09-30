@@ -329,4 +329,12 @@ fn a_job_is_equivalent_to_production_when_its_data_sets_match() {
     let (code, st, _) = expect("ALPHA\nBETX\n", &["--declare", dir.join("declare.txt").to_str().unwrap()]);
     assert_eq!(code, Some(0));
     assert!(st.contains("equivalent-as-declared"), "{st}");
+    fs::write(dir.join("steps.txt"), "UP RC=0000\n").unwrap();
+    let steps = format!("STEPS={}", dir.join("steps.txt").display());
+    let (code, _, l) = expect("ALPHA\nBETA\n", &["--expected", &steps]);
+    assert_eq!(code, Some(0), "{l}");
+    fs::write(dir.join("steps.txt"), "UP RC=0004\n").unwrap();
+    let (code, st, _) = expect("ALPHA\nBETA\n", &["--expected", &steps]);
+    assert_eq!(code, Some(1));
+    assert!(st.contains("\"what\":\"STEP UP\"") && st.contains("\"actual\":\"RC=0000\""), "{st}");
 }

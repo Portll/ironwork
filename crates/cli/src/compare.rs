@@ -38,7 +38,7 @@ pub(crate) struct Declared {
     pub reason: String,
 }
 
-/// Declarations, one a line: `DD NAME`, `DATASET DSN`, `DISPLAY` or `RETURN-CODE`, optionally
+/// Declarations, one a line: `DD NAME`, `DATASET DSN`, `STEP NAME`, `DISPLAY` or `RETURN-CODE`, optionally
 /// `lines A-B`, then the reason.
 pub(crate) fn parse_declared(text: &str) -> Result<Vec<Declared>, String> {
     let mut out = Vec::new();
@@ -51,12 +51,12 @@ pub(crate) fn parse_declared(text: &str) -> Result<Vec<Declared>, String> {
         let head = words.next().unwrap_or_default().to_ascii_uppercase();
         let rest = words.next().unwrap_or("").trim();
         let (what, rest) = match head.as_str() {
-            "DD" | "DATASET" => {
+            "DD" | "DATASET" | "STEP" => {
                 let mut w = rest.splitn(2, char::is_whitespace);
                 (format!("{head} {}", w.next().unwrap_or_default().to_ascii_uppercase()), w.next().unwrap_or("").trim())
             }
             "DISPLAY" | "RETURN-CODE" => (head.clone(), rest),
-            _ => return Err(format!("line {}: a declaration starts DD, DATASET, DISPLAY or RETURN-CODE", n + 1)),
+            _ => return Err(format!("line {}: a declaration starts DD, DATASET, STEP, DISPLAY or RETURN-CODE", n + 1)),
         };
         let (lines, reason) = match rest.strip_prefix("lines ") {
             Some(r) => {

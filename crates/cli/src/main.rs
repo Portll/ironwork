@@ -121,8 +121,10 @@ job flags:
   --expected DATASETS=DIR
              migration equivalence: the job runs on a copy of --datasets with a fixed clock
              (--clock, or 2026-01-01), and each file in DIR, laid out as --datasets is, is compared
-             byte for byte with the data set the job left. --declare names intended divergences
-             (DATASET DSN [lines A-B] reason) and --statement where the in-toto statement goes;
+             byte for byte with the data set the job left. --expected STEPS=file adds production's
+             step outcomes, one a line (STEP RC=0004, STEP ABEND S0C7), compared with the job's.
+             --declare names intended divergences (DATASET DSN [lines A-B] reason, STEP NAME
+             reason) and --statement where the in-toto statement goes;
              exit status 0 equivalent, 1 diverged, 3 inconclusive
   --proclib DIR
              a procedure library, searched for cataloged procedures and INCLUDE members after the
@@ -341,16 +343,22 @@ fn driver() -> ExitCode {
             Some(d) => (d.to_string(), true),
             None => (dir, false),
         };
-        let expected_dir = match expected.as_slice() {
-            [] => None,
-            [(name, path)] if name.eq_ignore_ascii_case("DATASETS") => Some(path.clone()),
-            _ => return usage_error("job takes --expected DATASETS=DIR, a directory of production's data sets"),
-        };
+        let (mut expected_dir, mut expected_steps) = (None, None);
+        for (name, path) in &expected {
+            match name.to_ascii_uppercase().as_str() {
+                "DATASETS" => expected_dir = Some(path.clone()),
+                "STEPS" => expected_steps = Some(path.clone()),
+                _ => return usage_error("job takes --expected DATASETS=DIR and --expected STEPS=file"),
+            }
+        }
+        if expected_steps.is_some() && expected_dir.is_none() {
+            return usage_error("--expected STEPS=file goes with --expected DATASETS=DIR");
+        }
         let clock = match (clock, &expected_dir) {
             (exec::unit::Clock::System, Some(_)) => exec::unit::Clock::Fixed(1_767_225_600, 0),
             (c, _) => c,
         };
-        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, flags, clock, replay: replay.map(std::path::PathBuf::from), expected: expected_dir, declare, statement });
+        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, flags, clock, replay: replay.map(std::path::PathBuf::from), expected: expected_dir, expected_steps, declare, statement });
     }
     if datasets.is_some() || !proclibs.is_empty() {
         return usage_error("--datasets and --proclib are for job");

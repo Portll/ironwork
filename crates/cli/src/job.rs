@@ -30,6 +30,8 @@ pub struct Request {
     /// Production's outputs, a directory laid out as --datasets is: the job runs on a copy of the
     /// data sets and each file here is compared with the data set the job left.
     pub expected: Option<PathBuf>,
+    /// Production's step outcomes, one a line: `STEP RC=nnnn` or `STEP ABEND code`.
+    pub expected_steps: Option<PathBuf>,
     pub declare: Option<PathBuf>,
     pub statement: Option<PathBuf>,
 }
@@ -690,6 +692,39 @@ fn equivalence(req: &Request, job: &Job, report: &Report, expected: &Path, left:
     let wanted = files_under(expected);
     if wanted.is_empty() {
         return crate::usage_error(&format!("--expected {}: no data sets to compare", expected.display()));
+    }
+    if let Some(file) = &req.expected_steps {
+        let text = match fs::read_to_string(file) {
+            Ok(t) => t,
+            Err(e) => return crate::usage_error(&format!("--expected STEPS={}: {e}", file.display())),
+        };
+        let outcome_of = |step: &str| {
+            report.steps.iter().find_map(|v| match v {
+                Value::Obj(m) if m.get("step") == Some(&Value::Str(step.to_string())) => match m.get("outcome") {
+                    Some(Value::Str(o)) => Some(o.split(':').next().unwrap_or(o).trim().to_string()),
+                    _ => None,
+                },
+                _ => None,
+            })
+        };
+        for (n, line) in text.lines().enumerate().filter(|(_, l)| !l.trim().is_empty()) {
+            let Some((step, want)) = line.trim().split_once(char::is_whitespace) else { return crate::usage_error(&format!("--expected STEPS line {}: STEP RC=nnnn or STEP ABEND code", n + 1)) };
+            let want = want.trim().to_string();
+            let got = outcome_of(step);
+            let what = format!("STEP {step}");
+            let same = got.as_deref() == Some(want.as_str());
+            let mut r = fields([("what", what.clone().into()), ("same", same.into()), ("expected", want.into()), ("actual", got.map_or(Value::Null, Value::Str))]);
+            if !same {
+                match declared.iter().find(|d| d.what == what) {
+                    Some(d) => {
+                        declared_hit += 1;
+                        r.insert("declared".into(), d.reason.clone().into());
+                    }
+                    None => undeclared += 1,
+                }
+            }
+            results.push(Value::Obj(r));
+        }
     }
     for (name, path) in &wanted {
         let want = fs::read(path).ok();

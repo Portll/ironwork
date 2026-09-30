@@ -101,7 +101,10 @@ the job against production's recorded inputs and compares what it leaves with wh
 2. Each file under PROD, laid out as `--datasets` is (A.B, or A.B/M for a member), is compared byte
    for byte with the data set of that name the job left; each difference is located by line and
    offset, and a data set the job did not leave is a difference.
-3. `--declare FILE` lists intended divergences, one a line: `DATASET DSN [lines A-B] reason`.
+3. `--expected STEPS=FILE` adds production's step outcomes from its job log, one a line
+   (`STEP RC=0004`, `CALLER.PSTEP ABEND S0C7`), each compared with the step's outcome in the job.
+4. `--declare FILE` lists intended divergences, one a line: `DATASET DSN [lines A-B] reason` or
+   `STEP NAME reason`.
 
 The statement's `predicateType` is
 `https://github.com/Portll/ironwork/blob/main/docs/evidence.md#job-equivalence-v1`, apart from
