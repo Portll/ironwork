@@ -1,6 +1,19 @@
 //! The CICS region a harness run stands in for: one task, its files, its temporary-storage and
-//! transient-data queues, and the time services. The interpreter runs the commands; this holds
-//! what they act on.
+//! transient-data queues, and the time services; and the commands a program runs against it, as
+//! `CicsCommand`s the executor builds and `run` carries out.
+
+mod command;
+mod file_control;
+mod maps;
+mod program;
+mod run;
+mod services;
+
+pub use command::{Assign, Cics, CicsCommand, Control, Datum, FileControl, FileOptions, Opt, Record, Resp, Transfer};
+pub use run::{
+    At, CicsHost, EIBAID, EIBCALEN, EIBCPOSN, EIBDATE, EIBFN, EIBRESP, EIBRESP2, EIBRSRCE, EIBTASKN, EIBTIME, EIBTRMID,
+    EIBTRNID, Flow, Handler, Handlers, begin_command, begin_task, bytes, in_task, ok, raise, run, unsupported,
+};
 
 use crate::files::{Dd, Format, KeySpan, Keying};
 use crate::calendar::{civil, EPOCH_1900_TO_1970_MILLIS, EPOCH_1900_TO_1970_SECONDS, SECONDS_PER_DAY};

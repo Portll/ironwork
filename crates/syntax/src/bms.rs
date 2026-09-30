@@ -6,7 +6,8 @@ use crate::{Error, Pos};
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-pub use rt::bms::{Attrb, Field, Initial, Intensity, Map, Mapset, Mode, Protection};
+pub use rt::bms::{Attrb, Field, Initial, Intensity, Map, Mapset, Mode, Protection, Slot, extended_attributes, picture_size, slots};
+use rt::bms::EXTENDED;
 
 /// The mapset a COPY of `name` finds in the libraries: the one named `name` in `NAME.bms`, or the
 /// file's only mapset. None when no library holds a BMS file of that name.
@@ -391,28 +392,6 @@ fn attrb(ops: &Operands) -> Result<Attrb, Error> {
     Ok(a)
 }
 
-/// How many bytes a PICTURE string covers on the screen.
-/// The bytes a PICIN or PICOUT picture occupies: S and V take none.
-pub fn picture_size(pic: &str) -> u32 {
-    let chars: Vec<char> = pic.chars().collect();
-    let (mut size, mut i) = (0, 0);
-    while i < chars.len() {
-        let c = chars[i].to_ascii_uppercase();
-        i += 1;
-        let mut repeat = 1;
-        if chars.get(i) == Some(&'(')
-            && let Some(close) = chars[i..].iter().position(|&c| c == ')')
-        {
-            repeat = chars[i + 1..i + close].iter().collect::<String>().parse().unwrap_or(1);
-            i += close + 1;
-        }
-        if !matches!(c, 'S' | 'V') {
-            size += repeat;
-        }
-    }
-    size
-}
-
 fn hex_bytes(s: &str, line: u32) -> Result<Vec<u8>, Error> {
     if !s.len().is_multiple_of(2) || !s.is_ascii() {
         return Err(fail(line, "XINIT takes an even number of hexadecimal digits"));
@@ -507,81 +486,7 @@ fn position(ops: &Operands, map: &Map) ->Result<(u16, u16), Error> {
     Ok(((offset / columns + 1) as u16, (offset % columns + 1) as u16))
 }
 
-/// The extended attributes in symbolic-map order: name, field-name suffix, and whether EXTATT=YES implies it.
-const EXTENDED: &[(&str, char, bool)] = &[
-    ("COLOR", 'C', true),
-    ("PS", 'P', true),
-    ("HILIGHT", 'H', true),
-    ("VALIDN", 'V', true),
-    ("OUTLINE", 'U', false),
-    ("SOSI", 'M', false),
-    ("TRANSP", 'T', false),
-];
-
 /// The COBOL a program COPYs for the mapset: each map's input and output structures.
-/// Where one occurrence of a named field lies in a map's symbolic structure: the offsets of its L
-/// and F/A bytes and extended attributes (for the first member of a group, or a lone field), and
-/// of its data. They are the offsets `symbolic_map` declares, which SEND MAP and RECEIVE MAP use.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Slot {
-    pub field: usize,
-    pub occurrence: u16,
-    pub control: Option<usize>,
-    pub extended: usize,
-    pub data: usize,
-    pub size: usize,
-}
-
-impl Slot {
-    /// The L halfword, then the F/A byte, when the slot has them.
-    pub fn length_at(&self) -> Option<usize> {
-        self.control
-    }
-
-    pub fn attribute_at(&self) -> Option<usize> {
-        self.control.map(|c| c + 2)
-    }
-}
-
-/// The DSATTS attributes a map's symbolic structure carries, in their order.
-pub fn extended_attributes(map: &Map) -> Vec<&'static str> {
-    EXTENDED.iter().filter(|(a, _, _)| map.dsatts.iter().any(|d| d == a)).map(|(a, _, _)| *a).collect()
-}
-
-/// Every named field's slots, in structure order, sized for the input side (PICIN) or the output
-/// side (PICOUT).
-pub fn slots(map: &Map, input: bool) -> Vec<Slot> {
-    let k = extended_attributes(map).len();
-    let mut at = if map.tioapfx { 12 } else { 0 };
-    let mut out = Vec::new();
-    let mut group: Option<&str> = None;
-    for (i, f) in map.fields.iter().enumerate().filter(|(_, f)| f.name.is_some()) {
-        let lead = match &f.group {
-            Some(g) => {
-                let first = group != Some(g.as_str());
-                group = Some(g);
-                first
-            }
-            None => {
-                group = None;
-                true
-            }
-        };
-        let picture = if input { &f.picin } else { &f.picout };
-        let size = picture.as_deref().map_or(usize::from(f.length), |p| picture_size(p) as usize);
-        let copies = if f.group.is_none() { f.occurs.max(1) } else { 1 };
-        for occurrence in 0..copies {
-            let control = lead.then_some(at);
-            if lead {
-                at += 3 + k;
-            }
-            out.push(Slot { field: i, occurrence, control, extended: at - k, data: at, size });
-            at += size;
-        }
-    }
-    out
-}
-
 pub fn symbolic_map(mapset: &Mapset) -> String {
     let mut out = String::new();
     for map in &mapset.maps {

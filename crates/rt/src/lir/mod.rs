@@ -24,8 +24,9 @@ pub use file::{
     RelativeKey, Spacing, StartKey, StartRel,
 };
 pub use flow::{Declaratives, Frame, FrameKind, Op, Range, RangeKind, Resume, ReturnPoint, Returns, Step, Terminator};
+pub use crate::cics::CicsCommand;
 pub use payload::{
-    CicsCommand, DisplayItem, DisplayPlan, FloatFrom, Func, FunctionPlan, Image, InitField, InitPlan,
+    DisplayItem, DisplayPlan, FloatFrom, Func, FunctionPlan, Image, InitField, InitPlan,
     InvokePlan, MethodName, MovePlan, NationalFrom, NumericFrom, Receiver, ReleasePlan, ReportOp, ReturnPlan,
     SearchAllPlan, SearchKey, SortPlan, TrimSide,
 };

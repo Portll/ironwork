@@ -22,14 +22,12 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use syntax::Pos;
 use syntax::ast::*;
-use zarch::decimal::{self, Decimal};
+use zarch::decimal;
 use zarch::ebcdic::{self, CodePage, Collation};
 use zarch::hfp::{Hfp, Precision};
 
 mod cics;
-mod cics_bms;
-mod cics_files;
-mod cics_services;
+mod cics_bind;
 mod declaratives;
 mod facts;
 mod file_io;

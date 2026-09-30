@@ -293,5 +293,4 @@ placeholder! {
     ReleasePlan: "RELEASE, §9.6; not defined yet.",
     ReturnPlan: "RETURN, §9.6; not defined yet.",
     ReportOp: "INITIATE, GENERATE, TERMINATE or SUPPRESS, §9.6; not defined yet.",
-    CicsCommand: "An EXEC CICS command, §9.5; waits for the CICS code to move into rt.",
 }

@@ -7,6 +7,7 @@ mod common;
 
 use common::payroll;
 use ironwork_rt::abend::{AbendCode, Ending, FileStatus, Signal};
+use ironwork_rt::cics::{Assign, Cics, Condition, Control, Datum, FileControl, FileOptions, Record, Resp, Transfer};
 use ironwork_rt::files::Format;
 use ironwork_rt::lir::*;
 use ironwork_rt::module::codec::{Decode, Encode, Writer, decode_all};
@@ -325,7 +326,7 @@ fn program_shape_round_trips() {
             on_exception: false,
             not_on_exception: false,
         }],
-        cics: vec![CicsCommand::Placeholder],
+        cics: vec![CicsCommand { name: 3, command: Cics::Syncpoint { rollback: false }, resp: Resp { resp: None, resp2: None, nohandle: true } }],
         sqlca: Sqlca { fields: vec![(SqlcaField::Code, 0, INTEGER)] },
         entries: vec![EntryPoint { name: 2, paragraph: 1, block: 4, using: vec![0, 1] }],
         class: Some(Box::new(account())),
@@ -632,7 +633,94 @@ fn statement_payloads_round_trip_with_every_tag() {
     round_trip(&[ReleasePlan::Placeholder]);
     round_trip(&[ReturnPlan::Placeholder]);
     round_trip(&[ReportOp::Placeholder]);
-    round_trip(&[CicsCommand::Placeholder]);
+}
+
+#[test]
+fn cics_commands_round_trip_with_every_tag() {
+    let (place, value, text) = (Some(Datum::Place(1)), Some(Datum::Value(Operand::Const(2))), Some(Datum::Text(3)));
+    let record = Record { into: place, set: None, length: value };
+    let transfer = Transfer { program: text, commarea: place, length: Some(Datum::Bare) };
+    let control = Control { erase: true, freekb: false, alarm: true, frset: false };
+    let options = FileOptions {
+        ridfld: place,
+        keylength: value,
+        reqid: None,
+        from: None,
+        numrec: place,
+        record: record.clone(),
+        generic: true,
+        rrn: false,
+        gteq: true,
+        equal: false,
+        update: true,
+    };
+    let assign = Assign {
+        applid: place,
+        sysid: None,
+        userid: None,
+        netname: text,
+        facility: None,
+        startcode: None,
+        abcode: None,
+        program: value,
+        cwaleng: None,
+        twaleng: place,
+    };
+    let commands = vec![
+        Cics::File { verb: FileControl::Readprev, file: text, options },
+        Cics::Return { transid: text, commarea: None, length: None },
+        Cics::Link(transfer.clone()),
+        Cics::Xctl(transfer),
+        Cics::Abend { abcode: value, cancel: true },
+        Cics::HandleCondition(vec![(Condition::NOTFND, Some(4)), (Condition::ERROR, None)]),
+        Cics::IgnoreCondition(vec![Condition::LENGERR, Condition::BUSY]),
+        Cics::PushHandle,
+        Cics::PopHandle,
+        Cics::HandleAbend { program: false, label: Some(2), reset: true },
+        Cics::HandleAid,
+        Cics::SendMap { map: text, mapset: None, from: place, maponly: false, dataonly: true, cursor: Some(Datum::Bare), control },
+        Cics::ReceiveMap { map: text, mapset: text, into: place, set: None },
+        Cics::SendControl { cursor: value, control: Control::default() },
+        Cics::Receive(record.clone()),
+        Cics::Asktime { abstime: place },
+        Cics::Formattime { abstime: place, datesep: Some(Datum::Bare), timesep: None, outputs: vec![(5, Datum::Place(6)), (7, Datum::Bare)] },
+        Cics::Assign(assign),
+        Cics::Getmain { flength: value, length: None, initimg: value, set: place },
+        Cics::Freemain,
+        Cics::Enq,
+        Cics::Deq,
+        Cics::Delay,
+        Cics::Syncpoint { rollback: true },
+        Cics::Address { eib: place, commarea: place, cwa: None, twa: None },
+        Cics::SendText { from: place, length: value },
+        Cics::WriteOperator { text: value, textlength: None },
+        Cics::WriteqTs { queue: text, from: place, length: None, rewrite: true, item: place, numitems: None },
+        Cics::ReadqTs { queue: place, next: true, item: None, numitems: place, record: record.clone() },
+        Cics::DeleteqTs { queue: text },
+        Cics::WriteqTd { queue: text, from: place, length: value },
+        Cics::ReadqTd { queue: text, record },
+        Cics::DeleteqTd { queue: text },
+        Cics::Unsupported,
+    ];
+    every_variant(&commands, 34);
+    let resp = Resp { resp: place, resp2: Some(Datum::Place(8)), nohandle: false };
+    round_trip(&commands.into_iter().map(|command| CicsCommand { name: 9, command, resp: resp.clone() }).collect::<Vec<_>>());
+    let verbs = [
+        FileControl::Read,
+        FileControl::Write,
+        FileControl::Rewrite,
+        FileControl::Delete,
+        FileControl::Unlock,
+        FileControl::Startbr,
+        FileControl::Resetbr,
+        FileControl::Readnext,
+        FileControl::Readprev,
+        FileControl::Endbr,
+    ];
+    every_variant(&verbs, 10);
+    every_variant(&[Datum::Place(0), Datum::Value(Operand::Load(1)), Datum::Text(2), Datum::Bare], 4);
+    every_variant(Condition::ALL, 121);
+    assert_eq!(refused::<Condition>(&[121], &StringTable::default()), (0, "Condition has no tag 121".into()));
 }
 
 /// An indexed file with FILE STATUS, an alternate key, LINAGE and a print file's carriage.

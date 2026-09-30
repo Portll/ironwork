@@ -1125,46 +1125,38 @@ pub enum StartKey { Prime, Named { key: u8, span: RecordSpan }, Relative(IntExpr
 
 ### 9.5 EXEC CICS
 
+`rt::cics::CicsCommand` (rt/src/cics/command.rs), generic like §9.3's payloads: `P`, `O` and `S`
+are the LIR's `PlaceId`, `Operand` and `SymId`, or the walker's `&Ref`, `&Operand` and `&str`.
+
 ```rust
-/// RESP, RESP2 and NOHANDLE decide what `raise` does (machine/cics.rs:261-286).
-pub struct CicsCommand { pub command: Cics, pub resp: Option<PlaceId>, pub resp2: Option<PlaceId>, pub nohandle: bool }
+pub struct CicsCommand<P, O, S> { pub name: S, pub command: Cics<P, O, S>, pub resp: Resp<P, O, S> }
+/// RESP, RESP2 and NOHANDLE decide what `raise` does.
+pub struct Resp<P, O, S> { pub resp: Opt<P, O, S>, pub resp2: Opt<P, O, S>, pub nohandle: bool }
+/// An option's argument; an absent option is None.
+pub enum Datum<P, O, S> { Place(P), Value(O), Text(S), Bare }
+pub type Opt<P, O, S> = Option<Datum<P, O, S>>;
 
-/// One variant per arm of `Machine::cics` (machine/cics.rs:104-137), `cics_service`
-/// (cics_services.rs:17-32) and `cics_file` (cics_files.rs:38-50).
-pub enum Cics {
-    File(CicsFileVerb, CicsFileOptions),
-    Return { transid: Option<Datum>, commarea: Option<Datum>, length: Option<IntExpr> },
-    Link { program: Datum, commarea: Option<Datum>, length: Option<IntExpr>, xctl: bool },
-    Abend { abcode: Option<Datum>, cancel: bool },
-    /// Each condition with its label, or None to remove the entry.
-    HandleCondition(Vec<(cics::Condition, Option<ParaId>)>),
-    IgnoreCondition(Vec<cics::Condition>),
-    PushHandle, PopHandle, HandleAbend(AbendHandler), HandleAid,
-    SendMap(MapRef, SendMapOptions), ReceiveMap(MapRef, ReceiveMapOptions),
-    SendControl(SendControlOptions), Receive(ReceiveOptions),
-    Service(CicsService),
-    /// Settles the SQL unit of work through `Session::settle` (machine/sql.rs:135-145).
-    Syncpoint { rollback: bool },
-    /// "EXEC CICS … is not supported yet", when reached (cics_services.rs:32).
-    Unsupported(SymId),
-}
-
-/// An argument: a data item, a literal, or a name written as text.
-pub enum Datum { Place(PlaceId), Const(ConstId), Text(SymId) }
-/// A map named by literals is found at lowering; one named by data is looked up when it runs.
-pub enum MapRef { Found(MapId), Named { map: Datum, mapset: Option<Datum> } }
-/// A mapset's position in the module's BMS section (load-module.md §5.3), and a map's within it.
-pub struct MapId { pub mapset: u32, pub map: u32 }
+/// 34 variants: File { verb: FileControl, file, options: FileOptions } for the ten file-control
+/// commands; Return; Link and Xctl (Transfer); Abend; HandleCondition(Vec<(Condition,
+/// Option<ParaId>)>); IgnoreCondition(Vec<Condition>); PushHandle; PopHandle; HandleAbend
+/// { program, label: Option<ParaId>, reset }; HandleAid; SendMap; ReceiveMap; SendControl;
+/// Receive(Record); Asktime; Formattime; Assign; Getmain; Freemain; Enq; Deq; Delay;
+/// Syncpoint { rollback }; Address; SendText; WriteOperator; WriteqTs; ReadqTs; DeleteqTs;
+/// WriteqTd; ReadqTd; DeleteqTd; and Unsupported, "EXEC CICS … is not supported yet".
+pub enum Cics<P, O, S> { /* … */ }
 ```
 
-`cics::Condition` is the one RESP and default-abend table (semantics-library.md §7, DRY-4). Each
-options struct has one field per option its handler reads, as a `Datum`, `PlaceId` or `IntExpr`.
-The op returns `Next`, `GoTo(ParaId)` for a handled condition or HANDLE ABEND, or `End` for RETURN,
-XCTL and a LINKed program's STOP RUN. Handler tables, the task, the EIB and the terminal stay
-run-time state. The walker matches the command string and scans the option list on every command
-(machine/cics.rs:39-52, 98-137), resolves HANDLE labels by name (cics.rs:288-291), reads a mapset
-from the copy libraries on first use in a task (cics_bms.rs:37-57), and finds DFHCOMMAREA by name
-(cics_services.rs:128).
+`name` is the command as written, which messages give (SEND for SEND MAP written as SEND
+MAP(name)). `cics::Condition` is the one RESP and default-abend table (semantics-library.md §7,
+DRY-4). An option is evaluated when the service reads it, in the order the walker read it, so
+binding evaluates nothing. `rt::cics::run` returns `Next`, `GoTo(ParaId)` for a handled condition or
+HANDLE ABEND, or `End` for RETURN, XCTL and a LINKed program's STOP RUN. Handler tables, the task,
+the EIB and the terminal stay run-time state. What `run` asks of its executor is `CicsHost`: the
+run unit and the program's handlers, operands that are not data items, DFHCOMMAREA's address, a
+mapset from the copy libraries, the symbolic map's `mapI` and `mapO` by name, and running a program
+for LINK and XCTL. The walker binds a block in machine/cics_bind.rs, matching the command words and
+options the translator gives and resolving HANDLE labels there. SYNCPOINT settles the SQL session,
+which the walker runs (machine/sql.rs) until the SQL runtime moves into `rt` (E11d).
 
 ### 9.6 SORT, MERGE and Report Writer
 
