@@ -9,6 +9,9 @@ pub struct Source {
     /// For each char of `text`, where it came from.
     pub positions: Vec<Pos>,
     pub options: Vec<String>,
+    /// None when debugging lines (D in column 7) were read as comments; else the file and line of
+    /// each one read as program text.
+    pub debugging: Option<Vec<(u16, u32)>>,
 }
 
 const TEXT_START: usize = 7;
@@ -26,7 +29,16 @@ pub fn read(input: &str) -> Result<Source, Error> {
 /// Reads one file's text; `file` indexes its name in the program's file table. A comment-entry is
 /// left out of the text, so neither COPY nor the lexer sees it (LR pp. 117, 700).
 pub fn read_file(input: &str, file: u16) -> Result<Source, Error> {
-    let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new() };
+    read_lines(input, file, false)
+}
+
+/// Reads one file's text with its debugging lines as program text.
+pub fn read_file_debugging(input: &str, file: u16) -> Result<Source, Error> {
+    read_lines(input, file, true)
+}
+
+fn read_lines(input: &str, file: u16, debugging: bool) -> Result<Source, Error> {
+    let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new(), debugging: debugging.then(Vec::new) };
     let mut seen_program = false;
     let mut open_quote: Option<char> = None;
     let mut closed_at_72: Option<char> = None;
@@ -40,12 +52,16 @@ pub fn read_file(input: &str, file: u16) -> Result<Source, Error> {
             continue;
         }
         let indicator = chars.get(6).copied().unwrap_or(' ');
-        if matches!(indicator, '*' | '/' | 'D' | 'd') {
+        let debugging_line = matches!(indicator, 'D' | 'd');
+        if indicator == '*' || indicator == '/' || (debugging_line && out.debugging.is_none()) {
             continue;
         }
         let area: Vec<char> = chars.iter().take(TEXT_END).skip(TEXT_START).copied().collect();
         if area.iter().all(|c| *c == ' ') {
             continue;
+        }
+        if debugging_line && let Some(lines) = &mut out.debugging {
+            lines.push((file, line));
         }
         seen_program = true;
         let area_a_blank = area.iter().take(AREA_B - TEXT_START).all(|c| *c == ' ');
@@ -288,6 +304,16 @@ mod tests {
         let first = format!("{head}{}'", "A".repeat(TEXT_END - head.len() - 1));
         let s = read(&format!("{first}\n      -    'B'.\n")).unwrap();
         assert!(s.text.ends_with("A' 'B'."), "{}", s.text);
+    }
+
+    #[test]
+    fn debugging_lines_are_comments_unless_read_as_text() {
+        let text = "           MOVE 1 TO X\n      D    DISPLAY X\n      d    DISPLAY Y\n      D\n";
+        let plain = read(text).unwrap();
+        assert!(!plain.text.contains("DISPLAY") && plain.debugging.is_none());
+        let debugging = read_file_debugging(text, 3).unwrap();
+        assert!(debugging.text.contains("DISPLAY X") && debugging.text.contains("DISPLAY Y"));
+        assert_eq!(debugging.debugging, Some(vec![(3, 2), (3, 3)]));
     }
 
     #[test]

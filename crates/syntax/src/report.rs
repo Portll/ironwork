@@ -135,5 +135,7 @@ pub struct UseBeforeReporting {
     pub section: usize,
     pub group: String,
     pub qualifier: Option<String>,
+    /// USE GLOBAL: it serves the same group name in contained programs too.
+    pub global: bool,
     pub pos: Pos,
 }

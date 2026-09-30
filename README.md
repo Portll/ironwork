@@ -19,7 +19,7 @@ The PyPI and npm packages carry builds for Linux (static, x64 and arm64), macOS 
 Windows (x64). The same builds are attached to each [release](https://github.com/Portll/ironwork/releases).
 From a checkout:
 
-    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
+    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
     cargo run -p ironwork -- check program.cbl [-I copylib]...
 
 CBL and PROCESS cards set the options. COPY members are found in the program's own directory, then
@@ -182,6 +182,17 @@ The subset the interpreter runs today:
   sequential file opened I-O can be REWRITTEN in place.
   The files of a SAME RECORD AREA clause share one record area, and so do the VSAM files of a SAME
   AREA clause.
+- **Declaratives:** USE AFTER STANDARD EXCEPTION/ERROR PROCEDURE on files or on INPUT, OUTPUT, I-O
+  or EXTEND. When a statement on a file fails, or meets AT END or INVALID KEY with no phrase for
+  it, the file's own procedure runs, else the one for the mode it is open in, once FILE STATUS
+  holds the status; control then returns after the statement, and the failure no longer ends the
+  run. They serve the files of a SORT's USING and GIVING too, and keep those files from FASTSRT.
+  USE FOR DEBUGGING on procedures or ALL PROCEDURES, with DEBUG-ITEM, and debugging lines (D in
+  column 7), under SOURCE-COMPUTER ... WITH DEBUGGING MODE; without it both are comments. The
+  debugging sections run only under `-debug`, standing for the Language Environment option DEBUG,
+  as on z/OS, where NODEBUG is the default. USE GLOBAL serves its own program only, so GLOBAL for
+  an open mode, or before reporting a group of a contained program, is refused in a program that
+  contains others. Assumptions C60 to C69 hold what the manuals leave open.
 - **Sort and merge:** SD files; SORT and MERGE on ascending and descending keys anywhere in the
   record (alphanumeric keys by the COLLATING SEQUENCE phrase, else for a file by the program
   collating sequence, else in EBCDIC order; zoned and packed keys as DFSORT compares them; other
@@ -199,7 +210,7 @@ The subset the interpreter runs today:
   ZERO, JUSTIFIED and SIGN; PAGE-COUNTER and LINE-COUNTER; INITIATE, GENERATE of a DETAIL group or
   of the report (summary reporting), and TERMINATE, with control footings minor to major and
   headings major to minor, and page footing and heading on each new page; DECLARATIVES holding USE
-  BEFORE REPORTING, with SUPPRESS PRINTING and PRINT-SWITCH. Each line is a WRITE AFTER ADVANCING
+  [GLOBAL] BEFORE REPORTING, with SUPPRESS PRINTING and PRINT-SWITCH. Each line is a WRITE AFTER ADVANCING
   to the report's file, so its records carry ASA control characters, the CODE after the character.
   The precompiler's extensions (OCCURS, PRESENT WHEN, multiple LINES and COLUMNS, OR PAGE, STYLE,
   FUNCTION and the rest) are refused by name; assumptions RW1 to RW13 hold what the manuals leave

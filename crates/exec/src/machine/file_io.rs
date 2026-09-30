@@ -21,11 +21,27 @@ impl<'p> Machine<'p, '_, '_> {
         Ok(())
     }
 
-    /// Records an I/O status; with no FILE STATUS to hold it, a failing status ends the run.
+    /// Records an I/O status of file k in the mode it is open in.
     pub(super) fn io_status(&mut self, k: usize, status: impl Into<FileStatus>, message: String, pos: Pos) -> R<()> {
+        let mode = self.unit.programs[self.me].files[k].as_ref().map(|f| f.mode);
+        self.io_failure(k, status, mode, message, pos)
+    }
+
+    /// Records an I/O status of file k, open in `mode` or being opened in it. A failing status runs
+    /// the file's EXCEPTION/ERROR procedure, once FILE STATUS holds it
+    /// ([`numeric::assumptions::ERROR_DECLARATIVE_STATUSES`]); with none, and no FILE STATUS either,
+    /// it ends the run.
+    pub(super) fn io_failure(&mut self, k: usize, status: impl Into<FileStatus>, mode: Option<OpenMode>, message: String, pos: Pos) -> R<()> {
         let status = status.into();
         self.set_status(k, status, pos)?;
-        if self.program.files[k].status.is_none() && !status.covers('0') {
+        if status.covers('0') {
+            return Ok(());
+        }
+        self.uses.failed = Some(k);
+        if let Some(procedure) = self.error_declarative(k, mode) {
+            return self.run_error_declarative(procedure, pos);
+        }
+        if self.program.files[k].status.is_none() {
             return Err(Abend { code: AbendCode::Io(status), message, pos });
         }
         Ok(())
@@ -211,12 +227,15 @@ impl<'p> Machine<'p, '_, '_> {
         self.carriage[k].is_some_and(|c| !c.reserved) && format != Format::Text
     }
 
+    /// OPEN: a file whose data set is unavailable is status 35, or 05 when it is OPTIONAL, which
+    /// OPEN EXTEND then creates (Language Reference SC27-8713-03, pp. 300-301).
     pub(super) fn open_file(&mut self, mode: OpenMode, name: &str, pos: Pos) -> R<()> {
         let k = self.file_index(name, pos)?;
         let program = self.program;
         let decl = &program.files[k];
+        let opening = Some(mode);
         if self.unit.programs[self.me].files[k].is_some() {
-            return self.io_status(k, FileStatus::AlreadyOpen, format!("{name} is already open"), pos);
+            return self.io_failure(k, FileStatus::AlreadyOpen, opening, format!("{name} is already open"), pos);
         }
         let page = match (&decl.linage, mode) {
             (Some(_), OpenMode::Output | OpenMode::Extend) => Some(Page::opened(self.geometry(k, pos)?)),
@@ -237,34 +256,42 @@ impl<'p> Machine<'p, '_, '_> {
             let status = match &dd {
                 Some(d) if mode == OpenMode::Output || d.path.exists() => FileStatus::Success,
                 _ if decl.optional && mode != OpenMode::Output => FileStatus::SuccessOptional,
-                None => return self.io_status(k, FileStatus::FileNotFound, no_dd, pos),
-                Some(d) => return self.io_status(k, FileStatus::FileNotFound, format!("{name}: {}: no such file", d.path.display()), pos),
+                None => return self.io_failure(k, FileStatus::FileNotFound, opening, no_dd, pos),
+                Some(d) => return self.io_failure(k, FileStatus::FileNotFound, opening, format!("{name}: {}: no such file", d.path.display()), pos),
             };
             let keying = self.keying(k, pos)?;
             let format = dd.as_ref().and_then(|d| d.format).unwrap_or(default);
             let record_len = self.area(k).1 + usize::from(self.adds_control_byte(k, format));
             return match files::open_keyed(dd.as_ref(), mode, format, keying, record_len, self.page) {
                 Ok(f) => self.opened(k, f, status, pos),
-                Err(e) => self.io_status(k, FileStatus::PermanentError, format!("{name}: {e}"), pos),
+                Err(e) => self.io_failure(k, FileStatus::PermanentError, opening, format!("{name}: {e}"), pos),
             };
         }
         match dd {
-            None if decl.optional && mode == OpenMode::Input => self.opened(k, files::absent(), FileStatus::SuccessOptional, pos),
-            None => self.io_status(k, FileStatus::FileNotFound, no_dd, pos),
-            Some(dd) => match files::open(&dd, mode, dd.format.unwrap_or(default)) {
-                Ok(mut f) => {
-                    f.page = page;
-                    self.opened(k, f, FileStatus::Success, pos)
+            _ if decl.optional && mode == OpenMode::Input && dd.as_ref().is_none_or(|d| !d.path.exists()) => {
+                self.opened(k, files::absent(), FileStatus::SuccessOptional, pos)
+            }
+            None => self.io_failure(k, FileStatus::FileNotFound, opening, no_dd, pos),
+            Some(dd) if mode == OpenMode::Extend && !decl.optional && !dd.path.exists() => {
+                self.io_failure(k, FileStatus::FileNotFound, opening, format!("{name}: {}: no such file", dd.path.display()), pos)
+            }
+            Some(dd) => {
+                let created = mode == OpenMode::Extend && !dd.path.exists();
+                match files::open(&dd, mode, dd.format.unwrap_or(default)) {
+                    Ok(mut f) => {
+                        f.page = page;
+                        self.opened(k, f, if created { FileStatus::SuccessOptional } else { FileStatus::Success }, pos)
+                    }
+                    Err(e) => {
+                        let status = match e.kind() {
+                            std::io::ErrorKind::NotFound => FileStatus::FileNotFound,
+                            std::io::ErrorKind::Unsupported => FileStatus::OpenModeUnsupported,
+                            _ => FileStatus::PermanentError,
+                        };
+                        self.io_failure(k, status, opening, format!("{name}: {}: {e}", dd.path.display()), pos)
+                    }
                 }
-                Err(e) => {
-                    let status = match e.kind() {
-                        std::io::ErrorKind::NotFound => FileStatus::FileNotFound,
-                        std::io::ErrorKind::Unsupported => FileStatus::OpenModeUnsupported,
-                        _ => FileStatus::PermanentError,
-                    };
-                    self.io_status(k, status, format!("{name}: {}: {e}", dd.path.display()), pos)
-                }
-            },
+            }
         }
     }
 
@@ -315,16 +342,19 @@ impl<'p> Machine<'p, '_, '_> {
         let k = self.file_index(name, pos)?;
         match self.unit.programs[self.me].files[k].take() {
             None => self.io_status(k, FileStatus::NotOpen, format!("{name} is not open"), pos),
-            Some(f) => match f.close() {
-                Ok(()) => {
-                    let assign = &self.program.files[k].assign;
-                    if let Some(d) = self.unit.dds.get(assign) {
-                        self.unit.notify(Event::Close { dd: assign, path: &d.path });
+            Some(f) => {
+                let mode = Some(f.mode);
+                match f.close() {
+                    Ok(()) => {
+                        let assign = &self.program.files[k].assign;
+                        if let Some(d) = self.unit.dds.get(assign) {
+                            self.unit.notify(Event::Close { dd: assign, path: &d.path });
+                        }
+                        self.set_status(k, FileStatus::Success, pos)
                     }
-                    self.set_status(k, FileStatus::Success, pos)
+                    Err(e) => self.io_failure(k, FileStatus::PermanentError, mode, format!("{name}: {e}"), pos),
                 }
-                Err(e) => self.io_status(k, FileStatus::PermanentError, format!("{name}: {e}"), pos),
-            },
+            }
         }
     }
 

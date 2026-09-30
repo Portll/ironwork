@@ -236,11 +236,11 @@ fn copy_span(out: &mut Source, chars: &[char], positions: &[Pos], range: std::op
 
 fn apply(src: &Source, replacing: &[Replacing]) -> Source {
     if replacing.is_empty() {
-        return Source { text: src.text.clone(), positions: src.positions.clone(), options: Vec::new() };
+        return Source { text: src.text.clone(), positions: src.positions.clone(), options: Vec::new(), debugging: None };
     }
     let chars: Vec<char> = src.text.chars().collect();
     let words = text_words(&chars);
-    let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new() };
+    let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new(), debugging: None };
     let emit = |out: &mut Source, text: &str, pos: Pos| {
         for c in text.chars() {
             out.text.push(c);
@@ -311,7 +311,8 @@ fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>,
     if !words.iter().any(|w| w.text.eq_ignore_ascii_case("COPY") || w.text.eq_ignore_ascii_case("INCLUDE")) {
         return Ok(source);
     }
-    let mut out = Source { text: String::new(), positions: Vec::new(), options: source.options.clone() };
+    let mut out = Source { text: String::new(), positions: Vec::new(), options: source.options.clone(), debugging: source.debugging.clone() };
+    let read = |text: &str, file: u16| if source.debugging.is_some() { source::read_file_debugging(text, file) } else { source::read_file(text, file) };
     let (mut cursor, mut i) = (0usize, 0usize);
     while i < words.len() {
         let pos = source.positions[words[i].start];
@@ -330,27 +331,34 @@ fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>,
         let verb = if sql { "EXEC SQL INCLUDE" } else { "COPY" };
         let mapset = if own || path.is_some() { None } else { bms::load(libraries, &name, library.as_deref()) };
         let (key, member) = match (path, mapset) {
-            (Some(path), _) => (path.display().to_string(), read_member(&path, pos, files)?),
+            (Some(path), _) => (path.display().to_string(), read_member(&path, pos, files, &read)?),
             (None, Some((path, mapset))) => {
                 let mapset = mapset.map_err(|e| Error::at(pos, format!("{verb} {name}: {}", e.place(&path.display().to_string()))))?;
                 let file = u16::try_from(files.len()).map_err(|_| Error::at(pos, "more than 65535 copy members"))?;
                 files.push(path.display().to_string());
-                (path.display().to_string(), source::read_file(&bms::symbolic_map(&mapset), file)?)
+                (path.display().to_string(), read(&bms::symbolic_map(&mapset), file)?)
             }
             (None, None) => {
                 let text = system::member(&name).ok_or_else(|| Error::at(pos, format!("{verb} {name}: no such member in the copy libraries")))?;
                 let key = format!("(system member {})", name.to_ascii_uppercase());
                 let file = u16::try_from(files.len()).map_err(|_| Error::at(pos, "more than 65535 copy members"))?;
                 files.push(key.clone());
-                (key, source::read_file(&text, file)?)
+                (key, read(&text, file)?)
             }
         };
         if stack.contains(&key) || stack.len() >= MAX_DEPTH {
             return Err(Error::at(pos, format!("{verb} {name}: copies itself, or nests deeper than {MAX_DEPTH}")));
         }
         stack.push(key);
-        let member = expand_nested(member, libraries, files, stack)?;
+        let mut member = expand_nested(member, libraries, files, stack)?;
         stack.pop();
+        if let (Some(lines), Some(copied)) = (&mut out.debugging, member.debugging.take()) {
+            // A COPY on a debugging line makes all of its member's text debugging lines.
+            if lines.contains(&(pos.file, pos.line)) {
+                lines.extend(member.positions.iter().map(|p| (p.file, p.line)));
+            }
+            lines.extend(copied);
+        }
         let replaced = apply(&member, &replacing);
         out.text.push_str(&replaced.text);
         out.positions.extend(replaced.positions);
@@ -363,11 +371,11 @@ fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>,
     Ok(out)
 }
 
-fn read_member(path: &Path, pos: Pos, files: &mut Vec<String>) -> Result<Source, Error> {
+fn read_member(path: &Path, pos: Pos, files: &mut Vec<String>, read: &dyn Fn(&str, u16) -> Result<Source, Error>) -> Result<Source, Error> {
     let bytes = std::fs::read(path).map_err(|e| Error::at(pos, format!("COPY {}: {e}", path.display())))?;
     let file = u16::try_from(files.len()).map_err(|_| Error::at(pos, "more than 65535 copy members"))?;
     files.push(path.display().to_string());
-    source::read_file(&decode(&bytes), file)
+    read(&decode(&bytes), file)
 }
 
 #[cfg(test)]

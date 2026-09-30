@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 mod collating;
 mod data;
 mod linage;
+mod declaratives;
 mod oo;
 mod printer;
 mod procedure;
@@ -277,6 +278,10 @@ fn file_status_codes_and_optional_files() {
         .concat(),
     );
     let (out, err, ending) = run_files(&source, &[]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(out, "05\nEND 10\n35\n47\n");
+    let missing = [format!("NODD={}", temp("no-such-data-set").display()), format!("NODD2={}", temp("no-such-data-set").display())];
+    let (out, err, ending) = run_files(&source, &missing);
     assert!(ending.is_ok(), "{ending:?} {err}");
     assert_eq!(out, "05\nEND 10\n35\n47\n");
 }
@@ -828,6 +833,7 @@ fn mutated_programs_never_panic_the_front_end() {
         .chain(oo::fuzz_seeds())
         .chain(collating::fuzz_seeds())
         .chain(procedure::fuzz_seeds())
+        .chain(declaratives::fuzz_seeds())
         .collect();
     let mut seed = 0x853C_49E6_748F_EA9Bu64;
     let mut next = move || {

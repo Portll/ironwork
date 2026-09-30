@@ -39,10 +39,13 @@ pub enum Signal {
     SortStopped,
     /// The reader of DISPLAY output went away, as `head` does: not the program's failure.
     ClosedOutput,
+    /// An EXCEPTION/ERROR procedure ended in GO TO, STOP RUN or GOBACK, which the statement that
+    /// ran it carries out.
+    DeclarativeExit,
 }
 
 impl Signal {
-    const ALL: [Self; 4] = [Self::StopRun, Self::GoBack, Self::SortStopped, Self::ClosedOutput];
+    const ALL: [Self; 5] = [Self::StopRun, Self::GoBack, Self::SortStopped, Self::ClosedOutput, Self::DeclarativeExit];
 
     fn text(self) -> &'static str {
         match self {
@@ -50,6 +53,7 @@ impl Signal {
             Self::GoBack => "REPORT-GOBACK",
             Self::SortStopped => "SORT-STOPPED",
             Self::ClosedOutput => "CLOSED-OUTPUT",
+            Self::DeclarativeExit => "DECLARATIVE-EXIT",
         }
     }
 }

@@ -1,6 +1,5 @@
-//! The REPORT SECTION, the FD REPORT clause, the report writer statements, and DECLARATIVES
-//! holding USE BEFORE REPORTING procedures. Clauses of the report writer this implementation does
-//! not run are refused by name.
+//! The REPORT SECTION, the FD REPORT clause, the report writer statements, and USE BEFORE
+//! REPORTING. Clauses of the report writer this implementation does not run are refused by name.
 
 use super::*;
 use crate::report::*;
@@ -90,51 +89,13 @@ impl Parser<'_> {
         })
     }
 
-    /// The PROCEDURE DIVISION's paragraphs, DECLARATIVES first when there are any.
-    pub(super) fn procedure_paragraphs(&mut self, writer: &mut ReportWriter) -> R<Vec<Paragraph>> {
-        if !self.is_word("DECLARATIVES") {
-            return self.paragraphs();
-        }
-        self.at += 1;
-        self.expect(&Tok::Period, "a period after DECLARATIVES")?;
-        let mut paragraphs = Vec::new();
-        loop {
-            if self.is_word("END") && self.word_at(1) == Some("DECLARATIVES") {
-                self.at += 2;
-                self.expect(&Tok::Period, "a period after END DECLARATIVES")?;
-                break;
-            }
-            if self.peek().is_none() || self.at_end_program() || self.at_division(&["IDENTIFICATION", "ID"]) {
-                return Err(self.error("END DECLARATIVES"));
-            }
-            if paragraphs.is_empty() && !self.section_header() {
-                return Err(self.error("a section in DECLARATIVES"));
-            }
-            if self.procedure_item(&mut paragraphs)? && self.is_word("USE") {
-                let used = self.use_statement(paragraphs.len() - 1)?;
-                writer.uses.push(used);
-            }
-        }
-        writer.procedure_start = paragraphs.len();
-        paragraphs.extend(self.paragraphs()?);
-        Ok(paragraphs)
-    }
-
-    fn use_statement(&mut self, section: usize) -> R<UseBeforeReporting> {
-        let pos = self.pos();
-        self.at += 1;
-        if self.is_word("GLOBAL") {
-            return Err(Error::at(pos, "USE GLOBAL BEFORE REPORTING is not supported yet"));
-        }
-        if !self.is_word("BEFORE") || self.word_at(1) != Some("REPORTING") {
-            let what = if self.is_word("FOR") { "USE FOR DEBUGGING" } else { "USE AFTER STANDARD ERROR or EXCEPTION" };
-            return Err(Error::at(pos, format!("{what} is not supported yet")));
-        }
+    /// USE BEFORE REPORTING, after its USE and any GLOBAL.
+    pub(super) fn use_before_reporting(&mut self, section: usize, global: bool, pos: Pos) -> R<UseBeforeReporting> {
         self.at += 2;
         let group = self.name("a report group name")?;
         let qualifier = if self.accept_any(&["IN", "OF"]).is_some() { Some(self.name("a report name")?) } else { None };
         self.expect(&Tok::Period, "a period after USE BEFORE REPORTING")?;
-        Ok(UseBeforeReporting { section, group, qualifier, pos })
+        Ok(UseBeforeReporting { section, group, qualifier, global, pos })
     }
 
     fn report_description(&mut self) -> R<Report> {

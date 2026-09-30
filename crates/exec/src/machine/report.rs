@@ -372,6 +372,7 @@ impl<'p> Machine<'p, '_, '_> {
     /// Performs a USE BEFORE REPORTING section; true when it suppressed the group's printing.
     fn use_before_reporting(&mut self, (first, last): (usize, usize), pos: Pos) -> R<bool> {
         self.nest(pos)?;
+        self.uses.arrival = super::declaratives::Arrival::Use;
         let flow = self.run_paragraphs(first, last);
         self.unit.depth -= 1;
         match flow? {

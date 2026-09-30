@@ -339,6 +339,9 @@ fn use_before_reporting_runs_before_the_group_and_suppress_printing_drops_its_li
     let (out, file) = run_report(&source, "rw-tally.txt", true);
     assert_eq!(text(file), "1\n3\nSUM  6\n");
     assert_eq!(out, "3\n");
+    let global = source.replace("USE BEFORE REPORTING ROW", "USE GLOBAL BEFORE REPORTING ROW");
+    let (out, file) = run_report(&global, "rw-tally-global.txt", true);
+    assert_eq!((text(file).as_str(), out.as_str()), ("1\n3\nSUM  6\n", "3\n"));
 }
 
 #[test]
@@ -369,10 +372,7 @@ fn report_writer_features_not_implemented_are_refused_by_name() {
         let message = refusal(&source);
         assert!(message.contains(name), "expected a refusal naming {name}, got {message}");
     }
-    let statements: &[(&[&str], &str)] = &[
-        (&["DECLARATIVES.", "E SECTION.", "    USE AFTER STANDARD ERROR PROCEDURE ON RPT.", "E-1.", "    CONTINUE.", "END DECLARATIVES.", "M SECTION.", "    GOBACK."], "USE AFTER STANDARD ERROR"),
-        (&["    INITIATE R UPON RPT."], "INITIATE ... UPON"),
-    ];
+    let statements: &[(&[&str], &str)] = &[(&["    INITIATE R UPON RPT."], "INITIATE ... UPON")];
     for (procedure, name) in statements {
         let source = report_program("FD  RPT REPORT IS R.", &[], &["RD  R.", "01  D TYPE DE LINE PLUS 1 COLUMN 1 VALUE 'X'."], procedure);
         let message = refusal(&source);

@@ -165,6 +165,9 @@ pub struct Options {
     pub warnings: Warnings,
     /// DYNAM: a CALL of a literal loads the program at run time, as a CALL of an identifier does.
     pub dynam: bool,
+    /// The Language Environment runtime option DEBUG (`-debug`): USE FOR DEBUGGING procedures run.
+    /// NODEBUG, IBM's default, keeps them from running (assumption C63).
+    pub debug: bool,
 }
 
 impl Default for Options {
@@ -185,6 +188,7 @@ impl Default for Options {
             dbcs: true,
             warnings: Warnings::default(),
             dynam: false,
+            debug: false,
         }
     }
 }
@@ -270,6 +274,7 @@ impl Options {
             "--fastsrt-adv-print=exclude" => self.fastsrt_adv_print = FastsrtAdvPrint::Exclude,
             "--fastsrt-adv-print=include" => self.fastsrt_adv_print = FastsrtAdvPrint::Include,
             "-warnings-block" => self.warnings = Warnings::Block,
+            "-debug" => self.debug = true,
             _ => return Err(OptionError::UnknownFlag(flag.to_owned())),
         }
         Ok(())

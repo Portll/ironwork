@@ -5,7 +5,7 @@ use std::{env, fs, io};
 const USAGE: &str = "ironwork for COBOL
 usage:
   ironwork run <program.cbl> [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include]
-               [-I <dir>]... [-L <dir>]... [--dd NAME=path[:format]]... [--clock <time>]
+               [-debug] [-I <dir>]... [-L <dir>]... [--dd NAME=path[:format]]... [--clock <time>]
                [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                                                        compile and run; CBL and PROCESS cards set the options
   ironwork check <program.cbl> [-I <dir>]...           compile only
@@ -32,6 +32,9 @@ flags:
              refuse to run a program whose compile gave warnings, as run and cics refuse one whose
              compile gave errors; the return code stays 4. ironwork's own: IBM's FLAG option only
              chooses which messages are listed
+  -debug     the Language Environment runtime option DEBUG: a program compiled WITH DEBUGGING
+             MODE runs its USE FOR DEBUGGING procedures, which NODEBUG, IBM's default, keeps from
+             running. Debugging lines run in such a program either way
   -I <dir>   a copy library for COPY members, searched after the program's own directory
   -L <dir>   a program library: CALL finds a program there by name, after the programs in the
              same source and the program's own directory
@@ -129,7 +132,7 @@ exit status: for check, and for a run the compile refuses, the compile's return 
   and cics refuse at 8, or at 4 under -warnings-block. Otherwise RETURN-CODE when the run ends
   normally, 16 an abend; 2 usage";
 
-const FLAGS: &[&str] = &["-silent", "-strict-sort-keys", "-warnings-block"];
+const FLAGS: &[&str] = &["-silent", "-strict-sort-keys", "-warnings-block", "-debug"];
 const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid", "--sysid", "--commarea", "--commarea-out", "--file", "--td", "--screens", "--serve", "--transaction", "--csd"];
 
 mod compare;

@@ -27,6 +27,8 @@ pub struct Program {
     pub exec_declarations: Vec<ExecBlock>,
     /// The REPORT SECTION, and the DECLARATIVES that serve it.
     pub report_writer: crate::report::ReportWriter,
+    /// The DECLARATIVES' USE AFTER EXCEPTION/ERROR and USE FOR DEBUGGING procedures.
+    pub declaratives: Declaratives,
     /// The REPOSITORY's classes, and for a class definition or a method what it is.
     pub oo: Option<Box<Oo>>,
     pub environment: Environment,
@@ -205,6 +207,40 @@ pub struct Paragraph {
 pub struct ProcName {
     pub name: String,
     pub section: Option<String>,
+}
+
+/// USE AFTER EXCEPTION/ERROR and USE FOR DEBUGGING sections; USE BEFORE REPORTING ones are the
+/// Report Writer's.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Declaratives {
+    pub errors: Vec<UseAfterError>,
+    pub debugging: Vec<UseForDebugging>,
+}
+
+/// A USE AFTER STANDARD EXCEPTION/ERROR PROCEDURE section.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UseAfterError {
+    /// The section's header among the program's paragraphs.
+    pub section: usize,
+    pub global: bool,
+    pub on: ErrorUse,
+    pub pos: Pos,
+}
+
+/// The files an EXCEPTION/ERROR procedure serves: those it names, or those open in one mode.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ErrorUse {
+    Files(Vec<String>),
+    Mode(OpenMode),
+}
+
+/// A USE FOR DEBUGGING section, which runs before each procedure it names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UseForDebugging {
+    pub section: usize,
+    /// Empty for ALL PROCEDURES.
+    pub procedures: Vec<ProcName>,
+    pub pos: Pos,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -617,6 +653,9 @@ pub struct Environment {
     /// SPECIAL-NAMES entries naming a printer channel, space suppression, a punch pocket or AFP:
     /// each mnemonic-name and its environment-name.
     pub mnemonics: Vec<(String, String)>,
+    /// SOURCE-COMPUTER ... WITH DEBUGGING MODE: debugging lines and USE FOR DEBUGGING sections are
+    /// compiled rather than read as comments.
+    pub debugging_mode: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

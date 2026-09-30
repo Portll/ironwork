@@ -261,11 +261,24 @@ impl<'p> Machine<'p, '_, '_> {
         Ok(Ok(Entry { record, keys }))
     }
 
-    fn status_failed(&mut self, k: usize) -> R<bool> {
-        let program = self.program;
-        let Some(r) = &program.files[k].status else { return Ok(false) };
-        let loc = self.locate(r)?;
-        Ok(self.bytes(loc).first().is_some_and(|&b| b != ebcdic::ZERO))
+    /// Runs `op`; true when a statement on file k failed in it.
+    fn fails(&mut self, k: usize, op: impl FnOnce(&mut Self) -> R<()>) -> R<bool> {
+        self.uses.failed = None;
+        op(self)?;
+        Ok(self.uses.failed == Some(k))
+    }
+
+    /// After a USING or GIVING file fails: with an EXCEPTION/ERROR procedure for it, which has run,
+    /// the file's processing ends there and the SORT or MERGE goes on unless the procedure set
+    /// SORT-RETURN to 16 ([`assumptions::SORT_FILE_DECLARATIVE`]); without one it fails.
+    fn after_failure(&mut self, k: usize, mode: OpenMode, why: String, pos: Pos) -> R<Outcome> {
+        if self.error_declarative(k, Some(mode)).is_none() {
+            return Ok(Err(why));
+        }
+        if self.sort_return(pos)? == 16 {
+            return Ok(Err(stopped_by_program()));
+        }
+        Ok(Ok(()))
     }
 
     fn is_open(&self, k: usize) -> bool {
@@ -277,7 +290,7 @@ impl<'p> Machine<'p, '_, '_> {
         let program = self.program;
         let name = &program.files[k].name;
         if self.is_open(k) {
-            self.io_status(k, "41", format!("{name} is open, and a SORT or MERGE opens it itself"), pos)?;
+            self.io_failure(k, "41", Some(mode), format!("{name} is open, and a SORT or MERGE opens it itself"), pos)?;
             return Ok(Err(format!("{name} is already open (file status 41)")));
         }
         self.open_file(mode, name, pos)?;
@@ -287,8 +300,7 @@ impl<'p> Machine<'p, '_, '_> {
     fn close_for_sort(&mut self, k: usize, pos: Pos) -> R<Outcome> {
         let program = self.program;
         let name = &program.files[k].name;
-        self.close_file(name, pos)?;
-        if self.status_failed(k)? { Ok(Err(format!("CLOSE {name} failed"))) } else { Ok(Ok(())) }
+        if self.fails(k, |m| m.close_file(name, pos))? { Ok(Err(format!("CLOSE {name} failed"))) } else { Ok(Ok(())) }
     }
 
     /// The next record of an open USING file, with the file status READ would set. A print file's
@@ -355,14 +367,22 @@ impl<'p> Machine<'p, '_, '_> {
         let program = self.program;
         let name = &program.files[k].name;
         if let Err(why) = self.open_for_sort(k, OpenMode::Input, pos)? {
-            return Ok(Err(why));
+            return Ok(self.after_failure(k, OpenMode::Input, why, pos)?.map(|()| Vec::new()));
         }
         let extent = self.area(sd).1 + if dfsort { self.control_byte(k) } else { 0 };
         let mut entries = Vec::new();
+        let mut closed = false;
         loop {
             let failure = match self.next_input(k, dfsort, pos)? {
                 Input::End => break,
-                Input::Failed(why) => why,
+                Input::Failed(why) => {
+                    self.close_file(name, pos)?;
+                    if let Err(why) = self.after_failure(k, OpenMode::Input, why, pos)? {
+                        return Ok(Err(why));
+                    }
+                    closed = true;
+                    break;
+                }
                 Input::Record(r) => match self.entry(sd, keys, r, extent, pos)? {
                     Ok(e) => {
                         entries.push(e);
@@ -374,7 +394,10 @@ impl<'p> Machine<'p, '_, '_> {
             self.close_file(name, pos)?;
             return Ok(Err(failure));
         }
-        if let Err(why) = self.close_for_sort(k, pos)? {
+        if !closed
+            && let Err(why) = self.close_for_sort(k, pos)?
+            && let Err(why) = self.after_failure(k, OpenMode::Input, why, pos)?
+        {
             return Ok(Err(why));
         }
         if dfsort && entries.is_empty() && matches!(program.files[k].organization, Organization::Indexed | Organization::Relative) {
@@ -410,7 +433,7 @@ impl<'p> Machine<'p, '_, '_> {
         let program = self.program;
         let name = &program.files[k].name;
         if let Err(why) = self.open_for_sort(k, OpenMode::Output, pos)? {
-            return Ok(Err(why));
+            return self.after_failure(k, OpenMode::Output, why, pos);
         }
         let (area, size) = self.area(k);
         let limit = size.min(self.area(sd).1);
@@ -425,13 +448,15 @@ impl<'p> Machine<'p, '_, '_> {
             let len = record.len().min(limit);
             self.unit.mem[area..area + len].copy_from_slice(&record[..len]);
             let loc = Loc { offset: area, len, kind: Kind::Alnum { justified: false }, item: usize::MAX };
-            self.write_record(k, loc, None, &NO_HANDLERS, pos)?;
-            if self.status_failed(k)? {
+            if self.fails(k, |m| m.write_record(k, loc, None, &NO_HANDLERS, pos).map(drop))? {
                 self.close_file(name, pos)?;
-                return Ok(Err(format!("WRITE {name} failed")));
+                return self.after_failure(k, OpenMode::Output, format!("WRITE {name} failed"), pos);
             }
         }
-        self.close_for_sort(k, pos)
+        match self.close_for_sort(k, pos)? {
+            Err(why) => self.after_failure(k, OpenMode::Output, why, pos),
+            closed => Ok(closed),
+        }
     }
 
     /// 1 when file k's data set holds a byte for ADV's printer control character before each
@@ -543,6 +568,8 @@ impl<'p> Machine<'p, '_, '_> {
             "it is a variable-length relative file".into()
         } else if !input && decl.linage.is_some() {
             "its FD has LINAGE".into()
+        } else if self.error_declarative(k, Some(if input { OpenMode::Input } else { OpenMode::Output })).is_some() {
+            "an EXCEPTION/ERROR procedure applies to it".into()
         } else if self.carriage[k].is_some_and(|c| !c.reserved) && self.options.fastsrt_adv_print == FastsrtAdvPrint::Exclude {
             format!("it is a print file, whose records ADV makes a byte longer than its FD's {} ({})", self.area(k).1, FastsrtAdvPrint::Exclude.flag())
         } else if self.fixed_length(k) != self.fixed_length(sd) {
@@ -628,7 +655,7 @@ impl<'p> Machine<'p, '_, '_> {
 
     /// Runs an input or output procedure with `active` in progress. An Err outcome is a stop
     /// signalled by RELEASE or RETURN.
-    fn run_sort_procedure(&mut self, from: &ProcName, thru: Option<&ProcName>, active: Active, pos: Pos) -> R<(Result<Flow, String>, Option<Active>)> {
+    fn run_sort_procedure(&mut self, from: &ProcName, thru: Option<&ProcName>, active: Active, arrival: declaratives::Arrival, pos: Pos) -> R<(Result<Flow, String>, Option<Active>)> {
         let (start, first_end) = self.procedure(from, pos)?;
         let end = match thru {
             Some(t) => self.procedure(t, pos)?.1,
@@ -637,7 +664,7 @@ impl<'p> Machine<'p, '_, '_> {
         self.sort = Some(active);
         let nested = self.nest(pos);
         let flow = nested.and_then(|()| {
-            let flow = self.procedure_range(start, end);
+            let flow = self.procedure_range(start, end, arrival);
             self.unit.depth -= 1;
             flow
         });
@@ -651,10 +678,12 @@ impl<'p> Machine<'p, '_, '_> {
 
     /// Paragraphs `start` to `end` as a procedure's range: a GO TO out of it carries on where it
     /// went, and the procedure ends when control falls through the end of paragraph `end`.
-    fn procedure_range(&mut self, start: usize, end: usize) -> R<Flow> {
+    fn procedure_range(&mut self, start: usize, end: usize, arrival: declaratives::Arrival) -> R<Flow> {
         let last = self.program.paragraphs.len() - 1;
+        self.uses.arrival = arrival;
         let mut flow = self.run_paragraphs(start, end)?;
         while let Flow::GoTo(t) = flow {
+            self.uses.arrival = declaratives::Arrival::GoTo;
             flow = if t <= end {
                 self.run_paragraphs(t, end)?
             } else {
@@ -689,7 +718,7 @@ impl<'p> Machine<'p, '_, '_> {
             },
             Some(SortIo::Procedure { from, thru }) => {
                 let active = Active { sd, keys: keys.clone(), phase: Phase::Input(Vec::new()) };
-                let (flow, active) = self.run_sort_procedure(from, thru.as_ref(), active, pos)?;
+                let (flow, active) = self.run_sort_procedure(from, thru.as_ref(), active, declaratives::Arrival::Sort("SORT INPUT"), pos)?;
                 match flow {
                     Err(why) => return self.sort_end(st, Err(why)),
                     Ok(Flow::End(e)) => return Ok(Flow::End(e)),
@@ -716,7 +745,8 @@ impl<'p> Machine<'p, '_, '_> {
             }
             Some(SortIo::Procedure { from, thru }) => {
                 let active = Active { sd, keys, phase: Phase::Output { records, next: 0 } };
-                match self.run_sort_procedure(from, thru.as_ref(), active, pos)?.0 {
+                let procedure = if st.merge { "MERGE OUTPUT" } else { "SORT OUTPUT" };
+                match self.run_sort_procedure(from, thru.as_ref(), active, declaratives::Arrival::Sort(procedure), pos)?.0 {
                     Err(why) => self.sort_end(st, Err(why)),
                     Ok(Flow::End(e)) => Ok(Flow::End(e)),
                     Ok(_) => self.sort_end(st, Ok(())),

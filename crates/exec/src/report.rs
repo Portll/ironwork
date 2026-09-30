@@ -686,7 +686,7 @@ fn resolve_report(program: &Program, layout: &Layout, ri: usize, r: &rw::Report,
     let children = &layout.items[root].children;
     let child = |ordinal: usize| children[ordinal];
     let paged = r.page.is_some();
-    let mut check = crate::Check { layout, program, errors };
+    let mut check = crate::Check { layout, program, errors, debugging: false };
     let mut controls = Vec::new();
     for (c, &(saved, len)) in r.controls.iter().zip(&draft.controls) {
         check.reference(c);

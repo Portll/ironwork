@@ -25,6 +25,7 @@ mod cics;
 mod cics_bms;
 mod cics_files;
 mod cics_services;
+mod declaratives;
 mod file_io;
 mod le_services;
 mod oo;
@@ -101,6 +102,8 @@ pub struct Machine<'p, 'u, 'w> {
     sort: Option<sort::Active>,
     /// The priority-number of the segment the running paragraph is in.
     segment: u8,
+    declaratives: &'p crate::declaratives::Table,
+    uses: declaratives::State,
     unit: &'u mut RunUnit<'w>,
 }
 
@@ -221,6 +224,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             oo: oo::Frame::default(),
             sort: None,
             segment: 0,
+            declaratives: &compiled.declaratives,
+            uses: declaratives::State::default(),
             unit,
         };
         if compiled.layout.local_size > 0 {
@@ -274,15 +279,20 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
         self.segment = self.program.paragraphs[start].priority;
         let last = self.program.paragraphs.len() - 1;
+        self.uses.arrival = declaratives::Arrival::Start;
         loop {
             match self.run_paragraphs_from(start, skip, last)? {
                 Flow::End(e) => return Ok(e),
-                Flow::GoTo(t) => (start, skip) = (t, 0),
+                Flow::GoTo(t) => {
+                    (start, skip) = (t, 0);
+                    self.uses.arrival = declaratives::Arrival::GoTo;
+                }
                 _ => return Ok(Ending::EndOfProgram),
             }
         }
     }
 
+    /// Paragraphs `from` to `to`, as control reaching `from` in the way `uses.arrival` says.
     fn run_paragraphs(&mut self, from: usize, to: usize) -> R<Flow> {
         self.run_paragraphs_from(from, 0, to)
     }
@@ -293,8 +303,20 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let program = self.program;
         let segment = self.segment;
         let mut i = from;
+        let mut arrival = std::mem::take(&mut self.uses.arrival);
         while i <= to {
             self.enter_segment(program.paragraphs[i].priority);
+            if !self.declaratives.triggers.is_empty() {
+                if skip == 0
+                    && let Some(flow) = self.debug_before(i, arrival)?
+                {
+                    return Ok(flow);
+                }
+                if program.paragraphs[i].is_section {
+                    self.uses.line = program.paragraphs[i].pos;
+                }
+                arrival = declaratives::Arrival::FallThrough;
+            }
             let altered = self.unit.programs[self.me].altered.get(i).copied().flatten();
             let statements = &program.paragraphs[i].statements;
             let flow = match altered {
@@ -305,7 +327,10 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             match flow {
                 Flow::Next | Flow::ExitParagraph => i += 1,
                 Flow::ExitSection => i = crate::section_end(program, i) + 1,
-                Flow::GoTo(t) if (from..=to).contains(&t) => i = t,
+                Flow::GoTo(t) if (from..=to).contains(&t) => {
+                    i = t;
+                    arrival = declaratives::Arrival::GoTo;
+                }
                 Flow::ExitPerform | Flow::ExitPerformCycle => i += 1,
                 other => return Ok(other),
             }
@@ -358,7 +383,20 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         crate::procedure(self.program, p).map_err(|m| Abend::ironwork(m, pos))
     }
 
+    /// One statement. An EXCEPTION/ERROR procedure it ran may have sent control elsewhere.
     fn exec(&mut self, s: &'p Stmt) -> R<Flow> {
+        if !self.declaratives.triggers.is_empty()
+            && let Some(pos) = declaratives::statement_pos(s)
+        {
+            self.uses.line = pos;
+        }
+        match self.statement(s) {
+            Err(Abend { code: AbendCode::Signal(Signal::DeclarativeExit), .. }) => Ok(self.declarative_exit()),
+            flow => flow,
+        }
+    }
+
+    fn statement(&mut self, s: &'p Stmt) -> R<Flow> {
         match s {
             Stmt::Move { from, to, pos } => {
                 for r in to {
@@ -392,7 +430,10 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     Some(t) => self.procedure(t, *pos)?.1,
                     None => first_end,
                 };
-                return self.repeat(repeat, *pos, &mut |m: &mut Self| m.run_paragraphs(start, end));
+                return self.repeat(repeat, *pos, &mut |m: &mut Self| {
+                    m.uses.line = *pos;
+                    m.run_paragraphs(start, end)
+                });
             }
             Stmt::PerformInline { body, repeat, pos } => return self.repeat(repeat, *pos, &mut |m: &mut Self| m.run_block(body)),
             Stmt::Display { items, no_advancing, pos } => self.display(items, *no_advancing, *pos)?,

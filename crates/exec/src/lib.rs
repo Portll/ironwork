@@ -8,6 +8,7 @@ pub use rt::codec;
 pub use rt::digest;
 pub use rt::evidence;
 pub mod collating;
+pub mod declaratives;
 pub mod edit;
 pub mod files;
 pub mod layout;
@@ -51,6 +52,8 @@ pub struct Compiled {
     pub diagnostics: Vec<Error>,
     /// The program's ENTRY statements, in source order.
     pub entries: Vec<EntryPoint>,
+    /// Where each EXCEPTION/ERROR and debugging procedure runs.
+    pub declaratives: declaratives::Table,
 }
 
 /// An alternate entry point: a CALL of `name` begins at statement `statement` of paragraph
@@ -98,7 +101,7 @@ pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error
 pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -> Result<Compiled, Vec<Error>> {
     let mut errors = Vec::new();
     reserved::check(&program, &mut errors);
-    let mut program = sort::with_special_registers(program);
+    let mut program = declaratives::with_debug_item(sort::with_special_registers(program));
     let mut options = Options::default();
     let mut ssrange = false;
     for option in &program.options {
@@ -161,7 +164,9 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
     }
     let report_writer = report::resolve(&program, &layout, drafts, &mut errors);
     let carriage = printer::carriages(&program, &layout, options.adv);
-    let mut check = Check { layout: &layout, program: &program, errors: &mut errors };
+    let declaratives = declaratives::resolve(&program, &layout, &options, &mut errors);
+    let debugging = declaratives::debugging_sections(&program);
+    let mut check = Check { layout: &layout, program: &program, errors: &mut errors, debugging: false };
     for k in 0..program.files.len() {
         check.file_keys(k);
         linage::check_file(check.program, check.layout, k, check.errors);
@@ -169,7 +174,8 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
     for block in &program.exec_declarations {
         check.exec_block(block);
     }
-    for p in &program.paragraphs {
+    for (i, p) in program.paragraphs.iter().enumerate() {
+        check.debugging = debugging.iter().any(|&(first, last)| (first..=last).contains(&i));
         check.statements(&p.statements);
     }
     let entries = entry_points(&program);
@@ -179,7 +185,7 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
     if refused(&errors, &options) {
         Err(errors)
     } else {
-        Ok(Compiled { program, layout, options, ssrange, report_writer, collating, carriage, diagnostics: errors, entries })
+        Ok(Compiled { program, layout, options, ssrange, report_writer, collating, carriage, diagnostics: errors, entries, declaratives })
     }
 }
 
@@ -440,6 +446,8 @@ struct Check<'a> {
     layout: &'a Layout,
     program: &'a Program,
     errors: &'a mut Vec<Error>,
+    /// The statements are a debugging section's, which alone may reference DEBUG-ITEM.
+    debugging: bool,
 }
 
 impl Check<'_> {
@@ -787,6 +795,10 @@ impl Check<'_> {
             return;
         }
         if oo::special_register(self.layout, r) {
+            return;
+        }
+        if !self.debugging && !self.program.declaratives.debugging.is_empty() && declaratives::DEBUG_ITEM_NAMES.contains(&r.name.as_str()) {
+            self.errors.push(Error::at(r.pos, format!("{}: only a debugging section may reference DEBUG-ITEM", r.name)));
             return;
         }
         match self.layout.resolve(&r.name, &r.qualifiers, r.pos) {

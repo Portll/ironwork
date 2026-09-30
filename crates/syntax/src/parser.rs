@@ -2,13 +2,14 @@ use crate::ast::*;
 use crate::lexer::{Tok, Token};
 use crate::{Error, Pos};
 
+mod declaratives;
 mod oo;
 mod report;
 mod sort;
 
 /// Every program in the source, first to last, with nested programs after the one containing them.
 pub fn parse(tokens: &[Token], options: Vec<String>) -> Result<Vec<Program>, Error> {
-    let mut parser = Parser { tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default(), mnemonics: Vec::new() };
+    let mut parser = Parser { tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default(), mnemonics: Vec::new(), debugging: false };
     let mut programs = Vec::new();
     parser.program(&options, &mut programs)?;
     while parser.peek().is_some() {
@@ -58,9 +59,11 @@ fn figurative(word: &str) -> Option<Figurative> {
     })
 }
 
-/// A contained program has the alphabets and collating sequence of the program containing it,
-/// whose configuration section is the only one (Language Reference SC27-8713-03, p. 121).
+/// A contained program has the alphabets, collating sequence and debugging mode of the program
+/// containing it, whose configuration section is the only one (Language Reference SC27-8713-03,
+/// p. 121).
 fn share_configuration(outer: &Environment, inner: &mut Environment) {
+    inner.debugging_mode |= outer.debugging_mode;
     if inner.collating_sequence.is_none() {
         inner.collating_sequence.clone_from(&outer.collating_sequence);
     }
@@ -98,6 +101,8 @@ struct Parser<'a> {
     /// containing it, whose configuration section applies to it too.
     mnemonics: Vec<(String, String)>,
     sql: SqlState,
+    /// WITH DEBUGGING MODE, from the program's configuration section or its container's.
+    debugging: bool,
 }
 
 /// The WHENEVER actions in force, which carry on in listing order, and the EXEC SQL blocks the
@@ -197,9 +202,9 @@ impl Parser<'_> {
     }
 
     fn program(&mut self, options: &[String], out: &mut Vec<Program>) -> R<()> {
-        let outer = (std::mem::take(&mut self.exec_declarations), std::mem::take(&mut self.cics), std::mem::take(&mut self.sql.blocks), self.mnemonics.clone());
+        let outer = (std::mem::take(&mut self.exec_declarations), std::mem::take(&mut self.cics), std::mem::take(&mut self.sql.blocks), self.mnemonics.clone(), self.debugging);
         let parsed = self.one_program(options, out);
-        (self.exec_declarations, self.cics, self.sql.blocks, self.mnemonics) = outer;
+        (self.exec_declarations, self.cics, self.sql.blocks, self.mnemonics, self.debugging) = outer;
         parsed
     }
 
@@ -246,8 +251,10 @@ impl Parser<'_> {
             (files, repository) = self.environment(&mut environment)?;
         }
         self.mnemonics.splice(0..0, environment.mnemonics.iter().cloned());
+        self.debugging |= environment.debugging_mode;
         let (mut working_storage, mut local_storage, mut linkage) = (Vec::new(), Vec::new(), Vec::new());
         let mut report_writer = crate::report::ReportWriter::default();
+        let mut declaratives = Declaratives::default();
         if self.at_division(&["DATA"]) {
             self.at += 2;
             self.expect(&Tok::Period, "a period")?;
@@ -278,10 +285,11 @@ impl Parser<'_> {
                 returning = Some(self.name("a RETURNING item")?);
             }
             self.expect(&Tok::Period, "a period after the PROCEDURE DIVISION header")?;
-            self.procedure_paragraphs(&mut report_writer)?
+            self.procedure_paragraphs(&mut report_writer, &mut declaratives)?
         } else {
             Vec::new()
         };
+        declaratives::debugging_sections_allowed(&declaratives, recursive, method)?;
         if let Some(f) = files.iter().find(|f| f.assign.is_empty()) {
             return Err(Error::at(f.pos, format!("{} has no SELECT ... ASSIGN", f.name)));
         }
@@ -306,6 +314,7 @@ impl Parser<'_> {
         for inner in &mut nested {
             share_configuration(&environment, &mut inner.environment);
         }
+        declaratives::contained_programs(&declaratives, &report_writer, &nested)?;
         if !method && self.at_end_program() && self.word_at(1) == Some("PROGRAM") {
             self.at += 2;
             if self.word().is_some() || matches!(self.peek(), Some(Tok::Alnum(_))) {
@@ -327,6 +336,7 @@ impl Parser<'_> {
             files,
             exec_declarations,
             report_writer,
+            declaratives,
             oo: oo::program_oo(repository),
             environment,
             nested: contained,
@@ -364,6 +374,11 @@ impl Parser<'_> {
                 return Err(self.error("DECIMAL-POINT IS COMMA is not supported yet"));
             }
             if self.environment_clause(clauses)? {
+                continue;
+            }
+            if self.is_word("DEBUGGING") && self.word_at(1) == Some("MODE") {
+                self.at += 2;
+                clauses.debugging_mode = true;
                 continue;
             }
             if let Some(environment) = self.word().filter(|w| advancing_environment_name(w)).map(str::to_owned) {
@@ -919,7 +934,7 @@ impl Parser<'_> {
         let mut paragraphs = Vec::new();
         while self.peek().is_some() && !self.at_end_program() && !self.at_division(&["IDENTIFICATION", "ID"]) {
             if self.is_word("DECLARATIVES") {
-                return Err(self.error("DECLARATIVES are not supported yet"));
+                return Err(self.error("DECLARATIVES must begin the PROCEDURE DIVISION"));
             }
             self.procedure_item(&mut paragraphs)?;
         }
@@ -2191,9 +2206,9 @@ fn cics_options(body: &str) -> Vec<(String, Option<ExecArg>)> {
 
 /// An argument as the COBOL operand it names, through ironwork's own lexer and parser.
 fn operand_of(text: &str, pos: Pos) -> Option<Operand> {
-    let source = crate::source::Source { text: text.to_owned(), positions: vec![pos; text.chars().count()], options: Vec::new() };
+    let source = crate::source::Source { text: text.to_owned(), positions: vec![pos; text.chars().count()], options: Vec::new(), debugging: None };
     let tokens = crate::lexer::lex(&source).ok()?;
-    let mut p = Parser { tokens: &tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default(), mnemonics: Vec::new() };
+    let mut p = Parser { tokens: &tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default(), mnemonics: Vec::new(), debugging: false };
     let op = p.operand().ok()?;
     (p.at == tokens.len()).then_some(op)
 }
@@ -2206,7 +2221,7 @@ fn system_entries(member: &str) -> R<Vec<DataEntry>> {
 fn system_text_entries(text: &str) -> R<Vec<DataEntry>> {
     let source = crate::source::read(text)?;
     let tokens = crate::lexer::lex(&source)?;
-    Parser { tokens: &tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default(), mnemonics: Vec::new() }.data_entries()
+    Parser { tokens: &tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default(), mnemonics: Vec::new(), debugging: false }.data_entries()
 }
 
 /// Words that begin a SELECT clause, and so end the one before.

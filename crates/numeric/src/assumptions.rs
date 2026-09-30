@@ -177,6 +177,16 @@ pub const ALTERED_GO_TO_RESET: &str = "C52";
 pub const DISPLAY_STREAM: &str = "C53";
 pub const RANDOM_GENERATOR: &str = "C54";
 pub const ZERO_DIVISOR_CHECK: &str = "C55";
+pub const ERROR_DECLARATIVE_MODE: &str = "C60";
+pub const ERROR_DECLARATIVE_STATUSES: &str = "C61";
+pub const SORT_FILE_DECLARATIVE: &str = "C62";
+pub const DEBUG_RUNTIME_OPTION: &str = "C63";
+pub const DEBUG_LINE_NUMBER: &str = "C64";
+pub const DEBUG_LINE_STATEMENT: &str = "C65";
+pub const DEBUG_CONTENTS_LENGTH: &str = "C66";
+pub const DEBUG_NAME_FORM: &str = "C67";
+pub const DEBUGGING_SECTION_REFERENCES: &str = "C68";
+pub const GLOBAL_DECLARATIVES: &str = "C69";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1064,6 +1074,66 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: ZERO_DIVISOR_CHECK,
         claim: "A zero divisor that no ON SIZE ERROR phrase takes, in an arithmetic statement without one or in an expression outside an arithmetic statement (a condition, a subscript, a reference modifier), is the program check of the instruction the compiler divides with: HFP divide, S0CF, when the expression is evaluated in floating point; fixed-point divide, S0C9, when the dividend and the divisor are made only of integer binary items and integer literals, at least one an item; decimal divide, S0CB, otherwise. The size error condition belongs to the arithmetic statements alone, and with ON SIZE ERROR any zero divisor, floating-point too, is one (Language Reference SC27-8713-03, p. 296; Programming Guide SC27-8714-03, p. 242); the manuals do not say which instructions the compiler divides with",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ERROR_DECLARATIVE_MODE,
+        claim: "An EXCEPTION/ERROR procedure for an open mode serves a file open in that mode, and for OPEN one being opened in it, an OPEN of a file already open included (Language Reference SC27-8713-03, pp. 417, 714). A file that is not open, as for a READ, WRITE or CLOSE before its OPEN, is in no mode, so only a procedure that names it serves it. A procedure that names the file comes first (p. 714), and two procedures for one file, or for one open mode, are refused, as p. 714 forbids simultaneous requests for two",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ERROR_DECLARATIVE_STATUSES,
+        claim: "Every I/O status whose first digit is not 0 runs the file's EXCEPTION/ERROR procedure once FILE STATUS holds it, unless the statement's AT END or INVALID KEY phrase takes a 1x or 2x status, and then no procedure runs (Language Reference SC27-8713-03, pp. 299, 303-304, 432, 714); a 0x status runs none. The procedure returns control to the end of the statement, and NOT AT END and NOT INVALID KEY are not run: none of ironwork's statuses is a critical error, after which p. 714 says control does not return. The implicit CLOSE at the end of the run or at CANCEL runs no procedure (Programming Guide SC27-8714-03, pp. 179, 204, 219)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SORT_FILE_DECLARATIVE,
+        claim: "An EXCEPTION/ERROR procedure serves the OPEN, READ, WRITE and CLOSE a SORT or MERGE does of its USING and GIVING files (Language Reference SC27-8713-03, pp. 457-458); the end of a USING file runs none. After it, that file's processing ends: a USING file gives the records read before the failure and is closed, a GIVING file is closed, and the operation goes on with SORT-RETURN 0, unless the procedure moved 16 to SORT-RETURN, which stops it at once with SORT-RETURN 16, as the Programming Guide has the procedure do to report the failure (SC27-8714-03, pp. 232, 234-235). A file with no procedure fails as SORT_FILE_FAILURE says. Under FASTSRT a USING or GIVING file that an INPUT, OUTPUT or file-specific procedure serves is COBOL's (p. 233), which FASTSRT_FILES does not list",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: DEBUG_RUNTIME_OPTION,
+        claim: "USE FOR DEBUGGING procedures run only in a program compiled WITH DEBUGGING MODE and run under the Language Environment runtime option DEBUG, which -debug stands for; NODEBUG, the default, keeps them from running, and debugging lines, once compiled, run under either (Language Reference SC27-8713-03, pp. 771-772; Programming Guide SC27-8714-03, pp. 431, 446). Without WITH DEBUGGING MODE both are comments, and a contained program has the mode of the program containing it (LR pp. 121, 772)",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: DEBUG_LINE_NUMBER,
+        claim: "DEBUG-LINE holds, in six digits with leading zeros, the number of the line the statement starts on in its own source file. Under NONUMBER, the default, IBM puts the compiler-generated number there (Language Reference SC27-8713-03, p. 19), the listing's line number, which counts the lines of COPY members too: a statement after a COPY, or in a member, is numbered otherwise by IBM",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: DEBUG_LINE_STATEMENT,
+        claim: "The statement DEBUG-LINE names is the one that sent control to the procedure (Language Reference SC27-8713-03, p. 20): the PERFORM on each repetition, the GO TO, the SORT or MERGE, the input-output statement whose condition ran a USE procedure; for fall through, the statement last started in the procedure before, or the section header control passed through. CONTINUE, EXIT, NEXT SENTENCE and a separator period carry no position in ironwork, so after one of them DEBUG-LINE names the statement before it",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: DEBUG_CONTENTS_LENGTH,
+        claim: "DEBUG-CONTENTS is 30 characters, so DEBUG-ITEM is 86 bytes. The Language Reference gives it as PICTURE X(n) (SC27-8713-03, p. 19), and the procedures Enterprise COBOL debugs put at most 13 characters in it (p. 20)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: DEBUG_NAME_FORM,
+        claim: "DEBUG-NAME is the procedure-name as the USE FOR DEBUGGING sentence writes it, a section that qualifies it joined by OF (Language Reference SC27-8713-03, p. 19); under ALL PROCEDURES it is the procedure's own name, unqualified. Control entering a section runs the section's debugging procedure, then, by fall through, that of its first paragraph",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: DEBUGGING_SECTION_REFERENCES,
+        claim: "A debugging section may PERFORM or GO TO a procedure of another debugging section, and of an EXCEPTION/ERROR section: p. 771 of the Language Reference (SC27-8713-03) forbids referring to a procedure in a debugging section from a statement outside of the debugging section, read here as outside every debugging section, as the CCVS85 DB tests assume, and p. 716 forbids references to nondeclarative procedures only. Without WITH DEBUGGING MODE a debugging section is a comment in full, header and USE sentence included, so its names are not defined and its text is not checked (p. 772)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: GLOBAL_DECLARATIVES,
+        claim: "A program's declaratives run for its own statements only. USE GLOBAL AFTER EXCEPTION/ERROR for an open mode, and USE GLOBAL BEFORE REPORTING for a report group of a contained program without its own procedure for it, would serve another program's statements (Language Reference SC27-8713-03, p. 715; Report Writer Precompiler SC26-4301-04, 4.7.2 rule 5 and 4.7.3 rule 4), and are refused in a program that contains others; elsewhere GLOBAL changes nothing. A GLOBAL procedure for a named file is kept, since a contained program cannot name another program's file in ironwork, which has no GLOBAL files",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
