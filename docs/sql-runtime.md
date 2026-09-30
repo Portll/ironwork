@@ -69,10 +69,10 @@ On 2026-09-29 the operator put SQL next after M8, ahead of the VM in
     OPEN its cursor, and refuses a cursor not yet declared at compile time.
   - **A cursor ironwork does not run** (scrollable, or for a prepared statement) is still declared.
     Reaching its DECLARE does nothing, as for any declaration; its OPEN abends, naming what it is.
-- **Refused by name.** CONNECT and DISCONNECT come from other precompilers, so a program that
-  uses them is refused at compile time as not a Db2 program. Dynamic SQL (PREPARE, EXECUTE, EXECUTE
-  IMMEDIATE, DESCRIBE) and multi-row FETCH are refused at run time by name, as every EXEC statement
-  is today.
+- **Refused by name.** DISCONNECT comes from other precompilers, so a program that uses it is
+  refused at compile time as not a Db2 for z/OS program. CONNECT, which Db2 for z/OS has for DRDA,
+  dynamic SQL (PREPARE, EXECUTE, EXECUTE IMMEDIATE, DESCRIBE) and multi-row FETCH are refused at
+  run time by name.
 
 ## 4. The Database interface (run time)
 
@@ -409,8 +409,10 @@ is for evaluation only.
 - **D1.** The recording format of §8, and strict replay as the default.
 - **D2.** Settled 2026-09-30: TLS as a separate, optional build on rustls (§9), not in-house TLS,
   and not in ironwork's own build.
-- **D3.** Refuse CONNECT and DISCONNECT at compile time as not Db2, where today they are checked and
-  pass.
+- **D3.** Settled 2026-09-30: DISCONNECT is refused at compile time as not Db2 for z/OS. CONNECT is
+  Db2 for z/OS ([Db2 13,
+  CONNECT](https://www.ibm.com/docs/en/db2-for-zos/13.0.0?topic=statements-connect)), so it passes
+  the check and is refused by name at run time (§3).
 - **D4.** Done 2026-09-30: the SQ prefix, `Oracle::Db2` and the `Observed` basis are in the
   assumptions registry.
 

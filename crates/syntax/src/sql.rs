@@ -81,7 +81,8 @@ pub enum Statement {
     Declaration,
     /// A statement ironwork does not run, named by what it is.
     Unsupported(String),
-    /// A statement that does not read as its verb requires, with the reason.
+    /// A statement the precompiler refuses, with the reason: it does not read as its verb requires,
+    /// or it is not Db2 for z/OS.
     Malformed(String),
 }
 
@@ -353,6 +354,7 @@ fn statement(toks: &[Tok], pos: Pos) -> Statement {
         "WHENEVER" => whenever(toks),
         "INCLUDE" => Statement::Declaration,
         "BEGIN" | "END" if word(toks, 1) == "DECLARE" => Statement::Declaration,
+        "DISCONNECT" => Statement::Malformed("DISCONNECT is not a Db2 for z/OS statement; Db2 ends a connection with RELEASE and a commit".into()),
         "" => Statement::Malformed("the block holds no statement".into()),
         other => Statement::Unsupported(other.into()),
     }
@@ -579,6 +581,7 @@ mod tests {
     #[test]
     fn what_is_refused_and_why() {
         assert_eq!(st("CONNECT TO DB1"), Statement::Unsupported("CONNECT".into()));
+        assert!(matches!(st("DISCONNECT ALL"), Statement::Malformed(why) if why.starts_with("DISCONNECT is not a Db2 for z/OS statement")));
         assert_eq!(st("PREPARE S1 FROM :STMT"), Statement::Unsupported("PREPARE".into()));
         assert_eq!(st("FETCH PRIOR FROM C1 INTO :A"), Statement::Unsupported("a scrollable FETCH".into()));
         let prepared = Statement::DeclareUnsupported { name: "C2".into(), what: "a cursor for a prepared statement".into() };
