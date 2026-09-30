@@ -7,7 +7,7 @@ const USAGE: &str = "ironwork for COBOL
 usage:
   ironwork run <program.cbl> [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include]
                [-debug] [--cics-return-warning=once|always|never] [-I <dir>]... [-L <dir>]...
-               [--dd NAME=path[:format]]... [--clock <time>]
+               [--dd NAME=path[:format][:mod]]... [--clock <time>]
                [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                                                        compile and run; CBL and PROCESS cards set the options
   ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]...
@@ -48,13 +48,14 @@ flags:
   -I <dir>   a copy library for COPY members, searched after the program's own directory
   -L <dir>   a program library: CALL finds a program there by name, after the programs in the
              same source and the program's own directory
-  --dd NAME=path[:format]
+  --dd NAME=path[:format][:mod]
              the file a DD name stands for, as JCL would give it; DD_NAME in the environment also
              works. Binary files hold z/OS records (fixed, or variable behind 4-byte RDWs); :text
              reads and writes UTF-8 lines through the program's code page. A print file's records
-             carry a printer control character, which :text shows as line spacing. An indexed or
-             relative file's DD holds its records in key order, as a REPRO unload does. DD SYSIN is
-             what ACCEPT reads; without it, ACCEPT reads standard input
+             carry a printer control character, which :text shows as line spacing. :mod is
+             DISP=MOD: OPEN OUTPUT of a sequential file keeps its records and writes after them. An
+             indexed or relative file's DD holds its records in key order, as a REPRO unload does.
+             DD SYSIN is what ACCEPT reads; without it, ACCEPT reads standard input
   --provenance FILE
              write what the compile read and decided as an in-toto statement with the SLSA
              Provenance v1 predicate: the source and every COPY member by digest, the option cards

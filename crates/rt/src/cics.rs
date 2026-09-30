@@ -189,7 +189,7 @@ pub fn parse_file(spec: &str) -> Result<(String, FileDef), String> {
     };
 
     let record_len = record_len.ok_or_else(|| format!("{spec}: missing len=RECLEN"))?;
-    let dd = Dd { path: PathBuf::from(path), format };
+    let dd = Dd { path: PathBuf::from(path), format, append: false };
     Ok((name, FileDef { dd, data_set, record_len }))
 }
 

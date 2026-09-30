@@ -38,6 +38,8 @@ impl Format {
 pub struct Dd {
     pub path: PathBuf,
     pub format: Option<Format>,
+    /// DISP=MOD: OPEN OUTPUT keeps the records already there and writes after them.
+    pub append: bool,
 }
 
 /// The DDs a run may use: given explicitly, or read from `DD_<NAME>` in the environment.
@@ -48,15 +50,19 @@ pub struct Dds {
 }
 
 fn dd_value(value: &str) -> Result<Dd, String> {
-    let (path, format) = value.rsplit_once(':').and_then(|(p, word)| Some((p, Some(Format::from_keyword(word)?)))).unwrap_or((value, None));
+    let (rest, append) = match value.rsplit_once(':') {
+        Some((rest, word)) if word.eq_ignore_ascii_case("mod") => (rest, true),
+        _ => (value, false),
+    };
+    let (path, format) = rest.rsplit_once(':').and_then(|(p, word)| Some((p, Some(Format::from_keyword(word)?)))).unwrap_or((rest, None));
     if path.is_empty() {
         return Err(format!("DD {value}: no path"));
     }
-    Ok(Dd { path: PathBuf::from(path), format })
+    Ok(Dd { path: PathBuf::from(path), format, append })
 }
 
 impl Dds {
-    /// DDs from `NAME=path[:text|:fixed|:variable]` specs, and from the environment when `environment`.
+    /// DDs from `NAME=path[:text|:fixed|:variable][:mod]` specs, and from the environment when `environment`.
     pub fn new(specs: &[String], environment: bool) -> Result<Self, String> {
         let mut given = HashMap::new();
         for spec in specs {
@@ -484,8 +490,8 @@ pub fn open_keyed(dd: Option<&Dd>, mode: OpenMode, format: Format, keying: Keyin
 pub fn open(dd: &Dd, mode: OpenMode, format: Format) -> io::Result<Open> {
     let handle = match mode {
         OpenMode::Input => Handle::Reader(BufReader::new(File::open(&dd.path)?)),
-        OpenMode::Output => Handle::Writer(BufWriter::new(File::create(&dd.path)?)),
-        OpenMode::Extend => Handle::Writer(BufWriter::new(OpenOptions::new().append(true).create(true).open(&dd.path)?)),
+        OpenMode::Output if !dd.append => Handle::Writer(BufWriter::new(File::create(&dd.path)?)),
+        OpenMode::Output | OpenMode::Extend => Handle::Writer(BufWriter::new(OpenOptions::new().append(true).create(true).open(&dd.path)?)),
         OpenMode::InputOutput => return Err(io::Error::new(io::ErrorKind::Unsupported, "OPEN I-O of a line-sequential file")),
     };
     Ok(Open { mode, format, handle, head: Head::Start, page: None })
@@ -628,16 +634,45 @@ mod tests {
     #[test]
     fn dd_specs() {
         let dds = Dds::new(&["IN=/tmp/a.txt:text".into(), "out=/tmp/b.dat".into()], false).unwrap();
-        assert_eq!(dds.get("IN"), Some(Dd { path: "/tmp/a.txt".into(), format: Some(Format::Text) }));
+        assert_eq!(dds.get("IN"), Some(Dd { path: "/tmp/a.txt".into(), format: Some(Format::Text), append: false }));
         assert_eq!(dds.get("OUT").unwrap().format, None);
         assert!(dds.get("NONE").is_none());
         assert!(Dds::new(&["NOEQUALS".into()], false).is_err());
     }
 
     #[test]
+    fn mod_suffix_follows_the_format_or_stands_alone() {
+        let dd = |value: &str| dd_value(value).unwrap();
+        assert_eq!(dd("a.dat:mod"), Dd { path: "a.dat".into(), format: None, append: true });
+        assert_eq!(dd("a.dat:text:mod"), Dd { path: "a.dat".into(), format: Some(Format::Text), append: true });
+        assert_eq!(dd("A.DAT:TEXT:MOD"), Dd { path: "A.DAT".into(), format: Some(Format::Text), append: true });
+        assert_eq!(dd("a.dat:text"), Dd { path: "a.dat".into(), format: Some(Format::Text), append: false });
+        assert_eq!(dd("c:\\a.dat"), Dd { path: "c:\\a.dat".into(), format: None, append: false });
+        assert!(dd_value(":mod").is_err());
+    }
+
+    #[test]
+    fn open_output_on_a_mod_dd_writes_after_the_records_there() {
+        let path = std::env::temp_dir().join(format!("ironwork-mod-{}", std::process::id()));
+        let write = |append: bool, records: &[&[u8]]| {
+            let mut out = open(&Dd { path: path.clone(), format: None, append }, OpenMode::Output, Format::Fixed).unwrap();
+            for record in records {
+                out.write(record).unwrap();
+            }
+            out.close().unwrap();
+        };
+        write(false, &[b"AA", b"BB"]);
+        write(true, &[b"CC"]);
+        assert_eq!(std::fs::read(&path).unwrap(), b"AABBCC");
+        write(false, &[b"DD"]);
+        assert_eq!(std::fs::read(&path).unwrap(), b"DD");
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
     fn variable_records_round_trip_through_rdws() {
         let path = std::env::temp_dir().join(format!("ironwork-vb-{}", std::process::id()));
-        let dd = Dd { path: path.clone(), format: None };
+        let dd = Dd { path: path.clone(), format: None, append: false };
         let mut out = open(&dd, OpenMode::Output, Format::Variable).unwrap();
         out.write(b"AB").unwrap();
         out.write(b"CDEF").unwrap();
