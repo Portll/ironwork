@@ -5,3 +5,6 @@ target/
 
 # Documents held back from publication until they are reviewed.
 /review/
+
+# Local corpus measurements: per-program results over third-party code, not for publication.
+/measurements/
