@@ -263,7 +263,9 @@ The macros are exported from `rt` as `codec_struct!` and `codec_enum!`. Their gr
 Every field and element must itself be encodable (§4.1 to §4.4).
 
     codec_struct!(Options { arith, trunc, numproc, codepage, trunc_check, fastsrt, fastsrt_adv_print,
-        sort_keys, adv, thread, dll, rent, dbcs, warnings, dynam, debug } check options_valid);
+        sort_keys, adv, thread, dll, rent, dbcs, warnings, compile, dynam, debug, cics_return_warning,
+        invdata, zwb, quote, currency, nsymbol, dispsign, intdate, qualify, initial, vlr, vsamopenfs }
+        check options_valid);
     codec_enum!(Arith { Compat = 0, Extend = 1 });
     codec_enum!(Kind {
         Group = 0,
@@ -302,8 +304,18 @@ tests, and the debug positions (§9).
 | `cics_return_warning` | `Once`, tag 0 | `00` |
 | `invdata` | `None` | `00` |
 | `zwb` | true | `01` |
+| `quote` | `Quote`, tag 0 | `00` |
+| `currency` | `None` | `00` |
+| `nsymbol` | `National`, tag 0 | `00` |
+| `dispsign` | `Compat`, tag 0 | `00` |
+| `intdate` | `Ansi`, tag 0 | `00` |
+| `qualify` | `Compat`, tag 0 | `00` |
+| `initial` | false | `00` |
+| `vlr` | `Standard`, tag 0 | `00` |
+| `vsamopenfs` | `Compat`, tag 0 | `00` |
 
-Twenty-one bytes: `01 01 00 F4 08 00 00 00 00 01 00 00 01 01 00 00 00 00 00 00 01`.
+Thirty bytes: `01 01 00 F4 08 00 00 00 00 01 00 00 01 01 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00
+00`.
 
 ### 4.8 Bounds on decoding
 
@@ -319,13 +331,13 @@ Twenty-one bytes: `01 01 00 F4 08 00 00 00 00 01 00 00 01 01 00 00 00 00 00 00 0
 ## 5. Options, storage and maps
 
 Line numbers are for the tree at 79a199e, except those of `crates/numeric/src/options.rs`, which are
-for the tree that added `Options::cics_return_warning`.
+for the tree that added `Options::vsamopenfs`.
 
 ### 5.1 Options
 
 `Program.options` is lir.md's `ProgramOptions`: `numeric::options::Options`
-(crates/numeric/src/options.rs:208-235), which is `Copy`, holds only enums, options, integers and
-bools, and encodes as it is, its fields in declaration order; then `ssrange`, the option cards, the
+(crates/numeric/src/options.rs:299-339), which is `Copy`, holds only enums, options, integers, a
+`char` and bools, and encodes as it is, its fields in declaration order; then `ssrange`, the option cards, the
 collating sequence, `decimal_point_comma` (a bool) and `numval_currency` (a string), the last two
 from SPECIAL-NAMES (lir.md §9.11), and `when_compiled`. Options are per program, because a CBL
 card is.
@@ -349,7 +361,7 @@ compiler option: `trunc_check`, `fastsrt_adv_print`, `sort_keys`, `warnings`, `d
 | `arith` | `Arith` (:54) | tag: `Compat` 0, `Extend` 1 | `ARITH`, `AR`, with `COMPAT`, `C`, `EXTEND` or `E` |
 | `trunc` | `Trunc` (:84) | tag: `Std` 0, `Opt` 1, `Bin` 2 | `TRUNC(STD\|OPT\|BIN)` |
 | `numproc` | `Numproc` (:92) | tag: `Nopfd` 0, `Pfd` 1 | `NUMPROC(NOPFD\|PFD)` |
-| `codepage` | `u16` | LEB128. The `check` function refuses a CCSID `CodePage::by_ccsid` does not carry, because `Options::code_page` (:401) would otherwise panic | `CODEPAGE(n)`, `CP(n)` |
+| `codepage` | `u16` | LEB128. The `check` function refuses a CCSID `CodePage::by_ccsid` does not carry, because `Options::code_page` (:592) would otherwise panic | `CODEPAGE(n)`, `CP(n)` |
 | `trunc_check` | `TruncCheck` (:102) | tag: `Report` 0, `Silent` 1 | `-silent` |
 | `fastsrt` | `bool` | 0 or 1 | `FASTSRT`, `FSRT`, and `NOFASTSRT`, `NOFSRT` |
 | `fastsrt_adv_print` | `FastsrtAdvPrint` (:122) | tag: `Exclude` 0, `Include` 1 | `--fastsrt-adv-print=exclude\|include` |
@@ -359,18 +371,28 @@ compiler option: `trunc_check`, `fastsrt_adv_print`, `sort_keys`, `warnings`, `d
 | `dll` | `bool` | 0 or 1 | `DLL`, `NODLL` |
 | `rent` | `bool` | 0 or 1 | `RENT`, `NORENT` |
 | `dbcs` | `bool` | 0 or 1 | `DBCS`, `NODBCS` |
-| `warnings` | `Warnings` (:161) | tag: `Proceed` 0, `Block` 1 | `-warnings-block` |
-| `compile` | `Option<Compile>` (:170) | `None`, or `Some` then the tag: `Full` 0, `Until` 1 followed by the `Stop` (:181) tag (`W` 0, `E` 1, `S` 2), `SyntaxOnly` 2. `None` when no card gives the option; `Options::object_code` (:394) resolves it with `warnings` (assumption C47) | `COMPILE`, `C`, and `NOCOMPILE`, `NOC`, alone or with `(W)`, `(E)` or `(S)` |
+| `warnings` | `Warnings` (:252) | tag: `Proceed` 0, `Block` 1 | `-warnings-block` |
+| `compile` | `Option<Compile>` (:261) | `None`, or `Some` then the tag: `Full` 0, `Until` 1 followed by the `Stop` (:272) tag (`W` 0, `E` 1, `S` 2), `SyntaxOnly` 2. `None` when no card gives the option; `Options::object_code` (:585) resolves it with `warnings` (assumption C47) | `COMPILE`, `C`, and `NOCOMPILE`, `NOC`, alone or with `(W)`, `(E)` or `(S)` |
 | `dynam` | `bool` | 0 or 1 | `DYNAM`, `DYN`, and `NODYNAM`, `NODYN` |
 | `debug` | `bool` | 0 or 1 | `-debug`, the Language Environment runtime option DEBUG |
 | `cics_return_warning` | `CicsReturnWarning` (:141) | tag: `Once` 0, `Always` 1, `Never` 2. What a program with no STOP RUN, GOBACK or EXIT PROGRAM that ends with EXEC CICS RETURN or XCTL gets (assumption C124) | `--cics-return-warning=once\|always\|never` |
 | `invdata` | `Option<Invdata>` | `None` for NOINVDATA, or `Some` then `forcenumcmp` and `cleansign` as bools | `INVDATA`, `INVD`, with `FORCENUMCMP`, `FNC`, `NOFORCENUMCMP`, `NOFNC`, `CLEANSIGN`, `CS`, `NOCLEANSIGN`, `NOCS`; `NOINVDATA`, `NOINVD`; `ZONEDATA(PFD\|NOPFD\|MIG)`, `ZD`, as INVDATA's equivalents |
 | `zwb` | `bool` | 0 or 1 | `ZWB`, `NOZWB` |
+| `quote` | `Quote` (:161) | tag: `Quote` 0, `Apost` 1. The figurative constant QUOTE's character | `QUOTE`, `Q`, `APOST` |
+| `currency` | `Option<Currency>` (:188) | `None`, or `Some` then the tag: `Char` 0 followed by the `char`, `Hex` 1 followed by the byte. `Options::currency_symbol` (:598) reads a `Hex` byte in the program's code page | `CURRENCY(literal)`, `CURR(literal)`, and `NOCURRENCY`, `NOCURR` |
+| `nsymbol` | `Nsymbol` (:196) | tag: `National` 0, `Dbcs` 1 | `NSYMBOL`, `NS`, with `NATIONAL`, `NAT` or `DBCS` |
+| `dispsign` | `DispSign` (:206) | tag: `Compat` 0, `Sep` 1 | `DISPSIGN`, `DS`, with `COMPAT`, `C`, `SEP` or `S` |
+| `intdate` | `IntDate` (:215) | tag: `Ansi` 0, `Lilian` 1 | `INTDATE(ANSI\|LILIAN)` |
+| `qualify` | `Qualify` (:224) | tag: `Compat` 0, `Extend` 1 | `QUALIFY`, `QUA`, with `COMPAT`, `C`, `EXTEND` or `E` |
+| `initial` | `bool` | 0 or 1 | `INITIAL`, `NOINITIAL` |
+| `vlr` | `Vlr` (:234) | tag: `Standard` 0, `Compat` 1 | `VLR`, with `STANDARD`, `S`, `COMPAT` or `C` |
+| `vsamopenfs` | `VsamOpenFs` (:243) | tag: `Compat` 0, `Succ` 1 | `VSAMOPENFS`, `VS`, with `COMPAT`, `C`, `SUCC` or `S` |
 
-`ADV`, `DBCS`, `DLL`, `NUMPROC`, `RENT`, `THREAD` and `TRUNC` have no abbreviations. The defaults are
-`Compat`, `Std`, `Nopfd`, 1140, `Report`, false, `Exclude`, `Dfsort`, true, false, false, true, true,
-`Proceed`, `None` (IBM's default NOCOMPILE(S) in force), false, false, `Once`, `None`
-(NOINVDATA), true.
+`ADV`, `APOST`, `DBCS`, `DLL`, `INITIAL`, `INTDATE`, `NUMPROC`, `RENT`, `THREAD`, `TRUNC` and `ZWB`
+have no abbreviations. The defaults are `Compat`, `Std`, `Nopfd`, 1140, `Report`, false, `Exclude`,
+`Dfsort`, true, false, false, true, true, `Proceed`, `None` (IBM's default NOCOMPILE(S) in force),
+false, false, `Once`, `None` (NOINVDATA), true, `Quote`, `None` (NOCURRENCY), `National`, `Compat`,
+`Ansi`, `Compat`, false, `Standard`, `Compat`.
 
 ### 5.2 Storage and the item table
 
@@ -647,7 +669,8 @@ and finds them different.
 - **Given** any value of every codec type, generated by a fixed sequence **when** it is encoded and
   decoded **then** it equals the original, **and** a value with a NaN encodes as the canonical NaN.
 - **Given** `Options` with `arith: Extend`, `trunc: Opt` and every other field at its default
-  **then** it encodes as `01 01 00 F4 08 00 00 00 01 00 00 01 01`.
+  **then** it encodes as `01 01 00 F4 08 00 00 00 00 01 00 00 01 01 00 00 00 00 00 00 01 00 00 00 00
+  00 00 00 00 00`.
 - **Given** an OCCURS DEPENDING ON table **when** the module loads **then** the item holds the
   object's item index, **and** the module contains no `Ref`.
 

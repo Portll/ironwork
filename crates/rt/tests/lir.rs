@@ -18,7 +18,7 @@ use ironwork_rt::storage::Kind;
 use ironwork_rt::vocab::{AcceptFrom, BinOp, Figurative, InspectMode, OpenMode, Pos, RelOp, SignClause, SignPosition};
 use numeric::precision::{Fixed, Places};
 use numeric::options::{Compile, FastsrtAdvPrint, Invdata, Stop, Warnings};
-use numeric::{Arith, CicsReturnWarning, Numproc, Options, SortKeys, Trunc, TruncCheck};
+use numeric::{Arith, CicsReturnWarning, Currency, DispSign, IntDate, Nsymbol, Numproc, Options, Qualify, Quote, SortKeys, Trunc, TruncCheck, Vlr, VsamOpenFs};
 use zarch::check::ProgramCheck;
 use zarch::hfp::Precision;
 use zarch::wide::U256;
@@ -159,8 +159,17 @@ fn options_round_trip_with_every_field_off_its_default() {
         cics_return_warning: CicsReturnWarning::Never,
         invdata: Some(Invdata { forcenumcmp: true, cleansign: false }),
         zwb: false,
+        quote: Quote::Apost,
+        currency: Some(Currency::Char('£')),
+        nsymbol: Nsymbol::Dbcs,
+        dispsign: DispSign::Sep,
+        intdate: IntDate::Lilian,
+        qualify: Qualify::Extend,
+        initial: true,
+        vlr: Vlr::Compat,
+        vsamopenfs: VsamOpenFs::Succ,
     };
-    round_trip(&[every]);
+    round_trip(&[every, Options { currency: Some(Currency::Hex(0x5B)), ..every }]);
     let each = [
         Options { fastsrt_adv_print: FastsrtAdvPrint::Include, ..Options::default() },
         Options { warnings: Warnings::Block, ..Options::default() },
@@ -170,6 +179,15 @@ fn options_round_trip_with_every_field_off_its_default() {
         Options { cics_return_warning: CicsReturnWarning::Always, ..Options::default() },
         Options { invdata: Some(Invdata::default()), ..Options::default() },
         Options { zwb: false, ..Options::default() },
+        Options { quote: Quote::Apost, ..Options::default() },
+        Options { currency: Some(Currency::Hex(0x4A)), ..Options::default() },
+        Options { nsymbol: Nsymbol::Dbcs, ..Options::default() },
+        Options { dispsign: DispSign::Sep, ..Options::default() },
+        Options { intdate: IntDate::Lilian, ..Options::default() },
+        Options { qualify: Qualify::Extend, ..Options::default() },
+        Options { initial: true, ..Options::default() },
+        Options { vlr: Vlr::Compat, ..Options::default() },
+        Options { vsamopenfs: VsamOpenFs::Succ, ..Options::default() },
     ];
     round_trip(&each);
     for options in each {
@@ -180,6 +198,14 @@ fn options_round_trip_with_every_field_off_its_default() {
     every_variant(&[Compile::Full, Compile::Until(Stop::W), Compile::SyntaxOnly], 3);
     every_variant(&[Stop::W, Stop::E, Stop::S], 3);
     every_variant(&[CicsReturnWarning::Once, CicsReturnWarning::Always, CicsReturnWarning::Never], 3);
+    every_variant(&[Quote::Quote, Quote::Apost], 2);
+    every_variant(&[Currency::Char('$'), Currency::Hex(0x5B)], 2);
+    every_variant(&[Nsymbol::National, Nsymbol::Dbcs], 2);
+    every_variant(&[DispSign::Compat, DispSign::Sep], 2);
+    every_variant(&[IntDate::Ansi, IntDate::Lilian], 2);
+    every_variant(&[Qualify::Compat, Qualify::Extend], 2);
+    every_variant(&[Vlr::Standard, Vlr::Compat], 2);
+    every_variant(&[VsamOpenFs::Compat, VsamOpenFs::Succ], 2);
 }
 
 #[test]
@@ -187,7 +213,13 @@ fn kinds_and_options_have_load_module_s_bytes() {
     assert_eq!(encoded(&Kind::Zoned { digits: 5, scale: 2, signed: true, sign: Some(SIGN) }).0, [3, 5, 2, 1, 1, 1, 1]);
     assert_eq!(encoded(&Kind::Float(Precision::Extended)).0, [6, 2]);
     let options = Options { arith: Arith::Extend, trunc: Trunc::Opt, ..Options::default() };
-    assert_eq!(encoded(&options).0, [0x01, 0x01, 0x00, 0xF4, 0x08, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]);
+    assert_eq!(
+        encoded(&options).0,
+        [
+            0x01, 0x01, 0x00, 0xF4, 0x08, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00
+        ]
+    );
     let (bytes, strings) = encoded(&(7u8, Options { codepage: 999, ..options }));
     let reason = "CODEPAGE(999) is not a page the tables carry".to_owned();
     assert_eq!(refused::<(u8, Options)>(&bytes, &strings), (1, reason));

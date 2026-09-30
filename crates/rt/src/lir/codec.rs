@@ -11,7 +11,7 @@ use crate::vocab::{AcceptFrom, BinOp, Closing, Figurative, InspectMode, OpenMode
 use crate::{codec_enum, codec_struct};
 use numeric::precision::{Fixed, Places};
 use numeric::options::{Compile, FastsrtAdvPrint, Invdata, Stop, Warnings};
-use numeric::{Arith, CicsReturnWarning, Numproc, Options, SortKeys, Trunc, TruncCheck};
+use numeric::{Arith, CicsReturnWarning, Currency, DispSign, IntDate, Nsymbol, Numproc, Options, Qualify, Quote, SortKeys, Trunc, TruncCheck, Vlr, VsamOpenFs};
 use zarch::check::ProgramCheck;
 use zarch::ebcdic::CodePage;
 use zarch::hfp::Precision;
@@ -134,7 +134,8 @@ codec_enum!(FileStatus {
 
 codec_struct!(Options {
     arith, trunc, numproc, codepage, trunc_check, fastsrt, fastsrt_adv_print, sort_keys, adv, thread, dll, rent, dbcs,
-    warnings, compile, dynam, debug, cics_return_warning, invdata, zwb,
+    warnings, compile, dynam, debug, cics_return_warning, invdata, zwb, quote, currency, nsymbol, dispsign, intdate, qualify, initial,
+    vlr, vsamopenfs,
 } check options_valid);
 codec_struct!(Invdata { forcenumcmp, cleansign });
 codec_enum!(Arith { Compat = 0, Extend = 1 });
@@ -147,6 +148,14 @@ codec_enum!(Warnings { Proceed = 0, Block = 1 });
 codec_enum!(Compile { Full = 0, Until(stop) = 1, SyntaxOnly = 2 });
 codec_enum!(Stop { W = 0, E = 1, S = 2 });
 codec_enum!(CicsReturnWarning { Once = 0, Always = 1, Never = 2 });
+codec_enum!(Quote { Quote = 0, Apost = 1 });
+codec_enum!(Currency { Char(c) = 0, Hex(b) = 1 });
+codec_enum!(Nsymbol { National = 0, Dbcs = 1 });
+codec_enum!(DispSign { Compat = 0, Sep = 1 });
+codec_enum!(IntDate { Ansi = 0, Lilian = 1 });
+codec_enum!(Qualify { Compat = 0, Extend = 1 });
+codec_enum!(Vlr { Standard = 0, Compat = 1 });
+codec_enum!(VsamOpenFs { Compat = 0, Succ = 1 });
 
 /// `Options::code_page` panics on a CCSID the tables do not carry.
 fn options_valid(options: &Options) -> Result<(), String> {

@@ -1,5 +1,5 @@
 use std::fmt;
-use zarch::ebcdic::CodePage;
+use zarch::ebcdic::{self, CodePage};
 use zarch::hfp::Precision;
 
 /// Enterprise COBOL's compiler options, from Table 45 of IBM's Programming Guide, vendored byte for
@@ -171,6 +171,97 @@ impl CicsReturnWarning {
     }
 }
 
+/// What the figurative constant QUOTE is: a quotation mark under QUOTE, IBM's default, or an
+/// apostrophe under APOST (Programming Guide SC27-8714-03, p. 347).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Quote {
+    #[default]
+    Quote,
+    Apost,
+}
+
+impl Quote {
+    /// The character in EBCDIC, where every single-byte page carries it at the same place.
+    pub const fn byte(self) -> u8 {
+        match self {
+            Self::Quote => ebcdic::QUOTE,
+            Self::Apost => ebcdic::APOSTROPHE,
+        }
+    }
+
+    /// The character as a UTF-16 unit, for a national item.
+    pub const fn unit(self) -> u16 {
+        match self {
+            Self::Quote => 0x0022,
+            Self::Apost => 0x0027,
+        }
+    }
+}
+
+/// CURRENCY(literal): the character, or a hexadecimal literal's byte, which the program's code page
+/// turns into one (Programming Guide SC27-8714-03, p. 358).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Currency {
+    Char(char),
+    Hex(u8),
+}
+
+/// Whether N literals, and PICTURE N items with no USAGE clause, are national, IBM's default, or
+/// DBCS (Programming Guide SC27-8714-03, pp. 387-388).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Nsymbol {
+    #[default]
+    National,
+    Dbcs,
+}
+
+/// How DISPLAY shows a signed binary, packed or overpunched zoned item: as releases before 6 did,
+/// with an overpunched digit (`Compat`), or with a separate leading sign (`Sep`) (Programming
+/// Guide SC27-8714-03, pp. 362-363).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DispSign {
+    #[default]
+    Compat,
+    Sep,
+}
+
+/// Day 1 of the date intrinsic functions' integer dates: 1 January 1601 (`Ansi`), or Language
+/// Environment's Lilian 15 October 1582 (Programming Guide SC27-8714-03, p. 375).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum IntDate {
+    #[default]
+    Ansi,
+    Lilian,
+}
+
+/// Whether a reference must be unique by the standard's rules (`Compat`), or resolves to the one
+/// item a complete set of qualifiers names (`Extend`) (Programming Guide SC27-8714-03, p. 400).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Qualify {
+    #[default]
+    Compat,
+    Extend,
+}
+
+/// The file status of a READ whose record's length conflicts with the file's record descriptions:
+/// 04 under `Standard`, checked against the level-01 records; 00 under `Compat`, checked only
+/// against RECORD VARYING (Programming Guide SC27-8714-03, pp. 422-424).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Vlr {
+    #[default]
+    Standard,
+    Compat,
+}
+
+/// The file status of a VSAM OPEN that succeeds once its file's integrity is verified: 97 under
+/// `Compat`, 00 under `Succ` (Programming Guide SC27-8714-03, p. 424).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VsamOpenFs {
+    #[default]
+    Compat,
+    Succ,
+}
+
 /// Whether a program whose compile gave warnings runs (`Proceed`), or (`-warnings-block`, the
 /// command line's NOCOMPILE(W)) is refused. The return code is 4 either way.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -252,6 +343,19 @@ pub struct Options {
     pub invdata: Option<Invdata>,
     /// ZWB: a signed zoned item compared with a nonnumeric operand loses its sign first.
     pub zwb: bool,
+    pub quote: Quote,
+    /// CURRENCY(literal): the currency symbol a program with no CURRENCY SIGN clause uses in place
+    /// of $. None under NOCURRENCY, IBM's default.
+    pub currency: Option<Currency>,
+    pub nsymbol: Nsymbol,
+    pub dispsign: DispSign,
+    pub intdate: IntDate,
+    pub qualify: Qualify,
+    /// INITIAL: the program and its nested programs behave as though their PROGRAM-ID paragraphs
+    /// said IS INITIAL (Programming Guide SC27-8714-03, p. 374).
+    pub initial: bool,
+    pub vlr: Vlr,
+    pub vsamopenfs: VsamOpenFs,
 }
 
 impl Default for Options {
@@ -277,6 +381,15 @@ impl Default for Options {
             cics_return_warning: CicsReturnWarning::default(),
             invdata: None,
             zwb: true,
+            quote: Quote::default(),
+            currency: None,
+            nsymbol: Nsymbol::default(),
+            dispsign: DispSign::default(),
+            intdate: IntDate::default(),
+            qualify: Qualify::default(),
+            initial: false,
+            vlr: Vlr::default(),
+            vsamopenfs: VsamOpenFs::default(),
         }
     }
 }
@@ -322,6 +435,31 @@ fn without_effect(name: &str) -> Option<OptionError> {
     Some(OptionError::NoEffect { option, why, warning })
 }
 
+/// CURRENCY's literal: one character between quotation marks or apostrophes, or a hexadecimal
+/// literal of one byte (Programming Guide SC27-8714-03, p. 358). A figurative constant, a
+/// null-terminated, DBCS or national literal is none of these, so it is refused here.
+fn currency_literal(text: &str) -> Option<Currency> {
+    fn quoted(t: &str) -> Option<&str> {
+        let q = t.chars().next().filter(|q| matches!(q, '\'' | '"'))?;
+        (t.len() >= 2 && t.ends_with(q)).then(|| &t[1..t.len() - 1])
+    }
+    let text = text.trim();
+    if let Some(hex) = text.strip_prefix(['X', 'x']).and_then(quoted) {
+        return u8::from_str_radix(hex, 16).ok().filter(|_| hex.len() == 2).map(Currency::Hex);
+    }
+    let mut chars = quoted(text)?.chars();
+    match (chars.next(), chars.next()) {
+        (Some(c), None) if can_be_currency(c) => Some(Currency::Char(c)),
+        _ => None,
+    }
+}
+
+/// Whether the CURRENCY option may name `c`: a single-byte character that is no digit, space, one
+/// of the letters A B C D E G N P R S U V X Z in either case, or one of * + - / , . ; ( ) " =.
+pub fn can_be_currency(c: char) -> bool {
+    u32::from(c) < 256 && !c.is_ascii_digit() && !"ABCDEGNPRSUVXZabcdegnprsuvxz *+-/,.;()\"=".contains(c)
+}
+
 impl std::error::Error for OptionError {}
 
 impl Options {
@@ -329,7 +467,8 @@ impl Options {
     /// `TRUNC(OPT)`, `AR(E)`, `CP(1047)`. Returns false for an option this layer does not read. An
     /// error leaves the options as they were, except NUMPROC(MIG), which sets the default NUMPROC.
     pub fn apply(&mut self, option: &str) -> Result<bool, OptionError> {
-        let option = option.trim().to_ascii_uppercase();
+        let given = option.trim();
+        let option = given.to_ascii_uppercase();
         let (name, sub) = match option.split_once('(') {
             Some((name, rest)) => (name.trim(), rest.trim_end_matches(')').trim()),
             None => (option.as_str(), ""),
@@ -411,6 +550,58 @@ impl Options {
             "RENT" => self.rent = !off,
             "DBCS" => self.dbcs = !off,
             "DYNAM" => self.dynam = !off,
+            "APOST/QUOTE" if sub.is_empty() => self.quote = if name == "APOST" { Quote::Apost } else { Quote::Quote },
+            "CURRENCY" => {
+                self.currency = match (off, sub) {
+                    (true, "") => None,
+                    (false, _) => Some(currency_literal(given.split_once('(').map_or("", |(_, rest)| rest.trim_end().trim_end_matches(')'))).ok_or_else(bad)?),
+                    _ => return Err(bad()),
+                }
+            }
+            "NSYMBOL" => {
+                self.nsymbol = match sub {
+                    "NATIONAL" | "NAT" => Nsymbol::National,
+                    "DBCS" => Nsymbol::Dbcs,
+                    _ => return Err(bad()),
+                }
+            }
+            "DISPSIGN" => {
+                self.dispsign = match sub {
+                    "COMPAT" | "C" => DispSign::Compat,
+                    "SEP" | "S" => DispSign::Sep,
+                    _ => return Err(bad()),
+                }
+            }
+            "INTDATE" => {
+                self.intdate = match sub {
+                    "ANSI" => IntDate::Ansi,
+                    "LILIAN" => IntDate::Lilian,
+                    _ => return Err(bad()),
+                }
+            }
+            "QUALIFY" => {
+                self.qualify = match sub {
+                    "COMPAT" | "C" => Qualify::Compat,
+                    "EXTEND" | "E" => Qualify::Extend,
+                    _ => return Err(bad()),
+                }
+            }
+            "INITIAL" if sub.is_empty() => self.initial = !off,
+            "VLR" => {
+                self.vlr = match sub {
+                    "STANDARD" | "S" => Vlr::Standard,
+                    "COMPAT" | "C" => Vlr::Compat,
+                    _ => return Err(bad()),
+                }
+            }
+            "VSAMOPENFS" => {
+                self.vsamopenfs = match sub {
+                    "COMPAT" | "C" => VsamOpenFs::Compat,
+                    "SUCC" | "S" => VsamOpenFs::Succ,
+                    _ => return Err(bad()),
+                }
+            }
+            "APOST/QUOTE" | "INITIAL" => return Err(bad()),
             _ => return Ok(false),
         }
         Ok(true)
@@ -445,6 +636,18 @@ impl Options {
 
     pub fn code_page(&self) -> &'static CodePage {
         CodePage::by_ccsid(self.codepage).expect("codepage validated when applied")
+    }
+
+    /// The CURRENCY option's character, a hexadecimal literal's read in the program's code page;
+    /// Err with that character when the page gives one the option may not name.
+    pub fn currency_symbol(&self) -> Option<Result<char, char>> {
+        self.currency.map(|c| match c {
+            Currency::Char(c) => Ok(c),
+            Currency::Hex(b) => {
+                let c = self.code_page().decode_byte(b);
+                if can_be_currency(c) { Ok(c) } else { Err(c) }
+            }
+        })
     }
 }
 
@@ -656,6 +859,57 @@ mod tests {
         assert_eq!(o.fastsrt_adv_print.flag(), "--fastsrt-adv-print=exclude");
         assert!(o.apply_flag("--fastsrt-adv-print=maybe").is_err());
         assert!(o.apply_flag("--fastsrt-adv-print").is_err());
+    }
+
+    #[test]
+    fn the_options_of_roadmap_2_10_to_2_12_default_to_ibms_and_take_each_documented_suboption() {
+        let o = Options::default();
+        assert_eq!((o.quote, o.currency, o.nsymbol, o.dispsign, o.intdate), (Quote::Quote, None, Nsymbol::National, DispSign::Compat, IntDate::Ansi));
+        assert_eq!((o.qualify, o.initial, o.vlr, o.vsamopenfs), (Qualify::Compat, false, Vlr::Standard, VsamOpenFs::Compat));
+        let given = |cards: &[&str]| {
+            let mut o = Options::default();
+            cards.iter().for_each(|c| assert_eq!(o.apply(c), Ok(true), "{c}"));
+            o
+        };
+        assert_eq!(given(&["APOST"]).quote, Quote::Apost);
+        assert_eq!(given(&["apost", "Q"]).quote, Quote::Quote);
+        assert_eq!(given(&["NS(DBCS)"]).nsymbol, Nsymbol::Dbcs);
+        assert_eq!(given(&["NSYMBOL(DBCS)", "NS(NAT)"]).nsymbol, Nsymbol::National);
+        assert_eq!(given(&["DS(S)"]).dispsign, DispSign::Sep);
+        assert_eq!(given(&["DISPSIGN(SEP)", "DISPSIGN(COMPAT)"]).dispsign, DispSign::Compat);
+        assert_eq!(given(&["INTDATE(LILIAN)"]).intdate, IntDate::Lilian);
+        assert_eq!(given(&["QUA(E)"]).qualify, Qualify::Extend);
+        assert_eq!(given(&["QUALIFY(EXTEND)", "QUA(C)"]).qualify, Qualify::Compat);
+        assert!(given(&["INITIAL"]).initial);
+        assert!(!given(&["INITIAL", "NOINITIAL"]).initial);
+        assert_eq!(given(&["VLR(C)"]).vlr, Vlr::Compat);
+        assert_eq!(given(&["VLR(COMPAT)", "VLR(STANDARD)"]).vlr, Vlr::Standard);
+        assert_eq!(given(&["VS(S)"]).vsamopenfs, VsamOpenFs::Succ);
+        assert_eq!(given(&["VSAMOPENFS(SUCC)", "VSAMOPENFS(COMPAT)"]).vsamopenfs, VsamOpenFs::Compat);
+        for bad in ["APOST(X)", "NSYMBOL(N)", "DS(X)", "INTDATE(JULIAN)", "QUA(X)", "INITIAL(Y)", "VLR(X)", "VS(X)", "INTDATE"] {
+            assert!(matches!(Options::default().apply(bad), Err(OptionError::BadSuboption { .. })), "{bad}");
+        }
+    }
+
+    #[test]
+    fn currency_takes_one_character_it_may_name_in_either_delimiter_or_a_hexadecimal_byte() {
+        let currency = |card: &str| {
+            let mut o = Options::default();
+            o.apply(card).map(|_| o.currency)
+        };
+        assert_eq!(currency("CURRENCY('£')"), Ok(Some(Currency::Char('£'))));
+        assert_eq!(currency("curr(\"f\")"), Ok(Some(Currency::Char('f'))), "the literal keeps its case");
+        assert_eq!(currency("CURRENCY(X'5B')"), Ok(Some(Currency::Hex(0x5B))));
+        assert_eq!(currency("NOCURR"), Ok(None));
+        for bad in ["CURRENCY('E')", "CURRENCY('e')", "CURRENCY('1')", "CURRENCY(' ')", "CURRENCY('*')", "CURRENCY('EUR')", "CURRENCY(SPACE)", "CURRENCY(N'£')", "CURRENCY(Z'£')", "CURRENCY(X'5B5B')", "CURRENCY", "NOCURRENCY('£')"] {
+            assert!(matches!(currency(bad), Err(OptionError::BadSuboption { .. })), "{bad}");
+        }
+        let mut o = Options::default();
+        o.apply("CURRENCY(X'4A')").unwrap();
+        assert_eq!(o.currency_symbol(), Some(Ok('¢')), "X'4A' is the cent sign in CCSID 1140");
+        o.apply("CURRENCY(X'F1')").unwrap();
+        assert_eq!(o.currency_symbol(), Some(Err('1')));
+        assert_eq!(Options::default().currency_symbol(), None);
     }
 
     #[test]
