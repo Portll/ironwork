@@ -174,6 +174,7 @@ It is zero-dependency Rust.
 | 21 | Dynamic SQL, multi-row FETCH, LOBs, DRDA | ironwork | L to XL | Out of scope in sql-runtime.md |
 | 22 | Coverage reports from ironwork runs (E9); DDL to PostgreSQL schemas (E10) | Both | M each | |
 | 23 | cobolwork BACKLOG items: git-ref source tree, the three extractions, utility knowledge-base rows, PCI and COBIT mappings, the gitleaks pull request | cobolwork | S to L each | As BACKLOG.md lists them |
+| 24 | A verifier for high-assurance builds (E11): each compilation's output checked against its source by a separate tool, which a project's tool qualification can rest on | ironwork | L to XL | After VM step 2 and P0 #5; structured for qualification in [verifier.md](verifier.md) |
 
 ## 6. What the VM needs
 
@@ -209,6 +210,7 @@ costs nothing but CI time.
 | E8 | Migration equivalence: run a job under ironwork against recorded SQL and files, and compare with production's outputs | P2 | L |
 | E9 | Execution coverage feeding cobolwork, to mark findings in code a test reached | P3 | M |
 | E10 | Db2 DDL to PostgreSQL schemas for SQL tests | P3 | M |
+| E11 | Translation validation for safety-critical estates (avionics, medical devices), where a miscompilation is a hazard: [verifier.md](verifier.md) | P3 | L to XL |
 
 ## 8. Outside the code
 
