@@ -175,8 +175,11 @@ fn random(n: usize) -> Vec<u8> {
     if File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut buf)).is_ok() {
         return buf;
     }
+    use std::hash::{BuildHasher, Hasher};
     let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
-    let seed = format!("{}:{}:{:p}", d.as_nanos(), std::process::id(), &buf);
+    let mut keyed = std::collections::hash_map::RandomState::new().build_hasher();
+    keyed.write_u128(d.as_nanos());
+    let seed = format!("{}:{}:{:p}:{}", d.as_nanos(), std::process::id(), &buf, keyed.finish());
     sha256(seed.as_bytes())[..n.min(32)].to_vec()
 }
 
@@ -234,8 +237,13 @@ pub fn prepare(dir: &Path, reads: &[PathBuf]) -> io::Result<PathBuf> {
                 fs::set_permissions(&p, fs::Permissions::from_mode(0o700))?;
             }
         }
+        refuse_link(&p)?;
     }
-    fs::canonicalize(&absolute)
+    let made = fs::canonicalize(&absolute)?;
+    if made != intended {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("the evidence directory {} resolved to {} while it was made", dir.display(), made.display())));
+    }
+    Ok(made)
 }
 
 struct Chain {
@@ -340,6 +348,8 @@ impl Journal {
     }
 }
 
+/// The ledger lock. A lock older than a minute was left by a writer that died holding it, and is
+/// broken, as cobolwork breaks it.
 fn take_lock(path: &Path) -> Result<(), String> {
     let deadline = Instant::now() + std::time::Duration::from_secs(5);
     loop {
@@ -349,6 +359,10 @@ fn take_lock(path: &Path) -> Result<(), String> {
                 return Ok(());
             }
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                let stale = fs::symlink_metadata(path).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > std::time::Duration::from_secs(60));
+                if stale && fs::remove_file(path).is_ok() {
+                    continue;
+                }
                 if Instant::now() >= deadline {
                     return Err("the ledger lock could not be had".into());
                 }
@@ -377,7 +391,11 @@ fn ledger_tail(path: &Path) -> io::Result<Option<String>> {
     f.take(window).read_to_end(&mut buf)?;
     let text = String::from_utf8_lossy(&buf);
     let body = text.strip_suffix('\n').ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "ledger.jsonl ends in a partial line"))?;
-    Ok(Some(body.rsplit('\n').next().unwrap_or(body).to_string()))
+    match body.rsplit_once('\n') {
+        Some((_, last)) => Ok(Some(last.to_string())),
+        None if window < size => Err(io::Error::new(io::ErrorKind::InvalidData, "the ledger's last line is longer than any ledger record")),
+        None => Ok(Some(body.to_string())),
+    }
 }
 
 /// The value of a top-level string or integer field in one canonical record line.
@@ -396,8 +414,10 @@ fn append_ledger(dir: &Path, run: &str, journal: &Chain) -> io::Result<()> {
     refuse_link(&path)?;
     let mut chain = match ledger_tail(&path)? {
         Some(line) => {
-            let seq: i64 = field_of(&line, "seq").and_then(|s| s.parse().ok()).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "the ledger's last record has no seq"))?;
-            Chain { chain: field_of(&line, "chain").unwrap_or_default(), seq: seq + 1, prev: field_of(&line, "hash").unwrap_or_default() }
+            let bad = || io::Error::new(io::ErrorKind::InvalidData, "the ledger's last line is not a ledger record");
+            let hex_of = |key: &str, len: usize| field_of(&line, key).filter(|v| v.len() == len && v.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+            let seq: i64 = field_of(&line, "seq").and_then(|s| s.parse().ok()).ok_or_else(bad)?;
+            Chain { chain: hex_of("chain", 32).ok_or_else(bad)?, seq: seq + 1, prev: hex_of("hash", 64).ok_or_else(bad)? }
         }
         None => Chain { chain: hex(&random(16)), seq: 0, prev: ZERO.into() },
     };
@@ -475,6 +495,36 @@ mod tests {
         let dir = temp();
         assert!(prepare(&dir.join("src").join("ev"), std::slice::from_ref(&dir)).is_err());
         assert!(!dir.join("src").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn closed(ev: &Path) -> Ledger {
+        Journal::create(ev, &[], "run", &[], "0.0.0").unwrap().close(Some(0)).unwrap()
+    }
+
+    #[test]
+    fn a_lock_left_by_a_dead_writer_is_broken_after_a_minute() {
+        let dir = temp();
+        let ev = dir.join("ev");
+        prepare(&ev, &[]).unwrap();
+        let lock = File::create(ev.join(LOCK)).unwrap();
+        lock.set_modified(SystemTime::now() - std::time::Duration::from_secs(120)).unwrap();
+        drop(lock);
+        assert_eq!(closed(&ev), Ledger::Recorded);
+        assert!(!ev.join(LOCK).exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_ledger_whose_last_line_is_no_ledger_record_is_not_extended() {
+        let dir = temp();
+        let ev = dir.join("ev");
+        prepare(&ev, &[]).unwrap();
+        for tail in ["{\"seq\":0}\n".to_string(), format!("{{\"chain\":\"{}\",\"hash\":\"{}\",\"seq\":0}}\n", "a".repeat(31), "b".repeat(64)), format!("{}\n", "x".repeat(70_000))] {
+            fs::write(ev.join(LEDGER), &tail).unwrap();
+            assert!(matches!(closed(&ev), Ledger::Unrecorded(_)), "{}", &tail[..20]);
+            assert_eq!(fs::read_to_string(ev.join(LEDGER)).unwrap(), tail);
+        }
         fs::remove_dir_all(dir).unwrap();
     }
 }
