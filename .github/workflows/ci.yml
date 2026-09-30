@@ -17,11 +17,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The option table is vendored from cobolwork; its drift test compares it with cobolwork's.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Portll/cobolwork
+          path: cobolwork
+          persist-credentials: false
+          sparse-checkout: provenance/enterprise-options.tsv
+          sparse-checkout-cone-mode: false
       - name: Toolchain
         run: |
           rustup toolchain install stable --profile minimal --component clippy
           rustup default stable
       - name: Test
+        env:
+          IRONWORK_COBOLWORK_DIR: ${{ github.workspace }}/cobolwork
         run: cargo test --workspace --locked
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings

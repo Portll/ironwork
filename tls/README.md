@@ -5,7 +5,8 @@ dependencies, so TLS lives here, in a workspace of its own, as `fuzz/` does.
 
     cargo build --release --manifest-path tls/Cargo.toml
 
-The binary is `tls/target/release/ironwork` (or under `CARGO_TARGET_DIR`). Over TCP it connects
+The binary is `tls/target/release/ironwork` (or under `CARGO_TARGET_DIR`). Each GitHub release also
+carries it, as the `ironwork-tls-<version>-<target>` archives. Over TCP it connects
 with `sslmode=verify-full` unless the URL says `sslmode=disable`: it checks the server's certificate
 chain and its name, against `sslrootcert=path.pem` or else the Mozilla roots in `webpki-roots`.
 
