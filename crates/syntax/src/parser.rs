@@ -30,6 +30,11 @@ const VERBS: &[&str] = &[
 ];
 
 /// Words that end a phrase or a nested block.
+/// A number written as digits alone, which can be a procedure-name.
+fn digits(t: &Tok) -> bool {
+    matches!(t, Tok::Number(n) if n.bytes().all(|b| b.is_ascii_digit()))
+}
+
 const PHRASE_WORDS: &[&str] = &[
     "ELSE", "END-IF", "END-PERFORM", "END-COMPUTE", "END-ADD", "END-SUBTRACT", "END-MULTIPLY", "END-DIVIDE", "END-DISPLAY", "WHEN",
     "TO", "FROM", "BY", "INTO", "GIVING", "REMAINDER", "ROUNDED", "ON", "NOT", "SIZE", "UNTIL", "VARYING", "TIMES", "THRU", "THROUGH",
@@ -1051,12 +1056,12 @@ impl Parser<'_> {
     }
 
     fn paragraph_header(&self) -> bool {
-        self.tokens.get(self.at).is_some_and(|t| t.area_a && matches!(t.tok, Tok::Word(_))) && self.peek_at(1) == Some(&Tok::Period)
+        self.tokens.get(self.at).is_some_and(|t| t.area_a && (matches!(t.tok, Tok::Word(_)) || digits(&t.tok))) && self.peek_at(1) == Some(&Tok::Period)
     }
 
     fn section_header(&self) -> bool {
         // EXIT SECTION is a statement; EXIT, reserved, names no section.
-        self.tokens.get(self.at).is_some_and(|t| matches!(t.tok, Tok::Word(_))) && self.word_at(0) != Some("EXIT") && self.word_at(1) == Some("SECTION")
+        self.tokens.get(self.at).is_some_and(|t| matches!(t.tok, Tok::Word(_)) || digits(&t.tok)) && self.word_at(0) != Some("EXIT") && self.word_at(1) == Some("SECTION")
     }
 
     fn paragraphs(&mut self) -> R<Vec<Paragraph>> {
@@ -1074,7 +1079,7 @@ impl Parser<'_> {
     fn procedure_item(&mut self, paragraphs: &mut Vec<Paragraph>) -> R<bool> {
         if self.section_header() {
             let pos = self.pos();
-            let name = self.name("a section name")?;
+            let name = self.procedure_word("a section name")?;
             self.at += 1;
             let mut priority = 0;
             if let Some(Tok::Number(n)) = self.peek() {
@@ -1087,7 +1092,7 @@ impl Parser<'_> {
         }
         if self.paragraph_header() {
             let pos = self.pos();
-            let name = self.name("a paragraph name")?;
+            let name = self.procedure_word("a paragraph name")?;
             self.at += 1;
             let (section, priority) = paragraphs.last().map_or((None, 0), |p| (p.section.clone(), p.priority));
             paragraphs.push(Paragraph { name, statements: Vec::new(), section, is_section: false, priority, pos });
@@ -1362,11 +1367,11 @@ impl Parser<'_> {
                     return Ok(Stmt::GoTo { target: None, pos });
                 }
                 let target = self.proc_name()?;
-                if !self.starts_ref() && !self.is_word("DEPENDING") {
+                if !self.starts_proc_name() && !self.is_word("DEPENDING") {
                     return Ok(Stmt::GoTo { target: Some(target), pos });
                 }
                 let mut targets = vec![target];
-                while self.starts_ref() && !self.is_word("DEPENDING") {
+                while self.starts_proc_name() && !self.is_word("DEPENDING") {
                     targets.push(self.proc_name()?);
                 }
                 self.expect_word("DEPENDING")?;
@@ -1382,7 +1387,7 @@ impl Parser<'_> {
                         self.expect_word("TO")?;
                     }
                     pairs.push((paragraph, self.proc_name()?));
-                    if !self.starts_ref() {
+                    if !self.starts_proc_name() {
                         break;
                     }
                 }
@@ -1569,9 +1574,8 @@ impl Parser<'_> {
     }
 
     fn perform(&mut self, pos: Pos) -> R<Stmt> {
-        let named = self.word().is_some_and(|w| !VERBS.contains(&w) && !PHRASE_WORDS.contains(&w))
-            && self.word_at(1) != Some("TIMES")
-            && !matches!(self.peek(), Some(Tok::Number(_)));
+        let named = (self.word().is_some_and(|w| !VERBS.contains(&w) && !PHRASE_WORDS.contains(&w) && w != "TEST") || self.peek().is_some_and(digits))
+            && !self.times_ahead();
         if named {
             let from = self.proc_name()?;
             let thru = if self.accept_any(&["THRU", "THROUGH"]).is_some() { Some(self.proc_name()?) } else { None };
@@ -2161,9 +2165,33 @@ impl Parser<'_> {
     }
 
     fn proc_name(&mut self) -> R<ProcName> {
-        let name = self.name("a procedure name")?;
-        let section = if self.accept_any(&["OF", "IN"]).is_some() { Some(self.name("a section name")?) } else { None };
+        let name = self.procedure_word("a procedure name")?;
+        let section = if self.accept_any(&["OF", "IN"]).is_some() { Some(self.procedure_word("a section name")?) } else { None };
         Ok(ProcName { name, section })
+    }
+
+    /// A paragraph-name or section-name, which may be digits alone.
+    fn procedure_word(&mut self, what: &str) -> R<String> {
+        match self.peek() {
+            Some(t) if digits(t) => {
+                let Tok::Number(n) = t.clone() else { unreachable!() };
+                self.at += 1;
+                Ok(n)
+            }
+            _ => self.name(what),
+        }
+    }
+
+    fn starts_proc_name(&self) -> bool {
+        self.starts_ref() || self.peek().is_some_and(digits)
+    }
+
+    /// Whether an operand and TIMES come next, as in PERFORM P T (I) TIMES.
+    fn times_ahead(&mut self) -> bool {
+        let at = self.at;
+        let times = self.starts_operand() && self.expr().is_ok() && self.is_word("TIMES");
+        self.at = at;
+        times
     }
 
     fn evaluate(&mut self, pos: Pos) -> R<Stmt> {
@@ -2246,7 +2274,7 @@ impl Parser<'_> {
             }
             return Ok(Loop::Varying { varying, after, test_after });
         }
-        if self.starts_operand() && self.word_at(1) == Some("TIMES") || matches!(self.peek(), Some(Tok::Number(_))) {
+        if self.times_ahead() {
             let count = self.expr()?;
             self.expect_word("TIMES")?;
             return Ok(Loop::Times(count));
@@ -2892,6 +2920,23 @@ mod tests {
         assert!(matches!(&s[3], Stmt::GoToDepending { targets, on, .. } if targets.len() == 2 && on.name == "D"));
         assert!(matches!(&p.paragraphs[2].statements[0], Stmt::GoTo { target: None, .. }));
         assert!(matches!(&p.paragraphs[3].statements[0], Stmt::GoTo { target: Some(t), .. } if t.name == "P1"));
+    }
+
+    #[test]
+    fn procedure_names_of_digits_and_a_subscripted_times_count() {
+        let p = program(
+            "       01  T.\n           05 N PIC 9 OCCURS 2.\n       01  I PIC 9.\n       PROCEDURE DIVISION.\n       00 SECTION 00.\n       10.\n           PERFORM 20 N (I) TIMES\n           PERFORM 20 THRU 30\n           PERFORM N (1) TIMES CONTINUE END-PERFORM\n           PERFORM TEST BEFORE UNTIL I > 1 ADD 1 TO I END-PERFORM\n           GO TO 20 30 DEPENDING ON I\n           ALTER 30 TO PROCEED TO 20 40 TO 20.\n       20.\n           PERFORM 00.\n       30.\n           GO TO 20.\n       40.\n           GO TO 20.\n",
+        );
+        let names: Vec<&str> = p.paragraphs.iter().map(|q| q.name.as_str()).collect();
+        assert_eq!(names, ["00", "10", "20", "30", "40"]);
+        let s = &p.paragraphs[1].statements;
+        assert!(matches!(&s[0], Stmt::PerformProc { from, repeat: Loop::Times(Expr::Operand(Operand::Ref(r))), .. } if from.name == "20" && r.name == "N" && r.subscripts.len() == 1));
+        assert!(matches!(&s[1], Stmt::PerformProc { from, thru: Some(t), repeat: Loop::Once, .. } if from.name == "20" && t.name == "30"));
+        assert!(matches!(&s[2], Stmt::PerformInline { repeat: Loop::Times(_), .. }));
+        assert!(matches!(&s[3], Stmt::PerformInline { repeat: Loop::Until { test_after: false, .. }, .. }));
+        assert!(matches!(&s[4], Stmt::GoToDepending { targets, .. } if targets.len() == 2 && targets[1].name == "30"));
+        assert!(matches!(&s[5], Stmt::Alter { pairs, .. } if pairs.len() == 2 && pairs[1].0.name == "40"));
+        assert!(matches!(&p.paragraphs[2].statements[0], Stmt::PerformProc { from, .. } if from.name == "00"));
     }
 
     #[test]
