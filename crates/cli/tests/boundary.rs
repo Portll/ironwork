@@ -423,6 +423,19 @@ fn the_check_sees_every_form_a_manifest_can_name_a_dependency_in() {
     for rt in caught {
         assert!(!breaches(rt).is_empty(), "not caught:\n{rt}");
     }
+
+    let on_compile = "[dependencies]\ncompile = { package = \"ironwork-compile\", path = \"../compile\" }\n";
+    let runtime = [("zarch", "ironwork-zarch"), ("numeric", "ironwork-numeric"), ("rt", "ironwork-rt")];
+    for (dir, _) in runtime {
+        let manifests: Vec<(&str, String)> = runtime
+            .iter()
+            .map(|&(d, package)| (d, format!("[package]\nname = \"{package}\"\n{}", if d == dir { on_compile } else { "" })))
+            .chain([("compile", "[package]\nname = \"ironwork-compile\"\n".to_owned())])
+            .collect();
+        let members: Vec<(&str, &str)> = manifests.iter().map(|(d, m)| (*d, m.as_str())).collect();
+        let found = Workspace::parse(ROOT, &members).boundary();
+        assert!(found.iter().any(|b| b.starts_with(&format!("crates/{dir}/Cargo.toml")) && b.contains("ironwork-compile")), "{dir}: {found:?}");
+    }
 }
 
 #[test]

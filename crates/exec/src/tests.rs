@@ -1,7 +1,10 @@
 use super::*;
 use crate::testing::{Executor, Harness, compile_errors, ebcdic, line};
+use compile::refused;
+use numeric::Options;
 use std::collections::BTreeMap;
-use syntax::Severity;
+use syntax::ast::Stmt;
+use syntax::{Error, Severity};
 
 mod collating;
 mod data;

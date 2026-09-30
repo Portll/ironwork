@@ -42,7 +42,7 @@ pub(crate) fn with_special_registers(mut program: Program) -> Program {
 }
 
 /// A key of a table SORT: the table's element itself, or an item within it.
-pub(crate) fn table_key(layout: &Layout, table: usize, name: &str) -> Option<usize> {
+pub fn table_key(layout: &Layout, table: usize, name: &str) -> Option<usize> {
     if layout.items[table].name.as_deref() == Some(name) {
         return Some(table);
     }
@@ -50,7 +50,7 @@ pub(crate) fn table_key(layout: &Layout, table: usize, name: &str) -> Option<usi
 }
 
 /// Keys whose comparison a collating sequence changes: alphanumeric and edited ones.
-pub(crate) fn collates(kind: Kind) -> bool {
+pub fn collates(kind: Kind) -> bool {
     matches!(kind, Kind::Group | Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::NumericEdited { .. })
 }
 

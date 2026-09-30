@@ -13,9 +13,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ironwork-compile"
+version = "0.1.2"
+dependencies = [
+ "ironwork-numeric",
+ "ironwork-rt",
+ "ironwork-syntax",
+ "ironwork-zarch",
+]
+
+[[package]]
 name = "ironwork-exec"
 version = "0.1.2"
 dependencies = [
+ "ironwork-compile",
  "ironwork-numeric",
  "ironwork-oracle",
  "ironwork-rt",

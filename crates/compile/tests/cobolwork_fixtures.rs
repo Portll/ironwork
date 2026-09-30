@@ -25,7 +25,7 @@ fn copied_layout(member: &str, file: &str) -> Vec<(u8, Option<String>, u32, u32,
         "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n           COPY {member}.\n       PROCEDURE DIVISION.\n           GOBACK.\n"
     );
     let parsed = syntax::parse_with(&program, &syntax::copy::Libraries::new(vec![dir.clone()])).unwrap_or_else(|e| panic!("{file}: {e}"));
-    let compiled = ironwork_exec::compile(parsed, &[]).unwrap_or_else(|e| panic!("{file}: {e:?}"));
+    let compiled = ironwork_compile::compile(parsed, &[]).unwrap_or_else(|e| panic!("{file}: {e:?}"));
     std::fs::remove_dir_all(dir).unwrap();
     compiled.layout.items.iter().map(|i| (i.level, i.name.clone(), i.offset, i.size, i.occurs)).collect()
 }

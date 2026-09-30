@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use exec::Execute;
 use exec::digest::{hex, sha256};
 use exec::evidence::{canonical, fields, Value};
 

@@ -1,6 +1,6 @@
 [package]
-name = "ironwork-exec"
-description = "ironwork for COBOL: an interpreter over EBCDIC storage"
+name = "ironwork-compile"
+description = "ironwork for COBOL: the compiler that checks a parsed program and lays out its storage as IBM does"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -12,14 +12,10 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-compile = { package = "ironwork-compile", path = "../compile", version = "0.1.2" }
 numeric = { package = "ironwork-numeric", path = "../numeric", version = "0.1.2" }
 rt = { package = "ironwork-rt", path = "../rt", version = "0.1.2" }
 syntax = { package = "ironwork-syntax", path = "../syntax", version = "0.1.2" }
 zarch = { package = "ironwork-zarch", path = "../zarch", version = "0.1.2" }
-
-[dev-dependencies]
-oracle = { package = "ironwork-oracle", path = "../oracle" }
 
 [lints]
 workspace = true

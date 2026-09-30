@@ -8,7 +8,7 @@ use syntax::ast::*;
 use syntax::{Error, Pos};
 
 /// A section's paragraphs, first to last.
-pub(crate) type Span = (usize, usize);
+pub type Span = (usize, usize);
 
 /// DEBUG-ITEM as the Language Reference describes it (p. 19), with a DEBUG-CONTENTS of 30
 /// characters ([`numeric::assumptions::DEBUG_CONTENTS_LENGTH`]).
@@ -29,9 +29,9 @@ const DEBUG_ITEM: &str = concat!(
 );
 
 /// Where each field of DEBUG-ITEM starts, and its length.
-pub(crate) const DEBUG_LINE: (usize, usize) = (0, 6);
-pub(crate) const DEBUG_NAME: (usize, usize) = (7, 30);
-pub(crate) const DEBUG_CONTENTS: (usize, usize) = (56, 30);
+pub const DEBUG_LINE: (usize, usize) = (0, 6);
+pub const DEBUG_NAME: (usize, usize) = (7, 30);
+pub const DEBUG_CONTENTS: (usize, usize) = (56, 30);
 
 /// DEBUG-ITEM and its fields, which only a debugging section can reference (p. 771).
 pub(crate) const DEBUG_ITEM_NAMES: [&str; 7] = ["DEBUG-ITEM", "DEBUG-LINE", "DEBUG-NAME", "DEBUG-SUB-1", "DEBUG-SUB-2", "DEBUG-SUB-3", "DEBUG-CONTENTS"];
@@ -40,19 +40,19 @@ pub(crate) const DEBUG_ITEM_NAMES: [&str; 7] = ["DEBUG-ITEM", "DEBUG-LINE", "DEB
 #[derive(Debug, Default)]
 pub struct Table {
     /// Each file's own EXCEPTION/ERROR procedure.
-    pub(crate) files: Vec<Option<Span>>,
+    pub files: Vec<Option<Span>>,
     /// The EXCEPTION/ERROR procedures for files open INPUT, OUTPUT, I-O and EXTEND.
-    pub(crate) modes: [Option<Span>; 4],
+    pub modes: [Option<Span>; 4],
     /// Under the DEBUG runtime option: for each paragraph, the debugging section that runs before
     /// it and the name DEBUG-NAME gives. Empty otherwise.
-    pub(crate) triggers: Vec<Option<(Span, String)>>,
+    pub triggers: Vec<Option<(Span, String)>>,
     /// DEBUG-ITEM's item in the layout.
-    pub(crate) debug_item: Option<usize>,
+    pub debug_item: Option<usize>,
     /// Under ALL PROCEDURES, where each ALTER in the declaratives is: those run no debugging section.
-    pub(crate) declarative_alters: Vec<Pos>,
+    pub declarative_alters: Vec<Pos>,
 }
 
-pub(crate) fn mode_index(mode: OpenMode) -> usize {
+pub fn mode_index(mode: OpenMode) -> usize {
     match mode {
         OpenMode::Input => 0,
         OpenMode::Output => 1,
@@ -153,7 +153,7 @@ pub(crate) fn resolve(program: &Program, layout: &Layout, options: &Options, err
 }
 
 /// A procedure-name as DEBUG-NAME and DEBUG-CONTENTS give it, a qualifier after OF (p. 19).
-pub(crate) fn debug_name(name: &ProcName) -> String {
+pub fn debug_name(name: &ProcName) -> String {
     name.section.as_ref().map_or_else(|| name.name.clone(), |s| format!("{} OF {s}", name.name))
 }
 

@@ -306,6 +306,7 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
 
 #[cfg(test)]
 mod tests {
+    use crate::Execute;
     use crate::sql::{Abandoned, Answer, Call, Database, Outcome, Value};
     use std::cell::RefCell;
     use std::collections::VecDeque;

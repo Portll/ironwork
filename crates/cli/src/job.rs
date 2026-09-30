@@ -13,6 +13,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use exec::Execute;
 use exec::evidence::{canonical, fields, Value};
 
 pub struct Request {

@@ -7,6 +7,7 @@ use crate::abend::{AbendCode, Signal};
 use crate::calendar::{civil, days_from_civil, days_in_month, SECONDS_PER_DAY};
 use crate::layout::{Item, Kind, Layout, Resolved};
 use rt::storage::{Loc, Val};
+pub(crate) use rt::storage::literal_fixed;
 use crate::unit::{ADDRESS_BASE, LoadError, RETURN_CODE, RunUnit};
 use crate::Compiled;
 use numeric::binary::{self, Binary};
@@ -120,21 +121,6 @@ fn figurative_unit(f: Figurative) -> u16 {
 
 fn fixed(negative: bool, magnitude: U256, places: Places) -> Fixed {
     Fixed { negative: negative && !magnitude.is_zero(), magnitude, places }
-}
-
-pub(crate) fn literal_fixed(text: &str) -> Option<Fixed> {
-    let (negative, body) = match text.as_bytes().first() {
-        Some(b'-') => (true, &text[1..]),
-        Some(b'+') => (false, &text[1..]),
-        _ => (false, text),
-    };
-    let (int, frac) = body.split_once('.').unwrap_or((body, ""));
-    let digits = format!("{int}{frac}");
-    if digits.is_empty() || digits.len() > 31 {
-        return None;
-    }
-    let magnitude: u128 = digits.parse().ok()?;
-    Some(fixed(negative, U256::from_u128(magnitude), Places::new(int.len().max(1) as u32, frac.len() as u32)))
 }
 
 fn pow10(n: u32) -> U256 {

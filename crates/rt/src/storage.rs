@@ -2,8 +2,9 @@
 //! values that move between items.
 
 use crate::vocab::{Figurative, SignClause};
-use numeric::precision::Fixed;
+use numeric::precision::{Fixed, Places};
 use zarch::hfp::{Hfp, Precision};
+use zarch::wide::U256;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -63,4 +64,20 @@ pub enum Val {
     All(Vec<u8>),
     /// A pointer value: `ADDRESS_BASE` (in the interpreter's run unit) plus an offset into run-unit memory, or 0 for NULL.
     Address(u32),
+}
+
+/// A numeric literal's value; None unless it holds 1 to 31 digits.
+pub fn literal_fixed(text: &str) -> Option<Fixed> {
+    let (negative, body) = match text.as_bytes().first() {
+        Some(b'-') => (true, &text[1..]),
+        Some(b'+') => (false, &text[1..]),
+        _ => (false, text),
+    };
+    let (int, frac) = body.split_once('.').unwrap_or((body, ""));
+    let digits = format!("{int}{frac}");
+    if digits.is_empty() || digits.len() > 31 {
+        return None;
+    }
+    let magnitude = U256::from_u128(digits.parse().ok()?);
+    Some(Fixed { negative: negative && !magnitude.is_zero(), magnitude, places: Places::new(int.len().max(1) as u32, frac.len() as u32) })
 }

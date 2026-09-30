@@ -1,5 +1,5 @@
 use crate::lower::{self, LowerError};
-use crate::{Abend, Compiled, Ending, cics, compile, files, unit};
+use crate::{Abend, Compiled, Ending, Execute, cics, compile, files, unit};
 use rt::lir::Program;
 use rt::module::StringTable;
 use rt::module::codec::{Encode, Writer, decode_all};
