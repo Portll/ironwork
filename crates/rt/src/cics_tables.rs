@@ -103,7 +103,7 @@ fn tables() -> &'static Tables {
             .collect();
         let cvda = rows(DFHVALUE)
             .map(|row| {
-                let [name, value] = row[..] else { panic!("dfhvalue.tsv: {row:?} is not two cells") };
+                let [name, value, _since, _source] = row[..] else { panic!("dfhvalue.tsv: {row:?} is not four cells") };
                 (name, number(value, "dfhvalue.tsv"))
             })
             .collect();
@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn the_tables_hold_every_row() {
-        assert_eq!((commands().len(), resp_table().len(), tables().cvda.len()), (67, 121, 999));
+        assert_eq!((commands().len(), resp_table().len(), tables().cvda.len()), (67, 121, 1061));
         assert_eq!(every_command_options().iter().map(|o| o.name).collect::<Vec<_>>(), ["RESP", "RESP2"]);
         assert!(commands().iter().all(|c| c.doc.starts_with("https://www.ibm.com/docs/") && c.page.is_some()), "every command cites IBM");
     }
@@ -162,7 +162,8 @@ mod tests {
         assert_eq!((resp("notfnd"), resp("NOSUCH"), resp_condition(82)), (Some(13), None, Some("ROLLEDBACK")));
         let busy = resp_table().last().unwrap();
         assert_eq!((busy.condition, busy.page), ("BUSY", None));
-        assert_eq!((cvda("ABEND"), cvda("ALLOCATD"), cvda("ADDRESS")), (Some(900), Some(81), None), "ADDRESS is left out: IBM's two tables disagree");
+        assert_eq!((cvda("ABEND"), cvda("ALLOCATD"), cvda("ADDRESS")), (Some(900), Some(81), Some(859)), "ADDRESS as CICS TS 5.4 and later give it");
+        assert_eq!((cvda("SECERROR"), cvda("NODEJSAPP"), cvda("AWARE"), cvda("NOTAWARE")), (Some(1214), Some(1215), Some(1256), Some(1257)), "5.4, 5.5 and 6.x values; AWARE from 6.x's numeric table");
     }
 
     #[test]
