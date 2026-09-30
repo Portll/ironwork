@@ -101,15 +101,76 @@ struct Outcome {
     error: Option<String>,
 }
 
-fn scratch(side: &str) -> std::io::Result<PathBuf> {
-    let nonce = hex(&sha256(format!("{:?}{}{side}", std::time::SystemTime::now(), std::process::id()).as_bytes()))[..12].to_string();
-    let dir = std::env::temp_dir().join(format!("ironwork-compare-{side}-{nonce}"));
-    fs::create_dir_all(&dir)?;
-    Ok(dir)
+/// A new directory under the system's temporary directory, made by this call alone: a directory
+/// someone made first under the same name is never used.
+pub(crate) fn scratch(label: &str) -> std::io::Result<PathBuf> {
+    use std::hash::{BuildHasher, Hasher};
+    for _ in 0..16 {
+        let mut keyed = std::collections::hash_map::RandomState::new().build_hasher();
+        keyed.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+        let nonce = hex(&sha256(format!("{}{}{label}", keyed.finish(), std::process::id()).as_bytes()))[..16].to_string();
+        let dir = std::env::temp_dir().join(format!("ironwork-{label}-{nonce}"));
+        match fs::create_dir(&dir) {
+            Ok(()) => return Ok(dir),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::other("no unused temporary directory name"))
 }
 
-/// Runs one program with every DD pointed at a copy in `dir`.
-fn run_side(program: &Path, req: &Request, specs: &[Spec], dir: &Path) -> Outcome {
+pub(crate) enum Assessment {
+    Same,
+    Declared,
+    Undeclared,
+}
+
+/// Each line where two outputs differ, 1-based, with the byte offset of its first difference.
+fn line_differences(a: &[u8], b: &[u8]) -> Vec<(usize, usize)> {
+    let (la, lb): (Vec<&[u8]>, Vec<&[u8]>) = (a.split_inclusive(|&c| c == b'\n').collect(), b.split_inclusive(|&c| c == b'\n').collect());
+    let mut out = Vec::new();
+    let mut offset = 0;
+    for i in 0..la.len().max(lb.len()) {
+        let (x, y) = (la.get(i).copied().unwrap_or_default(), lb.get(i).copied().unwrap_or_default());
+        if x != y {
+            let within = x.iter().zip(y).position(|(p, q)| p != q).unwrap_or(x.len().min(y.len()));
+            out.push((i + 1, offset + within));
+        }
+        offset += x.len();
+    }
+    out
+}
+
+/// One output compared: every line that differs must fall in a declaration of `what` (one
+/// without lines covers the whole output), and the first difference no declaration covers is the
+/// one reported.
+pub(crate) fn assess(what: &str, a: Option<&[u8]>, b: Option<&[u8]>, declared: &[Declared]) -> (BTreeMap<String, Value>, Assessment) {
+    let diffs = match (a, b) {
+        (Some(a), Some(b)) => line_differences(a, b),
+        (None, None) => Vec::new(),
+        _ => vec![(1, 0)],
+    };
+    let mut r = fields([("what", what.into()), ("same", diffs.is_empty().into()), ("expected", digest_of(a)), ("actual", digest_of(b))]);
+    if diffs.is_empty() {
+        return (r, Assessment::Same);
+    }
+    let covering = |line: usize| declared.iter().find(|d| d.what == what && d.lines.is_none_or(|(x, y)| (x..=y).contains(&line)));
+    let uncovered = diffs.iter().find(|(line, _)| covering(*line).is_none());
+    let (line, offset) = uncovered.copied().unwrap_or(diffs[0]);
+    r.insert("firstDifference".into(), Value::Obj(fields([("line", Value::Int(line as i64)), ("offset", Value::Int(offset as i64))])));
+    r.insert("differingLines".into(), Value::Int(diffs.len() as i64));
+    if uncovered.is_some() {
+        return (r, Assessment::Undeclared);
+    }
+    let mut reasons: Vec<String> = diffs.iter().filter_map(|(l, _)| covering(*l)).map(|d| d.reason.clone()).collect();
+    reasons.dedup();
+    r.insert("declared".into(), reasons.join("; ").into());
+    (r, Assessment::Declared)
+}
+
+/// Runs one program, read from `source`, with every DD pointed at a copy in `dir` of the inputs
+/// as they were when the comparison began.
+fn run_side(program: &Path, source: &[u8], req: &Request, specs: &[Spec], snapshot: &BTreeMap<String, Option<Vec<u8>>>, dir: &Path) -> Outcome {
     let mut outcome = Outcome { closure: Vec::new(), return_code: None, abend: None, display: Vec::new(), files: BTreeMap::new(), error: None };
     let fail = |mut o: Outcome, e: String| {
         o.error = Some(e);
@@ -118,17 +179,14 @@ fn run_side(program: &Path, req: &Request, specs: &[Spec], dir: &Path) -> Outcom
     let mut local = Vec::new();
     for s in specs {
         let copy = dir.join(&s.name);
-        if s.path.exists()
-            && let Err(e) = fs::copy(&s.path, &copy)
+        if let Some(Some(bytes)) = snapshot.get(&s.name)
+            && let Err(e) = fs::write(&copy, bytes)
         {
             return fail(outcome, format!("copying DD {}: {e}", s.name));
         }
         local.push(format!("{}={}{}", s.name, copy.display(), s.suffix));
     }
-    let text = match fs::read(program) {
-        Ok(b) => syntax::copy::decode(&b),
-        Err(e) => return fail(outcome, format!("{}: {e}", program.display())),
-    };
+    let text = syntax::copy::decode(source);
     let own = program.parent().map(Path::to_path_buf).unwrap_or_default();
     let libraries = syntax::copy::Libraries::new(std::iter::once(own.clone()).chain(req.libraries.iter().cloned()).collect()).with_program(program);
     let mut programs = match syntax::parse_all_with(&text, &libraries) {
@@ -137,8 +195,10 @@ fn run_side(program: &Path, req: &Request, specs: &[Spec], dir: &Path) -> Outcom
     };
     let first = programs.remove(0);
     let roots: Vec<PathBuf> = std::iter::once(own.clone()).chain(req.libraries.iter().cloned()).collect();
-    for s in std::iter::once(program.display().to_string()).chain(first.sources.iter().filter(|s| !s.is_empty() && !s.starts_with('(')).cloned()) {
-        let path = PathBuf::from(&s);
+    let own_name = program.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    outcome.closure.push((own_name, hex(&sha256(source))));
+    for s in first.sources.iter().filter(|s| !s.is_empty() && !s.starts_with('(') && Path::new(s) != program) {
+        let path = PathBuf::from(s);
         if let Ok(bytes) = fs::read(&path) {
             let name = roots.iter().find_map(|r| path.strip_prefix(r).ok()).map_or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), |p| p.to_string_lossy().replace('\\', "/"));
             if !outcome.closure.iter().any(|(n, _)| *n == name) {
@@ -168,7 +228,21 @@ fn run_side(program: &Path, req: &Request, specs: &[Spec], dir: &Path) -> Outcom
     };
     let database = replay.as_mut().map(|r| r as &mut dyn exec::sql::Database);
     let mut err = Vec::new();
-    let ended = compiled.execute_with(library, dds, Some(sysin), req.clock, database, &mut outcome.display, &mut err);
+    let called = std::cell::RefCell::new(Vec::new());
+    let observer: exec::unit::Observer<'_> = Box::new(|event| {
+        if let exec::unit::Event::Load { source: Some(path), .. } = event {
+            called.borrow_mut().push(path.to_path_buf());
+        }
+    });
+    let ended = compiled.execute_observed(library, dds, Some(sysin), req.clock, database, &mut outcome.display, &mut err, Some(observer));
+    for path in called.into_inner() {
+        if let Ok(bytes) = fs::read(&path) {
+            let name = format!("called:{}", roots.iter().chain(&req.program_dirs).find_map(|r| path.strip_prefix(r).ok()).map_or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), |p| p.to_string_lossy().replace('\\', "/")));
+            if !outcome.closure.iter().any(|(n, _)| *n == name) {
+                outcome.closure.push((name, hex(&sha256(&bytes))));
+            }
+        }
+    }
     match ended {
         Ok((_, rc)) => outcome.return_code = Some(i64::from(rc)),
         Err(a) => outcome.abend = Some((a.code.to_string(), a.message.clone())),
@@ -179,19 +253,12 @@ fn run_side(program: &Path, req: &Request, specs: &[Spec], dir: &Path) -> Outcom
     outcome
 }
 
-/// The first line (1-based) and byte offset where two outputs differ, or None when they do not.
-pub(crate) fn first_difference(a: &[u8], b: &[u8]) -> Option<(usize, usize)> {
-    let at = a.iter().zip(b).position(|(x, y)| x != y).or((a.len() != b.len()).then(|| a.len().min(b.len())))?;
-    let line = a[..at.min(a.len())].iter().filter(|&&c| c == b'\n').count() + 1;
-    Some((line, at))
-}
-
 pub(crate) fn digest_of(bytes: Option<&[u8]>) -> Value {
     bytes.map_or(Value::Null, |b| hex(&sha256(b)).into())
 }
 
-fn subject(name: &str, path: &Path) -> Value {
-    let digest = fs::read(path).map(|b| hex(&sha256(&b))).unwrap_or_default();
+fn subject(name: &str, path: &Path, source: &[u8]) -> Value {
+    let digest = hex(&sha256(source));
     Value::Obj(fields([("name", format!("{name}:{}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).into()), ("digest", Value::Obj(fields([("sha256", digest.into())])))]))
 }
 
@@ -210,17 +277,36 @@ pub fn run(req: Request) -> ExitCode {
     if req.base.is_none() && req.expected.is_empty() {
         return crate::usage_error("compare needs --base, or --expected for each output to check");
     }
-    let mut dirs = Vec::new();
-    let mut side = |name: &str, program: &Path| -> Result<Outcome, String> {
-        let dir = scratch(name).map_err(|e| e.to_string())?;
-        dirs.push(dir.clone());
-        Ok(run_side(program, &req, &specs, &dir))
+    let mut expected: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    for (n, p) in &req.expected {
+        match fs::read(p) {
+            Ok(b) => {
+                expected.insert(n.to_ascii_uppercase(), b);
+            }
+            Err(e) => return crate::usage_error(&format!("--expected {n}={}: {e}", p.display())),
+        }
+    }
+    let snapshot: BTreeMap<String, Option<Vec<u8>>> = specs.iter().map(|s| (s.name.clone(), fs::read(&s.path).ok())).collect();
+    let read_source = |p: &Path| fs::read(p).map_err(|e| format!("{}: {e}", p.display()));
+    let head_source = match read_source(&req.head) {
+        Ok(b) => b,
+        Err(e) => return crate::usage_error(&e),
     };
-    let head = match side("head", &req.head) {
+    let base_source = match req.base.as_deref().map(read_source).transpose() {
+        Ok(b) => b,
+        Err(e) => return crate::usage_error(&e),
+    };
+    let mut dirs = Vec::new();
+    let mut side = |name: &str, program: &Path, source: &[u8]| -> Result<Outcome, String> {
+        let dir = scratch(&format!("compare-{name}")).map_err(|e| e.to_string())?;
+        dirs.push(dir.clone());
+        Ok(run_side(program, source, &req, &specs, &snapshot, &dir))
+    };
+    let head = match side("head", &req.head, &head_source) {
         Ok(o) => o,
         Err(e) => return crate::usage_error(&e),
     };
-    let base = match req.base.as_deref().map(|b| side("base", b)).transpose() {
+    let base = match req.base.as_deref().zip(base_source.as_deref()).map(|(b, src)| side("base", b, src)).transpose() {
         Ok(o) => o,
         Err(e) => return crate::usage_error(&e),
     };
@@ -232,23 +318,12 @@ pub fn run(req: Request) -> ExitCode {
     let mut undeclared = 0usize;
     let mut declared_hit = 0usize;
     let mut inconclusive = Vec::new();
-    let is_declared = |what: &str, line: Option<usize>| declared.iter().find(|d| d.what == what && d.lines.is_none_or(|(a, b)| line.is_some_and(|l| (a..=b).contains(&l))));
     let mut compare = |what: String, a: Option<&[u8]>, b: Option<&[u8]>, results: &mut Vec<Value>| {
-        let diff = match (a, b) {
-            (Some(a), Some(b)) => first_difference(a, b),
-            (None, None) => None,
-            _ => Some((1, 0)),
-        };
-        let mut r = fields([("what", what.clone().into()), ("same", diff.is_none().into()), ("expected", digest_of(a)), ("actual", digest_of(b))]);
-        if let Some((line, offset)) = diff {
-            r.insert("firstDifference".into(), Value::Obj(fields([("line", Value::Int(line as i64)), ("offset", Value::Int(offset as i64))])));
-            match is_declared(&what, Some(line)) {
-                Some(d) => {
-                    declared_hit += 1;
-                    r.insert("declared".into(), d.reason.clone().into());
-                }
-                None => undeclared += 1,
-            }
+        let (r, assessment) = assess(&what, a, b, &declared);
+        match assessment {
+            Assessment::Declared => declared_hit += 1,
+            Assessment::Undeclared => undeclared += 1,
+            Assessment::Same => {}
         }
         results.push(Value::Obj(r));
     };
@@ -271,12 +346,14 @@ pub fn run(req: Request) -> ExitCode {
         compare("ABEND".into(), abend_code(base).map(String::into_bytes).as_deref(), abend_code(&head).map(String::into_bytes).as_deref(), &mut results);
         compare("DISPLAY".into(), Some(&base.display), Some(&head.display), &mut results);
     }
-    let expected: BTreeMap<String, Option<Vec<u8>>> = req.expected.iter().map(|(n, p)| (n.to_ascii_uppercase(), fs::read(p).ok())).collect();
+    let mut unchecked = Vec::new();
     for s in &specs {
         if let Some(want) = expected.get(&s.name) {
-            compare(format!("DD {}", s.name), want.as_deref(), head.files.get(&s.name).and_then(|f| f.as_deref()), &mut results);
+            compare(format!("DD {}", s.name), Some(want), head.files.get(&s.name).and_then(|f| f.as_deref()), &mut results);
         } else if let Some(base) = &base {
             compare(format!("DD {}", s.name), base.files.get(&s.name).and_then(|f| f.as_deref()), head.files.get(&s.name).and_then(|f| f.as_deref()), &mut results);
+        } else {
+            unchecked.push(Value::Str(s.name.clone()));
         }
     }
 
@@ -289,10 +366,10 @@ pub fn run(req: Request) -> ExitCode {
     } else {
         "equivalent"
     };
-    let inputs = Value::Arr(specs.iter().filter(|s| s.path.exists()).map(|s| Value::Obj(fields([("dd", s.name.clone().into()), ("sha256", digest_of(fs::read(&s.path).ok().as_deref()))]))).collect());
-    let mut subjects = vec![subject("head", &req.head)];
-    if let Some(b) = &req.base {
-        subjects.insert(0, subject("base", b));
+    let inputs = Value::Arr(specs.iter().filter_map(|s| snapshot.get(&s.name).and_then(|b| b.as_deref()).map(|b| Value::Obj(fields([("dd", s.name.clone().into()), ("sha256", digest_of(Some(b)))])))).collect());
+    let mut subjects = vec![subject("head", &req.head, &head_source)];
+    if let (Some(b), Some(src)) = (&req.base, &base_source) {
+        subjects.insert(0, subject("base", b, src));
     }
     let predicate = fields([
         ("verdict", verdict.into()),
@@ -301,6 +378,7 @@ pub fn run(req: Request) -> ExitCode {
         ("results", Value::Arr(results)),
         ("declared", Value::Arr(declared.iter().map(|d| Value::Obj(fields([("what", d.what.clone().into()), ("reason", d.reason.clone().into())]))).collect())),
         ("inconclusive", Value::Arr(inconclusive.iter().map(|s| Value::Str(s.clone())).collect())),
+        ("unchecked", Value::Arr(unchecked)),
         ("closure", Value::Obj({
             let side = |o: &Outcome| Value::Arr(o.closure.iter().map(|(n, d)| Value::Obj(fields([("name", n.clone().into()), ("sha256", d.clone().into())]))).collect());
             let mut m = BTreeMap::new();
@@ -347,9 +425,23 @@ mod tests {
     }
 
     #[test]
-    fn the_first_difference_is_located_by_line_and_offset() {
-        assert_eq!(first_difference(b"a\nbc\n", b"a\nbd\n"), Some((2, 3)));
-        assert_eq!(first_difference(b"ab", b"abc"), Some((1, 2)));
-        assert_eq!(first_difference(b"same", b"same"), None);
+    fn each_differing_line_is_located_by_line_and_offset() {
+        assert_eq!(line_differences(b"a\nbc\n", b"a\nbd\n"), [(2, 3)]);
+        assert_eq!(line_differences(b"ab", b"abc"), [(1, 2)]);
+        assert_eq!(line_differences(b"x\ny\nz\n", b"x\nY\nz\nw\n"), [(2, 2), (4, 6)]);
+        assert!(line_differences(b"same", b"same").is_empty());
+    }
+
+    #[test]
+    fn a_declaration_covers_only_the_lines_it_names() {
+        let declared = parse_declared("DD OUT lines 2-2 the field was renamed\n").unwrap();
+        let (base, head) = (b"HEADER\nOLD\nFOOTER\nDATA\n".as_slice(), b"HEADER\nNEW\nFOOTER\nMORE\n".as_slice());
+        let (r, a) = assess("DD OUT", Some(base), Some(head), &declared);
+        assert!(matches!(a, Assessment::Undeclared));
+        assert_eq!(r.get("firstDifference"), Some(&Value::Obj(fields([("line", Value::Int(4)), ("offset", Value::Int(18))]))));
+        let (_, a) = assess("DD OUT", Some(base), Some(b"HEADER\nNEW\nFOOTER\nDATA\n"), &declared);
+        assert!(matches!(a, Assessment::Declared));
+        let whole = parse_declared("DD OUT the report was redesigned\n").unwrap();
+        assert!(matches!(assess("DD OUT", Some(base), Some(head), &whole).1, Assessment::Declared));
     }
 }

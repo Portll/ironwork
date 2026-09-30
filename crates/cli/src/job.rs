@@ -273,7 +273,8 @@ impl Runner<'_> {
 }
 
 /// Runs a COBOL program with the step's DDs: its return code, or the abend's code and message.
-fn run_cobol(path: &Path, req: &Request, dds: &[Allocated], database: Option<&mut (dyn exec::sql::Database + '_)>, out: &mut dyn Write) -> Result<i16, (AbendCode, String)> {
+/// Each program CALL loads from a library goes into `called`.
+fn run_cobol(path: &Path, req: &Request, dds: &[Allocated], database: Option<&mut (dyn exec::sql::Database + '_)>, out: &mut dyn Write, called: &mut BTreeSet<PathBuf>) -> Result<i16, (AbendCode, String)> {
     let ironwork = |m: String| (AbendCode::Ironwork, m);
     let text = fs::read(path).map(|b| syntax::copy::decode(&b)).map_err(|e| ironwork(format!("{}: {e}", path.display())))?;
     let own = path.parent().map(Path::to_path_buf).unwrap_or_default();
@@ -289,7 +290,15 @@ fn run_cobol(path: &Path, req: &Request, dds: &[Allocated], database: Option<&mu
         None => Box::new(std::io::empty()),
     };
     let mut err = std::io::stderr();
-    match compiled.execute_with(library, dds, Some(sysin), req.clock, database, out, &mut err) {
+    let loads = std::cell::RefCell::new(Vec::new());
+    let observer: exec::unit::Observer<'_> = Box::new(|event| {
+        if let exec::unit::Event::Load { source: Some(p), .. } = event {
+            loads.borrow_mut().push(p.to_path_buf());
+        }
+    });
+    let ended = compiled.execute_observed(library, dds, Some(sysin), req.clock, database, out, &mut err, Some(observer));
+    called.extend(loads.into_inner());
+    match ended {
         Ok((_, rc)) => Ok(rc),
         Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => Ok(0),
         Err(a) => Err((a.code, a.message)),
@@ -435,13 +444,6 @@ struct Frame {
     abend_aware: bool,
 }
 
-fn scratch_dir() -> std::io::Result<PathBuf> {
-    let nonce = exec::digest::hex(&exec::digest::sha256(format!("{:?}{}", std::time::SystemTime::now(), std::process::id()).as_bytes()))[..12].to_string();
-    let dir = std::env::temp_dir().join(format!("ironwork-job-{nonce}"));
-    fs::create_dir_all(&dir)?;
-    Ok(dir)
-}
-
 pub fn run(req: Request) -> ExitCode {
     let shown = req.jcl.display().to_string();
     let text = match fs::read_to_string(&req.jcl) {
@@ -490,7 +492,7 @@ pub fn run(req: Request) -> ExitCode {
         },
         None => None,
     };
-    let scratch = match scratch_dir() {
+    let scratch = match crate::compare::scratch("job") {
         Ok(d) => d,
         Err(e) => {
             eprintln!("ironwork: a scratch directory: {e}");
@@ -516,7 +518,7 @@ pub fn run(req: Request) -> ExitCode {
         }
         None => req.datasets.clone(),
     };
-    let inputs = files_under(&req.datasets);
+    let inputs: Vec<(String, Value)> = if req.expected.is_some() { files_under(&datasets).into_iter().map(|(n, p)| (n, crate::compare::digest_of(fs::read(p).ok().as_deref()))).collect() } else { Vec::new() };
     let mut runner = Runner { req: &req, datasets, scratch, temporaries: BTreeMap::new(), passed_new: BTreeSet::new(), files: 0 };
     let report = run_job(&job, &mut runner, replay.as_mut().map(|r| r as &mut dyn exec::sql::Database));
     for path in std::mem::take(&mut runner.passed_new) {
@@ -603,7 +605,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                     Program::Idcams => Ok(idcams(runner, &dds)),
                     Program::Cobol(path) => {
                         programs.insert(path.clone());
-                        run_cobol(&path, runner.req, &dds, database.as_deref_mut(), &mut stdout)
+                        run_cobol(&path, runner.req, &dds, database.as_deref_mut(), &mut stdout, &mut programs)
                     }
                     Program::Missing => Err((AbendCode::ModuleNotFound, format!("program {} is not in the program libraries", step.pgm))),
                 };
@@ -686,8 +688,8 @@ pub const JOB_PREDICATE: &str = "https://github.com/Portll/ironwork/blob/main/do
 /// Each data set production left, compared with the one the job left: an in-toto statement whose
 /// subjects are the JCL and the programs the job ran. Exit 0 equivalent or equivalent as
 /// declared, 1 diverged, 3 inconclusive.
-fn equivalence(req: &Request, job: &Job, report: &Report, expected: &Path, left: &Path, inputs: &[(String, PathBuf)], declared: &[crate::compare::Declared]) -> ExitCode {
-    use crate::compare::{digest_of, first_difference};
+fn equivalence(req: &Request, job: &Job, report: &Report, expected: &Path, left: &Path, inputs: &[(String, Value)], declared: &[crate::compare::Declared]) -> ExitCode {
+    use crate::compare::{Assessment, assess, digest_of};
     let (mut results, mut undeclared, mut declared_hit) = (Vec::new(), 0usize, 0usize);
     let wanted = files_under(expected);
     if wanted.is_empty() {
@@ -711,18 +713,14 @@ fn equivalence(req: &Request, job: &Job, report: &Report, expected: &Path, left:
             let Some((step, want)) = line.trim().split_once(char::is_whitespace) else { return crate::usage_error(&format!("--expected STEPS line {}: STEP RC=nnnn or STEP ABEND code", n + 1)) };
             let want = want.trim().to_string();
             let got = outcome_of(step);
-            let what = format!("STEP {step}");
-            let same = got.as_deref() == Some(want.as_str());
-            let mut r = fields([("what", what.clone().into()), ("same", same.into()), ("expected", want.into()), ("actual", got.map_or(Value::Null, Value::Str))]);
-            if !same {
-                match declared.iter().find(|d| d.what == what) {
-                    Some(d) => {
-                        declared_hit += 1;
-                        r.insert("declared".into(), d.reason.clone().into());
-                    }
-                    None => undeclared += 1,
-                }
+            let (mut r, assessment) = assess(&format!("STEP {step}"), Some(want.as_bytes()), got.as_deref().map(str::as_bytes), declared);
+            match assessment {
+                Assessment::Declared => declared_hit += 1,
+                Assessment::Undeclared => undeclared += 1,
+                Assessment::Same => {}
             }
+            r.insert("expected".into(), want.into());
+            r.insert("actual".into(), got.map_or(Value::Null, Value::Str));
             results.push(Value::Obj(r));
         }
     }
@@ -733,21 +731,11 @@ fn equivalence(req: &Request, job: &Job, report: &Report, expected: &Path, left:
             None => (name.as_str(), None),
         };
         let got = fs::read(member.map_or_else(|| left.join(dsn), |m| left.join(dsn).join(m))).ok();
-        let diff = match (&want, &got) {
-            (Some(a), Some(b)) => first_difference(a, b),
-            _ => Some((1, 0)),
-        };
-        let what = format!("DATASET {name}");
-        let mut r = fields([("what", what.clone().into()), ("same", diff.is_none().into()), ("expected", digest_of(want.as_deref())), ("actual", digest_of(got.as_deref()))]);
-        if let Some((line, offset)) = diff {
-            r.insert("firstDifference".into(), Value::Obj(fields([("line", Value::Int(line as i64)), ("offset", Value::Int(offset as i64))])));
-            match declared.iter().find(|d| d.what == what && d.lines.is_none_or(|(a, b)| (a..=b).contains(&line))) {
-                Some(d) => {
-                    declared_hit += 1;
-                    r.insert("declared".into(), d.reason.clone().into());
-                }
-                None => undeclared += 1,
-            }
+        let (r, assessment) = assess(&format!("DATASET {name}"), want.as_deref(), got.as_deref(), declared);
+        match assessment {
+            Assessment::Declared => declared_hit += 1,
+            Assessment::Undeclared => undeclared += 1,
+            Assessment::Same => {}
         }
         results.push(Value::Obj(r));
     }
@@ -767,7 +755,7 @@ fn equivalence(req: &Request, job: &Job, report: &Report, expected: &Path, left:
     let predicate = fields([
         ("verdict", verdict.into()),
         ("job", job.name.clone().into()),
-        ("inputs", Value::Arr(inputs.iter().map(|(n, p)| Value::Obj(fields([("dataset", n.clone().into()), ("sha256", digest_of(fs::read(p).ok().as_deref()))]))).collect())),
+        ("inputs", Value::Arr(inputs.iter().map(|(n, d)| Value::Obj(fields([("dataset", n.clone().into()), ("sha256", d.clone())]))).collect())),
         ("sqlRecording", req.replay.as_ref().map_or(Value::Null, |p| digest_of(fs::read(p).ok().as_deref()))),
         ("steps", Value::Arr(report.steps.clone())),
         ("results", Value::Arr(results)),

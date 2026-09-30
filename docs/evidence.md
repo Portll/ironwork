@@ -59,23 +59,28 @@ digests.
 <a id="equivalence-v1"></a>`ironwork compare --base OLD.cbl --head NEW.cbl --dd ...` runs both
 versions (`crates/cli/src/compare.rs`):
 
-1. Each side runs in its own temporary directory holding copies of every input DD, so neither side
-   can change the caller's files or the other's inputs. The clock is `--clock` or 2026-01-01; SYSIN
+1. The inputs and both sources are read once, when the comparison begins; each side runs in its
+   own new temporary directory holding copies of those inputs, so neither side can change the
+   caller's files or the other's inputs, and a file changed during the run changes neither. The clock is `--clock` or 2026-01-01; SYSIN
    is the SYSIN DD or empty; a `--sql-replay` recording is replayed strictly, so a change that issues
    different SQL fails its replay.
-2. RETURN-CODE, the abend code, the DISPLAY output and every DD are compared byte for byte; each
-   difference is located by line and offset.
+2. RETURN-CODE, the abend code, the DISPLAY output and every DD are compared byte for byte, line
+   by line.
 3. `--declare FILE` lists intended divergences, one a line: `DD NAME [lines A-B] reason`,
-   `DISPLAY reason`, `RETURN-CODE reason`.
+   `DISPLAY reason`, `RETURN-CODE reason`. Every line that differs must fall in a declaration of
+   its output, and the first that does not is the one reported; a declaration without lines
+   covers the whole output.
 4. `--expected NAME=path` compares the head's output with a given file instead of a base run: the
-   check for a program translated to another language, whose outputs are the files.
+   check for a program translated to another language, whose outputs are the files. Each file
+   must exist, and the DDs no file is given for are listed as `unchecked`.
 
 The statement's `predicateType` is
 `https://github.com/Portll/ironwork/blob/main/docs/evidence.md#equivalence-v1`; its subjects are
 `base:<file>` and `head:<file>` by digest, and its predicate holds `verdict`, `inputs` (DD names and
 digests), `sqlRecording`, `closure` (each side's program and COPY members, named relative to their
 library, by digest: how a change to a copybook alone is shown to have been run), `results`,
-`declared`, `inconclusive`, `coverage` and `limit`.
+`declared`, `inconclusive`, `unchecked`, `coverage` and `limit`. A program CALL loaded from a
+library is in `closure` as `called:<name>`.
 
 | verdict | when | exit |
 |---|---|---|
@@ -100,7 +105,8 @@ the job against production's recorded inputs and compares what it leaves with wh
    replayed strictly across the job's steps in order.
 2. Each file under PROD, laid out as `--datasets` is (A.B, or A.B/M for a member), is compared byte
    for byte with the data set of that name the job left; each difference is located by line and
-   offset, and a data set the job did not leave is a difference.
+   offset, and a data set the job did not leave is a difference. Declarations cover lines as they
+   do for `compare`.
 3. `--expected STEPS=FILE` adds production's step outcomes from its job log, one a line
    (`STEP RC=0004`, `CALLER.PSTEP ABEND S0C7`), each compared with the step's outcome in the job.
 4. `--declare FILE` lists intended divergences, one a line: `DATASET DSN [lines A-B] reason` or
@@ -109,7 +115,7 @@ the job against production's recorded inputs and compares what it leaves with wh
 The statement's `predicateType` is
 `https://github.com/Portll/ironwork/blob/main/docs/evidence.md#job-equivalence-v1`, apart from
 `equivalence-v1` because its subjects are not a base and a head program: they are `job:<file>`, the
-JCL, and `program:<file>` for each COBOL program the job ran, by digest. The predicate holds
+JCL, and `program:<file>` for each COBOL program the job ran or CALLed, by digest. The predicate holds
 `verdict`, `job`, `inputs` (each data set and its digest before the run), `sqlRecording`, `steps`
 (each step, its program and its outcome as the job log shows it), `results`, `declared`,
 `inconclusive`, `coverage` and `limit`. The verdicts and exit statuses are those of `compare`; a
