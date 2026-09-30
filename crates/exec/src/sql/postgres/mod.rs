@@ -129,6 +129,9 @@ impl Database for Postgres {
     fn rollback(&mut self, _: &Call) -> Answer {
         self.end("ROLLBACK")
     }
+    fn close_all(&mut self) -> Result<(), Abandoned> {
+        self.conn.simple("CLOSE ALL").map_err(abandon)
+    }
 }
 
 /// Against a live server named by IRONWORK_PG_URL, which `tools/pg-test.sh` starts in a container;
@@ -231,10 +234,10 @@ mod tests {
         }
     }
 
-    fn run(database: Box<dyn Database + '_>) -> Result<String, String> {
+    fn run(mut database: Box<dyn Database + '_>) -> Result<String, String> {
         let compiled = crate::compile(syntax::parse(PROGRAM).expect("parses"), &[]).expect("compiles");
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let ran = compiled.execute_with(crate::unit::Library::default(), crate::files::Dds::default(), None, crate::unit::Clock::System, Some(database), &mut out, &mut err);
+        let ran = compiled.execute_with(crate::unit::Library::default(), crate::files::Dds::default(), None, crate::unit::Clock::System, Some(database.as_mut()), &mut out, &mut err);
         ran.map(|_| String::from_utf8(out).expect("DISPLAY writes text")).map_err(|a| format!("{}: {}", a.code, a.message))
     }
 

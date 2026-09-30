@@ -178,7 +178,8 @@ impl<'w> Recorder<'w> {
         let outcome = answer?;
         self.seq += 1;
         let text = entry_text(self.seq, call, &outcome);
-        self.out.write_all(text.as_bytes()).map_err(|e| Abandoned { code: "SQLR", message: format!("the recording could not be written: {e}") })?;
+        // Flushed per call: a served session ends when the server is interrupted, not by returning.
+        self.out.write_all(text.as_bytes()).and_then(|()| self.out.flush()).map_err(|e| Abandoned { code: "SQLR", message: format!("the recording could not be written: {e}") })?;
         Ok(outcome)
     }
 }
@@ -207,6 +208,9 @@ impl Database for Recorder<'_> {
     fn rollback(&mut self, call: &Call) -> Answer {
         let a = self.inner.rollback(call);
         self.record(call, a)
+    }
+    fn close_all(&mut self) -> Result<(), Abandoned> {
+        self.inner.close_all()
     }
 }
 

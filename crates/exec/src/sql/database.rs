@@ -64,6 +64,11 @@ pub trait Database {
     fn close(&mut self, call: &Call) -> Answer;
     fn commit(&mut self, call: &Call) -> Answer;
     fn rollback(&mut self, call: &Call) -> Answer;
+    /// Closes every cursor, held ones too, as the end of a CICS task does, so the next task on the
+    /// same connection finds none open. A backend without cursors of its own has nothing to close.
+    fn close_all(&mut self) -> Result<(), Abandoned> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,7 +81,7 @@ pub struct OpenCursor {
 /// A run unit's connection to its database, and the state the runtime keeps rather than asking
 /// the backend, so every backend answers alike.
 pub struct Session<'w> {
-    pub database: Box<dyn Database + 'w>,
+    pub database: &'w mut dyn Database,
     /// Open cursors by program and cursor name, as two programs may declare the same name.
     cursors: HashMap<(String, String), OpenCursor>,
     /// Whether any statement has reached the database since the last COMMIT or ROLLBACK.
@@ -84,7 +89,7 @@ pub struct Session<'w> {
 }
 
 impl<'w> Session<'w> {
-    pub fn new(database: Box<dyn Database + 'w>) -> Self {
+    pub fn new(database: &'w mut (dyn Database + '_)) -> Self {
         Self { database, cursors: HashMap::new(), pending: false }
     }
 
@@ -127,6 +132,17 @@ impl<'w> Session<'w> {
             self.committed();
         } else {
             self.rolled_back();
+        }
+        Ok(answer)
+    }
+
+    /// Ends a CICS task: settles its unit of work, then closes the held cursors a commit leaves
+    /// open, as the end of a task closes every cursor.
+    pub fn end_task(&mut self, program: &str, commit: bool) -> Answer {
+        let answer = self.settle(program, commit)?;
+        if !self.cursors.is_empty() {
+            self.database.close_all()?;
+            self.cursors.clear();
         }
         Ok(answer)
     }

@@ -1,5 +1,6 @@
 #!/bin/sh
-# Runs the PostgreSQL backend's live tests against a throwaway PostgreSQL 14 container.
+# Runs the PostgreSQL backend's live tests, and a served conversation recorded against it, against
+# a throwaway PostgreSQL 14 container.
 # usage: tools/pg-test.sh    (needs Docker; IRONWORK_PG_PORT picks the host port, default 55433)
 set -eu
 name=ironwork-pg-test
@@ -13,4 +14,6 @@ until docker exec "$name" pg_isready -q -h 127.0.0.1 -U ironwork 2>/dev/null; do
     if [ "$(docker inspect -f '{{.State.Running}}' "$name")" != true ]; then docker logs "$name" 2>&1 | tail -5; exit 1; fi
     sleep 1
 done
-IRONWORK_PG_URL="postgres://ironwork:ironwork@127.0.0.1:$port/ironwork" cargo test -p ironwork-exec --locked sql::postgres
+export IRONWORK_PG_URL="postgres://ironwork:ironwork@127.0.0.1:$port/ironwork"
+cargo test -p ironwork-exec --locked sql::postgres
+cargo test -p ironwork --locked --test serve_sql

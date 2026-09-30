@@ -166,7 +166,7 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
         let call = Call { program: &self.program.id, ordinal, verb, cursor, text, inputs };
         let session = self.unit.sql.as_mut().expect("a database is attached");
         session.pending |= !matches!(verb, "COMMIT" | "ROLLBACK");
-        run(session.database.as_mut(), &call).map_err(|a| Abend { code: a.code.into(), message: a.message, pos })
+        run(&mut *session.database, &call).map_err(|a| Abend { code: a.code.into(), message: a.message, pos })
     }
 
     /// A SELECT INTO's or a FETCH's answer: one row is assigned, none is +100, more than one is -811.
@@ -306,7 +306,7 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
 
 #[cfg(test)]
 mod tests {
-    use crate::sql::{Answer, Call, Database, Outcome, Value};
+    use crate::sql::{Abandoned, Answer, Call, Database, Outcome, Value};
     use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::rc::Rc;
@@ -346,6 +346,10 @@ mod tests {
         fn rollback(&mut self, c: &Call) -> Answer {
             self.answer(c)
         }
+        fn close_all(&mut self) -> Result<(), Abandoned> {
+            self.calls.borrow_mut().push(("CLOSE ALL".into(), 0, String::new(), Vec::new()));
+            Ok(())
+        }
     }
 
     const DATA: &str = concat!(
@@ -370,9 +374,9 @@ mod tests {
         let program = syntax::parse(&format!("{DATA}{procedure}")).expect("parses");
         let compiled = crate::compile(program, &[]).expect("compiles");
         let calls = Calls::default();
-        let db = Script { answers: answers.into(), calls: calls.clone() };
+        let mut db = Script { answers: answers.into(), calls: calls.clone() };
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let ran = compiled.execute_with(crate::unit::Library::default(), crate::files::Dds::default(), None, crate::unit::Clock::System, Some(Box::new(db)), &mut out, &mut err);
+        let ran = compiled.execute_with(crate::unit::Library::default(), crate::files::Dds::default(), None, crate::unit::Clock::System, Some(&mut db), &mut out, &mut err);
         let shown = ran.map(|_| String::from_utf8(out).expect("DISPLAY writes text")).map_err(|a| a.code.to_string());
         (shown, calls.take())
     }
@@ -586,10 +590,10 @@ mod tests {
     fn run_task(procedure: &str, answers: Vec<Outcome>) -> (String, Result<(), String>, Vec<Logged>) {
         let compiled = crate::compile(syntax::parse(&format!("{DATA}{procedure}")).expect("parses"), &[]).expect("compiles");
         let calls = Calls::default();
-        let db = Script { answers: answers.into(), calls: calls.clone() };
+        let mut db = Script { answers: answers.into(), calls: calls.clone() };
         let task = crate::cics::Task { transid: "T1".into(), ..Default::default() };
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let ran = compiled.execute_cics_with(crate::unit::Library::default(), crate::files::Dds::default(), task, crate::unit::Clock::System, Some(Box::new(db)), &mut out, &mut err);
+        let ran = compiled.execute_cics_with(crate::unit::Library::default(), crate::files::Dds::default(), task, crate::unit::Clock::System, Some(&mut db), &mut out, &mut err);
         (String::from_utf8(out).expect("DISPLAY writes text"), ran.map(drop).map_err(|a| a.code.to_string()), calls.take())
     }
 
@@ -630,6 +634,27 @@ mod tests {
     }
 
     #[test]
+    fn tasks_share_a_database_and_each_ends_its_own_unit_of_work_and_cursors() {
+        let procedure = [
+            "           EXEC SQL DECLARE C1 CURSOR WITH HOLD FOR\n                    SELECT NAME FROM T END-EXEC.\n",
+            "           EXEC SQL OPEN C1 END-EXEC.\n",
+            SHOW_CODE,
+            "           EXEC CICS RETURN END-EXEC.\n",
+        ]
+        .concat();
+        let compiled = crate::compile(syntax::parse(&format!("{DATA}{procedure}")).expect("parses"), &[]).expect("compiles");
+        let calls = Calls::default();
+        let mut db = Script { answers: VecDeque::new(), calls: calls.clone() };
+        for _ in 0..2 {
+            let task = crate::cics::Task { transid: "T1".into(), ..Default::default() };
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let ran = compiled.execute_cics_with(crate::unit::Library::default(), crate::files::Dds::default(), task, crate::unit::Clock::System, Some(&mut db), &mut out, &mut err);
+            assert_eq!((String::from_utf8(out).expect("DISPLAY writes text").as_str(), ran.is_ok()), (" 000\n", true));
+        }
+        assert_eq!(verbs(&calls.take()), ["OPEN", "COMMIT", "CLOSE ALL", "OPEN", "COMMIT", "CLOSE ALL"]);
+    }
+
+    #[test]
     fn a_cics_task_cannot_commit_through_sql_and_an_abend_backs_it_out() {
         let procedure = [
             "           EXEC SQL DELETE FROM T END-EXEC.\n",
@@ -654,9 +679,9 @@ mod tests {
 
     fn replayed(procedure: &str, recording: &str) -> Result<String, (String, String)> {
         let compiled = crate::compile(syntax::parse(&format!("{DATA}{procedure}")).expect("parses"), &[]).expect("compiles");
-        let replay = crate::sql::Replay::parse(recording, false).expect("the recording parses");
+        let mut replay = crate::sql::Replay::parse(recording, false).expect("the recording parses");
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let ran = compiled.execute_with(crate::unit::Library::default(), crate::files::Dds::default(), None, crate::unit::Clock::System, Some(Box::new(replay)), &mut out, &mut err);
+        let ran = compiled.execute_with(crate::unit::Library::default(), crate::files::Dds::default(), None, crate::unit::Clock::System, Some(&mut replay), &mut out, &mut err);
         ran.map(|_| String::from_utf8(out).expect("DISPLAY writes text")).map_err(|a| (a.code.to_string(), a.message))
     }
 

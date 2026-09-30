@@ -184,6 +184,10 @@ Input rules:
   - A held cursor stays open across SYNCPOINT. SYNCPOINT ROLLBACK and the end of the task close
     every cursor ([CICS TS 6, CICS and CURSOR WITH
     HOLD](https://www.ibm.com/docs/en/SSJL4D_6.x/applications/developing/database/dfhtk67.html)).
+    At the end of the task the runtime asks the backend's `close_all` for the held cursors a commit
+    left open, so a later task on the same connection finds none.
+  - Under `--serve` the region holds one database, and one recording, for every task. Each task
+    is its own unit of work, as it is in CICS.
   - EXEC SQL COMMIT and ROLLBACK are refused in a CICS task with -925 and -926: the task's unit of
     work belongs to CICS.
   - A commit the database refuses at SYNCPOINT backs the unit of work out and raises ROLLEDBACK

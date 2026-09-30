@@ -123,6 +123,11 @@ impl Tn3270 {
         self.pending.push_back(record);
     }
 
+    /// Drops queued input no task read: a task's terminal input ends with the task.
+    pub fn discard_pending(&mut self) {
+        self.pending.clear();
+    }
+
     fn write(&mut self, bytes: &[u8]) -> Result<(), String> {
         self.stream.write_all(bytes).and_then(|()| self.stream.flush()).map_err(|e| format!("writing to the terminal: {e}"))
     }

@@ -199,7 +199,7 @@ impl Compiled {
         dds: files::Dds,
         sysin: Option<Box<dyn BufRead + 'w>>,
         clock: unit::Clock,
-        database: Option<Box<dyn sql::Database + 'w>>,
+        database: Option<&'w mut (dyn sql::Database + '_)>,
         out: &'w mut dyn Write,
         err: &'w mut dyn Write,
     ) -> Result<(Ending, i16), Abend> {
@@ -234,7 +234,8 @@ impl Compiled {
     }
 
     /// A CICS task with a database: SYNCPOINT commits, and the end of the task commits, or rolls
-    /// back after an abend.
+    /// back after an abend, and closes every cursor. The database outlives the task, so a region's
+    /// tasks can share one.
     #[allow(clippy::too_many_arguments)]
     pub fn execute_cics_with<'w>(
         &self,
@@ -242,7 +243,7 @@ impl Compiled {
         dds: files::Dds,
         mut task: cics::Task,
         clock: unit::Clock,
-        database: Option<Box<dyn sql::Database + 'w>>,
+        database: Option<&'w mut (dyn sql::Database + '_)>,
         out: &'w mut dyn Write,
         err: &'w mut dyn Write,
     ) -> Result<(Ending, cics::Task), Abend> {
@@ -259,7 +260,7 @@ impl Compiled {
             m.begin_task(commarea, length);
             m.run_procedure()
         });
-        let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(&self.program.id, ending.is_ok()).map(drop));
+        let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.end_task(&self.program.id, ending.is_ok()).map(drop));
         let mut closed = run_unit.close_all();
         for (name, f) in run_unit.cics_files.drain() {
             if let Err(e) = f.close() {

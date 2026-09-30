@@ -44,7 +44,7 @@ flags:
   --sql-replay path
              answer EXEC SQL from a recording instead of a database. A call the recording does not
              hold next abends SQLR, naming both calls. --sql-db and --sql-replay work with cics,
-             not with --serve
+             and with --serve one database, and one recording, serves every task
   --sql-replay-mode strict|keyed
              strict (the default) answers call n from the recording's call n; keyed answers each
              call from the first unused recorded call with the same statement and inputs
@@ -72,8 +72,8 @@ cics flags:
              script. The program runs as --transid's first task with no COMMAREA; RETURN TRANSID
              waits for the operator's next AID key and runs that transaction with the COMMAREA
              RETURN gave. A task that ends without TRANSID, an abend, or a transaction that is not
-             defined ends the conversation. Not with --screens, --commarea, --commarea-out, --sql-db
-             or --sql-replay
+             defined ends the conversation. Each task is its own unit of work. Not with --screens,
+             --commarea or --commarea-out
   --transaction TRAN=PROGRAM
              with --serve, the program a transaction runs: a program of the source, or one found
              through -L. --transid names the given program; each program compiles once
@@ -230,7 +230,7 @@ fn driver() -> ExitCode {
         Ok(d) => d,
         Err(e) => return usage_error(&e),
     };
-    let database = match (replay, sql_db, sql_record) {
+    let mut database = match (replay, sql_db, sql_record) {
         (Some(_), Some(_), _) => return usage_error("--sql-replay and --sql-db are two databases; give one"),
         (_, None, Some(_)) => return usage_error("--sql-record needs --sql-db"),
         (Some(file), None, None) => match fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|text| exec::sql::Replay::parse(&text, keyed)) {
@@ -263,7 +263,7 @@ fn driver() -> ExitCode {
         None => Box::new(io::stdin().lock()),
     };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
-    match compiled.execute_with(library, dds, Some(sysin), clock, database, &mut out, &mut err) {
+    match compiled.execute_with(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err) {
         Ok((_, return_code)) => ExitCode::from(return_code as u8),
         Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => ExitCode::SUCCESS,
         Err(abend) => report_abend(&compiled, path, &abend),
@@ -327,11 +327,13 @@ fn cics_task(options: &[(String, String)], number: u32) -> Result<exec::cics::Ta
     Ok(task)
 }
 
-/// The programs a served terminal's transactions run, each compiled the first time it is needed.
+/// The programs a served terminal's transactions run, each compiled the first time it is needed,
+/// and the database every task shares.
 struct Transactions {
     library: exec::unit::Library,
     table: std::collections::HashMap<String, String>,
     compiled: std::collections::HashMap<String, std::rc::Rc<exec::Compiled>>,
+    database: Option<Box<dyn exec::sql::Database>>,
 }
 
 impl Transactions {
@@ -370,7 +372,14 @@ impl Transactions {
 }
 
 /// Serves TN3270 on --serve's address, one connection at a time, running pseudo-conversations.
-fn serve_cics(first: &exec::Compiled, mut library: exec::unit::Library, dds: exec::files::Dds, clock: exec::unit::Clock, options: &[(String, String)]) -> ExitCode {
+fn serve_cics(
+    first: &exec::Compiled,
+    mut library: exec::unit::Library,
+    dds: exec::files::Dds,
+    clock: exec::unit::Clock,
+    database: Option<Box<dyn exec::sql::Database>>,
+    options: &[(String, String)],
+) -> ExitCode {
     let get = |name: &str| options.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone());
     let address = get("--serve").unwrap_or_default();
     if let Err(e) = cics_task(options, 1) {
@@ -396,7 +405,7 @@ fn serve_cics(first: &exec::Compiled, mut library: exec::unit::Library, dds: exe
         }
     };
     eprintln!("ironwork: serving TN3270 on {}", listener.local_addr().map_or(address, |a| a.to_string()));
-    let mut transactions = Transactions { library, table, compiled: Default::default() };
+    let mut transactions = Transactions { library, table, compiled: Default::default(), database };
     for connection in listener.incoming() {
         let stream = match connection {
             Ok(s) => s,
@@ -492,8 +501,9 @@ fn conversation(
         task.terminal = Some(Box::new(exec::tn3270::Shared(terminal.clone())));
         eprintln!("ironwork: task {number}: {transid} runs {program}");
         let (mut out, mut err) = (io::stdout().lock(), io::stderr());
-        let ran = compiled.execute_cics(transactions.library.clone(), dds.clone(), task, clock, &mut out, &mut err);
+        let ran = compiled.execute_cics_with(transactions.library.clone(), dds.clone(), task, clock, transactions.database.as_deref_mut(), &mut out, &mut err);
         drop(out);
+        terminal.borrow_mut().discard_pending();
         let task = match ran {
             Ok((_, task)) => task,
             Err(abend) => return Conversation::Failed(format!("{transid}: ABEND {}: {} at {}", abend.code, abend.message, abend.pos)),
@@ -527,16 +537,16 @@ fn run_cics(
     library: exec::unit::Library,
     dds: exec::files::Dds,
     clock: exec::unit::Clock,
-    database: Option<Box<dyn exec::sql::Database>>,
+    mut database: Option<Box<dyn exec::sql::Database>>,
     options: &[(String, String)],
 ) -> ExitCode {
     let page = compiled.options.code_page();
     let get = |name: &str| options.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone());
     if get("--serve").is_some() {
-        if get("--screens").is_some() || get("--commarea").is_some() || get("--commarea-out").is_some() || database.is_some() {
-            return usage_error("--serve cannot be combined with --screens, --commarea, --commarea-out, --sql-db or --sql-replay");
+        if get("--screens").is_some() || get("--commarea").is_some() || get("--commarea-out").is_some() {
+            return usage_error("--serve cannot be combined with --screens, --commarea or --commarea-out");
         }
-        return serve_cics(compiled, library, dds, clock, options);
+        return serve_cics(compiled, library, dds, clock, database, options);
     }
     if get("--transaction").is_some() {
         return usage_error("--transaction needs --serve");
@@ -583,7 +593,7 @@ fn run_cics(
         }
     };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
-    let ran = compiled.execute_cics_with(library, dds, task, clock, database, &mut out, &mut err);
+    let ran = compiled.execute_cics_with(library, dds, task, clock, database.as_deref_mut(), &mut out, &mut err);
     drop(out);
     print_screens();
     match ran {
