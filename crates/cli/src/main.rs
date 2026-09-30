@@ -4,7 +4,8 @@ use std::{env, fs, io};
 
 const USAGE: &str = "ironwork for COBOL
 usage:
-  ironwork run <program.cbl> [-silent] [-strict-sort-keys] [-I <dir>]... [-L <dir>]... [--dd NAME=path[:format]]... [--clock <time>]
+  ironwork run <program.cbl> [-silent] [-strict-sort-keys] [--fastsrt-adv-print=exclude|include]
+               [-I <dir>]... [-L <dir>]... [--dd NAME=path[:format]]... [--clock <time>]
                [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                                                        compile and run; CBL and PROCESS cards set the options
   ironwork check <program.cbl> [-I <dir>]...           compile only
@@ -21,6 +22,12 @@ flags:
              read a SORT or MERGE key as the program would, so a zoned or packed key that is not
              a valid number is a data exception (S0C7); without it, keys compare as DFSORT's ZD
              and PD formats compare them
+  --fastsrt-adv-print=exclude|include
+             whether FASTSRT gives DFSORT the I/O of a USING or GIVING print file under ADV, whose
+             data set's records are a byte longer than its FD's. exclude (the default) leaves it to
+             COBOL; include has DFSORT take the records as they stand: it reads the control
+             character as a record's first byte and writes none, padding each record with X'00' or
+             failing the SORT where DFSORT's rules for record lengths say so
   -I <dir>   a copy library for COPY members, searched after the program's own directory
   -L <dir>   a program library: CALL finds a program there by name, after the programs in the
              same source and the program's own directory
@@ -238,6 +245,10 @@ fn driver() -> ExitCode {
             "-I" => match args.next() {
                 Some(dir) => libraries.push(std::path::PathBuf::from(dir)),
                 None => return usage_error("-I needs a directory"),
+            },
+            f if f.starts_with("--fastsrt-adv-print") => match f {
+                "--fastsrt-adv-print=exclude" | "--fastsrt-adv-print=include" => flags.push(a),
+                _ => return usage_error("--fastsrt-adv-print needs =exclude or =include"),
             },
             f if f.starts_with('-') && f.len() > 1 && !FLAGS.contains(&f) => return usage_error(&format!("unknown flag {f}")),
             f if f.starts_with('-') && f.len() > 1 => flags.push(a),

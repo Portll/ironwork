@@ -145,6 +145,9 @@ pub const FASTSRT_FILES: &str = "S11";
 pub const FASTSRT_STATUS: &str = "S12";
 pub const FASTSRT_FAILURE: &str = "S13";
 pub const SAME_AREA_VSAM: &str = "S14";
+pub const FASTSRT_PRINT_RECORDS: &str = "S15";
+pub const FASTSRT_RECORD_LENGTHS: &str = "S16";
+pub const FASTSRT_ADV_PRINT: &str = "S17";
 pub const PRINT_CONTROL_CHARACTER: &str = "C40";
 pub const PRINT_SPACING_RECORDS: &str = "C41";
 pub const PRINT_CONTROL_RUN_TIME: &str = "C42";
@@ -675,7 +678,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: FASTSRT_FILES,
-        claim: "Under FASTSRT DFSORT does the I/O of a SORT's only USING file and its only GIVING file, except a MERGE's, a line-sequential or variable-length relative file, a GIVING file whose FD has LINAGE (p. 233), a print file under ADV, one whose records differ from the SD's in format (fixed or variable) or largest length, and a GIVING file that is also the USING file; COBOL does the rest as under NOFASTSRT (Programming Guide SC27-8714-03, pp. 232-233, 369). A print file under ADV is left to COBOL because ADV adds a byte to its record length for the printer control character (p. 346), which the DD's LRECL counts (p. 185): p. 233 wants the SD's and the FD's largest records the same length and p. 232 the DD to match the FD, so with the FD's record as long as the SD's the data set's records are a byte longer than DFSORT's, and with it a byte shorter the FD's and the SD's differ; under NOADV the character is inside the FD's record and the lengths rule alone applies",
+        claim: "Under FASTSRT DFSORT does the I/O of a SORT's only USING file and its only GIVING file, except a MERGE's, a line-sequential or variable-length relative file, a GIVING file whose FD has LINAGE (p. 233), a print file under ADV unless --fastsrt-adv-print=include, one whose records differ from the SD's in format (fixed or variable) or largest length, and a GIVING file that is also the USING file; COBOL does the rest as under NOFASTSRT (Programming Guide SC27-8714-03, pp. 232-233, 369). The Guide does not name a print file under ADV. By default, --fastsrt-adv-print=exclude, it is left to COBOL, because ADV adds a byte to its record length for the printer control character (p. 346), which the DD's LRECL counts (p. 185): p. 233 wants the SD's and the FD's largest records the same length and p. 232 the DD to match the FD, so with the FD's record as long as the SD's the data set's records are a byte longer than DFSORT's, and with it a byte shorter the FD's and the SD's differ. --fastsrt-adv-print=include reads p. 233 as the FD's length alone and gives the file to DFSORT, as FASTSRT_ADV_PRINT says. Under NOADV the character is inside the FD's record and the lengths rule alone applies",
         basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -870,6 +873,24 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         claim: "A single-row FETCH that returns a row sets SQLERRD(3) to 1; Db2 for z/OS documents SQLERRD(3) for a rowset FETCH only (Db2 12.1.5 for Linux, tools/db2-probe)",
         basis: Basis::Observed,
         oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: FASTSRT_PRINT_RECORDS,
+        claim: "Under FASTSRT DFSORT, not COBOL, does the I/O of the USING and GIVING files (Programming Guide SC27-8714-03, p. 232), and DFSORT adds a printer control character only to the lines of an OUTFIL report (DFSORT Application Programming Guide SC23-6878-50, p. 225), which needs control statements ironwork does not read. So DFSORT writes a GIVING print file's records as the SD holds them, with no control character, where COBOL writes each as a WRITE without phrases (Language Reference SC27-8713-03, p. 453), which for a print file is AFTER ADVANCING 1 LINE (Programming Guide pp. 178-179), the character over the record's first byte under NOADV; and DFSORT reads a USING print file's records as its data set holds them, where COBOL's READ skips the byte ADV adds (PRINT_CONTROL_RUN_TIME). Under NOADV the two read a USING print file alike",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FASTSRT_RECORD_LENGTHS,
+        claim: "DFSORT takes the length of the records it sorts from the SORTIN data set, not from the RECORD statement (DFSORT Application Programming Guide SC23-6878-50, p. 420). A fixed-length record shorter than SORTOUT's LRECL is padded on the right with X'00', and a longer one cut on the right, with message ICE171I and return code 0 (pp. 14-15, 200, 209) under PAD=RC0 and TRUNC=RC0, the IBM-supplied defaults (DFSORT Installation and Customization SC23-6881-70, pp. 91, 102); padding needs the Blockset technique and a sort or copy, DFSORT checks neither padding nor truncation without both a SORTIN and a SORTOUT data set (pp. 200, 209), and it neither pads nor cuts the records an E15 or E35 exit returns (p. 15). A variable-length record longer than SORTOUT's LRECL ends DFSORT with ICE217A under NOVLLONG (p. 210), the IBM-supplied default (Installation and Customization p. 103; DFSORT Messages, Codes and Diagnosis SC23-6879-50, p. 76)",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FASTSRT_ADV_PRINT,
+        claim: "With --fastsrt-adv-print=include a print file under ADV is FASTSRT's as any other file is, and DFSORT meets its data set's records, a byte longer than the FD's. A USING file's data set stands as DFSORT's SORTIN and a GIVING file's as its SORTOUT, as the Programming Guide implies by keeping DFSORT's SORTIN and SORTOUT options from a FASTSRT program (SC27-8714-03, p. 232) without saying so, and COBOL gives DFSORT each key's place in the SD's record; so, by FASTSRT_PRINT_RECORDS and FASTSRT_RECORD_LENGTHS, a USING print file's records keep the control character as their first byte, each key being read a byte before where the FD has it, and a GIVING file's fixed-length records are padded with X'00' or cut to its data set's length. With no USING data set of DFSORT's own, as with an INPUT PROCEDURE or a USING file COBOL reads, a GIVING print file's longer fixed-length records fail the SORT before its input phase, as ICE043A reason 9 says of fixed-length output records longer than the input's (DFSORT Messages, Codes and Diagnosis SC23-6879-50, pp. 29-30). COBOL takes a record from DFSORT, for an OUTPUT PROCEDURE or a GIVING file it writes, at the SD's length at most, and a VSAM GIVING file takes it at its own. A text DD holds no control character, so on it a print file's records are the FD's length, and each record DFSORT writes is a line",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
     },
 ];
 

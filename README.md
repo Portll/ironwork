@@ -19,7 +19,7 @@ The PyPI and npm packages carry builds for Linux (static, x64 and arm64), macOS 
 Windows (x64). The same builds are attached to each [release](https://github.com/Portll/ironwork/releases).
 From a checkout:
 
-    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
+    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [--fastsrt-adv-print=exclude|include] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
     cargo run -p ironwork -- check program.cbl [-I copylib]...
 
 CBL and PROCESS cards set the options. COPY members are found in the program's own directory, then
@@ -36,7 +36,13 @@ otherwise the system clock in UTC.
 A SORT or MERGE compares zoned and packed keys as DFSORT compares ZD and PD fields, so no bytes
 in a key are a data exception; `-strict-sort-keys` reads each key as the program would instead, so
 a key that is not a valid number abends S0C7. FASTSRT and NOFASTSRT (the default) on a CBL or
-PROCESS card choose who does the I/O of USING and GIVING files, as on z/OS.
+PROCESS card choose who does the I/O of USING and GIVING files, as on z/OS. Where DFSORT does it, a
+print file's records are written as the SD holds them, with no printer control character
+(assumption S15). IBM's rules leave open whether DFSORT may have a print file under ADV, whose data
+set's records are a byte longer than its FD's: `--fastsrt-adv-print=exclude` (the default) leaves
+it to COBOL, and `--fastsrt-adv-print=include` gives it to DFSORT, which reads the control
+character as each record's first byte and pads, cuts or refuses records as its rules for record
+lengths say (S16 and S17).
 
 A sequential file that a WRITE ... ADVANCING names, whose FD has LINAGE, or that holds a report is a
 print file: each record written to it carries a printer control character, ASA when every WRITE ...
@@ -295,8 +301,10 @@ A binary store under TRUNC(OPT) whose value exceeds the PICTURE is reported, bec
 binary truncation give different results and the program depends on which one the generated code
 uses. So is a SORT whose outcome FASTSRT changes: a USING or GIVING file whose I/O DFSORT does, or
 would do, under FASTSRT, and whose FILE STATUS (or a GIVING relative file's RELATIVE KEY) the SORT
-then leaves alone; and, under FASTSRT, each USING or GIVING file IBM's rules keep from DFSORT, with
-the reason. The flag `-silent` suppresses the reports and changes nothing else.
+then leaves alone; a print file whose records DFSORT reads or writes otherwise than COBOL, naming
+the `--fastsrt-adv-print` choice for one under ADV; and, under FASTSRT, each USING or GIVING file
+IBM's rules keep from DFSORT, with the reason. The flag `-silent` suppresses the reports and changes
+nothing else.
 
 ## Licence
 

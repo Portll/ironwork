@@ -183,6 +183,27 @@ impl<'p> Machine<'p, '_, '_> {
         Ok(record.len() > size)
     }
 
+    /// How file k's records are held when its DD does not say.
+    fn described_format(&self, k: usize) -> Format {
+        let decl = &self.program.files[k];
+        match decl.organization {
+            Organization::LineSequential => Format::Text,
+            _ if decl.recording == Some('V') || decl.record_min != decl.record_max => Format::Variable,
+            _ => Format::Fixed,
+        }
+    }
+
+    /// How file k's DD holds its records.
+    pub(super) fn dd_format(&self, k: usize) -> Format {
+        self.unit.dds.get(&self.program.files[k].assign).and_then(|d| d.format).unwrap_or_else(|| self.described_format(k))
+    }
+
+    /// Whether file k's DD holds a byte before each record for the printer control character: a
+    /// print file under ADV, unless the DD is text, which shows the character as line spacing.
+    pub(super) fn adds_control_byte(&self, k: usize, format: Format) -> bool {
+        self.carriage[k].is_some_and(|c| !c.reserved) && format != Format::Text
+    }
+
     pub(super) fn open_file(&mut self, mode: OpenMode, name: &str, pos: Pos) -> R<()> {
         let k = self.file_index(name, pos)?;
         let program = self.program;
@@ -190,11 +211,7 @@ impl<'p> Machine<'p, '_, '_> {
         if self.unit.programs[self.me].files[k].is_some() {
             return self.io_status(k, FileStatus::AlreadyOpen, format!("{name} is already open"), pos);
         }
-        let default = match decl.organization {
-            Organization::LineSequential => Format::Text,
-            _ if decl.recording == Some('V') || decl.record_min != decl.record_max => Format::Variable,
-            _ => Format::Fixed,
-        };
+        let default = self.described_format(k);
         let dd = self.unit.dds.get(&decl.assign);
         if let Some(d) = &dd {
             self.unit.notify(Event::Open { dd: &decl.assign, mode, path: &d.path });
@@ -329,7 +346,7 @@ impl<'p> Machine<'p, '_, '_> {
         let Some(mut f) = self.unit.programs[self.me].files[k].take() else {
             return self.conclude(k, FileStatus::NotOpenInput, &r.at_end, '1', "READ", pos);
         };
-        let added = self.carriage[k].is_some_and(|c| !c.reserved) && f.format != Format::Text;
+        let added = self.adds_control_byte(k, f.format);
         let read = f.read(size + usize::from(added));
         let format = f.format;
         let input = f.mode == OpenMode::Input;

@@ -626,7 +626,7 @@ fn fastsrt_leaves_linage_and_adv_print_output_to_cobol() {
     };
     let cobol_writes = [0x40, 0xC1, 0xF1, 0x40, 0xC2, 0xF2];
     let (stdout, err, written) = run("FASTSRT", "       FD  OUT-F.\n");
-    assert!(err.contains("FASTSRT does not apply to GIVING OUT-F: it is a print file, whose records ADV makes a byte longer than its FD's 2; COBOL does its I/O"), "{err}");
+    assert!(err.contains("FASTSRT does not apply to GIVING OUT-F: it is a print file, whose records ADV makes a byte longer than its FD's 2 (--fastsrt-adv-print=exclude); COBOL does its I/O"), "{err}");
     assert_eq!((stdout.as_str(), written.as_slice()), ("00 00\n", &cobol_writes[..]));
     let (stdout, err, _) = run("FASTSRT,NOADV", "       FD  OUT-F.\n");
     assert!(err.contains("FASTSRT: DFSORT does the I/O of GIVING OUT-F, so its FILE STATUS FS-O is not updated by the SORT"), "{err}");
@@ -636,4 +636,142 @@ fn fastsrt_leaves_linage_and_adv_print_output_to_cobol() {
         assert!(err.contains("FASTSRT does not apply to GIVING OUT-F: its FD has LINAGE; COBOL does its I/O"), "{options}: {err}");
         assert_eq!((stdout.as_str(), written.as_slice()), ("00 00\n", &cobol_writes[..]), "{options}");
     }
+}
+
+/// Runs `source` under a CBL card of `options`, `out` removed first: standard output, standard
+/// error and the bytes then in `out`.
+fn run_cbl(options: &str, source: &str, flags: &[&str], dds: &[String], out: &std::path::Path) -> (String, String, Vec<u8>) {
+    let _ = std::fs::remove_file(out);
+    let (stdout, err, ending) = run_flagged(&format!("       CBL {options}\n{source}"), dds, flags);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    (stdout, err, std::fs::read(out).unwrap_or_default())
+}
+
+/// A SORT of two-byte records. P-IN and OUT-F are print files, written with ADVANCING in a
+/// paragraph that never runs; IN-A and PLAIN are not.
+fn print_sort_program(sort: &str) -> String {
+    file_program(
+        &[
+            SELECT_SD,
+            "           SELECT IN-A ASSIGN TO ADD.\n           SELECT P-IN ASSIGN TO PDD.\n",
+            "           SELECT OUT-F ASSIGN TO ODD FILE STATUS FS-O.\n           SELECT PLAIN ASSIGN TO QDD.\n",
+        ]
+        .concat(),
+        concat!(
+            "       SD  S-FILE.\n       01  S-REC PIC X(2).\n       FD  IN-A.\n       01  A-REC PIC X(2).\n       FD  P-IN.\n       01  P-REC PIC X(2).\n",
+            "       FD  OUT-F.\n       01  O-REC PIC X(2).\n       FD  PLAIN.\n       01  Q-REC PIC X(2).\n",
+        ),
+        "       01  FS-O PIC XX VALUE 'YY'.\n       01  RC PIC 99.\n",
+        &[
+            line(sort),
+            line("MOVE SORT-RETURN TO RC"),
+            line("DISPLAY RC ' ' FS-O"),
+            line("GOBACK."),
+            "       FEED.\n".into(),
+            line("DISPLAY 'FEEDING'"),
+            line("MOVE 'B2' TO S-REC RELEASE S-REC"),
+            line("MOVE 'A1' TO S-REC RELEASE S-REC."),
+            "       SHOW.\n".into(),
+            line("PERFORM 3 TIMES RETURN S-FILE AT END DISPLAY 'END'"),
+            line("    NOT AT END DISPLAY S-REC END-RETURN END-PERFORM."),
+            "       NEVER-RUN.\n".into(),
+            line("WRITE P-REC AFTER ADVANCING 2 LINES"),
+            line("WRITE O-REC AFTER ADVANCING 2 LINES."),
+        ]
+        .concat(),
+    )
+}
+
+#[test]
+fn fastsrt_writes_a_noadv_print_giving_file_as_the_sd_holds_its_records() {
+    let (input, out) = (text_file("fsnoadv-in.txt", &["B2", "A1"]), temp("fsnoadv-out.bin"));
+    let dds = [dd("ADD", &input), format!("ODD={}", out.display())];
+    let source = print_sort_program("SORT S-FILE ASCENDING S-REC USING IN-A GIVING OUT-F");
+    let unchanged = "the I/O of GIVING OUT-F, a print file under NOADV, whose records DFSORT writes as the SD holds them, with no printer control character";
+    let (stdout, err, written) = run_cbl("NOADV", &source, &[], &dds, &out);
+    assert_eq!((stdout.as_str(), written.as_slice()), ("00 00\n", &[0x40, 0xF1, 0x40, 0xF2][..]));
+    assert!(err.contains(&format!("under FASTSRT, DFSORT would do {unchanged}")), "{err}");
+    let (stdout, err, written) = run_cbl("FASTSRT,NOADV", &source, &[], &dds, &out);
+    assert_eq!((stdout.as_str(), written.as_slice()), ("00 YY\n", &[0xC1, 0xF1, 0xC2, 0xF2][..]));
+    assert!(err.contains(&format!("FASTSRT: DFSORT does {unchanged}")), "{err}");
+    assert!(run_cbl("FASTSRT,NOADV", &source, &["-silent"], &dds, &out).1.is_empty());
+}
+
+#[test]
+fn fastsrt_adv_print_include_pads_the_giving_records_or_fails_the_sort() {
+    let (input, out) = (text_file("fsinc-in.txt", &["B2", "A1"]), temp("fsinc-out.bin"));
+    let dds = [dd("ADD", &input), format!("ODD={}", out.display())];
+    let include = ["--fastsrt-adv-print=include"];
+    let source = print_sort_program("SORT S-FILE ASCENDING S-REC USING IN-A GIVING OUT-F");
+    for (options, flags) in [("FASTSRT", &[][..]), ("NOFASTSRT", &include[..])] {
+        let (stdout, _, written) = run_cbl(options, &source, flags, &dds, &out);
+        assert_eq!((stdout.as_str(), written.as_slice()), ("00 00\n", &[0x40, 0xC1, 0xF1, 0x40, 0xC2, 0xF2][..]), "{options} {flags:?}");
+    }
+    let padded = "the I/O of GIVING OUT-F, a print file under ADV taken by --fastsrt-adv-print=include, whose records DFSORT writes with no printer control character; DFSORT pads each record with X'00' to the data set's 3 bytes (ICE171I)";
+    assert!(run_cbl("NOFASTSRT", &source, &include, &dds, &out).1.contains(&format!("under FASTSRT, DFSORT would do {padded}")));
+    let (stdout, err, written) = run_cbl("FASTSRT", &source, &include, &dds, &out);
+    assert_eq!((stdout.as_str(), written.as_slice()), ("00 YY\n", &[0xC1, 0xF1, 0x00, 0xC2, 0xF2, 0x00][..]));
+    assert!(err.contains(&format!("FASTSRT: DFSORT does {padded}")), "{err}");
+
+    let fed = print_sort_program("SORT S-FILE ASCENDING S-REC INPUT PROCEDURE FEED GIVING OUT-F");
+    let (stdout, err, written) = run_cbl("FASTSRT", &fed, &include, &dds, &out);
+    assert_eq!((stdout.as_str(), written.as_slice()), ("16 YY\n", &[][..]));
+    assert!(err.contains("SORT S-FILE failed: GIVING OUT-F's data set has 3-byte records, and with no USING file of its own DFSORT does not pad the SD's 2-byte records: ICE043A"), "{err}");
+    let (stdout, _, written) = run_cbl("FASTSRT", &fed, &[], &dds, &out);
+    assert_eq!((stdout.as_str(), written.as_slice()), ("FEEDING\n00 00\n", &[0x40, 0xC1, 0xF1, 0x40, 0xC2, 0xF2][..]));
+}
+
+#[test]
+fn fastsrt_adv_print_include_reads_the_control_character_as_the_records_first_byte() {
+    let (print, out) = (temp("fsinc-print.bin"), temp("fsinc-plain.bin"));
+    std::fs::write(&print, [0xF1, 0xC1, 0xF1, 0x40, 0xC2, 0xF2]).unwrap();
+    let dds = [format!("PDD={}", print.display()), format!("QDD={}", out.display())];
+    let include = ["--fastsrt-adv-print=include"];
+    let source = print_sort_program("SORT S-FILE ASCENDING S-REC USING P-IN GIVING PLAIN");
+    for (options, flags) in [("NOFASTSRT", &include[..]), ("FASTSRT", &[][..])] {
+        let (stdout, _, written) = run_cbl(options, &source, flags, &dds, &out);
+        assert_eq!((stdout.as_str(), written.as_slice()), ("00 YY\n", &[0xC1, 0xF1, 0xC2, 0xF2][..]), "{options}");
+    }
+    let (stdout, err, written) = run_cbl("FASTSRT", &source, &include, &dds, &out);
+    assert_eq!((stdout.as_str(), written.as_slice()), ("00 YY\n", &[0x40, 0xC2, 0xF1, 0xC1][..]));
+    assert!(
+        err.contains("FASTSRT: DFSORT does the I/O of USING P-IN, a print file under ADV taken by --fastsrt-adv-print=include, whose records DFSORT reads as its data set holds them, 3 bytes with the printer control character first, so each key is read a byte before where the FD has it"),
+        "{err}"
+    );
+    assert!(err.contains("FASTSRT: DFSORT does the I/O of GIVING PLAIN; DFSORT cuts each 3-byte record to the data set's 2 bytes (ICE171I)"), "{err}");
+    let shown = print_sort_program("SORT S-FILE ASCENDING S-REC USING P-IN OUTPUT PROCEDURE SHOW");
+    assert_eq!(run_cbl("FASTSRT", &shown, &include, &dds, &out).0, " B\n1A\nEND\n00 YY\n");
+    assert_eq!(run_cbl("FASTSRT", &shown, &[], &dds, &out).0, "A1\nB2\nEND\n00 YY\n");
+}
+
+#[test]
+fn fastsrt_adv_print_include_fails_a_variable_record_longer_than_the_giving_data_set() {
+    let (print, out) = (temp("fsinc-vprint.bin"), temp("fsinc-vout.bin"));
+    std::fs::write(&print, [0, 7, 0, 0, 0x40, 0xC1, 0xF1, 0, 6, 0, 0, 0x40, 0xC2]).unwrap();
+    let dds = [format!("VDD={}", print.display()), format!("WDD={}", out.display())];
+    let source = file_program(
+        &[SELECT_SD, "           SELECT V-IN ASSIGN TO VDD.\n           SELECT V-OUT ASSIGN TO WDD.\n"].concat(),
+        concat!(
+            "       SD  S-FILE RECORD VARYING FROM 1 TO 2.\n       01  S-REC.\n           05 S-K PIC X.\n           05 S-T PIC X.\n",
+            "       FD  V-IN RECORD VARYING FROM 1 TO 2.\n       01  V-REC PIC X(2).\n       FD  V-OUT RECORD VARYING FROM 1 TO 2.\n       01  W-REC PIC X(2).\n",
+        ),
+        "       01  RC PIC 99.\n",
+        &[
+            line("SORT S-FILE ASCENDING S-K USING V-IN GIVING V-OUT"),
+            line("MOVE SORT-RETURN TO RC"),
+            line("DISPLAY RC"),
+            line("GOBACK."),
+            "       NEVER-RUN.\n".into(),
+            line("WRITE V-REC AFTER ADVANCING 1 LINE."),
+        ]
+        .concat(),
+    );
+    let cobol = [0, 6, 0, 0, 0xC1, 0xF1, 0, 5, 0, 0, 0xC2];
+    for options in ["NOFASTSRT", "FASTSRT"] {
+        let (stdout, _, written) = run_cbl(options, &source, &[], &dds, &out);
+        assert_eq!((stdout.as_str(), written.as_slice()), ("00\n", &cobol[..]), "{options}");
+    }
+    let (stdout, err, _) = run_cbl("FASTSRT", &source, &["--fastsrt-adv-print=include"], &dds, &out);
+    assert_eq!(stdout, "16\n");
+    assert!(err.contains("SORT S-FILE failed: a 3-byte record is longer than the largest of GIVING V-OUT's data set, 2 bytes: ICE217A"), "{err}");
 }

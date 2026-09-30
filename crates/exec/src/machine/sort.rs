@@ -3,8 +3,8 @@
 //! files or RETURN. A table SORT reorders the table's elements in place.
 
 use super::*;
-use crate::files::{Format, Record};
-use numeric::{SortKeys, TruncCheck, assumptions};
+use crate::files::{Format, Move, Record};
+use numeric::{FastsrtAdvPrint, SortKeys, TruncCheck, assumptions};
 use std::rc::Rc;
 
 /// The signal a RELEASE or RETURN raises to stop the operation: control passes to the statement
@@ -78,6 +78,11 @@ impl Fastsrt {
     fn dfsort(&self, fastsrt: bool) -> bool {
         fastsrt && self.refusal.is_none()
     }
+}
+
+/// The USING file whose data set DFSORT would read as its SORTIN.
+fn sortin(plan: &[Fastsrt]) -> Option<&Fastsrt> {
+    plan.iter().find(|f| f.input && f.refusal.is_none())
 }
 
 /// How a SORT or MERGE ended: Err holds why it failed.
@@ -237,19 +242,21 @@ impl<'p> Machine<'p, '_, '_> {
         decl.recording != Some('V') && decl.record_min == decl.record_max
     }
 
-    /// A record as it enters the sort: fitted to the SD's record length and keyed. See
-    /// [`assumptions::SORT_RECORD_LENGTHS`].
-    fn entry(&mut self, sd: usize, keys: &[Key], mut record: Vec<u8>, pos: Pos) -> R<Result<Entry, String>> {
+    /// A record as it enters the sort: fitted to `extent`, the length of the sort's records (the
+    /// SD's, unless DFSORT reads a longer data set), and keyed at the SD's places from its first
+    /// byte. See [`assumptions::SORT_RECORD_LENGTHS`] and [`assumptions::FASTSRT_ADV_PRINT`].
+    fn entry(&mut self, sd: usize, keys: &[Key], mut record: Vec<u8>, extent: usize, pos: Pos) -> R<Result<Entry, String>> {
         let (area, size) = self.area(sd);
         if self.fixed_length(sd) {
-            record.resize(size, ebcdic::SPACE);
+            record.resize(extent, ebcdic::SPACE);
         } else {
-            record.truncate(size);
+            record.truncate(extent);
         }
         if keys.iter().any(|k| k.offset + k.len > record.len()) {
             return Ok(Err(format!("a record of {} bytes ends inside a key", record.len())));
         }
-        self.unit.mem[area..area + record.len()].copy_from_slice(&record);
+        let held = record.len().min(size);
+        self.unit.mem[area..area + held].copy_from_slice(&record[..held]);
         let keys = self.key_values(area, keys, self.options.sort_keys == SortKeys::Dfsort, pos)?;
         Ok(Ok(Entry { record, keys }))
     }
@@ -284,18 +291,21 @@ impl<'p> Machine<'p, '_, '_> {
         if self.status_failed(k)? { Ok(Err(format!("CLOSE {name} failed"))) } else { Ok(Ok(())) }
     }
 
-    /// The next record of an open USING file, with the file status READ would set.
-    fn next_input(&mut self, k: usize, pos: Pos) -> R<Input> {
+    /// The next record of an open USING file, with the file status READ would set. A print file's
+    /// record under ADV keeps the byte before it only when `dfsort` reads it
+    /// ([`assumptions::FASTSRT_PRINT_RECORDS`]).
+    fn next_input(&mut self, k: usize, dfsort: bool, pos: Pos) -> R<Input> {
         let size = self.area(k).1;
         let Some(mut f) = self.unit.programs[self.me].files[k].take() else { return Ok(Input::Failed("the file is not open".into())) };
         let text = f.format == Format::Text && !f.is_keyed();
+        let added = self.adds_control_byte(k, f.format);
         let read = match f.keyed() {
             Some(keyed) => match keyed.step(false) {
                 Ok(Some(found)) => Ok(Record::Data(found.record)),
                 Ok(None) => Ok(Record::End),
                 Err(code) => Err((code, "there is no next record".to_owned())),
             },
-            None => f.read(size).map_err(|e| ("30", e.to_string())),
+            None => f.read(size + usize::from(added)).map_err(|e| ("30", e.to_string())),
         };
         self.unit.programs[self.me].files[k] = Some(f);
         let program = self.program;
@@ -312,6 +322,9 @@ impl<'p> Machine<'p, '_, '_> {
             Ok(Record::WrongLength(r)) => (r, "04"),
         };
         self.set_status(k, code, pos)?;
+        if added && !dfsort {
+            return Ok(Input::Record(record.get(1..).unwrap_or_default().to_vec()));
+        }
         if !text {
             return Ok(Input::Record(record));
         }
@@ -344,12 +357,13 @@ impl<'p> Machine<'p, '_, '_> {
         if let Err(why) = self.open_for_sort(k, OpenMode::Input, pos)? {
             return Ok(Err(why));
         }
+        let extent = self.area(sd).1 + if dfsort { self.control_byte(k) } else { 0 };
         let mut entries = Vec::new();
         loop {
-            let failure = match self.next_input(k, pos)? {
+            let failure = match self.next_input(k, dfsort, pos)? {
                 Input::End => break,
                 Input::Failed(why) => why,
-                Input::Record(r) => match self.entry(sd, keys, r, pos)? {
+                Input::Record(r) => match self.entry(sd, keys, r, extent, pos)? {
                     Ok(e) => {
                         entries.push(e);
                         continue;
@@ -374,13 +388,14 @@ impl<'p> Machine<'p, '_, '_> {
         Ok(Ok(entries))
     }
 
-    /// Writes every record to each GIVING file, as WRITE without phrases would.
-    fn scatter(&mut self, records: &[Vec<u8>], plan: &[Fastsrt], pos: Pos) -> R<Outcome> {
+    /// Writes every record to each GIVING file, as WRITE without phrases would, or as DFSORT writes
+    /// a sequential file's data set.
+    fn scatter(&mut self, records: &[Vec<u8>], sd: usize, plan: &[Fastsrt], pos: Pos) -> R<Outcome> {
         for f in plan.iter().filter(|f| !f.input) {
             let written = if f.dfsort(self.options.fastsrt) {
-                self.by_dfsort(f.file, |m| m.write_giving(records, f.file, pos))?
+                self.by_dfsort(f.file, |m| m.write_giving(records, f.file, sd, true, pos))?
             } else {
-                self.write_giving(records, f.file, pos)?
+                self.write_giving(records, f.file, sd, false, pos)?
             };
             if written.is_err() {
                 return Ok(written);
@@ -389,16 +404,25 @@ impl<'p> Machine<'p, '_, '_> {
         Ok(Ok(()))
     }
 
-    /// One GIVING file, opened, written and closed.
-    fn write_giving(&mut self, records: &[Vec<u8>], k: usize, pos: Pos) -> R<Outcome> {
+    /// One GIVING file, opened, written and closed. COBOL takes each record at the SD's length at
+    /// most ([`assumptions::FASTSRT_ADV_PRINT`]).
+    fn write_giving(&mut self, records: &[Vec<u8>], k: usize, sd: usize, dfsort: bool, pos: Pos) -> R<Outcome> {
         let program = self.program;
         let name = &program.files[k].name;
         if let Err(why) = self.open_for_sort(k, OpenMode::Output, pos)? {
             return Ok(Err(why));
         }
         let (area, size) = self.area(k);
+        let limit = size.min(self.area(sd).1);
         for record in records {
-            let len = record.len().min(size);
+            if dfsort && program.files[k].organization == Organization::Sequential {
+                if let Err(why) = self.dfsort_put(k, record)? {
+                    self.close_file(name, pos)?;
+                    return Ok(Err(why));
+                }
+                continue;
+            }
+            let len = record.len().min(limit);
             self.unit.mem[area..area + len].copy_from_slice(&record[..len]);
             let loc = Loc { offset: area, len, kind: Kind::Alnum { justified: false }, item: usize::MAX };
             self.write_record(k, loc, None, &NO_HANDLERS, pos)?;
@@ -408,6 +432,59 @@ impl<'p> Machine<'p, '_, '_> {
             }
         }
         self.close_for_sort(k, pos)
+    }
+
+    /// 1 when file k's data set holds a byte for ADV's printer control character before each
+    /// record, which DFSORT reads and writes as part of the record; else 0.
+    fn control_byte(&self, k: usize) -> usize {
+        usize::from(self.adds_control_byte(k, self.dd_format(k)))
+    }
+
+    /// A record as DFSORT writes it to a sequential GIVING file's data set: with no printer control
+    /// character, a fixed-length record padded with X'00' or cut to the data set's length, and a
+    /// variable-length one longer than that a failure. A text DD shows each record as a line. See
+    /// FASTSRT_PRINT_RECORDS, FASTSRT_RECORD_LENGTHS and FASTSRT_ADV_PRINT in numeric::assumptions.
+    fn dfsort_put(&mut self, k: usize, record: &[u8]) -> R<Outcome> {
+        let program = self.program;
+        let name = &program.files[k].name;
+        let Some(mut f) = self.unit.programs[self.me].files[k].take() else { return Ok(Err(format!("{name} is not open"))) };
+        let lrecl = self.area(k).1 + self.control_byte(k);
+        let written = match f.format {
+            Format::Text => {
+                let line = self.page.decode(record).trim_end().to_owned();
+                f.print(Some(Move::Lines(1)), &line, None)
+            }
+            Format::Fixed => {
+                let mut bytes = record.to_vec();
+                bytes.resize(lrecl, 0x00);
+                f.write(&bytes)
+            }
+            Format::Variable if record.len() > lrecl => {
+                self.unit.programs[self.me].files[k] = Some(f);
+                let why = format!("a {}-byte record is longer than the largest of GIVING {name}'s data set, {lrecl} bytes: ICE217A (see {})", record.len(), assumptions::FASTSRT_RECORD_LENGTHS);
+                return Ok(Err(why));
+            }
+            Format::Variable => f.write(record),
+        };
+        self.unit.programs[self.me].files[k] = Some(f);
+        Ok(written.map_err(|e| format!("writing {name} failed: {e}")))
+    }
+
+    /// DFSORT's check of its data sets before it sorts: a fixed-length GIVING data set whose records
+    /// are longer than the SD's, with no USING data set of DFSORT's own to pad from, fails the SORT
+    /// ([`assumptions::FASTSRT_ADV_PRINT`]).
+    fn dfsort_refuses(&self, sd: usize, plan: &[Fastsrt]) -> Option<String> {
+        if !self.options.fastsrt || sortin(plan).is_some() {
+            return None;
+        }
+        let length = self.area(sd).1;
+        plan.iter().filter(|f| !f.input && f.refusal.is_none() && self.dd_format(f.file) == Format::Fixed).find_map(|f| {
+            let lrecl = self.area(f.file).1 + self.control_byte(f.file);
+            let name = &self.program.files[f.file].name;
+            (lrecl > length).then(|| {
+                format!("GIVING {name}'s data set has {lrecl}-byte records, and with no USING file of its own DFSORT does not pad the SD's {length}-byte records: ICE043A (see {})", assumptions::FASTSRT_ADV_PRINT)
+            })
+        })
     }
 
     /// Runs `op` on file k as DFSORT does its I/O under FASTSRT: the file's FILE STATUS and RELATIVE
@@ -466,8 +543,8 @@ impl<'p> Machine<'p, '_, '_> {
             "it is a variable-length relative file".into()
         } else if !input && decl.linage {
             "its FD has LINAGE".into()
-        } else if self.carriage[k].is_some_and(|c| !c.reserved) {
-            format!("it is a print file, whose records ADV makes a byte longer than its FD's {}", self.area(k).1)
+        } else if self.carriage[k].is_some_and(|c| !c.reserved) && self.options.fastsrt_adv_print == FastsrtAdvPrint::Exclude {
+            format!("it is a print file, whose records ADV makes a byte longer than its FD's {} ({})", self.area(k).1, FastsrtAdvPrint::Exclude.flag())
         } else if self.fixed_length(k) != self.fixed_length(sd) {
             format!("its records are {}-length and the SD's {}-length", format(k), format(sd))
         } else if self.area(k).1 != self.area(sd).1 {
@@ -481,20 +558,25 @@ impl<'p> Machine<'p, '_, '_> {
 
     /// Checked mode: where FASTSRT changes what the program sees of a SORT, and where FASTSRT was
     /// asked for and cannot apply.
-    fn report_fastsrt(&mut self, st: &SortStmt, plan: &[Fastsrt]) {
+    fn report_fastsrt(&mut self, st: &SortStmt, sd: usize, plan: &[Fastsrt]) {
         if self.options.trunc_check == TruncCheck::Silent {
             return;
         }
         let verb = if st.merge { "MERGE" } else { "SORT" };
         let fastsrt = self.options.fastsrt;
         let program = self.program;
+        let mut reports = Vec::new();
         for f in plan {
             let decl = &program.files[f.file];
             let phrase = if f.input { "USING" } else { "GIVING" };
-            let report = match &f.refusal {
-                Some(why) if fastsrt => format!("FASTSRT does not apply to {phrase} {}: {why}; COBOL does its I/O", decl.name),
-                Some(_) => continue,
+            match &f.refusal {
+                Some(why) if fastsrt => reports.push(format!("FASTSRT does not apply to {phrase} {}: {why}; COBOL does its I/O", decl.name)),
+                Some(_) => {}
                 None => {
+                    if let Some(records) = self.dfsort_records(f, sd, plan) {
+                        let does = if fastsrt { "FASTSRT: DFSORT does" } else { "under FASTSRT, DFSORT would do" };
+                        reports.push(format!("{does} the I/O of {phrase} {}{records}", decl.name));
+                    }
                     let mut kept: Vec<String> = decl.status.iter().map(|r| format!("FILE STATUS {}", r.name)).collect();
                     if !f.input && decl.organization == Organization::Relative {
                         kept.extend(decl.relative_key.iter().map(|r| format!("RELATIVE KEY {}", r.name)));
@@ -503,15 +585,45 @@ impl<'p> Machine<'p, '_, '_> {
                         continue;
                     }
                     let kept = kept.join(" and ");
-                    if fastsrt {
+                    reports.push(if fastsrt {
                         format!("FASTSRT: DFSORT does the I/O of {phrase} {}, so its {kept} is not updated by the {verb}", decl.name)
                     } else {
                         format!("under FASTSRT, DFSORT would do the I/O of {phrase} {} and its {kept} would not be updated by the {verb}", decl.name)
-                    }
+                    });
                 }
-            };
+            }
+        }
+        for report in reports {
             let _ = writeln!(self.unit.err, "ironwork: {}: {verb} {}: {report} (-silent stops these reports)", st.pos, st.subject.name);
         }
+    }
+
+    /// How DFSORT's records for file f differ from COBOL's: a print file's control character, and
+    /// a GIVING data set's record length against the sort's. None when they do not.
+    fn dfsort_records(&self, f: &Fastsrt, sd: usize, plan: &[Fastsrt]) -> Option<String> {
+        let length = self.area(sd).1;
+        let byte = self.control_byte(f.file);
+        let choice = self.options.fastsrt_adv_print.flag();
+        let mut notes = Vec::new();
+        match self.carriage[f.file] {
+            Some(c) if c.reserved && !f.input => notes.push(", a print file under NOADV, whose records DFSORT writes as the SD holds them, with no printer control character".to_owned()),
+            Some(c) if !c.reserved && byte == 1 && f.input => notes.push(format!(
+                ", a print file under ADV taken by {choice}, whose records DFSORT reads as its data set holds them, {} bytes with the printer control character first, so each key is read a byte before where the FD has it",
+                length + 1
+            )),
+            Some(c) if !c.reserved && byte == 1 => notes.push(format!(", a print file under ADV taken by {choice}, whose records DFSORT writes with no printer control character")),
+            _ => {}
+        }
+        if !f.input && self.dd_format(f.file) == Format::Fixed && self.program.files[f.file].organization == Organization::Sequential {
+            let lrecl = self.area(f.file).1 + byte;
+            let sorted = sortin(plan).map(|u| length + self.control_byte(u.file));
+            match sorted {
+                Some(r) if lrecl > r => notes.push(format!("; DFSORT pads each record with X'00' to the data set's {lrecl} bytes (ICE171I)")),
+                Some(r) if lrecl < r => notes.push(format!("; DFSORT cuts each {r}-byte record to the data set's {lrecl} bytes (ICE171I)")),
+                _ => {}
+            }
+        }
+        (!notes.is_empty()).then(|| notes.concat())
     }
 
     /// Runs an input or output procedure with `active` in progress. An Err outcome is a stop
@@ -566,7 +678,10 @@ impl<'p> Machine<'p, '_, '_> {
         self.set_integer(&sort_return, 0, pos)?;
         let keys = self.file_keys(st, sd, pos)?;
         let plan = self.fastsrt_plan(st, sd, pos)?;
-        self.report_fastsrt(st, &plan);
+        self.report_fastsrt(st, sd, &plan);
+        if let Some(why) = self.dfsort_refuses(sd, &plan) {
+            return self.sort_end(st, Err(why));
+        }
         let mut entries = match &st.input {
             Some(SortIo::Files(_)) => match self.gather(st, sd, &keys, &plan)? {
                 Ok(entries) => entries,
@@ -596,7 +711,7 @@ impl<'p> Machine<'p, '_, '_> {
         let records: Vec<Vec<u8>> = entries.into_iter().map(|e| e.record).collect();
         match &st.output {
             Some(SortIo::Files(_)) => {
-                let outcome = self.scatter(&records, &plan, pos)?;
+                let outcome = self.scatter(&records, sd, &plan, pos)?;
                 self.sort_end(st, outcome)
             }
             Some(SortIo::Procedure { from, thru }) => {
@@ -648,7 +763,8 @@ impl<'p> Machine<'p, '_, '_> {
         } else {
             self.bytes(loc).to_vec()
         };
-        match self.entry(sd, &keys, bytes, pos)? {
+        let extent = self.area(sd).1;
+        match self.entry(sd, &keys, bytes, extent, pos)? {
             Ok(e) => {
                 if let Some(Active { phase: Phase::Input(entries), .. }) = &mut self.sort {
                     entries.push(e);

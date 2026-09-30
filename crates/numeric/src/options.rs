@@ -115,6 +115,25 @@ pub enum SortKeys {
     Strict,
 }
 
+/// Whether FASTSRT gives DFSORT the I/O of a USING or GIVING print file under ADV, whose data set's
+/// records are a byte longer than its FD's: never (`--fastsrt-adv-print=exclude`), or as any other
+/// file's (`--fastsrt-adv-print=include`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FastsrtAdvPrint {
+    #[default]
+    Exclude,
+    Include,
+}
+
+impl FastsrtAdvPrint {
+    pub const fn flag(self) -> &'static str {
+        match self {
+            Self::Exclude => "--fastsrt-adv-print=exclude",
+            Self::Include => "--fastsrt-adv-print=include",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Options {
     pub arith: Arith,
@@ -124,6 +143,7 @@ pub struct Options {
     pub trunc_check: TruncCheck,
     /// FASTSRT: DFSORT does the I/O of a SORT's USING and GIVING files where IBM's rules allow.
     pub fastsrt: bool,
+    pub fastsrt_adv_print: FastsrtAdvPrint,
     pub sort_keys: SortKeys,
     /// ADV: a print file's printer control character is a byte added before each record; under
     /// NOADV it is the record's own first byte.
@@ -144,6 +164,7 @@ impl Default for Options {
             codepage: 1140,
             trunc_check: TruncCheck::default(),
             fastsrt: false,
+            fastsrt_adv_print: FastsrtAdvPrint::default(),
             sort_keys: SortKeys::default(),
             adv: true,
             thread: false,
@@ -231,6 +252,8 @@ impl Options {
         match flag {
             "-silent" => self.trunc_check = TruncCheck::Silent,
             "-strict-sort-keys" => self.sort_keys = SortKeys::Strict,
+            "--fastsrt-adv-print=exclude" => self.fastsrt_adv_print = FastsrtAdvPrint::Exclude,
+            "--fastsrt-adv-print=include" => self.fastsrt_adv_print = FastsrtAdvPrint::Include,
             _ => return Err(OptionError::UnknownFlag(flag.to_owned())),
         }
         Ok(())
@@ -356,5 +379,17 @@ mod tests {
         o.apply_flag("-strict-sort-keys").unwrap();
         assert_eq!(o.sort_keys, SortKeys::Strict);
         assert!(o.apply_flag("-quiet").is_err());
+    }
+
+    #[test]
+    fn fastsrt_adv_print_excludes_unless_included() {
+        let mut o = Options::default();
+        assert_eq!(o.fastsrt_adv_print, FastsrtAdvPrint::Exclude);
+        o.apply_flag("--fastsrt-adv-print=include").unwrap();
+        assert_eq!(o.fastsrt_adv_print, FastsrtAdvPrint::Include);
+        o.apply_flag("--fastsrt-adv-print=exclude").unwrap();
+        assert_eq!(o.fastsrt_adv_print.flag(), "--fastsrt-adv-print=exclude");
+        assert!(o.apply_flag("--fastsrt-adv-print=maybe").is_err());
+        assert!(o.apply_flag("--fastsrt-adv-print").is_err());
     }
 }
