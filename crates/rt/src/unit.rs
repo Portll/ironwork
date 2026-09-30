@@ -32,6 +32,8 @@ pub struct Loaded<H> {
     pub entry: Option<usize>,
     /// Where each paragraph's GO TO goes since an ALTER, by paragraph; empty until one runs.
     pub altered: Vec<Option<usize>>,
+    /// The library file CALL loaded the program from; None for the programs of the first source.
+    pub source: Option<PathBuf>,
 }
 
 pub enum LoadError {
@@ -75,14 +77,18 @@ pub enum Clock {
     Fixed(i64, u32),
 }
 
-/// What a run did that its evidence journal records: each file as it is opened and closed, and
-/// each program CALL loads, with the source it was read from when a library supplied it.
+/// What a run did that its evidence journal records: each file as it is opened and closed, each
+/// program CALL loads, with the source it was read from when a library supplied it, and each
+/// operation an input could steer, with its operand as the program's code page reads it.
 pub enum Event<'a> {
     Open { dd: &'a str, mode: OpenMode, path: &'a Path },
     Close { dd: &'a str, path: &'a Path },
     Load { program: &'a str, source: Option<&'a Path> },
     /// Control entering paragraph (or section header) `index` of `program` at its start.
     Paragraph { program: &'a str, name: &'a str, index: usize },
+    /// `kind` is cobolwork's name for the sink (`dynamic-program-load`, `log`, ...); `file` is the
+    /// library file or COPY member the operation is in, empty for the first program's own source.
+    Sink { kind: &'static str, file: &'a str, line: u32, operand: &'a str },
 }
 
 pub type Observer<'w> = Box<dyn FnMut(Event<'_>) + 'w>;
@@ -153,7 +159,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         let base = self.allocate(size);
         let index = self.programs.len();
         self.names.insert(name.clone(), index);
-        self.programs.push(Loaded { compiled, name, base, files: (0..files).map(|_| None).collect(), initialized: false, active: false, entry: None, altered: Vec::new() });
+        self.programs.push(Loaded { compiled, name, base, files: (0..files).map(|_| None).collect(), initialized: false, active: false, entry: None, altered: Vec::new(), source: None });
         index
     }
 
@@ -180,6 +186,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         let (files, size) = L::shape(&compiled);
         let copy = self.add_named(Some(compiled), name, files, size);
         self.programs[copy].entry = Some(entry);
+        self.programs[copy].source = self.programs[index].source.clone();
         Ok((copy, Some(entry)))
     }
 
@@ -209,7 +216,13 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         }
         let loaded = self.library.program(&name)?;
         self.notify(Event::Load { program: &name, source: loaded.source.as_deref() });
-        Ok(self.add_named(Some(loaded.compiled), loaded.name, loaded.files, loaded.size))
+        let index = self.add_named(Some(loaded.compiled), loaded.name, loaded.files, loaded.size);
+        self.programs[index].source = loaded.source;
+        Ok(index)
+    }
+
+    pub const fn observed(&self) -> bool {
+        self.observer.is_some()
     }
 
     pub fn notify(&mut self, event: Event<'_>) {

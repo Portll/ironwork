@@ -87,17 +87,21 @@ pub fn output(journal: &mut Journal, name: &str, bytes: &[u8], path: &Path, root
     let _ = journal.append("output", fields([("name", name.into()), ("sha256", sha.into()), ("bytes", Value::Int(bytes.len() as i64)), ("path", relative(path, roots).into())]));
 }
 
-/// A run in progress: the journal, and every DD it opened, so their final state is recorded.
+/// A run in progress: the journal, every DD it opened, so their final state is recorded, and for
+/// an input trace the marker and each sink already recorded as reached or not.
 pub struct Run {
     journal: Journal,
     roots: Vec<PathBuf>,
+    program: String,
     opened: BTreeSet<(String, PathBuf)>,
+    marker: Option<String>,
+    sinks: BTreeSet<(&'static str, String, u32, bool)>,
     failed: Option<String>,
 }
 
 impl Run {
-    pub fn new(journal: Journal, roots: &[PathBuf]) -> Self {
-        Self { journal, roots: roots.to_vec(), opened: BTreeSet::new(), failed: None }
+    pub fn new(journal: Journal, roots: &[PathBuf], program: &str, marker: Option<&str>) -> Self {
+        Self { journal, roots: roots.to_vec(), program: program.to_string(), opened: BTreeSet::new(), marker: marker.map(str::to_string), sinks: BTreeSet::new(), failed: None }
     }
 
     fn dd(&mut self, dd: &str, event: &str, mode: Option<&str>, path: &Path) {
@@ -135,6 +139,16 @@ impl Run {
                     f.insert("from".into(), relative(p, &self.roots).into());
                 }
                 self.write("call", f);
+            }
+            Event::Sink { kind, file, line, operand } => {
+                let Some(marker) = &self.marker else { return };
+                let reached = operand.contains(marker.as_str());
+                if self.sinks.insert((kind, file.to_string(), line, reached)) {
+                    let marker = marker.clone();
+                    let file = relative(Path::new(if file.is_empty() { self.program.as_str() } else { file }), &self.roots);
+                    let f = fields([("sink", kind.into()), ("file", file.into()), ("line", i64::from(line).into()), ("marker", marker.into()), ("reached", reached.into())]);
+                    self.write("sink", f);
+                }
             }
         }
     }

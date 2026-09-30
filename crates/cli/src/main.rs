@@ -55,13 +55,22 @@ flags:
              record the run in a hash-chained journal and ledger in DIR, in cobolwork's evidence
              format: the source and every COPY member by digest, each DD's digest when it is
              opened, closed and at the end, each program CALL loads, and the abend or RETURN-CODE.
-             DIR may not be inside the program's directory or a library. run, check and job; a
-             job's journal holds the JCL, each program's sources, each step's DDs and CALLs, the
-             data sets each step left, and a step record with each step's outcome
+             DIR may not be inside the program's directory or a library. run, check, job and cics
+             (one task, not --serve); a job's journal holds the JCL, each program's sources, each
+             step's DDs and CALLs, the data sets each step left, and a step record with each
+             step's outcome
   --coverage FILE
              write which paragraphs the run entered: for each program of the source every
              paragraph with its line and how often control entered it, and for each program CALL
              loaded from a library the paragraphs it reached. run only
+  --trace-marker TEXT
+             with --evidence: record each operation an input could steer, and whether TEXT was in
+             its operand: a CALL of a variable program name or of an operating-system command
+             routine, DISPLAY, and in a CICS task a data item naming a LINK, XCTL or START
+             program or transaction, a queue, a RIDFLD or a SYSID, or what WRITEQ TD, WRITE
+             OPERATOR or JOURNALNAME, SEND and WEB write. Enter TEXT where the input comes in
+             (SYSIN, a DD, the COMMAREA, a replayed row); each operation is recorded once reached
+             and once not. run, job and cics
   --clock YYYY-MM-DDTHH:MM:SS[.hh]
              the time ACCEPT FROM DATE, TIME and FUNCTION CURRENT-DATE report, for a run that must
              repeat; without it they report the system clock in UTC
@@ -223,6 +232,7 @@ fn driver() -> ExitCode {
     let (mut sql_db, mut sql_record) = (None, None);
     let mut c_series = false;
     let mut evidence_dir: Option<std::path::PathBuf> = None;
+    let mut trace_marker: Option<String> = None;
     let mut provenance_file: Option<std::path::PathBuf> = None;
     let (mut compare_base, mut compare_head, mut declare, mut statement) = (None, None, None, None);
     let mut expected: Vec<(String, std::path::PathBuf)> = Vec::new();
@@ -266,6 +276,10 @@ fn driver() -> ExitCode {
             "--evidence" => match args.next() {
                 Some(dir) => evidence_dir = Some(std::path::PathBuf::from(dir)),
                 None => return usage_error("--evidence needs a directory"),
+            },
+            "--trace-marker" => match args.next().filter(|m| !m.is_empty()) {
+                Some(m) => trace_marker = Some(m),
+                None => return usage_error("--trace-marker needs the text entered at the input"),
             },
             "--datasets" => match args.next() {
                 Some(dir) => datasets = Some(dir),
@@ -328,6 +342,9 @@ fn driver() -> ExitCode {
     if c_series {
         return usage_error("unknown flag --c-series");
     }
+    if trace_marker.is_some() && (evidence_dir.is_none() || !matches!(rest.first().map(String::as_str), Some("run" | "job" | "cics"))) {
+        return usage_error("--trace-marker goes with --evidence, for run, job and cics");
+    }
     if let [c, file] = rest.as_slice()
         && c == "ddl"
     {
@@ -375,7 +392,7 @@ fn driver() -> ExitCode {
             (exec::unit::Clock::System, Some(_)) => exec::unit::Clock::Fixed(1_767_225_600, 0),
             (c, _) => c,
         };
-        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, flags, clock, replay: replay.map(std::path::PathBuf::from), expected: expected_dir, expected_steps, declare, statement, evidence: evidence_dir });
+        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, flags, clock, replay: replay.map(std::path::PathBuf::from), expected: expected_dir, expected_steps, declare, statement, evidence: evidence_dir, trace_marker });
     }
     if datasets.is_some() || !proclibs.is_empty() {
         return usage_error("--datasets and --proclib are for job");
@@ -398,8 +415,8 @@ fn driver() -> ExitCode {
     if coverage_file.is_some() && command != "run" {
         return usage_error("--coverage is for run");
     }
-    if (evidence_dir.is_some() || provenance_file.is_some()) && command == "cics" {
-        return usage_error("--evidence and --provenance are for run and check");
+    if command == "cics" && (provenance_file.is_some() || (evidence_dir.is_some() && cics_options.iter().any(|(n, _)| n == "--serve"))) {
+        return usage_error("--provenance is for run and check, and --evidence for one task, not --serve");
     }
     let reads: Vec<std::path::PathBuf> = std::iter::once(own_directory.clone()).chain(libraries.iter().cloned()).chain(program_dirs.iter().cloned()).collect();
     let mut journal = match &evidence_dir {
@@ -486,7 +503,8 @@ fn driver() -> ExitCode {
         (None, None, None) => None,
     };
     if command == "cics" {
-        return run_cics(&compiled, path, library, dds, clock, database, &cics_options);
+        let run = journal.map(|j| evidence::Run::new(j, &reads, path, trace_marker.as_deref()));
+        return run_cics(&compiled, path, library, dds, clock, database, &cics_options, run);
     }
     let sysin: Box<dyn io::BufRead> = match dds.get("SYSIN") {
         Some(dd) => match fs::File::open(&dd.path) {
@@ -499,7 +517,7 @@ fn driver() -> ExitCode {
         None => Box::new(io::stdin().lock()),
     };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
-    let shared = journal.map(|j| std::rc::Rc::new(std::cell::RefCell::new(evidence::Run::new(j, &reads))));
+    let shared = journal.map(|j| std::rc::Rc::new(std::cell::RefCell::new(evidence::Run::new(j, &reads, path, trace_marker.as_deref()))));
     let covered = coverage_file.as_ref().map(|_| std::rc::Rc::new(std::cell::RefCell::new(coverage::Coverage::default())));
     let observer = (shared.is_some() || covered.is_some()).then(|| {
         let (run, cov) = (shared.clone(), covered.clone());
@@ -826,6 +844,7 @@ fn conversation(
 
 /// Runs the program as a CICS task built from the cics flags; reports RETURN TRANSID and writes
 /// RETURN's COMMAREA where --commarea-out says.
+#[allow(clippy::too_many_arguments)]
 fn run_cics(
     compiled: &exec::Compiled,
     path: &str,
@@ -834,6 +853,7 @@ fn run_cics(
     clock: exec::unit::Clock,
     mut database: Option<Box<dyn exec::sql::Database>>,
     options: &[(String, String)],
+    evidence: Option<evidence::Run>,
 ) -> ExitCode {
     let page = compiled.options.code_page();
     let get = |name: &str| options.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone());
@@ -888,9 +908,17 @@ fn run_cics(
         }
     };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
-    let ran = compiled.execute_cics_with(library, dds, task, clock, database.as_deref_mut(), &mut out, &mut err);
+    let shared = evidence.map(|run| std::rc::Rc::new(std::cell::RefCell::new(run)));
+    let observer = shared.clone().map(|run| Box::new(move |event: exec::unit::Event<'_>| run.borrow_mut().observe(event)) as exec::unit::Observer<'_>);
+    let ran = compiled.execute_cics_observed(library, dds, task, clock, database.as_deref_mut(), &mut out, &mut err, observer);
     drop(out);
     print_screens();
+    if let Some(run) = shared.and_then(|r| std::rc::Rc::try_unwrap(r).ok()) {
+        let abend = ran.as_ref().err().filter(|a| !matches!(a.code, AbendCode::Signal(Signal::ClosedOutput)));
+        let file = abend.and_then(|a| compiled.program.sources.get(a.pos.file as usize)).map(String::as_str);
+        let journal = run.into_inner().end(abend.map(|a| (a.code.to_string(), file, i64::from(a.pos.line))));
+        evidence::finish(Some(journal), if abend.is_some() { 16 } else { 0 });
+    }
     match ran {
         Ok((_, task)) => {
             match &task.next_transid {

@@ -8,7 +8,7 @@ use crate::calendar::{civil, days_from_civil, days_in_month, SECONDS_PER_DAY};
 use crate::layout::{Item, Kind, Layout, Resolved};
 use rt::storage::{Loc, Val};
 pub(crate) use rt::storage::literal_fixed;
-use crate::unit::{ADDRESS_BASE, LoadError, RETURN_CODE, RunUnit};
+use crate::unit::{ADDRESS_BASE, Event, LoadError, RETURN_CODE, RunUnit};
 use crate::Compiled;
 use numeric::binary::{self, Binary};
 use numeric::precision::{self, ArithError, Fixed, Places};
@@ -43,6 +43,10 @@ type R<T> = Result<T, Abend>;
 /// The most digits a numeric item holds, under ARITH(EXTEND): all an alphanumeric sender can give
 /// one (LONG_ZONED_BY_PACKS in numeric::assumptions).
 const MAX_DIGITS: usize = 31;
+
+/// The routines cobolwork reads a CALL of as running an operating-system command, whose arguments
+/// the input trace checks.
+const OS_COMMAND_ROUTINES: &[&str] = &["SYSTEM", "C$SYSTEM", "CBL_EXEC_RUN_UNIT", "CBL_GC_HOSTED", "BXPSYSTM"];
 
 enum Flow {
     Next,
@@ -1090,13 +1094,52 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         })
     }
 
+    /// Tells the observer, for the input trace, the operand of an operation an input could steer.
+    pub(crate) fn sink(&mut self, kind: &'static str, pos: Pos, operand: &str) {
+        let source = self.unit.programs[self.me].source.clone();
+        let program = self.program;
+        let file = match (pos.file, &source) {
+            (0, Some(path)) => path.to_str().unwrap_or_default(),
+            (i, _) => program.sources.get(i as usize).map_or("", String::as_str),
+        };
+        self.unit.notify(Event::Sink { kind, file, line: pos.line, operand });
+    }
+
+    /// The bytes a CALL passes, one argument after another, as the code page reads them.
+    fn arguments_text(&mut self, c: &Call) -> R<String> {
+        let mut text = String::new();
+        for op in c.using.iter().filter_map(|a| a.value.as_ref()) {
+            let bytes = match op {
+                Operand::Ref(r) => {
+                    let loc = self.locate(r)?;
+                    self.bytes(loc).to_vec()
+                }
+                _ => self.content_argument(op, c.pos)?,
+            };
+            text.push_str(&self.page.decode(&bytes));
+        }
+        Ok(text)
+    }
+
     fn call(&mut self, c: &'p Call) -> R<Flow> {
         if let Some(flow) = self.call_through_pointer(c)? {
             return Ok(flow);
         }
         let pos = c.pos;
         let name = self.program_name(&c.target, pos)?;
-        let dynamic = self.options.dynam || !matches!(c.target, Operand::Literal(_));
+        let variable = !matches!(c.target, Operand::Literal(_));
+        if self.unit.observed() {
+            if variable {
+                self.sink("dynamic-program-load", pos, &name);
+            }
+            // ironwork runs no operating-system command: the CALL loads a program of that name or fails.
+            if OS_COMMAND_ROUTINES.contains(&name.as_str())
+                && let Ok(text) = self.arguments_text(c)
+            {
+                self.sink("os-command", pos, &text);
+            }
+        }
+        let dynamic = self.options.dynam || variable;
         let (index, entry) = match self.unit.load_entry(&name, dynamic) {
             Ok(i) => i,
             Err(LoadError::NotFound) if crate::le::provides(&name) => return self.le_call(c, &name),
@@ -2286,6 +2329,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     Val::Address(_) => return Err(Abend::ironwork("DISPLAY of a pointer is not supported", pos)),
                 },
             }
+        }
+        if self.unit.observed() {
+            self.sink("log", pos, &text);
         }
         let result = if no_advancing { write!(self.unit.out, "{text}") } else { writeln!(self.unit.out, "{text}") };
         result.map_err(|e| match e.kind() {

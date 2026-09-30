@@ -56,6 +56,9 @@ impl<'p> Machine<'p, '_, '_> {
         if self.unit.cics.is_none() {
             return Err(Abend::ironwork(format!("EXEC CICS {} was reached outside a CICS task: run the program with `ironwork cics`", block.command), block.pos));
         }
+        if self.unit.observed() {
+            self.cics_sinks(block);
+        }
         self.eib_fullword(EIBRESP, 0);
         self.eib_fullword(EIBRESP2, 0);
         match block.command.as_str() {
@@ -93,6 +96,44 @@ impl<'p> Machine<'p, '_, '_> {
             "SEND CONTROL" => self.send_control(block),
             "RECEIVE" => self.receive_raw(block),
             _ => self.cics_service(block),
+        }
+    }
+
+    /// The operands of a command an input could steer, told to the observer before the command
+    /// runs, so a command ironwork does not carry out yet is still traced. Only a data item is: a
+    /// literal operand is the program's own choice. An operand that cannot be read is left to the
+    /// command to report, so tracing never changes how a run ends.
+    fn cics_sinks(&mut self, block: &ExecBlock) {
+        let command = block.command.as_str();
+        let queue = matches!(command, "WRITEQ" | "READQ" | "DELETEQ") || command.starts_with("WRITEQ ") || command.starts_with("READQ ") || command.starts_with("DELETEQ ");
+        let mut sinks: Vec<(&str, &'static str)> = Vec::new();
+        match command {
+            "LINK" | "XCTL" => sinks.push(("PROGRAM", "cics-dynamic-transfer")),
+            "START" | "START TRANSID" => sinks.push(("TRANSID", "cics-dynamic-transfer")),
+            "READ" | "STARTBR" | "RESETBR" => sinks.push(("RIDFLD", "record-key")),
+            "DELETE" => sinks.push(("RIDFLD", "record-update")),
+            "WRITEQ TD" => sinks.push(("FROM", "log")),
+            "WRITE" if has(block, "OPERATOR") => sinks.push(("TEXT", "log")),
+            "WRITE" if has(block, "JOURNALNAME") || has(block, "JOURNALNUM") => sinks.push(("FROM", "log")),
+            "SEND TEXT" | "SEND MAP" | "SEND" => sinks.push(("FROM", "screen")),
+            "WEB SEND" => sinks.push(("FROM", "web-response")),
+            "WEB WRITE" => sinks.push(("VALUE", "http-header")),
+            "WEB OPEN" => sinks.extend([("HOST", "outbound-host"), ("URL", "outbound-host")]),
+            "WEB CONVERSE" => sinks.extend([("PATH", "outbound-host"), ("FROM", "outbound-http")]),
+            _ => {}
+        }
+        if queue {
+            sinks.extend([("QUEUE", "queue-name"), ("QNAME", "queue-name")]);
+        }
+        sinks.push(("SYSID", "cics-sysid"));
+        for (option, kind) in sinks {
+            if !matches!(operand(block, option), Some(Operand::Ref(_))) {
+                continue;
+            }
+            if let Ok(Some(bytes)) = self.arg_bytes(block, option) {
+                let text = self.page.decode(&bytes);
+                self.sink(kind, block.pos, &text);
+            }
         }
     }
 

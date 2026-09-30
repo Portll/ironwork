@@ -22,6 +22,7 @@ by `prev` and `seq`.
 | `call` | `program`, `from`, `sha256` | each program CALL loads from a library, with its source's digest |
 | `abend` | `code`, `file`, `line` | the abend the run ended with |
 | `step` | `step`, `pgm`, `outcome` | for `job`, each step as the job log shows it: `RC=0004`, an abend, BYPASSED or JCL ERROR, with why |
+| `sink` | `sink`, `file`, `line`, `marker`, `reached` | with `--trace-marker`, an operation an input could steer, the first time it is reached with the marker in its operand and the first time without (§1.1) |
 | `close` | `exit`, `counts`, `durationMs`, `ledger` | last |
 
 - A job's journal is one run: the JCL as an `input`, then for each step its programs' sources, its
@@ -40,6 +41,35 @@ by `prev` and `seq`.
 - The run unit tells an observer what it opens, closes and loads, and each paragraph control
   enters (`exec::unit::Observer`); the
   interpreter and, when it lands, the VM raise the same events, so a journal is the same under both.
+- `cics` keeps a journal for one task; `--serve` does not.
+
+### 1.1 Input trace: `--trace-marker TEXT`
+
+With `--evidence`, `run`, `job` and `cics` record whether a marker entered at an input reached each
+operation an input could steer: cobolwork's execution label for a path finding (cobolwork
+`docs/spec/reach.md` §9.7, marker `CWVRFY01`). The marker goes in where the input comes in (SYSIN, a
+DD, the COMMAREA, a replayed row), so no source is instrumented; at each sink the interpreter
+decodes the operand through the program's code page and the journal records whether the marker is
+in it (`exec::unit::Event::Sink`). The operand itself is never recorded.
+
+| `sink` | operation, where its operand is a data item |
+|---|---|
+| `dynamic-program-load` | CALL of a program named by a data item |
+| `os-command` | CALL SYSTEM, C$SYSTEM, CBL_EXEC_RUN_UNIT, CBL_GC_HOSTED or BXPSYSTM: the arguments. ironwork runs no operating-system command; the CALL loads a program of that name or fails |
+| `log` | DISPLAY (literals included); WRITEQ TD FROM; WRITE OPERATOR TEXT; WRITE JOURNALNAME FROM |
+| `cics-dynamic-transfer` | LINK or XCTL PROGRAM; START TRANSID |
+| `queue-name` | QUEUE or QNAME of WRITEQ, READQ, DELETEQ |
+| `record-key`, `record-update` | RIDFLD of READ, STARTBR, RESETBR; of DELETE |
+| `screen` | SEND TEXT or SEND MAP FROM |
+| `web-response`, `http-header`, `outbound-host`, `outbound-http` | WEB SEND FROM; WEB WRITE VALUE; WEB OPEN HOST or URL, WEB CONVERSE PATH; WEB CONVERSE FROM |
+| `cics-sysid` | SYSID of any command |
+
+The names are cobolwork's sink kinds (`lib/dataflow.mjs`), so a label joins a finding by sink, file
+and line. A CICS operand is recorded before the command runs, so a command ironwork does not carry
+out yet (START, WEB) is still traced before it stops the task; an operand that cannot be read is
+left to the command, so tracing never changes how a run ends. Not traced, because ironwork does not
+run them yet: MQPUT, dynamic SQL, sockets, ASSIGN to a data item, and the sources ACCEPT FROM
+COMMAND-LINE or ENVIRONMENT and PARM.
 
 ## 2. Build provenance: `--provenance FILE`
 

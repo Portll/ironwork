@@ -39,6 +39,8 @@ pub struct Request {
     pub statement: Option<PathBuf>,
     /// Where the job's hash-chained journal goes, as `run --evidence` writes one for a program.
     pub evidence: Option<PathBuf>,
+    /// The text an input trace looks for in each sink's operand, recorded in the journal.
+    pub trace_marker: Option<String>,
 }
 
 /// IBM programs a job can name that ironwork does not run; each is refused before the job starts.
@@ -773,14 +775,19 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                     ended = true;
                     continue;
                 }
+                let program = program_of(&step.pgm, &runner.req.program_dirs);
+                let source = match &program {
+                    Program::Cobol(path) => path.display().to_string(),
+                    _ => step.pgm.clone(),
+                };
                 let run = journal.borrow_mut().take().map(|j| {
-                    let mut r = crate::evidence::Run::new(j, roots);
+                    let mut r = crate::evidence::Run::new(j, roots, &source, runner.req.trace_marker.as_deref());
                     for d in dds.iter().filter(|d| d.dataset) {
                         r.track(&d.name, &d.path);
                     }
                     Rc::new(RefCell::new(r))
                 });
-                let outcome = match program_of(&step.pgm, &runner.req.program_dirs) {
+                let outcome = match program {
                     Program::Iefbr14 => Ok(0),
                     Program::Iebgener => iebgener(&dds),
                     Program::Idcams => Ok(idcams(runner, &dds)),

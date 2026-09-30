@@ -113,6 +113,21 @@ pub trait Execute {
         out: &'w mut dyn Write,
         err: &'w mut dyn Write,
     ) -> Result<(Ending, cics::Task), Abend>;
+
+    /// Runs as [`Execute::execute_cics_with`] does, telling `observer` what the task opens, loads
+    /// and passes to an operation an input could steer.
+    #[allow(clippy::too_many_arguments)]
+    fn execute_cics_observed<'w>(
+        &self,
+        library: unit::Library,
+        dds: files::Dds,
+        task: cics::Task,
+        clock: unit::Clock,
+        database: Option<&'w mut (dyn sql::Database + '_)>,
+        out: &'w mut dyn Write,
+        err: &'w mut dyn Write,
+        observer: Option<unit::Observer<'w>>,
+    ) -> Result<(Ending, cics::Task), Abend>;
 }
 
 impl Execute for Compiled {
@@ -190,14 +205,29 @@ impl Execute for Compiled {
         &self,
         library: unit::Library,
         dds: files::Dds,
-        mut task: cics::Task,
+        task: cics::Task,
         clock: unit::Clock,
         database: Option<&'w mut (dyn sql::Database + '_)>,
         out: &'w mut dyn Write,
         err: &'w mut dyn Write,
     ) -> Result<(Ending, cics::Task), Abend> {
+        self.execute_cics_observed(library, dds, task, clock, database, out, err, None)
+    }
+
+    fn execute_cics_observed<'w>(
+        &self,
+        library: unit::Library,
+        dds: files::Dds,
+        mut task: cics::Task,
+        clock: unit::Clock,
+        database: Option<&'w mut (dyn sql::Database + '_)>,
+        out: &'w mut dyn Write,
+        err: &'w mut dyn Write,
+        observer: Option<unit::Observer<'w>>,
+    ) -> Result<(Ending, cics::Task), Abend> {
         oo::refuse_to_run(&self.program)?;
         let mut run_unit = unit::RunUnit::new(library, dds, None, clock, out, err);
+        run_unit.observer = observer;
         run_unit.sql = database.map(sql::Session::new);
         let me = run_unit.add(None, &self.program, self.layout.size as usize);
         run_unit.eib = run_unit.push_temporary(&[0; cics::EIB_LEN]);

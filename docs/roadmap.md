@@ -161,7 +161,7 @@ It is zero-dependency Rust.
 | 13 | The build gate running `ironwork check` (E1) | cobolwork | S | `ironwork check` exists now, exiting 12 on a compile error |
 | 14 | A CICS region defined by a CSD, for the TN3270 server (E6) | ironwork | S | Built (2026-09-30): `--serve --csd` reads the DEFINE TRANSACTIONs; cobolwork's CSD fixtures are shared in `fixtures/cobolwork/csd/` |
 | 15 | Crash-fuzzing programs through ironwork (E5) | Both | L | S0C7, S0C4 and SSRANGE become findings, each with its input |
-| 16 | Dynamic witness (E4): `cobolwork confirm` runs ironwork with a payload | Both | L | Needs an ironwork trace of which input bytes reached which operation |
+| 16 | Dynamic witness (E4): `cobolwork confirm` runs ironwork with a payload | Both | L | ironwork's half built (2026-09-30): `--trace-marker` records whether the marker reached each sink ([evidence.md](evidence.md) §1.1); cobolwork's labeller is next |
 | 17 | A caller for cobolwork's remediation gate | cobolwork | M | BACKLOG item |
 | 18 | JCL runner (E7) and migration equivalence testing (E8) | ironwork | XL, then L | E8 builds on SQL replay and E7 |
 
@@ -203,7 +203,7 @@ costs nothing but CI time.
 | E1 | The build gate compiles IBM estates with ironwork | P2 | S |
 | E2 | Shared data between the repositories | P1 | M |
 | E3 | cobolwork rules from ironwork's numeric and code-page model | P1 | M |
-| E4 | Confirmed findings: an ironwork run shows the input reaching the sink. This would be a new evidence kind, and it needs the operator's ruling, because cobolwork has so far claimed only what it read | P2 | L |
+| E4 | Confirmed findings: an ironwork run shows the input reaching the sink (operator 2026-09-30: execution labels for cobolwork's precision). Built: `--trace-marker`, a `sink` record per operation reached with and without the marker, [evidence.md](evidence.md) §1.1; sinks ironwork does not run yet (MQ, dynamic SQL, sockets) are not traced | P2 | L |
 | E5 | Fuzzing COBOL programs for abends, reported as findings with their inputs | P2 | L |
 | E6 | CSD-defined CICS regions for the TN3270 server | P2 | S |
 | E7 | A JCL runner: steps, DD allocation, COND and IF, in-stream data, and the utilities cobolwork's `lib/utilities.mjs` documents with IBM citations. `ironwork job` runs all of these with procedures, IEFBR14, IEBGENER and IDCAMS; SORT as a utility, PARM, DISP=MOD and generation data groups are to come | P2 | XL |
