@@ -73,7 +73,9 @@ versions (`crates/cli/src/compare.rs`):
 The statement's `predicateType` is
 `https://github.com/Portll/ironwork/blob/main/docs/evidence.md#equivalence-v1`; its subjects are
 `base:<file>` and `head:<file>` by digest, and its predicate holds `verdict`, `inputs` (DD names and
-digests), `sqlRecording`, `results`, `declared`, `inconclusive`, `coverage` and `limit`.
+digests), `sqlRecording`, `closure` (each side's program and COPY members, named relative to their
+library, by digest: how a change to a copybook alone is shown to have been run), `results`,
+`declared`, `inconclusive`, `coverage` and `limit`.
 
 | verdict | when | exit |
 |---|---|---|

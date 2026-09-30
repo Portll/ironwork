@@ -90,6 +90,8 @@ fn parse_dd(spec: &str) -> Result<Spec, String> {
 }
 
 struct Outcome {
+    /// The program and every COPY member it read, named relative to their library, by digest.
+    closure: Vec<(String, String)>,
     return_code: Option<i64>,
     abend: Option<(String, String)>,
     display: Vec<u8>,
@@ -106,7 +108,7 @@ fn scratch(side: &str) -> std::io::Result<PathBuf> {
 
 /// Runs one program with every DD pointed at a copy in `dir`.
 fn run_side(program: &Path, req: &Request, specs: &[Spec], dir: &Path) -> Outcome {
-    let mut outcome = Outcome { return_code: None, abend: None, display: Vec::new(), files: BTreeMap::new(), error: None };
+    let mut outcome = Outcome { closure: Vec::new(), return_code: None, abend: None, display: Vec::new(), files: BTreeMap::new(), error: None };
     let fail = |mut o: Outcome, e: String| {
         o.error = Some(e);
         o
@@ -132,6 +134,16 @@ fn run_side(program: &Path, req: &Request, specs: &[Spec], dir: &Path) -> Outcom
         Err(e) => return fail(outcome, e.place(&program.display().to_string()).to_string()),
     };
     let first = programs.remove(0);
+    let roots: Vec<PathBuf> = std::iter::once(own.clone()).chain(req.libraries.iter().cloned()).collect();
+    for s in std::iter::once(program.display().to_string()).chain(first.sources.iter().filter(|s| !s.is_empty() && !s.starts_with('(')).cloned()) {
+        let path = PathBuf::from(&s);
+        if let Ok(bytes) = fs::read(&path) {
+            let name = roots.iter().find_map(|r| path.strip_prefix(r).ok()).map_or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), |p| p.to_string_lossy().replace('\\', "/"));
+            if !outcome.closure.iter().any(|(n, _)| *n == name) {
+                outcome.closure.push((name, hex(&sha256(&bytes))));
+            }
+        }
+    }
     let library = exec::unit::Library { programs, dirs: std::iter::once(own).chain(req.program_dirs.iter().cloned()).collect(), copy: libraries, flags: req.flags.clone() };
     let compiled = match exec::compile(first, &req.flags) {
         Ok(c) => c,
@@ -287,6 +299,15 @@ pub fn run(req: Request) -> ExitCode {
         ("results", Value::Arr(results)),
         ("declared", Value::Arr(declared.iter().map(|d| Value::Obj(fields([("what", d.what.clone().into()), ("reason", d.reason.clone().into())]))).collect())),
         ("inconclusive", Value::Arr(inconclusive.iter().map(|s| Value::Str(s.clone())).collect())),
+        ("closure", Value::Obj({
+            let side = |o: &Outcome| Value::Arr(o.closure.iter().map(|(n, d)| Value::Obj(fields([("name", n.clone().into()), ("sha256", d.clone().into())]))).collect());
+            let mut m = BTreeMap::new();
+            m.insert("head".to_string(), side(&head));
+            if let Some(b) = &base {
+                m.insert("base".to_string(), side(b));
+            }
+            m
+        })),
         ("coverage", Value::Null),
         ("ironwork", env!("CARGO_PKG_VERSION").into()),
         ("limit", LIMIT.into()),

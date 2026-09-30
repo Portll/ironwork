@@ -74,6 +74,7 @@ fn a_refactor_is_equivalent() {
     assert!(st.contains("\"verdict\":\"equivalent\""));
     assert!(st.contains("\"name\":\"base:BASE.cbl\"") && st.contains("\"name\":\"head:HEAD.cbl\""));
     assert!(st.contains("\"coverage\":null"), "coverage is not claimed");
+    assert!(st.contains("\"closure\":{\"base\":[{\"name\":\"BASE.cbl\""), "each side's closure is recorded");
     assert!(!dir.join("out.txt").exists(), "neither run wrote the caller's file");
     fs::remove_dir_all(dir).unwrap();
 }
