@@ -2,24 +2,33 @@
 
 mod abend;
 mod arith;
+mod call;
 mod codec;
 mod debug;
 mod flow;
 mod payload;
 mod place;
+mod sql;
+mod text;
 mod value;
 
 pub use abend::{AbendCode, FileStatus, Signal};
 pub use arith::{ArithPlan, ArithStep, Mode, RemainderPlan, StepPlan, StorePlan};
+pub use call::{CallArg, CallPlan, CallTarget, LeService};
 pub use debug::Debug;
-pub use flow::{AcceptFrom, Ending, Frame, FrameKind, Op, Range, RangeKind, Step, Terminator};
+pub use flow::{Ending, Frame, FrameKind, Op, Range, RangeKind, Step, Terminator};
 pub use payload::{
-    CallPlan, CicsCommand, DisplayPlan, FileDesc, FileOp, FloatFrom, Func, FunctionPlan, Image, InitPlan, InspectPlan,
+    CicsCommand, DisplayItem, DisplayPlan, FileDesc, FileOp, FloatFrom, Func, FunctionPlan, Image, InitField, InitPlan,
     InvokePlan, MethodName, MovePlan, NationalFrom, NumericFrom, Receiver, ReleasePlan, ReportOp, ReturnPlan,
-    SearchAllPlan, SortPlan, SqlEntry, Sqlca, StringPlan, TrimSide, UnstringPlan,
+    SearchAllPlan, SearchKey, SortPlan, TrimSide,
 };
 pub use place::{Base, Odo, Place, RefMod, Subscript};
-pub use value::{BinOp, ByteClass, Compare, Comparand, Cond, Const, Count, Expr, IntExpr, Operand, RelOp, SignTest, SqlTest};
+pub use sql::{HostPlace, SqlEntry, SqlStatement, Sqlca, SqlcaField};
+pub use text::{
+    Bound, Chars, ConvertTable, Converting, DelimiterIn, InspectPhrase, InspectPlan, Replacement, StringPlan,
+    StringSource, UnstringInto, UnstringPlan,
+};
+pub use value::{ByteClass, Compare, Comparand, Cond, Const, Count, Expr, IntExpr, Operand, SignTest, SqlTest};
 
 use crate::codec_struct;
 use crate::picture::Sym;
@@ -178,7 +187,7 @@ pub struct Services {
 codec_struct!(Program {
     id, options, initial, recursive, storage, items, paragraphs, procedure_start, ranges, blocks, places, exprs,
     conds, consts, plans, services, sql, abends, edits, symbols, debug,
-});
+} check program_valid);
 codec_struct!(ProgramOptions { options, ssrange, dynam, cards });
 codec_struct!(Storage {
     size, image, local_image, init_reports, init_abend, linkage, using, returning, file_areas,
@@ -191,6 +200,10 @@ codec_struct!(Paragraph { name, is_section, entry, section_end, at });
 codec_struct!(Block { ops, end });
 codec_struct!(Plans { arith, init, display, inspect, string, unstring, search_all, function });
 codec_struct!(Services { file_ops, files, calls, sorts, releases, returns, invokes, cics, sqlca });
+
+fn program_valid(program: &Program) -> Result<(), String> {
+    sql::table_valid(&program.sql, &program.symbols)
+}
 
 fn storage_valid(storage: &Storage) -> Result<(), String> {
     if u32::try_from(storage.image.len()) == Ok(storage.size) {

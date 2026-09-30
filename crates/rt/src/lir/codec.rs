@@ -3,8 +3,9 @@
 use crate::module::ModuleError;
 use crate::module::codec::{Decode, Encode, Reader, Writer};
 use crate::picture::Sym;
+use crate::sql::HostType;
 use crate::storage::Kind;
-use crate::vocab::{Figurative, SignClause, SignPosition};
+use crate::vocab::{AcceptFrom, BinOp, Figurative, InspectMode, RelOp, SignClause, SignPosition};
 use crate::{codec_enum, codec_struct};
 use numeric::precision::{Fixed, Places};
 use numeric::{Arith, Numproc, Options, SortKeys, Trunc, TruncCheck};
@@ -31,6 +32,28 @@ codec_enum!(Kind {
 codec_struct!(SignClause { position, separate });
 codec_enum!(SignPosition { Leading = 0, Trailing = 1 });
 codec_enum!(Figurative { Zero = 0, Space = 1, HighValue = 2, LowValue = 3, Quote = 4, Null = 5 });
+codec_enum!(BinOp { Add = 0, Sub = 1, Mul = 2, Div = 3, Pow = 4 });
+codec_enum!(RelOp { Eq = 0, Ne = 1, Lt = 2, Le = 3, Gt = 4, Ge = 5 });
+codec_enum!(AcceptFrom {
+    Sysin = 0,
+    Date { four_digit_year } = 1,
+    Day { four_digit_year } = 2,
+    DayOfWeek = 3,
+    Time = 4,
+});
+codec_enum!(InspectMode { Characters = 0, All = 1, Leading = 2, First = 3 });
+codec_enum!(HostType {
+    SmallInt { signed } = 0,
+    Integer { signed } = 1,
+    BigInt { signed } = 2,
+    Decimal { digits, scale, signed } = 3,
+    Zoned { digits, scale, signed, sign } = 4,
+    Real = 5,
+    Double = 6,
+    Char(len) = 7,
+    VarChar(max) = 8,
+    Structure(members) = 9,
+});
 codec_enum!(Sym {
     Nine = 0,
     Z = 1,

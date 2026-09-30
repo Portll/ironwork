@@ -2,7 +2,7 @@
 
 use super::{AbendId, CondId, ConstId, ExprId, FunctionId, Odo, PlaceId, TempId};
 use crate::codec_enum;
-use crate::vocab::Figurative;
+use crate::vocab::{BinOp, Figurative, RelOp};
 use numeric::precision::Fixed;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,25 +92,6 @@ pub enum Count {
     Odo(Odo),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BinOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Pow,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RelOp {
-    Eq,
-    Ne,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-}
-
 /// WHENEVER's classes: SQLCODE < 0, SQLCODE = 100, or a warning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SqlTest {
@@ -148,6 +129,4 @@ codec_enum!(Compare {
 codec_enum!(ByteClass { Packed { signed } = 0, Zoned { signed } = 1, Digits = 2, Alphabetic = 3 });
 codec_enum!(SignTest { Positive = 0, Negative = 1, Zero = 2 });
 codec_enum!(Count { Fixed(n) = 0, Odo(odo) = 1 });
-codec_enum!(BinOp { Add = 0, Sub = 1, Mul = 2, Div = 3, Pow = 4 });
-codec_enum!(RelOp { Eq = 0, Ne = 1, Lt = 2, Le = 3, Gt = 4, Ge = 5 });
 codec_enum!(SqlTest { Error = 0, NotFound = 1, Warning = 2 });

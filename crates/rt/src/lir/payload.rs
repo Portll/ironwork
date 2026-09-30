@@ -1,6 +1,10 @@
-//! Statement payloads from lir.md §9: MOVE, FUNCTION and INVOKE, and a placeholder for each other.
+//! Statement payloads from lir.md §9: MOVE, INITIALIZE, DISPLAY, SEARCH ALL, FUNCTION and INVOKE,
+//! and a placeholder for each payload whose service is not in `rt` yet. DISPLAY's, SEARCH ALL's and
+//! those of `text`, `call` and `sql` are generic over the handles they name (semantics-library.md §9,
+//! C6): the LIR's ids by default, the walker's own references in the interpreter.
 
-use super::{AbendId, DebugId, ExprId, Operand, PlaceId, RefMod, StorePlan, SymId};
+use super::{AbendId, Comparand, Compare, Count, DebugId, ExprId, Operand, PlaceId, RefMod, StorePlan, SymId};
+use crate::vocab::Figurative;
 use crate::{codec_enum, codec_struct};
 use zarch::hfp::Precision;
 
@@ -50,6 +54,66 @@ pub enum FloatFrom {
     Float,
     Fixed,
     Zero,
+}
+
+/// INITIALIZE of one item: each elementary item the walk reaches, every occurrence listed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InitPlan {
+    pub fields: Vec<InitField>,
+}
+
+/// SPACE, ZERO or NULL, as the walker gives the item's kind, moved into `len` bytes at `offset` from
+/// the target's start.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InitField {
+    pub offset: u32,
+    pub len: u32,
+    pub value: Figurative,
+    pub store: MovePlan,
+}
+
+/// DISPLAY's items, each shown as the walker shows its kind, then a newline unless NO ADVANCING.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DisplayPlan<P = PlaceId, O = Operand> {
+    pub items: Vec<DisplayItem<P, O>>,
+    pub no_advancing: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DisplayItem<P = PlaceId, O = Operand> {
+    /// Groups, alphanumeric, zoned and edited items: the storage in the program's code page.
+    Bytes(P),
+    National(P),
+    /// Packed and binary items: the value's last `digits` digits, which for COMP-5 or TRUNC(BIN)
+    /// are as many as the item's halfword, fullword or doubleword holds.
+    Digits { place: P, digits: u32, signed: bool },
+    /// Floating-point, pointer, index and object-reference items: the place, then the abend.
+    Refused { place: P, abend: AbendId },
+    /// A literal or figurative constant as DISPLAY shows it; a numeric literal as written.
+    Text(SymId),
+    /// FUNCTION, LENGTH OF or ADDRESS OF, by the value's kind.
+    Value(O),
+}
+
+/// SEARCH ALL's binary search. The op returns Arm(0) on an occurrence whose keys equal their WHEN
+/// terms, for a Branch on the whole condition, and Arm(1) when the search ends without one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchAllPlan<P = PlaceId, V = Comparand, N = Count> {
+    /// The table's first index, stored by `store` at each occurrence tried.
+    pub index: P,
+    pub store: StorePlan,
+    pub count: N,
+    /// The keys the WHEN condition tests for equality, in the table's KEY order.
+    pub keys: Vec<SearchKey<V>>,
+}
+
+/// `key` as the WHEN term names it, and the `value` it must equal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SearchKey<V = Comparand> {
+    pub ascending: bool,
+    pub key: V,
+    pub value: V,
+    pub how: Compare,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -139,6 +203,19 @@ codec_enum!(NumericFrom {
     DeEdit { edit, digits, scale } = 6,
 });
 codec_enum!(FloatFrom { Float = 0, Fixed = 1, Zero = 2 });
+codec_struct!(InitPlan { fields });
+codec_struct!(InitField { offset, len, value, store });
+codec_struct!(DisplayPlan { items, no_advancing });
+codec_enum!(DisplayItem {
+    Bytes(place) = 0,
+    National(place) = 1,
+    Digits { place, digits, signed } = 2,
+    Refused { place, abend } = 3,
+    Text(text) = 4,
+    Value(value) = 5,
+});
+codec_struct!(SearchAllPlan { index, store, count, keys });
+codec_struct!(SearchKey { ascending, key, value, how });
 codec_struct!(FunctionPlan { func, args, side, refmod, at });
 codec_enum!(Func {
     Char = 0,
@@ -181,20 +258,11 @@ macro_rules! placeholder {
 }
 
 placeholder! {
-    InitPlan: "INITIALIZE's flat plan of offset, length, value and store; §9.1 does not define it yet.",
-    DisplayPlan: "DISPLAY's format per item; §9.1 does not define it yet.",
-    InspectPlan: "INSPECT's patterns and CONVERTING table; §9.1 does not define it yet.",
-    StringPlan: "STRING's sources and delimiters; §9.1 does not define it yet.",
-    UnstringPlan: "UNSTRING's delimiters and each receiver's MOVE plan; §9.1 does not define it yet.",
-    SearchAllPlan: "SEARCH ALL's keys matched to WHEN terms; §9.1 does not define it yet.",
     FileOp: "A file verb with its phrases, §9.4; waits for `OpenMode`, `StartRel` and `FileDesc`.",
     FileDesc: "A file's declaration, §9.4; not defined yet.",
-    CallPlan: "CALL's target and arguments, §9.3; waits for `LeService`.",
     SortPlan: "SORT or MERGE, §9.6; waits for `SortKey` and `Fastsrt`.",
     ReleasePlan: "RELEASE, §9.6; not defined yet.",
     ReturnPlan: "RETURN, §9.6; not defined yet.",
     ReportOp: "INITIATE, GENERATE, TERMINATE or SUPPRESS, §9.6; not defined yet.",
     CicsCommand: "An EXEC CICS command, §9.5; waits for the CICS code to move into rt.",
-    SqlEntry: "An EXEC SQL block, §9.7; waits for the SQL code to move into rt.",
-    Sqlca: "The SQLCA fields a program declares, §9.7; waits for the SQL code to move into rt.",
 }

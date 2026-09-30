@@ -5,6 +5,7 @@ use super::{
     InvokeId, MovePlan, Operand, ParaId, PlaceId, RangeId, ReleaseId, ReportOp, ReturnId, SearchAllId, SortId, SqlId,
     StepPlan, StringId, TempId, UnstringId,
 };
+use crate::vocab::AcceptFrom;
 use crate::{codec_enum, codec_struct};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -111,15 +112,6 @@ pub enum Ending {
     EndOfProgram,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AcceptFrom {
-    Sysin,
-    Date { four_digit_year: bool },
-    Day { four_digit_year: bool },
-    DayOfWeek,
-    Time,
-}
-
 codec_enum!(Op {
     Move { from, to, plan } = 0,
     Initialize { target, plan } = 1,
@@ -167,10 +159,3 @@ codec_enum!(RangeKind { Perform = 0, SortProcedure = 1, UseBeforeReporting = 2 }
 codec_struct!(Frame { first, last, kind, ret, depth });
 codec_enum!(FrameKind { Main = 0, Perform = 1, SortProcedure = 2, UseBeforeReporting { at } = 3 });
 codec_enum!(Ending { Goback = 0, StopRun = 1, EndOfProgram = 2 });
-codec_enum!(AcceptFrom {
-    Sysin = 0,
-    Date { four_digit_year } = 1,
-    Day { four_digit_year } = 2,
-    DayOfWeek = 3,
-    Time = 4,
-});

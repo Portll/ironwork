@@ -7,8 +7,9 @@ use ironwork_rt::lir::*;
 use ironwork_rt::module::codec::{Decode, Encode, Writer, decode_all};
 use ironwork_rt::module::{ModuleError, StringTable};
 use ironwork_rt::picture::Sym;
+use ironwork_rt::sql::{HostType, fingerprint};
 use ironwork_rt::storage::Kind;
-use ironwork_rt::vocab::{Figurative, Pos, SignClause, SignPosition};
+use ironwork_rt::vocab::{AcceptFrom, BinOp, Figurative, InspectMode, Pos, RelOp, SignClause, SignPosition};
 use numeric::precision::{Fixed, Places};
 use numeric::{Arith, Numproc, Options, SortKeys, Trunc, TruncCheck};
 use zarch::check::ProgramCheck;
@@ -53,6 +54,10 @@ const SIGN: SignClause = SignClause { position: SignPosition::Trailing, separate
 const PACKED: StorePlan = StorePlan::Packed { digits: 9, scale: 2, signed: true };
 const ODO: Odo = Odo { object: IntExpr::Item(3), max: 50, element: 12, check: true };
 const REFMOD: RefMod = RefMod { start: IntExpr::Const(2), length: Some(IntExpr::Fixed { expr: 4, dmax: 0 }), check: false };
+const ALNUM: MovePlan = MovePlan::Alnum { image: Image::Bytes, justified: false };
+const FILL: MovePlan = MovePlan::Alnum { image: Image::Figurative, justified: false };
+const TALLY: StepPlan = StepPlan { dmax: 0, store: PACKED };
+const INTEGER: HostType = HostType::Integer { signed: true };
 
 #[test]
 fn the_borrowed_vocabulary_round_trips_with_every_tag() {
@@ -212,19 +217,25 @@ fn program_shape_round_trips() {
     round_trip(&[Block { ops: vec![], end: Terminator::Jump(1) }, Block { ops: vec![Op::Nest, Op::Arith(0)], end: Terminator::Abend(0) }]);
     let plans = Plans {
         arith: vec![ArithPlan { dmax: 0, arith: Arith::Extend, prepass: vec![], steps: vec![], remainder: None, handled: false }],
-        init: vec![InitPlan::Placeholder],
-        display: vec![DisplayPlan::Placeholder],
-        inspect: vec![InspectPlan::Placeholder],
-        string: vec![StringPlan::Placeholder],
-        unstring: vec![UnstringPlan::Placeholder],
-        search_all: vec![SearchAllPlan::Placeholder],
+        init: vec![InitPlan { fields: vec![InitField { offset: 0, len: 2, value: Figurative::Null, store: FILL }] }],
+        display: vec![DisplayPlan { items: vec![DisplayItem::Text(0)], no_advancing: false }],
+        inspect: vec![InspectPlan { target: 0, tallying: vec![], replacing: vec![], converting: None }],
+        string: vec![StringPlan { into: 0, pointer: None, sources: vec![] }],
+        unstring: vec![UnstringPlan { source: 0, pointer: None, delimiters: vec![], into: vec![], tallying: None }],
+        search_all: vec![SearchAllPlan { index: 0, store: StorePlan::Index, count: Count::Fixed(5), keys: vec![] }],
         function: vec![FunctionPlan { func: Func::Trim, args: vec![0], side: Some(TrimSide::Leading), refmod: None, at: 1 }],
     };
     round_trip(&[Plans::default(), plans]);
     let services = Services {
         file_ops: vec![FileOp::Placeholder],
         files: vec![FileDesc::Placeholder],
-        calls: vec![CallPlan::Placeholder],
+        calls: vec![CallPlan {
+            target: CallTarget::Named { name: 1, le: None },
+            args: vec![],
+            returning: None,
+            on_exception: false,
+            not_on_exception: false,
+        }],
         sorts: vec![SortPlan::Placeholder],
         releases: vec![ReleasePlan::Placeholder],
         returns: vec![ReturnPlan::Placeholder],
@@ -237,7 +248,7 @@ fn program_shape_round_trips() {
             not_on_exception: false,
         }],
         cics: vec![CicsCommand::Placeholder],
-        sqlca: Sqlca::Placeholder,
+        sqlca: Sqlca { fields: vec![(SqlcaField::Code, 0, INTEGER)] },
     };
     round_trip(&[Services::default(), services]);
 }
@@ -475,22 +486,214 @@ fn statement_payloads_round_trip_with_every_tag() {
         not_on_exception: false,
     };
     round_trip(&[invoke]);
-    round_trip(&[InitPlan::Placeholder]);
-    round_trip(&[DisplayPlan::Placeholder]);
-    round_trip(&[InspectPlan::Placeholder]);
-    round_trip(&[StringPlan::Placeholder]);
-    round_trip(&[UnstringPlan::Placeholder]);
-    round_trip(&[SearchAllPlan::Placeholder]);
     round_trip(&[FileOp::Placeholder]);
     round_trip(&[FileDesc::Placeholder]);
-    round_trip(&[CallPlan::Placeholder]);
     round_trip(&[SortPlan::Placeholder]);
     round_trip(&[ReleasePlan::Placeholder]);
     round_trip(&[ReturnPlan::Placeholder]);
     round_trip(&[ReportOp::Placeholder]);
     round_trip(&[CicsCommand::Placeholder]);
-    round_trip(&[SqlEntry::Placeholder]);
-    round_trip(&[Sqlca::Placeholder]);
+}
+
+#[test]
+fn initialize_display_and_search_all_round_trip_with_every_tag() {
+    let space = InitField { offset: 0, len: 10, value: Figurative::Space, store: FILL };
+    let zero = InitField { offset: 10, len: 5, value: Figurative::Zero, store: MovePlan::Numeric { from: NumericFrom::Zero, store: PACKED } };
+    let null = InitField { offset: 15, len: 4, value: Figurative::Null, store: MovePlan::Address };
+    round_trip(&[InitPlan { fields: vec![] }, InitPlan { fields: vec![space, zero, null] }]);
+    let items = [
+        DisplayItem::Bytes(0),
+        DisplayItem::National(1),
+        DisplayItem::Digits { place: 2, digits: 10, signed: true },
+        DisplayItem::Refused { place: 3, abend: 0 },
+        DisplayItem::Text(4),
+        DisplayItem::Value(Operand::Function(0)),
+    ];
+    every_variant(&items, 6);
+    round_trip(&[DisplayPlan { items: items.to_vec(), no_advancing: true }, DisplayPlan { items: vec![], no_advancing: false }]);
+    let key = SearchKey { ascending: true, key: Comparand::Operand(Operand::Load(5)), value: Comparand::Expr(2), how: Compare::Alphanumeric };
+    let descending = SearchKey { ascending: false, how: Compare::Refused(1), ..key };
+    let plan = SearchAllPlan { index: 6, store: StorePlan::Index, count: Count::Odo(ODO), keys: vec![key, descending] };
+    let fixed = SearchAllPlan { count: Count::Fixed(20), keys: vec![], ..plan.clone() };
+    round_trip(&[plan, fixed]);
+}
+
+#[test]
+fn inspect_string_and_unstring_round_trip_with_every_tag() {
+    every_variant(&[InspectMode::Characters, InspectMode::All, InspectMode::Leading, InspectMode::First], 4);
+    every_variant(&[Chars::Literal(vec![0x6B]), Chars::Place(3), Chars::Value(Operand::Function(1))], 3);
+    every_variant(&[Replacement::Chars(Chars::Place(4)), Replacement::Fill(0x40)], 2);
+    let built = ConvertTable::Built(vec![(0x81, 0xC1), (0x82, 0xC2)]);
+    every_variant(&[built.clone(), ConvertTable::Operands { from: Chars::Place(1), to: Chars::Literal(vec![0xC1]) }], 2);
+    let tally = InspectPhrase {
+        mode: InspectMode::Leading,
+        pattern: Some(Chars::Literal(vec![0x40])),
+        by: None,
+        counter: Some((7, TALLY)),
+        bounds: vec![Bound { after: true, value: Chars::Literal(vec![0x5C]) }],
+    };
+    let replace = InspectPhrase {
+        mode: InspectMode::Characters,
+        pattern: None,
+        by: Some(Replacement::Fill(0xF0)),
+        counter: None,
+        bounds: vec![Bound { after: false, value: Chars::Place(2) }, Bound { after: false, value: Chars::Place(8) }],
+    };
+    let converting = Converting { table: built, bounds: vec![] };
+    let inspect = InspectPlan { target: 0, tallying: vec![tally], replacing: vec![replace], converting: Some(converting) };
+    round_trip(&[inspect, InspectPlan { target: 1, tallying: vec![], replacing: vec![], converting: None }]);
+    let sources = vec![
+        StringSource { chars: Chars::Place(2), delimiter: Some(Chars::Literal(vec![0x40])) },
+        StringSource { chars: Chars::Literal(vec![0xC1, 0xC2]), delimiter: None },
+    ];
+    let string = StringPlan { into: 0, pointer: Some((1, PACKED)), sources };
+    round_trip(&[string, StringPlan { into: 3, pointer: None, sources: vec![] }]);
+    let field = UnstringInto { target: 4, plan: ALNUM, delimiter: Some(DelimiterIn { target: 5, found: ALNUM, none: FILL }), count: Some((6, PACKED)) };
+    round_trip(&[field, UnstringInto { delimiter: None, count: None, ..field }]);
+    let unstring = UnstringPlan {
+        source: 0,
+        pointer: Some((1, PACKED)),
+        delimiters: vec![(true, Chars::Literal(vec![0x40])), (false, Chars::Place(2))],
+        into: vec![field],
+        tallying: Some((3, TALLY)),
+    };
+    round_trip(&[unstring, UnstringPlan { source: 0, pointer: None, delimiters: vec![], into: vec![], tallying: None }]);
+}
+
+#[test]
+fn call_plans_round_trip_with_every_tag() {
+    let services = [
+        LeService::Cee3abd,
+        LeService::Cee3dmp,
+        LeService::Ceedate,
+        LeService::Ceedatm,
+        LeService::Ceedays,
+        LeService::Ceedywk,
+        LeService::Ceefrst,
+        LeService::Ceegmt,
+        LeService::Ceegmto,
+        LeService::Ceegtst,
+        LeService::Ceeloct,
+        LeService::Ceemout,
+        LeService::Ceesecs,
+        LeService::Ceeutc,
+    ];
+    every_variant(&services, 14);
+    let targets = [CallTarget::Named { name: 1, le: Some(LeService::Ceedate) }, CallTarget::Dynamic(Operand::Load(2)), CallTarget::Pointer(3)];
+    every_variant(&targets, 3);
+    let args = [CallArg::Reference(0), CallArg::Content(Chars::Literal(vec![0xF1])), CallArg::Value(Operand::LengthOf(1)), CallArg::Omitted];
+    every_variant(&args, 4);
+    let call = CallPlan { target: targets[0], args: args.to_vec(), returning: Some(4), on_exception: true, not_on_exception: false };
+    let plain = CallPlan { target: CallTarget::Named { name: 2, le: None }, args: vec![], returning: None, on_exception: false, not_on_exception: true };
+    round_trip(&[call, plain]);
+}
+
+#[test]
+fn the_sql_table_round_trips_with_every_tag() {
+    let types = [
+        HostType::SmallInt { signed: true },
+        HostType::Integer { signed: false },
+        HostType::BigInt { signed: true },
+        HostType::Decimal { digits: 7, scale: 2, signed: true },
+        HostType::Zoned { digits: 5, scale: 0, signed: true, sign: Some(SIGN) },
+        HostType::Real,
+        HostType::Double,
+        HostType::Char(10),
+        HostType::VarChar(30),
+        HostType::Structure(vec![(4, INTEGER), (5, HostType::Char(20))]),
+    ];
+    every_variant(&types, 10);
+    let id = HostPlace { var: 0, member: None, ty: Ok(INTEGER), indicator: None };
+    let member = HostPlace { var: 1, member: Some((4, 20)), ty: Ok(HostType::Char(20)), indicator: Some((2, 2)) };
+    let untyped = HostPlace { var: 3, member: None, ty: Err(1), indicator: None };
+    round_trip(&[id.clone(), member.clone(), untyped.clone()]);
+    let statements = [
+        SqlStatement::Query { inputs: vec![id.clone()], into: vec![member.clone(), untyped] },
+        SqlStatement::Change { delete: true, inputs: vec![], current_of: Some(2) },
+        SqlStatement::Open { cursor: 2, inputs: vec![id] },
+        SqlStatement::Fetch { cursor: 2, into: vec![member] },
+        SqlStatement::Close { cursor: 2 },
+        SqlStatement::Commit,
+        SqlStatement::Rollback,
+        SqlStatement::Declaration,
+        SqlStatement::Unsupported(3),
+    ];
+    every_variant(&statements, 9);
+    let fields = [
+        SqlcaField::CaId,
+        SqlcaField::CaBc,
+        SqlcaField::Code,
+        SqlcaField::ErrMl,
+        SqlcaField::ErrMc,
+        SqlcaField::ErrP,
+        SqlcaField::State,
+        SqlcaField::ErrD(3),
+        SqlcaField::Warn(10),
+    ];
+    every_variant(&fields, 9);
+    let sqlca = Sqlca { fields: vec![(SqlcaField::Code, 7, INTEGER), (SqlcaField::ErrD(6), 8, INTEGER), (SqlcaField::State, 9, HostType::Char(5))] };
+    round_trip(&[Sqlca::default(), sqlca]);
+    let text = "SELECT NAME FROM EMP WHERE ID = ?";
+    let query = SqlEntry { ordinal: 1, verb: 0, statement: statements[0].clone(), text: 1, fingerprint: fingerprint(text), with_hold: false };
+    round_trip(&[query]);
+}
+
+#[test]
+fn a_host_structure_or_a_field_the_sqlca_lacks_is_malformed() {
+    let structure = HostType::Structure(vec![(1, HostType::Char(3))]);
+    let place = HostPlace { var: 0, member: None, ty: Ok(structure.clone()), indicator: None };
+    let (bytes, strings) = encoded(&place);
+    assert_eq!(refused::<HostPlace>(&bytes, &strings), (0, "a host structure where lowering gives its members".into()));
+    let cases = [
+        ((SqlcaField::Code, structure), "a host structure where lowering gives its members"),
+        ((SqlcaField::ErrD(0), INTEGER), "SQLERRD(0) is not an SQLCA field"),
+        ((SqlcaField::ErrD(7), INTEGER), "SQLERRD(7) is not an SQLCA field"),
+        ((SqlcaField::Warn(11), HostType::Char(1)), "SQLWARN11 is not an SQLCA field"),
+    ];
+    for ((field, ty), reason) in cases {
+        let (bytes, strings) = encoded(&Sqlca { fields: vec![(field, 0, ty)] });
+        assert_eq!(refused::<Sqlca>(&bytes, &strings), (0, reason.into()));
+    }
+}
+
+#[test]
+fn a_program_s_sql_table_runs_from_ordinal_1_with_each_text_s_fingerprint_and_with_hold() {
+    let mut program = payroll();
+    let first = program.symbols.len() as u32;
+    let declare = "DECLARE C1 CURSOR WITH HOLD FOR SELECT NAME FROM EMP";
+    program.symbols.extend(["OPEN", "C1", declare, "COMMIT"].map(String::from));
+    let statement = SqlStatement::Open { cursor: first + 1, inputs: vec![] };
+    let open = SqlEntry { ordinal: 1, verb: first, statement, text: first + 2, fingerprint: fingerprint(declare), with_hold: true };
+    let commit = SqlEntry { ordinal: 2, verb: first + 3, statement: SqlStatement::Commit, text: first + 3, fingerprint: fingerprint("COMMIT"), with_hold: false };
+    program.sql = vec![open.clone(), commit.clone()];
+    round_trip(std::slice::from_ref(&program));
+    let refusal = |sql: Vec<SqlEntry>| {
+        let (bytes, strings) = encoded(&Program { sql, ..program.clone() });
+        refused::<Program>(&bytes, &strings)
+    };
+    assert_eq!(refusal(vec![commit.clone()]), (0, "SQL entry 1 has ordinal 2".into()));
+    let reason = format!("SQL entry 1 has fingerprint 00000000, not its text's {:08X}", fingerprint(declare));
+    assert_eq!(refusal(vec![SqlEntry { fingerprint: 0, ..open.clone() }]), (0, reason));
+    assert_eq!(refusal(vec![SqlEntry { with_hold: false, ..open.clone() }]), (0, "SQL entry 1 has WITH HOLD clear for its text".into()));
+    assert_eq!(refusal(vec![SqlEntry { ordinal: 1, with_hold: true, ..commit }]), (0, "SQL entry 1 has WITH HOLD set for its text".into()));
+    assert_eq!(refusal(vec![SqlEntry { text: 99, ..open }]), (0, format!("symbol 99 of a table of {}", first + 4)));
+}
+
+/// The walker builds the same payloads over its own references (semantics-library.md §9, C6).
+#[test]
+fn payloads_take_the_walker_s_own_handles() {
+    let first = StringSource { chars: Chars::Place("WS-FIRST"), delimiter: None };
+    let string: StringPlan<&str, &str> = StringPlan { into: "WS-OUT", pointer: None, sources: vec![first] };
+    let call: CallPlan<&str, &str> = CallPlan {
+        target: CallTarget::Dynamic("WS-PROGRAM"),
+        args: vec![CallArg::Reference("WS-RECORD"), CallArg::Content(Chars::Value("LENGTH OF WS-RECORD"))],
+        returning: None,
+        on_exception: false,
+        not_on_exception: false,
+    };
+    let host: HostPlace<&str> = HostPlace { var: "WS-ID", member: None, ty: Ok(INTEGER), indicator: Some(("WS-IND", 0)) };
+    let search: SearchAllPlan<&str, &str, u32> = SearchAllPlan { index: "IX", store: StorePlan::Index, count: 20, keys: vec![] };
+    assert_eq!((string.into, call.args.len(), host.indicator, search.count), ("WS-OUT", 2, Some(("WS-IND", 0)), 20));
 }
 
 #[test]
