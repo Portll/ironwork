@@ -139,13 +139,18 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
         self.whenever(&sql.whenever, outcome.sqlcode, warnings[0], pos)
     }
 
-    /// EXEC CICS SYNCPOINT commits the task's unit of work, and SYNCPOINT ROLLBACK backs it out.
+    /// EXEC CICS SYNCPOINT commits the task's unit of work, and SYNCPOINT ROLLBACK backs it out. A
+    /// commit the database refuses leaves the work backed out and raises ROLLEDBACK.
     pub(super) fn cics_syncpoint(&mut self, block: &ExecBlock) -> R<Flow> {
         let (pos, program) = (block.pos, self.program.id.as_str());
+        let commit = !super::cics::has(block, "ROLLBACK");
         if let Some(session) = self.unit.sql.as_mut() {
-            let answer = session.settle(program, !super::cics::has(block, "ROLLBACK")).map_err(|a| Abend { code: a.code.into(), message: a.message, pos })?;
+            let answer = session.settle(program, commit).map_err(|a| Abend { code: a.code.into(), message: a.message, pos })?;
+            if answer.sqlcode < 0 && commit {
+                return self.raise(block, "ROLLEDBACK", 0);
+            }
             if answer.sqlcode < 0 {
-                let message = format!("SYNCPOINT: the database refused to commit with SQLCODE {}, where CICS raises ROLLEDBACK, which ironwork does not raise yet", answer.sqlcode);
+                let message = format!("SYNCPOINT ROLLBACK: the database refused to roll back with SQLCODE {}", answer.sqlcode);
                 return Err(Abend { code: "SQL".into(), message, pos });
             }
         }
@@ -578,10 +583,10 @@ mod tests {
         assert_eq!(verbs(&calls), ["OPEN", "FETCH", "DELETE", "COMMIT"]);
     }
 
-    fn run_task(procedure: &str) -> (String, Result<(), String>, Vec<Logged>) {
+    fn run_task(procedure: &str, answers: Vec<Outcome>) -> (String, Result<(), String>, Vec<Logged>) {
         let compiled = crate::compile(syntax::parse(&format!("{DATA}{procedure}")).expect("parses"), &[]).expect("compiles");
         let calls = Calls::default();
-        let db = Script { answers: VecDeque::new(), calls: calls.clone() };
+        let db = Script { answers: answers.into(), calls: calls.clone() };
         let task = crate::cics::Task { transid: "T1".into(), ..Default::default() };
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let ran = compiled.execute_cics_with(crate::unit::Library::default(), crate::files::Dds::default(), task, crate::unit::Clock::System, Some(Box::new(db)), &mut out, &mut err);
@@ -601,10 +606,27 @@ mod tests {
             "           EXEC CICS RETURN END-EXEC.\n",
         ]
         .concat();
-        let (_, ended, calls) = run_task(&procedure);
+        let (_, ended, calls) = run_task(&procedure, Vec::new());
         assert_eq!(ended, Ok(()));
         let got: Vec<(&str, u32)> = calls.iter().map(|c| (c.0.as_str(), c.1)).collect();
         assert_eq!(got, [("DELETE", 1), ("COMMIT", 0), ("DELETE", 2), ("ROLLBACK", 0), ("DELETE", 3), ("COMMIT", 0)]);
+    }
+
+    #[test]
+    fn a_refused_commit_at_syncpoint_raises_rolledback() {
+        let refused = || vec![Outcome::ok(), Outcome::error(-911, "40001")];
+        let procedure = concat!(
+            "           EXEC SQL DELETE FROM T END-EXEC.\n",
+            "           EXEC CICS SYNCPOINT RESP(WS-ID) END-EXEC.\n",
+            "           MOVE WS-ID TO E-CODE.\n",
+            "           DISPLAY E-CODE.\n",
+            "           EXEC CICS RETURN END-EXEC.\n",
+        );
+        let (shown, ended, calls) = run_task(procedure, refused());
+        assert_eq!((shown.as_str(), ended), (" 082\n", Ok(())));
+        assert_eq!(verbs(&calls), ["DELETE", "COMMIT"]);
+        let unhandled = "           EXEC SQL DELETE FROM T END-EXEC.\n           EXEC CICS SYNCPOINT END-EXEC.\n           EXEC CICS RETURN END-EXEC.\n";
+        assert_eq!(run_task(unhandled, refused()).1, Err("AEXJ".into()));
     }
 
     #[test]
@@ -618,7 +640,7 @@ mod tests {
             "           EXEC CICS ABEND ABCODE('XYZ1') END-EXEC.\n",
         ]
         .concat();
-        let (shown, ended, calls) = run_task(&procedure);
+        let (shown, ended, calls) = run_task(&procedure, Vec::new());
         assert_eq!((shown.as_str(), ended), ("-925\n-926\n", Err("XYZ1".into())));
         assert_eq!(verbs(&calls), ["DELETE", "ROLLBACK"]);
     }

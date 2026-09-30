@@ -186,8 +186,9 @@ Input rules:
     HOLD](https://www.ibm.com/docs/en/SSJL4D_6.x/applications/developing/database/dfhtk67.html)).
   - EXEC SQL COMMIT and ROLLBACK are refused in a CICS task with -925 and -926: the task's unit of
     work belongs to CICS.
-  - A commit the database refuses at SYNCPOINT abends `SQL`, naming the SQLCODE. CICS raises
-    ROLLEDBACK there, and ironwork's RESP table does not hold ROLLEDBACK's value yet.
+  - A commit the database refuses at SYNCPOINT backs the unit of work out and raises ROLLEDBACK
+    (RESP 82); left unhandled, the task abends AEXJ ([CICS TS 6, EXEC
+    CICS SYNCPOINT](https://www.ibm.com/docs/en/cics-ts/6.x?topic=summary-syncpoint)).
 - **Ordinal 0.** A commit or rollback that no EXEC SQL statement asks for (SYNCPOINT, or the end of
   a run unit or task) names the first program with ordinal 0. It reaches the database only while the
   database holds work or an open cursor.

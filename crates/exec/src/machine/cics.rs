@@ -82,6 +82,7 @@ fn default_abend(condition: &str) -> &'static str {
         "TERMIDERR" => "AEIK",
         "FILENOTFOUND" => "AEIL",
         "DISABLED" => "AEXL",
+        "ROLLEDBACK" => "AEXJ",
         "LOCKED" => "AEX8",
         "RECORDBUSY" => "AEX9",
         "QIDERR" => "AEYH",
