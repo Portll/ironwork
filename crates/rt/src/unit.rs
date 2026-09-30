@@ -5,8 +5,9 @@
 //! `H` is the executor's handle to a loaded program and `L` the loader CALL goes through; the run
 //! unit holds both without looking inside, and asks `L` what it needs to know about an `H`.
 
+use crate::abend::Abend;
 use crate::files::{Dds, Open};
-use crate::vocab::OpenMode;
+use crate::vocab::{OpenMode, Pos};
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -202,6 +203,30 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         if self.programs.iter().all(|p| p.base < mark) && self.le.heap_end() <= mark {
             self.mem.truncate(mark.max(RESERVED));
         }
+    }
+
+    /// One more PERFORM or CALL in progress, refused past `MAX_DEPTH` rather than exhaust the stack.
+    pub fn enter(&mut self, pos: Pos) -> Result<(), Abend> {
+        if self.depth >= MAX_DEPTH {
+            return Err(Abend::ironwork(format!("PERFORM and CALL nest deeper than {MAX_DEPTH}"), pos));
+        }
+        self.depth += 1;
+        Ok(())
+    }
+
+    /// Marks program `me` active: where its storage starts, and whether the activation starts from
+    /// fresh storage, as its first does, the first after a CANCEL, and every one of an INITIAL
+    /// program.
+    pub fn activate(&mut self, me: usize, initial: bool) -> (usize, bool) {
+        let program = &mut self.programs[me];
+        program.active = true;
+        (program.base, !program.initialized || initial)
+    }
+
+    /// Program `me`'s storage holds its initial values, and its GO TOs go where they are written.
+    pub fn initialized(&mut self, me: usize) {
+        self.programs[me].initialized = true;
+        self.programs[me].altered.clear();
     }
 
     pub fn find(&self, name: &str) -> Option<usize> {

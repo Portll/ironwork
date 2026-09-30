@@ -126,7 +126,7 @@ impl<'p> Machine<'p, '_, '_> {
             });
         }
         if loc.kind == Kind::National {
-            let unit = figurative_unit(f);
+            let unit = rt::store::figurative_unit(f);
             return Ok(bytes.chunks(2).all(|c| c == unit.to_be_bytes()));
         }
         let byte = self.collating.figurative(f);
@@ -192,7 +192,7 @@ impl<'p> Machine<'p, '_, '_> {
             Kind::AlnumEdited { .. } | Kind::NumericEdited { .. } => text::string(text::trimmed(&self.page.decode(&bytes), false)),
             Kind::National => text::string(text::trimmed(&utf16_text(&bytes), false)),
             Kind::Float(precision) => text::float_number(Hfp::from_bytes(precision, &bytes), if precision == Precision::Short { 8 } else { 17 }),
-            Kind::Zoned { digits, scale, .. } | Kind::Packed { digits, scale, .. } => self.json_fixed(loc, digits.saturating_sub(scale) + self.scaling(loc), pos)?,
+            Kind::Zoned { digits, scale, .. } | Kind::Packed { digits, scale, .. } => self.json_fixed(loc, digits.saturating_sub(scale) + store::scaling(&self.facts(), loc), pos)?,
             Kind::Binary { digits, scale, native, .. } => {
                 let integers = if native || self.options.trunc == Trunc::Bin {
                     let whole = match digits {
@@ -202,7 +202,7 @@ impl<'p> Machine<'p, '_, '_> {
                     };
                     whole - scale.min(whole)
                 } else {
-                    digits.saturating_sub(scale) + self.scaling(loc)
+                    digits.saturating_sub(scale) + store::scaling(&self.facts(), loc)
                 };
                 self.json_fixed(loc, integers, pos)?
             }
