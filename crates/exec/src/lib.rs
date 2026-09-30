@@ -17,6 +17,7 @@ pub mod oo;
 pub mod picture;
 pub mod printer;
 pub mod report;
+mod reserved;
 mod sort;
 pub mod sql;
 pub use rt::strings;
@@ -63,8 +64,9 @@ pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error
 /// `whole` is false for the parts a class definition is compiled into, which IBM's rules for
 /// compiler options do not apply to one by one.
 pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -> Result<Compiled, Vec<Error>> {
-    let mut program = sort::with_special_registers(program);
     let mut errors = Vec::new();
+    reserved::check(&program, &mut errors);
+    let mut program = sort::with_special_registers(program);
     let mut options = Options::default();
     let mut ssrange = false;
     for option in &program.options {

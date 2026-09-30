@@ -32,6 +32,7 @@ RULES = [
     (r"COPY (\S+): no such member", "COPY member not found"),
     (r"EXEC (\S+) needs a precompiler", r"EXEC \1 (precompiler)"),
     (r"(.+) is not supported yet", r"\1"),
+    (r"\S+ is a reserved word, so it cannot name", "reserved word as a name"),
     (r"\S+ is not defined", "undefined name"),
     (r"\S+ is ambiguous", "ambiguous name"),
     (r"no paragraph named", "undefined paragraph"),

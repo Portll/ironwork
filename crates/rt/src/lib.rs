@@ -11,6 +11,7 @@ pub mod edit;
 pub mod evidence;
 pub mod module;
 pub mod picture;
+pub mod reserved_words;
 pub mod sql;
 pub mod storage;
 pub mod strings;

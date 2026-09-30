@@ -148,7 +148,7 @@ It is zero-dependency Rust.
 |---|---|---|---|---|
 | 6 | SQL, [sql-runtime.md](sql-runtime.md) steps 1–6: typed statements (S), conversion (M), SQLCA, WHENEVER and single-row statements (M), the recording format and `--sql-replay` (S), cursors (S), CICS SYNCPOINT (XS), all six built | ironwork | L | Next by ruling. Written as a library service for both executors |
 | 7 | Publish cobolwork: public repository, tagged release, npm decision, the PolyForm links fixed | cobolwork | S | Needs the operator's go-ahead |
-| 8 | Shared data (E2): option table, CICS command table, reserved words, BMS and SQL fixtures, with drift tests | Both | M | The option table, and the BMS and SQL fixtures (`fixtures/cobolwork/`), are shared (2026-09-30), and so are the CICS command, DFHRESP and DFHVALUE tables (`crates/rt/data/`), whose checked dispatch list waits on E11c; reserved words remain |
+| 8 | Shared data (E2): option table, CICS command table, reserved words, BMS and SQL fixtures, with drift tests | Both | M | The option table, and the BMS and SQL fixtures (`fixtures/cobolwork/`), are shared (2026-09-30), and so are the CICS command, DFHRESP and DFHVALUE tables (`crates/rt/data/`), whose checked dispatch list waits on E11c; IBM's reserved words (`crates/rt/data/reserved-words.tsv`) are refused as user-defined names (2026-09-30: 1344 to 1339 of 3000 in the census, each refusal one Enterprise COBOL makes) |
 | 9 | Rules from ironwork's model (E3): TRUNC(OPT) binary overflow, EBCDIC-dependent order and comparison, intermediates over 30 digits (31 under ARITH(EXTEND)) | cobolwork | M | None exists yet |
 | 10 | A hand-labelled flow corpus: the independent witness for cobolwork's precision | cobolwork | L | Banks will ask for it |
 

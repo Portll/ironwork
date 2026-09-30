@@ -323,10 +323,10 @@ fn cee3abd_in_a_cics_task_is_a_transaction_abend_named_by_the_code() {
 
 #[test]
 fn ceemout_and_cee3dmp_in_a_cics_task_write_to_cese_and_no_dd() {
-    let data = "       01  DEST PIC S9(9) BINARY VALUE 2.\n       01  TITLE PIC X(80) VALUE 'CICS DUMP'.\n       01  OPTS PIC X(255) VALUE 'FNAME(MYDUMP)'.\n";
+    let data = "       01  DEST PIC S9(9) BINARY VALUE 2.\n       01  DUMP-TITLE PIC X(80) VALUE 'CICS DUMP'.\n       01  OPTS PIC X(255) VALUE 'FNAME(MYDUMP)'.\n";
     let mut body = set("IN", "Hello from CEEMOUT");
     body.push(line("CALL 'CEEMOUT' USING IN-STR DEST FC"));
-    body.push(line("CALL 'CEE3DMP' USING TITLE OPTS FC"));
+    body.push(line("CALL 'CEE3DMP' USING DUMP-TITLE OPTS FC"));
     body.push(line("DISPLAY FC-MSG"));
     let (sysout, dump) = (temp("cics-sysout.txt"), temp("cics-mydump.txt"));
     let dds = [format!("SYSOUT={}", sysout.display()), format!("MYDUMP={}", dump.display())];
@@ -361,10 +361,10 @@ fn a_service_given_fewer_arguments_than_it_takes_is_ironworks_own_abend() {
 
 #[test]
 fn a_service_is_called_through_an_identifier_and_a_program_of_its_name_comes_first() {
-    let data = "       01  SERVICE PIC X(8) VALUE 'CEEDAYS'.\n";
+    let data = "       01  SVC PIC X(8) VALUE 'CEEDAYS'.\n";
     let mut body = set("IN", "20000101");
     body.extend(set("PIC", "YYYYMMDD"));
-    body.push(line("CALL SERVICE USING IN-STR PIC-STR LILIAN FC"));
+    body.push(line("CALL SVC USING IN-STR PIC-STR LILIAN FC"));
     body.push(line("DISPLAY LILIAN"));
     body.push(line("CALL 'CEEDATE' USING LILIAN PIC-STR OUT-80 FC"));
     body.push(line("DISPLAY OUT-80"));
@@ -407,8 +407,8 @@ fn ceemout_writes_to_the_message_file_or_standard_error() {
 
 #[test]
 fn cee3dmp_writes_a_titled_dump_to_its_dd() {
-    let data = "       01  TITLE PIC X(80) VALUE 'DUMP FROM THE TEST'.\n       01  OPTS PIC X(255) VALUE 'TRACE FILE VAR STOR'.\n";
-    let body = [line("CALL 'CEE3DMP' USING TITLE OPTS FC"), line("DISPLAY FC-MSG"), line("MOVE 'FNAME(MYDUMP) NOSUCH' TO OPTS"), line("CALL 'CEE3DMP' USING TITLE OPTS FC"), line("DISPLAY FC-MSG")];
+    let data = "       01  DUMP-TITLE PIC X(80) VALUE 'DUMP FROM THE TEST'.\n       01  OPTS PIC X(255) VALUE 'TRACE FILE VAR STOR'.\n";
+    let body = [line("CALL 'CEE3DMP' USING DUMP-TITLE OPTS FC"), line("DISPLAY FC-MSG"), line("MOVE 'FNAME(MYDUMP) NOSUCH' TO OPTS"), line("CALL 'CEE3DMP' USING DUMP-TITLE OPTS FC"), line("DISPLAY FC-MSG")];
     let path = temp("mydump.txt");
     let (out, err, ending) = run(&program(data, &body), &[format!("MYDUMP={}", path.display())]);
     assert!(ending.is_ok(), "{ending:?}");
