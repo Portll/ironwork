@@ -519,7 +519,8 @@ fn field(st: &Statement, ops: &Operands, map: &Map) -> Result<Field, Error> {
         Some(Initial::Bytes(b)) => b.len() as u32,
         None => 0,
     };
-    let length = match ops.number("LENGTH", 1, 256)? {
+    let length = match ops.number("LENGTH", 0, 256)? {
+        Some(0) if name.is_some() => return Err(fail(line, "LENGTH=0 is allowed only on an unlabelled field, where it delimits an input field")),
         Some(n) => n,
         None => picin.iter().chain(&picout).map(|p| picture_size(p)).max().unwrap_or(from_data),
     };
@@ -837,6 +838,15 @@ mod tests {
         assert_eq!(map.fields[3].occurs, 3);
         assert_eq!(map.fields[4].group.as_deref(), Some("ADDR"));
         assert_eq!(map.fields[5].group.as_deref(), Some("ADDR"));
+    }
+
+    #[test]
+    fn zero_length_is_for_an_unlabelled_field_only() {
+        let src = |label: &str| format!("M DFHMSD TYPE=MAP\nM1 DFHMDI SIZE=(24,80)\n{label:<9}DFHMDF POS=(6,33),LENGTH=0,ATTRB=ASKIP\n");
+        let map = &parse(&src("")).unwrap()[0].maps[0];
+        assert_eq!((map.fields[0].name.clone(), map.fields[0].length), (None, 0));
+        let err = parse(&src("AMT")).unwrap_err();
+        assert!(err.to_string().contains("LENGTH=0 is allowed only on an unlabelled field"), "{err}");
     }
 
     #[test]
