@@ -69,6 +69,9 @@ fn read_lines(input: &str, file: u16, debugging: bool) -> Result<Source, Error> 
             continue;
         }
         comment_entry = false;
+        if indicator != '-' && open_quote.is_none() && listing_control(&area) {
+            continue;
+        }
         let start_col = TEXT_START as u32 + 1;
         if indicator == '-' {
             let first = area.iter().position(|c| *c != ' ').unwrap();
@@ -129,6 +132,22 @@ fn read_lines(input: &str, file: u16, debugging: bool) -> Result<Source, Error> 
         return Err(Error::at(out.positions.last().copied().unwrap_or_default(), "an unterminated literal"));
     }
     Ok(out)
+}
+
+/// EJECT, SKIP1, SKIP2, SKIP3 or TITLE with its literal, alone on the line and perhaps ended by a
+/// period: statements for the listing that have no effect on compilation.
+fn listing_control(area: &[char]) -> bool {
+    let line: String = area.iter().collect();
+    let line = line.trim();
+    let line = line.strip_suffix('.').unwrap_or(line).trim_end();
+    if ["EJECT", "SKIP1", "SKIP2", "SKIP3"].iter().any(|w| line.eq_ignore_ascii_case(w)) {
+        return true;
+    }
+    let Some(literal) = line.get(..6).filter(|t| t.eq_ignore_ascii_case("TITLE ")).map(|_| line[6..].trim_start()) else { return false };
+    let literal = literal.strip_prefix(['N', 'n', 'G', 'g']).filter(|l| l.starts_with(['\'', '"'])).unwrap_or(literal);
+    let Some(quote) = literal.chars().next().filter(|c| matches!(c, '\'' | '"')) else { return false };
+    let inner = literal.get(1..literal.len() - 1).unwrap_or_default();
+    literal.len() >= 2 && literal.ends_with(quote) && !inner.replace(&format!("{quote}{quote}"), "").contains(quote)
 }
 
 /// `*>` outside a literal starts a comment that runs to the end of the line.
@@ -216,6 +235,22 @@ mod tests {
     fn sequence_numbers_comments_and_columns_past_72_are_dropped() {
         let s = read("000100 IDENTIFICATION DIVISION.                                         SEQ00001\n000200*a comment\n000300/page\n").unwrap();
         assert_eq!(s.text.trim(), "IDENTIFICATION DIVISION.");
+    }
+
+    #[test]
+    fn listing_statements_alone_on_their_line_are_left_out() {
+        let text = [
+            "       01  A PIC X.\n",
+            "           EJECT\n",
+            "       SKIP2.\n",
+            "           TITLE 'RATES, ''A'' TO Z'.\n",
+            "           title n\"NATIONAL\"\n",
+            "       01  B PIC X.\n",
+            "           EJECT X\n",
+        ]
+        .concat();
+        let s = read(&text).unwrap();
+        assert_eq!(s.text.split_whitespace().collect::<Vec<_>>(), ["01", "A", "PIC", "X.", "01", "B", "PIC", "X.", "EJECT", "X"]);
     }
 
     #[test]
