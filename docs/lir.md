@@ -10,7 +10,9 @@ interpreter runs lowers into it, and how lowering is checked.
 
 **Citations** are `crate/path.rs:line` on main at 79a199e (the ironwork-codegen checkout), or,
 marked **(int)**, on the integration branch `feat/le-under-cics` at 0e73f5d (the ironwork-le-cics
-checkout), which has SORT and MERGE, LE callable services, Report Writer and OO COBOL.
+checkout), which has SORT and MERGE, LE callable services, Report Writer and OO COBOL, or, marked
+**(f2)**, on main at f201664, where the second lowering slice (CALL, INVOKE, ALTER and the rest of
+§8.9) starts.
 
 ---
 
@@ -93,8 +95,8 @@ pub struct Program {
     /// The ArithPlan, MovePlan, InitPlan, DisplayPlan, InspectPlan, StringPlan, UnstringPlan,
     /// SearchAllPlan and FunctionPlan tables.
     pub plans: Plans,
-    /// The FileOp, FileDesc, CallPlan, SortPlan, ReportOp, InvokePlan and CicsCommand tables, and
-    /// the Sqlca.
+    /// The FileOp, FileDesc, CallPlan, SortPlan, ReportOp, InvokePlan and CicsCommand tables, the
+    /// Sqlca, the ENTRY points (§9.3) and, for a class definition, its class (§9.8).
     pub services: Services,
     pub sql: Vec<SqlEntry>, pub abends: Vec<AbendText>, pub edits: Vec<Vec<Sym>>,
     pub symbols: Vec<String>, pub debug: Debug,
@@ -153,8 +155,9 @@ pub struct Item {
 /// position for `Storage.init_abend`, which no op raises.
 pub struct AbendText { pub code: AbendCode, pub message: SymId, pub at: Option<DebugId> }
 
-/// `section_end` is the last paragraph of its section (exec/src/lib.rs:99-103).
-pub struct Paragraph { pub name: SymId, pub is_section: bool, pub entry: BlockId, pub section_end: ParaId, pub at: DebugId }
+/// `section_end` is the last paragraph of its section (exec/src/lib.rs:99-103). `priority` is its
+/// section's priority-number, 0 for none; 50 to 99 is an independent segment (§8.9).
+pub struct Paragraph { pub name: SymId, pub is_section: bool, pub entry: BlockId, pub section_end: ParaId, pub priority: u8, pub at: DebugId }
 pub struct Block { pub ops: Vec<Op>, pub end: Terminator }
 ```
 
@@ -206,9 +209,11 @@ pub enum Base {
     ReturnCode,
     /// The task's EXEC interface block, for services and ADDRESS EIB.
     Eib,
-    /// SELF's cell, pushed at method entry (machine/oo.rs:409 (int)).
+    /// SELF's cell, pushed at method entry (machine/oo.rs:409 (int)): four bytes, an object
+    /// reference, whatever reference modification the Ref has (`oo_register`, machine/oo.rs:94-109
+    /// (f2)). Evaluating it outside a method abends IRONWORK "SELF outside a method".
     SelfRef,
-    /// JNIENVPTR's cell, made on first use (machine/oo.rs:101-117 (int)).
+    /// JNIENVPTR's cell, made on first use (machine/oo.rs:101-117 (int)): four bytes, a pointer.
     JniEnv,
 }
 
@@ -334,7 +339,12 @@ pub enum Comparand {
 /// The branch of `compare` (machine.rs:1852-1894) the two sides take, fixed by their kinds:
 /// packed bytes under NUMPROC(PFD); addresses; extended float when either side is COMP-1 or
 /// COMP-2; fixed; national; alphanumeric images at the longer length; or a pair the walker refuses.
-pub enum Compare { PackedPfd, Address, Float, Fixed, National, Alphanumeric, Refused(AbendId) }
+/// `References` is two addresses of which one is an object reference or SELF
+/// (`compare_references`, machine/oo.rs:145-158 (f2)): each is looked up in the run unit's objects,
+/// the first first, abending IRONWORK for one freed or never given (the message names the Refs of
+/// both sides as written); equal when both identify the same object, or are both NULL, else less.
+/// NULL written as a figurative constant is not an address, so `A = NULL` is `Address`.
+pub enum Compare { PackedPfd, Address, Float, Fixed, National, Alphanumeric, Refused(AbendId), References }
 
 pub enum ByteClass { Packed { signed: bool }, Zoned { signed: bool }, Digits, Alphabetic }
 pub enum SignTest { Positive, Negative, Zero }
@@ -505,6 +515,8 @@ pub enum Op {
     File(FileOpId), Call(CallId), Cancel(Operand),
     Sort(SortId), Release(ReleaseId), Return(ReturnId), Report(ReportOp),
     Invoke(InvokeId), Cics(CicsId), Sql(SqlId),
+    /// ALTER, independent segments and the segment register (§8.9).
+    Alter { para: ParaId, to: ParaId }, EnterSegment(u8), SetSegment(u8),
 }
 
 /// What an op tells the VM, as the walker's `Flow` (machine.rs:58-67) does. The library's services
@@ -527,7 +539,8 @@ pub enum Terminator {
     ParagraphEnd { next: ParaId },
     /// GO TO, with the range rules of §8.4.
     GoTo(ParaId),
-    /// GO TO … DEPENDING ON: `targets[k − 1]` for a value k in range, as a GO TO; else `otherwise`.
+    /// GO TO … DEPENDING ON: `targets[k − 1]` for a value k in range, as a `GoTo`, depth reset
+    /// included; else `otherwise`, the next statement.
     Switch { value: IntExpr, targets: Vec<ParaId>, otherwise: BlockId },
     /// An out-of-line PERFORM: push a frame, enter the range; `ret` runs when it completes.
     PerformEnter { range: RangeId, ret: BlockId },
@@ -535,6 +548,9 @@ pub enum Terminator {
     ExitProgram { next: BlockId },
     End(Ending),
     Abend(AbendId),
+    /// The entry of a paragraph an ALTER names (§8.9): a `GoTo` of the target the alter table
+    /// holds for `para`, or `Jump(otherwise)` while it holds none.
+    AlteredGoTo { para: ParaId, otherwise: BlockId },
 }
 
 pub struct Range { pub first: ParaId, pub last: ParaId, pub kind: RangeKind }
@@ -582,10 +598,20 @@ b3: Unnest(1); Jump next                  b3: Step I by 1; Jump b1
 - **VARYING:** FROM is stored with MOVE rules (machine.rs:502-504); each step re-evaluates the
   variable's place, locates the places of BY in `Op::Step.prepass` (§7.5), and stores with
   `StepPlan`, no ROUNDED and no size error (machine.rs:517-521).
-- **VARYING … AFTER** is refused by the parser (syntax/src/parser.rs:1596-1598), so the walker has
-  no baseline. It lowers to one loop per variable, the innermost varying fastest; the order in which
-  an inner variable is reset and the outer one stepped becomes an assumption when the front end
-  accepts AFTER.
+- **VARYING … AFTER** lowers as `vary` runs it (machine.rs:598-636 (f2)), which follows the
+  Language Reference's figures (SC27-8713-03, pp. 425-428): one loop per variable, the last
+  varying fastest. An inner loop's test coming true augments the variable outside it, then sets
+  the inner variable to its FROM value again, then tests the outer one. TEST BEFORE sets every
+  variable to its FROM value before the first test; TEST AFTER sets only the first, and each inner
+  one as its loop is entered. EXIT PERFORM leaves every level at once.
+
+```text
+PERFORM P VARYING I FROM 1 BY 1 UNTIL CI AFTER J FROM I BY 1 UNTIL CJ    (TEST BEFORE)
+b0: Nest; Move I <- 1; Move J <- I; Jump h0
+h0: Branch CI exit else h1                s0: Step I by 1; Move J <- I; Jump h0
+h1: Branch CJ s0 else run                 s1: Step J by 1; Jump h1
+run: PerformEnter r -> s1                 exit: Unnest(1); Jump next
+```
 
 ### 8.4 Frames
 
@@ -610,7 +636,8 @@ enum FrameKind { Main, Perform, SortProcedure, UseBeforeReporting { at: DebugId 
   go to t. Main holds every paragraph.
 - **Transfers from services** (`Step::GoTo`: HANDLE CONDITION, HANDLE ABEND) and WHENEVER's GO TO
   follow the GoTo rule, because the walker returns them as `Flow::GoTo` (machine/cics.rs:276-278,
-  machine/sql.rs:289).
+  machine/sql.rs:289). So do a `Switch` target and an `AlteredGoTo`'s target (§8.9), which the
+  walker returns the same way (machine.rs:315, 462 (f2)).
 - **Elision.** Control in paragraph p always lies inside the top frame's range, so a GO TO from p to
   t is a plain `Jump` when every range holding p also holds t.
 
@@ -701,7 +728,10 @@ abend.
 | Statement | Terminator | Walker |
 |---|---|---|
 | GO TO | `GoTo`, or `Jump` when elided | machine.rs:375 |
-| GO TO … DEPENDING ON | `Switch`; out of range, the next statement | Not parsed (parser.rs:1026-1029); no baseline |
+| GO TO … DEPENDING ON | `Switch`; out of range, the next statement | machine.rs:459-464 (f2) |
+| GO TO with no target | Nothing: unaltered it falls through; altered, its paragraph's entry transfers (§8.9) | machine.rs:458 (f2) |
+| ALTER | `Alter` per pair, in order | machine.rs:465-473 (f2) |
+| ENTRY | Nothing; the statement after it starts a block a CALL enters (§9.3) | machine.rs:458 (f2) |
 | EXIT PARAGRAPH | `ParagraphEnd { next: p + 1 }` | machine.rs:275, 411 |
 | EXIT SECTION | `ParagraphEnd { next: section_end + 1 }` | machine.rs:276, 412 |
 | EXIT PERFORM, EXIT PERFORM CYCLE | `Jump` to the loop's exit or continuation, with `Unnest` | machine.rs:469-470 |
@@ -710,6 +740,58 @@ abend.
 | GOBACK, EXIT METHOD | `End(Goback)` | machine.rs:376; 422 (int) |
 | EXIT PROGRAM | `ExitProgram`: whether this is the run unit's first program is known only at run time | machine.rs:377-378 |
 | Falling off the last paragraph | `ParagraphEnd`, completing Main | machine.rs:265 |
+
+### 8.9 ALTER and independent segments
+
+ALTER changes where a paragraph's GO TO goes. The walker keeps the change in `Loaded.altered`, a
+target per paragraph of the loaded program (unit.rs:33-34 (f2)), and checks it whenever control
+reaches a paragraph, before its statements (`run_paragraphs_from`, machine.rs:312-317 (f2)).
+
+```rust
+Op::Alter { para: ParaId, to: ParaId }                       // ALTER para TO PROCEED TO to
+Terminator::AlteredGoTo { para: ParaId, otherwise: BlockId } // at the entry of each altered paragraph
+Op::EnterSegment(u8)                                         // at the entry of every paragraph
+Op::SetSegment(u8)                                           // where a PERFORM range returns
+```
+
+- **The alter table** is mutable state of the loaded program: one optional target per paragraph,
+  empty until an ALTER runs. It lives as long as the program's WORKING-STORAGE: it is cleared
+  whenever that storage is initialized afresh (the first CALL, the first after a CANCEL, and every
+  CALL of an INITIAL program, machine.rs:227-232 (f2)) and kept from one CALL to the next
+  otherwise. A dynamic CALL's copy for an ENTRY name has its own. Check refuses ALTER in a
+  RECURSIVE program, under THREAD and in a method (exec/src/lib.rs:221-227 (f2)), so no two
+  activations share one.
+- **`Alter`** sets `para`'s entry to `to`, the first paragraph of the procedure ALTER names.
+- **`AlteredGoTo`** begins the entry block of each paragraph some ALTER names, after
+  `EnterSegment`: while the table holds a target t for `para`, control goes to t exactly as by
+  `GoTo(t)` (§8.4), so under **V1** an altered GO TO out of a PERFORM range abandons the range and
+  every PERFORM out to the first whose range holds t, and the depth is reset to that frame's;
+  otherwise `Jump(otherwise)` runs the paragraph as written. The target is known only at run time,
+  so it is never elided to a `Jump`.
+- **A GO TO with no target** that nothing has altered does nothing: control falls through to the
+  next paragraph (machine.rs:458 (f2)). It lowers to no op; Check makes it its paragraph's only
+  sentence.
+- **Independent segments.** Control reaching a paragraph whose section has a priority-number of 50
+  or more from a paragraph of another segment finds the segment in its initial state: the walker
+  clears the alter entries of that segment's paragraphs (`enter_segment`, machine.rs:336-349 (f2);
+  assumption C52 `ALTERED_GO_TO_RESET`). The walker keeps the segment in a register that
+  `run_paragraphs_from` sets as each paragraph is entered and restores when a range completes
+  normally, but not when a GO TO leaves it (machine.rs:296, 330 (f2)).
+- **The segment register** is per activation. It starts at the priority of the paragraph the
+  activation starts in (`procedure_start`, or an ENTRY's paragraph, machine.rs:272 (f2)).
+  `EnterSegment(p)` at the head of every paragraph's entry block does what `enter_segment` does:
+  when p differs from the register and is 50 or more, it clears the alter entries of the
+  paragraphs whose `priority` is p; then the register holds p. `SetSegment(q)` begins the block
+  each `PerformEnter` returns to: the register goes back to q, the priority of the paragraph the
+  PERFORM is written in, clearing nothing. That is the value the walker restores, because while a
+  paragraph's statements run the register holds its priority: every range a statement performs
+  restores it, and a GO TO out of one never returns to the statement. A range abandoned by a GO TO
+  never reaches its return block, so, as in the walker, the register keeps the last paragraph's
+  segment until the target's `EnterSegment`.
+- **Only where it shows.** Clearing matters only to a paragraph an ALTER names, so lowering emits
+  `EnterSegment` and `SetSegment` only when an ALTER names a paragraph of an independent segment;
+  otherwise priorities have no effect the walker shows, and independent segments lower as other
+  paragraphs do.
 
 ## 9. Statements as LIR ops
 
@@ -747,6 +829,7 @@ walker does on each execution; the last column names that work.
 | Declarative EXEC SQL | Nothing (machine.rs:393); its `SqlEntry` still exists | - | - |
 | FUNCTION | `Operand::Function` (§9.9) | One call | Name and arity (machine.rs:1225-1233) |
 | PERFORM, GO TO, EXIT, STOP RUN, GOBACK, NEXT SENTENCE | Terminators (§8) | Lowered | Procedure names (machine.rs:308-310) |
+| GO TO … DEPENDING ON, ALTER, ENTRY | `Switch`; `Alter` and `AlteredGoTo` (§8.9); an entry block (§9.3) | Lowered | Procedure names (machine.rs:459-473 (f2)); where an ENTRY begins |
 
 ### 9.2 MOVE
 
@@ -830,23 +913,60 @@ pub enum CallTarget {
 
 pub enum CallArg {
     Reference(PlaceId),
-    /// Copied to a temporary as `content_argument` does (machine.rs:1078-1095).
-    Content(Operand),
-    /// A fullword, an address or bytes, as `value_argument` does (machine.rs:1098-1109).
+    /// Copied to a temporary as `content_argument` does (machine.rs:1275-1292 (f2)).
+    Content(Chars),
+    /// A fullword, an address or bytes, as `value_argument` does (machine.rs:1295-1306 (f2)).
     Value(Operand),
     Omitted,
 }
+
+/// An ENTRY statement (`Compiled.entries`, exec/src/lib.rs:60-82 (f2)): a CALL of `name` starts at
+/// `block`, the block that begins with the statement after the ENTRY in paragraph `paragraph`, in
+/// the Main frame, with the segment register at that paragraph's priority, and binds `using`, LINKAGE
+/// record ordinals, in place of `Storage.using`.
+pub struct EntryPoint { pub name: SymId, pub paragraph: ParaId, pub block: BlockId, pub using: Vec<u16> }
 ```
 
+`Services.entries` holds them in source order, the order `Loaded.entry` numbers them. A dynamic
+CALL of an entry name gets a copy of the program of its own (assumption C51 `ENTRY_CALLS`,
+unit.rs:150-171 (f2)).
+
 - **The op returns** `Arm(0)` after a normal return, `Arm(1)` when the program is not found and ON
-  EXCEPTION is written, or `End(StopRun)`. Without ON EXCEPTION a missing program abends S806.
+  EXCEPTION is written, or `End(StopRun)`; `Next` in place of `Arm(0)` when neither ON EXCEPTION
+  nor NOT ON EXCEPTION is written, so that only an op with a phrase is followed by a `Select`.
+  Without ON EXCEPTION a missing program abends S806.
+- **The target.** A literal's name is `literal_value` then `program_name` done at lowering
+  (machine.rs:1150-1155 (f2)): the text in the program's code page, decoded, trimmed and
+  upper-cased. A literal that is not alphanumeric or hexadecimal, or that the code page cannot
+  encode, lowers to the walker's IRONWORK abend, an `Abend` terminator at the statement, since the
+  walker gives it before looking for a program. A data item holding a FUNCTION-POINTER or
+  PROCEDURE-POINTER is `Pointer`, as `call_through_pointer` decides by the item's declared kind
+  (machine/oo.rs:563-568 (f2)); any other identifier, and LENGTH OF or ADDRESS OF, is `Dynamic`,
+  whose operand is read as its kind reads it (a numeric item's invalid data abends S0C7) before a
+  value that is not alphanumeric bytes abends IRONWORK "a program name must be alphanumeric".
+- **Arguments** keep `call_nested`'s order and forms (machine.rs:1191-1211 (f2)): OMITTED;
+  BY REFERENCE of a data item, its address; BY VALUE, `value_argument` of the operand's value; and
+  anything else, BY CONTENT or BY REFERENCE of a literal, LENGTH OF or ADDRESS OF, a copy. A
+  `Content` literal's bytes are made at lowering as `content_argument` makes them: alphanumeric
+  and hexadecimal bytes, national UTF-16 units, an ALL literal's bytes once, a figurative constant
+  as the collating sequence's one byte, and a number as unsigned zoned digits, as many as the
+  literal has, the last with a minus zone when it is negative. `Content(Value(o))` is LENGTH OF as
+  a binary fullword or ADDRESS OF as its four bytes.
+- **Through a pointer** (machine/oo.rs:563-672 (f2)) every argument is `Value` or `Omitted`: the JNI
+  service takes each operand's value as it reads, OMITTED as NULL, whatever BY phrase is written.
+  No depth is counted, ON EXCEPTION never runs, and `returning` receives the service's result.
+- **RETURNING** is located after the callee returns and receives its RETURNING item's value by
+  MOVE rules chosen from the value's kind, or the service's result; not after STOP RUN.
 - **LE services** run only after the program search fails, as assumption L1
   `LE_SERVICE_AFTER_PROGRAMS` (int) records. `LeService` is an enum of the services `le_service`
   dispatches (machine/le_services.rs:59-74 (int)); arguments are addresses, as for a program
-  (le_services.rs:31-49 (int)). ON EXCEPTION never runs for a service.
+  (le_services.rs:31-49 (int)). ON EXCEPTION never runs for a service. A `Dynamic` target's name is
+  matched with a service when the CALL runs.
+- **CANCEL** is one `Cancel` per name, in order, each read as `program_name` reads a `Dynamic`
+  target (machine.rs:478-483 (f2)).
 - **Dynamic at run time:** loading and compiling on first CALL, RECURSIVE and INITIAL handling, the
-  recursion check, CANCEL's effect, and temporaries (machine.rs:973-1122). How a static CALL binds
-  is load-module.md §8.3.
+  recursion check, the depth check (after the load, before the arguments), CANCEL's effect, and
+  temporaries (machine.rs:973-1122). How a static CALL binds is load-module.md §8.3.
 
 ### 9.4 Files
 
@@ -1053,18 +1173,57 @@ pub struct InvokePlan {
     pub on_exception: bool, pub not_on_exception: bool,
 }
 /// The walker decides the receiver by name on every INVOKE (machine/oo.rs:192-215 (int)).
-pub enum Receiver { SelfRef, Super, Class(SymId), Object(PlaceId) }
+/// `Class` is a REPOSITORY class-name: `name` as written, which the walker's messages give, and
+/// `external`, which finds the class.
+pub enum Receiver { SelfRef, Super, Class { name: SymId, external: SymId }, Object(PlaceId) }
 pub enum MethodName { New, Named(SymId), Dynamic(PlaceId) }
+
+/// A class definition, in `Services.class` of the program lowered from its source; every name is
+/// that program's symbol. `parent` is the external name of the class it inherits.
+pub struct Class {
+    pub external: SymId, pub parent: SymId,
+    pub factory: Option<ClassPart>, pub object: Option<ClassPart>, pub methods: Vec<Method>,
+}
+/// FACTORY or OBJECT data, lowered as a program: its `Storage` image is the data as VALUE clauses
+/// leave it, which each object's or the factory's storage starts from, and `records` the offset of
+/// each 01 or 77 record in it (exec/src/oo.rs:222-226 (f2)).
+pub struct ClassPart { pub data: Program, pub records: Vec<u32> }
+/// `params` and `returns` are Java signatures. The method's LINKAGE records from `own_records` on
+/// are its part's records, bound at each invocation to the receiving object's or the factory's data.
+pub struct Method {
+    pub name: SymId, pub factory: bool, pub params: Vec<SymId>, pub returns: Option<SymId>,
+    pub own_records: u16, pub code: Program,
+}
 ```
 
-- **A class definition** lowers to its external and parent names, its FACTORY and OBJECT data as
-  `Storage`, and each method as a `Program` with its name, Java signature and `own_records`, the
-  count of LINKAGE records it declares before the data it works on (exec/src/oo.rs:83-92 (int)).
-- **Object references** are `Kind::ObjectReference` places, moved and compared as addresses
-  (machine.rs:1743 (int)).
+- **A class definition** lowers to the program its shell compiles to, with `Services.class` set.
+  Its FACTORY and OBJECT data and its methods are compiled as `load_class` compiles them the first
+  time a run reaches the class (`class_code`, exec/src/oo.rs:356-491 (f2)), and each is lowered as a
+  program of its own; a method's instance data are LINKAGE records after its own, as the walker
+  binds them (machine/oo.rs:515-521 (f2)). Lowering compiles them with the compiler flags that give
+  the class's options (flags only set trunc-check, sort-keys, FASTSRT ADV printing, warnings and
+  debug, after the cards), and refuses a method or part whose options differ from the class's. A
+  method or part never holds a class: the decoder refuses one before reading it, which keeps a
+  damaged module from nesting programs without end.
+- **INVOKE** evaluates as `invoke` does (machine/oo.rs:377-437 (f2)): the method name, the
+  receiver, then each argument, then the method is looked up by name, factory or instance, the
+  arguments' Java types and the RETURNING item's (both fixed at lowering by `operand_type` and
+  `item_type`, which Check has already required). SELF and SUPER outside a method abend IRONWORK;
+  Check refuses them. `NEW` sent to anything but a class abends IRONWORK.
+- **Arguments** pass as `argument` makes them (machine/oo.rs:309-332 (f2)): a data item as its
+  bytes, a one-character reference modification of Java type `C` as its first UTF-16 unit, LENGTH
+  OF and an integer literal as a binary fullword, ZERO as four zero bytes, another figurative
+  constant as its EBCDIC byte (not the collating sequence's), an alphanumeric or national literal
+  as its bytes. An argument of a reference type passes the object its four bytes identify.
+- **The op returns** `Arm(1)` when no method matches and ON EXCEPTION is written, else `Arm(0)`, or
+  `Next` when neither phrase is written; without ON EXCEPTION the walker abends U4038. RETURNING is
+  located after the method returns and receives its value by MOVE rules chosen from the value's
+  kind: a new object reference for NEW or a returned object, the RETURNING item's value otherwise.
+- **Object references** are `Kind::ObjectReference` places, moved as addresses (machine.rs:1743
+  (int)) and compared by `Compare::References` (§6).
 - **Dynamic:** class loading, an object's class, method lookup along the inheritance chain
-  (machine/oo.rs:259-282 (int)), and part and method storage. INVOKE returns `Arm(1)` when no
-  method matches and ON EXCEPTION is written; without it the walker abends U4038.
+  (machine/oo.rs:259-282 (int)), part and method storage, local and global references, the depth
+  check before a COBOL method runs, and RETURN-CODE kept across it.
 
 ### 9.9 Intrinsic functions
 
@@ -1208,5 +1367,6 @@ only on reaching it lowers to an `Abend` op (decision 2).
    follow rules the Language Reference states, so they need no oracle.
 4. **Abends in called programs.** Should `Abend` carry its program, so the CLI names the right file
    for an abend in a CALLed program? It changes what `ironwork run` prints today.
-5. **Constructs the parser refuses:** MOVE CORRESPONDING, PERFORM VARYING … AFTER and GO TO …
-   DEPENDING ON. The LIR defines each. Add them to the front end and the walker in step 2, or later?
+5. **Constructs the parser refuses:** MOVE CORRESPONDING. The LIR defines it. Add it to the front
+   end and the walker in step 2, or later? PERFORM VARYING … AFTER and GO TO … DEPENDING ON are
+   now parsed and run by the walker, and lower as it runs them (§8.3, §8.8).

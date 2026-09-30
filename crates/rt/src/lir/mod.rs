@@ -2,6 +2,7 @@
 
 mod arith;
 mod call;
+mod class;
 mod codec;
 mod collating;
 mod debug;
@@ -13,7 +14,8 @@ mod text;
 mod value;
 
 pub use arith::{ArithPlan, ArithStep, Mode, RemainderPlan, StepPlan, StorePlan};
-pub use call::{CallArg, CallPlan, CallTarget, LeService};
+pub use call::{CallArg, CallPlan, CallTarget, EntryPoint, LeService};
+pub use class::{Class, ClassPart, Method};
 pub use collating::{Collating, Sequence};
 pub use debug::Debug;
 pub use flow::{Frame, FrameKind, Op, Range, RangeKind, Step, Terminator};
@@ -154,6 +156,8 @@ pub struct Paragraph {
     pub entry: BlockId,
     /// The last paragraph of its section.
     pub section_end: ParaId,
+    /// Its section's priority-number, 0 for none; 50 or more is an independent segment.
+    pub priority: u8,
     pub at: DebugId,
 }
 
@@ -187,6 +191,10 @@ pub struct Services {
     pub invokes: Vec<InvokePlan>,
     pub cics: Vec<CicsCommand>,
     pub sqlca: Sqlca,
+    /// The ENTRY statements, in source order, which a CALL of their names enters.
+    pub entries: Vec<EntryPoint>,
+    /// A class definition's data and methods; None for any other program.
+    pub class: Option<Box<Class>>,
 }
 
 codec_struct!(Program {
@@ -201,10 +209,10 @@ codec_struct!(Item {
     name, level, parent, offset, size, occurs, dims, kind, local, linkage, redefines, depending_on, keys, at,
 });
 codec_struct!(AbendText { code, message, at });
-codec_struct!(Paragraph { name, is_section, entry, section_end, at });
+codec_struct!(Paragraph { name, is_section, entry, section_end, priority, at });
 codec_struct!(Block { ops, end });
 codec_struct!(Plans { arith, init, display, inspect, string, unstring, search_all, function });
-codec_struct!(Services { file_ops, files, calls, sorts, releases, returns, invokes, cics, sqlca });
+codec_struct!(Services { file_ops, files, calls, sorts, releases, returns, invokes, cics, sqlca, entries, class });
 
 pub(crate) fn program_valid(program: &Program) -> Result<(), String> {
     sql::table_valid(&program.sql, &program.symbols)

@@ -122,8 +122,8 @@ pub fn payroll() -> Program {
         storage,
         items,
         paragraphs: vec![
-            Paragraph { name: 2, is_section: false, entry: 0, section_end: 1, at: 4 },
-            Paragraph { name: 3, is_section: false, entry: 5, section_end: 1, at: 7 },
+            Paragraph { name: 2, is_section: false, entry: 0, section_end: 1, priority: 0, at: 4 },
+            Paragraph { name: 3, is_section: false, entry: 5, section_end: 1, priority: 0, at: 7 },
         ],
         procedure_start: 0,
         ranges: vec![Range { first: 1, last: 1, kind: RangeKind::Perform }],

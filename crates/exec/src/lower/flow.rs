@@ -8,7 +8,7 @@ use rt::abend::Ending;
 use rt::lir::{self, BlockId, DebugId, Op, RangeId, Terminator};
 use rt::storage::Kind;
 use syntax::Pos;
-use syntax::ast::{BinOp, ExecKind, ExitKind, Expr, Loop, Object, Operand, ProcName, RelOp, SizeError, Sorting, Stmt, Subject, Target, When};
+use syntax::ast::{BinOp, ExecKind, ExitKind, Expr, Loop, Object, Operand, ProcName, RelOp, SizeError, Sorting, Stmt, Subject, Target, Varying, When};
 
 /// Blocks under construction; `current` is the one ops go into, None after a terminator.
 #[derive(Default)]
@@ -61,6 +61,13 @@ struct Inline {
 enum Body<'a> {
     Range(RangeId),
     Inline(&'a [Stmt]),
+}
+
+/// A VARYING or AFTER phrase: the MOVE of FROM, the step by BY, and the UNTIL test.
+struct VaryLevel {
+    from: Op,
+    step: Op,
+    until: Test,
 }
 
 impl Lower<'_> {
@@ -130,8 +137,9 @@ impl Lower<'_> {
             return Err(LowerError::Exceeds("paragraphs", Pos::default()));
         }
         for p in &program.paragraphs {
-            self.collect_ranges(&p.statements)?;
+            self.collect(&p.statements)?;
         }
+        self.segments = self.altered.iter().any(|&p| program.paragraphs[p].priority >= 50);
         self.entries = (0..n).map(|_| self.new_block()).collect::<R<_>>()?;
         let mut paragraphs = Vec::with_capacity(n);
         for (p, para) in program.paragraphs.iter().enumerate() {
@@ -142,19 +150,31 @@ impl Lower<'_> {
                 is_section: para.is_section,
                 entry: self.entries[p],
                 section_end: crate::section_end(program, p) as u32,
+                priority: para.priority,
                 at: self.at(para.pos),
             });
         }
         Ok(paragraphs)
     }
 
-    fn collect_ranges(&mut self, stmts: &[Stmt]) -> R<()> {
+    /// Every PERFORM range, and every paragraph an ALTER names.
+    fn collect(&mut self, stmts: &[Stmt]) -> R<()> {
         for s in stmts {
-            if let Stmt::PerformProc { from, thru, pos, .. } = s {
-                self.range(from, thru.as_ref(), *pos)?;
+            match s {
+                Stmt::PerformProc { from, thru, pos, .. } => {
+                    self.range(from, thru.as_ref(), *pos)?;
+                }
+                Stmt::Alter { pairs, .. } => {
+                    for (from, _) in pairs {
+                        if let Ok((p, _)) = crate::procedure(self.program, from) {
+                            self.altered.insert(p);
+                        }
+                    }
+                }
+                _ => {}
             }
             for body in crate::oo::bodies(s) {
-                self.collect_ranges(body)?;
+                self.collect(body)?;
             }
         }
         Ok(())
@@ -180,19 +200,35 @@ impl Lower<'_> {
         Ok(r)
     }
 
-    /// `run_sentences` over one paragraph; a separator period starts a block NEXT SENTENCE can
-    /// reach.
+    /// `run_sentences` over one paragraph, entered as `run_paragraphs_from` enters it: its segment,
+    /// then the GO TO an ALTER set. A separator period starts a block NEXT SENTENCE can reach, and
+    /// an ENTRY statement one a CALL can enter.
     fn paragraph(&mut self, p: usize) -> R<()> {
         let para = &self.program.paragraphs[p];
+        if self.segments {
+            self.op(Op::EnterSegment(para.priority), para.pos)?;
+        }
+        if self.altered.contains(&p) {
+            let body = self.new_block()?;
+            self.end(Terminator::AlteredGoTo { para: p as u32, otherwise: body }, para.pos)?;
+            self.switch(body)?;
+        }
         for (i, s) in para.statements.iter().enumerate() {
             let pos = stmt_pos(s).unwrap_or(para.pos);
-            if *s == Stmt::SentenceEnd {
-                let b = self.sentence(p, i + 1)?;
-                self.jump(b, pos)?;
-                self.switch(b)?;
-                continue;
+            match s {
+                Stmt::SentenceEnd => {
+                    let b = self.sentence(p, i + 1)?;
+                    self.jump(b, pos)?;
+                    self.switch(b)?;
+                }
+                Stmt::Entry { .. } => {
+                    let b = self.new_block()?;
+                    self.jump(b, pos)?;
+                    self.switch(b)?;
+                    self.entry_blocks.insert((p, i + 1), b);
+                }
+                _ => self.statement(s, &Ctx { para: p, top: i, pos, loops: Vec::new() })?,
             }
-            self.statement(s, &Ctx { para: p, top: i, pos, loops: Vec::new() })?;
         }
         if self.blocks.current.is_some() {
             let end = self.paragraph_end(p, p + 1);
@@ -264,7 +300,45 @@ impl Lower<'_> {
                     self.op(Op::Initialize { target, plan }, pos)?;
                 }
             }
-            Stmt::GoTo { target: None, .. } => return unsupported("a GO TO with no target, which ALTER sets", pos),
+            // Unaltered, a GO TO with no target does nothing; the paragraph's entry holds the altered one.
+            Stmt::GoTo { target: None, .. } | Stmt::Entry { .. } => {}
+            Stmt::GoToDepending { targets, on, .. } => {
+                let value = self.int_expr(&Expr::Operand(Operand::Ref(on.clone())), pos)?;
+                let mut paragraphs = Vec::with_capacity(targets.len());
+                for target in targets {
+                    let Ok((t, _)) = crate::procedure(self.program, target) else { return unsupported("a GO TO DEPENDING ON target the walker cannot resolve", pos) };
+                    paragraphs.push(t as u32);
+                }
+                let next = self.new_block()?;
+                self.end(Terminator::Switch { value, targets: paragraphs, otherwise: next }, pos)?;
+                self.switch(next)?;
+            }
+            Stmt::Alter { pairs, .. } => {
+                for (from, to) in pairs {
+                    let (Ok((para, _)), Ok((to, _))) = (crate::procedure(self.program, from), crate::procedure(self.program, to)) else {
+                        return unsupported("an ALTER the walker cannot resolve", pos);
+                    };
+                    self.op(Op::Alter { para: para as u32, to: to as u32 }, pos)?;
+                }
+            }
+            Stmt::Call(c) => match self.call_plan(c, pos)? {
+                Ok(plan) => {
+                    self.op(Op::Call(plan), pos)?;
+                    self.phrases(c.on_exception.as_deref(), c.not_on_exception.as_deref(), pos, &inner)?;
+                }
+                Err(abend) => self.end(Terminator::Abend(abend), pos)?,
+            },
+            Stmt::Cancel { targets, .. } => {
+                for t in targets {
+                    let name = self.operand(t, pos)?.operand;
+                    self.op(Op::Cancel(name), pos)?;
+                }
+            }
+            Stmt::Invoke(i) => {
+                let plan = self.invoke_plan(i, pos)?;
+                self.op(Op::Invoke(plan), pos)?;
+                self.phrases(i.on_exception.as_deref(), i.not_on_exception.as_deref(), pos, &inner)?;
+            }
             Stmt::GoTo { target: Some(target), .. } => {
                 let Ok((t, _)) = crate::procedure(self.program, target) else { return unsupported("a GO TO the walker cannot resolve", pos) };
                 self.unnest(ctx.loops.len(), pos)?;
@@ -345,6 +419,23 @@ impl Lower<'_> {
                 self.branch(*b, then, otherwise, pos)
             }
         }
+    }
+
+    /// ON EXCEPTION and NOT ON EXCEPTION after a CALL or INVOKE op, which returns Arm(1) and Arm(0)
+    /// when either phrase is written.
+    fn phrases(&mut self, on: Option<&[Stmt]>, not_on: Option<&[Stmt]>, pos: Pos, ctx: &Ctx) -> R<()> {
+        if on.is_none() && not_on.is_none() {
+            return Ok(());
+        }
+        let (normal, exception, join) = (self.new_block()?, self.new_block()?, self.new_block()?);
+        self.end(Terminator::Select(vec![normal, exception]), pos)?;
+        self.switch(normal)?;
+        self.statements(not_on.unwrap_or_default(), ctx)?;
+        self.jump(join, pos)?;
+        self.switch(exception)?;
+        self.statements(on.unwrap_or_default(), ctx)?;
+        self.jump(join, pos)?;
+        self.switch(join)
     }
 
     fn arithmetic(&mut self, computations: &[(&Target, &Expr)], remainder: Option<&(Target, Expr, Expr)>, handler: Option<&SizeError>, pos: Pos, ctx: &Ctx) -> R<()> {
@@ -471,57 +562,106 @@ impl Lower<'_> {
                     self.run_body(&body, head, exit, pos, ctx)?;
                 }
             }
-            Loop::Varying { after, .. } if !after.is_empty() => return unsupported("PERFORM VARYING with AFTER", pos),
-            Loop::Varying { varying, test_after, .. } => {
-                let var = self.place(&varying.var, false)?;
-                let kind = self.kind_of(var);
-                if !matches!(kind, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Index) {
-                    return unsupported("a PERFORM VARYING variable that is not a fixed-point numeric item", varying.var.pos);
-                }
-                let Expr::Operand(from) = &varying.from else { return unsupported("PERFORM VARYING FROM an arithmetic expression", pos) };
-                let from = self.operand(from, pos)?;
-                let item = self.place_items[var as usize];
-                let plan = self.move_plan(&Side { src: None, ..from.side }, kind, item)?;
-                self.op(Op::Move { from: from.operand, to: var, plan }, pos)?;
-                let step = Expr::Bin(Box::new(Expr::Operand(Operand::Ref(varying.var.clone()))), BinOp::Add, Box::new(varying.by.clone()));
-                let dmax = scale(kind).max(self.dmax(&step)?);
-                let prepass = self.dmax_places(&varying.by)?;
-                let by = self.expr(&varying.by, pos)?;
-                let store = self.store_plan(kind, item)?;
-                let step = Op::Step { var, by, plan: lir::StepPlan { dmax, store }, prepass };
-                let until = self.test(&varying.until, pos)?;
-                let (run, cont) = (self.new_block()?, self.new_block()?);
-                if *test_after {
-                    self.jump(run, pos)?;
-                    self.switch(run)?;
-                    self.run_body(&body, cont, exit, pos, ctx)?;
-                    self.switch(cont)?;
-                    let stepping = self.new_block()?;
-                    self.branch(until, exit, stepping, pos)?;
-                    self.switch(stepping)?;
-                    self.op(step, pos)?;
-                    self.jump(run, pos)?;
-                } else {
-                    let head = self.new_block()?;
-                    self.jump(head, pos)?;
-                    self.switch(head)?;
-                    self.branch(until, exit, run, pos)?;
-                    self.switch(run)?;
-                    self.run_body(&body, cont, exit, pos, ctx)?;
-                    self.switch(cont)?;
-                    self.op(step, pos)?;
-                    self.jump(head, pos)?;
-                }
+            Loop::Varying { varying, after, test_after } => {
+                let levels: Vec<&Varying> = std::iter::once(&**varying).chain(after).collect();
+                self.varying(&levels, *test_after, &body, exit, pos, ctx)?;
             }
         }
         self.switch(exit)?;
         self.op(Op::Unnest(1), pos)
     }
 
+    /// PERFORM VARYING and its AFTER phrases as `vary` runs them, one loop per variable, the last
+    /// varying fastest: an outer variable is augmented before the one inside it is set to its FROM
+    /// value again. TEST BEFORE sets every variable first; TEST AFTER sets each inner one as its
+    /// loop is entered.
+    fn varying(&mut self, levels: &[&Varying], test_after: bool, body: &Body<'_>, exit: BlockId, pos: Pos, ctx: &Ctx) -> R<()> {
+        let mut vary = Vec::with_capacity(levels.len());
+        for v in levels {
+            vary.push(self.vary_level(v, pos)?);
+        }
+        let n = vary.len() - 1;
+        let tests: Vec<BlockId> = (0..=n).map(|_| self.new_block()).collect::<R<_>>()?;
+        let steps: Vec<BlockId> = (0..=n).map(|_| self.new_block()).collect::<R<_>>()?;
+        let run = self.new_block()?;
+        if test_after {
+            // Block k sets variable k + 1 and enters its loop; the last is the body.
+            let tops: Vec<BlockId> = (0..n).map(|_| self.new_block()).collect::<R<_>>()?;
+            let top = |k: usize| if k < n { tops[k] } else { run };
+            self.op(vary[0].from.clone(), pos)?;
+            self.jump(top(0), pos)?;
+            for k in 0..n {
+                self.switch(tops[k])?;
+                self.op(vary[k + 1].from.clone(), pos)?;
+                self.jump(top(k + 1), pos)?;
+            }
+            self.switch(run)?;
+            self.run_body(body, tests[n], exit, pos, ctx)?;
+            for (k, level) in vary.into_iter().enumerate() {
+                self.switch(tests[k])?;
+                let then = if k == 0 { exit } else { tests[k - 1] };
+                self.branch(level.until, then, steps[k], pos)?;
+                self.switch(steps[k])?;
+                self.op(level.step, pos)?;
+                self.jump(top(k), pos)?;
+            }
+        } else {
+            for level in &vary {
+                self.op(level.from.clone(), pos)?;
+            }
+            self.jump(tests[0], pos)?;
+            let froms: Vec<Op> = vary.iter().map(|level| level.from.clone()).collect();
+            for (k, level) in vary.into_iter().enumerate() {
+                self.switch(tests[k])?;
+                let then = if k == 0 { exit } else { steps[k - 1] };
+                let inner = if k == n { run } else { tests[k + 1] };
+                self.branch(level.until, then, inner, pos)?;
+                self.switch(steps[k])?;
+                self.op(level.step, pos)?;
+                if k < n {
+                    self.op(froms[k + 1].clone(), pos)?;
+                }
+                self.jump(tests[k], pos)?;
+            }
+            self.switch(run)?;
+            self.run_body(body, steps[n], exit, pos, ctx)?;
+        }
+        Ok(())
+    }
+
+    /// One VARYING or AFTER phrase: FROM stored with MOVE rules, the BY step, and the UNTIL test.
+    fn vary_level(&mut self, v: &Varying, pos: Pos) -> R<VaryLevel> {
+        let var = self.place(&v.var, false)?;
+        let kind = self.kind_of(var);
+        if !matches!(kind, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Index) {
+            return unsupported("a PERFORM VARYING variable that is not a fixed-point numeric item", v.var.pos);
+        }
+        let Expr::Operand(from) = &v.from else { return unsupported("PERFORM VARYING FROM an arithmetic expression", pos) };
+        let from = self.operand(from, pos)?;
+        let item = self.place_items[var as usize];
+        let plan = self.move_plan(&Side { src: None, ..from.side }, kind, item)?;
+        let from = Op::Move { from: from.operand, to: var, plan };
+        let sum = Expr::Bin(Box::new(Expr::Operand(Operand::Ref(v.var.clone()))), BinOp::Add, Box::new(v.by.clone()));
+        let dmax = scale(kind).max(self.dmax(&sum)?);
+        let prepass = self.dmax_places(&v.by)?;
+        let by = self.expr(&v.by, pos)?;
+        let store = self.store_plan(kind, item)?;
+        let step = Op::Step { var, by, plan: lir::StepPlan { dmax, store }, prepass };
+        let until = self.test(&v.until, pos)?;
+        Ok(VaryLevel { from, step, until })
+    }
+
     /// One iteration: enter the range and return to `cont`, or run the inline body, where EXIT
     /// PERFORM takes `exit` and EXIT PERFORM CYCLE `cont`.
     fn run_body(&mut self, body: &Body<'_>, cont: BlockId, exit: BlockId, pos: Pos, ctx: &Ctx) -> R<()> {
         match body {
+            Body::Range(range) if self.segments => {
+                let ret = self.new_block()?;
+                self.end(Terminator::PerformEnter { range: *range, ret }, pos)?;
+                self.switch(ret)?;
+                self.op(Op::SetSegment(self.program.paragraphs[ctx.para].priority), pos)?;
+                self.jump(cont, pos)
+            }
             Body::Range(range) => self.end(Terminator::PerformEnter { range: *range, ret: cont }, pos),
             Body::Inline(stmts) => {
                 let mut inner = Ctx { pos, ..ctx.clone() };

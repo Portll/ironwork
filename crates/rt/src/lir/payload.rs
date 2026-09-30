@@ -155,7 +155,10 @@ pub enum TrimSide {
     Trailing,
 }
 
-/// `args` and `returning` carry each Java type signature.
+/// `args` and `returning` carry each Java type signature. The op evaluates the method name, then the
+/// receiver, then each argument, and returns Arm(1) when no method matches and ON EXCEPTION is
+/// written, Arm(0) otherwise, or Next when neither phrase is written. `returning` is moved by the
+/// kind of the value the method returns.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InvokePlan {
     pub receiver: Receiver,
@@ -166,11 +169,13 @@ pub struct InvokePlan {
     pub not_on_exception: bool,
 }
 
+/// `Class` is a REPOSITORY class-name: `name` as written, which messages give, and `external`, which
+/// finds the class.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Receiver {
     SelfRef,
     Super,
-    Class(SymId),
+    Class { name: SymId, external: SymId },
     Object(PlaceId),
 }
 
@@ -241,7 +246,7 @@ codec_enum!(Func {
 });
 codec_enum!(TrimSide { Leading = 0, Trailing = 1 });
 codec_struct!(InvokePlan { receiver, method, args, returning, on_exception, not_on_exception });
-codec_enum!(Receiver { SelfRef = 0, Super = 1, Class(name) = 2, Object(place) = 3 });
+codec_enum!(Receiver { SelfRef = 0, Super = 1, Class { name, external } = 2, Object(place) = 3 });
 codec_enum!(MethodName { New = 0, Named(name) = 1, Dynamic(place) = 2 });
 
 macro_rules! placeholder {

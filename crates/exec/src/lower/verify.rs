@@ -2,9 +2,29 @@
 //! the control-flow graph is closed, every op has its debug entry, and places carry SSRANGE checks
 //! exactly when the program has SSRANGE.
 
-use rt::lir::{Comparand, Cond, DisplayItem, Expr, IntExpr, Op, Operand, Place, Program, Terminator};
+use rt::lir::{CallArg, CallTarget, Chars, Comparand, Cond, DisplayItem, Expr, IntExpr, MethodName, Op, Operand, Place, Program, Receiver, Terminator};
 
+/// A class definition's data and methods are programs of their own, each checked as one.
 pub fn verify(p: &Program) -> Result<(), String> {
+    verify_program(p)?;
+    let Some(class) = &p.services.class else { return Ok(()) };
+    for part in class.factory.iter().chain(&class.object) {
+        verify(&part.data).map_err(|e| format!("class data: {e}"))?;
+    }
+    for m in &class.methods {
+        verify(&m.code).map_err(|e| format!("method {}: {e}", p.symbols.get(m.name as usize).map_or("", String::as_str)))?;
+    }
+    let symbol = |id: u32| if (id as usize) < p.symbols.len() { Ok(()) } else { Err(format!("symbol {id} of {}", p.symbols.len())) };
+    symbol(class.external)?;
+    symbol(class.parent)?;
+    for m in &class.methods {
+        symbol(m.name)?;
+        m.params.iter().chain(&m.returns).try_for_each(|&s| symbol(s))?;
+    }
+    Ok(())
+}
+
+fn verify_program(p: &Program) -> Result<(), String> {
     let within = |what: &str, id: u32, len: usize| if (id as usize) < len { Ok(()) } else { Err(format!("{what} {id} of {len}")) };
     let block = |id| within("block", id, p.blocks.len());
     let place = |id| within("place", id, p.places.len());
@@ -105,6 +125,60 @@ pub fn verify(p: &Program) -> Result<(), String> {
             expr(r.divisor)?;
         }
     }
+    let symbol = |id: u32| within("symbol", id, p.symbols.len());
+    let chars = |c: &Chars| match c {
+        Chars::Literal(_) => Ok(()),
+        Chars::Place(q) => place(*q),
+        Chars::Value(o) => operand(o),
+    };
+    for c in &p.services.calls {
+        match &c.target {
+            CallTarget::Named { name, .. } => symbol(*name)?,
+            CallTarget::Dynamic(o) => operand(o)?,
+            CallTarget::Pointer(q) => place(*q)?,
+        }
+        for a in &c.args {
+            match a {
+                CallArg::Reference(q) => place(*q)?,
+                CallArg::Content(ch) => chars(ch)?,
+                CallArg::Value(o) => operand(o)?,
+                CallArg::Omitted => {}
+            }
+            if matches!(c.target, CallTarget::Pointer(_)) && !matches!(a, CallArg::Value(_) | CallArg::Omitted) {
+                return Err("a CALL through a pointer with an argument that is not a value".into());
+            }
+        }
+        c.returning.map_or(Ok(()), place)?;
+    }
+    for i in &p.services.invokes {
+        match i.receiver {
+            Receiver::SelfRef | Receiver::Super => {}
+            Receiver::Class { name, external } => {
+                symbol(name)?;
+                symbol(external)?;
+            }
+            Receiver::Object(q) => place(q)?,
+        }
+        match i.method {
+            MethodName::New => {}
+            MethodName::Named(s) => symbol(s)?,
+            MethodName::Dynamic(q) => place(q)?,
+        }
+        for (o, java) in &i.args {
+            operand(o)?;
+            symbol(*java)?;
+        }
+        if let Some((q, java)) = i.returning {
+            place(q)?;
+            symbol(java)?;
+        }
+    }
+    for e in &p.services.entries {
+        symbol(e.name)?;
+        within("paragraph", e.paragraph, p.paragraphs.len())?;
+        block(e.block)?;
+        e.using.iter().try_for_each(|&r| within("LINKAGE record", u32::from(r), p.storage.linkage.len()))?;
+    }
     for d in &p.plans.display {
         for item in &d.items {
             match item {
@@ -127,6 +201,16 @@ pub fn verify(p: &Program) -> Result<(), String> {
             return Err(format!("block {b}: {} debug entries for {} ops and a terminator", ids.len(), blk.ops.len()));
         }
         ids.iter().try_for_each(|&id| within("debug entry", id, p.debug.positions.len()))?;
+        let armed = |op: &Op| match op {
+            Op::Arith(a) => p.plans.arith.get(*a as usize).is_some_and(|plan| plan.handled),
+            Op::Call(c) => p.services.calls.get(*c as usize).is_some_and(|plan| plan.on_exception || plan.not_on_exception),
+            Op::Invoke(i) => p.services.invokes.get(*i as usize).is_some_and(|plan| plan.on_exception || plan.not_on_exception),
+            _ => false,
+        };
+        let last = blk.ops.len().saturating_sub(1);
+        if blk.ops.iter().enumerate().any(|(k, op)| armed(op) && (k != last || !matches!(blk.end, Terminator::Select(_)))) {
+            return Err(format!("block {b}: an op that returns an arm is not followed by its Select"));
+        }
         for op in &blk.ops {
             match op {
                 Op::Move { from, to, .. } => {
@@ -145,7 +229,14 @@ pub fn verify(p: &Program) -> Result<(), String> {
                 }
                 Op::SetTemp(_, n) => int(n)?,
                 Op::Display(d) => within("DISPLAY plan", *d, p.plans.display.len())?,
-                Op::Nest | Op::Unnest(_) | Op::DecTemp(_) => {}
+                Op::Call(c) => within("CALL plan", *c, p.services.calls.len())?,
+                Op::Cancel(o) => operand(o)?,
+                Op::Invoke(i) => within("INVOKE plan", *i, p.services.invokes.len())?,
+                Op::Alter { para, to } => {
+                    within("paragraph", *para, p.paragraphs.len())?;
+                    within("paragraph", *to, p.paragraphs.len())?;
+                }
+                Op::Nest | Op::Unnest(_) | Op::DecTemp(_) | Op::EnterSegment(_) | Op::SetSegment(_) => {}
                 other => return Err(format!("block {b}: {other:?} is outside this slice")),
             }
         }
@@ -158,13 +249,13 @@ pub fn verify(p: &Program) -> Result<(), String> {
             }
             Terminator::Select(arms) => {
                 arms.iter().try_for_each(|&t| block(t))?;
-                let handled = match blk.ops.last() {
-                    Some(Op::Arith(a)) => p.plans.arith.get(*a as usize).is_some_and(|plan| plan.handled),
-                    _ => false,
-                };
-                if !handled || arms.len() != 2 {
-                    return Err(format!("block {b}: a Select that does not follow an arithmetic op with SIZE ERROR"));
+                if !blk.ops.last().is_some_and(armed) || arms.len() != 2 {
+                    return Err(format!("block {b}: a Select that does not follow an op with its phrases"));
                 }
+            }
+            Terminator::AlteredGoTo { para, otherwise } => {
+                within("paragraph", *para, p.paragraphs.len())?;
+                block(*otherwise)?;
             }
             Terminator::ParagraphEnd { next } => {
                 if *next as usize > p.paragraphs.len() {

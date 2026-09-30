@@ -108,7 +108,7 @@ impl Lower<'_> {
         }
         let reference = |s: &Side| s.src == Some(Kind::ObjectReference);
         if x.value == Value::Address && y.value == Value::Address && (reference(x) || reference(y)) {
-            return super::unsupported("comparing object references", pos);
+            return Ok(Compare::References);
         }
         let address = |v: Value| matches!(v, Value::Address | Value::Fig(Figurative::Null));
         if x.value == Value::Address || y.value == Value::Address {

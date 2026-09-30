@@ -1,10 +1,13 @@
 //! Lowering (docs/lir.md): a compiled program with every name resolved, every category decided and
 //! every transfer of control made explicit, as the LIR a VM runs and a load module holds.
 //!
-//! This is the first slice: storage, places, expressions and conditions, the arithmetic verbs,
-//! MOVE, IF, EVALUATE, DISPLAY, INITIALIZE, PERFORM, GO TO, EXIT, STOP RUN and GOBACK. Anything
-//! else is [`LowerError::Unsupported`], naming the construct.
+//! Lowered so far: storage, places, expressions and conditions, the arithmetic verbs, MOVE, IF,
+//! EVALUATE, DISPLAY, INITIALIZE, PERFORM, GO TO, GO TO DEPENDING ON, ALTER, EXIT, STOP RUN, GOBACK,
+//! CALL, CANCEL, ENTRY, INVOKE, independent segments and class definitions. Anything else is
+//! [`LowerError::Unsupported`], naming the construct.
 
+mod call;
+mod class;
 mod cond;
 mod data;
 mod flow;
@@ -22,7 +25,7 @@ use crate::machine::Machine;
 use crate::unit::{Clock, Library, RunUnit};
 use rt::abend::AbendCode;
 use rt::lir::{self, AbendId, BlockId, ConstId, DebugId, PlaceId, RangeId, SymId};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use syntax::Pos;
 use syntax::ast;
@@ -81,8 +84,8 @@ fn push<T>(table: &mut Vec<T>, value: T, what: &'static str) -> R<u32> {
     Ok(id)
 }
 
-/// Lowers one compiled program. A program that is not a class definition, uses only the constructs
-/// of this slice and passes Check lowers.
+/// Lowers one compiled program, or a class definition with its data and methods. One that passes
+/// Check and uses only the constructs lowered so far lowers.
 pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
     let mut l = Lower::new(compiled);
     l.refuse_program()?;
@@ -91,6 +94,8 @@ pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
     let storage = l.storage()?;
     let items = l.items()?;
     let paragraphs = l.procedure()?;
+    l.services.entries = l.entry_points()?;
+    l.services.class = l.class_definition()?;
     let procedure_start = compiled.program.report_writer.procedure_start.min(compiled.program.paragraphs.len());
     let (blocks, ops) = l.blocks.finish()?;
     let program = lir::Program {
@@ -114,7 +119,7 @@ pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
         conds: l.conds,
         consts: l.consts,
         plans: l.plans,
-        services: lir::Services::default(),
+        services: l.services,
         sql: Vec::new(),
         abends: l.abends,
         edits: compiled.layout.edits.clone(),
@@ -148,6 +153,7 @@ struct Lower<'c> {
     abends: Vec<lir::AbendText>,
     abend_ids: HashMap<String, AbendId>,
     plans: lir::Plans,
+    services: lir::Services,
     ranges: Vec<lir::Range>,
     range_ids: HashMap<(u32, u32), RangeId>,
     blocks: flow::Blocks,
@@ -156,6 +162,13 @@ struct Lower<'c> {
     entries: Vec<BlockId>,
     /// The block that starts statement k of paragraph p, after a separator period.
     sentences: HashMap<(usize, usize), BlockId>,
+    /// The block that starts statement k of paragraph p, after an ENTRY statement.
+    entry_blocks: HashMap<(usize, usize), BlockId>,
+    /// The paragraphs an ALTER names.
+    altered: BTreeSet<usize>,
+    /// Whether an ALTER names a paragraph of an independent segment, which makes the segment
+    /// control reaches observable.
+    segments: bool,
 }
 
 impl<'c> Lower<'c> {
@@ -179,21 +192,22 @@ impl<'c> Lower<'c> {
             abends: Vec::new(),
             abend_ids: HashMap::new(),
             plans: lir::Plans::default(),
+            services: lir::Services::default(),
             ranges: Vec::new(),
             range_ids: HashMap::new(),
             blocks: flow::Blocks::default(),
             temps: 0,
             entries: Vec::new(),
             sentences: HashMap::new(),
+            entry_blocks: HashMap::new(),
+            altered: BTreeSet::new(),
+            segments: false,
         }
     }
 
     /// Program-wide constructs outside the slice, refused before anything is lowered.
     fn refuse_program(&self) -> R<()> {
         let program = self.program;
-        if program.oo.as_ref().is_some_and(|o| o.class().is_some()) {
-            return unsupported("a class definition", Pos::default());
-        }
         if let Some(report) = program.report_writer.reports.first() {
             return unsupported("Report Writer", report.pos);
         }
@@ -202,9 +216,6 @@ impl<'c> Lower<'c> {
         }
         if let Some(pos) = program.declaratives.errors.first().map(|u| u.pos).or_else(|| program.declaratives.debugging.first().map(|u| u.pos)) {
             return unsupported("DECLARATIVES", pos);
-        }
-        if let Some(p) = program.paragraphs.iter().find(|p| p.priority >= 50) {
-            return unsupported("an independent segment", p.pos);
         }
         Ok(())
     }

@@ -42,6 +42,16 @@ pub enum Op {
     Invoke(InvokeId),
     Cics(CicsId),
     Sql(SqlId),
+    /// ALTER: from now on control reaching paragraph `para` goes to `to`. The alter table lives as
+    /// long as the program's WORKING-STORAGE.
+    Alter { para: ParaId, to: ParaId },
+    /// Control reaching a paragraph of segment `priority`: when that differs from the segment
+    /// register and is 50 or more, the alter entries of the segment's paragraphs are cleared. The
+    /// register then holds `priority`.
+    EnterSegment(u8),
+    /// A PERFORM range completed: the register goes back to the PERFORM's own segment, clearing
+    /// nothing.
+    SetSegment(u8),
 }
 
 /// What an op tells the VM.
@@ -64,7 +74,7 @@ pub enum Terminator {
     /// Leaves a paragraph for `next`, which may be one past the last; a PERFORM range may complete here.
     ParagraphEnd { next: ParaId },
     GoTo(ParaId),
-    /// GO TO … DEPENDING ON: `targets[k − 1]` for k in range, else `otherwise`.
+    /// GO TO … DEPENDING ON: `targets[k − 1]` for k in range, taken as a `GoTo`; else `otherwise`.
     Switch { value: IntExpr, targets: Vec<ParaId>, otherwise: BlockId },
     /// An out-of-line PERFORM: push a frame and enter the range; `ret` runs when it completes.
     PerformEnter { range: RangeId, ret: BlockId },
@@ -72,6 +82,9 @@ pub enum Terminator {
     ExitProgram { next: BlockId },
     End(Ending),
     Abend(AbendId),
+    /// The entry of a paragraph an ALTER names: a `GoTo` of the target the alter table holds for
+    /// `para`, or `Jump(otherwise)` while it holds none.
+    AlteredGoTo { para: ParaId, otherwise: BlockId },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -138,6 +151,9 @@ codec_enum!(Op {
     Invoke(id) = 24,
     Cics(id) = 25,
     Sql(id) = 26,
+    Alter { para, to } = 27,
+    EnterSegment(priority) = 28,
+    SetSegment(priority) = 29,
 });
 codec_enum!(Step { Next = 0, Arm(arm) = 1, GoTo(para) = 2, End(ending) = 3 });
 codec_enum!(Terminator {
@@ -151,6 +167,7 @@ codec_enum!(Terminator {
     ExitProgram { next } = 7,
     End(ending) = 8,
     Abend(abend) = 9,
+    AlteredGoTo { para, otherwise } = 10,
 });
 codec_struct!(Range { first, last, kind });
 codec_enum!(RangeKind { Perform = 0, SortProcedure = 1, UseBeforeReporting = 2 });

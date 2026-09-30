@@ -1,8 +1,8 @@
 use super::*;
 use crate::testing::{check_lowering, encoded, line};
 use rt::lir::{
-    ArithPlan, Base, Collating, Comparand, Cond as LirCond, Const, DisplayItem, Image, IntExpr, Mode, MovePlan, NationalFrom, NumericFrom, Op,
-    Operand as LirOperand, Place, Program, SignTest, StorePlan, Terminator,
+    ArithPlan, Base, CallArg, CallTarget, Chars, Collating, Comparand, Cond as LirCond, Const, DisplayItem, Image, IntExpr, LeService, MethodName, Mode,
+    MovePlan, NationalFrom, NumericFrom, Op, Operand as LirOperand, Place, Program, Receiver, SignTest, StorePlan, Terminator,
 };
 use rt::module::codec::decode_all;
 
@@ -377,7 +377,7 @@ fn every_op_and_terminator_names_a_position() {
 #[test]
 fn constructs_outside_the_slice_are_refused_by_name() {
     let refused = |body: &str, data: &str| lower(&compiled(&program("", data, &[line(body), line("GOBACK.")].concat()))).unwrap_err();
-    assert!(matches!(refused("CALL 'SUB'", ""), LowerError::Unsupported("CALL", _)));
+    assert!(matches!(refused("SET K UP BY 1", "       01  K PIC 9.\n"), LowerError::Unsupported("SET", _)));
     assert!(matches!(refused("MOVE FUNCTION UPPER-CASE(A) TO A", "       01  A PIC X.\n"), LowerError::Unsupported("FUNCTION", _)));
     assert!(matches!(refused("INSPECT A TALLYING N FOR ALL 'A'", "       01  A PIC X.\n       01  N PIC 9.\n"), LowerError::Unsupported("INSPECT", _)));
     let e = refused("ACCEPT A", "       01  A PIC X.\n");
@@ -394,18 +394,11 @@ fn statements_and_program_features_the_lowering_lacks_are_refused_by_name() {
         let error = lower(&compiled(&program("", data, &source(lines)))).unwrap_err();
         assert!(matches!(error, LowerError::Unsupported(n, _) if n == name), "{name}: {error}");
     };
-    named(&["A.", "    GO TO B C DEPENDING ON K.", "B.", "    GOBACK.", "C.", "    GOBACK."], "GO TO DEPENDING ON");
-    named(&["A.", "    ALTER B TO PROCEED TO C.", "B.", "    GO TO.", "C.", "    GOBACK."], "ALTER");
-    named(&["A.", "    ENTRY 'ALT'.", "    GOBACK."], "ENTRY");
-    named(
-        &["A.", "    PERFORM P VARYING K FROM 1 BY 1 UNTIL K > 2", "        AFTER J FROM 1 BY 1 UNTIL J > 2", "    GOBACK.", "P.", "    CONTINUE."],
-        "PERFORM VARYING with AFTER",
-    );
     named(
         &["DECLARATIVES.", "S SECTION.", "    USE AFTER STANDARD ERROR PROCEDURE ON INPUT.", "P.", "    CONTINUE.", "END DECLARATIVES.", "A.", "    GOBACK."],
         "DECLARATIVES",
     );
-    named(&["S1 SECTION 50.", "A.", "    GOBACK."], "an independent segment");
+    named(&["A.", "    CALL 'SUB' USING FUNCTION UPPER-CASE('A').", "    GOBACK."], "FUNCTION");
 }
 
 #[test]
@@ -539,4 +532,262 @@ fn a_condition_name_whose_values_compare_differently_is_an_or_of_relations_in_va
     assert_eq!(hows, [lir::Compare::Fixed, lir::Compare::Alphanumeric]);
     let or = p.conds.iter().find_map(|c| if let LirCond::Or(a, b) = c { Some((*a, *b)) } else { None }).unwrap();
     assert_eq!(or, (0, 1));
+}
+
+/// Where control goes from a block through plain jumps to blocks with no ops.
+fn through(p: &Program, mut b: u32) -> u32 {
+    while let (true, Terminator::Jump(t)) = (p.blocks[b as usize].ops.is_empty(), &p.blocks[b as usize].end) {
+        b = *t;
+    }
+    b
+}
+
+fn symbol(p: &Program, id: u32) -> &str {
+    &p.symbols[id as usize]
+}
+
+#[test]
+fn go_to_depending_on_switches_and_alter_sets_the_go_to_its_paragraph_s_entry_takes() {
+    let p = lowered(&program(
+        "",
+        "       01  K PIC 9 VALUE 2.\n",
+        &[
+            "       MAIN-LINE.\n",
+            &line("GO TO P1 P2 DEPENDING ON K"),
+            &line("ALTER SW TO PROCEED TO P2"),
+            &line("GO TO SW."),
+            "       SW.\n",
+            &line("GO TO P1."),
+            "       P1.\n",
+            &line("DISPLAY 'P1'."),
+            "       P2.\n",
+            &line("GO TO."),
+        ]
+        .concat(),
+    ));
+    let (sw, p1, p2) = (paragraph(&p, "SW") as u32, paragraph(&p, "P1") as u32, paragraph(&p, "P2") as u32);
+    let switch = p.blocks.iter().find_map(|b| if let Terminator::Switch { value, targets, otherwise } = &b.end { Some((value.clone(), targets.clone(), *otherwise)) } else { None });
+    let (value, targets, otherwise) = switch.unwrap();
+    assert!(matches!(value, IntExpr::Item(k) if symbol(&p, p.places[k as usize].name) == "K"));
+    assert_eq!(targets, [p1, p2]);
+    assert_eq!(p.blocks[otherwise as usize].ops, [Op::Alter { para: sw, to: p2 }]);
+    let entry = &p.blocks[p.paragraphs[sw as usize].entry as usize];
+    let Terminator::AlteredGoTo { para, otherwise } = entry.end else { panic!("{entry:?}") };
+    assert_eq!((para, entry.ops.len()), (sw, 0));
+    assert_eq!(p.blocks[otherwise as usize].end, Terminator::Jump(p.paragraphs[p1 as usize].entry));
+    assert_eq!(end_of(&p, "P2"), Terminator::ParagraphEnd { next: p2 + 1 });
+    assert!(!ops(&p).any(|op| matches!(op, Op::EnterSegment(_) | Op::SetSegment(_))), "no ALTER names a paragraph of an independent segment");
+    assert!(p.paragraphs.iter().all(|q| q.priority == 0));
+}
+
+#[test]
+fn an_altered_paragraph_of_an_independent_segment_makes_every_entry_and_perform_return_keep_the_segment() {
+    let segment = |name: &str, priority: u8| {
+        [
+            format!("       {name} SECTION {priority}.\n       {name}-START.\n"),
+            line(&format!("DISPLAY 'IN {priority}'.")),
+            format!("       {name}-SW.\n"),
+            line(&format!("GO TO {name}-FIRST.")),
+            format!("       {name}-FIRST.\n"),
+            line(&format!("ALTER {name}-SW TO PROCEED TO {name}-SECOND")),
+            line(&format!("GO TO {name}-SW.")),
+            format!("       {name}-SECOND.\n"),
+            line("DISPLAY 'SECOND'."),
+        ]
+        .concat()
+    };
+    let p = lowered(&program(
+        "",
+        "",
+        &["       MAIN SECTION.\n".to_owned(), line("PERFORM FIXED"), line("PERFORM INDEP 2 TIMES"), line("GOBACK."), segment("FIXED", 10), segment("INDEP", 50)].concat(),
+    ));
+    for q in &p.paragraphs {
+        assert_eq!(p.blocks[q.entry as usize].ops.first(), Some(&Op::EnterSegment(q.priority)), "{}", symbol(&p, q.name));
+    }
+    assert_eq!(p.paragraphs[paragraph(&p, "INDEP-SW")].priority, 50);
+    for sw in ["FIXED-SW", "INDEP-SW"] {
+        assert!(matches!(p.blocks[p.paragraphs[paragraph(&p, sw)].entry as usize].end, Terminator::AlteredGoTo { .. }), "{sw}");
+    }
+    let returns: Vec<u32> = p.blocks.iter().filter_map(|b| if let Terminator::PerformEnter { ret, .. } = b.end { Some(ret) } else { None }).collect();
+    assert_eq!(returns.len(), 2);
+    for ret in returns {
+        assert_eq!(p.blocks[ret as usize].ops, [Op::SetSegment(0)]);
+    }
+}
+
+#[test]
+fn an_entry_statement_starts_a_block_a_call_of_its_name_enters() {
+    let source = [
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. SUBPROG.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n",
+        "       01  COUNTER PIC 9 VALUE 0.\n       LINKAGE SECTION.\n       01  PAYREC PIC X(5).\n       01  PAY-CODE PIC 9.\n",
+        "       PROCEDURE DIVISION USING PAYREC.\n",
+        &line("ADD 1 TO COUNTER"),
+        &line("ENTRY 'PASSED'."),
+        &line("EXIT PROGRAM."),
+        &line("ENTRY 'PAYMASTR' USING PAY-CODE PAYREC."),
+        &line("ADD 2 TO COUNTER"),
+        &line("GOBACK."),
+    ]
+    .concat();
+    let p = lowered(&source);
+    let entries = &p.services.entries;
+    assert_eq!(entries.iter().map(|e| symbol(&p, e.name)).collect::<Vec<_>>(), ["PASSED", "PAYMASTR"]);
+    assert_eq!((entries[0].using.as_slice(), entries[1].using.as_slice()), (&[][..], &[1, 0][..]));
+    assert!(entries.iter().all(|e| e.paragraph == 0));
+    assert!(matches!(p.blocks[through(&p, entries[0].block) as usize].end, Terminator::ExitProgram { .. }));
+    let paymastr = &p.blocks[through(&p, entries[1].block) as usize];
+    assert!(matches!(paymastr.ops.first(), Some(Op::Arith(1))), "{paymastr:?}");
+}
+
+#[test]
+fn perform_varying_after_steps_the_outer_variable_before_it_sets_the_inner_one_again() {
+    let data = "       01  I PIC 9(2).\n       01  J PIC 9(2).\n";
+    let body = |test: &str| {
+        [line(&format!("PERFORM P {test}VARYING I FROM 1 BY 1 UNTIL I > 3")), line("    AFTER J FROM I BY 1 UNTIL J > 3"), line("GOBACK."), "       P.\n".into(), line("DISPLAY I J.")].concat()
+    };
+    let var = |p: &Program, op: &Op| match op {
+        Op::Move { to, .. } => format!("MOVE {}", symbol(p, p.places[*to as usize].name)),
+        Op::Step { var, .. } => format!("STEP {}", symbol(p, p.places[*var as usize].name)),
+        other => format!("{other:?}"),
+    };
+    let blocks = |p: &Program| p.blocks.iter().map(|b| b.ops.iter().map(|op| var(p, op)).collect::<Vec<_>>().join(", ")).filter(|s| !s.is_empty()).collect::<Vec<_>>();
+    let before = lowered(&program("", data, &body("")));
+    let shown = blocks(&before);
+    assert_eq!(shown[0], "Nest, MOVE I, MOVE J");
+    assert!(shown.contains(&"STEP I, MOVE J".to_owned()) && shown.contains(&"STEP J".to_owned()), "{shown:?}");
+    let after = lowered(&program("", data, &body("WITH TEST AFTER ")));
+    let shown = blocks(&after);
+    assert_eq!(shown[0], "Nest, MOVE I");
+    assert!(shown.contains(&"MOVE J".to_owned()) && shown.contains(&"STEP I".to_owned()) && shown.contains(&"STEP J".to_owned()), "{shown:?}");
+}
+
+#[test]
+fn call_plans_keep_each_argument_as_the_walker_passes_it() {
+    let data = concat!(
+        "       01  PGM PIC X(8) VALUE 'SUB'.\n       01  REC PIC X(5).\n       01  N PIC S9(4) COMP.\n",
+        "       01  FP USAGE FUNCTION-POINTER.\n",
+    );
+    let body = [
+        "CALL 'CEEDATE' USING REC",
+        "CALL 'sub1 ' USING BY REFERENCE REC",
+        "    BY CONTENT 'AB' 12 ZERO LENGTH OF REC BY VALUE N OMITTED",
+        "    RETURNING N ON EXCEPTION DISPLAY 'MISSING'",
+        "    NOT ON EXCEPTION DISPLAY 'CALLED' END-CALL",
+        "CALL PGM",
+        "CALL FP USING REC OMITTED",
+        "CANCEL PGM 'SUB'",
+        "GOBACK.",
+    ]
+    .map(line)
+    .concat();
+    let p = lowered(&program("", data, &body));
+    let calls = &p.services.calls;
+    let CallTarget::Named { name, le } = calls[0].target else { panic!("{:?}", calls[0].target) };
+    assert_eq!((symbol(&p, name), le), ("CEEDATE", Some(LeService::Ceedate)));
+    let CallTarget::Named { name, le: None } = calls[1].target else { panic!("{:?}", calls[1].target) };
+    assert_eq!(symbol(&p, name), "SUB1");
+    assert!(matches!(calls[0].args[0], CallArg::Reference(_)) && matches!(calls[1].args[0], CallArg::Reference(_)));
+    assert_eq!(calls[1].args[1], CallArg::Content(Chars::Literal(vec![0xC1, 0xC2])));
+    assert_eq!(calls[1].args[2], CallArg::Content(Chars::Literal(vec![0xF1, 0xF2])));
+    assert_eq!(calls[1].args[3], CallArg::Content(Chars::Literal(vec![0xF0])));
+    assert!(matches!(calls[1].args[4], CallArg::Content(Chars::Value(LirOperand::LengthOf(_)))));
+    assert!(matches!(calls[1].args[5], CallArg::Value(LirOperand::Load(_))));
+    assert_eq!(calls[1].args[6], CallArg::Omitted);
+    assert!(calls[1].returning.is_some() && calls[1].on_exception && calls[1].not_on_exception);
+    assert!(matches!(calls[2].target, CallTarget::Dynamic(LirOperand::Load(_))));
+    assert!(matches!(calls[3].target, CallTarget::Pointer(_)));
+    assert!(matches!(calls[3].args.as_slice(), [CallArg::Value(LirOperand::Load(_)), CallArg::Omitted]));
+    let selects: Vec<_> = p.blocks.iter().filter(|b| matches!(b.end, Terminator::Select(_))).map(|b| b.ops.last().cloned()).collect();
+    assert_eq!(selects, [Some(Op::Call(1))]);
+    let cancels: Vec<_> = ops(&p).filter_map(|op| if let Op::Cancel(o) = op { Some(*o) } else { None }).collect();
+    assert!(matches!(cancels.as_slice(), [LirOperand::Load(_), LirOperand::Const(_)]));
+}
+
+const OO_CARD: &str = "       CBL THREAD,DLL\n";
+
+#[test]
+fn a_class_definition_lowers_its_data_and_each_method_as_a_program() {
+    let method = |name: &str, linkage: &str, header: &str, body: &[&str]| {
+        let data = if linkage.is_empty() { String::new() } else { format!("       DATA DIVISION.\n       LINKAGE SECTION.\n{linkage}") };
+        let body: String = body.iter().map(|l| line(l)).collect();
+        format!("       IDENTIFICATION DIVISION.\n       METHOD-ID. \"{name}\".\n{data}       PROCEDURE DIVISION{header}.\n{body}       END METHOD \"{name}\".\n")
+    };
+    let part = |kind: &str, data: &str, methods: &[String]| {
+        format!("       IDENTIFICATION DIVISION.\n       {kind}.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n{data}       PROCEDURE DIVISION.\n{}       END {kind}.\n", methods.concat())
+    };
+    let source = [
+        OO_CARD,
+        "       IDENTIFICATION DIVISION.\n       CLASS-ID. Account INHERITS Base.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       REPOSITORY.\n",
+        "           CLASS Base IS \"java.lang.Object\"\n           CLASS Account IS \"Account\".\n",
+        &part(
+            "FACTORY",
+            "       01  OPENED PIC S9(9) BINARY VALUE 0.\n",
+            &[method("open", "       01  OPENING USAGE OBJECT REFERENCE Account.\n", " RETURNING OPENING", &["INVOKE Account NEW RETURNING OPENING", "ADD 1 TO OPENED."])],
+        ),
+        &part(
+            "OBJECT",
+            "       01  BALANCE PIC S9(9) BINARY VALUE 100.\n",
+            &[
+                method("credit", "       01  AMOUNT PIC S9(9) BINARY.\n", " USING BY VALUE AMOUNT", &["ADD AMOUNT TO BALANCE", "INVOKE SELF \"show\"."]),
+                method("show", "", "", &["DISPLAY BALANCE."]),
+            ],
+        ),
+        "       END CLASS Account.\n",
+    ]
+    .concat();
+    let p = lowered(&source);
+    let class = p.services.class.as_deref().unwrap();
+    assert_eq!((symbol(&p, class.external), symbol(&p, class.parent)), ("Account", "java.lang.Object"));
+    let (factory, object) = (class.factory.as_ref().unwrap(), class.object.as_ref().unwrap());
+    assert_eq!((factory.records.as_slice(), factory.data.storage.image.as_slice()), (&[0][..], &[0, 0, 0, 0][..]));
+    assert_eq!((object.records.as_slice(), object.data.storage.image.as_slice()), (&[0][..], &[0, 0, 0, 100][..]));
+    let methods: Vec<_> = class.methods.iter().map(|m| (symbol(&p, m.name), m.factory, m.params.iter().map(|&s| symbol(&p, s)).collect::<Vec<_>>(), m.returns.map(|s| symbol(&p, s)), m.own_records)).collect();
+    assert_eq!(
+        methods,
+        [("open", true, vec![], Some("LAccount;"), 1), ("credit", false, vec!["I"], None, 1), ("show", false, vec![], None, 0)]
+    );
+    let open = &class.methods[0].code;
+    let new = &open.services.invokes[0];
+    let Receiver::Class { name, external } = new.receiver else { panic!("{:?}", new.receiver) };
+    assert_eq!((symbol(open, name), symbol(open, external), new.method), ("ACCOUNT", "Account", MethodName::New));
+    assert_eq!(new.returning.map(|(_, java)| symbol(open, java)), Some("LAccount;"));
+    assert_eq!(place_named(open, "OPENED")[0].base, Base::Linkage(1));
+    let credit = &class.methods[1].code;
+    let show = &credit.services.invokes[0];
+    assert_eq!(show.receiver, Receiver::SelfRef);
+    assert!(matches!(show.method, MethodName::Named(s) if symbol(credit, s) == "show"));
+    assert_eq!(place_named(credit, "BALANCE")[0].base, Base::Linkage(1));
+    assert!(credit.services.class.is_none());
+}
+
+#[test]
+fn invoke_plans_name_the_receiver_method_and_java_types_and_object_references_compare_as_objects() {
+    let source = [
+        OO_CARD,
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. CLIENT RECURSIVE.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       REPOSITORY.\n",
+        "           CLASS Account IS \"Account\".\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n",
+        "       01  A1 USAGE OBJECT REFERENCE Account.\n       01  A2 USAGE OBJECT REFERENCE Account.\n       01  U USAGE OBJECT REFERENCE.\n",
+        "       01  AMOUNT PIC S9(9) BINARY.\n       01  MNAME PIC X(20).\n       PROCEDURE DIVISION.\n",
+        &line("INVOKE Account \"open\" RETURNING A1"),
+        &line("INVOKE A1 \"credit\" USING BY VALUE AMOUNT 7"),
+        &line("    ON EXCEPTION DISPLAY 'NONE' END-INVOKE"),
+        &line("INVOKE U MNAME"),
+        &line("IF A1 = A2 DISPLAY 'SAME' END-IF"),
+        &line("IF A1 = NULL DISPLAY 'NULL' END-IF"),
+        &line("GOBACK."),
+    ]
+    .concat();
+    let p = lowered(&source);
+    let invokes = &p.services.invokes;
+    assert!(matches!(invokes[0].receiver, Receiver::Class { .. }));
+    assert_eq!(invokes[0].returning.map(|(_, java)| symbol(&p, java)), Some("LAccount;"));
+    assert!(matches!(invokes[1].receiver, Receiver::Object(a) if symbol(&p, p.places[a as usize].name) == "A1"));
+    let args: Vec<_> = invokes[1].args.iter().map(|(o, java)| (matches!(o, LirOperand::Load(_)), symbol(&p, *java))).collect();
+    assert_eq!(args, [(true, "I"), (false, "I")]);
+    assert!(invokes[1].on_exception && !invokes[1].not_on_exception && !invokes[0].on_exception);
+    assert!(matches!(invokes[2].method, MethodName::Dynamic(_)));
+    let selects: Vec<_> = p.blocks.iter().filter(|b| matches!(b.end, Terminator::Select(_))).map(|b| b.ops.last().cloned()).collect();
+    assert_eq!(selects, [Some(Op::Invoke(1))]);
+    let hows: Vec<_> = p.conds.iter().filter_map(|c| if let LirCond::Rel { how, .. } = c { Some(*how) } else { None }).collect();
+    assert_eq!(hows, [lir::Compare::References, lir::Compare::Address]);
 }

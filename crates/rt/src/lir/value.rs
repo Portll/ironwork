@@ -73,6 +73,9 @@ pub enum Compare {
     National,
     Alphanumeric,
     Refused(AbendId),
+    /// Two addresses, one side an object reference: equal when both identify the same object, else
+    /// less. Each side is looked up, the first first, and one that was freed or never given abends.
+    References,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,6 +132,7 @@ codec_enum!(Compare {
     National = 4,
     Alphanumeric = 5,
     Refused(abend) = 6,
+    References = 7,
 });
 codec_enum!(ByteClass { Packed { signed } = 0, Zoned { signed } = 1, Digits = 2, Alphabetic = 3 });
 codec_enum!(SignTest { Positive = 0, Negative = 1, Zero = 2 });

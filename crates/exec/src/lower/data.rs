@@ -116,8 +116,11 @@ impl Lower<'_> {
 
     fn new_place(&mut self, r: &Ref, receiving: bool) -> R<PlaceId> {
         let layout = self.layout;
+        // `oo_register`: SELF's cell and JNIENVPTR's, whole, whatever reference modification says.
         if r.qualifiers.is_empty() && r.subscripts.is_empty() && matches!(r.name.as_str(), "SELF" | "JNIENVPTR") && layout.resolve(&r.name, &[], r.pos).is_err() {
-            return unsupported("SELF or JNIENVPTR", r.pos);
+            let (base, kind) = if r.name == "SELF" { (lir::Base::SelfRef, Kind::ObjectReference) } else { (lir::Base::JniEnv, Kind::Pointer) };
+            let place = lir::Place { base, offset: 0, len: 4, kind, subscripts: Vec::new(), odo: None, refmod: None, name: self.sym(&r.name), at: self.at(r.pos) };
+            return self.push_place(place, None);
         }
         if r.name == "RETURN-CODE" && r.qualifiers.is_empty() && !layout.items.iter().any(|i| i.name.as_deref() == Some("RETURN-CODE")) {
             let place = lir::Place {

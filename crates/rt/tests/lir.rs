@@ -274,7 +274,7 @@ fn program_shape_round_trips() {
     };
     let filler = Item { name: None, parent: None, dims: vec![], depending_on: None, keys: vec![], redefines: Some(6), ..item.clone() };
     round_trip(&[item, filler]);
-    round_trip(&[Paragraph { name: 1, is_section: true, entry: 0, section_end: 3, at: 2 }]);
+    round_trip(&[Paragraph { name: 1, is_section: true, entry: 0, section_end: 3, priority: 50, at: 2 }]);
     round_trip(&[Block { ops: vec![], end: Terminator::Jump(1) }, Block { ops: vec![Op::Nest, Op::Arith(0)], end: Terminator::Abend(0) }]);
     let plans = Plans {
         arith: vec![ArithPlan { dmax: 0, arith: Arith::Extend, prepass: vec![], steps: vec![], remainder: None, handled: false }],
@@ -310,8 +310,39 @@ fn program_shape_round_trips() {
         }],
         cics: vec![CicsCommand::Placeholder],
         sqlca: Sqlca { fields: vec![(SqlcaField::Code, 0, INTEGER)] },
+        entries: vec![EntryPoint { name: 2, paragraph: 1, block: 4, using: vec![0, 1] }],
+        class: Some(Box::new(account())),
     };
     round_trip(&[Services::default(), services]);
+}
+
+/// A class with FACTORY data, OBJECT data and a method of each, its programs the sample program.
+fn account() -> Class {
+    let part = ClassPart { data: payroll(), records: vec![0, 40] };
+    let method = Method { name: 3, factory: false, params: vec![4], returns: Some(5), own_records: 1, code: payroll() };
+    let open = Method { factory: true, params: vec![], returns: None, own_records: 0, ..method.clone() };
+    Class { external: 1, parent: 2, factory: Some(part.clone()), object: Some(part), methods: vec![method, open] }
+}
+
+#[test]
+fn class_definitions_and_entry_points_round_trip() {
+    let bare = Class { factory: None, object: None, methods: vec![], ..account() };
+    round_trip(&[account(), bare]);
+    round_trip(&[EntryPoint { name: 0, paragraph: 0, block: 0, using: vec![] }, EntryPoint { name: 7, paragraph: 2, block: 9, using: vec![3] }]);
+    let mut program = payroll();
+    program.services.class = Some(Box::new(account()));
+    round_trip(std::slice::from_ref(&program));
+}
+
+#[test]
+fn a_class_inside_a_class_s_method_is_malformed() {
+    let mut inner = payroll();
+    inner.services.class = Some(Box::new(Class { factory: None, object: None, methods: vec![], ..account() }));
+    let mut class = account();
+    class.methods[1].code = inner;
+    let (bytes, strings) = encoded(&class);
+    assert_eq!(refused::<Class>(&bytes, &strings).1, "a class definition inside a class definition");
+    round_trip(&[account()]);
 }
 
 #[test]
@@ -399,8 +430,9 @@ fn values_and_conditions_round_trip_with_every_tag() {
         Compare::National,
         Compare::Alphanumeric,
         Compare::Refused(0),
+        Compare::References,
     ];
-    every_variant(&compares, 7);
+    every_variant(&compares, 8);
     let classes = [ByteClass::Packed { signed: false }, ByteClass::Zoned { signed: true }, ByteClass::Digits, ByteClass::Alphabetic];
     every_variant(&classes, 4);
     every_variant(&[SignTest::Positive, SignTest::Negative, SignTest::Zero], 3);
@@ -470,8 +502,11 @@ fn control_flow_round_trips_with_every_tag() {
         Op::Invoke(0),
         Op::Cics(0),
         Op::Sql(1),
+        Op::Alter { para: 2, to: 5 },
+        Op::EnterSegment(50),
+        Op::SetSegment(0),
     ];
-    every_variant(&ops, 27);
+    every_variant(&ops, 30);
     every_variant(&[Step::Next, Step::Arm(2), Step::GoTo(3), Step::End(Ending::Goback)], 4);
     let terminators = [
         Terminator::Jump(1),
@@ -484,8 +519,9 @@ fn control_flow_round_trips_with_every_tag() {
         Terminator::ExitProgram { next: 8 },
         Terminator::End(Ending::StopRun),
         Terminator::Abend(0),
+        Terminator::AlteredGoTo { para: 3, otherwise: 9 },
     ];
-    every_variant(&terminators, 10);
+    every_variant(&terminators, 11);
     round_trip(&[Range { first: 1, last: 3, kind: RangeKind::Perform }, Range { first: 4, last: 2, kind: RangeKind::SortProcedure }]);
     every_variant(&[RangeKind::Perform, RangeKind::SortProcedure, RangeKind::UseBeforeReporting], 3);
     let kinds = [FrameKind::Main, FrameKind::Perform, FrameKind::SortProcedure, FrameKind::UseBeforeReporting { at: 4 }];
@@ -554,10 +590,10 @@ fn statement_payloads_round_trip_with_every_tag() {
     every_variant(&funcs, 20);
     every_variant(&[TrimSide::Leading, TrimSide::Trailing], 2);
     round_trip(&[FunctionPlan { func: Func::Max, args: vec![0, 1, 2], side: None, refmod: Some(REFMOD), at: 5 }]);
-    every_variant(&[Receiver::SelfRef, Receiver::Super, Receiver::Class(1), Receiver::Object(2)], 4);
+    every_variant(&[Receiver::SelfRef, Receiver::Super, Receiver::Class { name: 1, external: 7 }, Receiver::Object(2)], 4);
     every_variant(&[MethodName::New, MethodName::Named(3), MethodName::Dynamic(4)], 3);
     let invoke = InvokePlan {
-        receiver: Receiver::Class(1),
+        receiver: Receiver::Class { name: 1, external: 1 },
         method: MethodName::Named(2),
         args: vec![(Operand::Load(0), 3), (Operand::Const(1), 4)],
         returning: Some((5, 6)),
