@@ -10,6 +10,9 @@ use syntax::ast::{Expr, FunctionCall};
 impl Lower<'_> {
     pub(super) fn function(&mut self, f: &FunctionCall) -> R<(FunctionId, Side)> {
         let Some(func) = Func::named(&f.name) else { return unsupported("a FUNCTION the LIR does not name", f.pos) };
+        if !f.all_subscripts.is_empty() {
+            return unsupported("FUNCTION arguments with ALL subscripts", f.pos);
+        }
         let pos = f.pos;
         let mut args = Vec::with_capacity(f.args.len());
         let mut sides = Vec::with_capacity(f.args.len());

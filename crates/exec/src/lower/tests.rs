@@ -385,6 +385,8 @@ fn constructs_outside_the_slice_are_refused_by_name() {
     assert!(matches!(refused("STRING A DELIMITED BY SIZE INTO A", "       01  A PIC X.\n"), LowerError::Unsupported("STRING", _)));
     let mixed = refused("MOVE FUNCTION MAX(A 1) TO A", "       01  A PIC X.\n");
     assert!(matches!(mixed, LowerError::Unsupported("FUNCTION MIN or MAX of arguments of different kinds", _)));
+    let all = refused("MOVE FUNCTION MAX(T(ALL)) TO A", "       01  A PIC X.\n       01  G.\n           05 T PIC X OCCURS 3.\n");
+    assert!(matches!(all, LowerError::Unsupported("FUNCTION arguments with ALL subscripts", _)));
     let numval = refused("MOVE FUNCTION NUMVAL(A) TO A", "       01  A PIC X.\n");
     assert!(matches!(numval, LowerError::Unsupported(n, _) if n.starts_with("a FUNCTION result whose digits")));
     assert!(matches!(refused("INSPECT A TALLYING N FOR ALL 'A'", "       01  A PIC X.\n       01  N PIC 9.\n"), LowerError::Unsupported("INSPECT", _)));
