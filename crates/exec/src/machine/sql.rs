@@ -147,7 +147,7 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
         if let Some(session) = self.unit.sql.as_mut() {
             let answer = session.settle(program, commit).map_err(|a| Abend { code: a.code.into(), message: a.message, pos })?;
             if answer.sqlcode < 0 && commit {
-                return self.raise(block, "ROLLEDBACK", 0);
+                return self.raise(block, crate::cics::Condition::ROLLEDBACK, 0);
             }
             if answer.sqlcode < 0 {
                 let message = format!("SYNCPOINT ROLLBACK: the database refused to roll back with SQLCODE {}", answer.sqlcode);

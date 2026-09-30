@@ -13,6 +13,104 @@ use std::path::PathBuf;
 /// The EXEC interface block's length: EIBRLDBK, its last field, is at X'54'.
 pub const EIB_LEN: usize = 85;
 
+macro_rules! conditions {
+    ($($name:ident)*) => {
+        /// A CICS exception condition, one variant per name DFHRESP knows, spelt as IBM spells it.
+        #[allow(clippy::upper_case_acronyms)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        pub enum Condition {
+            $($name,)*
+        }
+
+        impl Condition {
+            pub const ALL: &[Self] = &[$(Self::$name,)*];
+
+            pub fn name(self) -> &'static str {
+                match self {
+                    $(Self::$name => stringify!($name),)*
+                }
+            }
+        }
+    };
+}
+
+conditions! {
+    NORMAL ERROR RDATT WRBRK EOF EODS EOC INBFMH ENDINPT NONVAL NOSTART TERMIDERR FILENOTFOUND
+    NOTFND DUPREC DUPKEY INVREQ IOERR NOSPACE NOTOPEN ENDFILE ILLOGIC LENGERR QZERO SIGNAL QBUSY
+    ITEMERR PGMIDERR TRANSIDERR ENDDATA INVTSREQ EXPIRED RETPAGE RTEFAIL RTESOME TSIOERR MAPFAIL
+    INVERRTERM INVMPSZ IGREQID OVERFLOW INVLDC NOSTG JIDERR QIDERR NOJBUFSP DSSTAT SELNERR FUNCERR
+    UNEXPIN NOPASSBKRD NOPASSBKWR SEGIDERR SYSIDERR ISCINVREQ ENQBUSY ENVDEFERR IGREQCD SESSIONERR
+    SYSBUSY SESSBUSY NOTALLOC CBIDERR INVEXITREQ INVPARTNSET INVPARTN PARTNFAIL USERIDERR NOTAUTH
+    VOLIDERR SUPPRESSED RESIDERR NOSPOOL TERMERR ROLLEDBACK END DISABLED ALLOCERR STRELERR OPENERR
+    SPOLBUSY SPOLERR NODEIDERR TASKIDERR TCIDERR DSNNOTFOUND LOADING MODELIDERR OUTDESCRERR
+    PARTNERIDERR PROFILEIDERR NETNAMEIDERR LOCKED RECORDBUSY UOWNOTFOUND UOWLNOTFOUND LINKABEND
+    CHANGED PROCESSBUSY ACTIVITYBUSY PROCESSERR ACTIVITYERR CONTAINERERR EVENTERR TOKENERR
+    NOTFINISHED POOLERR TIMERERR SYMBOLERR TEMPLATERR NOTSUPERUSER CSDERR DUPRES RESUNAVAIL
+    CHANNELERR CCSIDERR TIMEDOUT CODEPAGEERR INCOMPLETE APPNOTFOUND BUSY
+}
+
+/// Names a condition also goes by: DSIDERR is FILENOTFOUND's older name.
+const ALIASES: &[(&str, Condition)] = &[("DSIDERR", Condition::FILENOTFOUND)];
+
+/// The transaction abend CICS issues when a condition is raised and nothing handles it; a
+/// condition not listed abends AEIP.
+const DEFAULT_ABENDS: &[(Condition, &str)] = &[
+    (Condition::NOTFND, "AEIM"),
+    (Condition::DUPREC, "AEIN"),
+    (Condition::DUPKEY, "AEIO"),
+    (Condition::IOERR, "AEIQ"),
+    (Condition::NOSPACE, "AEIR"),
+    (Condition::NOTOPEN, "AEIS"),
+    (Condition::ENDFILE, "AEIT"),
+    (Condition::ILLOGIC, "AEIU"),
+    (Condition::LENGERR, "AEIV"),
+    (Condition::QZERO, "AEIW"),
+    (Condition::ITEMERR, "AEIZ"),
+    (Condition::PGMIDERR, "AEI0"),
+    (Condition::TRANSIDERR, "AEI1"),
+    (Condition::ENDDATA, "AEI2"),
+    (Condition::INVTSREQ, "AEI3"),
+    (Condition::EXPIRED, "AEI4"),
+    (Condition::TSIOERR, "AEI8"),
+    (Condition::MAPFAIL, "AEI9"),
+    (Condition::ERROR, "AEIA"),
+    (Condition::EOF, "AEID"),
+    (Condition::EODS, "AEIE"),
+    (Condition::INBFMH, "AEIG"),
+    (Condition::ENDINPT, "AEIH"),
+    (Condition::NONVAL, "AEII"),
+    (Condition::NOSTART, "AEIJ"),
+    (Condition::TERMIDERR, "AEIK"),
+    (Condition::FILENOTFOUND, "AEIL"),
+    (Condition::DISABLED, "AEXL"),
+    (Condition::ROLLEDBACK, "AEXJ"),
+    (Condition::LOCKED, "AEX8"),
+    (Condition::RECORDBUSY, "AEX9"),
+    (Condition::QIDERR, "AEYH"),
+    (Condition::SYSIDERR, "AEYQ"),
+    (Condition::NOTAUTH, "AEY7"),
+    (Condition::USERIDERR, "AEYX"),
+    (Condition::CONTAINERERR, "AEZJ"),
+    (Condition::CHANNELERR, "AEZV"),
+];
+
+impl Condition {
+    /// The condition DFHRESP(name) names, by either of its names, in any case.
+    pub fn from_name(name: &str) -> Option<Self> {
+        let alias = ALIASES.iter().find(|(a, _)| a.eq_ignore_ascii_case(name)).map(|&(_, c)| c);
+        alias.or_else(|| Self::ALL.iter().copied().find(|c| c.name().eq_ignore_ascii_case(name)))
+    }
+
+    /// EIBRESP's value for the condition, from IBM's DFHRESP table.
+    pub fn resp(self) -> i32 {
+        crate::cics_tables::resp(self.name()).unwrap_or_else(|| panic!("DFHRESP has no {}", self.name()))
+    }
+
+    pub fn default_abend(self) -> &'static str {
+        DEFAULT_ABENDS.iter().find(|&&(c, _)| c == self).map_or("AEIP", |&(_, abend)| abend)
+    }
+}
+
 /// What kind of VSAM data set a CICS file is.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DataSet {
@@ -134,7 +232,7 @@ pub struct Task {
     /// The AID key whose input started the task, as EIBAID shows it before any RECEIVE.
     pub initial_aid: Option<u8>,
     /// Mapsets already read from the copy libraries, by name.
-    pub mapsets: HashMap<String, syntax::bms::Mapset>,
+    pub mapsets: HashMap<String, crate::bms::Mapset>,
     /// RETURN TRANSID and COMMAREA, when the task ended that way.
     pub next_transid: Option<String>,
     pub returned_commarea: Option<Vec<u8>>,
@@ -148,7 +246,7 @@ impl Task {
         queue: &str,
         rewrite: Option<usize>,
         data: &[u8],
-    ) -> Result<usize, &'static str> {
+    ) -> Result<usize, Condition> {
         let queue = queue.trim_end();
         match rewrite {
             None => {
@@ -160,9 +258,9 @@ impl Task {
                 Ok(q.items.len())
             }
             Some(item) => {
-                let q = self.ts.get_mut(queue).ok_or("QIDERR")?;
+                let q = self.ts.get_mut(queue).ok_or(Condition::QIDERR)?;
                 if item == 0 || item > q.items.len() {
-                    return Err("ITEMERR");
+                    return Err(Condition::ITEMERR);
                 }
                 q.items[item - 1] = data.to_vec();
                 Ok(item)
@@ -175,20 +273,20 @@ impl Task {
         &mut self,
         queue: &str,
         item: Option<usize>,
-    ) -> Result<(Vec<u8>, usize), &'static str> {
+    ) -> Result<(Vec<u8>, usize), Condition> {
         let queue = queue.trim_end();
-        let q = self.ts.get_mut(queue).ok_or("QIDERR")?;
+        let q = self.ts.get_mut(queue).ok_or(Condition::QIDERR)?;
         let item_num = match item {
             Some(n) => {
                 if n == 0 || n > q.items.len() {
-                    return Err("ITEMERR");
+                    return Err(Condition::ITEMERR);
                 }
                 n
             }
             None => {
                 let n = if q.next == 0 { 1 } else { q.next + 1 };
                 if n > q.items.len() {
-                    return Err("ITEMERR");
+                    return Err(Condition::ITEMERR);
                 }
                 n
             }
@@ -199,9 +297,9 @@ impl Task {
     }
 
     /// DELETEQ TS.
-    pub fn deleteq_ts(&mut self, queue: &str) -> Result<(), &'static str> {
+    pub fn deleteq_ts(&mut self, queue: &str) -> Result<(), Condition> {
         let queue = queue.trim_end();
-        self.ts.remove(queue).map(|_| ()).ok_or("QIDERR")
+        self.ts.remove(queue).map(|_| ()).ok_or(Condition::QIDERR)
     }
 
     /// WRITEQ TD: appends (creating the queue).
@@ -211,11 +309,11 @@ impl Task {
     }
 
     /// READQ TD: removes and returns the oldest item.
-    pub fn readq_td(&mut self, queue: &str) -> Result<Vec<u8>, &'static str> {
+    pub fn readq_td(&mut self, queue: &str) -> Result<Vec<u8>, Condition> {
         let queue = queue.trim_end();
-        let items = self.td.get_mut(queue).ok_or("QZERO")?;
+        let items = self.td.get_mut(queue).ok_or(Condition::QZERO)?;
         if items.is_empty() {
-            return Err("QZERO");
+            return Err(Condition::QZERO);
         }
         Ok(items.remove(0))
     }
@@ -349,6 +447,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn every_condition_is_a_dfhresp_row_with_its_number() {
+        for &c in Condition::ALL {
+            assert_eq!(Some(c.resp()), crate::cics_tables::resp(c.name()), "{c:?}");
+            assert_eq!(Condition::from_name(c.name()), Some(c));
+        }
+        let rows: Vec<&str> = crate::cics_tables::resp_table().iter().map(|r| r.condition).collect();
+        let names: Vec<&str> = Condition::ALL.iter().map(|c| c.name()).collect();
+        assert_eq!(names, rows, "one variant per DFHRESP row, in its order");
+    }
+
+    #[test]
+    fn every_default_abend_is_for_a_dfhresp_condition_and_listed_once() {
+        for (i, &(c, abend)) in DEFAULT_ABENDS.iter().enumerate() {
+            assert!(crate::cics_tables::resp(c.name()).is_some(), "{c:?}");
+            assert!(DEFAULT_ABENDS[..i].iter().all(|&(d, _)| d != c), "{c:?} is listed twice");
+            assert_eq!(c.default_abend(), abend);
+        }
+        assert_eq!(DEFAULT_ABENDS.len(), 37);
+        let codes = [Condition::QIDERR, Condition::ROLLEDBACK, Condition::FILENOTFOUND, Condition::INVREQ, Condition::INVMPSZ].map(Condition::default_abend);
+        assert_eq!(codes, ["AEYH", "AEXJ", "AEIL", "AEIP", "AEIP"]);
+    }
+
+    #[test]
+    fn dsiderr_is_filenotfound_by_its_older_name() {
+        let c = Condition::from_name("dsiderr").unwrap();
+        assert_eq!((c, c.name(), c.resp()), (Condition::FILENOTFOUND, "FILENOTFOUND", 12));
+        assert_eq!(Condition::from_name("NOSUCH"), None);
+    }
+
+    #[test]
     fn parse_file_ksds() {
         let (name, def) = parse_file("MYFILE=/tmp/data,KSDS,key=0:8,len=80").unwrap();
         assert_eq!(name, "MYFILE");
@@ -387,17 +515,17 @@ mod tests {
         assert_eq!(data, b"three");
         assert_eq!(count, 3);
 
-        assert_eq!(task.readq_ts("Q1", None), Err("ITEMERR"));
+        assert_eq!(task.readq_ts("Q1", None), Err(Condition::ITEMERR));
 
         task.writeq_ts("Q1", Some(1), b"ONE").unwrap();
         let (data, _) = task.readq_ts("Q1", Some(1)).unwrap();
         assert_eq!(data, b"ONE");
 
-        assert_eq!(task.writeq_ts("Q1", Some(9), b"x"), Err("ITEMERR"));
-        assert_eq!(task.readq_ts("NOPE", None), Err("QIDERR"));
+        assert_eq!(task.writeq_ts("Q1", Some(9), b"x"), Err(Condition::ITEMERR));
+        assert_eq!(task.readq_ts("NOPE", None), Err(Condition::QIDERR));
 
         task.deleteq_ts("Q1").unwrap();
-        assert_eq!(task.readq_ts("Q1", None), Err("QIDERR"));
+        assert_eq!(task.readq_ts("Q1", None), Err(Condition::QIDERR));
     }
 
     #[test]
@@ -410,7 +538,7 @@ mod tests {
         assert_eq!(task.readq_td("Q1").unwrap(), b"first");
         assert_eq!(task.readq_td("Q1").unwrap(), b"second");
         assert_eq!(task.readq_td("Q1").unwrap(), b"third");
-        assert_eq!(task.readq_td("Q1"), Err("QZERO"));
+        assert_eq!(task.readq_td("Q1"), Err(Condition::QZERO));
     }
 
     #[test]

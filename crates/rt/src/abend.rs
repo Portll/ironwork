@@ -2,6 +2,7 @@
 //! passes up as errors to leave a statement early. With them, the I/O statuses FILE STATUS
 //! receives, and how a run ends.
 
+use crate::cics::Condition;
 use crate::vocab::Pos;
 use std::fmt;
 use zarch::check::ProgramCheck;
@@ -278,11 +279,11 @@ impl FileStatus {
     }
 
     /// The CICS condition a keyed store's failure raises.
-    pub fn cics_condition(self) -> &'static str {
+    pub fn cics_condition(self) -> Condition {
         match self {
-            Self::DuplicateKey => "DUPREC",
-            Self::NotFound => "NOTFND",
-            _ => "INVREQ",
+            Self::DuplicateKey => Condition::DUPREC,
+            Self::NotFound => Condition::NOTFND,
+            _ => Condition::INVREQ,
         }
     }
 }

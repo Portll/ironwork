@@ -101,13 +101,7 @@ pub enum LinageValue {
     Data(Ref),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OpenMode {
-    Input,
-    Output,
-    Extend,
-    InputOutput,
-}
+pub use rt::vocab::OpenMode;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Advancing {

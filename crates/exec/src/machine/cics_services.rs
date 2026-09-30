@@ -3,7 +3,7 @@
 
 use super::*;
 use super::cics::{EIBDATE, EIBTIME, has};
-use crate::cics::{self, FormatValue};
+use crate::cics::{self, Condition, FormatValue};
 
 /// The largest GETMAIN the harness will grant.
 const GETMAIN_LIMIT: usize = 1 << 28;
@@ -111,7 +111,7 @@ impl<'p> Machine<'p, '_, '_> {
             None => self.arg_int(block, "LENGTH")?.ok_or_else(|| Abend::ironwork("EXEC CICS GETMAIN needs FLENGTH or LENGTH", block.pos))?,
         };
         if length < 0 || length as usize > GETMAIN_LIMIT {
-            return self.raise(block, "LENGERR", 0);
+            return self.raise(block, Condition::LENGERR, 0);
         }
         let fill = self.arg_bytes(block, "INITIMG")?.and_then(|b| b.first().copied()).unwrap_or(0);
         let at = self.unit.push_temporary(&vec![fill; length as usize]);

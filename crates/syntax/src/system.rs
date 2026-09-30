@@ -153,12 +153,9 @@ pub fn member(name: &str) -> Option<String> {
     })
 }
 
-/// The EIBRESP value for DFHRESP(condition): IBM's table, plus DSIDERR, the older name for FILENOTFOUND.
+/// The EIBRESP value for DFHRESP(condition), by any name the condition goes by.
 pub fn resp_code(condition: &str) -> Option<i32> {
-    if condition.eq_ignore_ascii_case("DSIDERR") {
-        return rt::cics_tables::resp("FILENOTFOUND");
-    }
-    rt::cics_tables::resp(condition)
+    rt::cics::Condition::from_name(condition).map(rt::cics::Condition::resp)
 }
 
 /// CICS commands whose second word is part of the command, not an option.

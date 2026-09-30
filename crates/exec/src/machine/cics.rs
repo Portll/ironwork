@@ -3,12 +3,12 @@
 //! in cics_files.rs.
 
 use super::*;
-use crate::cics;
+use crate::cics::{self, Condition};
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct Handlers {
-    pub conditions: HashMap<String, Handler>,
-    pub stack: Vec<HashMap<String, Handler>>,
+    pub conditions: HashMap<Condition, Handler>,
+    pub stack: Vec<HashMap<Condition, Handler>>,
     pub abend: Option<usize>,
 }
 
@@ -51,50 +51,6 @@ pub(super) fn operand<'b>(block: &'b ExecBlock, name: &str) -> Option<&'b Operan
     }
 }
 
-/// The transaction abend CICS issues when a condition is raised and nothing handles it.
-fn default_abend(condition: &str) -> &'static str {
-    match condition {
-        "NOTFND" => "AEIM",
-        "DUPREC" => "AEIN",
-        "DUPKEY" => "AEIO",
-        "IOERR" => "AEIQ",
-        "NOSPACE" => "AEIR",
-        "NOTOPEN" => "AEIS",
-        "ENDFILE" => "AEIT",
-        "ILLOGIC" => "AEIU",
-        "LENGERR" => "AEIV",
-        "QZERO" => "AEIW",
-        "ITEMERR" => "AEIZ",
-        "PGMIDERR" => "AEI0",
-        "TRANSIDERR" => "AEI1",
-        "ENDDATA" => "AEI2",
-        "INVTSREQ" => "AEI3",
-        "EXPIRED" => "AEI4",
-        "TSIOERR" => "AEI8",
-        "MAPFAIL" => "AEI9",
-        "ERROR" => "AEIA",
-        "EOF" => "AEID",
-        "EODS" => "AEIE",
-        "INBFMH" => "AEIG",
-        "ENDINPT" => "AEIH",
-        "NONVAL" => "AEII",
-        "NOSTART" => "AEIJ",
-        "TERMIDERR" => "AEIK",
-        "FILENOTFOUND" => "AEIL",
-        "DISABLED" => "AEXL",
-        "ROLLEDBACK" => "AEXJ",
-        "LOCKED" => "AEX8",
-        "RECORDBUSY" => "AEX9",
-        "QIDERR" => "AEYH",
-        "SYSIDERR" => "AEYQ",
-        "NOTAUTH" => "AEY7",
-        "USERIDERR" => "AEYX",
-        "CONTAINERERR" => "AEZJ",
-        "CHANNELERR" => "AEZV",
-        _ => "AEIP",
-    }
-}
-
 impl<'p> Machine<'p, '_, '_> {
     pub(super) fn cics(&mut self, block: &'p ExecBlock) -> R<Flow> {
         if self.unit.cics.is_none() {
@@ -112,7 +68,9 @@ impl<'p> Machine<'p, '_, '_> {
             "HANDLE CONDITION" => self.handle_condition(block),
             "IGNORE CONDITION" => {
                 for (name, _) in block.options.iter().filter(|(n, _)| !NOT_CONDITIONS.contains(&n.as_str())) {
-                    self.cics_handlers.conditions.insert(name.clone(), Handler::Ignore);
+                    if let Some(condition) = Condition::from_name(name) {
+                        self.cics_handlers.conditions.insert(condition, Handler::Ignore);
+                    }
                 }
                 self.cics_ok(block)
             }
@@ -126,7 +84,7 @@ impl<'p> Machine<'p, '_, '_> {
                     self.cics_handlers.conditions = saved;
                     self.cics_ok(block)
                 }
-                None => self.raise(block, "INVREQ", 0),
+                None => self.raise(block, Condition::INVREQ, 0),
             },
             "HANDLE ABEND" => self.handle_abend(block),
             "HANDLE AID" => self.cics_ok(block),
@@ -263,7 +221,7 @@ impl<'p> Machine<'p, '_, '_> {
         }
         self.store_int(block, "LENGTH", record.len() as i64)?;
         if record.len() > limit && !has(block, "SET") {
-            return self.raise(block, "LENGERR", 0);
+            return self.raise(block, Condition::LENGERR, 0);
         }
         self.cics_ok(block)
     }
@@ -278,8 +236,8 @@ impl<'p> Machine<'p, '_, '_> {
     /// Raises a condition. RESP or NOHANDLE take it; otherwise HANDLE CONDITION (the condition's
     /// own entry, else ERROR) or IGNORE CONDITION decides; otherwise HANDLE ABEND, if active, or
     /// the task abends with the condition's AEIx code.
-    pub(super) fn raise(&mut self, block: &ExecBlock, name: &str, resp2: i32) -> R<Flow> {
-        let resp = syntax::system::resp_code(name).unwrap_or(1);
+    pub(super) fn raise(&mut self, block: &ExecBlock, condition: Condition, resp2: i32) -> R<Flow> {
+        let resp = condition.resp();
         self.eib_fullword(EIBRESP, resp);
         self.eib_fullword(EIBRESP2, resp2);
         if has(block, "RESP") {
@@ -291,14 +249,14 @@ impl<'p> Machine<'p, '_, '_> {
             return Ok(Flow::Next);
         }
         let handlers = &self.cics_handlers.conditions;
-        match handlers.get(name).or_else(|| handlers.get("ERROR")).copied() {
+        match handlers.get(&condition).or_else(|| handlers.get(&Condition::ERROR)).copied() {
             Some(Handler::Ignore) => Ok(Flow::Next),
             Some(Handler::Label(p)) => Ok(Flow::GoTo(p)),
             None => match self.cics_handlers.abend.take() {
                 Some(p) => Ok(Flow::GoTo(p)),
                 None => Err(Abend {
-                    code: AbendCode::Cics(default_abend(name).into()),
-                    message: format!("EXEC CICS {}: {name} was raised with no RESP, HANDLE CONDITION or IGNORE CONDITION", block.command),
+                    code: AbendCode::Cics(condition.default_abend().into()),
+                    message: format!("EXEC CICS {}: {} was raised with no RESP, HANDLE CONDITION or IGNORE CONDITION", block.command, condition.name()),
                     pos: block.pos,
                 }),
             },
@@ -312,15 +270,15 @@ impl<'p> Machine<'p, '_, '_> {
 
     fn handle_condition(&mut self, block: &ExecBlock) -> R<Flow> {
         for (name, arg) in block.options.iter().filter(|(n, _)| !NOT_CONDITIONS.contains(&n.as_str())) {
-            match arg {
-                Some(ExecArg::Text(t)) => {
-                    let p = self.label(block, t)?;
-                    self.cics_handlers.conditions.insert(name.clone(), Handler::Label(p));
-                }
-                _ => {
-                    self.cics_handlers.conditions.remove(name);
-                }
-            }
+            let label = match arg {
+                Some(ExecArg::Text(t)) => Some(self.label(block, t)?),
+                _ => None,
+            };
+            let Some(condition) = Condition::from_name(name) else { continue };
+            match label {
+                Some(p) => self.cics_handlers.conditions.insert(condition, Handler::Label(p)),
+                None => self.cics_handlers.conditions.remove(&condition),
+            };
         }
         self.cics_ok(block)
     }
@@ -350,7 +308,7 @@ impl<'p> Machine<'p, '_, '_> {
         let transid = self.arg_text(block, "TRANSID")?;
         let commarea = self.commarea(block)?;
         if !self.main && (transid.is_some() || commarea.is_some()) {
-            return self.raise(block, "INVREQ", 0);
+            return self.raise(block, Condition::INVREQ, 0);
         }
         if let Some(task) = self.unit.cics.as_mut() {
             if let Some(t) = transid {
@@ -374,7 +332,7 @@ impl<'p> Machine<'p, '_, '_> {
         self.eib_text(EIBRSRCE, 8, &name);
         let index = match self.unit.load(&name) {
             Ok(i) => i,
-            Err(LoadError::NotFound) => return self.raise(block, "PGMIDERR", 0),
+            Err(LoadError::NotFound) => return self.raise(block, Condition::PGMIDERR, 0),
             Err(LoadError::Compile(m)) => return Err(Abend::ironwork(format!("EXEC CICS {} PROGRAM({name}): {m}", block.command), block.pos)),
         };
         let Some(compiled) = self.unit.programs[index].compiled.clone() else {

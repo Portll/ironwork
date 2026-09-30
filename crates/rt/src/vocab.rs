@@ -1,5 +1,5 @@
 //! The vocabulary the front end, the interpreter and a compiled program share: source positions
-//! and the small enums of the data division and INSPECT.
+//! and the small enums of the data division, INSPECT and OPEN.
 
 use std::fmt;
 
@@ -65,6 +65,14 @@ pub enum RelOp {
     Le,
     Gt,
     Ge,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpenMode {
+    Input,
+    Output,
+    Extend,
+    InputOutput,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

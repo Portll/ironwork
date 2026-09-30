@@ -5,16 +5,16 @@
 //! place them ([`Open::print`]). Sequential files stream;
 //! indexed and relative files are held in memory (see [`Keyed`]).
 
+use crate::vocab::OpenMode;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::ops::Bound;
 use std::path::PathBuf;
-use syntax::ast::OpenMode;
 use zarch::ebcdic::{self, CodePage};
 
-pub use rt::abend::FileStatus;
+pub use crate::abend::FileStatus;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {

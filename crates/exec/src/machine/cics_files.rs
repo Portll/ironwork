@@ -4,7 +4,7 @@
 
 use super::cics::{EIBFN, has};
 use super::*;
-use crate::cics::Browse;
+use crate::cics::{Browse, Condition};
 use crate::files::{self, FileStatus, Keyed, Keying};
 
 /// The first record at or after `key`: matching it exactly, or (GENERIC) starting with it, or
@@ -42,7 +42,7 @@ impl<'p> Machine<'p, '_, '_> {
                 let reqid = self.reqid(block)?;
                 match self.unit.cics.as_mut().and_then(|t| t.browses.remove(&(file, reqid))) {
                     Some(_) => self.cics_ok(block),
-                    None => self.raise(block, "INVREQ", 0),
+                    None => self.raise(block, Condition::INVREQ, 0),
                 }
             }
             other => Err(Abend::ironwork(format!("EXEC CICS {other} is not supported yet"), block.pos)),
@@ -51,20 +51,20 @@ impl<'p> Machine<'p, '_, '_> {
 
     /// Runs `op` on a file's store, opening it on first use. Err names the condition to raise:
     /// FILENOTFOUND when no --file defines it, NOTOPEN when its data set cannot be read.
-    fn on_file<T>(&mut self, file: &str, op: impl FnOnce(&mut Self, &mut Keyed) -> R<T>) -> R<Result<T, &'static str>> {
+    fn on_file<T>(&mut self, file: &str, op: impl FnOnce(&mut Self, &mut Keyed) -> R<T>) -> R<Result<T, Condition>> {
         let mut open = match self.unit.cics_files.remove(file) {
             Some(open) => open,
             None => {
-                let Some(def) = self.unit.cics.as_ref().and_then(|t| t.files.get(file)).cloned() else { return Ok(Err("FILENOTFOUND")) };
+                let Some(def) = self.unit.cics.as_ref().and_then(|t| t.files.get(file)).cloned() else { return Ok(Err(Condition::FILENOTFOUND)) };
                 match files::open_keyed(Some(&def.dd), OpenMode::InputOutput, def.format(), def.keying(), def.record_len, self.page) {
                     Ok(open) => open,
-                    Err(_) => return Ok(Err("NOTOPEN")),
+                    Err(_) => return Ok(Err(Condition::NOTOPEN)),
                 }
             }
         };
         let result = match open.keyed() {
             Some(keyed) => op(self, keyed).map(Ok),
-            None => Ok(Err("INVREQ")),
+            None => Ok(Err(Condition::INVREQ)),
         };
         self.unit.cics_files.insert(file.to_owned(), open);
         result
@@ -113,7 +113,7 @@ impl<'p> Machine<'p, '_, '_> {
         })?;
         let (key, record, relative) = match found {
             Err(c) => return self.raise(block, c, 0),
-            Ok((None, _)) => return self.raise(block, "NOTFND", 0),
+            Ok((None, _)) => return self.raise(block, Condition::NOTFND, 0),
             Ok((Some((key, record)), relative)) => (key, record, relative),
         };
         if has(block, "UPDATE")
@@ -139,7 +139,7 @@ impl<'p> Machine<'p, '_, '_> {
         let outcome = self.on_file(file, |m, keyed| {
             let key = key_of(m, keyed)?;
             Ok(match keyed.prime_key(&record) {
-                Some(own) if own != key => Err("INVREQ"),
+                Some(own) if own != key => Err(Condition::INVREQ),
                 _ => put(keyed, key, record).map(|_| ()).map_err(FileStatus::cics_condition),
             })
         })?;
@@ -158,7 +158,7 @@ impl<'p> Machine<'p, '_, '_> {
 
     /// REWRITE replaces the record a READ UPDATE holds; its key may not change.
     fn file_rewrite(&mut self, block: &ExecBlock, file: &str) -> R<Flow> {
-        let Some(key) = self.release_hold(file) else { return self.raise(block, "INVREQ", 0) };
+        let Some(key) = self.release_hold(file) else { return self.raise(block, Condition::INVREQ, 0) };
         let record = self.sent_bytes(block, "FROM", "LENGTH")?;
         self.store_record(block, file, record, |_, _| Ok(key), Keyed::replace)
     }
@@ -168,7 +168,7 @@ impl<'p> Machine<'p, '_, '_> {
     fn file_delete(&mut self, block: &ExecBlock, file: &str) -> R<Flow> {
         let held = if has(block, "RIDFLD") { None } else { Some(self.release_hold(file)) };
         if let Some(None) = held {
-            return self.raise(block, "INVREQ", 0);
+            return self.raise(block, Condition::INVREQ, 0);
         }
         let outcome = self.on_file(file, |m, keyed| {
             if let Some(Some(key)) = held {
@@ -187,7 +187,7 @@ impl<'p> Machine<'p, '_, '_> {
         })?;
         match outcome {
             Err(c) => self.raise(block, c, 0),
-            Ok(0) => self.raise(block, "NOTFND", 0),
+            Ok(0) => self.raise(block, Condition::NOTFND, 0),
             Ok(count) => {
                 self.store_int(block, "NUMREC", count)?;
                 self.cics_ok(block)
@@ -202,7 +202,7 @@ impl<'p> Machine<'p, '_, '_> {
         let reqid = self.reqid(block)?;
         let exists = self.unit.cics.as_ref().is_some_and(|t| t.browses.contains_key(&(file.to_owned(), reqid)));
         if reset != exists {
-            return self.raise(block, "INVREQ", 0);
+            return self.raise(block, Condition::INVREQ, 0);
         }
         let gteq = !has(block, "EQUAL");
         let found = self.on_file(file, |m, keyed| {
@@ -214,7 +214,7 @@ impl<'p> Machine<'p, '_, '_> {
         })?;
         match found {
             Err(c) => self.raise(block, c, 0),
-            Ok(None) => self.raise(block, "NOTFND", 0),
+            Ok(None) => self.raise(block, Condition::NOTFND, 0),
             Ok(Some(browse)) => {
                 if let Some(task) = self.unit.cics.as_mut() {
                     task.browses.insert((file.to_owned(), reqid), browse);
@@ -229,7 +229,7 @@ impl<'p> Machine<'p, '_, '_> {
     fn file_browse(&mut self, block: &ExecBlock, file: &str, backward: bool) -> R<Flow> {
         let reqid = self.reqid(block)?;
         let Some(browse) = self.unit.cics.as_ref().and_then(|t| t.browses.get(&(file.to_owned(), reqid))).cloned() else {
-            return self.raise(block, "INVREQ", 0);
+            return self.raise(block, Condition::INVREQ, 0);
         };
         let found = self.on_file(file, |m, keyed| {
             let relative = keyed.keying == Keying::Relative;
@@ -240,7 +240,7 @@ impl<'p> Machine<'p, '_, '_> {
         })?;
         let (key, record, relative) = match found {
             Err(c) => return self.raise(block, c, 0),
-            Ok((None, _)) => return self.raise(block, "ENDFILE", 0),
+            Ok((None, _)) => return self.raise(block, Condition::ENDFILE, 0),
             Ok((Some((key, record)), relative)) => (key, record, relative),
         };
         if let Some(task) = self.unit.cics.as_mut() {

@@ -3,14 +3,14 @@
 
 pub mod abend;
 pub use rt::calendar;
-pub mod cics;
+pub use rt::cics;
 pub use rt::codec;
 pub use rt::digest;
 pub use rt::evidence;
 pub mod collating;
 pub mod declaratives;
 pub mod edit;
-pub mod files;
+pub use rt::files;
 pub mod layout;
 pub mod le;
 pub mod linage;
@@ -27,7 +27,7 @@ pub use rt::strings;
 pub mod terminal;
 #[cfg(test)]
 mod testing;
-pub mod tn3270;
+pub use rt::tn3270;
 pub mod unit;
 
 pub use machine::{Abend, Ending};

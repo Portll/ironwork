@@ -4,6 +4,7 @@
 
 use super::cics::{EIBAID, EIBCPOSN, has, operand};
 use super::*;
+use crate::cics::Condition;
 use crate::terminal::{self, attribute_byte};
 use syntax::bms::{self, Initial, Intensity, Map, Protection};
 
@@ -34,7 +35,7 @@ fn attribute_of(attrb: &bms::Attrb) -> u8 {
 impl<'p> Machine<'p, '_, '_> {
     /// The map MAP names in MAPSET (or the mapset of the map's name), read once per task from the
     /// copy libraries.
-    fn bms_map(&mut self, block: &ExecBlock) -> R<Result<Map, &'static str>> {
+    fn bms_map(&mut self, block: &ExecBlock) -> R<Result<Map, Condition>> {
         let Some(map_name) = self.arg_text(block, "MAP")?.map(|m| m.to_ascii_uppercase()) else {
             return Err(Abend::ironwork(format!("EXEC CICS {} needs MAP", block.command), block.pos));
         };
@@ -43,7 +44,7 @@ impl<'p> Machine<'p, '_, '_> {
         let mapset = match cached {
             Some(m) => m,
             None => match bms::find_mapset(self.unit.copy_libraries(), &set_name) {
-                None => return Ok(Err("PGMIDERR")),
+                None => return Ok(Err(Condition::PGMIDERR)),
                 Some(Err(e)) => return Err(Abend::ironwork(format!("EXEC CICS {} MAPSET({set_name}): {}", block.command, e.message), block.pos)),
                 Some(Ok(m)) => {
                     if let Some(task) = self.unit.cics.as_mut() {
@@ -53,7 +54,7 @@ impl<'p> Machine<'p, '_, '_> {
                 }
             },
         };
-        Ok(mapset.maps.into_iter().find(|m| m.name == map_name).ok_or("INVREQ"))
+        Ok(mapset.maps.into_iter().find(|m| m.name == map_name).ok_or(Condition::INVREQ))
     }
 
     /// The bytes of the area an option names, else of the data item `default`, else nothing.
@@ -117,7 +118,7 @@ impl<'p> Machine<'p, '_, '_> {
                 let row = usize::from(map.line) + usize::from(field.line) - 1;
                 let column = usize::from(map.column) + usize::from(field.column) - 1 + usize::from(occurrence) * (usize::from(field.length) + 1);
                 if row > rows || column > columns {
-                    return self.raise(block, "INVMPSZ", 0);
+                    return self.raise(block, Condition::INVMPSZ, 0);
                 }
                 let at = (row - 1) * columns + column - 1;
                 let slot = slots.iter().find(|s| s.field == i && s.occurrence == occurrence);
@@ -195,7 +196,7 @@ impl<'p> Machine<'p, '_, '_> {
         let (_, columns) = self.with_terminal(block, |t| Ok(t.size()))?;
         let read = self.next_inbound(block)?;
         if read.fields.is_empty() {
-            return self.raise(block, "MAPFAIL", 0);
+            return self.raise(block, Condition::MAPFAIL, 0);
         }
         let slots = bms::slots(&map, true);
         let size = slots.last().map_or(0, |s| s.data + s.size);
