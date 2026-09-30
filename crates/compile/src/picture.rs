@@ -109,6 +109,21 @@ pub fn analyse_with(text: &str, notation: Notation) -> Result<Picture, String> {
     }
 }
 
+/// A numeric PICTURE under BLANK WHEN ZERO, which makes the item numeric-edited (Language
+/// Reference SC27-8713-03, p. 195).
+pub fn blank_when_zero(p: &Picture) -> Result<Picture, String> {
+    if p.signed {
+        return Err("BLANK WHEN ZERO cannot be given for a PICTURE with S".into());
+    }
+    let int = p.digits.saturating_sub(p.scale) as usize;
+    let mut syms = vec![Sym::Nine; int];
+    if p.scale > 0 {
+        syms.push(Sym::Implied);
+    }
+    syms.extend(std::iter::repeat_n(Sym::Nine, p.digits as usize - int));
+    Ok(Picture { category: Category::NumericEdited, edit: Some(syms), ..p.clone() })
+}
+
 fn edited(text: &str, runs: &[(char, u64)], decimal_comma: bool, currency: Option<&str>) -> Result<Picture, String> {
     let total: u64 = runs.iter().map(|&(_, n)| n).sum();
     if total > MAX_EDITED {
@@ -312,5 +327,14 @@ mod tests {
         assert!(analyse_with("We9", notation).unwrap_err().contains("two different currency symbols"));
         assert!(analyse_with("E9", notation).unwrap_err().contains("not a PICTURE symbol"));
         assert_eq!(analyse("$9").unwrap().currency.as_deref(), Some("$"));
+    }
+
+    #[test]
+    fn blank_when_zero_makes_a_numeric_picture_numeric_edited() {
+        let p = blank_when_zero(&analyse("99V9").unwrap()).unwrap();
+        assert_eq!((p.category, p.size, p.digits, p.scale), (Category::NumericEdited, 3, 3, 1));
+        assert_eq!(p.edit.unwrap(), [Sym::Nine, Sym::Nine, Sym::Implied, Sym::Nine]);
+        assert_eq!(blank_when_zero(&analyse("VPP99").unwrap()).unwrap().edit.unwrap(), [Sym::Implied, Sym::Nine, Sym::Nine]);
+        assert!(blank_when_zero(&analyse("S99").unwrap()).unwrap_err().contains("with S"));
     }
 }

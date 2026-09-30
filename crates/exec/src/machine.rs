@@ -223,9 +223,14 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             let item = &self.layout.items[index];
             let Some(value) = item.value.clone().filter(|_| item.linkage.is_none() && item.local == local) else { continue };
             let occurrences: u32 = item.dims.iter().map(|&(_, n)| n).product::<u32>().max(1);
+            // An alphanumeric VALUE fills a numeric-edited item as alphanumeric data (Language Reference p. 246).
+            let kind = match (item.kind, &value) {
+                (Kind::NumericEdited { .. }, Literal::Alnum(_) | Literal::Figurative(_) | Literal::All(_)) => Kind::Alnum { justified: false },
+                (kind, _) => kind,
+            };
             for k in 0..occurrences {
                 let offset = base + item.offset as usize + self.occurrence_offset(item, k);
-                let loc = Loc { offset, len: item.size as usize, kind: item.kind, item: index };
+                let loc = Loc { offset, len: item.size as usize, kind, item: index };
                 let val = self.literal_value(&value, item.pos)?;
                 self.assign(loc, val, None, item.pos)?;
             }

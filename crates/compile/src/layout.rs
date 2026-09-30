@@ -484,9 +484,17 @@ fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, pic: Option<&picture::
         return Ok(Kind::Float(if usage == Usage::Float1 { Precision::Short } else { Precision::Long }));
     }
     let Some(pic) = pic else { return Err(err("an elementary item needs a PICTURE".into())) };
-    if e.blank_when_zero && pic.category != Category::NumericEdited {
-        return Err(err("BLANK WHEN ZERO is supported on numeric-edited items only, so far".into()));
-    }
+    let blank_numeric;
+    let pic = match pic.category {
+        Category::Numeric if e.blank_when_zero && usage == Usage::Display => {
+            blank_numeric = picture::blank_when_zero(pic).map_err(err)?;
+            &blank_numeric
+        }
+        Category::NumericEdited => pic,
+        Category::Numeric if e.blank_when_zero && usage == Usage::National => return Err(err("BLANK WHEN ZERO on a USAGE NATIONAL item is not supported yet".into())),
+        _ if e.blank_when_zero => return Err(err("BLANK WHEN ZERO needs a numeric or numeric-edited item of USAGE DISPLAY or NATIONAL".into())),
+        _ => pic,
+    };
     let k = match (pic.category, usage) {
         (Category::NumericEdited, Usage::Display) => {
             edits.push(pic.edit.clone().unwrap_or_default());

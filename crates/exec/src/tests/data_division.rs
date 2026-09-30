@@ -248,6 +248,27 @@ fn decimal_point_is_comma_in_literals_editing_de_editing_numval_and_contained_pr
 }
 
 #[test]
+fn blank_when_zero_makes_a_numeric_item_numeric_edited() {
+    let out = run(&program(
+        "",
+        "       01  A PIC 9(3)V9 BLANK WHEN ZERO VALUE ZERO.\n       01  B PIC 9 BLANK WHEN ZERO VALUE '5'.\n       01  N PIC 9(3)V9.\n       01  D PIC 999 VALUE '000' BLANK WHEN ZERO.\n",
+        &[
+            line("DISPLAY '[' A '][' B '][' D ']'"),
+            line("MOVE 0 TO A B"),
+            line("DISPLAY '[' A '][' B ']'"),
+            line("MOVE 12.5 TO A"),
+            line("MOVE A TO N"),
+            line("DISPLAY '[' A '] ' N"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    ));
+    assert_eq!(out, "[0000][5][000]\n[    ][ ]\n[0125] 0125\n");
+    let signed = program("", "       01  S PIC S9 BLANK WHEN ZERO.\n", &line("GOBACK."));
+    assert!(compile_errors(&signed).contains("BLANK WHEN ZERO cannot be given for a PICTURE with S"));
+}
+
+#[test]
 fn currency_signs_edit_fixed_and_floating_de_edit_and_reach_contained_programs() {
     let source = [
         "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. CUR.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n",
