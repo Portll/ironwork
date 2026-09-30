@@ -2,7 +2,7 @@
 //! program against it in EBCDIC with the numeric model of `ironwork-numeric`.
 
 pub mod abend;
-pub mod calendar;
+pub use rt::calendar;
 pub mod cics;
 pub mod codec;
 pub mod collating;

@@ -17,6 +17,7 @@ version = "0.1.1"
 dependencies = [
  "ironwork-numeric",
  "ironwork-oracle",
+ "ironwork-rt",
  "ironwork-syntax",
  "ironwork-zarch",
 ]

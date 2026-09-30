@@ -13,6 +13,7 @@ categories.workspace = true
 
 [dependencies]
 numeric = { package = "ironwork-numeric", path = "../numeric", version = "0.1.1" }
+rt = { package = "ironwork-rt", path = "../rt", version = "0.1.1" }
 syntax = { package = "ironwork-syntax", path = "../syntax", version = "0.1.1" }
 zarch = { package = "ironwork-zarch", path = "../zarch", version = "0.1.1" }
 
