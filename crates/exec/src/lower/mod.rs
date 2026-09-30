@@ -1,0 +1,381 @@
+//! Lowering (docs/lir.md): a compiled program with every name resolved, every category decided and
+//! every transfer of control made explicit, as the LIR a VM runs and a load module holds.
+//!
+//! This is the first slice: storage, places, expressions and conditions, the arithmetic verbs,
+//! MOVE, IF, EVALUATE, DISPLAY, INITIALIZE, PERFORM, GO TO, EXIT, STOP RUN and GOBACK. Anything
+//! else is [`LowerError::Unsupported`], naming the construct.
+
+mod cond;
+mod data;
+mod flow;
+mod plans;
+mod verify;
+
+#[cfg(test)]
+mod corpus;
+#[cfg(test)]
+mod tests;
+
+pub use verify::verify;
+
+use crate::Compiled;
+use crate::layout::{Layout, Resolved};
+use crate::machine::Machine;
+use crate::unit::{Clock, Library, RunUnit};
+use rt::lir::{self, AbendCode, AbendId, BlockId, ConstId, DebugId, PlaceId, RangeId, SymId};
+use std::collections::HashMap;
+use std::fmt;
+use syntax::Pos;
+use syntax::ast;
+use zarch::ebcdic::CodePage;
+
+/// Why a program does not lower.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LowerError {
+    /// A construct this slice does not lower yet, and where the program uses it.
+    Unsupported(&'static str, Pos),
+    /// A table larger than the LIR's ids can index.
+    Exceeds(&'static str, Pos),
+    /// The lowered program fails [`verify`], which is a fault in lowering.
+    Invalid(String),
+}
+
+impl LowerError {
+    pub fn pos(&self) -> Pos {
+        match self {
+            Self::Unsupported(_, pos) | Self::Exceeds(_, pos) => *pos,
+            Self::Invalid(_) => Pos::default(),
+        }
+    }
+}
+
+impl fmt::Display for LowerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unsupported(what, _) => write!(f, "lowering: {what} is not lowered yet"),
+            Self::Exceeds(what, _) => write!(f, "lowering: {what} exceeds the LIR's limit"),
+            Self::Invalid(why) => write!(f, "lowering: the lowered program is invalid: {why}"),
+        }
+    }
+}
+
+impl From<LowerError> for syntax::Error {
+    fn from(e: LowerError) -> Self {
+        syntax::Error::at(e.pos(), e.to_string())
+    }
+}
+
+type R<T> = Result<T, LowerError>;
+
+fn unsupported<T>(what: &'static str, pos: Pos) -> R<T> {
+    Err(LowerError::Unsupported(what, pos))
+}
+
+/// The next index of a table, refused past `u32`.
+fn next_id<T>(table: &[T], what: &'static str) -> R<u32> {
+    u32::try_from(table.len()).map_err(|_| LowerError::Exceeds(what, Pos::default()))
+}
+
+fn push<T>(table: &mut Vec<T>, value: T, what: &'static str) -> R<u32> {
+    let id = next_id(table, what)?;
+    table.push(value);
+    Ok(id)
+}
+
+/// Lowers one compiled program. A program that is not a class definition, uses only the constructs
+/// of this slice and passes Check lowers.
+pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
+    let mut l = Lower::new(compiled);
+    l.refuse_program()?;
+    let id = l.sym(&compiled.program.id);
+    let sources = compiled.program.sources.iter().map(|s| l.sym(s)).collect();
+    let storage = l.storage()?;
+    let items = l.items()?;
+    let paragraphs = l.procedure()?;
+    let dynam = compiled.program.options.iter().fold(false, |on, card| numeric::options::switch(card, "DYNAM").unwrap_or(on));
+    let procedure_start = compiled.program.report_writer.procedure_start.min(compiled.program.paragraphs.len());
+    let (blocks, ops) = l.blocks.finish()?;
+    let program = lir::Program {
+        id,
+        options: lir::ProgramOptions { options: compiled.options, ssrange: compiled.ssrange, dynam, cards: compiled.program.options.clone() },
+        initial: compiled.program.initial,
+        recursive: compiled.program.recursive,
+        storage,
+        items,
+        paragraphs,
+        procedure_start: procedure_start as u32,
+        ranges: l.ranges,
+        blocks,
+        places: l.places,
+        exprs: l.exprs,
+        conds: l.conds,
+        consts: l.consts,
+        plans: l.plans,
+        services: lir::Services::default(),
+        sql: Vec::new(),
+        abends: l.abends,
+        edits: compiled.layout.edits.clone(),
+        symbols: l.symbols,
+        debug: lir::Debug { sources, positions: l.positions, ops },
+    };
+    if cfg!(debug_assertions) {
+        verify(&program).map_err(LowerError::Invalid)?;
+    }
+    Ok(program)
+}
+
+/// The tables a program lowers into, each interned where equal entries may be shared.
+struct Lower<'c> {
+    c: &'c Compiled,
+    layout: &'c Layout,
+    program: &'c ast::Program,
+    page: &'static CodePage,
+    symbols: Vec<String>,
+    symbol_ids: HashMap<String, SymId>,
+    positions: Vec<Pos>,
+    position_ids: HashMap<(u16, u32, u32), DebugId>,
+    places: Vec<lir::Place>,
+    /// The layout item each place names, None for RETURN-CODE the program does not declare.
+    place_items: Vec<Option<usize>>,
+    place_ids: HashMap<String, PlaceId>,
+    exprs: Vec<lir::Expr>,
+    conds: Vec<lir::Cond>,
+    consts: Vec<lir::Const>,
+    const_ids: HashMap<String, ConstId>,
+    abends: Vec<lir::AbendText>,
+    abend_ids: HashMap<String, AbendId>,
+    plans: lir::Plans,
+    ranges: Vec<lir::Range>,
+    range_ids: HashMap<(u32, u32), RangeId>,
+    blocks: flow::Blocks,
+    temps: u16,
+    /// Each paragraph's entry block.
+    entries: Vec<BlockId>,
+    /// The block that starts statement k of paragraph p, after a separator period.
+    sentences: HashMap<(usize, usize), BlockId>,
+}
+
+impl<'c> Lower<'c> {
+    fn new(c: &'c Compiled) -> Self {
+        Self {
+            c,
+            layout: &c.layout,
+            program: &c.program,
+            page: c.options.code_page(),
+            symbols: Vec::new(),
+            symbol_ids: HashMap::new(),
+            positions: Vec::new(),
+            position_ids: HashMap::new(),
+            places: Vec::new(),
+            place_items: Vec::new(),
+            place_ids: HashMap::new(),
+            exprs: Vec::new(),
+            conds: Vec::new(),
+            consts: Vec::new(),
+            const_ids: HashMap::new(),
+            abends: Vec::new(),
+            abend_ids: HashMap::new(),
+            plans: lir::Plans::default(),
+            ranges: Vec::new(),
+            range_ids: HashMap::new(),
+            blocks: flow::Blocks::default(),
+            temps: 0,
+            entries: Vec::new(),
+            sentences: HashMap::new(),
+        }
+    }
+
+    /// Program-wide constructs outside the slice, refused before anything is lowered.
+    fn refuse_program(&self) -> R<()> {
+        let program = self.program;
+        if program.oo.as_ref().is_some_and(|o| o.class().is_some()) {
+            return unsupported("a class definition", Pos::default());
+        }
+        if let Some(report) = program.report_writer.reports.first() {
+            return unsupported("Report Writer", report.pos);
+        }
+        if !self.c.collating.is_native() {
+            return unsupported("a PROGRAM COLLATING SEQUENCE", Pos::default());
+        }
+        if let Some(block) = program.exec_declarations.first() {
+            return unsupported("EXEC SQL", block.pos);
+        }
+        Ok(())
+    }
+
+    fn sym(&mut self, text: &str) -> SymId {
+        if let Some(&id) = self.symbol_ids.get(text) {
+            return id;
+        }
+        let id = self.symbols.len() as SymId;
+        self.symbols.push(text.to_owned());
+        self.symbol_ids.insert(text.to_owned(), id);
+        id
+    }
+
+    fn at(&mut self, pos: Pos) -> DebugId {
+        let key = (pos.file, pos.line, pos.col);
+        if let Some(&id) = self.position_ids.get(&key) {
+            return id;
+        }
+        let id = self.positions.len() as DebugId;
+        self.positions.push(pos);
+        self.position_ids.insert(key, id);
+        id
+    }
+
+    fn abend(&mut self, code: AbendCode, message: &str) -> R<AbendId> {
+        let key = format!("{code:?}{message}");
+        if let Some(&id) = self.abend_ids.get(&key) {
+            return Ok(id);
+        }
+        let text = lir::AbendText { code, message: self.sym(message) };
+        let id = push(&mut self.abends, text, "abend messages")?;
+        self.abend_ids.insert(key, id);
+        Ok(id)
+    }
+
+    fn ironwork(&mut self, message: &str) -> R<AbendId> {
+        self.abend(AbendCode::Ironwork, message)
+    }
+
+    /// The slab and LOCAL-STORAGE as the walker's own VALUE initialization leaves them, run once
+    /// in a run unit of their own, with what it reported and any abend.
+    fn storage(&mut self) -> R<lir::Storage> {
+        let layout = self.layout;
+        let (size, local) = (layout.size as usize, layout.local_size as usize);
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let (image, local_image, abend) = {
+            let mut unit = RunUnit::new(Library::default(), crate::files::Dds::default(), None, Clock::Fixed(0, 0), &mut out, &mut err);
+            let me = unit.add(None, self.program, size);
+            let abend = Machine::activation(self.c, me, &mut unit, true).err();
+            let base = unit.programs[me].base;
+            let image = unit.mem[base..base + size].to_vec();
+            let local_image = if local > 0 { unit.mem[unit.mem.len() - local..].to_vec() } else { Vec::new() };
+            (image, local_image, abend)
+        };
+        let init_reports = String::from_utf8_lossy(&err).lines().map(|l| self.sym(l)).collect();
+        let init_abend = match abend {
+            Some(a) => Some(self.abend(abend_code(&a.code), &a.message)?),
+            None => None,
+        };
+        let root = |name: &str| layout.linkage_roots.iter().position(|&i| layout.items[i].name.as_deref() == Some(name));
+        let mut using = Vec::new();
+        for param in &self.program.using {
+            match root(&param.name).map(u16::try_from) {
+                Some(Ok(ordinal)) => using.push(ordinal),
+                Some(Err(_)) => return Err(LowerError::Exceeds("LINKAGE records", Pos::default())),
+                None => return unsupported("PROCEDURE DIVISION USING an item that is not a LINKAGE record", Pos::default()),
+            }
+        }
+        let returning = match &self.program.returning {
+            None => None,
+            Some(name) => match root(name).map(u16::try_from) {
+                Some(Ok(ordinal)) => Some(ordinal),
+                Some(Err(_)) => return Err(LowerError::Exceeds("LINKAGE records", Pos::default())),
+                None => return unsupported("RETURNING an item that is not a LINKAGE record", Pos::default()),
+            },
+        };
+        Ok(lir::Storage {
+            size: layout.size,
+            image,
+            local_image,
+            init_reports,
+            init_abend,
+            linkage: layout.linkage_roots.iter().map(|&i| layout.items[i].size).collect(),
+            using,
+            returning,
+            file_areas: layout.file_areas.clone(),
+        })
+    }
+
+    /// The layout's items for `dump`, with DEPENDING ON objects and keys as item indices.
+    fn items(&mut self) -> R<Vec<lir::Item>> {
+        let layout = self.layout;
+        let mut items = Vec::with_capacity(layout.items.len());
+        for item in &layout.items {
+            let item_of = |r: &ast::Ref| match layout.resolve(&r.name, &r.qualifiers, r.pos) {
+                Ok(Resolved::Item(i)) => Ok(i as u32),
+                _ => unsupported("an OCCURS DEPENDING ON or KEY that names no data item", r.pos),
+            };
+            let depending_on = item.depending_on.as_ref().map(item_of).transpose()?;
+            let keys = item.keys.iter().map(|(ascending, r)| item_of(r).map(|i| (*ascending, i))).collect::<R<_>>()?;
+            items.push(lir::Item {
+                name: item.name.as_deref().map(|n| self.sym(n)),
+                level: item.level,
+                parent: item.parent.map(|p| p as u32),
+                offset: item.offset,
+                size: item.size,
+                occurs: item.occurs,
+                dims: item.dims.clone(),
+                kind: item.kind,
+                local: item.local,
+                linkage: item.linkage,
+                redefines: item.redefines.as_deref().map(|n| self.sym(n)),
+                depending_on,
+                keys,
+                at: self.at(item.pos),
+            });
+        }
+        Ok(items)
+    }
+}
+
+fn abend_code(code: &crate::abend::AbendCode) -> AbendCode {
+    use crate::abend::{AbendCode as A, Signal as S};
+    use lir::Signal;
+    match code {
+        A::Check(c) => AbendCode::Check(*c),
+        A::Protection => AbendCode::Protection,
+        A::ModuleNotFound => AbendCode::ModuleNotFound,
+        A::Io(status) => AbendCode::Io(file_status(*status)),
+        A::Cics(c) => AbendCode::Cics(c.clone()),
+        A::User(c) => AbendCode::User(c.clone()),
+        A::Ironwork => AbendCode::Ironwork,
+        A::Exec => AbendCode::Exec,
+        A::Sql => AbendCode::Sql,
+        A::SqlReplay => AbendCode::SqlReplay,
+        A::Java => AbendCode::Java,
+        A::Signal(s) => AbendCode::Signal(match s {
+            S::DivideByZero => Signal::DivideByZero,
+            S::StopRun => Signal::StopRun,
+            S::GoBack => Signal::GoBack,
+            S::SortStopped => Signal::SortStopped,
+            S::ClosedOutput => Signal::ClosedOutput,
+        }),
+    }
+}
+
+fn file_status(status: crate::files::FileStatus) -> lir::FileStatus {
+    use crate::files::FileStatus as F;
+    use lir::FileStatus as L;
+    match status {
+        F::Success => L::Success,
+        F::SuccessDuplicate => L::SuccessDuplicate,
+        F::SuccessWrongLength => L::SuccessWrongLength,
+        F::SuccessOptional => L::SuccessOptional,
+        F::AtEnd => L::AtEnd,
+        F::RelativeKeyOverflow => L::RelativeKeyOverflow,
+        F::SequenceError => L::SequenceError,
+        F::DuplicateKey => L::DuplicateKey,
+        F::NotFound => L::NotFound,
+        F::BoundaryViolation => L::BoundaryViolation,
+        F::PermanentError => L::PermanentError,
+        F::FileNotFound => L::FileNotFound,
+        F::OpenModeUnsupported => L::OpenModeUnsupported,
+        F::AlreadyOpen => L::AlreadyOpen,
+        F::NotOpen => L::NotOpen,
+        F::NoPriorRead => L::NoPriorRead,
+        F::RecordLengthChanged => L::RecordLengthChanged,
+        F::NoNextRecord => L::NoNextRecord,
+        F::NotOpenInput => L::NotOpenInput,
+        F::NotOpenOutput => L::NotOpenOutput,
+        F::NotOpenInputOutput => L::NotOpenInputOutput,
+    }
+}
+
+/// Whether the place cannot abend when evaluated: a slab, LOCAL-STORAGE or RETURN-CODE base and a
+/// constant offset and length.
+fn is_static(place: &lir::Place) -> bool {
+    matches!(place.base, lir::Base::Program | lir::Base::Local | lir::Base::ReturnCode) && place.subscripts.is_empty() && place.odo.is_none() && place.refmod.is_none()
+}

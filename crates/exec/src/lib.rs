@@ -14,6 +14,7 @@ pub mod files;
 pub mod layout;
 pub mod le;
 pub mod linage;
+pub mod lower;
 pub mod machine;
 pub mod oo;
 pub mod picture;
