@@ -552,6 +552,7 @@ pub fn bodies(s: &Stmt) -> Vec<&[Stmt]> {
         Stmt::Call(c) => vec![opt(&c.on_exception), opt(&c.not_on_exception)],
         Stmt::Invoke(i) => vec![opt(&i.on_exception), opt(&i.not_on_exception)],
         Stmt::JsonGenerate(g) => vec![opt(&g.on_exception), opt(&g.not_on_exception)],
+        Stmt::XmlParse(x) => vec![opt(&x.on_exception), opt(&x.not_on_exception)],
         Stmt::String(st) => vec![opt(&st.on_overflow), opt(&st.not_on_overflow)],
         Stmt::Unstring(u) => vec![opt(&u.on_overflow), opt(&u.not_on_overflow)],
         Stmt::Search(se) => se.whens.iter().map(|(_, b)| b.as_slice()).chain([opt(&se.at_end)]).collect(),

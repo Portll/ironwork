@@ -207,7 +207,9 @@ The subset the interpreter runs today:
   subscripts. The floating-point functions (SQRT, LOG, SIN and the rest, assumption C111) are
   computed to 128 bits and rounded to long or extended HFP (C110); RANDOM is a generator of
   ironwork's choosing (C54). JSON GENERATE, with COUNT, NAME, SUPPRESS, CONVERTING, INDICATING,
-  ENCODING and ON EXCEPTION, sets JSON-CODE (C117). What is not Enterprise COBOL is refused as such:
+  ENCODING and ON EXCEPTION, sets JSON-CODE (C117). XML PARSE reports z/OS XML System Services'
+  events to its processing procedure, in segments through END-OF-INPUT, with XML-TEXT, XML-NTEXT and
+  the namespace registers, and XMLSS's codes in XML-CODE (C118). What is not Enterprise COBOL is refused as such:
   `<>`, literals joined with `&`, SET ENVIRONMENT and ACCEPT ... FROM ENVIRONMENT.
 - **Subprograms:** several and nested programs per source; CALL (static and dynamic) USING BY
   REFERENCE, BY CONTENT, BY VALUE and OMITTED, RETURNING, ON EXCEPTION; PROCEDURE DIVISION USING

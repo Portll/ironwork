@@ -412,6 +412,7 @@ pub enum Stmt {
     Report(Box<crate::report::ReportStmt>),
     Invoke(Box<Invoke>),
     JsonGenerate(Box<JsonGenerate>),
+    XmlParse(Box<XmlParse>),
     ExitMethod { pos: Pos },
     Sorting(Box<Sorting>),
     StopRun { pos: Pos },
@@ -758,4 +759,18 @@ pub struct NullIndicator {
 pub enum Encoding {
     Ccsid(Operand),
     FromCodepage,
+}
+
+/// XML PARSE under XMLPARSE(XMLSS) (Language Reference SC27-8713-03, pp. 489-494).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct XmlParse {
+    pub document: Ref,
+    /// WITH ENCODING: the document's CCSID.
+    pub encoding: Option<Operand>,
+    pub returning_national: bool,
+    pub procedure: ProcName,
+    pub thru: Option<ProcName>,
+    pub on_exception: Option<Vec<Stmt>>,
+    pub not_on_exception: Option<Vec<Stmt>>,
+    pub pos: Pos,
 }

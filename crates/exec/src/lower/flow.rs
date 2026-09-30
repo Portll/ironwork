@@ -803,6 +803,7 @@ fn statement_name(s: &Stmt) -> &'static str {
         Stmt::Report(_) => "Report Writer",
         Stmt::Invoke(_) => "INVOKE",
         Stmt::JsonGenerate(_) => "JSON GENERATE",
+        Stmt::XmlParse(_) => "XML PARSE",
         _ => "this statement",
     }
 }
@@ -845,6 +846,7 @@ fn stmt_pos(s: &Stmt) -> Option<Pos> {
         Stmt::Exec(block) => block.pos,
         Stmt::Invoke(i) => i.pos,
         Stmt::JsonGenerate(g) => g.pos,
+        Stmt::XmlParse(x) => x.pos,
         Stmt::Report(r) => match &**r {
             ReportStmt::Initiate { pos, .. } | ReportStmt::Generate { pos, .. } | ReportStmt::Terminate { pos, .. } | ReportStmt::Suppress { pos } => *pos,
         },

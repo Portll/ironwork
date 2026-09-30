@@ -26,7 +26,7 @@ const VERBS: &[&str] = &[
     "MOVE", "COMPUTE", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "IF", "PERFORM", "DISPLAY", "INITIALIZE", "GO", "GOBACK", "STOP",
     "CONTINUE", "EXIT", "EVALUATE", "SET", "CALL", "ACCEPT", "STRING", "UNSTRING", "INSPECT", "READ", "WRITE", "OPEN", "CLOSE",
     "REWRITE", "DELETE", "START", "SEARCH", "SORT", "MERGE", "RETURN", "RELEASE", "CANCEL", "EXEC", "NEXT", "INVOKE",
-    "INITIATE", "GENERATE", "TERMINATE", "SUPPRESS", "ALTER", "ENTRY", "JSON",
+    "INITIATE", "GENERATE", "TERMINATE", "SUPPRESS", "ALTER", "ENTRY", "JSON", "XML",
 ];
 
 /// Words that end a phrase or a nested block.
@@ -37,7 +37,7 @@ const PHRASE_WORDS: &[&str] = &[
     "BEFORE", "AFTER", "ADVANCING", "INPUT", "OUTPUT", "EXTEND", "I-O", "REVERSED", "USING", "RETURNING", "EXCEPTION", "OVERFLOW",
     "END-CALL", "OMITTED", "CONTENT", "REFERENCE", "VALUE", "UP", "DOWN", "DELIMITED", "DELIMITER", "COUNT", "POINTER", "TALLYING",
     "REPLACING", "CONVERTING", "INITIAL", "FOR", "CHARACTERS", "LEADING", "FIRST", "ALL", "END-STRING", "END-UNSTRING", "END-SEARCH",
-    "NEXT", "INVALID", "KEY", "END-REWRITE", "END-DELETE", "END-START", "END-INVOKE", "END-RETURN", "END-OF-PAGE", "EOP", "END-JSON",
+    "NEXT", "INVALID", "KEY", "END-REWRITE", "END-DELETE", "END-START", "END-INVOKE", "END-RETURN", "END-OF-PAGE", "EOP", "END-JSON", "END-XML",
 ];
 
 /// The phrases of JSON GENERATE, which end a list of NAME or SUPPRESS operands; NAME, INDICATING
@@ -1145,6 +1145,7 @@ impl Parser<'_> {
             "CALL" => Stmt::Call(Box::new(self.call(pos)?)),
             "INVOKE" => Stmt::Invoke(Box::new(self.invoke(pos)?)),
             "JSON" if self.accept_word("GENERATE") => Stmt::JsonGenerate(Box::new(self.json_generate(pos)?)),
+            "XML" if self.accept_word("PARSE") => Stmt::XmlParse(Box::new(self.xml_parse(pos)?)),
             "CANCEL" => {
                 let mut targets = Vec::new();
                 while self.starts_operand() {
@@ -1675,6 +1676,39 @@ impl Parser<'_> {
         self.accept_word("END-JSON");
         (g.on_exception, g.not_on_exception) = (h.on, h.not_on);
         Ok(g)
+    }
+
+    fn xml_parse(&mut self, pos: Pos) -> R<XmlParse> {
+        let document = self.reference()?;
+        let mut x = XmlParse { document, encoding: None, returning_national: false, procedure: ProcName { name: String::new(), section: None }, thru: None, on_exception: None, not_on_exception: None, pos };
+        loop {
+            if self.accept_word("WITH") || self.is_word("ENCODING") {
+                self.expect_word("ENCODING")?;
+                x.encoding = Some(self.operand()?);
+            } else if self.accept_word("RETURNING") {
+                self.expect_word("NATIONAL")?;
+                x.returning_national = true;
+            } else if self.is_word("VALIDATING") {
+                return Err(self.error("PROCESSING PROCEDURE: XML PARSE VALIDATING is not supported yet"));
+            } else {
+                break;
+            }
+        }
+        self.expect_word("PROCESSING")?;
+        self.expect_word("PROCEDURE")?;
+        self.accept_word("IS");
+        x.procedure = self.proc_name()?;
+        if self.accept_any(&["THRU", "THROUGH"]).is_some() {
+            x.thru = Some(self.proc_name()?);
+        }
+        let [h] = self.on_phrases(&["ON", "EXCEPTION"], &["END-XML"], |p| {
+            p.accept_word("ON");
+            p.expect_word("EXCEPTION")?;
+            Ok(0)
+        })?;
+        self.accept_word("END-XML");
+        (x.on_exception, x.not_on_exception) = (h.on, h.not_on);
+        Ok(x)
     }
 
     fn call(&mut self, pos: Pos) -> R<Call> {

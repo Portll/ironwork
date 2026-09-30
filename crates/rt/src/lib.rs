@@ -16,6 +16,7 @@ pub mod files;
 pub mod fixed;
 pub mod intrinsic;
 pub mod json;
+pub mod xml;
 pub mod le;
 pub mod linage;
 pub mod loc;

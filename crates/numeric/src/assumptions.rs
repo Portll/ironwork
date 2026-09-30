@@ -208,6 +208,7 @@ pub const FORMATTED_DATETIME_RULES: &str = "C116";
 pub const ROUNDED_EXTRA_PLACE: &str = "C101";
 pub const CURRENCY_SIGNS: &str = "C102";
 pub const JSON_GENERATE_RULES: &str = "C117";
+pub const XML_PARSE_RULES: &str = "C118";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1281,6 +1282,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: JSON_GENERATE_RULES,
         claim: "JSON GENERATE (Language Reference SC27-8713-03, pp. 369-382) writes zoned, packed, binary, index and internal floating-point items as JSON numbers and every other elementary item as a string, choosing where the manual is silent: a table element that a SUPPRESS ... WHEN phrase leaves out is left out of its array, and a table all of whose elements are left out is left out; the members of an unnamed group join its parent's object; a COMP-1 or COMP-2 value takes the digits of its exact HFP value rounded to 9 or 18 significant digits; a character an EBCDIC ENCODING cannot hold becomes X'3F'; when the receiver is too small it holds the leading bytes of the document, whole characters for a national receiver, and COUNT names that many character positions; JSON-CODE and JSON-STATUS are declared in each program that has the statement rather than as GLOBAL in the outermost one",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: XML_PARSE_RULES,
+        claim: "XML PARSE runs as under XMLPARSE(XMLSS); XMLPARSE(COMPAT) and VALIDATING are not supported. Where the manuals are silent: a document that is not well formed gives XML-CODE with z/OS XML System Services' return code 12 and the non-validating parser's reason (SA38-0681-50, Appendix B): 2004 when it ends before the root's end tag, 2019 with no root, 3000 a duplicate attribute, 3008 -- in a comment, 3022 < in an attribute value, 3028 a bad character reference, 3035 a mismatched end tag, 3060 a malformed XML declaration or a later processing instruction named xml, 3061 an undeclared entity, 3062 any other character out of place, text after the root included, 3065 a second root; an undeclared prefix is Enterprise COBOL's warning 00040800 or 00040801 and ends the parse, even when the procedure resets XML-CODE. At END-OF-INPUT, XML-CODE 1 takes identifier-1's content, evaluated again, as the next segment, and any other value ends the input, so an unfinished document is then an exception. Markup a segment ends inside is held until it is complete, while content, comments and processing-instruction data are reported in parts, the target again before each later part (Programming Guide SC27-8714-03, pp. 652-653); START-OF-CDATA-SECTION waits for a character after <![CDATA[; namespace declarations are reported after START-OF-ELEMENT and before the attributes; a character reference to a character the document's code page lacks is a NATIONAL-CHARACTER event; XML-TEXT for EXCEPTION holds the document up to the error; the registers' fragments live in run-unit storage released after each event",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

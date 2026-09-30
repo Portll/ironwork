@@ -5,7 +5,7 @@ pub mod collating;
 pub mod declaratives;
 pub mod layout;
 pub mod linage;
-mod markup;
+pub mod markup;
 pub mod oo;
 pub mod picture;
 pub mod printer;
@@ -582,6 +582,18 @@ impl Check<'_> {
             Stmt::Exec(block) => self.exec_block(block),
             Stmt::Report(r) => report::check_statement(self.program, r, self.errors),
             Stmt::Invoke(i) => self.invoke(i),
+            Stmt::XmlParse(x) => {
+                self.reference(&x.document);
+                if let Some(op) = &x.encoding {
+                    self.operand(op);
+                }
+                self.procedure(&x.procedure, x.pos);
+                if let Some(t) = &x.thru {
+                    self.procedure(t, x.pos);
+                }
+                self.statements(x.on_exception.as_deref().unwrap_or_default());
+                self.statements(x.not_on_exception.as_deref().unwrap_or_default());
+            }
             Stmt::JsonGenerate(g) => {
                 for r in [&g.receiver, &g.from].into_iter().chain(&g.count) {
                     self.reference(r);
@@ -736,7 +748,7 @@ impl Check<'_> {
         if r.name == "RETURN-CODE" && r.qualifiers.is_empty() && self.layout.resolve(&r.name, &r.qualifiers, r.pos).is_err() {
             return;
         }
-        if oo::special_register(self.layout, r) {
+        if oo::special_register(self.layout, r) || markup::xml_register(self.layout, r) {
             return;
         }
         if !self.debugging && !self.program.declaratives.debugging.is_empty() && declaratives::DEBUG_ITEM_NAMES.contains(&r.name.as_str()) {

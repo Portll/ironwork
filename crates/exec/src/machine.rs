@@ -41,6 +41,7 @@ mod perform;
 mod report;
 mod sort;
 mod sql;
+mod xml;
 
 type R<T> = Result<T, Abend>;
 
@@ -94,6 +95,8 @@ pub struct Machine<'p, 'u, 'w> {
     declaratives: &'p crate::declaratives::Table,
     uses: declaratives::State,
     returns: perform::Returns,
+    /// XML-TEXT and the other XML registers of the event being processed.
+    xml: xml::Registers,
     unit: &'u mut RunUnit<'w>,
 }
 
@@ -130,6 +133,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             declaratives: &compiled.declaratives,
             uses: declaratives::State::default(),
             returns: perform::Returns::new(compiled.program.paragraphs.len()),
+            xml: xml::Registers::default(),
             unit,
         };
         if compiled.layout.local_size > 0 {
@@ -356,6 +360,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             }
             Stmt::Invoke(i) => return self.invoke(i),
             Stmt::JsonGenerate(g) => return self.json_generate(g),
+            Stmt::XmlParse(x) => return self.xml_parse(x),
             Stmt::ExitMethod { .. } => return Ok(Flow::End(Ending::Goback)),
             Stmt::SentenceEnd => {}
             Stmt::StopRun { .. } => return Ok(Flow::End(Ending::StopRun)),
@@ -516,7 +521,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn locate_as(&mut self, r: &Ref, receiving: bool) -> R<Loc> {
-        if let Some(loc) = self.oo_register(r)? {
+        if let Some(loc) = self.oo_register(r)?.or(self.xml_register(r)?) {
             return Ok(loc);
         }
         if r.name == "RETURN-CODE" && r.qualifiers.is_empty() && !self.layout.items.iter().any(|i| i.name.as_deref() == Some("RETURN-CODE")) {
