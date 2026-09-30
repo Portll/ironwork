@@ -58,7 +58,8 @@ impl Parser<'_> {
         while self.peek().is_some() && !self.at_division(&["ENVIRONMENT", "IDENTIFICATION", "ID", "DATA", "PROCEDURE"]) && !self.at_end_of("CLASS") {
             self.at += 1;
         }
-        let repository = if self.at_division(&["ENVIRONMENT"]) { self.class_environment()? } else { Vec::new() };
+        let mut environment = Environment::default();
+        let repository = if self.at_division(&["ENVIRONMENT"]) { self.class_environment(&mut environment)? } else { Vec::new() };
         if self.at_division(&["DATA", "PROCEDURE"]) {
             return Err(self.error("a FACTORY or OBJECT paragraph: a class's data and methods belong to them"));
         }
@@ -81,17 +82,21 @@ impl Parser<'_> {
         if self.peek().is_some() {
             return Err(self.error("the end of the source: a class definition must be alone in its source file"));
         }
+        for method in def.factory.iter_mut().chain(def.object.iter_mut()).flat_map(|p| p.methods.iter_mut()) {
+            share_configuration(&environment, &mut method.environment);
+        }
         out.push(Program {
             id: name,
             options: options.to_vec(),
             oo: Some(Box::new(Oo { repository, unit: OoUnit::Class(Box::new(def)) })),
+            environment,
             ..Program::default()
         });
         Ok(())
     }
 
-    /// A class's ENVIRONMENT DIVISION: a CONFIGURATION SECTION only, whose REPOSITORY is kept.
-    fn class_environment(&mut self) -> R<Vec<ClassEntry>> {
+    /// A class's ENVIRONMENT DIVISION: a CONFIGURATION SECTION only, whose REPOSITORY and collating clauses are kept.
+    fn class_environment(&mut self, clauses: &mut Environment) -> R<Vec<ClassEntry>> {
         self.at += 2;
         self.expect(&Tok::Period, "a period")?;
         let mut repository = Vec::new();
@@ -108,6 +113,9 @@ impl Parser<'_> {
             }
             if self.accept_word("REPOSITORY") {
                 repository = self.repository()?;
+                continue;
+            }
+            if self.environment_clause(clauses)? {
                 continue;
             }
             self.at += 1;

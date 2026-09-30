@@ -98,17 +98,6 @@ enum Step {
     Out(Flow),
 }
 
-fn figurative_byte(f: Figurative) -> u8 {
-    match f {
-        Figurative::Zero => ebcdic::ZERO,
-        Figurative::Space => ebcdic::SPACE,
-        Figurative::HighValue => ebcdic::HIGH_VALUE,
-        Figurative::LowValue => ebcdic::LOW_VALUE,
-        Figurative::Quote => ebcdic::QUOTE,
-        Figurative::Null => 0,
-    }
-}
-
 fn figurative_unit(f: Figurative) -> u16 {
     match f {
         Figurative::Zero => 0x0030,

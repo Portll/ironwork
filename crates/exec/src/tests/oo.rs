@@ -420,7 +420,39 @@ fn factory_methods_are_inherited_and_self_in_one_is_its_own_class() {
     assert_eq!(out, "MAKER 1\nSUBMAKER\nMAKER 1\nMAKER 2\n");
 }
 
-const ENVIRONMENT: [&str; 2] = ["SET ADDRESS OF JNIENV TO JNIENVPTR", "SET ADDRESS OF JNINATIVEINTERFACE TO JNIENV"];
+/// Z down to A, then 0 and 9 in one position, then X'FF': LOW-VALUE is Z and HIGH-VALUE X'FE'.
+const BACKWARDS: &str = "       OBJECT-COMPUTER. IBM-370 PROGRAM COLLATING SEQUENCE IS PCS.\n       SPECIAL-NAMES.\n           ALPHABET PCS IS 'Z' THROUGH 'A' '0' ALSO '9', HIGH-VALUE.\n";
+
+fn collated(source: String) -> String {
+    source.replacen("CONFIGURATION SECTION.\n", &format!("CONFIGURATION SECTION.\n{BACKWARDS}"), 1)
+}
+
+fn taker() -> String {
+    let data = "       LINKAGE SECTION.\n       01  H PIC X.\n       01  L PIC X.\n";
+    let body = [
+        "EVALUATE H WHEN X'FE' DISPLAY 'H FE'",
+        "    WHEN X'FF' DISPLAY 'H FF' END-EVALUATE",
+        "EVALUATE L WHEN 'Z' DISPLAY 'L Z'",
+        "    WHEN X'00' DISPLAY 'L 00' END-EVALUATE",
+        "MOVE HIGH-VALUE TO H",
+        "EVALUATE H WHEN X'FE' DISPLAY 'M FE'",
+        "    WHEN X'FF' DISPLAY 'M FF' END-EVALUATE.",
+    ];
+    class("Taker INHERITS Base", &["Base IS \"java.lang.Object\""], &part("OBJECT", "", &[method("take", data, " USING BY VALUE H L", &body)]))
+}
+
+#[test]
+fn figurative_arguments_follow_the_invokers_collating_sequence_and_a_method_its_classs() {
+    let main = client(&["Taker"], "       01  T USAGE OBJECT REFERENCE Taker.\n", &["INVOKE Taker NEW RETURNING T", "INVOKE T \"take\"", "    USING BY VALUE HIGH-VALUE LOW-VALUE", "GOBACK."]);
+    let (out, err, ending) = run_oo(&collated(main.clone()), &[taker()]);
+    assert!(ending.is_ok(), "{ending:?}\n{err}");
+    assert_eq!(out, "H FE\nL Z\nM FF\n");
+    let (out, err, ending) = run_oo(&main, &[collated(taker())]);
+    assert!(ending.is_ok(), "{ending:?}\n{err}");
+    assert_eq!(out, "H FF\nL 00\nM FE\n");
+}
+
+const ENVIRONMENT: [&str; 2] =["SET ADDRESS OF JNIENV TO JNIENVPTR", "SET ADDRESS OF JNINATIVEINTERFACE TO JNIENV"];
 
 /// A class that keeps an Account in its instance data: as a method receives it, makes it, or makes
 /// it global; and SELF.
