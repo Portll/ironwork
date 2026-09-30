@@ -12,7 +12,7 @@ pub enum Op {
 }
 
 impl Op {
-    fn holds(self, left: u16, right: u16) -> bool {
+    pub fn holds(self, left: u16, right: u16) -> bool {
         match self {
             Op::Gt => left > right,
             Op::Ge => left >= right,

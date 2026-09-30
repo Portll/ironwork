@@ -29,12 +29,13 @@ pub struct Request {
 
 /// IBM programs a job can name that ironwork does not run; each is refused before the job starts.
 const NOT_SUPPORTED: &[&str] = &[
-    "SORT", "ICEMAN", "DFSORT", "SYNCSORT", "ICETOOL", "IDCAMS", "IEBCOPY", "IEBUPDTE", "IEBPTPCH", "IEBCOMPR", "IEBDG", "IEHLIST", "IEHPROGM", "IEHMOVE", "IKJEFT01", "IKJEFT1A", "IKJEFT1B", "IRXJCL", "BPXBATCH", "BPXBATSL", "FTP", "DSNUTILB", "DSNUPROC", "DSNTEP2", "DSNTEP4", "DSNTIAUL", "DSNTIAD", "DFSRRC00", "ADRDSSU", "IEWL", "IEWBLINK", "HEWL", "IGYCRCTL", "ASMA90", "DFHECP1$", "DFHEAP1$", "IEBEDIT", "AMASPZAP",
+    "SORT", "ICEMAN", "DFSORT", "SYNCSORT", "ICETOOL", "IEBCOPY", "IEBUPDTE", "IEBPTPCH", "IEBCOMPR", "IEBDG", "IEHLIST", "IEHPROGM", "IEHMOVE", "IKJEFT01", "IKJEFT1A", "IKJEFT1B", "IRXJCL", "BPXBATCH", "BPXBATSL", "FTP", "DSNUTILB", "DSNUPROC", "DSNTEP2", "DSNTEP4", "DSNTIAUL", "DSNTIAD", "DFSRRC00", "ADRDSSU", "IEWL", "IEWBLINK", "HEWL", "IGYCRCTL", "ASMA90", "DFHECP1$", "DFHEAP1$", "IEBEDIT", "AMASPZAP",
 ];
 
 enum Program {
     Iefbr14,
     Iebgener,
+    Idcams,
     Cobol(PathBuf),
     Missing,
 }
@@ -43,6 +44,7 @@ fn program_of(pgm: &str, dirs: &[PathBuf]) -> Program {
     match pgm {
         "IEFBR14" => return Program::Iefbr14,
         "IEBGENER" | "ICEGENER" => return Program::Iebgener,
+        "IDCAMS" => return Program::Idcams,
         _ => {}
     }
     let lower = pgm.to_ascii_lowercase();
@@ -85,6 +87,17 @@ fn refusals(job: &Job, req: &Request) -> Vec<String> {
             let text_parts = dd.parts.iter().filter(|p| matches!(p.source, Source::InStream(_))).count();
             if dd.parts.len() > 1 && text_parts > 0 && text_parts < dd.parts.len() && !req.text {
                 out.push(at(format!("DD {} concatenates in-stream data with data sets of z/OS records", dd.name)));
+            }
+        }
+        if matches!(program, Program::Idcams) {
+            match step.dds.iter().find(|d| d.name == "SYSIN").map(|d| &d.parts[..]) {
+                Some([jcl::Part { source: Source::InStream(cards), .. }]) => {
+                    if let Err(e) = jcl::idcams::parse(cards) {
+                        out.push(at(format!("IDCAMS: {e}")));
+                    }
+                }
+                Some(_) if !req.text => out.push(at("IDCAMS SYSIN from data sets of z/OS records is not supported yet".into())),
+                _ => {}
             }
         }
         if matches!(program, Program::Iebgener) {
@@ -135,6 +148,14 @@ fn fresh_name(dir: &Path, n: &mut usize, what: &str) -> PathBuf {
 }
 
 impl Runner<'_> {
+    /// The file of a catalogued data set, or of one member: NAME or NAME(MEMBER).
+    fn catalog_path(&self, name: &str) -> PathBuf {
+        match name.split_once('(') {
+            Some((dsn, member)) => self.req.datasets.join(dsn).join(member.trim_end_matches(')')),
+            None => self.req.datasets.join(name),
+        }
+    }
+
     fn dataset_path(&self, source: &Source) -> Option<PathBuf> {
         match source {
             Source::Dataset { dsn, member } => Some(member.as_ref().map_or_else(|| self.req.datasets.join(dsn), |m| self.req.datasets.join(dsn).join(m))),
@@ -273,6 +294,128 @@ fn iebgener(dds: &[Allocated]) -> Result<i16, (AbendCode, String)> {
     let bytes = fs::read(&from.path).map_err(|e| (AbendCode::Ironwork, format!("SYSUT1: {e}")))?;
     fs::write(&to.path, bytes).map_err(|e| (AbendCode::Ironwork, format!("SYSUT2: {e}")))?;
     Ok(0)
+}
+
+/// IDCAMS over the step's SYSIN: each command's condition code is LASTCC, the highest is MAXCC
+/// and the step's return code, and a code of 16 ends the commands. Messages go to SYSPRINT.
+fn idcams(runner: &Runner<'_>, dds: &[Allocated]) -> i16 {
+    use jcl::idcams::{Command, Target};
+    let dd = |n: &str| dds.iter().find(|d| d.name == n);
+    let mut print = Vec::new();
+    let cards = dd("SYSIN").and_then(|d| fs::read_to_string(&d.path).ok()).map(|t| t.lines().map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
+    let commands = match jcl::idcams::parse(&cards) {
+        Ok(c) => c,
+        Err(e) => {
+            print.push(format!("IDCAMS: {e}"));
+            print.push("IDC0002I IDCAMS PROCESSING COMPLETE. MAXIMUM CONDITION CODE WAS 12".into());
+            write_print(dd("SYSPRINT"), &print);
+            return 12;
+        }
+    };
+    let text_of = |t: &Target| match t {
+        Target::Dd(n) => dd(n).map(|d| (d.path.clone(), d.text)),
+        Target::Dataset(name) => Some((runner.catalog_path(name), runner.req.text)),
+    };
+    let shown = |t: &Target| match t {
+        Target::Dd(n) => format!("DD {n}"),
+        Target::Dataset(n) => n.clone(),
+    };
+    fn run(commands: &[Command], cc: &mut (u16, u16), print: &mut Vec<String>, act: &mut dyn FnMut(&Command, &mut Vec<String>) -> u16) {
+        for c in commands {
+            if cc.1 >= 16 {
+                return;
+            }
+            match c {
+                Command::Set { max: true, value } => cc.1 = *value,
+                Command::Set { max: false, value } => {
+                    cc.0 = *value;
+                    cc.1 = cc.1.max(*value);
+                }
+                Command::If { max, op, value, then, otherwise } => {
+                    let tested = if *max { cc.1 } else { cc.0 };
+                    let branch = if op.holds(tested, *value) { then } else { otherwise };
+                    run(branch, cc, print, act);
+                }
+                other => {
+                    let code = act(other, print);
+                    print.push(format!("IDC0001I FUNCTION COMPLETED, HIGHEST CONDITION CODE WAS {code}"));
+                    cc.0 = code;
+                    cc.1 = cc.1.max(code);
+                }
+            }
+        }
+    }
+    let mut act = |c: &Command, print: &mut Vec<String>| -> u16 {
+        match c {
+            Command::Delete(names) => {
+                let mut code = 0;
+                for name in names {
+                    let path = runner.catalog_path(name);
+                    let gone = if path.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };
+                    match gone {
+                        Ok(()) => print.push(format!("IDC0550I ENTRY (A) {name} DELETED")),
+                        Err(_) => {
+                            print.push(format!("IDC3012I ENTRY {name} NOT FOUND"));
+                            code = 8;
+                        }
+                    }
+                }
+                code
+            }
+            Command::DefineCluster(name) => {
+                let path = runner.catalog_path(name);
+                if path.exists() {
+                    print.push(format!("ironwork: DEFINE CLUSTER {name}: the data set exists"));
+                    return 12;
+                }
+                match fs::write(&path, b"") {
+                    Ok(()) => 0,
+                    Err(e) => {
+                        print.push(format!("ironwork: DEFINE CLUSTER {name}: {e}"));
+                        12
+                    }
+                }
+            }
+            Command::Repro { from, to } => {
+                let (Some((source, source_text)), Some((target, target_text))) = (text_of(from), text_of(to)) else {
+                    print.push(format!("ironwork: REPRO: {} or {} is not allocated to the step", shown(from), shown(to)));
+                    return 12;
+                };
+                if source_text != target_text {
+                    print.push(format!("ironwork: REPRO from {} to {}: one holds UTF-8 lines and the other z/OS records", shown(from), shown(to)));
+                    return 12;
+                }
+                if !target.is_file() {
+                    print.push(format!("ironwork: REPRO: {} does not exist", shown(to)));
+                    return 12;
+                }
+                match fs::read(&source).and_then(|b| fs::write(&target, b)) {
+                    Ok(()) => 0,
+                    Err(e) => {
+                        print.push(format!("ironwork: REPRO from {} to {}: {e}", shown(from), shown(to)));
+                        12
+                    }
+                }
+            }
+            Command::Set { .. } | Command::If { .. } => 0,
+        }
+    };
+    let mut cc = (0u16, 0u16);
+    run(&commands, &mut cc, &mut print, &mut act);
+    print.push(format!("IDC0002I IDCAMS PROCESSING COMPLETE. MAXIMUM CONDITION CODE WAS {}", cc.1));
+    write_print(dd("SYSPRINT"), &print);
+    cc.1 as i16
+}
+
+fn write_print(dd: Option<&Allocated>, lines: &[String]) {
+    if let Some(d) = dd {
+        let mut text = fs::read_to_string(&d.path).unwrap_or_default();
+        for l in lines {
+            text.push_str(l);
+            text.push('\n');
+        }
+        let _ = fs::write(&d.path, text);
+    }
 }
 
 struct Frame {
@@ -419,6 +562,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                 let outcome = match program_of(&step.pgm, &runner.req.program_dirs) {
                     Program::Iefbr14 => Ok(0),
                     Program::Iebgener => iebgener(&dds),
+                    Program::Idcams => Ok(idcams(runner, &dds)),
                     Program::Cobol(path) => run_cobol(&path, runner.req, &dds, database.as_deref_mut(), &mut stdout),
                     Program::Missing => Err((AbendCode::ModuleNotFound, format!("program {} is not in the program libraries", step.pgm))),
                 };

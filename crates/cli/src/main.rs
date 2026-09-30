@@ -111,12 +111,13 @@ job flags:
              the job's data sets: DSN=A.B is the file DIR/A.B and DSN=A.B(M) the file DIR/A.B/M, a
              partitioned data set being a directory of members. They hold z/OS records, or UTF-8
              lines with :text; in-stream data and SYSOUT are always lines. Each EXEC PGM= runs a
-             COBOL program found in -L as PGM.cbl or PGM.cob, or IEFBR14, or IEBGENER without
-             control statements; DISP creates, keeps and deletes data sets as each step ends, and
+             COBOL program found in -L as PGM.cbl or PGM.cob, IEFBR14, IEBGENER without control
+             statements, or IDCAMS (DELETE, REPRO, DEFINE CLUSTER, SET, IF and DO, its messages to
+             SYSPRINT); DISP creates, keeps and deletes data sets as each step ends, and
              COND and IF/THEN/ELSE choose the steps. A step's DISPLAY output and its SYSOUT DDs go
              to standard output, a line per step to standard error. What the job uses that
-             ironwork does not run (PARM, DISP=MOD, generation data groups, SORT, IDCAMS and IBM's
-             other programs) is refused before any step runs. Exit status: the highest return
+             ironwork does not run (PARM, DISP=MOD, generation data groups, SORT, other IDCAMS
+             commands and IBM's other programs) is refused before any step runs. Exit status: the highest return
              code, 16 when a step abended or a JCL error ended the job, 2 for a job refused
   --proclib DIR
              a procedure library, searched for cataloged procedures and INCLUDE members after the

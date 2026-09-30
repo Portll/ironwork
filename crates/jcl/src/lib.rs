@@ -5,6 +5,7 @@
 //! data groups, backward references) it refuses by name rather than reading it some other way.
 
 pub mod cond;
+pub mod idcams;
 
 use cond::Cond;
 use std::collections::HashMap;

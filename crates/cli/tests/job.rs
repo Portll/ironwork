@@ -221,10 +221,10 @@ fn members_of_a_partitioned_data_set_are_files_in_its_directory() {
 #[test]
 fn what_ironwork_does_not_run_is_refused_before_any_step() {
     let dir = temp("refuse");
-    let o = job(&dir, "//S1 EXEC PGM=IEFBR14\n//NEW DD DSN=MADE.EARLY,DISP=(NEW,CATLG)\n//S2 EXEC PGM=SORT\n//S3 EXEC PGM=IEFBR14\n//X DD DSN=A.B,DISP=MOD\n");
+    let o = job(&dir, "//S1 EXEC PGM=IEFBR14\n//NEW DD DSN=MADE.EARLY,DISP=(NEW,CATLG)\n//S2 EXEC PGM=SORT\n//S3 EXEC PGM=IEFBR14\n//X DD DSN=A.B,DISP=MOD\n//S4 EXEC PGM=IDCAMS\n//SYSIN DD *\n  LISTCAT ALL\n");
     assert_eq!(o.status.code(), Some(2));
     let l = log(&o);
-    assert!(l.contains("PGM=SORT is not supported yet") && l.contains("DISP=MOD is not supported yet"), "{l}");
+    assert!(l.contains("PGM=SORT is not supported yet") && l.contains("DISP=MOD is not supported yet") && l.contains("IDCAMS: the IDCAMS command LISTCAT is not supported yet"), "{l}");
     assert!(!dir.join("data/MADE.EARLY").exists());
     let o = job(&dir, "//S1 EXEC MYPROC\n");
     assert_eq!(o.status.code(), Some(2));
@@ -265,4 +265,41 @@ fn procedures_from_jcllib_and_proclib_run_with_their_overrides() {
     assert_eq!(o.status.code(), Some(2), "{l}");
     assert_eq!(fs::read_to_string(dir.join("data/OUT.SET")).unwrap(), "GAMMA\n");
     assert!(l.contains("RUN.UP PGM=UPCASE RC=0002") && l.contains("RUN.GONE PGM=IEFBR14 BYPASSED: COND=(0,NE,UP) is true") && l.contains("YES PGM=IEFBR14 RC=0000"), "{l}");
+}
+
+#[test]
+fn idcams_deletes_defines_and_copies_with_its_condition_codes() {
+    let dir = temp("idcams");
+    fs::write(dir.join("data/SRC.DATA"), "one\ntwo\n").unwrap();
+    fs::write(dir.join("data/OLD.DATA"), "x\n").unwrap();
+    let o = job(
+        &dir,
+        concat!(
+            "//CLEAN    EXEC PGM=IDCAMS\n",
+            "//SYSPRINT DD SYSOUT=*\n",
+            "//SYSIN    DD *\n",
+            "  DELETE (OLD.DATA NEVER.THERE) PURGE\n",
+            "  IF LASTCC = 8 THEN SET MAXCC = 0\n",
+            "  DEFINE CLUSTER (NAME(NEW.KSDS) INDEXED KEYS(4 0) -\n",
+            "         RECORDSIZE(20 20))\n",
+            "  REPRO INFILE(IN) OUTDATASET(NEW.KSDS)\n",
+            "/*\n",
+            "//IN       DD DSN=SRC.DATA,DISP=SHR\n",
+            "//FAIL     EXEC PGM=IDCAMS\n",
+            "//SYSPRINT DD SYSOUT=*\n",
+            "//SYSIN    DD *\n",
+            "  REPRO INDATASET(SRC.DATA) OUTDATASET(NOT.DEFINED)\n",
+            "  DELETE SRC.DATA\n",
+            "/*\n",
+        ),
+    );
+    let l = log(&o);
+    assert!(l.contains("CLEAN PGM=IDCAMS RC=0000") && l.contains("FAIL PGM=IDCAMS RC=0012"), "{l}");
+    assert_eq!(o.status.code(), Some(12));
+    assert!(!dir.join("data/OLD.DATA").exists() && !dir.join("data/SRC.DATA").exists());
+    assert_eq!(fs::read_to_string(dir.join("data/NEW.KSDS")).unwrap(), "one\ntwo\n");
+    let out = String::from_utf8_lossy(&o.stdout);
+    for want in ["IDC0550I ENTRY (A) OLD.DATA DELETED", "IDC3012I ENTRY NEVER.THERE NOT FOUND", "IDC0001I FUNCTION COMPLETED, HIGHEST CONDITION CODE WAS 8", "IDC0002I IDCAMS PROCESSING COMPLETE. MAXIMUM CONDITION CODE WAS 0", "MAXIMUM CONDITION CODE WAS 12"] {
+        assert!(out.contains(want), "{want} in {out}");
+    }
 }
