@@ -10,6 +10,7 @@ pub mod codec;
 pub mod digest;
 pub mod edit;
 pub mod evidence;
+pub mod lir;
 pub mod module;
 pub mod picture;
 pub mod reserved_words;

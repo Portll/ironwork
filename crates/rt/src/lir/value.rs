@@ -1,0 +1,153 @@
+//! Values, expressions and conditions (lir.md §6).
+
+use super::{AbendId, CondId, ConstId, ExprId, FunctionId, Odo, PlaceId, TempId};
+use crate::codec_enum;
+use crate::vocab::Figurative;
+use numeric::precision::Fixed;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Operand {
+    Load(PlaceId),
+    Const(ConstId),
+    LengthOf(PlaceId),
+    AddressOf(PlaceId),
+    Function(FunctionId),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Const {
+    Bytes(Vec<u8>),
+    National(Vec<u8>),
+    Number(Fixed),
+    Figurative(Figurative),
+    All(Vec<u8>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntExpr {
+    Const(i64),
+    Item(PlaceId),
+    Fixed { expr: ExprId, dmax: u32 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Expr {
+    Operand(Operand),
+    Neg(ExprId),
+    Bin(ExprId, BinOp, ExprId),
+    /// An exponent from 0 to 31, else abend IRONWORK.
+    Pow(ExprId, IntExpr),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Cond {
+    Rel { a: Comparand, op: RelOp, b: Comparand, how: Compare },
+    Class { place: PlaceId, test: ByteClass },
+    Sign { value: ExprId, test: SignTest },
+    /// A level-88 name: equal to any value, or within any THRU pair.
+    Name { subject: PlaceId, values: Vec<(ConstId, Option<ConstId>)>, how: Compare },
+    Not(CondId),
+    And(CondId, CondId),
+    Or(CondId, CondId),
+    Counter(TempId),
+    InTable { index: PlaceId, count: Count },
+    Sql(SqlTest),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Comparand {
+    Operand(Operand),
+    Expr(ExprId),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Compare {
+    PackedPfd,
+    Address,
+    Float,
+    Fixed,
+    National,
+    Alphanumeric,
+    Refused(AbendId),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ByteClass {
+    Packed { signed: bool },
+    Zoned { signed: bool },
+    Digits,
+    Alphabetic,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignTest {
+    Positive,
+    Negative,
+    Zero,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Count {
+    Fixed(u32),
+    Odo(Odo),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Pow,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RelOp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+/// WHENEVER's classes: SQLCODE < 0, SQLCODE = 100, or a warning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SqlTest {
+    Error,
+    NotFound,
+    Warning,
+}
+
+codec_enum!(Operand { Load(place) = 0, Const(id) = 1, LengthOf(place) = 2, AddressOf(place) = 3, Function(id) = 4 });
+codec_enum!(Const { Bytes(b) = 0, National(n) = 1, Number(f) = 2, Figurative(f) = 3, All(b) = 4 });
+codec_enum!(IntExpr { Const(n) = 0, Item(place) = 1, Fixed { expr, dmax } = 2 });
+codec_enum!(Expr { Operand(o) = 0, Neg(e) = 1, Bin(a, op, b) = 2, Pow(base, exponent) = 3 });
+codec_enum!(Cond {
+    Rel { a, op, b, how } = 0,
+    Class { place, test } = 1,
+    Sign { value, test } = 2,
+    Name { subject, values, how } = 3,
+    Not(c) = 4,
+    And(a, b) = 5,
+    Or(a, b) = 6,
+    Counter(t) = 7,
+    InTable { index, count } = 8,
+    Sql(test) = 9,
+});
+codec_enum!(Comparand { Operand(o) = 0, Expr(e) = 1 });
+codec_enum!(Compare {
+    PackedPfd = 0,
+    Address = 1,
+    Float = 2,
+    Fixed = 3,
+    National = 4,
+    Alphanumeric = 5,
+    Refused(abend) = 6,
+});
+codec_enum!(ByteClass { Packed { signed } = 0, Zoned { signed } = 1, Digits = 2, Alphabetic = 3 });
+codec_enum!(SignTest { Positive = 0, Negative = 1, Zero = 2 });
+codec_enum!(Count { Fixed(n) = 0, Odo(odo) = 1 });
+codec_enum!(BinOp { Add = 0, Sub = 1, Mul = 2, Div = 3, Pow = 4 });
+codec_enum!(RelOp { Eq = 0, Ne = 1, Lt = 2, Le = 3, Gt = 4, Ge = 5 });
+codec_enum!(SqlTest { Error = 0, NotFound = 1, Warning = 2 });
