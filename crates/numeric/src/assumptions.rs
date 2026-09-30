@@ -187,6 +187,14 @@ pub const DEBUG_CONTENTS_LENGTH: &str = "C66";
 pub const DEBUG_NAME_FORM: &str = "C67";
 pub const DEBUGGING_SECTION_REFERENCES: &str = "C68";
 pub const GLOBAL_DECLARATIVES: &str = "C69";
+pub const SYNC_SUBORDINATE_GROUP: &str = "C90";
+pub const SYNC_ONLY_WHEN_WRITTEN: &str = "C91";
+pub const SYNC_SLACK_OWNER: &str = "C92";
+pub const SYNC_REDEFINES_REFUSED: &str = "C93";
+pub const DECIMAL_COMMA_SEPARATOR: &str = "C94";
+pub const DECIMAL_COMMA_DISPLAY_LITERAL: &str = "C95";
+pub const ARITH_DIGIT_LIMITS: &str = "C96";
+pub const MULTIPLE_RESULTS: &str = "C97";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1134,6 +1142,54 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: GLOBAL_DECLARATIVES,
         claim: "A program's declaratives run for its own statements only. USE GLOBAL AFTER EXCEPTION/ERROR for an open mode, and USE GLOBAL BEFORE REPORTING for a report group of a contained program without its own procedure for it, would serve another program's statements (Language Reference SC27-8713-03, p. 715; Report Writer Precompiler SC26-4301-04, 4.7.2 rule 5 and 4.7.3 rule 4), and are refused in a program that contains others; elsewhere GLOBAL changes nothing. A GLOBAL procedure for a named file is kept, since a contained program cannot name another program's file in ironwork, which has no GLOBAL files",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SYNC_SUBORDINATE_GROUP,
+        claim: "SYNCHRONIZED on a group at level 02 to 49 synchronizes each elementary item within it, as the clause does on a level-01 group; the Language Reference allows it on elementary items and level-01 groups (SC27-8713-03, p. 231) and says nothing of other groups",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SYNC_ONLY_WHEN_WRITTEN,
+        claim: "A binary, COMP-1, COMP-2, POINTER or INDEX item is aligned only when SYNCHRONIZED applies to it. Table 15 of the Language Reference says a subordinate binary item is aligned on 2 or 4 bytes 'when the synchronized clause is not specified', and in the same row that 'when SYNCHRONIZED is not specified for binary items, no space is reserved for slack bytes' (SC27-8713-03, p. 232); ironwork takes the second, and the first as a slip for 'specified'. A synchronized binary item of 10 to 18 digits is aligned on 4 bytes, as the slack-byte algorithm gives (p. 233), not on 8",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SYNC_SLACK_OWNER,
+        claim: "Slack bytes before a synchronized item belong to the group of the elementary item before it (Language Reference SC27-8713-03, p. 234), so a group that ended just before them grows by them; but when that group is a table or a redefinition, or ends earlier than the slack begins, the slack bytes stay in the group that holds it and the table's occurrences keep their length",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SYNC_REDEFINES_REFUSED,
+        claim: "A synchronized item that starts a redefinition where its boundary would need slack bytes stops the compile. The Language Reference says such an item must not need them and that the redefined item must be aligned for it (SC27-8713-03, pp. 232-233), but not what the compiler does when a program breaks the rule",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: DECIMAL_COMMA_SEPARATOR,
+        claim: "Under DECIMAL-POINT IS COMMA a comma between digits, or after a space, parenthesis or sign and before a digit, is a numeric literal's decimal point, and a comma after any other word is a separator even with a digit after it, so T(1,2) has the one subscript 1,2 and T(I,2) has two. The Language Reference says only that a separator comma is a comma followed by a space (SC27-8713-03, p. 49) and that the clause exchanges the comma's and the period's functions in numeric literals (p. 131); a period before a digit is then an error",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: DECIMAL_COMMA_DISPLAY_LITERAL,
+        claim: "DISPLAY of a numeric literal writes it as the program wrote it, so under DECIMAL-POINT IS COMMA its decimal point is a comma; the Language Reference says nothing of how DISPLAY shows a numeric literal (SC27-8713-03, pp. 333-334)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ARITH_DIGIT_LIMITS,
+        claim: "A numeric or numeric-edited PICTURE whose digit positions, scaling positions P included, exceed 18 under ARITH(COMPAT) or 31 under ARITH(EXTEND), and a numeric literal with more digits than that, stop the compile (Language Reference SC27-8713-03, pp. 45, 209, 217-218; Programming Guide SC27-8714-03, p. 349). Neither manual gives the diagnostic's severity, and P is counted for every numeric item, where the Language Reference counts it for numeric-edited items and arithmetic operands (p. 209)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: MULTIPLE_RESULTS,
+        claim: "An arithmetic statement with several receivers computes what they share once, before any is stored, and each receiver in turn then takes it or combines it with its own current value, its subscripts evaluated then (Language Reference SC27-8713-03, p. 298). For ADD, SUBTRACT, MULTIPLY and DIVIDE without GIVING the shared part is the operands other than the receiver; for COMPUTE and the GIVING forms it is the whole expression, so a receiver that COMPUTE names twice gets the same result twice",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

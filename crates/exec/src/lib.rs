@@ -128,6 +128,7 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
         errors.push(Error::at(Pos::default(), m));
         collating::Sequence::native()
     });
+    digit_limits(&program, options.arith, &mut errors);
     let drafts = report::prepare(&mut program, options.adv, &mut errors);
     let linage_counters = linage::add_counters(&mut program);
     if whole {
@@ -138,7 +139,7 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
         errors.push(e);
         (0..files.len()).collect()
     });
-    let mut layout = match layout::build(&program.working_storage, &files, &shared, &program.linkage, &program.local_storage) {
+    let mut layout = match layout::build(&program.working_storage, &files, &shared, &program.linkage, &program.local_storage, program.environment.decimal_point_comma) {
         Ok(l) => l,
         Err(e) => {
             errors.push(e);
@@ -166,7 +167,7 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
     let carriage = printer::carriages(&program, &layout, options.adv);
     let declaratives = declaratives::resolve(&program, &layout, &options, &mut errors);
     let debugging = declaratives::debugging_sections(&program);
-    let mut check = Check { layout: &layout, program: &program, errors: &mut errors, debugging: false };
+    let mut check = Check { layout: &layout, program: &program, errors: &mut errors, debugging: false, max_digits: options.arith.max_picture_digits() };
     for k in 0..program.files.len() {
         check.file_keys(k);
         linage::check_file(check.program, check.layout, k, check.errors);
@@ -441,6 +442,41 @@ impl Compiled {
     }
 }
 
+/// Under ARITH(COMPAT) a numeric or numeric-edited PICTURE, scaling positions P included, and a
+/// fixed-point numeric literal hold at most 18 digits, and under ARITH(EXTEND) 31 (Language
+/// Reference SC27-8713-03, pp. 45, 209, 217-218; Programming Guide SC27-8714-03, p. 349).
+fn digit_limits(program: &Program, arith: numeric::options::Arith, errors: &mut Vec<Error>) {
+    let max = arith.max_picture_digits();
+    let option = match arith {
+        numeric::options::Arith::Compat => "ARITH(COMPAT)",
+        numeric::options::Arith::Extend => "ARITH(EXTEND)",
+    };
+    let entries = program.working_storage.iter().chain(&program.local_storage).chain(&program.linkage).chain(program.files.iter().flat_map(|f| &f.records));
+    for e in entries {
+        if let Some(p) = e.picture.as_deref()
+            && let Ok(pic) = picture::analyse_with(p, program.environment.decimal_point_comma)
+            && matches!(pic.category, picture::Category::Numeric | picture::Category::NumericEdited)
+        {
+            let positions = pic.digits + pic.scaling + pic.scale.saturating_sub(pic.digits);
+            if positions > max {
+                errors.push(Error::at(e.pos, format!("PICTURE {p}: {positions} digit positions, more than the {max} {option} allows")));
+            }
+        }
+        let values = e.value.iter().chain(e.condition_values.iter().flat_map(|(low, high)| std::iter::once(low).chain(high))).chain(&e.false_value);
+        for v in values {
+            if let Literal::Number(t) = v
+                && literal_digits(t) > max as usize
+            {
+                errors.push(Error::at(e.pos, format!("the literal {t} has more than the {max} digits {option} allows")));
+            }
+        }
+    }
+}
+
+fn literal_digits(t: &str) -> usize {
+    t.chars().filter(char::is_ascii_digit).count()
+}
+
 /// Resolves every name before the program runs, so a misspelling is a compile error.
 struct Check<'a> {
     layout: &'a Layout,
@@ -448,6 +484,8 @@ struct Check<'a> {
     errors: &'a mut Vec<Error>,
     /// The statements are a debugging section's, which alone may reference DEBUG-ITEM.
     debugging: bool,
+    /// The most digits a numeric literal has under the program's ARITH option.
+    max_digits: u32,
 }
 
 impl Check<'_> {
@@ -588,7 +626,14 @@ impl Check<'_> {
                 }
                 self.handlers(invalid);
             }
-            Stmt::Initialize { targets, .. } => targets.iter().for_each(|r| self.reference(r)),
+            Stmt::Initialize { targets, pos } => {
+                for r in targets {
+                    self.reference(r);
+                    if self.item(r).is_some_and(|i| self.layout.items[i].level == 66) {
+                        self.errors.push(Error::at(*pos, format!("INITIALIZE {}: a level-66 RENAMES item cannot be initialized", r.name)));
+                    }
+                }
+            }
             Stmt::GoTo { target: Some(target), pos } => self.procedure(target, *pos),
             Stmt::GoToDepending { targets, on, pos } => {
                 targets.iter().for_each(|t| self.procedure(t, *pos));
@@ -611,6 +656,16 @@ impl Check<'_> {
             Stmt::Cancel { targets, .. } => targets.iter().for_each(|t| self.operand(t)),
             Stmt::Set { set, .. } => match set {
                 SetStmt::ConditionTrue(targets) => targets.iter().for_each(|r| self.reference(r)),
+                SetStmt::ConditionFalse(targets) => {
+                    for r in targets {
+                        self.reference(r);
+                        if let Ok(layout::Resolved::Condition(c)) = self.layout.resolve(&r.name, &r.qualifiers, r.pos)
+                            && self.layout.conditions[c].false_value.is_none()
+                        {
+                            self.errors.push(Error::at(r.pos, format!("SET {} TO FALSE: the condition-name has no WHEN SET TO FALSE value", r.name)));
+                        }
+                    }
+                }
                 SetStmt::To { targets, value } | SetStmt::AddressOf { targets, value } => {
                     targets.iter().for_each(|r| self.reference(r));
                     self.operand(value);
@@ -847,8 +902,8 @@ impl Check<'_> {
     fn operand(&mut self, op: &Operand) {
         match op {
             Operand::Ref(r) | Operand::LengthOf(r) | Operand::AddressOf(r) => self.reference(r),
-            Operand::Literal(Literal::Number(t)) if machine::literal_fixed(t).is_none() => {
-                self.errors.push(Error::at(Pos::default(), format!("the literal {t} has more than 31 digits")));
+            Operand::Literal(Literal::Number(t)) if machine::literal_fixed(t).is_none() || literal_digits(t) > self.max_digits as usize => {
+                self.errors.push(Error::at(Pos::default(), format!("the literal {t} has more than {} digits", self.max_digits.min(31))));
             }
             Operand::Literal(_) => {}
             Operand::Function(f) => {

@@ -171,6 +171,10 @@ pub struct DataEntry {
     /// Level 88: the values that make the condition true.
     /// Each value, or the low and high ends of a THRU range.
     pub condition_values: Vec<(Literal, Option<Literal>)>,
+    /// Level 88 WHEN SET TO FALSE: the value SET ... TO FALSE stores.
+    pub false_value: Option<Literal>,
+    /// Level 66 RENAMES: the item renamed, or the first and last of a THRU range.
+    pub renames: Option<(Ref, Option<Ref>)>,
     /// USAGE OBJECT REFERENCE class-name: the class; None for a universal reference.
     pub object_class: Option<String>,
     pub pos: Pos,
@@ -467,6 +471,8 @@ pub struct Call {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SetStmt {
     ConditionTrue(Vec<Ref>),
+    /// SET condition-names TO FALSE: each conditional variable gets its WHEN SET TO FALSE value.
+    ConditionFalse(Vec<Ref>),
     /// SET targets TO value: an index or integer to a number, a pointer to ADDRESS OF, NULL or another pointer.
     To { targets: Vec<Ref>, value: Operand },
     /// SET ADDRESS OF targets TO pointer.
@@ -656,6 +662,9 @@ pub struct Environment {
     /// SOURCE-COMPUTER ... WITH DEBUGGING MODE: debugging lines and USE FOR DEBUGGING sections are
     /// compiled rather than read as comments.
     pub debugging_mode: bool,
+    /// SPECIAL-NAMES DECIMAL-POINT IS COMMA: the comma and the period exchange roles in PICTURE
+    /// character-strings, numeric literals and the arguments of NUMVAL and NUMVAL-C.
+    pub decimal_point_comma: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

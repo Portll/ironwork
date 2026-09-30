@@ -4,8 +4,9 @@ use std::collections::BTreeMap;
 
 mod collating;
 mod data;
-mod linage;
+mod data_division;
 mod declaratives;
+mod linage;
 mod oo;
 mod printer;
 mod procedure;
@@ -679,6 +680,8 @@ const FRAGMENTS: &[&str] = &[
     "NOT AT EOP ", "LINAGE-COUNTER", " IN P ", "ADVANCING PAGE ", "BEFORE ADVANCING ",
     "ENTRY 'E' ", "ENTRY ", "ALTER ", "TO PROCEED TO ", "GO TO.", "GO TO ", " DEPENDING ON ",
     " AFTER ", "NO ADVANCING", "FUNCTION RANDOM", "FUNCTION RANDOM(", " <> ", " & ", "SECTION 50.", "SECTION 99", "\n       CBL DYNAM\n",
+    " SYNC ", " SYNCHRONIZED RIGHT ", " COMP-2 SYNC ", "\n       66  RN RENAMES ", " THRU ", "PIC 99PP ", "PIC SVP(3)9 ", "PIC ZZZPP ", "PIC P",
+    "DECIMAL-POINT IS COMMA. ", "1,5 ", ",25", "PIC Z.ZZ9,99 ", " FALSE 'N' ", " WHEN SET TO FALSE ", "SET X TO FALSE ", "CURRENCY SIGN '$' ",
 ];
 
 fn mutate(base: &str, next: &mut impl FnMut() -> u64) -> String {

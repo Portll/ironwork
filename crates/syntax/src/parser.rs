@@ -59,11 +59,12 @@ fn figurative(word: &str) -> Option<Figurative> {
     })
 }
 
-/// A contained program has the alphabets, collating sequence and debugging mode of the program
-/// containing it, whose configuration section is the only one (Language Reference SC27-8713-03,
-/// p. 121).
+/// A contained program has the alphabets, collating sequence, decimal point and debugging mode of
+/// the program containing it, whose configuration section is the only one (Language Reference
+/// SC27-8713-03, p. 121).
 fn share_configuration(outer: &Environment, inner: &mut Environment) {
     inner.debugging_mode |= outer.debugging_mode;
+    inner.decimal_point_comma |= outer.decimal_point_comma;
     if inner.collating_sequence.is_none() {
         inner.collating_sequence.clone_from(&outer.collating_sequence);
     }
@@ -370,8 +371,22 @@ impl Parser<'_> {
     fn environment(&mut self, clauses: &mut Environment) -> R<(Vec<FileDecl>, Vec<ClassEntry>)> {
         let (mut files, mut repository) = (Vec::new(), Vec::new());
         while self.peek().is_some() && !self.at_division(&["DATA", "PROCEDURE"]) {
-            if self.is_word("DECIMAL-POINT") {
-                return Err(self.error("DECIMAL-POINT IS COMMA is not supported yet"));
+            if self.accept_word("DECIMAL-POINT") {
+                self.accept_word("IS");
+                self.expect_word("COMMA")?;
+                clauses.decimal_point_comma = true;
+                continue;
+            }
+            if self.is_word("CURRENCY") {
+                let pos = self.pos();
+                self.at += 1;
+                self.accept_word("SIGN");
+                self.accept_word("IS");
+                let sign = self.literal()?;
+                if sign != Literal::Alnum("$".into()) || self.is_word("WITH") || self.is_word("PICTURE") {
+                    return Err(Error::at(pos, "a CURRENCY SIGN other than $ is not supported yet"));
+                }
+                continue;
             }
             if self.environment_clause(clauses)? {
                 continue;
@@ -806,6 +821,8 @@ impl Parser<'_> {
             indexed_by: Vec::new(),
             keys: Vec::new(),
             condition_values: Vec::new(),
+            false_value: None,
+            renames: None,
             object_class: None,
             pos,
         };
@@ -835,16 +852,31 @@ impl Parser<'_> {
                     self.accept_word("IS");
                     self.accept_word("ARE");
                     if level == 88 {
-                        while self.peek().is_some() && self.peek() != Some(&Tok::Period) {
+                        while self.peek().is_some() && self.peek() != Some(&Tok::Period) && !self.is_word("WHEN") && !self.is_word("FALSE") {
                             let low = self.literal()?;
                             let high = if self.accept_any(&["THRU", "THROUGH"]).is_some() { Some(self.literal()?) } else { None };
                             e.condition_values.push((low, high));
+                        }
+                        if self.accept_word("WHEN") {
+                            self.accept_word("SET");
+                            self.accept_word("TO");
+                            self.expect_word("FALSE")?;
+                            self.accept_word("IS");
+                            e.false_value = Some(self.literal()?);
+                        } else if self.accept_word("FALSE") {
+                            self.accept_word("IS");
+                            e.false_value = Some(self.literal()?);
                         }
                     } else {
                         e.value = Some(self.literal()?);
                     }
                 }
                 "REDEFINES" => e.redefines = Some(self.name("the item redefined")?),
+                "RENAMES" => {
+                    let first = self.reference()?;
+                    let last = if self.accept_any(&["THRU", "THROUGH"]).is_some() { Some(self.reference()?) } else { None };
+                    e.renames = Some((first, last));
+                }
                 "OCCURS" => {
                     let count = |p: &mut Self| -> R<u32> {
                         let n = match p.peek() {
@@ -1725,6 +1757,9 @@ impl Parser<'_> {
             if self.accept_word("TRUE") {
                 return Ok(SetStmt::ConditionTrue(targets));
             }
+            if self.accept_word("FALSE") {
+                return Ok(SetStmt::ConditionFalse(targets));
+            }
             return Ok(SetStmt::To { targets, value: self.operand()? });
         }
         match self.accept_any(&["UP", "DOWN"]).as_deref() {
@@ -2500,5 +2535,40 @@ mod tests {
         assert!(matches!(&not_on[0], Stmt::Write { end_of_page, .. } if end_of_page.on.is_some() && end_of_page.not_on.is_none()));
         assert!(matches!(&s[1], Stmt::Write { advancing: Some(Advancing::Lines { before: true, .. }), end_of_page, .. } if end_of_page.on.is_some() && end_of_page.not_on.is_some()));
         assert!(matches!(&s[2], Stmt::Write { invalid, end_of_page, .. } if invalid.on.is_some() && end_of_page.not_on.is_some()));
+    }
+
+    #[test]
+    fn decimal_point_is_comma_reaches_contained_programs_and_other_currency_signs_are_refused() {
+        let text = [
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OUTER.\n       ENVIRONMENT DIVISION.\n",
+            "       CONFIGURATION SECTION.\n       SPECIAL-NAMES.\n           CURRENCY SIGN IS '$'\n           DECIMAL-POINT IS COMMA.\n",
+            "       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  A PIC 9V9 VALUE 1,5.\n",
+            "       PROCEDURE DIVISION.\n           GOBACK.\n",
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. INNER.\n       PROCEDURE DIVISION.\n           GOBACK.\n",
+            "       END PROGRAM INNER.\n       END PROGRAM OUTER.\n",
+        ]
+        .concat();
+        let programs = crate::parse_all_with(&text, &crate::copy::Libraries::default()).unwrap_or_else(|e| panic!("{e}"));
+        assert!(programs.iter().all(|p| p.environment.decimal_point_comma));
+        assert_eq!(programs[0].working_storage[0].value, Some(Literal::Number("1.5".into())));
+        let other = text.replace("'$'", "'W'");
+        assert!(crate::parse(&other).unwrap_err().message.contains("CURRENCY SIGN"));
+    }
+
+    #[test]
+    fn renames_and_condition_names_with_a_false_value() {
+        let p = program(concat!(
+            "       01  R.\n           05 A PIC X.\n           05 B PIC X.\n              88 B-ON VALUE 'Y' FALSE 'N'.\n",
+            "              88 B-OFF VALUES 'N' 'X' WHEN SET TO FALSE IS SPACE.\n",
+            "       66  AB RENAMES A THRU B.\n       66  BB RENAMES B OF R.\n",
+            "       PROCEDURE DIVISION.\n           SET B-ON B-OFF TO FALSE.\n",
+        ));
+        let ws = &p.working_storage;
+        assert_eq!((ws[3].false_value.as_ref(), ws[3].condition_values.len()), (Some(&Literal::Alnum("N".into())), 1));
+        assert_eq!((ws[4].false_value.as_ref(), ws[4].condition_values.len()), (Some(&Literal::Figurative(Figurative::Space)), 2));
+        let (first, last) = ws[5].renames.as_ref().unwrap();
+        assert_eq!((ws[5].level, first.name.as_str(), last.as_ref().map(|r| r.name.as_str())), (66, "A", Some("B")));
+        assert_eq!(ws[6].renames.as_ref().unwrap().0.qualifiers, ["R"]);
+        assert!(matches!(&p.paragraphs[0].statements[0], Stmt::Set { set: SetStmt::ConditionFalse(t), .. } if t.len() == 2));
     }
 }

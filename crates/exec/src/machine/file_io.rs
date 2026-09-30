@@ -141,7 +141,7 @@ impl<'p> Machine<'p, '_, '_> {
         let Some(r) = &program.files[k].relative_key else { return Ok(true) };
         let loc = self.locate(r)?;
         Ok(match loc.kind.digits_scale() {
-            Some((digits, scale)) => digits.saturating_sub(scale) >= 19 || n < 10u64.pow(digits - scale),
+            Some((digits, scale)) => digits.saturating_sub(scale) >= 19 || n < 10u64.pow(digits.saturating_sub(scale)),
             None => true,
         })
     }

@@ -1,9 +1,10 @@
 //! WORKING-STORAGE as IBM lays it out: sizes by USAGE and PICTURE, REDEFINES sharing storage,
-//! OCCURS repeating it. See [`numeric::assumptions::WORKING_STORAGE_LAYOUT`] for where each 01
-//! level starts.
+//! OCCURS repeating it, SYNCHRONIZED slack bytes before an item and after each occurrence, and
+//! level-66 RENAMES over what is laid out. See [`numeric::assumptions::WORKING_STORAGE_LAYOUT`]
+//! for where each 01 level starts.
 
 use crate::picture::{self, Category, Sym};
-use syntax::ast::{DataEntry, Environment, FileDecl, Literal, Organization, Usage};
+use syntax::ast::{DataEntry, Environment, FileDecl, Literal, Organization, Ref, Usage};
 use syntax::{Error, Pos};
 use zarch::hfp::Precision;
 
@@ -42,6 +43,9 @@ pub struct Item {
     pub linkage: Option<u16>,
     /// The class-name of a typed object reference.
     pub object_class: Option<String>,
+    /// PICTURE scaling positions P right of the digits: the item's value is its digits times ten
+    /// to this power.
+    pub scaling: u32,
     pub pos: Pos,
 }
 
@@ -50,6 +54,8 @@ pub struct Condition {
     pub name: String,
     pub item: usize,
     pub values: Vec<(Literal, Option<Literal>)>,
+    /// The WHEN SET TO FALSE value.
+    pub false_value: Option<Literal>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,12 +88,22 @@ pub const MAX_STORAGE: u32 = 128 << 20;
 
 /// Lays out WORKING-STORAGE, then each file's record area, which all its 01 records share and
 /// which is at least `record_max` bytes. Files whose `shared` entry names the same file share one
-/// area, as large as the largest of them (see [`record_area_owners`]).
-pub fn build(entries: &[DataEntry], files: &[(&[DataEntry], Option<u32>)], shared: &[usize], linkage: &[DataEntry], local: &[DataEntry]) -> Result<Layout, Error> {
+/// area, as large as the largest of them (see [`record_area_owners`]). `decimal_comma` is
+/// DECIMAL-POINT IS COMMA, which changes what the PICTUREs mean.
+pub fn build(
+    entries: &[DataEntry],
+    files: &[(&[DataEntry], Option<u32>)],
+    shared: &[usize],
+    linkage: &[DataEntry],
+    local: &[DataEntry],
+    decimal_comma: bool,
+) -> Result<Layout, Error> {
     let mut items: Vec<Item> = Vec::new();
     let mut usages: Vec<Option<Usage>> = Vec::new();
+    let mut synchronized: Vec<bool> = Vec::new();
     let mut conditions = Vec::new();
     let mut open: Vec<usize> = Vec::new();
+    let mut renames: Vec<(usize, &DataEntry)> = Vec::new();
     const LINKAGE: u16 = u16::MAX;
     const LOCAL: u16 = u16::MAX - 1;
     let tagged: Vec<(Option<u16>, &DataEntry)> = entries
@@ -99,30 +115,72 @@ pub fn build(entries: &[DataEntry], files: &[(&[DataEntry], Option<u32>)], share
         .collect();
     let mut group = None;
     let mut linkage_roots = Vec::new();
+    let mut after_renames = false;
     for &(region, e) in &tagged {
         if region != group {
             open.clear();
             group = region;
+            after_renames = false;
         }
         let file = region.filter(|&r| r != LINKAGE && r != LOCAL);
         let in_linkage = region == Some(LINKAGE);
-
-
+        if e.occurs.is_some() && matches!(e.level, 1 | 66 | 77 | 88) {
+            return Err(Error::at(e.pos, format!("OCCURS at level {:02}: Enterprise COBOL takes OCCURS only at levels 02 to 49", e.level)));
+        }
         if e.level == 88 {
+            if after_renames {
+                return Err(Error::at(e.pos, "a level-88 entry after a level-66 entry: a RENAMES item cannot be a conditional variable"));
+            }
             let item = *open.last().ok_or_else(|| Error::at(e.pos, "a level-88 entry with no item before it"))?;
             let name = e.name.clone().ok_or_else(|| Error::at(e.pos, "a level-88 entry needs a name"))?;
-            conditions.push(Condition { name, item, values: e.condition_values.clone() });
+            conditions.push(Condition { name, item, values: e.condition_values.clone(), false_value: e.false_value.clone() });
             continue;
         }
+        if e.renames.is_some() != (e.level == 66) {
+            return Err(Error::at(e.pos, "RENAMES goes with level 66, and level 66 with RENAMES"));
+        }
         if e.level == 66 {
-            return Err(Error::at(e.pos, "RENAMES (level 66) is not supported yet"));
+            let record = open.first().copied().filter(|&r| items[r].level == 1).ok_or_else(|| Error::at(e.pos, "a level-66 entry must follow the entries of a level-01 record"))?;
+            if e.name.is_none() || e.picture.is_some() || e.usage.is_some() || e.value.is_some() || e.redefines.is_some() || e.sync || e.sign.is_some() {
+                return Err(Error::at(e.pos, "a level-66 entry has a name and a RENAMES clause, and nothing else"));
+            }
+            renames.push((items.len(), e));
+            items.push(Item {
+                name: e.name.clone(),
+                level: 66,
+                parent: Some(record),
+                children: Vec::new(),
+                offset: 0,
+                size: 0,
+                occurs: 1,
+                table: false,
+                depending_on: None,
+                odo: None,
+                index_names: Vec::new(),
+                keys: Vec::new(),
+                local: items[record].local,
+                kind: Kind::Group,
+                value: None,
+                dims: Vec::new(),
+                redefines: None,
+                file,
+                linkage: items[record].linkage,
+                object_class: None,
+                scaling: 0,
+                pos: e.pos,
+            });
+            usages.push(None);
+            synchronized.push(false);
+            after_renames = true;
+            continue;
         }
         if !(e.level == 1 || e.level == 77 || (2..=49).contains(&e.level)) {
             return Err(Error::at(e.pos, format!("level {} is not a data level", e.level)));
         }
-        if e.sync {
-            return Err(Error::at(e.pos, "SYNCHRONIZED is not supported yet"));
+        if after_renames && e.level != 1 && e.level != 77 {
+            return Err(Error::at(e.pos, format!("level {:02} after a level-66 entry: a record's RENAMES entries follow its last entry", e.level)));
         }
+        after_renames = false;
         while open.last().is_some_and(|&i| items[i].level >= e.level || items[i].level == 77) {
             open.pop();
         }
@@ -162,25 +220,33 @@ pub fn build(entries: &[DataEntry], files: &[(&[DataEntry], Option<u32>)], share
                 None
             },
             object_class: e.object_class.clone(),
+            scaling: 0,
             pos: e.pos,
         });
-        if (e.level == 1 || e.level == 77) && e.occurs.is_some() {
-            return Err(Error::at(e.pos, "OCCURS is not allowed at level 01 or 77"));
-        }
         if e.occurs == Some(0) {
             return Err(Error::at(e.pos, "OCCURS 0 is not a table"));
         }
         let inherited = parent.and_then(|p| usages[p]);
         usages.push(e.usage.or(inherited));
+        synchronized.push(e.sync || parent.is_some_and(|p| synchronized[p]));
         if let Some(p) = parent {
             items[p].children.push(index);
         }
         open.push(index);
     }
     let mut edits = Vec::new();
+    let mut aligns = vec![1u32; items.len()];
     for (index, (_, e)) in tagged.iter().filter(|(_, e)| e.level != 88).enumerate() {
-        items[index].kind = kind(e, &items[index], usages[index], &mut edits)?;
-        items[index].size = elementary_size(&items[index], declared_size(e));
+        if e.level == 66 {
+            continue;
+        }
+        let pic = e.picture.as_deref().map(|p| picture::analyse_with(p, decimal_comma).map_err(|m| Error::at(e.pos, m))).transpose()?;
+        items[index].kind = kind(e, &items[index], usages[index], pic.as_ref(), &mut edits)?;
+        items[index].scaling = pic.as_ref().map_or(0, |p| p.scaling);
+        items[index].size = elementary_size(&items[index], pic.as_ref().map(|p| p.size));
+        if synchronized[index] && items[index].kind != Kind::Group {
+            aligns[index] = alignment(items[index].kind);
+        }
     }
     for (_, e) in &tagged {
         for name in &e.indexed_by {
@@ -205,13 +271,15 @@ pub fn build(entries: &[DataEntry], files: &[(&[DataEntry], Option<u32>)], share
                 file: None,
                 linkage: None,
                 object_class: None,
+                scaling: 0,
                 pos: e.pos,
             });
         }
     }
+    aligns.resize(items.len(), 1);
     let roots: Vec<usize> = (0..items.len()).filter(|&i| items[i].parent.is_none()).collect();
     for &r in &roots {
-        measure(&mut items, r)?;
+        measure(&mut items, &aligns, r, 0)?;
     }
     let mut local_cursor = 0u32;
     let local_roots: Vec<usize> = roots.iter().copied().filter(|&r| items[r].local).collect();
@@ -282,6 +350,9 @@ pub fn build(entries: &[DataEntry], files: &[(&[DataEntry], Option<u32>)], share
             (child, at) = (a, items[a].parent);
         }
     }
+    for (index, e) in renames {
+        rename(&mut items, index, e)?;
+    }
     let mut areas = Vec::new();
     for (k, &size) in own.iter().enumerate() {
         let g = owner(k);
@@ -299,7 +370,86 @@ pub fn build(entries: &[DataEntry], files: &[(&[DataEntry], Option<u32>)], share
     Ok(Layout { items, conditions, edits, file_areas: areas, linkage_roots, local_size: local_cursor, size: cursor, file_names: Vec::new(), linage_counters: Vec::new() })
 }
 
-fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, edits: &mut Vec<Vec<Sym>>) -> Result<Kind, Error> {
+/// Gives level-66 entry `index` the storage and attributes of what it renames (Language Reference
+/// SC27-8713-03, pp. 228-229): one item as that item is, or from the start of the first item
+/// through the end of the last as an alphanumeric group.
+fn rename(items: &mut [Item], index: usize, e: &DataEntry) -> Result<(), Error> {
+    let Some((first, last)) = &e.renames else { return Ok(()) };
+    let record = items[index].parent.unwrap_or(index);
+    let find = |r: &Ref| -> Result<usize, Error> {
+        let err = |m: String| Err(Error::at(r.pos, format!("RENAMES {}: {m}", r.name)));
+        if !r.subscripts.is_empty() || r.refmod.is_some() {
+            return err("a renamed item is named without subscripts or reference modification".into());
+        }
+        let in_record = |mut at: usize| {
+            let mut wanted = r.qualifiers.iter().peekable();
+            while let Some(p) = items[at].parent {
+                if wanted.peek().is_some_and(|q| items[p].name.as_deref() == Some(q.as_str())) {
+                    wanted.next();
+                }
+                at = p;
+            }
+            at == record && wanted.next().is_none()
+        };
+        let found: Vec<usize> = (0..items.len()).filter(|&i| i != record && items[i].level != 66 && items[i].name.as_deref() == Some(r.name.as_str()) && in_record(i)).collect();
+        let &[t] = found.as_slice() else {
+            let record_name = items[record].name.clone().unwrap_or_default();
+            return err(if found.is_empty() { format!("no item of that name below {record_name}, other than a level-66 entry") } else { "ambiguous; qualify it with OF or IN".into() });
+        };
+        if !items[t].dims.is_empty() {
+            return err("a renamed item must not have OCCURS, nor belong to a group that has it".into());
+        }
+        Ok(t)
+    };
+    if first.name == items[record].name.clone().unwrap_or_default() && first.qualifiers.is_empty() {
+        return Err(Error::at(first.pos, format!("RENAMES {}: a level-66 entry cannot rename a level-01 record", first.name)));
+    }
+    let a = find(first)?;
+    let Some(last) = last else {
+        let (offset, size, kind, scaling, odo) = (items[a].offset, items[a].size, items[a].kind, items[a].scaling, items[a].odo);
+        let it = &mut items[index];
+        (it.offset, it.size, it.kind, it.scaling, it.odo) = (offset, size, kind, scaling, odo);
+        return Ok(());
+    };
+    let b = find(last)?;
+    let end = |i: usize| items[i].offset + items[i].size;
+    let mut up = items[b].parent;
+    while let Some(p) = up {
+        if p == a {
+            return Err(Error::at(last.pos, format!("RENAMES {} THRU {}: the last item cannot be within the first", first.name, last.name)));
+        }
+        up = items[p].parent;
+    }
+    if a == b || items[b].offset < items[a].offset || end(b) < end(a) {
+        return Err(Error::at(last.pos, format!("RENAMES {} THRU {}: the last item must start and end no earlier than the first", first.name, last.name)));
+    }
+    let root = |mut i: usize| {
+        while let Some(p) = items[i].parent {
+            i = p;
+        }
+        i
+    };
+    if let Some(t) = (0..items.len()).find(|&i| items[i].depending_on.is_some() && root(i) == record && items[i].offset >= items[a].offset && items[i].offset < end(b)) {
+        return Err(Error::at(items[t].pos, format!("RENAMES {} THRU {}: no OCCURS DEPENDING ON between them", first.name, last.name)));
+    }
+    let (offset, size) = (items[a].offset, end(b) - items[a].offset);
+    let it = &mut items[index];
+    (it.offset, it.size, it.kind) = (offset, size, Kind::Group);
+    Ok(())
+}
+
+/// The boundary a SYNCHRONIZED item of this kind is aligned on (Language Reference SC27-8713-03,
+/// pp. 232-233); 1 for the kinds SYNCHRONIZED leaves where they are.
+fn alignment(kind: Kind) -> u32 {
+    match kind {
+        Kind::Binary { digits: 0..=4, .. } => 2,
+        Kind::Binary { .. } | Kind::Float(Precision::Short) | Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer => 4,
+        Kind::Float(_) => 8,
+        _ => 1,
+    }
+}
+
+fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, pic: Option<&picture::Picture>, edits: &mut Vec<Vec<Sym>>) -> Result<Kind, Error> {
     let err = |m: String| Error::at(e.pos, m);
     let usage = usage.unwrap_or_default();
     let handle = matches!(usage, Usage::ObjectReference | Usage::ProgramPointer);
@@ -328,7 +478,7 @@ fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, edits: &mut Vec<Vec<Sy
         }
         return Ok(Kind::Float(if usage == Usage::Float1 { Precision::Short } else { Precision::Long }));
     }
-    let pic = picture::analyse(e.picture.as_deref().unwrap()).map_err(err)?;
+    let Some(pic) = pic else { return Err(err("an elementary item needs a PICTURE".into())) };
     if e.blank_when_zero && pic.category != Category::NumericEdited {
         return Err(err("BLANK WHEN ZERO is supported on numeric-edited items only, so far".into()));
     }
@@ -375,32 +525,81 @@ fn elementary_size(item: &Item, e_size: Option<u32>) -> u32 {
 }
 
 /// Sizes the item and its descendants; children's offsets are relative to their parent here.
-fn measure(items: &mut [Item], index: usize) -> Result<(), Error> {
+/// `base` is where the item starts in its record, the 01 level on a doubleword, which is what a
+/// SYNCHRONIZED item's boundary is reckoned from (Language Reference SC27-8713-03, pp. 233-235).
+fn measure(items: &mut [Item], aligns: &[u32], index: usize, base: u32) -> Result<(), Error> {
     if items[index].kind != Kind::Group {
         return Ok(());
     }
     let children = items[index].children.clone();
     let (mut cursor, mut extent) = (0u32, 0u32);
     let mut placed: Vec<(Option<String>, u32)> = Vec::new();
+    let mut previous: Option<usize> = None;
     for c in children {
-        measure(items, c)?;
-        let offset = match items[c].redefines.clone() {
-            Some(target) => placed.iter().rev().find(|(n, _)| n.as_deref() == Some(target.as_str())).map(|&(_, o)| o).ok_or_else(|| {
+        let redefined = match items[c].redefines.clone() {
+            Some(target) => Some(placed.iter().rev().find(|(n, _)| n.as_deref() == Some(target.as_str())).map(|&(_, o)| o).ok_or_else(|| {
                 Error::at(items[c].pos, format!("REDEFINES {target}: no earlier item of that name at this level"))
-            })?,
-            None => cursor,
+            })?),
+            None => None,
         };
+        let start = redefined.unwrap_or(cursor);
+        let m = first_alignment(items, aligns, c);
+        let slack = (m - (base + start) % m) % m;
+        if slack > 0 && redefined.is_some() {
+            return Err(Error::at(items[c].pos, format!("a SYNCHRONIZED item at the start of a REDEFINES would need {slack} slack bytes: the redefined item must be on a {m}-byte boundary")));
+        }
+        if slack > 0 {
+            give_slack(items, previous, cursor, slack);
+        }
+        let offset = start + slack;
+        measure(items, aligns, c, base + offset)?;
+        if items[c].table {
+            let m = widest_alignment(items, aligns, c);
+            items[c].size = items[c].size.div_ceil(m) * m;
+        }
         let too_large = || Error::at(items[c].pos, format!("an item larger than the interpreter's {MAX_STORAGE} bytes"));
         let span = items[c].size.checked_mul(items[c].occurs).filter(|&s| s <= MAX_STORAGE).ok_or_else(too_large)?;
-        if items[c].redefines.is_none() {
-            cursor = cursor.checked_add(span).filter(|&s| s <= MAX_STORAGE).ok_or_else(too_large)?;
+        if redefined.is_none() {
+            cursor = offset.checked_add(span).filter(|&s| s <= MAX_STORAGE).ok_or_else(too_large)?;
         }
         extent = extent.max(offset + span);
         items[c].offset = offset;
         placed.push((items[c].name.clone(), offset));
+        previous = Some(c);
     }
     items[index].size = cursor.max(extent);
     Ok(())
+}
+
+/// The boundary the first elementary item within `index` is aligned on.
+fn first_alignment(items: &[Item], aligns: &[u32], index: usize) -> u32 {
+    match items[index].children.first() {
+        Some(&c) if items[index].kind == Kind::Group => first_alignment(items, aligns, c),
+        _ => aligns[index],
+    }
+}
+
+/// The widest boundary of any elementary item within `index`, to which each occurrence of a table
+/// is padded so that every occurrence aligns as the first does.
+fn widest_alignment(items: &[Item], aligns: &[u32], index: usize) -> u32 {
+    items[index].children.iter().map(|&c| widest_alignment(items, aligns, c)).fold(aligns[index], u32::max)
+}
+
+/// Slack bytes before a SYNCHRONIZED item belong at the level of the elementary item before it
+/// (Language Reference SC27-8713-03, p. 234): so they lengthen the group sibling that ends where
+/// they start, and that group's last group, down to the elementary item's own group. A table or
+/// a redefinition keeps its length and leaves them to the group it is in.
+fn give_slack(items: &mut [Item], previous: Option<usize>, cursor: u32, slack: u32) {
+    let Some(mut g) = previous else { return };
+    let mut end = cursor;
+    while items[g].kind == Kind::Group && !items[g].table && items[g].redefines.is_none() && items[g].offset + items[g].size == end {
+        end = items[g].size;
+        items[g].size += slack;
+        match items[g].children.last() {
+            Some(&c) => g = c,
+            None => return,
+        }
+    }
 }
 
 fn place(items: &mut [Item], index: usize, offset: u32, mut dims: Vec<(u32, u32)>) {
@@ -465,10 +664,6 @@ impl Layout {
             _ => Err(Error::at(pos, format!("{name} is ambiguous; qualify it with OF or IN"))),
         }
     }
-}
-
-fn declared_size(e: &DataEntry) -> Option<u32> {
-    e.picture.as_deref().and_then(|p| picture::analyse(p).ok()).map(|p| p.size)
 }
 
 /// The file whose record area each file uses: its own, or the first file of its SAME RECORD AREA

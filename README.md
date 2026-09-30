@@ -135,11 +135,17 @@ The subset the interpreter runs today:
 - **Data:** WORKING-STORAGE, LOCAL-STORAGE, FILE SECTION and LINKAGE SECTION items in DISPLAY, BINARY, COMP-5,
   PACKED-DECIMAL, COMP-1, COMP-2, NATIONAL, POINTER and INDEX; numeric-edited and
   alphanumeric-edited PICTUREs (zero suppression, `*`, floating `$ + -`, CR, DB, insertion, BLANK
-  WHEN ZERO); VALUE, REDEFINES, OCCURS with KEY, INDEXED BY and DEPENDING ON, SIGN, and level-88
-  conditions with THRU ranges. A zoned item longer than one PACK takes, up to 31 digits, is packed
-  in parts (assumption C34). A group that holds the object of its own OCCURS DEPENDING ON receives
-  data at its maximum length, as IBM lists for MOVE, ACCEPT, STRING, UNSTRING, READ and RETURN
-  INTO, and WRITE, REWRITE and RELEASE FROM.
+  WHEN ZERO); scaling positions P at either end of the digits; VALUE, REDEFINES, OCCURS with KEY,
+  INDEXED BY and DEPENDING ON, SIGN, SYNCHRONIZED with IBM's slack bytes before an item and after
+  each occurrence of a table, level-66 RENAMES of one item or a THRU range, and level-88
+  conditions with THRU ranges and WHEN SET TO FALSE. SPECIAL-NAMES DECIMAL-POINT IS COMMA
+  exchanges the comma and the period in PICTUREs, numeric literals and NUMVAL and NUMVAL-C, for
+  the program and the programs it contains. Numeric PICTUREs and literals hold at most 18 digits
+  under ARITH(COMPAT) and 31 under ARITH(EXTEND). A zoned item longer than one PACK takes, up to
+  31 digits, is packed in parts (assumption C34). A group that holds the object of its own OCCURS
+  DEPENDING ON receives data at its maximum length, as IBM lists for MOVE, ACCEPT, STRING,
+  UNSTRING, READ and RETURN INTO, and WRITE, REWRITE and RELEASE FROM. Assumptions C90 to C97
+  hold what the manuals leave open about these.
 - **Collating sequences:** SPECIAL-NAMES ALPHABET (EBCDIC, NATIVE, STANDARD-1, STANDARD-2, or
   literals with THROUGH and ALSO) and OBJECT-COMPUTER PROGRAM COLLATING SEQUENCE, which a contained
   program shares. The program's sequence orders alphanumeric relation and condition-name
@@ -153,8 +159,8 @@ The subset the interpreter runs today:
   INITIAL), SEARCH and SEARCH ALL (a binary search on the table's keys, as IBM's is, so an unsorted
   table misses what a serial search finds), DISPLAY [UPON] [WITH] NO ADVANCING (to standard output,
   as a z/OS UNIX program writes it: assumption C53), ACCEPT (SYSIN, DATE, DAY,
-  DAY-OF-WEEK, TIME), INITIALIZE, SET (condition TO TRUE, index TO/UP BY/DOWN BY, pointer TO
-  ADDRESS OF/NULL, ADDRESS OF TO pointer), GO TO [DEPENDING ON], ALTER and the altered GO TO (put
+  DAY-OF-WEEK, TIME), INITIALIZE, SET (condition TO TRUE or FALSE, index TO/UP BY/DOWN BY,
+  pointer TO ADDRESS OF/NULL, ADDRESS OF TO pointer), GO TO [DEPENDING ON], ALTER and the altered GO TO (put
   back by CANCEL, IS INITIAL and entry to an independent segment: assumption C52), GOBACK, STOP
   RUN; subscripts, reference modification, LENGTH OF, ADDRESS OF, and the functions ABS, CHAR,
   CURRENT-DATE, DATE-OF-INTEGER, INTEGER, INTEGER-OF-DATE, INTEGER-PART, LENGTH, LOWER-CASE, MAX,

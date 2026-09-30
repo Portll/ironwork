@@ -180,9 +180,24 @@ fn compare_fixed(a: &Fixed, b: &Fixed) -> Ordering {
     }
 }
 
+/// The places of an item's stored digits; PICTURE Ps to the left of the digits make `scale`
+/// exceed `digits`.
 fn places_of(kind: Kind) -> Places {
     let (digits, scale) = kind.digits_scale().unwrap_or((0, 0));
-    Places::new(digits - scale, scale)
+    Places::new(digits.saturating_sub(scale), scale)
+}
+
+/// A value times ten to the `k`: the algebraic value of digits that PICTURE Ps follow.
+fn scaled_up(f: Fixed, k: u32) -> Fixed {
+    if k == 0 {
+        return f;
+    }
+    fixed(f.negative, f.magnitude.checked_mul(pow10(k)).unwrap_or_default(), Places::new(f.places.int + k, f.places.dec))
+}
+
+/// A value divided by ten to the `k`, exactly: the same digits with `k` more decimal places.
+fn scaled_down(f: Fixed, k: u32) -> Fixed {
+    Fixed { places: Places::new(f.places.int.saturating_sub(k), f.places.dec + k), ..f }
 }
 
 fn zoned_digits(magnitude: u128, digits: usize, sign_zone: u8) -> Vec<u8> {
@@ -407,9 +422,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             }
             Stmt::Compute { targets, expr, size_error, pos } => {
                 let computations: Vec<(Target, Expr)> = targets.iter().map(|t| (t.clone(), expr.clone())).collect();
-                return self.arithmetic(&computations, None, size_error.as_ref(), *pos);
+                return self.arithmetic(&computations, None, size_error.as_ref(), false, *pos);
             }
-            Stmt::Arith(a) => return self.arithmetic(&a.computations, a.remainder.as_ref(), a.size_error.as_ref(), a.pos),
+            Stmt::Arith(a) => return self.arithmetic(&a.computations, a.remainder.as_ref(), a.size_error.as_ref(), true, a.pos),
             Stmt::If { cond, then, otherwise, pos } => {
                 let branch = if self.condition(cond, *pos)? { then } else { otherwise };
                 return self.run_block(branch);
@@ -797,7 +812,35 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         })
     }
 
+    /// PICTURE scaling positions to the right of a numeric item's digits.
+    fn scaling(&self, loc: Loc) -> u32 {
+        match loc.kind {
+            Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::NumericEdited { .. } => self.layout.items.get(loc.item).map_or(0, |i| i.scaling),
+            _ => 0,
+        }
+    }
+
+    /// The places of the value a numeric item holds, its scaling positions included.
+    fn places(&self, loc: Loc) -> Places {
+        let places = places_of(loc.kind);
+        Places::new(places.int + self.scaling(loc), places.dec)
+    }
+
+    /// What a DECIMAL-POINT IS COMMA program shows for a decimal point.
+    fn decimal_point(&self) -> char {
+        if self.program.environment.decimal_point_comma { ',' } else { '.' }
+    }
+
     fn read(&self, loc: Loc, pos: Pos) -> R<Val> {
+        let value = self.read_stored(loc, pos)?;
+        Ok(match value {
+            Val::Num(f) => Val::Num(scaled_up(f, self.scaling(loc))),
+            other => other,
+        })
+    }
+
+    /// An item's value as its digits hold it, before any scaling positions to their right.
+    fn read_stored(&self, loc: Loc, pos: Pos) -> R<Val> {
         let bytes = self.bytes(loc);
         let places = places_of(loc.kind);
         Ok(match loc.kind {
@@ -1300,13 +1343,15 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     fn set(&mut self, set: &SetStmt, pos: Pos) -> R<()> {
         match set {
-            SetStmt::ConditionTrue(targets) => {
+            SetStmt::ConditionTrue(targets) | SetStmt::ConditionFalse(targets) => {
+                let truth = matches!(set, SetStmt::ConditionTrue(_));
                 for r in targets {
                     let Resolved::Condition(index) = self.resolve(r)? else {
-                        return Err(Abend::ironwork(format!("SET {} TO TRUE: not a condition-name", r.name), pos));
+                        return Err(Abend::ironwork(format!("SET {} TO {}: not a condition-name", r.name, if truth { "TRUE" } else { "FALSE" }), pos));
                     };
                     let condition = &self.layout.conditions[index];
-                    let Some((value, _)) = condition.values.first().cloned() else { continue };
+                    let value = if truth { condition.values.first().map(|(v, _)| v.clone()) } else { condition.false_value.clone() };
+                    let Some(value) = value else { continue };
                     let item = &self.layout.items[condition.item];
                     let subject = Ref { name: item.name.clone().unwrap_or_default(), qualifiers: Vec::new(), subscripts: r.subscripts.clone(), refmod: None, pos };
                     let dest = self.locate(&subject)?;
@@ -1444,7 +1489,10 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     Some(v) => self.page.decode(&bytes_of(v)?),
                     None => "$".to_owned(),
                 };
-                let text = self.page.decode(&bytes_of(&args[0])?);
+                let mut text = self.page.decode(&bytes_of(&args[0])?);
+                if self.program.environment.decimal_point_comma {
+                    text = text.chars().map(|c| if c == '.' { ',' } else if c == ',' { '.' } else { c }).collect();
+                }
                 Val::Num(numval(&text, (f.name == "NUMVAL-C").then_some(currency.as_str())).unwrap_or_else(|| Fixed::new(0, Places::new(1, 0))))
             }
             "TRIM" => {
@@ -1720,9 +1768,11 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
     }
 
-    /// COMPUTE, ADD, SUBTRACT, MULTIPLY, DIVIDE: each target receives its expression. A size error
+    /// COMPUTE, ADD, SUBTRACT, MULTIPLY, DIVIDE: what the receivers share is computed before any is
+    /// stored, then each receiver in turn gets it, or with `per_receiver` combines it with its own
+    /// current value (Language Reference SC27-8713-03, p. 298, multiple results). A size error
     /// leaves the target unchanged when the statement handles it.
-    fn arithmetic(&mut self, computations: &[(Target, Expr)], remainder: Option<&(Target, Expr, Expr)>, handler: Option<&'p SizeError>, pos: Pos) -> R<Flow> {
+    fn arithmetic(&mut self, computations: &[(Target, Expr)], remainder: Option<&(Target, Expr, Expr)>, handler: Option<&'p SizeError>, per_receiver: bool, pos: Pos) -> R<Flow> {
         let mut size_error = false;
         let mut dmax = 0;
         for (t, e) in computations {
@@ -1734,13 +1784,54 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             dmax = dmax.max(loc.kind.digits_scale().map_or(0, |(_, s)| s)).max(self.dmax(dividend)?);
         }
         let mut quotient_target: Option<Loc> = None;
+        let mut results = Vec::with_capacity(computations.len());
         for (t, e) in computations {
+            let own = |x: &Expr| per_receiver && matches!(x, Expr::Operand(Operand::Ref(r)) if *r == t.r);
+            let float = self.uses_float(e)?;
+            let (shared, with) = match e {
+                Expr::Bin(a, op, b) if *op != BinOp::Pow && own(a) => (b.as_ref(), Some((*op, true))),
+                Expr::Bin(a, op, b) if *op != BinOp::Pow && own(b) => (a.as_ref(), Some((*op, false))),
+                _ => (e, None),
+            };
+            let outcome = if float {
+                self.eval_float(shared, self.options.arith.float_intermediate(), pos).map(Val::Float)
+            } else {
+                self.eval_fixed(shared, dmax, pos).map(Val::Num)
+            };
+            results.push((t, shared, with, outcome));
+        }
+        let operands = match remainder {
+            Some((_, dividend, divisor)) => Some((self.eval_fixed(dividend, dmax, pos)?, self.eval_fixed(divisor, dmax, pos)?)),
+            None => None,
+        };
+        for (t, shared, with, outcome) in results {
             let loc = self.locate(&t.r)?;
             quotient_target.get_or_insert(loc);
-            let outcome = if self.uses_float(e)? {
-                self.eval_float(e, self.options.arith.float_intermediate(), pos).map(Val::Float)
-            } else {
-                self.eval_fixed(e, dmax, pos).map(Val::Num)
+            let outcome = match (with, outcome) {
+                (Some((op, receiver_first)), Ok(Val::Num(value))) => {
+                    let current = self.eval_fixed(&Expr::Operand(Operand::Ref(t.r.clone())), dmax, pos)?;
+                    let (x, y) = if receiver_first { (current, value) } else { (value, current) };
+                    if op == BinOp::Div && y.magnitude.is_zero() {
+                        let receiver = Expr::Operand(Operand::Ref(t.r.clone()));
+                        let check = if self.binary_division(&receiver, shared)? { ProgramCheck::FixedPointDivide } else { ProgramCheck::DecimalDivide };
+                        Err(Abend::check(check, pos))
+                    } else {
+                        self.combine(x, op, y, dmax, pos).map(Val::Num)
+                    }
+                }
+                (Some((op, receiver_first)), Ok(Val::Float(value))) => {
+                    let (p, mask) = (self.options.arith.float_intermediate(), ProgramMask::default());
+                    let current = self.eval_float(&Expr::Operand(Operand::Ref(t.r.clone())), p, pos)?;
+                    let (x, y) = if receiver_first { (current, value) } else { (value, current) };
+                    let result = match op {
+                        BinOp::Add => x.add(y, mask),
+                        BinOp::Sub => x.sub(y, mask),
+                        BinOp::Mul => x.mul(y, p, mask),
+                        _ => x.div(y, mask),
+                    };
+                    result.map(Val::Float).map_err(|c| Abend::check(c, pos))
+                }
+                (_, outcome) => outcome,
             };
             let value = match outcome {
                 Err(a) if handler.is_some() && a.code.zero_divisor() => {
@@ -1751,9 +1842,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             };
             size_error |= self.store_value(loc, value, t.rounded, handler.is_some(), pos)?;
         }
-        if let (Some((t, dividend, divisor)), Some(q_loc)) = (remainder, quotient_target) {
+        if let (Some((t, _, _)), Some((x, y)), Some(q_loc)) = (remainder, operands, quotient_target) {
             let arith = self.options.arith;
-            let (x, y) = (self.eval_fixed(dividend, dmax, pos)?, self.eval_fixed(divisor, dmax, pos)?);
             if !y.magnitude.is_zero() {
                 let q = x.div(y, dmax, arith).map_err(|_| Abend::ironwork("remainder", pos))?;
                 let q_places = places_of(q_loc.kind);
@@ -1769,6 +1859,22 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         Ok(Flow::Next)
     }
 
+    /// One fixed-point operation of an arithmetic statement.
+    fn combine(&self, x: Fixed, op: BinOp, y: Fixed, dmax: u32, pos: Pos) -> R<Fixed> {
+        let arith = self.options.arith;
+        let result = match op {
+            BinOp::Add => x.add(y, dmax, arith),
+            BinOp::Sub => x.sub(y, dmax, arith),
+            BinOp::Mul => x.mul(y, dmax, arith),
+            BinOp::Div => x.div(y, dmax, arith),
+            BinOp::Pow => return Err(Abend::ironwork("exponentiation of a receiver by a shared result", pos)),
+        };
+        result.map_err(|e| match e {
+            ArithError::DivideByZero => Abend::check(ProgramCheck::DecimalDivide, pos),
+            ArithError::BeyondModel => Abend::ironwork("an intermediate result wider than 256 bits", pos),
+        })
+    }
+
     /// Stores an arithmetic result; returns whether it was a size error.
     fn store_value(&mut self, loc: Loc, value: Val, rounded: bool, keep_on_size_error: bool, pos: Pos) -> R<bool> {
         match (loc.kind, value) {
@@ -1782,8 +1888,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 self.write(loc, &h.to_bytes());
                 Ok(false)
             }
-            (kind, Val::Float(h)) => {
-                let (f, overflow) = float::to_fixed(h, places_of(kind), rounded);
+            (_, Val::Float(h)) => {
+                let (f, overflow) = float::to_fixed(h, self.places(loc), rounded);
                 if overflow && keep_on_size_error {
                     return Ok(true);
                 }
@@ -1800,6 +1906,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     fn store_fixed_checked(&mut self, loc: Loc, value: &Fixed, rounded: bool, keep_on_size_error: bool, pos: Pos) -> R<bool> {
         let beyond = || Abend::ironwork("a value wider than 256 bits", pos);
+        let value = &scaled_down(*value, self.scaling(loc));
         let (bytes, size_error) = match loc.kind {
             Kind::Zoned { digits, scale, signed, sign } => {
                 let m = align(value, scale, rounded).ok_or_else(beyond)?;
@@ -1851,7 +1958,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 let m = align(value, scale, rounded).ok_or_else(beyond)?;
                 let cap = pow10(digits);
                 let kept = m.div_rem(cap).1.to_u128().unwrap();
-                let text = crate::edit::numeric(&self.layout.edits[edit as usize], digits, value.negative && kept != 0, kept, blank_when_zero);
+                let text = crate::edit::numeric(&self.layout.edits[edit as usize], digits, value.negative && kept != 0, kept, blank_when_zero, self.decimal_point());
                 (self.page.encode(&text).map_err(|e| Abend::ironwork(e.to_string(), pos))?, m >= cap)
             }
             _ => return Err(Abend::ironwork("a numeric value stored into a non-numeric item", pos)),
@@ -1886,10 +1993,24 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     /// MOVE, and VALUE at start-up, into one receiving item.
     fn assign(&mut self, dest: Loc, val: Val, src: Option<Loc>, pos: Pos) -> R<()> {
+        if let Some(s) = src
+            && s.kind == Kind::Group
+            && matches!(dest.kind, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Float(_) | Kind::NumericEdited { .. } | Kind::AlnumEdited { .. })
+        {
+            // A group move converts nothing (Language Reference SC27-8713-03, p. 410).
+            let mut out = vec![ebcdic::SPACE; dest.len];
+            let n = s.len.min(dest.len);
+            out[..n].copy_from_slice(&self.bytes(s)[..n]);
+            self.write(dest, &out);
+            return Ok(());
+        }
         match dest.kind {
             Kind::Group | Kind::Alnum { .. } => {
                 let justified = matches!(dest.kind, Kind::Alnum { justified: true });
-                let image = self.alnum_image(&val, src, dest.len, pos)?;
+                let image = match (dest.kind, src) {
+                    (Kind::Group, Some(s)) if matches!(val, Val::Num(_) | Val::Float(_) | Val::Address(_)) => self.bytes(s).to_vec(),
+                    _ => self.alnum_image(&val, src, dest.len, pos)?,
+                };
                 let mut out = vec![ebcdic::SPACE; dest.len];
                 if justified && image.len() < dest.len {
                     out[dest.len - image.len()..].copy_from_slice(&image);
@@ -1934,6 +2055,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 Val::Num(f) => {
                     if let (Some(s), Kind::Packed { digits, scale, signed: true }, Numproc::Pfd) = (src, dest.kind, self.options.numproc)
                         && s.kind == dest.kind
+                        && self.scaling(s) == self.scaling(dest)
                         && digits > 0
                         && scale == places_of(s.kind).dec
                     {
@@ -1944,7 +2066,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     }
                 }
                 Val::Float(h) => {
-                    let (f, _) = float::to_fixed(h, places_of(dest.kind), false);
+                    let (f, _) = float::to_fixed(h, self.places(dest), false);
                     self.store_fixed(dest, &f, false, pos)?;
                 }
                 Val::Fig(Figurative::Zero) => self.store_fixed(dest, &Fixed::new(0, Places::new(1, 0)), false, pos)?,
@@ -1954,10 +2076,10 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     self.write(dest, &fill);
                 }
                 Val::Bytes(b) => {
-                    let v = match src.map(|s| s.kind) {
-                        Some(Kind::NumericEdited { edit, digits, scale, .. }) => {
+                    let v = match src.map(|s| (s, s.kind)) {
+                        Some((s, Kind::NumericEdited { edit, .. })) => {
                             let (negative, magnitude) = crate::edit::de_edit(&self.layout.edits[edit as usize], &self.page.decode(&b));
-                            fixed(negative, U256::from_u128(magnitude), Places::new(digits - scale, scale))
+                            scaled_up(fixed(negative, U256::from_u128(magnitude), places_of(s.kind)), self.scaling(s))
                         }
                         _ => {
                             let digits = &b[b.len().saturating_sub(MAX_DIGITS)..];
@@ -1990,7 +2112,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Val::All(b) => b.iter().copied().cycle().take(len.max(b.len())).collect(),
             Val::Fig(f) => vec![self.collating.figurative(*f); len],
             Val::Num(f) if f.places.dec == 0 => {
-                let digits = src.and_then(|s| s.kind.digits_scale()).map_or(f.places.total(), |(d, _)| d);
+                let digits = src.and_then(|s| s.kind.digits_scale().map(|(d, _)| d + self.scaling(s))).unwrap_or(f.places.total());
                 zoned_digits(f.magnitude.to_u128().unwrap_or(0), digits as usize, decimal::UNSIGNED)
             }
             Val::National(_) => return Err(Abend::ironwork("a national value cannot be moved to an alphanumeric item", pos)),
@@ -2084,7 +2206,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let (va, la) = self.comparand(a, pos)?;
         let (vb, lb) = self.comparand(b, pos)?;
         if let (Some(x), Some(y)) = (la, lb)
-            && let (Kind::Packed { .. }, true, Numproc::Pfd) = (x.kind, x.kind == y.kind, self.options.numproc)
+            && let (Kind::Packed { .. }, true, Numproc::Pfd) = (x.kind, x.kind == y.kind && self.scaling(x) == self.scaling(y), self.options.numproc)
         {
             return sign::compare_packed(self.bytes(x), self.bytes(y), Numproc::Pfd).map_err(|c| Abend::check(c, pos));
         }
@@ -2119,11 +2241,22 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             (Val::Fig(Figurative::Zero), Val::Num(y)) => Ok(compare_fixed(&Fixed::new(0, Places::new(1, 0)), y)),
             (Val::National(x), Val::National(y)) => Ok(compare_national(x, y)),
             _ => {
+                let (va, la) = self.stored_digits(va, la, pos)?;
+                let (vb, lb) = self.stored_digits(vb, lb, pos)?;
                 let len = self.image_len(&va, la).max(self.image_len(&vb, lb));
                 let x = self.alnum_image(&va, la, len, pos)?;
                 let y = self.alnum_image(&vb, lb, len, pos)?;
                 Ok(ebcdic::compare_alphanumeric(&x, &y, self.collating.collation()))
             }
+        }
+    }
+
+    /// A numeric operand compared with a nonnumeric one is its digits, scaling positions ignored
+    /// (Language Reference SC27-8713-03, p. 211).
+    fn stored_digits(&self, v: Val, loc: Option<Loc>, pos: Pos) -> R<(Val, Option<Loc>)> {
+        match loc {
+            Some(l) if matches!(v, Val::Num(_)) && self.scaling(l) > 0 => Ok((self.read_stored(l, pos)?, None)),
+            _ => Ok((v, loc)),
         }
     }
 
@@ -2153,7 +2286,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     match loc.kind {
                         Kind::National => text.push_str(&utf16_text(self.bytes(loc))),
                         Kind::Packed { digits, signed, .. } | Kind::Binary { digits, signed, .. } => {
-                            let Val::Num(f) = self.read(loc, r.pos)? else { unreachable!() };
+                            let Val::Num(f) = self.read_stored(loc, r.pos)? else { unreachable!() };
                             let zone = match (signed, f.negative) {
                                 (false, _) => decimal::UNSIGNED,
                                 (true, true) => decimal::MINUS,
@@ -2183,7 +2316,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                         _ => text.push_str(&self.page.decode(self.bytes(loc))),
                     }
                 }
-                Operand::Literal(Literal::Number(t)) => text.push_str(t),
+                Operand::Literal(Literal::Number(t)) => text.push_str(&t.replace('.', &self.decimal_point().to_string())),
                 other => match self.operand(other, pos)? {
                     Val::Bytes(b) | Val::All(b) => text.push_str(&self.page.decode(&b)),
                     Val::National(b) => text.push_str(&utf16_text(&b)),

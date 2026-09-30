@@ -225,6 +225,8 @@ pub(crate) fn entry(level: u8, name: Option<String>, picture: Option<String>, us
         indexed_by: Vec::new(),
         keys: Vec::new(),
         condition_values: Vec::new(),
+        false_value: None,
+        renames: None,
         object_class: None,
         pos,
     }
@@ -255,9 +257,9 @@ fn entry_picture(e: &rw::Entry) -> Option<String> {
 }
 
 /// Integer and decimal places of a numeric or numeric-edited PICTURE.
-fn places(picture: &str) -> Option<(u32, u32)> {
-    let p = picture::analyse(picture).ok()?;
-    matches!(p.category, Category::Numeric | Category::NumericEdited).then_some((p.digits - p.scale, p.scale))
+fn places(picture: &str, decimal_comma: bool) -> Option<(u32, u32)> {
+    let p = picture::analyse_with(picture, decimal_comma).ok()?;
+    matches!(p.category, Category::Numeric | Category::NumericEdited).then_some(((p.digits + p.scaling).saturating_sub(p.scale), p.scale))
 }
 
 /// The entry a SUM operand names, when it names a REPORT SECTION entry: report, group, entry.
@@ -314,7 +316,7 @@ pub(crate) fn prepare(program: &mut Program, adv: bool, errors: &mut Vec<Error>)
         ];
         let mut groups = Vec::new();
         for g in &r.groups {
-            groups.push(draft_group(&reports, ri, g, &taken, &mut children, errors));
+            groups.push(draft_group(&reports, ri, g, &taken, &mut children, program.environment.decimal_point_comma, errors));
         }
         let mut controls = Vec::new();
         let mut cursor = state::FLAGS + r.groups.len();
@@ -382,7 +384,7 @@ fn line_end(d: &Draft) -> usize {
 /// The size of each CONTROL item, from a layout of the program as written.
 fn measure_controls(program: &Program, reports: &[rw::Report]) -> Vec<Vec<usize>> {
     let files: Vec<(&[DataEntry], Option<u32>)> = program.files.iter().map(|f| (f.records.as_slice(), f.record_max)).collect();
-    let built = layout::build(&program.working_storage, &files, &[], &program.linkage, &program.local_storage).ok();
+    let built = layout::build(&program.working_storage, &files, &[], &program.linkage, &program.local_storage, program.environment.decimal_point_comma).ok();
     reports
         .iter()
         .map(|r| {
@@ -399,7 +401,15 @@ fn measure_controls(program: &Program, reports: &[rw::Report]) -> Vec<Vec<usize>
 
 /// Places one group's lines and fields, adding a storage child for each field and SUM total
 /// ([`numeric::assumptions::REPORT_SUM_OVERFLOW`] for a total's PICTURE).
-fn draft_group(reports: &[rw::Report], ri: usize, g: &rw::Group, taken: &std::collections::HashSet<String>, children: &mut Vec<DataEntry>, errors: &mut Vec<Error>) -> DraftGroup {
+fn draft_group(
+    reports: &[rw::Report],
+    ri: usize,
+    g: &rw::Group,
+    taken: &std::collections::HashSet<String>,
+    children: &mut Vec<DataEntry>,
+    decimal_comma: bool,
+    errors: &mut Vec<Error>,
+) -> DraftGroup {
     let mut d = DraftGroup { lines: Vec::new(), unprinted: Vec::new(), totals: Vec::new() };
     let mut inherited: Vec<(u8, bool, bool, bool)> = Vec::new();
     let mut last_column = 0usize;
@@ -437,7 +447,7 @@ fn draft_group(reports: &[rw::Report], ri: usize, g: &rw::Group, taken: &std::co
             }
             continue;
         };
-        let analysed = match picture::analyse(&picture) {
+        let analysed = match picture::analyse_with(&picture, decimal_comma) {
             Ok(p) => p,
             Err(m) => {
                 errors.push(Error::at(e.pos, m));
@@ -459,13 +469,13 @@ fn draft_group(reports: &[rw::Report], ri: usize, g: &rw::Group, taken: &std::co
         field.justified = just && analysed.category == Category::Alphanumeric;
         field.blank_when_zero = bwz && numeric_edited;
         if let Some(rw::Content::Sum(clauses)) = &e.content {
-            let Some((mut int, mut dec)) = places(&picture) else {
+            let Some((mut int, mut dec)) = places(&picture, decimal_comma) else {
                 errors.push(Error::at(e.pos, "a SUM entry needs a numeric PICTURE"));
                 continue;
             };
             for operand in clauses.iter().flat_map(|c| &c.operands) {
                 if let Some((r, og, oe)) = report_entry(reports, ri, operand)
-                    && let Some((i, s)) = entry_picture(&reports[r].groups[og].entries[oe]).as_deref().and_then(places)
+                    && let Some((i, s)) = entry_picture(&reports[r].groups[og].entries[oe]).as_deref().and_then(|p| places(p, decimal_comma))
                 {
                     int = int.max(i);
                     dec = dec.max(s);
@@ -686,7 +696,7 @@ fn resolve_report(program: &Program, layout: &Layout, ri: usize, r: &rw::Report,
     let children = &layout.items[root].children;
     let child = |ordinal: usize| children[ordinal];
     let paged = r.page.is_some();
-    let mut check = crate::Check { layout, program, errors, debugging: false };
+    let mut check = crate::Check { layout, program, errors, debugging: false, max_digits: 31 };
     let mut controls = Vec::new();
     for (c, &(saved, len)) in r.controls.iter().zip(&draft.controls) {
         check.reference(c);
@@ -793,7 +803,7 @@ fn resolve_report(program: &Program, layout: &Layout, ri: usize, r: &rw::Report,
                             continue;
                         }
                         let source = &r.groups[og].entries[oe];
-                        if entry_picture(source).as_deref().and_then(places).is_none() {
+                        if entry_picture(source).as_deref().and_then(|p| places(p, program.environment.decimal_point_comma)).is_none() {
                             check.errors.push(Error::at(operand.pos, format!("SUM {}: the entry summed must be numeric", operand.name)));
                             continue;
                         }

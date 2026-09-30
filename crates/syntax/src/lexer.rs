@@ -42,10 +42,15 @@ struct Lexer<'a> {
     positions: &'a [Pos],
     at: usize,
     tokens: Vec<Token>,
+    /// DECIMAL-POINT IS COMMA is in force: a comma between digits is the decimal point.
+    decimal_comma: bool,
+    /// For each program begun and not yet ended, whether the comma was the decimal point before
+    /// it: a contained program has its container's, and a program after it starts afresh.
+    outer: Vec<bool>,
 }
 
 pub fn lex(source: &Source) -> Result<Vec<Token>, Error> {
-    let mut lx = Lexer { chars: source.text.chars().collect(), positions: &source.positions, at: 0, tokens: Vec::new() };
+    let mut lx = Lexer { chars: source.text.chars().collect(), positions: &source.positions, at: 0, tokens: Vec::new(), decimal_comma: false, outer: Vec::new() };
     while lx.at < lx.chars.len() {
         lx.next_token()?;
     }
@@ -70,7 +75,24 @@ impl Lexer<'_> {
     }
 
     fn emit(&mut self, tok: Tok, pos: Pos) {
+        if let Tok::Word(w) = &tok {
+            let before = |back: usize| match self.tokens.len().checked_sub(back).map(|i| &self.tokens[i].tok) {
+                Some(Tok::Word(p)) => p.as_str(),
+                _ => "",
+            };
+            match w.as_str() {
+                "PROGRAM-ID" => self.outer.push(self.decimal_comma),
+                "PROGRAM" if before(1) == "END" => self.decimal_comma = self.outer.pop().unwrap_or(false),
+                "COMMA" if before(1) == "DECIMAL-POINT" || before(1) == "IS" && before(2) == "DECIMAL-POINT" => self.decimal_comma = true,
+                _ => {}
+            }
+        }
         self.tokens.push(Token { tok, pos, area_a: (8..=11).contains(&pos.col) });
+    }
+
+    /// The character that is a numeric literal's decimal point.
+    fn point(&self) -> char {
+        if self.decimal_comma { ',' } else { '.' }
     }
 
     fn expecting_picture(&self) -> bool {
@@ -82,6 +104,16 @@ impl Lexer<'_> {
     fn next_token(&mut self) -> Result<(), Error> {
         let c = self.chars[self.at];
         let pos = self.pos();
+        let point = self.point();
+        let leading_point = c == ',' && point == ',' && self.peek(1).is_some_and(|d| d.is_ascii_digit()) && !self.at.checked_sub(1).is_some_and(|i| is_word_char(self.chars[i]));
+        if leading_point && self.expecting_picture() {
+            return self.picture(pos);
+        }
+        if leading_point {
+            let tok = self.number_or_word(pos)?;
+            self.emit(tok, pos);
+            return Ok(());
+        }
         if c == ' ' || c == '\n' || c == ',' || c == ';' {
             self.at += 1;
             return Ok(());
@@ -116,7 +148,7 @@ impl Lexer<'_> {
                 self.at += 1;
                 self.emit(Tok::Period, pos);
             }
-            '+' | '-' if next.is_some_and(|n| n.is_ascii_digit() || (n == '.' && self.peek(2).is_some_and(|d| d.is_ascii_digit()))) => {
+            '+' | '-' if next.is_some_and(|n| n.is_ascii_digit() || (n == point && self.peek(2).is_some_and(|d| d.is_ascii_digit()))) => {
                 self.at += 1;
                 let digits = self.number_or_word(pos)?;
                 match digits {
@@ -217,7 +249,7 @@ impl Lexer<'_> {
         }
         let run: String = self.chars[start..self.at].iter().collect();
         let all_digits = run.chars().all(|c| c.is_ascii_digit());
-        if all_digits && self.peek(0) == Some('.') && self.peek(1).is_some_and(|c| c.is_ascii_digit()) {
+        if all_digits && self.peek(0) == Some(self.point()) && self.peek(1).is_some_and(|c| c.is_ascii_digit()) {
             self.at += 1;
             let frac_start = self.at;
             while self.peek(0).is_some_and(|c| c.is_ascii_digit()) {
@@ -362,5 +394,28 @@ mod tests {
         let t = lex(&source::read("       PARA.\n           MOVE").unwrap()).unwrap();
         assert!(t[0].area_a);
         assert!(!t[2].area_a);
+    }
+
+    fn numbers(text: &str) -> Vec<String> {
+        toks(text).into_iter().filter_map(|t| if let Tok::Number(n) = t { Some(n) } else { None }).collect()
+    }
+
+    #[test]
+    fn under_decimal_point_is_comma_a_comma_between_digits_is_the_point() {
+        let text = "           DECIMAL-POINT IS COMMA.\n           1,5 -,25 +3,0 ,75 T(1, 2) A,B 1.\n";
+        assert_eq!(numbers(text), ["1.5", "-.25", "+3.0", ".75", "1", "2", "1"]);
+        assert!(toks(text).contains(&w("B")));
+        assert!(toks("           DECIMAL-POINT IS COMMA.\n           PIC ,99.").contains(&Tok::Pic(",99".into())));
+        assert!(lex(&source::read("           DECIMAL-POINT COMMA.\n           MOVE 1.5").unwrap()).is_err());
+    }
+
+    #[test]
+    fn a_contained_program_keeps_the_decimal_comma_and_the_next_program_does_not() {
+        let text = concat!(
+            "       PROGRAM-ID. A.\n           DECIMAL-POINT IS COMMA.\n           1,5\n",
+            "       PROGRAM-ID. B.\n           2,5\n       END PROGRAM B.\n           3,5\n       END PROGRAM A.\n",
+            "       PROGRAM-ID. C.\n           4,5\n",
+        );
+        assert_eq!(numbers(text), ["1.5", "2.5", "3.5", "4", "5"]);
     }
 }

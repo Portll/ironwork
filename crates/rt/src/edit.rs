@@ -4,20 +4,21 @@
 use crate::picture::Sym;
 
 /// The characters a numeric-edited item holds for a value. `magnitude` is already aligned to the
-/// PICTURE's decimal places and within its digit positions.
-pub fn numeric(syms: &[Sym], digits: u32, negative: bool, magnitude: u128, blank_when_zero: bool) -> String {
+/// PICTURE's decimal places and within its digit positions. `point` is what a decimal point
+/// position shows: a period, or a comma under DECIMAL-POINT IS COMMA.
+pub fn numeric(syms: &[Sym], digits: u32, negative: bool, magnitude: u128, blank_when_zero: bool, point: char) -> String {
     let size: usize = syms.iter().map(Sym::width).sum();
     let digit_syms: Vec<&Sym> = syms.iter().filter(|s| s.is_digit()).collect();
     if magnitude == 0 && (blank_when_zero || digit_syms.iter().all(|s| matches!(s, Sym::Z | Sym::Float(_)))) {
         return " ".repeat(size);
     }
     if magnitude == 0 && digit_syms.iter().all(|s| matches!(s, Sym::Star)) {
-        return syms.iter().filter(|s| !matches!(s, Sym::Implied)).map(|s| if *s == Sym::Point { '.' } else { '*' }).collect();
+        return syms.iter().flat_map(|s| std::iter::repeat_n(if *s == Sym::Point { point } else { '*' }, s.width())).collect();
     }
     let text = format!("{magnitude:0width$}", width = digits as usize);
     let mut digit_chars = text.chars().skip(text.len() - digits as usize);
     let mut out: Vec<char> = Vec::with_capacity(size);
-    let (mut significant, mut fill) = (false, ' ');
+    let (mut significant, mut fill) = (false, None);
     let (mut float_char, mut float_slot) = (None, None);
     for s in syms {
         match *s {
@@ -26,10 +27,11 @@ pub fn numeric(syms: &[Sym], digits: u32, negative: bool, magnitude: u128, blank
                 out.push(digit_chars.next().unwrap_or('0'));
             }
             Sym::Z | Sym::Star => {
-                fill = if *s == Sym::Star { '*' } else { ' ' };
+                let blank = if *s == Sym::Star { '*' } else { ' ' };
+                fill = Some(blank);
                 let d = digit_chars.next().unwrap_or('0');
                 significant |= d != '0';
-                out.push(if significant { d } else { fill });
+                out.push(if significant { d } else { blank });
             }
             Sym::FloatLead(c) => {
                 float_char = Some(c);
@@ -49,7 +51,7 @@ pub fn numeric(syms: &[Sym], digits: u32, negative: bool, magnitude: u128, blank
             Sym::Point | Sym::Implied => {
                 significant = true;
                 if *s == Sym::Point {
-                    out.push('.');
+                    out.push(point);
                 }
             }
             Sym::Insert(c) => {
@@ -59,7 +61,7 @@ pub fn numeric(syms: &[Sym], digits: u32, negative: bool, magnitude: u128, blank
                     float_slot = Some(out.len());
                     out.push(' ');
                 } else {
-                    out.push(fill);
+                    out.push(fill.unwrap_or(c));
                 }
             }
             Sym::Sign(c) => out.push(match (c, negative) {
