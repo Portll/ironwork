@@ -1,0 +1,15 @@
+#!/bin/sh
+# GCC's COBOL front end, run in an arm64 Linux container: libgcobol supports aarch64 Linux but not
+# aarch64 Darwin. Host paths are mounted at the same paths so arguments and outputs resolve
+# unchanged; what it links is a Linux executable, which `gcobol-exec` runs.
+image=${GCOBOL_IMAGE:-gcobol:16}
+case $(basename "$0") in
+  gcobol-exec) set -- "$@" ;;
+  *) set -- gcobol "$@" ;;
+esac
+mounts="-v /Users:/Users -v /private/tmp:/tmp -v /private/tmp:/private/tmp -v /private/var/folders:/var/folders"
+[ -d /Volumes ] && mounts="$mounts -v /Volumes:/Volumes"
+tty=
+[ -t 0 ] && tty=-t
+exec docker run --rm -i $tty --platform linux/arm64 -u "$(id -u):$(id -g)" $mounts -w "$PWD" \
+  -e HOME=/tmp -e TMPDIR=/tmp "$image" "$@"

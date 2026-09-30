@@ -207,6 +207,17 @@ anywhere in the run unit's storage, as on z/OS, but never outside it.
 `tools/census.py` runs `ironwork check` over a sample of a COBOL corpus and tallies why programs are
 refused, which is how the next gaps are chosen.
 
+`tools/differ.py` runs each program under `ironwork run` and compiled by GCC's gcobol, and reports
+where what DISPLAY wrote, the return code or an abend differ. gcobol keeps storage in ASCII and has
+its own numeric model, so it is no oracle: a difference is behaviour that changes when a program
+leaves z/OS, or an ironwork bug, and Enterprise COBOL settles which. `tools/gcobol/` builds gcobol 16
+in Docker for arm64 or x86-64 Linux, natively on an Apple silicon Mac, with a wrapper that runs it
+at the host's paths; install it as `gcobol`, and as `gcobol-exec` to run what it links:
+
+    docker build -t gcobol:16 tools/gcobol
+    ln -s "$PWD/tools/gcobol/gcobol" ~/.local/bin/gcobol; ln -s gcobol ~/.local/bin/gcobol-exec
+    tools/differ.py target/release/ironwork programs/ --exec gcobol-exec --stdin sysin.txt
+
 `ironwork assumptions` lists the register of assumptions (`numeric::assumptions::ASSUMPTIONS`), one
 per line; `--c-series` puts each entry's number in a single C series first, with its own id beside it.
 

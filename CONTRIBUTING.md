@@ -52,9 +52,10 @@ assistant asks again on your next pull request.
   compiler decides, Db2 for z/OS for what embedded SQL sees. The register is append-only: never
   reorder, remove or insert entries, because the C-series numbers of `ironwork assumptions
   --c-series` are positions in it.
-- **The real compiler settles a prediction; GnuCOBOL does not.**
+- **The real compiler settles a prediction; GnuCOBOL and gcobol do not.**
   `cargo run -p ironwork-oracle -- smoke <dir>` is a syntax check only: GnuCOBOL is ASCII and
-  IEEE, and its results are not IBM's. `cargo run -p ironwork-oracle -- check <dir>` scores saved
+  IEEE, and its results are not IBM's. `tools/differ.py` finds where ironwork and gcobol disagree,
+  which says where to look, not who is right. `cargo run -p ironwork-oracle -- check <dir>` scores saved
   Enterprise COBOL job output against the model.
   An assumption no run has upheld is unsettled, not passing.
 - **A code page is ICU's table, unchanged.** A new or updated file in `crates/zarch/ucm/` comes

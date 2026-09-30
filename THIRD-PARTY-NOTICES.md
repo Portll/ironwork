@@ -152,8 +152,10 @@ Agreement v2.0, by way of cobolwork's CLA. The adaptation is disclosed in the do
 
 IBM, IBM Z, z/Architecture, z/OS and Enterprise COBOL are trademarks of IBM. Unicode is a
 registered trademark of Unicode, Inc. They are used nominatively, to say what this software models
-and where its data comes from. No affiliation or endorsement is claimed. Hercules, GnuCOBOL and Zowe
-are named only as tools a user may run alongside ironwork; none of them is included in it.
+and where its data comes from. No affiliation or endorsement is claimed. Hercules, GnuCOBOL, GCC's
+gcobol and Zowe are named only as tools a user may run alongside ironwork; none of them is included
+in it. `tools/gcobol/` builds a container image from Debian's gcobol package on the user's machine;
+the image is not distributed with ironwork.
 
 ---
 
