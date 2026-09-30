@@ -84,6 +84,7 @@ impl<'p> Machine<'p, '_, '_> {
                 code: AbendCode::user(4038),
                 message: format!("CALL {name}: {} {} With its feedback code omitted the condition was signaled, and nothing handled it", c.symbol(), c.text()),
                 pos,
+                file: None,
             }),
             (None, _) => Ok(()),
         }
@@ -93,13 +94,13 @@ impl<'p> Machine<'p, '_, '_> {
     fn le_at(&self, call: &LeCall, i: usize) -> R<usize> {
         call.args.get(i).copied().flatten().ok_or_else(|| {
             let param = le::parameters(call.name).and_then(|p| p.get(i)).copied().unwrap_or("argument");
-            Abend { code: AbendCode::Protection, message: format!("CALL {}: {param} is OMITTED, and the service addresses it", call.name), pos: call.pos }
+            Abend { code: AbendCode::Protection, message: format!("CALL {}: {param} is OMITTED, and the service addresses it", call.name), pos: call.pos, file: None }
         })
     }
 
     fn le_load(&self, at: usize, len: usize, pos: Pos) -> R<Vec<u8>> {
         let bytes = at.checked_add(len).and_then(|end| self.unit.mem.get(at..end));
-        bytes.map(<[u8]>::to_vec).ok_or_else(|| Abend { code: AbendCode::Protection, message: "a callable service's argument reaches outside the run unit's storage".into(), pos })
+        bytes.map(<[u8]>::to_vec).ok_or_else(|| Abend { code: AbendCode::Protection, message: "a callable service's argument reaches outside the run unit's storage".into(), pos, file: None })
     }
 
     /// Stores at an argument's address; what would fall past the run unit's storage is not kept.
@@ -148,9 +149,9 @@ impl<'p> Machine<'p, '_, '_> {
         };
         let user = ((code as u32) & 0xFFF) as u16;
         if self.unit.cics.is_some() {
-            return Abend { code: AbendCode::Cics(format!("{user:04}")), message: format!("CALL CEE3ABD: transaction abend {user:04}"), pos: call.pos };
+            return Abend { code: AbendCode::Cics(format!("{user:04}")), message: format!("CALL CEE3ABD: transaction abend {user:04}"), pos: call.pos, file: None };
         }
-        Abend { code: AbendCode::user(user), message: format!("CALL CEE3ABD: user abend {user} {how}"), pos: call.pos }
+        Abend { code: AbendCode::user(user), message: format!("CALL CEE3ABD: user abend {user} {how}"), pos: call.pos, file: None }
     }
 
     fn ceedays_or_secs(&mut self, call: &LeCall, reading: le::Reading) -> Outcome {

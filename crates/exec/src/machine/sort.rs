@@ -14,7 +14,7 @@ const STOPPED: &str = "SORT-STOPPED";
 static NO_HANDLERS: Handlers = Handlers { on: None, not_on: None };
 
 fn stop(why: String, pos: Pos) -> Abend {
-    Abend { code: STOPPED.into(), message: why, pos }
+    Abend { code: STOPPED.into(), message: why, pos, file: None }
 }
 
 fn stopped_by_program() -> String {

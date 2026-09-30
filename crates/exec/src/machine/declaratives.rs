@@ -114,7 +114,7 @@ impl<'p> Machine<'p, '_, '_> {
         match flow? {
             leaving @ (Flow::GoTo(_) | Flow::End(_) | Flow::Resume(..) | Flow::Return(_)) => {
                 self.uses.leaving = Some(leaving);
-                Err(Abend { code: AbendCode::Signal(Signal::DeclarativeExit), message: String::new(), pos })
+                Err(Abend { code: AbendCode::Signal(Signal::DeclarativeExit), message: String::new(), pos, file: None })
             }
             _ => Ok(()),
         }

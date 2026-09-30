@@ -77,6 +77,7 @@ fn java(what: String, class: &str, pos: Pos) -> Abend {
         code: AbendCode::Java,
         message: format!("{what} was reached: {class} is a Java class, and ironwork for COBOL checks Java classes but has no JVM to run them"),
         pos,
+        file: None,
     }
 }
 
@@ -209,20 +210,24 @@ impl<'p> Machine<'p, '_, '_> {
             return Ok(c);
         }
         let found = classes::find_class(&mut self.unit.library, external).map_err(|m| Abend::ironwork(m, pos))?;
-        let code = match found {
-            None => None,
-            Some(program) => {
+        let (code, sources) = match found {
+            None => (None, Vec::new()),
+            Some((program, path)) => {
                 let flags = self.unit.library.flags.clone();
                 let (code, _) = classes::class_code(&program, &flags).map_err(|errors| {
                     let first = syntax::most_severe(&errors).map(|e| e.place(external)).unwrap_or_default();
                     Abend::ironwork(format!("class {external} does not compile: {first}"), pos)
                 })?;
-                Some(Rc::new(code))
+                let mut sources = program.sources;
+                if let (Some(own), Some(path)) = (sources.first_mut(), path) {
+                    *own = path;
+                }
+                (Some(Rc::new(code)), sources)
             }
         };
         let index = self.unit.oo.classes.len();
         let methods = code.as_ref().map_or(0, |c| c.methods.len());
-        self.unit.oo.classes.push(LoadedClass { external: external.to_owned(), code: code.clone(), parent: None, factory_object: 0, factory_data: None, methods: vec![None; methods] });
+        self.unit.oo.classes.push(LoadedClass { external: external.to_owned(), code: code.clone(), parent: None, factory_object: 0, factory_data: None, methods: vec![None; methods], sources });
         let factory_object = self.unit.oo.add_object(Instance { class: index, factory: true, parts: Vec::new() }).map_err(|m| Abend::ironwork(m, pos))?;
         self.unit.oo.classes[index].factory_object = factory_object;
         let Some(code) = code else { return Ok(index) };
@@ -363,6 +368,7 @@ impl<'p> Machine<'p, '_, '_> {
                 code: AbendCode::user(4038),
                 message: format!("{what}: no method matches it, and the INVOKE has no ON EXCEPTION (a severity-3 Language Environment condition)"),
                 pos: i.pos,
+                file: None,
             }),
         }
     }
@@ -532,6 +538,12 @@ impl<'p> Machine<'p, '_, '_> {
         self.unit.programs[storage].active = false;
         self.unit.release_temporaries(mark);
         let (ending, mut returned) = outcome;
+        let ending = ending.map_err(|mut abend| {
+            if abend.file.is_none() {
+                abend.file = Some(self.unit.oo.classes[class].sources.get(abend.pos.file as usize).cloned().unwrap_or_default());
+            }
+            abend
+        });
         if ending? == Ending::StopRun {
             return Ok(Flow::End(Ending::StopRun));
         }
@@ -658,6 +670,7 @@ impl<'p> Machine<'p, '_, '_> {
                     code: AbendCode::Java,
                     message: format!("CALL {} was reached: {service} is a JNI service, and ironwork for COBOL has no JVM to run it", r.name),
                     pos,
+                    file: None,
                 });
             }
         };

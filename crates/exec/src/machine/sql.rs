@@ -24,7 +24,7 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
     pub(super) fn sql(&mut self, block: &'p ExecBlock) -> R<Flow> {
         let sql = block.sql.as_ref().expect("the parser types every EXEC SQL block");
         let (pos, program) = (block.pos, self.program.id.as_str());
-        let refused = |why: String| Abend { code: "EXEC".into(), message: format!("EXEC SQL {} was reached: {why}", block.command), pos };
+        let refused = |why: String| Abend { code: "EXEC".into(), message: format!("EXEC SQL {} was reached: {why}", block.command), pos, file: None };
         if self.unit.sql.is_none() {
             return Err(refused("no database is attached to the run".into()));
         }
@@ -83,7 +83,7 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
                 } else {
                     let answer = self.sql_call("FETCH", sql.ordinal, Some(cursor), &format!("FETCH {cursor}"), &[], |db, call| db.fetch(call), pos)?;
                     if answer.rows.len() > 1 {
-                        return Err(Abend { code: "SQL".into(), message: format!("the database answered FETCH {cursor} with {} rows", answer.rows.len()), pos });
+                        return Err(Abend { code: "SQL".into(), message: format!("the database answered FETCH {cursor} with {} rows", answer.rows.len()), pos, file: None });
                     }
                     let on_row = answer.sqlcode >= 0 && answer.rows.len() == 1;
                     if let Some(open) = self.session().cursor(program, cursor) {
@@ -145,13 +145,13 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
         let (pos, program) = (block.pos, self.program.id.as_str());
         let commit = !super::cics::has(block, "ROLLBACK");
         if let Some(session) = self.unit.sql.as_mut() {
-            let answer = session.settle(program, commit).map_err(|a| Abend { code: a.code.into(), message: a.message, pos })?;
+            let answer = session.settle(program, commit).map_err(|a| Abend { code: a.code.into(), message: a.message, pos, file: None })?;
             if answer.sqlcode < 0 && commit {
                 return self.raise(block, crate::cics::Condition::ROLLEDBACK, 0);
             }
             if answer.sqlcode < 0 {
                 let message = format!("SYNCPOINT ROLLBACK: the database refused to roll back with SQLCODE {}", answer.sqlcode);
-                return Err(Abend { code: "SQL".into(), message, pos });
+                return Err(Abend { code: "SQL".into(), message, pos, file: None });
             }
         }
         self.cics_ok(block)
@@ -166,7 +166,7 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
         let call = Call { program: &self.program.id, ordinal, verb, cursor, text, inputs };
         let session = self.unit.sql.as_mut().expect("a database is attached");
         session.pending |= !matches!(verb, "COMMIT" | "ROLLBACK");
-        run(&mut *session.database, &call).map_err(|a| Abend { code: a.code.into(), message: a.message, pos })
+        run(&mut *session.database, &call).map_err(|a| Abend { code: a.code.into(), message: a.message, pos, file: None })
     }
 
     /// A SELECT INTO's or a FETCH's answer: one row is assigned, none is +100, more than one is -811.
@@ -195,7 +195,7 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
                 None => None,
             };
             let ty = sql::host_type(self.layout, loc.item)
-                .map_err(|why| Abend { code: "EXEC".into(), message: format!("EXEC SQL {command}: {why}"), pos: hv.var.pos })?;
+                .map_err(|why| Abend { code: "EXEC".into(), message: format!("EXEC SQL {command}: {why}"), pos: hv.var.pos, file: None })?;
             match ty {
                 HostType::Structure(members) => {
                     let start = self.layout.items[loc.item].offset as usize;

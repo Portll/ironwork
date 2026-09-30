@@ -304,6 +304,44 @@ fn a_class_is_found_in_the_program_libraries_and_checks_alone() {
     assert!(refused.message.contains("class definition"), "{}", refused.message);
 }
 
+/// Divider's "divide" divides by zero; Relay's "relay" invokes it.
+fn divider_and_relay() -> (String, String) {
+    let divider = class(
+        "Divider INHERITS Base",
+        &["Base IS \"java.lang.Object\"", "Divider IS \"Divider\""],
+        &part("OBJECT", "", &[method("divide", "       WORKING-STORAGE SECTION.\n       01  D PIC 9 VALUE 0.\n       01  Q PIC 9.\n", "", &["DIVIDE 10 BY D GIVING Q."])]),
+    );
+    let relay = class(
+        "Relay INHERITS Base",
+        &["Base IS \"java.lang.Object\"", "Divider IS \"Divider\"", "Relay IS \"Relay\""],
+        &part(
+            "OBJECT",
+            "",
+            &[method("relay", "       WORKING-STORAGE SECTION.\n       01  V USAGE OBJECT REFERENCE Divider.\n", "", &["INVOKE Divider NEW RETURNING V", "INVOKE V \"divide\"."])],
+        ),
+    );
+    (divider, relay)
+}
+
+#[test]
+fn an_abend_in_a_method_names_the_source_its_class_was_read_from() {
+    let dir = temp("classfile");
+    std::fs::create_dir_all(&dir).unwrap();
+    let (divider, relay) = divider_and_relay();
+    std::fs::write(dir.join("Divider.cbl"), &divider).unwrap();
+    std::fs::write(dir.join("Relay.cbl"), relay).unwrap();
+    let line = divider.lines().position(|l| l.contains("DIVIDE 10")).unwrap() as u32 + 1;
+    for (target, name) in [("Divider", "divide"), ("Relay", "relay")] {
+        let data = format!("       01  T USAGE OBJECT REFERENCE {target}.\n");
+        let main = client(&[&format!("{target} IS \"{target}\"")], &data, &[&format!("INVOKE {target} NEW RETURNING T"), &format!("INVOKE T \"{name}\""), "GOBACK."]);
+        let (_, err, ending) = run_unit(&main, vec![dir.clone()], "");
+        let abend = ending.unwrap_err();
+        assert_eq!(abend.code.to_string(), "S0CB", "{abend:?}\n{err}");
+        assert_eq!((abend.file, abend.pos.line), (Some(dir.join("Divider.cbl").display().to_string()), line), "{target}");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn what_enterprise_cobol_refuses_is_refused() {
     let data = [ACCOUNT_DATA, "       01  TEXT PIC X(10).\n       01  P POINTER.\n"].concat();

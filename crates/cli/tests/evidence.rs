@@ -1,6 +1,6 @@
 //! `ironwork run --evidence`: the journal records the source, the COPY member, each DD's digest and
-//! the CALL, links every record to the one before, reaches the ledger, and is refused inside a
-//! directory the run reads.
+//! the CALL and where an abend was, links every record to the one before, reaches the ledger, and is
+//! refused inside a directory the run reads.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -131,5 +131,62 @@ fn an_evidence_directory_inside_the_program_directory_is_refused() {
     let status = Command::new(env!("CARGO_BIN_EXE_ironwork")).arg("check").arg(dir.join("src/EVDEMO.cbl")).arg("--evidence").arg(dir.join("src/ev")).status().unwrap();
     assert_eq!(status.code(), Some(2));
     assert!(!dir.join("src/ev").exists());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn an_abend_in_a_method_names_the_class_source_on_stderr_and_in_the_journal() {
+    let dir = temp("method");
+    let lines = |l: &[&str]| l.iter().map(|l| format!("       {l}\n")).collect::<String>();
+    let class = lines(&[
+        "CBL THREAD,DLL",
+        "IDENTIFICATION DIVISION.",
+        "CLASS-ID. Divider INHERITS Base.",
+        "ENVIRONMENT DIVISION.",
+        "CONFIGURATION SECTION.",
+        "REPOSITORY.",
+        "    CLASS Base IS \"java.lang.Object\"",
+        "    CLASS Divider IS \"Divider\".",
+        "IDENTIFICATION DIVISION.",
+        "OBJECT.",
+        "PROCEDURE DIVISION.",
+        "IDENTIFICATION DIVISION.",
+        "METHOD-ID. \"divide\".",
+        "DATA DIVISION.",
+        "WORKING-STORAGE SECTION.",
+        "01  D PIC 9 VALUE 0.",
+        "01  Q PIC 9.",
+        "PROCEDURE DIVISION.",
+        "    DIVIDE 10 BY D GIVING Q.",
+        "END METHOD \"divide\".",
+        "END OBJECT.",
+        "END CLASS Divider.",
+    ]);
+    let client = lines(&[
+        "CBL THREAD,DLL",
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. CLIENT RECURSIVE.",
+        "ENVIRONMENT DIVISION.",
+        "CONFIGURATION SECTION.",
+        "REPOSITORY.",
+        "    CLASS Divider IS \"Divider\".",
+        "DATA DIVISION.",
+        "WORKING-STORAGE SECTION.",
+        "01  T USAGE OBJECT REFERENCE Divider.",
+        "PROCEDURE DIVISION.",
+        "    INVOKE Divider NEW RETURNING T",
+        "    INVOKE T \"divide\"",
+        "    GOBACK.",
+    ]);
+    fs::write(dir.join("lib/Divider.cbl"), class).unwrap();
+    fs::write(dir.join("src/CLIENT.cbl"), client).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_ironwork")).arg("run").arg(dir.join("src/CLIENT.cbl")).arg("-L").arg(dir.join("lib")).arg("--evidence").arg(dir.join("ev")).output().unwrap();
+    assert_eq!(out.status.code(), Some(16));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.starts_with(&format!("{}:19:", dir.join("lib/Divider.cbl").display())) && stderr.contains("ABEND S0CB"), "{stderr}");
+    let run = fs::read_dir(dir.join("ev/runs")).unwrap().next().unwrap().unwrap().path();
+    let journal = fs::read_to_string(run).unwrap();
+    let abend = journal.lines().find(|l| field(l, "kind") == Some("abend")).unwrap();
+    assert_eq!((field(abend, "file"), field(abend, "line")), (Some("Divider.cbl"), Some("19")), "{abend}");
     fs::remove_dir_all(dir).unwrap();
 }

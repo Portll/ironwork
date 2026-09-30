@@ -12,15 +12,17 @@ pub struct Abend {
     pub code: AbendCode,
     pub message: String,
     pub pos: Pos,
+    /// The source a method's abend is in, from its class's source table (empty when not read from a file); None for the first program's.
+    pub file: Option<String>,
 }
 
 impl Abend {
     pub fn check(c: ProgramCheck, pos: Pos) -> Self {
-        Self { code: AbendCode::Check(c), message: format!("{c:?} exception"), pos }
+        Self { code: AbendCode::Check(c), message: format!("{c:?} exception"), pos, file: None }
     }
 
     pub fn ironwork(message: impl Into<String>, pos: Pos) -> Self {
-        Self { code: AbendCode::Ironwork, message: message.into(), pos }
+        Self { code: AbendCode::Ironwork, message: message.into(), pos, file: None }
     }
 }
 

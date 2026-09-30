@@ -69,6 +69,8 @@ pub struct LoadedClass<C> {
     /// Loaded storage of the factory data, and of each method's WORKING-STORAGE once it has run.
     pub factory_data: Option<usize>,
     pub methods: Vec<Option<usize>>,
+    /// The class's source table, its own source first by path when a program library supplied it.
+    pub sources: Vec<String>,
 }
 
 pub struct Instance {

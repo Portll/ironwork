@@ -423,6 +423,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     code: AbendCode::Exec,
                     message: format!("EXEC {kind} {} was reached: ironwork for COBOL checks EXEC statements but does not run them yet", block.command),
                     pos: block.pos,
+                    file: None,
                 });
             }
             Stmt::Invoke(i) => return self.invoke(i),
@@ -609,6 +610,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 code: AbendCode::Protection,
                 message: format!("{} is a LINKAGE item with no address: no argument was passed for it, and no SET ADDRESS OF gave it one", r.name),
                 pos: r.pos,
+                file: None,
             })?,
             None if item.local => self.local_base,
             None => self.base,
@@ -1063,7 +1065,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             return Ok(None);
         }
         let offset = address.checked_sub(ADDRESS_BASE).map(|o| o as usize).filter(|&o| o < self.unit.mem.len());
-        offset.map(Some).ok_or_else(|| Abend { code: AbendCode::Protection, message: format!("address {address:08X} is outside the run unit's storage"), pos })
+        offset.map(Some).ok_or_else(|| Abend { code: AbendCode::Protection, message: format!("address {address:08X} is outside the run unit's storage"), pos, file: None })
     }
 
     fn program_name(&mut self, op: &Operand, pos: Pos) -> R<String> {
@@ -1086,7 +1088,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Err(LoadError::NotFound) => {
                 return match &c.on_exception {
                     Some(body) => self.run_block(body),
-                    None => Err(Abend { code: AbendCode::ModuleNotFound, message: crate::le::missing(&name), pos }),
+                    None => Err(Abend { code: AbendCode::ModuleNotFound, message: crate::le::missing(&name), pos, file: None }),
                 };
             }
             Err(LoadError::Compile(message)) => return Err(Abend::ironwork(format!("CALL {name}: {message}"), pos)),
@@ -2272,7 +2274,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
         let result = if no_advancing { write!(self.unit.out, "{text}") } else { writeln!(self.unit.out, "{text}") };
         result.map_err(|e| match e.kind() {
-            std::io::ErrorKind::BrokenPipe => Abend { code: AbendCode::Signal(Signal::ClosedOutput), message: "standard output closed".into(), pos },
+            std::io::ErrorKind::BrokenPipe => Abend { code: AbendCode::Signal(Signal::ClosedOutput), message: "standard output closed".into(), pos, file: None },
             _ => Abend::ironwork(format!("DISPLAY: {e}"), pos),
         })
     }

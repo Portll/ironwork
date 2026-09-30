@@ -258,6 +258,7 @@ impl<'p> Machine<'p, '_, '_> {
                     code: AbendCode::Cics(condition.default_abend().into()),
                     message: format!("EXEC CICS {}: {} was raised with no RESP, HANDLE CONDITION or IGNORE CONDITION", block.command, condition.name()),
                     pos: block.pos,
+                    file: None,
                 }),
             },
         }
@@ -379,7 +380,7 @@ impl<'p> Machine<'p, '_, '_> {
         {
             return Ok(Flow::GoTo(p));
         }
-        Err(Abend { message: format!("EXEC CICS ABEND ABCODE({code})"), code: AbendCode::Cics(code), pos: block.pos })
+        Err(Abend { message: format!("EXEC CICS ABEND ABCODE({code})"), code: AbendCode::Cics(code), pos: block.pos, file: None })
     }
 
     /// Fills the EXEC interface block for the task's first program and binds DFHEIBLK and

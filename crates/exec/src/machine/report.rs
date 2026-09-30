@@ -376,12 +376,12 @@ impl<'p> Machine<'p, '_, '_> {
         let flow = self.run_paragraphs(first, last);
         self.unit.depth -= 1;
         match flow? {
-            Flow::End(Ending::StopRun) => return Err(Abend { code: AbendCode::Signal(Signal::StopRun), message: String::new(), pos }),
-            Flow::End(_) => return Err(Abend { code: AbendCode::Signal(Signal::GoBack), message: String::new(), pos }),
+            Flow::End(Ending::StopRun) => return Err(Abend { code: AbendCode::Signal(Signal::StopRun), message: String::new(), pos, file: None }),
+            Flow::End(_) => return Err(Abend { code: AbendCode::Signal(Signal::GoBack), message: String::new(), pos, file: None }),
             Flow::GoTo(_) => return Err(Abend::ironwork("GO TO out of a USE BEFORE REPORTING procedure", pos)),
             leaving @ (Flow::Resume(..) | Flow::Return(_)) => {
                 self.uses.leaving = Some(leaving);
-                return Err(Abend { code: AbendCode::Signal(Signal::DeclarativeExit), message: String::new(), pos });
+                return Err(Abend { code: AbendCode::Signal(Signal::DeclarativeExit), message: String::new(), pos, file: None });
             }
             _ => {}
         }

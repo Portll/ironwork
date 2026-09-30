@@ -42,7 +42,7 @@ impl<'p> Machine<'p, '_, '_> {
             return self.run_error_declarative(procedure, pos);
         }
         if self.program.files[k].status.is_none() {
-            return Err(Abend { code: AbendCode::Io(status), message, pos });
+            return Err(Abend { code: AbendCode::Io(status), message, pos, file: None });
         }
         Ok(())
     }

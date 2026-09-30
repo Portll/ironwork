@@ -527,7 +527,7 @@ fn driver() -> ExitCode {
     if let Some(run) = shared {
         let run = std::rc::Rc::try_unwrap(run).map(std::cell::RefCell::into_inner);
         if let Ok(run) = run {
-            let file = abend.and_then(|a| compiled.program.sources.get(a.pos.file as usize)).map(String::as_str);
+            let file = abend.and_then(|a| abend_file(&compiled, a));
             evidence::finish(Some(run.end(abend.map(|a| (a.code.to_string(), file, i64::from(a.pos.line))))), status);
         }
     }
@@ -575,8 +575,13 @@ fn live_database(url: &str, record: Option<&str>) -> Result<Box<dyn exec::sql::D
     Ok(Box::new(recorder))
 }
 
+/// The source an abend's position is in: a method's own, else the first program's table.
+fn abend_file<'a>(compiled: &'a exec::Compiled, abend: &'a exec::machine::Abend) -> Option<&'a str> {
+    abend.file.as_deref().or_else(|| compiled.program.sources.get(abend.pos.file as usize).map(String::as_str))
+}
+
 fn report_abend(compiled: &exec::Compiled, path: &str, abend: &exec::machine::Abend) -> ExitCode {
-    let file = compiled.program.sources.get(abend.pos.file as usize).filter(|f| !f.is_empty()).map_or(path, |f| f.as_str());
+    let file = abend_file(compiled, abend).filter(|f| !f.is_empty()).unwrap_or(path);
     eprintln!("{file}:{}: ABEND {}: {}", abend.pos, abend.code, abend.message);
     ExitCode::from(16)
 }

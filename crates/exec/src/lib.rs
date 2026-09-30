@@ -169,8 +169,8 @@ impl Execute for Compiled {
         let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(&self.program.id, ending.is_ok()).map(drop));
         let closed = run_unit.close_all();
         let ending = ending?;
-        settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default() })?;
-        closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default() })?;
+        settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default(), file: None })?;
+        closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default(), file: None })?;
         Ok((ending, run_unit.return_code()))
     }
 
@@ -221,11 +221,11 @@ impl Execute for Compiled {
             closed = closed.and(Err(format!("writing transient data: {e}")));
         }
         let ending = ending.map_err(|a| match a.code {
-            AbendCode::Check(_) | AbendCode::Protection => Abend { message: format!("{} ({}, which CICS reports as ASRA)", a.message, a.code), code: AbendCode::Cics("ASRA".into()), pos: a.pos },
+            AbendCode::Check(_) | AbendCode::Protection => Abend { message: format!("{} ({}, which CICS reports as ASRA)", a.message, a.code), code: AbendCode::Cics("ASRA".into()), pos: a.pos, file: a.file },
             _ => a,
         })?;
-        settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default() })?;
-        closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default() })?;
+        settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default(), file: None })?;
+        closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default(), file: None })?;
         Ok((ending, task))
     }
 }
