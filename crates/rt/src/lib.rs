@@ -8,5 +8,6 @@ pub mod codec;
 pub mod edit;
 pub mod module;
 pub mod picture;
+pub mod storage;
 pub mod strings;
 pub mod vocab;

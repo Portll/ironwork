@@ -37,3 +37,13 @@ pub enum InspectMode {
     Leading,
     First,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Figurative {
+    Zero,
+    Space,
+    HighValue,
+    LowValue,
+    Quote,
+    Null,
+}

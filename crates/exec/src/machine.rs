@@ -5,6 +5,7 @@
 use crate::abend::{AbendCode, Signal};
 use crate::calendar::{civil, days_from_civil, days_in_month, SECONDS_PER_DAY};
 use crate::layout::{Item, Kind, Layout, Resolved};
+use rt::storage::{Loc, Val};
 use crate::unit::{ADDRESS_BASE, LoadError, RETURN_CODE, RunUnit};
 use crate::Compiled;
 use numeric::binary::{self, Binary};
@@ -70,26 +71,6 @@ enum Flow {
     ExitPerform,
     ExitPerformCycle,
     NextSentence,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct Loc {
-    offset: usize,
-    len: usize,
-    kind: Kind,
-    item: usize,
-}
-
-#[derive(Clone, Debug)]
-enum Val {
-    Bytes(Vec<u8>),
-    National(Vec<u8>),
-    Num(Fixed),
-    Float(Hfp),
-    Fig(Figurative),
-    All(Vec<u8>),
-    /// A pointer value: [`ADDRESS_BASE`] plus an offset into run-unit memory, or 0 for NULL.
-    Address(u32),
 }
 
 pub struct Machine<'p, 'u, 'w> {

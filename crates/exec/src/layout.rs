@@ -3,49 +3,11 @@
 //! level starts.
 
 use crate::picture::{self, Category, Sym};
-use syntax::ast::{DataEntry, Environment, FileDecl, Literal, Organization, SignClause, Usage};
+use syntax::ast::{DataEntry, Environment, FileDecl, Literal, Organization, Usage};
 use syntax::{Error, Pos};
 use zarch::hfp::Precision;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind {
-    Group,
-    Alnum { justified: bool },
-    National,
-    Zoned { digits: u32, scale: u32, signed: bool, sign: Option<SignClause> },
-    Packed { digits: u32, scale: u32, signed: bool },
-    Binary { digits: u32, scale: u32, signed: bool, native: bool },
-    Float(Precision),
-    /// `edit` indexes [`Layout::edits`].
-    NumericEdited { edit: u32, digits: u32, scale: u32, blank_when_zero: bool },
-    AlnumEdited { edit: u32 },
-    /// USAGE POINTER: an address, four bytes.
-    Pointer,
-    /// An index name or USAGE INDEX item, holding an occurrence number in four bytes.
-    Index,
-    /// USAGE OBJECT REFERENCE: four bytes naming an object, as under LP(32).
-    ObjectReference,
-    /// USAGE FUNCTION-POINTER or PROCEDURE-POINTER, four bytes.
-    ProgramPointer,
-}
-
-impl Kind {
-    pub fn is_numeric(self) -> bool {
-        matches!(self, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Float(_) | Kind::Index)
-    }
-
-    /// Digits and decimal places of a fixed-point numeric item.
-    pub fn digits_scale(self) -> Option<(u32, u32)> {
-        match self {
-            Kind::Zoned { digits, scale, .. }
-            | Kind::Packed { digits, scale, .. }
-            | Kind::Binary { digits, scale, .. }
-            | Kind::NumericEdited { digits, scale, .. } => Some((digits, scale)),
-            Kind::Index => Some((9, 0)),
-            _ => None,
-        }
-    }
-}
+pub use rt::storage::Kind;
 
 #[derive(Clone, Debug)]
 pub struct Item {

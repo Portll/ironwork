@@ -158,15 +158,7 @@ pub struct DataEntry {
     pub pos: Pos,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Figurative {
-    Zero,
-    Space,
-    HighValue,
-    LowValue,
-    Quote,
-    Null,
-}
+pub use rt::vocab::Figurative;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Literal {
