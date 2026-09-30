@@ -87,19 +87,24 @@ pub fn stored_bytes(facts: &dyn ProgramFacts, val: Val, pos: Pos) -> R<Vec<u8>> 
     })
 }
 
-/// Reference modification of a result, which must be alphanumeric; `bounds` evaluates the start
-/// and length, and is checked against the result whatever SSRANGE says.
+/// Reference modification of a result, alphanumeric or national (whose character positions are two
+/// bytes); `bounds` evaluates the start and length, and is checked against the result whatever
+/// SSRANGE says.
 pub fn refmod(value: Val, pos: Pos, bounds: impl FnOnce() -> R<(i64, Option<i64>)>) -> R<Val> {
-    let Val::Bytes(b) = value else {
-        return Err(Abend::ironwork("reference modification of a non-alphanumeric function result", pos));
+    let (unit, b) = match &value {
+        Val::Bytes(b) => (1, b),
+        Val::National(b) => (2, b),
+        _ => return Err(Abend::ironwork("reference modification of a function result that is neither alphanumeric nor national", pos)),
     };
     let (start, length) = bounds()?;
-    let start = start as usize;
-    let len = match length {
-        Some(l) => l as usize,
-        None => b.len() + 1 - start,
-    };
-    b.get(start - 1..start - 1 + len).map(|s| Val::Bytes(s.to_vec())).ok_or_else(|| Abend::ironwork("reference modification past the function result", pos))
+    let len = length.unwrap_or((b.len() / unit) as i64 + 1 - start);
+    let part = usize::try_from(start - 1)
+        .ok()
+        .zip(usize::try_from(len).ok())
+        .and_then(|(s, l)| b.get(s * unit..(s + l) * unit))
+        .map(<[u8]>::to_vec)
+        .ok_or_else(|| Abend::ironwork("reference modification past the function result", pos))?;
+    Ok(if unit == 2 { Val::National(part) } else { Val::Bytes(part) })
 }
 
 /// A function of its arguments' values. `side` is TRIM's LEADING or TRAILING.

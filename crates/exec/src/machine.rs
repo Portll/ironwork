@@ -567,10 +567,14 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 Some(l) => Some(self.integer(l, r.pos)?),
                 None => None,
             };
-            let (from, length) = loc::refmod(len, start, length, self.ssrange, &r.name, r.pos)?;
-            offset += from;
-            len = length;
-            kind = Kind::Alnum { justified: false };
+            // A national item's character positions are two bytes, and a part of it is national.
+            let unit = if kind == Kind::National { 2 } else { 1 };
+            let (from, length) = loc::refmod(len / unit, start, length, self.ssrange, &r.name, r.pos)?;
+            offset += from * unit;
+            len = length * unit;
+            if kind != Kind::National {
+                kind = Kind::Alnum { justified: false };
+            }
         }
         let (offset, len) = loc::within(offset, len, self.unit.mem.len(), &r.name, r.pos)?;
         Ok(Loc { offset, len, kind, item: index })

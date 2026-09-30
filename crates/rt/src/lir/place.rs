@@ -47,6 +47,7 @@ pub struct Odo {
     pub check: bool,
 }
 
+/// Start and length count character positions: two bytes each when the place's kind is national.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RefMod {
     pub start: IntExpr,

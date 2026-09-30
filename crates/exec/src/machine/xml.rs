@@ -78,7 +78,7 @@ impl<'p> Machine<'p, '_, '_> {
             if start < 1 || length < 0 || (start - 1 + length) as usize * unit > len {
                 return Err(Abend::ironwork(format!("reference modification ({start}:{length}) of {} is outside its {len} bytes", r.name), r.pos));
             }
-            loc = Loc { offset: offset + (start as usize - 1) * unit, len: length as usize * unit, kind: Kind::Alnum { justified: false }, item: usize::MAX };
+            loc = Loc { offset: offset + (start as usize - 1) * unit, len: length as usize * unit, kind, item: usize::MAX };
         }
         Ok(Some(loc))
     }

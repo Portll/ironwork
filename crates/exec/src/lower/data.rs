@@ -166,7 +166,8 @@ impl Lower<'_> {
                     Some(l) => Some(self.int_expr(l, r.pos)?),
                     None => None,
                 };
-                (Kind::Alnum { justified: false }, Some(lir::RefMod { start, length, check: ssrange }))
+                let kind = if item.kind == Kind::National { Kind::National } else { Kind::Alnum { justified: false } };
+                (kind, Some(lir::RefMod { start, length, check: ssrange }))
             }
         };
         let place = lir::Place { base, offset: item.offset, len: item.size, kind, subscripts, odo, refmod, name: self.sym(&r.name), at: self.at(r.pos) };

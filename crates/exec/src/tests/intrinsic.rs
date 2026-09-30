@@ -205,3 +205,10 @@ fn the_formatted_functions_write_and_read_ibms_formats() {
         "2026-09-27T12:00:00.42+00:00\n19950215\n051427.81-0500\n10:14:27Z\n19950215T235959\n1995-02-16T01:00:00Z\n0143951\n1886781\n0000006\n19950215\n"
     );
 }
+
+#[test]
+fn a_reference_modified_national_item_counts_characters_and_stays_national() {
+    let data = "       01  NX PIC N(4) VALUE N'ABCD'.\n       01  S PIC 9 VALUE 2.\n";
+    let out = displays(data, &["DISPLAY FUNCTION DISPLAY-OF(NX(2:S))", "DISPLAY FUNCTION DISPLAY-OF(NX(3:))", "DISPLAY FUNCTION DISPLAY-OF(\n    FUNCTION NATIONAL-OF('WXYZ')(2:2))"]);
+    assert_eq!(out, "BC\nCD\nXY\n");
+}
