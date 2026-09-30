@@ -132,6 +132,7 @@ fn kind_fields(kind: &str) -> Option<(&'static [&'static str], &'static [&'stati
         "dd" => (&["dd", "event", "mode", "sha256", "bytes"], &["dd", "event"]),
         "call" => (&["program", "from", "sha256"], &["program"]),
         "abend" => (&["code", "file", "line"], &["code"]),
+        "step" => (&["step", "pgm", "outcome"], &["step", "pgm", "outcome"]),
         "output" => (&["name", "sha256", "bytes", "path", "stdout"], &["name", "sha256"]),
         "close" => (&["exit", "counts", "durationMs", "ledger"], &["exit"]),
         "genesis" => (&["createdAt", "rotatedFrom"], &["createdAt"]),

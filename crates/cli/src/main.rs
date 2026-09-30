@@ -55,7 +55,9 @@ flags:
              record the run in a hash-chained journal and ledger in DIR, in cobolwork's evidence
              format: the source and every COPY member by digest, each DD's digest when it is
              opened, closed and at the end, each program CALL loads, and the abend or RETURN-CODE.
-             DIR may not be inside the program's directory or a library. run and check only
+             DIR may not be inside the program's directory or a library. run, check and job; a
+             job's journal holds the JCL, each program's sources, each step's DDs and CALLs, the
+             data sets each step left, and a step record with each step's outcome
   --clock YYYY-MM-DDTHH:MM:SS[.hh]
              the time ACCEPT FROM DATE, TIME and FUNCTION CURRENT-DATE report, for a run that must
              repeat; without it they report the system clock in UTC
@@ -341,8 +343,8 @@ fn driver() -> ExitCode {
         && c == "job"
     {
         let Some(dir) = datasets else { return usage_error("job needs --datasets DIR") };
-        if !dds.is_empty() || sql_db.is_some() || evidence_dir.is_some() || provenance_file.is_some() || !cics_options.is_empty() || compare_base.is_some() || compare_head.is_some() {
-            return usage_error("job takes its DDs from the JCL; --dd, --sql-db, --evidence, --provenance and the cics flags are not for job");
+        if !dds.is_empty() || sql_db.is_some() || provenance_file.is_some() || !cics_options.is_empty() || compare_base.is_some() || compare_head.is_some() {
+            return usage_error("job takes its DDs from the JCL; --dd, --sql-db, --provenance and the cics flags are not for job");
         }
         let (dir, text) = match dir.strip_suffix(":text") {
             Some(d) => (d.to_string(), true),
@@ -363,7 +365,7 @@ fn driver() -> ExitCode {
             (exec::unit::Clock::System, Some(_)) => exec::unit::Clock::Fixed(1_767_225_600, 0),
             (c, _) => c,
         };
-        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, flags, clock, replay: replay.map(std::path::PathBuf::from), expected: expected_dir, expected_steps, declare, statement });
+        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, flags, clock, replay: replay.map(std::path::PathBuf::from), expected: expected_dir, expected_steps, declare, statement, evidence: evidence_dir });
     }
     if datasets.is_some() || !proclibs.is_empty() {
         return usage_error("--datasets and --proclib are for job");

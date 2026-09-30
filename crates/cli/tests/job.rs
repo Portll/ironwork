@@ -363,3 +363,30 @@ fn generations_roll_forward_and_off_across_runs() {
     let o = job(&dir, "//BAD EXEC PGM=IEFBR14\n//X DD DSN=PAY.DAILY(-5),DISP=SHR\n");
     assert!(log(&o).contains("DD X: PAY.DAILY(-5): no such generation"), "{}", log(&o));
 }
+
+#[test]
+fn a_job_records_its_steps_in_a_hash_chained_journal() {
+    let dir = temp("evidence");
+    upcase(&dir);
+    fs::write(dir.join("data/IN.NAMES"), "alpha\n").unwrap();
+    let ev = dir.with_extension("evidence");
+    let _ = fs::remove_dir_all(&ev);
+    let o = job_with(
+        &dir,
+        "//UP EXEC PGM=UPCASE\n//IN DD DSN=IN.NAMES,DISP=SHR\n//OUT DD DSN=OUT.NAMES,DISP=(NEW,CATLG)\n//SKIP EXEC PGM=IEFBR14,COND=(0,EQ)\n//GONE EXEC PGM=IEFBR14\n//OLD DD DSN=IN.NAMES,DISP=(OLD,DELETE)\n",
+        &["--evidence", ev.to_str().unwrap()],
+    );
+    assert_eq!(o.status.code(), Some(0), "{}", log(&o));
+    let runs: Vec<_> = fs::read_dir(ev.join("runs")).unwrap().flatten().collect();
+    assert_eq!(runs.len(), 1);
+    let text = fs::read_to_string(runs[0].path()).unwrap();
+    let kinds: Vec<&str> = text.lines().map(|l| l.split("\"kind\":\"").nth(1).unwrap().split('"').next().unwrap()).collect();
+    assert_eq!(kinds.first(), Some(&"open"));
+    assert_eq!(kinds.last(), Some(&"close"));
+    assert_eq!(kinds.iter().filter(|k| **k == "step").count(), 3);
+    for want in ["\"outcome\":\"RC=0000\",\"pgm\":\"UPCASE\"", "\"outcome\":\"BYPASSED: COND=(0,EQ) is true\"", "\"path\":\"job.jcl\"", "\"path\":\"lib/UPCASE.cbl\"", "\"dd\":\"OUT\",\"event\":\"end\"", "\"dd\":\"OLD\",\"event\":\"end\""] {
+        assert!(text.contains(want), "{want} in {text}");
+    }
+    assert!(!text.contains("alpha") && !text.contains("ALPHA"));
+    assert!(fs::read_to_string(ev.join("ledger.jsonl")).unwrap().contains("\"kind\":\"run\""));
+}

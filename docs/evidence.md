@@ -9,7 +9,7 @@ evidence directory unchanged.
 
 ## 1. Run journal: `--evidence DIR`
 
-`ironwork run` and `check` write `DIR/runs/<runId>.jsonl` and append the run's tip to
+`ironwork run`, `check` and `job` write `DIR/runs/<runId>.jsonl` and append the run's tip to
 `DIR/ledger.jsonl` (`crates/rt/src/evidence.rs`, `crates/cli/src/evidence.rs`). Each record is
 canonical JSON hashed as SHA-256(`"cobolwork-evidence/v1\n"` || the record without `hash`), linked
 by `prev` and `seq`.
@@ -21,8 +21,13 @@ by `prev` and `seq`.
 | `dd` | `dd`, `event` (`open`, `close`, `end`), `mode`, `sha256`, `bytes` | a file's digest before each OPEN, after each CLOSE, and as the run left it |
 | `call` | `program`, `from`, `sha256` | each program CALL loads from a library, with its source's digest |
 | `abend` | `code`, `file`, `line` | the abend the run ended with |
+| `step` | `step`, `pgm`, `outcome` | for `job`, each step as the job log shows it: `RC=0004`, an abend, BYPASSED or JCL ERROR, with why |
 | `close` | `exit`, `counts`, `durationMs`, `ledger` | last |
 
+- A job's journal is one run: the JCL as an `input`, then for each step its programs' sources, its
+  DDs' `open` and `close` records and CALLs, an `end` record for each data set it was given, and
+  its `step` record. The directory is refused inside the JCL's directory, `--datasets`, a library
+  or a procedure library.
 - A path is relative to the directory that supplied it (the program's, a `-I` library, a `-L`
   library) and otherwise its file name. No record holds a record's data, an option's value, or an
   absolute path.

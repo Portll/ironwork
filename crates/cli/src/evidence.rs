@@ -138,6 +138,15 @@ impl Run {
         }
     }
 
+    /// A DD whose data set is recorded as the step left it, whether or not a program opened it.
+    pub fn track(&mut self, dd: &str, path: &Path) {
+        self.opened.insert((dd.to_string(), path.to_path_buf()));
+    }
+
+    pub fn journal_mut(&mut self) -> &mut Journal {
+        &mut self.journal
+    }
+
     /// Records each opened DD as the run left it, and the abend if there was one.
     pub fn end(mut self, abend: Option<(String, Option<&str>, i64)>) -> Journal {
         for (dd, path) in std::mem::take(&mut self.opened) {

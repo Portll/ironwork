@@ -7,7 +7,9 @@
 use exec::abend::{AbendCode, Signal};
 use jcl::cond::{self, Ran};
 use jcl::{Dd, End, Item, Job, Source, Status, Step};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -35,6 +37,8 @@ pub struct Request {
     pub expected_steps: Option<PathBuf>,
     pub declare: Option<PathBuf>,
     pub statement: Option<PathBuf>,
+    /// Where the job's hash-chained journal goes, as `run --evidence` writes one for a program.
+    pub evidence: Option<PathBuf>,
 }
 
 /// IBM programs a job can name that ironwork does not run; each is refused before the job starts.
@@ -130,6 +134,8 @@ fn refusals(job: &Job, req: &Request) -> Vec<String> {
 
 /// A DD's file for one step, and what becomes of each data set in it when the step ends.
 struct Allocated {
+    /// The DD is one data set, whose state after the step the evidence journal records.
+    dataset: bool,
     name: String,
     path: PathBuf,
     text: bool,
@@ -283,7 +289,8 @@ impl Runner<'_> {
             }
         }
         if paths.len() == 1 {
-            return Ok(Allocated { name: dd.name.clone(), path: paths.remove(0), text, sysout });
+            let dataset = matches!(dd.parts[0].source, Source::Dataset { .. } | Source::Temporary { .. } | Source::Generation { .. });
+            return Ok(Allocated { dataset, name: dd.name.clone(), path: paths.remove(0), text, sysout });
         }
         let joined = fresh_name(&self.scratch, &mut self.files, &label);
         let mut bytes = Vec::new();
@@ -291,7 +298,7 @@ impl Runner<'_> {
             bytes.extend(fs::read(p).map_err(|e| format!("DD {}: {e}", dd.name))?);
         }
         fs::write(&joined, bytes).map_err(|e| format!("DD {}: {e}", dd.name))?;
-        Ok(Allocated { name: dd.name.clone(), path: joined, text, sysout })
+        Ok(Allocated { dataset: false, name: dd.name.clone(), path: joined, text, sysout })
     }
 
     fn dispose(&mut self, disposals: Vec<Disposal>, abended: bool) {
@@ -387,13 +394,17 @@ impl Runner<'_> {
 
 /// Runs a COBOL program with the step's DDs: its return code, or the abend's code and message.
 /// Each program CALL loads from a library goes into `called`.
-fn run_cobol(path: &Path, req: &Request, dds: &[Allocated], database: Option<&mut (dyn exec::sql::Database + '_)>, out: &mut dyn Write, called: &mut BTreeSet<PathBuf>) -> Result<i16, (AbendCode, String)> {
+#[allow(clippy::too_many_arguments)]
+fn run_cobol(path: &Path, req: &Request, dds: &[Allocated], database: Option<&mut (dyn exec::sql::Database + '_)>, out: &mut dyn Write, called: &mut BTreeSet<PathBuf>, evidence: Option<&Rc<RefCell<crate::evidence::Run>>>, roots: &[PathBuf]) -> Result<i16, (AbendCode, String)> {
     let ironwork = |m: String| (AbendCode::Ironwork, m);
     let text = fs::read(path).map(|b| syntax::copy::decode(&b)).map_err(|e| ironwork(format!("{}: {e}", path.display())))?;
     let own = path.parent().map(Path::to_path_buf).unwrap_or_default();
     let libraries = syntax::copy::Libraries::new(std::iter::once(own.clone()).chain(req.libraries.iter().cloned()).collect()).with_program(path);
     let mut programs = syntax::parse_all_with(&text, &libraries).map_err(|e| ironwork(e.place(&path.display().to_string()).to_string()))?;
     let first = programs.remove(0);
+    if let Some(run) = evidence {
+        crate::evidence::sources(run.borrow_mut().journal_mut(), &first.sources, &path.display().to_string(), roots);
+    }
     let library = exec::unit::Library { programs, dirs: std::iter::once(own).chain(req.program_dirs.iter().cloned()).collect(), copy: libraries, flags: req.flags.clone() };
     let compiled = exec::compile(first, &req.flags).map_err(|errors| ironwork(syntax::most_severe(&errors).map(|e| e.place(&path.display().to_string()).to_string()).unwrap_or_default()))?;
     let specs: Vec<String> = dds.iter().map(|d| format!("{}={}{}", d.name, d.path.display(), if d.text { ":text" } else { "" })).collect();
@@ -405,8 +416,11 @@ fn run_cobol(path: &Path, req: &Request, dds: &[Allocated], database: Option<&mu
     let mut err = std::io::stderr();
     let loads = std::cell::RefCell::new(Vec::new());
     let observer: exec::unit::Observer<'_> = Box::new(|event| {
-        if let exec::unit::Event::Load { source: Some(p), .. } = event {
+        if let exec::unit::Event::Load { source: Some(p), .. } = &event {
             loads.borrow_mut().push(p.to_path_buf());
+        }
+        if let Some(run) = evidence {
+            run.borrow_mut().observe(event);
         }
     });
     let ended = compiled.execute_observed(library, dds, Some(sysin), req.clock, database, out, &mut err, Some(observer));
@@ -652,7 +666,31 @@ pub fn run(req: Request) -> ExitCode {
     };
     let inputs: Vec<(String, Value)> = if req.expected.is_some() { files_under(&datasets).into_iter().map(|(n, p)| (n, crate::compare::digest_of(fs::read(p).ok().as_deref()))).collect() } else { Vec::new() };
     let mut runner = Runner { req: &req, datasets, scratch, temporaries: BTreeMap::new(), gdg_start: BTreeMap::new(), passed_new: BTreeSet::new(), files: 0 };
-    let report = run_job(&job, &mut runner, replay.as_mut().map(|r| r as &mut dyn exec::sql::Database));
+    let roots: Vec<PathBuf> = std::iter::once(req.jcl.parent().map(Path::to_path_buf).unwrap_or_default())
+        .chain([req.datasets.clone()])
+        .chain(req.libraries.iter().cloned())
+        .chain(req.program_dirs.iter().cloned())
+        .chain(req.proclibs.iter().cloned())
+        .collect();
+    let journal = match &req.evidence {
+        Some(dir) => match crate::evidence::start(dir, &roots, "job", &shown) {
+            Ok(mut j) => {
+                crate::evidence::sources(&mut j, &[], &shown, &roots);
+                Some(j)
+            }
+            Err(e) => {
+                eprintln!("ironwork: --evidence {}: {e}", dir.display());
+                let _ = fs::remove_dir_all(&runner.scratch);
+                return ExitCode::from(2);
+            }
+        },
+        None => None,
+    };
+    let journal = RefCell::new(journal);
+    let report = run_job(&job, &mut runner, replay.as_mut().map(|r| r as &mut dyn exec::sql::Database), &journal, &roots);
+    if let Some(j) = journal.into_inner() {
+        crate::evidence::finish(Some(j), i64::from(report.status));
+    }
     for path in std::mem::take(&mut runner.passed_new) {
         let _ = if path.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };
     }
@@ -666,13 +704,17 @@ pub fn run(req: Request) -> ExitCode {
 
 /// Runs every step the job's conditions allow; the exit status is the highest return code, or
 /// 16 when a step abended or the job ended on a JCL error.
-fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exec::sql::Database>) -> Report {
+/// With a journal, each step's DDs, CALLs, sources and outcome go into it as the step ends.
+fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exec::sql::Database>, journal: &RefCell<Option<exec::evidence::Journal>>, roots: &[PathBuf]) -> Report {
     let (mut ran, mut abended, mut failed) = (Vec::<Ran>::new(), false, false);
     let mut frames: Vec<Frame> = Vec::new();
     let mut stdout = std::io::stdout().lock();
     let (mut steps, mut gaps, mut programs) = (Vec::new(), Vec::new(), BTreeSet::new());
     let mut log = |name: &str, pgm: &str, what: String| {
         eprintln!("ironwork job {}: {name} PGM={pgm} {what}", job.name);
+        if let Some(j) = journal.borrow_mut().as_mut() {
+            let _ = j.append("step", fields([("step", name.into()), ("pgm", pgm.into()), ("outcome", what.clone().into())]));
+        }
         steps.push(Value::Obj(fields([("step", name.into()), ("pgm", pgm.into()), ("outcome", what.into())])));
     };
     let mut ended = false;
@@ -731,13 +773,20 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                     ended = true;
                     continue;
                 }
+                let run = journal.borrow_mut().take().map(|j| {
+                    let mut r = crate::evidence::Run::new(j, roots);
+                    for d in dds.iter().filter(|d| d.dataset) {
+                        r.track(&d.name, &d.path);
+                    }
+                    Rc::new(RefCell::new(r))
+                });
                 let outcome = match program_of(&step.pgm, &runner.req.program_dirs) {
                     Program::Iefbr14 => Ok(0),
                     Program::Iebgener => iebgener(&dds),
                     Program::Idcams => Ok(idcams(runner, &dds)),
                     Program::Cobol(path) => {
                         programs.insert(path.clone());
-                        run_cobol(&path, runner.req, &dds, database.as_deref_mut(), &mut stdout, &mut programs)
+                        run_cobol(&path, runner.req, &dds, database.as_deref_mut(), &mut stdout, &mut programs, run.as_ref(), roots)
                     }
                     Program::Missing => Err((AbendCode::ModuleNotFound, format!("program {} is not in the program libraries", step.pgm))),
                 };
@@ -747,6 +796,10 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                     }
                 }
                 let _ = stdout.flush();
+                if let Some(run) = run.and_then(|r| Rc::try_unwrap(r).ok()) {
+                    let abend = outcome.as_ref().err().map(|(code, _)| (code.to_string(), None, 0));
+                    *journal.borrow_mut() = Some(run.into_inner().end(abend));
+                }
                 match outcome {
                     Ok(rc) => {
                         let rc = rc.clamp(0, 4095) as u16;
