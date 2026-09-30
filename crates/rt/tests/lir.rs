@@ -6,6 +6,7 @@ use std::fmt;
 mod common;
 
 use common::payroll;
+use ironwork_rt::abend::{AbendCode, Ending, FileStatus, Signal};
 use ironwork_rt::lir::*;
 use ironwork_rt::module::codec::{Decode, Encode, Writer, decode_all};
 use ironwork_rt::module::{ModuleError, StringTable};
@@ -14,6 +15,7 @@ use ironwork_rt::sql::{HostType, fingerprint};
 use ironwork_rt::storage::Kind;
 use ironwork_rt::vocab::{AcceptFrom, BinOp, Figurative, InspectMode, Pos, RelOp, SignClause, SignPosition};
 use numeric::precision::{Fixed, Places};
+use numeric::options::{FastsrtAdvPrint, Warnings};
 use numeric::{Arith, Numproc, Options, SortKeys, Trunc, TruncCheck};
 use zarch::check::ProgramCheck;
 use zarch::hfp::Precision;
@@ -126,12 +128,48 @@ fn the_borrowed_vocabulary_round_trips_with_every_tag() {
     round_trip(&[fixed(0, 1, 0), fixed(-1_234_567, 5, 2), fixed(i128::MAX, 39, 0), wide]);
 }
 
+/// Every field set away from its default, so a field the codec skipped decodes as the default and fails.
+#[test]
+fn options_round_trip_with_every_field_off_its_default() {
+    let every = Options {
+        arith: Arith::Extend,
+        trunc: Trunc::Bin,
+        numproc: Numproc::Pfd,
+        codepage: 1047,
+        trunc_check: TruncCheck::Silent,
+        fastsrt: true,
+        fastsrt_adv_print: FastsrtAdvPrint::Include,
+        sort_keys: SortKeys::Strict,
+        adv: false,
+        thread: true,
+        dll: true,
+        rent: false,
+        dbcs: false,
+        warnings: Warnings::Block,
+        dynam: true,
+        debug: true,
+    };
+    round_trip(&[every]);
+    let each = [
+        Options { fastsrt_adv_print: FastsrtAdvPrint::Include, ..Options::default() },
+        Options { warnings: Warnings::Block, ..Options::default() },
+        Options { dynam: true, ..Options::default() },
+        Options { debug: true, ..Options::default() },
+    ];
+    round_trip(&each);
+    for options in each {
+        assert_ne!(encoded(&options).0, encoded(&Options::default()).0);
+    }
+    every_variant(&[FastsrtAdvPrint::Exclude, FastsrtAdvPrint::Include], 2);
+    every_variant(&[Warnings::Proceed, Warnings::Block], 2);
+}
+
 #[test]
 fn kinds_and_options_have_load_module_s_bytes() {
     assert_eq!(encoded(&Kind::Zoned { digits: 5, scale: 2, signed: true, sign: Some(SIGN) }).0, [3, 5, 2, 1, 1, 1, 1]);
     assert_eq!(encoded(&Kind::Float(Precision::Extended)).0, [6, 2]);
     let options = Options { arith: Arith::Extend, trunc: Trunc::Opt, ..Options::default() };
-    assert_eq!(encoded(&options).0, [0x01, 0x01, 0x00, 0xF4, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x01]);
+    assert_eq!(encoded(&options).0, [0x01, 0x01, 0x00, 0xF4, 0x08, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00]);
     let (bytes, strings) = encoded(&(7u8, Options { codepage: 999, ..options }));
     let reason = "CODEPAGE(999) is not a page the tables carry".to_owned();
     assert_eq!(refused::<(u8, Options)>(&bytes, &strings), (1, reason));
@@ -154,8 +192,9 @@ fn abend_codes_round_trip_with_every_tag() {
         AbendCode::Signal(Signal::SortStopped),
     ];
     every_variant(&codes, 12);
-    let signals = [Signal::DivideByZero, Signal::StopRun, Signal::GoBack, Signal::SortStopped, Signal::ClosedOutput];
+    let signals = [Signal::StopRun, Signal::GoBack, Signal::SortStopped, Signal::ClosedOutput, Signal::DeclarativeExit];
     every_variant(&signals, 5);
+    every_variant(&[Ending::Goback, Ending::StopRun, Ending::EndOfProgram], 3);
     let statuses = [
         FileStatus::Success,
         FileStatus::SuccessDuplicate,
@@ -197,7 +236,7 @@ fn letters_first() -> Sequence {
 #[test]
 fn program_shape_round_trips() {
     let cards = vec!["TRUNC(OPT)".into(), "SSR".into()];
-    let options = ProgramOptions { options: Options::default(), ssrange: true, dynam: true, cards, collating: Collating::Native };
+    let options = ProgramOptions { options: Options::default(), ssrange: true, cards, collating: Collating::Native };
     let sequenced = ProgramOptions { collating: Collating::Sequence(letters_first()), ..options.clone() };
     round_trip(&[options, sequenced]);
     every_variant(&[Collating::Native, Collating::Sequence(letters_first())], 2);

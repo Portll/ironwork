@@ -1,6 +1,5 @@
 //! The LIR of docs/lir.md: a program lowered once, which the VM runs and a load module holds.
 
-mod abend;
 mod arith;
 mod call;
 mod codec;
@@ -13,12 +12,11 @@ mod sql;
 mod text;
 mod value;
 
-pub use abend::{AbendCode, FileStatus, Signal};
 pub use arith::{ArithPlan, ArithStep, Mode, RemainderPlan, StepPlan, StorePlan};
 pub use call::{CallArg, CallPlan, CallTarget, LeService};
 pub use collating::{Collating, Sequence};
 pub use debug::Debug;
-pub use flow::{Ending, Frame, FrameKind, Op, Range, RangeKind, Step, Terminator};
+pub use flow::{Frame, FrameKind, Op, Range, RangeKind, Step, Terminator};
 pub use payload::{
     CicsCommand, DisplayItem, DisplayPlan, FileDesc, FileOp, FloatFrom, Func, FunctionPlan, Image, InitField, InitPlan,
     InvokePlan, MethodName, MovePlan, NationalFrom, NumericFrom, Receiver, ReleasePlan, ReportOp, ReturnPlan,
@@ -32,6 +30,7 @@ pub use text::{
 };
 pub use value::{ByteClass, Compare, Comparand, Cond, Const, Count, Expr, IntExpr, Operand, SignTest, SqlTest};
 
+use crate::abend::AbendCode;
 use crate::codec_struct;
 use crate::picture::Sym;
 use crate::storage::Kind;
@@ -95,7 +94,6 @@ pub struct Program {
 pub struct ProgramOptions {
     pub options: numeric::Options,
     pub ssrange: bool,
-    pub dynam: bool,
     /// The CBL and PROCESS cards as written.
     pub cards: Vec<String>,
     pub collating: Collating,
@@ -195,7 +193,7 @@ codec_struct!(Program {
     id, options, initial, recursive, storage, items, paragraphs, procedure_start, ranges, blocks, places, exprs,
     conds, consts, plans, services, sql, abends, edits, symbols, debug,
 } check program_valid);
-codec_struct!(ProgramOptions { options, ssrange, dynam, cards, collating });
+codec_struct!(ProgramOptions { options, ssrange, cards, collating });
 codec_struct!(Storage {
     size, image, local_image, init_reports, init_abend, linkage, using, returning, file_areas,
 } check storage_valid);

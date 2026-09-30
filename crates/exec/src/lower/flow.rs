@@ -4,7 +4,8 @@
 use super::cond::Test;
 use super::data::{Side, scale};
 use super::{Lower, LowerError, R, push, unsupported};
-use rt::lir::{self, BlockId, DebugId, Ending, Op, RangeId, Terminator};
+use rt::abend::Ending;
+use rt::lir::{self, BlockId, DebugId, Op, RangeId, Terminator};
 use rt::storage::Kind;
 use syntax::Pos;
 use syntax::ast::{BinOp, ExecKind, ExitKind, Expr, Loop, Object, Operand, ProcName, RelOp, SizeError, Sorting, Stmt, Subject, Target, When};
@@ -263,7 +264,8 @@ impl Lower<'_> {
                     self.op(Op::Initialize { target, plan }, pos)?;
                 }
             }
-            Stmt::GoTo { target, .. } => {
+            Stmt::GoTo { target: None, .. } => return unsupported("a GO TO with no target, which ALTER sets", pos),
+            Stmt::GoTo { target: Some(target), .. } => {
                 let Ok((t, _)) = crate::procedure(self.program, target) else { return unsupported("a GO TO the walker cannot resolve", pos) };
                 self.unnest(ctx.loops.len(), pos)?;
                 let (p, t32) = (ctx.para as u32, t as u32);
@@ -469,7 +471,8 @@ impl Lower<'_> {
                     self.run_body(&body, head, exit, pos, ctx)?;
                 }
             }
-            Loop::Varying { varying, test_after } => {
+            Loop::Varying { after, .. } if !after.is_empty() => return unsupported("PERFORM VARYING with AFTER", pos),
+            Loop::Varying { varying, test_after, .. } => {
                 let var = self.place(&varying.var, false)?;
                 let kind = self.kind_of(var);
                 if !matches!(kind, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Index) {
@@ -561,6 +564,9 @@ fn statement_name(s: &Stmt) -> &'static str {
             ExecKind::Dli => "EXEC DLI",
             ExecKind::Other => "EXEC",
         },
+        Stmt::GoToDepending { .. } => "GO TO DEPENDING ON",
+        Stmt::Alter { .. } => "ALTER",
+        Stmt::Entry { .. } => "ENTRY",
         Stmt::Report(_) => "Report Writer",
         Stmt::Invoke(_) => "INVOKE",
         _ => "this statement",
@@ -591,7 +597,10 @@ fn stmt_pos(s: &Stmt) -> Option<Pos> {
         | Stmt::Set { pos, .. }
         | Stmt::Accept { pos, .. }
         | Stmt::ExitMethod { pos }
-        | Stmt::StopRun { pos } => *pos,
+        | Stmt::StopRun { pos }
+        | Stmt::GoToDepending { pos, .. }
+        | Stmt::Alter { pos, .. }
+        | Stmt::Entry { pos, .. } => *pos,
         Stmt::Arith(a) => a.pos,
         Stmt::Read(r) => r.pos,
         Stmt::Call(c) => c.pos,

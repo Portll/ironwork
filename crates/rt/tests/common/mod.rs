@@ -1,5 +1,6 @@
 //! The sample program the LIR and load-module tests share.
 
+use ironwork_rt::abend::Ending;
 use ironwork_rt::lir::*;
 use ironwork_rt::storage::Kind;
 use ironwork_rt::vocab::{BinOp, Pos};
@@ -115,7 +116,7 @@ pub fn payroll() -> Program {
 
     Program {
         id: 0,
-        options: ProgramOptions { options: Options::default(), ssrange: true, dynam: false, cards: vec!["SSRANGE".into()], collating: Collating::Native },
+        options: ProgramOptions { options: Options::default(), ssrange: true, cards: vec!["SSRANGE".into()], collating: Collating::Native },
         initial: false,
         recursive: false,
         storage,

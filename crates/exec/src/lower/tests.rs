@@ -386,6 +386,29 @@ fn constructs_outside_the_slice_are_refused_by_name() {
 }
 
 #[test]
+fn statements_and_program_features_the_lowering_lacks_are_refused_by_name() {
+    let data = "       01  K PIC 9 VALUE 1.\n       01  J PIC 9.\n";
+    // A line indented four columns is in area B; any other starts in area A.
+    let source = |lines: &[&str]| lines.iter().map(|l| if l.starts_with("    ") { line(l.trim_start()) } else { format!("       {l}\n") }).collect::<String>();
+    let named = |lines: &[&str], name: &str| {
+        let error = lower(&compiled(&program("", data, &source(lines)))).unwrap_err();
+        assert!(matches!(error, LowerError::Unsupported(n, _) if n == name), "{name}: {error}");
+    };
+    named(&["A.", "    GO TO B C DEPENDING ON K.", "B.", "    GOBACK.", "C.", "    GOBACK."], "GO TO DEPENDING ON");
+    named(&["A.", "    ALTER B TO PROCEED TO C.", "B.", "    GO TO.", "C.", "    GOBACK."], "ALTER");
+    named(&["A.", "    ENTRY 'ALT'.", "    GOBACK."], "ENTRY");
+    named(
+        &["A.", "    PERFORM P VARYING K FROM 1 BY 1 UNTIL K > 2", "        AFTER J FROM 1 BY 1 UNTIL J > 2", "    GOBACK.", "P.", "    CONTINUE."],
+        "PERFORM VARYING with AFTER",
+    );
+    named(
+        &["DECLARATIVES.", "S SECTION.", "    USE AFTER STANDARD ERROR PROCEDURE ON INPUT.", "P.", "    CONTINUE.", "END DECLARATIVES.", "A.", "    GOBACK."],
+        "DECLARATIVES",
+    );
+    named(&["S1 SECTION 50.", "A.", "    GOBACK."], "an independent segment");
+}
+
+#[test]
 fn lowering_is_deterministic() {
     let source = program(
         "",

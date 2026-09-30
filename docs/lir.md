@@ -101,11 +101,11 @@ pub struct Program {
 }
 
 /// Fixed at compile time (codegen-runtime.md §10, invariant 7). `ssrange` is `Compiled.ssrange`
-/// (exec/src/lib.rs:29). `dynam` makes a literal CALL resolve at run time, as the walker does every
-/// CALL (load-module.md §8.3). `cards` are the CBL and PROCESS cards as written (ast.rs:7).
+/// (exec/src/lib.rs:29). `options.dynam` makes a literal CALL resolve at run time, as the walker does
+/// every CALL (load-module.md §8.3). `cards` are the CBL and PROCESS cards as written (ast.rs:7).
 /// `collating` is `Compiled.collating` (exec/src/lib.rs, after 79a199e).
 pub struct ProgramOptions {
-    pub options: numeric::Options, pub ssrange: bool, pub dynam: bool, pub cards: Vec<String>,
+    pub options: numeric::Options, pub ssrange: bool, pub cards: Vec<String>,
     pub collating: Collating,
 }
 

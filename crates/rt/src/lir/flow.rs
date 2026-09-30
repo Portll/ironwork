@@ -5,6 +5,7 @@ use super::{
     InvokeId, MovePlan, Operand, ParaId, PlaceId, RangeId, ReleaseId, ReportOp, ReturnId, SearchAllId, SortId, SqlId,
     StepPlan, StringId, TempId, UnstringId,
 };
+use crate::abend::Ending;
 use crate::vocab::AcceptFrom;
 use crate::{codec_enum, codec_struct};
 
@@ -109,13 +110,6 @@ pub enum FrameKind {
     UseBeforeReporting { at: DebugId },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Ending {
-    Goback,
-    StopRun,
-    EndOfProgram,
-}
-
 codec_enum!(Op {
     Move { from, to, plan } = 0,
     Initialize { target, plan } = 1,
@@ -162,4 +156,3 @@ codec_struct!(Range { first, last, kind });
 codec_enum!(RangeKind { Perform = 0, SortProcedure = 1, UseBeforeReporting = 2 });
 codec_struct!(Frame { first, last, kind, ret, depth, temps });
 codec_enum!(FrameKind { Main = 0, Perform = 1, SortProcedure = 2, UseBeforeReporting { at } = 3 });
-codec_enum!(Ending { Goback = 0, StopRun = 1, EndOfProgram = 2 });

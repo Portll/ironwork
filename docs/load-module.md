@@ -262,8 +262,8 @@ The macros are exported from `rt` as `codec_struct!` and `codec_enum!`. Their gr
 
 Every field and element must itself be encodable (§4.1 to §4.4).
 
-    codec_struct!(Options { arith, trunc, numproc, codepage, trunc_check, fastsrt, sort_keys,
-        adv, thread, dll, rent, dbcs } check options_valid);
+    codec_struct!(Options { arith, trunc, numproc, codepage, trunc_check, fastsrt, fastsrt_adv_print,
+        sort_keys, adv, thread, dll, rent, dbcs, warnings, dynam, debug } check options_valid);
     codec_enum!(Arith { Compat = 0, Extend = 1 });
     codec_enum!(Kind {
         Group = 0,
@@ -288,14 +288,18 @@ tests, and the debug positions (§9).
 | `codepage` | 1140 as LEB128 (`0x474`) | `F4 08` |
 | `trunc_check` | tag 0 | `00` |
 | `fastsrt` | false | `00` |
+| `fastsrt_adv_print` | `Exclude`, tag 0 | `00` |
 | `sort_keys` | `Dfsort`, tag 0 | `00` |
 | `adv` | true | `01` |
 | `thread` | false | `00` |
 | `dll` | false | `00` |
 | `rent` | true | `01` |
 | `dbcs` | true | `01` |
+| `warnings` | `Proceed`, tag 0 | `00` |
+| `dynam` | false | `00` |
+| `debug` | false | `00` |
 
-Thirteen bytes: `01 01 00 F4 08 00 00 00 01 00 00 01 01`.
+Seventeen bytes: `01 01 00 F4 08 00 00 00 00 01 00 00 01 01 00 00 00`.
 
 ### 4.8 Bounds on decoding
 
@@ -317,13 +321,14 @@ for 273fc24.
 
 `Program.options` is lir.md's `ProgramOptions`: `numeric::options::Options`
 (crates/numeric/src/options.rs:119-136), which is `Copy`, holds only enums, integers and bools, and
-encodes as it is, its fields in declaration order; then `ssrange`, `dynam` and the option cards.
-Options are per program, because a CBL card is. `dynam` is new: `Options` does not model it, and the
-interpreter treats every CALL as dynamic (`RunUnit::load`, unit.rs:136).
+encodes as it is, its fields in declaration order; then `ssrange` and the option cards.
+Options are per program, because a CBL card is. `dynam` is one of its fields: under NODYNAM a CALL of
+a literal is static.
 
 The spellings a card or PARM may use come from IBM's option table, vendored as
 `crates/numeric/data/enterprise-options.tsv` and read by `Options::apply`. Two fields have no IBM
-option: `trunc_check` and `sort_keys` are set by this compiler's own flags.
+option: `trunc_check`, `fastsrt_adv_print`, `sort_keys`, `warnings` and `debug` are set by this
+compiler's own flags.
 
 | Field | Type | Encoding | Set by |
 |---|---|---|---|
@@ -333,15 +338,20 @@ option: `trunc_check` and `sort_keys` are set by this compiler's own flags.
 | `codepage` | `u16` | LEB128. The `check` function refuses a CCSID `CodePage::by_ccsid` does not carry, because `Options::code_page` (:239) would otherwise panic | `CODEPAGE(n)`, `CP(n)` |
 | `trunc_check` | `TruncCheck` (:102) | tag: `Report` 0, `Silent` 1 | `-silent` |
 | `fastsrt` | `bool` | 0 or 1 | `FASTSRT`, `FSRT`, and `NOFASTSRT`, `NOFSRT` |
+| `fastsrt_adv_print` | `FastsrtAdvPrint` | tag: `Exclude` 0, `Include` 1 | `--fastsrt-adv-print=exclude\|include` |
 | `sort_keys` | `SortKeys` (:112) | tag: `Dfsort` 0, `Strict` 1 | `-strict-sort-keys` |
 | `adv` | `bool` | 0 or 1 | `ADV`, `NOADV` |
 | `thread` | `bool` | 0 or 1 | `THREAD`, `NOTHREAD` |
 | `dll` | `bool` | 0 or 1 | `DLL`, `NODLL` |
 | `rent` | `bool` | 0 or 1 | `RENT`, `NORENT` |
 | `dbcs` | `bool` | 0 or 1 | `DBCS`, `NODBCS` |
+| `warnings` | `Warnings` | tag: `Proceed` 0, `Block` 1 | `-warnings-block` |
+| `dynam` | `bool` | 0 or 1 | `DYNAM`, `DYN`, `NODYNAM` |
+| `debug` | `bool` | 0 or 1 | `-debug` |
 
 `ADV`, `DBCS`, `DLL`, `NUMPROC`, `RENT`, `THREAD` and `TRUNC` have no abbreviations. The defaults are
-`Compat`, `Std`, `Nopfd`, 1140, `Report`, false, `Dfsort`, true, false, false, true, true.
+`Compat`, `Std`, `Nopfd`, 1140, `Report`, false, `Exclude`, `Dfsort`, true, false, false, true, true,
+`Proceed`, false, false.
 
 ### 5.2 Storage and the item table
 

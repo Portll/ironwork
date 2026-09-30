@@ -1,5 +1,6 @@
 //! Codecs for the types the LIR borrows from `rt`, `numeric` and `zarch`, with load-module.md's tags.
 
+use crate::abend::{AbendCode, Ending, FileStatus, Signal};
 use crate::module::ModuleError;
 use crate::module::codec::{Decode, Encode, Reader, Writer};
 use crate::picture::Sym;
@@ -8,6 +9,7 @@ use crate::storage::Kind;
 use crate::vocab::{AcceptFrom, BinOp, Figurative, InspectMode, RelOp, SignClause, SignPosition};
 use crate::{codec_enum, codec_struct};
 use numeric::precision::{Fixed, Places};
+use numeric::options::{FastsrtAdvPrint, Warnings};
 use numeric::{Arith, Numproc, Options, SortKeys, Trunc, TruncCheck};
 use zarch::check::ProgramCheck;
 use zarch::ebcdic::CodePage;
@@ -83,14 +85,57 @@ codec_enum!(ProgramCheck {
     HfpDivide = 9,
 });
 
+codec_enum!(Ending { Goback = 0, StopRun = 1, EndOfProgram = 2 });
+codec_enum!(AbendCode {
+    Check(check) = 0,
+    Protection = 1,
+    ModuleNotFound = 2,
+    Io(status) = 3,
+    Cics(code) = 4,
+    User(code) = 5,
+    Ironwork = 6,
+    Exec = 7,
+    Sql = 8,
+    SqlReplay = 9,
+    Java = 10,
+    Signal(signal) = 11,
+});
+codec_enum!(Signal { StopRun = 0, GoBack = 1, SortStopped = 2, ClosedOutput = 3, DeclarativeExit = 4 });
+codec_enum!(FileStatus {
+    Success = 0,
+    SuccessDuplicate = 1,
+    SuccessWrongLength = 2,
+    SuccessOptional = 3,
+    AtEnd = 4,
+    RelativeKeyOverflow = 5,
+    SequenceError = 6,
+    DuplicateKey = 7,
+    NotFound = 8,
+    BoundaryViolation = 9,
+    PermanentError = 10,
+    FileNotFound = 11,
+    OpenModeUnsupported = 12,
+    AlreadyOpen = 13,
+    NotOpen = 14,
+    NoPriorRead = 15,
+    RecordLengthChanged = 16,
+    NoNextRecord = 17,
+    NotOpenInput = 18,
+    NotOpenOutput = 19,
+    NotOpenInputOutput = 20,
+});
+
 codec_struct!(Options {
-    arith, trunc, numproc, codepage, trunc_check, fastsrt, sort_keys, adv, thread, dll, rent, dbcs,
+    arith, trunc, numproc, codepage, trunc_check, fastsrt, fastsrt_adv_print, sort_keys, adv, thread, dll, rent, dbcs,
+    warnings, dynam, debug,
 } check options_valid);
 codec_enum!(Arith { Compat = 0, Extend = 1 });
 codec_enum!(Trunc { Std = 0, Opt = 1, Bin = 2 });
 codec_enum!(Numproc { Nopfd = 0, Pfd = 1 });
 codec_enum!(TruncCheck { Report = 0, Silent = 1 });
 codec_enum!(SortKeys { Dfsort = 0, Strict = 1 });
+codec_enum!(FastsrtAdvPrint { Exclude = 0, Include = 1 });
+codec_enum!(Warnings { Proceed = 0, Block = 1 });
 
 /// `Options::code_page` panics on a CCSID the tables do not carry.
 fn options_valid(options: &Options) -> Result<(), String> {

@@ -20,7 +20,8 @@ use crate::Compiled;
 use crate::layout::{Layout, Resolved};
 use crate::machine::Machine;
 use crate::unit::{Clock, Library, RunUnit};
-use rt::lir::{self, AbendCode, AbendId, BlockId, ConstId, DebugId, PlaceId, RangeId, SymId};
+use rt::abend::AbendCode;
+use rt::lir::{self, AbendId, BlockId, ConstId, DebugId, PlaceId, RangeId, SymId};
 use std::collections::HashMap;
 use std::fmt;
 use syntax::Pos;
@@ -90,7 +91,6 @@ pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
     let storage = l.storage()?;
     let items = l.items()?;
     let paragraphs = l.procedure()?;
-    let dynam = compiled.program.options.iter().fold(false, |on, card| numeric::options::switch(card, "DYNAM").unwrap_or(on));
     let procedure_start = compiled.program.report_writer.procedure_start.min(compiled.program.paragraphs.len());
     let (blocks, ops) = l.blocks.finish()?;
     let program = lir::Program {
@@ -98,7 +98,6 @@ pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
         options: lir::ProgramOptions {
             options: compiled.options,
             ssrange: compiled.ssrange,
-            dynam,
             cards: compiled.program.options.clone(),
             collating: collating(&compiled.collating),
         },
@@ -201,6 +200,12 @@ impl<'c> Lower<'c> {
         if let Some(block) = program.exec_declarations.first() {
             return unsupported("EXEC SQL", block.pos);
         }
+        if let Some(pos) = program.declaratives.errors.first().map(|u| u.pos).or_else(|| program.declaratives.debugging.first().map(|u| u.pos)) {
+            return unsupported("DECLARATIVES", pos);
+        }
+        if let Some(p) = program.paragraphs.iter().find(|p| p.priority >= 50) {
+            return unsupported("an independent segment", p.pos);
+        }
         Ok(())
     }
 
@@ -259,7 +264,7 @@ impl<'c> Lower<'c> {
         };
         let init_reports = String::from_utf8_lossy(&err).lines().map(|l| self.sym(l)).collect();
         let init_abend = match abend {
-            Some(a) => Some(self.abend(abend_code(&a.code), &a.message, Some(a.pos))?),
+            Some(a) => Some(self.abend(a.code.clone(), &a.message, Some(a.pos))?),
             None => None,
         };
         let root = |name: &str| layout.linkage_roots.iter().position(|&i| layout.items[i].name.as_deref() == Some(name));
@@ -337,59 +342,6 @@ fn collating(sequence: &crate::collating::Sequence) -> lir::Collating {
         high_value: sequence.high_value,
         low_value: sequence.low_value,
     })
-}
-
-fn abend_code(code: &crate::abend::AbendCode) -> AbendCode {
-    use crate::abend::{AbendCode as A, Signal as S};
-    use lir::Signal;
-    match code {
-        A::Check(c) => AbendCode::Check(*c),
-        A::Protection => AbendCode::Protection,
-        A::ModuleNotFound => AbendCode::ModuleNotFound,
-        A::Io(status) => AbendCode::Io(file_status(*status)),
-        A::Cics(c) => AbendCode::Cics(c.clone()),
-        A::User(c) => AbendCode::User(c.clone()),
-        A::Ironwork => AbendCode::Ironwork,
-        A::Exec => AbendCode::Exec,
-        A::Sql => AbendCode::Sql,
-        A::SqlReplay => AbendCode::SqlReplay,
-        A::Java => AbendCode::Java,
-        A::Signal(s) => AbendCode::Signal(match s {
-            S::DivideByZero => Signal::DivideByZero,
-            S::StopRun => Signal::StopRun,
-            S::GoBack => Signal::GoBack,
-            S::SortStopped => Signal::SortStopped,
-            S::ClosedOutput => Signal::ClosedOutput,
-        }),
-    }
-}
-
-fn file_status(status: crate::files::FileStatus) -> lir::FileStatus {
-    use crate::files::FileStatus as F;
-    use lir::FileStatus as L;
-    match status {
-        F::Success => L::Success,
-        F::SuccessDuplicate => L::SuccessDuplicate,
-        F::SuccessWrongLength => L::SuccessWrongLength,
-        F::SuccessOptional => L::SuccessOptional,
-        F::AtEnd => L::AtEnd,
-        F::RelativeKeyOverflow => L::RelativeKeyOverflow,
-        F::SequenceError => L::SequenceError,
-        F::DuplicateKey => L::DuplicateKey,
-        F::NotFound => L::NotFound,
-        F::BoundaryViolation => L::BoundaryViolation,
-        F::PermanentError => L::PermanentError,
-        F::FileNotFound => L::FileNotFound,
-        F::OpenModeUnsupported => L::OpenModeUnsupported,
-        F::AlreadyOpen => L::AlreadyOpen,
-        F::NotOpen => L::NotOpen,
-        F::NoPriorRead => L::NoPriorRead,
-        F::RecordLengthChanged => L::RecordLengthChanged,
-        F::NoNextRecord => L::NoNextRecord,
-        F::NotOpenInput => L::NotOpenInput,
-        F::NotOpenOutput => L::NotOpenOutput,
-        F::NotOpenInputOutput => L::NotOpenInputOutput,
-    }
 }
 
 /// Whether the place cannot abend when evaluated: a slab, LOCAL-STORAGE or RETURN-CODE base and a
