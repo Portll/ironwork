@@ -6,6 +6,7 @@ mod class;
 mod codec;
 mod collating;
 mod debug;
+mod file;
 mod flow;
 mod payload;
 mod place;
@@ -13,14 +14,18 @@ mod sql;
 mod text;
 mod value;
 
-pub use arith::{ArithPlan, ArithStep, Mode, RemainderPlan, StepPlan, StorePlan};
+pub use arith::{ArithPlan, ArithStep, Mode, RemainderPlan, StepPlan, StorePlan, UpDown};
 pub use call::{CallArg, CallPlan, CallTarget, EntryPoint, LeService};
 pub use class::{Class, ClassPart, Method};
 pub use collating::{Collating, Sequence};
 pub use debug::Debug;
+pub use file::{
+    Access, Advance, Carriage, FileDesc, FileOp, FileVerb, FromMove, IndexKeys, Linage, Organization, Phrase, RecordSpan,
+    RelativeKey, Spacing, StartKey, StartRel,
+};
 pub use flow::{Frame, FrameKind, Op, Range, RangeKind, Step, Terminator};
 pub use payload::{
-    CicsCommand, DisplayItem, DisplayPlan, FileDesc, FileOp, FloatFrom, Func, FunctionPlan, Image, InitField, InitPlan,
+    CicsCommand, DisplayItem, DisplayPlan, FloatFrom, Func, FunctionPlan, Image, InitField, InitPlan,
     InvokePlan, MethodName, MovePlan, NationalFrom, NumericFrom, Receiver, ReleasePlan, ReportOp, ReturnPlan,
     SearchAllPlan, SearchKey, SortPlan, TrimSide,
 };

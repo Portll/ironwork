@@ -43,7 +43,7 @@ impl Blocks {
 /// Where a statement sits: its paragraph, the paragraph statement it is part of (for NEXT
 /// SENTENCE), a position for statements that carry none, and the inline PERFORMs around it.
 #[derive(Clone)]
-struct Ctx {
+pub(super) struct Ctx {
     para: usize,
     top: usize,
     pos: Pos,
@@ -71,7 +71,7 @@ struct VaryLevel {
 }
 
 impl Lower<'_> {
-    fn new_block(&mut self) -> R<BlockId> {
+    pub(super) fn new_block(&mut self) -> R<BlockId> {
         push(&mut self.blocks.open, Open::default(), "blocks")
     }
 
@@ -87,7 +87,7 @@ impl Lower<'_> {
         }
     }
 
-    fn op(&mut self, op: Op, pos: Pos) -> R<()> {
+    pub(super) fn op(&mut self, op: Op, pos: Pos) -> R<()> {
         let at = self.at(pos);
         let b = self.current()? as usize;
         self.blocks.open[b].ops.push(op);
@@ -95,7 +95,7 @@ impl Lower<'_> {
         Ok(())
     }
 
-    fn end(&mut self, end: Terminator, pos: Pos) -> R<()> {
+    pub(super) fn end(&mut self, end: Terminator, pos: Pos) -> R<()> {
         let at = self.at(pos);
         let b = self.current()? as usize;
         self.blocks.open[b].end = Some((end, at));
@@ -104,14 +104,14 @@ impl Lower<'_> {
     }
 
     /// Ends the open block, if there is one, with a jump to `to`.
-    fn jump(&mut self, to: BlockId, pos: Pos) -> R<()> {
+    pub(super) fn jump(&mut self, to: BlockId, pos: Pos) -> R<()> {
         match self.blocks.current {
             Some(_) => self.end(Terminator::Jump(to), pos),
             None => Ok(()),
         }
     }
 
-    fn switch(&mut self, b: BlockId) -> R<()> {
+    pub(super) fn switch(&mut self, b: BlockId) -> R<()> {
         if let Some(open) = self.blocks.current {
             return Err(LowerError::Invalid(format!("block {open} left open for block {b}")));
         }
@@ -244,7 +244,7 @@ impl Lower<'_> {
         if next < self.entries.len() && !completes { Terminator::Jump(self.entries[next]) } else { Terminator::ParagraphEnd { next: next as u32 } }
     }
 
-    fn statements(&mut self, stmts: &[Stmt], ctx: &Ctx) -> R<()> {
+    pub(super) fn statements(&mut self, stmts: &[Stmt], ctx: &Ctx) -> R<()> {
         for s in stmts {
             self.statement(s, ctx)?;
         }
@@ -321,6 +321,10 @@ impl Lower<'_> {
                     self.op(Op::Alter { para: para as u32, to: to as u32 }, pos)?;
                 }
             }
+            Stmt::Open { .. } | Stmt::Close { .. } | Stmt::Read(_) | Stmt::Write { .. } | Stmt::Rewrite { .. } | Stmt::Delete { .. } | Stmt::Start { .. } => {
+                self.file_statement(s, pos, &inner)?
+            }
+            Stmt::Set { set, .. } => self.set(set, pos)?,
             Stmt::Call(c) => match self.call_plan(c, pos)? {
                 Ok(plan) => {
                     self.op(Op::Call(plan), pos)?;

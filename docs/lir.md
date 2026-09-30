@@ -431,6 +431,10 @@ pub struct RemainderPlan { pub target: PlaceId, pub dividend: ExprId, pub diviso
 /// PERFORM VARYING's step, SET UP and DOWN BY, and the TALLYING adds: an add, then a store with no
 /// size error (machine.rs:517-521, 799-800, 1179-1180).
 pub struct StepPlan { pub dmax: u32, pub store: StorePlan }
+
+/// SET UP or DOWN BY on one receiver, by what reading it gives: an address moved by the step, a
+/// number the step is added to, or a value the walker refuses once it has read it.
+pub enum UpDown { Pointer, Number(StepPlan), Refused(AbendId) }
 ```
 
 The same `StorePlan` serves MOVE's numeric receivers, with ROUNDED off and no size check
@@ -500,8 +504,10 @@ pub enum Op {
     Move { from: Operand, to: PlaceId, plan: MovePlan },
     Initialize { target: PlaceId, plan: InitId },
     Arith(ArithId),
-    SetAddress { record: u16, address: Operand },
-    SetUpDown { target: PlaceId, by: IntExpr, down: bool, plan: StepPlan },
+    /// SET ADDRESS OF: `address` evaluated once, then each LINKAGE record bound to it in turn.
+    SetAddress { records: Vec<u16>, address: Operand },
+    /// SET UP BY or DOWN BY: `by` evaluated once, then each receiver read and moved in turn.
+    SetUpDown { by: IntExpr, down: bool, targets: Vec<(PlaceId, UpDown)> },
     /// PERFORM VARYING's increment: `var` located, then each place of `prepass` (§7.5), then
     /// `var + by` computed with `plan.dmax` and stored.
     Step { var: PlaceId, by: ExprId, plan: StepPlan, prepass: Vec<PlaceId> },
@@ -805,10 +811,10 @@ walker does on each execution; the last column names that work.
 | MOVE | `Move` per receiver (§9.2) | Lowered | Category dispatch in `assign` and `alnum_image` (machine.rs:1657-1768) |
 | COMPUTE, ADD, SUBTRACT, MULTIPLY, DIVIDE | `Arith`, then `Select` if handled | Lowered | §7.1 |
 | INITIALIZE | `Initialize` with a flat plan of (offset, length, value, store) | Lowered | The walk over the item's children (machine.rs:1968-1993) |
-| SET TO TRUE | `Move` of the first VALUE's low end | Lowered | The conditional variable by name (machine.rs:1134) |
-| SET TO | `Move`; plan `Address` for pointer receivers | One call | The kind test (machine.rs:1144-1148) |
-| SET ADDRESS OF | `SetAddress`; a record that is not an 01 or 77 of LINKAGE lowers to `Abend` | One call | Resolve and linkage test (machine.rs:1159-1165) |
-| SET UP BY, DOWN BY | `SetUpDown`: pointer arithmetic or a `StepPlan` | One call | Read, then match on the value (machine.rs:1173-1183) |
+| SET TO TRUE, TO FALSE | `Move` of the first VALUE's low end, or of WHEN SET TO FALSE's value, into the conditional variable found again by name (§11, item 1); nothing when there is none | Lowered | The conditional variable by name (machine.rs `set`) |
+| SET TO | `Move` per receiver; a `POINTER` receiver takes only an address or NULL, else `Refused` | One call | The kind test |
+| SET ADDRESS OF | One `SetAddress` for all the records; a target that is not an 01 or 77 of LINKAGE ends the block in `Abend` after the records before it | One call | Resolve and linkage test |
+| SET UP BY, DOWN BY | One `SetUpDown`: each receiver `Pointer`, `Number` with a `StepPlan` of dmax 0, or `Refused` | One call | Read, then match on the value |
 | INSPECT | `Inspect` over constant patterns and a prebuilt CONVERTING table when both operands are literals | One call | Literal images and the CONVERTING table (machine.rs:822-834, 849-869) |
 | STRING | `String`, then `Select` on overflow | One call | `natural_bytes` of literals (machine.rs:686-697) |
 | UNSTRING | `Unstring` with each receiver's MOVE plan, then `Select` | One call | `assign` dispatch per field (machine.rs:773) |
@@ -819,7 +825,7 @@ walker does on each execution; the last column names that work.
 | DISPLAY | `Display` with a format per item | One call | Kind dispatch (machine.rs:1913-1959) |
 | ACCEPT | `Accept` with a MOVE plan | One call | - |
 | CALL, CANCEL | `Call`, then `Select`; `Cancel` (§9.3) | One call | Literal names decoded (machine.rs:966-971) |
-| OPEN … START | `File`, then `Select` (§9.4) | One call | File by name, keys, FILE STATUS |
+| OPEN … START | `File` per file named, then `Select` when a phrase is written (§9.4) | One call | File by name, keys, FILE STATUS, which phrase applies |
 | SORT, MERGE, RELEASE, RETURN | `Sort`; `Release`; `Return`, then `Select` (§9.6) | One call | SD by name, key places, the FASTSRT plan |
 | INITIATE, GENERATE, TERMINATE, SUPPRESS | `Report` (§9.6) | One call | Report and group by name (machine/report.rs:50-52 (int)) |
 | INVOKE | `Invoke`, then `Select` (§9.8) | One call | Receiver kind, Java types |
@@ -827,7 +833,8 @@ walker does on each execution; the last column names that work.
 | EXEC SQL | `Sql`, then `Branch` on `Cond::Sql` (§9.7) | One call | Host variables, SQLCA fields and WHENEVER labels by name |
 | EXEC DLI, other EXEC | `Abend` with the walker's EXEC message (machine.rs:396-408) | - | - |
 | Declarative EXEC SQL | Nothing (machine.rs:393); its `SqlEntry` still exists | - | - |
-| FUNCTION | `Operand::Function` (§9.9) | One call | Name and arity (machine.rs:1225-1233) |
+| FUNCTION | `Operand::Function` (§9.9) | One call | Name and arity (machine.rs `function`) |
+| DECLARATIVES | Their paragraphs, as paragraphs; one that can run is refused until the flow rework (§9.10) | - | - |
 | PERFORM, GO TO, EXIT, STOP RUN, GOBACK, NEXT SENTENCE | Terminators (§8) | Lowered | Procedure names (machine.rs:308-310) |
 | GO TO … DEPENDING ON, ALTER, ENTRY | `Switch`; `Alter` and `AlteredGoTo` (§8.9); an entry block (§9.3) | Lowered | Procedure names (machine.rs:459-473 (f2)); where an ENTRY begins |
 
@@ -970,33 +977,82 @@ unit.rs:150-171 (f2)).
 
 ### 9.4 Files
 
+A file statement stays one `rt::files` call per file it names, as `machine/file_io.rs` makes it. The
+payload names the file by index and gives the places, plans and phrases the walker finds by name on
+each execution; the status, the record, the DD and the in-memory file are run-time state.
+
 ```rust
-/// `on` and `not_on` are the phrases written; `covers` is the status class ON covers: b'1' for AT
-/// END, b'2' for INVALID KEY (file_io.rs:51-64).
-pub struct FileOp { pub file: u16, pub verb: FileVerb, pub on: bool, pub not_on: bool, pub covers: u8 }
+/// SELECT and FD. `format` is how records are held when the DD does not say (`described_format`);
+/// `status` is FILE STATUS with the MOVE its two characters take (`set_status`).
+pub struct FileDesc {
+    pub name: SymId, pub assign: SymId, pub organization: Organization, pub access: Access,
+    pub optional: bool, pub format: rt::files::Format, pub status: Option<(PlaceId, MovePlan)>,
+    /// RECORD KEY, then each ALTERNATE RECORD KEY with WITH DUPLICATES, as spans of the record area.
+    pub keys: Option<IndexKeys>,
+    pub relative: Option<RelativeKey>, pub linage: Option<Linage>, pub carriage: Option<Carriage>,
+    pub sort: bool,
+}
+pub struct IndexKeys { pub prime: RecordSpan, pub alternates: Vec<(RecordSpan, bool)> }
+pub struct RecordSpan { pub offset: u32, pub len: u32 }
+/// Read as `value`, stored by `store` when a sequential READ or WRITE sets it; `digits` bounds the
+/// record numbers it holds (`relative_fits`).
+pub struct RelativeKey { pub place: PlaceId, pub value: IntExpr, pub store: StorePlan, pub digits: Option<u32> }
+/// Each value evaluated in this order whenever the page's geometry is taken, and LINAGE-COUNTER.
+pub struct Linage { pub lines: IntExpr, pub footing: Option<IntExpr>, pub top: Option<IntExpr>, pub bottom: Option<IntExpr>, pub counter: Option<(PlaceId, StorePlan)> }
+pub struct Carriage { pub machine: bool, pub reserved: bool }
+
+pub struct FileOp { pub file: u16, pub verb: FileVerb, pub phrase: Option<Phrase>, pub end_of_page: Option<Phrase> }
+/// The ON and NOT ON phrases written.
+pub struct Phrase { pub on: bool, pub not_on: bool }
 
 pub enum FileVerb {
     Open(OpenMode),
     Close,
-    /// `key` is 0 for the prime key, then each alternate (file_io.rs:111-118).
-    Read { next: bool, previous: bool, into: Option<(PlaceId, MovePlan)>, key: Option<u8> },
-    Write { record: PlaceId, from: Option<(Operand, MovePlan)>, advancing: Option<Advance> },
-    Rewrite { record: PlaceId, from: Option<(Operand, MovePlan)> },
+    /// `sequential`: the phrase is AT END and a held file reads in sequence; else INVALID KEY, and
+    /// `key` is the key of reference of an indexed file.
+    Read { sequential: bool, previous: bool, into: Option<(PlaceId, MovePlan)>, key: u8 },
+    /// `record` is located after FROM has moved into `FromMove.to`, the record as a receiving item.
+    Write { record: PlaceId, from: Option<FromMove>, advancing: Option<Advance> },
+    Rewrite { record: PlaceId, from: Option<FromMove> },
     Delete,
-    Start { key: Option<(StartRel, u8, PlaceId)> },
+    Start { rel: StartRel, key: StartKey },
 }
-
-/// WRITE's ADVANCING phrase; the library takes it with the count evaluated.
-pub enum Advance { Lines { before: bool, count: IntExpr }, Page { before: bool } }
+pub struct FromMove { pub from: Operand, pub to: PlaceId, pub plan: MovePlan }
+pub enum Advance { Lines { before: bool, count: IntExpr }, Page { before: bool }, Mnemonic { before: bool, space: Spacing } }
+pub enum Spacing { Lines(u64), Channel(u8), PageMode }
+pub enum StartRel { Equal, Greater, NotLess }
+pub enum StartKey { Prime, Named { key: u8, span: RecordSpan }, Relative(IntExpr), RelativeKey }
 ```
 
-A file's declaration is a `FileDesc`: its ASSIGN name, organization, access, OPTIONAL, record
-format, FILE STATUS and RELATIVE KEY places, and its keys as spans of the record area. `File`
-returns `Arm(0)` for no phrase, `Arm(1)` for ON and `Arm(2)` for NOT ON. `conclude` sets the status
-and chooses; a failing status with no phrase and no FILE STATUS abends `IO-xx` (file_io.rs:41-47).
-The walker finds the file by name (file_io.rs:27-29), works out key spans at OPEN
-(file_io.rs:91-107), finds which key a READ or START names (file_io.rs:111-118), and locates FILE
-STATUS on every status (file_io.rs:31-38); all are fixed at lowering.
+- **The op and its phrases.** With no phrase written the op returns `Next`. Otherwise it returns
+  `Arm(1)` for the ON phrase (AT END or INVALID KEY), `Arm(2)` for NOT ON, `Arm(3)` for
+  END-OF-PAGE, `Arm(4)` for NOT END-OF-PAGE, and `Arm(0)` when no phrase written runs, and a
+  `Select` of `FileOp::arms()` blocks follows: 3, or 5 with END-OF-PAGE. An arm whose phrase is not
+  written goes where `Arm(0)` goes. `conclude` sets FILE STATUS before the phrase runs, and a
+  failing status with no phrase to run takes the file's error path: a USE AFTER EXCEPTION/ERROR
+  procedure (§9.10), else `IO-xx` when the file has no FILE STATUS.
+- **One op per file.** OPEN and CLOSE name several files; the walker opens each in turn and stops at
+  the first abend, as a block of ops does.
+- **Which phrase READ takes** is fixed by the file: AT END for a sequential file, sequential access,
+  READ NEXT or PREVIOUS under dynamic access, and a line-sequential file, which is never held in
+  memory and so always reads through `read_stream`; INVALID KEY otherwise. The other phrase never
+  runs, and is not lowered. A random READ of a keyed file that is not open goes through
+  `read_stream` and takes AT END with status 47, which neither phrase covers, so the choice gives the
+  walker's result either way.
+- **WRITE's phrases.** A WRITE to a file open with a page (LINAGE, OUTPUT or EXTEND) runs END-OF-PAGE
+  or NOT END-OF-PAGE; to a held file, INVALID KEY or NOT INVALID KEY through `conclude`; to a
+  streamed file neither. Which applies is known only at run time, so the op carries both.
+- **Fixed at lowering:** the file by name; each key's span, from its place, which must be a static
+  item of the file's record area; which key READ KEY or START KEY names, a leading part for START;
+  START's relation, one other than =, > or NOT < being the walker's abend at the statement; the
+  mnemonic-name's movement (`printer::mnemonic_space`); the described format; the FILE STATUS and
+  INTO moves, which take alphanumeric bytes; the RELATIVE KEY's read and store; LINAGE's values
+  and LINAGE-COUNTER's place, a static item of the slab. Check refuses what the walker would abend on
+  here (no such file, a key outside the record, a mnemonic-name that is no channel, one on a LINAGE
+  file), and lowering refuses it too, by name.
+- **Run-time state:** the open file, its mode and position, the DD and its format, the page, the
+  status each call gives, which WRITE path applies, and the last file whose statement failed, which
+  SORT reads.
 
 ### 9.5 EXEC CICS
 
@@ -1228,18 +1284,88 @@ pub struct Method {
 ### 9.9 Intrinsic functions
 
 ```rust
-/// `side` is TRIM's LEADING or TRAILING.
-pub struct FunctionPlan { pub func: Func, pub args: Vec<ExprId>, pub side: Option<TrimSide>, pub refmod: Option<RefMod>, pub at: DebugId }
+/// Each argument evaluated as a comparison evaluates it; then `arity`'s abend, if set; then the
+/// function, which reads `integer` again: CHAR, INTEGER-OF-DATE, DATE-OF-INTEGER and RANDOM their
+/// first argument, NATIONAL-OF its second; last, on an alphanumeric result, `refmod`.
+pub struct FunctionPlan {
+    pub func: Func, pub args: Vec<Comparand>, pub integer: Option<IntExpr>,
+    pub side: Option<TrimSide>, pub refmod: Option<RefMod>, pub arity: Option<AbendId>, pub at: DebugId,
+}
 
-/// The functions Check admits (exec/src/lib.rs:32-35).
-pub enum Func {
-    Char, Ord, NationalOf, Length, UpperCase, LowerCase, Reverse, CurrentDate, Numval, NumvalC,
-    Trim, Mod, Rem, Integer, IntegerPart, Abs, Min, Max, IntegerOfDate, DateOfInteger,
+/// One row per function: variant, tag, name and argument counts. Adding a function is adding a row.
+functions! {
+    Char = 0, "CHAR", 1..=1;  Ord = 1, "ORD", 1..=1;  NationalOf = 2, "NATIONAL-OF", 1..=2;  …
+    Min = 16, "MIN", 1..=usize::MAX;  …  Random = 20, "RANDOM", 0..=1;
 }
 ```
 
-The walker matches the name as a string and checks the argument count on each call
-(machine.rs:1225-1233). A wrong count lowers to an `Abend` op; everything else is one call.
+- **The walker's order** (machine.rs `function`): every argument by `expr_value`, which is
+  `Comparand` (an operand read as its kind; an expression with its float test, dmax pass and mode);
+  then the argument count, abending IRONWORK "FUNCTION X takes 1..=1 arguments", or "needs
+  arguments" for MIN and MAX; then the function. CHAR, NATIONAL-OF's CCSID, INTEGER-OF-DATE,
+  DATE-OF-INTEGER and RANDOM's seed evaluate their argument a second time with `integer`, which is
+  observable (a subscript's locate, FUNCTION RANDOM advancing), so the plan keeps it. Reference
+  modification of the result is evaluated last, with `integer`, and checked against the result
+  whatever SSRANGE says, so `refmod.check` is false.
+- **A name Check admits but `Func` lacks** is refused, "a FUNCTION the LIR does not name".
+- **The result's category** decides the MOVE and comparison plans around the operand: bytes for
+  CHAR, TRIM, UPPER-CASE, LOWER-CASE, REVERSE and CURRENT-DATE; national for NATIONAL-OF; a float
+  for RANDOM, and for ABS, REM, MIN and MAX of a floating-point argument; an integer of 3, 9, 7 and 8
+  digits for ORD, LENGTH, INTEGER-OF-DATE and DATE-OF-INTEGER, of 30 digits (31 under
+  ARITH(EXTEND)) for INTEGER and INTEGER-PART of a floating-point argument; 31 digits with the
+  arguments' most decimal places for MOD, REM, INTEGER, INTEGER-PART and ABS; MIN and MAX the
+  winning argument's own value. Where the decimal places or digits depend on the text (NUMVAL,
+  NUMVAL-C) or on which argument wins, the result is a number of unknown scale, and moving or
+  comparing it as alphanumeric is refused, since the walker decides that by the value. MIN or MAX
+  of arguments of different categories is refused.
+- **The float test** (`uses_float`) counts FUNCTION RANDOM as floating-point without locating
+  anything, and ABS, REM, MIN and MAX as floating-point when any argument is; it tests every one of
+  their arguments, locating their operands, where it stops at the first floating-point operand
+  elsewhere. The `prepass` and `probe` lists keep those locates.
+
+### 9.10 DECLARATIVES
+
+**Not lowered yet.** How a declarative gives control back is the PERFORM model's: on main at
+45bf697 an out-of-line PERFORM arms a return point at the end of its range
+(machine/perform.rs, assumption C99 `PERFORM_RETURN_POINTS`), `run_error_declarative` and
+`run_debugging` run their section as `run_paragraphs`, and a section that passes an active
+PERFORM's return point returns to that PERFORM (`Flow::Return`, `Flow::Resume`), which the statement
+that ran it passes on. The frames of §8.4 cannot express that, so a declarative that can run is
+refused until the flow rework, by one of two names:
+
+- **"DECLARATIVES: a file statement a USE AFTER EXCEPTION/ERROR procedure serves"**, on an OPEN whose
+  file or open mode has a procedure, or any other file statement whose file has one or while any
+  open mode has one (`error_declarative`). Only file statements and SORT run these procedures.
+- **"DECLARATIVES: USE FOR DEBUGGING under the DEBUG option"**, when `Table.triggers` is not empty.
+
+Declaratives that cannot run lower as the paragraphs before `procedure_start`: debugging sections
+without the DEBUG option, and USE AFTER EXCEPTION/ERROR procedures no file statement can reach. They
+run only when a PERFORM or GO TO names them, as ordinary paragraphs.
+
+What the flow rework needs to reproduce, from the walker at 45bf697:
+
+- **An error procedure** runs inside the failing statement, after FILE STATUS is set: the depth
+  is checked and raised (`nest`, the statement's position), the section runs with DEBUG-CONTENTS
+  arrival `USE PROCEDURE`, and the depth is lowered. Completing it goes back into the statement,
+  which carries on (`conclude` returns, OPEN stops, WRITE skips the page update). Any other ending
+  (GO TO out, STOP RUN, GOBACK, a return to an active PERFORM, a resume after one left by GO TO)
+  abandons the statement, and the statement's own `exec` hands that flow on. The file's own
+  procedure comes before its open mode's; the mode is the one it is open in, or being opened in.
+- **A debugging section** runs, unless one is running, at control reaching a paragraph it names
+  (`run_region`, before the paragraph's ALTERed GO TO, after `enter_segment`, not when a CALL
+  enters by ENTRY past the paragraph's start), and after each ALTER of one, pair by pair once every
+  pair is set, except ALTERs in the declaratives under ALL PROCEDURES. It fills DEBUG-ITEM (at the
+  slab offset of `Table.debug_item`) with spaces, then DEBUG-LINE (the paragraph's own line when the
+  run started there; the ALTER's; otherwise the line of the statement last started, which every
+  statement, each out-of-line PERFORM iteration and each section header sets), DEBUG-NAME and
+  DEBUG-CONTENTS by how control came: START PROGRAM, FALL THROUGH, PERFORM LOOP, USE PROCEDURE, a
+  SORT procedure's name, blank after a GO TO, or the ALTER's TO PROCEED TO name. The line register
+  is saved and restored around the section. An ending other than completing leaves the region the
+  paragraph was reached in, as `run_region` breaks with it.
+- **The representation** these point to: a range kind for each; the file's own procedure and one
+  per open mode in the program's file table; an op per statement that sets the line register, only
+  under the DEBUG option; an op at the entry of each paragraph a debugging section names, and one
+  after an ALTER; and a result of the procedure that carries the return-point model's transfers.
 
 ## 10. The debug table
 

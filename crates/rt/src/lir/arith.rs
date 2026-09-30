@@ -63,6 +63,16 @@ pub struct StepPlan {
     pub store: StorePlan,
 }
 
+/// SET UP BY or DOWN BY on one receiver, by what reading it gives: an address moved by the step,
+/// a number the step is added to (no ROUNDED, no size error), or a value the walker refuses once
+/// it has read it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UpDown {
+    Pointer,
+    Number(StepPlan),
+    Refused(AbendId),
+}
+
 codec_struct!(ArithPlan { dmax, arith, prepass, steps, remainder, handled });
 codec_struct!(ArithStep { target, expr, mode, store, rounded, probe });
 codec_enum!(Mode { Fixed = 0, Float(precision) = 1 });
@@ -77,3 +87,4 @@ codec_enum!(StorePlan {
 });
 codec_struct!(RemainderPlan { target, dividend, divisor, quotient_scale, store });
 codec_struct!(StepPlan { dmax, store });
+codec_enum!(UpDown { Pointer = 0, Number(plan) = 1, Refused(abend) = 2 });

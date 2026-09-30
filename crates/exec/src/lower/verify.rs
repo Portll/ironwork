@@ -2,7 +2,9 @@
 //! the control-flow graph is closed, every op has its debug entry, and places carry SSRANGE checks
 //! exactly when the program has SSRANGE.
 
-use rt::lir::{CallArg, CallTarget, Chars, Comparand, Cond, DisplayItem, Expr, IntExpr, MethodName, Op, Operand, Place, Program, Receiver, Terminator};
+use rt::lir::{
+    Advance, CallArg, CallTarget, Chars, Comparand, Cond, DisplayItem, Expr, FileVerb, IntExpr, MethodName, Op, Operand, Place, Program, Receiver, StartKey, Terminator, UpDown,
+};
 
 /// A class definition's data and methods are programs of their own, each checked as one.
 pub fn verify(p: &Program) -> Result<(), String> {
@@ -126,6 +128,62 @@ fn verify_program(p: &Program) -> Result<(), String> {
         }
     }
     let symbol = |id: u32| within("symbol", id, p.symbols.len());
+    for f in &p.plans.function {
+        f.args.iter().try_for_each(comparand)?;
+        f.integer.as_ref().map_or(Ok(()), int)?;
+        if let Some(r) = &f.refmod {
+            int(&r.start)?;
+            r.length.as_ref().map_or(Ok(()), int)?;
+            if r.check {
+                return Err("a FUNCTION's reference modification with an SSRANGE check".into());
+            }
+        }
+        f.arity.map_or(Ok(()), abend)?;
+        within("debug entry", f.at, p.debug.positions.len())?;
+    }
+    for f in &p.services.files {
+        symbol(f.name)?;
+        symbol(f.assign)?;
+        f.status.map_or(Ok(()), |(q, _)| place(q))?;
+        if let Some(r) = &f.relative {
+            place(r.place)?;
+            int(&r.value)?;
+        }
+        if let Some(l) = &f.linage {
+            int(&l.lines)?;
+            [&l.footing, &l.top, &l.bottom].into_iter().flatten().try_for_each(int)?;
+            l.counter.map_or(Ok(()), |(q, _)| place(q))?;
+        }
+    }
+    for op in &p.services.file_ops {
+        let Some(f) = p.services.files.get(op.file as usize) else { return Err(format!("file {} of {}", op.file, p.services.files.len())) };
+        let keys = f.keys.as_ref().map_or(0, |k| k.alternates.len() + 1);
+        match &op.verb {
+            FileVerb::Open(_) | FileVerb::Close | FileVerb::Delete => {}
+            FileVerb::Read { into, key, .. } => {
+                into.map_or(Ok(()), |(q, _)| place(q))?;
+                if *key != 0 && usize::from(*key) >= keys {
+                    return Err(format!("key {key} of a file with {keys}"));
+                }
+            }
+            FileVerb::Write { record, from, advancing } => {
+                place(*record)?;
+                from.map_or(Ok(()), |m| operand(&m.from).and_then(|()| place(m.to)))?;
+                if let Some(Advance::Lines { count, .. }) = advancing {
+                    int(count)?;
+                }
+            }
+            FileVerb::Rewrite { record, from } => {
+                place(*record)?;
+                from.map_or(Ok(()), |m| operand(&m.from).and_then(|()| place(m.to)))?;
+            }
+            FileVerb::Start { key, .. } => match key {
+                StartKey::Named { key, .. } if usize::from(*key) >= keys => return Err(format!("key {key} of a file with {keys}")),
+                StartKey::Relative(n) => int(n)?,
+                _ => {}
+            },
+        }
+    }
     let chars = |c: &Chars| match c {
         Chars::Literal(_) => Ok(()),
         Chars::Place(q) => place(*q),
@@ -201,12 +259,15 @@ fn verify_program(p: &Program) -> Result<(), String> {
             return Err(format!("block {b}: {} debug entries for {} ops and a terminator", ids.len(), blk.ops.len()));
         }
         ids.iter().try_for_each(|&id| within("debug entry", id, p.debug.positions.len()))?;
-        let armed = |op: &Op| match op {
-            Op::Arith(a) => p.plans.arith.get(*a as usize).is_some_and(|plan| plan.handled),
-            Op::Call(c) => p.services.calls.get(*c as usize).is_some_and(|plan| plan.on_exception || plan.not_on_exception),
-            Op::Invoke(i) => p.services.invokes.get(*i as usize).is_some_and(|plan| plan.on_exception || plan.not_on_exception),
-            _ => false,
+        // The number of blocks the Select after an op has, 0 when the op returns no arm.
+        let arms = |op: &Op| match op {
+            Op::Arith(a) if p.plans.arith.get(*a as usize).is_some_and(|plan| plan.handled) => 2,
+            Op::Call(c) if p.services.calls.get(*c as usize).is_some_and(|plan| plan.on_exception || plan.not_on_exception) => 2,
+            Op::Invoke(i) if p.services.invokes.get(*i as usize).is_some_and(|plan| plan.on_exception || plan.not_on_exception) => 2,
+            Op::File(f) => p.services.file_ops.get(*f as usize).map_or(0, |op| op.arms()),
+            _ => 0,
         };
+        let armed = |op: &Op| arms(op) > 0;
         let last = blk.ops.len().saturating_sub(1);
         if blk.ops.iter().enumerate().any(|(k, op)| armed(op) && (k != last || !matches!(blk.end, Terminator::Select(_)))) {
             return Err(format!("block {b}: an op that returns an arm is not followed by its Select"));
@@ -236,6 +297,20 @@ fn verify_program(p: &Program) -> Result<(), String> {
                     within("paragraph", *para, p.paragraphs.len())?;
                     within("paragraph", *to, p.paragraphs.len())?;
                 }
+                Op::File(f) => within("file statement", *f, p.services.file_ops.len())?,
+                Op::SetAddress { records, address } => {
+                    records.iter().try_for_each(|&r| within("LINKAGE record", u32::from(r), p.storage.linkage.len()))?;
+                    operand(address)?;
+                }
+                Op::SetUpDown { by, targets, .. } => {
+                    int(by)?;
+                    for (q, how) in targets {
+                        place(*q)?;
+                        if let UpDown::Refused(a) = how {
+                            abend(*a)?;
+                        }
+                    }
+                }
                 Op::Nest | Op::Unnest(_) | Op::DecTemp(_) | Op::EnterSegment(_) | Op::SetSegment(_) => {}
                 other => return Err(format!("block {b}: {other:?} is outside this slice")),
             }
@@ -247,9 +322,9 @@ fn verify_program(p: &Program) -> Result<(), String> {
                 block(*then)?;
                 block(*otherwise)?;
             }
-            Terminator::Select(arms) => {
-                arms.iter().try_for_each(|&t| block(t))?;
-                if !blk.ops.last().is_some_and(armed) || arms.len() != 2 {
+            Terminator::Select(targets) => {
+                targets.iter().try_for_each(|&t| block(t))?;
+                if blk.ops.last().map_or(0, arms) != targets.len() {
                     return Err(format!("block {b}: a Select that does not follow an op with its phrases"));
                 }
             }

@@ -41,6 +41,9 @@ impl Lower<'_> {
     /// `item`.
     pub(super) fn move_plan(&mut self, from: &Side, to: Kind, item: Option<usize>) -> R<MovePlan> {
         let refused = |lower: &mut Self, message: &str| lower.ironwork(message).map(MovePlan::Refused);
+        if from.value == Value::Num(None) && matches!(to, Kind::Group | Kind::Alnum { .. } | Kind::AlnumEdited { .. }) {
+            return unsupported("a FUNCTION result whose digits are known only when it runs, moved to an alphanumeric item", syntax::Pos::default());
+        }
         Ok(match to {
             Kind::Group | Kind::Alnum { .. } => match image(from) {
                 Ok(image) => MovePlan::Alnum { image, justified: matches!(to, Kind::Alnum { justified: true }) },
@@ -210,8 +213,7 @@ impl Lower<'_> {
                     let text = self.display_text(lit, pos)?;
                     DisplayItem::Text(self.sym(&text))
                 }
-                Operand::LengthOf(_) | Operand::AddressOf(_) => DisplayItem::Value(self.operand(op, pos)?.operand),
-                Operand::Function(f) => return unsupported("FUNCTION", f.pos),
+                Operand::LengthOf(_) | Operand::AddressOf(_) | Operand::Function(_) => DisplayItem::Value(self.operand(op, pos)?.operand),
             });
         }
         push(&mut self.plans.display, lir::DisplayPlan { items: shown, no_advancing }, "DISPLAY plans")

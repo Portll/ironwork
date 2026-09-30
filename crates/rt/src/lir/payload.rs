@@ -3,7 +3,7 @@
 //! those of `text`, `call` and `sql` are generic over the handles they name (semantics-library.md §9,
 //! C6): the LIR's ids by default, the walker's own references in the interpreter.
 
-use super::{AbendId, Comparand, Compare, Count, DebugId, ExprId, Operand, PlaceId, RefMod, StorePlan, SymId};
+use super::{AbendId, Comparand, Compare, Count, DebugId, IntExpr, Operand, PlaceId, RefMod, StorePlan, SymId};
 use crate::vocab::Figurative;
 use crate::{codec_enum, codec_struct};
 use zarch::hfp::Precision;
@@ -116,37 +116,83 @@ pub struct SearchKey<V = Comparand> {
     pub how: Compare,
 }
 
+/// FUNCTION, as the walker evaluates it: each argument in turn, as a comparison evaluates an
+/// operand or expression; then, when `arity` is set, its abend (a wrong number of arguments);
+/// then the function, which for CHAR, INTEGER-OF-DATE, DATE-OF-INTEGER and RANDOM evaluates its
+/// first argument again as `integer`, and for NATIONAL-OF with two arguments its second; last,
+/// on an alphanumeric result, `refmod`'s start and length. `refmod.check` is always false: the
+/// walker checks a function's reference modification against its result whatever SSRANGE says.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FunctionPlan {
     pub func: Func,
-    pub args: Vec<ExprId>,
+    pub args: Vec<Comparand>,
+    pub integer: Option<IntExpr>,
+    /// TRIM's LEADING or TRAILING.
     pub side: Option<TrimSide>,
     pub refmod: Option<RefMod>,
+    pub arity: Option<AbendId>,
     pub at: DebugId,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Func {
-    Char,
-    Ord,
-    NationalOf,
-    Length,
-    UpperCase,
-    LowerCase,
-    Reverse,
-    CurrentDate,
-    Numval,
-    NumvalC,
-    Trim,
-    Mod,
-    Rem,
-    Integer,
-    IntegerPart,
-    Abs,
-    Min,
-    Max,
-    IntegerOfDate,
-    DateOfInteger,
+/// One row per intrinsic function: its variant, its tag in a load module, its name, and the
+/// fewest and most arguments it takes. Adding a function is adding its row.
+macro_rules! functions {
+    ($($variant:ident = $tag:literal, $name:literal, $min:literal ..= $max:expr;)*) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum Func {
+            $($variant,)*
+        }
+
+        impl Func {
+            pub const ALL: &'static [Func] = &[$(Func::$variant,)*];
+
+            pub fn name(self) -> &'static str {
+                match self {
+                    $(Func::$variant => $name,)*
+                }
+            }
+
+            pub fn named(name: &str) -> Option<Func> {
+                match name {
+                    $($name => Some(Func::$variant),)*
+                    _ => None,
+                }
+            }
+
+            /// The argument counts the function takes.
+            pub fn arity(self) -> ::core::ops::RangeInclusive<usize> {
+                match self {
+                    $(Func::$variant => $min..=$max,)*
+                }
+            }
+        }
+
+        codec_enum!(Func { $($variant = $tag,)* });
+    };
+}
+
+functions! {
+    Char = 0, "CHAR", 1..=1;
+    Ord = 1, "ORD", 1..=1;
+    NationalOf = 2, "NATIONAL-OF", 1..=2;
+    Length = 3, "LENGTH", 1..=1;
+    UpperCase = 4, "UPPER-CASE", 1..=1;
+    LowerCase = 5, "LOWER-CASE", 1..=1;
+    Reverse = 6, "REVERSE", 1..=1;
+    CurrentDate = 7, "CURRENT-DATE", 0..=0;
+    Numval = 8, "NUMVAL", 1..=2;
+    NumvalC = 9, "NUMVAL-C", 1..=2;
+    Trim = 10, "TRIM", 1..=1;
+    Mod = 11, "MOD", 2..=2;
+    Rem = 12, "REM", 2..=2;
+    Integer = 13, "INTEGER", 1..=1;
+    IntegerPart = 14, "INTEGER-PART", 1..=1;
+    Abs = 15, "ABS", 1..=1;
+    Min = 16, "MIN", 1..=usize::MAX;
+    Max = 17, "MAX", 1..=usize::MAX;
+    IntegerOfDate = 18, "INTEGER-OF-DATE", 1..=1;
+    DateOfInteger = 19, "DATE-OF-INTEGER", 1..=1;
+    Random = 20, "RANDOM", 0..=1;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -221,29 +267,7 @@ codec_enum!(DisplayItem {
 });
 codec_struct!(SearchAllPlan { index, store, count, keys });
 codec_struct!(SearchKey { ascending, key, value, how });
-codec_struct!(FunctionPlan { func, args, side, refmod, at });
-codec_enum!(Func {
-    Char = 0,
-    Ord = 1,
-    NationalOf = 2,
-    Length = 3,
-    UpperCase = 4,
-    LowerCase = 5,
-    Reverse = 6,
-    CurrentDate = 7,
-    Numval = 8,
-    NumvalC = 9,
-    Trim = 10,
-    Mod = 11,
-    Rem = 12,
-    Integer = 13,
-    IntegerPart = 14,
-    Abs = 15,
-    Min = 16,
-    Max = 17,
-    IntegerOfDate = 18,
-    DateOfInteger = 19,
-});
+codec_struct!(FunctionPlan { func, args, integer, side, refmod, arity, at });
 codec_enum!(TrimSide { Leading = 0, Trailing = 1 });
 codec_struct!(InvokePlan { receiver, method, args, returning, on_exception, not_on_exception });
 codec_enum!(Receiver { SelfRef = 0, Super = 1, Class { name, external } = 2, Object(place) = 3 });
@@ -263,8 +287,6 @@ macro_rules! placeholder {
 }
 
 placeholder! {
-    FileOp: "A file verb with its phrases, §9.4; waits for `OpenMode`, `StartRel` and `FileDesc`.",
-    FileDesc: "A file's declaration, §9.4; not defined yet.",
     SortPlan: "SORT or MERGE, §9.6; waits for `SortKey` and `Fastsrt`.",
     ReleasePlan: "RELEASE, §9.6; not defined yet.",
     ReturnPlan: "RETURN, §9.6; not defined yet.",

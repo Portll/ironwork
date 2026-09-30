@@ -7,13 +7,14 @@ mod common;
 
 use common::payroll;
 use ironwork_rt::abend::{AbendCode, Ending, FileStatus, Signal};
+use ironwork_rt::files::Format;
 use ironwork_rt::lir::*;
 use ironwork_rt::module::codec::{Decode, Encode, Writer, decode_all};
 use ironwork_rt::module::{ModuleError, StringTable};
 use ironwork_rt::picture::Sym;
 use ironwork_rt::sql::{HostType, fingerprint};
 use ironwork_rt::storage::Kind;
-use ironwork_rt::vocab::{AcceptFrom, BinOp, Figurative, InspectMode, Pos, RelOp, SignClause, SignPosition};
+use ironwork_rt::vocab::{AcceptFrom, BinOp, Figurative, InspectMode, OpenMode, Pos, RelOp, SignClause, SignPosition};
 use numeric::precision::{Fixed, Places};
 use numeric::options::{Compile, FastsrtAdvPrint, Stop, Warnings};
 use numeric::{Arith, Numproc, Options, SortKeys, Trunc, TruncCheck};
@@ -284,12 +285,20 @@ fn program_shape_round_trips() {
         string: vec![StringPlan { into: 0, pointer: None, sources: vec![] }],
         unstring: vec![UnstringPlan { source: 0, pointer: None, delimiters: vec![], into: vec![], tallying: None }],
         search_all: vec![SearchAllPlan { index: 0, store: StorePlan::Index, count: Count::Fixed(5), keys: vec![] }],
-        function: vec![FunctionPlan { func: Func::Trim, args: vec![0], side: Some(TrimSide::Leading), refmod: None, at: 1 }],
+        function: vec![FunctionPlan {
+            func: Func::Trim,
+            args: vec![Comparand::Operand(Operand::Load(0))],
+            integer: None,
+            side: Some(TrimSide::Leading),
+            refmod: None,
+            arity: None,
+            at: 1,
+        }],
     };
     round_trip(&[Plans::default(), plans]);
     let services = Services {
-        file_ops: vec![FileOp::Placeholder],
-        files: vec![FileDesc::Placeholder],
+        file_ops: vec![FileOp { file: 0, verb: FileVerb::Delete, phrase: Some(Phrase { on: true, not_on: false }), end_of_page: None }],
+        files: vec![master()],
         calls: vec![CallPlan {
             target: CallTarget::Named { name: 1, le: None },
             args: vec![],
@@ -478,8 +487,8 @@ fn control_flow_round_trips_with_every_tag() {
         Op::Move { from: Operand::Const(0), to: 1, plan: move_plan },
         Op::Initialize { target: 1, plan: 0 },
         Op::Arith(0),
-        Op::SetAddress { record: 1, address: Operand::AddressOf(2) },
-        Op::SetUpDown { target: 1, by: IntExpr::Const(-2), down: true, plan: StepPlan { dmax: 0, store: StorePlan::Index } },
+        Op::SetAddress { records: vec![1, 0], address: Operand::AddressOf(2) },
+        Op::SetUpDown { by: IntExpr::Const(-2), down: true, targets: vec![(1, UpDown::Number(StepPlan { dmax: 0, store: StorePlan::Index })), (2, UpDown::Pointer)] },
         Op::Step { var: 1, by: 0, plan: StepPlan { dmax: 0, store: PACKED }, prepass: vec![2, 3] },
         Op::SetInt { target: 1, value: IntExpr::Const(1) },
         Op::Inspect(0),
@@ -565,31 +574,19 @@ fn statement_payloads_round_trip_with_every_tag() {
     ];
     every_variant(&numeric, 7);
     every_variant(&[FloatFrom::Float, FloatFrom::Fixed, FloatFrom::Zero], 3);
-    let funcs = [
-        Func::Char,
-        Func::Ord,
-        Func::NationalOf,
-        Func::Length,
-        Func::UpperCase,
-        Func::LowerCase,
-        Func::Reverse,
-        Func::CurrentDate,
-        Func::Numval,
-        Func::NumvalC,
-        Func::Trim,
-        Func::Mod,
-        Func::Rem,
-        Func::Integer,
-        Func::IntegerPart,
-        Func::Abs,
-        Func::Min,
-        Func::Max,
-        Func::IntegerOfDate,
-        Func::DateOfInteger,
-    ];
-    every_variant(&funcs, 20);
+    every_variant(Func::ALL, 21);
+    for &func in Func::ALL {
+        assert_eq!(Func::named(func.name()), Some(func));
+    }
+    assert_eq!((Func::named("NUMVAL-C"), Func::named("NUMVALC")), (Some(Func::NumvalC), None));
+    assert_eq!((Func::Random.arity(), Func::Max.arity().contains(&40)), (0..=1, true));
     every_variant(&[TrimSide::Leading, TrimSide::Trailing], 2);
-    round_trip(&[FunctionPlan { func: Func::Max, args: vec![0, 1, 2], side: None, refmod: Some(REFMOD), at: 5 }]);
+    let args = vec![Comparand::Operand(Operand::Load(0)), FLOAT_EXPR, Comparand::Operand(Operand::Function(1))];
+    round_trip(&[
+        FunctionPlan { func: Func::Max, args, integer: None, side: None, refmod: Some(REFMOD), arity: None, at: 5 },
+        FunctionPlan { func: Func::Char, args: vec![], integer: Some(IntExpr::Item(2)), side: None, refmod: None, arity: Some(3), at: 6 },
+    ]);
+    every_variant(&[UpDown::Pointer, UpDown::Number(TALLY), UpDown::Refused(2)], 3);
     every_variant(&[Receiver::SelfRef, Receiver::Super, Receiver::Class { name: 1, external: 7 }, Receiver::Object(2)], 4);
     every_variant(&[MethodName::New, MethodName::Named(3), MethodName::Dynamic(4)], 3);
     let invoke = InvokePlan {
@@ -601,13 +598,79 @@ fn statement_payloads_round_trip_with_every_tag() {
         not_on_exception: false,
     };
     round_trip(&[invoke]);
-    round_trip(&[FileOp::Placeholder]);
-    round_trip(&[FileDesc::Placeholder]);
     round_trip(&[SortPlan::Placeholder]);
     round_trip(&[ReleasePlan::Placeholder]);
     round_trip(&[ReturnPlan::Placeholder]);
     round_trip(&[ReportOp::Placeholder]);
     round_trip(&[CicsCommand::Placeholder]);
+}
+
+/// An indexed file with FILE STATUS, an alternate key, LINAGE and a print file's carriage.
+fn master() -> FileDesc {
+    let span = RecordSpan { offset: 0, len: 6 };
+    FileDesc {
+        name: 1,
+        assign: 2,
+        organization: Organization::Indexed,
+        access: Access::Dynamic,
+        optional: true,
+        format: Format::Variable,
+        status: Some((3, ALNUM)),
+        keys: Some(IndexKeys { prime: span, alternates: vec![(RecordSpan { offset: 6, len: 20 }, true)] }),
+        relative: None,
+        linage: Some(Linage { lines: IntExpr::Const(60), footing: Some(IntExpr::Item(4)), top: None, bottom: Some(IntExpr::Const(3)), counter: Some((5, PACKED)) }),
+        carriage: Some(Carriage { machine: true, reserved: false }),
+        sort: false,
+    }
+}
+
+#[test]
+fn file_declarations_and_statements_round_trip_with_every_tag() {
+    let relative = RelativeKey { place: 7, value: IntExpr::Item(7), store: PACKED, digits: Some(5) };
+    let numbered = FileDesc { organization: Organization::Relative, keys: None, relative: Some(relative), linage: None, carriage: None, ..master() };
+    round_trip(&[master(), numbered]);
+    every_variant(&[Organization::Sequential, Organization::LineSequential, Organization::Indexed, Organization::Relative], 4);
+    every_variant(&[Access::Sequential, Access::Random, Access::Dynamic], 3);
+    every_variant(&[Format::Fixed, Format::Variable, Format::Text], 3);
+    every_variant(&[OpenMode::Input, OpenMode::Output, OpenMode::Extend, OpenMode::InputOutput], 4);
+    let from = FromMove { from: Operand::Const(0), to: 8, plan: ALNUM };
+    let verbs = [
+        FileVerb::Open(OpenMode::Extend),
+        FileVerb::Close,
+        FileVerb::Read { sequential: false, previous: true, into: Some((9, ALNUM)), key: 1 },
+        FileVerb::Write { record: 8, from: Some(from), advancing: Some(Advance::Lines { before: true, count: IntExpr::Item(4) }) },
+        FileVerb::Rewrite { record: 8, from: None },
+        FileVerb::Delete,
+        FileVerb::Start { rel: StartRel::NotLess, key: StartKey::Named { key: 1, span: RecordSpan { offset: 6, len: 4 } } },
+    ];
+    every_variant(&verbs, 7);
+    let advances = [
+        Advance::Lines { before: false, count: IntExpr::Const(2) },
+        Advance::Page { before: true },
+        Advance::Mnemonic { before: false, space: Spacing::Channel(12) },
+    ];
+    every_variant(&advances, 3);
+    every_variant(&[Spacing::Lines(0), Spacing::Channel(1), Spacing::PageMode], 3);
+    every_variant(&[StartRel::Equal, StartRel::Greater, StartRel::NotLess], 3);
+    let keys = [StartKey::Prime, StartKey::Named { key: 0, span: RecordSpan { offset: 0, len: 6 } }, StartKey::Relative(IntExpr::Item(7)), StartKey::RelativeKey];
+    every_variant(&keys, 4);
+    let phrase = Phrase { on: true, not_on: true };
+    let ops = [
+        FileOp { file: 0, verb: FileVerb::Close, phrase: None, end_of_page: None },
+        FileOp { file: 1, verb: verbs[2].clone(), phrase: Some(phrase), end_of_page: None },
+        FileOp { file: 0, verb: verbs[3].clone(), phrase: None, end_of_page: Some(Phrase { on: false, not_on: true }) },
+    ];
+    round_trip(&ops);
+    assert_eq!(ops.iter().map(FileOp::arms).collect::<Vec<_>>(), [0, 3, 5]);
+}
+
+#[test]
+fn keys_on_a_file_that_is_not_indexed_are_malformed() {
+    let reason = "keys on a file that is not indexed, or an indexed file without them".to_owned();
+    for file in [FileDesc { organization: Organization::Sequential, ..master() }, FileDesc { keys: None, ..master() }] {
+        let (bytes, strings) = encoded(&file);
+        assert_eq!(refused::<FileDesc>(&bytes, &strings), (0, reason.clone()));
+    }
 }
 
 #[test]

@@ -67,18 +67,6 @@ fn whole(f: &Fixed) -> Option<i64> {
     Some(if f.negative { -m } else { m })
 }
 
-/// Every operand of an expression in the order the walker evaluates them.
-fn leaves<'e>(e: &'e Expr, out: &mut Vec<&'e Operand>) {
-    match e {
-        Expr::Operand(op) => out.push(op),
-        Expr::Neg(inner) => leaves(inner, out),
-        Expr::Bin(a, _, b) => {
-            leaves(a, out);
-            leaves(b, out);
-        }
-    }
-}
-
 /// The references `Machine::dmax` locates: every operand but divisors and exponents.
 pub(super) fn dmax_refs<'e>(e: &'e Expr, out: &mut Vec<&'e Ref>) {
     match e {
@@ -276,38 +264,45 @@ impl Lower<'_> {
         })
     }
 
-    /// The walker's `uses_float`: a floating-point item among the operands.
+    /// The walker's `uses_float`: a floating-point item among the operands, FUNCTION RANDOM, or ABS,
+    /// REM, MIN or MAX of an argument that is one.
     pub(super) fn uses_float(&mut self, e: &Expr) -> R<bool> {
-        let mut ops = Vec::new();
-        leaves(e, &mut ops);
-        for op in ops {
-            if let Operand::Ref(r) = op {
-                let p = self.place(r, false)?;
-                if matches!(self.kind_of(p), Kind::Float(_)) {
-                    return Ok(true);
-                }
-            }
-        }
-        Ok(false)
+        self.probe(e, &mut Vec::new())
     }
 
-    /// The places the walker's float test locates, in order, up to the first floating-point one.
+    /// The places the walker's float test locates, in its order, static ones left out.
     pub(super) fn float_probe(&mut self, e: &Expr) -> R<Vec<PlaceId>> {
-        let mut ops = Vec::new();
-        leaves(e, &mut ops);
-        let mut probe = Vec::new();
-        for op in ops {
-            if let Operand::Ref(r) = op {
+        let mut places = Vec::new();
+        self.probe(e, &mut places)?;
+        Ok(places)
+    }
+
+    /// `uses_float`: each operand is located left to right until a floating-point one, except
+    /// that ABS, REM, MIN and MAX test every argument.
+    fn probe(&mut self, e: &Expr, located: &mut Vec<PlaceId>) -> R<bool> {
+        Ok(match e {
+            Expr::Operand(Operand::Ref(r)) => {
                 let p = self.place(r, false)?;
                 if !self.is_static(p) {
-                    probe.push(p);
+                    located.push(p);
                 }
-                if matches!(self.kind_of(p), Kind::Float(_)) {
-                    break;
-                }
+                matches!(self.kind_of(p), Kind::Float(_))
             }
-        }
-        Ok(probe)
+            Expr::Operand(Operand::Function(f)) => match f.name.as_str() {
+                "RANDOM" => true,
+                "ABS" | "REM" | "MIN" | "MAX" => {
+                    let mut any = false;
+                    for a in &f.args {
+                        any |= self.probe(a, located)?;
+                    }
+                    any
+                }
+                _ => false,
+            },
+            Expr::Operand(_) => false,
+            Expr::Neg(inner) => self.probe(inner, located)?,
+            Expr::Bin(a, _, b) => self.probe(a, located)? || self.probe(b, located)?,
+        })
     }
 
     pub(super) fn expr(&mut self, e: &Expr, pos: Pos) -> R<ExprId> {
@@ -343,7 +338,10 @@ impl Lower<'_> {
                 let p = self.place(r, false)?;
                 Ok(Lowered { operand: lir::Operand::AddressOf(p), side: Side { value: Value::Address, src: None, digits: 0 } })
             }
-            Operand::Function(f) => unsupported("FUNCTION", f.pos),
+            Operand::Function(f) => {
+                let (id, side) = self.function(f)?;
+                Ok(Lowered { operand: lir::Operand::Function(id), side })
+            }
         }
     }
 

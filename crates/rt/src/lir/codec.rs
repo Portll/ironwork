@@ -1,12 +1,13 @@
 //! Codecs for the types the LIR borrows from `rt`, `numeric` and `zarch`, with load-module.md's tags.
 
 use crate::abend::{AbendCode, Ending, FileStatus, Signal};
+use crate::files::Format;
 use crate::module::ModuleError;
 use crate::module::codec::{Decode, Encode, Reader, Writer};
 use crate::picture::Sym;
 use crate::sql::HostType;
 use crate::storage::Kind;
-use crate::vocab::{AcceptFrom, BinOp, Figurative, InspectMode, RelOp, SignClause, SignPosition};
+use crate::vocab::{AcceptFrom, BinOp, Figurative, InspectMode, OpenMode, RelOp, SignClause, SignPosition};
 use crate::{codec_enum, codec_struct};
 use numeric::precision::{Fixed, Places};
 use numeric::options::{Compile, FastsrtAdvPrint, Stop, Warnings};
@@ -44,6 +45,8 @@ codec_enum!(AcceptFrom {
     Time = 4,
 });
 codec_enum!(InspectMode { Characters = 0, All = 1, Leading = 2, First = 3 });
+codec_enum!(OpenMode { Input = 0, Output = 1, Extend = 2, InputOutput = 3 });
+codec_enum!(Format { Fixed = 0, Variable = 1, Text = 2 });
 codec_enum!(HostType {
     SmallInt { signed } = 0,
     Integer { signed } = 1,

@@ -3,15 +3,19 @@
 //!
 //! Lowered so far: storage, places, expressions and conditions, the arithmetic verbs, MOVE, IF,
 //! EVALUATE, DISPLAY, INITIALIZE, PERFORM, GO TO, GO TO DEPENDING ON, ALTER, EXIT, STOP RUN, GOBACK,
-//! CALL, CANCEL, ENTRY, INVOKE, independent segments and class definitions. Anything else is
+//! CALL, CANCEL, ENTRY, INVOKE, SET, the file statements, intrinsic functions, independent
+//! segments and class definitions, and DECLARATIVES that never run. Anything else is
 //! [`LowerError::Unsupported`], naming the construct.
 
 mod call;
 mod class;
 mod cond;
 mod data;
+mod file;
 mod flow;
+mod function;
 mod plans;
+mod set;
 mod verify;
 
 #[cfg(test)]
@@ -93,6 +97,7 @@ pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
     let sources = compiled.program.sources.iter().map(|s| l.sym(s)).collect();
     let storage = l.storage()?;
     let items = l.items()?;
+    l.services.files = l.files()?;
     let paragraphs = l.procedure()?;
     l.services.entries = l.entry_points()?;
     l.services.class = l.class_definition()?;
@@ -211,11 +216,15 @@ impl<'c> Lower<'c> {
         if let Some(report) = program.report_writer.reports.first() {
             return unsupported("Report Writer", report.pos);
         }
+        if let Some(u) = program.report_writer.uses.first() {
+            return unsupported("Report Writer", u.pos);
+        }
         if let Some(block) = program.exec_declarations.first() {
             return unsupported("EXEC SQL", block.pos);
         }
-        if let Some(pos) = program.declaratives.errors.first().map(|u| u.pos).or_else(|| program.declaratives.debugging.first().map(|u| u.pos)) {
-            return unsupported("DECLARATIVES", pos);
+        // How a declarative returns control depends on the PERFORM model (lir.md §9.10).
+        if let Some(u) = program.declaratives.debugging.first().filter(|_| !self.c.declaratives.triggers.is_empty()) {
+            return unsupported("DECLARATIVES: USE FOR DEBUGGING under the DEBUG option", u.pos);
         }
         Ok(())
     }

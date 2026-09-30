@@ -86,7 +86,7 @@ impl Lower<'_> {
     }
 
     /// An operand keeps its location for the comparison; an expression does not.
-    fn comparand(&mut self, e: &Expr, pos: Pos) -> R<(Comparand, Side)> {
+    pub(super) fn comparand(&mut self, e: &Expr, pos: Pos) -> R<(Comparand, Side)> {
         if let Expr::Operand(op) = e {
             let lowered = self.operand(op, pos)?;
             return Ok((Comparand::Operand(lowered.operand), lowered.side));
@@ -164,21 +164,11 @@ impl Lower<'_> {
             Ok(Resolved::Item(_)) => return Ok(Test::Abend(self.ironwork(&format!("{} is a data item, not a condition", r.name))?, r.pos)),
             Err(e) => return Ok(Test::Abend(self.ironwork(&e.message)?, r.pos)),
         };
-        let condition = &layout.conditions[index];
-        let item = &layout.items[condition.item];
-        let name = item.name.clone().unwrap_or_default();
-        let found = match layout.resolve(&name, &[], r.pos) {
-            Ok(Resolved::Item(i)) if i == condition.item => None,
-            Ok(Resolved::Item(_)) => return super::unsupported("a conditional variable whose name finds another item", r.pos),
-            Ok(Resolved::Condition(_)) => Some(format!("{name} is a condition-name, not a data item")),
-            Err(e) => Some(e.message),
+        let subject = match self.conditional_variable(index, r, r.pos)? {
+            Ok(place) => place,
+            Err((abend, at)) => return Ok(Test::Abend(abend, at)),
         };
-        let found = found.or_else(|| (r.subscripts.len() != item.dims.len()).then(|| format!("{name} takes {} subscripts, not {}", item.dims.len(), r.subscripts.len())));
-        if let Some(message) = found {
-            return Ok(Test::Abend(self.ironwork(&message)?, r.pos));
-        }
-        let subject_ref = Ref { name, qualifiers: Vec::new(), subscripts: r.subscripts.clone(), refmod: None, pos: r.pos };
-        let subject = self.item_place(condition.item, &subject_ref, false)?;
+        let condition = &layout.conditions[index];
         let kind = self.kind_of(subject);
         let x = Side { value: super::data::value_of(kind), src: Some(kind), digits: kind.digits_scale().map_or(0, |(d, _)| d) };
         let mut values = Vec::new();

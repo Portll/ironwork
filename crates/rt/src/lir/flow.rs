@@ -3,7 +3,7 @@
 use super::{
     AbendId, ArithId, BlockId, CallId, CicsId, CondId, DebugId, DisplayId, ExprId, FileOpId, InitId, InspectId, IntExpr,
     InvokeId, MovePlan, Operand, ParaId, PlaceId, RangeId, ReleaseId, ReportOp, ReturnId, SearchAllId, SortId, SqlId,
-    StepPlan, StringId, TempId, UnstringId,
+    StepPlan, StringId, TempId, UnstringId, UpDown,
 };
 use crate::abend::Ending;
 use crate::vocab::AcceptFrom;
@@ -14,8 +14,11 @@ pub enum Op {
     Move { from: Operand, to: PlaceId, plan: MovePlan },
     Initialize { target: PlaceId, plan: InitId },
     Arith(ArithId),
-    SetAddress { record: u16, address: Operand },
-    SetUpDown { target: PlaceId, by: IntExpr, down: bool, plan: StepPlan },
+    /// SET ADDRESS OF: `address` evaluated once, NULL or an address in run-unit memory, then
+    /// each LINKAGE record given it in turn.
+    SetAddress { records: Vec<u16>, address: Operand },
+    /// SET UP BY or DOWN BY: `by` evaluated once, then each receiver read and moved in turn.
+    SetUpDown { by: IntExpr, down: bool, targets: Vec<(PlaceId, UpDown)> },
     /// PERFORM VARYING's increment: `var` located, then each place of `prepass`, then `var + by`
     /// computed and stored.
     Step { var: PlaceId, by: ExprId, plan: StepPlan, prepass: Vec<PlaceId> },
@@ -127,8 +130,8 @@ codec_enum!(Op {
     Move { from, to, plan } = 0,
     Initialize { target, plan } = 1,
     Arith(id) = 2,
-    SetAddress { record, address } = 3,
-    SetUpDown { target, by, down, plan } = 4,
+    SetAddress { records, address } = 3,
+    SetUpDown { by, down, targets } = 4,
     Step { var, by, plan, prepass } = 5,
     SetInt { target, value } = 6,
     Inspect(id) = 7,

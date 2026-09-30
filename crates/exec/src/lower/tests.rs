@@ -12,7 +12,12 @@ fn program(options: &str, data: &str, procedure: &str) -> String {
 }
 
 fn compiled(source: &str) -> Compiled {
-    crate::compile(syntax::parse(source).unwrap_or_else(|e| panic!("{e}")), &[]).unwrap_or_else(|e| panic!("{e:?}"))
+    compiled_with(source, &[])
+}
+
+fn compiled_with(source: &str, flags: &[&str]) -> Compiled {
+    let flags: Vec<String> = flags.iter().map(|f| f.to_string()).collect();
+    crate::compile(syntax::parse(source).unwrap_or_else(|e| panic!("{e}")), &flags).unwrap_or_else(|e| panic!("{e:?}"))
 }
 
 fn lowered(source: &str) -> Program {
@@ -377,8 +382,11 @@ fn every_op_and_terminator_names_a_position() {
 #[test]
 fn constructs_outside_the_slice_are_refused_by_name() {
     let refused = |body: &str, data: &str| lower(&compiled(&program("", data, &[line(body), line("GOBACK.")].concat()))).unwrap_err();
-    assert!(matches!(refused("SET K UP BY 1", "       01  K PIC 9.\n"), LowerError::Unsupported("SET", _)));
-    assert!(matches!(refused("MOVE FUNCTION UPPER-CASE(A) TO A", "       01  A PIC X.\n"), LowerError::Unsupported("FUNCTION", _)));
+    assert!(matches!(refused("STRING A DELIMITED BY SIZE INTO A", "       01  A PIC X.\n"), LowerError::Unsupported("STRING", _)));
+    let mixed = refused("MOVE FUNCTION MAX(A 1) TO A", "       01  A PIC X.\n");
+    assert!(matches!(mixed, LowerError::Unsupported("FUNCTION MIN or MAX of arguments of different kinds", _)));
+    let numval = refused("MOVE FUNCTION NUMVAL(A) TO A", "       01  A PIC X.\n");
+    assert!(matches!(numval, LowerError::Unsupported(n, _) if n.starts_with("a FUNCTION result whose digits")));
     assert!(matches!(refused("INSPECT A TALLYING N FOR ALL 'A'", "       01  A PIC X.\n       01  N PIC 9.\n"), LowerError::Unsupported("INSPECT", _)));
     let e = refused("ACCEPT A", "       01  A PIC X.\n");
     assert_eq!(e.to_string(), "lowering: ACCEPT is not lowered yet");
@@ -394,11 +402,10 @@ fn statements_and_program_features_the_lowering_lacks_are_refused_by_name() {
         let error = lower(&compiled(&program("", data, &source(lines)))).unwrap_err();
         assert!(matches!(error, LowerError::Unsupported(n, _) if n == name), "{name}: {error}");
     };
-    named(
-        &["DECLARATIVES.", "S SECTION.", "    USE AFTER STANDARD ERROR PROCEDURE ON INPUT.", "P.", "    CONTINUE.", "END DECLARATIVES.", "A.", "    GOBACK."],
-        "DECLARATIVES",
-    );
-    named(&["A.", "    CALL 'SUB' USING FUNCTION UPPER-CASE('A').", "    GOBACK."], "FUNCTION");
+    named(&["A.", "    EXEC CICS RETURN END-EXEC.", "    GOBACK."], "EXEC CICS");
+    let inert = ["DECLARATIVES.", "S SECTION.", "    USE AFTER STANDARD ERROR PROCEDURE ON INPUT.", "P.", "    CONTINUE.", "END DECLARATIVES.", "A.", "    GOBACK."];
+    let p = lowered(&program("", data, &source(&inert)));
+    assert_eq!(p.procedure_start, 2);
 }
 
 #[test]
@@ -790,4 +797,225 @@ fn invoke_plans_name_the_receiver_method_and_java_types_and_object_references_co
     assert_eq!(selects, [Some(Op::Invoke(1))]);
     let hows: Vec<_> = p.conds.iter().filter_map(|c| if let LirCond::Rel { how, .. } = c { Some(*how) } else { None }).collect();
     assert_eq!(hows, [lir::Compare::References, lir::Compare::Address]);
+}
+
+/// A program with a FILE SECTION: `select` and `fd` lines as written, a line indented four columns
+/// in area B.
+fn with_files(options: &str, select: &[&str], fd: &[&str], data: &str, procedure: &[&str]) -> String {
+    let area = |lines: &[&str]| lines.iter().map(|l| if l.starts_with("    ") { line(l.trim_start()) } else { format!("       {l}\n") }).collect::<String>();
+    let card = if options.is_empty() { String::new() } else { format!("       CBL {options}\n") };
+    [
+        card,
+        area(&["IDENTIFICATION DIVISION.", "PROGRAM-ID. T.", "ENVIRONMENT DIVISION.", "INPUT-OUTPUT SECTION.", "FILE-CONTROL."]),
+        area(select),
+        area(&["DATA DIVISION.", "FILE SECTION."]),
+        area(fd),
+        area(&["WORKING-STORAGE SECTION."]),
+        data.to_owned(),
+        area(&["PROCEDURE DIVISION."]),
+        area(procedure),
+    ]
+    .concat()
+}
+
+fn file_ops(p: &Program) -> Vec<(lir::FileOp, usize)> {
+    p.blocks
+        .iter()
+        .flat_map(|b| b.ops.iter().enumerate().map(move |(k, op)| (b, k, op)))
+        .filter_map(|(b, k, op)| match op {
+            Op::File(id) => Some((p.services.file_ops[*id as usize].clone(), if k + 1 == b.ops.len() { if let Terminator::Select(arms) = &b.end { arms.len() } else { 0 } } else { 0 })),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_sequential_read_takes_at_end_and_file_status_takes_the_status_by_move() {
+    let p = lowered(&with_files(
+        "",
+        &["    SELECT IN-F ASSIGN TO INDD FILE STATUS IS FS."],
+        &["FD  IN-F.", "01  IN-REC PIC X(8)."],
+        "       01  FS PIC XX.\n       01  W PIC X(10).\n",
+        &[
+            "M.",
+            "    OPEN INPUT IN-F",
+            "    READ IN-F INTO W",
+            "        AT END DISPLAY 'E'",
+            "        NOT AT END DISPLAY 'N'",
+            "    END-READ",
+            "    READ IN-F",
+            "    CLOSE IN-F",
+            "    GOBACK.",
+        ],
+    ));
+    let file = &p.services.files[0];
+    assert_eq!((symbol(&p, file.name), symbol(&p, file.assign)), ("IN-F", "INDD"));
+    assert_eq!((file.organization, file.access, file.format, file.keys.is_none()), (lir::Organization::Sequential, lir::Access::Sequential, rt::files::Format::Fixed, true));
+    let (status, plan) = file.status.unwrap();
+    assert_eq!((symbol(&p, p.places[status as usize].name), plan), ("FS", MovePlan::Alnum { image: Image::Bytes, justified: false }));
+    let ops = file_ops(&p);
+    let verbs: Vec<_> = ops.iter().map(|(op, arms)| (std::mem::discriminant(&op.verb), op.phrase, *arms)).collect();
+    let phrase = lir::Phrase { on: true, not_on: true };
+    assert_eq!(verbs.iter().map(|v| (v.1, v.2)).collect::<Vec<_>>(), [(None, 0), (Some(phrase), 3), (None, 0), (None, 0)]);
+    let lir::FileVerb::Read { sequential: true, previous: false, into: Some((into, into_plan)), key: 0 } = ops[1].0.verb else { panic!("{:?}", ops[1].0.verb) };
+    assert_eq!((symbol(&p, p.places[into as usize].name), into_plan), ("W", MovePlan::Alnum { image: Image::Bytes, justified: false }));
+    let select = p.blocks.iter().find_map(|b| if let Terminator::Select(arms) = &b.end { Some(arms.clone()) } else { None }).unwrap();
+    assert!(select[1] != select[0] && select[2] != select[0] && select[1] != select[2]);
+    assert_eq!(p.blocks[select[1] as usize].ops.len(), 1);
+    verify(&p).unwrap();
+}
+
+#[test]
+fn an_indexed_file_s_keys_are_spans_of_its_record_and_a_keyed_read_or_start_names_one() {
+    let p = lowered(&with_files(
+        "",
+        &["    SELECT MF ASSIGN TO MDD", "        ORGANIZATION IS INDEXED ACCESS MODE IS DYNAMIC", "        RECORD KEY IS MK", "        ALTERNATE RECORD KEY IS AK WITH DUPLICATES."],
+        &["FD  MF.", "01  MR.", "    05 MK PIC X(4).", "    05 AK PIC X(6).", "    05 MD PIC X(10)."],
+        "       01  PART PIC X(2).\n",
+        &[
+            "M.",
+            "    OPEN I-O MF",
+            "    READ MF KEY IS AK",
+            "        INVALID KEY DISPLAY 'NO'",
+            "    END-READ",
+            "    READ MF NEXT AT END DISPLAY 'END' END-READ",
+            "    START MF KEY IS NOT LESS THAN MK",
+            "        INVALID KEY DISPLAY 'NO'",
+            "    END-START",
+            "    DELETE MF",
+            "    GOBACK.",
+        ],
+    ));
+    let keys = p.services.files[0].keys.clone().unwrap();
+    assert_eq!(keys.prime, lir::RecordSpan { offset: 0, len: 4 });
+    assert_eq!(keys.alternates, [(lir::RecordSpan { offset: 4, len: 6 }, true)]);
+    let ops = file_ops(&p);
+    assert!(matches!(ops[1].0.verb, lir::FileVerb::Read { sequential: false, key: 1, .. }));
+    assert_eq!((ops[1].0.phrase, ops[1].1), (Some(lir::Phrase { on: true, not_on: false }), 3));
+    assert!(matches!(ops[2].0.verb, lir::FileVerb::Read { sequential: true, .. }));
+    let start = lir::FileVerb::Start { rel: lir::StartRel::NotLess, key: lir::StartKey::Named { key: 0, span: lir::RecordSpan { offset: 0, len: 4 } } };
+    assert_eq!(ops[3].0.verb, start);
+    assert_eq!((ops[4].0.verb.clone(), ops[4].1), (lir::FileVerb::Delete, 0));
+}
+
+#[test]
+fn write_from_advancing_on_a_linage_file_selects_five_arms() {
+    let p = lowered(&with_files(
+        "",
+        &["    SELECT PF ASSIGN TO PDD."],
+        &["FD  PF LINAGE IS 10 LINES WITH FOOTING AT 8.", "01  PR PIC X(20)."],
+        "       01  W PIC X(20).\n",
+        &["M.", "    OPEN OUTPUT PF", "    WRITE PR FROM W AFTER ADVANCING 2 LINES", "        AT END-OF-PAGE DISPLAY 'EOP'", "    END-WRITE", "    GOBACK."],
+    ));
+    let file = &p.services.files[0];
+    let linage = file.linage.clone().unwrap();
+    assert_eq!((linage.lines, linage.footing, linage.top), (IntExpr::Const(10), Some(IntExpr::Const(8)), None));
+    let (counter, _) = linage.counter.unwrap();
+    assert_eq!(symbol(&p, p.places[counter as usize].name), "LINAGE-COUNTER");
+    assert_eq!(file.carriage, Some(lir::Carriage { machine: false, reserved: false }));
+    let (write, arms) = file_ops(&p)[1].clone();
+    assert_eq!((write.phrase, write.end_of_page, arms), (None, Some(lir::Phrase { on: true, not_on: false }), 5));
+    let lir::FileVerb::Write { record, from: Some(from), advancing: Some(advancing) } = write.verb else { panic!() };
+    assert_eq!((&p.places[record as usize], from.plan), (&p.places[from.to as usize], MovePlan::Alnum { image: Image::Bytes, justified: false }));
+    assert_eq!(symbol(&p, p.places[record as usize].name), "PR");
+    assert_eq!(advancing, lir::Advance::Lines { before: false, count: IntExpr::Const(2) });
+}
+
+#[test]
+fn declaratives_that_can_run_are_refused_and_ones_that_cannot_lower_as_paragraphs() {
+    let source = |use_on: &str, open: &str| {
+        with_files(
+            "",
+            &["    SELECT IN-F ASSIGN TO INDD.", "    SELECT OUT-F ASSIGN TO OUTDD."],
+            &["FD  IN-F.", "01  IN-REC PIC X(3).", "FD  OUT-F.", "01  OUT-REC PIC X(3)."],
+            "",
+            &["DECLARATIVES.", "E SECTION.", &format!("    USE AFTER ERROR PROCEDURE ON {use_on}."), "E1.", "    DISPLAY 'E'.", "END DECLARATIVES.", "M SECTION.", "M1.", &format!("    OPEN {open}"), "    GOBACK."],
+        )
+    };
+    let named = "DECLARATIVES: a file statement a USE AFTER EXCEPTION/ERROR procedure serves";
+    assert!(matches!(lower(&compiled(&source("IN-F", "INPUT IN-F"))), Err(LowerError::Unsupported(n, _)) if n == named));
+    assert!(matches!(lower(&compiled(&source("INPUT", "INPUT OUT-F"))), Err(LowerError::Unsupported(n, _)) if n == named));
+    let written = source("OUT-F", "OUTPUT IN-F").replace("    GOBACK.", "    WRITE OUT-REC\n           GOBACK.");
+    assert!(matches!(lower(&compiled(&written)), Err(LowerError::Unsupported(n, _)) if n == named));
+    let p = lowered(&source("INPUT", "OUTPUT OUT-F"));
+    assert_eq!(p.procedure_start, paragraph(&p, "M") as u32);
+    let debugging = [
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n",
+        "       SOURCE-COMPUTER. IBM-370 WITH DEBUGGING MODE.\n       PROCEDURE DIVISION.\n       DECLARATIVES.\n       D SECTION.\n",
+        "           USE FOR DEBUGGING ON M.\n       D1.\n           DISPLAY DEBUG-NAME.\n       END DECLARATIVES.\n",
+        "       M SECTION.\n       M1.\n           GOBACK.\n",
+    ]
+    .concat();
+    lowered(&debugging);
+    let refused = lower(&compiled_with(&debugging, &["-debug"])).unwrap_err();
+    assert!(matches!(refused, LowerError::Unsupported("DECLARATIVES: USE FOR DEBUGGING under the DEBUG option", _)), "{refused}");
+}
+
+#[test]
+fn set_lowers_each_form_as_the_walker_runs_it() {
+    let source = [
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n",
+        "       01  K PIC 9 VALUE 0.\n           88 K-ON VALUE 1 WHEN SET TO FALSE IS 0.\n",
+        "       01  J PIC 9 VALUE 0.\n       01  P POINTER.\n       01  W PIC X(4).\n",
+        "       01  T.\n           05 E PIC X OCCURS 3 INDEXED BY IX.\n",
+        "       LINKAGE SECTION.\n       01  L PIC X(4).\n       PROCEDURE DIVISION.\n",
+        &line("SET K-ON TO TRUE"),
+        &line("SET K-ON TO FALSE"),
+        &line("SET P TO ADDRESS OF W"),
+        &line("SET IX TO 2"),
+        &line("SET J K UP BY J"),
+        &line("SET P IX DOWN BY 1"),
+        &line("SET ADDRESS OF L TO P"),
+        &line("SET ADDRESS OF L ADDRESS OF W TO NULL"),
+        &line("GOBACK."),
+    ]
+    .concat();
+    let p = lowered(&source);
+    let name = |q: u32| symbol(&p, p.places[q as usize].name);
+    let b = &p.blocks[0].ops;
+    let numeric = MovePlan::Numeric { from: NumericFrom::Value, store: StorePlan::Zoned { digits: 1, scale: 0, signed: false, sign: None } };
+    let Op::Move { from: LirOperand::Const(on), to, plan } = b[0] else { panic!("{:?}", b[0]) };
+    assert_eq!((name(to), plan, &p.consts[on as usize]), ("K", numeric, &Const::Number(numeric::precision::Fixed::new(1, numeric::precision::Places::new(1, 0)))));
+    let Op::Move { from: LirOperand::Const(off), to, .. } = b[1] else { panic!("{:?}", b[1]) };
+    assert!(name(to) == "K" && matches!(p.consts[off as usize], Const::Number(f) if f.magnitude.is_zero()));
+    assert!(matches!(b[2], Op::Move { from: LirOperand::AddressOf(_), to, plan: MovePlan::Address } if name(to) == "P"));
+    assert!(matches!(b[3], Op::Move { to, plan: MovePlan::Index, .. } if name(to) == "IX"));
+    let Op::SetUpDown { by: IntExpr::Item(by), down: false, targets } = &b[4] else { panic!("{:?}", b[4]) };
+    assert_eq!((name(*by), targets.iter().map(|t| name(t.0)).collect::<Vec<_>>()), ("J", vec!["J", "K"]));
+    let Op::SetUpDown { down: true, targets, .. } = &b[5] else { panic!("{:?}", b[5]) };
+    assert!(matches!(targets[..], [(_, lir::UpDown::Pointer), (_, lir::UpDown::Number(_))]));
+    assert!(matches!(b[6], Op::SetAddress { ref records, address: LirOperand::Load(q) } if records == &[0] && name(q) == "P"));
+    assert!(matches!(&b[7], Op::SetAddress { records, address: LirOperand::Const(_) } if records == &[0]));
+    let Terminator::Abend(a) = p.blocks[0].end else { panic!("{:?}", p.blocks[0].end) };
+    assert_eq!(symbol(&p, p.abends[a as usize].message), "SET ADDRESS OF W: only a LINKAGE record can be given an address");
+}
+
+#[test]
+fn a_function_evaluates_its_arguments_then_any_again_as_an_integer_then_its_reference_modification() {
+    let p = lowered(&program(
+        "",
+        "       01  A PIC X(4).\n       01  N PIC 9(3).\n       01  F COMP-2.\n",
+        &[
+            line("MOVE FUNCTION UPPER-CASE(A)(2:2) TO A"),
+            line("MOVE FUNCTION CHAR(N + 1) TO A"),
+            line("MOVE FUNCTION MAX(F 1) TO N"),
+            line("COMPUTE N = FUNCTION MOD(N 7) + FUNCTION RANDOM"),
+            line("DISPLAY FUNCTION TRIM(A LEADING) FUNCTION LENGTH(A N)"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    ));
+    let f = &p.plans.function;
+    assert_eq!((f[0].func, f[0].args.len(), f[0].integer.is_none()), (lir::Func::UpperCase, 1, true));
+    assert!(matches!(f[0].refmod, Some(lir::RefMod { start: IntExpr::Const(2), length: Some(IntExpr::Const(2)), check: false })));
+    assert!(matches!((&f[1].args[..], &f[1].integer), ([Comparand::Expr { mode: Mode::Fixed, .. }], Some(IntExpr::Fixed { .. }))));
+    assert_eq!(f[2].func, lir::Func::Max);
+    assert_eq!(moves(&p)[2], MovePlan::Numeric { from: NumericFrom::Float, store: StorePlan::Zoned { digits: 3, scale: 0, signed: false, sign: None } });
+    let compute = &p.plans.arith[0].steps[0];
+    assert_eq!(compute.mode, Mode::Float(numeric::Arith::Compat.float_intermediate()));
+    assert_eq!((f[5].side, f[5].arity), (Some(lir::TrimSide::Leading), None));
+    let arity = f[6].arity.unwrap();
+    assert_eq!((f[6].func, symbol(&p, p.abends[arity as usize].message)), (lir::Func::Length, "FUNCTION LENGTH takes 1..=1 arguments"));
+    let Op::Display(d) = ops(&p).find(|op| matches!(op, Op::Display(_))).unwrap() else { unreachable!() };
+    assert!(matches!(p.plans.display[*d as usize].items[..], [DisplayItem::Value(LirOperand::Function(5)), DisplayItem::Value(LirOperand::Function(6))]));
 }
