@@ -248,6 +248,38 @@ fn decimal_point_is_comma_in_literals_editing_de_editing_numval_and_contained_pr
 }
 
 #[test]
+fn currency_signs_edit_fixed_and_floating_de_edit_and_reach_contained_programs() {
+    let source = [
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. CUR.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n",
+        "       SPECIAL-NAMES.\n           CURRENCY SIGN IS \"W\"\n           CURRENCY SIGN 'EUR ' WITH PICTURE SYMBOL 'y'\n",
+        "           DECIMAL-POINT IS COMMA.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n",
+        "       01  J PIC WWWWW.\n       01  M PIC W9999.\n       01  L PIC yyyy9,99-.\n       01  B PIC S9(5)V99.\n",
+        "       01  K PIC 9999999V99.\n       PROCEDURE DIVISION.\n",
+        &line("MOVE 1234 TO J"),
+        &line("MOVE 42 TO M"),
+        &line("DISPLAY '[' J '][' M ']'"),
+        &line("MOVE 12 TO J"),
+        &line("MOVE -5,5 TO L"),
+        &line("DISPLAY '[' J '][' L ']'"),
+        &line("MOVE L TO B"),
+        &line("MOVE J TO K"),
+        &line("DISPLAY B ' ' K"),
+        &line("CALL 'INNER'"),
+        &line("GOBACK."),
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. INNER.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n",
+        "       01  E2 PIC WW9,9.\n       PROCEDURE DIVISION.\n",
+        &line("MOVE 2,5 TO E2"),
+        &line("DISPLAY 'INNER [' E2 ']'"),
+        &line("GOBACK."),
+        "       END PROGRAM INNER.\n       END PROGRAM CUR.\n",
+    ]
+    .concat();
+    assert_eq!(run(&source), "[W1234][W0042]\n[  W12][   EUR 5,50-]\n000055} 000001200\nINNER [ W2,5]\n");
+    let dollar = source.replace("PIC WWWWW", "PIC $$$$$");
+    assert!(compile_errors(&dollar).contains("'$' is not a currency symbol"), "{}", compile_errors(&dollar));
+}
+
+#[test]
 fn a_group_sender_moves_its_bytes_and_a_statements_shared_result_is_computed_before_any_receiver_changes() {
     let out = run(&program(
         "",

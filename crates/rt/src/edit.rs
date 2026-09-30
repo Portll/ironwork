@@ -5,15 +5,17 @@ use crate::picture::Sym;
 
 /// The characters a numeric-edited item holds for a value. `magnitude` is already aligned to the
 /// PICTURE's decimal places and within its digit positions. `point` is what a decimal point
-/// position shows: a period, or a comma under DECIMAL-POINT IS COMMA.
-pub fn numeric(syms: &[Sym], digits: u32, negative: bool, magnitude: u128, blank_when_zero: bool, point: char) -> String {
-    let size: usize = syms.iter().map(Sym::width).sum();
+/// position shows: a period, or a comma under DECIMAL-POINT IS COMMA. `currency` is the currency
+/// sign value, which the first currency position holds in full.
+pub fn numeric(syms: &[Sym], digits: u32, negative: bool, magnitude: u128, blank_when_zero: bool, point: char, currency: &str) -> String {
+    let width = |s: &Sym| width(s, currency);
+    let size: usize = syms.iter().map(width).sum();
     let digit_syms: Vec<&Sym> = syms.iter().filter(|s| s.is_digit()).collect();
     if magnitude == 0 && (blank_when_zero || digit_syms.iter().all(|s| matches!(s, Sym::Z | Sym::Float(_)))) {
         return " ".repeat(size);
     }
     if magnitude == 0 && digit_syms.iter().all(|s| matches!(s, Sym::Star)) {
-        return syms.iter().flat_map(|s| std::iter::repeat_n(if *s == Sym::Point { point } else { '*' }, s.width())).collect();
+        return syms.iter().flat_map(|s| std::iter::repeat_n(if *s == Sym::Point { point } else { '*' }, width(s))).collect();
     }
     let text = format!("{magnitude:0width$}", width = digits as usize);
     let mut digit_chars = text.chars().skip(text.len() - digits as usize);
@@ -35,8 +37,8 @@ pub fn numeric(syms: &[Sym], digits: u32, negative: bool, magnitude: u128, blank
             }
             Sym::FloatLead(c) => {
                 float_char = Some(c);
-                float_slot = Some(out.len());
-                out.push(' ');
+                out.extend(std::iter::repeat_n(' ', width(s)));
+                float_slot = Some(out.len() - 1);
             }
             Sym::Float(_) => {
                 let d = digit_chars.next().unwrap_or('0');
@@ -69,19 +71,25 @@ pub fn numeric(syms: &[Sym], digits: u32, negative: bool, magnitude: u128, blank
                 (_, true) => '-',
                 _ => ' ',
             }),
-            Sym::Currency => out.push('$'),
+            Sym::Currency => out.extend(currency.chars()),
             Sym::Cr => out.extend(if negative { ['C', 'R'] } else { [' ', ' '] }),
             Sym::Db => out.extend(if negative { ['D', 'B'] } else { [' ', ' '] }),
             Sym::Char => out.push(' '),
         }
     }
-    if let (Some(c), Some(slot)) = (float_char, float_slot) {
-        out[slot] = match (c, negative) {
-            ('$', _) => '$',
-            ('+', false) => '+',
-            (_, true) => '-',
-            _ => ' ',
-        };
+    match (float_char, float_slot) {
+        (Some('$'), Some(slot)) => {
+            let value: Vec<char> = currency.chars().collect();
+            out[slot + 1 - value.len()..=slot].copy_from_slice(&value);
+        }
+        (Some(c), Some(slot)) => {
+            out[slot] = match (c, negative) {
+                ('+', false) => '+',
+                (_, true) => '-',
+                _ => ' ',
+            }
+        }
+        _ => {}
     }
     out.into_iter().collect()
 }
@@ -99,8 +107,8 @@ pub fn alphanumeric(syms: &[Sym], data: &[u8], space: u8, encode: impl Fn(char) 
 }
 
 /// A numeric-edited item's value: the digits in its digit positions, negative when it shows a
-/// minus sign, CR or DB.
-pub fn de_edit(syms: &[Sym], text: &str) -> (bool, u128) {
+/// minus sign, CR or DB. `currency` is the currency sign value, as for [`numeric`].
+pub fn de_edit(syms: &[Sym], text: &str, currency: &str) -> (bool, u128) {
     let chars: Vec<char> = text.chars().collect();
     let (mut at, mut magnitude, mut negative) = (0usize, 0u128, false);
     for s in syms {
@@ -119,7 +127,15 @@ pub fn de_edit(syms: &[Sym], text: &str) -> (bool, u128) {
         if matches!(s, Sym::Float(_)) {
             negative |= c == '-';
         }
-        at += 1;
+        at += width(s, currency);
     }
     (negative, magnitude)
+}
+
+/// Character positions `s` takes: the first currency position holds the whole currency sign value.
+fn width(s: &Sym, currency: &str) -> usize {
+    match s {
+        Sym::Currency | Sym::FloatLead('$') => currency.chars().count().max(1),
+        _ => s.width(),
+    }
 }

@@ -257,8 +257,8 @@ fn entry_picture(e: &rw::Entry) -> Option<String> {
 }
 
 /// Integer and decimal places of a numeric or numeric-edited PICTURE.
-fn places(picture: &str, decimal_comma: bool) -> Option<(u32, u32)> {
-    let p = picture::analyse_with(picture, decimal_comma).ok()?;
+fn places(picture: &str, notation: crate::picture::Notation) -> Option<(u32, u32)> {
+    let p = picture::analyse_with(picture, notation).ok()?;
     matches!(p.category, Category::Numeric | Category::NumericEdited).then_some(((p.digits + p.scaling).saturating_sub(p.scale), p.scale))
 }
 
@@ -316,7 +316,7 @@ pub(crate) fn prepare(program: &mut Program, adv: bool, errors: &mut Vec<Error>)
         ];
         let mut groups = Vec::new();
         for g in &r.groups {
-            groups.push(draft_group(&reports, ri, g, &taken, &mut children, program.environment.decimal_point_comma, errors));
+            groups.push(draft_group(&reports, ri, g, &taken, &mut children, crate::picture::Notation::of(&program.environment), errors));
         }
         let mut controls = Vec::new();
         let mut cursor = state::FLAGS + r.groups.len();
@@ -384,7 +384,7 @@ fn line_end(d: &Draft) -> usize {
 /// The size of each CONTROL item, from a layout of the program as written.
 fn measure_controls(program: &Program, reports: &[rw::Report]) -> Vec<Vec<usize>> {
     let files: Vec<(&[DataEntry], Option<u32>)> = program.files.iter().map(|f| (f.records.as_slice(), f.record_max)).collect();
-    let built = layout::build(&program.working_storage, &files, &[], &program.linkage, &program.local_storage, program.environment.decimal_point_comma).ok();
+    let built = layout::build(&program.working_storage, &files, &[], &program.linkage, &program.local_storage, crate::picture::Notation::of(&program.environment)).ok();
     reports
         .iter()
         .map(|r| {
@@ -407,7 +407,7 @@ fn draft_group(
     g: &rw::Group,
     taken: &std::collections::HashSet<String>,
     children: &mut Vec<DataEntry>,
-    decimal_comma: bool,
+    notation: crate::picture::Notation,
     errors: &mut Vec<Error>,
 ) -> DraftGroup {
     let mut d = DraftGroup { lines: Vec::new(), unprinted: Vec::new(), totals: Vec::new() };
@@ -447,7 +447,7 @@ fn draft_group(
             }
             continue;
         };
-        let analysed = match picture::analyse_with(&picture, decimal_comma) {
+        let analysed = match picture::analyse_with(&picture, notation) {
             Ok(p) => p,
             Err(m) => {
                 errors.push(Error::at(e.pos, m));
@@ -469,13 +469,13 @@ fn draft_group(
         field.justified = just && analysed.category == Category::Alphanumeric;
         field.blank_when_zero = bwz && numeric_edited;
         if let Some(rw::Content::Sum(clauses)) = &e.content {
-            let Some((mut int, mut dec)) = places(&picture, decimal_comma) else {
+            let Some((mut int, mut dec)) = places(&picture, notation) else {
                 errors.push(Error::at(e.pos, "a SUM entry needs a numeric PICTURE"));
                 continue;
             };
             for operand in clauses.iter().flat_map(|c| &c.operands) {
                 if let Some((r, og, oe)) = report_entry(reports, ri, operand)
-                    && let Some((i, s)) = entry_picture(&reports[r].groups[og].entries[oe]).as_deref().and_then(|p| places(p, decimal_comma))
+                    && let Some((i, s)) = entry_picture(&reports[r].groups[og].entries[oe]).as_deref().and_then(|p| places(p, notation))
                 {
                     int = int.max(i);
                     dec = dec.max(s);
@@ -803,7 +803,7 @@ fn resolve_report(program: &Program, layout: &Layout, ri: usize, r: &rw::Report,
                             continue;
                         }
                         let source = &r.groups[og].entries[oe];
-                        if entry_picture(source).as_deref().and_then(|p| places(p, program.environment.decimal_point_comma)).is_none() {
+                        if entry_picture(source).as_deref().and_then(|p| places(p, crate::picture::Notation::of(&program.environment))).is_none() {
                             check.errors.push(Error::at(operand.pos, format!("SUM {}: the entry summed must be numeric", operand.name)));
                             continue;
                         }

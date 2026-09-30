@@ -662,6 +662,15 @@ pub struct Environment {
     /// SPECIAL-NAMES DECIMAL-POINT IS COMMA: the comma and the period exchange roles in PICTURE
     /// character-strings, numeric literals and the arguments of NUMVAL and NUMVAL-C.
     pub decimal_point_comma: bool,
+    /// SPECIAL-NAMES CURRENCY SIGN clauses in order; none means the symbol and value $.
+    pub currency: Vec<CurrencySign>,
+}
+
+/// A CURRENCY SIGN clause: the currency sign value, and the PICTURE symbol that stands for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CurrencySign {
+    pub value: String,
+    pub symbol: char,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

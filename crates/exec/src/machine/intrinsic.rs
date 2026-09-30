@@ -423,7 +423,7 @@ impl<'p> Machine<'p, '_, '_> {
                 let text = self.text_of(&args[0], name, pos)?;
                 let currency = match args.get(1) {
                     Some(v) => self.text_of(v, name, pos)?,
-                    None => "$".to_owned(),
+                    None => self.default_currency(),
                 };
                 let form = match name {
                     "TEST-NUMVAL" => Form::Numval,

@@ -2,12 +2,17 @@ pub use rt::edit::{alphanumeric, de_edit, numeric};
 
 #[cfg(test)]
 mod tests {
-    use crate::picture::analyse;
+    use crate::picture::{Notation, Picture, analyse, analyse_with};
     use rt::edit::*;
+    use syntax::ast::CurrencySign;
+
+    fn currency(p: &Picture) -> &str {
+        p.currency.as_deref().unwrap_or_default()
+    }
 
     fn edit(pic: &str, value: i128) -> String {
         let p = analyse(pic).unwrap();
-        numeric(p.edit.as_ref().unwrap(), p.digits, value < 0, value.unsigned_abs(), false, '.')
+        numeric(p.edit.as_ref().unwrap(), p.digits, value < 0, value.unsigned_abs(), false, '.', currency(&p))
     }
 
     #[test]
@@ -50,24 +55,24 @@ mod tests {
     #[test]
     fn blank_when_zero() {
         let p = analyse("999.99").unwrap();
-        assert_eq!(numeric(p.edit.as_ref().unwrap(), p.digits, false, 0, true, '.'), "      ");
+        assert_eq!(numeric(p.edit.as_ref().unwrap(), p.digits, false, 0, true, '.', currency(&p)), "      ");
     }
 
     #[test]
     fn de_editing_recovers_the_value() {
         for (pic, v) in [("$$,$$9.99CR", -123450i128), ("ZZ9-", -7), ("ZZ,ZZ9", 1234)] {
             let p = analyse(pic).unwrap();
-            let text = numeric(p.edit.as_ref().unwrap(), p.digits, v < 0, v.unsigned_abs(), false, '.');
-            assert_eq!(de_edit(p.edit.as_ref().unwrap(), &text), (v < 0, v.unsigned_abs()), "{pic} {text:?}");
+            let text = numeric(p.edit.as_ref().unwrap(), p.digits, v < 0, v.unsigned_abs(), false, '.', currency(&p));
+            assert_eq!(de_edit(p.edit.as_ref().unwrap(), &text, currency(&p)), (v < 0, v.unsigned_abs()), "{pic} {text:?}");
         }
     }
 
     #[test]
     fn under_decimal_point_is_comma_a_comma_shows_the_point_and_de_editing_still_recovers_the_value() {
         let edit = |pic: &str, value: i128| {
-            let p = crate::picture::analyse_with(pic, true).unwrap();
-            let text = numeric(p.edit.as_ref().unwrap(), p.digits, value < 0, value.unsigned_abs(), false, ',');
-            assert_eq!(de_edit(p.edit.as_ref().unwrap(), &text), (value < 0, value.unsigned_abs()), "{pic} {text:?}");
+            let p = analyse_with(pic, Notation { decimal_comma: true, currency: &[] }).unwrap();
+            let text = numeric(p.edit.as_ref().unwrap(), p.digits, value < 0, value.unsigned_abs(), false, ',', currency(&p));
+            assert_eq!(de_edit(p.edit.as_ref().unwrap(), &text, currency(&p)), (value < 0, value.unsigned_abs()), "{pic} {text:?}");
             text
         };
         assert_eq!(edit("Z.ZZ9,99-", -123450), "1.234,50-");
@@ -82,7 +87,26 @@ mod tests {
         assert_eq!(edit("0ZZ9", 5), "0  5");
         assert_eq!(edit("ZZ0Z9", 5), "    5");
         let p = analyse("$**.**CR").unwrap();
-        assert_eq!(numeric(p.edit.as_ref().unwrap(), p.digits, false, 0, false, '.'), "$**.****".replace('$', "*"));
+        assert_eq!(numeric(p.edit.as_ref().unwrap(), p.digits, false, 0, false, '.', currency(&p)), "$**.****".replace('$', "*"));
+    }
+
+    #[test]
+    fn a_currency_sign_value_fills_the_first_currency_position_fixed_or_floating() {
+        let signs = [CurrencySign { value: "W".into(), symbol: 'W' }, CurrencySign { value: "EUR ".into(), symbol: 'U' }];
+        let edit = |pic: &str, value: i128| {
+            let p = analyse_with(pic, Notation { decimal_comma: true, currency: &signs }).unwrap();
+            let text = numeric(p.edit.as_ref().unwrap(), p.digits, value < 0, value.unsigned_abs(), false, ',', currency(&p));
+            assert_eq!(text.chars().count(), p.size as usize, "{pic} {text:?}");
+            assert_eq!(de_edit(p.edit.as_ref().unwrap(), &text, currency(&p)), (value < 0, value.unsigned_abs()), "{pic} {text:?}");
+            text
+        };
+        assert_eq!(edit("W9999", 1234), "W1234");
+        assert_eq!(edit("WWWWW", 12), "  W12");
+        assert_eq!(edit("U9.999,99", 123456), "EUR 1.234,56");
+        assert_eq!(edit("UUUU9,99-", -550), "   EUR 5,50-");
+        assert_eq!(edit("UUUU9,99", 123456), "EUR 1234,56");
+        let p = analyse_with("U**9", Notation { decimal_comma: false, currency: &signs }).unwrap();
+        assert_eq!(numeric(p.edit.as_ref().unwrap(), p.digits, false, 0, false, '.', currency(&p)), "EUR **0");
     }
 
     #[test]

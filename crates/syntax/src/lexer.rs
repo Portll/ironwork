@@ -44,13 +44,15 @@ struct Lexer<'a> {
     tokens: Vec<Token>,
     /// DECIMAL-POINT IS COMMA is in force: a comma between digits is the decimal point.
     decimal_comma: bool,
+    /// The currency symbols CURRENCY SIGN clauses have named so far, whose case a PICTURE keeps.
+    currency: Vec<char>,
     /// For each program begun and not yet ended, whether the comma was the decimal point before
     /// it: a contained program has its container's, and a program after it starts afresh.
     outer: Vec<bool>,
 }
 
 pub fn lex(source: &Source) -> Result<Vec<Token>, Error> {
-    let mut lx = Lexer { chars: source.text.chars().collect(), positions: &source.positions, at: 0, tokens: Vec::new(), decimal_comma: false, outer: Vec::new() };
+    let mut lx = Lexer { chars: source.text.chars().collect(), positions: &source.positions, at: 0, tokens: Vec::new(), decimal_comma: false, currency: Vec::new(), outer: Vec::new() };
     while lx.at < lx.chars.len() {
         lx.next_token()?;
     }
@@ -75,17 +77,25 @@ impl Lexer<'_> {
     }
 
     fn emit(&mut self, tok: Tok, pos: Pos) {
-        if let Tok::Word(w) = &tok {
-            let before = |back: usize| match self.tokens.len().checked_sub(back).map(|i| &self.tokens[i].tok) {
-                Some(Tok::Word(p)) => p.as_str(),
-                _ => "",
-            };
-            match w.as_str() {
+        let before = |back: usize| match self.tokens.len().checked_sub(back).map(|i| &self.tokens[i].tok) {
+            Some(Tok::Word(p)) => p.as_str(),
+            _ => "",
+        };
+        match &tok {
+            Tok::Word(w) => match w.as_str() {
                 "PROGRAM-ID" => self.outer.push(self.decimal_comma),
                 "PROGRAM" if before(1) == "END" => self.decimal_comma = self.outer.pop().unwrap_or(false),
                 "COMMA" if before(1) == "DECIMAL-POINT" || before(1) == "IS" && before(2) == "DECIMAL-POINT" => self.decimal_comma = true,
                 _ => {}
+            },
+            Tok::Alnum(a) => {
+                let mut chars = a.chars();
+                let names_symbol = before(1) == "SYMBOL" || (1..=3).any(|back| before(back) == "CURRENCY" && (1..back).all(|b| matches!(before(b), "SIGN" | "IS")));
+                if let (Some(c), None, true) = (chars.next(), chars.next(), names_symbol) {
+                    self.currency.push(c);
+                }
             }
+            _ => {}
         }
         self.tokens.push(Token { tok, pos, area_a: (8..=11).contains(&pos.col) });
     }
@@ -278,8 +288,8 @@ impl Lexer<'_> {
             return Err(Error::at(pos, "PICTURE with no character-string"));
         }
         self.at = end;
-        let text = text.to_ascii_uppercase();
-        let tok = if text == "IS" && self.tokens.last().is_some_and(|t| matches!(&t.tok, Tok::Word(w) if w == "PIC" || w == "PICTURE")) {
+        let text: String = text.chars().map(|c| if self.currency.contains(&c) { c } else { c.to_ascii_uppercase() }).collect();
+        let tok = if matches!(text.as_str(), "IS" | "SYMBOL") && self.tokens.last().is_some_and(|t| matches!(&t.tok, Tok::Word(w) if w == "PIC" || w == "PICTURE")) {
             Tok::Word(text)
         } else {
             Tok::Pic(text)

@@ -206,6 +206,7 @@ pub const FUNCTION_CLOCK: &str = "C114";
 pub const UUID4_SOURCE: &str = "C115";
 pub const FORMATTED_DATETIME_RULES: &str = "C116";
 pub const ROUNDED_EXTRA_PLACE: &str = "C101";
+pub const CURRENCY_SIGNS: &str = "C102";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1267,6 +1268,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: ROUNDED_EXTRA_PLACE,
         claim: "A receiver named with ROUNDED counts in dmax with one decimal place more than it holds, so a quotient, or an intermediate cut back to dmax places, keeps the digit that rounding reads: DIVIDE 44.1 INTO a PIC 9(4)V9 of 1661.7 ROUNDED gives 37.7, as CCVS85 NC117A and NC171A expect. The Programming Guide says only that under ROUNDED one more decimal place, and one more integer place, might be carried for accuracy if necessary (SC27-8714-03, p. 794); the Language Reference's ROUNDED phrase compares the result's fraction with the receiver's (SC27-8713-03, p. 296)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CURRENCY_SIGNS,
+        claim: "Once a program has a CURRENCY SIGN clause, $ is a currency symbol in its PICTUREs only if a clause names it: the Language Reference says the currency symbol is $ or the character a clause or the CURRENCY option specifies, and that the clause overrides the option (SC27-8713-03, pp. 130, 212), not that $ stays. A floating currency string of a value longer than one character ends in the position left of the first digit shown, the first currency position holding the whole value (p. 210). NUMVAL-C and TEST-NUMVAL-C without argument-2 take as cs the value of the program's only CURRENCY SIGN clause, where p. 616 names the currency symbol, and $ otherwise. A hexadecimal currency sign literal is refused, since its character depends on the code page",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

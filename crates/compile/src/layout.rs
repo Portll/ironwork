@@ -69,6 +69,8 @@ pub struct Layout {
     pub conditions: Vec<Condition>,
     /// The positions of each edited PICTURE.
     pub edits: Vec<Vec<Sym>>,
+    /// The currency sign value each edited PICTURE's currency symbol stands for, empty without one.
+    pub currencies: Vec<String>,
     /// Offset and size of each file's record area, in declaration order.
     pub file_areas: Vec<(u32, u32)>,
     /// The item of each LINKAGE record, in order.
@@ -88,15 +90,15 @@ pub const MAX_STORAGE: u32 = 128 << 20;
 
 /// Lays out WORKING-STORAGE, then each file's record area, which all its 01 records share and
 /// which is at least `record_max` bytes. Files whose `shared` entry names the same file share one
-/// area, as large as the largest of them (see [`record_area_owners`]). `decimal_comma` is
-/// DECIMAL-POINT IS COMMA, which changes what the PICTUREs mean.
+/// area, as large as the largest of them (see [`record_area_owners`]). `notation` is what
+/// SPECIAL-NAMES changes in the PICTUREs.
 pub fn build(
     entries: &[DataEntry],
     files: &[(&[DataEntry], Option<u32>)],
     shared: &[usize],
     linkage: &[DataEntry],
     local: &[DataEntry],
-    decimal_comma: bool,
+    notation: picture::Notation,
 ) -> Result<Layout, Error> {
     let mut items: Vec<Item> = Vec::new();
     let mut usages: Vec<Option<Usage>> = Vec::new();
@@ -234,14 +236,17 @@ pub fn build(
         }
         open.push(index);
     }
-    let mut edits = Vec::new();
+    let (mut edits, mut currencies) = (Vec::new(), Vec::new());
     let mut aligns = vec![1u32; items.len()];
     for (index, (_, e)) in tagged.iter().filter(|(_, e)| e.level != 88).enumerate() {
         if e.level == 66 {
             continue;
         }
-        let pic = e.picture.as_deref().map(|p| picture::analyse_with(p, decimal_comma).map_err(|m| Error::at(e.pos, m))).transpose()?;
+        let pic = e.picture.as_deref().map(|p| picture::analyse_with(p, notation).map_err(|m| Error::at(e.pos, m))).transpose()?;
         items[index].kind = kind(e, &items[index], usages[index], pic.as_ref(), &mut edits)?;
+        if currencies.len() < edits.len() {
+            currencies.push(pic.as_ref().and_then(|p| p.currency.clone()).unwrap_or_default());
+        }
         items[index].scaling = pic.as_ref().map_or(0, |p| p.scaling);
         items[index].size = elementary_size(&items[index], pic.as_ref().map(|p| p.size));
         if synchronized[index] && items[index].kind != Kind::Group {
@@ -367,7 +372,7 @@ pub fn build(
         };
         areas.push((start, size));
     }
-    Ok(Layout { items, conditions, edits, file_areas: areas, linkage_roots, local_size: local_cursor, size: cursor, file_names: Vec::new(), linage_counters: Vec::new() })
+    Ok(Layout { items, conditions, edits, currencies, file_areas: areas, linkage_roots, local_size: local_cursor, size: cursor, file_names: Vec::new(), linage_counters: Vec::new() })
 }
 
 /// Gives level-66 entry `index` the storage and attributes of what it renames (Language Reference

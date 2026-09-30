@@ -933,6 +933,7 @@ const FRAGMENTS: &[&str] = &[
     " AFTER ", "NO ADVANCING", "FUNCTION RANDOM", "FUNCTION RANDOM(", " <> ", " & ", "SECTION 50.", "SECTION 99", "\n       CBL DYNAM\n",
     " SYNC ", " SYNCHRONIZED RIGHT ", " COMP-2 SYNC ", "\n       66  RN RENAMES ", " THRU ", "PIC 99PP ", "PIC SVP(3)9 ", "PIC ZZZPP ", "PIC P",
     "DECIMAL-POINT IS COMMA. ", "1,5 ", ",25", "PIC Z.ZZ9,99 ", " FALSE 'N' ", " WHEN SET TO FALSE ", "SET X TO FALSE ", "CURRENCY SIGN '$' ",
+    "CURRENCY SIGN 'W' ", "CURRENCY 'EUR ' WITH PICTURE SYMBOL 'y' ", "PIC WWW9 ", "PIC yy9,99 ",
 ];
 
 fn mutate(base: &str, next: &mut impl FnMut() -> u64) -> String {

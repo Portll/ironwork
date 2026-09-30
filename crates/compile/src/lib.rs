@@ -120,7 +120,7 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
         errors.push(e);
         (0..files.len()).collect()
     });
-    let mut layout = match layout::build(&program.working_storage, &files, &shared, &program.linkage, &program.local_storage, program.environment.decimal_point_comma) {
+    let mut layout = match layout::build(&program.working_storage, &files, &shared, &program.linkage, &program.local_storage, crate::picture::Notation::of(&program.environment)) {
         Ok(l) => l,
         Err(e) => {
             errors.push(e);
@@ -301,7 +301,7 @@ fn digit_limits(program: &Program, arith: numeric::options::Arith, errors: &mut 
     let entries = program.working_storage.iter().chain(&program.local_storage).chain(&program.linkage).chain(program.files.iter().flat_map(|f| &f.records));
     for e in entries {
         if let Some(p) = e.picture.as_deref()
-            && let Ok(pic) = picture::analyse_with(p, program.environment.decimal_point_comma)
+            && let Ok(pic) = picture::analyse_with(p, crate::picture::Notation::of(&program.environment))
             && matches!(pic.category, picture::Category::Numeric | picture::Category::NumericEdited)
         {
             let positions = pic.digits + pic.scaling + pic.scale.saturating_sub(pic.digits);

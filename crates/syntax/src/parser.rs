@@ -59,12 +59,21 @@ fn figurative(word: &str) -> Option<Figurative> {
     })
 }
 
-/// A contained program has the alphabets, collating sequence, decimal point and debugging mode of
-/// the program containing it, whose configuration section is the only one (Language Reference
-/// SC27-8713-03, p. 121).
+/// A character that can stand for a currency sign in a PICTURE: a single byte that is no digit, space,
+/// PICTURE letter or one of + - , . * / ; ( ) " = ' (Language Reference SC27-8713-03, p. 130).
+fn currency_symbol(c: char) -> bool {
+    u32::from(c) < 256 && !c.is_ascii_digit() && !"ABCDEGNPRSUVXZabcdegnprsuvxz +-,.*/;()\"='".contains(c)
+}
+
+/// A contained program has the alphabets, collating sequence, decimal point, currency signs and
+/// debugging mode of the program containing it, whose configuration section is the only one
+/// (Language Reference SC27-8713-03, p. 121).
 fn share_configuration(outer: &Environment, inner: &mut Environment) {
     inner.debugging_mode |= outer.debugging_mode;
     inner.decimal_point_comma |= outer.decimal_point_comma;
+    if inner.currency.is_empty() {
+        inner.currency.clone_from(&outer.currency);
+    }
     if inner.collating_sequence.is_none() {
         inner.collating_sequence.clone_from(&outer.collating_sequence);
     }
@@ -380,12 +389,11 @@ impl Parser<'_> {
             if self.is_word("CURRENCY") {
                 let pos = self.pos();
                 self.at += 1;
-                self.accept_word("SIGN");
-                self.accept_word("IS");
-                let sign = self.literal()?;
-                if sign != Literal::Alnum("$".into()) || self.is_word("WITH") || self.is_word("PICTURE") {
-                    return Err(Error::at(pos, "a CURRENCY SIGN other than $ is not supported yet"));
+                let sign = self.currency_sign()?;
+                if clauses.currency.iter().any(|c| c.symbol == sign.symbol) {
+                    return Err(Error::at(pos, format!("a second CURRENCY SIGN clause for the currency symbol {:?}", sign.symbol)));
                 }
+                clauses.currency.push(sign);
                 continue;
             }
             if self.environment_clause(clauses)? {
@@ -415,6 +423,44 @@ impl Parser<'_> {
             self.at += 1;
         }
         Ok((files, repository))
+    }
+
+    /// CURRENCY [SIGN] [IS] literal-6 [[WITH] PICTURE SYMBOL literal-7], after CURRENCY, checked as
+    /// the Language Reference lists (SC27-8713-03, pp. 129-130).
+    fn currency_sign(&mut self) -> R<CurrencySign> {
+        self.accept_word("SIGN");
+        self.accept_word("IS");
+        let pos = self.pos();
+        let value = match self.literal()? {
+            Literal::Alnum(v) if !v.is_empty() => v,
+            Literal::Hex(_) => return Err(Error::at(pos, "a hexadecimal CURRENCY SIGN literal is not supported yet")),
+            _ => return Err(Error::at(pos, "CURRENCY SIGN needs a nonempty alphanumeric literal")),
+        };
+        let with = self.accept_word("WITH");
+        if !(self.is_word("PICTURE") && self.word_at(1) == Some("SYMBOL")) {
+            if with {
+                return Err(self.error("expected PICTURE SYMBOL after WITH"));
+            }
+            let mut chars = value.chars();
+            return match (chars.next(), chars.next()) {
+                (Some(symbol), None) if currency_symbol(symbol) => Ok(CurrencySign { value, symbol }),
+                _ => Err(Error::at(pos, format!("CURRENCY SIGN {value:?} is not one character that can be a PICTURE currency symbol"))),
+            };
+        }
+        self.at += 2;
+        if value.chars().any(|c| c.is_ascii_digit() || matches!(c, '+' | '-' | '.' | ',')) {
+            return Err(Error::at(pos, format!("CURRENCY SIGN {value:?} contains a digit, +, -, . or ,")));
+        }
+        let pos = self.pos();
+        let symbol = match self.literal()? {
+            Literal::Alnum(s) => s,
+            _ => String::new(),
+        };
+        let mut chars = symbol.chars();
+        match (chars.next(), chars.next()) {
+            (Some(symbol), None) if currency_symbol(symbol) => Ok(CurrencySign { value, symbol }),
+            _ => Err(Error::at(pos, format!("PICTURE SYMBOL {symbol:?} is not one character that can be a PICTURE currency symbol"))),
+        }
     }
 
     fn select(&mut self) -> R<FileDecl> {
@@ -2593,10 +2639,11 @@ mod tests {
     }
 
     #[test]
-    fn decimal_point_is_comma_reaches_contained_programs_and_other_currency_signs_are_refused() {
+    fn decimal_point_is_comma_and_currency_signs_reach_contained_programs() {
         let text = [
             "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OUTER.\n       ENVIRONMENT DIVISION.\n",
-            "       CONFIGURATION SECTION.\n       SPECIAL-NAMES.\n           CURRENCY SIGN IS '$'\n           DECIMAL-POINT IS COMMA.\n",
+            "       CONFIGURATION SECTION.\n       SPECIAL-NAMES.\n           CURRENCY SIGN IS 'W'\n",
+            "           CURRENCY 'EUR ' WITH PICTURE SYMBOL 'y'\n           DECIMAL-POINT IS COMMA.\n",
             "       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  A PIC 9V9 VALUE 1,5.\n",
             "       PROCEDURE DIVISION.\n           GOBACK.\n",
             "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. INNER.\n       PROCEDURE DIVISION.\n           GOBACK.\n",
@@ -2606,8 +2653,33 @@ mod tests {
         let programs = crate::parse_all_with(&text, &crate::copy::Libraries::default()).unwrap_or_else(|e| panic!("{e}"));
         assert!(programs.iter().all(|p| p.environment.decimal_point_comma));
         assert_eq!(programs[0].working_storage[0].value, Some(Literal::Number("1.5".into())));
-        let other = text.replace("'$'", "'W'");
-        assert!(crate::parse(&other).unwrap_err().message.contains("CURRENCY SIGN"));
+        let signs = [CurrencySign { value: "W".into(), symbol: 'W' }, CurrencySign { value: "EUR ".into(), symbol: 'y' }];
+        assert!(programs.iter().all(|p| p.environment.currency == signs));
+        for (clause, why) in [
+            ("'E'", "one character"),
+            ("'EUR'", "one character"),
+            ("'E9' PICTURE SYMBOL 'Y'", "a digit"),
+            ("'EUR' PICTURE SYMBOL 'Z'", "PICTURE SYMBOL"),
+            ("X'9F' PICTURE SYMBOL 'Y'", "hexadecimal"),
+            ("'EUR' WITH 'Y'", "PICTURE SYMBOL after WITH"),
+            ("'W'\n           CURRENCY 'WON' PICTURE SYMBOL 'W'", "a second CURRENCY SIGN"),
+        ] {
+            let bad = text.replace("CURRENCY SIGN IS 'W'", &format!("CURRENCY SIGN IS {clause}"));
+            let message = crate::parse(&bad).unwrap_err().message;
+            assert!(message.contains(why), "{clause}: {message}");
+        }
+    }
+
+    #[test]
+    fn a_picture_keeps_the_case_of_a_currency_symbol_and_picture_symbol_is_no_picture_string() {
+        let text = concat!(
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n",
+            "       SPECIAL-NAMES.\n           CURRENCY SIGN 'CHF ' WITH PICTURE SYMBOL 'f'.\n       DATA DIVISION.\n",
+            "       WORKING-STORAGE SECTION.\n       01  A PIC fff9v99.\n       01  B PIC zz9.\n",
+        );
+        let p = crate::parse(text).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(p.environment.currency, [CurrencySign { value: "CHF ".into(), symbol: 'f' }]);
+        assert_eq!((p.working_storage[0].picture.as_deref(), p.working_storage[1].picture.as_deref()), (Some("fff9V99"), Some("ZZ9")));
     }
 
     #[test]

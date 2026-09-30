@@ -177,8 +177,9 @@ The subset the interpreter runs today:
   INDEXED BY and DEPENDING ON, SIGN, SYNCHRONIZED with IBM's slack bytes before an item and after
   each occurrence of a table, level-66 RENAMES of one item or a THRU range, and level-88
   conditions with THRU ranges and WHEN SET TO FALSE. SPECIAL-NAMES DECIMAL-POINT IS COMMA
-  exchanges the comma and the period in PICTUREs, numeric literals and NUMVAL and NUMVAL-C, for
-  the program and the programs it contains. Numeric PICTUREs and literals hold at most 18 digits
+  exchanges the comma and the period in PICTUREs, numeric literals and NUMVAL and NUMVAL-C, and
+  CURRENCY SIGN clauses, with or without PICTURE SYMBOL, give the currency symbols and the values
+  editing inserts (assumption C102), for the program and the programs it contains. Numeric PICTUREs and literals hold at most 18 digits
   under ARITH(COMPAT) and 31 under ARITH(EXTEND). A zoned item longer than one PACK takes, up to
   31 digits, is packed in parts (assumption C34). A group that holds the object of its own OCCURS
   DEPENDING ON receives data at its maximum length, as IBM lists for MOVE, ACCEPT, STRING,

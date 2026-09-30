@@ -729,6 +729,14 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         if self.program.environment.decimal_point_comma { ',' } else { '.' }
     }
 
+    /// The cs of NUMVAL-C and TEST-NUMVAL-C without argument-2 (assumption C102).
+    fn default_currency(&self) -> String {
+        match self.program.environment.currency.as_slice() {
+            [only] => only.value.clone(),
+            _ => "$".to_owned(),
+        }
+    }
+
     fn read(&self, loc: Loc, pos: Pos) -> R<Val> {
         let value = self.read_stored(loc, pos)?;
         Ok(match value {
@@ -1385,7 +1393,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 arity(1..=2)?;
                 let currency = match args.get(1) {
                     Some(v) => self.page.decode(&bytes_of(v)?),
-                    None => "$".to_owned(),
+                    None => self.default_currency(),
                 };
                 let mut text = self.page.decode(&bytes_of(&args[0])?);
                 if self.program.environment.decimal_point_comma {
@@ -1903,7 +1911,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 let m = align(value, scale, rounded).ok_or_else(beyond)?;
                 let cap = pow10(digits);
                 let kept = m.div_rem(cap).1.to_u128().unwrap();
-                let text = crate::edit::numeric(&self.layout.edits[edit as usize], digits, value.negative && kept != 0, kept, blank_when_zero, self.decimal_point());
+                let text = crate::edit::numeric(&self.layout.edits[edit as usize], digits, value.negative && kept != 0, kept, blank_when_zero, self.decimal_point(), &self.layout.currencies[edit as usize]);
                 (self.page.encode(&text).map_err(|e| Abend::ironwork(e.to_string(), pos))?, m >= cap)
             }
             _ => return Err(Abend::ironwork("a numeric value stored into a non-numeric item", pos)),
@@ -2023,7 +2031,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 Val::Bytes(b) => {
                     let v = match src.map(|s| (s, s.kind)) {
                         Some((s, Kind::NumericEdited { edit, .. })) => {
-                            let (negative, magnitude) = crate::edit::de_edit(&self.layout.edits[edit as usize], &self.page.decode(&b));
+                            let (negative, magnitude) = crate::edit::de_edit(&self.layout.edits[edit as usize], &self.page.decode(&b), &self.layout.currencies[edit as usize]);
                             scaled_up(fixed(negative, U256::from_u128(magnitude), places_of(s.kind)), self.scaling(s))
                         }
                         _ => {
