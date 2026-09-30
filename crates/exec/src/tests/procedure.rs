@@ -508,3 +508,32 @@ fn numeric_functions_take_floating_point_arguments() {
     let (_, _, ending) = run_with(&source("COMPUTE R = FUNCTION MOD(F, 2)"), &[]);
     assert_eq!(ending.unwrap_err().message, "FUNCTION MOD needs integer arguments, and a floating-point argument is not one");
 }
+
+#[test]
+fn a_paragraph_name_in_two_sections_is_the_referencing_sections_own() {
+    let sections = |third: &str| {
+        program(
+            "",
+            "       01  N PIC 9 VALUE 0.\n",
+            &[
+                "       FIRST-S SECTION.\n       P0.\n",
+                &line("PERFORM P1"),
+                &line("GO TO P1."),
+                "       P1.\n",
+                &line("DISPLAY 'FIRST'."),
+                "       SECOND-S SECTION.\n       Q0.\n",
+                &line("PERFORM P1"),
+                &line("GO TO THIRD-S."),
+                "       P1.\n",
+                &line("DISPLAY 'SECOND'."),
+                "       THIRD-S SECTION.\n       R0.\n",
+                &line(third),
+                &line("GOBACK."),
+            ]
+            .concat(),
+        )
+    };
+    let out = run(&sections("CONTINUE."));
+    assert_eq!(out, "FIRST\nFIRST\nSECOND\n");
+    assert!(compile_errors(&sections("PERFORM P1.")).contains("P1 names more than one paragraph"));
+}

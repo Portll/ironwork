@@ -85,6 +85,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     let mut errors = std::mem::take(&mut program.messages);
     reserved::check(&program, &mut errors);
     let mut program = declaratives::with_debug_item(markup::with_special_registers(sort::with_special_registers(program)));
+    qualify_in_own_section(&mut program);
     let mut options = Options::default();
     let mut ssrange = false;
     for option in &program.options {
@@ -316,6 +317,54 @@ pub fn section_end(program: &Program, i: usize) -> usize {
     let (floor, ceiling) = if i < declaratives { (0, declaratives) } else { (declaratives, paragraphs.len()) };
     let Some(header) = (floor..=i).rev().find(|&j| paragraphs[j].is_section) else { return i };
     (header + 1..ceiling).take_while(|&j| !paragraphs[j].is_section).last().unwrap_or(header)
+}
+
+/// Qualifies each unqualified paragraph-name that more than one section holds with the section it
+/// is written in, when that section holds it: within its own section a paragraph-name needs no
+/// qualifier, so every later lookup must find that paragraph.
+fn qualify_in_own_section(program: &mut Program) {
+    let paragraphs: Vec<(String, Option<String>, bool)> = program.paragraphs.iter().map(|p| (p.name.clone(), p.section.clone(), p.is_section)).collect();
+    let in_section = |name: &str, section: &str| paragraphs.iter().any(|(n, s, is_section)| n == name && !is_section && s.as_deref() == Some(section));
+    let named = |name: &str| paragraphs.iter().filter(|(n, ..)| n == name).count();
+    fn qualify(stmts: &mut [Stmt], section: &str, needs: &dyn Fn(&str) -> bool) {
+        for s in stmts {
+            for p in procedure_names_mut(s) {
+                if p.section.is_none() && needs(&p.name) {
+                    p.section = Some(section.to_owned());
+                }
+            }
+            for body in oo::bodies_mut(s) {
+                qualify(body, section, needs);
+            }
+        }
+    }
+    for p in &mut program.paragraphs {
+        let Some(section) = p.section.clone() else { continue };
+        qualify(&mut p.statements, &section, &|name| named(name) > 1 && in_section(name, &section));
+    }
+}
+
+/// The procedure-names statement `s` itself names, not those of the statements it holds.
+fn procedure_names_mut(s: &mut Stmt) -> Vec<&mut ProcName> {
+    match s {
+        Stmt::PerformProc { from, thru, .. } => std::iter::once(from).chain(thru.as_mut()).collect(),
+        Stmt::GoTo { target, .. } => target.iter_mut().collect(),
+        Stmt::GoToDepending { targets, .. } => targets.iter_mut().collect(),
+        Stmt::Alter { pairs, .. } => pairs.iter_mut().flat_map(|(from, to)| [from, to]).collect(),
+        Stmt::XmlParse(x) => std::iter::once(&mut x.procedure).chain(x.thru.as_mut()).collect(),
+        Stmt::Sorting(so) => match &mut **so {
+            Sorting::Sort(st) => [st.input.as_mut(), st.output.as_mut()]
+                .into_iter()
+                .flatten()
+                .flat_map(|io| match io {
+                    SortIo::Procedure { from, thru } => std::iter::once(from).chain(thru.as_mut()).collect(),
+                    SortIo::Files(_) => Vec::new(),
+                })
+                .collect(),
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    }
 }
 
 /// The first and last paragraph a procedure name covers: one paragraph, or a whole section.
