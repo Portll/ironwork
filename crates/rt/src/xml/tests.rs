@@ -20,6 +20,9 @@ fn run(segments: &[&str]) -> Result<Vec<String>, (Vec<String>, Malformed)> {
                 if e.information == 2 {
                     line.push_str(" (more)");
                 }
+                if e.code != 0 {
+                    line.push_str(&format!(" {}", e.code));
+                }
                 out.push(line.trim_end().to_owned());
                 if e.kind == EventKind::EndOfDocument {
                     return Ok(out);
@@ -141,8 +144,6 @@ fn a_document_that_is_not_well_formed_stops_where_it_goes_wrong() {
     assert_eq!(error("<a/><b/>"), Malformed { offset: 4, why: Why::SecondRoot });
     assert_eq!(Why::MismatchedEndTag.code(), 0x000C_3035);
     assert_eq!(error("   "), Malformed { offset: 3, why: Why::NoRoot });
-    assert_eq!(error("<q:a/>"), Malformed { offset: 1, why: Why::UndeclaredElementPrefix });
-    assert_eq!(error(r#"<a q:b="1"/>"#), Malformed { offset: 3, why: Why::UndeclaredAttributePrefix });
     assert_eq!(error("<a><!-- x -- y --></a>"), Malformed { offset: 18, why: Why::BadComment });
     assert_eq!(error(r#"<a b="<"/>"#), Malformed { offset: 6, why: Why::LessThanInAttribute });
     assert_eq!(error(" <?xml version=\"1.0\"?><a/>"), Malformed { offset: 3, why: Why::BadDeclaration });
@@ -176,5 +177,50 @@ fn a_doctype_gives_its_root_and_standalone_no_lets_an_entity_stay_unresolved() {
     assert_eq!(
         events,
         ["START-OF-DOCUMENT", "VERSION-INFORMATION 1.0", "STANDALONE-DECLARATION no", "DOCUMENT-TYPE-DECLARATION a", "START-OF-ELEMENT a", "UNRESOLVED-REFERENCE e", "END-OF-ELEMENT a", "END-OF-DOCUMENT"]
+    );
+}
+
+#[test]
+fn an_undeclared_prefix_is_a_warning_before_its_name_as_the_programming_guides_table_83_shows() {
+    let document = concat!(
+        r#"<pfx0:root xmlns:pfx1="http://whatever">"#,
+        "<pfx1:localElName1>",
+        "<pfx2:localElName2/>",
+        r#"<pfx3:localElName3 pfx4:localAtName4="">"#,
+        "c1",
+        r#"<pfx5:localElName5 pfx6:localAtName6=""/>"#,
+        "c2</pfx3:localElName3>c3",
+        "</pfx1:localElName1></pfx0:root>",
+    );
+    assert_eq!(
+        run(&[document]).unwrap(),
+        [
+            "START-OF-DOCUMENT",
+            "EXCEPTION pfx0:root 264193",
+            "START-OF-ELEMENT root [pfx0|]",
+            "NAMESPACE-DECLARATION [pfx1|http://whatever]",
+            "START-OF-ELEMENT localElName1 [pfx1|http://whatever]",
+            "EXCEPTION pfx2:localElName2 264193",
+            "START-OF-ELEMENT localElName2 [pfx2|]",
+            "END-OF-ELEMENT localElName2 [pfx2|]",
+            "EXCEPTION pfx3:localElName3 264193",
+            "START-OF-ELEMENT localElName3 [pfx3|]",
+            "EXCEPTION pfx4:localAtName4 264192",
+            "ATTRIBUTE-NAME localAtName4 [pfx4|]",
+            "ATTRIBUTE-CHARACTERS",
+            "CONTENT-CHARACTERS c1",
+            "EXCEPTION pfx5:localElName5 264193",
+            "START-OF-ELEMENT localElName5 [pfx5|]",
+            "EXCEPTION pfx6:localAtName6 264192",
+            "ATTRIBUTE-NAME localAtName6 [pfx6|]",
+            "ATTRIBUTE-CHARACTERS",
+            "END-OF-ELEMENT localElName5 [pfx5|]",
+            "CONTENT-CHARACTERS c2",
+            "END-OF-ELEMENT localElName3 [pfx3|]",
+            "CONTENT-CHARACTERS c3",
+            "END-OF-ELEMENT localElName1 [pfx1|http://whatever]",
+            "END-OF-ELEMENT root [pfx0|]",
+            "END-OF-DOCUMENT",
+        ]
     );
 }

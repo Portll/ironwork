@@ -88,3 +88,39 @@ fn namespaces_and_national_text_fill_their_registers() {
     let national = parse(data, &["XML PARSE DOC RETURNING NATIONAL PROCESSING PROCEDURE P"], &["MOVE SPACES TO N", "MOVE XML-NTEXT TO N", "DISPLAY FUNCTION DISPLAY-OF(N) '|' LENGTH OF XML-TEXT."]);
     assert_eq!(trimmed(&national)[1], "a         |000000000");
 }
+
+#[test]
+fn the_parse_goes_on_past_an_undeclared_prefix_only_when_xml_code_is_reset() {
+    let data = "       01  DOC PIC X(28) VALUE '<q:a><b q:c=\"1\">x</b></q:a>'.\n       01  GO-ON PIC 9.\n       01  C PIC 9(9).\n";
+    let handler = [
+        "MOVE XML-CODE TO C",
+        "DISPLAY XML-EVENT(1:20) C ' ' XML-TEXT",
+        "IF XML-EVENT = 'EXCEPTION' AND GO-ON = 1\n    MOVE 0 TO XML-CODE\nEND-IF.",
+    ];
+    let main = [
+        "MOVE 1 TO GO-ON",
+        "XML PARSE DOC PROCESSING PROCEDURE P\n    NOT ON EXCEPTION DISPLAY 'DONE'\nEND-XML",
+        "MOVE 0 TO GO-ON",
+        "XML PARSE DOC PROCESSING PROCEDURE P\n    ON EXCEPTION MOVE XML-CODE TO C\n    DISPLAY 'STOPPED ' C\nEND-XML",
+    ];
+    assert_eq!(
+        trimmed(&parse(data, &main, &handler)),
+        [
+            "START-OF-DOCUMENT   000000000",
+            "EXCEPTION           000264193 q:a",
+            "START-OF-ELEMENT    000000000 a",
+            "START-OF-ELEMENT    000000000 b",
+            "EXCEPTION           000264192 q:c",
+            "ATTRIBUTE-NAME      000000000 c",
+            "ATTRIBUTE-CHARACTERS000000000 1",
+            "CONTENT-CHARACTERS  000000000 x",
+            "END-OF-ELEMENT      000000000 b",
+            "END-OF-ELEMENT      000000000 a",
+            "END-OF-DOCUMENT     000000000",
+            "DONE",
+            "START-OF-DOCUMENT   000000000",
+            "EXCEPTION           000264193 q:a",
+            "STOPPED 000264193",
+        ]
+    );
+}

@@ -217,7 +217,8 @@ The subset the interpreter runs today:
   ironwork's choosing (C54). JSON GENERATE, with COUNT, NAME, SUPPRESS, CONVERTING, INDICATING,
   ENCODING and ON EXCEPTION, sets JSON-CODE (C117). XML PARSE reports z/OS XML System Services'
   events to its processing procedure, in segments through END-OF-INPUT, with XML-TEXT, XML-NTEXT and
-  the namespace registers, and XMLSS's codes in XML-CODE (C118). XML GENERATE, with COUNT, ENCODING,
+  the namespace registers, XMLSS's codes in XML-CODE, and past an undeclared prefix when the
+  procedure resets XML-CODE (C118). XML GENERATE, with COUNT, ENCODING,
   XML-DECLARATION, ATTRIBUTES, NAMESPACE and its prefix, NAME, TYPE, SUPPRESS and ON EXCEPTION, sets
   XML-CODE (C119). JSON PARSE, with NAME and OMITTED, SUPPRESS, CONVERTING, INDICATING, IGNORING and
   ENCODING, moves each matched value by MOVE's rules and sets JSON-CODE and JSON-STATUS (C170). What is not Enterprise COBOL is refused as such:

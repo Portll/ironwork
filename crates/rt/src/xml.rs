@@ -75,11 +75,20 @@ pub struct Event {
     /// XML-INFORMATION: 1 when attribute or content characters are complete, 2 when more follow,
     /// 0 for every other event (p. 34).
     pub information: i32,
+    /// XML-CODE for an EXCEPTION the parse goes on from when the processing procedure sets XML-CODE
+    /// to zero: an undeclared prefix's warning.
+    pub code: i32,
 }
 
 impl Event {
     fn new(kind: EventKind, text: impl Into<String>) -> Self {
-        Self { kind, text: text.into(), namespace: String::new(), prefix: String::new(), information: 0 }
+        Self { kind, text: text.into(), namespace: String::new(), prefix: String::new(), information: 0, code: 0 }
+    }
+
+    /// The warning for a name with an undeclared prefix, which XML-TEXT holds whole (Programming
+    /// Guide SC27-8714-03, pp. 647, 656-658).
+    fn undeclared(why: Why, qualified: &str) -> Self {
+        Self { code: why.code(), ..Self::new(EventKind::Exception, qualified) }
     }
 
     fn characters(kind: EventKind, text: String, complete: bool) -> Self {
@@ -642,7 +651,6 @@ impl<'r> Scanner<'r> {
     }
 
     fn start_tag(&mut self) -> Scan<()> {
-        let tag_start = self.at;
         self.at += 1;
         let qualified = self.name()?;
         let mut attributes: Vec<(String, usize, String, Vec<Event>)> = Vec::new();
@@ -693,18 +701,19 @@ impl<'r> Scanner<'r> {
             }
         }
         let (prefix, local) = split(&qualified);
+        let mut events = Vec::new();
         let namespace = match self.bound(&prefix) {
             Some(uri) => uri.to_owned(),
-            None if prefix.is_empty() => String::new(),
             None => {
-                self.bindings.truncate(scope);
-                self.at = tag_start + 1;
-                return Err(Why::UndeclaredElementPrefix);
+                if !prefix.is_empty() {
+                    events.push(Event::undeclared(Why::UndeclaredElementPrefix, &qualified));
+                }
+                String::new()
             }
         };
-        let mut events = vec![Event { namespace: namespace.clone(), prefix: prefix.clone(), ..Event::new(EventKind::StartOfElement, local.clone()) }];
+        events.push(Event { namespace: namespace.clone(), prefix: prefix.clone(), ..Event::new(EventKind::StartOfElement, local.clone()) });
         events.extend(declarations);
-        for (name, name_at, _, parts) in attributes {
+        for (name, _, _, parts) in attributes {
             if name == "xmlns" || name.starts_with("xmlns:") {
                 continue;
             }
@@ -715,9 +724,8 @@ impl<'r> Scanner<'r> {
                 match self.bound(&attribute_prefix) {
                     Some(uri) => uri.to_owned(),
                     None => {
-                        self.bindings.truncate(scope);
-                        self.at = name_at;
-                        return Err(Why::UndeclaredAttributePrefix);
+                        events.push(Event::undeclared(Why::UndeclaredAttributePrefix, &name));
+                        String::new()
                     }
                 }
             };

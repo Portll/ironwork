@@ -155,12 +155,18 @@ impl<'p> Machine<'p, '_, '_> {
         let mut scanner = Scanner::new(&text, &*representable);
         let mark = self.unit.mem.len();
         let code = loop {
-            let (event, exception) = match scanner.advance() {
-                Step::Event(e) => (e, None),
-                Step::EndOfInput => (Event { kind: EventKind::EndOfInput, text: String::new(), namespace: String::new(), prefix: String::new(), information: 0 }, None),
+            // An EXCEPTION the scanner reports as an event is a warning the parse can go on from.
+            let (event, exception, warning) = match scanner.advance() {
+                Step::Event(e) if e.kind == EventKind::Exception => {
+                    let code = i64::from(e.code);
+                    (e, Some(code), true)
+                }
+                Step::Event(e) => (e, None, false),
+                Step::EndOfInput => (Event { kind: EventKind::EndOfInput, text: String::new(), namespace: String::new(), prefix: String::new(), information: 0, code: 0 }, None, false),
                 Step::Error(m) => {
                     let upto: String = seen.chars().take(m.offset).collect();
-                    (Event { kind: EventKind::Exception, text: upto, namespace: String::new(), prefix: String::new(), information: 0 }, Some(i64::from(m.why.code())))
+                    let code = m.why.code();
+                    (Event { kind: EventKind::Exception, text: upto, namespace: String::new(), prefix: String::new(), information: 0, code }, Some(i64::from(code)), false)
                 }
                 Step::Done => break 0,
             };
@@ -173,7 +179,8 @@ impl<'p> Machine<'p, '_, '_> {
             }
             let code = self.xml_code(x.pos)?;
             match event.kind {
-                EventKind::Exception => break code,
+                EventKind::Exception if warning && code == 0 => {}
+                EventKind::Exception => break exception.unwrap_or(code),
                 EventKind::EndOfDocument => break 0,
                 EventKind::EndOfInput if code == 1 => {
                     let segment = self.xml_document(x, encoding)?;
