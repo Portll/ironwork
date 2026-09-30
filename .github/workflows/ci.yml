@@ -17,13 +17,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The option table is vendored from cobolwork; its drift test compares it with cobolwork's.
+      # The option table and fixtures/cobolwork are vendored from cobolwork; drift tests compare them.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Portll/cobolwork
           path: cobolwork
           persist-credentials: false
-          sparse-checkout: provenance/enterprise-options.tsv
+          sparse-checkout: |
+            provenance/enterprise-options.tsv
+            test/fixtures/bms/
+            test/fixtures/sql/
           sparse-checkout-cone-mode: false
       - name: Toolchain
         run: |

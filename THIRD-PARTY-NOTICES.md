@@ -134,6 +134,15 @@ All trademarks and registered trademarks mentioned herein are the
 property of their respective owners.
 ```
 
+## AWS CardDemo test fixtures — Apache License 2.0
+
+**Where:** [`fixtures/cobolwork/bms/`](fixtures/cobolwork/bms/), four files copied by way of
+cobolwork from [AWS CardDemo](https://github.com/aws-samples/aws-mainframe-modernization-carddemo):
+the `COSGN00` and `COCRDSL` BMS maps (`app/bms/`) and the copybooks CICS generated from them
+(`app/cpy-bms/`). Tests read them; nothing built from ironwork includes them. Each file is unchanged
+below a header naming its source, and keeps its Amazon copyright notice and the Apache License 2.0
+header, whose text is at <https://www.apache.org/licenses/LICENSE-2.0>.
+
 ## Contributor agreement
 
 [`CLA.md`](CLA.md) is adapted from the Apache Software Foundation's Individual Contributor License
