@@ -35,6 +35,8 @@ pub struct Token {
     pub pos: Pos,
     /// Starts in area A (columns 8 to 11), where division, section and paragraph headers go.
     pub area_a: bool,
+    /// A word as the source spells it, where that is not all capitals.
+    pub spelled: Option<String>,
 }
 
 struct Lexer<'a> {
@@ -97,7 +99,17 @@ impl Lexer<'_> {
             }
             _ => {}
         }
-        self.tokens.push(Token { tok, pos, area_a: (8..=11).contains(&pos.col) });
+        let spelled = match &tok {
+            Tok::Word(w) => self
+                .at
+                .checked_sub(w.chars().count())
+                .map(|start| &self.chars[start..self.at])
+                .filter(|raw| raw.iter().any(char::is_ascii_lowercase))
+                .map(|raw| raw.iter().collect::<String>())
+                .filter(|raw| raw.eq_ignore_ascii_case(w)),
+            _ => None,
+        };
+        self.tokens.push(Token { tok, pos, area_a: (8..=11).contains(&pos.col), spelled });
     }
 
     /// The character that is a numeric literal's decimal point.

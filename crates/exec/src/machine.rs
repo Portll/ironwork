@@ -30,6 +30,7 @@ mod cics_services;
 mod declaratives;
 mod file_io;
 mod intrinsic;
+mod json;
 mod le_services;
 mod oo;
 mod perform;
@@ -432,6 +433,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 });
             }
             Stmt::Invoke(i) => return self.invoke(i),
+            Stmt::JsonGenerate(g) => return self.json_generate(g),
             Stmt::ExitMethod { .. } => return Ok(Flow::End(Ending::Goback)),
             Stmt::SentenceEnd => {}
             Stmt::StopRun { .. } => return Ok(Flow::End(Ending::StopRun)),

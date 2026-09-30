@@ -207,6 +207,7 @@ pub const UUID4_SOURCE: &str = "C115";
 pub const FORMATTED_DATETIME_RULES: &str = "C116";
 pub const ROUNDED_EXTRA_PLACE: &str = "C101";
 pub const CURRENCY_SIGNS: &str = "C102";
+pub const JSON_GENERATE_RULES: &str = "C117";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1274,6 +1275,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: CURRENCY_SIGNS,
         claim: "Once a program has a CURRENCY SIGN clause, $ is a currency symbol in its PICTUREs only if a clause names it: the Language Reference says the currency symbol is $ or the character a clause or the CURRENCY option specifies, and that the clause overrides the option (SC27-8713-03, pp. 130, 212), not that $ stays. A floating currency string of a value longer than one character ends in the position left of the first digit shown, the first currency position holding the whole value (p. 210). NUMVAL-C and TEST-NUMVAL-C without argument-2 take as cs the value of the program's only CURRENCY SIGN clause, where p. 616 names the currency symbol, and $ otherwise. A hexadecimal currency sign literal is refused, since its character depends on the code page",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: JSON_GENERATE_RULES,
+        claim: "JSON GENERATE (Language Reference SC27-8713-03, pp. 369-382) writes zoned, packed, binary, index and internal floating-point items as JSON numbers and every other elementary item as a string, choosing where the manual is silent: a table element that a SUPPRESS ... WHEN phrase leaves out is left out of its array, and a table all of whose elements are left out is left out; the members of an unnamed group join its parent's object; a COMP-1 or COMP-2 value takes the digits of its exact HFP value rounded to 9 or 18 significant digits; a character an EBCDIC ENCODING cannot hold becomes X'3F'; when the receiver is too small it holds the leading bytes of the document, whole characters for a national receiver, and COUNT names that many character positions; JSON-CODE and JSON-STATUS are declared in each program that has the statement rather than as GLOBAL in the outermost one",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

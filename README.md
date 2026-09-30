@@ -206,8 +206,9 @@ The subset the interpreter runs today:
   ULENGTH, UPOS, USUBSTR, USUPPLEMENTARY, UVALID and UWIDTH, with table arguments written with ALL
   subscripts. The floating-point functions (SQRT, LOG, SIN and the rest, assumption C111) are
   computed to 128 bits and rounded to long or extended HFP (C110); RANDOM is a generator of
-  ironwork's choosing (C54). What is not Enterprise COBOL is refused as such: `<>`, literals joined
-  with `&`, SET ENVIRONMENT and ACCEPT ... FROM ENVIRONMENT.
+  ironwork's choosing (C54). JSON GENERATE, with COUNT, NAME, SUPPRESS, CONVERTING, INDICATING,
+  ENCODING and ON EXCEPTION, sets JSON-CODE (C117). What is not Enterprise COBOL is refused as such:
+  `<>`, literals joined with `&`, SET ENVIRONMENT and ACCEPT ... FROM ENVIRONMENT.
 - **Subprograms:** several and nested programs per source; CALL (static and dynamic) USING BY
   REFERENCE, BY CONTENT, BY VALUE and OMITTED, RETURNING, ON EXCEPTION; PROCEDURE DIVISION USING
   and RETURNING; ENTRY [USING], whose name a CALL begins at and whose USING list alone gives LINKAGE

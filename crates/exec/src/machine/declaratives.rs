@@ -84,6 +84,7 @@ pub(super) fn statement_pos(s: &Stmt) -> Option<Pos> {
         Stmt::Search(se) => se.pos,
         Stmt::Exec(block) => block.pos,
         Stmt::Invoke(i) => i.pos,
+        Stmt::JsonGenerate(g) => g.pos,
         Stmt::Report(r) => match &**r {
             ReportStmt::Initiate { pos, .. } | ReportStmt::Generate { pos, .. } | ReportStmt::Terminate { pos, .. } | ReportStmt::Suppress { pos } => *pos,
         },

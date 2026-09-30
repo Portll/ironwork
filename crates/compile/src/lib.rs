@@ -5,6 +5,7 @@ pub mod collating;
 pub mod declaratives;
 pub mod layout;
 pub mod linage;
+mod markup;
 pub mod oo;
 pub mod picture;
 pub mod printer;
@@ -82,7 +83,7 @@ pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error
 pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -> Result<Compiled, Vec<Error>> {
     let mut errors = Vec::new();
     reserved::check(&program, &mut errors);
-    let mut program = declaratives::with_debug_item(sort::with_special_registers(program));
+    let mut program = declaratives::with_debug_item(markup::with_special_registers(sort::with_special_registers(program)));
     let mut options = Options::default();
     let mut ssrange = false;
     for option in &program.options {
@@ -581,6 +582,36 @@ impl Check<'_> {
             Stmt::Exec(block) => self.exec_block(block),
             Stmt::Report(r) => report::check_statement(self.program, r, self.errors),
             Stmt::Invoke(i) => self.invoke(i),
+            Stmt::JsonGenerate(g) => {
+                for r in [&g.receiver, &g.from].into_iter().chain(&g.count) {
+                    self.reference(r);
+                }
+                let mut named: Vec<&Ref> = g.names.iter().map(|(r, _)| r).collect();
+                for s in &g.suppress {
+                    if let Suppression::Item { item, .. } = s {
+                        named.push(item);
+                    }
+                }
+                for (item, conversion) in &g.converting {
+                    named.push(item);
+                    if let JsonConversion::Boolean(Marker::Condition(c)) = conversion {
+                        named.push(c);
+                    }
+                }
+                for i in &g.indicating {
+                    named.push(&i.item);
+                    named.extend(&i.indicator);
+                    if let Marker::Condition(c) = &i.marker {
+                        named.push(c);
+                    }
+                }
+                named.into_iter().for_each(|r| self.reference_unsubscripted(r));
+                if let Some(Encoding::Ccsid(op)) = &g.encoding {
+                    self.operand(op);
+                }
+                self.statements(g.on_exception.as_deref().unwrap_or_default());
+                self.statements(g.not_on_exception.as_deref().unwrap_or_default());
+            }
             Stmt::Sorting(s) => self.sorting(s),
             // Language Reference SC27-8713-03, p. 344.
             Stmt::Exit { kind: kind @ (ExitKind::Perform | ExitKind::PerformCycle), pos } if self.inline_performs == 0 => {

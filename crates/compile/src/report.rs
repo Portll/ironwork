@@ -212,6 +212,7 @@ pub(crate) fn entry(level: u8, name: Option<String>, picture: Option<String>, us
     DataEntry {
         level,
         name,
+        spelled: None,
         picture,
         usage,
         value: None,

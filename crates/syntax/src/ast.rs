@@ -145,6 +145,9 @@ pub struct DataEntry {
     pub level: u8,
     /// None for FILLER or an unnamed entry.
     pub name: Option<String>,
+    /// The name as the source spells it, where that is not all capitals: JSON and XML GENERATE
+    /// keep it.
+    pub spelled: Option<String>,
     pub picture: Option<String>,
     /// None when no USAGE is written; the item then inherits its group's.
     pub usage: Option<Usage>,
@@ -408,6 +411,7 @@ pub enum Stmt {
     Exec(Box<ExecBlock>),
     Report(Box<crate::report::ReportStmt>),
     Invoke(Box<Invoke>),
+    JsonGenerate(Box<JsonGenerate>),
     ExitMethod { pos: Pos },
     Sorting(Box<Sorting>),
     StopRun { pos: Pos },
@@ -702,3 +706,56 @@ pub enum SortIo {
     Procedure { from: ProcName, thru: Option<ProcName> },
 }
 
+
+/// JSON GENERATE (Language Reference SC27-8713-03, pp. 369-382).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JsonGenerate {
+    pub receiver: Ref,
+    pub from: Ref,
+    pub count: Option<Ref>,
+    /// NAME OF item IS literal; `None` for OMITTED.
+    pub names: Vec<(Ref, Option<Literal>)>,
+    pub suppress: Vec<Suppression>,
+    pub converting: Vec<(Ref, JsonConversion)>,
+    pub indicating: Vec<NullIndicator>,
+    pub encoding: Option<Encoding>,
+    pub on_exception: Option<Vec<Stmt>>,
+    pub not_on_exception: Option<Vec<Stmt>>,
+    pub pos: Pos,
+}
+
+/// A SUPPRESS phrase: an item, or EVERY item of a class (`Some(true)` NUMERIC, `Some(false)`
+/// NONNUMERIC, `None` both), suppressed always or only WHEN it equals one of the figurative constants.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Suppression {
+    Item { item: Ref, when: Vec<Figurative> },
+    Every { numeric: Option<bool>, when: Vec<Figurative> },
+}
+
+/// A value that stands for true (CONVERTING ... TO JSON BOOLEAN) or for null (INDICATING): a
+/// condition-name, or a one-character literal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Marker {
+    Condition(Ref),
+    Literal(Literal),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum JsonConversion {
+    Boolean(Marker),
+    Null(Figurative),
+}
+
+/// INDICATING item IS JSON NULL USING a condition-name of the indicator, or a literal IN it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NullIndicator {
+    pub item: Ref,
+    pub marker: Marker,
+    pub indicator: Option<Ref>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Encoding {
+    Ccsid(Operand),
+    FromCodepage,
+}

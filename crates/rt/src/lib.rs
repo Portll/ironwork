@@ -14,6 +14,7 @@ pub mod edit;
 pub mod evidence;
 pub mod files;
 pub mod intrinsic;
+pub mod json;
 pub mod le;
 pub mod linage;
 pub mod lir;

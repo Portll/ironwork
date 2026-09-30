@@ -26,7 +26,7 @@ const VERBS: &[&str] = &[
     "MOVE", "COMPUTE", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "IF", "PERFORM", "DISPLAY", "INITIALIZE", "GO", "GOBACK", "STOP",
     "CONTINUE", "EXIT", "EVALUATE", "SET", "CALL", "ACCEPT", "STRING", "UNSTRING", "INSPECT", "READ", "WRITE", "OPEN", "CLOSE",
     "REWRITE", "DELETE", "START", "SEARCH", "SORT", "MERGE", "RETURN", "RELEASE", "CANCEL", "EXEC", "NEXT", "INVOKE",
-    "INITIATE", "GENERATE", "TERMINATE", "SUPPRESS", "ALTER", "ENTRY",
+    "INITIATE", "GENERATE", "TERMINATE", "SUPPRESS", "ALTER", "ENTRY", "JSON",
 ];
 
 /// Words that end a phrase or a nested block.
@@ -37,8 +37,12 @@ const PHRASE_WORDS: &[&str] = &[
     "BEFORE", "AFTER", "ADVANCING", "INPUT", "OUTPUT", "EXTEND", "I-O", "REVERSED", "USING", "RETURNING", "EXCEPTION", "OVERFLOW",
     "END-CALL", "OMITTED", "CONTENT", "REFERENCE", "VALUE", "UP", "DOWN", "DELIMITED", "DELIMITER", "COUNT", "POINTER", "TALLYING",
     "REPLACING", "CONVERTING", "INITIAL", "FOR", "CHARACTERS", "LEADING", "FIRST", "ALL", "END-STRING", "END-UNSTRING", "END-SEARCH",
-    "NEXT", "INVALID", "KEY", "END-REWRITE", "END-DELETE", "END-START", "END-INVOKE", "END-RETURN", "END-OF-PAGE", "EOP",
+    "NEXT", "INVALID", "KEY", "END-REWRITE", "END-DELETE", "END-START", "END-INVOKE", "END-RETURN", "END-OF-PAGE", "EOP", "END-JSON",
 ];
+
+/// The phrases of JSON GENERATE, which end a list of NAME or SUPPRESS operands; NAME, INDICATING
+/// and ENCODING are not reserved words, so they are phrases only here.
+const JSON_PHRASES: &[&str] = &["COUNT", "INDICATING", "ENCODING", "NAME", "SUPPRESS", "CONVERTING", "ON", "NOT", "EXCEPTION", "END-JSON", "ALSO"];
 
 /// The environment-names a WRITE ADVANCING mnemonic-name can stand for (Language Reference,
 /// SPECIAL-NAMES, Table 5): channels C01 to C12, CSP, pockets S01 to S05, and AFP-5A.
@@ -854,6 +858,7 @@ impl Parser<'_> {
         let mut e = DataEntry {
             level,
             name: None,
+            spelled: None,
             picture: None,
             usage: None,
             value: None,
@@ -877,6 +882,7 @@ impl Parser<'_> {
         {
             if w != "FILLER" {
                 e.name = Some(w.to_owned());
+                e.spelled = self.tokens[self.at].spelled.clone();
             }
             self.at += 1;
         }
@@ -1138,6 +1144,7 @@ impl Parser<'_> {
             "INITIALIZE" => Stmt::Initialize { targets: self.refs()?, pos },
             "CALL" => Stmt::Call(Box::new(self.call(pos)?)),
             "INVOKE" => Stmt::Invoke(Box::new(self.invoke(pos)?)),
+            "JSON" if self.accept_word("GENERATE") => Stmt::JsonGenerate(Box::new(self.json_generate(pos)?)),
             "CANCEL" => {
                 let mut targets = Vec::new();
                 while self.starts_operand() {
@@ -1544,6 +1551,130 @@ impl Parser<'_> {
         })?;
         self.accept_word(end);
         Ok(h)
+    }
+
+    fn json_operand_follows(&self) -> bool {
+        self.starts_ref() && !self.word().is_some_and(|w| JSON_PHRASES.contains(&w))
+    }
+
+    fn figurative_list(&mut self) -> R<Vec<Figurative>> {
+        let mut out = Vec::new();
+        loop {
+            let word = self.name("a figurative constant")?;
+            out.push(figurative(&word).filter(|f| !matches!(f, Figurative::Quote | Figurative::Null)).ok_or_else(|| self.error("ZERO, SPACE, LOW-VALUE or HIGH-VALUE"))?);
+            if !self.accept_word("OR") {
+                return Ok(out);
+            }
+        }
+    }
+
+    /// A condition-name, or a literal; with `inside`, a literal takes IN and its item.
+    fn marker(&mut self, inside: bool) -> R<(Marker, Option<Ref>)> {
+        if self.starts_ref() {
+            return Ok((Marker::Condition(self.reference()?), None));
+        }
+        let literal = self.literal()?;
+        let item = if inside {
+            self.expect_word("IN")?;
+            Some(self.reference()?)
+        } else {
+            None
+        };
+        Ok((Marker::Literal(literal), item))
+    }
+
+    fn json_generate(&mut self, pos: Pos) -> R<JsonGenerate> {
+        let receiver = self.reference()?;
+        self.expect_word("FROM")?;
+        let from = self.reference()?;
+        let mut g = JsonGenerate { receiver, from, count: None, names: Vec::new(), suppress: Vec::new(), converting: Vec::new(), indicating: Vec::new(), encoding: None, on_exception: None, not_on_exception: None, pos };
+        loop {
+            if self.accept_word("COUNT") {
+                self.accept_word("IN");
+                g.count = Some(self.reference()?);
+            } else if self.accept_word("INDICATING") {
+                loop {
+                    let item = self.reference()?;
+                    self.accept_word("IS");
+                    self.accept_word("JSON");
+                    self.expect_word("NULL")?;
+                    self.expect_word("USING")?;
+                    let (marker, indicator) = self.marker(true)?;
+                    g.indicating.push(NullIndicator { item, marker, indicator });
+                    if !self.accept_word("ALSO") {
+                        break;
+                    }
+                }
+            } else if self.accept_word("ENCODING") {
+                g.encoding = Some(if self.accept_word("FROM") {
+                    self.expect_word("CODEPAGE")?;
+                    Encoding::FromCodepage
+                } else {
+                    Encoding::Ccsid(self.operand()?)
+                });
+            } else if self.accept_word("NAME") {
+                self.accept_word("OF");
+                loop {
+                    let item = self.reference()?;
+                    self.accept_word("IS");
+                    let name = if self.accept_word("OMITTED") { None } else { Some(self.literal()?) };
+                    g.names.push((item, name));
+                    if !self.json_operand_follows() {
+                        break;
+                    }
+                }
+            } else if self.accept_word("SUPPRESS") {
+                loop {
+                    if self.accept_word("EVERY") {
+                        let numeric = match self.accept_any(&["NUMERIC", "NONNUMERIC"]).as_deref() {
+                            Some("NUMERIC") => Some(true),
+                            Some(_) => Some(false),
+                            None => None,
+                        };
+                        self.expect_word("WHEN")?;
+                        g.suppress.push(Suppression::Every { numeric, when: self.figurative_list()? });
+                    } else {
+                        let item = self.reference()?;
+                        let when = if self.accept_word("WHEN") { self.figurative_list()? } else { Vec::new() };
+                        g.suppress.push(Suppression::Item { item, when });
+                    }
+                    if !(self.is_word("EVERY") || self.json_operand_follows()) {
+                        break;
+                    }
+                }
+            } else if self.accept_word("CONVERTING") {
+                loop {
+                    let item = self.reference()?;
+                    self.expect_word("TO")?;
+                    self.accept_word("JSON");
+                    let conversion = if self.accept_word("NULL") {
+                        self.expect_word("USING")?;
+                        let [f] = self.figurative_list()?[..] else { return Err(self.error("one figurative constant after USING")) };
+                        JsonConversion::Null(f)
+                    } else {
+                        if self.accept_any(&["BOOLEAN", "BOOL"]).is_none() {
+                            return Err(self.error("BOOLEAN or NULL"));
+                        }
+                        self.expect_word("USING")?;
+                        JsonConversion::Boolean(self.marker(false)?.0)
+                    };
+                    g.converting.push((item, conversion));
+                    if !self.accept_word("ALSO") {
+                        break;
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+        let [h] = self.on_phrases(&["ON", "EXCEPTION"], &["END-JSON"], |p| {
+            p.accept_word("ON");
+            p.expect_word("EXCEPTION")?;
+            Ok(0)
+        })?;
+        self.accept_word("END-JSON");
+        (g.on_exception, g.not_on_exception) = (h.on, h.not_on);
+        Ok(g)
     }
 
     fn call(&mut self, pos: Pos) -> R<Call> {
