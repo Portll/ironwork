@@ -11,7 +11,7 @@ use crate::vocab::{AcceptFrom, BinOp, Figurative, InspectMode, OpenMode, RelOp, 
 use crate::{codec_enum, codec_struct};
 use numeric::precision::{Fixed, Places};
 use numeric::options::{Compile, FastsrtAdvPrint, Stop, Warnings};
-use numeric::{Arith, Numproc, Options, SortKeys, Trunc, TruncCheck};
+use numeric::{Arith, CicsReturnWarning, Numproc, Options, SortKeys, Trunc, TruncCheck};
 use zarch::check::ProgramCheck;
 use zarch::ebcdic::CodePage;
 use zarch::hfp::Precision;
@@ -130,7 +130,7 @@ codec_enum!(FileStatus {
 
 codec_struct!(Options {
     arith, trunc, numproc, codepage, trunc_check, fastsrt, fastsrt_adv_print, sort_keys, adv, thread, dll, rent, dbcs,
-    warnings, compile, dynam, debug,
+    warnings, compile, dynam, debug, cics_return_warning,
 } check options_valid);
 codec_enum!(Arith { Compat = 0, Extend = 1 });
 codec_enum!(Trunc { Std = 0, Opt = 1, Bin = 2 });
@@ -141,6 +141,7 @@ codec_enum!(FastsrtAdvPrint { Exclude = 0, Include = 1 });
 codec_enum!(Warnings { Proceed = 0, Block = 1 });
 codec_enum!(Compile { Full = 0, Until(stop) = 1, SyntaxOnly = 2 });
 codec_enum!(Stop { W = 0, E = 1, S = 2 });
+codec_enum!(CicsReturnWarning { Once = 0, Always = 1, Never = 2 });
 
 /// `Options::code_page` panics on a CCSID the tables do not carry.
 fn options_valid(options: &Options) -> Result<(), String> {

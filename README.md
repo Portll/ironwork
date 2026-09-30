@@ -19,8 +19,8 @@ The PyPI and npm packages carry builds for Linux (static, x64 and arm64), macOS 
 Windows (x64). The same builds are attached to each [release](https://github.com/Portll/ironwork/releases).
 From a checkout:
 
-    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
-    cargo run -p ironwork -- check program.cbl [-I copylib]...
+    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
+    cargo run -p ironwork -- check program.cbl [-warnings-block] [--cics-return-warning=once|always|never] [-I copylib]...
 
 CBL and PROCESS cards set the options. COPY members are found in the program's own directory, then
 each `-I` library: a copybook (`.cpy`, `.copy`) in any of them before a program source (`.cbl`,
@@ -134,6 +134,13 @@ as NOCOMPILE(S) does, since IGYWCLG would bypass its GO step above 8 whatever th
 NOCOMPILE alone is a syntax check that runs nothing. `-warnings-block` is ironwork's command-line NOCOMPILE(W), and a card's COMPILE or
 NOCOMPILE wins over it, as IBM's PROCESS statements outrank the compiler's invocation. Neither
 changes the return code (C47).
+
+A program with no STOP RUN, GOBACK or EXIT PROGRAM gets IBM's IGYPS2091-W, a warning that it may
+run past its end. One that leaves by EXEC CICS RETURN or XCTL, which the CICS translator turns into
+a CALL, is exempt unless asked: `--cics-return-warning=once` (the default) gives an informational
+note in place of the warning, once in a run; `=always` gives the warning, return code 4; `=never`
+gives nothing. Whether Enterprise COBOL warns such a program is open until an IBM listing settles it
+(C124).
 
 Messages go to standard error, one to a line: errors first, then warnings, then informational
 messages, each in the order ironwork found them.

@@ -299,8 +299,9 @@ tests, and the debug positions (§9).
 | `compile` | `None` | `00` |
 | `dynam` | false | `00` |
 | `debug` | false | `00` |
+| `cics_return_warning` | `Once`, tag 0 | `00` |
 
-Eighteen bytes: `01 01 00 F4 08 00 00 00 00 01 00 00 01 01 00 00 00 00`.
+Nineteen bytes: `01 01 00 F4 08 00 00 00 00 01 00 00 01 01 00 00 00 00 00`.
 
 ### 4.8 Bounds on decoding
 
@@ -316,26 +317,26 @@ Eighteen bytes: `01 01 00 F4 08 00 00 00 00 01 00 00 01 01 00 00 00 00`.
 ## 5. Options, storage and maps
 
 Line numbers are for the tree at 79a199e, except those of `crates/numeric/src/options.rs`, which are
-for the tree that added `Options::compile`.
+for the tree that added `Options::cics_return_warning`.
 
 ### 5.1 Options
 
 `Program.options` is lir.md's `ProgramOptions`: `numeric::options::Options`
-(crates/numeric/src/options.rs:187-213), which is `Copy`, holds only enums, options, integers and
+(crates/numeric/src/options.rs:208-235), which is `Copy`, holds only enums, options, integers and
 bools, and encodes as it is, its fields in declaration order; then `ssrange` and the option cards. Options
 are per program, because a CBL card is.
 
 The spellings a card or PARM may use come from IBM's option table, vendored as
-`crates/numeric/data/enterprise-options.tsv` and read by `Options::apply`. Five fields have no IBM
-compiler option: `trunc_check`, `fastsrt_adv_print`, `sort_keys`, `warnings` and `debug` are set by
-this compiler's own flags.
+`crates/numeric/data/enterprise-options.tsv` and read by `Options::apply`. Six fields have no IBM
+compiler option: `trunc_check`, `fastsrt_adv_print`, `sort_keys`, `warnings`, `debug` and
+`cics_return_warning` are set by this compiler's own flags.
 
 | Field | Type | Encoding | Set by |
 |---|---|---|---|
 | `arith` | `Arith` (:54) | tag: `Compat` 0, `Extend` 1 | `ARITH`, `AR`, with `COMPAT`, `C`, `EXTEND` or `E` |
 | `trunc` | `Trunc` (:84) | tag: `Std` 0, `Opt` 1, `Bin` 2 | `TRUNC(STD\|OPT\|BIN)` |
 | `numproc` | `Numproc` (:92) | tag: `Nopfd` 0, `Pfd` 1 | `NUMPROC(NOPFD\|PFD)` |
-| `codepage` | `u16` | LEB128. The `check` function refuses a CCSID `CodePage::by_ccsid` does not carry, because `Options::code_page` (:346) would otherwise panic | `CODEPAGE(n)`, `CP(n)` |
+| `codepage` | `u16` | LEB128. The `check` function refuses a CCSID `CodePage::by_ccsid` does not carry, because `Options::code_page` (:401) would otherwise panic | `CODEPAGE(n)`, `CP(n)` |
 | `trunc_check` | `TruncCheck` (:102) | tag: `Report` 0, `Silent` 1 | `-silent` |
 | `fastsrt` | `bool` | 0 or 1 | `FASTSRT`, `FSRT`, and `NOFASTSRT`, `NOFSRT` |
 | `fastsrt_adv_print` | `FastsrtAdvPrint` (:122) | tag: `Exclude` 0, `Include` 1 | `--fastsrt-adv-print=exclude\|include` |
@@ -345,14 +346,15 @@ this compiler's own flags.
 | `dll` | `bool` | 0 or 1 | `DLL`, `NODLL` |
 | `rent` | `bool` | 0 or 1 | `RENT`, `NORENT` |
 | `dbcs` | `bool` | 0 or 1 | `DBCS`, `NODBCS` |
-| `warnings` | `Warnings` (:140) | tag: `Proceed` 0, `Block` 1 | `-warnings-block` |
-| `compile` | `Option<Compile>` (:149) | `None`, or `Some` then the tag: `Full` 0, `Until` 1 followed by the `Stop` (:160) tag (`W` 0, `E` 1, `S` 2), `SyntaxOnly` 2. `None` when no card gives the option; `Options::object_code` (:339) resolves it with `warnings` (assumption C47) | `COMPILE`, `C`, and `NOCOMPILE`, `NOC`, alone or with `(W)`, `(E)` or `(S)` |
+| `warnings` | `Warnings` (:161) | tag: `Proceed` 0, `Block` 1 | `-warnings-block` |
+| `compile` | `Option<Compile>` (:170) | `None`, or `Some` then the tag: `Full` 0, `Until` 1 followed by the `Stop` (:181) tag (`W` 0, `E` 1, `S` 2), `SyntaxOnly` 2. `None` when no card gives the option; `Options::object_code` (:394) resolves it with `warnings` (assumption C47) | `COMPILE`, `C`, and `NOCOMPILE`, `NOC`, alone or with `(W)`, `(E)` or `(S)` |
 | `dynam` | `bool` | 0 or 1 | `DYNAM`, `DYN`, and `NODYNAM`, `NODYN` |
 | `debug` | `bool` | 0 or 1 | `-debug`, the Language Environment runtime option DEBUG |
+| `cics_return_warning` | `CicsReturnWarning` (:141) | tag: `Once` 0, `Always` 1, `Never` 2. What a program with no STOP RUN, GOBACK or EXIT PROGRAM that ends with EXEC CICS RETURN or XCTL gets (assumption C124) | `--cics-return-warning=once\|always\|never` |
 
 `ADV`, `DBCS`, `DLL`, `NUMPROC`, `RENT`, `THREAD` and `TRUNC` have no abbreviations. The defaults are
 `Compat`, `Std`, `Nopfd`, 1140, `Report`, false, `Exclude`, `Dfsort`, true, false, false, true, true,
-`Proceed`, `None` (IBM's default NOCOMPILE(S) in force), false, false.
+`Proceed`, `None` (IBM's default NOCOMPILE(S) in force), false, false, `Once`.
 
 ### 5.2 Storage and the item table
 

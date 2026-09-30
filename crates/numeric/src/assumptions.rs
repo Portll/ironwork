@@ -1337,8 +1337,8 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: NO_PROGRAM_END,
-        claim: "A program with no STOP RUN, GOBACK or EXIT PROGRAM statement anywhere in its PROCEDURE DIVISION, DECLARATIVES included, gets IGYPS2091-W, 'No \"STOP RUN\", \"GOBACK\" or \"EXIT PROGRAM\" was found in the program. Check program logic to verify that the program will exit.' (Migration Guide GC27-8715-03, p. 131): a warning (W, return code 4) with no line, in ironwork's words. An EXEC CICS RETURN or a CALL that ends the run does not count, as the guide names only the three statements. A class definition and its methods, which end with EXIT METHOD, get no such warning",
-        basis: Basis::Documented,
+        claim: "A program with no STOP RUN, GOBACK or EXIT PROGRAM statement anywhere in its PROCEDURE DIVISION, DECLARATIVES included, gets IGYPS2091-W, 'No \"STOP RUN\", \"GOBACK\" or \"EXIT PROGRAM\" was found in the program. Check program logic to verify that the program will exit.' (Migration Guide GC27-8715-03, p. 131): a warning (W, return code 4) with no line, in ironwork's words. A class definition and its methods, which end with EXIT METHOD, get no such warning. One that has an EXEC CICS RETURN or EXEC CICS XCTL is exempt by default, by the operator's choice pending an Enterprise COBOL listing of such a program, and --cics-return-warning says what it gets: once, the default, an informational note (return code 0) in place of the warning; always, the warning; never, nothing. The evidence points the other way: the CICS translator turns EXEC CICS RETURN into Call 'DFHEI1' using by content x'0e0800000600001000' end-call, with no GOBACK after it (CICS TS Application Programming Guide SC34-6433-06, pp. 87-88; IBM's CICS TS COBOL translation-output page shows the same), and the guide names only the three statements, so Enterprise COBOL itself would likely warn. The note is once per ironwork invocation because check, run and cics print the messages of one program, the first in the source",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {

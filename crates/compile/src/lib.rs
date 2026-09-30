@@ -166,7 +166,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     let entries = entry_points(&program);
     procedure_rules(&program, &layout, &entries, &options, &mut errors);
     if whole {
-        program_end(&program, &mut errors);
+        program_end(&program, &options, &mut errors);
     }
     oo::check(&layout, &program, &mut errors);
     let errors: Vec<Error> = errors.into_iter().map(|e| e.in_files(&program.sources)).collect();
@@ -193,12 +193,27 @@ fn option_severity(e: &numeric::options::OptionError) -> Severity {
 }
 
 /// IBM's warning for a program with no STOP RUN, GOBACK or EXIT PROGRAM, which may run past its
-/// end (assumption [`numeric::assumptions::NO_PROGRAM_END`]).
-fn program_end(program: &Program, errors: &mut Vec<Error>) {
+/// end; one that leaves by EXEC CICS RETURN or XCTL gets what `--cics-return-warning` says
+/// (assumption [`numeric::assumptions::NO_PROGRAM_END`]).
+fn program_end(program: &Program, options: &Options, errors: &mut Vec<Error>) {
+    use numeric::CicsReturnWarning;
     let mut all = Vec::new();
     program.paragraphs.iter().for_each(|p| inner_statements(&p.statements, &mut all));
-    if !all.iter().any(|s| matches!(s, Stmt::StopRun { .. } | Stmt::Goback { .. } | Stmt::ExitProgram { .. })) {
-        errors.push(Error::warning(Pos::default(), "no STOP RUN, GOBACK or EXIT PROGRAM in the program: check that it ends"));
+    if all.iter().any(|s| matches!(s, Stmt::StopRun { .. } | Stmt::Goback { .. } | Stmt::ExitProgram { .. })) {
+        return;
+    }
+    let cics_end = all.iter().find_map(|s| match s {
+        Stmt::Exec(b) if b.kind == ExecKind::Cics && matches!(b.command.as_str(), "RETURN" | "XCTL") => Some(b.command.as_str()),
+        _ => None,
+    });
+    match (cics_end, options.cics_return_warning) {
+        (Some(_), CicsReturnWarning::Never) => {}
+        (Some(command), CicsReturnWarning::Once) => errors.push(Error::at(Pos::default(), format!(
+            "IGYPS2091-W not given: the program ends with EXEC CICS {command}, which the CICS translator turns into a CALL; --cics-return-warning=always gives the warning, =never drops this note"
+        )).graded(Severity::Informational)),
+        (None, _) | (Some(_), CicsReturnWarning::Always) => {
+            errors.push(Error::warning(Pos::default(), "no STOP RUN, GOBACK or EXIT PROGRAM in the program: check that it ends"));
+        }
     }
 }
 

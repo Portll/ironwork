@@ -134,6 +134,27 @@ impl FastsrtAdvPrint {
     }
 }
 
+/// What a program with no STOP RUN, GOBACK or EXIT PROGRAM that ends with EXEC CICS RETURN or XCTL
+/// gets (assumption C124): IBM's warning (`--cics-return-warning=always`), one informational note
+/// in place of it (`once`), or nothing (`never`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CicsReturnWarning {
+    #[default]
+    Once,
+    Always,
+    Never,
+}
+
+impl CicsReturnWarning {
+    pub const fn flag(self) -> &'static str {
+        match self {
+            Self::Once => "--cics-return-warning=once",
+            Self::Always => "--cics-return-warning=always",
+            Self::Never => "--cics-return-warning=never",
+        }
+    }
+}
+
 /// Whether a program whose compile gave warnings runs (`Proceed`), or (`-warnings-block`, the
 /// command line's NOCOMPILE(W)) is refused. The return code is 4 either way.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -210,6 +231,7 @@ pub struct Options {
     /// The Language Environment runtime option DEBUG (`-debug`): USE FOR DEBUGGING procedures run.
     /// NODEBUG, IBM's default, keeps them from running (assumption C63).
     pub debug: bool,
+    pub cics_return_warning: CicsReturnWarning,
 }
 
 impl Default for Options {
@@ -232,6 +254,7 @@ impl Default for Options {
             compile: None,
             dynam: false,
             debug: false,
+            cics_return_warning: CicsReturnWarning::default(),
         }
     }
 }
@@ -357,6 +380,9 @@ impl Options {
             "--fastsrt-adv-print=include" => self.fastsrt_adv_print = FastsrtAdvPrint::Include,
             "-warnings-block" => self.warnings = Warnings::Block,
             "-debug" => self.debug = true,
+            "--cics-return-warning=once" => self.cics_return_warning = CicsReturnWarning::Once,
+            "--cics-return-warning=always" => self.cics_return_warning = CicsReturnWarning::Always,
+            "--cics-return-warning=never" => self.cics_return_warning = CicsReturnWarning::Never,
             _ => return Err(OptionError::UnknownFlag(flag.to_owned())),
         }
         Ok(())
@@ -563,5 +589,17 @@ mod tests {
         assert_eq!(o.fastsrt_adv_print.flag(), "--fastsrt-adv-print=exclude");
         assert!(o.apply_flag("--fastsrt-adv-print=maybe").is_err());
         assert!(o.apply_flag("--fastsrt-adv-print").is_err());
+    }
+
+    #[test]
+    fn cics_return_warning_is_once_unless_the_flag_says_always_or_never() {
+        let mut o = Options::default();
+        assert_eq!(o.cics_return_warning, CicsReturnWarning::Once);
+        for mode in [CicsReturnWarning::Always, CicsReturnWarning::Never, CicsReturnWarning::Once] {
+            o.apply_flag(mode.flag()).unwrap();
+            assert_eq!(o.cics_return_warning, mode);
+        }
+        assert!(o.apply_flag("--cics-return-warning=sometimes").is_err());
+        assert!(o.apply_flag("--cics-return-warning").is_err());
     }
 }

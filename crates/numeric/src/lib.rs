@@ -10,4 +10,4 @@ pub mod precision;
 pub mod sign;
 pub mod zoned;
 
-pub use options::{Arith, FastsrtAdvPrint, Numproc, Options, SortKeys, Trunc, TruncCheck};
+pub use options::{Arith, CicsReturnWarning, FastsrtAdvPrint, Numproc, Options, SortKeys, Trunc, TruncCheck};

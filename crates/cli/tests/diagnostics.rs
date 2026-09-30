@@ -124,3 +124,51 @@ fn nocompile_alone_checks_the_program_and_runs_nothing() {
     let note = format!("ironwork: {}: NOCOMPILE is a syntax check, with no program to run\n", source.path());
     assert_eq!((ran.status.code(), stderr(&ran), ran.stdout.is_empty()), (Some(0), note, true));
 }
+
+fn ending_with(id: &str, last: &str) -> String {
+    format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. {id}.\n       PROCEDURE DIVISION.\n           DISPLAY 'HELLO'\n{last}")
+}
+
+const CICS_NOTE: &str = "informational: IGYPS2091-W not given: the program ends with EXEC CICS RETURN, which the CICS translator turns into a CALL; --cics-return-warning=always gives the warning, =never drops this note";
+const NO_END: &str = "warning: no STOP RUN, GOBACK or EXIT PROGRAM in the program: check that it ends";
+
+#[test]
+fn cics_return_warning_gives_a_note_once_the_warning_always_or_nothing_never() {
+    let cics = Source::new("cics-return", &ending_with("P", "           EXEC CICS RETURN END-EXEC.\n"));
+    let lines = |out: &Output| stderr(out).lines().map(|l| l.trim_start_matches(cics.path()).trim_start_matches(": ").to_owned()).collect::<Vec<_>>();
+    let default = ironwork(&["check", cics.path()]);
+    assert_eq!((default.status.code(), lines(&default)), (Some(0), vec![CICS_NOTE.to_owned()]));
+    let once = ironwork(&["check", cics.path(), "--cics-return-warning=once"]);
+    assert_eq!((once.status.code(), lines(&once)), (Some(0), vec![CICS_NOTE.to_owned()]));
+    let always = ironwork(&["check", cics.path(), "--cics-return-warning=always"]);
+    assert_eq!((always.status.code(), lines(&always)), (Some(4), vec![NO_END.to_owned()]));
+    let never = ironwork(&["check", cics.path(), "--cics-return-warning=never"]);
+    assert_eq!((never.status.code(), lines(&never)), (Some(0), Vec::<String>::new()));
+    for bad in ["--cics-return-warning", "--cics-return-warning=sometimes"] {
+        let out = ironwork(&["check", cics.path(), bad]);
+        assert_eq!(out.status.code(), Some(2), "{bad}");
+        assert!(stderr(&out).contains("--cics-return-warning needs =once, =always or =never"), "{bad}");
+    }
+}
+
+#[test]
+fn the_cics_note_is_given_once_for_a_source_of_several_programs() {
+    let two = [ending_with("P1", "           EXEC CICS RETURN END-EXEC.\n       END PROGRAM P1.\n"), ending_with("P2", "           EXEC CICS XCTL PROGRAM('P1') END-EXEC.\n       END PROGRAM P2.\n")].concat();
+    let source = Source::new("cics-two", &two);
+    let out = ironwork(&["check", source.path()]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(stderr(&out).matches("IGYPS2091-W not given").count(), 1, "{}", stderr(&out));
+}
+
+#[test]
+fn a_cics_program_with_goback_gets_nothing_and_a_program_with_no_end_and_no_cics_is_warned_whatever_the_flag() {
+    let goback = Source::new("cics-goback", &ending_with("P", "           EXEC CICS RETURN END-EXEC\n           GOBACK.\n"));
+    let plain = Source::new("no-end", &ending_with("P", "           MOVE 1 TO RETURN-CODE.\n"));
+    for mode in ["--cics-return-warning=once", "--cics-return-warning=always", "--cics-return-warning=never"] {
+        let out = ironwork(&["check", goback.path(), mode]);
+        assert_eq!((out.status.code(), stderr(&out)), (Some(0), String::new()), "{mode}");
+        let out = ironwork(&["check", plain.path(), mode]);
+        assert_eq!(out.status.code(), Some(4), "{mode}");
+        assert!(stderr(&out).contains(NO_END), "{mode}: {}", stderr(&out));
+    }
+}

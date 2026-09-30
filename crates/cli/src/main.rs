@@ -6,10 +6,12 @@ use std::{env, fs, io};
 const USAGE: &str = "ironwork for COBOL
 usage:
   ironwork run <program.cbl> [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include]
-               [-debug] [-I <dir>]... [-L <dir>]... [--dd NAME=path[:format]]... [--clock <time>]
+               [-debug] [--cics-return-warning=once|always|never] [-I <dir>]... [-L <dir>]...
+               [--dd NAME=path[:format]]... [--clock <time>]
                [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                                                        compile and run; CBL and PROCESS cards set the options
-  ironwork check <program.cbl> [-I <dir>]...           compile only
+  ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]...
+                                                       compile only
   ironwork cics <program.cbl> [run flags] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
                [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]... [--td QUEUE=path]...
                [--screens path | --serve HOST:PORT [--transaction TRAN=PROGRAM]... [--csd path]]
@@ -37,6 +39,12 @@ flags:
   -debug     the Language Environment runtime option DEBUG: a program compiled WITH DEBUGGING
              MODE runs its USE FOR DEBUGGING procedures, which NODEBUG, IBM's default, keeps from
              running. Debugging lines run in such a program either way
+  --cics-return-warning=once|always|never
+             what a program with no STOP RUN, GOBACK or EXIT PROGRAM that ends with EXEC CICS
+             RETURN or XCTL gets. IBM warns of the missing end (IGYPS2091-W, return code 4):
+             always gives that warning; once (the default) gives an informational note in its
+             place, once per run, as the CICS translator turns RETURN and XCTL into a CALL;
+             never gives nothing. A program with none of these gets the warning whatever the flag
   -I <dir>   a copy library for COPY members, searched after the program's own directory
   -L <dir>   a program library: CALL finds a program there by name, after the programs in the
              same source and the program's own directory
@@ -330,6 +338,10 @@ fn driver() -> ExitCode {
             f if f.starts_with("--fastsrt-adv-print") => match f {
                 "--fastsrt-adv-print=exclude" | "--fastsrt-adv-print=include" => flags.push(a),
                 _ => return usage_error("--fastsrt-adv-print needs =exclude or =include"),
+            },
+            f if f.starts_with("--cics-return-warning") => match f {
+                "--cics-return-warning=once" | "--cics-return-warning=always" | "--cics-return-warning=never" => flags.push(a),
+                _ => return usage_error("--cics-return-warning needs =once, =always or =never"),
             },
             f if f.starts_with('-') && f.len() > 1 && !FLAGS.contains(&f) => return usage_error(&format!("unknown flag {f}")),
             f if f.starts_with('-') && f.len() > 1 => flags.push(a),
