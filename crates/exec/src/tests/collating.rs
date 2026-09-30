@@ -144,7 +144,7 @@ fn an_alphabet_that_cannot_be_one_is_refused() {
 fn a_sort_s_ascii_order_is_standard_1_s() {
     for ccsid in [37, 1140, 1047] {
         let page = zarch::ebcdic::CodePage::by_ccsid(ccsid).unwrap();
-        let standard = crate::collating::Sequence::of(&syntax::ast::Alphabet::Standard1, page).unwrap();
+        let standard = crate::collating::Sequence::of(&syntax::ast::Alphabet::Standard1, page, numeric::Quote::default()).unwrap();
         assert_eq!(rt::sort::Collating::ascii(page), rt::sort::Collating::Positions(std::rc::Rc::new(standard.positions())), "CCSID {ccsid}");
     }
 }

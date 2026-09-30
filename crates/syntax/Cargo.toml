@@ -12,6 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+numeric = { package = "ironwork-numeric", path = "../numeric", version = "0.1.2" }
 rt = { package = "ironwork-rt", path = "../rt", version = "0.1.2" }
 
 [lints]

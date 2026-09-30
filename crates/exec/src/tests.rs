@@ -19,6 +19,7 @@ mod linage;
 mod oo;
 mod printer;
 mod procedure;
+mod quote_currency_nsymbol;
 mod report;
 mod sort;
 mod xml;

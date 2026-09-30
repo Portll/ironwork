@@ -176,6 +176,7 @@ dependencies = [
 name = "ironwork-syntax"
 version = "0.1.2"
 dependencies = [
+ "ironwork-numeric",
  "ironwork-rt",
 ]
 

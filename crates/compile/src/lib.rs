@@ -128,16 +128,20 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
             errors.push(Error::at(Pos::default(), e.to_string()));
         }
     }
+    default_currency(&mut program, &mut options, &mut errors);
+    national_symbols(&program, &mut options, &mut errors);
     for (name, alphabet) in &program.environment.alphabets {
         if program.environment.collating_sequence.as_ref() != Some(name)
-            && let Err(m) = collating::Sequence::of(alphabet, options.code_page())
+            && let Err(m) = collating::Sequence::of(alphabet, options.code_page(), options.quote)
         {
             errors.push(Error::at(Pos::default(), format!("ALPHABET {name}: {m}")));
         }
     }
-    let collating = collating::Sequence::program(&program.environment, options.code_page()).unwrap_or_else(|m| {
+    let collating = collating::Sequence::program(&program.environment, options.code_page(), options.quote).unwrap_or_else(|m| {
         errors.push(Error::at(Pos::default(), m));
-        collating::Sequence::native()
+        let mut native = collating::Sequence::native();
+        native.quote = options.quote;
+        native
     });
     digit_limits(&program, options.arith, &mut errors);
     let drafts = report::prepare(&mut program, options.adv, &mut errors);
@@ -218,6 +222,51 @@ fn option_severity(e: &numeric::options::OptionError) -> Severity {
         OptionError::Removed { .. } | OptionError::NoEffect { warning: true, .. } => Severity::Warning,
         OptionError::NoEffect { warning: false, .. } => Severity::Informational,
         OptionError::UnsupportedCodePage(_) | OptionError::UnknownFlag(_) => Severity::Severe,
+    }
+}
+
+/// CURRENCY(literal) makes its character the currency symbol, standing for itself, of a program
+/// with no CURRENCY SIGN clause, in place of $; a program with one ignores the option
+/// (Programming Guide SC27-8714-03, p. 358). A hexadecimal literal whose character the option may
+/// not name is discarded with an error, as an invalid suboption is (assumption
+/// [`numeric::assumptions::CURRENCY_OPTION`]).
+fn default_currency(program: &mut Program, options: &mut Options, errors: &mut Vec<Error>) {
+    match options.currency_symbol() {
+        Some(Ok(symbol)) if program.environment.currency.is_empty() => program.environment.currency.push(CurrencySign { value: symbol.to_string(), symbol }),
+        Some(Err(c)) => {
+            errors.push(Error::at(Pos::default(), format!("CBL CURRENCY: code page {} reads its byte as {c:?}, which cannot be a currency symbol", options.codepage)).graded(Severity::Error));
+            options.currency = None;
+        }
+        _ => {}
+    }
+}
+
+/// NSYMBOL(DBCS) makes a PICTURE of N alone with no USAGE, its own or a group's, USAGE DISPLAY-1
+/// (Programming Guide SC27-8714-03, p. 388), which ironwork does not have. NSYMBOL(NATIONAL) with
+/// NODBCS on the cards is IBM's conflict: an error, and DBCS in effect (p. 344).
+fn national_symbols(program: &Program, options: &mut Options, errors: &mut Vec<Error>) {
+    if options.nsymbol == numeric::Nsymbol::National {
+        if !options.dbcs && program.options.iter().any(|o| numeric::options::switch(o, "NSYMBOL").is_some()) {
+            errors.push(Error::at(Pos::default(), "CBL NODBCS: NSYMBOL(NATIONAL) requires DBCS, which is in effect").graded(Severity::Error));
+            options.dbcs = true;
+        }
+        return;
+    }
+    let only_n = |p: &str| p.chars().any(|c| c.eq_ignore_ascii_case(&'N')) && p.chars().all(|c| c.eq_ignore_ascii_case(&'N') || c.is_ascii_digit() || matches!(c, '(' | ')'));
+    let lists = [&program.working_storage, &program.local_storage, &program.linkage].into_iter().chain(program.files.iter().map(|f| &f.records));
+    for entries in lists {
+        let mut groups: Vec<(u8, bool)> = Vec::new();
+        for e in entries.iter().filter(|e| !matches!(e.level, 66 | 88)) {
+            let level = if e.level == 77 { 1 } else { e.level };
+            while groups.last().is_some_and(|&(l, _)| l >= level) {
+                groups.pop();
+            }
+            let usage = e.usage.is_some() || groups.iter().any(|&(_, u)| u);
+            if let Some(p) = e.picture.as_deref().filter(|p| !usage && only_n(p)) {
+                errors.push(Error::at(e.pos, format!("PICTURE {p} with no USAGE is DISPLAY-1 under NSYMBOL(DBCS), and ironwork has no DBCS data")));
+            }
+            groups.push((level, e.usage.is_some()));
+        }
     }
 }
 

@@ -146,11 +146,25 @@ pub fn parse_all_with(text: &str, libraries: &copy::Libraries) -> Result<Vec<ast
         let lexed = lexer::lex(&source).map_err(|e| e.in_files(&files))?;
         tokens = debugging::keep(lexed, source.debugging.as_deref().unwrap_or_default());
     }
+    dbcs_literal(&tokens, &source.options).map_err(|e| e.in_files(&files))?;
     let mut programs = parser::parse(&tokens, source.options).map_err(|e| e.in_files(&files))?;
     for p in &mut programs {
         p.sources = files.clone();
     }
     Ok(programs)
+}
+
+/// Under NSYMBOL(DBCS) an N literal is a DBCS literal (Programming Guide SC27-8714-03, p. 388),
+/// which ironwork cannot hold (assumption [`numeric::assumptions::NSYMBOL_DBCS`]).
+fn dbcs_literal(tokens: &[lexer::Token], cards: &[String]) -> Result<(), Error> {
+    let mut options = numeric::Options::default();
+    for card in cards {
+        options.apply(card).ok();
+    }
+    match tokens.iter().find(|t| matches!(t.tok, lexer::Tok::National(_))) {
+        Some(t) if options.nsymbol == numeric::Nsymbol::Dbcs => Err(Error::at(t.pos, "an N literal is a DBCS literal under NSYMBOL(DBCS), and ironwork has no DBCS data")),
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]

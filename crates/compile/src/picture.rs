@@ -39,8 +39,8 @@ impl<'a> Notation<'a> {
         Self { decimal_comma: environment.decimal_point_comma, currency: &environment.currency }
     }
 
-    /// The value `symbol` stands for: with no CURRENCY SIGN clause, $ for $ (Language Reference
-    /// SC27-8713-03, p. 212).
+    /// The value `symbol` stands for: with no CURRENCY SIGN clause or CURRENCY option, $ for $
+    /// (Language Reference SC27-8713-03, p. 212).
     pub fn currency_value(&self, symbol: char) -> Option<&'a str> {
         match self.currency {
             [] => (symbol == '$').then_some("$"),
@@ -241,7 +241,7 @@ fn runs<'a>(text: &str, notation: Notation<'a>) -> Result<Runs<'a>, String> {
             }
             out.push(('$', 1));
         } else if c == '$' {
-            return Err(format!("PICTURE {text}: '$' is not a currency symbol under this program's CURRENCY SIGN clauses"));
+            return Err(format!("PICTURE {text}: '$' is not a currency symbol of this program, whose CURRENCY SIGN clauses or CURRENCY option name others"));
         } else {
             out.push((c.to_ascii_uppercase(), 1));
         }

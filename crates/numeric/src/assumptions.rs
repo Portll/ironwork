@@ -224,6 +224,9 @@ pub const NO_PROGRAM_END: &str = "C124";
 pub const USE_WITHOUT_PARAGRAPH: &str = "C125";
 pub const PICTURE_ENDS_AT_ITS_SEPARATOR: &str = "C195";
 pub const ZONED_COMPARED_AS_BYTES: &str = "C221";
+pub const APOST_EVERYWHERE: &str = "C210";
+pub const CURRENCY_OPTION: &str = "C211";
+pub const NSYMBOL_DBCS: &str = "C212";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1393,6 +1396,24 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: ZONED_COMPARED_AS_BYTES,
         claim: "A zoned integer compared with a nonnumeric operand, an alphanumeric, alphanumeric-edited, numeric-edited or group item, an alphanumeric or hexadecimal literal, or a figurative constant other than ZERO, is compared as the bytes it holds, without being read as a number: a numeric integer in such a comparison is treated as moved to an alphanumeric item of its size (Language Reference, comparison of numeric and alphanumeric operands), which for zoned data copies the digits. Under ZWB, IBM's default, a sign it overpunches is removed first (its zone made F); under NOZWB it is kept (Programming Guide SC27-8714-03, p. 431: 'Use NOZWB if you want to test input numeric fields for SPACES'); a separate sign is left out either way. So an unsigned item holding spaces equals SPACES, and a signed one does under NOZWB, where reading it as a number would end in a data exception. A scaled item is compared as its digits, as before",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: APOST_EVERYWHERE,
+        claim: "Under APOST the figurative constant QUOTE is the apostrophe wherever the program uses it: X'7D' in an alphanumeric item, X'0027' in a national one, and as an entry of an ALPHABET clause. The Programming Guide says only that [ALL] QUOTE and QUOTES represent apostrophes under APOST and quotation marks under QUOTE, and that either may delimit a literal whichever is in effect (SC27-8714-03, p. 347)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CURRENCY_OPTION,
+        claim: "CURRENCY(literal), in a program with no CURRENCY SIGN clause of its own or of a containing program, acts as a CURRENCY SIGN clause whose value is the literal's one character, standing for itself: that character is the PICTURE currency symbol in place of $, and an edited item shows it. The Language Reference says the currency symbol is $ or the one character the CURRENCY option or a CURRENCY SIGN clause gives, and that a CURRENCY SIGN clause makes the option ignored (SC27-8713-03, pp. 130, 211); the Programming Guide lists the characters the literal may not be (SC27-8714-03, p. 358). That the currency sign value is the character itself, and that nothing is said when the option is ignored, are chosen. A hexadecimal literal is read in the program's code page once every card is applied, so CODEPAGE may follow it; one whose character the option may not name is an error and the option is discarded, as an invalid suboption is (C121). NUMVAL-C's default currency string is not changed here",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: NSYMBOL_DBCS,
+        claim: "Under NSYMBOL(DBCS) an N literal is a DBCS literal and a PICTURE of N alone with no USAGE is USAGE DISPLAY-1 (Programming Guide SC27-8714-03, pp. 387-388). ironwork holds no DBCS data, so the first N literal stops the read and each such item is a severe error, both in ironwork's words; a program with neither compiles as under NSYMBOL(NATIONAL), as IBM's text implies it would. NX literals are not N literals. NSYMBOL(NATIONAL) with NODBCS on the cards, which are one level of precedence, is an error and DBCS stays in effect, as Table 46 forces it (p. 344); NODBCS alone, with NSYMBOL(NATIONAL) only as the default, is taken as written",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

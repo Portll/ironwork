@@ -2,6 +2,7 @@
 //! COLLATING SEQUENCE makes one the program's, for its alphanumeric comparisons, HIGH-VALUE,
 //! LOW-VALUE, CHAR and ORD; the COLLATING SEQUENCE phrase makes one a SORT's or MERGE's.
 
+use numeric::Quote;
 use syntax::ast::{Alphabet, AlphabetEntry, Environment, Figurative, Literal};
 use zarch::ebcdic::{self, CodePage, Collation};
 
@@ -11,35 +12,38 @@ pub struct Sequence {
     ordinals: Vec<u8>,
     pub high_value: u8,
     pub low_value: u8,
+    /// QUOTE's character, which APOST/QUOTE chooses.
+    pub quote: Quote,
 }
 
 impl Sequence {
     pub fn native() -> Self {
-        Self { collation: Collation::Native, ordinals: (0..=255).collect(), high_value: ebcdic::HIGH_VALUE, low_value: ebcdic::LOW_VALUE }
+        Self { collation: Collation::Native, ordinals: (0..=255).collect(), high_value: ebcdic::HIGH_VALUE, low_value: ebcdic::LOW_VALUE, quote: Quote::default() }
     }
 
     /// The program's sequence: its PROGRAM COLLATING SEQUENCE, else EBCDIC.
-    pub fn program(environment: &Environment, page: &CodePage) -> Result<Self, String> {
+    pub fn program(environment: &Environment, page: &CodePage, quote: Quote) -> Result<Self, String> {
         match &environment.collating_sequence {
-            Some(name) => Self::named(environment, name, page).map_err(|m| format!("PROGRAM COLLATING SEQUENCE {name}: {m}")),
-            None => Ok(Self::native()),
+            Some(name) => Self::named(environment, name, page, quote).map_err(|m| format!("PROGRAM COLLATING SEQUENCE {name}: {m}")),
+            None => Ok(Self { quote, ..Self::native() }),
         }
     }
 
-    pub fn named(environment: &Environment, name: &str, page: &CodePage) -> Result<Self, String> {
+    pub fn named(environment: &Environment, name: &str, page: &CodePage, quote: Quote) -> Result<Self, String> {
         let (_, alphabet) = environment.alphabets.iter().find(|(n, _)| n == name).ok_or("not an alphabet-name of SPECIAL-NAMES")?;
-        Self::of(alphabet, page)
+        Self::of(alphabet, page, quote)
     }
 
     /// STANDARD-1 and STANDARD-2 are 7-bit ASCII's order: ASCII_COLLATION in numeric::assumptions.
-    pub fn of(alphabet: &Alphabet, page: &CodePage) -> Result<Self, String> {
-        Ok(match alphabet {
+    pub fn of(alphabet: &Alphabet, page: &CodePage, quote: Quote) -> Result<Self, String> {
+        let sequence = match alphabet {
             Alphabet::Ebcdic | Alphabet::Native => Self::native(),
             Alphabet::Standard1 | Alphabet::Standard2 => {
                 Self::from_positions((0..0x80u8).filter_map(|c| page.encode_char(c as char)).map(|b| vec![b]).collect())
             }
-            Alphabet::Literal(entries) => Self::from_positions(literal_positions(entries, page)?),
-        })
+            Alphabet::Literal(entries) => Self::from_positions(literal_positions(entries, page, quote)?),
+        };
+        Ok(Self { quote, ..sequence })
     }
 
     /// Positions given explicitly, lowest first, each holding characters that collate equal; every
@@ -59,7 +63,7 @@ impl Sequence {
         }
         let low_value = positions.first().and_then(|p| p.first()).copied().unwrap_or(ebcdic::LOW_VALUE);
         let high_value = positions.last().and_then(|p| p.last()).copied().unwrap_or(ebcdic::HIGH_VALUE);
-        Self { collation: Collation::Weights(weights), ordinals: positions.iter().map(|p| p[0]).collect(), high_value, low_value }
+        Self { collation: Collation::Weights(weights), ordinals: positions.iter().map(|p| p[0]).collect(), high_value, low_value, quote: Quote::default() }
     }
 
     /// A figurative constant's character: HIGH-VALUE and LOW-VALUE are this sequence's highest and
@@ -68,7 +72,7 @@ impl Sequence {
         match f {
             Figurative::HighValue => self.high_value,
             Figurative::LowValue => self.low_value,
-            other => native_figurative(other),
+            other => native_figurative(other, self.quote),
         }
     }
 
@@ -101,20 +105,20 @@ impl Sequence {
     }
 }
 
-fn literal_positions(entries: &[AlphabetEntry], page: &CodePage) -> Result<Vec<Vec<u8>>, String> {
+fn literal_positions(entries: &[AlphabetEntry], page: &CodePage, quote: Quote) -> Result<Vec<Vec<u8>>, String> {
     let mut positions: Vec<Vec<u8>> = Vec::new();
     for entry in entries {
         match entry {
-            AlphabetEntry::Literal(l) => positions.extend(characters(l, page)?.into_iter().map(|b| vec![b])),
+            AlphabetEntry::Literal(l) => positions.extend(characters(l, page, quote)?.into_iter().map(|b| vec![b])),
             AlphabetEntry::Through(first, last) => {
-                let (a, b) = (single(first, page)?, single(last, page)?);
+                let (a, b) = (single(first, page, quote)?, single(last, page, quote)?);
                 if a <= b {
                     positions.extend((a..=b).map(|c| vec![c]));
                 } else {
                     positions.extend((b..=a).rev().map(|c| vec![c]));
                 }
             }
-            AlphabetEntry::Also(literals) => positions.push(literals.iter().map(|l| single(l, page)).collect::<Result<_, _>>()?),
+            AlphabetEntry::Also(literals) => positions.push(literals.iter().map(|l| single(l, page, quote)).collect::<Result<_, _>>()?),
         }
     }
     let mut seen = [false; 256];
@@ -129,7 +133,7 @@ fn literal_positions(entries: &[AlphabetEntry], page: &CodePage) -> Result<Vec<V
 /// The characters an ALPHABET literal gives: its own; for a number, the character at that
 /// position of EBCDIC; for a figurative constant, its EBCDIC character (ALPHABET_LITERALS in
 /// numeric::assumptions).
-fn characters(literal: &Literal, page: &CodePage) -> Result<Vec<u8>, String> {
+fn characters(literal: &Literal, page: &CodePage, quote: Quote) -> Result<Vec<u8>, String> {
     Ok(match literal {
         Literal::Alnum(s) => page.encode(s).map_err(|e| e.to_string())?,
         Literal::Hex(b) => b.clone(),
@@ -138,25 +142,25 @@ fn characters(literal: &Literal, page: &CodePage) -> Result<Vec<u8>, String> {
             _ => return Err(format!("{n} is not an ordinal position from 1 to 256")),
         },
         Literal::Figurative(Figurative::Null) => return Err("NULL cannot be in an ALPHABET clause".into()),
-        Literal::Figurative(f) => vec![native_figurative(*f)],
+        Literal::Figurative(f) => vec![native_figurative(*f, quote)],
         Literal::National(_) => return Err("a national literal cannot be in an ALPHABET clause".into()),
         Literal::All(_) => return Err("ALL cannot be in an ALPHABET clause".into()),
     })
 }
 
-fn native_figurative(f: Figurative) -> u8 {
+fn native_figurative(f: Figurative, quote: Quote) -> u8 {
     match f {
         Figurative::Space => ebcdic::SPACE,
         Figurative::Zero => ebcdic::ZERO,
-        Figurative::Quote => ebcdic::QUOTE,
+        Figurative::Quote => quote.byte(),
         Figurative::HighValue => ebcdic::HIGH_VALUE,
         Figurative::LowValue => ebcdic::LOW_VALUE,
         Figurative::Null => 0,
     }
 }
 
-fn single(literal: &Literal, page: &CodePage) -> Result<u8, String> {
-    match characters(literal, page)?.as_slice() {
+fn single(literal: &Literal, page: &CodePage, quote: Quote) -> Result<u8, String> {
+    match characters(literal, page, quote)?.as_slice() {
         [b] => Ok(*b),
         _ => Err("a literal of THROUGH or ALSO must be one character".into()),
     }

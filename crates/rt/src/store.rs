@@ -12,7 +12,7 @@ use crate::unit::{Loader, RunUnit};
 use crate::vocab::{Figurative, Pos, SignClause, SignPosition};
 use numeric::binary::{self, Binary};
 use numeric::precision::{Fixed, Places};
-use numeric::{Numproc, Options, Trunc, float, sign};
+use numeric::{Numproc, Options, Quote, Trunc, float, sign};
 use std::cmp::Ordering;
 use zarch::check::ProgramMask;
 use zarch::decimal::{self, Decimal};
@@ -236,13 +236,13 @@ pub fn zoned_image(magnitude: u128, digits: u32, signed: bool, negative: bool, s
     }
 }
 
-pub fn figurative_unit(f: Figurative) -> u16 {
+pub fn figurative_unit(f: Figurative, quote: Quote) -> u16 {
     match f {
         Figurative::Zero => 0x0030,
         Figurative::Space => 0x0020,
         Figurative::HighValue => 0xFFFF,
         Figurative::LowValue => 0x0000,
-        Figurative::Quote => 0x0022,
+        Figurative::Quote => quote.unit(),
         Figurative::Null => 0,
     }
 }
@@ -284,7 +284,7 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
             let units: Vec<u16> = match val {
                 Val::National(b) => b.chunks(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect(),
                 Val::Bytes(b) => page.decode(&b).encode_utf16().collect(),
-                Val::Fig(f) => vec![figurative_unit(f); dest.len / 2],
+                Val::Fig(f) => vec![figurative_unit(f, facts.options().quote); dest.len / 2],
                 _ => return Err(Abend::ironwork("this value cannot be moved to a national item", pos)),
             };
             let mut out: Vec<u8> = units.iter().take(dest.len / 2).flat_map(|u| u.to_be_bytes()).collect();

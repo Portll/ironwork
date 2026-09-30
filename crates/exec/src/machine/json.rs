@@ -148,7 +148,7 @@ impl<'p> Machine<'p, '_, '_> {
             });
         }
         if loc.kind == Kind::National {
-            let unit = rt::store::figurative_unit(f);
+            let unit = rt::store::figurative_unit(f, self.options.quote);
             return Ok(bytes.chunks(2).all(|c| c == unit.to_be_bytes()));
         }
         let byte = self.collating.figurative(f);
