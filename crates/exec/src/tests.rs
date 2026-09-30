@@ -141,6 +141,173 @@ fn sections_perform_fall_through_and_exit_section() {
     assert_eq!(out, "K=3\nDONE\n");
 }
 
+fn exit_program(procedure: &[&str]) -> String {
+    program("", "       01  I PIC 9(2).\n       01  K PIC 9 VALUE 0.\n", &procedure.concat())
+}
+
+#[test]
+fn exit_paragraph_leaves_the_paragraph_and_falls_to_the_next() {
+    let out = run(&exit_program(&[
+        "       MAIN-LINE.\n",
+        &line("DISPLAY 'M'."),
+        "       P1.\n",
+        &line("DISPLAY 'A1'"),
+        &line("EXIT PARAGRAPH"),
+        &line("DISPLAY 'NOT REACHED'."),
+        "       P2.\n",
+        &line("DISPLAY 'B1'."),
+        &line("EXIT PARAGRAPH."),
+        &line("DISPLAY 'NOT REACHED 2'."),
+        "       P3.\n",
+        &line("EXIT PARAGRAPH."),
+        &line("DISPLAY 'NOT REACHED 3'."),
+        "       P4.\n",
+        &line("IF K = 0"),
+        &line("    EXIT PARAGRAPH"),
+        &line("END-IF"),
+        &line("DISPLAY 'NOT REACHED 4'."),
+        "       P5.\n",
+        &line("DISPLAY 'END'"),
+        &line("STOP RUN."),
+    ]));
+    assert_eq!(out, "M\nA1\nB1\nEND\n");
+}
+
+#[test]
+fn exit_paragraph_in_a_performed_paragraph_returns_to_the_performer() {
+    let out = run(&exit_program(&[
+        "       MAIN-LINE.\n",
+        &line("PERFORM P1"),
+        &line("DISPLAY 'BACK'"),
+        &line("PERFORM P2"),
+        &line("DISPLAY 'END'"),
+        &line("STOP RUN."),
+        "       P1.\n",
+        &line("DISPLAY 'A1'"),
+        &line("EXIT PARAGRAPH"),
+        &line("DISPLAY 'NOT REACHED'."),
+        "       P2.\n",
+        &line("EXIT PARAGRAPH."),
+        &line("DISPLAY 'NOT REACHED 2'."),
+    ]));
+    assert_eq!(out, "A1\nBACK\nEND\n");
+}
+
+#[test]
+fn exit_section_leaves_the_whole_section() {
+    let out = run(&exit_program(&[
+        "       MAIN SECTION.\n",
+        &line("DISPLAY 'M'."),
+        "       S1 SECTION.\n",
+        "       S1-A.\n",
+        &line("DISPLAY 'S1A'"),
+        &line("EXIT SECTION"),
+        &line("DISPLAY 'NOT REACHED'."),
+        "       S1-B.\n",
+        &line("DISPLAY 'NOT REACHED S1B'."),
+        "       S2 SECTION.\n",
+        "       S2-A.\n",
+        &line("DISPLAY 'S2A'."),
+        &line("EXIT SECTION."),
+        &line("DISPLAY 'NOT REACHED S2A'."),
+        "       S2-B.\n",
+        &line("DISPLAY 'NOT REACHED S2B'."),
+        "       S3 SECTION.\n",
+        "       S3-A.\n",
+        &line("DISPLAY 'S3'"),
+        &line("STOP RUN."),
+    ]));
+    assert_eq!(out, "M\nS1A\nS2A\nS3\n");
+}
+
+#[test]
+fn exit_section_opening_a_paragraph_and_in_a_performed_section() {
+    let out = run(&exit_program(&[
+        "       MAIN SECTION.\n",
+        &line("PERFORM S1"),
+        &line("DISPLAY 'BACK'"),
+        &line("GO TO S3."),
+        "       S1 SECTION.\n",
+        "       S1-A.\n",
+        &line("EXIT SECTION."),
+        &line("DISPLAY 'NOT REACHED'."),
+        "       S1-B.\n",
+        &line("DISPLAY 'NOT REACHED S1B'."),
+        "       S3 SECTION.\n",
+        &line("DISPLAY 'S3'"),
+        &line("STOP RUN."),
+    ]));
+    assert_eq!(out, "BACK\nS3\n");
+}
+
+#[test]
+fn exit_perform_ends_an_inline_loop() {
+    let out = run(&exit_program(&[
+        &line("PERFORM VARYING I FROM 1 BY 1 UNTIL I > 5"),
+        &line("    DISPLAY 'TOP ' I"),
+        &line("    IF I = 3"),
+        &line("        EXIT PERFORM"),
+        &line("    END-IF"),
+        &line("    DISPLAY 'BOTTOM ' I"),
+        &line("END-PERFORM"),
+        &line("DISPLAY 'AFTER ' I"),
+        &line("GOBACK."),
+    ]));
+    assert_eq!(out, "TOP 01\nBOTTOM 01\nTOP 02\nBOTTOM 02\nTOP 03\nAFTER 03\n");
+}
+
+#[test]
+fn exit_perform_opening_the_loop_body_and_leaving_only_the_inner_loop() {
+    let out = run(&exit_program(&[
+        &line("PERFORM VARYING I FROM 1 BY 1 UNTIL I > 2"),
+        &line("    PERFORM UNTIL K > 5"),
+        &line("        ADD 1 TO K"),
+        &line("        IF K = 2"),
+        &line("            EXIT PERFORM"),
+        &line("        END-IF"),
+        &line("    END-PERFORM"),
+        &line("    DISPLAY 'I=' I ' K=' K"),
+        &line("    MOVE 0 TO K"),
+        &line("END-PERFORM"),
+        &line("PERFORM"),
+        &line("EXIT PERFORM"),
+        &line("DISPLAY 'NOT REACHED'"),
+        &line("END-PERFORM"),
+        &line("DISPLAY 'END'"),
+        &line("GOBACK."),
+    ]));
+    assert_eq!(out, "I=01 K=2\nI=02 K=2\nEND\n");
+}
+
+#[test]
+fn exit_perform_cycle_skips_the_rest_of_one_iteration() {
+    let out = run(&exit_program(&[
+        &line("PERFORM VARYING I FROM 1 BY 1 UNTIL I > 5"),
+        &line("    DISPLAY 'TOP ' I"),
+        &line("    IF I = 3"),
+        &line("        EXIT PERFORM CYCLE"),
+        &line("    END-IF"),
+        &line("    DISPLAY 'BOTTOM ' I"),
+        &line("END-PERFORM"),
+        &line("DISPLAY 'AFTER ' I"),
+        &line("GOBACK."),
+    ]));
+    assert_eq!(out, "TOP 01\nBOTTOM 01\nTOP 02\nBOTTOM 02\nTOP 03\nTOP 04\nBOTTOM 04\nTOP 05\nBOTTOM 05\nAFTER 06\n");
+}
+
+#[test]
+fn exit_perform_cycle_as_the_first_statement_of_the_body() {
+    let out = run(&exit_program(&[
+        &line("PERFORM VARYING I FROM 1 BY 1 UNTIL I > 3"),
+        &line("EXIT PERFORM CYCLE"),
+        &line("DISPLAY 'NOT REACHED'"),
+        &line("END-PERFORM"),
+        &line("DISPLAY 'AFTER ' I"),
+        &line("GOBACK."),
+    ]));
+    assert_eq!(out, "AFTER 04\n");
+}
+
 #[test]
 fn evaluate_true_also_thru_and_other() {
     let out = run(&program(
