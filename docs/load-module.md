@@ -3,9 +3,10 @@
 The `.iwm` file format, and how a run unit loads it. It details §8 of
 [codegen-runtime.md](codegen-runtime.md) and serves invariants 6 and 7 of its §10.
 
-**Status:** draft, 2026-09-30, for the operator's review. Nothing here is built. The types a module
-holds are [lir.md](lir.md)'s; this document gives the container, the encoding rules, which apply to
-any of them, and the program directory.
+**Status:** draft, 2026-09-30, for the operator's review. The container and the encoding rules (§3,
+§4) are built in `rt::module`; the codecs for options, storage, maps and the directory, the loader
+and `dump` are not. The types a module holds are [lir.md](lir.md)'s; this document gives the
+container, the encoding rules, which apply to any of them, and the program directory.
 
 ## 1. Scope and constraints
 
@@ -15,8 +16,9 @@ any of them, and the program directory.
   format, with no serialisation crate. The reader works on `&[u8]` with checked slicing, and never
   casts a byte buffer to a struct.
 - **Where it lives.** The reader, the codec traits and the types they encode live in `rt`. The
-  writer driver (section order, string interning, checksums) lives in `compile`, which depends on
-  `rt`; the reader cannot call the writer.
+  container writer, `rt::module::ModuleWriter` (section order, string interning, checksums), lives
+  in `rt` too, because no `compile` crate exists yet. The reader never calls it. Once `compile`
+  exists it drives the writer: it chooses what each section holds, and `rt` lays the bytes out.
 - **Untrusted input.** A `.iwm` may be truncated, corrupt or hostile. The reader bounds every count
   and index, never allocates from a length it has not checked (§4.8), and never panics.
 
@@ -24,7 +26,7 @@ any of them, and the program directory.
 
 | Term | Meaning |
 |---|---|
-| Module | The bytes of one `.iwm` file, and its parsed form `rt::module::Module` |
+| Module | The bytes of one `.iwm` file, and `rt::module::Module`, those bytes with the header and section table checked |
 | Section | A contiguous block of a module holding one kind of data |
 | Program ordinal | A program's position in the directory, from 0, in source order with nested programs after their container (`syntax::parse_all_with`, lib.rs:77) |
 | String table | The one table of strings every other section refers to by index |
@@ -55,27 +57,73 @@ sections before it can decode anything else. Section bodies use the rules of §4
 | 12 | 4 | `features` | Bit set of required features. Zero in every version so far |
 | 16 | 4 | `section_count` | Number of table entries |
 | 20 | 8 | `file_len` | Total bytes. A shorter file is truncated, and a longer one has trailing bytes |
-| 28 | 4 | `header_crc` | CRC-32 of bytes 0 to 27, then of the whole section table |
+| 28 | 4 | `header_crc` | CRC-32 of bytes 0 to 27 followed by the whole section table, as one run |
 
 ### 3.3 Section table entry
 
 | Offset | Size | Field | Rule |
 |---|---|---|---|
 | 0 | 4 | `id` | A section id (§3.4) |
-| 4 | 4 | `flags` | Bit 0: optional, so a reader that does not know `id` skips it. Other bits are zero |
+| 4 | 4 | `flags` | Bit 0: optional, so a reader that does not know `id` skips it. Other bits are zero, and the reader refuses a set one |
 | 8 | 8 | `offset` | From the start of the file |
 | 16 | 8 | `length` | In bytes |
 | 24 | 4 | `crc` | CRC-32 of the section's bytes |
 
-- **Canonical table.** Entries ascend by `id`. The first body begins where the table ends, and
-  each later one where the previous ends, so no two writers can lay a module out differently. A
-  reader rejects any other layout as malformed.
+- **Canonical table.** Entries ascend strictly by `id`. The first body begins where the table ends,
+  and each later one where the previous ends, and the last ends at `file_len`, so no two writers
+  can lay a module out differently. The table must fit inside the file. A reader rejects any other
+  layout as malformed.
+- **Flags and known sections.** A section this version knows (§3.4) is required, so the reader
+  refuses one flagged optional. A section it does not know is skipped if flagged optional, and
+  refused otherwise. Any flag bit other than bit 0 is refused.
+- **Required sections.** Every section of §3.4 with a required "yes" must be in the table. The
+  reader refuses a module that lacks one, naming the lowest id missing.
 - **Checksum.** CRC-32, the IEEE polynomial (reflected, `0xEDB88320`, initial and final XOR
-  `0xFFFFFFFF`): a 256-entry table built by a `const fn`, about fifteen lines in `rt`. It detects
+  `0xFFFFFFFF`): a 256-entry table built by a `const fn`, about fifteen lines in `rt`, with
+  `extend` to continue a checksum over more bytes. It detects
   the burst errors and truncations of transit. It does not resist tampering (question 2).
-- **Order of checks.** Magic, then version (§8.1), then `file_len`, then `header_crc`, then each
-  section's `crc` when the reader first touches the section. A reader that wants only the directory
-  need not checksum the LIR.
+- **Order of checks.** The reader stops at the first that fails:
+  1. Magic. A file that is a prefix of the magic, or shorter than it, is compared as far as it goes.
+  2. A file shorter than the 32-byte header is truncated. This comes before the version, which sits
+     inside the header.
+  3. Version (§8.1).
+  4. `file_len`: a shorter file is truncated, and a longer one has trailing bytes.
+  5. `header_crc`, over the header and the whole section table.
+  6. `features`: any set bit is refused.
+  7. The section table (§3.3): its size, order, layout, flags and ids, then the required sections.
+  8. Each section's `crc`, when the reader first touches the section. A reader that wants only the
+     directory need not checksum the LIR.
+
+  A file that fails an earlier check reports it whatever a later field says, so a changed magic,
+  version or `file_len` byte is not reported as a bad `header_crc`.
+
+### 3.5 Errors
+
+| Error | Raised when | Message |
+|---|---|---|
+| `NotAModule` | The magic differs (check 1) | `not an ironwork load module` |
+| `Truncated` | Fewer than 32 bytes, or fewer than `file_len` (checks 2, 4) | `truncated: 100 bytes of 240` |
+| `Version` | A version the reader does not read (check 3, §8.1) | `load module format 1.0; this ironwork reads 0.1. Compile the source again` |
+| `TrailingBytes` | More bytes than `file_len` (check 4) | `4 bytes after the end of the module at 240` |
+| `HeaderChecksum` | `header_crc` differs (check 5) | `header is corrupt (checksum 1234ABCD, expected 5678EF01)` |
+| `Feature` | Any `features` bit is set (check 6) | `load module needs features 0x00000004, which this ironwork lacks` |
+| `UnknownSection` | A section the reader does not know, not flagged optional (check 7) | `required section 0x9 is unknown to this ironwork` |
+| `MissingSection` | A required section is absent (check 7) | `required section DEBUG is missing` |
+| `SectionChecksum` | A section's `crc` differs (check 8) | `section LAYOUT is corrupt (checksum 1234ABCD, expected 5678EF01)` |
+| `Malformed` | Anything else: a table or a body breaks a rule of §3 or §4 | `LAYOUT is malformed at byte 2: bool 7` |
+
+- **`Malformed` reasons in the header and table** (section `section table`, offset from the start of
+  the file): the table runs past the end; entries not strictly ascending; a section not beginning
+  where the last ended, or running past the end; sections that end before `file_len`; a flag bit
+  other than bit 0; a known section flagged optional.
+- **`Malformed` reasons in a body** (offset from the start of the body): an integer over 64 bits,
+  over-long, or cut short; a value that overflows its type; a `bool`, `Option` or `Result` byte
+  other than 0 or 1; a surrogate or out-of-range `char`; a NaN other than the canonical one; a
+  count larger than the bytes that remain; an index outside the string table; an unknown enum tag;
+  map keys that do not strictly ascend; a `check` that fails; bytes left after the last value;
+  and, in the string table, invalid UTF-8 and a text stored twice.
+- **File name.** The reader's messages carry no file name. The caller puts it in front, as
+  `X: `.
 
 ### 3.4 Sections
 
@@ -90,10 +138,14 @@ sections before it can decode anything else. Section bodies use the rules of §4
 | 7 | `BMS` | The map models of the mapsets the module's programs use (§5.3) | yes |
 | 8 | `DEBUG` | Per program: `Program.debug` (§9) | yes |
 | 0x8000 up | reserved | Extension sections, written with flag bit 0 set | no |
+| any other | unknown | Skipped if flagged optional, and refused otherwise (§3.3) | no |
 
 - **Per program** means a count equal to the directory's program count, then one record per program
   in ordinal order. A section never repeats a program's name. A program's records are decoded
   together, on its first CALL.
+- **Order of writing.** `ModuleWriter::section` takes the known sections in ascending id order and
+  panics on any other order, and on `STRINGS`, which `finish` writes. `finish` panics if a required
+  section is missing. `extension` takes an id from `0x8000` up and always sets the optional flag.
 - **Always present.** A module with no SQL or no maps still carries the section, with zero records,
   so every module's section table has the same shape.
 - **Debug is required.** Every abend names its COBOL position (codegen-runtime.md §10, invariant 3),
@@ -112,14 +164,14 @@ its fields are, so encoding any type built from them is mechanical.
 | `u16`, `u32`, `u64`, `usize` | Unsigned LEB128: seven bits per byte, low group first, high bit set on all but the last byte |
 | `i16`, `i32`, `i64` | Zigzag (`(n << 1) ^ (n >> bits-1)`), then unsigned LEB128 |
 | `char` | Its scalar value as unsigned LEB128. A surrogate or a value over `0x10FFFF` is malformed |
-| `f64` | Its bit pattern as eight little-endian bytes, with any NaN written as `0x7FF8000000000000`. No encoded type holds a float today |
+| `f64` | Its bit pattern as eight little-endian bytes, with any NaN written as `0x7FF8000000000000`. The reader refuses any other NaN. No encoded type holds a float today |
 
 - **Why LEB128.** Nearly every integer in a module is a small index, count, length or offset, so a
   variable width makes a module much smaller than fixed `u32`, with no alignment. Nothing needs to
   skip integers: the table indexes the sections, and a program is decoded whole.
 - **Canonical only.** The reader rejects an over-long encoding (a final zero byte after a
-  continuation, as `0x80 0x00`) and a value that overflows the target type, so each value has one
-  byte form.
+  continuation, as `0x80 0x00`), a value of more than 64 bits, and a value that overflows the
+  target type, so each value has one byte form.
 - **Sizes.** `usize` is read as `u64` and checked to fit the target's `usize`.
 
 ### 4.2 Strings
@@ -129,7 +181,8 @@ its fields are, so encoding any type built from them is mechanical.
 - **Bytes.** A `Vec<u8>` is a count then the raw bytes, and does not enter the string table. It
   holds binary data: a `Const::Bytes`, the storage image, a BMS `Initial::Bytes`.
 - **Table body.** A count, then per string a byte length and its UTF-8 bytes. Invalid UTF-8 is
-  malformed. The empty string is an ordinary entry.
+  malformed, and so is a text stored twice, since the table stores each text once. The empty string
+  is an ordinary entry.
 - **Order.** Strings are numbered by first use, in the fixed order the writer visits the sections
   (§3.4) and, within a section, the fields. The writer builds the section bodies first, interning as
   it goes, then writes the table, which sits first in the file.
@@ -148,11 +201,11 @@ its fields are, so encoding any type built from them is mechanical.
 | Rust | Encoding |
 |---|---|
 | Struct | Its fields in declaration order, with no names, no length and no padding |
-| Tuple | Its elements in order |
-| `[T; N]` | Its elements in order, with no count (the type gives `N`) |
+| Tuple | Its elements in order. Tuples of two, three and four elements are encodable |
+| `[T; N]` | Its elements in order, with no count (the type gives `N`). The reader refuses an `N` larger than the bytes that remain |
 | `Vec<T>` | A count, then the elements |
-| `Option<T>` | One byte, 0 for `None` or 1 for `Some`, then the `T` for `Some` |
-| `Result<T, E>` | One byte, 0 for `Ok` or 1 for `Err`, then the `T` or the `E` |
+| `Option<T>` | One byte, 0 for `None` or 1 for `Some`, then the `T` for `Some`. Any other byte is malformed |
+| `Result<T, E>` | One byte, 0 for `Ok` or 1 for `Err`, then the `T` or the `E`. Any other byte is malformed |
 | `Box<T>` | Just the `T` |
 | `BTreeMap<K, V>` | A count, then each `(K, V)` in ascending key order. The reader rejects an order that does not strictly ascend |
 | `HashMap`, `HashSet` | Not encodable. No codec exists, so a type holding one does not compile (§10) |
@@ -168,9 +221,12 @@ and the reader checks the two agree.
     pub trait Decode: Sized { fn decode(r: &mut Reader<'_>) -> Result<Self, ModuleError>; }
 
 - **`Writer`** owns a `Vec<u8>` and the string interner. `w.string(&str)` writes the index. It has
-  `leb`, `zigzag`, `byte`, `bytes` and `count`.
-- **`Reader`** owns a `&[u8]`, a position, the section's name for error messages, and a reference to
-  the decoded string table. Every read is bounds-checked and returns an error instead of panicking.
+  `leb`, `zigzag`, `byte`, `bytes` and `count`, and `take`, which returns the bytes written so far
+  and keeps the string table.
+- **`Reader`** borrows a `&[u8]`, and holds a position, the section's name for error messages, and a
+  reference to the decoded string table. Every read is bounds-checked and returns an error instead
+  of panicking. `finish` refuses bytes left after the last value.
+- **`decode_all::<T>(section, bytes, strings)`** decodes one `T` that fills `bytes` exactly.
 - **Foreign types.** `Encode` and `Decode` are `rt`'s traits, so `rt` may implement them for
   `numeric::options::Options`, `numeric`'s `Fixed` and `zarch::hfp::Precision` without breaking the
   orphan rule.
@@ -183,29 +239,46 @@ and the reader checks the two agree.
   fields in the same order, and a swapped pair round-trips against itself while being wrong against
   the format.
 - **A new field cannot be forgotten.** The struct form expands to an exhaustive destructure
-  (`let Options { arith, trunc, numproc, codepage, trunc_check } = self;`, with no `..`), and the
+  (`let Options { arith, trunc, .., dbcs } = self;`, listing every field and with no `..`), and the
   enum form to an exhaustive `match`, so a new field or variant is a compile error until listed.
 - **Not a proc-macro,** which is a separate crate and needs a Rust parser. `macro_rules!` covers
-  structs and enums with named fields in about eighty lines.
+  structs with named fields and enums with unit, named-field and tuple variants in about sixty
+  lines.
 
-The macro takes the type and its fields, and for an enum its explicit tags:
+The macros are exported from `rt` as `codec_struct!` and `codec_enum!`. Their grammar:
 
-    codec_struct!(Options { arith, trunc, numproc, codepage, trunc_check } check options_valid);
+    codec_struct!(Type { field, ... } [check path]);
+    codec_enum!(Type { Variant [{ field, ... } | (elem, ...)] = tag, ... });
+
+| Part | Rule |
+|---|---|
+| `Type { field, ... }` | The type's named fields, in the order they encode. Every field is listed, and a tuple struct is not accepted |
+| `check path` | Optional. A `fn(&T) -> Result<(), String>` run on the decoded value, for a rule the shape cannot state (a code page the tables carry, §5.1). Its `String` becomes the reason of a `Malformed` at the byte where the value began. Without it, no check runs |
+| `Variant` | A unit variant, written bare |
+| `Variant { field, ... }` | A variant with named fields, encoded in the order listed |
+| `Variant(elem, ...)` | A tuple variant, such as `Float(p)`. Each `elem` is a binding name for one position, encoded in order |
+| `= tag` | An integer literal, unsigned LEB128 on the wire. Every variant has one; a variant has named fields or tuple elements, not both |
+| Trailing comma | Allowed after the last field, element and variant |
+
+Every field and element must itself be encodable (§4.1 to §4.4).
+
+    codec_struct!(Options { arith, trunc, numproc, codepage, trunc_check, fastsrt, sort_keys,
+        adv, thread, dll, rent, dbcs } check options_valid);
     codec_enum!(Arith { Compat = 0, Extend = 1 });
     codec_enum!(Kind {
         Group = 0,
         Alnum { justified } = 1,
         Zoned { digits, scale, signed, sign } = 3,
+        Float(precision) = 6,
     });
 
-`check` names an optional function run on the decoded value, for a rule the shape cannot state (a
-code page the tables carry, §5.1). Hand-written code is confined to the integer, string, `Vec`,
-`Option`, `Result`, `Box`, tuple, array and `BTreeMap` implementations, and the debug positions
-(§9), about a hundred and fifty lines with their tests.
+Hand-written code is confined to the integer, `bool`, `char`, `f64`, string, `Vec`, `Option`,
+`Result`, `Box`, tuple, array and `BTreeMap` implementations in `codec.rs`, about 270 lines without
+tests, and the debug positions (§9).
 
 ### 4.7 A worked example
 
-`Options { arith: Extend, trunc: Opt, numproc: Nopfd, codepage: 1140, trunc_check: Report }`:
+`Options` with `arith: Extend` and `trunc: Opt`, and every other field at `Options::default()`:
 
 | Field | Value | Bytes |
 |---|---|---|
@@ -214,8 +287,15 @@ code page the tables carry, §5.1). Hand-written code is confined to the integer
 | `numproc` | tag 0 | `00` |
 | `codepage` | 1140 as LEB128 (`0x474`) | `F4 08` |
 | `trunc_check` | tag 0 | `00` |
+| `fastsrt` | false | `00` |
+| `sort_keys` | `Dfsort`, tag 0 | `00` |
+| `adv` | true | `01` |
+| `thread` | false | `00` |
+| `dll` | false | `00` |
+| `rent` | true | `01` |
+| `dbcs` | true | `01` |
 
-Six bytes: `01 01 00 F4 08 00`.
+Thirteen bytes: `01 01 00 F4 08 00 00 00 01 00 00 01 01`.
 
 ### 4.8 Bounds on decoding
 
@@ -230,23 +310,38 @@ Six bytes: `01 01 00 F4 08 00`.
 
 ## 5. Options, storage and maps
 
-Line numbers are for the tree at 79a199e.
+Line numbers are for the tree at 79a199e, except those of `crates/numeric/src/options.rs`, which are
+for 273fc24.
 
 ### 5.1 Options
 
 `Program.options` is lir.md's `ProgramOptions`: `numeric::options::Options`
-(crates/numeric/src/options.rs:59-66), which is `Copy`, holds only enums and integers, and encodes
-as it is; then `ssrange`, `dynam` and the option cards. Options are per program, because a CBL card
-is. `dynam` is new: `Options` does not model it, and the interpreter treats every CALL as dynamic
-(`RunUnit::load`, unit.rs:136).
+(crates/numeric/src/options.rs:119-136), which is `Copy`, holds only enums, integers and bools, and
+encodes as it is, its fields in declaration order; then `ssrange`, `dynam` and the option cards.
+Options are per program, because a CBL card is. `dynam` is new: `Options` does not model it, and the
+interpreter treats every CALL as dynamic (`RunUnit::load`, unit.rs:136).
 
-| Field | Type | Encoding |
-|---|---|---|
-| `arith` | `Arith` (:6) | tag: `Compat` 0, `Extend` 1 |
-| `trunc` | `Trunc` (:36) | tag: `Std` 0, `Opt` 1, `Bin` 2 |
-| `numproc` | `Numproc` (:44) | tag: `Nopfd` 0, `Pfd` 1 |
-| `codepage` | `u16` | LEB128. The `check` function refuses a CCSID `CodePage::by_ccsid` does not carry, because `Options::code_page` (:148) would otherwise panic |
-| `trunc_check` | `TruncCheck` (:53) | tag: `Report` 0, `Silent` 1 |
+The spellings a card or PARM may use come from IBM's option table, vendored as
+`crates/numeric/data/enterprise-options.tsv` and read by `Options::apply`. Two fields have no IBM
+option: `trunc_check` and `sort_keys` are set by this compiler's own flags.
+
+| Field | Type | Encoding | Set by |
+|---|---|---|---|
+| `arith` | `Arith` (:54) | tag: `Compat` 0, `Extend` 1 | `ARITH`, `AR`, with `COMPAT`, `C`, `EXTEND` or `E` |
+| `trunc` | `Trunc` (:84) | tag: `Std` 0, `Opt` 1, `Bin` 2 | `TRUNC(STD\|OPT\|BIN)` |
+| `numproc` | `Numproc` (:92) | tag: `Nopfd` 0, `Pfd` 1 | `NUMPROC(NOPFD\|PFD)` |
+| `codepage` | `u16` | LEB128. The `check` function refuses a CCSID `CodePage::by_ccsid` does not carry, because `Options::code_page` (:239) would otherwise panic | `CODEPAGE(n)`, `CP(n)` |
+| `trunc_check` | `TruncCheck` (:102) | tag: `Report` 0, `Silent` 1 | `-silent` |
+| `fastsrt` | `bool` | 0 or 1 | `FASTSRT`, `FSRT`, and `NOFASTSRT`, `NOFSRT` |
+| `sort_keys` | `SortKeys` (:112) | tag: `Dfsort` 0, `Strict` 1 | `-strict-sort-keys` |
+| `adv` | `bool` | 0 or 1 | `ADV`, `NOADV` |
+| `thread` | `bool` | 0 or 1 | `THREAD`, `NOTHREAD` |
+| `dll` | `bool` | 0 or 1 | `DLL`, `NODLL` |
+| `rent` | `bool` | 0 or 1 | `RENT`, `NORENT` |
+| `dbcs` | `bool` | 0 or 1 | `DBCS`, `NODBCS` |
+
+`ADV`, `DBCS`, `DLL`, `NUMPROC`, `RENT`, `THREAD` and `TRUNC` have no abbreviations. The defaults are
+`Compat`, `Std`, `Nopfd`, 1140, `Report`, false, `Dfsort`, true, false, false, true, true.
 
 ### 5.2 Storage and the item table
 
@@ -365,8 +460,8 @@ The format version is `major.minor`, starting at `0.1`.
 
 | The reader finds | It does |
 |---|---|
-| Bad magic | Refuses: `X is not an ironwork load module` |
-| A different `major` | Refuses: `X: load module format 2.0; this ironwork reads 1.x. Compile the source again` |
+| Bad magic | Refuses: `X: not an ironwork load module` |
+| A different `major` | Refuses: `X: load module format 1.0; this ironwork reads 0.1. Compile the source again`. A reader of major 1 or more names `1.x` |
 | The same `major`, a lower `minor` | Reads it. A minor version only adds, and a section body's shape never changes inside a major (new data goes in a new section) |
 | The same `major`, a higher `minor` | Reads it, ignoring sections with the optional flag it does not know. Refuses on an unknown required section or a set `features` bit, naming it |
 | `major` 0 | Requires the same `minor` as well. The format is not frozen until 1.0 |
@@ -513,8 +608,8 @@ second compiles once from two working directories.
   read and written again **then** the bytes are identical, **and** `dump` of the two agree.
 - **Given** any value of every codec type, generated by a fixed sequence **when** it is encoded and
   decoded **then** it equals the original, **and** a value with a NaN encodes as the canonical NaN.
-- **Given** `Options { arith: Extend, trunc: Opt, numproc: Nopfd, codepage: 1140, trunc_check: Report }`
-  **then** it encodes as `01 01 00 F4 08 00`.
+- **Given** `Options` with `arith: Extend`, `trunc: Opt` and every other field at its default
+  **then** it encodes as `01 01 00 F4 08 00 00 00 01 00 00 01 01`.
 - **Given** an OCCURS DEPENDING ON table **when** the module loads **then** the item holds the
   object's item index, **and** the module contains no `Ref`.
 
@@ -533,20 +628,27 @@ second compiles once from two working directories.
 ### L3: Version mismatch
 
 - **Given** a module whose `major` is higher than the reader's **when** it is run **then** the run
-  stops with `X: load module format 2.0; this ironwork reads 1.x. Compile the source again`, and
+  stops with `X: load module format 1.0; this ironwork reads 0.1. Compile the source again`, and
   exit status is non-zero, **and** no program runs.
 - **Given** a module with a higher `minor` and an unknown optional section **then** it runs, and the
   section is ignored. **Given** an unknown required section **then** it is refused, naming the
   section.
-- **Given** a file that does not start with the magic **then** `X is not an ironwork load module`.
+- **Given** a file that does not start with the magic **then** `X: not an ironwork load module`.
+- **Given** a module with a `features` bit set **then** it is refused, naming the bits.
 - **Given** a `major` 0 reader and a module with another `minor` **then** it is refused.
 
 ### L4: Corruption
 
 - **Given** a module with one byte of the `LAYOUT` section changed **when** it is loaded **then** it
   is refused with `X: section LAYOUT is corrupt (checksum 1234ABCD, expected 5678EF01)`.
-- **Given** a module truncated anywhere **then** it is refused as truncated, never a panic.
-- **Given** a header byte changed **then** it is refused as a bad header checksum.
+- **Given** a module truncated anywhere, including to fewer than 32 bytes **then** it is refused as
+  truncated, never a panic.
+- **Given** a `features`, `section_count`, `header_crc` or section-table byte changed **then** it is
+  refused as a bad header checksum. **Given** a magic, version or `file_len` byte changed **then**
+  it is refused by that field's own check.
+- **Given** a string table that stores one text twice, a non-canonical NaN, a known section flagged
+  optional, a flag bit other than bit 0, or a module without a required section **then** it is
+  refused.
 - **Given** a section whose checksum was recomputed after a count was set beyond the remaining
   bytes **then** it is refused as malformed, and no memory is allocated from the count.
 - **Given** a `SQL` entry whose stored fingerprint differs from its text **then** the module is
