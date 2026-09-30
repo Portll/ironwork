@@ -379,6 +379,10 @@ impl<'p> Machine<'p, '_, '_> {
             Flow::End(Ending::StopRun) => return Err(Abend { code: AbendCode::Signal(Signal::StopRun), message: String::new(), pos }),
             Flow::End(_) => return Err(Abend { code: AbendCode::Signal(Signal::GoBack), message: String::new(), pos }),
             Flow::GoTo(_) => return Err(Abend::ironwork("GO TO out of a USE BEFORE REPORTING procedure", pos)),
+            leaving @ (Flow::Resume(..) | Flow::Return(_)) => {
+                self.uses.leaving = Some(leaving);
+                return Err(Abend { code: AbendCode::Signal(Signal::DeclarativeExit), message: String::new(), pos });
+            }
             _ => {}
         }
         let Some(item) = self.report_writer.print_switch else { return Ok(false) };

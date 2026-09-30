@@ -482,3 +482,25 @@ pub(super) fn fuzz_seeds() -> Vec<String> {
     let (debugging, _) = debugging_program(true);
     vec![debugging, sort_program(&["B-ERR SECTION.", "    USE GLOBAL AFTER STANDARD EXCEPTION PROCEDURE ON B.", "B-1.", "    MOVE 16 TO SORT-RETURN."], "")]
 }
+
+#[test]
+fn a_file_procedure_passing_the_end_of_a_perform_left_by_go_to_returns_after_that_perform() {
+    let source = with_declaratives(
+        &["    SELECT OUT-F ASSIGN TO OUTDD."],
+        &["FD  OUT-F.", "01  OUT-REC PIC X(3)."],
+        &["01  K PIC 9 VALUE 0."],
+        &[
+            "OUT-ERR SECTION.",
+            "    USE AFTER EXCEPTION PROCEDURE OUT-F.",
+            "E1.",
+            "    DISPLAY 'E1'",
+            "    IF K = 0 GO TO M2.",
+            "E2.",
+            "    DISPLAY 'E2'.",
+        ],
+        &["    PERFORM E1", "    DISPLAY 'BACK'", "    GOBACK.", "M2.", "    MOVE 1 TO K", "    OPEN INPUT OUT-F", "    DISPLAY 'AFTER OPEN'", "    GOBACK."],
+    );
+    let (out, err, ending) = run_files(&source, &[]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(out, "E1\nE1\nBACK\n");
+}

@@ -112,7 +112,7 @@ impl<'p> Machine<'p, '_, '_> {
         let flow = self.run_paragraphs(first, last);
         self.unit.depth -= 1;
         match flow? {
-            leaving @ (Flow::GoTo(_) | Flow::End(_)) => {
+            leaving @ (Flow::GoTo(_) | Flow::End(_) | Flow::Resume(..) | Flow::Return(_)) => {
                 self.uses.leaving = Some(leaving);
                 Err(Abend { code: AbendCode::Signal(Signal::DeclarativeExit), message: String::new(), pos })
             }
@@ -180,7 +180,7 @@ impl<'p> Machine<'p, '_, '_> {
         self.uses.debugging = false;
         self.uses.line = saved;
         Ok(match flow? {
-            leaving @ (Flow::GoTo(_) | Flow::End(_)) => Some(leaving),
+            leaving @ (Flow::GoTo(_) | Flow::End(_) | Flow::Resume(..) | Flow::Return(_)) => Some(leaving),
             _ => None,
         })
     }
