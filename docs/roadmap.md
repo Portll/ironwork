@@ -159,7 +159,7 @@ It is zero-dependency Rust.
 | 11 | The VM (§6) | ironwork | XL | After SQL, by ruling |
 | 12 | The PostgreSQL backend (SQL step 7) | ironwork | L | Built; TLS in the separate `tls/` build (D2); Q5 passes against PostgreSQL 14.19 |
 | 13 | The build gate running `ironwork check` (E1) | cobolwork | S | `ironwork check` exists now, exiting 12 on a compile error |
-| 14 | A CICS region defined by a CSD, for the TN3270 server (E6) | ironwork | S | cobolwork already parses CSDs; share fixtures |
+| 14 | A CICS region defined by a CSD, for the TN3270 server (E6) | ironwork | S | Built (2026-09-30): `--serve --csd` reads the DEFINE TRANSACTIONs; cobolwork's CSD fixtures are shared in `fixtures/cobolwork/csd/` |
 | 15 | Crash-fuzzing programs through ironwork (E5) | Both | L | S0C7, S0C4 and SSRANGE become findings, each with its input |
 | 16 | Dynamic witness (E4): `cobolwork confirm` runs ironwork with a payload | Both | L | Needs an ironwork trace of which input bytes reached which operation |
 | 17 | A caller for cobolwork's remediation gate | cobolwork | M | BACKLOG item |

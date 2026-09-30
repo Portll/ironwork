@@ -27,6 +27,11 @@ jobs:
             provenance/*.tsv
             test/fixtures/bms/
             test/fixtures/sql/
+            test/fixtures/entry/REGION.csd
+            test/fixtures/intrdr/declared/REGION.CSD
+            test/fixtures/outbound/REGION.csd
+            test/fixtures/priv/REGION.csd
+            test/fixtures/web-csd/REGION.csd
           sparse-checkout-cone-mode: false
       - name: Toolchain
         run: |

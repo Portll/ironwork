@@ -3,25 +3,10 @@
 //! IRONWORK_PG_URL set (tools/pg-test.sh), the conversation is also recorded against PostgreSQL and
 //! replayed from that recording.
 
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpStream;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::mpsc::{self, Receiver};
-use std::time::Duration;
+mod common;
 
-const IAC: u8 = 255;
-const DO: u8 = 253;
-const WILL: u8 = 251;
-const SB: u8 = 250;
-const SE: u8 = 240;
-const EOR_COMMAND: u8 = 239;
-const BINARY: u8 = 0;
-const TERMINAL_TYPE: u8 = 24;
-const EOR: u8 = 25;
-const ENTER: u8 = 0x7D;
-
-const WAIT: Duration = Duration::from_secs(60);
+use common::{converse, serve};
+use std::path::PathBuf;
 
 /// A held cursor left open at the end of the first task, and opened again by the second.
 const PROGRAM: &str = concat!(
@@ -50,87 +35,6 @@ const PROGRAM: &str = concat!(
 
 const SHOWN: [&str; 2] = ["FIRST ADAMS    000", "SECOND ADAMS    000"];
 
-/// The server process, killed when dropped so a failing test leaves nothing listening.
-struct Server {
-    child: Child,
-    address: String,
-    stdout: Receiver<String>,
-    stderr: Receiver<String>,
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-fn lines(stream: impl Read + Send + 'static) -> Receiver<String> {
-    let (send, receive) = mpsc::channel();
-    std::thread::spawn(move || {
-        for line in BufReader::new(stream).lines().map_while(Result::ok) {
-            if send.send(line.trim_end_matches('\r').to_owned()).is_err() {
-                return;
-            }
-        }
-    });
-    receive
-}
-
-fn serve(program: &Path, database: &[&str]) -> Server {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_ironwork"))
-        .args(["cics", program.to_str().expect("a UTF-8 path"), "--transid", "T1", "--serve", "127.0.0.1:0"])
-        .args(database)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("the ironwork binary starts");
-    let (stdout, stderr) = (lines(child.stdout.take().expect("piped")), lines(child.stderr.take().expect("piped")));
-    let mut server = Server { child, address: String::new(), stdout, stderr };
-    while server.address.is_empty() {
-        let line = server.stderr.recv_timeout(WAIT).expect("the server reports its address");
-        if let Some(address) = line.strip_prefix("ironwork: serving TN3270 on ") {
-            server.address = address.to_owned();
-        }
-    }
-    server
-}
-
-fn read_exact(stream: &mut TcpStream, n: usize) -> Vec<u8> {
-    let mut bytes = vec![0; n];
-    stream.read_exact(&mut bytes).expect("the server negotiates");
-    bytes
-}
-
-/// Connects as an IBM-3278-2, presses ENTER once the first task has returned TRANSID, disconnects
-/// once the second has ended, and returns the lines the tasks displayed and how many tasks ran.
-fn converse(server: &Server) -> (Vec<String>, usize) {
-    let mut stream = TcpStream::connect(&server.address).expect("the server accepts");
-    stream.set_read_timeout(Some(WAIT)).unwrap();
-    assert_eq!(read_exact(&mut stream, 3), [IAC, DO, TERMINAL_TYPE]);
-    stream.write_all(&[IAC, WILL, TERMINAL_TYPE]).unwrap();
-    assert_eq!(read_exact(&mut stream, 6), [IAC, SB, TERMINAL_TYPE, 1, IAC, SE]);
-    let mut reply = vec![IAC, SB, TERMINAL_TYPE, 0];
-    reply.extend_from_slice(b"IBM-3278-2");
-    reply.extend_from_slice(&[IAC, SE]);
-    stream.write_all(&reply).unwrap();
-    assert_eq!(read_exact(&mut stream, 12).len(), 12);
-    stream.write_all(&[IAC, WILL, BINARY, IAC, DO, BINARY, IAC, WILL, EOR, IAC, DO, EOR]).unwrap();
-    let first = server.stdout.recv_timeout(WAIT).expect("the first task displays");
-    stream.write_all(&[ENTER, 0x40, 0x40, IAC, EOR_COMMAND]).unwrap();
-    let second = server.stdout.recv_timeout(WAIT).expect("the second task displays");
-    drop(stream);
-    let mut tasks = 0;
-    loop {
-        let line = server.stderr.recv_timeout(WAIT).expect("the server ends the connection");
-        eprintln!("{line}");
-        tasks += usize::from(line.ends_with(" runs SRVQ"));
-        if line.ends_with(" disconnected") {
-            return (vec![first, second], tasks);
-        }
-    }
-}
-
 fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("ironwork-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -151,7 +55,7 @@ fn a_served_conversation_runs_exec_sql_from_a_recording() {
     }
     let dir = scratch("serve-replay");
     std::fs::write(dir.join("served.sql"), recording).unwrap();
-    let server = serve(&dir.join("srvq.cbl"), &["--sql-replay", dir.join("served.sql").to_str().unwrap()]);
+    let server = serve(&dir.join("srvq.cbl"), &["--transid", "T1", "--sql-replay", dir.join("served.sql").to_str().unwrap()]);
     assert_eq!(converse(&server), (SHOWN.map(String::from).to_vec(), 2));
     drop(server);
     std::fs::remove_dir_all(dir).unwrap();
@@ -172,12 +76,12 @@ fn a_served_conversation_recorded_against_postgresql_replays() {
 
     let dir = scratch("serve-pg");
     let recording = dir.join("served.sql");
-    let live = serve(&dir.join("srvq.cbl"), &["--sql-db", &url, "--sql-record", recording.to_str().unwrap()]);
+    let live = serve(&dir.join("srvq.cbl"), &["--transid", "T1", "--sql-db", &url, "--sql-record", recording.to_str().unwrap()]);
     assert_eq!(converse(&live), (SHOWN.map(String::from).to_vec(), 2));
     drop(live);
     let recorded = std::fs::read_to_string(&recording).unwrap();
     assert_eq!(recorded.lines().filter(|l| l.starts_with('@')).count(), 6, "{recorded}");
-    let replayed = serve(&dir.join("srvq.cbl"), &["--sql-replay", recording.to_str().unwrap()]);
+    let replayed = serve(&dir.join("srvq.cbl"), &["--transid", "T1", "--sql-replay", recording.to_str().unwrap()]);
     assert_eq!(converse(&replayed), (SHOWN.map(String::from).to_vec(), 2));
     drop(replayed);
     std::fs::remove_dir_all(dir).unwrap();

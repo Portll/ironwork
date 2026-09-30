@@ -73,6 +73,36 @@ fn host_variables_are_read_and_written_as_the_shared_table_says() {
     }
 }
 
+/// Each shared region definition, where cobolwork keeps it and the name ironwork's copy has.
+const CSDS: [(&str, &str); 5] = [
+    ("entry/REGION.csd", "entry.csd"),
+    ("intrdr/declared/REGION.CSD", "intrdr-declared.csd"),
+    ("outbound/REGION.csd", "outbound.csd"),
+    ("priv/REGION.csd", "priv.csd"),
+    ("web-csd/REGION.csd", "web-csd.csd"),
+];
+
+/// What cobolwork's parseCsd reads from each: transactions with their programs, and queues with
+/// their type and DD.
+#[test]
+fn region_definitions_read_as_cobolwork_reads_them() {
+    type Expected = (Vec<(&'static str, &'static str)>, Vec<(&'static str, &'static str, Option<&'static str>)>);
+    let expected: [(&str, Expected); 5] = [
+        ("entry.csd", (vec![("INQ1", "INQUIRY"), ("MNU1", "MENU")], vec![])),
+        ("intrdr-declared.csd", (vec![("JSUB", "JOBSUB")], vec![("JOBS", "EXTRA", Some("INREADER")), ("LOGQ", "EXTRA", Some("APPLOG"))])),
+        ("outbound.csd", (vec![], vec![("RPTQ", "EXTRA", Some("RPTOUT")), ("SCRQ", "INTRA", None)])),
+        ("priv.csd", (vec![("CECI", "DFHECIP"), ("PAY1", "PAYADM"), ("PAY2", "PAYRPT"), ("PAY3", "PAYADM2")], vec![])),
+        ("web-csd.csd", (vec![], vec![])),
+    ];
+    for (file, (transactions, queues)) in expected {
+        let csd = syntax::csd::parse(&read(&fixtures().join("csd").join(file))).unwrap_or_else(|e| panic!("{file}: {e}"));
+        let got: Vec<(&str, &str)> = csd.transactions.iter().map(|(t, d)| (t.as_str(), d.program.as_deref().unwrap_or("-"))).collect();
+        assert_eq!(got, transactions, "{file}");
+        let got: Vec<(&str, &str, Option<&str>)> = csd.tdqueues.iter().map(|(q, d)| (q.as_str(), d.kind.as_deref().unwrap_or("-"), csd.dd_of_queue(q))).collect();
+        assert_eq!(got, queues, "{file}");
+    }
+}
+
 /// Run with IRONWORK_COBOLWORK_DIR naming a cobolwork checkout; CI does.
 #[test]
 fn the_vendored_fixtures_are_cobolworks() {
@@ -90,5 +120,12 @@ fn the_vendored_fixtures_are_cobolworks() {
             let differs = read(&fixtures().join(sub).join(&name)) != read(&theirs.join(sub).join(&name));
             assert!(!differs, "fixtures/cobolwork/{sub}/{name} differs from cobolwork's: run tools/sync-cobolwork-fixtures.sh");
         }
+    }
+    let mut ours: Vec<String> = std::fs::read_dir(fixtures().join("csd")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    ours.sort();
+    assert_eq!(ours, CSDS.map(|(_, name)| name), "fixtures/cobolwork/csd holds other files than CSDS names");
+    for (path, name) in CSDS {
+        let differs = read(&fixtures().join("csd").join(name)) != read(&theirs.join(path));
+        assert!(!differs, "fixtures/cobolwork/csd/{name} differs from cobolwork's {path}: run tools/sync-cobolwork-fixtures.sh");
     }
 }

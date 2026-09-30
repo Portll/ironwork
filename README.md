@@ -181,7 +181,8 @@ The subset the interpreter runs today:
   (`type ROW COL text`, `eof`, `cursor`, then an AID key) and prints every screen; `--serve
   HOST:PORT` is a TN3270 server a 3270 emulator such as c3270 or x3270 connects to, running
   pseudo-conversations task after task (`--transaction TRAN=PROGRAM` names the programs RETURN
-  TRANSID leads to). The choices made without a z/OS to observe are assumptions C28 to C33.
+  TRANSID leads to, and `--csd FILE` takes them from the region's DEFINE TRANSACTIONs).
+  The choices made without a z/OS to observe are assumptions C28 to C33.
 - **Language Environment callable services:** a CALL that finds no program of the name reaches
   the service. CEE3ABD ends the run with user abend U*abcode*; CEEDAYS, CEEDATE, CEEDATM,
   CEESECS and CEEDYWK convert between text, Lilian days and Lilian seconds (a COMP-2, in HFP) by

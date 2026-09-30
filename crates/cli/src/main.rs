@@ -10,7 +10,7 @@ usage:
   ironwork check <program.cbl> [-I <dir>]...           compile only
   ironwork cics <program.cbl> [run flags] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
                [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]... [--td QUEUE=path]...
-               [--screens path | --serve HOST:PORT [--transaction TRAN=PROGRAM]...]
+               [--screens path | --serve HOST:PORT [--transaction TRAN=PROGRAM]... [--csd path]]
                                                        run as the first program of a CICS task
   ironwork assumptions [--c-series]                    list the register of assumptions, one per line
   ironwork --version
@@ -86,6 +86,10 @@ cics flags:
   --transaction TRAN=PROGRAM
              with --serve, the program a transaction runs: a program of the source, or one found
              through -L. --transid names the given program; each program compiles once
+  --csd path
+             with --serve, the region's transactions from a CICS system definition, as DFHCSDUP
+             reads it: each DEFINE TRANSACTION runs its PROGRAM. --transid and --transaction win
+             over it
 assumptions flags:
   --c-series
              put each entry's number in one C series first, its position in the register, with the
@@ -105,7 +109,7 @@ compare flags: ironwork compare --base OLD.cbl --head NEW.cbl [--dd NAME=path]..
 exit status: RETURN-CODE when the run ends normally; 12 compile errors, 16 an abend, 2 usage";
 
 const FLAGS: &[&str] = &["-silent", "-strict-sort-keys"];
-const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid", "--sysid", "--commarea", "--commarea-out", "--file", "--td", "--screens", "--serve", "--transaction"];
+const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid", "--sysid", "--commarea", "--commarea-out", "--file", "--td", "--screens", "--serve", "--transaction", "--csd"];
 
 mod compare;
 mod evidence;
@@ -501,6 +505,12 @@ fn serve_cics(
         return usage_error(&e);
     }
     let mut table = std::collections::HashMap::new();
+    if let Some(file) = get("--csd") {
+        match fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|text| syntax::csd::parse(&text).map_err(|e| e.to_string())) {
+            Ok(csd) => table.extend(csd.transactions.into_iter().filter_map(|(tran, t)| Some((tran, t.program?)))),
+            Err(e) => return usage_error(&format!("--csd {file}: {e}")),
+        }
+    }
     table.insert(get("--transid").unwrap_or_else(|| "TRAN".into()).to_ascii_uppercase(), first.program.id.to_ascii_uppercase());
     for (_, spec) in options.iter().filter(|(n, _)| n == "--transaction") {
         match spec.split_once('=') {
@@ -663,8 +673,8 @@ fn run_cics(
         }
         return serve_cics(compiled, library, dds, clock, database, options);
     }
-    if get("--transaction").is_some() {
-        return usage_error("--transaction needs --serve");
+    if get("--transaction").is_some() || get("--csd").is_some() {
+        return usage_error("--transaction and --csd need --serve");
     }
     let mut task = match cics_task(options, 1) {
         Ok(t) => t,
