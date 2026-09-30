@@ -236,10 +236,17 @@ impl Default for Options {
     }
 }
 
+/// What an option could not do. Each but UnsupportedCodePage and UnknownFlag is a message IBM's
+/// compiler gives and carries on from (assumptions C120 to C122).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OptionError {
+    /// A suboption the option does not have: the option is discarded.
     BadSuboption { option: String, given: String },
-    Removed { option: String, since: &'static str },
+    /// A suboption IBM removed, replaced by `instead`.
+    Removed { option: String, since: &'static str, instead: &'static str },
+    /// An option Enterprise COBOL 6.4 does not have, given a warning or (`warning` false) an
+    /// informational message and no effect.
+    NoEffect { option: &'static str, why: &'static str, warning: bool },
     UnsupportedCodePage(u16),
     UnknownFlag(String),
 }
@@ -248,18 +255,34 @@ impl fmt::Display for OptionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::BadSuboption { option, given } => write!(f, "{option} does not take ({given})"),
-            Self::Removed { option, since } => write!(f, "{option} was removed in Enterprise COBOL {since}"),
+            Self::Removed { option, since, instead } => write!(f, "{option} was removed in Enterprise COBOL {since}, so {instead} is in effect"),
+            Self::NoEffect { option, why, .. } => write!(f, "{option} {why}"),
             Self::UnsupportedCodePage(ccsid) => write!(f, "CODEPAGE({ccsid}) is not a single-byte EBCDIC page this compiler carries"),
             Self::UnknownFlag(flag) => write!(f, "unknown flag {flag}"),
         }
     }
 }
 
+/// The options IBM removed from Enterprise COBOL that a 6.4 compile accepts without effect, by
+/// spelling: LIB and SIZE (Migration Guide GC27-8715-03, Table 32, p. 167), FLAGSAA and NOFDUMP
+/// (Table 23, p. 112).
+fn without_effect(name: &str) -> Option<OptionError> {
+    let (option, why, warning) = match name {
+        "LIB" => ("LIB", "is no longer needed: COPY members are always read from the libraries", false),
+        "SIZE" | "SZ" => ("SIZE", "was removed in Enterprise COBOL V5 and has no effect", false),
+        "FLAGSAA" => ("FLAGSAA", "is not an Enterprise COBOL option and has no effect", true),
+        "NOFDUMP" => ("NOFDUMP", "is not an Enterprise COBOL option and has no effect", true),
+        _ => return None,
+    };
+    Some(OptionError::NoEffect { option, why, warning })
+}
+
 impl std::error::Error for OptionError {}
 
 impl Options {
     /// Applies one IBM compiler option as a CBL or PROCESS card or PARM writes it, e.g.
-    /// `TRUNC(OPT)`, `AR(E)`, `CP(1047)`. Returns false for an option this layer does not read.
+    /// `TRUNC(OPT)`, `AR(E)`, `CP(1047)`. Returns false for an option this layer does not read. An
+    /// error leaves the options as they were, except NUMPROC(MIG), which sets the default NUMPROC.
     pub fn apply(&mut self, option: &str) -> Result<bool, OptionError> {
         let option = option.trim().to_ascii_uppercase();
         let (name, sub) = match option.split_once('(') {
@@ -267,6 +290,9 @@ impl Options {
             None => (option.as_str(), ""),
         };
         let bad = || OptionError::BadSuboption { option: name.to_owned(), given: sub.to_owned() };
+        if let Some(e) = without_effect(name) {
+            return Err(e);
+        }
         let Some((documented, off)) = spelled(name) else { return Ok(false) };
         match documented.name {
             "ARITH" => {
@@ -288,7 +314,10 @@ impl Options {
                 self.numproc = match sub {
                     "NOPFD" => Numproc::Nopfd,
                     "PFD" => Numproc::Pfd,
-                    "MIG" => return Err(OptionError::Removed { option: "NUMPROC(MIG)".into(), since: "V5" }),
+                    "MIG" => {
+                        self.numproc = Numproc::default();
+                        return Err(OptionError::Removed { option: "NUMPROC(MIG)".into(), since: "V5", instead: "NUMPROC(NOPFD)" });
+                    }
                     _ => return Err(bad()),
                 }
             }
@@ -457,11 +486,21 @@ mod tests {
     }
 
     #[test]
-    fn refusals_name_the_problem() {
+    fn an_option_that_cannot_be_applied_says_why_and_leaves_the_options_as_they_were() {
         let mut o = Options::default();
-        assert!(matches!(o.apply("NUMPROC(MIG)"), Err(OptionError::Removed { .. })));
+        o.apply("NUMPROC(PFD)").unwrap();
+        o.apply("TRUNC(BIN)").unwrap();
         assert!(matches!(o.apply("TRUNC(FAST)"), Err(OptionError::BadSuboption { .. })));
         assert_eq!(o.apply("CODEPAGE(930)"), Err(OptionError::UnsupportedCodePage(930)));
+        assert!(matches!(o.apply("CP(X)"), Err(OptionError::BadSuboption { .. })));
+        for (option, warns) in [("LIB", false), ("SIZE(MAX)", false), ("sz(2097152)", false), ("FLAGSAA", true), ("NOFDUMP", true)] {
+            assert!(matches!(o.apply(option), Err(OptionError::NoEffect { warning, .. }) if warning == warns), "{option}");
+        }
+        assert_eq!((o.apply("NOLIB"), o.apply("FDUMP")), (Ok(false), Ok(false)));
+        assert_eq!((o.numproc, o.trunc, o.codepage), (Numproc::Pfd, Trunc::Bin, 1140));
+        let removed = o.apply("NUMPROC(MIG)").unwrap_err();
+        assert_eq!(removed.to_string(), "NUMPROC(MIG) was removed in Enterprise COBOL V5, so NUMPROC(NOPFD) is in effect");
+        assert_eq!(o.numproc, Numproc::Nopfd, "the default NUMPROC, not the one before");
     }
 
     #[test]

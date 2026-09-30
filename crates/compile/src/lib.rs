@@ -19,7 +19,7 @@ use layout::Layout;
 use numeric::Options;
 use rt::storage::literal_fixed;
 use syntax::ast::*;
-use syntax::{Error, Pos};
+use syntax::{Error, Pos, Severity};
 
 pub struct Compiled {
     pub program: Program,
@@ -92,7 +92,7 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
             ssrange = on;
         }
         if let Err(e) = options.apply(option) {
-            errors.push(Error::at(Pos::default(), format!("CBL {option}: {e}")));
+            errors.push(Error::at(Pos::default(), format!("CBL {option}: {e}")).graded(option_severity(&e)));
         }
     }
     for flag in flags {
@@ -171,6 +171,21 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
         Err(errors)
     } else {
         Ok(Compiled { program, layout, options, ssrange, report_writer, collating, carriage, diagnostics: errors, entries, declaratives })
+    }
+}
+
+/// How severe IBM's message for a card's option is: an invalid suboption is an error and the option
+/// is discarded, and a removed option a warning or informational message (assumptions
+/// [`numeric::assumptions::INVALID_OPTION_DISCARDED`], [`numeric::assumptions::NUMPROC_MIG_WARNS`]
+/// and [`numeric::assumptions::OPTIONS_WITHOUT_EFFECT`]). A code page ironwork does not carry
+/// stops the compile, as ironwork cannot read the program in it.
+fn option_severity(e: &numeric::options::OptionError) -> Severity {
+    use numeric::options::OptionError;
+    match e {
+        OptionError::BadSuboption { .. } => Severity::Error,
+        OptionError::Removed { .. } | OptionError::NoEffect { warning: true, .. } => Severity::Warning,
+        OptionError::NoEffect { warning: false, .. } => Severity::Informational,
+        OptionError::UnsupportedCodePage(_) | OptionError::UnknownFlag(_) => Severity::Severe,
     }
 }
 

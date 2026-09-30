@@ -11,6 +11,7 @@ mod corresponding;
 mod data;
 mod data_division;
 mod declaratives;
+mod diagnostics;
 mod intrinsic;
 mod json;
 mod linage;
@@ -892,12 +893,13 @@ fn an_e_level_message_leaves_the_program_to_run_and_the_return_code_at_8() {
 }
 
 #[test]
-fn nocompile_alone_leaves_nothing_to_run_and_a_severity_it_does_not_name_is_refused() {
-    let compiled = |card: &str| compile(syntax::parse(&program(card, "", &line("GOBACK."))).unwrap(), &[]).map(|c| c.diagnostics).err();
-    assert_eq!(compiled("NOCOMPILE"), Some(Vec::new()));
-    assert_eq!(compiled("NOC(W)"), None);
-    let errors = compiled("NOC(U)").unwrap();
-    assert_eq!(errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>(), ["CBL NOC(U): NOC does not take (U)"]);
+fn nocompile_alone_leaves_nothing_to_run_and_a_severity_it_does_not_name_is_discarded_with_an_error() {
+    let compiled = |card: &str| compile(syntax::parse(&program(card, "", &line("GOBACK."))).unwrap(), &[]);
+    assert_eq!(compiled("NOCOMPILE").err(), Some(Vec::new()));
+    assert!(compiled("NOC(W)").is_ok());
+    let discarded = compiled("NOC(U)").unwrap_or_else(|e| panic!("{e:?}"));
+    assert_eq!(discarded.diagnostics.iter().map(|e| (e.message.as_str(), e.severity)).collect::<Vec<_>>(), [("CBL NOC(U): NOC does not take (U)", Severity::Error)]);
+    assert_eq!(discarded.options.object_code(), numeric::options::Compile::Until(numeric::options::Stop::S));
 }
 
 const FRAGMENTS: &[&str] = &[

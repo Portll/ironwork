@@ -211,6 +211,9 @@ pub const JSON_GENERATE_RULES: &str = "C117";
 pub const XML_PARSE_RULES: &str = "C118";
 pub const CORRESPONDING_PAIRS: &str = "C130";
 pub const CORRESPONDING_CHOICES: &str = "C131";
+pub const NUMPROC_MIG_WARNS: &str = "C120";
+pub const INVALID_OPTION_DISCARDED: &str = "C121";
+pub const OPTIONS_WITHOUT_EFFECT: &str = "C122";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -959,7 +962,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: REFUSALS_ARE_SEVERE,
-        claim: "Every refusal ironwork made before its messages had severities is S, return code 12, and none is E: IBM's E is an error the compiler corrects, still producing object code under the default NOCOMPILE(S) (Programming Guide SC27-8714-03, pp. 282, 355), and ironwork corrects nothing, so a program it refuses has no code to run. Some it refuses IBM documents below S: NUMPROC(MIG) gets a warning and the default NUMPROC (Migration Guide GC27-8715-03, Table 18, p. 96); a TEST suboption IBM removed is an invalid-option error and the option is discarded (Table 29, p. 151), as a suboption ironwork refuses, such as TRUNC(FAST), may be; a non-COBOL character is accepted with IGYLI0163-E (p. 111). These stay S until ironwork does what IBM does with them. U is not used: ironwork's reader stops at the first syntax error, which IBM reports and reads past",
+        claim: "Every refusal ironwork made before its messages had severities is S, return code 12, and none is E: IBM's E is an error the compiler corrects, still producing object code under the default NOCOMPILE(S) (Programming Guide SC27-8714-03, pp. 282, 355), and ironwork corrects nothing, so a program it refuses has no code to run. Where IBM documents a lower severity ironwork now follows it: NUMPROC(MIG) is W with the default NUMPROC, an invalid suboption is E with the option discarded, and a non-COBOL character is IGYLI0163-E (C120 onward). U is not used: ironwork's reader stops at the first syntax error, which IBM reports and reads past",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -1303,6 +1306,24 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: CORRESPONDING_CHOICES,
         claim: "Where the Language Reference leaves CORRESPONDING open: pairs are processed in the order of the sending group's entries; the items of a FILLER group are not considered; an item is alphabetic when its PICTURE holds only A, as ironwork has no alphabetic category of its own; a numeric-edited item is not numeric for ADD and SUBTRACT, following the rule over the manual's example, which adds two; ADD and SUBTRACT evaluate every sending item before storing any receiver (C97), which differs from pair-by-pair only when a receiving item overlaps a later sending one; and no message is given when no items correspond",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: NUMPROC_MIG_WARNS,
+        claim: "NUMPROC(MIG) on a CBL or PROCESS card is a warning (W, return code 4), and the compile takes the default NUMPROC, NOPFD, as ironwork has no installation defaults, whatever NUMPROC an earlier option set (Migration Guide GC27-8715-03, Table 23, p. 112, and Table 32, p. 167). The guide gives neither the message's number nor its text: the message is ironwork's own",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: INVALID_OPTION_DISCARDED,
+        claim: "A suboption that an option ironwork reads does not have, such as TRUNC(FAST), ARITH(X), NOCOMPILE(U) or a CODEPAGE that is not a number, is an error (E, return code 8) and the option is discarded, the setting before it staying in force, as the Migration Guide records for removed TEST suboptions: 'Error (Invalid option diagnostic, option discarded)' (GC27-8715-03, Table 34, p. 168); the Programming Guide shows the compiler diagnosing a CBL statement's options and carrying on (SC27-8714-03, pp. 279-280). The message's number and text are not in the manuals ironwork has: the text is ironwork's, unchanged from when the option stopped the compile. A CODEPAGE that is a number but no single-byte EBCDIC page ironwork carries still stops the compile (S), since IBM would compile the program in that page and ironwork cannot read it so; an option name that is in no table of IBM's still passes without a message",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: OPTIONS_WITHOUT_EFFECT,
+        claim: "Options Enterprise COBOL 6.4 no longer has are accepted without effect. LIB, which the compiler now always behaves as having, and SIZE (Migration Guide GC27-8715-03, Table 32, p. 167) are informational (return code 0), as Enterprise COBOL 6.3 gives them for invocation parameters LIB and SIZE(2097152) in job output in the corpus: IGYOS4090-I 'The \"LIB\" option specification is no longer required. COBOL library processing is always in effect.' and IGYOS4013-I 'The \"SIZE\" option is no longer supported.' (SamMoussa961_COBOL, CLHELLO JOB03701); ironwork gives them for a CBL or PROCESS card too, and takes SZ as SIZE's abbreviation. FLAGSAA and NOFDUMP are warnings (W, return code 4), as the guide says IBM warns for each (Table 23, p. 112), with ironwork's text since the guide gives none. FDUMP, which IBM maps to TEST, and NOLIB pass without a message, as TEST does here; no source ironwork has shows IBM's message for NOLIB. The messages are ironwork's own words",
+        basis: Basis::Observed,
         oracle: Oracle::EnterpriseCobol,
     },
 ];
