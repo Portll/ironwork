@@ -43,7 +43,7 @@ impl<'p> Machine<'p, '_, '_> {
         let cached = self.unit.cics.as_ref().and_then(|t| t.mapsets.get(&set_name)).cloned();
         let mapset = match cached {
             Some(m) => m,
-            None => match bms::find_mapset(self.unit.copy_libraries(), &set_name) {
+            None => match bms::find_mapset(&self.unit.library.copy, &set_name) {
                 None => return Ok(Err(Condition::PGMIDERR)),
                 Some(Err(e)) => return Err(Abend::ironwork(format!("EXEC CICS {} MAPSET({set_name}): {}", block.command, e.message), block.pos)),
                 Some(Ok(m)) => {

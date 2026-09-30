@@ -3,6 +3,8 @@
 //! services. The CALL side, which reads and writes the arguments, is machine/le_services.rs. What
 //! the manual leaves open is `numeric::assumptions` L1 to L18.
 
+pub use rt::le::State;
+
 use crate::calendar::{civil, days_in_month, is_leap, lilian, weekday, LAST_LILIAN, LILIAN_ZERO, MILLIS_PER_DAY, SECONDS_PER_DAY};
 use numeric::precision::{Fixed, Places};
 use zarch::check::ProgramMask;
@@ -583,21 +585,6 @@ pub fn read(input: &[u8], picture: &[u8], reading: Reading, window: i64, page: &
     }
     let millis = ((i64::from(hour) * 60 + i64::from(p.minute)) * 60 + i64::from(p.second)) * 1000 + i64::from(p.millis);
     Ok(Stamp { lilian, millis })
-}
-
-/// What a run keeps for the services: heap storage, and which output DDs it has started.
-#[derive(Debug, Default)]
-pub struct State {
-    /// Each CEEGTST block: where it starts, its length, and whether CEEFRST has freed it.
-    pub heap: Vec<(usize, usize, bool)>,
-    pub written: Vec<String>,
-}
-
-impl State {
-    /// The end of the highest heap block: run-unit storage below it is not released.
-    pub fn heap_end(&self) -> usize {
-        self.heap.iter().map(|&(at, len, _)| at + len).max().unwrap_or(0)
-    }
 }
 
 /// CEE3DMP's options: the ddname FNAME names, and whether any keyword was not one it takes.

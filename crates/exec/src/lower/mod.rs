@@ -26,7 +26,7 @@ pub use verify::verify;
 use crate::Compiled;
 use crate::layout::{Layout, Resolved};
 use crate::machine::Machine;
-use crate::unit::{Clock, Library, RunUnit};
+use crate::unit::{AddProgram, Clock, Library, RunUnit};
 use rt::abend::AbendCode;
 use rt::lir::{self, AbendId, BlockId, ConstId, DebugId, PlaceId, RangeId, SymId};
 use std::collections::{BTreeSet, HashMap};

@@ -14,6 +14,7 @@ pub use rt::files;
 pub use compile::layout;
 pub mod le;
 pub use compile::linage;
+pub mod loader;
 pub mod lower;
 pub mod machine;
 pub mod oo;
@@ -34,6 +35,7 @@ pub(crate) use compile::{procedure, section_end};
 pub use machine::{Abend, Ending};
 
 use abend::AbendCode;
+use unit::AddProgram;
 use std::io::{BufRead, Write};
 use syntax::Pos;
 
