@@ -136,10 +136,7 @@ pub struct Sql {
     pub whenever: Whenever,
 }
 
-/// A statement's identity in a recording: 32-bit FNV-1a over its canonical text.
-pub fn fingerprint(text: &str) -> u32 {
-    text.bytes().fold(0x811c_9dc5, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193))
-}
+pub use rt::sql::fingerprint;
 
 /// The statement in `body`, the text between EXEC SQL and END-EXEC.
 pub fn parse(body: &str, pos: Pos) -> Statement {

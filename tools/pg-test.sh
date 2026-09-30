@@ -15,5 +15,6 @@ until docker exec "$name" pg_isready -q -h 127.0.0.1 -U ironwork 2>/dev/null; do
     sleep 1
 done
 export IRONWORK_PG_URL="postgres://ironwork:ironwork@127.0.0.1:$port/ironwork"
-cargo test -p ironwork-exec --locked sql::postgres
+cargo test -p ironwork-rt --locked sql::postgres
+cargo test -p ironwork-exec --locked sql::tests::live
 cargo test -p ironwork --locked --test serve_sql

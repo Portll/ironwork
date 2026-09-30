@@ -4,8 +4,8 @@
 
 use super::{BAD_LENGTH, HostType, NOT_ASSIGNABLE, OUT_OF_RANGE, SqlError, UNCONVERTIBLE, Value};
 use crate::codec;
+use crate::vocab::{SignClause, SignPosition};
 use numeric::Numproc;
-use syntax::ast::{SignClause, SignPosition};
 use zarch::check::ProgramCheck;
 use zarch::decimal::{self, Decimal};
 use zarch::ebcdic::CodePage;

@@ -11,7 +11,7 @@
 
 use super::{Abandoned, Answer, Call, Database, Outcome, Value};
 use std::io::Write;
-use syntax::sql::fingerprint;
+use super::fingerprint;
 
 const HEADER: &str = "# ironwork sql recording 1";
 
