@@ -793,6 +793,15 @@ fn compile_errors_name_what_is_undefined() {
 }
 
 #[test]
+fn exec_dli_is_refused_at_compile_time_by_name() {
+    let parsed = syntax::parse(&program("", "       01  SSA PIC X(9).\n", &line("EXEC DLI GU SEGMENT(ROOT) WHERE(KEY=SSA) END-EXEC."))).unwrap();
+    let errors = compile(parsed, &[]).err().unwrap();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(errors[0].message.starts_with("EXEC DLI GU is not supported"), "{}", errors[0].message);
+    assert!(errors[0].severity >= Severity::Error);
+}
+
+#[test]
 fn an_error_refuses_a_program_and_a_warning_only_under_warnings_block() {
     let message = |severity| Error::at(Pos::default(), "m").graded(severity);
     let blocking = {

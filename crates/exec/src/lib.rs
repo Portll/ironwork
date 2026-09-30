@@ -875,6 +875,9 @@ impl Check<'_> {
 
     /// Every host variable and every CICS argument that names data must resolve.
     fn exec_block(&mut self, block: &ExecBlock) {
+        if block.kind == ExecKind::Dli {
+            self.errors.push(Error::at(block.pos, format!("EXEC DLI {} is not supported: ironwork for COBOL does not run IMS DL/I calls", block.command)));
+        }
         if let Some(syntax::sql::Sql { statement: syntax::sql::Statement::Malformed(why), .. }) = &block.sql {
             self.errors.push(Error::at(block.pos, format!("EXEC SQL {}: {why}", block.command)));
         }
