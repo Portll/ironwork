@@ -383,6 +383,25 @@ fn edited_receivers_and_de_editing() {
     assert_eq!(out, "[$1,234.50CR][   ]\n012345}   $411.50CR AB CD\n");
 }
 
+#[test]
+fn a_rounded_quotient_keeps_the_digit_rounding_reads() {
+    let out = run(&program(
+        "",
+        "       01  DIV2 PIC 99V9 VALUE 44.1.\n       01  DIV3 PIC 9(4)V9 VALUE 1661.7.\n       01  I PIC 99 VALUE 2.\n       01  C PIC 99V9.\n       01  T PIC 99V9.\n       01  Q PIC 9V9.\n       01  R PIC 9V99.\n",
+        &[
+            line("DIVIDE DIV2 INTO DIV3 ROUNDED"),
+            line("DIVIDE 4 INTO I ROUNDED"),
+            line("COMPUTE C ROUNDED = 1661.7 / DIV2"),
+            line("COMPUTE T = 1661.7 / DIV2"),
+            line("DIVIDE 3 INTO 2 GIVING Q ROUNDED REMAINDER R"),
+            line("DISPLAY DIV3 ' ' I ' ' C ' ' T ' ' Q ' ' R"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    ));
+    assert_eq!(out, "00377 01 377 376 07 020\n");
+}
+
 fn file_program(select: &str, fd: &str, data: &str, procedure: &str) -> String {
     format!(
         "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. F.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n{select}       DATA DIVISION.\n       FILE SECTION.\n{fd}       WORKING-STORAGE SECTION.\n{data}       PROCEDURE DIVISION.\n{procedure}"

@@ -11,7 +11,7 @@ pub(crate) use rt::storage::literal_fixed;
 use crate::unit::{ADDRESS_BASE, LoadError, RETURN_CODE, RunUnit};
 use crate::Compiled;
 use numeric::binary::{self, Binary};
-use numeric::precision::{ArithError, Fixed, Places};
+use numeric::precision::{self, ArithError, Fixed, Places};
 use numeric::{Numproc, Options, Trunc, float, sign};
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -1722,7 +1722,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let mut dmax = 0;
         for (t, e) in computations {
             let loc = self.locate(&t.r)?;
-            dmax = dmax.max(loc.kind.digits_scale().map_or(0, |(_, s)| s)).max(self.dmax(e)?);
+            dmax = dmax.max(precision::receiver_dec(loc.kind.digits_scale().map_or(0, |(_, s)| s), t.rounded)).max(self.dmax(e)?);
         }
         if let Some((t, dividend, _)) = remainder {
             let loc = self.locate(&t.r)?;

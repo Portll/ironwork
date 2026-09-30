@@ -205,6 +205,7 @@ pub const NUMVAL_TEST_RULES: &str = "C113";
 pub const FUNCTION_CLOCK: &str = "C114";
 pub const UUID4_SOURCE: &str = "C115";
 pub const FORMATTED_DATETIME_RULES: &str = "C116";
+pub const ROUNDED_EXTRA_PLACE: &str = "C101";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1260,6 +1261,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: FORMATTED_DATETIME_RULES,
         claim: "The FORMATTED functions, INTEGER-OF-FORMATTED-DATE, SECONDS-FROM-FORMATTED-TIME and TEST-FORMATTED-DATETIME take the formats of the Language Reference (SC27-8713-03, pp. 504-506), choosing where it is silent or inconsistent: the decimal separator of a fractional-seconds format appears in the data, as its rules say, though several of its examples omit it (pp. 561, 566, 568, 629); fractional seconds are truncated; a comma may stand for the period; a UTC format moves the date as well as the time by the offset; a week may be 53 where the ISO year has 53 weeks, though p. 506 says 01 to 52; an offset sign of 0 takes only 00 hours and minutes; INTEGER-OF-FORMATTED-DATE reads the date part alone, as p. 579 says the time part does not change its result. TEST-FORMATTED-DATETIME names the first position at which a field can no longer be in range, or a value longer than its format errs at the first extra character. A format that is not one of IBM's, which Enterprise COBOL refuses at compile time, ends the run here",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ROUNDED_EXTRA_PLACE,
+        claim: "A receiver named with ROUNDED counts in dmax with one decimal place more than it holds, so a quotient, or an intermediate cut back to dmax places, keeps the digit that rounding reads: DIVIDE 44.1 INTO a PIC 9(4)V9 of 1661.7 ROUNDED gives 37.7, as CCVS85 NC117A and NC171A expect. The Programming Guide says only that under ROUNDED one more decimal place, and one more integer place, might be carried for accuracy if necessary (SC27-8714-03, p. 794); the Language Reference's ROUNDED phrase compares the result's fraction with the receiver's (SC27-8713-03, p. 296)",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

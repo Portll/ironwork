@@ -34,6 +34,12 @@ pub fn quotient_places(dividend: Places, divisor: Places, dmax: u32) -> Places {
     Places::new(dividend.int + divisor.dec, dividend.dec.max(dmax))
 }
 
+/// The decimal places a receiver of `scale` counts for in dmax: under ROUNDED one more, the digit
+/// rounding reads. See [`crate::assumptions::ROUNDED_EXTRA_PLACE`].
+pub const fn receiver_dec(scale: u32, rounded: bool) -> u32 {
+    scale + rounded as u32
+}
+
 /// The places carried for an intermediate result `ir`. `dmax` is the most decimal places among
 /// the statement's receivers and its operands other than divisors and exponents.
 pub fn carried(ir: Places, dmax: u32, arith: Arith) -> Places {
@@ -211,6 +217,17 @@ mod tests {
         let n = Fixed::new(-10, Places::new(2, 0)).div(Fixed::new(3, Places::new(1, 0)), 2, Arith::Compat).unwrap();
         assert_eq!(n.to_i128(), Some(-333));
         assert_eq!(Fixed::new(1, S18).div(Fixed::new(0, S18), 0, Arith::Compat), Err(ArithError::DivideByZero));
+    }
+
+    #[test]
+    fn a_rounded_quotient_carries_one_place_more_than_its_receiver() {
+        let (dividend, divisor) = (Fixed::new(16617, Places::new(4, 1)), Fixed::new(441, Places::new(2, 1)));
+        let receiver = Places::new(4, 1);
+        let truncated = dividend.div(divisor, receiver_dec(receiver.dec, false), Arith::Compat).unwrap();
+        assert_eq!(truncated.to_receiver(receiver, true).0.to_i128(), Some(376));
+        let rounded = dividend.div(divisor, receiver_dec(receiver.dec, true), Arith::Compat).unwrap();
+        assert_eq!((rounded.to_i128(), rounded.places.dec), (Some(3768), 2));
+        assert_eq!(rounded.to_receiver(receiver, true).0.to_i128(), Some(377));
     }
 
     #[test]

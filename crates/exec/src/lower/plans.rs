@@ -4,6 +4,7 @@
 
 use super::data::{Side, Value, scale};
 use super::{Lower, R, push, unsupported};
+use numeric::precision::receiver_dec;
 use numeric::{Numproc, Trunc};
 use rt::lir::{
     self, ArithId, ArithPlan, ArithStep, DisplayId, DisplayItem, ExprId, FloatFrom, Image, InitField, InitId, InitPlan, Mode, MovePlan, NationalFrom,
@@ -108,7 +109,7 @@ impl Lower<'_> {
                 prepass.push(target);
             }
             prepass.extend(self.dmax_places(e)?);
-            dmax = dmax.max(scale(self.kind_of(target))).max(self.dmax(e)?);
+            dmax = dmax.max(receiver_dec(scale(self.kind_of(target)), t.rounded)).max(self.dmax(e)?);
         }
         let arith = self.c.options.arith;
         let mut lowered: Vec<(&Expr, ExprId)> = Vec::new();
