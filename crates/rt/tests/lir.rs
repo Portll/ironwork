@@ -40,9 +40,14 @@ fn round_trip<T: Encode + Decode + PartialEq + fmt::Debug>(values: &[T]) {
 
 /// `values` round-trip and between them carry every tag below `count`.
 fn every_variant<T: Encode + Decode + PartialEq + fmt::Debug>(values: &[T], count: u8) {
+    every_variant_but(values, count, &[]);
+}
+
+/// `values` round-trip and between them carry every tag below `count` but the `retired` ones.
+fn every_variant_but<T: Encode + Decode + PartialEq + fmt::Debug>(values: &[T], count: u8, retired: &[u8]) {
     round_trip(values);
     let tags: BTreeSet<u8> = values.iter().map(|v| encoded(v).0[0]).collect();
-    assert_eq!(tags, (0..count).collect(), "{}", std::any::type_name::<T>());
+    assert_eq!(tags, (0..count).filter(|t| !retired.contains(t)).collect(), "{}", std::any::type_name::<T>());
 }
 
 fn refused<T: Decode + fmt::Debug>(bytes: &[u8], strings: &StringTable) -> (usize, String) {
@@ -275,7 +280,7 @@ fn program_shape_round_trips() {
     };
     let filler = Item { name: None, parent: None, dims: vec![], depending_on: None, keys: vec![], redefines: Some(6), ..item.clone() };
     round_trip(&[item, filler]);
-    round_trip(&[Paragraph { name: 1, is_section: true, entry: 0, section_end: 3, priority: 50, at: 2 }]);
+    round_trip(&[Paragraph { name: 1, is_section: true, entry: 0, section_end: 3, priority: 50, at: 2, abandoned: Some(4) }]);
     round_trip(&[Block { ops: vec![], end: Terminator::Jump(1) }, Block { ops: vec![Op::Nest, Op::Arith(0)], end: Terminator::Abend(0) }]);
     let plans = Plans {
         arith: vec![ArithPlan { dmax: 0, arith: Arith::Extend, prepass: vec![], steps: vec![], remainder: None, handled: false }],
@@ -321,6 +326,7 @@ fn program_shape_round_trips() {
         sqlca: Sqlca { fields: vec![(SqlcaField::Code, 0, INTEGER)] },
         entries: vec![EntryPoint { name: 2, paragraph: 1, block: 4, using: vec![0, 1] }],
         class: Some(Box::new(account())),
+        declaratives: Declaratives { modes: [Some(0), None, None, Some(2)], debug_item: Some((120, 86)) },
     };
     round_trip(&[Services::default(), services]);
 }
@@ -513,10 +519,13 @@ fn control_flow_round_trips_with_every_tag() {
         Op::Sql(1),
         Op::Alter { para: 2, to: 5 },
         Op::EnterSegment(50),
-        Op::SetSegment(0),
+        Op::DebugLine(42),
+        Op::DebugAlter { range: 1, name: 2, contents: 3 },
     ];
-    every_variant(&ops, 30);
-    every_variant(&[Step::Next, Step::Arm(2), Step::GoTo(3), Step::End(Ending::Goback)], 4);
+    // Tag 29 is retired (load-module.md §4.3).
+    every_variant_but(&ops, 32, &[29]);
+    let resume = Resume { para: 2, block: 11 };
+    every_variant(&[Step::Next, Step::Arm(2), Step::GoTo(3), Step::End(Ending::Goback), Step::Return(u64::MAX), Step::Resume(resume)], 6);
     let terminators = [
         Terminator::Jump(1),
         Terminator::Branch { cond: 0, then: 1, otherwise: 2 },
@@ -524,19 +533,28 @@ fn control_flow_round_trips_with_every_tag() {
         Terminator::ParagraphEnd { next: 2 },
         Terminator::GoTo(0),
         Terminator::Switch { value: IntExpr::Item(1), targets: vec![0, 2], otherwise: 6 },
-        Terminator::PerformEnter { range: 0, ret: 7 },
+        Terminator::PerformEnter { range: 0, ret: 7, resume: Some(resume) },
+        Terminator::PerformEnter { range: 1, ret: 7, resume: None },
         Terminator::ExitProgram { next: 8 },
         Terminator::End(Ending::StopRun),
         Terminator::Abend(0),
         Terminator::AlteredGoTo { para: 3, otherwise: 9 },
+        Terminator::Debug { range: 2, name: 4, next: 10 },
     ];
-    every_variant(&terminators, 11);
+    // Tag 6 is retired.
+    every_variant_but(&terminators, 13, &[6]);
     round_trip(&[Range { first: 1, last: 3, kind: RangeKind::Perform }, Range { first: 4, last: 2, kind: RangeKind::SortProcedure }]);
-    every_variant(&[RangeKind::Perform, RangeKind::SortProcedure, RangeKind::UseBeforeReporting], 3);
-    let kinds = [FrameKind::Main, FrameKind::Perform, FrameKind::SortProcedure, FrameKind::UseBeforeReporting { at: 4 }];
-    every_variant(&kinds, 4);
-    let main = Frame { first: 0, last: 9, kind: FrameKind::Main, ret: 0, depth: 0, temps: vec![] };
-    round_trip(&[main, Frame { first: 2, last: 3, kind: kinds[3], ret: 5, depth: 2, temps: vec![3, 0, -1] }]);
+    let kinds = [RangeKind::Perform, RangeKind::SortProcedure, RangeKind::UseBeforeReporting, RangeKind::UseProcedure, RangeKind::Debugging];
+    every_variant(&kinds, 5);
+    let point = ReturnPoint { frame: 7, resume: Some(resume) };
+    round_trip(&[point, ReturnPoint { frame: 0, resume: None }]);
+    let frames = [FrameKind::Main, FrameKind::Perform { range: 0, ret: 5, resume: Some(resume) }, FrameKind::Procedure { range: 1 }];
+    every_variant(&frames, 3);
+    let main = Frame { id: 0, kind: FrameKind::Main, displaced: None, segment: 0, depth: 0, temps: vec![] };
+    let performed = Frame { id: 9, kind: frames[1], displaced: Some(point), segment: 51, depth: 2, temps: vec![3, 0, -1] };
+    round_trip(&[main.clone(), performed.clone()]);
+    let saved = [(11, Some(point)), (12, None)].into_iter().collect();
+    round_trip(&[Returns::default(), Returns { armed: vec![None, Some(point)], saved, frames: vec![main, performed], next_frame: 10 }]);
     every_variant(&[Ending::Goback, Ending::StopRun, Ending::EndOfProgram], 3);
     let accepts = [
         AcceptFrom::Sysin,
@@ -546,6 +564,15 @@ fn control_flow_round_trips_with_every_tag() {
         AcceptFrom::Time,
     ];
     every_variant(&accepts, 5);
+}
+
+#[test]
+fn a_range_s_region_runs_to_the_program_s_end_when_it_ends_before_it_starts_and_a_sort_procedure_s_holds_every_paragraph() {
+    let range = |first, last, kind| Range { first, last, kind };
+    assert_eq!(range(2, 4, RangeKind::Perform).region(9), (2, 4));
+    assert_eq!(range(4, 2, RangeKind::Perform).region(9), (4, 8));
+    assert_eq!(range(3, 3, RangeKind::UseProcedure).region(9), (3, 3));
+    assert_eq!(range(2, 4, RangeKind::SortProcedure).region(9), (0, 8));
 }
 
 #[test]
@@ -561,7 +588,7 @@ fn statement_payloads_round_trip_with_every_tag() {
         MovePlan::Refused(3),
     ];
     every_variant(&moves, 8);
-    every_variant(&[Image::Bytes, Image::All, Image::Figurative, Image::Digits { digits: 3 }], 4);
+    every_variant(&[Image::Bytes, Image::All, Image::Figurative, Image::Digits { digits: 3 }, Image::Stored], 5);
     every_variant(&[NationalFrom::Units, NationalFrom::Decoded, NationalFrom::Figurative], 3);
     let numeric = [
         NumericFrom::Value,
@@ -621,6 +648,7 @@ fn master() -> FileDesc {
         linage: Some(Linage { lines: IntExpr::Const(60), footing: Some(IntExpr::Item(4)), top: None, bottom: Some(IntExpr::Const(3)), counter: Some((5, PACKED)) }),
         carriage: Some(Carriage { machine: true, reserved: false }),
         sort: false,
+        error: Some(1),
     }
 }
 

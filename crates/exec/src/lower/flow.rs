@@ -1,11 +1,13 @@
 //! Control flow (lir.md §8): one entry block per paragraph, PERFORM as loops around `PerformEnter`
-//! or an inline body, and each `Flow` the walker returns as an explicit terminator.
+//! or an inline body, each `Flow` the walker returns as an explicit terminator, and the ranges and
+//! triggers the declaratives run by (§9.10).
 
 use super::cond::Test;
 use super::data::{Side, scale};
 use super::{Lower, LowerError, R, push, unsupported};
-use rt::abend::Ending;
-use rt::lir::{self, BlockId, DebugId, Op, RangeId, Terminator};
+use crate::declaratives::{Span, debug_name};
+use rt::abend::{AbendCode, Ending};
+use rt::lir::{self, BlockId, DebugId, Op, RangeId, RangeKind, Terminator};
 use rt::storage::Kind;
 use syntax::Pos;
 use syntax::ast::{BinOp, ExecKind, ExitKind, Expr, Loop, Object, Operand, ProcName, RelOp, SizeError, Sorting, Stmt, Subject, Target, Varying, When};
@@ -59,7 +61,8 @@ struct Inline {
 }
 
 enum Body<'a> {
-    Range(RangeId),
+    /// `resumes`: the PERFORM runs once and is a statement of its paragraph (C99).
+    Range { range: RangeId, resumes: bool },
     Inline(&'a [Stmt]),
 }
 
@@ -128,8 +131,8 @@ impl Lower<'_> {
         Ok(b)
     }
 
-    /// The PROCEDURE DIVISION: every PERFORM range first, since a paragraph's end and each GO TO
-    /// depend on all of them, then each paragraph from its entry block.
+    /// The PROCEDURE DIVISION: every range first, since a paragraph's end and each GO TO depend on
+    /// all of them, then each paragraph from its entry block.
     pub(super) fn procedure(&mut self) -> R<Vec<lir::Paragraph>> {
         let program = self.program;
         let n = program.paragraphs.len();
@@ -152,9 +155,53 @@ impl Lower<'_> {
                 section_end: crate::section_end(program, p) as u32,
                 priority: para.priority,
                 at: self.at(para.pos),
+                abandoned: None,
             });
         }
+        for (p, para) in program.paragraphs.iter().enumerate() {
+            if self.ranges.iter().any(|r| r.last as usize == p) {
+                let message = format!(
+                    "control passed the end of {}, which is armed to return to a PERFORM that control left by GO TO; ironwork returns there only to a PERFORM that runs once and is not inside another statement",
+                    para.name
+                );
+                paragraphs[p].abandoned = Some(self.abend(AbendCode::Ironwork, &message, Some(para.pos))?);
+            }
+        }
         Ok(paragraphs)
+    }
+
+    /// The open modes' EXCEPTION/ERROR procedures and, under the DEBUG option, DEBUG-ITEM, with a
+    /// range for each debugging section that serves a paragraph.
+    pub(super) fn declaratives(&mut self) -> R<lir::Declaratives> {
+        let table = &self.c.declaratives;
+        let mut modes = [None; 4];
+        for (mode, span) in modes.iter_mut().zip(table.modes) {
+            *mode = span.map(|s| self.span_range(s, RangeKind::UseProcedure)).transpose()?;
+        }
+        for (span, _) in table.triggers.iter().flatten() {
+            self.span_range(*span, RangeKind::Debugging)?;
+        }
+        let debug_item = table.debug_item.filter(|_| self.debugging).map(|i| (self.layout.items[i].offset, self.layout.items[i].size));
+        Ok(lir::Declaratives { modes, debug_item })
+    }
+
+    /// The range a declarative section runs as.
+    pub(super) fn span_range(&mut self, (first, last): Span, kind: RangeKind) -> R<RangeId> {
+        self.intern_range(first as u32, last as u32, kind)
+    }
+
+    fn intern_range(&mut self, first: u32, last: u32, kind: RangeKind) -> R<RangeId> {
+        if let Some(&r) = self.range_ids.get(&(first, last, kind)) {
+            return Ok(r);
+        }
+        let r = push(&mut self.ranges, lir::Range { first, last, kind }, "ranges")?;
+        self.range_ids.insert((first, last, kind), r);
+        Ok(r)
+    }
+
+    /// The debugging section that runs before paragraph p, and the name DEBUG-NAME gives it.
+    fn trigger(&self, p: usize) -> Option<(Span, String)> {
+        self.c.declaratives.triggers.get(p).cloned().flatten()
     }
 
     /// Every PERFORM range, and every paragraph an ALTER names.
@@ -191,22 +238,26 @@ impl Lower<'_> {
                 Err(_) => return unsupported("a PERFORM of a procedure the walker cannot find", pos),
             },
         };
-        let key = (first as u32, last as u32);
-        if let Some(&r) = self.range_ids.get(&key) {
-            return Ok(r);
-        }
-        let r = push(&mut self.ranges, lir::Range { first: key.0, last: key.1, kind: lir::RangeKind::Perform }, "PERFORM ranges")?;
-        self.range_ids.insert(key, r);
-        Ok(r)
+        self.intern_range(first as u32, last as u32, RangeKind::Perform)
     }
 
-    /// `run_sentences` over one paragraph, entered as `run_paragraphs_from` enters it: its segment,
-    /// then the GO TO an ALTER set. A separator period starts a block NEXT SENTENCE can reach, and
-    /// an ENTRY statement one a CALL can enter.
+    /// `run_sentences` over one paragraph, entered as `run_region` enters it: its segment, its
+    /// debugging section, then the GO TO an ALTER set. A separator period starts a block NEXT
+    /// SENTENCE can reach, and an ENTRY statement one a CALL can enter.
     fn paragraph(&mut self, p: usize) -> R<()> {
         let para = &self.program.paragraphs[p];
         if self.segments {
             self.op(Op::EnterSegment(para.priority), para.pos)?;
+        }
+        if let Some((span, name)) = self.trigger(p) {
+            let name = self.sym(&name);
+            let range = self.span_range(span, RangeKind::Debugging)?;
+            let next = self.new_block()?;
+            self.end(Terminator::Debug { range, name, next }, para.pos)?;
+            self.switch(next)?;
+        }
+        if self.debugging && para.is_section {
+            self.op(Op::DebugLine(para.pos.line), para.pos)?;
         }
         if self.altered.contains(&p) {
             let body = self.new_block()?;
@@ -222,6 +273,7 @@ impl Lower<'_> {
                     self.switch(b)?;
                 }
                 Stmt::Entry { .. } => {
+                    self.debug_line(pos)?;
                     let b = self.new_block()?;
                     self.jump(b, pos)?;
                     self.switch(b)?;
@@ -238,10 +290,20 @@ impl Lower<'_> {
     }
 
     /// Leaving paragraph `p` for `next`: a plain jump when no range's last paragraph lies from `p`
-    /// to `next` − 1, since no frame can complete there (lir.md §8.2).
+    /// to `next` − 1, since no return point is armed there and no region ends there, and no
+    /// debugging section reads how control came to `next` (lir.md §8.2).
     fn paragraph_end(&self, p: usize, next: usize) -> Terminator {
         let completes = self.ranges.iter().any(|r| p <= r.last as usize && (r.last as usize) < next);
-        if next < self.entries.len() && !completes { Terminator::Jump(self.entries[next]) } else { Terminator::ParagraphEnd { next: next as u32 } }
+        if next < self.entries.len() && !completes && self.trigger(next).is_none() {
+            Terminator::Jump(self.entries[next])
+        } else {
+            Terminator::ParagraphEnd { next: next as u32 }
+        }
+    }
+
+    /// Under the DEBUG option, the line register takes a statement's line as it starts.
+    fn debug_line(&mut self, pos: Pos) -> R<()> {
+        if self.debugging { self.op(Op::DebugLine(pos.line), pos) } else { Ok(()) }
     }
 
     pub(super) fn statements(&mut self, stmts: &[Stmt], ctx: &Ctx) -> R<()> {
@@ -252,6 +314,9 @@ impl Lower<'_> {
     }
 
     fn statement(&mut self, s: &Stmt, ctx: &Ctx) -> R<()> {
+        if let Some(at) = stmt_pos(s) {
+            self.debug_line(at)?;
+        }
         let pos = stmt_pos(s).unwrap_or(ctx.pos);
         let inner = Ctx { pos, ..ctx.clone() };
         match s {
@@ -286,7 +351,9 @@ impl Lower<'_> {
             Stmt::Evaluate { subjects, whens, other, .. } => self.evaluate(subjects, whens, other, pos, &inner)?,
             Stmt::PerformProc { from, thru, repeat, .. } => {
                 let range = self.range(from, thru.as_ref(), pos)?;
-                self.perform(repeat, Body::Range(range), pos, &inner)?;
+                let own = self.program.paragraphs[ctx.para].statements.get(ctx.top).is_some_and(|top| std::ptr::eq(top, s));
+                let body = Body::Range { range, resumes: own && matches!(repeat, Loop::Once) };
+                self.perform(repeat, body, pos, &inner)?;
             }
             Stmt::PerformInline { body, repeat, .. } => self.perform(repeat, Body::Inline(body), pos, &inner)?,
             Stmt::Display { items, no_advancing, .. } => {
@@ -314,11 +381,22 @@ impl Lower<'_> {
                 self.switch(next)?;
             }
             Stmt::Alter { pairs, .. } => {
+                let mut altered = Vec::with_capacity(pairs.len());
                 for (from, to) in pairs {
-                    let (Ok((para, _)), Ok((to, _))) = (crate::procedure(self.program, from), crate::procedure(self.program, to)) else {
+                    let (Ok((para, _)), Ok((target, _))) = (crate::procedure(self.program, from), crate::procedure(self.program, to)) else {
                         return unsupported("an ALTER the walker cannot resolve", pos);
                     };
-                    self.op(Op::Alter { para: para as u32, to: to as u32 }, pos)?;
+                    self.op(Op::Alter { para: para as u32, to: target as u32 }, pos)?;
+                    altered.push((para, to));
+                }
+                if !self.c.declaratives.declarative_alters.contains(&pos) {
+                    for (para, to) in altered {
+                        let Some((span, name)) = self.trigger(para) else { continue };
+                        let name = self.sym(&name);
+                        let contents = self.sym(&debug_name(to));
+                        let range = self.span_range(span, RangeKind::Debugging)?;
+                        self.op(Op::DebugAlter { range, name, contents }, pos)?;
+                    }
                 }
             }
             Stmt::Open { .. } | Stmt::Close { .. } | Stmt::Read(_) | Stmt::Write { .. } | Stmt::Rewrite { .. } | Stmt::Delete { .. } | Stmt::Start { .. } => {
@@ -346,10 +424,13 @@ impl Lower<'_> {
             Stmt::GoTo { target: Some(target), .. } => {
                 let Ok((t, _)) = crate::procedure(self.program, target) else { return unsupported("a GO TO the walker cannot resolve", pos) };
                 self.unnest(ctx.loops.len(), pos)?;
-                let (p, t32) = (ctx.para as u32, t as u32);
-                let holds = |r: &lir::Range, q: u32| r.first <= q && q <= r.last;
-                let end = if self.ranges.iter().all(|r| !holds(r, p) || holds(r, t32)) { Terminator::Jump(self.entries[t]) } else { Terminator::GoTo(t32) };
-                self.end(end, pos)?;
+                let (p, t32, n) = (ctx.para as u32, t as u32, self.entries.len() as u32);
+                let holds = |r: &lir::Range, q: u32| {
+                    let (lo, hi) = r.region(n);
+                    lo <= q && q <= hi
+                };
+                let stays = self.ranges.iter().all(|r| !holds(r, p) || holds(r, t32)) && self.trigger(t).is_none();
+                self.end(if stays { Terminator::Jump(self.entries[t]) } else { Terminator::GoTo(t32) }, pos)?;
             }
             Stmt::Goback { .. } | Stmt::ExitMethod { .. } => self.end(Terminator::End(Ending::Goback), pos)?,
             Stmt::StopRun { .. } => self.end(Terminator::End(Ending::StopRun), pos)?,
@@ -458,7 +539,7 @@ impl Lower<'_> {
     }
 
     /// `Stmt::Evaluate`: a chain of branches, each WHEN's alternatives in turn, each subject
-    /// evaluated again at each comparison (lir.md §11, item 7).
+    /// evaluated again at each comparison (lir.md §11, item 6).
     fn evaluate(&mut self, subjects: &[Subject], whens: &[When], other: &[Stmt], pos: Pos, ctx: &Ctx) -> R<()> {
         let join = self.new_block()?;
         for when in whens.iter().filter(|w| !w.alternatives.is_empty()) {
@@ -528,12 +609,17 @@ impl Lower<'_> {
     }
 
     /// PERFORM as `repeat` runs it: the depth raised once, the loop, and the depth released at its
-    /// exit (lir.md §8.3). Each TIMES statement has a counter of its own.
+    /// exit (lir.md §8.3). Each TIMES statement has a counter of its own. A PERFORM that can resume
+    /// goes on after the exit in a block of its own, where the resume enters.
     fn perform(&mut self, repeat: &Loop, body: Body<'_>, pos: Pos, ctx: &Ctx) -> R<()> {
         self.op(Op::Nest, pos)?;
         let exit = self.new_block()?;
+        let after = match body {
+            Body::Range { resumes: true, .. } => Some(lir::Resume { para: ctx.para as u32, block: self.new_block()? }),
+            _ => None,
+        };
         match repeat {
-            Loop::Once => self.run_body(&body, exit, exit, pos, ctx)?,
+            Loop::Once => self.run_body(&body, exit, exit, after, pos, ctx)?,
             Loop::Times(count) => {
                 let temp = self.temp(pos)?;
                 let n = self.int_expr(count, pos)?;
@@ -545,7 +631,7 @@ impl Lower<'_> {
                 self.end(Terminator::Branch { cond: counter, then: run, otherwise: exit }, pos)?;
                 self.switch(run)?;
                 self.op(Op::DecTemp(temp), pos)?;
-                self.run_body(&body, head, exit, pos, ctx)?;
+                self.run_body(&body, head, exit, None, pos, ctx)?;
             }
             Loop::Until { cond, test_after } => {
                 let until = self.test(cond, pos)?;
@@ -554,7 +640,7 @@ impl Lower<'_> {
                     let cont = self.new_block()?;
                     self.jump(run, pos)?;
                     self.switch(run)?;
-                    self.run_body(&body, cont, exit, pos, ctx)?;
+                    self.run_body(&body, cont, exit, None, pos, ctx)?;
                     self.switch(cont)?;
                     self.branch(until, exit, run, pos)?;
                 } else {
@@ -563,7 +649,7 @@ impl Lower<'_> {
                     self.switch(head)?;
                     self.branch(until, exit, run, pos)?;
                     self.switch(run)?;
-                    self.run_body(&body, head, exit, pos, ctx)?;
+                    self.run_body(&body, head, exit, None, pos, ctx)?;
                 }
             }
             Loop::Varying { varying, after, test_after } => {
@@ -572,7 +658,14 @@ impl Lower<'_> {
             }
         }
         self.switch(exit)?;
-        self.op(Op::Unnest(1), pos)
+        self.op(Op::Unnest(1), pos)?;
+        match after {
+            Some(resume) => {
+                self.jump(resume.block, pos)?;
+                self.switch(resume.block)
+            }
+            None => Ok(()),
+        }
     }
 
     /// PERFORM VARYING and its AFTER phrases as `vary` runs them, one loop per variable, the last
@@ -600,7 +693,7 @@ impl Lower<'_> {
                 self.jump(top(k + 1), pos)?;
             }
             self.switch(run)?;
-            self.run_body(body, tests[n], exit, pos, ctx)?;
+            self.run_body(body, tests[n], exit, None, pos, ctx)?;
             for (k, level) in vary.into_iter().enumerate() {
                 self.switch(tests[k])?;
                 let then = if k == 0 { exit } else { tests[k - 1] };
@@ -628,7 +721,7 @@ impl Lower<'_> {
                 self.jump(tests[k], pos)?;
             }
             self.switch(run)?;
-            self.run_body(body, steps[n], exit, pos, ctx)?;
+            self.run_body(body, steps[n], exit, None, pos, ctx)?;
         }
         Ok(())
     }
@@ -656,17 +749,13 @@ impl Lower<'_> {
     }
 
     /// One iteration: enter the range and return to `cont`, or run the inline body, where EXIT
-    /// PERFORM takes `exit` and EXIT PERFORM CYCLE `cont`.
-    fn run_body(&mut self, body: &Body<'_>, cont: BlockId, exit: BlockId, pos: Pos, ctx: &Ctx) -> R<()> {
+    /// PERFORM takes `exit` and EXIT PERFORM CYCLE `cont`. Under DEBUG each entry sets the line register.
+    fn run_body(&mut self, body: &Body<'_>, cont: BlockId, exit: BlockId, resume: Option<lir::Resume>, pos: Pos, ctx: &Ctx) -> R<()> {
         match body {
-            Body::Range(range) if self.segments => {
-                let ret = self.new_block()?;
-                self.end(Terminator::PerformEnter { range: *range, ret }, pos)?;
-                self.switch(ret)?;
-                self.op(Op::SetSegment(self.program.paragraphs[ctx.para].priority), pos)?;
-                self.jump(cont, pos)
+            Body::Range { range, .. } => {
+                self.debug_line(pos)?;
+                self.end(Terminator::PerformEnter { range: *range, ret: cont, resume }, pos)
             }
-            Body::Range(range) => self.end(Terminator::PerformEnter { range: *range, ret: cont }, pos),
             Body::Inline(stmts) => {
                 let mut inner = Ctx { pos, ..ctx.clone() };
                 inner.loops.push(Inline { exit, cont });

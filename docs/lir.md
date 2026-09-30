@@ -12,7 +12,8 @@ interpreter runs lowers into it, and how lowering is checked.
 marked **(int)**, on the integration branch `feat/le-under-cics` at 0e73f5d (the ironwork-le-cics
 checkout), which has SORT and MERGE, LE callable services, Report Writer and OO COBOL, or, marked
 **(f2)**, on main at f201664, where the second lowering slice (CALL, INVOKE, ALTER and the rest of
-§8.9) starts.
+§8.9) starts, or, marked **(7af)**, on main at 7af8643, whose walker runs PERFORM by return points
+(§8.4).
 
 ---
 
@@ -38,9 +39,10 @@ checkout), which has SORT and MERGE, LE callable services, Report Writer and OO 
 | Base | What a place's offset counts from: the program's slab, LOCAL-STORAGE, a LINKAGE record, or a run-unit cell |
 | Plan | A decision the walker makes on each execution, made once at lowering |
 | Block | A straight run of ops ending in one terminator |
-| Paragraph end | The terminator after a paragraph's last statement, where a PERFORM range can complete |
-| Range | Paragraphs run as a unit: an out-of-line PERFORM, a SORT or MERGE procedure, a USE BEFORE REPORTING section |
-| Frame | The VM's record of an active range: its bounds, where it returns, and the nesting depth |
+| Paragraph end | Where control passes the end of a paragraph, and the return point armed there is taken |
+| Range | Paragraphs run as a unit: an out-of-line PERFORM, a SORT or MERGE procedure, a USE BEFORE REPORTING, USE AFTER EXCEPTION/ERROR or USE FOR DEBUGGING section |
+| Return point | What a running range arms at the end of its last paragraph, where control passing returns to it (C99) |
+| Frame | The VM's record of a running range: its number, where it returns, the return point it displaced, the segment register and the nesting depth |
 | Abend op | An abend the walker gives only when it reaches a construct, kept as an op so it still happens only then |
 | Debug id | An index into the debug table: the file, line and column an op or place names when it abends |
 
@@ -63,8 +65,8 @@ is what `Machine::locate` returns today (machine.rs:69-75). An executor evaluate
 3. **Plans are shared, not copied.** Lowering builds each plan once; the VM and, from step 2, the
    walker execute it.
 4. **Control transfer is explicit, and the walker's rules are the baseline.** Paragraph ends, GO TO,
-   PERFORM entry and every service that transfers control are terminators. The VM's frame stack
-   reproduces the walker's Rust recursion (§8.4), recorded as V1 (§8.6).
+   PERFORM entry and every service that transfers control are terminators. The VM's frames and
+   return points reproduce the walker's (§8.4), assumption C99 (§8.6).
 5. **Services stay library code,** as `rt` functions over `Loc`s and values. A payload names places
    and expressions by id, and the library asks the executor for each `Loc` or value where the walker
    would locate or evaluate it (semantics-library.md §9, C6), so abends and side effects keep the
@@ -96,7 +98,8 @@ pub struct Program {
     /// SearchAllPlan and FunctionPlan tables.
     pub plans: Plans,
     /// The FileOp, FileDesc, CallPlan, SortPlan, ReportOp, InvokePlan and CicsCommand tables, the
-    /// Sqlca, the ENTRY points (§9.3) and, for a class definition, its class (§9.8).
+    /// Sqlca, the ENTRY points (§9.3), for a class definition its class (§9.8), and the
+    /// declaratives' `Declaratives` (§9.10).
     pub services: Services,
     pub sql: Vec<SqlEntry>, pub abends: Vec<AbendText>, pub edits: Vec<Vec<Sym>>,
     pub symbols: Vec<String>, pub debug: Debug,
@@ -156,8 +159,10 @@ pub struct Item {
 pub struct AbendText { pub code: AbendCode, pub message: SymId, pub at: Option<DebugId> }
 
 /// `section_end` is the last paragraph of its section (exec/src/lib.rs:99-103). `priority` is its
-/// section's priority-number, 0 for none; 50 to 99 is an independent segment (§8.9).
-pub struct Paragraph { pub name: SymId, pub is_section: bool, pub entry: BlockId, pub section_end: ParaId, pub priority: u8, pub at: DebugId }
+/// section's priority-number, 0 for none; 50 to 99 is an independent segment (§8.9). `abandoned`,
+/// on a paragraph that ends a range, is the abend of passing its end when the frame armed there
+/// cannot resume (§8.4).
+pub struct Paragraph { pub name: SymId, pub is_section: bool, pub entry: BlockId, pub section_end: ParaId, pub priority: u8, pub at: DebugId, pub abandoned: Option<AbendId> }
 pub struct Block { pub ops: Vec<Op>, pub end: Terminator }
 ```
 
@@ -521,19 +526,26 @@ pub enum Op {
     File(FileOpId), Call(CallId), Cancel(Operand),
     Sort(SortId), Release(ReleaseId), Return(ReturnId), Report(ReportOp),
     Invoke(InvokeId), Cics(CicsId), Sql(SqlId),
-    /// ALTER, independent segments and the segment register (§8.9).
-    Alter { para: ParaId, to: ParaId }, EnterSegment(u8), SetSegment(u8),
+    /// ALTER and independent segments (§8.9).
+    Alter { para: ParaId, to: ParaId }, EnterSegment(u8),
+    /// Under the DEBUG option (§9.10): the line register, and a debugging section after an ALTER.
+    DebugLine(u32), DebugAlter { range: RangeId, name: SymId, contents: SymId },
 }
 
-/// What an op tells the VM, as the walker's `Flow` (machine.rs:58-67) does. The library's services
-/// return it too (semantics-library.md §4.1).
+/// What an op tells the VM, as the walker's `Flow` (machine.rs:46-59 (7af)) does. The library's
+/// services return it too (semantics-library.md §4.1).
 pub enum Step {
     Next,
     /// The handler a service selected; only a block's last op returns it, for `Select`.
     Arm(u8),
-    /// A transfer the service chose at run time: HANDLE CONDITION, HANDLE ABEND.
+    /// A transfer the service chose at run time (HANDLE CONDITION, HANDLE ABEND), or one a
+    /// procedure it ran left by (§9.6).
     GoTo(ParaId),
     End(Ending),
+    /// A procedure the op ran passed the return point of active frame `frame` (§8.4).
+    Return(u64),
+    /// A procedure the op ran passed the return point of a PERFORM control had left (§8.4).
+    Resume(Resume),
 }
 
 pub enum Terminator {
@@ -541,15 +553,16 @@ pub enum Terminator {
     Branch { cond: CondId, then: BlockId, otherwise: BlockId },
     /// On the Arm the block's last op returned.
     Select(Vec<BlockId>),
-    /// Control leaves a paragraph for paragraph `next`, which may be one past the last (§8.4).
+    /// Control passes the end of paragraph `next` − 1 for `next`, which may be one past the last:
+    /// the return point armed there is taken (§8.4).
     ParagraphEnd { next: ParaId },
-    /// GO TO, with the range rules of §8.4.
+    /// GO TO, with the transfer rules of §8.4.
     GoTo(ParaId),
     /// GO TO … DEPENDING ON: `targets[k − 1]` for a value k in range, as a `GoTo`, depth reset
     /// included; else `otherwise`, the next statement.
     Switch { value: IntExpr, targets: Vec<ParaId>, otherwise: BlockId },
-    /// An out-of-line PERFORM: push a frame, enter the range; `ret` runs when it completes.
-    PerformEnter { range: RangeId, ret: BlockId },
+    /// An out-of-line PERFORM: push a frame, arm its return point, enter the range (§8.4).
+    PerformEnter { range: RangeId, ret: BlockId, resume: Option<Resume> },
     /// EXIT PROGRAM: nothing in the run unit's first program, GOBACK in any other (machine.rs:377-378).
     ExitProgram { next: BlockId },
     End(Ending),
@@ -557,11 +570,25 @@ pub enum Terminator {
     /// The entry of a paragraph an ALTER names (§8.9): a `GoTo` of the target the alter table
     /// holds for `para`, or `Jump(otherwise)` while it holds none.
     AlteredGoTo { para: ParaId, otherwise: BlockId },
+    /// Under the DEBUG option, the entry of a paragraph a debugging section serves (§9.10).
+    Debug { range: RangeId, name: SymId, next: BlockId },
 }
 
+/// The statement after an out-of-line PERFORM that runs once and is a statement of paragraph
+/// `para` (§8.4). `block` also keys what that PERFORM displaced.
+pub struct Resume { pub para: ParaId, pub block: BlockId }
+
 pub struct Range { pub first: ParaId, pub last: ParaId, pub kind: RangeKind }
-pub enum RangeKind { Perform, SortProcedure, UseBeforeReporting }
+pub enum RangeKind { Perform, SortProcedure, UseBeforeReporting, UseProcedure, Debugging }
 ```
+
+- **Tags** (load-module.md §4.3): `PerformEnter` is tag 12 and `Debug` 11 of `Terminator`, and tag 6
+  is retired; `DebugLine` and `DebugAlter` are tags 30 and 31 of `Op`, and tag 29 (`SetSegment`) is
+  retired.
+- **A range's region** (`Range::region`) is the paragraphs a GO TO stays in it for: `first` to
+  `last`; `first` to the program's last paragraph when `last` comes before `first`; and every
+  paragraph for a SORT or MERGE procedure (§8.6). `UseProcedure` is a USE AFTER EXCEPTION/ERROR
+  procedure and `Debugging` a USE FOR DEBUGGING section (§9.10).
 
 The spec's `PerformEnter(range, loop)` is split: a PERFORM's loop is ordinary blocks around
 `PerformEnter`, because inline PERFORM needs the same loops without a range.
@@ -572,12 +599,12 @@ The spec's `PerformEnter(range, loop)` is split: a PERFORM's loop is ordinary bl
   holding the statements before the section's first paragraph (syntax/src/ast.rs:160-169).
 - **A section is a range** from its header to `section_end`, as `procedure` resolves a section name
   (exec/src/lib.rs:106-120). END DECLARATIVES ends a section as a header does (lib.rs:114-120 (int)).
-- **Fall-through** goes from paragraph p to p + 1, across section boundaries, as `run_paragraphs`
-  does (machine.rs:275).
-- **The paragraph's last block** ends in `ParagraphEnd { next: p + 1 }`, or in a plain `Jump` when
-  no range's last paragraph lies in p to `next` − 1, since no frame can complete there. Only
-  paragraphs that end a PERFORM, a SORT procedure or a USE BEFORE REPORTING section, and the
-  program's last, keep the check.
+- **Fall-through** goes from paragraph p to p + 1, across section boundaries, as `run_region`
+  does (machine/perform.rs:100-175 (7af)).
+- **The paragraph's last block** ends in `ParagraphEnd { next: p + 1 }`. It is a plain `Jump`
+  instead when no range's last paragraph lies in p to `next` − 1, since then no return point can be
+  armed at `next` − 1 and no region ends before `next`, and no debugging section serves `next`
+  (§9.10). The same holds for every `ParagraphEnd` EXIT and NEXT SENTENCE produce.
 
 ### 8.3 PERFORM
 
@@ -592,7 +619,10 @@ b3: Unnest(1); Jump next                  b3: Step I by 1; Jump b1
                                           b4: Unnest(1); Jump next    EXIT PERFORM: Jump b4
 ```
 
-- **Once:** `Nest; PerformEnter r -> b1`, `b1: Unnest(1)`.
+- **Once:** `Nest; PerformEnter r -> b1`, `b1: Unnest(1)`. When the PERFORM is a statement of its
+  paragraph, not inside another statement, it can resume (§8.4): `PerformEnter r -> b1, resume
+  (p, b2)`, `b1: Unnest(1); Jump b2`, and `b2` holds the statements after it, as `after`
+  (machine/perform.rs:88-94 (7af)) finds them.
 - **TIMES:** the count is evaluated once and below zero counts as zero (machine.rs:480). Each
   TIMES statement has its own `TempId`, and its counter lives in the frame the statement runs under
   (`Frame.temps`, §8.4), not in the program: a paragraph can PERFORM itself, directly or through
@@ -619,115 +649,144 @@ h1: Branch CJ s0 else run                 s1: Step J by 1; Jump h1
 run: PerformEnter r -> s1                 exit: Unnest(1); Jump next
 ```
 
-### 8.4 Frames
+### 8.4 Return points and frames
+
+Assumption C99 (§8.6) and the walker's `perform_range` and `run_region`
+(machine/perform.rs:60-175 (7af)):
+
+- **Arming.** Each run of a range is a frame with a number of its own. It arms a return point at
+  the end of its range's last paragraph, displacing whatever was armed there, and its paragraphs
+  run in the range's region.
+- **Checking.** Wherever control passes the end of a paragraph (falling through, EXIT PARAGRAPH,
+  EXIT SECTION at the section's last paragraph, NEXT SENTENCE with no period after it), the point
+  armed there decides: none, and control goes on; the running frame's, and it completes; an active
+  outer frame's, and that frame completes, every frame inside it being left; a frame control left,
+  and control resumes after its PERFORM, or the run abends.
+- **Leaving.** A GO TO to a paragraph outside a frame's region leaves the frame, and each one out to
+  the first whose region holds the target. A left frame's point stays armed.
+
+The VM's state, per activation (a CALL starts with nothing armed, C99), in `rt::lir`:
 
 ```rust
-/// The VM's record of an active range: `ret` runs when it completes, and its paragraphs run at
-/// `depth` (§8.7). Main is the program's own run and holds every paragraph, since the walker
-/// restarts its run at any GO TO target.
-/// `temps` holds the TIMES counters of the statements running under the frame, by `TempId`.
-struct Frame { first: ParaId, last: ParaId, kind: FrameKind, ret: BlockId, depth: u32, temps: Vec<i64> }
-enum FrameKind { Main, Perform, SortProcedure, UseBeforeReporting { at: DebugId } }
+/// A return point: the frame that armed it, and its PERFORM's resume.
+pub struct ReturnPoint { pub frame: u64, pub resume: Option<Resume> }
+/// An active range. `displaced` is the point it replaced; `segment` the segment register when it
+/// was pushed (§8.9); its paragraphs run at `depth` (§8.7); `temps` are its TIMES counters (§8.3).
+pub struct Frame { pub id: u64, pub kind: FrameKind, pub displaced: Option<ReturnPoint>, pub segment: u8, pub depth: u32, pub temps: Vec<i64> }
+/// Main holds every paragraph and arms nothing. A Procedure frame is a range a service or a
+/// `Debug` runs in a dispatch loop of its own (§9.6).
+pub enum FrameKind { Main, Perform { range: RangeId, ret: BlockId, resume: Option<Resume> }, Procedure { range: RangeId } }
+/// The point armed at each paragraph's end; what each resumable PERFORM control left displaced,
+/// by its `Resume.block`; the frames, Main first; the next frame's number.
+pub struct Returns { pub armed: Vec<Option<ReturnPoint>>, pub saved: BTreeMap<BlockId, Option<ReturnPoint>>, pub frames: Vec<Frame>, pub next_frame: u64 }
 ```
 
-- **PerformEnter { range, ret }** pushes a Perform frame and goes to the entry of `first`. A range
-  whose `last` precedes `first` runs nothing and goes straight to `ret`.
+- **PerformEnter { range, ret, resume }** pushes a Perform frame numbered `next_frame`, which then
+  counts up, with `displaced` taken from `armed[last]`, the segment register, and the depth; arms
+  `armed[last]` with its number and `resume`; and goes to the entry of `first`. The arrival
+  register (§9.10) is PERFORM.
+- **Completing** the top frame puts `displaced` back at `armed[last]`, pops the frame and restores
+  the segment register from it. A Perform frame goes to `ret` at its depth; a Procedure frame's
+  dispatch loop ends, `Completed`.
+- **Leaving** a frame pops it and leaves `armed` as it is. A Perform frame with a resume records
+  `saved[resume.block] = displaced`. Leaving a Procedure frame ends its dispatch loop with the
+  transfer that left it (§9.6).
+- **Transfers.** `GoTo(t)`, taken by `GoTo`, a `Switch` or `AlteredGoTo` target and `Step::GoTo`:
+  leave frames while the top one's region does not hold t, reset the depth to the top frame's, set
+  the arrival register to GO TO, and go to t's entry. `Resume(r)`: the same for `r.para`, then the
+  segment register takes `r.para`'s priority, clearing nothing, and control goes to `r.block`.
+  `Return(f)`: leave frames until frame f is on top, and complete it. `End(e)`: the run ends. Main
+  holds every paragraph, so only a Procedure frame's loop sees a transfer it cannot follow.
+- **ParagraphEnd { next }**, with e = `next` − 1 and F the top frame, by `armed[e]`:
+  1. none: past the last paragraph, `End(EndOfProgram)`; in F's region, `next` at F's depth, the
+     arrival register FALL THROUGH; otherwise `GoTo(next)`;
+  2. F's point: F completes;
+  3. the point of a frame on the stack: `Return` to it;
+  4. the point of a frame control left, with a resume r: `armed[e]` takes `saved[r.block]`, or
+     nothing, and then `Resume(r)`;
+  5. any other: `Abend(paragraphs[e].abandoned)`, IRONWORK "control passed the end of P, which is
+     armed to return to a PERFORM that control left by GO TO; ironwork returns there only to a
+     PERFORM that runs once and is not inside another statement", at paragraph e. Lowering sets
+     `Paragraph.abandoned` on every paragraph that ends a range.
 - **TIMES counters** are the top frame's: `SetTemp` sets one there, and `DecTemp` and `Counter`
   read it there. A new frame starts with none set, and a popped frame's go with it (§8.3).
-- **ParagraphEnd { next }:** if `next` ≤ the top frame's `last`, go to `next`. Otherwise pop the
-  frame and complete it: a Perform frame goes to its `ret`; Main ends the run with EndOfProgram; a
-  callback frame returns to its service (§9.6).
-- **GoTo(t):** while the top frame's range does not hold t, a Perform frame is popped and its `ret`
-  never runs; a SortProcedure frame is re-bounded (§9.6); a UseBeforeReporting frame abends. Then
-  go to t. Main holds every paragraph.
-- **Transfers from services** (`Step::GoTo`: HANDLE CONDITION, HANDLE ABEND) and WHENEVER's GO TO
-  follow the GoTo rule, because the walker returns them as `Flow::GoTo` (machine/cics.rs:276-278,
-  machine/sql.rs:289). So do a `Switch` target and an `AlteredGoTo`'s target (§8.9), which the
-  walker returns the same way (machine.rs:315, 462 (f2)).
-- **Elision.** Control in paragraph p always lies inside the top frame's range, so a GO TO from p to
-  t is a plain `Jump` when every range holding p also holds t.
+- **Elision.** Control in paragraph p always lies in the top frame's region, so a GO TO from p to t
+  is a plain `Jump` when every range whose region holds p also holds t and no debugging section
+  serves t (§9.10).
 
 ### 8.5 The walker's baseline
 
-The walker has no frame stack. Each out-of-line PERFORM is a Rust call of `run_paragraphs(from, to)`
-inside `repeat` (machine.rs:340-347, 446-526), and control flow is the `Flow` value returned up
-through those calls.
+The walker keeps the same state in `perform::Returns` (machine/perform.rs:8-33 (7af)): `armed`,
+`saved` by the PERFORM statement's address, the active frames' numbers, and a counter. A frame is a
+Rust call of `perform_range`, and `run_region` returns `Flow::Return(frame)` and
+`Flow::Resume(paragraph, statement)` up through the calls, where the VM pops frames.
 
-- **A range completes** when the index passes its own `to`: `while i <= to` (machine.rs:273).
-- **A GO TO inside the range** is followed (machine.rs:277). **One outside it** is returned upward
-  (machine.rs:279): `repeat_nested` passes it out as `Step::Out` and stops the loop, with no further
-  iterations and no VARYING step (machine.rs:471, 476, 484, 495, 512); the PERFORM returns it to its
-  paragraph's `run_sentences` (machine.rs:292); the enclosing `run_paragraphs` follows it if its
-  range holds the target, or returns it further; and at the top `run_procedure` restarts the run at
-  the target (machine.rs:264). The abandoned PERFORMs never return, and their depth is released as
-  the Rust calls unwind (machine.rs:449).
 - **Overlapping ranges.** Take `PERFORM A THRU C` from MAIN, and in A `PERFORM B THRU D`, where B, C
-  and D each DISPLAY their names. The inner call runs B, C and D, passing the end of C without
-  returning, since its `to` is D; it returns to A, and the outer call runs B and C again. The output
-  is B C D B C. One return point per paragraph end would instead return from the outer PERFORM at
-  the first end of C.
-- **A GO TO out and back.** In codegen-runtime.md's B3, B does `GO TO D` with D after C: the walker
-  runs D and what follows as the main line, and the PERFORM never returns. A return-point
-  implementation would return to the old PERFORM's successor when control next passes the end of C.
-- **EXIT SECTION** jumps to the paragraph after the section (machine.rs:276); past the range's `to`,
-  the range completes, though control never passed the end of `to`.
+  and D each DISPLAY their names. The inner PERFORM runs B and C; at the end of C the outer
+  PERFORM's point is armed and it is active, so the outer PERFORM completes and the inner one is
+  left, its point at D still armed. The output is B C.
+- **A GO TO out and back.** In codegen-runtime.md's B3, B does `GO TO D` with D after C: the
+  PERFORM is left and D runs as the main line. If control later passes the end of C, it resumes
+  after the PERFORM when that PERFORM runs once and is a statement of its paragraph, and abends
+  otherwise.
+- **EXIT SECTION** in a performed paragraph goes to the end of the section's last paragraph, past
+  the performed paragraph's point, as `Flow::ExitSection` does (perform.rs:133-134 (7af)); from
+  there, leaving the PERFORM's region is a GO TO to the next paragraph, which leaves its frame.
+- **A THRU range that ends before it starts,** `PERFORM B THRU A`, has a region from B to the last
+  paragraph: control falls on from B to the end of the program, and reaches A's end only by a GO TO
+  that leaves the frame first, so passing it resumes after the PERFORM or abends (rules 4 and 5).
 - **EXIT PERFORM outside an inline PERFORM** is an S-level error in Check, as the Language
   Reference does not allow it (SC27-8713-03, p. 344). Under a card's COMPILE the program runs
   anyway, and the statement moves to the next paragraph, as EXIT PARAGRAPH does (machine.rs:278).
+- **A procedure a statement runs,** an EXCEPTION/ERROR procedure or a debugging section, runs by
+  `run_paragraphs`, a `perform_range` with no resume, so it arms, completes and is left by the same
+  rules; §9.6 and §9.10 give what its statement does when it is left.
 
-The frame rules of §8.4 reproduce every one of these. If an oracle settles V1 the other way, the
-VM's rules change and the LIR does not: `ParagraphEnd` already marks every paragraph end where a
-range can complete, which a return-point model needs.
+### 8.6 Assumption C99
 
-### 8.6 Assumptions V1 and V2
+V1 is superseded by C99 `PERFORM_RETURN_POINTS` in `numeric::assumptions::ASSUMPTIONS`
+(numeric/src/assumptions.rs), basis `Chosen`, oracle Enterprise COBOL, which the walker and the VM
+share:
 
-Lowering and VM assumptions form a new **V** series in `numeric::assumptions::ASSUMPTIONS`. Both
-entries are provisional (basis `Chosen`, settled only by an Enterprise COBOL run), and the series
-is append-only: an id is never reused or renumbered.
+> An out-of-line PERFORM arms a return point at the end of its range's last paragraph (Language
+> Reference SC27-8713-03, p. 419), one per activation, since a CALL resets return points
+> (Programming Guide SC27-8714-03, p. 547). Control that passes that end by any path, falling
+> through or by GO TO, returns to the PERFORM, so PERFORM B THRU A with A before B returns when
+> control reaches the end of A, and a range that passes the end of another active PERFORM's range
+> returns there to that PERFORM. Neither manual says what a PERFORM that control leaves by GO TO
+> leaves behind: its return point stays armed, as the Programming Guide's warning against ranges
+> that keep control from the end implies (p. 772), until control passes it and returns after that
+> PERFORM, which then puts back the point it displaced; ironwork refuses at run time to return so
+> into a PERFORM that repeats or is inside another statement. EXIT SECTION goes to the end of the
+> section, past the return point of a performed paragraph in it (LR p. 345).
 
-```rust
-pub const PERFORM_RANGE_EXITS: &str = "V1";
-pub const SORT_PROCEDURE_EXITS: &str = "V2";
+**V2 is folded into C99.** The walker runs a SORT or MERGE input or output procedure with the same
+return point: `procedure_range` is `perform_range(start, end, Some((0, last)), None)`
+(machine/sort.rs:677-680 (7af)). What V2 described is that frame's region, the whole program: a
+GO TO never leaves the procedure, which ends when control passes its last paragraph's end, at the
+end of the program, which the SORT passes on, or at an active PERFORM's return point, which the
+SORT takes as the procedure's end (sort.rs:707-708, 734-735 (7af)). C99's text does not name SORT
+procedures, so the whole-program region is recorded here as the walker's baseline and wants an
+oracle case with C99's. The V series keeps V1 and V2 retired.
 
-Assumption {
-    id: PERFORM_RANGE_EXITS,
-    claim: "A PERFORM returns only when control leaves the end of its own last paragraph while it \
-            is the innermost active PERFORM; passing the end of an outer PERFORM's last paragraph \
-            inside an inner one does not return from the outer. A GO TO to a paragraph outside the \
-            innermost PERFORM's range abandons it, and every PERFORM out to the first whose range \
-            holds the target; they never return and their loops stop. EXIT SECTION past a range's \
-            last paragraph completes it. A THRU range that ends before it starts runs nothing.",
-    basis: Basis::Chosen,
-    oracle: Oracle::EnterpriseCobol,
-}
-
-Assumption {
-    id: SORT_PROCEDURE_EXITS,
-    claim: "A GO TO out of a SORT or MERGE input or output procedure does not leave it: a target \
-            at or before the procedure's last paragraph continues there with the procedure's end \
-            unchanged, and a target past it runs to the end of the program, which ends the \
-            program, and the SORT passes that on.",
-    basis: Basis::Chosen,
-    oracle: Oracle::EnterpriseCobol,
-}
-```
-
-B3 of codegen-runtime.md then reads: the VM's result is V1's; the walker's is recorded beside it;
-a difference is reported as a change of semantics.
+B3 of codegen-runtime.md then reads: the VM's result is C99's, which is the walker's.
 
 ### 8.7 Nesting depth
 
 The walker counts every PERFORM, inline ones included, every CALL, LINK, XCTL and INVOKE, and each
-SORT procedure and USE BEFORE REPORTING run, against `MAX_DEPTH` = 100 (unit.rs:55;
+SORT procedure, USE procedure and debugging section run, against `MAX_DEPTH` = 100 (unit.rs:55;
 machine.rs:453-459), and abends IRONWORK "PERFORM and CALL nest deeper than 100" at the statement.
 The check comes once per statement, before the first iteration, so `PERFORM P 0 TIMES` can still
 abend.
 
 - **`Nest`** at the head of each PERFORM checks and raises the depth; **`Unnest(n)`** lowers it on
   each lexical exit: normal completion, EXIT PERFORM, and NEXT SENTENCE out of `n` inline PERFORMs.
-- **Frames record the depth** their paragraphs run at. `ParagraphEnd` and `GoTo` reset the depth to
-  the top frame's, which releases any inline PERFORMs left by EXIT PARAGRAPH, EXIT SECTION or GO TO,
-  and any PERFORM statements whose frames a GO TO popped, as the walker's unwinding does.
+- **Frames record the depth** their paragraphs run at. A paragraph end, a transfer and a resume
+  reset the depth to the top frame's, which releases any inline PERFORMs left by EXIT PARAGRAPH,
+  EXIT SECTION or GO TO, and any PERFORM statements whose frames were left, as the walker's
+  unwinding does.
+- **A procedure run** by a file op or a `Debug` checks and raises the depth at its statement or
+  paragraph, runs at the raised depth, and lowers it when its dispatch loop ends.
 
 ### 8.8 Other transfers
 
@@ -736,28 +795,27 @@ abend.
 | GO TO | `GoTo`, or `Jump` when elided | machine.rs:375 |
 | GO TO … DEPENDING ON | `Switch`; out of range, the next statement | machine.rs:459-464 (f2) |
 | GO TO with no target | Nothing: unaltered it falls through; altered, its paragraph's entry transfers (§8.9) | machine.rs:458 (f2) |
-| ALTER | `Alter` per pair, in order | machine.rs:465-473 (f2) |
+| ALTER | `Alter` per pair, in order, then any `DebugAlter` (§9.10) | machine.rs:465-473 (f2) |
 | ENTRY | Nothing; the statement after it starts a block a CALL enters (§9.3) | machine.rs:458 (f2) |
-| EXIT PARAGRAPH | `ParagraphEnd { next: p + 1 }` | machine.rs:275, 411 |
-| EXIT SECTION | `ParagraphEnd { next: section_end + 1 }` | machine.rs:276, 412 |
+| EXIT PARAGRAPH | `ParagraphEnd { next: p + 1 }` | perform.rs:133 (7af) |
+| EXIT SECTION | `ParagraphEnd { next: section_end + 1 }`: the check is at the section's last paragraph | perform.rs:134 (7af) |
 | EXIT PERFORM, EXIT PERFORM CYCLE | `Jump` to the loop's exit or continuation, with `Unnest` | machine.rs:469-470 |
 | NEXT SENTENCE | `Jump` past the next separator period of the paragraph, or `ParagraphEnd`, with `Unnest` | machine.rs:291, 392 |
 | STOP RUN | `End(StopRun)` | machine.rs:410 |
 | GOBACK, EXIT METHOD | `End(Goback)` | machine.rs:376; 422 (int) |
 | EXIT PROGRAM | `ExitProgram`: whether this is the run unit's first program is known only at run time | machine.rs:377-378 |
-| Falling off the last paragraph | `ParagraphEnd`, completing Main | machine.rs:265 |
+| Falling off the last paragraph | `ParagraphEnd`, `End(EndOfProgram)` | perform.rs:106-107 (7af) |
 
 ### 8.9 ALTER and independent segments
 
 ALTER changes where a paragraph's GO TO goes. The walker keeps the change in `Loaded.altered`, a
 target per paragraph of the loaded program (unit.rs:33-34 (f2)), and checks it whenever control
-reaches a paragraph, before its statements (`run_paragraphs_from`, machine.rs:312-317 (f2)).
+reaches a paragraph, before its statements (`run_region`, machine/perform.rs:125 (7af)).
 
 ```rust
 Op::Alter { para: ParaId, to: ParaId }                       // ALTER para TO PROCEED TO to
 Terminator::AlteredGoTo { para: ParaId, otherwise: BlockId } // at the entry of each altered paragraph
 Op::EnterSegment(u8)                                         // at the entry of every paragraph
-Op::SetSegment(u8)                                           // where a PERFORM range returns
 ```
 
 - **The alter table** is mutable state of the loaded program: one optional target per paragraph,
@@ -769,35 +827,36 @@ Op::SetSegment(u8)                                           // where a PERFORM 
   activations share one.
 - **`Alter`** sets `para`'s entry to `to`, the first paragraph of the procedure ALTER names.
 - **`AlteredGoTo`** begins the entry block of each paragraph some ALTER names, after
-  `EnterSegment`: while the table holds a target t for `para`, control goes to t exactly as by
-  `GoTo(t)` (§8.4), so under **V1** an altered GO TO out of a PERFORM range abandons the range and
-  every PERFORM out to the first whose range holds t, and the depth is reset to that frame's;
-  otherwise `Jump(otherwise)` runs the paragraph as written. The target is known only at run time,
-  so it is never elided to a `Jump`.
+  `EnterSegment` and any `Debug`: while the table holds a target t for `para`, control goes to t
+  exactly as by `GoTo(t)` (§8.4), leaving each frame whose region does not hold t; otherwise
+  `Jump(otherwise)` runs the paragraph as written. The target is known only at run time, so it is
+  never elided to a `Jump`.
 - **A GO TO with no target** that nothing has altered does nothing: control falls through to the
   next paragraph (machine.rs:458 (f2)). It lowers to no op; Check makes it its paragraph's only
   sentence.
 - **Independent segments.** Control reaching a paragraph whose section has a priority-number of 50
   or more from a paragraph of another segment finds the segment in its initial state: the walker
-  clears the alter entries of that segment's paragraphs (`enter_segment`, machine.rs:336-349 (f2);
-  assumption C52 `ALTERED_GO_TO_RESET`). The walker keeps the segment in a register that
-  `run_paragraphs_from` sets as each paragraph is entered and restores when a range completes
-  normally, but not when a GO TO leaves it (machine.rs:296, 330 (f2)).
+  clears the alter entries of that segment's paragraphs (`enter_segment`, machine.rs:256-269 (7af);
+  assumption C52 `ALTERED_GO_TO_RESET`).
 - **The segment register** is per activation. It starts at the priority of the paragraph the
-  activation starts in (`procedure_start`, or an ENTRY's paragraph, machine.rs:272 (f2)).
+  activation starts in (`procedure_start`, or an ENTRY's paragraph, perform.rs:42 (7af)).
   `EnterSegment(p)` at the head of every paragraph's entry block does what `enter_segment` does:
   when p differs from the register and is 50 or more, it clears the alter entries of the
-  paragraphs whose `priority` is p; then the register holds p. `SetSegment(q)` begins the block
-  each `PerformEnter` returns to: the register goes back to q, the priority of the paragraph the
-  PERFORM is written in, clearing nothing. That is the value the walker restores, because while a
-  paragraph's statements run the register holds its priority: every range a statement performs
-  restores it, and a GO TO out of one never returns to the statement. A range abandoned by a GO TO
-  never reaches its return block, so, as in the walker, the register keeps the last paragraph's
-  segment until the target's `EnterSegment`.
+  paragraphs whose `priority` is p; then the register holds p.
+- **Frames restore it.** `run_region` saves the register when a range starts and restores it when
+  the range ends by completing or by a return to its own or an outer PERFORM, clearing nothing,
+  and not when control leaves it (perform.rs:102, 170-172 (7af)); a resume, inside the region or
+  above it, sets the register to the resumed paragraph's priority (perform.rs:140-143, 153-157
+  (7af)). So `Frame.segment` holds the register at the push, and completing a frame restores it:
+  a PERFORM's return, a return to a PERFORM through nested ones, and a procedure a statement or a
+  `Debug` runs, which no op after the statement could restore. Leaving a frame restores nothing,
+  the target's `EnterSegment` setting the register, and a GO TO out of a range that comes back as
+  a `Resume` sets it from `r.para`, so the resumed statement runs with its own paragraph's
+  priority.
 - **Only where it shows.** Clearing matters only to a paragraph an ALTER names, so lowering emits
-  `EnterSegment` and `SetSegment` only when an ALTER names a paragraph of an independent segment;
-  otherwise priorities have no effect the walker shows, and independent segments lower as other
-  paragraphs do.
+  `EnterSegment` only when an ALTER names a paragraph of an independent segment; otherwise
+  priorities have no effect the walker shows, and independent segments lower as other paragraphs
+  do. The register's save and restore are the VM's, with no op.
 
 ## 9. Statements as LIR ops
 
@@ -834,7 +893,7 @@ walker does on each execution; the last column names that work.
 | EXEC DLI, other EXEC | `Abend` with the walker's EXEC message (machine.rs:396-408) | - | - |
 | Declarative EXEC SQL | Nothing (machine.rs:393); its `SqlEntry` still exists | - | - |
 | FUNCTION | `Operand::Function` (§9.9) | One call | Name and arity (machine.rs `function`) |
-| DECLARATIVES | Their paragraphs, as paragraphs; one that can run is refused until the flow rework (§9.10) | - | - |
+| DECLARATIVES | Their paragraphs, and a range for each procedure that can run: the file ops run USE AFTER EXCEPTION/ERROR ones; under DEBUG, `Debug`, `DebugAlter` and `DebugLine` (§9.10) | Lowered | The procedure by file and mode; the triggers |
 | PERFORM, GO TO, EXIT, STOP RUN, GOBACK, NEXT SENTENCE | Terminators (§8) | Lowered | Procedure names (machine.rs:308-310) |
 | GO TO … DEPENDING ON, ALTER, ENTRY | `Switch`; `Alter` and `AlteredGoTo` (§8.9); an entry block (§9.3) | Lowered | Procedure names (machine.rs:459-473 (f2)); where an ENTRY begins |
 
@@ -857,7 +916,8 @@ pub enum MovePlan {
     Refused(AbendId),
 }
 
-pub enum Image { Bytes, All, Figurative, Digits { digits: u32 } }
+/// `Stored`: a numeric, floating-point or pointer sender's own bytes as stored, once it has been read.
+pub enum Image { Bytes, All, Figurative, Digits { digits: u32 }, Stored }
 pub enum NationalFrom { Units, Decoded, Figurative }
 pub enum NumericFrom {
     Value,
@@ -879,7 +939,8 @@ Every category pair, by the value the walker reads from the sender (line numbers
 
 | Sender | Group, alphanumeric | Alnum-edited | National | Numeric, numeric-edited | Float | Pointer kinds | Index |
 |---|---|---|---|---|---|---|---|
-| Group, alphanumeric, either edited | Copied | Edited | Decoded to UTF-16 | Unsigned zoned integer, S0C7 unless digits; numeric-edited is de-edited | Refused | Refused | Refused |
+| Group | Copied | Copied, not edited | Decoded to UTF-16 | Copied, not converted | Copied | Refused | Refused |
+| Alphanumeric, either edited | Copied | Edited | Decoded to UTF-16 | Unsigned zoned integer, S0C7 unless digits; numeric-edited is de-edited | Refused | Refused | Refused |
 | National | Refused | Refused | Units | Refused | Refused | Refused | Refused |
 | Integer numeric | Its digits, unsigned | Digits, edited | Refused | Stored; PFD packed copy | Converted | Refused | Stored |
 | Numeric with decimals | Refused | Refused | Refused | Stored | Converted | Refused | Stored |
@@ -890,8 +951,13 @@ Every category pair, by the value the walker reads from the sender (line numbers
 | ALL literal | Repeated | Repeated, edited | Refused | Bytes filled cyclically | Refused | Refused | Refused |
 | Pointer kinds | Refused | Refused | Refused | Refused | Refused | Copied | Refused |
 
-- **Group moves** are these elementary moves with the group as alphanumeric, which differs from IBM
-  (§11, item 2).
+- **Group moves** convert nothing, as `assign` (machine.rs:1953-1970 (7af)) and the Language
+  Reference (SC27-8713-03, p. 410) have it. A group sender to a numeric, floating-point,
+  numeric-edited or alphanumeric-edited receiver is `Alnum { image: Bytes, justified: false }`: its
+  bytes, space-padded or cut. A numeric, floating-point or pointer item moved to a group receiver is
+  `Alnum { image: Stored, justified: false }`: its bytes as stored, after the read that can abend
+  on invalid data. A literal moved to a group receiver moves as to an alphanumeric one. SET TO and
+  WRITE and REWRITE FROM take the same plans.
 - **Several receivers** lower to one `Move` each. Each locates its receiver, then reads the sender
   again (machine.rs:315-318), so a receiver stored earlier can change what a later one gets (§11).
 - **MOVE CORRESPONDING** expands at lowering into one `Move` per pair of corresponding elementary
@@ -990,7 +1056,8 @@ pub struct FileDesc {
     /// RECORD KEY, then each ALTERNATE RECORD KEY with WITH DUPLICATES, as spans of the record area.
     pub keys: Option<IndexKeys>,
     pub relative: Option<RelativeKey>, pub linage: Option<Linage>, pub carriage: Option<Carriage>,
-    pub sort: bool,
+    /// `error` is the file's own USE AFTER EXCEPTION/ERROR procedure (§9.10).
+    pub sort: bool, pub error: Option<RangeId>,
 }
 pub struct IndexKeys { pub prime: RecordSpan, pub alternates: Vec<(RecordSpan, bool)> }
 pub struct RecordSpan { pub offset: u32, pub len: u32 }
@@ -1030,7 +1097,8 @@ pub enum StartKey { Prime, Named { key: u8, span: RecordSpan }, Relative(IntExpr
   `Select` of `FileOp::arms()` blocks follows: 3, or 5 with END-OF-PAGE. An arm whose phrase is not
   written goes where `Arm(0)` goes. `conclude` sets FILE STATUS before the phrase runs, and a
   failing status with no phrase to run takes the file's error path: a USE AFTER EXCEPTION/ERROR
-  procedure (§9.10), else `IO-xx` when the file has no FILE STATUS.
+  procedure the op runs through `Procedures::run`, whose leaving the op returns as its `Step`
+  (§9.10), else `IO-xx` when the file has no FILE STATUS.
 - **One op per file.** OPEN and CLOSE name several files; the walker opens each in turn and stops at
   the first abend, as a block of ops does.
 - **Which phrase READ takes** is fixed by the file: AT END for a sequential file, sequential access,
@@ -1099,19 +1167,22 @@ from the copy libraries on first use in a task (cics_bms.rs:37-57), and finds DF
 
 ### 9.6 SORT, MERGE and Report Writer
 
-Both run COBOL procedures from inside a service, through one trait:
+Both run COBOL procedures from inside a service, through one trait, and so does a file op for a
+USE AFTER EXCEPTION/ERROR procedure (§9.10):
 
 ```rust
-/// How a service runs a COBOL procedure. The walker implements it with `run_paragraphs`; the VM
-/// runs a nested dispatch loop over the range, under a frame of the range's kind.
+/// How a service runs a COBOL procedure. The walker implements it with `run_paragraphs` and
+/// `procedure_range`; the VM runs a dispatch loop of its own over the range under a Procedure
+/// frame (§8.4), with the arrival register (§9.10) at `arrival`: USE PROCEDURE, or SORT INPUT,
+/// SORT OUTPUT or MERGE OUTPUT.
 pub trait Procedures {
-    fn run(&mut self, range: RangeId) -> Result<RangeEnd, Abend>;
+    fn run(&mut self, range: RangeId, arrival: Arrival) -> Result<RangeEnd, Abend>;
 }
 
 pub enum RangeEnd {
     Completed,
-    /// STOP RUN, GOBACK or the end of the program was reached inside the procedure.
-    Ended(Ending),
+    /// Control left the procedure's frame by this transfer: `GoTo`, `End`, `Return` or `Resume`.
+    Left(Step),
 }
 
 /// `keys` are offsets in the record with kind and direction (machine/sort.rs:179-191 (int));
@@ -1129,16 +1200,17 @@ pub enum SortIo { Files(Vec<u16>), Procedure(RangeId) }
   (sort.rs:595-669 (int)). RETURN returns `Arm` for AT END.
 - **A table SORT** is one op with the element's stride and key offsets fixed; the count stays
   dynamic under OCCURS DEPENDING ON (sort.rs:673-707 (int)).
-- **GO TO out of a SORT procedure** does not unwind past it: `procedure_range`
-  (sort.rs:510-524 (int)) behaves as V2 states (§8.6), and SORT passes the end of the program on
-  (sort.rs:548, 574 (int)). The SortProcedure frame is re-bounded the same way.
+- **A SORT procedure's frame** holds every paragraph (§8.6), so no GO TO leaves it. `Left(End(e))`
+  makes the op return `Step::End(e)`; any other `Left`, a return to an active PERFORM, the SORT
+  takes as the procedure's end and goes on (machine/sort.rs:707-708, 734-735 (7af)).
 - **Report Writer.** `report::Writer` (exec/src/report.rs (int)) resolves the report model at
   compile time, but keeps a `Ref` for each CONTROL item and an AST `Expr` for each SOURCE and SUM
   operand, resolved on every GENERATE (machine/report.rs:200, 288, 297, 664 (int)). Lowering
   replaces them with places and expressions, and `Report` ops name a report or group by index.
-- **USE BEFORE REPORTING** runs through `Procedures::run` under a UseBeforeReporting frame. A GO TO
-  out of it abends IRONWORK at the report statement (machine/report.rs:382 (int)); STOP RUN or
-  GOBACK inside it ends the run (report.rs:380-381, 44-45 (int)).
+- **USE BEFORE REPORTING** runs through `Procedures::run`. `Left(GoTo(_))` abends IRONWORK at the
+  report statement; `Left(End(_))` ends the run as STOP RUN or GOBACK; `Left(Return)` and
+  `Left(Resume)` abandon the report statement, whose op returns them
+  (`use_before_reporting`, machine/report.rs:373-392 (7af)).
 
 ### 9.7 EXEC SQL
 
@@ -1214,8 +1286,8 @@ pub struct Sqlca { pub fields: Vec<(SqlcaField, PlaceId, HostType)> }
   is SQLCODE < 0, NOT FOUND is 100, and SQLWARNING is neither, and warned or > 0. The classes
   exclude each other, so only a condition whose action is GO TO gets a test, and a CONTINUE still
   stops the later ones from applying. Each target block ends in `GoTo(para)`, not a plain jump,
-  because the walker returns the branch as `Flow::GoTo` (machine/sql.rs:289), which leaves PERFORM
-  ranges by V1. The walker resolves the label by name on every statement.
+  because the walker returns the branch as `Flow::GoTo` (machine/sql.rs:289), which leaves frames
+  by the transfer rules of §8.4. The walker resolves the label by name on every statement.
 - **No database attached** abends EXEC at run time, as now (machine/sql.rs:28-30).
 
 ### 9.8 OO COBOL
@@ -1325,47 +1397,65 @@ functions! {
 
 ### 9.10 DECLARATIVES
 
-**Not lowered yet.** How a declarative gives control back is the PERFORM model's: on main at
-45bf697 an out-of-line PERFORM arms a return point at the end of its range
-(machine/perform.rs, assumption C99 `PERFORM_RETURN_POINTS`), `run_error_declarative` and
-`run_debugging` run their section as `run_paragraphs`, and a section that passes an active
-PERFORM's return point returns to that PERFORM (`Flow::Return`, `Flow::Resume`), which the statement
-that ran it passes on. The frames of §8.4 cannot express that, so a declarative that can run is
-refused until the flow rework, by one of two names:
+Declaratives lower as the paragraphs before `procedure_start`, and each procedure that can run is a
+range its trigger runs as a procedure (§9.6): in its own dispatch loop, under a Procedure frame that
+arms its last paragraph's end as a PERFORM does (§8.4), since the walker runs it by
+`run_paragraphs`. What happens when control leaves it is the trigger's.
 
-- **"DECLARATIVES: a file statement a USE AFTER EXCEPTION/ERROR procedure serves"**, on an OPEN whose
-  file or open mode has a procedure, or any other file statement whose file has one or while any
-  open mode has one (`error_declarative`). Only file statements and SORT run these procedures.
-- **"DECLARATIVES: USE FOR DEBUGGING under the DEBUG option"**, when `Table.triggers` is not empty.
+```rust
+/// In `Services`: the open modes' EXCEPTION/ERROR procedures, INPUT, OUTPUT, I-O and EXTEND in
+/// that order, as `mode_index` orders them; DEBUG-ITEM's offset and length in the slab.
+pub struct Declaratives { pub modes: [Option<RangeId>; 4], pub debug_item: Option<(u32, u32)> }
+// In `FileDesc`: `error: Option<RangeId>`, the file's own procedure.
+```
 
-Declaratives that cannot run lower as the paragraphs before `procedure_start`: debugging sections
-without the DEBUG option, and USE AFTER EXCEPTION/ERROR procedures no file statement can reach. They
-run only when a PERFORM or GO TO names them, as ordinary paragraphs.
+**USE AFTER EXCEPTION/ERROR** (`io_failure` and `run_error_declarative`, machine/file_io.rs:34-48,
+machine/declaratives.rs:109-121 (7af)). Each procedure is a `UseProcedure` range of its section.
+The file op sets FILE STATUS; a failing status that no phrase written takes runs the file's own
+procedure, else the one for the mode the file is open in or being opened in, through
+`Procedures::run` with arrival USE PROCEDURE, after checking and raising the depth at the
+statement (§8.7). `Completed` goes back into the statement, which carries on as the walker's does
+(`conclude` returns, OPEN stops, WRITE skips the page update). `Left(step)` abandons the statement
+and the op returns `step`: a GO TO out, STOP RUN or GOBACK, a return to an active PERFORM, or a
+resume after one control left, which the VM then carries out as it would the statement's own
+(§8.4). With neither procedure, the file's error path is as before: `IO-xx` when it has no FILE
+STATUS. Which procedure applies is known only at run time, from the file's open mode, so lowering
+gives the op both and refuses no file statement.
 
-What the flow rework needs to reproduce, from the walker at 45bf697:
+**USE FOR DEBUGGING** under the DEBUG runtime option, when `Table.triggers` is not empty (`exec`,
+`debug_before`, `debug_alter` and `run_debugging`, machine.rs:299-309 and
+machine/declaratives.rs:132-186 (7af)). Each debugging section that serves a paragraph is a
+`Debugging` range, and `Declaratives.debug_item` is set. Without the option the sections are only
+paragraphs, and nothing below is lowered.
 
-- **An error procedure** runs inside the failing statement, after FILE STATUS is set: the depth
-  is checked and raised (`nest`, the statement's position), the section runs with DEBUG-CONTENTS
-  arrival `USE PROCEDURE`, and the depth is lowered. Completing it goes back into the statement,
-  which carries on (`conclude` returns, OPEN stops, WRITE skips the page update). Any other ending
-  (GO TO out, STOP RUN, GOBACK, a return to an active PERFORM, a resume after one left by GO TO)
-  abandons the statement, and the statement's own `exec` hands that flow on. The file's own
-  procedure comes before its open mode's; the mode is the one it is open in, or being opened in.
-- **A debugging section** runs, unless one is running, at control reaching a paragraph it names
-  (`run_region`, before the paragraph's ALTERed GO TO, after `enter_segment`, not when a CALL
-  enters by ENTRY past the paragraph's start), and after each ALTER of one, pair by pair once every
-  pair is set, except ALTERs in the declaratives under ALL PROCEDURES. It fills DEBUG-ITEM (at the
-  slab offset of `Table.debug_item`) with spaces, then DEBUG-LINE (the paragraph's own line when the
-  run started there; the ALTER's; otherwise the line of the statement last started, which every
-  statement, each out-of-line PERFORM iteration and each section header sets), DEBUG-NAME and
-  DEBUG-CONTENTS by how control came: START PROGRAM, FALL THROUGH, PERFORM LOOP, USE PROCEDURE, a
-  SORT procedure's name, blank after a GO TO, or the ALTER's TO PROCEED TO name. The line register
-  is saved and restored around the section. An ending other than completing leaves the region the
-  paragraph was reached in, as `run_region` breaks with it.
-- **The representation** these point to: a range kind for each; the file's own procedure and one
-  per open mode in the program's file table; an op per statement that sets the line register, only
-  under the DEBUG option; an op at the entry of each paragraph a debugging section names, and one
-  after an ALTER; and a result of the procedure that carries the return-point model's transfers.
+- **Registers.** The VM keeps three per activation: the line register, which DEBUG-LINE shows; the
+  arrival register, which DEBUG-CONTENTS shows, set by how control reaches a paragraph's entry
+  (START PROGRAM at the start of the run, PERFORM LOOP by `PerformEnter`, FALL THROUGH by a
+  paragraph end, blank after a transfer, USE PROCEDURE or the SORT procedure's name by
+  `Procedures::run`); and a flag that a debugging section is running.
+- **`DebugLine(line)`** sets the line register. Lowering puts one before each statement that has a
+  position, including an ENTRY and a GO TO with no target, as `exec` does; before each
+  `PerformEnter`, since every out-of-line iteration sets it; and at the entry of each section
+  header, after any `Debug`.
+- **`Debug { range, name, next }`** begins the entry block of a paragraph a section serves, after
+  `EnterSegment` and before `AlteredGoTo`. A CALL through ENTRY and a resume enter past it. Unless
+  a section is running, it checks and raises the depth at the paragraph, fills DEBUG-ITEM with
+  spaces and then DEBUG-LINE (six digits: the paragraph's own line when the arrival is START
+  PROGRAM, else the line register), DEBUG-NAME `name` and DEBUG-CONTENTS from the arrival register,
+  each encoded in the program's code page and cut to its field (offsets 0, 7 and 56; lengths 6, 30
+  and 30), saves the line register, sets the flag, runs `range` through `Procedures::run`, then
+  clears the flag, restores the line register and lowers the depth. `Completed` goes to `next`.
+  `Left(step)` leaves the top frame with `step`, as `run_region` breaks with it: `Return` to that
+  frame completes it; otherwise the frame is left and `step` carries on from the frame below, and
+  when the top frame is Main the run ends, with `End`'s ending or else END OF PROGRAM (`run_from`,
+  machine/perform.rs:37-48 (7af)).
+- **`DebugAlter { range, name, contents }`** follows an ALTER's `Alter` ops, one for each pair
+  whose altered paragraph a section serves, in order, except for an ALTER in the declaratives under
+  ALL PROCEDURES (`Table.declarative_alters`). It runs as `Debug` does, with DEBUG-LINE the
+  ALTER's line and DEBUG-CONTENTS `contents`, the TO PROCEED TO name as written, and returns
+  `Next`, or the `Left` step, which ends the ALTER as the statement's own transfer.
+- **No elision into a served paragraph.** A GO TO to it stays `GoTo` and a paragraph end before it
+  stays `ParagraphEnd`, so the arrival register is set on every way in.
 
 ## 10. The debug table
 
@@ -1388,7 +1478,8 @@ position comes from where the walker takes it:
 | EXEC CICS, EXEC SQL, other EXEC | The EXEC block | The op's entry |
 | Invalid data in any SQL input | The first host variable (machine/sql.rs:212) | The op's entry, which holds that position |
 | VALUE initialization | The data entry (machine.rs:239-240) | `Storage.init_abend`'s `AbendText.at` |
-| GO TO out of USE BEFORE REPORTING | The report statement (report.rs:382 (int)) | The frame's `at` |
+| GO TO out of USE BEFORE REPORTING | The report statement (report.rs:382 (int)) | The op's entry |
+| Passing an armed end whose PERFORM cannot resume | The paragraph (perform.rs:159-166 (7af)) | `Paragraph.abandoned`'s `AbendText.at` |
 | Settling SQL, closing files at the end | No position (exec/src/lib.rs:165-166) | No position |
 
 - **Each op that can abend** has one entry, and a place carries its own. Lowering splits a walker
@@ -1408,12 +1499,11 @@ executors and recorded.
 | # | Behaviour | Where | IBM | LIR |
 |---|---|---|---|---|
 | 1 | A condition-name test and SET TO TRUE find the conditional variable again by its unqualified name, so one whose name is ambiguous, or FILLER, abends IRONWORK | machine.rs:1134, 1797-1803 | No such failure | The place by item index, plus an `Abend` op where the walker would fail |
-| 2 | A group sender to a numeric receiver is converted as an unsigned zoned integer; an integer sender to a group receiver becomes its digits | machine.rs:1659-1672, 1725-1736, 1761-1764 | A group move copies bytes, unconverted | `MovePlan` as §9.2 |
-| 3 | MOVE to several receivers reads the sender again for each, after earlier stores | machine.rs:315-318 | The sender's subscripts are evaluated once, before the first receiver | One `Move` per receiver |
-| 4 | COMPUTE with several receivers evaluates the expression again for each (machine.rs:321-323); ADD and SUBTRACT with several receivers read shared operands again after earlier stores | machine.rs:1503-1522 | Computed once, then stored into each | One `ArithStep` per receiver |
-| 5 | INITIALIZE gives an alphanumeric-edited item ZERO | machine.rs:1976-1980 | SPACE | The walker's values in the plan |
-| 6 | The dmax pre-pass and the float test locate receivers and operands before any store or evaluation, and `integer`, `expr_value` and the VARYING step locate operands before they evaluate them | machine.rs:1494-1506, 613-619, 517-521 | - | `ArithPlan.prepass` and `ArithStep.probe` (§7.4); the `prepass` of `IntExpr::Fixed`, `Comparand::Expr` and `Op::Step` (§7.5) |
-| 7 | EVALUATE evaluates a subject again at each comparison | machine.rs:420-442 | Once | As the walker; a subject may be cached only where evaluating it cannot abend and calls no FUNCTION |
+| 2 | MOVE to several receivers reads the sender again for each, after earlier stores | machine.rs:315-318 | The sender's subscripts are evaluated once, before the first receiver | One `Move` per receiver |
+| 3 | COMPUTE with several receivers evaluates the expression again for each (machine.rs:321-323); ADD and SUBTRACT with several receivers read shared operands again after earlier stores | machine.rs:1503-1522 | Computed once, then stored into each | One `ArithStep` per receiver |
+| 4 | INITIALIZE gives an alphanumeric-edited item ZERO | machine.rs:1976-1980 | SPACE | The walker's values in the plan |
+| 5 | The dmax pre-pass and the float test locate receivers and operands before any store or evaluation, and `integer`, `expr_value` and the VARYING step locate operands before they evaluate them | machine.rs:1494-1506, 613-619, 517-521 | - | `ArithPlan.prepass` and `ArithStep.probe` (§7.4); the `prepass` of `IntExpr::Fixed`, `Comparand::Expr` and `Op::Step` (§7.5) |
+| 6 | EVALUATE evaluates a subject again at each comparison | machine.rs:420-442 | Once | As the walker; a subject may be cached only where evaluating it cannot abend and calls no FUNCTION |
 
 ## 12. Invariants and verification
 
@@ -1469,7 +1559,7 @@ RETURN-CODE and the ending; the abend's code, message and position; every file w
 the SQL call log (verb, ordinal, text, inputs), from the scripted database of machine/sql.rs:305-336
 or a recording; and for CICS the returned task: next TRANSID, COMMAREA, TS and TD queues, and
 terminal screens. The fuzz target of B2 runs both with a step limit, and passes when they agree or
-both stop at it. The golden programs of §12.2 run in both, which exercises V1.
+both stop at it. The golden programs of §12.2 run in both, which exercises C99.
 
 ### 12.4 What lowering refuses
 
@@ -1478,18 +1568,21 @@ error, `FILE:LINE:COL: message` (syntax/src/lib.rs:44-56). Lowering refuses only
 lowered yet (`lowering: CONSTRUCT is not lowered yet`; step 2 is done when no test program meets
 this) and a program past an encoding limit (`lowering: WHAT exceeds N`, such as more than 2³² − 1
 ops; layout already refuses storage over 128 MiB, layout.rs:108-109). Everything the walker refuses
-only on reaching it lowers to an `Abend` op (decision 2).
+only on reaching it lowers to an `Abend` op (decision 2). A program with DECIMAL-POINT IS COMMA or a
+CURRENCY SIGN clause is refused whole, "DECIMAL-POINT IS COMMA / CURRENCY SIGN editing parameters",
+until the edit tables carry the decimal point and currency values that editing and de-editing read.
 
 ## 13. Open questions
 
-1. **V1.** Keep the walker's PERFORM rules as the VM's until an Enterprise COBOL run settles V1? No
-   Enterprise COBOL oracle is available now: which should settle it, and must V1 be settled before
+1. **C99.** Keep the walker's return-point rules as the VM's until an Enterprise COBOL run settles
+   C99, with the whole-program region of a SORT procedure (§8.6)? No
+   Enterprise COBOL oracle is available now: which should settle it, and must C99 be settled before
    step 5 makes the VM the default?
 2. **Nested dispatch.** The VM runs CALL, INVOKE, SORT procedures and USE BEFORE REPORTING as Rust
    recursion, bounded by `MAX_DEPTH`, as the walker does. Accept that, or require the VM to keep its
    own activation stack?
-3. **The walker's divergences from IBM** in §11 (items 1 to 5). Fix them in both executors during
-   step 2, each recorded as a change of semantics, or keep them until an oracle rules? Items 2 to 4
+3. **The walker's divergences from IBM** in §11 (items 1 to 4). Fix them in both executors during
+   step 2, each recorded as a change of semantics, or keep them until an oracle rules? Items 2 and 3
    follow rules the Language Reference states, so they need no oracle.
 4. **Abends in called programs.** Should `Abend` carry its program, so the CLI names the right file
    for an abend in a CALLed program? It changes what `ironwork run` prints today.

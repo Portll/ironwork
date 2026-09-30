@@ -3,7 +3,8 @@
 //! exactly when the program has SSRANGE.
 
 use rt::lir::{
-    Advance, CallArg, CallTarget, Chars, Comparand, Cond, DisplayItem, Expr, FileVerb, IntExpr, MethodName, Op, Operand, Place, Program, Receiver, StartKey, Terminator, UpDown,
+    Advance, CallArg, CallTarget, Chars, Comparand, Cond, DisplayItem, Expr, FileVerb, IntExpr, MethodName, Op, Operand, Place, Program, RangeKind, Receiver, StartKey, Terminator,
+    UpDown,
 };
 
 /// A class definition's data and methods are programs of their own, each checked as one.
@@ -33,6 +34,11 @@ fn verify_program(p: &Program) -> Result<(), String> {
     let expr = |id| within("expression", id, p.exprs.len());
     let cond = |id| within("condition", id, p.conds.len());
     let abend = |id| within("abend", id, p.abends.len());
+    let range = |id: u32, kind: RangeKind| match p.ranges.get(id as usize) {
+        Some(r) if r.kind == kind => Ok(()),
+        Some(r) => Err(format!("range {id} is {:?} where {kind:?} is wanted", r.kind)),
+        None => Err(format!("range {id} of {}", p.ranges.len())),
+    };
     let places = |qs: &[u32]| qs.iter().try_for_each(|&q| place(q));
     let int = |e: &IntExpr| match e {
         IntExpr::Const(_) => Ok(()),
@@ -144,6 +150,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
     for f in &p.services.files {
         symbol(f.name)?;
         symbol(f.assign)?;
+        f.error.map_or(Ok(()), |r| range(r, RangeKind::UseProcedure))?;
         f.status.map_or(Ok(()), |(q, _)| place(q))?;
         if let Some(r) = &f.relative {
             place(r.place)?;
@@ -154,6 +161,13 @@ fn verify_program(p: &Program) -> Result<(), String> {
             [&l.footing, &l.top, &l.bottom].into_iter().flatten().try_for_each(int)?;
             l.counter.map_or(Ok(()), |(q, _)| place(q))?;
         }
+    }
+    let declaratives = &p.services.declaratives;
+    declaratives.modes.iter().flatten().try_for_each(|&r| range(r, RangeKind::UseProcedure))?;
+    if let Some((offset, len)) = declaratives.debug_item
+        && offset.checked_add(len).is_none_or(|end| end > p.storage.size)
+    {
+        return Err(format!("DEBUG-ITEM at {offset} for {len} in a slab of {}", p.storage.size));
     }
     for op in &p.services.file_ops {
         let Some(f) = p.services.files.get(op.file as usize) else { return Err(format!("file {} of {}", op.file, p.services.files.len())) };
@@ -311,7 +325,12 @@ fn verify_program(p: &Program) -> Result<(), String> {
                         }
                     }
                 }
-                Op::Nest | Op::Unnest(_) | Op::DecTemp(_) | Op::EnterSegment(_) | Op::SetSegment(_) => {}
+                Op::DebugAlter { range: r, name, contents } => {
+                    range(*r, RangeKind::Debugging)?;
+                    symbol(*name)?;
+                    symbol(*contents)?;
+                }
+                Op::Nest | Op::Unnest(_) | Op::DecTemp(_) | Op::EnterSegment(_) | Op::DebugLine(_) => {}
                 other => return Err(format!("block {b}: {other:?} is outside this slice")),
             }
         }
@@ -343,9 +362,18 @@ fn verify_program(p: &Program) -> Result<(), String> {
                 targets.iter().try_for_each(|&t| within("paragraph", t, p.paragraphs.len()))?;
                 block(*otherwise)?;
             }
-            Terminator::PerformEnter { range, ret } => {
-                within("range", *range, p.ranges.len())?;
+            Terminator::PerformEnter { range: r, ret, resume } => {
+                range(*r, RangeKind::Perform)?;
                 block(*ret)?;
+                if let Some(resume) = resume {
+                    within("paragraph", resume.para, p.paragraphs.len())?;
+                    block(resume.block)?;
+                }
+            }
+            Terminator::Debug { range: r, name, next } => {
+                range(*r, RangeKind::Debugging)?;
+                symbol(*name)?;
+                block(*next)?;
             }
             Terminator::ExitProgram { next } => block(*next)?,
             Terminator::End(_) => {}
@@ -356,6 +384,10 @@ fn verify_program(p: &Program) -> Result<(), String> {
         block(para.entry)?;
         if (para.section_end as usize) < k || para.section_end as usize >= p.paragraphs.len() {
             return Err(format!("paragraph {k}: section end {}", para.section_end));
+        }
+        para.abandoned.map_or(Ok(()), abend)?;
+        if para.abandoned.is_some() != p.ranges.iter().any(|r| r.last as usize == k) {
+            return Err(format!("paragraph {k}: an abandoned return point's abend where no range ends, or none where one does"));
         }
     }
     for r in &p.ranges {

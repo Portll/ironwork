@@ -23,7 +23,7 @@ pub use file::{
     Access, Advance, Carriage, FileDesc, FileOp, FileVerb, FromMove, IndexKeys, Linage, Organization, Phrase, RecordSpan,
     RelativeKey, Spacing, StartKey, StartRel,
 };
-pub use flow::{Frame, FrameKind, Op, Range, RangeKind, Step, Terminator};
+pub use flow::{Declaratives, Frame, FrameKind, Op, Range, RangeKind, Resume, ReturnPoint, Returns, Step, Terminator};
 pub use payload::{
     CicsCommand, DisplayItem, DisplayPlan, FloatFrom, Func, FunctionPlan, Image, InitField, InitPlan,
     InvokePlan, MethodName, MovePlan, NationalFrom, NumericFrom, Receiver, ReleasePlan, ReportOp, ReturnPlan,
@@ -164,6 +164,9 @@ pub struct Paragraph {
     /// Its section's priority-number, 0 for none; 50 or more is an independent segment.
     pub priority: u8,
     pub at: DebugId,
+    /// On a paragraph that ends a range: the IRONWORK abend when control passes its end while it
+    /// holds the return point of a frame control left that cannot resume (C99).
+    pub abandoned: Option<AbendId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -200,6 +203,7 @@ pub struct Services {
     pub entries: Vec<EntryPoint>,
     /// A class definition's data and methods; None for any other program.
     pub class: Option<Box<Class>>,
+    pub declaratives: Declaratives,
 }
 
 codec_struct!(Program {
@@ -214,10 +218,10 @@ codec_struct!(Item {
     name, level, parent, offset, size, occurs, dims, kind, local, linkage, redefines, depending_on, keys, at,
 });
 codec_struct!(AbendText { code, message, at });
-codec_struct!(Paragraph { name, is_section, entry, section_end, priority, at });
+codec_struct!(Paragraph { name, is_section, entry, section_end, priority, at, abandoned });
 codec_struct!(Block { ops, end });
 codec_struct!(Plans { arith, init, display, inspect, string, unstring, search_all, function });
-codec_struct!(Services { file_ops, files, calls, sorts, releases, returns, invokes, cics, sqlca, entries, class });
+codec_struct!(Services { file_ops, files, calls, sorts, releases, returns, invokes, cics, sqlca, entries, class, declaratives });
 
 pub(crate) fn program_valid(program: &Program) -> Result<(), String> {
     sql::table_valid(&program.sql, &program.symbols)

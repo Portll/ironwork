@@ -4,6 +4,7 @@ use rt::lir::{
     ArithPlan, Base, CallArg, CallTarget, Chars, Collating, Comparand, Cond as LirCond, Const, DisplayItem, Image, IntExpr, LeService, MethodName, Mode,
     MovePlan, NationalFrom, NumericFrom, Op, Operand as LirOperand, Place, Program, Receiver, SignTest, StorePlan, Terminator,
 };
+use rt::abend::Ending;
 use rt::module::codec::decode_all;
 
 fn program(options: &str, data: &str, procedure: &str) -> String {
@@ -87,10 +88,43 @@ fn a_go_to_out_of_a_perform_range_stays_a_transfer_and_the_range_s_end_keeps_its
     assert_eq!(end_of(&p, "C"), Terminator::ParagraphEnd { next: d });
     assert_eq!(end_of(&p, "A"), Terminator::Jump(p.paragraphs[a as usize + 1].entry));
     assert_eq!(end_of(&p, "D"), Terminator::ParagraphEnd { next: d + 1 });
-    let enter = p.blocks.iter().find_map(|b| if let Terminator::PerformEnter { range, ret } = b.end { Some((range, ret)) } else { None });
-    let (range, ret) = enter.unwrap();
+    let enter = p.blocks.iter().find_map(|b| if let Terminator::PerformEnter { range, ret, resume } = b.end { Some((range, ret, resume)) } else { None });
+    let (range, ret, resume) = enter.unwrap();
     assert_eq!(range, 0);
     assert_eq!(p.blocks[ret as usize].ops, [Op::Unnest(1)]);
+    let resume = resume.unwrap();
+    assert_eq!((resume.para, &p.blocks[ret as usize].end), (paragraph(&p, "MAIN-LINE") as u32, &Terminator::Jump(resume.block)));
+    assert!(matches!(p.blocks[resume.block as usize].end, Terminator::End(Ending::StopRun)));
+    let abandoned: Vec<bool> = p.paragraphs.iter().map(|q| q.abandoned.is_some()).collect();
+    assert_eq!(abandoned, [false, false, false, true, false]);
+    let text = p.abends[p.paragraphs[c as usize].abandoned.unwrap() as usize].clone();
+    assert!(symbol(&p, text.message).starts_with("control passed the end of C, which is armed to return to a PERFORM that control left by GO TO"));
+    assert_eq!(text.at.map(|at| p.debug.positions[at as usize].line), Some(14));
+}
+
+#[test]
+fn a_perform_resumes_only_when_it_runs_once_and_is_a_statement_of_its_paragraph() {
+    let p = lowered(&program(
+        "",
+        "       01  K PIC 9 VALUE 0.\n",
+        &[
+            "       MAIN-LINE.\n",
+            &line("PERFORM P"),
+            &line("IF K = 0 PERFORM P END-IF"),
+            &line("PERFORM P 2 TIMES"),
+            &line("PERFORM P UNTIL K > 0"),
+            &line("PERFORM P."),
+            &line("STOP RUN."),
+            "       P.\n",
+            &line("ADD 1 TO K."),
+        ]
+        .concat(),
+    ));
+    let resumes: Vec<Option<lir::Resume>> = p.blocks.iter().filter_map(|b| if let Terminator::PerformEnter { resume, .. } = b.end { Some(resume) } else { None }).collect();
+    assert_eq!(resumes.len(), 5);
+    assert_eq!(resumes.iter().flatten().map(|r| r.para).collect::<Vec<_>>(), [0, 0], "{resumes:?}");
+    assert_eq!(p.ranges.len(), 1);
+    assert!(p.paragraphs[paragraph(&p, "P")].abandoned.is_some());
 }
 
 #[test]
@@ -405,6 +439,12 @@ fn statements_and_program_features_the_lowering_lacks_are_refused_by_name() {
         assert!(matches!(error, LowerError::Unsupported(n, _) if n == name), "{name}: {error}");
     };
     named(&["A.", "    EXEC CICS RETURN END-EXEC.", "    GOBACK."], "EXEC CICS");
+    let editing = "DECIMAL-POINT IS COMMA / CURRENCY SIGN editing parameters";
+    for clause in ["DECIMAL-POINT IS COMMA", "CURRENCY SIGN IS 'EUR' WITH PICTURE SYMBOL 'y'"] {
+        let special = program("", data, &source(&["A.", "    GOBACK."])).replace("       DATA DIVISION.\n", &format!("       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       SPECIAL-NAMES.\n           {clause}.\n       DATA DIVISION.\n"));
+        let error = lower(&compiled(&special)).unwrap_err();
+        assert!(matches!(error, LowerError::Unsupported(n, _) if n == editing), "{clause}: {error}");
+    }
     let inert = ["DECLARATIVES.", "S SECTION.", "    USE AFTER STANDARD ERROR PROCEDURE ON INPUT.", "P.", "    CONTINUE.", "END DECLARATIVES.", "A.", "    GOBACK."];
     let p = lowered(&program("", data, &source(&inert)));
     assert_eq!(p.procedure_start, 2);
@@ -585,12 +625,12 @@ fn go_to_depending_on_switches_and_alter_sets_the_go_to_its_paragraph_s_entry_ta
     assert_eq!((para, entry.ops.len()), (sw, 0));
     assert_eq!(p.blocks[otherwise as usize].end, Terminator::Jump(p.paragraphs[p1 as usize].entry));
     assert_eq!(end_of(&p, "P2"), Terminator::ParagraphEnd { next: p2 + 1 });
-    assert!(!ops(&p).any(|op| matches!(op, Op::EnterSegment(_) | Op::SetSegment(_))), "no ALTER names a paragraph of an independent segment");
+    assert!(!ops(&p).any(|op| matches!(op, Op::EnterSegment(_))), "no ALTER names a paragraph of an independent segment");
     assert!(p.paragraphs.iter().all(|q| q.priority == 0));
 }
 
 #[test]
-fn an_altered_paragraph_of_an_independent_segment_makes_every_entry_and_perform_return_keep_the_segment() {
+fn an_altered_paragraph_of_an_independent_segment_makes_every_entry_enter_its_segment() {
     let segment = |name: &str, priority: u8| {
         [
             format!("       {name} SECTION {priority}.\n       {name}-START.\n"),
@@ -617,11 +657,11 @@ fn an_altered_paragraph_of_an_independent_segment_makes_every_entry_and_perform_
     for sw in ["FIXED-SW", "INDEP-SW"] {
         assert!(matches!(p.blocks[p.paragraphs[paragraph(&p, sw)].entry as usize].end, Terminator::AlteredGoTo { .. }), "{sw}");
     }
-    let returns: Vec<u32> = p.blocks.iter().filter_map(|b| if let Terminator::PerformEnter { ret, .. } = b.end { Some(ret) } else { None }).collect();
-    assert_eq!(returns.len(), 2);
-    for ret in returns {
-        assert_eq!(p.blocks[ret as usize].ops, [Op::SetSegment(0)]);
-    }
+    // A completing frame puts the segment register back, and a resume sets it to its paragraph's.
+    let enters: Vec<(u32, Option<lir::Resume>)> = p.blocks.iter().filter_map(|b| if let Terminator::PerformEnter { ret, resume, .. } = b.end { Some((ret, resume)) } else { None }).collect();
+    assert_eq!(enters.len(), 2);
+    assert_eq!(enters.iter().map(|(ret, _)| p.blocks[*ret as usize].ops.clone()).collect::<Vec<_>>(), [vec![Op::Unnest(1)], vec![]]);
+    assert_eq!((enters[0].1.map(|r| r.para), enters[1].1), (Some(paragraph(&p, "MAIN") as u32), None));
 }
 
 #[test]
@@ -924,33 +964,127 @@ fn write_from_advancing_on_a_linage_file_selects_five_arms() {
 }
 
 #[test]
-fn declaratives_that_can_run_are_refused_and_ones_that_cannot_lower_as_paragraphs() {
-    let source = |use_on: &str, open: &str| {
-        with_files(
-            "",
-            &["    SELECT IN-F ASSIGN TO INDD.", "    SELECT OUT-F ASSIGN TO OUTDD."],
-            &["FD  IN-F.", "01  IN-REC PIC X(3).", "FD  OUT-F.", "01  OUT-REC PIC X(3)."],
-            "",
-            &["DECLARATIVES.", "E SECTION.", &format!("    USE AFTER ERROR PROCEDURE ON {use_on}."), "E1.", "    DISPLAY 'E'.", "END DECLARATIVES.", "M SECTION.", "M1.", &format!("    OPEN {open}"), "    GOBACK."],
-        )
-    };
-    let named = "DECLARATIVES: a file statement a USE AFTER EXCEPTION/ERROR procedure serves";
-    assert!(matches!(lower(&compiled(&source("IN-F", "INPUT IN-F"))), Err(LowerError::Unsupported(n, _)) if n == named));
-    assert!(matches!(lower(&compiled(&source("INPUT", "INPUT OUT-F"))), Err(LowerError::Unsupported(n, _)) if n == named));
-    let written = source("OUT-F", "OUTPUT IN-F").replace("    GOBACK.", "    WRITE OUT-REC\n           GOBACK.");
-    assert!(matches!(lower(&compiled(&written)), Err(LowerError::Unsupported(n, _)) if n == named));
-    let p = lowered(&source("INPUT", "OUTPUT OUT-F"));
-    assert_eq!(p.procedure_start, paragraph(&p, "M") as u32);
-    let debugging = [
+fn an_exception_procedure_is_a_range_each_file_or_open_mode_names_and_a_perform_it_leaves_can_resume() {
+    let source = with_files(
+        "",
+        &["    SELECT IN-F ASSIGN TO INDD.", "    SELECT OUT-F ASSIGN TO OUTDD."],
+        &["FD  IN-F.", "01  IN-REC PIC X(3).", "FD  OUT-F.", "01  OUT-REC PIC X(3)."],
+        "       01  K PIC 9 VALUE 0.\n",
+        &[
+            "DECLARATIVES.",
+            "OUT-ERR SECTION.",
+            "    USE AFTER EXCEPTION PROCEDURE OUT-F.",
+            "E1.",
+            "    DISPLAY 'E1'",
+            "    IF K = 0 GO TO M2.",
+            "E2.",
+            "    DISPLAY 'E2'.",
+            "IN-ERR SECTION.",
+            "    USE AFTER ERROR PROCEDURE ON INPUT.",
+            "I1.",
+            "    DISPLAY 'I1'.",
+            "END DECLARATIVES.",
+            "M SECTION.",
+            "M1.",
+            "    PERFORM E1",
+            "    DISPLAY 'BACK'",
+            "    GOBACK.",
+            "M2.",
+            "    MOVE 1 TO K",
+            "    OPEN INPUT OUT-F IN-F",
+            "    WRITE OUT-REC",
+            "    GOBACK.",
+        ],
+    );
+    let p = lowered(&source);
+    let range = |first: &str, last: &str, kind| lir::Range { first: paragraph(&p, first) as u32, last: paragraph(&p, last) as u32, kind };
+    let out_err = p.services.files[1].error.unwrap();
+    assert_eq!((p.services.files[0].error, p.ranges[out_err as usize]), (None, range("OUT-ERR", "E2", lir::RangeKind::UseProcedure)));
+    let input = p.services.declaratives.modes[0].unwrap();
+    assert_eq!(p.ranges[input as usize], range("IN-ERR", "I1", lir::RangeKind::UseProcedure));
+    assert_eq!((&p.services.declaratives.modes[1..], p.services.declaratives.debug_item), (&[None; 3][..], None));
+    assert_eq!(file_ops(&p).len(), 3);
+    let enter = p.blocks.iter().find_map(|b| if let Terminator::PerformEnter { range, resume, .. } = b.end { Some((range, resume)) } else { None });
+    let (performed, resume) = enter.unwrap();
+    assert_eq!(p.ranges[performed as usize], range("E1", "E1", lir::RangeKind::Perform));
+    assert_eq!(resume.map(|r| r.para), Some(paragraph(&p, "M1") as u32));
+    for (name, armed) in [("E1", true), ("E2", true), ("I1", true), ("M1", false), ("OUT-ERR", false)] {
+        assert_eq!(p.paragraphs[paragraph(&p, name)].abandoned.is_some(), armed, "{name}");
+    }
+    assert_eq!(end_of(&p, "E2"), Terminator::ParagraphEnd { next: paragraph(&p, "IN-ERR") as u32 });
+    assert!(!p.blocks.iter().any(|b| matches!(b.end, Terminator::Debug { .. })) && !ops(&p).any(|op| matches!(op, Op::DebugLine(_))));
+}
+
+/// A program WITH DEBUGGING MODE whose section DBG serves paragraphs SW and P, which the main line
+/// reaches by GO TO, an ALTER and fall-through.
+fn debugging_program() -> String {
+    [
         "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n",
-        "       SOURCE-COMPUTER. IBM-370 WITH DEBUGGING MODE.\n       PROCEDURE DIVISION.\n       DECLARATIVES.\n       D SECTION.\n",
-        "           USE FOR DEBUGGING ON M.\n       D1.\n           DISPLAY DEBUG-NAME.\n       END DECLARATIVES.\n",
-        "       M SECTION.\n       M1.\n           GOBACK.\n",
+        "       SOURCE-COMPUTER. IBM-370 WITH DEBUGGING MODE.\n       PROCEDURE DIVISION.\n       DECLARATIVES.\n       DBG SECTION.\n",
+        "           USE FOR DEBUGGING ON P SW.\n       D1.\n           DISPLAY DEBUG-NAME DEBUG-CONTENTS.\n       END DECLARATIVES.\n",
+        "       M SECTION.\n       M1.\n",
+        &line("ALTER SW TO PROCEED TO P"),
+        &line("GO TO SW."),
+        "       SW.\n",
+        &line("GO TO Q."),
+        "       Q.\n",
+        &line("DISPLAY 'Q'."),
+        "       P.\n",
+        &line("GO TO R."),
+        "       R.\n",
+        &line("GOBACK."),
     ]
-    .concat();
-    lowered(&debugging);
-    let refused = lower(&compiled_with(&debugging, &["-debug"])).unwrap_err();
-    assert!(matches!(refused, LowerError::Unsupported("DECLARATIVES: USE FOR DEBUGGING under the DEBUG option", _)), "{refused}");
+    .concat()
+}
+
+#[test]
+fn under_the_debug_option_a_debugging_section_runs_at_its_paragraph_s_entry_and_after_an_alter_of_it() {
+    let source = debugging_program();
+    let off = lowered(&source);
+    assert!(!off.blocks.iter().any(|b| matches!(b.end, Terminator::Debug { .. })) && !ops(&off).any(|op| matches!(op, Op::DebugLine(_) | Op::DebugAlter { .. })));
+    let p = lower(&compiled_with(&source, &["-debug"])).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(round_trip(&p), p);
+    let (dbg, d1, pp) = (paragraph(&p, "DBG") as u32, paragraph(&p, "D1") as u32, paragraph(&p, "P") as u32);
+    let section = p.ranges.iter().position(|r| *r == lir::Range { first: dbg, last: d1, kind: lir::RangeKind::Debugging }).unwrap() as u32;
+    let entry = &p.blocks[p.paragraphs[pp as usize].entry as usize];
+    let Terminator::Debug { range, name, next } = entry.end else { panic!("{entry:?}") };
+    assert_eq!((range, symbol(&p, name), entry.ops.len()), (section, "P", 0));
+    assert!(matches!(p.blocks[next as usize].ops[..], [Op::DebugLine(22), ..]));
+    assert_eq!(p.blocks.iter().filter(|b| matches!(b.end, Terminator::Debug { .. })).count(), 2);
+    assert_eq!(p.services.declaratives.debug_item.map(|(_, len)| len), Some(86));
+    let alter = ops(&p).find_map(|op| if let Op::DebugAlter { range, name, contents } = op { Some((*range, *name, *contents)) } else { None }).unwrap();
+    assert_eq!((alter.0, symbol(&p, alter.1), symbol(&p, alter.2)), (section, "SW", "P"));
+    // How control came to SW and P is read there, so the GO TO and the fall-through into them stay transfers.
+    assert_eq!(end_of(&p, "M1"), Terminator::GoTo(paragraph(&p, "SW") as u32));
+    assert_eq!(end_of(&p, "Q"), Terminator::ParagraphEnd { next: pp });
+    let m = &p.blocks[p.paragraphs[paragraph(&p, "M")].entry as usize];
+    assert_eq!(m.ops, [Op::DebugLine(13)]);
+    let mut lines: Vec<u32> = ops(&p).filter_map(|op| if let Op::DebugLine(l) = op { Some(*l) } else { None }).collect();
+    lines.sort_unstable();
+    assert_eq!(lines, [8, 11, 13, 15, 16, 18, 20, 22, 24], "each section header and statement");
+}
+
+#[test]
+fn a_group_move_copies_bytes_both_ways_as_the_walker_does() {
+    let data = concat!(
+        "       01  G.\n           05 G1 PIC X(2).\n           05 G2 PIC X(2).\n       01  Z PIC 9(4).\n       01  P PIC S9(5) COMP-3.\n",
+        "       01  E PIC ZZ9.99.\n       01  AE PIC XXBXX.\n       01  F COMP-2.\n       01  PTR POINTER.\n       01  A PIC X(4).\n",
+    );
+    let body = ["MOVE G TO Z", "MOVE G TO P", "MOVE G TO E", "MOVE G TO AE", "MOVE G TO F", "MOVE Z TO G", "MOVE F TO G", "MOVE 12 TO G", "MOVE G TO A", "SET Z TO G", "GOBACK."].map(line).concat();
+    let plans = moves(&lowered(&program("", data, &body)));
+    let copied = MovePlan::Alnum { image: Image::Bytes, justified: false };
+    let stored = MovePlan::Alnum { image: Image::Stored, justified: false };
+    assert_eq!(plans, [copied, copied, copied, copied, copied, stored, stored, MovePlan::Alnum { image: Image::Digits { digits: 2 }, justified: false }, copied, copied]);
+    let file = with_files(
+        "",
+        &["    SELECT OUT-F ASSIGN TO OUTDD."],
+        &["FD  OUT-F.", "01  OUT-REC PIC 9(3)."],
+        "       01  G.\n           05 G1 PIC X(3).\n",
+        &["M.", "    OPEN OUTPUT OUT-F", "    WRITE OUT-REC FROM G", "    GOBACK."],
+    );
+    let p = lowered(&file);
+    let lir::FileVerb::Write { from: Some(from), .. } = file_ops(&p)[1].0.verb else { panic!() };
+    assert_eq!(from.plan, copied);
 }
 
 #[test]

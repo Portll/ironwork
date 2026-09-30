@@ -26,6 +26,8 @@ pub enum Image {
     All,
     Figurative,
     Digits { digits: u32 },
+    /// A numeric, floating-point or pointer sender's own bytes as stored, once it has been read.
+    Stored,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -242,7 +244,7 @@ codec_enum!(MovePlan {
     Index = 6,
     Refused(abend) = 7,
 });
-codec_enum!(Image { Bytes = 0, All = 1, Figurative = 2, Digits { digits } = 3 });
+codec_enum!(Image { Bytes = 0, All = 1, Figurative = 2, Digits { digits } = 3, Stored = 4 });
 codec_enum!(NationalFrom { Units = 0, Decoded = 1, Figurative = 2 });
 codec_enum!(NumericFrom {
     Value = 0,

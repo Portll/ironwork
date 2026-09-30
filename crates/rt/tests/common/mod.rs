@@ -1,6 +1,6 @@
 //! The sample program the LIR and load-module tests share.
 
-use ironwork_rt::abend::Ending;
+use ironwork_rt::abend::{AbendCode, Ending};
 use ironwork_rt::lir::*;
 use ironwork_rt::storage::Kind;
 use ironwork_rt::vocab::{BinOp, Pos};
@@ -14,11 +14,12 @@ fn fixed(value: i128, int: u32, dec: u32) -> Fixed {
 const WS_I: PlaceId = 0;
 const WS_AMT_I: PlaceId = 1;
 const WS_TOTAL: PlaceId = 2;
+const ABANDONED: &str = "control passed the end of ADD-PARA, which is armed to return to a PERFORM that control left by GO TO; ironwork returns there only to a PERFORM that runs once and is not inside another statement";
 
 /// MAIN sets WS-I to 1 and performs ADD-PARA three times, stepping WS-I; ADD-PARA does
 /// `ADD WS-AMT (WS-I) TO WS-TOTAL ROUNDED ON SIZE ERROR STOP RUN`.
 pub fn payroll() -> Program {
-    let symbols = ["PAYROLL", "PAYROLL.cbl", "MAIN", "ADD-PARA", "WS-TABLE", "WS-AMT", "WS-I", "WS-TOTAL"];
+    let symbols = ["PAYROLL", "PAYROLL.cbl", "MAIN", "ADD-PARA", "WS-TABLE", "WS-AMT", "WS-I", "WS-TOTAL", ABANDONED];
     let binary = Kind::Binary { digits: 4, scale: 0, signed: false, native: false };
     let packed = |digits| Kind::Packed { digits, scale: 2, signed: true };
     let item = |name, level, parent, offset, size, kind, at| Item {
@@ -69,7 +70,7 @@ pub fn payroll() -> Program {
             end: Terminator::Jump(1),
         },
         Block { ops: vec![], end: Terminator::Branch { cond: 0, then: 2, otherwise: 4 } },
-        Block { ops: vec![Op::DecTemp(0)], end: Terminator::PerformEnter { range: 0, ret: 3 } },
+        Block { ops: vec![Op::DecTemp(0)], end: Terminator::PerformEnter { range: 0, ret: 3, resume: None } },
         Block { ops: vec![Op::Step { var: WS_I, by: 3, plan: step_i, prepass: vec![] }], end: Terminator::Jump(1) },
         Block { ops: vec![Op::Unnest(1)], end: Terminator::End(Ending::StopRun) },
         Block { ops: vec![Op::Arith(0)], end: Terminator::Select(vec![6, 7]) },
@@ -122,8 +123,8 @@ pub fn payroll() -> Program {
         storage,
         items,
         paragraphs: vec![
-            Paragraph { name: 2, is_section: false, entry: 0, section_end: 1, priority: 0, at: 4 },
-            Paragraph { name: 3, is_section: false, entry: 5, section_end: 1, priority: 0, at: 7 },
+            Paragraph { name: 2, is_section: false, entry: 0, section_end: 1, priority: 0, at: 4, abandoned: None },
+            Paragraph { name: 3, is_section: false, entry: 5, section_end: 1, priority: 0, at: 7, abandoned: Some(0) },
         ],
         procedure_start: 0,
         ranges: vec![Range { first: 1, last: 1, kind: RangeKind::Perform }],
@@ -140,7 +141,7 @@ pub fn payroll() -> Program {
         plans: Plans { arith: vec![add], ..Plans::default() },
         services: Services::default(),
         sql: vec![],
-        abends: vec![],
+        abends: vec![AbendText { code: AbendCode::Ironwork, message: 8, at: Some(7) }],
         edits: vec![],
         symbols: symbols.map(String::from).to_vec(),
         debug,

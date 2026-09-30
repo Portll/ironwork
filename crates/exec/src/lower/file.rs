@@ -7,7 +7,6 @@ use super::{Lower, R, is_static, push, unsupported};
 use crate::layout::Resolved;
 use crate::printer::{self, Space};
 use rt::files::Format;
-use rt::vocab::OpenMode;
 use rt::lir::{self, Advance, FileDesc, FileOp, FileVerb, FromMove, IndexKeys, Op, Phrase, RecordSpan, RelativeKey, Spacing, StartKey, StartRel, Terminator};
 use syntax::Pos;
 use syntax::ast::{Access, Advancing, Expr, FileDecl, Handlers, LinageValue, Operand, Organization, Ref, RelOp, Stmt};
@@ -105,6 +104,7 @@ impl Lower<'_> {
             linage,
             carriage: self.c.carriage.get(k).copied().flatten().map(|c| lir::Carriage { machine: c.machine, reserved: c.reserved }),
             sort: f.sort,
+            error: self.c.declaratives.files.get(k).copied().flatten().map(|s| self.span_range(s, lir::RangeKind::UseProcedure)).transpose()?,
         })
     }
 
@@ -143,29 +143,12 @@ impl Lower<'_> {
         }
     }
 
-    /// The file a statement names, refused while a USE AFTER EXCEPTION/ERROR procedure can run
-    /// for it.
-    fn file_index(&self, name: &str, mode: Option<OpenMode>, pos: Pos) -> R<u16> {
-        let Some(Ok(k)) = self.program.files.iter().position(|f| f.name == name).map(u16::try_from) else {
-            return unsupported("a file statement naming no file", pos);
-        };
-        self.unserved(k, mode, pos)?;
-        Ok(k)
-    }
-
-    /// Refuses a statement on file k that a USE AFTER EXCEPTION/ERROR procedure can serve: the
-    /// file's own, or the one for `mode`, the mode OPEN opens it in, or for any mode.
-    fn unserved(&self, k: u16, mode: Option<OpenMode>, pos: Pos) -> R<()> {
-        let table = &self.c.declaratives;
-        let modes = match mode {
-            Some(m) => table.modes[crate::declaratives::mode_index(m)].is_some(),
-            None => table.modes.iter().any(Option::is_some),
-        };
-        if modes || table.files.get(k as usize).is_some_and(Option::is_some) {
-            // How the procedure returns control depends on the PERFORM model (lir.md §9.10).
-            return unsupported("DECLARATIVES: a file statement a USE AFTER EXCEPTION/ERROR procedure serves", pos);
+    /// The file a statement names.
+    fn file_index(&self, name: &str, pos: Pos) -> R<u16> {
+        match self.program.files.iter().position(|f| f.name == name).map(u16::try_from) {
+            Some(Ok(k)) => Ok(k),
+            _ => unsupported("a file statement naming no file", pos),
         }
-        Ok(())
     }
 
     /// The file a record belongs to, the record as WRITE or REWRITE writes it, and FROM's move
@@ -176,7 +159,6 @@ impl Lower<'_> {
             _ => None,
         };
         let Some(file) = file else { return unsupported("a WRITE or REWRITE of an item that is not a file's record", pos) };
-        self.unserved(file, None, pos)?;
         let from = match from {
             None => None,
             Some(op) => {
@@ -196,18 +178,18 @@ impl Lower<'_> {
         match s {
             Stmt::Open { files, .. } => {
                 for (mode, name) in files {
-                    let file = self.file_index(name, Some(*mode), pos)?;
+                    let file = self.file_index(name, pos)?;
                     self.file_op(FileOp { file, verb: FileVerb::Open(*mode), phrase: None, end_of_page: None }, [None, None, None, None], pos, ctx)?;
                 }
             }
             Stmt::Close { files, .. } => {
                 for name in files {
-                    let file = self.file_index(name, None, pos)?;
+                    let file = self.file_index(name, pos)?;
                     self.file_op(FileOp { file, verb: FileVerb::Close, phrase: None, end_of_page: None }, [None, None, None, None], pos, ctx)?;
                 }
             }
             Stmt::Read(r) => {
-                let file = self.file_index(&r.file, None, pos)?;
+                let file = self.file_index(&r.file, pos)?;
                 let decl = &program.files[file as usize];
                 // Only a file held in memory reads by key; any other takes AT END (`read_stream`).
                 let sequential = decl.access == Access::Sequential
@@ -248,11 +230,11 @@ impl Lower<'_> {
                 self.file_op(op, bodies(invalid, None), pos, ctx)?;
             }
             Stmt::Delete { file, invalid, .. } => {
-                let file = self.file_index(file, None, pos)?;
+                let file = self.file_index(file, pos)?;
                 self.file_op(FileOp { file, verb: FileVerb::Delete, phrase: phrase(invalid), end_of_page: None }, bodies(invalid, None), pos, ctx)?;
             }
             Stmt::Start { file, key, invalid, .. } => {
-                let file = self.file_index(file, None, pos)?;
+                let file = self.file_index(file, pos)?;
                 let rel = match key.as_ref().map(|(op, _)| *op) {
                     None | Some(RelOp::Eq) => StartRel::Equal,
                     Some(RelOp::Gt) => StartRel::Greater,

@@ -2,7 +2,7 @@
 //! statements stay `rt::files` calls; these name the places, plans and procedures the walker finds
 //! by name on each execution.
 
-use super::{IntExpr, MovePlan, Operand, PlaceId, StorePlan, SymId};
+use super::{IntExpr, MovePlan, Operand, PlaceId, RangeId, StorePlan, SymId};
 use crate::files::Format;
 use crate::vocab::OpenMode;
 use crate::{codec_enum, codec_struct};
@@ -27,6 +27,8 @@ pub struct FileDesc {
     pub carriage: Option<Carriage>,
     /// Described by SD.
     pub sort: bool,
+    /// Its own EXCEPTION/ERROR procedure, which comes before one for its open mode.
+    pub error: Option<RangeId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -180,7 +182,7 @@ pub enum StartKey {
 }
 
 codec_struct!(FileDesc {
-    name, assign, organization, access, optional, format, status, keys, relative, linage, carriage, sort,
+    name, assign, organization, access, optional, format, status, keys, relative, linage, carriage, sort, error,
 } check file_valid);
 codec_enum!(Organization { Sequential = 0, LineSequential = 1, Indexed = 2, Relative = 3 });
 codec_enum!(Access { Sequential = 0, Random = 1, Dynamic = 2 });

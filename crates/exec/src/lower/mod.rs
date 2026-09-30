@@ -4,7 +4,7 @@
 //! Lowered so far: storage, places, expressions and conditions, the arithmetic verbs, MOVE, IF,
 //! EVALUATE, DISPLAY, INITIALIZE, PERFORM, GO TO, GO TO DEPENDING ON, ALTER, EXIT, STOP RUN, GOBACK,
 //! CALL, CANCEL, ENTRY, INVOKE, SET, the file statements, intrinsic functions, independent
-//! segments and class definitions, and DECLARATIVES that never run. Anything else is
+//! segments, class definitions, USE AFTER EXCEPTION/ERROR and USE FOR DEBUGGING. Anything else is
 //! [`LowerError::Unsupported`], naming the construct.
 
 mod call;
@@ -98,6 +98,7 @@ pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
     let storage = l.storage()?;
     let items = l.items()?;
     l.services.files = l.files()?;
+    l.services.declaratives = l.declaratives()?;
     let paragraphs = l.procedure()?;
     l.services.entries = l.entry_points()?;
     l.services.class = l.class_definition()?;
@@ -160,7 +161,7 @@ struct Lower<'c> {
     plans: lir::Plans,
     services: lir::Services,
     ranges: Vec<lir::Range>,
-    range_ids: HashMap<(u32, u32), RangeId>,
+    range_ids: HashMap<(u32, u32, lir::RangeKind), RangeId>,
     blocks: flow::Blocks,
     temps: u16,
     /// Each paragraph's entry block.
@@ -174,6 +175,8 @@ struct Lower<'c> {
     /// Whether an ALTER names a paragraph of an independent segment, which makes the segment
     /// control reaches observable.
     segments: bool,
+    /// Under the DEBUG option, whether a debugging section serves a paragraph.
+    debugging: bool,
 }
 
 impl<'c> Lower<'c> {
@@ -207,6 +210,7 @@ impl<'c> Lower<'c> {
             entry_blocks: HashMap::new(),
             altered: BTreeSet::new(),
             segments: false,
+            debugging: !c.declaratives.triggers.is_empty(),
         }
     }
 
@@ -222,9 +226,9 @@ impl<'c> Lower<'c> {
         if let Some(block) = program.exec_declarations.first() {
             return unsupported("EXEC SQL", block.pos);
         }
-        // How a declarative returns control depends on the PERFORM model (lir.md §9.10).
-        if let Some(u) = program.declaratives.debugging.first().filter(|_| !self.c.declaratives.triggers.is_empty()) {
-            return unsupported("DECLARATIVES: USE FOR DEBUGGING under the DEBUG option", u.pos);
+        // Editing and de-editing read them, and the LIR's edit tables do not carry them yet.
+        if program.environment.decimal_point_comma || !program.environment.currency.is_empty() {
+            return unsupported("DECIMAL-POINT IS COMMA / CURRENCY SIGN editing parameters", Pos::default());
         }
         Ok(())
     }

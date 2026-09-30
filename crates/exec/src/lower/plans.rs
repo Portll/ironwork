@@ -39,9 +39,18 @@ impl Lower<'_> {
     }
 
     /// `Machine::assign` of what `from` reads as into a receiver of kind `to`, whose layout item is
-    /// `item`.
+    /// `item`. A group move converts nothing: a group sender's bytes go to a numeric, floating-point
+    /// or edited receiver as they are, and a group receiver takes a numeric, floating-point or
+    /// pointer item's bytes as stored.
     pub(super) fn move_plan(&mut self, from: &Side, to: Kind, item: Option<usize>) -> R<MovePlan> {
         let refused = |lower: &mut Self, message: &str| lower.ironwork(message).map(MovePlan::Refused);
+        let unconverted = matches!(to, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Float(_) | Kind::NumericEdited { .. } | Kind::AlnumEdited { .. });
+        if from.src == Some(Kind::Group) && unconverted {
+            return Ok(MovePlan::Alnum { image: Image::Bytes, justified: false });
+        }
+        if to == Kind::Group && from.src.is_some() && matches!(from.value, Value::Num(_) | Value::Float | Value::Address) {
+            return Ok(MovePlan::Alnum { image: Image::Stored, justified: false });
+        }
         if from.value == Value::Num(None) && matches!(to, Kind::Group | Kind::Alnum { .. } | Kind::AlnumEdited { .. }) {
             return unsupported("a FUNCTION result whose digits are known only when it runs, moved to an alphanumeric item", syntax::Pos::default());
         }
