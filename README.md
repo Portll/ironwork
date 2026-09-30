@@ -197,9 +197,10 @@ The subset the interpreter runs today:
   USE FOR DEBUGGING on procedures or ALL PROCEDURES, with DEBUG-ITEM, and debugging lines (D in
   column 7), under SOURCE-COMPUTER ... WITH DEBUGGING MODE; without it both are comments. The
   debugging sections run only under `-debug`, standing for the Language Environment option DEBUG,
-  as on z/OS, where NODEBUG is the default. USE GLOBAL serves its own program only, so GLOBAL for
-  an open mode, or before reporting a group of a contained program, is refused in a program that
-  contains others. Assumptions C60 to C69 hold what the manuals leave open.
+  as on z/OS, where NODEBUG is the default; a section runs before each procedure it serves and
+  after each ALTER of one. USE GLOBAL serves its own program only, so GLOBAL for an open mode, or
+  before reporting a group of a contained program, is refused in a program that contains others.
+  Assumptions C60 to C69 and C98 hold what the manuals leave open.
 - **Sort and merge:** SD files; SORT and MERGE on ascending and descending keys anywhere in the
   record (alphanumeric keys by the COLLATING SEQUENCE phrase, else for a file by the program
   collating sequence, else in EBCDIC order; zoned and packed keys as DFSORT compares them; other

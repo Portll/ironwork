@@ -195,6 +195,7 @@ pub const DECIMAL_COMMA_SEPARATOR: &str = "C94";
 pub const DECIMAL_COMMA_DISPLAY_LITERAL: &str = "C95";
 pub const ARITH_DIGIT_LIMITS: &str = "C96";
 pub const MULTIPLE_RESULTS: &str = "C97";
+pub const ALTER_DEBUGGING: &str = "C98";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1190,6 +1191,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: MULTIPLE_RESULTS,
         claim: "An arithmetic statement with several receivers computes what they share once, before any is stored, and each receiver in turn then takes it or combines it with its own current value, its subscripts evaluated then (Language Reference SC27-8713-03, p. 298). For ADD, SUBTRACT, MULTIPLY and DIVIDE without GIVING the shared part is the operands other than the receiver; for COMPUTE and the GIVING forms it is the whole expression, so a receiver that COMPUTE names twice gets the same result twice",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ALTER_DEBUGGING,
+        claim: "Once an ALTER has run, the debugging section that serves each paragraph it alters runs, once for each TO [PROCEED TO] phrase in the order written, with DEBUG-LINE the ALTER, DEBUG-NAME the altered paragraph as DEBUG_NAME_FORM gives it, and DEBUG-CONTENTS the procedure-name after TO PROCEED TO, a qualifier after OF (Language Reference SC27-8713-03, pp. 19-20, 716). A procedure named only after TO PROCEED TO gets no debugging section from the ALTER: p. 716 says an ALTER 'referring to the named procedure', and Table 2 on p. 20 has an ALTER row for procedure-name-1 alone, as CCVS85 DB105A expects under ALL PROCEDURES. Under ALL PROCEDURES an ALTER in the declaratives runs none, as p. 716 says; there an ALTER of a paragraph that a USE FOR DEBUGGING names still runs its section, as p. 716 makes no exception for it",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

@@ -470,6 +470,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     altered.resize(paragraphs, None);
                     altered[at] = Some(to);
                 }
+                if let Some(flow) = self.debug_alter(pairs, *pos)? {
+                    return Ok(flow);
+                }
             }
             Stmt::Goback { .. } => return Ok(Flow::End(Ending::Goback)),
             Stmt::ExitProgram { .. } if self.main => {}

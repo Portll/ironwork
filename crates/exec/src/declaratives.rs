@@ -48,6 +48,8 @@ pub struct Table {
     pub(crate) triggers: Vec<Option<(Span, String)>>,
     /// DEBUG-ITEM's item in the layout.
     pub(crate) debug_item: Option<usize>,
+    /// Under ALL PROCEDURES, where each ALTER in the declaratives is: those run no debugging section.
+    pub(crate) declarative_alters: Vec<Pos>,
 }
 
 pub(crate) fn mode_index(mode: OpenMode) -> usize {
@@ -130,19 +132,41 @@ pub(crate) fn resolve(program: &Program, layout: &Layout, options: &Options, err
                 Err(m) => errors.push(error(&m)),
                 Ok((i, _)) if in_debugging(i) => errors.push(error("the procedure is in a debugging section")),
                 Ok((i, _)) if triggers[i].is_some() => errors.push(error("the procedure is named in another USE FOR DEBUGGING, or twice in this one")),
-                Ok((i, _)) => triggers[i] = Some((section, name.section.as_ref().map_or_else(|| name.name.clone(), |s| format!("{} OF {s}", name.name)))),
+                Ok((i, _)) => triggers[i] = Some((section, debug_name(name))),
             }
         }
     }
     references(program, &debugging, errors);
     if options.debug && triggers.iter().any(Option::is_some) {
         table.triggers = triggers;
+        if every > 0 {
+            for p in program.paragraphs.iter().take(program.report_writer.procedure_start) {
+                alters(&p.statements, &mut table.declarative_alters);
+            }
+        }
     }
     table.debug_item = match layout.resolve("DEBUG-ITEM", &[], Pos::default()) {
         Ok(Resolved::Item(i)) if !uses.is_empty() => Some(i),
         _ => None,
     };
     table
+}
+
+/// A procedure-name as DEBUG-NAME and DEBUG-CONTENTS give it, a qualifier after OF (p. 19).
+pub(crate) fn debug_name(name: &ProcName) -> String {
+    name.section.as_ref().map_or_else(|| name.name.clone(), |s| format!("{} OF {s}", name.name))
+}
+
+/// Where each ALTER in `stmts` is.
+fn alters(stmts: &[Stmt], out: &mut Vec<Pos>) {
+    for s in stmts {
+        if let Stmt::Alter { pos, .. } = s {
+            out.push(*pos);
+        }
+        for body in crate::oo::bodies(s) {
+            alters(body, out);
+        }
+    }
 }
 
 /// Each PERFORM, GO TO, ALTER and SORT or MERGE procedure in `stmts`: the procedures it names,

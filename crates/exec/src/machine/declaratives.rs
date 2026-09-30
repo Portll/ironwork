@@ -1,9 +1,9 @@
 //! Declaratives at run time: a file's EXCEPTION/ERROR procedure after its statement fails, and a
-//! debugging section before each procedure it serves, with DEBUG-ITEM saying how control came
-//! there (Language Reference SC27-8713-03, pp. 19-20, 714-716 and 771-772).
+//! debugging section before each procedure it serves and after each ALTER of one, with DEBUG-ITEM
+//! saying how control came there (Language Reference SC27-8713-03, pp. 19-20, 714-716 and 771-772).
 
 use super::*;
-use crate::declaratives::{DEBUG_CONTENTS, DEBUG_LINE, DEBUG_NAME, Span, mode_index};
+use crate::declaratives::{DEBUG_CONTENTS, DEBUG_LINE, DEBUG_NAME, Span, debug_name, mode_index};
 use syntax::report::ReportStmt;
 
 /// How control comes to a procedure, as DEBUG-CONTENTS reports it (p. 20).
@@ -131,17 +131,41 @@ impl<'p> Machine<'p, '_, '_> {
     /// or GOBACK.
     pub(super) fn debug_before(&mut self, i: usize, arrival: Arrival) -> R<Option<Flow>> {
         let table = self.declaratives;
-        let Some(Some(((first, last), name))) = table.triggers.get(i) else { return Ok(None) };
+        let Some(Some((section, name))) = table.triggers.get(i) else { return Ok(None) };
+        let pos = self.program.paragraphs[i].pos;
+        let line = if arrival == Arrival::Start { pos } else { self.uses.line };
+        self.run_debugging(*section, name, line, arrival.contents(), pos)
+    }
+
+    /// After the ALTER at `pos`, the debugging section of each paragraph it altered, pair by pair,
+    /// with DEBUG-CONTENTS the TO PROCEED TO name ([`numeric::assumptions::ALTER_DEBUGGING`]).
+    pub(super) fn debug_alter(&mut self, pairs: &[(ProcName, ProcName)], pos: Pos) -> R<Option<Flow>> {
+        let table = self.declaratives;
+        if table.triggers.is_empty() || table.declarative_alters.contains(&pos) {
+            return Ok(None);
+        }
+        for (paragraph, target) in pairs {
+            let at = self.procedure(paragraph, pos)?.0;
+            if let Some(Some((section, name))) = table.triggers.get(at)
+                && let Some(flow) = self.run_debugging(*section, name, pos, &debug_name(target), pos)?
+            {
+                return Ok(Some(flow));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Runs debugging section `first..=last` with DEBUG-ITEM holding `line`, `name` and `contents`,
+    /// unless a debugging section is running already.
+    fn run_debugging(&mut self, (first, last): Span, name: &str, line: Pos, contents: &str, pos: Pos) -> R<Option<Flow>> {
         if self.uses.debugging {
             return Ok(None);
         }
-        let pos = self.program.paragraphs[i].pos;
-        let line = if arrival == Arrival::Start { pos } else { self.uses.line };
-        if let Some(item) = table.debug_item {
+        if let Some(item) = self.declaratives.debug_item {
             let (at, size) = (self.base + self.layout.items[item].offset as usize, self.layout.items[item].size as usize);
             self.unit.mem[at..at + size].fill(ebcdic::SPACE);
-            for ((offset, len), text) in [(DEBUG_LINE, format!("{:06}", line.line)), (DEBUG_NAME, name.clone()), (DEBUG_CONTENTS, arrival.contents().to_owned())] {
-                let bytes = self.page.encode(&text).map_err(|e| Abend::ironwork(e.to_string(), pos))?;
+            for ((offset, len), text) in [(DEBUG_LINE, &format!("{:06}", line.line)[..]), (DEBUG_NAME, name), (DEBUG_CONTENTS, contents)] {
+                let bytes = self.page.encode(text).map_err(|e| Abend::ironwork(e.to_string(), pos))?;
                 let n = bytes.len().min(len);
                 self.unit.mem[at + offset..at + offset + n].copy_from_slice(&bytes[..n]);
             }
@@ -149,7 +173,7 @@ impl<'p> Machine<'p, '_, '_> {
         let saved = self.uses.line;
         self.uses.debugging = true;
         let flow = self.nest(pos).and_then(|()| {
-            let flow = self.run_paragraphs(*first, *last);
+            let flow = self.run_paragraphs(first, last);
             self.unit.depth -= 1;
             flow
         });

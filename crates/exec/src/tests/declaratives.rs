@@ -364,6 +364,120 @@ fn go_to_depending_and_an_altered_go_to_reach_a_procedure_as_go_to_does() {
     assert_eq!(out, "P2  |    |\nP3  |    |\n");
 }
 
+#[test]
+fn an_alter_runs_the_debugging_section_of_the_paragraph_it_alters_and_not_of_its_target() {
+    let lines = [
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. D.",
+        "ENVIRONMENT DIVISION.",
+        "CONFIGURATION SECTION.",
+        "SOURCE-COMPUTER. IBM-370 WITH DEBUGGING MODE.",
+        "PROCEDURE DIVISION.",
+        "DECLARATIVES.",
+        "DBG SECTION.",
+        "    USE FOR DEBUGGING ON A B OF MAIN.",
+        "DBG-1.",
+        "    DISPLAY DEBUG-NAME(1:9) '|' DEBUG-CONTENTS(1:9) '|'",
+        "        DEBUG-LINE '|' DEBUG-CONTENTS(10:21) '|'.",
+        "END DECLARATIVES.",
+        "MAIN SECTION.",
+        "M.",
+        "    ALTER C TO PROCEED TO A.",
+        "    ALTER A TO PROCEED TO Z.",
+        "    ALTER C TO Z.",
+        "    ALTER B TO PROCEED TO Z OF MAIN A TO C.",
+        "    DISPLAY 'END'.",
+        "    GO TO A.",
+        "A.",
+        "    GO TO Z.",
+        "B.",
+        "    GO TO Z.",
+        "C.",
+        "    GO TO Z.",
+        "Z.",
+        "    GOBACK.",
+    ];
+    let source = cobol(&lines);
+    let line = |text: &str| format!("{:06}", lines.iter().position(|l| l.trim_start().starts_with(text)).unwrap() + 1);
+    let blank = " ".repeat(21);
+    let (out, err, ending) = run_with(&source, &["-debug"]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    let expected = [
+        format!("A        |Z        |{}|{blank}|", line("ALTER A")),
+        format!("B OF MAIN|Z OF MAIN|{}|{blank}|", line("ALTER B")),
+        format!("A        |C        |{}|{blank}|", line("ALTER B")),
+        "END".to_owned(),
+        format!("A        |         |{}|{blank}|", line("GO TO A")),
+    ];
+    assert_eq!(out, expected.map(|l| l + "\n").concat());
+    assert_eq!(run_with(&source, &[]).0, "END\n");
+    let unmoded = source.replace(" WITH DEBUGGING MODE", "");
+    assert_eq!(run_with(&unmoded, &["-debug"]).0, "END\n");
+}
+
+#[test]
+fn under_all_procedures_every_alter_but_those_in_the_declaratives_runs_the_debugging_section() {
+    let source = cobol(&[
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. D.",
+        "ENVIRONMENT DIVISION.",
+        "CONFIGURATION SECTION.",
+        "SOURCE-COMPUTER. IBM-370 WITH DEBUGGING MODE.",
+        "INPUT-OUTPUT SECTION.",
+        "FILE-CONTROL.",
+        "    SELECT F ASSIGN TO NODD.",
+        "DATA DIVISION.",
+        "FILE SECTION.",
+        "FD  F.",
+        "01  F-REC PIC X.",
+        "PROCEDURE DIVISION.",
+        "DECLARATIVES.",
+        "DBG SECTION.",
+        "    USE FOR DEBUGGING ON ALL PROCEDURES.",
+        "DBG-1.",
+        "    DISPLAY DEBUG-NAME(1:4) '|' DEBUG-CONTENTS(1:13) '|'.",
+        "E SECTION.",
+        "    USE AFTER ERROR PROCEDURE ON F.",
+        "E-1.",
+        "    ALTER E-2 TO PROCEED TO E-3.",
+        "E-2.",
+        "    GO TO E-4.",
+        "E-3.",
+        "    DISPLAY 'E'.",
+        "E-4.",
+        "    EXIT.",
+        "END DECLARATIVES.",
+        "MAIN SECTION.",
+        "M.",
+        "    ALTER A TO PROCEED TO Z",
+        "    OPEN INPUT F",
+        "    GO TO A.",
+        "A.",
+        "    GO TO B.",
+        "B.",
+        "    DISPLAY 'B'.",
+        "Z.",
+        "    GOBACK.",
+    ]);
+    let (out, err, ending) = run_with(&source, &["-debug"]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    let expected = [
+        "MAIN|START PROGRAM|",
+        "M   |FALL THROUGH |",
+        "A   |Z            |",
+        "E   |USE PROCEDURE|",
+        "E-1 |FALL THROUGH |",
+        "E-2 |FALL THROUGH |",
+        "E-3 |             |",
+        "E",
+        "E-4 |FALL THROUGH |",
+        "A   |             |",
+        "Z   |             |",
+    ];
+    assert_eq!(out, expected.map(|l| l.to_owned() + "\n").concat());
+    assert_eq!(run_with(&source, &[]).0, "E\n");
+}
+
 pub(super) fn fuzz_seeds() -> Vec<String> {
     let (debugging, _) = debugging_program(true);
     vec![debugging, sort_program(&["B-ERR SECTION.", "    USE GLOBAL AFTER STANDARD EXCEPTION PROCEDURE ON B.", "B-1.", "    MOVE 16 TO SORT-RETURN."], "")]
