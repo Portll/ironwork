@@ -394,8 +394,9 @@ fn name_of(st: &Statement, what: &str, max: usize) -> Result<String, Error> {
 
 fn mapset_header(st: &Statement, ops: &Operands) -> Result<OpenSet, Error> {
     let name = name_of(st, "DFHMSD", MAX_NAME)?;
+    // CardDemo's maps write &&SYSPARM, and CICS generated their copybooks from them.
     if let Some(t) = ops.word("TYPE")?
-        && !matches!(t.as_str(), "DSECT" | "MAP" | "&SYSPARM")
+        && !matches!(t.as_str(), "DSECT" | "MAP" | "&SYSPARM" | "&&SYSPARM")
     {
         return Err(fail(st.line, format!("TYPE={t}: DSECT, MAP, FINAL or &SYSPARM")));
     }
