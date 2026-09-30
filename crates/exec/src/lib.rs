@@ -5,6 +5,8 @@ pub mod abend;
 pub use rt::calendar;
 pub mod cics;
 pub use rt::codec;
+pub use rt::digest;
+pub use rt::evidence;
 pub mod collating;
 pub mod edit;
 pub mod files;
@@ -203,8 +205,26 @@ impl Compiled {
         out: &'w mut dyn Write,
         err: &'w mut dyn Write,
     ) -> Result<(Ending, i16), Abend> {
+        self.execute_observed(library, dds, sysin, clock, database, out, err, None)
+    }
+
+    /// Runs as [`Compiled::execute_with`] does, telling `observer` what the run opens, closes and
+    /// loads.
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_observed<'w>(
+        &self,
+        library: unit::Library,
+        dds: files::Dds,
+        sysin: Option<Box<dyn BufRead + 'w>>,
+        clock: unit::Clock,
+        database: Option<&'w mut (dyn sql::Database + '_)>,
+        out: &'w mut dyn Write,
+        err: &'w mut dyn Write,
+        observer: Option<unit::Observer<'w>>,
+    ) -> Result<(Ending, i16), Abend> {
         oo::refuse_to_run(&self.program)?;
         let mut run_unit = unit::RunUnit::new(library, dds, sysin, clock, out, err);
+        run_unit.observer = observer;
         run_unit.sql = database.map(sql::Session::new);
         let me = run_unit.add(None, &self.program, self.layout.size as usize);
         let ending = machine::Machine::activation(self, me, &mut run_unit, true).and_then(|mut m| m.run_procedure());

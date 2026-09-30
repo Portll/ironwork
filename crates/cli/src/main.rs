@@ -31,6 +31,11 @@ flags:
              carry a printer control character, which :text shows as line spacing. An indexed or
              relative file's DD holds its records in key order, as a REPRO unload does. DD SYSIN is
              what ACCEPT reads; without it, ACCEPT reads standard input
+  --evidence DIR
+             record the run in a hash-chained journal and ledger in DIR, in cobolwork's evidence
+             format: the source and every COPY member by digest, each DD's digest when it is
+             opened, closed and at the end, each program CALL loads, and the abend or RETURN-CODE.
+             DIR may not be inside the program's directory or a library. run and check only
   --clock YYYY-MM-DDTHH:MM:SS[.hh]
              the time ACCEPT FROM DATE, TIME and FUNCTION CURRENT-DATE report, for a run that must
              repeat; without it they report the system clock in UTC
@@ -86,6 +91,8 @@ exit status: RETURN-CODE when the run ends normally; 12 compile errors, 16 an ab
 const FLAGS: &[&str] = &["-silent", "-strict-sort-keys"];
 const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid", "--sysid", "--commarea", "--commarea-out", "--file", "--td", "--screens", "--serve", "--transaction"];
 
+mod evidence;
+
 fn usage_error(message: &str) -> ExitCode {
     eprintln!("ironwork: {message}\n{USAGE}");
     ExitCode::from(2)
@@ -128,6 +135,7 @@ fn driver() -> ExitCode {
     let (mut replay, mut keyed) = (None, false);
     let (mut sql_db, mut sql_record) = (None, None);
     let mut c_series = false;
+    let mut evidence_dir: Option<std::path::PathBuf> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "-h" | "--help" => {
@@ -138,6 +146,10 @@ fn driver() -> ExitCode {
                 println!("ironwork for COBOL {}", env!("CARGO_PKG_VERSION"));
                 return ExitCode::SUCCESS;
             }
+            "--evidence" => match args.next() {
+                Some(dir) => evidence_dir = Some(std::path::PathBuf::from(dir)),
+                None => return usage_error("--evidence needs a directory"),
+            },
             "--dd" => match args.next() {
                 Some(spec) => dds.push(spec),
                 None => return usage_error("--dd needs NAME=path"),
@@ -199,14 +211,31 @@ fn driver() -> ExitCode {
         }
     };
     let own_directory = std::path::Path::new(path).parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    if evidence_dir.is_some() && command == "cics" {
+        return usage_error("--evidence is for run and check");
+    }
+    let reads: Vec<std::path::PathBuf> = std::iter::once(own_directory.clone()).chain(libraries.iter().cloned()).chain(program_dirs.iter().cloned()).collect();
+    let mut journal = match &evidence_dir {
+        Some(dir) => match evidence::start(dir, &reads, command, path) {
+            Ok(j) => Some(j),
+            Err(e) => {
+                eprintln!("ironwork: --evidence {}: {e}", dir.display());
+                return ExitCode::from(2);
+            }
+        },
+        None => None,
+    };
     let libraries = syntax::copy::Libraries::new(std::iter::once(own_directory.clone()).chain(libraries).collect());
     let mut programs = match syntax::parse_all_with(&text, &libraries) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("{}", e.place(path));
-            return ExitCode::from(12);
+            return evidence::finish(journal, 12);
         }
     };
+    if let Some(j) = journal.as_mut() {
+        evidence::sources(j, &programs[0].sources, path, &reads);
+    }
     let first = programs.remove(0);
     let library = exec::unit::Library {
         programs,
@@ -220,11 +249,11 @@ fn driver() -> ExitCode {
             for e in errors {
                 eprintln!("{}", e.place(path));
             }
-            return ExitCode::from(12);
+            return evidence::finish(journal, 12);
         }
     };
     if command == "check" {
-        return ExitCode::SUCCESS;
+        return evidence::finish(journal, 0);
     }
     let dds = match exec::files::Dds::new(&dds, true) {
         Ok(d) => d,
@@ -263,7 +292,22 @@ fn driver() -> ExitCode {
         None => Box::new(io::stdin().lock()),
     };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
-    match compiled.execute_with(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err) {
+    let shared = journal.map(|j| std::rc::Rc::new(std::cell::RefCell::new(evidence::Run::new(j, &reads))));
+    let observer = shared.clone().map(|run| Box::new(move |event: exec::unit::Event<'_>| run.borrow_mut().observe(event)) as exec::unit::Observer<'_>);
+    let ended = compiled.execute_observed(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer);
+    let (status, abend) = match &ended {
+        Ok((_, return_code)) => (i64::from(*return_code), None),
+        Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => (0, None),
+        Err(abend) => (16, Some(abend)),
+    };
+    if let Some(run) = shared {
+        let run = std::rc::Rc::try_unwrap(run).map(std::cell::RefCell::into_inner);
+        if let Ok(run) = run {
+            let file = abend.and_then(|a| compiled.program.sources.get(a.pos.file as usize)).map(String::as_str);
+            evidence::finish(Some(run.end(abend.map(|a| (a.code.to_string(), file, i64::from(a.pos.line))))), status);
+        }
+    }
+    match ended {
         Ok((_, return_code)) => ExitCode::from(return_code as u8),
         Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => ExitCode::SUCCESS,
         Err(abend) => report_abend(&compiled, path, &abend),

@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::files::{self, FileStatus, Format, KeySpan, Keyed, Keying, Record};
+use crate::unit::Event;
 use crate::printer::{self, Space};
 
 impl<'p> Machine<'p, '_, '_> {
@@ -195,6 +196,9 @@ impl<'p> Machine<'p, '_, '_> {
             _ => Format::Fixed,
         };
         let dd = self.unit.dds.get(&decl.assign);
+        if let Some(d) = &dd {
+            self.unit.notify(Event::Open { dd: &decl.assign, mode, path: &d.path });
+        }
         let no_dd = format!("{name}: no DD {} was given (--dd {}=path)", decl.assign, decl.assign);
         let held = match decl.organization {
             Organization::Indexed | Organization::Relative => true,
@@ -246,7 +250,13 @@ impl<'p> Machine<'p, '_, '_> {
         match self.unit.programs[self.me].files[k].take() {
             None => self.io_status(k, FileStatus::NotOpen, format!("{name} is not open"), pos),
             Some(f) => match f.close() {
-                Ok(()) => self.set_status(k, FileStatus::Success, pos),
+                Ok(()) => {
+                    let assign = &self.program.files[k].assign;
+                    if let Some(d) = self.unit.dds.get(assign) {
+                        self.unit.notify(Event::Close { dd: assign, path: &d.path });
+                    }
+                    self.set_status(k, FileStatus::Success, pos)
+                }
                 Err(e) => self.io_status(k, FileStatus::PermanentError, format!("{name}: {e}"), pos),
             },
         }

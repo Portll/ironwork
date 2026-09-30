@@ -5,7 +5,9 @@
 
 pub mod calendar;
 pub mod codec;
+pub mod digest;
 pub mod edit;
+pub mod evidence;
 pub mod module;
 pub mod picture;
 pub mod sql;

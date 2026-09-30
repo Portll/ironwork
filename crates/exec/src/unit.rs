@@ -6,9 +6,9 @@ use crate::files::{Dds, Open};
 use crate::Compiled;
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use syntax::ast::Program;
+use syntax::ast::{OpenMode, Program};
 use syntax::copy;
 
 /// A pointer's value is its offset into run-unit memory plus this, so that no item's address is
@@ -51,6 +51,16 @@ pub enum Clock {
     Fixed(i64, u32),
 }
 
+/// What a run did that its evidence journal records: each file as it is opened and closed, and
+/// each program CALL loads, with the source it was read from when a library supplied it.
+pub enum Event<'a> {
+    Open { dd: &'a str, mode: OpenMode, path: &'a Path },
+    Close { dd: &'a str, path: &'a Path },
+    Load { program: &'a str, source: Option<&'a Path> },
+}
+
+pub type Observer<'w> = Box<dyn FnMut(Event<'_>) + 'w>;
+
 /// How deep PERFORMs and CALLs may nest before the run abends, rather than exhaust the stack.
 pub const MAX_DEPTH: usize = 100;
 
@@ -76,6 +86,8 @@ pub struct RunUnit<'w> {
     pub le: crate::le::State,
     /// Classes, objects and the JNI environment of the run unit's object-oriented programs.
     pub oo: crate::oo::Objects,
+    /// Told what the run opens, closes and loads, when a caller keeps evidence of it.
+    pub observer: Option<Observer<'w>>,
 }
 
 fn member_name(name: &str) -> bool {
@@ -101,6 +113,7 @@ impl<'w> RunUnit<'w> {
             sql: None,
             le: crate::le::State::default(),
             oo: Default::default(),
+            observer: None,
         }
     }
 
@@ -147,21 +160,28 @@ impl<'w> RunUnit<'w> {
         if !member_name(&name) {
             return Err(LoadError::NotFound);
         }
-        let program = match self.library.programs.iter().position(|p| p.id.eq_ignore_ascii_case(&name)) {
-            Some(i) => self.library.programs.remove(i),
-            None => self.search_libraries(&name)?,
+        let (program, source) = match self.library.programs.iter().position(|p| p.id.eq_ignore_ascii_case(&name)) {
+            Some(i) => (self.library.programs.remove(i), None),
+            None => self.search_libraries(&name).map(|(p, path)| (p, Some(path)))?,
         };
         let compiled = crate::compile(program, &self.library.flags).map_err(|errors| {
             let first = errors.first().map(|e| e.place(&name)).unwrap_or_default();
             LoadError::Compile(format!("{name} does not compile: {first}"))
         })?;
+        self.notify(Event::Load { program: &name, source: source.as_deref() });
         let compiled = Rc::new(compiled);
         let size = compiled.layout.size as usize;
         let program = compiled.program.clone();
         Ok(self.add(Some(compiled), &program, size))
     }
 
-    fn search_libraries(&mut self, name: &str) -> Result<Program, LoadError> {
+    pub(crate) fn notify(&mut self, event: Event<'_>) {
+        if let Some(observer) = self.observer.as_mut() {
+            observer(event);
+        }
+    }
+
+    fn search_libraries(&mut self, name: &str) -> Result<(Program, PathBuf), LoadError> {
         let candidates = [name.to_owned(), name.to_ascii_lowercase()];
         let path = self
             .library
@@ -175,7 +195,7 @@ impl<'w> RunUnit<'w> {
             .map_err(|e| LoadError::Compile(format!("{name} does not compile: {}", e.place(&path.display().to_string()))))?;
         let first = programs.remove(0);
         self.library.programs.extend(programs);
-        Ok(first)
+        Ok((first, path))
     }
 
     /// Closes every file any program left open, as the runtime does when the run unit ends.
