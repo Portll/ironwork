@@ -280,14 +280,14 @@ impl Lower<'_> {
                 self.end(Terminator::ExitProgram { next }, pos)?;
                 self.switch(next)?;
             }
-            Stmt::Continue | Stmt::SentenceEnd | Stmt::Exit(ExitKind::Plain) => {}
-            Stmt::Exit(ExitKind::Paragraph) => self.leave(ctx.para + 1, ctx, pos)?,
-            Stmt::Exit(ExitKind::Section) => self.leave(crate::section_end(self.program, ctx.para) + 1, ctx, pos)?,
-            Stmt::Exit(ExitKind::Perform) => match ctx.loops.last() {
+            Stmt::Continue | Stmt::SentenceEnd | Stmt::Exit { kind: ExitKind::Plain, .. } => {}
+            Stmt::Exit { kind: ExitKind::Paragraph, .. } => self.leave(ctx.para + 1, ctx, pos)?,
+            Stmt::Exit { kind: ExitKind::Section, .. } => self.leave(crate::section_end(self.program, ctx.para) + 1, ctx, pos)?,
+            Stmt::Exit { kind: ExitKind::Perform, .. } => match ctx.loops.last() {
                 Some(l) => self.end(Terminator::Jump(l.exit), pos)?,
                 None => self.leave(ctx.para + 1, ctx, pos)?,
             },
-            Stmt::Exit(ExitKind::PerformCycle) => match ctx.loops.last() {
+            Stmt::Exit { kind: ExitKind::PerformCycle, .. } => match ctx.loops.last() {
                 Some(l) => self.end(Terminator::Jump(l.cont), pos)?,
                 None => self.leave(ctx.para + 1, ctx, pos)?,
             },
@@ -617,6 +617,6 @@ fn stmt_pos(s: &Stmt) -> Option<Pos> {
             Sorting::Sort(st) => st.pos,
             Sorting::Release { pos, .. } | Sorting::Return { pos, .. } => *pos,
         },
-        Stmt::NextSentence | Stmt::SentenceEnd | Stmt::Continue | Stmt::Exit(_) => return None,
+        Stmt::NextSentence | Stmt::SentenceEnd | Stmt::Continue | Stmt::Exit { .. } => return None,
     })
 }

@@ -1305,11 +1305,11 @@ impl Parser<'_> {
             "EXIT" => match self.accept_any(&["PROGRAM", "PARAGRAPH", "SECTION", "PERFORM", "METHOD"]).as_deref() {
                 Some("PROGRAM") => Stmt::ExitProgram { pos },
                 Some("METHOD") => Stmt::ExitMethod { pos },
-                Some("PARAGRAPH") => Stmt::Exit(ExitKind::Paragraph),
-                Some("SECTION") => Stmt::Exit(ExitKind::Section),
-                Some(_) if self.accept_word("CYCLE") => Stmt::Exit(ExitKind::PerformCycle),
-                Some(_) => Stmt::Exit(ExitKind::Perform),
-                None => Stmt::Exit(ExitKind::Plain),
+                Some("PARAGRAPH") => Stmt::Exit { kind: ExitKind::Paragraph, pos },
+                Some("SECTION") => Stmt::Exit { kind: ExitKind::Section, pos },
+                Some(_) if self.accept_word("CYCLE") => Stmt::Exit { kind: ExitKind::PerformCycle, pos },
+                Some(_) => Stmt::Exit { kind: ExitKind::Perform, pos },
+                None => Stmt::Exit { kind: ExitKind::Plain, pos },
             },
             other => return Err(Error::at(pos, format!("{other} is not a statement ironwork for COBOL supports yet"))),
         })
@@ -2479,7 +2479,7 @@ mod tests {
         let p = program("       PROCEDURE DIVISION.\n       MAIN-LINE SECTION.\n       SKIPPED.\n           EXIT SECTION.\n       NEVER.\n           GOBACK.\n");
         let names: Vec<&str> = p.paragraphs.iter().map(|q| q.name.as_str()).collect();
         assert_eq!(names, ["MAIN-LINE", "SKIPPED", "NEVER"]);
-        assert!(matches!(p.paragraphs[1].statements[..], [Stmt::Exit(ExitKind::Section), Stmt::SentenceEnd]), "{:?}", p.paragraphs[1].statements);
+        assert!(matches!(p.paragraphs[1].statements[..], [Stmt::Exit { kind: ExitKind::Section, .. }, Stmt::SentenceEnd]), "{:?}", p.paragraphs[1].statements);
     }
 
     fn linage_program(fds: &str, procedure: &str) -> String {

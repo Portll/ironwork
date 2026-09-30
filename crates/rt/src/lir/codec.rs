@@ -9,7 +9,7 @@ use crate::storage::Kind;
 use crate::vocab::{AcceptFrom, BinOp, Figurative, InspectMode, RelOp, SignClause, SignPosition};
 use crate::{codec_enum, codec_struct};
 use numeric::precision::{Fixed, Places};
-use numeric::options::{FastsrtAdvPrint, Warnings};
+use numeric::options::{Compile, FastsrtAdvPrint, Stop, Warnings};
 use numeric::{Arith, Numproc, Options, SortKeys, Trunc, TruncCheck};
 use zarch::check::ProgramCheck;
 use zarch::ebcdic::CodePage;
@@ -127,7 +127,7 @@ codec_enum!(FileStatus {
 
 codec_struct!(Options {
     arith, trunc, numproc, codepage, trunc_check, fastsrt, fastsrt_adv_print, sort_keys, adv, thread, dll, rent, dbcs,
-    warnings, dynam, debug,
+    warnings, compile, dynam, debug,
 } check options_valid);
 codec_enum!(Arith { Compat = 0, Extend = 1 });
 codec_enum!(Trunc { Std = 0, Opt = 1, Bin = 2 });
@@ -136,6 +136,8 @@ codec_enum!(TruncCheck { Report = 0, Silent = 1 });
 codec_enum!(SortKeys { Dfsort = 0, Strict = 1 });
 codec_enum!(FastsrtAdvPrint { Exclude = 0, Include = 1 });
 codec_enum!(Warnings { Proceed = 0, Block = 1 });
+codec_enum!(Compile { Full = 0, Until(stop) = 1, SyntaxOnly = 2 });
+codec_enum!(Stop { W = 0, E = 1, S = 2 });
 
 /// `Options::code_page` panics on a CCSID the tables do not carry.
 fn options_valid(options: &Options) -> Result<(), String> {

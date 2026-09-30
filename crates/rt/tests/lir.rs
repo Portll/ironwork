@@ -15,7 +15,7 @@ use ironwork_rt::sql::{HostType, fingerprint};
 use ironwork_rt::storage::Kind;
 use ironwork_rt::vocab::{AcceptFrom, BinOp, Figurative, InspectMode, Pos, RelOp, SignClause, SignPosition};
 use numeric::precision::{Fixed, Places};
-use numeric::options::{FastsrtAdvPrint, Warnings};
+use numeric::options::{Compile, FastsrtAdvPrint, Stop, Warnings};
 use numeric::{Arith, Numproc, Options, SortKeys, Trunc, TruncCheck};
 use zarch::check::ProgramCheck;
 use zarch::hfp::Precision;
@@ -146,6 +146,7 @@ fn options_round_trip_with_every_field_off_its_default() {
         rent: false,
         dbcs: false,
         warnings: Warnings::Block,
+        compile: Some(Compile::Until(Stop::E)),
         dynam: true,
         debug: true,
     };
@@ -153,6 +154,7 @@ fn options_round_trip_with_every_field_off_its_default() {
     let each = [
         Options { fastsrt_adv_print: FastsrtAdvPrint::Include, ..Options::default() },
         Options { warnings: Warnings::Block, ..Options::default() },
+        Options { compile: Some(Compile::SyntaxOnly), ..Options::default() },
         Options { dynam: true, ..Options::default() },
         Options { debug: true, ..Options::default() },
     ];
@@ -162,6 +164,8 @@ fn options_round_trip_with_every_field_off_its_default() {
     }
     every_variant(&[FastsrtAdvPrint::Exclude, FastsrtAdvPrint::Include], 2);
     every_variant(&[Warnings::Proceed, Warnings::Block], 2);
+    every_variant(&[Compile::Full, Compile::Until(Stop::W), Compile::SyntaxOnly], 3);
+    every_variant(&[Stop::W, Stop::E, Stop::S], 3);
 }
 
 #[test]
@@ -169,7 +173,7 @@ fn kinds_and_options_have_load_module_s_bytes() {
     assert_eq!(encoded(&Kind::Zoned { digits: 5, scale: 2, signed: true, sign: Some(SIGN) }).0, [3, 5, 2, 1, 1, 1, 1]);
     assert_eq!(encoded(&Kind::Float(Precision::Extended)).0, [6, 2]);
     let options = Options { arith: Arith::Extend, trunc: Trunc::Opt, ..Options::default() };
-    assert_eq!(encoded(&options).0, [0x01, 0x01, 0x00, 0xF4, 0x08, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00]);
+    assert_eq!(encoded(&options).0, [0x01, 0x01, 0x00, 0xF4, 0x08, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00]);
     let (bytes, strings) = encoded(&(7u8, Options { codepage: 999, ..options }));
     let reason = "CODEPAGE(999) is not a page the tables carry".to_owned();
     assert_eq!(refused::<(u8, Options)>(&bytes, &strings), (1, reason));

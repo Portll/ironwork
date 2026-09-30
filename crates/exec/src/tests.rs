@@ -1,6 +1,7 @@
 use super::*;
 use crate::testing::{Executor, Harness, compile_errors, ebcdic, line};
 use std::collections::BTreeMap;
+use syntax::Severity;
 
 mod collating;
 mod data;
@@ -306,6 +307,26 @@ fn exit_perform_cycle_as_the_first_statement_of_the_body() {
         &line("GOBACK."),
     ]));
     assert_eq!(out, "AFTER 04\n");
+}
+
+#[test]
+fn exit_perform_outside_an_inline_perform_is_a_severe_error() {
+    let source = exit_program(&[
+        "       MAIN-LINE.\n",
+        &line("PERFORM P1"),
+        &line("PERFORM 2 TIMES"),
+        &line("    IF K = 0 EXIT PERFORM CYCLE END-IF"),
+        &line("END-PERFORM"),
+        &line("EXIT PERFORM"),
+        &line("GOBACK."),
+        "       P1.\n",
+        &line("IF K = 0"),
+        &line("    EXIT PERFORM CYCLE"),
+        &line("END-IF."),
+    ]);
+    let errors = compile(syntax::parse(&source).unwrap(), &[]).err().expect("refused");
+    let found: Vec<(u32, &str, Severity)> = errors.iter().map(|e| (e.pos.line, e.message.as_str(), e.severity)).collect();
+    assert_eq!(found, [(13, "EXIT PERFORM must be inside an inline PERFORM", Severity::Severe), (17, "EXIT PERFORM CYCLE must be inside an inline PERFORM", Severity::Severe)]);
 }
 
 #[test]
@@ -802,24 +823,55 @@ fn exec_dli_is_refused_at_compile_time_by_name() {
 }
 
 #[test]
-fn an_error_refuses_a_program_and_a_warning_only_under_warnings_block() {
+fn the_compile_option_in_force_says_which_messages_refuse_a_program() {
     let message = |severity| Error::at(Pos::default(), "m").graded(severity);
+    let options = |cards: &[&str], flags: &[&str]| {
+        let mut o = Options::default();
+        cards.iter().for_each(|c| assert_eq!(o.apply(c), Ok(true), "{c}"));
+        flags.iter().for_each(|f| o.apply_flag(f).unwrap());
+        o
+    };
+    let severities = [Severity::Informational, Severity::Warning, Severity::Error, Severity::Severe, Severity::Unrecoverable];
+    // Whether no messages, then one of each severity from I to U, refuse the program.
+    for (cards, flags, expected) in [
+        (&[][..], &[][..], [false, false, false, false, true, true]),
+        (&["NOCOMPILE(S)"], &[], [false, false, false, false, true, true]),
+        (&["NOCOMPILE(E)"], &[], [false, false, false, true, true, true]),
+        (&["NOC(W)"], &[], [false, false, true, true, true, true]),
+        (&[], &["-warnings-block"], [false, false, true, true, true, true]),
+        (&["COMPILE"], &[], [false, false, false, false, true, true]),
+        (&["NOCOMPILE"], &[], [true, true, true, true, true, true]),
+        (&["NOC(S)"], &["-warnings-block"], [false, false, false, false, true, true]),
+        (&["NOC(E)"], &["-warnings-block"], [false, false, false, true, true, true]),
+        (&["C"], &["-warnings-block"], [false, false, false, false, true, true]),
+        (&["NOC(W)", "NOC(E)"], &[], [false, false, false, true, true, true]),
+    ] {
+        let o = options(cards, flags);
+        let got: Vec<bool> = std::iter::once(refused(&[], &o)).chain(severities.map(|s| refused(&[message(Severity::Informational), message(s)], &o))).collect();
+        assert_eq!(got, expected, "{cards:?} {flags:?}");
+    }
+}
+
+#[test]
+fn an_e_level_message_leaves_the_program_to_run_and_the_return_code_at_8() {
+    let messages = [Error::warning(Pos::default(), "w"), Error::at(Pos::default(), "e").graded(Severity::Error)];
+    assert!(!refused(&messages, &Options::default()));
+    assert_eq!(syntax::return_code(&messages), 8);
     let blocking = {
         let mut o = Options::default();
         o.apply_flag("-warnings-block").unwrap();
         o
     };
-    for (severity, proceeds, blocks) in [
-        (Severity::Informational, false, false),
-        (Severity::Warning, false, true),
-        (Severity::Error, true, true),
-        (Severity::Severe, true, true),
-        (Severity::Unrecoverable, true, true),
-    ] {
-        let messages = [message(Severity::Informational), message(severity)];
-        assert_eq!((refused(&messages, &Options::default()), refused(&messages, &blocking)), (proceeds, blocks), "{severity:?}");
-    }
-    assert!(!refused(&[], &blocking));
+    assert!(refused(&messages, &blocking));
+}
+
+#[test]
+fn nocompile_alone_leaves_nothing_to_run_and_a_severity_it_does_not_name_is_refused() {
+    let compiled = |card: &str| compile(syntax::parse(&program(card, "", &line("GOBACK."))).unwrap(), &[]).map(|c| c.diagnostics).err();
+    assert_eq!(compiled("NOCOMPILE"), Some(Vec::new()));
+    assert_eq!(compiled("NOC(W)"), None);
+    let errors = compiled("NOC(U)").unwrap();
+    assert_eq!(errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>(), ["CBL NOC(U): NOC does not take (U)"]);
 }
 
 const FRAGMENTS: &[&str] = &[

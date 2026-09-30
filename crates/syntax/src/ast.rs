@@ -409,7 +409,7 @@ pub enum Stmt {
     Sorting(Box<Sorting>),
     StopRun { pos: Pos },
     Continue,
-    Exit(ExitKind),
+    Exit { kind: ExitKind, pos: Pos },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

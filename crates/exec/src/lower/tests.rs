@@ -140,8 +140,8 @@ fn exit_section_leaves_for_the_paragraph_after_the_section() {
     );
     let mut parsed = syntax::parse(&source).unwrap();
     for s in parsed.paragraphs.iter_mut().flat_map(|p| p.statements.iter_mut()) {
-        if *s == ast::Stmt::Exit(ast::ExitKind::Paragraph) {
-            *s = ast::Stmt::Exit(ast::ExitKind::Section);
+        if let ast::Stmt::Exit { kind: kind @ ast::ExitKind::Paragraph, .. } = s {
+            *kind = ast::ExitKind::Section;
         }
     }
     let p = lower(&crate::compile(parsed, &[]).unwrap()).unwrap();

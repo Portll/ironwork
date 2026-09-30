@@ -81,22 +81,23 @@ messages', 0 when there is none (Enterprise COBOL Programming Guide SC27-8714-03
 |---|---|---|
 | I, informational | 0 | run the program |
 | W, warning | 4 | run the program; refuse under `-warnings-block` |
-| E, error | 8 | refuse |
+| E, error | 8 | run the program |
 | S, severe | 12 | refuse |
 | U, unrecoverable | 16 | refuse |
 
 Every refusal ironwork makes is S (assumption C45). A class definition, or a program with INVOKE or
 object references, compiled without THREAD, DLL, RENT or DBCS, or with NORENT beside THREAD or DLL,
 is W (J19). `ironwork check` exits with the return code. `ironwork run` and `ironwork cics` print
-the messages, then run the program at 0 or 4, and otherwise exit with the return code without
-running anything. IBM's own IGYWCLG procedure would run a program compiled at 8; ironwork refuses at
-E because it makes none of the corrections an E-level message reports (C46).
+the messages, then run the program at 0, 4 or 8, and otherwise exit with the return code without
+running anything, as IBM's IGYWCLG procedure runs its GO step only up to 8 and the default
+NOCOMPILE(S) produces object code after E-level messages (C46).
 
-Under `-warnings-block`, `run` and `cics` refuse at 4 too, and the return code stays 4. The flag is
-ironwork's own: IBM has no option that turns warnings into errors, and FLAG(x,y) only chooses which
-messages the listing shows. The nearest are NOCOMPILE(W), which stops IBM's object code at the
-first warning and which ironwork does not read from a CBL card, and a MSGEXIT user exit, which can
-raise a message's severity one message at a time (C47).
+A CBL or PROCESS card's COMPILE option moves the refusal: NOCOMPILE(W), NOCOMPILE(E) or
+NOCOMPILE(S) (abbreviated NOC) refuses from the first message of that severity, COMPILE (C) from S
+as NOCOMPILE(S) does, since IGYWCLG would bypass its GO step above 8 whatever the object code, and
+NOCOMPILE alone is a syntax check that runs nothing. `-warnings-block` is ironwork's command-line NOCOMPILE(W), and a card's COMPILE or
+NOCOMPILE wins over it, as IBM's PROCESS statements outrank the compiler's invocation. Neither
+changes the return code (C47).
 
 Messages go to standard error, one to a line: errors first, then warnings, then informational
 messages, each in the order ironwork found them.

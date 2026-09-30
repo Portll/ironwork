@@ -154,8 +154,8 @@ pub const PRINT_CONTROL_RUN_TIME: &str = "C42";
 pub const TEXT_PRINT_LINES: &str = "C43";
 pub const COMPILER_SEVERITIES: &str = "C44";
 pub const REFUSALS_ARE_SEVERE: &str = "C45";
-pub const REFUSED_FROM_E: &str = "C46";
-pub const WARNINGS_BLOCK: &str = "C47";
+pub const REFUSED_FROM_S: &str = "C46";
+pub const NOCOMPILE: &str = "C47";
 pub const COMMENT_ENTRY_EXTENT: &str = "C80";
 pub const COMMENT_ENTRY_HEADERS: &str = "C81";
 pub const COMMENT_ENTRY_REMARKS: &str = "C82";
@@ -948,14 +948,14 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
-        id: REFUSED_FROM_E,
-        claim: "ironwork run and cics run a program whose compile's return code is 0 or 4, printing its warnings and informational messages first, and refuse one at 8 or more, exiting with that return code. IBM's IGYWCLG procedure would run it at 8: its GO step is bypassed only when 8 is less than the compile step's return code, COND=((8,LT,COBOL),(4,LT,LKED)) (Programming Guide SC27-8714-03, pp. 259-260), and the default NOCOMPILE(S) produces object code after E-level messages (p. 355). ironwork refuses at E because it makes none of the corrections an E-level message reports; no message of its is E yet (REFUSALS_ARE_SEVERE)",
-        basis: Basis::Chosen,
+        id: REFUSED_FROM_S,
+        claim: "ironwork run and cics run a program whose compile's return code is 0, 4 or 8, printing its messages first, and refuse one at 12 or more, exiting with that return code, as IBM's IGYWCLG procedure runs one: its GO step is bypassed only when 8 is less than the compile step's return code, COND=((8,LT,COBOL),(4,LT,LKED)) (Programming Guide SC27-8714-03, pp. 259-260), and the default NOCOMPILE(S) produces object code after E-level messages, stopping it at the first S-level one (p. 355). A card's COMPILE or NOCOMPILE, or -warnings-block, moves the refusal (NOCOMPILE). No message of ironwork's is E yet (REFUSALS_ARE_SEVERE)",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
-        id: WARNINGS_BLOCK,
-        claim: "-warnings-block is ironwork's own flag: with it, run and cics refuse a program whose compile gave a warning, and the return code stays 4. IBM has no option that makes warnings refuse a program: FLAG(x,y) chooses only which messages are listed (Programming Guide SC27-8714-03, pp. 369-370); NOCOMPILE(W) stops object code at the first W-level message, leaving the return code 4 (p. 355), and ironwork does not read COMPILE from a CBL or PROCESS card; and a MSGEXIT user exit of the EXIT option can raise a W or I message to any severity up to S, one message at a time, which changes the return code (pp. 836-837)",
+        id: NOCOMPILE,
+        claim: "COMPILE, abbreviated C, produces object code whatever the messages; NOCOMPILE(W), NOCOMPILE(E) or NOCOMPILE(S), abbreviated NOC, stops it at the first message of that severity or higher, NOCOMPILE(S) being the default; and NOCOMPILE alone is a syntax check with no object code (Programming Guide SC27-8714-03, p. 355). ironwork reads them from a CBL or PROCESS card, the last one given winning (p. 344): run and cics refuse a program with a message at or above the level, under NOCOMPILE whatever its messages, and under COMPILE from S as under NOCOMPILE(S): COMPILE's object code after an S-level message runs with results IBM calls unpredictable (p. 355), and IGYWCLG's COND bypasses its GO step above 8 whatever the object code (REFUSED_FROM_S). A program ironwork cannot parse or lay out is refused under any of them. -warnings-block is ironwork's command-line NOCOMPILE(W), and a card's COMPILE or NOCOMPILE wins over it, as options on a PROCESS or CBL statement take precedence over the compiler invocation's (p. 273). None of them changes the return code, the highest of the messages' (p. 282), so check exits as it would without them. IBM has no option that turns a warning into an error: FLAG(x,y) chooses only which messages are listed (pp. 369-370), and a MSGEXIT user exit of the EXIT option can raise a W or I message to any severity up to S, one message at a time, which changes the return code (pp. 836-837)",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

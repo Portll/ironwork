@@ -31,9 +31,8 @@ flags:
              character as a record's first byte and writes none, padding each record with X'00' or
              failing the SORT where DFSORT's rules for record lengths say so
   -warnings-block
-             refuse to run a program whose compile gave warnings, as run and cics refuse one whose
-             compile gave errors; the return code stays 4. ironwork's own: IBM's FLAG option only
-             chooses which messages are listed
+             refuse to run a program whose compile gave warnings, as NOCOMPILE(W) would; the return
+             code stays 4. A CBL or PROCESS card's COMPILE or NOCOMPILE wins over it
   -debug     the Language Environment runtime option DEBUG: a program compiled WITH DEBUGGING
              MODE runs its USE FOR DEBUGGING procedures, which NODEBUG, IBM's default, keeps from
              running. Debugging lines run in such a program either way
@@ -148,8 +147,9 @@ compile messages go to standard error, errors first, then warnings, then informa
   `path:line:col: message`, `path:line:col: warning: message`, `path:line:col: informational: message`
 exit status: for check, and for a run the compile refuses, the compile's return code, the highest
   of its messages' severities as IBM's: 0 none or informational, 4 warnings, 8, 12 or 16 errors; run
-  and cics refuse at 8, or at 4 under -warnings-block. Otherwise RETURN-CODE when the run ends
-  normally, 16 an abend; 2 usage";
+  and cics refuse from 12 under IBM's default NOCOMPILE(S), from 4 under -warnings-block, or as a
+  card's COMPILE or NOCOMPILE says. Otherwise RETURN-CODE when the run ends normally, 16 an abend;
+  2 usage";
 
 const FLAGS: &[&str] = &["-silent", "-strict-sort-keys", "-warnings-block", "-debug"];
 const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid", "--sysid", "--commarea", "--commarea-out", "--file", "--td", "--screens", "--serve", "--transaction", "--csd"];
@@ -388,7 +388,13 @@ fn driver() -> ExitCode {
     };
     let compiled = match exec::compile(first, &flags) {
         Ok(c) => c,
-        Err(messages) => return evidence::finish(journal, i64::from(report(&messages, path))),
+        Err(messages) => {
+            let return_code = report(&messages, path);
+            if command != "check" && return_code == 0 {
+                eprintln!("ironwork: {path}: NOCOMPILE is a syntax check, with no program to run");
+            }
+            return evidence::finish(journal, i64::from(return_code));
+        }
     };
     let return_code = report(&compiled.diagnostics, path);
     if let Some(file) = &provenance_file {

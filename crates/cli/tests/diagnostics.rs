@@ -91,3 +91,36 @@ fn a_syntax_error_is_return_code_12() {
     let out = ironwork(&["check", source.path()]);
     assert_eq!((out.status.code(), stderr(&out)), (Some(12), format!("{}:4:19: expected TO, found Period\n", source.path())));
 }
+
+/// `object_oriented`'s program, which compiles with a warning, behind a CBL card.
+fn carded(card: &str) -> String {
+    format!("       CBL {card}\n{}", object_oriented("", ""))
+}
+
+#[test]
+fn a_nocompile_card_says_where_run_refuses_and_outranks_warnings_block() {
+    let blocked = Source::new("nocompile-w", &carded("NOCOMPILE(W)"));
+    let warning = format!("{}: {MISSING}\n", blocked.path());
+    for command in ["check", "run", "cics"] {
+        let out = ironwork(&[command, blocked.path()]);
+        assert_eq!((out.status.code(), stderr(&out), out.stdout.is_empty()), (Some(4), warning.clone(), true), "{command}");
+    }
+    for (k, card) in ["NOC(E)", "NOCOMPILE(S)", "COMPILE"].into_iter().enumerate() {
+        let source = Source::new(&format!("card-{k}"), &carded(card));
+        let warning = format!("{}: {MISSING}\n", source.path());
+        let checked = ironwork(&["check", source.path(), "-warnings-block"]);
+        assert_eq!((checked.status.code(), stderr(&checked)), (Some(4), warning.clone()), "{card}");
+        let ran = ironwork(&["run", source.path(), "-warnings-block"]);
+        assert_eq!((ran.status.code(), stderr(&ran), String::from_utf8_lossy(&ran.stdout).into_owned()), (Some(0), warning, "NO ACCOUNT\n".into()), "{card}");
+    }
+}
+
+#[test]
+fn nocompile_alone_checks_the_program_and_runs_nothing() {
+    let source = Source::new("syntax-check", "       CBL NOCOMPILE\n       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       PROCEDURE DIVISION.\n           DISPLAY 'RAN'.\n           GOBACK.\n");
+    let checked = ironwork(&["check", source.path()]);
+    assert_eq!((checked.status.code(), stderr(&checked)), (Some(0), String::new()));
+    let ran = ironwork(&["run", source.path()]);
+    let note = format!("ironwork: {}: NOCOMPILE is a syntax check, with no program to run\n", source.path());
+    assert_eq!((ran.status.code(), stderr(&ran), ran.stdout.is_empty()), (Some(0), note, true));
+}

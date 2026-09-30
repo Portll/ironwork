@@ -638,8 +638,9 @@ through those calls.
   implementation would return to the old PERFORM's successor when control next passes the end of C.
 - **EXIT SECTION** jumps to the paragraph after the section (machine.rs:276); past the range's `to`,
   the range completes, though control never passed the end of `to`.
-- **EXIT PERFORM outside an inline PERFORM** moves to the next paragraph, as EXIT PARAGRAPH does
-  (machine.rs:278); Check does not refuse it (exec/src/lib.rs:447).
+- **EXIT PERFORM outside an inline PERFORM** is an S-level error in Check, as the Language
+  Reference does not allow it (SC27-8713-03, p. 344). Under a card's COMPILE the program runs
+  anyway, and the statement moves to the next paragraph, as EXIT PARAGRAPH does (machine.rs:278).
 
 The frame rules of §8.4 reproduce every one of these. If an oracle settles V1 the other way, the
 VM's rules change and the LIR does not: `ParagraphEnd` already marks every paragraph end where a

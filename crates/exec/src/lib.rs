@@ -37,7 +37,7 @@ use layout::Layout;
 use numeric::Options;
 use std::io::{BufRead, Write};
 use syntax::ast::*;
-use syntax::{Error, Pos, Severity};
+use syntax::{Error, Pos};
 
 pub struct Compiled {
     pub program: Program,
@@ -49,7 +49,7 @@ pub struct Compiled {
     pub collating: collating::Sequence,
     /// Each file's printer control character, when it is a print file.
     pub carriage: Vec<Option<printer::Carriage>>,
-    /// The warnings and informational messages of a program that compiled.
+    /// The messages of a program that compiled, none of them severe enough to stop its object code.
     pub diagnostics: Vec<Error>,
     /// The program's ENTRY statements, in source order.
     pub entries: Vec<EntryPoint>,
@@ -87,9 +87,9 @@ const FUNCTIONS: &[&str] = &[
 ];
 
 /// Checks and lays out a parsed program. `flags` are this compiler's own, such as `-silent`. A
-/// program is refused, with every message, when one is an error (E, S or U), or under
-/// `-warnings-block` a warning; otherwise its warnings and informational messages are
-/// [`Compiled::diagnostics`].
+/// program is refused, with every message, when one stops its object code: under IBM's default
+/// NOCOMPILE(S) one that is S or U, from W under `-warnings-block`, or as a CBL or PROCESS card's
+/// COMPILE or NOCOMPILE says; otherwise its messages are [`Compiled::diagnostics`].
 pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error>> {
     if program.oo.as_ref().is_some_and(|o| o.class().is_some()) {
         return oo::compile_class_definition(program, flags);
@@ -168,7 +168,7 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
     let carriage = printer::carriages(&program, &layout, options.adv);
     let declaratives = declaratives::resolve(&program, &layout, &options, &mut errors);
     let debugging = declaratives::debugging_sections(&program);
-    let mut check = Check { layout: &layout, program: &program, errors: &mut errors, debugging: false, max_digits: options.arith.max_picture_digits() };
+    let mut check = Check { layout: &layout, program: &program, errors: &mut errors, debugging: false, max_digits: options.arith.max_picture_digits(), inline_performs: 0 };
     for k in 0..program.files.len() {
         check.file_keys(k);
         linage::check_file(check.program, check.layout, k, check.errors);
@@ -191,14 +191,12 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
     }
 }
 
-/// Whether messages keep a program from running: an error does, and a warning under
-/// `-warnings-block`. See [`numeric::assumptions::REFUSED_FROM_E`].
+/// Whether messages keep a program from running: the COMPILE option in force stops its object code,
+/// or, as IGYWCLG bypasses its GO step, the return code is above 8. See
+/// [`numeric::assumptions::REFUSED_FROM_S`] and [`numeric::assumptions::NOCOMPILE`].
 pub(crate) fn refused(messages: &[Error], options: &Options) -> bool {
-    let floor = match options.warnings {
-        numeric::options::Warnings::Proceed => Severity::Error,
-        numeric::options::Warnings::Block => Severity::Warning,
-    };
-    messages.iter().any(|m| m.severity >= floor)
+    let stops_at = options.object_code().stops_at().min(12);
+    stops_at == 0 || messages.iter().any(|m| m.severity.return_code() >= stops_at)
 }
 
 /// The rules of the ENTRY statement (Language Reference SC27-8713-03, pp. 339-340), and of ALTER
@@ -487,6 +485,8 @@ struct Check<'a> {
     debugging: bool,
     /// The most digits a numeric literal has under the program's ARITH option.
     max_digits: u32,
+    /// How many inline PERFORMs the statement is inside.
+    inline_performs: usize,
 }
 
 impl Check<'_> {
@@ -527,7 +527,9 @@ impl Check<'_> {
             }
             Stmt::PerformInline { body, repeat, .. } => {
                 self.repeat(repeat);
+                self.inline_performs += 1;
                 self.statements(body);
+                self.inline_performs -= 1;
             }
             Stmt::PerformProc { from, thru, repeat, pos } => {
                 self.procedure(from, *pos);
@@ -732,7 +734,12 @@ impl Check<'_> {
             Stmt::Report(r) => report::check_statement(self.program, r, self.errors),
             Stmt::Invoke(i) => self.invoke(i),
             Stmt::Sorting(s) => self.sorting(s),
-            Stmt::Goback { .. } | Stmt::StopRun { .. } | Stmt::ExitProgram { .. } | Stmt::ExitMethod { .. } | Stmt::Continue | Stmt::Exit(_) | Stmt::NextSentence | Stmt::SentenceEnd => {}
+            // Language Reference SC27-8713-03, p. 344.
+            Stmt::Exit { kind: kind @ (ExitKind::Perform | ExitKind::PerformCycle), pos } if self.inline_performs == 0 => {
+                let exit = if *kind == ExitKind::Perform { "EXIT PERFORM" } else { "EXIT PERFORM CYCLE" };
+                self.errors.push(Error::at(*pos, format!("{exit} must be inside an inline PERFORM")));
+            }
+            Stmt::Goback { .. } | Stmt::StopRun { .. } | Stmt::ExitProgram { .. } | Stmt::ExitMethod { .. } | Stmt::Continue | Stmt::Exit { .. } | Stmt::NextSentence | Stmt::SentenceEnd => {}
         }
     }
 

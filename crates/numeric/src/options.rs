@@ -134,13 +134,53 @@ impl FastsrtAdvPrint {
     }
 }
 
-/// Whether a program whose compile gave warnings, and no errors, runs (`Proceed`), or
-/// (`-warnings-block`) is refused as an erroneous one is. The return code is 4 either way.
+/// Whether a program whose compile gave warnings runs (`Proceed`), or (`-warnings-block`, the
+/// command line's NOCOMPILE(W)) is refused. The return code is 4 either way.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Warnings {
     #[default]
     Proceed,
     Block,
+}
+
+/// The COMPILE option: which messages stop the object code, so that run and cics refuse the
+/// program (Programming Guide SC27-8714-03, p. 355).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Compile {
+    /// COMPILE: object code whatever the messages, unless one is U and the compilation ended.
+    Full,
+    /// NOCOMPILE(W), NOCOMPILE(E) or NOCOMPILE(S): none from the first message of that severity up.
+    Until(Stop),
+    /// NOCOMPILE: a syntax check, with no object code at all.
+    SyntaxOnly,
+}
+
+/// A severity NOCOMPILE names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stop {
+    W,
+    E,
+    S,
+}
+
+impl Default for Compile {
+    fn default() -> Self {
+        Self::Until(Stop::S)
+    }
+}
+
+impl Compile {
+    /// The lowest return code (Programming Guide Table 38, p. 282) of a message that stops the object
+    /// code: 0 stops it whatever the messages.
+    pub const fn stops_at(self) -> u8 {
+        match self {
+            Self::Full => 16,
+            Self::Until(Stop::S) => 12,
+            Self::Until(Stop::E) => 8,
+            Self::Until(Stop::W) => 4,
+            Self::SyntaxOnly => 0,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -163,6 +203,8 @@ pub struct Options {
     pub rent: bool,
     pub dbcs: bool,
     pub warnings: Warnings,
+    /// COMPILE or NOCOMPILE as a CBL or PROCESS card gave it; None when none did.
+    pub compile: Option<Compile>,
     /// DYNAM: a CALL of a literal loads the program at run time, as a CALL of an identifier does.
     pub dynam: bool,
     /// The Language Environment runtime option DEBUG (`-debug`): USE FOR DEBUGGING procedures run.
@@ -187,6 +229,7 @@ impl Default for Options {
             rent: true,
             dbcs: true,
             warnings: Warnings::default(),
+            compile: None,
             dynam: false,
             debug: false,
         }
@@ -254,6 +297,16 @@ impl Options {
                 CodePage::by_ccsid(ccsid).ok_or(OptionError::UnsupportedCodePage(ccsid))?;
                 self.codepage = ccsid;
             }
+            "COMPILE" => {
+                self.compile = Some(match (off, sub) {
+                    (false, "") => Compile::Full,
+                    (true, "") => Compile::SyntaxOnly,
+                    (true, "W") => Compile::Until(Stop::W),
+                    (true, "E") => Compile::Until(Stop::E),
+                    (true, "S") => Compile::Until(Stop::S),
+                    _ => return Err(bad()),
+                })
+            }
             "FASTSRT" => self.fastsrt = !off,
             "ADV" => self.adv = !off,
             "THREAD" => self.thread = !off,
@@ -278,6 +331,16 @@ impl Options {
             _ => return Err(OptionError::UnknownFlag(flag.to_owned())),
         }
         Ok(())
+    }
+
+    /// The COMPILE option in force: a card's, which outranks the command line as a PROCESS
+    /// statement outranks the compiler's invocation (Programming Guide SC27-8714-03, p. 273), else
+    /// NOCOMPILE(W) under `-warnings-block`, else IBM's default NOCOMPILE(S).
+    pub fn object_code(&self) -> Compile {
+        self.compile.unwrap_or(match self.warnings {
+            Warnings::Block => Compile::Until(Stop::W),
+            Warnings::Proceed => Compile::default(),
+        })
     }
 
     pub fn code_page(&self) -> &'static CodePage {
@@ -364,7 +427,7 @@ mod tests {
             "NUMPROC" => "(PFD)",
             _ => "",
         };
-        for name in ["ARITH", "CODEPAGE", "TRUNC", "NUMPROC", "FASTSRT"] {
+        for name in ["ARITH", "CODEPAGE", "TRUNC", "NUMPROC", "FASTSRT", "COMPILE"] {
             let o = documented().find(|o| o.name == name).unwrap();
             for s in o.spellings() {
                 assert_eq!(Options::default().apply(&format!("{s}{}", suboption(name))), Ok(true), "{s}");
@@ -418,6 +481,37 @@ mod tests {
         o.apply_flag("-warnings-block").unwrap();
         assert_eq!(o.warnings, Warnings::Block);
         assert!(o.apply_flag("-Werror").is_err());
+    }
+
+    #[test]
+    fn compile_and_nocompile_with_each_severity_and_their_abbreviations() {
+        let given = |option: &str| {
+            let mut o = Options::default();
+            o.apply(option).map(|_| o.compile)
+        };
+        assert_eq!(Options::default().object_code(), Compile::Until(Stop::S));
+        assert_eq!(given("COMPILE"), Ok(Some(Compile::Full)));
+        assert_eq!(given("c"), Ok(Some(Compile::Full)));
+        assert_eq!(given("NOCOMPILE"), Ok(Some(Compile::SyntaxOnly)));
+        assert_eq!(given("NOC(w)"), Ok(Some(Compile::Until(Stop::W))));
+        assert_eq!(given("NOCOMPILE(E)"), Ok(Some(Compile::Until(Stop::E))));
+        assert_eq!(given("NOC(S)"), Ok(Some(Compile::Until(Stop::S))));
+        for bad in ["NOCOMPILE(U)", "NOC(I)", "COMPILE(S)", "C(E)"] {
+            assert!(matches!(given(bad), Err(OptionError::BadSuboption { .. })), "{bad}");
+        }
+        let codes = [Compile::Full, Compile::Until(Stop::S), Compile::Until(Stop::E), Compile::Until(Stop::W), Compile::SyntaxOnly].map(Compile::stops_at);
+        assert_eq!(codes, [16, 12, 8, 4, 0]);
+    }
+
+    #[test]
+    fn a_card_outranks_warnings_block() {
+        let mut o = Options::default();
+        o.apply_flag("-warnings-block").unwrap();
+        assert_eq!(o.object_code(), Compile::Until(Stop::W));
+        o.apply("NOCOMPILE(S)").unwrap();
+        assert_eq!(o.object_code(), Compile::Until(Stop::S));
+        o.apply("NOCOMPILE(E)").unwrap();
+        assert_eq!(o.object_code(), Compile::Until(Stop::E), "the last card wins");
     }
 
     #[test]
