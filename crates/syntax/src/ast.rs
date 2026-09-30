@@ -254,30 +254,13 @@ pub enum Operand {
     AddressOf(Ref),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BinOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Pow,
-}
+pub use rt::vocab::{AcceptFrom, BinOp, RelOp};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Expr {
     Operand(Operand),
     Neg(Box<Expr>),
     Bin(Box<Expr>, BinOp, Box<Expr>),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RelOp {
-    Eq,
-    Ne,
-    Lt,
-    Le,
-    Gt,
-    Ge,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -427,15 +410,6 @@ pub enum SetStmt {
     /// SET ADDRESS OF targets TO pointer.
     AddressOf { targets: Vec<Ref>, value: Operand },
     UpDown { targets: Vec<Ref>, down: bool, by: Expr },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AcceptFrom {
-    Sysin,
-    Date { four_digit_year: bool },
-    Day { four_digit_year: bool },
-    DayOfWeek,
-    Time,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

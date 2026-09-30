@@ -47,3 +47,31 @@ pub enum Figurative {
     Quote,
     Null,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Pow,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RelOp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AcceptFrom {
+    Sysin,
+    Date { four_digit_year: bool },
+    Day { four_digit_year: bool },
+    DayOfWeek,
+    Time,
+}
