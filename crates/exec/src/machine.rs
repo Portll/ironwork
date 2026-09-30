@@ -29,6 +29,7 @@ mod cics_files;
 mod cics_services;
 mod declaratives;
 mod file_io;
+mod intrinsic;
 mod le_services;
 mod oo;
 mod perform;
@@ -1347,10 +1348,10 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     fn function(&mut self, f: &FunctionCall) -> R<Val> {
         let pos = f.pos;
-        let mut args: Vec<Val> = Vec::new();
-        for a in &f.args {
-            args.push(self.expr_value(a, pos)?);
+        if let Some(value) = self.storage_function(f)? {
+            return self.function_refmod(f, value);
         }
+        let args = self.function_arguments(f)?;
         let arity = |n: std::ops::RangeInclusive<usize>| {
             if n.contains(&args.len()) { Ok(()) } else { Err(Abend::ironwork(format!("FUNCTION {} takes {n:?} arguments", f.name), pos)) }
         };
@@ -1450,23 +1451,6 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 };
                 Val::Num(Fixed::new(result, Places::new(31 - dec.min(31), dec)))
             }
-            "MIN" | "MAX" => {
-                if args.is_empty() {
-                    return Err(Abend::ironwork(format!("FUNCTION {} needs arguments", f.name), pos));
-                }
-                let want = if f.name == "MIN" { Ordering::Less } else { Ordering::Greater };
-                let mut best = 0;
-                for i in 1..args.len() {
-                    let o = match (&args[i], &args[best]) {
-                        (Val::Num(x), Val::Num(y)) => compare_fixed(x, y),
-                        (x, y) => ebcdic::compare_alphanumeric(&bytes_of(x)?, &bytes_of(y)?, collating.collation()),
-                    };
-                    if o == want {
-                        best = i;
-                    }
-                }
-                args.swap_remove(best)
-            }
             "INTEGER-OF-DATE" => {
                 arity(1..=1)?;
                 let n = self.integer(&f.args[0], pos)?;
@@ -1510,8 +1494,13 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 };
                 Val::Float(self.random(seed, pos)?)
             }
-            other => return Err(Abend::ironwork(format!("FUNCTION {other} is not supported yet"), pos)),
+            _ => self.more_function(f, args)?,
         };
+        self.function_refmod(f, value)
+    }
+
+    fn function_refmod(&mut self, f: &FunctionCall, value: Val) -> R<Val> {
+        let pos = f.pos;
         match (&f.refmod, value) {
             (None, v) => Ok(v),
             (Some(rm), Val::Bytes(b)) => {
@@ -1613,17 +1602,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     fn uses_float(&mut self, e: &Expr) -> R<bool> {
         Ok(match e {
-            Expr::Operand(Operand::Function(f)) => match f.name.as_str() {
-                "RANDOM" => true,
-                "ABS" | "REM" | "MIN" | "MAX" => {
-                    let mut any = false;
-                    for a in &f.args {
-                        any |= self.uses_float(a)?;
-                    }
-                    any
-                }
-                _ => false,
-            },
+            Expr::Operand(Operand::Function(f)) => self.is_floating_point(f)?,
             Expr::Operand(op) => matches!(self.operand_kind(op)?, Some(Kind::Float(_))),
             Expr::Neg(inner) => self.uses_float(inner)?,
             Expr::Bin(a, _, b) => self.uses_float(a)? || self.uses_float(b)?,

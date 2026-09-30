@@ -198,6 +198,13 @@ pub const MULTIPLE_RESULTS: &str = "C97";
 pub const ALTER_DEBUGGING: &str = "C98";
 pub const PERFORM_RETURN_POINTS: &str = "C99";
 pub const FLOAT_FUNCTION_ARGUMENTS: &str = "C100";
+pub const FLOAT_FUNCTION_ROUNDING: &str = "C110";
+pub const FLOATING_POINT_FUNCTIONS: &str = "C111";
+pub const FUNCTION_DOMAIN: &str = "C112";
+pub const NUMVAL_TEST_RULES: &str = "C113";
+pub const FUNCTION_CLOCK: &str = "C114";
+pub const UUID4_SOURCE: &str = "C115";
+pub const FORMATTED_DATETIME_RULES: &str = "C116";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1211,6 +1218,48 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: FLOAT_FUNCTION_ARGUMENTS,
         claim: "A floating-point argument, item or expression, is allowed wherever a function takes a numeric argument and refused where it takes an integer (Language Reference SC27-8713-03, p. 507). INTEGER and INTEGER-PART of one return an integer of 30 digits, 31 under ARITH(EXTEND), and ABS, MAX, MIN and REM with one are evaluated in floating point and return it (Programming Guide SC27-8714-03, pp. 799 and 801). The guide names REM a mixed function where the Language Reference types it numeric (p. 633), and gives the precision only of floating-point functions: a mixed function is evaluated here in long floating point, extended under ARITH(EXTEND), as they are",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FLOAT_FUNCTION_ROUNDING,
+        claim: "The floating-point intrinsic functions are computed in binary to 128 bits and rounded to the nearest long HFP value under ARITH(COMPAT), extended under ARITH(EXTEND), ties away from zero; a fixed-point argument is first converted to HFP of that precision (C5). IBM computes SQRT, EXP, EXP10, LOG, LOG10 and the trigonometric functions with Language Environment's math services, CEESDSQT and the rest (Programming Guide SC27-8714-03, p. 58), whose results can differ from the nearest value in the last hexadecimal digit. ANNUITY, PRESENT-VALUE and the statistics functions, which have no such service, are computed the same way, where IBM's generated code may truncate at each HFP step",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FLOATING_POINT_FUNCTIONS,
+        claim: "ACOS, ANNUITY, ASIN, ATAN, COS, LOG, LOG10, MEAN, MEDIAN, MIDRANGE, PRESENT-VALUE, RANDOM, SIN, SQRT, STANDARD-DEVIATION, TAN and VARIANCE are floating-point functions, as earlier Programming Guides listed them; E, PI, EXP, EXP10 and NUMVAL-F are, as the Language Reference says (SC27-8713-03, pp. 553-557, 609); SECONDS-FROM-FORMATTED-TIME is, as its example's inexact result shows (p. 507), and SECONDS-PAST-MIDNIGHT with it. ABS, MAX, MIN, RANGE, REM and SUM are floating point when any argument is (Programming Guide, p. 799; C100). An expression holding a floating-point function is evaluated in floating point (pp. 62-63). NUMVAL and NUMVAL-C, which the Language Reference also calls floating point (pp. 605, 608), stay fixed point here for now",
+        basis: Basis::Recalled,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FUNCTION_DOMAIN,
+        claim: "An argument outside a function's domain ends the run with abend IRONWORK: SQRT of a negative number, LOG or LOG10 of zero or less, ASIN or ACOS beyond -1 to +1, ANNUITY with a negative rate or periods that are not a positive integer, PRESENT-VALUE at a rate of -1 or less, FACTORIAL beyond 28 (29 under ARITH(EXTEND)), a century window whose end year is outside 1700 to 9999, HEX-TO-CHAR or BIT-TO-CHAR of other characters or of a length that is not a multiple of 2 or 8. IBM leaves such values undefined (Language Reference SC27-8713-03, p. 500) and Language Environment's math services signal a condition. SIN, COS and TAN of an argument beyond 2^63 times pi/2, which ironwork does not reduce, end the run the same way. A result beyond HFP's range is an exponent overflow, S0CC, and one below it zero (C8)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: NUMVAL_TEST_RULES,
+        claim: "TEST-NUMVAL, TEST-NUMVAL-C and TEST-NUMVAL-F follow the formats of NUMVAL, NUMVAL-C and NUMVAL-F (Language Reference SC27-8713-03, pp. 605-609, 651-655), choosing where they are silent: CR and DB in either case; NUMVAL-C's grouping separator only between digits and before the decimal point; NUMVAL-F's E in either case, spaces allowed around it, its exponent sign optional, and the 16-digit mantissa limit with an exponent not checked; a string that stops short, or holds only spaces, gives its length + 1. NUMVAL-C's currency string defaults to $. NUMVAL-F of a string that breaks them returns zero, as NUMVAL does here",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FUNCTION_CLOCK,
+        claim: "SECONDS-PAST-MIDNIGHT, FORMATTED-CURRENT-DATE, whose offset is therefore +0000, and the year of execution that YEAR-TO-YYYY, DATE-TO-YYYYMMDD and DAY-TO-YYYYDDD window by, read the run unit's clock as UTC to the hundredth of a second, as CURRENT-DATE does here (+0000); z/OS gives local time, and finer seconds (Language Reference SC27-8713-03, p. 631)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: UUID4_SOURCE,
+        claim: "UUID4 takes its 122 random bits from the process's randomly keyed hasher over the clock, not from a cryptographic generator; IBM uses the Message-Security-Assist random number facility where the machine has it (Language Reference SC27-8713-03, p. 669). The version and variant bits are set and the string is lowercase, as IBM's example shows",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FORMATTED_DATETIME_RULES,
+        claim: "The FORMATTED functions, INTEGER-OF-FORMATTED-DATE, SECONDS-FROM-FORMATTED-TIME and TEST-FORMATTED-DATETIME take the formats of the Language Reference (SC27-8713-03, pp. 504-506), choosing where it is silent or inconsistent: the decimal separator of a fractional-seconds format appears in the data, as its rules say, though several of its examples omit it (pp. 561, 566, 568, 629); fractional seconds are truncated; a comma may stand for the period; a UTC format moves the date as well as the time by the offset; a week may be 53 where the ISO year has 53 weeks, though p. 506 says 01 to 52; an offset sign of 0 takes only 00 hours and minutes; INTEGER-OF-FORMATTED-DATE reads the date part alone, as p. 579 says the time part does not change its result. TEST-FORMATTED-DATETIME names the first position at which a field can no longer be in range, or a value longer than its format errs at the first extra character. A format that is not one of IBM's, which Enterprise COBOL refuses at compile time, ends the run here",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

@@ -766,7 +766,7 @@ impl Check<'_> {
             }
             Operand::Literal(_) => {}
             Operand::Function(f) => {
-                if !FUNCTIONS.contains(&f.name.as_str()) {
+                if !FUNCTIONS.contains(&f.name.as_str()) && !rt::intrinsic::FUNCTIONS.contains(&f.name.as_str()) {
                     self.errors.push(Error::at(f.pos, format!("FUNCTION {} is not supported yet", f.name)));
                 }
                 f.args.iter().for_each(|a| self.expr(a));

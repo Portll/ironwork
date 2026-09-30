@@ -13,6 +13,7 @@ pub mod digest;
 pub mod edit;
 pub mod evidence;
 pub mod files;
+pub mod intrinsic;
 pub mod linage;
 pub mod lir;
 pub mod module;

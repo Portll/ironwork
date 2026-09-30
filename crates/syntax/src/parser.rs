@@ -1897,7 +1897,7 @@ impl Parser<'_> {
             Some(Tok::Word(w)) if w == "FUNCTION" => {
                 self.at += 1;
                 let name = self.name("a function name")?;
-                let (mut args, mut modifier) = (Vec::new(), None);
+                let (mut args, mut modifier, mut all_subscripts) = (Vec::new(), None, Vec::new());
                 if self.peek() == Some(&Tok::LParen) && !self.refmod_ahead() {
                     self.at += 1;
                     while !self.accept(&Tok::RParen) {
@@ -1905,11 +1905,17 @@ impl Parser<'_> {
                             modifier = Some(m);
                             continue;
                         }
+                        if self.all_subscript_ahead() {
+                            let (table, all) = self.table_with_all()?;
+                            all_subscripts.push((args.len(), all));
+                            args.push(Expr::Operand(Operand::Ref(table)));
+                            continue;
+                        }
                         args.push(self.expr()?);
                     }
                 }
                 let refmod = self.refmod()?;
-                Ok(Operand::Function(FunctionCall { name, args, modifier, refmod, pos }))
+                Ok(Operand::Function(FunctionCall { name, args, modifier, refmod, all_subscripts, pos }))
             }
             Some(Tok::Word(w)) if w == "LENGTH" && self.word_at(1) == Some("OF") => {
                 self.at += 2;
@@ -1970,6 +1976,55 @@ impl Parser<'_> {
         let length = if self.peek() == Some(&Tok::RParen) { None } else { Some(Box::new(self.expr()?)) };
         self.expect(&Tok::RParen, "')'")?;
         Ok(Some(RefMod { start, length }))
+    }
+
+    /// Whether a reference whose subscripts include the word ALL starts at the cursor.
+    fn all_subscript_ahead(&self) -> bool {
+        if !self.starts_ref() {
+            return false;
+        }
+        let mut at = self.at + 1;
+        while matches!(self.tokens.get(at).map(|t| &t.tok), Some(Tok::Word(w)) if w == "OF" || w == "IN") {
+            at += 2;
+        }
+        if self.tokens.get(at).map(|t| &t.tok) != Some(&Tok::LParen) {
+            return false;
+        }
+        let mut depth = 0;
+        for t in &self.tokens[at..] {
+            match &t.tok {
+                Tok::LParen => depth += 1,
+                Tok::RParen if depth == 1 => return false,
+                Tok::RParen => depth -= 1,
+                Tok::Word(w) if depth == 1 && w == "ALL" => return true,
+                Tok::Period => return false,
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// A table reference with ALL subscripts (Language Reference SC27-8713-03, pp. 501-502): the
+    /// reference, holding 1 for each ALL, and the positions of the ALLs.
+    fn table_with_all(&mut self) -> R<(Ref, Vec<usize>)> {
+        let pos = self.pos();
+        let name = self.name("a data name")?;
+        let mut qualifiers = Vec::new();
+        while self.accept_any(&["OF", "IN"]).is_some() {
+            qualifiers.push(self.name("a qualifier")?);
+        }
+        self.expect(&Tok::LParen, "'('")?;
+        let (mut subscripts, mut all) = (Vec::new(), Vec::new());
+        while !self.accept(&Tok::RParen) {
+            if self.accept_any(&["ALL"]).is_some() {
+                all.push(subscripts.len());
+                subscripts.push(Expr::Operand(Operand::Literal(Literal::Number("1".into()))));
+            } else {
+                subscripts.push(self.expr()?);
+            }
+        }
+        let refmod = self.refmod()?;
+        Ok((Ref { name, qualifiers, subscripts, refmod, pos }, all))
     }
 
     fn reference(&mut self) -> R<Ref> {

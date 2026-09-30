@@ -294,6 +294,9 @@ pub struct FunctionCall {
     /// A keyword argument, as in FUNCTION TRIM(X LEADING).
     pub modifier: Option<String>,
     pub refmod: Option<RefMod>,
+    /// Each argument written as a table with ALL subscripts, as in FUNCTION SUM(T(ALL)): its index
+    /// and the positions of those subscripts, where its reference holds 1.
+    pub all_subscripts: Vec<(usize, Vec<usize>)>,
     pub pos: Pos,
 }
 

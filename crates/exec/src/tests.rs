@@ -10,6 +10,7 @@ mod collating;
 mod data;
 mod data_division;
 mod declaratives;
+mod intrinsic;
 mod linage;
 mod oo;
 mod printer;

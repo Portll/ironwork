@@ -1,0 +1,190 @@
+use super::*;
+
+fn run_at_noon(source: &str) -> (String, Result<Ending, Abend>) {
+    let o = Harness::source(source).clock(unit::Clock::Fixed(1_790_510_400, 42)).run(Executor::Interpreter);
+    (o.out, o.ending)
+}
+
+fn displays(data: &str, statements: &[&str]) -> String {
+    let body: String = statements.iter().flat_map(|s| s.split('\n')).map(line).chain([line("GOBACK.")]).collect();
+    let (out, ending) = run_at_noon(&program("", data, &body));
+    assert!(ending.is_ok(), "{ending:?}");
+    out
+}
+
+fn each_rounded(functions: &[&str]) -> String {
+    let statements: Vec<String> = functions.iter().flat_map(|f| [format!("COMPUTE R ROUNDED =\n    FUNCTION {f}"), "DISPLAY R".to_owned()]).collect();
+    displays("       01  R PIC 999.9(9).\n       01  X COMP-2 VALUE 2.5.\n", &statements.iter().map(String::as_str).collect::<Vec<_>>())
+}
+
+#[test]
+fn the_mathematical_and_financial_functions_give_their_values() {
+    let out = each_rounded(&[
+        "SQRT(2)", "EXP(1)", "LOG(10)", "LOG10(2)", "SIN(1)", "COS(1)", "TAN(1)", "ASIN(0.5)", "ACOS(0.5)", "ATAN(1)", "PI", "E", "EXP10(2)",
+        "ANNUITY(0.25 4)", "PRESENT-VALUE(0.5 1 2 3)",
+    ]);
+    assert_eq!(
+        out,
+        [
+            "001.414213562", "002.718281828", "002.302585093", "000.301029996", "000.841470985", "000.540302306", "001.557407725", "000.523598776",
+            "001.047197551", "000.785398163", "003.141592654", "002.718281828", "100.000000000", "000.423441734", "002.444444444",
+        ]
+        .map(|s| format!("{s}\n"))
+        .concat()
+    );
+}
+
+#[test]
+fn the_statistics_and_mixed_functions_follow_their_arguments() {
+    let out = each_rounded(&[
+        "MEAN(1 2 3 4)", "MEDIAN(3 1 2)", "MEDIAN(4 1 3 2)", "MIDRANGE(1 9 4)", "VARIANCE(2 4 4 4 5 5 7 9)", "STANDARD-DEVIATION(2 4 4 4 5 5 7 9)",
+        "SUM(1.5 2.25 3)", "RANGE(3 9.5 1)", "ORD-MAX(3 9 1)", "ORD-MIN(3 9 1)", "MAX(X 1)", "SUM(X 1)", "FACTORIAL(5)", "SIGN(0)",
+    ]);
+    assert_eq!(
+        out,
+        [
+            "002.500000000", "002.000000000", "002.500000000", "005.000000000", "004.000000000", "002.000000000", "006.750000000", "008.500000000",
+            "002.000000000", "003.000000000", "002.500000000", "003.500000000", "120.000000000", "000.000000000",
+        ]
+        .map(|s| format!("{s}\n"))
+        .concat()
+    );
+}
+
+#[test]
+fn all_subscripts_take_every_element_and_stop_at_the_depending_on_count() {
+    let data = "       01  T VALUE '010020030040050'.\n           05 N PIC 9(3) OCCURS 5.\n       01  C PIC 9 VALUE 5.\n       01  D.\n           05 V PIC 9(3) OCCURS 1 TO 5 DEPENDING ON C.\n       01  G VALUE '123456'.\n           05 ROW OCCURS 2.\n              10 CELL PIC 9 OCCURS 3.\n       01  S PIC 9(4).\n";
+    let out = displays(
+        data,
+        &[
+            "COMPUTE S = FUNCTION SUM(N(ALL))",
+            "DISPLAY S",
+            "COMPUTE S = FUNCTION MAX(N(ALL)) + FUNCTION ORD-MIN(N(ALL))",
+            "DISPLAY S",
+            "MOVE '001002003004005' TO D",
+            "MOVE 3 TO C",
+            "COMPUTE S = FUNCTION SUM(V(ALL))",
+            "DISPLAY S",
+            "COMPUTE S = FUNCTION SUM(CELL(ALL, 2))",
+            "DISPLAY S",
+            "COMPUTE S = FUNCTION SUM(CELL(1 ALL)) * 100\n    + FUNCTION SUM(CELL(ALL ALL))",
+            "DISPLAY S",
+            "COMPUTE S = FUNCTION ORD-MAX(CELL(ALL, ALL))\n    + FUNCTION SUM(N(ALL) 1000)",
+            "DISPLAY S",
+        ],
+    );
+    assert_eq!(out, "0150\n0051\n0006\n0007\n0621\n1156\n");
+}
+
+#[test]
+fn the_date_functions_window_years_from_the_clock() {
+    let out = displays(
+        "       01  S PIC 9(8).\n       01  F PIC 9(5)V99.\n",
+        &[
+            "COMPUTE S = FUNCTION YEAR-TO-YYYY(4)",
+            "DISPLAY S",
+            "COMPUTE S = FUNCTION DATE-TO-YYYYMMDD(851003)",
+            "DISPLAY S",
+            "COMPUTE S = FUNCTION DAY-TO-YYYYDDD(95005, -10)",
+            "DISPLAY S",
+            "COMPUTE S = FUNCTION DAY-OF-INTEGER(143951)",
+            "DISPLAY S",
+            "COMPUTE S = FUNCTION INTEGER-OF-DAY(1995046)",
+            "DISPLAY S",
+            "COMPUTE S = FUNCTION TEST-DATE-YYYYMMDD(19950240) * 10\n    + FUNCTION TEST-DAY-YYYYDDD(1995446)",
+            "DISPLAY S",
+            "COMPUTE F ROUNDED = FUNCTION SECONDS-PAST-MIDNIGHT",
+            "DISPLAY F",
+        ],
+    );
+    assert_eq!(out, "00002004\n19851003\n01995005\n01995046\n00143951\n00000032\n4320042\n");
+}
+
+#[test]
+fn the_character_functions_read_storage_as_it_is() {
+    let data = "       01  BIN PIC 9(9) BINARY VALUE 12.\n       01  PAC PIC 9(5) COMP-3 VALUE 12345.\n       01  BAD REDEFINES PAC PIC X(3).\n       01  ZON PIC 9(5) VALUE 12345.\n       01  NAT PIC N(3) VALUE N'ABC'.\n       01  U PIC X(36).\n       01  L PIC 9(3).\n";
+    let out = displays(
+        data,
+        &[
+            "DISPLAY FUNCTION HEX-OF('Hello, world!')",
+            "DISPLAY FUNCTION HEX-OF(BIN) ' '\n    FUNCTION HEX-OF(PAC) ' ' FUNCTION HEX-OF(ZON)",
+            "DISPLAY FUNCTION BIT-OF(PAC)",
+            "MOVE 'ABC' TO BAD",
+            "DISPLAY FUNCTION HEX-OF(PAC)",
+            "DISPLAY FUNCTION HEX-TO-CHAR('C1c2')\n    FUNCTION BIT-TO-CHAR('1100001111000100')",
+            "COMPUTE L = FUNCTION BYTE-LENGTH(BIN) * 10\n    + FUNCTION BYTE-LENGTH(NAT)",
+            "DISPLAY L",
+            "DISPLAY FUNCTION DISPLAY-OF(NAT)\n    FUNCTION DISPLAY-OF(FUNCTION NATIONAL-OF('XYZ'), 37)",
+            "MOVE FUNCTION UUID4 TO U",
+            "DISPLAY U(9:1) U(14:1) U(15:1) U(19:1) U(24:1)",
+        ],
+    );
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(&lines[..7], ["C8859393966B40A6969993845A", "0000000C 12345F F1F2F3F4F5", "000100100011010001011111", "C1C2C3", "ABCD", "046", "ABCXYZ"]);
+    assert_eq!(lines[7], "--4--");
+}
+
+#[test]
+fn the_numval_tests_and_numval_f_take_ibms_formats() {
+    let out = displays(
+        "       01  S PIC 9(4).\n       01  F PIC 9(4)V9(4).\n",
+        &[
+            "COMPUTE S = FUNCTION TEST-NUMVAL('0 1')",
+            "DISPLAY S",
+            "COMPUTE S = FUNCTION TEST-NUMVAL-C('  $12,345.67CR')",
+            "DISPLAY S",
+            "COMPUTE S = FUNCTION TEST-NUMVAL-C('CHF 12' 'CHF')\n    + FUNCTION TEST-NUMVAL-F('1.5E+12345')",
+            "DISPLAY S",
+            "COMPUTE F ROUNDED = FUNCTION NUMVAL-F('+ 12.345678E+2')",
+            "DISPLAY F",
+        ],
+    );
+    assert_eq!(out, "0003\n0000\n0010\n12345678\n");
+}
+
+#[test]
+fn a_floating_point_function_makes_its_expression_floating_point() {
+    let out = displays(
+        "       01  X COMP-2 VALUE 2.5.\n",
+        &["IF FUNCTION SQRT(16) = 4 DISPLAY 'FOUR' END-IF", "IF FUNCTION MAX(X 3) > 2.9 DISPLAY 'MAX' END-IF", "DISPLAY FUNCTION MAX('AB' 'B')"],
+    );
+    assert_eq!(out, "FOUR\nMAX\nB\n");
+}
+
+#[test]
+fn an_argument_outside_a_functions_domain_ends_the_run() {
+    let ending = |statement: &str| run_at_noon(&program("", "       01  X COMP-2.\n", &[line(statement), line("GOBACK.")].concat())).1.unwrap_err().message;
+    assert!(ending("COMPUTE X = FUNCTION SQRT(-1)").contains("FUNCTION SQRT(-1): the argument must be zero or positive"));
+    assert!(ending("COMPUTE X = FUNCTION LOG(0)").contains("FUNCTION LOG(0): the argument must be greater than zero"));
+    assert!(ending("COMPUTE X = FUNCTION ACOS(2)").contains("FUNCTION ACOS(2): the argument must be from -1 to +1"));
+    assert!(ending("COMPUTE X = FUNCTION FACTORIAL(29)").contains("FUNCTION FACTORIAL(29): the argument must be from 0 to 28"));
+    assert!(ending("MOVE FUNCTION HEX-TO-CHAR('ABC') TO X").contains("a multiple of 2"));
+    assert!(ending("COMPUTE X = FUNCTION EXP(200)").contains("HfpExponentOverflow"));
+}
+
+#[test]
+fn the_formatted_functions_write_and_read_ibms_formats() {
+    let out = displays(
+        "       01  S PIC 9(7).\n       01  F PIC 9(5)V99.\n       01  N PIC N(8).\n",
+        &[
+            "DISPLAY FUNCTION FORMATTED-CURRENT-DATE(\n    'YYYY-MM-DDThh:mm:ss.ss+hh:mm')",
+            "DISPLAY FUNCTION FORMATTED-DATE('YYYYMMDD' 143951)",
+            "DISPLAY FUNCTION FORMATTED-TIME('hhmmss.ss+hhmm'\n    18867.812479168304 -300)",
+            "DISPLAY FUNCTION FORMATTED-TIME('hh:mm:ssZ' 18867 -300)",
+            "DISPLAY FUNCTION FORMATTED-DATETIME('YYYYMMDDThhmmss'\n    143951 86399)",
+            "DISPLAY FUNCTION FORMATTED-DATETIME(\n    'YYYY-MM-DDThh:mm:ssZ' 143951 82800 -120)",
+            "COMPUTE S = FUNCTION INTEGER-OF-FORMATTED-DATE(\n    'YYYYMMDDThhmmss.ss+hhmm' '19950215T051427.81+0500')",
+            "DISPLAY S",
+            "COMPUTE F ROUNDED = FUNCTION SECONDS-FROM-FORMATTED-TIME(\n    'hhmmss.ss+hhmm' '051427.81+0500')",
+            "DISPLAY F",
+            "COMPUTE S = FUNCTION TEST-FORMATTED-DATETIME(\n    'YYYYMMDD' '20051314')",
+            "DISPLAY S",
+            "MOVE FUNCTION FORMATTED-DATE(N'YYYYMMDD' 143951) TO N",
+            "DISPLAY FUNCTION DISPLAY-OF(N)",
+        ],
+    );
+    assert_eq!(
+        out,
+        "2026-09-27T12:00:00.42+00:00\n19950215\n051427.81-0500\n10:14:27Z\n19950215T235959\n1995-02-16T01:00:00Z\n0143951\n1886781\n0000006\n19950215\n"
+    );
+}

@@ -200,11 +200,13 @@ The subset the interpreter runs today:
   DAY-OF-WEEK, TIME), INITIALIZE, SET (condition TO TRUE or FALSE, index TO/UP BY/DOWN BY,
   pointer TO ADDRESS OF/NULL, ADDRESS OF TO pointer), GO TO [DEPENDING ON], ALTER and the altered GO TO (put
   back by CANCEL, IS INITIAL and entry to an independent segment: assumption C52), GOBACK, STOP
-  RUN; subscripts, reference modification, LENGTH OF, ADDRESS OF, and the functions ABS, CHAR,
-  CURRENT-DATE, DATE-OF-INTEGER, INTEGER, INTEGER-OF-DATE, INTEGER-PART, LENGTH, LOWER-CASE, MAX,
-  MIN, MOD, NATIONAL-OF, NUMVAL, NUMVAL-C, ORD, RANDOM (a generator of ironwork's choosing,
-  assumption C54), REM, REVERSE, TRIM and UPPER-CASE. What is not Enterprise COBOL is refused as
-  such: `<>`, literals joined with `&`, SET ENVIRONMENT and ACCEPT ... FROM ENVIRONMENT.
+  RUN; subscripts, reference modification, LENGTH OF, ADDRESS OF, and the intrinsic functions of
+  Enterprise COBOL 6.4 but WHEN-COMPILED, COMBINED-DATETIME, CONTENT-OF and the Unicode functions
+  ULENGTH, UPOS, USUBSTR, USUPPLEMENTARY, UVALID and UWIDTH, with table arguments written with ALL
+  subscripts. The floating-point functions (SQRT, LOG, SIN and the rest, assumption C111) are
+  computed to 128 bits and rounded to long or extended HFP (C110); RANDOM is a generator of
+  ironwork's choosing (C54). What is not Enterprise COBOL is refused as such: `<>`, literals joined
+  with `&`, SET ENVIRONMENT and ACCEPT ... FROM ENVIRONMENT.
 - **Subprograms:** several and nested programs per source; CALL (static and dynamic) USING BY
   REFERENCE, BY CONTENT, BY VALUE and OMITTED, RETURNING, ON EXCEPTION; PROCEDURE DIVISION USING
   and RETURNING; ENTRY [USING], whose name a CALL begins at and whose USING list alone gives LINKAGE
