@@ -143,6 +143,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ironwork-jcl"
+version = "0.1.1"
+
+[[package]]
 name = "ironwork-numeric"
 version = "0.1.1"
 dependencies = [
@@ -169,6 +173,7 @@ name = "ironwork-tls"
 version = "0.1.1"
 dependencies = [
  "ironwork-exec",
+ "ironwork-jcl",
  "ironwork-numeric",
  "ironwork-syntax",
  "rcgen",

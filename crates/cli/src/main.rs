@@ -13,6 +13,8 @@ usage:
                [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]... [--td QUEUE=path]...
                [--screens path | --serve HOST:PORT [--transaction TRAN=PROGRAM]... [--csd path]]
                                                        run as the first program of a CICS task
+  ironwork job <job.jcl> --datasets DIR[:text] [run flags] [-I <dir>]... [-L <dir>]... [--clock <time>] [--sql-replay path]
+                                                       run a job's steps in order
   ironwork assumptions [--c-series]                    list the register of assumptions, one per line
   ironwork --version
 flags:
@@ -104,6 +106,18 @@ cics flags:
              with --serve, the region's transactions from a CICS system definition, as DFHCSDUP
              reads it: each DEFINE TRANSACTION runs its PROGRAM. --transid and --transaction win
              over it
+job flags:
+  --datasets DIR[:text]
+             the job's data sets: DSN=A.B is the file DIR/A.B and DSN=A.B(M) the file DIR/A.B/M, a
+             partitioned data set being a directory of members. They hold z/OS records, or UTF-8
+             lines with :text; in-stream data and SYSOUT are always lines. Each EXEC PGM= runs a
+             COBOL program found in -L as PGM.cbl or PGM.cob, or IEFBR14, or IEBGENER without
+             control statements; DISP creates, keeps and deletes data sets as each step ends, and
+             COND and IF/THEN/ELSE choose the steps. A step's DISPLAY output and its SYSOUT DDs go
+             to standard output, a line per step to standard error. What the job uses that
+             ironwork does not run (procedures, symbolic parameters, PARM, DISP=MOD, SORT, IDCAMS
+             and IBM's other programs) is refused before any step runs. Exit status: the highest
+             return code, 16 when a step abended or a JCL error ended the job, 2 for a job refused
 assumptions flags:
   --c-series
              put each entry's number in one C series first, its position in the register, with the
@@ -138,6 +152,7 @@ const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid",
 mod compare;
 mod ddl;
 mod evidence;
+mod job;
 mod provenance;
 
 fn usage_error(message: &str) -> ExitCode {
@@ -186,6 +201,7 @@ fn driver() -> ExitCode {
     let mut provenance_file: Option<std::path::PathBuf> = None;
     let (mut compare_base, mut compare_head, mut declare, mut statement) = (None, None, None, None);
     let mut expected: Vec<(String, std::path::PathBuf)> = Vec::new();
+    let mut datasets: Option<String> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "-h" | "--help" => {
@@ -219,6 +235,10 @@ fn driver() -> ExitCode {
             "--evidence" => match args.next() {
                 Some(dir) => evidence_dir = Some(std::path::PathBuf::from(dir)),
                 None => return usage_error("--evidence needs a directory"),
+            },
+            "--datasets" => match args.next() {
+                Some(dir) => datasets = Some(dir),
+                None => return usage_error("--datasets needs a directory"),
             },
             "--dd" => match args.next() {
                 Some(spec) => dds.push(spec),
@@ -293,6 +313,22 @@ fn driver() -> ExitCode {
             exec::unit::Clock::System => exec::unit::Clock::Fixed(1_767_225_600, 0),
             fixed => fixed,
         }, replay: replay.map(std::path::PathBuf::from), expected, declare, statement });
+    }
+    if let [c, file] = rest.as_slice()
+        && c == "job"
+    {
+        let Some(dir) = datasets else { return usage_error("job needs --datasets DIR") };
+        if !dds.is_empty() || sql_db.is_some() || evidence_dir.is_some() || provenance_file.is_some() || !cics_options.is_empty() {
+            return usage_error("job takes its DDs from the JCL; --dd, --sql-db, --evidence, --provenance and the cics flags are not for job");
+        }
+        let (dir, text) = match dir.strip_suffix(":text") {
+            Some(d) => (d.to_string(), true),
+            None => (dir, false),
+        };
+        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, flags, clock, replay: replay.map(std::path::PathBuf::from) });
+    }
+    if datasets.is_some() {
+        return usage_error("--datasets is for job");
     }
     if compare_base.is_some() || compare_head.is_some() || !expected.is_empty() || declare.is_some() || statement.is_some() {
         return usage_error("--base, --head, --expected, --declare and --statement are for compare");

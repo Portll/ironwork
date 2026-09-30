@@ -13,6 +13,7 @@ path = "../crates/cli/src/main.rs"
 
 [dependencies]
 exec = { package = "ironwork-exec", path = "../crates/exec" }
+jcl = { package = "ironwork-jcl", path = "../crates/jcl" }
 numeric = { package = "ironwork-numeric", path = "../crates/numeric" }
 syntax = { package = "ironwork-syntax", path = "../crates/syntax" }
 rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"] }

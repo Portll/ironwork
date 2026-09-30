@@ -1,0 +1,15 @@
+[package]
+name = "ironwork-jcl"
+description = "ironwork for COBOL: a reader for z/OS job control language"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true

@@ -7,6 +7,7 @@ name = "ironwork"
 version = "0.1.1"
 dependencies = [
  "ironwork-exec",
+ "ironwork-jcl",
  "ironwork-numeric",
  "ironwork-syntax",
 ]
@@ -21,6 +22,10 @@ dependencies = [
  "ironwork-syntax",
  "ironwork-zarch",
 ]
+
+[[package]]
+name = "ironwork-jcl"
+version = "0.1.1"
 
 [[package]]
 name = "ironwork-numeric"

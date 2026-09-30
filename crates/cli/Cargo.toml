@@ -13,6 +13,7 @@ categories.workspace = true
 
 [dependencies]
 exec = { package = "ironwork-exec", path = "../exec", version = "0.1.1" }
+jcl = { package = "ironwork-jcl", path = "../jcl", version = "0.1.1" }
 numeric = { package = "ironwork-numeric", path = "../numeric", version = "0.1.1" }
 syntax = { package = "ironwork-syntax", path = "../syntax", version = "0.1.1" }
 
