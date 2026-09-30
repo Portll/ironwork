@@ -19,7 +19,7 @@ use syntax::ast::*;
 use zarch::check::{ProgramCheck, ProgramMask};
 use zarch::decimal::{self, Decimal};
 use zarch::ebcdic::{self, CodePage, Collation};
-use zarch::hfp::{Hfp, Precision};
+use zarch::hfp::{Hfp, Precision, Rounding};
 use zarch::wide::U256;
 
 mod cics;
@@ -1428,6 +1428,14 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 };
                 Val::Bytes(trimmed)
             }
+            "MOD" | "REM" | "INTEGER" | "INTEGER-PART" | "ABS" | "MIN" | "MAX" if args.iter().any(|v| matches!(v, Val::Float(_))) => {
+                arity(match f.name.as_str() {
+                    "MOD" | "REM" => 2..=2,
+                    "MIN" | "MAX" => 1..=usize::MAX,
+                    _ => 1..=1,
+                })?;
+                self.float_function(&f.name, &args, pos)?
+            }
             "MOD" | "REM" | "INTEGER" | "INTEGER-PART" | "ABS" => {
                 arity(if matches!(f.name.as_str(), "MOD" | "REM") { 2..=2 } else { 1..=1 })?;
                 let number = |v: &Val| match v {
@@ -1532,6 +1540,57 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
     }
 
+    /// A numeric function with a floating-point argument. ABS, REM, MIN and MAX are then evaluated in
+    /// floating point and return it; INTEGER and INTEGER-PART return an integer of 30 digits, 31
+    /// under ARITH(EXTEND) (Programming Guide SC27-8714-03, pp. 799 and 801); MOD takes integers
+    /// only (Language Reference SC27-8713-03, p. 507). Assumption FLOAT_FUNCTION_ARGUMENTS.
+    fn float_function(&self, name: &str, args: &[Val], pos: Pos) -> R<Val> {
+        let p = self.options.arith.float_intermediate();
+        let check = |r: Result<Hfp, ProgramCheck>| r.map_err(|c| Abend::check(c, pos));
+        let float = |v: &Val| match v {
+            Val::Float(h) if h.precision.digits() <= p.digits() => Ok(h.lengthen(p)),
+            Val::Float(h) => Ok(float::narrow(*h, p)),
+            Val::Num(x) => check(float::from_fixed(*x, p, ProgramMask::default())),
+            _ => Err(Abend::ironwork(format!("FUNCTION {name} needs numeric arguments"), pos)),
+        };
+        let whole = |h: Hfp| h.to_integer(Rounding::TowardZero).ok_or_else(|| Abend::ironwork(format!("FUNCTION {name} of a floating-point value beyond 38 digits"), pos));
+        let x = float(&args[0])?;
+        Ok(match name {
+            "ABS" => Val::Float(Hfp { negative: false, ..x }),
+            "INTEGER" | "INTEGER-PART" => {
+                let t = whole(x)?;
+                let below = name == "INTEGER" && x.negative && Hfp::from_integer(t, p).compare(x) != Ordering::Equal;
+                let t = t - i128::from(below);
+                let digits = if self.options.arith == numeric::Arith::Compat { 30 } else { 31 };
+                if t.unsigned_abs() >= 10u128.pow(digits) {
+                    return Err(Abend::ironwork(format!("FUNCTION {name} of a floating-point value beyond {digits} digits"), pos));
+                }
+                Val::Num(Fixed::new(t, Places::new(digits, 0)))
+            }
+            "REM" => {
+                let y = float(&args[1])?;
+                if y.fraction == 0 {
+                    return Err(Abend::ironwork("FUNCTION REM by zero", pos));
+                }
+                let q = check(x.div(y, ProgramMask::default()))?;
+                let part = Hfp::from_integer(whole(q)?, p);
+                Val::Float(check(x.sub(check(y.mul(part, p, ProgramMask::default()))?, ProgramMask::default()))?)
+            }
+            "MIN" | "MAX" => {
+                let want = if name == "MIN" { Ordering::Less } else { Ordering::Greater };
+                let mut best = x;
+                for v in &args[1..] {
+                    let y = float(v)?;
+                    if y.compare(best) == want {
+                        best = y;
+                    }
+                }
+                Val::Float(best)
+            }
+            _ => return Err(Abend::ironwork(format!("FUNCTION {name} needs integer arguments, and a floating-point argument is not one"), pos)),
+        })
+    }
+
     /// FUNCTION RANDOM: the next number of the run unit's sequence, as long HFP. A seed starts a
     /// new sequence (Language Reference SC27-8713-03, p. 629); the generator is assumption C54.
     fn random(&mut self, seed: Option<i64>, pos: Pos) -> R<Hfp> {
@@ -1568,7 +1627,17 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     fn uses_float(&mut self, e: &Expr) -> R<bool> {
         Ok(match e {
-            Expr::Operand(Operand::Function(f)) => f.name == "RANDOM",
+            Expr::Operand(Operand::Function(f)) => match f.name.as_str() {
+                "RANDOM" => true,
+                "ABS" | "REM" | "MIN" | "MAX" => {
+                    let mut any = false;
+                    for a in &f.args {
+                        any |= self.uses_float(a)?;
+                    }
+                    any
+                }
+                _ => false,
+            },
             Expr::Operand(op) => matches!(self.operand_kind(op)?, Some(Kind::Float(_))),
             Expr::Neg(inner) => self.uses_float(inner)?,
             Expr::Bin(a, _, b) => self.uses_float(a)? || self.uses_float(b)?,

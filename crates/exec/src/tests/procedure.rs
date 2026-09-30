@@ -484,3 +484,27 @@ fn passing_the_end_of_a_repeated_perform_left_by_go_to_is_refused() {
     assert_eq!(out, "P1\n");
     assert!(ending.unwrap_err().message.starts_with("control passed the end of P2, which is armed to return to a PERFORM that control left by GO TO"));
 }
+
+#[test]
+fn numeric_functions_take_floating_point_arguments() {
+    let source = |statement: &str| {
+        program(
+            "",
+            "       01  F COMP-2.\n       01  R PIC -9(4).99.\n",
+            &[line("MOVE -2.5 TO F"), line(statement), line("DISPLAY R"), line("GOBACK.")].concat(),
+        )
+    };
+    for (statement, shown) in [
+        ("COMPUTE R = FUNCTION INTEGER(F)", "-0003.00"),
+        ("COMPUTE R = FUNCTION INTEGER-PART(F)", "-0002.00"),
+        ("COMPUTE R = FUNCTION INTEGER(100 * F)", "-0250.00"),
+        ("COMPUTE R = FUNCTION ABS(F) + 1", " 0003.50"),
+        ("COMPUTE R = FUNCTION REM(F * 3, 2)", "-0001.50"),
+        ("COMPUTE R = FUNCTION MAX(1, F, 0.25)", " 0001.00"),
+        ("COMPUTE R = FUNCTION MIN(1, F, 0.25)", "-0002.50"),
+    ] {
+        assert_eq!(run(&source(statement)), format!("{shown}\n"), "{statement}");
+    }
+    let (_, _, ending) = run_with(&source("COMPUTE R = FUNCTION MOD(F, 2)"), &[]);
+    assert_eq!(ending.unwrap_err().message, "FUNCTION MOD needs integer arguments, and a floating-point argument is not one");
+}

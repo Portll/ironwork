@@ -197,6 +197,7 @@ pub const ARITH_DIGIT_LIMITS: &str = "C96";
 pub const MULTIPLE_RESULTS: &str = "C97";
 pub const ALTER_DEBUGGING: &str = "C98";
 pub const PERFORM_RETURN_POINTS: &str = "C99";
+pub const FLOAT_FUNCTION_ARGUMENTS: &str = "C100";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1204,6 +1205,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: PERFORM_RETURN_POINTS,
         claim: "An out-of-line PERFORM arms a return point at the end of its range's last paragraph (Language Reference SC27-8713-03, p. 419), one per activation, since a CALL resets return points (Programming Guide SC27-8714-03, p. 547). Control that passes that end by any path, falling through or by GO TO, returns to the PERFORM, so PERFORM B THRU A with A before B returns when control reaches the end of A, and a range that passes the end of another active PERFORM's range returns there to that PERFORM. Neither manual says what a PERFORM that control leaves by GO TO leaves behind: its return point stays armed, as the Programming Guide's warning against ranges that keep control from the end implies (p. 772), until control passes it and returns after that PERFORM, which then puts back the point it displaced; ironwork refuses at run time to return so into a PERFORM that repeats or is inside another statement. EXIT SECTION goes to the end of the section, past the return point of a performed paragraph in it (LR p. 345)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FLOAT_FUNCTION_ARGUMENTS,
+        claim: "A floating-point argument, item or expression, is allowed wherever a function takes a numeric argument and refused where it takes an integer (Language Reference SC27-8713-03, p. 507). INTEGER and INTEGER-PART of one return an integer of 30 digits, 31 under ARITH(EXTEND), and ABS, MAX, MIN and REM with one are evaluated in floating point and return it (Programming Guide SC27-8714-03, pp. 799 and 801). The guide names REM a mixed function where the Language Reference types it numeric (p. 633), and gives the precision only of floating-point functions: a mixed function is evaluated here in long floating point, extended under ARITH(EXTEND), as they are",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
