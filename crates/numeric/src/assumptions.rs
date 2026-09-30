@@ -160,6 +160,10 @@ pub const COMMENT_ENTRY_EXTENT: &str = "C80";
 pub const COMMENT_ENTRY_HEADERS: &str = "C81";
 pub const COMMENT_ENTRY_REMARKS: &str = "C82";
 pub const CONTINUED_LITERAL_QUOTES: &str = "C83";
+pub const COPY_SEARCH_ROUNDS: &str = "C85";
+pub const COPY_NOT_THE_PROGRAM: &str = "C86";
+pub const COPY_LITERAL_AS_WRITTEN: &str = "C87";
+pub const COPY_DOUBLED_PERIOD: &str = "C88";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -946,6 +950,30 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: CONTINUED_LITERAL_QUOTES,
         claim: "A continuation line of an alphanumeric or national literal left open at column 72 has a hyphen in column 7 and a quotation mark as its first nonblank character, and the literal resumes after that mark. When a literal's closing quotation mark is in column 72 and the continuation line starts with two, the pair stands for one quotation mark in one literal; otherwise, a quotation mark that starts a continuation line after a closed literal starts a second literal (Language Reference SC27-8713-03, p. 58). The rules hold for apostrophes alike, and ironwork gives the pair precedence where both could apply",
         basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: COPY_SEARCH_ROUNDS,
+        claim: "A COPY member is looked for in three rounds, each through every copy library in order (the program's own directory, then each -I directory) before the next begins: as NAME.cpy, .CPY, .copy and .COPY; then as .cbl, .CBL, .cob and .COB; then as the name alone; each extension with the name as written, then upper-cased, then lower-cased. In one z/OS UNIX directory IBM tries .cpy, .CPY, .cbl, .CBL, .cob and .COB, each with the name upper- and lower-cased (Language Reference SC27-8713-03, p. 705), and the name alone last (Programming Guide SC27-8714-03, p. 440), searching the current directory, the -I directories and SYSLIB's in turn (LR p. 705, PG p. 441); it does not say whether an earlier directory's .cbl comes before a later one's .cpy. A compile from JCL searches SYSLIB's data sets, then COPYLOC's (LR p. 705), which hold copybooks and not the library the program is read from, so the rounds take a copybook in any library before a program source. .copy is not IBM's, and the name as written, which IBM folds to upper case (PG p. 440), comes first, so that on a file system that ignores case a message names the member as the program spells it; the order differs from IBM's only where two files' names differ only in case",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: COPY_NOT_THE_PROGRAM,
+        claim: "The file being compiled is never a COPY member of its own compilation, at any depth of nesting: a compile from JCL reads the program from SYSIN and looks for members in SYSLIB and COPYLOC (Language Reference SC27-8713-03, p. 705), so a member named as the program comes from another file or is not found. The program's own directory is a copy library only as ironwork's stand-in for the current directory cob2 searches first (p. 705). Any other member a chain of COPY statements reaches while it is still being copied is refused, as a nested COPY cannot cause recursion (p. 697)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: COPY_LITERAL_AS_WRITTEN,
+        claim: "A text-name written as a literal is looked for as written first, through every library, and then with extensions as a user-defined word is (COPY_SEARCH_ROUNDS). IBM takes a literal as the file name, relative path or absolute path it spells (Programming Guide SC27-8714-03, p. 440) and adds extensions only to a name that is not a literal (Language Reference SC27-8713-03, p. 705); the extensions are ironwork's, for sources written for compilers that add them",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: COPY_DOUBLED_PERIOD,
+        claim: "COPY X.. is refused, naming X.: a COPY statement ends with a separator period (Language Reference SC27-8713-03, p. 697), which is a period followed by a space (pp. 49-50), so the name is X., not X. A text-name or library-name for a data set holds only letters, digits and hyphens (p. 696); in z/OS UNIX directories any COBOL character may appear (p. 697), and X. would then name X..cpy and the like, not X's file. The manuals do not say whether Enterprise COBOL instead reads X and a separator period, leaving the second period in the text, as GnuCOBOL 3.2 does",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

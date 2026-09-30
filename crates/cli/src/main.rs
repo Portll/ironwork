@@ -320,7 +320,7 @@ fn driver() -> ExitCode {
         },
         None => None,
     };
-    let libraries = syntax::copy::Libraries::new(std::iter::once(own_directory.clone()).chain(libraries).collect());
+    let libraries = syntax::copy::Libraries::new(std::iter::once(own_directory.clone()).chain(libraries).collect()).with_program(std::path::Path::new(path));
     let mut programs = match syntax::parse_all_with(&text, &libraries) {
         Ok(p) => p,
         Err(e) => return evidence::finish(journal, i64::from(report(std::slice::from_ref(&e), path))),
@@ -525,7 +525,7 @@ impl Transactions {
                     .ok_or_else(|| format!("program {name} not found"))?;
                 let shown = path.display().to_string();
                 let text = fs::read(&path).map(|b| syntax::copy::decode(&b)).map_err(|e| format!("{shown}: {e}"))?;
-                let parsed = syntax::parse_all_with(&text, &self.library.copy).map_err(|e| e.place(&shown))?;
+                let parsed = syntax::parse_all_with(&text, &self.library.copy.with_program(&path)).map_err(|e| e.place(&shown))?;
                 let at = self.library.programs.len();
                 self.library.programs.extend(parsed);
                 at

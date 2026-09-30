@@ -23,8 +23,11 @@ From a checkout:
     cargo run -p ironwork -- check program.cbl [-I copylib]...
 
 CBL and PROCESS cards set the options. COPY members are found in the program's own directory, then
-each `-I` library. CALL finds a program among the others in the same source, then in the program's
-directory and each `-L` library, by name; a dynamic CALL can name only such a member, never a path.
+each `-I` library: a copybook (`.cpy`, `.copy`) in any of them before a program source (`.cbl`,
+`.cob`), and either before a file named as the member alone, which a literal name tries first; the
+program being compiled is never its own member. CALL finds a program among the others in the same
+source, then in the program's directory and each `-L` library, by name; a dynamic CALL can name only
+such a member, never a path.
 `ASSIGN` names a DD, and a program reaches only the files its DDs are given, by `--dd` or `DD_NAME`
 in the environment, as JCL gives them on z/OS; DD SYSIN is what ACCEPT reads, standard input
 otherwise. An indexed or relative file's DD holds its records in key order, as an IDCAMS REPRO

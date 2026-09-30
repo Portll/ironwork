@@ -191,7 +191,7 @@ impl<'w> RunUnit<'w> {
             .find(|p| p.is_file())
             .ok_or(LoadError::NotFound)?;
         let text = std::fs::read(&path).map(|b| copy::decode(&b)).map_err(|e| LoadError::Compile(format!("{}: {e}", path.display())))?;
-        let mut programs = syntax::parse_all_with(&text, &self.library.copy)
+        let mut programs = syntax::parse_all_with(&text, &self.library.copy.with_program(&path))
             .map_err(|e| LoadError::Compile(format!("{name} does not compile: {}", e.place(&path.display().to_string()))))?;
         let first = programs.remove(0);
         self.library.programs.extend(programs);

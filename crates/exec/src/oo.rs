@@ -977,7 +977,7 @@ pub(crate) fn find_class(library: &mut crate::unit::Library, external: &str) -> 
                         continue;
                     }
                     let text = std::fs::read(&path).map(|b| syntax::copy::decode(&b)).map_err(|e| format!("{}: {e}", path.display()))?;
-                    let mut programs = syntax::parse_all_with(&text, &library.copy).map_err(|e| format!("class {external} does not compile: {}", e.place(&path.display().to_string())))?;
+                    let mut programs = syntax::parse_all_with(&text, &library.copy.with_program(&path)).map_err(|e| format!("class {external} does not compile: {}", e.place(&path.display().to_string())))?;
                     if defined_class(&programs[0]).as_deref() == Some(external) {
                         return Ok(Some(programs.remove(0)));
                     }

@@ -2,6 +2,19 @@
 """Run `ironwork check` over a fixed sample of a COBOL corpus and tally the first reason each
 program is refused.
 
+Each directory under the corpus root is a repository, and each program is given, as -I libraries
+in sorted order, the directories a z/OS build of its repository would concatenate in SYSLIB:
+
+- every directory of the repository holding a .cpy or .copy file;
+- every directory holding a member the program copies, directly or through another member. A
+  COPY or EXEC SQL INCLUDE of NAME finds a file of the repository named NAME, or NAME with an
+  extension ironwork tries or a BMS map's (.cpy, .copy, .cbl, .cob, .bms, in any case); where
+  NAME is a path relative to a library, as in `COPY "swd/mod/int/v"`, the library is the
+  directory that path starts from.
+
+A .cbl or .cob file holding a PROGRAM-ID is a program, never a member, since SYSLIB holds
+copybooks; an absolute or backslashed path names no member.
+
 usage: census.py <ironwork binary> <corpus dir> [sample size] [seed]
 """
 import collections, os, random, re, subprocess, sys
@@ -20,6 +33,67 @@ def programs(root):
         for f in files:
             if f.lower().endswith((".cbl", ".cob")):
                 yield os.path.join(dirpath, f)
+
+MEMBER_EXTENSIONS = ("", ".cpy", ".copy", ".cbl", ".cob", ".bms")
+COPIES = re.compile(r"""(?<!\S)(?:COPY|INCLUDE)\s+("[^"\n]+"|'[^'\n]+'|[^\s"'.]+(?:\.[^\s"'.]+)*)""", re.I)
+
+def read(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read().decode("latin-1")
+    except OSError:
+        return ""
+
+def copied_names(path):
+    """The names a file's COPY and EXEC SQL INCLUDE statements give, comment lines aside."""
+    lines = [line.split("*>")[0] for line in read(path).splitlines() if not (len(line) > 6 and line[6] in "*/")]
+    return {m.group(1).strip("'\"") for m in COPIES.finditer("\n".join(lines))}
+
+class Repository:
+    """A repository's files, found by lowercased file name."""
+
+    def __init__(self, files):
+        self.by_name = collections.defaultdict(list)
+        for path in files:
+            self.by_name[os.path.basename(path).lower()].append(path)
+        self.programs = {}
+
+    def is_program(self, path):
+        if not path.lower().endswith((".cbl", ".cob")):
+            return False
+        if path not in self.programs:
+            self.programs[path] = re.search(r"PROGRAM-ID", read(path), re.I) is not None
+        return self.programs[path]
+
+    def members(self, name):
+        """Each (library, file) that holds the member `name`."""
+        name = name[2:] if name.startswith("./") else name
+        if not name or name.startswith("/") or "\\" in name:
+            return
+        for extension in MEMBER_EXTENSIONS:
+            relative = (name + extension).lower()
+            for path in self.by_name.get(os.path.basename(relative), ()):
+                if path.lower().endswith(os.sep + relative) and not self.is_program(path):
+                    yield path[: len(path) - len(relative) - 1], path
+
+def member_libraries(program, repository):
+    """The libraries that hold what `program` copies, and what those members copy in turn."""
+    libraries, seen, pending = set(), {program}, [program]
+    while pending:
+        for name in copied_names(pending.pop()):
+            for library, member in repository.members(name):
+                libraries.add(library)
+                if member not in seen and not member.lower().endswith(".bms"):
+                    seen.add(member)
+                    pending.append(member)
+    return libraries
+
+def repository_files(root):
+    files = collections.defaultdict(list)
+    for dirpath, _, names in os.walk(root):
+        repo = os.path.relpath(dirpath, root).split(os.sep)[0]
+        files[repo].extend(os.path.join(dirpath, n) for n in names)
+    return files
 
 RULES = [
     (r"(\S+) is not a statement ironwork for COBOL supports yet", r"statement \1"),
@@ -55,10 +129,14 @@ def main():
     population = sorted(programs(root))
     sample = random.Random(seed).sample(population, min(size, len(population)))
     libraries = copy_libraries(root)
+    files, repositories = repository_files(root), {}
     tally, accepted = collections.Counter(), 0
     for path in sample:
         repo = os.path.relpath(path, root).split(os.sep)[0]
-        flags = [arg for d in sorted(libraries.get(repo, ())) for arg in ("-I", d)]
+        if repo not in repositories:
+            repositories[repo] = Repository(files[repo])
+        dirs = libraries.get(repo, set()) | member_libraries(path, repositories[repo])
+        flags = [arg for d in sorted(dirs) for arg in ("-I", d)]
         try:
             r = subprocess.run([binary, "check", path, *flags], capture_output=True, text=True, timeout=20)
         except subprocess.TimeoutExpired:

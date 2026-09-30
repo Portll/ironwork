@@ -9,28 +9,40 @@ use crate::{Error, Pos};
 use std::path::{Path, PathBuf};
 
 /// Directories searched for COPY members, in order. A `COPY X OF LIB` looks in `<dir>/LIB` first.
+/// The file being compiled, when named, is never one of its own members.
 #[derive(Clone, Debug, Default)]
 pub struct Libraries {
     dirs: Vec<PathBuf>,
+    program: Option<PathBuf>,
 }
 
-const EXTENSIONS: &[&str] = &["", ".cpy", ".CPY", ".cbl", ".CBL", ".cob", ".COB", ".copy", ".COPY"];
+const COPYBOOKS: &[&str] = &[".cpy", ".CPY", ".copy", ".COPY"];
+const PROGRAM_SOURCES: &[&str] = &[".cbl", ".CBL", ".cob", ".COB"];
+const BARE: &[&str] = &[""];
 const MAX_DEPTH: usize = 32;
 
 impl Libraries {
     pub fn new(dirs: Vec<PathBuf>) -> Self {
-        Self { dirs }
+        Self { dirs, program: None }
     }
 
-    fn find(&self, name: &str, library: Option<&str>) -> Option<PathBuf> {
-        self.find_with(name, library, EXTENSIONS)
+    /// These libraries, for compiling the program in `program`.
+    pub fn with_program(&self, program: &Path) -> Self {
+        Self { dirs: self.dirs.clone(), program: Some(program.to_path_buf()) }
+    }
+
+    /// A round of extensions searches every library before the next round starts, so a copybook in
+    /// any library is found before a program source (assumptions C85 to C87).
+    fn find(&self, name: &str, library: Option<&str>, literal: bool) -> Option<PathBuf> {
+        let rounds = if literal { [BARE, COPYBOOKS, PROGRAM_SOURCES] } else { [COPYBOOKS, PROGRAM_SOURCES, BARE] };
+        self.find_in_rounds(name, library, &rounds)
     }
 
     pub(crate) fn find_bms(&self, name: &str, library: Option<&str>) -> Option<PathBuf> {
-        self.find_with(name, library, &[".bms", ".BMS"])
+        self.find_in_rounds(name, library, &[&[".bms", ".BMS"]])
     }
 
-    fn find_with(&self, name: &str, library: Option<&str>, extensions: &[&str]) -> Option<PathBuf> {
+    fn find_in_rounds(&self, name: &str, library: Option<&str>, rounds: &[&[&str]]) -> Option<PathBuf> {
         let mut places: Vec<PathBuf> = Vec::new();
         for d in &self.dirs {
             if let Some(lib) = library {
@@ -38,9 +50,30 @@ impl Libraries {
             }
             places.push(d.clone());
         }
-        let names = [name.to_owned(), name.to_ascii_uppercase(), name.to_ascii_lowercase()];
-        places.iter().flat_map(|p| names.iter().flat_map(move |n| extensions.iter().map(move |e| p.join(format!("{n}{e}"))))).find(|p| p.is_file())
+        let mut names = vec![name.to_owned()];
+        for variant in [name.to_ascii_uppercase(), name.to_ascii_lowercase()] {
+            if !names.contains(&variant) {
+                names.push(variant);
+            }
+        }
+        let (places, names) = (&places, &names);
+        rounds
+            .iter()
+            .flat_map(|extensions| places.iter().flat_map(move |p| extensions.iter().flat_map(move |e| names.iter().map(move |n| p.join(format!("{n}{e}"))))))
+            .find(|p| p.is_file() && !self.program.as_deref().is_some_and(|program| same_file(program, p)))
     }
+}
+
+/// Whether two paths name one file, however each is spelled.
+fn same_file(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let (Ok(x), Ok(y)) = (std::fs::metadata(a), std::fs::metadata(b)) {
+            return x.dev() == y.dev() && x.ino() == y.ino();
+        }
+    }
+    matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(x), Ok(y)) if x == y)
 }
 
 /// Reads a source file's bytes: UTF-8 when valid, otherwise one character per byte (Latin-1).
@@ -123,6 +156,8 @@ struct Replacing {
 
 struct Statement {
     name: String,
+    /// Whether the name is a literal, which IBM takes as a file name as written.
+    literal: bool,
     library: Option<String>,
     replacing: Vec<Replacing>,
     /// Index of the word after the terminating period.
@@ -133,12 +168,21 @@ fn copy_statement(words: &[Word], at: usize, pos: Pos) -> Result<Statement, Erro
     let err = |m: &str| Error::at(pos, format!("COPY: {m}"));
     let text = |i: usize| words.get(i).map(|w| w.text.as_str());
     let mut i = at + 1;
+    let quoted = |s: &str| s.starts_with(['\'', '"']);
     let unquote = |s: &str| s.trim_matches(|c| c == '\'' || c == '"').to_owned();
-    let name = unquote(text(i).ok_or_else(|| err("a member name"))?);
+    // In `COPY X..` the separator period is the second, so the name is `X.` (assumption C88).
+    let word = |s: &str| {
+        if s.ends_with('.') && !quoted(s) {
+            return Err(Error::at(pos, format!("COPY {s}: the name ends in a period; the period that ends a COPY statement is the one followed by a space")));
+        }
+        Ok(unquote(s))
+    };
+    let first = text(i).ok_or_else(|| err("a member name"))?;
+    let (name, literal) = (word(first)?, quoted(first));
     i += 1;
     let mut library = None;
     if text(i).is_some_and(|w| w.eq_ignore_ascii_case("OF") || w.eq_ignore_ascii_case("IN")) {
-        library = Some(unquote(text(i + 1).ok_or_else(|| err("a library name"))?));
+        library = Some(word(text(i + 1).ok_or_else(|| err("a library name"))?)?);
         i += 2;
     }
     if text(i).is_some_and(|w| w.eq_ignore_ascii_case("SUPPRESS")) {
@@ -171,7 +215,7 @@ fn copy_statement(words: &[Word], at: usize, pos: Pos) -> Result<Statement, Erro
     if text(i) != Some(".") {
         return Err(err("a period to end the statement"));
     }
-    Ok(Statement { name, library, replacing, next: i + 1 })
+    Ok(Statement { name, literal, library, replacing, next: i + 1 })
 }
 
 /// A REPLACING operand: pseudo-text `==...==` as its text-words, or one text-word.
@@ -249,14 +293,16 @@ pub fn expand(source: Source, libraries: &Libraries, files: &mut Vec<String>) ->
 }
 
 /// `EXEC SQL INCLUDE name END-EXEC`, which the Db2 precompiler treats as a COPY of its member (and
-/// of its own SQLCA or SQLDA); `next` is the word after END-EXEC and any period that ends it.
-fn sql_include(words: &[Word], at: usize) -> Option<(String, usize)> {
+/// of its own SQLCA or SQLDA): the member's name, whether it is quoted, and the word after END-EXEC
+/// and any period that ends it.
+fn sql_include(words: &[Word], at: usize) -> Option<(String, bool, usize)> {
     let is = |k: usize, w: &str| words.get(at + k).is_some_and(|x| x.text.eq_ignore_ascii_case(w));
     if !(is(0, "EXEC") && is(1, "SQL") && is(2, "INCLUDE") && is(4, "END-EXEC")) {
         return None;
     }
-    let name = words[at + 3].text.trim_matches(|c| c == '\'' || c == '"').to_owned();
-    Some((name, at + 5 + usize::from(is(5, "."))))
+    let word = &words[at + 3].text;
+    let name = word.trim_matches(|c| c == '\'' || c == '"').to_owned();
+    Some((name, word.starts_with(['\'', '"']), at + 5 + usize::from(is(5, "."))))
 }
 
 fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>, stack: &mut Vec<String>) -> Result<Source, Error> {
@@ -269,18 +315,18 @@ fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>,
     let (mut cursor, mut i) = (0usize, 0usize);
     while i < words.len() {
         let pos = source.positions[words[i].start];
-        let (name, library, replacing, next, sql) = if words[i].text.eq_ignore_ascii_case("COPY") {
+        let (name, literal, library, replacing, next, sql) = if words[i].text.eq_ignore_ascii_case("COPY") {
             let st = copy_statement(&words, i, pos)?;
-            (st.name, st.library, st.replacing, st.next, false)
-        } else if let Some((name, next)) = sql_include(&words, i) {
-            (name, None, Vec::new(), next, true)
+            (st.name, st.literal, st.library, st.replacing, st.next, false)
+        } else if let Some((name, literal, next)) = sql_include(&words, i) {
+            (name, literal, None, Vec::new(), next, true)
         } else {
             i += 1;
             continue;
         };
         copy_span(&mut out, &chars, &source.positions, cursor..words[i].start);
         let own = sql && matches!(name.to_ascii_uppercase().as_str(), "SQLCA" | "SQLDA");
-        let path = if own { None } else { libraries.find(&name, library.as_deref()) };
+        let path = if own { None } else { libraries.find(&name, library.as_deref(), literal) };
         let verb = if sql { "EXEC SQL INCLUDE" } else { "COPY" };
         let mapset = if own || path.is_some() { None } else { bms::load(libraries, &name, library.as_deref()) };
         let (key, member) = match (path, mapset) {
@@ -393,6 +439,75 @@ mod tests {
     fn a_member_that_copies_itself_is_refused() {
         let dir = dir_with(&[("LOOP.cpy", "       COPY LOOP.\n")]);
         assert!(expanded("       COPY LOOP.\n", &dir).unwrap_err().message.contains("copies itself"));
+    }
+
+    /// A fresh directory holding `files`, each at its path under it.
+    fn tree(tag: &str, files: &[(&str, &str)]) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("ironwork-copy-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for (name, text) in files {
+            let path = root.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
+        root
+    }
+
+    fn expanded_with(main: &str, libraries: &Libraries) -> Result<String, Error> {
+        let mut files = vec![String::new()];
+        expand(source::read(main)?, libraries, &mut files).map(|s| s.text)
+    }
+
+    #[test]
+    fn a_copybook_in_any_library_is_found_before_a_program_source() {
+        let root = tree(
+            "rounds",
+            &[
+                ("src/INQACC.cbl", "       01  PROGRAM-SOURCE PIC X.\n"),
+                ("src/ONLY.cbl", "       01  ONLY-SOURCE PIC X.\n"),
+                ("src/BARE", "       01  BARE-FILE PIC X.\n"),
+                ("cpy/INQACC.cpy", "       01  COPYBOOK PIC X.\n"),
+                ("cpy/BARE.copy", "       01  COPY-FILE PIC X.\n"),
+            ],
+        );
+        let libraries = Libraries::new(vec![root.join("src"), root.join("cpy")]);
+        assert!(expanded_with("       COPY INQACC.\n", &libraries).unwrap().contains("COPYBOOK"));
+        assert!(expanded_with("       COPY inqacc.\n", &libraries).unwrap().contains("COPYBOOK"));
+        assert!(expanded_with("       COPY BARE.\n", &libraries).unwrap().contains("COPY-FILE"));
+        assert!(expanded_with("       COPY ONLY.\n", &libraries).unwrap().contains("ONLY-SOURCE"));
+    }
+
+    #[test]
+    fn a_name_alone_is_tried_after_its_extensions_and_a_literal_first() {
+        let root = tree("bare", &[("lib/MEMBER", "       01  BARE-FILE PIC X.\n"), ("lib/MEMBER.cpy", "       01  COPYBOOK PIC X.\n"), ("lib/ALONE", "       01  ALONE PIC X.\n")]);
+        let libraries = Libraries::new(vec![root.join("lib")]);
+        assert!(expanded_with("       COPY MEMBER.\n", &libraries).unwrap().contains("COPYBOOK"));
+        assert!(expanded_with("       COPY \"MEMBER\".\n", &libraries).unwrap().contains("BARE-FILE"));
+        assert!(expanded_with("       COPY ALONE.\n", &libraries).unwrap().contains("01  ALONE"));
+    }
+
+    #[test]
+    fn the_program_being_compiled_is_never_its_own_member() {
+        let program = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PGMC.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       COPY PGMC.\n";
+        let root = tree("self", &[("src/PGMC.cbl", program), ("src/OUTER.cpy", "       COPY PGMC.\n"), ("lib/PGMC.cbl", "       01  PGMC-X PIC X.\n")]);
+        let main = root.join("src/../src/PGMC.cbl");
+        let libraries = Libraries::new(vec![root.join("src"), root.join("lib")]).with_program(&main);
+        assert!(expanded_with(program, &libraries).unwrap().contains("PGMC-X"));
+        assert!(expanded_with("       COPY OUTER.\n", &libraries).unwrap().contains("PGMC-X"));
+        let alone = Libraries::new(vec![root.join("src")]).with_program(&main);
+        assert!(expanded_with(program, &alone).unwrap_err().message.contains("no such member"));
+        assert!(expanded_with(program, &Libraries::new(vec![root.join("src")])).unwrap_err().message.contains("copies itself"));
+    }
+
+    #[test]
+    fn a_doubled_period_is_refused_by_name() {
+        let root = tree("period", &[("lib/COBCPARMS.cpy", "       01  PARMS PIC X.\n")]);
+        let libraries = Libraries::new(vec![root.join("lib")]);
+        let err = expanded_with("       COPY COBCPARMS..\n", &libraries).unwrap_err();
+        assert!(err.message.contains("COPY COBCPARMS.: the name ends in a period"), "{}", err.message);
+        let err = expanded_with("       COPY COBCPARMS OF LIB..\n", &libraries).unwrap_err();
+        assert!(err.message.contains("COPY LIB.: "), "{}", err.message);
+        assert!(expanded_with("       COPY COBCPARMS.\n", &libraries).unwrap().contains("PARMS"));
     }
 
     #[test]
