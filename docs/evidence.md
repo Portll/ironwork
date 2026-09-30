@@ -35,7 +35,10 @@ by `prev` and `seq`.
   and is created owner-only.
 - Files are hashed as they stream (`crates/rt/src/digest.rs`), so a large data set is not held in
   memory; hashing an indexed file at OPEN still reads all of it.
-- The run unit tells an observer what it opens, closes and loads (`exec::unit::Observer`); the
+- `run --coverage FILE` writes, for each program of the source, every paragraph with its line and
+  how often control entered it, from the run unit's `Paragraph` events.
+- The run unit tells an observer what it opens, closes and loads, and each paragraph control
+  enters (`exec::unit::Observer`); the
   interpreter and, when it lands, the VM raise the same events, so a journal is the same under both.
 
 ## 2. Build provenance: `--provenance FILE`
@@ -94,10 +97,17 @@ library is in `closure` as `called:<name>`.
 | `diverged` | a difference not declared | 1 |
 | `inconclusive` | a side could not run, or reached what ironwork does not model | 3 |
 
+`coverage` is measured on the head run: `paragraphs` and `reached` count the head program's
+paragraphs and those control entered; `changed` names the paragraphs whose statements differ from
+the base's (positions aside), or every paragraph when the change touched none, as a change to data
+or to a copybook in the DATA DIVISION does (`scope` `all`; so too with `--expected`); and
+`unreached` names the changed paragraphs the inputs never entered. cobolwork's build refuses a
+statement with unreached changed paragraphs where its policy requires equivalence. `coverage` is
+`null` when the head did not run.
+
 **Limits, stated in every statement.** Equivalence is under ironwork's model of Enterprise COBOL,
-on the inputs given. The oracle holds no Enterprise COBOL goldens yet. Paragraph coverage is not
-measured yet (E9), so `coverage` is `null`, and cobolwork's build treats a statement without
-coverage as inconclusive where its policy requires equivalence.
+on the inputs given. The oracle holds no Enterprise COBOL goldens yet. Coverage is of paragraphs
+entered, not of the statements or branches within them.
 
 ## 4. Migration equivalence for a job: `ironwork job --expected`
 

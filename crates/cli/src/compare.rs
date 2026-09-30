@@ -15,7 +15,35 @@ use exec::digest::{hex, sha256};
 use exec::evidence::{canonical, fields, Value};
 
 pub const PREDICATE: &str = "https://github.com/Portll/ironwork/blob/main/docs/evidence.md#equivalence-v1";
-pub(crate) const LIMIT: &str = "Equivalence is under ironwork's model of Enterprise COBOL, on the inputs recorded here; the oracle holds no Enterprise COBOL goldens yet, and paragraph coverage is not measured (coverage null), so a verdict of equivalent covers these inputs only.";
+pub(crate) const LIMIT: &str = "Equivalence is under ironwork's model of Enterprise COBOL, on the inputs recorded here; the oracle holds no Enterprise COBOL goldens yet, and coverage is of paragraphs entered, not of statements or branches within them, so a verdict of equivalent covers these inputs only.";
+
+/// The head's paragraphs the change touched, and those of them the inputs never entered. A change
+/// that touched no paragraph's statements (data, or a copybook in the DATA DIVISION) is held to
+/// every paragraph. Null when the head did not run.
+fn coverage_of(head: &Outcome, base: Option<&Outcome>) -> Value {
+    if head.error.is_some() || head.paragraphs.is_empty() {
+        return Value::Null;
+    }
+    let all: Vec<usize> = (0..head.paragraphs.len()).collect();
+    let changed: Vec<usize> = match base.filter(|b| b.error.is_none()) {
+        Some(b) => {
+            let before: BTreeMap<&str, &str> = b.paragraphs.iter().map(|(n, f)| (n.as_str(), f.as_str())).collect();
+            all.iter().copied().filter(|&i| before.get(head.paragraphs[i].0.as_str()) != Some(&head.paragraphs[i].1.as_str())).collect()
+        }
+        None => all.clone(),
+    };
+    let (scope, changed) = if changed.is_empty() { ("all", all.clone()) } else if base.is_some() { ("changed", changed) } else { ("all", changed) };
+    let name = |i: &usize| Value::Str(head.paragraphs[*i].0.clone());
+    let reached = all.iter().filter(|&&i| head.coverage.reached(&head.main, i)).count();
+    let unreached: Vec<Value> = changed.iter().filter(|&&i| !head.coverage.reached(&head.main, i)).map(name).collect();
+    Value::Obj(fields([
+        ("paragraphs", Value::Int(all.len() as i64)),
+        ("reached", Value::Int(reached as i64)),
+        ("scope", scope.into()),
+        ("changed", Value::Arr(changed.iter().map(name).collect())),
+        ("unreached", Value::Arr(unreached)),
+    ]))
+}
 
 pub struct Request {
     pub base: Option<PathBuf>,
@@ -100,6 +128,24 @@ struct Outcome {
     display: Vec<u8>,
     files: BTreeMap<String, Option<Vec<u8>>>,
     error: Option<String>,
+    /// The program's PROGRAM-ID and each paragraph's name and statements, positions left out.
+    main: String,
+    paragraphs: Vec<(String, String)>,
+    coverage: crate::coverage::Coverage,
+}
+
+/// A paragraph's statements as text with every source position removed, so a paragraph that only
+/// moved is the same paragraph.
+fn fingerprint(statements: &[syntax::ast::Stmt]) -> String {
+    let text = format!("{statements:?}");
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+    while let Some(at) = rest.find("Pos {") {
+        out.push_str(&rest[..at]);
+        rest = rest[at..].find('}').map_or("", |end| &rest[at + end + 1..]);
+    }
+    out.push_str(rest);
+    out
 }
 
 /// A new directory under the system's temporary directory, made by this call alone: a directory
@@ -172,7 +218,7 @@ pub(crate) fn assess(what: &str, a: Option<&[u8]>, b: Option<&[u8]>, declared: &
 /// Runs one program, read from `source`, with every DD pointed at a copy in `dir` of the inputs
 /// as they were when the comparison began.
 fn run_side(program: &Path, source: &[u8], req: &Request, specs: &[Spec], snapshot: &BTreeMap<String, Option<Vec<u8>>>, dir: &Path) -> Outcome {
-    let mut outcome = Outcome { closure: Vec::new(), return_code: None, abend: None, display: Vec::new(), files: BTreeMap::new(), error: None };
+    let mut outcome = Outcome { closure: Vec::new(), return_code: None, abend: None, display: Vec::new(), files: BTreeMap::new(), error: None, main: String::new(), paragraphs: Vec::new(), coverage: Default::default() };
     let fail = |mut o: Outcome, e: String| {
         o.error = Some(e);
         o
@@ -195,6 +241,8 @@ fn run_side(program: &Path, source: &[u8], req: &Request, specs: &[Spec], snapsh
         Err(e) => return fail(outcome, e.place(&program.display().to_string()).to_string()),
     };
     let first = programs.remove(0);
+    outcome.main = first.id.clone();
+    outcome.paragraphs = first.paragraphs.iter().map(|p| (p.name.clone(), fingerprint(&p.statements))).collect();
     let roots: Vec<PathBuf> = std::iter::once(own.clone()).chain(req.libraries.iter().cloned()).collect();
     let own_name = program.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     outcome.closure.push((own_name, hex(&sha256(source))));
@@ -230,12 +278,15 @@ fn run_side(program: &Path, source: &[u8], req: &Request, specs: &[Spec], snapsh
     let database = replay.as_mut().map(|r| r as &mut dyn exec::sql::Database);
     let mut err = Vec::new();
     let called = std::cell::RefCell::new(Vec::new());
+    let coverage = std::cell::RefCell::new(crate::coverage::Coverage::default());
     let observer: exec::unit::Observer<'_> = Box::new(|event| {
+        coverage.borrow_mut().observe(&event);
         if let exec::unit::Event::Load { source: Some(path), .. } = event {
             called.borrow_mut().push(path.to_path_buf());
         }
     });
     let ended = compiled.execute_observed(library, dds, Some(sysin), req.clock, database, &mut outcome.display, &mut err, Some(observer));
+    outcome.coverage = coverage.into_inner();
     for path in called.into_inner() {
         if let Ok(bytes) = fs::read(&path) {
             let name = format!("called:{}", roots.iter().chain(&req.program_dirs).find_map(|r| path.strip_prefix(r).ok()).map_or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), |p| p.to_string_lossy().replace('\\', "/")));
@@ -389,7 +440,7 @@ pub fn run(req: Request) -> ExitCode {
             }
             m
         })),
-        ("coverage", Value::Null),
+        ("coverage", coverage_of(&head, base.as_ref())),
         ("ironwork", env!("CARGO_PKG_VERSION").into()),
         ("limit", LIMIT.into()),
     ]);

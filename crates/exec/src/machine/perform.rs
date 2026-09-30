@@ -108,6 +108,9 @@ impl<'p> Machine<'p, '_, '_> {
             }
             self.returns.running = i;
             self.enter_segment(program.paragraphs[i].priority);
+            if skip == 0 {
+                self.unit.notify(rt::unit::Event::Paragraph { program: &program.id, name: &program.paragraphs[i].name, index: i });
+            }
             if !self.declaratives.triggers.is_empty() {
                 if skip == 0
                     && let Some(flow) = self.debug_before(i, arrival)?

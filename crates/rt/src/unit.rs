@@ -81,6 +81,8 @@ pub enum Event<'a> {
     Open { dd: &'a str, mode: OpenMode, path: &'a Path },
     Close { dd: &'a str, path: &'a Path },
     Load { program: &'a str, source: Option<&'a Path> },
+    /// Control entering paragraph (or section header) `index` of `program` at its start.
+    Paragraph { program: &'a str, name: &'a str, index: usize },
 }
 
 pub type Observer<'w> = Box<dyn FnMut(Event<'_>) + 'w>;

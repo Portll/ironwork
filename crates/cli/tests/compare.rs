@@ -73,7 +73,7 @@ fn a_refactor_is_equivalent() {
     assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(st.contains("\"verdict\":\"equivalent\""));
     assert!(st.contains("\"name\":\"base:BASE.cbl\"") && st.contains("\"name\":\"head:HEAD.cbl\""));
-    assert!(st.contains("\"coverage\":null"), "coverage is not claimed");
+    assert!(st.contains("\"scope\":\"changed\"") && st.contains("\"unreached\":[]"), "the renamed paragraph ran: {st}");
     assert!(st.contains("\"closure\":{\"base\":[{\"name\":\"BASE.cbl\""), "each side's closure is recorded");
     assert!(!dir.join("out.txt").exists(), "neither run wrote the caller's file");
     fs::remove_dir_all(dir).unwrap();
@@ -115,5 +115,49 @@ fn expected_outputs_check_a_translation_without_a_base() {
     fs::write(dir.join("want.txt"), "0001035\n0000344\n0012777\n").unwrap();
     let (out, _) = compare(&dir, None, &head, &["--expected".into(), format!("OUT={}", dir.join("want.txt").display())]);
     assert_eq!(out.status.code(), Some(1));
+    fs::remove_dir_all(dir).unwrap();
+}
+
+fn two_paragraphs(dir: &Path, name: &str, unused: &str) -> PathBuf {
+    let text = [
+        "       IDENTIFICATION DIVISION.",
+        "       PROGRAM-ID. TWO.",
+        "       PROCEDURE DIVISION.",
+        "       MAIN-LINE.",
+        "           PERFORM USED-PARA 2 TIMES.",
+        "           GOBACK.",
+        "       USED-PARA.",
+        "           DISPLAY 'USED'.",
+        "       UNUSED-PARA.",
+        &format!("           DISPLAY '{unused}'."),
+    ];
+    let path = dir.join(name);
+    fs::write(&path, text.join("\n") + "\n").unwrap();
+    path
+}
+
+#[test]
+fn a_change_the_inputs_never_reach_is_named_unreached() {
+    let dir = temp("unreached");
+    let base = two_paragraphs(&dir, "BASE.cbl", "OLD");
+    let head = two_paragraphs(&dir, "HEAD.cbl", "NEW");
+    let (out, st) = compare(&dir, Some(&base), &head, &[]);
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(st.contains("\"verdict\":\"equivalent\""));
+    assert!(st.contains("\"changed\":[\"UNUSED-PARA\"]") && st.contains("\"unreached\":[\"UNUSED-PARA\"]") && st.contains("\"paragraphs\":3,\"reached\":2"), "{st}");
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn run_coverage_counts_each_paragraph_entered() {
+    let dir = temp("coverage");
+    let program = two_paragraphs(&dir, "TWO.cbl", "X");
+    let report = dir.join("coverage.json");
+    let out = Command::new(env!("CARGO_BIN_EXE_ironwork")).arg("run").arg(&program).arg("--coverage").arg(&report).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = fs::read_to_string(&report).unwrap();
+    for want in ["{\"entered\":1,\"line\":4,\"name\":\"MAIN-LINE\"", "{\"entered\":2,\"line\":7,\"name\":\"USED-PARA\"", "{\"entered\":0,\"line\":9,\"name\":\"UNUSED-PARA\"", "\"paragraphs\":3,\"program\":\"TWO\",\"reached\":2"] {
+        assert!(text.contains(want), "{want} in {text}");
+    }
     fs::remove_dir_all(dir).unwrap();
 }

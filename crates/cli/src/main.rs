@@ -58,6 +58,10 @@ flags:
              DIR may not be inside the program's directory or a library. run, check and job; a
              job's journal holds the JCL, each program's sources, each step's DDs and CALLs, the
              data sets each step left, and a step record with each step's outcome
+  --coverage FILE
+             write which paragraphs the run entered: for each program of the source every
+             paragraph with its line and how often control entered it, and for each program CALL
+             loaded from a library the paragraphs it reached. run only
   --clock YYYY-MM-DDTHH:MM:SS[.hh]
              the time ACCEPT FROM DATE, TIME and FUNCTION CURRENT-DATE report, for a run that must
              repeat; without it they report the system clock in UTC
@@ -170,6 +174,7 @@ const FLAGS: &[&str] = &["-silent", "-strict-sort-keys", "-warnings-block", "-de
 const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid", "--sysid", "--commarea", "--commarea-out", "--file", "--td", "--screens", "--serve", "--transaction", "--csd"];
 
 mod compare;
+mod coverage;
 mod ddl;
 mod evidence;
 mod job;
@@ -222,6 +227,7 @@ fn driver() -> ExitCode {
     let (mut compare_base, mut compare_head, mut declare, mut statement) = (None, None, None, None);
     let mut expected: Vec<(String, std::path::PathBuf)> = Vec::new();
     let mut datasets: Option<String> = None;
+    let mut coverage_file: Option<std::path::PathBuf> = None;
     let mut proclibs: Vec<std::path::PathBuf> = Vec::new();
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -248,6 +254,10 @@ fn driver() -> ExitCode {
             "--expected" => match args.next().and_then(|v| v.split_once('=').map(|(n, p)| (n.to_string(), std::path::PathBuf::from(p)))) {
                 Some(pair) => expected.push(pair),
                 None => return usage_error("--expected needs NAME=path"),
+            },
+            "--coverage" => match args.next() {
+                Some(file) => coverage_file = Some(std::path::PathBuf::from(file)),
+                None => return usage_error("--coverage needs a file"),
             },
             "--provenance" => match args.next() {
                 Some(file) => provenance_file = Some(std::path::PathBuf::from(file)),
@@ -385,6 +395,9 @@ fn driver() -> ExitCode {
         }
     };
     let own_directory = std::path::Path::new(path).parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    if coverage_file.is_some() && command != "run" {
+        return usage_error("--coverage is for run");
+    }
     if (evidence_dir.is_some() || provenance_file.is_some()) && command == "cics" {
         return usage_error("--evidence and --provenance are for run and check");
     }
@@ -404,6 +417,7 @@ fn driver() -> ExitCode {
         Ok(p) => p,
         Err(e) => return evidence::finish(journal, i64::from(report(std::slice::from_ref(&e), path))),
     };
+    let outlines: Vec<coverage::Outline> = programs.iter().map(coverage::Outline::of).collect();
     if let Some(j) = journal.as_mut() {
         evidence::sources(j, &programs[0].sources, path, &reads);
     }
@@ -486,13 +500,30 @@ fn driver() -> ExitCode {
     };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
     let shared = journal.map(|j| std::rc::Rc::new(std::cell::RefCell::new(evidence::Run::new(j, &reads))));
-    let observer = shared.clone().map(|run| Box::new(move |event: exec::unit::Event<'_>| run.borrow_mut().observe(event)) as exec::unit::Observer<'_>);
+    let covered = coverage_file.as_ref().map(|_| std::rc::Rc::new(std::cell::RefCell::new(coverage::Coverage::default())));
+    let observer = (shared.is_some() || covered.is_some()).then(|| {
+        let (run, cov) = (shared.clone(), covered.clone());
+        Box::new(move |event: exec::unit::Event<'_>| {
+            if let Some(c) = &cov {
+                c.borrow_mut().observe(&event);
+            }
+            if let Some(r) = &run {
+                r.borrow_mut().observe(event);
+            }
+        }) as exec::unit::Observer<'_>
+    });
     let ended = compiled.execute_observed(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer);
     let (status, abend) = match &ended {
         Ok((_, return_code)) => (i64::from(*return_code), None),
         Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => (0, None),
         Err(abend) => (16, Some(abend)),
     };
+    if let (Some(file), Some(c)) = (&coverage_file, &covered) {
+        let text = format!("{}\n", exec::evidence::canonical(&c.borrow().report(&outlines)));
+        if let Err(e) = fs::write(file, text) {
+            eprintln!("ironwork: --coverage {}: {e}", file.display());
+        }
+    }
     if let Some(run) = shared {
         let run = std::rc::Rc::try_unwrap(run).map(std::cell::RefCell::into_inner);
         if let Ok(run) = run {

@@ -125,6 +125,7 @@ impl Run {
                 self.dd(dd, "open", Some(mode_name(mode)), path);
             }
             Event::Close { dd, path } => self.dd(dd, "close", None, path),
+            Event::Paragraph { .. } => {}
             Event::Load { program, source } => {
                 let mut f = fields([("program", program.into())]);
                 if let Some((sha, _)) = source.and_then(digest) {
