@@ -310,6 +310,11 @@ impl Journal {
         Ok(())
     }
 
+    /// The hash of the last record written.
+    pub fn tip(&self) -> &str {
+        &self.chain.prev
+    }
+
     pub fn append(&mut self, kind: &str, fields: BTreeMap<String, Value>) -> io::Result<()> {
         self.append_at(kind, fields, &iso_now())
     }

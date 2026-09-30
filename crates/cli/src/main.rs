@@ -31,6 +31,10 @@ flags:
              carry a printer control character, which :text shows as line spacing. An indexed or
              relative file's DD holds its records in key order, as a REPRO unload does. DD SYSIN is
              what ACCEPT reads; without it, ACCEPT reads standard input
+  --provenance FILE
+             write what the compile read and decided as an in-toto statement with the SLSA
+             Provenance v1 predicate: the source and every COPY member by digest, the option cards
+             and the options in force, and ironwork's version and digest. Unsigned. run and check
   --evidence DIR
              record the run in a hash-chained journal and ledger in DIR, in cobolwork's evidence
              format: the source and every COPY member by digest, each DD's digest when it is
@@ -86,12 +90,26 @@ assumptions flags:
   --c-series
              put each entry's number in one C series first, its position in the register, with the
              original id beside it (C36 L1); the stored ids do not change
+compare flags: ironwork compare --base OLD.cbl --head NEW.cbl [--dd NAME=path]... [--sql-replay file]
+  --base, --head
+             the two versions of the program; each runs in its own directory on copies of every DD,
+             with the same clock (--clock, or 2026-01-01 when none is given), SYSIN and recording
+  --expected NAME=path
+             compare the head's DD NAME with this file instead of a base run (a translation's check)
+  --declare file
+             divergences the change means to make, one a line: DD NAME [lines A-B] reason,
+             DISPLAY reason, or RETURN-CODE reason
+  --statement file
+             where the in-toto equivalence statement is written (standard output otherwise)
+  exit status 0 equivalent or equivalent as declared, 1 diverged, 3 inconclusive, 2 usage
 exit status: RETURN-CODE when the run ends normally; 12 compile errors, 16 an abend, 2 usage";
 
 const FLAGS: &[&str] = &["-silent", "-strict-sort-keys"];
 const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid", "--sysid", "--commarea", "--commarea-out", "--file", "--td", "--screens", "--serve", "--transaction"];
 
+mod compare;
 mod evidence;
+mod provenance;
 
 fn usage_error(message: &str) -> ExitCode {
     eprintln!("ironwork: {message}\n{USAGE}");
@@ -136,6 +154,9 @@ fn driver() -> ExitCode {
     let (mut sql_db, mut sql_record) = (None, None);
     let mut c_series = false;
     let mut evidence_dir: Option<std::path::PathBuf> = None;
+    let mut provenance_file: Option<std::path::PathBuf> = None;
+    let (mut compare_base, mut compare_head, mut declare, mut statement) = (None, None, None, None);
+    let mut expected: Vec<(String, std::path::PathBuf)> = Vec::new();
     while let Some(a) = args.next() {
         match a.as_str() {
             "-h" | "--help" => {
@@ -146,6 +167,26 @@ fn driver() -> ExitCode {
                 println!("ironwork for COBOL {}", env!("CARGO_PKG_VERSION"));
                 return ExitCode::SUCCESS;
             }
+            "--base" | "--head" | "--declare" | "--statement" => match args.next() {
+                Some(v) => {
+                    let v = Some(std::path::PathBuf::from(v));
+                    match a.as_str() {
+                        "--base" => compare_base = v,
+                        "--head" => compare_head = v,
+                        "--declare" => declare = v,
+                        _ => statement = v,
+                    }
+                }
+                None => return usage_error(&format!("{a} needs a path")),
+            },
+            "--expected" => match args.next().and_then(|v| v.split_once('=').map(|(n, p)| (n.to_string(), std::path::PathBuf::from(p)))) {
+                Some(pair) => expected.push(pair),
+                None => return usage_error("--expected needs NAME=path"),
+            },
+            "--provenance" => match args.next() {
+                Some(file) => provenance_file = Some(std::path::PathBuf::from(file)),
+                None => return usage_error("--provenance needs a file"),
+            },
             "--evidence" => match args.next() {
                 Some(dir) => evidence_dir = Some(std::path::PathBuf::from(dir)),
                 None => return usage_error("--evidence needs a directory"),
@@ -199,6 +240,16 @@ fn driver() -> ExitCode {
     if c_series {
         return usage_error("unknown flag --c-series");
     }
+    if rest == ["compare"] {
+        let Some(head) = compare_head else { return usage_error("compare needs --head") };
+        return compare::run(compare::Request { base: compare_base, head, dds, libraries, program_dirs, flags, clock: match clock {
+            exec::unit::Clock::System => exec::unit::Clock::Fixed(1_767_225_600, 0),
+            fixed => fixed,
+        }, replay: replay.map(std::path::PathBuf::from), expected, declare, statement });
+    }
+    if compare_base.is_some() || compare_head.is_some() || !expected.is_empty() || declare.is_some() || statement.is_some() {
+        return usage_error("--base, --head, --expected, --declare and --statement are for compare");
+    }
     let (command, path) = match rest.as_slice() {
         [c, p] if c == "run" || c == "check" || c == "cics" => (c.as_str(), p.as_str()),
         _ => return usage_error("expected run, check or cics, and one program"),
@@ -211,8 +262,8 @@ fn driver() -> ExitCode {
         }
     };
     let own_directory = std::path::Path::new(path).parent().map(|p| p.to_path_buf()).unwrap_or_default();
-    if evidence_dir.is_some() && command == "cics" {
-        return usage_error("--evidence is for run and check");
+    if (evidence_dir.is_some() || provenance_file.is_some()) && command == "cics" {
+        return usage_error("--evidence and --provenance are for run and check");
     }
     let reads: Vec<std::path::PathBuf> = std::iter::once(own_directory.clone()).chain(libraries.iter().cloned()).chain(program_dirs.iter().cloned()).collect();
     let mut journal = match &evidence_dir {
@@ -236,6 +287,8 @@ fn driver() -> ExitCode {
     if let Some(j) = journal.as_mut() {
         evidence::sources(j, &programs[0].sources, path, &reads);
     }
+    let first_sources = programs[0].sources.clone();
+    let first_cards = programs[0].options.clone();
     let first = programs.remove(0);
     let library = exec::unit::Library {
         programs,
@@ -252,6 +305,24 @@ fn driver() -> ExitCode {
             return evidence::finish(journal, 12);
         }
     };
+    if let Some(file) = &provenance_file {
+        let text = provenance::statement(&provenance::Inputs {
+            program: path,
+            sources: &first_sources,
+            cards: &first_cards,
+            flags: &flags,
+            roots: &reads,
+            compiled: &compiled,
+            journal_tip: journal.as_ref().map(|j| (j.id.clone(), j.tip().to_string())),
+        });
+        if let Err(e) = fs::write(file, &text) {
+            eprintln!("ironwork: --provenance {}: {e}", file.display());
+            return evidence::finish(journal, 2);
+        }
+        if let Some(j) = journal.as_mut() {
+            evidence::output(j, "provenance", text.as_bytes(), file, &reads);
+        }
+    }
     if command == "check" {
         return evidence::finish(journal, 0);
     }

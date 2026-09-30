@@ -81,6 +81,12 @@ const fn mode_name(mode: OpenMode) -> &'static str {
     }
 }
 
+/// A document the command wrote, by digest.
+pub fn output(journal: &mut Journal, name: &str, bytes: &[u8], path: &Path, roots: &[PathBuf]) {
+    let sha = hex(&exec::digest::sha256(bytes));
+    let _ = journal.append("output", fields([("name", name.into()), ("sha256", sha.into()), ("bytes", Value::Int(bytes.len() as i64)), ("path", relative(path, roots).into())]));
+}
+
 /// A run in progress: the journal, and every DD it opened, so their final state is recorded.
 pub struct Run {
     journal: Journal,

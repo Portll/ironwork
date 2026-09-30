@@ -95,6 +95,36 @@ fn a_run_with_evidence_records_what_it_read_opened_and_loaded() {
 }
 
 #[test]
+fn check_provenance_names_every_copy_member_and_the_options_in_force() {
+    let dir = temp("provenance");
+    write_program(&dir);
+    let source = fs::read_to_string(dir.join("src/EVDEMO.cbl")).unwrap();
+    fs::write(dir.join("src/EVDEMO.cbl"), format!("       CBL TRUNC(BIN)\n{source}")).unwrap();
+    let status = Command::new(env!("CARGO_BIN_EXE_ironwork"))
+        .arg("check")
+        .arg(dir.join("src/EVDEMO.cbl"))
+        .arg("--provenance")
+        .arg(dir.join("prov.json"))
+        .arg("--evidence")
+        .arg(dir.join("ev"))
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let text = fs::read_to_string(dir.join("prov.json")).unwrap();
+    assert!(text.starts_with("{\"_type\":\"https://in-toto.io/Statement/v1\""));
+    assert!(text.contains("\"predicateType\":\"https://slsa.dev/provenance/v1\""));
+    assert!(text.contains("\"uri\":\"file:INREC.cpy\""), "the COPY member is a resolved dependency");
+    assert!(text.contains("\"optionCards\":[\"TRUNC(BIN)\"]"));
+    assert!(text.contains("\"trunc\":\"Bin\""), "the option in force");
+    assert!(text.contains("\"name\":\"EVDEMO.cbl\""));
+    assert!(!text.contains(&dir.display().to_string()), "no absolute path");
+    let run = fs::read_dir(dir.join("ev/runs")).unwrap().next().unwrap().unwrap().path();
+    let journal = fs::read_to_string(run).unwrap();
+    assert!(journal.lines().any(|l| field(l, "kind") == Some("output") && field(l, "name") == Some("provenance")), "the journal records the statement by digest");
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn an_evidence_directory_inside_the_program_directory_is_refused() {
     let dir = temp("inside");
     write_program(&dir);
