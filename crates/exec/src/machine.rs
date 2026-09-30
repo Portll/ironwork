@@ -531,6 +531,13 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let Resolved::Item(index) = self.resolve(r)? else {
             return Err(Abend::ironwork(format!("{} is a condition-name, not a data item", r.name), r.pos));
         };
+        self.locate_item(index, r, receiving)
+    }
+
+    /// Item `index` with `r`'s subscripts and reference modification, `r` naming it in messages:
+    /// how a condition-name reaches its conditional variable, which may be FILLER or share its
+    /// name with other items.
+    fn locate_item(&mut self, index: usize, r: &Ref, receiving: bool) -> R<Loc> {
         let layout = self.layout;
         let item = &layout.items[index];
         if r.subscripts.len() != item.dims.len() {
@@ -1007,12 +1014,10 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                         return Err(Abend::ironwork(format!("SET {} TO {}: not a condition-name", r.name, if truth { "TRUE" } else { "FALSE" }), pos));
                     };
                     let condition = &self.layout.conditions[index];
-                    let value = if truth { condition.values.first().map(|(v, _)| v.clone()) } else { condition.false_value.clone() };
+                    let value = if truth { condition.values.first().map(|(v, _)| v) } else { condition.false_value.as_ref() };
                     let Some(value) = value else { continue };
-                    let item = &self.layout.items[condition.item];
-                    let subject = Ref { name: item.name.clone().unwrap_or_default(), qualifiers: Vec::new(), subscripts: r.subscripts.clone(), refmod: None, pos };
-                    let dest = self.locate(&subject)?;
-                    let val = self.literal_value(&value, pos)?;
+                    let dest = self.locate_item(condition.item, r, false)?;
+                    let val = self.literal_value(value, pos)?;
                     self.assign(dest, val, None, pos)?;
                 }
             }
@@ -1304,24 +1309,12 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     return Err(Abend::ironwork(format!("{} is a data item, not a condition", r.name), r.pos));
                 };
                 let condition = &self.layout.conditions[index];
-                let item = &self.layout.items[condition.item];
-                let subject = Ref {
-                    name: item.name.clone().unwrap_or_default(),
-                    qualifiers: Vec::new(),
-                    subscripts: r.subscripts.clone(),
-                    refmod: None,
-                    pos: r.pos,
-                };
-                let subject = Expr::Operand(Operand::Ref(subject));
-                let values = condition.values.clone();
-                for (low, high) in values {
-                    let low = Expr::Operand(Operand::Literal(low));
+                let loc = self.locate_item(condition.item, r, false)?;
+                let subject = (self.read(loc, r.pos)?, Some(loc));
+                for (low, high) in &condition.values {
                     let hit = match high {
-                        None => self.compare(&subject, &low, pos)? == Ordering::Equal,
-                        Some(high) => {
-                            self.compare(&subject, &low, pos)? != Ordering::Less
-                                && self.compare(&subject, &Expr::Operand(Operand::Literal(high)), pos)? != Ordering::Greater
-                        }
+                        None => self.compare_literal(&subject, low, pos)? == Ordering::Equal,
+                        Some(high) => self.compare_literal(&subject, low, pos)? != Ordering::Less && self.compare_literal(&subject, high, pos)? != Ordering::Greater,
                     };
                     if hit {
                         return Ok(true);
@@ -1359,6 +1352,11 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             return Ok(o);
         }
         store::compare(&self.facts(), &self.unit.mem, (va, la), (vb, lb), pos)
+    }
+
+    fn compare_literal(&mut self, subject: &(Val, Option<Loc>), literal: &Literal, pos: Pos) -> R<Ordering> {
+        let value = self.literal_value(literal, pos)?;
+        store::compare(&self.facts(), &self.unit.mem, subject.clone(), (value, None), pos)
     }
 
     fn comparand(&mut self, e: &Expr, pos: Pos) -> R<(Val, Option<Loc>)> {

@@ -1278,6 +1278,30 @@ fn index_names_and_set_condition_to_true() {
 }
 
 #[test]
+fn condition_names_reach_a_filler_or_repeated_variable_by_its_item() {
+    let data = [
+        "       01  A.\n           05  FILLER PIC X VALUE 'Y'.\n               88  A-ON VALUE 'Y'.\n",
+        "           05  S PIC 9 VALUE 1.\n               88  S-ONE VALUE 1.\n",
+        "       01  B.\n           05  S PIC 9 VALUE 2.\n               88  S-TWO VALUE 2.\n               88  S-SIX VALUE 6.\n",
+        "       01  T.\n           05  R OCCURS 2.\n               10  S PIC 9 VALUE 0.\n                   88  S-SET VALUE 5.\n",
+    ]
+    .concat();
+    let out = run(&program(
+        "",
+        &data,
+        &[
+            line("IF A-ON AND S-ONE AND S-TWO DISPLAY 'ALL' END-IF"),
+            line("SET S-SIX TO TRUE"),
+            line("SET S-SET (2) TO TRUE"),
+            line("IF S-SET (2) AND NOT S-SET (1) DISPLAY 'ROW 2' END-IF"),
+            line("DISPLAY A B T."),
+        ]
+        .concat(),
+    ));
+    assert_eq!(out, "ALL\nROW 2\nY1605\n");
+}
+
+#[test]
 fn accept_dates_times_and_sysin() {
     let source = program(
         "",

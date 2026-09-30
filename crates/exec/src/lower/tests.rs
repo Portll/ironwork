@@ -291,14 +291,15 @@ fn a_condition_name_keeps_each_value_and_thru_pair() {
 }
 
 #[test]
-fn a_condition_name_the_walker_cannot_find_again_abends_where_it_is_tested() {
+fn a_condition_name_whose_variable_name_repeats_tests_its_own_item() {
     let p = lowered(&program(
         "",
         "       01  G1.\n           05 F PIC X VALUE 'A'.\n              88 F-A VALUE 'A'.\n       01  G2.\n           05 F PIC X.\n",
         &[line("DISPLAY 'BEFORE'"), line("IF F-A DISPLAY 'A' END-IF"), line("GOBACK.")].concat(),
     ));
-    let abend = p.blocks.iter().find_map(|b| if let Terminator::Abend(a) = b.end { Some(a) } else { None }).unwrap();
-    assert!(p.symbols[p.abends[abend as usize].message as usize].contains("ambiguous"));
+    assert!(p.blocks.iter().all(|b| !matches!(b.end, Terminator::Abend(_))));
+    let tested = p.places.iter().find(|q| symbol(&p, q.name) == "F-A").unwrap();
+    assert_eq!(tested.offset, 0);
 }
 
 #[test]
@@ -1111,9 +1112,9 @@ fn set_lowers_each_form_as_the_walker_runs_it() {
     let b = &p.blocks[0].ops;
     let numeric = MovePlan::Numeric { from: NumericFrom::Value, store: StorePlan::Zoned { digits: 1, scale: 0, signed: false, sign: None } };
     let Op::Move { from: LirOperand::Const(on), to, plan } = b[0] else { panic!("{:?}", b[0]) };
-    assert_eq!((name(to), plan, &p.consts[on as usize]), ("K", numeric, &Const::Number(numeric::precision::Fixed::new(1, numeric::precision::Places::new(1, 0)))));
+    assert_eq!((name(to), plan, &p.consts[on as usize]), ("K-ON", numeric, &Const::Number(numeric::precision::Fixed::new(1, numeric::precision::Places::new(1, 0)))));
     let Op::Move { from: LirOperand::Const(off), to, .. } = b[1] else { panic!("{:?}", b[1]) };
-    assert!(name(to) == "K" && matches!(p.consts[off as usize], Const::Number(f) if f.magnitude.is_zero()));
+    assert!(name(to) == "K-ON" && matches!(p.consts[off as usize], Const::Number(f) if f.magnitude.is_zero()));
     assert!(matches!(b[2], Op::Move { from: LirOperand::AddressOf(_), to, plan: MovePlan::Address } if name(to) == "P"));
     assert!(matches!(b[3], Op::Move { to, plan: MovePlan::Index, .. } if name(to) == "IX"));
     let Op::SetUpDown { by: IntExpr::Item(by), down: false, targets } = &b[4] else { panic!("{:?}", b[4]) };

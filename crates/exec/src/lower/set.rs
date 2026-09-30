@@ -3,7 +3,7 @@
 //! each LINKAGE record, and UP BY and DOWN BY with the step evaluated once.
 
 use super::data::Value;
-use super::{Lower, R, unsupported};
+use super::{Lower, R};
 use crate::layout::Resolved;
 use rt::lir::{MovePlan, Op, StepPlan, Terminator, UpDown};
 use rt::storage::Kind;
@@ -30,7 +30,7 @@ impl Lower<'_> {
                     let condition = &self.layout.conditions[index];
                     let value = if truth { condition.values.first().map(|(v, _)| v) } else { condition.false_value.as_ref() };
                     let Some(value) = value else { continue };
-                    let to = match self.conditional_variable(index, r, pos)? {
+                    let to = match self.conditional_variable(index, r)? {
                         Ok(place) => place,
                         Err((abend, at)) => return self.end(Terminator::Abend(abend), at),
                     };
@@ -94,25 +94,15 @@ impl Lower<'_> {
         Ok(())
     }
 
-    /// A SET or test's conditional variable, found again by its unqualified name with the
-    /// condition-name's subscripts, as the walker finds it; or the abend that finding gives, with
-    /// where it names. `at` is the position the walker's reference to the variable carries.
-    pub(super) fn conditional_variable(&mut self, index: usize, r: &syntax::ast::Ref, at: Pos) -> R<Result<rt::lir::PlaceId, (rt::lir::AbendId, Pos)>> {
-        let layout = self.layout;
-        let condition = &layout.conditions[index];
-        let item = &layout.items[condition.item];
-        let name = item.name.clone().unwrap_or_default();
-        let found = match layout.resolve(&name, &[], at) {
-            Ok(Resolved::Item(i)) if i == condition.item => None,
-            Ok(Resolved::Item(_)) => return unsupported("a conditional variable whose name finds another item", r.pos),
-            Ok(Resolved::Condition(_)) => Some(format!("{name} is a condition-name, not a data item")),
-            Err(e) => Some(e.message),
-        };
-        let found = found.or_else(|| (r.subscripts.len() != item.dims.len()).then(|| format!("{name} takes {} subscripts, not {}", item.dims.len(), r.subscripts.len())));
-        if let Some(message) = found {
-            return Ok(Err((self.ironwork(&message)?, at)));
+    /// A SET or test's conditional variable, by item index with the condition-name's subscripts, as
+    /// the walker's `locate_item` takes it; or the abend a wrong count of subscripts gives.
+    pub(super) fn conditional_variable(&mut self, index: usize, r: &syntax::ast::Ref) -> R<Result<rt::lir::PlaceId, (rt::lir::AbendId, Pos)>> {
+        let item = self.layout.conditions[index].item;
+        let dims = self.layout.items[item].dims.len();
+        if r.subscripts.len() != dims {
+            let message = format!("{} takes {dims} subscripts, not {}", r.name, r.subscripts.len());
+            return Ok(Err((self.ironwork(&message)?, r.pos)));
         }
-        let subject = syntax::ast::Ref { name, qualifiers: Vec::new(), subscripts: r.subscripts.clone(), refmod: None, pos: at };
-        Ok(Ok(self.item_place(condition.item, &subject, false)?))
+        Ok(Ok(self.item_place(item, r, false)?))
     }
 }

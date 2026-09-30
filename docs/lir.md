@@ -870,7 +870,7 @@ walker does on each execution; the last column names that work.
 | MOVE | `Move` per receiver (§9.2) | Lowered | Category dispatch in `assign` and `alnum_image` (machine.rs:1657-1768) |
 | COMPUTE, ADD, SUBTRACT, MULTIPLY, DIVIDE | `Arith`, then `Select` if handled | Lowered | §7.1 |
 | INITIALIZE | `Initialize` with a flat plan of (offset, length, value, store) | Lowered | The walk over the item's children (machine.rs:1968-1993) |
-| SET TO TRUE, TO FALSE | `Move` of the first VALUE's low end, or of WHEN SET TO FALSE's value, into the conditional variable found again by name (§11, item 1); nothing when there is none | Lowered | The conditional variable by name (machine.rs `set`) |
+| SET TO TRUE, TO FALSE | `Move` of the first VALUE's low end, or of WHEN SET TO FALSE's value, into the conditional variable by item index; nothing when there is none | Lowered | The conditional variable by item index (machine.rs `set`) |
 | SET TO | `Move` per receiver; a `POINTER` receiver takes only an address or NULL, else `Refused` | One call | The kind test |
 | SET ADDRESS OF | One `SetAddress` for all the records; a target that is not an 01 or 77 of LINKAGE ends the block in `Abend` after the records before it | One call | Resolve and linkage test |
 | SET UP BY, DOWN BY | One `SetUpDown`: each receiver `Pointer`, `Number` with a `StepPlan` of dmax 0, or `Refused` | One call | Read, then match on the value |
@@ -960,8 +960,9 @@ Every category pair, by the value the walker reads from the sender (line numbers
   WRITE and REWRITE FROM take the same plans.
 - **Several receivers** lower to one `Move` each. Each locates its receiver, then reads the sender
   again (machine.rs:315-318), so a receiver stored earlier can change what a later one gets (§11).
-- **MOVE CORRESPONDING** expands at lowering into one `Move` per pair of corresponding elementary
-  items. The parser refuses it today (parser.rs:826-827).
+- **MOVE, ADD and SUBTRACT CORRESPONDING** reach lowering already expanded: the compiler turns
+  each into a MOVE per pair of corresponding items, or one ADD or SUBTRACT with a computation per
+  pair (compile's `corresponding`; C130, C131), so lowering sees only `Move` and `Arith`.
 - **Figuratives and ALL literals** are constants; the plan says how each fills the receiver.
 
 ### 9.3 CALL, CANCEL and LE services
@@ -1498,7 +1499,7 @@ executors and recorded.
 
 | # | Behaviour | Where | IBM | LIR |
 |---|---|---|---|---|
-| 1 | A condition-name test and SET TO TRUE find the conditional variable again by its unqualified name, so one whose name is ambiguous, or FILLER, abends IRONWORK | machine.rs:1134, 1797-1803 | No such failure | The place by item index, plus an `Abend` op where the walker would fail |
+| 1 | Changed in both executors: a condition-name test and SET TO TRUE or FALSE take the conditional variable by item index (machine.rs `locate_item`, lower/set.rs `conditional_variable`), so a FILLER variable or one whose name repeats works | - | As IBM | The place by item index |
 | 2 | MOVE to several receivers reads the sender again for each, after earlier stores | machine.rs:315-318 | The sender's subscripts are evaluated once, before the first receiver | One `Move` per receiver |
 | 3 | COMPUTE with several receivers evaluates the expression again for each (machine.rs:321-323); ADD and SUBTRACT with several receivers read shared operands again after earlier stores | machine.rs:1503-1522 | Computed once, then stored into each | One `ArithStep` per receiver |
 | 4 | INITIALIZE gives an alphanumeric-edited item ZERO | machine.rs:1976-1980 | SPACE | The walker's values in the plan |
@@ -1581,11 +1582,11 @@ until the edit tables carry the decimal point and currency values that editing a
 2. **Nested dispatch.** The VM runs CALL, INVOKE, SORT procedures and USE BEFORE REPORTING as Rust
    recursion, bounded by `MAX_DEPTH`, as the walker does. Accept that, or require the VM to keep its
    own activation stack?
-3. **The walker's divergences from IBM** in §11 (items 1 to 4). Fix them in both executors during
+3. **The walker's divergences from IBM** in §11 (items 2 to 4; item 1 is fixed). Fix them in both executors during
    step 2, each recorded as a change of semantics, or keep them until an oracle rules? Items 2 and 3
    follow rules the Language Reference states, so they need no oracle.
 4. **Abends in called programs.** Should `Abend` carry its program, so the CLI names the right file
    for an abend in a CALLed program? It changes what `ironwork run` prints today.
-5. **Constructs the parser refuses:** MOVE CORRESPONDING. The LIR defines it. Add it to the front
-   end and the walker in step 2, or later? PERFORM VARYING … AFTER and GO TO … DEPENDING ON are
-   now parsed and run by the walker, and lower as it runs them (§8.3, §8.8).
+5. **Constructs the parser refused:** answered. MOVE, ADD and SUBTRACT CORRESPONDING are expanded by
+   the compiler before lowering (§9.2); PERFORM VARYING … AFTER and GO TO … DEPENDING ON are parsed
+   and run by the walker, and lower as it runs them (§8.3, §8.8).

@@ -278,9 +278,9 @@ Each is argued in the document named, and none blocks step 1.
 |---|---|---|
 | Q1 | [lir](lir.md) | Which oracle settles V1 (PERFORM-range exits), and must it be settled before step 5 makes the VM the default? |
 | Q2 | lir | Does the VM keep Rust recursion for CALL, INVOKE, SORT procedures and USE BEFORE REPORTING, or keep its own stack? |
-| Q3 | lir | Are the walker's five known divergences from IBM fixed in step 2, or only once an oracle confirms them? |
+| Q3 | lir | Are the walker's four remaining known divergences from IBM fixed in step 2, or only once an oracle confirms them? (Condition-names finding their variable by name was fixed in both executors.) |
 | Q4 | lir | Does an abend carry its program, so that its file name is right in a multi-program run? |
-| Q5 | lir | Are MOVE CORRESPONDING, PERFORM VARYING … AFTER and GO TO … DEPENDING ON, which the parser refuses today, added in step 2 or later? |
+| Q5 | lir | Answered: MOVE CORRESPONDING, PERFORM VARYING … AFTER and GO TO … DEPENDING ON are all parsed and run; the compiler expands CORRESPONDING before lowering. |
 | Q6 | [sem](semantics-library.md) | Does `syntax` depend on `rt` for the shared vocabulary (recommended), or convert at lowering? |
 | Q7 | sem | Does the runtime exception cover `tn3270.rs`, the TN3270 server? |
 | Q8 | [lm](load-module.md) | Is a reader kept for the previous major version of the format? |

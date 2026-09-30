@@ -155,8 +155,7 @@ impl Lower<'_> {
         Ok(Test::Cond(self.cond(lir::Cond::Sign { value, test })?))
     }
 
-    /// A level-88 name. The walker finds the conditional variable again by its unqualified name
-    /// and abends where that fails (lir.md §11, item 1); the test keeps the abend there.
+    /// A level-88 name, tested against its conditional variable by item index.
     fn condition_name(&mut self, r: &Ref, pos: Pos) -> R<Test> {
         let layout = self.layout;
         let index = match layout.resolve(&r.name, &r.qualifiers, r.pos) {
@@ -164,7 +163,7 @@ impl Lower<'_> {
             Ok(Resolved::Item(_)) => return Ok(Test::Abend(self.ironwork(&format!("{} is a data item, not a condition", r.name))?, r.pos)),
             Err(e) => return Ok(Test::Abend(self.ironwork(&e.message)?, r.pos)),
         };
-        let subject = match self.conditional_variable(index, r, r.pos)? {
+        let subject = match self.conditional_variable(index, r)? {
             Ok(place) => place,
             Err((abend, at)) => return Ok(Test::Abend(abend, at)),
         };

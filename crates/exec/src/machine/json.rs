@@ -34,6 +34,14 @@ impl<'p> Machine<'p, '_, '_> {
         }
     }
 
+    /// The conditional variable of condition-name `c`, found with its qualifiers.
+    fn variable_of(&mut self, c: &Ref) -> R<usize> {
+        match self.resolve(c)? {
+            Resolved::Condition(k) => Ok(self.layout.conditions[k].item),
+            _ => Err(Abend::ironwork(format!("{} is not a condition-name", c.name), c.pos)),
+        }
+    }
+
     fn json_phrases<'g>(&mut self, g: &'g JsonGenerate) -> R<Phrases<'g>> {
         let mut p = Phrases::default();
         for (r, name) in &g.names {
@@ -72,7 +80,7 @@ impl<'p> Machine<'p, '_, '_> {
             p.indicated.insert(item, i);
             let indicator = match (&i.indicator, &i.marker) {
                 (Some(r), _) => self.item_of(r)?,
-                (None, Marker::Condition(c)) => self.layout.conditions.iter().find(|k| k.name == c.name).map(|k| k.item).ok_or_else(|| Abend::ironwork(format!("{} is not a condition-name", c.name), c.pos))?,
+                (None, Marker::Condition(c)) => self.variable_of(c)?,
                 (None, Marker::Literal(_)) => return Err(Abend::ironwork("INDICATING ... USING a literal takes IN and the indicator", g.pos)),
             };
             p.indicators.insert(indicator);
@@ -108,7 +116,7 @@ impl<'p> Machine<'p, '_, '_> {
             Marker::Literal(Literal::Alnum(s)) => Ok(self.page.encode(s).ok().and_then(|b| b.first().copied()) == Some(byte)),
             Marker::Literal(_) => Err(Abend::ironwork("a one-character alphanumeric literal", pos)),
             Marker::Condition(c) => {
-                let dims = self.layout.conditions.iter().find(|k| k.name == c.name).map_or(0, |k| self.layout.items[k.item].dims.len());
+                let dims = self.layout.items[self.variable_of(c)?].dims.len();
                 self.condition(&Cond::Name(Self::subscripted(c, subscripts, dims)), pos)
             }
         }
@@ -148,16 +156,12 @@ impl<'p> Machine<'p, '_, '_> {
 
     fn json_elementary(&mut self, item: usize, loc: Loc, subscripts: &[u32], p: &Phrases, pos: Pos) -> R<Option<String>> {
         if let Some(i) = p.indicated.get(&item) {
-            let indicator = match &i.indicator {
-                Some(r) => r.clone(),
-                None => {
-                    let Marker::Condition(c) = &i.marker else { unreachable!("checked in json_phrases") };
-                    let k = self.layout.conditions.iter().find(|k| k.name == c.name).map(|k| k.item).unwrap_or(item);
-                    Ref { name: self.layout.items[k].name.clone().unwrap_or_default(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos }
-                }
+            let (k, named) = match (&i.indicator, &i.marker) {
+                (Some(r), _) => (self.item_of(r)?, r),
+                (None, Marker::Condition(c)) => (self.variable_of(c)?, c),
+                (None, Marker::Literal(_)) => unreachable!("checked in json_phrases"),
             };
-            let k = self.item_of(&indicator)?;
-            let at = self.locate(&Self::subscripted(&indicator, subscripts, self.layout.items[k].dims.len()))?;
+            let at = self.locate_item(k, &Self::subscripted(named, subscripts, self.layout.items[k].dims.len()), false)?;
             let byte = self.bytes(at).first().copied().unwrap_or(0);
             if self.marker_holds(&i.marker, byte, subscripts, pos)? {
                 return Ok(Some("null".into()));
