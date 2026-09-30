@@ -81,8 +81,8 @@ pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error
 
 /// `whole` is false for the parts a class definition is compiled into, which IBM's rules for
 /// compiler options do not apply to one by one.
-pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -> Result<Compiled, Vec<Error>> {
-    let mut errors = Vec::new();
+pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: bool) -> Result<Compiled, Vec<Error>> {
+    let mut errors = std::mem::take(&mut program.messages);
     reserved::check(&program, &mut errors);
     let mut program = declaratives::with_debug_item(markup::with_special_registers(sort::with_special_registers(program)));
     let mut options = Options::default();
@@ -165,6 +165,9 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
     }
     let entries = entry_points(&program);
     procedure_rules(&program, &layout, &entries, &options, &mut errors);
+    if whole {
+        program_end(&program, &mut errors);
+    }
     oo::check(&layout, &program, &mut errors);
     let errors: Vec<Error> = errors.into_iter().map(|e| e.in_files(&program.sources)).collect();
     if refused(&errors, &options) {
@@ -186,6 +189,16 @@ fn option_severity(e: &numeric::options::OptionError) -> Severity {
         OptionError::Removed { .. } | OptionError::NoEffect { warning: true, .. } => Severity::Warning,
         OptionError::NoEffect { warning: false, .. } => Severity::Informational,
         OptionError::UnsupportedCodePage(_) | OptionError::UnknownFlag(_) => Severity::Severe,
+    }
+}
+
+/// IBM's warning for a program with no STOP RUN, GOBACK or EXIT PROGRAM, which may run past its
+/// end (assumption [`numeric::assumptions::NO_PROGRAM_END`]).
+fn program_end(program: &Program, errors: &mut Vec<Error>) {
+    let mut all = Vec::new();
+    program.paragraphs.iter().for_each(|p| inner_statements(&p.statements, &mut all));
+    if !all.iter().any(|s| matches!(s, Stmt::StopRun { .. } | Stmt::Goback { .. } | Stmt::ExitProgram { .. })) {
+        errors.push(Error::warning(Pos::default(), "no STOP RUN, GOBACK or EXIT PROGRAM in the program: check that it ends"));
     }
 }
 

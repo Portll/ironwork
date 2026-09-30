@@ -242,7 +242,7 @@ fn an_independent_segment_is_entered_with_its_go_tos_as_written() {
 #[test]
 fn the_alter_statements_rules_are_compile_errors() {
     let errors = |head: &str, body: &str| {
-        compile_errors(&format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T{head}.\n       PROCEDURE DIVISION.\n       P0.\n{body}       P1.\n           GO TO P2.\n       P2.\n           DISPLAY 'X'.\n       S SECTION.\n           GO TO P2.\n"))
+        compile_errors(&format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T{head}.\n       PROCEDURE DIVISION.\n       P0.\n{body}       P1.\n           GO TO P2.\n       P2.\n           DISPLAY 'X'.\n       S SECTION.\n           GO TO P2.\n       P3.\n           STOP RUN.\n"))
     };
     assert_eq!(errors("", &line("ALTER P1 TO PROCEED TO P0.")), "");
     assert!(errors("", &line("ALTER P2 TO P0.")).contains("ALTER P2: the paragraph must hold one sentence, a GO TO without DEPENDING ON"));

@@ -214,6 +214,9 @@ pub const CORRESPONDING_CHOICES: &str = "C131";
 pub const NUMPROC_MIG_WARNS: &str = "C120";
 pub const INVALID_OPTION_DISCARDED: &str = "C121";
 pub const OPTIONS_WITHOUT_EFFECT: &str = "C122";
+pub const NON_COBOL_CHARACTERS: &str = "C123";
+pub const NO_PROGRAM_END: &str = "C124";
+pub const USE_WITHOUT_PARAGRAPH: &str = "C125";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1323,6 +1326,24 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: OPTIONS_WITHOUT_EFFECT,
         claim: "Options Enterprise COBOL 6.4 no longer has are accepted without effect. LIB, which the compiler now always behaves as having, and SIZE (Migration Guide GC27-8715-03, Table 32, p. 167) are informational (return code 0), as Enterprise COBOL 6.3 gives them for invocation parameters LIB and SIZE(2097152) in job output in the corpus: IGYOS4090-I 'The \"LIB\" option specification is no longer required. COBOL library processing is always in effect.' and IGYOS4013-I 'The \"SIZE\" option is no longer supported.' (SamMoussa961_COBOL, CLHELLO JOB03701); ironwork gives them for a CBL or PROCESS card too, and takes SZ as SIZE's abbreviation. FLAGSAA and NOFDUMP are warnings (W, return code 4), as the guide says IBM warns for each (Table 23, p. 112), with ironwork's text since the guide gives none. FDUMP, which IBM maps to TEST, and NOLIB pass without a message, as TEST does here; no source ironwork has shows IBM's message for NOLIB. The messages are ironwork's own words",
+        basis: Basis::Observed,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: NON_COBOL_CHARACTERS,
+        claim: "A single-byte character outside the basic COBOL character set (Language Reference SC27-8713-03, Table 1, pp. 3-6), outside a literal, comment or PICTURE string, is accepted with IGYLI0163-E, 'Non-COBOL character \"%\" was found in column 8. The character was accepted.' (Migration Guide GC27-8715-03, p. 127), one message for each such character: an error (E, return code 8), so the program still runs under NOCOMPILE(S). Accepted means it is read as a character of the word it is in, or as a word of its own, which the parse then takes or refuses as it would any word. The guide calls non-COBOL the EBCDIC characters outside the set (p. 125), so control characters count; a character beyond U+00FF, which z/OS would hold in DBCS, is still refused, as are $ and &, whose own messages ironwork keeps. COPY REPLACING works on the text before it is read, so a character that REPLACING removes, which IBM diagnoses in the member, gives no message here",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: NO_PROGRAM_END,
+        claim: "A program with no STOP RUN, GOBACK or EXIT PROGRAM statement anywhere in its PROCEDURE DIVISION, DECLARATIVES included, gets IGYPS2091-W, 'No \"STOP RUN\", \"GOBACK\" or \"EXIT PROGRAM\" was found in the program. Check program logic to verify that the program will exit.' (Migration Guide GC27-8715-03, p. 131): a warning (W, return code 4) with no line, in ironwork's words. An EXEC CICS RETURN or a CALL that ends the run does not count, as the guide names only the three statements. A class definition and its methods, which end with EXIT METHOD, get no such warning",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: USE_WITHOUT_PARAGRAPH,
+        claim: "A DECLARATIVES section whose USE statement is followed at once by the next section or END DECLARATIVES gets IGYPS2036-I, 'A paragraph-name was missing after the \"USE\" statement.', informational (return code 0), on the line that follows, as Enterprise COBOL 6.3 gives it for CCVS85 IC401M, DB301M, DB302M and DB305M in the compile listings of eclipse-che4z's COBOL language server tests. No manual ironwork has lists the message. A USE statement followed by statements with no paragraph-name, and a debugging section read as a comment without WITH DEBUGGING MODE, get none, as no listing shows what IBM gives for them",
         basis: Basis::Observed,
         oracle: Oracle::EnterpriseCobol,
     },

@@ -44,7 +44,12 @@ impl Parser<'_> {
                 Use::Comment => {
                     paragraphs.pop();
                     self.skip_debugging_section();
+                    continue;
                 }
+            }
+            if self.at_end_declaratives() || self.section_header() {
+                let section = &paragraphs[paragraphs.len() - 1].name;
+                self.messages.push(Error::at(self.pos(), format!("{section} SECTION: no paragraph-name after its USE statement")).graded(crate::Severity::Informational));
             }
         }
         writer.procedure_start = paragraphs.len();
@@ -190,6 +195,25 @@ mod tests {
         );
         assert_eq!(p.report_writer.procedure_start, 4);
         assert!(parse(&program("", "       E SECTION.\n           USE AFTER EXCEPTION CONDITION EC-SIZE.\n")).unwrap_err().message.contains("expected PROCEDURE"));
+    }
+
+    #[test]
+    fn a_section_that_ends_right_after_its_use_statement_is_noted() {
+        let text = program(
+            " WITH DEBUGGING MODE",
+            "       E1 SECTION.\n           USE AFTER ERROR PROCEDURE ON F.\n       E2 SECTION.\n           USE FOR DEBUGGING ON M.\n       E2-A.\n           DISPLAY 'E2'.\n       E3 SECTION.\n           USE AFTER ERROR PROCEDURE INPUT.\n",
+        );
+        let p = &parse(&text).unwrap_or_else(|e| panic!("{e}"))[0];
+        let messages: Vec<(u32, &str, crate::Severity)> = p.messages.iter().map(|m| (m.pos.line, m.message.as_str(), m.severity)).collect();
+        assert_eq!(
+            messages,
+            [
+                (17, "E1 SECTION: no paragraph-name after its USE statement", crate::Severity::Informational),
+                (23, "E3 SECTION: no paragraph-name after its USE statement", crate::Severity::Informational),
+            ]
+        );
+        let comment = program("", "       D SECTION.\n           USE FOR DEBUGGING ON M.\n");
+        assert!(parse(&comment).unwrap_or_else(|e| panic!("{e}"))[0].messages.is_empty());
     }
 
     #[test]

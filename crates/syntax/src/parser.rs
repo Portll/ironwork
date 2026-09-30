@@ -9,7 +9,7 @@ mod sort;
 
 /// Every program in the source, first to last, with nested programs after the one containing them.
 pub fn parse(tokens: &[Token], options: Vec<String>) -> Result<Vec<Program>, Error> {
-    let mut parser = Parser { tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default(), mnemonics: Vec::new(), debugging: false };
+    let mut parser = Parser::new(tokens);
     let mut programs = Vec::new();
     parser.program(&options, &mut programs)?;
     while parser.peek().is_some() {
@@ -117,6 +117,11 @@ struct Parser<'a> {
     sql: SqlState,
     /// WITH DEBUGGING MODE, from the program's configuration section or its container's.
     debugging: bool,
+    /// Messages about the program being parsed that do not stop the parse.
+    messages: Vec<Error>,
+    /// Which tokens' own messages a program has taken, so a container leaves its contained
+    /// programs' to them.
+    reported: Vec<bool>,
 }
 
 /// The WHENEVER actions in force, which carry on in listing order, and the EXEC SQL blocks the
@@ -129,6 +134,22 @@ struct SqlState {
 }
 
 type R<T> = Result<T, Error>;
+
+impl<'a> Parser<'a> {
+    fn new(tokens: &'a [Token]) -> Self {
+        Self {
+            tokens,
+            at: 0,
+            exec_declarations: Vec::new(),
+            cics: false,
+            sql: SqlState::default(),
+            mnemonics: Vec::new(),
+            debugging: false,
+            messages: Vec::new(),
+            reported: vec![false; tokens.len()],
+        }
+    }
+}
 
 impl Parser<'_> {
     fn peek(&self) -> Option<&Tok> {
@@ -222,10 +243,24 @@ impl Parser<'_> {
     }
 
     fn program(&mut self, options: &[String], out: &mut Vec<Program>) -> R<()> {
+        let (start, first) = (self.at, out.len());
         let outer = (std::mem::take(&mut self.exec_declarations), std::mem::take(&mut self.cics), std::mem::take(&mut self.sql.blocks), self.mnemonics.clone(), self.debugging);
+        let outer_messages = std::mem::take(&mut self.messages);
         let parsed = self.one_program(options, out);
         (self.exec_declarations, self.cics, self.sql.blocks, self.mnemonics, self.debugging) = outer;
-        parsed
+        let own = std::mem::replace(&mut self.messages, outer_messages);
+        parsed?;
+        let mut messages = Vec::new();
+        for i in start..self.at {
+            if !std::mem::replace(&mut self.reported[i], true) {
+                messages.extend(self.tokens[i].messages.iter().cloned());
+            }
+        }
+        messages.extend(own);
+        if let Some(p) = out.get_mut(first) {
+            p.messages = messages;
+        }
+        Ok(())
     }
 
     fn one_program(&mut self, options: &[String], out: &mut Vec<Program>) -> R<()> {
@@ -2534,7 +2569,7 @@ fn cics_options(body: &str) -> Vec<(String, Option<ExecArg>)> {
 fn operand_of(text: &str, pos: Pos) -> Option<Operand> {
     let source = crate::source::Source { text: text.to_owned(), positions: vec![pos; text.chars().count()], options: Vec::new(), debugging: None };
     let tokens = crate::lexer::lex(&source).ok()?;
-    let mut p = Parser { tokens: &tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default(), mnemonics: Vec::new(), debugging: false };
+    let mut p = Parser::new(&tokens);
     let op = p.operand().ok()?;
     (p.at == tokens.len()).then_some(op)
 }
@@ -2547,7 +2582,7 @@ fn system_entries(member: &str) -> R<Vec<DataEntry>> {
 fn system_text_entries(text: &str) -> R<Vec<DataEntry>> {
     let source = crate::source::read(text)?;
     let tokens = crate::lexer::lex(&source)?;
-    Parser { tokens: &tokens, at: 0, exec_declarations: Vec::new(), cics: false, sql: SqlState::default(), mnemonics: Vec::new(), debugging: false }.data_entries()
+    Parser::new(&tokens).data_entries()
 }
 
 /// Words that begin a SELECT clause, and so end the one before.
@@ -2633,6 +2668,17 @@ mod tests {
         let all = crate::parse_all_with(&text, &Default::default()).unwrap_or_else(|e| panic!("{e}"));
         let contained: Vec<(&str, &[String])> = all.iter().map(|p| (p.id.as_str(), p.nested.as_slice())).collect();
         assert_eq!(contained, [("OUTER", &["A".to_owned(), "B".to_owned()][..]), ("A", &["A1".to_owned()][..]), ("A1", &[][..]), ("B", &[][..])]);
+    }
+
+    #[test]
+    fn each_program_carries_the_messages_of_its_own_source_and_not_its_contained_programs() {
+        let program = |id: &str, name: &str, inner: &str| {
+            format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. {id}.\n       PROCEDURE DIVISION.\n           DISPLAY {name}\n           GOBACK.\n{inner}       END PROGRAM {id}.\n")
+        };
+        let text = [program("O#1", "O1", &[program("A", "A@1", ""), program("B", "B1", "")].concat()), program("NEXT", "N%1", "")].concat();
+        let all = crate::parse_all_with(&text, &Default::default()).unwrap_or_else(|e| panic!("{e}"));
+        let lines: Vec<(&str, Vec<u32>)> = all.iter().map(|p| (p.id.as_str(), p.messages.iter().map(|m| m.pos.line).collect())).collect();
+        assert_eq!(lines, [("O#1", vec![2, 18]), ("A", vec![9]), ("B", vec![]), ("NEXT", vec![22])]);
     }
 
     #[test]

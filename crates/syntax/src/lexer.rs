@@ -39,6 +39,8 @@ pub struct Token {
     pub spelled: Option<String>,
     /// A separator comma or semicolon comes between this token and the one before it.
     pub after_comma: bool,
+    /// Messages about the token that do not stop the parse.
+    pub messages: Vec<Error>,
 }
 
 struct Lexer<'a> {
@@ -54,10 +56,12 @@ struct Lexer<'a> {
     /// it: a contained program has its container's, and a program after it starts afresh.
     outer: Vec<bool>,
     comma_pending: bool,
+    /// Messages for the next token emitted.
+    pending: Vec<Error>,
 }
 
 pub fn lex(source: &Source) -> Result<Vec<Token>, Error> {
-    let mut lx = Lexer { chars: source.text.chars().collect(), positions: &source.positions, at: 0, tokens: Vec::new(), decimal_comma: false, currency: Vec::new(), outer: Vec::new(), comma_pending: false };
+    let mut lx = Lexer { chars: source.text.chars().collect(), positions: &source.positions, at: 0, tokens: Vec::new(), decimal_comma: false, currency: Vec::new(), outer: Vec::new(), comma_pending: false, pending: Vec::new() };
     while lx.at < lx.chars.len() {
         lx.next_token()?;
     }
@@ -66,6 +70,13 @@ pub fn lex(source: &Source) -> Result<Vec<Token>, Error> {
 
 fn is_word_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '-' || c == '_'
+}
+
+/// A single-byte character outside IBM's basic COBOL character set (Language Reference
+/// SC27-8713-03, Table 1, pp. 3-6), which IBM accepts with an error as part of the text around it
+/// (assumption C123). `$` and `&`, which ironwork reads only where COBOL puts them, are left out.
+fn non_cobol(c: char) -> bool {
+    u32::from(c) <= 0xFF && !c.is_ascii_alphanumeric() && !" \n+-*/=$,;.\"'()><:_&".contains(c)
 }
 
 impl Lexer<'_> {
@@ -113,7 +124,7 @@ impl Lexer<'_> {
             _ => None,
         };
         let after_comma = std::mem::take(&mut self.comma_pending);
-        self.tokens.push(Token { tok, pos, area_a: (8..=11).contains(&pos.col), spelled, after_comma });
+        self.tokens.push(Token { tok, pos, area_a: (8..=11).contains(&pos.col), spelled, after_comma, messages: std::mem::take(&mut self.pending) });
     }
 
     /// The character that is a numeric literal's decimal point.
@@ -183,7 +194,7 @@ impl Lexer<'_> {
                     _ => return Err(Error::at(pos, "a sign must be followed by a number")),
                 }
             }
-            _ if c.is_ascii_alphanumeric() || c == '.' => {
+            _ if c.is_ascii_alphanumeric() || c == '.' || non_cobol(c) => {
                 let tok = self.number_or_word(pos)?;
                 match tok {
                     Tok::Word(w) if w == "EXEC" || w == "EXECUTE" => {
@@ -271,7 +282,10 @@ impl Lexer<'_> {
 
     fn number_or_word(&mut self, pos: Pos) -> Result<Tok, Error> {
         let start = self.at;
-        while self.peek(0).is_some_and(is_word_char) {
+        while let Some(c) = self.peek(0).filter(|&c| is_word_char(c) || non_cobol(c)) {
+            if non_cobol(c) {
+                self.pending.push(Error::at(self.pos(), format!("non-COBOL character {c:?}: the character was accepted")).graded(crate::Severity::Error));
+            }
             self.at += 1;
         }
         let run: String = self.chars[start..self.at].iter().collect();
@@ -414,6 +428,25 @@ mod tests {
         let error = |text: &str| lex(&source::read(text).unwrap()).unwrap_err().message;
         assert!(error("           'A' & 'B'").contains("literal concatenation with & is not Enterprise COBOL's"));
         assert!(error("           NOTIFY=&SYSUID").contains("unexpected character '&'"));
+    }
+
+    #[test]
+    fn a_non_cobol_character_is_accepted_into_its_word_with_an_error() {
+        let lexed = lex(&source::read("           MOVE WS#1 TO %\u{1b} 'A@B'.").unwrap()).unwrap();
+        assert_eq!(lexed.iter().map(|t| t.tok.clone()).collect::<Vec<_>>(), [w("MOVE"), w("WS#1"), w("TO"), w("%\u{1b}"), Tok::Alnum("A@B".into()), Tok::Period]);
+        let messages: Vec<(usize, u32, &str, crate::Severity)> =
+            lexed.iter().enumerate().flat_map(|(i, t)| t.messages.iter().map(move |m| (i, m.pos.col, m.message.as_str(), m.severity))).collect();
+        assert_eq!(
+            messages,
+            [
+                (1, 19, "non-COBOL character '#': the character was accepted", crate::Severity::Error),
+                (3, 25, "non-COBOL character '%': the character was accepted", crate::Severity::Error),
+                (3, 26, "non-COBOL character '\\u{1b}': the character was accepted", crate::Severity::Error),
+            ]
+        );
+        let error = |text: &str| lex(&source::read(text).unwrap()).unwrap_err().message;
+        assert_eq!(error("           MOVE $X"), "unexpected character '$'");
+        assert_eq!(error("           MOVE \u{3042}"), "unexpected character '\u{3042}'");
     }
 
     #[test]

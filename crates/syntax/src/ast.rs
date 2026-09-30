@@ -34,6 +34,8 @@ pub struct Program {
     pub environment: Environment,
     /// The PROGRAM-IDs of the programs it directly contains.
     pub nested: Vec<String>,
+    /// The messages reading its source gave that did not stop the parse, in the order found.
+    pub messages: Vec<crate::Error>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
