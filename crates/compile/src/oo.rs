@@ -546,6 +546,7 @@ pub fn bodies(s: &Stmt) -> Vec<&[Stmt]> {
         Stmt::Evaluate { whens, other, .. } => whens.iter().map(|w| w.body.as_slice()).chain([other.as_slice()]).collect(),
         Stmt::Compute { size_error: Some(se), .. } => vec![&se.on, &se.not_on],
         Stmt::Arith(a) => a.size_error.iter().flat_map(|se| [se.on.as_slice(), se.not_on.as_slice()]).collect(),
+        Stmt::Corresponding(c) => c.size_error.iter().flat_map(|se| [se.on.as_slice(), se.not_on.as_slice()]).collect(),
         Stmt::Read(r) => handlers(&r.at_end).into_iter().chain(handlers(&r.invalid)).collect(),
         Stmt::Write { invalid, end_of_page, .. } => handlers(invalid).into_iter().chain(handlers(end_of_page)).collect(),
         Stmt::Rewrite { invalid, .. } | Stmt::Delete { invalid, .. } | Stmt::Start { invalid, .. } => handlers(invalid).to_vec(),
@@ -558,6 +559,39 @@ pub fn bodies(s: &Stmt) -> Vec<&[Stmt]> {
         Stmt::Search(se) => se.whens.iter().map(|(_, b)| b.as_slice()).chain([opt(&se.at_end)]).collect(),
         Stmt::Sorting(so) => match &**so {
             Sorting::Return { at_end, .. } => handlers(at_end).to_vec(),
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    }
+}
+
+/// The statement lists [`bodies`] gives, those that are present, to change.
+pub fn bodies_mut(s: &mut Stmt) -> Vec<&mut Vec<Stmt>> {
+    fn handlers(h: &mut Handlers) -> impl Iterator<Item = &mut Vec<Stmt>> {
+        h.on.iter_mut().chain(h.not_on.iter_mut())
+    }
+    fn pair<'s>(a: &'s mut Option<Vec<Stmt>>, b: &'s mut Option<Vec<Stmt>>) -> Vec<&'s mut Vec<Stmt>> {
+        a.iter_mut().chain(b.iter_mut()).collect()
+    }
+    match s {
+        Stmt::If { then, otherwise, .. } => vec![then, otherwise],
+        Stmt::PerformInline { body, .. } => vec![body],
+        Stmt::Evaluate { whens, other, .. } => whens.iter_mut().map(|w| &mut w.body).chain([other]).collect(),
+        Stmt::Compute { size_error: Some(se), .. } => vec![&mut se.on, &mut se.not_on],
+        Stmt::Arith(a) => a.size_error.iter_mut().flat_map(|se| [&mut se.on, &mut se.not_on]).collect(),
+        Stmt::Corresponding(c) => c.size_error.iter_mut().flat_map(|se| [&mut se.on, &mut se.not_on]).collect(),
+        Stmt::Read(r) => handlers(&mut r.at_end).chain(handlers(&mut r.invalid)).collect(),
+        Stmt::Write { invalid, end_of_page, .. } => handlers(invalid).chain(handlers(end_of_page)).collect(),
+        Stmt::Rewrite { invalid, .. } | Stmt::Delete { invalid, .. } | Stmt::Start { invalid, .. } => handlers(invalid).collect(),
+        Stmt::Call(c) => pair(&mut c.on_exception, &mut c.not_on_exception),
+        Stmt::Invoke(i) => pair(&mut i.on_exception, &mut i.not_on_exception),
+        Stmt::JsonGenerate(g) => pair(&mut g.on_exception, &mut g.not_on_exception),
+        Stmt::XmlParse(x) => pair(&mut x.on_exception, &mut x.not_on_exception),
+        Stmt::String(st) => pair(&mut st.on_overflow, &mut st.not_on_overflow),
+        Stmt::Unstring(u) => pair(&mut u.on_overflow, &mut u.not_on_overflow),
+        Stmt::Search(se) => se.whens.iter_mut().map(|(_, b)| b).chain(se.at_end.iter_mut()).collect(),
+        Stmt::Sorting(so) => match &mut **so {
+            Sorting::Return { at_end, .. } => handlers(at_end).collect(),
             _ => Vec::new(),
         },
         _ => Vec::new(),

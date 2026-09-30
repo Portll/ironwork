@@ -7,6 +7,7 @@ use syntax::ast::Stmt;
 use syntax::{Error, Severity};
 
 mod collating;
+mod corresponding;
 mod data;
 mod data_division;
 mod declaratives;

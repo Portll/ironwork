@@ -372,6 +372,9 @@ pub enum Stmt {
     Compute { targets: Vec<Target>, expr: Expr, size_error: Option<SizeError>, pos: Pos },
     /// ADD, SUBTRACT, MULTIPLY and DIVIDE, reduced to their arithmetic.
     Arith(Box<Arith>),
+    /// MOVE, ADD or SUBTRACT CORRESPONDING, which the compiler expands into a MOVE per pair of
+    /// corresponding items, or one ADD or SUBTRACT over them all.
+    Corresponding(Box<Corresponding>),
     If { cond: Cond, then: Vec<Stmt>, otherwise: Vec<Stmt>, pos: Pos },
     PerformInline { body: Vec<Stmt>, repeat: Loop, pos: Pos },
     PerformProc { from: ProcName, thru: Option<ProcName>, repeat: Loop, pos: Pos },
@@ -442,6 +445,25 @@ pub struct Arith {
     pub verb: ArithVerb,
     pub computations: Vec<(Target, Expr)>,
     pub remainder: Option<(Target, Expr, Expr)>,
+    pub size_error: Option<SizeError>,
+    pub pos: Pos,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CorrespondingVerb {
+    Move,
+    Add,
+    Subtract,
+}
+
+/// `from` is the sending group and `to` the receiving one; `rounded` and `size_error` are ADD's
+/// and SUBTRACT's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Corresponding {
+    pub verb: CorrespondingVerb,
+    pub from: Ref,
+    pub to: Ref,
+    pub rounded: bool,
     pub size_error: Option<SizeError>,
     pub pos: Pos,
 }

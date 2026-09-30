@@ -837,6 +837,7 @@ fn stmt_pos(s: &Stmt) -> Option<Pos> {
         | Stmt::Alter { pos, .. }
         | Stmt::Entry { pos, .. } => *pos,
         Stmt::Arith(a) => a.pos,
+        Stmt::Corresponding(c) => c.pos,
         Stmt::Read(r) => r.pos,
         Stmt::Call(c) => c.pos,
         Stmt::String(st) => st.pos,

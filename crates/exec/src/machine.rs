@@ -249,6 +249,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 return self.arithmetic(&computations, None, size_error.as_ref(), false, *pos);
             }
             Stmt::Arith(a) => return self.arithmetic(&a.computations, a.remainder.as_ref(), a.size_error.as_ref(), true, a.pos),
+            Stmt::Corresponding(c) => return Err(Abend::ironwork("CORRESPONDING reached the interpreter unexpanded", c.pos)),
             Stmt::If { cond, then, otherwise, pos } => {
                 let branch = if self.condition(cond, *pos)? { then } else { otherwise };
                 return self.run_block(branch);

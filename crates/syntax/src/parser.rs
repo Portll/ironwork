@@ -1094,7 +1094,7 @@ impl Parser<'_> {
         Ok(match verb.as_str() {
             "MOVE" => {
                 if self.accept_any(&["CORRESPONDING", "CORR"]).is_some() {
-                    return Err(Error::at(pos, "MOVE CORRESPONDING is not supported yet"));
+                    return self.corresponding(CorrespondingVerb::Move, pos);
                 }
                 let from = self.operand()?;
                 self.expect_word("TO")?;
@@ -1111,6 +1111,8 @@ impl Parser<'_> {
                 self.accept_word("END-COMPUTE");
                 Stmt::Compute { targets, expr, size_error, pos }
             }
+            "ADD" if self.accept_any(&["CORRESPONDING", "CORR"]).is_some() => self.corresponding(CorrespondingVerb::Add, pos)?,
+            "SUBTRACT" if self.accept_any(&["CORRESPONDING", "CORR"]).is_some() => self.corresponding(CorrespondingVerb::Subtract, pos)?,
             "ADD" | "SUBTRACT" | "MULTIPLY" | "DIVIDE" => Stmt::Arith(Box::new(self.arith(&verb, pos)?)),
             "IF" => {
                 let cond = self.cond()?;
@@ -1376,6 +1378,23 @@ impl Parser<'_> {
             p.expect_word("ERROR").map(|()| 0)
         })?;
         Ok((h.on.is_some() || h.not_on.is_some()).then(|| SizeError { on: h.on.unwrap_or_default(), not_on: h.not_on.unwrap_or_default() }))
+    }
+
+    /// The rest of a MOVE, ADD or SUBTRACT after CORRESPONDING, whose one receiving group IBM's
+    /// format 2 and 3 allow.
+    fn corresponding(&mut self, verb: CorrespondingVerb, pos: Pos) -> R<Stmt> {
+        let from = self.reference()?;
+        self.expect_word(if verb == CorrespondingVerb::Subtract { "FROM" } else { "TO" })?;
+        let to = self.reference()?;
+        let (rounded, size_error) = match verb {
+            CorrespondingVerb::Move => (false, None),
+            _ => (self.accept_word("ROUNDED"), self.size_error()?),
+        };
+        if self.starts_ref() {
+            return Err(Error::at(self.pos(), "CORRESPONDING takes one receiving group"));
+        }
+        self.accept_any(&["END-ADD", "END-SUBTRACT"]);
+        Ok(Stmt::Corresponding(Box::new(Corresponding { verb, from, to, rounded, size_error, pos })))
     }
 
     fn targets(&mut self) -> R<Vec<Target>> {
@@ -2706,9 +2725,18 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_statements_are_named() {
-        let text = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       PROCEDURE DIVISION.\n           MOVE CORRESPONDING A TO B.\n";
-        assert!(crate::parse(text).unwrap_err().message.contains("MOVE CORRESPONDING"));
+    fn corresponding_forms_take_one_receiving_group() {
+        let p = program(
+            "       PROCEDURE DIVISION.\n           MOVE CORR A TO B(1)\n           ADD CORRESPONDING A TO B ROUNDED\n             ON SIZE ERROR CONTINUE END-ADD\n           SUBTRACT CORR A FROM B.\n",
+        );
+        let s = &p.paragraphs[0].statements;
+        let Stmt::Corresponding(m) = &s[0] else { panic!("{:?}", s[0]) };
+        assert_eq!((m.verb, m.from.name.as_str(), m.to.name.as_str(), m.to.subscripts.len()), (CorrespondingVerb::Move, "A", "B", 1));
+        let Stmt::Corresponding(a) = &s[1] else { panic!() };
+        assert!(a.verb == CorrespondingVerb::Add && a.rounded && a.size_error.is_some());
+        assert!(matches!(&s[2], Stmt::Corresponding(c) if c.verb == CorrespondingVerb::Subtract && !c.rounded));
+        let text = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       PROCEDURE DIVISION.\n           MOVE CORRESPONDING A TO B C.\n";
+        assert!(crate::parse(text).unwrap_err().message.contains("one receiving group"));
     }
 
     #[test]

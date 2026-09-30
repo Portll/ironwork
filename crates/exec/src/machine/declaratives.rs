@@ -76,6 +76,7 @@ pub(super) fn statement_pos(s: &Stmt) -> Option<Pos> {
         | Stmt::ExitMethod { pos }
         | Stmt::StopRun { pos } => *pos,
         Stmt::Arith(a) => a.pos,
+        Stmt::Corresponding(c) => c.pos,
         Stmt::Read(r) => r.pos,
         Stmt::Call(c) => c.pos,
         Stmt::String(st) => st.pos,

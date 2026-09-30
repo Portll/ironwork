@@ -2,6 +2,7 @@
 //! WORKING-STORAGE laid out as IBM lays it out, ready for the interpreter or for lowering.
 
 pub mod collating;
+mod corresponding;
 pub mod declaratives;
 pub mod layout;
 pub mod linage;
@@ -130,6 +131,7 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
     };
     let counter_item = |entry: usize| program.working_storage[..entry].iter().filter(|e| e.level != 88).count();
     layout.name_files(&program.files, linage_counters.iter().map(|c| c.map(counter_item)).collect());
+    corresponding::expand(&mut program, &layout, &mut errors);
     for item in &layout.items {
         if let Some(object) = &item.depending_on {
             match layout.resolve(&object.name, &object.qualifiers, object.pos) {
@@ -631,6 +633,7 @@ impl Check<'_> {
                 self.errors.push(Error::at(*pos, format!("{exit} must be inside an inline PERFORM")));
             }
             Stmt::Goback { .. } | Stmt::StopRun { .. } | Stmt::ExitProgram { .. } | Stmt::ExitMethod { .. } | Stmt::Continue | Stmt::Exit { .. } | Stmt::NextSentence | Stmt::SentenceEnd => {}
+            Stmt::Corresponding(_) => unreachable!("CORRESPONDING is expanded before Check"),
         }
     }
 
