@@ -5,7 +5,7 @@
 use super::cics::{EIBFN, has};
 use super::*;
 use crate::cics::Browse;
-use crate::files::{self, Keyed, Keying};
+use crate::files::{self, FileStatus, Keyed, Keying};
 
 /// The first record at or after `key`: matching it exactly, or (GENERIC) starting with it, or
 /// (GTEQ) any record from there on.
@@ -16,16 +16,7 @@ fn find(keyed: &Keyed, key: &[u8], generic: bool, gteq: bool) -> Option<(Vec<u8>
 }
 
 /// A keyed store's insert or replace.
-type Put = fn(&mut Keyed, Vec<u8>, Vec<u8>) -> Result<bool, &'static str>;
-
-/// The CICS condition a keyed store's failure raises.
-fn condition_of(status: &str) -> &'static str {
-    match status {
-        "22" => "DUPREC",
-        "23" => "NOTFND",
-        _ => "INVREQ",
-    }
-}
+type Put = fn(&mut Keyed, Vec<u8>, Vec<u8>) -> Result<bool, FileStatus>;
 
 impl<'p> Machine<'p, '_, '_> {
     pub(super) fn cics_file(&mut self, block: &'p ExecBlock) -> R<Flow> {
@@ -149,7 +140,7 @@ impl<'p> Machine<'p, '_, '_> {
             let key = key_of(m, keyed)?;
             Ok(match keyed.prime_key(&record) {
                 Some(own) if own != key => Err("INVREQ"),
-                _ => put(keyed, key, record).map(|_| ()).map_err(condition_of),
+                _ => put(keyed, key, record).map(|_| ()).map_err(FileStatus::cics_condition),
             })
         })?;
         match outcome {

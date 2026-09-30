@@ -2,6 +2,7 @@
 //! reference can reach anywhere in that memory, as a program compiled without SSRANGE can on
 //! z/OS, but never outside it.
 
+use crate::abend::{AbendCode, Signal};
 use crate::calendar::{civil, days_from_civil, days_in_month, SECONDS_PER_DAY};
 use crate::layout::{Item, Kind, Layout, Resolved};
 use crate::unit::{ADDRESS_BASE, LoadError, RETURN_CODE, RunUnit};
@@ -32,29 +33,26 @@ mod sql;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Abend {
-    pub code: String,
+    pub code: AbendCode,
     pub message: String,
     pub pos: Pos,
 }
 
 impl Abend {
     fn check(c: ProgramCheck, pos: Pos) -> Self {
-        Self { code: c.abend(), message: format!("{c:?} exception"), pos }
+        Self { code: AbendCode::Check(c), message: format!("{c:?} exception"), pos }
     }
 
     fn ironwork(message: impl Into<String>, pos: Pos) -> Self {
-        Self { code: "IRONWORK".into(), message: message.into(), pos }
+        Self { code: AbendCode::Ironwork, message: message.into(), pos }
     }
 }
 
 type R<T> = Result<T, Abend>;
 
-const DIVIDE_BY_ZERO: &str = "DIVIDE-BY-ZERO";
 /// The most digits a numeric item holds, under ARITH(EXTEND): all an alphanumeric sender can give
 /// one (LONG_ZONED_BY_PACKS in numeric::assumptions).
 const MAX_DIGITS: usize = 31;
-/// The reader of DISPLAY output went away, as `head` does: not the program's failure.
-pub const CLOSED_OUTPUT: &str = "CLOSED-OUTPUT";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Ending {
@@ -424,7 +422,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     ExecKind::Other => "",
                 };
                 return Err(Abend {
-                    code: "EXEC".into(),
+                    code: AbendCode::Exec,
                     message: format!("EXEC {kind} {} was reached: ironwork for COBOL checks EXEC statements but does not run them yet", block.command),
                     pos: block.pos,
                 });
@@ -588,7 +586,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
         let base = match item.linkage {
             Some(l) => self.linkage[l as usize].ok_or_else(|| Abend {
-                code: "S0C4".into(),
+                code: AbendCode::Protection,
                 message: format!("{} is a LINKAGE item with no address: no argument was passed for it, and no SET ADDRESS OF gave it one", r.name),
                 pos: r.pos,
             })?,
@@ -1017,7 +1015,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             return Ok(None);
         }
         let offset = address.checked_sub(ADDRESS_BASE).map(|o| o as usize).filter(|&o| o < self.unit.mem.len());
-        offset.map(Some).ok_or_else(|| Abend { code: "S0C4".into(), message: format!("address {address:08X} is outside the run unit's storage"), pos })
+        offset.map(Some).ok_or_else(|| Abend { code: AbendCode::Protection, message: format!("address {address:08X} is outside the run unit's storage"), pos })
     }
 
     fn program_name(&mut self, op: &Operand, pos: Pos) -> R<String> {
@@ -1039,7 +1037,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Err(LoadError::NotFound) => {
                 return match &c.on_exception {
                     Some(body) => self.run_block(body),
-                    None => Err(Abend { code: "S806".into(), message: crate::le::missing(&name), pos }),
+                    None => Err(Abend { code: AbendCode::ModuleNotFound, message: crate::le::missing(&name), pos }),
                 };
             }
             Err(LoadError::Compile(message)) => return Err(Abend::ironwork(format!("CALL {name}: {message}"), pos)),
@@ -1481,7 +1479,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let arith = self.options.arith;
         let wrap = |r: Result<Fixed, ArithError>| {
             r.map_err(|e| match e {
-                ArithError::DivideByZero => Abend { code: DIVIDE_BY_ZERO.into(), message: "division by zero".into(), pos },
+                ArithError::DivideByZero => Abend { code: AbendCode::Signal(Signal::DivideByZero), message: "division by zero".into(), pos },
                 ArithError::BeyondModel => Abend::ironwork("an intermediate result wider than 256 bits", pos),
             })
         };
@@ -1570,7 +1568,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 self.eval_fixed(e, dmax, pos).map(Val::Num)
             };
             let value = match outcome {
-                Err(a) if a.code == DIVIDE_BY_ZERO => {
+                Err(Abend { code: AbendCode::Signal(Signal::DivideByZero), .. }) => {
                     if handler.is_none() {
                         return Err(Abend::check(ProgramCheck::DecimalDivide, pos));
                     }
@@ -2026,7 +2024,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
         let result = if no_advancing { write!(self.unit.out, "{text}") } else { writeln!(self.unit.out, "{text}") };
         result.map_err(|e| match e.kind() {
-            std::io::ErrorKind::BrokenPipe => Abend { code: CLOSED_OUTPUT.into(), message: "standard output closed".into(), pos },
+            std::io::ErrorKind::BrokenPipe => Abend { code: AbendCode::Signal(Signal::ClosedOutput), message: "standard output closed".into(), pos },
             _ => Abend::ironwork(format!("DISPLAY: {e}"), pos),
         })
     }

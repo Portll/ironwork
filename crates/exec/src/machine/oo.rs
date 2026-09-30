@@ -74,7 +74,7 @@ const OBJECT_METHODS: &[(&str, &[&str], Option<&str>)] = &[
 
 fn java(what: String, class: &str, pos: Pos) -> Abend {
     Abend {
-        code: "JAVA".into(),
+        code: AbendCode::Java,
         message: format!("{what} was reached: {class} is a Java class, and ironwork for COBOL checks Java classes but has no JVM to run them"),
         pos,
     }
@@ -360,7 +360,7 @@ impl<'p> Machine<'p, '_, '_> {
         match &i.on_exception {
             Some(body) => self.run_block(body),
             None => Err(Abend {
-                code: "U4038".into(),
+                code: AbendCode::user(4038),
                 message: format!("{what}: no method matches it, and the INVOKE has no ON EXCEPTION (a severity-3 Language Environment condition)"),
                 pos: i.pos,
             }),
@@ -655,7 +655,7 @@ impl<'p> Machine<'p, '_, '_> {
             "ExceptionClear" => None,
             _ => {
                 return Err(Abend {
-                    code: "JAVA".into(),
+                    code: AbendCode::Java,
                     message: format!("CALL {} was reached: {service} is a JNI service, and ironwork for COBOL has no JVM to run it", r.name),
                     pos,
                 });

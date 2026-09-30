@@ -1,6 +1,7 @@
 //! ironwork for COBOL: WORKING-STORAGE laid out as IBM lays it out, and an interpreter that runs a
 //! program against it in EBCDIC with the numeric model of `ironwork-numeric`.
 
+pub mod abend;
 pub mod calendar;
 pub mod cics;
 pub mod codec;
@@ -25,6 +26,7 @@ pub mod unit;
 
 pub use machine::{Abend, Ending};
 
+use abend::AbendCode;
 use layout::Layout;
 use numeric::Options;
 use std::io::{BufRead, Write};
@@ -210,7 +212,7 @@ impl Compiled {
         let closed = run_unit.close_all();
         let ending = ending?;
         settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default() })?;
-        closed.map_err(|m| Abend { code: "IRONWORK".into(), message: m, pos: Pos::default() })?;
+        closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default() })?;
         Ok((ending, run_unit.return_code()))
     }
 }
@@ -268,12 +270,12 @@ impl Compiled {
         if let Err(e) = task.flush_td(self.options.code_page()) {
             closed = closed.and(Err(format!("writing transient data: {e}")));
         }
-        let ending = ending.map_err(|a| match a.code.strip_prefix("S0C") {
-            Some(_) => Abend { message: format!("{} ({}, which CICS reports as ASRA)", a.message, a.code), code: "ASRA".into(), pos: a.pos },
-            None => a,
+        let ending = ending.map_err(|a| match a.code {
+            AbendCode::Check(_) | AbendCode::Protection => Abend { message: format!("{} ({}, which CICS reports as ASRA)", a.message, a.code), code: AbendCode::Cics("ASRA".into()), pos: a.pos },
+            _ => a,
         })?;
         settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default() })?;
-        closed.map_err(|m| Abend { code: "IRONWORK".into(), message: m, pos: Pos::default() })?;
+        closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default() })?;
         Ok((ending, task))
     }
 }

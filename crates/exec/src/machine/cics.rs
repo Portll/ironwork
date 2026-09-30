@@ -297,7 +297,7 @@ impl<'p> Machine<'p, '_, '_> {
             None => match self.cics_handlers.abend.take() {
                 Some(p) => Ok(Flow::GoTo(p)),
                 None => Err(Abend {
-                    code: default_abend(name).into(),
+                    code: AbendCode::Cics(default_abend(name).into()),
                     message: format!("EXEC CICS {}: {name} was raised with no RESP, HANDLE CONDITION or IGNORE CONDITION", block.command),
                     pos: block.pos,
                 }),
@@ -421,7 +421,7 @@ impl<'p> Machine<'p, '_, '_> {
         {
             return Ok(Flow::GoTo(p));
         }
-        Err(Abend { code: code.clone(), message: format!("EXEC CICS ABEND ABCODE({code})"), pos: block.pos })
+        Err(Abend { message: format!("EXEC CICS ABEND ABCODE({code})"), code: AbendCode::Cics(code), pos: block.pos })
     }
 
     /// Fills the EXEC interface block for the task's first program and binds DFHEIBLK and

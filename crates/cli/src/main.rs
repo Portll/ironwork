@@ -1,3 +1,4 @@
+use exec::abend::{AbendCode, Signal};
 use std::process::ExitCode;
 use std::{env, fs, io};
 
@@ -264,7 +265,7 @@ fn driver() -> ExitCode {
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
     match compiled.execute_with(library, dds, Some(sysin), clock, database, &mut out, &mut err) {
         Ok((_, return_code)) => ExitCode::from(return_code as u8),
-        Err(abend) if abend.code == exec::machine::CLOSED_OUTPUT => ExitCode::SUCCESS,
+        Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => ExitCode::SUCCESS,
         Err(abend) => report_abend(&compiled, path, &abend),
     }
 }
@@ -601,7 +602,7 @@ fn run_cics(
             }
             ExitCode::SUCCESS
         }
-        Err(abend) if abend.code == exec::machine::CLOSED_OUTPUT => ExitCode::SUCCESS,
+        Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => ExitCode::SUCCESS,
         Err(abend) => report_abend(compiled, path, &abend),
     }
 }

@@ -320,7 +320,7 @@ pub(crate) fn option_rules(program: &Program, options: &Options, errors: &mut Ve
 
 pub(crate) fn refuse_to_run(program: &Program) -> Result<(), crate::Abend> {
     match program.oo.as_ref().and_then(|o| o.class()) {
-        Some(c) => Err(crate::Abend { code: "IRONWORK".into(), message: format!("{} is a class definition: run a program that uses it", c.name), pos: c.pos }),
+        Some(c) => Err(crate::Abend { code: crate::abend::AbendCode::Ironwork, message: format!("{} is a class definition: run a program that uses it", c.name), pos: c.pos }),
         None => Ok(()),
     }
 }

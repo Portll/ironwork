@@ -10,10 +10,6 @@ use crate::printer::Space;
 use crate::report::{Adding, Field, FieldContent, Group, GroupKind, Line, Origin, Report, state};
 use syntax::report::{LineNumber, NextGroup, ReportStmt};
 
-/// A USE BEFORE REPORTING procedure ended the run; the statement that invoked it passes that on.
-const STOP_RUN: &str = "REPORT-STOP-RUN";
-const GO_BACK: &str = "REPORT-GOBACK";
-
 /// Why a report group is being produced, for NEXT GROUP and subtotalling.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Trigger {
@@ -43,8 +39,8 @@ impl<'p> Machine<'p, '_, '_> {
         };
         match done {
             Ok(()) => Ok(Flow::Next),
-            Err(a) if a.code == STOP_RUN => Ok(Flow::End(Ending::StopRun)),
-            Err(a) if a.code == GO_BACK => Ok(Flow::End(Ending::Goback)),
+            Err(Abend { code: AbendCode::Signal(Signal::StopRun), .. }) => Ok(Flow::End(Ending::StopRun)),
+            Err(Abend { code: AbendCode::Signal(Signal::GoBack), .. }) => Ok(Flow::End(Ending::Goback)),
             Err(a) => Err(a),
         }
     }
@@ -297,7 +293,7 @@ impl<'p> Machine<'p, '_, '_> {
     fn accumulate(&mut self, ri: usize, sum: usize, origin: &Origin, pos: Pos) -> R<()> {
         let value = match origin {
             Origin::Source(e) => match self.expr_value(e, pos) {
-                Err(a) if a.code == DIVIDE_BY_ZERO => {
+                Err(Abend { code: AbendCode::Signal(Signal::DivideByZero), .. }) => {
                     let _ = writeln!(self.unit.err, "ironwork: {pos}: report writer run-time error 10: a SOURCE expression divided by zero; nothing was added to the total");
                     return Ok(());
                 }
@@ -379,8 +375,8 @@ impl<'p> Machine<'p, '_, '_> {
         let flow = self.run_paragraphs(first, last);
         self.unit.depth -= 1;
         match flow? {
-            Flow::End(Ending::StopRun) => return Err(Abend { code: STOP_RUN.into(), message: String::new(), pos }),
-            Flow::End(_) => return Err(Abend { code: GO_BACK.into(), message: String::new(), pos }),
+            Flow::End(Ending::StopRun) => return Err(Abend { code: AbendCode::Signal(Signal::StopRun), message: String::new(), pos }),
+            Flow::End(_) => return Err(Abend { code: AbendCode::Signal(Signal::GoBack), message: String::new(), pos }),
             Flow::GoTo(_) => return Err(Abend::ironwork("GO TO out of a USE BEFORE REPORTING procedure", pos)),
             _ => {}
         }
@@ -664,7 +660,7 @@ impl<'p> Machine<'p, '_, '_> {
             }
             FieldContent::Source(e) => {
                 let overflow = match self.expr_value(e, pos) {
-                    Err(a) if a.code == DIVIDE_BY_ZERO => true,
+                    Err(Abend { code: AbendCode::Signal(Signal::DivideByZero), .. }) => true,
                     Err(a) => return Err(a),
                     Ok(v) => self.store_value(dest, v, f.rounded, true, pos)?,
                 };

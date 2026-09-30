@@ -373,7 +373,7 @@ mod tests {
         let db = Script { answers: answers.into(), calls: calls.clone() };
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let ran = compiled.execute_with(crate::unit::Library::default(), crate::files::Dds::default(), None, crate::unit::Clock::System, Some(Box::new(db)), &mut out, &mut err);
-        let shown = ran.map(|_| String::from_utf8(out).expect("DISPLAY writes text")).map_err(|a| a.code);
+        let shown = ran.map(|_| String::from_utf8(out).expect("DISPLAY writes text")).map_err(|a| a.code.to_string());
         (shown, calls.take())
     }
 
@@ -590,7 +590,7 @@ mod tests {
         let task = crate::cics::Task { transid: "T1".into(), ..Default::default() };
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let ran = compiled.execute_cics_with(crate::unit::Library::default(), crate::files::Dds::default(), task, crate::unit::Clock::System, Some(Box::new(db)), &mut out, &mut err);
-        (String::from_utf8(out).expect("DISPLAY writes text"), ran.map(drop).map_err(|a| a.code), calls.take())
+        (String::from_utf8(out).expect("DISPLAY writes text"), ran.map(drop).map_err(|a| a.code.to_string()), calls.take())
     }
 
     #[test]
@@ -657,7 +657,7 @@ mod tests {
         let replay = crate::sql::Replay::parse(recording, false).expect("the recording parses");
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let ran = compiled.execute_with(crate::unit::Library::default(), crate::files::Dds::default(), None, crate::unit::Clock::System, Some(Box::new(replay)), &mut out, &mut err);
-        ran.map(|_| String::from_utf8(out).expect("DISPLAY writes text")).map_err(|a| (a.code, a.message))
+        ran.map(|_| String::from_utf8(out).expect("DISPLAY writes text")).map_err(|a| (a.code.to_string(), a.message))
     }
 
     #[test]

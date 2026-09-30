@@ -2,65 +2,50 @@
 //! a sequential file opened I-O, is held in memory ([`files::Keyed`]).
 
 use super::*;
-use crate::files::{self, Format, KeySpan, Keyed, Keying, Record};
+use crate::files::{self, FileStatus, Format, KeySpan, Keyed, Keying, Record};
 use crate::printer::{self, Space};
-
-/// What a failing file status means, for the message when no FILE STATUS or phrase takes it.
-fn meaning(code: &str) -> &'static str {
-    match code {
-        "10" => "there is no next record",
-        "21" => "the key is out of sequence",
-        "22" => "a record with that key is already there",
-        "23" => "there is no record with that key",
-        "14" => "the record number is too large for the RELATIVE KEY",
-        "24" => "the record number is outside the file",
-        "43" => "the last statement on the file was not a successful READ",
-        "44" => "the record is not the length of the one it replaces",
-        "46" => "there is no next record: the last READ reached the end, or START found nothing",
-        "47" => "the file is not open INPUT or I-O",
-        "48" => "the file is not open for output",
-        "49" => "the file is not open I-O",
-        _ => "the statement failed",
-    }
-}
 
 impl<'p> Machine<'p, '_, '_> {
     fn file_index(&self, name: &str, pos: Pos) -> R<usize> {
         self.program.files.iter().position(|f| f.name == name).ok_or_else(|| Abend::ironwork(format!("no file named {name}"), pos))
     }
 
-    pub(super) fn set_status(&mut self, k: usize, code: &str, pos: Pos) -> R<()> {
+    pub(super) fn set_status(&mut self, k: usize, status: impl Into<FileStatus>, pos: Pos) -> R<()> {
         if let Some(r) = &self.program.files[k].status {
             let loc = self.locate(r)?;
-            let bytes = self.page.encode(code).map_err(|e| Abend::ironwork(e.to_string(), pos))?;
+            let bytes = self.page.encode(status.into().as_str()).map_err(|e| Abend::ironwork(e.to_string(), pos))?;
             self.assign(loc, Val::Bytes(bytes), None, pos)?;
         }
         Ok(())
     }
 
     /// Records an I/O status; with no FILE STATUS to hold it, a failing status ends the run.
-    pub(super) fn io_status(&mut self, k: usize, code: &str, message: String, pos: Pos) -> R<()> {
-        self.set_status(k, code, pos)?;
-        if self.program.files[k].status.is_none() && !code.starts_with('0') {
-            return Err(Abend { code: format!("IO-{code}"), message, pos });
+    pub(super) fn io_status(&mut self, k: usize, status: impl Into<FileStatus>, message: String, pos: Pos) -> R<()> {
+        let status = status.into();
+        self.set_status(k, status, pos)?;
+        if self.program.files[k].status.is_none() && !status.covers('0') {
+            return Err(Abend { code: AbendCode::Io(status), message, pos });
         }
         Ok(())
     }
 
-    /// Sets the file status and runs the phrase it selects: the ON phrase for the condition it
-    /// covers (AT END for 1x, INVALID KEY for 2x), the NOT phrase on success.
-    fn conclude(&mut self, k: usize, code: &str, handlers: &'p Handlers, covers: char, verb: &str, pos: Pos) -> R<Flow> {
-        let body = match code.chars().next() {
-            Some('0') => handlers.not_on.as_deref(),
-            Some(c) if c == covers => handlers.on.as_deref(),
-            _ => None,
+    /// Sets the file status and runs the phrase it selects: the ON phrase for the condition of
+    /// `class` (AT END for 1x, INVALID KEY for 2x), the NOT phrase on success.
+    fn conclude(&mut self, k: usize, status: FileStatus, handlers: &'p Handlers, class: char, verb: &str, pos: Pos) -> R<Flow> {
+        let body = if status.covers('0') {
+            handlers.not_on.as_deref()
+        } else if status.covers(class) {
+            handlers.on.as_deref()
+        } else {
+            None
         };
         if let Some(body) = body {
-            self.set_status(k, code, pos)?;
+            self.set_status(k, status, pos)?;
             return self.run_block(body);
         }
         let program = self.program;
-        self.io_status(k, code, format!("{verb} {}: file status {code}: {}", program.files[k].name, meaning(code)), pos)?;
+        let message = format!("{verb} {}: file status {}: {}", program.files[k].name, status.as_str(), status.meaning());
+        self.io_status(k, status, message, pos)?;
         Ok(Flow::Next)
     }
 
@@ -202,7 +187,7 @@ impl<'p> Machine<'p, '_, '_> {
         let program = self.program;
         let decl = &program.files[k];
         if self.unit.programs[self.me].files[k].is_some() {
-            return self.io_status(k, "41", format!("{name} is already open"), pos);
+            return self.io_status(k, FileStatus::AlreadyOpen, format!("{name} is already open"), pos);
         }
         let default = match decl.organization {
             Organization::LineSequential => Format::Text,
@@ -218,10 +203,10 @@ impl<'p> Machine<'p, '_, '_> {
         };
         if held {
             let status = match &dd {
-                Some(d) if mode == OpenMode::Output || d.path.exists() => "00",
-                _ if decl.optional && mode != OpenMode::Output => "05",
-                None => return self.io_status(k, "35", no_dd, pos),
-                Some(d) => return self.io_status(k, "35", format!("{name}: {}: no such file", d.path.display()), pos),
+                Some(d) if mode == OpenMode::Output || d.path.exists() => FileStatus::Success,
+                _ if decl.optional && mode != OpenMode::Output => FileStatus::SuccessOptional,
+                None => return self.io_status(k, FileStatus::FileNotFound, no_dd, pos),
+                Some(d) => return self.io_status(k, FileStatus::FileNotFound, format!("{name}: {}: no such file", d.path.display()), pos),
             };
             let keying = self.keying(k, pos)?;
             let format = dd.as_ref().and_then(|d| d.format).unwrap_or(default);
@@ -230,27 +215,27 @@ impl<'p> Machine<'p, '_, '_> {
                     self.unit.programs[self.me].files[k] = Some(f);
                     self.set_status(k, status, pos)
                 }
-                Err(e) => self.io_status(k, "30", format!("{name}: {e}"), pos),
+                Err(e) => self.io_status(k, FileStatus::PermanentError, format!("{name}: {e}"), pos),
             };
         }
         match dd {
             None if decl.optional && mode == OpenMode::Input => {
                 self.unit.programs[self.me].files[k] = Some(files::absent());
-                self.set_status(k, "05", pos)
+                self.set_status(k, FileStatus::SuccessOptional, pos)
             }
-            None => self.io_status(k, "35", no_dd, pos),
+            None => self.io_status(k, FileStatus::FileNotFound, no_dd, pos),
             Some(dd) => match files::open(&dd, mode, dd.format.unwrap_or(default)) {
                 Ok(f) => {
                     self.unit.programs[self.me].files[k] = Some(f);
-                    self.set_status(k, "00", pos)
+                    self.set_status(k, FileStatus::Success, pos)
                 }
                 Err(e) => {
-                    let code = match e.kind() {
-                        std::io::ErrorKind::NotFound => "35",
-                        std::io::ErrorKind::Unsupported => "37",
-                        _ => "30",
+                    let status = match e.kind() {
+                        std::io::ErrorKind::NotFound => FileStatus::FileNotFound,
+                        std::io::ErrorKind::Unsupported => FileStatus::OpenModeUnsupported,
+                        _ => FileStatus::PermanentError,
                     };
-                    self.io_status(k, code, format!("{name}: {}: {e}", dd.path.display()), pos)
+                    self.io_status(k, status, format!("{name}: {}: {e}", dd.path.display()), pos)
                 }
             },
         }
@@ -259,10 +244,10 @@ impl<'p> Machine<'p, '_, '_> {
     pub(super) fn close_file(&mut self, name: &str, pos: Pos) -> R<()> {
         let k = self.file_index(name, pos)?;
         match self.unit.programs[self.me].files[k].take() {
-            None => self.io_status(k, "42", format!("{name} is not open"), pos),
+            None => self.io_status(k, FileStatus::NotOpen, format!("{name} is not open"), pos),
             Some(f) => match f.close() {
-                Ok(()) => self.set_status(k, "00", pos),
-                Err(e) => self.io_status(k, "30", format!("{name}: {e}"), pos),
+                Ok(()) => self.set_status(k, FileStatus::Success, pos),
+                Err(e) => self.io_status(k, FileStatus::PermanentError, format!("{name}: {e}"), pos),
             },
         }
     }
@@ -276,18 +261,18 @@ impl<'p> Machine<'p, '_, '_> {
         let program = self.program;
         let decl = &program.files[k];
         let sequential = self.sequential(k) || decl.access == Access::Dynamic && r.next;
-        let (code, found, variable) = self
+        let (status, found, variable) = self
             .held(k, |m, mode, format, keyed| {
                 let variable = format == Format::Variable;
                 if !matches!(mode, OpenMode::Input | OpenMode::InputOutput) {
-                    return Ok(("47", None, variable));
+                    return Ok((FileStatus::NotOpenInput, None, variable));
                 }
                 if sequential {
-                    return Ok(match keyed.step(r.previous) {
-                        Err(code) => (code, None, variable),
-                        Ok(None) => ("10", None, variable),
-                        Ok(Some(found)) if keyed.keying == Keying::Relative && !m.relative_fits(k, files::number_of(&found.key))? => ("14", None, variable),
-                        Ok(Some(found)) => (if found.duplicate { "02" } else { "00" }, Some(found), variable),
+                    return Ok(match keyed.read_next(r.previous) {
+                        Err(status) => (status, None, variable),
+                        Ok(None) => (FileStatus::AtEnd, None, variable),
+                        Ok(Some(found)) if keyed.keying == Keying::Relative && !m.relative_fits(k, files::number_of(&found.key))? => (FileStatus::RelativeKeyOverflow, None, variable),
+                        Ok(Some(found)) => (if found.duplicate { FileStatus::SuccessDuplicate } else { FileStatus::Success }, Some(found), variable),
                     });
                 }
                 let keying = keyed.keying.clone();
@@ -298,41 +283,41 @@ impl<'p> Machine<'p, '_, '_> {
                         Some(key) => (0, key),
                         None => {
                             keyed.lose_position();
-                            return Ok(("23", None, variable));
+                            return Ok((FileStatus::NotFound, None, variable));
                         }
                     },
                 };
                 Ok(match keyed.get(which, &value) {
                     None => {
                         keyed.lose_position();
-                        ("23", None, variable)
+                        (FileStatus::NotFound, None, variable)
                     }
                     Some(found) => {
                         keyed.read_at(which, &found.key);
-                        (if found.duplicate { "02" } else { "00" }, Some(found), variable)
+                        (if found.duplicate { FileStatus::SuccessDuplicate } else { FileStatus::Success }, Some(found), variable)
                     }
                 })
             })?
-            .unwrap_or(("47", None, false));
-        let mut code = code;
+            .unwrap_or((FileStatus::NotOpenInput, None, false));
+        let mut status = status;
         if let Some(found) = found {
             if sequential && decl.organization == Organization::Relative
                 && let Some(rk) = &decl.relative_key
             {
                 self.set_integer(rk, files::number_of(&found.key) as i64, pos)?;
             }
-            if self.deliver(k, &found.record, variable, r.into.as_ref(), pos)? && code == "00" {
-                code = "04";
+            if self.deliver(k, &found.record, variable, r.into.as_ref(), pos)? && status == FileStatus::Success {
+                status = FileStatus::SuccessWrongLength;
             }
         }
-        if sequential { self.conclude(k, code, &r.at_end, '1', "READ", pos) } else { self.conclude(k, code, &r.invalid, '2', "READ", pos) }
+        if sequential { self.conclude(k, status, &r.at_end, '1', "READ", pos) } else { self.conclude(k, status, &r.invalid, '2', "READ", pos) }
     }
 
     fn read_stream(&mut self, k: usize, r: &'p ReadStmt) -> R<Flow> {
         let pos = r.pos;
         let size = self.area(k).1;
         let Some(mut f) = self.unit.programs[self.me].files[k].take() else {
-            return self.conclude(k, "47", &r.at_end, '1', "READ", pos);
+            return self.conclude(k, FileStatus::NotOpenInput, &r.at_end, '1', "READ", pos);
         };
         let added = self.carriage[k].is_some_and(|c| !c.reserved) && f.format != Format::Text;
         let read = f.read(size + usize::from(added));
@@ -340,15 +325,15 @@ impl<'p> Machine<'p, '_, '_> {
         let input = f.mode == OpenMode::Input;
         self.unit.programs[self.me].files[k] = Some(f);
         if !input {
-            return self.conclude(k, "47", &r.at_end, '1', "READ", pos);
+            return self.conclude(k, FileStatus::NotOpenInput, &r.at_end, '1', "READ", pos);
         }
         let (record, wrong_length) = match read {
             Err(e) => {
                 let program = self.program;
-                self.io_status(k, "30", format!("READ {}: {e}", program.files[k].name), pos)?;
+                self.io_status(k, FileStatus::PermanentError, format!("READ {}: {e}", program.files[k].name), pos)?;
                 return Ok(Flow::Next);
             }
-            Ok(Record::End) => return self.conclude(k, "10", &r.at_end, '1', "READ", pos),
+            Ok(Record::End) => return self.conclude(k, FileStatus::AtEnd, &r.at_end, '1', "READ", pos),
             Ok(Record::Data(bytes)) => (bytes, false),
             Ok(Record::WrongLength(bytes)) => (bytes, true),
         };
@@ -360,7 +345,7 @@ impl<'p> Machine<'p, '_, '_> {
             record
         };
         let long = self.deliver(k, &record, format == Format::Variable, r.into.as_ref(), pos)?;
-        self.conclude(k, if wrong_length || long { "04" } else { "00" }, &r.at_end, '1', "READ", pos)
+        self.conclude(k, if wrong_length || long { FileStatus::SuccessWrongLength } else { FileStatus::Success }, &r.at_end, '1', "READ", pos)
     }
 
     pub(super) fn write_stmt(&mut self, record: &Ref, from: Option<&Operand>, advancing: Option<&Advancing>, invalid: &'p Handlers, pos: Pos) -> R<Flow> {
@@ -381,7 +366,7 @@ impl<'p> Machine<'p, '_, '_> {
         let program = self.program;
         let decl = &program.files[k];
         let sequential = self.sequential(k);
-        let code = self
+        let status = self
             .held(k, |m, mode, format, keyed| {
                 let allowed = match mode {
                     OpenMode::Output => true,
@@ -390,7 +375,7 @@ impl<'p> Machine<'p, '_, '_> {
                     OpenMode::Input => false,
                 };
                 if !allowed || keyed.keying == Keying::Position {
-                    return Ok("48");
+                    return Ok(FileStatus::NotOpenOutput);
                 }
                 keyed.last_read = None;
                 let bytes = m.record_bytes(k, loc, format);
@@ -398,14 +383,14 @@ impl<'p> Machine<'p, '_, '_> {
                     Keying::Indexed { prime, .. } => {
                         let key = prime.of(&bytes);
                         if sequential && keyed.highest_key().is_some_and(|h| key <= *h) {
-                            return Ok("21");
+                            return Ok(FileStatus::SequenceError);
                         }
                         key
                     }
                     _ if sequential => {
                         let n = keyed.highest_key().map_or(0, |h| files::number_of(h)) + 1;
                         if n > files::MAX_RELATIVE || !m.relative_fits(k, n)? {
-                            return Ok("24");
+                            return Ok(FileStatus::BoundaryViolation);
                         }
                         if let Some(rk) = &decl.relative_key {
                             m.set_integer(rk, n as i64, pos)?;
@@ -414,17 +399,17 @@ impl<'p> Machine<'p, '_, '_> {
                     }
                     _ => match m.relative_number(k, pos)? {
                         Some(key) if files::number_of(&key) <= files::MAX_RELATIVE => key,
-                        _ => return Ok("24"),
+                        _ => return Ok(FileStatus::BoundaryViolation),
                     },
                 };
                 Ok(match keyed.insert(key, bytes) {
-                    Err(code) => code,
-                    Ok(true) => "02",
-                    Ok(false) => "00",
+                    Err(status) => status,
+                    Ok(true) => FileStatus::SuccessDuplicate,
+                    Ok(false) => FileStatus::Success,
                 })
             })?
-            .unwrap_or("48");
-        self.conclude(k, code, invalid, '2', "WRITE", pos)
+            .unwrap_or(FileStatus::NotOpenOutput);
+        self.conclude(k, status, invalid, '2', "WRITE", pos)
     }
 
     /// A WRITE's ADVANCING phrase as a movement, BEFORE or AFTER the line; a count below zero
@@ -445,11 +430,11 @@ impl<'p> Machine<'p, '_, '_> {
     pub(super) fn write_stream(&mut self, k: usize, loc: Loc, before: bool, space: Space, pos: Pos) -> R<()> {
         let name = self.program.files[k].name.clone();
         let Some(mut f) = self.unit.programs[self.me].files[k].take() else {
-            return self.io_status(k, "48", format!("WRITE {name}: {}", meaning("48")), pos);
+            return self.io_status(k, FileStatus::NotOpenOutput, format!("WRITE {name}: {}", FileStatus::NotOpenOutput.meaning()), pos);
         };
         if f.mode == OpenMode::Input {
             self.unit.programs[self.me].files[k] = Some(f);
-            return self.io_status(k, "48", format!("WRITE {name}: {}", meaning("48")), pos);
+            return self.io_status(k, FileStatus::NotOpenOutput, format!("WRITE {name}: {}", FileStatus::NotOpenOutput.meaning()), pos);
         }
         let carriage = self.carriage[k];
         let controls = carriage.map(|c| printer::controls(c.machine, before, space));
@@ -478,25 +463,25 @@ impl<'p> Machine<'p, '_, '_> {
         };
         self.unit.programs[self.me].files[k] = Some(f);
         match written {
-            Ok(()) => self.set_status(k, "00", pos),
-            Err(e) => self.io_status(k, "30", format!("WRITE {name}: {e}"), pos),
+            Ok(()) => self.set_status(k, FileStatus::Success, pos),
+            Err(e) => self.io_status(k, FileStatus::PermanentError, format!("WRITE {name}: {e}"), pos),
         }
     }
 
     pub(super) fn rewrite_stmt(&mut self, record: &Ref, from: Option<&Operand>, invalid: &'p Handlers, pos: Pos) -> R<Flow> {
         let (k, loc) = self.record_of(record, from, "REWRITE", pos)?;
         let sequential = self.sequential(k);
-        let code = self
+        let status = self
             .held(k, |m, mode, format, keyed| {
                 if mode != OpenMode::InputOutput {
-                    return Ok("49");
+                    return Ok(FileStatus::NotOpenInputOutput);
                 }
                 let bytes = m.record_bytes(k, loc, format);
                 let prior = keyed.last_read.take();
                 let key = if sequential {
-                    let Some(prior) = prior else { return Ok("43") };
+                    let Some(prior) = prior else { return Ok(FileStatus::NoPriorRead) };
                     if keyed.prime_key(&bytes).is_some_and(|key| key != prior) {
-                        return Ok("21");
+                        return Ok(FileStatus::SequenceError);
                     }
                     prior
                 } else {
@@ -504,47 +489,47 @@ impl<'p> Machine<'p, '_, '_> {
                         Some(key) => key,
                         None => match m.relative_number(k, pos)? {
                             Some(key) => key,
-                            None => return Ok("23"),
+                            None => return Ok(FileStatus::NotFound),
                         },
                     }
                 };
                 if keyed.keying == Keying::Position && keyed.record(&key).is_some_and(|old| old.len() != bytes.len()) {
-                    return Ok("44");
+                    return Ok(FileStatus::RecordLengthChanged);
                 }
                 Ok(match keyed.replace(key, bytes) {
-                    Err(code) => code,
-                    Ok(true) => "02",
-                    Ok(false) => "00",
+                    Err(status) => status,
+                    Ok(true) => FileStatus::SuccessDuplicate,
+                    Ok(false) => FileStatus::Success,
                 })
             })?
-            .unwrap_or("49");
-        self.conclude(k, code, invalid, '2', "REWRITE", pos)
+            .unwrap_or(FileStatus::NotOpenInputOutput);
+        self.conclude(k, status, invalid, '2', "REWRITE", pos)
     }
 
     pub(super) fn delete_stmt(&mut self, file: &str, invalid: &'p Handlers, pos: Pos) -> R<Flow> {
         let k = self.file_index(file, pos)?;
         let sequential = self.sequential(k);
-        let code = self
+        let status = self
             .held(k, |m, mode, _, keyed| {
                 if mode != OpenMode::InputOutput || keyed.keying == Keying::Position {
-                    return Ok("49");
+                    return Ok(FileStatus::NotOpenInputOutput);
                 }
                 let prior = keyed.last_read.take();
                 let key = match (&keyed.keying, sequential) {
                     (_, true) => match prior {
                         Some(key) => key,
-                        None => return Ok("43"),
+                        None => return Ok(FileStatus::NoPriorRead),
                     },
                     (Keying::Indexed { prime, .. }, false) => prime.of(m.record_area(k)),
                     _ => match m.relative_number(k, pos)? {
                         Some(key) => key,
-                        None => return Ok("23"),
+                        None => return Ok(FileStatus::NotFound),
                     },
                 };
-                Ok(if keyed.remove(&key).is_some() { "00" } else { "23" })
+                Ok(if keyed.remove(&key).is_some() { FileStatus::Success } else { FileStatus::NotFound })
             })?
-            .unwrap_or("49");
-        self.conclude(k, code, invalid, '2', "DELETE", pos)
+            .unwrap_or(FileStatus::NotOpenInputOutput);
+        self.conclude(k, status, invalid, '2', "DELETE", pos)
     }
 
     pub(super) fn start_stmt(&mut self, file: &str, key: Option<&(RelOp, Ref)>, invalid: &'p Handlers, pos: Pos) -> R<Flow> {
@@ -555,10 +540,10 @@ impl<'p> Machine<'p, '_, '_> {
             Some(RelOp::Ge) => (Ordering::Greater, true),
             Some(_) => return Err(Abend::ironwork("START KEY takes =, >, NOT < or >=", pos)),
         };
-        let code = self
+        let status = self
             .held(k, |m, mode, _, keyed| {
                 if !matches!(mode, OpenMode::Input | OpenMode::InputOutput) || keyed.keying == Keying::Position {
-                    return Ok("47");
+                    return Ok(FileStatus::NotOpenInput);
                 }
                 let keying = keyed.keying.clone();
                 let (which, value) = match (&keying, key) {
@@ -567,9 +552,9 @@ impl<'p> Machine<'p, '_, '_> {
                     (_, Some((_, r))) => (0, files::record_number(m.integer(&Expr::Operand(Operand::Ref(r.clone())), pos)?.max(0) as u64)),
                     (_, None) => (0, files::record_number(m.relative_value(k, pos)?.max(0) as u64)),
                 };
-                Ok(if keyed.start(which, wanted, or_equal, &value) { "00" } else { "23" })
+                Ok(if keyed.start(which, wanted, or_equal, &value) { FileStatus::Success } else { FileStatus::NotFound })
             })?
-            .unwrap_or("47");
-        self.conclude(k, code, invalid, '2', "START", pos)
+            .unwrap_or(FileStatus::NotOpenInput);
+        self.conclude(k, status, invalid, '2', "START", pos)
     }
 }
