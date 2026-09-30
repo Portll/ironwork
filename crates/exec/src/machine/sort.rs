@@ -3,18 +3,14 @@
 //! files or RETURN. A table SORT reorders the table's elements in place.
 
 use super::*;
-use crate::files::{Format, Move, Record};
+use crate::files::{FileStatus, Format, Move, Record};
 use numeric::{FastsrtAdvPrint, SortKeys, TruncCheck, assumptions};
 use std::rc::Rc;
-
-/// The signal a RELEASE or RETURN raises to stop the operation: control passes to the statement
-/// after the SORT or MERGE, whose message is the reason.
-const STOPPED: &str = "SORT-STOPPED";
 
 static NO_HANDLERS: Handlers = Handlers { on: None, not_on: None };
 
 fn stop(why: String, pos: Pos) -> Abend {
-    Abend { code: STOPPED.into(), message: why, pos, file: None }
+    Abend { code: AbendCode::Signal(Signal::SortStopped), message: why, pos, file: None }
 }
 
 fn stopped_by_program() -> String {
@@ -290,8 +286,8 @@ impl<'p> Machine<'p, '_, '_> {
         let program = self.program;
         let name = &program.files[k].name;
         if self.is_open(k) {
-            self.io_failure(k, "41", Some(mode), format!("{name} is open, and a SORT or MERGE opens it itself"), pos)?;
-            return Ok(Err(format!("{name} is already open (file status 41)")));
+            self.io_failure(k, FileStatus::AlreadyOpen, Some(mode), format!("{name} is open, and a SORT or MERGE opens it itself"), pos)?;
+            return Ok(Err(format!("{name} is already open (file status {})", FileStatus::AlreadyOpen.as_str())));
         }
         self.open_file(mode, name, pos)?;
         if self.is_open(k) { Ok(Ok(())) } else { Ok(Err(format!("OPEN {name} failed"))) }
@@ -315,23 +311,23 @@ impl<'p> Machine<'p, '_, '_> {
             Some(keyed) => match keyed.step(false) {
                 Ok(Some(found)) => Ok(Record::Data(found.record)),
                 Ok(None) => Ok(Record::End),
-                Err(code) => Err((code, "there is no next record".to_owned())),
+                Err(code) => Err((FileStatus::from(code), "there is no next record".to_owned())),
             },
-            None => f.read(size + usize::from(added)).map_err(|e| ("30", e.to_string())),
+            None => f.read(size + usize::from(added)).map_err(|e| (FileStatus::PermanentError, e.to_string())),
         };
         self.unit.programs[self.me].files[k] = Some(f);
         let program = self.program;
         let (record, code) = match read {
             Err((code, message)) => {
                 self.io_status(k, code, format!("{}: {message}", program.files[k].name), pos)?;
-                return Ok(Input::Failed(format!("reading {} failed (file status {code})", program.files[k].name)));
+                return Ok(Input::Failed(format!("reading {} failed (file status {})", program.files[k].name, code.as_str())));
             }
             Ok(Record::End) => {
-                self.set_status(k, "10", pos)?;
+                self.set_status(k, FileStatus::AtEnd, pos)?;
                 return Ok(Input::End);
             }
-            Ok(Record::Data(r)) => (r, "00"),
-            Ok(Record::WrongLength(r)) => (r, "04"),
+            Ok(Record::Data(r)) => (r, FileStatus::Success),
+            Ok(Record::WrongLength(r)) => (r, FileStatus::SuccessWrongLength),
         };
         self.set_status(k, code, pos)?;
         if added && !dfsort {
@@ -525,7 +521,7 @@ impl<'p> Machine<'p, '_, '_> {
         }
         let was_open = self.is_open(k);
         let result = match op(self) {
-            Err(a) if a.code.starts_with("IO-") => Ok(Err(a.message)),
+            Err(a) if matches!(a.code, AbendCode::Io(_)) => Ok(Err(a.message)),
             other => other,
         };
         if !was_open && let Some(f) = self.unit.programs[self.me].files[k].take() {
@@ -670,7 +666,7 @@ impl<'p> Machine<'p, '_, '_> {
         });
         let active = self.sort.take();
         match flow {
-            Err(a) if a.code == STOPPED => Ok((Err(a.message), active)),
+            Err(a) if a.code == AbendCode::Signal(Signal::SortStopped) => Ok((Err(a.message), active)),
             Err(a) => Err(a),
             Ok(flow) => Ok((Ok(flow), active)),
         }

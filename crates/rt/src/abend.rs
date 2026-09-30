@@ -135,11 +135,6 @@ impl AbendCode {
         }
     }
 
-    /// For SORT's FASTSRT reader, which still tests the text.
-    pub fn starts_with(&self, prefix: &str) -> bool {
-        self.as_str().starts_with(prefix)
-    }
-
     /// The program check a zero divisor raises: decimal, fixed-point or HFP divide. An arithmetic
     /// statement with ON SIZE ERROR takes it as a size error instead.
     pub fn zero_divisor(&self) -> bool {
