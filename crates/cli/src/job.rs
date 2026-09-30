@@ -141,6 +141,20 @@ struct Disposal {
     disp: jcl::Disp,
     created: bool,
     temporary: bool,
+    /// The generation data group a new generation joins when it is kept.
+    group: Option<String>,
+}
+
+/// A generation data group's base, as IDCAMS DEFINE GDG left it.
+struct Gdg {
+    limit: usize,
+    empty: bool,
+}
+
+const GDG_MAGIC: &str = "IRONWORK-GDG";
+
+fn gdg_text(limit: u16, scratch: bool, empty: bool) -> String {
+    format!("{GDG_MAGIC} LIMIT={limit} {} {}\n", if scratch { "SCRATCH" } else { "NOSCRATCH" }, if empty { "EMPTY" } else { "NOEMPTY" })
 }
 
 struct Runner<'a> {
@@ -148,6 +162,8 @@ struct Runner<'a> {
     datasets: PathBuf,
     scratch: PathBuf,
     temporaries: BTreeMap<String, PathBuf>,
+    /// Each generation data group's generations when the job first named it.
+    gdg_start: BTreeMap<String, Vec<u32>>,
     /// Data sets this job created that are only passed so far: deleted when the job ends.
     passed_new: BTreeSet<PathBuf>,
     files: usize,
@@ -210,6 +226,30 @@ impl Runner<'_> {
                     sysout = true;
                     paths.push(path);
                 }
+                Source::Dataset { dsn, member: None } if self.gdg(dsn).is_some() => {
+                    for generation in self.generations(dsn).into_iter().rev() {
+                        paths.push(self.datasets.join(format!("{dsn}.G{generation:04}V00")));
+                    }
+                    if paths.is_empty() {
+                        return Err(format!("DD {}: {dsn} has no generations", dd.name));
+                    }
+                }
+                Source::Generation { base, relative } => {
+                    let shown = format!("{base}({relative:+})").replace("(+0)", "(0)");
+                    let path = self.generation_path(base, *relative).map_err(|e| format!("DD {}: {shown}: {e}", dd.name))?;
+                    let created = part.disp.status == Status::New;
+                    if created {
+                        if path.exists() {
+                            return Err(format!("DD {}: {shown} already exists, and DISP=NEW creates it", dd.name));
+                        }
+                        fs::write(&path, b"").map_err(|e| format!("DD {}: {e}", dd.name))?;
+                    } else if !path.is_file() {
+                        return Err(format!("DD {}: {shown} was not found", dd.name));
+                    }
+                    disposals.push(Disposal { path: path.clone(), disp: part.disp, created, temporary: false, group: created.then(|| base.clone()) });
+                    paths.push(path);
+                }
+                Source::Refer(path) => return Err(format!("DD {}: *.{path} was not resolved", dd.name)),
                 source @ (Source::Dataset { .. } | Source::Temporary { .. }) => {
                     let path = self.dataset_path(source).expect("a data set has a path");
                     let (member, shown) = match source {
@@ -237,7 +277,7 @@ impl Runner<'_> {
                     } else if member != whole.is_dir() {
                         return Err(format!("DD {}: {shown} {}", dd.name, if member { "names a member of a data set that has none" } else { "is a partitioned data set; name a member" }));
                     }
-                    disposals.push(Disposal { path: whole, disp: part.disp, created, temporary });
+                    disposals.push(Disposal { path: whole, disp: part.disp, created, temporary, group: None });
                     paths.push(path);
                 }
             }
@@ -267,8 +307,80 @@ impl Runner<'_> {
                 End::Pass => {}
                 End::Keep | End::Catlg | End::Uncatlg => {
                     self.passed_new.remove(&d.path);
+                    if let Some(base) = &d.group {
+                        self.roll_off(base);
+                    }
                 }
             }
+        }
+    }
+
+    /// The group's base, when `base` names one.
+    fn gdg(&self, base: &str) -> Option<Gdg> {
+        let text = fs::read_to_string(self.datasets.join(base)).ok()?;
+        let mut words = text.lines().next()?.split_whitespace();
+        if words.next()? != GDG_MAGIC {
+            return None;
+        }
+        let limit = words.next()?.strip_prefix("LIMIT=")?.parse().ok()?;
+        let rest: Vec<&str> = words.collect();
+        Some(Gdg { limit, empty: rest.contains(&"EMPTY") })
+    }
+
+    /// The generation numbers catalogued for `base`, oldest first.
+    fn generations(&self, base: &str) -> Vec<u32> {
+        let prefix = format!("{base}.G");
+        let mut out: Vec<u32> = fs::read_dir(&self.datasets)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let rest = name.strip_prefix(&prefix)?;
+                let (number, version) = rest.split_once('V')?;
+                (number.len() == 4 && version == "00").then(|| number.parse().ok()).flatten()
+            })
+            .collect();
+        out.sort_unstable();
+        out
+    }
+
+    /// The file of a relative generation. Numbers are relative to the generations the job began
+    /// with, so every (+1) in a job is the same new generation and (0) stays the one that was
+    /// newest when the job began.
+    fn generation_path(&mut self, base: &str, relative: i32) -> Result<PathBuf, String> {
+        if self.gdg(base).is_none() {
+            return Err(format!("{base} is not a generation data group; IDCAMS DEFINE GDG makes one"));
+        }
+        if !self.gdg_start.contains_key(base) {
+            let found = self.generations(base);
+            self.gdg_start.insert(base.to_string(), found);
+        }
+        let start = &self.gdg_start[base];
+        let newest = start.last().copied().unwrap_or(0);
+        let number = if relative > 0 {
+            (newest + relative as u32 - 1) % 9999 + 1
+        } else {
+            let back = relative.unsigned_abs() as usize;
+            if back >= start.len() {
+                return Err("no such generation".into());
+            }
+            start[start.len() - 1 - back]
+        };
+        Ok(self.datasets.join(format!("{base}.G{number:04}V00")))
+    }
+
+    /// After a new generation is kept: past the limit, the oldest roll off, or all but the newest
+    /// under EMPTY. A generation that rolls off is deleted, SCRATCH or not.
+    fn roll_off(&self, base: &str) {
+        let Some(g) = self.gdg(base) else { return };
+        let all = self.generations(base);
+        if all.len() <= g.limit {
+            return;
+        }
+        let keep = if g.empty { 1 } else { g.limit };
+        for number in &all[..all.len() - keep] {
+            let _ = fs::remove_file(self.datasets.join(format!("{base}.G{number:04}V00")));
         }
     }
 }
@@ -370,6 +482,11 @@ fn idcams(runner: &Runner<'_>, dds: &[Allocated]) -> i16 {
             Command::Delete(names) => {
                 let mut code = 0;
                 for name in names {
+                    if runner.gdg(name).is_some() {
+                        for number in runner.generations(name) {
+                            let _ = fs::remove_file(runner.datasets.join(format!("{name}.G{number:04}V00")));
+                        }
+                    }
                     let path = runner.catalog_path(name);
                     let gone = if path.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };
                     match gone {
@@ -381,6 +498,20 @@ fn idcams(runner: &Runner<'_>, dds: &[Allocated]) -> i16 {
                     }
                 }
                 code
+            }
+            Command::DefineGdg { name, limit, scratch, empty } => {
+                let path = runner.catalog_path(name);
+                if path.exists() {
+                    print.push(format!("ironwork: DEFINE GDG {name}: the name is in use"));
+                    return 12;
+                }
+                match fs::write(&path, gdg_text(*limit, *scratch, *empty)) {
+                    Ok(()) => 0,
+                    Err(e) => {
+                        print.push(format!("ironwork: DEFINE GDG {name}: {e}"));
+                        12
+                    }
+                }
             }
             Command::DefineCluster(name) => {
                 let path = runner.catalog_path(name);
@@ -520,7 +651,7 @@ pub fn run(req: Request) -> ExitCode {
         None => req.datasets.clone(),
     };
     let inputs: Vec<(String, Value)> = if req.expected.is_some() { files_under(&datasets).into_iter().map(|(n, p)| (n, crate::compare::digest_of(fs::read(p).ok().as_deref()))).collect() } else { Vec::new() };
-    let mut runner = Runner { req: &req, datasets, scratch, temporaries: BTreeMap::new(), passed_new: BTreeSet::new(), files: 0 };
+    let mut runner = Runner { req: &req, datasets, scratch, temporaries: BTreeMap::new(), gdg_start: BTreeMap::new(), passed_new: BTreeSet::new(), files: 0 };
     let report = run_job(&job, &mut runner, replay.as_mut().map(|r| r as &mut dyn exec::sql::Database));
     for path in std::mem::take(&mut runner.passed_new) {
         let _ = if path.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };

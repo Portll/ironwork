@@ -68,6 +68,11 @@ pub enum Source {
     Dataset { dsn: String, member: Option<String> },
     /// `&&NAME`, a data set that lasts until the job ends.
     Temporary { name: String, member: Option<String> },
+    /// A generation of a generation data group, relative to the newest when the job began: 0 the
+    /// newest, -1 the one before, +1 the next.
+    Generation { base: String, relative: i32 },
+    /// DSN=*.stepname.ddname before it is resolved to the data set it names.
+    Refer(String),
     InStream(Vec<String>),
     Dummy,
     Sysout,
@@ -449,7 +454,9 @@ pub fn parse_with(text: &str, libraries: &Libraries<'_>) -> Result<Job, Error> {
     let mut expander = Expander { libraries, procs: HashMap::new(), order: Vec::new(), symbols: HashMap::new(), items: Vec::new() };
     expander.statements(&raws[1..], None, &HashMap::new(), 0)?;
     check_nesting(&expander.items)?;
-    Ok(Job { name, cond, items: expander.items })
+    let mut items = expander.items;
+    resolve_references(&mut items)?;
+    Ok(Job { name, cond, items })
 }
 
 fn job_operands(st: &Raw) -> Result<Cond, Error> {
@@ -762,14 +769,21 @@ fn exec_program(raw: &Raw, operands: &str, caller: Option<&str>) -> Result<Optio
 
 fn dataset(value: &str, line: usize) -> Result<Source, Error> {
     let value = unquote(value);
-    if value.starts_with("*.") {
-        return err(line, "a backward reference (DSN=*.stepname.ddname) is not supported yet");
+    if let Some(path) = value.strip_prefix("*.") {
+        if !path.split('.').all(is_name) || path.split('.').count() > 3 {
+            return err(line, format!("*.{path} is not *.ddname, *.stepname.ddname or *.stepname.procstepname.ddname"));
+        }
+        return Ok(Source::Refer(path.to_string()));
     }
     let (base, member) = match value.split_once('(') {
         Some((b, rest)) => {
             let Some(m) = rest.strip_suffix(')') else { return err(line, format!("{value} is not a data set name")) };
-            if m.starts_with(['+', '-']) || m.bytes().all(|c| c.is_ascii_digit()) {
-                return err(line, "a generation data group reference is not supported yet");
+            if m.starts_with(['+', '-']) || (!m.is_empty() && m.bytes().all(|c| c.is_ascii_digit())) {
+                let relative: i32 = m.trim_start_matches('+').parse().map_err(|_| Error { line, message: format!("{m} is not a relative generation") })?;
+                if !(-255..=255).contains(&relative) || b.starts_with("&&") || !is_dsn(b) || b.len() > 35 {
+                    return err(line, format!("{value} is not a generation of a generation data group"));
+                }
+                return Ok(Source::Generation { base: b.to_string(), relative });
             }
             if !is_name(m) {
                 return err(line, format!("{m} is not a member name"));
@@ -847,7 +861,7 @@ fn dd_fields(raw: &Raw, operands: &str) -> Result<(Option<Source>, Option<Disp>)
             (Some(k), _) => return err(raw.line, format!("DD keyword {k} is not supported yet")),
         }
     }
-    if disposition.is_some() && source.as_ref().is_some_and(|s| !matches!(s, Source::Dataset { .. } | Source::Temporary { .. })) {
+    if disposition.is_some() && source.as_ref().is_some_and(|s| !matches!(s, Source::Dataset { .. } | Source::Temporary { .. } | Source::Generation { .. } | Source::Refer(_))) {
         return err(raw.line, "DISP applies to a data set");
     }
     Ok((source, disposition))
@@ -888,7 +902,7 @@ fn override_dd(step: &mut Step, name: &str, index: usize, raw: &Raw, operands: &
         Some(dd) if index < dd.parts.len() => {
             let part = &mut dd.parts[index];
             if let Some(s) = source {
-                if !matches!(s, Source::Dataset { .. } | Source::Temporary { .. }) {
+                if !matches!(s, Source::Dataset { .. } | Source::Temporary { .. } | Source::Generation { .. } | Source::Refer(_)) {
                     part.disp = Disp::default();
                 }
                 part.source = s;
@@ -911,6 +925,49 @@ fn override_dd(step: &mut Step, name: &str, index: usize, raw: &Raw, operands: &
         }
         None => err(raw.line, "an unnamed DD statement with nothing to concatenate to"),
     }
+}
+
+/// Each DSN=*.… becomes the data set it names: *.ddname an earlier DD of the same step,
+/// *.stepname.ddname a DD of an earlier step (inside a procedure, one of the procedure's steps
+/// first), *.stepname.procstepname.ddname a DD of a step in the procedure a job step called.
+fn resolve_references(items: &mut [Item]) -> Result<(), Error> {
+    for k in 0..items.len() {
+        let Item::Step(step) = &items[k] else { continue };
+        let caller = step.caller.clone();
+        let mut resolved = Vec::new();
+        for (d, dd) in step.dds.iter().enumerate() {
+            for (p, part) in dd.parts.iter().enumerate() {
+                let Source::Refer(path) = &part.source else { continue };
+                let names: Vec<&str> = path.split('.').collect();
+                let found = match names.as_slice() {
+                    [ddname] => step.dds[..d].iter().find(|x| x.name == *ddname).map(|x| &x.parts[0].source),
+                    [s, ddname] => {
+                        let earlier = |caller_of: Option<&str>| items[..k].iter().rev().find_map(|i| match i {
+                            Item::Step(st) if st.name.as_deref() == Some(*s) && st.caller.as_deref() == caller_of => st.dds.iter().find(|x| x.name == *ddname).map(|x| &x.parts[0].source),
+                            _ => None,
+                        });
+                        earlier(caller.as_deref()).or_else(|| earlier(None))
+                    }
+                    [s, ps, ddname] => items[..k].iter().rev().find_map(|i| match i {
+                        Item::Step(st) if st.caller.as_deref() == Some(*s) && st.name.as_deref() == Some(*ps) => st.dds.iter().find(|x| x.name == *ddname).map(|x| &x.parts[0].source),
+                        _ => None,
+                    }),
+                    _ => None,
+                };
+                match found {
+                    Some(src @ (Source::Dataset { .. } | Source::Temporary { .. } | Source::Generation { .. })) => resolved.push((d, p, src.clone())),
+                    Some(_) => return err(part.line, format!("*.{path} names a DD that is no data set")),
+                    None => return err(part.line, format!("*.{path} names no earlier DD")),
+                }
+            }
+        }
+        if let Item::Step(step) = &mut items[k] {
+            for (d, p, src) in resolved {
+                step.dds[d].parts[p].source = src;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// IF and ENDIF pair up, ELSE has an IF, and nesting stops at 15 levels.

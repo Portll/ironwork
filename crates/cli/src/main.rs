@@ -112,12 +112,16 @@ job flags:
              partitioned data set being a directory of members. They hold z/OS records, or UTF-8
              lines with :text; in-stream data and SYSOUT are always lines. Each EXEC PGM= runs a
              COBOL program found in -L as PGM.cbl or PGM.cob, IEFBR14, IEBGENER without control
-             statements, or IDCAMS (DELETE, REPRO, DEFINE CLUSTER, SET, IF and DO, its messages to
-             SYSPRINT); DISP creates, keeps and deletes data sets as each step ends, and
+             statements, or IDCAMS (DELETE, REPRO, DEFINE CLUSTER and GDG, SET, IF and DO, its
+             messages to SYSPRINT); DISP creates, keeps and deletes data sets as each step ends, and
              COND and IF/THEN/ELSE choose the steps. A step's DISPLAY output and its SYSOUT DDs go
              to standard output, a line per step to standard error. What the job uses that
-             ironwork does not run (PARM, DISP=MOD, generation data groups, SORT, other IDCAMS
-             commands and IBM's other programs) is refused before any step runs. Exit status: the highest return
+             ironwork does not run (PARM, DISP=MOD, SORT, other IDCAMS commands and IBM's other
+             programs) is refused before any step runs. A generation data group's base is the file
+             DIR/BASE that DEFINE GDG writes, and generation n the file DIR/BASE.GnnnnV00; (0),
+             (-1) and (+1) count from the generations the job began with, DSN=BASE reads them all,
+             newest first, and generations past LIMIT roll off, all but the newest under EMPTY.
+             DSN=*.stepname.ddname and *.stepname.procstepname.ddname name an earlier DD's data set. Exit status: the highest return
              code, 16 when a step abended or a JCL error ended the job, 2 for a job refused
   --expected DATASETS=DIR
              migration equivalence: the job runs on a copy of --datasets with a fixed clock

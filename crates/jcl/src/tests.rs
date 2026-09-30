@@ -137,8 +137,8 @@ fn what_is_not_modelled_is_refused_by_name() {
     for (body, message) in [
         ("//S1 EXEC MYPROC\n", "no procedure library holds member MYPROC"),
         ("//S1 EXEC PGM=A,PARM=&P\n", "symbolic parameter &P has no value"),
-        ("//S1 EXEC PGM=A\n//IN DD DSN=G.BASE(+1),DISP=(NEW,CATLG)\n", "a generation data group reference is not supported yet"),
-        ("//S1 EXEC PGM=A\n//IN DD DSN=*.S0.OUT,DISP=SHR\n", "a backward reference (DSN=*.stepname.ddname) is not supported yet"),
+        ("//S1 EXEC PGM=A\n//IN DD DSN=G.BASE(+300),DISP=(NEW,CATLG)\n", "G.BASE(+300) is not a generation of a generation data group"),
+        ("//S1 EXEC PGM=A\n//IN DD DSN=*.S0.OUT,DISP=SHR\n", "*.S0.OUT names no earlier DD"),
         ("//S1 EXEC PGM=A\n//S1.IN DD DSN=A.B,DISP=SHR\n", "DD S1.IN overrides a procedure step, but the EXEC before it runs a program"),
         ("//S1 EXEC PGM=A\n//IN DD PATH='/u/x'\n", "DD keyword PATH is not supported yet"),
         ("//S1 EXEC PGM=A,PARM='A\n//  B'\n", "a quoted value continued onto the next line is not supported yet"),
@@ -242,4 +242,24 @@ fn procedure_mistakes_are_refused() {
     assert!(refused("//P PROC\n//S EXEC PGM=A\n// PEND\n//S1 EXEC P,PARM.NONE=X\n").contains("has no step NONE"));
     assert!(refused("//P PROC\n//S EXEC PGM=A\n// PEND\n//S1 EXEC P\n//NONE.DD1 DD DUMMY\n").contains("has no step NONE"));
     assert!(refused("//P PROC\n//S EXEC PGM=A,PARM=&X\n// PEND\n//S1 EXEC P\n").contains("P line 3: symbolic parameter &X has no value"));
+}
+
+#[test]
+fn generations_and_backward_references_are_read() {
+    let j = job(concat!(
+        "//P PROC\n//PS EXEC PGM=A\n//OUT DD DSN=P.OUT,DISP=(NEW,PASS)\n//PS2 EXEC PGM=B\n//IN DD DSN=*.PS.OUT,DISP=OLD\n// PEND\n",
+        "//S1 EXEC PGM=A\n//NEW DD DSN=G.DAILY(+1),DISP=(NEW,CATLG)\n//OLD DD DSN=G.DAILY(-1),DISP=SHR\n//AGAIN DD DSN=*.NEW,DISP=SHR\n",
+        "//S2 EXEC PGM=B\n//IN DD DSN=*.S1.OLD,DISP=SHR\n",
+        "//S3 EXEC P\n//S4 EXEC PGM=C\n//IN DD DSN=*.S3.PS.OUT,DISP=OLD\n",
+    ))
+    .unwrap();
+    let s = steps(&j);
+    let src = |k: usize, d: usize| s[k].dds[d].parts[0].source.clone();
+    assert_eq!(src(0, 0), Source::Generation { base: "G.DAILY".into(), relative: 1 });
+    assert_eq!(src(0, 1), Source::Generation { base: "G.DAILY".into(), relative: -1 });
+    assert_eq!(src(0, 2), src(0, 0));
+    assert_eq!(src(1, 0), src(0, 1));
+    assert_eq!(src(3, 0), Source::Dataset { dsn: "P.OUT".into(), member: None });
+    assert_eq!(src(4, 0), Source::Dataset { dsn: "P.OUT".into(), member: None });
+    assert!(refused("//S1 EXEC PGM=A\n//O DD SYSOUT=*\n//S2 EXEC PGM=A\n//I DD DSN=*.S1.O,DISP=SHR\n").contains("names a DD that is no data set"));
 }

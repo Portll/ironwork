@@ -338,3 +338,28 @@ fn a_job_is_equivalent_to_production_when_its_data_sets_match() {
     assert_eq!(code, Some(1));
     assert!(st.contains("\"what\":\"STEP UP\"") && st.contains("\"actual\":\"RC=0000\""), "{st}");
 }
+
+#[test]
+fn generations_roll_forward_and_off_across_runs() {
+    let dir = temp("gdg");
+    let define = "//DEF EXEC PGM=IDCAMS\n//SYSPRINT DD DUMMY\n//SYSIN DD *\n  DEFINE GDG(NAME(PAY.DAILY) LIMIT(2) SCRATCH)\n/*\n";
+    let o = job(&dir, define);
+    assert_eq!(o.status.code(), Some(0), "{}", log(&o));
+    assert!(fs::read_to_string(dir.join("data/PAY.DAILY")).unwrap().starts_with("IRONWORK-GDG LIMIT=2 SCRATCH"));
+    let run = |text: &str| {
+        let jcl = format!("//NEW EXEC PGM=IEBGENER\n//SYSUT1 DD *\n{text}\n/*\n//SYSUT2 DD DSN=PAY.DAILY(+1),DISP=(NEW,CATLG)\n//SYSIN DD DUMMY\n//SAME EXEC PGM=IEBGENER\n//SYSUT1 DD DSN=*.NEW.SYSUT2,DISP=SHR\n//SYSUT2 DD SYSOUT=*\n//SYSIN DD DUMMY\n");
+        job(&dir, &jcl)
+    };
+    for day in ["one", "two", "three"] {
+        let o = run(day);
+        assert_eq!(o.status.code(), Some(0), "{}", log(&o));
+        assert_eq!(String::from_utf8_lossy(&o.stdout), format!("{day}\n"));
+    }
+    assert!(!dir.join("data/PAY.DAILY.G0001V00").exists());
+    assert_eq!(fs::read_to_string(dir.join("data/PAY.DAILY.G0002V00")).unwrap(), "two\n");
+    assert_eq!(fs::read_to_string(dir.join("data/PAY.DAILY.G0003V00")).unwrap(), "three\n");
+    let o = job(&dir, "//ALL EXEC PGM=IEBGENER\n//SYSUT1 DD DSN=PAY.DAILY,DISP=SHR\n//SYSUT2 DD SYSOUT=*\n//SYSIN DD DUMMY\n//PREV EXEC PGM=IEBGENER\n//SYSUT1 DD DSN=PAY.DAILY(-1),DISP=SHR\n//SYSUT2 DD SYSOUT=*\n//SYSIN DD DUMMY\n");
+    assert_eq!(String::from_utf8_lossy(&o.stdout), "three\ntwo\ntwo\n");
+    let o = job(&dir, "//BAD EXEC PGM=IEFBR14\n//X DD DSN=PAY.DAILY(-5),DISP=SHR\n");
+    assert!(log(&o).contains("DD X: PAY.DAILY(-5): no such generation"), "{}", log(&o));
+}

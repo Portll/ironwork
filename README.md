@@ -77,7 +77,7 @@ usage.
 `ironwork job` reads one job's JCL and runs its steps in order. Each EXEC PGM= runs a COBOL program
 found in a `-L` library as PGM.cbl or PGM.cob, IEFBR14, IEBGENER without control statements (SYSUT1
 copied to SYSUT2 as it stands, or return code 12 without either DD), or IDCAMS with DELETE, REPRO,
-DEFINE CLUSTER, SET, IF and DO, whose IDC messages go to SYSPRINT. Data sets live in the
+DEFINE CLUSTER and GDG, SET, IF and DO, whose IDC messages go to SYSPRINT. Data sets live in the
 `--datasets` directory: DSN=A.B is the file A.B there and DSN=A.B(M) the file M in the directory
 A.B, a partitioned data set being a directory of members. They hold z/OS records, fixed or variable
 behind 4-byte RDWs, or UTF-8 lines with `:text`; in-stream data and SYSOUT are always lines. DD
@@ -86,6 +86,10 @@ DUMMY and DSN=NULLFILE are an empty input, an unnamed DD concatenates to the one
 ones, and cataloged ones found in the data sets JCLLIB ORDER names and then each `--proclib`
 directory, with symbolic parameters (the EXEC's over the PROC's defaults over SET), INCLUDE members,
 PARM and COND overrides and DD overrides; a step in a procedure is stepname.procstepname.
+DSN=*.stepname.ddname names an earlier DD's data set. A generation data group's base is the file
+BASE that DEFINE GDG writes and generation n the file BASE.GnnnnV00: (0), (-1) and (+1) count from
+the generations the job began with, DSN=BASE reads them all newest first, and a kept new generation
+rolls the oldest off past LIMIT, or all but itself under EMPTY.
 
 DISP=NEW creates the data set when the step starts; OLD and SHR need it to exist, and a data set
 that must exist and does not, or that DISP=NEW names and that exists, is a JCL error that ends the
@@ -98,8 +102,8 @@ levels over RC, stepname.RC, ABEND, ABENDCC=, stepname.ABEND and stepname.RUN. A
 runs only under COND=EVEN or ONLY, or in the branch of an IF that tests an abend or whether a step
 ran. A program no library holds abends S806. A step's DISPLAY output and SYSOUT DDs go to standard
 output, and a line per step to standard error: the step, the program and RC=nnnn, ABEND and its
-code, BYPASSED and why, or JCL ERROR. PARM, DISP=MOD, generation data groups, backward references,
-SORT and IBM's other programs are refused by name before any step runs. Exit status: the highest
+code, BYPASSED and why, or JCL ERROR. PARM, DISP=MOD, SORT and IBM's other programs are refused by
+name before any step runs. Exit status: the highest
 return code; 16 when a step abended or a JCL error ended the job; 2 for a job refused.
 `--expected DATASETS=DIR` runs the job on a copy of the data sets and compares what it leaves with
 production's, as [docs/evidence.md](docs/evidence.md) §4 describes.

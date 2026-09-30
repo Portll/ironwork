@@ -17,6 +17,9 @@ pub enum Command {
     Delete(Vec<String>),
     Repro { from: Target, to: Target },
     DefineCluster(String),
+    /// A generation data group's base: how many generations it keeps, whether a generation that
+    /// rolls off is scratched, and whether all roll off together when the limit is passed.
+    DefineGdg { name: String, limit: u16, scratch: bool, empty: bool },
     /// SET MAXCC= when `max`, SET LASTCC= otherwise.
     Set { max: bool, value: u16 },
     If { max: bool, op: Op, value: u16, then: Vec<Command>, otherwise: Vec<Command> },
@@ -301,7 +304,7 @@ impl Parser {
     }
 }
 
-const DELETE_IGNORED: &[&str] = &["PURGE", "PRG", "NOPURGE", "NPRG", "ERASE", "ERAS", "NOERASE", "NERAS", "SCRATCH", "SCR", "NOSCRATCH", "NSCR", "NONVSAM", "NVSAM", "CLUSTER", "CL", "FORCE", "FRC", "NOFORCE", "NFRC"];
+const DELETE_IGNORED: &[&str] = &["PURGE", "PRG", "NOPURGE", "NPRG", "ERASE", "ERAS", "NOERASE", "NERAS", "SCRATCH", "SCR", "NOSCRATCH", "NSCR", "NONVSAM", "NVSAM", "CLUSTER", "CL", "FORCE", "FRC", "NOFORCE", "NFRC", "GENERATIONDATAGROUP", "GDG"];
 
 fn delete(args: &[Token]) -> Result<Command, String> {
     let mut names = Vec::new();
@@ -352,10 +355,36 @@ fn dd_name(v: &str) -> Result<String, String> {
     if crate::is_name(name) && v.split_whitespace().count() == 1 { Ok(name.to_string()) } else { Err(format!("{v} is not a DD name")) }
 }
 
+fn define_gdg(group: &str) -> Result<Command, String> {
+    let (mut name, mut limit, mut scratch, mut empty) = (None, None, false, false);
+    for t in tokens(group)? {
+        match t {
+            Token::Keyed(k, v) if k == "NAME" => name = Some(name_of(&v)?),
+            Token::Keyed(k, v) if k == "LIMIT" || k == "LIM" => match v.trim().parse::<u16>() {
+                Ok(n) if (1..=255).contains(&n) => limit = Some(n),
+                _ => return Err(format!("LIMIT({v}) is not from 1 to 255")),
+            },
+            Token::Word(w) if w == "SCRATCH" || w == "SCR" => scratch = true,
+            Token::Word(w) if w == "NOSCRATCH" || w == "NSCR" => scratch = false,
+            Token::Word(w) if w == "EMPTY" || w == "EMP" => empty = true,
+            Token::Word(w) if w == "NOEMPTY" || w == "NEMP" => empty = false,
+            Token::End => {}
+            Token::Keyed(k, _) | Token::Word(k) => return Err(format!("DEFINE GDG parameter {k} is not supported yet")),
+            other => return Err(format!("DEFINE GDG has {other:?} where a parameter belongs")),
+        }
+    }
+    match (name, limit) {
+        (Some(name), Some(limit)) if !name.contains('(') && name.len() <= 35 => Ok(Command::DefineGdg { name, limit, scratch, empty }),
+        (Some(name), Some(_)) => Err(format!("{name} is not a generation data group name of 35 characters or fewer")),
+        _ => Err("DEFINE GDG needs NAME and LIMIT".into()),
+    }
+}
+
 fn define(args: &[Token]) -> Result<Command, String> {
     let mut name = None;
     for a in args {
         match a {
+            Token::Keyed(k, v) if k == "GENERATIONDATAGROUP" || k == "GDG" => return define_gdg(v),
             Token::Keyed(k, v) if k == "CLUSTER" || k == "CL" => {
                 let inner = tokens(v)?;
                 for t in inner {
@@ -367,7 +396,7 @@ fn define(args: &[Token]) -> Result<Command, String> {
                 }
             }
             Token::Keyed(k, _) if matches!(k.as_str(), "DATA" | "INDEX" | "IX" | "CATALOG" | "CAT") => {}
-            Token::Keyed(k, _) | Token::Word(k) => return Err(format!("DEFINE {k} is not supported yet; DEFINE CLUSTER is")),
+            Token::Keyed(k, _) | Token::Word(k) => return Err(format!("DEFINE {k} is not supported yet; DEFINE CLUSTER and GDG are")),
             other => return Err(format!("DEFINE has {other:?} where a parameter belongs")),
         }
     }
@@ -398,6 +427,7 @@ mod tests {
             Command::DefineCluster("PROD.KSDS".into()),
             Command::Delete(vec!["PROD.LIB(MEM1)".into()]),
         ]);
+        assert_eq!(parse(&cards("DEFINE GDG (NAME(PROD.DAILY) LIMIT(3) SCRATCH EMPTY)")).unwrap(), [Command::DefineGdg { name: "PROD.DAILY".into(), limit: 3, scratch: true, empty: true }]);
     }
 
     #[test]
@@ -421,7 +451,8 @@ mod tests {
             ("DELETE PROD.*", "DELETE of a generic name (PROD.*) is not supported yet"),
             ("REPRO INFILE(A) OUTFILE(B) REPLACE", "REPRO parameter REPLACE is not supported yet"),
             ("REPRO INFILE(A) OUTFILE(B) COUNT(5)", "REPRO parameter COUNT is not supported yet"),
-            ("DEFINE GDG(NAME(X.Y) LIMIT(5))", "DEFINE GDG is not supported yet; DEFINE CLUSTER is"),
+            ("DEFINE ALIAS(NAME(X.Y) RELATE(CAT))", "DEFINE ALIAS is not supported yet; DEFINE CLUSTER and GDG are"),
+            ("DEFINE GDG(NAME(X.Y) LIMIT(300))", "LIMIT(300) is not from 1 to 255"),
             ("DELETE ../ETC", "../ETC is not a data set name"),
             ("SET MAXCC=17", "17 is not a condition code from 0 to 16"),
             ("DO\nDELETE A.B", "DO is out of place"),
