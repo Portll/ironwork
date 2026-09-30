@@ -206,8 +206,8 @@ costs nothing but CI time.
 | E4 | Confirmed findings: an ironwork run shows the input reaching the sink. This would be a new evidence kind, and it needs the operator's ruling, because cobolwork has so far claimed only what it read | P2 | L |
 | E5 | Fuzzing COBOL programs for abends, reported as findings with their inputs | P2 | L |
 | E6 | CSD-defined CICS regions for the TN3270 server | P2 | S |
-| E7 | A JCL runner: steps, DD allocation, COND and IF, in-stream data, and the utilities cobolwork's `lib/utilities.mjs` documents with IBM citations | P2 | XL |
-| E8 | Migration equivalence: run a job under ironwork against recorded SQL and files, and compare with production's outputs | P2 | L |
+| E7 | A JCL runner: steps, DD allocation, COND and IF, in-stream data, and the utilities cobolwork's `lib/utilities.mjs` documents with IBM citations. `ironwork job` runs all of these with procedures, IEFBR14, IEBGENER and IDCAMS; SORT as a utility, PARM, DISP=MOD and generation data groups are to come | P2 | XL |
+| E8 | Migration equivalence: run a job under ironwork against recorded SQL and files, and compare with production's outputs. Built: `ironwork job --expected`, [evidence.md](evidence.md) §4 | P2 | L |
 | E9 | Execution coverage feeding cobolwork, to mark findings in code a test reached | P3 | M |
 | E10 | Db2 DDL to PostgreSQL schemas for SQL tests | P3 | M |
 | E11 | Translation validation for safety-critical estates (avionics, medical devices), where a miscompilation is a hazard: [verifier.md](verifier.md) | P3 | L to XL |

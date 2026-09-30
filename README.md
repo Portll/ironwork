@@ -72,6 +72,38 @@ binary or floating-point, assumption C55), the user completion code (U0999 from 
 a Language Environment condition nothing handled) or the file status of an unhandled I/O failure; 2
 usage.
 
+    cargo run -p ironwork -- job payroll.jcl --datasets data[:text] [--proclib procs]... [-L proglib]... [-I copylib]... [--clock 2026-09-27T12:00:00] [--sql-replay calls.txt]
+
+`ironwork job` reads one job's JCL and runs its steps in order. Each EXEC PGM= runs a COBOL program
+found in a `-L` library as PGM.cbl or PGM.cob, IEFBR14, IEBGENER without control statements (SYSUT1
+copied to SYSUT2 as it stands, or return code 12 without either DD), or IDCAMS with DELETE, REPRO,
+DEFINE CLUSTER, SET, IF and DO, whose IDC messages go to SYSPRINT. Data sets live in the
+`--datasets` directory: DSN=A.B is the file A.B there and DSN=A.B(M) the file M in the directory
+A.B, a partitioned data set being a directory of members. They hold z/OS records, fixed or variable
+behind 4-byte RDWs, or UTF-8 lines with `:text`; in-stream data and SYSOUT are always lines. DD
+DUMMY and DSN=NULLFILE are an empty input, an unnamed DD concatenates to the one before it, and
+&&NAME is a temporary data set that lasts until the job ends. Procedures are expanded: in-stream
+ones, and cataloged ones found in the data sets JCLLIB ORDER names and then each `--proclib`
+directory, with symbolic parameters (the EXEC's over the PROC's defaults over SET), INCLUDE members,
+PARM and COND overrides and DD overrides; a step in a procedure is stepname.procstepname.
+
+DISP=NEW creates the data set when the step starts; OLD and SHR need it to exist, and a data set
+that must exist and does not, or that DISP=NEW names and that exists, is a JCL error that ends the
+job. As a step ends its normal disposition applies, or its abnormal one after an abend: DELETE
+removes the data set, KEEP, CATLG and UNCATLG keep it, and PASS keeps it for later steps, a data
+set the job created and only passed being deleted when the job ends. With no disposition stated, a
+data set the step created is deleted and one that existed is kept. COND on the JOB statement ends
+the job when a test is true, COND on EXEC bypasses the step, and IF/THEN/ELSE/ENDIF nest to 15
+levels over RC, stepname.RC, ABEND, ABENDCC=, stepname.ABEND and stepname.RUN. After an abend a step
+runs only under COND=EVEN or ONLY, or in the branch of an IF that tests an abend or whether a step
+ran. A program no library holds abends S806. A step's DISPLAY output and SYSOUT DDs go to standard
+output, and a line per step to standard error: the step, the program and RC=nnnn, ABEND and its
+code, BYPASSED and why, or JCL ERROR. PARM, DISP=MOD, generation data groups, backward references,
+SORT and IBM's other programs are refused by name before any step runs. Exit status: the highest
+return code; 16 when a step abended or a JCL error ended the job; 2 for a job refused.
+`--expected DATASETS=DIR` runs the job on a copy of the data sets and compares what it leaves with
+production's, as [docs/evidence.md](docs/evidence.md) §4 describes.
+
 ## Compiler messages
 
 Each message has one of IBM's five severities, and a compile's return code is the highest of its
@@ -126,6 +158,7 @@ as the severity when it is one of those two. For example:
 | `oracle` | The test harness: COBOL programs that pin their options on a CBL card, DISPLAY each case's storage in hex, and are scored against the model's predictions. | — |
 | `syntax` | Fixed-format source (sequence area, indicators, continuation, CBL and PROCESS cards), the lexer and the parser. | — |
 | `exec` | WORKING-STORAGE laid out byte for byte (USAGE, PICTURE, REDEFINES, OCCURS), and an interpreter over it. | The oracle programs, which it runs |
+| `jcl` | Job control language: JOB, EXEC and DD statements, dispositions, in-stream data, COND and IF, procedures and symbolic parameters, and IDCAMS commands. | *z/OS MVS JCL Reference*; *DFSMS Access Method Services Commands* |
 | `ironwork` | The driver. | — |
 
 The subset the interpreter runs today:
