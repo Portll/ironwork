@@ -56,11 +56,11 @@ It is zero-dependency Rust.
 | EXEC SQL | Both | cobolwork translates for flow and `cobc`; ironwork runs it. Shared statement fixtures |
 | CICS commands | Both | cobolwork finds defects; ironwork runs them. One command table (`provenance/precompile.json`) as shared data |
 | BMS maps | Both | Two parsers for two purposes. ironwork's symbolic maps are the reference; shared fixtures |
-| JCL | Both | cobolwork reads jobs. Running them belongs to ironwork (proposed: E7) |
+| JCL | Both | cobolwork reads jobs. Running them belongs to ironwork (E7) |
 | Db2 DDL | cobolwork | On cobolwork's language plan. ironwork's SQL backend takes schemas as fixtures |
 | Oracles | Each its own | cobolwork grades against GnuCOBOL's listing and its bench; ironwork against Enterprise COBOL and Hercules |
 
-**Placements to rule on:**
+**Placements, ruled by the operator on 2026-09-30:**
 
 - JCL execution and utilities go to ironwork.
 - Dynamic confirmation of findings is orchestrated by cobolwork and traced by ironwork.
