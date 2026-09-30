@@ -140,7 +140,7 @@ It is zero-dependency Rust.
 | 2 | Commit approval: the cobolwork-web split | Operator | XS | M8, SQL and these specs have landed; the four-branch integration is landing |
 | 3 | M8: the TN3270 server | ironwork | M | Done |
 | 4 | Integrate SORT/MERGE, LE, Report Writer and OO | ironwork | M | In flight |
-| 5 | Choose an Enterprise COBOL route for goldens: HDISV, ZD&T Enterprise Edition, or a client's system | Operator | XL to carry out | ironwork's central claim is unwitnessed until this happens |
+| 5 | Enterprise COBOL goldens: route chosen 2026-09-30, IBM Test Accelerator for Z (On-Demand Environments: Enterprise COBOL 6.4, Db2 13.1, CICS 6.2) on a Linux x86-64 host, with the outputs kept in a private repository | Operator | XL to carry out | ironwork's central claim is unwitnessed until the licence is bought and the first goldens are in |
 
 ### P1: next
 
@@ -220,4 +220,4 @@ costs nothing but CI time.
 | LICENSING.md for both products, with the uncapped prices of 2026-09-29 | Drafted on the operator's go-ahead | S |
 | Title opinion on cobolwork's word lists; the ACL addendum; trade marks | A practitioner | S each |
 | Making the repositories public | Operator | XS, after P0 #1 and P1 #7 |
-| The goldens route, P0 #5 | Operator | Decision |
+| The goldens route, P0 #5: chosen 2026-09-30; the licence and whether goldens may be published | Operator; a practitioner on publication | Purchase; S |

@@ -342,6 +342,10 @@ names the compiler and its level):
 Keep one directory per target: compiler level, `ARCH` and `OPT` all change the generated code, and
 with it the answers to chosen assumptions.
 
+Goldens are IBM's outputs, so they live in a private repository cloned here as `goldens/`, which
+`.gitignore` keeps out of this one. They come from IBM Test Accelerator for Z's On-Demand
+Environments (Enterprise COBOL 6.4, Db2 13.1, CICS 6.2) on a Linux x86-64 host.
+
 ### Hercules, a second reading of the machine
 
     cargo run -p ironwork-oracle -- hercules /tmp/herc   # needs hercules (4.9.1) on PATH
