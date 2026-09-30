@@ -3,6 +3,7 @@
 //! (RUNTIME-EXCEPTION.md), so a compiled program that links it is not bound by the AGPL.
 //! [`module`] reads and writes the load modules such a program is shipped as.
 
+pub mod abend;
 pub mod calendar;
 pub mod cics_tables;
 pub mod codec;

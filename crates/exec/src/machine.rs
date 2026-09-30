@@ -2,6 +2,7 @@
 //! reference can reach anywhere in that memory, as a program compiled without SSRANGE can on
 //! z/OS, but never outside it.
 
+pub use rt::abend::{Abend, Ending};
 use crate::abend::{AbendCode, Signal};
 use crate::calendar::{civil, days_from_civil, days_in_month, SECONDS_PER_DAY};
 use crate::layout::{Item, Kind, Layout, Resolved};
@@ -33,35 +34,11 @@ mod report;
 mod sort;
 mod sql;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Abend {
-    pub code: AbendCode,
-    pub message: String,
-    pub pos: Pos,
-}
-
-impl Abend {
-    fn check(c: ProgramCheck, pos: Pos) -> Self {
-        Self { code: AbendCode::Check(c), message: format!("{c:?} exception"), pos }
-    }
-
-    fn ironwork(message: impl Into<String>, pos: Pos) -> Self {
-        Self { code: AbendCode::Ironwork, message: message.into(), pos }
-    }
-}
-
 type R<T> = Result<T, Abend>;
 
 /// The most digits a numeric item holds, under ARITH(EXTEND): all an alphanumeric sender can give
 /// one (LONG_ZONED_BY_PACKS in numeric::assumptions).
 const MAX_DIGITS: usize = 31;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Ending {
-    Goback,
-    StopRun,
-    EndOfProgram,
-}
 
 enum Flow {
     Next,

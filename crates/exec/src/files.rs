@@ -14,6 +14,8 @@ use std::path::PathBuf;
 use syntax::ast::OpenMode;
 use zarch::ebcdic::{self, CodePage};
 
+pub use rt::abend::FileStatus;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
     Fixed,
@@ -80,129 +82,6 @@ enum Handle {
     Writer(BufWriter<File>),
     Keyed(Box<Keyed>),
     Empty,
-}
-
-/// An I/O status, as FILE STATUS receives it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FileStatus {
-    Success,
-    SuccessDuplicate,
-    SuccessWrongLength,
-    SuccessOptional,
-    AtEnd,
-    RelativeKeyOverflow,
-    SequenceError,
-    DuplicateKey,
-    NotFound,
-    BoundaryViolation,
-    PermanentError,
-    FileNotFound,
-    OpenModeUnsupported,
-    AlreadyOpen,
-    NotOpen,
-    NoPriorRead,
-    RecordLengthChanged,
-    NoNextRecord,
-    NotOpenInput,
-    NotOpenOutput,
-    NotOpenInputOutput,
-}
-
-impl FileStatus {
-    pub(crate) const ALL: [Self; 21] = [
-        Self::Success,
-        Self::SuccessDuplicate,
-        Self::SuccessWrongLength,
-        Self::SuccessOptional,
-        Self::AtEnd,
-        Self::RelativeKeyOverflow,
-        Self::SequenceError,
-        Self::DuplicateKey,
-        Self::NotFound,
-        Self::BoundaryViolation,
-        Self::PermanentError,
-        Self::FileNotFound,
-        Self::OpenModeUnsupported,
-        Self::AlreadyOpen,
-        Self::NotOpen,
-        Self::NoPriorRead,
-        Self::RecordLengthChanged,
-        Self::NoNextRecord,
-        Self::NotOpenInput,
-        Self::NotOpenOutput,
-        Self::NotOpenInputOutput,
-    ];
-
-    /// The code a run ends with when this status fails a statement and no FILE STATUS holds it.
-    pub fn abend_code(self) -> &'static str {
-        match self {
-            Self::Success => "IO-00",
-            Self::SuccessDuplicate => "IO-02",
-            Self::SuccessWrongLength => "IO-04",
-            Self::SuccessOptional => "IO-05",
-            Self::AtEnd => "IO-10",
-            Self::RelativeKeyOverflow => "IO-14",
-            Self::SequenceError => "IO-21",
-            Self::DuplicateKey => "IO-22",
-            Self::NotFound => "IO-23",
-            Self::BoundaryViolation => "IO-24",
-            Self::PermanentError => "IO-30",
-            Self::FileNotFound => "IO-35",
-            Self::OpenModeUnsupported => "IO-37",
-            Self::AlreadyOpen => "IO-41",
-            Self::NotOpen => "IO-42",
-            Self::NoPriorRead => "IO-43",
-            Self::RecordLengthChanged => "IO-44",
-            Self::NoNextRecord => "IO-46",
-            Self::NotOpenInput => "IO-47",
-            Self::NotOpenOutput => "IO-48",
-            Self::NotOpenInputOutput => "IO-49",
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        &self.abend_code()["IO-".len()..]
-    }
-
-    /// Whether the status is of class `class`, its first digit: 0 success, 1 AT END, 2 INVALID KEY.
-    pub fn covers(self, class: char) -> bool {
-        self.as_str().starts_with(class)
-    }
-
-    /// What a failing status means, for the message when no FILE STATUS or phrase takes it.
-    pub fn meaning(self) -> &'static str {
-        match self {
-            Self::AtEnd => "there is no next record",
-            Self::SequenceError => "the key is out of sequence",
-            Self::DuplicateKey => "a record with that key is already there",
-            Self::NotFound => "there is no record with that key",
-            Self::RelativeKeyOverflow => "the record number is too large for the RELATIVE KEY",
-            Self::BoundaryViolation => "the record number is outside the file",
-            Self::NoPriorRead => "the last statement on the file was not a successful READ",
-            Self::RecordLengthChanged => "the record is not the length of the one it replaces",
-            Self::NoNextRecord => "there is no next record: the last READ reached the end, or START found nothing",
-            Self::NotOpenInput => "the file is not open INPUT or I-O",
-            Self::NotOpenOutput => "the file is not open for output",
-            Self::NotOpenInputOutput => "the file is not open I-O",
-            _ => "the statement failed",
-        }
-    }
-
-    /// The CICS condition a keyed store's failure raises.
-    pub fn cics_condition(self) -> &'static str {
-        match self {
-            Self::DuplicateKey => "DUPREC",
-            Self::NotFound => "NOTFND",
-            _ => "INVREQ",
-        }
-    }
-}
-
-/// The status a two-digit code names, for SORT, which still passes its statuses as text.
-impl From<&str> for FileStatus {
-    fn from(code: &str) -> Self {
-        Self::ALL.into_iter().find(|s| s.as_str() == code).unwrap_or_else(|| panic!("{code} is not a file status ironwork sets"))
-    }
 }
 
 /// Where a key lies in a record.
