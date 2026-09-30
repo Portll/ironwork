@@ -221,10 +221,10 @@ fn members_of_a_partitioned_data_set_are_files_in_its_directory() {
 #[test]
 fn what_ironwork_does_not_run_is_refused_before_any_step() {
     let dir = temp("refuse");
-    let o = job(&dir, "//S1 EXEC PGM=IEFBR14\n//NEW DD DSN=MADE.EARLY,DISP=(NEW,CATLG)\n//S2 EXEC PGM=SORT\n//S3 EXEC PGM=IEFBR14\n//X DD DSN=A.B,DISP=MOD\n//S4 EXEC PGM=IDCAMS\n//SYSIN DD *\n  LISTCAT ALL\n");
+    let o = job(&dir, "//S1 EXEC PGM=IEFBR14\n//NEW DD DSN=MADE.EARLY,DISP=(NEW,CATLG)\n//S2 EXEC PGM=SORT\n//S3 EXEC PGM=IEFBR14\n//X DD DSN=G.BASE(+1),DISP=MOD\n//S4 EXEC PGM=IDCAMS\n//SYSIN DD *\n  LISTCAT ALL\n");
     assert_eq!(o.status.code(), Some(2));
     let l = log(&o);
-    assert!(l.contains("PGM=SORT is not supported yet") && l.contains("DISP=MOD is not supported yet") && l.contains("IDCAMS: the IDCAMS command LISTCAT is not supported yet"), "{l}");
+    assert!(l.contains("PGM=SORT is not supported yet") && l.contains("DISP=MOD on a generation or in a concatenation is not supported yet") && l.contains("IDCAMS: the IDCAMS command LISTCAT is not supported yet"), "{l}");
     assert!(!dir.join("data/MADE.EARLY").exists());
     let o = job(&dir, "//S1 EXEC MYPROC\n");
     assert_eq!(o.status.code(), Some(2));
@@ -389,4 +389,25 @@ fn a_job_records_its_steps_in_a_hash_chained_journal() {
     }
     assert!(!text.contains("alpha") && !text.contains("ALPHA"));
     assert!(fs::read_to_string(ev.join("ledger.jsonl")).unwrap().contains("\"kind\":\"run\""));
+}
+
+#[test]
+fn disp_mod_writes_after_what_the_data_set_holds_and_creates_one_that_is_missing() {
+    let dir = temp("mod");
+    upcase(&dir);
+    fs::write(dir.join("data/IN.NAMES"), "delta\n").unwrap();
+    fs::write(dir.join("data/LOG.NAMES"), "ALPHA\n").unwrap();
+    let o = job(
+        &dir,
+        concat!(
+            "//UP EXEC PGM=UPCASE\n//IN DD DSN=IN.NAMES,DISP=SHR\n//OUT DD DSN=LOG.NAMES,DISP=MOD\n",
+            "//GEN EXEC PGM=IEBGENER\n//SYSUT1 DD *\nlast\n/*\n//SYSUT2 DD DSN=LOG.NAMES,DISP=MOD\n//SYSIN DD DUMMY\n",
+            "//NEW EXEC PGM=IEBGENER\n//SYSUT1 DD *\nfirst\n/*\n//SYSUT2 DD DSN=MADE.BY.MOD,DISP=(MOD,CATLG)\n//SYSIN DD DUMMY\n",
+            "//GONE EXEC PGM=IEBGENER\n//SYSUT1 DD *\nx\n/*\n//SYSUT2 DD DSN=NOT.KEPT,DISP=MOD\n//SYSIN DD DUMMY\n",
+        ),
+    );
+    assert_eq!(o.status.code(), Some(0), "{}", log(&o));
+    assert_eq!(fs::read_to_string(dir.join("data/LOG.NAMES")).unwrap(), "ALPHA\nDELTA\nlast\n");
+    assert_eq!(fs::read_to_string(dir.join("data/MADE.BY.MOD")).unwrap(), "first\n");
+    assert!(!dir.join("data/NOT.KEPT").exists(), "a data set DISP=MOD created with no disposition is deleted as NEW would be");
 }

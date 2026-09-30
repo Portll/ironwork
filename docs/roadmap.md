@@ -206,7 +206,7 @@ costs nothing but CI time.
 | E4 | Confirmed findings: an ironwork run shows the input reaching the sink (operator 2026-09-30: execution labels for cobolwork's precision). Built: `--trace-marker`, a `sink` record per operation reached with and without the marker, [evidence.md](evidence.md) §1.1; sinks ironwork does not run yet (MQ, dynamic SQL, sockets) are not traced | P2 | L |
 | E5 | Fuzzing COBOL programs for abends, reported as findings with their inputs | P2 | L |
 | E6 | CSD-defined CICS regions for the TN3270 server | P2 | S |
-| E7 | A JCL runner: steps, DD allocation, COND and IF, in-stream data, and the utilities cobolwork's `lib/utilities.mjs` documents with IBM citations. `ironwork job` runs all of these with procedures, IEFBR14, IEBGENER and IDCAMS; SORT as a utility, PARM, DISP=MOD and generation data groups are to come | P2 | XL |
+| E7 | A JCL runner: steps, DD allocation, COND and IF, in-stream data, and the utilities cobolwork's `lib/utilities.mjs` documents with IBM citations. `ironwork job` runs these with procedures, generation data groups, IEFBR14, IEBGENER and IDCAMS; SORT as a utility and PARM are to come | P2 | XL |
 | E8 | Migration equivalence: run a job under ironwork against recorded SQL and files, and compare with production's outputs. Built: `ironwork job --expected`, [evidence.md](evidence.md) §4 | P2 | L |
 | E9 | Execution coverage feeding cobolwork, to mark findings in code a test reached | P3 | M |
 | E10 | Db2 DDL to PostgreSQL schemas for SQL tests | P3 | M |

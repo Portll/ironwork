@@ -143,8 +143,9 @@ job flags:
              messages to SYSPRINT); DISP creates, keeps and deletes data sets as each step ends, and
              COND and IF/THEN/ELSE choose the steps. A step's DISPLAY output and its SYSOUT DDs go
              to standard output, a line per step to standard error. What the job uses that
-             ironwork does not run (PARM, DISP=MOD, SORT, other IDCAMS commands and IBM's other
-             programs) is refused before any step runs. A generation data group's base is the file
+             ironwork does not run (PARM, SORT, other IDCAMS commands and IBM's other programs) is
+             refused before any step runs. DISP=MOD writes after what a data set holds, and
+             creates it, as NEW would, where it is not there. A generation data group's base is the file
              DIR/BASE that DEFINE GDG writes, and generation n the file DIR/BASE.GnnnnV00; (0),
              (-1) and (+1) count from the generations the job began with, DSN=BASE reads them all,
              newest first, and generations past LIMIT roll off, all but the newest under EMPTY.

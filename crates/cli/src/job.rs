@@ -96,8 +96,8 @@ fn refusals(job: &Job, req: &Request) -> Vec<String> {
         }
         for dd in &step.dds {
             for part in &dd.parts {
-                if part.disp.status == Status::Mod {
-                    out.push(format!("line {}: DISP=MOD is not supported yet", part.line));
+                if part.disp.status == Status::Mod && (dd.parts.len() > 1 || matches!(part.source, Source::Generation { .. })) {
+                    out.push(format!("line {}: DISP=MOD on a generation or in a concatenation is not supported yet", part.line));
                 }
             }
             let text_parts = dd.parts.iter().filter(|p| matches!(p.source, Source::InStream(_))).count();
@@ -142,6 +142,8 @@ struct Allocated {
     path: PathBuf,
     text: bool,
     sysout: bool,
+    /// DISP=MOD: OPEN OUTPUT keeps the data set's records and writes after them.
+    append: bool,
 }
 
 struct Disposal {
@@ -267,11 +269,13 @@ impl Runner<'_> {
                     };
                     let whole = if member { path.parent().map(Path::to_path_buf).unwrap_or_default() } else { path.clone() };
                     let temporary = matches!(source, Source::Temporary { .. });
-                    let created = part.disp.status == Status::New;
+                    let fresh = !whole.exists();
+                    if part.disp.status == Status::New && !fresh {
+                        return Err(format!("DD {}: {shown} already exists, and DISP=NEW creates it", dd.name));
+                    }
+                    // DISP=MOD creates a data set that is not there, and then disposes of it as NEW would.
+                    let created = part.disp.status == Status::New || (part.disp.status == Status::Mod && fresh);
                     if created {
-                        if whole.exists() {
-                            return Err(format!("DD {}: {shown} already exists, and DISP=NEW creates it", dd.name));
-                        }
                         if member {
                             fs::create_dir_all(&whole).map_err(|e| format!("DD {}: {e}", dd.name))?;
                         } else {
@@ -280,19 +284,21 @@ impl Runner<'_> {
                         if let Source::Temporary { name, .. } = source {
                             self.temporaries.insert(name.clone(), whole.clone());
                         }
-                    } else if !whole.exists() {
+                    } else if fresh {
                         return Err(format!("DD {}: {shown} was not found", dd.name));
                     } else if member != whole.is_dir() {
                         return Err(format!("DD {}: {shown} {}", dd.name, if member { "names a member of a data set that has none" } else { "is a partitioned data set; name a member" }));
                     }
-                    disposals.push(Disposal { path: whole, disp: part.disp, created, temporary, group: None });
+                    let disp = if created { jcl::Disp { status: Status::New, ..part.disp } } else { part.disp };
+                    disposals.push(Disposal { path: whole, disp, created, temporary, group: None });
                     paths.push(path);
                 }
             }
         }
         if paths.len() == 1 {
             let dataset = matches!(dd.parts[0].source, Source::Dataset { .. } | Source::Temporary { .. } | Source::Generation { .. });
-            return Ok(Allocated { dataset, name: dd.name.clone(), path: paths.remove(0), text, sysout });
+            let append = dd.parts[0].disp.status == Status::Mod;
+            return Ok(Allocated { dataset, name: dd.name.clone(), path: paths.remove(0), text, sysout, append });
         }
         let joined = fresh_name(&self.scratch, &mut self.files, &label);
         let mut bytes = Vec::new();
@@ -300,7 +306,7 @@ impl Runner<'_> {
             bytes.extend(fs::read(p).map_err(|e| format!("DD {}: {e}", dd.name))?);
         }
         fs::write(&joined, bytes).map_err(|e| format!("DD {}: {e}", dd.name))?;
-        Ok(Allocated { dataset: false, name: dd.name.clone(), path: joined, text, sysout })
+        Ok(Allocated { dataset: false, name: dd.name.clone(), path: joined, text, sysout, append: false })
     }
 
     fn dispose(&mut self, disposals: Vec<Disposal>, abended: bool) {
@@ -409,7 +415,7 @@ fn run_cobol(path: &Path, req: &Request, dds: &[Allocated], database: Option<&mu
     }
     let library = exec::unit::Library { programs, dirs: std::iter::once(own).chain(req.program_dirs.iter().cloned()).collect(), copy: libraries, flags: req.flags.clone() };
     let compiled = exec::compile(first, &req.flags).map_err(|errors| ironwork(syntax::most_severe(&errors).map(|e| e.place(&path.display().to_string()).to_string()).unwrap_or_default()))?;
-    let specs: Vec<String> = dds.iter().map(|d| format!("{}={}{}", d.name, d.path.display(), if d.text { ":text" } else { "" })).collect();
+    let specs: Vec<String> = dds.iter().map(|d| format!("{}={}{}{}", d.name, d.path.display(), if d.text { ":text" } else { "" }, if d.append { ":mod" } else { "" })).collect();
     let dds = exec::files::Dds::new(&specs, false).map_err(ironwork)?;
     let sysin: Box<dyn std::io::BufRead> = match dds.get("SYSIN").and_then(|d| fs::File::open(d.path).ok()) {
         Some(f) => Box::new(std::io::BufReader::new(f)),
@@ -434,13 +440,21 @@ fn run_cobol(path: &Path, req: &Request, dds: &[Allocated], database: Option<&mu
     }
 }
 
+/// Writes `bytes` to `path`, after what it holds when `append`.
+fn put(path: &Path, bytes: &[u8], append: bool) -> std::io::Result<()> {
+    if !append {
+        return fs::write(path, bytes);
+    }
+    fs::OpenOptions::new().append(true).create(true).open(path)?.write_all(bytes)
+}
+
 /// IEBGENER with no control statements: SYSUT1 copied to SYSUT2 as it stands. Without either
 /// DD it ends with return code 12.
 fn iebgener(dds: &[Allocated]) -> Result<i16, (AbendCode, String)> {
     let dd = |n: &str| dds.iter().find(|d| d.name == n);
     let (Some(from), Some(to)) = (dd("SYSUT1"), dd("SYSUT2")) else { return Ok(12) };
     let bytes = fs::read(&from.path).map_err(|e| (AbendCode::Ironwork, format!("SYSUT1: {e}")))?;
-    fs::write(&to.path, bytes).map_err(|e| (AbendCode::Ironwork, format!("SYSUT2: {e}")))?;
+    put(&to.path, &bytes, to.append).map_err(|e| (AbendCode::Ironwork, format!("SYSUT2: {e}")))?;
     Ok(0)
 }
 
@@ -461,8 +475,8 @@ fn idcams(runner: &Runner<'_>, dds: &[Allocated]) -> i16 {
         }
     };
     let text_of = |t: &Target| match t {
-        Target::Dd(n) => dd(n).map(|d| (d.path.clone(), d.text)),
-        Target::Dataset(name) => Some((runner.catalog_path(name), runner.req.text)),
+        Target::Dd(n) => dd(n).map(|d| (d.path.clone(), d.text, d.append)),
+        Target::Dataset(name) => Some((runner.catalog_path(name), runner.req.text, false)),
     };
     let shown = |t: &Target| match t {
         Target::Dd(n) => format!("DD {n}"),
@@ -544,7 +558,7 @@ fn idcams(runner: &Runner<'_>, dds: &[Allocated]) -> i16 {
                 }
             }
             Command::Repro { from, to } => {
-                let (Some((source, source_text)), Some((target, target_text))) = (text_of(from), text_of(to)) else {
+                let (Some((source, source_text, _)), Some((target, target_text, append))) = (text_of(from), text_of(to)) else {
                     print.push(format!("ironwork: REPRO: {} or {} is not allocated to the step", shown(from), shown(to)));
                     return 12;
                 };
@@ -556,7 +570,7 @@ fn idcams(runner: &Runner<'_>, dds: &[Allocated]) -> i16 {
                     print.push(format!("ironwork: REPRO: {} does not exist", shown(to)));
                     return 12;
                 }
-                match fs::read(&source).and_then(|b| fs::write(&target, b)) {
+                match fs::read(&source).and_then(|b| put(&target, &b, append)) {
                     Ok(()) => 0,
                     Err(e) => {
                         print.push(format!("ironwork: REPRO from {} to {}: {e}", shown(from), shown(to)));

@@ -91,7 +91,8 @@ BASE that DEFINE GDG writes and generation n the file BASE.GnnnnV00: (0), (-1) a
 the generations the job began with, DSN=BASE reads them all newest first, and a kept new generation
 rolls the oldest off past LIMIT, or all but itself under EMPTY.
 
-DISP=NEW creates the data set when the step starts; OLD and SHR need it to exist, and a data set
+DISP=NEW creates the data set when the step starts; OLD and SHR need it to exist; MOD writes after
+what it holds, or creates it as NEW would where it is not there; and a data set
 that must exist and does not, or that DISP=NEW names and that exists, is a JCL error that ends the
 job. As a step ends its normal disposition applies, or its abnormal one after an abend: DELETE
 removes the data set, KEEP, CATLG and UNCATLG keep it, and PASS keeps it for later steps, a data
@@ -102,8 +103,8 @@ levels over RC, stepname.RC, ABEND, ABENDCC=, stepname.ABEND and stepname.RUN. A
 runs only under COND=EVEN or ONLY, or in the branch of an IF that tests an abend or whether a step
 ran. A program no library holds abends S806. A step's DISPLAY output and SYSOUT DDs go to standard
 output, and a line per step to standard error: the step, the program and RC=nnnn, ABEND and its
-code, BYPASSED and why, or JCL ERROR. PARM, DISP=MOD, SORT and IBM's other programs are refused by
-name before any step runs. Exit status: the highest
+code, BYPASSED and why, or JCL ERROR. PARM, SORT and IBM's other programs are refused by name
+before any step runs. Exit status: the highest
 return code; 16 when a step abended or a JCL error ended the job; 2 for a job refused.
 `--expected DATASETS=DIR` runs the job on a copy of the data sets and compares what it leaves with
 production's, as [docs/evidence.md](docs/evidence.md) §4 describes.
