@@ -34,7 +34,7 @@ use layout::Layout;
 use numeric::Options;
 use std::io::{BufRead, Write};
 use syntax::ast::*;
-use syntax::{Error, Pos};
+use syntax::{Error, Pos, Severity};
 
 pub struct Compiled {
     pub program: Program,
@@ -46,6 +46,8 @@ pub struct Compiled {
     pub collating: collating::Sequence,
     /// Each file's printer control character, when it is a print file.
     pub carriage: Vec<Option<printer::Carriage>>,
+    /// The warnings and informational messages of a program that compiled.
+    pub diagnostics: Vec<Error>,
 }
 
 const FUNCTIONS: &[&str] = &[
@@ -53,7 +55,10 @@ const FUNCTIONS: &[&str] = &[
     "INTEGER", "INTEGER-PART", "ABS", "MIN", "MAX", "INTEGER-OF-DATE", "DATE-OF-INTEGER",
 ];
 
-/// Checks and lays out a parsed program. `flags` are this compiler's own, such as `-silent`.
+/// Checks and lays out a parsed program. `flags` are this compiler's own, such as `-silent`. A
+/// program is refused, with every message, when one is an error (E, S or U), or under
+/// `-warnings-block` a warning; otherwise its warnings and informational messages are
+/// [`Compiled::diagnostics`].
 pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error>> {
     if program.oo.as_ref().is_some_and(|o| o.class().is_some()) {
         return oo::compile_class_definition(program, flags);
@@ -137,11 +142,22 @@ pub(crate) fn compile_program(program: Program, flags: &[String], whole: bool) -
         check.statements(&p.statements);
     }
     oo::check(&layout, &program, &mut errors);
-    if errors.is_empty() {
-        Ok(Compiled { program, layout, options, ssrange, report_writer, collating, carriage })
+    let errors: Vec<Error> = errors.into_iter().map(|e| e.in_files(&program.sources)).collect();
+    if refused(&errors, &options) {
+        Err(errors)
     } else {
-        Err(errors.into_iter().map(|e| e.in_files(&program.sources)).collect())
+        Ok(Compiled { program, layout, options, ssrange, report_writer, collating, carriage, diagnostics: errors })
     }
+}
+
+/// Whether messages keep a program from running: an error does, and a warning under
+/// `-warnings-block`. See [`numeric::assumptions::REFUSED_FROM_E`].
+pub(crate) fn refused(messages: &[Error], options: &Options) -> bool {
+    let floor = match options.warnings {
+        numeric::options::Warnings::Proceed => Severity::Error,
+        numeric::options::Warnings::Block => Severity::Warning,
+    };
+    messages.iter().any(|m| m.severity >= floor)
 }
 
 /// The last paragraph of the section that paragraph `i` is in, or `i` when there are no sections.

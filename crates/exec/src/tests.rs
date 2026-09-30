@@ -614,6 +614,28 @@ fn compile_errors_name_what_is_undefined() {
     let parsed = syntax::parse(&program("", "       01  X PIC X.\n", &line("MOVE Y TO X."))).unwrap();
     let errors = compile(parsed, &[]).err().unwrap();
     assert!(errors[0].message.contains("Y is not defined"));
+    assert_eq!(errors[0].severity, Severity::Severe);
+}
+
+#[test]
+fn an_error_refuses_a_program_and_a_warning_only_under_warnings_block() {
+    let message = |severity| Error::at(Pos::default(), "m").graded(severity);
+    let blocking = {
+        let mut o = Options::default();
+        o.apply_flag("-warnings-block").unwrap();
+        o
+    };
+    for (severity, proceeds, blocks) in [
+        (Severity::Informational, false, false),
+        (Severity::Warning, false, true),
+        (Severity::Error, true, true),
+        (Severity::Severe, true, true),
+        (Severity::Unrecoverable, true, true),
+    ] {
+        let messages = [message(Severity::Informational), message(severity)];
+        assert_eq!((refused(&messages, &Options::default()), refused(&messages, &blocking)), (proceeds, blocks), "{severity:?}");
+    }
+    assert!(!refused(&[], &blocking));
 }
 
 const FRAGMENTS: &[&str] = &[

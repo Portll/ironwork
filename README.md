@@ -19,7 +19,7 @@ The PyPI and npm packages carry builds for Linux (static, x64 and arm64), macOS 
 Windows (x64). The same builds are attached to each [release](https://github.com/Portll/ironwork/releases).
 From a checkout:
 
-    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [--fastsrt-adv-print=exclude|include] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
+    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
     cargo run -p ironwork -- check program.cbl [-I copylib]...
 
 CBL and PROCESS cards set the options. COPY members are found in the program's own directory, then
@@ -52,11 +52,55 @@ a byte longer than the FD's; NOADV on a CBL or PROCESS card makes it the record'
 `:text` DD shows the characters as line feeds, form feeds and carriage returns. Assumptions C40 to
 C43 hold what the manuals leave open.
 
-Exit status: RETURN-CODE when the run ends normally; 12 compile errors; 16 an abend, whose message
-names the system completion code (S0C7 for a data exception, S0C4 for a LINKAGE item with no
-address, S806 for a program CALL cannot find), the user completion code (U0999 from CEE3ABD, U4038
-for a Language Environment condition nothing handled) or the file status of an unhandled I/O
-failure; 2 usage.
+Exit status: RETURN-CODE when the run ends normally; for `check`, and for a run the compile refuses,
+the compile's return code (below); 16 an abend, whose message names the system completion code
+(S0C7 for a data exception, S0C4 for a LINKAGE item with no address, S806 for a program CALL cannot
+find), the user completion code (U0999 from CEE3ABD, U4038 for a Language Environment condition
+nothing handled) or the file status of an unhandled I/O failure; 2 usage.
+
+## Compiler messages
+
+Each message has one of IBM's five severities, and a compile's return code is the highest of its
+messages', 0 when there is none (Enterprise COBOL Programming Guide SC27-8714-03, Table 38, p. 282):
+
+| Severity | Return code | `run` and `cics` |
+|---|---|---|
+| I, informational | 0 | run the program |
+| W, warning | 4 | run the program; refuse under `-warnings-block` |
+| E, error | 8 | refuse |
+| S, severe | 12 | refuse |
+| U, unrecoverable | 16 | refuse |
+
+Every refusal ironwork makes is S (assumption C45). A class definition, or a program with INVOKE or
+object references, compiled without THREAD, DLL, RENT or DBCS, or with NORENT beside THREAD or DLL,
+is W (J19). `ironwork check` exits with the return code. `ironwork run` and `ironwork cics` print
+the messages, then run the program at 0 or 4, and otherwise exit with the return code without
+running anything. IBM's own IGYWCLG procedure would run a program compiled at 8; ironwork refuses at
+E because it makes none of the corrections an E-level message reports (C46).
+
+Under `-warnings-block`, `run` and `cics` refuse at 4 too, and the return code stays 4. The flag is
+ironwork's own: IBM has no option that turns warnings into errors, and FLAG(x,y) only chooses which
+messages the listing shows. The nearest are NOCOMPILE(W), which stops IBM's object code at the
+first warning and which ironwork does not read from a CBL card, and a MSGEXIT user exit, which can
+raise a message's severity one message at a time (C47).
+
+Messages go to standard error, one to a line: errors first, then warnings, then informational
+messages, each in the order ironwork found them.
+
+    path:line:col: message                   E, S or U
+    path:line:col: warning: message          W
+    path:line:col: informational: message    I
+    path: message                            the same three, for a message with no position
+    path: warning: message
+    path: informational: message
+
+An error's line carries no severity: E, S and U lines look alike, and the exit status is the
+highest. `path` is the program as given, or the COPY member the position is in. An error's message
+never begins with `warning:` or `informational:`, so a parser can take the word after the position
+as the severity when it is one of those two. For example:
+
+    client.cbl:12:17: Y is not defined
+    client.cbl: warning: program CLIENT uses object-oriented syntax, which IBM compiles only with THREAD, DLL, RENT and DBCS: THREAD, DLL missing from its CBL or PROCESS cards (see J13 and J19)
 
 ## Crates
 
@@ -154,10 +198,10 @@ The subset the interpreter runs today:
   programs read and in the program libraries (Account.cbl for Account or com.acme.Account). Java
   classes are checked, not run: reaching one ends the run with abend JAVA naming the class and
   method, while java.lang.Object's NEW and equals, and the JNI's reference services, run without a
-  JVM. As IBM requires, a class definition, or a program with INVOKE or object references, carries
-  THREAD and DLL on a CBL or PROCESS card (RENT and DBCS are the defaults), and a program compiled
-  with THREAD is RECURSIVE and has no INITIAL, nested program, or SORT or MERGE of a file; otherwise
-  it is refused. The choices are assumptions J1 to J20.
+  JVM. IBM compiles a class definition, or a program with INVOKE or object references, with THREAD
+  and DLL on a CBL or PROCESS card (RENT and DBCS are the defaults); without them it compiles with a
+  warning and runs. A program compiled with THREAD is RECURSIVE and has no INITIAL, nested program,
+  or SORT or MERGE of a file; otherwise it is refused. The choices are assumptions J1 to J20.
 
 - **EXEC SQL and EXEC CICS** are read and checked: every SQL host variable and every CICS argument
   that names data must resolve; EXEC SQL INCLUDE works as COPY; a program with EXEC CICS gets
@@ -211,7 +255,8 @@ SSRANGE is honoured, including for OCCURS DEPENDING ON counts; without it a subs
 anywhere in the run unit's storage, as on z/OS, but never outside it.
 
 `tools/census.py` runs `ironwork check` over a sample of a COBOL corpus and tallies why programs are
-refused, which is how the next gaps are chosen.
+refused, which is how the next gaps are chosen. A program checked with warnings alone, return code 4,
+counts as compiling.
 
 `tools/differ.py` runs each program under `ironwork run` and compiled by GCC's gcobol, and reports
 where what DISPLAY wrote, the return code or an abend differ. gcobol keeps storage in ASCII and has

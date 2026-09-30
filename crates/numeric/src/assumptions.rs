@@ -152,6 +152,10 @@ pub const PRINT_CONTROL_CHARACTER: &str = "C40";
 pub const PRINT_SPACING_RECORDS: &str = "C41";
 pub const PRINT_CONTROL_RUN_TIME: &str = "C42";
 pub const TEXT_PRINT_LINES: &str = "C43";
+pub const COMPILER_SEVERITIES: &str = "C44";
+pub const REFUSALS_ARE_SEVERE: &str = "C45";
+pub const REFUSED_FROM_E: &str = "C46";
+pub const WARNINGS_BLOCK: &str = "C47";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -792,7 +796,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: OO_OPTIONS_SEVERITY,
-        claim: "IBM names no message for object-oriented syntax compiled without THREAD, DLL, RENT or DBCS, nor for THREAD without RECURSIVE, which it calls an error (Messages and Codes SC27-4648-02, p. v, lists only some messages); each rule of J13 refuses the program as a compile error. A program that reaches Java through JNIENVPTR alone, with no INVOKE or object reference, is held to none of them, as IBM builds its Bank-of-Z IBTRAN with DLL and without THREAD",
+        claim: "IBM names no message for object-oriented syntax compiled without THREAD, DLL, RENT or DBCS, nor for THREAD without RECURSIVE, which it calls an error (Messages and Codes SC27-4648-02, p. v, lists only some messages), so the severity of each rule of J13 is chosen. A missing option is a warning (W, return code 4), and the program runs as if compiled with it. NORENT with THREAD or DLL is a warning too: IBM forces RENT and 'generates an error message' (Programming Guide SC27-8714-03, p. 344), and the message it gives for an option dropped in conflict resolution is W, IGYOS4020-W, return code 4, in Enterprise COBOL job output quoted in the corpus (Delvoie_Mainframe, A5 instructions). THREAD without RECURSIVE, and INITIAL, a nested program, SORT of a file or MERGE under THREAD, are errors (S), as IBM diagnoses them as errors (J13). A program that reaches Java through JNIENVPTR alone, with no INVOKE or object reference, is held to none of them, as IBM builds its Bank-of-Z IBTRAN with DLL and without THREAD",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -889,6 +893,30 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: FASTSRT_ADV_PRINT,
         claim: "With --fastsrt-adv-print=include a print file under ADV is FASTSRT's as any other file is, and DFSORT meets its data set's records, a byte longer than the FD's. A USING file's data set stands as DFSORT's SORTIN and a GIVING file's as its SORTOUT, as the Programming Guide implies by keeping DFSORT's SORTIN and SORTOUT options from a FASTSRT program (SC27-8714-03, p. 232) without saying so, and COBOL gives DFSORT each key's place in the SD's record; so, by FASTSRT_PRINT_RECORDS and FASTSRT_RECORD_LENGTHS, a USING print file's records keep the control character as their first byte, each key being read a byte before where the FD has it, and a GIVING file's fixed-length records are padded with X'00' or cut to its data set's length. With no USING data set of DFSORT's own, as with an INPUT PROCEDURE or a USING file COBOL reads, a GIVING print file's longer fixed-length records fail the SORT before its input phase, as ICE043A reason 9 says of fixed-length output records longer than the input's (DFSORT Messages, Codes and Diagnosis SC23-6879-50, pp. 29-30). COBOL takes a record from DFSORT, for an OUTPUT PROCEDURE or a GIVING file it writes, at the SD's length at most, and a VSAM GIVING file takes it at its own. A text DD holds no control character, so on it a print file's records are the FD's length, and each record DFSORT writes is a line",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: COMPILER_SEVERITIES,
+        claim: "A compiler message has one of five severities, each with a return code: I (informational) 0, the program runs correctly; W (warning) 4, a possible error; E (error) 8, an error the compiler attempted to correct; S (severe) 12, one it could not, and the program should not be run; U (unrecoverable) 16, the compilation ended. A compilation's return code is generally the highest of its messages' (Programming Guide SC27-8714-03, Table 38, p. 282), and the letter ends each message's identifier, as in IGYPS2121-S (p. 281). ironwork check exits with that return code, 0 when there is no message",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: REFUSALS_ARE_SEVERE,
+        claim: "Every refusal ironwork made before its messages had severities is S, return code 12, and none is E: IBM's E is an error the compiler corrects, still producing object code under the default NOCOMPILE(S) (Programming Guide SC27-8714-03, pp. 282, 355), and ironwork corrects nothing, so a program it refuses has no code to run. Some it refuses IBM documents below S: NUMPROC(MIG) gets a warning and the default NUMPROC (Migration Guide GC27-8715-03, Table 18, p. 96); a TEST suboption IBM removed is an invalid-option error and the option is discarded (Table 29, p. 151), as a suboption ironwork refuses, such as TRUNC(FAST), may be; a non-COBOL character is accepted with IGYLI0163-E (p. 111). These stay S until ironwork does what IBM does with them. U is not used: ironwork's reader stops at the first syntax error, which IBM reports and reads past",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: REFUSED_FROM_E,
+        claim: "ironwork run and cics run a program whose compile's return code is 0 or 4, printing its warnings and informational messages first, and refuse one at 8 or more, exiting with that return code. IBM's IGYWCLG procedure would run it at 8: its GO step is bypassed only when 8 is less than the compile step's return code, COND=((8,LT,COBOL),(4,LT,LKED)) (Programming Guide SC27-8714-03, pp. 259-260), and the default NOCOMPILE(S) produces object code after E-level messages (p. 355). ironwork refuses at E because it makes none of the corrections an E-level message reports; no message of its is E yet (REFUSALS_ARE_SEVERE)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: WARNINGS_BLOCK,
+        claim: "-warnings-block is ironwork's own flag: with it, run and cics refuse a program whose compile gave a warning, and the return code stays 4. IBM has no option that makes warnings refuse a program: FLAG(x,y) chooses only which messages are listed (Programming Guide SC27-8714-03, pp. 369-370); NOCOMPILE(W) stops object code at the first W-level message, leaving the return code 4 (p. 355), and ironwork does not read COMPILE from a CBL or PROCESS card; and a MSGEXIT user exit of the EXIT option can raise a W or I message to any severity up to S, one message at a time, which changes the return code (pp. 836-837)",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

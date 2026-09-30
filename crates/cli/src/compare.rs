@@ -147,7 +147,7 @@ fn run_side(program: &Path, req: &Request, specs: &[Spec], dir: &Path) -> Outcom
     let library = exec::unit::Library { programs, dirs: std::iter::once(own).chain(req.program_dirs.iter().cloned()).collect(), copy: libraries, flags: req.flags.clone() };
     let compiled = match exec::compile(first, &req.flags) {
         Ok(c) => c,
-        Err(errors) => return fail(outcome, errors.first().map(|e| e.place(&program.display().to_string()).to_string()).unwrap_or_default()),
+        Err(errors) => return fail(outcome, syntax::most_severe(&errors).map(|e| e.place(&program.display().to_string()).to_string()).unwrap_or_default()),
     };
     let dds = match exec::files::Dds::new(&local, false) {
         Ok(d) => d,

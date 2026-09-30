@@ -4,7 +4,7 @@ use std::{env, fs, io};
 
 const USAGE: &str = "ironwork for COBOL
 usage:
-  ironwork run <program.cbl> [-silent] [-strict-sort-keys] [--fastsrt-adv-print=exclude|include]
+  ironwork run <program.cbl> [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include]
                [-I <dir>]... [-L <dir>]... [--dd NAME=path[:format]]... [--clock <time>]
                [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                                                        compile and run; CBL and PROCESS cards set the options
@@ -28,6 +28,10 @@ flags:
              COBOL; include has DFSORT take the records as they stand: it reads the control
              character as a record's first byte and writes none, padding each record with X'00' or
              failing the SORT where DFSORT's rules for record lengths say so
+  -warnings-block
+             refuse to run a program whose compile gave warnings, as run and cics refuse one whose
+             compile gave errors; the return code stays 4. ironwork's own: IBM's FLAG option only
+             chooses which messages are listed
   -I <dir>   a copy library for COPY members, searched after the program's own directory
   -L <dir>   a program library: CALL finds a program there by name, after the programs in the
              same source and the program's own directory
@@ -118,9 +122,14 @@ compare flags: ironwork compare --base OLD.cbl --head NEW.cbl [--dd NAME=path]..
   --statement file
              where the in-toto equivalence statement is written (standard output otherwise)
   exit status 0 equivalent or equivalent as declared, 1 diverged, 3 inconclusive, 2 usage
-exit status: RETURN-CODE when the run ends normally; 12 compile errors, 16 an abend, 2 usage";
+compile messages go to standard error, errors first, then warnings, then informational messages:
+  `path:line:col: message`, `path:line:col: warning: message`, `path:line:col: informational: message`
+exit status: for check, and for a run the compile refuses, the compile's return code, the highest
+  of its messages' severities as IBM's: 0 none or informational, 4 warnings, 8, 12 or 16 errors; run
+  and cics refuse at 8, or at 4 under -warnings-block. Otherwise RETURN-CODE when the run ends
+  normally, 16 an abend; 2 usage";
 
-const FLAGS: &[&str] = &["-silent", "-strict-sort-keys"];
+const FLAGS: &[&str] = &["-silent", "-strict-sort-keys", "-warnings-block"];
 const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid", "--sysid", "--commarea", "--commarea-out", "--file", "--td", "--screens", "--serve", "--transaction", "--csd"];
 
 mod compare;
@@ -314,10 +323,7 @@ fn driver() -> ExitCode {
     let libraries = syntax::copy::Libraries::new(std::iter::once(own_directory.clone()).chain(libraries).collect());
     let mut programs = match syntax::parse_all_with(&text, &libraries) {
         Ok(p) => p,
-        Err(e) => {
-            eprintln!("{}", e.place(path));
-            return evidence::finish(journal, 12);
-        }
+        Err(e) => return evidence::finish(journal, i64::from(report(std::slice::from_ref(&e), path))),
     };
     if let Some(j) = journal.as_mut() {
         evidence::sources(j, &programs[0].sources, path, &reads);
@@ -333,13 +339,9 @@ fn driver() -> ExitCode {
     };
     let compiled = match exec::compile(first, &flags) {
         Ok(c) => c,
-        Err(errors) => {
-            for e in errors {
-                eprintln!("{}", e.place(path));
-            }
-            return evidence::finish(journal, 12);
-        }
+        Err(messages) => return evidence::finish(journal, i64::from(report(&messages, path))),
     };
+    let return_code = report(&compiled.diagnostics, path);
     if let Some(file) = &provenance_file {
         let text = provenance::statement(&provenance::Inputs {
             program: path,
@@ -359,7 +361,7 @@ fn driver() -> ExitCode {
         }
     }
     if command == "check" {
-        return evidence::finish(journal, 0);
+        return evidence::finish(journal, i64::from(return_code));
     }
     let dds = match exec::files::Dds::new(&dds, true) {
         Ok(d) => d,
@@ -418,6 +420,22 @@ fn driver() -> ExitCode {
         Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => ExitCode::SUCCESS,
         Err(abend) => report_abend(&compiled, path, &abend),
     }
+}
+
+/// A compile's messages as standard error shows them: errors first, then warnings, then
+/// informational messages, each in the order the compiler found them.
+fn listing(messages: &[syntax::Error], path: &str) -> Vec<String> {
+    let mut ordered: Vec<&syntax::Error> = messages.iter().collect();
+    ordered.sort_by_key(|m| std::cmp::Reverse(m.severity));
+    ordered.into_iter().map(|m| m.place(path)).collect()
+}
+
+/// Prints a compile's messages and gives its return code, the highest of theirs.
+fn report(messages: &[syntax::Error], path: &str) -> u8 {
+    for line in listing(messages, path) {
+        eprintln!("{line}");
+    }
+    syntax::return_code(messages)
 }
 
 /// ironwork's own build has no TLS; the build in tls/ compiles this file with `ironwork_tls` set.
@@ -514,7 +532,7 @@ impl Transactions {
             }
         };
         let compiled = exec::compile(self.library.programs[index].clone(), &self.library.flags)
-            .map_err(|errors| format!("{name} does not compile: {}", errors.first().map(|e| e.place(&name)).unwrap_or_default()))?;
+            .map_err(|errors| format!("{name} does not compile: {}", syntax::most_severe(&errors).map(|e| e.place(&name)).unwrap_or_default()))?;
         let compiled = std::rc::Rc::new(compiled);
         self.compiled.insert(name, compiled.clone());
         Ok(compiled)
@@ -789,4 +807,18 @@ fn parse_clock(text: &str) -> Option<exec::unit::Clock> {
     }
     let days = exec::calendar::days_from_civil(year, month, day);
     Some(exec::unit::Clock::Fixed(days * exec::calendar::SECONDS_PER_DAY + hour * 3600 + minute * 60 + second, hundredths))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::listing;
+    use syntax::{Error, Pos, Severity};
+
+    #[test]
+    fn errors_are_listed_first_then_warnings_then_informational_messages() {
+        let at = |line: u32, severity: Severity| Error::at(Pos { file: 0, line, col: 8 }, format!("m{line}")).graded(severity);
+        let messages = [at(1, Severity::Informational), at(2, Severity::Warning), at(3, Severity::Severe), at(4, Severity::Error), at(5, Severity::Warning), at(6, Severity::Severe)];
+        assert_eq!(listing(&messages, "p.cbl"), ["p.cbl:3:8: m3", "p.cbl:6:8: m6", "p.cbl:4:8: m4", "p.cbl:2:8: warning: m2", "p.cbl:5:8: warning: m5", "p.cbl:1:8: informational: m1"]);
+        assert_eq!(syntax::return_code(&messages), 12);
+    }
 }

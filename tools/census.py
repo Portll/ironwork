@@ -64,7 +64,7 @@ def main():
         except subprocess.TimeoutExpired:
             tally["(timeout)"] += 1
             continue
-        if r.returncode == 0:
+        if r.returncode in (0, 4):
             accepted += 1
         else:
             tally[reason(r.stderr)] += 1

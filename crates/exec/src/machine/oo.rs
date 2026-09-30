@@ -213,8 +213,8 @@ impl<'p> Machine<'p, '_, '_> {
             None => None,
             Some(program) => {
                 let flags = self.unit.library.flags.clone();
-                let code = classes::class_code(&program, &flags).map_err(|errors| {
-                    let first = errors.first().map(|e| e.place(external)).unwrap_or_default();
+                let (code, _) = classes::class_code(&program, &flags).map_err(|errors| {
+                    let first = syntax::most_severe(&errors).map(|e| e.place(external)).unwrap_or_default();
                     Abend::ironwork(format!("class {external} does not compile: {first}"), pos)
                 })?;
                 Some(Rc::new(code))

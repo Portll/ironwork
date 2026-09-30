@@ -578,23 +578,37 @@ fn a_program_that_is_not_a_method_makes_its_references_in_the_running_methods_fr
 #[test]
 fn object_oriented_programs_need_the_options_ibm_compiles_them_with() {
     let with = |card: &str, id: &str| errors(&client(&["Account IS \"Account\""], ACCOUNT_DATA, &["INVOKE Account NEW RETURNING A1", "GOBACK."]).replacen(OO_CARD, card, 1).replacen("CLIENT RECURSIVE", id, 1));
-    let needs = |missing: &str| format!("program CLIENT uses object-oriented syntax, which IBM compiles only with THREAD, DLL, RENT and DBCS: {missing} missing from its CBL or PROCESS cards (see J13 and J19)");
+    let needs = |missing: &str| format!("warning: program CLIENT uses object-oriented syntax, which IBM compiles only with THREAD, DLL, RENT and DBCS: {missing} missing from its CBL or PROCESS cards (see J13 and J19)");
     assert_eq!(with(OO_CARD, "CLIENT RECURSIVE"), "");
     assert_eq!(with("", "CLIENT"), needs("THREAD, DLL"));
     assert_eq!(with("       CBL THREAD\n", "CLIENT RECURSIVE"), needs("DLL"));
     assert_eq!(with("       PROCESS DLL\n", "CLIENT"), needs("THREAD"));
     assert_eq!(with("       CBL THREAD,DLL,NODBCS\n", "CLIENT RECURSIVE"), needs("DBCS"));
     assert_eq!(with("       CBL NORENT\n", "CLIENT"), needs("THREAD, DLL, RENT"));
-    assert!(with("       CBL THREAD,DLL,NORENT\n", "CLIENT RECURSIVE").starts_with("NORENT conflicts with THREAD and DLL, which IBM compiles only as RENT"));
+    assert!(with("       CBL THREAD,DLL,NORENT\n", "CLIENT RECURSIVE").starts_with("warning: NORENT conflicts with THREAD and DLL, which IBM compiles only as RENT"));
     assert_eq!(with(OO_CARD, "CLIENT"), "program CLIENT is compiled with THREAD, which requires RECURSIVE in its PROGRAM-ID paragraph");
     assert_eq!(with(OO_CARD, "CLIENT RECURSIVE INITIAL"), "program CLIENT is INITIAL, which THREAD does not allow");
     let nested = [client(&["Account IS \"Account\""], ACCOUNT_DATA, &["GOBACK."]), "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. INNER.\n       PROCEDURE DIVISION.\n           GOBACK.\n       END PROGRAM INNER.\n       END PROGRAM CLIENT.\n".into()].concat();
     assert_eq!(errors(&nested), "program CLIENT contains program INNER, and THREAD does not allow nested programs");
     let bare = account().replacen(OO_CARD, "", 1);
-    assert!(errors(&bare).contains("class ACCOUNT uses object-oriented syntax, which IBM compiles only with THREAD, DLL, RENT and DBCS: THREAD, DLL missing"), "{}", errors(&bare));
-    let loaded = client(&["Account IS \"Account\""], ACCOUNT_DATA, &["INVOKE Account NEW RETURNING A1", "GOBACK."]);
-    let refused = run_oo(&loaded, &[bare]).2.unwrap_err().message;
-    assert!(refused.starts_with("class Account does not compile: ") && refused.contains("THREAD, DLL missing"), "{refused}");
+    assert!(errors(&bare).starts_with("warning: class ACCOUNT uses object-oriented syntax, which IBM compiles only with THREAD, DLL, RENT and DBCS: THREAD, DLL missing"), "{}", errors(&bare));
+}
+
+#[test]
+fn a_program_and_class_without_the_options_run_with_a_warning_unless_warnings_block() {
+    let program = client(&["Account IS \"Account\""], ACCOUNT_DATA, &["INVOKE Account NEW RETURNING A1", "INVOKE A1 \"getBalance\" RETURNING BAL", "MOVE BAL TO SHOWN DISPLAY SHOWN", "GOBACK."]);
+    let bare = program.replacen(OO_CARD, "", 1).replacen("CLIENT RECURSIVE", "CLIENT", 1);
+    let compiled = compile(syntax::parse(&bare).unwrap(), &[]).unwrap_or_else(|e| panic!("{e:?}"));
+    assert_eq!(compiled.diagnostics.iter().map(|d| (d.severity, syntax::return_code(std::slice::from_ref(d)))).collect::<Vec<_>>(), [(syntax::Severity::Warning, 4)]);
+    let bare_class = account().replacen(OO_CARD, "", 1);
+    let (out, err, ending) = run_oo(&bare, std::slice::from_ref(&bare_class));
+    assert!(ending.is_ok(), "{ending:?}\n{err}");
+    assert_eq!(out, " 100\n");
+    let refused = compile(syntax::parse(&bare).unwrap(), &["-warnings-block".into()]).err().expect("refused");
+    assert_eq!(refused.iter().map(|d| d.severity).collect::<Vec<_>>(), [syntax::Severity::Warning]);
+    let blocked = Harness::source(&program).classes(&[bare_class]).flags(&["-warnings-block"]).run(Executor::Interpreter);
+    let message = blocked.ending.unwrap_err().message;
+    assert!(message.starts_with("class Account does not compile: Account: warning: class ACCOUNT uses object-oriented syntax") && message.contains("THREAD, DLL missing"), "{message}");
 }
 
 #[test]

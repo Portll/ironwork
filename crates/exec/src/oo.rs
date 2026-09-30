@@ -241,7 +241,8 @@ pub(crate) fn compile_class_definition(program: Program, flags: &[String]) -> Re
     let mut shell = program.clone();
     shell.oo = None;
     let mut compiled = crate::compile_program(shell, flags, false)?;
-    class_code(&program, flags)?;
+    let (_, diagnostics) = class_code(&program, flags)?;
+    compiled.diagnostics.extend(diagnostics);
     compiled.program = program;
     Ok(compiled)
 }
@@ -261,7 +262,8 @@ fn object_oriented(program: &Program) -> bool {
 /// IBM's rules for the options a program is compiled with (see [`OO_OPTIONS_REQUIRED`]): object-
 /// oriented syntax needs THREAD, DLL, RENT and DBCS, NORENT conflicts with THREAD and DLL, and under
 /// THREAD a program is RECURSIVE, not INITIAL, contains no program, and SORTs or MERGEs no file. A
-/// method answers only for its statements; its class answers for the options.
+/// method answers only for its statements; its class answers for the options. A missing option and
+/// the NORENT conflict are warnings, the rest errors (see [`OO_OPTIONS_SEVERITY`]).
 pub(crate) fn option_rules(program: &Program, options: &Options, errors: &mut Vec<Error>) {
     let oo = program.oo.as_deref();
     let method = oo.and_then(Oo::method).is_some();
@@ -272,7 +274,7 @@ pub(crate) fn option_rules(program: &Program, options: &Options, errors: &mut Ve
     if !method {
         let forcing: Vec<&str> = [(options.thread, "THREAD"), (options.dll, "DLL")].into_iter().filter(|(on, _)| *on).map(|(_, o)| o).collect();
         if !options.rent && !forcing.is_empty() {
-            errors.push(Error::at(Pos::default(), format!("NORENT conflicts with {}, which IBM compiles only as RENT (see {OO_OPTIONS_REQUIRED})", forcing.join(" and "))));
+            errors.push(Error::warning(Pos::default(), format!("NORENT conflicts with {}, which IBM compiles only as RENT (see {OO_OPTIONS_REQUIRED})", forcing.join(" and "))));
         }
         if object_oriented(program) {
             let missing: Vec<&str> = [(options.thread, "THREAD"), (options.dll, "DLL"), (options.rent || !forcing.is_empty(), "RENT"), (options.dbcs, "DBCS")]
@@ -281,7 +283,7 @@ pub(crate) fn option_rules(program: &Program, options: &Options, errors: &mut Ve
                 .map(|(_, o)| o)
                 .collect();
             if !missing.is_empty() {
-                errors.push(Error::at(
+                errors.push(Error::warning(
                     Pos::default(),
                     format!(
                         "{who} uses object-oriented syntax, which IBM compiles only with THREAD, DLL, RENT and DBCS: {} missing from its CBL or PROCESS cards (see {OO_OPTIONS_REQUIRED} and {OO_OPTIONS_SEVERITY})",
@@ -350,13 +352,17 @@ fn declared_names(program: &Program) -> HashSet<String> {
         .collect()
 }
 
-pub(crate) fn class_code(program: &Program, flags: &[String]) -> Result<ClassCode, Vec<Error>> {
+/// A class definition's code, and the warnings and informational messages it compiled with.
+pub(crate) fn class_code(program: &Program, flags: &[String]) -> Result<(ClassCode, Vec<Error>), Vec<Error>> {
     let Some(oo) = program.oo.as_deref() else { return Err(vec![Error::at(Pos::default(), "not a class definition")]) };
     let Some(def) = oo.class() else { return Err(vec![Error::at(Pos::default(), "not a class definition")]) };
     let mut errors = Vec::new();
     let mut options = Options::default();
     for option in &program.options {
         options.apply(option).ok();
+    }
+    for flag in flags {
+        options.apply_flag(flag).ok();
     }
     option_rules(program, &options, &mut errors);
     let external = defined_class(program).unwrap_or_default();
@@ -392,7 +398,10 @@ pub(crate) fn class_code(program: &Program, flags: &[String]) -> Result<ClassCod
         }
         for m in &part.methods {
             match method_code(program, m, part, factory, flags) {
-                Ok(mc) => code.methods.push(mc),
+                Ok(mc) => {
+                    errors.extend(mc.code.diagnostics.iter().cloned());
+                    code.methods.push(mc);
+                }
                 Err(e) => errors.extend(e),
             }
         }
@@ -404,7 +413,7 @@ pub(crate) fn class_code(program: &Program, flags: &[String]) -> Result<ClassCod
             errors.push(Error::at(pos, format!("{} method \"{}\" has the same parameter types as {} method \"{}\"", kind(m.factory), m.name, kind(twin.factory), twin.name)));
         }
     }
-    if errors.is_empty() { Ok(code) } else { Err(errors) }
+    if crate::refused(&errors, &options) { Err(errors) } else { Ok((code, errors)) }
 }
 
 /// A method compiled with its paragraph's data after its own LINKAGE records; a name the method

@@ -165,7 +165,7 @@ impl<'w> RunUnit<'w> {
             None => self.search_libraries(&name).map(|(p, path)| (p, Some(path)))?,
         };
         let compiled = crate::compile(program, &self.library.flags).map_err(|errors| {
-            let first = errors.first().map(|e| e.place(&name)).unwrap_or_default();
+            let first = syntax::most_severe(&errors).map(|e| e.place(&name)).unwrap_or_default();
             LoadError::Compile(format!("{name} does not compile: {first}"))
         })?;
         self.notify(Event::Load { program: &name, source: source.as_deref() });

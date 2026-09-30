@@ -88,7 +88,7 @@ impl Harness {
         let mut programs = syntax::parse_all_with(&self.source, &syntax::copy::Libraries::default()).unwrap_or_else(|e| panic!("{e}"));
         let compiled = compile(programs.remove(0), &self.flags).unwrap_or_else(|e| panic!("{e:?}"));
         programs.extend(self.classes.iter().map(|c| syntax::parse(c).unwrap_or_else(|e| panic!("{e}\n{c}"))));
-        let library = unit::Library { programs, dirs: self.dirs, ..Default::default() };
+        let library = unit::Library { programs, dirs: self.dirs, flags: self.flags, ..Default::default() };
         let dds = files::Dds::new(&self.dds, false).unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let (ending, return_code, task) = match self.task {
@@ -123,8 +123,10 @@ pub fn ebcdic(text: &str) -> Vec<u8> {
     page().encode(text).unwrap()
 }
 
-/// Every message the compiler gives, one to a line; empty when it compiles.
+/// Every message the compiler gives, one to a line, a warning's or informational message's after
+/// its label; empty when it compiles without one.
 pub fn compile_errors(source: &str) -> String {
     let parsed = syntax::parse(source).unwrap_or_else(|e| panic!("{e}"));
-    compile(parsed, &[]).err().map(|e| e.iter().map(|e| e.message.clone()).collect::<Vec<_>>().join("\n")).unwrap_or_default()
+    let messages = compile(parsed, &[]).map_or_else(|errors| errors, |c| c.diagnostics);
+    messages.iter().map(syntax::Error::labelled).collect::<Vec<_>>().join("\n")
 }

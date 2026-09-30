@@ -134,6 +134,15 @@ impl FastsrtAdvPrint {
     }
 }
 
+/// Whether a program whose compile gave warnings, and no errors, runs (`Proceed`), or
+/// (`-warnings-block`) is refused as an erroneous one is. The return code is 4 either way.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Warnings {
+    #[default]
+    Proceed,
+    Block,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Options {
     pub arith: Arith,
@@ -153,6 +162,7 @@ pub struct Options {
     pub dll: bool,
     pub rent: bool,
     pub dbcs: bool,
+    pub warnings: Warnings,
 }
 
 impl Default for Options {
@@ -171,6 +181,7 @@ impl Default for Options {
             dll: false,
             rent: true,
             dbcs: true,
+            warnings: Warnings::default(),
         }
     }
 }
@@ -254,6 +265,7 @@ impl Options {
             "-strict-sort-keys" => self.sort_keys = SortKeys::Strict,
             "--fastsrt-adv-print=exclude" => self.fastsrt_adv_print = FastsrtAdvPrint::Exclude,
             "--fastsrt-adv-print=include" => self.fastsrt_adv_print = FastsrtAdvPrint::Include,
+            "-warnings-block" => self.warnings = Warnings::Block,
             _ => return Err(OptionError::UnknownFlag(flag.to_owned())),
         }
         Ok(())
@@ -379,6 +391,15 @@ mod tests {
         o.apply_flag("-strict-sort-keys").unwrap();
         assert_eq!(o.sort_keys, SortKeys::Strict);
         assert!(o.apply_flag("-quiet").is_err());
+    }
+
+    #[test]
+    fn warnings_proceed_unless_the_flag_blocks_them() {
+        let mut o = Options::default();
+        assert_eq!(o.warnings, Warnings::Proceed);
+        o.apply_flag("-warnings-block").unwrap();
+        assert_eq!(o.warnings, Warnings::Block);
+        assert!(o.apply_flag("-Werror").is_err());
     }
 
     #[test]
