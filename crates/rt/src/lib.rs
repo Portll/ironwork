@@ -4,16 +4,20 @@
 //! [`module`] reads and writes the load modules such a program is shipped as.
 
 pub mod abend;
+pub mod accept;
+pub mod arith;
 pub mod bms;
 pub mod calendar;
 pub mod cics;
 pub mod cics_tables;
 pub mod codec;
 pub mod digest;
+pub mod display;
 pub mod edit;
 pub mod evidence;
 pub mod files;
 pub mod fixed;
+pub mod host;
 pub mod intrinsic;
 pub mod json;
 pub mod xml;
@@ -25,11 +29,13 @@ pub mod module;
 pub mod oo;
 pub mod picture;
 pub mod reserved_words;
+pub mod set;
 pub mod sql;
 pub mod storage;
 pub mod store;
 pub mod strings;
 pub mod terminal;
+pub mod text;
 pub mod tn3270;
 pub mod unit;
 pub mod vocab;

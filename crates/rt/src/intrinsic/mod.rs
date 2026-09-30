@@ -2,6 +2,7 @@
 
 pub mod dates;
 pub mod datetime;
+pub mod function;
 pub mod math;
 pub mod numval;
 pub mod real;

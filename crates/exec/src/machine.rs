@@ -4,27 +4,27 @@
 
 pub use rt::abend::{Abend, Ending};
 use crate::abend::{AbendCode, Signal};
-use crate::calendar::{civil, days_from_civil, days_in_month, SECONDS_PER_DAY};
 use crate::layout::{Item, Kind, Layout, Resolved};
 use rt::storage::{Loc, Val};
 pub(crate) use rt::storage::literal_fixed;
 use crate::unit::{ADDRESS_BASE, Event, LoadError, RETURN_CODE, RunUnit};
 use crate::Compiled;
-use numeric::precision::{self, ArithError, Fixed, Places};
+use numeric::precision::{self, Fixed, Places};
 use numeric::{Options, Trunc, float};
-use rt::fixed::{MAX_DIGITS, align, compare_fixed, fixed, places_of, pow10, zoned_digits};
-use rt::lir::{ByteClass, SignTest};
+use rt::fixed::{align, compare_fixed, places_of, zoned_digits};
+use rt::arith;
+use rt::display::utf16_text;
+use rt::lir::{ByteClass, ConvertTable, Converting, SignTest, StringSource, TrimSide};
 use rt::loc;
 use rt::store::{self, compare_national};
+use rt::text::UnstringField;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use syntax::Pos;
 use syntax::ast::*;
-use zarch::check::{ProgramCheck, ProgramMask};
 use zarch::decimal::{self, Decimal};
 use zarch::ebcdic::{self, CodePage, Collation};
-use zarch::hfp::{Hfp, Precision, Rounding};
-use zarch::wide::U256;
+use zarch::hfp::{Hfp, Precision};
 
 mod cics;
 mod cics_bms;
@@ -643,11 +643,6 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         store::read(&self.facts(), &self.unit.mem, loc, pos)
     }
 
-    /// An item's value as its digits hold it, before any scaling positions to their right.
-    fn read_stored(&self, loc: Loc, pos: Pos) -> R<Val> {
-        store::read_stored(&self.facts(), &self.unit.mem, loc, pos)
-    }
-
     fn operand_with_loc(&mut self, op: &Operand, pos: Pos) -> R<(Val, Option<Loc>)> {
         if let Operand::Ref(r) = op {
             let loc = self.locate(r)?;
@@ -672,16 +667,6 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
     }
 
-    /// An operand as STRING, UNSTRING and INSPECT see it: its bytes, a figurative constant as one
-    /// character, a numeric literal as its digits.
-    fn natural_bytes(&mut self, op: &Operand, pos: Pos) -> R<Vec<u8>> {
-        if let Operand::Ref(r) = op {
-            let loc = self.locate(r)?;
-            return Ok(self.bytes(loc).to_vec());
-        }
-        store::natural_bytes(&self.facts(), self.operand(op, pos)?, pos)
-    }
-
     fn set_integer(&mut self, r: &Ref, value: i64, pos: Pos) -> R<()> {
         let dest = self.locate(r)?;
         store::set_integer(&self.facts(), self.unit, dest, value, pos)
@@ -695,163 +680,26 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn string_stmt(&mut self, st: &'p StringStmt) -> R<Flow> {
-        let pos = st.pos;
-        let dest = self.locate_receiving(&st.into)?;
-        let mut pointer = match &st.pointer {
-            Some(r) => self.integer(&Expr::Operand(Operand::Ref(r.clone())), pos)?,
-            None => 1,
-        };
-        let len = dest.len as i64;
-        let mut overflow = pointer < 1 || pointer > len;
-        if !overflow {
-            'sources: for (op, delimiter) in &st.sources {
-                let bytes = self.natural_bytes(op, pos)?;
-                let delimiter = match delimiter {
-                    Delimiter::Size => None,
-                    Delimiter::By(d) => Some(self.natural_bytes(d, pos)?),
-                };
-                for b in crate::strings::delimited(&bytes, delimiter.as_deref()) {
-                    if pointer > len {
-                        overflow = true;
-                        break 'sources;
-                    }
-                    self.unit.mem[dest.offset + pointer as usize - 1] = b;
-                    pointer += 1;
-                }
-            }
-        }
-        if let Some(r) = &st.pointer {
-            self.set_integer(r, pointer, pos)?;
-        }
+        let sources: Vec<_> = st.sources.iter().map(|(op, d)| StringSource { chars: facts::chars(op), delimiter: match d {
+            Delimiter::Size => None,
+            Delimiter::By(d) => Some(facts::chars(d)),
+        } }).collect();
+        let overflow = rt::text::string(self, &st.into, st.pointer.as_ref(), &sources, st.pos)?;
         self.overflow_branch(overflow, &st.on_overflow, &st.not_on_overflow)
     }
 
     fn unstring(&mut self, u: &'p Unstring) -> R<Flow> {
-        let pos = u.pos;
-        let source_loc = self.locate(&u.source)?;
-        let source = self.bytes(source_loc).to_vec();
-        let len = source.len() as i64;
-        let mut pointer = match &u.pointer {
-            Some(r) => self.integer(&Expr::Operand(Operand::Ref(r.clone())), pos)?,
-            None => 1,
-        };
-        let mut delimiters = Vec::new();
-        for (all, d) in &u.delimiters {
-            delimiters.push((*all, self.natural_bytes(d, pos)?));
-        }
-        let mut overflow = pointer < 1 || pointer > len;
-        let mut fields = 0i64;
-        if !overflow {
-            for into in &u.into {
-                if pointer > len {
-                    break;
-                }
-                let start = pointer as usize - 1;
-                let dest = self.locate_receiving(&into.target)?;
-                let (end, matched) = if delimiters.is_empty() {
-                    ((start + dest.len).min(source.len()), None)
-                } else {
-                    match crate::strings::next_delimiter(&source, start, &delimiters) {
-                        Some((at, k)) => (at, Some(k)),
-                        None => (source.len(), None),
-                    }
-                };
-                self.assign(dest, Val::Bytes(source[start..end].to_vec()), None, pos)?;
-                let delimiter = matched.map(|k| delimiters[k].1.clone());
-                if let Some(r) = &into.delimiter_in {
-                    let d = self.locate_receiving(r)?;
-                    self.assign(d, delimiter.clone().map_or(Val::Fig(Figurative::Space), Val::Bytes), None, pos)?;
-                }
-                if let Some(r) = &into.count_in {
-                    self.set_integer(r, (end - start) as i64, pos)?;
-                }
-                let next = match matched {
-                    Some(k) => crate::strings::past_delimiter(&source, end, &delimiters[k].1, delimiters[k].0),
-                    None => end,
-                };
-                pointer = next as i64 + 1;
-                fields += 1;
-            }
-            overflow = pointer <= len;
-        }
-        if let Some(r) = &u.pointer {
-            self.set_integer(r, pointer, pos)?;
-        }
-        if let Some(r) = &u.tallying {
-            let dest = self.locate(r)?;
-            let Val::Num(current) = self.read(dest, pos)? else {
-                return Err(Abend::ironwork("TALLYING IN needs a numeric item", pos));
-            };
-            let total = current.add(Fixed::new(fields as i128, Places::new(19, 0)), 0, self.options.arith).map_err(|_| Abend::ironwork("TALLYING", pos))?;
-            self.store_fixed(dest, &total, false, pos)?;
-        }
+        let delimiters: Vec<_> = u.delimiters.iter().map(|(all, d)| (*all, facts::chars(d))).collect();
+        let into: Vec<_> = u.into.iter().map(|i| UnstringField { target: &i.target, delimiter: i.delimiter_in.as_ref(), count: i.count_in.as_ref() }).collect();
+        let overflow = rt::text::unstring(self, &u.source, u.pointer.as_ref(), &delimiters, &into, u.tallying.as_ref(), u.pos)?;
         self.overflow_branch(overflow, &u.on_overflow, &u.not_on_overflow)
     }
 
     fn inspect(&mut self, i: &Inspect) -> R<()> {
-        let pos = i.pos;
-        let loc = self.locate(&i.target)?;
-        let mut data = self.bytes(loc).to_vec();
-        let tallied = self.phrases(&data, &i.tallying, pos)?;
-        let counts = crate::strings::inspect(&mut data, &tallied);
-        for (phrase, count) in i.tallying.iter().zip(counts) {
-            let Some(counter) = &phrase.counter else { continue };
-            let dest = self.locate(counter)?;
-            let Val::Num(current) = self.read(dest, pos)? else {
-                return Err(Abend::ironwork("a TALLYING counter must be numeric", pos));
-            };
-            let total = current.add(Fixed::new(count as i128, Places::new(19, 0)), 0, self.options.arith).map_err(|_| Abend::ironwork("TALLYING", pos))?;
-            self.store_fixed(dest, &total, false, pos)?;
-        }
-        let mut replacing = self.phrases(&data, &i.replacing, pos)?;
-        if let Some((from, to, bounds)) = &i.converting {
-            let (from, to) = (self.natural_bytes(from, pos)?, self.natural_bytes(to, pos)?);
-            if from.len() != to.len() {
-                return Err(Abend::ironwork("CONVERTING needs operands of the same length", pos));
-            }
-            let (start, end) = self.region(&data, bounds, pos)?;
-            let mut seen = Vec::new();
-            for (f, t) in from.into_iter().zip(to) {
-                if !seen.contains(&f) {
-                    seen.push(f);
-                    replacing.push(crate::strings::Phrase { mode: InspectMode::All, pattern: vec![f], by: Some(vec![t]), start, end });
-                }
-            }
-        }
-        crate::strings::inspect(&mut data, &replacing);
-        self.write(loc, &data);
-        Ok(())
-    }
-
-    fn region(&mut self, data: &[u8], bounds: &[Bound], pos: Pos) -> R<(usize, usize)> {
-        let (mut before, mut after) = (None, None);
-        for b in bounds {
-            let v = self.natural_bytes(&b.value, pos)?;
-            if b.after { after = Some(v) } else { before = Some(v) }
-        }
-        Ok(crate::strings::region(data, before.as_deref(), after.as_deref()))
-    }
-
-    fn phrases(&mut self, data: &[u8], phrases: &[InspectPhrase], pos: Pos) -> R<Vec<crate::strings::Phrase>> {
-        let mut out = Vec::new();
-        for p in phrases {
-            let pattern = match &p.pattern {
-                Some(op) => self.natural_bytes(op, pos)?,
-                None => Vec::new(),
-            };
-            let len = pattern.len().max(1);
-            let by = match &p.by {
-                Some(Operand::Literal(Literal::Figurative(f))) => Some(vec![self.collating.figurative(*f); len]),
-                Some(op) => Some(self.natural_bytes(op, pos)?),
-                None => None,
-            };
-            if by.as_ref().is_some_and(|b| b.len() != len) {
-                return Err(Abend::ironwork("a REPLACING value must be as long as what it replaces", pos));
-            }
-            let (start, end) = self.region(data, &p.bounds, pos)?;
-            out.push(crate::strings::Phrase { mode: p.mode, pattern, by, start, end });
-        }
-        Ok(out)
+        let tallying: Vec<_> = i.tallying.iter().map(|p| self.inspect_phrase(p)).collect();
+        let replacing: Vec<_> = i.replacing.iter().map(|p| self.inspect_phrase(p)).collect();
+        let converting = i.converting.as_ref().map(|(from, to, bounds)| Converting { table: ConvertTable::Operands { from: facts::chars(from), to: facts::chars(to) }, bounds: facts::bounds(bounds) });
+        rt::text::inspect(self, &i.target, &tallying, &replacing, converting.as_ref(), i.pos)
     }
 
     fn search(&mut self, se: &'p Search) -> R<Flow> {
@@ -938,11 +786,6 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
         let loc = self.locate(r)?;
         Ok(ADDRESS_BASE + loc.offset as u32)
-    }
-
-    /// An address back to an offset in run-unit memory, refusing one that is NULL or outside it.
-    fn offset_of(&self, address: u32, pos: Pos) -> R<Option<usize>> {
-        loc::offset_of(address, self.unit.mem.len(), pos)
     }
 
     fn program_name(&mut self, op: &Operand, pos: Pos) -> R<String> {
@@ -1177,20 +1020,13 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 for r in targets {
                     let dest = self.locate(r)?;
                     let (val, src) = self.operand_with_loc(value, pos)?;
-                    match (dest.kind, val) {
-                        (Kind::Pointer, v @ (Val::Address(_) | Val::Fig(Figurative::Null))) => self.assign(dest, v, None, pos)?,
-                        (Kind::Pointer, _) => return Err(Abend::ironwork("SET a pointer TO ADDRESS OF, NULL or another pointer", pos)),
-                        (_, v) => self.assign(dest, v, src, pos)?,
-                    }
+                    let (val, src) = rt::set::to(dest, val, src, pos)?;
+                    self.assign(dest, val, src, pos)?;
                 }
             }
             SetStmt::AddressOf { targets, value } => {
-                let address = match self.operand(value, pos)? {
-                    Val::Address(a) => a,
-                    Val::Fig(Figurative::Null) => 0,
-                    _ => return Err(Abend::ironwork("SET ADDRESS OF takes a pointer, ADDRESS OF or NULL", pos)),
-                };
-                let offset = self.offset_of(address, pos)?;
+                let val = self.operand(value, pos)?;
+                let offset = rt::set::address(val, self.unit.mem.len(), pos)?;
                 for r in targets {
                     let Resolved::Item(i) = self.resolve(r)? else {
                         return Err(Abend::ironwork(format!("SET ADDRESS OF {}: not a data item", r.name), pos));
@@ -1202,22 +1038,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 }
             }
             SetStmt::UpDown { targets, down, by } => {
-                let step = self.integer(by, pos)?;
-                let step = if *down { -step } else { step };
-                for r in targets {
-                    let dest = self.locate(r)?;
-                    match self.read(dest, pos)? {
-                        Val::Address(a) => {
-                            let moved = u32::try_from(a as i64 + step).map_err(|_| Abend::ironwork("a pointer moved below zero", pos))?;
-                            self.write(dest, &moved.to_be_bytes());
-                        }
-                        Val::Num(f) => {
-                            let next = f.add(Fixed::new(step as i128, Places::new(19, 0)), 0, self.options.arith).map_err(|_| Abend::ironwork("SET UP/DOWN", pos))?;
-                            self.store_fixed(dest, &next, false, pos)?;
-                        }
-                        _ => return Err(Abend::ironwork("SET UP BY and DOWN BY take an index, integer or pointer", pos)),
-                    }
-                }
+                let by = self.integer(by, pos)?;
+                let targets: Vec<&Ref> = targets.iter().collect();
+                rt::set::up_down(self, by, *down, &targets, pos)?;
             }
         }
         Ok(())
@@ -1225,268 +1048,34 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     fn accept(&mut self, target: &Ref, from: AcceptFrom, pos: Pos) -> R<()> {
         let dest = self.locate_receiving(target)?;
-        let (seconds, hundredths) = self.unit.now();
-        let c = crate::calendar::civil(seconds);
-        let (year, month, day, hour, minute, second, yday, wday) = (c.year, c.month, c.day, c.hour, c.minute, c.second, c.day_of_year, c.weekday);
-        let digits = |text: String| Val::Num(literal_fixed(&text).expect("digits"));
-        let val = match from {
-            AcceptFrom::Date { four_digit_year: true } => digits(format!("{year:04}{month:02}{day:02}")),
-            AcceptFrom::Date { four_digit_year: false } => digits(format!("{:02}{month:02}{day:02}", year % 100)),
-            AcceptFrom::Day { four_digit_year: true } => digits(format!("{year:04}{yday:03}")),
-            AcceptFrom::Day { four_digit_year: false } => digits(format!("{:02}{yday:03}", year % 100)),
-            AcceptFrom::DayOfWeek => digits(format!("{wday}")),
-            AcceptFrom::Time => digits(format!("{hour:02}{minute:02}{second:02}{hundredths:02}")),
-            AcceptFrom::Sysin => {
-                let mut line = String::new();
-                let read = match self.unit.sysin.as_mut() {
-                    Some(r) => r.read_line(&mut line).map_err(|e| Abend::ironwork(format!("ACCEPT: {e}"), pos))?,
-                    None => 0,
-                };
-                if read == 0 {
-                    let _ = writeln!(self.unit.err, "ironwork: {pos}: ACCEPT found SYSIN at its end; {} is unchanged", target.name);
-                    return Ok(());
-                }
-                let unknown = self.page.encode_char('?').unwrap_or(0x6F);
-                Val::Bytes(line.trim_end_matches(['\n', '\r']).chars().map(|c| self.page.encode_char(c).unwrap_or(unknown)).collect())
-            }
-        };
-        self.assign(dest, val, None, pos)
+        rt::accept::accept(&self.facts(), self.unit, dest, from, &target.name, pos)
     }
 
     fn function(&mut self, f: &FunctionCall) -> R<Val> {
-        let pos = f.pos;
         if let Some(value) = self.storage_function(f)? {
             return self.function_refmod(f, value);
         }
         let args = self.function_arguments(f)?;
-        let arity = |n: std::ops::RangeInclusive<usize>| {
-            if n.contains(&args.len()) { Ok(()) } else { Err(Abend::ironwork(format!("FUNCTION {} takes {n:?} arguments", f.name), pos)) }
+        let side = match f.modifier.as_deref() {
+            Some("LEADING") => Some(TrimSide::Leading),
+            Some("TRAILING") => Some(TrimSide::Trailing),
+            _ => None,
         };
-        let collating = self.collating;
-        let bytes_of = |v: &Val| match v {
-            Val::Bytes(b) | Val::All(b) => Ok(b.clone()),
-            Val::Fig(fig) => Ok(vec![collating.figurative(*fig)]),
-            _ => Err(Abend::ironwork(format!("FUNCTION {} needs an alphanumeric argument", f.name), pos)),
-        };
-        let value = match f.name.as_str() {
-            "CHAR" => {
-                arity(1..=1)?;
-                let n = self.integer(&f.args[0], pos)?;
-                let c = collating.character(n).ok_or_else(|| Abend::ironwork(format!("FUNCTION CHAR({n}) is outside 1 to {}", collating.count()), pos))?;
-                Val::Bytes(vec![c])
-            }
-            "ORD" => {
-                arity(1..=1)?;
-                let b = bytes_of(&args[0])?;
-                let first = *b.first().ok_or_else(|| Abend::ironwork("FUNCTION ORD of an empty argument", pos))?;
-                Val::Num(Fixed::new(collating.ordinal(first) as i128, Places::new(3, 0)))
-            }
-            "NATIONAL-OF" => {
-                arity(1..=2)?;
-                let ccsid = if args.len() == 2 { self.integer(&f.args[1], pos)? as u16 } else { self.options.codepage };
-                let page = CodePage::by_ccsid(ccsid).ok_or_else(|| Abend::ironwork(format!("CCSID {ccsid} is not a code page ironwork for COBOL carries"), pos))?;
-                Val::National(page.to_utf16be(&bytes_of(&args[0])?))
-            }
-            "LENGTH" => {
-                arity(1..=1)?;
-                let n = match &args[0] {
-                    Val::Bytes(b) | Val::All(b) => b.len(),
-                    Val::National(b) => b.len() / 2,
-                    Val::Num(v) => v.places.total() as usize,
-                    _ => return Err(Abend::ironwork("FUNCTION LENGTH of this argument is not supported yet", pos)),
-                };
-                Val::Num(Fixed::new(n as i128, Places::new(9, 0)))
-            }
-            "NUMVAL" | "NUMVAL-C" => {
-                arity(1..=2)?;
-                let currency = match args.get(1) {
-                    Some(v) => self.page.decode(&bytes_of(v)?),
-                    None => self.default_currency(),
-                };
-                let mut text = self.page.decode(&bytes_of(&args[0])?);
-                if self.program.environment.decimal_point_comma {
-                    text = text.chars().map(|c| if c == '.' { ',' } else if c == ',' { '.' } else { c }).collect();
-                }
-                Val::Num(numval(&text, (f.name == "NUMVAL-C").then_some(currency.as_str())).unwrap_or_else(|| Fixed::new(0, Places::new(1, 0))))
-            }
-            "TRIM" => {
-                arity(1..=1)?;
-                let b = bytes_of(&args[0])?;
-                let first = b.iter().position(|&c| c != ebcdic::SPACE);
-                let last = b.iter().rposition(|&c| c != ebcdic::SPACE);
-                let trimmed = match (first, last, f.modifier.as_deref()) {
-                    (None, _, _) | (_, None, _) => Vec::new(),
-                    (Some(s), _, Some("LEADING")) => b[s..].to_vec(),
-                    (_, Some(e), Some("TRAILING")) => b[..=e].to_vec(),
-                    (Some(s), Some(e), _) => b[s..=e].to_vec(),
-                };
-                Val::Bytes(trimmed)
-            }
-            "MOD" | "REM" | "INTEGER" | "INTEGER-PART" | "ABS" | "MIN" | "MAX" if args.iter().any(|v| matches!(v, Val::Float(_))) => {
-                arity(match f.name.as_str() {
-                    "MOD" | "REM" => 2..=2,
-                    "MIN" | "MAX" => 1..=usize::MAX,
-                    _ => 1..=1,
-                })?;
-                self.float_function(&f.name, &args, pos)?
-            }
-            "MOD" | "REM" | "INTEGER" | "INTEGER-PART" | "ABS" => {
-                arity(if matches!(f.name.as_str(), "MOD" | "REM") { 2..=2 } else { 1..=1 })?;
-                let number = |v: &Val| match v {
-                    Val::Num(x) => Ok(*x),
-                    _ => Err(Abend::ironwork(format!("FUNCTION {} needs numeric arguments", f.name), pos)),
-                };
-                let x = number(&args[0])?;
-                let dec = if args.len() == 2 { x.places.dec.max(number(&args[1])?.places.dec) } else { x.places.dec };
-                let scaled = |v: &Fixed| -> R<i128> {
-                    let m = align(v, dec, false).and_then(|m| m.to_u128()).and_then(|m| i128::try_from(m).ok()).ok_or_else(|| Abend::ironwork("an argument beyond 38 digits", pos))?;
-                    Ok(if v.negative { -m } else { m })
-                };
-                let unit = 10i128.pow(dec);
-                let a = scaled(&x)?;
-                let result = match f.name.as_str() {
-                    "ABS" => a.abs(),
-                    "INTEGER" => a.div_euclid(unit) * unit,
-                    "INTEGER-PART" => a / unit * unit,
-                    other => {
-                        let b = scaled(&number(&args[1])?)?;
-                        if b == 0 {
-                            return Err(Abend::ironwork(format!("FUNCTION {other} by zero"), pos));
-                        }
-                        if other == "MOD" { a - b * a.div_euclid(b) } else { a - b * (a / b) }
-                    }
-                };
-                Val::Num(Fixed::new(result, Places::new(31 - dec.min(31), dec)))
-            }
-            "INTEGER-OF-DATE" => {
-                arity(1..=1)?;
-                let n = self.integer(&f.args[0], pos)?;
-                let (y, m, d) = (n / 10000, n / 100 % 100, n % 100);
-                if !(1601..=9999).contains(&y) || !(1..=12).contains(&m) || !(1..=i64::from(days_in_month(y, m as u32))).contains(&d) {
-                    return Err(Abend::ironwork(format!("FUNCTION INTEGER-OF-DATE({n}): not a date from 1601 to 9999"), pos));
-                }
-                Val::Num(Fixed::new((days_from_civil(y, m, d) - days_from_civil(1600, 12, 31)) as i128, Places::new(7, 0)))
-            }
-            "DATE-OF-INTEGER" => {
-                arity(1..=1)?;
-                let n = self.integer(&f.args[0], pos)?;
-                if !(1..=3_067_671).contains(&n) {
-                    return Err(Abend::ironwork(format!("FUNCTION DATE-OF-INTEGER({n}): outside 1 to 3067671"), pos));
-                }
-                let c = civil((days_from_civil(1600, 12, 31) + n) * SECONDS_PER_DAY);
-                Val::Num(Fixed::new((c.year * 10000 + i64::from(c.month) * 100 + i64::from(c.day)) as i128, Places::new(8, 0)))
-            }
-            "CURRENT-DATE" => {
-                arity(0..=0)?;
-                let (seconds, hundredths) = self.unit.now();
-                let c = civil(seconds);
-                let text = format!("{:04}{:02}{:02}{:02}{:02}{:02}{hundredths:02}+0000", c.year, c.month, c.day, c.hour, c.minute, c.second);
-                Val::Bytes(self.page.encode(&text).map_err(|e| Abend::ironwork(e.to_string(), pos))?)
-            }
-            "UPPER-CASE" | "LOWER-CASE" | "REVERSE" => {
-                arity(1..=1)?;
-                let text = self.page.decode(&bytes_of(&args[0])?);
-                let changed: String = match f.name.as_str() {
-                    "UPPER-CASE" => text.to_uppercase(),
-                    "LOWER-CASE" => text.to_lowercase(),
-                    _ => text.chars().rev().collect(),
-                };
-                Val::Bytes(self.page.encode(&changed).map_err(|e| Abend::ironwork(e.to_string(), pos))?)
-            }
-            "RANDOM" => {
-                arity(0..=1)?;
-                let seed = match f.args.first() {
-                    Some(a) => Some(self.integer(a, pos)?),
-                    None => None,
-                };
-                Val::Float(self.random(seed, pos)?)
-            }
-            _ => self.more_function(f, args)?,
-        };
+        let value = rt::intrinsic::function::evaluate(&mut intrinsic::Call { machine: self, f }, &f.name, side, args, f.pos)?;
         self.function_refmod(f, value)
     }
 
     fn function_refmod(&mut self, f: &FunctionCall, value: Val) -> R<Val> {
         let pos = f.pos;
-        match (&f.refmod, value) {
-            (None, v) => Ok(v),
-            (Some(rm), Val::Bytes(b)) => {
-                let start = self.integer(&rm.start, pos)? as usize;
-                let len = match &rm.length {
-                    Some(l) => self.integer(l, pos)? as usize,
-                    None => b.len() + 1 - start,
-                };
-                b.get(start - 1..start - 1 + len).map(|s| Val::Bytes(s.to_vec())).ok_or_else(|| Abend::ironwork("reference modification past the function result", pos))
-            }
-            (Some(_), _) => Err(Abend::ironwork("reference modification of a non-alphanumeric function result", pos)),
-        }
-    }
-
-    /// A numeric function with a floating-point argument. ABS, REM, MIN and MAX are then evaluated in
-    /// floating point and return it; INTEGER and INTEGER-PART return an integer of 30 digits, 31
-    /// under ARITH(EXTEND) (Programming Guide SC27-8714-03, pp. 799 and 801); MOD takes integers
-    /// only (Language Reference SC27-8713-03, p. 507). Assumption FLOAT_FUNCTION_ARGUMENTS.
-    fn float_function(&self, name: &str, args: &[Val], pos: Pos) -> R<Val> {
-        let p = self.options.arith.float_intermediate();
-        let check = |r: Result<Hfp, ProgramCheck>| r.map_err(|c| Abend::check(c, pos));
-        let float = |v: &Val| match v {
-            Val::Float(h) if h.precision.digits() <= p.digits() => Ok(h.lengthen(p)),
-            Val::Float(h) => Ok(float::narrow(*h, p)),
-            Val::Num(x) => check(float::from_fixed(*x, p, ProgramMask::default())),
-            _ => Err(Abend::ironwork(format!("FUNCTION {name} needs numeric arguments"), pos)),
-        };
-        let whole = |h: Hfp| h.to_integer(Rounding::TowardZero).ok_or_else(|| Abend::ironwork(format!("FUNCTION {name} of a floating-point value beyond 38 digits"), pos));
-        let x = float(&args[0])?;
-        Ok(match name {
-            "ABS" => Val::Float(Hfp { negative: false, ..x }),
-            "INTEGER" | "INTEGER-PART" => {
-                let t = whole(x)?;
-                let below = name == "INTEGER" && x.negative && Hfp::from_integer(t, p).compare(x) != Ordering::Equal;
-                let t = t - i128::from(below);
-                let digits = if self.options.arith == numeric::Arith::Compat { 30 } else { 31 };
-                if t.unsigned_abs() >= 10u128.pow(digits) {
-                    return Err(Abend::ironwork(format!("FUNCTION {name} of a floating-point value beyond {digits} digits"), pos));
-                }
-                Val::Num(Fixed::new(t, Places::new(digits, 0)))
-            }
-            "REM" => {
-                let y = float(&args[1])?;
-                if y.fraction == 0 {
-                    return Err(Abend::ironwork("FUNCTION REM by zero", pos));
-                }
-                let q = check(x.div(y, ProgramMask::default()))?;
-                let part = Hfp::from_integer(whole(q)?, p);
-                Val::Float(check(x.sub(check(y.mul(part, p, ProgramMask::default()))?, ProgramMask::default()))?)
-            }
-            "MIN" | "MAX" => {
-                let want = if name == "MIN" { Ordering::Less } else { Ordering::Greater };
-                let mut best = x;
-                for v in &args[1..] {
-                    let y = float(v)?;
-                    if y.compare(best) == want {
-                        best = y;
-                    }
-                }
-                Val::Float(best)
-            }
-            _ => return Err(Abend::ironwork(format!("FUNCTION {name} needs integer arguments, and a floating-point argument is not one"), pos)),
+        let Some(rm) = &f.refmod else { return Ok(value) };
+        rt::intrinsic::function::refmod(value, pos, || {
+            let start = self.integer(&rm.start, pos)?;
+            let length = match &rm.length {
+                Some(l) => Some(self.integer(l, pos)?),
+                None => None,
+            };
+            Ok((start, length))
         })
-    }
-
-    /// FUNCTION RANDOM: the next number of the run unit's sequence, as long HFP. A seed starts a
-    /// new sequence (Language Reference SC27-8713-03, p. 629); the generator is assumption C54.
-    fn random(&mut self, seed: Option<i64>, pos: Pos) -> R<Hfp> {
-        const MODULUS: u64 = 2_147_483_647;
-        let state = match (seed, self.unit.random) {
-            (Some(n), _) if n < 0 => return Err(Abend::ironwork(format!("FUNCTION RANDOM({n}): the seed must be zero or a positive integer"), pos)),
-            (Some(n), _) => n as u64 % (MODULUS - 1) + 1,
-            (None, Some(s)) => u64::from(s),
-            (None, None) => 1,
-        };
-        let next = state * 16807 % MODULUS;
-        self.unit.random = Some(next as u32);
-        let (x, m) = (Hfp::from_integer(next as i128, Precision::Long), Hfp::from_integer(MODULUS as i128, Precision::Long));
-        x.div(m, ProgramMask::default()).map_err(|c| Abend::check(c, pos))
     }
 
     fn expr_value(&mut self, e: &Expr, pos: Pos) -> R<Val> {
@@ -1507,6 +1096,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         })
     }
 
+    /// Fixed at lowering as `ArithStep.mode` (lower/plans.rs); the walker decides it on each execution.
     fn uses_float(&mut self, e: &Expr) -> R<bool> {
         Ok(match e {
             Expr::Operand(Operand::Function(f)) => self.is_floating_point(f)?,
@@ -1516,7 +1106,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         })
     }
 
-    /// The most decimal places among an expression's operands, divisors and exponents aside.
+    /// The most decimal places among an expression's operands, divisors and exponents aside. Fixed at
+    /// lowering as `ArithPlan.dmax` (lower/plans.rs); the walker works it out on each execution.
     fn dmax(&mut self, e: &Expr) -> R<u32> {
         Ok(match e {
             Expr::Operand(Operand::Literal(Literal::Number(t))) => literal_fixed(t).map_or(0, |f| f.places.dec),
@@ -1529,47 +1120,24 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     fn eval_fixed(&mut self, e: &Expr, dmax: u32, pos: Pos) -> R<Fixed> {
         let arith = self.options.arith;
-        let wrap = |r: Result<Fixed, ArithError>| {
-            r.map_err(|e| match e {
-                ArithError::DivideByZero => Abend::check(ProgramCheck::DecimalDivide, pos),
-                ArithError::BeyondModel => Abend::ironwork("an intermediate result wider than 256 bits", pos),
-            })
-        };
         match e {
-            Expr::Operand(op) => match self.operand(op, pos)? {
-                Val::Num(f) => Ok(f),
-                Val::Float(h) => Ok(float::to_fixed(h, Places::new(MAX_DIGITS as u32 - dmax.min(MAX_DIGITS as u32), dmax), false).0),
-                Val::Fig(Figurative::Zero) => Ok(Fixed::new(0, Places::new(1, 0))),
-                _ => Err(Abend::ironwork("a non-numeric operand in arithmetic", pos)),
-            },
-            Expr::Neg(inner) => {
-                let v = self.eval_fixed(inner, dmax, pos)?;
-                Ok(fixed(!v.negative, v.magnitude, v.places))
+            Expr::Operand(op) => {
+                let val = self.operand(op, pos)?;
+                arith::fixed_operand(val, dmax, pos)
             }
+            Expr::Neg(inner) => Ok(arith::fixed_neg(self.eval_fixed(inner, dmax, pos)?)),
             Expr::Bin(a, op, b) => {
                 let x = self.eval_fixed(a, dmax, pos)?;
                 if *op == BinOp::Pow {
                     let n = self.integer(b, pos)?;
-                    if !(0..=31).contains(&n) {
-                        return Err(Abend::ironwork("exponentiation other than by an integer from 0 to 31 is not supported yet", pos));
-                    }
-                    let mut acc = Fixed::new(1, Places::new(1, 0));
-                    for _ in 0..n {
-                        acc = wrap(acc.mul(x, dmax, arith))?;
-                    }
-                    return Ok(acc);
+                    return arith::pow(x, n, dmax, arith, pos);
                 }
                 let y = self.eval_fixed(b, dmax, pos)?;
-                if *op == BinOp::Div && y.magnitude.is_zero() {
-                    let check = if self.binary_division(a, b)? { ProgramCheck::FixedPointDivide } else { ProgramCheck::DecimalDivide };
-                    return Err(Abend::check(check, pos));
+                if arith::divides_by_zero(*op, &y) {
+                    let binary = self.binary_division(a, b)?;
+                    return Err(arith::zero_divide(binary, pos));
                 }
-                wrap(match op {
-                    BinOp::Add => x.add(y, dmax, arith),
-                    BinOp::Sub => x.sub(y, dmax, arith),
-                    BinOp::Mul => x.mul(y, dmax, arith),
-                    _ => x.div(y, dmax, arith),
-                })
+                arith::fixed_binop(x, *op, y, dmax, arith, pos)
             }
         }
     }
@@ -1602,29 +1170,15 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn eval_float(&mut self, e: &Expr, p: Precision, pos: Pos) -> R<Hfp> {
-        let mask = ProgramMask::default();
-        let check = |r: Result<Hfp, ProgramCheck>| r.map_err(|c| Abend::check(c, pos));
         match e {
-            Expr::Operand(op) => match self.operand(op, pos)? {
-                Val::Float(h) if h.precision.digits() <= p.digits() => Ok(h.lengthen(p)),
-                Val::Float(h) => Ok(float::narrow(h, p)),
-                Val::Num(f) => check(float::from_fixed(f, p, mask)),
-                Val::Fig(Figurative::Zero) => Ok(Hfp::zero(p)),
-                _ => Err(Abend::ironwork("a non-numeric operand in arithmetic", pos)),
-            },
-            Expr::Neg(inner) => {
-                let v = self.eval_float(inner, p, pos)?;
-                Ok(if v.fraction == 0 { v } else { Hfp { negative: !v.negative, ..v } })
+            Expr::Operand(op) => {
+                let val = self.operand(op, pos)?;
+                arith::float_operand(val, p, pos)
             }
+            Expr::Neg(inner) => Ok(arith::float_neg(self.eval_float(inner, p, pos)?)),
             Expr::Bin(a, op, b) => {
                 let (x, y) = (self.eval_float(a, p, pos)?, self.eval_float(b, p, pos)?);
-                check(match op {
-                    BinOp::Add => x.add(y, mask),
-                    BinOp::Sub => x.sub(y, mask),
-                    BinOp::Mul => x.mul(y, p, mask),
-                    BinOp::Div => x.div(y, mask),
-                    BinOp::Pow => return Err(Abend::ironwork("floating-point exponentiation is not supported yet", pos)),
-                })
+                arith::float_binop(x, *op, y, p, pos)
             }
         }
     }
@@ -1672,68 +1226,38 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 (Some((op, receiver_first)), Ok(Val::Num(value))) => {
                     let current = self.eval_fixed(&Expr::Operand(Operand::Ref(t.r.clone())), dmax, pos)?;
                     let (x, y) = if receiver_first { (current, value) } else { (value, current) };
-                    if op == BinOp::Div && y.magnitude.is_zero() {
+                    if arith::divides_by_zero(op, &y) {
                         let receiver = Expr::Operand(Operand::Ref(t.r.clone()));
-                        let check = if self.binary_division(&receiver, shared)? { ProgramCheck::FixedPointDivide } else { ProgramCheck::DecimalDivide };
-                        Err(Abend::check(check, pos))
+                        let binary = self.binary_division(&receiver, shared)?;
+                        Err(arith::zero_divide(binary, pos))
                     } else {
-                        self.combine(x, op, y, dmax, pos).map(Val::Num)
+                        arith::fixed_binop(x, op, y, dmax, self.options.arith, pos).map(Val::Num)
                     }
                 }
                 (Some((op, receiver_first)), Ok(Val::Float(value))) => {
-                    let (p, mask) = (self.options.arith.float_intermediate(), ProgramMask::default());
+                    let p = self.options.arith.float_intermediate();
                     let current = self.eval_float(&Expr::Operand(Operand::Ref(t.r.clone())), p, pos)?;
                     let (x, y) = if receiver_first { (current, value) } else { (value, current) };
-                    let result = match op {
-                        BinOp::Add => x.add(y, mask),
-                        BinOp::Sub => x.sub(y, mask),
-                        BinOp::Mul => x.mul(y, p, mask),
-                        _ => x.div(y, mask),
-                    };
-                    result.map(Val::Float).map_err(|c| Abend::check(c, pos))
+                    arith::float_binop(x, op, y, p, pos).map(Val::Float)
                 }
                 (_, outcome) => outcome,
             };
-            let value = match outcome {
-                Err(a) if handler.is_some() && a.code.zero_divisor() => {
-                    size_error = true;
-                    continue;
-                }
-                other => other?,
+            let Some(value) = arith::size_error(outcome, handler.is_some())? else {
+                size_error = true;
+                continue;
             };
             size_error |= self.store_value(loc, value, t.rounded, handler.is_some(), pos)?;
         }
-        if let (Some((t, _, _)), Some((x, y)), Some(q_loc)) = (remainder, operands, quotient_target) {
-            let arith = self.options.arith;
-            if !y.magnitude.is_zero() {
-                let q = x.div(y, dmax, arith).map_err(|_| Abend::ironwork("remainder", pos))?;
-                let q_places = places_of(q_loc.kind);
-                let q = fixed(q.negative, align(&q, q_places.dec, false).unwrap_or_default(), Places::new(q.places.int, q_places.dec));
-                let r = q.mul(y, dmax, arith).and_then(|p| x.sub(p, dmax, arith)).map_err(|_| Abend::ironwork("remainder", pos))?;
-                let r_loc = self.locate(&t.r)?;
-                size_error |= self.store_value(r_loc, Val::Num(r), false, handler.is_some(), pos)?;
-            }
+        if let (Some((t, _, _)), Some((x, y)), Some(q_loc)) = (remainder, operands, quotient_target)
+            && let Some(r) = arith::remainder(x, y, places_of(q_loc.kind).dec, dmax, self.options.arith, pos)?
+        {
+            let r_loc = self.locate(&t.r)?;
+            size_error |= self.store_value(r_loc, Val::Num(r), false, handler.is_some(), pos)?;
         }
         if let Some(h) = handler {
             return self.run_block(if size_error { &h.on } else { &h.not_on });
         }
         Ok(Flow::Next)
-    }
-
-    /// One fixed-point operation of an arithmetic statement.
-    fn combine(&self, x: Fixed, op: BinOp, y: Fixed, dmax: u32, pos: Pos) -> R<Fixed> {
-        let arith = self.options.arith;
-        let result = match op {
-            BinOp::Add => x.add(y, dmax, arith),
-            BinOp::Sub => x.sub(y, dmax, arith),
-            BinOp::Mul => x.mul(y, dmax, arith),
-            BinOp::Div => x.div(y, dmax, arith),
-            BinOp::Pow => return Err(Abend::ironwork("exponentiation of a receiver by a shared result", pos)),
-        };
-        result.map_err(|e| match e {
-            ArithError::DivideByZero => Abend::check(ProgramCheck::DecimalDivide, pos),
-            ArithError::BeyondModel => Abend::ironwork("an intermediate result wider than 256 bits", pos),
-        })
     }
 
     /// Stores an arithmetic result; returns whether it was a size error.
@@ -1847,61 +1371,23 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     fn display(&mut self, items: &[Operand], no_advancing: bool, pos: Pos) -> R<()> {
         let mut text = String::new();
         for op in items {
-            match op {
+            let shown = match op {
                 Operand::Ref(r) => {
                     let loc = self.locate(r)?;
-                    match loc.kind {
-                        Kind::National => text.push_str(&utf16_text(self.bytes(loc))),
-                        Kind::Packed { digits, signed, .. } | Kind::Binary { digits, signed, .. } => {
-                            let Val::Num(f) = self.read_stored(loc, r.pos)? else { unreachable!() };
-                            let zone = match (signed, f.negative) {
-                                (false, _) => decimal::UNSIGNED,
-                                (true, true) => decimal::MINUS,
-                                (true, false) => decimal::PLUS,
-                            };
-                            let whole = match loc.kind {
-                                Kind::Binary { native, .. } => native || self.options.trunc == Trunc::Bin,
-                                _ => false,
-                            };
-                            let shown = if whole {
-                                let width = match loc.len {
-                                    2 => 5,
-                                    4 => 10,
-                                    _ if signed => 19,
-                                    _ => 20,
-                                };
-                                zoned_digits(f.magnitude.to_u128().unwrap_or(0), width, zone)
-                            } else {
-                                zoned_digits(f.magnitude.div_rem(pow10(digits)).1.to_u128().unwrap_or(0), digits as usize, zone)
-                            };
-                            text.push_str(&self.page.decode(&shown));
-                        }
-                        Kind::Float(_) => return Err(Abend::ironwork("DISPLAY of a floating-point item is not supported yet", r.pos)),
-                        Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer => {
-                            return Err(Abend::ironwork("DISPLAY of a pointer, index or object reference is not supported", r.pos));
-                        }
-                        _ => text.push_str(&self.page.decode(self.bytes(loc))),
-                    }
+                    rt::display::place(&self.facts(), &self.unit.mem, loc, r.pos)?
                 }
-                Operand::Literal(Literal::Number(t)) => text.push_str(&t.replace('.', &self.decimal_point().to_string())),
-                other => match self.operand(other, pos)? {
-                    Val::Bytes(b) | Val::All(b) => text.push_str(&self.page.decode(&b)),
-                    Val::National(b) => text.push_str(&utf16_text(&b)),
-                    Val::Fig(f) => text.push(self.page.decode_byte(self.collating.figurative(f))),
-                    Val::Num(f) => text.push_str(&self.page.decode(&zoned_digits(f.magnitude.to_u128().unwrap_or(0), f.places.total() as usize, decimal::UNSIGNED))),
-                    Val::Float(_) => return Err(Abend::ironwork("DISPLAY of a floating-point value is not supported yet", pos)),
-                    Val::Address(_) => return Err(Abend::ironwork("DISPLAY of a pointer is not supported", pos)),
-                },
-            }
+                Operand::Literal(Literal::Number(t)) => rt::display::number(t, &self.facts()),
+                other => {
+                    let val = self.operand(other, pos)?;
+                    rt::display::value(&self.facts(), val, pos)?
+                }
+            };
+            text.push_str(&shown);
         }
         if self.unit.observed() {
             self.sink("log", pos, &text);
         }
-        let result = if no_advancing { write!(self.unit.out, "{text}") } else { writeln!(self.unit.out, "{text}") };
-        result.map_err(|e| match e.kind() {
-            std::io::ErrorKind::BrokenPipe => Abend { code: AbendCode::Signal(Signal::ClosedOutput), message: "standard output closed".into(), pos, file: None },
-            _ => Abend::ironwork(format!("DISPLAY: {e}"), pos),
-        })
+        rt::display::write(&mut *self.unit.out, &text, no_advancing, pos)
     }
 
     fn initialize(&mut self, index: usize, offset: usize, pos: Pos) -> R<()> {
@@ -1932,11 +1418,6 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 }
 
-fn utf16_text(bytes: &[u8]) -> String {
-    let units: Vec<u16> = bytes.chunks(2).map(|c| u16::from_be_bytes([c[0], *c.get(1).unwrap_or(&0)])).collect();
-    String::from_utf16_lossy(&units)
-}
-
 fn flatten_and<'c>(cond: &'c Cond, out: &mut Vec<&'c Cond>) {
     match cond {
         Cond::And(a, b) => {
@@ -1956,35 +1437,3 @@ fn key_term<'c>(terms: &[&'c Cond], key: &str) -> Option<(&'c Expr, &'c Expr)> {
         _ => None,
     })
 }
-
-/// NUMVAL and NUMVAL-C: spaces, one sign (leading + or -, trailing + - CR or DB), digits with at most
-/// one decimal point; NUMVAL-C also allows the currency sign and commas. None when the text is
-/// anything else.
-fn numval(text: &str, currency: Option<&str>) -> Option<Fixed> {
-    let mut t = text.trim().to_ascii_uppercase();
-    let mut negative = false;
-    for (suffix, minus) in [("CR", true), ("DB", true), ("-", true), ("+", false)] {
-        if let Some(rest) = t.strip_suffix(suffix) {
-            negative = minus;
-            t = rest.trim_end().to_owned();
-            break;
-        }
-    }
-    if let Some(rest) = t.strip_prefix('-') {
-        negative = true;
-        t = rest.trim_start().to_owned();
-    } else if let Some(rest) = t.strip_prefix('+') {
-        t = rest.trim_start().to_owned();
-    }
-    if let Some(c) = currency {
-        t = t.trim_start_matches(c.trim()).trim_start().replace(',', "");
-    }
-    let (int, frac) = t.split_once('.').unwrap_or((&t, ""));
-    if int.is_empty() && frac.is_empty() || !int.chars().chain(frac.chars()).all(|c| c.is_ascii_digit()) || int.len() + frac.len() > 31 {
-        return None;
-    }
-    let digits: u128 = format!("{int}{frac}").parse().unwrap_or(0);
-    let f = Fixed::new(digits as i128, Places::new(int.len().max(1) as u32, frac.len() as u32));
-    Some(if negative { Fixed { negative: digits != 0, ..f } } else { f })
-}
-

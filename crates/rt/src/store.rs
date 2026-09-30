@@ -30,6 +30,12 @@ pub trait ProgramFacts {
     /// A figurative constant's character: HIGH-VALUE and LOW-VALUE are the collating sequence's.
     fn figurative(&self, f: Figurative) -> u8;
     fn collation(&self) -> &Collation;
+    /// A character's ordinal position in the collating sequence, from 1, which FUNCTION ORD gives.
+    fn ordinal(&self, byte: u8) -> u16;
+    /// The character at an ordinal position, which FUNCTION CHAR gives.
+    fn character(&self, ordinal: i64) -> Option<u8>;
+    /// How many characters the collating sequence orders.
+    fn characters(&self) -> usize;
     fn decimal_point(&self) -> char;
     /// An edited PICTURE's symbols, and the currency sign it shows.
     fn edit(&self, edit: u32) -> (&[Sym], &str);
