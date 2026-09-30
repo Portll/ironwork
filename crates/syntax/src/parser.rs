@@ -1686,7 +1686,7 @@ impl Parser<'_> {
         match self.peek() {
             Some(Tok::Alnum(_) | Tok::Hex(_) | Tok::National(_) | Tok::Number(_)) => true,
             Some(Tok::Word(w)) => {
-                (figurative(w).is_some() || matches!(w.as_str(), "ALL" | "FUNCTION" | "LENGTH" | "ADDRESS" | "DFHRESP") || self.starts_ref()) && !self.paragraph_header()
+                (figurative(w).is_some() || matches!(w.as_str(), "ALL" | "FUNCTION" | "LENGTH" | "ADDRESS" | "DFHRESP" | "DFHVALUE") || self.starts_ref()) && !self.paragraph_header()
             }
             _ => false,
         }
@@ -1722,6 +1722,13 @@ impl Parser<'_> {
                 self.expect(&Tok::RParen, "')'")?;
                 let code = crate::system::resp_code(&condition).ok_or_else(|| Error::at(pos, format!("DFHRESP({condition}): not a CICS condition ironwork for COBOL knows")))?;
                 Ok(Operand::Literal(Literal::Number(code.to_string())))
+            }
+            Some(Tok::Word(w)) if w == "DFHVALUE" && self.peek_at(1) == Some(&Tok::LParen) => {
+                self.at += 2;
+                let name = self.name("a CVDA value")?;
+                self.expect(&Tok::RParen, "')'")?;
+                let value = rt::cics_tables::cvda(&name).ok_or_else(|| Error::at(pos, format!("DFHVALUE({name}): not a CVDA ironwork for COBOL knows")))?;
+                Ok(Operand::Literal(Literal::Number(value.to_string())))
             }
             Some(Tok::Word(w)) if w == "ADDRESS" && self.word_at(1) == Some("OF") => {
                 self.at += 2;
@@ -2078,6 +2085,29 @@ mod tests {
             "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n{body}"
         );
         crate::parse(&text).unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    #[test]
+    fn dfhresp_and_dfhvalue_fold_to_the_numbers_in_ibms_tables() {
+        let body = |operand: &str| format!("       01  A PIC S9(8) COMP.\n       PROCEDURE DIVISION.\n           IF A = {operand}\n               GOBACK\n           END-IF.\n");
+        let folds_to = |operand: &str, n: i32| {
+            let p = program(&body(operand));
+            assert!(format!("{:?}", p.paragraphs[0].statements[0]).contains(&format!("Number(\"{n}\")")), "{operand}");
+        };
+        folds_to("DFHRESP(NOTFINISHED)", 113);
+        folds_to("DFHRESP(DSIDERR)", 12);
+        folds_to("DFHRESP(FILENOTFOUND)", 12);
+        assert_eq!(rt::cics_tables::cvda("ENABLED"), Some(23));
+        folds_to("DFHVALUE(ENABLED)", 23);
+        for (operand, message) in [("DFHRESP(NOSUCH)", "DFHRESP(NOSUCH): not a CICS condition"), ("DFHVALUE(NOSUCH)", "DFHVALUE(NOSUCH): not a CVDA")] {
+            let err = crate::parse(&format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n{}", body(operand))).unwrap_err();
+            assert!(err.to_string().contains(message), "{err}");
+        }
+    }
+
+    #[test]
+    fn an_exec_cics_program_compares_with_dfhresp_notfinished() {
+        program("       01  WS-RESP PIC S9(8) COMP.\n       PROCEDURE DIVISION.\n           EXEC CICS RETURN END-EXEC\n           IF WS-RESP = DFHRESP(NOTFINISHED)\n               GOBACK\n           END-IF.\n");
     }
 
     #[test]

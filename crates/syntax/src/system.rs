@@ -153,27 +153,12 @@ pub fn member(name: &str) -> Option<String> {
     })
 }
 
-/// EIBRESP values by condition name, as the CICS Application Programming Reference lists them, for
-/// DFHRESP(condition), which the translator replaces with the number.
-const RESP: &[(&str, i32)] = &[
-    ("NORMAL", 0), ("ERROR", 1), ("RDATT", 2), ("WRBRK", 3), ("EOF", 4), ("EODS", 5), ("EOC", 6), ("INBFMH", 7), ("ENDINPT", 8),
-    ("NONVAL", 9), ("NOSTART", 10), ("TERMIDERR", 11), ("FILENOTFOUND", 12), ("DSIDERR", 12), ("NOTFND", 13), ("DUPREC", 14),
-    ("DUPKEY", 15), ("INVREQ", 16), ("IOERR", 17), ("NOSPACE", 18), ("NOTOPEN", 19), ("ENDFILE", 20), ("ILLOGIC", 21), ("LENGERR", 22),
-    ("QZERO", 23), ("SIGNAL", 24), ("QBUSY", 25), ("ITEMERR", 26), ("PGMIDERR", 27), ("TRANSIDERR", 28), ("ENDDATA", 29),
-    ("INVTSREQ", 30), ("EXPIRED", 31), ("RETPAGE", 32), ("RTEFAIL", 33), ("RTESOME", 34), ("TSIOERR", 35), ("MAPFAIL", 36),
-    ("INVERRTERM", 37), ("INVMPSZ", 38), ("IGREQID", 39), ("OVERFLOW", 40), ("INVLDC", 41), ("NOSTG", 42), ("JIDERR", 43),
-    ("QIDERR", 44), ("NOJBUFSP", 45), ("DSSTAT", 46), ("SELNERR", 47), ("FUNCERR", 48), ("UNEXPIN", 49), ("NOPASSBKRD", 50),
-    ("NOPASSBKWR", 51), ("SEGIDERR", 52), ("SYSIDERR", 53), ("ISCINVREQ", 54), ("ENQBUSY", 55), ("ENVDEFERR", 56), ("IGREQCD", 57),
-    ("SESSIONERR", 58), ("SYSBUSY", 59), ("SESSBUSY", 60), ("NOTALLOC", 61), ("CBIDERR", 62), ("INVEXITREQ", 63), ("INVPARTNSET", 64),
-    ("INVPARTN", 65), ("PARTNFAIL", 66), ("USERIDERR", 69), ("NOTAUTH", 70), ("VOLIDERR", 71), ("SUPPRESSED", 72), ("ROLLEDBACK", 82), ("END", 83),
-    ("DISABLED", 84), ("TASKIDERR", 91), ("TCIDERR", 92), ("DSNNOTFOUND", 93), ("LOADING", 94), ("MODELIDERR", 95), ("PARTNERIDERR", 97),
-    ("PROFILEIDERR", 98), ("LOCKED", 100), ("RECORDBUSY", 101), ("UOWNOTFOUND", 102), ("CONTAINERERR", 110), ("TOKENERR", 112),
-    ("CSDERR", 119), ("DUPRES", 120), ("CHANNELERR", 122), ("CCSIDERR", 123), ("TIMEDOUT", 124), ("CODEPAGEERR", 125), ("INCOMPLETE", 126),
-    ("BUSY", 128),
-];
-
+/// The EIBRESP value for DFHRESP(condition): IBM's table, plus DSIDERR, the older name for FILENOTFOUND.
 pub fn resp_code(condition: &str) -> Option<i32> {
-    RESP.iter().find(|(n, _)| n.eq_ignore_ascii_case(condition)).map(|&(_, v)| v)
+    if condition.eq_ignore_ascii_case("DSIDERR") {
+        return rt::cics_tables::resp("FILENOTFOUND");
+    }
+    rt::cics_tables::resp(condition)
 }
 
 /// CICS commands whose second word is part of the command, not an option.
