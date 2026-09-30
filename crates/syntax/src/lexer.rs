@@ -37,6 +37,8 @@ pub struct Token {
     pub area_a: bool,
     /// A word as the source spells it, where that is not all capitals.
     pub spelled: Option<String>,
+    /// A separator comma or semicolon comes between this token and the one before it.
+    pub after_comma: bool,
 }
 
 struct Lexer<'a> {
@@ -51,10 +53,11 @@ struct Lexer<'a> {
     /// For each program begun and not yet ended, whether the comma was the decimal point before
     /// it: a contained program has its container's, and a program after it starts afresh.
     outer: Vec<bool>,
+    comma_pending: bool,
 }
 
 pub fn lex(source: &Source) -> Result<Vec<Token>, Error> {
-    let mut lx = Lexer { chars: source.text.chars().collect(), positions: &source.positions, at: 0, tokens: Vec::new(), decimal_comma: false, currency: Vec::new(), outer: Vec::new() };
+    let mut lx = Lexer { chars: source.text.chars().collect(), positions: &source.positions, at: 0, tokens: Vec::new(), decimal_comma: false, currency: Vec::new(), outer: Vec::new(), comma_pending: false };
     while lx.at < lx.chars.len() {
         lx.next_token()?;
     }
@@ -109,7 +112,8 @@ impl Lexer<'_> {
                 .filter(|raw| raw.eq_ignore_ascii_case(w)),
             _ => None,
         };
-        self.tokens.push(Token { tok, pos, area_a: (8..=11).contains(&pos.col), spelled });
+        let after_comma = std::mem::take(&mut self.comma_pending);
+        self.tokens.push(Token { tok, pos, area_a: (8..=11).contains(&pos.col), spelled, after_comma });
     }
 
     /// The character that is a numeric literal's decimal point.
@@ -137,6 +141,7 @@ impl Lexer<'_> {
             return Ok(());
         }
         if c == ' ' || c == '\n' || c == ',' || c == ';' {
+            self.comma_pending |= c == ',' || c == ';';
             self.at += 1;
             return Ok(());
         }

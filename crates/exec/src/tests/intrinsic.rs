@@ -77,6 +77,23 @@ fn all_subscripts_take_every_element_and_stop_at_the_depending_on_count() {
 }
 
 #[test]
+fn a_parenthesis_after_a_separator_comma_opens_the_next_argument() {
+    let data = "       01  A PIC 9 VALUE 3.\n       01  B PIC 9 VALUE 4.\n       01  T VALUE '051207'.\n           05 IND PIC 99 OCCURS 3.\n       01  R PIC 99.\n";
+    let out = displays(
+        data,
+        &[
+            "COMPUTE R = FUNCTION MIN(A * B, (3 + 1) / 2)",
+            "DISPLAY R",
+            "COMPUTE R = FUNCTION MIN(B; (3))",
+            "DISPLAY R",
+            "COMPUTE R = FUNCTION MAX(IND (2), (1 + 1))",
+            "DISPLAY R",
+        ],
+    );
+    assert_eq!(out, "02\n03\n12\n");
+}
+
+#[test]
 fn the_date_functions_window_years_from_the_clock() {
     let out = displays(
         "       01  S PIC 9(8).\n       01  F PIC 9(5)V99.\n",

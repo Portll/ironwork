@@ -139,6 +139,12 @@ impl Parser<'_> {
         self.tokens.get(self.at + ahead).map(|t| &t.tok)
     }
 
+    /// Whether token `at` is a parenthesis that subscripts or modifies the name before it: after a
+    /// separator comma it opens the next operand, as in MIN(A * B, (3 + 1) / 2).
+    fn qualifying_paren_at(&self, at: usize) -> bool {
+        self.tokens.get(at).is_some_and(|t| t.tok == Tok::LParen && !t.after_comma)
+    }
+
     fn pos(&self) -> Pos {
         self.tokens.get(self.at).or(self.tokens.last()).map(|t| t.pos).unwrap_or_default()
     }
@@ -1926,7 +1932,7 @@ impl Parser<'_> {
     /// Whether a counter and FOR follow, past any subscripts on the counter.
     fn tally_counter_ahead(&self) -> bool {
         let mut i = self.at + 1;
-        if self.tokens.get(i).map(|t| &t.tok) == Some(&Tok::LParen) {
+        if self.qualifying_paren_at(i) {
             let mut depth = 0;
             while let Some(t) = self.tokens.get(i) {
                 match t.tok {
@@ -2128,7 +2134,7 @@ impl Parser<'_> {
                 self.at += 1;
                 let name = self.name("a function name")?;
                 let (mut args, mut modifier, mut all_subscripts) = (Vec::new(), None, Vec::new());
-                if self.peek() == Some(&Tok::LParen) && !self.refmod_ahead() {
+                if self.qualifying_paren_at(self.at) && !self.refmod_ahead() {
                     self.at += 1;
                     while !self.accept(&Tok::RParen) {
                         if let Some(m) = self.accept_any(&["LEADING", "TRAILING"]) {
@@ -2197,7 +2203,7 @@ impl Parser<'_> {
     }
 
     fn refmod(&mut self) -> R<Option<RefMod>> {
-        if self.peek() != Some(&Tok::LParen) || !self.refmod_ahead() {
+        if !self.qualifying_paren_at(self.at) || !self.refmod_ahead() {
             return Ok(None);
         }
         self.at += 1;
@@ -2217,7 +2223,7 @@ impl Parser<'_> {
         while matches!(self.tokens.get(at).map(|t| &t.tok), Some(Tok::Word(w)) if w == "OF" || w == "IN") {
             at += 2;
         }
-        if self.tokens.get(at).map(|t| &t.tok) != Some(&Tok::LParen) {
+        if !self.qualifying_paren_at(at) {
             return false;
         }
         let mut depth = 0;
@@ -2265,7 +2271,7 @@ impl Parser<'_> {
             qualifiers.push(self.name("a qualifier")?);
         }
         let mut subscripts = Vec::new();
-        if self.peek() == Some(&Tok::LParen) && !self.refmod_ahead() {
+        if self.qualifying_paren_at(self.at) && !self.refmod_ahead() {
             self.at += 1;
             while !self.accept(&Tok::RParen) {
                 subscripts.push(self.expr()?);
