@@ -209,6 +209,7 @@ pub const ROUNDED_EXTRA_PLACE: &str = "C101";
 pub const CURRENCY_SIGNS: &str = "C102";
 pub const JSON_GENERATE_RULES: &str = "C117";
 pub const XML_PARSE_RULES: &str = "C118";
+pub const XML_GENERATE_RULES: &str = "C119";
 pub const CORRESPONDING_PAIRS: &str = "C130";
 pub const CORRESPONDING_CHOICES: &str = "C131";
 pub const NUMPROC_MIG_WARNS: &str = "C120";
@@ -1296,6 +1297,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: XML_PARSE_RULES,
         claim: "XML PARSE runs as under XMLPARSE(XMLSS); XMLPARSE(COMPAT) and VALIDATING are not supported. Where the manuals are silent: a document that is not well formed gives XML-CODE with z/OS XML System Services' return code 12 and the non-validating parser's reason (SA38-0681-50, Appendix B): 2004 when it ends before the root's end tag, 2019 with no root, 3000 a duplicate attribute, 3008 -- in a comment, 3022 < in an attribute value, 3028 a bad character reference, 3035 a mismatched end tag, 3060 a malformed XML declaration or a later processing instruction named xml, 3061 an undeclared entity, 3062 any other character out of place, text after the root included, 3065 a second root; an undeclared prefix is Enterprise COBOL's warning 00040800 or 00040801 and ends the parse, even when the procedure resets XML-CODE. At END-OF-INPUT, XML-CODE 1 takes identifier-1's content, evaluated again, as the next segment, and any other value ends the input, so an unfinished document is then an exception. Markup a segment ends inside is held until it is complete, while content, comments and processing-instruction data are reported in parts, the target again before each later part (Programming Guide SC27-8714-03, pp. 652-653); START-OF-CDATA-SECTION waits for a character after <![CDATA[; namespace declarations are reported after START-OF-ELEMENT and before the attributes; a character reference to a character the document's code page lacks is a NATIONAL-CHARACTER event; XML-TEXT for EXCEPTION holds the document up to the error; the registers' fragments live in run-unit storage released after each event",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: XML_GENERATE_RULES,
+        claim: "Where the Language Reference (SC27-8713-03, pp. 484-494) and the Programming Guide (SC27-8714-03, pp. 663-669, 817) are silent, XML GENERATE: trims alphanumeric-edited and numeric-edited values of trailing spaces only, as items of class alphanumeric; puts an unnamed group's members in its parent's element; places TYPE CONTENT items in the parent's content in the order of the data description, among its child elements; writes an element with no content as a start and an end tag, never an empty-element tag, as the Programming Guide's examples show, and keeps a group with no attributes and no content unless a SUPPRESS phrase is given; lets an item's own SUPPRESS ... WHEN decide for it in place of every EVERY phrase; writes a value holding a character XML 1.0 cannot hold as the item's storage in upper-case hexadecimal under its name prefixed hex., sets 417 and goes to ON EXCEPTION once the whole document is written, with 400 before 417 and 417 before 418; drops a namespace's trailing spaces, escapes it as an attribute value, gives 416 for a character XML cannot hold, and ignores NAMESPACE-PREFIX when the namespace is empty; names an EBCDIC CCSID in the XML declaration as IBM- and at least three digits, as the Programming Guide's IBM-037 shows; makes a national item in a document in an EBCDIC code page exception 420 at run time, where the manual makes it a compile-time rule, and a character the code page lacks its ? with 418; and leaves the receiver and COUNT unchanged for 411, 414, 415, 416, 419 and 420",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

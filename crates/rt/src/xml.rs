@@ -5,6 +5,8 @@
 
 use std::collections::VecDeque;
 
+pub mod generate;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventKind {
     StartOfDocument,

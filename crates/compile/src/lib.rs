@@ -639,6 +639,19 @@ impl Check<'_> {
                 self.statements(x.on_exception.as_deref().unwrap_or_default());
                 self.statements(x.not_on_exception.as_deref().unwrap_or_default());
             }
+            Stmt::XmlGenerate(x) => {
+                for r in [&x.receiver, &x.from].into_iter().chain(&x.count) {
+                    self.reference(r);
+                }
+                let named = x.names.iter().map(|(r, _)| r).chain(x.types.iter().map(|(r, _)| r));
+                let suppressed = x.suppress.iter().filter_map(|s| if let Suppression::Item { item, .. } = s { Some(item) } else { None });
+                named.chain(suppressed).for_each(|r| self.reference_unsubscripted(r));
+                for op in [&x.encoding, &x.namespace, &x.prefix].into_iter().flatten() {
+                    self.operand(op);
+                }
+                self.statements(x.on_exception.as_deref().unwrap_or_default());
+                self.statements(x.not_on_exception.as_deref().unwrap_or_default());
+            }
             Stmt::JsonGenerate(g) => {
                 for r in [&g.receiver, &g.from].into_iter().chain(&g.count) {
                     self.reference(r);

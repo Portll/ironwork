@@ -44,6 +44,10 @@ const PHRASE_WORDS: &[&str] = &[
 /// and ENCODING are not reserved words, so they are phrases only here.
 const JSON_PHRASES: &[&str] = &["COUNT", "INDICATING", "ENCODING", "NAME", "SUPPRESS", "CONVERTING", "ON", "NOT", "EXCEPTION", "END-JSON", "ALSO"];
 
+/// The phrases of XML GENERATE, which end a list of NAME, TYPE or SUPPRESS operands.
+const XML_PHRASES: &[&str] =
+    &["COUNT", "WITH", "ENCODING", "XML-DECLARATION", "ATTRIBUTES", "NAMESPACE", "NAMESPACE-PREFIX", "NAME", "TYPE", "SUPPRESS", "EVERY", "ON", "NOT", "EXCEPTION", "END-XML"];
+
 /// The environment-names a WRITE ADVANCING mnemonic-name can stand for (Language Reference,
 /// SPECIAL-NAMES, Table 5): channels C01 to C12, CSP, pockets S01 to S05, and AFP-5A.
 fn advancing_environment_name(word: &str) -> bool {
@@ -1189,6 +1193,7 @@ impl Parser<'_> {
             "INVOKE" => Stmt::Invoke(Box::new(self.invoke(pos)?)),
             "JSON" if self.accept_word("GENERATE") => Stmt::JsonGenerate(Box::new(self.json_generate(pos)?)),
             "XML" if self.accept_word("PARSE") => Stmt::XmlParse(Box::new(self.xml_parse(pos)?)),
+            "XML" if self.accept_word("GENERATE") => Stmt::XmlGenerate(Box::new(self.xml_generate(pos)?)),
             "CANCEL" => {
                 let mut targets = Vec::new();
                 while self.starts_operand() {
@@ -1693,7 +1698,7 @@ impl Parser<'_> {
                             None => None,
                         };
                         self.expect_word("WHEN")?;
-                        g.suppress.push(Suppression::Every { numeric, when: self.figurative_list()? });
+                        g.suppress.push(Suppression::Every { numeric, form: None, when: self.figurative_list()? });
                     } else {
                         let item = self.reference()?;
                         let when = if self.accept_word("WHEN") { self.figurative_list()? } else { Vec::new() };
@@ -1736,6 +1741,119 @@ impl Parser<'_> {
         self.accept_word("END-JSON");
         (g.on_exception, g.not_on_exception) = (h.on, h.not_on);
         Ok(g)
+    }
+
+    fn xml_operand_follows(&self) -> bool {
+        self.starts_ref() && !self.word().is_some_and(|w| XML_PHRASES.contains(&w))
+    }
+
+    fn xml_form(&mut self) -> R<Option<XmlForm>> {
+        Ok(match self.accept_any(&["ATTRIBUTE", "ELEMENT", "CONTENT"]).as_deref() {
+            Some("ATTRIBUTE") => Some(XmlForm::Attribute),
+            Some("ELEMENT") => Some(XmlForm::Element),
+            Some(_) => Some(XmlForm::Content),
+            None => None,
+        })
+    }
+
+    fn xml_generate(&mut self, pos: Pos) -> R<XmlGenerate> {
+        let receiver = self.reference()?;
+        self.expect_word("FROM")?;
+        let from = self.reference()?;
+        let mut x = XmlGenerate {
+            receiver,
+            from,
+            count: None,
+            encoding: None,
+            declaration: false,
+            attributes: false,
+            namespace: None,
+            prefix: None,
+            names: Vec::new(),
+            types: Vec::new(),
+            suppress: Vec::new(),
+            on_exception: None,
+            not_on_exception: None,
+            pos,
+        };
+        loop {
+            if self.accept_word("COUNT") {
+                self.accept_word("IN");
+                x.count = Some(self.reference()?);
+                continue;
+            }
+            let with = self.accept_word("WITH");
+            if self.accept_word("ENCODING") {
+                x.encoding = Some(self.operand()?);
+            } else if self.accept_word("XML-DECLARATION") {
+                x.declaration = true;
+            } else if self.accept_word("ATTRIBUTES") {
+                x.attributes = true;
+            } else if with {
+                return Err(self.error("ENCODING, XML-DECLARATION or ATTRIBUTES"));
+            } else if self.accept_word("NAMESPACE") {
+                self.accept_word("IS");
+                x.namespace = Some(self.operand()?);
+                if self.accept_word("NAMESPACE-PREFIX") {
+                    self.accept_word("IS");
+                    x.prefix = Some(self.operand()?);
+                }
+            } else if self.accept_word("NAME") {
+                self.accept_word("OF");
+                loop {
+                    let item = self.reference()?;
+                    self.accept_word("IS");
+                    x.names.push((item, self.literal()?));
+                    if !self.xml_operand_follows() {
+                        break;
+                    }
+                }
+            } else if self.accept_word("TYPE") {
+                self.accept_word("OF");
+                loop {
+                    let item = self.reference()?;
+                    self.accept_word("IS");
+                    let form = self.xml_form()?.ok_or_else(|| self.error("ATTRIBUTE, ELEMENT or CONTENT"))?;
+                    x.types.push((item, form));
+                    if !self.xml_operand_follows() {
+                        break;
+                    }
+                }
+            } else if self.accept_word("SUPPRESS") {
+                loop {
+                    if self.accept_word("EVERY") {
+                        let numeric = match self.accept_any(&["NUMERIC", "NONNUMERIC"]).as_deref() {
+                            Some("NUMERIC") => Some(true),
+                            Some(_) => Some(false),
+                            None => None,
+                        };
+                        let form = self.xml_form()?;
+                        if numeric.is_none() && form.is_none() {
+                            return Err(self.error("NUMERIC, NONNUMERIC, ATTRIBUTE, CONTENT or ELEMENT"));
+                        }
+                        self.expect_word("WHEN")?;
+                        x.suppress.push(Suppression::Every { numeric, form, when: self.figurative_list()? });
+                    } else {
+                        let item = self.reference()?;
+                        let when = if self.accept_word("WHEN") { self.figurative_list()? } else { Vec::new() };
+                        x.suppress.push(Suppression::Item { item, when });
+                    }
+                    if !(self.is_word("EVERY") || self.xml_operand_follows()) {
+                        break;
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+        let [h] = self.on_phrases(&["ON", "EXCEPTION"], &["END-XML"], |p| {
+            p.accept_word("ON");
+            p.expect_word("EXCEPTION")?;
+            Ok(0)
+        })?;
+        self.accept_word("END-XML");
+        (x.on_exception, x.not_on_exception) = (h.on, h.not_on);
+        Ok(x)
     }
 
     fn xml_parse(&mut self, pos: Pos) -> R<XmlParse> {

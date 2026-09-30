@@ -26,8 +26,15 @@ struct Phrases<'g> {
     spellings: Vec<(Pos, String)>,
 }
 
+/// An elementary item's value as JSON and XML GENERATE convert and trim it (Language Reference
+/// SC27-8713-03, pp. 381-382, 492-493).
+pub(super) enum Converted {
+    Number(String),
+    Chars(String),
+}
+
 impl<'p> Machine<'p, '_, '_> {
-    fn item_of(&mut self, r: &Ref) -> R<usize> {
+    pub(super) fn item_of(&mut self, r: &Ref) -> R<usize> {
         match self.resolve(r)? {
             Resolved::Item(i) => Ok(i),
             _ => Err(Abend::ironwork(format!("{} is a condition-name, not a data item", r.name), r.pos)),
@@ -61,7 +68,7 @@ impl<'p> Machine<'p, '_, '_> {
                 Suppression::Item { item, when } => {
                     p.suppressed_when.insert(self.item_of(item)?, when);
                 }
-                Suppression::Every { numeric, when } => p.every.push((*numeric, when)),
+                Suppression::Every { numeric, when, .. } => p.every.push((*numeric, when)),
             }
         }
         for (r, conversion) in &g.converting {
@@ -85,10 +92,15 @@ impl<'p> Machine<'p, '_, '_> {
             };
             p.indicators.insert(indicator);
         }
+        p.spellings = self.spellings();
+        Ok(p)
+    }
+
+    /// Each data entry whose name the source spells in mixed case, by its position.
+    pub(super) fn spellings(&self) -> Vec<(Pos, String)> {
         let program = self.program;
         let entries = program.working_storage.iter().chain(&program.local_storage).chain(&program.linkage).chain(program.files.iter().flat_map(|f| &f.records));
-        p.spellings = entries.filter_map(|e| Some((e.pos, e.spelled.clone()?))).collect();
-        Ok(p)
+        entries.filter_map(|e| Some((e.pos, e.spelled.clone()?))).collect()
     }
 
     /// Items JSON GENERATE leaves out wherever they are: unnamed elementary items, REDEFINES and
@@ -106,7 +118,7 @@ impl<'p> Machine<'p, '_, '_> {
         Some(p.spellings.iter().find(|(at, _)| *at == i.pos).map(|(_, s)| s.clone()).or_else(|| i.name.clone()).unwrap_or_default())
     }
 
-    fn subscripted(r: &Ref, subscripts: &[u32], dims: usize) -> Ref {
+    pub(super) fn subscripted(r: &Ref, subscripts: &[u32], dims: usize) -> Ref {
         let subscripts = subscripts.iter().take(dims).map(|s| Expr::Operand(Operand::Literal(Literal::Number(s.to_string())))).collect();
         Ref { subscripts, ..r.clone() }
     }
@@ -124,7 +136,7 @@ impl<'p> Machine<'p, '_, '_> {
 
     /// Whether an item equals a figurative constant: numerically for ZERO and a numeric item,
     /// otherwise character by character.
-    fn equals_figurative(&self, loc: Loc, f: Figurative, pos: Pos) -> R<bool> {
+    pub(super) fn equals_figurative(&self, loc: Loc, f: Figurative, pos: Pos) -> R<bool> {
         let bytes = self.bytes(loc);
         if f == Figurative::Zero && loc.kind.is_numeric() {
             return Ok(match self.read(loc, pos)? {
@@ -142,7 +154,7 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     /// Whether EVERY [NUMERIC | NONNUMERIC] WHEN selects an item for this figurative constant (pp. 376-377).
-    fn every_selects(kind: Kind, numeric: Option<bool>, f: Figurative) -> bool {
+    pub(super) fn every_selects(kind: Kind, numeric: Option<bool>, f: Figurative) -> bool {
         let class_numeric = kind.is_numeric();
         if numeric.is_some_and(|n| n != class_numeric) {
             return false;
@@ -190,13 +202,21 @@ impl<'p> Machine<'p, '_, '_> {
             let byte = self.bytes(loc).first().copied().unwrap_or(0);
             return Ok(Some(if self.marker_holds(m, byte, subscripts, pos)? { "true" } else { "false" }.into()));
         }
+        Ok(Some(match self.converted(item, loc, "JSON GENERATE", pos)? {
+            Converted::Number(n) => n,
+            Converted::Chars(c) => text::string(&c),
+        }))
+    }
+
+    pub(super) fn converted(&mut self, item: usize, loc: Loc, statement: &str, pos: Pos) -> R<Converted> {
         let bytes = self.bytes(loc).to_vec();
-        Ok(Some(match loc.kind {
-            Kind::Alnum { justified } => text::string(text::trimmed(&self.page.decode(&bytes), justified)),
-            Kind::AlnumEdited { .. } | Kind::NumericEdited { .. } => text::string(text::trimmed(&self.page.decode(&bytes), false)),
-            Kind::National => text::string(text::trimmed(&utf16_text(&bytes), false)),
-            Kind::Float(precision) => text::float_number(Hfp::from_bytes(precision, &bytes), if precision == Precision::Short { 8 } else { 17 }),
-            Kind::Zoned { digits, scale, .. } | Kind::Packed { digits, scale, .. } => self.json_fixed(loc, digits.saturating_sub(scale) + store::scaling(&self.facts(), loc), pos)?,
+        let chars = |t: &str, justified: bool| Converted::Chars(text::trimmed(t, justified).to_owned());
+        Ok(match loc.kind {
+            Kind::Alnum { justified } => chars(&self.page.decode(&bytes), justified),
+            Kind::AlnumEdited { .. } | Kind::NumericEdited { .. } | Kind::Group => chars(&self.page.decode(&bytes), false),
+            Kind::National => chars(&utf16_text(&bytes), false),
+            Kind::Float(precision) => Converted::Number(text::float_number(Hfp::from_bytes(precision, &bytes), if precision == Precision::Short { 8 } else { 17 })),
+            Kind::Zoned { digits, scale, .. } | Kind::Packed { digits, scale, .. } => Converted::Number(self.json_fixed(loc, digits.saturating_sub(scale) + store::scaling(&self.facts(), loc), pos)?),
             Kind::Binary { digits, scale, native, .. } => {
                 let integers = if native || self.options.trunc == Trunc::Bin {
                     let whole = match digits {
@@ -208,20 +228,19 @@ impl<'p> Machine<'p, '_, '_> {
                 } else {
                     digits.saturating_sub(scale) + store::scaling(&self.facts(), loc)
                 };
-                self.json_fixed(loc, integers, pos)?
+                Converted::Number(self.json_fixed(loc, integers, pos)?)
             }
-            Kind::Index => self.json_fixed(loc, 10, pos)?,
-            Kind::Group => text::string(text::trimmed(&self.page.decode(&bytes), false)),
+            Kind::Index => Converted::Number(self.json_fixed(loc, 10, pos)?),
             Kind::Pointer | Kind::ObjectReference | Kind::ProgramPointer => {
-                return Err(Abend::ironwork(format!("JSON GENERATE: {} is a pointer or object reference", self.layout.items[item].name.as_deref().unwrap_or("FILLER")), pos));
+                return Err(Abend::ironwork(format!("{statement}: {} is a pointer or object reference", self.layout.items[item].name.as_deref().unwrap_or("FILLER")), pos));
             }
-        }))
+        })
     }
 
     fn json_fixed(&self, loc: Loc, integers: u32, pos: Pos) -> R<String> {
         match self.read(loc, pos)? {
             Val::Num(x) => Ok(text::fixed_number(x.negative, x.magnitude, x.places.dec, integers)),
-            _ => Err(Abend::ironwork("JSON GENERATE: a numeric item without a numeric value", pos)),
+            _ => Err(Abend::ironwork("a numeric item without a numeric value", pos)),
         }
     }
 

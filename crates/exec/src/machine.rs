@@ -362,6 +362,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Stmt::Invoke(i) => return self.invoke(i),
             Stmt::JsonGenerate(g) => return self.json_generate(g),
             Stmt::XmlParse(x) => return self.xml_parse(x),
+            Stmt::XmlGenerate(x) => return self.xml_generate(x),
             Stmt::ExitMethod { .. } => return Ok(Flow::End(Ending::Goback)),
             Stmt::SentenceEnd => {}
             Stmt::StopRun { .. } => return Ok(Flow::End(Ending::StopRun)),

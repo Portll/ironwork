@@ -418,6 +418,7 @@ pub enum Stmt {
     Invoke(Box<Invoke>),
     JsonGenerate(Box<JsonGenerate>),
     XmlParse(Box<XmlParse>),
+    XmlGenerate(Box<XmlGenerate>),
     ExitMethod { pos: Pos },
     Sorting(Box<Sorting>),
     StopRun { pos: Pos },
@@ -750,11 +751,12 @@ pub struct JsonGenerate {
 }
 
 /// A SUPPRESS phrase: an item, or EVERY item of a class (`Some(true)` NUMERIC, `Some(false)`
-/// NONNUMERIC, `None` both), suppressed always or only WHEN it equals one of the figurative constants.
+/// NONNUMERIC, `None` both) and, for XML GENERATE, of a form, suppressed always or only WHEN it
+/// equals one of the figurative constants.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Suppression {
     Item { item: Ref, when: Vec<Figurative> },
-    Every { numeric: Option<bool>, when: Vec<Figurative> },
+    Every { numeric: Option<bool>, form: Option<XmlForm>, when: Vec<Figurative> },
 }
 
 /// A value that stands for true (CONVERTING ... TO JSON BOOLEAN) or for null (INDICATING): a
@@ -783,6 +785,34 @@ pub struct NullIndicator {
 pub enum Encoding {
     Ccsid(Operand),
     FromCodepage,
+}
+
+/// XML GENERATE (Language Reference SC27-8713-03, pp. 484-494).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct XmlGenerate {
+    pub receiver: Ref,
+    pub from: Ref,
+    pub count: Option<Ref>,
+    /// WITH ENCODING: the document's CCSID.
+    pub encoding: Option<Operand>,
+    pub declaration: bool,
+    pub attributes: bool,
+    pub namespace: Option<Operand>,
+    pub prefix: Option<Operand>,
+    pub names: Vec<(Ref, Literal)>,
+    pub types: Vec<(Ref, XmlForm)>,
+    pub suppress: Vec<Suppression>,
+    pub on_exception: Option<Vec<Stmt>>,
+    pub not_on_exception: Option<Vec<Stmt>>,
+    pub pos: Pos,
+}
+
+/// How XML GENERATE expresses an item: as an attribute or an element, or as its parent's content.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum XmlForm {
+    Attribute,
+    Element,
+    Content,
 }
 
 /// XML PARSE under XMLPARSE(XMLSS) (Language Reference SC27-8713-03, pp. 489-494).

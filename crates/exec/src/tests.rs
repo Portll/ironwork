@@ -21,6 +21,7 @@ mod procedure;
 mod report;
 mod sort;
 mod xml;
+mod xml_generate;
 
 fn program(options: &str, data: &str, procedure: &str) -> String {
     let card = if options.is_empty() { String::new() } else { format!("       CBL {options}\n") };

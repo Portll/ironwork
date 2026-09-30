@@ -4,6 +4,8 @@
 use super::*;
 use rt::xml::{Event, EventKind, Scanner, Step};
 
+mod generate;
+
 const UTF8: u16 = 1208;
 
 /// Where XML-TEXT and the other registers whose length varies hold the current event's fragments:

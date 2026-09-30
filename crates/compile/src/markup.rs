@@ -1,6 +1,6 @@
-//! The special registers of JSON GENERATE and XML PARSE (Language Reference SC27-8713-03, pp. 21-37):
-//! JSON-CODE, JSON-STATUS, XML-CODE, XML-EVENT and XML-INFORMATION are declared for a program that
-//! has the statement; XML-TEXT and the others whose length varies are located while it runs.
+//! The special registers of JSON GENERATE and the XML statements (Language Reference SC27-8713-03,
+//! pp. 21-37): JSON-CODE, JSON-STATUS, XML-CODE, XML-EVENT and XML-INFORMATION are declared for a
+//! program that has the statement; XML-TEXT and the others whose length varies are located while it runs.
 
 use crate::layout::Layout;
 use crate::oo::bodies;
@@ -39,7 +39,7 @@ fn declared(program: &Program) -> Vec<String> {
 
 pub(crate) fn with_special_registers(mut program: Program) -> Program {
     let uses = |found: &dyn Fn(&Stmt) -> bool| program.paragraphs.iter().any(|p| any(&p.statements, &found));
-    let wanted: Vec<&str> = [(uses(&|s| matches!(s, Stmt::JsonGenerate(_))), JSON_REGISTERS), (uses(&|s| matches!(s, Stmt::XmlParse(_))), XML_REGISTERS)]
+    let wanted: Vec<&str> = [(uses(&|s| matches!(s, Stmt::JsonGenerate(_))), JSON_REGISTERS), (uses(&|s| matches!(s, Stmt::XmlParse(_) | Stmt::XmlGenerate(_))), XML_REGISTERS)]
         .into_iter()
         .filter_map(|(used, text)| used.then_some(text))
         .collect();
