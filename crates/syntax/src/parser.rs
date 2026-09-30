@@ -111,9 +111,6 @@ struct SqlState {
 
 type R<T> = Result<T, Error>;
 
-/// The statements of an ON phrase and of its NOT ON phrase.
-type OnPhrases = (Option<Vec<Stmt>>, Option<Vec<Stmt>>);
-
 impl Parser<'_> {
     fn peek(&self) -> Option<&Tok> {
         self.tokens.get(self.at).map(|t| &t.tok)
@@ -331,12 +328,12 @@ impl Parser<'_> {
             returning,
             paragraphs,
             files,
-            sources: Vec::new(),
             exec_declarations,
             report_writer,
             oo: oo::program_oo(repository),
             environment,
             nested: contained,
+            ..Program::default()
         });
         out.extend(nested);
         Ok(())
@@ -543,9 +540,7 @@ impl Parser<'_> {
                     }
                     other => {
                         files[index].linage |= other == "LINAGE";
-                        while self.peek().is_some() && self.peek() != Some(&Tok::Period)
-                            && !self.word().is_some_and(|w| matches!(w, "RECORDING" | "RECORD" | "BLOCK" | "LABEL" | "DATA" | "VALUE" | "REPORT" | "REPORTS" | "LINAGE"))
-                        {
+                        while self.peek().is_some() && self.peek() != Some(&Tok::Period) && !self.word().is_some_and(|w| FD_WORDS.contains(&w)) {
                             self.at += 1;
                         }
                     }
@@ -654,13 +649,60 @@ impl Parser<'_> {
             if self.data_exec()? {
                 continue;
             }
-            let Some(Tok::Number(level)) = self.peek() else { break };
-            let pos = self.pos();
-            let level: u8 = level.parse().map_err(|_| self.error("a level number"))?;
-            self.at += 1;
+            let Some((level, pos)) = self.level_number()? else { break };
             entries.push(self.data_entry(level, pos)?);
         }
         Ok(entries)
+    }
+
+    fn level_number(&mut self) -> R<Option<(u8, Pos)>> {
+        let Some(Tok::Number(level)) = self.peek() else { return Ok(None) };
+        let pos = self.pos();
+        let level = level.parse().map_err(|_| self.error("a level number"))?;
+        self.at += 1;
+        Ok(Some((level, pos)))
+    }
+
+    /// The character-string after PICTURE.
+    fn picture(&mut self) -> R<String> {
+        self.accept_word("IS");
+        match self.peek() {
+            Some(Tok::Pic(p)) => {
+                let p = p.clone();
+                self.at += 1;
+                Ok(p)
+            }
+            _ => Err(self.error("a PICTURE character-string")),
+        }
+    }
+
+    /// The SIGN clause, after its first word: SIGN, LEADING or TRAILING.
+    fn sign_clause(&mut self, first: &str) -> R<SignClause> {
+        let side = if first == "SIGN" {
+            self.accept_word("IS");
+            self.name("LEADING or TRAILING")?
+        } else {
+            first.to_owned()
+        };
+        let position = match side.as_str() {
+            "LEADING" => SignPosition::Leading,
+            "TRAILING" => SignPosition::Trailing,
+            _ => return Err(self.error("LEADING or TRAILING")),
+        };
+        let separate = self.accept_word("SEPARATE");
+        if separate {
+            self.accept_word("CHARACTER");
+        }
+        Ok(SignClause { position, separate })
+    }
+
+    /// WHEN ZERO, after BLANK.
+    fn blank_when_zero(&mut self) -> R<()> {
+        self.accept_word("WHEN");
+        if self.accept_any(&["ZERO", "ZEROS", "ZEROES"]).is_none() {
+            return Err(self.error("ZERO after BLANK WHEN"));
+        }
+        Ok(())
     }
 
     fn data_entry(&mut self, level: u8, pos: Pos) -> R<DataEntry> {
@@ -694,16 +736,7 @@ impl Parser<'_> {
         while !self.accept(&Tok::Period) {
             let clause = self.name("a data description clause or a period")?;
             match clause.as_str() {
-                "PIC" | "PICTURE" => {
-                    self.accept_word("IS");
-                    match self.peek() {
-                        Some(Tok::Pic(p)) => {
-                            e.picture = Some(p.clone());
-                            self.at += 1;
-                        }
-                        _ => return Err(self.error("a PICTURE character-string")),
-                    }
-                }
+                "PIC" | "PICTURE" => e.picture = Some(self.picture()?),
                 "USAGE" => {
                     self.accept_word("IS");
                     let w = self.name("a usage")?;
@@ -764,22 +797,7 @@ impl Parser<'_> {
                         }
                     }
                 }
-                "SIGN" | "LEADING" | "TRAILING" => {
-                    if clause == "SIGN" {
-                        self.accept_word("IS");
-                    }
-                    let side = if clause == "SIGN" { self.name("LEADING or TRAILING")? } else { clause.clone() };
-                    let position = match side.as_str() {
-                        "LEADING" => SignPosition::Leading,
-                        "TRAILING" => SignPosition::Trailing,
-                        _ => return Err(self.error("LEADING or TRAILING")),
-                    };
-                    let separate = self.accept_word("SEPARATE");
-                    if separate {
-                        self.accept_word("CHARACTER");
-                    }
-                    e.sign = Some(SignClause { position, separate });
-                }
+                "SIGN" | "LEADING" | "TRAILING" => e.sign = Some(self.sign_clause(&clause)?),
                 "JUSTIFIED" | "JUST" => {
                     self.accept_word("RIGHT");
                     e.justified = true;
@@ -789,10 +807,7 @@ impl Parser<'_> {
                     e.sync = true;
                 }
                 "BLANK" => {
-                    self.accept_word("WHEN");
-                    if self.accept_any(&["ZERO", "ZEROS", "ZEROES"]).is_none() {
-                        return Err(self.error("ZERO after BLANK WHEN"));
-                    }
+                    self.blank_when_zero()?;
                     e.blank_when_zero = true;
                 }
                 "GLOBAL" | "EXTERNAL" => {}
@@ -831,52 +846,54 @@ impl Parser<'_> {
     }
 
     fn paragraphs(&mut self) -> R<Vec<Paragraph>> {
-        let mut paragraphs: Vec<Paragraph> = Vec::new();
-        let mut section: Option<String> = None;
-        loop {
-            if self.peek().is_none() || self.at_end_program() || self.at_division(&["IDENTIFICATION", "ID"]) {
-                break;
-            }
+        let mut paragraphs = Vec::new();
+        while self.peek().is_some() && !self.at_end_program() && !self.at_division(&["IDENTIFICATION", "ID"]) {
             if self.is_word("DECLARATIVES") {
                 return Err(self.error("DECLARATIVES are not supported yet"));
             }
-            if self.section_header() {
-                let pos = self.pos();
-                let name = self.name("a section name")?;
-                self.at += 1;
-                if matches!(self.peek(), Some(Tok::Number(_))) {
-                    self.at += 1;
-                }
-                self.expect(&Tok::Period, "a period after the section header")?;
-                section = Some(name.clone());
-                paragraphs.push(Paragraph { name, statements: Vec::new(), section: section.clone(), is_section: true, pos });
-                continue;
-            }
-            if self.paragraph_header() {
-                let pos = self.pos();
-                let name = self.name("a paragraph name")?;
-                self.at += 1;
-                paragraphs.push(Paragraph { name, statements: Vec::new(), section: section.clone(), is_section: false, pos });
-                continue;
-            }
-            if self.accept(&Tok::Period) {
-                if let Some(p) = paragraphs.last_mut()
-                    && p.statements.last().is_some_and(|s| *s != Stmt::SentenceEnd)
-                {
-                    p.statements.push(Stmt::SentenceEnd);
-                }
-                continue;
-            }
-            let block = self.block(&[])?;
-            if block.is_empty() {
-                return Err(self.error("a statement"));
-            }
-            if paragraphs.is_empty() {
-                paragraphs.push(Paragraph { name: String::new(), statements: Vec::new(), section: None, is_section: false, pos: self.pos() });
-            }
-            paragraphs.last_mut().unwrap().statements.extend(block);
+            self.procedure_item(&mut paragraphs)?;
         }
         Ok(paragraphs)
+    }
+
+    /// A section or paragraph header, a separator period, or statements, added to `paragraphs`; true for a section header.
+    fn procedure_item(&mut self, paragraphs: &mut Vec<Paragraph>) -> R<bool> {
+        if self.section_header() {
+            let pos = self.pos();
+            let name = self.name("a section name")?;
+            self.at += 1;
+            if matches!(self.peek(), Some(Tok::Number(_))) {
+                self.at += 1;
+            }
+            self.expect(&Tok::Period, "a period after the section header")?;
+            paragraphs.push(Paragraph { section: Some(name.clone()), name, statements: Vec::new(), is_section: true, pos });
+            return Ok(true);
+        }
+        if self.paragraph_header() {
+            let pos = self.pos();
+            let name = self.name("a paragraph name")?;
+            self.at += 1;
+            let section = paragraphs.last().and_then(|p| p.section.clone());
+            paragraphs.push(Paragraph { name, statements: Vec::new(), section, is_section: false, pos });
+            return Ok(false);
+        }
+        if self.accept(&Tok::Period) {
+            if let Some(p) = paragraphs.last_mut()
+                && p.statements.last().is_some_and(|s| *s != Stmt::SentenceEnd)
+            {
+                p.statements.push(Stmt::SentenceEnd);
+            }
+            return Ok(false);
+        }
+        let block = self.block(&[])?;
+        if block.is_empty() {
+            return Err(self.error("a statement"));
+        }
+        if paragraphs.is_empty() {
+            paragraphs.push(Paragraph { name: String::new(), statements: Vec::new(), section: None, is_section: false, pos: self.pos() });
+        }
+        paragraphs.last_mut().unwrap().statements.extend(block);
+        Ok(false)
     }
 
     /// Statements up to a period, a paragraph header, or one of `stops`, none of them consumed.
@@ -1034,27 +1051,14 @@ impl Parser<'_> {
                 } else {
                     None
                 };
-                let (mut at_end, mut invalid) = (Handlers::default(), Handlers::default());
-                loop {
-                    let negated = self.is_word("NOT") && matches!(self.word_at(1), Some("AT" | "END" | "INVALID"));
-                    let start = if negated { 1 } else { 0 };
-                    let word = self.word_at(start).unwrap_or("").to_owned();
-                    if !matches!(word.as_str(), "AT" | "END" | "INVALID") {
-                        break;
+                let [at_end, invalid] = self.on_phrases(&["AT", "END", "INVALID"], &["END-READ"], |p| {
+                    if p.accept_word("INVALID") {
+                        p.accept_word("KEY");
+                        return Ok(1);
                     }
-                    self.at += start;
-                    let target = if word == "INVALID" {
-                        self.at += 1;
-                        self.accept_word("KEY");
-                        &mut invalid
-                    } else {
-                        self.accept_word("AT");
-                        self.expect_word("END")?;
-                        &mut at_end
-                    };
-                    let body = self.block(&["NOT", "END-READ"])?;
-                    if negated { target.not_on = Some(body) } else { target.on = Some(body) }
-                }
+                    p.accept_word("AT");
+                    p.expect_word("END").map(|()| 0)
+                })?;
                 self.accept_word("END-READ");
                 Stmt::Read(Box::new(ReadStmt { file, next, previous, into, key, at_end, invalid, pos }))
             }
@@ -1137,23 +1141,12 @@ impl Parser<'_> {
     }
 
     fn size_error(&mut self) -> R<Option<SizeError>> {
-        let mut found = None;
-        loop {
-            let negated = self.is_word("NOT") && matches!(self.word_at(1), Some("ON" | "SIZE"));
-            let plain = self.is_word("ON") || self.is_word("SIZE");
-            if !negated && !plain {
-                return Ok(found);
-            }
-            if negated {
-                self.at += 1;
-            }
-            self.accept_word("ON");
-            self.expect_word("SIZE")?;
-            self.expect_word("ERROR")?;
-            let body = self.block(&["NOT", "END-COMPUTE", "END-ADD", "END-SUBTRACT", "END-MULTIPLY", "END-DIVIDE"])?;
-            let se = found.get_or_insert(SizeError { on: Vec::new(), not_on: Vec::new() });
-            if negated { se.not_on = body } else { se.on = body }
-        }
+        let [h] = self.on_phrases(&["ON", "SIZE"], &["END-COMPUTE", "END-ADD", "END-SUBTRACT", "END-MULTIPLY", "END-DIVIDE"], |p| {
+            p.accept_word("ON");
+            p.expect_word("SIZE")?;
+            p.expect_word("ERROR").map(|()| 0)
+        })?;
+        Ok((h.on.is_some() || h.not_on.is_some()).then(|| SizeError { on: h.on.unwrap_or_default(), not_on: h.not_on.unwrap_or_default() }))
     }
 
     fn targets(&mut self) -> R<Vec<Target>> {
@@ -1297,19 +1290,29 @@ impl Parser<'_> {
         Ok(Stmt::PerformInline { body, repeat, pos })
     }
 
-    /// INVALID KEY and NOT INVALID KEY phrases, then the scope terminator.
-    fn invalid_key(&mut self, end: &str) -> R<Handlers> {
-        let mut h = Handlers::default();
+    /// ON and NOT ON phrases, each opening with one of `starts`; `head` reads its words and picks the handlers it fills.
+    fn on_phrases<const N: usize>(&mut self, starts: &[&str], ends: &[&str], head: impl Fn(&mut Self) -> R<usize>) -> R<[Handlers; N]> {
+        let stops = [&["NOT"][..], ends].concat();
+        let mut handlers = std::array::from_fn(|_| Handlers::default());
         loop {
-            let negated = self.is_word("NOT") && self.word_at(1) == Some("INVALID");
-            if !negated && !self.is_word("INVALID") {
-                break;
+            let negated = self.is_word("NOT") && self.word_at(1).is_some_and(|w| starts.contains(&w));
+            if !negated && !self.word().is_some_and(|w| starts.contains(&w)) {
+                return Ok(handlers);
             }
-            self.at += if negated { 2 } else { 1 };
-            self.accept_word("KEY");
-            let body = self.block(&["NOT", end])?;
+            self.at += usize::from(negated);
+            let h = &mut handlers[head(self)?];
+            let body = self.block(&stops)?;
             if negated { h.not_on = Some(body) } else { h.on = Some(body) }
         }
+    }
+
+    /// INVALID KEY and NOT INVALID KEY phrases, then the scope terminator.
+    fn invalid_key(&mut self, end: &str) -> R<Handlers> {
+        let [h] = self.on_phrases(&["INVALID"], &[end], |p| {
+            p.at += 1;
+            p.accept_word("KEY");
+            Ok(0)
+        })?;
         self.accept_word(end);
         Ok(h)
     }
@@ -1337,44 +1340,22 @@ impl Parser<'_> {
             }
         }
         let returning = if self.accept_word("RETURNING") { Some(self.reference()?) } else { None };
-        let (mut on_exception, mut not_on_exception) = (None, None);
-        loop {
-            let negated = self.is_word("NOT") && matches!(self.word_at(1), Some("ON" | "EXCEPTION" | "OVERFLOW"));
-            if !negated && !(self.is_word("ON") || self.is_word("EXCEPTION") || self.is_word("OVERFLOW")) {
-                break;
-            }
-            if negated {
-                self.at += 1;
-            }
-            self.accept_word("ON");
-            if self.accept_any(&["EXCEPTION", "OVERFLOW"]).is_none() {
-                return Err(self.error("EXCEPTION or OVERFLOW"));
-            }
-            let body = self.block(&["NOT", "END-CALL"])?;
-            if negated { not_on_exception = Some(body) } else { on_exception = Some(body) }
-        }
+        let [exception] = self.on_phrases(&["ON", "EXCEPTION", "OVERFLOW"], &["END-CALL"], |p| {
+            p.accept_word("ON");
+            p.accept_any(&["EXCEPTION", "OVERFLOW"]).map(|_| 0).ok_or_else(|| p.error("EXCEPTION or OVERFLOW"))
+        })?;
         self.accept_word("END-CALL");
-        Ok(Call { target, using, returning, on_exception, not_on_exception, pos })
+        Ok(Call { target, using, returning, on_exception: exception.on, not_on_exception: exception.not_on, pos })
     }
 
     /// ON OVERFLOW and NOT ON OVERFLOW phrases, in either order.
-    fn overflow(&mut self, end: &str) -> R<OnPhrases> {
-        let (mut on, mut not_on) = (None, None);
-        loop {
-            let negated = self.is_word("NOT") && matches!(self.word_at(1), Some("ON" | "OVERFLOW"));
-            if !negated && !(self.is_word("ON") || self.is_word("OVERFLOW")) {
-                break;
-            }
-            if negated {
-                self.at += 1;
-            }
-            self.accept_word("ON");
-            self.expect_word("OVERFLOW")?;
-            let body = self.block(&["NOT", end])?;
-            if negated { not_on = Some(body) } else { on = Some(body) }
-        }
+    fn overflow(&mut self, end: &str) -> R<Handlers> {
+        let [h] = self.on_phrases(&["ON", "OVERFLOW"], &[end], |p| {
+            p.accept_word("ON");
+            p.expect_word("OVERFLOW").map(|()| 0)
+        })?;
         self.accept_word(end);
-        Ok((on, not_on))
+        Ok(h)
     }
 
     fn string(&mut self, pos: Pos) -> R<StringStmt> {
@@ -1403,7 +1384,7 @@ impl Parser<'_> {
         } else {
             None
         };
-        let (on_overflow, not_on_overflow) = self.overflow("END-STRING")?;
+        let Handlers { on: on_overflow, not_on: not_on_overflow } = self.overflow("END-STRING")?;
         Ok(StringStmt { sources, into, pointer, on_overflow, not_on_overflow, pos })
     }
 
@@ -1453,7 +1434,7 @@ impl Parser<'_> {
         } else {
             None
         };
-        let (on_overflow, not_on_overflow) = self.overflow("END-UNSTRING")?;
+        let Handlers { on: on_overflow, not_on: not_on_overflow } = self.overflow("END-UNSTRING")?;
         Ok(Unstring { source, delimiters, into, pointer, tallying, on_overflow, not_on_overflow, pos })
     }
 
@@ -2073,6 +2054,11 @@ fn system_text_entries(text: &str) -> R<Vec<DataEntry>> {
 const SELECT_CLAUSES: &[&str] = &[
     "ASSIGN", "ORGANIZATION", "ACCESS", "FILE", "STATUS", "RECORD", "ALTERNATE", "RELATIVE", "LINE", "SEQUENTIAL", "INDEXED", "RESERVE",
     "PADDING", "LOCK", "SHARING",
+];
+
+/// Words that begin an FD clause, and so end the clause or the list of report names before them.
+const FD_WORDS: &[&str] = &[
+    "RECORDING", "RECORD", "BLOCK", "LABEL", "DATA", "VALUE", "CODE-SET", "LINAGE", "REPORT", "REPORTS", "IS", "EXTERNAL", "GLOBAL", "STYLE",
 ];
 
 fn is_clause_word(w: &str) -> bool {

@@ -37,11 +37,6 @@ const RD_WORDS: &[&str] = &[
     "CODE", "WITH", "CONTROL", "CONTROLS", "PAGE", "HEADING", "FIRST", "LAST", "FOOTING", "LINE", "IS", "GLOBAL", "ALLOW", "OVERFLOW", "SUM", "STYLE",
 ];
 
-/// Words that begin an FD clause, so end the list of report names before them.
-const FD_WORDS: &[&str] = &[
-    "RECORDING", "RECORD", "BLOCK", "LABEL", "DATA", "VALUE", "CODE-SET", "LINAGE", "REPORT", "REPORTS", "IS", "EXTERNAL", "GLOBAL", "STYLE",
-];
-
 impl Parser<'_> {
     pub(super) fn report_section(&mut self) -> R<Vec<Report>> {
         let mut reports = Vec::new();
@@ -102,8 +97,7 @@ impl Parser<'_> {
         }
         self.at += 1;
         self.expect(&Tok::Period, "a period after DECLARATIVES")?;
-        let mut paragraphs: Vec<Paragraph> = Vec::new();
-        let mut section: Option<String> = None;
+        let mut paragraphs = Vec::new();
         loop {
             if self.is_word("END") && self.word_at(1) == Some("DECLARATIVES") {
                 self.at += 2;
@@ -113,46 +107,12 @@ impl Parser<'_> {
             if self.peek().is_none() || self.at_end_program() || self.at_division(&["IDENTIFICATION", "ID"]) {
                 return Err(self.error("END DECLARATIVES"));
             }
-            if self.section_header() {
-                let pos = self.pos();
-                let name = self.name("a section name")?;
-                self.at += 1;
-                if matches!(self.peek(), Some(Tok::Number(_))) {
-                    self.at += 1;
-                }
-                self.expect(&Tok::Period, "a period after the section header")?;
-                section = Some(name.clone());
-                paragraphs.push(Paragraph { name, statements: Vec::new(), section: section.clone(), is_section: true, pos });
-                if self.is_word("USE") {
-                    let used = self.use_statement(paragraphs.len() - 1)?;
-                    writer.uses.push(used);
-                }
-                continue;
-            }
-            if paragraphs.is_empty() {
+            if paragraphs.is_empty() && !self.section_header() {
                 return Err(self.error("a section in DECLARATIVES"));
             }
-            if self.paragraph_header() {
-                let pos = self.pos();
-                let name = self.name("a paragraph name")?;
-                self.at += 1;
-                paragraphs.push(Paragraph { name, statements: Vec::new(), section: section.clone(), is_section: false, pos });
-                continue;
-            }
-            if self.accept(&Tok::Period) {
-                if let Some(p) = paragraphs.last_mut()
-                    && p.statements.last().is_some_and(|s| *s != Stmt::SentenceEnd)
-                {
-                    p.statements.push(Stmt::SentenceEnd);
-                }
-                continue;
-            }
-            let block = self.block(&[])?;
-            if block.is_empty() {
-                return Err(self.error("a statement"));
-            }
-            if let Some(p) = paragraphs.last_mut() {
-                p.statements.extend(block);
+            if self.procedure_item(&mut paragraphs)? && self.is_word("USE") {
+                let used = self.use_statement(paragraphs.len() - 1)?;
+                writer.uses.push(used);
             }
         }
         writer.procedure_start = paragraphs.len();
@@ -282,10 +242,7 @@ impl Parser<'_> {
                 other => return Err(Error::at(clause_pos, format!("{other} is not an RD clause ironwork for COBOL supports yet"))),
             }
         }
-        while let Some(Tok::Number(level)) = self.peek() {
-            let pos = self.pos();
-            let level: u8 = level.parse().map_err(|_| self.error("a level number"))?;
-            self.at += 1;
+        while let Some((level, pos)) = self.level_number()? {
             if level == 88 || level == 66 || level == 77 {
                 return Err(Error::at(pos, format!("a level-{level} entry in the REPORT SECTION is not supported yet")));
             }
@@ -379,14 +336,7 @@ impl Parser<'_> {
                 }
                 "PIC" | "PICTURE" => {
                     self.at += 1;
-                    self.accept_word("IS");
-                    match self.peek() {
-                        Some(Tok::Pic(p)) => {
-                            e.picture = Some(p.clone());
-                            self.at += 1;
-                        }
-                        _ => return Err(self.error("a PICTURE character-string")),
-                    }
+                    e.picture = Some(self.picture()?);
                 }
                 "SOURCE" | "SOURCES" => {
                     self.at += 1;
@@ -425,10 +375,7 @@ impl Parser<'_> {
                 }
                 "BLANK" => {
                     self.at += 1;
-                    self.accept_word("WHEN");
-                    if self.accept_any(&["ZERO", "ZEROS", "ZEROES"]).is_none() {
-                        return Err(self.error("ZERO after BLANK WHEN"));
-                    }
+                    self.blank_when_zero()?;
                     e.blank_when_zero = true;
                 }
                 "JUSTIFIED" | "JUST" => {
@@ -438,20 +385,7 @@ impl Parser<'_> {
                 }
                 "SIGN" | "LEADING" | "TRAILING" => {
                     self.at += 1;
-                    if word == "SIGN" {
-                        self.accept_word("IS");
-                    }
-                    let side = if word == "SIGN" { self.name("LEADING or TRAILING")? } else { word.clone() };
-                    let position = match side.as_str() {
-                        "LEADING" => SignPosition::Leading,
-                        "TRAILING" => SignPosition::Trailing,
-                        _ => return Err(self.error("LEADING or TRAILING")),
-                    };
-                    let separate = self.accept_word("SEPARATE");
-                    if separate {
-                        self.accept_word("CHARACTER");
-                    }
-                    e.sign = Some(SignClause { position, separate });
+                    e.sign = Some(self.sign_clause(&word)?);
                 }
                 "USAGE" | "DISPLAY" => {
                     self.at += 1;

@@ -84,21 +84,8 @@ impl Parser<'_> {
         out.push(Program {
             id: name,
             options: options.to_vec(),
-            initial: false,
-            recursive: false,
-            working_storage: Vec::new(),
-            local_storage: Vec::new(),
-            linkage: Vec::new(),
-            using: Vec::new(),
-            returning: None,
-            paragraphs: Vec::new(),
-            files: Vec::new(),
-            sources: Vec::new(),
-            exec_declarations: Vec::new(),
-            report_writer: Default::default(),
             oo: Some(Box::new(Oo { repository, unit: OoUnit::Class(Box::new(def)) })),
-            environment: Environment::default(),
-            nested: Vec::new(),
+            ..Program::default()
         });
         Ok(())
     }
@@ -306,22 +293,12 @@ impl Parser<'_> {
             }
         }
         let returning = if self.accept_word("RETURNING") { Some(self.reference()?) } else { None };
-        let (mut on_exception, mut not_on_exception) = (None, None);
-        loop {
-            let negated = self.is_word("NOT") && matches!(self.word_at(1), Some("ON" | "EXCEPTION"));
-            if !negated && !(self.is_word("ON") || self.is_word("EXCEPTION")) {
-                break;
-            }
-            if negated {
-                self.at += 1;
-            }
-            self.accept_word("ON");
-            self.expect_word("EXCEPTION")?;
-            let body = self.block(&["NOT", "END-INVOKE"])?;
-            if negated { not_on_exception = Some(body) } else { on_exception = Some(body) }
-        }
+        let [exception] = self.on_phrases(&["ON", "EXCEPTION"], &["END-INVOKE"], |p| {
+            p.accept_word("ON");
+            p.expect_word("EXCEPTION").map(|()| 0)
+        })?;
         self.accept_word("END-INVOKE");
-        Ok(Invoke { target, method, using, returning, on_exception, not_on_exception, pos })
+        Ok(Invoke { target, method, using, returning, on_exception: exception.on, not_on_exception: exception.not_on, pos })
     }
 }
 

@@ -3,7 +3,7 @@ use crate::Pos;
 mod oo;
 pub use oo::*;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Program {
     pub id: String,
     /// Options from CBL and PROCESS cards, in the order written.

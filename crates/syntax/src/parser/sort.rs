@@ -112,20 +112,10 @@ impl Parser<'_> {
                 let file = self.name("a sort or merge file")?;
                 self.accept_word("RECORD");
                 let into = if self.accept_word("INTO") { Some(self.reference()?) } else { None };
-                let mut at_end = Handlers::default();
-                loop {
-                    let negated = self.is_word("NOT") && matches!(self.word_at(1), Some("AT" | "END"));
-                    if !negated && !self.is_word("AT") && !self.is_word("END") {
-                        break;
-                    }
-                    if negated {
-                        self.at += 1;
-                    }
-                    self.accept_word("AT");
-                    self.expect_word("END")?;
-                    let body = self.block(&["NOT", "END-RETURN"])?;
-                    if negated { at_end.not_on = Some(body) } else { at_end.on = Some(body) }
-                }
+                let [at_end] = self.on_phrases(&["AT", "END"], &["END-RETURN"], |p| {
+                    p.accept_word("AT");
+                    p.expect_word("END").map(|()| 0)
+                })?;
                 self.accept_word("END-RETURN");
                 Ok(Sorting::Return { file, into, at_end, pos })
             }
