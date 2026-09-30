@@ -4,12 +4,14 @@ pub mod codec;
 mod container;
 pub mod crc;
 pub mod leb;
+mod programs;
 mod strings;
 
 use std::fmt;
 
 pub use codec::{Decode, Encode, Reader, Writer};
 pub use container::{EXTENSIONS, MAGIC, Module, ModuleWriter, OPTIONAL, Section, SectionEntry, Version};
+pub use programs::{DirectoryEntry, LoadedModule, read, write, write_with};
 pub use strings::StringTable;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

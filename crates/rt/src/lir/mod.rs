@@ -201,7 +201,7 @@ codec_struct!(Block { ops, end });
 codec_struct!(Plans { arith, init, display, inspect, string, unstring, search_all, function });
 codec_struct!(Services { file_ops, files, calls, sorts, releases, returns, invokes, cics, sqlca });
 
-fn program_valid(program: &Program) -> Result<(), String> {
+pub(crate) fn program_valid(program: &Program) -> Result<(), String> {
     sql::table_valid(&program.sql, &program.symbols)
 }
 
