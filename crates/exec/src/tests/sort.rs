@@ -78,7 +78,7 @@ fn input_and_output_procedures_with_packed_and_binary_keys() {
     );
     let (out, err, ending) = run_files(&source, &[]);
     assert!(ending.is_ok(), "{ending:?} {err}");
-    assert_eq!(out, "D-100    0\nC  -5  300\nA  -5   10\nG  -5   10\nF   0   -7\nB   3   -2\nE   3   -2\nSTILL AT END\nAFTER 000{\n");
+    assert_eq!(out, "D-100    0\nC  -5  300\nA  -5   10\nG  -5   10\nF   0   -7\nB   3   -2\nE   3   -2\nSTILL AT END\nAFTER 0000\n");
 }
 
 #[test]
@@ -229,7 +229,7 @@ fn giving_indexed_and_relative_files() {
     );
     let (out, err, ending) = run_files(&source, &[dd("IDD", &input), dd("KDD", &ksds), dd("RDD", &rrds)]);
     assert!(ending.is_ok(), "{ending:?} {err}");
-    assert_eq!(out, "0003 000{\n");
+    assert_eq!(out, "0003 0000\n");
     assert_eq!(std::fs::read_to_string(&ksds).unwrap(), "A1\nB2\nC3\n");
     assert_eq!(std::fs::read_to_string(&rrds).unwrap(), "A1\nB2\nC3\n");
 }

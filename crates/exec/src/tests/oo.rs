@@ -602,7 +602,7 @@ fn jni_services_make_delete_and_frame_references() {
         "MOVE BAL TO SHOWN DISPLAY SHOWN",
         "INVOKE B \"getBalance\" RETURNING BAL",
     ]);
-    assert_eq!(out, "000000000A\n000000000B\n000000000{\nONE OBJECT\nNOT NULL\n 100\n");
+    assert_eq!(out, "0000000001\n0000000002\n0000000000\nONE OBJECT\nNOT NULL\n 100\n");
     let message = abend(ending);
     assert!(
         message.starts_with("INVOKE B \"getBalance\": B holds a local reference to an Account object, returned by method \"open\" of Account, invoked at line 41 of CLIENT; it expired when PopLocalFrame at line 42 of CLIENT freed its frame"),

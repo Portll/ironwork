@@ -28,7 +28,7 @@ fn each_event_performs_the_processing_procedure_with_its_text() {
             "CONTENT-CHARACTERS            {Hello, World!}",
             "END-OF-ELEMENT                {msg}",
             "END-OF-DOCUMENT               {}",
-            "PARSED 00000000{",
+            "PARSED 000000000",
         ]
     );
 }
@@ -44,15 +44,15 @@ fn end_of_input_takes_the_next_segment_when_xml_code_is_one() {
     assert_eq!(
         trimmed(&out),
         [
-            "START-OF-DOCUMENT   00000000{ 000000000 {}",
-            "START-OF-ELEMENT    00000000{ 000000001 {a}",
-            "START-OF-ELEMENT    00000000{ 000000001 {b}",
-            "CONTENT-CHARACTERS  00000000B 000000008 {Hello, w}",
-            "END-OF-INPUT        00000000{ 000000000 {}",
-            "CONTENT-CHARACTERS  00000000A 000000004 {orld}",
-            "END-OF-ELEMENT      00000000{ 000000001 {b}",
-            "END-OF-ELEMENT      00000000{ 000000001 {a}",
-            "END-OF-DOCUMENT     00000000{ 000000000 {}",
+            "START-OF-DOCUMENT   000000000 000000000 {}",
+            "START-OF-ELEMENT    000000000 000000001 {a}",
+            "START-OF-ELEMENT    000000000 000000001 {b}",
+            "CONTENT-CHARACTERS  000000002 000000008 {Hello, w}",
+            "END-OF-INPUT        000000000 000000000 {}",
+            "CONTENT-CHARACTERS  000000001 000000004 {orld}",
+            "END-OF-ELEMENT      000000000 000000001 {b}",
+            "END-OF-ELEMENT      000000000 000000001 {a}",
+            "END-OF-DOCUMENT     000000000 000000000 {}",
         ]
     );
 }
@@ -65,7 +65,7 @@ fn an_exception_passes_the_xmlss_code_and_ends_the_parse() {
         &["XML PARSE DOC PROCESSING PROCEDURE P\n    ON EXCEPTION DISPLAY 'FAILED ' XML-CODE\n    NOT ON EXCEPTION DISPLAY 'PARSED'\nEND-XML"],
         &["IF XML-EVENT = 'EXCEPTION'\n    DISPLAY XML-CODE ' ' XML-TEXT\nEND-IF."],
     );
-    assert_eq!(trimmed(&out), ["00079877C <msg>Hello", "FAILED 00079877C"]);
+    assert_eq!(trimmed(&out), ["000798773 <msg>Hello", "FAILED 000798773"]);
 }
 
 #[test]

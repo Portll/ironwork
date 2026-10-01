@@ -76,7 +76,7 @@ fn a_receiver_too_small_is_an_exception_with_json_code_one() {
         data,
         &["JSON GENERATE D FROM G COUNT N ENCODING 37\n    ON EXCEPTION DISPLAY 'TOO SMALL ' JSON-CODE ' ' N\n    NOT ON EXCEPTION DISPLAY 'FITS'\nEND-JSON", "DISPLAY D"],
     );
-    assert_eq!(out, "TOO SMALL 00000000A 0010\n{\"G\":{\"LON\n");
+    assert_eq!(out, "TOO SMALL 000000001 0010\n{\"G\":{\"LON\n");
 }
 
 #[test]

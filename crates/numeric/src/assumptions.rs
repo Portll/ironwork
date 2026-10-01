@@ -329,7 +329,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: DISPLAY_OF_NONDISPLAY_NUMERIC,
-        claim: "DISPLAY shows a packed or binary item as zoned digits of its PICTURE, with the sign overpunched on the last digit when the item is signed; a COMP-5 item, or any binary item under TRUNC(BIN), shows its whole binary value in 5, 10, or 19 (signed) or 20 digits for a halfword, fullword or doubleword",
+        claim: "DISPLAY shows a packed or binary item as zoned digits of its PICTURE, a negative value's sign overpunched on the last digit and a positive value's digits unsigned (Programming Guide SC27-8714-03, p. 363, Table 48; Language Reference SC27-8713-03, p. 334); a COMP-5 item, or any binary item under TRUNC(BIN), shows its whole binary value in 5, 10, or 19 (signed) or 20 digits for a halfword, fullword or doubleword",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

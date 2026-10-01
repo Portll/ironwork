@@ -76,7 +76,7 @@ fn synchronized_binary_items_hold_their_values() {
         "       01  R.\n           05 C PIC X VALUE 'A'.\n           05 N PIC S9(5) COMP SYNC VALUE 12345.\n           05 T OCCURS 3.\n              10 T-C PIC X.\n              10 T-N PIC S9(4) COMP SYNC.\n",
         &[line("MOVE 7 TO T-N(3)"), line("ADD N TO T-N(3)"), line("DISPLAY C ' ' N ' ' T-N(3) ' ' LENGTH OF R"), line("GOBACK.")].concat(),
     ));
-    assert_eq!(out, "A 1234E 235B 000000020\n");
+    assert_eq!(out, "A 12345 2352 000000020\n");
 }
 
 #[test]

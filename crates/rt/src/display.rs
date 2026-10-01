@@ -13,20 +13,17 @@ use zarch::decimal;
 type R<T> = Result<T, Abend>;
 
 /// A data item, by its kind: packed and binary items as their last digits, COMP-5 and TRUNC(BIN)
-/// binary items as every digit their halfword, fullword or doubleword holds. Under DISPSIGN(SEP) a
-/// signed binary, packed or overpunched zoned item shows its sign, + or -, before those digits
-/// (Programming Guide SC27-8714-03, pp. 362-363; assumption C213).
+/// binary items as every digit their halfword, fullword or doubleword holds, a negative value's
+/// sign overpunched on the last. Under DISPSIGN(SEP) a signed binary, packed or overpunched zoned
+/// item shows its sign, + or -, before its digits (Programming Guide SC27-8714-03, pp. 362-363,
+/// Table 48; assumption C213).
 pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<String> {
     let separate = facts.options().dispsign == DispSign::Sep;
     Ok(match loc.kind {
         Kind::National => utf16_text(store::bytes(mem, loc)),
         Kind::Packed { digits, signed, .. } | Kind::Binary { digits, signed, .. } => {
             let Val::Num(f) = store::read_stored(facts, mem, loc, pos)? else { unreachable!() };
-            let zone = match (signed && !separate, f.negative) {
-                (false, _) => decimal::UNSIGNED,
-                (true, true) => decimal::MINUS,
-                (true, false) => decimal::PLUS,
-            };
+            let zone = if signed && !separate && f.negative { decimal::MINUS } else { decimal::UNSIGNED };
             let whole = match loc.kind {
                 Kind::Binary { native, .. } => native || facts.options().trunc == Trunc::Bin,
                 _ => false,

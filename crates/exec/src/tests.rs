@@ -953,8 +953,8 @@ fn trunc_opt_reports_unless_silent() {
 fn display_shows_the_whole_binary_value_under_trunc_bin_and_for_comp_5() {
     let data = "       01  B PIC S9(4) BINARY.\n       01  C PIC S9(4) COMP-5.\n       01  U PIC 9(8) COMP-5.\n";
     let body = [line("MOVE 12345 TO B C"), line("MOVE 123456789 TO U"), line("DISPLAY B ' ' C ' ' U"), line("GOBACK.")].concat();
-    assert_eq!(run(&program("TRUNC(BIN)", data, &body)), "1234E 1234E 0123456789\n");
-    assert_eq!(run(&program("TRUNC(STD)", data, &body)), "234E 1234E 0123456789\n");
+    assert_eq!(run(&program("TRUNC(BIN)", data, &body)), "12345 12345 0123456789\n");
+    assert_eq!(run(&program("TRUNC(STD)", data, &body)), "2345 12345 0123456789\n");
 }
 
 /// The items of Table 48 (Programming Guide SC27-8714-03, p. 363).
@@ -964,9 +964,8 @@ const TABLE_48: &str = "       01  UB PIC 9(3) BINARY VALUE 111.\n       01  PB 
 fn dispsign_sep_shows_a_signed_items_sign_before_its_digits_as_table_48_does() {
     let body = [line("DISPLAY UB ' ' PB ' ' NB"), line("DISPLAY UPD ' ' PPD ' ' NPD"), line("DISPLAY UZ ' ' TP ' ' TN ' ' LP ' ' LN"), line("GOBACK.")].concat();
     assert_eq!(run(&program("DISPSIGN(SEP)", TABLE_48, &body)), "111 +111 -111\n222 +222 -222\n333 +333 -333 +333 -333\n");
-    let body = [line("DISPLAY UB ' ' NB ' ' UPD ' ' NPD"), line("DISPLAY UZ ' ' TP ' ' TN ' ' LP ' ' LN"), line("GOBACK.")].concat();
-    assert_eq!(run(&program("DS(C)", TABLE_48, &body)), "111 11J 222 22K\n333 33C 33L C33 L33\n");
-    assert_eq!(run(&program("", TABLE_48, &body)), "111 11J 222 22K\n333 33C 33L C33 L33\n");
+    assert_eq!(run(&program("DS(C)", TABLE_48, &body)), "111 111 11J\n222 222 22K\n333 33C 33L C33 L33\n");
+    assert_eq!(run(&program("", TABLE_48, &body)), "111 111 11J\n222 222 22K\n333 33C 33L C33 L33\n");
 }
 
 #[test]
@@ -974,7 +973,7 @@ fn dispsign_sep_leaves_a_separate_sign_where_it_is_and_reads_a_zoned_sign_from_i
     let data = "       01  SS PIC S9(3) SIGN TRAILING SEPARATE VALUE -333.\n       01  C5 PIC S9(4) COMP-5.\n       01  G.\n           05 BAD PIC S9(3).\n       01  F PIC S9(3)V99 COMP-3 VALUE -1.5.\n";
     let body = [line("MOVE 12345 TO C5"), line("MOVE '12 ' TO G"), line("DISPLAY SS ' ' C5 ' ' BAD ' ' F"), line("GOBACK.")].concat();
     assert_eq!(run(&program("DS(S)", data, &body)), "333- +12345 +120 -00150\n");
-    assert_eq!(run(&program("DS(C)", data, &body)), "333- 1234E 12  0015}\n");
+    assert_eq!(run(&program("DS(C)", data, &body)), "333- 12345 12  0015}\n");
 }
 
 #[test]
@@ -1379,7 +1378,7 @@ fn call_by_reference_content_and_value_with_returning_and_return_code() {
     );
     let (out, err, ending) = run_unit(&source, vec![], "");
     assert_eq!(ending.as_ref().map(|e| e.1), Ok(4), "{ending:?} {err}");
-    assert_eq!(out, "XYZ BBB 0107 000D\n0201\n0101\n");
+    assert_eq!(out, "XYZ BBB 0107 0004\n0201\n0101\n");
 }
 
 #[test]
@@ -1848,7 +1847,7 @@ fn cics_link_passes_the_commarea_and_xctl_does_not_come_back() {
     let source = format!("{main}       END PROGRAM MAINP.\n{sub}       END PROGRAM SUBP.\n{last}       END PROGRAM LASTP.\n");
     let (out, ending) = run_cics(&source, task("TR04"), None, unit::Clock::System);
     assert!(ending.is_ok(), "{ending:?}");
-    assert_eq!(out, "SUB 000E AAAAA\nBACK BBBBB\nPGMIDERR\nLAST\n");
+    assert_eq!(out, "SUB 0005 AAAAA\nBACK BBBBB\nPGMIDERR\nLAST\n");
 }
 
 #[test]
@@ -1878,7 +1877,7 @@ fn cics_time_assign_and_abend() {
         .concat(),
     );
     let (out, ending) = run_cics(&source, task("TR05"), None, unit::Clock::Fixed(1_790_514_309, 25));
-    assert_eq!(out, "00399950310925{\n2026/09/27 13:05:09 00000000\nUSER01  |IRONWORK\nRECOVERED\n");
+    assert_eq!(out, "003999503109250\n2026/09/27 13:05:09 00000000\nUSER01  |IRONWORK\nRECOVERED\n");
     assert_eq!(ending.unwrap_err().code, "XY34");
 }
 
@@ -2027,7 +2026,7 @@ fn bms_maps_send_and_receive_through_a_scripted_terminal() {
     let ending = compiled.execute_cics(library, files::Dds::default(), t, unit::Clock::System, &mut out, &mut err);
     let out = String::from_utf8(out).unwrap();
     assert!(ending.is_ok(), "{ending:?}\n{out}");
-    assert_eq!(out, "CUST ACME     L=000D QTY 007\nENTER\nMAPFAIL\nCLEAR\n");
+    assert_eq!(out, "CUST ACME     L=0004 QTY 007\nENTER\nMAPFAIL\nCLEAR\n");
     let screen = shown.borrow()[0].clone();
     let rows: Vec<&str> = screen.lines().collect();
     assert_eq!(rows[0], " ORDER ENTRY");
