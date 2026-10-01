@@ -1,25 +1,64 @@
 //! Integer dates, Julian dates and the sliding century window (Language Reference SC27-8713-03,
 //! pp. 503-504, 545-549, 577, 645-647, 681).
 
-use crate::calendar::{civil, days_from_civil, days_in_month, is_leap, SECONDS_PER_DAY};
+use crate::calendar::{civil, days_from_civil, days_in_month, is_leap, LILIAN_ZERO, SECONDS_PER_DAY};
+use numeric::IntDate;
 
-/// The day before integer date 1, 1 January 1601.
-const DAY_ZERO: i64 = days_from_civil(1600, 12, 31);
-pub const LAST_INTEGER_DATE: i64 = 3_067_671;
+/// Days since 1970-01-01 of the day before integer date 1: 31 December 1600 under INTDATE(ANSI),
+/// 14 October 1582 under INTDATE(LILIAN) (Programming Guide SC27-8714-03, pp. 59, 375).
+pub const fn day_zero(intdate: IntDate) -> i64 {
+    match intdate {
+        IntDate::Ansi => days_from_civil(1600, 12, 31),
+        IntDate::Lilian => LILIAN_ZERO,
+    }
+}
 
-/// DAY-OF-INTEGER: the YYYYDDD of integer date `n`.
-pub fn day_of_integer(n: i64) -> Option<i64> {
-    if !(1..=LAST_INTEGER_DATE).contains(&n) {
+/// The integer date of 31 December 9999: 3,067,671 under ANSI (Language Reference SC27-8713-03,
+/// p. 509), 3,074,324 under LILIAN (assumption C214).
+pub const fn last_integer_date(intdate: IntDate) -> i64 {
+    days_from_civil(9999, 12, 31) - day_zero(intdate)
+}
+
+/// The integer date of `days` since 1970-01-01, if it is from 1 to the last.
+fn integer_date(days: i64, intdate: IntDate) -> Option<i64> {
+    let n = days - day_zero(intdate);
+    (1..=last_integer_date(intdate)).contains(&n).then_some(n)
+}
+
+/// Days since 1970-01-01 of integer date `n`, if it is from 1 to the last.
+fn days_of(n: i64, intdate: IntDate) -> Option<i64> {
+    (1..=last_integer_date(intdate)).contains(&n).then(|| day_zero(intdate) + n)
+}
+
+/// INTEGER-OF-DATE: the integer date of a valid YYYYMMDD.
+pub fn integer_of_date(yyyymmdd: i64, intdate: IntDate) -> Option<i64> {
+    let (year, month, day) = (yyyymmdd / 10000, yyyymmdd / 100 % 100, yyyymmdd % 100);
+    if year > 9999 || !(1..=12).contains(&month) || !(1..=i64::from(days_in_month(year, month as u32))).contains(&day) {
         return None;
     }
-    let days = DAY_ZERO + n;
+    integer_date(days_from_civil(year, month, day), intdate)
+}
+
+/// DATE-OF-INTEGER: the YYYYMMDD of integer date `n`.
+pub fn date_of_integer(n: i64, intdate: IntDate) -> Option<i64> {
+    let c = civil(days_of(n, intdate)? * SECONDS_PER_DAY);
+    Some(c.year * 10000 + i64::from(c.month) * 100 + i64::from(c.day))
+}
+
+/// DAY-OF-INTEGER: the YYYYDDD of integer date `n`.
+pub fn day_of_integer(n: i64, intdate: IntDate) -> Option<i64> {
+    let days = days_of(n, intdate)?;
     let year = civil(days * SECONDS_PER_DAY).year;
     Some(year * 1000 + days - days_from_civil(year, 1, 1) + 1)
 }
 
 /// INTEGER-OF-DAY: the integer date of a valid YYYYDDD.
-pub fn integer_of_day(yyyyddd: i64) -> Option<i64> {
-    (test_day(yyyyddd) == 0).then(|| days_from_civil(yyyyddd / 1000, 1, 1) + yyyyddd % 1000 - 1 - DAY_ZERO)
+pub fn integer_of_day(yyyyddd: i64, intdate: IntDate) -> Option<i64> {
+    let (year, day) = (yyyyddd / 1000, yyyyddd % 1000);
+    if year > 9999 || !(1..=if is_leap(year) { 366 } else { 365 }).contains(&day) {
+        return None;
+    }
+    integer_date(days_from_civil(year, 1, 1) + day - 1, intdate)
 }
 
 /// TEST-DATE-YYYYMMDD: 0 for a valid date, else 1 for the year, 2 the month, 3 the day.
@@ -86,13 +125,38 @@ mod tests {
 
     #[test]
     fn integer_and_julian_dates_convert_both_ways() {
-        assert_eq!(day_of_integer(1), Some(1_601_001));
-        assert_eq!(day_of_integer(LAST_INTEGER_DATE), Some(9_999_365));
-        assert_eq!(day_of_integer(143_951), Some(1_995_046));
-        assert_eq!(integer_of_day(1_995_046), Some(143_951));
-        assert_eq!(integer_of_day(2_000_366), Some(integer_of_day(2_001_001).unwrap() - 1));
-        assert_eq!(day_of_integer(0), None);
-        assert_eq!(integer_of_day(1_999_366), None);
+        let ansi = IntDate::Ansi;
+        assert_eq!(day_of_integer(1, ansi), Some(1_601_001));
+        assert_eq!(last_integer_date(ansi), 3_067_671);
+        assert_eq!(day_of_integer(last_integer_date(ansi), ansi), Some(9_999_365));
+        assert_eq!(day_of_integer(143_951, ansi), Some(1_995_046));
+        assert_eq!(integer_of_day(1_995_046, ansi), Some(143_951));
+        assert_eq!(integer_of_day(2_000_366, ansi), Some(integer_of_day(2_001_001, ansi).unwrap() - 1));
+        assert_eq!(day_of_integer(0, ansi), None);
+        assert_eq!(integer_of_day(1_999_366, ansi), None);
+        assert_eq!(integer_of_day(1_600_366, ansi), None);
+        assert_eq!(integer_of_date(16_010_101, ansi), Some(1));
+        assert_eq!(date_of_integer(143_951, ansi), Some(19_950_215));
+        assert_eq!(integer_of_date(16_001_231, ansi), None);
+        assert_eq!(integer_of_date(19_950_229, ansi), None);
+        assert_eq!(date_of_integer(3_067_672, ansi), None);
+    }
+
+    #[test]
+    fn lilian_integer_dates_count_from_15_october_1582_as_language_environment_does() {
+        let lilian = IntDate::Lilian;
+        assert_eq!(date_of_integer(1, lilian), Some(15_821_015));
+        assert_eq!(integer_of_date(15_821_015, lilian), Some(1));
+        assert_eq!(integer_of_date(15_821_014, lilian), None);
+        assert_eq!(integer_of_date(16_010_101, lilian), Some(6_654), "6,653 days before the ANSI day 1");
+        assert_eq!(integer_of_date(19_950_215, lilian), Some(143_951 + 6_653));
+        assert_eq!(last_integer_date(lilian), 3_074_324);
+        assert_eq!(date_of_integer(3_074_324, lilian), Some(99_991_231));
+        assert_eq!(date_of_integer(3_074_325, lilian), None);
+        assert_eq!(day_of_integer(1, lilian), Some(1_582_288));
+        assert_eq!(integer_of_day(1_582_288, lilian), Some(1));
+        assert_eq!(integer_of_day(1_582_287, lilian), None);
+        assert_eq!(date_of_integer(0, lilian), None);
     }
 
     #[test]

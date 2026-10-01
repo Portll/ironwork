@@ -182,3 +182,19 @@ fn initial_with_thread_checks_with_return_code_4_and_runs_as_noinitial() {
     let ran = ironwork(&["run", source.path()]);
     assert_eq!((ran.status.code(), stderr(&ran), String::from_utf8_lossy(&ran.stdout).into_owned()), (Some(0), warning, "RAN\n".into()));
 }
+
+#[test]
+fn a_call_of_ceecbldy_under_intdate_lilian_is_a_warning_on_its_line_and_calls_ceedays() {
+    let program = |card: &str| {
+        format!("{card}       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  D.\n           05 D-LEN PIC S9(4) BINARY VALUE 8.\n           05 D-TEXT PIC X(8) VALUE '19950215'.\n       01  PICS.\n           05 P-LEN PIC S9(4) BINARY VALUE 8.\n           05 P-TEXT PIC X(8) VALUE 'YYYYMMDD'.\n       01  L PIC 9(9) BINARY.\n       PROCEDURE DIVISION.\n           CALL 'CEECBLDY' USING D PICS L OMITTED\n           DISPLAY L\n           GOBACK.\n")
+    };
+    let lilian = Source::new("ceecbldy-lilian", &program("       CBL INTDATE(LILIAN)\n"));
+    let warning = format!("{}:14:12: warning: CALL 'CEECBLDY' under INTDATE(LILIAN): CEECBLDY gives an ANSI integer date, which nothing can use under LILIAN, so the CALL is to CEEDAYS\n", lilian.path());
+    let checked = ironwork(&["check", lilian.path()]);
+    assert_eq!((checked.status.code(), stderr(&checked)), (Some(4), warning.clone()));
+    let ran = ironwork(&["run", lilian.path()]);
+    assert_eq!((ran.status.code(), stderr(&ran), String::from_utf8_lossy(&ran.stdout).into_owned()), (Some(0), warning, "000150604\n".into()));
+    let ansi = Source::new("ceecbldy-ansi", &program(""));
+    let checked = ironwork(&["check", ansi.path()]);
+    assert_eq!((checked.status.code(), stderr(&checked)), (Some(0), String::new()));
+}

@@ -6,7 +6,7 @@ use super::numval::{self, Form};
 use super::real::Real;
 use super::{dates, datetime, math, text, unicode};
 use crate::abend::Abend;
-use crate::calendar::{SECONDS_PER_DAY, civil, days_from_civil, days_in_month};
+use crate::calendar::{SECONDS_PER_DAY, civil};
 use crate::display::utf16_text;
 use crate::fixed::{align, compare_fixed};
 use crate::lir::TrimSide;
@@ -14,7 +14,7 @@ use crate::storage::Val;
 use crate::store::{ProgramFacts, compare_national};
 use crate::vocab::{Figurative, Pos};
 use numeric::precision::{Fixed, Places};
-use numeric::{Arith, float};
+use numeric::{Arith, IntDate, float};
 use std::cmp::Ordering;
 use std::ops::{Add, Div, RangeInclusive, Sub};
 use zarch::check::{ProgramCheck, ProgramMask};
@@ -223,20 +223,17 @@ pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args
         "INTEGER-OF-DATE" => {
             arity(1..=1)?;
             let n = x.integer(0, pos)?;
-            let (y, m, d) = (n / 10000, n / 100 % 100, n % 100);
-            if !(1601..=9999).contains(&y) || !(1..=12).contains(&m) || !(1..=i64::from(days_in_month(y, m as u32))).contains(&d) {
-                return Err(Abend::ironwork(format!("FUNCTION INTEGER-OF-DATE({n}): not a date from 1601 to 9999"), pos));
-            }
-            Val::Num(Fixed::new((days_from_civil(y, m, d) - days_from_civil(1600, 12, 31)) as i128, Places::new(7, 0)))
+            let intdate = facts.options().intdate;
+            let first = dates::date_of_integer(1, intdate).unwrap_or_default();
+            let days = dates::integer_of_date(n, intdate).ok_or_else(|| Abend::ironwork(format!("FUNCTION INTEGER-OF-DATE({n}): not a date from {first} to 99991231"), pos))?;
+            Val::Num(Fixed::new(days.into(), Places::new(7, 0)))
         }
         "DATE-OF-INTEGER" => {
             arity(1..=1)?;
             let n = x.integer(0, pos)?;
-            if !(1..=3_067_671).contains(&n) {
-                return Err(Abend::ironwork(format!("FUNCTION DATE-OF-INTEGER({n}): outside 1 to 3067671"), pos));
-            }
-            let c = civil((days_from_civil(1600, 12, 31) + n) * SECONDS_PER_DAY);
-            Val::Num(Fixed::new((c.year * 10000 + i64::from(c.month) * 100 + i64::from(c.day)) as i128, Places::new(8, 0)))
+            let intdate = facts.options().intdate;
+            let date = dates::date_of_integer(n, intdate).ok_or_else(|| Abend::ironwork(format!("FUNCTION DATE-OF-INTEGER({n}): outside 1 to {}", dates::last_integer_date(intdate)), pos))?;
+            Val::Num(Fixed::new(date.into(), Places::new(8, 0)))
         }
         "CURRENT-DATE" => {
             arity(0..=0)?;
@@ -406,10 +403,11 @@ fn format_argument(facts: &dyn ProgramFacts, v: &Val, name: &str, pos: Pos) -> R
     datetime::Format::parse(&written).ok_or_else(|| Abend::ironwork(format!("FUNCTION {name}: {written} is not a date and time format (Language Reference SC27-8713-03, p. 504)"), pos))
 }
 
-fn integer_date(v: &Val, name: &str, pos: Pos) -> R<i64> {
+fn integer_date(v: &Val, intdate: IntDate, name: &str, pos: Pos) -> R<i64> {
     let n = whole(v, name, pos)?;
-    if !(1..=i128::from(dates::LAST_INTEGER_DATE)).contains(&n) {
-        return Err(Abend::ironwork(format!("FUNCTION {name}: the integer date {n} is outside 1 to {}", dates::LAST_INTEGER_DATE), pos));
+    let last = dates::last_integer_date(intdate);
+    if !(1..=i128::from(last)).contains(&n) {
+        return Err(Abend::ironwork(format!("FUNCTION {name}: the integer date {n} is outside 1 to {last}"), pos));
     }
     Ok(n as i64)
 }
@@ -443,6 +441,7 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
     let facts = x.facts();
     let facts: &dyn ProgramFacts = &facts;
     let arith = facts.options().arith;
+    let intdate = facts.options().intdate;
     let p = arith.float_intermediate();
     let arity = |n: RangeInclusive<usize>, args: &[Val]| {
         if n.contains(&args.len()) { Ok(()) } else { Err(Abend::ironwork(format!("FUNCTION {name} takes {n:?} arguments, not {}", args.len()), pos)) }
@@ -569,8 +568,11 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             arity(1..=1, &args)?;
             let n = i64::try_from(whole(&args[0], name, pos)?).unwrap_or(i64::MAX);
             match name {
-                "DAY-OF-INTEGER" => Ok(integer(dates::day_of_integer(n).ok_or_else(|| Abend::ironwork(format!("FUNCTION DAY-OF-INTEGER({n}): outside 1 to {}", dates::LAST_INTEGER_DATE), pos))?.into(), 7)),
-                "INTEGER-OF-DAY" => Ok(integer(dates::integer_of_day(n).ok_or_else(|| Abend::ironwork(format!("FUNCTION INTEGER-OF-DAY({n}): not a date from 1601001 to 9999365"), pos))?.into(), 7)),
+                "DAY-OF-INTEGER" => Ok(integer(dates::day_of_integer(n, intdate).ok_or_else(|| Abend::ironwork(format!("FUNCTION DAY-OF-INTEGER({n}): outside 1 to {}", dates::last_integer_date(intdate)), pos))?.into(), 7)),
+                "INTEGER-OF-DAY" => {
+                    let first = dates::day_of_integer(1, intdate).unwrap_or_default();
+                    Ok(integer(dates::integer_of_day(n, intdate).ok_or_else(|| Abend::ironwork(format!("FUNCTION INTEGER-OF-DAY({n}): not a date from {first} to 9999365"), pos))?.into(), 7))
+                }
                 "TEST-DATE-YYYYMMDD" => Ok(integer(dates::test_date(n).into(), 1)),
                 _ => Ok(integer(dates::test_day(n).into(), 1)),
             }
@@ -666,12 +668,12 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             let (integer_date, nanos, offset) = match name {
                 "FORMATTED-CURRENT-DATE" => {
                     let (seconds, hundredths) = x.now();
-                    let integer_date = seconds.div_euclid(SECONDS_PER_DAY) + days_from_civil(1970, 1, 1) - days_from_civil(1600, 12, 31);
+                    let integer_date = seconds.div_euclid(SECONDS_PER_DAY) - dates::day_zero(intdate);
                     (integer_date, seconds.rem_euclid(SECONDS_PER_DAY) as u64 * datetime::NANOS_PER_SECOND + u64::from(hundredths) * 10_000_000, 0)
                 }
-                "FORMATTED-DATE" => (self::integer_date(&args[1], name, pos)?, 0, 0),
+                "FORMATTED-DATE" => (self::integer_date(&args[1], intdate, name, pos)?, 0, 0),
                 "FORMATTED-TIME" => (1, nanos_of_day(&args[1], name, pos)?, utc_offset(args.get(2), name, pos)?),
-                _ => (self::integer_date(&args[1], name, pos)?, nanos_of_day(&args[2], name, pos)?, utc_offset(args.get(3), name, pos)?),
+                _ => (self::integer_date(&args[1], intdate, name, pos)?, nanos_of_day(&args[2], name, pos)?, utc_offset(args.get(3), name, pos)?),
             };
             let (integer_date, nanos) = if format.is_utc() {
                 let total = i128::from(integer_date) * i128::from(datetime::NANOS_PER_DAY) + i128::from(nanos) - i128::from(offset) * 60 * i128::from(datetime::NANOS_PER_SECOND);
@@ -680,7 +682,7 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             } else {
                 (integer_date, nanos)
             };
-            let text = format.render(integer_date.clamp(1, dates::LAST_INTEGER_DATE), nanos, offset);
+            let text = format.render(integer_date.clamp(1, dates::last_integer_date(intdate)), nanos, offset, intdate);
             match &args[0] {
                 Val::National(_) => Ok(Val::National(text.encode_utf16().flat_map(u16::to_be_bytes).collect())),
                 _ => text_value(facts, &text, pos),
@@ -692,19 +694,19 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             let format = format_argument(facts, &args[0], name, pos)?;
             let value = text_of(facts, &args[1], name, pos)?;
             match name {
-                "TEST-FORMATTED-DATETIME" => Ok(integer(format.read(&value).err().unwrap_or(0) as i128, 9)),
+                "TEST-FORMATTED-DATETIME" => Ok(integer(format.read(&value, IntDate::Ansi).err().unwrap_or(0) as i128, 9)),
                 "INTEGER-OF-FORMATTED-DATE" => {
                     let date_part = written.split('T').next().unwrap_or_default();
                     let date = datetime::Format::parse(date_part).filter(|f| f.has_date()).ok_or_else(|| Abend::ironwork(format!("FUNCTION {name}: {written} has no date"), pos))?;
                     let prefix: String = value.chars().take(date.len()).collect();
-                    let reading = date.read(&prefix).map_err(|at| Abend::ironwork(format!("FUNCTION {name}: character {at} of {value} does not fit {written}"), pos))?;
+                    let reading = date.read(&prefix, intdate).map_err(|at| Abend::ironwork(format!("FUNCTION {name}: character {at} of {value} does not fit {written}"), pos))?;
                     Ok(integer(reading.integer_date.unwrap_or(0).into(), 7))
                 }
                 _ => {
                     if !format.has_time() {
                         return Err(Abend::ironwork(format!("FUNCTION {name}: {written} has no time"), pos));
                     }
-                    let reading = format.read(&value).map_err(|at| Abend::ironwork(format!("FUNCTION {name}: character {at} of {value} does not fit {written}"), pos))?;
+                    let reading = format.read(&value, IntDate::Ansi).map_err(|at| Abend::ironwork(format!("FUNCTION {name}: character {at} of {value} does not fit {written}"), pos))?;
                     let (seconds, fraction, digits) = reading.seconds.unwrap_or_default();
                     let scale = 10u128.pow(u32::from(digits));
                     let value = Real::from_u128(u128::from(seconds) * scale + u128::from(fraction)).div(Real::from_u128(scale));

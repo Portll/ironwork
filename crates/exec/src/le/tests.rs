@@ -71,6 +71,23 @@ fn ceedays_reads_a_date_by_its_picture() {
 }
 
 #[test]
+fn under_intdate_lilian_a_call_of_ceecbldy_is_diagnosed_and_calls_ceedays() {
+    let mut body = set("IN", "1995-02-15");
+    body.extend(set("PIC", "YYYY-MM-DD"));
+    body.push(line("CALL 'ceecbldy' USING IN-STR PIC-STR LILIAN FC"));
+    body.push(line("DISPLAY LILIAN ' ' FC-SEV ' ' FC-MSG"));
+    let lilian = format!("       CBL INTDATE(LILIAN)\n{}", program("", &body));
+    assert_eq!(lines(&lilian), ["000150604 0000 0000"]);
+    assert_eq!(
+        crate::testing::compile_errors(&lilian),
+        "warning: CALL 'CEECBLDY' under INTDATE(LILIAN): CEECBLDY gives an ANSI integer date, which nothing can use under LILIAN, so the CALL is to CEEDAYS"
+    );
+    let (_, _, ending) = run(&program("", &body), &[]);
+    assert!(ending.unwrap_err().message.contains("CEECBLDY is a Language Environment callable service that ironwork for COBOL does not provide yet"));
+    assert_eq!(crate::testing::compile_errors(&program("", &body)), "");
+}
+
+#[test]
 fn the_feedback_code_is_all_zero_on_success_and_a_cee_token_on_failure() {
     let data = "       01  EXPECTED PIC X(12).\n           88 BAD-DATE VALUE X'000309CC59C3C5C5'.\n           88 ALL-ZERO VALUE LOW-VALUES.\n";
     let mut body = vec![line("MOVE ALL 'X' TO FC-X")];

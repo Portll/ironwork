@@ -2,9 +2,10 @@
 //! FORMATTED-DATETIME, INTEGER-OF-FORMATTED-DATE, SECONDS-FROM-FORMATTED-TIME and
 //! TEST-FORMATTED-DATETIME (Language Reference SC27-8713-03, pp. 504-507).
 
+use super::dates::{date_of_integer, day_zero};
 use crate::calendar::{civil, days_from_civil, days_in_month, is_leap, SECONDS_PER_DAY};
+use numeric::IntDate;
 
-const DAY_ZERO: i64 = days_from_civil(1600, 12, 31);
 pub const NANOS_PER_SECOND: u64 = 1_000_000_000;
 pub const NANOS_PER_DAY: u64 = SECONDS_PER_DAY as u64 * NANOS_PER_SECOND;
 
@@ -83,12 +84,6 @@ fn time_fields(text: &str, extended: bool) -> Option<Vec<Field>> {
         _ => return None,
     }
     Some(fields)
-}
-
-/// The civil date of an integer date.
-fn ymd(integer_date: i64) -> (i64, u32, u32) {
-    let c = civil((DAY_ZERO + integer_date) * SECONDS_PER_DAY);
-    (c.year, c.month, c.day)
 }
 
 /// ISO weekday, Monday 1 to Sunday 7, of days since 1970-01-01.
@@ -187,12 +182,13 @@ impl Format {
         self.fields.is_empty()
     }
 
-    /// The value: `integer_date` for a date part, `nanos` past midnight for a time part, and the
-    /// offset from UTC in minutes for an offset part. The caller has adjusted a UTC format's date
-    /// and time by the offset.
-    pub fn render(&self, integer_date: i64, nanos: u64, offset_minutes: i32) -> String {
-        let days = DAY_ZERO + integer_date;
-        let (year, month, day) = ymd(integer_date);
+    /// The value: `integer_date`, as `intdate` numbers it, for a date part, `nanos` past midnight
+    /// for a time part, and the offset from UTC in minutes for an offset part. The caller has
+    /// adjusted a UTC format's date and time by the offset.
+    pub fn render(&self, integer_date: i64, nanos: u64, offset_minutes: i32, intdate: IntDate) -> String {
+        let days = day_zero(intdate) + integer_date;
+        let c = civil(days * SECONDS_PER_DAY);
+        let (year, month, day) = (c.year, c.month, c.day);
         let (week_year, week, wd) = iso_week(days);
         let seconds = nanos / NANOS_PER_SECOND;
         let mut out = String::new();
@@ -220,13 +216,17 @@ impl Format {
 
     /// Reads `value` against the format, or gives the 1-based position of the first character at
     /// which it is known to be in error (p. 649): a field's digits are checked as they come, so a
-    /// year that starts 15 is in error at its second digit.
-    pub fn read(&self, value: &str) -> Result<Reading, usize> {
+    /// year that starts 15 is in error at its second digit. A date reads as an integer date as
+    /// `intdate` numbers them, whose first year it may not precede; one before integer date 1 is
+    /// in error at its last character.
+    pub fn read(&self, value: &str, intdate: IntDate) -> Result<Reading, usize> {
         let chars: Vec<char> = value.chars().collect();
+        let first_year = date_of_integer(1, intdate).unwrap_or_default() / 10000;
         let mut at = 0usize;
         let (mut year, mut month, mut day, mut ordinal, mut week, mut wd) = (None, None, None, None, None, None);
         let (mut hour, mut minute, mut second, mut fraction) = (0u32, 0u32, 0u32, (0u64, 0u8));
         let mut zero_offset = false;
+        let mut date_end = 0usize;
         for f in &self.fields {
             let mut digits = |n: usize, lo: i64, hi: i64| -> Result<i64, usize> {
                 let mut v = 0i64;
@@ -243,7 +243,7 @@ impl Format {
                 Ok(v)
             };
             match *f {
-                Field::Year => year = Some(digits(4, 1601, 9999)?),
+                Field::Year => year = Some(digits(4, first_year, 9999)?),
                 Field::Month => month = Some(digits(2, 1, 12)?),
                 Field::Day => {
                     let most = days_in_month(year.unwrap_or(2000), month.unwrap_or(1) as u32);
@@ -277,9 +277,9 @@ impl Format {
                     at += 1;
                 }
             }
-        }
-        if at < chars.len() {
-            return Err(at + 1);
+            if matches!(f, Field::Year | Field::Month | Field::Day | Field::DayOfYear | Field::Week | Field::Weekday) {
+                date_end = at;
+            }
         }
         let days = match (year, month, day, ordinal, week, wd) {
             (Some(y), Some(m), Some(d), ..) => Some(days_from_civil(y, m, d)),
@@ -287,8 +287,14 @@ impl Format {
             (Some(y), _, _, _, Some(w), Some(d)) => Some(from_iso_week(y, w, d)),
             _ => None,
         };
+        if days.is_some_and(|d| d <= day_zero(intdate)) {
+            return Err(date_end);
+        }
+        if at < chars.len() {
+            return Err(at + 1);
+        }
         Ok(Reading {
-            integer_date: days.map(|d| d - DAY_ZERO),
+            integer_date: days.map(|d| d - day_zero(intdate)),
             seconds: self.has_time().then_some((hour * 3600 + minute * 60 + second, fraction.0, fraction.1)),
         })
     }
@@ -300,6 +306,21 @@ mod tests {
 
     const FEB_15_1995: i64 = 143_951;
     const NANOS: u64 = 18_867_812_479_168;
+    const ANSI: IntDate = IntDate::Ansi;
+    const LILIAN: IntDate = IntDate::Lilian;
+
+    #[test]
+    fn under_lilian_dates_read_and_render_as_lilian_days_from_15_october_1582() {
+        let f = |s: &str| Format::parse(s).unwrap();
+        assert_eq!(f("YYYYMMDD").render(1, 0, 0, LILIAN), "15821015");
+        assert_eq!(f("YYYY-DDD").render(FEB_15_1995 + 6_653, 0, 0, LILIAN), "1995-046");
+        assert_eq!(f("YYYYMMDD").read("19950215", LILIAN).unwrap().integer_date, Some(FEB_15_1995 + 6_653));
+        assert_eq!(f("YYYYMMDD").read("15821015", LILIAN).unwrap().integer_date, Some(1));
+        assert_eq!(f("YYYYMMDD").read("15821014", LILIAN), Err(8), "the day before integer date 1");
+        assert_eq!(f("YYYY-DDD").read("1582-001", LILIAN), Err(8));
+        assert_eq!(f("YYYYMMDD").read("15811231", LILIAN), Err(4));
+        assert_eq!(f("YYYYMMDD").read("15821015", ANSI), Err(2));
+    }
 
     #[test]
     fn only_ibms_formats_parse() {
@@ -315,35 +336,35 @@ mod tests {
     #[test]
     fn values_render_as_the_language_references_examples_show() {
         let f = |s: &str| Format::parse(s).unwrap();
-        assert_eq!(f("YYYYMMDD").render(FEB_15_1995, 0, 0), "19950215");
-        assert_eq!(f("YYYY-DDD").render(FEB_15_1995, 0, 0), "1995-046");
-        assert_eq!(f("YYYY-Www-D").render(FEB_15_1995, 0, 0), "1995-W07-3");
-        assert_eq!(f("hhmmss.ss+hhmm").render(0, NANOS, -300), "051427.81-0500");
-        assert_eq!(f("YYYY-MM-DDThh:mm:ss.ss+hh:mm").render(FEB_15_1995, NANOS, 300), "1995-02-15T05:14:27.81+05:00");
-        assert_eq!(f("hh:mm:ssZ").render(0, 36_000 * NANOS_PER_SECOND, 0), "10:00:00Z");
-        let dec_31_2020 = days_from_civil(2020, 12, 31) - DAY_ZERO;
-        assert_eq!(f("YYYYWwwD").render(dec_31_2020, 0, 0), "2020W534");
+        assert_eq!(f("YYYYMMDD").render(FEB_15_1995, 0, 0, ANSI), "19950215");
+        assert_eq!(f("YYYY-DDD").render(FEB_15_1995, 0, 0, ANSI), "1995-046");
+        assert_eq!(f("YYYY-Www-D").render(FEB_15_1995, 0, 0, ANSI), "1995-W07-3");
+        assert_eq!(f("hhmmss.ss+hhmm").render(0, NANOS, -300, ANSI), "051427.81-0500");
+        assert_eq!(f("YYYY-MM-DDThh:mm:ss.ss+hh:mm").render(FEB_15_1995, NANOS, 300, ANSI), "1995-02-15T05:14:27.81+05:00");
+        assert_eq!(f("hh:mm:ssZ").render(0, 36_000 * NANOS_PER_SECOND, 0, ANSI), "10:00:00Z");
+        let dec_31_2020 = days_from_civil(2020, 12, 31) - day_zero(ANSI);
+        assert_eq!(f("YYYYWwwD").render(dec_31_2020, 0, 0, ANSI), "2020W534");
         let jan_1_2021 = dec_31_2020 + 1;
-        assert_eq!(f("YYYYWwwD").render(jan_1_2021, 0, 0), "2020W535");
+        assert_eq!(f("YYYYWwwD").render(jan_1_2021, 0, 0, ANSI), "2020W535");
     }
 
     #[test]
     fn a_value_is_in_error_where_it_first_cannot_conform() {
         let f = |s: &str| Format::parse(s).unwrap();
-        assert_eq!(f("YYYYMMDD").read("19950215").unwrap().integer_date, Some(FEB_15_1995));
-        assert_eq!(f("YYYYMMDD").read("20051314"), Err(6));
-        assert_eq!(f("YYYYMMDD").read("15990316"), Err(2));
-        assert_eq!(f("YYYYMMDD").read("19959215"), Err(5));
-        assert_eq!(f("YYYYMMDD").read("19950229"), Err(8));
-        assert_eq!(f("YYYYMMDDThhmmss").read("19950215T0514:27"), Err(14));
-        assert_eq!(f("YYYYMMDD").read("1995021"), Err(8));
-        assert_eq!(f("YYYYMMDD").read("199502150"), Err(9));
-        assert_eq!(f("YYYY-Www-D").read("1995-W07-3").unwrap().integer_date, Some(FEB_15_1995));
-        assert_eq!(f("YYYY-DDD").read("1995-046").unwrap().integer_date, Some(FEB_15_1995));
-        let r = f("YYYYMMDDThhmmss.ss+hhmm").read("19950215T051427.81+0500").unwrap();
+        assert_eq!(f("YYYYMMDD").read("19950215", ANSI).unwrap().integer_date, Some(FEB_15_1995));
+        assert_eq!(f("YYYYMMDD").read("20051314", ANSI), Err(6));
+        assert_eq!(f("YYYYMMDD").read("15990316", ANSI), Err(2));
+        assert_eq!(f("YYYYMMDD").read("19959215", ANSI), Err(5));
+        assert_eq!(f("YYYYMMDD").read("19950229", ANSI), Err(8));
+        assert_eq!(f("YYYYMMDDThhmmss").read("19950215T0514:27", ANSI), Err(14));
+        assert_eq!(f("YYYYMMDD").read("1995021", ANSI), Err(8));
+        assert_eq!(f("YYYYMMDD").read("199502150", ANSI), Err(9));
+        assert_eq!(f("YYYY-Www-D").read("1995-W07-3", ANSI).unwrap().integer_date, Some(FEB_15_1995));
+        assert_eq!(f("YYYY-DDD").read("1995-046", ANSI).unwrap().integer_date, Some(FEB_15_1995));
+        let r = f("YYYYMMDDThhmmss.ss+hhmm").read("19950215T051427.81+0500", ANSI).unwrap();
         assert_eq!((r.integer_date, r.seconds), (Some(FEB_15_1995), Some((18_867, 81, 2))));
-        assert_eq!(f("hhmmss+hhmm").read("0514270").map(|_| ()), Err(8));
-        assert_eq!(f("hhmmss+hhmm").read("05142700001"), Err(11));
-        assert_eq!(f("hhmmss+hhmm").read("05142700000").unwrap().seconds, Some((18_867, 0, 0)));
+        assert_eq!(f("hhmmss+hhmm").read("0514270", ANSI).map(|_| ()), Err(8));
+        assert_eq!(f("hhmmss+hhmm").read("05142700001", ANSI), Err(11));
+        assert_eq!(f("hhmmss+hhmm").read("05142700000", ANSI).unwrap().seconds, Some((18_867, 0, 0)));
     }
 }

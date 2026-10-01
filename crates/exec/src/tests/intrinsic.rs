@@ -207,6 +207,42 @@ fn the_formatted_functions_write_and_read_ibms_formats() {
 }
 
 #[test]
+fn intdate_lilian_numbers_the_integer_dates_from_15_october_1582() {
+    let statements = [
+        "COMPUTE S = FUNCTION INTEGER-OF-DATE(19950215)",
+        "DISPLAY S",
+        "COMPUTE S = FUNCTION DATE-OF-INTEGER(1)",
+        "DISPLAY S",
+        "COMPUTE S = FUNCTION DAY-OF-INTEGER(1)",
+        "DISPLAY S",
+        "COMPUTE S = FUNCTION INTEGER-OF-DAY(1995046)",
+        "DISPLAY S",
+        "DISPLAY FUNCTION FORMATTED-DATE('YYYYMMDD' 150604)",
+        "DISPLAY FUNCTION FORMATTED-DATETIME('YYYYDDDThhmmss' 1 0)",
+        "COMPUTE S = FUNCTION INTEGER-OF-FORMATTED-DATE(\n    'YYYYMMDD' '19950215')",
+        "DISPLAY S",
+        "DISPLAY FUNCTION FORMATTED-CURRENT-DATE('YYYYMMDDThhmmss')",
+        "COMPUTE S = FUNCTION TEST-DATE-YYYYMMDD(15821015)",
+        "DISPLAY S",
+    ];
+    let body: String = statements.iter().flat_map(|s| s.split('\n')).map(line).chain([line("GOBACK.")]).collect();
+    let data = "       01  S PIC 9(8).\n";
+    let shown = |card: &str| {
+        let (out, ending) = run_at_noon(&program(card, data, &body));
+        assert!(ending.is_ok(), "{ending:?}");
+        out
+    };
+    assert_eq!(shown("INTDATE(LILIAN)"), "00150604\n15821015\n01582288\n00150604\n19950215\n1582288T000000\n00150604\n20260927T120000\n00000001\n");
+    assert_eq!(shown(""), "00143951\n16010101\n01601001\n00143951\n20130504\n1601001T000000\n00143951\n20260927T120000\n00000001\n");
+    assert_eq!(shown("INTDATE(ANSI)"), shown(""));
+    let ending = |card: &str, statement: &str| run_at_noon(&program(card, data, &[line(statement), line("GOBACK.")].concat())).1;
+    assert!(ending("INTDATE(LILIAN)", "COMPUTE S = FUNCTION INTEGER-OF-DATE(15821014)").unwrap_err().message.contains("not a date from 15821015 to 99991231"));
+    assert!(ending("", "COMPUTE S = FUNCTION INTEGER-OF-DATE(15821015)").unwrap_err().message.contains("not a date from 16010101 to 99991231"));
+    assert!(ending("INTDATE(LILIAN)", "COMPUTE S = FUNCTION DATE-OF-INTEGER(3074324)").is_ok());
+    assert!(ending("", "COMPUTE S = FUNCTION DATE-OF-INTEGER(3074324)").unwrap_err().message.contains("outside 1 to 3067671"));
+}
+
+#[test]
 fn a_reference_modified_national_item_counts_characters_and_stays_national() {
     let data = "       01  NX PIC N(4) VALUE N'ABCD'.\n       01  S PIC 9 VALUE 2.\n";
     let out = displays(data, &["DISPLAY FUNCTION DISPLAY-OF(NX(2:S))", "DISPLAY FUNCTION DISPLAY-OF(NX(3:))", "DISPLAY FUNCTION DISPLAY-OF(\n    FUNCTION NATIONAL-OF('WXYZ')(2:2))"]);

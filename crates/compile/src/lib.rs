@@ -143,6 +143,9 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     }
     default_currency(&mut program, &mut options, &mut errors);
     national_symbols(&program, &mut options, &mut errors);
+    if options.intdate == numeric::IntDate::Lilian {
+        program.paragraphs.iter_mut().for_each(|p| ceecbldy_to_ceedays(&mut p.statements, &mut errors));
+    }
     for (name, alphabet) in &program.environment.alphabets {
         if program.environment.collating_sequence.as_ref() != Some(name)
             && let Err(m) = collating::Sequence::of(alphabet, options.code_page(), options.quote)
@@ -309,6 +312,25 @@ fn program_end(program: &Program, options: &Options, errors: &mut Vec<Error>) {
         )).graded(Severity::Informational)),
         (None, _) | (Some(_), CicsReturnWarning::Always) => {
             errors.push(Error::warning(Pos::default(), "no STOP RUN, GOBACK or EXIT PROGRAM in the program: check that it ends"));
+        }
+    }
+}
+
+/// Under INTDATE(LILIAN) a CALL of the literal 'CEECBLDY', whose ANSI integer date neither the date
+/// functions nor the callable services could then read, is diagnosed and calls CEEDAYS
+/// (Programming Guide SC27-8714-03, p. 375; assumption
+/// [`numeric::assumptions::CEECBLDY_UNDER_LILIAN`]).
+fn ceecbldy_to_ceedays(stmts: &mut [Stmt], errors: &mut Vec<Error>) {
+    for s in stmts {
+        if let Stmt::Call(c) = s
+            && let Operand::Literal(Literal::Alnum(name)) = &mut c.target
+            && name.trim().eq_ignore_ascii_case("CEECBLDY")
+        {
+            *name = "CEEDAYS".into();
+            errors.push(Error::warning(c.pos, "CALL 'CEECBLDY' under INTDATE(LILIAN): CEECBLDY gives an ANSI integer date, which nothing can use under LILIAN, so the CALL is to CEEDAYS"));
+        }
+        for body in oo::bodies_mut(s) {
+            ceecbldy_to_ceedays(body, errors);
         }
     }
 }

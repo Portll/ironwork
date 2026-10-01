@@ -232,6 +232,8 @@ pub const VLR_WITHOUT_VARYING: &str = "C218";
 pub const VLR_RECORDS_CHECKED: &str = "C219";
 pub const VSAM_OPEN_NEVER_VERIFIED: &str = "C220";
 pub const DISPSIGN_SEPARATE: &str = "C213";
+pub const LILIAN_INTEGER_DATES: &str = "C214";
+pub const CEECBLDY_UNDER_LILIAN: &str = "C215";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1449,6 +1451,18 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: DISPSIGN_SEPARATE,
         claim: "Under DISPSIGN(SEP) DISPLAY shows a signed binary, packed or overpunched zoned item as a leading + or - followed by the digits DISPSIGN(COMPAT) shows, unsigned (Programming Guide SC27-8714-03, pp. 362-363, Table 48), so a COMP-5 or TRUNC(BIN) binary item keeps its 5, 10, 19 or 20 digits (C14). IBM's table lists no other kind, and the rest is chosen: a zoned item with SIGN SEPARATE, whose sign is separate already, shows as stored, a trailing sign staying last; an unsigned item, and a value that is not an item (a literal, a function's result), is unchanged; a national decimal item, which ironwork does not lay out yet, would be unchanged too, IBM naming only binary, packed and zoned. An overpunched zoned item is read as its bytes, as COMPAT shows them, not as arithmetic reads it: the sign is - when the sign position's zone is X'B' or X'D' and + for any other zone, one that is no sign included, and the digits are the bytes with that zone made X'F', so invalid data is shown rather than ending the run",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LILIAN_INTEGER_DATES,
+        claim: "Under INTDATE(LILIAN) every integer date a date function takes or returns is a Lilian day, 15 October 1582 being day 1 (Programming Guide SC27-8714-03, pp. 59, 375): INTEGER-OF-DATE, DATE-OF-INTEGER, DAY-OF-INTEGER, INTEGER-OF-DAY, FORMATTED-DATE, FORMATTED-DATETIME and INTEGER-OF-FORMATTED-DATE, which the Language Reference marks as INTDATE's (SC27-8713-03, pp. 551, 555, 571, 573, 583, 585, 587). The Language Reference gives the ranges under ANSI only: integer dates 1 to 3,067,671 and years 1601 to 9999 (p. 509). Under LILIAN the dates run, as Language Environment's date services take them, from 15 October 1582 to 31 December 9999, so integer dates from 1 to 3,074,324, standard dates from 15821015, Julian dates from 1582288, and a formatted date's year from 1582. TEST-DATE-YYYYMMDD, TEST-DAY-YYYYDDD, TEST-FORMATTED-DATETIME and SECONDS-FROM-FORMATTED-TIME carry no INTDATE note and keep years from 1601 (pp. 637, 653, 655, 657). FORMATTED-CURRENT-DATE takes and gives no integer date, so INTDATE does not touch it. COMBINED-DATETIME, the other function the note is on (p. 541), is not provided",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CEECBLDY_UNDER_LILIAN,
+        claim: "Under INTDATE(LILIAN) a CALL whose target is the literal 'CEECBLDY' is diagnosed and calls CEEDAYS, which takes the same arguments and gives a Lilian day (Programming Guide SC27-8714-03, p. 375). The guide gives neither the message nor its severity: it is a warning (W, return code 4) in ironwork's words, since the program no longer calls what it names. A CALL of an identifier that holds 'CEECBLDY' is not converted, as the guide names the literal only, and ends the run as ironwork does not provide CEECBLDY; nor is a literal under INTDATE(ANSI)",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
