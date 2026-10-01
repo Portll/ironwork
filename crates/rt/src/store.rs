@@ -119,7 +119,7 @@ pub fn set_integer<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit
 pub fn store_value<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, loc: Loc, value: Val, rounded: bool, keep_on_size_error: bool, pos: Pos) -> R<bool> {
     match (loc.kind, value) {
         (Kind::Float(p), Val::Float(h)) => {
-            let h = if h.precision.digits() > p.digits() { float::narrow(h, p) } else { h.lengthen(p) };
+            let h = if h.precision.digits() > p.digits() { float::narrow_rounded(h, p).map_err(|c| Abend::check(c, pos))? } else { h.lengthen(p) };
             write(&mut unit.mem, loc, &h.to_bytes());
             Ok(false)
         }
@@ -129,7 +129,7 @@ pub fn store_value<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit
             Ok(false)
         }
         (_, Val::Float(h)) => {
-            let (f, overflow) = float::to_fixed(h, places(facts, loc), rounded);
+            let (f, overflow) = float::to_receiver(h, places(facts, loc));
             if overflow && keep_on_size_error {
                 return Ok(true);
             }
@@ -324,7 +324,7 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
                 }
             }
             Val::Float(h) => {
-                let (f, _) = float::to_fixed(h, places(facts, dest), false);
+                let (f, _) = float::to_receiver(h, places(facts, dest));
                 store_fixed(facts, unit, dest, &f, false, pos)?;
             }
             Val::Fig(Figurative::Zero) => store_fixed(facts, unit, dest, &Fixed::new(0, Places::new(1, 0)), false, pos)?,
@@ -352,7 +352,7 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
         },
         Kind::Float(p) => {
             let h = match val {
-                Val::Float(h) if h.precision.digits() > p.digits() => float::narrow(h, p),
+                Val::Float(h) if h.precision.digits() > p.digits() => float::narrow_rounded(h, p).map_err(|c| Abend::check(c, pos))?,
                 Val::Float(h) => h.lengthen(p),
                 Val::Num(f) => float::from_fixed(f, p, ProgramMask::default()).map_err(|c| Abend::check(c, pos))?,
                 Val::Fig(Figurative::Zero) => Hfp::zero(p),

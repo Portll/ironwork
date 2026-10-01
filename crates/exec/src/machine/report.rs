@@ -311,7 +311,7 @@ impl<'p> Machine<'p, '_, '_> {
         let loc = self.item_loc(self.report(ri).sums[sum].total);
         let addend = match value {
             Val::Num(f) => f,
-            Val::Float(h) => float::to_fixed(h, places_of(loc.kind), false).0,
+            Val::Float(h) => float::to_receiver(h, places_of(loc.kind)).0,
             Val::Fig(Figurative::Zero) => Fixed::new(0, Places::new(1, 0)),
             _ => return Err(Abend::ironwork("a SUM operand that is not numeric", pos)),
         };

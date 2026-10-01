@@ -1210,8 +1210,12 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     fn arithmetic(&mut self, computations: &[(Target, Expr)], remainder: Option<&(Target, Expr, Expr)>, handler: Option<&'p SizeError>, per_receiver: bool, pos: Pos) -> R<Flow> {
         let mut size_error = false;
         let mut dmax = 0;
+        // A COMP-1 or COMP-2 receiver makes the statement's arithmetic floating point (Programming
+        // Guide SC27-8714-03, p. 800).
+        let mut float_receiver = false;
         for (t, e) in computations {
             let loc = self.locate(&t.r)?;
+            float_receiver |= matches!(loc.kind, Kind::Float(_));
             dmax = dmax.max(precision::receiver_dec(loc.kind.digits_scale().map_or(0, |(_, s)| s), t.rounded)).max(self.dmax(e)?);
         }
         if let Some((t, dividend, _)) = remainder {
@@ -1222,7 +1226,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let mut results = Vec::with_capacity(computations.len());
         for (t, e) in computations {
             let own = |x: &Expr| per_receiver && matches!(x, Expr::Operand(Operand::Ref(r)) if *r == t.r);
-            let float = self.uses_float(e)?;
+            let float = float_receiver || self.uses_float(e)?;
             let (shared, with) = match e {
                 Expr::Bin(a, op, b) if *op != BinOp::Pow && own(a) => (b.as_ref(), Some((*op, true))),
                 Expr::Bin(a, op, b) if *op != BinOp::Pow && own(b) => (a.as_ref(), Some((*op, false))),

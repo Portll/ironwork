@@ -37,7 +37,7 @@ pub const PFD_MOVES_BYTES: &str = "C3";
 pub const PFD_COMPARES_LOGICALLY: &str = "C4";
 pub const FLOAT_FROM_DECIMAL: &str = "C5";
 pub const FLOAT_TO_DECIMAL: &str = "C6";
-pub const FLOAT_NARROWING_TRUNCATES: &str = "C7";
+pub const FLOAT_NARROWING_ROUNDS: &str = "C7";
 pub const LE_MASKS_UNDERFLOW: &str = "C8";
 pub const PREFERRED_RESULT_SIGNS: &str = "C9";
 pub const ZONED_BY_PACK: &str = "C10";
@@ -266,14 +266,14 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: FLOAT_TO_DECIMAL,
-        claim: "An HFP value moved to a fixed-point receiver is its exact value truncated at the receiver's scale, or rounded half away from zero under ROUNDED",
-        basis: Basis::Chosen,
+        claim: "An HFP value moved or stored into a fixed-point receiver is rounded in the receiver's low-order position, with or without ROUNDED, and keeps at most 9 significant digits from short precision and 18 from long, the rest zero (Programming Guide SC27-8714-03, p. 52); the Language Reference's COMBINED-DATETIME example, 143951.1886781248 from a long value of 143951.18867812478..., shows a COMPUTE rounding (SC27-8713-03, p. 542). Rounding is half away from zero; an extended value keeps every digit the receiver holds",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
-        id: FLOAT_NARROWING_TRUNCATES,
-        claim: "A floating-point intermediate stored into a narrower COMP-1 or COMP-2 keeps its high-order part (truncation), not LOAD ROUNDED",
-        basis: Basis::Chosen,
+        id: FLOAT_NARROWING_ROUNDS,
+        claim: "A floating-point value moved or stored into a narrower COMP-1 or COMP-2 is rounded in the low-order position, as LOAD ROUNDED rounds (Programming Guide SC27-8714-03, p. 52)",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {

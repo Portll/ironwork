@@ -219,18 +219,19 @@ fn long(bits: u64) -> Hfp {
 fn hfp(options: &Options) -> Vec<Case> {
     let p = options.arith.float_intermediate();
     let mask = ProgramMask::default();
-    let narrowing = if options.arith == Arith::Extend { vec![a::FLOAT_NARROWING_TRUNCATES] } else { vec![] };
+    let narrowing = if options.arith == Arith::Extend { vec![a::FLOAT_NARROWING_ROUNDS] } else { vec![] };
     let (one, two, three) = (long(0x4110_0000_0000_0000), long(0x4120_0000_0000_0000), long(0x4130_0000_0000_0000));
     let operands = lines("05 A-% COMP-2.\n05 AX-% REDEFINES A-% PIC X(8).\n05 B-% COMP-2.\n05 BX-% REDEFINES B-% PIC X(8).");
     let plant = |x: Hfp, y: Hfp| vec![format!("MOVE X'{}' TO AX-%", hex(&x.to_bytes())), format!("MOVE X'{}' TO BX-%", hex(&y.to_bytes()))];
     let at = |v: Hfp| v.lengthen(p);
+    let stored = |v: Hfp, target: Precision| if v.precision.digits() > target.digits() { float::narrow_rounded(v, target).unwrap() } else { v };
 
-    let two_thirds = float::narrow(at(two).div(at(three), mask).unwrap(), Precision::Long);
-    let third_times_three = float::narrow(at(one).div(at(three), mask).and_then(|t| t.mul(at(three), p, mask)).unwrap(), Precision::Long);
+    let two_thirds = stored(at(two).div(at(three), mask).unwrap(), Precision::Long);
+    let third_times_three = stored(at(one).div(at(three), mask).and_then(|t| t.mul(at(three), p, mask)).unwrap(), Precision::Long);
     let wide = long(0x4112_3456_8000_0000);
-    let tenth = float::from_fixed(Fixed::new(1, Places::new(1, 1)), p, mask).map(|v| float::narrow(v, Precision::Long)).unwrap();
+    let tenth = float::from_fixed(Fixed::new(1, Places::new(1, 1)), p, mask).map(|v| stored(v, Precision::Long)).unwrap();
     let almost_tenth = long(0x4019_9999_9999_9999);
-    let to_hundredths = |rounded| packed(2, float::to_fixed(almost_tenth, Places::new(1, 2), rounded).0);
+    let to_hundredths = || packed(2, float::to_receiver(almost_tenth, Places::new(1, 2)).0);
 
     vec![
         Case {
@@ -251,8 +252,8 @@ fn hfp(options: &Options) -> Vec<Case> {
             operands: operands.clone(),
             items: vec!["05 F-% COMP-1.".into()],
             statements: [plant(wide, one), vec!["MOVE A-% TO F-%".into()]].concat(),
-            expect: float::narrow(wide, Precision::Short).to_bytes(),
-            ..case("hfp.2".into(), vec![a::FLOAT_NARROWING_TRUNCATES])
+            expect: stored(wide, Precision::Short).to_bytes(),
+            ..case("hfp.2".into(), vec![a::FLOAT_NARROWING_ROUNDS])
         },
         Case {
             operands: vec!["05 P-% PIC S9V9 COMP-3 VALUE 0.1.".into()],
@@ -265,14 +266,14 @@ fn hfp(options: &Options) -> Vec<Case> {
             operands: operands.clone(),
             items: vec!["05 Q-% PIC S9V99 COMP-3.".into()],
             statements: [plant(almost_tenth, one), vec!["COMPUTE Q-% = A-%".into()]].concat(),
-            expect: to_hundredths(false),
+            expect: to_hundredths(),
             ..case("hfp.4".into(), vec![a::FLOAT_TO_DECIMAL])
         },
         Case {
             operands,
             items: vec!["05 Q-% PIC S9V99 COMP-3.".into()],
             statements: [plant(almost_tenth, one), vec!["COMPUTE Q-% ROUNDED = A-%".into()]].concat(),
-            expect: to_hundredths(true),
+            expect: to_hundredths(),
             ..case("hfp.5".into(), vec![a::FLOAT_TO_DECIMAL])
         },
     ]
@@ -318,9 +319,9 @@ mod tests {
         let compat = all(&Options::default(), false);
         assert_eq!(expect(&compat, "hfp.0"), "40AAAAAAAAAAAAAA");
         assert_eq!(expect(&compat, "hfp.1"), "40FFFFFFFFFFFFFF");
-        assert_eq!(expect(&compat, "hfp.2"), "41123456");
+        assert_eq!(expect(&compat, "hfp.2"), "41123457");
         assert_eq!(expect(&compat, "hfp.3"), "4019999999999999");
-        assert_eq!(expect(&compat, "hfp.4"), "009C");
+        assert_eq!(expect(&compat, "hfp.4"), "010C");
         assert_eq!(expect(&compat, "hfp.5"), "010C");
     }
 
