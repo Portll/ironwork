@@ -1254,14 +1254,20 @@ pub struct ReturnPlan { pub file: Option<u16>, pub into: Option<PlaceId>, pub so
 - **A SORT procedure's frame** holds every paragraph (§8.6), so no GO TO leaves it. `Left(End(e))`
   makes the op return `Step::End(e)`; any other `Left`, a return to an active PERFORM, the SORT
   takes as the procedure's end and goes on (machine/sort.rs:707-708, 734-735 (7af)).
-- **Report Writer.** `report::Writer` (exec/src/report.rs (int)) resolves the report model at
-  compile time, but keeps a `Ref` for each CONTROL item and an AST `Expr` for each SOURCE and SUM
-  operand, resolved on every GENERATE (machine/report.rs:200, 288, 297, 664 (int)). Lowering
-  replaces them with places and expressions, and `Report` ops name a report or group by index.
-- **USE BEFORE REPORTING** runs through `Procedures::run`. `Left(GoTo(_))` abends IRONWORK at the
-  report statement; `Left(End(_))` ends the run as STOP RUN or GOBACK; `Left(Return)` and
-  `Left(Resume)` abandon the report statement, whose op returns them
-  (`use_before_reporting`, machine/report.rs:373-392 (7af)).
+- **Report Writer.** `rt::report::Writer<X, C, V>` is the report model `compile::report` resolves,
+  generic over a SOURCE or SUM operand's expression `X`, a CONTROL item `C` and a VALUE or CODE
+  literal `V`: the interpreter's `Expr`, `Ref` and `Literal`, evaluated on every GENERATE, or
+  `ExprId`, `PlaceId` and `ConstId` once lowered (`lir::ReportWriter`). `rt::report::run` carries out
+  a `ReportOp`, which names a report and DETAIL group by index:
+
+  ```rust
+  pub enum ReportOp { Initiate(u32), Generate { report: u32, detail: Option<u32> }, Terminate(u32), Suppress }
+  ```
+
+- **USE BEFORE REPORTING** runs through `ReportHost::use_before_reporting`. `GoTo` abends IRONWORK
+  at the report statement; `End(_)` ends the run as STOP RUN or GOBACK; `Left`, a return to an
+  active PERFORM or a resumed statement, abandons the report statement, and the executor carries
+  out the transfer.
 
 ### 9.7 EXEC SQL
 

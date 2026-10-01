@@ -32,6 +32,7 @@ pub mod module;
 pub mod oo;
 pub mod picture;
 pub mod printer;
+pub mod report;
 pub mod reserved_words;
 pub mod set;
 pub mod sort;

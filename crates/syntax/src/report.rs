@@ -3,6 +3,7 @@
 
 use crate::Pos;
 use crate::ast::{Expr, Literal, Ref, SignClause};
+pub use rt::report::{ColumnNumber, Footing, LineNumber, NextGroup};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ReportWriter {
@@ -30,13 +31,6 @@ pub struct Report {
     pub pos: Pos,
 }
 
-/// FOOTING, or LAST CONTROL FOOTING: a line, or lines below LAST DETAIL.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Footing {
-    Line(u32),
-    Plus(u32),
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ControlName {
     Final,
@@ -53,29 +47,6 @@ pub enum GroupType {
     ControlFooting(Option<ControlName>),
     PageFooting,
     ReportFooting,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NextGroup {
-    Line(u32),
-    Plus(u32),
-    NextPage,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LineNumber {
-    Line(u32),
-    Plus(u32),
-    /// NEXT PAGE, with the absolute line when one is written.
-    NextPage(Option<u32>),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ColumnNumber {
-    Left(u32),
-    Plus(u32),
-    Right(u32),
-    Center(u32),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

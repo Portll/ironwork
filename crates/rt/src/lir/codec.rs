@@ -7,7 +7,7 @@ use crate::module::codec::{Decode, Encode, Reader, Writer};
 use crate::picture::Sym;
 use crate::sql::HostType;
 use crate::storage::Kind;
-use crate::vocab::{AcceptFrom, BinOp, Closing, Figurative, InspectMode, OpenMode, RelOp, SignClause, SignPosition};
+use crate::vocab::{AcceptFrom, BinOp, Closing, Figurative, InspectMode, OpenMode, Pos, RelOp, SignClause, SignPosition};
 use crate::{codec_enum, codec_struct};
 use numeric::precision::{Fixed, Places};
 use numeric::options::{Compile, FastsrtAdvPrint, Stop, Warnings};
@@ -33,6 +33,7 @@ codec_enum!(Kind {
     ProgramPointer = 12,
 });
 codec_struct!(SignClause { position, separate });
+codec_struct!(Pos { file, line, col });
 codec_enum!(SignPosition { Leading = 0, Trailing = 1 });
 codec_enum!(Figurative { Zero = 0, Space = 1, HighValue = 2, LowValue = 3, Quote = 4, Null = 5 });
 codec_enum!(BinOp { Add = 0, Sub = 1, Mul = 2, Div = 3, Pow = 4 });

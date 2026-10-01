@@ -1,8 +1,7 @@
-//! Statement payloads from lir.md §9: MOVE, INITIALIZE, DISPLAY, SEARCH ALL, FUNCTION and INVOKE,
-//! and a placeholder for each payload whose service is not in `rt` yet. DISPLAY's, SEARCH ALL's,
-//! INVOKE's and those of `text`, `call` and `sql` are generic over the handles they name
-//! (semantics-library.md §9, C6): the LIR's ids by default, the walker's own references in the
-//! interpreter.
+//! Statement payloads from lir.md §9: MOVE, INITIALIZE, DISPLAY, SEARCH ALL, FUNCTION and INVOKE.
+//! DISPLAY's, SEARCH ALL's, INVOKE's and those of `text`, `call` and `sql` are generic over the
+//! handles they name (semantics-library.md §9, C6): the LIR's ids by default, the walker's own
+//! references in the interpreter.
 
 use super::{AbendId, Comparand, Compare, Count, DebugId, IntExpr, Operand, PlaceId, RefMod, StorePlan, SymId};
 use crate::vocab::Figurative;
@@ -353,20 +352,3 @@ codec_enum!(TrimSide { Leading = 0, Trailing = 1 });
 codec_struct!(InvokePlan { receiver, method, args, returning, on_exception, not_on_exception });
 codec_enum!(Receiver { SelfRef = 0, Super = 1, Class { name, external } = 2, Object(place) = 3 });
 codec_enum!(MethodName { New = 0, Named(name) = 1, Dynamic(place) = 2 });
-
-macro_rules! placeholder {
-    ($($ty:ident: $doc:literal,)*) => {$(
-        #[doc = $doc]
-        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-        pub enum $ty {
-            #[default]
-            Placeholder,
-        }
-
-        codec_enum!($ty { Placeholder = 0 });
-    )*};
-}
-
-placeholder! {
-    ReportOp: "INITIATE, GENERATE, TERMINATE or SUPPRESS, §9.6; not defined yet.",
-}

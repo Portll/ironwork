@@ -3,7 +3,7 @@
 //! and this follows it: each report's lines and fields are placed; its report control area
 //! (PAGE-COUNTER, LINE-COUNTER, the writer's own state and saved controls), its printed fields and
 //! its SUM totals become WORKING-STORAGE ([`numeric::assumptions::REPORT_CONTROL_AREA`]); and every
-//! name is resolved. `machine::report` runs the result.
+//! name is resolved. `rt::report` runs the result.
 
 use crate::layout::{self, Layout};
 use crate::picture::{self, Category};
@@ -11,175 +11,17 @@ use syntax::ast::*;
 use syntax::report::{self as rw, ColumnNumber, ControlName, Footing, GroupType, LineNumber, NextGroup, ReportStmt};
 use syntax::{Error, Pos};
 
-/// Offsets in a report's state item. The item starts as X'00', so every flag starts false.
-pub mod state {
-    pub const INITIATED: usize = 0;
-    pub const GENERATED: usize = 1;
-    /// A page has begun: output has gone to the file since INITIATE.
-    pub const STARTED: usize = 2;
-    /// The PAGE HEADING is still to come on the current page, below a REPORT HEADING.
-    pub const HEADING_DUE: usize = 3;
-    pub const BODY_ON_PAGE: usize = 4;
-    /// The current page holds the REPORT HEADING alone.
-    pub const HEADING_ONLY: usize = 5;
-    /// The line the file is at, 0 before the page's first line: a fullword.
-    pub const VERTICAL: usize = 8;
-    /// NEXT GROUP's absolute line, held until the next page: a fullword.
-    pub const SAVED_NEXT_GROUP: usize = 12;
-    /// One GROUP INDICATE flag per report group, then each control's value at the last GENERATE.
-    pub const FLAGS: usize = 16;
-}
+pub use rt::report::{Adding, GroupKind, Page, Sum, generate_target, span, state};
 
-/// The reports of one program.
-#[derive(Clone, Debug, Default)]
-pub struct Writer {
-    pub reports: Vec<Report>,
-    /// PRINT-SWITCH, which SUPPRESS PRINTING sets.
-    pub print_switch: Option<usize>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Report {
-    pub name: String,
-    pub file: usize,
-    pub code: Option<Literal>,
-    /// Bytes of a line: the record less the CODE, and under NOADV the control character.
-    pub width: usize,
-    pub page: Option<Page>,
-    /// Level 1 is the most major control; level 0 is FINAL.
-    pub controls: Vec<Control>,
-    pub groups: Vec<Group>,
-    pub sums: Vec<Sum>,
-    /// SUM operands outside the REPORT SECTION, added by GENERATE.
-    pub subtotals: Vec<Subtotal>,
-    pub page_counter: usize,
-    pub line_counter: usize,
-    pub state: usize,
-    pub report_heading: Option<usize>,
-    pub page_heading: Option<usize>,
-    pub page_footing: Option<usize>,
-    pub report_footing: Option<usize>,
-    /// The CONTROL HEADING and CONTROL FOOTING of each level, FINAL first.
-    pub control_headings: Vec<Option<usize>>,
-    pub control_footings: Vec<Option<usize>>,
-    /// FIRST DETAIL when written, so a PAGE HEADING below a REPORT HEADING can be seen not to fit.
-    pub first_detail_written: Option<i64>,
-}
-
-/// The page regions, with the precompiler's defaults applied.
-#[derive(Clone, Copy, Debug)]
-pub struct Page {
-    pub limit: i64,
-    pub heading: i64,
-    pub first_detail: i64,
-    pub last_detail: i64,
-    pub footing: i64,
-}
-
-#[derive(Clone, Debug)]
-pub struct Control {
-    pub reference: Ref,
-    /// Where its value at the last GENERATE is kept in the state item.
-    pub saved: usize,
-    pub len: usize,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum GroupKind {
-    ReportHeading,
-    PageHeading,
-    ControlHeading,
-    Detail,
-    ControlFooting,
-    PageFooting,
-    ReportFooting,
-}
-
-impl GroupKind {
-    pub fn is_body(self) -> bool {
-        matches!(self, Self::ControlHeading | Self::Detail | Self::ControlFooting)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Group {
-    pub name: Option<String>,
-    pub kind: GroupKind,
-    /// The control level of a CONTROL HEADING or FOOTING.
-    pub level: usize,
-    pub next_group: Option<NextGroup>,
-    pub lines: Vec<Line>,
-    /// Fields with no COLUMN, which are set but not printed.
-    pub unprinted: Vec<Field>,
-    /// Cross-footing: SUM entries of this group adding entries of this group, in dependency order.
-    pub cross: Vec<(usize, Origin)>,
-    /// Rolling forward: SUM entries elsewhere adding entries of this group.
-    pub rolls: Vec<(usize, Origin)>,
-    /// The SUM entries defined in this group, reset after it unless RESET defers them.
-    pub totals: Vec<usize>,
-    pub indicate: Option<usize>,
-    /// The USE BEFORE REPORTING section: its first and last paragraph.
-    pub declarative: Option<(usize, usize)>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Line {
-    pub number: LineNumber,
-    pub fields: Vec<Field>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Field {
-    pub item: usize,
-    /// First byte in the line.
-    pub column: usize,
-    pub content: FieldContent,
-    pub group_indicate: bool,
-    /// BLANK WHEN ZERO on an unedited numeric PICTURE, which the field applies after the MOVE.
-    pub blank_when_zero: bool,
-    pub rounded: bool,
-    pub pos: Pos,
-}
-
-#[derive(Clone, Debug)]
-pub enum FieldContent {
-    Source(Expr),
-    Value(Literal),
-    Sum(usize),
-    /// No SOURCE, VALUE or SUM: the program's own statements fill the field.
-    Program,
-}
-
-#[derive(Clone, Debug)]
-pub struct Sum {
-    pub total: usize,
-    /// RESET ON: the control level whose break resets the total instead.
-    pub reset: Option<usize>,
-}
-
-/// What an entry adds to a total when its group is produced.
-#[derive(Clone, Debug)]
-pub enum Origin {
-    Source(Expr),
-    Value(Literal),
-    Total(usize),
-}
-
-#[derive(Clone, Debug)]
-pub struct Subtotal {
-    pub sum: usize,
-    pub operand: Expr,
-    pub adding: Adding,
-}
-
-#[derive(Clone, Debug)]
-pub enum Adding {
-    EveryGenerate,
-    /// UPON: only a GENERATE of one of these DETAIL groups adds.
-    Upon(Vec<usize>),
-    /// SOURCE SUM correlation: the DETAIL groups that have the operand as a SOURCE.
-    Correlated(Vec<usize>),
-}
+pub type Writer = rt::report::Writer<Expr, Ref, Literal>;
+pub type Report = rt::report::Report<Expr, Ref, Literal>;
+pub type Control = rt::report::Control<Ref>;
+pub type Group = rt::report::Group<Expr, Literal>;
+pub type Line = rt::report::Line<Expr, Literal>;
+pub type Field = rt::report::Field<Expr, Literal>;
+pub type FieldContent = rt::report::FieldContent<Expr, Literal>;
+pub type Origin = rt::report::Origin<Expr, Literal>;
+pub type Subtotal = rt::report::Subtotal<Expr>;
 
 /// A report's geometry and where its storage went, between synthesis and resolution.
 pub(crate) struct Draft {
@@ -892,11 +734,6 @@ fn order_cross(mut pending: Vec<(usize, Origin)>) -> Result<Vec<(usize, Origin)>
         ordered.push(pending.remove(i));
     }
     Ok(ordered)
-}
-
-/// The rows of a relative group from the line before its first to its last.
-pub fn span(g: &Group) -> i64 {
-    g.lines.iter().map(|l| if let LineNumber::Plus(k) = l.number { k as i64 } else { 0 }).sum()
 }
 
 /// The page regions with the defaults the precompiler takes, as it is supplied (option OSVS):

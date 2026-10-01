@@ -2,9 +2,8 @@
 //! phrase or EXCEPTION/ERROR procedure the status each returns selects.
 
 use super::*;
-use super::facts::{advance, spacing};
+use super::facts::advance;
 use crate::files::{FileStatus, Format, KeySpan, Keying};
-use crate::printer::Space;
 use rt::fileio::{self, Outcome, Read};
 use rt::lir::{self, StartRel};
 
@@ -205,9 +204,9 @@ impl<'p> Machine<'p, '_, '_> {
         }
     }
 
-    pub(super) fn write_stream(&mut self, k: usize, loc: Loc, before: bool, space: Space, pos: Pos) -> R<()> {
+    pub(super) fn write_stream(&mut self, k: usize, loc: Loc, before: bool, space: lir::Spacing, pos: Pos) -> R<()> {
         let file = self.file_desc(k);
-        let outcome = fileio::write_stream(self, &file, loc, before, spacing(space), pos)?;
+        let outcome = fileio::write_stream(self, &file, loc, before, space, pos)?;
         self.settle(k, outcome, None, pos).map(drop)
     }
 

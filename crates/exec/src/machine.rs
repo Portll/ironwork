@@ -10,7 +10,7 @@ pub(crate) use rt::storage::literal_fixed;
 use crate::unit::{ADDRESS_BASE, Event, LoadError, RETURN_CODE, RunUnit};
 use crate::Compiled;
 use numeric::precision::{self, Fixed, Places};
-use numeric::{Options, Trunc, float};
+use numeric::{Options, Trunc};
 use rt::fixed::{align, places_of, zoned_digits};
 use rt::arith;
 use rt::display::utf16_text;

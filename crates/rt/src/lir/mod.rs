@@ -31,9 +31,10 @@ pub use markup::{
 };
 pub use flow::{Declaratives, Frame, FrameKind, Op, Range, RangeKind, Resume, ReturnPoint, Returns, Step, Terminator};
 pub use crate::cics::CicsCommand;
+pub use crate::report::{ReportOp, Writer as ReportWriter};
 pub use payload::{
     Argument, DisplayItem, DisplayPlan, FloatFrom, Func, FunctionPlan, Image, InitField, InitPlan,
-    InvokePlan, MethodName, MovePlan, NationalFrom, NumericFrom, Receiver, ReportOp, SearchAllPlan, SearchKey, TrimSide,
+    InvokePlan, MethodName, MovePlan, NationalFrom, NumericFrom, Receiver, SearchAllPlan, SearchKey, TrimSide,
 };
 pub use place::{Base, Odo, Place, RefMod, Subscript};
 pub use sort::{FileSort, ReleasePlan, ReturnPlan, SortIo, SortKey, SortKeys, SortPlan, TableSort};

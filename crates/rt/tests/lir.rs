@@ -536,7 +536,7 @@ fn control_flow_round_trips_with_every_tag() {
         Op::Sort(0),
         Op::Release(0),
         Op::Return(0),
-        Op::Report(ReportOp::Placeholder),
+        Op::Report(ReportOp::Generate { report: 1, detail: Some(2) }),
         Op::Invoke(0),
         Op::Cics(0),
         Op::Sql(1),
@@ -652,7 +652,70 @@ fn statement_payloads_round_trip_with_every_tag() {
         not_on_exception: false,
     };
     round_trip(&[invoke]);
-    round_trip(&[ReportOp::Placeholder]);
+}
+
+fn report() -> ironwork_rt::report::Report {
+    use ironwork_rt::report::*;
+    let field = |content| Field { item: 9, column: 4, content, group_indicate: true, blank_when_zero: false, rounded: true, pos: Pos { file: 1, line: 20, col: 12 } };
+    let detail = Group {
+        name: Some("DETAIL-LINE".into()),
+        kind: GroupKind::Detail,
+        level: 0,
+        next_group: Some(NextGroup::Plus(1)),
+        lines: vec![Line { number: LineNumber::Plus(1), fields: vec![field(FieldContent::Source(3)), field(FieldContent::Value(1))] }],
+        unprinted: vec![field(FieldContent::Program)],
+        cross: vec![(0, Origin::Source(4)), (1, Origin::Total(0))],
+        rolls: vec![(1, Origin::Value(2))],
+        totals: vec![0],
+        indicate: Some(0),
+        declarative: Some((2, 3)),
+    };
+    let footing = Group {
+        name: None,
+        kind: GroupKind::ControlFooting,
+        level: 1,
+        next_group: Some(NextGroup::NextPage),
+        lines: vec![Line { number: LineNumber::NextPage(Some(5)), fields: vec![field(FieldContent::Sum(1))] }, Line { number: LineNumber::Line(9), fields: vec![] }],
+        indicate: None,
+        declarative: None,
+        ..detail.clone()
+    };
+    Report {
+        name: "SALES".into(),
+        file: 2,
+        code: Some(5),
+        width: 132,
+        page: Some(Page { limit: 60, heading: 1, first_detail: 5, last_detail: 50, footing: 55 }),
+        controls: vec![Control { reference: 7, saved: 18, len: 4 }],
+        groups: vec![detail, footing],
+        sums: vec![Sum { total: 11, reset: None }, Sum { total: 12, reset: Some(1) }],
+        subtotals: vec![Subtotal { sum: 0, operand: 6, adding: Adding::Upon(vec![0]) }],
+        page_counter: 13,
+        line_counter: 14,
+        state: 15,
+        report_heading: None,
+        page_heading: Some(1),
+        page_footing: None,
+        report_footing: None,
+        control_headings: vec![None, None],
+        control_footings: vec![None, Some(1)],
+        first_detail_written: Some(5),
+    }
+}
+
+#[test]
+fn report_writers_and_ops_round_trip_with_every_tag() {
+    use ironwork_rt::report::*;
+    let unpaged = Report { page: None, code: None, first_detail_written: None, ..report() };
+    round_trip(&[ReportWriter::default(), ReportWriter { reports: vec![report(), unpaged], print_switch: Some(16) }]);
+    every_variant(&[ReportOp::Initiate(0), ReportOp::Generate { report: 1, detail: None }, ReportOp::Terminate(2), ReportOp::Suppress], 4);
+    every_variant(&[LineNumber::Line(1), LineNumber::Plus(2), LineNumber::NextPage(None)], 3);
+    every_variant(&[NextGroup::Line(1), NextGroup::Plus(2), NextGroup::NextPage], 3);
+    let kinds = [GroupKind::ReportHeading, GroupKind::PageHeading, GroupKind::ControlHeading, GroupKind::Detail, GroupKind::ControlFooting, GroupKind::PageFooting, GroupKind::ReportFooting];
+    every_variant(&kinds, 7);
+    every_variant(&[FieldContent::Source(1), FieldContent::Value(2), FieldContent::Sum(3), FieldContent::Program], 4);
+    every_variant(&[Origin::Source(1), Origin::Value(2), Origin::Total(3)], 3);
+    every_variant(&[Adding::EveryGenerate, Adding::Upon(vec![1]), Adding::Correlated(vec![])], 3);
 }
 
 fn file_sort() -> FileSort {
