@@ -307,3 +307,10 @@ fn when_compiled_gives_the_compile_time_as_current_date_gives_the_run_s() {
     assert!(o.ending.is_ok(), "{:?}", o.ending);
     assert_eq!(o.out, "2026092712000042+0000 20260927\n19700101\n");
 }
+
+#[test]
+fn numval_c_takes_the_currency_option_as_its_default_currency_sign() {
+    let data = "       01  R PIC 9(4)V99.\n";
+    let body: String = ["COMPUTE R = FUNCTION NUMVAL-C('£1,234.50')", "DISPLAY R", "GOBACK."].into_iter().map(line).collect();
+    assert_eq!(run_at_noon(&program("CURRENCY('£')", data, &body)).0, "123450\n");
+}
