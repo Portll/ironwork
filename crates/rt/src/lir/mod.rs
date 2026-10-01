@@ -8,6 +8,7 @@ mod collating;
 mod debug;
 mod file;
 mod flow;
+mod markup;
 mod payload;
 mod place;
 mod sql;
@@ -22,6 +23,10 @@ pub use debug::Debug;
 pub use file::{
     Access, Advance, Carriage, FileDesc, FileOp, FileVerb, FromMove, IndexKeys, Linage, Organization, Phrase, RecordSpan,
     RelativeKey, Spacing, StartKey, StartRel,
+};
+pub use markup::{
+    Ccsid, Convert, Flag, Indicator, JsonGenerate, JsonLeaf, JsonNode, JsonParse, JsonValue, Marker, Markup, Named, NumberInto, ParseLeaf, ParseNode, ParseValue,
+    SetTo, XmlForm, XmlGenerate, XmlNode, XmlParse, XmlRegister, XmlValue,
 };
 pub use flow::{Declaratives, Frame, FrameKind, Op, Range, RangeKind, Resume, ReturnPoint, Returns, Step, Terminator};
 pub use crate::cics::CicsCommand;
@@ -71,6 +76,7 @@ pub type ReleaseId = u32;
 pub type ReturnId = u32;
 pub type InvokeId = u32;
 pub type CicsId = u32;
+pub type MarkupId = u32;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Program {
@@ -218,6 +224,8 @@ pub struct Services {
     /// A class definition's data and methods; None for any other program.
     pub class: Option<Box<Class>>,
     pub declaratives: Declaratives,
+    /// JSON GENERATE, JSON PARSE, XML GENERATE and XML PARSE, by `Op::Markup`.
+    pub markup: Vec<Markup>,
 }
 
 codec_struct!(Program {
@@ -236,7 +244,7 @@ codec_struct!(AbendText { code, message, at });
 codec_struct!(Paragraph { name, is_section, entry, section_end, priority, at, abandoned });
 codec_struct!(Block { ops, end });
 codec_struct!(Plans { arith, init, display, inspect, string, unstring, search_all, function });
-codec_struct!(Services { file_ops, files, calls, sorts, releases, returns, invokes, cics, sqlca, entries, class, declaratives });
+codec_struct!(Services { file_ops, files, calls, sorts, releases, returns, invokes, cics, sqlca, entries, class, declaratives, markup });
 
 pub(crate) fn program_valid(program: &Program) -> Result<(), String> {
     sql::table_valid(&program.sql, &program.symbols)

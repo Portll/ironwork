@@ -219,6 +219,9 @@ impl Lower<'_> {
                         }
                     }
                 }
+                Stmt::XmlParse(x) => {
+                    self.processing(x)?;
+                }
                 _ => {}
             }
             for body in crate::oo::bodies(s) {
@@ -460,6 +463,7 @@ impl Lower<'_> {
                 let stays = self.ranges.iter().all(|r| !holds(r, p) || holds(r, t32)) && self.trigger(t).is_none();
                 self.end(if stays { Terminator::Jump(self.entries[t]) } else { Terminator::GoTo(t32) }, pos)?;
             }
+            Stmt::JsonGenerate(_) | Stmt::JsonParse(_) | Stmt::XmlGenerate(_) | Stmt::XmlParse(_) => self.markup(s, pos, &inner)?,
             Stmt::Goback { .. } | Stmt::ExitMethod { .. } => self.end(Terminator::End(Ending::Goback), pos)?,
             Stmt::StopRun { .. } => self.end(Terminator::End(Ending::StopRun), pos)?,
             Stmt::ExitProgram { .. } => {
@@ -536,7 +540,7 @@ impl Lower<'_> {
 
     /// ON EXCEPTION and NOT ON EXCEPTION after a CALL or INVOKE op, which returns Arm(1) and Arm(0)
     /// when either phrase is written.
-    fn phrases(&mut self, on: Option<&[Stmt]>, not_on: Option<&[Stmt]>, pos: Pos, ctx: &Ctx) -> R<()> {
+    pub(super) fn phrases(&mut self, on: Option<&[Stmt]>, not_on: Option<&[Stmt]>, pos: Pos, ctx: &Ctx) -> R<()> {
         if on.is_none() && not_on.is_none() {
             return Ok(());
         }

@@ -1,6 +1,6 @@
 //! Places (lir.md §5): data references resolved at lowering, which an executor evaluates to a `Loc`.
 
-use super::{DebugId, IntExpr, SymId};
+use super::{DebugId, IntExpr, SymId, XmlRegister};
 use crate::storage::Kind;
 use crate::{codec_enum, codec_struct};
 
@@ -29,6 +29,10 @@ pub enum Base {
     Eib,
     SelfRef,
     JniEnv,
+    /// An XML PARSE fragment register, the current event's text: `offset` and `len` are 0 and the
+    /// fragment gives both. Its reference modification is checked whatever `check` says, abending
+    /// IRONWORK "reference modification (s:l) of NAME is outside its N bytes".
+    Xml(XmlRegister),
 }
 
 /// `check` is the occurrence count, present only under SSRANGE.
@@ -64,6 +68,7 @@ codec_enum!(Base {
     Eib = 4,
     SelfRef = 5,
     JniEnv = 6,
+    Xml(register) = 7,
 });
 codec_struct!(Subscript { stride, value, check });
 codec_struct!(Odo { object, max, element, check });

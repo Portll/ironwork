@@ -7,6 +7,8 @@ use rt::lir::{
 use rt::abend::Ending;
 use rt::module::codec::decode_all;
 
+mod markup;
+
 fn program(options: &str, data: &str, procedure: &str) -> String {
     let card = if options.is_empty() { String::new() } else { format!("       CBL {options}\n") };
     format!("{card}       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n{data}       PROCEDURE DIVISION.\n{procedure}")

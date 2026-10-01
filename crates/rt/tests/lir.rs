@@ -333,6 +333,7 @@ fn program_shape_round_trips() {
         entries: vec![EntryPoint { name: 2, paragraph: 1, block: 4, using: vec![0, 1] }],
         class: Some(Box::new(account())),
         declaratives: Declaratives { modes: [Some(0), None, None, Some(2)], debug_item: Some((120, 86)) },
+        markup: vec![Markup::XmlParse(xml_parse())],
     };
     round_trip(&[Services::default(), services]);
 }
@@ -392,8 +393,8 @@ fn a_collating_sequence_that_is_not_one_is_malformed() {
 #[test]
 fn places_round_trip_with_every_base() {
     let bases =
-        [Base::Program, Base::Local, Base::Linkage(2), Base::ReturnCode, Base::Eib, Base::SelfRef, Base::JniEnv];
-    every_variant(&bases, 7);
+        [Base::Program, Base::Local, Base::Linkage(2), Base::ReturnCode, Base::Eib, Base::SelfRef, Base::JniEnv, Base::Xml(XmlRegister::NText)];
+    every_variant(&bases, 8);
     let subscript = Subscript { stride: 12, value: IntExpr::Item(1), check: Some(50) };
     round_trip(&[subscript.clone(), Subscript { stride: 4, value: IntExpr::Const(-1), check: None }]);
     round_trip(&[ODO, Odo { check: false, ..ODO }]);
@@ -425,7 +426,7 @@ fn values_and_conditions_round_trip_with_every_tag() {
         Const::All(vec![]),
     ];
     every_variant(&consts, 5);
-    every_variant(&[IntExpr::Const(i64::MIN), IntExpr::Item(0), IntExpr::Fixed { expr: 2, dmax: 3, prepass: vec![1, 4] }], 3);
+    every_variant(&[IntExpr::Const(i64::MIN), IntExpr::Item(0), IntExpr::Fixed { expr: 2, dmax: 3, prepass: vec![1, 4] }, IntExpr::Walk(2)], 4);
     let exprs = [Expr::Operand(Operand::Load(0)), Expr::Neg(0), Expr::Bin(0, BinOp::Div, 1), Expr::Pow(1, IntExpr::Const(2))];
     every_variant(&exprs, 4);
     let conds = [
@@ -527,9 +528,10 @@ fn control_flow_round_trips_with_every_tag() {
         Op::EnterSegment(50),
         Op::DebugLine(42),
         Op::DebugAlter { range: 1, name: 2, contents: 3 },
+        Op::Markup(0),
     ];
     // Tag 29 is retired (load-module.md §4.3).
-    every_variant_but(&ops, 32, &[29]);
+    every_variant_but(&ops, 33, &[29]);
     let resume = Resume { para: 2, block: 11 };
     every_variant(&[Step::Next, Step::Arm(2), Step::GoTo(3), Step::End(Ending::Goback), Step::Return(u64::MAX), Step::Resume(resume)], 6);
     let terminators = [
@@ -550,8 +552,8 @@ fn control_flow_round_trips_with_every_tag() {
     // Tag 6 is retired.
     every_variant_but(&terminators, 13, &[6]);
     round_trip(&[Range { first: 1, last: 3, kind: RangeKind::Perform }, Range { first: 4, last: 2, kind: RangeKind::SortProcedure }]);
-    let kinds = [RangeKind::Perform, RangeKind::SortProcedure, RangeKind::UseBeforeReporting, RangeKind::UseProcedure, RangeKind::Debugging];
-    every_variant(&kinds, 5);
+    let kinds = [RangeKind::Perform, RangeKind::SortProcedure, RangeKind::UseBeforeReporting, RangeKind::UseProcedure, RangeKind::Debugging, RangeKind::Processing];
+    every_variant(&kinds, 6);
     let point = ReturnPoint { frame: 7, resume: Some(resume) };
     round_trip(&[point, ReturnPoint { frame: 0, resume: None }]);
     let frames = [FrameKind::Main, FrameKind::Perform { range: 0, ret: 5, resume: Some(resume) }, FrameKind::Procedure { range: 1 }];
@@ -723,6 +725,97 @@ fn cics_commands_round_trip_with_every_tag() {
     every_variant(&[Datum::Place(0), Datum::Value(Operand::Load(1)), Datum::Text(2), Datum::Bare], 4);
     every_variant(Condition::ALL, 121);
     assert_eq!(refused::<Condition>(&[121], &StringTable::default()), (0, "Condition has no tag 121".into()));
+}
+
+fn xml_parse() -> XmlParse {
+    XmlParse {
+        document: 0,
+        encoding: Some(Operand::Const(1)),
+        national: true,
+        procedure: 2,
+        event: 3,
+        code: (4, PACKED),
+        information: (5, StorePlan::Index),
+        code_value: IntExpr::Item(4),
+        on_exception: true,
+        not_on_exception: false,
+    }
+}
+
+fn json_generate() -> JsonGenerate {
+    let leaf = JsonLeaf {
+        indicator: Some((Ok(6), Marker::Byte(Some(0xE8)))),
+        null: Some(Figurative::Zero),
+        suppress: vec![Figurative::Space, Figurative::Zero],
+        boolean: Some(Marker::Condition(2)),
+        convert: Convert::Fixed { integers: 5 },
+    };
+    let group = JsonNode { offset: 0, len: 12, kind: Kind::Group, name: 1, occurs: Some(Count::Odo(ODO)), value: JsonValue::Object { members: vec![1], eligible: true } };
+    let field = JsonNode { offset: 2, len: 5, kind: Kind::Zoned { digits: 5, scale: 0, signed: false, sign: None }, name: 2, occurs: None, value: JsonValue::Leaf(leaf) };
+    JsonGenerate {
+        from: 0,
+        subscripts: vec![IntExpr::Item(1)],
+        nodes: vec![group, field],
+        name: None,
+        receiver: 2,
+        encoding: Ccsid::CodePage,
+        count: Some((3, PACKED)),
+        code: (4, StorePlan::Binary { digits: 9, scale: 0, signed: true, native: false, name: 0 }),
+        on_exception: false,
+        not_on_exception: true,
+    }
+}
+
+fn xml_generate() -> XmlGenerate {
+    let leaf = XmlValue::Leaf { form: XmlForm::Attribute, suppress: vec![Figurative::Space], convert: Convert::Chars { justified: true } };
+    let nodes = vec![
+        XmlNode { offset: 0, len: 20, kind: Kind::Group, name: 1, occurs: None, value: XmlValue::Element { members: vec![1] } },
+        XmlNode { offset: 0, len: 10, kind: Kind::Group, name: 2, occurs: Some(Count::Fixed(2)), value: XmlValue::Members { members: vec![2] } },
+        XmlNode { offset: 0, len: 10, kind: Kind::Alnum { justified: true }, name: 3, occurs: None, value: leaf },
+    ];
+    XmlGenerate {
+        receiver: 0,
+        encoding: Ccsid::Operand(Operand::Const(0)),
+        namespace: Some(Operand::Load(1)),
+        prefix: None,
+        declaration: true,
+        from: 2,
+        subscripts: vec![],
+        nodes,
+        suppressing: true,
+        count: None,
+        code: (3, PACKED),
+        on_exception: true,
+        not_on_exception: true,
+    }
+}
+
+#[test]
+fn json_and_xml_statements_round_trip_with_every_tag() {
+    every_variant(&[Markup::JsonGenerate(json_generate()), Markup::XmlGenerate(xml_generate()), Markup::XmlParse(xml_parse())], 3);
+    every_variant(&[Ccsid::Unnamed, Ccsid::CodePage, Ccsid::Operand(Operand::Load(0))], 3);
+    let converts = [Convert::Chars { justified: false }, Convert::National, Convert::Float(Precision::Short), Convert::Fixed { integers: 10 }, Convert::Refused(1)];
+    every_variant(&converts, 5);
+    every_variant(&[Marker::Byte(None), Marker::Condition(0), Marker::Refused(2)], 3);
+    every_variant(&[JsonValue::Object { members: vec![], eligible: false }, json_generate().nodes[1].value.clone()], 2);
+    every_variant(&xml_generate().nodes.into_iter().map(|n| n.value).collect::<Vec<_>>(), 3);
+    every_variant(&[XmlForm::Attribute, XmlForm::Element, XmlForm::Content], 3);
+    let registers = [XmlRegister::Text, XmlRegister::NText, XmlRegister::Namespace, XmlRegister::NNamespace, XmlRegister::Prefix, XmlRegister::NPrefix];
+    every_variant(&registers, 6);
+    assert_eq!(registers.map(XmlRegister::national), [false, true, false, true, false, true]);
+    assert_eq!(Markup::XmlParse(xml_parse()).phrases(), (true, false));
+}
+
+#[test]
+fn a_markup_tree_whose_member_comes_before_its_holder_is_malformed() {
+    let mut g = json_generate();
+    g.nodes[0].value = JsonValue::Object { members: vec![0], eligible: false };
+    let (bytes, strings) = encoded(&g);
+    assert_eq!(refused::<JsonGenerate>(&bytes, &strings), (0, "markup node 0 holds node 0 of 2".into()));
+    let mut x = xml_generate();
+    x.nodes.clear();
+    let (bytes, strings) = encoded(&x);
+    assert_eq!(refused::<XmlGenerate>(&bytes, &strings), (0, "a markup tree with no root".into()));
 }
 
 /// An indexed file with FILE STATUS, an alternate key, LINAGE and a print file's carriage.

@@ -30,6 +30,9 @@ pub enum IntExpr {
     Const(i64),
     Item(PlaceId),
     Fixed { expr: ExprId, dmax: u32, prepass: Vec<PlaceId> },
+    /// Subscript k of the JSON walk in progress (lir.md §9.13): FROM's subscripts, then the
+    /// occurrence of each table the walk has entered. Only a markup payload's places hold it.
+    Walk(u8),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -109,7 +112,7 @@ pub enum SqlTest {
 
 codec_enum!(Operand { Load(place) = 0, Const(id) = 1, LengthOf(place) = 2, AddressOf(place) = 3, Function(id) = 4 });
 codec_enum!(Const { Bytes(b) = 0, National(n) = 1, Number(f) = 2, Figurative(f) = 3, All(b) = 4 });
-codec_enum!(IntExpr { Const(n) = 0, Item(place) = 1, Fixed { expr, dmax, prepass } = 2 });
+codec_enum!(IntExpr { Const(n) = 0, Item(place) = 1, Fixed { expr, dmax, prepass } = 2, Walk(k) = 3 });
 codec_enum!(Expr { Operand(o) = 0, Neg(e) = 1, Bin(a, op, b) = 2, Pow(base, exponent) = 3 });
 codec_enum!(Cond {
     Rel { a, op, b, how } = 0,

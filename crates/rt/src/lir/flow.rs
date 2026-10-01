@@ -3,7 +3,7 @@
 
 use super::{
     AbendId, ArithId, BlockId, CallId, CicsId, CondId, DisplayId, ExprId, FileOpId, InitId, InspectId, IntExpr,
-    InvokeId, MovePlan, Operand, ParaId, PlaceId, RangeId, ReleaseId, ReportOp, ReturnId, SearchAllId, SortId, SqlId,
+    InvokeId, MarkupId, MovePlan, Operand, ParaId, PlaceId, RangeId, ReleaseId, ReportOp, ReturnId, SearchAllId, SortId, SqlId,
     StepPlan, StringId, SymId, TempId, UnstringId, UpDown,
 };
 use crate::abend::Ending;
@@ -59,6 +59,8 @@ pub enum Op {
     /// Under the DEBUG option, after an ALTER of a paragraph a debugging section serves: that
     /// section, with DEBUG-NAME `name` and DEBUG-CONTENTS `contents`, the TO PROCEED TO name.
     DebugAlter { range: RangeId, name: SymId, contents: SymId },
+    /// JSON GENERATE, JSON PARSE, XML GENERATE or XML PARSE (lir.md §9.13).
+    Markup(MarkupId),
 }
 
 /// What an op tells the VM.
@@ -143,6 +145,8 @@ pub enum RangeKind {
     UseProcedure,
     /// A USE FOR DEBUGGING section.
     Debugging,
+    /// An XML PARSE processing procedure.
+    Processing,
 }
 
 /// What the declaratives need at run time besides each file's own procedure (`FileDesc.error`).
@@ -229,6 +233,7 @@ codec_enum!(Op {
     EnterSegment(priority) = 28,
     DebugLine(line) = 30,
     DebugAlter { range, name, contents } = 31,
+    Markup(id) = 32,
 });
 codec_enum!(Step { Next = 0, Arm(arm) = 1, GoTo(para) = 2, End(ending) = 3, Return(frame) = 4, Resume(resume) = 5 });
 codec_enum!(Terminator {
@@ -247,7 +252,7 @@ codec_enum!(Terminator {
 });
 codec_struct!(Resume { para, block });
 codec_struct!(Range { first, last, kind });
-codec_enum!(RangeKind { Perform = 0, SortProcedure = 1, UseBeforeReporting = 2, UseProcedure = 3, Debugging = 4 });
+codec_enum!(RangeKind { Perform = 0, SortProcedure = 1, UseBeforeReporting = 2, UseProcedure = 3, Debugging = 4, Processing = 5 });
 codec_struct!(Declaratives { modes, debug_item });
 codec_struct!(ReturnPoint { frame, resume });
 codec_struct!(Frame { id, kind, displaced, segment, depth, temps });

@@ -110,6 +110,10 @@ impl Lower<'_> {
             let place = lir::Place { base, offset: 0, len: 4, kind, subscripts: Vec::new(), odo: None, refmod: None, name: self.sym(&r.name), at: self.at(r.pos) };
             return self.push_place(place, None);
         }
+        if compile::markup::xml_register(layout, r) {
+            let place = self.xml_register(r)?;
+            return self.push_place(place, None);
+        }
         if r.name == "RETURN-CODE" && r.qualifiers.is_empty() && !layout.items.iter().any(|i| i.name.as_deref() == Some("RETURN-CODE")) {
             let place = lir::Place {
                 base: lir::Base::ReturnCode,

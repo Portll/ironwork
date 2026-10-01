@@ -168,7 +168,12 @@ impl Lower<'_> {
             Ok(place) => place,
             Err((abend, at)) => return Ok(Test::Abend(abend, at)),
         };
-        let condition = &layout.conditions[index];
+        self.condition_values(index, subject, pos)
+    }
+
+    /// Condition-name `index` tested against its conditional variable at `subject`.
+    pub(super) fn condition_values(&mut self, index: usize, subject: lir::PlaceId, pos: Pos) -> R<Test> {
+        let condition = &self.layout.conditions[index];
         let kind = self.kind_of(subject);
         let x = Side { value: super::data::value_of(kind), src: Some(kind), digits: kind.digits_scale().map_or(0, |(d, _)| d) };
         let mut values = Vec::new();

@@ -84,7 +84,7 @@ pub type DebugId = u32; pub type AbendId = u32; pub type TempId = u16;
 pub type SqlId = u32;
 // And a `u32` id per plan or service table: ArithId, InitId, DisplayId, InspectId, StringId,
 // UnstringId, SearchAllId, FunctionId, FileOpId, CallId, SortId, ReleaseId, ReturnId, InvokeId,
-// CicsId.
+// CicsId, MarkupId.
 
 /// One program, lowered. Methods and FACTORY or OBJECT data lower as programs too (§9.8).
 pub struct Program {
@@ -98,8 +98,8 @@ pub struct Program {
     /// SearchAllPlan and FunctionPlan tables.
     pub plans: Plans,
     /// The FileOp, FileDesc, CallPlan, SortPlan, ReportOp, InvokePlan and CicsCommand tables, the
-    /// Sqlca, the ENTRY points (§9.3), for a class definition its class (§9.8), and the
-    /// declaratives' `Declaratives` (§9.10).
+    /// Sqlca, the ENTRY points (§9.3), for a class definition its class (§9.8), the
+    /// declaratives' `Declaratives` (§9.10), and the JSON and XML statements (§9.13).
     pub services: Services,
     pub sql: Vec<SqlEntry>, pub abends: Vec<AbendText>, pub edits: Vec<Edit>,
     pub symbols: Vec<String>, pub debug: Debug,
@@ -226,6 +226,10 @@ pub enum Base {
     SelfRef,
     /// JNIENVPTR's cell, made on first use (machine/oo.rs:101-117 (int)): four bytes, a pointer.
     JniEnv,
+    /// An XML PARSE fragment register (§9.13): `offset` and `len` are 0 and the current event's
+    /// fragment gives both, empty outside a processing procedure. Its reference modification is
+    /// checked whatever `check` says (`xml_register`, machine/xml.rs).
+    Xml(XmlRegister),
 }
 
 /// Each `check` is present only under SSRANGE: 1 to `count`; 0 to `max`; start and length at
@@ -257,6 +261,7 @@ pub struct RefMod { pub start: IntExpr, pub length: Option<IntExpr>, pub check: 
 |---|---|---|
 | Undeclared RETURN-CODE | `Base::ReturnCode`, offset 0, length 2, BINARY S9(4) | 539-541 |
 | SELF, JNIENVPTR | `Base::SelfRef`, `Base::JniEnv` | 553-555 (int), calling oo.rs:71-81 (int) |
+| XML-TEXT, XML-NTEXT and the namespace registers, undeclared | `Base::Xml(register)` | `xml_register` (machine/xml.rs) |
 | Name lookup and its memo | Resolved at lowering; a condition-name used as data becomes an `Abend` op | 528-536, 542-544 |
 | Subscript count | Check refuses a wrong count (lib.rs:565-568); lowering asserts it | 547-549 |
 | WORKING-STORAGE, record areas | `Base::Program` | 557 |
@@ -311,7 +316,9 @@ pub enum Const { Bytes(Vec<u8>), National(Vec<u8>), Number(Fixed), Figurative(Fi
 
 /// A subscript, bound, TIMES count or exponent, as `integer()` gives it (machine.rs:613-619).
 /// `Fixed` locates each place of `prepass`, then evaluates `expr` with `dmax` (§7.5).
-pub enum IntExpr { Const(i64), Item(PlaceId), Fixed { expr: ExprId, dmax: u32, prepass: Vec<PlaceId> } }
+/// `Walk(k)` is subscript k of the JSON walk in progress (§9.13); only a markup payload's places
+/// and conditions hold it.
+pub enum IntExpr { Const(i64), Item(PlaceId), Fixed { expr: ExprId, dmax: u32, prepass: Vec<PlaceId> }, Walk(u8) }
 
 pub enum Expr {
     Operand(Operand), Neg(ExprId), Bin(ExprId, BinOp, ExprId),
@@ -537,6 +544,8 @@ pub enum Op {
     Alter { para: ParaId, to: ParaId }, EnterSegment(u8),
     /// Under the DEBUG option (§9.10): the line register, and a debugging section after an ALTER.
     DebugLine(u32), DebugAlter { range: RangeId, name: SymId, contents: SymId },
+    /// JSON GENERATE, JSON PARSE, XML GENERATE or XML PARSE (§9.13).
+    Markup(MarkupId),
 }
 
 /// What an op tells the VM, as the walker's `Flow` (machine.rs:46-59 (7af)) does. The library's
@@ -586,16 +595,18 @@ pub enum Terminator {
 pub struct Resume { pub para: ParaId, pub block: BlockId }
 
 pub struct Range { pub first: ParaId, pub last: ParaId, pub kind: RangeKind }
-pub enum RangeKind { Perform, SortProcedure, UseBeforeReporting, UseProcedure, Debugging }
+pub enum RangeKind { Perform, SortProcedure, UseBeforeReporting, UseProcedure, Debugging, Processing }
 ```
 
 - **Tags** (load-module.md §4.3): `PerformEnter` is tag 12 and `Debug` 11 of `Terminator`, and tag 6
-  is retired; `DebugLine` and `DebugAlter` are tags 30 and 31 of `Op`, and tag 29 (`SetSegment`) is
-  retired.
+  is retired; `DebugLine` and `DebugAlter` are tags 30 and 31 of `Op`, `Markup` 32, and tag 29
+  (`SetSegment`) is retired. `Processing` is tag 5 of `RangeKind`, `Xml` tag 7 of `Base` and
+  `Walk` tag 3 of `IntExpr`.
 - **A range's region** (`Range::region`) is the paragraphs a GO TO stays in it for: `first` to
   `last`; `first` to the program's last paragraph when `last` comes before `first`; and every
   paragraph for a SORT or MERGE procedure (§8.6). `UseProcedure` is a USE AFTER EXCEPTION/ERROR
-  procedure and `Debugging` a USE FOR DEBUGGING section (§9.10).
+  procedure, `Debugging` a USE FOR DEBUGGING section (§9.10), and `Processing` an XML PARSE
+  processing procedure (§9.13).
 
 The spec's `PerformEnter(range, loop)` is split: a PERFORM's loop is ordinary blocks around
 `PerformEnter`, because inline PERFORM needs the same loops without a range.
@@ -793,7 +804,9 @@ abend.
   EXIT SECTION or GO TO, and any PERFORM statements whose frames were left, as the walker's
   unwinding does.
 - **A procedure run** by a file op or a `Debug` checks and raises the depth at its statement or
-  paragraph, runs at the raised depth, and lowers it when its dispatch loop ends.
+  paragraph, runs at the raised depth, and lowers it when its dispatch loop ends. XML PARSE runs
+  its processing procedure at the statement's depth and raises nothing, as `xml_event` calls
+  `perform_range` (machine/xml.rs).
 
 ### 8.8 Other transfers
 
@@ -903,6 +916,8 @@ walker does on each execution; the last column names that work.
 | DECLARATIVES | Their paragraphs, and a range for each procedure that can run: the file ops run USE AFTER EXCEPTION/ERROR ones; under DEBUG, `Debug`, `DebugAlter` and `DebugLine` (§9.10) | Lowered | The procedure by file and mode; the triggers |
 | PERFORM, GO TO, EXIT, STOP RUN, GOBACK, NEXT SENTENCE | Terminators (§8) | Lowered | Procedure names (machine.rs:308-310) |
 | GO TO … DEPENDING ON, ALTER, ENTRY | `Switch`; `Alter` and `AlteredGoTo` (§8.9); an entry block (§9.3) | Lowered | Procedure names (machine.rs:459-473 (f2)); where an ENTRY begins |
+| JSON GENERATE, JSON PARSE, XML GENERATE | `Markup`, then `Select` when a phrase is written (§9.13) | One call | The phrases' items by name, the tree walked by name and kind |
+| XML PARSE | `Markup`, which runs the processing procedure per event, then `Select` (§9.13) | One call | The procedure by name, the registers by name |
 
 ### 9.2 MOVE
 
@@ -1505,6 +1520,134 @@ and one of a DEPENDING ON table with neither INDEXED BY nor VARYING, where the w
 follows the count. `SetInt` steps the index and a VARYING item that is not the index by one;
 lowering refuses one that is not an index or an integer item, where `integer` + 1 and
 the item + 1 truncate differently.
+
+### 9.13 JSON and XML
+
+Each statement is one `Op::Markup` naming its payload in `Services.markup`. The payload holds the
+statement's places, operands and phrases, and the tree of items the walker's walk reaches, with
+every choice it makes by name or kind made at lowering: which items it ignores (FILLER, REDEFINES,
+RENAMES, the null indicators), which SUPPRESS leaves out, how an unnamed group's members join their
+parent, each name as the document writes or matches it, each table's count (`Count::Fixed`, or the
+OCCURS DEPENDING ON object), and how each value converts. Values, the document and its encoding stay
+run-time data, read where the walker reads them.
+
+```rust
+pub enum Markup { JsonGenerate(JsonGenerate), XmlGenerate(XmlGenerate), XmlParse(XmlParse), JsonParse(JsonParse) }
+/// None written, the program's CODEPAGE (ENCODING FROM CODEPAGE), or an operand.
+pub enum Ccsid { Unnamed, CodePage, Operand(Operand) }
+/// How GENERATE writes an elementary value (`converted`, machine/json.rs).
+pub enum Convert { Chars { justified: bool }, National, Float(Precision), Fixed { integers: u32 }, Refused(AbendId) }
+/// A USING value of JSON GENERATE: a literal's first byte, a condition-name, or the walker's abend.
+pub enum Marker { Byte(Option<u8>), Condition(CondId), Refused(AbendId) }
+
+pub struct JsonGenerate {
+    pub from: PlaceId, pub subscripts: Vec<IntExpr>, pub nodes: Vec<JsonNode>, pub name: Option<SymId>,
+    pub receiver: PlaceId, pub encoding: Ccsid, pub count: Option<(PlaceId, StorePlan)>,
+    pub code: (PlaceId, StorePlan), pub on_exception: bool, pub not_on_exception: bool,
+}
+pub struct JsonNode { pub offset: u32, pub len: u32, pub kind: Kind, pub name: SymId, pub occurs: Option<Count>, pub value: JsonValue }
+pub enum JsonValue { Object { members: Vec<u32>, eligible: bool }, Leaf(JsonLeaf) }
+pub struct JsonLeaf {
+    pub indicator: Option<(Result<PlaceId, AbendId>, Marker)>, pub null: Option<Figurative>,
+    pub suppress: Vec<Figurative>, pub boolean: Option<Marker>, pub convert: Convert,
+}
+
+pub struct XmlGenerate {
+    pub receiver: PlaceId, pub encoding: Ccsid, pub namespace: Option<Operand>, pub prefix: Option<Operand>,
+    pub declaration: bool, pub from: PlaceId, pub subscripts: Vec<IntExpr>, pub nodes: Vec<XmlNode>,
+    pub suppressing: bool, pub count: Option<(PlaceId, StorePlan)>, pub code: (PlaceId, StorePlan),
+    pub on_exception: bool, pub not_on_exception: bool,
+}
+pub struct XmlNode { pub offset: u32, pub len: u32, pub kind: Kind, pub name: SymId, pub occurs: Option<Count>, pub value: XmlValue }
+pub enum XmlValue { Element { members: Vec<u32> }, Members { members: Vec<u32> }, Leaf { form: XmlForm, suppress: Vec<Figurative>, convert: Convert } }
+
+pub struct XmlParse {
+    pub document: PlaceId, pub encoding: Option<Operand>, pub national: bool, pub procedure: RangeId,
+    pub event: PlaceId, pub code: (PlaceId, StorePlan), pub information: (PlaceId, StorePlan),
+    pub code_value: IntExpr, pub on_exception: bool, pub not_on_exception: bool,
+}
+pub enum XmlRegister { Text, NText, Namespace, NNamespace, Prefix, NPrefix }
+
+pub struct JsonParse {
+    pub source: PlaceId, pub encoding: Ccsid, pub into: PlaceId, pub subscripts: Vec<IntExpr>,
+    pub nodes: Vec<ParseNode>, pub ignore_all: bool, pub code: (PlaceId, StorePlan), pub status: (PlaceId, StorePlan),
+    pub on_exception: bool, pub not_on_exception: bool,
+}
+pub struct ParseNode {
+    pub offset: u32, pub len: u32, pub kind: Kind, pub name: Named, pub occurs: Option<Count>, pub ignored: bool,
+    pub indicator: Option<Indicator>, pub null: Option<(Figurative, MovePlan)>, pub value: ParseValue,
+}
+pub enum Named { Exactly(SymId), Folded(SymId), Omitted }
+pub enum ParseValue { Object { members: Vec<u32> }, Leaf(ParseLeaf), Suppressed }
+pub struct ParseLeaf { pub boolean: Option<Flag>, pub text: Option<MovePlan>, pub number: NumberInto }
+pub enum NumberInto { Float(MovePlan), Store(StorePlan), Edited(MovePlan), Digits, Incompatible }
+pub struct Indicator { pub place: Option<Result<PlaceId, AbendId>>, pub flag: Flag }
+pub enum Flag { Set { on: SetTo, off: SetTo }, Literals { on: (ConstId, MovePlan), off: (ConstId, MovePlan) } }
+pub enum SetTo { Nothing, Move { place: PlaceId, value: ConstId, plan: MovePlan }, Refused(AbendId) }
+```
+
+- **The op and its phrases.** With ON EXCEPTION or NOT ON EXCEPTION written the op returns `Arm(1)`
+  when the code it stores is not 0 and `Arm(0)` when it is, for a `Select` of two blocks, as CALL's;
+  with neither, `Next`.
+- **Trees nest by index.** `nodes[0]` is the statement's own item; every member comes after the node
+  that holds it, which the decoder and the verifier check, so no walk loops. A node's `offset` counts
+  from the start of the occurrence of the node that holds it (`nodes[0]` from its place's `Loc`), and
+  a table's elements are `len` apart, `occurs` of them, counted when the walk reaches the table.
+- **The walk's subscripts.** FROM's or INTO's subscripts are evaluated once, after its locate, and
+  each table entered adds its occurrence number. A JSON phrase's indicator or condition-name is
+  located with the first of them (`IntExpr::Walk(k)` in its place's subscripts), as `subscripted`
+  and `locate_item` do; too few is the walker's IRONWORK abend, kept with the phrase's position.
+- **Phrases that name no data item.** A JSON phrase naming a condition-name, a NAME literal that is
+  not alphanumeric or national, and an INDICATING literal without IN abend at the statement before
+  anything is read, so the statement lowers to an `Abend` terminator. XML GENERATE resolves its
+  phrases only after the encoding and namespace, and such a phrase is refused by name.
+- **JSON GENERATE** (`json_generate`, machine/json.rs): FROM located (its first element when it
+  names a whole table, which makes `nodes[0]` a table), its subscripts, the tree, then the receiver
+  located (as a receiving item), the CCSID read, the document written, COUNT IN and JSON-CODE stored.
+  An `Object` with no member left is left out when `eligible`, else `{}`; a table whose elements are
+  all left out is left out; the root left out is `{}`, or `[]` for a whole table. A leaf tests, in
+  order, its indicator's marker (null), `null`, `suppress` (left out), `boolean`, then converts.
+- **XML GENERATE** (`xml_generated`, machine/xml/generate.rs): the receiver, the CCSID (`Unnamed` is
+  UTF-16 for a national receiver, else CODEPAGE), XML-CODE 415, 411 or 414 ending it there; the
+  namespace (416), the prefix read only for a namespace that is not empty (419); FROM, its
+  subscripts and the tree; 420 for a national value in a single-byte document; then the document,
+  COUNT IN, and XML-CODE 400, 417, 418 or 0. A `Members` node is an unnamed group whose members join,
+  occurrence by occurrence, the element that holds it; an `Element` left with nothing is left out
+  when `suppressing`, but never `nodes[0]`, which takes the namespace declaration. An elementary
+  FROM is converted as its place locates it, whatever its form.
+- **XML PARSE** (`xml_parse`, machine/xml.rs): the document located, the encoding read (a CCSID
+  ironwork has no page for abends IRONWORK), the document located again and decoded. The op then
+  runs the event loop: `rt::xml::Scanner` reports each event, which sets XML-EVENT (30 characters),
+  XML-CODE (0, or the exception's code), XML-INFORMATION and the `Base::Xml` registers, and the op
+  runs `procedure` through `Procedures::run` (§9.6) under a Procedure frame with the arrival PERFORM
+  LOOP. `Left(step)` ends the statement with `step`, its phrases not run. After `Completed` the op
+  reads `code_value`: a warning `Scanner::advance` reports as an EXCEPTION event (an undeclared
+  prefix) goes on when it is 0, and that or any other EXCEPTION otherwise ends the parse with the
+  scanner's code, whatever the procedure set; END-OF-DOCUMENT ends it with 0; at END-OF-INPUT, 1
+  locates and decodes the document again as the next segment (`Scanner::feed`) and any other value
+  ends the input (`Scanner::finish`); after any other event, -1 ends it with -1. XML-CODE takes the
+  result. The procedure is a `Processing` range, so a GO TO out of it stays a `GoTo` and its last
+  paragraph keeps `abandoned` (§8.4).
+- **JSON PARSE** (`json_parse`, machine/json/parse.rs): the source located, the CCSID read
+  (FROM CODEPAGE of a national source is 109 before it is), the text decoded and parsed; for a
+  document that parses, INTO located with its subscripts, and each value moved into the node its
+  name reaches (`Named`), the first that matches. `nodes[0]` named `Omitted` takes the document
+  itself; otherwise the document is an object whose members INTO's name matches. A node takes a
+  value as `parse_value` does: a duplicate at the same node and offset, the indicator (located,
+  then its flag set on for null), a null by `null`'s MOVE or as ignored or a status, an object into
+  a group's members, any other value into a leaf: a boolean by its flag, a string by `text` or as the
+  number it spells with the program's decimal point (`ProgramOptions.decimal_point_comma`), a number
+  by `number`. JSON-CODE and then JSON-STATUS are stored.
+- **The special registers are places.** JSON-CODE, JSON-STATUS, XML-CODE, XML-EVENT and
+  XML-INFORMATION are WORKING-STORAGE items Check declares for a program that has the statement
+  (compile/src/markup.rs), stored with `set_integer`'s plans. XML-TEXT, XML-NTEXT, XML-NAMESPACE,
+  XML-NNAMESPACE, XML-NAMESPACE-PREFIX and XML-NNAMESPACE-PREFIX, where the program declares none,
+  are `Base::Xml` places, alphanumeric or national, whose reference modification abends IRONWORK
+  "reference modification (s:l) of NAME is outside its N bytes".
+- **Refused:** an item with PICTURE scaling positions in a GENERATE tree or JSON PARSE leaf (an
+  executor reads values by `Kind`, which does not carry them), a JSON phrase naming a
+  reference-modified item, an XML GENERATE phrase or JSON PARSE INTO that names no data item, and a
+  PROCESSING PROCEDURE the walker cannot find.
 
 ## 10. The debug table
 

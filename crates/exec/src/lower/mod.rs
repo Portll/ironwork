@@ -5,8 +5,8 @@
 //! EVALUATE, DISPLAY, INITIALIZE, PERFORM, GO TO, GO TO DEPENDING ON, ALTER, EXIT, STOP RUN, GOBACK,
 //! CALL, CANCEL, ENTRY, INVOKE, SET, STRING, UNSTRING, INSPECT, SEARCH, ACCEPT, the file
 //! statements, intrinsic functions, independent segments, class definitions, USE AFTER
-//! EXCEPTION/ERROR and USE FOR DEBUGGING. Anything else is [`LowerError::Unsupported`], naming the
-//! construct.
+//! EXCEPTION/ERROR, USE FOR DEBUGGING, and JSON and XML GENERATE and PARSE. Anything else is
+//! [`LowerError::Unsupported`], naming the construct.
 
 mod call;
 mod class;
@@ -15,6 +15,7 @@ mod data;
 mod file;
 mod flow;
 mod function;
+mod markup;
 mod plans;
 mod search;
 mod set;

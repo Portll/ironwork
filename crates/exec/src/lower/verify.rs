@@ -3,8 +3,9 @@
 //! exactly when the program has SSRANGE.
 
 use rt::lir::{
-    Advance, Bound, CallArg, CallTarget, Chars, Comparand, Compare, Cond, ConvertTable, Count, DisplayItem, Expr, FileVerb, IntExpr, MethodName, MovePlan, Op, Operand,
-    Place, Program, RangeKind, Receiver, Replacement, StartKey, StorePlan, Terminator, UpDown,
+    Advance, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Convert, ConvertTable, Count, DisplayItem, Expr, FileVerb, Flag, IntExpr, JsonValue,
+    Marker, Markup, MethodName, MovePlan, Named, Op, Operand, ParseValue, Place, Program, RangeKind, Receiver, Replacement, SetTo, StartKey, StorePlan, Terminator, UpDown,
+    XmlValue,
 };
 
 /// A class definition's data and methods are programs of their own, each checked as one.
@@ -41,7 +42,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
     };
     let places = |qs: &[u32]| qs.iter().try_for_each(|&q| place(q));
     let int = |e: &IntExpr| match e {
-        IntExpr::Const(_) => Ok(()),
+        IntExpr::Const(_) | IntExpr::Walk(_) => Ok(()),
         IntExpr::Item(q) => place(*q),
         IntExpr::Fixed { expr: e, prepass, .. } => expr(*e).and_then(|()| places(prepass)),
     };
@@ -309,6 +310,108 @@ fn verify_program(p: &Program) -> Result<(), String> {
             symbol(java)?;
         }
     }
+    let count = |c: &Count| match c {
+        Count::Fixed(_) => Ok(()),
+        Count::Odo(o) => int(&o.object),
+    };
+    let marker = |m: &Marker| match *m {
+        Marker::Byte(_) => Ok(()),
+        Marker::Condition(c) => cond(c),
+        Marker::Refused(a) => abend(a),
+    };
+    let convert = |c: &Convert| if let Convert::Refused(a) = *c { abend(a) } else { Ok(()) };
+    let constant = |c: u32| within("constant", c, p.consts.len());
+    let set_to = |s: &SetTo| match *s {
+        SetTo::Nothing => Ok(()),
+        SetTo::Move { place: q, value, .. } => place(q).and_then(|()| constant(value)),
+        SetTo::Refused(a) => abend(a),
+    };
+    let flag = |f: &Flag| match f {
+        Flag::Set { on, off } => set_to(on).and_then(|()| set_to(off)),
+        Flag::Literals { on, off } => constant(on.0).and_then(|()| constant(off.0)),
+    };
+    let ccsid = |c: &Ccsid| if let Ccsid::Operand(o) = c { operand(o) } else { Ok(()) };
+    let members = |k: usize, members: &[u32], nodes: usize| match members.iter().find(|&&m| m as usize <= k || m as usize >= nodes) {
+        Some(m) => Err(format!("markup node {k} holds node {m} of {nodes}")),
+        None => Ok(()),
+    };
+    for m in &p.services.markup {
+        match m {
+            Markup::JsonGenerate(g) => {
+                place(g.from)?;
+                g.subscripts.iter().try_for_each(int)?;
+                g.name.map_or(Ok(()), symbol)?;
+                place(g.receiver)?;
+                ccsid(&g.encoding)?;
+                g.count.map_or(Ok(()), |(q, _)| place(q))?;
+                place(g.code.0)?;
+                for (k, n) in g.nodes.iter().enumerate() {
+                    symbol(n.name)?;
+                    n.occurs.as_ref().map_or(Ok(()), count)?;
+                    match &n.value {
+                        JsonValue::Object { members: held, .. } => members(k, held, g.nodes.len())?,
+                        JsonValue::Leaf(leaf) => {
+                            if let Some((at, test)) = &leaf.indicator {
+                                at.map_or_else(abend, place)?;
+                                marker(test)?;
+                            }
+                            leaf.boolean.as_ref().map_or(Ok(()), marker)?;
+                            convert(&leaf.convert)?;
+                        }
+                    }
+                }
+            }
+            Markup::XmlGenerate(g) => {
+                place(g.receiver)?;
+                ccsid(&g.encoding)?;
+                g.namespace.iter().chain(&g.prefix).try_for_each(operand)?;
+                place(g.from)?;
+                g.subscripts.iter().try_for_each(int)?;
+                g.count.map_or(Ok(()), |(q, _)| place(q))?;
+                place(g.code.0)?;
+                for (k, n) in g.nodes.iter().enumerate() {
+                    symbol(n.name)?;
+                    n.occurs.as_ref().map_or(Ok(()), count)?;
+                    match &n.value {
+                        XmlValue::Element { members: held } | XmlValue::Members { members: held } => members(k, held, g.nodes.len())?,
+                        XmlValue::Leaf { convert: c, .. } => convert(c)?,
+                    }
+                }
+            }
+            Markup::XmlParse(x) => {
+                place(x.document)?;
+                x.encoding.as_ref().map_or(Ok(()), operand)?;
+                range(x.procedure, RangeKind::Processing)?;
+                place(x.event)?;
+                place(x.code.0)?;
+                place(x.information.0)?;
+                int(&x.code_value)?;
+            }
+            Markup::JsonParse(j) => {
+                place(j.source)?;
+                ccsid(&j.encoding)?;
+                place(j.into)?;
+                j.subscripts.iter().try_for_each(int)?;
+                place(j.code.0)?;
+                place(j.status.0)?;
+                for (k, n) in j.nodes.iter().enumerate() {
+                    if let Named::Exactly(name) | Named::Folded(name) = n.name {
+                        symbol(name)?;
+                    }
+                    n.occurs.as_ref().map_or(Ok(()), count)?;
+                    if let Some(i) = &n.indicator {
+                        i.place.map_or(Ok(()), |at| at.map_or_else(abend, place))?;
+                        flag(&i.flag)?;
+                    }
+                    match &n.value {
+                        ParseValue::Object { members: held } => members(k, held, j.nodes.len())?,
+                        ParseValue::Leaf(leaf) => leaf.boolean.as_ref().map_or(Ok(()), flag)?,
+                        ParseValue::Suppressed => {}
+                    }
+                }
+            }
+        }
+    }
     for e in &p.services.entries {
         symbol(e.name)?;
         within("paragraph", e.paragraph, p.paragraphs.len())?;
@@ -344,6 +447,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
             Op::Invoke(i) if p.services.invokes.get(*i as usize).is_some_and(|plan| plan.on_exception || plan.not_on_exception) => 2,
             Op::File(f) => p.services.file_ops.get(*f as usize).map_or(0, |op| op.arms()),
             Op::String(_) | Op::Unstring(_) | Op::SearchAll(_) => 2,
+            Op::Markup(m) if p.services.markup.get(*m as usize).is_some_and(|x| x.phrases() != (false, false)) => 2,
             _ => 0,
         };
         let armed = |op: &Op| arms(op) > 0;
@@ -377,6 +481,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
                     within("paragraph", *to, p.paragraphs.len())?;
                 }
                 Op::File(f) => within("file statement", *f, p.services.file_ops.len())?,
+                Op::Markup(m) => within("JSON or XML statement", *m, p.services.markup.len())?,
                 Op::SetAddress { records, address } => {
                     records.iter().try_for_each(|&r| within("LINKAGE record", u32::from(r), p.storage.linkage.len()))?;
                     operand(address)?;
