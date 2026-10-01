@@ -260,11 +260,12 @@ fn default_currency(program: &mut Program, options: &mut Options, errors: &mut V
 
 /// NSYMBOL(DBCS) makes a PICTURE of N alone with no USAGE, its own or a group's, USAGE DISPLAY-1
 /// (Programming Guide SC27-8714-03, p. 388), which ironwork does not have. NSYMBOL(NATIONAL) with
-/// NODBCS on the cards is IBM's conflict: an error, and DBCS in effect (p. 344).
+/// NODBCS on the cards is IBM's conflict: DBCS in effect, with a warning (p. 344; assumption
+/// [`numeric::assumptions::NSYMBOL_DBCS`]).
 fn national_symbols(program: &Program, options: &mut Options, errors: &mut Vec<Error>) {
     if options.nsymbol == numeric::Nsymbol::National {
         if !options.dbcs && program.options.iter().any(|o| numeric::options::switch(o, "NSYMBOL").is_some()) {
-            errors.push(Error::at(Pos::default(), "CBL NODBCS: NSYMBOL(NATIONAL) requires DBCS, which is in effect").graded(Severity::Error));
+            errors.push(Error::warning(Pos::default(), "CBL NODBCS: NSYMBOL(NATIONAL) requires DBCS, which is in effect"));
             options.dbcs = true;
         }
         return;

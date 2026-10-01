@@ -1417,7 +1417,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: NSYMBOL_DBCS,
-        claim: "Under NSYMBOL(DBCS) an N literal is a DBCS literal and a PICTURE of N alone with no USAGE is USAGE DISPLAY-1 (Programming Guide SC27-8714-03, pp. 387-388). ironwork holds no DBCS data, so the first N literal stops the read and each such item is a severe error, both in ironwork's words; a program with neither compiles as under NSYMBOL(NATIONAL), as IBM's text implies it would. NX literals are not N literals. NSYMBOL(NATIONAL) with NODBCS on the cards, which are one level of precedence, is an error and DBCS stays in effect, as Table 46 forces it (p. 344); NODBCS alone, with NSYMBOL(NATIONAL) only as the default, is taken as written",
+        claim: "Under NSYMBOL(DBCS) an N literal is a DBCS literal and a PICTURE of N alone with no USAGE is USAGE DISPLAY-1 (Programming Guide SC27-8714-03, pp. 387-388). ironwork holds no DBCS data, so the first N literal stops the read and each such item is a severe error, both in ironwork's words; a program with neither compiles as under NSYMBOL(NATIONAL), as IBM's text implies it would. NX literals are not N literals. NSYMBOL(NATIONAL) with NODBCS on the cards, which are one level of precedence, leaves DBCS in effect, as Table 46 forces it (p. 344), with a warning (W, return code 4) in ironwork's words, since the message Enterprise COBOL gives for an option dropped in conflict resolution is IGYOS4020-W (J19), as for INITIAL with THREAD (C217); NODBCS alone, with NSYMBOL(NATIONAL) only as the default, is taken as written",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

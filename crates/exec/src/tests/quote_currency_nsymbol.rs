@@ -87,11 +87,11 @@ fn nsymbol_dbcs_refuses_what_it_would_make_dbcs_and_leaves_the_rest_alone() {
 }
 
 #[test]
-fn nsymbol_national_with_nodbcs_is_an_error_and_keeps_dbcs() {
+fn nsymbol_national_with_nodbcs_warns_and_keeps_dbcs() {
     let parsed = syntax::parse(&program("NODBCS,NSYMBOL(NATIONAL)", "", &line("GOBACK."))).unwrap();
     let compiled = compile(parsed, &[]).unwrap();
     let messages: Vec<_> = compiled.diagnostics.iter().map(|e| (e.message.as_str(), e.severity)).collect();
-    assert_eq!(messages, [("CBL NODBCS: NSYMBOL(NATIONAL) requires DBCS, which is in effect", Severity::Error)]);
+    assert_eq!(messages, [("CBL NODBCS: NSYMBOL(NATIONAL) requires DBCS, which is in effect", Severity::Warning)]);
     assert!(compiled.options.dbcs);
     let alone = compile(syntax::parse(&program("NODBCS", "", &line("GOBACK."))).unwrap(), &[]).unwrap();
     assert!(!alone.options.dbcs && alone.diagnostics.is_empty());
