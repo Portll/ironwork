@@ -21,6 +21,14 @@ pub const FUNCTIONS: &[&str] = &[
     "WHEN-COMPILED",
 ];
 
+/// Functions of type alphanumeric or national, or whose type follows an argument that may be one
+/// (Language Reference SC27-8713-03, p. 77 and Part 7).
+pub const CHARACTER_VALUED: &[&str] = &[
+    "BIT-OF", "BIT-TO-CHAR", "CHAR", "CONTENT-OF", "CURRENT-DATE", "DISPLAY-OF", "FORMATTED-CURRENT-DATE", "FORMATTED-DATE",
+    "FORMATTED-DATETIME", "FORMATTED-TIME", "HEX-OF", "HEX-TO-CHAR", "LOWER-CASE", "MAX", "MIN", "NATIONAL-OF", "REVERSE", "TRIM",
+    "UPPER-CASE", "USUBSTR", "UUID4", "WHEN-COMPILED",
+];
+
 /// Functions whose result is long floating point under ARITH(COMPAT) and extended under
 /// ARITH(EXTEND), so an expression holding one is evaluated in floating point (Programming Guide
 /// SC27-8714-03, pp. 56-58, 62-63, 800-801; assumption C111).

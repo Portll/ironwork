@@ -70,7 +70,10 @@ impl Lower<'_> {
     /// CONVERTING's table is built here when both operands are literals of the same length; else
     /// the operands are kept and read, and their lengths compared, when the statement runs.
     pub(super) fn inspect_plan(&mut self, i: &Inspect, pos: Pos) -> R<InspectId> {
-        let target = self.place(&i.target, false)?;
+        let Operand::Ref(target) = &i.target else {
+            return unsupported("INSPECT of a function result", pos);
+        };
+        let target = self.place(target, false)?;
         let mut tallying = Vec::with_capacity(i.tallying.len());
         for p in &i.tallying {
             tallying.push(self.inspect_phrase(p, pos)?);

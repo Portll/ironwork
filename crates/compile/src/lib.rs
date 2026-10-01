@@ -804,7 +804,10 @@ impl Check<'_> {
                 self.statements(u.not_on_overflow.as_deref().unwrap_or_default());
             }
             Stmt::Inspect(i) => {
-                self.reference(&i.target);
+                self.operand(&i.target);
+                if let Operand::Function(f) = &i.target {
+                    self.inspected_function(f, i);
+                }
                 for p in i.tallying.iter().chain(&i.replacing) {
                     p.pattern.iter().chain(&p.by).for_each(|o| self.operand(o));
                     if let Some(c) = &p.counter {
@@ -1108,6 +1111,25 @@ impl Check<'_> {
             {
                 self.errors.push(Error::at(block.pos, format!("EXEC DLI {} WHERE({t}): {why}", command.name)));
             }
+        }
+    }
+
+    /// A function's value can be inspected only as a character string, and only by TALLYING:
+    /// REPLACING and CONVERTING store into the inspected item (Language Reference SC27-8713-03,
+    /// pp. 77, 359; assumption C190).
+    fn inspected_function(&mut self, f: &FunctionCall, i: &Inspect) {
+        let name = f.name.as_str();
+        let known = FUNCTIONS.contains(&name) || rt::intrinsic::FUNCTIONS.contains(&name);
+        if known && !rt::intrinsic::CHARACTER_VALUED.contains(&name) {
+            self.errors.push(Error::at(f.pos, format!("INSPECT FUNCTION {name}: an integer or numeric function can be used only where an arithmetic expression can, not as the inspected item")));
+        }
+        let stores = if !i.replacing.is_empty() {
+            Some("REPLACING")
+        } else {
+            i.converting.as_ref().map(|_| "CONVERTING")
+        };
+        if let Some(phrase) = stores {
+            self.errors.push(Error::at(f.pos, format!("INSPECT FUNCTION {name} {phrase}: {phrase} stores into the inspected item, and a function-identifier cannot be a receiving operand")));
         }
     }
 

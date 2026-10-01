@@ -1664,6 +1664,8 @@ kind; the plans fix it:
   `Value::Bytes`); DELIMITER IN takes the delimiter that way (`found`) or SPACE (`none`).
 - **Literals** are `Chars::Literal`, `natural_bytes` of the value `literal_value` gives. INSPECT's
   REPLACING BY a figurative constant is `Replacement::Fill` of its character.
+- **INSPECT of a function result** (TALLYING only, assumption C190) is not lowered: `InspectPlan`'s
+  target is a place, and the walker runs it through `rt::text::tally`.
 - **STRING, UNSTRING and SEARCH ALL** always return `Arm`, so a `Select` of two arms follows each,
   to the next statement where no phrase is written.
 

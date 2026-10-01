@@ -158,14 +158,8 @@ pub fn inspect<P: Copy, O>(
 ) -> R<()> {
     let loc = x.locate(target, false)?;
     let mut data = store::bytes(x.mem(), loc).to_vec();
-    let tallied = phrases(x, &data, tallying, pos)?;
-    let counts = strings::inspect(&mut data, &tallied);
-    for (phrase, count) in tallying.iter().zip(counts) {
-        let Some(counter) = phrase.counter else { continue };
-        let dest = x.locate(counter, false)?;
-        add_count(x, dest, count, "a TALLYING counter must be numeric", pos)?;
-    }
-    let mut changes = phrases(x, &data, replacing, pos)?;
+    count(x, &mut data, 1, tallying, pos)?;
+    let mut changes = phrases(x, &data, 1, replacing, pos)?;
     if let Some(c) = converting {
         let pairs = match &c.table {
             ConvertTable::Built(pairs) => pairs.clone(),
@@ -183,14 +177,46 @@ pub fn inspect<P: Copy, O>(
                 pairs
             }
         };
-        let (start, end) = region(x, &data, &c.bounds, pos)?;
+        let (start, end) = region(x, &data, 1, &c.bounds, pos)?;
         for (f, t) in pairs {
             changes.push(Phrase { mode: InspectMode::All, pattern: vec![f], by: Some(vec![t]), start, end });
         }
     }
-    strings::inspect(&mut data, &changes);
+    strings::inspect(&mut data, 1, &changes);
     store::write(x.mem(), loc, &data);
     Ok(())
+}
+
+/// INSPECT TALLYING of a function's value, evaluated once before the phrases' operands. A national
+/// value's character positions are two bytes, and a figurative constant is one national character
+/// (assumption C191).
+pub fn tally<P: Copy, O>(x: &mut impl Values<P, O>, subject: &O, tallying: &[InspectPhrase<P, O>], pos: Pos) -> R<()> {
+    let val = x.value(subject, pos)?;
+    let unit = if matches!(val, Val::National(_)) { 2 } else { 1 };
+    let mut data = store::natural_bytes(&x.facts(), val, pos)?;
+    count(x, &mut data, unit, tallying, pos)
+}
+
+fn count<P: Copy, O>(x: &mut impl Values<P, O>, data: &mut [u8], unit: usize, tallying: &[InspectPhrase<P, O>], pos: Pos) -> R<()> {
+    let tallied = phrases(x, data, unit, tallying, pos)?;
+    let counts = strings::inspect(data, unit, &tallied);
+    for (phrase, count) in tallying.iter().zip(counts) {
+        let Some(counter) = phrase.counter else { continue };
+        let dest = x.locate(counter, false)?;
+        add_count(x, dest, count, "a TALLYING counter must be numeric", pos)?;
+    }
+    Ok(())
+}
+
+/// `chars`, where a figurative constant is a national character when a position is two bytes.
+fn chars_in<P: Copy, O>(x: &mut impl Values<P, O>, c: &Chars<P, O>, unit: usize, pos: Pos) -> R<Vec<u8>> {
+    match c {
+        Chars::Value(o) if unit == 2 => match x.value(o, pos)? {
+            Val::Fig(f) => Ok(store::figurative_unit(f).to_be_bytes().to_vec()),
+            val => store::natural_bytes(&x.facts(), val, pos),
+        },
+        c => chars(x, c, pos),
+    }
 }
 
 /// TALLYING's add: `n` added to a numeric item, stored with no size error.
@@ -204,20 +230,20 @@ fn add_count<P: Copy>(x: &mut impl Host<P>, dest: Loc, n: i64, not_numeric: &str
 }
 
 /// The part of `data` BEFORE and AFTER INITIAL leave a phrase: the last of each applies.
-fn region<P: Copy, O>(x: &mut impl Values<P, O>, data: &[u8], bounds: &[Bound<P, O>], pos: Pos) -> R<(usize, usize)> {
+fn region<P: Copy, O>(x: &mut impl Values<P, O>, data: &[u8], unit: usize, bounds: &[Bound<P, O>], pos: Pos) -> R<(usize, usize)> {
     let (mut before, mut after) = (None, None);
     for b in bounds {
-        let v = chars(x, &b.value, pos)?;
+        let v = chars_in(x, &b.value, unit, pos)?;
         if b.after { after = Some(v) } else { before = Some(v) }
     }
-    Ok(strings::region(data, before.as_deref(), after.as_deref()))
+    Ok(strings::region(data, unit, before.as_deref(), after.as_deref()))
 }
 
-fn phrases<P: Copy, O>(x: &mut impl Values<P, O>, data: &[u8], phrases: &[InspectPhrase<P, O>], pos: Pos) -> R<Vec<Phrase>> {
+fn phrases<P: Copy, O>(x: &mut impl Values<P, O>, data: &[u8], unit: usize, phrases: &[InspectPhrase<P, O>], pos: Pos) -> R<Vec<Phrase>> {
     let mut out = Vec::new();
     for p in phrases {
         let pattern = match &p.pattern {
-            Some(c) => chars(x, c, pos)?,
+            Some(c) => chars_in(x, c, unit, pos)?,
             None => Vec::new(),
         };
         let len = pattern.len().max(1);
@@ -229,7 +255,7 @@ fn phrases<P: Copy, O>(x: &mut impl Values<P, O>, data: &[u8], phrases: &[Inspec
         if by.as_ref().is_some_and(|b| b.len() != len) {
             return Err(Abend::ironwork("a REPLACING value must be as long as what it replaces", pos));
         }
-        let (start, end) = region(x, data, &p.bounds, pos)?;
+        let (start, end) = region(x, data, unit, &p.bounds, pos)?;
         out.push(Phrase { mode: p.mode, pattern, by, start, end });
     }
     Ok(out)

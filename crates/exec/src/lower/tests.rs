@@ -428,6 +428,8 @@ fn constructs_outside_the_slice_are_refused_by_name() {
     assert!(matches!(all, LowerError::Unsupported("a FUNCTION of fixed arguments given a table whose ALL subscripts run to an OCCURS DEPENDING ON count", _)));
     let numval = refused("MOVE FUNCTION MAX(N M) TO A", "       01  A PIC X.\n       01  N PIC 9.\n       01  M PIC 99.\n");
     assert!(matches!(numval, LowerError::Unsupported(n, _) if n.starts_with("a FUNCTION result whose digits")));
+    let inspected = refused("INSPECT FUNCTION REVERSE(A) TALLYING C FOR LEADING SPACES", "       01  A PIC X.\n       01  C PIC 9.\n");
+    assert!(matches!(inspected, LowerError::Unsupported("INSPECT of a function result", _)));
     let e = refused("SEARCH T WHEN T(X) = 'A' CONTINUE END-SEARCH", "       01  G.\n           05 N PIC 9.\n           05 T PIC X OCCURS 1 TO 3 DEPENDING ON N.\n       01  X PIC 9.\n");
     assert_eq!(e.to_string(), "lowering: SEARCH of an OCCURS DEPENDING ON table with neither INDEXED BY nor VARYING is not lowered yet");
     assert_eq!(syntax::Error::from(e).pos.line, 10);
@@ -1152,6 +1154,15 @@ fn a_function_evaluates_its_arguments_then_any_again_as_an_integer_then_its_refe
     assert_eq!((f[6].func, symbol(&p, p.abends[arity as usize].message)), (lir::Func::Length, "FUNCTION LENGTH takes 1..=1 arguments"));
     let Op::Display(d) = ops(&p).find(|op| matches!(op, Op::Display(_))).unwrap() else { unreachable!() };
     assert!(matches!(p.plans.display[*d as usize].items[..], [DisplayItem::Value(LirOperand::Function(5)), DisplayItem::Value(LirOperand::Function(6))]));
+}
+
+#[test]
+fn case_reverse_and_trim_of_a_national_argument_are_national() {
+    let statements: String = ["NATIONAL-OF(A)", "REVERSE(W)", "UPPER-CASE(W)", "LOWER-CASE(W)", "TRIM(W)", "REVERSE(A)"].iter().map(|f| line(&format!("MOVE FUNCTION {f} TO W"))).collect();
+    let p = lowered(&program("", "       01  A PIC X(4).\n       01  W PIC N(4).\n", &[statements, line("GOBACK.")].concat()));
+    let m = moves(&p);
+    assert!(m[1..5].iter().all(|plan| *plan == m[0]), "{m:?}");
+    assert_ne!(m[5], m[0]);
 }
 
 fn with_special_names(clauses: &str, data: &str, procedure: &[String]) -> String {

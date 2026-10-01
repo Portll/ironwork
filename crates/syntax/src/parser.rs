@@ -2240,7 +2240,7 @@ impl Parser<'_> {
     }
 
     fn inspect(&mut self, pos: Pos) -> R<Inspect> {
-        let target = self.reference()?;
+        let target = if self.is_word("FUNCTION") { self.operand()? } else { Operand::Ref(self.reference()?) };
         let (mut tallying, mut replacing, mut converting) = (Vec::new(), Vec::new(), None);
         if self.accept_word("TALLYING") {
             while self.starts_ref() && self.word_at(1) == Some("FOR") || self.starts_ref() && !self.is_word("REPLACING") && self.tally_counter_ahead() {

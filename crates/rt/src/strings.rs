@@ -14,9 +14,9 @@ pub struct Phrase {
 
 /// The region `[start, end)` of `data` that BEFORE and AFTER INITIAL leave: BEFORE ends it at the
 /// first occurrence of its value, AFTER starts it after the first occurrence of its value (or
-/// leaves nothing when the value does not occur).
-pub fn region(data: &[u8], before: Option<&[u8]>, after: Option<&[u8]>) -> (usize, usize) {
-    let find = |needle: &[u8]| (!needle.is_empty()).then(|| data.windows(needle.len()).position(|w| w == needle)).flatten();
+/// leaves nothing when the value does not occur). A character position is `unit` bytes.
+pub fn region(data: &[u8], unit: usize, before: Option<&[u8]>, after: Option<&[u8]>) -> (usize, usize) {
+    let find = |needle: &[u8]| (!needle.is_empty()).then(|| (0..=data.len().saturating_sub(needle.len())).step_by(unit).find(|&p| data[p..].starts_with(needle))).flatten();
     let start = match after {
         Some(a) => find(a).map_or(data.len(), |p| p + a.len()),
         None => 0,
@@ -30,8 +30,8 @@ pub fn region(data: &[u8], before: Option<&[u8]>, after: Option<&[u8]>) -> (usiz
 
 /// Scans `data` left to right; at each position the first phrase that applies and matches takes
 /// the characters it matches. Returns how many times each phrase matched, replacing as it goes
-/// when phrases carry a BY value.
-pub fn inspect(data: &mut [u8], phrases: &[Phrase]) -> Vec<i64> {
+/// when phrases carry a BY value. A character position is `unit` bytes.
+pub fn inspect(data: &mut [u8], unit: usize, phrases: &[Phrase]) -> Vec<i64> {
     let mut counts = vec![0i64; phrases.len()];
     let mut active = vec![true; phrases.len()];
     let mut next_leading: Vec<usize> = phrases.iter().map(|p| p.start).collect();
@@ -46,7 +46,7 @@ pub fn inspect(data: &mut [u8], phrases: &[Phrase]) -> Vec<i64> {
                 active[k] = false;
                 continue;
             }
-            let len = if phrase.mode == InspectMode::Characters { 1 } else { phrase.pattern.len() };
+            let len = if phrase.mode == InspectMode::Characters { unit } else { phrase.pattern.len() };
             let fits = len > 0 && at + len <= phrase.end;
             let hit = fits && (phrase.mode == InspectMode::Characters || data[at..at + len] == phrase.pattern[..]);
             if !hit {
@@ -69,7 +69,7 @@ pub fn inspect(data: &mut [u8], phrases: &[Phrase]) -> Vec<i64> {
             taken = len;
             break;
         }
-        at += taken.max(1);
+        at += taken.max(unit);
     }
     counts
 }
@@ -112,36 +112,46 @@ mod tests {
     fn tallying_all_leading_and_characters() {
         let mut data = b"  AABA  ".to_vec();
         let n = data.len();
-        let counts = inspect(&mut data, &[phrase(InspectMode::Leading, " ", None, (0, n)), phrase(InspectMode::All, "A", None, (0, n))]);
+        let counts = inspect(&mut data, 1, &[phrase(InspectMode::Leading, " ", None, (0, n)), phrase(InspectMode::All, "A", None, (0, n))]);
         assert_eq!(counts, [2, 3]);
-        let counts = inspect(&mut data, &[phrase(InspectMode::Characters, "", None, (0, n))]);
+        let counts = inspect(&mut data, 1, &[phrase(InspectMode::Characters, "", None, (0, n))]);
         assert_eq!(counts, [8]);
     }
 
     #[test]
     fn replacing_first_all_and_within_bounds() {
         let mut data = b"A,B,C.D,E".to_vec();
-        let (start, end) = region(&data, Some(b"."), None);
-        inspect(&mut data, &[phrase(InspectMode::All, ",", Some(";"), (start, end))]);
+        let (start, end) = region(&data, 1, Some(b"."), None);
+        inspect(&mut data, 1, &[phrase(InspectMode::All, ",", Some(";"), (start, end))]);
         assert_eq!(data, b"A;B;C.D,E");
         let mut data = b"XAXAX".to_vec();
-        inspect(&mut data, &[phrase(InspectMode::First, "X", Some("Y"), (0, 5))]);
+        inspect(&mut data, 1, &[phrase(InspectMode::First, "X", Some("Y"), (0, 5))]);
         assert_eq!(data, b"YAXAX");
         let mut data = b"00012".to_vec();
-        inspect(&mut data, &[phrase(InspectMode::Leading, "0", Some(" "), (0, 5))]);
+        inspect(&mut data, 1, &[phrase(InspectMode::Leading, "0", Some(" "), (0, 5))]);
         assert_eq!(data, b"   12");
     }
 
     #[test]
     fn after_initial_with_no_occurrence_leaves_nothing() {
-        assert_eq!(region(b"ABC", None, Some(b"Z")), (3, 3));
-        assert_eq!(region(b"ABCD", Some(b"D"), Some(b"A")), (1, 3));
+        assert_eq!(region(b"ABC", 1, None, Some(b"Z")), (3, 3));
+        assert_eq!(region(b"ABCD", 1, Some(b"D"), Some(b"A")), (1, 3));
     }
 
     #[test]
     fn a_leading_run_ends_at_the_first_other_character() {
         let mut data = b"**A**".to_vec();
-        assert_eq!(inspect(&mut data, &[phrase(InspectMode::Leading, "*", None, (0, 5))]), [2]);
+        assert_eq!(inspect(&mut data, 1, &[phrase(InspectMode::Leading, "*", None, (0, 5))]), [2]);
+    }
+
+    #[test]
+    fn national_characters_are_two_bytes() {
+        let mut data = vec![0x00, 0x41, 0x41, 0x00, 0x20, 0x00, 0x00, 0x20];
+        let n = data.len();
+        let space = Phrase { mode: InspectMode::All, pattern: vec![0x00, 0x20], by: None, start: 0, end: n };
+        let characters = Phrase { mode: InspectMode::Characters, pattern: vec![], by: None, start: 0, end: n };
+        assert_eq!(inspect(&mut data, 2, &[space, characters]), [1, 3]);
+        assert_eq!(region(&data, 2, Some(&[0x00, 0x20]), Some(&[0x00, 0x41])), (2, 6));
     }
 
     #[test]

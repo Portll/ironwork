@@ -241,11 +241,7 @@ fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
         Func::Integer | Func::IntegerPart if float => integer(if arith == Arith::Compat { 30 } else { 31 }),
         Func::Mod if float => num(None, 0),
         Func::Char
-        | Func::UpperCase
-        | Func::LowerCase
-        | Func::Reverse
         | Func::CurrentDate
-        | Func::Trim
         | Func::HexOf
         | Func::BitOf
         | Func::HexToChar
@@ -254,7 +250,15 @@ fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
         | Func::Uuid4
         | Func::WhenCompiled => of(Value::Bytes),
         Func::NationalOf => of(Value::National),
-        Func::FormattedCurrentDate | Func::FormattedDate | Func::FormattedTime | Func::FormattedDatetime | Func::Usubstr => {
+        Func::UpperCase
+        | Func::LowerCase
+        | Func::Reverse
+        | Func::Trim
+        | Func::FormattedCurrentDate
+        | Func::FormattedDate
+        | Func::FormattedTime
+        | Func::FormattedDatetime
+        | Func::Usubstr => {
             of(if args.first().is_some_and(|a| a.side.value == Value::National) { Value::National } else { Value::Bytes })
         }
         Func::Random

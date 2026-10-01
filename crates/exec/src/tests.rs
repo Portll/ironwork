@@ -1618,6 +1618,42 @@ fn inspect_tallying_replacing_and_converting() {
 }
 
 #[test]
+fn inspect_tallying_counts_over_a_function_result_and_refuses_to_change_one() {
+    let data = "       01  S PIC X(8) VALUE 'AbC'.\n       01  W PIC N(4) VALUE N'xy'.\n       01  N1 PIC 99 VALUE 0.\n       01  N2 PIC 99 VALUE 0.\n       01  N3 PIC 99 VALUE 0.\n";
+    let out = run(&program(
+        "",
+        data,
+        &[
+            line("INSPECT FUNCTION REVERSE(S) TALLYING N1 FOR LEADING SPACES"),
+            line("INSPECT FUNCTION UPPER-CASE(S (1:3)) TALLYING N2 FOR ALL 'B'"),
+            line("    N3 FOR CHARACTERS BEFORE INITIAL FUNCTION UPPER-CASE('c')"),
+            line("DISPLAY N1 ' ' N2 ' ' N3 ' [' S ']'"),
+            line("MOVE 0 TO N1 N2 N3"),
+            line("INSPECT FUNCTION REVERSE(W) TALLYING N1 FOR LEADING SPACES"),
+            line("    N2 FOR ALL N'y' N3 FOR CHARACTERS"),
+            line("DISPLAY N1 ' ' N2 ' ' N3 ' '"),
+            line("    FUNCTION DISPLAY-OF(FUNCTION UPPER-CASE(W))"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    ));
+    assert_eq!(out, "05 01 01 [AbC     ]\n02 01 01 XY  \n");
+    let errors = |statement: &str| {
+        let body: String = statement.split(" | ").chain(["GOBACK."]).map(line).collect();
+        let parsed = syntax::parse(&program("", data, &body)).unwrap();
+        compile(parsed, &[]).err().unwrap().into_iter().map(|e| e.message).collect::<Vec<_>>()
+    };
+    let receiving = |name: &str, phrase: &str| format!("INSPECT FUNCTION {name} {phrase}: {phrase} stores into the inspected item, and a function-identifier cannot be a receiving operand");
+    assert_eq!(errors("INSPECT FUNCTION REVERSE(S) REPLACING ALL 'A' BY 'B'"), [receiving("REVERSE", "REPLACING")]);
+    assert_eq!(errors("INSPECT FUNCTION TRIM(S) TALLYING N1 FOR ALL 'A' | REPLACING ALL 'A' BY 'B'"), [receiving("TRIM", "REPLACING")]);
+    assert_eq!(errors("INSPECT FUNCTION UPPER-CASE(S) CONVERTING 'A' TO 'B'"), [receiving("UPPER-CASE", "CONVERTING")]);
+    assert_eq!(
+        errors("INSPECT FUNCTION LENGTH(S) TALLYING N1 FOR CHARACTERS"),
+        ["INSPECT FUNCTION LENGTH: an integer or numeric function can be used only where an arithmetic expression can, not as the inspected item"]
+    );
+}
+
+#[test]
 fn search_serial_and_binary() {
     let out = run(&program(
         "",

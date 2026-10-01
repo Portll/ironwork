@@ -635,7 +635,10 @@ impl Rules<'_> {
                 self.plain(&Operand::Ref(u.source.clone()), u.pos);
                 u.into.iter().for_each(|i| self.receiver(&i.target, u.pos));
             }
-            Stmt::Inspect(i) => self.receiver(&i.target, i.pos),
+            Stmt::Inspect(i) => match &i.target {
+                Operand::Ref(r) => self.receiver(r, i.pos),
+                subject => self.plain(subject, i.pos),
+            },
             Stmt::If { cond, pos, .. } => self.cond(cond, *pos),
             Stmt::PerformInline { repeat, pos, .. } | Stmt::PerformProc { repeat, pos, .. } => match repeat {
                 Loop::Until { cond, .. } => self.cond(cond, *pos),

@@ -706,9 +706,12 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     fn inspect(&mut self, i: &Inspect) -> R<()> {
         let tallying: Vec<_> = i.tallying.iter().map(|p| self.inspect_phrase(p)).collect();
+        let Operand::Ref(target) = &i.target else {
+            return rt::text::tally(self, &&i.target, &tallying, i.pos);
+        };
         let replacing: Vec<_> = i.replacing.iter().map(|p| self.inspect_phrase(p)).collect();
         let converting = i.converting.as_ref().map(|(from, to, bounds)| Converting { table: ConvertTable::Operands { from: facts::chars(from), to: facts::chars(to) }, bounds: facts::bounds(bounds) });
-        rt::text::inspect(self, &i.target, &tallying, &replacing, converting.as_ref(), i.pos)
+        rt::text::inspect(self, target, &tallying, &replacing, converting.as_ref(), i.pos)
     }
 
     fn search(&mut self, se: &'p Search) -> R<Flow> {

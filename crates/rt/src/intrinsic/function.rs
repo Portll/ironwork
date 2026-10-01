@@ -239,6 +239,11 @@ pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args
             arity(0..=0)?;
             date_and_time(&facts, x.now(), pos)?
         }
+        "UPPER-CASE" | "LOWER-CASE" | "REVERSE" if matches!(args.first(), Some(Val::National(_))) => {
+            arity(1..=1)?;
+            let Val::National(b) = &args[0] else { unreachable!() };
+            Val::National(national_case(&utf16_text(b), name).encode_utf16().flat_map(u16::to_be_bytes).collect())
+        }
         "UPPER-CASE" | "LOWER-CASE" | "REVERSE" => {
             arity(1..=1)?;
             let text = page.decode(&bytes_of(&args[0])?);
@@ -324,6 +329,17 @@ fn random(state: &mut Option<u32>, seed: Option<i64>, pos: Pos) -> R<Hfp> {
     *state = Some(next as u32);
     let (x, m) = (Hfp::from_integer(next as i128, Precision::Long), Hfp::from_integer(MODULUS as i128, Precision::Long));
     x.div(m, ProgramMask::default()).map_err(|c| Abend::check(c, pos))
+}
+
+/// UPPER-CASE, LOWER-CASE or REVERSE of national text: a surrogate pair reverses as one character,
+/// and a letter whose case mapping is more than one character is left as it is (assumption C192).
+fn national_case(text: &str, name: &str) -> String {
+    let one = |c: char, mapped: &mut dyn ExactSizeIterator<Item = char>| if mapped.len() == 1 { mapped.next().unwrap_or(c) } else { c };
+    match name {
+        "UPPER-CASE" => text.chars().map(|c| one(c, &mut c.to_uppercase())).collect(),
+        "LOWER-CASE" => text.chars().map(|c| one(c, &mut c.to_lowercase())).collect(),
+        _ => text.chars().rev().collect(),
+    }
 }
 
 fn text_of(facts: &dyn ProgramFacts, v: &Val, name: &str, pos: Pos) -> R<String> {
@@ -776,5 +792,17 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             text_value(facts, &text::uuid4(random), pos)
         }
         other => Err(Abend::ironwork(format!("FUNCTION {other} is not supported yet"), pos)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::national_case;
+
+    #[test]
+    fn national_reverse_keeps_surrogate_pairs_and_case_keeps_the_length() {
+        assert_eq!(national_case("Tö\u{21DF3}b", "REVERSE"), "b\u{21DF3}öT");
+        assert_eq!(national_case("straße", "UPPER-CASE"), "STRAßE");
+        assert_eq!(national_case("ÄB\u{130}", "LOWER-CASE"), "äb\u{130}");
     }
 }

@@ -235,6 +235,9 @@ pub const DISPSIGN_SEPARATE: &str = "C213";
 pub const LILIAN_INTEGER_DATES: &str = "C214";
 pub const CEECBLDY_UNDER_LILIAN: &str = "C215";
 pub const COMPLETE_SET_OF_QUALIFIERS: &str = "C216";
+pub const INSPECT_FUNCTION_SUBJECT: &str = "C190";
+pub const INSPECT_NATIONAL_FUNCTION_RESULT: &str = "C191";
+pub const NATIONAL_CASE_AND_REVERSE: &str = "C192";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1470,6 +1473,24 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: COMPLETE_SET_OF_QUALIFIERS,
         claim: "Under QUALIFY(EXTEND) a reference the standard's rules find ambiguous names the one candidate it gives a complete set of qualifiers, 'every level in the containing hierarchy of names' (Programming Guide SC27-8714-03, p. 400; 'every qualifier is specified', Language Reference SC27-8713-03, p. 68); with no such candidate, or two, it stays ambiguous. A data item's complete set is the name of every group that holds it, nearest first, up to its level-01 entry: a FILLER or unnamed group has no name to give and is no level of it, and a level-66 item's hierarchy is its record. A record's file-name may follow but is not needed, since the Language Reference lets a level-01 name that is the only one of its level be referenced under EXTEND (p. 67), which a record of an FD or SD could not be if its file-name were needed (p. 69); a LINAGE-COUNTER's complete set is its file-name or nothing. A condition-name's hierarchy starts with its conditional variable, which qualifies it (p. 70). The rule applies to RENAMES operands too, among the items of the record. A SUM operand naming a REPORT SECTION entry is found by its report-name and does not follow it",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: INSPECT_FUNCTION_SUBJECT,
+        claim: "INSPECT's identifier-1 can be an alphanumeric or national function-identifier in a TALLYING-only INSPECT (format 1): a function-identifier can be used wherever a sending data item of its category can, except as a receiving operand (Language Reference SC27-8713-03, p. 77), the INSPECT data flow evaluates a function-identifier once, as the first operation (p. 360), and TALLYING leaves identifier-1 unchanged. REPLACING (formats 2 and 3) and CONVERTING (format 4) copy their result back to identifier-1 (Table 40, p. 359), so a function there is a receiving operand and is refused when compiled (S); so is an integer or numeric function as identifier-1, since one can be used only where an arithmetic expression can (pp. 77, 505) and identifier-1 must be a DISPLAY, DISPLAY-1 or NATIONAL item or group (p. 355). MIN, MAX and CONTENT-OF, whose type follows their arguments, are not refused. The manuals give neither the message numbers nor their text: the messages are ironwork's. A function-identifier as identifier-3 to identifier-7 is read as any sending operand is",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: INSPECT_NATIONAL_FUNCTION_RESULT,
+        claim: "INSPECT TALLYING of a national function result counts national characters (two-byte encoding units) and matches comparands and BEFORE or AFTER INITIAL delimiters only at character boundaries, and a figurative constant there is one national character (Language Reference SC27-8713-03, p. 355). An inspected item of usage NATIONAL is still inspected byte by byte, with figurative constants of one byte, as before this entry; that and the lowering, which refuses INSPECT of a function result, are left for later. No intrinsic function returns DBCS, so a DBCS function result does not arise",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: NATIONAL_CASE_AND_REVERSE,
+        claim: "UPPER-CASE, LOWER-CASE and REVERSE of a national argument are national (Language Reference SC27-8713-03, pp. 597, 635, 671), as TRIM's already was (p. 665), and lowering types all four so. REVERSE keeps a surrogate pair as one character (p. 635). The case functions map each character by Unicode's case mapping where that gives one character and leave it alone otherwise, so the result keeps the argument's length as the manual requires; IBM names UnicodeData.txt, whose simple mappings differ from this in a few characters, such as U+0130, which is left as it is here",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

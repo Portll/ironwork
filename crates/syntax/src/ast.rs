@@ -571,9 +571,10 @@ pub struct InspectPhrase {
     pub bounds: Vec<Bound>,
 }
 
+/// `target` is a data item or, for TALLYING alone, a function's value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Inspect {
-    pub target: Ref,
+    pub target: Operand,
     pub tallying: Vec<InspectPhrase>,
     pub replacing: Vec<InspectPhrase>,
     pub converting: Option<(Operand, Operand, Vec<Bound>)>,

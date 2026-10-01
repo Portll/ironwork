@@ -131,8 +131,10 @@ fn receivers(s: &Stmt) -> Vec<&Ref> {
             out.extend(u.pointer.iter().chain(&u.tallying));
         }
         Stmt::Inspect(i) => {
-            if !i.replacing.is_empty() || i.converting.is_some() {
-                out.push(&i.target);
+            if let Operand::Ref(r) = &i.target
+                && (!i.replacing.is_empty() || i.converting.is_some())
+            {
+                out.push(r);
             }
             out.extend(i.tallying.iter().filter_map(|p| p.counter.as_ref()));
         }
