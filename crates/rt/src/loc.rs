@@ -8,6 +8,12 @@ use crate::vocab::Pos;
 
 type R<T> = Result<T, Abend>;
 
+/// An SSRANGE failure: LE's condition, which nothing handles, ends the run with U4038 under the
+/// default ABTERMENC(ABEND); the message starts with IBM's message id where one is known (L19).
+fn out_of_range(message: String, pos: Pos) -> Abend {
+    Abend { code: AbendCode::user(4038), message, pos, file: None }
+}
+
 /// A LINKAGE record's address; S0C4 while no argument or SET ADDRESS OF has given it one.
 pub fn linkage_base(address: Option<usize>, name: &str, pos: Pos) -> R<usize> {
     address.ok_or_else(|| Abend {
@@ -23,7 +29,7 @@ pub fn subscript(value: i64, stride: u32, check: Option<u32>, name: &str, pos: P
     if let Some(count) = check
         && (value < 1 || value > count as i64)
     {
-        return Err(Abend::ironwork(format!("subscript {value} of {name} is out of range 1 to {count} (SSRANGE)"), pos));
+        return Err(out_of_range(format!("IGZ0006S subscript {value} of {name} is out of range 1 to {count} (SSRANGE)"), pos));
     }
     Ok((value - 1) * stride as i64)
 }
@@ -32,7 +38,7 @@ pub fn subscript(value: i64, stride: u32, check: Option<u32>, name: &str, pos: P
 /// declared maximum so that a bad count never reaches past the table's storage.
 pub fn occurrences(count: i64, max: u32, check: bool, object: &str, pos: Pos) -> R<u32> {
     if check && !(0..=max as i64).contains(&count) {
-        return Err(Abend::ironwork(format!("{object} = {count} is outside the OCCURS DEPENDING ON range 0 to {max} (SSRANGE)"), pos));
+        return Err(out_of_range(format!("{object} = {count} is outside the OCCURS DEPENDING ON range 0 to {max} (SSRANGE)"), pos));
     }
     Ok(count.clamp(0, max as i64) as u32)
 }
@@ -46,8 +52,17 @@ pub fn odo_len(len: i64, max: u32, current: u32, element: u32) -> i64 {
 /// Without a length, it runs to the item's end.
 pub fn refmod(len: i64, start: i64, length: Option<i64>, check: bool, name: &str, pos: Pos) -> R<(i64, i64)> {
     let length = length.unwrap_or(len - start + 1);
-    if check && (start < 1 || length < 1 || start + length - 1 > len) {
-        return Err(Abend::ironwork(format!("reference modification ({start}:{length}) of {name} is out of range (SSRANGE)"), pos));
+    if check {
+        let id = if start < 1 || start > len {
+            "IGZ0072S"
+        } else if length < 1 {
+            "IGZ0073S"
+        } else if start + length - 1 > len {
+            "IGZ0074S"
+        } else {
+            return Ok((start - 1, length));
+        };
+        return Err(out_of_range(format!("{id} reference modification ({start}:{length}) of {name} is out of range (SSRANGE)"), pos));
     }
     Ok((start - 1, length))
 }

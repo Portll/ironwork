@@ -829,9 +829,22 @@ fn ssrange_catches_what_ibm_would_catch() {
     let data = "       01  G.\n           05 T PIC X OCCURS 3.\n       01  I PIC 9 VALUE 4.\n";
     let body = [line("MOVE 'A' TO T(I)"), line("GOBACK.")].concat();
     assert!(run_with(&program("", data, &body), &[]).2.is_ok());
-    assert!(run_with(&program("SSRANGE", data, &body), &[]).2.unwrap_err().message.contains("SSRANGE"));
+    let abend = run_with(&program("SSRANGE", data, &body), &[]).2.unwrap_err();
+    assert_eq!(abend.code, AbendCode::user(4038));
+    assert!(abend.message.starts_with("IGZ0006S") && abend.message.contains("SSRANGE"), "{}", abend.message);
     assert!(run_with(&program("SSR(ZLEN)", data, &body), &[]).2.unwrap_err().message.contains("SSRANGE"));
     assert!(run_with(&program("SSR,NOSSR", data, &body), &[]).2.is_ok());
+}
+
+#[test]
+fn ssrange_reference_modification_names_the_part_out_of_range() {
+    let data = "       01  X PIC X(3).\n       01  S PIC S9.\n       01  L PIC S9.\n";
+    for (start, length, id) in [(4, 1, "IGZ0072S"), (0, 1, "IGZ0072S"), (1, 0, "IGZ0073S"), (2, 3, "IGZ0074S")] {
+        let body = [line(&format!("MOVE {start} TO S")), line(&format!("MOVE {length} TO L")), line("MOVE 'A' TO X(S:L)"), line("GOBACK.")].concat();
+        let abend = run_with(&program("SSRANGE", data, &body), &[]).2.unwrap_err();
+        assert_eq!(abend.code, AbendCode::user(4038));
+        assert!(abend.message.starts_with(id), "({start}:{length}): {}", abend.message);
+    }
 }
 
 #[test]

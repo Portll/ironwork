@@ -86,6 +86,7 @@ pub const LE_UNDER_CICS: &str = "L15";
 pub const LE_CEEIGZCT: &str = "L16";
 pub const LE_CEEIGZCT_DISAGREEMENTS: &str = "L17";
 pub const LE_SHORT_ARGUMENT_LIST: &str = "L18";
+pub const LE_SSRANGE_U4038: &str = "L19";
 pub const REPORT_WRITER_PRECOMPILER: &str = "RW1";
 pub const REPORT_TOTALS_BEFORE_PAGE_FIT: &str = "RW2";
 pub const REPORT_SOURCE_SUM_CORRELATION: &str = "RW3";
@@ -807,6 +808,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: LE_SHORT_ARGUMENT_LIST,
         claim: "A CALL of a service with fewer arguments than its syntax lists, CEE3ABD with no USING among them, ends the run with ironwork's own abend, not a modelled one: IBM calls a short list invalid with unpredictable results (SA38-0683-60, General usage notes for callable services) and says nothing of register 1 at a CALL without USING, whose own CALL and CEEPCALL macros leave it unaltered when no parameter is coded (MVS Assembler Services Reference SA22-7606-13, CALL; SA38-0682-60, CEEPCALL); the service then reads its arguments through whatever register 1 and the storage past the list hold, so neither S0C4 nor any other result follows. A missing fc is not taken as OMITTED, nor a missing clean-up as none",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LE_SSRANGE_U4038,
+        claim: "A reference SSRANGE finds out of range signals a severity-3 LE condition; nothing handles it, so the run ends with user abend U4038 under the default ABTERMENC(ABEND). The message ids, from memory of the Enterprise COBOL messages: IGZ0006S for a subscript or index outside its table, IGZ0072S for a reference-modification start outside its item, IGZ0073S for a length below 1, and IGZ0074S for a start and length that reach past the item's end. An OCCURS DEPENDING ON object outside its range carries no id until one is checked",
+        basis: Basis::Recalled,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
