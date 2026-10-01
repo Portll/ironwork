@@ -15,6 +15,7 @@ pub mod digest;
 pub mod display;
 pub mod edit;
 pub mod evidence;
+pub mod feedback;
 pub mod files;
 pub mod fileio;
 pub mod fixed;

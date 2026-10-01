@@ -1072,9 +1072,10 @@ unit.rs:150-171 (f2)).
 - **RETURNING** is located after the callee returns and receives its RETURNING item's value by
   MOVE rules chosen from the value's kind, or the service's result; not after STOP RUN.
 - **LE services** run only after the program search fails, as assumption L1
-  `LE_SERVICE_AFTER_PROGRAMS` (int) records. `LeService` is an enum of the services `le_service`
-  dispatches (machine/le_services.rs:59-74 (int)); arguments are addresses, as for a program
-  (le_services.rs:31-49 (int)). ON EXCEPTION never runs for a service. A `Dynamic` target's name is
+  `LE_SERVICE_AFTER_PROGRAMS` (int) records. `LeService` is an enum of the services
+  `rt::le::call` runs, over an `LeHost` that gives it the run unit, the code page and a loaded
+  method's name for CEE3DMP; arguments are addresses, as for a program (`le_arguments`,
+  machine/le_services.rs). ON EXCEPTION never runs for a service. A `Dynamic` target's name is
   matched with a service when the CALL runs.
 - **CANCEL** is one `Cancel` per name, in order, each read as `program_name` reads a `Dynamic`
   target (machine.rs:478-483 (f2)).
