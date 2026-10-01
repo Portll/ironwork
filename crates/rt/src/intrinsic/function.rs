@@ -4,7 +4,7 @@
 
 use super::numval::{self, Form};
 use super::real::Real;
-use super::{dates, datetime, math, text};
+use super::{dates, datetime, math, text, unicode};
 use crate::abend::Abend;
 use crate::calendar::{SECONDS_PER_DAY, civil, days_from_civil, days_in_month};
 use crate::display::utf16_text;
@@ -151,14 +151,17 @@ pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args
         "NUMVAL" | "NUMVAL-C" => {
             arity(1..=2)?;
             let currency = match args.get(1) {
-                Some(v) => page.decode(&bytes_of(v)?),
+                Some(v) => text_of(&facts, v, name, pos)?,
                 None => x.currency(),
             };
-            let mut text = page.decode(&bytes_of(&args[0])?);
+            let mut text = text_of(&facts, &args[0], name, pos)?;
             if facts.decimal_point() == ',' {
                 text = text.chars().map(|c| if c == '.' { ',' } else if c == ',' { '.' } else { c }).collect();
             }
-            Val::Num(numval::fixed(&text, (name == "NUMVAL-C").then_some(currency.as_str())).unwrap_or_else(|| Fixed::new(0, Places::new(1, 0))))
+            let value = numval::fixed(&text, (name == "NUMVAL-C").then_some(currency.as_str())).unwrap_or_else(|| Fixed::new(0, Places::new(1, 0)));
+            // Long floating point under ARITH(COMPAT), extended under ARITH(EXTEND) (Programming
+            // Guide SC27-8714-03, p. 115).
+            float_result(exact_real(&value), facts.options().arith.float_intermediate(), pos)?
         }
         "TRIM" => {
             arity(1..=1)?;
@@ -701,6 +704,55 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
                     let scale = 10u128.pow(u32::from(digits));
                     let value = Real::from_u128(u128::from(seconds) * scale + u128::from(fraction)).div(Real::from_u128(scale));
                     float_result(value, p, pos)
+                }
+            }
+        }
+        "COMBINED-DATETIME" => {
+            arity(2..=2, &args)?;
+            let date = integer_date(&args[0], name, pos)?;
+            let seconds = match &args[1] {
+                Val::Num(x) => exact_real(x),
+                Val::Float(h) => Real::from_hfp(*h),
+                _ => return Err(Abend::ironwork(format!("FUNCTION {name} needs numeric arguments"), pos)),
+            };
+            if seconds.is_negative() || seconds.compare(Real::from_u128(86_400)) != Ordering::Less {
+                return Err(outside(seconds, "the time must be from 0 to less than 86400 seconds"));
+            }
+            // A long-precision result whatever ARITH says (Language Reference SC27-8713-03, p. 541).
+            let long = (Real::from_u128(date as u128) + seconds / Real::from_u128(100_000)).to_hfp(Precision::Long).map_err(|c| Abend::check(c, pos))?;
+            Ok(Val::Float(if p.digits() > Precision::Long.digits() { long.lengthen(p) } else { long }))
+        }
+        "CONTENT-OF" => {
+            arity(1..=1, &args)?;
+            Ok(args.swap_remove(0))
+        }
+        "ULENGTH" | "UPOS" | "USUBSTR" | "USUPPLEMENTARY" | "UVALID" | "UWIDTH" => {
+            let n = match name {
+                "UPOS" | "UWIDTH" => 2,
+                "USUBSTR" => 3,
+                _ => 1,
+            };
+            arity(n..=n, &args)?;
+            let (bytes, utf16) = match &args[0] {
+                Val::National(b) => (b.as_slice(), true),
+                Val::Bytes(b) | Val::All(b) => (b.as_slice(), false),
+                _ => return Err(Abend::ironwork(format!("FUNCTION {name} needs an alphanumeric or national argument"), pos)),
+            };
+            let nth = |k: usize| -> R<Option<(usize, usize)>> {
+                let n = whole(&args[k], name, pos)?;
+                Ok(usize::try_from(n).ok().filter(|&n| n > 0).and_then(|n| unicode::characters(bytes, utf16).get(n - 1).copied()))
+            };
+            match name {
+                "ULENGTH" => Ok(integer(unicode::characters(bytes, utf16).len() as i128, 9)),
+                "UPOS" => Ok(integer(nth(1)?.map_or(0, |(at, _)| at + 1) as i128, 9)),
+                "UWIDTH" => Ok(integer(nth(1)?.map_or(0, |(_, width)| width) as i128, 9)),
+                "USUPPLEMENTARY" => Ok(integer(unicode::supplementary(bytes, utf16) as i128, 9)),
+                "UVALID" => Ok(integer(unicode::invalid(bytes, utf16).unwrap_or(0) as i128, 9)),
+                _ => {
+                    let part = unicode::substring(bytes, utf16, whole(&args[1], name, pos)?, whole(&args[2], name, pos)?)
+                        .ok_or_else(|| Abend::ironwork(format!("FUNCTION {name}: the substring reaches past argument-1's characters"), pos))?
+                        .to_vec();
+                    Ok(if utf16 { Val::National(part) } else { Val::Bytes(part) })
                 }
             }
         }

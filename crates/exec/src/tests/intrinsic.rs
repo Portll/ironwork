@@ -212,3 +212,51 @@ fn a_reference_modified_national_item_counts_characters_and_stays_national() {
     let out = displays(data, &["DISPLAY FUNCTION DISPLAY-OF(NX(2:S))", "DISPLAY FUNCTION DISPLAY-OF(NX(3:))", "DISPLAY FUNCTION DISPLAY-OF(\n    FUNCTION NATIONAL-OF('WXYZ')(2:2))"]);
     assert_eq!(out, "BC\nCD\nXY\n");
 }
+
+#[test]
+fn the_unicode_functions_count_utf_8_and_utf_16_characters() {
+    let data = concat!(
+        "       01  A PIC X(6) VALUE X'4BC3A4666572'.\n",
+        "       01  BB PIC X(16) VALUE X'005400F6006200750072D858DC6B0073'.\n",
+        "       01  B REDEFINES BB PIC N(8).\n",
+        "       01  E PIC X(3) VALUE 'ABC'.\n",
+        "       01  S PIC X(6).\n",
+        "       01  R PIC 99.\n",
+    );
+    let each = ["ULENGTH(A)", "ULENGTH(B)", "UPOS(A 3)", "UPOS(B 7)", "UWIDTH(B 6)", "UWIDTH(A 9)", "USUPPLEMENTARY(B)", "UVALID(A)", "UVALID(E)"];
+    let mut statements: Vec<String> = each.iter().flat_map(|f| [format!("COMPUTE R = FUNCTION {f}"), "DISPLAY R".into()]).collect();
+    statements.push("MOVE FUNCTION USUBSTR(A 2 2) TO S".into());
+    statements.push("DISPLAY FUNCTION HEX-OF(S(1:3))".into());
+    let out = displays(data, &statements.iter().map(String::as_str).collect::<Vec<_>>());
+    assert_eq!(out, "05\n07\n04\n15\n04\n00\n06\n00\n01\nC3A466\n");
+}
+
+#[test]
+fn combined_datetime_is_a_long_approximation_rounded_into_its_receiver() {
+    let statements = |data: &str| {
+        let body: String = ["COMPUTE MYDATE = 143951", "COMPUTE MYTIME = 18867.812479168304", "COMPUTE MYRESULT =", "    FUNCTION COMBINED-DATETIME (MYDATE, MYTIME)", "DISPLAY 'COMBINED-DATE-TIME: ' MYRESULT", "GOBACK."]
+            .into_iter()
+            .map(line)
+            .collect();
+        (data.to_owned(), body)
+    };
+    let (compat, body) = statements("       01 MYRESULT PIC 9(8).9(10).\n       01 MYDATE PIC 9(18).\n       01 MYTIME PIC 9(06)V9(12).\n");
+    assert_eq!(run_at_noon(&program("", &compat, &body)).0, "COMBINED-DATE-TIME: 00143951.1886781248\n");
+    let (extend, body) = statements("       01 MYRESULT PIC 9(9).9(17).\n       01 MYDATE PIC 9(31).\n       01 MYTIME PIC 9(19)V9(12).\n");
+    assert_eq!(run_at_noon(&program("ARITH(EXTEND)", &extend, &body)).0, "COMBINED-DATE-TIME: 000143951.18867812478856649\n");
+}
+
+#[test]
+fn content_of_gives_its_arguments_value() {
+    let data = "       01  A PIC X(3) VALUE 'abc'.\n       01  N PIC S9(3) VALUE -42.\n       01  R PIC S9(3).\n";
+    let out = displays(data, &["DISPLAY FUNCTION CONTENT-OF(A)", "COMPUTE R = FUNCTION CONTENT-OF(N) + 1", "DISPLAY R"]);
+    assert_eq!(out, "abc\n04J\n");
+}
+
+#[test]
+fn numval_is_floating_point_long_under_compat_and_extended_under_extend() {
+    let data = "       01  A PIC X(20) VALUE '123456789.123456789'.\n       01  B PIC 999V99.\n       01  C PIC 9(9)V9(9).\n";
+    let body: String = ["COMPUTE B = FUNCTION NUMVAL(' 1.23 ')", "COMPUTE C = FUNCTION NUMVAL(A)", "DISPLAY B ' ' C", "COMPUTE C = FUNCTION NUMVAL-C('$1,234.5CR')", "DISPLAY C", "GOBACK."].into_iter().map(line).collect();
+    assert_eq!(run_at_noon(&program("", data, &body)).0, "00123 123456789123456787\n000001234500000000\n");
+    assert_eq!(run_at_noon(&program("ARITH(EXTEND)", data, &body)).0, "00123 123456789123456789\n000001234500000000\n");
+}

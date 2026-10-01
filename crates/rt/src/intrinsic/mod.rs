@@ -7,6 +7,7 @@ pub mod math;
 pub mod numval;
 pub mod real;
 pub mod text;
+pub mod unicode;
 
 /// The functions beyond the first twenty-one that ironwork for COBOL runs.
 pub const FUNCTIONS: &[&str] = &[
@@ -16,13 +17,14 @@ pub const FUNCTIONS: &[&str] = &[
     "MEAN", "MEDIAN", "MIDRANGE", "NUMVAL-F", "ORD-MAX", "ORD-MIN", "PI", "PRESENT-VALUE", "RANGE", "SECONDS-FROM-FORMATTED-TIME",
     "SECONDS-PAST-MIDNIGHT", "SIGN", "SIN", "SQRT", "STANDARD-DEVIATION", "SUM", "TAN", "TEST-DATE-YYYYMMDD", "TEST-DAY-YYYYDDD",
     "TEST-FORMATTED-DATETIME", "TEST-NUMVAL", "TEST-NUMVAL-C", "TEST-NUMVAL-F", "UUID4", "VARIANCE", "YEAR-TO-YYYY",
+    "ULENGTH", "UPOS", "USUBSTR", "USUPPLEMENTARY", "UVALID", "UWIDTH", "COMBINED-DATETIME", "CONTENT-OF",
 ];
 
 /// Functions whose result is long floating point under ARITH(COMPAT) and extended under
 /// ARITH(EXTEND), so an expression holding one is evaluated in floating point (Programming Guide
 /// SC27-8714-03, pp. 56-58, 62-63, 800-801; assumption C111).
 pub const FLOATING_POINT: &[&str] = &[
-    "ACOS", "ANNUITY", "ASIN", "ATAN", "COS", "E", "EXP", "EXP10", "LOG", "LOG10", "MEAN", "MEDIAN", "MIDRANGE", "NUMVAL-F", "PI",
+    "ACOS", "ANNUITY", "ASIN", "ATAN", "COMBINED-DATETIME", "COS", "E", "EXP", "EXP10", "LOG", "LOG10", "MEAN", "MEDIAN", "MIDRANGE", "NUMVAL", "NUMVAL-C", "NUMVAL-F", "PI",
     "PRESENT-VALUE", "RANDOM", "SECONDS-FROM-FORMATTED-TIME", "SECONDS-PAST-MIDNIGHT", "SIN", "SQRT", "STANDARD-DEVIATION", "TAN", "VARIANCE",
 ];
 
