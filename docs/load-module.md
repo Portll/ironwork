@@ -336,7 +336,7 @@ for the tree that added `Options::vsamopenfs`.
 ### 5.1 Options
 
 `Program.options` is lir.md's `ProgramOptions`: `numeric::options::Options`
-(crates/numeric/src/options.rs:299-339), which is `Copy`, holds only enums, options, integers, a
+(crates/numeric/src/options.rs:316-361), which is `Copy`, holds only enums, options, integers, a
 `char` and bools, and encodes as it is, its fields in declaration order; then `ssrange`, the option cards, the
 collating sequence, `decimal_point_comma` (a bool) and `numval_currency` (a string), the last two
 from SPECIAL-NAMES (lir.md §9.11), and `when_compiled`. Options are per program, because a CBL
@@ -361,7 +361,7 @@ compiler option: `trunc_check`, `fastsrt_adv_print`, `sort_keys`, `warnings`, `d
 | `arith` | `Arith` (:54) | tag: `Compat` 0, `Extend` 1 | `ARITH`, `AR`, with `COMPAT`, `C`, `EXTEND` or `E` |
 | `trunc` | `Trunc` (:84) | tag: `Std` 0, `Opt` 1, `Bin` 2 | `TRUNC(STD\|OPT\|BIN)` |
 | `numproc` | `Numproc` (:92) | tag: `Nopfd` 0, `Pfd` 1 | `NUMPROC(NOPFD\|PFD)` |
-| `codepage` | `u16` | LEB128. The `check` function refuses a CCSID `CodePage::by_ccsid` does not carry, because `Options::code_page` (:592) would otherwise panic | `CODEPAGE(n)`, `CP(n)` |
+| `codepage` | `u16` | LEB128. The `check` function refuses a CCSID `CodePage::by_ccsid` does not carry, because `Options::code_page` (:639) would otherwise panic | `CODEPAGE(n)`, `CP(n)` |
 | `trunc_check` | `TruncCheck` (:102) | tag: `Report` 0, `Silent` 1 | `-silent` |
 | `fastsrt` | `bool` | 0 or 1 | `FASTSRT`, `FSRT`, and `NOFASTSRT`, `NOFSRT` |
 | `fastsrt_adv_print` | `FastsrtAdvPrint` (:122) | tag: `Exclude` 0, `Include` 1 | `--fastsrt-adv-print=exclude\|include` |
@@ -371,22 +371,22 @@ compiler option: `trunc_check`, `fastsrt_adv_print`, `sort_keys`, `warnings`, `d
 | `dll` | `bool` | 0 or 1 | `DLL`, `NODLL` |
 | `rent` | `bool` | 0 or 1 | `RENT`, `NORENT` |
 | `dbcs` | `bool` | 0 or 1 | `DBCS`, `NODBCS` |
-| `warnings` | `Warnings` (:252) | tag: `Proceed` 0, `Block` 1 | `-warnings-block` |
-| `compile` | `Option<Compile>` (:261) | `None`, or `Some` then the tag: `Full` 0, `Until` 1 followed by the `Stop` (:272) tag (`W` 0, `E` 1, `S` 2), `SyntaxOnly` 2. `None` when no card gives the option; `Options::object_code` (:585) resolves it with `warnings` (assumption C47) | `COMPILE`, `C`, and `NOCOMPILE`, `NOC`, alone or with `(W)`, `(E)` or `(S)` |
+| `warnings` | `Warnings` (:269) | tag: `Proceed` 0, `Block` 1 | `-warnings-block` |
+| `compile` | `Option<Compile>` (:278) | `None`, or `Some` then the tag: `Full` 0, `Until` 1 followed by the `Stop` (:289) tag (`W` 0, `E` 1, `S` 2), `SyntaxOnly` 2. `None` when no card gives the option; `Options::object_code` (:632) resolves it with `warnings` (assumption C47) | `COMPILE`, `C`, and `NOCOMPILE`, `NOC`, alone or with `(W)`, `(E)` or `(S)` |
 | `dynam` | `bool` | 0 or 1 | `DYNAM`, `DYN`, and `NODYNAM`, `NODYN` |
 | `debug` | `bool` | 0 or 1 | `-debug`, the Language Environment runtime option DEBUG |
-| `cics_return_warning` | `CicsReturnWarning` (:141) | tag: `Once` 0, `Always` 1, `Never` 2. What a program with no STOP RUN, GOBACK or EXIT PROGRAM that ends with EXEC CICS RETURN or XCTL gets (assumption C124) | `--cics-return-warning=once\|always\|never` |
-| `invdata` | `Option<Invdata>` | `None` for NOINVDATA, or `Some` then `forcenumcmp` and `cleansign` as bools | `INVDATA`, `INVD`, with `FORCENUMCMP`, `FNC`, `NOFORCENUMCMP`, `NOFNC`, `CLEANSIGN`, `CS`, `NOCLEANSIGN`, `NOCS`; `NOINVDATA`, `NOINVD`; `ZONEDATA(PFD\|NOPFD\|MIG)`, `ZD`, as INVDATA's equivalents |
+| `cics_return_warning` | `CicsReturnWarning` (:157) | tag: `Once` 0, `Always` 1, `Never` 2. What a program with no STOP RUN, GOBACK or EXIT PROGRAM that ends with EXEC CICS RETURN or XCTL gets (assumption C124) | `--cics-return-warning=once\|always\|never` |
+| `invdata` | `Option<Invdata>` (:142) | `None` for NOINVDATA, or `Some` then `forcenumcmp` and `cleansign` as bools | `INVDATA`, `INVD`, with `FORCENUMCMP`, `FNC`, `NOFORCENUMCMP`, `NOFNC`, `CLEANSIGN`, `CS`, `NOCLEANSIGN`, `NOCS`; `NOINVDATA`, `NOINVD`; `ZONEDATA(PFD\|NOPFD\|MIG)`, `ZD`, as INVDATA's equivalents |
 | `zwb` | `bool` | 0 or 1 | `ZWB`, `NOZWB` |
-| `quote` | `Quote` (:161) | tag: `Quote` 0, `Apost` 1. The figurative constant QUOTE's character | `QUOTE`, `Q`, `APOST` |
-| `currency` | `Option<Currency>` (:188) | `None`, or `Some` then the tag: `Char` 0 followed by the `char`, `Hex` 1 followed by the byte. `Options::currency_symbol` (:598) reads a `Hex` byte in the program's code page | `CURRENCY(literal)`, `CURR(literal)`, and `NOCURRENCY`, `NOCURR` |
-| `nsymbol` | `Nsymbol` (:196) | tag: `National` 0, `Dbcs` 1 | `NSYMBOL`, `NS`, with `NATIONAL`, `NAT` or `DBCS` |
-| `dispsign` | `DispSign` (:206) | tag: `Compat` 0, `Sep` 1 | `DISPSIGN`, `DS`, with `COMPAT`, `C`, `SEP` or `S` |
-| `intdate` | `IntDate` (:215) | tag: `Ansi` 0, `Lilian` 1 | `INTDATE(ANSI\|LILIAN)` |
-| `qualify` | `Qualify` (:224) | tag: `Compat` 0, `Extend` 1 | `QUALIFY`, `QUA`, with `COMPAT`, `C`, `EXTEND` or `E` |
+| `quote` | `Quote` (:177) | tag: `Quote` 0, `Apost` 1. The figurative constant QUOTE's character | `QUOTE`, `Q`, `APOST` |
+| `currency` | `Option<Currency>` (:204) | `None`, or `Some` then the tag: `Char` 0 followed by the `char`, `Hex` 1 followed by the byte. `Options::currency_symbol` (:645) reads a `Hex` byte in the program's code page | `CURRENCY(literal)`, `CURR(literal)`, and `NOCURRENCY`, `NOCURR` |
+| `nsymbol` | `Nsymbol` (:212) | tag: `National` 0, `Dbcs` 1 | `NSYMBOL`, `NS`, with `NATIONAL`, `NAT` or `DBCS` |
+| `dispsign` | `DispSign` (:222) | tag: `Compat` 0, `Sep` 1 | `DISPSIGN`, `DS`, with `COMPAT`, `C`, `SEP` or `S` |
+| `intdate` | `IntDate` (:231) | tag: `Ansi` 0, `Lilian` 1 | `INTDATE(ANSI\|LILIAN)` |
+| `qualify` | `Qualify` (:240) | tag: `Compat` 0, `Extend` 1 | `QUALIFY`, `QUA`, with `COMPAT`, `C`, `EXTEND` or `E` |
 | `initial` | `bool` | 0 or 1 | `INITIAL`, `NOINITIAL` |
-| `vlr` | `Vlr` (:234) | tag: `Standard` 0, `Compat` 1 | `VLR`, with `STANDARD`, `S`, `COMPAT` or `C` |
-| `vsamopenfs` | `VsamOpenFs` (:243) | tag: `Compat` 0, `Succ` 1 | `VSAMOPENFS`, `VS`, with `COMPAT`, `C`, `SUCC` or `S` |
+| `vlr` | `Vlr` (:250) | tag: `Standard` 0, `Compat` 1 | `VLR`, with `STANDARD`, `S`, `COMPAT` or `C` |
+| `vsamopenfs` | `VsamOpenFs` (:260) | tag: `Compat` 0, `Succ` 1 | `VSAMOPENFS`, `VS`, with `COMPAT`, `C`, `SUCC` or `S` |
 
 `ADV`, `APOST`, `DBCS`, `DLL`, `INITIAL`, `INTDATE`, `NUMPROC`, `RENT`, `THREAD`, `TRUNC` and `ZWB`
 have no abbreviations. The defaults are `Compat`, `Std`, `Nopfd`, 1140, `Report`, false, `Exclude`,
