@@ -1432,10 +1432,10 @@ impl Parser<'_> {
             "EVALUATE" => self.evaluate(pos)?,
             "INITIATE" | "GENERATE" | "TERMINATE" | "SUPPRESS" => Stmt::Report(Box::new(self.report_statement(&verb, pos)?)),
             "GOBACK" => Stmt::Goback { pos },
-            "STOP" => {
-                self.expect_word("RUN")?;
-                Stmt::StopRun { pos }
-            }
+            "STOP" if self.accept_word("RUN") => Stmt::StopRun { pos },
+            // STOP literal waits for the operator, whom ironwork does not have (assumption C132).
+            "STOP" if self.starts_operand() && !self.starts_ref() => Stmt::Display { items: vec![self.operand()?], no_advancing: false, pos },
+            "STOP" => return Err(self.error("RUN or a literal after STOP")),
             "CONTINUE" => Stmt::Continue,
             "EXIT" => match self.accept_any(&["PROGRAM", "PARAGRAPH", "SECTION", "PERFORM", "METHOD"]).as_deref() {
                 Some("PROGRAM") => Stmt::ExitProgram { pos },
@@ -1621,7 +1621,13 @@ impl Parser<'_> {
 
     /// ON and NOT ON phrases, each opening with one of `starts`; `head` reads its words and picks the handlers it fills.
     fn on_phrases<const N: usize>(&mut self, starts: &[&str], ends: &[&str], head: impl Fn(&mut Self) -> R<usize>) -> R<[Handlers; N]> {
-        self.phrases_opening(|p, i| p.word_at(i).is_some_and(|w| starts.contains(&w)), ends, head)
+        // ON and AT are optional words: either opens the phrase only before its keyword.
+        let opens = |p: &Self, i: usize| match p.word_at(i) {
+            Some(w @ ("ON" | "AT")) if starts.contains(&w) => p.word_at(i + 1).is_some_and(|k| k != w && starts.contains(&k)),
+            Some(w) => starts.contains(&w),
+            None => false,
+        };
+        self.phrases_opening(opens, ends, head)
     }
 
     /// ON and NOT ON phrases, each where `opens` finds one `i` words ahead.
@@ -2053,13 +2059,15 @@ impl Parser<'_> {
         if self.accept_word("USING") {
             let mut mode = ArgMode::Reference;
             loop {
-                if self.accept_word("BY") {
-                    mode = match self.accept_any(&["REFERENCE", "CONTENT", "VALUE"]).as_deref() {
-                        Some("CONTENT") => ArgMode::Content,
-                        Some("VALUE") => ArgMode::Value,
-                        Some(_) => ArgMode::Reference,
-                        None => return Err(self.error("REFERENCE, CONTENT or VALUE after BY")),
+                let by = self.accept_word("BY");
+                if let Some(m) = self.accept_any(&["REFERENCE", "CONTENT", "VALUE"]) {
+                    mode = match m.as_str() {
+                        "CONTENT" => ArgMode::Content,
+                        "VALUE" => ArgMode::Value,
+                        _ => ArgMode::Reference,
                     };
+                } else if by {
+                    return Err(self.error("REFERENCE, CONTENT or VALUE after BY"));
                 } else if self.accept_word("OMITTED") {
                     using.push(Arg { mode, value: None });
                 } else if self.starts_operand() {
@@ -3134,6 +3142,20 @@ mod tests {
         assert!(matches!(&s[3], Stmt::GoToDepending { targets, on, .. } if targets.len() == 2 && on.name == "D"));
         assert!(matches!(&p.paragraphs[2].statements[0], Stmt::GoTo { target: None, .. }));
         assert!(matches!(&p.paragraphs[3].statements[0], Stmt::GoTo { target: Some(t), .. } if t.name == "P1"));
+    }
+
+    #[test]
+    fn by_left_out_stop_literal_and_a_phrase_that_belongs_to_the_outer_statement() {
+        let p = program(
+            "       01  A PIC 9.\n       PROCEDURE DIVISION.\n           CALL 'P' USING CONTENT A REFERENCE A VALUE A A\n               ON EXCEPTION ADD 1 TO A\n               NOT ON EXCEPTION ADD 2 TO A\n           END-CALL\n           STOP 'OPERATOR'\n           STOP ZERO\n           STOP RUN.\n",
+        );
+        let s = &p.paragraphs[0].statements;
+        let Stmt::Call(c) = &s[0] else { panic!("{:?}", s[0]) };
+        let modes: Vec<ArgMode> = c.using.iter().map(|a| a.mode).collect();
+        assert_eq!(modes, [ArgMode::Content, ArgMode::Reference, ArgMode::Value, ArgMode::Value]);
+        assert!(c.on_exception.as_ref().is_some_and(|b| matches!(&b[0], Stmt::Arith(a) if a.size_error.is_none())) && c.not_on_exception.is_some());
+        assert!(matches!(&s[1], Stmt::Display { items, .. } if items == &[Operand::Literal(Literal::Alnum("OPERATOR".into()))]));
+        assert!(matches!(&s[2], Stmt::Display { .. }) && matches!(&s[3], Stmt::StopRun { .. }));
     }
 
     #[test]

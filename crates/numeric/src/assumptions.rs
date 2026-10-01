@@ -214,6 +214,7 @@ pub const XML_GENERATE_RULES: &str = "C119";
 pub const JSON_PARSE_RULES: &str = "C170";
 pub const CORRESPONDING_PAIRS: &str = "C130";
 pub const CORRESPONDING_CHOICES: &str = "C131";
+pub const STOP_LITERAL: &str = "C132";
 pub const NUMPROC_MIG_WARNS: &str = "C120";
 pub const INVALID_OPTION_DISCARDED: &str = "C121";
 pub const OPTIONS_WITHOUT_EFFECT: &str = "C122";
@@ -1329,6 +1330,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: CORRESPONDING_CHOICES,
         claim: "Where the Language Reference leaves CORRESPONDING open: pairs are processed in the order of the sending group's entries; the items of a FILLER group are not considered; an item is alphabetic when its PICTURE holds only A, as ironwork has no alphabetic category of its own; a numeric-edited item is not numeric for ADD and SUBTRACT, following the rule over the manual's example, which adds two; ADD and SUBTRACT evaluate every sending item before storing any receiver (C97), which differs from pair-by-pair only when a receiving item overlaps a later sending one; and no message is given when no items correspond",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: STOP_LITERAL,
+        claim: "STOP literal communicates the literal to the operator and suspends the program until the operator intervenes, then continues with the next statement (Language Reference for Enterprise COBOL 6.4, 'STOP statement'). ironwork has no operator to wait for: it writes the literal as DISPLAY does and continues at once",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
