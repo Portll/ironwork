@@ -263,3 +263,96 @@ fn advancing_the_language_reference_does_not_allow_is_refused() {
         assert!(message.contains(expected), "expected {expected:?}, got {message}");
     }
 }
+
+/// A program that writes "PAYROLL 2026" to report.txt, prints it with the command the STRING
+/// operands `command` build (they may name PRINTER-NAME, 'office') and displays the CALL's status.
+fn lp_program(command: &[&str], returning: bool) -> String {
+    let (returning, status) = if returning { (" RETURNING ST", "ST") } else { ("", "RETURN-CODE") };
+    let command: Vec<String> = command.iter().map(|operand| format!("        {operand}")).collect();
+    [
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. VP.",
+        "ENVIRONMENT DIVISION.",
+        "INPUT-OUTPUT SECTION.",
+        "FILE-CONTROL.",
+        "    SELECT RPT ASSIGN TO \"report.txt\".",
+        "DATA DIVISION.",
+        "FILE SECTION.",
+        "FD  RPT.",
+        "01  RPT-REC PIC X(12).",
+        "WORKING-STORAGE SECTION.",
+        "01  PRINTER-NAME PIC X(40) VALUE 'office'.",
+        "01  CMD PIC X(80).",
+        "01  ST PIC S9(9) COMP-5.",
+        "01  SHOWN PIC 9.",
+        "PROCEDURE DIVISION.",
+        "    OPEN OUTPUT RPT.",
+        "    WRITE RPT-REC FROM 'PAYROLL 2026'.",
+        "    CLOSE RPT.",
+        "    STRING",
+        &command.join("\n       "),
+        "        DELIMITED BY SIZE INTO CMD.",
+        &format!("    CALL 'SYSTEM' USING CMD{returning}."),
+        &format!("    MOVE {status} TO SHOWN."),
+        "    DISPLAY 'STATUS ' SHOWN.",
+        "    GOBACK.",
+    ]
+    .iter()
+    .map(|l| format!("       {l}\n"))
+    .collect()
+}
+
+/// Runs `source` with DD REPORT.TXT as a text file and, when `printer`, DD PRINTER; returns the
+/// outcome and what the printer holds.
+fn run_lp(source: &str, name: &str, printer: bool) -> (crate::testing::Outcome, Option<Vec<u8>>) {
+    let (report, prn) = (temp(&format!("{name}.txt")), temp(&format!("{name}.prn")));
+    let _ = (std::fs::remove_file(&report), std::fs::remove_file(&prn));
+    let mut dds = vec![format!("REPORT.TXT={}:text", report.display())];
+    if printer {
+        dds.push(format!("PRINTER={}", prn.display()));
+    }
+    let o = Harness::source(source).dds(&dds).run(Executor::Interpreter);
+    (o, std::fs::read(&prn).ok())
+}
+
+#[test]
+fn lp_of_a_file_the_run_was_given_prints_it_on_the_virtual_printer() {
+    let source = lp_program(&["'lp -d ' DELIMITED BY SIZE", "PRINTER-NAME DELIMITED BY SPACE", "' -o cpi=10 report.txt'"], true);
+    let (o, printed) = run_lp(&source, "vp-lp", true);
+    assert!(o.ending.is_ok(), "{:?}\n{}", o.ending, o.err);
+    assert_eq!(o.out, "STATUS 0\n");
+    assert_eq!(printed.as_deref(), Some(&b"PAYROLL 2026\n"[..]));
+}
+
+#[test]
+fn without_returning_the_status_is_the_return_code() {
+    let (o, printed) = run_lp(&lp_program(&["'lpr report.txt'"], false), "vp-rc", true);
+    assert_eq!((o.out.as_str(), o.return_code), ("STATUS 0\n", 0));
+    assert_eq!(printed.as_deref(), Some(&b"PAYROLL 2026\n"[..]));
+}
+
+#[test]
+fn a_file_the_run_was_not_given_prints_nothing_and_returns_1() {
+    let (o, printed) = run_lp(&lp_program(&["'lp report.txt /etc/passwd'"], true), "vp-missing", true);
+    assert!(o.ending.is_ok(), "{:?}", o.ending);
+    assert_eq!(o.out, "STATUS 1\n");
+    assert!(o.err.contains("the virtual printer printed nothing: /etc/passwd: no DD /ETC/PASSWD"), "{}", o.err);
+    assert_eq!(printed, None);
+}
+
+#[test]
+fn any_other_command_or_a_run_without_a_printer_still_finds_no_program() {
+    for (command, printer) in [("'lp -d x;id report.txt'", true), ("'lpstat -p'", true), ("'lp report.txt'", false)] {
+        let (o, printed) = run_lp(&lp_program(&[command], true), "vp-none", printer);
+        let abend = o.ending.expect_err(command);
+        assert_eq!(abend.code, crate::abend::AbendCode::ModuleNotFound, "{command}");
+        assert_eq!(printed, None, "{command}");
+    }
+}
+
+#[test]
+fn a_destination_passed_through_the_environment_still_prints() {
+    let (o, printed) = run_lp(&lp_program(&["'lp -d \"$PAYRPT_PRINTER\" report.txt'"], true), "vp-env", true);
+    assert_eq!(o.out, "STATUS 0\n", "{:?}\n{}", o.ending, o.err);
+    assert_eq!(printed.as_deref(), Some(&b"PAYROLL 2026\n"[..]));
+}

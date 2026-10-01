@@ -55,7 +55,7 @@ in it (`exec::unit::Event::Sink`). The operand itself is never recorded.
 | `sink` | operation, where its operand is a data item |
 |---|---|
 | `dynamic-program-load` | CALL of a program named by a data item |
-| `os-command` | CALL SYSTEM, C$SYSTEM, CBL_EXEC_RUN_UNIT, CBL_GC_HOSTED or BXPSYSTM: the arguments. ironwork runs no operating-system command; the CALL loads a program of that name or fails |
+| `os-command` | CALL SYSTEM, C$SYSTEM, CBL_EXEC_RUN_UNIT, CBL_GC_HOSTED or BXPSYSTM: the arguments. ironwork runs no operating-system command; the CALL loads a program of that name or fails, or, for an lp or lpr command in a run given DD PRINTER, prints on the virtual printer (README), whose DD and each printed DD are journalled as opened and closed |
 | `log` | DISPLAY (literals included); WRITEQ TD FROM; WRITE OPERATOR TEXT; WRITE JOURNALNAME FROM |
 | `cics-dynamic-transfer` | LINK or XCTL PROGRAM; START TRANSID |
 | `queue-name` | QUEUE or QNAME of WRITEQ, READQ, DELETEQ |

@@ -871,6 +871,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Ok(i) => i,
             Err(LoadError::NotFound) if crate::le::provides(&name) => return self.le_call(c, &name),
             Err(LoadError::NotFound) => {
+                if let Some(flow) = self.virtual_print(c, &name)? {
+                    return Ok(flow);
+                }
                 return match &c.on_exception {
                     Some(body) => self.run_block(body),
                     None => Err(Abend { code: AbendCode::ModuleNotFound, message: crate::le::missing(&name), pos, file: None }),
@@ -888,6 +891,37 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let result = self.call_nested(c, index, entry, compiled);
         self.unit.depth -= 1;
         result
+    }
+
+    /// A CALL no library answers that the virtual printer serves: SYSTEM or C$SYSTEM with an lp or
+    /// lpr command, in a run given DD PRINTER. It returns lp's status, 0 printed or 1 not, through
+    /// RETURNING or else RETURN-CODE.
+    fn virtual_print(&mut self, c: &'p Call, name: &str) -> R<Option<Flow>> {
+        use rt::virtual_printer::{self, Job};
+        if !virtual_printer::ROUTINES.contains(&name) {
+            return Ok(None);
+        }
+        let Some(printer) = self.unit.dds.get(virtual_printer::DD) else { return Ok(None) };
+        let Some(job) = self.arguments_text(c).ok().as_deref().and_then(Job::parse) else { return Ok(None) };
+        let dds = self.unit.dds.clone();
+        let status: i16 = match virtual_printer::print(&dds, &printer, &job, &mut |event| self.unit.notify(event)) {
+            Ok(()) => 0,
+            Err(why) => {
+                let _ = writeln!(self.unit.err, "ironwork: {}: CALL {name}: the virtual printer printed nothing: {why}", c.pos);
+                1
+            }
+        };
+        match &c.returning {
+            Some(target) => {
+                let dest = self.locate(target)?;
+                self.assign(dest, Val::Num(Fixed::new(i128::from(status), Places::new(9, 0))), None, c.pos)?;
+            }
+            None => self.unit.mem[RETURN_CODE..RETURN_CODE + 2].copy_from_slice(&status.to_be_bytes()),
+        }
+        Ok(Some(match &c.not_on_exception {
+            Some(body) => self.run_block(body)?,
+            None => Flow::Next,
+        }))
     }
 
     fn call_nested(&mut self, c: &'p Call, index: usize, entry: Option<usize>, compiled: std::rc::Rc<Compiled>) -> R<Flow> {

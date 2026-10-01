@@ -86,6 +86,18 @@ VLR(COMPAT), under which a READ checks a variable-length record only against REC
 VSAMOPENFS is read and kept, but no OPEN in ironwork reaches the verified open it changes.
 Assumptions C210 to C220 hold what the manuals leave open.
 
+ironwork runs no operating-system command: a CALL of SYSTEM or C$SYSTEM that no library answers
+abends S806, unless it prints. In a run given DD PRINTER, the virtual printer, a command that is lp
+or lpr with options CUPS documents and at least one file appends each file to DD PRINTER, byte for
+byte, and returns 0. Each file is a DD, as an ASSIGN literal names one (report.txt is DD
+REPORT.TXT), so the command reaches only what the run was given; a file with no DD prints nothing
+and returns 1, as lp does. A command the shell would do more with (quotes, `;`, `|`, `$`, a
+redirection) is not a print, except that an option's value may be a double-quoted variable,
+`"$NAME"`, which the shell passes as one word: the form a program uses to keep a printer's name out
+of the command text. The destination, copies and title are read and not acted on. The status goes
+to the CALL's RETURNING item, or else RETURN-CODE. `compare` compares DD PRINTER as it does any DD,
+so a change that stops a program printing diverges.
+
 Exit status: RETURN-CODE when the run ends normally; for `check`, and for a run the compile refuses,
 the compile's return code (below); 16 an abend, whose message names the system completion code
 (S0C7 for a data exception, S0C4 for a LINKAGE item with no address, S806 for a program CALL cannot

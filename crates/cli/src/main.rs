@@ -60,7 +60,9 @@ flags:
              carry a printer control character, which :text shows as line spacing. :mod is
              DISP=MOD: OPEN OUTPUT of a sequential file keeps its records and writes after them. An
              indexed or relative file's DD holds its records in key order, as a REPRO unload does.
-             DD SYSIN is what ACCEPT reads; without it, ACCEPT reads standard input
+             DD SYSIN is what ACCEPT reads; without it, ACCEPT reads standard input. DD PRINTER is
+             the virtual printer: CALL 'SYSTEM' or 'C$SYSTEM' with an lp or lpr command appends
+             the files it names, each a DD, there and returns 0, and runs nothing
   --provenance FILE
              write what the compile read and decided as an in-toto statement with the SLSA
              Provenance v1 predicate: the source and every COPY member by digest, the option cards
