@@ -77,7 +77,8 @@ pub fn read(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<Val> 
 
 /// An item's value as its digits hold it, before any scaling positions to their right.
 pub fn read_stored(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<Val> {
-    let bytes = bytes(mem, loc);
+    let cleaned = facts.options().invdata.is_some_and(|i| i.cleansign).then(|| sign_cleaned(bytes(mem, loc), loc.kind)).flatten();
+    let bytes = cleaned.as_deref().unwrap_or(bytes(mem, loc));
     let places = places_of(loc.kind);
     Ok(match loc.kind {
         Kind::Group | Kind::Alnum { .. } | Kind::NumericEdited { .. } | Kind::AlnumEdited { .. } => Val::Bytes(bytes.to_vec()),
@@ -92,6 +93,26 @@ pub fn read_stored(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> 
         }
         Kind::Zoned { signed, sign, .. } => Val::Num(zoned_value(facts.options().numproc, bytes, signed, sign, places, pos)?),
     })
+}
+
+/// INVDATA(CLEANSIGN): a zoned or packed item whose sign half-byte is not a sign code (0 to 9) is
+/// read with that half-byte made F, positive (assumption C222); None when there is nothing to
+/// clean. A separate sign is a character, not a half-byte, and is left alone.
+fn sign_cleaned(bytes: &[u8], kind: Kind) -> Option<Vec<u8>> {
+    let (at, high) = match kind {
+        Kind::Packed { .. } => (bytes.len().checked_sub(1)?, false),
+        Kind::Zoned { sign: Some(SignClause { separate: true, .. }), .. } => return None,
+        Kind::Zoned { sign: Some(SignClause { position: SignPosition::Leading, .. }), .. } => (0, true),
+        Kind::Zoned { .. } => (bytes.len().checked_sub(1)?, true),
+        _ => return None,
+    };
+    let half = if high { bytes[at] >> 4 } else { bytes[at] & 0x0F };
+    if half > 9 {
+        return None;
+    }
+    let mut cleaned = bytes.to_vec();
+    cleaned[at] |= if high { 0xF0 } else { 0x0F };
+    Some(cleaned)
 }
 
 /// A zoned operand enters arithmetic through PACK, which keeps only the sign's zone.
@@ -479,11 +500,15 @@ pub fn compared_zoned_bytes(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc) -> O
     Some(image)
 }
 
-/// `image`, from [`compared_zoned_bytes`], compared as alphanumeric with `other`; `zoned_first` is whether
-/// the zoned item is the comparison's first operand.
-pub fn compare_zoned_bytes(facts: &dyn ProgramFacts, image: &[u8], other: (Val, Option<Loc>), zoned_first: bool, pos: Pos) -> R<Ordering> {
+/// `image`, from [`compared_zoned_bytes`], compared as alphanumeric with `other`, whose own bytes
+/// are taken the same way when it is a zoned integer too; `zoned_first` is whether the zoned item
+/// is the comparison's first operand.
+pub fn compare_zoned_bytes(facts: &dyn ProgramFacts, mem: &[u8], image: &[u8], other: (Val, Option<Loc>), zoned_first: bool, pos: Pos) -> R<Ordering> {
     let len = image.len().max(image_len(&other.0, other.1));
-    let y = alnum_image(facts, &other.0, other.1, len, pos)?;
+    let y = match other.1.and_then(|l| compared_zoned_bytes(facts, mem, l)) {
+        Some(bytes) => bytes,
+        None => alnum_image(facts, &other.0, other.1, len, pos)?,
+    };
     let o = ebcdic::compare_alphanumeric(image, &y, facts.collation());
     Ok(if zoned_first { o } else { o.reverse() })
 }

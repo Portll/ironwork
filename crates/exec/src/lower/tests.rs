@@ -583,6 +583,20 @@ fn a_condition_name_whose_values_compare_differently_is_an_or_of_relations_in_va
     assert_eq!(or, (0, 1));
 }
 
+#[test]
+fn under_invdata_an_unsigned_zoned_integer_compares_with_zero_or_its_like_by_bytes() {
+    let data = "       01  V PIC 9(4).\n       01  W PIC 9(4).\n       01  S PIC S9(4).\n       01  L PIC 9(5).\n";
+    let procedure = [line("IF V = ZERO OR V = W OR S = ZERO OR V = L DISPLAY 'Y' END-IF"), line("GOBACK.")].concat();
+    let hows = |options: &str| {
+        let p = lower(&compiled(&program(options, data, &procedure))).unwrap_or_else(|e| panic!("{e}"));
+        p.conds.iter().filter_map(|c| if let LirCond::Rel { how, .. } = c { Some(*how) } else { None }).collect::<Vec<_>>()
+    };
+    let bytes = lir::Compare::ZonedBytes { zoned_first: true };
+    assert_eq!(hows("INVDATA"), [bytes, bytes, lir::Compare::Fixed, lir::Compare::Fixed]);
+    assert_eq!(hows("INVDATA(FNC)"), [lir::Compare::Fixed; 4]);
+    assert_eq!(hows(""), [lir::Compare::Fixed; 4]);
+}
+
 /// Where control goes from a block through plain jumps to blocks with no ops.
 fn through(p: &Program, mut b: u32) -> u32 {
     while let (true, Terminator::Jump(t)) = (p.blocks[b as usize].ops.is_empty(), &p.blocks[b as usize].end) {

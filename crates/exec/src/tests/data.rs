@@ -166,3 +166,37 @@ fn zoned_items_compare_with_nonnumeric_operands_by_their_bytes() {
     assert_eq!(run(&program("", &data, &procedure)), "U\nP\nT\n");
     assert_eq!(run(&program("NOZWB", &data, &procedure)), "U\nS\nP SIGNED\nT\n");
 }
+
+#[test]
+fn invdata_cleansign_reads_an_invalid_sign_nibble_as_positive() {
+    let data = [
+        "       01  Z-X PIC X(3) VALUE X'F1F203'.\n       01  Z REDEFINES Z-X PIC S9(3).\n",
+        "       01  P-X PIC X(2) VALUE X'1230'.\n       01  P REDEFINES P-X PIC S9(3) COMP-3.\n",
+        "       01  N PIC 9(3).\n",
+    ]
+    .concat();
+    let procedure = [line("ADD 1 TO Z"), line("MOVE Z TO N"), line("DISPLAY N"), line("ADD 2 TO P"), line("MOVE P TO N"), line("DISPLAY N"), line("GOBACK.")].concat();
+    assert_eq!(run(&program("INVDATA", &data, &procedure)), "124\n125\n");
+    assert_eq!(run(&program("INVDATA(FNC)", &data, &procedure)), "124\n125\n");
+    for options in ["", "INVDATA(NOCS)"] {
+        let (_, _, ending) = run_with(&program(options, &data, &procedure), &[]);
+        assert_eq!(ending.unwrap_err().code, "S0C7", "{options}");
+    }
+}
+
+#[test]
+fn invdata_noforcenumcmp_compares_an_unsigned_zoned_item_with_zero_by_its_zones() {
+    let data = "       01  VALUE0 PIC X(4) VALUE '00 0'.\n       01  VALUE1 REDEFINES VALUE0 PIC 9(4).\n       01  W PIC 9(4) VALUE 0.\n";
+    let procedure = [
+        line("IF VALUE1 = ZERO DISPLAY 'ZERO' ELSE DISPLAY 'ZONES' END-IF"),
+        line("IF VALUE1 = W DISPLAY 'W' ELSE DISPLAY 'NOT W' END-IF"),
+        line("GOBACK."),
+    ]
+    .concat();
+    for options in ["", "INVDATA(FNC)", "ZONEDATA(MIG)"] {
+        assert_eq!(run(&program(options, data, &procedure)), "ZERO\nW\n", "{options}");
+    }
+    for options in ["INVDATA", "INVDATA(NOFNC,NOCS)", "ZONEDATA(NOPFD)"] {
+        assert_eq!(run(&program(options, data, &procedure)), "ZONES\nNOT W\n", "{options}");
+    }
+}

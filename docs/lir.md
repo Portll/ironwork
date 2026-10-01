@@ -394,6 +394,10 @@ pub enum Count { Fixed(u32), Odo(Odo) }
 - **A zoned integer against a nonnumeric operand** is `ZonedBytes`: the item's bytes, its sign
   removed under ZWB and kept under NOZWB, never its value, compared as alphanumeric
   (`rt::store::compared_zoned_bytes`, assumption C221), so invalid data compares rather than abends.
+  Under INVDATA(NOFORCENUMCMP) an unsigned zoned integer against ZERO, or against an unsigned zoned
+  integer of its own length, is `ZonedBytes` too, the other item taken by its bytes the same way
+  (`rt::store::compare_zoned_bytes`, assumption C223). INVDATA(CLEANSIGN) reads a sign half-byte of
+  0 to 9 as F wherever a zoned or packed item is read as a number (`rt::store::read_stored`, C222).
 - **Condition-names.** `Name` holds the conditional variable's place, with the 88-level reference's
   subscripts, and each VALUE as a constant, a THRU pair as `(low, Some(high))`. The walker reads the
   subject once per value (machine.rs:1806-1818) and the VM once, with the same result, since nothing

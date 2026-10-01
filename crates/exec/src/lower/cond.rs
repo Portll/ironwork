@@ -82,9 +82,9 @@ impl Lower<'_> {
     pub(super) fn relation(&mut self, a: &Expr, op: RelOp, b: &Expr, pos: Pos) -> R<Test> {
         let (a, x) = self.comparand(a, pos)?;
         let (b, y) = self.comparand(b, pos)?;
-        let how = if self.zoned_against(&a, &x, &y) {
+        let how = if self.zoned_against(&a, &x, &b, &y) {
             Compare::ZonedBytes { zoned_first: true }
-        } else if self.zoned_against(&b, &y, &x) {
+        } else if self.zoned_against(&b, &y, &a, &x) {
             Compare::ZonedBytes { zoned_first: false }
         } else {
             self.compare(&x, &y, pos)?
@@ -92,14 +92,27 @@ impl Lower<'_> {
         Ok(Test::Cond(self.cond(lir::Cond::Rel { a, op, b, how })?))
     }
 
-    /// Whether `c` is an unscaled zoned integer item and `other` nonnumeric, which `Machine::compare`
-    /// compares by the item's bytes.
-    fn zoned_against(&self, c: &Comparand, x: &Side, other: &Side) -> bool {
+    /// Whether `c` is an unscaled zoned integer item that `Machine::compare` compares by its bytes:
+    /// against a nonnumeric operand, or under INVDATA(NOFORCENUMCMP), unsigned, against ZERO or an
+    /// unsigned zoned integer of its own length (assumption C223).
+    fn zoned_against(&self, c: &Comparand, x: &Side, oc: &Comparand, other: &Side) -> bool {
+        let Some(p) = self.unscaled_zoned(c, x) else { return false };
         let nonnumeric = matches!(other.value, Value::Bytes | Value::All) || matches!(other.value, Value::Fig(f) if !matches!(f, Figurative::Zero | Figurative::Null));
-        let Comparand::Operand(lir::Operand::Load(p)) = c else { return false };
-        let place = &self.places[*p as usize];
-        let unscaled = self.place_items[*p as usize].is_none_or(|i| self.layout.items[i].scaling == 0);
-        nonnumeric && matches!(x.src, Some(Kind::Zoned { scale: 0, .. })) && place.refmod.is_none() && unscaled
+        let unsigned = |s: &Side| matches!(s.src, Some(Kind::Zoned { signed: false, .. }));
+        let zones_count = self.c.options.invdata.is_some_and(|i| !i.forcenumcmp)
+            && unsigned(x)
+            && match other.value {
+                Value::Fig(Figurative::Zero) => true,
+                _ => unsigned(other) && self.unscaled_zoned(oc, other).is_some_and(|q| self.places[q].len == self.places[p].len),
+            };
+        nonnumeric || zones_count
+    }
+
+    fn unscaled_zoned(&self, c: &Comparand, x: &Side) -> Option<usize> {
+        let Comparand::Operand(lir::Operand::Load(p)) = c else { return None };
+        let p = *p as usize;
+        let unscaled = self.place_items[p].is_none_or(|i| self.layout.items[i].scaling == 0);
+        (matches!(x.src, Some(Kind::Zoned { scale: 0, .. })) && self.places[p].refmod.is_none() && unscaled).then_some(p)
     }
 
     /// An operand keeps its location for the comparison; an expression does not.

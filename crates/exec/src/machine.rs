@@ -1372,8 +1372,14 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     fn compare(&mut self, a: &Expr, b: &Expr, pos: Pos) -> R<Ordering> {
         for (zoned, other, zoned_first) in [(a, b, true), (b, a, false)] {
             if let Some(image) = self.zoned_bytes_against(zoned, other)? {
-                let other = self.comparand(other, pos)?;
-                return store::compare_zoned_bytes(&self.facts(), &image, other, zoned_first, pos);
+                let other = match other {
+                    Expr::Operand(Operand::Ref(r)) if self.zone_sensitive(other)? => {
+                        let loc = self.locate(r)?;
+                        (Val::Bytes(Vec::new()), Some(loc))
+                    }
+                    _ => self.comparand(other, pos)?,
+                };
+                return store::compare_zoned_bytes(&self.facts(), &self.unit.mem, &image, other, zoned_first, pos);
             }
         }
         let (va, la) = self.comparand(a, pos)?;
@@ -1394,11 +1400,27 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Expr::Operand(Operand::Ref(o)) => matches!(self.locate(o)?.kind, Kind::Group | Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::NumericEdited { .. }),
             _ => false,
         };
-        if !nonnumeric {
+        // INVDATA(NOFORCENUMCMP): an unsigned zoned integer against ZERO or one of its own length
+        // compares its zones too (assumption C223).
+        let zones_count = self.options.invdata.is_some_and(|i| !i.forcenumcmp)
+            && self.zone_sensitive(e)?
+            && match other {
+                Expr::Operand(Operand::Literal(Literal::Figurative(Figurative::Zero))) => true,
+                Expr::Operand(Operand::Ref(o)) => self.zone_sensitive(other)? && self.locate(o)?.len == self.locate(r)?.len,
+                _ => false,
+            };
+        if !nonnumeric && !zones_count {
             return Ok(None);
         }
         let loc = self.locate(r)?;
         Ok(store::compared_zoned_bytes(&self.facts(), &self.unit.mem, loc))
+    }
+
+    /// Whether `e` is an unsigned, unscaled zoned integer item.
+    fn zone_sensitive(&mut self, e: &Expr) -> R<bool> {
+        let Expr::Operand(Operand::Ref(r)) = e else { return Ok(false) };
+        let loc = self.locate(r)?;
+        Ok(matches!(loc.kind, Kind::Zoned { scale: 0, signed: false, .. }) && self.layout.items.get(loc.item).is_none_or(|i| i.scaling == 0))
     }
 
     fn compare_literal(&mut self, subject: &(Val, Option<Loc>), literal: &Literal, pos: Pos) -> R<Ordering> {

@@ -238,6 +238,8 @@ pub const COMPLETE_SET_OF_QUALIFIERS: &str = "C216";
 pub const INSPECT_FUNCTION_SUBJECT: &str = "C190";
 pub const INSPECT_NATIONAL_FUNCTION_RESULT: &str = "C191";
 pub const NATIONAL_CASE_AND_REVERSE: &str = "C192";
+pub const INVDATA_CLEANSIGN: &str = "C222";
+pub const INVDATA_ZONES_COMPARED: &str = "C223";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1491,6 +1493,18 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: NATIONAL_CASE_AND_REVERSE,
         claim: "UPPER-CASE, LOWER-CASE and REVERSE of a national argument are national (Language Reference SC27-8713-03, pp. 597, 635, 671), as TRIM's already was (p. 665), and lowering types all four so. REVERSE keeps a surrogate pair as one character (p. 635). The case functions map each character by Unicode's case mapping where that gives one character and leave it alone otherwise, so the result keeps the argument's length as the manual requires; IBM names UnicodeData.txt, whose simple mappings differ from this in a few characters, such as U+0130, which is left as it is here",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: INVDATA_CLEANSIGN,
+        claim: "Under INVDATA(CLEANSIGN), the default once INVDATA is given and part of ZONEDATA(MIG) and ZONEDATA(NOPFD), a packed-decimal or zoned item whose sign half-byte is a digit, 0 to 9, is read with that half-byte made F, positive, rather than ending in a data exception: the compiler 'generates code to clean the sign nibble of USAGE DISPLAY and USAGE PACKED-DECIMAL data items on input to compare, add, subtract, multiply, and divide operations', and not for SIGN IS SEPARATE (Programming Guide SC27-8714-03, p. 378). Which valid sign the cleaning produces is not stated; F is chosen. It applies wherever the item is read as a number, a MOVE's sending item included, where IBM names only comparisons and arithmetic. Under NOCLEANSIGN and NOINVDATA such a sign is a data exception, as before",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: INVDATA_ZONES_COMPARED,
+        claim: "Under INVDATA(NOFORCENUMCMP), the default once INVDATA is given and part of ZONEDATA(NOPFD), an unsigned zoned integer compared with ZERO, or with an unsigned zoned integer of its own length, is compared as the bytes it holds, zones included, so an item holding X'F0F040F0' is not equal to ZERO: the compiler compares zoned data 'in the same manner as COBOL 4 or earlier versions', by an alphanumeric comparison where those considered the zone bits, and IBM's VALUE1 example gives false under INVDATA(NOFORCENUMCMP) at any OPT setting (Programming Guide SC27-8714-03, pp. 377-378). Which comparisons COBOL 4 made by their bytes is not listed; these two, where the bytes of equal values are always equal, are chosen. Other comparisons, and every comparison under FORCENUMCMP, ZONEDATA(MIG) and NOINVDATA, read the digits and ignore the zones; under NOINVDATA IBM's result depends on OPT, and OPT(0)'s is chosen",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
