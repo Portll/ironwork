@@ -101,17 +101,23 @@ pub struct Program {
     /// Sqlca, the ENTRY points (§9.3), for a class definition its class (§9.8), and the
     /// declaratives' `Declaratives` (§9.10).
     pub services: Services,
-    pub sql: Vec<SqlEntry>, pub abends: Vec<AbendText>, pub edits: Vec<Vec<Sym>>,
+    pub sql: Vec<SqlEntry>, pub abends: Vec<AbendText>, pub edits: Vec<Edit>,
     pub symbols: Vec<String>, pub debug: Debug,
 }
+
+/// An edited PICTURE (`Layout.edits`) and the currency sign value its currency symbol stands for
+/// (`Layout.currencies`), empty when it has none (§9.11).
+pub struct Edit { pub syms: Vec<Sym>, pub currency: String }
 
 /// Fixed at compile time (codegen-runtime.md §10, invariant 7). `ssrange` is `Compiled.ssrange`
 /// (exec/src/lib.rs:29). `options.dynam` makes a literal CALL resolve at run time, as the walker does
 /// every CALL (load-module.md §8.3). `cards` are the CBL and PROCESS cards as written (ast.rs:7).
-/// `collating` is `Compiled.collating` (exec/src/lib.rs, after 79a199e).
+/// `collating` is `Compiled.collating` (exec/src/lib.rs, after 79a199e). `decimal_point_comma` is
+/// SPECIAL-NAMES DECIMAL-POINT IS COMMA and `numval_currency` the cs NUMVAL-C and TEST-NUMVAL-C
+/// take without argument-2, both as the walker reads them (§9.11).
 pub struct ProgramOptions {
     pub options: numeric::Options, pub ssrange: bool, pub cards: Vec<String>,
-    pub collating: Collating,
+    pub collating: Collating, pub decimal_point_comma: bool, pub numval_currency: String,
 }
 
 /// The sequence PROGRAM COLLATING SEQUENCE names, from an ALPHABET clause of SPECIAL-NAMES, as
@@ -327,7 +333,8 @@ pub enum Cond {
     And(CondId, CondId), Or(CondId, CondId),
     /// A TIMES counter above zero.
     Counter(TempId),
-    /// SEARCH: the index from 1 to the table's current count (machine.rs:887-893).
+    /// SEARCH: the index from 1 to the table's current count (machine.rs:887-893), the count
+    /// evaluated first.
     InTable { index: PlaceId, count: Count },
     /// After EXEC SQL: SQLCODE < 0, = 100, or a warning (§9.7).
     Sql(SqlTest),
@@ -874,15 +881,15 @@ walker does on each execution; the last column names that work.
 | SET TO | `Move` per receiver; a `POINTER` receiver takes only an address or NULL, else `Refused` | One call | The kind test |
 | SET ADDRESS OF | One `SetAddress` for all the records; a target that is not an 01 or 77 of LINKAGE ends the block in `Abend` after the records before it | One call | Resolve and linkage test |
 | SET UP BY, DOWN BY | One `SetUpDown`: each receiver `Pointer`, `Number` with a `StepPlan` of dmax 0, or `Refused` | One call | Read, then match on the value |
-| INSPECT | `Inspect` over constant patterns and a prebuilt CONVERTING table when both operands are literals | One call | Literal images and the CONVERTING table (machine.rs:822-834, 849-869) |
-| STRING | `String`, then `Select` on overflow | One call | `natural_bytes` of literals (machine.rs:686-697) |
-| UNSTRING | `Unstring` with each receiver's MOVE plan, then `Select` | One call | `assign` dispatch per field (machine.rs:773) |
-| SEARCH | Blocks: `InTable` branch, one branch per WHEN, `SetInt` steps | Lowered | The index by name (machine.rs:880); table and count |
+| INSPECT | `Inspect` over constant patterns and a prebuilt CONVERTING table when both operands are literals of one length; each TALLYING counter with its `StepPlan` | One call | Literal images and the CONVERTING table (machine.rs:822-834, 849-869) |
+| STRING | `String`, then `Select` of two arms whether or not a phrase is written | One call | `natural_bytes` of literals (machine.rs:686-697) |
+| UNSTRING | `Unstring` with each receiver's MOVE plan, DELIMITER IN's two, and COUNT IN's and POINTER's stores, then `Select` as for STRING | One call | `assign` dispatch per field (machine.rs:773) |
+| SEARCH | Blocks: `InTable` branch, one branch per WHEN, a `SetInt` of index + 1, and of the VARYING item + 1 when it is not the index | Lowered | The index by name (machine.rs:880); table and count |
 | SEARCH ALL | `SearchAll`, with each key matched to a WHEN term by item, then `Select`, then the whole condition | One call | `flatten_and` and `key_term` by name on each execution (machine.rs:908-917) |
 | IF | `Branch` | Lowered | - |
 | EVALUATE | A chain of `Branch`, one per object; each comparison evaluates its subject, as the walker does | Lowered | - |
 | DISPLAY | `Display` with a format per item | One call | Kind dispatch (machine.rs:1913-1959) |
-| ACCEPT | `Accept` with a MOVE plan | One call | - |
+| ACCEPT | `Accept` with the MOVE plan of what its source gives: SYSIN's line as bytes, a date, day, weekday or time as an integer of its digits | One call | - |
 | CALL, CANCEL | `Call`, then `Select`; `Cancel` (§9.3) | One call | Literal names decoded (machine.rs:966-971) |
 | OPEN … START | `File` per file named, then `Select` when a phrase is written (§9.4) | One call | File by name, keys, FILE STATUS, which phrase applies |
 | SORT, MERGE, RELEASE, RETURN | `Sort`; `Release`; `Return`, then `Select` (§9.6) | One call | SD by name, key places, the FASTSRT plan |
@@ -1450,6 +1457,53 @@ paragraphs, and nothing below is lowered.
 - **No elision into a served paragraph.** A GO TO to it stays `GoTo` and a paragraph end before it
   stays `ParagraphEnd`, so the arrival register is set on every way in.
 
+### 9.11 Editing parameters
+
+SPECIAL-NAMES DECIMAL-POINT IS COMMA and CURRENCY SIGN IS literal [WITH PICTURE SYMBOL literal]
+reach run time through `ProgramFacts` (rt/src/store.rs), which the walker answers from the program's
+`Environment` and `Layout`. The LIR carries each answer, so an executor answers the same:
+
+| Walker reads | Where it is used | In the LIR |
+|---|---|---|
+| `ProgramFacts::decimal_point` (`Machine::decimal_point`) | A store into a numeric-edited item, by MOVE, arithmetic, INITIALIZE, SET, ACCEPT, POINTER or COUNT IN (rt/src/store.rs `store_fixed_checked`); NUMVAL, NUMVAL-C, NUMVAL-F, TEST-NUMVAL, TEST-NUMVAL-C and TEST-NUMVAL-F (rt/src/intrinsic/function.rs) | `ProgramOptions.decimal_point_comma` |
+| `ProgramFacts::edit(edit)`'s currency, from `Layout.currencies` | The same numeric-edited stores (`edit::numeric`), and a de-editing MOVE from a numeric-edited sender (`edit::de_edit`, `NumericFrom::DeEdit`) | `Edit.currency` of `Program.edits[edit]` |
+| `Machine::default_currency`: the only CURRENCY SIGN clause's value, else $ (C102) | NUMVAL-C and TEST-NUMVAL-C without argument-2 | `ProgramOptions.numval_currency` |
+| `display::number`: a numeric literal's point as the program's | DISPLAY of a numeric literal | `DisplayItem::Text`, whose text lowering writes with the comma |
+
+A numeric literal written with a decimal comma reaches the parser with a period (the lexer reads
+the program's point), so `Const::Number` needs nothing more; the PICTURE symbols and sizes are
+decided when the layout is built. A hexadecimal CURRENCY SIGN literal is refused by the parser.
+
+### 9.12 STRING, UNSTRING, INSPECT and SEARCH
+
+`rt::text` runs STRING, UNSTRING and INSPECT for both executors, over the walker's references in
+the interpreter and the LIR's ids in the VM. The walker leaves each receiver's store to its `Loc`'s
+kind; the plans fix it:
+
+- **POINTER and COUNT IN** are `(PlaceId, StorePlan)`: `set_integer`'s store, `Refused` with
+  "a numeric value stored into a non-numeric item" for a receiver that is not numeric.
+- **TALLYING counters** (INSPECT's and UNSTRING's TALLYING IN) are `(PlaceId, StepPlan)` with dmax
+  0. A counter that does not read as a fixed-point number (alphanumeric, edited, national,
+  floating-point or pointer) has a `Refused` store with the walker's message, "a TALLYING counter
+  must be numeric" or "TALLYING IN needs a numeric item", which an executor raises once it has
+  located the counter, where the walker reads it first; reading such an item cannot abend.
+- **UNSTRING's receivers** take the field as an alphanumeric sender with no storage (`MovePlan` of
+  `Value::Bytes`); DELIMITER IN takes the delimiter that way (`found`) or SPACE (`none`).
+- **Literals** are `Chars::Literal`, `natural_bytes` of the value `literal_value` gives. INSPECT's
+  REPLACING BY a figurative constant is `Replacement::Fill` of its character.
+- **STRING, UNSTRING and SEARCH ALL** always return `Arm`, so a `Select` of two arms follows each,
+  to the next statement where no phrase is written.
+
+SEARCH evaluates the table's count (`Count`, as `occurrences`) before it reads the index, as the
+walker does. The walker evaluates the count once, before its loop; `InTable` evaluates it at each
+test, which gives the same count while nothing the loop stores reaches the DEPENDING ON object.
+Lowering refuses a serial SEARCH whose index or VARYING item may share storage with that object
+(either in LINKAGE, or the object subscripted or reference-modified, or their storage overlaps),
+and one of a DEPENDING ON table with neither INDEXED BY nor VARYING, where the walker's abend
+follows the count. `SetInt` steps the index and a VARYING item that is not the index by one;
+lowering refuses one that is not an index or an integer item, where `integer` + 1 and
+the item + 1 truncate differently.
+
 ## 10. The debug table
 
 ```rust
@@ -1561,9 +1615,7 @@ error, `FILE:LINE:COL: message` (syntax/src/lib.rs:44-56). Lowering refuses only
 lowered yet (`lowering: CONSTRUCT is not lowered yet`; step 2 is done when no test program meets
 this) and a program past an encoding limit (`lowering: WHAT exceeds N`, such as more than 2³² − 1
 ops; layout already refuses storage over 128 MiB, layout.rs:108-109). Everything the walker refuses
-only on reaching it lowers to an `Abend` op (decision 2). A program with DECIMAL-POINT IS COMMA or a
-CURRENCY SIGN clause is refused whole, "DECIMAL-POINT IS COMMA / CURRENCY SIGN editing parameters",
-until the edit tables carry the decimal point and currency values that editing and de-editing read.
+only on reaching it lowers to an `Abend` op (decision 2).
 
 ## 13. Open questions
 

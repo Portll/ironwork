@@ -323,8 +323,9 @@ for the tree that added `Options::cics_return_warning`.
 
 `Program.options` is lir.md's `ProgramOptions`: `numeric::options::Options`
 (crates/numeric/src/options.rs:208-235), which is `Copy`, holds only enums, options, integers and
-bools, and encodes as it is, its fields in declaration order; then `ssrange` and the option cards. Options
-are per program, because a CBL card is.
+bools, and encodes as it is, its fields in declaration order; then `ssrange`, the option cards, the
+collating sequence, `decimal_point_comma` (a bool) and `numval_currency` (a string), the last two
+from SPECIAL-NAMES (lir.md §9.11). Options are per program, because a CBL card is.
 
 The spellings a card or PARM may use come from IBM's option table, vendored as
 `crates/numeric/data/enterprise-options.tsv` and read by `Options::apply`. Six fields have no IBM
@@ -358,8 +359,8 @@ compiler option: `trunc_check`, `fastsrt_adv_print`, `sort_keys`, `warnings`, `d
 
 ### 5.2 Storage and the item table
 
-The `LAYOUT` section holds lir.md's `Storage`, `Item` table and edit pictures, which encode by §4
-with these tags:
+The `LAYOUT` section holds lir.md's `Storage`, `Item` table and edit pictures, each an `Edit` of its
+symbols and the currency sign value it shows, which encode by §4 with these tags:
 
 - **`Kind`** (layout.rs:11-26, an `rt` type) tags in declaration order: `Group` 0,
   `Alnum{justified}` 1, `National` 2, `Zoned{digits,scale,signed,sign}` 3,

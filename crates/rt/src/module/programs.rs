@@ -4,10 +4,9 @@ use super::codec::{Decode, Encode, Reader, Writer};
 use super::{Module, ModuleError, ModuleWriter, Section, StringTable};
 use crate::codec_struct;
 use crate::lir::{
-    AbendText, Block, Cond, Const, Debug, Expr, Item, ParaId, Paragraph, Place, Plans, Program, ProgramOptions, Range,
+    AbendText, Block, Cond, Const, Debug, Edit, Expr, Item, ParaId, Paragraph, Place, Plans, Program, ProgramOptions, Range,
     Services, SqlEntry, Storage, SymId,
 };
-use crate::picture::Sym;
 
 /// A program's line in the `DIRECTORY` section (load-module.md §6).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,7 +69,7 @@ struct Parts<'a> {
     services: &'a Services,
     sql: &'a Vec<SqlEntry>,
     abends: &'a Vec<AbendText>,
-    edits: &'a Vec<Vec<Sym>>,
+    edits: &'a Vec<Edit>,
     symbols: &'a Vec<String>,
     debug: &'a Debug,
 }
@@ -243,7 +242,7 @@ pub fn read(bytes: &[u8]) -> Result<LoadedModule, ModuleError> {
     let count = directory.len();
 
     let options = records::<ProgramOptions>(&module, &strings, Section::OPTIONS, count)?;
-    let layouts = records::<(Storage, Vec<Item>, Vec<Vec<Sym>>)>(&module, &strings, Section::LAYOUT, count)?;
+    let layouts = records::<(Storage, Vec<Item>, Vec<Edit>)>(&module, &strings, Section::LAYOUT, count)?;
     let bodies = records::<Body>(&module, &strings, Section::LIR, count)?;
     let sql = records::<Vec<SqlEntry>>(&module, &strings, Section::SQL, count)?;
     let debug = records::<Debug>(&module, &strings, Section::DEBUG, count)?;

@@ -417,17 +417,15 @@ fn every_op_and_terminator_names_a_position() {
 #[test]
 fn constructs_outside_the_slice_are_refused_by_name() {
     let refused = |body: &str, data: &str| lower(&compiled(&program("", data, &[line(body), line("GOBACK.")].concat()))).unwrap_err();
-    assert!(matches!(refused("STRING A DELIMITED BY SIZE INTO A", "       01  A PIC X.\n"), LowerError::Unsupported("STRING", _)));
     let mixed = refused("MOVE FUNCTION MAX(A 1) TO A", "       01  A PIC X.\n");
     assert!(matches!(mixed, LowerError::Unsupported("FUNCTION MIN or MAX of arguments of different kinds", _)));
     let all = refused("MOVE FUNCTION MAX(T(ALL)) TO A", "       01  A PIC X.\n       01  G.\n           05 T PIC X OCCURS 3.\n");
     assert!(matches!(all, LowerError::Unsupported("FUNCTION arguments with ALL subscripts", _)));
     let numval = refused("MOVE FUNCTION NUMVAL(A) TO A", "       01  A PIC X.\n");
     assert!(matches!(numval, LowerError::Unsupported(n, _) if n.starts_with("a FUNCTION result whose digits")));
-    assert!(matches!(refused("INSPECT A TALLYING N FOR ALL 'A'", "       01  A PIC X.\n       01  N PIC 9.\n"), LowerError::Unsupported("INSPECT", _)));
-    let e = refused("ACCEPT A", "       01  A PIC X.\n");
-    assert_eq!(e.to_string(), "lowering: ACCEPT is not lowered yet");
-    assert_eq!(syntax::Error::from(e).pos.line, 7);
+    let e = refused("SEARCH T WHEN T(X) = 'A' CONTINUE END-SEARCH", "       01  G.\n           05 N PIC 9.\n           05 T PIC X OCCURS 1 TO 3 DEPENDING ON N.\n       01  X PIC 9.\n");
+    assert_eq!(e.to_string(), "lowering: SEARCH of an OCCURS DEPENDING ON table with neither INDEXED BY nor VARYING is not lowered yet");
+    assert_eq!(syntax::Error::from(e).pos.line, 10);
 }
 
 #[test]
@@ -440,12 +438,6 @@ fn statements_and_program_features_the_lowering_lacks_are_refused_by_name() {
         assert!(matches!(error, LowerError::Unsupported(n, _) if n == name), "{name}: {error}");
     };
     named(&["A.", "    EXEC CICS RETURN END-EXEC.", "    GOBACK."], "EXEC CICS");
-    let editing = "DECIMAL-POINT IS COMMA / CURRENCY SIGN editing parameters";
-    for clause in ["DECIMAL-POINT IS COMMA", "CURRENCY SIGN IS 'EUR' WITH PICTURE SYMBOL 'y'"] {
-        let special = program("", data, &source(&["A.", "    GOBACK."])).replace("       DATA DIVISION.\n", &format!("       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       SPECIAL-NAMES.\n           {clause}.\n       DATA DIVISION.\n"));
-        let error = lower(&compiled(&special)).unwrap_err();
-        assert!(matches!(error, LowerError::Unsupported(n, _) if n == editing), "{clause}: {error}");
-    }
     let inert = ["DECLARATIVES.", "S SECTION.", "    USE AFTER STANDARD ERROR PROCEDURE ON INPUT.", "P.", "    CONTINUE.", "END DECLARATIVES.", "A.", "    GOBACK."];
     let p = lowered(&program("", data, &source(&inert)));
     assert_eq!(p.procedure_start, 2);
@@ -1155,4 +1147,117 @@ fn a_function_evaluates_its_arguments_then_any_again_as_an_integer_then_its_refe
     assert_eq!((f[6].func, symbol(&p, p.abends[arity as usize].message)), (lir::Func::Length, "FUNCTION LENGTH takes 1..=1 arguments"));
     let Op::Display(d) = ops(&p).find(|op| matches!(op, Op::Display(_))).unwrap() else { unreachable!() };
     assert!(matches!(p.plans.display[*d as usize].items[..], [DisplayItem::Value(LirOperand::Function(5)), DisplayItem::Value(LirOperand::Function(6))]));
+}
+
+fn with_special_names(clauses: &str, data: &str, procedure: &[String]) -> String {
+    program("", data, &procedure.concat()).replace(
+        "       DATA DIVISION.\n",
+        &format!("       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       SPECIAL-NAMES.\n{clauses}       DATA DIVISION.\n"),
+    )
+}
+
+#[test]
+fn decimal_point_is_comma_and_currency_signs_reach_the_options_the_edits_and_display() {
+    let source = with_special_names(
+        "           CURRENCY SIGN IS 'EUR ' WITH PICTURE SYMBOL 'y'\n           DECIMAL-POINT IS COMMA.\n",
+        "       01  E PIC yyy9,99.\n       01  Z PIC ZZ9,9.\n",
+        &[line("MOVE 1,5 TO E Z"), line("DISPLAY 3,75 ' ' E"), line("GOBACK.")],
+    );
+    let p = lowered(&source);
+    assert!(p.options.decimal_point_comma);
+    assert_eq!(p.options.numval_currency, "EUR ");
+    let currencies: Vec<&str> = p.edits.iter().map(|e| e.currency.as_str()).collect();
+    assert_eq!(currencies, ["EUR ", ""]);
+    assert!(p.symbols.iter().any(|s| s == "3,75"));
+    let plain = lowered(&program("", "       01  E PIC $$9.99.\n", &[line("DISPLAY 3.75"), line("GOBACK.")].concat()));
+    assert_eq!((plain.options.decimal_point_comma, plain.options.numval_currency.as_str(), plain.edits[0].currency.as_str()), (false, "$", "$"));
+    assert!(plain.symbols.iter().any(|s| s == "3.75"));
+    let two = with_special_names("           CURRENCY 'W'\n           CURRENCY 'CHF' PICTURE SYMBOL 'f'.\n", "       01  E PIC W9.\n", &[line("GOBACK.")]);
+    assert_eq!(lowered(&two).options.numval_currency, "$");
+}
+
+#[test]
+fn string_unstring_and_inspect_plans_decide_each_receiver_s_store() {
+    let p = lowered(&program(
+        "",
+        "       01  S PIC X(12).\n       01  P PIC 99.\n       01  F1 PIC X(4).\n       01  F2 PIC 9(4).\n       01  D1 PIC X.\n       01  C1 PIC 9.\n       01  T PIC X.\n       01  N PIC 99.\n",
+        &[
+            line("STRING F1 DELIMITED BY SPACE 12 DELIMITED BY SIZE"),
+            line("    INTO S WITH POINTER P"),
+            line("    ON OVERFLOW DISPLAY 'OVER' END-STRING"),
+            line("UNSTRING S DELIMITED BY ',' OR ALL SPACE"),
+            line("    INTO F1 DELIMITER IN D1 COUNT IN C1 F2 TALLYING IN T"),
+            line("INSPECT S TALLYING N FOR ALL ZERO"),
+            line("    REPLACING ALL 'A' BY SPACE CONVERTING 'ab' TO 'AB'"),
+            line("INSPECT S CONVERTING 'ab' TO T"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    ));
+    let s = &p.plans.string[0];
+    assert!(matches!(s.pointer, Some((_, StorePlan::Zoned { digits: 2, .. }))));
+    assert!(matches!(&s.sources[..], [lir::StringSource { chars: Chars::Place(_), delimiter: Some(Chars::Literal(space)) }, lir::StringSource { chars: Chars::Literal(twelve), delimiter: None }] if space == &[0x40] && twelve == &[0xF1, 0xF2]));
+    let u = &p.plans.unstring[0];
+    assert_eq!(u.delimiters, [(false, Chars::Literal(vec![0x6B])), (true, Chars::Literal(vec![0x40]))]);
+    assert_eq!(u.into[0].plan, MovePlan::Alnum { image: Image::Bytes, justified: false });
+    assert_eq!(u.into[1].plan, MovePlan::Numeric { from: NumericFrom::Zoned, store: StorePlan::Zoned { digits: 4, scale: 0, signed: false, sign: None } });
+    let d = u.into[0].delimiter.unwrap();
+    assert_eq!((d.found, d.none), (MovePlan::Alnum { image: Image::Bytes, justified: false }, MovePlan::Alnum { image: Image::Figurative, justified: false }));
+    assert!(matches!(u.into[0].count, Some((_, StorePlan::Zoned { digits: 1, .. }))));
+    let Some((_, tally)) = &u.tallying else { panic!("TALLYING IN") };
+    assert!(matches!(tally.store, StorePlan::Refused(a) if symbol(&p, p.abends[a as usize].message) == "TALLYING IN needs a numeric item"));
+    let i = &p.plans.inspect[0];
+    assert!(matches!(i.tallying[0].counter, Some((_, lir::StepPlan { dmax: 0, store: StorePlan::Zoned { digits: 2, .. } }))));
+    assert_eq!(i.tallying[0].pattern, Some(Chars::Literal(vec![0xF0])));
+    assert_eq!(i.replacing[0].by, Some(lir::Replacement::Fill(0x40)));
+    assert_eq!(i.converting.as_ref().unwrap().table, lir::ConvertTable::Built(vec![(0x81, 0xC1), (0x82, 0xC2)]));
+    assert!(matches!(p.plans.inspect[1].converting.as_ref().unwrap().table, lir::ConvertTable::Operands { from: Chars::Literal(_), to: Chars::Place(_) }));
+    let selects = p.blocks.iter().filter(|b| matches!(b.ops.last(), Some(Op::String(_) | Op::Unstring(_)))).map(|b| &b.end);
+    assert!(selects.into_iter().all(|end| matches!(end, Terminator::Select(arms) if arms.len() == 2)));
+}
+
+#[test]
+fn a_serial_search_steps_its_index_and_varying_item_and_search_all_matches_keys_to_when_terms() {
+    let p = lowered(&program(
+        "",
+        "       01  N PIC 9 VALUE 3.\n       01  TBL.\n           05 E OCCURS 1 TO 5 DEPENDING ON N\n              ASCENDING KEY IS K INDEXED BY IX.\n              10 K PIC X.\n       01  V PIC 99.\n",
+        &[
+            line("SEARCH E VARYING V AT END DISPLAY 'NONE'"),
+            line("    WHEN K(IX) = 'C' DISPLAY 'C'"),
+            line("END-SEARCH"),
+            line("SEARCH ALL E WHEN K(IX) = 'D' DISPLAY 'D' END-SEARCH"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    ));
+    let in_table = p.conds.iter().find_map(|c| if let LirCond::InTable { index, count } = c { Some((*index, count.clone())) } else { None }).unwrap();
+    assert_eq!(p.places[in_table.0 as usize].kind, rt::storage::Kind::Index);
+    assert!(matches!(in_table.1, lir::Count::Odo(lir::Odo { max: 5, element: 1, .. })));
+    let steps: Vec<&str> = ops(&p).filter_map(|op| if let Op::SetInt { target, .. } = op { Some(symbol(&p, p.places[*target as usize].name)) } else { None }).collect();
+    assert_eq!(steps, ["IX", "V"]);
+    let a = &p.plans.search_all[0];
+    assert_eq!((a.store, a.keys.len(), a.keys[0].ascending, a.keys[0].how), (StorePlan::Index, 1, true, lir::Compare::Alphanumeric));
+    let searched = p.blocks.iter().find(|b| matches!(b.ops.last(), Some(Op::SearchAll(_)))).unwrap();
+    assert!(matches!(&searched.end, Terminator::Select(arms) if arms.len() == 2));
+
+    let overlapping = program(
+        "",
+        "       01  N PIC 9 VALUE 3.\n       01  TBL.\n           05 E PIC X OCCURS 1 TO 5 DEPENDING ON N INDEXED BY IX.\n",
+        &[line("SEARCH E VARYING N WHEN E(IX) = 'C' CONTINUE END-SEARCH"), line("GOBACK.")].concat(),
+    );
+    let e = lower(&compiled(&overlapping)).unwrap_err();
+    assert!(matches!(e, LowerError::Unsupported(n, _) if n.starts_with("SEARCH VARYING an item that may share storage")), "{e}");
+}
+
+#[test]
+fn accept_moves_what_its_source_gives_by_the_receiver_s_plan() {
+    let p = lowered(&program(
+        "",
+        "       01  D6 PIC X(6).\n       01  T PIC 9(8).\n       01  L PIC X(10).\n",
+        &[line("ACCEPT D6 FROM DATE"), line("ACCEPT T FROM TIME"), line("ACCEPT L"), line("GOBACK.")].concat(),
+    ));
+    let accepts: Vec<MovePlan> = ops(&p).filter_map(|op| if let Op::Accept { plan, .. } = op { Some(*plan) } else { None }).collect();
+    assert_eq!(accepts[0], MovePlan::Alnum { image: Image::Digits { digits: 6 }, justified: false });
+    assert_eq!(accepts[1], MovePlan::Numeric { from: NumericFrom::Value, store: StorePlan::Zoned { digits: 8, scale: 0, signed: false, sign: None } });
+    assert_eq!(accepts[2], MovePlan::Alnum { image: Image::Bytes, justified: false });
 }

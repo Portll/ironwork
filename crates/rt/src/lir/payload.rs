@@ -91,7 +91,8 @@ pub enum DisplayItem<P = PlaceId, O = Operand> {
     Digits { place: P, digits: u32, signed: bool },
     /// Floating-point, pointer, index and object-reference items: the place, then the abend.
     Refused { place: P, abend: AbendId },
-    /// A literal or figurative constant as DISPLAY shows it; a numeric literal as written.
+    /// A literal or figurative constant as DISPLAY shows it; a numeric literal as written, its decimal
+    /// point the program's.
     Text(SymId),
     /// FUNCTION, LENGTH OF or ADDRESS OF, by the value's kind.
     Value(O),

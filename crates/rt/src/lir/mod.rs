@@ -93,7 +93,7 @@ pub struct Program {
     pub services: Services,
     pub sql: Vec<SqlEntry>,
     pub abends: Vec<AbendText>,
-    pub edits: Vec<Vec<Sym>>,
+    pub edits: Vec<Edit>,
     pub symbols: Vec<String>,
     pub debug: Debug,
 }
@@ -105,6 +105,19 @@ pub struct ProgramOptions {
     /// The CBL and PROCESS cards as written.
     pub cards: Vec<String>,
     pub collating: Collating,
+    /// DECIMAL-POINT IS COMMA: numeric editing shows a comma for the decimal point, and the NUMVAL
+    /// and TEST-NUMVAL functions read one.
+    pub decimal_point_comma: bool,
+    /// The cs NUMVAL-C and TEST-NUMVAL-C take without argument-2 (assumption C102).
+    pub numval_currency: String,
+}
+
+/// An edited PICTURE's symbols, and the currency sign value its currency symbol stands for, empty
+/// when it has none.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Edit {
+    pub syms: Vec<Sym>,
+    pub currency: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -211,7 +224,8 @@ codec_struct!(Program {
     id, options, initial, recursive, storage, items, paragraphs, procedure_start, ranges, blocks, places, exprs,
     conds, consts, plans, services, sql, abends, edits, symbols, debug,
 } check program_valid);
-codec_struct!(ProgramOptions { options, ssrange, cards, collating });
+codec_struct!(ProgramOptions { options, ssrange, cards, collating, decimal_point_comma, numval_currency });
+codec_struct!(Edit { syms, currency });
 codec_struct!(Storage {
     size, image, local_image, init_reports, init_abend, linkage, using, returning, file_areas,
 } check storage_valid);

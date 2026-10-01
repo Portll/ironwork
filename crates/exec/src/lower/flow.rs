@@ -3,12 +3,13 @@
 //! triggers the declaratives run by (§9.10).
 
 use super::cond::Test;
-use super::data::{Side, scale};
+use super::data::{Side, Value, scale};
 use super::{Lower, LowerError, R, push, unsupported};
 use crate::declaratives::{Span, debug_name};
 use rt::abend::{AbendCode, Ending};
 use rt::lir::{self, BlockId, DebugId, Op, RangeId, RangeKind, Terminator};
 use rt::storage::Kind;
+use rt::vocab::AcceptFrom;
 use syntax::Pos;
 use syntax::ast::{BinOp, ExecKind, ExitKind, Expr, Loop, Object, Operand, ProcName, RelOp, SizeError, Sorting, Stmt, Subject, Target, Varying, When};
 
@@ -403,6 +404,33 @@ impl Lower<'_> {
                 self.file_statement(s, pos, &inner)?
             }
             Stmt::Set { set, .. } => self.set(set, pos)?,
+            Stmt::String(st) => {
+                let plan = self.string_plan(st, pos)?;
+                self.op(Op::String(plan), pos)?;
+                self.select(st.on_overflow.as_deref(), st.not_on_overflow.as_deref(), pos, &inner)?;
+            }
+            Stmt::Unstring(u) => {
+                let plan = self.unstring_plan(u, pos)?;
+                self.op(Op::Unstring(plan), pos)?;
+                self.select(u.on_overflow.as_deref(), u.not_on_overflow.as_deref(), pos, &inner)?;
+            }
+            Stmt::Inspect(i) => {
+                let plan = self.inspect_plan(i, pos)?;
+                self.op(Op::Inspect(plan), pos)?;
+            }
+            Stmt::Search(se) => self.search(se, pos, &inner)?,
+            Stmt::Accept { target, from, .. } => {
+                let place = self.place(target, true)?;
+                let value = match from {
+                    AcceptFrom::Sysin => Side { value: Value::Bytes, src: None, digits: 0 },
+                    AcceptFrom::Date { four_digit_year } => Side { value: Value::Num(Some(0)), src: None, digits: if *four_digit_year { 8 } else { 6 } },
+                    AcceptFrom::Day { four_digit_year } => Side { value: Value::Num(Some(0)), src: None, digits: if *four_digit_year { 7 } else { 5 } },
+                    AcceptFrom::DayOfWeek => Side { value: Value::Num(Some(0)), src: None, digits: 1 },
+                    AcceptFrom::Time => Side { value: Value::Num(Some(0)), src: None, digits: 8 },
+                };
+                let plan = self.move_plan(&value, self.kind_of(place), self.place_items[place as usize])?;
+                self.op(Op::Accept { target: place, from: *from, plan }, pos)?;
+            }
             Stmt::Call(c) => match self.call_plan(c, pos)? {
                 Ok(plan) => {
                     self.op(Op::Call(plan), pos)?;
@@ -482,7 +510,7 @@ impl Lower<'_> {
     }
 
     /// A branch on `test`; a test with an abending leaf becomes branches in its order.
-    fn branch(&mut self, test: Test, then: BlockId, otherwise: BlockId, pos: Pos) -> R<()> {
+    pub(super) fn branch(&mut self, test: Test, then: BlockId, otherwise: BlockId, pos: Pos) -> R<()> {
         if !test.abends() {
             let cond = self.fold(&test)?;
             return self.end(Terminator::Branch { cond, then, otherwise }, pos);
@@ -512,6 +540,11 @@ impl Lower<'_> {
         if on.is_none() && not_on.is_none() {
             return Ok(());
         }
+        self.select(on, not_on, pos, ctx)
+    }
+
+    /// The Select after an op that returns Arm(1) or Arm(0), running `on` or `not_on`.
+    fn select(&mut self, on: Option<&[Stmt]>, not_on: Option<&[Stmt]>, pos: Pos, ctx: &Ctx) -> R<()> {
         let (normal, exception, join) = (self.new_block()?, self.new_block()?, self.new_block()?);
         self.end(Terminator::Select(vec![normal, exception]), pos)?;
         self.switch(normal)?;

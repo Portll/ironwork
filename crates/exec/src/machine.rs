@@ -642,12 +642,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         if self.program.environment.decimal_point_comma { ',' } else { '.' }
     }
 
-    /// The cs of NUMVAL-C and TEST-NUMVAL-C without argument-2 (assumption C102).
     fn default_currency(&self) -> String {
-        match self.program.environment.currency.as_slice() {
-            [only] => only.value.clone(),
-            _ => "$".to_owned(),
-        }
+        numval_currency(&self.program.environment.currency)
     }
 
     fn read(&self, loc: Loc, pos: Pos) -> R<Val> {
@@ -1435,7 +1431,15 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 }
 
-fn flatten_and<'c>(cond: &'c Cond, out: &mut Vec<&'c Cond>) {
+/// The cs of NUMVAL-C and TEST-NUMVAL-C without argument-2 (assumption C102).
+pub(crate) fn numval_currency(signs: &[CurrencySign]) -> String {
+    match signs {
+        [only] => only.value.clone(),
+        _ => "$".to_owned(),
+    }
+}
+
+pub(crate) fn flatten_and<'c>(cond: &'c Cond, out: &mut Vec<&'c Cond>) {
     match cond {
         Cond::And(a, b) => {
             flatten_and(a, out);
@@ -1446,7 +1450,7 @@ fn flatten_and<'c>(cond: &'c Cond, out: &mut Vec<&'c Cond>) {
 }
 
 /// In a SEARCH ALL condition, the key item and the value it must equal.
-fn key_term<'c>(terms: &[&'c Cond], key: &str) -> Option<(&'c Expr, &'c Expr)> {
+pub(crate) fn key_term<'c>(terms: &[&'c Cond], key: &str) -> Option<(&'c Expr, &'c Expr)> {
     let is_key = |e: &Expr| matches!(e, Expr::Operand(Operand::Ref(r)) if r.name == key);
     terms.iter().find_map(|t| match t {
         Cond::Rel(a, RelOp::Eq, b) if is_key(a) => Some((a, b)),

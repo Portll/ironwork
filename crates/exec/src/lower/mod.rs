@@ -3,9 +3,10 @@
 //!
 //! Lowered so far: storage, places, expressions and conditions, the arithmetic verbs, MOVE, IF,
 //! EVALUATE, DISPLAY, INITIALIZE, PERFORM, GO TO, GO TO DEPENDING ON, ALTER, EXIT, STOP RUN, GOBACK,
-//! CALL, CANCEL, ENTRY, INVOKE, SET, the file statements, intrinsic functions, independent
-//! segments, class definitions, USE AFTER EXCEPTION/ERROR and USE FOR DEBUGGING. Anything else is
-//! [`LowerError::Unsupported`], naming the construct.
+//! CALL, CANCEL, ENTRY, INVOKE, SET, STRING, UNSTRING, INSPECT, SEARCH, ACCEPT, the file
+//! statements, intrinsic functions, independent segments, class definitions, USE AFTER
+//! EXCEPTION/ERROR and USE FOR DEBUGGING. Anything else is [`LowerError::Unsupported`], naming the
+//! construct.
 
 mod call;
 mod class;
@@ -15,7 +16,9 @@ mod file;
 mod flow;
 mod function;
 mod plans;
+mod search;
 mod set;
+mod text;
 mod verify;
 
 #[cfg(test)]
@@ -111,6 +114,8 @@ pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
             ssrange: compiled.ssrange,
             cards: compiled.program.options.clone(),
             collating: collating(&compiled.collating),
+            decimal_point_comma: compiled.program.environment.decimal_point_comma,
+            numval_currency: crate::machine::numval_currency(&compiled.program.environment.currency),
         },
         initial: compiled.program.initial,
         recursive: compiled.program.recursive,
@@ -128,7 +133,7 @@ pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
         services: l.services,
         sql: Vec::new(),
         abends: l.abends,
-        edits: compiled.layout.edits.clone(),
+        edits: edits(&compiled.layout)?,
         symbols: l.symbols,
         debug: lir::Debug { sources, positions: l.positions, ops },
     };
@@ -225,10 +230,6 @@ impl<'c> Lower<'c> {
         }
         if let Some(block) = program.exec_declarations.first() {
             return unsupported("EXEC SQL", block.pos);
-        }
-        // Editing and de-editing read them, and the LIR's edit tables do not carry them yet.
-        if program.environment.decimal_point_comma || !program.environment.currency.is_empty() {
-            return unsupported("DECIMAL-POINT IS COMMA / CURRENCY SIGN editing parameters", Pos::default());
         }
         Ok(())
     }
@@ -366,6 +367,14 @@ fn collating(sequence: &crate::collating::Sequence) -> lir::Collating {
         high_value: sequence.high_value,
         low_value: sequence.low_value,
     })
+}
+
+/// Each edited PICTURE with the currency sign value it shows.
+fn edits(layout: &Layout) -> R<Vec<lir::Edit>> {
+    if layout.edits.len() != layout.currencies.len() {
+        return Err(LowerError::Invalid(format!("{} edited PICTUREs with {} currency values", layout.edits.len(), layout.currencies.len())));
+    }
+    Ok(layout.edits.iter().zip(&layout.currencies).map(|(syms, currency)| lir::Edit { syms: syms.clone(), currency: currency.clone() }).collect())
 }
 
 /// Whether the place cannot abend when evaluated: a slab, LOCAL-STORAGE or RETURN-CODE base and a

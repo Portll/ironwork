@@ -250,9 +250,11 @@ fn letters_first() -> Sequence {
 #[test]
 fn program_shape_round_trips() {
     let cards = vec!["TRUNC(OPT)".into(), "SSR".into()];
-    let options = ProgramOptions { options: Options::default(), ssrange: true, cards, collating: Collating::Native };
+    let options = ProgramOptions { options: Options::default(), ssrange: true, cards, collating: Collating::Native, decimal_point_comma: false, numval_currency: "$".into() };
     let sequenced = ProgramOptions { collating: Collating::Sequence(letters_first()), ..options.clone() };
-    round_trip(&[options, sequenced]);
+    let comma = ProgramOptions { decimal_point_comma: true, numval_currency: "EUR ".into(), ..options.clone() };
+    round_trip(&[options, sequenced, comma]);
+    round_trip(&[Edit { syms: vec![Sym::Currency, Sym::Nine, Sym::Point, Sym::Nine], currency: "CHF ".into() }, Edit { syms: vec![Sym::Z], currency: String::new() }]);
     every_variant(&[Collating::Native, Collating::Sequence(letters_first())], 2);
     let storage = Storage {
         size: 3,
@@ -1012,7 +1014,7 @@ fn debug_positions_are_differences_from_the_one_before() {
 fn a_small_program_round_trips_byte_identically() {
     let program = payroll();
     let (bytes, strings) = encoded(&program);
-    assert_eq!(strings.iter().collect::<Vec<_>>()[..3], ["SSRANGE", "PAYROLL", "PAYROLL.cbl"]);
+    assert_eq!(strings.iter().collect::<Vec<_>>()[..4], ["SSRANGE", "$", "PAYROLL", "PAYROLL.cbl"]);
     let decoded = decode_all::<Program>("LIR", &bytes, &strings).unwrap();
     assert_eq!(decoded, program);
     assert_eq!(encoded(&decoded), (bytes.clone(), strings.clone()));

@@ -3,8 +3,8 @@
 //! exactly when the program has SSRANGE.
 
 use rt::lir::{
-    Advance, CallArg, CallTarget, Chars, Comparand, Cond, DisplayItem, Expr, FileVerb, IntExpr, MethodName, Op, Operand, Place, Program, RangeKind, Receiver, StartKey, Terminator,
-    UpDown,
+    Advance, Bound, CallArg, CallTarget, Chars, Comparand, Compare, Cond, ConvertTable, Count, DisplayItem, Expr, FileVerb, IntExpr, MethodName, MovePlan, Op, Operand,
+    Place, Program, RangeKind, Receiver, Replacement, StartKey, StorePlan, Terminator, UpDown,
 };
 
 /// A class definition's data and methods are programs of their own, each checked as one.
@@ -114,7 +114,12 @@ fn verify_program(p: &Program) -> Result<(), String> {
                 cond(*b)?;
             }
             Cond::Counter(_) | Cond::Sql(_) => {}
-            Cond::InTable { index, .. } => place(*index)?,
+            Cond::InTable { index, count } => {
+                place(*index)?;
+                if let Count::Odo(o) = count {
+                    int(&o.object)?;
+                }
+            }
         }
     }
     for a in &p.abends {
@@ -203,6 +208,65 @@ fn verify_program(p: &Program) -> Result<(), String> {
         Chars::Place(q) => place(*q),
         Chars::Value(o) => operand(o),
     };
+    let bounds = |bs: &[Bound]| bs.iter().try_for_each(|b| chars(&b.value));
+    let store = |s: &StorePlan| if let StorePlan::Refused(a) = s { abend(*a) } else { Ok(()) };
+    let moved = |m: &MovePlan| if let MovePlan::Refused(a) = m { abend(*a) } else { Ok(()) };
+    for plan in &p.plans.string {
+        place(plan.into)?;
+        plan.pointer.as_ref().map_or(Ok(()), |(q, s)| place(*q).and_then(|()| store(s)))?;
+        for source in &plan.sources {
+            chars(&source.chars)?;
+            source.delimiter.as_ref().map_or(Ok(()), chars)?;
+        }
+    }
+    for plan in &p.plans.unstring {
+        place(plan.source)?;
+        plan.pointer.as_ref().map_or(Ok(()), |(q, s)| place(*q).and_then(|()| store(s)))?;
+        plan.delimiters.iter().try_for_each(|(_, d)| chars(d))?;
+        for field in &plan.into {
+            place(field.target)?;
+            moved(&field.plan)?;
+            if let Some(d) = &field.delimiter {
+                place(d.target)?;
+                moved(&d.found)?;
+                moved(&d.none)?;
+            }
+            field.count.as_ref().map_or(Ok(()), |(q, s)| place(*q).and_then(|()| store(s)))?;
+        }
+        plan.tallying.as_ref().map_or(Ok(()), |(q, s)| place(*q).and_then(|()| store(&s.store)))?;
+    }
+    for plan in &p.plans.inspect {
+        place(plan.target)?;
+        for phrase in plan.tallying.iter().chain(&plan.replacing) {
+            phrase.pattern.as_ref().map_or(Ok(()), chars)?;
+            if let Some(Replacement::Chars(c)) = &phrase.by {
+                chars(c)?;
+            }
+            phrase.counter.as_ref().map_or(Ok(()), |(q, s)| place(*q).and_then(|()| store(&s.store)))?;
+            bounds(&phrase.bounds)?;
+        }
+        if let Some(c) = &plan.converting {
+            if let ConvertTable::Operands { from, to } = &c.table {
+                chars(from)?;
+                chars(to)?;
+            }
+            bounds(&c.bounds)?;
+        }
+    }
+    for plan in &p.plans.search_all {
+        place(plan.index)?;
+        store(&plan.store)?;
+        if let Count::Odo(o) = &plan.count {
+            int(&o.object)?;
+        }
+        for key in &plan.keys {
+            comparand(&key.key)?;
+            comparand(&key.value)?;
+            if let Compare::Refused(a) = key.how {
+                abend(a)?;
+            }
+        }
+    }
     for c in &p.services.calls {
         match &c.target {
             CallTarget::Named { name, .. } => symbol(*name)?,
@@ -279,6 +343,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
             Op::Call(c) if p.services.calls.get(*c as usize).is_some_and(|plan| plan.on_exception || plan.not_on_exception) => 2,
             Op::Invoke(i) if p.services.invokes.get(*i as usize).is_some_and(|plan| plan.on_exception || plan.not_on_exception) => 2,
             Op::File(f) => p.services.file_ops.get(*f as usize).map_or(0, |op| op.arms()),
+            Op::String(_) | Op::Unstring(_) | Op::SearchAll(_) => 2,
             _ => 0,
         };
         let armed = |op: &Op| arms(op) > 0;
@@ -324,6 +389,18 @@ fn verify_program(p: &Program) -> Result<(), String> {
                             abend(*a)?;
                         }
                     }
+                }
+                Op::String(id) => within("STRING plan", *id, p.plans.string.len())?,
+                Op::Unstring(id) => within("UNSTRING plan", *id, p.plans.unstring.len())?,
+                Op::Inspect(id) => within("INSPECT plan", *id, p.plans.inspect.len())?,
+                Op::SearchAll(id) => within("SEARCH ALL plan", *id, p.plans.search_all.len())?,
+                Op::SetInt { target, value } => {
+                    place(*target)?;
+                    int(value)?;
+                }
+                Op::Accept { target, plan, .. } => {
+                    place(*target)?;
+                    moved(plan)?;
                 }
                 Op::DebugAlter { range: r, name, contents } => {
                     range(*r, RangeKind::Debugging)?;
