@@ -1012,7 +1012,7 @@ impl Check<'_> {
             return;
         };
         for (name, arg) in &block.options {
-            if !command.options.contains(&name.as_str()) {
+            if command.options.is_some_and(|options| !options.contains(&name.as_str())) {
                 self.errors.push(Error::at(block.pos, format!("EXEC DLI {}: {name} is not one of its options", command.name)));
             } else if let (true, Some(ExecArg::Text(t))) = (name == "WHERE", arg)
                 && let Err(why) = syntax::dli::qualification(t)

@@ -5,27 +5,54 @@
 pub struct Command {
     pub name: &'static str,
     pub aliases: &'static [&'static str],
-    pub options: &'static [&'static str],
+    /// `None` where the book leaves the options to IMS's Operations Guide: GMSG, ICMD and RCMD.
+    pub options: Option<&'static [&'static str]>,
 }
 
-const GET: &[&str] = &[
-    "PCB", "AIB", "KEYFEEDBACK", "FEEDBACKLEN", "INTO", "VARIABLE", "OFFSET", "SEGLENGTH", "LOCKED", "LOCKCLASS", "MOVENEXT", "GETFIRST", "SET", "SETCOND",
-    "SETZERO", "SETPARENT", "FIRST", "LAST", "CURRENT", "SEGMENT", "FIELDLENGTH", "KEYLENGTH", "KEYS", "WHERE",
+const GET_UNIQUE: &[&str] = &[
+    "PCB", "AIB", "KEYFEEDBACK", "FEEDBACKLEN", "INTO", "VARIABLE", "LAST", "SEGMENT", "SEGLENGTH", "OFFSET", "LOCKED", "LOCKCLASS", "MOVENEXT", "GETFIRST", "SET",
+    "SETCOND", "SETZERO", "SETPARENT", "WHERE", "FIELDLENGTH", "KEYS", "KEYLENGTH",
 ];
 
+const GET_NEXT: &[&str] = &[
+    "PCB", "AIB", "KEYFEEDBACK", "FEEDBACKLEN", "INTO", "VARIABLE", "FIRST", "LAST", "CURRENT", "SEGMENT", "SEGLENGTH", "OFFSET", "LOCKED", "LOCKCLASS", "MOVENEXT",
+    "GETFIRST", "SET", "SETCOND", "SETZERO", "SETPARENT", "WHERE", "FIELDLENGTH", "KEYS", "KEYLENGTH",
+];
+
+/// From the book's Format diagrams (pp. 35-81). GHU, GHN and GHNP take their Get command's
+/// options (p. 102); every command that takes PCB may take AIB instead (p. 5).
 pub const COMMANDS: &[Command] = &[
-    Command { name: "GU", aliases: &["GET UNIQUE"], options: GET },
-    Command { name: "GHU", aliases: &["GET HOLD UNIQUE"], options: GET },
-    Command { name: "GN", aliases: &["GET NEXT"], options: GET },
-    Command { name: "GHN", aliases: &["GET HOLD NEXT"], options: GET },
-    Command { name: "GNP", aliases: &["GET NEXT IN PARENT"], options: GET },
-    Command { name: "GHNP", aliases: &["GET HOLD NEXT IN PARENT"], options: GET },
-    Command { name: "ISRT", aliases: &["INSERT"], options: &["PCB", "AIB", "VARIABLE", "SEGMENT", "SEGLENGTH", "FROM", "OFFSET", "KEYS", "KEYLENGTH", "WHERE", "FIELDLENGTH", "FIRST", "LAST", "CURRENT", "MOVENEXT", "GETFIRST", "SET", "SETCOND", "SETZERO", "SETPARENT"] },
-    Command { name: "DLET", aliases: &["DELETE"], options: &["PCB", "AIB", "VARIABLE", "SEGMENT", "SEGLENGTH", "FROM", "SETZERO"] },
-    Command { name: "REPL", aliases: &["REPLACE"], options: &["PCB", "AIB", "VARIABLE", "SEGMENT", "SEGLENGTH", "FROM", "OFFSET", "MOVENEXT", "SET", "SETCOND", "SETZERO"] },
-    Command { name: "SCHD", aliases: &["SCHEDULE"], options: &["PSB", "SYSSERVE", "NODHABEND"] },
-    Command { name: "TERM", aliases: &["TERMINATE"], options: &[] },
-    Command { name: "CHKP", aliases: &["CHECKPOINT"], options: &["ID", "AIB"] },
+    Command { name: "GU", aliases: &["GET UNIQUE"], options: Some(GET_UNIQUE) },
+    Command { name: "GHU", aliases: &[], options: Some(GET_UNIQUE) },
+    Command { name: "GN", aliases: &["GET NEXT"], options: Some(GET_NEXT) },
+    Command { name: "GHN", aliases: &[], options: Some(GET_NEXT) },
+    Command { name: "GNP", aliases: &["GET NEXT IN PARENT"], options: Some(GET_NEXT) },
+    Command { name: "GHNP", aliases: &[], options: Some(GET_NEXT) },
+    Command { name: "ISRT", aliases: &["INSERT"], options: Some(&["PCB", "AIB", "VARIABLE", "FIRST", "LAST", "CURRENT", "SEGMENT", "SEGLENGTH", "FROM", "OFFSET", "MOVENEXT", "GETFIRST", "SET", "SETCOND", "SETZERO", "WHERE", "FIELDLENGTH", "KEYS", "KEYLENGTH"]) },
+    Command { name: "DLET", aliases: &["DELETE"], options: Some(&["PCB", "AIB", "VARIABLE", "SEGMENT", "SEGLENGTH", "FROM", "SETZERO"]) },
+    Command { name: "REPL", aliases: &["REPLACE"], options: Some(&["PCB", "AIB", "VARIABLE", "SEGMENT", "SEGLENGTH", "OFFSET", "FROM", "MOVENEXT", "SET", "SETCOND", "SETZERO"]) },
+    Command { name: "POS", aliases: &["POSITION"], options: Some(&["PCB", "AIB", "INTO", "KEYFEEDBACK", "FEEDBACKLEN", "SEGMENT", "WHERE", "FIELDLENGTH"]) },
+    Command { name: "RETRIEVE", aliases: &[], options: Some(&["PCB", "AIB", "KEYFEEDBACK", "FEEDBACKLEN"]) },
+    Command { name: "LOAD", aliases: &[], options: Some(&["PCB", "AIB", "VARIABLE", "SEGMENT", "SEGLENGTH", "FROM"]) },
+    Command { name: "SCHD", aliases: &["SCHEDULE"], options: Some(&["PSB", "SYSSERVE", "NODHABEND"]) },
+    Command { name: "TERM", aliases: &["TERMINATE"], options: Some(&[]) },
+    Command { name: "ACCEPT", aliases: &[], options: Some(&["STATUSGROUP", "AIB"]) },
+    Command { name: "CHKP", aliases: &["CHECKPOINT"], options: Some(&["ID", "AIB"]) },
+    Command { name: "DEQ", aliases: &[], options: Some(&["LOCKCLASS", "AIB"]) },
+    Command { name: "LOG", aliases: &[], options: Some(&["FROM", "LENGTH", "AIB"]) },
+    Command { name: "QUERY", aliases: &[], options: Some(&["PCB", "AIB"]) },
+    Command { name: "REFRESH", aliases: &[], options: Some(&["DBQUERY", "AIB"]) },
+    Command { name: "ROLB", aliases: &[], options: Some(&[]) },
+    Command { name: "ROLL", aliases: &[], options: Some(&[]) },
+    Command { name: "ROLS", aliases: &[], options: Some(&["PCB", "TOKEN", "AREA", "AIB"]) },
+    Command { name: "SETS", aliases: &[], options: Some(&["TOKEN", "AREA", "AIB"]) },
+    Command { name: "SETU", aliases: &[], options: Some(&["TOKEN", "AREA"]) },
+    Command { name: "STAT", aliases: &["STATISTICS"], options: Some(&["PCB", "INTO", "LENGTH", "VSAM", "NONVSAM", "FORMATTED", "UNFORMATTED", "SUMMARY", "AIB"]) },
+    Command { name: "SYMCHKP", aliases: &[], options: Some(&["ID", "AREA1", "AREA2", "AREA3", "AREA4", "AREA5", "AREA6", "AREA7", "LENGTH1", "LENGTH2", "LENGTH3", "LENGTH4", "LENGTH5", "LENGTH6", "LENGTH7"]) },
+    Command { name: "XRST", aliases: &[], options: Some(&["MAXLENGTH", "ID", "AREA1", "AREA2", "AREA3", "AREA4", "AREA5", "AREA6", "AREA7", "LENGTH1", "LENGTH2", "LENGTH3", "LENGTH4", "LENGTH5", "LENGTH6", "LENGTH7"]) },
+    Command { name: "GMSG", aliases: &[], options: None },
+    Command { name: "ICMD", aliases: &[], options: None },
+    Command { name: "RCMD", aliases: &[], options: None },
 ];
 
 /// Options whose argument is a name rather than data: in double parentheses it is an area that

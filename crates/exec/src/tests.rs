@@ -902,6 +902,8 @@ fn exec_dli_is_checked_when_compiled_and_ends_the_run_when_reached() {
     let errors = |statements: &[&str]| compiled(statements).err().map(|e| e.into_iter().map(|e| e.message).collect::<Vec<_>>()).unwrap_or_default();
     let good = ["MOVE DIBSTAT TO S", "EXEC DLI GET UNIQUE USING PCB(PCB-NUM)", "    SEGMENT(ROOT) INTO(AREA1) WHERE(KEY = SSA)", "END-EXEC", "EXEC DLI SCHD PSB((SSA)) NODHABEND END-EXEC"];
     assert!(errors(&good).is_empty(), "{:?}", errors(&good));
+    let more = ["EXEC DLI STATISTICS USING PCB(1) INTO(AREA1)", "    VSAM FORMATTED LENGTH(360) END-EXEC", "EXEC DLI GMSG AIB(AREA1) WAITAOI END-EXEC", "EXEC DLI DELETE SEGMENT(ROOT) FROM(AREA1) END-EXEC"];
+    assert!(errors(&more).is_empty(), "{:?}", errors(&more));
     assert_eq!(errors(&["EXEC DLI FETCH SEGMENT(ROOT) END-EXEC"]), ["EXEC DLI FETCH is not an EXEC DLI command"]);
     assert_eq!(errors(&["EXEC DLI TERM INTO(AREA1) END-EXEC"]), ["EXEC DLI TERM: INTO is not one of its options"]);
     assert_eq!(errors(&["EXEC DLI GU SEGMENT(ROOT) WHERE(KEY SSA) END-EXEC"]), ["EXEC DLI GU WHERE(KEY SSA): a relational operator after KEY"]);
