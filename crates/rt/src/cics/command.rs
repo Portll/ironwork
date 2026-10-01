@@ -194,6 +194,150 @@ impl<P, O, S> Cics<P, O, S> {
     }
 }
 
+/// Turns a command's handles into another executor's, as lowering turns the walker's references
+/// into the LIR's ids.
+pub trait Handles<P, O, S> {
+    type Place;
+    type Value;
+    type Text;
+    type Error;
+    fn place(&mut self, place: P) -> Result<Self::Place, Self::Error>;
+    fn value(&mut self, value: O) -> Result<Self::Value, Self::Error>;
+    fn text(&mut self, text: S) -> Result<Self::Text, Self::Error>;
+}
+
+type Mapped<H, P, O, S, T> = Result<T, <H as Handles<P, O, S>>::Error>;
+type DatumOf<H, P, O, S> = Datum<<H as Handles<P, O, S>>::Place, <H as Handles<P, O, S>>::Value, <H as Handles<P, O, S>>::Text>;
+type OptOf<H, P, O, S> = Option<DatumOf<H, P, O, S>>;
+type CommandOf<H, P, O, S> = CicsCommand<<H as Handles<P, O, S>>::Place, <H as Handles<P, O, S>>::Value, <H as Handles<P, O, S>>::Text>;
+type CicsOf<H, P, O, S> = Cics<<H as Handles<P, O, S>>::Place, <H as Handles<P, O, S>>::Value, <H as Handles<P, O, S>>::Text>;
+type RecordOf<H, P, O, S> = Record<<H as Handles<P, O, S>>::Place, <H as Handles<P, O, S>>::Value, <H as Handles<P, O, S>>::Text>;
+type TransferOf<H, P, O, S> = Transfer<<H as Handles<P, O, S>>::Place, <H as Handles<P, O, S>>::Value, <H as Handles<P, O, S>>::Text>;
+
+impl<P, O, S> Datum<P, O, S> {
+    pub fn map<H: Handles<P, O, S>>(self, h: &mut H) -> Mapped<H, P, O, S, DatumOf<H, P, O, S>> {
+        Ok(match self {
+            Self::Place(p) => Datum::Place(h.place(p)?),
+            Self::Value(o) => Datum::Value(h.value(o)?),
+            Self::Text(s) => Datum::Text(h.text(s)?),
+            Self::Bare => Datum::Bare,
+        })
+    }
+}
+
+fn opt<P, O, S, H: Handles<P, O, S>>(o: Opt<P, O, S>, h: &mut H) -> Mapped<H, P, O, S, OptOf<H, P, O, S>> {
+    o.map(|d| d.map(h)).transpose()
+}
+
+impl<P, O, S> CicsCommand<P, O, S> {
+    /// The same command over `h`'s handles, each mapped in the order the fields are written.
+    pub fn map<H: Handles<P, O, S>>(self, h: &mut H) -> Mapped<H, P, O, S, CommandOf<H, P, O, S>> {
+        let name = h.text(self.name)?;
+        let command = self.command.map(h)?;
+        let resp = Resp { resp: opt(self.resp.resp, h)?, resp2: opt(self.resp.resp2, h)?, nohandle: self.resp.nohandle };
+        Ok(CicsCommand { name, command, resp })
+    }
+}
+
+impl<P, O, S> Record<P, O, S> {
+    fn map<H: Handles<P, O, S>>(self, h: &mut H) -> Mapped<H, P, O, S, RecordOf<H, P, O, S>> {
+        Ok(Record { into: opt(self.into, h)?, set: opt(self.set, h)?, length: opt(self.length, h)? })
+    }
+}
+
+impl<P, O, S> Transfer<P, O, S> {
+    fn map<H: Handles<P, O, S>>(self, h: &mut H) -> Mapped<H, P, O, S, TransferOf<H, P, O, S>> {
+        Ok(Transfer { program: opt(self.program, h)?, commarea: opt(self.commarea, h)?, length: opt(self.length, h)? })
+    }
+}
+
+impl<P, O, S> Cics<P, O, S> {
+    fn map<H: Handles<P, O, S>>(self, h: &mut H) -> Mapped<H, P, O, S, CicsOf<H, P, O, S>> {
+        Ok(match self {
+            Self::File { verb, file, options: o } => Cics::File {
+                verb,
+                file: opt(file, h)?,
+                options: FileOptions {
+                    ridfld: opt(o.ridfld, h)?,
+                    keylength: opt(o.keylength, h)?,
+                    reqid: opt(o.reqid, h)?,
+                    from: opt(o.from, h)?,
+                    numrec: opt(o.numrec, h)?,
+                    record: o.record.map(h)?,
+                    generic: o.generic,
+                    rrn: o.rrn,
+                    gteq: o.gteq,
+                    equal: o.equal,
+                    update: o.update,
+                },
+            },
+            Self::Return { transid, commarea, length } => Cics::Return { transid: opt(transid, h)?, commarea: opt(commarea, h)?, length: opt(length, h)? },
+            Self::Link(t) => Cics::Link(t.map(h)?),
+            Self::Xctl(t) => Cics::Xctl(t.map(h)?),
+            Self::Abend { abcode, cancel } => Cics::Abend { abcode: opt(abcode, h)?, cancel },
+            Self::HandleCondition(labels) => Cics::HandleCondition(labels),
+            Self::IgnoreCondition(conditions) => Cics::IgnoreCondition(conditions),
+            Self::PushHandle => Cics::PushHandle,
+            Self::PopHandle => Cics::PopHandle,
+            Self::HandleAbend { program, label, reset } => Cics::HandleAbend { program, label, reset },
+            Self::HandleAid => Cics::HandleAid,
+            Self::SendMap { map, mapset, from, maponly, dataonly, cursor, control } => {
+                Cics::SendMap { map: opt(map, h)?, mapset: opt(mapset, h)?, from: opt(from, h)?, maponly, dataonly, cursor: opt(cursor, h)?, control }
+            }
+            Self::ReceiveMap { map, mapset, into, set } => Cics::ReceiveMap { map: opt(map, h)?, mapset: opt(mapset, h)?, into: opt(into, h)?, set: opt(set, h)? },
+            Self::SendControl { cursor, control } => Cics::SendControl { cursor: opt(cursor, h)?, control },
+            Self::Receive(record) => Cics::Receive(record.map(h)?),
+            Self::Asktime { abstime } => Cics::Asktime { abstime: opt(abstime, h)? },
+            Self::Formattime { abstime, datesep, timesep, outputs } => {
+                let (abstime, datesep, timesep) = (opt(abstime, h)?, opt(datesep, h)?, opt(timesep, h)?);
+                let outputs = outputs.into_iter().map(|(name, d)| Ok((h.text(name)?, d.map(h)?))).collect::<Result<_, _>>()?;
+                Cics::Formattime { abstime, datesep, timesep, outputs }
+            }
+            Self::Assign(a) => Cics::Assign(Assign {
+                applid: opt(a.applid, h)?,
+                sysid: opt(a.sysid, h)?,
+                userid: opt(a.userid, h)?,
+                netname: opt(a.netname, h)?,
+                facility: opt(a.facility, h)?,
+                startcode: opt(a.startcode, h)?,
+                abcode: opt(a.abcode, h)?,
+                program: opt(a.program, h)?,
+                cwaleng: opt(a.cwaleng, h)?,
+                twaleng: opt(a.twaleng, h)?,
+            }),
+            Self::Getmain { flength, length, initimg, set } => Cics::Getmain { flength: opt(flength, h)?, length: opt(length, h)?, initimg: opt(initimg, h)?, set: opt(set, h)? },
+            Self::Freemain => Cics::Freemain,
+            Self::Enq => Cics::Enq,
+            Self::Deq => Cics::Deq,
+            Self::Delay => Cics::Delay,
+            Self::Syncpoint { rollback } => Cics::Syncpoint { rollback },
+            Self::Address { eib, commarea, cwa, twa } => Cics::Address { eib: opt(eib, h)?, commarea: opt(commarea, h)?, cwa: opt(cwa, h)?, twa: opt(twa, h)? },
+            Self::SendText { from, length } => Cics::SendText { from: opt(from, h)?, length: opt(length, h)? },
+            Self::WriteOperator { text, textlength } => Cics::WriteOperator { text: opt(text, h)?, textlength: opt(textlength, h)? },
+            Self::WriteqTs { queue, from, length, rewrite, item, numitems } => {
+                Cics::WriteqTs { queue: opt(queue, h)?, from: opt(from, h)?, length: opt(length, h)?, rewrite, item: opt(item, h)?, numitems: opt(numitems, h)? }
+            }
+            Self::ReadqTs { queue, next, item, numitems, record } => {
+                Cics::ReadqTs { queue: opt(queue, h)?, next, item: opt(item, h)?, numitems: opt(numitems, h)?, record: record.map(h)? }
+            }
+            Self::DeleteqTs { queue } => Cics::DeleteqTs { queue: opt(queue, h)? },
+            Self::WriteqTd { queue, from, length } => Cics::WriteqTd { queue: opt(queue, h)?, from: opt(from, h)?, length: opt(length, h)? },
+            Self::ReadqTd { queue, record } => Cics::ReadqTd { queue: opt(queue, h)?, record: record.map(h)? },
+            Self::DeleteqTd { queue } => Cics::DeleteqTd { queue: opt(queue, h)? },
+            Self::Unsupported => Cics::Unsupported,
+        })
+    }
+
+    /// The paragraphs HANDLE CONDITION and HANDLE ABEND name.
+    pub fn labels(&self) -> Vec<ParaId> {
+        match self {
+            Self::HandleCondition(labels) => labels.iter().filter_map(|&(_, p)| p).collect(),
+            Self::HandleAbend { label, .. } => label.iter().copied().collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
 impl FileControl {
     pub fn name(self) -> &'static str {
         match self {

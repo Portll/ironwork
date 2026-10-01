@@ -5,10 +5,11 @@
 //! EVALUATE, DISPLAY, INITIALIZE, PERFORM, GO TO, GO TO DEPENDING ON, ALTER, EXIT, STOP RUN, GOBACK,
 //! CALL, CANCEL, ENTRY, INVOKE, SET, STRING, UNSTRING, INSPECT, SEARCH, ACCEPT, the file
 //! statements, intrinsic functions, independent segments, class definitions, USE AFTER
-//! EXCEPTION/ERROR, USE FOR DEBUGGING, and JSON and XML GENERATE and PARSE. Anything else is
-//! [`LowerError::Unsupported`], naming the construct.
+//! EXCEPTION/ERROR, USE FOR DEBUGGING, JSON and XML GENERATE and PARSE, and the EXEC blocks.
+//! Anything else is [`LowerError::Unsupported`], naming the construct.
 
 mod call;
+mod cics;
 mod class;
 mod cond;
 mod data;
@@ -19,6 +20,7 @@ mod markup;
 mod plans;
 mod search;
 mod set;
+mod sql;
 mod text;
 mod verify;
 
@@ -103,6 +105,7 @@ pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
     let items = l.items()?;
     l.services.files = l.files()?;
     l.services.declaratives = l.declaratives()?;
+    (l.sql, l.services.sqlca) = l.sql_table()?;
     let paragraphs = l.procedure()?;
     l.services.entries = l.entry_points()?;
     l.services.class = l.class_definition()?;
@@ -133,7 +136,7 @@ pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
         consts: l.consts,
         plans: l.plans,
         services: l.services,
-        sql: Vec::new(),
+        sql: l.sql,
         abends: l.abends,
         edits: edits(&compiled.layout)?,
         symbols: l.symbols,
@@ -167,6 +170,8 @@ struct Lower<'c> {
     abend_ids: HashMap<String, AbendId>,
     plans: lir::Plans,
     services: lir::Services,
+    /// Every EXEC SQL block's entry, by ordinal.
+    sql: Vec<lir::SqlEntry>,
     ranges: Vec<lir::Range>,
     range_ids: HashMap<(u32, u32, lir::RangeKind), RangeId>,
     blocks: flow::Blocks,
@@ -208,6 +213,7 @@ impl<'c> Lower<'c> {
             abend_ids: HashMap::new(),
             plans: lir::Plans::default(),
             services: lir::Services::default(),
+            sql: Vec::new(),
             ranges: Vec::new(),
             range_ids: HashMap::new(),
             blocks: flow::Blocks::default(),
@@ -229,9 +235,6 @@ impl<'c> Lower<'c> {
         }
         if let Some(u) = program.report_writer.uses.first() {
             return unsupported("Report Writer", u.pos);
-        }
-        if let Some(block) = program.exec_declarations.first() {
-            return unsupported("EXEC SQL", block.pos);
         }
         Ok(())
     }

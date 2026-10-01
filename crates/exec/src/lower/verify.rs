@@ -2,11 +2,40 @@
 //! the control-flow graph is closed, every op has its debug entry, and places carry SSRANGE checks
 //! exactly when the program has SSRANGE.
 
+use rt::cics::Handles;
 use rt::lir::{
-    Advance, Argument, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Convert, ConvertTable, Count, DisplayItem, Expr, FileVerb, Flag, Func, IntExpr, JsonValue,
-    Marker, Markup, MethodName, MovePlan, Named, Op, Operand, ParseValue, Place, Program, RangeKind, Receiver, Replacement, SetTo, StartKey, StorePlan, Terminator, UpDown,
-    XmlValue,
+    Advance, Argument, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Convert, ConvertTable, Count, DisplayItem, Expr, FileVerb, Flag, Func, HostPlace, IntExpr,
+    JsonValue, Marker, Markup, MethodName, MovePlan, Named, Op, Operand, ParseValue, Place, PlaceId, Program, RangeKind, Receiver, Replacement, SetTo, SqlStatement, StartKey,
+    StorePlan, SymId, Terminator, UpDown, XmlValue,
 };
+
+type Check<'a, T> = &'a dyn Fn(T) -> Result<(), String>;
+
+/// A CICS command's handles, each checked against its table.
+struct Ids<'a> {
+    place: Check<'a, PlaceId>,
+    operand: &'a dyn Fn(&Operand) -> Result<(), String>,
+    symbol: Check<'a, SymId>,
+}
+
+impl Handles<PlaceId, Operand, SymId> for Ids<'_> {
+    type Place = ();
+    type Value = ();
+    type Text = ();
+    type Error = String;
+
+    fn place(&mut self, place: PlaceId) -> Result<(), String> {
+        (self.place)(place)
+    }
+
+    fn value(&mut self, value: Operand) -> Result<(), String> {
+        (self.operand)(&value)
+    }
+
+    fn text(&mut self, text: SymId) -> Result<(), String> {
+        (self.symbol)(text)
+    }
+}
 
 /// A class definition's data and methods are programs of their own, each checked as one.
 pub fn verify(p: &Program) -> Result<(), String> {
@@ -332,6 +361,30 @@ fn verify_program(p: &Program) -> Result<(), String> {
             symbol(java)?;
         }
     }
+    for c in &p.services.cics {
+        c.clone().map(&mut Ids { place: &place, operand: &operand, symbol: &symbol })?;
+        c.command.labels().into_iter().try_for_each(|q| within("paragraph", q, p.paragraphs.len()))?;
+    }
+    let host = |hs: &[HostPlace]| {
+        hs.iter().try_for_each(|h| {
+            place(h.var)?;
+            h.ty.as_ref().map_or_else(|&a| abend(a), |_| Ok(()))?;
+            h.indicator.map_or(Ok(()), |(q, _)| place(q))
+        })
+    };
+    for e in &p.sql {
+        symbol(e.verb)?;
+        symbol(e.text)?;
+        match &e.statement {
+            SqlStatement::Query { inputs, into } => host(inputs).and_then(|()| host(into))?,
+            SqlStatement::Change { inputs, current_of, .. } => host(inputs).and_then(|()| current_of.map_or(Ok(()), symbol))?,
+            SqlStatement::Open { cursor, inputs } => symbol(*cursor).and_then(|()| host(inputs))?,
+            SqlStatement::Fetch { cursor, into } => symbol(*cursor).and_then(|()| host(into))?,
+            SqlStatement::Close { cursor: s } | SqlStatement::Unsupported(s) => symbol(*s)?,
+            SqlStatement::Commit | SqlStatement::Rollback | SqlStatement::Declaration => {}
+        }
+    }
+    p.services.sqlca.fields.iter().try_for_each(|&(_, q, _)| place(q))?;
     let count = |c: &Count| match c {
         Count::Fixed(_) => Ok(()),
         Count::Odo(o) => int(&o.object),
@@ -504,6 +557,9 @@ fn verify_program(p: &Program) -> Result<(), String> {
                 }
                 Op::File(f) => within("file statement", *f, p.services.file_ops.len())?,
                 Op::Markup(m) => within("JSON or XML statement", *m, p.services.markup.len())?,
+                Op::Cics(c) => within("EXEC CICS command", *c, p.services.cics.len())?,
+                Op::Sql(k) if *k == 0 || *k as usize > p.sql.len() => return Err(format!("block {b}: EXEC SQL ordinal {k} of {}", p.sql.len())),
+                Op::Sql(_) => {}
                 Op::SetAddress { records, address } => {
                     records.iter().try_for_each(|&r| within("LINKAGE record", u32::from(r), p.storage.linkage.len()))?;
                     operand(address)?;

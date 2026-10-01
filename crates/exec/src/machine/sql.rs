@@ -118,7 +118,7 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
 }
 
 /// The SQLCA's fields by name, in the order they are filled.
-fn sqlca_fields(pos: Pos) -> Vec<(SqlcaField, Ref)> {
+pub(crate) fn sqlca_fields(pos: Pos) -> Vec<(SqlcaField, Ref)> {
     let named = |name: &str, subscript: Option<u8>| {
         let subscripts = subscript.map(|n| vec![Expr::Operand(Operand::Literal(Literal::Number(n.to_string())))]).unwrap_or_default();
         Ref { name: name.into(), qualifiers: Vec::new(), subscripts, refmod: None, pos }
@@ -262,6 +262,7 @@ mod tests {
     fn run(procedure: &str, answers: Vec<Outcome>) -> (Result<String, String>, Vec<Logged>) {
         let program = syntax::parse(&format!("{DATA}{procedure}")).expect("parses");
         let compiled = crate::compile(program, &[]).expect("compiles");
+        crate::testing::check_lowering(&compiled, rt::sql::fingerprint(procedure), None);
         let calls = Calls::default();
         let mut db = Script { answers: answers.into(), calls: calls.clone() };
         let (mut out, mut err) = (Vec::new(), Vec::new());
@@ -401,6 +402,7 @@ mod tests {
             "           GOBACK.\n",
         );
         let compiled = crate::compile(syntax::parse(source).expect("parses"), &[]).expect("compiles");
+        crate::testing::check_lowering(&compiled, rt::sql::fingerprint(source), None);
         let calls = Calls::default();
         let row = vec![Value::Char("ADAMS".into()), Value::Int(42), Value::Null];
         let mut db = Script { answers: vec![Outcome::rows(vec![row])].into(), calls: calls.clone() };
@@ -514,6 +516,7 @@ mod tests {
 
     fn run_task(procedure: &str, answers: Vec<Outcome>) -> (String, Result<(), String>, Vec<Logged>) {
         let compiled = crate::compile(syntax::parse(&format!("{DATA}{procedure}")).expect("parses"), &[]).expect("compiles");
+        crate::testing::check_lowering(&compiled, rt::sql::fingerprint(procedure), None);
         let calls = Calls::default();
         let mut db = Script { answers: answers.into(), calls: calls.clone() };
         let task = crate::cics::Task { transid: "T1".into(), ..Default::default() };
@@ -568,6 +571,7 @@ mod tests {
         ]
         .concat();
         let compiled = crate::compile(syntax::parse(&format!("{DATA}{procedure}")).expect("parses"), &[]).expect("compiles");
+        crate::testing::check_lowering(&compiled, rt::sql::fingerprint(&procedure), None);
         let calls = Calls::default();
         let mut db = Script { answers: VecDeque::new(), calls: calls.clone() };
         for _ in 0..2 {
@@ -604,6 +608,7 @@ mod tests {
 
     fn replayed(procedure: &str, recording: &str) -> Result<String, (String, String)> {
         let compiled = crate::compile(syntax::parse(&format!("{DATA}{procedure}")).expect("parses"), &[]).expect("compiles");
+        crate::testing::check_lowering(&compiled, rt::sql::fingerprint(procedure), None);
         let mut replay = crate::sql::Replay::parse(recording, false).expect("the recording parses");
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let ran = compiled.execute_with(crate::unit::Library::default(), crate::files::Dds::default(), None, crate::unit::Clock::System, Some(&mut replay), &mut out, &mut err);

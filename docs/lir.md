@@ -926,9 +926,9 @@ walker does on each execution; the last column names that work.
 | SORT, MERGE, RELEASE, RETURN | `Sort`; `Release`; `Return`, then `Select` (§9.6) | One call | SD by name, key places, the FASTSRT plan |
 | INITIATE, GENERATE, TERMINATE, SUPPRESS | `Report` (§9.6) | One call | Report and group by name (machine/report.rs:50-52 (int)) |
 | INVOKE | `Invoke`, then `Select` (§9.8) | One call | Receiver kind, Java types |
-| EXEC CICS | `Cics` (§9.5) | One call | The command string and option scans |
-| EXEC SQL | `Sql`, then `Branch` on `Cond::Sql` (§9.7) | One call | Host variables, SQLCA fields and WHENEVER labels by name |
-| EXEC DLI, other EXEC | `Abend` with the walker's EXEC message (machine.rs:396-408) | - | - |
+| EXEC CICS | `Cics`, which returns `GoTo` for a HANDLE label (§9.5) | One call | The command string, option scans and HANDLE labels |
+| EXEC SQL | `Sql`, then a `Branch` on `Cond::Sql` per WHENEVER GO TO (§9.7) | One call | Host variables, SQLCA fields and WHENEVER labels by name |
+| EXEC DLI, other EXEC | An `Abend` terminator with the walker's EXEC message, at the block | - | - |
 | Declarative EXEC SQL | Nothing (machine.rs:393); its `SqlEntry` still exists | - | - |
 | FUNCTION | `Operand::Function` (§9.9) | One call | Name and arity (machine.rs `function`) |
 | DECLARATIVES | Their paragraphs, and a range for each procedure that can run: the file ops run USE AFTER EXCEPTION/ERROR ones; under DEBUG, `Debug`, `DebugAlter` and `DebugLine` (§9.10) | Lowered | The procedure by file and mode; the triggers |
@@ -1201,6 +1201,27 @@ for LINK and XCTL. The walker binds a block in machine/cics_bind.rs, matching th
 options the translator gives and resolving HANDLE labels there. SYNCPOINT is a service
 (cics/services.rs) that settles the SQL session through `Session::settle`.
 
+- **Lowering binds with the walker's `bind`.** Each EXEC CICS block is one `Op::Cics` naming its
+  command in `Services.cics`. Lowering calls machine/cics_bind.rs's `bind` and maps the command it
+  gives through `cics::Handles` (`CicsCommand::map`): a data item becomes a place, located as the
+  walker locates it, not as a receiving item; another operand an `Operand`; text a symbol. So the
+  command, its options and RESP, RESP2 and NOHANDLE are the walker's, and every refusal `run` gives
+  (outside a task, a command ironwork does not carry out, an option it needs) comes from the same
+  code at the same point. A command ironwork does not carry out lowers to `Cics::Unsupported`.
+- **Labels are paragraphs, and handlers are run-time state.** HANDLE CONDITION and HANDLE ABEND
+  LABEL hold the `ParaId` their labels resolve to, as `crate::procedure` resolves them for the
+  walker. HANDLE, IGNORE, PUSH and POP change the program level's `Handlers` when the op runs, and a
+  condition `raise` sends to a label, or an ABEND HANDLE ABEND takes, makes the op return
+  `Step::GoTo(para)`, which the VM takes as a GO TO by the transfer rules of §8.4: it leaves every
+  frame whose region does not hold the paragraph and resets the depth, as the walker's
+  `Flow::GoTo` does. The table is per activation, as the walker's `Machine.cics_handlers` is, so a
+  LINKed program starts with none. RETURN and XCTL return `Step::End`. No new terminator is needed.
+- **Refused:** a HANDLE label that names no procedure, which the walker abends on only after the
+  task check (IRONWORK at the block, or the outside-a-task abend first), so no one terminator
+  gives both.
+- **Not lowered:** the observer's sinks (`cics_sinks`), which tell an observer a command's operands
+  and change no result, as with CALL's and DISPLAY's.
+
 ### 9.6 SORT, MERGE and Report Writer
 
 Both run COBOL procedures from inside a service, through one trait, and so does a file op for a
@@ -1342,9 +1363,28 @@ pub struct Sqlca { pub fields: Vec<(SqlcaField, PlaceId, HostType)> }
   order (machine/sql.rs:277-286). `SqlTest` classifies as the walker does (assumption SQ2): SQLERROR
   is SQLCODE < 0, NOT FOUND is 100, and SQLWARNING is neither, and warned or > 0. The classes
   exclude each other, so only a condition whose action is GO TO gets a test, and a CONTINUE still
-  stops the later ones from applying. Each target block ends in `GoTo(para)`, not a plain jump,
-  because the walker returns the branch as `Flow::GoTo` (machine/sql.rs:289), which leaves frames
-  by the transfer rules of §8.4. The walker resolves the label by name on every statement.
+  stops the later ones from applying. The walker returns the branch as `Flow::GoTo`
+  (machine/sql.rs:289), as a GO TO statement does, so each target block lowers as GO TO does
+  (§8.4, §8.8): `Unnest` for the inline PERFORMs around the statement, then `GoTo(para)`, or a
+  plain `Jump` when every range whose region holds the statement's paragraph also holds the
+  target and no debugging section serves it. The walker resolves the label by name on every
+  statement; lowering resolves it once, and a label that names no procedure makes the target block
+  end in `Abend` with the walker's IRONWORK message, raised only when that branch is taken. A
+  statement whose entry is `Declaration` (`run` gives None) gets no branch.
+- **`Op::Sql(k)` names ordinal k,** `Program.sql[k − 1]`. Lowering builds the whole table first,
+  from the DATA DIVISION's EXEC SQL blocks and every one among the procedure's statements, and
+  refuses a program whose ordinals do not run from 1 without a gap. A declarative block
+  (`ExecBlock::declarative`: INCLUDE, DECLARE SECTION, WHENEVER, DECLARE CURSOR, TABLE and
+  STATEMENT) has its entry and no op, as the walker does nothing for it.
+- **The SQLCA is resolved once.** The walker resolves the SQLCA fields by name on every statement
+  and writes each it can locate, leaving one it cannot as it was (`host::sqlca`). Lowering keeps the
+  fields that resolve to an item of an SQL type, as places of `Services.sqlca`, and leaves out one
+  written with the wrong number of subscripts, which no statement can locate. A field that is a host
+  structure is refused.
+- **Host variables** are lowered as `host_places` builds them: a structure's members, each indicator
+  element at 2 × its index, and an item with no SQL type as `Err(AbendId)`, the walker's message
+  with the host variable's position in `AbendText.at`. A host variable that names no data item is
+  refused with the place.
 - **No database attached** abends EXEC at run time, as now (machine/sql.rs:28-30).
 - **In `rt`.** `SqlEntry` and `SqlStatement` are generic like §9.5's `CicsCommand`: `P` and `S` are
   `PlaceId` and `SymId`, or the walker's `&Ref` and `String`. `rt::sql::run` runs an entry and fills
@@ -1835,8 +1875,9 @@ executors and recorded.
   same bytes, and lower again the same; any other `LowerError`, or a panic, fails the test and
   names the program. While step 2 is under way `Unsupported` is accepted, and the check never
   changes a test's outcome otherwise. A test in lower/tests.rs puts bench/*.cbl through the same
-  check. `run` and `run_task` in machine/sql.rs, `run_flagged` in tests/sort.rs and tests that
-  compile without running do not use the Harness, so their programs are not lowered yet.
+  check. So do the helpers of machine/sql.rs's tests and the test of machine/cics_bind.rs that
+  writes every command in IBM's table. `run_flagged` in tests/sort.rs and tests that compile
+  without running do not use the Harness, so their programs are not lowered yet.
 - **Coverage.** With `IRONWORK_LOWER_REPORT=<file>` set, the check appends one line per program:
   the test (or bench file), PROGRAM-ID, a fingerprint of the source and flags, and `ok`,
   `unsupported` with the construct, or `error`. `tools/lower-coverage.sh` runs exec's tests one at

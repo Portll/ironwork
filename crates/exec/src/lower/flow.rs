@@ -454,15 +454,19 @@ impl Lower<'_> {
             }
             Stmt::GoTo { target: Some(target), .. } => {
                 let Ok((t, _)) = crate::procedure(self.program, target) else { return unsupported("a GO TO the walker cannot resolve", pos) };
-                self.unnest(ctx.loops.len(), pos)?;
-                let (p, t32, n) = (ctx.para as u32, t as u32, self.entries.len() as u32);
-                let holds = |r: &lir::Range, q: u32| {
-                    let (lo, hi) = r.region(n);
-                    lo <= q && q <= hi
-                };
-                let stays = self.ranges.iter().all(|r| !holds(r, p) || holds(r, t32)) && self.trigger(t).is_none();
-                self.end(if stays { Terminator::Jump(self.entries[t]) } else { Terminator::GoTo(t32) }, pos)?;
+                self.go_to(t, ctx, pos)?;
             }
+            Stmt::Exec(block) => match block.kind {
+                ExecKind::Sql if block.declarative() => {}
+                ExecKind::Cics => self.cics(block, pos)?,
+                ExecKind::Sql => self.sql(block, pos, &inner)?,
+                ExecKind::Dli | ExecKind::Other => {
+                    let kind = if block.kind == ExecKind::Dli { "DLI" } else { "" };
+                    let message = format!("EXEC {kind} {} was reached: ironwork for COBOL checks EXEC statements but does not run them yet", block.command);
+                    let abend = self.abend(AbendCode::Exec, &message, None)?;
+                    self.end(Terminator::Abend(abend), pos)?;
+                }
+            },
             Stmt::JsonGenerate(_) | Stmt::JsonParse(_) | Stmt::XmlGenerate(_) | Stmt::XmlParse(_) => self.markup(s, pos, &inner)?,
             Stmt::Goback { .. } | Stmt::ExitMethod { .. } => self.end(Terminator::End(Ending::Goback), pos)?,
             Stmt::StopRun { .. } => self.end(Terminator::End(Ending::StopRun), pos)?,
@@ -504,6 +508,19 @@ impl Lower<'_> {
         }
         let n = u8::try_from(loops).map_err(|_| LowerError::Exceeds("inline PERFORMs around one statement", pos))?;
         self.op(Op::Unnest(n), pos)
+    }
+
+    /// The walker's `Flow::GoTo` to paragraph `t`: a plain jump when every range whose region holds
+    /// this paragraph also holds `t` and no debugging section serves `t` (lir.md §8.4).
+    pub(super) fn go_to(&mut self, t: usize, ctx: &Ctx, pos: Pos) -> R<()> {
+        self.unnest(ctx.loops.len(), pos)?;
+        let (p, t32, n) = (ctx.para as u32, t as u32, self.entries.len() as u32);
+        let holds = |r: &lir::Range, q: u32| {
+            let (lo, hi) = r.region(n);
+            lo <= q && q <= hi
+        };
+        let stays = self.ranges.iter().all(|r| !holds(r, p) || holds(r, t32)) && self.trigger(t).is_none();
+        self.end(if stays { Terminator::Jump(self.entries[t]) } else { Terminator::GoTo(t32) }, pos)
     }
 
     /// EXIT PARAGRAPH, EXIT SECTION, and EXIT PERFORM outside an inline PERFORM.

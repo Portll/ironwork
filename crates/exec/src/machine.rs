@@ -27,7 +27,7 @@ use zarch::ebcdic::{self, CodePage, Collation};
 use zarch::hfp::{Hfp, Precision};
 
 mod cics;
-mod cics_bind;
+pub(crate) mod cics_bind;
 mod declaratives;
 mod facts;
 mod file_io;
@@ -38,7 +38,7 @@ mod oo;
 mod perform;
 mod report;
 mod sort;
-mod sql;
+pub(crate) mod sql;
 mod xml;
 
 type R<T> = Result<T, Abend>;

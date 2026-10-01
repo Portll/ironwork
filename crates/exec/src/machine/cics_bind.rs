@@ -6,7 +6,7 @@ use super::*;
 use crate::cics::{Assign, Cics, CicsCommand, Condition, Control, Datum, FileControl, FileOptions, Opt, Record, Resp, Transfer};
 use rt::lir::ParaId;
 
-pub(super) type Command<'b> = CicsCommand<&'b Ref, &'b Operand, &'b str>;
+pub(crate) type Command<'b> = CicsCommand<&'b Ref, &'b Operand, &'b str>;
 type Arg<'b> = Opt<&'b Ref, &'b Operand, &'b str>;
 
 const FILE_CONTROL: &[(&str, FileControl)] = &[
@@ -101,7 +101,7 @@ fn condition_options(block: &ExecBlock) -> impl Iterator<Item = &(String, Option
 
 /// The command an EXEC CICS block writes, dispatched as the translator's words and options say.
 /// `label` finds the paragraph a HANDLE label names.
-pub(super) fn bind<'b>(block: &'b ExecBlock, label: &dyn Fn(&str) -> R<ParaId>) -> R<Command<'b>> {
+pub(crate) fn bind<'b>(block: &'b ExecBlock, label: &dyn Fn(&str) -> R<ParaId>) -> R<Command<'b>> {
     let a = |name: &str| arg(block, name);
     let file_verb = FILE_CONTROL.iter().find(|(name, _)| *name == block.command).map(|&(_, verb)| verb);
     let command = match (block.command.as_str(), file_verb) {
@@ -195,15 +195,15 @@ fn bind_other<'b>(block: &'b ExecBlock, command: &str, label: &dyn Fn(&str) -> R
     })
 }
 
+/// A HANDLE label: the paragraph or section it names, where control goes.
+pub(crate) fn label(program: &syntax::ast::Program, block: &ExecBlock, text: &str) -> R<ParaId> {
+    let p = ProcName { name: text.trim().to_ascii_uppercase(), section: None };
+    crate::procedure(program, &p).map(|(start, _)| start as ParaId).map_err(|m| Abend::ironwork(format!("EXEC CICS {}: {m}", block.command), block.pos))
+}
+
 impl<'p> Machine<'p, '_, '_> {
     pub(super) fn bind_cics(&self, block: &'p ExecBlock) -> R<Command<'p>> {
-        bind(block, &|text| self.label(block, text))
-    }
-
-    /// A HANDLE label: the paragraph or section it names, where control goes.
-    fn label(&self, block: &ExecBlock, text: &str) -> R<ParaId> {
-        let p = ProcName { name: text.trim().to_ascii_uppercase(), section: None };
-        crate::procedure(self.program, &p).map(|(start, _)| start as ParaId).map_err(|m| Abend::ironwork(format!("EXEC CICS {}: {m}", block.command), block.pos))
+        bind(block, &|text| label(self.program, block, text))
     }
 }
 
@@ -274,6 +274,9 @@ mod tests {
         for name in table {
             let program = program(name);
             let command = bind(exec_block(&program), &|_| Ok(0)).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            if let Ok(compiled) = crate::compile(program.clone(), &[]) {
+                crate::testing::check_lowering(&compiled, rt::sql::fingerprint(name), None);
+            }
             match REFUSED.iter().find(|(refused, _)| *refused == name) {
                 Some((_, message)) => {
                     let variant = command.command.name();

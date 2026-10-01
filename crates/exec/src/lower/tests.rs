@@ -7,7 +7,9 @@ use rt::lir::{
 use rt::abend::Ending;
 use rt::module::codec::decode_all;
 
+mod cics;
 mod markup;
+mod sql;
 
 fn program(options: &str, data: &str, procedure: &str) -> String {
     let card = if options.is_empty() { String::new() } else { format!("       CBL {options}\n") };
@@ -433,14 +435,14 @@ fn constructs_outside_the_slice_are_refused_by_name() {
 
 #[test]
 fn statements_and_program_features_the_lowering_lacks_are_refused_by_name() {
-    let data = "       01  K PIC 9 VALUE 1.\n       01  J PIC 9.\n";
+    let data = "       01  K PIC 9 VALUE 1.\n       01  J PIC 9.\n       01  T.\n           05 E PIC X OCCURS 3.\n";
     // A line indented four columns is in area B; any other starts in area A.
     let source = |lines: &[&str]| lines.iter().map(|l| if l.starts_with("    ") { line(l.trim_start()) } else { format!("       {l}\n") }).collect::<String>();
     let named = |lines: &[&str], name: &str| {
         let error = lower(&compiled(&program("", data, &source(lines)))).unwrap_err();
         assert!(matches!(error, LowerError::Unsupported(n, _) if n == name), "{name}: {error}");
     };
-    named(&["A.", "    EXEC CICS RETURN END-EXEC.", "    GOBACK."], "EXEC CICS");
+    named(&["A.", "    SORT E ON ASCENDING KEY E", "    GOBACK."], "SORT");
     let inert = ["DECLARATIVES.", "S SECTION.", "    USE AFTER STANDARD ERROR PROCEDURE ON INPUT.", "P.", "    CONTINUE.", "END DECLARATIVES.", "A.", "    GOBACK."];
     let p = lowered(&program("", data, &source(&inert)));
     assert_eq!(p.procedure_start, 2);
