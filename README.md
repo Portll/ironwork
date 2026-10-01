@@ -222,7 +222,7 @@ The subset the interpreter runs today:
   procedure resets XML-CODE (C118). XML GENERATE, with COUNT, ENCODING,
   XML-DECLARATION, ATTRIBUTES, NAMESPACE and its prefix, NAME, TYPE, SUPPRESS and ON EXCEPTION, sets
   XML-CODE (C119). JSON PARSE, with NAME and OMITTED, SUPPRESS, CONVERTING, INDICATING, IGNORING and
-  ENCODING, moves each matched value by MOVE's rules and sets JSON-CODE and JSON-STATUS (C170). What is not Enterprise COBOL is refused as such:
+  ENCODING, moves each matched value by MOVE's rules and sets JSON-CODE and JSON-STATUS (C200). What is not Enterprise COBOL is refused as such:
   `<>`, literals joined with `&`, SET ENVIRONMENT and ACCEPT ... FROM ENVIRONMENT.
 - **Subprograms:** several and nested programs per source; CALL (static and dynamic) USING BY
   REFERENCE, BY CONTENT, BY VALUE and OMITTED, RETURNING, ON EXCEPTION; PROCEDURE DIVISION USING
@@ -306,7 +306,7 @@ The subset the interpreter runs today:
   CICS gets DFHEIBLK and DFHCOMMAREA as the translator adds them; `DFHRESP(condition)` is its
   EIBRESP number; SQLCA, SQLDA, DFHEIBLK, DFHAID and DFHBMSCA are built in when no library holds
   them. An EXEC DLI command and its options are checked against IMS's table, a WHERE qualification's
-  form too, and the program gets the DL/I interface block, DIBSTAT and the rest (C171); a run ends
+  form too, and the program gets the DL/I interface block, DIBSTAT and the rest (C201); a run ends
   when it reaches one.
 - **EXEC SQL runs** against PostgreSQL (`--sql-db`) or a recording of a run (`--sql-replay`, made
   with `--sql-record`): single-row statements, cursors with WITH HOLD and positioned changes, COMMIT
