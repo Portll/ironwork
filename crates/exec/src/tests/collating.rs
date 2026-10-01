@@ -139,3 +139,12 @@ fn an_alphabet_that_cannot_be_one_is_refused() {
     let e = compile(syntax::parse(&undefined).unwrap(), &[]).err().unwrap();
     assert!(e[0].message.contains("PROGRAM COLLATING SEQUENCE NONE: not an alphabet-name"), "{}", e[0].message);
 }
+
+#[test]
+fn a_sort_s_ascii_order_is_standard_1_s() {
+    for ccsid in [37, 1140, 1047] {
+        let page = zarch::ebcdic::CodePage::by_ccsid(ccsid).unwrap();
+        let standard = crate::collating::Sequence::of(&syntax::ast::Alphabet::Standard1, page).unwrap();
+        assert_eq!(rt::sort::Collating::ascii(page), rt::sort::Collating::Positions(std::rc::Rc::new(standard.positions())), "CCSID {ccsid}");
+    }
+}

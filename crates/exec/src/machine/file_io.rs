@@ -135,15 +135,6 @@ impl<'p> Machine<'p, '_, '_> {
         }
     }
 
-    /// How file k's DD holds its records.
-    pub(super) fn dd_format(&self, k: usize) -> Format {
-        fileio::dd_format(self, &self.file_desc(k))
-    }
-
-    pub(super) fn adds_control_byte(&self, k: usize, format: Format) -> bool {
-        fileio::adds_control_byte(&self.file_desc(k), format)
-    }
-
     /// What a verb that returned no status for its phrases leaves to run: the file's error path,
     /// or END-OF-PAGE or NOT END-OF-PAGE.
     fn settle(&mut self, k: usize, outcome: Outcome, end_of_page: Option<&'p Handlers>, pos: Pos) -> R<Flow> {

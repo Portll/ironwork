@@ -1221,21 +1221,36 @@ pub enum RangeEnd {
     Left(Step),
 }
 
-/// `keys` are offsets in the record with kind and direction (machine/sort.rs:179-191 (int));
-/// `fastsrt` says which USING and GIVING files DFSORT would do the I/O of (sort.rs:412-448 (int)).
-pub struct SortPlan {
-    pub sd: u16, pub merge: bool, pub keys: Vec<SortKey>, pub input: SortIo, pub output: SortIo,
-    pub fastsrt: Vec<Fastsrt>, pub sort_return: PlaceId, pub sort_control: PlaceId,
+/// rt/src/lir/sort.rs. `FileSort` is generic over the handles the executor resolves as the
+/// statement runs (`SortHost`): the walker resolves the keys, the USING and GIVING names and the
+/// procedures where it did before the move, so every abend keeps its order.
+pub enum SortPlan { File(FileSort), Table(TableSort) }
+pub struct FileSort<R = PlaceId, Q = RangeId, K = SortKeys, F = u16> {
+    pub sd: u16, pub merge: bool, pub keys: K,
+    pub input: Option<SortIo<Q, F>>, pub output: Option<SortIo<Q, F>>,
+    pub sort_return: R, pub sort_control: R,
 }
-pub enum SortIo { Files(Vec<u16>), Procedure(RangeId) }
+pub enum SortIo<Q = RangeId, F = u16> { Files(Vec<F>), Procedure(Q) }
+/// Offsets in the record with kind and direction; `collating` is the sequence of the keys marked
+/// `collated` when it is not EBCDIC.
+pub struct SortKeys { pub keys: Vec<SortKey>, pub collating: Option<Box<[u8; 256]>> }
+pub struct SortKey { pub ascending: bool, pub offset: u32, pub len: u32, pub kind: Kind, pub item: u32, pub collated: bool }
+pub struct TableSort { pub first: PlaceId, pub count: Count, pub stride: u32, pub keys: SortKeys, pub name: SymId }
+pub struct ReleasePlan { pub record: PlaceId, pub file: Option<u16>, pub from: Option<(Operand, MovePlan)>, pub sort_return: PlaceId, pub name: SymId }
+pub struct ReturnPlan { pub file: Option<u16>, pub into: Option<PlaceId>, pub sort_return: PlaceId, pub name: SymId }
 ```
 
-- **SORT and MERGE** run as `rt` code: gather, a stable sort, scatter, SORT-RETURN and FASTSRT,
-  unchanged (sort.rs:526-593 (int)). A procedure runs through `Procedures::run`.
-- **RELEASE and RETURN** find the active sort in run-time state, as `Machine.sort` holds it now
-  (sort.rs:595-669 (int)). RETURN returns `Arm` for AT END.
+- **SORT and MERGE** run as `rt::sort::sort`: gather, a stable sort, scatter, SORT-RETURN, and the
+  FASTSRT plan, which it works out from the files' `FileDesc`s on each run. A procedure runs
+  through `SortHost::run_procedure`.
+- **RELEASE and RETURN** find the active sort in run-time state (`rt::sort::Active`, which the
+  executor keeps). RELEASE is `release_ready`, FROM's move, then `release`; RETURN returns `Arm`
+  for AT END.
 - **A table SORT** is one op with the element's stride and key offsets fixed; the count stays
-  dynamic under OCCURS DEPENDING ON (sort.rs:673-707 (int)).
+  dynamic under OCCURS DEPENDING ON (`rt::sort::sort_table`).
+- **The key order** is `rt::sort::Keys`, `order` and `KeyValue`, which take keys described as plain
+  data (position, length, DFSORT format, direction) as well as a program's items, so a sort utility
+  with no program behind it orders records the same way.
 - **A SORT procedure's frame** holds every paragraph (§8.6), so no GO TO leaves it. `Left(End(e))`
   makes the op return `Step::End(e)`; any other `Left`, a return to an active PERFORM, the SORT
   takes as the procedure's end and goes on (machine/sort.rs:707-708, 734-735 (7af)).

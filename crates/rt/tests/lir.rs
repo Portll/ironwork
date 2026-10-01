@@ -320,9 +320,9 @@ fn program_shape_round_trips() {
             on_exception: false,
             not_on_exception: false,
         }],
-        sorts: vec![SortPlan::Placeholder],
-        releases: vec![ReleasePlan::Placeholder],
-        returns: vec![ReturnPlan::Placeholder],
+        sorts: vec![SortPlan::File(file_sort())],
+        releases: vec![ReleasePlan { record: 4, file: Some(1), from: None, sort_return: 9, name: 3 }],
+        returns: vec![ReturnPlan { file: Some(1), into: None, sort_return: 9, name: 2 }],
         invokes: vec![InvokePlan {
             receiver: Receiver::SelfRef,
             method: MethodName::New,
@@ -652,10 +652,48 @@ fn statement_payloads_round_trip_with_every_tag() {
         not_on_exception: false,
     };
     round_trip(&[invoke]);
-    round_trip(&[SortPlan::Placeholder]);
-    round_trip(&[ReleasePlan::Placeholder]);
-    round_trip(&[ReturnPlan::Placeholder]);
     round_trip(&[ReportOp::Placeholder]);
+}
+
+fn file_sort() -> FileSort {
+    let zoned = Kind::Zoned { digits: 5, scale: 0, signed: true, sign: Some(SIGN) };
+    let keys = vec![
+        SortKey { ascending: true, offset: 0, len: 5, kind: zoned, item: 7, collated: false },
+        SortKey { ascending: false, offset: 5, len: 10, kind: Kind::Alnum { justified: false }, item: 8, collated: true },
+    ];
+    let mut positions = Box::new([0u8; 256]);
+    positions.iter_mut().enumerate().for_each(|(i, p)| *p = 255 - i as u8);
+    FileSort {
+        sd: 1,
+        merge: false,
+        keys: ironwork_rt::lir::SortKeys { keys, collating: Some(positions) },
+        input: Some(SortIo::Files(vec![2, 3])),
+        output: Some(SortIo::Procedure(4)),
+        sort_return: 9,
+        sort_control: 10,
+    }
+}
+
+#[test]
+fn sort_plans_round_trip_with_every_tag() {
+    let merge = FileSort {
+        merge: true,
+        keys: ironwork_rt::lir::SortKeys { keys: vec![], collating: None },
+        input: Some(SortIo::Procedure(1)),
+        output: None,
+        ..file_sort()
+    };
+    let unbuilt = FileSort { input: None, output: Some(SortIo::Files(vec![])), ..file_sort() };
+    round_trip(&[file_sort(), merge, unbuilt]);
+    every_variant(&[SortIo::Files(vec![1]), SortIo::Procedure(2)], 2);
+    let table = TableSort { first: 3, count: Count::Odo(ODO), stride: 12, keys: file_sort().keys, name: 5 };
+    let fixed = TableSort { count: Count::Fixed(10), ..table.clone() };
+    every_variant(&[SortPlan::File(file_sort()), SortPlan::Table(table), SortPlan::Table(fixed)], 2);
+    round_trip(&[
+        ReleasePlan { record: 4, file: Some(1), from: Some((Operand::Load(2), ALNUM)), sort_return: 9, name: 3 },
+        ReleasePlan { record: 4, file: None, from: None, sort_return: 9, name: 3 },
+    ]);
+    round_trip(&[ReturnPlan { file: Some(1), into: Some(6), sort_return: 9, name: 2 }, ReturnPlan { file: None, into: None, sort_return: 9, name: 2 }]);
 }
 
 #[test]

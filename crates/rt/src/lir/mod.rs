@@ -11,6 +11,7 @@ mod flow;
 mod markup;
 mod payload;
 mod place;
+mod sort;
 mod sql;
 mod text;
 mod value;
@@ -32,10 +33,10 @@ pub use flow::{Declaratives, Frame, FrameKind, Op, Range, RangeKind, Resume, Ret
 pub use crate::cics::CicsCommand;
 pub use payload::{
     Argument, DisplayItem, DisplayPlan, FloatFrom, Func, FunctionPlan, Image, InitField, InitPlan,
-    InvokePlan, MethodName, MovePlan, NationalFrom, NumericFrom, Receiver, ReleasePlan, ReportOp, ReturnPlan,
-    SearchAllPlan, SearchKey, SortPlan, TrimSide,
+    InvokePlan, MethodName, MovePlan, NationalFrom, NumericFrom, Receiver, ReportOp, SearchAllPlan, SearchKey, TrimSide,
 };
 pub use place::{Base, Odo, Place, RefMod, Subscript};
+pub use sort::{FileSort, ReleasePlan, ReturnPlan, SortIo, SortKey, SortKeys, SortPlan, TableSort};
 pub use sql::{HostPlace, SqlEntry, SqlStatement, Sqlca, SqlcaField};
 pub use text::{
     Bound, Chars, ConvertTable, Converting, DelimiterIn, InspectPhrase, InspectPlan, Replacement, StringPlan,

@@ -1,5 +1,5 @@
 //! SORT and MERGE at compile time: what is checked, and the special registers a program with an
-//! SD gets. They run in `machine::sort`.
+//! SD gets. They run in `rt::sort`.
 
 use crate::layout::{Kind, Layout, Resolved};
 use crate::Check;

@@ -368,8 +368,5 @@ macro_rules! placeholder {
 }
 
 placeholder! {
-    SortPlan: "SORT or MERGE, §9.6; waits for `SortKey` and `Fastsrt`.",
-    ReleasePlan: "RELEASE, §9.6; not defined yet.",
-    ReturnPlan: "RETURN, §9.6; not defined yet.",
     ReportOp: "INITIATE, GENERATE, TERMINATE or SUPPRESS, §9.6; not defined yet.",
 }

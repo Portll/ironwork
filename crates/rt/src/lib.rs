@@ -34,6 +34,7 @@ pub mod picture;
 pub mod printer;
 pub mod reserved_words;
 pub mod set;
+pub mod sort;
 pub mod sql;
 pub mod storage;
 pub mod store;
