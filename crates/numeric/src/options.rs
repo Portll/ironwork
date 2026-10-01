@@ -150,6 +150,63 @@ impl Default for Invdata {
     }
 }
 
+/// NUMCHECK: implicit numeric class tests of zoned and packed senders, and size tests of binary
+/// senders, each a warning that lets the statement run (MSG) or a terminating message (`abd`)
+/// (Programming Guide SC27-8714-03, pp. 388-392). ZONECHECK(MSG|ABD) is NUMCHECK(ZON,MSG|ABD)
+/// (p. 427).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Numcheck {
+    pub zon: Option<ZonCheck>,
+    pub pac: bool,
+    pub bin: Option<BinCheck>,
+    pub abd: bool,
+}
+
+impl Default for Numcheck {
+    fn default() -> Self {
+        Self { zon: Some(ZonCheck::default()), pac: true, bin: Some(BinCheck { truncbin: true }), abd: false }
+    }
+}
+
+/// ZON's suboptions: whether a zoned item compared with an alphanumeric operand is checked
+/// (ALPHNUM, the default), and whether the redefinitions p. 390 lists are tolerated (LAX).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ZonCheck {
+    pub alphnum: bool,
+    pub lax: bool,
+}
+
+impl Default for ZonCheck {
+    fn default() -> Self {
+        Self { alphnum: true, lax: false }
+    }
+}
+
+/// BIN's suboption: whether binary senders are checked under TRUNC(BIN) too (TRUNCBIN, the default).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BinCheck {
+    pub truncbin: bool,
+}
+
+/// PARMCHECK: a buffer of `bytes` after the last WORKING-STORAGE item, set to X'AA' before each
+/// CALL and checked after it, a change being a warning (MSG) or a terminating message (`abd`)
+/// (Programming Guide SC27-8714-03, p. 397).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Parmcheck {
+    pub abd: bool,
+    pub bytes: u16,
+}
+
+/// INITCHECK: a compile-time warning for a WORKING-STORAGE or LOCAL-STORAGE item used before it is
+/// set on some path (`Lax`, the default) or on any path (`Strict`) (Programming Guide
+/// SC27-8714-03, pp. 373-374).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Initcheck {
+    #[default]
+    Lax,
+    Strict,
+}
+
 /// What a program with no STOP RUN, GOBACK or EXIT PROGRAM that ends with EXEC CICS RETURN or XCTL
 /// gets (assumption C124): IBM's warning (`--cics-return-warning=always`), one informational note
 /// in place of it (`once`), or nothing (`never`).
@@ -358,6 +415,9 @@ pub struct Options {
     pub initial: bool,
     pub vlr: Vlr,
     pub vsamopenfs: VsamOpenFs,
+    pub numcheck: Option<Numcheck>,
+    pub parmcheck: Option<Parmcheck>,
+    pub initcheck: Option<Initcheck>,
 }
 
 impl Default for Options {
@@ -392,6 +452,9 @@ impl Default for Options {
             initial: false,
             vlr: Vlr::default(),
             vsamopenfs: VsamOpenFs::default(),
+            numcheck: None,
+            parmcheck: None,
+            initcheck: None,
         }
     }
 }
@@ -454,6 +517,99 @@ fn currency_literal(text: &str) -> Option<Currency> {
         (Some(c), None) if can_be_currency(c) => Some(Currency::Char(c)),
         _ => None,
     }
+}
+
+/// The text between an option's first opening parenthesis and its last closing one.
+fn inner(option: &str) -> &str {
+    option.split_once('(').map_or("", |(_, rest)| rest.trim_end().strip_suffix(')').unwrap_or(rest)).trim()
+}
+
+/// `text` split at the commas outside parentheses.
+fn top_level(text: &str) -> Vec<&str> {
+    let (mut parts, mut depth, mut start) = (Vec::new(), 0i32, 0);
+    for (i, c) in text.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                parts.push(text[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(text[start..].trim());
+    parts.into_iter().filter(|p| !p.is_empty()).collect()
+}
+
+/// NUMCHECK's suboptions with IBM's defaults: none gives every data type and MSG; data types left
+/// out are on when none is given and off when any is; every data type off is NONUMCHECK, None
+/// (Programming Guide SC27-8714-03, p. 389). None inside Some is a suboption IBM does not have.
+fn numcheck(text: &str) -> Option<Option<Numcheck>> {
+    let (mut zon, mut pac, mut bin, mut abd, mut typed) = (None, None, None, false, false);
+    for part in top_level(text) {
+        let (word, args) = match part.split_once('(') {
+            Some((w, _)) => (w.trim(), top_level(inner(part))),
+            None => (part, Vec::new()),
+        };
+        match word {
+            "ZON" => {
+                let mut z = ZonCheck::default();
+                for a in args {
+                    match a {
+                        "ALPHNUM" => z.alphnum = true,
+                        "NOALPHNUM" => z.alphnum = false,
+                        "LAX" | "LAXREDEF" => z.lax = true,
+                        "STRICT" | "STRICTREDEF" => z.lax = false,
+                        _ => return None,
+                    }
+                }
+                zon = Some(Some(z));
+            }
+            "NOZON" if args.is_empty() => zon = Some(None),
+            "PAC" if args.is_empty() => pac = Some(true),
+            "NOPAC" if args.is_empty() => pac = Some(false),
+            "BIN" => {
+                bin = Some(Some(BinCheck {
+                    truncbin: match args[..] {
+                        [] | ["TRUNCBIN"] => true,
+                        ["NOTRUNCBIN"] => false,
+                        _ => return None,
+                    },
+                }))
+            }
+            "NOBIN" if args.is_empty() => bin = Some(None),
+            "MSG" if args.is_empty() => abd = false,
+            "ABD" if args.is_empty() => abd = true,
+            _ => return None,
+        }
+        typed |= matches!(word, "ZON" | "NOZON" | "PAC" | "NOPAC" | "BIN" | "NOBIN");
+    }
+    let all = Numcheck::default();
+    let n = if typed {
+        Numcheck { zon: zon.flatten(), pac: pac.unwrap_or(false), bin: bin.flatten(), abd }
+    } else {
+        Numcheck { abd, ..all }
+    };
+    Some((n.zon.is_some() || n.pac || n.bin.is_some()).then_some(n))
+}
+
+/// PARMCHECK's MSG or ABD and buffer size, 100 bytes and MSG when left out (Programming Guide
+/// SC27-8714-03, p. 397).
+fn parmcheck(sub: &str) -> Option<Parmcheck> {
+    let mut p = Parmcheck { abd: false, bytes: 100 };
+    let parts: Vec<&str> = sub.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+    if parts.len() > 2 {
+        return None;
+    }
+    for (i, part) in parts.iter().enumerate() {
+        match *part {
+            "MSG" if i == 0 => p.abd = false,
+            "ABD" if i == 0 => p.abd = true,
+            n => p.bytes = n.parse().ok().filter(|b| (1..=9999).contains(b))?,
+        }
+    }
+    Some(p)
 }
 
 /// Whether the CURRENCY option may name `c`: a single-byte character that is no digit, space, one
@@ -545,6 +701,27 @@ impl Options {
                 }
             }
             "ZWB" => self.zwb = !off,
+            "NUMCHECK" if off => self.numcheck = None,
+            "NUMCHECK" => self.numcheck = numcheck(inner(&option)).ok_or_else(bad)?,
+            "ZONECHECK" if off => self.numcheck = self.numcheck.map(|n| Numcheck { zon: None, ..n }).filter(|n| n.pac || n.bin.is_some()),
+            "ZONECHECK" => {
+                let abd = match sub {
+                    "MSG" => false,
+                    "ABD" => true,
+                    _ => return Err(bad()),
+                };
+                self.numcheck = Some(Numcheck { zon: Some(ZonCheck::default()), pac: false, bin: None, abd });
+            }
+            "PARMCHECK" if off => self.parmcheck = None,
+            "PARMCHECK" => self.parmcheck = Some(parmcheck(sub).ok_or_else(bad)?),
+            "INITCHECK" if off => self.initcheck = None,
+            "INITCHECK" => {
+                self.initcheck = Some(match sub {
+                    "" | "LAX" => Initcheck::Lax,
+                    "STRICT" => Initcheck::Strict,
+                    _ => return Err(bad()),
+                })
+            }
             "FASTSRT" => self.fastsrt = !off,
             "ADV" => self.adv = !off,
             "THREAD" => self.thread = !off,
@@ -912,6 +1089,63 @@ mod tests {
         o.apply("CURRENCY(X'F1')").unwrap();
         assert_eq!(o.currency_symbol(), Some(Err('1')));
         assert_eq!(Options::default().currency_symbol(), None);
+    }
+
+    #[test]
+    fn numcheck_takes_ibms_suboption_defaults_and_zonecheck_is_its_zoned_check() {
+        let numcheck = |card: &str| {
+            let mut o = Options::default();
+            o.apply(card).map(|_| o.numcheck)
+        };
+        let all = Numcheck::default();
+        assert_eq!(all, Numcheck { zon: Some(ZonCheck { alphnum: true, lax: false }), pac: true, bin: Some(BinCheck { truncbin: true }), abd: false });
+        assert_eq!(numcheck("NUMCHECK"), Ok(Some(all)));
+        assert_eq!(numcheck("NC(ABD)"), Ok(Some(Numcheck { abd: true, ..all })));
+        assert_eq!(numcheck("NUMCHECK(BIN)"), Ok(Some(Numcheck { zon: None, pac: false, bin: Some(BinCheck { truncbin: true }), abd: false })));
+        assert_eq!(
+            numcheck("NUMCHECK(ZON(NOALPHNUM,LAX),NOPAC,BIN(NOTRUNCBIN),ABD)"),
+            Ok(Some(Numcheck { zon: Some(ZonCheck { alphnum: false, lax: true }), pac: false, bin: Some(BinCheck { truncbin: false }), abd: true }))
+        );
+        assert_eq!(numcheck("NUMCHECK(ZON(LAXREDEF))"), Ok(Some(Numcheck { zon: Some(ZonCheck { alphnum: true, lax: true }), pac: false, bin: None, abd: false })));
+        assert_eq!(numcheck("NUMCHECK(NOZON,NOPAC,NOBIN)"), Ok(None));
+        assert_eq!(numcheck("NONC"), Ok(None));
+        for bad in ["NUMCHECK(ZON(X))", "NUMCHECK(PAC(X))", "NUMCHECK(BIN(X))", "NUMCHECK(X)", "ZONECHECK", "ZC(X)"] {
+            assert!(matches!(numcheck(bad), Err(OptionError::BadSuboption { .. })), "{bad}");
+        }
+        assert_eq!(numcheck("ZC(ABD)"), Ok(Some(Numcheck { zon: Some(ZonCheck::default()), pac: false, bin: None, abd: true })));
+        let mut o = Options::default();
+        o.apply("NUMCHECK").unwrap();
+        o.apply("NOZONECHECK").unwrap();
+        assert_eq!(o.numcheck, Some(Numcheck { zon: None, ..all }));
+        o.apply("ZONECHECK(MSG)").unwrap();
+        o.apply("NOZC").unwrap();
+        assert_eq!(o.numcheck, None);
+    }
+
+    #[test]
+    fn parmcheck_and_initcheck_take_their_suboptions_and_ibms_defaults() {
+        let parmcheck = |card: &str| {
+            let mut o = Options::default();
+            o.apply(card).map(|_| o.parmcheck)
+        };
+        assert_eq!(parmcheck("PARMCHECK"), Ok(Some(Parmcheck { abd: false, bytes: 100 })));
+        assert_eq!(parmcheck("PC(ABD)"), Ok(Some(Parmcheck { abd: true, bytes: 100 })));
+        assert_eq!(parmcheck("PC(5000)"), Ok(Some(Parmcheck { abd: false, bytes: 5000 })));
+        assert_eq!(parmcheck("PARMCHECK(ABD,1)"), Ok(Some(Parmcheck { abd: true, bytes: 1 })));
+        assert_eq!(parmcheck("NOPC"), Ok(None));
+        for bad in ["PC(0)", "PC(10000)", "PC(5000,ABD)", "PC(MSG,1,2)", "PC(X)"] {
+            assert!(matches!(parmcheck(bad), Err(OptionError::BadSuboption { .. })), "{bad}");
+        }
+        let initcheck = |card: &str| {
+            let mut o = Options::default();
+            o.apply(card).map(|_| o.initcheck)
+        };
+        assert_eq!(initcheck("INITCHECK"), Ok(Some(Initcheck::Lax)));
+        assert_eq!(initcheck("IC(STRICT)"), Ok(Some(Initcheck::Strict)));
+        assert_eq!(initcheck("NOIC"), Ok(None));
+        assert!(matches!(initcheck("IC(X)"), Err(OptionError::BadSuboption { .. })));
+        let o = Options::default();
+        assert_eq!((o.numcheck, o.parmcheck, o.initcheck), (None, None, None));
     }
 
     #[test]
