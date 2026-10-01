@@ -230,6 +230,7 @@ pub const NSYMBOL_DBCS: &str = "C212";
 pub const INITIAL_UNDER_THREAD: &str = "C217";
 pub const VLR_WITHOUT_VARYING: &str = "C218";
 pub const VLR_RECORDS_CHECKED: &str = "C219";
+pub const VSAM_OPEN_NEVER_VERIFIED: &str = "C220";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1435,6 +1436,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: VLR_RECORDS_CHECKED,
         claim: "VLR changes the file status alone: under either setting the READ succeeds and delivers the same bytes (Programming Guide SC27-8714-03, p. 422). A record shorter than the check's minimum fills the record area only as far as its length, leaving the rest as it was, which IBM calls undefined, and one longer than the record area is truncated to it (Language Reference SC27-8713-03, pp. 431, 434); the record area, the larger of the RECORD clause's maximum and the longest level-01 record, is taken as the 'maximum record definition size' (p. 431), so a 70-byte record of Table 52's file is delivered whole and READ INTO moves its 70 bytes (p. 188). The check covers records of variable length: a sequential file whose DD or FD is variable, and an indexed, relative or I-O sequential file held in that format. A fixed-length record keeps its status 04 for a data set that ends in a short record or a record longer than the area, whatever VLR says, and a line-sequential file or text DD, whose short lines IBM fills with spaces (Programming Guide p. 218), is not checked",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: VSAM_OPEN_NEVER_VERIFIED,
+        claim: "VSAMOPENFS is read from a card and kept in the load module's options, but no ironwork OPEN reaches the condition it changes: a VSAM OPEN that succeeds once the file's integrity is verified, status 97 under COMPAT and 00 under SUCC (Programming Guide SC27-8714-03, pp. 199, 424; Language Reference SC27-8713-03, p. 303). Neither manual says when the check is made; from memory, z/OS makes it when a data set was left open for output, typically by a run that abended, and OPEN's implicit VERIFY succeeds. ironwork closes every file a run unit leaves open when it ends, abend or not, and holds an indexed or relative file in memory from OPEN to CLOSE, writing it whole at CLOSE, so a data set is always as a CLOSE left it and nothing marks it as not closed. Modelling it needs a mark kept with the data set, set by OPEN OUTPUT, I-O or EXTEND and left by an abend, which rt::files's rule that a program reaches only the files the operator maps does not provide for, and a choice of whether status 97 takes the file's error path. Until then a successful VSAM OPEN is 00, or 05 for an optional file, under either setting",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

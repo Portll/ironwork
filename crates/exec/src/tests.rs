@@ -592,6 +592,31 @@ fn an_indexed_file_of_variable_length_records_reads_by_table_52_too() {
 }
 
 #[test]
+fn a_vsam_open_is_00_under_either_vsamopenfs_setting_as_no_open_verifies_a_file() {
+    let path = temp("vsamopenfs.ksds");
+    let source = |card: &str, body: &[&str]| {
+        let program = file_program(
+            "           SELECT K-FILE ASSIGN TO KDD ORGANIZATION INDEXED\n               RECORD KEY K-KEY FILE STATUS IS FS.\n           SELECT X-FILE ASSIGN TO NODD.\n",
+            "       FD  K-FILE.\n       01  K-REC.\n           05 K-KEY PIC X(4).\n       FD  X-FILE.\n       01  X-REC PIC X.\n",
+            "       01  FS PIC XX.\n",
+            &body.iter().map(|l| line(l)).collect::<String>(),
+        );
+        format!("{card}{program}")
+    };
+    let dds = [format!("KDD={}", path.display())];
+    let abends = ["OPEN OUTPUT K-FILE", "MOVE 'K001' TO K-KEY", "WRITE K-REC", "OPEN INPUT X-FILE", "GOBACK."];
+    let reopens = ["OPEN I-O K-FILE", "DISPLAY FS", "READ K-FILE", "DISPLAY FS ' ' K-KEY", "GOBACK."];
+    for card in ["       CBL VSAMOPENFS(COMPAT)\n", "       CBL VS(S)\n"] {
+        let (_, _, ending) = run_files(&source(card, &abends), &dds);
+        assert_eq!(ending.unwrap_err().code, "IO-35", "{card}");
+        let (out, err, ending) = run_files(&source(card, &reopens), &dds);
+        assert!(ending.is_ok(), "{ending:?} {err}");
+        assert_eq!(out, "00\n00 K001\n", "{card}: the abend left the data set closed, so there is nothing to verify");
+    }
+    std::fs::remove_file(&path).unwrap();
+}
+
+#[test]
 fn file_status_codes_and_optional_files() {
     let source = file_program(
         "           SELECT OPTIONAL MAYBE ASSIGN TO NODD FILE STATUS S1.\n           SELECT MUST ASSIGN TO NODD2 FILE STATUS S2.\n",

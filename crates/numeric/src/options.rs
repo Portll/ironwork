@@ -254,7 +254,8 @@ pub enum Vlr {
 }
 
 /// The file status of a VSAM OPEN that succeeds once its file's integrity is verified: 97 under
-/// `Compat`, 00 under `Succ` (Programming Guide SC27-8714-03, p. 424).
+/// `Compat`, 00 under `Succ` (Programming Guide SC27-8714-03, p. 424). No ironwork OPEN verifies
+/// a file yet (assumption C220).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum VsamOpenFs {
     #[default]
