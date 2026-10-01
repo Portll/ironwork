@@ -149,6 +149,10 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     if whole {
         oo::option_rules(&program, &options, &mut errors);
     }
+    options.initial &= !options.thread;
+    if whole && program.oo.as_deref().and_then(Oo::method).is_none() {
+        program.initial |= options.initial;
+    }
     let files: Vec<(&[DataEntry], Option<u32>)> = program.files.iter().map(|f| (f.records.as_slice(), f.record_max)).collect();
     let shared = layout::record_area_owners(&program.files, &program.environment).unwrap_or_else(|e| {
         errors.push(e);

@@ -227,6 +227,7 @@ pub const ZONED_COMPARED_AS_BYTES: &str = "C221";
 pub const APOST_EVERYWHERE: &str = "C210";
 pub const CURRENCY_OPTION: &str = "C211";
 pub const NSYMBOL_DBCS: &str = "C212";
+pub const INITIAL_UNDER_THREAD: &str = "C217";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1414,6 +1415,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: NSYMBOL_DBCS,
         claim: "Under NSYMBOL(DBCS) an N literal is a DBCS literal and a PICTURE of N alone with no USAGE is USAGE DISPLAY-1 (Programming Guide SC27-8714-03, pp. 387-388). ironwork holds no DBCS data, so the first N literal stops the read and each such item is a severe error, both in ironwork's words; a program with neither compiles as under NSYMBOL(NATIONAL), as IBM's text implies it would. NX literals are not N literals. NSYMBOL(NATIONAL) with NODBCS on the cards, which are one level of precedence, is an error and DBCS stays in effect, as Table 46 forces it (p. 344); NODBCS alone, with NSYMBOL(NATIONAL) only as the default, is taken as written",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: INITIAL_UNDER_THREAD,
+        claim: "The INITIAL option with THREAD, on the same or different CBL and PROCESS cards and in either order, is ignored and NOINITIAL forced, with an error message (Programming Guide SC27-8714-03, p. 344, Table 46); under THREAD IBM diagnoses the INITIAL option as an error (p. 418). ironwork gives a warning (W, return code 4) in its own words, as for NORENT with THREAD, since the message Enterprise COBOL gives for an option dropped in conflict resolution is IGYOS4020-W (J19), and the program, its nested programs and the options in its load module are NOINITIAL. An IS INITIAL clause under THREAD keeps J13's error. A class definition gets the warning once and its methods none; the option makes no method initial, as INITIAL is an attribute of a program and its nested programs (p. 374; Language Reference SC27-8713-03, p. 103)",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

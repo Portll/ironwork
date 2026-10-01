@@ -702,6 +702,12 @@ fn thread_needs_recursive_and_refuses_initial_and_file_sorts() {
     assert_eq!(t("", "T IS INITIAL", &merge), "");
     assert_eq!(t("       CBL THREAD\n", "T", &[]), "program T is compiled with THREAD, which requires RECURSIVE in its PROGRAM-ID paragraph");
     assert_eq!(t("       CBL THREAD\n", "T RECURSIVE INITIAL", &[]), "program T is INITIAL, which THREAD does not allow");
+    let dropped = "warning: INITIAL conflicts with THREAD, which IBM compiles only as NOINITIAL (see C217)";
+    assert_eq!(t("       CBL INITIAL\n       PROCESS THREAD\n", "T RECURSIVE", &[]), dropped);
+    assert_eq!(t("       CBL THREAD,INITIAL\n", "T RECURSIVE INITIAL", &[]), format!("{dropped}\nprogram T is INITIAL, which THREAD does not allow"));
+    assert_eq!(t("       CBL THREAD,DLL,INITIAL\n", "T RECURSIVE", &[]), dropped);
+    let class = errors(&account().replacen(OO_CARD, "       CBL THREAD,DLL,INITIAL\n", 1));
+    assert_eq!(class.matches(dropped).count(), 1, "a class gets it once, its methods not at all: {class}");
     assert_eq!(t("       CBL THREAD\n", "T RECURSIVE", &["SORT E ON ASCENDING KEY E"]), "");
     assert_eq!(t("       CBL THREAD\n", "T RECURSIVE", &sort), "SORT of a file is not allowed in a program compiled with THREAD");
     assert_eq!(t("       CBL THREAD\n", "T RECURSIVE", &merge), "MERGE is not allowed in a program compiled with THREAD");

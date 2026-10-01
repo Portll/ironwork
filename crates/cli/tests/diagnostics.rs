@@ -172,3 +172,13 @@ fn a_cics_program_with_goback_gets_nothing_and_a_program_with_no_end_and_no_cics
         assert!(stderr(&out).contains(NO_END), "{mode}: {}", stderr(&out));
     }
 }
+
+#[test]
+fn initial_with_thread_checks_with_return_code_4_and_runs_as_noinitial() {
+    let source = Source::new("initial-thread", "       CBL THREAD,INITIAL\n       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P RECURSIVE.\n       PROCEDURE DIVISION.\n           DISPLAY 'RAN'.\n           GOBACK.\n");
+    let warning = format!("{}: warning: INITIAL conflicts with THREAD, which IBM compiles only as NOINITIAL (see C217)\n", source.path());
+    let checked = ironwork(&["check", source.path()]);
+    assert_eq!((checked.status.code(), stderr(&checked)), (Some(4), warning.clone()));
+    let ran = ironwork(&["run", source.path()]);
+    assert_eq!((ran.status.code(), stderr(&ran), String::from_utf8_lossy(&ran.stdout).into_owned()), (Some(0), warning, "RAN\n".into()));
+}

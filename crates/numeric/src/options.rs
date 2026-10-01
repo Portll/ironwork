@@ -352,7 +352,8 @@ pub struct Options {
     pub intdate: IntDate,
     pub qualify: Qualify,
     /// INITIAL: the program and its nested programs behave as though their PROGRAM-ID paragraphs
-    /// said IS INITIAL (Programming Guide SC27-8714-03, p. 374).
+    /// said IS INITIAL (Programming Guide SC27-8714-03, p. 374). A compile with THREAD takes
+    /// NOINITIAL (p. 344).
     pub initial: bool,
     pub vlr: Vlr,
     pub vsamopenfs: VsamOpenFs,

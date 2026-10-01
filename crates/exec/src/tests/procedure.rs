@@ -204,6 +204,58 @@ fn an_altered_go_to_is_put_back_by_cancel_and_by_initial_but_kept_between_calls(
     assert_eq!(run_unit(&main(" IS INITIAL"), vec![], "").0, "FIRST\nFIRST\nFIRST\n");
 }
 
+/// MAIN calls SUB twice, and SUB calls INNER, which it contains; each counts its calls in
+/// WORKING-STORAGE.
+fn nested_counters(card: &str, inner: &str) -> String {
+    let counter = |id: &str, call: &str| {
+        [
+            format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. {id}.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n"),
+            "       01  N PIC 9 VALUE 0.\n       PROCEDURE DIVISION.\n".into(),
+            line("ADD 1 TO N"),
+            line(&format!("DISPLAY '{}' N", &id[..3])),
+            call.into(),
+            line("GOBACK."),
+        ]
+        .concat()
+    };
+    [
+        card,
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. MAIN.\n       PROCEDURE DIVISION.\n",
+        &line("CALL 'SUB'"),
+        &line("CALL 'SUB'"),
+        &line("GOBACK."),
+        &counter("SUB", &line("CALL 'INNER'")),
+        &counter(inner, ""),
+        "       END PROGRAM INNER.\n       END PROGRAM SUB.\n       END PROGRAM MAIN.\n",
+    ]
+    .concat()
+}
+
+#[test]
+fn the_initial_option_makes_every_program_of_the_source_initial_and_noinitial_leaves_is_initial_alone() {
+    let run = |card: &str, inner: &str| run_unit(&nested_counters(card, inner), vec![], "").0;
+    assert_eq!(run("", "INNER"), "SUB1\nINN1\nSUB2\nINN2\n");
+    assert_eq!(run("       CBL INITIAL\n", "INNER"), "SUB1\nINN1\nSUB1\nINN1\n");
+    assert_eq!(run("       PROCESS INITIAL,NOINITIAL\n", "INNER"), "SUB1\nINN1\nSUB2\nINN2\n");
+    assert_eq!(run("       CBL NOINITIAL\n", "INNER IS INITIAL"), "SUB1\nINN1\nSUB2\nINN1\n");
+}
+
+#[test]
+fn thread_forces_noinitial_on_the_programs_it_compiles() {
+    let source = two_programs(
+        "",
+        &[line("CALL 'SUB'"), line("CALL 'SUB'"), line("GOBACK.")].concat(),
+        "SUB RECURSIVE",
+        "       WORKING-STORAGE SECTION.\n       01  N PIC 9 VALUE 0.\n",
+        &["       PROCEDURE DIVISION.\n".into(), line("ADD 1 TO N"), line("DISPLAY N"), line("GOBACK.")].concat(),
+    )
+    .replacen("PROGRAM-ID. MAIN.", "PROGRAM-ID. MAIN RECURSIVE.", 1);
+    let card = format!("       CBL INITIAL,THREAD\n{source}");
+    assert_eq!(compile_errors(&card), "warning: INITIAL conflicts with THREAD, which IBM compiles only as NOINITIAL (see C217)");
+    assert_eq!(run_unit(&card, vec![], "").0, "1\n2\n");
+    assert_eq!(run_unit(&format!("       CBL INITIAL\n{source}"), vec![], "").0, "1\n1\n");
+}
+
 #[test]
 fn an_independent_segment_is_entered_with_its_go_tos_as_written() {
     let segment = |name: &str, priority: u8| {

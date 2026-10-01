@@ -8,7 +8,7 @@ use crate::layout::{Kind, Layout, Resolved};
 use crate::{Check, Compiled};
 use numeric::Options;
 use rt::lir::CompileTime;
-use numeric::assumptions::{OO_OPTIONS_REQUIRED, OO_OPTIONS_SEVERITY};
+use numeric::assumptions::{INITIAL_UNDER_THREAD, OO_OPTIONS_REQUIRED, OO_OPTIONS_SEVERITY};
 use std::collections::HashSet;
 use std::rc::Rc;
 use syntax::ast::*;
@@ -46,10 +46,11 @@ fn object_oriented(program: &Program) -> bool {
 }
 
 /// IBM's rules for the options a program is compiled with (see [`OO_OPTIONS_REQUIRED`]): object-
-/// oriented syntax needs THREAD, DLL, RENT and DBCS, NORENT conflicts with THREAD and DLL, and under
-/// THREAD a program is RECURSIVE, not INITIAL, contains no program, and SORTs or MERGEs no file. A
-/// method answers only for its statements; its class answers for the options. A missing option and
-/// the NORENT conflict are warnings, the rest errors (see [`OO_OPTIONS_SEVERITY`]).
+/// oriented syntax needs THREAD, DLL, RENT and DBCS, NORENT conflicts with THREAD and DLL, INITIAL
+/// with THREAD, and under THREAD a program is RECURSIVE, not INITIAL, contains no program, and
+/// SORTs or MERGEs no file. A method answers only for its statements; its class answers for the
+/// options. A missing option and the two conflicts are warnings, the rest errors (see
+/// [`OO_OPTIONS_SEVERITY`] and [`INITIAL_UNDER_THREAD`]).
 pub(crate) fn option_rules(program: &Program, options: &Options, errors: &mut Vec<Error>) {
     let oo = program.oo.as_deref();
     let method = oo.and_then(Oo::method).is_some();
@@ -81,6 +82,9 @@ pub(crate) fn option_rules(program: &Program, options: &Options, errors: &mut Ve
     }
     if !options.thread {
         return;
+    }
+    if !method && options.initial {
+        errors.push(Error::warning(Pos::default(), format!("INITIAL conflicts with THREAD, which IBM compiles only as NOINITIAL (see {INITIAL_UNDER_THREAD})")));
     }
     if !method && oo.and_then(Oo::class).is_none() {
         if !program.recursive {

@@ -8,7 +8,8 @@ pub struct Program {
     pub id: String,
     /// Options from CBL and PROCESS cards, in the order written.
     pub options: Vec<String>,
-    /// PROGRAM-ID ... IS INITIAL: WORKING-STORAGE starts afresh on every CALL.
+    /// PROGRAM-ID ... IS INITIAL, or once compiled the INITIAL option: WORKING-STORAGE starts
+    /// afresh on every CALL.
     pub initial: bool,
     pub recursive: bool,
     pub working_storage: Vec<DataEntry>,

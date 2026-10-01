@@ -1389,3 +1389,15 @@ fn a_floating_point_receiver_makes_the_statement_float_and_numval_and_the_unicod
     assert_eq!(m[0], MovePlan::Numeric { from: NumericFrom::Float, store: StorePlan::Zoned { digits: 3, scale: 0, signed: false, sign: None } });
     assert_eq!((m[1], m[2], m[3]), (MovePlan::Alnum { image: Image::Digits { digits: 9 }, justified: false }, MovePlan::National(NationalFrom::Units), MovePlan::Alnum { image: Image::Digits { digits: 3 }, justified: false }));
 }
+
+#[test]
+fn the_lowered_program_is_initial_under_the_initial_option_unless_thread_forces_noinitial() {
+    let initial = |card: &str, head: &str| {
+        let p = lowered(&program(card, "", &line("GOBACK.")).replacen("PROGRAM-ID. T.", &format!("PROGRAM-ID. {head}."), 1));
+        (p.initial, p.options.options.initial)
+    };
+    assert_eq!(initial("", "T"), (false, false));
+    assert_eq!(initial("INITIAL", "T"), (true, true));
+    assert_eq!(initial("NOINITIAL", "T IS INITIAL"), (true, false));
+    assert_eq!(initial("INITIAL,THREAD", "T RECURSIVE"), (false, false));
+}
