@@ -221,10 +221,10 @@ fn members_of_a_partitioned_data_set_are_files_in_its_directory() {
 #[test]
 fn what_ironwork_does_not_run_is_refused_before_any_step() {
     let dir = temp("refuse");
-    let o = job(&dir, "//S1 EXEC PGM=IEFBR14\n//NEW DD DSN=MADE.EARLY,DISP=(NEW,CATLG)\n//S2 EXEC PGM=SORT\n//S3 EXEC PGM=IEFBR14\n//X DD DSN=G.BASE(+1),DISP=MOD\n//S4 EXEC PGM=IDCAMS\n//SYSIN DD *\n  LISTCAT ALL\n");
+    let o = job(&dir, "//S1 EXEC PGM=IEFBR14\n//NEW DD DSN=MADE.EARLY,DISP=(NEW,CATLG)\n//S2 EXEC PGM=ICETOOL\n//S3 EXEC PGM=IEFBR14\n//X DD DSN=G.BASE(+1),DISP=MOD\n//S4 EXEC PGM=IDCAMS\n//SYSIN DD *\n  LISTCAT ALL\n");
     assert_eq!(o.status.code(), Some(2));
     let l = log(&o);
-    assert!(l.contains("PGM=SORT is not supported yet") && l.contains("DISP=MOD on a generation or in a concatenation is not supported yet") && l.contains("IDCAMS: the IDCAMS command LISTCAT is not supported yet"), "{l}");
+    assert!(l.contains("PGM=ICETOOL is not supported yet") && l.contains("DISP=MOD on a generation or in a concatenation is not supported yet") && l.contains("IDCAMS: the IDCAMS command LISTCAT is not supported yet"), "{l}");
     assert!(!dir.join("data/MADE.EARLY").exists());
     let o = job(&dir, "//S1 EXEC MYPROC\n");
     assert_eq!(o.status.code(), Some(2));
@@ -410,4 +410,42 @@ fn disp_mod_writes_after_what_the_data_set_holds_and_creates_one_that_is_missing
     assert_eq!(fs::read_to_string(dir.join("data/LOG.NAMES")).unwrap(), "ALPHA\nDELTA\nlast\n");
     assert_eq!(fs::read_to_string(dir.join("data/MADE.BY.MOD")).unwrap(), "first\n");
     assert!(!dir.join("data/NOT.KEPT").exists(), "a data set DISP=MOD created with no disposition is deleted as NEW would be");
+}
+
+#[test]
+fn sort_orders_records_as_dfsort_does_and_merges_sorted_inputs() {
+    let dir = temp("sort");
+    fs::write(dir.join("data/IN.KEYS"), "B 003\nA 001\nC 002\nA 001\nb 009\n1 000\n").unwrap();
+    fs::write(dir.join("data/M.ONE"), "A\nC\n").unwrap();
+    fs::write(dir.join("data/M.TWO"), "B\nD\n").unwrap();
+    fs::write(dir.join("data/M.BAD"), "D\nB\n").unwrap();
+    let o = job(
+        &dir,
+        concat!(
+            "//S1 EXEC PGM=SORT\n//SYSOUT DD SYSOUT=*\n//SORTIN DD DSN=IN.KEYS,DISP=SHR\n//SORTOUT DD DSN=OUT.KEYS,DISP=(NEW,CATLG)\n",
+            "//SYSIN DD *\n  SORT FIELDS=(1,1,CH,A,3,3,ZD,A)\n  SUM FIELDS=NONE\n/*\n",
+            "//S2 EXEC PGM=ICEMAN\n//SYSOUT DD SYSOUT=*\n//SORTIN01 DD DSN=M.ONE,DISP=SHR\n//SORTIN02 DD DSN=M.TWO,DISP=SHR\n//SORTOUT DD DSN=M.OUT,DISP=(NEW,CATLG)\n",
+            "//SYSIN DD *\n  MERGE FIELDS=(1,1,CH,A)\n/*\n",
+            "//S3 EXEC PGM=SORT\n//SYSOUT DD SYSOUT=*\n//SORTIN01 DD DSN=M.BAD,DISP=SHR\n//SORTOUT DD DUMMY\n//SYSIN DD *\n  MERGE FIELDS=(1,1,CH,A)\n/*\n",
+        ),
+    );
+    let l = log(&o);
+    assert!(l.contains("S1 PGM=SORT RC=0000") && l.contains("S2 PGM=ICEMAN RC=0000") && l.contains("S3 PGM=SORT RC=0016"), "{l}");
+    assert_eq!(fs::read_to_string(dir.join("data/OUT.KEYS")).unwrap(), "b 009\nA 001\nB 003\nC 002\n1 000\n", "lower case before upper before digits, as EBCDIC orders them");
+    assert_eq!(fs::read_to_string(dir.join("data/M.OUT")).unwrap(), "A\nB\nC\nD\n");
+    assert!(String::from_utf8_lossy(&o.stdout).contains("record 2 of DD SORTIN01 is out of order for the MERGE"));
+}
+
+#[test]
+fn sort_reads_fixed_records_by_their_length_and_refuses_what_it_does_not_model() {
+    let dir = temp("sortbin");
+    fs::write(dir.join("data/BIN.IN"), [0u8, 0, 0, 2, 0, 0, 0, 1, 0xff, 0xff, 0xff, 0xff]).unwrap();
+    let path = dir.join("job.jcl");
+    fs::write(&path, "//T JOB 1\n//S1 EXEC PGM=SORT\n//SORTIN DD DSN=BIN.IN,DISP=SHR,DCB=(RECFM=FB,LRECL=4)\n//SORTOUT DD DSN=BIN.OUT,DISP=(NEW,CATLG)\n//SYSIN DD *\n  SORT FIELDS=(1,4,FI,A)\n/*\n").unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_ironwork")).args(["job", path.to_str().unwrap(), "--datasets", dir.join("data").to_str().unwrap()]).output().unwrap();
+    assert_eq!(o.status.code(), Some(0), "{}", log(&o));
+    assert_eq!(fs::read(dir.join("data/BIN.OUT")).unwrap(), [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 1, 0, 0, 0, 2], "FI is signed: -1 sorts first");
+    let o = job(&dir, "//S1 EXEC PGM=SORT\n//SYSIN DD *\n  SORT FIELDS=(1,1,CH,A)\n  INCLUDE COND=(1,1,CH,EQ,C'A')\n/*\n");
+    assert_eq!(o.status.code(), Some(2));
+    assert!(log(&o).contains("SORT: the DFSORT INCLUDE statement is not supported yet"), "{}", log(&o));
 }

@@ -9,7 +9,9 @@ dependencies = [
  "ironwork-exec",
  "ironwork-jcl",
  "ironwork-numeric",
+ "ironwork-rt",
  "ironwork-syntax",
+ "ironwork-zarch",
 ]
 
 [[package]]

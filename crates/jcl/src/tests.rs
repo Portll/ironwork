@@ -263,3 +263,12 @@ fn generations_and_backward_references_are_read() {
     assert_eq!(src(4, 0), Source::Dataset { dsn: "P.OUT".into(), member: None });
     assert!(refused("//S1 EXEC PGM=A\n//O DD SYSOUT=*\n//S2 EXEC PGM=A\n//I DD DSN=*.S1.O,DISP=SHR\n").contains("names a DD that is no data set"));
 }
+
+#[test]
+fn record_format_and_length_are_kept() {
+    let j = job("//S1 EXEC PGM=A\n//IN DD DSN=A.B,DISP=SHR,DCB=(RECFM=FB,LRECL=80,BLKSIZE=0)\n//OUT DD DSN=C.D,DISP=SHR,RECFM=VB,LRECL=104\n//X DD DUMMY\n").unwrap();
+    let p = |n: usize| &steps(&j)[0].dds[n].parts[0];
+    assert_eq!((p(0).recfm.as_deref(), p(0).lrecl), (Some("FB"), Some(80)));
+    assert_eq!((p(1).recfm.as_deref(), p(1).lrecl), (Some("VB"), Some(104)));
+    assert_eq!((p(2).recfm.as_deref(), p(2).lrecl), (None, None));
+}

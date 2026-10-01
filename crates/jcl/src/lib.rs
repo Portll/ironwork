@@ -6,6 +6,7 @@
 
 pub mod cond;
 pub mod idcams;
+pub mod sort;
 
 use cond::Cond;
 use std::collections::HashMap;
@@ -61,6 +62,9 @@ pub struct Part {
     pub source: Source,
     pub disp: Disp,
     pub line: usize,
+    /// The record format and length the DD gives (RECFM, LRECL, alone or in DCB), where it gives them.
+    pub recfm: Option<String>,
+    pub lrecl: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -836,6 +840,37 @@ fn disp(value: &str, line: usize) -> Result<Disp, Error> {
     Ok(Disp { status, normal, abnormal })
 }
 
+/// RECFM and LRECL from a DD's operands, alone or inside DCB=(...).
+fn record_format(operands: &[String], line: usize) -> Result<(Option<String>, Option<usize>), Error> {
+    let (mut recfm, mut lrecl) = (None, None);
+    let mut take = |key: &str, value: &str| -> Result<(), Error> {
+        match key {
+            "RECFM" => recfm = Some(value.to_string()),
+            "LRECL" => match value.parse::<usize>() {
+                Ok(n) if n > 0 => lrecl = Some(n),
+                _ if value == "X" => {}
+                _ => return err(line, format!("LRECL={value} is not a record length")),
+            },
+            _ => {}
+        }
+        Ok(())
+    };
+    for op in operands {
+        match keyword(op) {
+            (Some("DCB"), v) if v.starts_with('(') => {
+                for sub in split_operands(v.trim_start_matches('(').trim_end_matches(')'), line)? {
+                    if let (Some(k), sv) = keyword(&sub) {
+                        take(k, sv)?;
+                    }
+                }
+            }
+            (Some(k @ ("RECFM" | "LRECL")), v) => take(k, v)?,
+            _ => {}
+        }
+    }
+    Ok((recfm, lrecl))
+}
+
 /// What a DD statement says: its data (a data set, in-stream data, DUMMY or SYSOUT) and its
 /// DISP, each None where the statement does not say.
 fn dd_fields(raw: &Raw, operands: &str) -> Result<(Option<Source>, Option<Disp>), Error> {
@@ -870,7 +905,8 @@ fn dd_fields(raw: &Raw, operands: &str) -> Result<(Option<Source>, Option<Disp>)
 fn dd_part(raw: &Raw, operands: &str) -> Result<Part, Error> {
     let (source, disp) = dd_fields(raw, operands)?;
     let Some(source) = source else { return err(raw.line, "the DD statement names no data set, in-stream data, DUMMY or SYSOUT") };
-    Ok(Part { source, disp: disp.unwrap_or_default(), line: raw.line })
+    let (recfm, lrecl) = record_format(&split_operands(operands, raw.line)?, raw.line)?;
+    Ok(Part { source, disp: disp.unwrap_or_default(), line: raw.line, recfm, lrecl })
 }
 
 fn add_dd(step: &mut Step, raw: &Raw, part: Part) -> Result<(), Error> {
@@ -910,6 +946,9 @@ fn override_dd(step: &mut Step, name: &str, index: usize, raw: &Raw, operands: &
             if let Some(d) = disposition {
                 part.disp = d;
             }
+            let (recfm, lrecl) = record_format(&split_operands(operands, raw.line)?, raw.line)?;
+            part.recfm = recfm.or(part.recfm.take());
+            part.lrecl = lrecl.or(part.lrecl);
             part.line = raw.line;
             Ok(())
         }

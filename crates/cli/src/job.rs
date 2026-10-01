@@ -10,6 +10,8 @@ use jcl::{Dd, End, Item, Job, Source, Status, Step};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
+
+use zarch::ebcdic::CodePage;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -45,13 +47,14 @@ pub struct Request {
 
 /// IBM programs a job can name that ironwork does not run; each is refused before the job starts.
 const NOT_SUPPORTED: &[&str] = &[
-    "SORT", "ICEMAN", "DFSORT", "SYNCSORT", "ICETOOL", "IEBCOPY", "IEBUPDTE", "IEBPTPCH", "IEBCOMPR", "IEBDG", "IEHLIST", "IEHPROGM", "IEHMOVE", "IKJEFT01", "IKJEFT1A", "IKJEFT1B", "IRXJCL", "BPXBATCH", "BPXBATSL", "FTP", "DSNUTILB", "DSNUPROC", "DSNTEP2", "DSNTEP4", "DSNTIAUL", "DSNTIAD", "DFSRRC00", "ADRDSSU", "IEWL", "IEWBLINK", "HEWL", "IGYCRCTL", "ASMA90", "DFHECP1$", "DFHEAP1$", "IEBEDIT", "AMASPZAP",
+    "ICETOOL", "IEBCOPY", "IEBUPDTE", "IEBPTPCH", "IEBCOMPR", "IEBDG", "IEHLIST", "IEHPROGM", "IEHMOVE", "IKJEFT01", "IKJEFT1A", "IKJEFT1B", "IRXJCL", "BPXBATCH", "BPXBATSL", "FTP", "DSNUTILB", "DSNUPROC", "DSNTEP2", "DSNTEP4", "DSNTIAUL", "DSNTIAD", "DFSRRC00", "ADRDSSU", "IEWL", "IEWBLINK", "HEWL", "IGYCRCTL", "ASMA90", "DFHECP1$", "DFHEAP1$", "IEBEDIT", "AMASPZAP",
 ];
 
 enum Program {
     Iefbr14,
     Iebgener,
     Idcams,
+    Sort,
     Cobol(PathBuf),
     Missing,
 }
@@ -61,6 +64,7 @@ fn program_of(pgm: &str, dirs: &[PathBuf]) -> Program {
         "IEFBR14" => return Program::Iefbr14,
         "IEBGENER" | "ICEGENER" => return Program::Iebgener,
         "IDCAMS" => return Program::Idcams,
+        "SORT" | "ICEMAN" | "DFSORT" | "SYNCSORT" => return Program::Sort,
         _ => {}
     }
     let lower = pgm.to_ascii_lowercase();
@@ -105,6 +109,12 @@ fn refusals(job: &Job, req: &Request) -> Vec<String> {
                 out.push(at(format!("DD {} concatenates in-stream data with data sets of z/OS records", dd.name)));
             }
         }
+        if matches!(program, Program::Sort)
+            && let Some([jcl::Part { source: Source::InStream(cards), .. }]) = step.dds.iter().find(|d| d.name == "SYSIN").map(|d| &d.parts[..])
+            && let Err(e) = jcl::sort::parse(cards)
+        {
+            out.push(at(format!("{}: {e}", step.pgm)));
+        }
         if matches!(program, Program::Idcams) {
             match step.dds.iter().find(|d| d.name == "SYSIN").map(|d| &d.parts[..]) {
                 Some([jcl::Part { source: Source::InStream(cards), .. }]) => {
@@ -144,6 +154,9 @@ struct Allocated {
     sysout: bool,
     /// DISP=MOD: OPEN OUTPUT keeps the data set's records and writes after them.
     append: bool,
+    /// The record format and length the DD gives.
+    recfm: Option<String>,
+    lrecl: Option<usize>,
 }
 
 struct Disposal {
@@ -298,7 +311,7 @@ impl Runner<'_> {
         if paths.len() == 1 {
             let dataset = matches!(dd.parts[0].source, Source::Dataset { .. } | Source::Temporary { .. } | Source::Generation { .. });
             let append = dd.parts[0].disp.status == Status::Mod;
-            return Ok(Allocated { dataset, name: dd.name.clone(), path: paths.remove(0), text, sysout, append });
+            return Ok(Allocated { dataset, name: dd.name.clone(), path: paths.remove(0), text, sysout, append, recfm: dd.parts[0].recfm.clone(), lrecl: dd.parts[0].lrecl });
         }
         let joined = fresh_name(&self.scratch, &mut self.files, &label);
         let mut bytes = Vec::new();
@@ -306,7 +319,7 @@ impl Runner<'_> {
             bytes.extend(fs::read(p).map_err(|e| format!("DD {}: {e}", dd.name))?);
         }
         fs::write(&joined, bytes).map_err(|e| format!("DD {}: {e}", dd.name))?;
-        Ok(Allocated { dataset: false, name: dd.name.clone(), path: joined, text, sysout, append: false })
+        Ok(Allocated { dataset: false, name: dd.name.clone(), path: joined, text, sysout, append: false, recfm: dd.parts[0].recfm.clone(), lrecl: dd.parts[0].lrecl })
     }
 
     fn dispose(&mut self, disposals: Vec<Disposal>, abended: bool) {
@@ -599,6 +612,167 @@ fn write_print(dd: Option<&Allocated>, lines: &[String]) {
     }
 }
 
+/// A data set's records: lines of a text data set as EBCDIC bytes, variable-length records with
+/// their RDWs, or fixed-length ones.
+enum Layout {
+    Lines,
+    Variable,
+    Fixed(usize),
+}
+
+fn layout(dd: &Allocated, record: Option<jcl::sort::Record>) -> Result<Layout, String> {
+    if dd.text {
+        return Ok(Layout::Lines);
+    }
+    match (dd.recfm.as_deref().map(|r| r.starts_with('V')), dd.lrecl, record) {
+        (Some(true), _, _) => Ok(Layout::Variable),
+        (Some(false), Some(n), _) => Ok(Layout::Fixed(n)),
+        (None, _, Some(r)) if r.variable => Ok(Layout::Variable),
+        (None, _, Some(jcl::sort::Record { length: Some(n), .. })) => Ok(Layout::Fixed(n)),
+        _ => Err(format!("the record format of DD {} is not known: give DCB=(RECFM=FB,LRECL=n), RECFM=VB, or a RECORD statement", dd.name)),
+    }
+}
+
+fn read_records(dd: &Allocated, layout: &Layout, page: &CodePage) -> Result<Vec<Vec<u8>>, String> {
+    let bytes = fs::read(&dd.path).map_err(|e| format!("DD {}: {e}", dd.name))?;
+    match layout {
+        Layout::Lines => Ok(String::from_utf8_lossy(&bytes).lines().map(|l| page.encode_lossy(l)).collect()),
+        Layout::Fixed(n) => {
+            if !bytes.len().is_multiple_of(*n) {
+                return Err(format!("DD {} holds {} bytes, not a whole number of {n}-byte records", dd.name, bytes.len()));
+            }
+            Ok(bytes.chunks(*n).map(<[u8]>::to_vec).collect())
+        }
+        Layout::Variable => {
+            let mut out = Vec::new();
+            let mut at = 0;
+            while at < bytes.len() {
+                let len = bytes.get(at..at + 2).map(|b| usize::from(u16::from_be_bytes([b[0], b[1]]))).filter(|&l| l >= 4 && at + l <= bytes.len()).ok_or_else(|| format!("DD {} has a record descriptor word that is not valid at byte {at}", dd.name))?;
+                out.push(bytes[at..at + len].to_vec());
+                at += len;
+            }
+            Ok(out)
+        }
+    }
+}
+
+/// The records as SORTOUT holds them: lines decoded through the code page with trailing blanks
+/// dropped (and a variable record's RDW left out), or the record bytes as they are.
+fn write_records(dd: &Allocated, records: &[Vec<u8>], variable: bool, page: &CodePage) -> Result<(), String> {
+    let mut bytes = Vec::new();
+    for r in records {
+        if dd.text {
+            let body = if variable { &r[4.min(r.len())..] } else { &r[..] };
+            bytes.extend(page.decode(body).trim_end().as_bytes());
+            bytes.push(b'\n');
+        } else {
+            bytes.extend(r);
+        }
+    }
+    put(&dd.path, &bytes, dd.append).map_err(|e| format!("DD {}: {e}", dd.name))
+}
+
+/// DFSORT over the step's DDs: SORT, MERGE or COPY from SORTIN (or SORTIN01-99 for MERGE) to
+/// SORTOUT, with SUM FIELDS=NONE keeping the first of records with equal keys. Text records are
+/// EBCDIC through the code page while they are sorted, so CH keys collate as on z/OS, and are
+/// padded with blanks to the longest so a key past a line's end reads blanks. Return code 0, or 16
+/// with the reason on SYSOUT.
+fn sort_step(dds: &[Allocated]) -> i16 {
+    let dd = |n: &str| dds.iter().find(|d| d.name == n);
+    let fail = |why: String| {
+        write_print(dd("SYSOUT"), &[format!("ironwork SORT: {why}")]);
+        16
+    };
+    let cards = dd("SYSIN").and_then(|d| fs::read_to_string(&d.path).ok()).map(|t| t.lines().map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
+    let control = match jcl::sort::parse(&cards) {
+        Ok(c) => c,
+        Err(e) => return fail(e),
+    };
+    let page = numeric::options::Options::default().code_page();
+    let inputs: Vec<&Allocated> = match control.kind {
+        jcl::sort::Kind::Merge => (1..=99).filter_map(|n| dd(&format!("SORTIN{n:02}"))).collect(),
+        _ => dd("SORTIN").into_iter().collect(),
+    };
+    if inputs.is_empty() {
+        return fail(format!("no {} DD", if control.kind == jcl::sort::Kind::Merge { "SORTIN01" } else { "SORTIN" }));
+    }
+    let Some(out) = dd("SORTOUT") else { return fail("no SORTOUT DD".into()) };
+    let keys = rt::sort::Keys::new(
+        control
+            .fields
+            .iter()
+            .map(|f| rt::sort::Key {
+                position: f.position - 1,
+                length: f.length,
+                format: match f.format {
+                    jcl::sort::Format::Ch => rt::sort::Format::Ch,
+                    jcl::sort::Format::Ac => rt::sort::Format::Ac,
+                    jcl::sort::Format::Zd => rt::sort::Format::Zd,
+                    jcl::sort::Format::Clo => rt::sort::Format::Clo,
+                    jcl::sort::Format::Csl => rt::sort::Format::Csl,
+                    jcl::sort::Format::Cst => rt::sort::Format::Cst,
+                    jcl::sort::Format::Pd => rt::sort::Format::Pd,
+                    jcl::sort::Format::Bi => rt::sort::Format::Bi,
+                    jcl::sort::Format::Fi => rt::sort::Format::Fi,
+                },
+                ascending: f.ascending,
+            })
+            .collect(),
+        page,
+    );
+    let mut records = Vec::new();
+    let mut variable = false;
+    for input in &inputs {
+        let shape = match layout(input, control.record) {
+            Ok(l) => l,
+            Err(e) => return fail(e),
+        };
+        variable |= matches!(shape, Layout::Variable);
+        let mut these = match read_records(input, &shape, page) {
+            Ok(r) => r,
+            Err(e) => return fail(e),
+        };
+        if matches!(shape, Layout::Lines) {
+            let width = these.iter().map(Vec::len).max().unwrap_or(0).max(input.lrecl.unwrap_or(0));
+            for r in &mut these {
+                r.resize(width, 0x40);
+            }
+        }
+        if control.kind == jcl::sort::Kind::Merge {
+            match keys.out_of_order(&these) {
+                Ok(Some(i)) => return fail(format!("record {} of DD {} is out of order for the MERGE", i + 1, input.name)),
+                Ok(None) => {}
+                Err(e) => return fail(format!("DD {}: {e}", input.name)),
+            }
+        }
+        records.extend(these);
+    }
+    let mut sorted = if control.kind == jcl::sort::Kind::Copy {
+        records
+    } else {
+        match keys.sort(records) {
+            Ok(r) => r,
+            Err(e) => return fail(e.to_string()),
+        }
+    };
+    if control.drop_duplicates && !control.fields.is_empty() {
+        let mut kept: Vec<Vec<u8>> = Vec::with_capacity(sorted.len());
+        for r in sorted {
+            if kept.last().is_some_and(|k| keys.compare(k, &r).ok() == Some(std::cmp::Ordering::Equal)) {
+                continue;
+            }
+            kept.push(r);
+        }
+        sorted = kept;
+    }
+    let count = sorted.len();
+    if let Err(e) = write_records(out, &sorted, variable, page) {
+        return fail(e);
+    }
+    write_print(dd("SYSOUT"), &[format!("ironwork SORT: {count} records written to SORTOUT")]);
+    0
+}
+
 struct Frame {
     active: bool,
     parent: bool,
@@ -805,6 +979,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                     Program::Iefbr14 => Ok(0),
                     Program::Iebgener => iebgener(&dds),
                     Program::Idcams => Ok(idcams(runner, &dds)),
+                    Program::Sort => Ok(sort_step(&dds)),
                     Program::Cobol(path) => {
                         programs.insert(path.clone());
                         run_cobol(&path, runner.req, &dds, database.as_deref_mut(), &mut stdout, &mut programs, run.as_ref(), roots)

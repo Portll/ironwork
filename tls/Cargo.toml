@@ -15,7 +15,9 @@ path = "../crates/cli/src/main.rs"
 exec = { package = "ironwork-exec", path = "../crates/exec" }
 jcl = { package = "ironwork-jcl", path = "../crates/jcl" }
 numeric = { package = "ironwork-numeric", path = "../crates/numeric" }
+rt = { package = "ironwork-rt", path = "../crates/rt" }
 syntax = { package = "ironwork-syntax", path = "../crates/syntax" }
+zarch = { package = "ironwork-zarch", path = "../crates/zarch" }
 rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1.0.9"
 

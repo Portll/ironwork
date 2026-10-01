@@ -139,12 +139,14 @@ job flags:
              partitioned data set being a directory of members. They hold z/OS records, or UTF-8
              lines with :text; in-stream data and SYSOUT are always lines. Each EXEC PGM= runs a
              COBOL program found in -L as PGM.cbl or PGM.cob, IEFBR14, IEBGENER without control
-             statements, or IDCAMS (DELETE, REPRO, DEFINE CLUSTER and GDG, SET, IF and DO, its
-             messages to SYSPRINT); DISP creates, keeps and deletes data sets as each step ends, and
+             statements, IDCAMS (DELETE, REPRO, DEFINE CLUSTER and GDG, SET, IF and DO, its
+             messages to SYSPRINT), or SORT/ICEMAN (SORT, MERGE and COPY with FIELDS in CH, AC, ZD,
+             CLO, CSL, CST, PD, BI and FI, SUM FIELDS=NONE, RECORD; a text data set's lines collate
+             as EBCDIC); DISP creates, keeps and deletes data sets as each step ends, and
              COND and IF/THEN/ELSE choose the steps. A step's DISPLAY output and its SYSOUT DDs go
              to standard output, a line per step to standard error. What the job uses that
-             ironwork does not run (PARM, SORT, other IDCAMS commands and IBM's other programs) is
-             refused before any step runs. DISP=MOD writes after what a data set holds, and
+             ironwork does not run (PARM, other IDCAMS commands, DFSORT's INCLUDE, OMIT, INREC,
+             OUTREC and OUTFIL, and IBM's other programs) is refused before any step runs. DISP=MOD writes after what a data set holds, and
              creates it, as NEW would, where it is not there. A generation data group's base is the file
              DIR/BASE that DEFINE GDG writes, and generation n the file DIR/BASE.GnnnnV00; (0),
              (-1) and (+1) count from the generations the job began with, DSN=BASE reads them all,
