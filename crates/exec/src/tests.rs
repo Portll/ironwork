@@ -885,6 +885,15 @@ fn ssrange_reference_modification_names_the_part_out_of_range() {
 }
 
 #[test]
+fn ssrange_finds_an_occurs_depending_on_object_past_its_maximum() {
+    let data = "       01  N PIC 9 VALUE 4.\n       01  G.\n           05 T PIC X OCCURS 1 TO 3 DEPENDING ON N.\n";
+    let body = [line("DISPLAY G"), line("GOBACK.")].concat();
+    let abend = run_with(&program("SSRANGE", data, &body), &[]).2.unwrap_err();
+    assert_eq!(abend.code, AbendCode::user(4038));
+    assert!(abend.message.starts_with("IGZ0007S") && abend.message.contains("OCCURS DEPENDING ON"), "{}", abend.message);
+}
+
+#[test]
 fn compile_errors_name_what_is_undefined() {
     let parsed = syntax::parse(&program("", "       01  X PIC X.\n", &line("MOVE Y TO X."))).unwrap();
     let errors = compile(parsed, &[]).err().unwrap();

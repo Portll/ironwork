@@ -814,7 +814,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: LE_SSRANGE_U4038,
-        claim: "A reference SSRANGE finds out of range signals a severity-3 LE condition; nothing handles it, so the run ends with user abend U4038 under the default ABTERMENC(ABEND). The message ids, from memory of the Enterprise COBOL messages: IGZ0006S for a subscript or index outside its table, IGZ0072S for a reference-modification start outside its item, IGZ0073S for a length below 1, and IGZ0074S for a start and length that reach past the item's end. An OCCURS DEPENDING ON object outside its range carries no id until one is checked",
+        claim: "A reference SSRANGE finds out of range signals a severity-3 LE condition; nothing handles it, so the run ends with user abend U4038 under the default ABTERMENC(ABEND). The message ids, from memory of the Enterprise COBOL messages: IGZ0006S for a subscript or index outside its table, IGZ0072S for a reference-modification start outside its item, IGZ0073S for a length below 1, and IGZ0074S for a start and length that reach past the item's end. An OCCURS DEPENDING ON object outside its range gives IGZ0007S, IBM's message for a variable-length group longer than its maximum or shorter than zero (IBM Support, 'Executing a CICS generated application results in abend'); IBM checks the group's composite length, and ironwork checks each object's count",
         basis: Basis::Recalled,
         oracle: Oracle::EnterpriseCobol,
     },

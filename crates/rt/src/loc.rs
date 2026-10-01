@@ -38,7 +38,7 @@ pub fn subscript(value: i64, stride: u32, check: Option<u32>, name: &str, pos: P
 /// declared maximum so that a bad count never reaches past the table's storage.
 pub fn occurrences(count: i64, max: u32, check: bool, object: &str, pos: Pos) -> R<u32> {
     if check && !(0..=max as i64).contains(&count) {
-        return Err(out_of_range(format!("{object} = {count} is outside the OCCURS DEPENDING ON range 0 to {max} (SSRANGE)"), pos));
+        return Err(out_of_range(format!("IGZ0007S {object} = {count} is outside the OCCURS DEPENDING ON range 0 to {max} (SSRANGE)"), pos));
     }
     Ok(count.clamp(0, max as i64) as u32)
 }
