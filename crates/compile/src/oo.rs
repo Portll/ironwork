@@ -533,6 +533,16 @@ fn each(stmts: &[Stmt], f: &mut dyn FnMut(&Stmt)) {
     }
 }
 
+/// [`each`], to change.
+pub fn each_mut(stmts: &mut [Stmt], f: &mut dyn FnMut(&mut Stmt)) {
+    for s in stmts {
+        f(s);
+        for body in bodies_mut(s) {
+            each_mut(body, f);
+        }
+    }
+}
+
 fn opt(o: &Option<Vec<Stmt>>) -> &[Stmt] {
     o.as_deref().unwrap_or_default()
 }

@@ -160,6 +160,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     let counter_item = |entry: usize| program.working_storage[..entry].iter().filter(|e| e.level != 88).count();
     layout.name_files(&program.files, linage_counters.iter().map(|c| c.map(counter_item)).collect());
     corresponding::expand(&mut program, &layout, &mut errors);
+    condition_subjects(&mut program, &layout);
     for item in &layout.items {
         if let Some(object) = &item.depending_on {
             match layout.resolve(&object.name, &object.qualifiers, object.pos) {
@@ -353,21 +354,43 @@ fn qualify_in_own_section(program: &mut Program) {
     let paragraphs: Vec<(String, Option<String>, bool)> = program.paragraphs.iter().map(|p| (p.name.clone(), p.section.clone(), p.is_section)).collect();
     let in_section = |name: &str, section: &str| paragraphs.iter().any(|(n, s, is_section)| n == name && !is_section && s.as_deref() == Some(section));
     let named = |name: &str| paragraphs.iter().filter(|(n, ..)| n == name).count();
-    fn qualify(stmts: &mut [Stmt], section: &str, needs: &dyn Fn(&str) -> bool) {
-        for s in stmts {
-            for p in procedure_names_mut(s) {
-                if p.section.is_none() && needs(&p.name) {
-                    p.section = Some(section.to_owned());
-                }
-            }
-            for body in oo::bodies_mut(s) {
-                qualify(body, section, needs);
-            }
-        }
-    }
     for p in &mut program.paragraphs {
         let Some(section) = p.section.clone() else { continue };
-        qualify(&mut p.statements, &section, &|name| named(name) > 1 && in_section(name, &section));
+        oo::each_mut(&mut p.statements, &mut |s| {
+            for name in procedure_names_mut(s) {
+                if name.section.is_none() && named(&name.name) > 1 && in_section(&name.name, &section) {
+                    name.section = Some(section.clone());
+                }
+            }
+        });
+    }
+}
+
+/// An EVALUATE subject that is a condition-name is a condition, and so are its WHEN objects
+/// written as names, which the parser could not tell from values.
+fn condition_subjects(program: &mut Program, layout: &Layout) {
+    let is_condition = |r: &Ref| matches!(layout.resolve(&r.name, &r.qualifiers, r.pos), Ok(layout::Resolved::Condition(_)));
+    for p in &mut program.paragraphs {
+        oo::each_mut(&mut p.statements, &mut |s| {
+            let Stmt::Evaluate { subjects, whens, .. } = s else { return };
+            for (k, subject) in subjects.iter_mut().enumerate() {
+                let Subject::Expr(Expr::Operand(Operand::Ref(r))) = subject else { continue };
+                if !is_condition(r) {
+                    continue;
+                }
+                *subject = Subject::Cond(Cond::Name(r.clone()));
+                for alternative in whens.iter_mut().flat_map(|w| w.alternatives.iter_mut()) {
+                    let cond = match alternative.get(k) {
+                        Some(Object::Value { not, from: Expr::Operand(Operand::Ref(o)), thru: None }) => {
+                            let c = Cond::Name(o.clone());
+                            if *not { Cond::Not(Box::new(c)) } else { c }
+                        }
+                        _ => continue,
+                    };
+                    alternative[k] = Object::Cond(cond);
+                }
+            }
+        });
     }
 }
 

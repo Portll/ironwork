@@ -560,3 +560,22 @@ fn abbreviated_relations_keep_the_subject_the_operator_and_its_not() {
     ));
     assert_eq!(out, "LIST\nOR =\nRANGE\nNOT >\nNOT = LITERAL\nNOT > ITEM\n");
 }
+
+#[test]
+fn an_evaluate_subject_that_is_a_condition_name_takes_truth_values() {
+    let data = "       01  X PIC 9 VALUE 1.\n           88  X-ONE VALUE 1.\n           88  X-TWO VALUE 2.\n";
+    let out = run(&program(
+        "",
+        data,
+        &[
+            line("EVALUATE X-ONE ALSO X WHEN TRUE ALSO 1 DISPLAY 'A'"),
+            line("END-EVALUATE"),
+            line("EVALUATE X-TWO WHEN FALSE DISPLAY 'B' END-EVALUATE"),
+            line("EVALUATE X-ONE WHEN X-TWO DISPLAY 'NO'"),
+            line("    WHEN NOT X-TWO DISPLAY 'C' END-EVALUATE"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    ));
+    assert_eq!(out, "A\nB\nC\n");
+}
