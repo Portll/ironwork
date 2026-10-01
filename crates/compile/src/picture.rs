@@ -314,6 +314,20 @@ mod tests {
     }
 
     #[test]
+    fn a_picture_can_end_in_an_insertion_comma_or_the_decimal_point() {
+        let edit = |pic: &str, notation: Notation, value: u128| {
+            let p = analyse_with(pic, notation).unwrap();
+            let point = if notation.decimal_comma { ',' } else { '.' };
+            ((p.category, p.size, p.digits, p.scale), rt::edit::numeric(p.edit.as_ref().unwrap(), p.digits, false, value, false, point, ""))
+        };
+        assert_eq!(edit("9,9,9,", Notation::default(), 123), ((Category::NumericEdited, 6, 3, 0), "1,2,3,".into()));
+        assert_eq!(edit("999.", Notation::default(), 7), ((Category::NumericEdited, 4, 3, 0), "007.".into()));
+        assert_eq!(edit("9.9.9,", COMMA, 123), ((Category::NumericEdited, 6, 3, 0), "1.2.3,".into()));
+        assert_eq!(edit("999.", COMMA, 7), ((Category::NumericEdited, 4, 3, 0), "007.".into()));
+        assert_eq!(analyse_with("999.", COMMA).unwrap().edit.unwrap()[3], Sym::Insert('.'));
+    }
+
+    #[test]
     fn a_currency_sign_clause_names_the_symbol_and_the_value_it_stands_for() {
         let signs = [CurrencySign { value: "W".into(), symbol: 'W' }, CurrencySign { value: "EUR ".into(), symbol: 'e' }];
         let notation = Notation { decimal_comma: true, currency: &signs };

@@ -305,13 +305,14 @@ impl Lexer<'_> {
         Ok(if all_digits { Tok::Number(run) } else { Tok::Word(run.to_ascii_uppercase()) })
     }
 
+    /// Only the period, comma or semicolon just before the space is a separator (assumption C195).
     fn picture(&mut self, pos: Pos) -> Result<(), Error> {
         let start = self.at;
         while self.peek(0).is_some_and(|c| c != ' ' && c != '\n') {
             self.at += 1;
         }
         let mut end = self.at;
-        while end > start && matches!(self.chars[end - 1], '.' | ',' | ';') {
+        if end > start && matches!(self.chars[end - 1], '.' | ',' | ';') {
             end -= 1;
         }
         let text: String = self.chars[start..end].iter().collect();
@@ -377,6 +378,18 @@ mod tests {
     fn a_picture_is_one_token_and_keeps_its_own_periods() {
         assert_eq!(toks("           PIC S9(3)V99 COMP-3."), [w("PIC"), Tok::Pic("S9(3)V99".into()), w("COMP-3"), Tok::Period]);
         assert_eq!(toks("           PICTURE IS ZZ,ZZ9.99."), [w("PICTURE"), w("IS"), Tok::Pic("ZZ,ZZ9.99".into()), Tok::Period]);
+    }
+
+    #[test]
+    fn only_the_last_period_or_comma_before_the_space_is_a_separator() {
+        assert_eq!(toks("           PIC 9,9,9,."), [w("PIC"), Tok::Pic("9,9,9,".into()), Tok::Period]);
+        assert_eq!(toks("           PIC 999999999999.."), [w("PIC"), Tok::Pic("999999999999.".into()), Tok::Period]);
+        assert_eq!(toks("           PIC 99, VALUE 1."), [w("PIC"), Tok::Pic("99".into()), w("VALUE"), Tok::Number("1".into()), Tok::Period]);
+        assert_eq!(toks("           PIC 9.9,; VALUE 1."), [w("PIC"), Tok::Pic("9.9,".into()), w("VALUE"), Tok::Number("1".into()), Tok::Period]);
+        assert_eq!(toks("           PIC 999., VALUE 1."), [w("PIC"), Tok::Pic("999.".into()), w("VALUE"), Tok::Number("1".into()), Tok::Period]);
+        let comma = "           DECIMAL-POINT IS COMMA.\n           PIC 9.9.9,. PIC 999,,\n";
+        let pics: Vec<Tok> = toks(comma).into_iter().filter(|t| matches!(t, Tok::Pic(_))).collect();
+        assert_eq!(pics, [Tok::Pic("9.9.9,".into()), Tok::Pic("999,".into())]);
     }
 
     #[test]

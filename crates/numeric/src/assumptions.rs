@@ -222,6 +222,7 @@ pub const OPTIONS_WITHOUT_EFFECT: &str = "C122";
 pub const NON_COBOL_CHARACTERS: &str = "C123";
 pub const NO_PROGRAM_END: &str = "C124";
 pub const USE_WITHOUT_PARAGRAPH: &str = "C125";
+pub const PICTURE_ENDS_AT_ITS_SEPARATOR: &str = "C195";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1380,6 +1381,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: USE_WITHOUT_PARAGRAPH,
         claim: "A DECLARATIVES section whose USE statement is followed at once by the next section or END DECLARATIVES gets IGYPS2036-I, 'A paragraph-name was missing after the \"USE\" statement.', informational (return code 0), on the line that follows, as Enterprise COBOL 6.3 gives it for CCVS85 IC401M, DB301M, DB302M and DB305M in the compile listings of eclipse-che4z's COBOL language server tests. No manual ironwork has lists the message. A USE statement followed by statements with no paragraph-name, and a debugging section read as a comment without WITH DEBUGGING MODE, get none, as no listing shows what IBM gives for them",
         basis: Basis::Observed,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PICTURE_ENDS_AT_ITS_SEPARATOR,
+        claim: "A PICTURE character-string is delimited only by a separator space, comma, semicolon or period (Language Reference SC27-8713-03, p. 48), and a separator comma, semicolon or period is that character followed by a space (p. 50), so only the last such character before the space is a separator and any before it belong to the string: PIC 9,9,9,. is 9,9,9, with an insertion comma at its end, and PIC 999.. is 999. with its decimal point at its end, as CCVS85 NC125A writes them. As an IBM extension the string so ended may also be followed by a separator comma or semicolon and further clauses, where the 85 standard requires the separator period (p. 744), so PIC 999., VALUE ZERO is 999. too. DECIMAL-POINT IS COMMA exchanges the period's and comma's functions only within PICTURE strings and numeric literals (pp. 131, 208), not as separators, so the same holds under it",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
 ];
