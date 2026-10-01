@@ -240,6 +240,8 @@ fn intdate_lilian_numbers_the_integer_dates_from_15_october_1582() {
     assert!(ending("", "COMPUTE S = FUNCTION INTEGER-OF-DATE(15821015)").unwrap_err().message.contains("not a date from 16010101 to 99991231"));
     assert!(ending("INTDATE(LILIAN)", "COMPUTE S = FUNCTION DATE-OF-INTEGER(3074324)").is_ok());
     assert!(ending("", "COMPUTE S = FUNCTION DATE-OF-INTEGER(3074324)").unwrap_err().message.contains("outside 1 to 3067671"));
+    assert!(ending("INTDATE(LILIAN)", "COMPUTE S = FUNCTION COMBINED-DATETIME(3074324 0)").is_ok());
+    assert!(ending("", "COMPUTE S = FUNCTION COMBINED-DATETIME(3074324 0)").unwrap_err().message.contains("outside 1 to 3067671"));
 }
 
 #[test]

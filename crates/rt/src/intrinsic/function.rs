@@ -716,7 +716,7 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
         }
         "COMBINED-DATETIME" => {
             arity(2..=2, &args)?;
-            let date = integer_date(&args[0], name, pos)?;
+            let date = integer_date(&args[0], intdate, name, pos)?;
             let seconds = match &args[1] {
                 Val::Num(x) => exact_real(x),
                 Val::Float(h) => Real::from_hfp(*h),
