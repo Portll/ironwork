@@ -1094,10 +1094,13 @@ each execution; the status, the record, the DD and the in-memory file are run-ti
 
 ```rust
 /// SELECT and FD. `format` is how records are held when the DD does not say (`described_format`);
-/// `status` is FILE STATUS with the MOVE its two characters take (`set_status`).
+/// `read_lengths` the shortest and longest variable-length record a READ takes without status 04,
+/// as VLR measures them (`compile::read_lengths`); `status` is FILE STATUS with the MOVE its two
+/// characters take (`set_status`).
 pub struct FileDesc {
     pub name: SymId, pub assign: SymId, pub organization: Organization, pub access: Access,
-    pub optional: bool, pub format: rt::files::Format, pub status: Option<(PlaceId, MovePlan)>,
+    pub optional: bool, pub format: rt::files::Format, pub read_lengths: (u32, u32),
+    pub status: Option<(PlaceId, MovePlan)>,
     /// RECORD KEY, then each ALTERNATE RECORD KEY with WITH DUPLICATES, as spans of the record area.
     pub keys: Option<IndexKeys>,
     pub relative: Option<RelativeKey>, pub linage: Option<Linage>, pub carriage: Option<Carriage>,

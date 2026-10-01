@@ -39,6 +39,9 @@ pub struct File<'a, P, X> {
     pub carriage: Option<Carriage>,
     /// Where the record area is in run-unit memory, and its length.
     pub area: (usize, usize),
+    /// The shortest and longest variable-length record a READ takes without a record length
+    /// conflict ([`crate::lir::FileDesc::read_lengths`]).
+    pub read_lengths: (usize, usize),
 }
 
 /// LINAGE's values, evaluated in this order whenever the page's geometry is taken, and
@@ -209,6 +212,14 @@ fn deliver<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, re
         x.assign(dest, Val::Bytes(bytes), None, pos)?;
     }
     Ok(record.len() > size)
+}
+
+/// Whether a record READ delivered has a record length conflict, status 04: it was longer than the
+/// record area, or it is a variable-length record outside the file's read lengths
+/// ([`numeric::assumptions::VLR_RECORDS_CHECKED`]).
+fn length_conflict<P, X>(file: &File<'_, P, X>, len: usize, variable: bool, long: bool) -> bool {
+    let (shortest, longest) = file.read_lengths;
+    long || variable && !(shortest..=longest).contains(&len)
 }
 
 /// OPEN: a file whose data set is unavailable is status 35, or 05 when it is OPTIONAL, which
@@ -392,7 +403,8 @@ pub fn read<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, r
             host::set_integer(x, rk, files::number_of(&found.key) as i64, pos)?;
         }
         let record = found.record.get(usize::from(added)..).unwrap_or_default();
-        if deliver(x, file, record, variable, r.into, pos)? && status == FileStatus::Success {
+        let long = deliver(x, file, record, variable, r.into, pos)?;
+        if length_conflict(file, record.len(), variable, long) && status == FileStatus::Success {
             status = FileStatus::SuccessWrongLength;
         }
     }
@@ -428,8 +440,9 @@ fn read_stream<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>
     } else {
         record
     };
-    let long = deliver(x, file, &record, format == Format::Variable, into, pos)?;
-    at_end(if wrong_length || long { FileStatus::SuccessWrongLength } else { FileStatus::Success })
+    let variable = format == Format::Variable;
+    let long = deliver(x, file, &record, variable, into, pos)?;
+    at_end(if wrong_length || length_conflict(file, record.len(), variable, long) { FileStatus::SuccessWrongLength } else { FileStatus::Success })
 }
 
 /// WRITE of the record at `loc`: to a LINAGE file's page, a stream, or a held file.

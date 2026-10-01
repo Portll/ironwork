@@ -243,9 +243,9 @@ pub enum Qualify {
     Extend,
 }
 
-/// The file status of a READ whose record's length conflicts with the file's record descriptions:
-/// 04 under `Standard`, checked against the level-01 records; 00 under `Compat`, checked only
-/// against RECORD VARYING (Programming Guide SC27-8714-03, pp. 422-424).
+/// What a READ of a variable-length record checks its length against: the level-01 records under
+/// `Standard`, RECORD VARYING under `Compat`; outside them its status is 04, else 00 (Programming
+/// Guide SC27-8714-03, pp. 422-424, Table 52). See assumptions C218 and C219.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Vlr {
     #[default]

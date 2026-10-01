@@ -16,7 +16,7 @@ pub mod sort;
 pub mod sql;
 
 use layout::Layout;
-use numeric::Options;
+use numeric::{Options, Vlr};
 use rt::lir::{CompileTime, TimeSource};
 use rt::storage::literal_fixed;
 use syntax::ast::*;
@@ -64,6 +64,19 @@ pub fn entry_points(program: &Program) -> Vec<EntryPoint> {
         }
     }
     out
+}
+
+/// The shortest and longest variable-length record a READ of file k takes without a record length
+/// conflict: under VLR(STANDARD) its level-01 records', under VLR(COMPAT) its RECORD IS VARYING
+/// clause's, where a bound the clause leaves out is the level-01 records' (Programming Guide
+/// SC27-8714-03, pp. 422-424; Language Reference SC27-8713-03, pp. 187, 300, 431). See
+/// [`numeric::assumptions::VLR_WITHOUT_VARYING`] and [`numeric::assumptions::VLR_RECORDS_CHECKED`].
+pub fn read_lengths(file: &FileDecl, layout: &Layout, k: usize, vlr: Vlr) -> (u32, u32) {
+    let (shortest, longest) = layout.record_lengths[k].unwrap_or((0, layout.file_areas[k].1));
+    match vlr {
+        Vlr::Compat if file.record_varying => (file.record_min.unwrap_or(shortest), file.record_max.unwrap_or(longest)),
+        _ => (shortest, longest),
+    }
 }
 
 const FUNCTIONS: &[&str] = &[

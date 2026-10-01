@@ -515,6 +515,82 @@ fn fixed_and_variable_records_are_ebcdic_bytes() {
     assert_eq!(std::fs::read(&variable).unwrap(), [0, 6, 0, 0, 0xE7, 0xE8, 0, 10, 0, 0, 0xD3, 0xD6, 0xD5, 0xC7, 0xC5, 0xD9]);
 }
 
+/// Variable-length records behind their RDWs: `n` bytes of `fill` each.
+fn rdw_records(records: &[(usize, u8)]) -> Vec<u8> {
+    records.iter().flat_map(|&(n, fill)| [((n + 4) as u16).to_be_bytes().as_slice(), &[0, 0], &vec![fill; n]].concat()).collect()
+}
+
+/// Table 52's file (Programming Guide SC27-8714-03, pp. 423-424), RECORD VARYING FROM 10 TO 80
+/// with level-01 records of 20 and 50 bytes, read `reads` times INTO a 90-byte item under the CBL
+/// card given; each READ shows its status and how much of the item the record filled.
+fn table_52(card: &str, select: &str, reads: usize) -> String {
+    let record = |name: &str, size: usize| format!("       01  {name}.\n           02 {name}-KEY PIC X(4).\n           02 PIC X({}).\n", size - 4);
+    let source = file_program(
+        &format!("           SELECT V-FILE ASSIGN TO MYDD{select}\n               FILE STATUS IS FS.\n"),
+        &[
+            "       FD  V-FILE\n           BLOCK CONTAINS 0 RECORDS\n           RECORD VARYING IN SIZE FROM 10 TO 80\n           RECORDING MODE V.\n",
+            &record("REC-20", 20),
+            &record("REC-50", 50),
+        ]
+        .concat(),
+        "       01  FS PIC XX.\n       01  W PIC X(90).\n       01  L PIC 99.\n",
+        &[
+            line("OPEN INPUT V-FILE"),
+            line(&format!("PERFORM {reads} TIMES")),
+            line("    MOVE SPACES TO W"),
+            line("    READ V-FILE NEXT INTO W"),
+            line("    COMPUTE L = FUNCTION LENGTH(FUNCTION TRIM(W TRAILING))"),
+            line("    DISPLAY FS ' ' L"),
+            line("END-PERFORM"),
+            line("CLOSE V-FILE"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    );
+    format!("{card}{source}")
+}
+
+#[test]
+fn a_variable_length_read_s_status_follows_table_52_under_each_vlr_setting() {
+    let path = temp("table-52.dat");
+    let lengths = [5, 15, 40, 70, 90];
+    std::fs::write(&path, rdw_records(&lengths.map(|n| (n, 0xC1)))).unwrap();
+    let dds = [format!("MYDD={}", path.display())];
+    let read = |card: &str| {
+        let (out, err, ending) = run_files(&table_52(card, "", lengths.len()), &dds);
+        assert!(ending.is_ok(), "{ending:?} {err}");
+        out
+    };
+    let standard = "04 05\n04 15\n00 40\n04 70\n04 80\n";
+    assert_eq!(read(""), standard);
+    assert_eq!(read("       CBL VLR(STANDARD)\n"), standard);
+    assert_eq!(read("       CBL VLR(C)\n"), "04 05\n00 15\n00 40\n00 70\n04 80\n");
+    std::fs::remove_file(&path).unwrap();
+}
+
+#[test]
+fn an_indexed_file_of_variable_length_records_reads_by_table_52_too() {
+    let path = temp("table-52.ksds");
+    let records: Vec<u8> = [(5, b'1'), (15, b'2'), (40, b'3'), (70, b'4')]
+        .iter()
+        .flat_map(|&(n, key)| {
+            let record = [vec![0xF0, 0xF0, 0xF0, 0xF0 | (key - b'0')], vec![0xC1; n - 4]].concat();
+            [((n + 4) as u16).to_be_bytes().as_slice(), &[0, 0], &record].concat()
+        })
+        .collect();
+    std::fs::write(&path, records).unwrap();
+    let dds = [format!("MYDD={}", path.display())];
+    let select = "\n               ORGANIZATION INDEXED ACCESS DYNAMIC\n               RECORD KEY REC-20-KEY";
+    let read = |card: &str| {
+        let (out, err, ending) = run_files(&table_52(card, select, 4), &dds);
+        assert!(ending.is_ok(), "{ending:?} {err}");
+        out
+    };
+    assert_eq!(read("       CBL VLR(S)\n"), "04 05\n04 15\n00 40\n04 70\n");
+    assert_eq!(read("       CBL VLR(COMPAT)\n"), "04 05\n00 15\n00 40\n00 70\n");
+    std::fs::remove_file(&path).unwrap();
+}
+
 #[test]
 fn file_status_codes_and_optional_files() {
     let source = file_program(

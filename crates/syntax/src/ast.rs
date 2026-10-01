@@ -78,6 +78,9 @@ pub struct FileDecl {
     pub recording: Option<char>,
     pub record_min: Option<u32>,
     pub record_max: Option<u32>,
+    /// RECORD IS VARYING: `record_min` and `record_max` are its FROM and TO, each None when not
+    /// written (Language Reference SC27-8713-03, p. 187).
+    pub record_varying: bool,
     pub records: Vec<DataEntry>,
     /// FD ... REPORT IS: the reports written to the file.
     pub reports: Vec<String>,
@@ -158,6 +161,9 @@ pub struct DataEntry {
     pub redefines: Option<String>,
     /// OCCURS: the number of occurrences, or the most of them for OCCURS DEPENDING ON.
     pub occurs: Option<u32>,
+    /// OCCURS ... DEPENDING ON: the fewest occurrences, 1 when no integer-1 TO is written
+    /// (Language Reference SC27-8713-03, p. 204).
+    pub occurs_min: Option<u32>,
     /// OCCURS ... DEPENDING ON: the item that holds how many occurrences there are.
     pub depending_on: Option<Ref>,
     pub sign: Option<SignClause>,

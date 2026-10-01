@@ -98,6 +98,7 @@ impl Lower<'_> {
                 _ if f.recording == Some('V') || f.record_min != f.record_max => Format::Variable,
                 _ => Format::Fixed,
             },
+            read_lengths: compile::read_lengths(f, self.layout, k, self.c.options.vlr),
             status,
             keys,
             relative,

@@ -20,6 +20,8 @@ pub struct Item {
     /// One occurrence.
     pub size: u32,
     pub occurs: u32,
+    /// The fewest occurrences: OCCURS DEPENDING ON's minimum, else `occurs`.
+    pub occurs_min: u32,
     /// Declared with OCCURS, so references to it take a subscript.
     pub table: bool,
     /// OCCURS ... DEPENDING ON: the item holding the current number of occurrences.
@@ -73,6 +75,10 @@ pub struct Layout {
     pub currencies: Vec<String>,
     /// Offset and size of each file's record area, in declaration order.
     pub file_areas: Vec<(u32, u32)>,
+    /// The least and greatest length of each file's level-01 records, an OCCURS DEPENDING ON table
+    /// counted at its fewest and at its most occurrences (Language Reference SC27-8713-03, p. 188);
+    /// None for a file with none.
+    pub record_lengths: Vec<Option<(u32, u32)>>,
     /// The item of each LINKAGE record, in order.
     pub linkage_roots: Vec<usize>,
     /// Bytes of LOCAL-STORAGE each activation gets.
@@ -155,6 +161,7 @@ pub fn build(
                 offset: 0,
                 size: 0,
                 occurs: 1,
+                occurs_min: 1,
                 table: false,
                 depending_on: None,
                 odo: None,
@@ -199,6 +206,7 @@ pub fn build(
             offset: 0,
             size: 0,
             occurs: e.occurs.unwrap_or(1),
+            occurs_min: e.occurs_min.or(e.occurs).unwrap_or(1),
             table: e.occurs.is_some(),
             depending_on: e.depending_on.clone(),
             odo: None,
@@ -263,6 +271,7 @@ pub fn build(
                 offset: 0,
                 size: 4,
                 occurs: 1,
+                occurs_min: 1,
                 table: false,
                 depending_on: None,
                 odo: None,
@@ -372,7 +381,19 @@ pub fn build(
         };
         areas.push((start, size));
     }
-    Ok(Layout { items, conditions, edits, currencies, file_areas: areas, linkage_roots, local_size: local_cursor, size: cursor, file_names: Vec::new(), linage_counters: Vec::new() })
+    let mut record_lengths: Vec<Option<(u32, u32)>> = vec![None; files.len()];
+    for &r in &roots {
+        let Some(k) = items[r].file else { continue };
+        let fewer = items[r].odo.map_or(0, |t| {
+            let t = &items[t];
+            let outer: u32 = t.dims[..t.dims.len().saturating_sub(1)].iter().map(|&(_, n)| n).product();
+            t.occurs.saturating_sub(t.occurs_min) * t.size * outer
+        });
+        let (least, most) = (items[r].size.saturating_sub(fewer), items[r].size);
+        let lengths = &mut record_lengths[k as usize];
+        *lengths = Some(lengths.map_or((least, most), |(l, m)| (l.min(least), m.max(most))));
+    }
+    Ok(Layout { items, conditions, edits, currencies, file_areas: areas, record_lengths, linkage_roots, local_size: local_cursor, size: cursor, file_names: Vec::new(), linage_counters: Vec::new() })
 }
 
 /// Gives level-66 entry `index` the storage and attributes of what it renames (Language Reference

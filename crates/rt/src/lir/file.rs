@@ -18,6 +18,10 @@ pub struct FileDesc {
     pub access: Access,
     pub optional: bool,
     pub format: Format,
+    /// The shortest and longest variable-length record a READ takes without a record length
+    /// conflict (status 04), as the VLR option measures them (Programming Guide SC27-8714-03,
+    /// pp. 422-424).
+    pub read_lengths: (u32, u32),
     pub status: Option<(PlaceId, MovePlan)>,
     /// An indexed file's keys, as spans of its record area.
     pub keys: Option<IndexKeys>,
@@ -183,7 +187,7 @@ pub enum StartKey {
 }
 
 codec_struct!(FileDesc {
-    name, assign, organization, access, optional, format, status, keys, relative, linage, carriage, sort, error,
+    name, assign, organization, access, optional, format, read_lengths, status, keys, relative, linage, carriage, sort, error,
 } check file_valid);
 codec_enum!(Organization { Sequential = 0, LineSequential = 1, Indexed = 2, Relative = 3 });
 codec_enum!(Access { Sequential = 0, Random = 1, Dynamic = 2 });

@@ -228,6 +228,8 @@ pub const APOST_EVERYWHERE: &str = "C210";
 pub const CURRENCY_OPTION: &str = "C211";
 pub const NSYMBOL_DBCS: &str = "C212";
 pub const INITIAL_UNDER_THREAD: &str = "C217";
+pub const VLR_WITHOUT_VARYING: &str = "C218";
+pub const VLR_RECORDS_CHECKED: &str = "C219";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1421,6 +1423,18 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: INITIAL_UNDER_THREAD,
         claim: "The INITIAL option with THREAD, on the same or different CBL and PROCESS cards and in either order, is ignored and NOINITIAL forced, with an error message (Programming Guide SC27-8714-03, p. 344, Table 46); under THREAD IBM diagnoses the INITIAL option as an error (p. 418). ironwork gives a warning (W, return code 4) in its own words, as for NORENT with THREAD, since the message Enterprise COBOL gives for an option dropped in conflict resolution is IGYOS4020-W (J19), and the program, its nested programs and the options in its load module are NOINITIAL. An IS INITIAL clause under THREAD keeps J13's error. A class definition gets the warning once and its methods none; the option makes no method initial, as INITIAL is an attribute of a program and its nested programs (p. 374; Language Reference SC27-8713-03, p. 103)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: VLR_WITHOUT_VARYING,
+        claim: "VLR(STANDARD) checks the length of a variable-length record a READ returns against the least and greatest of the file's level-01 records, and VLR(COMPAT) against its RECORD IS VARYING IN SIZE FROM min TO max (Programming Guide SC27-8714-03, pp. 422-424, Table 52); a FROM or TO the clause leaves out is the least or greatest level-01 record (Language Reference SC27-8713-03, p. 187), and a level-01 record's least length counts an OCCURS DEPENDING ON table at its fewest occurrences, 1 when the entry has no integer-1 TO (pp. 188, 204). A file without RECORD IS VARYING is checked against its level-01 records under COMPAT as under STANDARD, whether it has RECORD CONTAINS integer-4 TO integer-5, whose integers the record descriptions decide and must match (pp. 187, 191), RECORD CONTAINS integer-3, or no RECORD clause: the guide names only the VARYING declaration as what COMPAT checks, and gives no case without one. A file with no level-01 record is checked against its record area alone",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: VLR_RECORDS_CHECKED,
+        claim: "VLR changes the file status alone: under either setting the READ succeeds and delivers the same bytes (Programming Guide SC27-8714-03, p. 422). A record shorter than the check's minimum fills the record area only as far as its length, leaving the rest as it was, which IBM calls undefined, and one longer than the record area is truncated to it (Language Reference SC27-8713-03, pp. 431, 434); the record area, the larger of the RECORD clause's maximum and the longest level-01 record, is taken as the 'maximum record definition size' (p. 431), so a 70-byte record of Table 52's file is delivered whole and READ INTO moves its 70 bytes (p. 188). The check covers records of variable length: a sequential file whose DD or FD is variable, and an indexed, relative or I-O sequential file held in that format. A fixed-length record keeps its status 04 for a data set that ends in a short record or a record longer than the area, whatever VLR says, and a line-sequential file or text DD, whose short lines IBM fills with spaces (Programming Guide p. 218), is not checked",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

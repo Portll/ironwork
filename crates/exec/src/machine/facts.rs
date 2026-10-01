@@ -174,6 +174,10 @@ impl<'p> Machine<'p, '_, '_> {
             }),
             carriage: self.carriage[k].map(|c| lir::Carriage { machine: c.machine, reserved: c.reserved }),
             area: self.area(k),
+            read_lengths: {
+                let (shortest, longest) = compile::read_lengths(decl, layout, k, self.options.vlr);
+                (shortest as usize, longest as usize)
+            },
         }
     }
 }

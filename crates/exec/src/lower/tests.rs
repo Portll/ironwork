@@ -1401,3 +1401,25 @@ fn the_lowered_program_is_initial_under_the_initial_option_unless_thread_forces_
     assert_eq!(initial("NOINITIAL", "T IS INITIAL"), (true, false));
     assert_eq!(initial("INITIAL,THREAD", "T RECURSIVE"), (false, false));
 }
+
+#[test]
+fn each_file_carries_the_lengths_its_vlr_setting_checks_a_read_against() {
+    let lengths = |card: &str| {
+        let source = [
+            card,
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n",
+            "           SELECT A ASSIGN TO ADD.\n           SELECT B ASSIGN TO BDD.\n           SELECT C ASSIGN TO CDD.\n           SELECT D ASSIGN TO DDD.\n",
+            "       DATA DIVISION.\n       FILE SECTION.\n",
+            "       FD  A RECORD VARYING IN SIZE FROM 10 TO 80.\n       01  A-20 PIC X(20).\n       01  A-50 PIC X(50).\n",
+            "       FD  B RECORD IS VARYING IN SIZE TO 80 CHARACTERS.\n       01  B-20 PIC X(20).\n       01  B-50 PIC X(50).\n",
+            "       FD  C RECORD CONTAINS 10 TO 80 CHARACTERS.\n       01  C-20 PIC X(20).\n       01  C-50 PIC X(50).\n",
+            "       FD  D RECORDING MODE V.\n       01  D-REC.\n           05 D-N PIC 99.\n           05 D-T PIC X(5) OCCURS 1 TO 10 DEPENDING ON D-N.\n",
+            "       WORKING-STORAGE SECTION.\n       PROCEDURE DIVISION.\n",
+            &line("GOBACK."),
+        ]
+        .concat();
+        lowered(&source).services.files.iter().map(|f| f.read_lengths).collect::<Vec<_>>()
+    };
+    assert_eq!(lengths(""), [(20, 50), (20, 50), (20, 50), (7, 52)]);
+    assert_eq!(lengths("       CBL VLR(COMPAT)\n"), [(10, 80), (20, 80), (20, 50), (7, 52)]);
+}

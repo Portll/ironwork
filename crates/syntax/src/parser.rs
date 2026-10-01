@@ -547,6 +547,7 @@ impl Parser<'_> {
             recording: None,
             record_min: None,
             record_max: None,
+            record_varying: false,
             records: Vec::new(),
             reports: Vec::new(),
             linage: None,
@@ -665,7 +666,8 @@ impl Parser<'_> {
                     "RECORD" => {
                         self.accept_word("CONTAINS");
                         self.accept_word("IS");
-                        if self.accept_word("VARYING") {
+                        let varying = self.accept_word("VARYING");
+                        if varying {
                             files[index].recording.get_or_insert('V');
                             self.accept_word("IN");
                             self.accept_word("SIZE");
@@ -683,7 +685,10 @@ impl Parser<'_> {
                         };
                         let first = number(self)?;
                         let second = if self.accept_word("TO") { number(self)? } else { None };
-                        if first.is_some() {
+                        if varying {
+                            files[index].record_varying = true;
+                            (files[index].record_min, files[index].record_max) = (first, second);
+                        } else if first.is_some() {
                             files[index].record_min = first;
                             files[index].record_max = second.or(first);
                         }
@@ -970,6 +975,7 @@ impl Parser<'_> {
             value: None,
             redefines: None,
             occurs: None,
+            occurs_min: None,
             depending_on: None,
             sign: None,
             justified: false,
@@ -1045,7 +1051,9 @@ impl Parser<'_> {
                         Ok(n)
                     };
                     let mut most = count(self)?;
+                    let mut least = 1;
                     if self.accept_word("TO") {
+                        least = most;
                         most = count(self)?;
                     }
                     e.occurs = Some(most);
@@ -1053,6 +1061,7 @@ impl Parser<'_> {
                     if self.accept_word("DEPENDING") {
                         self.accept_word("ON");
                         e.depending_on = Some(self.reference()?);
+                        e.occurs_min = Some(least);
                     }
                     loop {
                         if let Some(order) = self.accept_any(&["ASCENDING", "DESCENDING"]) {
@@ -3326,6 +3335,21 @@ mod tests {
             let e = crate::parse(&text).unwrap_err();
             assert!(e.message.contains(expected), "{fd}: {}", e.message);
         }
+    }
+
+    #[test]
+    fn record_varying_keeps_from_and_to_apart_and_an_odo_table_its_fewest_occurrences() {
+        let fds = [
+            "       FD  P RECORD IS VARYING IN SIZE TO 80 CHARACTERS.\n       01  P-REC PIC X.\n",
+            "       FD  S RECORD VARYING FROM 10.\n       01  S-REC.\n           05 N PIC 9.\n           05 T PIC X OCCURS 9 DEPENDING ON N.\n",
+            "       FD  Q RECORD CONTAINS 10 TO 80.\n       01  Q-REC.\n           05 U PIC X OCCURS 2 TO 9 TIMES DEPENDING ON N.\n",
+        ]
+        .concat();
+        let p = crate::parse(&linage_program(&fds, "           GOBACK.\n")).unwrap_or_else(|e| panic!("{e}"));
+        let bounds = |k: usize| (p.files[k].record_varying, p.files[k].record_min, p.files[k].record_max);
+        assert_eq!([bounds(0), bounds(1), bounds(2)], [(true, None, Some(80)), (true, Some(10), None), (false, Some(10), Some(80))]);
+        assert_eq!((p.files[1].records[2].occurs, p.files[1].records[2].occurs_min), (Some(9), Some(1)));
+        assert_eq!((p.files[2].records[1].occurs, p.files[2].records[1].occurs_min), (Some(9), Some(2)));
     }
 
     #[test]

@@ -60,6 +60,7 @@ pub(crate) fn entry(level: u8, name: Option<String>, picture: Option<String>, us
         value: None,
         redefines: None,
         occurs: None,
+        occurs_min: None,
         depending_on: None,
         sign: None,
         justified: false,

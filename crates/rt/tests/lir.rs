@@ -974,7 +974,8 @@ fn a_markup_tree_whose_member_comes_before_its_holder_is_malformed() {
     assert_eq!(refused::<XmlGenerate>(&bytes, &strings), (0, "a markup tree with no root".into()));
 }
 
-/// An indexed file with FILE STATUS, an alternate key, LINAGE and a print file's carriage.
+/// An indexed file of variable-length records with FILE STATUS, an alternate key, LINAGE and a
+/// print file's carriage.
 fn master() -> FileDesc {
     let span = RecordSpan { offset: 0, len: 6 };
     FileDesc {
@@ -984,6 +985,7 @@ fn master() -> FileDesc {
         access: Access::Dynamic,
         optional: true,
         format: Format::Variable,
+        read_lengths: (26, 300),
         status: Some((3, ALNUM)),
         keys: Some(IndexKeys { prime: span, alternates: vec![(RecordSpan { offset: 6, len: 20 }, true)] }),
         relative: None,
