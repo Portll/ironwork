@@ -11,7 +11,7 @@ use std::fmt;
 
 pub use codec::{Decode, Encode, Reader, Writer};
 pub use container::{EXTENSIONS, MAGIC, Module, ModuleWriter, OPTIONAL, Section, SectionEntry, Version};
-pub use programs::{DirectoryEntry, LoadedModule, read, write, write_with};
+pub use programs::{DirectoryEntry, LayoutRecord, LirRecord, LoadedModule, read, write, write_with};
 pub use strings::StringTable;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

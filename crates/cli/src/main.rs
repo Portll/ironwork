@@ -16,6 +16,11 @@ usage:
                [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]... [--td QUEUE=path]...
                [--screens path | --serve HOST:PORT [--transaction TRAN=PROGRAM]... [--csd path]]
                                                        run as the first program of a CICS task
+  ironwork compile <program.cbl>... [-o <dir>] [--bundle NAME] [--source-prefix DIR] [-silent] [-strict-sort-keys]
+               [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never]
+               [-I <dir>]... [-L <dir>]...                compile and lower each source's programs to a load module
+  ironwork dump [--section NAME]... [--strings] [--no-check] <module.iwm>
+                                                       print a load module, one fact per line
   ironwork job <job.jcl> --datasets DIR[:text] [--proclib DIR]... [run flags] [-I <dir>]... [-L <dir>]... [--clock <time>] [--sql-replay path]
                                                        run a job's steps in order
   ironwork assumptions [--c-series]                    list the register of assumptions, one per line
@@ -97,6 +102,28 @@ flags:
   --sql-replay-mode strict|keyed
              strict (the default) answers call n from the recording's call n; keyed answers each
              call from the first unused recorded call with the same statement and inputs
+compile flags:
+  -o <dir>   where the modules go, created if missing; the current directory without it. Each
+             source's programs make one module, named after the source: PAYROLL.cbl gives
+             PAYROLL.iwm. A source that does not compile or lower writes nothing, and a module is
+             written whole or not at all. The same source, libraries and options give the same
+             bytes; a program that uses FUNCTION WHEN-COMPILED holds the compile time, which is
+             SOURCE_DATE_EPOCH's when it is set. -L is taken as run takes it: every CALL is
+             resolved by name when it runs, so it does not change the module
+  --bundle NAME
+             every source's programs in one module, NAME.iwm, with one directory, written only if
+             every source compiles and lowers
+  --source-prefix DIR
+             the directory the debug table puts before each source's file name, which is
+             otherwise the file name alone; COPY members are named relative to their library
+dump flags:
+  --section NAME
+             print only the named sections (STRINGS, DIRECTORY, OPTIONS, LAYOUT, LIR, SQL, BMS,
+             DEBUG) after the header and the section table
+  --strings  print the string table, which the other sections print inline
+  --no-check print a section whose checksum differs too; without it the section is not printed
+             and the exit status is 1. Exit status 1 for a module the reader refuses, a section
+             that does not decode or a checksum that differs, 2 for a file that cannot be read
 cics flags:
   --transid, --termid, --userid, --applid, --sysid
              who and what started the task, as EIBTRNID, EIBTRMID and ASSIGN report them
@@ -188,18 +215,21 @@ compare flags: ironwork compare --base OLD.cbl --head NEW.cbl [--dd NAME=path]..
   exit status 0 equivalent or equivalent as declared, 1 diverged, 3 inconclusive, 2 usage
 compile messages go to standard error, errors first, then warnings, then informational messages:
   `path:line:col: message`, `path:line:col: warning: message`, `path:line:col: informational: message`
-exit status: for check, and for a run the compile refuses, the compile's return code, the highest
+exit status: for check and compile, and for a run the compile refuses, the compile's return code, the highest
   of its messages' severities as IBM's: 0 none or informational, 4 warnings, 8, 12 or 16 errors; run
   and cics refuse from 12 under IBM's default NOCOMPILE(S), from 4 under -warnings-block, or as a
-  card's COMPILE or NOCOMPILE says. Otherwise RETURN-CODE when the run ends normally, 16 an abend;
-  2 usage";
+  card's COMPILE or NOCOMPILE says; compile gives 12 for a program lowering refuses, naming the
+  construct and where it is, and 16 for a source it cannot read or a module it cannot write.
+  Otherwise RETURN-CODE when the run ends normally, 16 an abend; 2 usage";
 
 const FLAGS: &[&str] = &["-silent", "-strict-sort-keys", "-warnings-block", "-debug"];
 const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid", "--sysid", "--commarea", "--commarea-out", "--file", "--td", "--screens", "--serve", "--transaction", "--csd"];
 
 mod compare;
+mod compile;
 mod coverage;
 mod ddl;
+mod dump;
 mod evidence;
 mod job;
 mod provenance;
@@ -254,6 +284,8 @@ fn driver() -> ExitCode {
     let mut datasets: Option<String> = None;
     let mut coverage_file: Option<std::path::PathBuf> = None;
     let mut proclibs: Vec<std::path::PathBuf> = Vec::new();
+    let (mut out_dir, mut bundle, mut source_prefix): (Option<std::path::PathBuf>, Option<String>, Option<String>) = (None, None, None);
+    let mut dump_options = dump::Options { check: true, ..Default::default() };
     while let Some(a) = args.next() {
         match a.as_str() {
             "-h" | "--help" => {
@@ -337,6 +369,25 @@ fn driver() -> ExitCode {
                 Some(value) => cics_options.push((a.clone(), value)),
                 None => return usage_error(&format!("{o} needs a value")),
             },
+            "-o" => match args.next() {
+                Some(dir) => out_dir = Some(std::path::PathBuf::from(dir)),
+                None => return usage_error("-o needs a directory"),
+            },
+            "--bundle" => match args.next() {
+                Some(name) => bundle = Some(name),
+                None => return usage_error("--bundle needs a module name"),
+            },
+            "--source-prefix" => match args.next() {
+                Some(prefix) => source_prefix = Some(prefix),
+                None => return usage_error("--source-prefix needs a directory"),
+            },
+            "--section" => match args.next().as_deref().map(|n| (n.to_owned(), dump::section_named(n))) {
+                Some((_, Some(section))) => dump_options.only.push(section),
+                Some((name, None)) => return usage_error(&format!("--section {name}: no such section")),
+                None => return usage_error("--section needs a section name"),
+            },
+            "--strings" => dump_options.strings = true,
+            "--no-check" => dump_options.check = false,
             "--c-series" => c_series = true,
             "-I" => match args.next() {
                 Some(dir) => libraries.push(std::path::PathBuf::from(dir)),
@@ -360,6 +411,40 @@ fn driver() -> ExitCode {
     }
     if c_series {
         return usage_error("unknown flag --c-series");
+    }
+    let run_flags = !dds.is_empty() || replay.is_some() || keyed || sql_db.is_some() || sql_record.is_some() || evidence_dir.is_some() || trace_marker.is_some()
+        || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() || !matches!(clock, exec::unit::Clock::System)
+        || compare_base.is_some() || compare_head.is_some() || declare.is_some() || statement.is_some() || !expected.is_empty() || datasets.is_some()
+        || !proclibs.is_empty();
+    let dump_flags = !dump_options.only.is_empty() || dump_options.strings || !dump_options.check;
+    let compile_flags = out_dir.is_some() || bundle.is_some() || source_prefix.is_some();
+    match rest.split_first() {
+        Some((c, sources)) if c == "compile" => {
+            if sources.is_empty() {
+                return usage_error("compile needs a program");
+            }
+            if run_flags || dump_flags {
+                return usage_error("compile takes the compile flags, -I, -L, -o, --bundle and --source-prefix");
+            }
+            return compile::run(compile::Request {
+                sources: sources.iter().map(std::path::PathBuf::from).collect(),
+                out: out_dir.unwrap_or_else(|| std::path::PathBuf::from(".")),
+                bundle,
+                libraries,
+                flags,
+                source_prefix,
+            });
+        }
+        Some((c, files)) if c == "dump" => {
+            let [file] = files else { return usage_error("dump needs one module") };
+            if run_flags || compile_flags || !flags.is_empty() || !libraries.is_empty() || !program_dirs.is_empty() {
+                return usage_error("dump takes --section, --strings and --no-check");
+            }
+            return dump::run(dump::Request { file: file.into(), options: dump_options });
+        }
+        _ if compile_flags => return usage_error("-o, --bundle and --source-prefix are for compile"),
+        _ if dump_flags => return usage_error("--section, --strings and --no-check are for dump"),
+        _ => {}
     }
     if trace_marker.is_some() && (evidence_dir.is_none() || !matches!(rest.first().map(String::as_str), Some("run" | "job" | "cics"))) {
         return usage_error("--trace-marker goes with --evidence, for run, job and cics");

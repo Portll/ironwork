@@ -105,26 +105,30 @@ impl<'a> Parts<'a> {
     }
 }
 
-/// The `LIR` section's share of a program.
-struct Body {
-    id: SymId,
-    initial: bool,
-    recursive: bool,
-    paragraphs: Vec<Paragraph>,
-    procedure_start: ParaId,
-    ranges: Vec<Range>,
-    blocks: Vec<Block>,
-    places: Vec<Place>,
-    exprs: Vec<Expr>,
-    conds: Vec<Cond>,
-    consts: Vec<Const>,
-    plans: Plans,
-    services: Services,
-    abends: Vec<AbendText>,
-    symbols: Vec<String>,
+/// One program's record in the `LAYOUT` section.
+pub type LayoutRecord = (Storage, Vec<Item>, Vec<Edit>);
+
+/// One program's record in the `LIR` section: the fields of `Program` no other section holds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LirRecord {
+    pub id: SymId,
+    pub initial: bool,
+    pub recursive: bool,
+    pub paragraphs: Vec<Paragraph>,
+    pub procedure_start: ParaId,
+    pub ranges: Vec<Range>,
+    pub blocks: Vec<Block>,
+    pub places: Vec<Place>,
+    pub exprs: Vec<Expr>,
+    pub conds: Vec<Cond>,
+    pub consts: Vec<Const>,
+    pub plans: Plans,
+    pub services: Services,
+    pub abends: Vec<AbendText>,
+    pub symbols: Vec<String>,
 }
 
-impl Decode for Body {
+impl Decode for LirRecord {
     fn decode(r: &mut Reader<'_>) -> Result<Self, ModuleError> {
         Ok(Self {
             id: Decode::decode(r)?,
@@ -242,8 +246,8 @@ pub fn read(bytes: &[u8]) -> Result<LoadedModule, ModuleError> {
     let count = directory.len();
 
     let options = records::<ProgramOptions>(&module, &strings, Section::OPTIONS, count)?;
-    let layouts = records::<(Storage, Vec<Item>, Vec<Edit>)>(&module, &strings, Section::LAYOUT, count)?;
-    let bodies = records::<Body>(&module, &strings, Section::LIR, count)?;
+    let layouts = records::<LayoutRecord>(&module, &strings, Section::LAYOUT, count)?;
+    let bodies = records::<LirRecord>(&module, &strings, Section::LIR, count)?;
     let sql = records::<Vec<SqlEntry>>(&module, &strings, Section::SQL, count)?;
     let debug = records::<Debug>(&module, &strings, Section::DEBUG, count)?;
 
@@ -258,7 +262,7 @@ pub fn read(bytes: &[u8]) -> Result<LoadedModule, ModuleError> {
     let parts = options.into_iter().zip(layouts).zip(bodies).zip(sql).zip(debug);
     let mut programs = Vec::with_capacity(count);
     for ((((options, (storage, items, edits)), body), sql), debug) in parts {
-        let Body {
+        let LirRecord {
             id, initial, recursive, paragraphs, procedure_start, ranges, blocks, places, exprs, conds, consts, plans,
             services, abends, symbols,
         } = body;

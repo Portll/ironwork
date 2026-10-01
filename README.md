@@ -21,6 +21,17 @@ From a checkout:
 
     cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
     cargo run -p ironwork -- check program.cbl [-warnings-block] [--cics-return-warning=once|always|never] [-I copylib]...
+    cargo run -p ironwork -- compile program.cbl... [-o dir] [--bundle NAME] [--source-prefix DIR] [run's compile flags] [-I copylib]...
+    cargo run -p ironwork -- dump [--section NAME]... [--strings] [--no-check] program.iwm
+
+`compile` lowers each source's programs and writes them as one load module,
+[docs/load-module.md](docs/load-module.md): PAYROLL.cbl gives PAYROLL.iwm in `-o`'s directory, or
+every source's programs go into NAME.iwm under `--bundle NAME`. A program lowering refuses is
+named with the construct and its position, and its source writes nothing. The same source,
+libraries and options give the same bytes from any process or directory; a program that uses
+FUNCTION WHEN-COMPILED holds the compile time, SOURCE_DATE_EPOCH's when it is set. `dump` prints a
+module one fact per line, in section order, and exits 1 for a damaged one. `run` does not run a
+module yet: that needs the VM of [docs/codegen-runtime.md](docs/codegen-runtime.md).
 
 CBL and PROCESS cards set the options. COPY members are found in the program's own directory, then
 each `-I` library: a copybook (`.cpy`, `.copy`) in any of them before a program source (`.cbl`,
