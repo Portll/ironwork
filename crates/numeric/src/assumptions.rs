@@ -231,6 +231,7 @@ pub const INITIAL_UNDER_THREAD: &str = "C217";
 pub const VLR_WITHOUT_VARYING: &str = "C218";
 pub const VLR_RECORDS_CHECKED: &str = "C219";
 pub const VSAM_OPEN_NEVER_VERIFIED: &str = "C220";
+pub const DISPSIGN_SEPARATE: &str = "C213";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1442,6 +1443,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: VSAM_OPEN_NEVER_VERIFIED,
         claim: "VSAMOPENFS is read from a card and kept in the load module's options, but no ironwork OPEN reaches the condition it changes: a VSAM OPEN that succeeds once the file's integrity is verified, status 97 under COMPAT and 00 under SUCC (Programming Guide SC27-8714-03, pp. 199, 424; Language Reference SC27-8713-03, p. 303). Neither manual says when the check is made; from memory, z/OS makes it when a data set was left open for output, typically by a run that abended, and OPEN's implicit VERIFY succeeds. ironwork closes every file a run unit leaves open when it ends, abend or not, and holds an indexed or relative file in memory from OPEN to CLOSE, writing it whole at CLOSE, so a data set is always as a CLOSE left it and nothing marks it as not closed. Modelling it needs a mark kept with the data set, set by OPEN OUTPUT, I-O or EXTEND and left by an abend, which rt::files's rule that a program reaches only the files the operator maps does not provide for, and a choice of whether status 97 takes the file's error path. Until then a successful VSAM OPEN is 00, or 05 for an optional file, under either setting",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: DISPSIGN_SEPARATE,
+        claim: "Under DISPSIGN(SEP) DISPLAY shows a signed binary, packed or overpunched zoned item as a leading + or - followed by the digits DISPSIGN(COMPAT) shows, unsigned (Programming Guide SC27-8714-03, pp. 362-363, Table 48), so a COMP-5 or TRUNC(BIN) binary item keeps its 5, 10, 19 or 20 digits (C14). IBM's table lists no other kind, and the rest is chosen: a zoned item with SIGN SEPARATE, whose sign is separate already, shows as stored, a trailing sign staying last; an unsigned item, and a value that is not an item (a literal, a function's result), is unchanged; a national decimal item, which ironwork does not lay out yet, would be unchanged too, IBM naming only binary, packed and zoned. An overpunched zoned item is read as its bytes, as COMPAT shows them, not as arithmetic reads it: the sign is - when the sign position's zone is X'B' or X'D' and + for any other zone, one that is no sign included, and the digits are the bytes with that zone made X'F', so invalid data is shown rather than ending the run",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

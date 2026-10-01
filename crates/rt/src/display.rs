@@ -5,21 +5,24 @@ use crate::abend::{Abend, AbendCode, Signal};
 use crate::fixed::{pow10, zoned_digits};
 use crate::storage::{Kind, Loc, Val};
 use crate::store::{self, ProgramFacts};
-use crate::vocab::Pos;
-use numeric::Trunc;
+use crate::vocab::{Pos, SignClause, SignPosition};
+use numeric::{DispSign, Trunc};
 use std::io::Write;
 use zarch::decimal;
 
 type R<T> = Result<T, Abend>;
 
 /// A data item, by its kind: packed and binary items as their last digits, COMP-5 and TRUNC(BIN)
-/// binary items as every digit their halfword, fullword or doubleword holds.
+/// binary items as every digit their halfword, fullword or doubleword holds. Under DISPSIGN(SEP) a
+/// signed binary, packed or overpunched zoned item shows its sign, + or -, before those digits
+/// (Programming Guide SC27-8714-03, pp. 362-363; assumption C213).
 pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<String> {
+    let separate = facts.options().dispsign == DispSign::Sep;
     Ok(match loc.kind {
         Kind::National => utf16_text(store::bytes(mem, loc)),
         Kind::Packed { digits, signed, .. } | Kind::Binary { digits, signed, .. } => {
             let Val::Num(f) = store::read_stored(facts, mem, loc, pos)? else { unreachable!() };
-            let zone = match (signed, f.negative) {
+            let zone = match (signed && !separate, f.negative) {
                 (false, _) => decimal::UNSIGNED,
                 (true, true) => decimal::MINUS,
                 (true, false) => decimal::PLUS,
@@ -39,7 +42,14 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<Stri
             } else {
                 zoned_digits(f.magnitude.div_rem(pow10(digits)).1.to_u128().unwrap_or(0), digits as usize, zone)
             };
-            facts.page().decode(&shown)
+            facts.page().decode(&if signed && separate { sign_first(f.negative, shown) } else { shown })
+        }
+        Kind::Zoned { signed: true, sign, .. } if separate && !sign.is_some_and(|s| s.separate) => {
+            let mut shown = store::bytes(mem, loc).to_vec();
+            let at = if sign == Some(SignClause { position: SignPosition::Leading, separate: false }) { 0 } else { shown.len() - 1 };
+            let negative = matches!(shown[at] >> 4, 0xB | 0xD);
+            shown[at] |= 0xF0;
+            facts.page().decode(&sign_first(negative, shown))
         }
         Kind::Float(_) => return Err(Abend::ironwork("DISPLAY of a floating-point item is not supported yet", pos)),
         Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer => {
@@ -47,6 +57,13 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<Stri
         }
         _ => facts.page().decode(store::bytes(mem, loc)),
     })
+}
+
+/// Zoned digits after a separate sign, as DISPSIGN(SEP) shows a signed item.
+fn sign_first(negative: bool, digits: Vec<u8>) -> Vec<u8> {
+    let mut shown = vec![if negative { 0x60 } else { 0x4E }];
+    shown.extend(digits);
+    shown
 }
 
 /// A numeric literal as written, its decimal point the program's.

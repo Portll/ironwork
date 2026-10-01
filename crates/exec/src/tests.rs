@@ -957,6 +957,26 @@ fn display_shows_the_whole_binary_value_under_trunc_bin_and_for_comp_5() {
     assert_eq!(run(&program("TRUNC(STD)", data, &body)), "234E 1234E 0123456789\n");
 }
 
+/// The items of Table 48 (Programming Guide SC27-8714-03, p. 363).
+const TABLE_48: &str = "       01  UB PIC 9(3) BINARY VALUE 111.\n       01  PB PIC S9(3) BINARY VALUE 111.\n       01  NB PIC S9(3) BINARY VALUE -111.\n       01  UPD PIC 9(3) COMP-3 VALUE 222.\n       01  PPD PIC S9(3) COMP-3 VALUE 222.\n       01  NPD PIC S9(3) COMP-3 VALUE -222.\n       01  UZ PIC 9(3) VALUE 333.\n       01  TP PIC S9(3) VALUE 333.\n       01  TN PIC S9(3) VALUE -333.\n       01  LP PIC S9(3) SIGN LEADING VALUE 333.\n       01  LN PIC S9(3) SIGN LEADING VALUE -333.\n";
+
+#[test]
+fn dispsign_sep_shows_a_signed_items_sign_before_its_digits_as_table_48_does() {
+    let body = [line("DISPLAY UB ' ' PB ' ' NB"), line("DISPLAY UPD ' ' PPD ' ' NPD"), line("DISPLAY UZ ' ' TP ' ' TN ' ' LP ' ' LN"), line("GOBACK.")].concat();
+    assert_eq!(run(&program("DISPSIGN(SEP)", TABLE_48, &body)), "111 +111 -111\n222 +222 -222\n333 +333 -333 +333 -333\n");
+    let body = [line("DISPLAY UB ' ' NB ' ' UPD ' ' NPD"), line("DISPLAY UZ ' ' TP ' ' TN ' ' LP ' ' LN"), line("GOBACK.")].concat();
+    assert_eq!(run(&program("DS(C)", TABLE_48, &body)), "111 11J 222 22K\n333 33C 33L C33 L33\n");
+    assert_eq!(run(&program("", TABLE_48, &body)), "111 11J 222 22K\n333 33C 33L C33 L33\n");
+}
+
+#[test]
+fn dispsign_sep_leaves_a_separate_sign_where_it_is_and_reads_a_zoned_sign_from_its_zone() {
+    let data = "       01  SS PIC S9(3) SIGN TRAILING SEPARATE VALUE -333.\n       01  C5 PIC S9(4) COMP-5.\n       01  G.\n           05 BAD PIC S9(3).\n       01  F PIC S9(3)V99 COMP-3 VALUE -1.5.\n";
+    let body = [line("MOVE 12345 TO C5"), line("MOVE '12 ' TO G"), line("DISPLAY SS ' ' C5 ' ' BAD ' ' F"), line("GOBACK.")].concat();
+    assert_eq!(run(&program("DS(S)", data, &body)), "333- +12345 +120 -00150\n");
+    assert_eq!(run(&program("DS(C)", data, &body)), "333- 1234E 12  0015}\n");
+}
+
 #[test]
 fn a_reference_cannot_leave_working_storage() {
     let (_, _, ending) = run_with(&program("", "       01  X PIC X(4).\n", &[line("MOVE 'A' TO X(1:4000)"), line("GOBACK.")].concat()), &[]);
