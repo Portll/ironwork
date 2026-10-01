@@ -559,19 +559,24 @@ impl Parser<'_> {
                     let target = target.to_ascii_uppercase();
                     f.assign = target.rsplit('-').next().filter(|_| target.contains("-S-") || target.starts_with("S-") || target.starts_with("AS-")).unwrap_or(&target).to_owned();
                 }
+                // RECORD DELIMITER is syntax-checked and has no effect (LR, 'RECORD DELIMITER clause').
+                "RECORD" if self.accept_word("DELIMITER") => {
+                    self.accept_word("IS");
+                    self.name("STANDARD-1 or an assignment-name")?;
+                }
                 "RECORD" if !self.is_word("SEQUENTIAL") => {
                     self.accept_word("KEY");
                     self.accept_word("IS");
                     f.record_key = Some(self.reference()?);
                 }
-                "RELATIVE" if self.is_word("KEY") => {
-                    self.at += 1;
+                "RELATIVE" if self.is_word("KEY") || self.is_word("IS") || self.starts_ref() && !self.word().is_some_and(|w| SELECT_CLAUSES.contains(&w)) => {
+                    self.accept_word("KEY");
                     self.accept_word("IS");
                     f.relative_key = Some(self.reference()?);
                 }
                 "ALTERNATE" => {
                     self.accept_word("RECORD");
-                    self.expect_word("KEY")?;
+                    self.accept_word("KEY");
                     self.accept_word("IS");
                     let key = self.reference()?;
                     let duplicates = self.accept_word("WITH") | self.is_word("DUPLICATES");
@@ -3113,6 +3118,28 @@ mod tests {
         assert!(matches!(&s[3], Stmt::GoToDepending { targets, on, .. } if targets.len() == 2 && on.name == "D"));
         assert!(matches!(&p.paragraphs[2].statements[0], Stmt::GoTo { target: None, .. }));
         assert!(matches!(&p.paragraphs[3].statements[0], Stmt::GoTo { target: Some(t), .. } if t.name == "P1"));
+    }
+
+    #[test]
+    fn select_clauses_with_their_optional_words_left_out() {
+        let text = [
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n",
+            "           SELECT R ASSIGN RDD ORGANIZATION RELATIVE ACCESS RANDOM\n               RELATIVE R-KEY.\n",
+            "           SELECT Q ASSIGN QDD RELATIVE ACCESS DYNAMIC\n               RELATIVE IS Q-KEY.\n",
+            "           SELECT X ASSIGN XDD ORGANIZATION INDEXED\n               RECORD X-KEY ALTERNATE RECORD X-ALT\n               ALTERNATE RECORD IS X-ALT2 WITH DUPLICATES.\n",
+            "           SELECT S ASSIGN SDD RECORD DELIMITER IS STANDARD-1.\n",
+            "       DATA DIVISION.\n       FILE SECTION.\n       FD  R.\n       01  R-REC PIC X.\n       FD  Q.\n       01  Q-REC PIC X.\n",
+            "       FD  X.\n       01  X-REC.\n           05 X-KEY PIC X.\n           05 X-ALT PIC X.\n           05 X-ALT2 PIC X.\n       FD  S.\n       01  S-REC PIC X.\n",
+            "       WORKING-STORAGE SECTION.\n       01  R-KEY PIC 9.\n       01  Q-KEY PIC 9.\n       PROCEDURE DIVISION.\n           GOBACK.\n",
+        ]
+        .concat();
+        let p = crate::parse(&text).unwrap_or_else(|e| panic!("{e}"));
+        let f = &p.files;
+        assert!(f[0].organization == Organization::Relative && f[0].relative_key.as_ref().is_some_and(|k| k.name == "R-KEY"));
+        assert!(f[1].organization == Organization::Relative && f[1].relative_key.as_ref().is_some_and(|k| k.name == "Q-KEY"));
+        let alternates: Vec<(&str, bool)> = f[2].alternate_keys.iter().map(|(k, d)| (k.name.as_str(), *d)).collect();
+        assert_eq!(alternates, [("X-ALT", false), ("X-ALT2", true)]);
+        assert!(f[3].record_key.is_none() && f[3].organization == Organization::Sequential);
     }
 
     #[test]
