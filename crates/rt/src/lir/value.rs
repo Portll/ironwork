@@ -79,6 +79,9 @@ pub enum Compare {
     /// Two addresses, one side an object reference: equal when both identify the same object, else
     /// less. Each side is looked up, the first first, and one that was freed or never given abends.
     References,
+    /// A zoned integer, the first operand when `zoned_first`, against a nonnumeric one: its bytes
+    /// as `rt::store::compared_zoned_bytes` gives them, never its value, compared as alphanumeric.
+    ZonedBytes { zoned_first: bool },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,6 +139,7 @@ codec_enum!(Compare {
     Alphanumeric = 5,
     Refused(abend) = 6,
     References = 7,
+    ZonedBytes { zoned_first } = 8,
 });
 codec_enum!(ByteClass { Packed { signed } = 0, Zoned { signed } = 1, Digits = 2, Alphabetic = 3 });
 codec_enum!(SignTest { Positive = 0, Negative = 1, Zero = 2 });

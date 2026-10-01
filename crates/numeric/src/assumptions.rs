@@ -223,6 +223,7 @@ pub const NON_COBOL_CHARACTERS: &str = "C123";
 pub const NO_PROGRAM_END: &str = "C124";
 pub const USE_WITHOUT_PARAGRAPH: &str = "C125";
 pub const PICTURE_ENDS_AT_ITS_SEPARATOR: &str = "C195";
+pub const ZONED_COMPARED_AS_BYTES: &str = "C221";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1387,6 +1388,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: PICTURE_ENDS_AT_ITS_SEPARATOR,
         claim: "A PICTURE character-string is delimited only by a separator space, comma, semicolon or period (Language Reference SC27-8713-03, p. 48), and a separator comma, semicolon or period is that character followed by a space (p. 50), so only the last such character before the space is a separator and any before it belong to the string: PIC 9,9,9,. is 9,9,9, with an insertion comma at its end, and PIC 999.. is 999. with its decimal point at its end, as CCVS85 NC125A writes them. As an IBM extension the string so ended may also be followed by a separator comma or semicolon and further clauses, where the 85 standard requires the separator period (p. 744), so PIC 999., VALUE ZERO is 999. too. DECIMAL-POINT IS COMMA exchanges the period's and comma's functions only within PICTURE strings and numeric literals (pp. 131, 208), not as separators, so the same holds under it",
         basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ZONED_COMPARED_AS_BYTES,
+        claim: "A zoned integer compared with a nonnumeric operand, an alphanumeric, alphanumeric-edited, numeric-edited or group item, an alphanumeric or hexadecimal literal, or a figurative constant other than ZERO, is compared as the bytes it holds, without being read as a number: a numeric integer in such a comparison is treated as moved to an alphanumeric item of its size (Language Reference, comparison of numeric and alphanumeric operands), which for zoned data copies the digits. Under ZWB, IBM's default, a sign it overpunches is removed first (its zone made F); under NOZWB it is kept (Programming Guide SC27-8714-03, p. 431: 'Use NOZWB if you want to test input numeric fields for SPACES'); a separate sign is left out either way. So an unsigned item holding spaces equals SPACES, and a signed one does under NOZWB, where reading it as a number would end in a data exception. A scaled item is compared as its digits, as before",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

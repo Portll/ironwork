@@ -82,8 +82,24 @@ impl Lower<'_> {
     pub(super) fn relation(&mut self, a: &Expr, op: RelOp, b: &Expr, pos: Pos) -> R<Test> {
         let (a, x) = self.comparand(a, pos)?;
         let (b, y) = self.comparand(b, pos)?;
-        let how = self.compare(&x, &y, pos)?;
+        let how = if self.zoned_against(&a, &x, &y) {
+            Compare::ZonedBytes { zoned_first: true }
+        } else if self.zoned_against(&b, &y, &x) {
+            Compare::ZonedBytes { zoned_first: false }
+        } else {
+            self.compare(&x, &y, pos)?
+        };
         Ok(Test::Cond(self.cond(lir::Cond::Rel { a, op, b, how })?))
+    }
+
+    /// Whether `c` is an unscaled zoned integer item and `other` nonnumeric, which `Machine::compare`
+    /// compares by the item's bytes.
+    fn zoned_against(&self, c: &Comparand, x: &Side, other: &Side) -> bool {
+        let nonnumeric = matches!(other.value, Value::Bytes | Value::All) || matches!(other.value, Value::Fig(f) if !matches!(f, Figurative::Zero | Figurative::Null));
+        let Comparand::Operand(lir::Operand::Load(p)) = c else { return false };
+        let place = &self.places[*p as usize];
+        let unscaled = self.place_items[*p as usize].is_none_or(|i| self.layout.items[i].scaling == 0);
+        nonnumeric && matches!(x.src, Some(Kind::Zoned { scale: 0, .. })) && place.refmod.is_none() && unscaled
     }
 
     /// An operand keeps its location for the comparison; an expression does not.

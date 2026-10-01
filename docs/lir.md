@@ -378,7 +378,7 @@ pub enum Comparand {
 /// the first first, abending IRONWORK for one freed or never given (the message names the Refs of
 /// both sides as written); equal when both identify the same object, or are both NULL, else less.
 /// NULL written as a figurative constant is not an address, so `A = NULL` is `Address`.
-pub enum Compare { PackedPfd, Address, Float, Fixed, National, Alphanumeric, Refused(AbendId), References }
+pub enum Compare { PackedPfd, Address, Float, Fixed, National, Alphanumeric, Refused(AbendId), References, ZonedBytes { zoned_first: bool } }
 
 pub enum ByteClass { Packed { signed: bool }, Zoned { signed: bool }, Digits, Alphabetic }
 pub enum SignTest { Positive, Negative, Zero }
@@ -391,6 +391,9 @@ pub enum Count { Fixed(u32), Odo(Odo) }
 - **Sign conditions.** The walker reads an operand directly and evaluates anything else with
   `expr_value`, so an operand stays `Comparand::Operand`, read as its kind: ZERO or an
   alphanumeric item keeps the walker's sign-condition abend rather than arithmetic's.
+- **A zoned integer against a nonnumeric operand** is `ZonedBytes`: the item's bytes, its sign
+  removed under ZWB and kept under NOZWB, never its value, compared as alphanumeric
+  (`rt::store::compared_zoned_bytes`, assumption C221), so invalid data compares rather than abends.
 - **Condition-names.** `Name` holds the conditional variable's place, with the 88-level reference's
   subscripts, and each VALUE as a constant, a THRU pair as `(low, Some(high))`. The walker reads the
   subject once per value (machine.rs:1806-1818) and the VM once, with the same result, since nothing

@@ -10,7 +10,7 @@ use crate::storage::Kind;
 use crate::vocab::{AcceptFrom, BinOp, Closing, Figurative, InspectMode, OpenMode, Pos, RelOp, SignClause, SignPosition};
 use crate::{codec_enum, codec_struct};
 use numeric::precision::{Fixed, Places};
-use numeric::options::{Compile, FastsrtAdvPrint, Stop, Warnings};
+use numeric::options::{Compile, FastsrtAdvPrint, Invdata, Stop, Warnings};
 use numeric::{Arith, CicsReturnWarning, Numproc, Options, SortKeys, Trunc, TruncCheck};
 use zarch::check::ProgramCheck;
 use zarch::ebcdic::CodePage;
@@ -134,8 +134,9 @@ codec_enum!(FileStatus {
 
 codec_struct!(Options {
     arith, trunc, numproc, codepage, trunc_check, fastsrt, fastsrt_adv_print, sort_keys, adv, thread, dll, rent, dbcs,
-    warnings, compile, dynam, debug, cics_return_warning,
+    warnings, compile, dynam, debug, cics_return_warning, invdata, zwb,
 } check options_valid);
+codec_struct!(Invdata { forcenumcmp, cleansign });
 codec_enum!(Arith { Compat = 0, Extend = 1 });
 codec_enum!(Trunc { Std = 0, Opt = 1, Bin = 2 });
 codec_enum!(Numproc { Nopfd = 0, Pfd = 1 });

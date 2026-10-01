@@ -134,6 +134,22 @@ impl FastsrtAdvPrint {
     }
 }
 
+/// INVDATA: zoned and packed items may hold invalid digits, sign codes or zone bits. FORCENUMCMP
+/// compares zoned items as numbers whatever their zones; CLEANSIGN cleans a sign code on input to
+/// a comparison or computation (Programming Guide SC27-8714-03, pp. 376-378). ZONEDATA(NOPFD) and
+/// ZONEDATA(MIG) are INVDATA with FORCENUMCMP off and on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Invdata {
+    pub forcenumcmp: bool,
+    pub cleansign: bool,
+}
+
+impl Default for Invdata {
+    fn default() -> Self {
+        Self { forcenumcmp: false, cleansign: true }
+    }
+}
+
 /// What a program with no STOP RUN, GOBACK or EXIT PROGRAM that ends with EXEC CICS RETURN or XCTL
 /// gets (assumption C124): IBM's warning (`--cics-return-warning=always`), one informational note
 /// in place of it (`once`), or nothing (`never`).
@@ -232,6 +248,10 @@ pub struct Options {
     /// NODEBUG, IBM's default, keeps them from running (assumption C63).
     pub debug: bool,
     pub cics_return_warning: CicsReturnWarning,
+    /// INVDATA's suboptions; None for NOINVDATA, IBM's default, which assumes the data is valid.
+    pub invdata: Option<Invdata>,
+    /// ZWB: a signed zoned item compared with a nonnumeric operand loses its sign first.
+    pub zwb: bool,
 }
 
 impl Default for Options {
@@ -255,6 +275,8 @@ impl Default for Options {
             dynam: false,
             debug: false,
             cics_return_warning: CicsReturnWarning::default(),
+            invdata: None,
+            zwb: true,
         }
     }
 }
@@ -359,6 +381,29 @@ impl Options {
                     _ => return Err(bad()),
                 })
             }
+            "INVDATA" if off => self.invdata = None,
+            "INVDATA" => {
+                let mut invdata = Invdata::default();
+                for part in sub.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+                    match part {
+                        "FORCENUMCMP" | "FNC" => invdata.forcenumcmp = true,
+                        "NOFORCENUMCMP" | "NOFNC" => invdata.forcenumcmp = false,
+                        "CLEANSIGN" | "CS" => invdata.cleansign = true,
+                        "NOCLEANSIGN" | "NOCS" => invdata.cleansign = false,
+                        _ => return Err(bad()),
+                    }
+                }
+                self.invdata = Some(invdata);
+            }
+            "ZONEDATA" => {
+                self.invdata = match sub {
+                    "PFD" => None,
+                    "NOPFD" => Some(Invdata::default()),
+                    "MIG" => Some(Invdata { forcenumcmp: true, cleansign: true }),
+                    _ => return Err(bad()),
+                }
+            }
+            "ZWB" => self.zwb = !off,
             "FASTSRT" => self.fastsrt = !off,
             "ADV" => self.adv = !off,
             "THREAD" => self.thread = !off,
@@ -412,6 +457,27 @@ mod tests {
         let o = Options::default();
         assert_eq!((o.arith, o.trunc, o.numproc, o.codepage, o.fastsrt, o.adv), (Arith::Compat, Trunc::Std, Numproc::Nopfd, 1140, false, true));
         assert_eq!((o.thread, o.dll, o.rent, o.dbcs, o.dynam), (false, false, true, true, false));
+    }
+
+    #[test]
+    fn invdata_zonedata_and_zwb() {
+        let mut o = Options::default();
+        assert_eq!((o.invdata, o.zwb), (None, true));
+        assert_eq!(o.apply("INVDATA"), Ok(true));
+        assert_eq!(o.invdata, Some(Invdata { forcenumcmp: false, cleansign: true }));
+        assert_eq!(o.apply("INVD(FNC,NOCS)"), Ok(true));
+        assert_eq!(o.invdata, Some(Invdata { forcenumcmp: true, cleansign: false }));
+        assert_eq!(o.apply("NOINVDATA"), Ok(true));
+        assert_eq!(o.invdata, None);
+        assert_eq!(o.apply("ZD(MIG)"), Ok(true));
+        assert_eq!(o.invdata, Some(Invdata { forcenumcmp: true, cleansign: true }));
+        assert_eq!(o.apply("ZONEDATA(NOPFD)"), Ok(true));
+        assert_eq!(o.invdata, Some(Invdata::default()));
+        assert_eq!(o.apply("ZONEDATA(PFD)"), Ok(true));
+        assert_eq!(o.invdata, None);
+        assert!(o.apply("INVDATA(SOMETIMES)").is_err());
+        assert_eq!(o.apply("NOZWB"), Ok(true));
+        assert!(!o.zwb);
     }
 
     #[test]
@@ -480,9 +546,10 @@ mod tests {
             "CODEPAGE" => "(1047)",
             "TRUNC" => "(OPT)",
             "NUMPROC" => "(PFD)",
+            "ZONEDATA" => "(MIG)",
             _ => "",
         };
-        for name in ["ARITH", "CODEPAGE", "TRUNC", "NUMPROC", "FASTSRT", "COMPILE"] {
+        for name in ["ARITH", "CODEPAGE", "TRUNC", "NUMPROC", "FASTSRT", "COMPILE", "INVDATA", "ZONEDATA", "ZWB"] {
             let o = documented().find(|o| o.name == name).unwrap();
             for s in o.spellings() {
                 assert_eq!(Options::default().apply(&format!("{s}{}", suboption(name))), Ok(true), "{s}");

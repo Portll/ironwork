@@ -455,6 +455,39 @@ pub fn compare(facts: &dyn ProgramFacts, mem: &[u8], a: (Val, Option<Loc>), b: (
     }
 }
 
+/// The bytes a zoned integer holds, as a comparison with a nonnumeric operand reads them: as a MOVE
+/// to an alphanumeric item of its size leaves them, so a sign it overpunches is removed under ZWB
+/// and kept under NOZWB, and a separate sign is left out (assumption C221). None for an operand the
+/// comparison reads as a number first: not zoned, not an integer, or scaled.
+pub fn compared_zoned_bytes(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc) -> Option<Vec<u8>> {
+    let Kind::Zoned { scale: 0, signed, sign, .. } = loc.kind else { return None };
+    if scaling(facts, loc) > 0 {
+        return None;
+    }
+    let mut image = bytes(mem, loc).to_vec();
+    match sign {
+        Some(SignClause { separate: true, position: SignPosition::Leading }) => {
+            image.remove(0);
+        }
+        Some(SignClause { separate: true, position: SignPosition::Trailing }) => {
+            image.pop();
+        }
+        _ if !signed || !facts.options().zwb => {}
+        Some(SignClause { position: SignPosition::Leading, .. }) => image[0] |= 0xF0,
+        _ => *image.last_mut()? |= 0xF0,
+    }
+    Some(image)
+}
+
+/// `image`, from [`compared_zoned_bytes`], compared as alphanumeric with `other`; `zoned_first` is whether
+/// the zoned item is the comparison's first operand.
+pub fn compare_zoned_bytes(facts: &dyn ProgramFacts, image: &[u8], other: (Val, Option<Loc>), zoned_first: bool, pos: Pos) -> R<Ordering> {
+    let len = image.len().max(image_len(&other.0, other.1));
+    let y = alnum_image(facts, &other.0, other.1, len, pos)?;
+    let o = ebcdic::compare_alphanumeric(image, &y, facts.collation());
+    Ok(if zoned_first { o } else { o.reverse() })
+}
+
 /// A numeric operand compared with a nonnumeric one is its digits, scaling positions ignored
 /// (Language Reference SC27-8713-03, p. 211).
 pub fn stored_digits(facts: &dyn ProgramFacts, mem: &[u8], v: Val, loc: Option<Loc>, pos: Pos) -> R<(Val, Option<Loc>)> {

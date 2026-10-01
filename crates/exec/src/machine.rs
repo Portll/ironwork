@@ -1367,12 +1367,35 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     /// Object references are compared here; `rt::store::compare` compares everything else.
     fn compare(&mut self, a: &Expr, b: &Expr, pos: Pos) -> R<Ordering> {
+        for (zoned, other, zoned_first) in [(a, b, true), (b, a, false)] {
+            if let Some(image) = self.zoned_bytes_against(zoned, other)? {
+                let other = self.comparand(other, pos)?;
+                return store::compare_zoned_bytes(&self.facts(), &image, other, zoned_first, pos);
+            }
+        }
         let (va, la) = self.comparand(a, pos)?;
         let (vb, lb) = self.comparand(b, pos)?;
         if let Some(o) = self.compare_references(a, b, (&va, la), (&vb, lb), pos)? {
             return Ok(o);
         }
         store::compare(&self.facts(), &self.unit.mem, (va, la), (vb, lb), pos)
+    }
+
+    /// The bytes of `e`, a zoned integer item, when `other` is nonnumeric: that comparison reads the
+    /// item's bytes, never its value, so invalid data compares rather than abends.
+    fn zoned_bytes_against(&mut self, e: &Expr, other: &Expr) -> R<Option<Vec<u8>>> {
+        let Expr::Operand(Operand::Ref(r)) = e else { return Ok(None) };
+        let nonnumeric = match other {
+            Expr::Operand(Operand::Literal(l)) => matches!(l, Literal::Alnum(_) | Literal::Hex(_) | Literal::All(_))
+                || matches!(l, Literal::Figurative(f) if !matches!(f, Figurative::Zero | Figurative::Null)),
+            Expr::Operand(Operand::Ref(o)) => matches!(self.locate(o)?.kind, Kind::Group | Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::NumericEdited { .. }),
+            _ => false,
+        };
+        if !nonnumeric {
+            return Ok(None);
+        }
+        let loc = self.locate(r)?;
+        Ok(store::compared_zoned_bytes(&self.facts(), &self.unit.mem, loc))
     }
 
     fn compare_literal(&mut self, subject: &(Val, Option<Loc>), literal: &Literal, pos: Pos) -> R<Ordering> {

@@ -300,8 +300,10 @@ tests, and the debug positions (§9).
 | `dynam` | false | `00` |
 | `debug` | false | `00` |
 | `cics_return_warning` | `Once`, tag 0 | `00` |
+| `invdata` | `None` | `00` |
+| `zwb` | true | `01` |
 
-Nineteen bytes: `01 01 00 F4 08 00 00 00 00 01 00 00 01 01 00 00 00 00 00`.
+Twenty-one bytes: `01 01 00 F4 08 00 00 00 00 01 00 00 01 01 00 00 00 00 00 00 01`.
 
 ### 4.8 Bounds on decoding
 
@@ -362,10 +364,13 @@ compiler option: `trunc_check`, `fastsrt_adv_print`, `sort_keys`, `warnings`, `d
 | `dynam` | `bool` | 0 or 1 | `DYNAM`, `DYN`, and `NODYNAM`, `NODYN` |
 | `debug` | `bool` | 0 or 1 | `-debug`, the Language Environment runtime option DEBUG |
 | `cics_return_warning` | `CicsReturnWarning` (:141) | tag: `Once` 0, `Always` 1, `Never` 2. What a program with no STOP RUN, GOBACK or EXIT PROGRAM that ends with EXEC CICS RETURN or XCTL gets (assumption C124) | `--cics-return-warning=once\|always\|never` |
+| `invdata` | `Option<Invdata>` | `None` for NOINVDATA, or `Some` then `forcenumcmp` and `cleansign` as bools | `INVDATA`, `INVD`, with `FORCENUMCMP`, `FNC`, `NOFORCENUMCMP`, `NOFNC`, `CLEANSIGN`, `CS`, `NOCLEANSIGN`, `NOCS`; `NOINVDATA`, `NOINVD`; `ZONEDATA(PFD\|NOPFD\|MIG)`, `ZD`, as INVDATA's equivalents |
+| `zwb` | `bool` | 0 or 1 | `ZWB`, `NOZWB` |
 
 `ADV`, `DBCS`, `DLL`, `NUMPROC`, `RENT`, `THREAD` and `TRUNC` have no abbreviations. The defaults are
 `Compat`, `Std`, `Nopfd`, 1140, `Report`, false, `Exclude`, `Dfsort`, true, false, false, true, true,
-`Proceed`, `None` (IBM's default NOCOMPILE(S) in force), false, false, `Once`.
+`Proceed`, `None` (IBM's default NOCOMPILE(S) in force), false, false, `Once`, `None`
+(NOINVDATA), true.
 
 ### 5.2 Storage and the item table
 

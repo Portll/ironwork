@@ -145,3 +145,24 @@ fn release_from_and_return_into_use_the_maximum_length_too() {
     assert!(ending.is_ok(), "{ending:?} {err}");
     assert_eq!(out, "[3ABC] E\n");
 }
+
+#[test]
+fn zoned_items_compare_with_nonnumeric_operands_by_their_bytes() {
+    let data = [
+        "       01  U-X PIC X(3) VALUE SPACES.\n       01  U REDEFINES U-X PIC 9(3).\n",
+        "       01  S-X PIC X(3) VALUE SPACES.\n       01  S REDEFINES S-X PIC S9(3).\n",
+        "       01  P PIC S9(3) VALUE -12.\n       01  T PIC S9(3) SIGN LEADING SEPARATE VALUE -12.\n",
+    ]
+    .concat();
+    let procedure = [
+        line("IF U = SPACES DISPLAY 'U' END-IF"),
+        line("IF S = SPACES DISPLAY 'S' END-IF"),
+        line("IF P = '012' DISPLAY 'P' END-IF"),
+        line("IF P = '01K' DISPLAY 'P SIGNED' END-IF"),
+        line("IF T = '012' DISPLAY 'T' END-IF"),
+        line("GOBACK."),
+    ]
+    .concat();
+    assert_eq!(run(&program("", &data, &procedure)), "U\nP\nT\n");
+    assert_eq!(run(&program("NOZWB", &data, &procedure)), "U\nS\nP SIGNED\nT\n");
+}
