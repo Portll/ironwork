@@ -160,8 +160,8 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         native
     });
     digit_limits(&program, options.arith, &mut errors);
-    let drafts = report::prepare(&mut program, options.adv, &mut errors);
-    let linage_counters = linage::add_counters(&mut program);
+    let drafts = report::prepare(&mut program, options.adv, options.qualify, &mut errors);
+    let linage_counters = linage::add_counters(&mut program, options.qualify);
     if whole {
         oo::option_rules(&program, &options, &mut errors);
     }
@@ -174,7 +174,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         errors.push(e);
         (0..files.len()).collect()
     });
-    let mut layout = match layout::build(&program.working_storage, &files, &shared, &program.linkage, &program.local_storage, crate::picture::Notation::of(&program.environment)) {
+    let mut layout = match layout::build(&program.working_storage, &files, &shared, &program.linkage, &program.local_storage, crate::picture::Notation::of(&program.environment), options.qualify) {
         Ok(l) => l,
         Err(e) => {
             errors.push(e);

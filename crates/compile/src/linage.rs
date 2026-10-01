@@ -12,13 +12,14 @@ pub use rt::linage::{Geometry, Motion, Page, Step};
 
 /// Adds each LINAGE file's LINAGE-COUNTER to WORKING-STORAGE: with the PICTURE and USAGE of the
 /// page body's data item, or binary with as many digits as its integer (Language Reference
-/// SC27-8713-03, p. 23). Returns each file's entry in WORKING-STORAGE.
-pub(crate) fn add_counters(program: &mut Program) -> Vec<Option<usize>> {
+/// SC27-8713-03, p. 23), its data-name resolved as `qualify` says. Returns each file's entry in
+/// WORKING-STORAGE.
+pub(crate) fn add_counters(program: &mut Program, qualify: numeric::Qualify) -> Vec<Option<usize>> {
     let mut counters = vec![None; program.files.len()];
     let by_data = |f: &FileDecl| matches!(f.linage.as_ref().map(|l| &l.lines), Some(LinageValue::Data(_)));
     let built = program.files.iter().any(by_data).then(|| {
         let files: Vec<(&[DataEntry], Option<u32>)> = program.files.iter().map(|f| (f.records.as_slice(), f.record_max)).collect();
-        layout::build(&program.working_storage, &files, &[], &program.linkage, &program.local_storage, crate::picture::Notation::of(&program.environment)).ok()
+        layout::build(&program.working_storage, &files, &[], &program.linkage, &program.local_storage, crate::picture::Notation::of(&program.environment), qualify).ok()
     });
     let mut added = Vec::new();
     for (k, f) in program.files.iter().enumerate() {

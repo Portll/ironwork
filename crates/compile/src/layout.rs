@@ -4,6 +4,7 @@
 //! for where each 01 level starts.
 
 use crate::picture::{self, Category, Sym};
+use numeric::Qualify;
 use syntax::ast::{DataEntry, Environment, FileDecl, Literal, Organization, Ref, Usage};
 use syntax::{Error, Pos};
 use zarch::hfp::Precision;
@@ -88,6 +89,8 @@ pub struct Layout {
     pub file_names: Vec<String>,
     /// The LINAGE-COUNTER item of each file whose FD has LINAGE, which its file-name qualifies.
     pub linage_counters: Vec<Option<usize>>,
+    /// The QUALIFY option [`Layout::resolve`] follows.
+    pub qualify: Qualify,
 }
 
 const LEVEL_ALIGNMENT: u32 = 8;
@@ -97,7 +100,7 @@ pub const MAX_STORAGE: u32 = 128 << 20;
 /// Lays out WORKING-STORAGE, then each file's record area, which all its 01 records share and
 /// which is at least `record_max` bytes. Files whose `shared` entry names the same file share one
 /// area, as large as the largest of them (see [`record_area_owners`]). `notation` is what
-/// SPECIAL-NAMES changes in the PICTUREs.
+/// SPECIAL-NAMES changes in the PICTUREs; `qualify` how RENAMES and later references resolve.
 pub fn build(
     entries: &[DataEntry],
     files: &[(&[DataEntry], Option<u32>)],
@@ -105,6 +108,7 @@ pub fn build(
     linkage: &[DataEntry],
     local: &[DataEntry],
     notation: picture::Notation,
+    qualify: Qualify,
 ) -> Result<Layout, Error> {
     let mut items: Vec<Item> = Vec::new();
     let mut usages: Vec<Option<Usage>> = Vec::new();
@@ -365,7 +369,7 @@ pub fn build(
         }
     }
     for (index, e) in renames {
-        rename(&mut items, index, e)?;
+        rename(&mut items, index, e, qualify)?;
     }
     let mut areas = Vec::new();
     for (k, &size) in own.iter().enumerate() {
@@ -393,13 +397,20 @@ pub fn build(
         let lengths = &mut record_lengths[k as usize];
         *lengths = Some(lengths.map_or((least, most), |(l, m)| (l.min(least), m.max(most))));
     }
-    Ok(Layout { items, conditions, edits, currencies, file_areas: areas, record_lengths, linkage_roots, local_size: local_cursor, size: cursor, file_names: Vec::new(), linage_counters: Vec::new() })
+    Ok(Layout { items, conditions, edits, currencies, file_areas: areas, record_lengths, linkage_roots, local_size: local_cursor, size: cursor, file_names: Vec::new(), linage_counters: Vec::new(), qualify })
+}
+
+/// The names of item `start` and each group above it, nearest first: the hierarchy of names that
+/// qualifies an item `start` holds or a condition-name of `start`. FILLER and unnamed items give
+/// none.
+fn names_from(items: &[Item], start: Option<usize>) -> impl Iterator<Item = &str> {
+    std::iter::successors(start, |&p| items[p].parent).filter_map(|p| items[p].name.as_deref())
 }
 
 /// Gives level-66 entry `index` the storage and attributes of what it renames (Language Reference
 /// SC27-8713-03, pp. 228-229): one item as that item is, or from the start of the first item
 /// through the end of the last as an alphanumeric group.
-fn rename(items: &mut [Item], index: usize, e: &DataEntry) -> Result<(), Error> {
+fn rename(items: &mut [Item], index: usize, e: &DataEntry, qualify: Qualify) -> Result<(), Error> {
     let Some((first, last)) = &e.renames else { return Ok(()) };
     let record = items[index].parent.unwrap_or(index);
     let find = |r: &Ref| -> Result<usize, Error> {
@@ -417,7 +428,13 @@ fn rename(items: &mut [Item], index: usize, e: &DataEntry) -> Result<(), Error> 
             }
             at == record && wanted.next().is_none()
         };
-        let found: Vec<usize> = (0..items.len()).filter(|&i| i != record && items[i].level != 66 && items[i].name.as_deref() == Some(r.name.as_str()) && in_record(i)).collect();
+        let mut found: Vec<usize> = (0..items.len()).filter(|&i| i != record && items[i].level != 66 && items[i].name.as_deref() == Some(r.name.as_str()) && in_record(i)).collect();
+        if found.len() > 1 && qualify == Qualify::Extend {
+            let complete: Vec<usize> = found.iter().copied().filter(|&i| names_from(items, items[i].parent).eq(r.qualifiers.iter().map(String::as_str))).collect();
+            if complete.len() == 1 {
+                found = complete;
+            }
+        }
         let &[t] = found.as_slice() else {
             let record_name = items[record].name.clone().unwrap_or_default();
             return err(if found.is_empty() { format!("no item of that name below {record_name}, other than a level-66 entry") } else { "ambiguous; qualify it with OF or IN".into() });
@@ -665,8 +682,23 @@ impl Layout {
         self.file_names.get(k).map(String::as_str)
     }
 
+    /// Whether `qualifiers` are the complete set of a candidate: every name of its hierarchy, the
+    /// file-name of its FD or SD allowed last but not needed (assumption
+    /// [`numeric::assumptions::COMPLETE_SET_OF_QUALIFIERS`]).
+    fn complete(&self, candidate: Resolved, qualifiers: &[String]) -> bool {
+        let (start, own) = match candidate {
+            Resolved::Item(i) => (self.items[i].parent, i),
+            Resolved::Condition(c) => (Some(self.conditions[c].item), self.conditions[c].item),
+        };
+        let given = || qualifiers.iter().map(String::as_str);
+        given().eq(names_from(&self.items, start)) || given().eq(names_from(&self.items, start).chain(self.file_qualifying(own)))
+    }
+
     /// A data item, condition-name or LINAGE-COUNTER named with its qualifiers, the last of which
-    /// may be the file-name of an FD or SD (Language Reference SC27-8713-03, pp. 69-70).
+    /// may be the file-name of an FD or SD (Language Reference SC27-8713-03, pp. 69-70). Under
+    /// QUALIFY(EXTEND) a reference the standard's rules find ambiguous names the one candidate it
+    /// gives a complete set of qualifiers, if only one (Programming Guide SC27-8714-03, p. 400;
+    /// Language Reference SC27-8713-03, pp. 67-68).
     pub fn resolve(&self, name: &str, qualifiers: &[String], pos: Pos) -> Result<Resolved, Error> {
         let within = |mut at: Option<usize>, own: usize| {
             let mut wanted = qualifiers.iter();
@@ -692,6 +724,12 @@ impl Layout {
         found.extend(
             self.conditions.iter().enumerate().filter(|(_, c)| c.name == name && within(Some(c.item), c.item)).map(|(i, _)| Resolved::Condition(i)),
         );
+        if found.len() > 1 && self.qualify == Qualify::Extend {
+            let complete: Vec<Resolved> = found.iter().copied().filter(|&r| self.complete(r, qualifiers)).collect();
+            if let [one] = complete.as_slice() {
+                return Ok(*one);
+            }
+        }
         match found.as_slice() {
             [one] => Ok(*one),
             [] => Err(Error::at(pos, format!("{name} is not defined"))),

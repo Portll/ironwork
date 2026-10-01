@@ -123,13 +123,14 @@ fn report_entry(reports: &[rw::Report], current: usize, operand: &Ref) -> Option
 
 /// Places every report's lines and fields and adds its storage to WORKING-STORAGE; gives each
 /// report file a record length when its FD has none ([`numeric::assumptions::REPORT_RECORD_LENGTH`]).
-/// Under NOADV (`adv` false) a report record's first byte is its printer control character.
-pub(crate) fn prepare(program: &mut Program, adv: bool, errors: &mut Vec<Error>) -> Vec<Draft> {
+/// Under NOADV (`adv` false) a report record's first byte is its printer control character;
+/// `qualify` is how the CONTROL names resolve.
+pub(crate) fn prepare(program: &mut Program, adv: bool, qualify: numeric::Qualify, errors: &mut Vec<Error>) -> Vec<Draft> {
     let reports = program.report_writer.reports.clone();
     if reports.is_empty() {
         return Vec::new();
     }
-    let control_sizes = measure_controls(program, &reports);
+    let control_sizes = measure_controls(program, &reports, qualify);
     let taken: std::collections::HashSet<String> = program
         .working_storage
         .iter()
@@ -226,9 +227,9 @@ fn line_end(d: &Draft) -> usize {
 }
 
 /// The size of each CONTROL item, from a layout of the program as written.
-fn measure_controls(program: &Program, reports: &[rw::Report]) -> Vec<Vec<usize>> {
+fn measure_controls(program: &Program, reports: &[rw::Report], qualify: numeric::Qualify) -> Vec<Vec<usize>> {
     let files: Vec<(&[DataEntry], Option<u32>)> = program.files.iter().map(|f| (f.records.as_slice(), f.record_max)).collect();
-    let built = layout::build(&program.working_storage, &files, &[], &program.linkage, &program.local_storage, crate::picture::Notation::of(&program.environment)).ok();
+    let built = layout::build(&program.working_storage, &files, &[], &program.linkage, &program.local_storage, crate::picture::Notation::of(&program.environment), qualify).ok();
     reports
         .iter()
         .map(|r| {

@@ -165,6 +165,51 @@ fn renames_keeps_ibms_restrictions() {
 }
 
 #[test]
+fn qualify_extend_resolves_the_programming_guides_example_by_its_complete_sets_of_qualifiers() {
+    let data = "       01  A.\n           02 B.\n              03 C PIC X.\n              03 A PIC X.\n           02 C PIC X.\n";
+    let body: String = ["MOVE 'X' TO C OF B OF A", "MOVE 'Z' TO A OF B", "MOVE 'Y' TO C OF A", "DISPLAY A", "MOVE 'W' TO C OF B", "DISPLAY A", "MOVE SPACE TO A", "DISPLAY '[' A ']'", "GOBACK."].map(line).concat();
+    assert_eq!(run(&program("QUALIFY(EXTEND)", data, &body)), "XZY\nWZY\n[   ]\n");
+    assert_eq!(run(&program("QUA(E)", data, &body)), "XZY\nWZY\n[   ]\n");
+    for card in ["", "QUALIFY(COMPAT)", "QUA(C)"] {
+        let errors = compile_errors(&program(card, data, &body));
+        assert_eq!((errors.matches("C is ambiguous").count(), errors.matches("A is ambiguous").count(), errors.lines().count()), (1, 4, 5), "{card}: {errors}");
+    }
+}
+
+#[test]
+fn a_complete_set_skips_filler_ends_a_condition_names_at_its_variable_and_resolves_renames() {
+    let data = concat!(
+        "       01  S.\n           05 F PIC X VALUE 'Y'.\n              88 OK VALUE 'Y'.\n           05 G.\n              10 F PIC X VALUE 'N'.\n                 88 OK VALUE 'Y'.\n",
+        "           05 FILLER.\n              10 K PIC X VALUE '1'.\n           05 H.\n              10 K PIC X VALUE '2'.\n       66  R2 RENAMES K OF S.\n",
+        "       77  K PIC X VALUE '3'.\n",
+    );
+    let body: String = ["IF OK OF F OF S DISPLAY 'OK' END-IF", "IF OK OF G DISPLAY 'NOT' END-IF", "DISPLAY K OF S", "DISPLAY K", "DISPLAY K OF H", "DISPLAY R2", "GOBACK."].map(line).concat();
+    assert_eq!(run(&program("QUALIFY(EXTEND)", data, &body)), "OK\n1\n3\n2\n1\n");
+    let errors = compile_errors(&program("", data, &body));
+    assert!(errors.contains("RENAMES K: ambiguous"), "{errors}");
+    let errors = compile_errors(&program("", &data.replace("       66  R2 RENAMES K OF S.\n", ""), &body.replace(&line("DISPLAY R2"), "")));
+    assert_eq!(errors, ["OK", "K", "K"].map(|n| format!("{n} is ambiguous; qualify it with OF or IN")).join("\n"));
+}
+
+#[test]
+fn a_records_file_name_may_end_a_complete_set_and_need_not() {
+    let source = |card: &str| {
+        [
+            card,
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. Q.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n",
+            "       FILE-CONTROL.\n           SELECT F1 ASSIGN TO F1DD.\n",
+            "       DATA DIVISION.\n       FILE SECTION.\n",
+            "       FD  F1.\n       01  FR.\n           05 K PIC X.\n       01  OTHER-REC.\n           05 FR.\n              10 K PIC X.\n",
+            "       PROCEDURE DIVISION.\n           MOVE 'A' TO K OF FR OF F1\n           MOVE 'B' TO K OF FR\n           GOBACK.\n",
+        ]
+        .concat()
+    };
+    assert_eq!(compile_errors(&source("       CBL QUALIFY(EXTEND)\n")), "");
+    let errors = compile_errors(&source(""));
+    assert_eq!(errors.matches("K is ambiguous").count(), 2, "{errors}");
+}
+
+#[test]
 fn set_to_false_stores_the_when_set_to_false_value() {
     let data = concat!(
         "       01  FLAG PIC X VALUE 'Y'.\n           88 FLAG-ON VALUE 'Y' FALSE 'N'.\n",

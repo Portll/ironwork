@@ -234,6 +234,7 @@ pub const VSAM_OPEN_NEVER_VERIFIED: &str = "C220";
 pub const DISPSIGN_SEPARATE: &str = "C213";
 pub const LILIAN_INTEGER_DATES: &str = "C214";
 pub const CEECBLDY_UNDER_LILIAN: &str = "C215";
+pub const COMPLETE_SET_OF_QUALIFIERS: &str = "C216";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1463,6 +1464,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: CEECBLDY_UNDER_LILIAN,
         claim: "Under INTDATE(LILIAN) a CALL whose target is the literal 'CEECBLDY' is diagnosed and calls CEEDAYS, which takes the same arguments and gives a Lilian day (Programming Guide SC27-8714-03, p. 375). The guide gives neither the message nor its severity: it is a warning (W, return code 4) in ironwork's words, since the program no longer calls what it names. A CALL of an identifier that holds 'CEECBLDY' is not converted, as the guide names the literal only, and ends the run as ironwork does not provide CEECBLDY; nor is a literal under INTDATE(ANSI)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: COMPLETE_SET_OF_QUALIFIERS,
+        claim: "Under QUALIFY(EXTEND) a reference the standard's rules find ambiguous names the one candidate it gives a complete set of qualifiers, 'every level in the containing hierarchy of names' (Programming Guide SC27-8714-03, p. 400; 'every qualifier is specified', Language Reference SC27-8713-03, p. 68); with no such candidate, or two, it stays ambiguous. A data item's complete set is the name of every group that holds it, nearest first, up to its level-01 entry: a FILLER or unnamed group has no name to give and is no level of it, and a level-66 item's hierarchy is its record. A record's file-name may follow but is not needed, since the Language Reference lets a level-01 name that is the only one of its level be referenced under EXTEND (p. 67), which a record of an FD or SD could not be if its file-name were needed (p. 69); a LINAGE-COUNTER's complete set is its file-name or nothing. A condition-name's hierarchy starts with its conditional variable, which qualifies it (p. 70). The rule applies to RENAMES operands too, among the items of the record. A SUM operand naming a REPORT SECTION entry is found by its report-name and does not follow it",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
