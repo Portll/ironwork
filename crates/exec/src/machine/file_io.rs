@@ -174,9 +174,13 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     pub(super) fn close_file(&mut self, name: &str, pos: Pos) -> R<()> {
+        self.close_file_with(name, None, pos)
+    }
+
+    pub(super) fn close_file_with(&mut self, name: &str, closing: Option<Closing>, pos: Pos) -> R<()> {
         let k = self.file_index(name, pos)?;
         let file = self.file_desc(k);
-        let outcome = fileio::close(self, &file, pos)?;
+        let outcome = fileio::close(self, &file, closing, pos)?;
         self.settle(k, outcome, None, pos).map(drop)
     }
 

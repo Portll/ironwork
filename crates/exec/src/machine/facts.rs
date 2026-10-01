@@ -199,6 +199,10 @@ impl<'a> Files<&'a Ref, Int<'a>> for Machine<'_, '_, '_> {
         &mut self.unit.programs[self.me].files[k]
     }
 
+    fn locked(&mut self, k: usize) -> &mut bool {
+        &mut self.unit.programs[self.me].locked[k]
+    }
+
     fn dd(&self, assign: &str) -> Option<Dd> {
         self.unit.dds.get(assign)
     }

@@ -26,6 +26,8 @@ pub struct Loaded<H> {
     pub name: String,
     pub base: usize,
     pub files: Vec<Option<Open>>,
+    /// The files CLOSE WITH LOCK has closed, which OPEN refuses with status 38.
+    pub locked: Vec<bool>,
     pub initialized: bool,
     pub active: bool,
     /// For a copy a dynamic CALL of an ENTRY name loaded, that entry (numbered as
@@ -160,7 +162,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         let base = self.allocate(size);
         let index = self.programs.len();
         self.names.insert(name.clone(), index);
-        self.programs.push(Loaded { compiled, name, base, files: (0..files).map(|_| None).collect(), initialized: false, active: false, entry: None, altered: Vec::new(), source: None });
+        self.programs.push(Loaded { compiled, name, base, files: (0..files).map(|_| None).collect(), locked: vec![false; files], initialized: false, active: false, entry: None, altered: Vec::new(), source: None });
         index
     }
 

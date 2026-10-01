@@ -103,7 +103,7 @@ pub enum LinageValue {
     Data(Ref),
 }
 
-pub use rt::vocab::OpenMode;
+pub use rt::vocab::{Closing, OpenMode};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Advancing {
@@ -384,7 +384,7 @@ pub enum Stmt {
     Evaluate { subjects: Vec<Subject>, whens: Vec<When>, other: Vec<Stmt>, pos: Pos },
     Display { items: Vec<Operand>, no_advancing: bool, pos: Pos },
     Open { files: Vec<(OpenMode, String)>, pos: Pos },
-    Close { files: Vec<String>, pos: Pos },
+    Close { files: Vec<(String, Option<Closing>)>, pos: Pos },
     Read(Box<ReadStmt>),
     Write { record: Ref, from: Option<Operand>, advancing: Option<Advancing>, invalid: Handlers, end_of_page: Handlers, pos: Pos },
     Rewrite { record: Ref, from: Option<Operand>, invalid: Handlers, pos: Pos },

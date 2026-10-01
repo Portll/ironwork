@@ -526,7 +526,15 @@ impl Check<'_> {
             }
             Stmt::Display { items, .. } => items.iter().for_each(|o| self.operand(o)),
             Stmt::Open { files, pos } => files.iter().for_each(|(_, f)| self.file(f, *pos)),
-            Stmt::Close { files, pos } => files.iter().for_each(|f| self.file(f, *pos)),
+            Stmt::Close { files, pos } => {
+                for (name, closing) in files {
+                    self.file(name, *pos);
+                    let keyed = self.program.files.iter().any(|f| f.name == *name && matches!(f.organization, Organization::Indexed | Organization::Relative));
+                    if keyed && matches!(closing, Some(Closing::Volume | Closing::NoRewind)) {
+                        self.errors.push(Error::at(*pos, format!("CLOSE {name}: REEL, UNIT and NO REWIND are not valid for an indexed or relative file")));
+                    }
+                }
+            }
             Stmt::Read(r) => {
                 self.file(&r.file, r.pos);
                 if r.next {

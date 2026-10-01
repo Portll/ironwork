@@ -454,6 +454,43 @@ fn a_text_file_copied_record_by_record() {
 }
 
 #[test]
+fn close_reel_and_no_rewind_find_no_reel_and_close_with_lock_refuses_a_later_open() {
+    let data = temp("close.dat");
+    let source = file_program(
+        "           SELECT F ASSIGN TO FDD FILE STATUS IS FS.\n",
+        "       FD  F.\n       01  F-REC PIC X(4).\n",
+        "       01  FS PIC XX.\n",
+        &[
+            line("OPEN OUTPUT F"),
+            line("WRITE F-REC FROM 'ONE'"),
+            line("CLOSE F REEL"),
+            line("DISPLAY FS"),
+            line("WRITE F-REC FROM 'TWO'"),
+            line("CLOSE F WITH NO REWIND"),
+            line("DISPLAY FS"),
+            line("OPEN INPUT F"),
+            line("CLOSE F LOCK"),
+            line("DISPLAY FS"),
+            line("OPEN INPUT F"),
+            line("DISPLAY FS"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    );
+    let (out, err, ending) = run_files(&source, &[format!("FDD={}", data.display())]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(out, "07\n07\n00\n38\n");
+    assert_eq!(std::fs::read(&data).unwrap().len(), 8);
+    let keyed = file_program(
+        "           SELECT X ASSIGN TO XDD ORGANIZATION INDEXED\n               RECORD KEY IS X-KEY.\n",
+        "       FD  X.\n       01  X-REC.\n           05 X-KEY PIC X.\n",
+        "",
+        &line("CLOSE X UNIT."),
+    );
+    assert!(compile_errors(&keyed).contains("CLOSE X: REEL, UNIT and NO REWIND are not valid for an indexed or relative file"));
+}
+
+#[test]
 fn fixed_and_variable_records_are_ebcdic_bytes() {
     let (fixed, variable) = (temp("f.dat"), temp("v.dat"));
     let source = file_program(

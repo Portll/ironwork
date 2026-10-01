@@ -171,7 +171,8 @@ impl<'p> Machine<'p, '_, '_> {
         self.room(bytes.len(), pos)?;
         let base = self.unit.push_temporary(bytes);
         let files = compiled.as_ref().map_or(Vec::new(), |c| c.program.files.iter().map(|_| None).collect());
-        self.unit.programs.push(Loaded { compiled, name: String::new(), base, files, initialized: false, active: false, entry: None, altered: Vec::new(), source: None });
+        let locked = vec![false; files.len()];
+        self.unit.programs.push(Loaded { compiled, name: String::new(), base, files, locked, initialized: false, active: false, entry: None, altered: Vec::new(), source: None });
         Ok(self.unit.programs.len() - 1)
     }
 

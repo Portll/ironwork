@@ -282,8 +282,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 }
             }
             Stmt::Close { files, pos } => {
-                for name in files {
-                    self.close_file(name, *pos)?;
+                for (name, closing) in files {
+                    self.close_file_with(name, *closing, *pos)?;
                 }
             }
             Stmt::Read(r) => return self.read_stmt(r),

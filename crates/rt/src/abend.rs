@@ -193,10 +193,13 @@ pub enum FileStatus {
     NotOpenInput,
     NotOpenOutput,
     NotOpenInputOutput,
+    /// Successful, for a phrase that applies only to a reel or unit medium.
+    SuccessNonReel,
+    ClosedWithLock,
 }
 
 impl FileStatus {
-    pub(crate) const ALL: [Self; 21] = [
+    pub(crate) const ALL: [Self; 23] = [
         Self::Success,
         Self::SuccessDuplicate,
         Self::SuccessWrongLength,
@@ -218,6 +221,8 @@ impl FileStatus {
         Self::NotOpenInput,
         Self::NotOpenOutput,
         Self::NotOpenInputOutput,
+        Self::SuccessNonReel,
+        Self::ClosedWithLock,
     ];
 
     /// The code a run ends with when this status fails a statement and no FILE STATUS holds it.
@@ -227,6 +232,7 @@ impl FileStatus {
             Self::SuccessDuplicate => "IO-02",
             Self::SuccessWrongLength => "IO-04",
             Self::SuccessOptional => "IO-05",
+            Self::SuccessNonReel => "IO-07",
             Self::AtEnd => "IO-10",
             Self::RelativeKeyOverflow => "IO-14",
             Self::SequenceError => "IO-21",
@@ -236,6 +242,7 @@ impl FileStatus {
             Self::PermanentError => "IO-30",
             Self::FileNotFound => "IO-35",
             Self::OpenModeUnsupported => "IO-37",
+            Self::ClosedWithLock => "IO-38",
             Self::AlreadyOpen => "IO-41",
             Self::NotOpen => "IO-42",
             Self::NoPriorRead => "IO-43",
@@ -271,6 +278,7 @@ impl FileStatus {
             Self::NotOpenInput => "the file is not open INPUT or I-O",
             Self::NotOpenOutput => "the file is not open for output",
             Self::NotOpenInputOutput => "the file is not open I-O",
+            Self::ClosedWithLock => "the file was closed WITH LOCK",
             _ => "the statement failed",
         }
     }

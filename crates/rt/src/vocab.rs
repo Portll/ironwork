@@ -75,6 +75,16 @@ pub enum OpenMode {
     InputOutput,
 }
 
+/// The phrases CLOSE can write after a file-name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Closing {
+    /// REEL or UNIT, with FOR REMOVAL, WITH NO REWIND or neither: the volume, not the file.
+    Volume,
+    NoRewind,
+    /// WITH LOCK: the file cannot be opened again while the program is in the run unit.
+    Lock,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AcceptFrom {
     Sysin,

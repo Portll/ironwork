@@ -183,9 +183,10 @@ impl Lower<'_> {
                 }
             }
             Stmt::Close { files, .. } => {
-                for name in files {
+                for (name, closing) in files {
                     let file = self.file_index(name, pos)?;
-                    self.file_op(FileOp { file, verb: FileVerb::Close, phrase: None, end_of_page: None }, [None, None, None, None], pos, ctx)?;
+                    let verb = closing.map_or(FileVerb::Close, FileVerb::CloseWith);
+                    self.file_op(FileOp { file, verb, phrase: None, end_of_page: None }, [None, None, None, None], pos, ctx)?;
                 }
             }
             Stmt::Read(r) => {

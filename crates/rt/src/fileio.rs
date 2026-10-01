@@ -12,7 +12,7 @@ use crate::printer::{self, Controls};
 use crate::storage::{Loc, Val};
 use crate::store::{self, ProgramFacts};
 use crate::unit::Event;
-use crate::vocab::{OpenMode, Pos};
+use crate::vocab::{Closing, OpenMode, Pos};
 use numeric::precision::{Fixed, Places};
 use std::cmp::Ordering;
 use zarch::ebcdic;
@@ -94,6 +94,8 @@ pub struct Failure {
 pub trait Files<P: Copy, X: Copy>: Host<P> {
     /// The program's file `k` while it is open.
     fn slot(&mut self, k: usize) -> &mut Option<Open>;
+    /// Whether CLOSE WITH LOCK has closed file `k`.
+    fn locked(&mut self, k: usize) -> &mut bool;
     fn dd(&self, assign: &str) -> Option<Dd>;
     fn notify(&mut self, event: Event<'_>);
     fn int(&mut self, value: X, pos: Pos) -> R<i64>;
@@ -214,6 +216,9 @@ fn deliver<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, re
 pub fn open<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, mode: OpenMode, pos: Pos) -> R<Outcome> {
     let (k, name) = (file.index, file.name);
     let failure = |status, message| Ok(Outcome::Failed(Failure { status, mode: Some(mode), message }));
+    if *x.locked(k) {
+        return failure(FileStatus::ClosedWithLock, format!("{name} was closed WITH LOCK"));
+    }
     if x.slot(k).is_some() {
         return failure(FileStatus::AlreadyOpen, format!("{name} is already open"));
     }
@@ -304,8 +309,16 @@ fn set_linage_counter<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_
     x.store_fixed(loc, &Fixed::new(value as i128, Places::new(19, 0)), pos)
 }
 
-pub fn close<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, pos: Pos) -> R<Outcome> {
+/// CLOSE, and its phrases as IBM's table has them for a file on a medium without reels or units
+/// (Language Reference for Enterprise COBOL 6.4, 'Effect of CLOSE statement on file types'): REEL
+/// or UNIT leaves the file open and sets status 07, NO REWIND closes it with 07, and LOCK closes it
+/// so that OPEN refuses it with 38.
+pub fn close<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, closing: Option<Closing>, pos: Pos) -> R<Outcome> {
     let name = file.name;
+    if closing == Some(Closing::Volume) && x.slot(file.index).is_some() {
+        set_status(x, file, FileStatus::SuccessNonReel, pos)?;
+        return Ok(Outcome::Done);
+    }
     match x.slot(file.index).take() {
         None => Ok(failed(x, file, FileStatus::NotOpen, format!("{name} is not open"))),
         Some(f) => {
@@ -315,7 +328,9 @@ pub fn close<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, 
                     if let Some(d) = x.dd(file.assign) {
                         x.notify(Event::Close { dd: file.assign, path: &d.path });
                     }
-                    set_status(x, file, FileStatus::Success, pos)?;
+                    *x.locked(file.index) |= closing == Some(Closing::Lock);
+                    let status = if closing == Some(Closing::NoRewind) { FileStatus::SuccessNonReel } else { FileStatus::Success };
+                    set_status(x, file, status, pos)?;
                     Ok(Outcome::Done)
                 }
                 Err(e) => Ok(Outcome::Failed(Failure { status: FileStatus::PermanentError, mode, message: format!("{name}: {e}") })),

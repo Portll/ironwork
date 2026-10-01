@@ -1083,6 +1083,8 @@ pub struct Phrase { pub on: bool, pub not_on: bool }
 pub enum FileVerb {
     Open(OpenMode),
     Close,
+    /// CLOSE REEL or UNIT, which leaves the file open, NO REWIND or LOCK (rt::fileio::close).
+    CloseWith(Closing),
     /// `sequential`: the phrase is AT END and a held file reads in sequence; else INVALID KEY, and
     /// `key` is the key of reference of an indexed file.
     Read { sequential: bool, previous: bool, into: Option<(PlaceId, MovePlan)>, key: u8 },

@@ -1276,11 +1276,27 @@ impl Parser<'_> {
             "CLOSE" => {
                 let mut files = Vec::new();
                 while self.starts_ref() {
-                    files.push(self.name("a file name")?);
-                    if self.accept_word("WITH") {
-                        self.accept_any(&["LOCK", "NO"]);
-                        self.accept_word("REWIND");
-                    }
+                    let name = self.name("a file name")?;
+                    let closing = if self.accept_any(&["REEL", "UNIT"]).is_some() {
+                        if self.accept_word("FOR") {
+                            self.expect_word("REMOVAL")?;
+                        } else if self.accept_word("WITH") || self.is_word("NO") {
+                            self.expect_word("NO")?;
+                            self.expect_word("REWIND")?;
+                        }
+                        Some(Closing::Volume)
+                    } else {
+                        self.accept_word("WITH");
+                        if self.accept_word("LOCK") {
+                            Some(Closing::Lock)
+                        } else if self.accept_word("NO") {
+                            self.expect_word("REWIND")?;
+                            Some(Closing::NoRewind)
+                        } else {
+                            None
+                        }
+                    };
+                    files.push((name, closing));
                 }
                 Stmt::Close { files, pos }
             }

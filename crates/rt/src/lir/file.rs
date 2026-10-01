@@ -4,7 +4,7 @@
 
 use super::{IntExpr, MovePlan, Operand, PlaceId, RangeId, StorePlan, SymId};
 use crate::files::Format;
-use crate::vocab::OpenMode;
+use crate::vocab::{Closing, OpenMode};
 use crate::{codec_enum, codec_struct};
 
 /// A file as SELECT and FD declare it. `format` is how its records are held when its DD does not
@@ -124,6 +124,7 @@ pub struct Phrase {
 pub enum FileVerb {
     Open(OpenMode),
     Close,
+    CloseWith(Closing),
     /// `sequential`: READ NEXT or PREVIOUS, or a file read in sequence, whose phrase is AT END;
     /// otherwise the phrase is INVALID KEY and `key` the key of reference of an indexed file.
     Read { sequential: bool, previous: bool, into: Option<(PlaceId, MovePlan)>, key: u8 },
@@ -201,6 +202,7 @@ codec_enum!(FileVerb {
     Rewrite { record, from } = 4,
     Delete = 5,
     Start { rel, key } = 6,
+    CloseWith(closing) = 7,
 });
 codec_struct!(FromMove { from, to, plan });
 codec_enum!(Advance { Lines { before, count } = 0, Page { before } = 1, Mnemonic { before, space } = 2 });
