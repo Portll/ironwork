@@ -13,7 +13,7 @@ impl Lower<'_> {
         if program.oo.as_deref().and_then(|o| o.class()).is_none() {
             return Ok(None);
         }
-        let (code, _) = crate::oo::class_code(program, &flags(&self.c.options)).map_err(|errors| {
+        let (code, _) = crate::oo::class_code(program, &flags(&self.c.options), self.c.when_compiled).map_err(|errors| {
             let first = syntax::most_severe(&errors).map(|e| e.message.clone()).unwrap_or_default();
             LowerError::Invalid(format!("the class definition does not compile again: {first}"))
         })?;

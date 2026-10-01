@@ -31,6 +31,10 @@ impl<'p> Evaluator for Call<'_, 'p, '_, '_, '_> {
         self.machine.unit.now()
     }
 
+    fn compiled(&self) -> (i64, u32) {
+        (self.machine.when_compiled.seconds, self.machine.when_compiled.hundredths)
+    }
+
     fn random(&mut self) -> &mut Option<u32> {
         &mut self.machine.unit.random
     }

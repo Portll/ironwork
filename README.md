@@ -210,8 +210,10 @@ The subset the interpreter runs today:
   pointer TO ADDRESS OF/NULL, ADDRESS OF TO pointer), GO TO [DEPENDING ON], ALTER and the altered GO TO (put
   back by CANCEL, IS INITIAL and entry to an independent segment: assumption C52), GOBACK, STOP
   RUN; subscripts, reference modification, LENGTH OF, ADDRESS OF, and the intrinsic functions of
-  Enterprise COBOL 6.4 but WHEN-COMPILED, with table arguments written with ALL subscripts; the
-  Unicode functions read an alphanumeric argument as UTF-8 and a national one as UTF-16. The floating-point functions (SQRT, LOG, SIN and the rest, assumption C111) are
+  Enterprise COBOL 6.4, with table arguments written with ALL subscripts; the Unicode functions
+  read an alphanumeric argument as UTF-8 and a national one as UTF-16, and WHEN-COMPILED gives the
+  build's SOURCE_DATE_EPOCH when it is set and the time of the compile otherwise. The
+  floating-point functions (SQRT, LOG, SIN and the rest, assumption C111) are
   computed to 128 bits and rounded to long or extended HFP (C110); RANDOM is a generator of
   ironwork's choosing (C54). JSON GENERATE, with COUNT, NAME, SUPPRESS, CONVERTING, INDICATING,
   ENCODING and ON EXCEPTION, sets JSON-CODE (C117). XML PARSE reports z/OS XML System Services'

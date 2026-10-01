@@ -250,10 +250,13 @@ fn letters_first() -> Sequence {
 #[test]
 fn program_shape_round_trips() {
     let cards = vec!["TRUNC(OPT)".into(), "SSR".into()];
-    let options = ProgramOptions { options: Options::default(), ssrange: true, cards, collating: Collating::Native, decimal_point_comma: false, numval_currency: "$".into() };
+    let options = ProgramOptions { options: Options::default(), ssrange: true, cards, collating: Collating::Native, decimal_point_comma: false, numval_currency: "$".into(), when_compiled: None };
     let sequenced = ProgramOptions { collating: Collating::Sequence(letters_first()), ..options.clone() };
     let comma = ProgramOptions { decimal_point_comma: true, numval_currency: "EUR ".into(), ..options.clone() };
-    round_trip(&[options, sequenced, comma]);
+    let when_compiled = Some(CompileTime { seconds: 1_790_510_400, hundredths: 42, source: TimeSource::Clock });
+    let stamped = ProgramOptions { when_compiled, ..options.clone() };
+    round_trip(&[options, sequenced, comma, stamped]);
+    every_variant(&[TimeSource::SourceDateEpoch, TimeSource::Clock], 2);
     round_trip(&[Edit { syms: vec![Sym::Currency, Sym::Nine, Sym::Point, Sym::Nine], currency: "CHF ".into() }, Edit { syms: vec![Sym::Z], currency: String::new() }]);
     every_variant(&[Collating::Native, Collating::Sequence(letters_first())], 2);
     let storage = Storage {
@@ -298,7 +301,7 @@ fn program_shape_round_trips() {
         search_all: vec![SearchAllPlan { index: 0, store: StorePlan::Index, count: Count::Fixed(5), keys: vec![] }],
         function: vec![FunctionPlan {
             func: Func::Trim,
-            args: vec![Comparand::Operand(Operand::Load(0))],
+            args: vec![Argument::Value(Comparand::Operand(Operand::Load(0)))],
             integer: None,
             side: Some(TrimSide::Leading),
             refmod: None,
@@ -372,6 +375,19 @@ fn a_slab_size_that_differs_from_its_image_is_malformed() {
     let storage = Storage { size: 4, image: vec![0; 3], ..Storage::default() };
     let (bytes, strings) = encoded(&storage);
     assert_eq!(refused::<Storage>(&bytes, &strings), (0, "an image of 3 bytes for a slab of 4".into()));
+}
+
+#[test]
+fn a_compile_time_outside_what_when_compiled_shows_is_malformed() {
+    let refusal = |seconds: i64, hundredths: u32, source: TimeSource| {
+        let (bytes, strings) = encoded(&CompileTime { seconds, hundredths, source });
+        refused::<CompileTime>(&bytes, &strings).1
+    };
+    assert_eq!(refusal(-1, 0, TimeSource::Clock), "a compile time of -1 seconds and 0 hundredths from Clock");
+    assert_eq!(refusal(CompileTime::LATEST + 1, 0, TimeSource::SourceDateEpoch), "a compile time of 253402300800 seconds and 0 hundredths from SourceDateEpoch");
+    assert_eq!(refusal(0, 100, TimeSource::Clock), "a compile time of 0 seconds and 100 hundredths from Clock");
+    assert_eq!(refusal(0, 5, TimeSource::SourceDateEpoch), "a compile time of 0 seconds and 5 hundredths from SourceDateEpoch");
+    round_trip(&[CompileTime { seconds: CompileTime::LATEST, hundredths: 99, source: TimeSource::Clock }]);
 }
 
 #[test]
@@ -609,14 +625,17 @@ fn statement_payloads_round_trip_with_every_tag() {
     ];
     every_variant(&numeric, 7);
     every_variant(&[FloatFrom::Float, FloatFrom::Fixed, FloatFrom::Zero], 3);
-    every_variant(Func::ALL, 21);
+    every_variant(Func::ALL, 82);
     for &func in Func::ALL {
         assert_eq!(Func::named(func.name()), Some(func));
     }
     assert_eq!((Func::named("NUMVAL-C"), Func::named("NUMVALC")), (Some(Func::NumvalC), None));
     assert_eq!((Func::Random.arity(), Func::Max.arity().contains(&40)), (0..=1, true));
+    assert_eq!((Func::named("WHEN-COMPILED"), Func::PresentValue.arity().contains(&1)), (Some(Func::WhenCompiled), false));
     every_variant(&[TrimSide::Leading, TrimSide::Trailing], 2);
-    let args = vec![Comparand::Operand(Operand::Load(0)), FLOAT_EXPR, Comparand::Operand(Operand::Function(1))];
+    let all = Argument::All { element: 4, all: vec![(0, Count::Fixed(3)), (1, Count::Odo(ODO))] };
+    every_variant(&[Argument::Value(FLOAT_EXPR), all.clone()], 2);
+    let args = vec![Argument::Value(Comparand::Operand(Operand::Load(0))), Argument::Value(FLOAT_EXPR), all, Argument::Value(Comparand::Operand(Operand::Function(1)))];
     round_trip(&[
         FunctionPlan { func: Func::Max, args, integer: None, side: None, refmod: Some(REFMOD), arity: None, at: 5 },
         FunctionPlan { func: Func::Char, args: vec![], integer: Some(IntExpr::Item(2)), side: None, refmod: None, arity: Some(3), at: 6 },

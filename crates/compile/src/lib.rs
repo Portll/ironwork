@@ -17,12 +17,15 @@ pub mod sql;
 
 use layout::Layout;
 use numeric::Options;
+use rt::lir::{CompileTime, TimeSource};
 use rt::storage::literal_fixed;
 use syntax::ast::*;
 use syntax::{Error, Pos, Severity};
 
 pub struct Compiled {
     pub program: Program,
+    /// FUNCTION WHEN-COMPILED's time.
+    pub when_compiled: CompileTime,
     pub layout: Layout,
     pub options: Options,
     pub ssrange: bool,
@@ -73,15 +76,39 @@ const FUNCTIONS: &[&str] = &[
 /// NOCOMPILE(S) one that is S or U, from W under `-warnings-block`, or as a CBL or PROCESS card's
 /// COMPILE or NOCOMPILE says; otherwise its messages are [`Compiled::diagnostics`].
 pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error>> {
+    let at = compile_time().map_err(|message| vec![Error::at(Pos::default(), message)])?;
+    compile_at(program, flags, at)
+}
+
+/// Compiles as [`compile`] does, WHEN-COMPILED giving `at`.
+pub fn compile_at(program: Program, flags: &[String], at: CompileTime) -> Result<Compiled, Vec<Error>> {
     if program.oo.as_ref().is_some_and(|o| o.class().is_some()) {
-        return oo::compile_class_definition(program, flags);
+        return oo::compile_class_definition(program, flags, at);
     }
-    compile_program(program, flags, true)
+    compile_program(program, flags, true, at)
+}
+
+/// When a compile happens: SOURCE_DATE_EPOCH's seconds when the build sets it, the
+/// reproducible-builds convention, and the clock otherwise.
+pub fn compile_time() -> Result<CompileTime, String> {
+    let clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    compile_time_from(std::env::var_os("SOURCE_DATE_EPOCH").as_deref(), clock)
+}
+
+fn compile_time_from(epoch: Option<&std::ffi::OsStr>, clock: std::time::Duration) -> Result<CompileTime, String> {
+    let Some(epoch) = epoch else {
+        return Ok(CompileTime { seconds: clock.as_secs() as i64, hundredths: clock.subsec_millis() / 10, source: TimeSource::Clock });
+    };
+    let text = epoch.to_string_lossy();
+    match text.parse::<i64>() {
+        Ok(seconds) if text.bytes().all(|b| b.is_ascii_digit()) && seconds <= CompileTime::LATEST => Ok(CompileTime { seconds, hundredths: 0, source: TimeSource::SourceDateEpoch }),
+        _ => Err(format!("SOURCE_DATE_EPOCH={text}: not a whole number of seconds from 0 to {}", CompileTime::LATEST)),
+    }
 }
 
 /// `whole` is false for the parts a class definition is compiled into, which IBM's rules for
 /// compiler options do not apply to one by one.
-pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: bool) -> Result<Compiled, Vec<Error>> {
+pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: bool, when_compiled: CompileTime) -> Result<Compiled, Vec<Error>> {
     let mut errors = std::mem::take(&mut program.messages);
     reserved::check(&program, &mut errors);
     let mut program = declaratives::with_debug_item(markup::with_special_registers(sort::with_special_registers(program)));
@@ -174,7 +201,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     if refused(&errors, &options) {
         Err(errors)
     } else {
-        Ok(Compiled { program, layout, options, ssrange, report_writer, collating, carriage, diagnostics: errors, entries, declaratives })
+        Ok(Compiled { program, when_compiled, layout, options, ssrange, report_writer, collating, carriage, diagnostics: errors, entries, declaratives })
     }
 }
 
@@ -1006,6 +1033,25 @@ impl Check<'_> {
                 self.cond(a);
                 self.cond(b);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+    use std::time::Duration;
+
+    #[test]
+    fn source_date_epoch_decides_the_compile_time_and_the_clock_stands_in_for_it() {
+        let clock = Duration::from_millis(1_790_510_400_428);
+        let from = |epoch: Option<&str>| compile_time_from(epoch.map(OsStr::new), clock);
+        assert_eq!(from(None), Ok(CompileTime { seconds: 1_790_510_400, hundredths: 42, source: TimeSource::Clock }));
+        assert_eq!(from(Some("315532800")), Ok(CompileTime { seconds: 315_532_800, hundredths: 0, source: TimeSource::SourceDateEpoch }));
+        assert_eq!(from(Some("253402300799")).map(|t| t.seconds), Ok(CompileTime::LATEST));
+        for bad in ["", "-1", "+5", "1.5", " 7", "253402300800"] {
+            assert!(from(Some(bad)).unwrap_err().starts_with(&format!("SOURCE_DATE_EPOCH={bad}: ")), "{bad}");
         }
     }
 }

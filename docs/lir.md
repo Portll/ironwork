@@ -114,11 +114,19 @@ pub struct Edit { pub syms: Vec<Sym>, pub currency: String }
 /// every CALL (load-module.md §8.3). `cards` are the CBL and PROCESS cards as written (ast.rs:7).
 /// `collating` is `Compiled.collating` (exec/src/lib.rs, after 79a199e). `decimal_point_comma` is
 /// SPECIAL-NAMES DECIMAL-POINT IS COMMA and `numval_currency` the cs NUMVAL-C and TEST-NUMVAL-C
-/// take without argument-2, both as the walker reads them (§9.11).
+/// take without argument-2, both as the walker reads them (§9.11). `when_compiled` is
+/// `Compiled.when_compiled`, which FUNCTION WHEN-COMPILED gives (§9.9), in a program that uses
+/// WHEN-COMPILED, and None in any other, so its module does not depend on when it was compiled.
 pub struct ProgramOptions {
     pub options: numeric::Options, pub ssrange: bool, pub cards: Vec<String>,
     pub collating: Collating, pub decimal_point_comma: bool, pub numval_currency: String,
+    pub when_compiled: Option<CompileTime>,
 }
+
+/// Seconds since 1970-01-01T00:00:00Z, from 0 to 9999-12-31T23:59:59Z (253402300799), and
+/// hundredths below 100, zero when `source` is `SourceDateEpoch`; a decoder refuses anything else.
+pub struct CompileTime { pub seconds: i64, pub hundredths: u32, pub source: TimeSource }
+pub enum TimeSource { SourceDateEpoch, Clock }
 
 /// The sequence PROGRAM COLLATING SEQUENCE names, from an ALPHABET clause of SPECIAL-NAMES, as
 /// `collating::Sequence` builds it (exec/src/collating.rs, after 79a199e): alphanumeric comparisons,
@@ -179,8 +187,15 @@ pub struct Block { pub ops: Vec<Op>, pub end: Terminator }
   each fresh activation (machine.rs:198-227).
 - **The collating sequence is data.** Lowering keeps `Compiled.collating` whole, so an executor
   compares, fills HIGH-VALUE and LOW-VALUE and answers CHAR and ORD without the ALPHABET clause.
-  A load module's OPTIONS section holds it after the cards; load-module.md §5.1 does not list it
-  yet.
+  A load module's OPTIONS section holds it after the cards (load-module.md §5.1).
+- **The compile time is data.** `compile` takes it from SOURCE_DATE_EPOCH when the build sets it
+  (whole seconds, the reproducible-builds convention; a value that is not digits, or is past
+  253402300799, refuses the compile), and from the clock otherwise; `TimeSource` says which.
+  `compile_at` takes it from the caller. A class definition's methods and data take the class's.
+  The walker and the LIR read the one `Compiled.when_compiled`, so they give the same
+  WHEN-COMPILED; a program the walker compiles when a CALL first loads it is compiled at that
+  moment. Lowering keeps it only in a program with a WHEN-COMPILED plan, so no other program's LIR
+  depends on when it was compiled.
 - **No literal text reaches run time.** Lowering parses every numeric literal (`Const::Number`,
   §6); VALUE clauses reach the runtime only as the image, and 88-level values as constants of
   `Cond::Name`. The item table records DEPENDING ON objects and keys; places evaluate them (§5.4).
@@ -401,7 +416,7 @@ pub enum Count { Fixed(u32), Odo(Odo) }
 |---|---|---|
 | dmax | Largest scale among the receivers and the expressions, divisors and exponents aside (machine.rs:1493-1501, 1409-1417) | `ArithPlan.dmax` |
 | ARITH | `options.arith` (machine.rs:1420) | `ArithPlan.arith` |
-| Fixed or float | `uses_float` on each expression (machine.rs:1506, 1400-1406) | `ArithStep.mode` |
+| Fixed or float | Float for every expression when a receiver is COMP-1 or COMP-2 (Programming Guide SC27-8714-03, p. 800), else `uses_float` on each expression (machine.rs:1506, 1400-1406), which is then not run | `ArithStep.mode`, with an empty `probe` when a receiver decides it |
 | Float intermediate | `arith.float_intermediate()` (machine.rs:1507) | inside `Mode::Float` |
 | Receiver's store | `locate(t).kind`, then `store_value` and `store_fixed_checked` (machine.rs:1542-1633) | `StorePlan` |
 | ROUNDED | `t.rounded` (machine.rs:1521) | `ArithStep.rounded` |
@@ -457,7 +472,10 @@ pub enum UpDown { Pointer, Number(StepPlan), Refused(AbendId) }
 ```
 
 The same `StorePlan` serves MOVE's numeric receivers, with ROUNDED off and no size check
-(machine.rs:1566-1568).
+(machine.rs:1566-1568). A floating-point value reaching a fixed-point receiver is rounded whatever
+`rounded` says, and one reaching a narrower COMP-1 is rounded too, as `store_value` and `assign`
+do (rt/src/store.rs, `float::to_receiver` and `float::narrow_rounded`), so no plan carries a
+rounding of its own for them.
 
 ### 7.3 What stays dynamic
 
@@ -966,7 +984,7 @@ Every category pair, by the value the walker reads from the sender (line numbers
 | National | Refused | Refused | Units | Refused | Refused | Refused | Refused |
 | Integer numeric | Its digits, unsigned | Digits, edited | Refused | Stored; PFD packed copy | Converted | Refused | Stored |
 | Numeric with decimals | Refused | Refused | Refused | Stored | Converted | Refused | Stored |
-| COMP-1, COMP-2 | Refused | Refused | Refused | Converted, then stored | Narrowed or lengthened | Refused | Refused |
+| COMP-1, COMP-2 | Refused | Refused | Refused | Rounded in the receiver's low-order position, at most 9 significant digits from short and 18 from long (`float::to_receiver`), then stored | Narrowed rounding (`float::narrow_rounded`) or lengthened | Refused | Refused |
 | ZERO | Zeros | Zeros, edited | U+0030 units | Zero | Zero | Refused | Refused |
 | SPACE, QUOTE, HIGH-, LOW-VALUE | Filled | Filled, edited | Its unit | Bytes filled | Refused | Refused | Refused |
 | NULL | Filled with X'00' | Filled, edited | U+0000 | Bytes filled | Refused | NULL | Refused |
@@ -1373,44 +1391,103 @@ pub struct Method {
 ### 9.9 Intrinsic functions
 
 ```rust
-/// Each argument evaluated as a comparison evaluates it; then `arity`'s abend, if set; then the
-/// function, which reads `integer` again: CHAR, INTEGER-OF-DATE, DATE-OF-INTEGER and RANDOM their
-/// first argument, NATIONAL-OF its second; last, on an alphanumeric result, `refmod`.
+/// Each argument evaluated as a comparison evaluates it; then `arity`'s abend, if set, when the
+/// values the arguments give number outside `func.arity()`; then the function, which reads
+/// `integer` again: CHAR, INTEGER-OF-DATE, DATE-OF-INTEGER and RANDOM their first argument,
+/// NATIONAL-OF its second; last, on an alphanumeric result, `refmod`. HEX-OF, BIT-OF and
+/// BYTE-LENGTH read a `Load` argument's bytes as stored, and any other argument's value as DISPLAY
+/// would hold it; WHEN-COMPILED reads `ProgramOptions.when_compiled`.
 pub struct FunctionPlan {
-    pub func: Func, pub args: Vec<Comparand>, pub integer: Option<IntExpr>,
+    pub func: Func, pub args: Vec<Argument>, pub integer: Option<IntExpr>,
     pub side: Option<TrimSide>, pub refmod: Option<RefMod>, pub arity: Option<AbendId>, pub at: DebugId,
 }
+
+/// `All`: a table written with ALL subscripts, expanded when the function runs. `element` is the
+/// table as written, each ALL subscript 1; each `(position, count)` an ALL subscript's position
+/// among its subscripts and its occurrences.
+pub enum Argument { Value(Comparand), All { element: PlaceId, all: Vec<(u32, Count)> } }
 
 /// One row per function: variant, tag, name and argument counts. Adding a function is adding a row.
 functions! {
     Char = 0, "CHAR", 1..=1;  Ord = 1, "ORD", 1..=1;  NationalOf = 2, "NATIONAL-OF", 1..=2;  …
     Min = 16, "MIN", 1..=usize::MAX;  …  Random = 20, "RANDOM", 0..=1;
+    Acos = 21, "ACOS", 1..=1;  …  YearToYyyy = 72, "YEAR-TO-YYYY", 1..=2;
+    WhenCompiled = 73, "WHEN-COMPILED", 0..=0;
+    Ulength = 74, "ULENGTH", 1..=1;  …  ContentOf = 81, "CONTENT-OF", 1..=1;
 }
 ```
 
+Tags 0 to 20 are the walker's first twenty-one functions (`rt::intrinsic::function::evaluate`),
+21 to 72 the alphabetical first part of `rt::intrinsic::FUNCTIONS`, 73 WHEN-COMPILED, and 74 to 81
+the eight that follow in it: ULENGTH, UPOS, USUBSTR, USUPPLEMENTARY, UVALID, UWIDTH,
+COMBINED-DATETIME and CONTENT-OF. Every function the walker runs has a row.
+
 - **The walker's order** (machine.rs `function`): every argument by `expr_value`, which is
   `Comparand` (an operand read as its kind; an expression with its float test, dmax pass and mode);
-  then the argument count, abending IRONWORK "FUNCTION X takes 1..=1 arguments", or "needs
-  arguments" for MIN and MAX; then the function. CHAR, NATIONAL-OF's CCSID, INTEGER-OF-DATE,
+  then the argument count; then the function. CHAR, NATIONAL-OF's CCSID, INTEGER-OF-DATE,
   DATE-OF-INTEGER and RANDOM's seed evaluate their argument a second time with `integer`, which is
   observable (a subscript's locate, FUNCTION RANDOM advancing), so the plan keeps it. Reference
   modification of the result is evaluated last, with `integer`, and checked against the result
   whatever SSRANGE says, so `refmod.check` is false.
-- **A name Check admits but `Func` lacks** is refused, "a FUNCTION the LIR does not name".
-- **The result's category** decides the MOVE and comparison plans around the operand: bytes for
-  CHAR, TRIM, UPPER-CASE, LOWER-CASE, REVERSE and CURRENT-DATE; national for NATIONAL-OF; a float
-  for RANDOM, and for ABS, REM, MIN and MAX of a floating-point argument; an integer of 3, 9, 7 and 8
-  digits for ORD, LENGTH, INTEGER-OF-DATE and DATE-OF-INTEGER, of 30 digits (31 under
-  ARITH(EXTEND)) for INTEGER and INTEGER-PART of a floating-point argument; 31 digits with the
-  arguments' most decimal places for MOD, REM, INTEGER, INTEGER-PART and ABS; MIN and MAX the
-  winning argument's own value. Where the decimal places or digits depend on the text (NUMVAL,
-  NUMVAL-C) or on which argument wins, the result is a number of unknown scale, and moving or
-  comparing it as alphanumeric is refused, since the walker decides that by the value. MIN or MAX
-  of arguments of different categories is refused.
-- **The float test** (`uses_float`) counts FUNCTION RANDOM as floating-point without locating
-  anything, and ABS, REM, MIN and MAX as floating-point when any argument is; it tests every one of
-  their arguments, locating their operands, where it stops at the first floating-point operand
-  elsewhere. The `prepass` and `probe` lists keep those locates.
+- **The argument count** is checked on the values the arguments give, after ALL subscripts expand
+  them. `arity` holds the walker's message: "FUNCTION X takes 1..=1 arguments" for the first
+  twenty-one but MIN and MAX, "FUNCTION X takes 1..=1 arguments, not 2" for the rest, "FUNCTION X needs arguments"
+  for the functions of any number of arguments (MIN, MAX, ORD-MIN, ORD-MAX, RANGE, SUM, MEAN,
+  MEDIAN, MIDRANGE, VARIANCE, STANDARD-DEVIATION), and PRESENT-VALUE's "needs a rate and at least
+  one amount". `arity` is None where no count the arguments can give is wrong. Where an OCCURS
+  DEPENDING ON count leaves the number to run time, the plan carries the abend and the executor
+  tests it; a message that names the count (a function of fixed arguments past the first
+  twenty-one) is refused.
+- **HEX-OF, BIT-OF and BYTE-LENGTH** (`storage_function`) count their arguments as written before
+  evaluating any, "FUNCTION X takes one argument", and read an item's storage rather than its value,
+  so invalid data is shown rather than ending the run. A wrong count lowers with no arguments and
+  `arity` set. ALL subscripts are not expanded for them: the walker reads the table as written,
+  each ALL subscript 1.
+- **ALL subscripts** (`function_arguments`, `all_elements`): the walker reads every ALL dimension's
+  occurrence count first, left to right, an OCCURS DEPENDING ON dimension as its object's current
+  value (checked under SSRANGE), then each element, the rightmost ALL varying fastest, evaluating
+  the other subscripts as written for each. A table whose ALL dimensions have no OCCURS DEPENDING
+  ON and at most 256 elements lowers as one `Argument::Value` per element, its ALL subscripts
+  constants. Any other is `Argument::All`, with `Count::Fixed` or `Count::Odo` per ALL subscript,
+  which the executor expands in the walker's order.
+- **A name Check admits but `Func` lacks** is refused, "a FUNCTION the LIR does not name". None is
+  left.
+- **The result's category** decides the MOVE and comparison plans around the operand, as
+  `Machine::function`'s value reads:
+
+  | Result | Functions |
+  |---|---|
+  | The argument's own value | CONTENT-OF, a number of unknown scale for an item with PICTURE scaling positions |
+  | Alphanumeric or national as the first argument is | USUBSTR |
+  | Alphanumeric bytes | CHAR, TRIM, UPPER-CASE, LOWER-CASE, REVERSE, CURRENT-DATE, WHEN-COMPILED, HEX-OF, BIT-OF, HEX-TO-CHAR, BIT-TO-CHAR, DISPLAY-OF, UUID4 |
+  | National | NATIONAL-OF; FORMATTED-CURRENT-DATE, FORMATTED-DATE, FORMATTED-TIME and FORMATTED-DATETIME of a national format, alphanumeric otherwise |
+  | Floating point, long under ARITH(COMPAT) and extended under ARITH(EXTEND) | NUMVAL, NUMVAL-C, COMBINED-DATETIME (long rounded, then lengthened), RANDOM, ACOS, ANNUITY, ASIN, ATAN, COS, E, EXP, EXP10, LOG, LOG10, MEAN, MEDIAN, MIDRANGE, NUMVAL-F, PI, PRESENT-VALUE, SECONDS-FROM-FORMATTED-TIME, SECONDS-PAST-MIDNIGHT, SIN, SQRT, STANDARD-DEVIATION, TAN, VARIANCE; ABS, REM, MIN, MAX and SUM of a floating-point argument; RANGE when neither its greatest nor its least argument is fixed-point |
+  | An integer of 1 digit | SIGN, TEST-DATE-YYYYMMDD, TEST-DAY-YYYYDDD |
+  | 3 digits | ORD |
+  | 4 digits | YEAR-TO-YYYY |
+  | 7 digits | INTEGER-OF-DATE, DAY-OF-INTEGER, INTEGER-OF-DAY, DAY-TO-YYYYDDD, INTEGER-OF-FORMATTED-DATE |
+  | 8 digits | DATE-OF-INTEGER, DATE-TO-YYYYMMDD |
+  | 9 digits | LENGTH, BYTE-LENGTH, ORD-MIN, ORD-MAX, TEST-NUMVAL, TEST-NUMVAL-C, TEST-NUMVAL-F, TEST-FORMATTED-DATETIME, ULENGTH, UPOS, USUPPLEMENTARY, UVALID, UWIDTH |
+  | 30 digits, 31 under ARITH(EXTEND) | FACTORIAL; INTEGER and INTEGER-PART of a floating-point argument |
+  | 31 digits, the arguments' most decimal places | MOD, REM, INTEGER, INTEGER-PART, ABS |
+  | `Fixed::add`'s places, from a one-digit zero through each argument | SUM of fixed-point arguments |
+  | `Fixed::sub`'s places for the greatest less the least | RANGE of fixed-point arguments |
+  | The winning argument's own value | MIN, MAX |
+
+  Where the decimal places or digits depend on which argument wins
+  (MIN, MAX and RANGE of arguments of different sizes), on an argument that is an expression or an
+  item with PICTURE scaling positions, or on how many elements an OCCURS DEPENDING ON table gives
+  (SUM), the result is a number of unknown scale, and moving or comparing it as alphanumeric is
+  refused, since the walker decides that by the value. MIN or MAX of arguments of different
+  categories, RANGE of fixed-point arguments with floating-point or ZERO ones, and an OCCURS
+  DEPENDING ON table among arguments of another category, whose count would decide the result's
+  category, are refused.
+- **The float test** (`uses_float`, `is_floating_point`) counts the functions of
+  `rt::intrinsic::FLOATING_POINT` as floating-point without locating anything, and those of
+  `rt::intrinsic::MIXED` (ABS, MAX, MIN, RANGE, REM, SUM) as floating-point when an argument is,
+  testing their arguments as written in order and stopping at the first floating-point one, as it
+  stops at the first floating-point operand elsewhere. The `prepass` and `probe` lists keep those
+  locates.
 
 ### 9.10 DECLARATIVES
 

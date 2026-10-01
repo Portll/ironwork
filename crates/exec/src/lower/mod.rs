@@ -117,6 +117,7 @@ pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
             collating: collating(&compiled.collating),
             decimal_point_comma: compiled.program.environment.decimal_point_comma,
             numval_currency: crate::machine::numval_currency(&compiled.program.environment.currency),
+            when_compiled: l.plans.function.iter().any(|f| f.func == lir::Func::WhenCompiled).then_some(compiled.when_compiled),
         },
         initial: compiled.program.initial,
         recursive: compiled.program.recursive,

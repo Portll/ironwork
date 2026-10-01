@@ -1,6 +1,6 @@
 use crate::lower::{self, LowerError};
-use crate::{Abend, Compiled, Ending, Execute, cics, compile, files, unit};
-use rt::lir::Program;
+use crate::{Abend, Compiled, Ending, Execute, cics, compile, compile_at, files, unit};
+use rt::lir::{CompileTime, Program};
 use rt::module::StringTable;
 use rt::module::codec::{Encode, Writer, decode_all};
 use std::io::{Cursor, Write};
@@ -30,6 +30,7 @@ pub struct Harness {
     clock: unit::Clock,
     task: Option<cics::Task>,
     commarea: Option<String>,
+    when_compiled: Option<CompileTime>,
 }
 
 impl Harness {
@@ -44,6 +45,7 @@ impl Harness {
             clock: unit::Clock::System,
             task: None,
             commarea: None,
+            when_compiled: None,
         }
     }
 
@@ -82,6 +84,12 @@ impl Harness {
         self
     }
 
+    /// The main program's compile time, which WHEN-COMPILED gives, in place of the clock's.
+    pub fn compiled_at(mut self, at: CompileTime) -> Self {
+        self.when_compiled = Some(at);
+        self
+    }
+
     /// The task's COMMAREA, encoded in the program's code page.
     pub fn commarea(mut self, text: &str) -> Self {
         self.commarea = Some(text.to_owned());
@@ -91,7 +99,12 @@ impl Harness {
     pub fn run(self, executor: Executor) -> Outcome {
         let Executor::Interpreter = executor;
         let mut programs = syntax::parse_all_with(&self.source, &syntax::copy::Libraries::default()).unwrap_or_else(|e| panic!("{e}"));
-        let compiled = compile(programs.remove(0), &self.flags).unwrap_or_else(|e| panic!("{e:?}"));
+        let main = programs.remove(0);
+        let compiled = match self.when_compiled {
+            Some(at) => compile_at(main, &self.flags, at),
+            None => compile(main, &self.flags),
+        };
+        let compiled = compiled.unwrap_or_else(|e| panic!("{e:?}"));
         programs.extend(self.classes.iter().map(|c| syntax::parse(c).unwrap_or_else(|e| panic!("{e}\n{c}"))));
         let fingerprint = rt::sql::fingerprint(&format!("{}\n{}", self.source, self.flags.join(" ")));
         let library = unit::Library { programs, dirs: self.dirs, flags: self.flags, ..Default::default() };

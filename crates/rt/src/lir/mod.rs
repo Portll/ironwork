@@ -31,7 +31,7 @@ pub use markup::{
 pub use flow::{Declaratives, Frame, FrameKind, Op, Range, RangeKind, Resume, ReturnPoint, Returns, Step, Terminator};
 pub use crate::cics::CicsCommand;
 pub use payload::{
-    DisplayItem, DisplayPlan, FloatFrom, Func, FunctionPlan, Image, InitField, InitPlan,
+    Argument, DisplayItem, DisplayPlan, FloatFrom, Func, FunctionPlan, Image, InitField, InitPlan,
     InvokePlan, MethodName, MovePlan, NationalFrom, NumericFrom, Receiver, ReleasePlan, ReportOp, ReturnPlan,
     SearchAllPlan, SearchKey, SortPlan, TrimSide,
 };
@@ -44,7 +44,7 @@ pub use text::{
 pub use value::{ByteClass, Compare, Comparand, Cond, Const, Count, Expr, IntExpr, Operand, SignTest, SqlTest};
 
 use crate::abend::AbendCode;
-use crate::codec_struct;
+use crate::{codec_enum, codec_struct};
 use crate::picture::Sym;
 use crate::storage::Kind;
 
@@ -116,6 +116,9 @@ pub struct ProgramOptions {
     pub decimal_point_comma: bool,
     /// The cs NUMVAL-C and TEST-NUMVAL-C take without argument-2 (assumption C102).
     pub numval_currency: String,
+    /// What FUNCTION WHEN-COMPILED gives; None in a program that does not use it, so its module
+    /// does not depend on when it was compiled.
+    pub when_compiled: Option<CompileTime>,
 }
 
 /// An edited PICTURE's symbols, and the currency sign value its currency symbol stands for, empty
@@ -124,6 +127,27 @@ pub struct ProgramOptions {
 pub struct Edit {
     pub syms: Vec<Sym>,
     pub currency: String,
+}
+
+/// When the program was compiled, which FUNCTION WHEN-COMPILED gives: seconds since
+/// 1970-01-01T00:00:00Z and hundredths, and where the time came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CompileTime {
+    pub seconds: i64,
+    pub hundredths: u32,
+    pub source: TimeSource,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TimeSource {
+    /// The build's SOURCE_DATE_EPOCH, whole seconds (reproducible-builds.org/specs/source-date-epoch).
+    SourceDateEpoch,
+    Clock,
+}
+
+impl CompileTime {
+    /// 9999-12-31T23:59:59Z, the last second WHEN-COMPILED's four-digit year can show.
+    pub const LATEST: i64 = 253_402_300_799;
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -232,8 +256,10 @@ codec_struct!(Program {
     id, options, initial, recursive, storage, items, paragraphs, procedure_start, ranges, blocks, places, exprs,
     conds, consts, plans, services, sql, abends, edits, symbols, debug,
 } check program_valid);
-codec_struct!(ProgramOptions { options, ssrange, cards, collating, decimal_point_comma, numval_currency });
+codec_struct!(ProgramOptions { options, ssrange, cards, collating, decimal_point_comma, numval_currency, when_compiled });
 codec_struct!(Edit { syms, currency });
+codec_struct!(CompileTime { seconds, hundredths, source } check compile_time_valid);
+codec_enum!(TimeSource { SourceDateEpoch = 0, Clock = 1 });
 codec_struct!(Storage {
     size, image, local_image, init_reports, init_abend, linkage, using, returning, file_areas,
 } check storage_valid);
@@ -248,6 +274,14 @@ codec_struct!(Services { file_ops, files, calls, sorts, releases, returns, invok
 
 pub(crate) fn program_valid(program: &Program) -> Result<(), String> {
     sql::table_valid(&program.sql, &program.symbols)
+}
+
+fn compile_time_valid(t: &CompileTime) -> Result<(), String> {
+    let whole = t.source == TimeSource::SourceDateEpoch && t.hundredths != 0;
+    if !(0..=CompileTime::LATEST).contains(&t.seconds) || t.hundredths > 99 || whole {
+        return Err(format!("a compile time of {} seconds and {} hundredths from {:?}", t.seconds, t.hundredths, t.source));
+    }
+    Ok(())
 }
 
 fn storage_valid(storage: &Storage) -> Result<(), String> {

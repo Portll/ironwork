@@ -215,7 +215,8 @@ impl<'p> Machine<'p, '_, '_> {
             None => (None, Vec::new()),
             Some((program, path)) => {
                 let flags = self.unit.library.flags.clone();
-                let (code, _) = classes::class_code(&program, &flags).map_err(|errors| {
+                let at = crate::compile_time().map_err(|m| Abend::ironwork(format!("class {external} does not compile: {m}"), pos))?;
+                let (code, _) = classes::class_code(&program, &flags, at).map_err(|errors| {
                     let first = syntax::most_severe(&errors).map(|e| e.place(external)).unwrap_or_default();
                     Abend::ironwork(format!("class {external} does not compile: {first}"), pos)
                 })?;

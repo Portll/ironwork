@@ -121,12 +121,18 @@ impl Lower<'_> {
             dmax = dmax.max(receiver_dec(scale(self.kind_of(target)), t.rounded)).max(self.dmax(e)?);
         }
         let arith = self.c.options.arith;
+        let mut float_receiver = false;
+        for &(t, _) in computations {
+            let target = self.place(&t.r, false)?;
+            float_receiver |= matches!(self.kind_of(target), Kind::Float(_));
+        }
         let mut lowered: Vec<(&Expr, ExprId)> = Vec::new();
         let mut steps = Vec::new();
         for &(t, e) in computations {
             let target = self.place(&t.r, false)?;
-            let probe = self.float_probe(e)?;
-            let mode = if self.uses_float(e)? { Mode::Float(arith.float_intermediate()) } else { Mode::Fixed };
+            // A COMP-1 or COMP-2 receiver makes every step floating point, and the walker then skips the float test.
+            let (probe, float) = if float_receiver { (Vec::new(), true) } else { (self.float_probe(e)?, self.uses_float(e)?) };
+            let mode = if float { Mode::Float(arith.float_intermediate()) } else { Mode::Fixed };
             let expr = match lowered.iter().find(|(seen, _)| std::ptr::eq(*seen, e)) {
                 Some(&(_, id)) => id,
                 None => {

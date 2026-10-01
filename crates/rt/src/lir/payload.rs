@@ -120,21 +120,36 @@ pub struct SearchKey<V = Comparand> {
 }
 
 /// FUNCTION, as the walker evaluates it: each argument in turn, as a comparison evaluates an
-/// operand or expression; then, when `arity` is set, its abend (a wrong number of arguments);
-/// then the function, which for CHAR, INTEGER-OF-DATE, DATE-OF-INTEGER and RANDOM evaluates its
-/// first argument again as `integer`, and for NATIONAL-OF with two arguments its second; last,
-/// on an alphanumeric result, `refmod`'s start and length. `refmod.check` is always false: the
-/// walker checks a function's reference modification against its result whatever SSRANGE says.
+/// operand or expression; then, when the values the arguments give number outside `func.arity()`,
+/// `arity`'s abend (lowering leaves `arity` None where they cannot); then the function, which for
+/// CHAR, INTEGER-OF-DATE, DATE-OF-INTEGER and RANDOM evaluates its first argument again as
+/// `integer`, and for NATIONAL-OF with two arguments its second; last, on an alphanumeric result,
+/// `refmod`'s start and length. `refmod.check` is always false: the walker checks a function's
+/// reference modification against its result whatever SSRANGE says.
+///
+/// HEX-OF, BIT-OF and BYTE-LENGTH read a `Load` argument's bytes as stored, and any other
+/// argument's value as DISPLAY would hold it. WHEN-COMPILED reads `ProgramOptions.when_compiled`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FunctionPlan {
     pub func: Func,
-    pub args: Vec<Comparand>,
+    pub args: Vec<Argument>,
     pub integer: Option<IntExpr>,
     /// TRIM's LEADING or TRAILING.
     pub side: Option<TrimSide>,
     pub refmod: Option<RefMod>,
     pub arity: Option<AbendId>,
     pub at: DebugId,
+}
+
+/// A FUNCTION argument: one value, or the elements of a table written with ALL subscripts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Argument {
+    Value(Comparand),
+    /// `element` is the table as written, each ALL subscript 1. Each `(position, count)` is an ALL
+    /// subscript's position among the place's subscripts and its occurrences. The counts are
+    /// evaluated first, left to right; then, unless one is zero, each element with its ALL
+    /// subscripts set, the rightmost varying fastest, is evaluated and read as `Load` reads it.
+    All { element: PlaceId, all: Vec<(u32, Count)> },
 }
 
 /// One row per intrinsic function: its variant, its tag in a load module, its name, and the
@@ -196,6 +211,67 @@ functions! {
     IntegerOfDate = 18, "INTEGER-OF-DATE", 1..=1;
     DateOfInteger = 19, "DATE-OF-INTEGER", 1..=1;
     Random = 20, "RANDOM", 0..=1;
+    Acos = 21, "ACOS", 1..=1;
+    Annuity = 22, "ANNUITY", 2..=2;
+    Asin = 23, "ASIN", 1..=1;
+    Atan = 24, "ATAN", 1..=1;
+    BitOf = 25, "BIT-OF", 1..=1;
+    BitToChar = 26, "BIT-TO-CHAR", 1..=1;
+    ByteLength = 27, "BYTE-LENGTH", 1..=1;
+    Cos = 28, "COS", 1..=1;
+    DateToYyyymmdd = 29, "DATE-TO-YYYYMMDD", 1..=2;
+    DayOfInteger = 30, "DAY-OF-INTEGER", 1..=1;
+    DayToYyyyddd = 31, "DAY-TO-YYYYDDD", 1..=2;
+    DisplayOf = 32, "DISPLAY-OF", 1..=2;
+    E = 33, "E", 0..=0;
+    Exp = 34, "EXP", 1..=1;
+    Exp10 = 35, "EXP10", 1..=1;
+    Factorial = 36, "FACTORIAL", 1..=1;
+    FormattedCurrentDate = 37, "FORMATTED-CURRENT-DATE", 1..=1;
+    FormattedDate = 38, "FORMATTED-DATE", 2..=2;
+    FormattedDatetime = 39, "FORMATTED-DATETIME", 3..=4;
+    FormattedTime = 40, "FORMATTED-TIME", 2..=3;
+    HexOf = 41, "HEX-OF", 1..=1;
+    HexToChar = 42, "HEX-TO-CHAR", 1..=1;
+    IntegerOfDay = 43, "INTEGER-OF-DAY", 1..=1;
+    IntegerOfFormattedDate = 44, "INTEGER-OF-FORMATTED-DATE", 2..=2;
+    Log = 45, "LOG", 1..=1;
+    Log10 = 46, "LOG10", 1..=1;
+    Mean = 47, "MEAN", 1..=usize::MAX;
+    Median = 48, "MEDIAN", 1..=usize::MAX;
+    Midrange = 49, "MIDRANGE", 1..=usize::MAX;
+    NumvalF = 50, "NUMVAL-F", 1..=1;
+    OrdMax = 51, "ORD-MAX", 1..=usize::MAX;
+    OrdMin = 52, "ORD-MIN", 1..=usize::MAX;
+    Pi = 53, "PI", 0..=0;
+    PresentValue = 54, "PRESENT-VALUE", 2..=usize::MAX;
+    Range = 55, "RANGE", 1..=usize::MAX;
+    SecondsFromFormattedTime = 56, "SECONDS-FROM-FORMATTED-TIME", 2..=2;
+    SecondsPastMidnight = 57, "SECONDS-PAST-MIDNIGHT", 0..=0;
+    Sign = 58, "SIGN", 1..=1;
+    Sin = 59, "SIN", 1..=1;
+    Sqrt = 60, "SQRT", 1..=1;
+    StandardDeviation = 61, "STANDARD-DEVIATION", 1..=usize::MAX;
+    Sum = 62, "SUM", 1..=usize::MAX;
+    Tan = 63, "TAN", 1..=1;
+    TestDateYyyymmdd = 64, "TEST-DATE-YYYYMMDD", 1..=1;
+    TestDayYyyyddd = 65, "TEST-DAY-YYYYDDD", 1..=1;
+    TestFormattedDatetime = 66, "TEST-FORMATTED-DATETIME", 2..=2;
+    TestNumval = 67, "TEST-NUMVAL", 1..=1;
+    TestNumvalC = 68, "TEST-NUMVAL-C", 1..=2;
+    TestNumvalF = 69, "TEST-NUMVAL-F", 1..=1;
+    Uuid4 = 70, "UUID4", 0..=0;
+    Variance = 71, "VARIANCE", 1..=usize::MAX;
+    YearToYyyy = 72, "YEAR-TO-YYYY", 1..=2;
+    WhenCompiled = 73, "WHEN-COMPILED", 0..=0;
+    Ulength = 74, "ULENGTH", 1..=1;
+    Upos = 75, "UPOS", 2..=2;
+    Usubstr = 76, "USUBSTR", 3..=3;
+    Usupplementary = 77, "USUPPLEMENTARY", 1..=1;
+    Uvalid = 78, "UVALID", 1..=1;
+    Uwidth = 79, "UWIDTH", 2..=2;
+    CombinedDatetime = 80, "COMBINED-DATETIME", 2..=2;
+    ContentOf = 81, "CONTENT-OF", 1..=1;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -271,6 +347,7 @@ codec_enum!(DisplayItem {
 codec_struct!(SearchAllPlan { index, store, count, keys });
 codec_struct!(SearchKey { ascending, key, value, how });
 codec_struct!(FunctionPlan { func, args, integer, side, refmod, arity, at });
+codec_enum!(Argument { Value(value) = 0, All { element, all } = 1 });
 codec_enum!(TrimSide { Leading = 0, Trailing = 1 });
 codec_struct!(InvokePlan { receiver, method, args, returning, on_exception, not_on_exception });
 codec_enum!(Receiver { SelfRef = 0, Super = 1, Class { name, external } = 2, Object(place) = 3 });

@@ -39,6 +39,8 @@ pub trait Evaluator {
     /// The arguments as written, before ALL subscripts expand them.
     fn written(&self) -> usize;
     fn now(&self) -> (i64, u32);
+    /// When the program was compiled, as `now` gives a time.
+    fn compiled(&self) -> (i64, u32);
     /// The run unit's FUNCTION RANDOM state, from the first reference on.
     fn random(&mut self) -> &mut Option<u32>;
     /// The currency sign of NUMVAL-C and TEST-NUMVAL-C without argument-2 (assumption C102).
@@ -51,6 +53,12 @@ fn integer(n: i128, digits: u32) -> Val {
 
 fn exact_real(x: &Fixed) -> Real {
     Real::new(x.negative, x.magnitude, 0).div(Real::new(false, U256::pow10(x.places.dec), 0))
+}
+
+/// CURRENT-DATE's and WHEN-COMPILED's form of a UTC time: YYYYMMDDhhmmsshh+0000.
+fn date_and_time(facts: &dyn ProgramFacts, (seconds, hundredths): (i64, u32), pos: Pos) -> R<Val> {
+    let c = civil(seconds);
+    text_value(facts, &format!("{:04}{:02}{:02}{:02}{:02}{:02}{hundredths:02}+0000", c.year, c.month, c.day, c.hour, c.minute, c.second), pos)
 }
 
 fn text_value(facts: &dyn ProgramFacts, s: &str, pos: Pos) -> R<Val> {
@@ -232,10 +240,7 @@ pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args
         }
         "CURRENT-DATE" => {
             arity(0..=0)?;
-            let (seconds, hundredths) = x.now();
-            let c = civil(seconds);
-            let text = format!("{:04}{:02}{:02}{:02}{:02}{:02}{hundredths:02}+0000", c.year, c.month, c.day, c.hour, c.minute, c.second);
-            Val::Bytes(page.encode(&text).map_err(|e| Abend::ironwork(e.to_string(), pos))?)
+            date_and_time(&facts, x.now(), pos)?
         }
         "UPPER-CASE" | "LOWER-CASE" | "REVERSE" => {
             arity(1..=1)?;
@@ -755,6 +760,10 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
                     Ok(if utf16 { Val::National(part) } else { Val::Bytes(part) })
                 }
             }
+        }
+        "WHEN-COMPILED" => {
+            arity(0..=0, &args)?;
+            date_and_time(facts, x.compiled(), pos)
         }
         "UUID4" => {
             arity(0..=0, &args)?;

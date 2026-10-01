@@ -269,8 +269,8 @@ impl Lower<'_> {
         })
     }
 
-    /// The walker's `uses_float`: a floating-point item among the operands, FUNCTION RANDOM, or ABS,
-    /// REM, MIN or MAX of an argument that is one.
+    /// The walker's `uses_float`: a floating-point item among the operands, a floating-point
+    /// function, or a function of `rt::intrinsic::MIXED` with an argument that is one.
     pub(super) fn uses_float(&mut self, e: &Expr) -> R<bool> {
         self.probe(e, &mut Vec::new())
     }
@@ -282,8 +282,8 @@ impl Lower<'_> {
         Ok(places)
     }
 
-    /// `uses_float`: each operand is located left to right until a floating-point one, except
-    /// that ABS, REM, MIN and MAX test every argument.
+    /// `uses_float`: each operand is located left to right until a floating-point one; a
+    /// function's arguments are tested only for the functions of `rt::intrinsic::MIXED`.
     fn probe(&mut self, e: &Expr, located: &mut Vec<PlaceId>) -> R<bool> {
         Ok(match e {
             Expr::Operand(Operand::Ref(r)) => {
@@ -293,17 +293,20 @@ impl Lower<'_> {
                 }
                 matches!(self.kind_of(p), Kind::Float(_))
             }
-            Expr::Operand(Operand::Function(f)) => match f.name.as_str() {
-                "RANDOM" => true,
-                "ABS" | "REM" | "MIN" | "MAX" => {
-                    let mut any = false;
-                    for a in &f.args {
-                        any |= self.probe(a, located)?;
-                    }
-                    any
+            Expr::Operand(Operand::Function(f)) => {
+                let name = f.name.as_str();
+                if rt::intrinsic::FLOATING_POINT.contains(&name) {
+                    return Ok(true);
                 }
-                _ => false,
-            },
+                if rt::intrinsic::MIXED.contains(&name) {
+                    for a in &f.args {
+                        if self.probe(a, located)? {
+                            return Ok(true);
+                        }
+                    }
+                }
+                false
+            }
             Expr::Operand(_) => false,
             Expr::Neg(inner) => self.probe(inner, located)?,
             Expr::Bin(a, _, b) => self.probe(a, located)? || self.probe(b, located)?,

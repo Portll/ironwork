@@ -260,3 +260,12 @@ fn numval_is_floating_point_long_under_compat_and_extended_under_extend() {
     assert_eq!(run_at_noon(&program("", data, &body)).0, "00123 123456789123456787\n000001234500000000\n");
     assert_eq!(run_at_noon(&program("ARITH(EXTEND)", data, &body)).0, "00123 123456789123456789\n000001234500000000\n");
 }
+
+#[test]
+fn when_compiled_gives_the_compile_time_as_current_date_gives_the_run_s() {
+    let at = rt::lir::CompileTime { seconds: 1_790_510_400, hundredths: 42, source: rt::lir::TimeSource::Clock };
+    let body = [line("MOVE FUNCTION WHEN-COMPILED TO W"), line("DISPLAY W ' ' FUNCTION WHEN-COMPILED(1:8)"), line("DISPLAY FUNCTION CURRENT-DATE(1:8)"), line("GOBACK.")].concat();
+    let o = Harness::source(&program("", "       01  W PIC X(21).\n", &body)).compiled_at(at).clock(unit::Clock::Fixed(0, 0)).run(Executor::Interpreter);
+    assert!(o.ending.is_ok(), "{:?}", o.ending);
+    assert_eq!(o.out, "2026092712000042+0000 20260927\n19700101\n");
+}

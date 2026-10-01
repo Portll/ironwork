@@ -69,6 +69,7 @@ pub struct Machine<'p, 'u, 'w> {
     ssrange: bool,
     page: &'static CodePage,
     collating: &'p crate::collating::Sequence,
+    when_compiled: rt::lir::CompileTime,
     resolved: HashMap<(String, Vec<String>), Resolved>,
     /// This program's place in the run unit, and where its storage starts.
     me: usize,
@@ -116,6 +117,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             ssrange: compiled.ssrange,
             page: compiled.options.code_page(),
             collating: &compiled.collating,
+            when_compiled: compiled.when_compiled,
             resolved: HashMap::new(),
             me,
             base,

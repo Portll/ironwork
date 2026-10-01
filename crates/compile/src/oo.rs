@@ -7,6 +7,7 @@
 use crate::layout::{Kind, Layout, Resolved};
 use crate::{Check, Compiled};
 use numeric::Options;
+use rt::lir::CompileTime;
 use numeric::assumptions::{OO_OPTIONS_REQUIRED, OO_OPTIONS_SEVERITY};
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -42,11 +43,11 @@ pub struct MethodCode {
 }
 
 /// A class definition's source compiles when each of its methods does.
-pub(crate) fn compile_class_definition(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error>> {
+pub(crate) fn compile_class_definition(program: Program, flags: &[String], at: CompileTime) -> Result<Compiled, Vec<Error>> {
     let mut shell = program.clone();
     shell.oo = None;
-    let mut compiled = crate::compile_program(shell, flags, false)?;
-    let (_, diagnostics) = class_code(&program, flags)?;
+    let mut compiled = crate::compile_program(shell, flags, false, at)?;
+    let (_, diagnostics) = class_code(&program, flags, at)?;
     compiled.diagnostics.extend(diagnostics);
     compiled.program = program;
     Ok(compiled)
@@ -150,8 +151,9 @@ fn declared_names(program: &Program) -> HashSet<String> {
         .collect()
 }
 
-/// A class definition's code, and the warnings and informational messages it compiled with.
-pub fn class_code(program: &Program, flags: &[String]) -> Result<(ClassCode, Vec<Error>), Vec<Error>> {
+/// A class definition's code, compiled at `at`, and the warnings and informational messages it
+/// compiled with.
+pub fn class_code(program: &Program, flags: &[String], at: CompileTime) -> Result<(ClassCode, Vec<Error>), Vec<Error>> {
     let Some(oo) = program.oo.as_deref() else { return Err(vec![Error::at(Pos::default(), "not a class definition")]) };
     let Some(def) = oo.class() else { return Err(vec![Error::at(Pos::default(), "not a class definition")]) };
     let mut errors = Vec::new();
@@ -186,7 +188,7 @@ pub fn class_code(program: &Program, flags: &[String]) -> Result<(ClassCode, Vec
         let mut data = base.clone();
         data.working_storage = part.working_storage.clone();
         data.oo = Some(Box::new(Oo { repository: oo.repository.clone(), unit: OoUnit::Program }));
-        match crate::compile_program(data, flags, false) {
+        match crate::compile_program(data, flags, false, at) {
             Ok(c) => {
                 let offsets = c.layout.items.iter().filter(|i| i.parent.is_none()).take(records(&part.working_storage)).map(|i| i.offset).collect();
                 let compiled = Part { data: Rc::new(c), records: offsets };
@@ -195,7 +197,7 @@ pub fn class_code(program: &Program, flags: &[String]) -> Result<(ClassCode, Vec
             Err(e) => errors.extend(e),
         }
         for m in &part.methods {
-            match method_code(program, m, part, factory, flags) {
+            match method_code(program, m, part, factory, flags, at) {
                 Ok(mc) => {
                     errors.extend(mc.code.diagnostics.iter().cloned());
                     code.methods.push(mc);
@@ -216,7 +218,7 @@ pub fn class_code(program: &Program, flags: &[String]) -> Result<(ClassCode, Vec
 
 /// A method compiled with its paragraph's data after its own LINKAGE records; a name the method
 /// declares itself hides the paragraph's.
-fn method_code(class: &Program, method: &Program, part: &ClassPart, factory: bool, flags: &[String]) -> Result<MethodCode, Vec<Error>> {
+fn method_code(class: &Program, method: &Program, part: &ClassPart, factory: bool, flags: &[String], at: CompileTime) -> Result<MethodCode, Vec<Error>> {
     let mut p = method.clone();
     p.sources = class.sources.clone();
     p.options = class.options.clone();
@@ -237,7 +239,7 @@ fn method_code(class: &Program, method: &Program, part: &ClassPart, factory: boo
     }
     let pos = method.oo.as_deref().and_then(Oo::method).map_or(part.pos, |m| m.pos);
     let name = method.id.clone();
-    let compiled = crate::compile(p, flags)?;
+    let compiled = crate::compile_at(p, flags, at)?;
     let mut errors = Vec::new();
     let layout = &compiled.layout;
     let oo = compiled.program.oo.as_deref();

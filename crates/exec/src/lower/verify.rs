@@ -3,7 +3,7 @@
 //! exactly when the program has SSRANGE.
 
 use rt::lir::{
-    Advance, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Convert, ConvertTable, Count, DisplayItem, Expr, FileVerb, Flag, IntExpr, JsonValue,
+    Advance, Argument, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Convert, ConvertTable, Count, DisplayItem, Expr, FileVerb, Flag, Func, IntExpr, JsonValue,
     Marker, Markup, MethodName, MovePlan, Named, Op, Operand, ParseValue, Place, Program, RangeKind, Receiver, Replacement, SetTo, StartKey, StorePlan, Terminator, UpDown,
     XmlValue,
 };
@@ -140,8 +140,30 @@ fn verify_program(p: &Program) -> Result<(), String> {
         }
     }
     let symbol = |id: u32| within("symbol", id, p.symbols.len());
+    if p.plans.function.iter().any(|f| f.func == Func::WhenCompiled) != p.options.when_compiled.is_some() {
+        return Err("a compile time without a WHEN-COMPILED plan, or a WHEN-COMPILED plan without one".into());
+    }
     for f in &p.plans.function {
-        f.args.iter().try_for_each(comparand)?;
+        for a in &f.args {
+            match a {
+                Argument::Value(c) => comparand(c)?,
+                Argument::All { element, all } => {
+                    place(*element)?;
+                    let subscripts = p.places.get(*element as usize).map_or(0, |q| q.subscripts.len());
+                    for (position, count) in all {
+                        if *position as usize >= subscripts {
+                            return Err(format!("an ALL subscript at {position} of place {element}, which has {subscripts}"));
+                        }
+                        if let Count::Odo(o) = count {
+                            int(&o.object)?;
+                            if o.check != ssrange {
+                                return Err("an ALL subscript's OCCURS DEPENDING ON check that disagrees with SSRANGE".into());
+                            }
+                        }
+                    }
+                }
+            }
+        }
         f.integer.as_ref().map_or(Ok(()), int)?;
         if let Some(r) = &f.refmod {
             int(&r.start)?;

@@ -117,7 +117,7 @@ pub fn payroll() -> Program {
 
     Program {
         id: 0,
-        options: ProgramOptions { options: Options::default(), ssrange: true, cards: vec!["SSRANGE".into()], collating: Collating::Native, decimal_point_comma: false, numval_currency: "$".into() },
+        options: ProgramOptions { options: Options::default(), ssrange: true, cards: vec!["SSRANGE".into()], collating: Collating::Native, decimal_point_comma: false, numval_currency: "$".into(), when_compiled: None },
         initial: false,
         recursive: false,
         storage,

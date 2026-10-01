@@ -325,7 +325,17 @@ for the tree that added `Options::cics_return_warning`.
 (crates/numeric/src/options.rs:208-235), which is `Copy`, holds only enums, options, integers and
 bools, and encodes as it is, its fields in declaration order; then `ssrange`, the option cards, the
 collating sequence, `decimal_point_comma` (a bool) and `numval_currency` (a string), the last two
-from SPECIAL-NAMES (lir.md §9.11). Options are per program, because a CBL card is.
+from SPECIAL-NAMES (lir.md §9.11), and `when_compiled`. Options are per program, because a CBL
+card is.
+
+`when_compiled` is an `Option` of lir.md's `CompileTime`, the time FUNCTION WHEN-COMPILED gives:
+`Some` in a program that uses WHEN-COMPILED, and `None` in any other, so that only such a program's
+module depends on when it was compiled (§10). A class definition's methods and data are programs of
+their own, each `Some` only when it uses the function. `CompileTime` is `seconds` since
+1970-01-01T00:00:00Z as zigzag LEB128, `hundredths` as LEB128, and `source`, a tag:
+`SourceDateEpoch` 0, `Clock` 1. Its `check` refuses seconds outside 0 to 253402300799
+(9999-12-31T23:59:59Z), hundredths over 99, and hundredths other than 0 from `SourceDateEpoch`. The
+compiler takes it from the build's SOURCE_DATE_EPOCH when set, and from the clock otherwise.
 
 The spellings a card or PARM may use come from IBM's option table, vendored as
 `crates/numeric/data/enterprise-options.tsv` and read by `Options::apply`. Six fields have no IBM
@@ -512,7 +522,8 @@ The format version is `major.minor`, starting at `0.1`.
   (machine.rs:984), outside ON EXCEPTION. CICS LINK draws the same line: `NotFound` raises PGMIDERR
   and the rest abend (machine/cics.rs:359-362).
 - **Shadowing.** A stale `NAME.iwm` beside newer source is used, because step 2 precedes step 3,
-  and the format carries no timestamp to compare (question 4).
+  and the format carries no time to compare: the compile time a program using WHEN-COMPILED holds
+  is that function's value, not a build stamp, and the loader does not read it (question 4).
 
 ### 8.3 Static and dynamic CALL
 
@@ -580,7 +591,11 @@ few bytes each. The reader decodes a program's table on its first abend, not on 
 Invariant 6 says the same source, libraries and options give a byte-identical module. It holds
 because:
 
-1. **Nothing depends on time, path, host, compiler version or a random seed** (§8.1, §9.1).
+1. **Nothing depends on time, path, host, compiler version or a random seed** (§8.1, §9.1), with
+   one exception: a program that uses FUNCTION WHEN-COMPILED holds its compile time (§5.1), which
+   is the build's SOURCE_DATE_EPOCH when set, the reproducible-builds convention, and the clock's
+   otherwise. A module is reproducible with no environment unless one of its programs uses
+   WHEN-COMPILED; then the build sets SOURCE_DATE_EPOCH.
 2. **Nothing iterates unordered.** The codec has no `HashMap` or `HashSet` (§4.4). The maps in the
    tree are run-time caches, never encoded: `RunUnit.names` (unit.rs:62), `RunUnit.cics_files`
    (:72), `Machine.resolved` (machine.rs:95), `cics::Task.mapsets` (cics.rs:147). Lowering collects
@@ -588,18 +603,22 @@ because:
 3. **Every value has one form** (§3.3, §4.1, §4.2, §4.3). Set-like lists are sorted (the mapsets,
    by name); where order carries meaning (programs, items, paragraphs), source order is kept.
 4. **The inputs are named:** the source bytes, every COPY member and BMS file the compile read (by
-   content), and the options, including `-L` (which decides what a static CALL can resolve),
-   `--source-prefix` and the option cards.
+   content), the options, including `-L` (which decides what a static CALL can resolve),
+   `--source-prefix` and the option cards, and, for a program using WHEN-COMPILED,
+   SOURCE_DATE_EPOCH.
 
 A test compiles every corpus program twice in separate processes and compares the bytes, and a
-second compiles once from two working directories.
+second compiles once from two working directories. One that runs today (lower/tests.rs) compiles a
+program without WHEN-COMPILED at two compile times and finds the modules identical, and one with it
+and finds them different.
 
 ## 11. `ironwork dump`
 
     ironwork dump [--section NAME]... [--strings] [--no-check] file.iwm
 
 - **Output** is text, one fact per line, in section order, and stable: no address, timestamp or
-  path, so tests compare it as text.
+  path, so tests compare it as text. A program's `when_compiled` prints with its options; it is
+  present only where the program uses WHEN-COMPILED, and fixed by SOURCE_DATE_EPOCH.
 - **What it prints.** The version and file length. The section table with each section's id, name,
   offset, length and whether its checksum matched. The directory (id, ordinal, parent, COMMON,
   dynamic). Each program's options. The item table (level, name, offset, size, occurs, kind, ODO
@@ -629,8 +648,12 @@ second compiles once from two working directories.
 
 ### L2: Reproducibility
 
-- **Given** `PAYROLL.cbl` and the same libraries and options **when** it is compiled twice, in two
-  processes **then** the two `.iwm` files are byte-identical.
+- **Given** `PAYROLL.cbl`, which does not use WHEN-COMPILED, and the same libraries and options
+  **when** it is compiled twice, in two processes, with no SOURCE_DATE_EPOCH **then** the two
+  `.iwm` files are byte-identical.
+- **Given** a program that uses WHEN-COMPILED **when** it is compiled twice with one
+  SOURCE_DATE_EPOCH **then** the modules are byte-identical; **given** none **then** its
+  `when_compiled` is the clock's, `source` `Clock`, and the modules differ in `OPTIONS` only.
 - **Given** the same source compiled from two working directories **then** the modules are
   byte-identical.
 - **Given** a copy of the source under another directory **then** the module is byte-identical.
@@ -723,7 +746,7 @@ second compiles once from two working directories.
    in-tree), so a shop can check that a module is the one it built?
 3. **Stripping.** Should a `--strip-debug` module exist for size, with abends naming only the
    program and instruction? Invariant 3 forbids it as stated.
-4. **Stale modules.** A `NAME.iwm` beside a newer `NAME.cbl` is used, with no timestamp to compare.
+4. **Stale modules.** A `NAME.iwm` beside a newer `NAME.cbl` is used, its compile time not compared.
    Is that right, or should the `-L` search prefer source, or the newer file?
 5. **Unresolved static CALL.** A NODYNAM literal naming no program of the module compiles as a
    run-time call, with a warning, where IBM fails at link time. Should compiling fail instead,

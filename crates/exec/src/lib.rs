@@ -30,7 +30,7 @@ mod testing;
 pub use rt::tn3270;
 pub mod unit;
 
-pub use compile::{Compiled, EntryPoint, compile, entry_points};
+pub use compile::{Compiled, EntryPoint, compile, compile_at, compile_time, entry_points};
 pub(crate) use compile::{procedure, section_end};
 pub use machine::{Abend, Ending};
 

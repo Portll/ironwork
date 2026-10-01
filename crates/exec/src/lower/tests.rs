@@ -421,9 +421,10 @@ fn constructs_outside_the_slice_are_refused_by_name() {
     let refused = |body: &str, data: &str| lower(&compiled(&program("", data, &[line(body), line("GOBACK.")].concat()))).unwrap_err();
     let mixed = refused("MOVE FUNCTION MAX(A 1) TO A", "       01  A PIC X.\n");
     assert!(matches!(mixed, LowerError::Unsupported("FUNCTION MIN or MAX of arguments of different kinds", _)));
-    let all = refused("MOVE FUNCTION MAX(T(ALL)) TO A", "       01  A PIC X.\n       01  G.\n           05 T PIC X OCCURS 3.\n");
-    assert!(matches!(all, LowerError::Unsupported("FUNCTION arguments with ALL subscripts", _)));
-    let numval = refused("MOVE FUNCTION NUMVAL(A) TO A", "       01  A PIC X.\n");
+    let odo = "       01  A PIC X.\n       01  C PIC 9.\n       01  G.\n           05 T PIC 9 OCCURS 1 TO 3 DEPENDING ON C.\n";
+    let all = refused("COMPUTE C = FUNCTION SQRT(T(ALL))", odo);
+    assert!(matches!(all, LowerError::Unsupported("a FUNCTION of fixed arguments given a table whose ALL subscripts run to an OCCURS DEPENDING ON count", _)));
+    let numval = refused("MOVE FUNCTION MAX(N M) TO A", "       01  A PIC X.\n       01  N PIC 9.\n       01  M PIC 99.\n");
     assert!(matches!(numval, LowerError::Unsupported(n, _) if n.starts_with("a FUNCTION result whose digits")));
     let e = refused("SEARCH T WHEN T(X) = 'A' CONTINUE END-SEARCH", "       01  G.\n           05 N PIC 9.\n           05 T PIC X OCCURS 1 TO 3 DEPENDING ON N.\n       01  X PIC 9.\n");
     assert_eq!(e.to_string(), "lowering: SEARCH of an OCCURS DEPENDING ON table with neither INDEXED BY nor VARYING is not lowered yet");
@@ -1139,7 +1140,7 @@ fn a_function_evaluates_its_arguments_then_any_again_as_an_integer_then_its_refe
     let f = &p.plans.function;
     assert_eq!((f[0].func, f[0].args.len(), f[0].integer.is_none()), (lir::Func::UpperCase, 1, true));
     assert!(matches!(f[0].refmod, Some(lir::RefMod { start: IntExpr::Const(2), length: Some(IntExpr::Const(2)), check: false })));
-    assert!(matches!((&f[1].args[..], &f[1].integer), ([Comparand::Expr { mode: Mode::Fixed, .. }], Some(IntExpr::Fixed { .. }))));
+    assert!(matches!((&f[1].args[..], &f[1].integer), ([lir::Argument::Value(Comparand::Expr { mode: Mode::Fixed, .. })], Some(IntExpr::Fixed { .. }))));
     assert_eq!(f[2].func, lir::Func::Max);
     assert_eq!(moves(&p)[2], MovePlan::Numeric { from: NumericFrom::Float, store: StorePlan::Zoned { digits: 3, scale: 0, signed: false, sign: None } });
     let compute = &p.plans.arith[0].steps[0];
@@ -1262,4 +1263,127 @@ fn accept_moves_what_its_source_gives_by_the_receiver_s_plan() {
     assert_eq!(accepts[0], MovePlan::Alnum { image: Image::Digits { digits: 6 }, justified: false });
     assert_eq!(accepts[1], MovePlan::Numeric { from: NumericFrom::Value, store: StorePlan::Zoned { digits: 8, scale: 0, signed: false, sign: None } });
     assert_eq!(accepts[2], MovePlan::Alnum { image: Image::Bytes, justified: false });
+}
+
+#[test]
+fn each_function_s_result_reads_as_the_walker_s_value_does() {
+    let data = "       01  A PIC X(9).\n       01  N PIC 9(3) VALUE 7.\n       01  F COMP-2.\n       01  NA PIC N(8).\n";
+    let body = [
+        "MOVE FUNCTION SUM(N 1) TO A",
+        "DISPLAY A",
+        "MOVE FUNCTION RANGE(N N) TO A",
+        "DISPLAY A",
+        "MOVE FUNCTION ORD-MAX(N 1) TO A",
+        "DISPLAY A",
+        "MOVE FUNCTION FACTORIAL(3) TO A",
+        "DISPLAY A",
+        "MOVE FUNCTION SQRT(N) TO F",
+        "MOVE FUNCTION FORMATTED-DATE(N'YYYYMMDD' 143951) TO NA",
+        "MOVE FUNCTION HEX-OF(N) TO A",
+        "COMPUTE N = FUNCTION SQRT(4) + 1",
+        "COMPUTE N = FUNCTION SUM(N F) + 1",
+        "GOBACK.",
+    ];
+    let source = program("", data, &body.iter().map(|s| line(s)).collect::<String>());
+    let out = crate::testing::Harness::source(&source).run(crate::testing::Executor::Interpreter).out;
+    assert_eq!(out, "00008    \n0000     \n000000001\n000000000\n");
+    let p = lowered(&source);
+    let digits = |digits| MovePlan::Alnum { image: Image::Digits { digits }, justified: false };
+    let m = moves(&p);
+    assert_eq!(m[..4], [digits(5), digits(4), digits(9), digits(30)]);
+    assert_eq!(m[4], MovePlan::Float { from: lir::FloatFrom::Float, precision: zarch::hfp::Precision::Long });
+    assert_eq!((m[5], m[6]), (MovePlan::National(NationalFrom::Units), MovePlan::Alnum { image: Image::Bytes, justified: false }));
+    let f = &p.plans.function;
+    let hex = f.iter().find(|f| f.func == lir::Func::HexOf).unwrap();
+    assert!(matches!(&hex.args[..], [lir::Argument::Value(Comparand::Operand(LirOperand::Load(q)))] if symbol(&p, p.places[*q as usize].name) == "N"));
+    let steps: Vec<Mode> = p.plans.arith.iter().map(|a| a.steps[0].mode).collect();
+    assert_eq!(steps, [Mode::Float(numeric::Arith::Compat.float_intermediate()); 2]);
+}
+
+#[test]
+fn a_wrong_argument_count_abends_with_the_walker_s_message_after_the_arguments() {
+    let p = lowered(&program(
+        "",
+        "       01  N PIC 9(3).\n",
+        &[line("COMPUTE N = FUNCTION BYTE-LENGTH(N N)"), line("COMPUTE N = FUNCTION PRESENT-VALUE(1)"), line("COMPUTE N = FUNCTION ANNUITY(1)"), line("GOBACK.")].concat(),
+    ));
+    let messages: Vec<(usize, &str)> = p.plans.function.iter().map(|f| (f.args.len(), symbol(&p, p.abends[f.arity.unwrap() as usize].message))).collect();
+    assert_eq!(
+        messages,
+        [(0, "FUNCTION BYTE-LENGTH takes one argument"), (1, "FUNCTION PRESENT-VALUE needs a rate and at least one amount"), (1, "FUNCTION ANNUITY takes 2..=2 arguments, not 1")]
+    );
+}
+
+#[test]
+fn all_subscripts_list_a_table_s_elements_or_expand_when_the_function_runs() {
+    let data = "       01  T VALUE '010020030'.\n           05 N PIC 9(3) OCCURS 3.\n       01  C PIC 9 VALUE 3.\n       01  D.\n           05 V PIC 9(3) OCCURS 1 TO 5 DEPENDING ON C.\n       01  G VALUE '123456'.\n           05 ROW OCCURS 2.\n              10 CELL PIC 9 OCCURS 3.\n       01  BIG.\n           05 B PIC 9 OCCURS 300.\n       01  A PIC X(9).\n";
+    let body = ["MOVE FUNCTION SUM(N(ALL)) TO A", "COMPUTE C = FUNCTION SUM(CELL(ALL ALL))", "COMPUTE C = FUNCTION MAX(V(ALL))", "COMPUTE C = FUNCTION SUM(V(ALL) 1)", "COMPUTE C = FUNCTION SUM(B(ALL))", "GOBACK."];
+    let p = lowered(&program("", data, &body.iter().map(|s| line(s)).collect::<String>()));
+    let f = &p.plans.function;
+    let subscripts = |a: &lir::Argument| match a {
+        lir::Argument::Value(Comparand::Operand(LirOperand::Load(q))) => p.places[*q as usize].subscripts.iter().map(|s| if let IntExpr::Const(n) = s.value { n } else { 0 }).collect::<Vec<_>>(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(f[0].args.iter().map(subscripts).collect::<Vec<_>>(), [[1], [2], [3]]);
+    assert_eq!(moves(&p)[0], MovePlan::Alnum { image: Image::Digits { digits: 6 }, justified: false });
+    assert_eq!(f[1].args.iter().map(subscripts).collect::<Vec<_>>(), [[1, 1], [1, 2], [1, 3], [2, 1], [2, 2], [2, 3]]);
+    let lir::Argument::All { element, all } = &f[2].args[0] else { panic!("{:?}", f[2].args) };
+    assert_eq!(symbol(&p, p.places[*element as usize].name), "V");
+    assert!(matches!(&all[..], [(0, lir::Count::Odo(lir::Odo { max: 5, check: false, .. }))]));
+    assert_eq!(symbol(&p, p.abends[f[2].arity.unwrap() as usize].message), "FUNCTION MAX needs arguments");
+    assert_eq!((f[3].args.len(), f[3].arity), (2, None));
+    assert!(matches!(&f[4].args[..], [lir::Argument::All { all, .. }] if all[..] == [(0, lir::Count::Fixed(300))]));
+    assert_eq!(f[4].arity, None);
+}
+
+#[test]
+fn the_lir_carries_the_compile_time_when_compiled_gives() {
+    let at = lir::CompileTime { seconds: 315_532_800, hundredths: 0, source: lir::TimeSource::SourceDateEpoch };
+    let source = program("", "       01  W PIC X(21).\n", &[line("MOVE FUNCTION WHEN-COMPILED TO W"), line("GOBACK.")].concat());
+    let compiled = crate::compile_at(syntax::parse(&source).unwrap(), &[], at).unwrap();
+    let p = lower(&compiled).unwrap();
+    assert_eq!((p.options.when_compiled, round_trip(&p).options.when_compiled), (Some(at), Some(at)));
+    assert_eq!((p.plans.function[0].func, moves(&p)[0]), (lir::Func::WhenCompiled, MovePlan::Alnum { image: Image::Bytes, justified: false }));
+}
+
+#[test]
+fn a_program_without_when_compiled_gives_the_same_module_whenever_it_is_compiled() {
+    let source = program("", "       01  W PIC X(21).\n", &[line("MOVE FUNCTION CURRENT-DATE TO W"), line("GOBACK.")].concat());
+    let module = |seconds: i64, hundredths: u32| {
+        let at = lir::CompileTime { seconds, hundredths, source: lir::TimeSource::Clock };
+        let p = lower(&crate::compile_at(syntax::parse(&source).unwrap(), &[], at).unwrap()).unwrap();
+        assert_eq!(p.options.when_compiled, None);
+        rt::module::write(&[p])
+    };
+    assert_eq!(module(1_790_510_400, 42), module(315_532_800, 7));
+    let stamped = program("", "       01  W PIC X(21).\n", &[line("MOVE FUNCTION WHEN-COMPILED TO W"), line("GOBACK.")].concat());
+    let at = |seconds| lir::CompileTime { seconds, hundredths: 0, source: lir::TimeSource::Clock };
+    let p = |seconds| lower(&crate::compile_at(syntax::parse(&stamped).unwrap(), &[], at(seconds)).unwrap()).unwrap();
+    assert_ne!(rt::module::write(&[p(1)]), rt::module::write(&[p(2)]));
+}
+
+#[test]
+fn a_floating_point_receiver_makes_the_statement_float_and_numval_and_the_unicode_functions_read_as_the_walker_s() {
+    let data = "       01  N PIC 9(3).\n       01  G.\n           05 T PIC 9 OCCURS 3.\n       01  I PIC 9.\n       01  F COMP-2.\n       01  A PIC X(9).\n       01  NA PIC N(4).\n";
+    let p = lowered(&program(
+        "",
+        data,
+        &[
+            line("COMPUTE N F = T(I) + 1"),
+            line("COMPUTE N = T(I) + 1"),
+            line("MOVE FUNCTION NUMVAL('12') TO N"),
+            line("MOVE FUNCTION ULENGTH(A) TO A"),
+            line("MOVE FUNCTION USUBSTR(NA 1 2) TO NA"),
+            line("MOVE FUNCTION CONTENT-OF(N) TO A"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    ));
+    let float = Mode::Float(numeric::Arith::Compat.float_intermediate());
+    let steps: Vec<(Mode, usize)> = p.plans.arith[0].steps.iter().map(|s| (s.mode, s.probe.len())).collect();
+    assert_eq!(steps, [(float, 0), (float, 0)]);
+    assert_eq!((p.plans.arith[1].steps[0].mode, p.plans.arith[1].steps[0].probe.len()), (Mode::Fixed, 1));
+    let m = moves(&p);
+    assert_eq!(m[0], MovePlan::Numeric { from: NumericFrom::Float, store: StorePlan::Zoned { digits: 3, scale: 0, signed: false, sign: None } });
+    assert_eq!((m[1], m[2], m[3]), (MovePlan::Alnum { image: Image::Digits { digits: 9 }, justified: false }, MovePlan::National(NationalFrom::Units), MovePlan::Alnum { image: Image::Digits { digits: 3 }, justified: false }));
 }
