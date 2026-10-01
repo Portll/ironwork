@@ -64,6 +64,17 @@ END-OF-PAGE run once the line is written. Assumptions C70 to C76 hold what the m
 A print file opened I-O reads past its control characters and keeps them when a record is
 rewritten.
 
+The cards also take APOST, which makes QUOTE an apostrophe; CURRENCY(literal), the currency symbol
+in place of $ where no CURRENCY SIGN clause gives one; NSYMBOL(DBCS), under which N literals and
+PICTURE N items with no USAGE would be DBCS, which ironwork refuses; DISPSIGN(SEP), which puts a
+signed binary, packed or overpunched zoned item's sign before its digits on DISPLAY; INTDATE(LILIAN),
+which counts the date functions' integer dates from 15 October 1582 and turns CALL 'CEECBLDY' into
+CEEDAYS; QUALIFY(EXTEND), under which a complete set of qualifiers names its one item; INITIAL,
+which starts every program from its VALUE clauses on each CALL, and which THREAD drops; and
+VLR(COMPAT), under which a READ checks a variable-length record only against RECORD VARYING.
+VSAMOPENFS is read and kept, but no OPEN in ironwork reaches the verified open it changes.
+Assumptions C210 to C220 hold what the manuals leave open.
+
 Exit status: RETURN-CODE when the run ends normally; for `check`, and for a run the compile refuses,
 the compile's return code (below); 16 an abend, whose message names the system completion code
 (S0C7 for a data exception, S0C4 for a LINKAGE item with no address, S806 for a program CALL cannot
