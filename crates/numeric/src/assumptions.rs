@@ -212,6 +212,7 @@ pub const JSON_GENERATE_RULES: &str = "C117";
 pub const XML_PARSE_RULES: &str = "C118";
 pub const XML_GENERATE_RULES: &str = "C119";
 pub const JSON_PARSE_RULES: &str = "C170";
+pub const DLI_TRANSLATION: &str = "C171";
 pub const CORRESPONDING_PAIRS: &str = "C130";
 pub const CORRESPONDING_CHOICES: &str = "C131";
 pub const STOP_LITERAL: &str = "C132";
@@ -1318,6 +1319,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: JSON_PARSE_RULES,
         claim: "Where the Language Reference (SC27-8713-03, pp. 382-396) and the Programming Guide (SC27-8714-03, pp. 609-617, 819-822) are silent, JSON PARSE: takes only an object or an array as the outermost value (100 otherwise); gives 104 for an object or array where an elementary item stands, and for any other value where a group or table stands; lets a pair that names a suppressed item pass without status 2; reads an unnamed group's members as its parent's and leaves an unnamed table alone; compares duplicate pairs as parsed values, 4 when equal and 103 when not, the first staying; ends the walk at an exception, leaving what it set, with JSON-STATUS as far as it got, and gives 106 when no value reached an elementary item or a null; sets an INDICATING indicator whenever its item's pair is met, the first value for null and the second otherwise; reads a string for a numeric receiver as spaces, a sign, digits with at most one decimal point, and spaces (the form of APAR PH65883); moves a number into an alphanumeric or national receiver only as an integer, as MOVE moves an integer literal, the sign dropped; truncates fraction digits beyond the receiver's; sets 128 when a numeric receiver loses high-order digits, 256 when a string loses characters other than spaces or an integer loses digits, and 512 with X'3F' for each character the code page lacks; rounds a number once into COMP-1 or COMP-2; accepts WITH DETAIL without issuing the IGZ messages; and, as JSON GENERATE does, takes a table named without its last subscript as the whole table",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: DLI_TRANSLATION,
+        claim: "EXEC DLI is read as the IMS translator reads it (IMS Application Programming: EXEC DLI Commands for CICS and IMS, SC18-7811-04, chapters 4-6): a command by its name or longer spelling, its options checked against the book's lists, the data an option names and the right-hand side of each WHERE comparison declared, and SEGMENT or PSB in double parentheses naming an area. The DL/I interface block is declared at the head of WORKING-STORAGE with the book's COBOL labels over the 40 bytes its C declaration gives (p. 6), the unnamed bytes FILLER, unless the program declares DIBSTAT itself; the book does not name the 01 level, so it is DLZDIB, DL/I's name for the block, and the translator's IS GLOBAL is left out. A command is checked, not run: reaching one ends the run",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

@@ -126,6 +126,8 @@ struct Parser<'a> {
     exec_declarations: Vec<ExecBlock>,
     /// Whether the program being parsed has EXEC CICS, so the translator's additions apply.
     cics: bool,
+    /// Whether it has EXEC DLI, so the translator adds the DL/I interface block.
+    dli: bool,
     /// The WRITE ADVANCING mnemonic-names in scope: the program's own, then those of the programs
     /// containing it, whose configuration section applies to it too.
     mnemonics: Vec<(String, String)>,
@@ -157,6 +159,7 @@ impl<'a> Parser<'a> {
             at: 0,
             exec_declarations: Vec::new(),
             cics: false,
+            dli: false,
             sql: SqlState::default(),
             mnemonics: Vec::new(),
             debugging: false,
@@ -259,10 +262,10 @@ impl Parser<'_> {
 
     fn program(&mut self, options: &[String], out: &mut Vec<Program>) -> R<()> {
         let (start, first) = (self.at, out.len());
-        let outer = (std::mem::take(&mut self.exec_declarations), std::mem::take(&mut self.cics), std::mem::take(&mut self.sql.blocks), self.mnemonics.clone(), self.debugging);
+        let outer = (std::mem::take(&mut self.exec_declarations), std::mem::take(&mut self.cics), std::mem::take(&mut self.dli), std::mem::take(&mut self.sql.blocks), self.mnemonics.clone(), self.debugging);
         let outer_messages = std::mem::take(&mut self.messages);
         let parsed = self.one_program(options, out);
-        (self.exec_declarations, self.cics, self.sql.blocks, self.mnemonics, self.debugging) = outer;
+        (self.exec_declarations, self.cics, self.dli, self.sql.blocks, self.mnemonics, self.debugging) = outer;
         let own = std::mem::replace(&mut self.messages, outer_messages);
         parsed?;
         let mut messages = Vec::new();
@@ -365,6 +368,10 @@ impl Parser<'_> {
         }
         if self.cics {
             self.translator_additions(&mut linkage, &mut using)?;
+        }
+        let declares = |entries: &[DataEntry], name: &str| entries.iter().any(|e| e.name.as_deref() == Some(name));
+        if self.dli && !declares(&working_storage, "DIBSTAT") && !declares(&linkage, "DIBSTAT") {
+            working_storage.splice(0..0, system_entries("DLZDIB")?);
         }
         let exec_declarations = std::mem::take(&mut self.exec_declarations);
         let (mut nested, mut contained) = (Vec::new(), Vec::new());
@@ -844,6 +851,44 @@ impl Parser<'_> {
                         && !labels
                         && let Some(op) = operand_of(t, pos)
                     {
+                        *arg = Some(ExecArg::Operand(op));
+                    }
+                }
+            }
+            ExecKind::Dli => {
+                self.dli = true;
+                let words: Vec<&str> = body.split_whitespace().collect();
+                let rest = match crate::dli::command(&words) {
+                    Some((command, n)) => {
+                        block.command = command.name.to_owned();
+                        let mut rest = body.trim_start();
+                        for _ in 0..n {
+                            rest = rest.trim_start().split_once(char::is_whitespace).map_or("", |(_, r)| r);
+                        }
+                        rest
+                    }
+                    None => body.trim_start().split_once(char::is_whitespace).map_or("", |(_, r)| r),
+                };
+                block.options = cics_options(rest).into_iter().filter(|(name, arg)| !(name == "USING" && arg.is_none())).collect();
+                for (name, arg) in &mut block.options {
+                    let Some(ExecArg::Text(t)) = arg else { continue };
+                    if name == "WHERE" {
+                        if let Ok(comparisons) = crate::dli::qualification(t) {
+                            for (_, _, value) in comparisons {
+                                if let Some(Operand::Ref(r)) = operand_of(&value, pos) {
+                                    block.host_variables.push(r);
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    let area = t.strip_prefix('(').and_then(|a| a.strip_suffix(')'));
+                    let data = match area {
+                        Some(area) if crate::dli::NAMED.contains(&name.as_str()) => area.trim(),
+                        _ if crate::dli::NAMED.contains(&name.as_str()) => continue,
+                        _ => t.as_str(),
+                    };
+                    if let Some(op) = operand_of(data, pos) {
                         *arg = Some(ExecArg::Operand(op));
                     }
                 }

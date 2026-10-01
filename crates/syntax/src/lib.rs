@@ -6,6 +6,7 @@ pub mod bms;
 pub mod copy;
 pub mod csd;
 mod debugging;
+pub mod dli;
 pub mod feedback;
 pub mod jni;
 pub mod lexer;

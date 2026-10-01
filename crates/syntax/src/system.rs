@@ -145,6 +145,22 @@ pub fn member(name: &str) -> Option<String> {
             }
             out
         }
+        // The DL/I interface block the translator adds for EXEC DLI: IMS's labels (EXEC DLI
+        // Commands for CICS and IMS, SC18-7811-04, p. 6) over the 40 bytes its C declaration gives.
+        "DLZDIB" => [
+            "       01  DLZDIB.",
+            "           02 DIBVER PIC X(2).",
+            "           02 DIBSTAT PIC X(2).",
+            "           02 DIBSEGM PIC X(8).",
+            "           02 FILLER PIC X(2).",
+            "           02 DIBSEGLV PIC X(2).",
+            "           02 DIBKFBL PIC S9(4) COMP.",
+            "           02 DIBDBDNM PIC X(8).",
+            "           02 DIBDBORG PIC X(8).",
+            "           02 FILLER PIC X(6).",
+            "",
+        ]
+        .join("\n"),
         "DFHAID" => constants("DFHAID", DFHAID),
         "DFHBMSCA" => constants("DFHBMSCA", DFHBMSCA),
         "JNI" => crate::jni::member(),

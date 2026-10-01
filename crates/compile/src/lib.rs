@@ -950,7 +950,7 @@ impl Check<'_> {
     /// Every host variable and every CICS argument that names data must resolve.
     fn exec_block(&mut self, block: &ExecBlock) {
         if block.kind == ExecKind::Dli {
-            self.errors.push(Error::at(block.pos, format!("EXEC DLI {} is not supported: ironwork for COBOL does not run IMS DL/I calls", block.command)));
+            self.dli_block(block);
         }
         if let Some(syntax::sql::Sql { statement: syntax::sql::Statement::Malformed(why), .. }) = &block.sql {
             self.errors.push(Error::at(block.pos, format!("EXEC SQL {}: {why}", block.command)));
@@ -969,7 +969,6 @@ impl Check<'_> {
         }
     }
 
-    /// SEARCH names a table without a subscript.
     /// JSON GENERATE's and JSON PARSE's own item, which may name a whole table by leaving out its
     /// last subscript (Programming Guide SC27-8714-03, pp. 612-614, 619-620).
     fn whole_table_reference(&mut self, r: &Ref) {
@@ -983,6 +982,24 @@ impl Check<'_> {
         self.reference(r);
     }
 
+    /// An EXEC DLI command and its options against IMS's table, and each qualification's form.
+    fn dli_block(&mut self, block: &ExecBlock) {
+        let Some(command) = syntax::dli::find(&block.command) else {
+            self.errors.push(Error::at(block.pos, format!("EXEC DLI {} is not an EXEC DLI command", block.command)));
+            return;
+        };
+        for (name, arg) in &block.options {
+            if !command.options.contains(&name.as_str()) {
+                self.errors.push(Error::at(block.pos, format!("EXEC DLI {}: {name} is not one of its options", command.name)));
+            } else if let (true, Some(ExecArg::Text(t))) = (name == "WHERE", arg)
+                && let Err(why) = syntax::dli::qualification(t)
+            {
+                self.errors.push(Error::at(block.pos, format!("EXEC DLI {} WHERE({t}): {why}", command.name)));
+            }
+        }
+    }
+
+    /// SEARCH names a table without a subscript.
     fn reference_unsubscripted(&mut self, r: &Ref) {
         if let Err(e) = self.layout.resolve(&r.name, &r.qualifiers, r.pos) {
             self.errors.push(e);

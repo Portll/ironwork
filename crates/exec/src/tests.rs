@@ -893,12 +893,26 @@ fn compile_errors_name_what_is_undefined() {
 }
 
 #[test]
-fn exec_dli_is_refused_at_compile_time_by_name() {
-    let parsed = syntax::parse(&program("", "       01  SSA PIC X(9).\n", &[line("EXEC DLI GU SEGMENT(ROOT) WHERE(KEY=SSA) END-EXEC."), line("GOBACK.")].concat())).unwrap();
-    let errors = compile(parsed, &[]).err().unwrap();
-    assert_eq!(errors.len(), 1, "{errors:?}");
-    assert!(errors[0].message.starts_with("EXEC DLI GU is not supported"), "{}", errors[0].message);
-    assert!(errors[0].severity >= Severity::Error);
+fn exec_dli_is_checked_when_compiled_and_ends_the_run_when_reached() {
+    let data = "       01  SSA PIC X(9).\n       01  AREA1 PIC X(80).\n       01  PCB-NUM PIC S9(4) COMP VALUE 1.\n       01  S PIC XX.\n";
+    let compiled = |statements: &[&str]| {
+        let body: String = statements.iter().map(|s| line(s)).chain([line("GOBACK.")]).collect();
+        compile(syntax::parse(&program("", data, &body)).unwrap(), &[])
+    };
+    let errors = |statements: &[&str]| compiled(statements).err().map(|e| e.into_iter().map(|e| e.message).collect::<Vec<_>>()).unwrap_or_default();
+    let good = ["MOVE DIBSTAT TO S", "EXEC DLI GET UNIQUE USING PCB(PCB-NUM)", "    SEGMENT(ROOT) INTO(AREA1) WHERE(KEY = SSA)", "END-EXEC", "EXEC DLI SCHD PSB((SSA)) NODHABEND END-EXEC"];
+    assert!(errors(&good).is_empty(), "{:?}", errors(&good));
+    assert_eq!(errors(&["EXEC DLI FETCH SEGMENT(ROOT) END-EXEC"]), ["EXEC DLI FETCH is not an EXEC DLI command"]);
+    assert_eq!(errors(&["EXEC DLI TERM INTO(AREA1) END-EXEC"]), ["EXEC DLI TERM: INTO is not one of its options"]);
+    assert_eq!(errors(&["EXEC DLI GU SEGMENT(ROOT) WHERE(KEY SSA) END-EXEC"]), ["EXEC DLI GU WHERE(KEY SSA): a relational operator after KEY"]);
+    assert_eq!(errors(&["EXEC DLI GU SEGMENT(ROOT) INTO(NOWHERE) END-EXEC"]).len(), 1);
+    assert_eq!(errors(&["EXEC DLI GU SEGMENT(ROOT) WHERE(KEY = NOWHERE) END-EXEC"]).len(), 1);
+    let body: String = ["MOVE 'GB' TO DIBSTAT", "DISPLAY DIBSTAT ' ' LENGTH OF DLZDIB", "EXEC DLI GN SEGMENT(ROOT) INTO(AREA1) END-EXEC", "GOBACK."].into_iter().map(line).collect();
+    let (out, _, ending) = run_with(&program("", data, &body), &[]);
+    assert_eq!(out, "GB 000000040\n");
+    let abend = ending.unwrap_err();
+    assert_eq!(abend.code, AbendCode::Exec);
+    assert!(abend.message.starts_with("EXEC DLI GN was reached"), "{}", abend.message);
 }
 
 #[test]

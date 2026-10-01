@@ -301,10 +301,13 @@ The subset the interpreter runs today:
   warning and runs. A program compiled with THREAD is RECURSIVE and has no INITIAL, nested program,
   or SORT or MERGE of a file; otherwise it is refused. The choices are assumptions J1 to J20.
 
-- **EXEC SQL and EXEC CICS** are read and checked: every SQL host variable and every CICS argument
-  that names data must resolve; EXEC SQL INCLUDE works as COPY; a program with EXEC CICS gets
-  DFHEIBLK and DFHCOMMAREA as the translator adds them; `DFHRESP(condition)` is its EIBRESP number;
-  SQLCA, SQLDA, DFHEIBLK, DFHAID and DFHBMSCA are built in when no library holds them.
+- **EXEC SQL, EXEC CICS and EXEC DLI** are read and checked: every SQL host variable and every CICS
+  or DL/I argument that names data must resolve; EXEC SQL INCLUDE works as COPY; a program with EXEC
+  CICS gets DFHEIBLK and DFHCOMMAREA as the translator adds them; `DFHRESP(condition)` is its
+  EIBRESP number; SQLCA, SQLDA, DFHEIBLK, DFHAID and DFHBMSCA are built in when no library holds
+  them. An EXEC DLI command and its options are checked against IMS's table, a WHERE qualification's
+  form too, and the program gets the DL/I interface block, DIBSTAT and the rest (C171); a run ends
+  when it reaches one.
 - **EXEC SQL runs** against PostgreSQL (`--sql-db`) or a recording of a run (`--sql-replay`, made
   with `--sql-record`): single-row statements, cursors with WITH HOLD and positioned changes, COMMIT
   and ROLLBACK, CICS SYNCPOINT, host variables and indicators converted by Db2's rules, the SQLCA
