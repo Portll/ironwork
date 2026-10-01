@@ -5,15 +5,17 @@ use super::{AbendId, PlaceId, SymId};
 use crate::sql::{HostType, fingerprint};
 use crate::{codec_enum, codec_struct};
 
-/// One EXEC SQL block, declarative ones included; `Program.sql[k − 1]` has ordinal k.
+/// One EXEC SQL block, declarative ones included; `Program.sql[k − 1]` has ordinal k. `P` and `S`
+/// are the executor's handles to a data item and to text: the LIR's ids by default, the walker's
+/// own references in the interpreter.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SqlEntry<P = PlaceId> {
+pub struct SqlEntry<P = PlaceId, S = SymId> {
     pub ordinal: u32,
     /// The command word the call record and the EXEC messages name.
-    pub verb: SymId,
-    pub statement: SqlStatement<P>,
+    pub verb: S,
+    pub statement: SqlStatement<P, S>,
     /// What a `Database` call receives, `?` for each input; empty for a declaration.
-    pub text: SymId,
+    pub text: S,
     pub fingerprint: u32,
     /// Set on the OPEN of a cursor declared WITH HOLD, and on no other entry.
     pub with_hold: bool,
@@ -21,18 +23,18 @@ pub struct SqlEntry<P = PlaceId> {
 
 /// The typed statement with its host variables resolved and each OPEN given its DECLARE's inputs.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SqlStatement<P = PlaceId> {
+pub enum SqlStatement<P = PlaceId, S = SymId> {
     Query { inputs: Vec<HostPlace<P>>, into: Vec<HostPlace<P>> },
-    Change { delete: bool, inputs: Vec<HostPlace<P>>, current_of: Option<SymId> },
-    Open { cursor: SymId, inputs: Vec<HostPlace<P>> },
-    Fetch { cursor: SymId, into: Vec<HostPlace<P>> },
-    Close { cursor: SymId },
+    Change { delete: bool, inputs: Vec<HostPlace<P>>, current_of: Option<S> },
+    Open { cursor: S, inputs: Vec<HostPlace<P>> },
+    Fetch { cursor: S, into: Vec<HostPlace<P>> },
+    Close { cursor: S },
     Commit,
     Rollback,
     /// WHENEVER, DECLARE CURSOR, INCLUDE and the other declarations: no op.
     Declaration,
     /// Abends EXEC, naming it, when reached.
-    Unsupported(SymId),
+    Unsupported(S),
 }
 
 /// A host variable, or one member of a host structure at `member`'s offset and length. The

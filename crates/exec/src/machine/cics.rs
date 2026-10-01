@@ -1,14 +1,13 @@
 //! EXEC CICS in the walker: a block is bound into a `CicsCommand` (cics_bind.rs) and run by
-//! `rt::cics`, which asks the walker what `CicsHost` names. SYNCPOINT stays with the walker's SQL
-//! session (sql.rs).
+//! `rt::cics`, which asks the walker what `CicsHost` names.
 
 use super::*;
-use super::cics_bind::{operand, resp};
-use crate::cics::{self, CicsHost, Condition};
+use super::cics_bind::operand;
+use crate::cics::{self, CicsHost};
 use rt::bms::Mapset;
 use std::rc::Rc;
 
-pub(super) use super::cics_bind::has;
+use super::cics_bind::has;
 pub(super) use crate::cics::Handlers;
 
 fn flow(f: cics::Flow) -> Flow {
@@ -26,10 +25,6 @@ impl<'p> Machine<'p, '_, '_> {
             self.cics_sinks(block);
         }
         let command = self.bind_cics(block)?;
-        if let cics::Cics::Syncpoint { .. } = command.command {
-            cics::begin_command(self.unit);
-            return self.cics_syncpoint(block);
-        }
         cics::run(self, &command, block.pos).map(flow)
     }
 
@@ -67,19 +62,6 @@ impl<'p> Machine<'p, '_, '_> {
                 self.sink(kind, block.pos, &text);
             }
         }
-    }
-
-    /// Raises a condition for a command the walker runs itself: SYNCPOINT.
-    pub(super) fn raise(&mut self, block: &ExecBlock, condition: Condition, resp2: i32) -> R<Flow> {
-        let resp = resp(block);
-        let at = cics::At { name: &block.command, resp: &resp, pos: block.pos };
-        cics::raise(self, &at, condition, resp2).map(flow)
-    }
-
-    pub(super) fn cics_ok(&mut self, block: &ExecBlock) -> R<Flow> {
-        let resp = resp(block);
-        let at = cics::At { name: &block.command, resp: &resp, pos: block.pos };
-        cics::ok(self, &at).map(flow)
     }
 
     /// Fills the EXEC interface block for the task's first program and binds DFHEIBLK and

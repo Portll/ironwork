@@ -1,10 +1,10 @@
-//! Services: time, ASSIGN, storage, terminal text and the temporary-storage and transient-data
-//! queues.
+//! Services: time, ASSIGN, storage, terminal text, the temporary-storage and transient-data
+//! queues, and SYNCPOINT.
 
 use super::command::{Assign, Datum, Record};
 use super::run::{At, CicsHost, EIBDATE, EIBTIME, Flow, R};
 use super::run::{bytes, deliver, eib_packed, encoded, int, ok, page, raise, sent, store_bytes, store_int, store_pointer, task, text};
-use super::{FormatValue, abstime, eib_date, eib_time, format_time};
+use super::{Condition, FormatValue, abstime, eib_date, eib_time, format_time};
 use crate::abend::Abend;
 use crate::vocab::Pos;
 
@@ -222,5 +222,22 @@ pub(super) fn readq_td<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at
 pub(super) fn deleteq_td<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, queue: Option<&Datum<P, O, S>>) -> R<Flow> {
     let queue = queue_name(x, at, queue)?;
     task(x).deleteq_td(&queue);
+    ok(x, at)
+}
+
+/// SYNCPOINT commits the task's unit of work, and SYNCPOINT ROLLBACK backs it out. A commit the
+/// database refuses leaves the work backed out and raises ROLLEDBACK.
+pub(super) fn syncpoint<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, rollback: bool) -> R<Flow> {
+    let program = x.program_id();
+    if let Some(session) = x.unit().sql.as_mut() {
+        let answer = session.settle(&program, !rollback).map_err(|a| Abend { code: a.code.into(), message: a.message, pos: at.pos, file: None })?;
+        if answer.sqlcode < 0 && !rollback {
+            return raise(x, at, Condition::ROLLEDBACK, 0);
+        }
+        if answer.sqlcode < 0 {
+            let message = format!("SYNCPOINT ROLLBACK: the database refused to roll back with SQLCODE {}", answer.sqlcode);
+            return Err(Abend { code: "SQL".into(), message, pos: at.pos, file: None });
+        }
+    }
     ok(x, at)
 }

@@ -1,289 +1,102 @@
-//! EXEC SQL as the program meets it: host variables read and written through the SQL runtime, the
-//! SQLCA filled, and the WHENEVER branch in force taken.
+//! EXEC SQL in the walker: a block's host variables and SQLCA fields resolved into the
+//! `SqlEntry` and `Sqlca` that `rt::sql::run` runs, and the WHENEVER branch in force taken.
 
+use super::facts::Facts;
 use super::*;
-use crate::sql::{self, Call, HostType, NULL_WITHOUT_INDICATOR, Outcome, SqlError, Value};
+use crate::sql::{self, HostType, Session, SqlHost};
+use rt::host::Host;
+use rt::lir::{AbendId, HostPlace, SqlEntry, SqlStatement, Sqlca, SqlcaField};
 use syntax::sql::{Action, ChangeKind, HostVar, Statement, Whenever};
 
-/// SQLWARN0 to SQLWARNA, as the runtime sets them.
-type Warnings = [bool; 11];
-const TRUNCATED: usize = 1;
-const COLUMN_COUNT: usize = 3;
-/// Deadlock or timeout: the backend has rolled the unit of work back.
-const DEADLOCK: i32 = -911;
+type Entry<'b> = SqlEntry<&'b Ref, String>;
 
-/// A host variable's storage, its type, and its indicator's storage when it has one.
-struct Target {
-    offset: usize,
-    len: usize,
-    ty: HostType,
-    indicator: Option<usize>,
+/// The walker as one statement's run sees it, with the abends its host variables of no SQL type
+/// give, by `AbendId`.
+struct Bound<'m, 'p, 'u, 'w> {
+    machine: &'m mut Machine<'p, 'u, 'w>,
+    untyped: Vec<Abend>,
 }
 
 impl<'p, 'w> Machine<'p, '_, 'w> {
     pub(super) fn sql(&mut self, block: &'p ExecBlock) -> R<Flow> {
         let sql = block.sql.as_ref().expect("the parser types every EXEC SQL block");
-        let (pos, program) = (block.pos, self.program.id.as_str());
-        let refused = |why: String| Abend { code: "EXEC".into(), message: format!("EXEC SQL {} was reached: {why}", block.command), pos, file: None };
-        if self.unit.sql.is_none() {
-            return Err(refused("no database is attached to the run".into()));
+        let mut untyped = Vec::new();
+        let entry = self.sql_entry(block, &sql.statement, sql.ordinal, &mut untyped);
+        let fields = sqlca_fields(block.pos);
+        let sqlca = self.sqlca(&fields);
+        let ran = sql::run(&mut Bound { machine: self, untyped }, &entry, &sqlca, block.pos)?;
+        match ran {
+            Some(ran) => self.whenever(&sql.whenever, ran.sqlcode, ran.warned, block.pos),
+            None => Ok(Flow::Next),
         }
-        let mut warnings = Warnings::default();
-        let mut outcome = match &sql.statement {
-            Statement::Query { text, inputs, into } => match self.sql_inputs(inputs, &block.command)? {
-                Err(e) => Outcome::error(e.code, e.state),
-                Ok(values) => {
-                    let answer = self.sql_call(&block.command, sql.ordinal, None, text, &values, |db, call| db.execute(call), pos)?;
-                    self.sql_single_row(answer, into, &mut warnings, &block.command)?
-                }
-            },
+    }
+
+    /// The statement with its host variables bound, and the text its database call sends.
+    fn sql_entry<'b>(&mut self, block: &ExecBlock, statement: &'b Statement, ordinal: u32, untyped: &mut Vec<Abend>) -> Entry<'b> {
+        let command = block.command.as_str();
+        let mut places = |vars: &'b [HostVar]| self.host_places(vars, command, untyped);
+        let (statement, text, with_hold) = match statement {
+            Statement::Query { text, inputs, into } => (SqlStatement::Query { inputs: places(inputs), into: places(into) }, text.clone(), false),
             Statement::Change { kind, text, inputs, current_of } => {
-                let position = current_of.as_deref().map(|c| self.session().cursor(program, c).map(|c| c.positioned));
-                match (position, self.sql_inputs(inputs, &block.command)?) {
-                    (Some(None), _) => Outcome::error(-507, "24501"),
-                    (Some(Some(false)), _) => Outcome::error(-508, "24504"),
-                    (_, Err(e)) => Outcome::error(e.code, e.state),
-                    (_, Ok(values)) => {
-                        let mut answer = self.sql_call(&block.command, sql.ordinal, current_of.as_deref(), text, &values, |db, call| db.execute(call), pos)?;
-                        // Db2 answers a searched change that finds no row with +100.
-                        if current_of.is_none() && answer.sqlcode == 0 && answer.affected == 0 {
-                            answer = Outcome::error(100, "02000");
-                        }
-                        if let (Some(c), ChangeKind::Delete, true) = (current_of, kind, answer.sqlcode >= 0)
-                            && let Some(open) = self.session().cursor(program, c)
-                        {
-                            open.positioned = false;
-                        }
-                        answer
-                    }
-                }
+                (SqlStatement::Change { delete: matches!(kind, ChangeKind::Delete), inputs: places(inputs), current_of: current_of.clone() }, text.clone(), false)
             }
             Statement::Open { cursor, declared } => {
                 let declared = declared.as_ref().expect("the parser gives OPEN its DECLARE");
-                if self.session().cursor(program, cursor).is_some() {
-                    Outcome::error(-502, "24502")
-                } else {
-                    match self.sql_inputs(&declared.inputs, &block.command)? {
-                        Err(e) => Outcome::error(e.code, e.state),
-                        Ok(values) => {
-                            let hold = if declared.with_hold { " WITH HOLD" } else { "" };
-                            let text = format!("DECLARE {cursor} CURSOR{hold} FOR {}", declared.text);
-                            let answer = self.sql_call("OPEN", sql.ordinal, Some(cursor), &text, &values, |db, call| db.open(call), pos)?;
-                            if answer.sqlcode >= 0 {
-                                self.session().opened(program, cursor, declared.with_hold);
-                            }
-                            answer
-                        }
-                    }
-                }
+                let hold = if declared.with_hold { " WITH HOLD" } else { "" };
+                let text = format!("DECLARE {cursor} CURSOR{hold} FOR {}", declared.text);
+                (SqlStatement::Open { cursor: cursor.clone(), inputs: places(&declared.inputs) }, text, declared.with_hold)
             }
-            Statement::Fetch { cursor, into } => {
-                if self.session().cursor(program, cursor).is_none() {
-                    Outcome::error(-501, "24501")
-                } else {
-                    let answer = self.sql_call("FETCH", sql.ordinal, Some(cursor), &format!("FETCH {cursor}"), &[], |db, call| db.fetch(call), pos)?;
-                    if answer.rows.len() > 1 {
-                        return Err(Abend { code: "SQL".into(), message: format!("the database answered FETCH {cursor} with {} rows", answer.rows.len()), pos, file: None });
-                    }
-                    let on_row = answer.sqlcode >= 0 && answer.rows.len() == 1;
-                    if let Some(open) = self.session().cursor(program, cursor) {
-                        open.positioned = on_row;
-                    }
-                    let fetched = self.sql_single_row(answer, into, &mut warnings, &block.command)?;
-                    Outcome { affected: i64::from(on_row), ..fetched }
-                }
-            }
-            Statement::Close { cursor } => {
-                if self.session().cursor(program, cursor).is_none() {
-                    Outcome::error(-501, "24501")
-                } else {
-                    let answer = self.sql_call("CLOSE", sql.ordinal, Some(cursor), &format!("CLOSE {cursor}"), &[], |db, call| db.close(call), pos)?;
-                    if answer.sqlcode >= 0 {
-                        self.session().closed(program, cursor);
-                    }
-                    answer
-                }
-            }
-            Statement::Commit if self.unit.cics.is_some() => Outcome::error(-925, "2D521"),
-            Statement::Rollback if self.unit.cics.is_some() => Outcome::error(-926, "2D521"),
-            Statement::Commit => {
-                let answer = self.sql_call("COMMIT", sql.ordinal, None, "COMMIT", &[], |db, call| db.commit(call), pos)?;
-                if answer.sqlcode >= 0 {
-                    self.session().committed();
-                }
-                answer
-            }
-            Statement::Rollback => {
-                let answer = self.sql_call("ROLLBACK", sql.ordinal, None, "ROLLBACK", &[], |db, call| db.rollback(call), pos)?;
-                if answer.sqlcode >= 0 {
-                    self.session().rolled_back();
-                }
-                answer
-            }
-            Statement::Whenever { .. } | Statement::Declaration | Statement::DeclareCursor(_) | Statement::DeclareUnsupported { .. } => return Ok(Flow::Next),
-            Statement::Unsupported(what) => return Err(refused(format!("ironwork for COBOL does not run {what}"))),
+            Statement::Fetch { cursor, into } => (SqlStatement::Fetch { cursor: cursor.clone(), into: places(into) }, format!("FETCH {cursor}"), false),
+            Statement::Close { cursor } => (SqlStatement::Close { cursor: cursor.clone() }, format!("CLOSE {cursor}"), false),
+            Statement::Commit => (SqlStatement::Commit, "COMMIT".into(), false),
+            Statement::Rollback => (SqlStatement::Rollback, "ROLLBACK".into(), false),
+            Statement::Whenever { .. } | Statement::Declaration | Statement::DeclareCursor(_) | Statement::DeclareUnsupported { .. } => (SqlStatement::Declaration, String::new(), false),
+            Statement::Unsupported(what) => (SqlStatement::Unsupported(what.clone()), String::new(), false),
             Statement::Malformed(why) => unreachable!("the compiler refuses a malformed statement: {why}"),
         };
-        if outcome.sqlcode == DEADLOCK {
-            self.session().rolled_back();
-        }
-        warnings[0] = warnings[1..].iter().any(|&w| w);
-        if outcome.sqlcode == 0 && outcome.sqlstate == "00000" {
-            if warnings[TRUNCATED] {
-                outcome.sqlstate = "01004".into();
-            } else if warnings[COLUMN_COUNT] {
-                outcome.sqlstate = "01503".into();
-            }
-        }
-        self.sqlca(&outcome, &warnings, pos)?;
-        self.whenever(&sql.whenever, outcome.sqlcode, warnings[0], pos)
+        SqlEntry { ordinal, verb: command.to_owned(), statement, fingerprint: sql::fingerprint(&text), text, with_hold }
     }
 
-    /// EXEC CICS SYNCPOINT commits the task's unit of work, and SYNCPOINT ROLLBACK backs it out. A
-    /// commit the database refuses leaves the work backed out and raises ROLLEDBACK.
-    pub(super) fn cics_syncpoint(&mut self, block: &ExecBlock) -> R<Flow> {
-        let (pos, program) = (block.pos, self.program.id.as_str());
-        let commit = !super::cics::has(block, "ROLLBACK");
-        if let Some(session) = self.unit.sql.as_mut() {
-            let answer = session.settle(program, commit).map_err(|a| Abend { code: a.code.into(), message: a.message, pos, file: None })?;
-            if answer.sqlcode < 0 && commit {
-                return self.raise(block, crate::cics::Condition::ROLLEDBACK, 0);
-            }
-            if answer.sqlcode < 0 {
-                let message = format!("SYNCPOINT ROLLBACK: the database refused to roll back with SQLCODE {}", answer.sqlcode);
-                return Err(Abend { code: "SQL".into(), message, pos, file: None });
-            }
-        }
-        self.cics_ok(block)
-    }
-
-    fn session(&mut self) -> &mut sql::Session<'w> {
-        self.unit.sql.as_mut().expect("a database is attached")
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn sql_call(&mut self, verb: &str, ordinal: u32, cursor: Option<&str>, text: &str, inputs: &[Value], run: impl FnOnce(&mut dyn sql::Database, &Call) -> sql::Answer, pos: Pos) -> R<Outcome> {
-        let call = Call { program: &self.program.id, ordinal, verb, cursor, text, inputs };
-        let session = self.unit.sql.as_mut().expect("a database is attached");
-        session.pending |= !matches!(verb, "COMMIT" | "ROLLBACK");
-        run(&mut *session.database, &call).map_err(|a| Abend { code: a.code.into(), message: a.message, pos, file: None })
-    }
-
-    /// A SELECT INTO's or a FETCH's answer: one row is assigned, none is +100, more than one is -811.
-    fn sql_single_row(&mut self, answer: Outcome, into: &[HostVar], warnings: &mut Warnings, command: &str) -> R<Outcome> {
-        if answer.sqlcode < 0 {
-            return Ok(answer);
-        }
-        Ok(match answer.rows.len() {
-            0 => Outcome::error(100, "02000"),
-            1 => match self.sql_assign(into, &answer.rows[0], warnings, command)? {
-                Ok(()) => answer,
-                Err(e) => Outcome::error(e.code, e.state),
-            },
-            _ => Outcome::error(-811, "21000"),
-        })
-    }
-
-    /// Each host variable's storage and type, a host structure's members one by one with the
-    /// indicator array's elements beside them.
-    fn sql_targets(&mut self, vars: &[HostVar], command: &str) -> R<Vec<Target>> {
+    /// Each host variable's type, a host structure's members one by one with the indicator
+    /// array's elements beside them. An item with no SQL type abends EXEC when the statement
+    /// reaches it.
+    fn host_places<'b>(&mut self, vars: &'b [HostVar], command: &str, untyped: &mut Vec<Abend>) -> Vec<HostPlace<&'b Ref>> {
         let mut out = Vec::new();
         for hv in vars {
-            let loc = self.locate(&hv.var)?;
-            let indicator = match &hv.indicator {
-                Some(r) => Some(self.locate(r)?.offset),
-                None => None,
+            let indicator = |element: usize| hv.indicator.as_ref().map(|r| (r, 2 * element as u32));
+            let ty = match self.resolve(&hv.var) {
+                Ok(Resolved::Item(item)) => sql::host_type(self.layout, item)
+                    .map(|ty| (item, ty))
+                    .map_err(|why| Abend { code: "EXEC".into(), message: format!("EXEC SQL {command}: {why}"), pos: hv.var.pos, file: None }),
+                Ok(_) => Err(Abend::ironwork(format!("{} is a condition-name, not a data item", hv.var.name), hv.var.pos)),
+                Err(abend) => Err(abend),
             };
-            let ty = sql::host_type(self.layout, loc.item)
-                .map_err(|why| Abend { code: "EXEC".into(), message: format!("EXEC SQL {command}: {why}"), pos: hv.var.pos, file: None })?;
             match ty {
-                HostType::Structure(members) => {
-                    let start = self.layout.items[loc.item].offset as usize;
+                Ok((item, HostType::Structure(members))) => {
+                    let start = self.layout.items[item].offset;
                     for (i, (m, ty)) in members.into_iter().enumerate() {
-                        let item = &self.layout.items[m];
-                        out.push(Target { offset: loc.offset + item.offset as usize - start, len: item.size as usize, ty, indicator: indicator.map(|at| at + 2 * i) });
+                        let member = &self.layout.items[m];
+                        out.push(HostPlace { var: &hv.var, member: Some((member.offset - start, member.size)), ty: Ok(ty), indicator: indicator(i) });
                     }
                 }
-                ty => out.push(Target { offset: loc.offset, len: loc.len, ty, indicator }),
+                Ok((_, ty)) => out.push(HostPlace { var: &hv.var, member: None, ty: Ok(ty), indicator: indicator(0) }),
+                Err(abend) => {
+                    untyped.push(abend);
+                    out.push(HostPlace { var: &hv.var, member: None, ty: Err((untyped.len() - 1) as AbendId), indicator: indicator(0) });
+                }
             }
         }
-        Ok(out)
+        out
     }
 
-    /// The values the input host variables send: NULL where the indicator is negative.
-    fn sql_inputs(&mut self, vars: &[HostVar], command: &str) -> R<Result<Vec<Value>, SqlError>> {
-        let mut values = Vec::new();
-        for t in self.sql_targets(vars, command)? {
-            if let Some(at) = t.indicator
-                && i16::from_be_bytes([self.unit.mem[at], self.unit.mem[at + 1]]) < 0
-            {
-                values.push(Value::Null);
-                continue;
-            }
-            match sql::read(&self.unit.mem[t.offset..t.offset + t.len], &t.ty, self.page, self.options.numproc) {
-                Ok(v) => values.push(v),
-                Err(sql::ReadError::Check(c)) => return Err(Abend::check(c, vars[0].var.pos)),
-                Err(sql::ReadError::Sql(e)) => return Ok(Err(e)),
-            }
-        }
-        Ok(Ok(values))
-    }
-
-    /// Assigns a row to the INTO host variables, setting each indicator: -1 for NULL, a cut
-    /// string's original length, and 0 otherwise.
-    fn sql_assign(&mut self, into: &[HostVar], row: &[Value], warnings: &mut Warnings, command: &str) -> R<Result<(), SqlError>> {
-        let targets = self.sql_targets(into, command)?;
-        if targets.len() != row.len() {
-            warnings[COLUMN_COUNT] = true;
-        }
-        for (t, value) in targets.iter().zip(row) {
-            let indicator = match value {
-                Value::Null => match t.indicator {
-                    Some(_) => -1,
-                    None => return Ok(Err(NULL_WITHOUT_INDICATOR)),
-                },
-                value => match sql::write(value, &mut self.unit.mem[t.offset..t.offset + t.len], &t.ty, self.page) {
-                    Err(e) => return Ok(Err(e)),
-                    Ok(written) => {
-                        warnings[TRUNCATED] |= written.truncated_from.is_some();
-                        written.truncated_from.map_or(0, |n| n.min(i16::MAX as usize) as i16)
-                    }
-                },
-            };
-            if let Some(at) = t.indicator {
-                self.unit.mem[at..at + 2].copy_from_slice(&indicator.to_be_bytes());
-            }
-        }
-        Ok(Ok(()))
-    }
-
-    /// Writes the SQLCA fields the program declares, or its standalone SQLCODE and SQLSTATE.
-    fn sqlca(&mut self, o: &Outcome, warnings: &Warnings, pos: Pos) -> R<()> {
-        let mark = |on: bool| Value::Char(if on { "W" } else { " " }.into());
-        let mut fields = vec![
-            ("SQLCAID", None, Value::Char("SQLCA".into())),
-            ("SQLCABC", None, Value::Int(136)),
-            ("SQLCODE", None, Value::Int(o.sqlcode.into())),
-            ("SQLERRML", None, Value::Int(o.tokens.len().min(70) as i64)),
-            ("SQLERRMC", None, Value::Char(o.tokens.clone())),
-            ("SQLERRP", None, Value::Char(String::new())),
-            ("SQLSTATE", None, Value::Char(o.sqlstate.clone())),
-        ];
-        for n in 1..=6 {
-            fields.push(("SQLERRD", Some(n), Value::Int(if n == 3 { o.affected } else { 0 })));
-        }
-        for (i, name) in ["SQLWARN0", "SQLWARN1", "SQLWARN2", "SQLWARN3", "SQLWARN4", "SQLWARN5", "SQLWARN6", "SQLWARN7", "SQLWARN8", "SQLWARN9", "SQLWARNA"].into_iter().enumerate() {
-            fields.push((name, None, mark(warnings[i])));
-        }
-        for (name, subscript, value) in fields {
-            let subscripts = subscript.map(|n: u32| vec![Expr::Operand(Operand::Literal(Literal::Number(n.to_string())))]).unwrap_or_default();
-            let Ok(loc) = self.locate(&Ref { name: name.into(), qualifiers: Vec::new(), subscripts, refmod: None, pos }) else { continue };
-            let Ok(ty) = sql::host_type(self.layout, loc.item) else { continue };
-            // The SQLCA is the program's own declaration: a field that cannot hold its value keeps
-            // what it held.
-            let _ = sql::write(&value, &mut self.unit.mem[loc.offset..loc.offset + loc.len], &ty, self.page);
-        }
-        Ok(())
+    /// The SQLCA fields the program declares with an SQL type, or its standalone SQLCODE and
+    /// SQLSTATE.
+    fn sqlca<'b>(&mut self, fields: &'b [(SqlcaField, Ref)]) -> Sqlca<&'b Ref> {
+        let typed = |(field, r): &'b (SqlcaField, Ref)| match self.resolve(r) {
+            Ok(Resolved::Item(item)) => sql::host_type(self.layout, item).ok().map(|ty| (*field, r, ty)),
+            _ => None,
+        };
+        Sqlca { fields: fields.iter().filter_map(typed).collect() }
     }
 
     /// The WHENEVER action in force for this outcome, tested SQLERROR, NOT FOUND, then SQLWARNING.
@@ -301,6 +114,81 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
             Action::Continue => Ok(Flow::Next),
             Action::GoTo(label) => Ok(Flow::GoTo(self.procedure(&ProcName { name: label.clone(), section: None }, pos)?.0)),
         }
+    }
+}
+
+/// The SQLCA's fields by name, in the order they are filled.
+fn sqlca_fields(pos: Pos) -> Vec<(SqlcaField, Ref)> {
+    let named = |name: &str, subscript: Option<u8>| {
+        let subscripts = subscript.map(|n| vec![Expr::Operand(Operand::Literal(Literal::Number(n.to_string())))]).unwrap_or_default();
+        Ref { name: name.into(), qualifiers: Vec::new(), subscripts, refmod: None, pos }
+    };
+    let mut fields = vec![
+        (SqlcaField::CaId, named("SQLCAID", None)),
+        (SqlcaField::CaBc, named("SQLCABC", None)),
+        (SqlcaField::Code, named("SQLCODE", None)),
+        (SqlcaField::ErrMl, named("SQLERRML", None)),
+        (SqlcaField::ErrMc, named("SQLERRMC", None)),
+        (SqlcaField::ErrP, named("SQLERRP", None)),
+        (SqlcaField::State, named("SQLSTATE", None)),
+    ];
+    fields.extend((1..=6).map(|n| (SqlcaField::ErrD(n), named("SQLERRD", Some(n)))));
+    let warnings = ["SQLWARN0", "SQLWARN1", "SQLWARN2", "SQLWARN3", "SQLWARN4", "SQLWARN5", "SQLWARN6", "SQLWARN7", "SQLWARN8", "SQLWARN9", "SQLWARNA"];
+    fields.extend((0..).zip(warnings).map(|(n, name)| (SqlcaField::Warn(n), named(name, None))));
+    fields
+}
+
+impl<'a, 'p> Host<&'a Ref> for Bound<'_, 'p, '_, '_> {
+    type Facts = Facts<'p>;
+
+    fn facts(&self) -> Facts<'p> {
+        self.machine.facts()
+    }
+
+    fn mem(&mut self) -> &mut [u8] {
+        &mut self.machine.unit.mem
+    }
+
+    fn locate(&mut self, place: &'a Ref, receiving: bool) -> R<Loc> {
+        self.machine.locate_as(place, receiving)
+    }
+
+    fn integer(&mut self, place: &'a Ref, pos: Pos) -> R<i64> {
+        Host::integer(self.machine, place, pos)
+    }
+
+    fn assign(&mut self, dest: Loc, val: Val, src: Option<Loc>, pos: Pos) -> R<()> {
+        self.machine.assign(dest, val, src, pos)
+    }
+
+    fn store_fixed(&mut self, dest: Loc, value: &Fixed, pos: Pos) -> R<()> {
+        self.machine.store_fixed(dest, value, false, pos)
+    }
+}
+
+impl<'a, 'w> SqlHost<'w, &'a Ref, String> for Bound<'_, '_, '_, 'w> {
+    fn session(&mut self) -> Option<&mut Session<'w>> {
+        self.machine.unit.sql.as_mut()
+    }
+
+    fn in_task(&self) -> bool {
+        self.machine.unit.cics.is_some()
+    }
+
+    fn program_id(&self) -> String {
+        self.machine.program.id.clone()
+    }
+
+    fn text(&self, text: &String) -> String {
+        text.clone()
+    }
+
+    fn place_pos(&self, place: &'a Ref) -> Pos {
+        place.pos
+    }
+
+    fn untyped(&mut self, abend: AbendId) -> Abend {
+        self.untyped[abend as usize].clone()
     }
 }
 
@@ -486,6 +374,42 @@ mod tests {
     fn invalid_packed_input_abends_s0c7() {
         let procedure = "           EXEC SQL SELECT NAME INTO :WS-NAME FROM T\n                    WHERE AMT = :WS-BAD END-EXEC.\n           GOBACK.\n";
         assert_eq!(run(procedure, Vec::new()).0, Err("S0C7".into()));
+    }
+
+    #[test]
+    fn a_host_structure_takes_a_column_per_member_and_its_indicator_array_an_element_each() {
+        let source = concat!(
+            "       IDENTIFICATION DIVISION.\n",
+            "       PROGRAM-ID. Q.\n",
+            "       DATA DIVISION.\n",
+            "       WORKING-STORAGE SECTION.\n",
+            "       01 WS-ROW.\n",
+            "          05 R-NAME PIC X(5).\n",
+            "          05 R-ID   PIC S9(9) COMP.\n",
+            "          05 R-AMT  PIC S9(5)V99 COMP-3 VALUE 1.\n",
+            "       01 WS-INDS.\n",
+            "          05 WS-IND PIC S9(4) COMP OCCURS 3.\n",
+            "       01 E-NUM    PIC -9(3).\n",
+            "       PROCEDURE DIVISION.\n",
+            "           EXEC SQL SELECT NAME, ID, AMT INTO :WS-ROW:WS-INDS FROM T\n",
+            "                    END-EXEC.\n",
+            "           MOVE R-ID TO E-NUM.\n",
+            "           DISPLAY R-NAME E-NUM WITH NO ADVANCING.\n",
+            "           MOVE WS-IND(3) TO E-NUM.\n",
+            "           DISPLAY E-NUM.\n",
+            "           EXEC SQL INSERT INTO T VALUES (:WS-ROW) END-EXEC.\n",
+            "           GOBACK.\n",
+        );
+        let compiled = crate::compile(syntax::parse(source).expect("parses"), &[]).expect("compiles");
+        let calls = Calls::default();
+        let row = vec![Value::Char("ADAMS".into()), Value::Int(42), Value::Null];
+        let mut db = Script { answers: vec![Outcome::rows(vec![row])].into(), calls: calls.clone() };
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let ran = compiled.execute_with(crate::unit::Library::default(), crate::files::Dds::default(), None, crate::unit::Clock::System, Some(&mut db), &mut out, &mut err);
+        assert!(ran.is_ok(), "{ran:?}");
+        assert_eq!(String::from_utf8(out).expect("DISPLAY writes text"), "ADAMS 042-001\n");
+        let sent = Vec::from([Value::Char("ADAMS".into()), Value::Int(42), Value::Decimal { value: 100, scale: 2 }]);
+        assert_eq!(calls.take()[1].3, sent);
     }
 
     fn verbs(calls: &[Logged]) -> Vec<&str> {

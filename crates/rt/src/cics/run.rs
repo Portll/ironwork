@@ -114,8 +114,7 @@ pub fn begin_command<H, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>) {
     eib_fullword(unit, EIBRESP2, 0);
 }
 
-/// Runs a command. SYNCPOINT is the executor's to run: it settles the SQL session, which is not in
-/// `rt` yet.
+/// Runs a command.
 pub fn run<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, command: &CicsCommand<P, O, S>, pos: Pos) -> R<Flow> {
     let name = x.text(&command.name);
     in_task(x.unit(), &name, pos)?;
@@ -143,7 +142,7 @@ pub fn run<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, command: &Cics
         Cics::Formattime { abstime, datesep, timesep, outputs } => services::formattime(x, &at, abstime.as_ref(), datesep.as_ref(), timesep.as_ref(), outputs),
         Cics::Assign(assign) => services::assign(x, &at, assign),
         Cics::Getmain { flength, length, initimg, set } => services::getmain(x, &at, flength.as_ref(), length.as_ref(), initimg.as_ref(), set.as_ref()),
-        Cics::Syncpoint { .. } => Err(Abend::ironwork(format!("EXEC CICS {name} settles the SQL session, which its executor runs"), pos)),
+        Cics::Syncpoint { rollback } => services::syncpoint(x, &at, *rollback),
         Cics::Address { eib, commarea, cwa, twa } => services::address(x, &at, eib.as_ref(), commarea.as_ref(), cwa.as_ref(), twa.as_ref()),
         Cics::SendText { from, length } => services::send_text(x, &at, from.as_ref(), length.as_ref()),
         Cics::WriteOperator { text, textlength } => services::write_operator(x, &at, text.as_ref(), textlength.as_ref()),

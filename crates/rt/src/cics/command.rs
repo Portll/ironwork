@@ -67,7 +67,7 @@ pub enum Cics<P = PlaceId, O = Operand, S = SymId> {
     Enq,
     Deq,
     Delay,
-    /// Settles the SQL unit of work, which the executor's SQL session does.
+    /// Settles the SQL session's unit of work.
     Syncpoint { rollback: bool },
     Address { eib: Opt<P, O, S>, commarea: Opt<P, O, S>, cwa: Opt<P, O, S>, twa: Opt<P, O, S> },
     SendText { from: Opt<P, O, S>, length: Opt<P, O, S> },

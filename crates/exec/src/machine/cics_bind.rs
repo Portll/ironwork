@@ -62,7 +62,7 @@ fn first<'b>(block: &'b ExecBlock, names: &[&str]) -> Arg<'b> {
     names.iter().map(|n| arg(block, n)).find(|d| matches!(d, Some(Datum::Place(_) | Datum::Value(_) | Datum::Text(_)))).flatten()
 }
 
-pub(super) fn resp(block: &ExecBlock) -> Resp<&Ref, &Operand, &str> {
+fn resp(block: &ExecBlock) -> Resp<&Ref, &Operand, &str> {
     Resp { resp: arg(block, "RESP"), resp2: arg(block, "RESP2"), nohandle: has(block, "NOHANDLE") }
 }
 

@@ -1197,8 +1197,8 @@ the EIB and the terminal stay run-time state. What `run` asks of its executor is
 run unit and the program's handlers, operands that are not data items, DFHCOMMAREA's address, a
 mapset from the copy libraries, the symbolic map's `mapI` and `mapO` by name, and running a program
 for LINK and XCTL. The walker binds a block in machine/cics_bind.rs, matching the command words and
-options the translator gives and resolving HANDLE labels there. SYNCPOINT settles the SQL session,
-which the walker runs (machine/sql.rs) until the SQL runtime moves into `rt` (E11d).
+options the translator gives and resolving HANDLE labels there. SYNCPOINT is a service
+(cics/services.rs) that settles the SQL session through `Session::settle`.
 
 ### 9.6 SORT, MERGE and Report Writer
 
@@ -1324,6 +1324,13 @@ pub struct Sqlca { pub fields: Vec<(SqlcaField, PlaceId, HostType)> }
   because the walker returns the branch as `Flow::GoTo` (machine/sql.rs:289), which leaves frames
   by the transfer rules of §8.4. The walker resolves the label by name on every statement.
 - **No database attached** abends EXEC at run time, as now (machine/sql.rs:28-30).
+- **In `rt`.** `SqlEntry` and `SqlStatement` are generic like §9.5's `CicsCommand`: `P` and `S` are
+  `PlaceId` and `SymId`, or the walker's `&Ref` and `String`. `rt::sql::run` runs an entry and fills
+  the `Sqlca`, and returns SQLCODE and SQLWARN0 for the WHENEVER tests, or None for a declaration.
+  What it asks of its executor is `SqlHost`: the session, whether a CICS task is running, the
+  program id, text, a host variable's position for a program check, and the abend of a host
+  variable with no SQL type. The walker builds the entry, its `HostPlace`s and the `Sqlca` in
+  machine/sql.rs on every statement, and takes the WHENEVER branch there.
 
 ### 9.8 OO COBOL
 

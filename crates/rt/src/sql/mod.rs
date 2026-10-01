@@ -1,15 +1,19 @@
-//! The SQL runtime: values at the database boundary, and the host variables they come from and go
-//! to. It reaches storage only as a byte range and a host type, so any executor can call it.
+//! The SQL runtime: values at the database boundary, the host variables they come from and go to,
+//! and EXEC SQL statements run against the session (`run`, over the executor's `SqlHost`). It
+//! reaches storage only as a byte range and a host type, so any executor can call it.
 
 mod convert;
 mod database;
+mod host;
 mod postgres;
 mod replay;
+mod run;
 
 pub use convert::{ReadError, Written, read, write};
 pub use database::{Abandoned, Answer, Call, Database, OpenCursor, Outcome, Session};
 pub use postgres::{Postgres, Stream, Tls};
 pub use replay::{Recorder, Replay};
+pub use run::{Ran, SqlHost, run};
 
 use crate::vocab::SignClause;
 
