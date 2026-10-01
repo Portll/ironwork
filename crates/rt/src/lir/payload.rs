@@ -1,7 +1,8 @@
 //! Statement payloads from lir.md §9: MOVE, INITIALIZE, DISPLAY, SEARCH ALL, FUNCTION and INVOKE,
-//! and a placeholder for each payload whose service is not in `rt` yet. DISPLAY's, SEARCH ALL's and
-//! those of `text`, `call` and `sql` are generic over the handles they name (semantics-library.md §9,
-//! C6): the LIR's ids by default, the walker's own references in the interpreter.
+//! and a placeholder for each payload whose service is not in `rt` yet. DISPLAY's, SEARCH ALL's,
+//! INVOKE's and those of `text`, `call` and `sql` are generic over the handles they name
+//! (semantics-library.md §9, C6): the LIR's ids by default, the walker's own references in the
+//! interpreter.
 
 use super::{AbendId, Comparand, Compare, Count, DebugId, IntExpr, Operand, PlaceId, RefMod, StorePlan, SymId};
 use crate::vocab::Figurative;
@@ -285,11 +286,11 @@ pub enum TrimSide {
 /// written, Arm(0) otherwise, or Next when neither phrase is written. `returning` is moved by the
 /// kind of the value the method returns.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct InvokePlan {
-    pub receiver: Receiver,
-    pub method: MethodName,
-    pub args: Vec<(Operand, SymId)>,
-    pub returning: Option<(PlaceId, SymId)>,
+pub struct InvokePlan<P = PlaceId, O = Operand, S = SymId> {
+    pub receiver: Receiver<P, S>,
+    pub method: MethodName<P, S>,
+    pub args: Vec<(O, S)>,
+    pub returning: Option<(P, S)>,
     pub on_exception: bool,
     pub not_on_exception: bool,
 }
@@ -297,18 +298,18 @@ pub struct InvokePlan {
 /// `Class` is a REPOSITORY class-name: `name` as written, which messages give, and `external`, which
 /// finds the class.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Receiver {
+pub enum Receiver<P = PlaceId, S = SymId> {
     SelfRef,
     Super,
-    Class { name: SymId, external: SymId },
-    Object(PlaceId),
+    Class { name: S, external: S },
+    Object(P),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MethodName {
+pub enum MethodName<P = PlaceId, S = SymId> {
     New,
-    Named(SymId),
-    Dynamic(PlaceId),
+    Named(S),
+    Dynamic(P),
 }
 
 codec_enum!(MovePlan {

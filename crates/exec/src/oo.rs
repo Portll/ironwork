@@ -1,7 +1,8 @@
-//! Where a class definition is found. The run unit's objects and classes are `rt::oo`; compiling
-//! and checking a class is `compile::oo`; running one is machine/oo.rs.
+//! Where a class definition is found. The run unit's objects and classes, and running them, are
+//! `rt::oo`; compiling and checking a class is `compile::oo`.
 
 pub use compile::oo::*;
+pub use compile::oo::{ClassCode, MethodCode, Part};
 pub use rt::oo::*;
 
 use syntax::ast::Program;

@@ -21,6 +21,7 @@ pub mod fileio;
 pub mod fixed;
 pub mod host;
 pub mod intrinsic;
+pub mod jni;
 pub mod json;
 pub mod xml;
 pub mod le;

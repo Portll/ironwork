@@ -4,6 +4,7 @@
 use crate::oo::ClassCode;
 use crate::unit::{LoadError, LoadedProgram, Loader, RunUnit};
 use crate::Compiled;
+use rt::unit::FoundClass;
 use std::path::PathBuf;
 use std::rc::Rc;
 use syntax::ast::Program;
@@ -71,6 +72,20 @@ impl Loader<Rc<Compiled>> for Library {
 
     fn shape(program: &Rc<Compiled>) -> (usize, usize) {
         (program.program.files.len(), program.layout.size as usize)
+    }
+
+    fn class(&mut self, external: &str) -> Result<Option<FoundClass<Rc<ClassCode>>>, String> {
+        let Some((program, path)) = crate::oo::find_class(self, external)? else { return Ok(None) };
+        let at = crate::compile_time().map_err(|m| format!("class {external} does not compile: {m}"))?;
+        let (code, _) = crate::oo::class_code(&program, &self.flags, at).map_err(|errors| {
+            let first = syntax::most_severe(&errors).map(|e| e.place(external)).unwrap_or_default();
+            format!("class {external} does not compile: {first}")
+        })?;
+        let mut sources = program.sources;
+        if let (Some(own), Some(path)) = (sources.first_mut(), path) {
+            *own = path;
+        }
+        Ok(Some(FoundClass { code: Rc::new(code), sources }))
     }
 }
 

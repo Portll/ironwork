@@ -1,8 +1,15 @@
 //! The run unit's classes and objects, and the references a program holds to them. `C` is the
 //! executor's handle to a loaded class definition, which the run unit keeps without looking inside.
+//! `run` runs INVOKE, SELF and the JNI services, with `C` an `Rc<ClassCode<H>>`.
+
+mod run;
+
+pub use run::{MethodCall, OoHost, Returned, call_through_pointer, compare_references, invoke, jni_environment, self_reference};
 
 use numeric::assumptions::REFERENCES_KEPT;
 use std::collections::HashMap;
+
+pub const JAVA_LANG_OBJECT: &str = "java.lang.Object";
 
 /// Objects a run unit may create before it abends; they are never freed.
 pub const MAX_OBJECTS: usize = 1_000_000;
@@ -79,6 +86,54 @@ pub struct Instance {
     pub factory: bool,
     /// The loaded storage of each COBOL class's instance data, by class.
     pub parts: Vec<(usize, usize)>,
+}
+
+/// A COBOL class, compiled; `H` is the executor's handle to a compiled program.
+pub struct ClassCode<H> {
+    /// The external name of the class it inherits.
+    pub parent: String,
+    pub factory: Option<Part<H>>,
+    pub object: Option<Part<H>>,
+    pub methods: Vec<MethodCode<H>>,
+}
+
+/// FACTORY or OBJECT WORKING-STORAGE, laid out as a program's, and where each record starts in it.
+pub struct Part<H> {
+    pub data: H,
+    pub records: Vec<u32>,
+}
+
+pub struct MethodCode<H> {
+    pub name: String,
+    pub factory: bool,
+    /// Java types of the parameters and of the returned item, as a JNI signature spells them.
+    pub params: Vec<String>,
+    pub returns: Option<String>,
+    pub code: H,
+    /// LINKAGE records the method declares; the records of its paragraph's data follow them.
+    pub own_records: usize,
+}
+
+/// The method an activation runs.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Frame {
+    pub method: Option<Running>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Running {
+    /// The run-unit class that defines the method.
+    pub class: usize,
+    pub factory: bool,
+    /// The object SELF refers to, or the class's factory object.
+    pub this: u32,
+    /// Where SELF's four bytes are: zero until the method first reads SELF, then a local reference
+    /// of the method's frame.
+    pub cell: usize,
+    /// The serial of the method's local frame.
+    pub frame: u32,
+    /// The event that tells which method this is and where it was invoked.
+    pub invoked: u32,
 }
 
 impl<C> Default for Objects<C> {

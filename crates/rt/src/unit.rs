@@ -55,6 +55,13 @@ pub struct LoadedProgram<H> {
     pub source: Option<PathBuf>,
 }
 
+/// A class definition a loader found and compiled, and its source table, its own source first by
+/// path when a program library supplied it.
+pub struct FoundClass<C> {
+    pub code: C,
+    pub sources: Vec<String>,
+}
+
 /// Where CALL finds programs, and what the run unit needs to know about one it loaded.
 pub trait Loader<H> {
     /// The executor's handle to a loaded class definition.
@@ -71,6 +78,9 @@ pub trait Loader<H> {
 
     /// A loaded program's file count and storage size.
     fn shape(program: &H) -> (usize, usize);
+
+    /// The COBOL class definition of this external name, compiled; None for a Java class.
+    fn class(&mut self, external: &str) -> Result<Option<FoundClass<Self::Class>>, String>;
 }
 
 #[derive(Clone, Copy, Debug)]

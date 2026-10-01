@@ -1337,17 +1337,18 @@ pub struct Sqlca { pub fields: Vec<(SqlcaField, PlaceId, HostType)> }
 
 ```rust
 /// Java types come from `operand_type` and `item_type`, which read only declarations
-/// (exec/src/oo.rs:298-341 (int)); the walker works them out on every INVOKE.
-pub struct InvokePlan {
-    pub receiver: Receiver, pub method: MethodName,
-    pub args: Vec<(Operand, SymId)>, pub returning: Option<(PlaceId, SymId)>,
+/// (exec/src/oo.rs:298-341 (int)); the walker works them out on every INVOKE. Generic like §9.3's
+/// payloads, with `PlaceId`, `Operand` and `SymId` the defaults.
+pub struct InvokePlan<P, O, S> {
+    pub receiver: Receiver<P, S>, pub method: MethodName<P, S>,
+    pub args: Vec<(O, S)>, pub returning: Option<(P, S)>,
     pub on_exception: bool, pub not_on_exception: bool,
 }
 /// The walker decides the receiver by name on every INVOKE (machine/oo.rs:192-215 (int)).
 /// `Class` is a REPOSITORY class-name: `name` as written, which the walker's messages give, and
 /// `external`, which finds the class.
-pub enum Receiver { SelfRef, Super, Class { name: SymId, external: SymId }, Object(PlaceId) }
-pub enum MethodName { New, Named(SymId), Dynamic(PlaceId) }
+pub enum Receiver<P, S> { SelfRef, Super, Class { name: S, external: S }, Object(P) }
+pub enum MethodName<P, S> { New, Named(S), Dynamic(P) }
 
 /// A class definition, in `Services.class` of the program lowered from its source; every name is
 /// that program's symbol. `parent` is the external name of the class it inherits.
@@ -1380,7 +1381,10 @@ pub struct Method {
   receiver, then each argument, then the method is looked up by name, factory or instance, the
   arguments' Java types and the RETURNING item's (both fixed at lowering by `operand_type` and
   `item_type`, which Check has already required). SELF and SUPER outside a method abend IRONWORK;
-  Check refuses them. `NEW` sent to anything but a class abends IRONWORK.
+  Check refuses them. `NEW` sent to anything but a class abends IRONWORK. `rt::oo::invoke` runs
+  the plan over an `OoHost`: the run unit, the activation's method, names and Java signatures read
+  when the walker read them, an argument's bytes, a part's VALUE clauses, and running a method's
+  code. A class is found and compiled by `Loader::class`; `rt::oo::ClassCode<H>` holds it.
 - **Arguments** pass as `argument` makes them (machine/oo.rs:309-332 (f2)): a data item as its
   bytes, a one-character reference modification of Java type `C` as its first UTF-16 unit, LENGTH
   OF and an integer literal as a binary fullword, ZERO as four zero bytes, another figurative

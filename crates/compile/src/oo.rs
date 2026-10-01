@@ -1,8 +1,8 @@
 //! Object-oriented COBOL, compiled and checked. A class written in COBOL becomes code the
 //! interpreter runs within the run unit: each method is compiled as a program whose LINKAGE SECTION
 //! ends with the records of the OBJECT or FACTORY WORKING-STORAGE it works on, and each
-//! INVOKE finds its method by name and Java signature, as the JNI does. Running is in
-//! machine/oo.rs; a Java class is checked here and never run.
+//! INVOKE finds its method by name and Java signature, as the JNI does. Running is in `rt::oo`;
+//! a Java class is checked here and never run.
 
 use crate::layout::{Kind, Layout, Resolved};
 use crate::{Check, Compiled};
@@ -14,33 +14,13 @@ use std::rc::Rc;
 use syntax::ast::*;
 use syntax::{Error, Pos};
 
-pub const JAVA_LANG_OBJECT: &str = "java.lang.Object";
+pub use rt::oo::JAVA_LANG_OBJECT;
 
 /// A COBOL class, compiled.
-pub struct ClassCode {
-    /// The external name of the class it inherits.
-    pub parent: String,
-    pub factory: Option<Part>,
-    pub object: Option<Part>,
-    pub methods: Vec<MethodCode>,
-}
-
+pub type ClassCode = rt::oo::ClassCode<Rc<Compiled>>;
 /// FACTORY or OBJECT WORKING-STORAGE, laid out as a program's, and where each record starts in it.
-pub struct Part {
-    pub data: Rc<Compiled>,
-    pub records: Vec<u32>,
-}
-
-pub struct MethodCode {
-    pub name: String,
-    pub factory: bool,
-    /// Java types of the parameters and of the returned item, as a JNI signature spells them.
-    pub params: Vec<String>,
-    pub returns: Option<String>,
-    pub code: Rc<Compiled>,
-    /// LINKAGE records the method declares; the records of its paragraph's data follow them.
-    pub own_records: usize,
-}
+pub type Part = rt::oo::Part<Rc<Compiled>>;
+pub type MethodCode = rt::oo::MethodCode<Rc<Compiled>>;
 
 /// A class definition's source compiles when each of its methods does.
 pub(crate) fn compile_class_definition(program: Program, flags: &[String], at: CompileTime) -> Result<Compiled, Vec<Error>> {
