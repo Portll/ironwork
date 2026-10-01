@@ -212,7 +212,7 @@ fn count<P: Copy, O>(x: &mut impl Values<P, O>, data: &mut [u8], unit: usize, ta
 fn chars_in<P: Copy, O>(x: &mut impl Values<P, O>, c: &Chars<P, O>, unit: usize, pos: Pos) -> R<Vec<u8>> {
     match c {
         Chars::Value(o) if unit == 2 => match x.value(o, pos)? {
-            Val::Fig(f) => Ok(store::figurative_unit(f).to_be_bytes().to_vec()),
+            Val::Fig(f) => Ok(store::figurative_unit(f, x.facts().options().quote).to_be_bytes().to_vec()),
             val => store::natural_bytes(&x.facts(), val, pos),
         },
         c => chars(x, c, pos),
