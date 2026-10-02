@@ -26,6 +26,7 @@ mod quote_currency_nsymbol;
 mod report;
 mod scope;
 mod sort;
+mod vm;
 mod xml;
 mod xml_generate;
 

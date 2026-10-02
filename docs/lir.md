@@ -1988,6 +1988,18 @@ or a recording; and for CICS the returned task: next TRANSID, COMMAREA, TS and T
 terminal screens. The fuzz target of B2 runs both with a step limit, and passes when they agree or
 both stop at it. The golden programs of §12.2 run in both, which exercises C99.
 
+**What runs now.** `rt::vm` runs the core: storage, every data op, conditions, control flow and
+CALL within the run unit. File I/O, SORT and MERGE, Report Writer, EXEC CICS and SQL, JSON and XML,
+LE callable services and OO COBOL stop a run as `Halt::Unimplemented`, naming what was reached, and
+so do FUNCTION UUID4, whose value differs on every run, and the few places where the LIR does not
+keep what decides the interpreter's result. The test `Harness` runs every batch program that lowers
+on both executors, the system clock read once for both, and fails the test when they differ in
+DISPLAY output, standard error, the ending or abend (code, message, position and file), RETURN-CODE,
+the events an observer is told (Load, Open, Close, Paragraph, Sink), run-unit memory and each
+program's place in it, or a DD's file; a run the VM stops is counted, not failed. With
+`IRONWORK_VM_REPORT` set it appends a line per run, and `tools/vm-coverage.sh` totals them. A CICS
+task does not run on the VM yet.
+
 ### 12.4 What lowering refuses
 
 `LowerError { pos: Pos, message: String }` converts to `syntax::Error` and prints as a compile

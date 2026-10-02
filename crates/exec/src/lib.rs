@@ -31,6 +31,7 @@ pub mod terminal;
 mod testing;
 pub use rt::tn3270;
 pub mod unit;
+pub mod vm;
 
 pub use compile::{Compiled, EntryPoint, compile, compile_at, compile_time, entry_points};
 pub(crate) use compile::{procedure, procedure_from, section_end};
@@ -103,6 +104,22 @@ pub trait Execute {
         err: &'w mut dyn Write,
         observer: Option<unit::Observer<'w>>,
         parm: &str,
+    ) -> Result<(Ending, i16), Abend>;
+
+    /// Runs as [`Execute::execute_observed`] does, and puts what the run left in its run unit in
+    /// `kept`.
+    #[allow(clippy::too_many_arguments)]
+    fn execute_kept<'w>(
+        &self,
+        library: unit::Library,
+        dds: files::Dds,
+        sysin: Option<Box<dyn BufRead + 'w>>,
+        clock: unit::Clock,
+        database: Option<&'w mut (dyn sql::Database + '_)>,
+        out: &'w mut dyn Write,
+        err: &'w mut dyn Write,
+        observer: Option<unit::Observer<'w>>,
+        kept: &mut Option<unit::Remains>,
     ) -> Result<(Ending, i16), Abend>;
 
     /// Runs as the first program of a CICS task. `task` says who started it, what COMMAREA it
@@ -194,7 +211,7 @@ impl Execute for Compiled {
         err: &'w mut dyn Write,
         observer: Option<unit::Observer<'w>>,
     ) -> Result<(Ending, i16), Abend> {
-        run_main(self, library, dds, sysin, clock, database, out, err, observer, None)
+        run_main(self, library, dds, sysin, clock, database, out, err, observer, None, &mut None)
     }
 
     fn execute_main<'w>(
@@ -209,7 +226,22 @@ impl Execute for Compiled {
         observer: Option<unit::Observer<'w>>,
         parm: &str,
     ) -> Result<(Ending, i16), Abend> {
-        run_main(self, library, dds, sysin, clock, database, out, err, observer, Some(parm))
+        run_main(self, library, dds, sysin, clock, database, out, err, observer, Some(parm), &mut None)
+    }
+
+    fn execute_kept<'w>(
+        &self,
+        library: unit::Library,
+        dds: files::Dds,
+        sysin: Option<Box<dyn BufRead + 'w>>,
+        clock: unit::Clock,
+        database: Option<&'w mut (dyn sql::Database + '_)>,
+        out: &'w mut dyn Write,
+        err: &'w mut dyn Write,
+        observer: Option<unit::Observer<'w>>,
+        kept: &mut Option<unit::Remains>,
+    ) -> Result<(Ending, i16), Abend> {
+        run_main(self, library, dds, sysin, clock, database, out, err, observer, None, kept)
     }
 
     fn execute_cics<'w>(
@@ -297,6 +329,7 @@ fn run_main<'w>(
     err: &'w mut dyn Write,
     observer: Option<unit::Observer<'w>>,
     parm: Option<&str>,
+    kept: &mut Option<unit::Remains>,
 ) -> Result<(Ending, i16), Abend> {
     oo::refuse_to_run(&compiled.program)?;
     let mut run_unit = unit::RunUnit::new(library, dds, sysin, clock, out, err);
@@ -312,6 +345,7 @@ fn run_main<'w>(
     });
     let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(&compiled.program.id, ending.is_ok()).map(drop));
     let closed = run_unit.close_all();
+    *kept = Some(unit::Remains::of(&run_unit));
     let ending = ending?;
     settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default(), file: None })?;
     closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default(), file: None })?;
