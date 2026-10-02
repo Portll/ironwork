@@ -425,6 +425,16 @@ at the host's paths; install it as `gcobol`, and as `gcobol-exec` to run what it
     ln -s "$PWD/tools/gcobol/gcobol" ~/.local/bin/gcobol; ln -s gcobol ~/.local/bin/gcobol-exec
     tools/differ.py target/release/ironwork programs/ --exec gcobol-exec --stdin sysin.txt
 
+`tools/nist.py` runs NIST's CCVS85 audit routines, one program to a file as in
+[z390development/nistcobol85](https://github.com/z390development/nistcobol85)'s `src/`, after
+EXEC85's default option switches and X-cards, and classes each program as clean, failed (a FAIL*
+line in its report), refused or abended. Subprograms run only when called, and the flagging tests
+are compiled and not run, as the CCVS85 User Guide says. `--baseline` names an earlier results file
+and lists every program whose class changed; the exit status is 1 when one that was clean is no
+longer:
+
+    tools/nist.py target/release/ironwork ../nistcobol85/src --out nist.tsv --baseline before.tsv
+
 `ironwork assumptions` lists the register of assumptions (`numeric::assumptions::ASSUMPTIONS`), one
 per line; `--c-series` puts each entry's number in a single C series first, with its own id beside it.
 
