@@ -784,7 +784,7 @@ impl Check<'_> {
                 }
                 self.handlers(invalid);
             }
-            Stmt::Initialize { targets, pos } => {
+            Stmt::Initialize { targets, with, pos } => {
                 for r in targets {
                     self.reference(r);
                     if self.item(r).is_some_and(|i| self.layout.items[i].level == 66) {
@@ -794,6 +794,10 @@ impl Check<'_> {
                     if self.item(r).is_some_and(|i| !items[i].moved_by.is_empty() || items[i].odo.iter().any(|&t| items[t].followed)) {
                         self.errors.push(Error::at(*pos, format!("INITIALIZE {}: a variably located item, or a group holding one, cannot be initialized (Language Reference p. 351)", r.name)));
                     }
+                }
+                if let Some(with) = with {
+                    with.replacing.iter().for_each(|(_, by)| self.operand(by));
+                    self.initialize_incompatible(targets, with, *pos);
                 }
             }
             Stmt::GoTo { target: Some(target), pos } => self.procedure(target, *pos),
@@ -1171,6 +1175,25 @@ impl Check<'_> {
         for (_, arg) in &block.options {
             if let Some(ExecArg::Operand(op)) = arg {
                 self.operand(op);
+            }
+        }
+    }
+
+    /// IBM's IGYPS2047-W: with only a REPLACING phrase, a receiver none of whose elementary items is
+    /// of a category the phrase names is not initialized (Migration Guide GC27-8715-03, p. 137).
+    fn initialize_incompatible(&mut self, targets: &[Ref], with: &InitializeWith, pos: Pos) {
+        if !with.value.is_empty() || with.default {
+            return;
+        }
+        for r in targets {
+            let Some(i) = self.item(r) else { continue };
+            let receivers = self.layout.initialize_receivers(i, with.filler);
+            if !receivers.iter().any(|&(e, _)| with.initial_value(self.layout.category(e), false).is_some()) {
+                let categories: Vec<&str> = with.replacing.iter().map(|(c, _)| c.word()).collect();
+                self.errors.push(Error::warning(
+                    pos,
+                    format!("INITIALIZE {}: none of its items is of a category REPLACING names ({}), so it is not initialized", r.name, categories.join(", ")),
+                ));
             }
         }
     }

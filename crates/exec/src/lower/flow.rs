@@ -369,7 +369,8 @@ impl Lower<'_> {
                 let plan = self.display_plan(items, *no_advancing, pos)?;
                 self.op(Op::Display(plan), pos)?;
             }
-            Stmt::Initialize { targets, .. } => {
+            Stmt::Initialize { with: Some(_), .. } => return unsupported("INITIALIZE with FILLER, VALUE, REPLACING or DEFAULT", pos),
+            Stmt::Initialize { targets, with: None, .. } => {
                 for r in targets {
                     let target = self.place(r, false)?;
                     let plan = self.init_plan(target)?;

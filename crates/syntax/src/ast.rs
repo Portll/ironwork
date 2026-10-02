@@ -424,7 +424,8 @@ pub enum Stmt {
     Rewrite { record: Ref, from: Option<Operand>, invalid: Handlers, pos: Pos },
     Delete { file: String, invalid: Handlers, pos: Pos },
     Start { file: String, key: Option<(RelOp, Ref)>, invalid: Handlers, pos: Pos },
-    Initialize { targets: Vec<Ref>, pos: Pos },
+    /// INITIALIZE; `with` holds its FILLER, VALUE, REPLACING and DEFAULT phrases, None without any.
+    Initialize { targets: Vec<Ref>, with: Option<Box<InitializeWith>>, pos: Pos },
     /// GO TO; with no target, the altered GO TO that only an ALTER gives one.
     GoTo { target: Option<ProcName>, pos: Pos },
     /// GO TO ... DEPENDING ON: the procedure the item's value numbers, or on when none does.
@@ -598,6 +599,99 @@ pub struct InspectPhrase {
     pub by: Option<Operand>,
     pub counter: Option<Ref>,
     pub bounds: Vec<Bound>,
+}
+
+/// The categories INITIALIZE's VALUE and REPLACING phrases name (Language Reference SC27-8713-03,
+/// p. 350); EGCS is DBCS.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DataCategory {
+    Alphabetic,
+    Alphanumeric,
+    AlphanumericEdited,
+    Dbcs,
+    National,
+    NationalEdited,
+    Numeric,
+    NumericEdited,
+    Utf8,
+}
+
+impl DataCategory {
+    pub const ALL: [Self; 9] = [
+        Self::Alphabetic,
+        Self::Alphanumeric,
+        Self::AlphanumericEdited,
+        Self::Dbcs,
+        Self::National,
+        Self::NationalEdited,
+        Self::Numeric,
+        Self::NumericEdited,
+        Self::Utf8,
+    ];
+
+    pub fn from_word(word: &str) -> Option<Self> {
+        Some(match word {
+            "ALPHABETIC" => Self::Alphabetic,
+            "ALPHANUMERIC" => Self::Alphanumeric,
+            "ALPHANUMERIC-EDITED" => Self::AlphanumericEdited,
+            "DBCS" | "EGCS" => Self::Dbcs,
+            "NATIONAL" => Self::National,
+            "NATIONAL-EDITED" => Self::NationalEdited,
+            "NUMERIC" => Self::Numeric,
+            "NUMERIC-EDITED" => Self::NumericEdited,
+            "UTF-8" => Self::Utf8,
+            _ => return None,
+        })
+    }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Alphabetic => "ALPHABETIC",
+            Self::Alphanumeric => "ALPHANUMERIC",
+            Self::AlphanumericEdited => "ALPHANUMERIC-EDITED",
+            Self::Dbcs => "DBCS",
+            Self::National => "NATIONAL",
+            Self::NationalEdited => "NATIONAL-EDITED",
+            Self::Numeric => "NUMERIC",
+            Self::NumericEdited => "NUMERIC-EDITED",
+            Self::Utf8 => "UTF-8",
+        }
+    }
+}
+
+/// INITIALIZE's phrases. `value` lists the VALUE phrase's categories, every one for ALL TO VALUE.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct InitializeWith {
+    pub filler: bool,
+    pub value: Vec<DataCategory>,
+    pub replacing: Vec<(DataCategory, Operand)>,
+    pub default: bool,
+}
+
+/// What an elementary receiver of INITIALIZE is sent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InitialValue<'a> {
+    /// The literal of the item's own VALUE clause.
+    Value,
+    Replacing(&'a Operand),
+    /// SPACE, ZERO or NULL, by the item's category.
+    Default,
+}
+
+impl InitializeWith {
+    /// Rules 1c and 2 of INITIALIZE (Language Reference SC27-8713-03, pp. 352-353) for an
+    /// elementary item of `category`, which `has_value` when its entry has a VALUE clause; None when
+    /// the item is not a receiver.
+    pub fn initial_value(&self, category: Option<DataCategory>, has_value: bool) -> Option<InitialValue<'_>> {
+        let named = |c: DataCategory| category == Some(c);
+        if has_value && self.value.iter().any(|&c| named(c)) {
+            return Some(InitialValue::Value);
+        }
+        if let Some((_, by)) = self.replacing.iter().find(|(c, _)| named(*c)) {
+            return Some(InitialValue::Replacing(by));
+        }
+        (self.default || self.value.is_empty() && self.replacing.is_empty()).then_some(InitialValue::Default)
+    }
 }
 
 /// `target` is a data item or, for TALLYING alone, a function's value.

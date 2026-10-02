@@ -420,3 +420,61 @@ fn a_zero_divisor_shared_by_several_receivers_is_a_size_error_or_the_program_che
     assert_eq!(check("PIC 99 COMP"), ("10 20\n".to_owned(), "S0C9".to_owned()));
     assert_eq!(check("PIC 99"), ("10 20\n".to_owned(), "S0CB".to_owned()));
 }
+
+const INITIALIZED: &str = concat!(
+    "       01  G.\n           05 A1 PIC AAA VALUE 'ABC'.\n           05 X1 PIC X(3) VALUE 'XYZ'.\n",
+    "           05 E1 PIC XBX VALUE 'P Q'.\n           05 N1 PIC 9(3) VALUE 123.\n           05 NE PIC ZZ9 VALUE ' 45'.\n",
+    "           05 FILLER PIC XX VALUE '**'.\n           05 T PIC 9 OCCURS 2 VALUE 7.\n           05 R REDEFINES T PIC XX.\n",
+    "           05 FILLER.\n              10 IN-FILLER PIC X VALUE 'F'.\n       01  FIVE PIC 9 VALUE 5.\n",
+);
+
+#[test]
+fn initialize_phrases_choose_receivers_and_senders_by_category() {
+    let step = |statement: &str| [line("MOVE ALL '-' TO G"), line(statement), line("DISPLAY '[' G ']'")].concat();
+    let out = run(&program(
+        "",
+        INITIALIZED,
+        &[
+            line("DISPLAY '[' G ']'"),
+            step("INITIALIZE G"),
+            step("INITIALIZE G REPLACING ALPHABETIC BY 'Q'\n               NUMERIC DATA BY FIVE"),
+            step("INITIALIZE G WITH FILLER ALL TO VALUE"),
+            step("INITIALIZE G NUMERIC TO VALUE THEN TO DEFAULT"),
+            step("INITIALIZE G ALPHANUMERIC TO VALUE THEN REPLACING\n               NUMERIC-EDITED DATA BY 6 ALPHANUMERIC BY 'NO'"),
+            step("INITIALIZE G WITH FILLER\n               REPLACING ALPHANUMERIC-EDITED BY 'ABC'"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    ));
+    assert_eq!(
+        out,
+        concat!(
+            "[ABCXYZP Q123 45**77F]\n",
+            "[         000  0--00 ]\n",
+            "[Q  ------005-----55-]\n",
+            "[ABCXYZP Q123 45**77F]\n",
+            "[         123  0--77 ]\n",
+            "[---XYZ------  6----F]\n",
+            "[------A B-----------]\n",
+        )
+    );
+}
+
+#[test]
+fn initialize_replacing_that_no_item_matches_warns_as_igyps2047() {
+    let data = "       01  ALPHA PIC AABAABAA.\n       01  GROUP1.\n           05 ALPHA2 PIC AABAA.\n           05 BETA PIC AAA.\n";
+    let source = |statement: &str| program("", data, &[line("MOVE 'ABCDEFGH' TO ALPHA"), line(statement), line("DISPLAY ALPHA"), line("GOBACK.")].concat());
+    let message = compile_errors(&source("INITIALIZE ALPHA REPLACING ALPHABETIC DATA BY ALL '3'"));
+    assert!(message.contains("INITIALIZE ALPHA: none of its items is of a category REPLACING names (ALPHABETIC), so it is not initialized"), "{message}");
+    assert!(message.starts_with("warning"), "{message}");
+    assert_eq!(run(&source("INITIALIZE ALPHA REPLACING ALPHABETIC DATA BY ALL '3'")), "AB CD EF\n");
+    for quiet in [
+        "INITIALIZE GROUP1 REPLACING ALPHABETIC DATA BY ALL '5'",
+        "INITIALIZE ALPHA REPLACING\n               ALPHANUMERIC-EDITED DATA BY ALL '3'",
+        "INITIALIZE ALPHA REPLACING ALPHABETIC DATA BY ALL '3'\n               THEN TO DEFAULT",
+    ] {
+        assert_eq!(compile_errors(&source(quiet)), "", "{quiet}");
+    }
+    let twice = syntax::parse(&source("INITIALIZE ALPHA REPLACING NUMERIC BY 1\n               NUMERIC BY 2")).unwrap_err();
+    assert!(twice.message.contains("NUMERIC is named twice in the REPLACING phrase"), "{}", twice.message);
+}

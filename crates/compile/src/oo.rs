@@ -631,7 +631,7 @@ impl Rules<'_> {
                     self.expr(e, a.pos);
                 }
             }
-            Stmt::Initialize { targets, pos } | Stmt::Set { set: SetStmt::UpDown { targets, .. }, pos } => targets.iter().for_each(|r| self.receiver(r, *pos)),
+            Stmt::Initialize { targets, pos, .. } | Stmt::Set { set: SetStmt::UpDown { targets, .. }, pos } => targets.iter().for_each(|r| self.receiver(r, *pos)),
             Stmt::Accept { target, pos, .. } => self.receiver(target, *pos),
             Stmt::String(st) => {
                 st.sources.iter().for_each(|(o, _)| self.plain(o, st.pos));

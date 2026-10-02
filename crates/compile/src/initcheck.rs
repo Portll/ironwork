@@ -746,7 +746,10 @@ impl<'w, 'p> Walk<'w, 'p> {
                 self.file_status(file, *pos, &mut st);
                 st = self.handlers(invalid, st);
             }
-            Stmt::Initialize { targets, pos } => targets.iter().for_each(|r| self.write(r, *pos, &mut st)),
+            Stmt::Initialize { targets, pos, with } => {
+                with.iter().flat_map(|w| &w.replacing).for_each(|(_, by)| self.operand(by, *pos, &st));
+                targets.iter().for_each(|r| self.write(r, *pos, &mut st));
+            }
             Stmt::GoTo { target, .. } => {
                 let mut targets: Vec<usize> = target.iter().filter_map(|t| self.a.procedure(t)).map(|(first, _)| first).collect();
                 targets.extend(self.a.alters[self.paragraph].iter().copied());

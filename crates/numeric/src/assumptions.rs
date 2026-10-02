@@ -259,6 +259,7 @@ pub const EXTERNAL_STORAGE: &str = "C180";
 pub const GLOBAL_NAMES: &str = "C181";
 pub const SET_TO_ENTRY: &str = "C140";
 pub const HEX_CURRENCY_SIGN: &str = "C141";
+pub const INITIALIZE_FLOAT_NUMERIC: &str = "C171";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1639,6 +1640,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: HEX_CURRENCY_SIGN,
         claim: "CURRENCY SIGN IS X'...' gives the currency sign value the literal's bytes are in the program's code page, the CODEPAGE option's, as the Programming Guide's table of the euro sign's code points by code page has it, X'9F' in 1140 and X'5A' in 1142 (SC27-8714-03, pp. 64-65). Without PICTURE SYMBOL the literal is one byte, and the character it is must be one a PICTURE currency symbol can be; with it, the characters must include no digit, +, -, . or , (Language Reference SC27-8713-03, pp. 129-130). The symbol a PICTURE writes is the character the byte is, so the source spells it as the code page shows it; a lowercase letter, the same byte in every code page ironwork carries, keeps its case in a PICTURE as an alphanumeric symbol's does. The guide's own example, X'9F' WITH PICTURE SYMBOL 'U' (p. 64), is refused, since the Language Reference excludes U from literal-7 (p. 130)",
         basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: INITIALIZE_FLOAT_NUMERIC,
+        claim: "INITIALIZE's VALUE and REPLACING phrases take a COMP-1 or COMP-2 receiver as of category NUMERIC, reading the Language Reference's 'a data item of category internal floating-point ... is treated as if it were in the NUMERIC category' (SC27-8713-03, p. 352) as applying to receivers as well as to identifier-2, since rule 2 (p. 353) names no implied sending item for a floating-point category otherwise. A POINTER item, which no category names, is set to NULL with no phrase or with DEFAULT, as ironwork's INITIALIZE did before the phrases, and is left alone otherwise. The VALUE phrase finds no VALUE clause on a FILE SECTION or LINKAGE SECTION item, whose VALUE ironwork does not apply at all, and gives an OCCURS item's one VALUE to every occurrence. DBCS, EGCS, NATIONAL-EDITED and UTF-8 name no item, as ironwork has no items of those categories",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

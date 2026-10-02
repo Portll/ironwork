@@ -1362,7 +1362,7 @@ impl Parser<'_> {
                 self.accept_word("END-DISPLAY");
                 Stmt::Display { items, no_advancing, pos }
             }
-            "INITIALIZE" => Stmt::Initialize { targets: self.refs()?, pos },
+            "INITIALIZE" => self.initialize(pos)?,
             "CALL" => Stmt::Call(Box::new(self.call(pos)?)),
             "INVOKE" => Stmt::Invoke(Box::new(self.invoke(pos)?)),
             "JSON" if self.accept_word("GENERATE") => Stmt::JsonGenerate(Box::new(self.json_generate(pos)?)),
@@ -2341,6 +2341,70 @@ impl Parser<'_> {
             bounds.push(Bound { after: side == "AFTER", value: self.operand()? });
         }
         Ok(bounds)
+    }
+
+    /// INITIALIZE identifier-1 ... [WITH FILLER] [{ALL | category-name} TO VALUE] [THEN] [REPLACING
+    /// {category-name [DATA] BY {identifier-2 | literal-1}} ...] [THEN TO DEFAULT] (Language
+    /// Reference SC27-8713-03, pp. 350-352).
+    fn initialize(&mut self, pos: Pos) -> R<Stmt> {
+        let category = |p: &Self| p.word().and_then(DataCategory::from_word);
+        let mut targets = Vec::new();
+        while self.starts_ref() && category(self).is_none() && !self.is_word("FILLER") {
+            targets.push(self.reference()?);
+        }
+        if targets.is_empty() {
+            return Err(self.error("a data name"));
+        }
+        let twice = |c: DataCategory, phrase: &str| Error::at(pos, format!("INITIALIZE: {} is named twice in the {phrase} phrase", c.word()));
+        let mut with = InitializeWith::default();
+        if self.is_word("FILLER") || self.is_word("WITH") && self.word_at(1) == Some("FILLER") {
+            self.accept_word("WITH");
+            self.at += 1;
+            with.filler = true;
+        }
+        loop {
+            let named = if self.accept_word("ALL") {
+                DataCategory::ALL.to_vec()
+            } else if let Some(c) = category(self) {
+                self.at += 1;
+                vec![c]
+            } else {
+                break;
+            };
+            self.expect_word("TO")?;
+            self.expect_word("VALUE")?;
+            for c in named {
+                if with.value.contains(&c) {
+                    return Err(twice(c, "VALUE"));
+                }
+                with.value.push(c);
+            }
+        }
+        if self.is_word("THEN") && self.word_at(1) == Some("REPLACING") {
+            self.at += 1;
+        }
+        if self.accept_word("REPLACING") {
+            while let Some(c) = category(self) {
+                self.at += 1;
+                self.accept_word("DATA");
+                self.expect_word("BY")?;
+                let by = self.operand()?;
+                if with.replacing.iter().any(|(d, _)| *d == c) {
+                    return Err(twice(c, "REPLACING"));
+                }
+                with.replacing.push((c, by));
+            }
+            if with.replacing.is_empty() {
+                return Err(self.error("a category after REPLACING"));
+            }
+        }
+        let then = usize::from(self.is_word("THEN"));
+        if self.word_at(then) == Some("TO") && self.word_at(then + 1) == Some("DEFAULT") {
+            self.at += then + 2;
+            with.default = true;
+        }
+        let with = (with != InitializeWith::default()).then(|| Box::new(with));
+        Ok(Stmt::Initialize { targets, with, pos })
     }
 
     fn inspect(&mut self, pos: Pos) -> R<Inspect> {

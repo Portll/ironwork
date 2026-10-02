@@ -172,27 +172,16 @@ impl Lower<'_> {
 
     fn init_fields(&mut self, index: usize, offset: u32, fields: &mut Vec<InitField>) -> R<()> {
         let layout = self.layout;
-        let item = &layout.items[index];
-        let (value, from) = match item.kind {
-            Kind::Index | Kind::ObjectReference | Kind::ProgramPointer => return Ok(()),
-            Kind::Group => {
-                for &c in &item.children {
-                    let child = &layout.items[c];
-                    if child.redefines.is_some() || child.name.is_none() {
-                        continue;
-                    }
-                    for k in 0..child.occurs {
-                        self.init_fields(c, offset + (child.offset - item.offset) + k * child.size, fields)?;
-                    }
-                }
-                return Ok(());
-            }
-            Kind::Pointer => (Figurative::Null, Value::Address),
-            Kind::Alnum { .. } | Kind::National => (Figurative::Space, Value::Fig(Figurative::Space)),
-            _ => (Figurative::Zero, Value::Fig(Figurative::Zero)),
-        };
-        let store = self.move_plan(&Side { value: from, src: None, digits: 0 }, item.kind, Some(index))?;
-        fields.push(InitField { offset, len: item.size, value, store });
+        for (i, at) in layout.initialize_receivers(index, false) {
+            let kind = layout.items[i].kind;
+            let (value, from) = match kind {
+                Kind::Pointer => (Figurative::Null, Value::Address),
+                Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::National => (Figurative::Space, Value::Fig(Figurative::Space)),
+                _ => (Figurative::Zero, Value::Fig(Figurative::Zero)),
+            };
+            let store = self.move_plan(&Side { value: from, src: None, digits: 0 }, kind, Some(i))?;
+            fields.push(InitField { offset: offset + at, len: layout.items[i].size, value, store });
+        }
         Ok(())
     }
 

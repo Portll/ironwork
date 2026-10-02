@@ -170,11 +170,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             let item = &self.layout.items[index];
             let Some(value) = item.value.clone().filter(|_| item.linkage.is_none() && item.local == local) else { continue };
             let occurrences: u32 = item.dims.iter().map(|&(_, n)| n).product::<u32>().max(1);
-            // An alphanumeric VALUE fills a numeric-edited item as alphanumeric data (Language Reference p. 246).
-            let kind = match (item.kind, &value) {
-                (Kind::NumericEdited { .. }, Literal::Alnum(_) | Literal::Figurative(_) | Literal::All(_)) => Kind::Alnum { justified: false },
-                (kind, _) => kind,
-            };
+            let kind = value_kind(item.kind, &value);
             for k in 0..occurrences {
                 let offset = base + item.offset as usize + self.occurrence_offset(item, k);
                 let loc = Loc { offset, len: item.size as usize, kind, item: index };
@@ -308,13 +304,21 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Stmt::Rewrite { record, from, invalid, pos } => return self.rewrite_stmt(record, from.as_ref(), invalid, *pos),
             Stmt::Delete { file, invalid, pos } => return self.delete_stmt(file, invalid, *pos),
             Stmt::Start { file, key, invalid, pos } => return self.start_stmt(file, key.as_ref(), invalid, *pos),
-            Stmt::Initialize { targets, pos } => {
+            Stmt::Initialize { targets, with, pos } => {
+                let with = with.as_deref().unwrap_or(&NO_PHRASES);
                 for r in targets {
                     let loc = self.locate(r)?;
-                    if loc.item == usize::MAX {
-                        self.write(loc, &vec![0; loc.len]);
-                    } else {
-                        self.initialize(loc.item, loc.offset, *pos)?;
+                    if loc.item != usize::MAX {
+                        self.initialize(loc.item, loc.offset, with, *pos)?;
+                        continue;
+                    }
+                    match with.initial_value(Some(DataCategory::Numeric), false) {
+                        Some(InitialValue::Replacing(by)) => {
+                            let (val, src) = self.operand_with_loc(by, *pos)?;
+                            self.assign(loc, val, src, *pos)?;
+                        }
+                        Some(_) => self.write(loc, &vec![0; loc.len]),
+                        None => {}
                     }
                 }
             }
@@ -1660,28 +1664,23 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         rt::display::write(&mut *self.unit.out, &text, no_advancing, pos)
     }
 
-    fn initialize(&mut self, index: usize, offset: usize, pos: Pos) -> R<()> {
+    /// The implicit MOVEs of INITIALIZE to item `index` at `offset`.
+    fn initialize(&mut self, index: usize, offset: usize, with: &InitializeWith, pos: Pos) -> R<()> {
         let layout = self.layout;
-        let item = &layout.items[index];
-        if matches!(item.kind, Kind::Index | Kind::ObjectReference | Kind::ProgramPointer) {
-            return Ok(());
-        }
-        if item.kind != Kind::Group {
-            let loc = Loc { offset, len: item.size as usize, kind: item.kind, item: index };
-            let val = match item.kind {
-                Kind::Pointer => Val::Address(0),
-                Kind::Alnum { .. } | Kind::National => Val::Fig(Figurative::Space),
-                _ => Val::Fig(Figurative::Zero),
-            };
-            return self.assign(loc, val, None, pos);
-        }
-        for &c in &item.children {
-            let child = &layout.items[c];
-            if child.redefines.is_some() || child.name.is_none() {
-                continue;
-            }
-            for k in 0..child.occurs {
-                self.initialize(c, offset + (child.offset - item.offset) as usize + (k * child.size) as usize, pos)?;
+        for (i, at) in layout.initialize_receivers(index, with.filler) {
+            let item = &layout.items[i];
+            let loc = Loc { offset: offset + at as usize, len: item.size as usize, kind: item.kind, item: i };
+            match (with.initial_value(layout.category(i), item.value.is_some()), &item.value) {
+                (Some(InitialValue::Value), Some(value)) => {
+                    let val = self.literal_value(value, pos)?;
+                    self.assign(Loc { kind: value_kind(item.kind, value), ..loc }, val, None, pos)?;
+                }
+                (Some(InitialValue::Replacing(by)), _) => {
+                    let (val, src) = self.operand_with_loc(by, pos)?;
+                    self.assign(loc, val, src, pos)?;
+                }
+                (Some(_), _) => self.assign(loc, initial_default(item.kind), None, pos)?,
+                (None, _) => {}
             }
         }
         Ok(())
@@ -1693,6 +1692,27 @@ pub(crate) fn numval_currency(signs: &[CurrencySign]) -> String {
     match signs {
         [only] => only.value.clone(),
         _ => "$".to_owned(),
+    }
+}
+
+static NO_PHRASES: InitializeWith = InitializeWith { filler: false, value: Vec::new(), replacing: Vec::new(), default: false };
+
+/// The kind a VALUE clause's literal is placed as: editing is ignored, so an alphanumeric VALUE fills
+/// a numeric-edited or alphanumeric-edited item as alphanumeric data (Language Reference p. 246).
+fn value_kind(kind: Kind, value: &Literal) -> Kind {
+    match (kind, value) {
+        (Kind::NumericEdited { .. } | Kind::AlnumEdited { .. }, Literal::Alnum(_) | Literal::Figurative(_) | Literal::All(_)) => Kind::Alnum { justified: false },
+        (kind, _) => kind,
+    }
+}
+
+/// INITIALIZE's implied sending item for an elementary receiver of `kind` (Language Reference
+/// SC27-8713-03, p. 353), NULL for a pointer.
+fn initial_default(kind: Kind) -> Val {
+    match kind {
+        Kind::Pointer => Val::Address(0),
+        Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::National => Val::Fig(Figurative::Space),
+        _ => Val::Fig(Figurative::Zero),
     }
 }
 

@@ -56,6 +56,8 @@ pub struct Item {
     /// PICTURE scaling positions P right of the digits: the item's value is its digits times ten
     /// to this power.
     pub scaling: u32,
+    /// Of category alphabetic: a PICTURE of the symbol A alone.
+    pub alphabetic: bool,
     pub pos: Pos,
 }
 
@@ -231,6 +233,7 @@ pub fn build(
                 linkage: items[record].linkage,
                 object_class: None,
                 scaling: 0,
+                alphabetic: false,
                 pos: e.pos,
             });
             usages.push(None);
@@ -293,6 +296,7 @@ pub fn build(
             },
             object_class: e.object_class.clone(),
             scaling: 0,
+            alphabetic: false,
             pos: e.pos,
         });
         if e.occurs == Some(0) {
@@ -318,6 +322,7 @@ pub fn build(
             currencies.push(pic.as_ref().and_then(|p| p.currency.clone()).unwrap_or_default());
         }
         items[index].scaling = pic.as_ref().map_or(0, |p| p.scaling);
+        items[index].alphabetic = matches!(items[index].kind, Kind::Alnum { .. }) && e.picture.as_deref().is_some_and(crate::corresponding::is_alphabetic);
         items[index].size = elementary_size(&items[index], pic.as_ref().map(|p| p.size));
         if synchronized[index] && items[index].kind != Kind::Group {
             aligns[index] = alignment(items[index].kind);
@@ -350,6 +355,7 @@ pub fn build(
                 linkage: None,
                 object_class: None,
                 scaling: 0,
+                alphabetic: false,
                 pos: e.pos,
             });
         }
@@ -836,6 +842,51 @@ fn place(items: &mut [Item], index: usize, offset: u32, mut dims: Vec<(u32, u32)
 }
 
 impl Layout {
+    /// An elementary item's category as INITIALIZE's phrases name it, a floating-point item's as
+    /// NUMERIC (assumption [`numeric::assumptions::INITIALIZE_FLOAT_NUMERIC`]); None for a group
+    /// and for a pointer, index or object reference.
+    pub fn category(&self, i: usize) -> Option<syntax::ast::DataCategory> {
+        use syntax::ast::DataCategory;
+        let item = &self.items[i];
+        Some(match item.kind {
+            Kind::Alnum { .. } if item.alphabetic => DataCategory::Alphabetic,
+            Kind::Alnum { .. } => DataCategory::Alphanumeric,
+            Kind::AlnumEdited { .. } => DataCategory::AlphanumericEdited,
+            Kind::National => DataCategory::National,
+            Kind::NumericEdited { .. } => DataCategory::NumericEdited,
+            Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Float(_) => DataCategory::Numeric,
+            Kind::Group | Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer => return None,
+        })
+    }
+
+    /// The elementary items INITIALIZE of item `i` may move to, each occurrence with its offset from
+    /// `i`'s start (Language Reference SC27-8713-03, p. 352, rules 1a and 1b): none under a
+    /// REDEFINES, no FILLER unless `filler`, and no index, object reference or program pointer.
+    pub fn initialize_receivers(&self, i: usize, filler: bool) -> Vec<(usize, u32)> {
+        let mut out = Vec::new();
+        self.receivers_under(i, 0, filler, &mut out);
+        out
+    }
+
+    fn receivers_under(&self, i: usize, offset: u32, filler: bool, out: &mut Vec<(usize, u32)>) {
+        let item = &self.items[i];
+        match item.kind {
+            Kind::Index | Kind::ObjectReference | Kind::ProgramPointer => {}
+            Kind::Group => {
+                for &c in &item.children {
+                    let child = &self.items[c];
+                    if child.redefines.is_some() || child.name.is_none() && child.kind != Kind::Group && !filler {
+                        continue;
+                    }
+                    for k in 0..child.occurs {
+                        self.receivers_under(c, offset + (child.offset - item.offset) + k * child.size, filler, out);
+                    }
+                }
+            }
+            _ => out.push((i, offset)),
+        }
+    }
+
     /// Names the files, so that a file-name qualifies its records and its LINAGE-COUNTER.
     pub fn name_files(&mut self, files: &[FileDecl], linage_counters: Vec<Option<usize>>) {
         self.file_names = files.iter().map(|f| f.name.clone()).collect();

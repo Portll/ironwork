@@ -441,6 +441,10 @@ fn constructs_outside_the_slice_are_refused_by_name() {
     assert!(matches!(all, LowerError::Unsupported("a FUNCTION of fixed arguments given a table whose ALL subscripts run to an OCCURS DEPENDING ON count", _)));
     let numval = refused("MOVE FUNCTION MAX(N M) TO A", "       01  A PIC X.\n       01  N PIC 9.\n       01  M PIC 99.\n");
     assert!(matches!(numval, LowerError::Unsupported(n, _) if n.starts_with("a FUNCTION result whose digits")));
+    for phrase in ["WITH FILLER", "ALL TO VALUE", "REPLACING NUMERIC BY 1", "TO DEFAULT"] {
+        let e = refused(&format!("INITIALIZE A {phrase}"), "       01  A PIC 9.\n");
+        assert!(matches!(e, LowerError::Unsupported("INITIALIZE with FILLER, VALUE, REPLACING or DEFAULT", _)), "{phrase}: {e}");
+    }
     let e = refused("SEARCH T WHEN T(X) = 'A' CONTINUE END-SEARCH", "       01  G.\n           05 N PIC 9.\n           05 T PIC X OCCURS 1 TO 3 DEPENDING ON N.\n       01  X PIC 9.\n");
     assert_eq!(e.to_string(), "lowering: SEARCH of an OCCURS DEPENDING ON table with neither INDEXED BY nor VARYING is not lowered yet");
     assert_eq!(syntax::Error::from(e).pos.line, 10);
