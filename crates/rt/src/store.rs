@@ -1,7 +1,7 @@
 //! Storage and MOVE: an item's bytes and value by its `Loc`, numeric stores with their size-error
 //! and TRUNC(OPT) rules, MOVE, and the comparisons and class tests of conditions.
 
-use crate::abend::Abend;
+use crate::abend::{Abend, AbendCode};
 use crate::codec;
 use crate::edit;
 use crate::fixed::{MAX_DIGITS, align, compare_fixed, fixed, places_of, pow10, scaled_down, scaled_up, zoned_digits};
@@ -14,7 +14,7 @@ use numeric::binary::{self, Binary};
 use numeric::precision::{Fixed, Places};
 use numeric::{Numproc, Options, Quote, Trunc, float, sign};
 use std::cmp::Ordering;
-use zarch::check::ProgramMask;
+use zarch::check::{ProgramCheck, ProgramMask};
 use zarch::decimal::{self, Decimal};
 use zarch::ebcdic::{self, CodePage, Collation};
 use zarch::hfp::{Hfp, Precision};
@@ -287,7 +287,7 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
         Kind::Group | Kind::Alnum { .. } => {
             let justified = matches!(dest.kind, Kind::Alnum { justified: true });
             let image = match (dest.kind, src) {
-                (Kind::Group, Some(s)) if matches!(val, Val::Num(_) | Val::Float(_) | Val::Address(_)) => bytes(&unit.mem, s).to_vec(),
+                (Kind::Group, Some(s)) if matches!(val, Val::Num(_) | Val::Float(_) | Val::Address(_)) || is_decimal(s.kind) => bytes(&unit.mem, s).to_vec(),
                 _ => alnum_image(facts, &val, src, dest.len, pos)?,
             };
             let mut out = vec![ebcdic::SPACE; dest.len];
@@ -332,11 +332,8 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
         }
         Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::NumericEdited { .. } => match val {
             Val::Num(f) => {
-                if let (Some(s), Kind::Packed { digits, scale, signed: true }, Numproc::Pfd) = (src, dest.kind, facts.options().numproc)
-                    && s.kind == dest.kind
-                    && scaling(facts, s) == scaling(facts, dest)
-                    && digits > 0
-                    && scale == places_of(s.kind).dec
+                if let Some(s) = src
+                    && packed_copy(facts, s, dest)
                 {
                     let copied = sign::move_packed(bytes(&unit.mem, s), true, Numproc::Pfd);
                     write(&mut unit.mem, dest, &copied);
@@ -353,6 +350,12 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
             Val::All(b) => {
                 let fill: Vec<u8> = b.iter().copied().cycle().take(dest.len).collect();
                 write(&mut unit.mem, dest, &fill);
+            }
+            Val::Bytes(b) if let Some(s) = src
+                && is_decimal(s.kind)
+                && is_decimal(dest.kind) =>
+            {
+                carry_digits(facts, unit, dest, s, &b, pos)?;
             }
             Val::Bytes(b) if integer_digits(facts, dest).is_some() && !matches!(src.map(|s| s.kind), Some(Kind::NumericEdited { .. })) => {
                 move_digit_halves(facts, unit, dest, &b, pos)?;
@@ -396,6 +399,83 @@ fn integer_digits(facts: &dyn ProgramFacts, loc: Loc) -> Option<usize> {
     }
 }
 
+fn is_decimal(kind: Kind) -> bool {
+    matches!(kind, Kind::Zoned { .. } | Kind::Packed { .. })
+}
+
+/// NUMPROC(PFD), a signed packed item moved to one of the same kind and scaling: the bytes are copied.
+fn packed_copy(facts: &dyn ProgramFacts, src: Loc, dest: Loc) -> bool {
+    matches!(dest.kind, Kind::Packed { digits, signed: true, .. } if digits > 0)
+        && src.kind == dest.kind
+        && scaling(facts, src) == scaling(facts, dest)
+        && facts.options().numproc == Numproc::Pfd
+}
+
+/// Whether a MOVE from a zoned or packed sender compiles only to instructions that check no digit
+/// or sign: a byte copy, PACK, UNPK, and the OI that makes a sign F. A packed sender to another packed
+/// shape takes ZAP or SRP, a binary receiver CVB, a numeric-edited one ED, and those check
+/// (assumption C260).
+fn moved_unchecked(facts: &dyn ProgramFacts, src: Loc, dest: Loc) -> bool {
+    match (src.kind, dest.kind) {
+        (Kind::Packed { .. }, Kind::Packed { .. }) => packed_copy(facts, src, dest),
+        (Kind::Zoned { .. } | Kind::Packed { .. }, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Group) => true,
+        (Kind::Zoned { .. } | Kind::Packed { .. }, Kind::Alnum { .. } | Kind::AlnumEdited { .. }) => places_of(src.kind).dec == 0,
+        _ => false,
+    }
+}
+
+/// A MOVE's sending item read as a number; but where the MOVE checks nothing (C260) and its digits
+/// or sign are not decimal, its bytes as stored, after INVDATA(CLEANSIGN), which `assign` carries
+/// to the receiver unchecked.
+pub fn move_sender(facts: &dyn ProgramFacts, mem: &[u8], src: Loc, dest: Loc, pos: Pos) -> R<Val> {
+    match read(facts, mem, src, pos) {
+        Err(Abend { code: AbendCode::Check(ProgramCheck::Data), .. }) if moved_unchecked(facts, src, dest) => {
+            let stored = bytes(mem, src);
+            let cleaned = facts.options().invdata.is_some_and(|i| i.cleansign).then(|| sign_cleaned(stored, src.kind)).flatten();
+            Ok(Val::Bytes(cleaned.unwrap_or_else(|| stored.to_vec())))
+        }
+        value => value,
+    }
+}
+
+/// A zoned or packed item's digits as half-bytes, most significant first, and its sign half-byte
+/// when signed; SIGN SEPARATE gives D for '-' and C for any other character.
+fn digit_halves(kind: Kind, b: &[u8]) -> (Vec<u8>, Option<u8>) {
+    match kind {
+        Kind::Packed { digits, signed, .. } => {
+            let nibbles: Vec<u8> = b.iter().flat_map(|x| [x >> 4, x & 0x0F]).collect();
+            let (sign, body) = nibbles.split_last().expect("a packed item is at least one byte");
+            (body[body.len().saturating_sub(digits as usize)..].to_vec(), signed.then_some(*sign))
+        }
+        Kind::Zoned { sign: Some(SignClause { separate: true, position }), .. } => {
+            let (s, body) = if position == SignPosition::Leading { (b[0], &b[1..]) } else { (b[b.len() - 1], &b[..b.len() - 1]) };
+            (body.iter().map(|x| x & 0x0F).collect(), Some(if s == 0x60 { 0x0D } else { 0x0C }))
+        }
+        Kind::Zoned { signed, sign, .. } => {
+            let at = if matches!(sign, Some(SignClause { position: SignPosition::Leading, .. })) { 0 } else { b.len() - 1 };
+            (b.iter().map(|x| x & 0x0F).collect(), signed.then(|| b[at] >> 4))
+        }
+        _ => (Vec::new(), None),
+    }
+}
+
+/// A zoned or packed sender whose digits or sign are not decimal, moved to a zoned or packed
+/// receiver as PACK and UNPK move it: each receiver digit takes the sender's digit of the same
+/// power of ten, zero where there is none, and the data exception comes where the receiver is next
+/// read as a number (C260).
+fn carry_digits<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, dest: Loc, src: Loc, sender: &[u8], pos: Pos) -> R<()> {
+    if packed_copy(facts, src, dest) {
+        write(&mut unit.mem, dest, sender);
+        return Ok(());
+    }
+    let (halves, sign) = digit_halves(src.kind, sender);
+    let power = |loc: Loc| i64::from(scaling(facts, loc)) - i64::from(places_of(loc.kind).dec);
+    let (m, n) = (halves.len() as i64, dest.kind.digits_scale().map_or(0, |(d, _)| d) as i64);
+    let shift = m - n + power(src) - power(dest);
+    let aligned: Vec<u8> = (0..n).map(|j| usize::try_from(j + shift).ok().and_then(|i| halves.get(i)).copied().unwrap_or(0)).collect();
+    store_digit_halves(facts, unit, dest, &aligned, sign, pos)
+}
+
 /// An alphanumeric sender moved to a zoned or packed integer: the low half of each of its last bytes
 /// as a digit, zeros to the left, stored positive and unchecked. The byte copy, PACK and UNPK such a
 /// MOVE compiles to check no digit, so a non-digit is a data exception only where the item is next
@@ -403,9 +483,20 @@ fn integer_digits(facts: &dyn ProgramFacts, loc: Loc) -> Option<usize> {
 fn move_digit_halves<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, dest: Loc, sender: &[u8], pos: Pos) -> R<()> {
     let n = integer_digits(facts, dest).unwrap_or(0);
     let halves: Vec<u8> = (0..n).map(|i| (sender.len() + i).checked_sub(n).map_or(0, |k| sender[k] & 0x0F)).collect();
+    store_digit_halves(facts, unit, dest, &halves, None, pos)
+}
+
+/// One digit half-byte per receiver digit, and the sender's sign half-byte: the value of the
+/// decimal digits is stored, then each half above 9 is put back in its digit's place, and a sign
+/// half that is a digit in a signed receiver's sign place. An unsigned receiver's sign is F.
+fn store_digit_halves<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, dest: Loc, halves: &[u8], sign: Option<u8>, pos: Pos) -> R<()> {
+    let n = halves.len();
     let value = halves.iter().fold(0u128, |v, &h| v * 10 + if h > 9 { 0 } else { u128::from(h) });
-    store_fixed(facts, unit, dest, &fixed(false, U256::from_u128(value), Places::new(n as u32, 0)), false, pos)?;
-    if halves.iter().all(|&h| h <= 9) {
+    let magnitude = U256::from_u128(value).checked_mul(pow10(scaling(facts, dest))).unwrap_or_default();
+    let negative = sign.is_some_and(|s| s > 9 && decimal::is_minus(s));
+    store_fixed(facts, unit, dest, &fixed(negative, magnitude, places(facts, dest)), false, pos)?;
+    let sign_digit = sign.filter(|&s| s <= 9);
+    if halves.iter().all(|&h| h <= 9) && sign_digit.is_none() {
         return Ok(());
     }
     let mut out = bytes(&unit.mem, dest).to_vec();
@@ -420,14 +511,48 @@ fn move_digit_halves<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUn
         };
         out[at] = if high { (out[at] & 0x0F) | (h << 4) } else { (out[at] & 0xF0) | h };
     }
+    if let Some(s) = sign_digit {
+        let last = out.len() - 1;
+        match dest.kind {
+            Kind::Packed { signed: true, .. } => out[last] = (out[last] & 0xF0) | s,
+            Kind::Zoned { signed: true, sign: Some(SignClause { separate: true, .. }), .. } => {}
+            Kind::Zoned { signed: true, sign: Some(SignClause { position: SignPosition::Leading, .. }), .. } => out[0] = (out[0] & 0x0F) | (s << 4),
+            Kind::Zoned { signed: true, .. } => out[last] = (out[last] & 0x0F) | (s << 4),
+            _ => {}
+        }
+    }
     write(&mut unit.mem, dest, &out);
     Ok(())
+}
+
+/// What an alphanumeric receiver gets from a zoned or packed integer whose digits or sign are not
+/// decimal: a zoned sender's digit bytes as stored, an overpunched sign's zone made F; a packed
+/// sender's digits unpacked with F zones; a zero for each P (C260).
+fn unchecked_digit_bytes(facts: &dyn ProgramFacts, src: Loc, b: &[u8]) -> Vec<u8> {
+    let mut out = match src.kind {
+        Kind::Zoned { sign: Some(SignClause { separate: true, position }), .. } => {
+            if position == SignPosition::Leading { b[1..].to_vec() } else { b[..b.len() - 1].to_vec() }
+        }
+        Kind::Zoned { signed: true, sign, .. } => {
+            let mut digits = b.to_vec();
+            let at = if matches!(sign, Some(SignClause { position: SignPosition::Leading, .. })) { 0 } else { digits.len() - 1 };
+            digits[at] |= 0xF0;
+            digits
+        }
+        Kind::Zoned { .. } => b.to_vec(),
+        _ => digit_halves(src.kind, b).0.iter().map(|h| 0xF0 | h).collect(),
+    };
+    out.resize(out.len() + scaling(facts, src) as usize, 0xF0);
+    out
 }
 
 /// The bytes an alphanumeric receiver of `len` gets from `val`.
 pub fn alnum_image(facts: &dyn ProgramFacts, val: &Val, src: Option<Loc>, len: usize, pos: Pos) -> R<Vec<u8>> {
     Ok(match val {
-        Val::Bytes(b) => b.clone(),
+        Val::Bytes(b) => match src {
+            Some(s) if is_decimal(s.kind) => unchecked_digit_bytes(facts, s, b),
+            _ => b.clone(),
+        },
         Val::All(b) => b.iter().copied().cycle().take(len.max(b.len())).collect(),
         Val::Fig(f) => vec![facts.figurative(*f); len],
         Val::Num(f) if f.places.dec == 0 => {

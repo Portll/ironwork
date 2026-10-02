@@ -968,6 +968,8 @@ pub enum MovePlan {
 pub enum Image { Bytes, All, Figurative, Digits { digits: u32 }, Stored }
 pub enum NationalFrom { Units, Decoded, Figurative }
 pub enum NumericFrom {
+    /// The sender as a number; a zoned or packed sender through `store::move_sender`, which gives
+    /// digits that are not decimal as bytes to carry unchecked (C260).
     Value,
     /// NUMPROC(PFD), packed to packed of the same kind and scale: the bytes (1704-1711).
     PackedCopy,
@@ -991,8 +993,8 @@ Every category pair, by the value the walker reads from the sender (line numbers
 | Group | Copied | Copied, not edited | Decoded to UTF-16 | Copied, not converted | Copied | Refused | Refused |
 | Alphanumeric, either edited | Copied | Edited | Decoded to UTF-16 | Unsigned zoned integer, S0C7 unless digits; to a zoned or packed integer, its digits' low halves unchecked (C240); numeric-edited is de-edited | Refused | Refused | Refused |
 | National | Refused | Refused | Units | Refused | Refused | Refused | Refused |
-| Integer numeric | Its digits, unsigned | Digits, edited | Refused | Stored; PFD packed copy | Converted | Refused | Stored |
-| Numeric with decimals | Refused | Refused | Refused | Stored | Converted | Refused | Stored |
+| Integer numeric | Its digits, unsigned; zoned or packed digits that are not decimal, unchecked (C260) | Digits, edited; unchecked as to alphanumeric (C260) | Refused | Stored; PFD packed copy; zoned or packed digits that are not decimal, unchecked to zoned, zoned to packed, and in the PFD copy (C260) | Converted | Refused | Stored |
+| Numeric with decimals | Refused | Refused | Refused | Stored; unchecked as for integers (C260) | Converted | Refused | Stored |
 | COMP-1, COMP-2 | Refused | Refused | Refused | Rounded in the receiver's low-order position, at most 9 significant digits from short and 18 from long (`float::to_receiver`), then stored | Narrowed rounding (`float::narrow_rounded`) or lengthened | Refused | Refused |
 | ZERO | Zeros | Zeros, edited | U+0030 units | Zero | Zero | Refused | Refused |
 | SPACE, QUOTE, HIGH-, LOW-VALUE | Filled | Filled, edited | Its unit | Bytes filled | Refused | Refused | Refused |
@@ -1004,9 +1006,16 @@ Every category pair, by the value the walker reads from the sender (line numbers
   Reference (SC27-8713-03, p. 410) have it. A group sender to a numeric, floating-point,
   numeric-edited or alphanumeric-edited receiver is `Alnum { image: Bytes, justified: false }`: its
   bytes, space-padded or cut. A numeric, floating-point or pointer item moved to a group receiver is
-  `Alnum { image: Stored, justified: false }`: its bytes as stored, after the read that can abend
-  on invalid data. A literal moved to a group receiver moves as to an alphanumeric one. SET TO and
+  `Alnum { image: Stored, justified: false }`: its bytes as stored, and a zoned or packed sender's
+  unchecked (C260). A literal moved to a group receiver moves as to an alphanumeric one. SET TO and
   WRITE and REWRITE FROM take the same plans.
+- **A zoned or packed sender** of a MOVE, or of WRITE, REWRITE or RELEASE FROM, is read by
+  `rt::store::move_sender`, not `read`. Where the pair's code checks nothing (`moved_unchecked`:
+  to zoned, zoned to packed, the PFD packed copy, to alphanumeric, alphanumeric-edited or group) and
+  the digits or sign are not decimal, it gives the bytes as stored, and `assign` carries them
+  unchecked; the data exception comes where the receiver is next read as a number (C260). The plans
+  are unchanged: the VM must read these senders through `move_sender` too, or it abends at the MOVE
+  where the walker does not.
 - **Several receivers** lower to one `Move` each. Each locates its receiver, then reads the sender
   again (machine.rs:315-318), so a receiver stored earlier can change what a later one gets (§11).
 - **MOVE, ADD and SUBTRACT CORRESPONDING** reach lowering already expanded: the compiler turns

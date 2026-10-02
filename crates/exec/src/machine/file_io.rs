@@ -119,7 +119,7 @@ impl<'p> Machine<'p, '_, '_> {
             return Err(Abend::ironwork(format!("{verb} {}: not a record of a file", record.name), pos));
         };
         let Some(op) = from else { return Ok((k, dest)) };
-        let (val, src) = self.operand_with_loc(op, pos)?;
+        let (val, src) = self.move_source(op, dest, pos)?;
         self.assign(dest, val, src, pos)?;
         Ok((k, self.locate(record)?))
     }

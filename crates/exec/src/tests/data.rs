@@ -188,6 +188,53 @@ fn an_alphanumeric_sender_moves_to_an_integer_unchecked_and_the_arithmetic_readi
 }
 
 #[test]
+fn a_zoned_or_packed_sender_moves_unchecked_where_pack_unpk_or_a_byte_copy_moves_it() {
+    let data = [
+        "       01  A-X PIC X(5) VALUE '12*34'.\n       01  A REDEFINES A-X PIC 9(5).\n",
+        "       01  P-X PIC X(3) VALUE X'12A34C'.\n       01  P REDEFINES P-X PIC S9(5) COMP-3.\n",
+        "       01  S-X PIC X(5) VALUE X'F1F2F3F440'.\n       01  S REDEFINES S-X PIC S9(5).\n",
+        "       01  D-X PIC X(5) VALUE X'F1F25CF3D4'.\n       01  D REDEFINES D-X PIC S9(3)V99.\n",
+        "       01  Z PIC 9(5).\n       01  Q PIC S9(5) COMP-3.\n       01  X5 PIC X(5).\n       01  G.\n           05  G1 PIC X(5).\n",
+        "       01  U PIC 9(5).\n       01  T PIC S9(7).\n       01  E PIC S9(5)V9.\n",
+    ]
+    .concat();
+    let procedure = [
+        line("MOVE A TO Z X5 Q G"),
+        line("DISPLAY FUNCTION HEX-OF(Z) ' ' X5 ' ' FUNCTION HEX-OF(Q)"),
+        line("DISPLAY FUNCTION HEX-OF(G)"),
+        line("MOVE P TO U"),
+        line("DISPLAY FUNCTION HEX-OF(U)"),
+        line("MOVE S TO T U"),
+        line("DISPLAY FUNCTION HEX-OF(T) ' ' FUNCTION HEX-OF(U)"),
+        line("MOVE D TO E"),
+        line("DISPLAY FUNCTION HEX-OF(E)"),
+        line("ADD 1 TO Z"),
+        line("GOBACK."),
+    ]
+    .concat();
+    let source = program("", &data, &procedure);
+    let (out, _, ending) = run_with(&source, &[]);
+    assert_eq!(out, "F1F2FCF3F4 12*34 12C34C\nF1F25CF3F4\nF1F2FAF3F4\nF0F0F1F2F3F440 F1F2F3F4F0\nF0F0F1F2FCD3\n");
+    let abend = ending.unwrap_err();
+    let add = source.lines().position(|l| l.contains("ADD 1 TO Z")).unwrap() as u32 + 1;
+    assert_eq!((abend.code.as_str(), abend.pos.line), ("S0C7", add));
+}
+
+#[test]
+fn a_zoned_or_packed_sender_is_checked_at_the_move_where_zap_cvb_or_ed_moves_it() {
+    let data = "       01  A-X PIC X(5) VALUE '12*34'.\n       01  A REDEFINES A-X PIC 9(5).\n       01  P-X PIC X(3) VALUE X'12A34C'.\n       01  P REDEFINES P-X PIC S9(5) COMP-3.\n       01  B PIC 9(5) COMP.\n       01  N PIC ZZZZ9.\n       01  Q PIC S9(5) COMP-3.\n       01  R PIC S9(7) COMP-3.\n";
+    for (options, statement) in [("", "MOVE A TO B"), ("", "MOVE A TO N"), ("", "MOVE P TO R"), ("", "MOVE P TO Q"), ("NUMPROC(PFD)", "MOVE P TO R")] {
+        let source = program(options, data, &[line(statement), line("GOBACK.")].concat());
+        let (_, _, ending) = run_with(&source, &[]);
+        let abend = ending.unwrap_err();
+        let at = source.lines().position(|l| l.contains(statement)).unwrap() as u32 + 1;
+        assert_eq!((abend.code.as_str(), abend.pos.line), ("S0C7", at), "{options} {statement}");
+    }
+    let copied = program("NUMPROC(PFD)", data, &[line("MOVE P TO Q"), line("DISPLAY FUNCTION HEX-OF(Q)"), line("GOBACK.")].concat());
+    assert_eq!(run(&copied), "12A34C\n");
+}
+
+#[test]
 fn invdata_cleansign_reads_an_invalid_sign_nibble_as_positive() {
     let data = [
         "       01  Z-X PIC X(3) VALUE X'F1F203'.\n       01  Z REDEFINES Z-X PIC S9(3).\n",

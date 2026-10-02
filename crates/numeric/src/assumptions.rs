@@ -242,6 +242,7 @@ pub const NATIONAL_CASE_AND_REVERSE: &str = "C192";
 pub const INVDATA_CLEANSIGN: &str = "C222";
 pub const INVDATA_ZONES_COMPARED: &str = "C223";
 pub const ALPHANUMERIC_MOVED_UNCHECKED: &str = "C240";
+pub const NUMERIC_MOVED_UNCHECKED: &str = "C260";
 pub const INITCHECK_ANALYSIS: &str = "C224";
 pub const INITCHECK_MESSAGE: &str = "C225";
 pub const NUMCHECK_SENDERS: &str = "C228";
@@ -1525,6 +1526,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: ALPHANUMERIC_MOVED_UNCHECKED,
         claim: "An alphanumeric sender MOVEd to a zoned or packed integer item without P scaling is not checked for digits at the MOVE: the receiver gets the low half of each of the sender's last bytes as its digits, zeros to the left, stored as a positive value, and a byte whose low half is not a digit (an asterisk, X'5C') leaves that half in the receiver, so the data exception comes where the item is next read as a number. The Language Reference treats such a sender as an unsigned numeric integer (MOVE statement, elementary moves); the instructions a MOVE compiles to, a byte copy, PACK and UNPK, raise no data exception (z/Architecture Principles of Operation, PACK and UNPACK), and the decimal instructions of arithmetic do. A receiver with decimal places or P scaling, a binary receiver (CVB checks digits) and a numeric-edited one still read the sender as a number at the MOVE",
+        basis: Basis::Recalled,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: NUMERIC_MOVED_UNCHECKED,
+        claim: "A zoned or packed sender is not checked at a MOVE, or at the MOVE of a WRITE, REWRITE or RELEASE FROM phrase, whose generated code checks nothing: to a zoned item, to a packed item from a zoned one, to a packed item of its own kind and scaling under NUMPROC(PFD), and to an alphanumeric, alphanumeric-edited or group item. Those compile to a byte copy, PACK, UNPK and the OI that makes a sign F, which raise no data exception (z/Architecture Principles of Operation, PACK and UNPACK); NUMCHECK(ZON(LAX)) likewise leaves the sender of a zoned-to-zoned or zoned-to-alphanumeric MOVE unchecked and checks it 'if the sender is subsequently used in a numeric context' (Programming Guide SC27-8714-03, p. 391), and IBM leaves what invalid data gives to the generated code, which differs with OPT and ARCH (Migration Guide GC27-8715-03, pp. 201, 205-206). Where the sender's digits or sign are not decimal, each receiver digit takes the low half of the sender's digit of the same power of ten, zero where it has none, so a non-digit stays in the receiver and the data exception comes where the item is next read as a number; a sign half that is a digit stays in a signed receiver's sign place, an unsigned receiver's sign is F, and SIGN SEPARATE reads any character but '-' as positive. An alphanumeric receiver gets a zoned sender's bytes, an overpunched sign's zone made F, or a packed sender's digits unpacked with F zones. A packed sender to another packed shape (ZAP or SRP), and any zoned or packed sender to a binary (CVB), numeric-edited (ED) or floating-point receiver, is still read as a number at the MOVE and ends in S0C7 there. A sender whose digits and sign are decimal moves as before. Which instructions IBM generates for each pair is recalled, not documented",
         basis: Basis::Recalled,
         oracle: Oracle::EnterpriseCobol,
     },

@@ -112,7 +112,7 @@ impl<'p> Machine<'p, '_, '_> {
         sort::release_ready(self, file, Register("SORT-RETURN", pos), &record.name, pos)?;
         let loc = match from {
             Some(op) => {
-                let (val, src) = self.operand_with_loc(op, pos)?;
+                let (val, src) = self.move_source(op, loc, pos)?;
                 self.assign(loc, val, src, pos)?;
                 self.locate(record)?
             }

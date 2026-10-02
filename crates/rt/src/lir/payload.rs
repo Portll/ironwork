@@ -39,6 +39,8 @@ pub enum NationalFrom {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NumericFrom {
+    /// The sender as a number; a zoned or packed sender through `store::move_sender`, which gives
+    /// digits that are not decimal as bytes to carry unchecked (C260).
     Value,
     /// NUMPROC(PFD), packed to packed of the same kind and scale: the bytes.
     PackedCopy,

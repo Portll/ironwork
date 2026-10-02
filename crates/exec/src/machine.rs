@@ -683,7 +683,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         if !exempt {
             self.numcheck(loc, receiver_numeric && matches!(loc.kind, Kind::Alnum { .. } | Kind::Group), r.pos)?;
         }
-        Ok((self.read(loc, r.pos)?, Some(loc)))
+        Ok((store::move_sender(&self.facts(), &self.unit.mem, loc, dest, r.pos)?, Some(loc)))
     }
 
     fn operand(&mut self, op: &Operand, pos: Pos) -> R<Val> {
