@@ -89,7 +89,10 @@ return code 4, of each statement that uses a WORKING-STORAGE or LOCAL-STORAGE it
 statement sets, and INITCHECK(STRICT) of each that some path leaves unset, following PERFORM, GO TO
 and fall-through, and changes nothing at run time (C224, C225). NUMCHECK, with ZONECHECK as its
 zoned check, tests each zoned, packed or binary item a statement reads as a sender, and reports
-invalid data on the error stream (MSG) or ends the run with U4038 (ABD) (C228, C229).
+invalid data on the error stream (MSG) or ends the run with U4038 (ABD) (C228, C229). ZON(LAX)
+tolerates the two redefinitions IBM lists, an unsigned item over a signed one and leading spaces
+over an edited item's Z positions (C280), and a test the compiler finds always fails is an
+error-level message when compiled and is removed (C281).
 PARMCHECK(MSG|ABD,n) puts n bytes, 100 by default, after the WORKING-STORAGE a program declares and
 sets them to X'AA' before each CALL; when the called program has written into them, a warning on
 standard error names the parameter, the CALL's line and the program, and under ABD the run ends

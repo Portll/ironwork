@@ -43,6 +43,27 @@ pub trait ProgramFacts {
     fn scaling(&self, item: usize) -> u32;
     /// The item a TRUNC(OPT) report names.
     fn item_name(&self, item: usize) -> String;
+    /// What NUMCHECK(ZON(LAX)) tolerates in a zoned item because of the item it redefines.
+    fn lax_redefinition(&self, _item: usize) -> Option<LaxRedefinition> {
+        None
+    }
+    /// Whether the compiler removed NUMCHECK's test of `item` where the reference at `pos` reads
+    /// it, having found the test always fails.
+    fn numcheck_removed(&self, _item: usize, _pos: Pos) -> bool {
+        false
+    }
+}
+
+/// The two redefinitions NUMCHECK(ZON(LAX)) tolerates (Programming Guide SC27-8714-03, pp. 390-391).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LaxRedefinition {
+    /// An unsigned item whose last byte is the last of a signed trailing-overpunch level-01 or
+    /// level-77 item it redefines: tested as signed.
+    Signed,
+    /// A zoned item starting where a level-01 or level-77 numeric-edited item it redefines starts:
+    /// this many of its leading bytes may hold spaces, those over the edited item's leading Z
+    /// positions.
+    LeadingSpaces(u32),
 }
 
 pub fn bytes(mem: &[u8], loc: Loc) -> &[u8] {
@@ -564,40 +585,54 @@ pub fn alnum_image(facts: &dyn ProgramFacts, val: &Val, src: Option<Loc>, len: u
     })
 }
 
-/// What NUMCHECK finds wrong with a sending item's data, or None: a zoned or packed item that is
-/// not NUMERIC, its sign half-byte cleaned first under INVDATA(CLEANSIGN); an alphanumeric item
-/// moved to a numeric one (`as_integer`) that is not an unsigned integer's digits; or a binary
-/// item holding more digits than its PICTURE. COMP-5 is not checked, nor binary under TRUNC(BIN)
-/// with BIN(NOTRUNCBIN) (Programming Guide SC27-8714-03, pp. 388-391).
+/// What NUMCHECK finds wrong with a sending item's data, or None (see [`numcheck_fault_in`]).
 pub fn numcheck_fault(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, as_integer: bool) -> Option<&'static str> {
-    let check = facts.options().numcheck?;
-    let stored = bytes(mem, loc);
-    let cleaned = facts.options().invdata.is_some_and(|i| i.cleansign).then(|| sign_cleaned(stored, loc.kind)).flatten();
+    numcheck_fault_in(&facts.options(), loc.kind, bytes(mem, loc), facts.lax_redefinition(loc.item), as_integer)
+}
+
+/// What NUMCHECK finds wrong with `stored`, an item of `kind`, or None: a zoned or packed item that
+/// is not NUMERIC, its sign half-byte cleaned first under INVDATA(CLEANSIGN), and under ZON(LAX) a
+/// zoned item's `lax` redefinition tolerated; an alphanumeric item moved to a numeric one
+/// (`as_integer`) that is not an unsigned integer's digits; or a binary item holding more digits
+/// than its PICTURE. COMP-5 is not checked, nor binary under TRUNC(BIN) with BIN(NOTRUNCBIN)
+/// (Programming Guide SC27-8714-03, pp. 388-391).
+pub fn numcheck_fault_in(options: &Options, kind: Kind, stored: &[u8], lax: Option<LaxRedefinition>, as_integer: bool) -> Option<&'static str> {
+    let check = options.numcheck?;
+    let cleaned = options.invdata.is_some_and(|i| i.cleansign).then(|| sign_cleaned(stored, kind)).flatten();
     let b = cleaned.as_deref().unwrap_or(stored);
+    let lax = lax.filter(|_| check.zon.is_some_and(|z| z.lax));
+    let spaces = match lax {
+        Some(LaxRedefinition::LeadingSpaces(n)) => n as usize,
+        _ => 0,
+    };
     let digit = |x: &u8| (0xF0..=0xF9).contains(x);
-    let overpunch = |x: u8| matches!(x >> 4, 0xC | 0xD | 0xF) && x & 0x0F <= 9;
-    let valid = match loc.kind {
-        Kind::Zoned { signed, sign, .. } if check.zon.is_some() => match (signed, sign) {
-            (false, _) => b.iter().all(digit),
-            (true, Some(SignClause { separate: true, position })) => {
-                let (s, rest) = if position == SignPosition::Leading { (b[0], &b[1..]) } else { (b[b.len() - 1], &b[..b.len() - 1]) };
-                matches!(s, 0x4E | 0x60) && rest.iter().all(digit)
+    let digits = |from: usize, bytes: &[u8]| bytes.iter().enumerate().all(|(i, x)| digit(x) || from + i < spaces && *x == ebcdic::SPACE);
+    let overpunch = |at: usize, x: u8| matches!(x >> 4, 0xC | 0xD | 0xF) && x & 0x0F <= 9 || at < spaces && x == ebcdic::SPACE;
+    let valid = match kind {
+        Kind::Zoned { signed, sign, .. } if check.zon.is_some() => {
+            let last = b.len() - 1;
+            match (signed || lax == Some(LaxRedefinition::Signed), sign) {
+                (false, _) => digits(0, b),
+                (true, Some(SignClause { separate: true, position })) => {
+                    let (s, rest) = if position == SignPosition::Leading { (b[0], &b[1..]) } else { (b[last], &b[..last]) };
+                    matches!(s, 0x4E | 0x60) && rest.iter().all(digit)
+                }
+                (true, Some(SignClause { position: SignPosition::Leading, .. })) => overpunch(0, b[0]) && digits(1, &b[1..]),
+                (true, _) => overpunch(last, b[last]) && digits(0, &b[..last]),
             }
-            (true, Some(SignClause { position: SignPosition::Leading, .. })) => overpunch(b[0]) && b[1..].iter().all(digit),
-            (true, _) => overpunch(b[b.len() - 1]) && b[..b.len() - 1].iter().all(digit),
-        },
+        }
         Kind::Group | Kind::Alnum { .. } if as_integer && check.zon.is_some() => b.iter().all(digit),
         Kind::Packed { digits, signed, .. } if check.pac => {
             let spare_clear = digits % 2 == 1 || b[0] >> 4 == 0;
             decimal::tp(b).is_ok_and(|cc| cc.0 == 0) && (signed || b[b.len() - 1] & 0x0F == 0x0F) && spare_clear
         }
-        Kind::Binary { digits, signed, native: false, .. } if check.bin.is_some_and(|c| c.truncbin || facts.options().trunc != Trunc::Bin) => {
+        Kind::Binary { digits, signed, native: false, .. } if check.bin.is_some_and(|c| c.truncbin || options.trunc != Trunc::Bin) => {
             let raw = Binary { digits: digits as u8, signed, native: true }.load(b);
             raw.unsigned_abs() < 10u128.pow(digits)
         }
         _ => true,
     };
-    (!valid).then_some(match loc.kind {
+    (!valid).then_some(match kind {
         Kind::Binary { .. } => "has more digits than its PICTURE allows",
         _ => "is not NUMERIC",
     })
@@ -608,6 +643,9 @@ pub fn numcheck_fault(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, as_integer
 /// terminating message, U4038 (assumptions [`numeric::assumptions::NUMCHECK_SENDERS`] and
 /// [`numeric::assumptions::NUMCHECK_MESSAGE`]).
 pub fn numcheck<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, loc: Loc, as_integer: bool, program: &str, pos: Pos) -> R<()> {
+    if facts.numcheck_removed(loc.item, pos) {
+        return Ok(());
+    }
     let Some(why) = numcheck_fault(facts, &unit.mem, loc, as_integer) else { return Ok(()) };
     let message = format!("NUMCHECK: {} X'{}' in program {program} {why}", facts.item_name(loc.item), crate::digest::hex(bytes(&unit.mem, loc)).to_ascii_uppercase());
     if facts.options().numcheck.is_some_and(|c| c.abd) {

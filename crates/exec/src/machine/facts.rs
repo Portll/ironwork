@@ -9,7 +9,7 @@ use crate::printer::{self, Space};
 use rt::fileio::{self, Advance, Files};
 use rt::host::{Host, Values};
 use rt::lir::{self, Chars, Replacement};
-use rt::store::ProgramFacts;
+use rt::store::{LaxRedefinition, ProgramFacts};
 use rt::text;
 
 #[derive(Clone, Copy)]
@@ -65,6 +65,14 @@ impl ProgramFacts for Facts<'_> {
     /// RETURN-CODE has no item of its own.
     fn item_name(&self, item: usize) -> String {
         self.layout.items.get(item).map_or("RETURN-CODE".into(), |i| i.name.clone().unwrap_or_else(|| "FILLER".into()))
+    }
+
+    fn lax_redefinition(&self, item: usize) -> Option<LaxRedefinition> {
+        self.layout.numcheck.lax(item)
+    }
+
+    fn numcheck_removed(&self, item: usize, pos: Pos) -> bool {
+        self.layout.numcheck.removed(item, pos)
     }
 }
 

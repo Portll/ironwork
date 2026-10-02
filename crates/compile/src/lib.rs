@@ -9,6 +9,7 @@ mod initcheck;
 pub mod layout;
 pub mod linage;
 pub mod markup;
+pub mod numcheck;
 pub mod oo;
 pub mod picture;
 pub mod printer;
@@ -261,6 +262,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         errors.extend(initcheck::check(&program, &layout, declared, mode));
     }
     scope::check(&program, &layout, &mut errors);
+    layout.numcheck = numcheck::facts(&program, &layout, declared, &options, &collating, &mut errors);
     let errors: Vec<Error> = errors.into_iter().map(|e| e.in_files(&program.sources)).collect();
     if refused(&errors, &options) {
         Err(errors)

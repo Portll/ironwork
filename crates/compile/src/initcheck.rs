@@ -28,6 +28,19 @@ pub(crate) fn check(program: &Program, layout: &Layout, declared: usize, mode: I
     a.warnings()
 }
 
+/// The elementary items INITCHECK analyses that no statement sets and no CALL, INVOKE or EXEC
+/// statement reaches through an address, nor any of `also_set` shares storage with: each holds
+/// what its VALUE clauses give it for the whole run.
+pub(crate) fn never_set(program: &Program, layout: &Layout, declared: usize, also_set: &[usize]) -> Vec<usize> {
+    let mut a = Analysis::new(program, layout, declared, false);
+    a.scan();
+    for &i in also_set {
+        let set = a.sets(i).clone();
+        a.written.union(&set);
+    }
+    (0..a.leaves.len() as u32).filter(|&b| !a.written.contains(b) && !a.address_taken.contains(b)).map(|b| a.leaves[b as usize]).collect()
+}
+
 /// One bit per elementary item analysed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Bits(Vec<u64>);
@@ -113,6 +126,8 @@ struct Analysis<'p> {
     address_taken: Bits,
     /// What the VALUE clauses set, with every item referenced with reference modification.
     initial: Bits,
+    /// What any statement sets, gathered by the scan.
+    written: Bits,
     /// Each range performed, as its first paragraph and the paragraph whose end returns; MAIN's
     /// has none.
     ranges: Vec<(usize, Option<usize>)>,
@@ -170,6 +185,7 @@ impl<'p> Analysis<'p> {
             addressed: vec![false; items.len()],
             address_taken: Bits::new(width),
             initial: Bits::new(width),
+            written: Bits::new(width),
             ranges: Vec::new(),
             range_ids: HashMap::new(),
             alters: vec![Vec::new(); program.paragraphs.len()],
@@ -1152,6 +1168,10 @@ impl<'w, 'p> Walk<'w, 'p> {
         let Some(i) = self.a.item(r) else { return };
         if r.refmod.is_some() {
             self.a.refmodded[i] = true;
+        }
+        if self.mode == Mode::Scan {
+            let set = self.a.sets(i).clone();
+            self.a.written.union(&set);
         }
         if let Some(s) = st {
             s.union(self.a.sets(i));

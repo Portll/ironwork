@@ -135,6 +135,7 @@ pub struct Layout {
     /// PARMCHECK's buffer: its offset, at the end of the WORKING-STORAGE the program declares, and
     /// its length (assumption [`numeric::assumptions::PARMCHECK_BUFFER`]).
     pub parmcheck: Option<(u32, u32)>,
+    pub numcheck: crate::numcheck::NumcheckFacts,
 }
 
 const LEVEL_ALIGNMENT: u32 = 8;
@@ -544,6 +545,7 @@ pub fn build(
         linage_counters: Vec::new(),
         qualify,
         parmcheck: buffer,
+        numcheck: Default::default(),
     })
 }
 
