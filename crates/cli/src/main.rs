@@ -666,6 +666,14 @@ fn driver() -> ExitCode {
     let first_sources = programs[0].sources.clone();
     let first_cards = programs[0].options.clone();
     let first = programs.remove(0);
+    // The source's functions and prototypes are compiled with it, as IBM compiles the whole
+    // compilation group, so their messages come before the program's.
+    let (mut functions_code, mut functions_refused) = (0u8, false);
+    for function in programs.iter().filter(|p| p.function.is_some()) {
+        let (messages, refused) = exec::compile(function.clone(), &flags).map_or_else(|m| (m, true), |c| (c.diagnostics, false));
+        functions_code = functions_code.max(report(&messages, path));
+        functions_refused |= refused;
+    }
     let library = exec::unit::Library {
         programs,
         dirs: std::iter::once(own_directory).chain(program_dirs).collect(),
@@ -676,14 +684,17 @@ fn driver() -> ExitCode {
     let compiled = match exec::compile(first, &flags) {
         Ok(c) => c,
         Err(messages) => {
-            let return_code = report(&messages, path);
+            let return_code = report(&messages, path).max(functions_code);
             if command != "check" && return_code == 0 {
                 eprintln!("ironwork: {path}: NOCOMPILE is a syntax check, with no program to run");
             }
             return evidence::finish(journal, i64::from(return_code));
         }
     };
-    let return_code = report(&compiled.diagnostics, path);
+    let return_code = report(&compiled.diagnostics, path).max(functions_code);
+    if functions_refused && command != "check" {
+        return evidence::finish(journal, i64::from(return_code));
+    }
     if let Some(file) = &provenance_file {
         let text = provenance::statement(&provenance::Inputs {
             program: path,
@@ -704,6 +715,10 @@ fn driver() -> ExitCode {
     }
     if command == "check" {
         return evidence::finish(journal, i64::from(return_code));
+    }
+    if compiled.program.function.is_some() {
+        eprintln!("ironwork: {path}: FUNCTION-ID {}: the source holds user-defined functions and no program to run", compiled.program.id);
+        return evidence::finish(journal, 16);
     }
     let code = match vm.then(|| exec::vm::lowered(&compiled)) {
         None => None,

@@ -31,6 +31,7 @@ pub(crate) mod cics_bind;
 mod declaratives;
 mod facts;
 mod file_io;
+mod function;
 mod intrinsic;
 mod json;
 mod le_services;
@@ -97,6 +98,8 @@ pub struct Machine<'p, 'u, 'w> {
     xml: xml::Registers,
     /// The programs containing this one, innermost first, as they are running.
     containers: Vec<scope::Frame<'p>>,
+    /// The user-defined functions the program may invoke.
+    functions: &'p [compile::function::Udf],
     unit: &'u mut RunUnit<'w>,
 }
 
@@ -159,6 +162,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             returns: perform::Returns::new(compiled.program.paragraphs.len()),
             xml: xml::Registers::default(),
             containers: Vec::new(),
+            functions: &compiled.functions,
             unit,
         }
     }
@@ -249,6 +253,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
         match self.statement(s) {
             Err(Abend { code: AbendCode::Signal(Signal::DeclarativeExit), .. }) => Ok(self.declarative_exit()),
+            Err(Abend { code: AbendCode::Signal(Signal::StopRun), .. }) => Ok(Flow::End(Ending::StopRun)),
             flow => flow,
         }
     }
@@ -1259,6 +1264,10 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn function(&mut self, f: &FunctionCall) -> R<Val> {
+        if let Some(udf) = self.user_function(&f.name) {
+            let value = self.invoke_function(udf, f)?;
+            return self.function_refmod(f, value);
+        }
         if let Some(value) = self.storage_function(f)? {
             return self.function_refmod(f, value);
         }
@@ -1299,6 +1308,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     fn operand_kind(&mut self, op: &Operand) -> R<Option<Kind>> {
         Ok(match op {
             Operand::Ref(r) => Some(self.locate(r)?.kind),
+            Operand::Function(f) => self.user_function(&f.name).map(|u| u.result.kind),
             _ => None,
         })
     }

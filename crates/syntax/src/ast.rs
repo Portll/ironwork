@@ -39,6 +39,44 @@ pub struct Program {
     pub containers: Vec<Container>,
     /// The messages reading its source gave that did not stop the parse, in the order found.
     pub messages: Vec<crate::Error>,
+    /// FUNCTION-ID in place of PROGRAM-ID: a user-defined function, or a prototype of one.
+    pub function: Option<Function>,
+    /// The user-defined functions it may invoke: those defined or prototyped before it in its
+    /// source, and a function itself.
+    pub prototypes: Vec<Prototype>,
+}
+
+impl Program {
+    /// The name a CALL or a function invocation loads it by: a function's external name.
+    pub fn load_name(&self) -> &str {
+        self.function.as_ref().map_or(&self.id, |f| &f.external)
+    }
+
+    pub fn is_prototype(&self) -> bool {
+        self.function.as_ref().is_some_and(|f| f.prototype)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Function {
+    /// AS literal-1, else the function-name.
+    pub external: String,
+    /// IS PROTOTYPE: a description for invocations to be checked against, with no code.
+    pub prototype: bool,
+    pub pos: Pos,
+}
+
+/// A user-defined function as its definition or prototype describes it to an invocation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Prototype {
+    pub name: String,
+    pub external: String,
+    pub using: Vec<Param>,
+    pub returning: Option<String>,
+    pub linkage: Vec<DataEntry>,
+    /// The PICTURE notation of its definition: DECIMAL-POINT IS COMMA and the currency signs.
+    pub environment: Environment,
+    pub pos: Pos,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

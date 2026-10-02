@@ -5,6 +5,7 @@ pub mod collating;
 mod corresponding;
 pub use corresponding::is_alphabetic;
 pub mod declaratives;
+pub mod function;
 mod initcheck;
 pub mod layout;
 pub mod linage;
@@ -44,6 +45,8 @@ pub struct Compiled {
     pub entries: Vec<EntryPoint>,
     /// Where each EXCEPTION/ERROR and debugging procedure runs.
     pub declaratives: declaratives::Table,
+    /// The user-defined functions the program may invoke.
+    pub functions: Vec<function::Udf>,
 }
 
 /// An alternate entry point: a CALL of `name` begins at statement `statement` of paragraph
@@ -238,7 +241,24 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     let carriage = printer::carriages(&program, &layout, options.adv);
     let declaratives = declaratives::resolve(&program, &layout, &options, &mut errors);
     let debugging = declaratives::debugging_sections(&program);
-    let mut check = Check { layout: &layout, program: &program, errors: &mut errors, debugging: false, max_digits: options.arith.max_picture_digits(), inline_performs: 0 };
+    let functions = function::functions(&program, options.qualify, &mut errors);
+    let alphabetic: Vec<Pos> = [&program.working_storage, &program.local_storage, &program.linkage]
+        .into_iter()
+        .flatten()
+        .chain(program.files.iter().flat_map(|f| &f.records))
+        .filter(|e| e.picture.as_deref().is_some_and(is_alphabetic))
+        .map(|e| e.pos)
+        .collect();
+    let mut check = Check {
+        layout: &layout,
+        program: &program,
+        errors: &mut errors,
+        debugging: false,
+        max_digits: options.arith.max_picture_digits(),
+        inline_performs: 0,
+        functions: Some(&functions),
+        alphabetic: &alphabetic,
+    };
     for k in 0..program.files.len() {
         check.file_keys(k);
         check.record_depending(k);
@@ -254,7 +274,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     }
     let entries = entry_points(&program);
     procedure_rules(&program, &layout, &entries, &options, &mut errors);
-    if whole && !program.oo.as_deref().is_some_and(|o| o.method().is_some()) {
+    if whole && !program.oo.as_deref().is_some_and(|o| o.method().is_some()) && !program.is_prototype() {
         program_end(&program, &options, &mut errors);
     }
     oo::check(&layout, &program, &mut errors);
@@ -267,7 +287,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     if refused(&errors, &options) {
         Err(errors)
     } else {
-        Ok(Compiled { program, when_compiled, layout, options, ssrange, report_writer, collating, carriage, diagnostics: errors, entries, declaratives })
+        Ok(Compiled { program, when_compiled, layout, options, ssrange, report_writer, collating, carriage, diagnostics: errors, entries, declaratives, functions })
     }
 }
 
@@ -636,6 +656,10 @@ struct Check<'a> {
     max_digits: u32,
     /// How many inline PERFORMs the statement is inside.
     inline_performs: usize,
+    /// The user-defined functions the statements may invoke; None where none can be.
+    functions: Option<&'a [function::Udf]>,
+    /// Where each item of category alphabetic is declared.
+    alphabetic: &'a [Pos],
 }
 
 impl Check<'_> {
@@ -1236,7 +1260,8 @@ impl Check<'_> {
     fn inspected_function(&mut self, f: &FunctionCall, i: &Inspect) {
         let name = f.name.as_str();
         let known = FUNCTIONS.contains(&name) || rt::intrinsic::FUNCTIONS.contains(&name);
-        if known && !rt::intrinsic::CHARACTER_VALUED.contains(&name) {
+        let numeric_udf = self.functions.into_iter().flatten().any(|u| u.name == name && !u.character_valued());
+        if known && !rt::intrinsic::CHARACTER_VALUED.contains(&name) || numeric_udf {
             self.errors.push(Error::at(f.pos, format!("INSPECT FUNCTION {name}: an integer or numeric function can be used only where an arithmetic expression can, not as the inspected item")));
         }
         let stores = if !i.replacing.is_empty() {
@@ -1266,7 +1291,11 @@ impl Check<'_> {
             Operand::Literal(_) => {}
             Operand::Function(f) => {
                 if !FUNCTIONS.contains(&f.name.as_str()) && !rt::intrinsic::FUNCTIONS.contains(&f.name.as_str()) {
-                    self.errors.push(Error::at(f.pos, format!("FUNCTION {} is not supported yet", f.name)));
+                    match self.functions.map(|all| all.iter().find(|u| u.name == f.name)) {
+                        Some(Some(udf)) => function::check_invocation(udf, f, self.layout, self.alphabetic, self.program.environment.decimal_point_comma, self.errors),
+                        Some(None) => self.errors.push(Error::at(f.pos, format!("FUNCTION {}: neither an intrinsic function nor a user-defined function defined or prototyped before this program", f.name))),
+                        None => self.errors.push(Error::at(f.pos, format!("FUNCTION {}: a user-defined function is not supported here yet", f.name))),
+                    }
                 }
                 f.args.iter().for_each(|a| self.expr(a));
             }

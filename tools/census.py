@@ -99,6 +99,7 @@ RULES = [
     (r"(\S+) is not a statement ironwork for COBOL supports yet", r"statement \1"),
     (r"the (\S+) SECTION is not supported yet", r"\1 SECTION"),
     (r"FUNCTION (\S+) is not supported yet", r"FUNCTION \1"),
+    (r"FUNCTION (\S+): neither an intrinsic function", r"FUNCTION \1"),
     (r"PICTURE .*: edited pictures are not supported yet", "edited PICTURE"),
     (r"PICTURE .*: scaling position P", "PICTURE with P"),
     (r"(\S+) is not a data description clause", r"data clause \1"),

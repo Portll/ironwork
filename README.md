@@ -38,7 +38,9 @@ each `-I` library: a copybook (`.cpy`, `.copy`) in any of them before a program 
 `.cob`), and either before a file named as the member alone, which a literal name tries first; the
 program being compiled is never its own member. CALL finds a program among the others in the same
 source, then in the program's directory and each `-L` library, by name; a dynamic CALL can name only
-such a member, never a path.
+such a member, never a path. A user-defined function's definition is found the same way, by its
+external name. `run` and `check` compile a source's functions and function prototypes with its first
+program, which is the one a run enters even when functions come before it (assumption C270).
 `ASSIGN` names a DD, and a program reaches only the files its DDs are given, by `--dd` or `DD_NAME`
 in the environment, as JCL gives them on z/OS; DD SYSIN is what ACCEPT reads, standard input
 otherwise. An indexed or relative file's DD holds its records in key order, as an IDCAMS REPRO
@@ -310,6 +312,19 @@ The subset the interpreter runs today:
   on an EXTERNAL file, or on a GLOBAL file of a program that contains others; INDEXED BY in such a
   GLOBAL record; a GLOBAL file whose FILE STATUS or keys are not GLOBAL names; SET ADDRESS OF a
   GLOBAL LINKAGE record from a contained program; lowering any of them to the LIR.
+- **User-defined functions:** FUNCTION-ID definitions and prototypes (AS, IS PROTOTYPE, ENTRY-NAME,
+  ENTRY-INTERFACE) to END FUNCTION, invoked wherever an intrinsic function can be, as FUNCTION
+  name(arguments) or, when the REPOSITORY paragraph lists FUNCTION name, by the name alone. An
+  invocation is checked against the definition or prototype before it in the source: the number of
+  arguments, and each data item passed BY REFERENCE against its parameter's PICTURE, USAGE, SIGN,
+  JUSTIFIED and BLANK WHEN ZERO, a group by its length; a literal or expression is stored as the
+  parameter describes it (C272), and a prototype and the definition of its name must agree. The
+  RETURNING item's value is the function's, reference-modifiable when alphanumeric or national.
+  Functions are recursive, each activation with its own LOCAL-STORAGE, and STOP RUN in one ends the
+  run (C274). EXIT FUNCTION, a nested definition, an intrinsic function's name (C271), BY VALUE
+  parameters other than binary, floating-point, pointers and single characters, and SQL or CICS with
+  functions (C273) are refused. Lowering refuses an invocation, so `compile` writes no module for a
+  program that invokes a function.
 - **Files:** sequential, line-sequential, indexed (VSAM KSDS) and relative (RRDS):
   SELECT/ASSIGN/FILE STATUS, ORGANIZATION, ACCESS SEQUENTIAL/RANDOM/DYNAMIC, RECORD KEY, ALTERNATE
   RECORD KEY [WITH DUPLICATES], RELATIVE KEY; FD with RECORDING MODE F or V and RECORD

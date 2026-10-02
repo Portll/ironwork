@@ -7,7 +7,9 @@ mod oo;
 mod report;
 mod sort;
 
-/// Every program in the source, first to last, with nested programs after the one containing them.
+/// Every program in the source, first to last, with nested programs after the one containing them,
+/// except that the first program comes ahead of the user-defined functions and prototypes before
+/// it, as the binder's ENTRY statement makes it the one a run enters (assumption C270).
 pub fn parse(tokens: &[Token], options: Vec<String>) -> Result<Vec<Program>, Error> {
     let mut parser = Parser::new(tokens);
     let mut programs = Vec::new();
@@ -17,6 +19,9 @@ pub fn parse(tokens: &[Token], options: Vec<String>) -> Result<Vec<Program>, Err
             return Err(parser.error("another program, or the end of the source"));
         }
         parser.program(&options, &mut programs)?;
+    }
+    if let Some(first) = programs.iter().position(|p| p.function.is_none()) {
+        programs[..=first].rotate_right(1);
     }
     Ok(programs)
 }
@@ -166,6 +171,24 @@ fn global_records(entries: &[DataEntry]) -> Vec<DataEntry> {
     out
 }
 
+/// A function-name's rules of formation: at most 30 characters, letters, digits, hyphens and
+/// underscores, a letter among them, and no hyphen first or last.
+fn function_name(name: &str) -> Result<(), &'static str> {
+    if name.len() > 30 {
+        return Err("a function name has at most 30 characters");
+    }
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') || !name.chars().any(|c| c.is_ascii_alphabetic()) {
+        return Err("a function name is letters, digits, hyphens and underscores, with a letter among them");
+    }
+    if name.starts_with('-') || name.ends_with('-') {
+        return Err("a function name neither starts nor ends with a hyphen");
+    }
+    if figurative(name).is_some() {
+        return Err("a figurative constant cannot name a function");
+    }
+    Ok(())
+}
+
 fn usage_word(word: &str) -> Option<Usage> {
     Some(match word {
         "DISPLAY" => Usage::Display,
@@ -205,6 +228,11 @@ struct Parser<'a> {
     /// Which tokens' own messages a program has taken, so a container leaves its contained
     /// programs' to them.
     reported: Vec<bool>,
+    /// The user-defined functions defined or prototyped so far, and the names of those defined.
+    functions: Vec<Prototype>,
+    defined: Vec<String>,
+    /// Parsing a function prototype, which may not have a REPOSITORY paragraph.
+    in_prototype: bool,
 }
 
 /// The WHENEVER actions in force, which carry on in listing order, and the EXEC SQL blocks the
@@ -232,6 +260,9 @@ impl<'a> Parser<'a> {
             debugging: false,
             messages: Vec::new(),
             reported: vec![false; tokens.len()],
+            functions: Vec::new(),
+            defined: Vec::new(),
+            in_prototype: false,
         }
     }
 }
@@ -359,6 +390,9 @@ impl Parser<'_> {
         if self.is_word("CLASS-ID") {
             return self.class_definition(options, out);
         }
+        if self.is_word("FUNCTION-ID") {
+            return self.function_definition(options, out);
+        }
         self.expect_word("PROGRAM-ID")?;
         self.accept(&Tok::Period);
         let id = match self.peek() {
@@ -445,6 +479,9 @@ impl Parser<'_> {
         let exec_declarations = std::mem::take(&mut self.exec_declarations);
         let (mut nested, mut contained) = (Vec::new(), Vec::new());
         while self.at_division(&["IDENTIFICATION", "ID"]) {
+            if self.word_at(3) == Some("FUNCTION-ID") {
+                return Err(Error::at(self.tokens[self.at + 3].pos, "a user-defined function or prototype cannot be nested within a program, function, method or class"));
+            }
             let first = nested.len();
             self.program(options, &mut nested)?;
             contained.extend(nested.get(first).map(|p: &Program| p.id.clone()));
@@ -494,9 +531,81 @@ impl Parser<'_> {
             oo: oo::program_oo(repository),
             environment,
             nested: contained,
+            prototypes: self.functions.clone(),
             ..Program::default()
         });
         out.extend(nested);
+        Ok(())
+    }
+
+    /// A user-defined function or a prototype of one, from FUNCTION-ID to END FUNCTION (Language
+    /// Reference SC27-8713-03, FUNCTION-ID paragraph and the function definition structure).
+    fn function_definition(&mut self, options: &[String], out: &mut Vec<Program>) -> R<()> {
+        let pos = self.pos();
+        self.at += 1;
+        self.accept(&Tok::Period);
+        let name = self.name("a function name")?;
+        function_name(&name).map_err(|why| Error::at(self.tokens[self.at - 1].pos, format!("FUNCTION-ID {name}: {why}")))?;
+        if rt::intrinsic::FIRST.contains(&name.as_str()) || rt::intrinsic::FUNCTIONS.contains(&name.as_str()) {
+            return Err(Error::at(pos, format!("FUNCTION-ID {name}: {name} is an intrinsic function's name (assumption C271)")));
+        }
+        let (mut external, mut prototype) = (name.clone(), false);
+        while !self.accept(&Tok::Period) {
+            if self.accept_word("AS") {
+                match self.peek() {
+                    Some(Tok::Alnum(s)) if !s.trim().is_empty() => external = s.clone(),
+                    _ => return Err(self.error("the function's external name, an alphanumeric literal, after AS")),
+                }
+                self.at += 1;
+            } else if self.accept_word("IS") || self.is_word("PROTOTYPE") {
+                self.expect_word("PROTOTYPE")?;
+                prototype = true;
+            } else if let Some(phrase) = self.accept_any(&["ENTRY-NAME", "ENTRY-INTERFACE"]) {
+                self.accept_word("IS");
+                let allowed: &[&str] = if phrase == "ENTRY-NAME" { &["COMPAT", "LONGUPPER", "LONGMIXED"] } else { &["STATIC", "DYNAMIC", "DLL"] };
+                if self.accept_any(allowed).is_none() {
+                    return Err(self.error(format!("{} after {phrase}", allowed.join(", "))));
+                }
+            } else {
+                return Err(self.error("AS, IS PROTOTYPE, ENTRY-NAME, ENTRY-INTERFACE or the period ending the FUNCTION-ID paragraph"));
+            }
+        }
+        if !prototype && self.defined.contains(&name) {
+            return Err(Error::at(pos, format!("a second definition of user-defined function {name}")));
+        }
+        let first = out.len();
+        self.in_prototype = prototype;
+        let body = self.program_body(name.clone(), false, true, options, out, false);
+        self.in_prototype = false;
+        body?;
+        let program = &mut out[first];
+        program.function = Some(Function { external, prototype, pos });
+        if let Some(inner) = program.nested.first() {
+            return Err(Error::at(pos, format!("FUNCTION-ID {name}: a user-defined function contains no programs, but {inner} is inside it")));
+        }
+        if !(self.at_end_program() && self.word_at(1) == Some("FUNCTION")) {
+            return Err(self.error(format!("END FUNCTION {name}, which ends a user-defined function")));
+        }
+        self.at += 2;
+        let end = self.name("the function name after END FUNCTION")?;
+        if end != name {
+            return Err(Error::at(self.tokens[self.at - 1].pos, format!("END FUNCTION {end} ends function {name}")));
+        }
+        self.accept(&Tok::Period);
+        let own = Prototype {
+            name,
+            external: program.load_name().to_owned(),
+            using: program.using.clone(),
+            returning: program.returning.clone(),
+            linkage: program.linkage.clone(),
+            environment: program.environment.clone(),
+            pos,
+        };
+        program.prototypes.push(own.clone());
+        self.functions.push(own);
+        if !prototype {
+            self.defined.push(program.id.clone());
+        }
         Ok(())
     }
 
@@ -516,7 +625,7 @@ impl Parser<'_> {
     }
 
     fn at_end_program(&self) -> bool {
-        self.is_word("END") && matches!(self.word_at(1), Some("PROGRAM" | "METHOD"))
+        self.is_word("END") && matches!(self.word_at(1), Some("PROGRAM" | "METHOD" | "FUNCTION"))
     }
 
     /// The ENVIRONMENT DIVISION: SELECT entries of FILE-CONTROL and the REPOSITORY's classes;
@@ -559,6 +668,9 @@ impl Parser<'_> {
             if self.accept_word("SELECT") {
                 files.push(self.select()?);
                 continue;
+            }
+            if self.is_word("REPOSITORY") && self.in_prototype {
+                return Err(self.error("no REPOSITORY paragraph: a function prototype cannot have one"));
             }
             if self.accept_word("REPOSITORY") {
                 repository = self.repository()?;
@@ -1655,6 +1767,7 @@ impl Parser<'_> {
             "STOP" if self.starts_operand() && !self.starts_ref() => Stmt::Display { items: vec![self.operand()?], no_advancing: false, pos },
             "STOP" => return Err(self.error("RUN or a literal after STOP")),
             "CONTINUE" => Stmt::Continue,
+            "EXIT" if self.is_word("FUNCTION") => return Err(Error::at(pos, "EXIT FUNCTION: Enterprise COBOL does not yet support the format 4 EXIT statement; GOBACK ends a user-defined function")),
             "EXIT" => match self.accept_any(&["PROGRAM", "PARAGRAPH", "SECTION", "PERFORM", "METHOD"]).as_deref() {
                 Some("PROGRAM") => Stmt::ExitProgram { pos },
                 Some("METHOD") => Stmt::ExitMethod { pos },

@@ -27,6 +27,9 @@ struct Arg {
 
 impl Lower<'_> {
     pub(super) fn function(&mut self, f: &FunctionCall) -> R<(FunctionId, Side)> {
+        if self.c.functions.iter().any(|u| u.name == f.name) {
+            return unsupported("an invocation of a user-defined function (FUNCTION-ID)", f.pos);
+        }
         let Some(func) = Func::named(&f.name) else { return unsupported("a FUNCTION the LIR does not name", f.pos) };
         let pos = f.pos;
         let (args, sides) = if matches!(func, Func::HexOf | Func::BitOf | Func::ByteLength) { self.stored_argument(f)? } else { self.arguments(f)? };

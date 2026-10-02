@@ -123,7 +123,8 @@ impl Parser<'_> {
         Ok(repository)
     }
 
-    /// The REPOSITORY paragraph's CLASS entries; FUNCTION entries are passed over.
+    /// The REPOSITORY paragraph's CLASS entries; FUNCTION entries make the names they list
+    /// invocable without the word FUNCTION.
     pub(super) fn repository(&mut self) -> R<Vec<ClassEntry>> {
         self.accept(&Tok::Period);
         let mut entries: Vec<ClassEntry> = Vec::new();
@@ -164,6 +165,8 @@ impl Parser<'_> {
                 }
                 if self.accept_word("INTRINSIC") {
                     self.repository_intrinsics(&names)?;
+                } else {
+                    self.repository_functions(&names)?;
                 }
                 continue;
             }
@@ -191,6 +194,24 @@ impl Parser<'_> {
             }
             if !known(name) {
                 return Err(Error::at(*pos, format!("FUNCTION {name} INTRINSIC: {name} is not an intrinsic function ironwork for COBOL knows")));
+            }
+            self.intrinsics.push(name.clone());
+        }
+        Ok(())
+    }
+
+    /// FUNCTION user-defined-function-name: each name invoked without the word FUNCTION, which may
+    /// not be LENGTH, RANDOM, SIGN, SUM or WHEN-COMPILED (Language Reference, REPOSITORY paragraph).
+    fn repository_functions(&mut self, names: &[(String, Pos)]) -> R<()> {
+        for (name, pos) in names {
+            if matches!(name.as_str(), "LENGTH" | "RANDOM" | "SIGN" | "SUM" | "WHEN-COMPILED") {
+                return Err(Error::at(*pos, format!("FUNCTION {name}: a user-defined function in the REPOSITORY paragraph cannot be named {name}")));
+            }
+            if name == "ALL" {
+                return Err(Error::at(*pos, "FUNCTION ALL: INTRINSIC follows ALL, which names every intrinsic function"));
+            }
+            if rt::intrinsic::FIRST.contains(&name.as_str()) || rt::intrinsic::FUNCTIONS.contains(&name.as_str()) {
+                return Err(Error::at(*pos, format!("FUNCTION {name}: an intrinsic function is listed with INTRINSIC, and no user-defined function takes its name (assumption C271)")));
             }
             self.intrinsics.push(name.clone());
         }

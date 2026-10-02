@@ -264,6 +264,11 @@ pub const HEX_CURRENCY_SIGN: &str = "C141";
 pub const INITIALIZE_FLOAT_NUMERIC: &str = "C171";
 pub const FLOAT_VALUE_LITERAL: &str = "C172";
 pub const CICS_ABEND_EXITS: &str = "C142";
+pub const FUNCTION_SOURCE_ORDER: &str = "C270";
+pub const FUNCTION_NAMED_AS_INTRINSIC: &str = "C271";
+pub const FUNCTION_ARGUMENT_TEMPORARIES: &str = "C272";
+pub const FUNCTION_SQL_CICS: &str = "C273";
+pub const FUNCTION_INVOCATION_ORDER: &str = "C274";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1673,6 +1678,36 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: NUMCHECK_ALWAYS_FAILS,
         claim: "When the compiler can determine that a NUMCHECK test will always find invalid data, it gives an error-level message and removes the test, under MSG and ABD alike (Programming Guide SC27-8714-03, pp. 388, 391); the Guide does not say when it can. ironwork determines it for an item, not in a table, that holds for the whole run what one alphanumeric VALUE clause gives it, the item's own or a group's above it, with no other VALUE clause reaching its bytes: a WORKING-STORAGE or LOCAL-STORAGE item that the INITCHECK analysis (C224) finds no statement sets and no CALL, INVOKE or EXEC statement reaches by its address, and that no table SORT or READ of a RECORD VARYING DEPENDING ON file sets. The references are those the interpreter tests that the compiler can name: an arithmetic expression's operands, PERFORM TIMES counts and expressions in a relation among them; a MOVE's sender, alphanumeric ones as integers for a numeric receiver; a numeric item compared with a number, ZERO, an expression or another numeric item, except under INVDATA(NOFORCENUMCMP); a condition-name's conditional variable; and a BY CONTENT or BY VALUE argument; each without subscripts or reference modification. The message, at the reference, names the item, its bytes and the fault, severity E (return code 8), in ironwork's words since the Guide gives no number, and the test there is removed. Any other reference keeps its test at run time, where Enterprise COBOL may have removed it. A program with object-oriented syntax is not analysed",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FUNCTION_SOURCE_ORDER,
+        claim: "A run enters the first program of its source, ahead of the user-defined functions and function prototypes before it. IBM makes the first program or user-defined function of a batch compilation the default entry point, and asks for a binder ENTRY statement naming the main program when a function comes first, as IBM requires of a function with no prototype (Programming Guide, 'Structuring user-defined functions' and 'Link-editing user-defined functions'); ironwork runs as if that ENTRY statement were given. `run` and `check` compile the source's functions and prototypes with the program and report their messages first, as IBM compiles the whole compilation group; a function that does not compile stops the run, and a source of functions alone has no program to run. A function is loaded by its external name, AS literal-1 or else its function-name, matched without regard to case and without PGMNAME's truncation, as CALL matches program names",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FUNCTION_NAMED_AS_INTRINSIC,
+        claim: "No user-defined function takes an intrinsic function's name, neither in FUNCTION-ID nor in the REPOSITORY paragraph without INTRINSIC. The Language Reference forbids LENGTH, RANDOM, SIGN, SUM and WHEN-COMPILED as a REPOSITORY paragraph's user-defined function names ('REPOSITORY paragraph') and says nothing of the other intrinsic names, nor whether FUNCTION name then invokes the intrinsic function or the user's; ironwork refuses the name rather than guess which, so Enterprise COBOL may compile a program ironwork refuses",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FUNCTION_ARGUMENT_TEMPORARIES,
+        claim: "Conformance is between a formal parameter and a data item (Language Reference, 'USING phrase', conformance of parameters for user-defined functions): an argument that is a literal, an arithmetic expression or a function's value has no description to conform. It is evaluated before the function is entered and stored, as MOVE stores a value, in a temporary with the formal parameter's description, which the function addresses BY REFERENCE. IBM's own example passes literals so, docalc('add' 10 0.23) to PIC X(3), 999 and V999, giving result=010230 (Programming Guide, 'Invoking user-defined functions'). A BY VALUE argument, a data item's too, is stored the same way, which is COMPUTE's truncation for a numeric parameter and SET's copy for a pointer. A numeric parameter takes only what COMPUTE could send it, as IBM says of BY VALUE and ISO 1989 of every parameter: an alphanumeric, hexadecimal or national literal, or an index or numeric-edited item BY VALUE, is refused. A figurative constant is no function argument (Language Reference, 'Function-identifier'). A reference-modified data item is passed BY REFERENCE at its first byte without the conformance check, since its length is known only when the statement runs",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FUNCTION_SQL_CICS,
+        claim: "The Programming Guide says SQL, CICS and JAVAIOP cannot be used with user-defined functions, as the function definition must come ahead of the program using it ('Structuring user-defined functions'), and does not say which compilations that reaches. ironwork refuses EXEC SQL and EXEC CICS in a function definition or prototype and in a program its source defines or prototypes a function before; a program that invokes a function defined in another source, with no prototype in its own source, is not refused",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FUNCTION_INVOCATION_ORDER,
+        claim: "A user-defined function runs when the operand holding it is evaluated, a statement's operands in the order the interpreter evaluates them, left to right for DISPLAY and an arithmetic expression, so an operand after the invocation sees what the function stored through a BY REFERENCE argument and one before it does not; IBM documents neither when nor in what order a statement's function-identifiers are evaluated. Functions are always recursive (Programming Guide, 'Using user-defined functions'): every activation shares the function's WORKING-STORAGE and has LOCAL-STORAGE of its own, as a RECURSIVE program's do. STOP RUN in a function ends the run unit from the statement that invoked it, as in a called program",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

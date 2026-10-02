@@ -133,6 +133,7 @@ fn lower_source(source: &Path, r: &Request, at: exec::lir::CompileTime) -> Resul
         Ok(p) => p,
         Err(e) => return Err(crate::report(std::slice::from_ref(&e), &shown).max(12)),
     };
+    let parsed: Vec<_> = parsed.into_iter().filter(|p| !p.is_prototype()).collect();
     let parents = parents(&parsed);
     let mut code = 0u8;
     let mut lowered = Lowered { programs: Vec::new(), directory: Vec::new() };

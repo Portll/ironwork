@@ -38,10 +38,17 @@ impl Library {
         let text = std::fs::read(&path).map(|b| copy::decode(&b)).map_err(|e| LoadError::Compile(format!("{}: {e}", path.display())))?;
         let mut programs = syntax::parse_all_with(&text, &self.copy.with_program(&path))
             .map_err(|e| LoadError::Compile(format!("{name} does not compile: {}", e.place(&path.display().to_string()))))?;
-        let first = programs.remove(0);
+        let wanted = programs.iter().position(|p| loads_as(p, name)).or_else(|| programs.iter().position(|p| !p.is_prototype())).unwrap_or(0);
+        let found = programs.remove(wanted);
         self.programs.extend(programs);
-        Ok((first, path))
+        Ok((found, path))
     }
+}
+
+/// Whether a CALL or function invocation of `name` loads `program`: by PROGRAM-ID, or a function
+/// definition by its external name; a prototype has no code to load.
+fn loads_as(program: &Program, name: &str) -> bool {
+    !program.is_prototype() && program.load_name().eq_ignore_ascii_case(name)
 }
 
 impl Loader<Rc<Compiled>> for Library {
@@ -51,7 +58,7 @@ impl Loader<Rc<Compiled>> for Library {
         if !member_name(name) {
             return Err(LoadError::NotFound);
         }
-        let (program, source) = match self.programs.iter().position(|p| p.id.eq_ignore_ascii_case(name)) {
+        let (program, source) = match self.programs.iter().position(|p| loads_as(p, name)) {
             Some(i) => (self.programs.remove(i), None),
             None => self.search(name).map(|(p, path)| (p, Some(path)))?,
         };
@@ -61,7 +68,7 @@ impl Loader<Rc<Compiled>> for Library {
         })?;
         let compiled = Rc::new(compiled);
         let (files, size) = Self::shape(&compiled);
-        Ok(LoadedProgram { name: compiled.program.id.to_ascii_uppercase(), files, size, source, compiled })
+        Ok(LoadedProgram { name: compiled.program.load_name().to_ascii_uppercase(), files, size, source, compiled })
     }
 
     fn holder(&self, entry: &str) -> Option<String> {

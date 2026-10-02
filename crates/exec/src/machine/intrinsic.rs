@@ -47,6 +47,9 @@ impl<'p> Evaluator for Call<'_, 'p, '_, '_, '_> {
 impl<'p> Machine<'p, '_, '_> {
     /// Whether an expression holding `f` is evaluated in floating point.
     pub(super) fn is_floating_point(&mut self, f: &FunctionCall) -> R<bool> {
+        if let Some(udf) = self.user_function(&f.name) {
+            return Ok(matches!(udf.result.kind, Kind::Float(_)));
+        }
         if intrinsic::FLOATING_POINT.contains(&f.name.as_str()) {
             return Ok(true);
         }

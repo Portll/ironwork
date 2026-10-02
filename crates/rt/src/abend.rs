@@ -59,7 +59,8 @@ pub enum AbendCode {
 /// Control flow passed up as an error to the statement that takes it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Signal {
-    /// STOP RUN in a USE BEFORE REPORTING procedure: the report statement that ran it ends the run.
+    /// STOP RUN in a USE BEFORE REPORTING procedure or a user-defined function: the statement that
+    /// ran it ends the run.
     StopRun,
     /// GOBACK in a USE BEFORE REPORTING procedure.
     GoBack,
