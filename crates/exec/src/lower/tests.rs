@@ -1478,3 +1478,14 @@ fn numcheck_and_parmcheck_programs_are_refused_until_the_lir_carries_their_check
     assert!(matches!(refused("PARMCHECK"), LowerError::Unsupported("PARMCHECK", _)));
     lowered(&program("INITCHECK", "       01  A PIC 9.\n", &[line("ADD 1 TO A"), line("GOBACK.")].concat()));
 }
+
+#[test]
+fn a_procedure_name_of_digits_is_matched_as_written() {
+    let p = lowered(&program(
+        "",
+        "       01  K PIC 9 VALUE 2.\n",
+        &["       MAIN-LINE.\n", &line("GO TO 3 03 DEPENDING ON K."), "       03.\n", &line("DISPLAY '03'."), "       3.\n", &line("DISPLAY '3'.")].concat(),
+    ));
+    let switch = p.blocks.iter().find_map(|b| if let Terminator::Switch { targets, .. } = &b.end { Some(targets.clone()) } else { None });
+    assert_eq!(switch.unwrap(), [paragraph(&p, "3") as u32, paragraph(&p, "03") as u32]);
+}

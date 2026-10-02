@@ -2423,7 +2423,7 @@ impl Parser<'_> {
     }
 
     fn starts_proc_name(&self) -> bool {
-        self.starts_ref() || self.peek().is_some_and(digits)
+        self.starts_ref() || self.peek().is_some_and(digits) && !self.paragraph_header() && !self.section_header()
     }
 
     /// Whether an operand and TIMES come next, as in PERFORM P T (I) TIMES.
@@ -2540,7 +2540,8 @@ impl Parser<'_> {
 
     fn starts_operand(&self) -> bool {
         match self.peek() {
-            Some(Tok::Alnum(_) | Tok::Hex(_) | Tok::National(_) | Tok::Number(_)) => true,
+            Some(Tok::Alnum(_) | Tok::Hex(_) | Tok::National(_)) => true,
+            Some(Tok::Number(_)) => !self.paragraph_header(),
             Some(Tok::Word(w)) => {
                 (figurative(w).is_some() || matches!(w.as_str(), "ALL" | "FUNCTION" | "LENGTH" | "ADDRESS" | "DFHRESP" | "DFHVALUE") || self.starts_ref()) && !self.paragraph_header()
             }
@@ -3494,5 +3495,22 @@ mod tests {
         assert_eq!((ws[5].level, first.name.as_str(), last.as_ref().map(|r| r.name.as_str())), (66, "A", Some("B")));
         assert_eq!(ws[6].renames.as_ref().unwrap().0.qualifiers, ["R"]);
         assert!(matches!(&p.paragraphs[0].statements[0], Stmt::Set { set: SetStmt::ConditionFalse(t), .. } if t.len() == 2));
+    }
+
+    #[test]
+    fn a_procedure_name_of_digits_alone_is_read_where_a_procedure_name_goes() {
+        let p = program(concat!(
+            "       01  D PIC 9.\n       PROCEDURE DIVISION.\n       00 SECTION 50.\n       010.\n",
+            "           GO TO 3 010 OF 00 DEPENDING ON D\n           PERFORM 3 TIMES DISPLAY D END-PERFORM\n",
+            "           PERFORM 3 THRU 4 2 TIMES\n           DISPLAY 1\n       3.\n           ALTER 4 TO 3.\n       4.\n           GO TO 3.\n",
+        ));
+        let names: Vec<(&str, bool, u8)> = p.paragraphs.iter().map(|q| (q.name.as_str(), q.is_section, q.priority)).collect();
+        assert_eq!(names, [("00", true, 50), ("010", false, 50), ("3", false, 50), ("4", false, 50)]);
+        let s = &p.paragraphs[1].statements;
+        assert!(matches!(&s[0], Stmt::GoToDepending { targets, .. } if targets[0].name == "3" && targets[1].section.as_deref() == Some("00")));
+        assert!(matches!(&s[1], Stmt::PerformInline { repeat: Loop::Times(_), .. }));
+        assert!(matches!(&s[2], Stmt::PerformProc { from, thru: Some(t), repeat: Loop::Times(_), .. } if from.name == "3" && t.name == "4"));
+        assert!(matches!(&s[3], Stmt::Display { items, .. } if items.len() == 1));
+        assert!(matches!(&p.paragraphs[2].statements[0], Stmt::Alter { pairs, .. } if pairs[0].0.name == "4" && pairs[0].1.name == "3"));
     }
 }

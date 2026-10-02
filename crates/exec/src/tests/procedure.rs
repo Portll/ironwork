@@ -696,3 +696,38 @@ fn an_initial_program_resets_the_programs_it_contains_and_closes_its_files_when_
     assert_eq!(stdout, "OPEN 00\nINN1\nOPEN 00\nINN1\n");
     let _ = std::fs::remove_file(out);
 }
+
+#[test]
+fn paragraphs_and_sections_named_by_digits_alone_are_procedure_names() {
+    let out = run(&perform_program(&[
+        "       M SECTION.\n",
+        "       M1.\n",
+        &line("MOVE 2 TO K"),
+        &line("GO TO 3 4 5 DEPENDING ON K."),
+        "       3.\n",
+        &line("DISPLAY '3'."),
+        "       4.\n",
+        &line("DISPLAY '4'"),
+        &line("PERFORM 3 TIMES DISPLAY 'T' NO ADVANCING END-PERFORM"),
+        &line("PERFORM 01 2 TIMES"),
+        &line("PERFORM 0002"),
+        &line("ALTER 9 TO PROCEED TO 8"),
+        &line("GO TO 9."),
+        "       5.\n",
+        &line("DISPLAY '5'."),
+        "       9.\n",
+        &line("GO TO 5."),
+        "       8.\n",
+        &line("DISPLAY '8'"),
+        &line("STOP RUN."),
+        "       01 SECTION.\n",
+        "       1.\n",
+        &line("DISPLAY '1 OF 01'."),
+        "       0002 SECTION.\n",
+        "       1.\n",
+        &line("DISPLAY '1 OF 0002'."),
+        "       2.\n",
+        &line("DISPLAY '2 OF 0002'."),
+    ]));
+    assert_eq!(out, "4\nTTT1 OF 01\n1 OF 01\n1 OF 0002\n2 OF 0002\n8\n");
+}
