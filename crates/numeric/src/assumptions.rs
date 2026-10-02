@@ -270,6 +270,9 @@ pub const FUNCTION_NAMED_AS_INTRINSIC: &str = "C271";
 pub const FUNCTION_ARGUMENT_TEMPORARIES: &str = "C272";
 pub const FUNCTION_SQL_CICS: &str = "C273";
 pub const FUNCTION_INVOCATION_ORDER: &str = "C274";
+pub const INSPECT_NATIONAL_ITEM: &str = "C230";
+pub const INSPECT_OPERAND_USAGE: &str = "C231";
+pub const INSPECT_OPERAND_MADE_NATIONAL: &str = "C232";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1528,7 +1531,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: INSPECT_NATIONAL_FUNCTION_RESULT,
-        claim: "INSPECT TALLYING of a national function result counts national characters (two-byte encoding units) and matches comparands and BEFORE or AFTER INITIAL delimiters only at character boundaries, and a figurative constant there is one national character (Language Reference SC27-8713-03, p. 355). An inspected item of usage NATIONAL is still inspected byte by byte, with figurative constants of one byte, as before this entry; that and the lowering, which refuses INSPECT of a function result, are left for later. No intrinsic function returns DBCS, so a DBCS function result does not arise",
+        claim: "INSPECT TALLYING of a national function result counts national characters (two-byte encoding units) and matches comparands and BEFORE or AFTER INITIAL delimiters only at character boundaries, and a figurative constant there is one national character (Language Reference SC27-8713-03, p. 355). An alphanumeric literal or value there is made national as C232 says; an inspected data item of usage NATIONAL is C230. No intrinsic function returns DBCS, so a DBCS function result does not arise",
         basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -1715,6 +1718,24 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: FUNCTION_INVOCATION_ORDER,
         claim: "A user-defined function runs when the operand holding it is evaluated, a statement's operands in the order the interpreter evaluates them, left to right for DISPLAY and an arithmetic expression, so an operand after the invocation sees what the function stored through a BY REFERENCE argument and one before it does not; IBM documents neither when nor in what order a statement's function-identifiers are evaluated. Functions are always recursive (Programming Guide, 'Using user-defined functions'): every activation shares the function's WORKING-STORAGE and has LOCAL-STORAGE of its own, as a RECURSIVE program's do. STOP RUN in a function ends the run unit from the statement that invoked it, as in a called program",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: INSPECT_NATIONAL_ITEM,
+        claim: "INSPECT of a data item of usage NATIONAL, reference-modified or not, works in national characters (two-byte encoding units): TALLYING counts them, CHARACTERS takes one at a time, comparands and BEFORE or AFTER INITIAL delimiters match only at character boundaries, CHARACTERS BY takes a one-character national substitution field, and CONVERTING pairs the national characters of its operands by ordinal position (Language Reference SC27-8713-03, pp. 355-359). A figurative constant there is a one-character national literal (p. 355) of the value the Programming Guide gives (SC27-8714-03, p. 132), and as a substitution field it fills each occurrence of the subject field (p. 357). Both executors take the unit from the inspected item's kind; lowering keeps the literals of an INSPECT of a national item as values, which rt reads as national characters, and builds no CONVERTING table of bytes for one. ironwork holds no DBCS data (C212), national group, or national-edited or national numeric item, so an INSPECT of one does not arise",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: INSPECT_OPERAND_USAGE,
+        claim: "Every identifier of an INSPECT but the count field has the inspected item's usage, and every literal is national when the inspected item is of usage NATIONAL and alphanumeric when it is of usage DISPLAY; a figurative constant not beginning with ALL takes either usage (Language Reference SC27-8713-03, p. 355; Programming Guide SC27-8714-03, pp. 112, 128). ironwork refuses each operand that breaks this as a severe error (S): with a national inspected item, a data item not of usage NATIONAL or an alphanumeric, hexadecimal or numeric literal; with any other, a national item or literal. The manuals give neither the message numbers nor their text: the messages are ironwork's. A numeric literal or ALL literal with an inspected item that is not national is still taken as its characters, as before this entry. A function-identifier operand is not checked when compiled, since ironwork knows an intrinsic function's category only when it runs (C232)",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: INSPECT_OPERAND_MADE_NATIONAL,
+        claim: "Where INSPECT works in national characters, of a national item (C230) or a national function value (C191), an operand whose value is not national, an alphanumeric function value or a literal of a TALLYING of a function value, is converted to national characters through the program's code page, as MOVE converts an alphanumeric sender to a national receiver. IBM requires such an operand to be national (Language Reference SC27-8713-03, p. 355) and says nothing of a run that has one, so the conversion is ironwork's choice. A national value as an operand of an INSPECT of an item that is not national is compared byte by byte",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

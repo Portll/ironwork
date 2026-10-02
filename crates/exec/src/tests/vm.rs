@@ -358,3 +358,26 @@ fn the_vm_runs_a_cics_task_through_link_a_handled_condition_and_return() {
     let t = o.task.expect("the task");
     assert_eq!((t.next_transid.as_deref(), t.returned_commarea), (Some("NEXT"), Some(ebcdic("BBBBB"))));
 }
+
+#[test]
+fn the_vm_inspects_a_national_item_in_national_characters() {
+    let data = "       01  W PIC N(6) VALUE N'AB AB'.\n       01  P PIC N VALUE N'B'.\n       01  C1 PIC 99 VALUE 0.\n       01  C2 PIC 99 VALUE 0.\n";
+    let source = program(
+        "",
+        data,
+        &[
+            "INSPECT W TALLYING C1 FOR ALL SPACES C2 FOR CHARACTERS",
+            "INSPECT W REPLACING ALL SPACES BY ZERO",
+            "    FIRST P BY N'b' AFTER INITIAL N'A'",
+            "DISPLAY C1 ' ' C2 ' ' FUNCTION DISPLAY-OF(W)",
+            "INSPECT W CONVERTING N'0A' TO N'-a' BEFORE INITIAL P",
+            "DISPLAY FUNCTION DISPLAY-OF(W)",
+            "GOBACK.",
+        ]
+        .map(line)
+        .concat(),
+    );
+    let (out, ending) = on_both(&source);
+    assert_eq!(ending, Ok(Ending::Goback));
+    assert_eq!(out, "02 04 Ab0AB0\nab-aB0\n");
+}

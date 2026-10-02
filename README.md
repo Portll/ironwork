@@ -276,7 +276,8 @@ The subset the interpreter runs today:
   THRU, ANY, TRUE/FALSE, OTHER), PERFORM (procedures, sections, THRU, TIMES, UNTIL, VARYING with
   up to six AFTER phrases on a performed procedure, inline), EXIT PARAGRAPH/SECTION/PERFORM
   [CYCLE], NEXT SENTENCE, STRING, UNSTRING, INSPECT (TALLYING, also of a function's value: C190;
-  REPLACING, CONVERTING, BEFORE/AFTER INITIAL), SEARCH and SEARCH ALL (a binary search on the table's keys, as IBM's is, so an unsorted
+
+  REPLACING, CONVERTING, BEFORE/AFTER INITIAL; a national item in national characters: C230), SEARCH and SEARCH ALL (a binary search on the table's keys, as IBM's is, so an unsorted
   table misses what a serial search finds), DISPLAY [UPON] [WITH] NO ADVANCING (to standard output,
   as a z/OS UNIX program writes it: assumption C53), ACCEPT (SYSIN, DATE, DAY,
   DAY-OF-WEEK, TIME), INITIALIZE, SET (condition TO TRUE or FALSE, index TO/UP BY/DOWN BY,

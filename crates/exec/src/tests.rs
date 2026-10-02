@@ -1654,6 +1654,53 @@ fn inspect_tallying_replacing_and_converting() {
 }
 
 #[test]
+fn inspect_counts_replaces_and_converts_a_national_item_in_its_characters() {
+    let data = concat!(
+        "       01  W PIC N(6) VALUE N'AB AB'.\n       01  P PIC N VALUE N'B'.\n       01  F PIC N(2) VALUE N'BX'.\n       01  T PIC N(2) VALUE N'yz'.\n",
+        "       01  C1 PIC 99 VALUE 0.\n       01  C2 PIC 99 VALUE 0.\n       01  C3 PIC 99 VALUE 0.\n       01  C4 PIC 99 VALUE 0.\n       01  C5 PIC 99 VALUE 0.\n",
+    );
+    let out = run(&program(
+        "",
+        data,
+        &[
+            line("INSPECT W TALLYING C1 FOR CHARACTERS"),
+            line("INSPECT W TALLYING C2 FOR ALL SPACES C3 FOR LEADING N'A'"),
+            line("    C4 FOR ALL P AFTER INITIAL SPACE"),
+            line("INSPECT W (2:3) TALLYING C5 FOR CHARACTERS"),
+            line("DISPLAY C1 ' ' C2 ' ' C3 ' ' C4 ' ' C5"),
+            line("INSPECT W REPLACING ALL SPACES BY ZERO"),
+            line("INSPECT W REPLACING FIRST N'A' BY N'a' AFTER INITIAL ZERO"),
+            line("INSPECT W REPLACING CHARACTERS BY N'*' BEFORE INITIAL P"),
+            line("DISPLAY FUNCTION DISPLAY-OF(W)"),
+            line("MOVE 0 TO C1"),
+            line("INSPECT W TALLYING C1 FOR ALL P REPLACING ALL P BY N'b'"),
+            line("    LEADING N'*' BY SPACE"),
+            line("DISPLAY C1 ' ' FUNCTION DISPLAY-OF(W)"),
+            line("INSPECT W CONVERTING N'ab0' TO N'XYZ' AFTER INITIAL SPACE"),
+            line("DISPLAY FUNCTION DISPLAY-OF(W)"),
+            line("MOVE N'XYXY' TO W"),
+            line("INSPECT W CONVERTING F TO T BEFORE INITIAL N'Y'"),
+            line("DISPLAY FUNCTION DISPLAY-OF(W)"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    ));
+    assert_eq!(out, "06 02 01 01 03\n*B0aB0\n02  b0ab0\n YZXYZ\nzYXY  \n");
+    let errors = |statement: &str| {
+        let body: String = [statement, "GOBACK."].into_iter().map(line).collect();
+        let parsed = syntax::parse(&program("", &format!("{data}       01  S PIC X(4).\n"), &body)).unwrap();
+        compile(parsed, &[]).err().unwrap().into_iter().map(|e| e.message).collect::<Vec<_>>()
+    };
+    let national = |operand: &str| format!("INSPECT W: {operand} cannot be an operand here, since W is national and every operand but the count field must be national too");
+    let display = |operand: &str| format!("INSPECT S: {operand} cannot be an operand here, since S is not national, and an operand can be national only when the inspected item is");
+    assert_eq!(errors("INSPECT W TALLYING C1 FOR ALL 'A' BEFORE INITIAL S"), [national("an alphanumeric literal"), national("S")]);
+    assert_eq!(errors("INSPECT W REPLACING ALL P BY X'C1'"), [national("an alphanumeric literal")]);
+    assert_eq!(errors("INSPECT W CONVERTING S TO T"), [national("S")]);
+    assert_eq!(errors("INSPECT S TALLYING C1 FOR ALL N'A'"), [display("a national literal")]);
+    assert_eq!(errors("INSPECT S REPLACING CHARACTERS BY P AFTER INITIAL SPACE"), [display("P")]);
+}
+
+#[test]
 fn inspect_tallying_counts_over_a_function_result_and_refuses_to_change_one() {
     let data = "       01  S PIC X(8) VALUE 'AbC'.\n       01  W PIC N(4) VALUE N'xy'.\n       01  N1 PIC 99 VALUE 0.\n       01  N2 PIC 99 VALUE 0.\n       01  N3 PIC 99 VALUE 0.\n";
     let out = run(&program(

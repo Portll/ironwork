@@ -1509,6 +1509,36 @@ fn inspect_of_a_function_result_tallies_the_value_alone() {
 }
 
 #[test]
+fn inspect_of_a_national_item_keeps_its_literals_for_rt_to_read_as_national_characters() {
+    let p = lowered(&program(
+        "",
+        "       01  W PIC N(4).\n       01  P PIC N.\n       01  C PIC 9.\n",
+        &[
+            line("INSPECT W TALLYING C FOR ALL SPACES BEFORE INITIAL N'A'"),
+            line("    REPLACING ALL P BY ZERO"),
+            line("INSPECT W CONVERTING N'ab' TO N'AB' AFTER INITIAL QUOTE"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    ));
+    let value = |c: &Chars| match c {
+        Chars::Value(LirOperand::Const(k)) => p.consts[*k as usize].clone(),
+        other => panic!("{other:?}"),
+    };
+    use rt::vocab::Figurative::{Quote, Space, Zero};
+    let [i, c] = &p.plans.inspect[..] else { panic!("{:?}", p.plans.inspect) };
+    assert_eq!(value(i.tallying[0].pattern.as_ref().unwrap()), Const::Figurative(Space));
+    assert_eq!(value(&i.tallying[0].bounds[0].value), Const::National(vec![0, 0x41]));
+    assert!(matches!(i.replacing[0].pattern, Some(Chars::Place(_))));
+    let Some(lir::Replacement::Chars(by)) = &i.replacing[0].by else { panic!("{i:?}") };
+    assert_eq!(value(by), Const::Figurative(Zero));
+    let converting = c.converting.as_ref().unwrap();
+    let lir::ConvertTable::Operands { from, to } = &converting.table else { panic!("{c:?}") };
+    assert_eq!((value(from), value(to)), (Const::National(vec![0, 0x61, 0, 0x62]), Const::National(vec![0, 0x41, 0, 0x42])));
+    assert_eq!(value(&converting.bounds[0].value), Const::Figurative(Quote));
+}
+
+#[test]
 fn a_record_length_item_is_left_to_the_interpreter() {
     let source = [
         "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n",

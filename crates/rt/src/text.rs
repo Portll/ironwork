@@ -5,7 +5,7 @@
 use crate::abend::Abend;
 use crate::host::{self, Host, Values};
 use crate::lir::{Bound, Chars, ConvertTable, Converting, Replacement, StringSource};
-use crate::storage::{Loc, Val};
+use crate::storage::{Kind, Loc, Val};
 use crate::store::{self, ProgramFacts};
 use crate::strings::{self, Phrase};
 use crate::vocab::{Figurative, InspectMode, Pos};
@@ -148,7 +148,8 @@ pub fn unstring<P: Copy, O>(
     Ok(overflow)
 }
 
-/// INSPECT: TALLYING counts over the item as it is, then REPLACING and CONVERTING change it.
+/// INSPECT: TALLYING counts over the item as it is, then REPLACING and CONVERTING change it. A
+/// national item's character positions are two bytes (assumption C230).
 pub fn inspect<P: Copy, O>(
     x: &mut impl Values<P, O>,
     target: P,
@@ -158,32 +159,34 @@ pub fn inspect<P: Copy, O>(
     pos: Pos,
 ) -> R<()> {
     let loc = x.locate(target, false)?;
+    let unit = if loc.kind == Kind::National { 2 } else { 1 };
     let mut data = store::bytes(x.mem(), loc).to_vec();
-    count(x, &mut data, 1, tallying, pos)?;
-    let mut changes = phrases(x, &data, 1, replacing, pos)?;
+    count(x, &mut data, unit, tallying, pos)?;
+    let mut changes = phrases(x, &data, unit, replacing, pos)?;
     if let Some(c) = converting {
         let pairs = match &c.table {
-            ConvertTable::Built(pairs) => pairs.clone(),
+            ConvertTable::Built(pairs) if unit == 1 => pairs.iter().map(|&(f, t)| (vec![f], vec![t])).collect(),
+            ConvertTable::Built(_) => return Err(Abend::ironwork("a CONVERTING table of single bytes cannot convert a national item", pos)),
             ConvertTable::Operands { from, to } => {
-                let (from, to) = (chars(x, from, pos)?, chars(x, to, pos)?);
+                let (from, to) = (chars_in(x, from, unit, pos)?, chars_in(x, to, unit, pos)?);
                 if from.len() != to.len() {
                     return Err(Abend::ironwork("CONVERTING needs operands of the same length", pos));
                 }
-                let mut pairs: Vec<(u8, u8)> = Vec::new();
-                for (f, t) in from.into_iter().zip(to) {
-                    if !pairs.iter().any(|&(seen, _)| seen == f) {
-                        pairs.push((f, t));
+                let mut pairs: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+                for (f, t) in from.chunks(unit).zip(to.chunks(unit)) {
+                    if !pairs.iter().any(|(seen, _)| seen == f) {
+                        pairs.push((f.to_vec(), t.to_vec()));
                     }
                 }
                 pairs
             }
         };
-        let (start, end) = region(x, &data, 1, &c.bounds, pos)?;
-        for (f, t) in pairs {
-            changes.push(Phrase { mode: InspectMode::All, pattern: vec![f], by: Some(vec![t]), start, end });
+        let (start, end) = region(x, &data, unit, &c.bounds, pos)?;
+        for (pattern, by) in pairs {
+            changes.push(Phrase { mode: InspectMode::All, pattern, by: Some(by), start, end });
         }
     }
-    strings::inspect(&mut data, 1, &changes);
+    strings::inspect(&mut data, unit, &changes);
     host::write(x, loc, &data);
     Ok(())
 }
@@ -209,15 +212,48 @@ fn count<P: Copy, O>(x: &mut impl Values<P, O>, data: &mut [u8], unit: usize, ta
     Ok(())
 }
 
-/// `chars`, where a figurative constant is a national character when a position is two bytes.
+/// `chars`, where a value is national characters when a position is two bytes.
 fn chars_in<P: Copy, O>(x: &mut impl Values<P, O>, c: &Chars<P, O>, unit: usize, pos: Pos) -> R<Vec<u8>> {
     match c {
-        Chars::Value(o) if unit == 2 => match x.value(o, pos)? {
-            Val::Fig(f) => Ok(store::figurative_unit(f, x.facts().options().quote).to_be_bytes().to_vec()),
-            val => store::natural_bytes(&x.facts(), val, pos),
-        },
+        Chars::Value(o) if unit == 2 => {
+            let val = x.value(o, pos)?;
+            national(x, val, pos)
+        }
         c => chars(x, c, pos),
     }
+}
+
+/// A value as national characters: a figurative constant is one (assumption C191), and any other
+/// value that is not national is converted as MOVE converts it (C232).
+fn national<P: Copy, O>(x: &impl Values<P, O>, val: Val, pos: Pos) -> R<Vec<u8>> {
+    let facts = x.facts();
+    Ok(match val {
+        Val::National(b) => b,
+        Val::Fig(f) => store::figurative_unit(f, facts.options().quote).to_be_bytes().to_vec(),
+        val => facts.page().decode(&store::natural_bytes(&facts, val, pos)?).encode_utf16().flat_map(u16::to_be_bytes).collect(),
+    })
+}
+
+/// A REPLACING BY value's characters, which fill what they replace when it is a figurative constant.
+struct Substitute {
+    chars: Vec<u8>,
+    figurative: bool,
+}
+
+/// REPLACING's BY value, `len` bytes when it is a figurative constant.
+fn substitution<P: Copy, O>(x: &mut impl Values<P, O>, by: &Replacement<P, O>, unit: usize, len: usize, pos: Pos) -> R<Vec<u8>> {
+    let s = match by {
+        Replacement::Fill(b) if unit == 1 => Substitute { chars: vec![*b], figurative: true },
+        Replacement::Fill(_) => return Err(Abend::ironwork("a REPLACING byte cannot replace national characters", pos)),
+        Replacement::Chars(Chars::Value(o)) => {
+            let val = x.value(o, pos)?;
+            let figurative = matches!(val, Val::Fig(_));
+            let chars = if unit == 2 { national(x, val, pos)? } else { store::natural_bytes(&x.facts(), val, pos)? };
+            Substitute { chars, figurative }
+        }
+        Replacement::Chars(c) => Substitute { chars: chars(x, c, pos)?, figurative: false },
+    };
+    Ok(if s.figurative { s.chars.repeat(len / unit) } else { s.chars })
 }
 
 /// TALLYING's add: `n` added to a numeric item, stored with no size error.
@@ -247,10 +283,9 @@ fn phrases<P: Copy, O>(x: &mut impl Values<P, O>, data: &[u8], unit: usize, phra
             Some(c) => chars_in(x, c, unit, pos)?,
             None => Vec::new(),
         };
-        let len = pattern.len().max(1);
+        let len = if pattern.is_empty() { unit } else { pattern.len() };
         let by = match &p.by {
-            Some(Replacement::Fill(b)) => Some(vec![*b; len]),
-            Some(Replacement::Chars(c)) => Some(chars(x, c, pos)?),
+            Some(by) => Some(substitution(x, by, unit, len, pos)?),
             None => None,
         };
         if by.as_ref().is_some_and(|b| b.len() != len) {

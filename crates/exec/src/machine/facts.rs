@@ -84,15 +84,12 @@ impl<'p> Machine<'p, '_, '_> {
     pub(super) fn facts(&self) -> Facts<'p> {
         Facts { layout: self.layout, collating: self.collating, options: self.options, page: self.page, decimal_point: self.decimal_point() }
     }
+}
 
-    /// An INSPECT phrase with a figurative REPLACING value as its character.
-    pub(super) fn inspect_phrase<'a>(&self, p: &'a InspectPhrase) -> text::InspectPhrase<&'a Ref, &'a Operand> {
-        let by = p.by.as_ref().map(|op| match op {
-            Operand::Literal(Literal::Figurative(f)) => Replacement::Fill(self.collating.figurative(*f)),
-            op => Replacement::Chars(chars(op)),
-        });
-        text::InspectPhrase { mode: p.mode, pattern: p.pattern.as_ref().map(chars), by, counter: p.counter.as_ref(), bounds: bounds(&p.bounds) }
-    }
+/// An INSPECT phrase, its literals read as the inspected item's characters when the statement runs.
+pub(super) fn inspect_phrase(p: &InspectPhrase) -> text::InspectPhrase<&Ref, &Operand> {
+    let by = p.by.as_ref().map(|op| Replacement::Chars(chars(op)));
+    text::InspectPhrase { mode: p.mode, pattern: p.pattern.as_ref().map(chars), by, counter: p.counter.as_ref(), bounds: bounds(&p.bounds) }
 }
 
 /// An operand as STRING, UNSTRING and INSPECT take it: an item's storage, or anything else's value.

@@ -636,6 +636,18 @@ fn literal_digits(t: &str) -> usize {
     t.chars().filter(char::is_ascii_digit).count()
 }
 
+/// How an INSPECT message names a literal, and whether it is national; None for a figurative
+/// constant, which takes the inspected item's usage.
+fn inspected_literal(l: &Literal) -> Option<(&'static str, bool)> {
+    match l {
+        Literal::Figurative(_) => None,
+        Literal::All(inner) => inspected_literal(inner),
+        Literal::National(_) => Some(("a national literal", true)),
+        Literal::Number(_) => Some(("a numeric literal", false)),
+        Literal::Alnum(_) | Literal::Hex(_) => Some(("an alphanumeric literal", false)),
+    }
+}
+
 /// Resolves every name before the program runs, so a misspelling is a compile error.
 /// The condition-names a JSON PARSE USING phrase names.
 fn flag_conditions(flag: &Flag) -> Vec<&Ref> {
@@ -900,8 +912,10 @@ impl Check<'_> {
             }
             Stmt::Inspect(i) => {
                 self.operand(&i.target);
-                if let Operand::Function(f) = &i.target {
-                    self.inspected_function(f, i);
+                match &i.target {
+                    Operand::Function(f) => self.inspected_function(f, i),
+                    Operand::Ref(r) => self.inspected_usage(r, i),
+                    _ => {}
                 }
                 for p in i.tallying.iter().chain(&i.replacing) {
                     p.pattern.iter().chain(&p.by).for_each(|o| self.operand(o));
@@ -1271,6 +1285,37 @@ impl Check<'_> {
         };
         if let Some(phrase) = stores {
             self.errors.push(Error::at(f.pos, format!("INSPECT FUNCTION {name} {phrase}: {phrase} stores into the inspected item, and a function-identifier cannot be a receiving operand")));
+        }
+    }
+
+    /// INSPECT's identifiers but the count field have the inspected item's usage, and its literals
+    /// are national when it is national and alphanumeric otherwise; a figurative constant is either
+    /// (Language Reference SC27-8713-03, p. 355; assumption C231). A function-identifier's
+    /// category is known only when it runs.
+    fn inspected_usage(&mut self, target: &Ref, i: &Inspect) {
+        let Some(t) = self.item(target) else { return };
+        let national = self.layout.items[t].kind == rt::storage::Kind::National;
+        let phrases = i.tallying.iter().chain(&i.replacing).flat_map(|p| p.pattern.iter().chain(&p.by).chain(p.bounds.iter().map(|b| &b.value)));
+        let converting = i.converting.iter().flat_map(|(from, to, bounds)| [from, to].into_iter().chain(bounds.iter().map(|b| &b.value)));
+        for op in phrases.chain(converting) {
+            let (operand, is_national, pos) = match op {
+                Operand::Literal(l) => match inspected_literal(l) {
+                    Some((what, is_national)) => (what.to_owned(), is_national, i.pos),
+                    None => continue,
+                },
+                Operand::Ref(r) => match self.item(r) {
+                    Some(k) => (r.name.clone(), self.layout.items[k].kind == rt::storage::Kind::National, r.pos),
+                    None => continue,
+                },
+                _ => continue,
+            };
+            let name = &target.name;
+            let why = match (national, is_national) {
+                (true, false) => format!("{name} is national and every operand but the count field must be national too"),
+                (false, true) => format!("{name} is not national, and an operand can be national only when the inspected item is"),
+                _ => continue,
+            };
+            self.errors.push(Error::at(pos, format!("INSPECT {name}: {operand} cannot be an operand here, since {why}")));
         }
     }
 

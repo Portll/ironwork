@@ -951,7 +951,7 @@ walker does on each execution; the last column names that work.
 | SET TO ENTRY | None: `Unsupported` | Not lowered | The entry loaded and named in the run unit's list |
 | SET ADDRESS OF | One `SetAddress` for all the records; a target that is not an 01 or 77 of LINKAGE ends the block in `Abend` after the records before it | One call | Resolve and linkage test |
 | SET UP BY, DOWN BY | One `SetUpDown`: each receiver `Pointer`, `Number` with a `StepPlan` of dmax 0, or `Refused` | One call | Read, then match on the value |
-| INSPECT | `Inspect` over constant patterns and a prebuilt CONVERTING table when both operands are literals of one length; each TALLYING counter with its `StepPlan` | One call | Literal images and the CONVERTING table (machine.rs:822-834, 849-869) |
+| INSPECT | `Inspect` over constant patterns and a prebuilt CONVERTING table when both operands are literals of one length and the item is not national; each TALLYING counter with its `StepPlan` | One call | Literal images and the CONVERTING table (machine.rs:822-834, 849-869) |
 | STRING | `String`, then `Select` of two arms whether or not a phrase is written | One call | `natural_bytes` of literals (machine.rs:686-697) |
 | UNSTRING | `Unstring` with each receiver's MOVE plan, DELIMITER IN's two, and COUNT IN's and POINTER's stores, then `Select` as for STRING | One call | `assign` dispatch per field (machine.rs:773) |
 | SEARCH | Blocks: `InTable` branch, one branch per WHEN, a `SetInt` of index + 1, and of the VARYING item + 1 when it is not the index | Lowered | The index by name (machine.rs:880); table and count |
@@ -1795,7 +1795,11 @@ kind; the plans fix it:
 - **UNSTRING's receivers** take the field as an alphanumeric sender with no storage (`MovePlan` of
   `Value::Bytes`); DELIMITER IN takes the delimiter that way (`found`) or SPACE (`none`).
 - **Literals** are `Chars::Literal`, `natural_bytes` of the value `literal_value` gives. INSPECT's
-  REPLACING BY a figurative constant is `Replacement::Fill` of its character.
+  REPLACING BY a figurative constant is `Replacement::Fill` of its character. INSPECT of a national
+  item or of a function's value keeps its literals, a figurative BY value among them, as
+  `Chars::Value` of their constants, and its CONVERTING operands as `ConvertTable::Operands`:
+  `rt::text` reads them as national characters where what is inspected is national, taking the
+  character's two bytes from the item's `Loc` kind or the value's type (assumptions C191, C230).
 - **INSPECT of a function result** (TALLYING only, assumption C190): `InspectPlan`'s target is
   `Inspected::Value`, and the executor runs it through `rt::text::tally`, which evaluates the value
   once before the phrases' operands. Its plan carries no REPLACING or CONVERTING phrases, since the

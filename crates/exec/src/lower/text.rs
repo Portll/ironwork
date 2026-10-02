@@ -67,31 +67,34 @@ impl Lower<'_> {
         push(&mut self.plans.unstring, UnstringPlan { source, pointer, delimiters, into, tallying }, "UNSTRING plans")
     }
 
-    /// CONVERTING's table is built here when both operands are literals of the same length; else
-    /// the operands are kept and read, and their lengths compared, when the statement runs.
-    /// A function's value is tallied alone, as the walker's `rt::text::tally` ignores REPLACING and
-    /// CONVERTING there.
+    /// CONVERTING's table is built here when both operands are literals of the same length and the
+    /// item is not national; else the operands are kept and read, and their lengths compared, when
+    /// the statement runs. A function's value is tallied alone, as the walker's `rt::text::tally`
+    /// ignores REPLACING and CONVERTING there.
     pub(super) fn inspect_plan(&mut self, i: &Inspect, pos: Pos) -> R<InspectId> {
         let target = match &i.target {
             Operand::Ref(r) => Inspected::Item(self.place(r, false)?),
             op => Inspected::Value(self.operand(op, pos)?.operand),
         };
-        let valued = matches!(target, Inspected::Value(_));
+        let valued = match target {
+            Inspected::Value(_) => true,
+            Inspected::Item(place) => self.kind_of(place) == Kind::National,
+        };
         let mut tallying = Vec::with_capacity(i.tallying.len());
         for p in &i.tallying {
             tallying.push(self.inspect_phrase(p, valued, pos)?);
         }
-        if valued {
+        if let Inspected::Value(_) = target {
             return push(&mut self.plans.inspect, InspectPlan { target, tallying, replacing: Vec::new(), converting: None }, "INSPECT plans");
         }
         let mut replacing = Vec::with_capacity(i.replacing.len());
         for p in &i.replacing {
-            replacing.push(self.inspect_phrase(p, false, pos)?);
+            replacing.push(self.inspect_phrase(p, valued, pos)?);
         }
         let converting = match &i.converting {
             None => None,
             Some((from, to, bounds)) => {
-                let table = match (self.chars(from, pos)?, self.chars(to, pos)?) {
+                let table = match (self.inspect_chars(from, valued, pos)?, self.inspect_chars(to, valued, pos)?) {
                     (Chars::Literal(from), Chars::Literal(to)) if from.len() == to.len() => {
                         let mut pairs: Vec<(u8, u8)> = Vec::new();
                         for (f, t) in from.into_iter().zip(to) {
@@ -103,25 +106,21 @@ impl Lower<'_> {
                     }
                     (from, to) => ConvertTable::Operands { from, to },
                 };
-                Some(Converting { table, bounds: self.bounds(bounds, pos)? })
+                Some(Converting { table, bounds: self.bounds(bounds, valued, pos)? })
             }
         };
         push(&mut self.plans.inspect, InspectPlan { target, tallying, replacing, converting }, "INSPECT plans")
     }
 
-    /// `valued`: the phrase tallies a function's value, whose national character positions are two
-    /// bytes, so a literal stays a value, as `rt::text::tally` reads a figurative constant as one
-    /// national character.
+    /// `valued`: what is inspected may be national, a national item or function value, whose
+    /// character positions are two bytes, so its literals stay values for `rt::text` to read as
+    /// national characters, a figurative constant as one.
     fn inspect_phrase(&mut self, p: &ast::InspectPhrase, valued: bool, pos: Pos) -> R<InspectPhrase> {
-        let operand = |l: &mut Self, op: &Operand| match op {
-            Operand::Literal(_) if valued => Ok(Chars::Value(l.operand(op, pos)?.operand)),
-            _ => l.chars(op, pos),
-        };
-        let pattern = p.pattern.as_ref().map(|op| operand(self, op)).transpose()?;
+        let pattern = p.pattern.as_ref().map(|op| self.inspect_chars(op, valued, pos)).transpose()?;
         let by = match &p.by {
             None => None,
-            Some(Operand::Literal(Literal::Figurative(f))) => Some(Replacement::Fill(self.c.collating.figurative(*f))),
-            Some(op) => Some(Replacement::Chars(self.chars(op, pos)?)),
+            Some(Operand::Literal(Literal::Figurative(f))) if !valued => Some(Replacement::Fill(self.c.collating.figurative(*f))),
+            Some(op) => Some(Replacement::Chars(self.inspect_chars(op, valued, pos)?)),
         };
         let counter = match &p.counter {
             None => None,
@@ -130,12 +129,19 @@ impl Lower<'_> {
                 Some((place, self.count_plan(place, "a TALLYING counter must be numeric")?))
             }
         };
-        let bounds = p.bounds.iter().map(|b| Ok(Bound { after: b.after, value: operand(self, &b.value)? })).collect::<R<_>>()?;
-        Ok(InspectPhrase { mode: p.mode, pattern, by, counter, bounds })
+        Ok(InspectPhrase { mode: p.mode, pattern, by, counter, bounds: self.bounds(&p.bounds, valued, pos)? })
     }
 
-    fn bounds(&mut self, bounds: &[ast::Bound], pos: Pos) -> R<Vec<Bound>> {
-        bounds.iter().map(|b| Ok(Bound { after: b.after, value: self.chars(&b.value, pos)? })).collect()
+    fn bounds(&mut self, bounds: &[ast::Bound], valued: bool, pos: Pos) -> R<Vec<Bound>> {
+        bounds.iter().map(|b| Ok(Bound { after: b.after, value: self.inspect_chars(&b.value, valued, pos)? })).collect()
+    }
+
+    /// `chars`, a literal kept as a value when `valued`.
+    fn inspect_chars(&mut self, op: &Operand, valued: bool, pos: Pos) -> R<Chars> {
+        match op {
+            Operand::Literal(_) if valued => Ok(Chars::Value(self.operand(op, pos)?.operand)),
+            _ => self.chars(op, pos),
+        }
     }
 
     /// WITH POINTER: read as an integer, and stored as `set_integer` stores.
