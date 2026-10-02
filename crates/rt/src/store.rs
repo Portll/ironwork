@@ -354,6 +354,9 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
                 let fill: Vec<u8> = b.iter().copied().cycle().take(dest.len).collect();
                 write(&mut unit.mem, dest, &fill);
             }
+            Val::Bytes(b) if integer_digits(facts, dest).is_some() && !matches!(src.map(|s| s.kind), Some(Kind::NumericEdited { .. })) => {
+                move_digit_halves(facts, unit, dest, &b, pos)?;
+            }
             Val::Bytes(b) => {
                 let v = match src.map(|s| (s, s.kind)) {
                     Some((s, Kind::NumericEdited { edit, .. })) => {
@@ -382,6 +385,42 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
             write(&mut unit.mem, dest, &h.to_bytes());
         }
     }
+    Ok(())
+}
+
+/// The digits of a zoned or packed integer item without P scaling.
+fn integer_digits(facts: &dyn ProgramFacts, loc: Loc) -> Option<usize> {
+    match loc.kind {
+        Kind::Zoned { digits, scale: 0, .. } | Kind::Packed { digits, scale: 0, .. } if scaling(facts, loc) == 0 => Some(digits as usize),
+        _ => None,
+    }
+}
+
+/// An alphanumeric sender moved to a zoned or packed integer: the low half of each of its last bytes
+/// as a digit, zeros to the left, stored positive and unchecked. The byte copy, PACK and UNPK such a
+/// MOVE compiles to check no digit, so a non-digit is a data exception only where the item is next
+/// read as a number (assumption C240).
+fn move_digit_halves<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, dest: Loc, sender: &[u8], pos: Pos) -> R<()> {
+    let n = integer_digits(facts, dest).unwrap_or(0);
+    let halves: Vec<u8> = (0..n).map(|i| (sender.len() + i).checked_sub(n).map_or(0, |k| sender[k] & 0x0F)).collect();
+    let value = halves.iter().fold(0u128, |v, &h| v * 10 + if h > 9 { 0 } else { u128::from(h) });
+    store_fixed(facts, unit, dest, &fixed(false, U256::from_u128(value), Places::new(n as u32, 0)), false, pos)?;
+    if halves.iter().all(|&h| h <= 9) {
+        return Ok(());
+    }
+    let mut out = bytes(&unit.mem, dest).to_vec();
+    for (i, &h) in halves.iter().enumerate() {
+        let (at, high) = match dest.kind {
+            Kind::Packed { .. } => {
+                let nibble = 2 * out.len() - 1 - n + i;
+                (nibble / 2, nibble.is_multiple_of(2))
+            }
+            Kind::Zoned { sign: Some(SignClause { separate: true, position: SignPosition::Leading }), .. } => (i + 1, false),
+            _ => (i, false),
+        };
+        out[at] = if high { (out[at] & 0x0F) | (h << 4) } else { (out[at] & 0xF0) | h };
+    }
+    write(&mut unit.mem, dest, &out);
     Ok(())
 }
 

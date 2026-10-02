@@ -975,7 +975,8 @@ pub enum NumericFrom {
     Zero,
     /// Another figurative constant or an ALL literal: bytes filled, not converted (1720-1724).
     Fill,
-    /// Alphanumeric bytes read as an unsigned zoned integer of their length (1731-1734).
+    /// Alphanumeric bytes read as an unsigned zoned integer of their length (1731-1734); to a zoned or
+    /// packed integer without P scaling, the low halves of their last bytes, stored unchecked (C240).
     Zoned,
     /// A numeric-edited sender, de-edited (1727-1730).
     DeEdit { edit: u32, digits: u32, scale: u32 },
@@ -988,7 +989,7 @@ Every category pair, by the value the walker reads from the sender (line numbers
 | Sender | Group, alphanumeric | Alnum-edited | National | Numeric, numeric-edited | Float | Pointer kinds | Index |
 |---|---|---|---|---|---|---|---|
 | Group | Copied | Copied, not edited | Decoded to UTF-16 | Copied, not converted | Copied | Refused | Refused |
-| Alphanumeric, either edited | Copied | Edited | Decoded to UTF-16 | Unsigned zoned integer, S0C7 unless digits; numeric-edited is de-edited | Refused | Refused | Refused |
+| Alphanumeric, either edited | Copied | Edited | Decoded to UTF-16 | Unsigned zoned integer, S0C7 unless digits; to a zoned or packed integer, its digits' low halves unchecked (C240); numeric-edited is de-edited | Refused | Refused | Refused |
 | National | Refused | Refused | Units | Refused | Refused | Refused | Refused |
 | Integer numeric | Its digits, unsigned | Digits, edited | Refused | Stored; PFD packed copy | Converted | Refused | Stored |
 | Numeric with decimals | Refused | Refused | Refused | Stored | Converted | Refused | Stored |

@@ -46,7 +46,8 @@ pub enum NumericFrom {
     Zero,
     /// A figurative other than ZERO, or an ALL literal: bytes filled, not converted.
     Fill,
-    /// Alphanumeric bytes read as an unsigned zoned integer of their length.
+    /// Alphanumeric bytes read as an unsigned zoned integer of their length; to a zoned or packed
+    /// integer without P scaling, the low halves of their last bytes, stored unchecked (C240).
     Zoned,
     DeEdit { edit: u32, digits: u32, scale: u32 },
 }

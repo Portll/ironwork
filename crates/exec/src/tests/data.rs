@@ -168,6 +168,26 @@ fn zoned_items_compare_with_nonnumeric_operands_by_their_bytes() {
 }
 
 #[test]
+fn an_alphanumeric_sender_moves_to_an_integer_unchecked_and_the_arithmetic_reading_it_abends() {
+    let data = "       01  IN-X PIC X(5) VALUE '12*45'.\n       01  Z PIC 9(5).\n       01  P PIC S9(5) COMP-3.\n       01  T PIC S9(3) SIGN LEADING SEPARATE.\n";
+    let procedure = [
+        line("MOVE IN-X TO Z P T"),
+        line("DISPLAY FUNCTION HEX-OF(Z)"),
+        line("DISPLAY FUNCTION HEX-OF(P)"),
+        line("DISPLAY FUNCTION HEX-OF(T)"),
+        line("ADD 1 TO Z"),
+        line("GOBACK."),
+    ]
+    .concat();
+    let source = program("", data, &procedure);
+    let (out, _, ending) = run_with(&source, &[]);
+    assert_eq!(out, "F1F2FCF4F5\n12C45C\n4EFCF4F5\n");
+    let abend = ending.unwrap_err();
+    let add = source.lines().position(|l| l.contains("ADD 1 TO Z")).unwrap() as u32 + 1;
+    assert_eq!((abend.code.as_str(), abend.pos.line), ("S0C7", add));
+}
+
+#[test]
 fn invdata_cleansign_reads_an_invalid_sign_nibble_as_positive() {
     let data = [
         "       01  Z-X PIC X(3) VALUE X'F1F203'.\n       01  Z REDEFINES Z-X PIC S9(3).\n",

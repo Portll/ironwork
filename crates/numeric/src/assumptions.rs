@@ -241,6 +241,7 @@ pub const INSPECT_NATIONAL_FUNCTION_RESULT: &str = "C191";
 pub const NATIONAL_CASE_AND_REVERSE: &str = "C192";
 pub const INVDATA_CLEANSIGN: &str = "C222";
 pub const INVDATA_ZONES_COMPARED: &str = "C223";
+pub const ALPHANUMERIC_MOVED_UNCHECKED: &str = "C240";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1513,6 +1514,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: INVDATA_ZONES_COMPARED,
         claim: "Under INVDATA(NOFORCENUMCMP), the default once INVDATA is given and part of ZONEDATA(NOPFD), an unsigned zoned integer compared with ZERO, or with an unsigned zoned integer of its own length, is compared as the bytes it holds, zones included, so an item holding X'F0F040F0' is not equal to ZERO: the compiler compares zoned data 'in the same manner as COBOL 4 or earlier versions', by an alphanumeric comparison where those considered the zone bits, and IBM's VALUE1 example gives false under INVDATA(NOFORCENUMCMP) at any OPT setting (Programming Guide SC27-8714-03, pp. 377-378). Which comparisons COBOL 4 made by their bytes is not listed; these two, where the bytes of equal values are always equal, are chosen. Other comparisons, and every comparison under FORCENUMCMP, ZONEDATA(MIG) and NOINVDATA, read the digits and ignore the zones; under NOINVDATA IBM's result depends on OPT, and OPT(0)'s is chosen",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ALPHANUMERIC_MOVED_UNCHECKED,
+        claim: "An alphanumeric sender MOVEd to a zoned or packed integer item without P scaling is not checked for digits at the MOVE: the receiver gets the low half of each of the sender's last bytes as its digits, zeros to the left, stored as a positive value, and a byte whose low half is not a digit (an asterisk, X'5C') leaves that half in the receiver, so the data exception comes where the item is next read as a number. The Language Reference treats such a sender as an unsigned numeric integer (MOVE statement, elementary moves); the instructions a MOVE compiles to, a byte copy, PACK and UNPK, raise no data exception (z/Architecture Principles of Operation, PACK and UNPACK), and the decimal instructions of arithmetic do. A receiver with decimal places or P scaling, a binary receiver (CVB checks digits) and a numeric-edited one still read the sender as a number at the MOVE",
+        basis: Basis::Recalled,
         oracle: Oracle::EnterpriseCobol,
     },
 ];
