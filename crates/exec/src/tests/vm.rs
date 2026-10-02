@@ -175,13 +175,128 @@ fn the_vm_generates_xml_from_an_elementary_item_as_its_reference_locates_it() {
 }
 
 #[test]
-#[should_panic(expected = "the VM does not run file I/O yet")]
-fn file_statements_stop_the_vm_as_not_run_yet() {
+#[should_panic(expected = "the VM does not run FUNCTION UUID4")]
+fn what_the_vm_does_not_run_stops_it_as_not_run_yet() {
+    let _ = on_vm(&program("", "", &line("DISPLAY FUNCTION UUID4.")));
+}
+
+fn on_vm_with(source: &str, dds: &[String]) -> (String, Result<Ending, Abend>) {
+    let o = Harness::source(source).dds(dds).run(Executor::Vm);
+    (o.out, o.ending)
+}
+
+#[test]
+fn the_vm_runs_file_statements_and_an_error_procedure_that_leaves_by_go_to() {
+    let path = temp("vm-records.dat");
+    let _ = std::fs::remove_file(&path);
+    let source = [
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. F.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n",
+        "           SELECT F ASSIGN TO FDD FILE STATUS FS.\n           SELECT G ASSIGN TO NODD FILE STATUS FS.\n",
+        "       DATA DIVISION.\n       FILE SECTION.\n       FD  F.\n       01  F-REC PIC X.\n       FD  G.\n       01  G-REC PIC X.\n",
+        "       WORKING-STORAGE SECTION.\n       01  FS PIC XX.\n       PROCEDURE DIVISION.\n       DECLARATIVES.\n",
+        "       E SECTION.\n           USE AFTER ERROR PROCEDURE ON F G.\n       E-1.\n",
+        &line("DISPLAY 'E ' FS"),
+        &line("IF FS = '35' GO TO RECOVER."),
+        "       END DECLARATIVES.\n       MAIN SECTION.\n       M.\n",
+        &line("OPEN OUTPUT F"),
+        &line("WRITE F-REC FROM 'A' WRITE F-REC FROM 'B' CLOSE F"),
+        &line("OPEN INPUT F"),
+        &line("PERFORM 3 TIMES"),
+        &line("    READ F AT END DISPLAY 'END' NOT AT END DISPLAY F-REC"),
+        &line("END-PERFORM"),
+        &line("READ F CLOSE F"),
+        &line("OPEN INPUT G"),
+        &line("DISPLAY 'NOT HERE'."),
+        "       RECOVER.\n",
+        &line("DISPLAY 'RECOVERED'"),
+        &line("GOBACK."),
+    ]
+    .concat();
+    let (out, ending) = on_vm_with(&source, &[format!("FDD={}", path.display())]);
+    assert_eq!(ending, Ok(Ending::Goback));
+    assert_eq!(out, "A\nB\nEND\nE 10\nE 35\nRECOVERED\n");
+    assert_eq!(std::fs::read(&path).unwrap(), [0xC1, 0xC2]);
+}
+
+#[test]
+fn the_vm_sorts_through_input_and_output_procedures_and_a_table_in_place() {
     let source = file_program(
-        "           SELECT F ASSIGN TO INFILE.\n",
-        "       FD  F.\n       01  REC PIC X(10).\n",
-        "",
-        &[line("OPEN INPUT F."), line("STOP RUN.")].concat(),
+        "           SELECT S-FILE ASSIGN TO SORTWK1.\n",
+        "       SD  S-FILE.\n       01  S-REC.\n           05 S-K PIC 9.\n           05 S-T PIC X.\n",
+        "       01  EOF PIC X VALUE 'N'.\n       01  R PIC 99.\n       01  T VALUE '3142'.\n           05 E PIC 9 OCCURS 4.\n",
+        &[
+            "       MAIN-LINE.\n",
+            &line("SORT S-FILE ON DESCENDING KEY S-K"),
+            &line("    INPUT PROCEDURE FEED OUTPUT PROCEDURE SHOW"),
+            &line("MOVE SORT-RETURN TO R DISPLAY 'SORT-RETURN ' R"),
+            &line("SORT E ON ASCENDING KEY DISPLAY T"),
+            &line("GOBACK."),
+            "       FEED.\n",
+            &line("MOVE '1A' TO S-REC RELEASE S-REC"),
+            &line("RELEASE S-REC FROM '3B' RELEASE S-REC FROM '2C'."),
+            "       SHOW.\n",
+            &line("PERFORM UNTIL EOF = 'Y'"),
+            &line("    RETURN S-FILE AT END MOVE 'Y' TO EOF"),
+            &line("        NOT AT END DISPLAY S-REC END-RETURN"),
+            &line("END-PERFORM."),
+        ]
+        .concat(),
     );
-    let _ = on_vm(&source);
+    let (out, ending) = on_vm(&source);
+    assert_eq!(ending, Ok(Ending::Goback));
+    assert_eq!(out, "3B\n2C\n1A\nSORT-RETURN 00\n1234\n");
+}
+
+#[test]
+fn the_vm_tells_a_debugging_section_how_a_sort_procedure_was_reached() {
+    let source = [
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. D.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n",
+        "       SOURCE-COMPUTER. IBM-370 WITH DEBUGGING MODE.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n",
+        "           SELECT S ASSIGN TO SORTWK1.\n       DATA DIVISION.\n       FILE SECTION.\n       SD  S.\n       01  S-REC PIC X.\n",
+        "       WORKING-STORAGE SECTION.\n       01  EOF PIC X VALUE 'N'.\n       PROCEDURE DIVISION.\n       DECLARATIVES.\n",
+        "       DBG SECTION.\n           USE FOR DEBUGGING ON FEED SHOW.\n       DBG-1.\n",
+        &line("DISPLAY DEBUG-NAME(1:4) '|' DEBUG-CONTENTS(1:11) '|'."),
+        "       END DECLARATIVES.\n       MAIN SECTION.\n",
+        &line("SORT S ON ASCENDING KEY S-REC"),
+        &line("    INPUT PROCEDURE FEED OUTPUT PROCEDURE SHOW"),
+        &line("GOBACK."),
+        "       FEED SECTION.\n",
+        &line("RELEASE S-REC FROM 'B' RELEASE S-REC FROM 'A'."),
+        "       SHOW SECTION.\n",
+        &line("PERFORM UNTIL EOF = 'Y'"),
+        &line("    RETURN S AT END MOVE 'Y' TO EOF"),
+        &line("        NOT AT END DISPLAY S-REC END-RETURN"),
+        &line("END-PERFORM."),
+    ]
+    .concat();
+    let o = Harness::source(&source).flags(&["-debug"]).run(Executor::Vm);
+    assert_eq!(o.ending, Ok(Ending::Goback));
+    assert_eq!(o.out, "FEED|SORT INPUT |\nSHOW|SORT OUTPUT|\nA\nB\n");
+}
+
+#[test]
+fn the_vm_writes_a_report_and_runs_its_use_before_reporting_procedure() {
+    let path = temp("vm-report.txt");
+    let _ = std::fs::remove_file(&path);
+    let source = [
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. R.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n",
+        "           SELECT RPT ASSIGN TO RPTDD.\n       DATA DIVISION.\n       FILE SECTION.\n       FD  RPT REPORT IS TALLY.\n",
+        "       WORKING-STORAGE SECTION.\n       01  N PIC 9 VALUE 0.\n       01  CALLS PIC 9 VALUE 0.\n       REPORT SECTION.\n",
+        "       RD  TALLY CONTROL IS FINAL.\n       01  ROW TYPE DE LINE PLUS 1.\n           05 R-N COLUMN 1 PIC 9 SOURCE N.\n",
+        "       01  TYPE CF FINAL LINE PLUS 1.\n           05 COLUMN 1 VALUE 'SUM'.\n           05 COLUMN 5 PIC Z9 SUM R-N.\n",
+        "       PROCEDURE DIVISION.\n       DECLARATIVES.\n       ROW-USE SECTION.\n           USE BEFORE REPORTING ROW.\n       ROW-PARA.\n",
+        &line("ADD 1 TO CALLS"),
+        &line("IF N = 2 SUPPRESS PRINTING END-IF."),
+        "       END DECLARATIVES.\n       MAIN SECTION.\n       MAIN-PARA.\n",
+        &line("OPEN OUTPUT RPT INITIATE TALLY"),
+        &line("PERFORM 3 TIMES ADD 1 TO N GENERATE ROW END-PERFORM"),
+        &line("TERMINATE TALLY CLOSE RPT"),
+        &line("DISPLAY CALLS"),
+        &line("GOBACK."),
+    ]
+    .concat();
+    let (out, ending) = on_vm_with(&source, &[format!("RPTDD={}:text", path.display())]);
+    assert_eq!(ending, Ok(Ending::Goback));
+    assert_eq!(out, "3\n");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "1\n3\nSUM  6\n");
 }

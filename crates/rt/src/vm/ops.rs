@@ -63,18 +63,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             Op::Move { check, .. } if *check != SenderCheck::None => return Err(not_yet("NUMCHECK")),
             Op::Move { from, to, plan, .. } | Op::Set { from, to, plan } => {
                 let dest = self.loc(*to)?;
-                let (val, src) = match (op, from) {
-                    (Op::Move { .. }, Operand::Load(p)) => {
-                        let src = self.loc(*p)?;
-                        (store::move_sender(&self.facts(), &self.unit.mem, src, dest, self.pos(self.p.places[*p as usize].at))?, Some(src))
-                    }
-                    _ => self.value_with_loc(*from)?,
-                };
-                if let MovePlan::Refused(abend) = plan {
-                    return Err(self.abend(*abend, Some(at)).into());
-                }
-                let src = src.filter(|s| sender_kept(s.kind, dest.kind, plan));
-                store::assign(&self.facts(), self.unit, dest, val, src, pos)?;
+                self.move_to(matches!(op, Op::Set { .. }), *from, dest, plan, at)?;
             }
             Op::Initialize { target, plan } => self.initialize(*target, &p.plans.init[*plan as usize], pos)?,
             Op::Arith(id) => return self.arith(&p.plans.arith[*id as usize], pos),
@@ -143,11 +132,13 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 let name = self.sym(p.places[*target as usize].name);
                 accept::accept(&self.facts(), self.unit, dest, *from, name, pos)?;
             }
-            Op::File(_) => return Err(not_yet("file I/O")),
+            Op::File(id) => return self.file(&p.services.file_ops[*id as usize], at),
             Op::Call(id) => return self.call(&p.services.calls[*id as usize], pos),
             Op::Cancel(name) => self.cancel(*name, pos)?,
-            Op::Sort(_) | Op::Release(_) | Op::Return(_) => return Err(not_yet("SORT and MERGE")),
-            Op::Report(_) => return Err(not_yet("Report Writer")),
+            Op::Sort(id) => return self.sort(&p.services.sorts[*id as usize], pos),
+            Op::Release(id) => self.release(&p.services.releases[*id as usize], at)?,
+            Op::Return(id) => return self.return_record(&p.services.returns[*id as usize], pos),
+            Op::Report(op) => return self.report(*op, pos),
             Op::Invoke(_) => return Err(not_yet("object-oriented COBOL")),
             Op::Cics(_) => return Err(not_yet("EXEC CICS")),
             Op::Sql(_) => return Err(not_yet("EXEC SQL")),
@@ -168,6 +159,22 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             }
         }
         Ok(Step::Next)
+    }
+
+    /// MOVE of `from` into `dest`, located already, by `plan`; with `set`, as SET TO moves it.
+    pub(super) fn move_to(&mut self, set: bool, from: Operand, dest: Loc, plan: &MovePlan, at: u32) -> R<()> {
+        let (val, src) = match (set, from) {
+            (false, Operand::Load(p)) => {
+                let src = self.loc(p)?;
+                (store::move_sender(&self.facts(), &self.unit.mem, src, dest, self.pos(self.p.places[p as usize].at))?, Some(src))
+            }
+            _ => self.value_with_loc(from)?,
+        };
+        if let MovePlan::Refused(abend) = plan {
+            return Err(self.abend(*abend, Some(at)).into());
+        }
+        let src = src.filter(|s| sender_kept(s.kind, dest.kind, plan));
+        Ok(store::assign(&self.facts(), self.unit, dest, val, src, self.pos(at))?)
     }
 
     /// `Machine::enter_segment`: an independent segment entered from another is in its initial

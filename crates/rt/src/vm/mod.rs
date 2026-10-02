@@ -8,10 +8,13 @@
 mod arith;
 mod call;
 mod cond;
+mod files;
 mod flow;
 mod markup;
 mod ops;
 mod place;
+mod report;
+mod sort;
 mod value;
 
 use crate::abend::{Abend, Ending};
@@ -267,6 +270,7 @@ struct Vm<'p, 'u, 'w, L: Loader<Rc<Code>>> {
     pending: Option<String>,
     /// The JSON walk's subscripts and XML PARSE's fragment registers.
     markup: markup::State,
+    io: files::State,
     unit: &'u mut RunUnit<'w, Rc<Code>, L>,
 }
 
@@ -303,6 +307,7 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
             locating: 0,
             pending: None,
             markup: markup::State::default(),
+            io: files::State::default(),
             unit,
         };
         if !storage.local_image.is_empty() {

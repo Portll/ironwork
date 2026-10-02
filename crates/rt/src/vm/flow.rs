@@ -16,6 +16,9 @@ pub(crate) enum Arrival {
     Start,
     GoTo,
     FallThrough,
+    Use,
+    /// An input or output procedure: SORT INPUT, SORT OUTPUT or MERGE OUTPUT.
+    Sort(&'static str),
 }
 
 impl Arrival {
@@ -25,6 +28,8 @@ impl Arrival {
             Self::Start => "START PROGRAM",
             Self::GoTo => "",
             Self::FallThrough => "FALL THROUGH",
+            Self::Use => "USE PROCEDURE",
+            Self::Sort(procedure) => procedure,
         }
     }
 }
@@ -315,13 +320,19 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         self.transfer(step, floor)
     }
 
-    /// Runs `range` as a procedure under a frame of its own, in a dispatch loop of its own.
-    pub(super) fn run_procedure(&mut self, range: RangeId) -> R<Exit> {
+    /// Runs `range` as a procedure under a frame of its own, in a dispatch loop of its own. An
+    /// abend that unwinds it takes its frames and leaves their points armed, as the walker's
+    /// `perform_range` does when one passes through it.
+    pub(super) fn run_procedure(&mut self, range: RangeId, arrival: Arrival) -> R<Exit> {
         let r = self.p.ranges[range as usize];
         self.push(FrameKind::Procedure { range }, r.last, None);
         let floor = self.returns.frames.len() - 1;
-        self.arrival = Arrival::Perform;
-        self.dispatch(self.entry(r.first), floor)
+        self.arrival = arrival;
+        let exit = self.dispatch(self.entry(r.first), floor);
+        if exit.is_err() {
+            self.returns.frames.truncate(floor);
+        }
+        exit
     }
 
     /// A debugging section, unless one is running: DEBUG-ITEM filled with the line, name and
@@ -341,7 +352,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         self.debugging = true;
         let ran = match self.unit.enter(pos) {
             Ok(()) => {
-                let ran = self.run_procedure(range);
+                let ran = self.run_procedure(range, Arrival::Perform);
                 self.unit.depth = self.unit.depth.saturating_sub(1);
                 ran
             }

@@ -1,7 +1,7 @@
 //! JSON PARSE and XML PARSE: a document into the items its names reach, and a document's events
 //! through the processing procedure.
 
-use super::super::flow::Exit;
+use super::super::flow::{Arrival, Exit};
 use super::super::value::constant;
 use super::{Code, R, Vm, ccsid_of, node_loc, not_yet, slot};
 use crate::abend::{Abend, AbendCode};
@@ -442,6 +442,6 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             registers[slot(XmlRegister::Prefix)] = self.fragment(&encoding.encode(&e.prefix));
         }
         self.markup.xml = registers;
-        self.run_procedure(x.procedure)
+        self.run_procedure(x.procedure, Arrival::Perform)
     }
 }
