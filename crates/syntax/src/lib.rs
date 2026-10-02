@@ -138,11 +138,11 @@ pub fn parse_with(text: &str, libraries: &copy::Libraries) -> Result<ast::Progra
 /// Every program in the source, in order, nested programs after the one that contains them.
 pub fn parse_all_with(text: &str, libraries: &copy::Libraries) -> Result<Vec<ast::Program>, Error> {
     let mut files = vec![String::new()];
-    let mut source = source::read(text).and_then(|s| copy::expand(s, libraries, &mut files)).map_err(|e| e.in_files(&files))?;
+    let mut source = source::read(text).and_then(|s| copy::expand(s, libraries, &mut files)).and_then(copy::replace).map_err(|e| e.in_files(&files))?;
     let mut tokens = lexer::lex(&source).map_err(|e| e.in_files(&files))?;
     if debugging::requested(&tokens) {
         files.truncate(1);
-        source = source::read_file_debugging(text, 0).and_then(|s| copy::expand(s, libraries, &mut files)).map_err(|e| e.in_files(&files))?;
+        source = source::read_file_debugging(text, 0).and_then(|s| copy::expand(s, libraries, &mut files)).and_then(copy::replace).map_err(|e| e.in_files(&files))?;
         let lexed = lexer::lex(&source).map_err(|e| e.in_files(&files))?;
         tokens = debugging::keep(lexed, source.debugging.as_deref().unwrap_or_default());
     }

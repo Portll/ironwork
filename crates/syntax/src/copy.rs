@@ -190,32 +190,45 @@ fn copy_statement(words: &[Word], at: usize, pos: Pos) -> Result<Statement, Erro
     }
     let mut replacing = Vec::new();
     if text(i).is_some_and(|w| w.eq_ignore_ascii_case("REPLACING")) {
-        i += 1;
-        while text(i).is_some_and(|w| w != ".") {
-            let mode = match text(i) {
-                Some(w) if w.eq_ignore_ascii_case("LEADING") => Mode::Leading,
-                Some(w) if w.eq_ignore_ascii_case("TRAILING") => Mode::Trailing,
-                _ => Mode::Whole,
-            };
-            if !matches!(mode, Mode::Whole) {
-                i += 1;
-            }
-            let (pattern, after) = operand(words, i).ok_or_else(|| err("an operand to replace"))?;
-            if !text(after).is_some_and(|w| w.eq_ignore_ascii_case("BY")) {
-                return Err(err("BY"));
-            }
-            let (replacement, after) = operand(words, after + 1).ok_or_else(|| err("an operand after BY"))?;
-            if pattern.is_empty() || (!matches!(mode, Mode::Whole) && pattern.len() != 1) {
-                return Err(err("LEADING and TRAILING take one word; an empty pattern matches nothing"));
-            }
-            replacing.push(Replacing { mode, pattern, replacement: replacement.join(" ") });
-            i = after;
-        }
+        (replacing, i) = operands(words, i + 1, "COPY", pos)?;
     }
     if text(i) != Some(".") {
         return Err(err("a period to end the statement"));
     }
     Ok(Statement { name, literal, library, replacing, next: i + 1 })
+}
+
+/// The operand pairs of COPY REPLACING or of REPLACE, from word `at` to the period that ends the
+/// statement, and that period's index. REPLACE takes pseudo-text alone (Language Reference
+/// SC27-8713-03, p. 708).
+fn operands(words: &[Word], at: usize, verb: &str, pos: Pos) -> Result<(Vec<Replacing>, usize), Error> {
+    let err = |m: &str| Error::at(pos, format!("{verb}: {m}"));
+    let text = |i: usize| words.get(i).map(|w| w.text.as_str());
+    let replace = verb == "REPLACE";
+    let pseudo_text = |i: usize| !replace || text(i) == Some("==");
+    let (first, second) = if replace { ("pseudo-text between == delimiters to replace", "pseudo-text between == delimiters after BY") } else { ("an operand to replace", "an operand after BY") };
+    let (mut replacing, mut i) = (Vec::new(), at);
+    while text(i).is_some_and(|w| w != ".") {
+        let mode = match text(i) {
+            Some(w) if w.eq_ignore_ascii_case("LEADING") => Mode::Leading,
+            Some(w) if w.eq_ignore_ascii_case("TRAILING") => Mode::Trailing,
+            _ => Mode::Whole,
+        };
+        if !matches!(mode, Mode::Whole) {
+            i += 1;
+        }
+        let (pattern, after) = operand(words, i).filter(|_| pseudo_text(i)).ok_or_else(|| err(first))?;
+        if !text(after).is_some_and(|w| w.eq_ignore_ascii_case("BY")) {
+            return Err(err("BY"));
+        }
+        let (replacement, after) = operand(words, after + 1).filter(|_| pseudo_text(after + 1)).ok_or_else(|| err(second))?;
+        if pattern.is_empty() || (!matches!(mode, Mode::Whole) && pattern.len() != 1) {
+            return Err(err("LEADING and TRAILING take one word; an empty pattern matches nothing"));
+        }
+        replacing.push(Replacing { mode, pattern, replacement: replacement.join(" ") });
+        i = after;
+    }
+    Ok((replacing, i))
 }
 
 /// A REPLACING operand: pseudo-text `==...==` as its text-words, or one text-word.
@@ -371,6 +384,55 @@ fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>,
     Ok(out)
 }
 
+/// Applies the REPLACE statements in `source`, which COPY has expanded (Language Reference
+/// SC27-8713-03, pp. 708-712): each one's operands act on the text from its period to the next
+/// REPLACE statement or the end of the source, with COPY REPLACING's matching, and the statements
+/// themselves are left out (assumption C160).
+pub fn replace(source: Source) -> Result<Source, Error> {
+    let chars: Vec<char> = source.text.chars().collect();
+    let words = text_words(&chars);
+    let starts = |i: usize| words[i].text.eq_ignore_ascii_case("REPLACE");
+    if !(0..words.len()).any(starts) {
+        return Ok(source);
+    }
+    let mut out = Source { text: String::new(), positions: Vec::new(), options: source.options.clone(), debugging: source.debugging.clone() };
+    let segment = |out: &mut Source, range: std::ops::Range<usize>, active: &[Replacing]| {
+        let text = Source { text: chars[range.clone()].iter().collect(), positions: source.positions[range].to_vec(), options: Vec::new(), debugging: None };
+        let replaced = apply(&text, active);
+        out.text.push_str(&replaced.text);
+        out.positions.extend(replaced.positions);
+    };
+    let (mut active, mut cursor, mut i) = (Vec::new(), 0usize, 0usize);
+    while i < words.len() {
+        if !starts(i) {
+            i += 1;
+            continue;
+        }
+        let pos = source.positions[words[i].start];
+        let next = match words.get(i + 1).map(|w| w.text.to_ascii_uppercase()).as_deref() {
+            Some("OFF") if words.get(i + 2).is_some_and(|w| w.text == ".") => (Vec::new(), i + 3),
+            Some("OFF") => return Err(Error::at(pos, "REPLACE OFF: a period to end the statement")),
+            Some("ALSO" | "LAST") => return Err(Error::at(pos, "REPLACE ALSO and REPLACE LAST OFF are the 2014 COBOL standard's; Enterprise COBOL has REPLACE pseudo-text BY pseudo-text and REPLACE OFF")),
+            Some("==" | "LEADING" | "TRAILING") => {
+                let (replacing, period) = operands(&words, i + 1, "REPLACE", pos)?;
+                if words.get(period).is_none_or(|w| w.text != ".") {
+                    return Err(Error::at(pos, "REPLACE: a period to end the statement"));
+                }
+                (replacing, period + 1)
+            }
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+        segment(&mut out, cursor..words[i].start, &active);
+        (active, i) = next;
+        cursor = words[i - 1].end;
+    }
+    segment(&mut out, cursor..chars.len(), &active);
+    Ok(out)
+}
+
 fn read_member(path: &Path, pos: Pos, files: &mut Vec<String>, read: &dyn Fn(&str, u16) -> Result<Source, Error>) -> Result<Source, Error> {
     let bytes = std::fs::read(path).map_err(|e| Error::at(pos, format!("COPY {}: {e}", path.display())))?;
     let file = u16::try_from(files.len()).map_err(|_| Error::at(pos, "more than 65535 copy members"))?;
@@ -516,6 +578,78 @@ mod tests {
         let err = expanded_with("       COPY COBCPARMS OF LIB..\n", &libraries).unwrap_err();
         assert!(err.message.contains("COPY LIB.: "), "{}", err.message);
         assert!(expanded_with("       COPY COBCPARMS.\n", &libraries).unwrap().contains("PARMS"));
+    }
+
+    fn replaced(text: &str) -> Result<String, Error> {
+        replace(source::read(text)?).map(|s| s.text)
+    }
+
+    #[test]
+    fn replace_acts_from_its_period_to_the_next_replace() {
+        let text = replaced(concat!(
+            "       01  A PICTURE X.\n",
+            "       REPLACE ==PICTURE== BY ==PIC==.\n",
+            "       01  B PICTURE X.\n",
+            "       01  C PICTURE X VALUE 'PICTURE'.\n",
+            "       REPLACE OFF.\n",
+            "       01  D PICTURE X.\n",
+        ))
+        .unwrap();
+        let words: Vec<&str> = text.split_whitespace().collect();
+        assert_eq!(words, ["01", "A", "PICTURE", "X.", "01", "B", "PIC", "X.", "01", "C", "PIC", "X", "VALUE", "'PICTURE'.", "01", "D", "PICTURE", "X."]);
+    }
+
+    #[test]
+    fn replace_takes_the_language_references_example() {
+        let text = replaced(concat!(
+            "           REPLACE ==\"(Hello, World!)\"== BY ==\"(Hello, Mom!)\"==.\n",
+            "       01 WS-STRING1 PIC X(30) VALUE \"(Hello, World!)\".\n",
+            "           DISPLAY \"Modified: \" XX-WS-:TAG:1\n",
+            "           REPLACE LEADING ==XX-==  BY ====\n",
+            "                           ==:TAG:==  BY ==STRING==\n",
+            "                   TRAILING ==1== BY ==2==.\n",
+            "           DISPLAY \"Modified: \" XX-WS-:TAG:1\n",
+        ))
+        .unwrap();
+        assert!(text.contains("VALUE \"(Hello, Mom!)\"."), "{text}");
+        assert!(text.contains("DISPLAY \"Modified: \" XX-WS-:TAG:1\n") && text.ends_with("DISPLAY \"Modified: \" WS-STRING2"), "{text}");
+        assert!(!text.contains("REPLACE"), "{text}");
+    }
+
+    #[test]
+    fn a_later_replace_supersedes_and_several_words_match_as_one() {
+        let text = replaced(concat!(
+            "           REPLACE ==AO== BY ==TO== == = == BY ==EQUAL==.\n",
+            "           MOVE \"*\" AO X.\n",
+            "           REPLACE ==MOVE \"*\" TO X.\n",
+            "                      IF X = \"*\"== BY ==DISPLAY X==.\n",
+            "           MOVE \"*\" TO X.\n",
+            "           IF X = \"*\" DISPLAY Y.\n",
+        ))
+        .unwrap();
+        assert!(text.contains("MOVE \"*\" TO X."), "{text}");
+        assert!(text.contains("DISPLAY X DISPLAY Y."), "{text}");
+    }
+
+    #[test]
+    fn replace_takes_only_pseudo_text() {
+        let text = replaced("           MOVE REPLACE TO X.\n           DISPLAY Y.\n").unwrap();
+        assert!(text.contains("MOVE REPLACE TO X."));
+        assert!(replaced("       REPLACE A BY B.\n").unwrap().contains("REPLACE A BY B."));
+        let err = replaced("       REPLACE ==A== BY B.\n").unwrap_err();
+        assert_eq!(err.message, "REPLACE: pseudo-text between == delimiters after BY");
+        let err = replaced("       REPLACE ALSO ==A== BY ==B==.\n").unwrap_err();
+        assert!(err.message.starts_with("REPLACE ALSO and REPLACE LAST OFF are the 2014"), "{}", err.message);
+        assert_eq!(replaced("       REPLACE ==A== BY ==B==\n").unwrap_err().message, "REPLACE: a period to end the statement");
+    }
+
+    #[test]
+    fn replace_acts_on_copied_text() {
+        let dir = dir_with(&[("REPMEM.cpy", "       01  :TAG:-ID PIC 9.\n")]);
+        let src = source::read("       REPLACE ==:TAG:== BY ==CUST==.\n       COPY REPMEM.\n").unwrap();
+        let mut files = vec![String::new()];
+        let text = expand(src, &Libraries::new(vec![dir]), &mut files).and_then(replace).unwrap().text;
+        assert!(text.contains("01  CUST-ID PIC 9."), "{text}");
     }
 
     #[test]

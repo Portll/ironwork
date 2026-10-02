@@ -253,6 +253,7 @@ pub const PARM_ARGUMENTS_BEFORE_LAST_SLASH: &str = "C250";
 pub const PARM_AREA_PADDED: &str = "C251";
 pub const ABBREVIATED_RELATIONS: &str = "C150";
 pub const PARAGRAPH_IN_OWN_SECTION: &str = "C151";
+pub const REPLACE_STATEMENT: &str = "C160";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1596,6 +1597,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: PARAGRAPH_IN_OWN_SECTION,
         claim: "A paragraph-name need not be qualified when referred to within the section in which it appears (Language Reference SC27-8713-03, p. 68), so an unqualified name that more than one procedure has names the paragraph of that name in the section the reference is written in, when that section has one; from any other section it is refused as naming more than one paragraph, as before. The manual states the rule for references in general; ironwork applies it to each. Before any check, the compiler qualifies the names of GO TO, GO TO DEPENDING ON, PERFORM and its THRU, ALTER, SORT and MERGE procedures and XML PARSE's processing procedure with the section they are written in, so the compiler, the interpreter and the LIR lowering find the same paragraph. USE FOR DEBUGGING ON resolves from its declarative section, EXEC SQL WHENEVER GO TO from the paragraph of the SQL statement it follows, as the precompiler writes its GO TO there, and an EXEC CICS HANDLE label from the paragraph of the HANDLE command, with the same rule. CCVS85 NC208A's GO TO PAR-3C, unqualified in the section that has a PAR-3C, is the corpus case",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: REPLACE_STATEMENT,
+        claim: "REPLACE applies after COPY, to the whole expanded text, EXEC SQL and EXEC CICS statements included, as the Db2 coprocessor has it (Language Reference SC27-8713-03, pp. 708-712; Programming Guide SC27-8714-03, p. 513). A REPLACE is in effect from its period to the next REPLACE statement or the end of the source file: the manual says the end of the separately compiled program, so a batch of several programs in one file carries a REPLACE past the END PROGRAM of the one it is in, where IBM would stop it. The word REPLACE starts a statement only when pseudo-text, LEADING, TRAILING or OFF follows it, and wherever it is: the manual asks for a separator period before it, but its own example (pp. 709-710) has one after a DISPLAY with none, and gives that program's output. Matching is COPY REPLACING's: text words compared a word at a time, case aside outside literals, with a separator comma or semicolon never a word, so pseudo-text-1 that is only a comma or semicolon matches nothing. The replacing text takes the position of the first word it replaces, for messages and for Area A, where IBM puts each of its words in the area it is written in within pseudo-text-2; and REPLACE ALSO and REPLACE LAST OFF, which the 2014 standard has and the manual does not, are refused",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
