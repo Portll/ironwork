@@ -198,19 +198,19 @@ pub fn run<'w, X: UnitHost<'w>, T, E: From<Abend>>(x: &mut X, callee: &Callee, r
     if let Some(mark) = callee.mark {
         unit.release_temporaries(mark);
     }
-    Ok((ending.map_err(|a| in_loaded(unit, index, a)), value))
+    // A method's abend is named by its class's source table, which its INVOKE fills.
+    Ok((ending.map_err(|a| if callee.by == By::Invoke { a } else { in_loaded(unit, index, a) }), value))
 }
 
-/// An abend from program `index`, when a program library supplied it, named by that program's
-/// files, which the caller's file table would misname.
+/// An abend from program `index` named by that program's files, which a caller's file table would
+/// misname: its own source by path when a program library supplied it, otherwise from its source
+/// table, where the first program's source is empty. The innermost program an abend leaves names it.
 pub fn in_loaded<H: Clone, L: Loader<H>>(unit: &RunUnit<'_, H, L>, index: usize, mut abend: Abend) -> Abend {
     let program = &unit.programs[index];
-    if abend.file.is_none()
-        && let Some(source) = &program.source
-    {
-        abend.file = Some(match abend.pos.file {
-            0 => source.display().to_string(),
-            i => program.compiled.as_ref().and_then(|c| L::source(c, usize::from(i))).unwrap_or_default(),
+    if abend.file.is_none() {
+        abend.file = Some(match (abend.pos.file, &program.source) {
+            (0, Some(source)) => source.display().to_string(),
+            (i, _) => program.compiled.as_ref().and_then(|c| L::source(c, usize::from(i))).unwrap_or_default(),
         });
     }
     abend

@@ -5,7 +5,7 @@ use crate::oo::ClassCode;
 use crate::unit::{LoadError, LoadedProgram, Loader, RunUnit};
 use crate::Compiled;
 use rt::unit::FoundClass;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use syntax::ast::Program;
 use syntax::copy;
@@ -14,6 +14,8 @@ use syntax::copy;
 /// libraries searched by member name.
 #[derive(Clone, Debug, Default)]
 pub struct Library {
+    /// The programs not yet loaded: the first program's source's own, then those read from a
+    /// library file, which name that file as their first source.
     pub programs: Vec<Program>,
     pub dirs: Vec<PathBuf>,
     pub copy: copy::Libraries,
@@ -40,8 +42,19 @@ impl Library {
             .map_err(|e| LoadError::Compile(format!("{name} does not compile: {}", e.place(&path.display().to_string()))))?;
         let wanted = programs.iter().position(|p| loads_as(p, name)).or_else(|| programs.iter().position(|p| !p.is_prototype())).unwrap_or(0);
         let found = programs.remove(wanted);
-        self.programs.extend(programs);
+        self.add_read(&path, programs);
         Ok((found, path))
+    }
+
+    /// Keeps programs read from the library file `path` for a later CALL.
+    pub fn add_read(&mut self, path: &Path, programs: Vec<Program>) {
+        let shown = path.display().to_string();
+        self.programs.extend(programs.into_iter().map(|mut p| {
+            if let Some(own) = p.sources.first_mut() {
+                own.clone_from(&shown);
+            }
+            p
+        }));
     }
 }
 
@@ -59,7 +72,11 @@ impl Loader<Rc<Compiled>> for Library {
             return Err(LoadError::NotFound);
         }
         let (program, source) = match self.programs.iter().position(|p| loads_as(p, name)) {
-            Some(i) => (self.programs.remove(i), None),
+            Some(i) => {
+                let program = self.programs.remove(i);
+                let source = program.sources.first().filter(|s| !s.is_empty()).map(PathBuf::from);
+                (program, source)
+            }
             None => self.search(name).map(|(p, path)| (p, Some(path)))?,
         };
         let compiled = crate::compile(program, &self.flags).map_err(|errors| {

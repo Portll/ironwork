@@ -12,7 +12,9 @@ pub struct Abend {
     pub code: AbendCode,
     pub message: String,
     pub pos: Pos,
-    /// The source a method's abend is in, from its class's source table (empty when not read from a file); None for the first program's.
+    /// The source the abend is in, named by the innermost program or method it left: a library
+    /// file by path, otherwise from its source table, where the first program's source is empty.
+    /// None for an abend in the first program.
     pub file: Option<String>,
 }
 

@@ -1,6 +1,6 @@
 //! `ironwork run --evidence`: the journal records the source, the COPY member, each DD's digest and
-//! the CALL and where an abend was, links every record to the one before, reaches the ledger, and is
-//! refused inside a directory the run reads.
+//! the CALL and where an abend was, in whichever source, links every record to the one before,
+//! reaches the ledger, and is refused inside a directory the run reads.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -231,5 +231,91 @@ fn an_abend_names_the_file_and_line_it_happened_at_in_the_program_or_a_library_p
         let abend = journal.lines().find(|l| field(l, "kind") == Some("abend")).unwrap();
         assert_eq!((field(abend, "code"), field(abend, "file"), field(abend, "line")), (Some("S0C7"), Some(file), Some("9")), "{program}");
     }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+fn cobol(lines: &[String]) -> String {
+    lines.iter().map(|l| format!("       {l}\n")).collect()
+}
+
+/// Program `id` running `statements`, then GOBACK.
+fn calls(id: &str, statements: &[&str]) -> Vec<String> {
+    let head = ["IDENTIFICATION DIVISION.".to_string(), format!("PROGRAM-ID. {id}."), "PROCEDURE DIVISION.".into()];
+    head.into_iter().chain(statements.iter().chain(&["GOBACK."]).map(|s| format!("    {s}"))).collect()
+}
+
+/// Program `id`, whose eighth line divides by zero.
+fn divides(id: &str) -> Vec<String> {
+    let lines = ["IDENTIFICATION DIVISION.", &format!("PROGRAM-ID. {id}."), "DATA DIVISION.", "WORKING-STORAGE SECTION.", "01 D PIC 9 VALUE 0.", "01 Q PIC 9.", "PROCEDURE DIVISION.", "    DIVIDE 10 BY D GIVING Q.", "    GOBACK."];
+    lines.iter().map(|l| l.to_string()).collect()
+}
+
+fn end(id: &str) -> Vec<String> {
+    vec![format!("END PROGRAM {id}.")]
+}
+
+#[test]
+fn an_abend_in_a_called_program_names_that_programs_source_on_stderr_and_in_the_journal() {
+    let dir = temp("called");
+    let write = |file: &str, parts: &[Vec<String>]| fs::write(dir.join(file), cobol(&parts.concat())).unwrap();
+    write("lib/SUB.cbl", &[divides("SUB")]);
+    write("lib/MID.cbl", &[calls("MID", &["CALL 'SUB'."])]);
+    write("lib/LIBSUB.cbl", &[calls("LIBSUB", &["CALL 'HELPX'."])]);
+    write("lib/PAIRQ.cbl", &[calls("PAIRQ", &[]), end("PAIRQ"), divides("OTHERQ"), end("OTHERQ")]);
+    write("src/MAINS.cbl", &[calls("MAINS", &["CALL 'SUB'."])]);
+    write("src/MAIN3.cbl", &[calls("MAIN3", &["CALL 'MID'."])]);
+    let dynamic = ["IDENTIFICATION DIVISION.", "PROGRAM-ID. MAIND.", "DATA DIVISION.", "WORKING-STORAGE SECTION.", "01 N PIC X(8) VALUE 'SUB'.", "PROCEDURE DIVISION.", "    CALL N.", "    GOBACK."];
+    write("src/MAIND.cbl", &[dynamic.iter().map(|l| l.to_string()).collect()]);
+    write("src/MAINC.cbl", &[calls("MAINC", &["CALL 'INNER'."]), divides("INNER"), end("INNER"), end("MAINC")]);
+    write("src/MAINX.cbl", &[calls("MAINX", &["CALL 'LIBSUB'."]), end("MAINX"), divides("HELPX"), end("HELPX")]);
+    write("src/MAINQ.cbl", &[calls("MAINQ", &["CALL 'PAIRQ'.", "CALL 'OTHERQ'."])]);
+    let cases = [
+        ("MAINS", "lib/SUB.cbl", 8),
+        ("MAIN3", "lib/SUB.cbl", 8),
+        ("MAIND", "lib/SUB.cbl", 8),
+        ("MAINC", "src/MAINC.cbl", 13),
+        ("MAINX", "src/MAINX.cbl", 14),
+        ("MAINQ", "lib/PAIRQ.cbl", 13),
+    ];
+    for (program, file, line) in cases {
+        let ev = dir.join(format!("ev-{program}"));
+        let run = |extra: &[&std::ffi::OsStr]| Command::new(env!("CARGO_BIN_EXE_ironwork")).arg("run").arg(dir.join(format!("src/{program}.cbl"))).arg("-L").arg(dir.join("lib")).args(extra).output().unwrap();
+        let place = format!("{}:{line}:", dir.join(file).display());
+        for out in [run(&["--evidence".as_ref(), ev.as_os_str()]), run(&["--vm".as_ref()])] {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert_eq!(out.status.code(), Some(16), "{program}: {stderr}");
+            assert!(stderr.starts_with(&place) && stderr.contains("ABEND S0CB"), "{program}: {stderr}");
+        }
+        let journal = fs::read_to_string(fs::read_dir(ev.join("runs")).unwrap().next().unwrap().unwrap().path()).unwrap();
+        let abend = journal.lines().find(|l| field(l, "kind") == Some("abend")).unwrap();
+        let name = file.rsplit('/').next();
+        assert_eq!((field(abend, "file"), field(abend, "line")), (name, Some(line.to_string().as_str())), "{program}");
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn an_abend_in_a_later_cics_task_names_the_library_source_of_its_program() {
+    let dir = temp("cics-task");
+    fs::write(dir.join("src/FIRSTP.cbl"), cobol(&calls("FIRSTP", &["EXEC CICS RETURN TRANSID('NEXT') END-EXEC."]))).unwrap();
+    fs::write(dir.join("lib/LIBPGM.cbl"), cobol(&divides("LIBPGM"))).unwrap();
+    fs::write(dir.join("data/screens"), "ENTER\n").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_ironwork"))
+        .arg("cics")
+        .arg(dir.join("src/FIRSTP.cbl"))
+        .arg("-L")
+        .arg(dir.join("lib"))
+        .args(["--transid", "FIRS", "--transaction", "NEXT=LIBPGM", "--screens"])
+        .arg(dir.join("data/screens"))
+        .arg("--evidence")
+        .arg(dir.join("ev"))
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(16), "{stderr}");
+    assert!(stderr.lines().any(|l| l.starts_with(&format!("{}:8:", dir.join("lib/LIBPGM.cbl").display())) && l.contains("ABEND ASRA")), "{stderr}");
+    let journal = fs::read_to_string(fs::read_dir(dir.join("ev/runs")).unwrap().next().unwrap().unwrap().path()).unwrap();
+    let abend = journal.lines().find(|l| field(l, "kind") == Some("abend")).unwrap();
+    assert_eq!((field(abend, "file"), field(abend, "line")), (Some("LIBPGM.cbl"), Some("8")), "{abend}");
     fs::remove_dir_all(dir).unwrap();
 }

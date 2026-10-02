@@ -916,7 +916,8 @@ fn live_database(url: &str, record: Option<&str>) -> Result<Box<dyn exec::sql::D
     Ok(Box::new(recorder))
 }
 
-/// The source an abend's position is in: a method's own, else the first program's table.
+/// The source an abend's position is in: a called program's or method's own, else the first
+/// program's table.
 fn abend_file<'a>(compiled: &'a exec::Compiled, abend: &'a exec::machine::Abend) -> Option<&'a str> {
     abend.file.as_deref().or_else(|| compiled.program.sources.get(abend.pos.file as usize).map(String::as_str))
 }
@@ -989,7 +990,7 @@ impl Transactions {
                 let text = fs::read(&path).map(|b| syntax::copy::decode(&b)).map_err(|e| format!("{shown}: {e}"))?;
                 let parsed = syntax::parse_all_with(&text, &self.library.copy.with_program(&path)).map_err(|e| e.place(&shown))?;
                 let at = self.library.programs.len();
-                self.library.programs.extend(parsed);
+                self.library.add_read(&path, parsed);
                 at
             }
         };
