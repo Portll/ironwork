@@ -64,11 +64,12 @@ struct Feed {
     relative: bool,
 }
 
-/// What one run is given: each fed DD's records, and SYSIN's lines.
+/// What one run is given: each fed DD's records, SYSIN's lines, and the PARM's text.
 #[derive(Clone, Default)]
 struct Inputs {
     files: BTreeMap<String, Vec<Vec<u8>>>,
     sysin: Option<Vec<Vec<u8>>>,
+    parm: Option<Vec<u8>>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -280,7 +281,17 @@ fn data_set(records: &[Vec<u8>], rdw: bool) -> Vec<u8> {
 }
 
 fn sysin_line(rng: &mut Rng) -> Vec<u8> {
-    let length = [80, 80, 10, 1, 0][rng.below(5)];
+    text_line(rng, &[80, 80, 10, 1, 0])
+}
+
+/// A PARM of up to the 100 characters JCL allows; a slash in it may set runtime options apart.
+fn parm_text(rng: &mut Rng) -> Vec<u8> {
+    text_line(rng, &[0, 1, 8, 20, rt::le::parm::PARM_LIMIT])
+}
+
+/// A line of one of `lengths`, of digits, letters, number punctuation or all of them.
+fn text_line(rng: &mut Rng, lengths: &[usize]) -> Vec<u8> {
+    let length = lengths[rng.below(lengths.len())];
     let pick: &[u8] = match rng.below(4) {
         0 => b"0123456789",
         1 => b"ABCDEFGHIJKLMNOPQRSTUVWXYZ ",
@@ -294,7 +305,7 @@ fn sysin_text(lines: &[Vec<u8>]) -> Vec<u8> {
     lines.iter().flat_map(|l| l.iter().copied().chain(*b"\n")).collect()
 }
 
-fn generate(rng: &mut Rng, feeds: &[Feed], sysin: bool) -> Inputs {
+fn generate(rng: &mut Rng, feeds: &[Feed], sysin: bool, parm: bool) -> Inputs {
     let mut files = BTreeMap::new();
     for f in feeds {
         let mut records: Vec<Vec<u8>> = (0..1 + rng.below(4)).map(|_| record(rng, f)).collect();
@@ -310,7 +321,22 @@ fn generate(rng: &mut Rng, feeds: &[Feed], sysin: bool) -> Inputs {
         files.insert(f.dd.clone(), records);
     }
     let sysin = sysin.then(|| (0..1 + rng.below(3)).map(|_| sysin_line(rng)).collect());
-    Inputs { files, sysin }
+    let parm = parm.then(|| parm_text(rng));
+    Inputs { files, sysin, parm }
+}
+
+/// Whether the main program's PROCEDURE DIVISION USING takes the parameter Language Environment
+/// gives an EXEC PGM=,PARM=: one item, a group whose first elementary item is a halfword binary
+/// length.
+fn takes_parm(compiled: &exec::Compiled) -> bool {
+    let [param] = compiled.program.using.as_slice() else { return false };
+    let layout = &compiled.layout;
+    let Some(&item) = layout.linkage_roots.iter().find(|&&i| layout.items[i].name.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(&param.name))) else { return false };
+    let mut at = item;
+    while let Some(&first) = layout.items[at].children.first() {
+        at = first;
+    }
+    at != item && matches!(layout.items[at].kind, Kind::Binary { .. }) && layout.items[at].size == 2
 }
 
 /// Every statement of the program, nested ones included.
@@ -545,6 +571,9 @@ impl Runner<'_> {
             fs::write(&path, sysin_text(lines))?;
             given.push(("SYSIN", path));
         }
+        if let Some(parm) = &inputs.parm {
+            command.arg("--parm").arg(String::from_utf8_lossy(parm).as_ref());
+        }
         for (dd, path) in &given {
             command.arg("--dd").arg(format!("{dd}={}", path.display()));
         }
@@ -566,9 +595,9 @@ pub(crate) fn abend_line(line: &str, roots: &[PathBuf]) -> Option<Outcome> {
     Some(Outcome::Abend { code: code.to_string(), file: crate::evidence::relative(Path::new(file), roots), line: number, message: message.to_string() })
 }
 
-/// The smallest input found that still ends at the same abend, records and lines dropped and then
-/// each field put back to a value that breaks nothing, and whether the search finished within its
-/// budget of runs.
+/// The smallest input found that still ends at the same abend, records and lines dropped, the PARM
+/// cut short, and then each field put back to a value that breaks nothing, and whether the search
+/// finished within its budget of runs.
 fn minimize(runner: &mut Runner, feeds: &[Feed], others: &Others, mut inputs: Inputs, place: &(String, String, i64), budget: u32) -> (Inputs, bool) {
     let mut left = budget;
     let mut holds = |runner: &mut Runner, candidate: &Inputs| -> bool {
@@ -599,6 +628,15 @@ fn minimize(runner: &mut Runner, feeds: &[Feed], others: &Others, mut inputs: In
             }
             if holds(runner, &candidate) {
                 inputs = candidate;
+            }
+        }
+    }
+    if let Some(parm) = inputs.parm.clone() {
+        for keep in [0, parm.len() / 4, parm.len() / 2, 3 * parm.len() / 4] {
+            let candidate = Inputs { parm: Some(parm[..keep].to_vec()), ..inputs.clone() };
+            if keep < parm.len() && holds(runner, &candidate) {
+                inputs = candidate;
+                break;
             }
         }
     }
@@ -811,13 +849,14 @@ pub fn run(req: Request) -> ExitCode {
     let Some(file) = from_root(&req.program, &req.root) else {
         return fail(format!("{} is not under --root {}", req.program.display(), req.root.display()));
     };
-    if !compiled.program.using.is_empty() {
-        return fail(format!("{} takes PROCEDURE DIVISION USING parameters: fuzz runs a main program", compiled.program.id));
+    let parm = takes_parm(&compiled);
+    if !compiled.program.using.is_empty() && !parm {
+        return fail(format!("{} takes PROCEDURE DIVISION USING parameters that are not a PARM's halfword length and text: fuzz runs a main program", compiled.program.id));
     }
     let (feeds, sysin, others) = inputs_of(&compiled, &rest);
-    if feeds.is_empty() && !sysin {
+    if feeds.is_empty() && !sysin && !parm {
         let unfed = if others.unfed.is_empty() { String::new() } else { format!(" (not varied: {})", others.unfed.join(", ")) };
-        return fail(format!("{} reads no sequential, indexed or relative file on a DD of its own{unfed} and no SYSIN, so there is nothing to vary", compiled.program.id));
+        return fail(format!("{} reads no sequential, indexed or relative file on a DD of its own{unfed}, no SYSIN and no PARM, so there is nothing to vary", compiled.program.id));
     }
     let evidence = req.out.join("evidence");
     let coverage = req.out.join("coverage");
@@ -829,7 +868,7 @@ pub fn run(req: Request) -> ExitCode {
     let mut runner = Runner { req: &req, work, count: 0, rdw };
 
     // What the program does on empty input is no input's doing, so an abend it gives then is not kept.
-    let empty = Inputs { files: feeds.iter().map(|f| (f.dd.clone(), Vec::new())).collect(), sysin: sysin.then(Vec::new) };
+    let empty = Inputs { files: feeds.iter().map(|f| (f.dd.clone(), Vec::new())).collect(), sysin: sysin.then(Vec::new), parm: parm.then(Vec::new) };
     let baseline = match runner.run(&empty, &others, None) {
         Ok(o) => o.place(),
         Err(e) => return fail(format!("a run could not start: {e}")),
@@ -838,7 +877,7 @@ pub fn run(req: Request) -> ExitCode {
     let mut tally = Tally::new();
     let mut kept: Vec<((String, String, i64), Inputs)> = Vec::new();
     for _ in 0..req.runs {
-        let inputs = generate(&mut rng, &feeds, sysin);
+        let inputs = generate(&mut rng, &feeds, sysin, parm);
         let outcome = match runner.run(&inputs, &others, None) {
             Ok(o) => o,
             Err(e) => return fail(format!("a run could not start: {e}")),
@@ -877,6 +916,11 @@ pub fn run(req: Request) -> ExitCode {
         if let Some(lines) = &small.sysin {
             let id = format!("r{n}-SYSIN");
             inputs_out.push(input(&id, "sysin", "SYSIN", &sysin_text(lines), minimized));
+            ids.push(Value::from(id));
+        }
+        if let Some(text) = &small.parm {
+            let id = format!("r{n}-PARM");
+            inputs_out.push(input(&id, "parm", "PARM", text, minimized));
             ids.push(Value::from(id));
         }
         runs_out.push(kept_run(ids, &outcome, journal, n));
@@ -991,7 +1035,7 @@ mod tests {
         let feeds = [Feed { dd: "KS".into(), length: 3, variable: None, shapes, keys: vec![(0, 2), (2, 1)], relative: false }];
         let mut rng = Rng(3);
         for _ in 0..200 {
-            let records = &generate(&mut rng, &feeds, false).files["KS"];
+            let records = &generate(&mut rng, &feeds, false, false).files["KS"];
             assert!(records.windows(2).all(|w| w[0][..2] < w[1][..2]));
             assert_eq!(records.iter().map(|r| r[2]).collect::<BTreeSet<_>>().len(), records.len());
         }

@@ -311,3 +311,56 @@ fn a_program_s_return_code_of_2_is_not_a_refusal_and_a_refusal_says_why() {
     assert!(o.status.success(), "{}", stderr(&o));
     assert!(stderr(&o).contains("5 runs refused; the first: QTYSUM.cbl:21 S806 CALL NOSUCH"), "{}", stderr(&o));
 }
+
+const PARM_PROGRAM: &[&str] = &[
+    "       CBL SSRANGE",
+    "       IDENTIFICATION DIVISION.",
+    "       PROGRAM-ID. PARMSUM.",
+    "       DATA DIVISION.",
+    "       WORKING-STORAGE SECTION.",
+    "       01 WS-NUM PIC 9(5).",
+    "       01 WS-TOTAL PIC 9(9) VALUE 0.",
+    "       01 WS-TABLE.",
+    "          05 WS-SLOT PIC X(3) OCCURS 10 TIMES.",
+    "       LINKAGE SECTION.",
+    "       01 PARM-AREA.",
+    "          05 PARM-LEN  PIC S9(4) COMP.",
+    "          05 PARM-TEXT PIC X(100).",
+    "       PROCEDURE DIVISION USING PARM-AREA.",
+    "           DISPLAY 'PARM ' PARM-LEN ' ' PARM-TEXT (1:PARM-LEN + 1)",
+    "           IF PARM-LEN >= 5",
+    "              MOVE PARM-TEXT (1:5) TO WS-NUM",
+    "              ADD WS-NUM TO WS-TOTAL",
+    "              MOVE 'ABC' TO WS-SLOT (PARM-LEN)",
+    "           END-IF",
+    "           GOBACK.",
+];
+
+#[test]
+fn run_passes_a_parm_as_language_environment_does_and_fuzz_varies_it() {
+    let dir = temp("parm");
+    fs::write(dir.join("repo/src/PARMSUM.cbl"), PARM_PROGRAM.join("\n") + "\n").unwrap();
+    let run = Command::new(env!("CARGO_BIN_EXE_ironwork")).current_dir(dir.join("repo")).args(["run", "src/PARMSUM.cbl", "--parm", "00042/RPTOPTS(ON)"]).output().unwrap();
+    assert!(String::from_utf8_lossy(&run.stdout).starts_with("PARM 0005 00042"), "{}{}", String::from_utf8_lossy(&run.stdout), stderr(&run));
+
+    let o = Command::new(env!("CARGO_BIN_EXE_ironwork")).current_dir(dir.join("repo")).args(["fuzz", "src/PARMSUM.cbl", "--runs", "60", "-o"]).arg(dir.join("run")).output().unwrap();
+    assert!(o.status.success(), "{}", stderr(&o));
+    let manifest = fs::read_to_string(dir.join("run/manifest.json")).unwrap();
+    assert!(manifest.contains("\"kind\":\"parm\",\"minimized\""), "{manifest}");
+    let found = kept(&manifest);
+    assert!(found.iter().any(|k| k == "S0C7 18"), "{found:?}");
+    assert!(found.iter().any(|k| k == "U4038 19"), "{found:?}");
+}
+
+#[test]
+fn fuzz_refuses_a_flag_it_would_not_use() {
+    let dir = temp("flags");
+    for extra in [&["--declare", "x"][..], &["--sql-record", "x"], &["--proclib", "x"], &["--transid", "T"], &["--parm", "X"], &["--job", "--cics"]] {
+        let o = fuzz(&dir, "run", extra);
+        assert_eq!(o.status.code(), Some(2), "{extra:?}");
+        assert!(!dir.join("run").exists(), "{extra:?}");
+    }
+    let o = Command::new(env!("CARGO_BIN_EXE_ironwork")).current_dir(dir.join("repo")).args(["check", "src/QTYSUM.cbl", "--parm", "X"]).output().unwrap();
+    assert_eq!(o.status.code(), Some(2));
+    assert!(stderr(&o).contains("--parm is for run"), "{}", stderr(&o));
+}

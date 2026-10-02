@@ -204,15 +204,17 @@ cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
    (VLR decides which), or now and then shorter than READ allows. A line-sequential file, an
    indexed file whose keys lie past its shortest record, a contained program's file and a DD that
    more than one file names are given an empty data set. A file assigned to SYSIN reads the SYSIN
-   lines.
+   lines. A program whose one USING item is the parameter Language Environment gives a job step
+   (a group led by a halfword binary length) gets a PARM of up to 100 characters through `run
+   --parm`, which the run's journal does not record; the manifest holds it.
 2. Each run is its own `ironwork run` with the given `--clock` (2026-01-01 without it), stopped
    after `--timeout` seconds. Every data set is written inside DIR under a name of its own, never
    under its DD name, since ASSIGN may name a path. `--seed` fixes the inputs, so the same seed
    gives the same runs.
 3. An abend the program gives on empty input is not the input's doing and is not kept. Every other
    abend is kept once by code, file and line, with its input made as small as still gives it:
-   records and SYSIN lines dropped, then each field outside the keys set to a value that breaks
-   nothing, within 200 runs.
+   records and SYSIN lines dropped, the PARM cut short, then each field outside the keys set to a
+   value that breaks nothing, within 200 runs.
 4. Each kept input runs once more with `--evidence DIR/evidence` and `--coverage
    DIR/coverage/N.json`, so the abend rests on that run's journal (§1), whose `abend` record names
    the code, the file and the line. DIR is refused inside the program's directory or a library, as
@@ -224,7 +226,7 @@ cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
 `roots` (the program's directory, then each `-I` and `-L` library, by path from `--root`, `.` for
 `--root` itself and null for one outside it: the order a journal's `input` records number them, so
 a file named relative to its library is found under that library),
-`entry` (`run`), `inputs` (`id`, `kind` `dd` or `sysin`, `name`, `bytes` in base64, `minimized`,
+`entry` (`run`), `inputs` (`id`, `kind` `dd`, `sysin` or `parm`, `name`, `bytes` in base64, `minimized`,
 false when the 200 runs ran out first), `counts` (`runs`, `clean`, `abend`, `timeout`, `refused`,
 over the generated runs; an abend that says what the surroundings lack counts as refused and is not
 kept: IRONWORK, a construct ironwork does not run, and S806, a CALL of a program no `-L` library
@@ -233,5 +235,5 @@ program's RETURN-CODE can also give, and a run in which ironwork itself panicked
 gives the first refusal's reason and the first panic) and `runs`,
 one per kept abend (`input` ids, `outcome` `abend`, `abend` with `code`, `file` relative to the
 program's directory or the library it came from, `line` and `message`, `journal` the run id, and
-`coverage`). A program that takes PROCEDURE DIVISION USING is refused: a CALL would supply its
-parameters.
+`coverage`). A program that takes any other PROCEDURE DIVISION USING is refused: a CALL would
+supply its parameters.

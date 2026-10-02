@@ -7,7 +7,7 @@ const USAGE: &str = "ironwork for COBOL
 usage:
   ironwork run <program.cbl> [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include]
                [-debug] [--cics-return-warning=once|always|never] [-I <dir>]... [-L <dir>]... [--vm]
-               [--dd NAME=path[:format][:mod]]... [--clock <time>]
+               [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
                [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                                                        compile and run; CBL and PROCESS cards set the options
   ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]...
@@ -70,6 +70,10 @@ flags:
              DD SYSIN is what ACCEPT reads; without it, ACCEPT reads standard input. DD PRINTER is
              the virtual printer: CALL 'SYSTEM' or 'C$SYSTEM' with an lp or lpr command appends
              the files it names, each a DD, there and returns 0, and runs nothing
+  --parm TEXT
+             with run, the PARM an EXEC PGM= would give: the program's first USING item addresses
+             a halfword length and the arguments before the last slash, as Language Environment
+             passes them under CBLOPTS(ON). The run's journal does not record it
   --provenance FILE
              write what the compile read and decided as an in-toto statement with the SLSA
              Provenance v1 predicate: the source and every COPY member by digest, the option cards
@@ -231,7 +235,8 @@ fuzz flags:
              The inputs are the sequential, indexed and relative files the program OPENs INPUT
              or I-O on a DD of its own, built field by field from their records' descriptions, an
              indexed file's in key order, a relative file's a record per slot with some empty,
-             variable-length records behind RDWs, and SYSIN lines where it ACCEPTs from SYSIN.
+             variable-length records behind RDWs, SYSIN lines where it ACCEPTs from SYSIN, and a
+             PARM where its USING item is a halfword length and text.
              Each data set is written inside the fuzz run's directory. An abend the program
              gives on empty input is not kept; any other, by code and place, is kept once with the
              smallest input found that still gives it
@@ -337,8 +342,16 @@ fn driver() -> ExitCode {
     let mut clock_text: Option<String> = None;
     let mut fuzz_root: Option<std::path::PathBuf> = None;
     let (mut fuzz_runs, mut fuzz_seed, mut fuzz_timeout): (Option<u32>, Option<u64>, Option<u64>) = (None, None, None);
+    let mut parm: Option<String> = None;
+    let (mut fuzz_job, mut fuzz_cics) = (false, false);
     while let Some(a) = args.next() {
         match a.as_str() {
+            "--job" => fuzz_job = true,
+            "--cics" => fuzz_cics = true,
+            "--parm" => match args.next().filter(|p| p.chars().count() <= rt::le::parm::PARM_LIMIT) {
+                Some(p) => parm = Some(p),
+                None => return usage_error(&format!("--parm needs the text of a PARM, at most {} characters", rt::le::parm::PARM_LIMIT)),
+            },
             "-h" | "--help" => {
                 println!("{USAGE}");
                 return ExitCode::SUCCESS;
@@ -497,24 +510,38 @@ fn driver() -> ExitCode {
         || trace_statements.is_some() || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() || !matches!(clock, exec::unit::Clock::System)
         || compare_base.is_some() || compare_head.is_some() || declare.is_some() || statement.is_some() || !expected.is_empty() || datasets.is_some()
         || !proclibs.is_empty() || user.is_some()
-        || vm;
+        || vm || parm.is_some();
     let dump_flags = !dump_options.only.is_empty() || dump_options.strings || !dump_options.check;
-    let fuzz_flags = fuzz_root.is_some() || fuzz_runs.is_some() || fuzz_seed.is_some() || fuzz_timeout.is_some();
+    let fuzz_flags = fuzz_root.is_some() || fuzz_runs.is_some() || fuzz_seed.is_some() || fuzz_timeout.is_some() || fuzz_job || fuzz_cics;
     if vm && (rest.first().map(String::as_str) != Some("run") || evidence_dir.is_some()) {
         return usage_error("--vm is for run, and not with --evidence");
     }
-    if let [c, program] = rest.as_slice()
-        && c == "fuzz"
-    {
+    if parm.is_some() && rest.first().map(String::as_str) != Some("run") {
+        return usage_error("--parm is for run; a job's PARM comes from its EXEC, and fuzz makes its own");
+    }
+    if rest.first().is_some_and(|c| c == "fuzz") {
+        let [_, file] = rest.as_slice() else { return usage_error("fuzz needs one program, or one job with --job") };
         let Some(out) = out_dir else { return usage_error("fuzz needs -o DIR") };
-        if run_flags && (!dds.is_empty() || replay.is_some() || sql_db.is_some() || evidence_dir.is_some() || coverage_file.is_some() || provenance_file.is_some() || trace_marker.is_some() || trace_statements.is_some() || !cics_options.is_empty() || datasets.is_some()) {
-            return usage_error("fuzz makes its own DDs, evidence and coverage; it takes -o, --runs, --seed, --timeout, --root, --clock, -I, -L and the compile flags");
+        if fuzz_job && fuzz_cics {
+            return usage_error("fuzz takes --job or --cics, not both");
         }
-        if dump_flags || bundle.is_some() || source_prefix.is_some() {
-            return usage_error("fuzz takes -o, --runs, --seed, --timeout, --root, --clock, -I, -L and the compile flags");
+        // Fuzz makes every input, DD, journal and coverage report itself; a flag it would not use is
+        // refused rather than ignored.
+        let made = !dds.is_empty() || replay.is_some() || keyed || sql_db.is_some() || sql_record.is_some() || evidence_dir.is_some() || coverage_file.is_some() || provenance_file.is_some() || trace_marker.is_some() || trace_statements.is_some() || datasets.is_some();
+        let elsewhere = compare_base.is_some() || compare_head.is_some() || declare.is_some() || statement.is_some() || !expected.is_empty() || dump_flags || bundle.is_some() || source_prefix.is_some();
+        let job_only = !fuzz_job && (!proclibs.is_empty() || user.is_some());
+        let cics_only = !fuzz_cics && !cics_options.is_empty();
+        let cics_made = cics_options.iter().any(|(n, _)| matches!(n.as_str(), "--commarea" | "--commarea-out" | "--screens" | "--serve"));
+        if made || elsewhere || job_only || cics_only || cics_made {
+            let taken = match (fuzz_job, fuzz_cics) {
+                (true, _) => ", --proclib, --user",
+                (_, true) => ", --transid, --termid, --userid, --applid, --sysid, --transaction, --csd, --file, --td",
+                _ => "",
+            };
+            return usage_error(&format!("fuzz makes its own inputs, DDs, evidence and coverage; it takes -o, --runs, --seed, --timeout, --root, --clock, -I, -L{taken} and the compile flags"));
         }
-        return fuzz::run(fuzz::Request {
-            program: program.into(),
+        let request = fuzz::Request {
+            program: file.into(),
             out,
             root: fuzz_root.unwrap_or_else(|| std::path::PathBuf::from(".")),
             runs: fuzz_runs.unwrap_or(200),
@@ -524,10 +551,17 @@ fn driver() -> ExitCode {
             program_dirs,
             flags,
             clock: clock_text.unwrap_or_else(|| "2026-01-01T00:00:00".into()),
-        });
+        };
+        if fuzz_job {
+            return usage_error("fuzz --job is not built yet");
+        }
+        if fuzz_cics {
+            return usage_error("fuzz --cics is not built yet");
+        }
+        return fuzz::run(request);
     }
     if fuzz_flags {
-        return usage_error("--runs, --seed, --timeout and --root are for fuzz");
+        return usage_error("--runs, --seed, --timeout, --root, --job and --cics are for fuzz");
     }
     let compile_flags = out_dir.is_some() || bundle.is_some() || source_prefix.is_some();
     match rest.split_first() {
@@ -780,9 +814,10 @@ fn driver() -> ExitCode {
             }
         }) as exec::unit::Observer<'_>
     });
-    let ended = match &code {
-        None => compiled.execute_observed(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer),
-        Some(code) => match exec::vm::execute(&compiled, code, library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, None, &mut None) {
+    let ended = match (&code, &parm) {
+        (None, Some(p)) => compiled.execute_main(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, p),
+        (None, None) => compiled.execute_observed(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer),
+        (Some(code), parm) => match exec::vm::execute(&compiled, code, library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, parm.as_deref(), &mut None) {
             Ok(done) => Ok(done),
             Err(exec::vm::Halt::Abend(abend)) => Err(abend),
             Err(exec::vm::Halt::Unimplemented(what)) => {
