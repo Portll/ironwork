@@ -92,7 +92,7 @@ mod tests {
 
     #[test]
     fn a_currency_sign_value_fills_the_first_currency_position_fixed_or_floating() {
-        let signs = [CurrencySign { value: "W".into(), symbol: 'W' }, CurrencySign { value: "EUR ".into(), symbol: 'U' }];
+        let signs = [CurrencySign { value: "W".into(), symbol: 'W', hex: None }, CurrencySign { value: "EUR ".into(), symbol: 'U', hex: None }];
         let edit = |pic: &str, value: i128| {
             let p = analyse_with(pic, Notation { decimal_comma: true, currency: &signs }).unwrap();
             let text = numeric(p.edit.as_ref().unwrap(), p.digits, value < 0, value.unsigned_abs(), false, ',', currency(&p));

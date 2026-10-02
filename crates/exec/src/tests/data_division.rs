@@ -345,6 +345,46 @@ fn currency_signs_edit_fixed_and_floating_de_edit_and_reach_contained_programs()
     assert!(compile_errors(&dollar).contains("'$' is not a currency symbol"), "{}", compile_errors(&dollar));
 }
 
+/// A program whose SPECIAL-NAMES are `names`, with `data` in its WORKING-STORAGE, that moves 5.5
+/// to E and displays it.
+fn currency_program(card: &str, names: &str, data: &str) -> String {
+    [
+        card,
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. CUR.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n",
+        "       SPECIAL-NAMES.\n",
+        names,
+        ".\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n",
+        data,
+        "       PROCEDURE DIVISION.\n",
+        &line("MOVE 5.5 TO E"),
+        &line("DISPLAY '[' E ']'"),
+        &line("GOBACK."),
+    ]
+    .concat()
+}
+
+#[test]
+fn a_hexadecimal_currency_sign_is_its_bytes_in_the_programs_code_page() {
+    let euro = currency_program("", "           CURRENCY SIGN IS X'9F' WITH PICTURE SYMBOL 'Y'", "       01  E PIC YY9.99.\n");
+    assert_eq!(run(&euro), "[ €5.50]\n");
+    let dollar = currency_program("", "           CURRENCY SIGN IS X'5B'", "       01  E PIC $$9.99.\n");
+    assert_eq!(run(&dollar), "[ $5.50]\n");
+    let pound = currency_program("       CBL CODEPAGE(285)\n", "           CURRENCY SIGN IS X'5B'", "       01  E PIC ££9.99.\n");
+    assert_eq!(run(&pound), "[ £5.50]\n");
+    assert!(compile_errors(&pound.replace("CODEPAGE(285)", "CODEPAGE(37)")).contains("PICTURE ££9.99: '£' is not a numeric-edited symbol"));
+    let letter = currency_program("", "           CURRENCY SIGN IS X'86'", "       01  E PIC ff9.99.\n");
+    assert_eq!(run(&letter), "[ f5.50]\n");
+    let refused = |names: &str| {
+        let source = currency_program("", names, "       01  E PIC 9.9.\n");
+        syntax::parse(&source).map_or_else(|e| e.message, |_| compile_errors(&source))
+    };
+    assert!(refused("           CURRENCY SIGN IS X'5B5B'").contains("CURRENCY SIGN X'5B5B' is not one character that can be a PICTURE currency symbol"));
+    assert!(refused("           CURRENCY SIGN IS X'F1'").contains("CURRENCY SIGN X'F1' is \"1\" in the program's code page, which cannot be a PICTURE currency symbol"));
+    assert!(refused("           CURRENCY SIGN IS X'F1C1' PICTURE SYMBOL 'Y'").contains("which contains a digit, +, -, . or ,"));
+    assert!(refused("           CURRENCY SIGN IS '$'\n           CURRENCY SIGN IS X'5B'").contains("a second CURRENCY SIGN clause for the currency symbol '$'"));
+    assert!(refused("           CURRENCY SIGN IS X''").contains("CURRENCY SIGN needs a nonempty alphanumeric literal"));
+}
+
 #[test]
 fn a_group_sender_moves_its_bytes_and_a_statements_shared_result_is_computed_before_any_receiver_changes() {
     let out = run(&program(

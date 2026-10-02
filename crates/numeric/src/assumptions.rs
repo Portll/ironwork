@@ -258,6 +258,7 @@ pub const VARIABLY_LOCATED_ITEMS: &str = "C161";
 pub const EXTERNAL_STORAGE: &str = "C180";
 pub const GLOBAL_NAMES: &str = "C181";
 pub const SET_TO_ENTRY: &str = "C140";
+pub const HEX_CURRENCY_SIGN: &str = "C141";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1330,7 +1331,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: CURRENCY_SIGNS,
-        claim: "Once a program has a CURRENCY SIGN clause, $ is a currency symbol in its PICTUREs only if a clause names it: the Language Reference says the currency symbol is $ or the character a clause or the CURRENCY option specifies, and that the clause overrides the option (SC27-8713-03, pp. 130, 212), not that $ stays. A floating currency string of a value longer than one character ends in the position left of the first digit shown, the first currency position holding the whole value (p. 210). NUMVAL-C and TEST-NUMVAL-C without argument-2 take as cs the value of the program's only CURRENCY SIGN clause, where p. 616 names the currency symbol, the CURRENCY option's character when there is no clause (p. 212; C141), and $ otherwise. A hexadecimal currency sign literal is refused, since its character depends on the code page",
+        claim: "Once a program has a CURRENCY SIGN clause, $ is a currency symbol in its PICTUREs only if a clause names it: the Language Reference says the currency symbol is $ or the character a clause or the CURRENCY option specifies, and that the clause overrides the option (SC27-8713-03, pp. 130, 212), not that $ stays. A floating currency string of a value longer than one character ends in the position left of the first digit shown, the first currency position holding the whole value (p. 210). NUMVAL-C and TEST-NUMVAL-C without argument-2 take as cs the value of the program's only CURRENCY SIGN clause, where p. 616 names the currency symbol, the CURRENCY option's character when there is no clause (p. 212; C211), and $ otherwise. A hexadecimal currency sign literal is read as C141 says",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -1632,6 +1633,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: SET_TO_ENTRY,
         claim: "SET procedure-pointer or function-pointer TO ENTRY literal or identifier (Language Reference SC27-8713-03, 'Format 6: SET for procedure-pointer and function-pointer data items', pp. 449-450) resolves the entry when the SET runs: the program holding the name is found and loaded as a CALL of the name would find it, static for a literal under NODYNAM and dynamic for an identifier or under DYNAM (Programming Guide SC27-8714-03, pp. 557-558), and a name no program or Language Environment service has abends S806 at the SET. The manuals do not say when a dynamic entry is loaded; ironwork loads it at the SET because the pointer then holds an entry address. The pointer holds a value of ironwork's own, the same for each SET of the same name and resolution, so two pointers set to one entry compare equal; a CALL through it enters the entry as a CALL of the name does, with the arguments passed as the BY phrases say (pp. 320, 559), and ON EXCEPTION never runs, the entry having been found. After a CANCEL of the program the pointer is undefined (p. 558); ironwork's CALL through it loads the program again. identifier-9, a user-defined function returning a pointer, and SET TO a pointer a non-COBOL program set are not run, ironwork having neither",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: HEX_CURRENCY_SIGN,
+        claim: "CURRENCY SIGN IS X'...' gives the currency sign value the literal's bytes are in the program's code page, the CODEPAGE option's, as the Programming Guide's table of the euro sign's code points by code page has it, X'9F' in 1140 and X'5A' in 1142 (SC27-8714-03, pp. 64-65). Without PICTURE SYMBOL the literal is one byte, and the character it is must be one a PICTURE currency symbol can be; with it, the characters must include no digit, +, -, . or , (Language Reference SC27-8713-03, pp. 129-130). The symbol a PICTURE writes is the character the byte is, so the source spells it as the code page shows it; a lowercase letter, the same byte in every code page ironwork carries, keeps its case in a PICTURE as an alphanumeric symbol's does. The guide's own example, X'9F' WITH PICTURE SYMBOL 'U' (p. 64), is refused, since the Language Reference excludes U from literal-7 (p. 130)",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

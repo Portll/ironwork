@@ -161,6 +161,10 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
             errors.push(Error::at(Pos::default(), e.to_string()));
         }
     }
+    let page = options.code_page();
+    if let Err(m) = syntax::parser::decode_currency(&mut program.environment, |bytes| page.decode(bytes)) {
+        errors.push(Error::at(Pos::default(), m));
+    }
     default_currency(&mut program, &mut options, &mut errors);
     national_symbols(&program, &mut options, &mut errors);
     if options.intdate == numeric::IntDate::Lilian {
@@ -287,7 +291,7 @@ fn option_severity(e: &numeric::options::OptionError) -> Severity {
 /// [`numeric::assumptions::CURRENCY_OPTION`]).
 fn default_currency(program: &mut Program, options: &mut Options, errors: &mut Vec<Error>) {
     match options.currency_symbol() {
-        Some(Ok(symbol)) if program.environment.currency.is_empty() => program.environment.currency.push(CurrencySign { value: symbol.to_string(), symbol }),
+        Some(Ok(symbol)) if program.environment.currency.is_empty() => program.environment.currency.push(CurrencySign { value: symbol.to_string(), symbol, hex: None }),
         Some(Err(c)) => {
             errors.push(Error::at(Pos::default(), format!("CBL CURRENCY: code page {} reads its byte as {c:?}, which cannot be a currency symbol", options.codepage)).graded(Severity::Error));
             options.currency = None;

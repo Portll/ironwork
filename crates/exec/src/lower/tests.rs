@@ -1216,6 +1216,15 @@ fn decimal_point_is_comma_and_currency_signs_reach_the_options_the_edits_and_dis
 }
 
 #[test]
+fn a_hexadecimal_currency_sign_reaches_the_edits_and_numval_as_its_code_page_character() {
+    let source = with_special_names("           CURRENCY SIGN IS X'9F' WITH PICTURE SYMBOL 'Y'.\n", "       01  E PIC YY9.99.\n", &[line("MOVE 5.5 TO E"), line("GOBACK.")]);
+    let p = lowered(&source);
+    assert_eq!((p.options.numval_currency.as_str(), p.edits[0].currency.as_str()), ("€", "€"));
+    let letter = with_special_names("           CURRENCY SIGN IS X'86'.\n", "       01  E PIC ff9.99.\n", &[line("GOBACK.")]);
+    assert_eq!(lowered(&letter).edits[0].currency, "f");
+}
+
+#[test]
 fn string_unstring_and_inspect_plans_decide_each_receiver_s_store() {
     let p = lowered(&program(
         "",

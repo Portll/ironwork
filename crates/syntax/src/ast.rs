@@ -740,7 +740,13 @@ pub struct Environment {
 pub struct CurrencySign {
     pub value: String,
     pub symbol: char,
+    /// CURRENCY SIGN IS X'...': the literal's bytes, which the program's code page makes `value`,
+    /// and `symbol` too when there is no PICTURE SYMBOL (`symbol` is [`HEX_SYMBOL`] until then).
+    pub hex: Option<Vec<u8>>,
 }
+
+/// The symbol of a hexadecimal CURRENCY SIGN without PICTURE SYMBOL before its code page decodes it.
+pub const HEX_SYMBOL: char = '\0';
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Sorting {

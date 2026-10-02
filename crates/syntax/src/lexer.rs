@@ -75,6 +75,17 @@ fn is_word_char(c: char) -> bool {
 /// A single-byte character outside IBM's basic COBOL character set (Language Reference
 /// SC27-8713-03, Table 1, pp. 3-6), which IBM accepts with an error as part of the text around it
 /// (assumption C123). `$` and `&`, which ironwork reads only where COBOL puts them, are left out.
+/// The lowercase letter an EBCDIC byte is, the same in every code page ironwork carries.
+fn ebcdic_lowercase(byte: u8) -> Option<char> {
+    let (start, first) = match byte {
+        0x81..=0x89 => (0x81, b'a'),
+        0x91..=0x99 => (0x91, b'j'),
+        0xA2..=0xA9 => (0xA2, b's'),
+        _ => return None,
+    };
+    Some(char::from(first + (byte - start)))
+}
+
 fn non_cobol(c: char) -> bool {
     u32::from(c) <= 0xFF && !c.is_ascii_alphanumeric() && !" \n+-*/=$,;.\"'()><:_&".contains(c)
 }
@@ -108,6 +119,14 @@ impl Lexer<'_> {
                 let mut chars = a.chars();
                 let names_symbol = before(1) == "SYMBOL" || (1..=3).any(|back| before(back) == "CURRENCY" && (1..back).all(|b| matches!(before(b), "SIGN" | "IS")));
                 if let (Some(c), None, true) = (chars.next(), chars.next(), names_symbol) {
+                    self.currency.push(c);
+                }
+            }
+            Tok::Hex(bytes) => {
+                let names_symbol = (1..=3).any(|back| before(back) == "CURRENCY" && (1..back).all(|b| matches!(before(b), "SIGN" | "IS")));
+                if let ([byte], true) = (bytes.as_slice(), names_symbol)
+                    && let Some(c) = ebcdic_lowercase(*byte)
+                {
                     self.currency.push(c);
                 }
             }

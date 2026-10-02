@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn a_currency_sign_clause_names_the_symbol_and_the_value_it_stands_for() {
-        let signs = [CurrencySign { value: "W".into(), symbol: 'W' }, CurrencySign { value: "EUR ".into(), symbol: 'e' }];
+        let signs = [CurrencySign { value: "W".into(), symbol: 'W', hex: None }, CurrencySign { value: "EUR ".into(), symbol: 'e', hex: None }];
         let notation = Notation { decimal_comma: true, currency: &signs };
         let w = analyse_with("W9.999,99", notation).unwrap();
         assert_eq!((w.category, w.size, w.digits, w.scale, w.currency.as_deref()), (Category::NumericEdited, 9, 6, 2, Some("W")));
