@@ -160,7 +160,7 @@ It is zero-dependency Rust.
 | 12 | The PostgreSQL backend (SQL step 7) | ironwork | L | Built; TLS in the separate `tls/` build (D2); Q5 passes against PostgreSQL 14.19 |
 | 13 | The build gate running `ironwork check` (E1) | cobolwork | S | `ironwork check` exists now, exiting 12 on a compile error |
 | 14 | A CICS region defined by a CSD, for the TN3270 server (E6) | ironwork | S | Built (2026-09-30): `--serve --csd` reads the DEFINE TRANSACTIONs; cobolwork's CSD fixtures are shared in `fixtures/cobolwork/csd/` |
-| 15 | Crash-fuzzing programs through ironwork (E5) | Both | L | S0C7, S0C4 and SSRANGE become findings, each with its input |
+| 15 | Crash-fuzzing programs through ironwork (E5) | Both | L | Built: `ironwork fuzz` keeps each abend a generated input causes, with its smallest input, journal and coverage ([evidence.md](evidence.md) §5); cobolwork reports them as findings |
 | 16 | Dynamic witness (E4): `cobolwork confirm` runs ironwork with a payload | Both | L | ironwork's half built (2026-09-30): `--trace-marker` records whether the marker reached each sink ([evidence.md](evidence.md) §1.1); cobolwork's labeller is next |
 | 17 | A caller for cobolwork's remediation gate | cobolwork | M | BACKLOG item |
 | 18 | JCL runner (E7) and migration equivalence testing (E8) | ironwork | XL, then L | E8 builds on SQL replay and E7 |
@@ -204,7 +204,7 @@ costs nothing but CI time.
 | E2 | Shared data between the repositories | P1 | M |
 | E3 | cobolwork rules from ironwork's numeric and code-page model | P1 | M |
 | E4 | Confirmed findings: an ironwork run shows the input reaching the sink (operator 2026-09-30: execution labels for cobolwork's precision). Built: `--trace-marker`, a `sink` record per operation reached with and without the marker, [evidence.md](evidence.md) §1.1; sinks ironwork does not run yet (MQ, dynamic SQL, sockets) are not traced | P2 | L |
-| E5 | Fuzzing COBOL programs for abends, reported as findings with their inputs | P2 | L |
+| E5 | Fuzzing COBOL programs for abends, reported as findings with their inputs. Built: `ironwork fuzz` for batch programs, varying sequential and indexed fixed-length files and SYSIN ([evidence.md](evidence.md) §5); CICS tasks and jobs are to come | P2 | L |
 | E6 | CSD-defined CICS regions for the TN3270 server | P2 | S |
 | E7 | A JCL runner: steps, DD allocation, COND and IF, in-stream data, and the utilities cobolwork's `lib/utilities.mjs` documents with IBM citations. `ironwork job` runs these with procedures, generation data groups, IEFBR14, IEBGENER, IDCAMS and SORT; PARM and DFSORT's record editing (INCLUDE, OMIT, INREC, OUTREC, OUTFIL) are to come | P2 | XL |
 | E8 | Migration equivalence: run a job under ironwork against recorded SQL and files, and compare with production's outputs. Built: `ironwork job --expected`, [evidence.md](evidence.md) §4 | P2 | L |

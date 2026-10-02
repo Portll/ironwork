@@ -14,7 +14,7 @@ use exec::unit::Event;
 use syntax::ast::OpenMode;
 
 /// A path named relative to the first of `roots` that holds it, or by its file name.
-fn relative(path: &Path, roots: &[PathBuf]) -> String {
+pub fn relative(path: &Path, roots: &[PathBuf]) -> String {
     let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     for root in roots {
         let root = std::path::absolute(root).unwrap_or_else(|_| root.clone());

@@ -165,3 +165,34 @@ JCL, and `program:<file>` for each COBOL program the job ran or CALLed, by diges
 (each step, its program and its outcome as the job log shows it), `results`, `declared`,
 `inconclusive`, `coverage` and `limit`. The verdicts and exit statuses are those of `compare`; a
 step that reached what ironwork does not model makes the verdict `inconclusive`.
+
+## 5. Abends from generated input: `ironwork fuzz`
+
+`ironwork fuzz PROGRAM.cbl -o DIR` runs a batch program many times on generated input and keeps
+each abend an input caused, in the directory cobolwork's abend set reads (`COBOLWORK_ABENDS=DIR
+cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
+
+1. The inputs are the sequential and indexed files of fixed-length records the program OPENs INPUT
+   or I-O, an indexed file's records in RECORD KEY order with one to a key, and SYSIN where it
+   ACCEPTs from SYSIN. Records are built field by field from their level-01
+   descriptions: mostly values the PICTURE allows, sometimes its boundary, and sometimes the bytes
+   that break it (spaces or asterisks in a zoned number, a packed field of spaces). A relative
+   file, or one whose records have more than one length, is given an empty data set.
+2. Each run is its own `ironwork run` with the given `--clock` (2026-01-01 without it), stopped
+   after `--timeout` seconds. `--seed` fixes the inputs, so the same seed gives the same runs.
+3. An abend the program gives on empty input is not the input's doing and is not kept. Every other
+   abend is kept once by code, file and line, with its input made as small as still gives it:
+   records and SYSIN lines dropped, then each field set to a value that breaks nothing.
+4. Each kept input runs once more with `--evidence DIR/evidence` and `--coverage
+   DIR/coverage/N.json`, so the abend rests on that run's journal (§1), whose `abend` record names
+   the code, the file and the line.
+
+`DIR/manifest.json` holds `tool` (`ironwork-fuzz`), `version`, `seed`, `strategy` (`fields`),
+`clock`, `program` (`file`, relative to `--root`, the current directory without it, and `id`),
+`entry` (`run`), `inputs` (`id`, `kind` `dd` or `sysin`, `name`, `bytes` in base64, `minimized`),
+`counts` (`runs`, `clean`, `abend`, `timeout`, `refused`, over the generated runs; an abend that
+says what the surroundings lack counts as refused and is not kept: IRONWORK, a construct ironwork
+does not run, and S806, a CALL of a program no `-L` library holds) and `runs`, one per kept abend
+(`input` ids, `outcome` `abend`, `abend` with `code`, `file` relative to the program's directory or
+the library it came from, `line` and `message`, `journal` the run id, and `coverage`). A program
+that takes PROCEDURE DIVISION USING is refused: a CALL would supply its parameters.

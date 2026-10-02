@@ -23,6 +23,9 @@ usage:
                                                        print a load module, one fact per line
   ironwork job <job.jcl> --datasets DIR[:text] [--proclib DIR]... [run flags] [-I <dir>]... [-L <dir>]... [--clock <time>] [--sql-replay path]
                                                        run a job's steps in order
+  ironwork fuzz <program.cbl> -o <dir> [--runs N] [--seed N] [--timeout SECONDS] [--root DIR] [--clock <time>]
+               [-I <dir>]... [-L <dir>]... [-silent] [-strict-sort-keys] [-debug]
+                                                       run a batch program on generated input and keep each abend
   ironwork assumptions [--c-series]                    list the register of assumptions, one per line
   ironwork --version
 flags:
@@ -194,6 +197,20 @@ job flags:
              a procedure library, searched for cataloged procedures and INCLUDE members after the
              data sets JCLLIB ORDER names: member M is the file DIR/M or DIR/M.jcl. In-stream
              procedures, SET, symbolic parameters and EXEC and DD overrides are expanded
+fuzz flags:
+  -o <dir>   the fuzz run's directory, which must be new or empty: manifest.json, evidence/ with the
+             journal of a run on each kept input, and coverage/ with that run's paragraphs, as
+             cobolwork's abend set reads them (docs/evidence.md §5)
+  --runs N   how many generated inputs to run, 200 without it
+  --seed N   the generator's seed, 1 without it; the same seed gives the same inputs
+  --timeout SECONDS
+             how long one run may take before it is stopped and counted a timeout, 10 without it
+  --root DIR the repository root the manifest names the program from, the current directory without it
+             The inputs are the sequential and indexed files of fixed-length records the program
+             OPENs INPUT or I-O, built field by field from their records' descriptions, an indexed
+             file's in key order, and SYSIN lines where it ACCEPTs from SYSIN. An abend the program
+             gives on empty input is not kept; any other, by code and place, is kept once with the
+             smallest input found that still gives it
 assumptions flags:
   --c-series
              put each entry's number in one C series first, its position in the register, with the
@@ -233,6 +250,7 @@ mod coverage;
 mod ddl;
 mod dump;
 mod evidence;
+mod fuzz;
 mod job;
 mod provenance;
 
@@ -288,6 +306,9 @@ fn driver() -> ExitCode {
     let mut proclibs: Vec<std::path::PathBuf> = Vec::new();
     let (mut out_dir, mut bundle, mut source_prefix): (Option<std::path::PathBuf>, Option<String>, Option<String>) = (None, None, None);
     let mut dump_options = dump::Options { check: true, ..Default::default() };
+    let mut clock_text: Option<String> = None;
+    let mut fuzz_root: Option<std::path::PathBuf> = None;
+    let (mut fuzz_runs, mut fuzz_seed, mut fuzz_timeout): (Option<u32>, Option<u64>, Option<u64>) = (None, None, None);
     while let Some(a) = args.next() {
         match a.as_str() {
             "-h" | "--help" => {
@@ -346,9 +367,28 @@ fn driver() -> ExitCode {
                 Some(dir) => program_dirs.push(std::path::PathBuf::from(dir)),
                 None => return usage_error("-L needs a directory"),
             },
-            "--clock" => match args.next().as_deref().map(parse_clock) {
-                Some(Some(c)) => clock = c,
+            "--clock" => match args.next().map(|t| (parse_clock(&t), t)) {
+                Some((Some(c), t)) => {
+                    clock = c;
+                    clock_text = Some(t);
+                }
                 _ => return usage_error("--clock needs YYYY-MM-DDTHH:MM:SS[.hh]"),
+            },
+            "--root" => match args.next() {
+                Some(dir) => fuzz_root = Some(std::path::PathBuf::from(dir)),
+                None => return usage_error("--root needs a directory"),
+            },
+            "--runs" => match args.next().and_then(|n| n.parse().ok()) {
+                Some(n) => fuzz_runs = Some(n),
+                None => return usage_error("--runs needs a number"),
+            },
+            "--seed" => match args.next().and_then(|n| n.parse().ok()) {
+                Some(n) => fuzz_seed = Some(n),
+                None => return usage_error("--seed needs a number"),
+            },
+            "--timeout" => match args.next().and_then(|n| n.parse().ok()).filter(|&n: &u64| n > 0) {
+                Some(n) => fuzz_timeout = Some(n),
+                None => return usage_error("--timeout needs a number of seconds"),
             },
             "--sql-replay" => match args.next() {
                 Some(file) => replay = Some(file),
@@ -419,6 +459,33 @@ fn driver() -> ExitCode {
         || compare_base.is_some() || compare_head.is_some() || declare.is_some() || statement.is_some() || !expected.is_empty() || datasets.is_some()
         || !proclibs.is_empty();
     let dump_flags = !dump_options.only.is_empty() || dump_options.strings || !dump_options.check;
+    let fuzz_flags = fuzz_root.is_some() || fuzz_runs.is_some() || fuzz_seed.is_some() || fuzz_timeout.is_some();
+    if let [c, program] = rest.as_slice()
+        && c == "fuzz"
+    {
+        let Some(out) = out_dir else { return usage_error("fuzz needs -o DIR") };
+        if run_flags && (!dds.is_empty() || replay.is_some() || sql_db.is_some() || evidence_dir.is_some() || coverage_file.is_some() || provenance_file.is_some() || trace_marker.is_some() || !cics_options.is_empty() || datasets.is_some()) {
+            return usage_error("fuzz makes its own DDs, evidence and coverage; it takes -o, --runs, --seed, --timeout, --root, --clock, -I, -L and the compile flags");
+        }
+        if dump_flags || bundle.is_some() || source_prefix.is_some() {
+            return usage_error("fuzz takes -o, --runs, --seed, --timeout, --root, --clock, -I, -L and the compile flags");
+        }
+        return fuzz::run(fuzz::Request {
+            program: program.into(),
+            out,
+            root: fuzz_root.unwrap_or_else(|| std::path::PathBuf::from(".")),
+            runs: fuzz_runs.unwrap_or(200),
+            seed: fuzz_seed.unwrap_or(1),
+            timeout: std::time::Duration::from_secs(fuzz_timeout.unwrap_or(10)),
+            libraries,
+            program_dirs,
+            flags,
+            clock: clock_text.unwrap_or_else(|| "2026-01-01T00:00:00".into()),
+        });
+    }
+    if fuzz_flags {
+        return usage_error("--runs, --seed, --timeout and --root are for fuzz");
+    }
     let compile_flags = out_dir.is_some() || bundle.is_some() || source_prefix.is_some();
     match rest.split_first() {
         Some((c, sources)) if c == "compile" => {

@@ -115,6 +115,14 @@ binary or floating-point, assumption C55), the user completion code (U0999 from 
 a Language Environment condition nothing handled) or the file status of an unhandled I/O failure; 2
 usage.
 
+    cargo run -p ironwork -- fuzz src/PAYROLL.cbl -o fuzz-run [--runs 200] [--seed 1] [--timeout 10] [--root .] [-I copylib]... [-L proglib]...
+
+`ironwork fuzz` runs a batch program on generated input: the sequential and indexed files of
+fixed-length records it reads, built field by field from their descriptions, and SYSIN. Each abend an input
+causes is kept once by code and place, with the smallest input found that still causes it, the
+journal of a run on that input and its coverage; `COBOLWORK_ABENDS=fuzz-run cobolwork scan --only
+abend .` reports them as findings ([docs/evidence.md](docs/evidence.md) §5).
+
     cargo run -p ironwork -- job payroll.jcl --datasets data[:text] [--proclib procs]... [-L proglib]... [-I copylib]... [--clock 2026-09-27T12:00:00] [--sql-replay calls.txt]
 
 `ironwork job` reads one job's JCL and runs its steps in order. Each EXEC PGM= runs a COBOL program
