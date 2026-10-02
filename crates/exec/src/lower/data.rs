@@ -1,6 +1,7 @@
 //! Places, operands, constants and arithmetic expressions (lir.md §5 and §6).
 
 use super::{Lower, R, is_static, push, unsupported};
+use zarch::hfp::Precision;
 use crate::layout::Resolved;
 use crate::machine::literal_fixed;
 use numeric::precision::Fixed;
@@ -65,6 +66,23 @@ fn integer_kind(kind: Kind) -> bool {
 fn whole(f: &Fixed) -> Option<i64> {
     let m = f.magnitude.div_rem(U256::pow10(f.places.dec)).0.to_u128().and_then(|m| i64::try_from(m).ok())?;
     Some(if f.negative { -m } else { m })
+}
+
+/// The walker's `Within`: the arithmetic a function's argument expressions take part in.
+#[derive(Clone, Copy)]
+pub(super) enum Within {
+    Own,
+    Fixed(u32),
+    Float(Precision),
+}
+
+impl Within {
+    pub(super) fn of(mode: Mode, dmax: u32) -> Self {
+        match mode {
+            Mode::Fixed => Within::Fixed(dmax),
+            Mode::Float(p) => Within::Float(p),
+        }
+    }
 }
 
 /// The references `Machine::dmax` locates: every operand but divisors and exponents.
@@ -229,7 +247,7 @@ impl Lower<'_> {
         }
         let dmax = self.dmax(e)?;
         let prepass = self.dmax_places(e)?;
-        Ok(IntExpr::Fixed { expr: self.expr(e, pos)?, dmax, prepass })
+        Ok(IntExpr::Fixed { expr: self.expr_within(e, pos, Within::Fixed(dmax))?, dmax, prepass })
     }
 
     /// An expression other than an operand, as `Machine::expr_value` evaluates it: the float test
@@ -243,7 +261,16 @@ impl Lower<'_> {
             prepass.extend(self.dmax_places(e)?);
             (Mode::Fixed, self.dmax(e)?)
         };
-        Ok(Comparand::Expr { expr: self.expr(e, pos)?, dmax, mode, prepass })
+        Ok(Comparand::Expr { expr: self.expr_within(e, pos, Within::of(mode, dmax))?, dmax, mode, prepass })
+    }
+
+    /// An expression whose functions' argument expressions take part in `within`'s arithmetic, as
+    /// `Machine::eval_fixed` and `eval_float` evaluate them.
+    pub(super) fn expr_within(&mut self, e: &Expr, pos: Pos, within: Within) -> R<ExprId> {
+        let outer = std::mem::replace(&mut self.within, within);
+        let lowered = self.expr(e, pos);
+        self.within = outer;
+        lowered
     }
 
     /// The places `Machine::dmax` locates, in its order, static ones left out.

@@ -194,6 +194,9 @@ struct Lower<'c> {
     segments: bool,
     /// Under the DEBUG option, whether a debugging section serves a paragraph.
     debugging: bool,
+    /// The arithmetic of the expression being lowered, which its functions' argument expressions
+    /// take part in.
+    within: data::Within,
 }
 
 impl<'c> Lower<'c> {
@@ -229,6 +232,7 @@ impl<'c> Lower<'c> {
             altered: BTreeSet::new(),
             segments: false,
             debugging: !c.declaratives.triggers.is_empty(),
+            within: data::Within::Own,
         }
     }
 

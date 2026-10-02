@@ -33,6 +33,7 @@ mod facts;
 mod file_io;
 mod function;
 mod intrinsic;
+use intrinsic::Within;
 mod json;
 mod le_services;
 mod oo;
@@ -753,7 +754,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 let loc = self.locate(&layout.length_of_ref(r))?;
                 Ok(Val::Num(Fixed::new(loc.len as i128, Places::new(9, 0))))
             }
-            Operand::Function(f) => self.function(f),
+            Operand::Function(f) => self.function(f, Within::Own),
             Operand::AddressOf(r) => Ok(Val::Address(self.address_of(r)?)),
         }
     }
@@ -1132,7 +1133,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         rt::accept::accept(&self.facts(), self.unit, dest, from, &target.name, pos)
     }
 
-    fn function(&mut self, f: &FunctionCall) -> R<Val> {
+    fn function(&mut self, f: &FunctionCall, within: Within) -> R<Val> {
         if let Some(udf) = self.user_function(&f.name) {
             let value = self.invoke_function(udf, f)?;
             return self.function_refmod(f, value);
@@ -1140,7 +1141,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         if let Some(value) = self.storage_function(f)? {
             return self.function_refmod(f, value);
         }
-        let args = self.function_arguments(f)?;
+        let args = self.function_arguments(f, within)?;
         let side = match f.modifier.as_deref() {
             Some("LEADING") => Some(TrimSide::Leading),
             Some("TRAILING") => Some(TrimSide::Trailing),
@@ -1207,6 +1208,10 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     fn eval_fixed(&mut self, e: &Expr, dmax: u32, pos: Pos) -> R<Fixed> {
         let arith = self.options.arith;
         match e {
+            Expr::Operand(Operand::Function(f)) => {
+                let val = self.function(f, Within::Fixed(dmax))?;
+                arith::fixed_operand(val, dmax, pos)
+            }
             Expr::Operand(op) => {
                 let val = self.operand(op, pos)?;
                 arith::fixed_operand(val, dmax, pos)
@@ -1257,6 +1262,10 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     fn eval_float(&mut self, e: &Expr, p: Precision, pos: Pos) -> R<Hfp> {
         match e {
+            Expr::Operand(Operand::Function(f)) => {
+                let val = self.function(f, Within::Float(p))?;
+                arith::float_operand(val, p, pos)
+            }
             Expr::Operand(op) => {
                 let val = self.operand(op, pos)?;
                 arith::float_operand(val, p, pos)

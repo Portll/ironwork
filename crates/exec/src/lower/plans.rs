@@ -2,7 +2,7 @@
 //! Plans (lir.md §7 and §9): what `Machine::assign`, `arithmetic`, `store_fixed_checked`,
 //! `initialize` and `display` decide from kinds on each execution, decided once.
 
-use super::data::{Side, Value, scale};
+use super::data::{Side, Value, Within, scale};
 use super::{Lower, R, push, unsupported};
 use numeric::precision::receiver_dec;
 use numeric::{Numproc, Trunc};
@@ -136,7 +136,7 @@ impl Lower<'_> {
             let expr = match lowered.iter().find(|(seen, _)| std::ptr::eq(*seen, e)) {
                 Some(&(_, id)) => id,
                 None => {
-                    let id = self.expr(e, pos)?;
+                    let id = self.expr_within(e, pos, Within::of(mode, dmax))?;
                     lowered.push((e, id));
                     id
                 }
@@ -147,7 +147,7 @@ impl Lower<'_> {
         let remainder = match (remainder, steps.first().map(|s| s.target)) {
             (Some((t, dividend, divisor)), Some(quotient)) => {
                 let target = self.place(&t.r, false)?;
-                let (dividend, divisor) = (self.expr(dividend, pos)?, self.expr(divisor, pos)?);
+                let (dividend, divisor) = (self.expr_within(dividend, pos, Within::Fixed(dmax))?, self.expr_within(divisor, pos, Within::Fixed(dmax))?);
                 let store = self.store_plan(self.kind_of(target), self.place_items[target as usize])?;
                 Some(RemainderPlan { target, dividend, divisor, quotient_scale: scale(self.kind_of(quotient)), store })
             }

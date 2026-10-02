@@ -1,12 +1,12 @@
 //! Intrinsic functions (lir.md §9.9), as `Machine::function` evaluates them, and what each result
 //! reads as, which decides the MOVE and comparison plans it meets.
 
-use super::data::{Side, Value};
+use super::data::{Side, Value, Within};
 use super::{Lower, R, push, unsupported};
 use crate::layout::Resolved;
 use numeric::Arith;
 use numeric::precision::{Places, carried, sum_places};
-use rt::lir::{Argument, Count, Func, FunctionId, FunctionPlan, Odo, RefMod, TrimSide};
+use rt::lir::{Argument, Comparand, Count, Func, FunctionId, FunctionPlan, Mode, Odo, RefMod, TrimSide};
 use syntax::Pos;
 use syntax::ast::{Expr, Figurative, FunctionCall, Literal, Operand, Ref};
 
@@ -70,21 +70,35 @@ impl Lower<'_> {
         Ok((id, result))
     }
 
-    /// `function_arguments`: each argument as `expr_value` evaluates it, and a table written with
-    /// ALL subscripts as its elements.
+    /// `function_arguments`: each argument as it evaluates it, and a table written with ALL
+    /// subscripts as its elements.
     fn arguments(&mut self, f: &FunctionCall) -> R<(Vec<Argument>, Vec<Arg>)> {
         let (mut args, mut sides) = (Vec::with_capacity(f.args.len()), Vec::with_capacity(f.args.len()));
         for (i, a) in f.args.iter().enumerate() {
             match (f.all_subscripts.iter().find(|(k, _)| *k == i), a) {
                 (Some((_, positions)), Expr::Operand(Operand::Ref(table))) => self.all_elements(table, positions, &mut args, &mut sides)?,
                 _ => {
-                    let (arg, side) = self.comparand(a, f.pos)?;
+                    let (arg, side) = self.argument(a, f.pos)?;
                     args.push(Argument::Value(arg));
                     sides.push(Arg { side, scaled: self.scaled(a), times: Some(1) });
                 }
             }
         }
         Ok((args, sides))
+    }
+
+    /// One argument as `function_arguments` evaluates it: an operand as `expr_value` reads it, and
+    /// an expression in the arithmetic of the expression holding the function, with its own
+    /// decimal places where they are more.
+    fn argument(&mut self, a: &Expr, pos: Pos) -> R<(Comparand, Side)> {
+        let (mode, dmax, prepass) = match (self.within, a) {
+            (_, Expr::Operand(_)) | (Within::Own, _) => return self.comparand(a, pos),
+            (Within::Fixed(dmax), _) => (Mode::Fixed, dmax.max(self.dmax(a)?), self.dmax_places(a)?),
+            (Within::Float(p), _) => (Mode::Float(p), 0, Vec::new()),
+        };
+        let expr = self.expr_within(a, pos, Within::of(mode, dmax))?;
+        let value = if matches!(mode, Mode::Float(_)) { Value::Float } else { Value::Num(None) };
+        Ok((Comparand::Expr { expr, dmax, mode, prepass }, Side { value, src: None, digits: 0 }))
     }
 
     /// `storage_function`: HEX-OF, BIT-OF and BYTE-LENGTH count their arguments as written before

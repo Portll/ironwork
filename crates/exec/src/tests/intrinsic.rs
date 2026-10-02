@@ -52,6 +52,24 @@ fn the_statistics_and_mixed_functions_follow_their_arguments() {
 }
 
 #[test]
+fn an_argument_expression_takes_part_in_the_arithmetic_around_the_function() {
+    let out = displays(
+        "       01  R PIC -9(3).9(6).\n       01  T PIC -9(3).\n",
+        &[
+            "COMPUTE R = FUNCTION LOG(1 / 10)", "DISPLAY R",
+            "COMPUTE R = FUNCTION SQRT(1 / 4)", "DISPLAY R",
+            "COMPUTE R = FUNCTION MAX(1 / 3, 0.2)", "DISPLAY R",
+            "COMPUTE R = FUNCTION ABS(-1 / 8) + 1", "DISPLAY R",
+            "COMPUTE T = FUNCTION MAX(7 / 2, 1)", "DISPLAY T",
+        ],
+    );
+    // A floating-point function makes the whole expression floating point, its argument with it;
+    // otherwise the receiver's six decimal places reach a division inside the function, and an
+    // integer receiver none (Programming Guide SC27-8714-03, pp. 794, 800).
+    assert_eq!(out, "-002.302585\n 000.500000\n 000.333333\n 001.125000\n 003\n");
+}
+
+#[test]
 fn all_subscripts_take_every_element_and_stop_at_the_depending_on_count() {
     let data = "       01  T VALUE '010020030040050'.\n           05 N PIC 9(3) OCCURS 5.\n       01  C PIC 9 VALUE 5.\n       01  D.\n           05 V PIC 9(3) OCCURS 1 TO 5 DEPENDING ON C.\n       01  G VALUE '123456'.\n           05 ROW OCCURS 2.\n              10 CELL PIC 9 OCCURS 3.\n       01  S PIC 9(4).\n";
     let out = displays(

@@ -552,10 +552,15 @@ rather than before.
 | `Comparand::Expr`: an expression compared | `expr_value`: the float test, then for a fixed-point expression the dmax pass (machine.rs:1382-1391, 1400-1417) | The float test's places, then in `Mode::Fixed` the dmax pass's, so a place both reach is listed twice | `dmax`, 0 in `Mode::Float`; `mode` as `ArithStep.mode` |
 | `Cond::Sign` of an expression | `class`, through `expr_value` (machine.rs:1840-1849) | As `Comparand::Expr`, which it holds | As `Comparand::Expr` |
 | `Op::Step`: PERFORM VARYING's increment | Locates the variable, then the dmax pass over variable + BY, then `eval_fixed` (machine.rs:517-521) | The places of that dmax pass, the variable's first, located after the variable | `StepPlan.dmax`; always fixed |
+| `Argument::Value(Comparand::Expr)`: a FUNCTION's argument expression | `function_arguments`: in a fixed-point expression the argument's dmax pass, then `eval_fixed`; in a floating-point one `eval_float`; outside any arithmetic expression `expr_value` | The dmax pass's places; none in float; outside, as `Comparand::Expr` | The larger of the holding expression's dmax and the argument's, or the holding expression's `Mode::Float`; outside, as `Comparand::Expr` |
 
 - **The dmax pass** locates every operand of the expression except divisors and exponents, left to
   right (`dmax_refs`); **the float test** every operand, left to right, up to and including the
   first floating-point one.
+- **A function's argument expressions** take part in the arithmetic of the expression that holds
+  the function: its dmax, which counts the receivers (Programming Guide SC27-8714-03, p. 794), or
+  its floating point, which covers every operation in it (p. 800). A function that is an operand of
+  no arithmetic expression, moved or displayed or compared on its own, gives them their own.
 - **An exponent in float mode.** `eval_float` evaluates an exponent as a float and then abends
   (machine.rs:1483), so it never makes the exponent's own dmax pass: in `Mode::Float` an executor
   evaluates `Pow`'s `IntExpr::Fixed` exponent as a float expression and does not locate its

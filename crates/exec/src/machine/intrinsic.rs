@@ -5,6 +5,17 @@ use super::facts::Facts;
 use rt::intrinsic::function::{self as intrinsic_function, Evaluator};
 use rt::intrinsic;
 
+/// The arithmetic a FUNCTION's argument expressions take part in: that of the expression holding the
+/// function, whose dmax counts the final result field (Programming Guide SC27-8714-03, p. 794) and
+/// whose floating point covers every operation in it (p. 800), or their own where the function is
+/// an operand of no arithmetic expression.
+#[derive(Clone, Copy)]
+pub(super) enum Within {
+    Own,
+    Fixed(u32),
+    Float(Precision),
+}
+
 /// A FUNCTION's arguments as written, which CHAR, NATIONAL-OF, INTEGER-OF-DATE, DATE-OF-INTEGER
 /// and RANDOM evaluate again, and the run unit's clock and RANDOM state.
 pub(super) struct Call<'m, 'p, 'u, 'w, 'f> {
@@ -64,8 +75,9 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     /// The arguments' values; a table written with ALL subscripts gives one per element
-    /// (Language Reference SC27-8713-03, pp. 501-502).
-    pub(super) fn function_arguments(&mut self, f: &FunctionCall) -> R<Vec<Val>> {
+    /// (Language Reference SC27-8713-03, pp. 501-502). An argument expression takes part in the
+    /// arithmetic `within` names, keeping its own decimal places where they are more.
+    pub(super) fn function_arguments(&mut self, f: &FunctionCall, within: Within) -> R<Vec<Val>> {
         let mut out = Vec::with_capacity(f.args.len());
         for (i, a) in f.args.iter().enumerate() {
             match (f.all_subscripts.iter().find(|(k, _)| *k == i), a) {
@@ -74,7 +86,16 @@ impl<'p> Machine<'p, '_, '_> {
                         out.push(self.operand(&Operand::Ref(element), f.pos)?);
                     }
                 }
-                _ => out.push(self.expr_value(a, f.pos)?),
+                (_, Expr::Operand(Operand::Function(g))) => out.push(self.function(g, within)?),
+                (_, Expr::Operand(_)) => out.push(self.expr_value(a, f.pos)?),
+                _ => out.push(match within {
+                    Within::Own => self.expr_value(a, f.pos)?,
+                    Within::Fixed(dmax) => {
+                        let dmax = dmax.max(self.dmax(a)?);
+                        Val::Num(self.eval_fixed(a, dmax, f.pos)?)
+                    }
+                    Within::Float(p) => Val::Float(self.eval_float(a, p, f.pos)?),
+                }),
             }
         }
         Ok(out)

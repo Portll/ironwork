@@ -3,7 +3,7 @@
 //! triggers the declaratives run by (§9.10).
 
 use super::cond::Test;
-use super::data::{Side, Value, scale};
+use super::data::{Side, Value, Within, scale};
 use super::{Lower, LowerError, R, push, unsupported};
 use crate::declaratives::{Span, debug_name};
 use rt::abend::{AbendCode, Ending};
@@ -823,7 +823,7 @@ impl Lower<'_> {
         let sum = Expr::Bin(Box::new(Expr::Operand(Operand::Ref(v.var.clone()))), BinOp::Add, Box::new(v.by.clone()));
         let dmax = scale(kind).max(self.dmax(&sum)?);
         let prepass = self.dmax_places(&sum)?;
-        let by = self.expr(&v.by, pos)?;
+        let by = self.expr_within(&v.by, pos, Within::Fixed(dmax))?;
         let store = self.store_plan(kind, item)?;
         let step = Op::Step { var, by, plan: lir::StepPlan { dmax, store }, prepass };
         let until = self.test(&v.until, pos)?;
