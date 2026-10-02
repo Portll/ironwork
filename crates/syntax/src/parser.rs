@@ -1592,7 +1592,7 @@ impl Parser<'_> {
                     while self.starts_ref() {
                         files.push((mode, self.name("a file name")?));
                         self.accept_any(&["REVERSED"]);
-                        if self.accept_word("WITH") {
+                        if self.accept_word("WITH") || self.is_word("NO") {
                             self.expect_word("NO")?;
                             self.expect_word("REWIND")?;
                         }

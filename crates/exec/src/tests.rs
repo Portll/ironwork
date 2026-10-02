@@ -499,6 +499,33 @@ fn close_reel_and_no_rewind_find_no_reel_and_close_with_lock_refuses_a_later_ope
 }
 
 #[test]
+fn open_takes_no_rewind_with_or_without_with_and_reversed() {
+    let data = temp("norewind.dat");
+    let source = file_program(
+        "           SELECT F ASSIGN TO FDD FILE STATUS IS FS.\n",
+        "       FD  F.\n       01  F-REC PIC X(4).\n",
+        "       01  FS PIC XX.\n",
+        &[
+            line("OPEN OUTPUT F NO REWIND"),
+            line("WRITE F-REC FROM 'ONE'"),
+            line("CLOSE F"),
+            line("OPEN INPUT F WITH NO REWIND"),
+            line("READ F"),
+            line("DISPLAY F-REC FS"),
+            line("CLOSE F"),
+            line("OPEN INPUT F REVERSED"),
+            line("DISPLAY FS"),
+            line("CLOSE F"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    );
+    let (out, err, ending) = run_files(&source, &[format!("FDD={}", data.display())]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(out, "ONE 00\n00\n");
+}
+
+#[test]
 fn fixed_and_variable_records_are_ebcdic_bytes() {
     let (fixed, variable) = (temp("f.dat"), temp("v.dat"));
     let source = file_program(
