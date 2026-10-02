@@ -3,10 +3,12 @@
 The `.iwm` file format, and how a run unit loads it. It details §8 of
 [codegen-runtime.md](codegen-runtime.md) and serves invariants 6 and 7 of its §10.
 
-**Status:** draft, 2026-09-30, for the operator's review. The container and the encoding rules (§3,
-§4) are built in `rt::module`; the codecs for options, storage, maps and the directory, the loader
-and `dump` are not. The types a module holds are [lir.md](lir.md)'s; this document gives the
-container, the encoding rules, which apply to any of them, and the program directory.
+**Status:** draft, for the operator's review. The container, the encoding rules and every section's
+codec (§3 to §7, §9) are built in `rt::module`; `ironwork compile` writes modules and `ironwork
+dump` (§11) prints them. The loader (§8.2) is not built: running a module needs the VM. The writer
+always writes an empty `BMS` section, so a program that uses maps loses them (L2.5). The types a
+module holds are [lir.md](lir.md)'s; this document gives the container, the encoding rules, which
+apply to any of them, and the program directory.
 
 ## 1. Scope and constraints
 
@@ -688,7 +690,8 @@ and finds them different.
 - **Given** a BMS mapset used by two programs **then** the `BMS` section holds it once, in name
   order.
 - **Given** an option changed, such as `TRUNC(BIN)` **then** the modules differ, and only in
-  `OPTIONS` and in whatever the option changes in `LIR`.
+  `OPTIONS`, in `STRINGS` (which holds the option card's text) and in whatever the option changes
+  in `LIR`.
 
 ### L3: Version mismatch
 
@@ -775,7 +778,9 @@ and finds them different.
 3. **Stripping.** Should a `--strip-debug` module exist for size, with abends naming only the
    program and instruction? Invariant 3 forbids it as stated.
 4. **Stale modules.** A `NAME.iwm` beside a newer `NAME.cbl` is used, its compile time not compared.
-   Is that right, or should the `-L` search prefer source, or the newer file?
+   A compile that fails leaves an existing `NAME.iwm` in place, as a failed compile on z/OS leaves
+   the old member in the load library, so the loader would run the older module. Is that right, or
+   should the `-L` search prefer source, or the newer file?
 5. **Unresolved static CALL.** A NODYNAM literal naming no program of the module compiles as a
    run-time call, with a warning, where IBM fails at link time. Should compiling fail instead,
    unless the caller passes `--allow-unresolved`? And where the name is an LE service, should a
