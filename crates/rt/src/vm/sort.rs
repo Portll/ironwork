@@ -9,7 +9,7 @@ use crate::abend::{Abend, Ending};
 use crate::fileio::{self, Outcome};
 use crate::files::FileStatus;
 use crate::host::Host;
-use crate::lir::{DebugId, IntExpr, PlaceId, RangeId, ReleasePlan, ReturnPlan, SortKeys, SortPlan, Step};
+use crate::lir::{DebugId, IntExpr, PlaceId, RangeId, ReleasePlan, Resume, ReturnPlan, SortKeys, SortPlan, Step};
 use crate::sort::{self, Active, ItemKey, Procedure, SortFile, SortHost};
 use crate::storage::Loc;
 use crate::unit::Loader;
@@ -60,6 +60,23 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         };
         let released = sort::release(&mut Io { vm: self }, loc, name, pos);
         self.settle(released)
+    }
+
+    /// A PERFORM's resume, unless its frame is one whose SORT procedure an abend unwound and
+    /// control has not reached another paragraph under it since.
+    pub(super) fn resumable(&self, resume: Option<Resume>) -> Option<Resume> {
+        let top = self.returns.frames.last().map(|f| f.id);
+        resume.filter(|_| !top.is_some_and(|id| self.io.stale.contains(&id)))
+    }
+
+    /// Control reaches a paragraph, or resumes in one, under the top frame.
+    pub(super) fn paragraph_reached(&mut self) {
+        if let Some(top) = self.returns.frames.last()
+            && !self.io.stale.is_empty()
+        {
+            let id = top.id;
+            self.io.stale.retain(|&f| f != id);
+        }
     }
 
     /// RETURN: Arm(1) when a record came, Arm(0) at end.
@@ -145,7 +162,13 @@ impl<'p, L: Loader<Rc<Code>>> SortHost<'p, Handle<'p>, &'p IntExpr> for Io<'_, '
 
     /// Any other leaving is a return to an active PERFORM, which ends the procedure as its end does.
     fn run_procedure(&mut self, range: RangeId, kind: Procedure, pos: Pos) -> Result<Option<Ending>, Abend> {
-        Ok(match self.vm.procedure(range, Arrival::Sort(kind.name()), pos)? {
+        let exit = self.vm.procedure(range, Arrival::Sort(kind.name()), pos);
+        if exit.is_err()
+            && let Some(top) = self.vm.returns.frames.last()
+        {
+            self.vm.io.stale.push(top.id);
+        }
+        Ok(match exit? {
             Exit::End(e) => Some(e),
             Exit::Completed | Exit::Left(_) => None,
         })

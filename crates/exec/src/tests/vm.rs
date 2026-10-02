@@ -248,6 +248,38 @@ fn the_vm_sorts_through_input_and_output_procedures_and_a_table_in_place() {
 }
 
 #[test]
+fn a_perform_after_a_stopped_sort_in_its_paragraph_cannot_resume_as_in_the_interpreter() {
+    let source = file_program(
+        "           SELECT S ASSIGN TO SORTWK1.\n",
+        "       SD  S.\n       01  S-REC PIC X.\n",
+        "",
+        &[
+            "       MAIN-P.\n",
+            &line("SORT S ON ASCENDING KEY S-REC"),
+            &line("    INPUT PROCEDURE FEED OUTPUT PROCEDURE OUT-P"),
+            &line("PERFORM A THRU B"),
+            &line("DISPLAY 'BACK'"),
+            &line("GOBACK."),
+            "       A.\n",
+            &line("DISPLAY 'A' GO TO C."),
+            "       B.\n",
+            &line("DISPLAY 'B'."),
+            "       C.\n",
+            &line("DISPLAY 'C' GO TO B."),
+            "       FEED.\n",
+            &line("MOVE 16 TO SORT-RETURN RELEASE S-REC FROM 'X'."),
+            "       OUT-P.\n",
+            &line("DISPLAY 'OUT'."),
+        ]
+        .concat(),
+    );
+    let (out, ending) = on_vm(&source);
+    assert_eq!(out, "A\nC\nB\n");
+    let abend = ending.unwrap_err();
+    assert!(abend.message.starts_with("control passed the end of B"), "{}", abend.message);
+}
+
+#[test]
 fn the_vm_tells_a_debugging_section_how_a_sort_procedure_was_reached() {
     let source = [
         "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. D.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n",

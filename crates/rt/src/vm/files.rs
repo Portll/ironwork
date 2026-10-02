@@ -26,6 +26,11 @@ pub(super) struct State {
     pub(super) sort: Option<Active>,
     pub(super) failed: Option<usize>,
     pub(super) leaving: Option<Step>,
+    /// The frames that ran a SORT or MERGE whose procedure an abend unwound, as RELEASE and RETURN
+    /// do under SORT-RETURN 16. The unwinding leaves the walker's running paragraph inside the
+    /// procedure, and until control reaches another paragraph under such a frame a PERFORM there
+    /// finds no statement to resume at (machine/perform.rs `after`).
+    pub(super) stale: Vec<u64>,
 }
 
 /// What a file verb names: a data item; the RELATIVE KEY, located as its place and read as its

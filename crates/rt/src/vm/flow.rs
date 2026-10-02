@@ -81,6 +81,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             if let Some(i) = self.code.entry_of[block as usize] {
                 let paragraph = &p.paragraphs[i as usize];
                 self.unit.notify(Event::Paragraph { program: self.sym(p.id), name: self.sym(paragraph.name), index: i as usize });
+                self.paragraph_reached();
             }
             let b = &p.blocks[block as usize];
             let at = &p.debug.ops[block as usize];
@@ -152,7 +153,8 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             }
             Terminator::PerformEnter { range, ret, resume } => {
                 let r = self.p.ranges[*range as usize];
-                self.push(FrameKind::Perform { range: *range, ret: *ret, resume: *resume }, r.last, *resume);
+                let resume = self.resumable(*resume);
+                self.push(FrameKind::Perform { range: *range, ret: *ret, resume }, r.last, resume);
                 self.arrival = Arrival::Perform;
                 Next::Block(self.entry(r.first))
             }
@@ -246,6 +248,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
                 Ok(Next::Block(match step {
                     Step::Resume(r) => {
                         self.segment = self.p.paragraphs[r.para as usize].priority;
+                        self.paragraph_reached();
                         r.block
                     }
                     _ => {
