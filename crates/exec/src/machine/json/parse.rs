@@ -225,6 +225,8 @@ impl<'p> Machine<'p, '_, '_> {
             if p.suppressed.contains(&child) {
                 continue;
             }
+            // A variably located member is placed by the counts as they stand when its pair is read.
+            let at = at - self.moved_within(child, item, pos)?;
             if let Err(code) = self.parse_member(child, at, subscripts, value, p, g, pos)? {
                 return Ok(Err(code));
             }

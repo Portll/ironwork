@@ -94,6 +94,76 @@ fn a_group_holding_its_own_occurs_depending_on_object_receives_at_its_maximum_le
     assert_eq!(out, "[4ABCD]\n[4A---]\n[3XYZ] 05\n[5VWXYZ]\n[2QR] U\n");
 }
 
+/// The Programming Guide's complex ODO example (SC27-8714-03, p. 81), with a variably located
+/// table of fixed-length elements in place of its table of variable-length ones.
+const COMPLEX_ODO: &str = concat!(
+    "       01  FIELD-A.\n           02 COUNTER-1 PIC 99.\n           02 COUNTER-2 PIC 99.\n",
+    "           02 TABLE-1.\n              03 RECORD-1 OCCURS 1 TO 5 DEPENDING ON COUNTER-1 PIC X(3).\n",
+    "           02 EMPLOYEE-NUMBER PIC X(5).\n",
+    "           02 TABLE-2 OCCURS 1 TO 3 DEPENDING ON COUNTER-2 PIC X(2).\n",
+    "           02 TAIL-X PIC X(4).\n       01  W PIC 99.\n       01  COPY-A PIC X(40).\n",
+);
+
+#[test]
+fn an_item_after_an_occurs_depending_on_table_moves_with_its_count() {
+    let out = run(&program(
+        "",
+        COMPLEX_ODO,
+        &[
+            line("MOVE ALL '*' TO FIELD-A"),
+            line("MOVE 2 TO COUNTER-1"),
+            line("MOVE 1 TO COUNTER-2"),
+            line("MOVE 'AAA' TO RECORD-1 (1)"),
+            line("MOVE 'BBB' TO RECORD-1 (2)"),
+            line("MOVE 'EMPNO' TO EMPLOYEE-NUMBER"),
+            line("MOVE 'T1' TO TABLE-2 (1)"),
+            line("MOVE 'TAIL' TO TAIL-X"),
+            line("DISPLAY FIELD-A"),
+            line("MOVE LENGTH OF FIELD-A TO W"),
+            line("DISPLAY W ' ' LENGTH OF TABLE-1"),
+            line("MOVE FIELD-A TO COPY-A"),
+            line("DISPLAY COPY-A"),
+            line("MOVE 3 TO COUNTER-1"),
+            line("DISPLAY EMPLOYEE-NUMBER '|' TABLE-2 (1) '|' TAIL-X"),
+            line("MOVE 1 TO COUNTER-1"),
+            line("DISPLAY EMPLOYEE-NUMBER '|' TAIL-X"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    ));
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines[0], "0201AAABBBEMPNOT1TAIL");
+    assert_eq!(lines[1], "21 000000006");
+    assert_eq!(lines[2].trim_end(), "0201AAABBBEMPNOT1TAIL");
+    assert_eq!(lines[3], "NOT1T|AI|L***");
+    assert_eq!(lines[4], "BBBEM|OT1T");
+}
+
+#[test]
+fn a_variably_located_object_initialize_or_sort_key_is_refused_by_name() {
+    let errors = compile_errors(&program(
+        "",
+        "       01  R.\n           05 N PIC 9.\n           05 T PIC X OCCURS 1 TO 5 DEPENDING ON N.\n           05 M PIC 9.\n           05 U PIC X OCCURS 1 TO 5 DEPENDING ON M.\n",
+        &[line("INITIALIZE R"), line("INITIALIZE M"), line("GOBACK.")].concat(),
+    ));
+    assert!(errors.contains("OCCURS DEPENDING ON M: the object cannot follow an OCCURS DEPENDING ON table in its record"), "{errors}");
+    assert!(errors.contains("INITIALIZE R: a variably located item, or a group holding one, cannot be initialized"), "{errors}");
+    assert!(errors.contains("INITIALIZE M: a variably located item"), "{errors}");
+    let nested = compile_errors(&program(
+        "",
+        "       01  R.\n           05 N PIC 9.\n           05 A OCCURS 2.\n              10 T PIC X OCCURS 1 TO 5 DEPENDING ON N.\n           05 X PIC X.\n",
+        &line("GOBACK."),
+    ));
+    assert_eq!(nested, "items after an OCCURS DEPENDING ON table in the same record are not supported yet");
+    let sort = compile_errors(&file_program(
+        "           SELECT S-FILE ASSIGN TO SORTWK1.\n           SELECT F ASSIGN TO FDD.\n",
+        "       SD  S-FILE.\n       01  S-REC.\n           05 S-CNT PIC 9.\n           05 S-ITEM PIC X OCCURS 1 TO 5 DEPENDING ON S-CNT.\n           05 S-KEY PIC X.\n       FD  F.\n       01  F-REC PIC X(7).\n",
+        "",
+        &line("SORT S-FILE ON ASCENDING KEY S-KEY USING F GIVING F GOBACK."),
+    ));
+    assert_eq!(sort, "S-KEY: a sort key cannot follow an OCCURS DEPENDING ON table in its record");
+}
+
 #[test]
 fn read_into_and_write_from_use_the_maximum_length_too() {
     let (input, output) = (temp("odo-in.txt"), temp("odo-out.txt"));

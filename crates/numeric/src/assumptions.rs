@@ -254,6 +254,7 @@ pub const PARM_AREA_PADDED: &str = "C251";
 pub const ABBREVIATED_RELATIONS: &str = "C150";
 pub const PARAGRAPH_IN_OWN_SECTION: &str = "C151";
 pub const REPLACE_STATEMENT: &str = "C160";
+pub const VARIABLY_LOCATED_ITEMS: &str = "C161";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1604,6 +1605,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: REPLACE_STATEMENT,
         claim: "REPLACE applies after COPY, to the whole expanded text, EXEC SQL and EXEC CICS statements included, as the Db2 coprocessor has it (Language Reference SC27-8713-03, pp. 708-712; Programming Guide SC27-8714-03, p. 513). A REPLACE is in effect from its period to the next REPLACE statement or the end of the source file: the manual says the end of the separately compiled program, so a batch of several programs in one file carries a REPLACE past the END PROGRAM of the one it is in, where IBM would stop it. The word REPLACE starts a statement only when pseudo-text, LEADING, TRAILING or OFF follows it, and wherever it is: the manual asks for a separator period before it, but its own example (pp. 709-710) has one after a DISPLAY with none, and gives that program's output. Matching is COPY REPLACING's: text words compared a word at a time, case aside outside literals, with a separator comma or semicolon never a word, so pseudo-text-1 that is only a comma or semicolon matches nothing. The replacing text takes the position of the first word it replaces, for messages and for Area A, where IBM puts each of its words in the area it is written in within pseudo-text-2; and REPLACE ALSO and REPLACE LAST OFF, which the 2014 standard has and the manual does not, are refused",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: VARIABLY_LOCATED_ITEMS,
+        claim: "An item after an OCCURS DEPENDING ON table in its record, and not within it, is variably located (Language Reference SC27-8713-03, pp. 205-206; Programming Guide SC27-8714-03, pp. 81-82): each reference places it back from where the table's maximum puts it by the bytes of the occurrences past the object's current value, and a group holding such tables is as long as their current counts make it; its VALUE is placed as if each table held its maximum (LR p. 246). A receiving group that holds the objects of its tables is at its maximum length only when nothing after it in its record moves with them, since the guide has the actual length used when a variably located item follows (PG pp. 78-79). The location is worked out from the objects' values at each reference, so a count changed between two references moves what follows, as the guide says (p. 82), with no data moved; JSON GENERATE and XML GENERATE place each member as they write it, and JSON PARSE as it reaches the member's pair, after any earlier pair has set a count. Refused by name: an OCCURS DEPENDING ON object that is itself variably located, and a sort key or INITIALIZE target that is (LR pp. 205, 351, 402, 454), which IBM forbids; and, keeping the message ironwork gave before, a table with items after it that is within another table or holds one, a table with variable-length elements, whose element length the interpreter keeps at its maximum",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

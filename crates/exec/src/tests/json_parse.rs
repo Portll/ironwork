@@ -265,3 +265,12 @@ fn a_number_moves_only_where_table_46_allows_and_an_exponent_is_never_expanded()
     );
     assert_eq!(out, "CODE 104 STATUS 000\nCODE 104 STATUS 000\nCODE 000 STATUS 001\nCODE 000 STATUS 129\n42    0000\n");
 }
+
+#[test]
+fn a_member_after_an_occurs_depending_on_table_is_placed_by_the_count_its_pair_set() {
+    let data = concat!(
+        "       01  T PIC X(60) VALUE\n           '{\"REC\":{\"CNT\":2,\"ITEM\":[\"A\",\"B\"],\"LATER\":\"XYZ\"}}'.\n",
+        "       01  REC.\n           05 CNT PIC 9 VALUE 5.\n           05 ITEM PIC X OCCURS 1 TO 5 DEPENDING ON CNT.\n           05 LATER PIC X(3).\n",
+    );
+    assert_eq!(displays(&format!("{CODES}{data}"), &["JSON PARSE T INTO REC ENCODING 1140", SHOW, "DISPLAY REC"]), "CODE 000 STATUS 000\n2ABXYZ\n");
+}

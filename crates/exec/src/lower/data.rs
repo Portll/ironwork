@@ -153,8 +153,11 @@ impl Lower<'_> {
         for (&(stride, count), sub) in item.dims.iter().zip(&r.subscripts) {
             subscripts.push(lir::Subscript { stride, value: self.int_expr(sub, r.pos)?, check: ssrange.then_some(count) });
         }
+        if !item.moved_by.is_empty() || item.odo.iter().any(|&t| layout.items[t].followed) {
+            return unsupported("an item that follows an OCCURS DEPENDING ON table in its record, or a group holding such a table and what follows it", r.pos);
+        }
         let mut odo = None;
-        if let Some(t) = item.odo
+        if let Some(&t) = item.odo.first()
             && !(receiving && r.refmod.is_none() && self.object_within(t, index)?)
         {
             let table = &layout.items[t];

@@ -207,6 +207,10 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     for item in &layout.items {
         if let Some(object) = &item.depending_on {
             match layout.resolve(&object.name, &object.qualifiers, object.pos) {
+                Ok(layout::Resolved::Item(i)) if !layout.items[i].moved_by.is_empty() => errors.push(Error::at(
+                    object.pos,
+                    format!("OCCURS DEPENDING ON {}: the object cannot follow an OCCURS DEPENDING ON table in its record", object.name),
+                )),
                 Ok(layout::Resolved::Item(i)) if layout.items[i].kind.is_numeric() => {}
                 Ok(_) => errors.push(Error::at(object.pos, format!("OCCURS DEPENDING ON {}: not a numeric data item", object.name))),
                 Err(e) => errors.push(e),
@@ -774,6 +778,10 @@ impl Check<'_> {
                     self.reference(r);
                     if self.item(r).is_some_and(|i| self.layout.items[i].level == 66) {
                         self.errors.push(Error::at(*pos, format!("INITIALIZE {}: a level-66 RENAMES item cannot be initialized", r.name)));
+                    }
+                    let items = &self.layout.items;
+                    if self.item(r).is_some_and(|i| !items[i].moved_by.is_empty() || items[i].odo.iter().any(|&t| items[t].followed)) {
+                        self.errors.push(Error::at(*pos, format!("INITIALIZE {}: a variably located item, or a group holding one, cannot be initialized (Language Reference p. 351)", r.name)));
                     }
                 }
             }

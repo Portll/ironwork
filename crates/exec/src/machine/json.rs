@@ -293,7 +293,7 @@ impl<'p> Machine<'p, '_, '_> {
                 continue;
             }
             let child = &layout.items[c];
-            let child_offset = offset + (child.offset - i.offset) as usize;
+            let child_offset = offset + (child.offset - i.offset) as usize - self.moved_within(c, item, pos)?;
             if child.name.is_none() && !child.table {
                 self.json_members(c, child_offset, subscripts, p, pos, members, any_eligible)?;
                 continue;

@@ -162,7 +162,7 @@ impl<'p> Machine<'p, '_, '_> {
                 continue;
             }
             let child = &layout.items[c];
-            let first = offset + (child.offset - i.offset) as usize;
+            let first = offset + (child.offset - i.offset) as usize - self.moved_within(c, item, pos)?;
             let count = if child.table { self.occurrences(c, pos)? } else { 1 };
             for k in 0..count {
                 if child.table {

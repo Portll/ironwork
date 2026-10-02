@@ -110,6 +110,8 @@ impl Check<'_> {
                 fail(self, key.pos, format!("{}: a key of {verb} {name} must be in its records", key.name));
             } else if !item.dims.is_empty() {
                 fail(self, key.pos, format!("{}: a sort key cannot be in a table", key.name));
+            } else if !item.moved_by.is_empty() {
+                fail(self, key.pos, format!("{}: a sort key cannot follow an OCCURS DEPENDING ON table in its record", key.name));
             } else if matches!(item.kind, Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer) {
                 fail(self, key.pos, format!("{}: a POINTER, INDEX, object reference or function-pointer item cannot be a sort key", key.name));
             }

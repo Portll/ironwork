@@ -552,17 +552,18 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             None => self.base,
         };
         let mut offset = (base + item.offset as usize) as i64;
+        for &t in &item.moved_by {
+            offset -= self.unused(t, r.pos)?;
+        }
         for (&(stride, count), sub) in item.dims.iter().zip(&r.subscripts) {
             let s = self.integer(sub, r.pos)?;
             offset += loc::subscript(s, stride, self.ssrange.then_some(count), &r.name, r.pos)?;
         }
         let (mut len, mut kind) = (item.size as i64, item.kind);
-        if let Some(t) = item.odo
-            && !(receiving && r.refmod.is_none() && self.object_within(t, index)?)
-        {
-            let table = &layout.items[t];
-            let current = self.occurrences(t, r.pos)?;
-            len = loc::odo_len(len, table.occurs, current, table.size);
+        if !item.odo.is_empty() && !(receiving && r.refmod.is_none() && !item.followed && self.objects_within(&item.odo, index)?) {
+            for &t in &item.odo {
+                len -= self.unused(t, r.pos)?;
+            }
         }
         if let Some(rm) = &r.refmod {
             let start = self.integer(&rm.start, r.pos)?;
@@ -581,6 +582,35 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
         let (offset, len) = loc::within(offset, len, self.unit.mem.len(), &r.name, r.pos)?;
         Ok(Loc { offset, len, kind, item: index })
+    }
+
+    /// Whether the objects of these tables' OCCURS DEPENDING ON all lie within item `group`.
+    fn objects_within(&mut self, tables: &[usize], group: usize) -> R<bool> {
+        for &t in tables {
+            if !self.object_within(t, group)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// The bytes of OCCURS DEPENDING ON table `t` past its current count of occurrences.
+    fn unused(&mut self, t: usize, pos: Pos) -> R<i64> {
+        let table = &self.layout.items[t];
+        let (max, element) = (table.occurs, table.size);
+        let current = self.occurrences(t, pos)?;
+        Ok(-loc::odo_len(0, max, current, element))
+    }
+
+    /// The bytes the OCCURS DEPENDING ON tables ahead of item `member` in its record, and not ahead
+    /// of the group `holder` it is in, move it back from where the group's layout puts it.
+    fn moved_within(&mut self, member: usize, holder: usize, pos: Pos) -> R<usize> {
+        let layout = self.layout;
+        let mut moved = 0;
+        for &t in layout.items[member].moved_by.iter().filter(|t| !layout.items[holder].moved_by.contains(t)) {
+            moved += self.unused(t, pos)? as usize;
+        }
+        Ok(moved)
     }
 
     /// Whether the object of table `t`'s OCCURS DEPENDING ON lies within item `group`.

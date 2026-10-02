@@ -101,3 +101,10 @@ fn a_group_converted_to_json_null_is_null_and_one_whose_members_are_all_ignored_
     );
     assert_eq!(out, "{\"A\":{\"SUB\":null,\"B\":\"b\"}}\n{\"A\":{\"SUB\":{\"S1\":\" \",\"S2\":\" \"},\"B\":\"b\"}}\n");
 }
+
+#[test]
+fn a_member_after_an_occurs_depending_on_table_is_read_where_the_count_puts_it() {
+    let data = format!("{DOC}       01  REC.\n           05 CNT PIC 9.\n           05 ITEM PIC X OCCURS 1 TO 5 DEPENDING ON CNT.\n           05 LATER PIC X(3).\n");
+    let out = displays(&data, &["MOVE 2 TO CNT", "MOVE 'A' TO ITEM(1)", "MOVE 'B' TO ITEM(2)", "MOVE 'XYZ' TO LATER", "JSON GENERATE D FROM REC COUNT N ENCODING 1140", "DISPLAY D(1:N)"]);
+    assert_eq!(out, "{\"REC\":{\"CNT\":2,\"ITEM\":[\"A\",\"B\"],\"LATER\":\"XYZ\"}}\n");
+}

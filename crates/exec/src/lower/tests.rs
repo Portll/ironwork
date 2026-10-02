@@ -230,6 +230,17 @@ fn a_receiving_group_holding_its_own_odo_object_is_at_its_maximum_length() {
 }
 
 #[test]
+fn a_variably_located_item_and_a_group_holding_what_moves_are_refused() {
+    let data = "       01  REC.\n           05 CNT PIC 9.\n           05 ITEM PIC X OCCURS 1 TO 5 DEPENDING ON CNT.\n           05 LATER PIC X.\n       01  W PIC X(7).\n";
+    let why = "an item that follows an OCCURS DEPENDING ON table in its record, or a group holding such a table and what follows it";
+    for body in ["MOVE LATER TO W", "MOVE REC TO W", "MOVE W TO REC"] {
+        let error = lower(&compiled(&program("", data, &[line(body), line("GOBACK.")].concat()))).unwrap_err();
+        assert!(matches!(error, LowerError::Unsupported(n, _) if n == why), "{body}: {error}");
+    }
+    lowered(&program("", data, &[line("MOVE CNT TO W"), line("MOVE ITEM (1) TO W"), line("GOBACK.")].concat()));
+}
+
+#[test]
 fn compute_rounded_with_on_size_error_selects_its_handler() {
     let p = lowered(&program(
         "",

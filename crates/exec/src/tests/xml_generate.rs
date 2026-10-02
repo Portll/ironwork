@@ -175,3 +175,10 @@ fn encoding_errors_leave_the_receiver_alone() {
     );
     assert_eq!(out, "415\n414\n420\n000 000000024\n");
 }
+
+#[test]
+fn a_member_after_an_occurs_depending_on_table_is_read_where_the_count_puts_it() {
+    let data = "       01  REC.\n           05 CNT PIC 9 VALUE 2.\n           05 ITEM PIC X OCCURS 1 TO 5 DEPENDING ON CNT.\n           05 LATER PIC X(3).\n";
+    let statements = ["MOVE 'A' TO ITEM(1)", "MOVE 'B' TO ITEM(2)", "MOVE 'XYZ' TO LATER", "XML GENERATE Doc FROM REC COUNT IN docSize", "DISPLAY Doc(1:docSize)"];
+    assert_eq!(displays("", &format!("{DOC}{data}"), &statements), "<REC><CNT>2</CNT><ITEM>A</ITEM><ITEM>B</ITEM><LATER>XYZ</LATER></REC>\n");
+}

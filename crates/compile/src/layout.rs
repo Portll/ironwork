@@ -27,8 +27,15 @@ pub struct Item {
     pub table: bool,
     /// OCCURS ... DEPENDING ON: the item holding the current number of occurrences.
     pub depending_on: Option<syntax::ast::Ref>,
-    /// The OCCURS DEPENDING ON table this group ends with, whose current count sets its length.
-    pub odo: Option<usize>,
+    /// The OCCURS DEPENDING ON tables within this group, other than one within another of them: the
+    /// occurrences past each one's current count leave its length out.
+    pub odo: Vec<usize>,
+    /// The OCCURS DEPENDING ON tables ahead of this item in its record: the occurrences past each
+    /// one's current count move it back (a variably located item, Language Reference SC27-8713-03,
+    /// p. 206).
+    pub moved_by: Vec<usize>,
+    /// Whether an item after this one in its record moves with an OCCURS DEPENDING ON table in it.
+    pub followed: bool,
     /// A table's INDEXED BY names, and its ASCENDING/DESCENDING keys.
     pub index_names: Vec<String>,
     pub keys: Vec<(bool, syntax::ast::Ref)>,
@@ -176,7 +183,9 @@ pub fn build(
                 occurs_min: 1,
                 table: false,
                 depending_on: None,
-                odo: None,
+                odo: Vec::new(),
+                moved_by: Vec::new(),
+                followed: false,
                 index_names: Vec::new(),
                 keys: Vec::new(),
                 local: items[record].local,
@@ -221,7 +230,9 @@ pub fn build(
             occurs_min: e.occurs_min.or(e.occurs).unwrap_or(1),
             table: e.occurs.is_some(),
             depending_on: e.depending_on.clone(),
-            odo: None,
+            odo: Vec::new(),
+            moved_by: Vec::new(),
+            followed: false,
             index_names: e.indexed_by.clone(),
             keys: e.keys.clone(),
             local: region == Some(LOCAL),
@@ -286,7 +297,9 @@ pub fn build(
                 occurs_min: 1,
                 table: false,
                 depending_on: None,
-                odo: None,
+                odo: Vec::new(),
+                moved_by: Vec::new(),
+                followed: false,
                 index_names: Vec::new(),
                 keys: Vec::new(),
                 local: false,
@@ -378,15 +391,31 @@ pub fn build(
         cursor += bytes;
     }
     let tables: Vec<usize> = (0..items.len()).filter(|&i| items[i].depending_on.is_some()).collect();
-    for t in tables {
-        let (mut child, mut at) = (t, items[t].parent);
+    for &t in &tables {
+        let (mut child, mut at, mut nested) = (t, items[t].parent, false);
+        let (mut chain, mut followers) = (vec![t], Vec::new());
         while let Some(a) = at {
-            let last = items[a].children.iter().rev().find(|&&c| items[c].redefines.is_none()).copied();
-            if last != Some(child) {
-                return Err(Error::at(items[t].pos, "items after an OCCURS DEPENDING ON table in the same record are not supported yet"));
+            nested |= child != t && items[child].depending_on.is_some();
+            if !nested {
+                items[a].odo.push(t);
             }
-            items[a].odo.get_or_insert(t);
+            let end = items[child].offset + items[child].size * items[child].occurs;
+            let after = items[a].children.iter().skip_while(|&&c| c != child).skip(1).copied().filter(|&c| items[c].offset >= end);
+            let before = followers.len();
+            followers.extend(after);
+            if followers.len() > before {
+                chain.iter().for_each(|&c| items[c].followed = true);
+            }
+            chain.push(a);
             (child, at) = (a, items[a].parent);
+        }
+        let holds_another = tables.iter().any(|&u| u != t && ancestors(&items, u).any(|p| p == t));
+        if !followers.is_empty() && (items[t].dims.len() > 1 || holds_another) {
+            return Err(Error::at(items[t].pos, "items after an OCCURS DEPENDING ON table in the same record are not supported yet"));
+        }
+        while let Some(f) = followers.pop() {
+            items[f].moved_by.push(t);
+            followers.extend(items[f].children.iter().copied());
         }
     }
     for (index, e) in renames {
@@ -409,11 +438,15 @@ pub fn build(
     let mut record_lengths: Vec<Option<(u32, u32)>> = vec![None; files.len()];
     for &r in &roots {
         let Some(k) = items[r].file else { continue };
-        let fewer = items[r].odo.map_or(0, |t| {
-            let t = &items[t];
-            let outer: u32 = t.dims[..t.dims.len().saturating_sub(1)].iter().map(|&(_, n)| n).product();
-            t.occurs.saturating_sub(t.occurs_min) * t.size * outer
-        });
+        let fewer: u32 = items[r]
+            .odo
+            .iter()
+            .map(|&t| {
+                let t = &items[t];
+                let outer: u32 = t.dims[..t.dims.len().saturating_sub(1)].iter().map(|&(_, n)| n).product();
+                t.occurs.saturating_sub(t.occurs_min) * t.size * outer
+            })
+            .sum();
         let (least, most) = (items[r].size.saturating_sub(fewer), items[r].size);
         let lengths = &mut record_lengths[k as usize];
         *lengths = Some(lengths.map_or((least, most), |(l, m)| (l.min(least), m.max(most))));
@@ -470,9 +503,10 @@ fn rename(items: &mut [Item], index: usize, e: &DataEntry, qualify: Qualify) -> 
     }
     let a = find(first)?;
     let Some(last) = last else {
-        let (offset, size, kind, scaling, odo) = (items[a].offset, items[a].size, items[a].kind, items[a].scaling, items[a].odo);
+        let (offset, size, kind, scaling, odo, moved_by, followed) =
+            (items[a].offset, items[a].size, items[a].kind, items[a].scaling, items[a].odo.clone(), items[a].moved_by.clone(), items[a].followed);
         let it = &mut items[index];
-        (it.offset, it.size, it.kind, it.scaling, it.odo) = (offset, size, kind, scaling, odo);
+        (it.offset, it.size, it.kind, it.scaling, it.odo, it.moved_by, it.followed) = (offset, size, kind, scaling, odo, moved_by, followed);
         return Ok(());
     };
     let b = find(last)?;
@@ -496,10 +530,15 @@ fn rename(items: &mut [Item], index: usize, e: &DataEntry, qualify: Qualify) -> 
     if let Some(t) = (0..items.len()).find(|&i| items[i].depending_on.is_some() && root(i) == record && items[i].offset >= items[a].offset && items[i].offset < end(b)) {
         return Err(Error::at(items[t].pos, format!("RENAMES {} THRU {}: no OCCURS DEPENDING ON between them", first.name, last.name)));
     }
-    let (offset, size) = (items[a].offset, end(b) - items[a].offset);
+    let (offset, size, moved_by) = (items[a].offset, end(b) - items[a].offset, items[a].moved_by.clone());
     let it = &mut items[index];
-    (it.offset, it.size, it.kind) = (offset, size, Kind::Group);
+    (it.offset, it.size, it.kind, it.moved_by) = (offset, size, Kind::Group, moved_by);
     Ok(())
+}
+
+/// The groups item `i` belongs to, nearest first.
+fn ancestors(items: &[Item], i: usize) -> impl Iterator<Item = usize> + '_ {
+    std::iter::successors(items[i].parent, |&p| items[p].parent)
 }
 
 /// The boundary a SYNCHRONIZED item of this kind is aligned on (Language Reference SC27-8713-03,
