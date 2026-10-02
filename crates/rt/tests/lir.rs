@@ -1265,10 +1265,12 @@ fn debug_positions_are_differences_from_the_one_before() {
         sources: vec![1],
         positions: vec![Pos { file: 0, line: 5, col: 8 }, Pos { file: 1, line: 2, col: 12 }],
         ops: vec![vec![0, 1]],
+        statements: vec![vec![(0, 0), (1, 1)]],
     };
-    assert_eq!(encoded(&debug).0, [1, 1, 2, 0, 10, 16, 2, 5, 8, 1, 2, 0, 1]);
+    assert_eq!(encoded(&debug).0, [1, 1, 2, 0, 10, 16, 2, 5, 8, 1, 2, 0, 1, 1, 2, 0, 0, 1, 1]);
     let far = Pos { file: u16::MAX, line: u32::MAX, col: 0 };
-    round_trip(&[Debug::default(), debug, Debug { sources: vec![], positions: vec![far, Pos::default(), far], ops: vec![] }]);
+    let unreached = Debug { sources: vec![], positions: vec![far, Pos::default(), far], ops: vec![vec![2], vec![]], statements: vec![vec![], vec![(0, 0), (0, 2)]] };
+    round_trip(&[Debug::default(), debug, unreached]);
     let none = StringTable::default();
     assert_eq!(refused::<Debug>(&[0, 1, 0, 1, 0, 0], &none), (3, "a line of -1".into()));
     assert_eq!(refused::<Debug>(&[0, 1, 0x80, 0x80, 0x08, 0, 0, 0], &none), (2, "a file of 65536".into()));

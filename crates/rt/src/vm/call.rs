@@ -221,12 +221,16 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
 
     /// `Machine::sink`: tells the observer an operation an input could steer, and its operand.
     pub(super) fn sink(&mut self, kind: &'static str, pos: Pos, operand: &str) {
-        let p = self.p;
-        let source = self.unit.programs[self.me].source.clone();
-        let file = match (pos.file, &source) {
-            (0, Some(path)) => path.to_str().unwrap_or_default(),
-            (i, _) => p.debug.sources.get(usize::from(i)).map_or("", |&s| self.sym(s)),
-        };
-        self.unit.notify(Event::Sink { kind, file, line: pos.line, operand });
+        let file = self.event_file(pos);
+        self.unit.notify(Event::Sink { kind, file: &file, line: pos.line, operand });
+    }
+
+    /// `Machine::event_file`: a library program's own source by its path, a COPY member by the
+    /// program's file table, and the first program's own source as empty.
+    pub(super) fn event_file(&self, pos: Pos) -> String {
+        match (pos.file, &self.unit.programs[self.me].source) {
+            (0, Some(path)) => path.to_str().unwrap_or_default().to_owned(),
+            (i, _) => self.p.debug.sources.get(usize::from(i)).map_or_else(String::new, |&s| self.sym(s).to_owned()),
+        }
     }
 }

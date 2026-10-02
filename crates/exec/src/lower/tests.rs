@@ -1535,3 +1535,39 @@ fn an_unqualified_paragraph_name_lowers_to_the_one_in_its_own_section() {
     let performed: Vec<(u32, u32)> = p.ranges.iter().map(|r| (r.first, r.last)).collect();
     assert_eq!(performed, [(3, 3), (7, 7)]);
 }
+
+#[test]
+fn each_statement_with_a_position_starts_once_where_its_first_op_or_terminator_is() {
+    let body = [
+        "       MAIN.\n",
+        &line("MOVE 1 TO N"),
+        &line("IF N = 1"),
+        &line("    DISPLAY 'A'"),
+        &line("ELSE"),
+        &line("    DISPLAY 'B'"),
+        &line("END-IF"),
+        &line("CONTINUE"),
+        &line("GO TO P3."),
+        &line("DISPLAY 'NEVER'."),
+        "       P3.\n",
+        &line("STOP RUN."),
+    ]
+    .concat();
+    let source = program("", "       01  N PIC 9.\n", &body);
+    let p = lowered(&source);
+    let line_of = |text: &str| source.lines().position(|l| l.contains(text)).unwrap() as u32 + 1;
+    let mut starts: Vec<(usize, u32, u32)> =
+        p.debug.statements.iter().enumerate().flat_map(|(b, s)| s.iter().map(move |&(k, at)| (b, k, at))).map(|(b, k, at)| (b, k, p.debug.positions[at as usize].line)).collect();
+    let mut lines: Vec<u32> = starts.iter().map(|s| s.2).collect();
+    lines.sort_unstable();
+    let mut expected: Vec<u32> = ["MOVE 1", "IF N", "'A'", "'B'", "GO TO", "'NEVER'", "STOP RUN"].map(line_of).to_vec();
+    expected.sort_unstable();
+    assert_eq!(lines, expected);
+    starts.retain(|s| s.2 == line_of("MOVE 1") || s.2 == line_of("GO TO"));
+    let entry = p.paragraphs[paragraph(&p, "MAIN")].entry as usize;
+    assert_eq!((starts[0].0, starts[0].1), (entry, 0));
+    assert!(matches!(p.blocks[entry].ops[0], Op::Move { .. }));
+    let (b, k, _) = starts[1];
+    assert_eq!(k as usize, p.blocks[b].ops.len());
+    assert!(matches!(p.blocks[b].end, Terminator::GoTo(_) | Terminator::Jump(_)), "{:?}", p.blocks[b].end);
+}

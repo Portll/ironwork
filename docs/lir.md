@@ -1894,8 +1894,13 @@ pub enum SetTo { Nothing, Move { place: PlaceId, value: ConstId, plan: MovePlan 
 ```rust
 /// `sources` is the program's file table: the source, then each COPY member (ast.rs:21-22).
 /// `positions` maps a DebugId to its position; `ops` holds, per block, one DebugId per op and
-/// one for the terminator.
-pub struct Debug { pub sources: Vec<SymId>, pub positions: Vec<Pos>, pub ops: Vec<Vec<DebugId>> }
+/// one for the terminator; `statements` holds, per block, each statement that starts there.
+pub struct Debug {
+    pub sources: Vec<SymId>,
+    pub positions: Vec<Pos>,
+    pub ops: Vec<Vec<DebugId>>,
+    pub statements: Vec<Vec<(u32, DebugId)>>,
+}
 ```
 
 `Pos` is `rt::Pos`: the file index, line and column (today syntax/src/lib.rs:16-22). An abend's
@@ -1920,6 +1925,20 @@ position comes from where the walker takes it:
   first program's table (cli/src/main.rs:238-240), so an abend in a CALLed program from another
   source names the first program's file. The table holds each program's own; printing stays as
   today until question 4 is settled.
+- **Statement starts.** An entry `(k, at)` in a block's `statements` is a statement with a
+  position starting before op `k`, or before the terminator when `k` is the block's op count;
+  `at` is its position. A block's entries are in order, and several may share one `k`. Lowering
+  records one wherever the walker's `exec` meets a statement that `statement_pos` gives a position
+  (every statement but NEXT SENTENCE, a separator period, CONTINUE and EXIT), including an ENTRY,
+  under any option: it is not an op, so a run that does not trace statements pays nothing. A CALL
+  through ENTRY begins after the ENTRY's own entry, as the walker begins at the statement after
+  it. Statements after a transfer that nothing reaches keep their entries in their own block.
+- **Statement events.** When `RunUnit.statements` is set (`rt::unit::StatementFilter`: all
+  statements, or those on given lines), the walker raises `Event::Statement { file, line }` in
+  `exec` before the statement runs, and the VM raises one for each entry of a block as it reaches
+  op `k`, after the block's `Paragraph` event, and before the terminator for `k` equal to the op
+  count. `file` is resolved as a sink's is. `run --trace-statements` journals them (evidence.md
+  §1.2).
 - **The load module keeps the table** (load-module.md §9), so a module whose source is gone still
   prints `PAYROLL.cbl:LINE:COL: ABEND …` (codegen-runtime.md B1).
 
@@ -1991,8 +2010,10 @@ byte; DISPLAY output and standard error, which carries TRUNC(OPT), FASTSRT and S
 RETURN-CODE and the ending; the abend's code, message and position; every file written under a DD;
 the SQL call log (verb, ordinal, text, inputs), from the scripted database of machine/sql.rs:305-336
 or a recording; and for CICS the returned task: next TRANSID, COMMAREA, TS and TD queues, and
-terminal screens. The fuzz target of B2 runs both with a step limit, and passes when they agree or
-both stop at it. The golden programs of §12.2 run in both, which exercises C99.
+terminal screens. The run unit's events are compared too, with `RunUnit.statements` set to all
+statements in both, so each run checks the statement starts of §10 against the walker's `exec`.
+The fuzz target of B2 runs both with a step limit, and passes when they agree or both stop at it.
+The golden programs of §12.2 run in both, which exercises C99.
 
 **What runs now.** `rt::vm` runs the core: storage, every data op, conditions, control flow and
 CALL within the run unit. File I/O, SORT and MERGE, Report Writer, EXEC CICS and SQL, JSON and XML,

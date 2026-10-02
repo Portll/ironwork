@@ -80,8 +80,10 @@ pub fn execute<'w>(
     kept: &mut Option<Remains>,
 ) -> Result<(Ending, i16), Halt> {
     oo::refuse_to_run(&compiled.program)?;
+    let statements = library.trace_statements.clone();
     let mut run_unit = rt::unit::RunUnit::new(VmLibrary(library), dds, sysin, clock, out, err);
     run_unit.observer = observer;
+    run_unit.statements = statements;
     run_unit.sql = database.map(sql::Session::new);
     let me = run_unit.add_named(None, compiled.program.id.to_ascii_uppercase(), compiled.program.files.len(), compiled.layout.size as usize);
     let parm = parm.map(|p| run_unit.push_temporary(&rt::le::parm::parameter_area(rt::le::parm::program_arguments(p), compiled.options.code_page())));

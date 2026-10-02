@@ -115,6 +115,7 @@ pub fn payroll() -> Program {
             at(9, 30),
         ],
         ops: vec![vec![5; 4], vec![5], vec![5; 2], vec![5; 2], vec![5, 6], vec![8; 2], vec![8], vec![8], vec![7]],
+        statements: vec![vec![(0, 5)], vec![], vec![], vec![], vec![(1, 6)], vec![(0, 8)], vec![], vec![], vec![(0, 7)]],
     };
 
     Program {

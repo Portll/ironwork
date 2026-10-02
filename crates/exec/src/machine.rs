@@ -240,6 +240,13 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         {
             self.uses.line = pos;
         }
+        if self.unit.statements.is_some()
+            && let Some(pos) = declaratives::statement_pos(s)
+            && self.unit.traces(pos.line)
+        {
+            let file = self.event_file(pos);
+            self.unit.notify(Event::Statement { file: &file, line: pos.line });
+        }
         match self.statement(s) {
             Err(Abend { code: AbendCode::Signal(Signal::DeclarativeExit), .. }) => Ok(self.declarative_exit()),
             flow => flow,
@@ -885,13 +892,17 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     /// Tells the observer, for the input trace, the operand of an operation an input could steer.
     pub(crate) fn sink(&mut self, kind: &'static str, pos: Pos, operand: &str) {
-        let source = self.unit.programs[self.me].source.clone();
-        let program = self.program;
-        let file = match (pos.file, &source) {
-            (0, Some(path)) => path.to_str().unwrap_or_default(),
-            (i, _) => program.sources.get(i as usize).map_or("", String::as_str),
-        };
-        self.unit.notify(Event::Sink { kind, file, line: pos.line, operand });
+        let file = self.event_file(pos);
+        self.unit.notify(Event::Sink { kind, file: &file, line: pos.line, operand });
+    }
+
+    /// The file an event names for `pos`: a library program's own source by its path, a COPY
+    /// member by the program's file table, and the first program's own source as empty.
+    fn event_file(&self, pos: Pos) -> String {
+        match (pos.file, &self.unit.programs[self.me].source) {
+            (0, Some(path)) => path.to_str().unwrap_or_default().to_owned(),
+            (i, _) => self.program.sources.get(i as usize).cloned().unwrap_or_default(),
+        }
     }
 
     /// An abend from a program CALL or LINK loaded from a library, named by that program's files,

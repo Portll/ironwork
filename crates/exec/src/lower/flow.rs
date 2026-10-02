@@ -24,20 +24,28 @@ pub(super) struct Blocks {
 struct Open {
     ops: Vec<Op>,
     at: Vec<DebugId>,
+    starts: Vec<(u32, DebugId)>,
     end: Option<(Terminator, DebugId)>,
 }
 
+/// What the blocks give the debug table: per block, the debug entry of each op and of the
+/// terminator, and the statements that start there.
+pub(super) struct BlockDebug {
+    pub ops: Vec<Vec<DebugId>>,
+    pub statements: Vec<Vec<(u32, DebugId)>>,
+}
+
 impl Blocks {
-    /// The blocks and, per block, the debug entry of each op and of the terminator.
-    pub(super) fn finish(self) -> R<(Vec<lir::Block>, Vec<Vec<DebugId>>)> {
+    pub(super) fn finish(self) -> R<(Vec<lir::Block>, BlockDebug)> {
         let mut blocks = Vec::with_capacity(self.open.len());
-        let mut debug = Vec::with_capacity(self.open.len());
+        let mut debug = BlockDebug { ops: Vec::with_capacity(self.open.len()), statements: Vec::with_capacity(self.open.len()) };
         for (b, open) in self.open.into_iter().enumerate() {
             let Some((end, at)) = open.end else { return Err(LowerError::Invalid(format!("block {b} has no terminator"))) };
             let mut ids = open.at;
             ids.push(at);
             blocks.push(lir::Block { ops: open.ops, end });
-            debug.push(ids);
+            debug.ops.push(ids);
+            debug.statements.push(open.starts);
         }
         Ok((blocks, debug))
     }
@@ -282,7 +290,7 @@ impl Lower<'_> {
                     self.switch(b)?;
                 }
                 Stmt::Entry { .. } => {
-                    self.debug_line(pos)?;
+                    self.statement_start(pos)?;
                     let b = self.new_block()?;
                     self.jump(b, pos)?;
                     self.switch(b)?;
@@ -315,6 +323,16 @@ impl Lower<'_> {
         if self.debugging { self.op(Op::DebugLine(pos.line), pos) } else { Ok(()) }
     }
 
+    /// A statement starts here: the debug table records it before the next op, where the walker's
+    /// `exec` raises its Statement event, and the line register takes its line.
+    fn statement_start(&mut self, pos: Pos) -> R<()> {
+        let at = self.at(pos);
+        let b = self.current()? as usize;
+        let open = &mut self.blocks.open[b];
+        open.starts.push((open.ops.len() as u32, at));
+        self.debug_line(pos)
+    }
+
     pub(super) fn statements(&mut self, stmts: &[Stmt], ctx: &Ctx) -> R<()> {
         for s in stmts {
             self.statement(s, ctx)?;
@@ -324,7 +342,7 @@ impl Lower<'_> {
 
     fn statement(&mut self, s: &Stmt, ctx: &Ctx) -> R<()> {
         if let Some(at) = stmt_pos(s) {
-            self.debug_line(at)?;
+            self.statement_start(at)?;
         }
         let pos = stmt_pos(s).unwrap_or(ctx.pos);
         let inner = Ctx { pos, ..ctx.clone() };

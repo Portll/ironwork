@@ -94,6 +94,11 @@ flags:
              OPERATOR or JOURNALNAME, SEND and WEB write. Enter TEXT where the input comes in
              (SYSIN, a DD, the COMMAREA, a replayed row); each operation is recorded once reached
              and once not. run, job and cics
+  --trace-statements FILE
+             with --evidence: record each start of a statement FILE lists, one FILE:LINE per
+             line, a file matched by its name: cobolwork's routes.statements. The first 100
+             starts of each are recorded, in the order the run made them, the 100th marked
+             capped. run only
   --clock YYYY-MM-DDTHH:MM:SS[.hh]
              the time ACCEPT FROM DATE, TIME and FUNCTION CURRENT-DATE report, for a run that must
              repeat; without it they report the system clock in UTC
@@ -315,6 +320,7 @@ fn driver() -> ExitCode {
     let mut vm = false;
     let mut evidence_dir: Option<std::path::PathBuf> = None;
     let mut trace_marker: Option<String> = None;
+    let mut trace_statements: Option<std::path::PathBuf> = None;
     let mut provenance_file: Option<std::path::PathBuf> = None;
     let (mut compare_base, mut compare_head, mut declare, mut statement) = (None, None, None, None);
     let mut expected: Vec<(String, std::path::PathBuf)> = Vec::new();
@@ -368,6 +374,10 @@ fn driver() -> ExitCode {
             "--trace-marker" => match args.next().filter(|m| !m.is_empty()) {
                 Some(m) => trace_marker = Some(m),
                 None => return usage_error("--trace-marker needs the text entered at the input"),
+            },
+            "--trace-statements" => match args.next() {
+                Some(file) => trace_statements = Some(std::path::PathBuf::from(file)),
+                None => return usage_error("--trace-statements needs a file of FILE:LINE statements"),
             },
             "--datasets" => match args.next() {
                 Some(dir) => datasets = Some(dir),
@@ -479,7 +489,7 @@ fn driver() -> ExitCode {
         return usage_error("unknown flag --c-series");
     }
     let run_flags = !dds.is_empty() || replay.is_some() || keyed || sql_db.is_some() || sql_record.is_some() || evidence_dir.is_some() || trace_marker.is_some()
-        || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() || !matches!(clock, exec::unit::Clock::System)
+        || trace_statements.is_some() || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() || !matches!(clock, exec::unit::Clock::System)
         || compare_base.is_some() || compare_head.is_some() || declare.is_some() || statement.is_some() || !expected.is_empty() || datasets.is_some()
         || !proclibs.is_empty() || user.is_some()
         || vm;
@@ -492,7 +502,7 @@ fn driver() -> ExitCode {
         && c == "fuzz"
     {
         let Some(out) = out_dir else { return usage_error("fuzz needs -o DIR") };
-        if run_flags && (!dds.is_empty() || replay.is_some() || sql_db.is_some() || evidence_dir.is_some() || coverage_file.is_some() || provenance_file.is_some() || trace_marker.is_some() || !cics_options.is_empty() || datasets.is_some()) {
+        if run_flags && (!dds.is_empty() || replay.is_some() || sql_db.is_some() || evidence_dir.is_some() || coverage_file.is_some() || provenance_file.is_some() || trace_marker.is_some() || trace_statements.is_some() || !cics_options.is_empty() || datasets.is_some()) {
             return usage_error("fuzz makes its own DDs, evidence and coverage; it takes -o, --runs, --seed, --timeout, --root, --clock, -I, -L and the compile flags");
         }
         if dump_flags || bundle.is_some() || source_prefix.is_some() {
@@ -546,6 +556,16 @@ fn driver() -> ExitCode {
     if trace_marker.is_some() && (evidence_dir.is_none() || !matches!(rest.first().map(String::as_str), Some("run" | "job" | "cics"))) {
         return usage_error("--trace-marker goes with --evidence, for run, job and cics");
     }
+    if trace_statements.is_some() && (evidence_dir.is_none() || rest.first().map(String::as_str) != Some("run")) {
+        return usage_error("--trace-statements goes with --evidence, for run");
+    }
+    let listed = match trace_statements.as_deref().map(evidence::listed_statements).transpose() {
+        Ok(listed) => listed,
+        Err(e) => {
+            eprintln!("ironwork: --trace-statements {}: {e}", trace_statements.unwrap_or_default().display());
+            return ExitCode::from(2);
+        }
+    };
     if let [c, file] = rest.as_slice()
         && c == "ddl"
     {
@@ -647,6 +667,7 @@ fn driver() -> ExitCode {
         dirs: std::iter::once(own_directory).chain(program_dirs).collect(),
         copy: libraries,
         flags: flags.clone(),
+        trace_statements: listed.as_ref().map(|l| exec::unit::StatementFilter::Lines(l.iter().map(|&(_, line)| line).collect())),
     };
     let compiled = match exec::compile(first, &flags) {
         Ok(c) => c,
@@ -726,7 +747,7 @@ fn driver() -> ExitCode {
         None => Box::new(io::stdin().lock()),
     };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
-    let shared = journal.map(|j| std::rc::Rc::new(std::cell::RefCell::new(evidence::Run::new(j, &reads, path, trace_marker.as_deref()))));
+    let shared = journal.map(|j| std::rc::Rc::new(std::cell::RefCell::new(evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()))));
     let covered = coverage_file.as_ref().map(|_| std::rc::Rc::new(std::cell::RefCell::new(coverage::Coverage::default())));
     let observer = (shared.is_some() || covered.is_some()).then(|| {
         let (run, cov) = (shared.clone(), covered.clone());

@@ -601,10 +601,11 @@ Nesting and COMMON are not modelled.
 
 ## 9. The debug table
 
-The `DEBUG` section holds each program's `Program.debug` (lir.md §10). `sources` and `ops` encode
-by §4. `positions` is written in debug-id order, each position as its difference from the one
-before (file, line and column as zigzag LEB128), so a run of positions from one statement costs a
-few bytes each. The reader decodes a program's table on its first abend, not on load.
+The `DEBUG` section holds each program's `Program.debug` (lir.md §10). `sources`, `ops` and
+`statements` encode by §4, in that order with `positions` between `sources` and `ops`.
+`positions` is written in debug-id order, each position as its difference from the one before
+(file, line and column as zigzag LEB128), so a run of positions from one statement costs a few
+bytes each. The reader decodes a program's table on its first abend, not on load.
 
 ### 9.1 Source names
 

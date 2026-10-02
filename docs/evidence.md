@@ -23,6 +23,7 @@ by `prev` and `seq`.
 | `abend` | `code`, `file`, `line` | the abend the run ended with |
 | `step` | `step`, `pgm`, `outcome` | for `job`, each step as the job log shows it: `RC=0004`, an abend, BYPASSED or JCL ERROR, with why |
 | `sink` | `sink`, `file`, `line`, `marker`, `reached` | with `--trace-marker`, an operation an input could steer, the first time it is reached with the marker in its operand and the first time without (§1.1) |
+| `statement` | `file`, `line`, `capped` | with `--trace-statements`, each start of a listed statement, in the order the run made them, up to 100 per statement, the 100th with `capped` true (§1.2) |
 | `close` | `exit`, `counts`, `durationMs`, `ledger` | last |
 
 - A job's journal is one run: the JCL as an `input`, then for each step its programs' sources, its
@@ -70,6 +71,25 @@ out yet (START, WEB) is still traced before it stops the task; an operand that c
 left to the command, so tracing never changes how a run ends. Not traced, because ironwork does not
 run them yet: MQPUT, dynamic SQL, sockets, ASSIGN to a data item, and the sources ACCEPT FROM
 COMMAND-LINE or ENVIRONMENT. PARM reaches a program only through `ironwork job`.
+
+### 1.2 Statement trace: `--trace-statements FILE`
+
+With `--evidence`, `run` records each time a statement FILE lists starts: whether one run executed
+a finding's route in order, which cobolwork needs before coverage may refute the finding (cobolwork
+`docs/spec/reach.md` §9.8, fact 2). FILE holds one `FILE:LINE` per line, split at the last colon,
+blank lines left out: the statements of cobolwork's `flow --all-routes` `routes.statements`. A
+statement is matched by its file's name and its line, as cobolwork joins a sink to a finding, so a
+path recorded from another directory still matches.
+
+- **Where.** A statement starts as the walker's `exec` meets it (lir.md §10): every statement but
+  NEXT SENTENCE, a separator period, CONTINUE and EXIT, each time control reaches it, in a COPY
+  member or a program CALL loaded as well as in the program itself.
+- **How many.** The first 100 starts of each listed statement are recorded; the 100th carries
+  `capped: true`, and later ones are left out, so a loop cannot fill the journal. A route whose
+  order shows only after a statement's cap is not shown.
+- **Cost.** The run unit tells the observer only of statements on a listed line, and nothing
+  without the flag. The table of statement starts is in every lowered program, so the VM raises the
+  same events as the walker.
 
 ## 2. Build provenance: `--provenance FILE`
 

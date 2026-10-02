@@ -3,7 +3,7 @@
 //! at the end, each program CALL loads, and how the run ended. Paths are recorded relative to the
 //! directory that supplied them, never absolute.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -93,8 +93,29 @@ pub fn output(journal: &mut Journal, name: &str, bytes: &[u8], path: &Path, root
     let _ = journal.append("output", fields([("name", name.into()), ("sha256", sha.into()), ("bytes", Value::Int(bytes.len() as i64)), ("path", relative(path, roots).into())]));
 }
 
-/// A run in progress: the journal, every DD it opened, so their final state is recorded, and for
-/// an input trace the marker and each sink already recorded as reached or not.
+/// How many starts of one listed statement a journal records.
+pub const STATEMENT_CAP: u32 = 100;
+
+/// `--trace-statements`' file: one `FILE:LINE` per line, split at the last colon, blank lines
+/// left out; each statement as its file's name and its line.
+pub fn listed_statements(path: &Path) -> Result<BTreeSet<(String, u32)>, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let mut listed = BTreeSet::new();
+    for (k, entry) in text.lines().map(str::trim).enumerate().filter(|(_, l)| !l.is_empty()) {
+        let parsed = entry.rsplit_once(':').and_then(|(file, line)| Some((file_name(file)?, line.parse::<u32>().ok().filter(|&n| n > 0)?)));
+        let Some(statement) = parsed else { return Err(format!("line {}: {entry:?} is not FILE:LINE", k + 1)) };
+        listed.insert(statement);
+    }
+    Ok(listed)
+}
+
+fn file_name(path: &str) -> Option<String> {
+    Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned())
+}
+
+/// A run in progress: the journal, every DD it opened, so their final state is recorded, for an
+/// input trace the marker and each sink already recorded as reached or not, and for a statement
+/// trace the statements listed and how many starts of each are recorded.
 pub struct Run {
     journal: Journal,
     roots: Vec<PathBuf>,
@@ -102,12 +123,28 @@ pub struct Run {
     opened: BTreeSet<(String, PathBuf)>,
     marker: Option<String>,
     sinks: BTreeSet<(&'static str, String, u32, bool)>,
+    statements: BTreeMap<(String, u32), u32>,
     failed: Option<String>,
 }
 
 impl Run {
     pub fn new(journal: Journal, roots: &[PathBuf], program: &str, marker: Option<&str>) -> Self {
-        Self { journal, roots: roots.to_vec(), program: program.to_string(), opened: BTreeSet::new(), marker: marker.map(str::to_string), sinks: BTreeSet::new(), failed: None }
+        Self {
+            journal,
+            roots: roots.to_vec(),
+            program: program.to_string(),
+            opened: BTreeSet::new(),
+            marker: marker.map(str::to_string),
+            sinks: BTreeSet::new(),
+            statements: BTreeMap::new(),
+            failed: None,
+        }
+    }
+
+    /// Records each start of these statements, by file name and line, up to [`STATEMENT_CAP`].
+    pub fn with_statements(mut self, listed: BTreeSet<(String, u32)>) -> Self {
+        self.statements = listed.into_iter().map(|s| (s, 0)).collect();
+        self
     }
 
     fn dd(&mut self, dd: &str, event: &str, mode: Option<&str>, path: &Path) {
@@ -145,6 +182,21 @@ impl Run {
                     f.insert("from".into(), relative(p, &self.roots).into());
                 }
                 self.write("call", f);
+            }
+            Event::Statement { file, line } => {
+                let file = if file.is_empty() { self.program.as_str() } else { file };
+                let Some(name) = file_name(file) else { return };
+                let Some(count) = self.statements.get_mut(&(name, line)) else { return };
+                if *count == STATEMENT_CAP {
+                    return;
+                }
+                *count += 1;
+                let capped = *count == STATEMENT_CAP;
+                let mut f = fields([("file", relative(Path::new(file), &self.roots).into()), ("line", i64::from(line).into())]);
+                if capped {
+                    f.insert("capped".into(), true.into());
+                }
+                self.write("statement", f);
             }
             Event::Sink { kind, file, line, operand } => {
                 let Some(marker) = &self.marker else { return };

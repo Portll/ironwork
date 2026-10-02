@@ -605,6 +605,15 @@ fn verify_program(p: &Program) -> Result<(), String> {
     if p.debug.ops.len() != p.blocks.len() {
         return Err(format!("debug entries for {} blocks of {}", p.debug.ops.len(), p.blocks.len()));
     }
+    if p.debug.statements.len() != p.blocks.len() {
+        return Err(format!("statement starts for {} blocks of {}", p.debug.statements.len(), p.blocks.len()));
+    }
+    for (b, (blk, starts)) in p.blocks.iter().zip(&p.debug.statements).enumerate() {
+        if starts.windows(2).any(|w| w[0].0 > w[1].0) || starts.last().is_some_and(|&(k, _)| k as usize > blk.ops.len()) {
+            return Err(format!("block {b}: statement starts out of order or past its {} ops and terminator", blk.ops.len()));
+        }
+        starts.iter().try_for_each(|&(_, id)| within("debug entry", id, p.debug.positions.len()))?;
+    }
     for (b, (blk, ids)) in p.blocks.iter().zip(&p.debug.ops).enumerate() {
         if ids.len() != blk.ops.len() + 1 {
             return Err(format!("block {b}: {} debug entries for {} ops and a terminator", ids.len(), blk.ops.len()));

@@ -5,12 +5,15 @@ use crate::module::ModuleError;
 use crate::module::codec::{Decode, Encode, Reader, Writer};
 use crate::vocab::Pos;
 
-/// `positions` maps a DebugId to its position; `ops` holds, per block, one per op and one for the terminator.
+/// `positions` maps a DebugId to its position; `ops` holds, per block, one per op and one for the
+/// terminator; `statements` holds, per block, each statement that starts there: the op it starts
+/// before, the terminator's index when it starts before that, and its position.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Debug {
     pub sources: Vec<SymId>,
     pub positions: Vec<Pos>,
     pub ops: Vec<Vec<DebugId>>,
+    pub statements: Vec<Vec<(u32, DebugId)>>,
 }
 
 impl Encode for Debug {
@@ -25,6 +28,7 @@ impl Encode for Debug {
             last = pos;
         }
         self.ops.encode(w);
+        self.statements.encode(w);
     }
 }
 
@@ -44,7 +48,8 @@ impl Decode for Debug {
             last = pos;
         }
         let ops = Vec::decode(r)?;
-        Ok(Self { sources, positions, ops })
+        let statements = Vec::decode(r)?;
+        Ok(Self { sources, positions, ops, statements })
     }
 }
 

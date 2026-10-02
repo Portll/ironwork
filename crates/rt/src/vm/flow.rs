@@ -79,9 +79,15 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             }
             let b = &p.blocks[block as usize];
             let at = &p.debug.ops[block as usize];
+            let starts = &p.debug.statements[block as usize];
+            let tracing = self.unit.statements.is_some() && !starts.is_empty();
+            let mut told = 0;
             let mut arm = None;
             let mut transfer = None;
-            for (op, &id) in b.ops.iter().zip(at) {
+            for (k, (op, &id)) in b.ops.iter().zip(at).enumerate() {
+                if tracing {
+                    told = self.statements_before(starts, told, k);
+                }
                 match self.op(op, id)? {
                     Step::Next => {}
                     Step::Arm(a) => arm = Some(a),
@@ -90,6 +96,9 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
                         break;
                     }
                 }
+            }
+            if tracing && transfer.is_none() {
+                self.statements_before(starts, told, b.ops.len());
             }
             let next = match transfer {
                 Some(step) => self.transfer(step, floor)?,
@@ -100,6 +109,22 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
                 Next::Exit(exit) => return Ok(exit),
             }
         }
+    }
+
+    /// Tells the observer of each statement of `starts`, from the `told`th, that starts before op
+    /// `k`, as the walker's `exec` does; how many of `starts` are told after.
+    fn statements_before(&mut self, starts: &[(u32, DebugId)], mut told: usize, k: usize) -> usize {
+        while let Some(&(op, id)) = starts.get(told)
+            && op as usize <= k
+        {
+            let pos = self.pos(id);
+            if self.unit.traces(pos.line) {
+                let file = self.event_file(pos);
+                self.unit.notify(Event::Statement { file: &file, line: pos.line });
+            }
+            told += 1;
+        }
+        told
     }
 
     fn terminator(&mut self, end: &Terminator, at: DebugId, arm: Option<u8>, floor: usize) -> R<Next> {

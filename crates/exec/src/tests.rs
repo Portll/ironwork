@@ -27,6 +27,7 @@ mod report;
 mod scope;
 mod sort;
 mod vm;
+mod statements;
 mod xml;
 mod xml_generate;
 

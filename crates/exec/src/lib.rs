@@ -332,8 +332,10 @@ fn run_main<'w>(
     kept: &mut Option<unit::Remains>,
 ) -> Result<(Ending, i16), Abend> {
     oo::refuse_to_run(&compiled.program)?;
+    let statements = library.trace_statements.clone();
     let mut run_unit = unit::RunUnit::new(library, dds, sysin, clock, out, err);
     run_unit.observer = observer;
+    run_unit.statements = statements;
     run_unit.sql = database.map(sql::Session::new);
     let me = run_unit.add(None, &compiled.program, compiled.layout.size as usize);
     let parm = parm.map(|p| run_unit.push_temporary(&rt::le::parm::parameter_area(rt::le::parm::program_arguments(p), compiled.options.code_page())));

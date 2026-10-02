@@ -121,7 +121,7 @@ pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
     l.services.entries = l.entry_points()?;
     l.services.class = l.class_definition()?;
     let procedure_start = compiled.program.report_writer.procedure_start.min(compiled.program.paragraphs.len());
-    let (blocks, ops) = l.blocks.finish()?;
+    let (blocks, debug) = l.blocks.finish()?;
     let program = lir::Program {
         id,
         options: lir::ProgramOptions {
@@ -151,7 +151,7 @@ pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
         abends: l.abends,
         edits: edits(&compiled.layout)?,
         symbols: l.symbols,
-        debug: lir::Debug { sources, positions: l.positions, ops },
+        debug: lir::Debug { sources, positions: l.positions, ops: debug.ops, statements: debug.statements },
     };
     if cfg!(debug_assertions) {
         verify(&program).map_err(LowerError::Invalid)?;

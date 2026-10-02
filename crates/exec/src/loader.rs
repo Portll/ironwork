@@ -18,6 +18,8 @@ pub struct Library {
     pub dirs: Vec<PathBuf>,
     pub copy: copy::Libraries,
     pub flags: Vec<String>,
+    /// The statements whose start the run unit tells its observer of (`RunUnit::statements`).
+    pub trace_statements: Option<rt::unit::StatementFilter>,
 }
 
 fn member_name(name: &str) -> bool {

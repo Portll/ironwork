@@ -115,7 +115,7 @@ impl Harness {
         let compiled = compiled.unwrap_or_else(|e| panic!("{e:?}"));
         programs.extend(self.classes.iter().map(|c| syntax::parse(c).unwrap_or_else(|e| panic!("{e}\n{c}"))));
         let fingerprint = rt::sql::fingerprint(&format!("{}\n{}", self.source, self.flags.join(" ")));
-        let library = unit::Library { programs, dirs: self.dirs, flags: self.flags, ..Default::default() };
+        let library = unit::Library { programs, dirs: self.dirs, flags: self.flags, trace_statements: Some(unit::StatementFilter::All), ..Default::default() };
         let lowered = check_lowering(&compiled, fingerprint, None);
         for program in &library.programs {
             // Compiled as `RunUnit::load` compiles a CALLed program; one that does not compile is left out.
@@ -221,6 +221,7 @@ impl Events {
             Event::Load { program, source } => format!("load {program} {}", source.map(|s| s.display().to_string()).unwrap_or_default()),
             Event::Paragraph { program, name, index } => format!("paragraph {program} {name} {index}"),
             Event::Sink { kind, file, line, operand } => format!("sink {kind} {file}:{line} {operand}"),
+            Event::Statement { file, line } => format!("statement {file}:{line}"),
         };
         for b in text.bytes().chain([0]) {
             self.digest = (self.digest ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);

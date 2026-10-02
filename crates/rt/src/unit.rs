@@ -8,7 +8,7 @@
 use crate::abend::Abend;
 use crate::files::{Dds, Open};
 use crate::vocab::{OpenMode, Pos};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
@@ -104,6 +104,16 @@ pub enum Event<'a> {
     /// `kind` is cobolwork's name for the sink (`dynamic-program-load`, `log`, ...); `file` is the
     /// library file or COPY member the operation is in, empty for the first program's own source.
     Sink { kind: &'static str, file: &'a str, line: u32, operand: &'a str },
+    /// A statement starting, under [`RunUnit::statements`]; `file` as `Sink`'s.
+    Statement { file: &'a str, line: u32 },
+}
+
+/// The statements whose start a run tells its observer of: every one, or those on these lines of
+/// any source, which the observer narrows to their files.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StatementFilter {
+    All,
+    Lines(HashSet<u32>),
 }
 
 pub type Observer<'w> = Box<dyn FnMut(Event<'_>) + 'w>;
@@ -169,6 +179,8 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     connectors: HashMap<(usize, usize), Connector>,
     /// The entries SET TO ENTRY has named, which function-pointers and procedure-pointers hold.
     pub entries: Vec<crate::set::Entry>,
+    /// The statements an observer is told of as each starts; None tells it of none.
+    pub statements: Option<StatementFilter>,
 }
 
 impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
@@ -195,6 +207,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             externals: Externals::default(),
             connectors: HashMap::new(),
             entries: Vec::new(),
+            statements: None,
         }
     }
 
@@ -299,6 +312,15 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
 
     pub const fn observed(&self) -> bool {
         self.observer.is_some()
+    }
+
+    /// Whether a statement starting on `line` is told to the observer.
+    pub fn traces(&self, line: u32) -> bool {
+        match &self.statements {
+            None => false,
+            Some(StatementFilter::All) => self.observer.is_some(),
+            Some(StatementFilter::Lines(lines)) => self.observer.is_some() && lines.contains(&line),
+        }
     }
 
     pub fn notify(&mut self, event: Event<'_>) {
