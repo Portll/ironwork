@@ -383,6 +383,7 @@ fn twin(t: &cics::Task) -> Option<cics::Task> {
         returned_commarea: t.returned_commarea.clone(),
         abcode: t.abcode.clone(),
         cancelling: t.cancelling,
+        activations: t.activations,
     })
 }
 

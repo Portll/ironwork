@@ -42,6 +42,8 @@ pub trait CicsHost<'w, P: Copy, O, S>: Host<P> + UnitHost<'w> {
     fn text(&self, text: &S) -> String;
     /// The run unit's first program, from which RETURN TRANSID and COMMAREA end the task.
     fn main(&self) -> bool;
+    /// This activation of the program, which a HANDLE ABEND LABEL it sets belongs to.
+    fn activation(&self) -> u64;
     fn program_id(&self) -> String;
     /// Where DFHCOMMAREA is, when the program has one with an address.
     fn commarea(&self) -> Option<usize>;
@@ -75,9 +77,9 @@ pub struct AbendExit {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExitTarget {
-    /// A paragraph of the program that set the exit, entered as by a GO TO at the HANDLE ABEND
-    /// command `at`.
-    Label { paragraph: ParaId, at: Pos },
+    /// A paragraph of the program activation `owner` that set the exit, entered as by a GO TO at
+    /// the HANDLE ABEND command `at`.
+    Label { paragraph: ParaId, owner: u64, at: Pos },
     /// A program, entered as by LINK.
     Program(String),
 }

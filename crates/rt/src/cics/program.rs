@@ -116,16 +116,28 @@ fn interceptable(abend: &Abend) -> Option<String> {
     }
 }
 
-/// Where an abend that reaches a logical level goes: to the level's HANDLE ABEND exit when it is
-/// active, which CICS deactivates on the way in (C142). None passes the abend to the next higher
-/// level.
-pub fn abend_exit<H, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, handlers: &mut Handlers, abend: &Abend) -> Option<ExitTarget> {
-    let code = interceptable(abend)?;
-    let task = unit.cics.as_mut().filter(|t| !t.cancelling)?;
-    let exit = handlers.abend.as_mut().filter(|e| e.active)?;
+/// Where an abend that reaches activation `me` goes: to the level's HANDLE ABEND exit when it is
+/// active, which CICS deactivates on the way in (C142). A LABEL `me` set is a GO TO in it, and one
+/// another activation set abends APC2 (C238). A PROGRAM is entered only where `me` runs the level,
+/// as the task, LINK or XCTL started it; in a CALLed program the abend goes on with the exit still
+/// active. None passes the abend on.
+pub fn abend_exit<H, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, handlers: &mut Handlers, abend: &Abend, me: u64, runs_level: bool) -> R<Option<ExitTarget>> {
+    let Some(code) = interceptable(abend) else { return Ok(None) };
+    let Some(task) = unit.cics.as_mut().filter(|t| !t.cancelling) else { return Ok(None) };
+    let Some(exit) = handlers.abend.as_mut().filter(|e| e.active && (runs_level || matches!(e.target, ExitTarget::Label { .. }))) else {
+        return Ok(None);
+    };
     exit.active = false;
     task.abcode = Some(code);
-    Some(exit.target.clone())
+    match &exit.target {
+        ExitTarget::Label { owner, .. } if *owner != me => Err(Abend {
+            message: format!("{}; the HANDLE ABEND LABEL is in a program that is not running there, which CICS cannot branch to", abend.message),
+            code: AbendCode::Cics("APC2".into()),
+            pos: abend.pos,
+            file: abend.file.clone(),
+        }),
+        target => Ok(Some(target.clone())),
+    }
 }
 
 /// A HANDLE ABEND PROGRAM exit, entered as by LINK with the COMMAREA of the program that set it.
@@ -198,7 +210,7 @@ pub(super) fn handle_abend<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>
                 Err(LoadError::Compile(m)) => return Err(Abend::ironwork(format!("EXEC CICS HANDLE ABEND PROGRAM({name}): {m}"), at.pos)),
             }
         }
-        (None, Some(p)) => Some(ExitTarget::Label { paragraph: p, at: at.pos }),
+        (None, Some(p)) => Some(ExitTarget::Label { paragraph: p, owner: x.activation(), at: at.pos }),
         (None, None) => None,
     };
     let handlers = x.handlers();

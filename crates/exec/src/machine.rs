@@ -83,6 +83,8 @@ pub struct Machine<'p, 'u, 'w> {
     main: bool,
     /// HANDLE CONDITION, IGNORE CONDITION and HANDLE ABEND, which belong to the program level.
     cics_handlers: cics::Handlers,
+    /// This activation's number in the CICS task, which owns the HANDLE ABEND LABELs it sets.
+    serial: u64,
     report_writer: &'p crate::report::Writer,
     /// Each file's printer control character, when it is a print file.
     carriage: &'p [Option<crate::printer::Carriage>],
@@ -139,6 +141,10 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     /// Program `me` over its storage at `base`, with nothing bound or initialized.
     fn over(compiled: &'p Compiled, me: usize, base: usize, unit: &'u mut RunUnit<'w>, main: bool) -> Self {
+        let serial = unit.cics.as_mut().map_or(0, |task| {
+            task.activations += 1;
+            task.activations
+        });
         Self {
             compiled,
             program: &compiled.program,
@@ -155,6 +161,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             local_base: 0,
             main,
             cics_handlers: cics::Handlers::default(),
+            serial,
             report_writer: &compiled.report_writer,
             carriage: &compiled.carriage,
             oo: oo::Frame::default(),
@@ -973,7 +980,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             return Err(Abend::ironwork(format!("CALL {name}: the program is already active and is not RECURSIVE"), pos));
         }
         self.nest(pos)?;
-        let result = self.call_nested(c, index, entry, compiled);
+        let result = self.call_nested(c, index, entry, compiled, dynamic);
         self.unit.depth -= 1;
         result
     }
@@ -1038,18 +1045,26 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
     }
 
-    fn call_nested(&mut self, c: &'p Call, index: usize, entry: Option<usize>, compiled: std::rc::Rc<Compiled>) -> R<Flow> {
+    fn call_nested(&mut self, c: &'p Call, index: usize, entry: Option<usize>, compiled: std::rc::Rc<Compiled>, dynamic: bool) -> R<Flow> {
         let pos = c.pos;
         let mark = self.unit.mem.len();
         let addresses = callee::addresses(self, &call_args(&c.using), pos)?;
         self.parmcheck_set();
+        // A dynamic CALL suspends the caller's HANDLE ABEND exit, as CBLPSHPOP(ON) does (C237).
+        let suspends = dynamic && compiled.program.containers.is_empty();
         let containers = self.containers_of(&compiled.program);
         let by = By::Call { initial: compiled.program.initial };
         let (ending, returned) = callee::run(self, &Callee { index, by, mark: Some(mark), pos }, |m| {
             let mut callee = Machine::activation_within(&compiled, index, &mut *m.unit, false, containers)?;
             let entry = entry.and_then(|k| compiled.entries.get(k));
             callee.bind_linkage(&[], entry.map_or(&compiled.program.using, |e| &e.using), &addresses, true);
-            let ending = callee.run_from(entry.map(|e| (e.paragraph, e.statement)));
+            if !suspends {
+                callee.cics_handlers.abend = m.cics_handlers.abend.take();
+            }
+            let ending = callee.run_called(entry.map(|e| (e.paragraph, e.statement)));
+            if !suspends || ending.is_err() {
+                m.cics_handlers.abend = callee.cics_handlers.abend.take();
+            }
             let returned = match (&compiled.program.returning, &ending) {
                 (Some(item), Ok(_)) => Some(callee.returned(item, pos)?),
                 _ => None,

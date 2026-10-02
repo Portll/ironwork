@@ -1308,8 +1308,10 @@ DRY-4). An option is evaluated when the service reads it, in the order the walke
 binding evaluates nothing. `rt::cics::run` returns `Next`, `GoTo(ParaId)` for a handled condition,
 or `End` for RETURN, XCTL and a LINKed program's STOP RUN. A HANDLE ABEND exit is not a transfer
 `run` returns: an abend that reaches a program's activation, from the program, a CALL or a lower
-logical level, goes to `rt::cics::abend_exit`, and the executor runs the LABEL or enters the
-PROGRAM with `enter_exit_program` (the walker's `run_level`). Handler tables, the task,
+logical level, goes to `rt::cics::abend_exit` with the activation's number, and the executor runs
+a LABEL that activation set as a GO TO, or enters the PROGRAM with `enter_exit_program` where the
+program runs the logical level (the walker's `run_level`; a CALLed program's `run_called` takes
+only a LABEL). Handler tables, the task,
 the EIB and the terminal stay run-time state. What `run` asks of its executor is `CicsHost`: the
 run unit and the program's handlers, operands that are not data items, DFHCOMMAREA's address, a
 mapset from the copy libraries, the symbolic map's `mapI` and `mapO` by name, and running a program
@@ -1331,7 +1333,8 @@ options the translator gives and resolving HANDLE labels there. SYNCPOINT is a s
   `Step::GoTo(para)`, which the VM takes as a GO TO by the transfer rules of §8.4: it leaves every
   frame whose region does not hold the paragraph and resets the depth, as the walker's
   `Flow::GoTo` does. The table is per activation, as the walker's `Machine.cics_handlers` is, so a
-  LINKed program starts with none. RETURN and XCTL return `Step::End`. No new terminator is needed.
+  LINKed program starts with none; the walker moves the HANDLE ABEND exit into a statically CALLed
+  program and back (C237). RETURN and XCTL return `Step::End`. No new terminator is needed.
 - **Refused:** a HANDLE label that names no procedure, which the walker abends on only after the
   task check (IRONWORK at the block, or the outside-a-task abend first), so no one terminator
   gives both. HANDLE ABEND, whose exit an abend takes when it reaches the program's activation,

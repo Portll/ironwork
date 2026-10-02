@@ -70,15 +70,25 @@ impl<'p> Machine<'p, '_, '_> {
     /// with the PERFORMs the abend left still armed (C236), and a PROGRAM in place of the rest of
     /// this level (C142).
     pub(crate) fn run_level(&mut self) -> R<Ending> {
-        let mut ending = self.run_from(None);
+        self.run_taking_exits(None, true)
+    }
+
+    /// Runs a CALLed program, which is at its caller's logical level: an abend that reaches it
+    /// takes the level's exit only when that is a LABEL (C238).
+    pub(super) fn run_called(&mut self, at: Option<(usize, usize)>) -> R<Ending> {
+        self.run_taking_exits(at, false)
+    }
+
+    fn run_taking_exits(&mut self, at: Option<(usize, usize)>, runs_level: bool) -> R<Ending> {
+        let mut ending = self.run_from(at);
         loop {
             let abend = match ending {
                 Err(abend) => abend,
                 done => return done,
             };
-            match cics::abend_exit(self.unit, &mut self.cics_handlers, &abend) {
+            match cics::abend_exit(self.unit, &mut self.cics_handlers, &abend, self.serial, runs_level)? {
                 None => return Err(abend),
-                Some(cics::ExitTarget::Label { paragraph, at }) => ending = self.go_to(paragraph as usize, at),
+                Some(cics::ExitTarget::Label { paragraph, at, .. }) => ending = self.go_to(paragraph as usize, at),
                 Some(cics::ExitTarget::Program(name)) => {
                     let ending = cics::enter_exit_program(self, &name, abend.pos)?;
                     return Ok(if ending == Ending::StopRun { ending } else { Ending::Goback });
@@ -120,6 +130,10 @@ impl<'a, 'w> CicsHost<'w, &'a Ref, &'a Operand, &'a str> for Machine<'_, '_, 'w>
 
     fn main(&self) -> bool {
         self.main
+    }
+
+    fn activation(&self) -> u64 {
+        self.serial
     }
 
     fn program_id(&self) -> String {

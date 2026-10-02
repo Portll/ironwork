@@ -255,6 +255,8 @@ pub struct Task {
     pub abcode: Option<String>,
     /// An ABEND CANCEL is ending the task, which no HANDLE ABEND exit intercepts.
     pub cancelling: bool,
+    /// The program activations the task has started, which number each one.
+    pub activations: u64,
 }
 
 impl Task {

@@ -274,6 +274,8 @@ pub const INSPECT_NATIONAL_ITEM: &str = "C230";
 pub const INSPECT_OPERAND_USAGE: &str = "C231";
 pub const INSPECT_OPERAND_MADE_NATIONAL: &str = "C232";
 pub const CICS_ABEND_LABEL_GO_TO: &str = "C236";
+pub const CICS_ABEND_EXIT_ACROSS_CALL: &str = "C237";
+pub const CICS_ABEND_LABEL_OWNER: &str = "C238";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1676,7 +1678,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: CICS_ABEND_EXITS,
-        claim: "HANDLE ABEND gives each logical level one exit: PROGRAM or LABEL replaces the level's exit, active, CANCEL (the default) deactivates it and RESET reactivates it, also after CICS deactivated it on entry; PUSH HANDLE suspends it until POP HANDLE (CICS TS 5.3 Application Programming Reference SC34-7402-00, pp. 314-315; Application Programming Guide SC34-7401-00, pp. 364-365, 371-373). When the task abends, the exit of the level the abend happened at, else of each level above in turn, takes the first active one, deactivated as it is entered. A LABEL is a GO TO in the program that set it, the program levels below gone (C236). A PROGRAM must be one a LINK could find when HANDLE ABEND runs, else PGMIDERR, and is entered as by LINK with the COMMAREA and EIBCALEN of the program that set the exit; when it returns, the level that set it ends and control passes to the level above, or the task ends normally, and an abend in it goes on to the levels above; one that cannot be loaded then abends APCT, which goes on likewise. Intercepted are the transaction abends: a condition's AEIx, ABEND ABCODE, ASRA for a program check and APCT; not ABEND CANCEL, ASPx or APSJ, and, by ironwork's choice, not its own IRONWORK refusals or the batch codes a CICS task does not end with here (S806 from CALL, file status abends). ASSIGN ABCODE gives the code of the abend an exit was given, spaces before any. An exit set by a CALLed subprogram, which is at its caller's logical level, lasts only until the subprogram returns, and XCTL drops the exit of the program that issues it; the manuals say neither",
+        claim: "HANDLE ABEND gives each logical level one exit: PROGRAM or LABEL replaces the level's exit, active, CANCEL (the default) deactivates it and RESET reactivates it, also after CICS deactivated it on entry; PUSH HANDLE suspends it until POP HANDLE (CICS TS 5.3 Application Programming Reference SC34-7402-00, pp. 314-315; Application Programming Guide SC34-7401-00, pp. 364-365, 371-373). When the task abends, the exit of the level the abend happened at, else of each level above in turn, takes the first active one, deactivated as it is entered. A LABEL is a GO TO in the program that set it, the program levels below gone (C236). A PROGRAM must be one a LINK could find when HANDLE ABEND runs, else PGMIDERR, and is entered as by LINK with the COMMAREA and EIBCALEN of the program that set the exit; when it returns, the level that set it ends and control passes to the level above, or the task ends normally, and an abend in it goes on to the levels above; one that cannot be loaded then abends APCT, which goes on likewise. Intercepted are the transaction abends: a condition's AEIx, ABEND ABCODE, ASRA for a program check and APCT; not ABEND CANCEL, ASPx or APSJ, and, by ironwork's choice, not its own IRONWORK refusals or the batch codes a CICS task does not end with here (S806 from CALL, file status abends). ASSIGN ABCODE gives the code of the abend an exit was given, spaces before any. A CALLed subprogram is at its caller's logical level (C237, C238), and XCTL drops the exit of the program that issues it; the manuals do not say so",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -1743,6 +1745,18 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: CICS_ABEND_LABEL_GO_TO,
         claim: "When a HANDLE ABEND LABEL exit is taken in a COBOL program, control returns to the HANDLE ABEND command with the registers restored and a GO TO is executed there (CICS TS 6.x, HANDLE ABEND, topic dfhp4_handleabend; 'Creating a program-level abend program or routine', dfhp3mh). The return points of out-of-line PERFORMs are not registers but the program's own state, which a CALL resets (Programming Guide SC27-8714-03, p. 547), so the PERFORMs the abend left keep theirs armed, as a GO TO out of them would (C99): control that later passes the end of such a range returns after its PERFORM, which puts back the return point it displaced, and a PERFORM that repeats or is inside another statement is refused there as C99 says. The GO TO is the HANDLE ABEND command's, so a debugging section on the label gets that command's line as DEBUG-LINE; the manuals say nothing of PERFORMs here",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CICS_ABEND_EXIT_ACROSS_CALL,
+        claim: "A CALLed subprogram runs at its caller's logical level (CICS TS 6.x, 'Flow of control between programs and subprograms', dfhp3_cobol_subprog_flow). A static CALL, and a CALL of a contained program, leaves the level's HANDLE ABEND exit in effect in the subprogram, and an exit the subprogram sets is the level's after it returns ('Rules for calling subprograms', dfhp3_cobol_subprog_rules: for a statically called program, abend handling remains in effect irrespective of CBLPSHPOP). A dynamic CALL runs as under CBLPSHPOP(ON), the default (Enterprise COBOL 6.4 Performance Tuning Guide, CBLPSHPOP): the caller's exit is suspended, as by PUSH HANDLE, until the subprogram returns, when the exit the subprogram set is dropped and the caller's put back, as by POP HANDLE; an abend in the subprogram meets the exit as the subprogram left it. The Programming Guide describes that PUSH for a CALL of any program that is not contained and says nothing of static calls (SC27-8714-03, p. 503); ironwork follows the CICS rule. Only the abend exit goes with a static CALL: HANDLE CONDITION, IGNORE CONDITION and PUSH HANDLE's stack stay with the program that issued them",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CICS_ABEND_LABEL_OWNER,
+        claim: "A HANDLE ABEND LABEL exit is taken only in the activation of the program that set it, when an abend reaches the logical level there, from that program or from a level below it. An abend that reaches the level in another program, one the setter CALLed or one that CALLed it, or after the setter has returned, abends the task APC2, the code CICS gives for an illegal branch following an abend with an active handle label abend, an out-of-block GO TO to an inactive block (CICS TS 6.x, abend code APC2); the Programming Guide says a HANDLE LABEL cannot handle an abend caused by another program invoked with CALL, and that such cross-program branching ends the transaction (SC27-8714-03, p. 503). The exit is deactivated as when taken, ASSIGN ABCODE gives the code it was reached with, and APC2 goes on to the levels above. A program CALLed again is a new activation, which does not take a label its earlier one set. A PROGRAM exit is entered where the logical level runs, whichever of its programs set the exit or abended",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

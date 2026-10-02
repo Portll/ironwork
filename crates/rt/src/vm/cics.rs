@@ -94,7 +94,8 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 Err(Halt::Abend(abend)) => abend,
                 done => return done,
             };
-            match cics::abend_exit(self.unit, &mut self.cics_handlers, &abend) {
+            let me = self.activation();
+            match cics::abend_exit(self.unit, &mut self.cics_handlers, &abend, me, true)? {
                 None => return Err(abend.into()),
                 Some(ExitTarget::Label { paragraph: p, .. }) => {
                     self.unwind();
@@ -167,6 +168,11 @@ impl<'w, L: Loader<Rc<Code>>> CicsHost<'w, PlaceId, Operand, SymId> for Vm<'_, '
 
     fn main(&self) -> bool {
         self.main
+    }
+
+    // Lowering refuses HANDLE ABEND, so no exit names a VM activation.
+    fn activation(&self) -> u64 {
+        0
     }
 
     fn program_id(&self) -> String {

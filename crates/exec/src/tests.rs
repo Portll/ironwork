@@ -2156,6 +2156,63 @@ fn a_handle_abend_label_is_entered_by_a_go_to_at_the_handle_abend_command() {
     assert_eq!(o.out, format!("RECOVER |    |{handle:06}\n"));
 }
 
+/// The output and abend code of a task whose first program runs `body`, then RETURN, with
+/// RECOVER showing the abend code. It can CALL or LINK OWNL, which takes its own abend at its
+/// label, SETP and SETL, which set a PROGRAM and a LABEL exit and return, BADP, which abends, and
+/// MIDP, which CALLs SETL and abends; EXITP is the PROGRAM exit.
+fn handle_abend_task(body: &[&str]) -> (String, Option<String>) {
+    let code = "       01  WS-CODE PIC X(4).\n";
+    let mut procedure = vec!["       MAIN-LINE.\n".to_owned()];
+    procedure.extend(body.iter().map(|s| line(s)));
+    procedure.extend([line("EXEC CICS RETURN END-EXEC."), "       RECOVER.\n".into()]);
+    procedure.extend(["EXEC CICS ASSIGN ABCODE(WS-CODE) END-EXEC", "DISPLAY 'RECOVERED ' WS-CODE", "EXEC CICS RETURN END-EXEC."].map(line));
+    let main = cics_program("MAINP", &format!("{code}       01  WS-PGM PIC X(8).\n"), "", &procedure.concat());
+    let own = [
+        line("EXEC CICS HANDLE ABEND LABEL(OWN) END-EXEC"),
+        line("EXEC CICS ABEND ABCODE('OW01') END-EXEC."),
+        "       OWN.\n".into(),
+        line("EXEC CICS ASSIGN ABCODE(WS-CODE) END-EXEC"),
+        line("DISPLAY 'OWN ' WS-CODE"),
+        line("GOBACK."),
+    ];
+    let programs = [
+        ("OWNL", cics_program("OWNL", code, "", &own.concat())),
+        ("SETP", cics_program("SETP", "", "", &[line("EXEC CICS HANDLE ABEND PROGRAM('EXITP') END-EXEC"), line("GOBACK.")].concat())),
+        ("SETL", cics_program("SETL", "", "", &[line("EXEC CICS HANDLE ABEND LABEL(GONE) END-EXEC"), line("GOBACK."), "       GONE.\n".into(), line("DISPLAY 'NOT REACHED'.")].concat())),
+        ("BADP", cics_program("BADP", "", "", &line("EXEC CICS ABEND ABCODE('BD01') END-EXEC."))),
+        ("MIDP", cics_program("MIDP", "", "", &[line("CALL 'SETL'"), line("DISPLAY 'BACK IN MID'"), line("EXEC CICS ABEND ABCODE('MD01') END-EXEC.")].concat())),
+        ("EXITP", cics_program("EXITP", code, "", &[line("EXEC CICS ASSIGN ABCODE(WS-CODE) END-EXEC"), line("DISPLAY 'EXIT ' WS-CODE"), line("EXEC CICS RETURN END-EXEC.")].concat())),
+    ];
+    let mut source = format!("{main}       END PROGRAM MAINP.\n");
+    for (id, program) in programs {
+        source.push_str(&format!("{program}       END PROGRAM {id}.\n"));
+    }
+    let (out, ending) = run_cics(&source, task("TR14"), None, unit::Clock::System);
+    (out, ending.err().map(|a| a.code.to_string()))
+}
+
+#[test]
+fn a_statically_called_program_shares_the_levels_abend_exit_and_takes_only_a_label_of_its_own() {
+    let own = handle_abend_task(&["CALL 'OWNL'", "DISPLAY 'BACK IN MAIN'", "CALL 'SETP'", "EXEC CICS ABEND ABCODE('MN01') END-EXEC"]);
+    assert_eq!(own, ("OWN OW01\nBACK IN MAIN\nEXIT MN01\n".into(), None));
+    assert_eq!(handle_abend_task(&["EXEC CICS HANDLE ABEND LABEL(RECOVER) END-EXEC", "CALL 'BADP'"]), (String::new(), Some("APC2".into())));
+    assert_eq!(handle_abend_task(&["CALL 'SETL'", "EXEC CICS ABEND ABCODE('MN02') END-EXEC"]), (String::new(), Some("APC2".into())));
+    let above = handle_abend_task(&["EXEC CICS HANDLE ABEND LABEL(RECOVER) END-EXEC", "EXEC CICS LINK PROGRAM('MIDP') END-EXEC"]);
+    assert_eq!(above, ("BACK IN MID\nRECOVERED APC2\n".into(), None));
+}
+
+#[test]
+fn a_dynamic_call_suspends_the_callers_abend_exit_until_the_subprogram_returns() {
+    let call = |program: &str, after: &[&str]| {
+        let mut body = vec!["EXEC CICS HANDLE ABEND LABEL(RECOVER) END-EXEC".to_owned(), format!("MOVE '{program}' TO WS-PGM"), "CALL WS-PGM".to_owned()];
+        body.extend(after.iter().map(|s| s.to_string()));
+        handle_abend_task(&body.iter().map(String::as_str).collect::<Vec<_>>())
+    };
+    assert_eq!(call("BADP", &[]), (String::new(), Some("BD01".into())));
+    assert_eq!(call("SETP", &["EXEC CICS ABEND ABCODE('MN03') END-EXEC"]), ("RECOVERED MN03\n".into(), None));
+    assert_eq!(call("OWNL", &["DISPLAY 'BACK IN MAIN'"]), ("OWN OW01\nBACK IN MAIN\n".into(), None));
+}
+
 #[test]
 fn a_program_check_in_a_cics_task_is_asra() {
     let source = cics_program("CICS7", "", "       01  DFHCOMMAREA PIC X(10).\n", &line("DISPLAY DFHCOMMAREA."));
