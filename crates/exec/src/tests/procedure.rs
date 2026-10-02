@@ -125,6 +125,54 @@ fn the_entry_statements_rules_are_compile_errors() {
     assert!(syntax::parse(&program("", "", &line("ENTRY E."))).unwrap_err().message.contains("an alphanumeric literal naming the entry point"));
 }
 
+/// `caller_and_subprog` with procedure-pointers PP and PQ, function-pointer FP and pointer PTR in
+/// CALLER's WORKING-STORAGE.
+fn pointer_caller(caller: &[String]) -> String {
+    let pointers = "       01  PP USAGE PROCEDURE-POINTER.\n       01  PQ USAGE PROCEDURE-POINTER.\n       01  FP USAGE FUNCTION-POINTER.\n       01  PTR USAGE POINTER.\n";
+    caller_and_subprog(caller).replacen("       PROCEDURE DIVISION.\n", &format!("{pointers}       PROCEDURE DIVISION.\n"), 1)
+}
+
+#[test]
+fn a_call_through_a_pointer_set_to_entry_enters_the_entry_as_a_call_of_its_name() {
+    let source = pointer_caller(&[
+        line("SET PP TO ENTRY 'PAYMASTR'"),
+        line("CALL PP USING REC CODE-X"),
+        line("SET FP TO ENTRY PGM"),
+        line("CALL FP USING REC CODE-X"),
+        line("CALL FP USING REC CODE-X"),
+        line("SET PQ TO ENTRY 'SUBPROG'"),
+        line("CALL PQ USING REC"),
+        line("IF PP = PQ DISPLAY 'SAME' ELSE DISPLAY 'DIFFERENT' END-IF"),
+        line("SET PQ TO ENTRY 'PAYMASTR'"),
+        line("IF PP = PQ DISPLAY 'SAME' END-IF"),
+        line("SET PQ TO FP"),
+        line("CALL PQ USING REC CODE-X"),
+        line("SET PP TO NULL"),
+        line("IF PP = NULL DISPLAY 'NULL' END-IF"),
+    ]);
+    let (out, err, ending) = run_unit(&source, vec![], "");
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(out, "PAYMASTR HELLO 7 1\nPAYMASTR HELLO 7 1\nPAYMASTR HELLO 7 2\nSUBPROG HELLO 2\nDIFFERENT\nSAME\nPAYMASTR HELLO 7 3\nNULL\n");
+}
+
+#[test]
+fn set_to_entry_of_a_name_no_program_has_abends_at_the_set() {
+    let (out, _, ending) = run_unit(&pointer_caller(&[line("SET PP TO ENTRY 'NOSUCH'"), line("DISPLAY 'AFTER'")]), vec![], "");
+    assert_eq!(out, "");
+    assert_eq!(ending.unwrap_err().code, "S806");
+}
+
+#[test]
+fn set_to_entry_takes_pointer_receivers_and_an_alphanumeric_entry() {
+    let errors = |body: &str| compile_errors(&pointer_caller(&[line(body)]));
+    assert!(errors("SET REC TO ENTRY 'SUBPROG'").contains("SET REC TO ENTRY: the receiver must be a procedure-pointer or function-pointer"));
+    assert!(errors("SET PP TO ENTRY 12").contains("SET PP TO ENTRY: the entry literal must be alphanumeric"));
+    assert!(errors("SET PP TO ENTRY CODE-X").contains("SET PP TO ENTRY: CODE-X must be an alphanumeric or alphabetic item"));
+    assert!(errors("SET PP FP TO ENTRY FUNCTION UPPER-CASE(PGM)").contains("SET PP FP TO ENTRY: FUNCTION UPPER-CASE is an intrinsic function"));
+    assert!(errors("SET PP TO REC").contains("SET PP TO: a function-pointer or procedure-pointer takes another, a pointer, ENTRY or NULL"));
+    assert!(compile_errors(&pointer_caller(&[line("SET PP FP TO ENTRY PGM"), line("SET PP TO PTR")])).is_empty());
+}
+
 #[test]
 fn alter_changes_where_a_paragraphs_go_to_goes() {
     let out = run(&program(

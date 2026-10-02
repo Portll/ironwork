@@ -933,6 +933,7 @@ walker does on each execution; the last column names that work.
 | INITIALIZE | `Initialize` with a flat plan of (offset, length, value, store) | Lowered | The walk over the item's children (machine.rs:1968-1993) |
 | SET TO TRUE, TO FALSE | `Move` of the first VALUE's low end, or of WHEN SET TO FALSE's value, into the conditional variable by item index; nothing when there is none | Lowered | The conditional variable by item index (machine.rs `set`) |
 | SET TO | `Set` per receiver; a `POINTER` receiver takes only an address or NULL, else `Refused` | One call | The kind test |
+| SET TO ENTRY | None: `Unsupported` | Not lowered | The entry loaded and named in the run unit's list |
 | SET ADDRESS OF | One `SetAddress` for all the records; a target that is not an 01 or 77 of LINKAGE ends the block in `Abend` after the records before it | One call | Resolve and linkage test |
 | SET UP BY, DOWN BY | One `SetUpDown`: each receiver `Pointer`, `Number` with a `StepPlan` of dmax 0, or `Refused` | One call | Read, then match on the value |
 | INSPECT | `Inspect` over constant patterns and a prebuilt CONVERTING table when both operands are literals of one length; each TALLYING counter with its `StepPlan` | One call | Literal images and the CONVERTING table (machine.rs:822-834, 849-869) |
@@ -1088,7 +1089,9 @@ unit.rs:150-171 (f2)).
   encode, lowers to the walker's IRONWORK abend, an `Abend` terminator at the statement, since the
   walker gives it before looking for a program. A data item holding a FUNCTION-POINTER or
   PROCEDURE-POINTER is `Pointer`, as `call_through_pointer` decides by the item's declared kind
-  (machine/oo.rs:563-568 (f2)); any other identifier, and LENGTH OF or ADDRESS OF, is `Dynamic`,
+  (machine/oo.rs:563-568 (f2)), when the item is a field of JNINATIVEINTERFACE; through any other
+  pointer, which SET TO ENTRY can make name a program, the CALL is `Unsupported`, as SET TO ENTRY
+  is. Any other identifier, and LENGTH OF or ADDRESS OF, is `Dynamic`,
   whose operand is read as its kind reads it (a numeric item's invalid data abends S0C7) before a
   value that is not alphanumeric bytes abends IRONWORK "a program name must be alphanumeric".
 - **Arguments** keep `call_nested`'s order and forms (machine.rs:1191-1211 (f2)): OMITTED;

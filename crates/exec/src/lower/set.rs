@@ -3,7 +3,7 @@
 //! each LINKAGE record, and UP BY and DOWN BY with the step evaluated once.
 
 use super::data::Value;
-use super::{Lower, R};
+use super::{Lower, R, unsupported};
 use crate::layout::Resolved;
 use rt::lir::{MovePlan, Op, StepPlan, Terminator, UpDown};
 use rt::storage::Kind;
@@ -52,6 +52,7 @@ impl Lower<'_> {
                     self.op(Op::Set { from: sender.operand, to, plan }, pos)?;
                 }
             }
+            SetStmt::Entry { .. } => return unsupported("SET TO ENTRY", pos),
             SetStmt::AddressOf { targets, value } => {
                 let address = self.operand(value, pos)?.operand;
                 let mut records = Vec::with_capacity(targets.len());

@@ -122,7 +122,7 @@ fn receivers(s: &Stmt) -> Vec<&Ref> {
         Stmt::Compute { targets, .. } => out.extend(targets.iter().map(|t| &t.r)),
         Stmt::Arith(a) => out.extend(a.computations.iter().map(|(t, _)| &t.r).chain(a.remainder.iter().map(|(t, ..)| &t.r))),
         Stmt::Initialize { targets, .. } => out.extend(targets),
-        Stmt::Set { set: SetStmt::To { targets, .. } | SetStmt::AddressOf { targets, .. } | SetStmt::UpDown { targets, .. }, .. } => out.extend(targets),
+        Stmt::Set { set: SetStmt::To { targets, .. } | SetStmt::Entry { targets, .. } | SetStmt::AddressOf { targets, .. } | SetStmt::UpDown { targets, .. }, .. } => out.extend(targets),
         Stmt::Accept { target, .. } => out.push(target),
         Stmt::Read(r) => out.extend(&r.into),
         Stmt::String(st) => out.extend(std::iter::once(&st.into).chain(&st.pointer)),

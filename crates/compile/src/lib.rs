@@ -824,7 +824,7 @@ impl Check<'_> {
                         }
                     }
                 }
-                SetStmt::To { targets, value } => {
+                SetStmt::To { targets, value } | SetStmt::Entry { targets, entry: value } => {
                     targets.iter().for_each(|r| self.reference(r));
                     self.operand(value);
                 }

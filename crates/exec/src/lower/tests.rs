@@ -444,6 +444,9 @@ fn constructs_outside_the_slice_are_refused_by_name() {
     let e = refused("SEARCH T WHEN T(X) = 'A' CONTINUE END-SEARCH", "       01  G.\n           05 N PIC 9.\n           05 T PIC X OCCURS 1 TO 3 DEPENDING ON N.\n       01  X PIC 9.\n");
     assert_eq!(e.to_string(), "lowering: SEARCH of an OCCURS DEPENDING ON table with neither INDEXED BY nor VARYING is not lowered yet");
     assert_eq!(syntax::Error::from(e).pos.line, 10);
+    let pointer = "       01  PP USAGE PROCEDURE-POINTER.\n";
+    assert!(matches!(refused("SET PP TO ENTRY 'T'", pointer), LowerError::Unsupported("SET TO ENTRY", _)));
+    assert!(matches!(refused("CALL PP", pointer), LowerError::Unsupported("a CALL through a pointer SET TO ENTRY can set", _)));
 }
 
 #[test]
@@ -734,7 +737,7 @@ fn perform_varying_after_steps_the_outer_variable_before_it_sets_the_inner_one_a
 fn call_plans_keep_each_argument_as_the_walker_passes_it() {
     let data = concat!(
         "       01  PGM PIC X(8) VALUE 'SUB'.\n       01  REC PIC X(5).\n       01  N PIC S9(4) COMP.\n",
-        "       01  FP USAGE FUNCTION-POINTER.\n",
+        "       01  JNINATIVEINTERFACE.\n           02  FP USAGE FUNCTION-POINTER.\n",
     );
     let body = [
         "CALL 'CEEDATE' USING REC",

@@ -815,7 +815,7 @@ impl<'w, 'p> Walk<'w, 'p> {
             Stmt::Cancel { targets, pos } => targets.iter().for_each(|o| self.operand(o, *pos, &st)),
             Stmt::Set { set, pos } => match set {
                 SetStmt::ConditionTrue(targets) | SetStmt::ConditionFalse(targets) => targets.iter().for_each(|r| self.write(r, *pos, &mut st)),
-                SetStmt::To { targets, value } => {
+                SetStmt::To { targets, value } | SetStmt::Entry { targets, entry: value } => {
                     self.operand(value, *pos, &st);
                     targets.iter().for_each(|r| self.write(r, *pos, &mut st));
                 }

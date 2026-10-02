@@ -2438,6 +2438,9 @@ impl Parser<'_> {
             if self.accept_word("FALSE") {
                 return Ok(SetStmt::ConditionFalse(targets));
             }
+            if self.accept_word("ENTRY") {
+                return Ok(SetStmt::Entry { targets, entry: self.operand()? });
+            }
             return Ok(SetStmt::To { targets, value: self.operand()? });
         }
         match self.accept_any(&["UP", "DOWN"]).as_deref() {

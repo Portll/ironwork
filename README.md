@@ -294,7 +294,10 @@ The subset the interpreter runs today:
   REFERENCE, BY CONTENT, BY VALUE and OMITTED, RETURNING, ON EXCEPTION; PROCEDURE DIVISION USING
   and RETURNING; ENTRY [USING], whose name a CALL begins at and whose USING list alone gives LINKAGE
   addresses, a static CALL entering the program's one copy and a dynamic CALL (an identifier, or a
-  literal under DYNAM) a copy of its own for each entry name (assumptions C50 and C51); CANCEL; IS
+  literal under DYNAM) a copy of its own for each entry name (assumptions C50 and C51); SET of a
+  PROCEDURE-POINTER or FUNCTION-POINTER TO ENTRY a literal or identifier, which loads the program
+  when the SET runs, and CALL through the pointer, which enters it as a CALL of the name would
+  (C140); CANCEL; IS
   INITIAL and IS RECURSIVE; EXIT PROGRAM; RETURN-CODE. Every program in
   a run shares one memory, as on z/OS, and a called program keeps its WORKING-STORAGE and open files
   between CALLs until it is cancelled; its LOCAL-STORAGE starts afresh on every CALL. PERFORMs and

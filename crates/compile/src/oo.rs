@@ -447,6 +447,8 @@ impl Check<'_> {
 enum Side {
     Object,
     ProgramPointer,
+    /// USAGE POINTER, which only a SET of a function-pointer or procedure-pointer tells apart.
+    DataPointer,
     Null,
     Other,
 }
@@ -771,9 +773,48 @@ impl Rules<'_> {
         }
     }
 
+    fn kind_of(&self, r: &Ref) -> Option<Kind> {
+        match self.layout.resolve(&r.name, &r.qualifiers, r.pos) {
+            Ok(Resolved::Item(i)) => Some(self.layout.items[i].kind),
+            _ => None,
+        }
+    }
+
+    /// SET TO ENTRY: each receiver a procedure-pointer or function-pointer, the entry an
+    /// alphanumeric literal or an alphanumeric or alphabetic item.
+    fn set_entry(&mut self, targets: &[Ref], entry: &Operand, pos: Pos) {
+        for r in targets {
+            if self.side_of_ref(r, pos) != Side::ProgramPointer {
+                self.errors.push(Error::at(pos, format!("SET {} TO ENTRY: the receiver must be a procedure-pointer or function-pointer", r.name)));
+            }
+        }
+        let fault = match entry {
+            Operand::Literal(Literal::Alnum(name)) if name.trim().is_empty() => Some("the literal names no entry".to_owned()),
+            Operand::Literal(Literal::Alnum(_) | Literal::Hex(_)) => None,
+            Operand::Literal(_) => Some("the entry literal must be alphanumeric".to_owned()),
+            Operand::Ref(r) => match self.kind_of(r) {
+                Some(Kind::Alnum { .. } | Kind::Group) | None => None,
+                Some(_) => Some(format!("{} must be an alphanumeric or alphabetic item", r.name)),
+            },
+            Operand::Function(f) if crate::FUNCTIONS.contains(&f.name.as_str()) || rt::intrinsic::FUNCTIONS.contains(&f.name.as_str()) => Some(format!("FUNCTION {} is an intrinsic function, not a user-defined function returning a pointer", f.name)),
+            Operand::Function(_) => None,
+            Operand::LengthOf(_) | Operand::AddressOf(_) => Some("the entry must be a literal or identifier".to_owned()),
+        };
+        if let Some(fault) = fault {
+            let names: Vec<&str> = targets.iter().map(|r| r.name.as_str()).collect();
+            self.errors.push(Error::at(pos, format!("SET {} TO ENTRY: {fault}", names.join(" "))));
+        }
+    }
+
     fn set(&mut self, set: &SetStmt, pos: Pos) {
+        if let SetStmt::Entry { targets, entry } = set {
+            return self.set_entry(targets, entry, pos);
+        }
         let SetStmt::To { targets, value } = set else { return };
-        let value_side = self.side(value, pos);
+        let value_side = match value {
+            Operand::Ref(r) if self.kind_of(r) == Some(Kind::Pointer) => Side::DataPointer,
+            _ => self.side(value, pos),
+        };
         for r in targets {
             if is_named(r, "JNIENVPTR") && self.layout.resolve(&r.name, &[], r.pos).is_err() {
                 self.errors.push(Error::at(pos, "JNIENVPTR cannot receive a value"));
@@ -784,9 +825,9 @@ impl Rules<'_> {
                 continue;
             }
             let message = match (self.side_of_ref(r, pos), value_side) {
-                (Side::Object, Side::Object | Side::Null) | (Side::ProgramPointer, Side::ProgramPointer | Side::Null) => continue,
+                (Side::Object, Side::Object | Side::Null) | (Side::ProgramPointer, Side::ProgramPointer | Side::DataPointer | Side::Null) => continue,
                 (Side::Object, _) => "an object reference takes another object reference, SELF or NULL",
-                (Side::ProgramPointer, _) => "a function-pointer takes another function-pointer or NULL (SET TO ENTRY is not supported yet)",
+                (Side::ProgramPointer, _) => "a function-pointer or procedure-pointer takes another, a pointer, ENTRY or NULL",
                 (_, Side::Object | Side::ProgramPointer) => "an object reference or function-pointer can be set only into its own kind",
                 _ => continue,
             };

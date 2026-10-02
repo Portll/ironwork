@@ -16,6 +16,7 @@ impl Lower<'_> {
     /// read as one.
     pub(super) fn call_plan(&mut self, c: &Call, pos: Pos) -> R<Result<CallId, AbendId>> {
         let target = match &c.target {
+            Operand::Ref(r) if self.program_pointer(r) && !self.jni_function(r) => return unsupported("a CALL through a pointer SET TO ENTRY can set", pos),
             Operand::Ref(r) if self.program_pointer(r) => CallTarget::Pointer(self.place(r, false)?),
             Operand::Literal(lit) => match program_name(self, lit) {
                 Ok(name) => CallTarget::Named { name: self.sym(&name), le: le_service(&name, pos)? },
@@ -43,6 +44,16 @@ impl Lower<'_> {
     /// recognizes one.
     fn program_pointer(&self, r: &Ref) -> bool {
         matches!(self.layout.resolve(&r.name, &r.qualifiers, r.pos), Ok(Resolved::Item(i)) if self.layout.items[i].kind == Kind::ProgramPointer)
+    }
+
+    /// A function of the JNI's table, the one kind of pointer `CallTarget::Pointer` calls.
+    fn jni_function(&self, r: &Ref) -> bool {
+        let layout = self.layout;
+        let Ok(Resolved::Item(mut i)) = layout.resolve(&r.name, &r.qualifiers, r.pos) else { return false };
+        while let Some(parent) = layout.items[i].parent {
+            i = parent;
+        }
+        layout.items[i].name.as_deref() == Some("JNINATIVEINTERFACE")
     }
 
     /// `content_argument`: a data item's bytes, a literal's as its own data item would hold them.

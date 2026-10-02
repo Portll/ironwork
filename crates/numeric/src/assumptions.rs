@@ -257,6 +257,7 @@ pub const REPLACE_STATEMENT: &str = "C160";
 pub const VARIABLY_LOCATED_ITEMS: &str = "C161";
 pub const EXTERNAL_STORAGE: &str = "C180";
 pub const GLOBAL_NAMES: &str = "C181";
+pub const SET_TO_ENTRY: &str = "C140";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1624,6 +1625,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: GLOBAL_NAMES,
         claim: "A contained program sees the GLOBAL records and files of each program containing it, at that program's storage, record area and file connector (Language Reference SC27-8713-03, pp. 63-66, 185, 197). A name resolves among the program's own names and every GLOBAL name of the programs containing it, qualified as usual; where more than one item qualifies, the one declared nearest wins, the program's own first (p. 66). A file-name the program or a nearer program declares hides a farther GLOBAL one. A contained program called while a program containing it is not running, which only ironwork's flat program library allows, ends the run when it uses that program's GLOBAL names. Refused as not supported yet: a GLOBAL file whose FILE STATUS, RECORD KEY, ALTERNATE RECORD KEY or RELATIVE KEY is not a GLOBAL name of the program declaring it, as IBM resolves them there; LINAGE or REPORT on a GLOBAL file in a program that contains others, and on an EXTERNAL file; INDEXED BY in a GLOBAL record of a program that contains others, whose index is global too (p. 65); a GLOBAL file a contained program and its declaring program use differently as a print file, since ironwork decides that from each program's own WRITE statements; and SET ADDRESS OF a GLOBAL LINKAGE record from a contained program",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SET_TO_ENTRY,
+        claim: "SET procedure-pointer or function-pointer TO ENTRY literal or identifier (Language Reference SC27-8713-03, 'Format 6: SET for procedure-pointer and function-pointer data items', pp. 449-450) resolves the entry when the SET runs: the program holding the name is found and loaded as a CALL of the name would find it, static for a literal under NODYNAM and dynamic for an identifier or under DYNAM (Programming Guide SC27-8714-03, pp. 557-558), and a name no program or Language Environment service has abends S806 at the SET. The manuals do not say when a dynamic entry is loaded; ironwork loads it at the SET because the pointer then holds an entry address. The pointer holds a value of ironwork's own, the same for each SET of the same name and resolution, so two pointers set to one entry compare equal; a CALL through it enters the entry as a CALL of the name does, with the arguments passed as the BY phrases say (pp. 320, 559), and ON EXCEPTION never runs, the entry having been found. After a CANCEL of the program the pointer is undefined (p. 558); ironwork's CALL through it loads the program again. identifier-9, a user-defined function returning a pointer, and SET TO a pointer a non-COBOL program set are not run, ironwork having neither",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

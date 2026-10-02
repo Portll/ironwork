@@ -538,6 +538,8 @@ pub enum SetStmt {
     ConditionFalse(Vec<Ref>),
     /// SET targets TO value: an index or integer to a number, a pointer to ADDRESS OF, NULL or another pointer.
     To { targets: Vec<Ref>, value: Operand },
+    /// SET procedure-pointers or function-pointers TO ENTRY, the entry named by a literal or identifier.
+    Entry { targets: Vec<Ref>, entry: Operand },
     /// SET ADDRESS OF targets TO pointer.
     AddressOf { targets: Vec<Ref>, value: Operand },
     UpDown { targets: Vec<Ref>, down: bool, by: Expr },

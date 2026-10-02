@@ -167,6 +167,8 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     externals: Externals,
     /// The files of loaded programs that are another's connector, by program and file.
     connectors: HashMap<(usize, usize), Connector>,
+    /// The entries SET TO ENTRY has named, which function-pointers and procedure-pointers hold.
+    pub entries: Vec<crate::set::Entry>,
 }
 
 impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
@@ -192,6 +194,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             random: None,
             externals: Externals::default(),
             connectors: HashMap::new(),
+            entries: Vec::new(),
         }
     }
 

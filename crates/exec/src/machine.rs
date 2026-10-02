@@ -920,24 +920,28 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn call(&mut self, c: &'p Call) -> R<Flow> {
-        if let Some(flow) = self.call_through_pointer(c)? {
-            return Ok(flow);
-        }
         let pos = c.pos;
-        let name = self.program_name(&c.target, pos)?;
-        let variable = !matches!(c.target, Operand::Literal(_));
-        if self.unit.observed() {
-            if variable {
-                self.sink("dynamic-program-load", pos, &name);
+        let (name, dynamic) = match self.entry_pointer(&c.target)? {
+            Some(entry) => (entry.name, entry.dynamic),
+            None => {
+                if let Some(flow) = self.call_through_pointer(c)? {
+                    return Ok(flow);
+                }
+                let name = self.program_name(&c.target, pos)?;
+                let variable = !matches!(c.target, Operand::Literal(_));
+                if variable && self.unit.observed() {
+                    self.sink("dynamic-program-load", pos, &name);
+                }
+                (name, self.options.dynam || variable)
             }
-            // ironwork runs no operating-system command: the CALL loads a program of that name or fails.
-            if OS_COMMAND_ROUTINES.contains(&name.as_str())
-                && let Ok(text) = self.arguments_text(c)
-            {
-                self.sink("os-command", pos, &text);
-            }
+        };
+        // ironwork runs no operating-system command: the CALL loads a program of that name or fails.
+        if self.unit.observed()
+            && OS_COMMAND_ROUTINES.contains(&name.as_str())
+            && let Ok(text) = self.arguments_text(c)
+        {
+            self.sink("os-command", pos, &text);
         }
-        let dynamic = self.options.dynam || variable;
         let (index, entry) = match self.unit.load_entry(&name, dynamic) {
             Ok(i) => i,
             Err(LoadError::NotFound) if crate::le::provides(&name) => return self.le_call(c, &name),
@@ -994,6 +998,35 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Some(body) => self.run_block(body)?,
             None => Flow::Next,
         }))
+    }
+
+    /// The entry a CALL's function-pointer or procedure-pointer holds, when SET TO ENTRY set it.
+    fn entry_pointer(&mut self, target: &Operand) -> R<Option<rt::set::Entry>> {
+        let Operand::Ref(r) = target else { return Ok(None) };
+        let Ok(Resolved::Item(item)) = self.resolve(r) else { return Ok(None) };
+        if self.layout.items[item].kind != Kind::ProgramPointer {
+            return Ok(None);
+        }
+        let loc = self.locate(r)?;
+        let Ok(value) = <[u8; 4]>::try_from(self.bytes(loc)).map(u32::from_be_bytes) else { return Ok(None) };
+        Ok(rt::set::entry_of(&self.unit.entries, value).cloned())
+    }
+
+    /// SET TO ENTRY's entry: its name and whether a CALL through it is dynamic, loaded when the
+    /// SET runs (C140).
+    fn entry_named(&mut self, entry: &Operand, pos: Pos) -> R<(String, bool)> {
+        let name = self.program_name(entry, pos)?;
+        let variable = !matches!(entry, Operand::Literal(_));
+        if variable && self.unit.observed() {
+            self.sink("dynamic-program-load", pos, &name);
+        }
+        let dynamic = self.options.dynam || variable;
+        match self.unit.load_entry(&name, dynamic) {
+            Ok(_) => Ok((name, dynamic)),
+            Err(LoadError::NotFound) if crate::le::provides(&name) => Ok((name, dynamic)),
+            Err(LoadError::NotFound) => Err(Abend { code: AbendCode::ModuleNotFound, message: crate::le::missing(&name), pos, file: None }),
+            Err(LoadError::Compile(message)) => Err(Abend::ironwork(format!("SET TO ENTRY {name}: {message}"), pos)),
+        }
     }
 
     fn call_nested(&mut self, c: &'p Call, index: usize, entry: Option<usize>, compiled: std::rc::Rc<Compiled>) -> R<Flow> {
@@ -1178,6 +1211,14 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     let (val, src) = self.operand_with_loc(value, pos)?;
                     let (val, src) = rt::set::to(dest, val, src, pos)?;
                     self.assign(dest, val, src, pos)?;
+                }
+            }
+            SetStmt::Entry { targets, entry } => {
+                let (name, dynamic) = self.entry_named(entry, pos)?;
+                let value = rt::set::entry(&mut self.unit.entries, &name, dynamic, pos)?;
+                for r in targets {
+                    let dest = self.locate(r)?;
+                    self.assign(dest, Val::Address(value), None, pos)?;
                 }
             }
             SetStmt::AddressOf { targets, value } => {
