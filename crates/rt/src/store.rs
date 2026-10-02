@@ -597,6 +597,9 @@ pub fn numcheck_fault(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, as_integer
 /// than its PICTURE. COMP-5 is not checked, nor binary under TRUNC(BIN) with BIN(NOTRUNCBIN)
 /// (Programming Guide SC27-8714-03, pp. 388-391).
 pub fn numcheck_fault_in(options: &Options, kind: Kind, stored: &[u8], lax: Option<LaxRedefinition>, as_integer: bool) -> Option<&'static str> {
+    if !numcheck_tests(options, kind, as_integer) {
+        return None;
+    }
     let check = options.numcheck?;
     let cleaned = options.invdata.is_some_and(|i| i.cleansign).then(|| sign_cleaned(stored, kind)).flatten();
     let b = cleaned.as_deref().unwrap_or(stored);
@@ -609,7 +612,7 @@ pub fn numcheck_fault_in(options: &Options, kind: Kind, stored: &[u8], lax: Opti
     let digits = |from: usize, bytes: &[u8]| bytes.iter().enumerate().all(|(i, x)| digit(x) || from + i < spaces && *x == ebcdic::SPACE);
     let overpunch = |at: usize, x: u8| matches!(x >> 4, 0xC | 0xD | 0xF) && x & 0x0F <= 9 || at < spaces && x == ebcdic::SPACE;
     let valid = match kind {
-        Kind::Zoned { signed, sign, .. } if check.zon.is_some() => {
+        Kind::Zoned { signed, sign, .. } => {
             let last = b.len() - 1;
             match (signed || lax == Some(LaxRedefinition::Signed), sign) {
                 (false, _) => digits(0, b),
@@ -621,12 +624,12 @@ pub fn numcheck_fault_in(options: &Options, kind: Kind, stored: &[u8], lax: Opti
                 (true, _) => overpunch(last, b[last]) && digits(0, &b[..last]),
             }
         }
-        Kind::Group | Kind::Alnum { .. } if as_integer && check.zon.is_some() => b.iter().all(digit),
-        Kind::Packed { digits, signed, .. } if check.pac => {
+        Kind::Group | Kind::Alnum { .. } => b.iter().all(digit),
+        Kind::Packed { digits, signed, .. } => {
             let spare_clear = digits % 2 == 1 || b[0] >> 4 == 0;
             decimal::tp(b).is_ok_and(|cc| cc.0 == 0) && (signed || b[b.len() - 1] & 0x0F == 0x0F) && spare_clear
         }
-        Kind::Binary { digits, signed, native: false, .. } if check.bin.is_some_and(|c| c.truncbin || options.trunc != Trunc::Bin) => {
+        Kind::Binary { digits, signed, .. } => {
             let raw = Binary { digits: digits as u8, signed, native: true }.load(b);
             raw.unsigned_abs() < 10u128.pow(digits)
         }
@@ -636,6 +639,19 @@ pub fn numcheck_fault_in(options: &Options, kind: Kind, stored: &[u8], lax: Opti
         Kind::Binary { .. } => "has more digits than its PICTURE allows",
         _ => "is not NUMERIC",
     })
+}
+
+/// Whether NUMCHECK, under `options`, tests the data of an item of `kind`, which `as_integer`
+/// extends to an alphanumeric or group item; `numcheck_fault` tests only these.
+pub fn numcheck_tests(options: &Options, kind: Kind, as_integer: bool) -> bool {
+    let Some(check) = options.numcheck else { return false };
+    match kind {
+        Kind::Zoned { .. } => check.zon.is_some(),
+        Kind::Group | Kind::Alnum { .. } => as_integer && check.zon.is_some(),
+        Kind::Packed { .. } => check.pac,
+        Kind::Binary { native: false, .. } => check.bin.is_some_and(|c| c.truncbin || options.trunc != Trunc::Bin),
+        _ => false,
+    }
 }
 
 /// NUMCHECK's run-time check of a sending item: under MSG a warning on the error stream, with the

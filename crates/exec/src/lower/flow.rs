@@ -822,7 +822,7 @@ impl Lower<'_> {
         let from = Op::Set { from: from.operand, to: var, plan };
         let sum = Expr::Bin(Box::new(Expr::Operand(Operand::Ref(v.var.clone()))), BinOp::Add, Box::new(v.by.clone()));
         let dmax = scale(kind).max(self.dmax(&sum)?);
-        let prepass = self.dmax_places(&v.by)?;
+        let prepass = self.dmax_places(&sum)?;
         let by = self.expr(&v.by, pos)?;
         let store = self.store_plan(kind, item)?;
         let step = Op::Step { var, by, plan: lir::StepPlan { dmax, store }, prepass };

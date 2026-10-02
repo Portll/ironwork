@@ -540,6 +540,13 @@ fn perform_varying_by_a_subscripted_item_locates_it_before_the_add() {
 }
 
 #[test]
+fn perform_varying_a_subscripted_variable_locates_it_again_for_the_step_s_dmax_pass() {
+    let p = lowered(&program("SSRANGE", TABLE, &[line("PERFORM VARYING V(J) FROM 1 BY 1 UNTIL A > 9"), line("    CONTINUE"), line("END-PERFORM"), line("GOBACK.")].concat()));
+    let (var, prepass) = ops(&p).find_map(|op| if let Op::Step { var, prepass, .. } = op { Some((*var, prepass.clone())) } else { None }).unwrap();
+    assert_eq!(prepass, [var]);
+}
+
+#[test]
 fn a_value_clause_s_abend_names_its_data_entry() {
     let p = lowered(&program("", "       01  A PIC X(3) VALUE 'AB'.\n       01  N PIC X VALUE 'ą'.\n", &line("GOBACK.")));
     let abend = &p.abends[p.storage.init_abend.unwrap() as usize];
@@ -1299,6 +1306,24 @@ fn a_serial_search_steps_its_index_and_varying_item_and_search_all_matches_keys_
     );
     let e = lower(&compiled(&overlapping)).unwrap_err();
     assert!(matches!(e, LowerError::Unsupported(n, _) if n.starts_with("SEARCH VARYING an item that may share storage")), "{e}");
+}
+
+#[test]
+fn under_numcheck_a_serial_search_that_reads_a_tested_count_or_index_again_is_refused() {
+    let search = |options: &str, data: &str, statement: &str| program(options, data, &[line(statement), line("GOBACK.")].concat());
+    let indexed = "SEARCH E WHEN E(IX) = 'C' CONTINUE END-SEARCH";
+    let zoned = "       01  N PIC 9 VALUE 3.\n       01  TBL.\n           05 E PIC X OCCURS 1 TO 5 DEPENDING ON N INDEXED BY IX.\n";
+    let binary = "       01  N PIC 9 COMP VALUE 3.\n       01  TBL.\n           05 E PIC X OCCURS 1 TO 5 DEPENDING ON N INDEXED BY IX.\n";
+    let fixed = "       01  TBL.\n           05 E PIC X OCCURS 5 INDEXED BY IX.\n";
+    let varying = "       01  TBL.\n           05 E PIC X OCCURS 5.\n       01  V PIC 9.\n";
+    let by_v = "SEARCH E VARYING V WHEN E(V) = 'C' CONTINUE END-SEARCH";
+    for (options, data, statement) in [("NUMCHECK", zoned, indexed), ("NUMCHECK(BIN)", binary, indexed), ("NUMCHECK", varying, by_v)] {
+        let e = lower(&compiled(&search(options, data, statement))).unwrap_err();
+        assert!(matches!(e, LowerError::Unsupported("NUMCHECK of a serial SEARCH's OCCURS DEPENDING ON count or index", _)), "{options}: {e}");
+    }
+    for (options, data, statement) in [("ZONECHECK(MSG)", binary, indexed), ("NUMCHECK", fixed, indexed), ("", zoned, indexed), ("", varying, by_v)] {
+        lowered(&search(options, data, statement));
+    }
 }
 
 #[test]

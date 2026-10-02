@@ -155,6 +155,9 @@ pub struct Storage {
     pub linkage: Vec<u32>, pub using: Vec<u16>, pub returning: Option<u16>,
     /// Offset and size of each file's record area in the slab (layout.rs:98-99).
     pub file_areas: Vec<(u32, u32)>,
+    /// PARMCHECK's buffer (`Layout.parmcheck`): its offset in the slab and its size, present only
+    /// under PARMCHECK (§9.14).
+    pub parmcheck: Option<(u32, u32)>,
 }
 
 /// A data item as `dump` prints it and a debugger will read it; no executor reads it. Compile's
@@ -542,7 +545,7 @@ rather than before.
 | `IntExpr::Fixed`: a subscript, reference-modification bound, DEPENDING ON object, TIMES count or exponent | `integer`: the dmax pass, then `eval_fixed` (machine.rs:613-619) | The dmax pass's places | `dmax`; always fixed |
 | `Comparand::Expr`: an expression compared | `expr_value`: the float test, then for a fixed-point expression the dmax pass (machine.rs:1382-1391, 1400-1417) | The float test's places, then in `Mode::Fixed` the dmax pass's, so a place both reach is listed twice | `dmax`, 0 in `Mode::Float`; `mode` as `ArithStep.mode` |
 | `Cond::Sign` of an expression | `class`, through `expr_value` (machine.rs:1840-1849) | As `Comparand::Expr`, which it holds | As `Comparand::Expr` |
-| `Op::Step`: PERFORM VARYING's increment | Locates the variable, then the dmax pass over variable + BY, then `eval_fixed` (machine.rs:517-521) | The places of BY's dmax pass, located after the variable | `StepPlan.dmax`; always fixed |
+| `Op::Step`: PERFORM VARYING's increment | Locates the variable, then the dmax pass over variable + BY, then `eval_fixed` (machine.rs:517-521) | The places of that dmax pass, the variable's first, located after the variable | `StepPlan.dmax`; always fixed |
 
 - **The dmax pass** locates every operand of the expression except divisors and exponents, left to
   right (`dmax_refs`); **the float test** every operand, left to right, up to and including the
@@ -558,7 +561,8 @@ rather than before.
 
 ```rust
 pub enum Op {
-    Move { from: Operand, to: PlaceId, plan: MovePlan },
+    /// `to` located, then `from`, which takes NUMCHECK's `check` (§9.2) before it is read.
+    Move { from: Operand, to: PlaceId, plan: MovePlan, check: SenderCheck },
     /// SET TO, and PERFORM VARYING's FROM: as `Move`, but a data item sender is read as a number,
     /// its digits checked, where MOVE carries a zoned or packed sender's invalid digits (C260).
     Set { from: Operand, to: PlaceId, plan: MovePlan },
@@ -1000,6 +1004,15 @@ pub enum NumericFrom {
     DeEdit { edit: u32, digits: u32, scale: u32 },
 }
 pub enum FloatFrom { Float, Fixed, Zero }
+/// NUMCHECK's test of a MOVE's sending item once it is located, before it is read (§9.14).
+pub enum SenderCheck {
+    /// No NUMCHECK, a sender that is not a data item, or a zoned sender ZON(LAX) exempts.
+    None,
+    /// As every operand read is tested.
+    Item,
+    /// An alphanumeric or group sender to a numeric receiver: an unsigned integer's digits.
+    Integer,
+}
 ```
 
 Every category pair, by the value the walker reads from the sender (line numbers in machine.rs):
@@ -1032,6 +1045,15 @@ Every category pair, by the value the walker reads from the sender (line numbers
   unchecked; the data exception comes where the receiver is next read as a number (C260). The plans
   are unchanged: the VM must read these senders through `move_sender` too, or it abends at the MOVE
   where the walker does not.
+- **NUMCHECK's test of the sender** is `Move.check`, and `FromMove.check` for WRITE, REWRITE and
+  RELEASE FROM. Lowering decides it with `rt::store::move_check` from the sender's and receiver's
+  kinds, the function the walker's `move_source` calls on each execution: `Integer` for an
+  alphanumeric or group sender to a zoned, packed, binary, floating-point or numeric-edited
+  receiver; `None` for a zoned sender to a zoned, alphanumeric or group receiver under ZON(LAX)
+  (Programming Guide SC27-8714-03, pp. 388-391); `Item` for any other data item; `None` for any
+  other sender, and in a program without NUMCHECK. The executor locates the receiver, then the
+  sender, runs `rt::store::numcheck_sender` with `check`, then reads the sender with `move_sender`.
+  `Set` carries no test of its own: its sender is an operand read, which §9.14 tests.
 - **Several receivers** lower to one `Move` each. Each locates its receiver, then reads the sender
   again (machine.rs:315-318), so a receiver stored earlier can change what a later one gets (§11).
 - **MOVE, ADD and SUBTRACT CORRESPONDING** reach lowering already expanded: the compiler turns
@@ -1118,6 +1140,8 @@ unit.rs:150-171 (f2)).
 - **Dynamic at run time:** loading and compiling on first CALL, RECURSIVE and INITIAL handling, the
   recursion check, the depth check (after the load, before the arguments), CANCEL's effect, and
   temporaries (machine.rs:973-1122). How a static CALL binds is load-module.md §8.3.
+- **PARMCHECK and NUMCHECK** run inside the op: the buffer is set after the arguments and tested
+  after the callee returns, and a BY CONTENT or BY VALUE data item is tested as it is copied (§9.14).
 
 ### 9.4 Files
 
@@ -1171,7 +1195,8 @@ pub enum FileVerb {
     Delete,
     Start { rel: StartRel, key: StartKey },
 }
-pub struct FromMove { pub from: Operand, pub to: PlaceId, pub plan: MovePlan }
+/// `check` is NUMCHECK's test of `from` (§9.2).
+pub struct FromMove { pub from: Operand, pub to: PlaceId, pub plan: MovePlan, pub check: SenderCheck }
 pub enum Advance { Lines { before: bool, count: IntExpr }, Page { before: bool }, Mnemonic { before: bool, space: Spacing } }
 pub enum Spacing { Lines(u64), Channel(u8), PageMode }
 pub enum StartRel { Equal, Greater, NotLess }
@@ -1888,6 +1913,87 @@ pub enum SetTo { Nothing, Move { place: PlaceId, value: ConstId, plan: MovePlan 
   executor reads values by `Kind`, which does not carry them), a JSON phrase naming a
   reference-modified item, an XML GENERATE phrase or JSON PARSE INTO that names no data item, and a
   PROCESSING PROCEDURE the walker cannot find.
+
+### 9.14 NUMCHECK and PARMCHECK
+
+The walker runs NUMCHECK's test (`rt::store::numcheck`; Programming Guide SC27-8714-03,
+pp. 388-392) inside the reads it makes, between an item's locate and its read, and PARMCHECK's set
+and test inside a CALL, between its arguments and its callee (p. 397). An op of their own would
+move them past a locate, a read or a store of the same statement, so the LIR carries NUMCHECK in
+its reads and in `Move.check` (§9.2), and PARMCHECK in `Storage.parmcheck` and the CALL op. Both
+executors call the same `rt` functions: `store::numcheck`, `store::move_check`,
+`store::numcheck_sender`, `store::noalphnum` and `store::nonnumeric`, and `parmcheck::set` and
+`parmcheck::test`.
+
+**NUMCHECK.** Under `ProgramOptions.options.numcheck` an executor runs `store::numcheck`, with
+`as_integer` false and the place's `at` as its position, after the place is evaluated to a `Loc`
+and before the item is read, at each read of this table and at no other. Under MSG it writes its
+warning and the read goes on; under ABD it ends the run with U4038 before the read.
+
+| The walker's read | In the LIR | Tested |
+|---|---|---|
+| `operand` and `operand_with_loc` of a data item | `Operand::Load` read for its value: in an `Expr`; as a `Comparand` of `Cond::Sign`, of a FUNCTION's `Argument::Value` other than HEX-OF's, BIT-OF's and BYTE-LENGTH's, or of a report's SOURCE, SUM or CONTROL; `Op::Set`'s `from`; `SetAddress`, `Cancel`, `CallTarget::Dynamic`, `CallArg::Value`; `Chars::Value`, `Inspected::Value`; a markup statement's ENCODING, NAMESPACE and NAMESPACE-PREFIX; what the library reads through `Values::value` | At each read |
+| `operand` of each element of a table written with ALL subscripts | `Argument::All`'s elements | At each element |
+| `integer`, through `eval_fixed` or `eval_float` | `IntExpr::Item` and the `Load`s of an `IntExpr::Fixed`, wherever they stand: a place's subscripts, OCCURS DEPENDING ON object and reference modification, so at each evaluation of the place, as each locate of the walker's tests them; a `Pow` exponent, `SetTemp`, `Switch`, `SetInt`, `SetUpDown`'s `by`, `Cond::InTable`'s index, `Count::Odo`, a FUNCTION's `integer` and `refmod`, LINAGE, RELATIVE KEY, START's KEY, ADVANCING, XML-CODE, a markup walk's subscripts; what the library reads through `Host::integer` | At each read |
+| `eval_fixed` of an ADD or SUBTRACT receiver's own value, and of PERFORM VARYING's variable | The receiver's read under `ArithPlan.per_receiver`; `Op::Step`'s `var` | At each read |
+| `condition` of a condition-name | `Cond::Name`'s `subject` | Once, before its one read |
+| `content_argument` of a data item | `CallArg::Content(Chars::Place)` of a CALL of a program or an LE service; an EXEC CICS option's content (`CicsHost::content`) | Before its bytes are copied |
+| `move_source` | `Op::Move`'s and `FromMove`'s `from` | As `check` names, with `store::numcheck_sender` |
+| `compare` | `Cond::Rel` and `SearchKey` | As below |
+
+The walker reads these without the test, and so does an executor: DISPLAY's items; a class test's
+item; the argument of HEX-OF, BIT-OF and BYTE-LENGTH; INVOKE's arguments, which it takes as bytes;
+BY REFERENCE arguments and RETURNING; the arguments `arguments_text` shows an observer of a CALL of
+an operating-system routine; what the library reads after `Host::locate`, such as the
+items and counters of STRING, UNSTRING and INSPECT and the receivers of SET UP and DOWN BY; SQL host
+variables; file and sort keys; and what JSON and XML GENERATE write out and JSON and XML PARSE read.
+
+**Comparisons.** `Cond::Rel` and `SearchKey` carry nothing more. The walker decides at run time
+whether it tests a side, from the options and the kinds of what it compares, and locates places on
+the way (`Machine::compare`, `comparand_against`, `checks_against`); an executor does the same from
+`ProgramOptions`, the places' kinds, the constants and the `Compare` lowering chose:
+
+- **A side is tested against the other operand** (`checks_against`) always, but under
+  ZON(NOALPHNUM) (`store::noalphnum`) not when the other operand is nonnumeric: an alphanumeric,
+  hexadecimal or ALL literal, a figurative constant other than ZERO and NULL, or a data item of a
+  kind `store::nonnumeric` names, which is located to find its kind. Without NOALPHNUM nothing is
+  located for this.
+- **Neither side compared by its bytes:** after the zoned-bytes test's locates (§6), `a` and then
+  `b` are each read as an operand, but a data item side first asks `checks_against` of the other
+  operand, and is read untested when it says no.
+- **`ZonedBytes`:** once the zoned item's bytes are taken, it is located and tested when
+  `checks_against` of the other operand says so. Then the other operand: an unsigned, unscaled zoned
+  integer item is located twice and tested, and compared by its bytes; anything else is read as a
+  side of the previous item is, the zoned item its other operand, which is never nonnumeric, so a
+  data item is tested.
+
+**Each locate counts.** A place's evaluation reads its subscripts, OCCURS DEPENDING ON object and
+reference modification, and NUMCHECK tests each of those reads, so under MSG an executor evaluates
+each place as often as the walker locates it, not only in its order (§7.4, §7.5). Beside the
+passes the plans keep, an executor repeats these locates of the walker's: `compare`'s of the
+zoned-bytes test and `checks_against`, above; and on a zero divisor `binary_division`'s, which
+locate the division's item operands again, left to right until one is not an integer binary item,
+before the S0C9 or size error.
+
+**Refused.** Where the LIR reads an item more often than the walker, and NUMCHECK may test the item
+or what locating it reads, lowering refuses the program: a condition-name whose values compare
+differently (§6), whose `Or` of relations reads the subject once per value where the walker tests
+and reads it once; and a serial SEARCH, whose loop reads an OCCURS DEPENDING ON count at each step
+and the index twice, where the walker reads each once.
+
+**PARMCHECK.** `Storage.parmcheck` is the buffer after the WORKING-STORAGE the program declares
+(assumption PARMCHECK_BUFFER). Inside the CALL op an executor runs `parmcheck::set` over the calling
+program's slab, and later `parmcheck::test` with the op's position, `Program.id`,
+`ProgramOptions.options.parmcheck`'s ABD, and as `arguments` the address and place name of each
+argument that is a data item: `Reference`, `Content(Chars::Place)` and `Value(Load)`.
+
+| CALL of | Set | Test, naming |
+|---|---|---|
+| A program | After the arguments, before the callee is entered | After it returns and its temporaries are released, unless it ended the run with STOP RUN; before RETURNING and the phrases. The program's name in the run unit |
+| An LE service | After the arguments | After the service returns and its temporaries are released, before the phrases. The service's name |
+| A service through a pointer | Before the arguments | After the service returns, with no arguments. The pointer as written |
+
+A CALL that abends or finds no program is not tested, and INVOKE has no PARMCHECK.
 
 ## 10. The debug table
 

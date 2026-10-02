@@ -80,6 +80,10 @@ impl Lower<'_> {
                 return unsupported("SEARCH VARYING an item that may share storage with the table's OCCURS DEPENDING ON object", r.pos);
             }
         }
+        // The loop reads the count at each step and the index twice, where the walker reads each once.
+        if matches!(&count, Count::Odo(o) if self.int_tested(&o.object)) || self.read_tested(index_place) {
+            return unsupported("NUMCHECK of a serial SEARCH's OCCURS DEPENDING ON count or index", pos);
+        }
         let steps = stepped.iter().map(|&(place, r)| Ok((place, self.plus_one(r, pos)?))).collect::<R<Vec<(PlaceId, IntExpr)>>>()?;
         let (head, end) = (self.new_block()?, self.new_block()?);
         self.jump(head, pos)?;
