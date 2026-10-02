@@ -228,10 +228,11 @@ fuzz flags:
   --timeout SECONDS
              how long one run may take before it is stopped and counted a timeout, 10 without it
   --root DIR the repository root the manifest names the program from, the current directory without it
-             The inputs are the sequential and indexed files of fixed-length records the program
-             OPENs INPUT or I-O on a DD of its own, built field by field from their records'
-             descriptions, an indexed file's in key order, and SYSIN lines where it ACCEPTs from
-             SYSIN. Each data set is written inside the fuzz run's directory. An abend the program
+             The inputs are the sequential, indexed and relative files the program OPENs INPUT
+             or I-O on a DD of its own, built field by field from their records' descriptions, an
+             indexed file's in key order, a relative file's a record per slot with some empty,
+             variable-length records behind RDWs, and SYSIN lines where it ACCEPTs from SYSIN.
+             Each data set is written inside the fuzz run's directory. An abend the program
              gives on empty input is not kept; any other, by code and place, is kept once with the
              smallest input found that still gives it
 assumptions flags:

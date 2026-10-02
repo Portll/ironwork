@@ -192,14 +192,19 @@ step that reached what ironwork does not model makes the verdict `inconclusive`.
 each abend an input caused, in the directory cobolwork's abend set reads (`COBOLWORK_ABENDS=DIR
 cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
 
-1. The inputs are the sequential and indexed files of fixed-length records the program OPENs INPUT
-   or I-O, each on a DD of its own, and SYSIN where it ACCEPTs from SYSIN. An indexed file's
-   records are in RECORD KEY order, and no two share the RECORD KEY or an ALTERNATE RECORD KEY
-   without DUPLICATES. Records are built field by field, every occurrence of a table included,
-   from their level-01 descriptions: mostly values the PICTURE allows, sometimes its boundary, and
-   sometimes the bytes that break it (spaces or asterisks in a zoned number, a packed field of
-   spaces). A relative file, one whose records have more than one length, and a DD that more than
-   one file names are given an empty data set. A file assigned to SYSIN reads the SYSIN lines.
+1. The inputs are the sequential, indexed and relative files the program OPENs INPUT or I-O, each
+   on a DD of its own, and SYSIN where it ACCEPTs from SYSIN. An indexed file's records are in
+   RECORD KEY order, and no two share the RECORD KEY or an ALTERNATE RECORD KEY without
+   DUPLICATES. A relative file's data set holds a record per slot, some slots left empty. Records
+   are built field by field, every occurrence of a table included, from their level-01
+   descriptions: mostly values the PICTURE allows (a packed field's pad nibble zero, a national
+   field UTF-16 text), sometimes its boundary, and sometimes the bytes that break it (spaces or
+   asterisks in a zoned number, a packed field of spaces). A file whose records have more than one
+   length gets each record behind an RDW, at its level-01 record's length, at a length READ allows
+   (VLR decides which), or now and then shorter than READ allows. A line-sequential file, an
+   indexed file whose keys lie past its shortest record, a contained program's file and a DD that
+   more than one file names are given an empty data set. A file assigned to SYSIN reads the SYSIN
+   lines.
 2. Each run is its own `ironwork run` with the given `--clock` (2026-01-01 without it), stopped
    after `--timeout` seconds. Every data set is written inside DIR under a name of its own, never
    under its DD name, since ASSIGN may name a path. `--seed` fixes the inputs, so the same seed
@@ -223,7 +228,9 @@ a file named relative to its library is found under that library),
 false when the 200 runs ran out first), `counts` (`runs`, `clean`, `abend`, `timeout`, `refused`,
 over the generated runs; an abend that says what the surroundings lack counts as refused and is not
 kept: IRONWORK, a construct ironwork does not run, and S806, a CALL of a program no `-L` library
-holds; so does a run in which ironwork itself panicked, which standard error reports) and `runs`,
+holds; so do a run ironwork refused, told by its `ironwork:` line and not by the exit status a
+program's RETURN-CODE can also give, and a run in which ironwork itself panicked; standard error
+gives the first refusal's reason and the first panic) and `runs`,
 one per kept abend (`input` ids, `outcome` `abend`, `abend` with `code`, `file` relative to the
 program's directory or the library it came from, `line` and `message`, `journal` the run id, and
 `coverage`). A program that takes PROCEDURE DIVISION USING is refused: a CALL would supply its

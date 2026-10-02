@@ -33,7 +33,7 @@ pub use rt::tn3270;
 pub mod unit;
 pub mod vm;
 
-pub use compile::{Compiled, EntryPoint, compile, compile_at, compile_time, entry_points};
+pub use compile::{Compiled, EntryPoint, compile, compile_at, compile_time, entry_points, read_lengths, variable_records};
 pub(crate) use compile::{procedure, procedure_from, section_end};
 pub use machine::{Abend, Ending};
 

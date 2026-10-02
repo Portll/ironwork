@@ -247,3 +247,67 @@ fn every_occurrence_of_a_table_is_varied() {
     assert!(o.status.success(), "{}", stderr(&o));
     assert!(kept(&fs::read_to_string(dir.join("run/manifest.json")).unwrap()).iter().any(|k| k.starts_with("U4038 ")));
 }
+
+fn count(manifest: &str, key: &str) -> i64 {
+    manifest.split(&format!("\"{key}\":")).nth(1).and_then(|r| r.split([',', '}']).next()).and_then(|n| n.parse().ok()).unwrap()
+}
+
+#[test]
+fn variable_length_records_are_fed_behind_rdws() {
+    let dir = temp("varying");
+    rewrite(
+        &dir,
+        &[
+            ("       FD IN-FILE.", "       FD IN-FILE RECORD VARYING FROM 10 TO 17 DEPENDING ON WS-LEN."),
+            ("       01 WS-TOTAL PIC 9(9) VALUE 0.", "       01 WS-TOTAL PIC 9(9) VALUE 0.\n       01 WS-LEN PIC 9(4) COMP."),
+        ],
+    );
+    let o = fuzz(&dir, "run", &["--runs", "60"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let manifest = fs::read_to_string(dir.join("run/manifest.json")).unwrap();
+    assert_eq!(count(&manifest, "refused"), 0, "{manifest}");
+    assert!(kept(&manifest).iter().any(|k| k.starts_with("S0C7 ")), "{manifest}");
+}
+
+#[test]
+fn a_relative_file_is_fed_a_record_a_slot() {
+    let dir = temp("relative");
+    rewrite(&dir, &[("ASSIGN TO INFILE.", "ASSIGN TO INFILE\n               ORGANIZATION RELATIVE ACCESS SEQUENTIAL.")]);
+    let o = fuzz(&dir, "run", &["--runs", "40"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let manifest = fs::read_to_string(dir.join("run/manifest.json")).unwrap();
+    assert!(kept(&manifest).iter().any(|k| k.starts_with("S0C7 ")), "{manifest}");
+}
+
+#[test]
+fn a_contained_program_s_file_gets_its_dd() {
+    let dir = temp("contained");
+    rewrite(
+        &dir,
+        &[
+            ("           OPEN INPUT IN-FILE", "           CALL 'AUXREAD'\n           OPEN INPUT IN-FILE"),
+            (
+                "           GOBACK.",
+                "           GOBACK.\n       IDENTIFICATION DIVISION.\n       PROGRAM-ID. AUXREAD.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n           SELECT AUX-FILE ASSIGN TO AUXDD.\n       DATA DIVISION.\n       FILE SECTION.\n       FD AUX-FILE.\n       01 AUX-REC PIC X(5).\n       PROCEDURE DIVISION.\n           OPEN INPUT AUX-FILE\n           CLOSE AUX-FILE\n           GOBACK.\n       END PROGRAM AUXREAD.\n       END PROGRAM QTYSUM.",
+            ),
+        ],
+    );
+    let o = fuzz(&dir, "run", &["--runs", "40"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(stderr(&o).contains("not varied, given empty: AUXDD"), "{}", stderr(&o));
+    assert!(kept(&fs::read_to_string(dir.join("run/manifest.json")).unwrap()).iter().any(|k| k.starts_with("S0C7 ")));
+}
+
+#[test]
+fn a_program_s_return_code_of_2_is_not_a_refusal_and_a_refusal_says_why() {
+    let dir = temp("rc2");
+    rewrite(&dir, &[("           GOBACK.", "           MOVE 2 TO RETURN-CODE\n           GOBACK.")]);
+    let o = fuzz(&dir, "run", &["--runs", "20"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert_eq!(count(&fs::read_to_string(dir.join("run/manifest.json")).unwrap(), "refused"), 0);
+
+    rewrite(&dir, &[("           OPEN INPUT IN-FILE", "           CALL 'NOSUCH'\n           OPEN INPUT IN-FILE")]);
+    let o = fuzz(&dir, "called", &["--runs", "5"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(stderr(&o).contains("5 runs refused; the first: QTYSUM.cbl:21 S806 CALL NOSUCH"), "{}", stderr(&o));
+}
