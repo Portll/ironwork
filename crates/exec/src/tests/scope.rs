@@ -268,8 +268,8 @@ fn global_file(declaratives: &[&str], reader_declaratives: &[&str], reader_body:
     .concat()
 }
 
-fn run_global_file(source: &str) -> String {
-    let path = temp("global-file.txt");
+fn run_global_file(name: &str, source: &str) -> String {
+    let path = temp(name);
     std::fs::write(&path, "ABCD\n").unwrap();
     let o = Harness::source(source).dds(&[format!("GDD={}:text", path.display())]).run(Executor::Interpreter);
     assert!(o.ending.is_ok(), "{:?}\n{}", o.ending, o.err);
@@ -279,22 +279,22 @@ fn run_global_file(source: &str) -> String {
 #[test]
 fn a_global_file_is_the_containing_programs_connector_record_and_status() {
     let source = global_file(&[], &[], &["    OPEN INPUT GF", "    READ GF", "    DISPLAY 'READER ' G-REC ' ' GS"]);
-    assert_eq!(run_global_file(&source), "READER ABCD 00\nOUTER ABCD 00 0\n");
+    assert_eq!(run_global_file("global-connector.txt", &source), "READER ABCD 00\nOUTER ABCD 00 0\n");
 }
 
 #[test]
 fn a_global_declarative_serves_a_contained_program_without_its_own() {
     let global = ["G-ERR SECTION.", "    USE GLOBAL AFTER ERROR PROCEDURE ON INPUT.", "G-ERR-1.", "    ADD 1 TO SEEN", "    DISPLAY 'GLOBAL ' GS ' ' SEEN."];
     let body = ["    OPEN INPUT GF", "    READ GF", "    READ GF", "    DISPLAY 'AFTER ' GS"];
-    assert_eq!(run_global_file(&global_file(&global, &[], &body)), "GLOBAL 10 1\nAFTER 10\nOUTER ABCD 10 1\n");
+    assert_eq!(run_global_file("global-declaratives.txt", &global_file(&global, &[], &body)), "GLOBAL 10 1\nAFTER 10\nOUTER ABCD 10 1\n");
     let own = ["R-ERR SECTION.", "    USE AFTER ERROR PROCEDURE ON GF.", "R-ERR-1.", "    DISPLAY 'OWN ' GS."];
-    assert_eq!(run_global_file(&global_file(&global, &own, &body)), "OWN 10\nAFTER 10\nOUTER ABCD 10 0\n");
+    assert_eq!(run_global_file("global-declaratives.txt", &global_file(&global, &own, &body)), "OWN 10\nAFTER 10\nOUTER ABCD 10 0\n");
     let local = ["L-ERR SECTION.", "    USE AFTER ERROR PROCEDURE ON INPUT.", "L-ERR-1.", "    DISPLAY 'NOT GLOBAL'."];
     let not_global = global_file(&local, &[], &body);
-    let o = Harness::source(&not_global).dds(&[format!("GDD={}:text", temp("global-file.txt").display())]).run(Executor::Interpreter);
+    let o = Harness::source(&not_global).dds(&[format!("GDD={}:text", temp("global-declaratives.txt").display())]).run(Executor::Interpreter);
     assert!(o.out.starts_with("AFTER 10\n"), "{}", o.out);
     let stop = ["G-ERR SECTION.", "    USE GLOBAL AFTER ERROR PROCEDURE ON GF.", "G-ERR-1.", "    DISPLAY 'STOPPING'", "    STOP RUN."];
-    assert_eq!(run_global_file(&global_file(&stop, &[], &body)), "STOPPING\n");
+    assert_eq!(run_global_file("global-declaratives.txt", &global_file(&stop, &[], &body)), "STOPPING\n");
 }
 
 #[test]
