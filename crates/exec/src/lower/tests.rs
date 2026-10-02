@@ -1489,3 +1489,12 @@ fn a_procedure_name_of_digits_is_matched_as_written() {
     let switch = p.blocks.iter().find_map(|b| if let Terminator::Switch { targets, .. } = &b.end { Some(targets.clone()) } else { None });
     assert_eq!(switch.unwrap(), [paragraph(&p, "3") as u32, paragraph(&p, "03") as u32]);
 }
+
+#[test]
+fn perform_times_with_a_subscripted_count_sets_its_counter_from_that_element_once() {
+    let p = lowered(&program("", TABLE, &[line("PERFORM V (J) TIMES"), line("    CONTINUE"), line("END-PERFORM"), line("GOBACK.")].concat()));
+    let counts: Vec<&IntExpr> = ops(&p).filter_map(|op| if let Op::SetTemp(_, n) = op { Some(n) } else { None }).collect();
+    let [IntExpr::Item(v)] = counts[..] else { panic!("{counts:?}") };
+    let place = &p.places[*v as usize];
+    assert_eq!((p.symbols[place.name as usize].as_str(), place.subscripts.len()), ("V", 1));
+}

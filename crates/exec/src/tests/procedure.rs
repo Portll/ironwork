@@ -731,3 +731,26 @@ fn paragraphs_and_sections_named_by_digits_alone_are_procedure_names() {
     ]));
     assert_eq!(out, "4\nTTT1 OF 01\n1 OF 01\n1 OF 0002\n2 OF 0002\n8\n");
 }
+
+#[test]
+fn perform_times_takes_a_subscripted_count_and_test_needs_no_with() {
+    let out = run(&program(
+        "",
+        "       01  T.\n           05 N PIC 9 OCCURS 3 VALUE 2.\n       01  I PIC 9 VALUE 3.\n       01  K PIC 9 VALUE 0.\n",
+        &[
+            "       M.\n",
+            &line("MOVE 1 TO N (2)"),
+            &line("PERFORM P N (I) TIMES"),
+            &line("PERFORM N (2) TIMES DISPLAY 'I' END-PERFORM"),
+            &line("PERFORM P TEST AFTER UNTIL K > 4"),
+            &line("PERFORM TEST BEFORE UNTIL K > 5 ADD 1 TO K END-PERFORM"),
+            &line("DISPLAY K"),
+            &line("STOP RUN."),
+            "       P.\n",
+            &line("ADD 1 TO K"),
+            &line("DISPLAY 'P' K."),
+        ]
+        .concat(),
+    ));
+    assert_eq!(out, "P1\nP2\nI\nP3\nP4\nP5\n6\n");
+}
