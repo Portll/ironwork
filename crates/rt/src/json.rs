@@ -1,11 +1,63 @@
-//! The text JSON GENERATE writes for elementary data (Language Reference SC27-8713-03, pp. 381-382).
+//! The text JSON GENERATE writes for elementary data (Language Reference SC27-8713-03, pp. 381-382;
+//! JSON-CODE values from the Programming Guide SC27-8714-03, p. 819).
 
+use crate::abend::Abend;
 use crate::intrinsic::real::Real;
+use crate::storage::{Kind, Loc, Val};
+use crate::store::{self, ProgramFacts};
+use crate::vocab::{Figurative, Pos};
 use std::ops::{Div, Mul};
+use zarch::ebcdic::CodePage;
 use zarch::hfp::Hfp;
 use zarch::wide::U256;
 
 pub mod parse;
+
+pub const RECEIVER_TOO_SMALL: i64 = 1;
+pub const BAD_ENCODING: i64 = 2;
+pub const UTF8: u16 = 1208;
+pub const UTF16: u16 = 1200;
+/// The single-byte EBCDIC code pages a JSON document may be written in (p. 375, Table 45).
+pub const CCSIDS: &[u16] = &[1047, 1140, 37, 1141, 273, 1142, 277, 1143, 278, 1144, 280, 1145, 284, 1146, 285, 1147, 297, 1148, 500, 1149, 871];
+
+/// The document's bytes for a national receiver or another, in the CCSID ENCODING names, and the
+/// size of one character position; None for an encoding the statement cannot write.
+pub fn encoded(document: &str, national: bool, ccsid: Option<u16>) -> Option<(Vec<u8>, usize)> {
+    match (national, ccsid) {
+        (true, None | Some(UTF16)) => Some((document.encode_utf16().flat_map(u16::to_be_bytes).collect(), 2)),
+        (true, _) => None,
+        (false, None | Some(UTF8)) => Some((document.as_bytes().to_vec(), 1)),
+        (false, Some(c)) if CCSIDS.contains(&c) => CodePage::by_ccsid(c).map(|page| (document.chars().map(|ch| page.encode_char(ch).unwrap_or(0x3F)).collect(), 1)),
+        (false, Some(_)) => None,
+    }
+}
+
+/// Writes as much of a JSON or XML GENERATE document as fits in the receiver in whole character
+/// positions of `unit` bytes, and returns how many bytes that is.
+pub fn write_document(mem: &mut [u8], receiver: Loc, bytes: &[u8], unit: usize) -> usize {
+    let written = if bytes.len() <= receiver.len { bytes.len() } else { receiver.len - receiver.len % unit };
+    store::write(mem, Loc { len: written, ..receiver }, &bytes[..written]);
+    written
+}
+
+/// Whether an item equals a figurative constant, as SUPPRESS ... WHEN and CONVERTING ... TO JSON
+/// NULL test it: numerically for ZERO and a numeric item, otherwise character by character.
+pub fn equals_figurative(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, f: Figurative, pos: Pos) -> Result<bool, Abend> {
+    let bytes = store::bytes(mem, loc);
+    if f == Figurative::Zero && loc.kind.is_numeric() {
+        return Ok(match store::read(facts, mem, loc, pos)? {
+            Val::Num(x) => x.magnitude.is_zero(),
+            Val::Float(h) => h.fraction == 0,
+            _ => false,
+        });
+    }
+    if loc.kind == Kind::National {
+        let unit = store::figurative_unit(f, facts.options().quote);
+        return Ok(bytes.chunks(2).all(|c| c == unit.to_be_bytes()));
+    }
+    let byte = facts.figurative(f);
+    Ok(bytes.iter().all(|&b| b == byte))
+}
 
 /// A fixed-point value as if moved to a numeric-edited item of `integers` integer positions (at
 /// least one), `scale` decimal places after an actual period, and a leading minus sign; then

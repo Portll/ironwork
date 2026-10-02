@@ -1,5 +1,54 @@
 //! JSON text as JSON PARSE reads it (Language Reference SC27-8713-03, pp. 384-396): RFC 8259's
-//! grammar, with IBM's escape \x for NEXT LINE (U+0085).
+//! grammar, with IBM's escape \x for NEXT LINE (U+0085). JSON-CODE and JSON-STATUS values from the
+//! Programming Guide SC27-8714-03, pp. 819-821.
+
+use super::{CCSIDS, UTF8, UTF16};
+use crate::display::utf16_text;
+use crate::storage::literal_fixed;
+use numeric::precision::Fixed;
+use zarch::ebcdic::CodePage;
+
+pub const DIFFERENT_DUPLICATE: i64 = 103;
+pub const INCOMPATIBLE: i64 = 104;
+pub const NO_MATCH: i64 = 106;
+pub const UNCONVERTED_BOOLEAN: i64 = 107;
+pub const ANONYMOUS_ARRAY: i64 = 108;
+pub const PARSE_ENCODING: i64 = 109;
+
+pub const UNMATCHED_ITEM: i64 = 1;
+pub const UNMATCHED_NAME: i64 = 2;
+pub const SAME_DUPLICATE: i64 = 4;
+pub const SHORT_ARRAY: i64 = 8;
+pub const LONG_ARRAY: i64 = 16;
+pub const NULL_ITEM: i64 = 32;
+pub const NULL_ELEMENT: i64 = 64;
+pub const SIZE_ERROR: i64 = 128;
+pub const LOST: i64 = 256;
+pub const SUBSTITUTED: i64 = 512;
+
+/// EBCDIC's SUB, for a character the code page lacks.
+pub const SUB: u8 = 0x3F;
+
+/// The source's text: UTF-8 unless the CCSID ENCODING names is an EBCDIC code page, UTF-16 when
+/// the source is national; the JSON-CODE of an encoding that cannot be read.
+pub fn text(bytes: Vec<u8>, national: bool, ccsid: Option<u16>) -> Result<String, i64> {
+    match (national, ccsid) {
+        (true, None | Some(UTF16)) => Ok(utf16_text(&bytes)),
+        (false, None | Some(UTF8)) => String::from_utf8(bytes).map_err(|_| Invalid::Malformed.code()),
+        (false, Some(c)) if CCSIDS.contains(&c) => CodePage::by_ccsid(c).map(|page| page.decode(&bytes)).ok_or(PARSE_ENCODING),
+        _ => Err(PARSE_ENCODING),
+    }
+}
+
+/// A decimal value of at most 31 digits, and whether high-order integer digits had to go.
+pub fn fixed_value(negative: bool, int: &str, frac: &str) -> (Fixed, bool) {
+    let frac = &frac[..frac.len().min(31)];
+    let room = 31 - frac.len();
+    let cut = int.len() > room;
+    let int = if cut { &int[int.len() - room..] } else { int };
+    let text = format!("{}{}.{frac}", if negative { "-" } else { "" }, if int.is_empty() { "0" } else { int });
+    (literal_fixed(text.trim_end_matches('.')).expect("at most 31 digits"), cut)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {

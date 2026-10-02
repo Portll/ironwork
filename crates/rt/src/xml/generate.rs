@@ -1,6 +1,34 @@
-//! The text XML GENERATE writes (Language Reference SC27-8713-03, pp. 491-494).
+//! The text XML GENERATE writes (Language Reference SC27-8713-03, pp. 491-494; XML-CODE values from
+//! the Programming Guide SC27-8714-03, pp. 817-818).
 
-use super::{name_char, name_start, xml_char};
+use super::{Encoding, UTF8, UTF16, name_char, name_start, xml_char};
+use zarch::ebcdic::CodePage;
+
+pub const RECEIVER_TOO_SMALL: i64 = 400;
+pub const CODEPAGE_UNSUPPORTED: i64 = 411;
+pub const BAD_ENCODING: i64 = 414;
+pub const NATIONAL_NOT_UTF16: i64 = 415;
+pub const BAD_NAMESPACE: i64 = 416;
+pub const ILLEGAL_CHARACTERS: i64 = 417;
+pub const SUBSTITUTED: i64 = 418;
+pub const BAD_PREFIX: i64 = 419;
+pub const NATIONAL_NOT_UTF8: i64 = 420;
+/// The single-byte EBCDIC code pages an XML document may be written in (Programming Guide p. 640,
+/// Table 77).
+pub const CCSIDS: &[u16] = &[1047, 1140, 37, 1141, 273, 1142, 277, 1143, 278, 1144, 280, 1145, 284, 1146, 285, 1147, 297, 1148, 500, 1149, 871];
+
+/// The document's encoding for a national receiver or another, given the CCSID it is in and
+/// whether ENCODING named it; the XML-CODE of one the statement cannot write.
+pub fn encoding(national: bool, ccsid: Option<u16>, named: bool) -> Result<Encoding, i64> {
+    match (national, ccsid) {
+        (true, Some(UTF16)) => Ok(Encoding::National),
+        (true, _) => Err(NATIONAL_NOT_UTF16),
+        (false, Some(UTF8)) => Ok(Encoding::Utf8),
+        (false, Some(c)) if CCSIDS.contains(&c) && CodePage::by_ccsid(c).is_some() => Ok(Encoding::Page(CodePage::by_ccsid(c).expect("checked"))),
+        (false, _) if !named => Err(CODEPAGE_UNSUPPORTED),
+        (false, _) => Err(BAD_ENCODING),
+    }
+}
 
 /// Content or an attribute value: the five special characters as references, and each character
 /// beyond U+FFFF as a character reference.

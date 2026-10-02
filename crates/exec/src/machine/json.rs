@@ -6,13 +6,7 @@ use rt::json as text;
 
 mod parse;
 use std::collections::{HashMap, HashSet};
-
-const RECEIVER_TOO_SMALL: i64 = 1;
-const BAD_ENCODING: i64 = 2;
-const UTF8: u16 = 1208;
-const UTF16: u16 = 1200;
-/// The single-byte EBCDIC code pages a JSON document may be written in (p. 375, Table 45).
-const JSON_CCSIDS: &[u16] = &[1047, 1140, 37, 1141, 273, 1142, 277, 1143, 278, 1144, 280, 1145, 284, 1146, 285, 1147, 297, 1148, 500, 1149, 871];
+use text::{BAD_ENCODING, RECEIVER_TOO_SMALL};
 
 /// What the phrases of one JSON GENERATE say about each item of the tree.
 #[derive(Default)]
@@ -146,20 +140,7 @@ impl<'p> Machine<'p, '_, '_> {
     /// Whether an item equals a figurative constant: numerically for ZERO and a numeric item,
     /// otherwise character by character.
     pub(super) fn equals_figurative(&self, loc: Loc, f: Figurative, pos: Pos) -> R<bool> {
-        let bytes = self.bytes(loc);
-        if f == Figurative::Zero && loc.kind.is_numeric() {
-            return Ok(match self.read(loc, pos)? {
-                Val::Num(x) => x.magnitude.is_zero(),
-                Val::Float(h) => h.fraction == 0,
-                _ => false,
-            });
-        }
-        if loc.kind == Kind::National {
-            let unit = rt::store::figurative_unit(f, self.options.quote);
-            return Ok(bytes.chunks(2).all(|c| c == unit.to_be_bytes()));
-        }
-        let byte = self.collating.figurative(f);
-        Ok(bytes.iter().all(|&b| b == byte))
+        text::equals_figurative(&self.facts(), &self.unit.mem, loc, f, pos)
     }
 
     /// Whether EVERY [NUMERIC | NONNUMERIC] WHEN selects an item for this figurative constant (pp. 376-377).
@@ -366,13 +347,7 @@ impl<'p> Machine<'p, '_, '_> {
                 _ => None,
             },
         };
-        Ok(match (national, ccsid) {
-            (true, None | Some(UTF16)) => Some((document.encode_utf16().flat_map(u16::to_be_bytes).collect(), 2)),
-            (true, _) => None,
-            (false, None | Some(UTF8)) => Some((document.as_bytes().to_vec(), 1)),
-            (false, Some(c)) if JSON_CCSIDS.contains(&c) => CodePage::by_ccsid(c).map(|page| (document.chars().map(|ch| page.encode_char(ch).unwrap_or(0x3F)).collect(), 1)),
-            (false, Some(_)) => None,
-        })
+        Ok(text::encoded(document, national, ccsid))
     }
 
     fn json_code(&mut self, code: i64, pos: Pos) -> R<()> {
@@ -388,8 +363,7 @@ impl<'p> Machine<'p, '_, '_> {
             None => BAD_ENCODING,
             Some((bytes, unit)) => {
                 let fits = bytes.len() <= receiver.len;
-                let written = if fits { bytes.len() } else { receiver.len - receiver.len % unit };
-                self.unit.mem[receiver.offset..receiver.offset + written].copy_from_slice(&bytes[..written]);
+                let written = text::write_document(&mut self.unit.mem, receiver, &bytes, unit);
                 if let Some(count) = &g.count {
                     self.set_integer(count, (written / unit) as i64, g.pos)?;
                 }

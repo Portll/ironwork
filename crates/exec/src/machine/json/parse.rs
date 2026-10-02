@@ -3,29 +3,10 @@
 
 use super::*;
 use rt::intrinsic::numval::Number;
-use rt::json::parse::{self as json, Value};
+use rt::json::parse::{self as json, Value, fixed_value};
+use rt::json::parse::{ANONYMOUS_ARRAY, DIFFERENT_DUPLICATE, INCOMPATIBLE, NO_MATCH, PARSE_ENCODING, UNCONVERTED_BOOLEAN};
+use rt::json::parse::{LONG_ARRAY, LOST, NULL_ELEMENT, NULL_ITEM, SAME_DUPLICATE, SHORT_ARRAY, SIZE_ERROR, SUB, SUBSTITUTED, UNMATCHED_ITEM, UNMATCHED_NAME};
 use std::collections::{HashMap, HashSet};
-
-const DIFFERENT_DUPLICATE: i64 = 103;
-const INCOMPATIBLE: i64 = 104;
-const NO_MATCH: i64 = 106;
-const UNCONVERTED_BOOLEAN: i64 = 107;
-const ANONYMOUS_ARRAY: i64 = 108;
-const PARSE_ENCODING: i64 = 109;
-
-const UNMATCHED_ITEM: i64 = 1;
-const UNMATCHED_NAME: i64 = 2;
-const SAME_DUPLICATE: i64 = 4;
-const SHORT_ARRAY: i64 = 8;
-const LONG_ARRAY: i64 = 16;
-const NULL_ITEM: i64 = 32;
-const NULL_ELEMENT: i64 = 64;
-const SIZE_ERROR: i64 = 128;
-const LOST: i64 = 256;
-const SUBSTITUTED: i64 = 512;
-
-/// EBCDIC's SUB, for a character the code page lacks.
-const SUB: u8 = 0x3F;
 
 /// An exception ends the parse with its JSON-CODE.
 type Code = Result<(), i64>;
@@ -389,12 +370,7 @@ impl<'p> Machine<'p, '_, '_> {
                 _ => 0,
             }),
         };
-        Ok(match (national, ccsid) {
-            (true, None | Some(UTF16)) => Ok(utf16_text(&bytes)),
-            (false, None | Some(UTF8)) => String::from_utf8(bytes).map_err(|_| json::Invalid::Malformed.code()),
-            (false, Some(c)) if JSON_CCSIDS.contains(&c) => CodePage::by_ccsid(c).map(|page| page.decode(&bytes)).ok_or(PARSE_ENCODING),
-            _ => Err(PARSE_ENCODING),
-        })
+        Ok(json::text(bytes, national, ccsid))
     }
 
     /// A value into the statement's own item: one occurrence, or a whole table.
@@ -452,14 +428,4 @@ impl<'p> Machine<'p, '_, '_> {
             None => Ok(Flow::Next),
         }
     }
-}
-
-/// A decimal value of at most 31 digits, and whether high-order integer digits had to go.
-fn fixed_value(negative: bool, int: &str, frac: &str) -> (Fixed, bool) {
-    let frac = &frac[..frac.len().min(31)];
-    let room = 31 - frac.len();
-    let cut = int.len() > room;
-    let int = if cut { &int[int.len() - room..] } else { int };
-    let text = format!("{}{}.{frac}", if negative { "-" } else { "" }, if int.is_empty() { "0" } else { int });
-    (rt::storage::literal_fixed(text.trim_end_matches('.')).expect("at most 31 digits"), cut)
 }

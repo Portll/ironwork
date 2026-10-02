@@ -2,11 +2,9 @@
 //! procedure is performed for it (Language Reference SC27-8713-03, pp. 489-494).
 
 use super::*;
-use rt::xml::{Event, EventKind, Scanner, Step};
+use rt::xml::{Encoding, Event, EventKind, Scanner, Step, UTF8};
 
 mod generate;
-
-const UTF8: u16 = 1208;
 
 /// Where XML-TEXT and the other registers whose length varies hold the current event's fragments:
 /// an offset in run-unit storage and a length, empty outside a processing procedure.
@@ -18,66 +16,6 @@ pub(super) struct Registers {
     nnamespace: (usize, usize),
     prefix: (usize, usize),
     nprefix: (usize, usize),
-}
-
-/// How the document's characters are encoded, and so XML-TEXT's.
-#[derive(Clone, Copy)]
-enum Encoding {
-    National,
-    Utf8,
-    Page(&'static CodePage),
-}
-
-impl Encoding {
-    fn decode(self, bytes: &[u8]) -> String {
-        match self {
-            Encoding::National => utf16_text(bytes),
-            Encoding::Utf8 => String::from_utf8_lossy(bytes).into_owned(),
-            Encoding::Page(page) => page.decode(bytes),
-        }
-    }
-
-    /// Decodes a segment after the bytes the last one left of a character it split, and keeps those
-    /// this one leaves for the next (Programming Guide SC27-8714-03, p. 638).
-    fn decode_segment(self, carry: &mut Vec<u8>, bytes: &[u8]) -> String {
-        let mut all = std::mem::take(carry);
-        all.extend_from_slice(bytes);
-        let whole = match self {
-            Encoding::Utf8 => all.len() - utf8_unfinished(&all),
-            Encoding::National => {
-                let even = all.len() & !1;
-                if even >= 2 && (0xD8..=0xDB).contains(&all[even - 2]) { even - 2 } else { even }
-            }
-            Encoding::Page(_) => all.len(),
-        };
-        carry.extend_from_slice(&all[whole..]);
-        self.decode(&all[..whole])
-    }
-
-    fn encode(self, text: &str) -> Vec<u8> {
-        match self {
-            Encoding::National => text.encode_utf16().flat_map(u16::to_be_bytes).collect(),
-            Encoding::Utf8 => text.as_bytes().to_vec(),
-            Encoding::Page(page) => page.encode_lossy(text),
-        }
-    }
-}
-
-/// How many bytes at the end of `bytes` begin a UTF-8 character they do not finish.
-fn utf8_unfinished(bytes: &[u8]) -> usize {
-    for back in 1..=bytes.len().min(3) {
-        let lead = bytes[bytes.len() - back];
-        if lead & 0xC0 != 0x80 {
-            let length = match lead {
-                0xC0..=0xDF => 2,
-                0xE0..=0xEF => 3,
-                0xF0..=0xF7 => 4,
-                _ => 1,
-            };
-            return if length > back { back } else { 0 };
-        }
-    }
-    0
 }
 
 fn special(name: &str) -> Ref {

@@ -3,22 +3,9 @@
 
 use super::json::Converted;
 use super::*;
-use rt::xml::generate as text;
+use rt::xml::UTF16;
+use rt::xml::generate::{self as text, BAD_NAMESPACE, BAD_PREFIX, ILLEGAL_CHARACTERS, NATIONAL_NOT_UTF8, RECEIVER_TOO_SMALL, SUBSTITUTED};
 use std::collections::{HashMap, HashSet};
-
-const RECEIVER_TOO_SMALL: i64 = 400;
-const CODEPAGE_UNSUPPORTED: i64 = 411;
-const BAD_ENCODING: i64 = 414;
-const NATIONAL_NOT_UTF16: i64 = 415;
-const BAD_NAMESPACE: i64 = 416;
-const ILLEGAL_CHARACTERS: i64 = 417;
-const SUBSTITUTED: i64 = 418;
-const BAD_PREFIX: i64 = 419;
-const NATIONAL_NOT_UTF8: i64 = 420;
-const UTF16: u16 = 1200;
-/// The single-byte EBCDIC code pages an XML document may be written in (Programming Guide p. 640,
-/// Table 77).
-const XML_CCSIDS: &[u16] = &[1047, 1140, 37, 1141, 273, 1142, 277, 1143, 278, 1144, 280, 1145, 284, 1146, 285, 1147, 297, 1148, 500, 1149, 871];
 
 /// What the phrases of one XML GENERATE say about each item of the tree, and what generating it
 /// has met so far.
@@ -240,13 +227,9 @@ impl<'p> Machine<'p, '_, '_> {
             None if national => Some(UTF16),
             None => Some(self.options.codepage),
         };
-        let encoding = match (national, ccsid) {
-            (true, Some(UTF16)) => Encoding::National,
-            (true, _) => return Ok(NATIONAL_NOT_UTF16),
-            (false, Some(UTF8)) => Encoding::Utf8,
-            (false, Some(c)) if XML_CCSIDS.contains(&c) && CodePage::by_ccsid(c).is_some() => Encoding::Page(CodePage::by_ccsid(c).expect("checked")),
-            (false, _) if x.encoding.is_none() => return Ok(CODEPAGE_UNSUPPORTED),
-            (false, _) => return Ok(BAD_ENCODING),
+        let encoding = match text::encoding(national, ccsid, x.encoding.is_some()) {
+            Ok(encoding) => encoding,
+            Err(code) => return Ok(code),
         };
         let namespace = match &x.namespace {
             Some(op) => self.xml_operand_text(op, x.pos)?.trim_end_matches(' ').to_owned(),
@@ -282,8 +265,7 @@ impl<'p> Machine<'p, '_, '_> {
         let substituted = matches!(encoding, Encoding::Page(page) if document.chars().any(|c| page.encode_char(c).is_none()));
         let (bytes, unit) = (encoding.encode(&document), if national { 2 } else { 1 });
         let fits = bytes.len() <= receiver.len;
-        let written = if fits { bytes.len() } else { receiver.len - receiver.len % unit };
-        self.unit.mem[receiver.offset..receiver.offset + written].copy_from_slice(&bytes[..written]);
+        let written = rt::json::write_document(&mut self.unit.mem, receiver, &bytes, unit);
         if let Some(count) = &x.count {
             self.set_integer(count, (written / unit) as i64, x.pos)?;
         }

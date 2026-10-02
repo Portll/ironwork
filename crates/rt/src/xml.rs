@@ -3,9 +3,74 @@
 //! is held until it is complete, while character content, comments and processing-instruction data
 //! that a segment ends inside are reported in parts.
 
+use crate::display::utf16_text;
 use std::collections::VecDeque;
+use zarch::ebcdic::CodePage;
 
 pub mod generate;
+
+pub const UTF8: u16 = 1208;
+pub const UTF16: u16 = 1200;
+
+/// How a document's characters are encoded, and so XML-TEXT's.
+#[derive(Clone, Copy)]
+pub enum Encoding {
+    National,
+    Utf8,
+    Page(&'static CodePage),
+}
+
+impl Encoding {
+    pub fn decode(self, bytes: &[u8]) -> String {
+        match self {
+            Encoding::National => utf16_text(bytes),
+            Encoding::Utf8 => String::from_utf8_lossy(bytes).into_owned(),
+            Encoding::Page(page) => page.decode(bytes),
+        }
+    }
+
+    /// Decodes a segment after the bytes the last one left of a character it split, and keeps those
+    /// this one leaves for the next (Programming Guide SC27-8714-03, p. 638).
+    pub fn decode_segment(self, carry: &mut Vec<u8>, bytes: &[u8]) -> String {
+        let mut all = std::mem::take(carry);
+        all.extend_from_slice(bytes);
+        let whole = match self {
+            Encoding::Utf8 => all.len() - utf8_unfinished(&all),
+            Encoding::National => {
+                let even = all.len() & !1;
+                if even >= 2 && (0xD8..=0xDB).contains(&all[even - 2]) { even - 2 } else { even }
+            }
+            Encoding::Page(_) => all.len(),
+        };
+        carry.extend_from_slice(&all[whole..]);
+        self.decode(&all[..whole])
+    }
+
+    pub fn encode(self, text: &str) -> Vec<u8> {
+        match self {
+            Encoding::National => text.encode_utf16().flat_map(u16::to_be_bytes).collect(),
+            Encoding::Utf8 => text.as_bytes().to_vec(),
+            Encoding::Page(page) => page.encode_lossy(text),
+        }
+    }
+}
+
+/// How many bytes at the end of `bytes` begin a UTF-8 character they do not finish.
+fn utf8_unfinished(bytes: &[u8]) -> usize {
+    for back in 1..=bytes.len().min(3) {
+        let lead = bytes[bytes.len() - back];
+        if lead & 0xC0 != 0x80 {
+            let length = match lead {
+                0xC0..=0xDF => 2,
+                0xE0..=0xEF => 3,
+                0xF0..=0xF7 => 4,
+                _ => 1,
+            };
+            return if length > back { back } else { 0 };
+        }
+    }
+    0
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventKind {
