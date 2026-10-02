@@ -134,6 +134,10 @@ pub enum Connector {
     Program(usize, usize),
 }
 
+/// The routines cobolwork reads a CALL of as running an operating-system command, whose arguments
+/// the input trace checks.
+pub const OS_COMMAND_ROUTINES: &[&str] = &["SYSTEM", "C$SYSTEM", "CBL_EXEC_RUN_UNIT", "CBL_GC_HOSTED", "BXPSYSTM"];
+
 pub struct RunUnit<'w, H, L: Loader<H>> {
     pub mem: Vec<u8>,
     /// PERFORMs and CALLs in progress, across every program.

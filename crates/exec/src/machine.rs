@@ -7,7 +7,7 @@ use crate::abend::{AbendCode, Signal};
 use crate::layout::{Item, Kind, Layout, Resolved};
 use rt::storage::{Loc, Val};
 pub(crate) use rt::storage::literal_fixed;
-use crate::unit::{ADDRESS_BASE, Event, LoadError, RETURN_CODE, RunUnit};
+use crate::unit::{ADDRESS_BASE, Event, LoadError, OS_COMMAND_ROUTINES, RETURN_CODE, RunUnit};
 use crate::Compiled;
 use numeric::precision::{self, Fixed, Places};
 use numeric::{Options, Trunc};
@@ -44,10 +44,6 @@ pub(crate) mod sql;
 mod xml;
 
 type R<T> = Result<T, Abend>;
-
-/// The routines cobolwork reads a CALL of as running an operating-system command, whose arguments
-/// the input trace checks.
-const OS_COMMAND_ROUTINES: &[&str] = &["SYSTEM", "C$SYSTEM", "CBL_EXEC_RUN_UNIT", "CBL_GC_HOSTED", "BXPSYSTM"];
 
 enum Flow {
     Next,

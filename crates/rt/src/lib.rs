@@ -45,4 +45,5 @@ pub mod text;
 pub mod tn3270;
 pub mod unit;
 pub mod virtual_printer;
+pub mod vm;
 pub mod vocab;

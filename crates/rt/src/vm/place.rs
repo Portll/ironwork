@@ -1,0 +1,139 @@
+//! Places to `Loc`s, and the integers subscripts, bounds and counts take, in the walker's order of
+//! locates, reads and checks (lir.md §5.4, §7.5).
+
+use super::{Code, R, Vm, not_yet};
+use crate::abend::Abend;
+use crate::arith;
+use crate::fixed::align;
+use crate::lir::{Base, Count, Expr, IntExpr, Odo, Operand, Place, PlaceId};
+use crate::loc;
+use crate::storage::{Kind, Loc};
+use crate::unit::{Loader, RETURN_CODE};
+use crate::vocab::Pos;
+use numeric::precision::Fixed;
+use std::rc::Rc;
+
+/// A place that cannot abend: its address is its base's plus a constant.
+pub(super) fn is_static(place: &Place) -> bool {
+    matches!(place.base, Base::Program | Base::Local | Base::ReturnCode) && place.subscripts.is_empty() && place.odo.is_none() && place.refmod.is_none()
+}
+
+fn scale(kind: Kind) -> u32 {
+    kind.digits_scale().map_or(0, |(_, s)| s)
+}
+
+/// `Machine::integer`'s whole part, refused past 64 bits.
+fn whole(v: &Fixed, pos: Pos) -> Result<i64, Abend> {
+    let m = align(v, 0, false).and_then(|m| m.to_u128()).and_then(|m| i64::try_from(m).ok());
+    let m = m.ok_or_else(|| Abend::ironwork("an integer operand beyond 64 bits", pos))?;
+    Ok(if v.negative { -m } else { m })
+}
+
+impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
+    pub(super) fn loc(&mut self, place: PlaceId) -> R<Loc> {
+        self.loc_with(place, &[])
+    }
+
+    /// `place` with each subscript `fixed` names set to its constant, as the walker writes an ALL
+    /// subscript as a literal for each element.
+    pub(super) fn loc_with(&mut self, place: PlaceId, fixed: &[(u32, i64)]) -> R<Loc> {
+        self.locating += 1;
+        let loc = self.evaluate(place, fixed);
+        self.locating -= 1;
+        loc
+    }
+
+    fn evaluate(&mut self, id: PlaceId, fixed: &[(u32, i64)]) -> R<Loc> {
+        let place = &self.p.places[id as usize];
+        let pos = self.pos(place.at);
+        let name = self.sym(place.name);
+        let base = match place.base {
+            Base::Program => self.base,
+            Base::Local => self.local_base,
+            Base::Linkage(record) => loc::linkage_base(self.linkage[record as usize], name, pos)?,
+            Base::ReturnCode => RETURN_CODE,
+            Base::Eib => return Err(not_yet("EXEC CICS")),
+            Base::SelfRef | Base::JniEnv => return Err(not_yet("object-oriented COBOL")),
+            Base::Xml(_) => return Err(not_yet("JSON and XML statements")),
+        };
+        let mut offset = (base + place.offset as usize) as i64;
+        for (k, s) in place.subscripts.iter().enumerate() {
+            let value = match fixed.iter().find(|&&(at, _)| at as usize == k) {
+                Some(&(_, v)) => v,
+                None => self.int(&s.value, pos)?,
+            };
+            offset += loc::subscript(value, s.stride, s.check, name, pos)?;
+        }
+        let mut len = i64::from(place.len);
+        if let Some(odo) = &place.odo {
+            let current = self.occurrences(odo, pos)?;
+            len = loc::odo_len(len, odo.max, current, odo.element);
+        }
+        if let Some(rm) = &place.refmod {
+            let start = self.int(&rm.start, pos)?;
+            let length = match &rm.length {
+                Some(l) => Some(self.int(l, pos)?),
+                None => None,
+            };
+            let unit = if place.kind == Kind::National { 2 } else { 1 };
+            let (from, length) = loc::refmod(len / unit, start, length, rm.check, name, pos)?;
+            offset += from * unit;
+            len = length * unit;
+        }
+        let (offset, len) = loc::within(offset, len, self.unit.mem.len(), name, pos)?;
+        Ok(Loc { offset, len, kind: place.kind, item: id as usize })
+    }
+
+    /// `Machine::integer`: the dmax pass's locates, then the value, its whole part.
+    pub(super) fn int(&mut self, e: &IntExpr, pos: Pos) -> R<i64> {
+        match e {
+            IntExpr::Const(n) => Ok(*n),
+            IntExpr::Item(p) => self.int_place(*p, pos),
+            IntExpr::Fixed { expr, dmax, prepass } => {
+                for &q in prepass {
+                    self.loc(q)?;
+                }
+                let v = self.eval_fixed(*expr, *dmax, pos)?;
+                Ok(whole(&v, pos)?)
+            }
+            IntExpr::Walk(_) => Err(not_yet("JSON and XML statements")),
+        }
+    }
+
+    /// `Machine::integer` of a data item: located for its dmax, then located and read.
+    pub(super) fn int_place(&mut self, p: PlaceId, pos: Pos) -> R<i64> {
+        let place = &self.p.places[p as usize];
+        if !is_static(place) {
+            self.loc(p)?;
+        }
+        let val = self.value(Operand::Load(p))?;
+        let v = arith::fixed_operand(val, scale(place.kind), pos)?;
+        Ok(whole(&v, pos)?)
+    }
+
+    /// An OCCURS DEPENDING ON table's current count, kept within its maximum.
+    pub(super) fn occurrences(&mut self, odo: &Odo, pos: Pos) -> R<u32> {
+        let count = self.int(&odo.object, pos)?;
+        Ok(loc::occurrences(count, odo.max, odo.check, self.int_name(&odo.object), pos)?)
+    }
+
+    pub(super) fn count(&mut self, count: &Count, pos: Pos) -> R<u32> {
+        match count {
+            Count::Fixed(n) => Ok(*n),
+            Count::Odo(odo) => self.occurrences(odo, pos),
+        }
+    }
+
+    /// The data item an integer reads, as messages name it.
+    fn int_name(&self, e: &IntExpr) -> &'p str {
+        let place = match e {
+            IntExpr::Item(p) => Some(*p),
+            IntExpr::Fixed { expr, .. } => match self.p.exprs[*expr as usize] {
+                Expr::Operand(Operand::Load(p)) => Some(p),
+                _ => None,
+            },
+            _ => None,
+        };
+        place.map_or("", |p| self.sym(self.p.places[p as usize].name))
+    }
+}

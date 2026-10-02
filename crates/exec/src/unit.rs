@@ -2,7 +2,7 @@
 //! calling through the [`Library`].
 
 pub use crate::loader::{AddProgram, Library};
-pub use rt::unit::{ADDRESS_BASE, Clock, Event, LoadError, LoadedProgram, Loader, MAX_DEPTH, Observer, RETURN_CODE};
+pub use rt::unit::{ADDRESS_BASE, Clock, Event, LoadError, LoadedProgram, Loader, MAX_DEPTH, OS_COMMAND_ROUTINES, Observer, RETURN_CODE};
 
 use crate::Compiled;
 use std::rc::Rc;
