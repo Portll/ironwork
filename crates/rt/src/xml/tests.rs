@@ -137,7 +137,7 @@ fn namespaces_bind_element_and_attribute_names() {
 fn a_document_that_is_not_well_formed_stops_where_it_goes_wrong() {
     let error = |doc: &str| run(&[doc]).unwrap_err().1;
     assert_eq!(error("<a></b>"), Malformed { offset: 3, why: Why::MismatchedEndTag });
-    assert_eq!(error(r#"<a x="1" x="2"/>"#), Malformed { offset: 9, why: Why::DuplicateAttribute });
+    assert_eq!(error(r#"<a x="1" x="2"/>"#), Malformed { offset: 14, why: Why::DuplicateAttribute });
     assert_eq!(error("<a>&foo;</a>"), Malformed { offset: 3, why: Why::UndeclaredEntity });
     assert_eq!(error("<a>"), Malformed { offset: 3, why: Why::UnexpectedEnd });
     assert_eq!(error("<a/>x"), Malformed { offset: 4, why: Why::ContentAfterRoot });

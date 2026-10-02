@@ -178,3 +178,11 @@ fn xml_code_after_an_event_follows_table_75() {
     assert_eq!(fatal.code, AbendCode::user(4038));
     assert!(fatal.message.starts_with("IGZ0230S"), "{}", fatal.message);
 }
+
+#[test]
+fn an_exceptions_text_is_the_current_segment_and_includes_a_duplicate_attribute() {
+    let data = "       01  SEGMENTS VALUE '<a>xxxxxy</c>   '.\n           05 SEG PIC X(8) OCCURS 2.\n       01  I PIC 9 VALUE 1.\n       01  DUP PIC X(16) VALUE '<a x=\"1\" x=\"2\"/>'.\n";
+    let handler = ["IF XML-EVENT = 'EXCEPTION'\n    DISPLAY XML-TEXT\nEND-IF", "IF XML-EVENT = 'END-OF-INPUT' AND I = 1\n    ADD 1 TO I\n    MOVE 1 TO XML-CODE\nEND-IF."];
+    let out = parse(data, &["XML PARSE SEG(I) PROCESSING PROCEDURE P", "XML PARSE DUP PROCESSING PROCEDURE P"], &handler);
+    assert_eq!(trimmed(&out), ["y", "<a x=\"1\" x=\"2\""]);
+}

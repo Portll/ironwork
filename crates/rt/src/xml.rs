@@ -697,7 +697,6 @@ impl<'r> Scanner<'r> {
             self.at += 1;
             let (value, parts) = self.attribute_value(quote)?;
             if attributes.iter().any(|(n, ..)| *n == name) {
-                self.at = name_at;
                 return Err(Why::DuplicateAttribute);
             }
             attributes.push((name, name_at, value, parts));

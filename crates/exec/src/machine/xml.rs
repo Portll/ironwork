@@ -187,6 +187,9 @@ impl<'p> Machine<'p, '_, '_> {
         let mut carry = Vec::new();
         let text = self.xml_document(x, encoding, &mut carry)?;
         let mut seen = text.clone();
+        // An EXCEPTION's XML-TEXT is the current segment up to the error (Language Reference
+        // SC27-8713-03, p. 33, note 4).
+        let mut segment_start = 0;
         let mut scanner = Scanner::new(&text, &*representable);
         let mark = self.unit.mem.len();
         let code = loop {
@@ -199,7 +202,7 @@ impl<'p> Machine<'p, '_, '_> {
                 Step::Event(e) => (e, None, false),
                 Step::EndOfInput => (Event { kind: EventKind::EndOfInput, text: String::new(), namespace: String::new(), prefix: String::new(), information: 0, code: 0 }, None, false),
                 Step::Error(m) => {
-                    let upto: String = seen.chars().take(m.offset).collect();
+                    let upto: String = seen.chars().take(m.offset).skip(segment_start).collect();
                     let code = m.why.code();
                     (Event { kind: EventKind::Exception, text: upto, namespace: String::new(), prefix: String::new(), information: 0, code }, Some(i64::from(code)), false)
                 }
@@ -221,6 +224,7 @@ impl<'p> Machine<'p, '_, '_> {
                 _ if code == -1 => break -1,
                 EventKind::EndOfInput if code == 1 => {
                     let segment = self.xml_document(x, encoding, &mut carry)?;
+                    segment_start = seen.chars().count();
                     seen.push_str(&segment);
                     scanner.feed(&segment);
                 }
