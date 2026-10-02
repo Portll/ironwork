@@ -46,7 +46,7 @@ pub struct ReportFile {
 /// What the report writer asks of the executor beyond [`Host`]: the values of its SOURCE, SUM and
 /// VALUE operands, its data items, the stores of a SUM and a SOURCE, the report file, and running
 /// a USE BEFORE REPORTING procedure.
-pub trait ReportHost<'w, X: 'w, C: 'w, V: 'w>: Host<&'w C> {
+pub trait ReportHost<'w, X: 'w, C: 'w, V: 'w, U: 'w>: Host<&'w C> {
     fn value(&mut self, expr: &X, pos: Pos) -> R<Val>;
     /// A lone operand's value and its storage, when it has any; None for any other expression.
     fn operand(&mut self, expr: &X, pos: Pos) -> Option<R<(Val, Option<Loc>)>>;
@@ -59,13 +59,13 @@ pub trait ReportHost<'w, X: 'w, C: 'w, V: 'w>: Host<&'w C> {
     fn report_file(&mut self, k: usize) -> ReportFile;
     /// WRITE ... AFTER ADVANCING `space` of the record at `loc` to file `k`.
     fn write_line(&mut self, k: usize, loc: Loc, space: Spacing, pos: Pos) -> R<()>;
-    /// Performs the USE BEFORE REPORTING section of paragraphs `first..=last`.
-    fn use_before_reporting(&mut self, range: (usize, usize), pos: Pos) -> R<UseEnd>;
+    /// Performs a USE BEFORE REPORTING procedure.
+    fn use_before_reporting(&mut self, procedure: &U, pos: Pos) -> R<UseEnd>;
     fn err(&mut self) -> &mut dyn Write;
 }
 
 /// One report statement. A STOP RUN or GOBACK in a USE BEFORE REPORTING procedure ends the run.
-pub fn run<'w, X, C, V, H: ReportHost<'w, X, C, V>>(x: &mut H, writer: &'w Writer<X, C, V>, op: ReportOp, pos: Pos) -> R<Option<Ending>> {
+pub fn run<'w, X, C, V, U, H: ReportHost<'w, X, C, V, U>>(x: &mut H, writer: &'w Writer<X, C, V, U>, op: ReportOp, pos: Pos) -> R<Option<Ending>> {
     let mut r = Reporting { x, w: writer };
     let done = match op {
         ReportOp::Initiate(ri) => r.initiate(ri as usize, pos),
@@ -98,13 +98,13 @@ fn signal(signal: Signal, pos: Pos) -> Abend {
     Abend { code: AbendCode::Signal(signal), message: String::new(), pos, file: None }
 }
 
-struct Reporting<'w, 'h, H, X, C, V> {
+struct Reporting<'w, 'h, H, X, C, V, U> {
     x: &'h mut H,
-    w: &'w Writer<X, C, V>,
+    w: &'w Writer<X, C, V, U>,
 }
 
-impl<'w, X, C, V, H: ReportHost<'w, X, C, V>> Reporting<'w, '_, H, X, C, V> {
-    fn report(&self, ri: usize) -> &'w Report<X, C, V> {
+impl<'w, X, C, V, U, H: ReportHost<'w, X, C, V, U>> Reporting<'w, '_, H, X, C, V, U> {
+    fn report(&self, ri: usize) -> &'w Report<X, C, V, U> {
         let w = self.w;
         &w.reports[ri]
     }
@@ -395,8 +395,8 @@ impl<'w, X, C, V, H: ReportHost<'w, X, C, V>> Reporting<'w, '_, H, X, C, V> {
         for (s, origin) in &g.rolls {
             self.accumulate(ri, *s, origin, pos)?;
         }
-        let suppressed = match g.declarative {
-            Some(range) => self.use_before_reporting(range, pos)?,
+        let suppressed = match &g.declarative {
+            Some(procedure) => self.use_before_reporting(procedure, pos)?,
             None => false,
         };
         if !suppressed {
@@ -426,8 +426,8 @@ impl<'w, X, C, V, H: ReportHost<'w, X, C, V>> Reporting<'w, '_, H, X, C, V> {
     }
 
     /// Performs a USE BEFORE REPORTING section; true when it suppressed the group's printing.
-    fn use_before_reporting(&mut self, range: (usize, usize), pos: Pos) -> R<bool> {
-        match self.x.use_before_reporting(range, pos)? {
+    fn use_before_reporting(&mut self, procedure: &U, pos: Pos) -> R<bool> {
+        match self.x.use_before_reporting(procedure, pos)? {
             UseEnd::End(Ending::StopRun) => return Err(signal(Signal::StopRun, pos)),
             UseEnd::End(_) => return Err(signal(Signal::GoBack, pos)),
             UseEnd::GoTo => return Err(Abend::ironwork("GO TO out of a USE BEFORE REPORTING procedure", pos)),
@@ -440,7 +440,7 @@ impl<'w, X, C, V, H: ReportHost<'w, X, C, V>> Reporting<'w, '_, H, X, C, V> {
         Ok(suppressed)
     }
 
-    fn first_increment(g: &Group<X, V>) -> i64 {
+    fn first_increment(g: &Group<X, V, U>) -> i64 {
         match g.lines.first().map(|l| l.number) {
             Some(LineNumber::Plus(k)) => k as i64,
             _ => 1,
@@ -448,7 +448,7 @@ impl<'w, X, C, V, H: ReportHost<'w, X, C, V>> Reporting<'w, '_, H, X, C, V> {
     }
 
     /// Prints a group's lines, the first on line `first` and each other where its LINE puts it.
-    fn print_lines(&mut self, ri: usize, g: &'w Group<X, V>, first: i64, pos: Pos) -> R<()> {
+    fn print_lines(&mut self, ri: usize, g: &'w Group<X, V, U>, first: i64, pos: Pos) -> R<()> {
         let mut target = first;
         for (i, line) in g.lines.iter().enumerate() {
             if i > 0 {
@@ -463,7 +463,7 @@ impl<'w, X, C, V, H: ReportHost<'w, X, C, V>> Reporting<'w, '_, H, X, C, V> {
         Ok(())
     }
 
-    fn place_body(&mut self, ri: usize, g: &'w Group<X, V>, pos: Pos) -> R<()> {
+    fn place_body(&mut self, ri: usize, g: &'w Group<X, V, U>, pos: Pos) -> R<()> {
         let r = self.report(ri);
         let Some(page) = r.page else {
             let lc = self.line_counter(ri, pos)?;
@@ -549,7 +549,7 @@ impl<'w, X, C, V, H: ReportHost<'w, X, C, V>> Reporting<'w, '_, H, X, C, V> {
         Ok(())
     }
 
-    fn place_report_heading(&mut self, ri: usize, g: &'w Group<X, V>, pos: Pos) -> R<()> {
+    fn place_report_heading(&mut self, ri: usize, g: &'w Group<X, V, U>, pos: Pos) -> R<()> {
         let r = self.report(ri);
         let Some(page) = r.page else {
             let lc = self.line_counter(ri, pos)?;
@@ -577,7 +577,7 @@ impl<'w, X, C, V, H: ReportHost<'w, X, C, V>> Reporting<'w, '_, H, X, C, V> {
         Ok(())
     }
 
-    fn place_page_heading(&mut self, ri: usize, g: &'w Group<X, V>, pos: Pos) -> R<()> {
+    fn place_page_heading(&mut self, ri: usize, g: &'w Group<X, V, U>, pos: Pos) -> R<()> {
         let Some(page) = self.report(ri).page else { return Ok(()) };
         let lc = self.line_counter(ri, pos)?;
         let first = match g.lines[0].number {
@@ -588,7 +588,7 @@ impl<'w, X, C, V, H: ReportHost<'w, X, C, V>> Reporting<'w, '_, H, X, C, V> {
         self.print_lines(ri, g, first, pos)
     }
 
-    fn place_page_footing(&mut self, ri: usize, g: &'w Group<X, V>, pos: Pos) -> R<()> {
+    fn place_page_footing(&mut self, ri: usize, g: &'w Group<X, V, U>, pos: Pos) -> R<()> {
         let Some(page) = self.report(ri).page else { return Ok(()) };
         let first = match g.lines[0].number {
             LineNumber::Line(n) | LineNumber::NextPage(Some(n)) => n as i64,
@@ -600,7 +600,7 @@ impl<'w, X, C, V, H: ReportHost<'w, X, C, V>> Reporting<'w, '_, H, X, C, V> {
 
     /// The REPORT FOOTING below the last PAGE FOOTING, or on a page of its own when it will
     /// not fit there or says NEXT PAGE ([`numeric::assumptions::REPORT_NEW_PAGES`]).
-    fn place_report_footing(&mut self, ri: usize, g: &'w Group<X, V>, pos: Pos) -> R<()> {
+    fn place_report_footing(&mut self, ri: usize, g: &'w Group<X, V, U>, pos: Pos) -> R<()> {
         let r = self.report(ri);
         let lc = self.line_counter(ri, pos)?;
         let Some(page) = r.page else {
@@ -636,7 +636,7 @@ impl<'w, X, C, V, H: ReportHost<'w, X, C, V>> Reporting<'w, '_, H, X, C, V> {
         self.print_lines(ri, g, first, pos)
     }
 
-    fn next_group(&mut self, ri: usize, g: &'w Group<X, V>, trigger: Trigger, pos: Pos) -> R<()> {
+    fn next_group(&mut self, ri: usize, g: &'w Group<X, V, U>, trigger: Trigger, pos: Pos) -> R<()> {
         let Some(next) = g.next_group else { return Ok(()) };
         if let (GroupKind::ControlFooting, Trigger::Footing(level)) = (g.kind, trigger)
             && g.level != level
@@ -665,7 +665,7 @@ impl<'w, X, C, V, H: ReportHost<'w, X, C, V>> Reporting<'w, '_, H, X, C, V> {
     }
 
     /// Sets LINE-COUNTER to the line, fills its fields and writes it.
-    fn print_line(&mut self, ri: usize, g: &'w Group<X, V>, line: &'w Line<X, V>, target: i64, pos: Pos) -> R<()> {
+    fn print_line(&mut self, ri: usize, g: &'w Group<X, V, U>, line: &'w Line<X, V>, target: i64, pos: Pos) -> R<()> {
         let r = self.report(ri);
         self.set_line_counter(ri, target, pos)?;
         let indicate = g.indicate.is_none_or(|flag| self.flag(ri, state::FLAGS + flag));

@@ -44,7 +44,7 @@ impl<'p> Machine<'p, '_, '_> {
     }
 }
 
-impl<'p> ReportHost<'p, Expr, Ref, Literal> for Machine<'p, '_, '_> {
+impl<'p> ReportHost<'p, Expr, Ref, Literal, crate::report::Section> for Machine<'p, '_, '_> {
     fn value(&mut self, expr: &Expr, pos: Pos) -> R<Val> {
         self.expr_value(expr, pos)
     }
@@ -86,7 +86,7 @@ impl<'p> ReportHost<'p, Expr, Ref, Literal> for Machine<'p, '_, '_> {
         self.write_stream(k, loc, false, space, pos)
     }
 
-    fn use_before_reporting(&mut self, (first, last): (usize, usize), pos: Pos) -> R<UseEnd> {
+    fn use_before_reporting(&mut self, &(first, last): &crate::report::Section, pos: Pos) -> R<UseEnd> {
         self.nest(pos)?;
         self.uses.arrival = declaratives::Arrival::Use;
         let flow = self.run_paragraphs(first, last);

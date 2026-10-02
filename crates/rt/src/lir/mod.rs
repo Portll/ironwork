@@ -252,6 +252,8 @@ pub struct Services {
     pub declaratives: Declaratives,
     /// JSON GENERATE, JSON PARSE, XML GENERATE and XML PARSE, by `Op::Markup`.
     pub markup: Vec<Markup>,
+    /// The REPORT SECTION's reports, which `Op::Report` names by index.
+    pub report: ReportWriter,
 }
 
 codec_struct!(Program {
@@ -272,7 +274,7 @@ codec_struct!(AbendText { code, message, at });
 codec_struct!(Paragraph { name, is_section, entry, section_end, priority, at, abandoned });
 codec_struct!(Block { ops, end });
 codec_struct!(Plans { arith, init, display, inspect, string, unstring, search_all, function });
-codec_struct!(Services { file_ops, files, calls, sorts, releases, returns, invokes, cics, sqlca, entries, class, declaratives, markup });
+codec_struct!(Services { file_ops, files, calls, sorts, releases, returns, invokes, cics, sqlca, entries, class, declaratives, markup, report });
 
 pub(crate) fn program_valid(program: &Program) -> Result<(), String> {
     sql::table_valid(&program.sql, &program.symbols)

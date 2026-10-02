@@ -198,7 +198,7 @@ impl Lower<'_> {
     }
 
     /// `occurrences`: a table's declared count, or its OCCURS DEPENDING ON object's.
-    fn occurs(&mut self, item: usize, pos: Pos) -> R<Count> {
+    pub(super) fn occurs(&mut self, item: usize, pos: Pos) -> R<Count> {
         let i = &self.layout.items[item];
         let Some(object) = &i.depending_on else { return Ok(Count::Fixed(i.occurs)) };
         let (max, element) = (i.occurs, i.size);

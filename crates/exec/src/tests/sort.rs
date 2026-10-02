@@ -427,6 +427,7 @@ fn object_references_are_no_sort_keys_and_an_sd_writes_no_report() {
 fn run_flagged(source: &str, dds: &[String], flags: &[&str]) -> (String, String, Result<Ending, Abend>) {
     let flags: Vec<String> = flags.iter().map(|f| f.to_string()).collect();
     let compiled = compile(syntax::parse(source).unwrap_or_else(|e| panic!("{e}")), &flags).unwrap_or_else(|e| panic!("{e:?}"));
+    crate::testing::check_lowering(&compiled, rt::sql::fingerprint(&format!("{source}\n{}", flags.join(" "))), None);
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let ending = compiled.run_with(files::Dds::new(dds, false).unwrap(), &mut out, &mut err);
     (String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap(), ending)

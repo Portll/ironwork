@@ -22,6 +22,10 @@ pub struct FileDesc {
     /// conflict (status 04), as the VLR option measures them (Programming Guide SC27-8714-03,
     /// pp. 422-424).
     pub read_lengths: (u32, u32),
+    /// No RECORDING MODE V, and its smallest record as long as its largest.
+    pub fixed: bool,
+    /// The RECORD clause's smallest record.
+    pub record_min: Option<u32>,
     pub status: Option<(PlaceId, MovePlan)>,
     /// An indexed file's keys, as spans of its record area.
     pub keys: Option<IndexKeys>,
@@ -187,7 +191,7 @@ pub enum StartKey {
 }
 
 codec_struct!(FileDesc {
-    name, assign, organization, access, optional, format, read_lengths, status, keys, relative, linage, carriage, sort, error,
+    name, assign, organization, access, optional, format, read_lengths, fixed, record_min, status, keys, relative, linage, carriage, sort, error,
 } check file_valid);
 codec_enum!(Organization { Sequential = 0, LineSequential = 1, Indexed = 2, Relative = 3 });
 codec_enum!(Access { Sequential = 0, Random = 1, Dynamic = 2 });

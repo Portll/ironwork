@@ -2,7 +2,7 @@
 //! over the handles the executor resolves as the statement runs: the LIR's by default, the walker's
 //! own references in the interpreter.
 
-use super::{Count, MovePlan, Operand, PlaceId, RangeId, SymId};
+use super::{Count, FromMove, MovePlan, PlaceId, RangeId, SymId};
 use crate::storage::Kind;
 use crate::{codec_enum, codec_struct};
 
@@ -61,23 +61,23 @@ pub struct TableSort {
     pub name: SymId,
 }
 
-/// RELEASE of `record`, a record of file `file`, after FROM's move into it. `name` is the record
-/// as written.
+/// RELEASE of `record`, a record of file `file`, located after FROM has moved into `FromMove.to`,
+/// the record as a receiving item. `name` is the record as written.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReleasePlan {
     pub record: PlaceId,
     pub file: Option<u16>,
-    pub from: Option<(Operand, MovePlan)>,
+    pub from: Option<FromMove>,
     pub sort_return: PlaceId,
     pub name: SymId,
 }
 
-/// RETURN of file `file`, named `name` as written. The op returns Arm(0) at end and Arm(1) when a
-/// record came.
+/// RETURN of file `file`, named `name` as written, and INTO's MOVE of the record's bytes. The op
+/// returns Arm(0) at end and Arm(1) when a record came.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReturnPlan {
     pub file: Option<u16>,
-    pub into: Option<PlaceId>,
+    pub into: Option<(PlaceId, MovePlan)>,
     pub sort_return: PlaceId,
     pub name: SymId,
 }

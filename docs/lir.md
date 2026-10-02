@@ -97,9 +97,10 @@ pub struct Program {
     /// The ArithPlan, MovePlan, InitPlan, DisplayPlan, InspectPlan, StringPlan, UnstringPlan,
     /// SearchAllPlan and FunctionPlan tables.
     pub plans: Plans,
-    /// The FileOp, FileDesc, CallPlan, SortPlan, ReportOp, InvokePlan and CicsCommand tables, the
-    /// Sqlca, the ENTRY points (§9.3), for a class definition its class (§9.8), the
-    /// declaratives' `Declaratives` (§9.10), and the JSON and XML statements (§9.13).
+    /// The FileOp, FileDesc, CallPlan, SortPlan, ReleasePlan, ReturnPlan, InvokePlan and
+    /// CicsCommand tables, the Sqlca, the ENTRY points (§9.3), for a class definition its class
+    /// (§9.8), the declaratives' `Declaratives` (§9.10), the JSON and XML statements (§9.13), and
+    /// the report model `Op::Report` names (§9.6).
     pub services: Services,
     pub sql: Vec<SqlEntry>, pub abends: Vec<AbendText>, pub edits: Vec<Edit>,
     pub symbols: Vec<String>, pub debug: Debug,
@@ -930,8 +931,8 @@ walker does on each execution; the last column names that work.
 | ACCEPT | `Accept` with the MOVE plan of what its source gives: SYSIN's line as bytes, a date, day, weekday or time as an integer of its digits | One call | - |
 | CALL, CANCEL | `Call`, then `Select`; `Cancel` (§9.3) | One call | Literal names decoded (machine.rs:966-971) |
 | OPEN … START | `File` per file named, then `Select` when a phrase is written (§9.4) | One call | File by name, keys, FILE STATUS, which phrase applies |
-| SORT, MERGE, RELEASE, RETURN | `Sort`; `Release`; `Return`, then `Select` (§9.6) | One call | SD by name, key places, the FASTSRT plan |
-| INITIATE, GENERATE, TERMINATE, SUPPRESS | `Report` (§9.6) | One call | Report and group by name (machine/report.rs:50-52 (int)) |
+| SORT, MERGE, RELEASE, RETURN | `Sort`, which runs its procedures as ranges; `Release`; `Return`, then `Select` of two arms (§9.6) | One call | SD, files, keys, collating sequence, special registers and procedures by name |
+| INITIATE, GENERATE, TERMINATE, SUPPRESS | `Report` per report named, over `Services.report` (§9.6) | One call | Report and group by name; SOURCE, SUM, VALUE and CONTROL as the AST (machine/report.rs) |
 | INVOKE | `Invoke`, then `Select` (§9.8) | One call | Receiver kind, Java types |
 | EXEC CICS | `Cics`, which returns `GoTo` for a HANDLE label (§9.5) | One call | The command string, option scans and HANDLE labels |
 | EXEC SQL | `Sql`, then a `Branch` on `Cond::Sql` per WHENEVER GO TO (§9.7) | One call | Host variables, SQLCA fields and WHENEVER labels by name |
@@ -1099,11 +1100,15 @@ each execution; the status, the record, the DD and the in-memory file are run-ti
 ```rust
 /// SELECT and FD. `format` is how records are held when the DD does not say (`described_format`);
 /// `read_lengths` the shortest and longest variable-length record a READ takes without status 04,
-/// as VLR measures them (`compile::read_lengths`); `status` is FILE STATUS with the MOVE its two
-/// characters take (`set_status`).
+/// as VLR measures them (`compile::read_lengths`); `fixed` no RECORDING MODE V and its smallest
+/// record as long as its largest, which a SORT's records follow (`fixed_length`, machine/sort.rs);
+/// `record_min` the RECORD clause's smallest record, which a variable-length report record is cut
+/// to no shorter than (`ReportFile`); `status` FILE STATUS with the MOVE its two characters take
+/// (`set_status`).
 pub struct FileDesc {
     pub name: SymId, pub assign: SymId, pub organization: Organization, pub access: Access,
     pub optional: bool, pub format: rt::files::Format, pub read_lengths: (u32, u32),
+    pub fixed: bool, pub record_min: Option<u32>,
     pub status: Option<(PlaceId, MovePlan)>,
     /// RECORD KEY, then each ALTERNATE RECORD KEY with WITH DUPLICATES, as spans of the record area.
     pub keys: Option<IndexKeys>,
@@ -1253,8 +1258,7 @@ pub enum RangeEnd {
 }
 
 /// rt/src/lir/sort.rs. `FileSort` is generic over the handles the executor resolves as the
-/// statement runs (`SortHost`): the walker resolves the keys, the USING and GIVING names and the
-/// procedures where it did before the move, so every abend keeps its order.
+/// statement runs (`SortHost`): the walker's references and procedure names, or the LIR's ids.
 pub enum SortPlan { File(FileSort), Table(TableSort) }
 pub struct FileSort<R = PlaceId, Q = RangeId, K = SortKeys, F = u16> {
     pub sd: u16, pub merge: bool, pub keys: K,
@@ -1267,38 +1271,79 @@ pub enum SortIo<Q = RangeId, F = u16> { Files(Vec<F>), Procedure(Q) }
 pub struct SortKeys { pub keys: Vec<SortKey>, pub collating: Option<Box<[u8; 256]>> }
 pub struct SortKey { pub ascending: bool, pub offset: u32, pub len: u32, pub kind: Kind, pub item: u32, pub collated: bool }
 pub struct TableSort { pub first: PlaceId, pub count: Count, pub stride: u32, pub keys: SortKeys, pub name: SymId }
-pub struct ReleasePlan { pub record: PlaceId, pub file: Option<u16>, pub from: Option<(Operand, MovePlan)>, pub sort_return: PlaceId, pub name: SymId }
-pub struct ReturnPlan { pub file: Option<u16>, pub into: Option<PlaceId>, pub sort_return: PlaceId, pub name: SymId }
+/// `record` is located after FROM has moved into `FromMove.to`, the record as a receiving item.
+pub struct ReleasePlan { pub record: PlaceId, pub file: Option<u16>, pub from: Option<FromMove>, pub sort_return: PlaceId, pub name: SymId }
+pub struct ReturnPlan { pub file: Option<u16>, pub into: Option<(PlaceId, MovePlan)>, pub sort_return: PlaceId, pub name: SymId }
 ```
 
 - **SORT and MERGE** run as `rt::sort::sort`: gather, a stable sort, scatter, SORT-RETURN, and the
   FASTSRT plan, which it works out from the files' `FileDesc`s on each run. A procedure runs
-  through `SortHost::run_procedure`.
+  through `SortHost::run_procedure`, which checks and raises the depth at the statement (§8.7) and
+  sets the arrival register to SORT INPUT, SORT OUTPUT or MERGE OUTPUT.
+- **What lowering resolves** (lower/sort.rs). A SORT whose subject is a file's name, unqualified
+  and unsubscripted, is a `FileSort`, any other a `TableSort`, as `sorting` tells them apart. The
+  SD and the USING and GIVING files are file indices; SORT-RETURN and SORT-CONTROL are places of
+  the special registers Check declares, named at the statement; each key is its item's offset in
+  the SD's record area (`file_keys`) or in the table's element (`table_keys`), with its length,
+  kind and item. `collating` is the COLLATING SEQUENCE phrase's alphabet, else for a file SORT or
+  MERGE the PROGRAM COLLATING SEQUENCE, and None when that is EBCDIC or NATIVE; a key is
+  `collated` when it is alphanumeric, a group or edited (`compile::sort::collates`).
+- **A procedure is a range.** Each INPUT or OUTPUT PROCEDURE is a `SortProcedure` range from its
+  first paragraph to the last of THRU's, found as `crate::procedure` finds it. Its region is every
+  paragraph (§8.6), so a GO TO in it never leaves its frame, and its last paragraph ends in
+  `ParagraphEnd` and carries `abandoned`. `Left(End(e))` makes the op return
+  `Step::End(e)`; any other `Left`, a return to an active PERFORM, the SORT takes as the procedure's
+  end and goes on (machine/sort.rs:707-708, 734-735 (7af)).
 - **RELEASE and RETURN** find the active sort in run-time state (`rt::sort::Active`, which the
-  executor keeps). RELEASE is `release_ready`, FROM's move, then `release`; RETURN returns `Arm`
-  for AT END.
-- **A table SORT** is one op with the element's stride and key offsets fixed; the count stays
-  dynamic under OCCURS DEPENDING ON (`rt::sort::sort_table`).
+  executor keeps). RELEASE locates `FromMove.to`, or `record` without FROM; then `release_ready`,
+  with `file` the record's file (`Item.file`); then FROM's MOVE into the `Loc` it located; then
+  `record` located again and `release`. A record holding the object of its own OCCURS DEPENDING
+  ON is at its maximum length as FROM's receiver and at its current length as it is released.
+  RETURN is `return_record`, with INTO located as a receiving item and given the record's bytes by
+  its `MovePlan`; it returns `Arm(0)` at end and `Arm(1)` for a record, and a `Select` of two
+  blocks, AT END's and NOT AT END's, follows whether or not either is written.
+- **A table SORT** is one op with the element's stride and key offsets fixed. It evaluates `count`
+  (the OCCURS DEPENDING ON object, as `occurrences` does), then locates `first`, the subject with
+  a subscript of 1 added and no reference modification, then checks the elements lie in run-unit
+  storage, as `sort_table` does.
 - **The key order** is `rt::sort::Keys`, `order` and `KeyValue`, which take keys described as plain
   data (position, length, DFSORT format, direction) as well as a program's items, so a sort utility
   with no program behind it orders records the same way.
-- **A SORT procedure's frame** holds every paragraph (§8.6), so no GO TO leaves it. `Left(End(e))`
-  makes the op return `Step::End(e)`; any other `Left`, a return to an active PERFORM, the SORT
-  takes as the procedure's end and goes on (machine/sort.rs:707-708, 734-735 (7af)).
-- **Report Writer.** `rt::report::Writer<X, C, V>` is the report model `compile::report` resolves,
-  generic over a SOURCE or SUM operand's expression `X`, a CONTROL item `C` and a VALUE or CODE
-  literal `V`: the interpreter's `Expr`, `Ref` and `Literal`, evaluated on every GENERATE, or
-  `ExprId`, `PlaceId` and `ConstId` once lowered (`lir::ReportWriter`). `rt::report::run` carries out
-  a `ReportOp`, which names a report and DETAIL group by index:
+- **Refused:** a key, file or procedure the walker cannot resolve and a COLLATING SEQUENCE it
+  cannot build, which it abends on only part way through the statement (after SORT-RETURN is set,
+  the input phase has run, or a table's count is taken); a table SORT of a name that is no data
+  item; and a sort statement in a program without the sort special registers. Check refuses each,
+  so no program that compiles cleanly meets them.
+- **Report Writer.** `rt::report::Writer<X, C, V, U>` is the report model `compile::report`
+  resolves, generic over a SOURCE or SUM operand `X`, a CONTROL item `C`, a VALUE or CODE literal
+  `V` and a USE BEFORE REPORTING procedure `U`: the interpreter's `Expr`, `Ref`, `Literal` and
+  paragraph span, evaluated on every GENERATE, or once lowered (`lir::ReportWriter`, lower/report.rs)
+  a `Comparand`, `PlaceId`, `ConstId` and `RangeId`. It is `Services.report`; a program with no
+  REPORT SECTION holds the empty writer, two bytes encoded. `rt::report::run` carries out a
+  `ReportOp`, which names a report and DETAIL group by index:
 
   ```rust
   pub enum ReportOp { Initiate(u32), Generate { report: u32, detail: Option<u32> }, Terminate(u32), Suppress }
   ```
 
-- **USE BEFORE REPORTING** runs through `ReportHost::use_before_reporting`. `GoTo` abends IRONWORK
-  at the report statement; `End(_)` ends the run as STOP RUN or GOBACK; `Left`, a return to an
-  active PERFORM or a resumed statement, abandons the report statement, and the executor carries
-  out the transfer.
+- **What the report model holds once lowered.** A SOURCE, a SUM operand outside the REPORT
+  SECTION and a summed SOURCE are each a `Comparand`: an operand the writer reads with its storage
+  (`ReportHost::operand`, `operand_with_loc`), or an expression it evaluates as `expr_value` does,
+  with its float test, dmax pass and mode (§7.5). A CONTROL is a place, located as the walker
+  locates it at each GENERATE. A VALUE and the CODE are constants. Each data item the model names
+  by `usize` (a field, a SUM total, PAGE-COUNTER, LINE-COUNTER, the state item, PRINT-SWITCH) is the
+  id of a static place of the slab at the item's offset, whole, as `ReportHost::item` takes it;
+  lowering refuses one in LOCAL-STORAGE or LINKAGE. Report and group names stay text, for the
+  writer's messages, and a field's `pos` the position it names in them.
+- **The statements.** INITIATE and TERMINATE are an `Op::Report` per report they name, in order;
+  GENERATE one `Generate`, its target found as `generate_target` finds it; SUPPRESS PRINTING
+  `Suppress`. A name the walker cannot find becomes an `Abend` terminator with its IRONWORK message
+  after the ops before it.
+- **USE BEFORE REPORTING** is a `UseBeforeReporting` range of its section, which the group's
+  `declarative` names and `ReportHost::use_before_reporting` runs, with the arrival USE PROCEDURE,
+  after checking and raising the depth at the statement. `GoTo` abends IRONWORK at the report
+  statement; `End(_)` ends the run as STOP RUN or GOBACK; `Left`, a return to an active PERFORM or
+  a resumed statement, abandons the report statement, and the executor carries out the transfer.
 
 ### 9.7 EXEC SQL
 
@@ -1887,9 +1932,9 @@ executors and recorded.
   same bytes, and lower again the same; any other `LowerError`, or a panic, fails the test and
   names the program. While step 2 is under way `Unsupported` is accepted, and the check never
   changes a test's outcome otherwise. A test in lower/tests.rs puts bench/*.cbl through the same
-  check. So do the helpers of machine/sql.rs's tests and the test of machine/cics_bind.rs that
-  writes every command in IBM's table. `run_flagged` in tests/sort.rs and tests that compile
-  without running do not use the Harness, so their programs are not lowered yet.
+  check. So do the helpers of machine/sql.rs's tests, `run_flagged` in tests/sort.rs, and the test
+  of machine/cics_bind.rs that writes every command in IBM's table. Tests that compile without
+  running do not use the Harness, so their programs are not lowered yet.
 - **Coverage.** With `IRONWORK_LOWER_REPORT=<file>` set, the check appends one line per program:
   the test (or bench file), PROGRAM-ID, a fingerprint of the source and flags, and `ok`,
   `unsupported` with the construct, or `error`. `tools/lower-coverage.sh` runs exec's tests one at

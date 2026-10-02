@@ -1,14 +1,15 @@
 //! The report writer (lir.md §9.6): the reports `compile::report` resolves, as Enterprise COBOL's
 //! Report Writer Precompiler lays them out, and INITIATE, GENERATE, TERMINATE and SUPPRESS PRINTING
 //! over them ([`run`]). The model is generic over the executor's handles: `X` a SOURCE or SUM
-//! operand's expression, `C` a CONTROL item, `V` a VALUE or CODE literal; the LIR's ids by default,
-//! the walker's own AST in the interpreter.
+//! operand's expression, `C` a CONTROL item, `V` a VALUE or CODE literal, `U` a USE BEFORE
+//! REPORTING procedure: the LIR's comparands and ids by default, the walker's own AST and paragraph
+//! spans in the interpreter.
 
 mod run;
 
 pub use run::{ReportFile, ReportHost, UseEnd, run};
 
-use crate::lir::{ConstId, ExprId, PlaceId};
+use crate::lir::{Comparand, ConstId, PlaceId, RangeId};
 use crate::vocab::Pos;
 use crate::{codec_enum, codec_struct};
 
@@ -71,22 +72,23 @@ pub enum ReportOp {
     Suppress,
 }
 
-/// The reports of one program. Items (`usize`) are data items by their index.
+/// The reports of one program. Items (`usize`) are data items: by their index in the interpreter,
+/// and once lowered by the id of a static place in the slab.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Writer<X = ExprId, C = PlaceId, V = ConstId> {
-    pub reports: Vec<Report<X, C, V>>,
+pub struct Writer<X = Comparand, C = PlaceId, V = ConstId, U = RangeId> {
+    pub reports: Vec<Report<X, C, V, U>>,
     /// PRINT-SWITCH, which SUPPRESS PRINTING sets.
     pub print_switch: Option<usize>,
 }
 
-impl<X, C, V> Default for Writer<X, C, V> {
+impl<X, C, V, U> Default for Writer<X, C, V, U> {
     fn default() -> Self {
         Writer { reports: Vec::new(), print_switch: None }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Report<X = ExprId, C = PlaceId, V = ConstId> {
+pub struct Report<X = Comparand, C = PlaceId, V = ConstId, U = RangeId> {
     pub name: String,
     pub file: usize,
     pub code: Option<V>,
@@ -95,7 +97,7 @@ pub struct Report<X = ExprId, C = PlaceId, V = ConstId> {
     pub page: Option<Page>,
     /// Level 1 is the most major control; level 0 is FINAL.
     pub controls: Vec<Control<C>>,
-    pub groups: Vec<Group<X, V>>,
+    pub groups: Vec<Group<X, V, U>>,
     pub sums: Vec<Sum>,
     /// SUM operands outside the REPORT SECTION, added by GENERATE.
     pub subtotals: Vec<Subtotal<X>>,
@@ -149,7 +151,7 @@ impl GroupKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Group<X = ExprId, V = ConstId> {
+pub struct Group<X = Comparand, V = ConstId, U = RangeId> {
     pub name: Option<String>,
     pub kind: GroupKind,
     /// The control level of a CONTROL HEADING or FOOTING.
@@ -166,17 +168,17 @@ pub struct Group<X = ExprId, V = ConstId> {
     pub totals: Vec<usize>,
     pub indicate: Option<usize>,
     /// The USE BEFORE REPORTING section: its first and last paragraph.
-    pub declarative: Option<(usize, usize)>,
+    pub declarative: Option<U>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Line<X = ExprId, V = ConstId> {
+pub struct Line<X = Comparand, V = ConstId> {
     pub number: LineNumber,
     pub fields: Vec<Field<X, V>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Field<X = ExprId, V = ConstId> {
+pub struct Field<X = Comparand, V = ConstId> {
     pub item: usize,
     /// First byte in the line.
     pub column: usize,
@@ -189,7 +191,7 @@ pub struct Field<X = ExprId, V = ConstId> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum FieldContent<X = ExprId, V = ConstId> {
+pub enum FieldContent<X = Comparand, V = ConstId> {
     Source(X),
     Value(V),
     Sum(usize),
@@ -206,14 +208,14 @@ pub struct Sum {
 
 /// What an entry adds to a total when its group is produced.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Origin<X = ExprId, V = ConstId> {
+pub enum Origin<X = Comparand, V = ConstId> {
     Source(X),
     Value(V),
     Total(usize),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Subtotal<X = ExprId> {
+pub struct Subtotal<X = Comparand> {
     pub sum: usize,
     pub operand: X,
     pub adding: Adding,
@@ -229,12 +231,12 @@ pub enum Adding {
 }
 
 /// The rows of a relative group from the line before its first to its last.
-pub fn span<X, V>(g: &Group<X, V>) -> i64 {
+pub fn span<X, V, U>(g: &Group<X, V, U>) -> i64 {
     g.lines.iter().map(|l| if let LineNumber::Plus(k) = l.number { k as i64 } else { 0 }).sum()
 }
 
 /// The report and DETAIL group a GENERATE names: a report alone for summary reporting.
-pub fn generate_target<X, C, V>(reports: &[Report<X, C, V>], name: &str, qualifier: Option<&str>) -> Option<(usize, Option<usize>)> {
+pub fn generate_target<X, C, V, U>(reports: &[Report<X, C, V, U>], name: &str, qualifier: Option<&str>) -> Option<(usize, Option<usize>)> {
     if qualifier.is_none()
         && let Some(ri) = reports.iter().position(|r| r.name == name)
     {

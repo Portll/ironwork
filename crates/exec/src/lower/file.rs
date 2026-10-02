@@ -99,6 +99,8 @@ impl Lower<'_> {
                 _ => Format::Fixed,
             },
             read_lengths: compile::read_lengths(f, self.layout, k, self.c.options.vlr),
+            fixed: f.recording != Some('V') && f.record_min == f.record_max,
+            record_min: f.record_min,
             status,
             keys,
             relative,
@@ -110,7 +112,7 @@ impl Lower<'_> {
     }
 
     /// `assign` of a status or a record's bytes, which reach it as alphanumeric bytes.
-    fn bytes_into(&mut self, place: lir::PlaceId) -> R<lir::MovePlan> {
+    pub(super) fn bytes_into(&mut self, place: lir::PlaceId) -> R<lir::MovePlan> {
         self.move_plan(&Side { value: Value::Bytes, src: None, digits: 0 }, self.kind_of(place), self.place_items[place as usize])
     }
 

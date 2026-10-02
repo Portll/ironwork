@@ -13,10 +13,12 @@ use syntax::{Error, Pos};
 
 pub use rt::report::{Adding, GroupKind, Page, Sum, generate_target, span, state};
 
-pub type Writer = rt::report::Writer<Expr, Ref, Literal>;
-pub type Report = rt::report::Report<Expr, Ref, Literal>;
+/// A USE BEFORE REPORTING section by its first and last paragraph.
+pub type Section = (usize, usize);
+pub type Writer = rt::report::Writer<Expr, Ref, Literal, Section>;
+pub type Report = rt::report::Report<Expr, Ref, Literal, Section>;
 pub type Control = rt::report::Control<Ref>;
-pub type Group = rt::report::Group<Expr, Literal>;
+pub type Group = rt::report::Group<Expr, Literal, Section>;
 pub type Line = rt::report::Line<Expr, Literal>;
 pub type Field = rt::report::Field<Expr, Literal>;
 pub type FieldContent = rt::report::FieldContent<Expr, Literal>;

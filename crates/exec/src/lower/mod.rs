@@ -5,7 +5,8 @@
 //! EVALUATE, DISPLAY, INITIALIZE, PERFORM, GO TO, GO TO DEPENDING ON, ALTER, EXIT, STOP RUN, GOBACK,
 //! CALL, CANCEL, ENTRY, INVOKE, SET, STRING, UNSTRING, INSPECT, SEARCH, ACCEPT, the file
 //! statements, intrinsic functions, independent segments, class definitions, USE AFTER
-//! EXCEPTION/ERROR, USE FOR DEBUGGING, JSON and XML GENERATE and PARSE, and the EXEC blocks.
+//! EXCEPTION/ERROR, USE FOR DEBUGGING, JSON and XML GENERATE and PARSE, the EXEC blocks, SORT,
+//! MERGE, RELEASE and RETURN, and the Report Writer.
 //! Anything else is [`LowerError::Unsupported`], naming the construct.
 
 mod call;
@@ -18,8 +19,10 @@ mod flow;
 mod function;
 mod markup;
 mod plans;
+mod report;
 mod search;
 mod set;
+mod sort;
 mod sql;
 mod text;
 mod verify;
@@ -98,13 +101,13 @@ fn push<T>(table: &mut Vec<T>, value: T, what: &'static str) -> R<u32> {
 /// Check and uses only the constructs lowered so far lowers.
 pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
     let mut l = Lower::new(compiled);
-    l.refuse_program()?;
     let id = l.sym(&compiled.program.id);
     let sources = compiled.program.sources.iter().map(|s| l.sym(s)).collect();
     let storage = l.storage()?;
     let items = l.items()?;
     l.services.files = l.files()?;
     l.services.declaratives = l.declaratives()?;
+    l.services.report = l.report_writer()?;
     (l.sql, l.services.sqlca) = l.sql_table()?;
     let paragraphs = l.procedure()?;
     l.services.entries = l.entry_points()?;
@@ -225,18 +228,6 @@ impl<'c> Lower<'c> {
             segments: false,
             debugging: !c.declaratives.triggers.is_empty(),
         }
-    }
-
-    /// Program-wide constructs outside the slice, refused before anything is lowered.
-    fn refuse_program(&self) -> R<()> {
-        let program = self.program;
-        if let Some(report) = program.report_writer.reports.first() {
-            return unsupported("Report Writer", report.pos);
-        }
-        if let Some(u) = program.report_writer.uses.first() {
-            return unsupported("Report Writer", u.pos);
-        }
-        Ok(())
     }
 
     fn sym(&mut self, text: &str) -> SymId {

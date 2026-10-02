@@ -205,7 +205,7 @@ impl Lower<'_> {
         self.c.declaratives.triggers.get(p).cloned().flatten()
     }
 
-    /// Every PERFORM range, and every paragraph an ALTER names.
+    /// Every range a PERFORM, XML PARSE or SORT runs, and every paragraph an ALTER names.
     fn collect(&mut self, stmts: &[Stmt]) -> R<()> {
         for s in stmts {
             match s {
@@ -221,6 +221,11 @@ impl Lower<'_> {
                 }
                 Stmt::XmlParse(x) => {
                     self.processing(x)?;
+                }
+                Stmt::Sorting(so) => {
+                    if let Sorting::Sort(st) = &**so {
+                        self.collect_sort(st)?;
+                    }
                 }
                 _ => {}
             }
@@ -468,6 +473,8 @@ impl Lower<'_> {
                 }
             },
             Stmt::JsonGenerate(_) | Stmt::JsonParse(_) | Stmt::XmlGenerate(_) | Stmt::XmlParse(_) => self.markup(s, pos, &inner)?,
+            Stmt::Sorting(so) => self.sorting(so, pos, &inner)?,
+            Stmt::Report(r) => self.report_statement(r, pos)?,
             Stmt::Goback { .. } | Stmt::ExitMethod { .. } => self.end(Terminator::End(Ending::Goback), pos)?,
             Stmt::StopRun { .. } => self.end(Terminator::End(Ending::StopRun), pos)?,
             Stmt::ExitProgram { .. } => {

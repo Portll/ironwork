@@ -178,7 +178,7 @@ impl Lower<'_> {
         self.push_place(place, Some(index))
     }
 
-    fn push_place(&mut self, place: lir::Place, item: Option<usize>) -> R<PlaceId> {
+    pub(super) fn push_place(&mut self, place: lir::Place, item: Option<usize>) -> R<PlaceId> {
         let id = push(&mut self.places, place, "places")?;
         self.place_items.push(item);
         Ok(id)

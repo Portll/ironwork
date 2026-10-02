@@ -373,6 +373,7 @@ fn program_shape_round_trips() {
         class: Some(Box::new(account())),
         declaratives: Declaratives { modes: [Some(0), None, None, Some(2)], debug_item: Some((120, 86)) },
         markup: vec![Markup::XmlParse(xml_parse())],
+        report: ReportWriter { reports: vec![report()], print_switch: Some(16) },
     };
     round_trip(&[Services::default(), services]);
 }
@@ -698,13 +699,13 @@ fn report() -> ironwork_rt::report::Report {
         kind: GroupKind::Detail,
         level: 0,
         next_group: Some(NextGroup::Plus(1)),
-        lines: vec![Line { number: LineNumber::Plus(1), fields: vec![field(FieldContent::Source(3)), field(FieldContent::Value(1))] }],
+        lines: vec![Line { number: LineNumber::Plus(1), fields: vec![field(FieldContent::Source(Comparand::Operand(Operand::Load(3)))), field(FieldContent::Value(1))] }],
         unprinted: vec![field(FieldContent::Program)],
-        cross: vec![(0, Origin::Source(4)), (1, Origin::Total(0))],
+        cross: vec![(0, Origin::Source(Comparand::Expr { expr: 4, dmax: 2, mode: Mode::Fixed, prepass: vec![5] })), (1, Origin::Total(0))],
         rolls: vec![(1, Origin::Value(2))],
         totals: vec![0],
         indicate: Some(0),
-        declarative: Some((2, 3)),
+        declarative: Some(2),
     };
     let footing = Group {
         name: None,
@@ -725,7 +726,7 @@ fn report() -> ironwork_rt::report::Report {
         controls: vec![Control { reference: 7, saved: 18, len: 4 }],
         groups: vec![detail, footing],
         sums: vec![Sum { total: 11, reset: None }, Sum { total: 12, reset: Some(1) }],
-        subtotals: vec![Subtotal { sum: 0, operand: 6, adding: Adding::Upon(vec![0]) }],
+        subtotals: vec![Subtotal { sum: 0, operand: Comparand::Operand(Operand::Load(6)), adding: Adding::Upon(vec![0]) }],
         page_counter: 13,
         line_counter: 14,
         state: 15,
@@ -749,8 +750,8 @@ fn report_writers_and_ops_round_trip_with_every_tag() {
     every_variant(&[NextGroup::Line(1), NextGroup::Plus(2), NextGroup::NextPage], 3);
     let kinds = [GroupKind::ReportHeading, GroupKind::PageHeading, GroupKind::ControlHeading, GroupKind::Detail, GroupKind::ControlFooting, GroupKind::PageFooting, GroupKind::ReportFooting];
     every_variant(&kinds, 7);
-    every_variant(&[FieldContent::Source(1), FieldContent::Value(2), FieldContent::Sum(3), FieldContent::Program], 4);
-    every_variant(&[Origin::Source(1), Origin::Value(2), Origin::Total(3)], 3);
+    every_variant(&[FieldContent::Source(Comparand::Operand(Operand::Const(1))), FieldContent::Value(2), FieldContent::Sum(3), FieldContent::Program], 4);
+    every_variant(&[Origin::Source(Comparand::Operand(Operand::Load(1))), Origin::Value(2), Origin::Total(3)], 3);
     every_variant(&[Adding::EveryGenerate, Adding::Upon(vec![1]), Adding::Correlated(vec![])], 3);
 }
 
@@ -789,10 +790,10 @@ fn sort_plans_round_trip_with_every_tag() {
     let fixed = TableSort { count: Count::Fixed(10), ..table.clone() };
     every_variant(&[SortPlan::File(file_sort()), SortPlan::Table(table), SortPlan::Table(fixed)], 2);
     round_trip(&[
-        ReleasePlan { record: 4, file: Some(1), from: Some((Operand::Load(2), ALNUM)), sort_return: 9, name: 3 },
+        ReleasePlan { record: 4, file: Some(1), from: Some(FromMove { from: Operand::Load(2), to: 5, plan: ALNUM }), sort_return: 9, name: 3 },
         ReleasePlan { record: 4, file: None, from: None, sort_return: 9, name: 3 },
     ]);
-    round_trip(&[ReturnPlan { file: Some(1), into: Some(6), sort_return: 9, name: 2 }, ReturnPlan { file: None, into: None, sort_return: 9, name: 2 }]);
+    round_trip(&[ReturnPlan { file: Some(1), into: Some((6, ALNUM)), sort_return: 9, name: 2 }, ReturnPlan { file: None, into: None, sort_return: 9, name: 2 }]);
 }
 
 #[test]
@@ -986,6 +987,8 @@ fn master() -> FileDesc {
         optional: true,
         format: Format::Variable,
         read_lengths: (26, 300),
+        fixed: false,
+        record_min: Some(26),
         status: Some((3, ALNUM)),
         keys: Some(IndexKeys { prime: span, alternates: vec![(RecordSpan { offset: 6, len: 20 }, true)] }),
         relative: None,

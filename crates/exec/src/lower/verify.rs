@@ -5,9 +5,10 @@
 use rt::cics::Handles;
 use rt::lir::{
     Advance, Argument, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Convert, ConvertTable, Count, DisplayItem, Expr, FileVerb, Flag, Func, HostPlace, IntExpr,
-    JsonValue, Marker, Markup, MethodName, MovePlan, Named, Op, Operand, ParseValue, Place, PlaceId, Program, RangeKind, Receiver, Replacement, SetTo, SqlStatement, StartKey,
-    StorePlan, SymId, Terminator, UpDown, XmlValue,
+    JsonValue, Marker, Markup, MethodName, MovePlan, Named, Op, Operand, ParseValue, Place, PlaceId, Program, RangeKind, Receiver, Replacement, ReportOp, SetTo, SortIo, SortPlan,
+    SqlStatement, StartKey, StorePlan, SymId, Terminator, UpDown, XmlValue,
 };
+use rt::report::{FieldContent, GroupKind, Origin};
 
 type Check<'a, T> = &'a dyn Fn(T) -> Result<(), String>;
 
@@ -487,6 +488,97 @@ fn verify_program(p: &Program) -> Result<(), String> {
             }
         }
     }
+    let files = |k: u16| within("file", u32::from(k), p.services.files.len());
+    for s in &p.services.sorts {
+        match s {
+            SortPlan::File(f) => {
+                files(f.sd)?;
+                for io in f.input.iter().chain(&f.output) {
+                    match io {
+                        SortIo::Files(ks) => ks.iter().try_for_each(|&k| files(k))?,
+                        SortIo::Procedure(r) => range(*r, RangeKind::SortProcedure)?,
+                    }
+                }
+                place(f.sort_return)?;
+                place(f.sort_control)?;
+            }
+            SortPlan::Table(t) => {
+                place(t.first)?;
+                count(&t.count)?;
+                symbol(t.name)?;
+            }
+        }
+    }
+    for r in &p.services.releases {
+        place(r.record)?;
+        r.file.map_or(Ok(()), files)?;
+        r.from.as_ref().map_or(Ok(()), |m| operand(&m.from).and_then(|()| place(m.to)).and_then(|()| moved(&m.plan)))?;
+        place(r.sort_return)?;
+        symbol(r.name)?;
+    }
+    for r in &p.services.returns {
+        r.file.map_or(Ok(()), files)?;
+        r.into.as_ref().map_or(Ok(()), |(q, m)| place(*q).and_then(|()| moved(m)))?;
+        place(r.sort_return)?;
+        symbol(r.name)?;
+    }
+    let writer = &p.services.report;
+    let item = |k: usize| within("report item", u32::try_from(k).unwrap_or(u32::MAX), p.places.len());
+    writer.print_switch.map_or(Ok(()), item)?;
+    for r in &writer.reports {
+        within("report file", u32::try_from(r.file).unwrap_or(u32::MAX), p.services.files.len())?;
+        r.code.map_or(Ok(()), constant)?;
+        r.controls.iter().try_for_each(|c| place(c.reference))?;
+        [r.page_counter, r.line_counter, r.state].into_iter().try_for_each(item)?;
+        r.sums.iter().try_for_each(|s| item(s.total))?;
+        let group = |g: usize| within("report group", u32::try_from(g).unwrap_or(u32::MAX), r.groups.len());
+        let sum = |s: usize| within("SUM", u32::try_from(s).unwrap_or(u32::MAX), r.sums.len());
+        [r.report_heading, r.page_heading, r.page_footing, r.report_footing].into_iter().flatten().try_for_each(group)?;
+        r.control_headings.iter().chain(&r.control_footings).flatten().try_for_each(|&g| group(g))?;
+        let origin = |o: &Origin| match o {
+            Origin::Source(c) => comparand(c),
+            Origin::Value(v) => constant(*v),
+            Origin::Total(t) => sum(*t),
+        };
+        for st in &r.subtotals {
+            sum(st.sum)?;
+            comparand(&st.operand)?;
+        }
+        for g in &r.groups {
+            for f in g.lines.iter().flat_map(|l| &l.fields).chain(&g.unprinted) {
+                item(f.item)?;
+                match &f.content {
+                    FieldContent::Source(c) => comparand(c)?,
+                    FieldContent::Value(v) => constant(*v)?,
+                    FieldContent::Sum(s) => sum(*s)?,
+                    FieldContent::Program => {}
+                }
+            }
+            for (s, o) in g.cross.iter().chain(&g.rolls) {
+                sum(*s)?;
+                origin(o)?;
+            }
+            g.totals.iter().try_for_each(|&s| sum(s))?;
+            g.declarative.map_or(Ok(()), |d| range(d, RangeKind::UseBeforeReporting))?;
+        }
+    }
+    let report = |op: &ReportOp| {
+        let report = |ri: u32| match writer.reports.get(ri as usize) {
+            Some(r) => Ok(r),
+            None => Err(format!("report {ri} of {}", writer.reports.len())),
+        };
+        match *op {
+            ReportOp::Initiate(ri) | ReportOp::Terminate(ri) => report(ri).map(drop),
+            ReportOp::Generate { report: ri, detail } => {
+                let r = report(ri)?;
+                match detail.map(|d| r.groups.get(d as usize).map(|g| g.kind)) {
+                    None | Some(Some(GroupKind::Detail)) => Ok(()),
+                    Some(_) => Err(format!("GENERATE of report {ri}'s group {detail:?}, which is not a DETAIL group")),
+                }
+            }
+            ReportOp::Suppress => Ok(()),
+        }
+    };
     for e in &p.services.entries {
         symbol(e.name)?;
         within("paragraph", e.paragraph, p.paragraphs.len())?;
@@ -521,7 +613,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
             Op::Call(c) if p.services.calls.get(*c as usize).is_some_and(|plan| plan.on_exception || plan.not_on_exception) => 2,
             Op::Invoke(i) if p.services.invokes.get(*i as usize).is_some_and(|plan| plan.on_exception || plan.not_on_exception) => 2,
             Op::File(f) => p.services.file_ops.get(*f as usize).map_or(0, |op| op.arms()),
-            Op::String(_) | Op::Unstring(_) | Op::SearchAll(_) => 2,
+            Op::String(_) | Op::Unstring(_) | Op::SearchAll(_) | Op::Return(_) => 2,
             Op::Markup(m) if p.services.markup.get(*m as usize).is_some_and(|x| x.phrases() != (false, false)) => 2,
             _ => 0,
         };
@@ -558,6 +650,10 @@ fn verify_program(p: &Program) -> Result<(), String> {
                 Op::File(f) => within("file statement", *f, p.services.file_ops.len())?,
                 Op::Markup(m) => within("JSON or XML statement", *m, p.services.markup.len())?,
                 Op::Cics(c) => within("EXEC CICS command", *c, p.services.cics.len())?,
+                Op::Sort(s) => within("SORT or MERGE", *s, p.services.sorts.len())?,
+                Op::Release(r) => within("RELEASE", *r, p.services.releases.len())?,
+                Op::Return(r) => within("RETURN", *r, p.services.returns.len())?,
+                Op::Report(op) => report(op)?,
                 Op::Sql(k) if *k == 0 || *k as usize > p.sql.len() => return Err(format!("block {b}: EXEC SQL ordinal {k} of {}", p.sql.len())),
                 Op::Sql(_) => {}
                 Op::SetAddress { records, address } => {
@@ -591,7 +687,6 @@ fn verify_program(p: &Program) -> Result<(), String> {
                     symbol(*contents)?;
                 }
                 Op::Nest | Op::Unnest(_) | Op::DecTemp(_) | Op::EnterSegment(_) | Op::DebugLine(_) => {}
-                other => return Err(format!("block {b}: {other:?} is outside this slice")),
             }
         }
         match &blk.end {
