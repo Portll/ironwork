@@ -135,9 +135,22 @@ fn read_lines(input: &str, file: u16, debugging: bool) -> Result<Source, Error> 
 }
 
 /// EJECT, SKIP1, SKIP2, SKIP3 or TITLE with its literal, alone on the line and perhaps ended by a
-/// period: statements for the listing that have no effect on compilation.
+/// period, and perhaps by a floating comment: statements for the listing that have no effect on
+/// compilation.
 fn listing_control(area: &[char]) -> bool {
-    let line: String = area.iter().collect();
+    let mut quote = None;
+    let end = (0..area.len())
+        .find(|&i| {
+            let comment = floating_comment(area, i, quote);
+            match (quote, area[i]) {
+                (None, c @ ('\'' | '"')) => quote = Some(c),
+                (Some(q), c) if c == q => quote = None,
+                _ => {}
+            }
+            comment
+        })
+        .unwrap_or(area.len());
+    let line: String = area[..end].iter().collect();
     let line = line.trim();
     let line = line.strip_suffix('.').unwrap_or(line).trim_end();
     if ["EJECT", "SKIP1", "SKIP2", "SKIP3"].iter().any(|w| line.eq_ignore_ascii_case(w)) {
@@ -356,5 +369,25 @@ mod tests {
         let s = read("       IDENTIFICATION DIVISION.\n").unwrap();
         let i = s.text.find('D').unwrap();
         assert_eq!(s.positions[i], Pos { file: 0, line: 1, col: 9 });
+    }
+
+    #[test]
+    fn listing_statements_alone_on_a_line_are_left_out() {
+        let s = read(concat!(
+            "       01  A PIC X.\n",
+            "           EJECT\n",
+            "       SKIP1\n",
+            "           skip2.\n",
+            "           SKIP3 *> blank lines\n",
+            "           TITLE 'PAYROLL: PART 2'.\n",
+            "           TITLE 'A *> B' *> the title holds *>\n",
+            "       TITLE \"X\"\n",
+            "       01  B PIC X.\n",
+            "           MOVE TITLE TO EJECT.\n",
+            "           EJECT X.\n",
+        ))
+        .unwrap();
+        let words: Vec<&str> = s.text.split_whitespace().collect();
+        assert_eq!(words, ["01", "A", "PIC", "X.", "01", "B", "PIC", "X.", "MOVE", "TITLE", "TO", "EJECT.", "EJECT", "X."]);
     }
 }
