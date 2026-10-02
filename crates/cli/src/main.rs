@@ -57,9 +57,9 @@ flags:
              never gives nothing. A program with none of these gets the warning whatever the flag
   --vm       run and cics: lower the program and run it on the VM rather than the interpreter. A
              program lowering refuses gets the compile's 12; a run that reaches what the VM does not
-             run yet (file I/O, SORT, Report Writer, JSON and XML, LE services, INVOKE, and SEND MAP
-             or RECEIVE MAP with no FROM or INTO) stops there with a message naming it and exit
-             status 12. Not with --evidence or --serve
+             run yet (file I/O, SORT, Report Writer, LE services, INVOKE, and SEND MAP or RECEIVE
+             MAP with no FROM or INTO) stops there with a message naming it and exit status 12. Not
+             with --evidence or --serve
   -I <dir>   a copy library for COPY members, searched after the program's own directory
   -L <dir>   a program library: CALL finds a program there by name, after the programs in the
              same source and the program's own directory
