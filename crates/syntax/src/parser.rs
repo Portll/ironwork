@@ -420,7 +420,7 @@ impl Parser<'_> {
             share_configuration(&environment, &mut inner.environment);
             inner.containers.push(container.clone());
         }
-        declaratives::contained_programs(&declaratives, &report_writer, &nested)?;
+        declaratives::contained_programs(&report_writer, &nested)?;
         if !method && self.at_end_program() && self.word_at(1) == Some("PROGRAM") {
             self.at += 2;
             if self.word().is_some() || matches!(self.peek(), Some(Tok::Alnum(_))) {

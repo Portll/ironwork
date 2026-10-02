@@ -1209,7 +1209,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: GLOBAL_DECLARATIVES,
-        claim: "A program's declaratives run for its own statements only. USE GLOBAL AFTER EXCEPTION/ERROR for an open mode, and USE GLOBAL BEFORE REPORTING for a report group of a contained program without its own procedure for it, would serve another program's statements (Language Reference SC27-8713-03, p. 715; Report Writer Precompiler SC26-4301-04, 4.7.2 rule 5 and 4.7.3 rule 4), and are refused in a program that contains others; elsewhere GLOBAL changes nothing. A GLOBAL procedure for a named file is kept, since a contained program cannot name another program's file in ironwork, which has no GLOBAL files",
+        claim: "A file statement of a contained program that has no EXCEPTION/ERROR procedure of its own for the file, by name or by open mode, runs the first USE GLOBAL procedure of the programs containing it, innermost out, for the file and then for the mode (Language Reference SC27-8713-03, pp. 714-715), as a procedure of the program that declares it: over that program's storage as it stood when control left it, its LINKAGE addresses included, with PERFORMs of its own. Control comes back after the statement; STOP RUN in the procedure ends the run, and GO TO out of it, GOBACK and EXIT PROGRAM (which p. 714 forbids while a declarative of a nested program is active) are refused when reached. USE GLOBAL BEFORE REPORTING for a report group of a contained program without its own procedure for it would serve another program's report (Report Writer Precompiler SC26-4301-04, 4.7.2 rule 5 and 4.7.3 rule 4) and is refused in a program that contains others",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

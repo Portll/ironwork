@@ -37,6 +37,9 @@ impl<'p> Machine<'p, '_, '_> {
         if let Some(procedure) = self.error_declarative(k, mode) {
             return self.run_error_declarative(procedure, pos);
         }
+        if self.global_declarative(k, mode, pos)? {
+            return Ok(());
+        }
         if self.program.files[k].status.is_none() {
             return Err(Abend { code: AbendCode::Io(status), message, pos, file: None });
         }

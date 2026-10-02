@@ -43,6 +43,9 @@ pub struct Table {
     pub files: Vec<Option<Span>>,
     /// The EXCEPTION/ERROR procedures for files open INPUT, OUTPUT, I-O and EXTEND.
     pub modes: [Option<Span>; 4],
+    /// Those of `files` and `modes` declared GLOBAL, which serve the programs this one contains.
+    pub global_files: Vec<Option<Span>>,
+    pub global_modes: [Option<Span>; 4],
     /// Under the DEBUG runtime option: for each paragraph, the debugging section that runs before
     /// it and the name DEBUG-NAME gives. Empty otherwise.
     pub triggers: Vec<Option<(Span, String)>>,
@@ -86,7 +89,7 @@ pub(crate) fn debugging_sections(program: &Program) -> Vec<Span> {
 /// Resolves every USE AFTER EXCEPTION/ERROR and USE FOR DEBUGGING, with the rules of pp. 714-716.
 pub(crate) fn resolve(program: &Program, layout: &Layout, options: &Options, errors: &mut Vec<Error>) -> Table {
     let span = |section: usize| (section, crate::section_end(program, section));
-    let mut table = Table { files: vec![None; program.files.len()], ..Table::default() };
+    let mut table = Table { files: vec![None; program.files.len()], global_files: vec![None; program.files.len()], ..Table::default() };
     for u in &program.declaratives.errors {
         match &u.on {
             ErrorUse::Files(names) => {
@@ -96,13 +99,23 @@ pub(crate) fn resolve(program: &Program, layout: &Layout, options: &Options, err
                         None => errors.push(error("no file has that name")),
                         Some(k) if program.files[k].sort => errors.push(error("a sort or merge file takes no EXCEPTION/ERROR procedure")),
                         Some(k) if table.files[k].is_some() => errors.push(error("the file has another EXCEPTION/ERROR procedure")),
-                        Some(k) => table.files[k] = Some(span(u.section)),
+                        Some(k) => {
+                            table.files[k] = Some(span(u.section));
+                            if u.global {
+                                table.global_files[k] = Some(span(u.section));
+                            }
+                        }
                     }
                 }
             }
             ErrorUse::Mode(mode) => match &mut table.modes[mode_index(*mode)] {
                 Some(_) => errors.push(Error::at(u.pos, format!("USE AFTER EXCEPTION/ERROR ON {}: another procedure is for the same open mode", mode_name(*mode)))),
-                free => *free = Some(span(u.section)),
+                free => {
+                    *free = Some(span(u.section));
+                    if u.global {
+                        table.global_modes[mode_index(*mode)] = Some(span(u.section));
+                    }
+                }
             },
         }
     }

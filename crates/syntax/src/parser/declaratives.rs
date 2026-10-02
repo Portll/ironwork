@@ -138,17 +138,14 @@ pub(super) fn debugging_sections_allowed(declaratives: &Declaratives, recursive:
 }
 
 /// The rules the programs a program contains bring: debugging sections belong only to the
-/// outermost program (p. 715), and a GLOBAL declarative that would serve a contained program is
-/// refused, since a program's declaratives run only for its own statements (assumption C69).
-pub(super) fn contained_programs(declaratives: &Declaratives, writer: &ReportWriter, nested: &[Program]) -> R<()> {
+/// outermost program (p. 715), and USE GLOBAL BEFORE REPORTING for a contained program's report
+/// group is refused (assumption C69).
+pub(super) fn contained_programs(writer: &ReportWriter, nested: &[Program]) -> R<()> {
     if let Some(u) = nested.iter().find_map(|p| p.declaratives.debugging.first()) {
         return Err(Error::at(u.pos, "USE FOR DEBUGGING in a contained program: debugging sections are allowed only in the outermost program"));
     }
     if nested.is_empty() {
         return Ok(());
-    }
-    if let Some(u) = declaratives.errors.iter().find(|u| u.global && matches!(u.on, ErrorUse::Mode(_))) {
-        return Err(Error::at(u.pos, "USE GLOBAL AFTER EXCEPTION/ERROR for an open mode, in a program that contains others, is not supported yet"));
     }
     for u in writer.uses.iter().filter(|u| u.global) {
         let own = |p: &Program| p.report_writer.uses.iter().any(|v| v.group == u.group);
@@ -246,11 +243,10 @@ mod tests {
     }
 
     #[test]
-    fn global_declaratives_that_would_serve_a_contained_program_are_refused() {
+    fn global_reporting_declaratives_for_a_contained_program_are_refused() {
         let inner = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. INNER.\n       PROCEDURE DIVISION.\n           GOBACK.\n       END PROGRAM INNER.\n";
         let with = |declaratives: &str| [program("", declaratives), inner.into(), "       END PROGRAM T.\n".into()].concat();
-        let mode = parse(&with("       E SECTION.\n           USE GLOBAL AFTER ERROR PROCEDURE ON INPUT.\n")).unwrap_err();
-        assert!(mode.message.contains("not supported yet"), "{mode}");
+        assert!(parse(&with("       E SECTION.\n           USE GLOBAL AFTER ERROR PROCEDURE ON INPUT.\n")).is_ok());
         assert!(parse(&with("       E SECTION.\n           USE GLOBAL AFTER ERROR PROCEDURE ON F.\n")).is_ok());
         let reporting = [
             program("", "       U SECTION.\n           USE GLOBAL BEFORE REPORTING ROW.\n"),

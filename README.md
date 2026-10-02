@@ -325,9 +325,11 @@ The subset the interpreter runs today:
   column 7), under SOURCE-COMPUTER ... WITH DEBUGGING MODE; without it both are comments. The
   debugging sections run only under `-debug`, standing for the Language Environment option DEBUG,
   as on z/OS, where NODEBUG is the default; a section runs before each procedure it serves and
-  after each ALTER of one. USE GLOBAL serves its own program only, so GLOBAL for an open mode, or
-  before reporting a group of a contained program, is refused in a program that contains others.
-  Assumptions C60 to C69 and C98 hold what the manuals leave open.
+  after each ALTER of one. A file statement of a contained program with no procedure of its own
+  runs the first USE GLOBAL procedure of the programs containing it, innermost out, for the file
+  and then for its open mode, as a procedure of the program that declares it; USE GLOBAL BEFORE
+  REPORTING a group of a contained program is refused. Assumptions C60 to C69 and C98 hold what
+  the manuals leave open.
 - **Sort and merge:** SD files; SORT and MERGE on ascending and descending keys anywhere in the
   record (alphanumeric keys by the COLLATING SEQUENCE phrase, else for a file by the program
   collating sequence, else in EBCDIC order; zoned and packed keys as DFSORT compares them; other
