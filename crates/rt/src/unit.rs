@@ -111,6 +111,29 @@ pub type Observer<'w> = Box<dyn FnMut(Event<'_>) + 'w>;
 /// How deep PERFORMs and CALLs may nest before the run abends, rather than exhaust the stack.
 pub const MAX_DEPTH: usize = 100;
 
+/// EXTERNAL data records and file connectors, which belong to the run unit rather than to a
+/// program: one of each name, whichever program first describes it (Language Reference
+/// SC27-8713-03, pp. 65, 184, 197).
+#[derive(Default)]
+pub struct Externals {
+    /// Each EXTERNAL data record, and each EXTERNAL file's record area, by name: where it is and
+    /// how many bytes it has.
+    storage: HashMap<(bool, String), (usize, usize)>,
+    files: Vec<Option<Open>>,
+    /// Whether each EXTERNAL file was closed WITH LOCK.
+    locked: Vec<bool>,
+    file_names: HashMap<String, usize>,
+}
+
+/// A file of a program that is another's file connector.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Connector {
+    /// The run unit's EXTERNAL file of this number.
+    External(usize),
+    /// File `k` of loaded program `p`: a GLOBAL file of a program containing this one.
+    Program(usize, usize),
+}
+
 pub struct RunUnit<'w, H, L: Loader<H>> {
     pub mem: Vec<u8>,
     /// PERFORMs and CALLs in progress, across every program.
@@ -137,6 +160,9 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     pub observer: Option<Observer<'w>>,
     /// FUNCTION RANDOM's generator, one for the run unit, from the first reference on.
     pub random: Option<u32>,
+    externals: Externals,
+    /// The files of loaded programs that are another's connector, by program and file.
+    connectors: HashMap<(usize, usize), Connector>,
 }
 
 impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
@@ -160,6 +186,8 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             oo: Default::default(),
             observer: None,
             random: None,
+            externals: Externals::default(),
+            connectors: HashMap::new(),
         }
     }
 
@@ -212,9 +240,11 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         at
     }
 
-    /// Releases arguments pushed since `mark`, unless a program or heap storage was placed behind them.
+    /// Releases arguments pushed since `mark`, unless a program, heap storage or EXTERNAL storage
+    /// was placed behind them.
     pub fn release_temporaries(&mut self, mark: usize) {
-        if self.programs.iter().all(|p| p.base < mark) && self.le.heap_end() <= mark {
+        let external = self.externals.storage.values().all(|&(at, _)| at < mark);
+        if self.programs.iter().all(|p| p.base < mark) && self.le.heap_end() <= mark && external {
             self.mem.truncate(mark.max(RESERVED));
         }
     }
@@ -277,7 +307,84 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
                 f.close().map_err(|e| format!("closing a file of {}: {e}", program.name))?;
             }
         }
+        for (name, &k) in &self.externals.file_names {
+            if let Some(f) = self.externals.files[k].take() {
+                f.close().map_err(|e| format!("closing EXTERNAL file {name}: {e}"))?;
+            }
+        }
         Ok(())
+    }
+
+    /// Where EXTERNAL record `name` is, or EXTERNAL file `name`'s record area when `file`: storage
+    /// of `size` bytes, zeroed, the first time a program describes it. A description of another
+    /// size is refused (assumption C180).
+    pub fn external(&mut self, name: &str, file: bool, size: usize) -> Result<usize, String> {
+        let key = (file, name.to_owned());
+        if let Some(&(at, had)) = self.externals.storage.get(&key) {
+            return if had == size {
+                Ok(at)
+            } else {
+                let what = if file { "the record area of EXTERNAL file" } else { "EXTERNAL record" };
+                Err(format!("{what} {name} has {had} bytes in the run unit, and this program describes {size}"))
+            };
+        }
+        let at = self.allocate(size);
+        self.externals.storage.insert(key, (at, size));
+        Ok(at)
+    }
+
+    /// The run unit's connector for EXTERNAL file `name`.
+    pub fn external_file(&mut self, name: &str) -> Connector {
+        let (files, locked) = (&mut self.externals.files, &mut self.externals.locked);
+        let k = *self.externals.file_names.entry(name.to_owned()).or_insert_with(|| {
+            files.push(None);
+            locked.push(false);
+            files.len() - 1
+        });
+        Connector::External(k)
+    }
+
+    /// Program `me`'s file k is the connector `to`, for as long as the run unit lasts.
+    pub fn connect(&mut self, me: usize, k: usize, to: Connector) {
+        self.connectors.insert((me, k), to);
+    }
+
+    fn connector(&self, mut me: usize, mut k: usize) -> Option<Connector> {
+        let mut to = None;
+        while let Some(&c) = self.connectors.get(&(me, k)) {
+            to = Some(c);
+            match c {
+                Connector::External(_) => break,
+                Connector::Program(p, j) => (me, k) = (p, j),
+            }
+        }
+        to
+    }
+
+    /// Program `me`'s file k, open or not: its own, or the connector it shares.
+    pub fn file(&mut self, me: usize, k: usize) -> &mut Option<Open> {
+        match self.connector(me, k) {
+            None => &mut self.programs[me].files[k],
+            Some(Connector::External(e)) => &mut self.externals.files[e],
+            Some(Connector::Program(p, j)) => &mut self.programs[p].files[j],
+        }
+    }
+
+    /// Whether program `me`'s file k, or the connector it shares, was closed WITH LOCK.
+    pub fn locked(&mut self, me: usize, k: usize) -> &mut bool {
+        match self.connector(me, k) {
+            None => &mut self.programs[me].locked[k],
+            Some(Connector::External(e)) => &mut self.externals.locked[e],
+            Some(Connector::Program(p, j)) => &mut self.programs[p].locked[j],
+        }
+    }
+
+    pub fn file_ref(&self, me: usize, k: usize) -> &Option<Open> {
+        match self.connector(me, k) {
+            None => &self.programs[me].files[k],
+            Some(Connector::External(e)) => &self.externals.files[e],
+            Some(Connector::Program(p, j)) => &self.programs[p].files[j],
+        }
     }
 
     pub fn return_code(&self) -> i16 {

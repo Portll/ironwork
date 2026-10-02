@@ -19,7 +19,7 @@ impl<'p> Machine<'p, '_, '_> {
 
     /// Records an I/O status of file k in the mode it is open in.
     pub(super) fn io_status(&mut self, k: usize, status: impl Into<FileStatus>, message: String, pos: Pos) -> R<()> {
-        let mode = self.unit.programs[self.me].files[k].as_ref().map(|f| f.mode);
+        let mode = self.unit.file_ref(self.me, k).as_ref().map(|f| f.mode);
         self.io_failure(k, status, mode, message, pos)
     }
 
@@ -65,7 +65,11 @@ impl<'p> Machine<'p, '_, '_> {
 
     pub(super) fn area(&self, k: usize) -> (usize, usize) {
         let (offset, size) = self.layout.file_areas[k];
-        (self.base + offset as usize, size as usize)
+        let base = match self.layout.bound_areas[k] {
+            Some(ordinal) => self.linkage[ordinal as usize].unwrap_or_default(),
+            None => self.base,
+        };
+        (base + offset as usize, size as usize)
     }
 
     fn record_area(&self, k: usize) -> &[u8] {

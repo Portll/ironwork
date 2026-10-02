@@ -38,6 +38,7 @@ mod oo;
 mod parmcheck;
 mod perform;
 mod report;
+mod scope;
 mod sort;
 pub(crate) mod sql;
 mod xml;
@@ -64,6 +65,7 @@ enum Flow {
 }
 
 pub struct Machine<'p, 'u, 'w> {
+    compiled: &'p Compiled,
     program: &'p Program,
     layout: &'p Layout,
     options: Options,
@@ -97,6 +99,8 @@ pub struct Machine<'p, 'u, 'w> {
     returns: perform::Returns,
     /// XML-TEXT and the other XML registers of the event being processed.
     xml: xml::Registers,
+    /// The programs containing this one, innermost first, as they are running.
+    containers: Vec<scope::Frame<'p>>,
     unit: &'u mut RunUnit<'w>,
 }
 
@@ -110,8 +114,31 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     /// An activation of loaded program `me`. Its storage is initialized on its first activation,
     /// after a CANCEL, and on every activation of an INITIAL program.
     pub fn activation(compiled: &'p Compiled, me: usize, unit: &'u mut RunUnit<'w>, main: bool) -> R<Self> {
+        Self::activation_within(compiled, me, unit, main, Vec::new())
+    }
+
+    /// An activation of a contained program, called with the programs containing it running.
+    fn activation_within(compiled: &'p Compiled, me: usize, unit: &'u mut RunUnit<'w>, main: bool, containers: Vec<scope::Frame<'p>>) -> R<Self> {
         let (base, fresh) = unit.activate(me, compiled.program.initial);
-        let mut m = Self {
+        let mut m = Self::over(compiled, me, base, unit, main);
+        m.containers = containers;
+        m.bind_shared()?;
+        if compiled.layout.local_size > 0 {
+            m.local_base = m.unit.push_temporary(&vec![0; compiled.layout.local_size as usize]);
+            m.initialize_values(true)?;
+        }
+        if fresh {
+            m.unit.mem[base..base + compiled.layout.size as usize].fill(0);
+            m.initialize_values(false)?;
+            m.unit.initialized(me);
+        }
+        Ok(m)
+    }
+
+    /// Program `me` over its storage at `base`, with nothing bound or initialized.
+    fn over(compiled: &'p Compiled, me: usize, base: usize, unit: &'u mut RunUnit<'w>, main: bool) -> Self {
+        Self {
+            compiled,
             program: &compiled.program,
             layout: &compiled.layout,
             options: compiled.options,
@@ -135,18 +162,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             uses: declaratives::State::default(),
             returns: perform::Returns::new(compiled.program.paragraphs.len()),
             xml: xml::Registers::default(),
+            containers: Vec::new(),
             unit,
-        };
-        if compiled.layout.local_size > 0 {
-            m.local_base = m.unit.push_temporary(&vec![0; compiled.layout.local_size as usize]);
-            m.initialize_values(true)?;
         }
-        if fresh {
-            m.unit.mem[base..base + compiled.layout.size as usize].fill(0);
-            m.initialize_values(false)?;
-            m.unit.initialized(me);
-        }
-        Ok(m)
     }
 
     /// Applies VALUE clauses: to WORKING-STORAGE and file records, or to LOCAL-STORAGE.
@@ -1009,7 +1027,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
         self.parmcheck_set();
         let outcome = {
-            let mut callee = Machine::activation(&compiled, index, &mut *self.unit, false)?;
+            let containers = self.containers_of(&compiled.program);
+            let mut callee = Machine::activation_within(&compiled, index, &mut *self.unit, false, containers)?;
             let entry = entry.and_then(|k| compiled.entries.get(k));
             callee.bind_using(entry.map_or(&compiled.program.using, |e| &e.using), &addresses);
             callee.bind_returning();

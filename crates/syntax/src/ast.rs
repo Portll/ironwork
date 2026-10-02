@@ -35,6 +35,8 @@ pub struct Program {
     pub environment: Environment,
     /// The PROGRAM-IDs of the programs it directly contains.
     pub nested: Vec<String>,
+    /// The programs that contain it, innermost first, with the names each declares GLOBAL.
+    pub containers: Vec<Container>,
     /// The messages reading its source gave that did not stop the parse, in the order found.
     pub messages: Vec<crate::Error>,
 }
@@ -94,7 +96,22 @@ pub struct FileDecl {
     pub linage: Option<Linage>,
     /// Described by SD: a sort or merge file, which needs no data set.
     pub sort: bool,
+    pub external: bool,
+    pub global: bool,
+    /// For a GLOBAL file of a program containing this one, that program's PROGRAM-ID.
+    pub declared_in: Option<String>,
     pub pos: Pos,
+}
+
+/// A program containing another, as the contained program sees it: its PROGRAM-ID, and the 01
+/// records and files it declares GLOBAL, each with what is subordinate to it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Container {
+    pub id: String,
+    pub working_storage: Vec<DataEntry>,
+    pub local_storage: Vec<DataEntry>,
+    pub linkage: Vec<DataEntry>,
+    pub files: Vec<FileDecl>,
 }
 
 /// LINAGE IS lines [WITH FOOTING AT footing] [LINES AT TOP top] [LINES AT BOTTOM bottom].
@@ -189,9 +206,9 @@ pub struct DataEntry {
     pub renames: Option<(Ref, Option<Ref>)>,
     /// USAGE OBJECT REFERENCE class-name: the class; None for a universal reference.
     pub object_class: Option<String>,
-    /// EXTERNAL: the record belongs to the run unit, shared by every program that describes it.
+    /// EXTERNAL, written on the entry or attained from its FD.
     pub external: bool,
-    /// GLOBAL: the programs this one contains may reference the record too.
+    /// GLOBAL, written on the entry or attained from its FD.
     pub global: bool,
     pub pos: Pos,
 }

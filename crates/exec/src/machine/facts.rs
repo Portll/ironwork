@@ -204,11 +204,11 @@ pub(super) fn advance(a: &Advancing) -> Advance<'_, Int<'_>> {
 
 impl<'a> Files<&'a Ref, Int<'a>> for Machine<'_, '_, '_> {
     fn slot(&mut self, k: usize) -> &mut Option<Open> {
-        &mut self.unit.programs[self.me].files[k]
+        self.unit.file(self.me, k)
     }
 
     fn locked(&mut self, k: usize) -> &mut bool {
-        &mut self.unit.programs[self.me].locked[k]
+        self.unit.locked(self.me, k)
     }
 
     fn dd(&self, assign: &str) -> Option<Dd> {

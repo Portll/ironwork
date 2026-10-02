@@ -103,6 +103,21 @@ fn share_configuration(outer: &Environment, inner: &mut Environment) {
     }
 }
 
+/// The 01 records declared GLOBAL, each with the entries after it up to the next 01 or 77.
+fn global_records(entries: &[DataEntry]) -> Vec<DataEntry> {
+    let mut out = Vec::new();
+    let mut taking = false;
+    for e in entries {
+        if matches!(e.level, 1 | 77) {
+            taking = e.global;
+        }
+        if taking {
+            out.push(e.clone());
+        }
+    }
+    out
+}
+
 fn usage_word(word: &str) -> Option<Usage> {
     Some(match word {
         "DISPLAY" => Usage::Display,
@@ -394,8 +409,16 @@ impl Parser<'_> {
             return Err(Error::at(pos, "ENTRY cannot be used in a nested program"));
         }
         oo::share_repository(&repository, &mut nested)?;
+        let container = Container {
+            id: id.clone(),
+            working_storage: global_records(&working_storage),
+            local_storage: global_records(&local_storage),
+            linkage: global_records(&linkage),
+            files: files.iter().filter(|f| f.global).cloned().collect(),
+        };
         for inner in &mut nested {
             share_configuration(&environment, &mut inner.environment);
+            inner.containers.push(container.clone());
         }
         declaratives::contained_programs(&declaratives, &report_writer, &nested)?;
         if !method && self.at_end_program() && self.word_at(1) == Some("PROGRAM") {
@@ -561,6 +584,9 @@ impl Parser<'_> {
             reports: Vec::new(),
             linage: None,
             sort: false,
+            external: false,
+            global: false,
+            declared_in: None,
             pos,
         };
         let mut delimiter = None;
@@ -730,6 +756,9 @@ impl Parser<'_> {
                         let names = self.report_names()?;
                         files[index].reports.extend(names);
                     }
+                    "EXTERNAL" | "GLOBAL" if files[index].sort => return Err(Error::at(pos, format!("SD {name}: a sort or merge file takes no EXTERNAL or GLOBAL clause"))),
+                    "EXTERNAL" => files[index].external = true,
+                    "GLOBAL" => files[index].global = true,
                     "LINAGE" => {
                         let linage = self.linage()?;
                         if files[index].linage.is_some() {
@@ -744,7 +773,16 @@ impl Parser<'_> {
                     }
                 }
             }
-            files[index].records = self.data_entries()?;
+            let mut records = self.data_entries()?;
+            if let Some(e) = records.iter().find(|e| e.external) {
+                return Err(Error::at(e.pos, format!("{indicator} {name}: EXTERNAL goes on the FD, not on a record of the FILE SECTION")));
+            }
+            let (external, global) = (files[index].external, files[index].global);
+            for e in &mut records {
+                e.external = external;
+                e.global |= global;
+            }
+            files[index].records = records;
         }
         Ok(())
     }
@@ -1122,8 +1160,9 @@ impl Parser<'_> {
                     self.blank_when_zero()?;
                     e.blank_when_zero = true;
                 }
-                "GLOBAL" => e.global = true,
                 "EXTERNAL" => e.external = true,
+                "GLOBAL" => e.global = true,
+                "IS" if matches!(self.word(), Some("EXTERNAL" | "GLOBAL")) => {}
                 other => match usage_word(other) {
                     Some(u) => e.usage = Some(u),
                     None => return Err(Error::at(self.tokens[self.at - 1].pos, format!("{other} is not a data description clause ironwork for COBOL supports yet"))),
@@ -3125,6 +3164,31 @@ mod tests {
         assert_eq!(ws[2].redefines.as_deref(), Some("A"));
         assert_eq!((ws[3].name.as_deref(), &ws[3].value), (None, &Some(Literal::Figurative(Figurative::Space))));
         assert_eq!(ws[4].occurs, Some(3));
+    }
+
+    #[test]
+    fn external_and_global_are_kept_and_a_contained_program_sees_its_containers_global_records() {
+        let text = [
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. A.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n",
+            "           SELECT F ASSIGN TO FDD.\n           SELECT H ASSIGN TO HDD.\n       DATA DIVISION.\n       FILE SECTION.\n",
+            "       FD  F IS GLOBAL IS EXTERNAL.\n       01  F-REC PIC X.\n       FD  H.\n       01  H-REC PIC X.\n",
+            "       WORKING-STORAGE SECTION.\n       01  X IS EXTERNAL PIC X.\n       01  G IS GLOBAL.\n           05  G1 PIC X.\n       01  L PIC X.\n",
+            "       PROCEDURE DIVISION.\n           GOBACK.\n",
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. B.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  BG PIC X GLOBAL.\n       PROCEDURE DIVISION.\n           GOBACK.\n",
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. C.\n       PROCEDURE DIVISION.\n           GOBACK.\n",
+            "       END PROGRAM C.\n       END PROGRAM B.\n       END PROGRAM A.\n",
+        ]
+        .concat();
+        let all = crate::parse_all_with(&text, &crate::copy::Libraries::default()).unwrap_or_else(|e| panic!("{e}"));
+        let a = &all[0];
+        assert!(a.working_storage[0].external && !a.working_storage[0].global && a.working_storage[1].global && !a.working_storage[2].global);
+        assert!(a.files[0].external && a.files[0].global && a.files[0].records[0].external && a.files[0].records[0].global && !a.files[1].global);
+        let containers = |p: &Program| p.containers.iter().map(|c| (c.id.clone(), c.working_storage.iter().filter_map(|e| e.name.clone()).collect::<Vec<_>>(), c.files.len())).collect::<Vec<_>>();
+        assert_eq!(containers(&all[1]), [("A".to_owned(), vec!["G".to_owned(), "G1".to_owned()], 1)]);
+        assert_eq!(containers(&all[2]), [("B".to_owned(), vec!["BG".to_owned()], 0), ("A".to_owned(), vec!["G".to_owned(), "G1".to_owned()], 1)]);
+        let on_record = text.replace("       01  F-REC PIC X.", "       01  F-REC PIC X EXTERNAL.");
+        let err = crate::parse_all_with(&on_record, &crate::copy::Libraries::default()).unwrap_err();
+        assert!(err.message.contains("FD F: EXTERNAL goes on the FD, not on a record of the FILE SECTION"), "{err}");
     }
 
     #[test]

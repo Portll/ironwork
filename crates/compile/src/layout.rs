@@ -74,6 +74,31 @@ pub enum Resolved {
     Condition(usize),
 }
 
+/// Where a record addressed as a LINKAGE record is. Every other record is in the program's own
+/// storage (Language Reference SC27-8713-03, pp. 63-66).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Binding {
+    /// A LINKAGE record: an argument, SET ADDRESS OF or the runtime gives it its address.
+    Argument,
+    /// An EXTERNAL data record, or a record redefining one: the run unit's record of this name
+    /// and size.
+    External { name: String, size: u32 },
+    /// A record of file k, an EXTERNAL file: the run unit's record area of that file-name.
+    ExternalFile(u16),
+    /// A GLOBAL record of a program containing this one, by its PROGRAM-ID and the record's name.
+    Global { program: String, record: String, section: Section },
+}
+
+/// Where a GLOBAL record is in the program that declares it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Section {
+    WorkingStorage,
+    LocalStorage,
+    Linkage,
+    /// The record area of the file of this name.
+    File(String),
+}
+
 pub struct Layout {
     pub items: Vec<Item>,
     pub conditions: Vec<Condition>,
@@ -87,8 +112,15 @@ pub struct Layout {
     /// counted at its fewest and at its most occurrences (Language Reference SC27-8713-03, p. 188);
     /// None for a file with none.
     pub record_lengths: Vec<Option<(u32, u32)>>,
-    /// The item of each LINKAGE record, in order.
+    /// The item of each LINKAGE record, in order: the LINKAGE SECTION's, then the records whose
+    /// storage is elsewhere, as `bindings` says.
     pub linkage_roots: Vec<usize>,
+    pub bindings: Vec<Binding>,
+    /// How many programs out the program declaring each LINKAGE record is: 0 for its own.
+    pub depths: Vec<u8>,
+    /// For each file whose record area is not in the program's storage, the LINKAGE record
+    /// bound to that area.
+    pub bound_areas: Vec<Option<u16>>,
     /// Bytes of LOCAL-STORAGE each activation gets.
     pub local_size: u32,
     pub size: u32,
@@ -143,7 +175,9 @@ pub fn build(
     let mut group = None;
     let mut linkage_roots = Vec::new();
     let mut after_renames = false;
-    for &(region, e) in &tagged {
+    let bound = bound_records(&tagged);
+    let mut bound_roots = Vec::new();
+    for (&(region, e), &bound) in tagged.iter().zip(&bound) {
         if region != group {
             open.clear();
             group = region;
@@ -249,6 +283,11 @@ pub fn build(
                     }
                     Some(p) => items[p].linkage.unwrap_or_default(),
                 })
+            } else if bound {
+                if parent.is_none() {
+                    bound_roots.push(index);
+                }
+                Some(0)
             } else {
                 None
             },
@@ -316,6 +355,17 @@ pub fn build(
         }
     }
     aligns.resize(items.len(), 1);
+    let arguments = linkage_roots.len();
+    for i in 0..items.len() {
+        let mut r = i;
+        while let Some(p) = items[r].parent {
+            r = p;
+        }
+        if let Some(b) = bound_roots.iter().position(|&x| x == r) {
+            items[i].linkage = Some((arguments + b) as u16);
+        }
+    }
+    linkage_roots.extend(&bound_roots);
     let roots: Vec<usize> = (0..items.len()).filter(|&i| items[i].parent.is_none()).collect();
     for &r in &roots {
         measure(&mut items, &aligns, r, 0)?;
@@ -421,8 +471,28 @@ pub fn build(
     for (index, e) in renames {
         rename(&mut items, index, e, qualify)?;
     }
+    let mut bound_areas = vec![None; files.len()];
+    let mut bindings = vec![Binding::Argument; arguments];
+    for &r in &bound_roots {
+        let binding = match items[r].file {
+            Some(k) => {
+                bound_areas[k as usize].get_or_insert(items[r].linkage.unwrap_or_default());
+                Binding::ExternalFile(k)
+            }
+            None => {
+                let name = items[r].redefines.clone().or_else(|| items[r].name.clone()).unwrap_or_default();
+                let size = bound_roots.iter().find(|&&t| items[t].name.as_deref() == Some(name.as_str())).map_or(items[r].size, |&t| items[t].size);
+                Binding::External { name, size }
+            }
+        };
+        bindings.push(binding);
+    }
     let mut areas = Vec::new();
     for (k, &size) in own.iter().enumerate() {
+        if bound_areas[k].is_some() {
+            areas.push((0, area_size[owner(k)]));
+            continue;
+        }
         let g = owner(k);
         let start = match area_starts[g] {
             Some(start) => start,
@@ -451,14 +521,54 @@ pub fn build(
         let lengths = &mut record_lengths[k as usize];
         *lengths = Some(lengths.map_or((least, most), |(l, m)| (l.min(least), m.max(most))));
     }
-    Ok(Layout { items, conditions, edits, currencies, file_areas: areas, record_lengths, linkage_roots, local_size: local_cursor, size: cursor, file_names: Vec::new(), linage_counters: Vec::new(), qualify, parmcheck: buffer })
+    Ok(Layout {
+        items,
+        conditions,
+        edits,
+        currencies,
+        file_areas: areas,
+        record_lengths,
+        linkage_roots,
+        depths: vec![0; bindings.len()],
+        bindings,
+        bound_areas,
+        local_size: local_cursor,
+        size: cursor,
+        file_names: Vec::new(),
+        linage_counters: Vec::new(),
+        qualify,
+        parmcheck: buffer,
+    })
 }
+
 
 /// The names of item `start` and each group above it, nearest first: the hierarchy of names that
 /// qualifies an item `start` holds or a condition-name of `start`. FILLER and unnamed items give
 /// none.
 fn names_from(items: &[Item], start: Option<usize>) -> impl Iterator<Item = &str> {
     std::iter::successors(start, |&p| items[p].parent).filter_map(|p| items[p].name.as_deref())
+}
+
+/// Which entries belong to records whose storage the run unit holds: an EXTERNAL record of
+/// WORKING-STORAGE or of an EXTERNAL file, or a WORKING-STORAGE record redefining an EXTERNAL one
+/// (Language Reference SC27-8713-03, p. 197).
+fn bound_records(tagged: &[(Option<u16>, &DataEntry)]) -> Vec<bool> {
+    let mut externals: Vec<&str> = Vec::new();
+    let mut current = false;
+    let mut out = Vec::with_capacity(tagged.len());
+    for &(region, e) in tagged {
+        if matches!(e.level, 1 | 77) {
+            current = match region {
+                None => e.external || e.redefines.as_deref().is_some_and(|t| externals.contains(&t)),
+                Some(r) => r < u16::MAX - 1 && e.external,
+            };
+            if current && region.is_none() && e.external {
+                externals.extend(e.name.as_deref());
+            }
+        }
+        out.push(current);
+    }
+    out
 }
 
 /// Gives level-66 entry `index` the storage and attributes of what it renames (Language Reference
@@ -732,6 +842,23 @@ impl Layout {
         self.linage_counters = linage_counters;
     }
 
+    /// How many programs out the program declaring a name is: 0 for this program's own.
+    fn depth(&self, r: Resolved) -> u8 {
+        let mut i = match r {
+            Resolved::Item(i) => i,
+            Resolved::Condition(c) => self.conditions[c].item,
+        };
+        while let Some(p) = self.items[i].parent {
+            i = p;
+        }
+        self.items[i].linkage.and_then(|l| self.depths.get(l as usize)).copied().unwrap_or_default()
+    }
+
+    /// Whether LINKAGE record `ordinal` is one an argument or SET ADDRESS OF addresses.
+    pub fn is_argument(&self, ordinal: usize) -> bool {
+        self.bindings.get(ordinal).is_none_or(|b| *b == Binding::Argument)
+    }
+
     /// The file whose name qualifies item `i`: the file of its record, or the one it is the
     /// LINAGE-COUNTER of.
     fn file_qualifying(&self, mut i: usize) -> Option<&str> {
@@ -784,6 +911,10 @@ impl Layout {
         found.extend(
             self.conditions.iter().enumerate().filter(|(_, c)| c.name == name && within(Some(c.item), c.item)).map(|(i, _)| Resolved::Condition(i)),
         );
+        if found.len() > 1 {
+            let nearest = found.iter().map(|&r| self.depth(r)).min().unwrap_or_default();
+            found.retain(|&r| self.depth(r) == nearest);
+        }
         if found.len() > 1 && self.qualify == Qualify::Extend {
             let complete: Vec<Resolved> = found.iter().copied().filter(|&r| self.complete(r, qualifiers)).collect();
             if let [one] = complete.as_slice() {

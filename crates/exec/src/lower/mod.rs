@@ -33,7 +33,7 @@ mod tests;
 pub use verify::verify;
 
 use crate::Compiled;
-use crate::layout::{Layout, Resolved};
+use crate::layout::{Binding, Layout, Resolved};
 use crate::machine::Machine;
 use crate::unit::{AddProgram, Clock, Library, RunUnit};
 use rt::abend::AbendCode;
@@ -108,6 +108,7 @@ pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
         return unsupported("PARMCHECK", Pos::default());
     }
     let mut l = Lower::new(compiled);
+    l.refuse_shared_storage()?;
     let id = l.sym(&compiled.program.id);
     let sources = compiled.program.sources.iter().map(|s| l.sym(s)).collect();
     let storage = l.storage()?;
@@ -235,6 +236,23 @@ impl<'c> Lower<'c> {
             segments: false,
             debugging: !c.declaratives.triggers.is_empty(),
         }
+    }
+
+    /// EXTERNAL and GLOBAL storage, files and declaratives, which the LIR has no form for yet.
+    fn refuse_shared_storage(&self) -> R<()> {
+        let program = self.program;
+        if self.layout.bindings.iter().any(|b| *b != Binding::Argument) || program.files.iter().any(|f| f.external || f.declared_in.is_some()) {
+            return unsupported("EXTERNAL data and files, and GLOBAL names of a containing program", Pos::default());
+        }
+        if !program.containers.is_empty() && !program.files.is_empty() {
+            return unsupported("the files of a contained program, which a containing program's GLOBAL declaratives may serve", Pos::default());
+        }
+        let entries = program.working_storage.iter().chain(&program.local_storage).chain(&program.linkage);
+        let declares_global = entries.clone().any(|e| e.global) || program.files.iter().any(|f| f.global) || program.declaratives.errors.iter().any(|u| u.global);
+        if !program.nested.is_empty() && declares_global {
+            return unsupported("GLOBAL names and declaratives of a program that contains others", Pos::default());
+        }
+        Ok(())
     }
 
     fn sym(&mut self, text: &str) -> SymId {

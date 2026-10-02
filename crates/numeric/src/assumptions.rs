@@ -255,6 +255,8 @@ pub const ABBREVIATED_RELATIONS: &str = "C150";
 pub const PARAGRAPH_IN_OWN_SECTION: &str = "C151";
 pub const REPLACE_STATEMENT: &str = "C160";
 pub const VARIABLY_LOCATED_ITEMS: &str = "C161";
+pub const EXTERNAL_STORAGE: &str = "C180";
+pub const GLOBAL_NAMES: &str = "C181";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1611,6 +1613,18 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: VARIABLY_LOCATED_ITEMS,
         claim: "An item after an OCCURS DEPENDING ON table in its record, and not within it, is variably located (Language Reference SC27-8713-03, pp. 205-206; Programming Guide SC27-8714-03, pp. 81-82): each reference places it back from where the table's maximum puts it by the bytes of the occurrences past the object's current value, and a group holding such tables is as long as their current counts make it; its VALUE is placed as if each table held its maximum (LR p. 246). A receiving group that holds the objects of its tables is at its maximum length only when nothing after it in its record moves with them, since the guide has the actual length used when a variably located item follows (PG pp. 78-79). The location is worked out from the objects' values at each reference, so a count changed between two references moves what follows, as the guide says (p. 82), with no data moved; JSON GENERATE and XML GENERATE place each member as they write it, and JSON PARSE as it reaches the member's pair, after any earlier pair has set a count. Refused by name: an OCCURS DEPENDING ON object that is itself variably located, and a sort key or INITIALIZE target that is (LR pp. 205, 351, 402, 454), which IBM forbids; and, keeping the message ironwork gave before, a table with items after it that is within another table or holds one, a table with variable-length elements, whose element length the interpreter keeps at its maximum",
         basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: EXTERNAL_STORAGE,
+        claim: "An EXTERNAL data record, and an EXTERNAL file's connector and record area, are the run unit's: the first program activated that describes one allocates it, zeroed as ironwork zeroes WORKING-STORAGE before VALUE clauses, since the record takes no VALUE (Language Reference SC27-8713-03, pp. 197, 246; Programming Guide SC27-8714-03, p. 573), and every later description shares it until the run unit ends (pp. 65, 184). A record and a file are looked up by name in separate name spaces, and a WORKING-STORAGE record that redefines an EXTERNAL one shares its storage (p. 226). A description of another size than the one in the run unit ends the run with an ironwork abend when the program describing it is activated: the manuals say the records must define the same number of bytes, and the file descriptions the same maximum record size (pp. 186, 197), but not what the runtime does when they do not. CANCEL and an INITIAL program's return leave an EXTERNAL file open (Programming Guide pp. 178, 203); the end of the run unit closes it. INDEXED BY indexes of an EXTERNAL record stay the program's own (p. 197)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: GLOBAL_NAMES,
+        claim: "A contained program sees the GLOBAL records and files of each program containing it, at that program's storage, record area and file connector (Language Reference SC27-8713-03, pp. 63-66, 185, 197). A name resolves among the program's own names and every GLOBAL name of the programs containing it, qualified as usual; where more than one item qualifies, the one declared nearest wins, the program's own first (p. 66). A file-name the program or a nearer program declares hides a farther GLOBAL one. A contained program called while a program containing it is not running, which only ironwork's flat program library allows, ends the run when it uses that program's GLOBAL names. Refused as not supported yet: a GLOBAL file whose FILE STATUS, RECORD KEY, ALTERNATE RECORD KEY or RELATIVE KEY is not a GLOBAL name of the program declaring it, as IBM resolves them there; LINAGE or REPORT on a GLOBAL file in a program that contains others, and on an EXTERNAL file; INDEXED BY in a GLOBAL record of a program that contains others, whose index is global too (p. 65); a GLOBAL file a contained program and its declaring program use differently as a print file, since ironwork decides that from each program's own WRITE statements; and SET ADDRESS OF a GLOBAL LINKAGE record from a contained program",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

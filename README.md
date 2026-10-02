@@ -298,7 +298,12 @@ The subset the interpreter runs today:
   INITIAL and IS RECURSIVE; EXIT PROGRAM; RETURN-CODE. Every program in
   a run shares one memory, as on z/OS, and a called program keeps its WORKING-STORAGE and open files
   between CALLs until it is cancelled; its LOCAL-STORAGE starts afresh on every CALL. PERFORMs and
-  CALLs nest at most 100 deep.
+  CALLs nest at most 100 deep. EXTERNAL records and files are the run unit's, one of each name for
+  every program that describes it (C180); the GLOBAL records and files of a program reach the
+  programs it contains, a name declared again nearer hiding it (C181). Not yet: LINAGE or REPORT
+  on an EXTERNAL file, or on a GLOBAL file of a program that contains others; INDEXED BY in such a
+  GLOBAL record; a GLOBAL file whose FILE STATUS or keys are not GLOBAL names; SET ADDRESS OF a
+  GLOBAL LINKAGE record from a contained program; lowering any of them to the LIR.
 - **Files:** sequential, line-sequential, indexed (VSAM KSDS) and relative (RRDS):
   SELECT/ASSIGN/FILE STATUS, ORGANIZATION, ACCESS SEQUENTIAL/RANDOM/DYNAMIC, RECORD KEY, ALTERNATE
   RECORD KEY [WITH DUPLICATES], RELATIVE KEY; FD with RECORDING MODE F or V and RECORD

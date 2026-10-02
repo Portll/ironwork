@@ -24,6 +24,7 @@ mod printer;
 mod procedure;
 mod quote_currency_nsymbol;
 mod report;
+mod scope;
 mod sort;
 mod xml;
 mod xml_generate;

@@ -213,9 +213,13 @@ fn method_code(class: &Program, method: &Program, part: &ClassPart, factory: boo
             n.insert(0, ' ');
         }
     };
+    if let Some(e) = part.working_storage.iter().find(|e| e.external) {
+        return Err(vec![Error::at(e.pos, format!("{}: EXTERNAL in FACTORY or OBJECT WORKING-STORAGE is not supported yet", e.name.as_deref().unwrap_or("FILLER")))]);
+    }
     for e in &part.working_storage {
         let mut e = e.clone();
         e.value = None;
+        e.global = false;
         e.name.iter_mut().for_each(hide);
         e.redefines.iter_mut().for_each(hide);
         e.depending_on.iter_mut().for_each(|r| hide(&mut r.name));

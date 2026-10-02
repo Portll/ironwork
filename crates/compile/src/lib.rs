@@ -14,6 +14,7 @@ pub mod picture;
 pub mod printer;
 pub mod report;
 mod reserved;
+mod scope;
 pub mod sort;
 pub mod sql;
 
@@ -188,18 +189,23 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     if whole && program.oo.as_deref().and_then(Oo::method).is_none() {
         program.initial |= options.initial;
     }
+    scope::rules(&program, &mut errors);
+    let inherited = scope::inherit(&mut program);
+    let own_linkage = scope::own_linkage(&program);
+    let linkage: Vec<DataEntry> = program.linkage.iter().chain(&inherited.entries).cloned().collect();
     let files: Vec<(&[DataEntry], Option<u32>)> = program.files.iter().map(|f| (f.records.as_slice(), f.record_max)).collect();
     let shared = layout::record_area_owners(&program.files, &program.environment).unwrap_or_else(|e| {
         errors.push(e);
         (0..files.len()).collect()
     });
-    let mut layout = match layout::build(&program.working_storage, &files, &shared, &program.linkage, &program.local_storage, crate::picture::Notation::of(&program.environment), options.qualify, options.parmcheck.map(|p| (declared, p.bytes.into()))) {
+    let mut layout = match layout::build(&program.working_storage, &files, &shared, &linkage, &program.local_storage, crate::picture::Notation::of(&program.environment), options.qualify, options.parmcheck.map(|p| (declared, p.bytes.into()))) {
         Ok(l) => l,
         Err(e) => {
             errors.push(e);
             return Err(errors.into_iter().map(|e| e.in_files(&program.sources)).collect());
         }
     };
+    scope::bind(&mut layout, own_linkage, inherited, &program.files);
     let counter_item = |entry: usize| program.working_storage[..entry].iter().filter(|e| e.level != 88).count();
     layout.name_files(&program.files, linage_counters.iter().map(|c| c.map(counter_item)).collect());
     corresponding::expand(&mut program, &layout, &mut errors);
@@ -218,7 +224,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         }
     }
     for param in &program.using {
-        let is_record = layout.linkage_roots.iter().any(|&i| layout.items[i].name.as_deref() == Some(param.name.as_str()));
+        let is_record = layout.linkage_roots.iter().enumerate().any(|(o, &i)| layout.is_argument(o) && layout.items[i].name.as_deref() == Some(param.name.as_str()));
         if !is_record {
             errors.push(Error::at(Pos::default(), format!("PROCEDURE DIVISION USING {}: not an 01 or 77 item of the LINKAGE SECTION", param.name)));
         }
@@ -250,6 +256,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     if let Some(mode) = options.initcheck {
         errors.extend(initcheck::check(&program, &layout, declared, mode));
     }
+    scope::check(&program, &layout, &mut errors);
     let errors: Vec<Error> = errors.into_iter().map(|e| e.in_files(&program.sources)).collect();
     if refused(&errors, &options) {
         Err(errors)
@@ -383,7 +390,7 @@ fn procedure_rules(program: &Program, layout: &Layout, entries: &[EntryPoint], o
             errors.push(Error::at(e.pos, format!("ENTRY '{}': the name is already the program's or another ENTRY's", e.name)));
         }
         for param in &e.using {
-            if !layout.linkage_roots.iter().any(|&i| layout.items[i].name.as_deref() == Some(param.name.as_str())) {
+            if !layout.linkage_roots.iter().enumerate().any(|(o, &i)| layout.is_argument(o) && layout.items[i].name.as_deref() == Some(param.name.as_str())) {
                 errors.push(Error::at(e.pos, format!("ENTRY '{}' USING {}: not an 01 or 77 item of the LINKAGE SECTION", e.name, param.name)));
             }
         }
@@ -817,8 +824,13 @@ impl Check<'_> {
                         }
                     }
                 }
-                SetStmt::To { targets, value } | SetStmt::AddressOf { targets, value } => {
+                SetStmt::To { targets, value } => {
                     targets.iter().for_each(|r| self.reference(r));
+                    self.operand(value);
+                }
+                SetStmt::AddressOf { targets, value } => {
+                    targets.iter().for_each(|r| self.reference(r));
+                    targets.iter().for_each(|r| scope::set_address(self.layout, r, self.errors));
                     self.operand(value);
                 }
                 SetStmt::UpDown { targets, by, .. } => {
