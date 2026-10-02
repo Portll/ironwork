@@ -833,3 +833,13 @@ fn an_unqualified_paragraph_name_names_the_one_in_its_own_section() {
     let elsewhere = format!("{source}       S3 SECTION.\n{}", line("GO TO P."));
     assert_eq!(compile_errors(&elsewhere), "P names more than one paragraph; qualify it with OF and its section");
 }
+
+#[test]
+fn alphabetic_lower_and_upper_test_each_character_and_allow_spaces() {
+    let data = "       01  U PIC X(4) VALUE 'AB C'.\n       01  L PIC X(4) VALUE 'ab c'.\n       01  M PIC X(4) VALUE 'Ab c'.\n";
+    let test = |item: &str| {
+        format!("IF {item} IS ALPHABETIC-UPPER DISPLAY '{item} U' END-IF\n           IF {item} NOT ALPHABETIC-LOWER DISPLAY '{item} NOT L' END-IF")
+    };
+    let out = run(&program("", data, &[line(&test("U")), line(&test("L")), line(&test("M")), line("IF U(2:2) ALPHABETIC-UPPER AND L(1:1) ALPHABETIC-LOWER"), line("    DISPLAY 'BOTH' END-IF"), line("GOBACK.")].concat()));
+    assert_eq!(out, "U U\nU NOT L\nM NOT L\nBOTH\n");
+}

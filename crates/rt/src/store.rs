@@ -617,7 +617,7 @@ pub fn numcheck<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_
     Ok(())
 }
 
-/// NUMERIC or ALPHABETIC, tested on an item's bytes.
+/// NUMERIC, ALPHABETIC, ALPHABETIC-LOWER or ALPHABETIC-UPPER, tested on an item's bytes.
 pub fn byte_class(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, test: ByteClass) -> bool {
     let bytes = bytes(mem, loc);
     match test {
@@ -628,6 +628,8 @@ pub fn byte_class(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, test: ByteClas
         }),
         ByteClass::Digits => bytes.iter().all(|b| (0xF0..=0xF9).contains(b)),
         ByteClass::Alphabetic => bytes.iter().all(|&b| b == ebcdic::SPACE || facts.page().decode_byte(b).is_ascii_alphabetic()),
+        ByteClass::AlphabeticLower => bytes.iter().all(|&b| b == ebcdic::SPACE || facts.page().decode_byte(b).is_ascii_lowercase()),
+        ByteClass::AlphabeticUpper => bytes.iter().all(|&b| b == ebcdic::SPACE || facts.page().decode_byte(b).is_ascii_uppercase()),
     }
 }
 

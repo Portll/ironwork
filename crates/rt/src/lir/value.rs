@@ -90,6 +90,8 @@ pub enum ByteClass {
     Zoned { signed: bool },
     Digits,
     Alphabetic,
+    AlphabeticLower,
+    AlphabeticUpper,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,7 +143,7 @@ codec_enum!(Compare {
     References = 7,
     ZonedBytes { zoned_first } = 8,
 });
-codec_enum!(ByteClass { Packed { signed } = 0, Zoned { signed } = 1, Digits = 2, Alphabetic = 3 });
+codec_enum!(ByteClass { Packed { signed } = 0, Zoned { signed } = 1, Digits = 2, Alphabetic = 3, AlphabeticLower = 4, AlphabeticUpper = 5 });
 codec_enum!(SignTest { Positive = 0, Negative = 1, Zero = 2 });
 codec_enum!(Count { Fixed(n) = 0, Odo(odo) = 1 });
 codec_enum!(SqlTest { Error = 0, NotFound = 1, Warning = 2 });

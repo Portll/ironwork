@@ -163,15 +163,17 @@ impl Lower<'_> {
         })
     }
 
-    /// `Cond::Class`: NUMERIC or ALPHABETIC of a data item tests its bytes; anything else is a sign
+    /// `Cond::Class`: NUMERIC or an ALPHABETIC class of a data item tests its bytes; anything else is a sign
     /// test of the value, where NUMERIC and ALPHABETIC fall through to ZERO as in the walker.
     fn class(&mut self, e: &Expr, class: Class, pos: Pos) -> R<Test> {
-        if let (Class::Numeric | Class::Alphabetic, Expr::Operand(Operand::Ref(r))) = (class, e) {
+        if let (Class::Numeric | Class::Alphabetic | Class::AlphabeticLower | Class::AlphabeticUpper, Expr::Operand(Operand::Ref(r))) = (class, e) {
             let place = self.place(r, false)?;
             let test = match (class, self.kind_of(place)) {
                 (Class::Numeric, Kind::Packed { signed, .. }) => ByteClass::Packed { signed },
                 (Class::Numeric, Kind::Zoned { signed, sign: None, .. }) => ByteClass::Zoned { signed },
                 (Class::Numeric, _) => ByteClass::Digits,
+                (Class::AlphabeticLower, _) => ByteClass::AlphabeticLower,
+                (Class::AlphabeticUpper, _) => ByteClass::AlphabeticUpper,
                 _ => ByteClass::Alphabetic,
             };
             return Ok(Test::Cond(self.cond(lir::Cond::Class { place, test })?));
@@ -183,7 +185,7 @@ impl Lower<'_> {
         let test = match class {
             Class::Positive => SignTest::Positive,
             Class::Negative => SignTest::Negative,
-            Class::Numeric | Class::Alphabetic | Class::Zero => SignTest::Zero,
+            Class::Numeric | Class::Alphabetic | Class::AlphabeticLower | Class::AlphabeticUpper | Class::Zero => SignTest::Zero,
         };
         Ok(Test::Cond(self.cond(lir::Cond::Sign { value, test })?))
     }

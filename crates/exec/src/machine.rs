@@ -743,7 +743,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             }
             Operand::Literal(lit) => self.literal_value(lit, pos),
             Operand::LengthOf(r) => {
-                let loc = self.locate(r)?;
+                let layout = self.layout;
+                let loc = self.locate(&layout.length_of_ref(r))?;
                 Ok(Val::Num(Fixed::new(loc.len as i128, Places::new(9, 0))))
             }
             Operand::Function(f) => self.function(f),
@@ -1527,12 +1528,14 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn class(&mut self, e: &Expr, class: Class, pos: Pos) -> R<bool> {
-        if let (Class::Numeric | Class::Alphabetic, Expr::Operand(Operand::Ref(r))) = (class, e) {
+        if let (Class::Numeric | Class::Alphabetic | Class::AlphabeticLower | Class::AlphabeticUpper, Expr::Operand(Operand::Ref(r))) = (class, e) {
             let loc = self.locate(r)?;
             let test = match (class, loc.kind) {
                 (Class::Numeric, Kind::Packed { signed, .. }) => ByteClass::Packed { signed },
                 (Class::Numeric, Kind::Zoned { signed, sign: None, .. }) => ByteClass::Zoned { signed },
                 (Class::Numeric, _) => ByteClass::Digits,
+                (Class::AlphabeticLower, _) => ByteClass::AlphabeticLower,
+                (Class::AlphabeticUpper, _) => ByteClass::AlphabeticUpper,
                 (_, _) => ByteClass::Alphabetic,
             };
             return Ok(store::byte_class(&self.facts(), &self.unit.mem, loc, test));

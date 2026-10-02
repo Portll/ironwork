@@ -343,7 +343,8 @@ impl Lower<'_> {
             }
             Operand::Literal(lit) => self.literal(lit, pos),
             Operand::LengthOf(r) => {
-                let p = self.place(r, false)?;
+                let layout = self.layout;
+                let p = self.place(&layout.length_of_ref(r), false)?;
                 Ok(Lowered { operand: lir::Operand::LengthOf(p), side: Side { value: Value::Num(Some(0)), src: None, digits: 9 } })
             }
             Operand::AddressOf(r) => {

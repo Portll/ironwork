@@ -859,6 +859,19 @@ impl Layout {
         })
     }
 
+    /// LENGTH OF a table element written without subscripts gives one occurrence's length (Language
+    /// Reference SC27-8713-03, p. 23): the reference with each subscript 1.
+    pub fn length_of_ref<'r>(&self, r: &'r Ref) -> std::borrow::Cow<'r, Ref> {
+        use syntax::ast::{Expr, Operand};
+        match self.resolve(&r.name, &r.qualifiers, r.pos) {
+            Ok(Resolved::Item(i)) if r.subscripts.is_empty() && !self.items[i].dims.is_empty() => {
+                let one = Expr::Operand(Operand::Literal(Literal::Number("1".into())));
+                std::borrow::Cow::Owned(Ref { subscripts: vec![one; self.items[i].dims.len()], ..r.clone() })
+            }
+            _ => std::borrow::Cow::Borrowed(r),
+        }
+    }
+
     /// The elementary items INITIALIZE of item `i` may move to, each occurrence with its offset from
     /// `i`'s start (Language Reference SC27-8713-03, p. 352, rules 1a and 1b): none under a
     /// REDEFINES, no FILLER unless `filler`, and no index, object reference or program pointer.

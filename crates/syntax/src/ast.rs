@@ -361,6 +361,8 @@ pub enum Expr {
 pub enum Class {
     Numeric,
     Alphabetic,
+    AlphabeticLower,
+    AlphabeticUpper,
     Positive,
     Negative,
     Zero,

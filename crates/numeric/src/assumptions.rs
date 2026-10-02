@@ -260,6 +260,7 @@ pub const GLOBAL_NAMES: &str = "C181";
 pub const SET_TO_ENTRY: &str = "C140";
 pub const HEX_CURRENCY_SIGN: &str = "C141";
 pub const INITIALIZE_FLOAT_NUMERIC: &str = "C171";
+pub const FLOAT_VALUE_LITERAL: &str = "C172";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1645,6 +1646,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: INITIALIZE_FLOAT_NUMERIC,
         claim: "INITIALIZE's VALUE and REPLACING phrases take a COMP-1 or COMP-2 receiver as of category NUMERIC, reading the Language Reference's 'a data item of category internal floating-point ... is treated as if it were in the NUMERIC category' (SC27-8713-03, p. 352) as applying to receivers as well as to identifier-2, since rule 2 (p. 353) names no implied sending item for a floating-point category otherwise. A POINTER item, which no category names, is set to NULL with no phrase or with DEFAULT, as ironwork's INITIALIZE did before the phrases, and is left alone otherwise. The VALUE phrase finds no VALUE clause on a FILE SECTION or LINKAGE SECTION item, whose VALUE ironwork does not apply at all, and gives an OCCURS item's one VALUE to every occurrence. DBCS, EGCS, NATIONAL-EDITED and UTF-8 name no item, as ironwork has no items of those categories",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FLOAT_VALUE_LITERAL,
+        claim: "A floating-point literal in the VALUE clause of a COMP-1 or COMP-2 item (Language Reference SC27-8713-03, pp. 45, 246) gives the item the value its mantissa times ten to its exponent has, written in fixed point and converted to hexadecimal floating point as MOVE converts a fixed-point literal; Enterprise COBOL converts the literal when it compiles, and its conversion may round the last hexadecimal digit differently. One whose value needs more than 31 digits in fixed point, such as 1.0E+40 or 1.0E-35, is refused, as is a floating-point literal in the VALUE of a fixed-point item, as IBM refuses it. A floating-point literal is read as one only in an item's VALUE clause, not in a level-88 VALUE or the PROCEDURE DIVISION, and a fixed-point VALUE on a COMP-1 or COMP-2 item, which IBM refuses unless it is zero, is still accepted",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

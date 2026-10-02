@@ -66,6 +66,25 @@ fn advancing_environment_name(word: &str) -> bool {
     matches!(word, "CSP" | "AFP-5A") || numbered('C', 12) || numbered('S', 5)
 }
 
+/// `mantissa` times ten to `exponent`, as a fixed-point numeric literal of at most 31 digits.
+fn fixed_point(mantissa: &str, exponent: i32) -> Option<String> {
+    let (sign, body) = match mantissa.strip_prefix('-') {
+        Some(body) => ("-", body),
+        None => ("", mantissa.trim_start_matches('+')),
+    };
+    let (int, frac) = body.split_once('.')?;
+    let digits = format!("{int}{frac}");
+    let point = int.len() as i64 + i64::from(exponent);
+    let (int, frac) = match usize::try_from(point) {
+        Err(_) => (String::new(), "0".repeat(point.unsigned_abs() as usize) + &digits),
+        Ok(p) if p >= digits.len() => (digits.clone() + &"0".repeat(p - digits.len()), String::new()),
+        Ok(p) => (digits[..p].to_owned(), digits[p..].to_owned()),
+    };
+    let (int, frac) = (int.trim_start_matches('0'), frac.trim_end_matches('0'));
+    let int = if int.is_empty() { "0" } else { int };
+    (int.len() + frac.len() <= 31).then(|| if frac.is_empty() { format!("{sign}{int}") } else { format!("{sign}{int}.{frac}") })
+}
+
 fn figurative(word: &str) -> Option<Figurative> {
     Some(match word {
         "ZERO" | "ZEROS" | "ZEROES" => Figurative::Zero,
@@ -1100,6 +1119,7 @@ impl Parser<'_> {
             }
             self.at += 1;
         }
+        let mut floating = None;
         while !self.accept(&Tok::Period) {
             let clause = self.name("a data description clause or a period")?;
             match clause.as_str() {
@@ -1134,7 +1154,14 @@ impl Parser<'_> {
                             e.false_value = Some(self.literal()?);
                         }
                     } else {
+                        let at = self.pos();
                         e.value = Some(self.literal()?);
+                        if let Some(Literal::Number(mantissa)) = &e.value
+                            && let Some(fixed) = self.floating_point(&mantissa.clone(), at)?
+                        {
+                            e.value = Some(Literal::Number(fixed));
+                            floating = Some(at);
+                        }
                     }
                 }
                 "REDEFINES" => e.redefines = Some(self.name("the item redefined")?),
@@ -1204,7 +1231,40 @@ impl Parser<'_> {
                 },
             }
         }
+        if let Some(at) = floating
+            && (e.picture.is_some() || e.usage.is_some_and(|u| !matches!(u, Usage::Float1 | Usage::Float2)))
+        {
+            return Err(Error::at(at, "a floating-point VALUE literal is for a COMP-1 or COMP-2 item, not a fixed-point one"));
+        }
         Ok(e)
+    }
+
+    /// The exponent that makes `mantissa`, the numeric literal at `at`, a floating-point literal
+    /// (Language Reference SC27-8713-03, p. 45), taken with it; the value comes back written in
+    /// fixed point (numeric::assumptions::FLOAT_VALUE_LITERAL), None when no exponent follows.
+    fn floating_point(&mut self, mantissa: &str, at: Pos) -> R<Option<String>> {
+        let end = at.col + mantissa.chars().count() as u32;
+        let adjacent = |p: &Self, k: usize, col: u32| p.tokens.get(p.at + k).is_some_and(|t| t.pos.file == at.file && t.pos.line == at.line && t.pos.col == col);
+        let Some(Tok::Word(word)) = self.peek().cloned() else { return Ok(None) };
+        if !word.starts_with('E') || !mantissa.contains('.') || !adjacent(self, 0, end) {
+            return Ok(None);
+        }
+        let (exponent, used) = match (word.as_str(), self.peek_at(1)) {
+            ("E", Some(Tok::Number(n))) if n.starts_with(['+', '-']) && adjacent(self, 1, end + 1) => (n.clone(), 2),
+            ("E", _) => return Ok(None),
+            (_, _) => (word[1..].to_owned(), 1),
+        };
+        let digits = exponent.trim_start_matches(['+', '-']);
+        if digits.is_empty() || digits.len() > 2 || exponent.len() > digits.len() + 1 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            return Ok(None);
+        }
+        self.at += used;
+        let written = format!("{mantissa}E{exponent}");
+        if mantissa.bytes().filter(u8::is_ascii_digit).count() > 16 {
+            return Err(Error::at(at, format!("{written}: a floating-point literal's mantissa has at most 16 digits")));
+        }
+        let exponent: i32 = exponent.parse().map_err(|_| Error::at(at, format!("{written}: not an exponent")))?;
+        fixed_point(mantissa, exponent).map(Some).ok_or_else(|| Error::at(at, format!("VALUE {written}: a floating-point VALUE of more than 31 digits in fixed point is not supported yet")))
     }
 
     fn literal(&mut self) -> R<Literal> {
@@ -2619,7 +2679,7 @@ impl Parser<'_> {
         let save = self.at;
         self.expr()?;
         let conditional = self.relop_ahead(0) || self.is_word("IS") || self.is_word("NOT")
-            || self.word().is_some_and(|w| matches!(w, "NUMERIC" | "ALPHABETIC" | "POSITIVE" | "NEGATIVE" | "ZERO"));
+            || self.word().is_some_and(|w| matches!(w, "NUMERIC" | "ALPHABETIC" | "ALPHABETIC-LOWER" | "ALPHABETIC-UPPER" | "POSITIVE" | "NEGATIVE" | "ZERO"));
         self.at = save;
         Ok(if conditional { Subject::Cond(self.cond()?) } else { Subject::Expr(self.expr()?) })
     }
@@ -2974,10 +3034,12 @@ impl Parser<'_> {
         if let Some(op) = self.relop()? {
             return self.objects(left, op, negated, last);
         }
-        if let Some(class) = self.accept_any(&["NUMERIC", "ALPHABETIC", "POSITIVE", "NEGATIVE", "ZERO"]) {
+        if let Some(class) = self.accept_any(&["NUMERIC", "ALPHABETIC", "ALPHABETIC-LOWER", "ALPHABETIC-UPPER", "POSITIVE", "NEGATIVE", "ZERO"]) {
             let class = match class.as_str() {
                 "NUMERIC" => Class::Numeric,
                 "ALPHABETIC" => Class::Alphabetic,
+                "ALPHABETIC-LOWER" => Class::AlphabeticLower,
+                "ALPHABETIC-UPPER" => Class::AlphabeticUpper,
                 "POSITIVE" => Class::Positive,
                 "NEGATIVE" => Class::Negative,
                 _ => Class::Zero,

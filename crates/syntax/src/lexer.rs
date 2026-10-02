@@ -191,6 +191,15 @@ impl Lexer<'_> {
                 let bytes = unhex(&text).ok_or_else(|| Error::at(pos, format!("X'{text}' is not an even number of hex digits")))?;
                 self.emit(Tok::Hex(bytes), pos);
             }
+            'N' | 'n' if matches!(next, Some('X' | 'x')) && matches!(self.peek(2), Some('\'' | '"')) => {
+                self.at += 2;
+                let text = self.quoted(pos)?;
+                let units = unhex(&text).filter(|b| !b.is_empty() && b.len().is_multiple_of(2) && b.len() <= 160);
+                let units = units.map(|b| b.chunks(2).map(|u| u16::from_be_bytes([u[0], u[1]])).collect::<Vec<_>>());
+                let national = units.and_then(|u| String::from_utf16(&u).ok());
+                let national = national.ok_or_else(|| Error::at(pos, format!("NX'{text}': a national hexadecimal literal is 4 to 320 hex digits, four to each UTF-16 code unit")))?;
+                self.emit(Tok::National(national), pos);
+            }
             'N' | 'n' if quote_next => {
                 self.at += 1;
                 let text = self.quoted(pos)?;
@@ -386,6 +395,11 @@ mod tests {
     #[test]
     fn literals() {
         assert_eq!(toks("           'IT''S' X'F1C1' N'AB'"), [Tok::Alnum("IT'S".into()), Tok::Hex(vec![0xF1, 0xC1]), Tok::National("AB".into())]);
+        assert_eq!(toks("           NX'00410042' nx\"265ED83DDE00\""), [Tok::National("AB".into()), Tok::National("\u{265E}\u{1F600}".into())]);
+        for bad in ["NX'GH'", "NX'1'", "NX'004'", "NX'D83D'"] {
+            let e = lex(&source::read(&format!("           {bad}")).unwrap()).unwrap_err();
+            assert!(e.message.contains("a national hexadecimal literal is 4 to 320 hex digits"), "{bad}: {}", e.message);
+        }
     }
 
     #[test]

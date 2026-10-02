@@ -1256,7 +1256,8 @@ impl Check<'_> {
 
     fn operand(&mut self, op: &Operand) {
         match op {
-            Operand::Ref(r) | Operand::LengthOf(r) | Operand::AddressOf(r) => self.reference(r),
+            Operand::LengthOf(r) => self.reference(&self.layout.length_of_ref(r)),
+            Operand::Ref(r) | Operand::AddressOf(r) => self.reference(r),
             Operand::Literal(Literal::Number(t)) if literal_fixed(t).is_none() || literal_digits(t) > self.max_digits as usize => {
                 self.errors.push(Error::at(Pos::default(), format!("the literal {t} has more than {} digits", self.max_digits.min(31))));
             }

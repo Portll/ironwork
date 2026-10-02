@@ -516,8 +516,8 @@ fn values_and_conditions_round_trip_with_every_tag() {
         Compare::References,
     ];
     every_variant(&compares, 8);
-    let classes = [ByteClass::Packed { signed: false }, ByteClass::Zoned { signed: true }, ByteClass::Digits, ByteClass::Alphabetic];
-    every_variant(&classes, 4);
+    let classes = [ByteClass::Packed { signed: false }, ByteClass::Zoned { signed: true }, ByteClass::Digits, ByteClass::Alphabetic, ByteClass::AlphabeticLower, ByteClass::AlphabeticUpper];
+    every_variant(&classes, 6);
     every_variant(&[SignTest::Positive, SignTest::Negative, SignTest::Zero], 3);
     every_variant(&[Count::Fixed(10), Count::Odo(ODO)], 2);
     every_variant(&[BinOp::Add, BinOp::Sub, BinOp::Mul, BinOp::Div, BinOp::Pow], 5);

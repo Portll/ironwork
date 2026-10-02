@@ -478,3 +478,30 @@ fn initialize_replacing_that_no_item_matches_warns_as_igyps2047() {
     let twice = syntax::parse(&source("INITIALIZE ALPHA REPLACING NUMERIC BY 1\n               NUMERIC BY 2")).unwrap_err();
     assert!(twice.message.contains("NUMERIC is named twice in the REPLACING phrase"), "{}", twice.message);
 }
+
+#[test]
+fn a_floating_point_value_literal_initializes_comp_1_and_comp_2() {
+    let data = concat!(
+        "       01  A COMP-1 VALUE 543.12345E10.\n       01  B COMP-2 VALUE -1.5E-03.\n",
+        "       01  C USAGE COMP-2 VALUE +.25e2.\n       01  M PIC S9(9)V9(6) SIGN LEADING SEPARATE.\n",
+    );
+    let out = run(&program("", data, &[line("MOVE A TO M DISPLAY M"), line("MOVE B TO M DISPLAY M"), line("MOVE C TO M DISPLAY M"), line("GOBACK.")].concat()));
+    assert_eq!(out, "+233610000000000\n-000000000001500\n+000000025000000\n");
+    let refused = |entry: &str| syntax::parse(&program("", entry, &line("GOBACK."))).unwrap_err().message;
+    assert!(refused("       01  F PIC 9(4) VALUE 1.5E+03.\n").contains("a floating-point VALUE literal is for a COMP-1 or COMP-2 item"));
+    assert!(refused("       01  F COMP-2 VALUE 1.23456789012345678E1.\n").contains("mantissa has at most 16 digits"));
+    assert!(refused("       01  F COMP-2 VALUE 1.0E+40.\n").contains("more than 31 digits in fixed point"));
+}
+
+#[test]
+fn length_of_a_table_element_needs_no_subscript() {
+    let data = "       01  T.\n           05 E OCCURS 3.\n              10 E1 PIC X(4).\n              10 E2 PIC 9(3) OCCURS 2.\n       01  N PIC 9(4).\n";
+    let out = run(&program(
+        "",
+        data,
+        &[line("MOVE LENGTH OF E TO N DISPLAY N"), line("COMPUTE N = LENGTH OF E2 * 2 DISPLAY N"), line("DISPLAY LENGTH OF E1"), line("GOBACK.")].concat(),
+    ));
+    assert_eq!(out, "0010\n0006\n000000004\n");
+    let errors = compile_errors(&program("", data, &[line("MOVE E1 TO N"), line("GOBACK.")].concat()));
+    assert!(errors.contains("E1 takes 1 subscripts, not 0"), "{errors}");
+}

@@ -51,7 +51,10 @@ impl<'p> Machine<'p, '_, '_> {
                     bytes
                 }
             }
-            Operand::LengthOf(r) => (self.locate(r)?.len as i32).to_be_bytes().to_vec(),
+            Operand::LengthOf(r) => {
+                let layout = self.layout;
+                (self.locate(&layout.length_of_ref(r))?.len as i32).to_be_bytes().to_vec()
+            }
             Operand::Literal(Literal::Number(t)) => {
                 let v = t.parse::<i32>().map_err(|_| Abend::ironwork(format!("{t} is not an int"), pos))?;
                 v.to_be_bytes().to_vec()
