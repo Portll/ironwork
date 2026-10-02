@@ -83,6 +83,14 @@ impl Loader<Rc<Compiled>> for Library {
         (program.program.files.len(), program.layout.size as usize)
     }
 
+    fn nested(program: &Rc<Compiled>) -> &[String] {
+        &program.program.nested
+    }
+
+    fn source(program: &Rc<Compiled>, file: usize) -> Option<String> {
+        program.program.sources.get(file).cloned()
+    }
+
     fn class(&mut self, external: &str) -> Result<Option<FoundClass<Rc<ClassCode>>>, String> {
         let Some((program, path)) = crate::oo::find_class(self, external)? else { return Ok(None) };
         let at = crate::compile_time().map_err(|m| format!("class {external} does not compile: {m}"))?;

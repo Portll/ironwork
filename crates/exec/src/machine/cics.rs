@@ -100,19 +100,12 @@ impl<'p> Machine<'p, '_, '_> {
 }
 
 impl<'a, 'w> CicsHost<'w, &'a Ref, &'a Operand, &'a str> for Machine<'_, '_, 'w> {
-    type Program = Rc<Compiled>;
-    type Loader = crate::unit::Library;
-
-    fn unit(&mut self) -> &mut RunUnit<'w> {
-        self.unit
-    }
-
     fn handlers(&mut self) -> &mut Handlers {
         &mut self.cics_handlers
     }
 
     fn content(&mut self, operand: &&'a Operand, pos: Pos) -> R<Vec<u8>> {
-        self.content_argument(operand, pos)
+        callee::content(self, &super::facts::chars(operand), pos)
     }
 
     fn integer_of(&mut self, operand: &&'a Operand, pos: Pos) -> R<i64> {
@@ -153,12 +146,11 @@ impl<'a, 'w> CicsHost<'w, &'a Ref, &'a Operand, &'a str> for Machine<'_, '_, 'w>
     }
 
     fn run_program(&mut self, program: Rc<Compiled>, index: usize, commarea: Option<usize>, xctl: bool) -> R<Ending> {
-        let ending = Machine::activation(&program, index, &mut *self.unit, self.main && xctl).and_then(|mut callee| {
+        Machine::activation(&program, index, &mut *self.unit, self.main && xctl).and_then(|mut callee| {
             let eib = callee.unit.eib;
             callee.bind(&[Some(eib), commarea]);
             callee.run_level()
-        });
-        ending.map_err(|a| self.in_loaded(index, &program, a))
+        })
     }
 }
 

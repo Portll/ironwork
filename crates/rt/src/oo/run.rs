@@ -6,13 +6,14 @@
 
 use super::{ClassCode, Instance, JAVA_LANG_OBJECT, LoadedClass, MAX_MEMORY, Objects, Part, Referent, Running};
 use crate::abend::{Abend, AbendCode, Ending};
+use crate::callee::{self, By, Callee};
 use crate::display::utf16_text;
 use crate::host::Values;
 use crate::jni;
 use crate::lir::{CallArg, InvokePlan, MethodName, Receiver, Step};
 use crate::storage::{Kind, Loc, Val};
 use crate::store::{self, ProgramFacts};
-use crate::unit::{ADDRESS_BASE, Loaded, Loader, RETURN_CODE, RunUnit};
+use crate::unit::{ADDRESS_BASE, Loaded, Loader, RETURN_CODE, RunUnit, UnitHost};
 use crate::vocab::{Figurative, Pos};
 use numeric::assumptions::{EXPIRED_REFERENCE_ABENDS, LOCAL_FRAMES};
 use numeric::precision::{Fixed, Places};
@@ -21,12 +22,9 @@ use std::rc::Rc;
 
 type R<T> = Result<T, Abend>;
 
-/// What INVOKE and the JNI services ask of the executor beyond `Values`: the run unit, the method
+/// What INVOKE and the JNI services ask of the executor beyond `Values` and the run unit: the method
 /// the activation runs, names and Java signatures, an argument's bytes, and running a method.
-pub trait OoHost<'w, P: Copy, O, S>: Values<P, O> {
-    type Program: Clone;
-    type Loader: Loader<Self::Program, Class = Rc<ClassCode<Self::Program>>>;
-    fn unit(&mut self) -> &mut RunUnit<'w, Self::Program, Self::Loader>;
+pub trait OoHost<'w, P: Copy, O, S>: Values<P, O> + UnitHost<'w, Loader: Loader<<Self as UnitHost<'w>>::Program, Class = Rc<ClassCode<<Self as UnitHost<'w>>::Program>>>> {
     fn running(&self) -> Option<Running>;
     fn program_id(&self) -> String;
     /// A name, or a Java type signature, which an executor may work out only when it is read.
@@ -513,11 +511,10 @@ fn run_method<'w, P: Copy, O, S, X: OoHost<'w, P, O, S>>(x: &mut X, plan: &Invok
         _ => Vec::new(),
     };
     let running = Running { class, factory: method.factory, this, cell, frame, invoked };
-    let outcome = x.run_method(MethodCall { code: method.code.clone(), storage, records, arguments: addresses, running }, pos)?;
+    let call = MethodCall { code: method.code.clone(), storage, records, arguments: addresses, running };
+    let callee = Callee { index: storage, by: By::Invoke, mark: Some(mark), pos };
+    let (ending, returned) = callee::run(x, &callee, |x| x.run_method(call, pos).map(|r| (r.ending, r.value)))?;
     let unit = x.unit();
-    unit.programs[storage].active = false;
-    unit.release_temporaries(mark);
-    let Returned { ending, value: returned } = outcome;
     let ending = ending.map_err(|mut abend| {
         if abend.file.is_none() {
             abend.file = Some(unit.oo.classes[class].sources.get(abend.pos.file as usize).cloned().unwrap_or_default());

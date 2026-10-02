@@ -6,7 +6,7 @@ use super::{Condition, Reading, Stamp};
 use crate::abend::{Abend, AbendCode};
 use crate::calendar;
 use crate::lir::LeService;
-use crate::unit::{ADDRESS_BASE, Loader, RunUnit};
+use crate::unit::{ADDRESS_BASE, Loader, RunUnit, UnitHost};
 use crate::vocab::Pos;
 use std::io::Write;
 use zarch::ebcdic::CodePage;
@@ -21,12 +21,9 @@ const CESE: &str = "CESE";
 type R<T> = Result<T, Abend>;
 type Outcome = R<Option<Condition>>;
 
-/// What a service asks of the executor running it: the run unit, the program's code page, and the
-/// name a dump lists a loaded program by.
-pub trait LeHost<'w> {
-    type Program: Clone;
-    type Loader: Loader<Self::Program>;
-    fn unit(&mut self) -> &mut RunUnit<'w, Self::Program, Self::Loader>;
+/// What a service asks of the executor running it beyond the run unit: the program's code page, and
+/// the name a dump lists a loaded program by.
+pub trait LeHost<'w>: UnitHost<'w> {
     fn page(&self) -> &'static CodePage;
     /// `Class.method` for a loaded COBOL method; None for a program, which a dump lists by name.
     fn method_name(program: &Self::Program) -> Option<String>;

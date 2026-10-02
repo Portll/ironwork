@@ -88,6 +88,10 @@ impl Code {
     pub fn shape(&self) -> (usize, usize) {
         (self.files, self.size)
     }
+
+    pub fn nested(&self) -> &[String] {
+        &self.nested
+    }
 }
 
 impl Lowered {

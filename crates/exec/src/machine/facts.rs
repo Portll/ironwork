@@ -6,11 +6,14 @@ use crate::collating::Sequence;
 use crate::picture::Sym;
 use crate::files::{Dd, Keying, Open};
 use crate::printer::{self, Space};
+use rt::callee::Arguments;
 use rt::fileio::{self, Advance, Files};
 use rt::host::{Host, Values};
 use rt::lir::{self, Chars, Replacement};
 use rt::store::{LaxRedefinition, ProgramFacts};
 use rt::text;
+use rt::unit::UnitHost;
+use std::rc::Rc;
 
 #[derive(Clone, Copy)]
 pub struct Facts<'p> {
@@ -135,6 +138,34 @@ impl<'a, 'p> Host<&'a Ref> for Machine<'p, '_, '_> {
 impl<'a> Values<&'a Ref, &'a Operand> for Machine<'_, '_, '_> {
     fn value(&mut self, operand: &&'a Operand, pos: Pos) -> R<Val> {
         self.operand(operand, pos)
+    }
+}
+
+impl<'w> UnitHost<'w> for Machine<'_, '_, 'w> {
+    type Program = Rc<Compiled>;
+    type Loader = crate::unit::Library;
+
+    fn unit(&mut self) -> &mut RunUnit<'w> {
+        self.unit
+    }
+}
+
+impl<'a, 'w> Arguments<'w, &'a Ref, &'a Operand> for Machine<'_, '_, 'w> {
+    fn item(&self, operand: &&'a Operand) -> Option<&'a Ref> {
+        match *operand {
+            Operand::Ref(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    fn length_of(&self, operand: &&'a Operand) -> bool {
+        matches!(operand, Operand::LengthOf(_))
+    }
+
+    fn content_item(&mut self, place: &'a Ref) -> R<Loc> {
+        let loc = self.locate(place)?;
+        self.numcheck(loc, false, place.pos)?;
+        Ok(loc)
     }
 }
 

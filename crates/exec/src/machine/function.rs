@@ -47,7 +47,7 @@ impl<'p> Machine<'p, '_, '_> {
         self.unit.programs[index].active = active;
         self.unit.release_temporaries(mark);
         self.unit.depth -= 1;
-        match outcome.map_err(|a| self.in_loaded(index, &compiled, a))? {
+        match outcome.map_err(|a| callee::in_loaded(self.unit, index, a))? {
             (Ending::StopRun, _) => Err(Abend { code: AbendCode::Signal(Signal::StopRun), message: String::new(), pos, file: None }),
             (_, value) => Ok(value),
         }
@@ -69,14 +69,14 @@ fn run(compiled: &Rc<Compiled>, index: usize, unit: &mut RunUnit<'_>, bound: &[B
             }
         }));
     }
-    callee.bind_using(using, &addresses);
+    callee.bind_linkage(&[], using, &addresses, false);
     for (param, b) in using.iter().zip(bound) {
         if let Bound::Value(value) = b {
             let dest = callee.parameter(&param.name, pos)?;
             callee.assign(dest, value.clone(), None, pos)?;
         }
     }
-    callee.bind_returning();
+    callee.bind_linkage(&[], &[], &[], true);
     let ending = callee.run_from(None)?;
     let returning = compiled.program.returning.as_deref().unwrap_or_default();
     Ok((ending, callee.returned(returning, pos)?))

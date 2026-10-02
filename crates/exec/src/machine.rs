@@ -11,10 +11,11 @@ use crate::unit::{ADDRESS_BASE, Event, LoadError, OS_COMMAND_ROUTINES, RETURN_CO
 use crate::Compiled;
 use numeric::precision::{self, Fixed, Places};
 use numeric::{Options, Trunc};
-use rt::fixed::{align, places_of, zoned_digits};
+use rt::fixed::{align, places_of};
 use rt::arith;
+use rt::callee::{self, Bindings, By, Callee};
 use rt::display::utf16_text;
-use rt::lir::{ByteClass, ConvertTable, Converting, SignTest, StringSource, TrimSide};
+use rt::lir::{ByteClass, CallArg, ConvertTable, Converting, SignTest, StringSource, TrimSide};
 use rt::loc;
 use rt::store;
 use rt::text::UnstringField;
@@ -22,7 +23,6 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use syntax::Pos;
 use syntax::ast::*;
-use zarch::decimal;
 use zarch::ebcdic::{self, CodePage, Collation};
 use zarch::hfp::{Hfp, Precision};
 
@@ -361,7 +361,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Stmt::Cancel { targets, pos } => {
                 for t in targets {
                     let name = self.program_name(t, *pos)?;
-                    self.cancel(&name, *pos)?;
+                    callee::cancel(self.unit, &name, *pos)?;
                 }
             }
             Stmt::Set { set, pos } => self.set(set, *pos)?,
@@ -904,34 +904,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
     }
 
-    /// An abend from a program CALL or LINK loaded from a library, named by that program's files,
-    /// which the caller's file table would misname.
-    pub(crate) fn in_loaded(&self, index: usize, compiled: &Compiled, mut abend: Abend) -> Abend {
-        if abend.file.is_none()
-            && let Some(source) = &self.unit.programs[index].source
-        {
-            abend.file = Some(match abend.pos.file {
-                0 => source.display().to_string(),
-                i => compiled.program.sources.get(i as usize).cloned().unwrap_or_default(),
-            });
-        }
-        abend
-    }
-
-    /// The bytes a CALL passes, one argument after another, as the code page reads them.
     fn arguments_text(&mut self, c: &Call) -> R<String> {
-        let mut text = String::new();
-        for op in c.using.iter().filter_map(|a| a.value.as_ref()) {
-            let bytes = match op {
-                Operand::Ref(r) => {
-                    let loc = self.locate(r)?;
-                    self.bytes(loc).to_vec()
-                }
-                _ => self.content_argument(op, c.pos)?,
-            };
-            text.push_str(&self.page.decode(&bytes));
-        }
-        Ok(text)
+        callee::arguments_text(self, &call_args(&c.using), c.pos)
     }
 
     fn call(&mut self, c: &'p Call) -> R<Flow> {
@@ -1047,50 +1021,21 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     fn call_nested(&mut self, c: &'p Call, index: usize, entry: Option<usize>, compiled: std::rc::Rc<Compiled>) -> R<Flow> {
         let pos = c.pos;
         let mark = self.unit.mem.len();
-        let mut addresses = Vec::new();
-        for arg in &c.using {
-            let Some(op) = &arg.value else {
-                addresses.push(None);
-                continue;
-            };
-            let at = match (arg.mode, op) {
-                (ArgMode::Reference, Operand::Ref(r)) => {
-                    let loc = self.locate(r)?;
-                    loc.offset
-                }
-                (ArgMode::Value, _) => {
-                    let bytes = self.value_argument(op, pos)?;
-                    self.unit.push_temporary(&bytes)
-                }
-                (_, _) => {
-                    let bytes = self.content_argument(op, pos)?;
-                    self.unit.push_temporary(&bytes)
-                }
-            };
-            addresses.push(Some(at));
-        }
+        let addresses = callee::addresses(self, &call_args(&c.using), pos)?;
         self.parmcheck_set();
-        let outcome = {
-            let containers = self.containers_of(&compiled.program);
-            let mut callee = Machine::activation_within(&compiled, index, &mut *self.unit, false, containers)?;
+        let containers = self.containers_of(&compiled.program);
+        let by = By::Call { initial: compiled.program.initial };
+        let (ending, returned) = callee::run(self, &Callee { index, by, mark: Some(mark), pos }, |m| {
+            let mut callee = Machine::activation_within(&compiled, index, &mut *m.unit, false, containers)?;
             let entry = entry.and_then(|k| compiled.entries.get(k));
-            callee.bind_using(entry.map_or(&compiled.program.using, |e| &e.using), &addresses);
-            callee.bind_returning();
+            callee.bind_linkage(&[], entry.map_or(&compiled.program.using, |e| &e.using), &addresses, true);
             let ending = callee.run_from(entry.map(|e| (e.paragraph, e.statement)));
             let returned = match (&compiled.program.returning, &ending) {
                 (Some(item), Ok(_)) => Some(callee.returned(item, pos)?),
                 _ => None,
             };
-            (ending, returned)
-        };
-        self.unit.programs[index].active = false;
-        // Leaving an INITIAL program is a CANCEL of it (Language Reference SC27-8713-03, p. 349).
-        if compiled.program.initial {
-            self.cancel_program(index, pos)?;
-        }
-        self.unit.release_temporaries(mark);
-        let (ending, returned) = outcome;
-        let ending = ending.map_err(|a| self.in_loaded(index, &compiled, a));
+            Ok::<_, Abend>((ending, returned))
+        })?;
         if ending? == Ending::StopRun {
             return Ok(Flow::End(Ending::StopRun));
         }
@@ -1108,100 +1053,24 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     /// Gives each PROCEDURE DIVISION USING item the address of the argument in its position.
     pub(crate) fn bind(&mut self, addresses: &[Option<usize>]) {
         let program = self.program;
-        self.bind_using(&program.using, addresses);
+        self.bind_linkage(&[], &program.using, addresses, false);
     }
 
-    /// Gives each item of a PROCEDURE DIVISION or ENTRY USING list the address of the argument in
-    /// its position.
-    fn bind_using(&mut self, using: &[Param], addresses: &[Option<usize>]) {
-        for (param, address) in using.iter().zip(addresses) {
-            if let Some(ordinal) = self.layout.linkage_roots.iter().position(|&i| self.layout.items[i].name.as_deref() == Some(param.name.as_str())) {
-                self.linkage[ordinal] = *address;
-            }
-        }
-    }
-
-    /// The RETURNING item is in the LINKAGE SECTION, but no argument addresses it: the runtime
-    /// gives it storage of its own for the call.
-    fn bind_returning(&mut self) {
-        let Some(name) = &self.program.returning else { return };
-        let Some(ordinal) = self.layout.linkage_roots.iter().position(|&i| self.layout.items[i].name.as_deref() == Some(name.as_str())) else { return };
-        let size = self.layout.items[self.layout.linkage_roots[ordinal]].size as usize;
-        self.linkage[ordinal] = Some(self.unit.push_temporary(&vec![0; size]));
+    /// Binds this activation's LINKAGE records as `rt::callee::Bindings` does: the object's data
+    /// `records`, each item of a PROCEDURE DIVISION or ENTRY USING list the argument in its position,
+    /// and with `returning` the RETURNING item.
+    fn bind_linkage(&mut self, records: &[(usize, usize)], using: &[Param], addresses: &[Option<usize>], returning: bool) {
+        let layout = self.layout;
+        let ordinal = |name: &str| layout.linkage_roots.iter().position(|&i| layout.items[i].name.as_deref() == Some(name));
+        let using = using.iter().map(|param| ordinal(&param.name)).collect();
+        let returning = self.program.returning.as_deref().filter(|_| returning).and_then(ordinal).map(|o| (o, layout.items[layout.linkage_roots[o]].size as usize));
+        Bindings { records, using, addresses, returning }.bind(self.unit, &mut self.linkage);
     }
 
     fn returned(&mut self, name: &str, pos: Pos) -> R<Val> {
         let r = Ref { name: name.to_owned(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos };
         let loc = self.locate(&r)?;
         self.read(loc, pos)
-    }
-
-    /// A BY CONTENT argument: a copy of the item, or of the literal as its own data item would hold it.
-    fn content_argument(&mut self, op: &Operand, pos: Pos) -> R<Vec<u8>> {
-        if let Operand::Ref(r) = op {
-            let loc = self.locate(r)?;
-            self.numcheck(loc, false, r.pos)?;
-            return Ok(self.bytes(loc).to_vec());
-        }
-        Ok(match self.operand(op, pos)? {
-            Val::Bytes(b) | Val::All(b) | Val::National(b) => b,
-            Val::Fig(f) => vec![self.collating.figurative(f)],
-            Val::Address(a) => a.to_be_bytes().to_vec(),
-            Val::Num(f) if matches!(op, Operand::LengthOf(_)) => (align(&f, 0, false).and_then(|m| m.to_u128()).unwrap_or(0) as u32).to_be_bytes().to_vec(),
-            Val::Num(f) => {
-                let digits = f.places.total().max(1);
-                let magnitude = align(&f, f.places.dec, false).and_then(|m| m.to_u128()).unwrap_or(0);
-                zoned_digits(magnitude, digits as usize, if f.negative { decimal::MINUS } else { decimal::UNSIGNED })
-            }
-            Val::Float(h) => h.to_bytes(),
-        })
-    }
-
-    /// A BY VALUE argument: an integer as a binary fullword, an address, or the bytes of a one-character item.
-    fn value_argument(&mut self, op: &Operand, pos: Pos) -> R<Vec<u8>> {
-        Ok(match self.operand(op, pos)? {
-            Val::Num(f) => {
-                let whole = align(&f, 0, false).and_then(|m| m.to_u128()).and_then(|m| i32::try_from(m).ok()).ok_or_else(|| Abend::ironwork("a BY VALUE integer beyond a fullword", pos))?;
-                (if f.negative { -whole } else { whole }).to_be_bytes().to_vec()
-            }
-            Val::Address(a) => a.to_be_bytes().to_vec(),
-            Val::Fig(Figurative::Null) => vec![0; 4],
-            Val::Bytes(b) => b,
-            _ => return Err(Abend::ironwork("this BY VALUE argument is not supported", pos)),
-        })
-    }
-
-    /// CANCEL of a program a dynamic CALL entered, or of a contained program; a program only ever
-    /// called statically is left as it is (Language Reference SC27-8713-03, p. 327; Programming
-    /// Guide SC27-8714-03, pp. 399, 548).
-    fn cancel(&mut self, name: &str, pos: Pos) -> R<()> {
-        let Some(index) = self.unit.find(name) else { return Ok(()) };
-        let target = &self.unit.programs[index].name;
-        let contained = self.unit.programs.iter().any(|p| p.compiled.as_ref().is_some_and(|c| c.program.nested.contains(target)));
-        if !self.unit.programs[index].dynamic && !contained {
-            return Ok(());
-        }
-        if self.unit.programs[index].active {
-            return Err(Abend::ironwork(format!("CANCEL {name}: the program is active"), pos));
-        }
-        self.cancel_program(index, pos)
-    }
-
-    /// Closes the files of program `index` and of the programs it contains, each of which next
-    /// starts in its initial state (pp. 103, 349).
-    fn cancel_program(&mut self, index: usize, pos: Pos) -> R<()> {
-        let files: Vec<_> = self.unit.programs[index].files.iter_mut().filter_map(Option::take).collect();
-        for f in files {
-            f.close().map_err(|e| Abend::ironwork(format!("CANCEL {}: {e}", self.unit.programs[index].name), pos))?;
-        }
-        self.unit.programs[index].initialized = false;
-        let nested = self.unit.programs[index].compiled.as_ref().map(|c| c.program.nested.clone()).unwrap_or_default();
-        for name in nested {
-            if let Some(contained) = self.unit.find(&name) {
-                self.cancel_program(contained, pos)?;
-            }
-        }
-        Ok(())
     }
 
     fn set(&mut self, set: &SetStmt, pos: Pos) -> R<()> {
@@ -1722,6 +1591,20 @@ fn value_kind(kind: Kind, value: &Literal) -> Kind {
         (Kind::NumericEdited { .. } | Kind::AlnumEdited { .. }, Literal::Alnum(_) | Literal::Figurative(_) | Literal::All(_)) => Kind::Alnum { justified: false },
         (kind, _) => kind,
     }
+}
+
+/// A CALL's USING phrase as `rt::callee` takes it: a data item BY REFERENCE by its place, BY VALUE
+/// by its value, and anything else as BY CONTENT copies it.
+fn call_args(using: &[Arg]) -> Vec<CallArg<&Ref, &Operand>> {
+    using
+        .iter()
+        .map(|arg| match (arg.mode, &arg.value) {
+            (_, None) => CallArg::Omitted,
+            (ArgMode::Reference, Some(Operand::Ref(r))) => CallArg::Reference(r),
+            (ArgMode::Value, Some(op)) => CallArg::Value(op),
+            (_, Some(op)) => CallArg::Content(facts::chars(op)),
+        })
+        .collect()
 }
 
 /// INITIALIZE's implied sending item for an elementary receiver of `kind` (Language Reference

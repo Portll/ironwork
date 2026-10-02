@@ -125,13 +125,6 @@ impl<'p> Machine<'p, '_, '_> {
 }
 
 impl<'a, 'w> OoHost<'w, &'a Ref, &'a Operand, Sym<'a>> for Machine<'_, '_, 'w> {
-    type Program = Rc<Compiled>;
-    type Loader = crate::unit::Library;
-
-    fn unit(&mut self) -> &mut RunUnit<'w> {
-        self.unit
-    }
-
     fn running(&self) -> Option<Running> {
         self.oo.method
     }
@@ -174,13 +167,7 @@ impl<'a, 'w> OoHost<'w, &'a Ref, &'a Operand, Sym<'a>> for Machine<'_, '_, 'w> {
     fn run_method(&mut self, call: MethodCall<Rc<Compiled>>, pos: Pos) -> R<Returned> {
         let compiled = call.code;
         let mut callee = Machine::activation(&compiled, call.storage, &mut *self.unit, false)?;
-        for (ordinal, address) in call.records {
-            if let Some(slot) = callee.linkage.get_mut(ordinal) {
-                *slot = Some(address);
-            }
-        }
-        callee.bind(&call.arguments);
-        callee.bind_returning();
+        callee.bind_linkage(&call.records, &compiled.program.using, &call.arguments, true);
         callee.oo = Frame { method: Some(call.running) };
         let ending = callee.run_procedure();
         let value = match (&compiled.program.returning, &ending) {

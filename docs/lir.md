@@ -1138,9 +1138,9 @@ unit.rs:150-171 (f2)).
 - **LE services** run only after the program search fails, as assumption L1
   `LE_SERVICE_AFTER_PROGRAMS` (int) records. `LeService` is an enum of the services
   `rt::le::call` runs, over an `LeHost` that gives it the run unit, the code page and a loaded
-  method's name for CEE3DMP; arguments are addresses, as for a program (`le_arguments`,
-  machine/le_services.rs). ON EXCEPTION never runs for a service. A `Dynamic` target's name is
-  matched with a service when the CALL runs.
+  method's name for CEE3DMP; arguments are addresses, as for a program (`rt::callee::addresses`).
+  ON EXCEPTION never runs for a service. A `Dynamic` target's name is matched with a service when
+  the CALL runs.
 - **CANCEL** is one `Cancel` per name, in order, each read as `program_name` reads a `Dynamic`
   target (machine.rs:478-483 (f2)).
 - **Dynamic at run time:** loading and compiling on first CALL, RECURSIVE and INITIAL handling, the
@@ -1148,6 +1148,11 @@ unit.rs:150-171 (f2)).
   temporaries (machine.rs:973-1122). How a static CALL binds is load-module.md §8.3.
 - **PARMCHECK and NUMCHECK** run inside the op: the buffer is set after the arguments and tested
   after the callee returns, and a BY CONTENT or BY VALUE data item is tested as it is copied (§9.14).
+- **One sequence in `rt::callee`** for both executors, and for LINK, XCTL and INVOKE: `addresses`
+  builds the arguments, `Bindings` gives the callee's LINKAGE records their addresses, and `run`
+  wraps the executor's activation of the callee (inactive after, an INITIAL program a CALL entered
+  cancelled, temporaries released, an abend named by a library program's own files). CANCEL is
+  `rt::callee::cancel`. Each host trait reaches the run unit through `rt::unit::UnitHost`.
 
 ### 9.4 Files
 

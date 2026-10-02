@@ -6,6 +6,7 @@ use super::command::{Datum, Transfer};
 use super::run::{AbendExit, At, CicsHost, EIBCALEN, EIBFN, EIBRSRCE, ExitTarget, Flow, Handler, Handlers, R};
 use super::run::{bytes_cut, eib_bytes, eib_calen, eib_halfword, eib_text, int, ok, page, raise, text};
 use crate::abend::{Abend, AbendCode, Ending};
+use crate::callee::{self, By, Callee};
 use crate::lir::ParaId;
 use crate::unit::{LoadError, Loader, RunUnit};
 use crate::vocab::Pos;
@@ -86,12 +87,13 @@ pub(super) fn link<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &A
 /// Runs program `index` with fresh WORKING-STORAGE at the next logical level, or for XCTL in this
 /// program's place.
 fn enter<'w, P: Copy, O, S, X: CicsHost<'w, P, O, S>>(x: &mut X, program: X::Program, index: usize, area: Option<usize>, xctl: bool, pos: Pos) -> R<Ending> {
-    x.unit().programs[index].initialized = false;
-    x.unit().enter(pos)?;
-    let ending = x.run_program(program, index, area, xctl);
-    let unit = x.unit();
-    unit.depth -= 1;
-    unit.programs[index].active = false;
+    let callee = Callee { index, by: By::Link, mark: None, pos };
+    let (ending, ()) = callee::run(x, &callee, |x| {
+        x.unit().enter(pos)?;
+        let ending = x.run_program(program, index, area, xctl);
+        x.unit().depth -= 1;
+        Ok::<_, Abend>((ending, ()))
+    })?;
     ending
 }
 

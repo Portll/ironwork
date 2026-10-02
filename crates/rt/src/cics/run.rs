@@ -9,7 +9,7 @@ use crate::host::{self, Host};
 use crate::lir::{ParaId, Step};
 use crate::storage::{Loc, Val};
 use crate::store::{self, ProgramFacts};
-use crate::unit::{ADDRESS_BASE, Loader, RunUnit};
+use crate::unit::{ADDRESS_BASE, Loader, RunUnit, UnitHost};
 use crate::vocab::Pos;
 use std::collections::HashMap;
 use zarch::decimal::{self, Decimal};
@@ -30,13 +30,10 @@ pub const EIBRSRCE: usize = 0x33;
 pub const EIBRESP: usize = 0x4C;
 pub const EIBRESP2: usize = 0x50;
 
-/// What a command asks of the executor running it beyond `Host`: the run unit, the program level's
-/// handlers, operands that are not data items, names only the executor can resolve, and running a
-/// program for LINK and XCTL.
-pub trait CicsHost<'w, P: Copy, O, S>: Host<P> {
-    type Program: Clone;
-    type Loader: Loader<Self::Program>;
-    fn unit(&mut self) -> &mut RunUnit<'w, Self::Program, Self::Loader>;
+/// What a command asks of the executor running it beyond `Host` and the run unit: the program
+/// level's handlers, operands that are not data items, names only the executor can resolve, and
+/// running a program for LINK and XCTL.
+pub trait CicsHost<'w, P: Copy, O, S>: Host<P> + UnitHost<'w> {
     fn handlers(&mut self) -> &mut Handlers;
     /// An operand's bytes as CALL BY CONTENT passes them.
     fn content(&mut self, operand: &O, pos: Pos) -> R<Vec<u8>>;

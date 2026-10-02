@@ -8,6 +8,7 @@ pub mod accept;
 pub mod arith;
 pub mod bms;
 pub mod calendar;
+pub mod callee;
 pub mod cics;
 pub mod cics_tables;
 pub mod codec;

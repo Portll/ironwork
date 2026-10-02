@@ -4,7 +4,6 @@
 use super::{Code, Facts, Halt, R, Vm, not_yet};
 use crate::abend::Abend;
 use crate::arith;
-use crate::fixed::{align, zoned_digits};
 use crate::intrinsic::function::{self as intrinsic, Evaluator};
 use crate::lir::{Argument, Base, Comparand, Const, Count, Expr, ExprId, Func, FunctionId, FunctionPlan, IntExpr, Mode, Operand, PlaceId};
 use crate::storage::{Kind, Loc, Val};
@@ -13,7 +12,6 @@ use crate::unit::{ADDRESS_BASE, Loader};
 use crate::vocab::{BinOp, Figurative, Pos};
 use numeric::precision::{Fixed, Places};
 use std::rc::Rc;
-use zarch::decimal;
 use zarch::hfp::{Hfp, Precision};
 
 pub(super) fn constant(c: &Const) -> Val {
@@ -275,37 +273,6 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 current[k].1 = 1;
             }
         }
-    }
-
-    /// `Machine::content_argument` of a value: a BY CONTENT argument that is not a data item.
-    pub(super) fn content_of(&mut self, o: Operand) -> R<Vec<u8>> {
-        Ok(match self.value(o)? {
-            Val::Bytes(b) | Val::All(b) | Val::National(b) => b,
-            Val::Fig(f) => vec![self.facts().figurative(f)],
-            Val::Address(a) => a.to_be_bytes().to_vec(),
-            Val::Num(f) if matches!(o, Operand::LengthOf(_)) => (align(&f, 0, false).and_then(|m| m.to_u128()).unwrap_or(0) as u32).to_be_bytes().to_vec(),
-            Val::Num(f) => {
-                let digits = f.places.total().max(1);
-                let magnitude = align(&f, f.places.dec, false).and_then(|m| m.to_u128()).unwrap_or(0);
-                zoned_digits(magnitude, digits as usize, if f.negative { decimal::MINUS } else { decimal::UNSIGNED })
-            }
-            Val::Float(h) => h.to_bytes(),
-        })
-    }
-
-    /// `Machine::value_argument`: a BY VALUE argument.
-    pub(super) fn value_argument(&mut self, o: Operand, pos: Pos) -> R<Vec<u8>> {
-        Ok(match self.value(o)? {
-            Val::Num(f) => {
-                let whole = align(&f, 0, false).and_then(|m| m.to_u128()).and_then(|m| i32::try_from(m).ok());
-                let whole = whole.ok_or_else(|| Abend::ironwork("a BY VALUE integer beyond a fullword", pos))?;
-                (if f.negative { -whole } else { whole }).to_be_bytes().to_vec()
-            }
-            Val::Address(a) => a.to_be_bytes().to_vec(),
-            Val::Fig(Figurative::Null) => vec![0; 4],
-            Val::Bytes(b) => b,
-            _ => return Err(Abend::ironwork("this BY VALUE argument is not supported", pos).into()),
-        })
     }
 
     /// `Machine::program_name`: an alphanumeric value, decoded, trimmed and upper-cased.

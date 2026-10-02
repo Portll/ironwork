@@ -1,15 +1,17 @@
 //! CALL within the run unit (lir.md §9.3), as `Machine::call` and `call_nested` run it: the program
-//! found through the run unit's loader, its arguments' addresses, a new activation run by Rust
-//! recursion, RETURNING, and what an observer is told.
+//! found through the run unit's loader, then `rt::callee`'s arguments and run around a new
+//! activation run by Rust recursion, RETURNING, and what an observer is told.
 
 use super::{Code, Halt, Lowered, R, Vm, not_yet};
 use crate::abend::{Abend, AbendCode, Ending};
-use crate::lir::{Base, CallArg, CallPlan, CallTarget, Chars, Operand, Step};
+use crate::callee::{self, Arguments, Bindings, By, Callee};
+use crate::host::Host;
 use crate::le;
+use crate::lir::{Base, CallPlan, CallTarget, Operand, PlaceId, Step};
 use crate::virtual_printer;
 use crate::storage::{Kind, Loc, Val};
-use crate::store::{self, ProgramFacts};
-use crate::unit::{Event, LoadError, Loader, OS_COMMAND_ROUTINES};
+use crate::store;
+use crate::unit::{Event, LoadError, Loader, OS_COMMAND_ROUTINES, RunUnit, UnitHost};
 use crate::vocab::Pos;
 use std::rc::Rc;
 
@@ -25,7 +27,8 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 self.sink("dynamic-program-load", pos, &name);
             }
             if OS_COMMAND_ROUTINES.contains(&name.as_str()) {
-                match self.arguments_text(plan) {
+                let text = callee::arguments_text(self, &plan.args, pos);
+                match self.settle(text) {
                     Ok(text) => self.sink("os-command", pos, &text),
                     Err(Halt::Unimplemented(what)) => return Err(Halt::Unimplemented(what)),
                     Err(Halt::Abend(_)) => {}
@@ -57,41 +60,18 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         result
     }
 
-    fn call_nested(&mut self, plan: &CallPlan, index: usize, entry: Option<usize>, callee: &Lowered, pos: Pos) -> R<Step> {
+    fn call_nested(&mut self, plan: &CallPlan, index: usize, entry: Option<usize>, lowered: &Lowered, pos: Pos) -> R<Step> {
         let mark = self.unit.mem.len();
-        let mut addresses = Vec::with_capacity(plan.args.len());
-        for arg in &plan.args {
-            let at = match arg {
-                CallArg::Omitted => {
-                    addresses.push(None);
-                    continue;
-                }
-                CallArg::Reference(place) => self.loc(*place)?.offset,
-                CallArg::Value(o) => {
-                    let bytes = self.value_argument(*o, pos)?;
-                    self.unit.push_temporary(&bytes)
-                }
-                CallArg::Content(chars) => {
-                    let bytes = self.content(chars)?;
-                    self.unit.push_temporary(&bytes)
-                }
-            };
-            addresses.push(Some(at));
-        }
-        let program = &callee.program;
-        let (ending, returned) = {
-            let mut vm = Vm::activation(callee, index, &mut *self.unit, false)?;
+        let addresses = callee::addresses(self, &plan.args, pos);
+        let addresses = self.settle(addresses)?;
+        let program = &lowered.program;
+        let by = By::Call { initial: program.initial };
+        let (ending, returned) = callee::run(self, &Callee { index, by, mark: Some(mark), pos }, |caller| {
+            let mut vm = Vm::activation(lowered, index, &mut *caller.unit, false)?;
             let entry = entry.and_then(|k| program.services.entries.get(k));
-            let using = entry.map_or(&program.storage.using, |e| &e.using);
-            for (&ordinal, address) in using.iter().zip(&addresses) {
-                if let Some(slot) = vm.linkage.get_mut(usize::from(ordinal)) {
-                    *slot = *address;
-                }
-            }
-            if let Some(ordinal) = program.storage.returning {
-                let size = program.storage.linkage[usize::from(ordinal)] as usize;
-                vm.linkage[usize::from(ordinal)] = Some(vm.unit.push_temporary(&vec![0; size]));
-            }
+            let using = entry.map_or(&program.storage.using, |e| &e.using).iter().map(|&o| Some(usize::from(o))).collect();
+            let returning = program.storage.returning.map(|o| (usize::from(o), program.storage.linkage[usize::from(o)] as usize));
+            Bindings { records: &[], using, addresses: &addresses, returning }.bind(vm.unit, &mut vm.linkage);
             let ending = match vm.run_from(entry.map(|e| (e.paragraph, e.block))) {
                 Err(Halt::Unimplemented(what)) => return Err(Halt::Unimplemented(what)),
                 Err(Halt::Abend(a)) => Err(a),
@@ -101,15 +81,9 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 (Some(ordinal), Ok(_)) => Some(vm.returned(ordinal, pos)?),
                 _ => None,
             };
-            (ending, returned)
-        };
-        self.unit.programs[index].active = false;
-        if program.initial {
-            self.cancel_program(index, pos)?;
-        }
-        self.unit.release_temporaries(mark);
-        let ending = ending.map_err(|a| self.in_loaded(index, callee, a))?;
-        if ending == Ending::StopRun {
+            Ok((ending, returned))
+        })?;
+        if ending? == Ending::StopRun {
             return Ok(Step::End(Ending::StopRun));
         }
         if let (Some(target), Some(val)) = (plan.returning, returned) {
@@ -117,37 +91,6 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             store::assign(&self.facts(), self.unit, dest, val, None, pos)?;
         }
         Ok(if plan.on_exception || plan.not_on_exception { Step::Arm(0) } else { Step::Next })
-    }
-
-    /// `Machine::content_argument`: a copy of a data item, a literal as its own item would hold it,
-    /// or another operand's value as bytes.
-    fn content(&mut self, chars: &Chars) -> R<Vec<u8>> {
-        match chars {
-            Chars::Literal(bytes) => Ok(bytes.clone()),
-            Chars::Place(place) => {
-                let loc = self.loc(*place)?;
-                Ok(store::bytes(&self.unit.mem, loc).to_vec())
-            }
-            Chars::Value(o) => self.content_of(*o),
-        }
-    }
-
-    /// `Machine::arguments_text`: each argument's bytes, as the code page reads them.
-    fn arguments_text(&mut self, plan: &CallPlan) -> R<String> {
-        let mut text = String::new();
-        for arg in &plan.args {
-            let bytes = match arg {
-                CallArg::Omitted => continue,
-                CallArg::Reference(place) | CallArg::Content(Chars::Place(place)) | CallArg::Value(Operand::Load(place)) => {
-                    let loc = self.loc(*place)?;
-                    store::bytes(&self.unit.mem, loc).to_vec()
-                }
-                CallArg::Content(chars) => self.content(chars)?,
-                CallArg::Value(o) => self.content_of(*o)?,
-            };
-            text.push_str(&self.facts().page().decode(&bytes));
-        }
-        Ok(text)
     }
 
     /// The callee's RETURNING item, located by a place naming the whole record and read as its
@@ -171,52 +114,9 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         self.read(loc, pos)
     }
 
-    /// `Machine::in_loaded`: an abend in a program CALL loaded from a library names that program's
-    /// files.
-    fn in_loaded(&self, index: usize, callee: &Lowered, mut abend: Abend) -> Abend {
-        if abend.file.is_none()
-            && let Some(source) = &self.unit.programs[index].source
-        {
-            let program = &callee.program;
-            abend.file = Some(match abend.pos.file {
-                0 => source.display().to_string(),
-                i => program.debug.sources.get(usize::from(i)).map(|&s| program.symbols[s as usize].clone()).unwrap_or_default(),
-            });
-        }
-        abend
-    }
-
-    /// `Machine::cancel`: a program a dynamic CALL entered, or a contained one, is closed and starts
-    /// afresh at its next CALL; one only ever called statically is left as it is.
     pub(super) fn cancel(&mut self, name: Operand, pos: Pos) -> R<()> {
         let name = self.program_name(name, pos)?;
-        let Some(index) = self.unit.find(&name) else { return Ok(()) };
-        let target = &self.unit.programs[index].name;
-        let contained = self.unit.programs.iter().any(|p| p.compiled.as_ref().is_some_and(|c| c.nested.contains(target)));
-        if !self.unit.programs[index].dynamic && !contained {
-            return Ok(());
-        }
-        if self.unit.programs[index].active {
-            return Err(Abend::ironwork(format!("CANCEL {name}: the program is active"), pos).into());
-        }
-        self.cancel_program(index, pos)
-    }
-
-    /// `Machine::cancel_program`: the files of program `index` and of the programs it contains
-    /// closed, each to start in its initial state.
-    fn cancel_program(&mut self, index: usize, pos: Pos) -> R<()> {
-        let files: Vec<_> = self.unit.programs[index].files.iter_mut().filter_map(Option::take).collect();
-        for f in files {
-            f.close().map_err(|e| Abend::ironwork(format!("CANCEL {}: {e}", self.unit.programs[index].name), pos))?;
-        }
-        self.unit.programs[index].initialized = false;
-        let nested = self.unit.programs[index].compiled.as_ref().map(|c| c.nested.clone()).unwrap_or_default();
-        for name in nested {
-            if let Some(contained) = self.unit.find(&name) {
-                self.cancel_program(contained, pos)?;
-            }
-        }
-        Ok(())
+        Ok(callee::cancel(self.unit, &name, pos)?)
     }
 
     /// `Machine::sink`: tells the observer an operation an input could steer, and its operand.
@@ -232,5 +132,32 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             (0, Some(path)) => path.to_str().unwrap_or_default().to_owned(),
             (i, _) => self.p.debug.sources.get(usize::from(i)).map_or_else(String::new, |&s| self.sym(s).to_owned()),
         }
+    }
+}
+
+impl<'w, L: Loader<Rc<Code>>> UnitHost<'w> for Vm<'_, '_, 'w, L> {
+    type Program = Rc<Code>;
+    type Loader = L;
+
+    fn unit(&mut self) -> &mut RunUnit<'w, Rc<Code>, L> {
+        self.unit
+    }
+}
+
+impl<'w, L: Loader<Rc<Code>>> Arguments<'w, PlaceId, Operand> for Vm<'_, '_, 'w, L> {
+    fn item(&self, operand: &Operand) -> Option<PlaceId> {
+        match *operand {
+            Operand::Load(place) => Some(place),
+            _ => None,
+        }
+    }
+
+    fn length_of(&self, operand: &Operand) -> bool {
+        matches!(operand, Operand::LengthOf(_))
+    }
+
+    /// `Vm::activation` refuses a program compiled with NUMCHECK, so no test is made.
+    fn content_item(&mut self, place: PlaceId) -> Result<Loc, Abend> {
+        Host::locate(self, place, false)
     }
 }

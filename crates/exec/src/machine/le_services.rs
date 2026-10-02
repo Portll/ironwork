@@ -1,5 +1,5 @@
-//! A CALL that reaches a Language Environment callable service: the walker builds the argument
-//! addresses and runs the CALL's phrases, and `rt::le` runs the service.
+//! A CALL that reaches a Language Environment callable service: `rt::callee` builds the argument
+//! addresses, the walker runs the CALL's phrases, and `rt::le` runs the service.
 
 use super::*;
 use crate::le::{self, LeHost};
@@ -8,7 +8,7 @@ use std::rc::Rc;
 impl<'p> Machine<'p, '_, '_> {
     pub(super) fn le_call(&mut self, c: &'p Call, name: &str) -> R<Flow> {
         let mark = self.unit.mem.len();
-        let outcome = self.le_arguments(c).and_then(|args| {
+        let outcome = callee::addresses(self, &call_args(&c.using), c.pos).and_then(|args| {
             self.parmcheck_set();
             self.le_service(name, &args, c.pos).map(|()| args)
         });
@@ -20,27 +20,6 @@ impl<'p> Machine<'p, '_, '_> {
         }
     }
 
-    /// Each argument's address in run-unit memory, as a CALL to a program passes it.
-    fn le_arguments(&mut self, c: &Call) -> R<Vec<Option<usize>>> {
-        let mut addresses = Vec::new();
-        for arg in &c.using {
-            let at = match (arg.mode, &arg.value) {
-                (_, None) => None,
-                (ArgMode::Reference, Some(Operand::Ref(r))) => Some(self.locate(r)?.offset),
-                (ArgMode::Value, Some(op)) => {
-                    let bytes = self.value_argument(op, c.pos)?;
-                    Some(self.unit.push_temporary(&bytes))
-                }
-                (_, Some(op)) => {
-                    let bytes = self.content_argument(op, c.pos)?;
-                    Some(self.unit.push_temporary(&bytes))
-                }
-            };
-            addresses.push(at);
-        }
-        Ok(addresses)
-    }
-
     fn le_service(&mut self, name: &str, args: &[Option<usize>], pos: Pos) -> R<()> {
         match le::service(name) {
             Some(service) => le::call(self, service, args, pos),
@@ -50,13 +29,6 @@ impl<'p> Machine<'p, '_, '_> {
 }
 
 impl<'w> LeHost<'w> for Machine<'_, '_, 'w> {
-    type Program = Rc<Compiled>;
-    type Loader = crate::unit::Library;
-
-    fn unit(&mut self) -> &mut RunUnit<'w> {
-        self.unit
-    }
-
     fn page(&self) -> &'static CodePage {
         self.page
     }

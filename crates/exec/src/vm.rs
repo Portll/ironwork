@@ -37,6 +37,15 @@ impl Loader<Rc<Code>> for VmLibrary {
         program.shape()
     }
 
+    fn nested(program: &Rc<Code>) -> &[String] {
+        program.nested()
+    }
+
+    fn source(program: &Rc<Code>, file: usize) -> Option<String> {
+        let p = program.program()?;
+        p.debug.sources.get(file).map(|&s| p.symbols[s as usize].clone())
+    }
+
     fn class(&mut self, _external: &str) -> Result<Option<FoundClass<()>>, String> {
         Ok(None)
     }

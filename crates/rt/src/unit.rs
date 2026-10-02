@@ -81,8 +81,22 @@ pub trait Loader<H> {
     /// A loaded program's file count and storage size.
     fn shape(program: &H) -> (usize, usize);
 
+    /// The PROGRAM-IDs of the programs a loaded program contains, which a CANCEL of it reaches.
+    fn nested(program: &H) -> &[String];
+
+    /// Source file `file` of a loaded program's source table, by name.
+    fn source(program: &H, file: usize) -> Option<String>;
+
     /// The COBOL class definition of this external name, compiled; None for a Java class.
     fn class(&mut self, external: &str) -> Result<Option<FoundClass<Self::Class>>, String>;
+}
+
+/// An executor's activation, as each service's host trait reaches the run unit through it: `Program`
+/// is the executor's handle to a loaded program, `Loader` the loader CALL goes through.
+pub trait UnitHost<'w> {
+    type Program: Clone;
+    type Loader: Loader<Self::Program>;
+    fn unit(&mut self) -> &mut RunUnit<'w, Self::Program, Self::Loader>;
 }
 
 #[derive(Clone, Copy, Debug)]
