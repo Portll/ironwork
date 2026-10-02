@@ -1256,7 +1256,7 @@ pub type Opt<P, O, S> = Option<Datum<P, O, S>>;
 /// 34 variants: File { verb: FileControl, file, options: FileOptions } for the ten file-control
 /// commands; Return; Link and Xctl (Transfer); Abend; HandleCondition(Vec<(Condition,
 /// Option<ParaId>)>); IgnoreCondition(Vec<Condition>); PushHandle; PopHandle; HandleAbend
-/// { program, label: Option<ParaId>, reset }; HandleAid; SendMap; ReceiveMap; SendControl;
+/// { program: Opt, label: Option<ParaId>, reset }, tag 34 with 9 retired; HandleAid; SendMap; ReceiveMap; SendControl;
 /// Receive(Record); Asktime; Formattime; Assign; Getmain; Freemain; Enq; Deq; Delay;
 /// Syncpoint { rollback }; Address; SendText; WriteOperator; WriteqTs; ReadqTs; DeleteqTs;
 /// WriteqTd; ReadqTd; DeleteqTd; and Unsupported, "EXEC CICS … is not supported yet".
@@ -1285,17 +1285,18 @@ options the translator gives and resolving HANDLE labels there. SYNCPOINT is a s
   command, its options and RESP, RESP2 and NOHANDLE are the walker's, and every refusal `run` gives
   (outside a task, a command ironwork does not carry out, an option it needs) comes from the same
   code at the same point. A command ironwork does not carry out lowers to `Cics::Unsupported`.
-- **Labels are paragraphs, and handlers are run-time state.** HANDLE CONDITION and HANDLE ABEND
-  LABEL hold the `ParaId` their labels resolve to, as `crate::procedure` resolves them for the
-  walker. HANDLE, IGNORE, PUSH and POP change the program level's `Handlers` when the op runs, and a
-  condition `raise` sends to a label, or an ABEND HANDLE ABEND takes, makes the op return
+- **Labels are paragraphs, and handlers are run-time state.** HANDLE CONDITION holds the `ParaId`
+  its labels resolve to, as `crate::procedure_from` resolves them for the walker. HANDLE, IGNORE,
+  PUSH and POP change the program level's `Handlers` when the op runs, and a condition `raise`
+  sends to a label makes the op return
   `Step::GoTo(para)`, which the VM takes as a GO TO by the transfer rules of §8.4: it leaves every
   frame whose region does not hold the paragraph and resets the depth, as the walker's
   `Flow::GoTo` does. The table is per activation, as the walker's `Machine.cics_handlers` is, so a
   LINKed program starts with none. RETURN and XCTL return `Step::End`. No new terminator is needed.
 - **Refused:** a HANDLE label that names no procedure, which the walker abends on only after the
   task check (IRONWORK at the block, or the outside-a-task abend first), so no one terminator
-  gives both.
+  gives both. HANDLE ABEND, whose exit the walker takes when an abend reaches the program's
+  activation (`run_level`), which the VM has no frame for yet.
 - **Not lowered:** the observer's sinks (`cics_sinks`), which tell an observer a command's operands
   and change no result, as with CALL's and DISPLAY's.
 

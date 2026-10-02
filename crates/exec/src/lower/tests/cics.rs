@@ -23,7 +23,6 @@ fn each_block_is_one_op_whose_command_binds_as_the_walker_binds_it_and_handle_ke
         "       MAIN-LINE.\n",
         &line("EXEC CICS HANDLE CONDITION QIDERR(NO-QUEUE) ERROR(OOPS)"),
         &line("    LENGERR END-EXEC"),
-        &line("EXEC CICS HANDLE ABEND LABEL(RECOVER) END-EXEC"),
         &line("EXEC CICS READQ TS QUEUE('NOQ') INTO(WS-DATA) LENGTH(WS-LEN)"),
         &line("    RESP(WS-RESP) RESP2(WS-R2) END-EXEC"),
         &line("EXEC CICS IGNORE CONDITION LENGERR END-EXEC"),
@@ -42,25 +41,24 @@ fn each_block_is_one_op_whose_command_binds_as_the_walker_binds_it_and_handle_ke
     ]
     .concat();
     let p = lowered(&program("", DATA, &body));
-    let (no_queue, oops, recover) = (paragraph(&p, "NO-QUEUE") as u32, paragraph(&p, "OOPS") as u32, paragraph(&p, "RECOVER") as u32);
+    let (no_queue, oops) = (paragraph(&p, "NO-QUEUE") as u32, paragraph(&p, "OOPS") as u32);
     let got = commands(&p);
     let names_of: Vec<&str> = got.iter().map(|(n, _)| *n).collect();
-    assert_eq!(names_of, ["HANDLE CONDITION", "HANDLE ABEND", "READQ TS", "IGNORE CONDITION", "PUSH HANDLE", "POP HANDLE", "LINK", "RETURN", "ABEND", "XCTL"]);
+    assert_eq!(names_of, ["HANDLE CONDITION", "READQ TS", "IGNORE CONDITION", "PUSH HANDLE", "POP HANDLE", "LINK", "RETURN", "ABEND", "XCTL"]);
     let labels = vec![(Condition::QIDERR, Some(no_queue)), (Condition::ERROR, Some(oops)), (Condition::LENGERR, None)];
     assert_eq!(got[0].1.command, Cics::HandleCondition(labels));
-    assert_eq!(got[1].1.command, Cics::HandleAbend { program: None, label: Some(recover), reset: false });
-    let Cics::ReadqTs { queue, next: false, item: None, numitems: None, record: Record { into, set: None, length } } = &got[2].1.command else { panic!("{:?}", got[2]) };
+    let Cics::ReadqTs { queue, next: false, item: None, numitems: None, record: Record { into, set: None, length } } = &got[1].1.command else { panic!("{:?}", got[1]) };
     assert_eq!((names(&p, queue), names(&p, into), names(&p, length)), (format!("{:?}", Const::Bytes(crate::testing::ebcdic("NOQ"))), "WS-DATA".into(), "WS-LEN".into()));
-    let resp = &got[2].1.resp;
+    let resp = &got[1].1.resp;
     assert_eq!((names(&p, &resp.resp), names(&p, &resp.resp2), resp.nohandle), ("WS-RESP".into(), "WS-R2".into(), false));
-    assert_eq!(got[3].1.command, Cics::IgnoreCondition(vec![Condition::LENGERR]));
-    let Cics::Link(Transfer { program: Some(Datum::Value(_)), commarea: Some(Datum::Place(_)), length: None }) = got[6].1.command else { panic!("{:?}", got[6]) };
-    assert!(got[6].1.resp.nohandle);
-    let Cics::Return { transid, commarea, length } = &got[7].1.command else { panic!("{:?}", got[7]) };
+    assert_eq!(got[2].1.command, Cics::IgnoreCondition(vec![Condition::LENGERR]));
+    let Cics::Link(Transfer { program: Some(Datum::Value(_)), commarea: Some(Datum::Place(_)), length: None }) = got[5].1.command else { panic!("{:?}", got[5]) };
+    assert!(got[5].1.resp.nohandle);
+    let Cics::Return { transid, commarea, length } = &got[6].1.command else { panic!("{:?}", got[6]) };
     assert_eq!(names(&p, commarea), "WS-DATA");
     assert!(matches!((transid, length), (Some(Datum::Value(LirOperand::Const(_))), Some(Datum::Value(LirOperand::Const(_))))));
-    assert!(matches!(got[8].1.command, Cics::Abend { abcode: Some(Datum::Value(_)), cancel: true }));
-    assert!(matches!(got[9].1.command, Cics::Xctl(_)));
+    assert!(matches!(got[7].1.command, Cics::Abend { abcode: Some(Datum::Value(_)), cancel: true }));
+    assert!(matches!(got[8].1.command, Cics::Xctl(_)));
     // Each op returns its own transfer, so no terminator follows it.
     assert_eq!(end_of(&p, "MAIN-LINE"), Terminator::Jump(p.paragraphs[no_queue as usize].entry));
 }
@@ -93,4 +91,19 @@ fn a_handle_label_two_sections_have_is_the_one_in_the_handle_command_s_section()
     let p = lowered(&program("", DATA, &[section("S1"), section("S2")].concat()));
     let labels: Vec<Cics> = commands(&p).into_iter().map(|(_, c)| c.command.clone()).collect();
     assert_eq!(labels, [Cics::HandleCondition(vec![(Condition::ERROR, Some(1))]), Cics::HandleCondition(vec![(Condition::ERROR, Some(3))])]);
+}
+
+#[test]
+fn handle_abend_is_refused_and_a_handle_command_s_resp_is_data() {
+    let refused = |option: &str| {
+        let body = [line(&format!("EXEC CICS HANDLE ABEND {option} END-EXEC")), line("GOBACK."), "       RECOVER.\n".to_owned(), line("GOBACK.")].concat();
+        lower(&compiled(&program("", DATA, &body))).unwrap_err()
+    };
+    for option in ["LABEL(RECOVER)", "PROGRAM('EXITP')", "CANCEL", "RESET"] {
+        assert!(matches!(refused(option), LowerError::Unsupported("EXEC CICS HANDLE ABEND", _)), "{option}");
+    }
+    let body = [line("EXEC CICS HANDLE CONDITION ERROR(OOPS) RESP(WS-RESP) END-EXEC"), line("GOBACK."), "       OOPS.\n".to_owned(), line("GOBACK.")].concat();
+    let p = lowered(&program("", DATA, &body));
+    let got = commands(&p);
+    assert_eq!(names(&p, &got[0].1.resp.resp), "WS-RESP");
 }

@@ -886,7 +886,8 @@ fn cics_commands_round_trip_with_every_tag() {
         Cics::DeleteqTd { queue: text },
         Cics::Unsupported,
     ];
-    every_variant(&commands, 34);
+    // Tag 9 is retired (load-module.md §4.3).
+    every_variant_but(&commands, 35, &[9]);
     let resp = Resp { resp: place, resp2: Some(Datum::Place(8)), nohandle: false };
     round_trip(&commands.into_iter().map(|command| CicsCommand { name: 9, command, resp: resp.clone() }).collect::<Vec<_>>());
     let verbs = [

@@ -1,10 +1,10 @@
 //! EXEC CICS (lir.md §9.5): each block bound by the walker's own `cics_bind::bind`, its handles
-//! lowered, as one `Op::Cics`. HANDLE CONDITION and HANDLE ABEND keep the paragraphs their labels
-//! name, which the op returns as `Step::GoTo` when a condition or ABEND takes one.
+//! lowered, as one `Op::Cics`. HANDLE CONDITION keeps the paragraphs its labels name, which the op
+//! returns as `Step::GoTo` when a condition takes one. HANDLE ABEND is refused.
 
 use super::{Lower, LowerError, R, push, unsupported};
 use crate::machine::cics_bind;
-use rt::cics::Handles;
+use rt::cics::{Cics, Handles};
 use rt::lir::{self, Op, PlaceId, SymId};
 use syntax::Pos;
 use syntax::ast::{ExecBlock, Operand, Ref};
@@ -42,6 +42,10 @@ impl Lower<'_> {
         let Ok(bound) = cics_bind::bind(block, &|text| cics_bind::label(program, block, text, para)) else {
             return unsupported("a HANDLE label that names no procedure", pos);
         };
+        // The walker takes a HANDLE ABEND exit when an abend reaches the activation (run_level).
+        if matches!(bound.command, Cics::HandleAbend { .. }) {
+            return unsupported("EXEC CICS HANDLE ABEND", pos);
+        }
         let command = bound.map(&mut Lowering { l: self, pos })?;
         let id = push(&mut self.services.cics, command, "EXEC CICS commands")?;
         self.op(Op::Cics(id), pos)

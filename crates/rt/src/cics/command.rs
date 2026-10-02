@@ -373,6 +373,7 @@ impl Decode for Condition {
 codec_enum!(Datum { Place(place) = 0, Value(value) = 1, Text(text) = 2, Bare = 3 });
 codec_struct!(CicsCommand { name, command, resp });
 codec_struct!(Resp { resp, resp2, nohandle });
+// Tag 9 is retired; HandleAbend, whose PROGRAM is a datum, is 34.
 codec_enum!(Cics {
     File { verb, file, options } = 0,
     Return { transid, commarea, length } = 1,
@@ -383,7 +384,6 @@ codec_enum!(Cics {
     IgnoreCondition(conditions) = 6,
     PushHandle = 7,
     PopHandle = 8,
-    HandleAbend { program, label, reset } = 9,
     HandleAid = 10,
     SendMap { map, mapset, from, maponly, dataonly, cursor, control } = 11,
     ReceiveMap { map, mapset, into, set } = 12,
@@ -408,6 +408,7 @@ codec_enum!(Cics {
     ReadqTd { queue, record } = 31,
     DeleteqTd { queue } = 32,
     Unsupported = 33,
+    HandleAbend { program, label, reset } = 34,
 });
 codec_enum!(FileControl {
     Read = 0,
