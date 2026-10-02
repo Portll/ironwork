@@ -8,7 +8,7 @@ use numeric::Numproc;
 use rt::lir::{self, AbendId, ByteClass, Comparand, Compare, CondId, Mode, SignTest};
 use rt::storage::Kind;
 use syntax::Pos;
-use syntax::ast::{Class, Cond, Expr, Figurative, Operand, Ref, RelOp};
+use syntax::ast::{Class, Cond, Expr, Figurative, Literal, Operand, Ref, RelOp};
 
 /// A condition as blocks test it. `Abend` is a leaf the walker abends on when it evaluates it;
 /// a test with none folds into one `Cond`.
@@ -80,11 +80,13 @@ impl Lower<'_> {
     }
 
     pub(super) fn relation(&mut self, a: &Expr, op: RelOp, b: &Expr, pos: Pos) -> R<Test> {
+        let all = |e: &Expr| matches!(e, Expr::Operand(Operand::Literal(Literal::All(_))));
+        let (a_all, b_all) = (all(a), all(b));
         let (a, x) = self.comparand(a, pos)?;
         let (b, y) = self.comparand(b, pos)?;
-        let how = if self.zoned_against(&a, &x, &b, &y) {
+        let how = if self.zoned_against(&a, &x, &b, &y, b_all) {
             Compare::ZonedBytes { zoned_first: true }
-        } else if self.zoned_against(&b, &y, &a, &x) {
+        } else if self.zoned_against(&b, &y, &a, &x, a_all) {
             Compare::ZonedBytes { zoned_first: false }
         } else {
             self.compare(&x, &y, pos)?
@@ -93,11 +95,12 @@ impl Lower<'_> {
     }
 
     /// Whether `c` is an unscaled zoned integer item that `Machine::compare` compares by its bytes:
-    /// against a nonnumeric operand, or under INVDATA(NOFORCENUMCMP), unsigned, against ZERO or an
-    /// unsigned zoned integer of its own length (assumption C223).
-    fn zoned_against(&self, c: &Comparand, x: &Side, oc: &Comparand, other: &Side) -> bool {
+    /// against a nonnumeric operand, any ALL literal (`other_all`) among them, or under
+    /// INVDATA(NOFORCENUMCMP), unsigned, against ZERO or an unsigned zoned integer of its own
+    /// length (assumption C223).
+    fn zoned_against(&self, c: &Comparand, x: &Side, oc: &Comparand, other: &Side, other_all: bool) -> bool {
         let Some(p) = self.unscaled_zoned(c, x) else { return false };
-        let nonnumeric = matches!(other.value, Value::Bytes | Value::All) || matches!(other.value, Value::Fig(f) if !matches!(f, Figurative::Zero | Figurative::Null));
+        let nonnumeric = other_all || matches!(other.value, Value::Bytes | Value::All) || matches!(other.value, Value::Fig(f) if !matches!(f, Figurative::Zero | Figurative::Null));
         let unsigned = |s: &Side| matches!(s.src, Some(Kind::Zoned { signed: false, .. }));
         let zones_count = self.c.options.invdata.is_some_and(|i| !i.forcenumcmp)
             && unsigned(x)
