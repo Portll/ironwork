@@ -331,6 +331,17 @@ impl Hfp {
         Some((self.negative && !magnitude.is_zero(), magnitude))
     }
 
+    /// The value with its fractional digits dropped, toward zero, at any magnitude.
+    pub fn integer_part(self) -> Self {
+        let scale = self.scale();
+        if scale >= 0 {
+            return self;
+        }
+        let dropped = digit_bits(scale.unsigned_abs());
+        let fraction = if dropped >= 128 { 0 } else { self.fraction >> dropped << dropped };
+        if fraction == 0 { Self::zero(self.precision) } else { Self { fraction, ..self } }
+    }
+
     /// CONVERT TO FIXED, or `None` when the result does not fit.
     pub fn to_integer(self, rounding: Rounding) -> Option<i128> {
         let (negative, magnitude) = self.to_scaled_integer(0, rounding)?;

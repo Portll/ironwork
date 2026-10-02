@@ -241,3 +241,27 @@ fn integers_go_into_national_and_alphanumeric_items_and_any_number_into_floating
     let out = displays(&data, &["JSON PARSE T INTO G ENCODING 1140", SHOW, "DISPLAY FUNCTION DISPLAY-OF(N) '|' A '|'", "COMPUTE Code-Out = F", "DISPLAY Code-Out"]);
     assert_eq!(out, "CODE 000 STATUS 000\n42  |7  |\n015\n");
 }
+
+#[test]
+fn a_number_moves_only_where_table_46_allows_and_an_exponent_is_never_expanded() {
+    let data = format!("{CODES}       01  T PIC X(60).\n       01  G.\n           05 ALPHA PIC A(5).\n           05 ALNUM PIC X(5).\n           05 NUM PIC 9(4).\n");
+    let out = displays(
+        &data,
+        &[
+            "MOVE '{\"G\":{\"ALPHA\":42}}' TO T",
+            "JSON PARSE T INTO G ENCODING 1140",
+            SHOW,
+            "MOVE '{\"G\":{\"ALNUM\":1e2}}' TO T",
+            "JSON PARSE T INTO G ENCODING 1140",
+            SHOW,
+            "MOVE '{\"G\":{\"ALNUM\":42}}' TO T",
+            "JSON PARSE T INTO G ENCODING 1140",
+            SHOW,
+            "MOVE '{\"G\":{\"NUM\":1e99999999999999999999}}' TO T",
+            "JSON PARSE T INTO G ENCODING 1140",
+            SHOW,
+            "DISPLAY ALNUM ' ' NUM",
+        ],
+    );
+    assert_eq!(out, "CODE 104 STATUS 000\nCODE 104 STATUS 000\nCODE 000 STATUS 001\nCODE 000 STATUS 129\n42    0000\n");
+}

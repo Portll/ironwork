@@ -76,6 +76,8 @@ pub struct FileDecl {
     pub status: Option<Ref>,
     /// FILE STATUS's second data-name, for a VSAM file: the return, function and feedback codes.
     pub vsam_status: Option<Ref>,
+    /// PASSWORD IS items, checked and of no effect, as files here have no passwords.
+    pub passwords: Vec<Ref>,
     /// RECORDING MODE: F, V, U or S.
     pub recording: Option<char>,
     pub record_min: Option<u32>,

@@ -85,3 +85,19 @@ fn binary_float_and_comp_5_items_take_their_own_formats() {
     let out = displays(&data, &["JSON GENERATE D FROM G COUNT N ENCODING 1140", "DISPLAY D(1:N)"]);
     assert_eq!(out, "{\"G\":{\"B\":-12,\"F\":7.79999999999999982E+00,\"P\":1.50}}\n");
 }
+
+#[test]
+fn a_group_converted_to_json_null_is_null_and_one_whose_members_are_all_ignored_is_left_out() {
+    let data = format!("{DOC}       01  A.\n           02 SUB VALUE SPACES.\n              03 S1 PIC X.\n              03 S2 PIC X.\n           02 FILLS.\n              03 FILLER PIC X.\n           02 B PIC X VALUE 'b'.\n");
+    let out = displays(
+        &data,
+        &[
+            "JSON GENERATE D FROM A COUNT N ENCODING 1140\n    CONVERTING SUB TO JSON NULL USING SPACE",
+            "DISPLAY D(1:N)",
+            "MOVE SPACES TO D",
+            "JSON GENERATE D FROM A COUNT N ENCODING 1140\n    CONVERTING A TO JSON NULL USING SPACE",
+            "DISPLAY D(1:N)",
+        ],
+    );
+    assert_eq!(out, "{\"A\":{\"SUB\":null,\"B\":\"b\"}}\n{\"A\":{\"SUB\":{\"S1\":\" \",\"S2\":\" \"},\"B\":\"b\"}}\n");
+}

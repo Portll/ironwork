@@ -1379,9 +1379,10 @@ fn call_by_reference_content_and_value_with_returning_and_return_code() {
         ]
         .concat(),
     );
-    let (out, err, ending) = run_unit(&source, vec![], "");
+    let (out, err, ending) = run_unit(&format!("       CBL DYNAM\n{source}"), vec![], "");
     assert_eq!(ending.as_ref().map(|e| e.1), Ok(4), "{ending:?} {err}");
     assert_eq!(out, "XYZ BBB 0107 0004\n0201\n0101\n");
+    assert_eq!(run_unit(&source, vec![], "").0, "XYZ BBB 0107 0004\n0201\n0301\n");
 }
 
 #[test]
@@ -2086,6 +2087,21 @@ fn records_of_different_lengths_with_no_record_clause_make_a_variable_file() {
     assert!(ending.is_ok(), "{ending:?} {err}");
     assert_eq!(std::fs::metadata(&data).map(|m| m.len()).unwrap_or(0), 4 + 3 + 4 + 6);
     let _ = std::fs::remove_file(data);
+}
+
+#[test]
+fn a_password_item_must_be_an_alphanumeric_item_of_working_storage() {
+    let source = |item: &str| {
+        file_program(
+            "           SELECT K ASSIGN KDD ORGANIZATION INDEXED\n               RECORD KEY IS KK PASSWORD IS PW.\n",
+            "       FD  K.\n       01  KR.\n           05 KK PIC X.\n",
+            item,
+            &line("GOBACK."),
+        )
+    };
+    assert!(!compile_errors(&source("       01  PW PIC X(8).\n")).contains("PW"));
+    assert!(compile_errors(&source("       01  PW PIC 9(8).\n")).contains("PW: the PASSWORD of K must be an alphabetic, alphanumeric or alphanumeric-edited item of WORKING-STORAGE"));
+    assert!(compile_errors(&source("       01  OTHER PIC X(8).\n")).contains("PW is not defined"));
 }
 
 #[test]

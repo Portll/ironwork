@@ -106,10 +106,17 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     /// Items JSON GENERATE leaves out wherever they are: unnamed elementary items, REDEFINES and
-    /// RENAMES items with what is under them, and the phrases' null indicators.
+    /// RENAMES items with what is under them, the phrases' null indicators, and a group whose
+    /// members all are left out (Language Reference SC27-8713-03, p. 373).
     fn json_ignored(&self, item: usize, p: &Phrases) -> bool {
         let i = &self.layout.items[item];
-        (i.name.is_none() && i.children.is_empty()) || i.redefines.is_some() || i.level == 66 || p.indicators.contains(&item)
+        if i.redefines.is_some() || i.level == 66 || p.indicators.contains(&item) {
+            return true;
+        }
+        if i.children.is_empty() || i.kind != Kind::Group {
+            return i.name.is_none();
+        }
+        i.children.iter().all(|&c| self.json_ignored(c, p))
     }
 
     fn json_name(&self, item: usize, p: &Phrases) -> Option<String> {
@@ -168,7 +175,9 @@ impl<'p> Machine<'p, '_, '_> {
         }
     }
 
-    fn json_elementary(&mut self, item: usize, loc: Loc, subscripts: &[u32], p: &Phrases, pos: Pos) -> R<Option<String>> {
+    /// Whether an item, elementary or group, is JSON null: its INDICATING marker holds, or it
+    /// equals the figurative constant CONVERTING ... TO JSON NULL names (p. 378).
+    fn json_null(&mut self, item: usize, loc: Loc, subscripts: &[u32], p: &Phrases, pos: Pos) -> R<bool> {
         if let Some(i) = p.indicated.get(&item) {
             let (k, named) = match (&i.indicator, &i.marker) {
                 (Some(r), _) => (self.item_of(r)?, r),
@@ -178,12 +187,17 @@ impl<'p> Machine<'p, '_, '_> {
             let at = self.locate_item(k, &Self::subscripted(named, subscripts, self.layout.items[k].dims.len()), false)?;
             let byte = self.bytes(at).first().copied().unwrap_or(0);
             if self.marker_holds(&i.marker, byte, subscripts, pos)? {
-                return Ok(Some("null".into()));
+                return Ok(true);
             }
         }
-        if let Some(&f) = p.null_when.get(&item)
-            && self.equals_figurative(loc, f, pos)?
-        {
+        match p.null_when.get(&item) {
+            Some(&f) => self.equals_figurative(loc, f, pos),
+            None => Ok(false),
+        }
+    }
+
+    fn json_elementary(&mut self, item: usize, loc: Loc, subscripts: &[u32], p: &Phrases, pos: Pos) -> R<Option<String>> {
+        if self.json_null(item, loc, subscripts, p, pos)? {
             return Ok(Some("null".into()));
         }
         if let Some(when) = p.suppressed_when.get(&item) {
@@ -254,6 +268,10 @@ impl<'p> Machine<'p, '_, '_> {
         if i.children.is_empty() || i.kind != Kind::Group {
             let loc = Loc { offset, len: i.size as usize, kind: i.kind, item };
             return self.json_elementary(item, loc, subscripts, p, pos);
+        }
+        let loc = Loc { offset, len: i.size as usize, kind: Kind::Group, item };
+        if self.json_null(item, loc, subscripts, p, pos)? {
+            return Ok(Some("null".into()));
         }
         let mut members = Vec::new();
         let mut any_eligible = false;

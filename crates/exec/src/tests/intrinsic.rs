@@ -316,6 +316,29 @@ fn numval_c_takes_the_currency_option_as_its_default_currency_sign() {
 }
 
 #[test]
+fn numval_c_matches_a_lowercase_currency_string_as_written() {
+    let out = displays("       01  R PIC 9(4)V99.\n", &["COMPUTE R = FUNCTION NUMVAL-C('kr 12.50' 'kr')", "DISPLAY R", "COMPUTE R = FUNCTION NUMVAL-C('Rs 1,234.50' 'Rs')", "DISPLAY R"]);
+    assert_eq!(out, "001250\n123450\n");
+}
+
+#[test]
+fn annuity_at_a_rate_too_small_to_move_one_and_rem_of_a_large_float_have_values() {
+    let out = displays(
+        "       01  X COMP-2.\n       01  R PIC 9V9(9).\n",
+        &[
+            "COMPUTE X = FUNCTION EXP(-100)",
+            "COMPUTE R = FUNCTION ANNUITY(X 10)",
+            "DISPLAY R",
+            "COMPUTE X = 1000000000 * 1000000000 * 1000000000",
+            "COMPUTE X = X * 1000000000 * 10000",
+            "COMPUTE R = FUNCTION REM(X 0.5)",
+            "DISPLAY R",
+        ],
+    );
+    assert_eq!(out, "0100000000\n0000000000\n");
+}
+
+#[test]
 fn the_repository_paragraph_lets_intrinsic_functions_go_without_the_word_function() {
     let source = |entry: &str| {
         [

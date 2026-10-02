@@ -551,6 +551,7 @@ impl Parser<'_> {
             optional,
             status: None,
             vsam_status: None,
+            passwords: Vec::new(),
             recording: None,
             record_min: None,
             record_max: None,
@@ -583,10 +584,9 @@ impl Parser<'_> {
                         self.at += 1;
                     }
                 }
-                // Files here have no passwords, so the password items are read and not checked (LR p. 152).
                 "PASSWORD" => {
                     self.accept_word("IS");
-                    self.reference()?;
+                    f.passwords.push(self.reference()?);
                 }
                 // RECORD DELIMITER is syntax-checked and has no effect (LR, 'RECORD DELIMITER clause').
                 "RECORD" if self.accept_word("DELIMITER") => {
@@ -2802,7 +2802,9 @@ impl Parser<'_> {
         if self.peek() == Some(&Tok::LParen) {
             let save = self.at;
             self.at += 1;
-            let mut inner_last = None;
+            // A subject stated outside the parentheses stays current inside them; one stated inside
+            // ends at the right parenthesis (Language Reference SC27-8713-03, p. 288, rule 10).
+            let mut inner_last = last.clone();
             if let Ok(c) = self.or_cond(&mut inner_last)
                 && self.accept(&Tok::RParen)
                 && !matches!(self.peek(), Some(Tok::Plus | Tok::Minus | Tok::Star | Tok::Slash | Tok::Power))
@@ -2813,6 +2815,7 @@ impl Parser<'_> {
             }
             self.at = save;
         }
+        let start = self.at;
         let left = self.expr()?;
         self.accept_word("IS");
         let negated = self.is_word("NOT") && {
@@ -2837,7 +2840,7 @@ impl Parser<'_> {
             return Err(self.error("a relational operator or class after NOT"));
         }
         match (left, last.clone()) {
-            (Expr::Operand(Operand::Ref(name)), Some((subject, op, negated))) if self.abbreviation_context() => Ok(Cond::NameOrRel { subject, op, negated, name }),
+            (Expr::Operand(Operand::Ref(name)), Some((subject, op, negated))) if self.abbreviation_context(start) => Ok(Cond::NameOrRel { subject, op, negated, name }),
             (right, Some((subject, op, negated))) if !matches!(&right, Expr::Operand(Operand::Ref(_))) => Ok(relation(subject, op, negated, right)),
             (Expr::Operand(Operand::Ref(r)), _) => Ok(Cond::Name(r)),
             (_, _) => Err(self.error("a relational operator")),
@@ -2848,6 +2851,9 @@ impl Parser<'_> {
     /// over. The subject and operator stay current for the abbreviated relations that follow.
     fn objects(&mut self, subject: Expr, op: RelOp, negated: bool, last: &mut Option<(Expr, RelOp, bool)>) -> R<Cond> {
         *last = Some((subject.clone(), op, negated));
+        if self.peek() == Some(&Tok::LParen) && self.word_at(1) == Some("NOT") && !self.relop_ahead(2) {
+            return Err(Error::at(self.pos(), "NOT cannot follow the left parenthesis that distributes a relational operator"));
+        }
         let start = self.at;
         match self.distributed(&subject, op, negated) {
             Ok(Some(c)) => return Ok(c),
@@ -2899,9 +2905,18 @@ impl Parser<'_> {
         Ok(relation(subject.clone(), op, negated, object))
     }
 
-    /// After AND or OR, an operand with no operator of its own continues an abbreviated relation.
-    fn abbreviation_context(&self) -> bool {
-        self.at > 1 && matches!(self.tokens.get(self.at.saturating_sub(2)).map(|t| &t.tok), Some(Tok::Word(w)) if w == "OR" || w == "AND")
+    /// An operand from token `start`, with no operator of its own, continues an abbreviated
+    /// relation when AND or OR comes before it, past any NOT and left parentheses (p. 289, Table 30).
+    fn abbreviation_context(&self, start: usize) -> bool {
+        for t in self.tokens[..start].iter().rev() {
+            match &t.tok {
+                Tok::LParen => {}
+                Tok::Word(w) if w == "NOT" => {}
+                Tok::Word(w) => return w == "OR" || w == "AND",
+                _ => return false,
+            }
+        }
+        false
     }
 
     fn relop(&mut self) -> R<Option<RelOp>> {

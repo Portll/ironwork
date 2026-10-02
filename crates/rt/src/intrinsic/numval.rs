@@ -2,7 +2,6 @@
 //! pp. 605-609), which TEST-NUMVAL, TEST-NUMVAL-C and TEST-NUMVAL-F check (pp. 651-655).
 
 use super::real::Real;
-use numeric::precision::{Fixed, Places};
 use std::ops::{Div, Mul};
 use zarch::wide::U256;
 
@@ -181,37 +180,6 @@ pub fn parse(text: &str, form: Form, max_digits: usize, decimal_comma: bool) -> 
 /// TEST-NUMVAL, TEST-NUMVAL-C and TEST-NUMVAL-F.
 pub fn test(text: &str, form: Form, max_digits: usize, decimal_comma: bool) -> usize {
     parse(text, form, max_digits, decimal_comma).err().unwrap_or(0)
-}
-
-/// NUMVAL and NUMVAL-C as fixed point: spaces, one sign (leading + or -, trailing + - CR or DB),
-/// digits with at most one decimal point; NUMVAL-C also allows the currency sign and commas. None
-/// when the text is anything else.
-pub fn fixed(text: &str, currency: Option<&str>) -> Option<Fixed> {
-    let mut t = text.trim().to_ascii_uppercase();
-    let mut negative = false;
-    for (suffix, minus) in [("CR", true), ("DB", true), ("-", true), ("+", false)] {
-        if let Some(rest) = t.strip_suffix(suffix) {
-            negative = minus;
-            t = rest.trim_end().to_owned();
-            break;
-        }
-    }
-    if let Some(rest) = t.strip_prefix('-') {
-        negative = true;
-        t = rest.trim_start().to_owned();
-    } else if let Some(rest) = t.strip_prefix('+') {
-        t = rest.trim_start().to_owned();
-    }
-    if let Some(c) = currency {
-        t = t.trim_start_matches(c.trim()).trim_start().replace(',', "");
-    }
-    let (int, frac) = t.split_once('.').unwrap_or((&t, ""));
-    if int.is_empty() && frac.is_empty() || !int.chars().chain(frac.chars()).all(|c| c.is_ascii_digit()) || int.len() + frac.len() > 31 {
-        return None;
-    }
-    let digits: u128 = format!("{int}{frac}").parse().unwrap_or(0);
-    let f = Fixed::new(digits as i128, Places::new(int.len().max(1) as u32, frac.len() as u32));
-    Some(if negative { Fixed { negative: digits != 0, ..f } } else { f })
 }
 
 #[cfg(test)]

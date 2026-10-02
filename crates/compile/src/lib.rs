@@ -3,6 +3,7 @@
 
 pub mod collating;
 mod corresponding;
+pub use corresponding::is_alphabetic;
 pub mod declaratives;
 mod initcheck;
 pub mod layout;
@@ -226,6 +227,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     for k in 0..program.files.len() {
         check.file_keys(k);
         check.record_depending(k);
+        check.passwords(k);
         linage::check_file(check.program, check.layout, k, check.errors);
     }
     for block in &program.exec_declarations {
@@ -1058,6 +1060,21 @@ impl Check<'_> {
         self.reference(r);
         if self.item(r).is_some() && linage::unsigned_integer(self.layout, r).is_none() {
             self.errors.push(Error::at(r.pos, format!("{}: the DEPENDING ON item of {} must be an elementary unsigned integer", r.name, f.name)));
+        }
+    }
+
+    /// A PASSWORD item is a WORKING-STORAGE item of category alphabetic, alphanumeric or
+    /// alphanumeric-edited (Language Reference SC27-8713-03, p. 152).
+    fn passwords(&mut self, k: usize) {
+        let f = &self.program.files[k];
+        for r in &f.passwords {
+            self.reference(r);
+            let Some(i) = self.item(r) else { continue };
+            let item = &self.layout.items[i];
+            let working = !item.local && item.file.is_none() && item.linkage.is_none();
+            if !working || !matches!(item.kind, rt::storage::Kind::Alnum { .. } | rt::storage::Kind::AlnumEdited { .. } | rt::storage::Kind::Group) {
+                self.errors.push(Error::at(r.pos, format!("{}: the PASSWORD of {} must be an alphabetic, alphanumeric or alphanumeric-edited item of WORKING-STORAGE", r.name, f.name)));
+            }
         }
     }
 

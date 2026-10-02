@@ -200,6 +200,9 @@ pub struct Scanner<'r> {
     last_segment: bool,
     doctype: bool,
     standalone_no: bool,
+    /// The last CONTENT-CHARACTERS piece ended at a segment's end, so XML-INFORMATION said more
+    /// may follow.
+    split: bool,
 }
 
 type Scan<T> = Result<T, Why>;
@@ -207,8 +210,9 @@ type Scan<T> = Result<T, Why>;
 /// Not enough input to finish a construct.
 const MORE: Why = Why::UnexpectedEnd;
 
+/// XML's white space and next line, EBCDIC's NL (Programming Guide SC27-8714-03, p. 641).
 fn is_space(c: char) -> bool {
-    matches!(c, ' ' | '\t' | '\n' | '\r')
+    matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{85}')
 }
 
 fn name_start(c: char) -> bool {
@@ -247,6 +251,7 @@ impl<'r> Scanner<'r> {
             last_segment: false,
             doctype: false,
             standalone_no: false,
+            split: false,
         }
     }
 
@@ -331,6 +336,13 @@ impl<'r> Scanner<'r> {
     fn step(&mut self) -> Scan<()> {
         if let Some(open) = self.open.clone() {
             return self.continue_open(open);
+        }
+        // Content that a segment's end split is closed by a zero-length final piece when the next
+        // segment starts with markup (Programming Guide SC27-8714-03, pp. 639, 659-660).
+        if self.split && self.peek(0) == Some('<') {
+            self.split = false;
+            self.pending.push_back(Event::characters(EventKind::ContentCharacters, String::new(), true));
+            return Ok(());
         }
         while self.place != Place::Content && self.peek(0).is_some_and(is_space) {
             self.at += 1;
@@ -568,12 +580,13 @@ impl<'r> Scanner<'r> {
         if let Open::Instruction(target, true) = &open {
             self.pending.push_back(Event::new(EventKind::ProcessingInstructionTarget, target.clone()));
         }
-        if !text.is_empty() || kind == EventKind::Comment || kind == EventKind::ProcessingInstructionData {
-            let mut event = Event::new(kind, text);
-            if kind == EventKind::ContentCharacters {
-                event.information = if complete { 1 } else { 2 };
+        if kind == EventKind::ContentCharacters {
+            if !text.is_empty() || std::mem::take(&mut self.split) {
+                self.pending.push_back(Event::characters(kind, text, complete));
             }
-            self.pending.push_back(event);
+            self.split = !complete;
+        } else if !text.is_empty() || kind == EventKind::Comment || kind == EventKind::ProcessingInstructionData {
+            self.pending.push_back(Event::new(kind, text));
         }
         if complete {
             self.open = None;
@@ -642,6 +655,7 @@ impl<'r> Scanner<'r> {
         }
         if !run.is_empty() {
             self.pending.push_back(Event::characters(EventKind::ContentCharacters, run, complete));
+            self.split = !complete;
         }
         Ok(())
     }

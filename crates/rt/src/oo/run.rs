@@ -190,7 +190,7 @@ fn keep<H: Clone, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, compiled: Option<H
     let base = unit.push_temporary(bytes);
     let files = compiled.as_ref().map_or(Vec::new(), |c| (0..L::shape(c).0).map(|_| None).collect());
     let locked = vec![false; files.len()];
-    unit.programs.push(Loaded { compiled, name: String::new(), base, files, locked, initialized: false, active: false, entry: None, altered: Vec::new(), source: None });
+    unit.programs.push(Loaded { compiled, name: String::new(), base, files, locked, initialized: false, active: false, dynamic: false, entry: None, altered: Vec::new(), source: None });
     Ok(unit.programs.len() - 1)
 }
 

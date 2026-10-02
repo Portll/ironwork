@@ -280,9 +280,11 @@ impl<'p> Machine<'p, '_, '_> {
                 Ok(Ok(()))
             }
             Value::String(s) => self.parse_string(loc, s, g, pos),
+            Value::Number(_) if self.alphabetic(item) => Ok(Err(INCOMPATIBLE)),
             Value::Number(n) => {
                 let (negative, int, frac) = json::decimal(n);
-                self.parse_number(loc, negative, &int, &frac, g, pos)
+                let integer = !n.contains(['.', 'e', 'E']);
+                self.parse_number(loc, negative, &int, &frac, integer, g, pos)
             }
             Value::Object(_) | Value::Array(_) | Value::Null => Ok(Err(INCOMPATIBLE)),
         }
@@ -323,15 +325,25 @@ impl<'p> Machine<'p, '_, '_> {
                 Ok(Ok(()))
             }
             _ => match json::numeric_string(s, self.decimal_point()) {
-                Some((negative, int, frac)) => self.parse_number(loc, negative, &int, &frac, g, pos),
+                Some((negative, int, frac)) => self.parse_number(loc, negative, &int, &frac, true, g, pos),
                 None => Ok(Err(INCOMPATIBLE)),
             },
         }
     }
 
-    /// A number into a receiver, by MOVE; an alphanumeric or national receiver takes integers only.
-    fn parse_number(&mut self, loc: Loc, negative: bool, int: &str, frac: &str, g: &mut Progress, pos: Pos) -> R<Code> {
-        let integer = frac.bytes().all(|b| b == b'0');
+    /// Whether data item `item` is of category alphabetic, which no JSON number moves to (p. 395,
+    /// Table 46).
+    fn alphabetic(&self, item: usize) -> bool {
+        let at = self.layout.items[item].pos;
+        let program = self.program;
+        let mut entries = program.working_storage.iter().chain(&program.local_storage).chain(&program.linkage).chain(program.files.iter().flat_map(|f| &f.records));
+        entries.any(|e| e.pos == at && e.picture.as_deref().is_some_and(compile::is_alphabetic))
+    }
+
+    /// A number into a receiver, by MOVE; an alphanumeric or national receiver takes only a number
+    /// written as an integer, with no decimal point or exponent (p. 395, Table 46).
+    #[allow(clippy::too_many_arguments)]
+    fn parse_number(&mut self, loc: Loc, negative: bool, int: &str, frac: &str, integer: bool, g: &mut Progress, pos: Pos) -> R<Code> {
         match loc.kind {
             Kind::Float(precision) => {
                 let digits = format!("{int}{frac}");

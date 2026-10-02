@@ -25,7 +25,7 @@ pub fn expand(program: &mut Program, layout: &Layout, errors: &mut Vec<Error>) {
 }
 
 /// A PICTURE of the symbol A alone, repeated or with a count.
-fn is_alphabetic(picture: &str) -> bool {
+pub fn is_alphabetic(picture: &str) -> bool {
     let mut outside = picture.split(['(', ')']).step_by(2);
     outside.all(|s| s.chars().all(|c| c.eq_ignore_ascii_case(&'A'))) && picture.contains(['A', 'a'])
 }

@@ -228,6 +228,10 @@ pub fn parse(text: &str) -> Result<Value, Invalid> {
     Ok(value)
 }
 
+/// How many zeros an exponent may add on either side of a number's digits: past them it is too
+/// large or too small for any receiver.
+const MOST_ZEROS: i64 = 100;
+
 /// A number's sign, integer digits without leading zeros and fraction digits, its exponent applied.
 pub fn decimal(number: &str) -> (bool, String, String) {
     let (negative, body) = match number.strip_prefix('-') {
@@ -235,12 +239,15 @@ pub fn decimal(number: &str) -> (bool, String, String) {
         None => (false, number),
     };
     let (mantissa, exponent) = match body.find(['e', 'E']) {
-        Some(e) => (&body[..e], body[e + 1..].parse::<i64>().unwrap_or(0)),
+        Some(e) => {
+            let written = &body[e + 1..];
+            (&body[..e], written.parse::<i64>().unwrap_or(if written.starts_with('-') { i64::MIN } else { i64::MAX }))
+        }
         None => (body, 0),
     };
     let (int, frac) = mantissa.split_once('.').unwrap_or((mantissa, ""));
     let digits = format!("{int}{frac}");
-    let point = int.len() as i64 + exponent;
+    let point = (int.len() as i64).saturating_add(exponent).clamp(-MOST_ZEROS, digits.len() as i64 + MOST_ZEROS);
     let (int, frac) = if point <= 0 {
         (String::new(), format!("{}{digits}", "0".repeat(point.unsigned_abs() as usize)))
     } else if point as usize >= digits.len() {

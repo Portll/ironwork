@@ -37,6 +37,23 @@ impl Encoding {
         }
     }
 
+    /// Decodes a segment after the bytes the last one left of a character it split, and keeps those
+    /// this one leaves for the next (Programming Guide SC27-8714-03, p. 638).
+    fn decode_segment(self, carry: &mut Vec<u8>, bytes: &[u8]) -> String {
+        let mut all = std::mem::take(carry);
+        all.extend_from_slice(bytes);
+        let whole = match self {
+            Encoding::Utf8 => all.len() - utf8_unfinished(&all),
+            Encoding::National => {
+                let even = all.len() & !1;
+                if even >= 2 && (0xD8..=0xDB).contains(&all[even - 2]) { even - 2 } else { even }
+            }
+            Encoding::Page(_) => all.len(),
+        };
+        carry.extend_from_slice(&all[whole..]);
+        self.decode(&all[..whole])
+    }
+
     fn encode(self, text: &str) -> Vec<u8> {
         match self {
             Encoding::National => text.encode_utf16().flat_map(u16::to_be_bytes).collect(),
@@ -44,6 +61,23 @@ impl Encoding {
             Encoding::Page(page) => page.encode_lossy(text),
         }
     }
+}
+
+/// How many bytes at the end of `bytes` begin a UTF-8 character they do not finish.
+fn utf8_unfinished(bytes: &[u8]) -> usize {
+    for back in 1..=bytes.len().min(3) {
+        let lead = bytes[bytes.len() - back];
+        if lead & 0xC0 != 0x80 {
+            let length = match lead {
+                0xC0..=0xDF => 2,
+                0xE0..=0xEF => 3,
+                0xF0..=0xF7 => 4,
+                _ => 1,
+            };
+            return if length > back { back } else { 0 };
+        }
+    }
+    0
 }
 
 fn special(name: &str) -> Ref {
@@ -120,9 +154,9 @@ impl<'p> Machine<'p, '_, '_> {
         self.perform_range(range.0, range.1, None, None)
     }
 
-    fn xml_document(&mut self, x: &XmlParse, encoding: Encoding) -> R<String> {
+    fn xml_document(&mut self, x: &XmlParse, encoding: Encoding, carry: &mut Vec<u8>) -> R<String> {
         let loc = self.locate(&x.document)?;
-        Ok(encoding.decode(self.bytes(loc)))
+        Ok(encoding.decode_segment(carry, self.bytes(loc)))
     }
 
     pub(super) fn xml_parse(&mut self, x: &'p XmlParse) -> R<Flow> {
@@ -150,7 +184,8 @@ impl<'p> Machine<'p, '_, '_> {
             Encoding::Page(page) if !national_out => Box::new(move |c| page.encode_char(c).is_some()),
             _ => Box::new(|_| true),
         };
-        let text = self.xml_document(x, encoding)?;
+        let mut carry = Vec::new();
+        let text = self.xml_document(x, encoding, &mut carry)?;
         let mut seen = text.clone();
         let mut scanner = Scanner::new(&text, &*representable);
         let mark = self.unit.mem.len();
@@ -177,19 +212,32 @@ impl<'p> Machine<'p, '_, '_> {
                 Flow::Next => {}
                 other => return Ok(other),
             }
+            // What the procedure left in XML-CODE decides what follows (Programming Guide
+            // SC27-8714-03, p. 630, Table 75).
             let code = self.xml_code(x.pos)?;
             match event.kind {
                 EventKind::Exception if warning && code == 0 => {}
                 EventKind::Exception => break exception.unwrap_or(code),
-                EventKind::EndOfDocument => break 0,
+                _ if code == -1 => break -1,
                 EventKind::EndOfInput if code == 1 => {
-                    let segment = self.xml_document(x, encoding)?;
+                    let segment = self.xml_document(x, encoding, &mut carry)?;
                     seen.push_str(&segment);
                     scanner.feed(&segment);
                 }
-                EventKind::EndOfInput => scanner.finish(),
-                _ if code == -1 => break -1,
-                _ => {}
+                EventKind::EndOfInput if code == 0 => {
+                    if !carry.is_empty() {
+                        let rest = encoding.decode(&std::mem::take(&mut carry));
+                        seen.push_str(&rest);
+                        scanner.feed(&rest);
+                    }
+                    scanner.finish();
+                }
+                EventKind::EndOfDocument if code == 0 => break 0,
+                _ if code == 0 => {}
+                kind => {
+                    let message = format!("IGZ0230S XML PARSE: the processing procedure set XML-CODE to {code} at event {}", kind.name());
+                    return Err(Abend { code: AbendCode::user(4038), message, pos: x.pos, file: None });
+                }
             }
         };
         self.set_integer(&special("XML-CODE"), code, x.pos)?;

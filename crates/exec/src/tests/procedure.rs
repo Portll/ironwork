@@ -189,7 +189,7 @@ fn an_altered_go_to_is_put_back_by_cancel_and_by_initial_but_kept_between_calls(
     };
     let main = |initial: &str| {
         [
-            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. MAIN.\n       PROCEDURE DIVISION.\n",
+            "       CBL DYNAM\n       IDENTIFICATION DIVISION.\n       PROGRAM-ID. MAIN.\n       PROCEDURE DIVISION.\n",
             &line("CALL 'SUB'"),
             &line("CALL 'SUB'"),
             &line("CANCEL 'SUB'"),
@@ -646,6 +646,27 @@ fn an_abbreviated_relation_may_write_is_before_its_operator() {
     let data = "       01  A PIC 9.\n       01  B PIC 9 VALUE 1.\n       01  C PIC 9 VALUE 3.\n       01  D PIC 9 VALUE 9.\n";
     let source = program("", data, &[body(5), body(2), line("GOBACK.")].concat());
     assert_eq!(run(&source), "TRUE\nFALSE\n");
+}
+
+#[test]
+fn an_abbreviated_object_may_be_qualified_subscripted_negated_or_in_parentheses() {
+    let data = "       01  A PIC 9 VALUE 5.\n       01  B PIC 9 VALUE 1.\n       01  C PIC 9 VALUE 2.\n       01  D PIC 9 VALUE 5.\n       01  G.\n           05 E PIC 9 VALUE 5.\n           05 TE PIC 9 OCCURS 3 VALUE 5.\n";
+    let check = |condition: &str| [line(&format!("IF {condition}")), line("    DISPLAY 'T' ELSE DISPLAY 'F' END-IF")].concat();
+    let body = [
+        check("NOT (A NOT = B AND C AND NOT D)"),
+        check("A = B OR E OF G"),
+        check("A = B OR TE (2)"),
+        check("A = B OR NOT D"),
+        check("A = 5 AND (C OR D)"),
+        check("A > B AND NOT (C OR D)"),
+        check("A = B OR (> C AND < 9)"),
+        line("GOBACK."),
+    ]
+    .concat();
+    assert_eq!(run(&program("", data, &body)), "F\nT\nT\nF\nT\nF\nT\n");
+    let distributed = program("", data, &[check("A NOT = (NOT B OR C)"), line("GOBACK.")].concat());
+    let refused = syntax::parse(&distributed).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(refused.contains("NOT cannot follow the left parenthesis that distributes a relational operator"), "{refused}");
 }
 
 #[test]

@@ -30,6 +30,8 @@ pub struct Loaded<H> {
     pub locked: Vec<bool>,
     pub initialized: bool,
     pub active: bool,
+    /// A dynamic CALL has entered it, so CANCEL acts on it.
+    pub dynamic: bool,
     /// For a copy a dynamic CALL of an ENTRY name loaded, that entry (numbered as
     /// [`Loader::entry`] numbers them); None for the program loaded by its PROGRAM-ID.
     pub entry: Option<usize>,
@@ -172,7 +174,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         let base = self.allocate(size);
         let index = self.programs.len();
         self.names.insert(name.clone(), index);
-        self.programs.push(Loaded { compiled, name, base, files: (0..files).map(|_| None).collect(), locked: vec![false; files], initialized: false, active: false, entry: None, altered: Vec::new(), source: None });
+        self.programs.push(Loaded { compiled, name, base, files: (0..files).map(|_| None).collect(), locked: vec![false; files], initialized: false, active: false, dynamic: false, entry: None, altered: Vec::new(), source: None });
         index
     }
 

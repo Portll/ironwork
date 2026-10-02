@@ -249,20 +249,21 @@ fn power(base: Real, mut n: u128) -> Option<Real> {
     Some(result)
 }
 
-/// ANNUITY: rate / (1 - (1 + rate)^-periods), or 1 / periods at a zero rate (Language Reference
-/// SC27-8713-03, p. 521).
+/// ANNUITY: rate / (1 - (1 + rate)^-periods), or 1 / periods at a zero rate or one too small to
+/// move 1 + rate (Language Reference SC27-8713-03, p. 521).
 pub fn annuity(rate: Real, periods: u128) -> Option<Real> {
     if rate.is_negative() || periods == 0 {
         return None;
-    }
-    if rate.is_zero() {
-        return Some(Real::ONE.div(Real::from_u128(periods)));
     }
     let discount = match power(Real::ONE.add(rate), periods) {
         Some(p) => Real::ONE.div(p),
         None => Real::ZERO,
     };
-    Some(rate.div(Real::ONE.sub(discount)))
+    let denominator = Real::ONE.sub(discount);
+    if denominator.is_zero() {
+        return Some(Real::ONE.div(Real::from_u128(periods)));
+    }
+    Some(rate.div(denominator))
 }
 
 /// PRESENT-VALUE: the sum of each amount / (1 + rate)^n, n from 1 (p. 619).

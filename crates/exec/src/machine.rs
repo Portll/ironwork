@@ -911,6 +911,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let Some(compiled) = self.unit.programs[index].compiled.clone() else {
             return Err(Abend::ironwork(format!("CALL {name}: the first program of the run unit is already active"), pos));
         };
+        self.unit.programs[index].dynamic |= dynamic;
         if self.unit.programs[index].active && !compiled.program.recursive {
             return Err(Abend::ironwork(format!("CALL {name}: the program is already active and is not RECURSIVE"), pos));
         }
@@ -1077,8 +1078,16 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         })
     }
 
+    /// CANCEL of a program a dynamic CALL entered, or of a contained program; a program only ever
+    /// called statically is left as it is (Language Reference SC27-8713-03, p. 327; Programming
+    /// Guide SC27-8714-03, pp. 399, 548).
     fn cancel(&mut self, name: &str, pos: Pos) -> R<()> {
         let Some(index) = self.unit.find(name) else { return Ok(()) };
+        let target = &self.unit.programs[index].name;
+        let contained = self.unit.programs.iter().any(|p| p.compiled.as_ref().is_some_and(|c| c.program.nested.contains(target)));
+        if !self.unit.programs[index].dynamic && !contained {
+            return Ok(());
+        }
         if self.unit.programs[index].active {
             return Err(Abend::ironwork(format!("CANCEL {name}: the program is active"), pos));
         }

@@ -124,3 +124,57 @@ fn the_parse_goes_on_past_an_undeclared_prefix_only_when_xml_code_is_reset() {
         ]
     );
 }
+
+#[test]
+fn content_a_segment_ends_is_closed_by_a_zero_length_piece_when_markup_follows() {
+    let data = "       01  SEGMENTS VALUE '<a>Hello</a>    '.\n           05 SEG PIC X(8) OCCURS 2.\n       01  I PIC 9 VALUE 1.\n";
+    let handler = [
+        "DISPLAY XML-EVENT(1:20) XML-INFORMATION ' '\n    LENGTH OF XML-TEXT ' {' XML-TEXT '}'",
+        "IF XML-EVENT = 'END-OF-INPUT' AND I = 1\n    ADD 1 TO I\n    MOVE 1 TO XML-CODE\nEND-IF.",
+    ];
+    assert_eq!(
+        trimmed(&parse(data, &["XML PARSE SEG(I) PROCESSING PROCEDURE P"], &handler))[2..6],
+        [
+            "CONTENT-CHARACTERS  000000002 000000005 {Hello}",
+            "END-OF-INPUT        000000000 000000000 {}",
+            "CONTENT-CHARACTERS  000000001 000000000 {}",
+            "END-OF-ELEMENT      000000000 000000001 {a}",
+        ]
+    );
+}
+
+#[test]
+fn a_utf_8_character_split_between_segments_comes_whole() {
+    let data = "       01  W PIC X(5) VALUE X'3C613EC3'.\n       01  L PIC 9 VALUE 4.\n";
+    let handler = [
+        "DISPLAY XML-EVENT(1:20) FUNCTION HEX-OF(XML-TEXT)",
+        "IF XML-EVENT = 'END-OF-INPUT'\n    MOVE X'A93C2F613E' TO W\n    MOVE 5 TO L\n    MOVE 1 TO XML-CODE\nEND-IF.",
+    ];
+    let out = parse(data, &["XML PARSE W(1:L) WITH ENCODING 1208\n    PROCESSING PROCEDURE P"], &handler);
+    assert_eq!(trimmed(&out)[3..5], ["CONTENT-CHARACTERS  C3A9", "END-OF-ELEMENT      61"]);
+}
+
+#[test]
+fn ebcdic_new_line_is_white_space() {
+    let data = "       01  DOC.\n           05 PIC X(21) VALUE '<?xml version=\"1.0\"?>'.\n           05 PIC X VALUE X'15'.\n           05 PIC X(8) VALUE '<a>x</a>'.\n";
+    let out = parse(data, &["XML PARSE DOC PROCESSING PROCEDURE P\n    ON EXCEPTION DISPLAY 'FAILED ' XML-CODE\n    NOT ON EXCEPTION DISPLAY 'PARSED'\nEND-XML"], &["CONTINUE."]);
+    assert_eq!(trimmed(&out), ["PARSED"]);
+}
+
+#[test]
+fn xml_code_after_an_event_follows_table_75() {
+    let data = "       01  DOC PIC X(8) VALUE '<a>x</a>'.\n       01  SET-TO PIC S9.\n";
+    let main = ["XML PARSE DOC PROCESSING PROCEDURE P\n    ON EXCEPTION DISPLAY 'STOPPED ' XML-CODE\n    NOT ON EXCEPTION DISPLAY 'PARSED'\nEND-XML"];
+    let handler = ["IF XML-EVENT = 'END-OF-DOCUMENT'\n    MOVE SET-TO TO XML-CODE\nEND-IF."];
+    let source = |value: i8| {
+        let data = data.replace("SET-TO PIC S9.", &format!("SET-TO PIC S9 VALUE {value}."));
+        let body = |stmts: &[&str]| stmts.iter().flat_map(|s| s.split('\n')).map(line).collect::<String>();
+        program("", &data, &format!("       MAIN.\n{}{}       P.\n{}", body(&main), line("GOBACK."), body(&handler)))
+    };
+    let run = |value: i8| Harness::source(&source(value)).run(Executor::Interpreter);
+    assert_eq!(trimmed(&run(-1).out), ["STOPPED 00000000J"]);
+    assert_eq!(trimmed(&run(0).out), ["PARSED"]);
+    let fatal = run(1).ending.unwrap_err();
+    assert_eq!(fatal.code, AbendCode::user(4038));
+    assert!(fatal.message.starts_with("IGZ0230S"), "{}", fatal.message);
+}

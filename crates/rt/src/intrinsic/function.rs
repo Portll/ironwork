@@ -162,14 +162,14 @@ pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args
                 Some(v) => text_of(&facts, v, name, pos)?,
                 None => x.currency(),
             };
-            let mut text = text_of(&facts, &args[0], name, pos)?;
-            if facts.decimal_point() == ',' {
-                text = text.chars().map(|c| if c == '.' { ',' } else if c == ',' { '.' } else { c }).collect();
-            }
-            let value = numval::fixed(&text, (name == "NUMVAL-C").then_some(currency.as_str())).unwrap_or_else(|| Fixed::new(0, Places::new(1, 0)));
+            let text = text_of(&facts, &args[0], name, pos)?;
+            let form = if name == "NUMVAL-C" { Form::Currency(&currency) } else { Form::Numval };
+            let arith = facts.options().arith;
+            let digits = if arith == Arith::Extend { 31 } else { 18 };
+            let value = numval::parse(&text, form, digits, facts.decimal_point() == ',').map(|n| n.to_real()).unwrap_or(Real::ZERO);
             // Long floating point under ARITH(COMPAT), extended under ARITH(EXTEND) (Programming
             // Guide SC27-8714-03, p. 115).
-            float_result(exact_real(&value), facts.options().arith.float_intermediate(), pos)?
+            float_result(value, arith.float_intermediate(), pos)?
         }
         "TRIM" => {
             arity(1..=1)?;
@@ -296,8 +296,7 @@ fn float_function(facts: &dyn ProgramFacts, name: &str, args: &[Val], pos: Pos) 
             if y.fraction == 0 {
                 return Err(Abend::ironwork("FUNCTION REM by zero", pos));
             }
-            let q = check(x.div(y, ProgramMask::default()))?;
-            let part = Hfp::from_integer(whole(q)?, p);
+            let part = check(x.div(y, ProgramMask::default()))?.integer_part();
             Val::Float(check(x.sub(check(y.mul(part, p, ProgramMask::default()))?, ProgramMask::default()))?)
         }
         "MIN" | "MAX" => {
