@@ -411,7 +411,8 @@ The subset the interpreter runs today:
   RECEIVE MAP (MAPFAIL, JUSTIFY, EIBAID, EIBCPOSN), SEND CONTROL and RECEIVE work on a 3270
   display that speaks the 3270 data stream. `--screens FILE` plays an operator from a script
   (`type ROW COL text`, `eof`, `cursor`, then an AID key) and prints every screen; `--serve
-  HOST:PORT` is a TN3270 server a 3270 emulator such as c3270 or x3270 connects to. Both run
+  HOST:PORT` is a TN3270 server a 3270 emulator such as c3270 or x3270 connects to. It asks for
+  no credentials, so it serves only a loopback address unless `--serve-public` is given. Both run
   pseudo-conversations task after task on one screen (`--transaction TRAN=PROGRAM` names the
   programs RETURN TRANSID leads to, and `--csd FILE` takes them from the region's DEFINE
   TRANSACTIONs); a script's next AID key starts the next task.

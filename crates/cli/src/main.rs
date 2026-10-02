@@ -14,7 +14,7 @@ usage:
                                                        compile only
   ironwork cics <program.cbl> [run flags] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
                [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]... [--td QUEUE=path]...
-               [--screens path | --serve HOST:PORT [--transaction TRAN=PROGRAM]... [--csd path]]
+               [--screens path | --serve HOST:PORT [--serve-public] [--transaction TRAN=PROGRAM]... [--csd path]]
                                                        run as the first program of a CICS task
   ironwork compile <program.cbl>... [-o <dir>] [--bundle NAME] [--source-prefix DIR] [-silent] [-strict-sort-keys]
                [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never]
@@ -165,7 +165,10 @@ cics flags:
              waits for the operator's next AID key and runs that transaction with the COMMAREA
              RETURN gave. A task that ends without TRANSID, an abend, or a transaction that is not
              defined ends the conversation. Each task is its own unit of work. Not with --screens,
-             --commarea or --commarea-out
+             --commarea or --commarea-out. The server asks for no credentials, so an address that
+             is not loopback is refused without --serve-public
+  --serve-public
+             serve an address other than loopback, to anyone who reaches it
   --transaction TRAN=PROGRAM
              with --serve or --screens, the program a transaction runs: a program of the source,
              or one found through -L. --transid names the given program; each program compiles
@@ -440,6 +443,7 @@ fn driver() -> ExitCode {
                 Some("keyed") => keyed = true,
                 _ => return usage_error("--sql-replay-mode needs strict or keyed"),
             },
+            "--serve-public" => cics_options.push((a.clone(), String::new())),
             o if CICS_OPTIONS.contains(&o) => match args.next() {
                 Some(value) => cics_options.push((a.clone(), value)),
                 None => return usage_error(&format!("{o} needs a value")),
@@ -936,6 +940,14 @@ fn serve_cics(
         Ok(t) => t,
         Err(e) => return usage_error(&e),
     };
+    // The server asks for no credentials: whoever reaches the port runs the transactions against the
+    // files and the database this run was given.
+    let public = get("--serve-public").is_some();
+    let resolved: Vec<std::net::SocketAddr> = std::net::ToSocketAddrs::to_socket_addrs(address.as_str()).map(Iterator::collect).unwrap_or_default();
+    if let Some(open) = resolved.iter().find(|a| !a.ip().is_loopback()).filter(|_| !public) {
+        eprintln!("ironwork: --serve {address}: {} is not a loopback address, and the server asks for no credentials; give --serve-public to serve it anyway", open.ip());
+        return ExitCode::from(2);
+    }
     library.programs.insert(0, first.program.clone());
     let page = first.options.code_page();
     let listener = match std::net::TcpListener::bind(&address) {
@@ -945,7 +957,12 @@ fn serve_cics(
             return ExitCode::from(2);
         }
     };
-    eprintln!("ironwork: serving TN3270 on {}", listener.local_addr().map_or(address, |a| a.to_string()));
+    let served = listener.local_addr().map_or(address, |a| a.to_string());
+    if public {
+        eprintln!("ironwork: serving TN3270 on {served} to anyone who reaches it, without credentials");
+    } else {
+        eprintln!("ironwork: serving TN3270 on {served}");
+    }
     let mut transactions = Transactions { library, table, compiled: Default::default(), database };
     for connection in listener.incoming() {
         let stream = match connection {
@@ -1116,6 +1133,9 @@ fn run_cics(
     }
     if (get("--transaction").is_some() || get("--csd").is_some()) && get("--screens").is_none() {
         return usage_error("--transaction and --csd need --serve or --screens");
+    }
+    if get("--serve-public").is_some() {
+        return usage_error("--serve-public is for --serve");
     }
     let table = match transaction_table(compiled, options) {
         Ok(t) => t,
