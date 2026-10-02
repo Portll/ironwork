@@ -11,6 +11,8 @@ pub struct Place {
     /// One occurrence, before OCCURS DEPENDING ON and reference modification.
     pub len: u32,
     pub kind: Kind,
+    /// PICTURE P positions right of the item's digits: its value is its digits times ten to this.
+    pub scaling: u32,
     /// One per OCCURS level, outermost first.
     pub subscripts: Vec<Subscript>,
     pub odo: Option<Odo>,
@@ -59,7 +61,7 @@ pub struct RefMod {
     pub check: bool,
 }
 
-codec_struct!(Place { base, offset, len, kind, subscripts, odo, refmod, name, at });
+codec_struct!(Place { base, offset, len, kind, scaling, subscripts, odo, refmod, name, at });
 codec_enum!(Base {
     Program = 0,
     Local = 1,

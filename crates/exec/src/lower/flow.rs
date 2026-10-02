@@ -339,11 +339,11 @@ impl Lower<'_> {
             }
             Stmt::Compute { targets, expr, size_error, .. } => {
                 let computations: Vec<(&Target, &Expr)> = targets.iter().map(|t| (t, expr)).collect();
-                self.arithmetic(&computations, None, size_error.as_ref(), pos, &inner)?;
+                self.arithmetic(&computations, None, size_error.as_ref(), false, pos, &inner)?;
             }
             Stmt::Arith(a) => {
                 let computations: Vec<(&Target, &Expr)> = a.computations.iter().map(|(t, e)| (t, e)).collect();
-                self.arithmetic(&computations, a.remainder.as_ref(), a.size_error.as_ref(), pos, &inner)?;
+                self.arithmetic(&computations, a.remainder.as_ref(), a.size_error.as_ref(), true, pos, &inner)?;
             }
             Stmt::If { cond, then, otherwise, .. } => {
                 let test = self.test(cond, pos)?;
@@ -584,8 +584,9 @@ impl Lower<'_> {
         self.switch(join)
     }
 
-    fn arithmetic(&mut self, computations: &[(&Target, &Expr)], remainder: Option<&(Target, Expr, Expr)>, handler: Option<&SizeError>, pos: Pos, ctx: &Ctx) -> R<()> {
-        let plan = self.arith_plan(computations, remainder, handler.is_some(), pos)?;
+    /// `per_receiver` for ADD, SUBTRACT, MULTIPLY and DIVIDE, as `Machine::arithmetic` takes it.
+    fn arithmetic(&mut self, computations: &[(&Target, &Expr)], remainder: Option<&(Target, Expr, Expr)>, handler: Option<&SizeError>, per_receiver: bool, pos: Pos, ctx: &Ctx) -> R<()> {
+        let plan = self.arith_plan(computations, remainder, handler.is_some(), per_receiver, pos)?;
         self.op(Op::Arith(plan), pos)?;
         let Some(handler) = handler else { return Ok(()) };
         let (not_on, on, join) = (self.new_block()?, self.new_block()?, self.new_block()?);
@@ -798,7 +799,7 @@ impl Lower<'_> {
         let from = self.operand(from, pos)?;
         let item = self.place_items[var as usize];
         let plan = self.move_plan(&Side { src: None, ..from.side }, kind, item)?;
-        let from = Op::Move { from: from.operand, to: var, plan };
+        let from = Op::Set { from: from.operand, to: var, plan };
         let sum = Expr::Bin(Box::new(Expr::Operand(Operand::Ref(v.var.clone()))), BinOp::Add, Box::new(v.by.clone()));
         let dmax = scale(kind).max(self.dmax(&sum)?);
         let prepass = self.dmax_places(&v.by)?;

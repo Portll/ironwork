@@ -335,7 +335,7 @@ fn program_shape_round_trips() {
     round_trip(&[Paragraph { name: 1, is_section: true, entry: 0, section_end: 3, priority: 50, at: 2, abandoned: Some(4) }]);
     round_trip(&[Block { ops: vec![], end: Terminator::Jump(1) }, Block { ops: vec![Op::Nest, Op::Arith(0)], end: Terminator::Abend(0) }]);
     let plans = Plans {
-        arith: vec![ArithPlan { dmax: 0, arith: Arith::Extend, prepass: vec![], steps: vec![], remainder: None, handled: false }],
+        arith: vec![ArithPlan { dmax: 0, arith: Arith::Extend, prepass: vec![], steps: vec![], remainder: None, handled: false, per_receiver: false }],
         init: vec![InitPlan { fields: vec![InitField { offset: 0, len: 2, value: Figurative::Null, store: FILL }] }],
         display: vec![DisplayPlan { items: vec![DisplayItem::Text(0)], no_advancing: false }],
         inspect: vec![InspectPlan { target: Inspected::Item(0), tallying: vec![], replacing: vec![], converting: None }],
@@ -464,6 +464,7 @@ fn places_round_trip_with_every_base() {
         offset: 16,
         len: 12,
         kind: Kind::Alnum { justified: false },
+        scaling: 2,
         subscripts: vec![subscript.clone(), subscript],
         odo: Some(ODO),
         refmod: Some(REFMOD),
@@ -549,6 +550,7 @@ fn arithmetic_plans_round_trip_with_every_tag() {
         steps: vec![step.clone(), ArithStep { mode: Mode::Float(Precision::Long), probe: vec![], ..step }],
         remainder: Some(remainder),
         handled: true,
+        per_receiver: true,
     };
     round_trip(&[plan]);
 }
@@ -589,9 +591,10 @@ fn control_flow_round_trips_with_every_tag() {
         Op::DebugLine(42),
         Op::DebugAlter { range: 1, name: 2, contents: 3 },
         Op::Markup(0),
+        Op::Set { from: Operand::Load(2), to: 1, plan: MovePlan::Index },
     ];
     // Tag 29 is retired (load-module.md §4.3).
-    every_variant_but(&ops, 33, &[29]);
+    every_variant_but(&ops, 34, &[29]);
     let resume = Resume { para: 2, block: 11 };
     every_variant(&[Step::Next, Step::Arm(2), Step::GoTo(3), Step::End(Ending::Goback), Step::Return(u64::MAX), Step::Resume(resume)], 6);
     let terminators = [

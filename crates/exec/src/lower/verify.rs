@@ -627,7 +627,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
         }
         for op in &blk.ops {
             match op {
-                Op::Move { from, to, .. } => {
+                Op::Move { from, to, .. } | Op::Set { from, to, .. } => {
                     operand(from)?;
                     place(*to)?;
                 }

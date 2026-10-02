@@ -16,6 +16,10 @@ pub struct ArithPlan {
     pub remainder: Option<RemainderPlan>,
     /// ON or NOT ON SIZE ERROR is written.
     pub handled: bool,
+    /// ADD, SUBTRACT, MULTIPLY or DIVIDE rather than COMPUTE: a step whose expression has its own
+    /// receiver as an operand of its top operation evaluates the other operand with every step's,
+    /// and reads the receiver only when it stores.
+    pub per_receiver: bool,
 }
 
 /// `probe` holds the places the walker's float test locates after the receiver, static ones left out.
@@ -73,7 +77,7 @@ pub enum UpDown {
     Refused(AbendId),
 }
 
-codec_struct!(ArithPlan { dmax, arith, prepass, steps, remainder, handled });
+codec_struct!(ArithPlan { dmax, arith, prepass, steps, remainder, handled, per_receiver });
 codec_struct!(ArithStep { target, expr, mode, store, rounded, probe });
 codec_enum!(Mode { Fixed = 0, Float(precision) = 1 });
 codec_enum!(StorePlan {

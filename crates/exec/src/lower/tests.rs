@@ -61,7 +61,7 @@ fn ops(p: &Program) -> impl Iterator<Item = &Op> {
 }
 
 fn moves(p: &Program) -> Vec<MovePlan> {
-    ops(p).filter_map(|op| if let Op::Move { plan, .. } = op { Some(*plan) } else { None }).collect()
+    ops(p).filter_map(|op| if let Op::Move { plan, .. } | Op::Set { plan, .. } = op { Some(*plan) } else { None }).collect()
 }
 
 fn place_named<'p>(p: &'p Program, name: &str) -> Vec<&'p Place> {
@@ -399,7 +399,7 @@ fn perform_varying_moves_from_steps_by_and_tests_before_the_body() {
     ));
     let all: Vec<&Op> = ops(&p).collect();
     assert_eq!(all[0], &Op::Nest);
-    assert!(matches!(all[1], Op::Move { plan: MovePlan::Numeric { from: NumericFrom::Value, .. }, .. }));
+    assert!(matches!(all[1], Op::Set { plan: MovePlan::Numeric { from: NumericFrom::Value, .. }, .. }));
     let step = all.iter().find_map(|op| if let Op::Step { plan, .. } = op { Some(*plan) } else { None }).unwrap();
     assert_eq!(step.dmax, 0);
     assert_eq!(step.store, StorePlan::Zoned { digits: 2, scale: 0, signed: false, sign: None });
@@ -715,7 +715,7 @@ fn perform_varying_after_steps_the_outer_variable_before_it_sets_the_inner_one_a
         [line(&format!("PERFORM P {test}VARYING I FROM 1 BY 1 UNTIL I > 3")), line("    AFTER J FROM I BY 1 UNTIL J > 3"), line("GOBACK."), "       P.\n".into(), line("DISPLAY I J.")].concat()
     };
     let var = |p: &Program, op: &Op| match op {
-        Op::Move { to, .. } => format!("MOVE {}", symbol(p, p.places[*to as usize].name)),
+        Op::Move { to, .. } | Op::Set { to, .. } => format!("MOVE {}", symbol(p, p.places[*to as usize].name)),
         Op::Step { var, .. } => format!("STEP {}", symbol(p, p.places[*var as usize].name)),
         other => format!("{other:?}"),
     };
@@ -1134,8 +1134,8 @@ fn set_lowers_each_form_as_the_walker_runs_it() {
     assert_eq!((name(to), plan, &p.consts[on as usize]), ("K-ON", numeric, &Const::Number(numeric::precision::Fixed::new(1, numeric::precision::Places::new(1, 0)))));
     let Op::Move { from: LirOperand::Const(off), to, .. } = b[1] else { panic!("{:?}", b[1]) };
     assert!(name(to) == "K-ON" && matches!(p.consts[off as usize], Const::Number(f) if f.magnitude.is_zero()));
-    assert!(matches!(b[2], Op::Move { from: LirOperand::AddressOf(_), to, plan: MovePlan::Address } if name(to) == "P"));
-    assert!(matches!(b[3], Op::Move { to, plan: MovePlan::Index, .. } if name(to) == "IX"));
+    assert!(matches!(b[2], Op::Set { from: LirOperand::AddressOf(_), to, plan: MovePlan::Address } if name(to) == "P"));
+    assert!(matches!(b[3], Op::Set { to, plan: MovePlan::Index, .. } if name(to) == "IX"));
     let Op::SetUpDown { by: IntExpr::Item(by), down: false, targets } = &b[4] else { panic!("{:?}", b[4]) };
     assert_eq!((name(*by), targets.iter().map(|t| name(t.0)).collect::<Vec<_>>()), ("J", vec!["J", "K"]));
     let Op::SetUpDown { down: true, targets, .. } = &b[5] else { panic!("{:?}", b[5]) };

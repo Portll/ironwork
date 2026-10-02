@@ -49,7 +49,7 @@ impl Lower<'_> {
                         (Kind::Pointer, _) => MovePlan::Refused(self.ironwork("SET a pointer TO ADDRESS OF, NULL or another pointer")?),
                         _ => self.move_plan(&sender.side, kind, self.place_items[to as usize])?,
                     };
-                    self.op(Op::Move { from: sender.operand, to, plan }, pos)?;
+                    self.op(Op::Set { from: sender.operand, to, plan }, pos)?;
                 }
             }
             SetStmt::AddressOf { targets, value } => {

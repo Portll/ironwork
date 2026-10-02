@@ -14,6 +14,9 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Op {
     Move { from: Operand, to: PlaceId, plan: MovePlan },
+    /// SET TO, and PERFORM VARYING's FROM: as `Move`, but a data item sender is read as a number,
+    /// its digits checked, where MOVE carries a zoned or packed sender's invalid digits (C260).
+    Set { from: Operand, to: PlaceId, plan: MovePlan },
     Initialize { target: PlaceId, plan: InitId },
     Arith(ArithId),
     /// SET ADDRESS OF: `address` evaluated once, NULL or an address in run-unit memory, then
@@ -234,6 +237,7 @@ codec_enum!(Op {
     DebugLine(line) = 30,
     DebugAlter { range, name, contents } = 31,
     Markup(id) = 32,
+    Set { from, to, plan } = 33,
 });
 codec_enum!(Step { Next = 0, Arm(arm) = 1, GoTo(para) = 2, End(ending) = 3, Return(frame) = 4, Resume(resume) = 5 });
 codec_enum!(Terminator {

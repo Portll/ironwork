@@ -108,7 +108,7 @@ impl Lower<'_> {
 
     /// COMPUTE, ADD, SUBTRACT, MULTIPLY and DIVIDE as `Machine::arithmetic` runs them: dmax and each
     /// receiver's store fixed here, and the places its two locate passes reach kept in order.
-    pub(super) fn arith_plan(&mut self, computations: &[(&Target, &Expr)], remainder: Option<&(Target, Expr, Expr)>, handled: bool, pos: Pos) -> R<ArithId> {
+    pub(super) fn arith_plan(&mut self, computations: &[(&Target, &Expr)], remainder: Option<&(Target, Expr, Expr)>, handled: bool, per_receiver: bool, pos: Pos) -> R<ArithId> {
         let mut prepass = Vec::new();
         let mut dmax = 0;
         let sources = computations.iter().map(|&(t, e)| (t, e)).chain(remainder.map(|(t, dividend, _)| (t, dividend)));
@@ -153,7 +153,7 @@ impl Lower<'_> {
             }
             _ => None,
         };
-        push(&mut self.plans.arith, ArithPlan { dmax, arith, prepass, steps, remainder, handled }, "arithmetic plans")
+        push(&mut self.plans.arith, ArithPlan { dmax, arith, prepass, steps, remainder, handled, per_receiver }, "arithmetic plans")
     }
 
     /// `Machine::initialize` unrolled: every elementary item the walk reaches, offset from the

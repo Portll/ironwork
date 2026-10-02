@@ -50,6 +50,7 @@ pub fn payroll() -> Program {
         offset,
         len,
         kind,
+        scaling: 0,
         subscripts,
         odo: None,
         refmod: None,
@@ -93,6 +94,7 @@ pub fn payroll() -> Program {
         }],
         remainder: None,
         handled: true,
+        per_receiver: true,
     };
 
     let at = |line, col| Pos { file: 0, line, col };

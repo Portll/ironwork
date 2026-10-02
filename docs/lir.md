@@ -214,6 +214,9 @@ pub struct Place {
     pub len: u32,
     /// The item's kind, or alphanumeric under reference modification (machine.rs:584).
     pub kind: Kind,
+    /// `Item.scaling`: PICTURE P positions right of the digits, which `ProgramFacts::scaling`
+    /// gives for the place's `Loc`, so a read and a store scale the value as the walker's do.
+    pub scaling: u32,
     /// One per entry of `Item.dims` (layout.rs:69-70), outermost first.
     pub subscripts: Vec<Subscript>,
     /// On a group that ends with an OCCURS DEPENDING ON table (layout.rs:289-300).
@@ -449,6 +452,10 @@ pub struct ArithPlan {
     /// ON or NOT ON SIZE ERROR is written: a size error keeps the receiver, division by zero is a
     /// size error rather than S0CB, and the op returns Arm(0) or Arm(1) (machine.rs:1512-1537).
     pub handled: bool,
+    /// ADD, SUBTRACT, MULTIPLY or DIVIDE, the walker's `per_receiver`: a step whose expression is
+    /// a binary operation with its receiver as an operand evaluates only the other operand with
+    /// the rest, and reads the receiver when it stores (§7.4).
+    pub per_receiver: bool,
 }
 
 /// `probe` holds the places the walker's float test locates before the step is evaluated (§7.4).
@@ -510,6 +517,11 @@ gives and what storage holds at it. The plans keep them:
   until the first floating-point one (machine.rs:1400-1406, 1504-1506), before it evaluates the
   expression, which reads the left operand before locating the right. `ArithStep.probe` holds those
   operands, evaluated after the receiver and before the expression.
+- **Every step is evaluated before any is stored.** The steps' float tests and expressions run in
+  order first, an abend in an expression held until its step stores; then the REMAINDER's dividend
+  and divisor; then each step stores. Under `per_receiver` a step whose expression is a binary
+  operation with its receiver as an operand evaluates the other operand in the first pass, and
+  reads its receiver and combines the two when it stores (machine.rs `arithmetic`).
 - **Stores locate again.** Each step evaluates its receiver again when it stores, and the remainder
   after the quotient (machine.rs:1504, 1531), so a subscript an earlier receiver changed takes
   effect. The `Loc`s of the two passes are discarded.
@@ -547,6 +559,9 @@ rather than before.
 ```rust
 pub enum Op {
     Move { from: Operand, to: PlaceId, plan: MovePlan },
+    /// SET TO, and PERFORM VARYING's FROM: as `Move`, but a data item sender is read as a number,
+    /// its digits checked, where MOVE carries a zoned or packed sender's invalid digits (C260).
+    Set { from: Operand, to: PlaceId, plan: MovePlan },
     Initialize { target: PlaceId, plan: InitId },
     Arith(ArithId),
     /// SET ADDRESS OF: `address` evaluated once, then each LINKAGE record bound to it in turn.
@@ -625,7 +640,7 @@ pub enum RangeKind { Perform, SortProcedure, UseBeforeReporting, UseProcedure, D
 ```
 
 - **Tags** (load-module.md §4.3): `PerformEnter` is tag 12 and `Debug` 11 of `Terminator`, and tag 6
-  is retired; `DebugLine` and `DebugAlter` are tags 30 and 31 of `Op`, `Markup` 32, and tag 29
+  is retired; `DebugLine` and `DebugAlter` are tags 30 and 31 of `Op`, `Markup` 32, `Set` 33, and tag 29
   (`SetSegment`) is retired. `Processing` is tag 5 of `RangeKind`, `Xml` tag 7 of `Base` and
   `Walk` tag 3 of `IntExpr`.
 - **A range's region** (`Range::region`) is the paragraphs a GO TO stays in it for: `first` to
@@ -656,7 +671,7 @@ Out of line, 3 TIMES, and inline VARYING:
 
 ```text
 PERFORM A THRU C 3 TIMES                  PERFORM VARYING I FROM 1 BY 1 UNTIL I > 9, inline
-b0: Nest; SetTemp t0 = 3; Jump b1         b0: Nest; Move I <- 1; Jump b1
+b0: Nest; SetTemp t0 = 3; Jump b1         b0: Nest; Set I <- 1; Jump b1
 b1: Branch Counter(t0) b2 else b3         b1: Branch (I > 9) b4 else b2
 b2: DecTemp t0; PerformEnter r0 -> b1     b2: body …; Jump b3         EXIT PERFORM CYCLE: Jump b3
 b3: Unnest(1); Jump next                  b3: Step I by 1; Jump b1
@@ -673,11 +688,11 @@ b3: Unnest(1); Jump next                  b3: Step I by 1; Jump b1
   others, and the walker's `for` loop in `repeat_nested` gives each activation of the statement a
   count of its own (machine.rs:480). A counter in the program would let the inner PERFORM reset
   the outer one's.
-- **UNTIL:** VARYING without the Move and the Step. **TEST AFTER** moves the Branch after the body,
+- **UNTIL:** VARYING without the Set and the Step. **TEST AFTER** moves the Branch after the body,
   and for VARYING before the Step (machine.rs:497, 514-521).
-- **VARYING:** FROM is stored with MOVE rules (machine.rs:502-504); each step re-evaluates the
-  variable's place, locates the places of BY in `Op::Step.prepass` (§7.5), and stores with
-  `StepPlan`, no ROUNDED and no size error (machine.rs:517-521).
+- **VARYING:** FROM is stored with MOVE rules, as `Set` (machine.rs:502-504); each step
+  re-evaluates the variable's place, locates the places of BY in `Op::Step.prepass` (§7.5), and
+  stores with `StepPlan`, no ROUNDED and no size error (machine.rs:517-521).
 - **VARYING … AFTER** lowers as `vary` runs it (machine.rs:598-636 (f2)), which follows the
   Language Reference's figures (SC27-8713-03, pp. 425-428): one loop per variable, the last
   varying fastest. An inner loop's test coming true augments the variable outside it, then sets
@@ -687,8 +702,8 @@ b3: Unnest(1); Jump next                  b3: Step I by 1; Jump b1
 
 ```text
 PERFORM P VARYING I FROM 1 BY 1 UNTIL CI AFTER J FROM I BY 1 UNTIL CJ    (TEST BEFORE)
-b0: Nest; Move I <- 1; Move J <- I; Jump h0
-h0: Branch CI exit else h1                s0: Step I by 1; Move J <- I; Jump h0
+b0: Nest; Set I <- 1; Set J <- I; Jump h0
+h0: Branch CI exit else h1                s0: Step I by 1; Set J <- I; Jump h0
 h1: Branch CJ s0 else run                 s1: Step J by 1; Jump h1
 run: PerformEnter r -> s1                 exit: Unnest(1); Jump next
 ```
@@ -917,7 +932,7 @@ walker does on each execution; the last column names that work.
 | COMPUTE, ADD, SUBTRACT, MULTIPLY, DIVIDE | `Arith`, then `Select` if handled | Lowered | §7.1 |
 | INITIALIZE | `Initialize` with a flat plan of (offset, length, value, store) | Lowered | The walk over the item's children (machine.rs:1968-1993) |
 | SET TO TRUE, TO FALSE | `Move` of the first VALUE's low end, or of WHEN SET TO FALSE's value, into the conditional variable by item index; nothing when there is none | Lowered | The conditional variable by item index (machine.rs `set`) |
-| SET TO | `Move` per receiver; a `POINTER` receiver takes only an address or NULL, else `Refused` | One call | The kind test |
+| SET TO | `Set` per receiver; a `POINTER` receiver takes only an address or NULL, else `Refused` | One call | The kind test |
 | SET ADDRESS OF | One `SetAddress` for all the records; a target that is not an 01 or 77 of LINKAGE ends the block in `Abend` after the records before it | One call | Resolve and linkage test |
 | SET UP BY, DOWN BY | One `SetUpDown`: each receiver `Pointer`, `Number` with a `StepPlan` of dmax 0, or `Refused` | One call | Read, then match on the value |
 | INSPECT | `Inspect` over constant patterns and a prebuilt CONVERTING table when both operands are literals of one length; each TALLYING counter with its `StepPlan` | One call | Literal images and the CONVERTING table (machine.rs:822-834, 849-869) |
@@ -1911,7 +1926,7 @@ executors and recorded.
 |---|---|---|---|---|
 | 1 | Changed in both executors: a condition-name test and SET TO TRUE or FALSE take the conditional variable by item index (machine.rs `locate_item`, lower/set.rs `conditional_variable`), so a FILLER variable or one whose name repeats works | - | As IBM | The place by item index |
 | 2 | MOVE to several receivers reads the sender again for each, after earlier stores | machine.rs:315-318 | The sender's subscripts are evaluated once, before the first receiver | One `Move` per receiver |
-| 3 | COMPUTE with several receivers evaluates the expression again for each (machine.rs:321-323); ADD and SUBTRACT with several receivers read shared operands again after earlier stores | machine.rs:1503-1522 | Computed once, then stored into each | One `ArithStep` per receiver |
+| 3 | COMPUTE with several receivers evaluates the expression once for each, all before the first store; ADD, SUBTRACT, MULTIPLY and DIVIDE read the shared operands before the first store and each receiver as it is stored | machine.rs `arithmetic` | Computed once, then stored into each | One `ArithStep` per receiver, and `ArithPlan.per_receiver` (§7.4) |
 | 4 | INITIALIZE gives an alphanumeric-edited item ZERO | machine.rs:1976-1980 | SPACE | The walker's values in the plan |
 | 5 | The dmax pre-pass and the float test locate receivers and operands before any store or evaluation, and `integer`, `expr_value` and the VARYING step locate operands before they evaluate them | machine.rs:1494-1506, 613-619, 517-521 | - | `ArithPlan.prepass` and `ArithStep.probe` (§7.4); the `prepass` of `IntExpr::Fixed`, `Comparand::Expr` and `Op::Step` (§7.5) |
 | 6 | EVALUATE evaluates a subject again at each comparison | machine.rs:420-442 | Once | As the walker; a subject may be cached only where evaluating it cannot abend and calls no FUNCTION |

@@ -134,6 +134,7 @@ impl Lower<'_> {
             offset: item.offset,
             len: item.size,
             kind: item.kind,
+            scaling: item.scaling,
             subscripts: Vec::new(),
             odo: None,
             refmod: None,
