@@ -94,3 +94,23 @@ fn a_list_without_a_journal_or_not_of_file_and_line_is_refused() {
     assert_eq!(malformed.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&malformed.stderr).contains("line 1: \"LOOPER.cbl\" is not FILE:LINE"), "{}", String::from_utf8_lossy(&malformed.stderr));
 }
+
+#[test]
+fn a_statement_limit_ends_the_run_with_s322_at_the_same_statement_on_both_executors_and_in_a_job() {
+    let dir = temp("limit");
+    let limited = |extra: &[&str]| Command::new(env!("CARGO_BIN_EXE_ironwork")).arg("run").arg(dir.join("src/LOOPER.cbl")).args(["--statement-limit", "100"]).args(extra).output().unwrap();
+    for extra in [&[][..], &["--vm"]] {
+        let o = limited(extra);
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert_eq!(o.status.code(), Some(16), "{extra:?} {err}");
+        assert!(err.contains("LOOPER.cbl:8:16: ABEND S322:"), "{extra:?} {err}");
+    }
+    let done = Command::new(env!("CARGO_BIN_EXE_ironwork")).arg("run").arg(dir.join("src/LOOPER.cbl")).args(["--statement-limit", "200"]).output().unwrap();
+    assert!(done.status.success(), "{}", String::from_utf8_lossy(&done.stderr));
+
+    fs::create_dir_all(dir.join("ds")).unwrap();
+    fs::write(dir.join("JOB.jcl"), "//LIMIT    JOB\n//STEP1    EXEC PGM=LOOPER\n").unwrap();
+    let job = Command::new(env!("CARGO_BIN_EXE_ironwork")).arg("job").arg(dir.join("JOB.jcl")).arg("--datasets").arg(dir.join("ds")).arg("-L").arg(dir.join("src")).args(["--statement-limit", "100"]).output().unwrap();
+    let err = String::from_utf8_lossy(&job.stderr);
+    assert!(err.contains("LOOPER.cbl:8:16: ABEND S322:") && err.contains("STEP1 PGM=LOOPER ABEND S322"), "{err}");
+}

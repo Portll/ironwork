@@ -73,6 +73,10 @@ flags:
              DD SYSIN is what ACCEPT reads; without it, ACCEPT reads standard input. DD PRINTER is
              the virtual printer: CALL 'SYSTEM' or 'C$SYSTEM' with an lp or lpr command appends
              the files it names, each a DD, there and returns 0, and runs nothing
+  --statement-limit N
+             with run or job, end the run with S322 at the statement after the Nth to start, as z/OS
+             ends a step that runs past its TIME= (each job step gets N); a count stands in for CPU
+             time so the end falls at the same statement on every run (assumption C241)
   --parm TEXT
              with run, the PARM an EXEC PGM= would give: the program's first USING item addresses
              a halfword length and the arguments before the last slash, as Language Environment
@@ -379,6 +383,7 @@ fn driver() -> ExitCode {
     let mut fuzz_root: Option<std::path::PathBuf> = None;
     let (mut fuzz_runs, mut fuzz_seed, mut fuzz_timeout): (Option<u32>, Option<u64>, Option<u64>) = (None, None, None);
     let mut parm: Option<String> = None;
+    let mut statement_limit: Option<u64> = None;
     let (mut fuzz_job, mut fuzz_cics) = (false, false);
     let mut step_parms: Vec<(String, String)> = Vec::new();
     let mut instream: Vec<(String, std::path::PathBuf)> = Vec::new();
@@ -391,6 +396,10 @@ fn driver() -> ExitCode {
             "--instream" => match args.next().and_then(|v| v.split_once('=').map(|(k, p)| (k.to_ascii_uppercase(), std::path::PathBuf::from(p)))) {
                 Some(pair) => instream.push(pair),
                 None => return usage_error("--instream needs STEP.DD=path"),
+            },
+            "--statement-limit" => match args.next().and_then(|n| n.parse().ok()).filter(|&n: &u64| n > 0) {
+                Some(n) => statement_limit = Some(n),
+                None => return usage_error("--statement-limit needs a number of statements"),
             },
             "--job" => fuzz_job = true,
             "--cics" => fuzz_cics = true,
@@ -557,11 +566,14 @@ fn driver() -> ExitCode {
         || trace_statements.is_some() || trace_input || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() || !matches!(clock, exec::unit::Clock::System)
         || compare_base.is_some() || compare_head.is_some() || declare.is_some() || statement.is_some() || !expected.is_empty() || datasets.is_some()
         || !proclibs.is_empty() || user.is_some()
-        || vm || parm.is_some();
+        || vm || parm.is_some() || statement_limit.is_some();
     let dump_flags = !dump_options.only.is_empty() || dump_options.strings || !dump_options.check;
     let fuzz_flags = fuzz_root.is_some() || fuzz_runs.is_some() || fuzz_seed.is_some() || fuzz_timeout.is_some() || fuzz_job || fuzz_cics;
     if vm && (!matches!(rest.first().map(String::as_str), Some("run" | "cics")) || evidence_dir.is_some()) {
         return usage_error("--vm is for run and cics, and not with --evidence");
+    }
+    if statement_limit.is_some() && !matches!(rest.first().map(String::as_str), Some("run" | "job")) {
+        return usage_error("--statement-limit is for run and job; fuzz sets its own");
     }
     if parm.is_some() && rest.first().map(String::as_str) != Some("run") {
         return usage_error("--parm is for run; a job's PARM comes from its EXEC, and fuzz makes its own");
@@ -705,7 +717,7 @@ fn driver() -> ExitCode {
             (exec::unit::Clock::System, Some(_)) => exec::unit::Clock::Fixed(1_767_225_600, 0),
             (c, _) => c,
         };
-        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, user, flags, clock, replay: replay.map(std::path::PathBuf::from), expected: expected_dir, expected_steps, declare, statement, evidence: evidence_dir, trace_marker, parms: step_parms, instream, coverage: coverage_file });
+        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, user, flags, clock, replay: replay.map(std::path::PathBuf::from), expected: expected_dir, expected_steps, declare, statement, evidence: evidence_dir, trace_marker, parms: step_parms, instream, coverage: coverage_file, statement_limit });
     }
     if datasets.is_some() || !proclibs.is_empty() || user.is_some() {
         return usage_error("--datasets, --proclib and --user are for job");
@@ -769,6 +781,7 @@ fn driver() -> ExitCode {
         flags: flags.clone(),
         trace_statements: listed.as_ref().map(|l| exec::unit::StatementFilter::Lines(l.iter().map(|&(_, line)| line).collect())),
         trace_input,
+        statement_limit,
     };
     let compiled = match exec::compile(first, &flags) {
         Ok(c) => c,

@@ -24,6 +24,8 @@ pub struct Library {
     pub trace_statements: Option<rt::unit::StatementFilter>,
     /// Whether the run unit follows which bytes may hold input (`RunUnit::taint`).
     pub trace_input: bool,
+    /// How many statements may start before the run ends with S322 (`RunUnit::statement_limit`).
+    pub statement_limit: Option<u64>,
 }
 
 fn member_name(name: &str) -> bool {

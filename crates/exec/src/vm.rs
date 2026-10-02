@@ -105,10 +105,12 @@ pub fn execute<'w>(
 ) -> Result<(Ending, i16), Halt> {
     oo::refuse_to_run(&compiled.program)?;
     let (statements, taint) = (library.trace_statements.clone(), library.trace_input.then(rt::taint::Taint::default));
+    let limit = library.statement_limit;
     let mut run_unit = rt::unit::RunUnit::new(VmLibrary(library), dds, sysin, clock, out, err);
     run_unit.observer = observer;
     run_unit.statements = statements;
     run_unit.taint = taint;
+    run_unit.statement_limit = limit;
     run_unit.sql = database.map(sql::Session::new);
     let me = run_unit.add_named(None, compiled.program.id.to_ascii_uppercase(), compiled.program.files.len(), compiled.layout.size as usize);
     let parm = parm.map(|p| crate::push_parm(&mut run_unit, compiled, p));
@@ -143,10 +145,12 @@ pub fn execute_cics<'w>(
         return (Err(abend.into()), task);
     }
     let (statements, taint) = (library.trace_statements.clone(), library.trace_input.then(rt::taint::Taint::default));
+    let limit = library.statement_limit;
     let mut run_unit = rt::unit::RunUnit::new(VmLibrary(library), dds, None, clock, out, err);
     run_unit.observer = observer;
     run_unit.statements = statements;
     run_unit.taint = taint;
+    run_unit.statement_limit = limit;
     run_unit.sql = database.map(sql::Session::new);
     let (ending, ended, task) = crate::run_task(compiled, run_unit, task, kept, |unit, me, commarea, length| rt::vm::run_task(code, me, unit, commarea, length));
     let ending = match ending {

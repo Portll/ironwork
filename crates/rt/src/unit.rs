@@ -205,6 +205,8 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     pub statements: Option<StatementFilter>,
     /// Which bytes may hold input, when the run traces input.
     pub taint: Option<Taint>,
+    /// How many more statements may start before the run ends with S322; None for no limit.
+    pub statement_limit: Option<u64>,
 }
 
 impl<H, L: Loader<H>> RunUnit<'_, H, L> {
@@ -307,6 +309,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             entries: Vec::new(),
             statements: None,
             taint: None,
+            statement_limit: None,
         }
     }
 
@@ -418,6 +421,19 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
     }
 
     /// Whether a statement starting on `line` is told to the observer.
+    /// Counts the start of the statement at `pos` against the statement limit: once it is spent the
+    /// run ends there with S322, as z/OS ends a step that runs past its TIME= (assumption C241).
+    pub fn start_statement(&mut self, pos: Pos) -> Result<(), Abend> {
+        match self.statement_limit.as_mut() {
+            Some(0) => Err(Abend { code: crate::abend::AbendCode::TimeLimit, message: "the run reached its statement limit, as a step past its TIME= ends".into(), pos, file: None }),
+            Some(left) => {
+                *left -= 1;
+                Ok(())
+            }
+            None => Ok(()),
+        }
+    }
+
     pub fn traces(&self, line: u32) -> bool {
         match &self.statements {
             None => false,

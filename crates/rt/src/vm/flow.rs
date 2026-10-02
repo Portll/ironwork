@@ -86,13 +86,13 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             let b = &p.blocks[block as usize];
             let at = &p.debug.ops[block as usize];
             let starts = &p.debug.statements[block as usize];
-            let tracing = (self.unit.statements.is_some() || self.unit.taint.is_some()) && !starts.is_empty();
+            let tracing = (self.unit.statements.is_some() || self.unit.taint.is_some() || self.unit.statement_limit.is_some()) && !starts.is_empty();
             let mut told = 0;
             let mut arm = None;
             let mut transfer = None;
             for (k, (op, &id)) in b.ops.iter().zip(at).enumerate() {
                 if tracing {
-                    told = self.statements_before(starts, told, k);
+                    told = self.statements_before(starts, told, k)?;
                 }
                 match self.op(op, id)? {
                     Step::Next => {}
@@ -104,7 +104,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
                 }
             }
             if tracing && transfer.is_none() {
-                self.statements_before(starts, told, b.ops.len());
+                self.statements_before(starts, told, b.ops.len())?;
             }
             let next = match transfer {
                 Some(step) => self.transfer(step, floor)?,
@@ -118,13 +118,14 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
     }
 
     /// Starts each statement of `starts`, from the `told`th, that starts before op `k`, as the
-    /// walker's `exec` does: taint's statement starts, and the observer told; how many of `starts`
-    /// are started after.
-    fn statements_before(&mut self, starts: &[(u32, DebugId)], mut told: usize, k: usize) -> usize {
+    /// walker's `exec` does: counted against the statement limit, taint's statement starts, and the
+    /// observer told; how many of `starts` are started after.
+    fn statements_before(&mut self, starts: &[(u32, DebugId)], mut told: usize, k: usize) -> R<usize> {
         while let Some(&(op, id)) = starts.get(told)
             && op as usize <= k
         {
             let pos = self.pos(id);
+            self.unit.start_statement(pos)?;
             self.unit.statement_starts();
             if self.unit.traces(pos.line) {
                 let file = self.event_file(pos);
@@ -132,7 +133,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             }
             told += 1;
         }
-        told
+        Ok(told)
     }
 
     fn terminator(&mut self, end: &Terminator, at: DebugId, arm: Option<u8>, floor: usize) -> R<Next> {

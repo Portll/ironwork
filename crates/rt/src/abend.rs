@@ -43,6 +43,8 @@ pub enum AbendCode {
     Protection,
     /// S806: a CALLed program that is not in the library.
     ModuleNotFound,
+    /// S322: the run reached its statement limit, as a step that runs past its TIME= ends.
+    TimeLimit,
     /// IO- and the status: a failing status with no FILE STATUS to hold it.
     Io(FileStatus),
     /// A CICS transaction abend code: a condition's default abend, ABCODE, ASRA.
@@ -127,6 +129,7 @@ impl AbendCode {
             Self::Check(c) => check_code(*c),
             Self::Protection => "S0C4",
             Self::ModuleNotFound => "S806",
+            Self::TimeLimit => "S322",
             Self::Io(status) => status.abend_code(),
             Self::Cics(code) | Self::User(code) => code,
             Self::Ironwork => "IRONWORK",
@@ -164,7 +167,7 @@ impl From<&str> for AbendCode {
         CHECKS
             .map(Self::Check)
             .into_iter()
-            .chain([Self::Protection, Self::ModuleNotFound, Self::Ironwork, Self::Exec, Self::Sql, Self::SqlReplay, Self::Java])
+            .chain([Self::Protection, Self::ModuleNotFound, Self::TimeLimit, Self::Ironwork, Self::Exec, Self::Sql, Self::SqlReplay, Self::Java])
             .chain(FileStatus::ALL.map(Self::Io))
             .chain(Signal::ALL.map(Self::Signal))
             .find(|c| c.as_str() == text)
@@ -312,7 +315,7 @@ mod tests {
         for c in CHECKS {
             assert_eq!(AbendCode::Check(c).to_string(), c.abend());
         }
-        for text in ["S0C7", "S0C4", "S806", "IO-35", "IO-46", "AEIP", "ASRA", "0999", "U4038", "IRONWORK", "EXEC", "SQL", "SQLR", "JAVA", "SORT-STOPPED", "CLOSED-OUTPUT"] {
+        for text in ["S0C7", "S0C4", "S806", "S322", "IO-35", "IO-46", "AEIP", "ASRA", "0999", "U4038", "IRONWORK", "EXEC", "SQL", "SQLR", "JAVA", "SORT-STOPPED", "CLOSED-OUTPUT"] {
             assert_eq!(AbendCode::from(text).to_string(), text);
         }
         assert_eq!(AbendCode::from("U4038"), AbendCode::user(4038));

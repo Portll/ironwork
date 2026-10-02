@@ -107,6 +107,7 @@ codec_enum!(AbendCode {
     SqlReplay = 9,
     Java = 10,
     Signal(signal) = 11,
+    TimeLimit = 12,
 });
 codec_enum!(Signal { StopRun = 0, GoBack = 1, SortStopped = 2, ClosedOutput = 3, DeclarativeExit = 4 });
 codec_enum!(FileStatus {
