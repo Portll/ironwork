@@ -343,7 +343,13 @@ impl Lower<'_> {
 
     fn json_ignored(&self, item: usize, p: &JsonPhrases) -> bool {
         let i = &self.layout.items[item];
-        (i.name.is_none() && i.children.is_empty()) || i.redefines.is_some() || i.level == 66 || p.indicators.contains(&item)
+        if i.redefines.is_some() || i.level == 66 || p.indicators.contains(&item) {
+            return true;
+        }
+        if i.children.is_empty() || i.kind != Kind::Group {
+            return i.name.is_none();
+        }
+        i.children.iter().all(|&c| self.json_ignored(c, p))
     }
 
     fn json_name(&self, item: usize, p: &JsonPhrases) -> Option<String> {

@@ -58,10 +58,10 @@ fn suppress_leaves_out_items_and_groups_whose_members_all_are() {
     let mut statements = vec![generate(""), generate("\n    SUPPRESS DD"), generate("\n    SUPPRESS B E")];
     statements.push("MOVE 0 TO J".into());
     statements.push(generate(""));
-    let out = displays(&data, &statements.iter().map(String::as_str).collect::<Vec<_>>());
+    let out = displays_on_both(&data, &statements.iter().map(String::as_str).collect::<Vec<_>>());
     assert_eq!(out, "{\"A\":{\"E\":\"_\",\"B\":{\"C\":[{\"DD\":\"_\"},{\"DD\":\"_\"}]}}}\n{\"A\":{\"E\":\"_\"}}\n{\"A\":{}}\n{\"A\":{\"E\":\"_\",\"B\":{\"C\":[]}}}\n");
     let when = format!("{DOC}       01  G.\n           02 X PIC 9(3) VALUE 0.\n           02 Y PIC X(3) VALUE SPACES.\n           02 Z PIC X(3) VALUE 'ABC'.\n");
-    let out = displays(&when, &["JSON GENERATE D FROM G COUNT N ENCODING 1140\n    SUPPRESS EVERY NUMERIC WHEN ZERO\n    Y WHEN SPACES", "DISPLAY D(1:N)"]);
+    let out = displays_on_both(&when, &["JSON GENERATE D FROM G COUNT N ENCODING 1140\n    SUPPRESS EVERY NUMERIC WHEN ZERO\n    Y WHEN SPACES", "DISPLAY D(1:N)"]);
     assert_eq!(out, "{\"G\":{\"Z\":\"ABC\"}}\n");
 }
 
@@ -101,7 +101,7 @@ fn binary_float_and_comp_5_items_take_their_own_formats() {
 #[test]
 fn a_group_converted_to_json_null_is_null_and_one_whose_members_are_all_ignored_is_left_out() {
     let data = format!("{DOC}       01  A.\n           02 SUB VALUE SPACES.\n              03 S1 PIC X.\n              03 S2 PIC X.\n           02 FILLS.\n              03 FILLER PIC X.\n           02 B PIC X VALUE 'b'.\n");
-    let out = displays(
+    let out = displays_on_both(
         &data,
         &[
             "JSON GENERATE D FROM A COUNT N ENCODING 1140\n    CONVERTING SUB TO JSON NULL USING SPACE",

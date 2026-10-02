@@ -49,6 +49,17 @@ fn an_indicator_in_a_table_is_located_with_the_walk_s_subscripts_and_a_whole_tab
 }
 
 #[test]
+fn a_group_carries_its_null_test_and_one_whose_members_are_all_ignored_is_left_out() {
+    let data = "       01  D PIC X(80).\n       01  A.\n           02 SUB.\n              03 S1 PIC X.\n           02 FILLS.\n              03 FILLER PIC X.\n           02 B PIC X.\n";
+    let p = lowered(&program("", data, &[line("JSON GENERATE D FROM A"), line("    CONVERTING SUB TO JSON NULL USING SPACE"), line("GOBACK.")].concat()));
+    let [Markup::JsonGenerate(g)] = markup(&p) else { panic!() };
+    let names: Vec<&str> = g.nodes.iter().map(|n| symbol(&p, n.name)).collect();
+    assert_eq!(names, ["\"A\"", "\"SUB\"", "\"S1\"", "\"B\""]);
+    assert!(matches!(g.nodes[1], lir::JsonNode { null: Some(Figurative::Space), indicator: None, value: JsonValue::Object { .. }, .. }), "{:?}", g.nodes[1]);
+    assert!(g.nodes.iter().enumerate().all(|(k, n)| (k == 1) == n.null.is_some()));
+}
+
+#[test]
 fn a_phrase_naming_a_condition_name_abends_where_the_walker_would() {
     let data = "       01  D PIC X(80).\n       01  G.\n           05 A PIC X.\n              88 A-ON VALUE 'Y'.\n";
     let p = lowered(&program("", data, &[line("JSON GENERATE D FROM G SUPPRESS A-ON"), line("GOBACK.")].concat()));

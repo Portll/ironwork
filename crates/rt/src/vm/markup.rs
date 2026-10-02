@@ -115,20 +115,6 @@ impl ProgramFacts for Receiving<'_> {
     }
 }
 
-/// Whether a JSON GENERATE tree has a group with no elementary item under it, other than a root
-/// that is one occurrence. The walker ignores a group whose members it all ignores, where the tree
-/// keeps it, and the tree cannot tell that group from one whose members SUPPRESS names.
-fn hollow(nodes: &[JsonNode]) -> bool {
-    let mut shows = vec![false; nodes.len()];
-    for k in (0..nodes.len()).rev() {
-        shows[k] = match &nodes[k].value {
-            JsonValue::Leaf(_) => true,
-            JsonValue::Object { members, .. } => members.iter().any(|&m| shows[m as usize]),
-        };
-    }
-    shows.iter().enumerate().any(|(k, &shown)| !shown && (k > 0 || nodes[0].occurs.is_some()))
-}
-
 fn node_loc(offset: usize, len: u32, kind: Kind) -> Loc {
     Loc { offset, len: len as usize, kind, item: usize::MAX }
 }
@@ -269,9 +255,6 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     }
 
     fn json_generate(&mut self, g: &'p JsonGenerate, at: DebugId, pos: Pos) -> R<i64> {
-        if hollow(&g.nodes) {
-            return Err(not_yet("JSON GENERATE of a group with no elementary item under it, which the tree cannot tell from one the walker leaves out"));
-        }
         let from = self.loc(g.from)?.offset;
         self.markup.walk = self.walk_from(&g.subscripts, pos)?;
         let value = if g.nodes[0].occurs.is_some() {

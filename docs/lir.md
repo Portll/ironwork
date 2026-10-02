@@ -1904,7 +1904,8 @@ pub enum SetTo { Nothing, Move { place: PlaceId, value: ConstId, plan: MovePlan 
   it equals `null`, tested in that order as `json_null` tests them, before its members or value.
   An `Object` with no member left is left out when `eligible`, else `{}`; a table whose elements are
   all left out is left out; the root left out is `{}`, or `[]` for a whole table. A leaf then tests
-  `suppress` (left out) and `boolean`, then converts.
+  `suppress` (left out) and `boolean`, then converts. A group whose members the walk all ignores is
+  ignored with them and has no node.
 - **XML GENERATE** (`xml_generated`, machine/xml/generate.rs): the receiver, the CCSID (`Unnamed` is
   UTF-16 for a national receiver, else CODEPAGE), XML-CODE 415, 411 or 414 ending it there; the
   namespace (416), the prefix read only for a namespace that is not empty (419); FROM, its
