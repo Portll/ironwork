@@ -23,9 +23,11 @@ usage:
                                                        print a load module, one fact per line
   ironwork job <job.jcl> --datasets DIR[:text] [--proclib DIR]... [--user ID] [run flags] [-I <dir>]... [-L <dir>]... [--clock <time>] [--sql-replay path]
                                                        run a job's steps in order
-  ironwork fuzz <program.cbl> -o <dir> [--runs N] [--seed N] [--timeout SECONDS] [--root DIR] [--clock <time>]
+  ironwork fuzz [--job] <program.cbl|job.jcl> -o <dir> [--runs N] [--seed N] [--timeout SECONDS] [--root DIR] [--clock <time>]
                [-I <dir>]... [-L <dir>]... [-silent] [-strict-sort-keys] [-debug]
-                                                       run a batch program on generated input and keep each abend
+               [--datasets DIR] [--proclib DIR]... [--user ID]
+                                                       run a batch program, or with --job a job, on generated input
+                                                       and keep each abend
   ironwork assumptions [--c-series]                    list the register of assumptions, one per line
   ironwork --version
 flags:
@@ -89,7 +91,8 @@ flags:
   --coverage FILE
              write which paragraphs the run entered: for each program of the source every
              paragraph with its line and how often control entered it, and for each program CALL
-             loaded from a library the paragraphs it reached. run only
+             loaded from a library the paragraphs it reached. run, and job for every step's
+             programs
   --trace-marker TEXT
              with --evidence: record each operation an input could steer, and whether TEXT was in
              its operand: a CALL of a variable program name or of an operating-system command
@@ -222,6 +225,11 @@ job flags:
   --user ID
              the user ID that submitted the job: &SYSUID's value when the JOB statement gives no
              USER=
+  --step-parm STEP=TEXT
+             the PARM step STEP gets in place of its EXEC's, STEP as the job log names it
+             (stepname, or stepname.procstepname); the journal records the JCL, not this
+  --instream STEP.DD=path
+             the lines of path in place of the in-stream data of DD in step STEP
 fuzz flags:
   -o <dir>   the fuzz run's directory, which must be new or empty and outside the program's
              directory and its libraries: manifest.json, evidence/ with the journal of a run on each
@@ -232,6 +240,12 @@ fuzz flags:
   --timeout SECONDS
              how long one run may take before it is stopped and counted a timeout, 10 without it
   --root DIR the repository root the manifest names the program from, the current directory without it
+  --job      fuzz the job in the JCL file through ironwork job: each data set a COBOL step reads
+             before any step creates it is built from that program's file description, each
+             in-stream DD a COBOL step reads gets generated lines, and each COBOL step whose program
+             takes a PARM gets generated PARMs (--instream and --step-parm). --datasets gives data
+             sets every run starts with; a data set the job reads that is neither fed nor given is
+             empty. Only an abend placed at a COBOL statement is kept
              The inputs are the sequential, indexed and relative files the program OPENs INPUT
              or I-O on a DD of its own, built field by field from their records' descriptions, an
              indexed file's in key order, a relative file's a record per slot with some empty,
@@ -344,8 +358,18 @@ fn driver() -> ExitCode {
     let (mut fuzz_runs, mut fuzz_seed, mut fuzz_timeout): (Option<u32>, Option<u64>, Option<u64>) = (None, None, None);
     let mut parm: Option<String> = None;
     let (mut fuzz_job, mut fuzz_cics) = (false, false);
+    let mut step_parms: Vec<(String, String)> = Vec::new();
+    let mut instream: Vec<(String, std::path::PathBuf)> = Vec::new();
     while let Some(a) = args.next() {
         match a.as_str() {
+            "--step-parm" => match args.next().and_then(|v| v.split_once('=').map(|(s, t)| (s.to_ascii_uppercase(), t.to_string()))).filter(|(_, t)| t.chars().count() <= rt::le::parm::PARM_LIMIT) {
+                Some(pair) => step_parms.push(pair),
+                None => return usage_error(&format!("--step-parm needs STEP=TEXT, the text at most {} characters", rt::le::parm::PARM_LIMIT)),
+            },
+            "--instream" => match args.next().and_then(|v| v.split_once('=').map(|(k, p)| (k.to_ascii_uppercase(), std::path::PathBuf::from(p)))) {
+                Some(pair) => instream.push(pair),
+                None => return usage_error("--instream needs STEP.DD=path"),
+            },
             "--job" => fuzz_job = true,
             "--cics" => fuzz_cics = true,
             "--parm" => match args.next().filter(|p| p.chars().count() <= rt::le::parm::PARM_LIMIT) {
@@ -519,6 +543,9 @@ fn driver() -> ExitCode {
     if parm.is_some() && rest.first().map(String::as_str) != Some("run") {
         return usage_error("--parm is for run; a job's PARM comes from its EXEC, and fuzz makes its own");
     }
+    if (!step_parms.is_empty() || !instream.is_empty()) && rest.first().map(String::as_str) != Some("job") {
+        return usage_error("--step-parm and --instream are for job");
+    }
     if rest.first().is_some_and(|c| c == "fuzz") {
         let [_, file] = rest.as_slice() else { return usage_error("fuzz needs one program, or one job with --job") };
         let Some(out) = out_dir else { return usage_error("fuzz needs -o DIR") };
@@ -527,14 +554,14 @@ fn driver() -> ExitCode {
         }
         // Fuzz makes every input, DD, journal and coverage report itself; a flag it would not use is
         // refused rather than ignored.
-        let made = !dds.is_empty() || replay.is_some() || keyed || sql_db.is_some() || sql_record.is_some() || evidence_dir.is_some() || coverage_file.is_some() || provenance_file.is_some() || trace_marker.is_some() || trace_statements.is_some() || datasets.is_some();
+        let made = !dds.is_empty() || replay.is_some() || keyed || sql_db.is_some() || sql_record.is_some() || evidence_dir.is_some() || coverage_file.is_some() || provenance_file.is_some() || trace_marker.is_some() || trace_statements.is_some();
         let elsewhere = compare_base.is_some() || compare_head.is_some() || declare.is_some() || statement.is_some() || !expected.is_empty() || dump_flags || bundle.is_some() || source_prefix.is_some();
-        let job_only = !fuzz_job && (!proclibs.is_empty() || user.is_some());
+        let job_only = !fuzz_job && (!proclibs.is_empty() || user.is_some() || datasets.is_some()) || datasets.as_deref().is_some_and(|d| d.ends_with(":text"));
         let cics_only = !fuzz_cics && !cics_options.is_empty();
         let cics_made = cics_options.iter().any(|(n, _)| matches!(n.as_str(), "--commarea" | "--commarea-out" | "--screens" | "--serve"));
         if made || elsewhere || job_only || cics_only || cics_made {
             let taken = match (fuzz_job, fuzz_cics) {
-                (true, _) => ", --proclib, --user",
+                (true, _) => ", --datasets (without :text), --proclib, --user",
                 (_, true) => ", --transid, --termid, --userid, --applid, --sysid, --transaction, --csd, --file, --td",
                 _ => "",
             };
@@ -553,7 +580,7 @@ fn driver() -> ExitCode {
             clock: clock_text.unwrap_or_else(|| "2026-01-01T00:00:00".into()),
         };
         if fuzz_job {
-            return usage_error("fuzz --job is not built yet");
+            return fuzz::job::run(fuzz::job::Request { fuzz: request, datasets: datasets.map(std::path::PathBuf::from), proclibs, user });
         }
         if fuzz_cics {
             return usage_error("fuzz --cics is not built yet");
@@ -652,7 +679,7 @@ fn driver() -> ExitCode {
             (exec::unit::Clock::System, Some(_)) => exec::unit::Clock::Fixed(1_767_225_600, 0),
             (c, _) => c,
         };
-        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, user, flags, clock, replay: replay.map(std::path::PathBuf::from), expected: expected_dir, expected_steps, declare, statement, evidence: evidence_dir, trace_marker });
+        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, user, flags, clock, replay: replay.map(std::path::PathBuf::from), expected: expected_dir, expected_steps, declare, statement, evidence: evidence_dir, trace_marker, parms: step_parms, instream, coverage: coverage_file });
     }
     if datasets.is_some() || !proclibs.is_empty() || user.is_some() {
         return usage_error("--datasets, --proclib and --user are for job");

@@ -45,6 +45,49 @@ pub struct Request {
     pub evidence: Option<PathBuf>,
     /// The text an input trace looks for in each sink's operand, recorded in the journal.
     pub trace_marker: Option<String>,
+    /// PARMs given in place of the EXEC's, by step as the job log names it.
+    pub parms: Vec<(String, String)>,
+    /// In-stream data given in place of the JCL's, by step and DD (`STEP.DD`), each a file of lines.
+    pub instream: Vec<(String, PathBuf)>,
+    /// Where the paragraphs the job's programs entered are written, as `run --coverage` writes them.
+    pub coverage: Option<PathBuf>,
+}
+
+/// The job in `jcl`, its procedures and INCLUDE members found in the data sets JCLLIB names under
+/// `datasets` and then in `proclibs`.
+pub(crate) fn parse(jcl: &Path, datasets: &Path, proclibs: &[PathBuf], user: Option<&str>) -> Result<Job, String> {
+    let shown = jcl.display().to_string();
+    let text = fs::read_to_string(jcl).map_err(|e| format!("{shown}: {e}"))?;
+    let libraries = |order: &[String], member: &str| -> Result<Option<String>, String> {
+        let dirs = order.iter().map(|dsn| datasets.join(dsn)).chain(proclibs.iter().cloned());
+        for dir in dirs {
+            for path in [dir.join(member), dir.join(format!("{member}.jcl"))] {
+                if path.is_file() {
+                    return fs::read_to_string(&path).map(Some).map_err(|e| format!("{}: {e}", path.display()));
+                }
+            }
+        }
+        Ok(None)
+    };
+    jcl::parse_with(&text, &libraries, user).map_err(|e| format!("{shown}:{}: {}", e.line, e.message))
+}
+
+/// The job with the request's PARMs and in-stream data in place of the JCL's.
+fn override_steps(job: &mut Job, req: &Request) -> Result<(), String> {
+    let mut steps = job.items.iter_mut().filter_map(|i| if let Item::Step(s) = i { Some(s) } else { None }).collect::<Vec<_>>();
+    for (name, parm) in &req.parms {
+        let step = steps.iter_mut().find(|s| s.shown() == *name).ok_or_else(|| format!("--step-parm {name}: the job has no such step"))?;
+        step.parm = Some(parm.clone());
+    }
+    for (key, path) in &req.instream {
+        let (name, dd) = key.rsplit_once('.').ok_or_else(|| format!("--instream {key}: needs STEP.DD"))?;
+        let step = steps.iter_mut().find(|s| s.shown() == name).ok_or_else(|| format!("--instream {key}: the job has no step {name}"))?;
+        let part = step.dds.iter_mut().find(|d| d.name == dd).and_then(|d| d.parts.iter_mut().find(|p| matches!(p.source, Source::InStream(_))));
+        let part = part.ok_or_else(|| format!("--instream {key}: step {name} has no in-stream DD {dd}"))?;
+        let text = fs::read_to_string(path).map_err(|e| format!("--instream {key}: {}: {e}", path.display()))?;
+        part.source = Source::InStream(text.lines().map(str::to_string).collect());
+    }
+    Ok(())
 }
 
 /// IBM programs a job can name that ironwork does not run; each is refused before the job starts.
@@ -52,7 +95,7 @@ const NOT_SUPPORTED: &[&str] = &[
     "ICETOOL", "IEBCOPY", "IEBUPDTE", "IEBPTPCH", "IEBCOMPR", "IEBDG", "IEHLIST", "IEHPROGM", "IEHMOVE", "IKJEFT01", "IKJEFT1A", "IKJEFT1B", "IRXJCL", "BPXBATCH", "BPXBATSL", "FTP", "DSNUTILB", "DSNUPROC", "DSNTEP2", "DSNTEP4", "DSNTIAUL", "DSNTIAD", "DFSRRC00", "ADRDSSU", "IEWL", "IEWBLINK", "HEWL", "IGYCRCTL", "ASMA90", "DFHECP1$", "DFHEAP1$", "IEBEDIT", "AMASPZAP",
 ];
 
-enum Program {
+pub(crate) enum Program {
     Iefbr14,
     Iebgener,
     Idcams,
@@ -61,7 +104,7 @@ enum Program {
     Missing,
 }
 
-fn program_of(pgm: &str, dirs: &[PathBuf]) -> Program {
+pub(crate) fn program_of(pgm: &str, dirs: &[PathBuf]) -> Program {
     match pgm {
         "IEFBR14" => return Program::Iefbr14,
         "IEBGENER" | "ICEGENER" => return Program::Iebgener,
@@ -193,6 +236,8 @@ struct Runner<'a> {
     /// Data sets this job created that are only passed so far: deleted when the job ends.
     passed_new: BTreeSet<PathBuf>,
     files: usize,
+    /// With --coverage, the paragraphs the job's programs entered and each program's outline.
+    coverage: Option<RefCell<(crate::coverage::Coverage, Vec<crate::coverage::Outline>)>>,
 }
 
 fn fresh_name(dir: &Path, n: &mut usize, what: &str) -> PathBuf {
@@ -419,14 +464,23 @@ impl Runner<'_> {
 }
 
 /// Runs a COBOL program with the step's DDs and PARM: its return code, or the abend's code and
-/// message. Each program CALL loads from a library goes into `called`.
+/// message, with its file and line in `place` and on standard error as `run` gives them. Each
+/// program CALL loads from a library goes into `called`.
 #[allow(clippy::too_many_arguments)]
-fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database: Option<&mut (dyn exec::sql::Database + '_)>, out: &mut dyn Write, called: &mut BTreeSet<PathBuf>, evidence: Option<&Rc<RefCell<crate::evidence::Run>>>, roots: &[PathBuf]) -> Result<i16, (AbendCode, String)> {
+fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database: Option<&mut (dyn exec::sql::Database + '_)>, out: &mut dyn Write, called: &mut BTreeSet<PathBuf>, evidence: Option<&Rc<RefCell<crate::evidence::Run>>>, roots: &[PathBuf], place: &mut Option<(String, i64)>, coverage: Option<&RefCell<(crate::coverage::Coverage, Vec<crate::coverage::Outline>)>>) -> Result<i16, (AbendCode, String)> {
     let ironwork = |m: String| (AbendCode::Ironwork, m);
     let text = fs::read(path).map(|b| syntax::copy::decode(&b)).map_err(|e| ironwork(format!("{}: {e}", path.display())))?;
     let own = path.parent().map(Path::to_path_buf).unwrap_or_default();
     let libraries = syntax::copy::Libraries::new(std::iter::once(own.clone()).chain(req.libraries.iter().cloned()).collect()).with_program(path);
     let mut programs = syntax::parse_all_with(&text, &libraries).map_err(|e| ironwork(e.place(&path.display().to_string()).to_string()))?;
+    if let Some(c) = coverage {
+        let outlines = &mut c.borrow_mut().1;
+        for p in &programs {
+            if !outlines.iter().any(|o| o.program == p.id) {
+                outlines.push(crate::coverage::Outline::of(p));
+            }
+        }
+    }
     let first = programs.remove(0);
     if let Some(run) = evidence {
         crate::evidence::sources(run.borrow_mut().journal_mut(), &first.sources, &path.display().to_string(), roots);
@@ -445,6 +499,9 @@ fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database
         if let exec::unit::Event::Load { source: Some(p), .. } = &event {
             loads.borrow_mut().push(p.to_path_buf());
         }
+        if let Some(c) = coverage {
+            c.borrow_mut().0.observe(&event);
+        }
         if let Some(run) = evidence {
             run.borrow_mut().observe(event);
         }
@@ -454,7 +511,12 @@ fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database
     match ended {
         Ok((_, rc)) => Ok(rc),
         Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => Ok(0),
-        Err(a) => Err((a.code, a.message)),
+        Err(a) => {
+            let file = a.file.clone().or_else(|| compiled.program.sources.get(a.pos.file as usize).cloned()).filter(|f| !f.is_empty()).unwrap_or_else(|| path.display().to_string());
+            eprintln!("{file}:{}: ABEND {}: {}", a.pos, a.code, a.message);
+            *place = Some((file, i64::from(a.pos.line)));
+            Err((a.code, a.message))
+        }
     }
 }
 
@@ -864,31 +926,16 @@ struct Frame {
 
 pub fn run(req: Request) -> ExitCode {
     let shown = req.jcl.display().to_string();
-    let text = match fs::read_to_string(&req.jcl) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("ironwork: {shown}: {e}");
-            return ExitCode::from(2);
-        }
-    };
-    let libraries = |order: &[String], member: &str| -> Result<Option<String>, String> {
-        let dirs = order.iter().map(|dsn| req.datasets.join(dsn)).chain(req.proclibs.iter().cloned());
-        for dir in dirs {
-            for path in [dir.join(member), dir.join(format!("{member}.jcl"))] {
-                if path.is_file() {
-                    return fs::read_to_string(&path).map(Some).map_err(|e| format!("{}: {e}", path.display()));
-                }
-            }
-        }
-        Ok(None)
-    };
-    let job = match jcl::parse_with(&text, &libraries, req.user.as_deref()) {
+    let mut job = match parse(&req.jcl, &req.datasets, &req.proclibs, req.user.as_deref()) {
         Ok(j) => j,
         Err(e) => {
-            eprintln!("ironwork: {shown}:{}: {}", e.line, e.message);
+            eprintln!("ironwork: {e}");
             return ExitCode::from(2);
         }
     };
+    if let Err(e) = override_steps(&mut job, &req) {
+        return crate::usage_error(&e);
+    }
     if !req.datasets.is_dir() {
         eprintln!("ironwork: --datasets {}: not a directory", req.datasets.display());
         return ExitCode::from(2);
@@ -937,7 +984,8 @@ pub fn run(req: Request) -> ExitCode {
         None => req.datasets.clone(),
     };
     let inputs: Vec<(String, Value)> = if req.expected.is_some() { files_under(&datasets).into_iter().map(|(n, p)| (n, crate::compare::digest_of(fs::read(p).ok().as_deref()))).collect() } else { Vec::new() };
-    let mut runner = Runner { req: &req, datasets, scratch, temporaries: BTreeMap::new(), gdg_start: BTreeMap::new(), passed_new: BTreeSet::new(), files: 0 };
+    let coverage = req.coverage.as_ref().map(|_| RefCell::new(Default::default()));
+    let mut runner = Runner { req: &req, datasets, scratch, temporaries: BTreeMap::new(), gdg_start: BTreeMap::new(), passed_new: BTreeSet::new(), files: 0, coverage };
     let roots: Vec<PathBuf> = std::iter::once(req.jcl.parent().map(Path::to_path_buf).unwrap_or_default())
         .chain([req.datasets.clone()])
         .chain(req.libraries.iter().cloned())
@@ -962,6 +1010,12 @@ pub fn run(req: Request) -> ExitCode {
     let report = run_job(&job, &mut runner, replay.as_mut().map(|r| r as &mut dyn exec::sql::Database), &journal, &roots);
     if let Some(j) = journal.into_inner() {
         crate::evidence::finish(Some(j), i64::from(report.status));
+    }
+    if let (Some(file), Some(c)) = (&req.coverage, &runner.coverage) {
+        let (covered, outlines) = &*c.borrow();
+        if let Err(e) = fs::write(file, format!("{}\n", exec::evidence::canonical(&covered.report(outlines)))) {
+            eprintln!("ironwork: --coverage {}: {e}", file.display());
+        }
     }
     for path in std::mem::take(&mut runner.passed_new) {
         let _ = if path.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };
@@ -1057,6 +1111,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                     }
                     Rc::new(RefCell::new(r))
                 });
+                let mut place = None;
                 let outcome = match program {
                     Program::Iefbr14 => Ok(0),
                     Program::Iebgener => iebgener(&dds),
@@ -1064,7 +1119,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                     Program::Sort => Ok(sort_step(&dds)),
                     Program::Cobol(path) => {
                         programs.insert(path.clone());
-                        run_cobol(&path, step.parm.as_deref().unwrap_or(""), runner.req, &dds, database.as_deref_mut(), &mut stdout, &mut programs, run.as_ref(), roots)
+                        run_cobol(&path, step.parm.as_deref().unwrap_or(""), runner.req, &dds, database.as_deref_mut(), &mut stdout, &mut programs, run.as_ref(), roots, &mut place, runner.coverage.as_ref())
                     }
                     Program::Missing => Err((AbendCode::ModuleNotFound, format!("program {} is not in the program libraries", step.pgm))),
                 };
@@ -1075,7 +1130,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                 }
                 let _ = stdout.flush();
                 if let Some(run) = run.and_then(|r| Rc::try_unwrap(r).ok()) {
-                    let abend = outcome.as_ref().err().map(|(code, _)| (code.to_string(), None, 0));
+                    let abend = outcome.as_ref().err().map(|(code, _)| (code.to_string(), place.as_ref().map(|(f, _)| f.as_str()), place.as_ref().map_or(0, |(_, l)| *l)));
                     *journal.borrow_mut() = Some(run.into_inner().end(abend));
                 }
                 match outcome {
@@ -1111,7 +1166,7 @@ struct Report {
     programs: BTreeSet<PathBuf>,
 }
 
-fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+pub(crate) fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     fs::create_dir_all(to)?;
     for entry in fs::read_dir(from)? {
         let entry = entry?;

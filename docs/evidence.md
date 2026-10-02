@@ -28,8 +28,9 @@ by `prev` and `seq`.
 
 - A job's journal is one run: the JCL as an `input`, then for each step its programs' sources, its
   DDs' `open` and `close` records and CALLs, an `end` record for each data set it was given, and
-  its `step` record. The directory is refused inside the JCL's directory, `--datasets`, a library
-  or a procedure library.
+  its `step` record. A COBOL step's abend gives the `abend` record its file and line, and standard
+  error the line `run` gives. The directory is refused inside the JCL's directory, `--datasets`, a
+  library or a procedure library.
 - A path is relative to the directory that supplied it (the program's, a `-I` library, a `-L`
   library) and otherwise its file name. No record holds a record's data, an option's value, or an
   absolute path.
@@ -38,7 +39,8 @@ by `prev` and `seq`.
 - Files are hashed as they stream (`crates/rt/src/digest.rs`), so a large data set is not held in
   memory; hashing an indexed file at OPEN still reads all of it.
 - `run --coverage FILE` writes, for each program of the source, every paragraph with its line and
-  how often control entered it, from the run unit's `Paragraph` events.
+  how often control entered it, from the run unit's `Paragraph` events; `job --coverage FILE` the
+  same for every program the job's steps ran.
 - The run unit tells an observer what it opens, closes and loads, and each paragraph control
   enters (`exec::unit::Observer`); the
   interpreter and, when it lands, the VM raise the same events, so a journal is the same under both.
@@ -204,13 +206,22 @@ cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
    (VLR decides which), or now and then shorter than READ allows. A line-sequential file, an
    indexed file whose keys lie past its shortest record, a contained program's file and a DD that
    more than one file names are given an empty data set. A file assigned to SYSIN reads the SYSIN
-   lines. A program whose one USING item is the parameter Language Environment gives a job step
-   (a group led by a halfword binary length) gets a PARM of up to 100 characters through `run
-   --parm`, which the run's journal does not record; the manifest holds it.
-2. Each run is its own `ironwork run` with the given `--clock` (2026-01-01 without it), stopped
-   after `--timeout` seconds. Every data set is written inside DIR under a name of its own, never
-   under its DD name, since ASSIGN may name a path. `--seed` fixes the inputs, so the same seed
-   gives the same runs.
+   lines. A blank SYSIN card is 80 spaces, never an empty line. A program whose one USING item is
+   the parameter Language Environment gives a job step (a group led by a halfword binary length)
+   gets a PARM of up to 100 characters through `run --parm`, which the run's journal does not
+   record; the manifest holds it.
+   With `--job`, the inputs are those of the job's COBOL steps: each data set a step reads before
+   any step creates it, built from the first reading program's file description and named by its
+   data set name; each in-stream DD a step reads as SYSIN lines or as its file, named `STEP.DD`;
+   and each step whose program takes a PARM, named by the step as the job log names it. They reach
+   `ironwork job` through `--datasets` (a fresh copy per run of `--datasets` given to fuzz, with
+   the fed data sets written in), `--instream` and `--step-parm`. A data set the job reads that is
+   neither fed nor given is empty. A step that abends at no COBOL statement, and a JCL error, are
+   counted as refused.
+2. Each run is its own `ironwork run`, or `ironwork job` with `--job`, with the given `--clock`
+   (2026-01-01 without it), stopped after `--timeout` seconds. Every data set is written inside DIR
+   under a name of its own, never under its DD name, since ASSIGN may name a path. `--seed` fixes
+   the inputs, so the same seed gives the same runs.
 3. An abend the program gives on empty input is not the input's doing and is not kept. Every other
    abend is kept once by code, file and line, with its input made as small as still gives it:
    records and SYSIN lines dropped, the PARM cut short, then each field outside the keys set to a
@@ -225,12 +236,15 @@ cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
 `clock`, `program` (`file`, relative to `--root`, the current directory without it, and `id`),
 `roots` (the program's directory, then each `-I` and `-L` library, by path from `--root`, `.` for
 `--root` itself and null for one outside it: the order a journal's `input` records number them, so
-a file named relative to its library is found under that library),
-`entry` (`run`), `inputs` (`id`, `kind` `dd`, `sysin` or `parm`, `name`, `bytes` in base64, `minimized`,
+a file named relative to its library is found under that library; for a job, the JCL's directory,
+`.work` standing for each run's own data sets, the libraries, then the procedure libraries),
+`entry` (`run` or `job`; for a job `program` is the JCL and its id the job's name), `inputs` (`id`,
+`kind` `dd`, `sysin` or `parm`, `name`, `bytes` in base64, `minimized`,
 false when the 200 runs ran out first), `counts` (`runs`, `clean`, `abend`, `timeout`, `refused`,
 over the generated runs; an abend that says what the surroundings lack counts as refused and is not
-kept: IRONWORK, a construct ironwork does not run, and S806, a CALL of a program no `-L` library
-holds; so do a run ironwork refused, told by its `ironwork:` line and not by the exit status a
+kept: IRONWORK, a construct ironwork does not run, S806, a CALL of a program no `-L` library holds,
+EXEC, an EXEC statement with no database or region behind it, and IO-35, an OPEN of a file no DD
+gives; so do a run ironwork refused, told by its `ironwork:` line and not by the exit status a
 program's RETURN-CODE can also give, and a run in which ironwork itself panicked; standard error
 gives the first refusal's reason and the first panic) and `runs`,
 one per kept abend (`input` ids, `outcome` `abend`, `abend` with `code`, `file` relative to the

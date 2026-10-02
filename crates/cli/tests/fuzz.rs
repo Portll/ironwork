@@ -355,7 +355,7 @@ fn run_passes_a_parm_as_language_environment_does_and_fuzz_varies_it() {
 #[test]
 fn fuzz_refuses_a_flag_it_would_not_use() {
     let dir = temp("flags");
-    for extra in [&["--declare", "x"][..], &["--sql-record", "x"], &["--proclib", "x"], &["--transid", "T"], &["--parm", "X"], &["--job", "--cics"]] {
+    for extra in [&["--declare", "x"][..], &["--sql-record", "x"], &["--proclib", "x"], &["--transid", "T"], &["--parm", "X"], &["--job", "--cics"], &["--datasets", "x"], &["--job", "--datasets", "x:text"], &["--step-parm", "S=X"]] {
         let o = fuzz(&dir, "run", extra);
         assert_eq!(o.status.code(), Some(2), "{extra:?}");
         assert!(!dir.join("run").exists(), "{extra:?}");
@@ -363,4 +363,55 @@ fn fuzz_refuses_a_flag_it_would_not_use() {
     let o = Command::new(env!("CARGO_BIN_EXE_ironwork")).current_dir(dir.join("repo")).args(["check", "src/QTYSUM.cbl", "--parm", "X"]).output().unwrap();
     assert_eq!(o.status.code(), Some(2));
     assert!(stderr(&o).contains("--parm is for run"), "{}", stderr(&o));
+}
+
+const SYSIN_PROGRAM: &[&str] = &[
+    "       IDENTIFICATION DIVISION.",
+    "       PROGRAM-ID. CARDSUM.",
+    "       DATA DIVISION.",
+    "       WORKING-STORAGE SECTION.",
+    "       01 WS-CARD PIC X(5).",
+    "       01 WS-NUM REDEFINES WS-CARD PIC 9(5).",
+    "       01 WS-TOTAL PIC 9(9) VALUE 0.",
+    "       PROCEDURE DIVISION.",
+    "           ACCEPT WS-CARD",
+    "           ADD WS-NUM TO WS-TOTAL",
+    "           GOBACK.",
+];
+
+#[test]
+fn a_job_s_data_sets_in_stream_data_and_step_parms_are_fuzzed_and_each_abend_placed_in_its_program() {
+    let dir = temp("job");
+    fs::write(dir.join("repo/src/PARMSUM.cbl"), PARM_PROGRAM.join("\n") + "\n").unwrap();
+    fs::write(dir.join("repo/src/CARDSUM.cbl"), SYSIN_PROGRAM.join("\n") + "\n").unwrap();
+    fs::create_dir_all(dir.join("repo/jcl")).unwrap();
+    let jcl = [
+        "//FUZZJOB  JOB",
+        "//STEP1    EXEC PGM=QTYSUM",
+        "//INFILE   DD DSN=MY.INPUT,DISP=SHR",
+        "//STEP2    EXEC PGM=PARMSUM,PARM='00001',COND=EVEN",
+        "//STEP3    EXEC PGM=CARDSUM,COND=EVEN",
+        "//SYSIN    DD *",
+        "00042",
+        "/*",
+    ];
+    fs::write(dir.join("repo/jcl/FUZZ.jcl"), jcl.join("\n") + "\n").unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_ironwork")).current_dir(dir.join("repo")).args(["fuzz", "--job", "jcl/FUZZ.jcl", "-L", "src", "--runs", "60", "-o"]).arg(dir.join("run")).output().unwrap();
+    assert!(o.status.success(), "{}", stderr(&o));
+    let manifest = fs::read_to_string(dir.join("run/manifest.json")).unwrap();
+    assert!(manifest.contains("\"entry\":\"job\""), "{manifest}");
+    assert!(manifest.contains("\"program\":{\"file\":\"jcl/FUZZ.jcl\",\"id\":\"FUZZJOB\"}"), "{manifest}");
+    for (kind, name) in [("dd", "MY.INPUT"), ("parm", "STEP2"), ("sysin", "STEP3.SYSIN")] {
+        assert!(manifest.contains(&format!("\"kind\":\"{kind}\",\"minimized\":")) && manifest.contains(&format!("\"name\":\"{name}\"")), "{kind} {name}: {manifest}");
+    }
+    let found = kept(&manifest);
+    for place in ["S0C7 25", "U4038 19", "S0C7 10"] {
+        assert!(found.iter().any(|k| k == place), "{place}: {found:?}");
+    }
+    assert!(manifest.contains("\"file\":\"QTYSUM.cbl\""), "{manifest}");
+    for journal in manifest.split("\"journal\":\"").skip(1).map(|r| r.split('"').next().unwrap()) {
+        let text = fs::read_to_string(dir.join("run/evidence/runs").join(format!("{journal}.jsonl"))).unwrap();
+        assert!(text.lines().any(|l| l.contains("\"kind\":\"abend\"") && l.contains("\"line\":")), "{journal}: {text}");
+    }
+    assert!(dir.join("run/coverage/0.json").exists());
 }
