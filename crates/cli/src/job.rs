@@ -1220,6 +1220,7 @@ fn equivalence(req: &Request, job: &Job, report: &Report, expected: &Path, left:
         ("job", job.name.clone().into()),
         ("inputs", Value::Arr(inputs.iter().map(|(n, d)| Value::Obj(fields([("dataset", n.clone().into()), ("sha256", d.clone())]))).collect())),
         ("sqlRecording", req.replay.as_ref().map_or(Value::Null, |p| digest_of(fs::read(p).ok().as_deref()))),
+        ("clock", crate::compare::clock_value(req.clock)),
         ("steps", Value::Arr(report.steps.clone())),
         ("results", Value::Arr(results)),
         ("declared", Value::Arr(declared.iter().map(|d| Value::Obj(fields([("what", d.what.clone().into()), ("reason", d.reason.clone().into())]))).collect())),

@@ -135,10 +135,10 @@ versions (`crates/cli/src/compare.rs`):
 The statement's `predicateType` is
 `https://github.com/Portll/ironwork/blob/main/docs/evidence.md#equivalence-v1`; its subjects are
 `base:<file>` and `head:<file>` by digest, and its predicate holds `verdict`, `inputs` (DD names and
-digests), `sqlRecording`, `closure` (each side's program and COPY members, named relative to their
-library, by digest: how a change to a copybook alone is shown to have been run), `results`,
-`declared`, `inconclusive`, `unchecked`, `coverage` and `limit`. A program CALL loaded from a
-library is in `closure` as `called:<name>`.
+digests), `sqlRecording`, `clock` (the fixed time both sides ran at, ISO 8601 UTC), `closure` (each
+side's program and COPY members, named relative to their library, by digest: how a change to a
+copybook alone is shown to have been run), `results`, `declared`, `inconclusive`, `unchecked`,
+`coverage` and `limit`. A program CALL loaded from a library is in `closure` as `called:<name>`.
 
 | verdict | when | exit |
 |---|---|---|
@@ -181,8 +181,8 @@ The statement's `predicateType` is
 `https://github.com/Portll/ironwork/blob/main/docs/evidence.md#job-equivalence-v1`, apart from
 `equivalence-v1` because its subjects are not a base and a head program: they are `job:<file>`, the
 JCL, and `program:<file>` for each COBOL program the job ran or CALLed, by digest. The predicate holds
-`verdict`, `job`, `inputs` (each data set and its digest before the run), `sqlRecording`, `steps`
-(each step, its program and its outcome as the job log shows it), `results`, `declared`,
+`verdict`, `job`, `inputs` (each data set and its digest before the run), `sqlRecording`, `clock`,
+`steps` (each step, its program and its outcome as the job log shows it), `results`, `declared`,
 `inconclusive`, `coverage` and `limit`. The verdicts and exit statuses are those of `compare`; a
 step that reached what ironwork does not model makes the verdict `inconclusive`.
 

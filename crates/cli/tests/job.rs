@@ -320,7 +320,7 @@ fn a_job_is_equivalent_to_production_when_its_data_sets_match() {
     };
     let (code, st, l) = expect("ALPHA\nBETA\n", &[]);
     assert_eq!(code, Some(0), "{l}");
-    assert!(st.contains("\"verdict\":\"equivalent\"") && st.contains("job-equivalence-v1") && st.contains("\"name\":\"program:UPCASE.cbl\""), "{st}");
+    assert!(st.contains("\"verdict\":\"equivalent\"") && st.contains("job-equivalence-v1") && st.contains("\"name\":\"program:UPCASE.cbl\"") && st.contains("\"clock\":\"2026-01-01T00:00:00.000Z\""), "{st}");
     assert!(dir.join("data/IN.NAMES").exists() && !dir.join("data/OUT.NAMES").exists(), "production's data sets are not touched");
     let (code, st, _) = expect("ALPHA\nBETX\n", &[]);
     assert_eq!(code, Some(1));

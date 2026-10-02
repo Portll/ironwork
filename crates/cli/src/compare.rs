@@ -17,6 +17,14 @@ use exec::evidence::{canonical, fields, Value};
 pub const PREDICATE: &str = "https://github.com/Portll/ironwork/blob/main/docs/evidence.md#equivalence-v1";
 pub(crate) const LIMIT: &str = "Equivalence is under ironwork's model of Enterprise COBOL, on the inputs recorded here; the oracle holds no Enterprise COBOL goldens yet, and coverage is of paragraphs entered, not of statements or branches within them, so a verdict of equivalent covers these inputs only.";
 
+/// The time both sides ran at, as an ISO 8601 UTC timestamp; null for the system clock.
+pub(crate) fn clock_value(clock: exec::unit::Clock) -> Value {
+    match clock {
+        exec::unit::Clock::Fixed(seconds, hundredths) => exec::evidence::iso(seconds, hundredths * 10).into(),
+        exec::unit::Clock::System => Value::Null,
+    }
+}
+
 /// The head's paragraphs the change touched, and those of them the inputs never entered. A change
 /// that touched no paragraph's statements (data, or a copybook in the DATA DIVISION) is held to
 /// every paragraph. Null when the head did not run.
@@ -427,6 +435,7 @@ pub fn run(req: Request) -> ExitCode {
         ("verdict", verdict.into()),
         ("inputs", inputs),
         ("sqlRecording", req.replay.as_ref().map_or(Value::Null, |p| digest_of(fs::read(p).ok().as_deref()))),
+        ("clock", clock_value(req.clock)),
         ("results", Value::Arr(results)),
         ("declared", Value::Arr(declared.iter().map(|d| Value::Obj(fields([("what", d.what.clone().into()), ("reason", d.reason.clone().into())]))).collect())),
         ("inconclusive", Value::Arr(inconclusive.iter().map(|s| Value::Str(s.clone())).collect())),
