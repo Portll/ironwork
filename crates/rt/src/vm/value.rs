@@ -5,7 +5,7 @@ use super::{Code, Facts, Halt, R, Vm, not_yet};
 use crate::abend::Abend;
 use crate::arith;
 use crate::intrinsic::function::{self as intrinsic, Evaluator};
-use crate::lir::{Argument, Base, Comparand, Const, Count, Expr, ExprId, Func, FunctionId, FunctionPlan, IntExpr, Mode, Operand, PlaceId};
+use crate::lir::{AbendId, Argument, Base, Comparand, Const, Count, Expr, ExprId, Func, FunctionId, FunctionPlan, IntExpr, Mode, Operand, PlaceId};
 use crate::storage::{Kind, Loc, Val};
 use crate::store::{self, ProgramFacts};
 use crate::unit::{ADDRESS_BASE, Loader};
@@ -14,14 +14,16 @@ use numeric::precision::{Fixed, Places};
 use std::rc::Rc;
 use zarch::hfp::{Hfp, Precision};
 
-pub(super) fn constant(c: &Const) -> Val {
-    match c {
+/// A constant's value, or the abend reading a refused one gives.
+pub(super) fn constant(c: &Const) -> Result<Val, AbendId> {
+    Ok(match c {
         Const::Bytes(b) => Val::Bytes(b.clone()),
         Const::National(b) => Val::National(b.clone()),
         Const::Number(f) => Val::Num(*f),
         Const::Figurative(f) => Val::Fig(*f),
         Const::All(b) => Val::All(b.clone()),
-    }
+        Const::Refused(abend) => return Err(*abend),
+    })
 }
 
 impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
@@ -36,7 +38,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 let loc = self.loc(p)?;
                 self.read(loc, self.pos(self.p.places[p as usize].at))
             }
-            Operand::Const(c) => Ok(constant(&self.p.consts[c as usize])),
+            Operand::Const(c) => constant(&self.p.consts[c as usize]).map_err(|a| self.abend(a, None).into()),
             Operand::LengthOf(p) => {
                 let loc = self.loc(p)?;
                 Ok(Val::Num(Fixed::new(loc.len as i128, Places::new(9, 0))))

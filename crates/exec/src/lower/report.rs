@@ -114,7 +114,7 @@ impl Lower<'_> {
     }
 
     fn report_literal(&mut self, lit: &Literal, pos: Pos) -> R<ConstId> {
-        Ok(self.literal_const(lit, pos)?.0)
+        Ok(self.encoded_const(lit, pos)?.0)
     }
 
     /// The report writer's `item`: a data item at its offset in the slab, whole.

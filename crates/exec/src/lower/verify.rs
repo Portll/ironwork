@@ -4,7 +4,7 @@
 
 use rt::cics::Handles;
 use rt::lir::{
-    Advance, Argument, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Convert, ConvertTable, Count, DisplayItem, Inspected, Expr, FileVerb, Flag, Func, HostPlace, IntExpr,
+    Advance, Argument, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Const, Convert, ConvertTable, Count, DisplayItem, Inspected, Expr, FileVerb, Flag, Func, HostPlace, IntExpr,
     JsonValue, Marker, Markup, MethodName, MovePlan, Named, Op, Operand, ParseValue, Place, PlaceId, Program, RangeKind, Receiver, Replacement, ReportOp, SenderCheck, SetTo, SortIo, SortPlan,
     SqlStatement, StartKey, StorePlan, SymId, Terminator, UpDown, XmlValue,
 };
@@ -171,6 +171,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
     for a in &p.abends {
         a.at.map_or(Ok(()), |at| within("debug entry", at, p.debug.positions.len()))?;
     }
+    p.consts.iter().try_for_each(|c| if let Const::Refused(a) = c { abend(*a) } else { Ok(()) })?;
     for a in &p.plans.arith {
         places(&a.prepass)?;
         for s in &a.steps {

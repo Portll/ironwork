@@ -497,8 +497,9 @@ fn values_and_conditions_round_trip_with_every_tag() {
         Const::Number(fixed(-125, 1, 2)),
         Const::Figurative(Figurative::HighValue),
         Const::All(vec![]),
+        Const::Refused(3),
     ];
-    every_variant(&consts, 5);
+    every_variant(&consts, 6);
     every_variant(&[IntExpr::Const(i64::MIN), IntExpr::Item(0), IntExpr::Fixed { expr: 2, dmax: 3, prepass: vec![1, 4] }, IntExpr::Walk(2)], 4);
     let exprs = [Expr::Operand(Operand::Load(0)), Expr::Neg(0), Expr::Bin(0, BinOp::Div, 1), Expr::Pow(1, IntExpr::Const(2))];
     every_variant(&exprs, 4);

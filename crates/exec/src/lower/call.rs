@@ -60,6 +60,7 @@ impl Lower<'_> {
     fn content(&mut self, op: &Operand, pos: Pos) -> R<Chars> {
         Ok(match op {
             Operand::Ref(r) => Chars::Place(self.place(r, false)?),
+            Operand::Literal(lit) if self.unencodable(lit).is_some() => Chars::Value(self.operand(op, pos)?.operand),
             Operand::Literal(lit) => Chars::Literal(self.content_bytes(lit, pos)?),
             _ => Chars::Value(self.operand(op, pos)?.operand),
         })

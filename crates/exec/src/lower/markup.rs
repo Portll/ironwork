@@ -839,8 +839,8 @@ impl Lower<'_> {
             Flag::Literals(yes, no) => {
                 let Some(t) = target else { return Err(LowerError::Invalid("two JSON PARSE literals with no item to go in".into())) };
                 let kind = self.layout.items[t].kind;
-                let (on, on_side) = self.literal_const(yes, pos)?;
-                let (off, off_side) = self.literal_const(no, pos)?;
+                let (on, on_side) = self.encoded_const(yes, pos)?;
+                let (off, off_side) = self.encoded_const(no, pos)?;
                 lir::Flag::Literals { on: (on, self.move_plan(&on_side, kind, Some(t))?), off: (off, self.move_plan(&off_side, kind, Some(t))?) }
             }
         })
@@ -859,7 +859,7 @@ impl Lower<'_> {
             Ok(place) => place,
             Err(fail) => return self.refused(fail).map(SetTo::Refused),
         };
-        let (value, side) = self.literal_const(value, pos)?;
+        let (value, side) = self.encoded_const(value, pos)?;
         let plan = self.move_plan(&side, self.kind_of(place), self.place_items[place as usize])?;
         Ok(SetTo::Move { place, value, plan })
     }

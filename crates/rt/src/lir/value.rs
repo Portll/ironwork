@@ -21,6 +21,9 @@ pub enum Const {
     Number(Fixed),
     Figurative(Figurative),
     All(Vec<u8>),
+    /// An alphanumeric literal, or ALL one, the code page cannot encode: reading it abends, as
+    /// `literal_value` does each time it converts the literal.
+    Refused(AbendId),
 }
 
 /// `Fixed` locates each place of `prepass` before it evaluates `expr`, as the walker's dmax pass
@@ -118,7 +121,7 @@ pub enum SqlTest {
 }
 
 codec_enum!(Operand { Load(place) = 0, Const(id) = 1, LengthOf(place) = 2, AddressOf(place) = 3, Function(id) = 4 });
-codec_enum!(Const { Bytes(b) = 0, National(n) = 1, Number(f) = 2, Figurative(f) = 3, All(b) = 4 });
+codec_enum!(Const { Bytes(b) = 0, National(n) = 1, Number(f) = 2, Figurative(f) = 3, All(b) = 4, Refused(abend) = 5 });
 codec_enum!(IntExpr { Const(n) = 0, Item(place) = 1, Fixed { expr, dmax, prepass } = 2, Walk(k) = 3 });
 codec_enum!(Expr { Operand(o) = 0, Neg(e) = 1, Bin(a, op, b) = 2, Pow(base, exponent) = 3 });
 codec_enum!(Cond {

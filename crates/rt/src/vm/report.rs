@@ -78,7 +78,7 @@ impl<'p, L: Loader<Rc<Code>>> ReportHost<'p, Comparand, PlaceId, ConstId, RangeI
     }
 
     fn literal(&mut self, value: &ConstId, _pos: Pos) -> Result<Val, Abend> {
-        Ok(constant(&self.vm.p.consts[*value as usize]))
+        constant(&self.vm.p.consts[*value as usize]).map_err(|a| self.vm.abend(a, None))
     }
 
     fn item(&self, item: usize) -> Loc {

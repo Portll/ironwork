@@ -215,6 +215,7 @@ impl Lower<'_> {
                 }
                 Operand::Literal(Literal::Number(t)) if self.program.environment.decimal_point_comma => DisplayItem::Text(self.sym(&t.replace('.', ","))),
                 Operand::Literal(Literal::Number(t)) => DisplayItem::Text(self.sym(t)),
+                Operand::Literal(lit) if self.unencodable(lit).is_some() => DisplayItem::Value(self.operand(op, pos)?.operand),
                 Operand::Literal(lit) => {
                     let text = self.display_text(lit, pos)?;
                     DisplayItem::Text(self.sym(&text))

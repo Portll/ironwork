@@ -5,6 +5,7 @@ use zarch::hfp::Precision;
 use crate::layout::Resolved;
 use crate::machine::literal_fixed;
 use numeric::precision::Fixed;
+use rt::abend::AbendCode;
 use rt::lir::{self, Comparand, ConstId, ExprId, IntExpr, Mode, PlaceId};
 use rt::storage::Kind;
 use syntax::Pos;
@@ -394,6 +395,11 @@ impl Lower<'_> {
 
     /// A literal converted once, as `literal_value` converts it on every use.
     pub(super) fn literal_const(&mut self, lit: &Literal, pos: Pos) -> R<(ConstId, Side)> {
+        if let Some(message) = self.unencodable(lit) {
+            let abend = self.abend(AbendCode::Ironwork, &message, Some(pos))?;
+            let value = if matches!(lit, Literal::All(_)) { Value::All } else { Value::Bytes };
+            return Ok((self.constant(lir::Const::Refused(abend))?, Side { value, src: None, digits: 0 }));
+        }
         let (constant, value, digits) = match lit {
             Literal::Alnum(s) => (lir::Const::Bytes(self.encode(s, pos)?), Value::Bytes, 0),
             Literal::Hex(b) => (lir::Const::Bytes(b.clone()), Value::Bytes, 0),
@@ -415,6 +421,29 @@ impl Lower<'_> {
 
     pub(super) fn encode(&self, text: &str, pos: Pos) -> R<Vec<u8>> {
         self.page.encode(text).or_else(|_| unsupported("a literal the code page cannot encode", pos))
+    }
+
+    /// A literal of a report or of JSON PARSE, which a payload holds as a constant: one the code page
+    /// cannot encode is refused.
+    pub(super) fn encoded_const(&mut self, lit: &Literal, pos: Pos) -> R<(ConstId, Side)> {
+        if self.unencodable(lit).is_some() {
+            return unsupported("a literal the code page cannot encode, in a report or JSON PARSE", pos);
+        }
+        self.literal_const(lit, pos)
+    }
+
+    /// The message of `literal_value`'s abend for an alphanumeric literal, or ALL one, the code page
+    /// cannot encode.
+    pub(super) fn unencodable(&self, lit: &Literal) -> Option<String> {
+        let text = match lit {
+            Literal::Alnum(s) => s,
+            Literal::All(inner) => match &**inner {
+                Literal::Alnum(s) => s,
+                _ => return None,
+            },
+            _ => return None,
+        };
+        self.page.encode(text).err().map(|e| e.to_string())
     }
 
     pub(super) fn constant(&mut self, c: lir::Const) -> R<ConstId> {

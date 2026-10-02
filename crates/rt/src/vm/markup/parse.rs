@@ -216,14 +216,14 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 SetTo::Nothing => Ok(()),
                 SetTo::Move { place, value, plan } => {
                     let dest = self.loc(*place)?;
-                    let val = constant(&self.p.consts[*value as usize]);
+                    let val = constant(&self.p.consts[*value as usize]).map_err(|a| self.abend(a, Some(at.debug)))?;
                     self.move_into(dest, val, plan, at.debug, at.pos)
                 }
                 SetTo::Refused(abend) => Err(self.abend(*abend, Some(at.debug)).into()),
             },
             Flag::Literals { on: yes, off: no } => {
                 let (value, plan) = if on { yes } else { no };
-                let val = constant(&self.p.consts[*value as usize]);
+                let val = constant(&self.p.consts[*value as usize]).map_err(|a| self.abend(a, Some(at.debug)))?;
                 let Some(target) = target else { return Err(Abend::ironwork("JSON PARSE: two literals need the item they go in", at.pos).into()) };
                 self.move_into(target, val, plan, at.debug, at.pos)
             }

@@ -63,7 +63,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
     }
 
     fn compare_constant(&self, subject: &(Val, Option<Loc>), c: u32, pos: Pos) -> R<Ordering> {
-        let value = constant(&self.p.consts[c as usize]);
+        let value = constant(&self.p.consts[c as usize]).map_err(|a| self.abend(a, None))?;
         Ok(store::compare(&self.facts(), &self.unit.mem, subject.clone(), (value, None), pos)?)
     }
 
@@ -115,7 +115,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         let Comparand::Operand(Operand::Load(r)) = e else { return Ok(None) };
         let nonnumeric = match other {
             Comparand::Operand(Operand::Const(c)) => match &self.p.consts[*c as usize] {
-                Const::Bytes(_) | Const::All(_) => true,
+                Const::Bytes(_) | Const::All(_) | Const::Refused(_) => true,
                 Const::Figurative(f) => !matches!(f, Figurative::Zero | Figurative::Null),
                 Const::National(_) | Const::Number(_) => false,
             },

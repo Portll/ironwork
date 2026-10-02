@@ -339,8 +339,9 @@ pub enum Operand {
 }
 
 /// A literal, converted once, where `literal_value` converts it on every use (machine.rs:621-634).
-/// Bytes are alphanumeric in the program's code page, or hexadecimal.
-pub enum Const { Bytes(Vec<u8>), National(Vec<u8>), Number(Fixed), Figurative(Figurative), All(Vec<u8>) }
+/// Bytes are alphanumeric in the program's code page, or hexadecimal. `Refused` is an alphanumeric
+/// literal, or ALL one, the code page cannot encode, whose reading abends.
+pub enum Const { Bytes(Vec<u8>), National(Vec<u8>), Number(Fixed), Figurative(Figurative), All(Vec<u8>), Refused(AbendId) }
 
 /// A subscript, bound, TIMES count or exponent, as `integer()` gives it (machine.rs:613-619).
 /// `Fixed` locates each place of `prepass`, then evaluates `expr` with `dmax` (§7.5).
@@ -424,6 +425,17 @@ pub enum Count { Fixed(u32), Odo(Odo), Temp(TempId) }
   right and stop at the first alternative that holds, as the walker's loop returns at its first hit,
   so the reads, the abends (a `Compare::Refused` value abends only when reached) and the result are
   the walker's.
+- **A literal the code page cannot encode** (Japanese text, a check mark) compiles, and the walker
+  abends IRONWORK "U+hhhh has no byte in CCSID n" each time `literal_value` converts it, at the
+  position its caller gives. Lowering makes it `Const::Refused` with that abend and position, where
+  its `Side` is an alphanumeric literal's, so every plan is the one an encodable literal gets; an
+  executor abends where it reads the constant, which is where the walker converts the literal: a
+  MOVE after locating the receiver, a comparison after the locates of its zoned-bytes test, a
+  condition-name at the value reached. Where lowering converts a literal itself (DISPLAY's text,
+  `Chars::Literal` of STRING, UNSTRING, INSPECT and BY CONTENT), such a literal stays a value,
+  `DisplayItem::Value` or `Chars::Value`, read in the walker's order by the same library code. In
+  a report, whose literals lower without a position, and in JSON PARSE's USING phrase, such a
+  literal is refused by name.
 - **Abbreviated relations.** `Cond::NameOrRel` (syntax/src/ast.rs:283-285), decided at run time by
   what the name resolves to (machine.rs:1787-1790), lowers to `Name` or `Rel`.
 - **Arithmetic expressions** are `Expr` trees for `eval_fixed` and `eval_float`
