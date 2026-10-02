@@ -198,17 +198,19 @@ job flags:
              data sets JCLLIB ORDER names: member M is the file DIR/M or DIR/M.jcl. In-stream
              procedures, SET, symbolic parameters and EXEC and DD overrides are expanded
 fuzz flags:
-  -o <dir>   the fuzz run's directory, which must be new or empty: manifest.json, evidence/ with the
-             journal of a run on each kept input, and coverage/ with that run's paragraphs, as
-             cobolwork's abend set reads them (docs/evidence.md §5)
+  -o <dir>   the fuzz run's directory, which must be new or empty and outside the program's
+             directory and its libraries: manifest.json, evidence/ with the journal of a run on each
+             kept input, and coverage/ with that run's paragraphs, as cobolwork's abend set reads
+             them (docs/evidence.md §5)
   --runs N   how many generated inputs to run, 200 without it
   --seed N   the generator's seed, 1 without it; the same seed gives the same inputs
   --timeout SECONDS
              how long one run may take before it is stopped and counted a timeout, 10 without it
   --root DIR the repository root the manifest names the program from, the current directory without it
              The inputs are the sequential and indexed files of fixed-length records the program
-             OPENs INPUT or I-O, built field by field from their records' descriptions, an indexed
-             file's in key order, and SYSIN lines where it ACCEPTs from SYSIN. An abend the program
+             OPENs INPUT or I-O on a DD of its own, built field by field from their records'
+             descriptions, an indexed file's in key order, and SYSIN lines where it ACCEPTs from
+             SYSIN. Each data set is written inside the fuzz run's directory. An abend the program
              gives on empty input is not kept; any other, by code and place, is kept once with the
              smallest input found that still gives it
 assumptions flags:
@@ -382,9 +384,10 @@ fn driver() -> ExitCode {
                 Some(n) => fuzz_runs = Some(n),
                 None => return usage_error("--runs needs a number"),
             },
-            "--seed" => match args.next().and_then(|n| n.parse().ok()) {
+            // The manifest records the seed as a JSON integer, so it stays within i64.
+            "--seed" => match args.next().and_then(|n| n.parse().ok()).filter(|&n: &u64| i64::try_from(n).is_ok()) {
                 Some(n) => fuzz_seed = Some(n),
-                None => return usage_error("--seed needs a number"),
+                None => return usage_error("--seed needs a number from 0 to 9223372036854775807"),
             },
             "--timeout" => match args.next().and_then(|n| n.parse().ok()).filter(|&n: &u64| n > 0) {
                 Some(n) => fuzz_timeout = Some(n),

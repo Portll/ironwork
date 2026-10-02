@@ -13,12 +13,18 @@ use exec::evidence::{fields, Journal, Ledger, Value};
 use exec::unit::Event;
 use syntax::ast::OpenMode;
 
+/// A root as an absolute path. A program named without a directory has the empty path as its own,
+/// which is the current directory.
+fn absolute_root(root: &Path) -> PathBuf {
+    let root = if root.as_os_str().is_empty() { Path::new(".") } else { root };
+    std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf())
+}
+
 /// A path named relative to the first of `roots` that holds it, or by its file name.
 pub fn relative(path: &Path, roots: &[PathBuf]) -> String {
     let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     for root in roots {
-        let root = std::path::absolute(root).unwrap_or_else(|_| root.clone());
-        if let Ok(rest) = absolute.strip_prefix(&root) {
+        if let Ok(rest) = absolute.strip_prefix(absolute_root(root)) {
             return rest.to_string_lossy().replace('\\', "/");
         }
     }
@@ -31,7 +37,7 @@ fn digest(path: &Path) -> Option<(String, u64)> {
 
 fn root_of(path: &Path, roots: &[PathBuf]) -> i64 {
     let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-    roots.iter().position(|r| std::path::absolute(r).is_ok_and(|r| absolute.starts_with(r))).map_or(-1, |i| i as i64)
+    roots.iter().position(|r| absolute.starts_with(absolute_root(r))).map_or(-1, |i| i as i64)
 }
 
 /// Option names only, and the program by file name: a value may be a path or a URL with a password.

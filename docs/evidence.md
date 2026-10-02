@@ -173,26 +173,35 @@ each abend an input caused, in the directory cobolwork's abend set reads (`COBOL
 cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
 
 1. The inputs are the sequential and indexed files of fixed-length records the program OPENs INPUT
-   or I-O, an indexed file's records in RECORD KEY order with one to a key, and SYSIN where it
-   ACCEPTs from SYSIN. Records are built field by field from their level-01
-   descriptions: mostly values the PICTURE allows, sometimes its boundary, and sometimes the bytes
-   that break it (spaces or asterisks in a zoned number, a packed field of spaces). A relative
-   file, or one whose records have more than one length, is given an empty data set.
+   or I-O, each on a DD of its own, and SYSIN where it ACCEPTs from SYSIN. An indexed file's
+   records are in RECORD KEY order, and no two share the RECORD KEY or an ALTERNATE RECORD KEY
+   without DUPLICATES. Records are built field by field, every occurrence of a table included,
+   from their level-01 descriptions: mostly values the PICTURE allows, sometimes its boundary, and
+   sometimes the bytes that break it (spaces or asterisks in a zoned number, a packed field of
+   spaces). A relative file, one whose records have more than one length, and a DD that more than
+   one file names are given an empty data set. A file assigned to SYSIN reads the SYSIN lines.
 2. Each run is its own `ironwork run` with the given `--clock` (2026-01-01 without it), stopped
-   after `--timeout` seconds. `--seed` fixes the inputs, so the same seed gives the same runs.
+   after `--timeout` seconds. Every data set is written inside DIR under a name of its own, never
+   under its DD name, since ASSIGN may name a path. `--seed` fixes the inputs, so the same seed
+   gives the same runs.
 3. An abend the program gives on empty input is not the input's doing and is not kept. Every other
    abend is kept once by code, file and line, with its input made as small as still gives it:
-   records and SYSIN lines dropped, then each field set to a value that breaks nothing.
+   records and SYSIN lines dropped, then each field outside the keys set to a value that breaks
+   nothing, within 200 runs.
 4. Each kept input runs once more with `--evidence DIR/evidence` and `--coverage
    DIR/coverage/N.json`, so the abend rests on that run's journal (§1), whose `abend` record names
-   the code, the file and the line.
+   the code, the file and the line. DIR is refused inside the program's directory or a library, as
+   that run would refuse its evidence directory. A found abend that is not kept is named on
+   standard error with what its last run did instead.
 
 `DIR/manifest.json` holds `tool` (`ironwork-fuzz`), `version`, `seed`, `strategy` (`fields`),
 `clock`, `program` (`file`, relative to `--root`, the current directory without it, and `id`),
-`entry` (`run`), `inputs` (`id`, `kind` `dd` or `sysin`, `name`, `bytes` in base64, `minimized`),
-`counts` (`runs`, `clean`, `abend`, `timeout`, `refused`, over the generated runs; an abend that
-says what the surroundings lack counts as refused and is not kept: IRONWORK, a construct ironwork
-does not run, and S806, a CALL of a program no `-L` library holds) and `runs`, one per kept abend
-(`input` ids, `outcome` `abend`, `abend` with `code`, `file` relative to the program's directory or
-the library it came from, `line` and `message`, `journal` the run id, and `coverage`). A program
-that takes PROCEDURE DIVISION USING is refused: a CALL would supply its parameters.
+`entry` (`run`), `inputs` (`id`, `kind` `dd` or `sysin`, `name`, `bytes` in base64, `minimized`,
+false when the 200 runs ran out first), `counts` (`runs`, `clean`, `abend`, `timeout`, `refused`,
+over the generated runs; an abend that says what the surroundings lack counts as refused and is not
+kept: IRONWORK, a construct ironwork does not run, and S806, a CALL of a program no `-L` library
+holds; so does a run in which ironwork itself panicked, which standard error reports) and `runs`,
+one per kept abend (`input` ids, `outcome` `abend`, `abend` with `code`, `file` relative to the
+program's directory or the library it came from, `line` and `message`, `journal` the run id, and
+`coverage`). A program that takes PROCEDURE DIVISION USING is refused: a CALL would supply its
+parameters.

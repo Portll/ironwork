@@ -223,7 +223,8 @@ pub fn prepare(dir: &Path, reads: &[PathBuf]) -> io::Result<PathBuf> {
         intended.push(name);
     }
     for root in reads {
-        if let Ok(r) = fs::canonicalize(root)
+        let tree = if root.as_os_str().is_empty() { Path::new(".") } else { root };
+        if let Ok(r) = fs::canonicalize(tree)
             && intended.starts_with(&r)
         {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("the evidence directory {} is inside {}, which this run reads", dir.display(), root.display())));

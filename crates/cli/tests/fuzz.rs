@@ -57,6 +57,16 @@ fn fuzz(dir: &Path, out: &str, extra: &[&str]) -> std::process::Output {
         .unwrap()
 }
 
+/// QTYSUM with each `(from, to)` replaced, written over the test's copy.
+fn rewrite(dir: &Path, edits: &[(&str, &str)]) {
+    let text = edits.iter().fold(PROGRAM.join("\n"), |t, (from, to)| t.replace(from, to));
+    fs::write(dir.join("repo/src/QTYSUM.cbl"), text + "\n").unwrap();
+}
+
+fn stderr(o: &std::process::Output) -> String {
+    String::from_utf8_lossy(&o.stderr).into_owned()
+}
+
 /// Each kept run's abend as `code line` and its inputs' bytes, in the manifest's order.
 fn kept(manifest: &str) -> Vec<String> {
     let field = |text: &str, key: &str| text.split(&format!("\"{key}\":")).skip(1).map(|r| r.split([',', '}']).next().unwrap().trim_matches('"').to_string()).collect::<Vec<_>>();
@@ -121,4 +131,104 @@ fn a_directory_in_use_or_a_called_program_is_refused() {
     let o = fuzz(&dir, "called", &[]);
     assert_eq!(o.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&o.stderr).contains("takes PROCEDURE DIVISION USING"));
+
+    rewrite(&dir, &[]);
+    let o = fuzz(&dir, "repo/src/out", &[]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(stderr(&o).contains("is inside src"), "{}", stderr(&o));
+    assert!(!dir.join("repo/src/out").exists());
+}
+
+#[test]
+fn an_assign_literal_that_names_a_path_reaches_nothing_outside_the_fuzz_directory() {
+    let dir = temp("assign");
+    fs::write(dir.join("VICTIM"), "precious").unwrap();
+    rewrite(
+        &dir,
+        &[
+            ("ASSIGN TO INFILE.", "ASSIGN TO '../../../VICTIM'.\n           SELECT OUT-FILE ASSIGN TO '../../../WRITTEN'."),
+            ("       WORKING-STORAGE SECTION.", "       FD OUT-FILE.\n       01 OUT-REC PIC X(17).\n       WORKING-STORAGE SECTION."),
+            ("OPEN INPUT IN-FILE", "OPEN INPUT IN-FILE OUTPUT OUT-FILE"),
+            ("              NOT AT END", "              NOT AT END\n                 WRITE OUT-REC FROM IN-REC"),
+            ("CLOSE IN-FILE", "CLOSE IN-FILE OUT-FILE"),
+        ],
+    );
+    let o = fuzz(&dir, "run", &["--runs", "20"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert_eq!(fs::read_to_string(dir.join("VICTIM")).unwrap(), "precious");
+    assert!(!dir.join("WRITTEN").exists());
+    assert!(fs::read_to_string(dir.join("run/manifest.json")).unwrap().contains("\"name\":\"../../../VICTIM\""));
+}
+
+#[test]
+fn files_that_share_a_dd_get_one_empty_data_set_and_the_rest_is_still_varied() {
+    let dir = temp("shared");
+    rewrite(
+        &dir,
+        &[
+            ("ASSIGN TO INFILE.", "ASSIGN TO INFILE.\n           SELECT A-FILE ASSIGN TO DISK.\n           SELECT B-FILE ASSIGN TO DISK."),
+            ("       WORKING-STORAGE SECTION.", "       FD A-FILE.\n       01 A-REC PIC X(50).\n       FD B-FILE.\n       01 B-REC PIC X(5).\n       WORKING-STORAGE SECTION."),
+            ("           OPEN INPUT IN-FILE", "           OPEN INPUT A-FILE\n           CLOSE A-FILE\n           OPEN INPUT B-FILE\n           CLOSE B-FILE\n           OPEN INPUT IN-FILE"),
+        ],
+    );
+    let o = fuzz(&dir, "run", &["--runs", "40"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(stderr(&o).contains("not varied, given empty: DISK"), "{}", stderr(&o));
+    assert!(kept(&fs::read_to_string(dir.join("run/manifest.json")).unwrap()).iter().any(|k| k.starts_with("S0C7 ")));
+}
+
+#[test]
+fn a_program_in_the_current_directory_is_named_relative_to_it_in_the_manifest_and_journals() {
+    let dir = temp("cwd");
+    let o = Command::new(env!("CARGO_BIN_EXE_ironwork"))
+        .current_dir(dir.join("repo/src"))
+        .args(["fuzz", "QTYSUM.cbl", "--root", "..", "--runs", "40", "-o"])
+        .arg(dir.join("run"))
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", stderr(&o));
+    let manifest = fs::read_to_string(dir.join("run/manifest.json")).unwrap();
+    assert!(manifest.contains("\"program\":{\"file\":\"src/QTYSUM.cbl\""), "{manifest}");
+    assert!(kept(&manifest).iter().any(|k| k == "S0C7 25"));
+    let journals = fs::read_dir(dir.join("run/evidence/runs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap());
+    for text in std::iter::once(manifest.clone()).chain(journals) {
+        assert!(!text.contains("iw-fuzz-cli-cwd"), "{text}");
+    }
+}
+
+#[test]
+fn a_generated_indexed_file_repeats_no_alternate_key_that_allows_no_duplicates() {
+    let dir = temp("altkey");
+    rewrite(
+        &dir,
+        &[
+            ("ASSIGN TO INFILE.", "ASSIGN TO INFILE\n               ORGANIZATION INDEXED ACCESS SEQUENTIAL\n               RECORD KEY IN-NAME ALTERNATE RECORD KEY IN-IDX."),
+            ("                 ADD IN-QTY TO WS-TOTAL\n", ""),
+            ("                 MOVE 'ABC' TO WS-SLOT (IN-IDX)\n", "                 CONTINUE\n"),
+        ],
+    );
+    let o = fuzz(&dir, "run", &["--runs", "60"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let manifest = fs::read_to_string(dir.join("run/manifest.json")).unwrap();
+    assert!(manifest.contains("\"abend\":0"), "{manifest}");
+}
+
+#[test]
+fn every_occurrence_of_a_table_is_varied() {
+    let dir = temp("occurs");
+    rewrite(
+        &dir,
+        &[
+            ("          05 IN-IDX  PIC 9(2).", "          05 IN-IDX  PIC 9(2) OCCURS 70 TIMES."),
+            ("       01 WS-TOTAL PIC 9(9) VALUE 0.", "       01 WS-TOTAL PIC 9(9) VALUE 0.\n       01 WS-I PIC 9(2) VALUE 1."),
+            ("                 ADD IN-QTY TO WS-TOTAL\n", ""),
+            (
+                "                 MOVE 'ABC' TO WS-SLOT (IN-IDX)",
+                "                 IF IN-IDX (70) IS NUMERIC\n                    MOVE IN-IDX (70) TO WS-I\n                    MOVE 'ABC' TO WS-SLOT (WS-I)\n                 END-IF",
+            ),
+        ],
+    );
+    let o = fuzz(&dir, "run", &["--runs", "30"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(kept(&fs::read_to_string(dir.join("run/manifest.json")).unwrap()).iter().any(|k| k.starts_with("U4038 ")));
 }
