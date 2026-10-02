@@ -238,8 +238,9 @@ cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
 `--root` itself and null for one outside it: the order a journal's `input` records number them, so
 a file named relative to its library is found under that library; for a job, the JCL's directory,
 `.work` standing for each run's own data sets, the libraries, then the procedure libraries),
-`entry` (`run` or `job`; for a job `program` is the JCL and its id the job's name), `inputs` (`id`,
-`kind` `dd`, `sysin` or `parm`, `name`, `bytes` in base64, `minimized`,
+`entry` (`run`, `job`, or `cics` for §5.1; for a job `program` is the JCL and its id the job's
+name), `inputs` (`id`, `kind` `dd`, `sysin`, `parm`, `commarea` or `terminal`, `name`, `bytes` in
+base64, `minimized`,
 false when the 200 runs ran out first), `counts` (`runs`, `clean`, `abend`, `timeout`, `refused`,
 over the generated runs; an abend that says what the surroundings lack counts as refused and is not
 kept: IRONWORK, a construct ironwork does not run, S806, a CALL of a program no `-L` library holds,
@@ -251,3 +252,35 @@ one per kept abend (`input` ids, `outcome` `abend`, `abend` with `code`, `file` 
 program's directory or the library it came from, `line` and `message`, `journal` the run id, and
 `coverage`). A program that takes any other PROCEDURE DIVISION USING is refused: a CALL would
 supply its parameters.
+
+### 5.1 A CICS task: `ironwork fuzz --cics`
+
+`ironwork fuzz --cics PROGRAM.cbl -o DIR` runs the program as the first program of a CICS task,
+each run an `ironwork cics`, and writes the same directory with `entry` `cics`
+(`crates/cli/src/fuzz_cics.rs`):
+
+1. The COMMAREA is built from DFHCOMMAREA's fields, or, where DFHCOMMAREA is a table EIBCALEN
+   sizes, from the fields of the item the program MOVEs it into (up to 256 bytes of the table where
+   there is no such MOVE). Three tasks in ten get none, as a terminal's first task does, and now
+   and then one is shorter than the program describes. The one-byte DFHCOMMAREA the CICS
+   translator declares for a program that declares none is not varied. A task whose program reads
+   past the COMMAREA it was given ends refused: ironwork does not model the storage beyond it.
+2. A program that RECEIVEs or CONVERSEs, or RETURNs with a TRANSID, gets an operator at a scripted
+   terminal (`--screens`) for one to four turns. Each turn types text into some of the unprotected
+   fields of a map the program RECEIVEs (its mapset read from the copy libraries as NAME.bms, or
+   fields of no map where no library holds it), each field reached by `home` and `tab`, then
+   presses an AID key: ENTER most often, otherwise one the program names (DFHPFn, DFHCLEAR, HANDLE
+   AID) or any. A program that only SENDs gets a terminal with no turns. RETURN TRANSID starts the
+   next task on the script's next key; without `--transid` or `--csd`, the one transaction RETURN
+   TRANSID names, by a literal or a data item's VALUE, runs the program.
+3. `--transid`, `--termid`, `--userid`, `--applid`, `--sysid`, `--transaction`, `--csd`, `--file`
+   and `--td` go to every task. Each task gets its own copy of each `--file` data set, which a task
+   writes back when it ends, and its own `--td` queues.
+4. The empty input is a task with no COMMAREA and no turns. Minimizing drops turns, then the
+   COMMAREA, then puts each COMMAREA field back to a value that breaks nothing, then leaves each
+   typed field untyped. Besides the abends above, AEI0 (PGMIDERR), AEIL (FILENOTFOUND), AEYQ
+   (SYSIDERR) and AEI1 (TRANSIDERR) say what the region lacks and count as refused. A data or
+   protection exception in a task is ASRA, its message naming S0C7 or S0C4.
+5. A kept run's inputs are `kind` `commarea` (`name` `DFHCOMMAREA`, the EBCDIC bytes `--commarea`
+   takes) and `terminal` (`name` the terminal id, `--termid` or `TERM`, and the screen script as
+   UTF-8). Its journal and coverage take in every task of its pseudo-conversation.

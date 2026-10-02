@@ -183,12 +183,15 @@ pub(super) fn send_control<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>
     ok(x, at)
 }
 
-/// The operator's next AID key: EIBAID and EIBCPOSN are set from it.
+/// The operator's next AID key: EIBAID and EIBCPOSN are set from it. Data that does not start with
+/// an SBA order, as an unformatted screen sends, gives no fields.
 fn next_inbound<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>) -> R<terminal::Inbound> {
     let Some(stream) = with_terminal(x, at, |t| t.receive())? else {
         return Err(Abend::ironwork(format!("EXEC CICS {}: the terminal has no more input", at.name), at.pos));
     };
-    let read = terminal::parse_inbound(&stream).map_err(|m| Abend::ironwork(format!("EXEC CICS {}: {m}", at.name), at.pos))?;
+    let formatted = stream.get(3).is_none_or(|&b| b == terminal::SBA);
+    let stream = if formatted { &stream[..] } else { &stream[..3] };
+    let read = terminal::parse_inbound(stream).map_err(|m| Abend::ironwork(format!("EXEC CICS {}: {m}", at.name), at.pos))?;
     eib_bytes(x.unit(), EIBAID, &[read.aid]);
     eib_halfword(x.unit(), EIBCPOSN, read.cursor.unwrap_or(0) as i16);
     Ok(read)
@@ -196,7 +199,8 @@ fn next_inbound<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P
 
 /// RECEIVE MAP: the input map starts as nulls; each field the operator modified gets its length in
 /// L and its data in I, justified and filled as JUSTIFY says, and a field erased to empty gets
-/// F = X'80'. MAPFAIL when no field was modified (CLEAR and the PA keys included).
+/// F = X'80'. MAPFAIL when no field was modified (CLEAR and the PA keys included) and when the
+/// input holds no SBA order (CICS TS 6.x, RECEIVE MAP, Conditions).
 pub(super) fn receive_map<'w, P: Copy, O, S>(
     x: &mut impl CicsHost<'w, P, O, S>,
     at: &At<P, O, S>,

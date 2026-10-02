@@ -2246,6 +2246,28 @@ fn bms_maps_sent_from_and_received_into_a_named_area_run_alike_on_the_vm() {
 }
 
 #[test]
+fn receive_map_of_text_typed_on_an_unformatted_screen_is_mapfail() {
+    let dir = temp("bms-unformatted");
+    ordset(&dir);
+    let source = cics_program(
+        "ORDBLANK",
+        "           COPY ORDSET.\n       01  WS-RESP PIC S9(8) COMP.\n",
+        "",
+        &[
+            line("EXEC CICS RECEIVE MAP('ORDMAP') MAPSET('ORDSET')"),
+            line("    INTO(ORDMAPI) RESP(WS-RESP) END-EXEC"),
+            line("IF WS-RESP = DFHRESP(MAPFAIL) DISPLAY 'MAPFAIL' END-IF"),
+            line("EXEC CICS RETURN END-EXEC."),
+        ]
+        .concat(),
+    );
+    let script = "home\nstring ORD1 ACME 7\nENTER\n";
+    let interpreted = on_terminal(&source, &dir, script, false);
+    assert_eq!((interpreted.0.as_str(), &interpreted.2), ("MAPFAIL\n", &Ok(Ending::Goback)));
+    assert_eq!(on_terminal(&source, &dir, script, true), interpreted);
+}
+
+#[test]
 fn records_of_different_lengths_with_no_record_clause_make_a_variable_file() {
     let data = temp("variable-records.dat");
     let source = file_program(

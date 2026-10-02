@@ -92,8 +92,8 @@ flags:
   --coverage FILE
              write which paragraphs the run entered: for each program of the source every
              paragraph with its line and how often control entered it, and for each program CALL
-             loaded from a library the paragraphs it reached. run, and job for every step's
-             programs
+             loaded from a library the paragraphs it reached. run, cics for every task of its
+             pseudo-conversation, and job for every step's programs
   --trace-marker TEXT
              with --evidence: record each operation an input could steer, and whether TEXT was in
              its operand: a CALL of a variable program name or of an operating-system command
@@ -162,8 +162,9 @@ cics flags:
              a transient-data queue appended to path as text lines when the task ends
   --screens path
              a 3270 terminal (24x80) played from a script: `type ROW COL text`, `eof ROW COL`,
-             `cursor ROW COL`, and an AID key (ENTER, CLEAR, PA1-PA3, PF1-PF24) ending each turn;
-             every screen the task sends is printed when it ends. BMS maps are read from the copy
+             `cursor ROW COL`, the `home` and `tab` keys, `string text` typed at the cursor, and an
+             AID key (ENTER, CLEAR, PA1-PA3, PF1-PF24) ending each turn; every screen the task
+             sends is printed when it ends. BMS maps are read from the copy
              libraries as NAME.bms. A task that returns TRANSID is followed, on the same screen,
              by that transaction's task, started by the script's next AID key with the COMMAREA
              RETURN gave, until a task ends without TRANSID or the script has no key left
@@ -255,6 +256,17 @@ fuzz flags:
              Each data set is written inside the fuzz run's directory. An abend the program
              gives on empty input is not kept; any other, by code and place, is kept once with the
              smallest input found that still gives it
+  --cics     run the program as the first program of a CICS task, as ironwork cics does. Each
+             task gets a COMMAREA or none, built from DFHCOMMAREA's fields (or, where EIBCALEN
+             sizes DFHCOMMAREA, from the item the program MOVEs it into) and sometimes shorter
+             than that; and an operator's turns at a scripted terminal, text typed into the
+             unprotected fields of the maps the program RECEIVEs, each reached by Home and Tab,
+             then an AID key. --transid, --termid, --userid, --applid, --sysid, --transaction,
+             --csd, --file and --td go to every task, each task with its own copy of each --file
+             data set and its own --td queues; without --transid or --csd, the one transaction
+             RETURN TRANSID names, where the source names one, runs the program. AEI0, AEIL, AEYQ
+             and AEI1 say what the region lacks and are counted refused. An abend the task gives
+             with no COMMAREA and no operator input is not kept
 assumptions flags:
   --c-series
              put each entry's number in one C series first, its position in the register, with the
@@ -296,6 +308,7 @@ mod dfsort;
 mod dump;
 mod evidence;
 mod fuzz;
+mod fuzz_cics;
 mod job;
 mod provenance;
 
@@ -584,7 +597,7 @@ fn driver() -> ExitCode {
             return fuzz::job::run(fuzz::job::Request { fuzz: request, datasets: datasets.map(std::path::PathBuf::from), proclibs, user });
         }
         if fuzz_cics {
-            return usage_error("fuzz --cics is not built yet");
+            return fuzz_cics::run(fuzz_cics::Request { fuzz: request, options: cics_options });
         }
         return fuzz::run(request);
     }
@@ -700,8 +713,8 @@ fn driver() -> ExitCode {
         }
     };
     let own_directory = std::path::Path::new(path).parent().map(|p| p.to_path_buf()).unwrap_or_default();
-    if coverage_file.is_some() && command != "run" {
-        return usage_error("--coverage is for run");
+    if coverage_file.is_some() && command == "check" {
+        return usage_error("--coverage is for run, cics and job");
     }
     if command == "cics" && (provenance_file.is_some() || (evidence_dir.is_some() && cics_options.iter().any(|(n, _)| n == "--serve"))) {
         return usage_error("--provenance is for run and check, and --evidence for one task, not --serve");
@@ -816,7 +829,8 @@ fn driver() -> ExitCode {
     };
     if command == "cics" {
         let run = journal.map(|j| evidence::Run::new(j, &reads, path, trace_marker.as_deref()));
-        return run_cics(&compiled, path, library, dds, clock, database, &cics_options, run, vm);
+        let coverage = coverage_file.as_deref().map(|file| (file, outlines.as_slice()));
+        return run_cics(&compiled, path, library, dds, clock, database, &cics_options, run, vm, coverage);
     }
     let sysin: Box<dyn io::BufRead> = match dds.get("SYSIN") {
         Some(dd) => match fs::File::open(&dd.path) {
@@ -1191,7 +1205,8 @@ fn conversation(
 /// Runs the program as a CICS task built from the cics flags; reports RETURN TRANSID and writes
 /// RETURN's COMMAREA where --commarea-out says. With --screens, a task that returns TRANSID is
 /// followed by that transaction's task on the same terminal, started by the script's next AID key,
-/// until one ends without TRANSID or the script has no key left; one journal records them all.
+/// until one ends without TRANSID or the script has no key left; one journal records them all, and
+/// one coverage report the paragraphs all of them entered.
 #[allow(clippy::too_many_arguments)]
 fn run_cics(
     compiled: &exec::Compiled,
@@ -1203,6 +1218,7 @@ fn run_cics(
     options: &[(String, String)],
     evidence: Option<evidence::Run>,
     vm: bool,
+    coverage: Option<(&std::path::Path, &[coverage::Outline])>,
 ) -> ExitCode {
     let page = compiled.options.code_page();
     let get = |name: &str| options.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone());
@@ -1273,11 +1289,22 @@ fn run_cics(
     let mut transactions = Transactions { library, table, compiled: Default::default(), database: database.take() };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
     let shared = evidence.map(|run| std::rc::Rc::new(std::cell::RefCell::new(run)));
+    let covered = coverage.map(|_| std::rc::Rc::new(std::cell::RefCell::new(coverage::Coverage::default())));
     let mut current: Option<std::rc::Rc<exec::Compiled>> = None;
     let mut number = 1;
     let ran = loop {
         let program = current.as_deref().unwrap_or(compiled);
-        let observer = shared.clone().map(|run| Box::new(move |event: exec::unit::Event<'_>| run.borrow_mut().observe(event)) as exec::unit::Observer<'_>);
+        let observer = (shared.is_some() || covered.is_some()).then(|| {
+            let (run, cov) = (shared.clone(), covered.clone());
+            Box::new(move |event: exec::unit::Event<'_>| {
+                if let Some(c) = &cov {
+                    c.borrow_mut().observe(&event);
+                }
+                if let Some(r) = &run {
+                    r.borrow_mut().observe(event);
+                }
+            }) as exec::unit::Observer<'_>
+        });
         let ran = match cics_run(program, path, vm, transactions.library.clone(), dds.clone(), task, clock, transactions.database.as_deref_mut(), &mut out, &mut err, observer) {
             Ok(ran) => ran,
             Err(message) => {
@@ -1288,6 +1315,7 @@ fn run_cics(
             }
         };
         let (Some(terminal), Ok((_, ended))) = (&conversation, &ran) else { break ran };
+        terminal.borrow_mut().discard_pending();
         let Some(next) = ended.next_transid.as_deref().map(|t| t.trim().to_ascii_uppercase()) else { break ran };
         let record = match exec::terminal::Terminal::receive(&mut *terminal.borrow_mut()) {
             Ok(Some(r)) => r,
@@ -1322,6 +1350,12 @@ fn run_cics(
     };
     drop(out);
     print_screens();
+    if let (Some((file, outlines)), Some(c)) = (coverage, &covered) {
+        let text = format!("{}\n", exec::evidence::canonical(&c.borrow().report(outlines)));
+        if let Err(e) = fs::write(file, text) {
+            eprintln!("ironwork: --coverage {}: {e}", file.display());
+        }
+    }
     let compiled = current.as_deref().unwrap_or(compiled);
     if let Some(run) = shared.and_then(|r| std::rc::Rc::try_unwrap(r).ok()) {
         let abend = ran.as_ref().err().filter(|a| !matches!(a.code, AbendCode::Signal(Signal::ClosedOutput)));

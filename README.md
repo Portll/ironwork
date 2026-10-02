@@ -126,7 +126,9 @@ usage.
 fixed-length records it reads, built field by field from their descriptions, and SYSIN. Each abend an input
 causes is kept once by code and place, with the smallest input found that still causes it, the
 journal of a run on that input and its coverage; `COBOLWORK_ABENDS=fuzz-run cobolwork scan --only
-abend .` reports them as findings ([docs/evidence.md](docs/evidence.md) §5).
+abend .` reports them as findings ([docs/evidence.md](docs/evidence.md) §5). `fuzz --cics` runs a
+CICS program as a task instead, on a generated COMMAREA and an operator's generated typing into the
+maps it RECEIVEs (§5.1).
 
     cargo run -p ironwork -- job payroll.jcl --datasets data[:text] [--proclib procs]... [--user ID] [-L proglib]... [-I copylib]... [--clock 2026-09-27T12:00:00] [--sql-replay calls.txt]
 
@@ -425,9 +427,10 @@ The subset the interpreter runs today:
   their values. SEND MAP (ERASE, MAPONLY, DATAONLY, CURSOR, symbolic cursor, FREEKB, ALARM, FRSET),
   RECEIVE MAP (MAPFAIL, JUSTIFY, EIBAID, EIBCPOSN), SEND CONTROL and RECEIVE work on a 3270
   display that speaks the 3270 data stream. `--screens FILE` plays an operator from a script
-  (`type ROW COL text`, `eof`, `cursor`, then an AID key) and prints every screen; `--serve
-  HOST:PORT` is a TN3270 server a 3270 emulator such as c3270 or x3270 connects to. It asks for
-  no credentials, so it serves only a loopback address unless `--serve-public` is given. Both run
+  (`type ROW COL text`, `eof`, `cursor`, `home`, `tab`, `string text`, then an AID key) and prints
+  every screen; `--serve HOST:PORT` is a TN3270 server a 3270 emulator such as c3270 or x3270
+  connects to. It asks for no credentials, so it serves only a loopback address unless
+  `--serve-public` is given. Both run
   pseudo-conversations task after task on one screen (`--transaction TRAN=PROGRAM` names the
   programs RETURN TRANSID leads to, and `--csd FILE` takes them from the region's DEFINE
   TRANSACTIONs); a script's next AID key starts the next task.

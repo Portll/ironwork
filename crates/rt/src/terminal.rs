@@ -164,6 +164,18 @@ impl Screen {
             .map_or(0, |a| (a + 1) % size)
     }
 
+    /// The Home key: the cursor to the first position of the first unprotected field, or to
+    /// address 0 when the screen has none.
+    pub fn home(&mut self) {
+        self.cursor = self.next_unprotected(self.size() - 1);
+    }
+
+    /// The Tab key: the cursor to the first position of the next unprotected field after it,
+    /// wrapping, or to address 0 when the screen has none.
+    pub fn tab(&mut self) {
+        self.cursor = self.next_unprotected(self.cursor);
+    }
+
     /// Applies an outbound data stream: a command, its WCC, then orders and data.
     pub fn apply(&mut self, stream: &[u8]) -> Result<(), String> {
         let (&command, rest) = stream.split_first().ok_or("an empty data stream")?;
@@ -394,11 +406,16 @@ pub enum Action {
     Type { row: usize, column: usize, text: String },
     EraseEof { row: usize, column: usize },
     Cursor { row: usize, column: usize },
+    Home,
+    Tab,
+    /// Text typed at the cursor.
+    Text(String),
     Key(u8),
 }
 
-/// A scripted operator: `type ROW COL text`, `eof ROW COL`, `cursor ROW COL`, and an AID key
-/// (`ENTER`, `CLEAR`, `PA1`..`PA3`, `PF1`..`PF24`) that ends each turn. `#` starts a comment.
+/// A scripted operator: `type ROW COL text`, `eof ROW COL`, `cursor ROW COL`, the `home` and `tab`
+/// keys, `string text` typed at the cursor, and an AID key (`ENTER`, `CLEAR`, `PA1`..`PA3`,
+/// `PF1`..`PF24`) that ends each turn. `#` starts a comment.
 pub fn parse_script(text: &str) -> Result<Vec<Action>, String> {
     let mut actions = Vec::new();
     for (n, raw) in text.lines().enumerate() {
@@ -427,6 +444,9 @@ pub fn parse_script(text: &str) -> Result<Vec<Action>, String> {
                 let (row, column) = at(&mut words)?;
                 Action::Cursor { row, column }
             }
+            "home" => Action::Home,
+            "tab" => Action::Tab,
+            "string" => Action::Text(line.split_once(' ').map_or("", |(_, text)| text).to_owned()),
             key => Action::Key(aid_of(key).ok_or_else(|| bad("not type, eof, cursor or an AID key"))?),
         });
     }
@@ -458,6 +478,12 @@ impl Scripted {
     /// Keeps what an AID key sent for the next RECEIVE, as CICS keeps the input that starts a task.
     pub fn push_back(&mut self, record: Vec<u8>) {
         self.pending = Some(record);
+    }
+
+    /// Drops the input that started a task when the task never read it: a task's terminal input
+    /// ends with the task.
+    pub fn discard_pending(&mut self) {
+        self.pending = None;
     }
 }
 
@@ -502,6 +528,12 @@ impl Terminal for Scripted {
                 }
                 Action::EraseEof { row, column } => self.screen.erase_eof(self.screen.address(row, column))?,
                 Action::Cursor { row, column } => self.screen.cursor = self.screen.address(row, column),
+                Action::Home => self.screen.home(),
+                Action::Tab => self.screen.tab(),
+                Action::Text(text) => {
+                    let bytes = self.page.encode_lossy(&text);
+                    self.screen.type_at(self.screen.cursor, &bytes)?;
+                }
                 Action::Key(aid) => return Ok(Some(self.screen.read_modified(aid))),
             }
         }
@@ -601,5 +633,25 @@ mod tests {
         assert_eq!(script[4], Action::Key(0xF3));
         assert!(parse_script("type 0 1 X").is_err());
         assert!(parse_script("jump 1 1").is_err());
+    }
+
+    #[test]
+    fn home_and_tab_reach_each_unprotected_field_and_string_types_at_the_cursor() {
+        let mut stream = vec![ERASE_WRITE, WCC_RESTORE, SF, attribute_byte(PROTECTED)];
+        stream.extend(page().encode("ID").unwrap());
+        stream.extend([SF, attribute_byte(0), 0, 0, 0, SF, attribute_byte(PROTECTED), SF, attribute_byte(0), 0, 0, SF, attribute_byte(PROTECTED)]);
+        let script = parse_script("home\nstring ABCD\ntab\nstring  Z\ntab\nstring Q\nENTER\n").unwrap();
+        assert_eq!(script[3], Action::Text(" Z".into()));
+        let mut t = Scripted::new(1, 20, script, page());
+        t.send(&stream).unwrap();
+        let read = parse_inbound(&t.receive().unwrap().unwrap()).unwrap();
+        let typed = |s: &str| page().encode(s).unwrap();
+        assert_eq!(read.fields, vec![(4, typed("QBC")), (9, typed(" Z"))]);
+        let mut blank = Screen::new(2, 10);
+        blank.cursor = 7;
+        blank.home();
+        assert_eq!(blank.cursor, 0);
+        blank.tab();
+        assert_eq!(blank.cursor, 0);
     }
 }
