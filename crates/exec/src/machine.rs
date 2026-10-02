@@ -240,7 +240,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Stmt::Move { from, to, pos } => {
                 for r in to {
                     let dest = self.locate_receiving(r)?;
-                    let (val, src) = self.operand_with_loc(from, *pos)?;
+                    let (val, src) = self.move_source(from, dest, *pos)?;
                     self.assign(dest, val, src, *pos)?;
                 }
             }
@@ -655,15 +655,41 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     fn operand_with_loc(&mut self, op: &Operand, pos: Pos) -> R<(Val, Option<Loc>)> {
         if let Operand::Ref(r) = op {
             let loc = self.locate(r)?;
+            self.numcheck(loc, false, r.pos)?;
             return Ok((self.read(loc, r.pos)?, Some(loc)));
         }
         Ok((self.operand(op, pos)?, None))
+    }
+
+    /// NUMCHECK's test of a sending item, under the option (`rt::store::numcheck`).
+    fn numcheck(&mut self, loc: Loc, as_integer: bool, pos: Pos) -> R<()> {
+        if self.options.numcheck.is_none() {
+            return Ok(());
+        }
+        let facts = self.facts();
+        rt::store::numcheck(&facts, self.unit, loc, as_integer, &self.program.id, pos)
+    }
+
+    /// A MOVE's sender: NUMCHECK tests a zoned or packed sender, and an alphanumeric one moved to a
+    /// numeric receiver as an integer; under ZON(LAX) a zoned sender moved to a zoned or
+    /// alphanumeric receiver is not tested (Programming Guide SC27-8714-03, pp. 388-391).
+    fn move_source(&mut self, from: &Operand, dest: Loc, pos: Pos) -> R<(Val, Option<Loc>)> {
+        let Operand::Ref(r) = from else { return self.operand_with_loc(from, pos) };
+        let loc = self.locate(r)?;
+        let receiver_numeric = matches!(dest.kind, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Float(_) | Kind::NumericEdited { .. });
+        let lax = self.options.numcheck.and_then(|c| c.zon).is_some_and(|z| z.lax);
+        let exempt = lax && matches!(loc.kind, Kind::Zoned { .. }) && matches!(dest.kind, Kind::Zoned { .. } | Kind::Alnum { .. } | Kind::Group);
+        if !exempt {
+            self.numcheck(loc, receiver_numeric && matches!(loc.kind, Kind::Alnum { .. } | Kind::Group), r.pos)?;
+        }
+        Ok((self.read(loc, r.pos)?, Some(loc)))
     }
 
     fn operand(&mut self, op: &Operand, pos: Pos) -> R<Val> {
         match op {
             Operand::Ref(r) => {
                 let loc = self.locate(r)?;
+                self.numcheck(loc, false, r.pos)?;
                 self.read(loc, r.pos)
             }
             Operand::Literal(lit) => self.literal_value(lit, pos),
@@ -1017,6 +1043,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     fn content_argument(&mut self, op: &Operand, pos: Pos) -> R<Vec<u8>> {
         if let Operand::Ref(r) = op {
             let loc = self.locate(r)?;
+            self.numcheck(loc, false, r.pos)?;
             return Ok(self.bytes(loc).to_vec());
         }
         Ok(match self.operand(op, pos)? {
@@ -1381,6 +1408,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 };
                 let condition = &self.layout.conditions[index];
                 let loc = self.locate_item(condition.item, r, false)?;
+                self.numcheck(loc, false, r.pos)?;
                 let subject = (self.read(loc, r.pos)?, Some(loc));
                 for (low, high) in &condition.values {
                     let hit = match high {
@@ -1419,34 +1447,64 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     fn compare(&mut self, a: &Expr, b: &Expr, pos: Pos) -> R<Ordering> {
         for (zoned, other, zoned_first) in [(a, b, true), (b, a, false)] {
             if let Some(image) = self.zoned_bytes_against(zoned, other)? {
+                if let Expr::Operand(Operand::Ref(r)) = zoned
+                    && self.checks_against(other)?
+                {
+                    let loc = self.locate(r)?;
+                    self.numcheck(loc, false, r.pos)?;
+                }
                 let other = match other {
                     Expr::Operand(Operand::Ref(r)) if self.zone_sensitive(other)? => {
                         let loc = self.locate(r)?;
+                        self.numcheck(loc, false, r.pos)?;
                         (Val::Bytes(Vec::new()), Some(loc))
                     }
-                    _ => self.comparand(other, pos)?,
+                    _ => self.comparand_against(other, zoned, pos)?,
                 };
                 return store::compare_zoned_bytes(&self.facts(), &self.unit.mem, &image, other, zoned_first, pos);
             }
         }
-        let (va, la) = self.comparand(a, pos)?;
-        let (vb, lb) = self.comparand(b, pos)?;
+        let (va, la) = self.comparand_against(a, b, pos)?;
+        let (vb, lb) = self.comparand_against(b, a, pos)?;
         if let Some(o) = self.compare_references(a, b, (&va, la), (&vb, lb), pos)? {
             return Ok(o);
         }
         store::compare(&self.facts(), &self.unit.mem, (va, la), (vb, lb), pos)
     }
 
+    /// Whether `e` is an alphanumeric item, literal or figurative constant other than ZERO.
+    fn nonnumeric(&mut self, e: &Expr) -> R<bool> {
+        Ok(match e {
+            Expr::Operand(Operand::Literal(l)) => {
+                matches!(l, Literal::Alnum(_) | Literal::Hex(_) | Literal::All(_)) || matches!(l, Literal::Figurative(f) if !matches!(f, Figurative::Zero | Figurative::Null))
+            }
+            Expr::Operand(Operand::Ref(o)) => matches!(self.locate(o)?.kind, Kind::Group | Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::NumericEdited { .. }),
+            _ => false,
+        })
+    }
+
+    /// Whether NUMCHECK tests a zoned item compared with `other`: always, but under ZON(NOALPHNUM)
+    /// not against an alphanumeric operand (Programming Guide SC27-8714-03, pp. 389-390).
+    fn checks_against(&mut self, other: &Expr) -> R<bool> {
+        Ok(self.options.numcheck.and_then(|c| c.zon).is_none_or(|z| z.alphnum) || !self.nonnumeric(other)?)
+    }
+
+    /// A comparand, NUMCHECK testing an item unless ZON(NOALPHNUM) exempts it against `other`.
+    fn comparand_against(&mut self, e: &Expr, other: &Expr, pos: Pos) -> R<(Val, Option<Loc>)> {
+        match e {
+            Expr::Operand(Operand::Ref(r)) if !self.checks_against(other)? => {
+                let loc = self.locate(r)?;
+                Ok((self.read(loc, r.pos)?, Some(loc)))
+            }
+            _ => self.comparand(e, pos),
+        }
+    }
+
     /// The bytes of `e`, a zoned integer item, when `other` is nonnumeric: that comparison reads the
     /// item's bytes, never its value, so invalid data compares rather than abends.
     fn zoned_bytes_against(&mut self, e: &Expr, other: &Expr) -> R<Option<Vec<u8>>> {
         let Expr::Operand(Operand::Ref(r)) = e else { return Ok(None) };
-        let nonnumeric = match other {
-            Expr::Operand(Operand::Literal(l)) => matches!(l, Literal::Alnum(_) | Literal::Hex(_) | Literal::All(_))
-                || matches!(l, Literal::Figurative(f) if !matches!(f, Figurative::Zero | Figurative::Null)),
-            Expr::Operand(Operand::Ref(o)) => matches!(self.locate(o)?.kind, Kind::Group | Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::NumericEdited { .. }),
-            _ => false,
-        };
+        let nonnumeric = self.nonnumeric(other)?;
         // INVDATA(NOFORCENUMCMP): an unsigned zoned integer against ZERO or one of its own length
         // compares its zones too (assumption C223).
         let zones_count = self.options.invdata.is_some_and(|i| !i.forcenumcmp)

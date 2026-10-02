@@ -242,6 +242,8 @@ pub const NATIONAL_CASE_AND_REVERSE: &str = "C192";
 pub const INVDATA_CLEANSIGN: &str = "C222";
 pub const INVDATA_ZONES_COMPARED: &str = "C223";
 pub const ALPHANUMERIC_MOVED_UNCHECKED: &str = "C240";
+pub const NUMCHECK_SENDERS: &str = "C228";
+pub const NUMCHECK_MESSAGE: &str = "C229";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1520,6 +1522,18 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: ALPHANUMERIC_MOVED_UNCHECKED,
         claim: "An alphanumeric sender MOVEd to a zoned or packed integer item without P scaling is not checked for digits at the MOVE: the receiver gets the low half of each of the sender's last bytes as its digits, zeros to the left, stored as a positive value, and a byte whose low half is not a digit (an asterisk, X'5C') leaves that half in the receiver, so the data exception comes where the item is next read as a number. The Language Reference treats such a sender as an unsigned numeric integer (MOVE statement, elementary moves); the instructions a MOVE compiles to, a byte copy, PACK and UNPK, raise no data exception (z/Architecture Principles of Operation, PACK and UNPACK), and the decimal instructions of arithmetic do. A receiver with decimal places or P scaling, a binary receiver (CVB checks digits) and a numeric-edited one still read the sender as a number at the MOVE",
         basis: Basis::Recalled,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: NUMCHECK_SENDERS,
+        claim: "NUMCHECK (and ZONECHECK, which is NUMCHECK(ZON)) tests an item where a statement reads it as a sender: an operand of an arithmetic expression, a comparison or a condition-name's variable, a MOVE's sender, a receiver that is also a sender (ADD A TO B), a subscript, and a BY CONTENT or BY VALUE argument, before the statement uses it; not a receiver alone, a BY REFERENCE argument, a class test, or DISPLAY, which shows the bytes and uses no value (Programming Guide SC27-8714-03, pp. 388-391, 427). A zoned item is tested as IF NUMERIC tests it, after INVDATA(CLEANSIGN) has cleaned its sign (C222); a packed one too, with the spare half-byte of an even digit count zero; a binary one for a value of more digits than its PICTURE, except COMP-5, and under TRUNC(BIN) only with BIN(TRUNCBIN). An alphanumeric item moved to a numeric receiver is tested as an unsigned integer. ZON(NOALPHNUM) leaves a zoned item untested in a comparison with an alphanumeric item, literal or figurative constant. Of ZON(LAX)'s three tolerances, only the MOVE of a zoned item to a zoned or alphanumeric receiver is made; the two for a REDEFINES of a signed zoned or a numeric-edited level-01 item are not, so LAX reports there what IBM tolerates. No check is found invalid at compile time, so IBM's compile-time error for a check that always fails is not given. Each test is made each time the statement runs, where IBM removes redundant ones, so a loop may report more often than Enterprise COBOL does",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: NUMCHECK_MESSAGE,
+        claim: "NUMCHECK's run-time message names the item, its bytes in hexadecimal, the program and, by its position, the line, as IBM's does (Programming Guide SC27-8714-03, p. 391), in ironwork's words with no IGZ message number, since no Enterprise COBOL output ironwork has shows one. Under MSG it is written to the error stream and the statement runs; under ABD the run ends with U4038, the abend a Language Environment condition of severity 3 gives, as SSRANGE's does",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

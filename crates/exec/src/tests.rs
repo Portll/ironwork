@@ -16,6 +16,7 @@ mod intrinsic;
 mod json;
 mod json_parse;
 mod linage;
+mod numcheck;
 mod oo;
 mod printer;
 mod procedure;

@@ -84,7 +84,9 @@ CEEDAYS; QUALIFY(EXTEND), under which a complete set of qualifiers names its one
 which starts every program from its VALUE clauses on each CALL, and which THREAD drops; and
 VLR(COMPAT), under which a READ checks a variable-length record only against RECORD VARYING.
 VSAMOPENFS is read and kept, but no OPEN in ironwork reaches the verified open it changes.
-Assumptions C210 to C220 hold what the manuals leave open.
+NUMCHECK, and ZONECHECK as its zoned check, tests each zoned, packed or binary item a statement
+reads as a sender, and reports invalid data on the error stream (MSG) or ends the run with U4038
+(ABD) (C228, C229). Assumptions C210 to C220 hold what the manuals leave open.
 
 ironwork runs no operating-system command: a CALL of SYSTEM or C$SYSTEM that no library answers
 abends S806, unless it prints. In a run given DD PRINTER, the virtual printer, a command that is lp

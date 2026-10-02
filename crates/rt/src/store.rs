@@ -439,6 +439,59 @@ pub fn alnum_image(facts: &dyn ProgramFacts, val: &Val, src: Option<Loc>, len: u
     })
 }
 
+/// What NUMCHECK finds wrong with a sending item's data, or None: a zoned or packed item that is
+/// not NUMERIC, its sign half-byte cleaned first under INVDATA(CLEANSIGN); an alphanumeric item
+/// moved to a numeric one (`as_integer`) that is not an unsigned integer's digits; or a binary
+/// item holding more digits than its PICTURE. COMP-5 is not checked, nor binary under TRUNC(BIN)
+/// with BIN(NOTRUNCBIN) (Programming Guide SC27-8714-03, pp. 388-391).
+pub fn numcheck_fault(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, as_integer: bool) -> Option<&'static str> {
+    let check = facts.options().numcheck?;
+    let stored = bytes(mem, loc);
+    let cleaned = facts.options().invdata.is_some_and(|i| i.cleansign).then(|| sign_cleaned(stored, loc.kind)).flatten();
+    let b = cleaned.as_deref().unwrap_or(stored);
+    let digit = |x: &u8| (0xF0..=0xF9).contains(x);
+    let overpunch = |x: u8| matches!(x >> 4, 0xC | 0xD | 0xF) && x & 0x0F <= 9;
+    let valid = match loc.kind {
+        Kind::Zoned { signed, sign, .. } if check.zon.is_some() => match (signed, sign) {
+            (false, _) => b.iter().all(digit),
+            (true, Some(SignClause { separate: true, position })) => {
+                let (s, rest) = if position == SignPosition::Leading { (b[0], &b[1..]) } else { (b[b.len() - 1], &b[..b.len() - 1]) };
+                matches!(s, 0x4E | 0x60) && rest.iter().all(digit)
+            }
+            (true, Some(SignClause { position: SignPosition::Leading, .. })) => overpunch(b[0]) && b[1..].iter().all(digit),
+            (true, _) => overpunch(b[b.len() - 1]) && b[..b.len() - 1].iter().all(digit),
+        },
+        Kind::Group | Kind::Alnum { .. } if as_integer && check.zon.is_some() => b.iter().all(digit),
+        Kind::Packed { digits, signed, .. } if check.pac => {
+            let spare_clear = digits % 2 == 1 || b[0] >> 4 == 0;
+            decimal::tp(b).is_ok_and(|cc| cc.0 == 0) && (signed || b[b.len() - 1] & 0x0F == 0x0F) && spare_clear
+        }
+        Kind::Binary { digits, signed, native: false, .. } if check.bin.is_some_and(|c| c.truncbin || facts.options().trunc != Trunc::Bin) => {
+            let raw = Binary { digits: digits as u8, signed, native: true }.load(b);
+            raw.unsigned_abs() < 10u128.pow(digits)
+        }
+        _ => true,
+    };
+    (!valid).then_some(match loc.kind {
+        Kind::Binary { .. } => "has more digits than its PICTURE allows",
+        _ => "is not NUMERIC",
+    })
+}
+
+/// NUMCHECK's run-time check of a sending item: under MSG a warning on the error stream, with the
+/// item, its bytes in hexadecimal, the line and the program, and the statement runs; under ABD a
+/// terminating message, U4038 (assumptions [`numeric::assumptions::NUMCHECK_SENDERS`] and
+/// [`numeric::assumptions::NUMCHECK_MESSAGE`]).
+pub fn numcheck<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, loc: Loc, as_integer: bool, program: &str, pos: Pos) -> R<()> {
+    let Some(why) = numcheck_fault(facts, &unit.mem, loc, as_integer) else { return Ok(()) };
+    let message = format!("NUMCHECK: {} X'{}' in program {program} {why}", facts.item_name(loc.item), crate::digest::hex(bytes(&unit.mem, loc)).to_ascii_uppercase());
+    if facts.options().numcheck.is_some_and(|c| c.abd) {
+        return Err(Abend { code: crate::abend::AbendCode::user(4038), message, pos, file: None });
+    }
+    let _ = writeln!(unit.err, "ironwork: {pos}: {message}; the statement runs");
+    Ok(())
+}
+
 /// NUMERIC or ALPHABETIC, tested on an item's bytes.
 pub fn byte_class(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, test: ByteClass) -> bool {
     let bytes = bytes(mem, loc);
