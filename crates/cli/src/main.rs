@@ -6,7 +6,7 @@ use std::{env, fs, io};
 const USAGE: &str = "ironwork for COBOL
 usage:
   ironwork run <program.cbl> [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include]
-               [-debug] [--cics-return-warning=once|always|never] [-I <dir>]... [-L <dir>]...
+               [-debug] [--cics-return-warning=once|always|never] [-I <dir>]... [-L <dir>]... [--vm]
                [--dd NAME=path[:format][:mod]]... [--clock <time>]
                [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                                                        compile and run; CBL and PROCESS cards set the options
@@ -53,6 +53,10 @@ flags:
              always gives that warning; once (the default) gives an informational note in its
              place, once per run, as the CICS translator turns RETURN and XCTL into a CALL;
              never gives nothing. A program with none of these gets the warning whatever the flag
+  --vm       run: lower the program and run it on the VM rather than the interpreter. A program
+             lowering refuses gets the compile's 12; a run that reaches what the VM does not run
+             yet (file I/O, SORT, Report Writer, EXEC CICS and SQL, JSON and XML, LE services,
+             INVOKE) stops there with a message naming it and exit status 12. Not with --evidence
   -I <dir>   a copy library for COPY members, searched after the program's own directory
   -L <dir>   a program library: CALL finds a program there by name, after the programs in the
              same source and the program's own directory
@@ -308,6 +312,7 @@ fn driver() -> ExitCode {
     let (mut replay, mut keyed) = (None, false);
     let (mut sql_db, mut sql_record) = (None, None);
     let mut c_series = false;
+    let mut vm = false;
     let mut evidence_dir: Option<std::path::PathBuf> = None;
     let mut trace_marker: Option<String> = None;
     let mut provenance_file: Option<std::path::PathBuf> = None;
@@ -449,6 +454,7 @@ fn driver() -> ExitCode {
             "--strings" => dump_options.strings = true,
             "--no-check" => dump_options.check = false,
             "--c-series" => c_series = true,
+            "--vm" => vm = true,
             "-I" => match args.next() {
                 Some(dir) => libraries.push(std::path::PathBuf::from(dir)),
                 None => return usage_error("-I needs a directory"),
@@ -475,9 +481,13 @@ fn driver() -> ExitCode {
     let run_flags = !dds.is_empty() || replay.is_some() || keyed || sql_db.is_some() || sql_record.is_some() || evidence_dir.is_some() || trace_marker.is_some()
         || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() || !matches!(clock, exec::unit::Clock::System)
         || compare_base.is_some() || compare_head.is_some() || declare.is_some() || statement.is_some() || !expected.is_empty() || datasets.is_some()
-        || !proclibs.is_empty() || user.is_some();
+        || !proclibs.is_empty() || user.is_some()
+        || vm;
     let dump_flags = !dump_options.only.is_empty() || dump_options.strings || !dump_options.check;
     let fuzz_flags = fuzz_root.is_some() || fuzz_runs.is_some() || fuzz_seed.is_some() || fuzz_timeout.is_some();
+    if vm && (rest.first().map(String::as_str) != Some("run") || evidence_dir.is_some()) {
+        return usage_error("--vm is for run, and not with --evidence");
+    }
     if let [c, program] = rest.as_slice()
         && c == "fuzz"
     {
@@ -670,6 +680,14 @@ fn driver() -> ExitCode {
     if command == "check" {
         return evidence::finish(journal, i64::from(return_code));
     }
+    let code = match vm.then(|| exec::vm::lowered(&compiled)) {
+        None => None,
+        Some(Ok(code)) => Some(code),
+        Some(Err(e)) => {
+            eprintln!("{}", syntax::Error::from(e).place(path));
+            return evidence::finish(journal, 12);
+        }
+    };
     let dds = match exec::files::Dds::new(&dds, true) {
         Ok(d) => d,
         Err(e) => return usage_error(&e),
@@ -721,7 +739,17 @@ fn driver() -> ExitCode {
             }
         }) as exec::unit::Observer<'_>
     });
-    let ended = compiled.execute_observed(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer);
+    let ended = match &code {
+        None => compiled.execute_observed(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer),
+        Some(code) => match exec::vm::execute(&compiled, code, library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, None, &mut None) {
+            Ok(done) => Ok(done),
+            Err(exec::vm::Halt::Abend(abend)) => Err(abend),
+            Err(exec::vm::Halt::Unimplemented(what)) => {
+                eprintln!("ironwork: {path}: the VM does not run {what} yet; run it without --vm");
+                Ok((exec::Ending::EndOfProgram, 12))
+            }
+        },
+    };
     let (status, abend) = match &ended {
         Ok((_, return_code)) => (i64::from(*return_code), None),
         Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => (0, None),
