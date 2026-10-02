@@ -105,6 +105,8 @@ pub enum SignTest {
 pub enum Count {
     Fixed(u32),
     Odo(Odo),
+    /// The count `Op::SetCount` held in the top frame's counter earlier in the statement.
+    Temp(TempId),
 }
 
 /// WHENEVER's classes: SQLCODE < 0, SQLCODE = 100, or a warning.
@@ -145,5 +147,5 @@ codec_enum!(Compare {
 });
 codec_enum!(ByteClass { Packed { signed } = 0, Zoned { signed } = 1, Digits = 2, Alphabetic = 3, AlphabeticLower = 4, AlphabeticUpper = 5 });
 codec_enum!(SignTest { Positive = 0, Negative = 1, Zero = 2 });
-codec_enum!(Count { Fixed(n) = 0, Odo(odo) = 1 });
+codec_enum!(Count { Fixed(n) = 0, Odo(odo) = 1, Temp(temp) = 2 });
 codec_enum!(SqlTest { Error = 0, NotFound = 1, Warning = 2 });

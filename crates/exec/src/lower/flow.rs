@@ -684,7 +684,7 @@ impl Lower<'_> {
         self.switch(pass)
     }
 
-    fn temp(&mut self, pos: Pos) -> R<lir::TempId> {
+    pub(super) fn temp(&mut self, pos: Pos) -> R<lir::TempId> {
         let t = self.temps;
         self.temps = t.checked_add(1).ok_or(LowerError::Exceeds("PERFORM TIMES counters", pos))?;
         Ok(t)

@@ -531,7 +531,7 @@ fn values_and_conditions_round_trip_with_every_tag() {
     let classes = [ByteClass::Packed { signed: false }, ByteClass::Zoned { signed: true }, ByteClass::Digits, ByteClass::Alphabetic, ByteClass::AlphabeticLower, ByteClass::AlphabeticUpper];
     every_variant(&classes, 6);
     every_variant(&[SignTest::Positive, SignTest::Negative, SignTest::Zero], 3);
-    every_variant(&[Count::Fixed(10), Count::Odo(ODO)], 2);
+    every_variant(&[Count::Fixed(10), Count::Odo(ODO), Count::Temp(2)], 3);
     every_variant(&[BinOp::Add, BinOp::Sub, BinOp::Mul, BinOp::Div, BinOp::Pow], 5);
     every_variant(&[RelOp::Eq, RelOp::Ne, RelOp::Lt, RelOp::Le, RelOp::Gt, RelOp::Ge], 6);
     every_variant(&[SqlTest::Error, SqlTest::NotFound, SqlTest::Warning], 3);
@@ -604,9 +604,10 @@ fn control_flow_round_trips_with_every_tag() {
         Op::DebugAlter { range: 1, name: 2, contents: 3 },
         Op::Markup(0),
         Op::Set { from: Operand::Load(2), to: 1, plan: MovePlan::Index },
+        Op::SetCount(3, ODO),
     ];
     // Tag 29 is retired (load-module.md §4.3).
-    every_variant_but(&ops, 34, &[29]);
+    every_variant_but(&ops, 35, &[29]);
     let resume = Resume { para: 2, block: 11 };
     every_variant(&[Step::Next, Step::Arm(2), Step::GoTo(3), Step::End(Ending::Goback), Step::Return(u64::MAX), Step::Resume(resume)], 6);
     let terminators = [

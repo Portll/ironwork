@@ -3,7 +3,7 @@
 
 use super::{
     AbendId, ArithId, BlockId, CallId, CicsId, CondId, DisplayId, ExprId, FileOpId, InitId, InspectId, IntExpr,
-    InvokeId, MarkupId, MovePlan, Operand, ParaId, PlaceId, RangeId, ReleaseId, ReportOp, ReturnId, SearchAllId, SenderCheck, SortId, SqlId,
+    InvokeId, MarkupId, MovePlan, Odo, Operand, ParaId, PlaceId, RangeId, ReleaseId, ReportOp, ReturnId, SearchAllId, SenderCheck, SortId, SqlId,
     StepPlan, StringId, SymId, TempId, UnstringId, UpDown,
 };
 use crate::abend::Ending;
@@ -39,6 +39,9 @@ pub enum Op {
     Unnest(u8),
     SetTemp(TempId, IntExpr),
     DecTemp(TempId),
+    /// SEARCH's table count, evaluated once at the statement's start as `occurrences` evaluates it,
+    /// abending as it abends, and held in the top frame's counter `temp`, which `Count::Temp` reads.
+    SetCount(TempId, Odo),
     Display(DisplayId),
     Accept { target: PlaceId, from: AcceptFrom, plan: MovePlan },
     File(FileOpId),
@@ -239,6 +242,7 @@ codec_enum!(Op {
     DebugAlter { range, name, contents } = 31,
     Markup(id) = 32,
     Set { from, to, plan } = 33,
+    SetCount(temp, odo) = 34,
 });
 codec_enum!(Step { Next = 0, Arm(arm) = 1, GoTo(para) = 2, End(ending) = 3, Return(frame) = 4, Resume(resume) = 5 });
 codec_enum!(Terminator {

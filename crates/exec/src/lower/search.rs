@@ -1,9 +1,10 @@
 //! SEARCH and SEARCH ALL (lir.md §9.1) as `Machine::search` runs them: the table's current count,
-//! its first index or the VARYING item, then a serial loop of blocks or one binary search op.
+//! its first index or the VARYING item, then a serial loop of blocks or one binary search op. A
+//! serial SEARCH of an OCCURS DEPENDING ON table holds its count from the statement's start.
 
 use super::flow::Ctx;
 use super::{Lower, R, unsupported};
-use crate::layout::{Item, Resolved};
+use crate::layout::Resolved;
 use crate::machine::{flatten_and, key_term};
 use rt::lir::{self, Count, IntExpr, Op, PlaceId, SearchAllPlan, SearchKey, Terminator};
 use rt::storage::Kind;
@@ -26,17 +27,22 @@ impl Lower<'_> {
         };
         let table = &layout.items[t];
         let index = match (&se.varying, table.index_names.first()) {
-            (_, Some(name)) => Ref { name: name.clone(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos },
-            (Some(v), None) => v.clone(),
-            (None, None) if table.depending_on.is_some() => {
-                return unsupported("SEARCH of an OCCURS DEPENDING ON table with neither INDEXED BY nor VARYING", pos);
-            }
-            (None, None) => {
-                let abend = self.ironwork(&format!("SEARCH {}: the table has no INDEXED BY", se.table.name))?;
-                return self.end(Terminator::Abend(abend), pos);
-            }
+            (_, Some(name)) => Some(Ref { name: name.clone(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos }),
+            (Some(v), None) => Some(v.clone()),
+            (None, None) => None,
         };
-        let count = self.count(t, pos)?;
+        let count = match self.count(t, pos)? {
+            Count::Odo(odo) if !se.all || index.is_none() => {
+                let temp = self.temp(pos)?;
+                self.op(Op::SetCount(temp, odo), pos)?;
+                Count::Temp(temp)
+            }
+            count => count,
+        };
+        let Some(index) = index else {
+            let abend = self.ironwork(&format!("SEARCH {}: the table has no INDEXED BY", se.table.name))?;
+            return self.end(Terminator::Abend(abend), pos);
+        };
         let index_place = self.place(&index, false)?;
         let at_end = se.at_end.as_deref().unwrap_or_default();
         let join = self.new_block()?;
@@ -74,15 +80,10 @@ impl Lower<'_> {
             if !matches!(self.kind_of(place), Kind::Index | Kind::Zoned { scale: 0, .. } | Kind::Packed { scale: 0, .. } | Kind::Binary { scale: 0, .. }) {
                 return unsupported("SEARCH VARYING an item that is not an index or an integer", r.pos);
             }
-            if let (Count::Odo(_), Some(i)) = (&count, self.place_items[place as usize])
-                && self.object_overlaps(t, i)
-            {
-                return unsupported("SEARCH VARYING an item that may share storage with the table's OCCURS DEPENDING ON object", r.pos);
-            }
         }
-        // The loop reads the count at each step and the index twice, where the walker reads each once.
-        if matches!(&count, Count::Odo(o) if self.int_tested(&o.object)) || self.read_tested(index_place) {
-            return unsupported("NUMCHECK of a serial SEARCH's OCCURS DEPENDING ON count or index", pos);
+        // The loop reads the index twice at each step, where the walker reads it once.
+        if self.read_tested(index_place) {
+            return unsupported("NUMCHECK of a serial SEARCH's index", pos);
         }
         let steps = stepped.iter().map(|&(place, r)| Ok((place, self.plus_one(r, pos)?))).collect::<R<Vec<(PlaceId, IntExpr)>>>()?;
         let (head, end) = (self.new_block()?, self.new_block()?);
@@ -125,24 +126,5 @@ impl Lower<'_> {
     fn plus_one(&mut self, r: &Ref, pos: Pos) -> R<IntExpr> {
         let one = Expr::Operand(Operand::Literal(Literal::Number("1".into())));
         self.int_expr(&Expr::Bin(Box::new(Expr::Operand(Operand::Ref(r.clone()))), BinOp::Add, Box::new(one)), pos)
-    }
-
-    /// Whether storing into item `i` may change table `t`'s DEPENDING ON object, which the loop
-    /// reads again at each step where the walker read it once.
-    fn object_overlaps(&self, t: usize, i: usize) -> bool {
-        let layout = self.layout;
-        let Some(object) = &layout.items[t].depending_on else { return false };
-        let Ok(Resolved::Item(o)) = layout.resolve(&object.name, &object.qualifiers, object.pos) else { return true };
-        let (a, b) = (&layout.items[o], &layout.items[i]);
-        if !object.subscripts.is_empty() || object.refmod.is_some() || a.linkage.is_some() || b.linkage.is_some() {
-            return true;
-        }
-        let extent = |x: &Item| {
-            let start = u64::from(x.offset);
-            let span: u64 = x.dims.iter().map(|&(stride, count)| u64::from(stride) * u64::from(count.saturating_sub(1))).sum();
-            (start, start + span + u64::from(x.size))
-        };
-        let ((s1, e1), (s2, e2)) = (extent(a), extent(b));
-        a.local == b.local && s1 < e2 && s2 < e1
     }
 }

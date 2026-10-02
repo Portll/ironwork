@@ -6,7 +6,7 @@ use crate::abend::Abend;
 use crate::accept;
 use crate::display;
 use crate::host::{Host, Values};
-use crate::lir::{DisplayItem, InitPlan, Inspected, MovePlan, NumericFrom, Op, Operand, PlaceId, SearchAllPlan, SenderCheck, Step, StorePlan};
+use crate::lir::{DisplayItem, InitPlan, Inspected, MovePlan, NumericFrom, Op, Operand, PlaceId, SearchAllPlan, SenderCheck, Step, StorePlan, TempId};
 use crate::set;
 use crate::storage::{Kind, Loc, Val};
 use crate::store;
@@ -114,12 +114,11 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             Op::Unnest(n) => self.unit.depth = self.unit.depth.saturating_sub(usize::from(*n)),
             Op::SetTemp(t, value) => {
                 let n = self.int(value, pos)?.max(0);
-                let Some(frame) = self.returns.frames.last_mut() else { return Err(not_yet("a TIMES counter outside a frame")) };
-                let t = usize::from(*t);
-                if frame.temps.len() <= t {
-                    frame.temps.resize(t + 1, 0);
-                }
-                frame.temps[t] = n;
+                self.set_temp(*t, n)?;
+            }
+            Op::SetCount(t, odo) => {
+                let n = self.occurrences(odo, pos)?;
+                self.set_temp(*t, i64::from(n))?;
             }
             Op::DecTemp(t) => {
                 if let Some(n) = self.returns.frames.last_mut().and_then(|f| f.temps.get_mut(usize::from(*t))) {
@@ -175,6 +174,16 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         }
         let src = src.filter(|s| sender_kept(s.kind, dest.kind, plan));
         Ok(store::assign(&self.facts(), self.unit, dest, val, src, self.pos(at))?)
+    }
+
+    fn set_temp(&mut self, t: TempId, n: i64) -> R<()> {
+        let Some(frame) = self.returns.frames.last_mut() else { return Err(not_yet("a TIMES counter outside a frame")) };
+        let t = usize::from(t);
+        if frame.temps.len() <= t {
+            frame.temps.resize(t + 1, 0);
+        }
+        frame.temps[t] = n;
+        Ok(())
     }
 
     /// `Machine::enter_segment`: an independent segment entered from another is in its initial

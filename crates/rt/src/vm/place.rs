@@ -134,6 +134,10 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         match count {
             Count::Fixed(n) => Ok(*n),
             Count::Odo(odo) => self.occurrences(odo, pos),
+            Count::Temp(t) => {
+                let held = self.returns.frames.last().and_then(|f| f.temps.get(usize::from(*t))).and_then(|&n| u32::try_from(n).ok());
+                held.ok_or_else(|| not_yet("a SEARCH count read before SetCount held it"))
+            }
         }
     }
 

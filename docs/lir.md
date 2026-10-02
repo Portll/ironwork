@@ -395,7 +395,8 @@ pub enum Compare { PackedPfd, Address, Float, Fixed, National, Alphanumeric, Ref
 
 pub enum ByteClass { Packed { signed: bool }, Zoned { signed: bool }, Digits, Alphabetic }
 pub enum SignTest { Positive, Negative, Zero }
-pub enum Count { Fixed(u32), Odo(Odo) }
+/// `Temp` is the count `SetCount` held in the top frame earlier in the statement (§9.12).
+pub enum Count { Fixed(u32), Odo(Odo), Temp(TempId) }
 ```
 
 - **Subscripts and bounds** are `IntExpr`: a literal is `Const`, a plain integer item `Item`, and
@@ -591,6 +592,8 @@ pub enum Op {
     Inspect(InspectId), String(StringId), Unstring(UnstringId), SearchAll(SearchAllId),
     /// The PERFORM and CALL depth (§8.7), and TIMES counters.
     Nest, Unnest(u8), SetTemp(TempId, IntExpr), DecTemp(TempId),
+    /// SEARCH's table count, `occurrences` of `Odo` once, held in a counter (§9.12).
+    SetCount(TempId, Odo),
     Display(DisplayId),
     Accept { target: PlaceId, from: AcceptFrom, plan: MovePlan },
     File(FileOpId), Call(CallId), Cancel(Operand),
@@ -782,8 +785,9 @@ pub struct Returns { pub armed: Vec<Option<ReturnPoint>>, pub saved: BTreeMap<Bl
      armed to return to a PERFORM that control left by GO TO; ironwork returns there only to a
      PERFORM that runs once and is not inside another statement", at paragraph e. Lowering sets
      `Paragraph.abandoned` on every paragraph that ends a range.
-- **TIMES counters** are the top frame's: `SetTemp` sets one there, and `DecTemp` and `Counter`
-  read it there. A new frame starts with none set, and a popped frame's go with it (§8.3).
+- **TIMES counters** are the top frame's: `SetTemp` and `SetCount` set one there, and `DecTemp`,
+  `Counter` and `Count::Temp` read it there. A new frame starts with none set, and a popped frame's
+  go with it (§8.3). A SEARCH sets and reads its count within the statement, under one frame.
 - **Elision.** Control in paragraph p always lies in the top frame's region, so a GO TO from p to t
   is a plain `Jump` when every range whose region holds p also holds t and no debugging section
   serves t (§9.10).
@@ -954,7 +958,7 @@ walker does on each execution; the last column names that work.
 | INSPECT | `Inspect` over constant patterns and a prebuilt CONVERTING table when both operands are literals of one length and the item is not national; each TALLYING counter with its `StepPlan` | One call | Literal images and the CONVERTING table (machine.rs:822-834, 849-869) |
 | STRING | `String`, then `Select` of two arms whether or not a phrase is written | One call | `natural_bytes` of literals (machine.rs:686-697) |
 | UNSTRING | `Unstring` with each receiver's MOVE plan, DELIMITER IN's two, and COUNT IN's and POINTER's stores, then `Select` as for STRING | One call | `assign` dispatch per field (machine.rs:773) |
-| SEARCH | Blocks: `InTable` branch, one branch per WHEN, a `SetInt` of index + 1, and of the VARYING item + 1 when it is not the index | Lowered | The index by name (machine.rs:880); table and count |
+| SEARCH | Blocks: `SetCount` of an OCCURS DEPENDING ON table, `InTable` branch, one branch per WHEN, a `SetInt` of index + 1, and of the VARYING item + 1 when it is not the index | Lowered | The index by name (machine.rs:880); table and count |
 | SEARCH ALL | `SearchAll`, with each key matched to a WHEN term by item, then `Select`, then the whole condition | One call | `flatten_and` and `key_term` by name on each execution (machine.rs:908-917) |
 | IF | `Branch` | Lowered | - |
 | EVALUATE | A chain of `Branch`, one per object; each comparison evaluates its subject, as the walker does | Lowered | - |
@@ -1816,14 +1820,15 @@ kind; the plans fix it:
   to the next statement where no phrase is written.
 
 SEARCH evaluates the table's count (`Count`, as `occurrences`) before it reads the index, as the
-walker does. The walker evaluates the count once, before its loop; `InTable` evaluates it at each
-test, which gives the same count while nothing the loop stores reaches the DEPENDING ON object.
-Lowering refuses a serial SEARCH whose index or VARYING item may share storage with that object
-(either in LINKAGE, or the object subscripted or reference-modified, or their storage overlaps),
-and one of a DEPENDING ON table with neither INDEXED BY nor VARYING, where the walker's abend
-follows the count. `SetInt` steps the index and a VARYING item that is not the index by one;
-lowering refuses one that is not an index or an integer item, where `integer` + 1 and
-the item + 1 truncate differently.
+walker does, and once, before its loop. A serial SEARCH of an OCCURS DEPENDING ON table starts with
+`SetCount`, which evaluates the count there, abending as `occurrences` abends under SSRANGE, and
+holds it in a counter of its own; its `InTable` reads `Count::Temp` of that counter, so a VARYING
+item that is the DEPENDING ON object, or shares its storage, steps without changing the count, as
+in the walker. SEARCH ALL evaluates its plan's `Count` once inside `SearchAll`. A table with neither
+INDEXED BY nor VARYING, serial or ALL, ends the block in the walker's `Abend`, after `SetCount` when
+the table has a DEPENDING ON object, whose evaluation comes first. `SetInt` steps the index and a
+VARYING item that is not the index by one; lowering refuses one that is not an index or an integer
+item, where `integer` + 1 and the item + 1 truncate differently.
 
 ### 9.13 JSON and XML
 
@@ -2025,8 +2030,8 @@ before the S0C9 or size error.
 **Refused.** Where the LIR reads an item more often than the walker, and NUMCHECK may test the item
 or what locating it reads, lowering refuses the program: a condition-name whose values compare
 differently (§6), whose `Or` of relations reads the subject once per value where the walker tests
-and reads it once; and a serial SEARCH, whose loop reads an OCCURS DEPENDING ON count at each step
-and the index twice, where the walker reads each once.
+and reads it once; and a serial SEARCH, whose loop reads the index twice at each step, where the
+walker reads it once. The count `SetCount` holds is read once, as the walker reads it.
 
 **PARMCHECK.** `Storage.parmcheck` is the buffer after the WORKING-STORAGE the program declares
 (assumption PARMCHECK_BUFFER). Inside the CALL op an executor runs `parmcheck::set` over the calling

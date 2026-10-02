@@ -8,6 +8,7 @@ use rt::abend::Ending;
 use rt::module::codec::decode_all;
 
 mod cics;
+mod corpus;
 mod markup;
 mod report;
 mod sort;
@@ -445,9 +446,6 @@ fn constructs_outside_the_slice_are_refused_by_name() {
         let e = refused(&format!("INITIALIZE A {phrase}"), "       01  A PIC 9.\n");
         assert!(matches!(e, LowerError::Unsupported("INITIALIZE with FILLER, VALUE, REPLACING or DEFAULT", _)), "{phrase}: {e}");
     }
-    let e = refused("SEARCH T WHEN T(X) = 'A' CONTINUE END-SEARCH", "       01  G.\n           05 N PIC 9.\n           05 T PIC X OCCURS 1 TO 3 DEPENDING ON N.\n       01  X PIC 9.\n");
-    assert_eq!(e.to_string(), "lowering: SEARCH of an OCCURS DEPENDING ON table with neither INDEXED BY nor VARYING is not lowered yet");
-    assert_eq!(syntax::Error::from(e).pos.line, 10);
     let pointer = "       01  PP USAGE PROCEDURE-POINTER.\n";
     assert!(matches!(refused("SET PP TO ENTRY 'T'", pointer), LowerError::Unsupported("SET TO ENTRY", _)));
     assert!(matches!(refused("CALL PP", pointer), LowerError::Unsupported("a CALL through a pointer SET TO ENTRY can set", _)));
@@ -1291,25 +1289,19 @@ fn a_serial_search_steps_its_index_and_varying_item_and_search_all_matches_keys_
     ));
     let in_table = p.conds.iter().find_map(|c| if let LirCond::InTable { index, count } = c { Some((*index, count.clone())) } else { None }).unwrap();
     assert_eq!(p.places[in_table.0 as usize].kind, rt::storage::Kind::Index);
-    assert!(matches!(in_table.1, lir::Count::Odo(lir::Odo { max: 5, element: 1, .. })));
+    let held = ops(&p).find_map(|op| if let Op::SetCount(t, odo) = op { Some((*t, odo.clone())) } else { None }).unwrap();
+    assert!(matches!(held, (t, lir::Odo { max: 5, element: 1, .. }) if in_table.1 == lir::Count::Temp(t)));
     let steps: Vec<&str> = ops(&p).filter_map(|op| if let Op::SetInt { target, .. } = op { Some(symbol(&p, p.places[*target as usize].name)) } else { None }).collect();
     assert_eq!(steps, ["IX", "V"]);
     let a = &p.plans.search_all[0];
     assert_eq!((a.store, a.keys.len(), a.keys[0].ascending, a.keys[0].how), (StorePlan::Index, 1, true, lir::Compare::Alphanumeric));
     let searched = p.blocks.iter().find(|b| matches!(b.ops.last(), Some(Op::SearchAll(_)))).unwrap();
     assert!(matches!(&searched.end, Terminator::Select(arms) if arms.len() == 2));
-
-    let overlapping = program(
-        "",
-        "       01  N PIC 9 VALUE 3.\n       01  TBL.\n           05 E PIC X OCCURS 1 TO 5 DEPENDING ON N INDEXED BY IX.\n",
-        &[line("SEARCH E VARYING N WHEN E(IX) = 'C' CONTINUE END-SEARCH"), line("GOBACK.")].concat(),
-    );
-    let e = lower(&compiled(&overlapping)).unwrap_err();
-    assert!(matches!(e, LowerError::Unsupported(n, _) if n.starts_with("SEARCH VARYING an item that may share storage")), "{e}");
+    assert!(matches!(a.count, lir::Count::Odo(lir::Odo { max: 5, .. })));
 }
 
 #[test]
-fn under_numcheck_a_serial_search_that_reads_a_tested_count_or_index_again_is_refused() {
+fn under_numcheck_a_serial_search_that_reads_a_tested_index_again_is_refused() {
     let search = |options: &str, data: &str, statement: &str| program(options, data, &[line(statement), line("GOBACK.")].concat());
     let indexed = "SEARCH E WHEN E(IX) = 'C' CONTINUE END-SEARCH";
     let zoned = "       01  N PIC 9 VALUE 3.\n       01  TBL.\n           05 E PIC X OCCURS 1 TO 5 DEPENDING ON N INDEXED BY IX.\n";
@@ -1317,11 +1309,14 @@ fn under_numcheck_a_serial_search_that_reads_a_tested_count_or_index_again_is_re
     let fixed = "       01  TBL.\n           05 E PIC X OCCURS 5 INDEXED BY IX.\n";
     let varying = "       01  TBL.\n           05 E PIC X OCCURS 5.\n       01  V PIC 9.\n";
     let by_v = "SEARCH E VARYING V WHEN E(V) = 'C' CONTINUE END-SEARCH";
-    for (options, data, statement) in [("NUMCHECK", zoned, indexed), ("NUMCHECK(BIN)", binary, indexed), ("NUMCHECK", varying, by_v)] {
-        let e = lower(&compiled(&search(options, data, statement))).unwrap_err();
-        assert!(matches!(e, LowerError::Unsupported("NUMCHECK of a serial SEARCH's OCCURS DEPENDING ON count or index", _)), "{options}: {e}");
+    let e = lower(&compiled(&search("NUMCHECK", varying, by_v))).unwrap_err();
+    assert!(matches!(e, LowerError::Unsupported("NUMCHECK of a serial SEARCH's index", _)), "{e}");
+    let held = [("NUMCHECK", zoned, indexed), ("NUMCHECK(BIN)", binary, indexed), ("ZONECHECK(MSG)", binary, indexed), ("", zoned, indexed)];
+    for (options, data, statement) in held {
+        let p = lowered(&search(options, data, statement));
+        assert!(ops(&p).any(|op| matches!(op, Op::SetCount(..))), "{options}");
     }
-    for (options, data, statement) in [("ZONECHECK(MSG)", binary, indexed), ("NUMCHECK", fixed, indexed), ("", zoned, indexed), ("", varying, by_v)] {
+    for (options, data, statement) in [("NUMCHECK", fixed, indexed), ("", varying, by_v)] {
         lowered(&search(options, data, statement));
     }
 }

@@ -406,7 +406,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
     }
     p.services.sqlca.fields.iter().try_for_each(|&(_, q, _)| place(q))?;
     let count = |c: &Count| match c {
-        Count::Fixed(_) => Ok(()),
+        Count::Fixed(_) | Count::Temp(_) => Ok(()),
         Count::Odo(o) => int(&o.object),
     };
     let marker = |m: &Marker| match *m {
@@ -671,6 +671,8 @@ fn verify_program(p: &Program) -> Result<(), String> {
                     places(prepass)?;
                 }
                 Op::SetTemp(_, n) => int(n)?,
+                Op::SetCount(_, o) if o.check != ssrange => return Err(format!("block {b}: a SEARCH count's check that disagrees with SSRANGE")),
+                Op::SetCount(_, o) => int(&o.object)?,
                 Op::Display(d) => within("DISPLAY plan", *d, p.plans.display.len())?,
                 Op::Call(c) => within("CALL plan", *c, p.services.calls.len())?,
                 Op::Cancel(o) => operand(o)?,
