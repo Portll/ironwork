@@ -595,7 +595,7 @@ pub enum Step {
     Next,
     /// The handler a service selected; only a block's last op returns it, for `Select`.
     Arm(u8),
-    /// A transfer the service chose at run time (HANDLE CONDITION, HANDLE ABEND), or one a
+    /// A transfer the service chose at run time (HANDLE CONDITION), or one a
     /// procedure it ran left by (§9.6).
     GoTo(ParaId),
     End(Ending),
@@ -1235,8 +1235,11 @@ pub enum Cics<P, O, S> { /* … */ }
 `name` is the command as written, which messages give (SEND for SEND MAP written as SEND
 MAP(name)). `cics::Condition` is the one RESP and default-abend table (semantics-library.md §7,
 DRY-4). An option is evaluated when the service reads it, in the order the walker read it, so
-binding evaluates nothing. `rt::cics::run` returns `Next`, `GoTo(ParaId)` for a handled condition or
-HANDLE ABEND, or `End` for RETURN, XCTL and a LINKed program's STOP RUN. Handler tables, the task,
+binding evaluates nothing. `rt::cics::run` returns `Next`, `GoTo(ParaId)` for a handled condition,
+or `End` for RETURN, XCTL and a LINKed program's STOP RUN. A HANDLE ABEND exit is not a transfer
+`run` returns: an abend that reaches a program's activation, from the program, a CALL or a lower
+logical level, goes to `rt::cics::abend_exit`, and the executor runs the LABEL or enters the
+PROGRAM with `enter_exit_program` (the walker's `run_level`). Handler tables, the task,
 the EIB and the terminal stay run-time state. What `run` asks of its executor is `CicsHost`: the
 run unit and the program's handlers, operands that are not data items, DFHCOMMAREA's address, a
 mapset from the copy libraries, the symbolic map's `mapI` and `mapO` by name, and running a program

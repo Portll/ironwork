@@ -393,8 +393,10 @@ The subset the interpreter runs today:
 - **CICS, run as a harness** (`ironwork cics`): one task, with the transaction ID, terminal, user
   and COMMAREA the command line gives, and the EXEC interface block in IBM's layout. Program
   control (RETURN with TRANSID and COMMAREA, LINK, XCTL, ABEND); exception conditions (RESP, RESP2,
-  NOHANDLE, HANDLE CONDITION with ERROR, IGNORE CONDITION, PUSH and POP HANDLE, HANDLE ABEND, and
-  the AEIx abend IBM documents for a condition nothing handles; a program check is ASRA); ASKTIME,
+  NOHANDLE, HANDLE CONDITION with ERROR, IGNORE CONDITION, PUSH and POP HANDLE, and the AEIx abend
+  IBM documents for a condition nothing handles; a program check is ASRA); HANDLE ABEND PROGRAM,
+  LABEL, CANCEL and RESET, one exit per logical level, which an abend in the program or a level
+  below it reaches (C142); ASKTIME,
   FORMATTIME, ASSIGN, GETMAIN, FREEMAIN, ADDRESS, SYNCPOINT, ENQ, DEQ, DELAY, SEND TEXT and WRITE
   OPERATOR; temporary-storage and transient-data queues; and file control over VSAM KSDS and RRDS
   files (READ with GENERIC, GTEQ and UPDATE, WRITE, REWRITE, DELETE, UNLOCK, and browsing with

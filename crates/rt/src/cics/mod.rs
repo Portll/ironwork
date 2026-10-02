@@ -14,6 +14,8 @@ pub use run::{
     At, CicsHost, EIBAID, EIBCALEN, EIBCPOSN, EIBDATE, EIBFN, EIBRESP, EIBRESP2, EIBRSRCE, EIBTASKN, EIBTIME, EIBTRMID,
     EIBTRNID, Flow, Handler, Handlers, begin_command, begin_task, bytes, in_task, ok, raise, run, unsupported,
 };
+pub use run::{AbendExit, ExitTarget};
+pub use program::{abend_exit, enter_exit_program};
 
 use crate::files::{Dd, Format, KeySpan, Keying};
 use crate::calendar::{civil, EPOCH_1900_TO_1970_MILLIS, EPOCH_1900_TO_1970_SECONDS, SECONDS_PER_DAY};
@@ -249,6 +251,10 @@ pub struct Task {
     /// RETURN TRANSID and COMMAREA, when the task ended that way.
     pub next_transid: Option<String>,
     pub returned_commarea: Option<Vec<u8>>,
+    /// The code of the abend a HANDLE ABEND exit was given, which ASSIGN ABCODE returns.
+    pub abcode: Option<String>,
+    /// An ABEND CANCEL is ending the task, which no HANDLE ABEND exit intercepts.
+    pub cancelling: bool,
 }
 
 impl Task {

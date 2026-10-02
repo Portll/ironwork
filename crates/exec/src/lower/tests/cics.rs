@@ -48,7 +48,7 @@ fn each_block_is_one_op_whose_command_binds_as_the_walker_binds_it_and_handle_ke
     assert_eq!(names_of, ["HANDLE CONDITION", "HANDLE ABEND", "READQ TS", "IGNORE CONDITION", "PUSH HANDLE", "POP HANDLE", "LINK", "RETURN", "ABEND", "XCTL"]);
     let labels = vec![(Condition::QIDERR, Some(no_queue)), (Condition::ERROR, Some(oops)), (Condition::LENGERR, None)];
     assert_eq!(got[0].1.command, Cics::HandleCondition(labels));
-    assert_eq!(got[1].1.command, Cics::HandleAbend { program: false, label: Some(recover), reset: false });
+    assert_eq!(got[1].1.command, Cics::HandleAbend { program: None, label: Some(recover), reset: false });
     let Cics::ReadqTs { queue, next: false, item: None, numitems: None, record: Record { into, set: None, length } } = &got[2].1.command else { panic!("{:?}", got[2]) };
     assert_eq!((names(&p, queue), names(&p, into), names(&p, length)), (format!("{:?}", Const::Bytes(crate::testing::ebcdic("NOQ"))), "WS-DATA".into(), "WS-LEN".into()));
     let resp = &got[2].1.resp;

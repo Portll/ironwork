@@ -51,8 +51,8 @@ pub enum Cics<P = PlaceId, O = Operand, S = SymId> {
     IgnoreCondition(Vec<Condition>),
     PushHandle,
     PopHandle,
-    /// `reset` is CANCEL or RESET; `label` is resolved only when PROGRAM is absent.
-    HandleAbend { program: bool, label: Option<ParaId>, reset: bool },
+    /// PROGRAM or LABEL sets the exit, RESET reactivates it, and with none of them it is CANCEL.
+    HandleAbend { program: Opt<P, O, S>, label: Option<ParaId>, reset: bool },
     HandleAid,
     SendMap { map: Opt<P, O, S>, mapset: Opt<P, O, S>, from: Opt<P, O, S>, maponly: bool, dataonly: bool, cursor: Opt<P, O, S>, control: Control },
     ReceiveMap { map: Opt<P, O, S>, mapset: Opt<P, O, S>, into: Opt<P, O, S>, set: Opt<P, O, S> },
@@ -279,7 +279,7 @@ impl<P, O, S> Cics<P, O, S> {
             Self::IgnoreCondition(conditions) => Cics::IgnoreCondition(conditions),
             Self::PushHandle => Cics::PushHandle,
             Self::PopHandle => Cics::PopHandle,
-            Self::HandleAbend { program, label, reset } => Cics::HandleAbend { program, label, reset },
+            Self::HandleAbend { program, label, reset } => Cics::HandleAbend { program: opt(program, h)?, label, reset },
             Self::HandleAid => Cics::HandleAid,
             Self::SendMap { map, mapset, from, maponly, dataonly, cursor, control } => {
                 Cics::SendMap { map: opt(map, h)?, mapset: opt(mapset, h)?, from: opt(from, h)?, maponly, dataonly, cursor: opt(cursor, h)?, control }

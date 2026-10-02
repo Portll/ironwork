@@ -3,11 +3,12 @@
 
 use super::Condition;
 use super::command::{Datum, Transfer};
-use super::run::{At, CicsHost, EIBCALEN, EIBFN, EIBRSRCE, Flow, Handler, R};
+use super::run::{AbendExit, At, CicsHost, EIBCALEN, EIBFN, EIBRSRCE, ExitTarget, Flow, Handler, Handlers, R};
 use super::run::{bytes_cut, eib_bytes, eib_calen, eib_halfword, eib_text, int, ok, page, raise, text};
 use crate::abend::{Abend, AbendCode, Ending};
 use crate::lir::ParaId;
-use crate::unit::LoadError;
+use crate::unit::{LoadError, Loader, RunUnit};
+use crate::vocab::Pos;
 
 /// RETURN ends this program. At the task's top level TRANSID and COMMAREA name the next task and
 /// what it starts with; in a LINKed program they raise INVREQ.
@@ -68,12 +69,11 @@ pub(super) fn link<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &A
     let length = int(x, t.length.as_ref(), at.pos)?.map_or(item_len, |n| n.max(0) as usize);
     let saved = eib_calen(x.unit());
     eib_halfword(x.unit(), EIBCALEN, length as i16);
-    x.unit().programs[index].initialized = false;
-    x.unit().enter(at.pos)?;
-    let ending = x.run_program(program, index, area, xctl);
+    if xctl {
+        x.handlers().abend = None;
+    }
+    let ending = enter(x, program, index, area, xctl, at.pos);
     let unit = x.unit();
-    unit.depth -= 1;
-    unit.programs[index].active = false;
     unit.release_temporaries(mark);
     eib_halfword(unit, EIBCALEN, saved);
     match ending? {
@@ -83,13 +83,65 @@ pub(super) fn link<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &A
     }
 }
 
-/// ABEND ends the task with ABCODE, unless HANDLE ABEND LABEL is active and CANCEL is absent.
+/// Runs program `index` with fresh WORKING-STORAGE at the next logical level, or for XCTL in this
+/// program's place.
+fn enter<'w, P: Copy, O, S, X: CicsHost<'w, P, O, S>>(x: &mut X, program: X::Program, index: usize, area: Option<usize>, xctl: bool, pos: Pos) -> R<Ending> {
+    x.unit().programs[index].initialized = false;
+    x.unit().enter(pos)?;
+    let ending = x.run_program(program, index, area, xctl);
+    let unit = x.unit();
+    unit.depth -= 1;
+    unit.programs[index].active = false;
+    ending
+}
+
+/// ABEND ends the task with ABCODE; a HANDLE ABEND exit can intercept it unless CANCEL is given.
 pub(super) fn abend<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, abcode: Option<&Datum<P, O, S>>, cancel: bool) -> R<Flow> {
     let code = text(x, abcode, at.pos)?.unwrap_or_else(|| "????".into());
-    if !cancel && let Some(p) = x.handlers().abend.take() {
-        return Ok(Flow::GoTo(p));
+    if cancel && let Some(task) = x.unit().cics.as_mut() {
+        task.cancelling = true;
     }
     Err(Abend { message: format!("EXEC CICS ABEND ABCODE({code})"), code: AbendCode::Cics(code), pos: at.pos, file: None })
+}
+
+/// The transaction abend code an abend is in a CICS task, when a HANDLE ABEND exit can intercept
+/// it: a program check is ASRA; ASPx and APSJ, and ironwork's own refusals, cannot be.
+fn interceptable(abend: &Abend) -> Option<String> {
+    match &abend.code {
+        AbendCode::Check(_) | AbendCode::Protection => Some("ASRA".into()),
+        AbendCode::Cics(code) if !code.starts_with("ASP") && code != "APSJ" => Some(code.clone()),
+        _ => None,
+    }
+}
+
+/// Where an abend that reaches a logical level goes: to the level's HANDLE ABEND exit when it is
+/// active, which CICS deactivates on the way in (C142). None passes the abend to the next higher
+/// level.
+pub fn abend_exit<H, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, handlers: &mut Handlers, abend: &Abend) -> Option<ExitTarget> {
+    let code = interceptable(abend)?;
+    let task = unit.cics.as_mut().filter(|t| !t.cancelling)?;
+    let exit = handlers.abend.as_mut().filter(|e| e.active)?;
+    exit.active = false;
+    task.abcode = Some(code);
+    Some(exit.target.clone())
+}
+
+/// A HANDLE ABEND PROGRAM exit, entered as by LINK with the COMMAREA of the program that set it.
+/// One that cannot be loaded abends APCT, which passes to the next higher level.
+pub fn enter_exit_program<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, name: &str, pos: Pos) -> R<Ending> {
+    let apct = |message: String| Abend { code: AbendCode::Cics("APCT".into()), message, pos, file: None };
+    let index = match x.unit().load(name) {
+        Ok(i) => i,
+        Err(LoadError::NotFound) => return Err(apct(format!("HANDLE ABEND PROGRAM({name}): no program of the name"))),
+        Err(LoadError::Compile(m)) => return Err(Abend::ironwork(format!("HANDLE ABEND PROGRAM({name}): {m}"), pos)),
+    };
+    let Some(program) = x.unit().programs[index].compiled.clone() else {
+        return Err(apct(format!("HANDLE ABEND PROGRAM({name}): the task's first program is already running")));
+    };
+    let page = page(x);
+    eib_text(x.unit(), page, EIBRSRCE, 8, name);
+    let commarea = x.commarea();
+    enter(x, program, index, commarea, false, pos)
 }
 
 pub(super) fn handle_condition<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, labels: &[(Condition, Option<ParaId>)]) -> R<Flow> {
@@ -111,9 +163,10 @@ pub(super) fn ignore_condition<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O
     ok(x, at)
 }
 
+/// PUSH HANDLE suspends HANDLE CONDITION, IGNORE CONDITION and HANDLE ABEND until POP HANDLE.
 pub(super) fn push_handle<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>) -> R<Flow> {
     let handlers = x.handlers();
-    let saved = std::mem::take(&mut handlers.conditions);
+    let saved = (std::mem::take(&mut handlers.conditions), handlers.abend.take());
     handlers.stack.push(saved);
     ok(x, at)
 }
@@ -121,23 +174,36 @@ pub(super) fn push_handle<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>,
 pub(super) fn pop_handle<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>) -> R<Flow> {
     let handlers = x.handlers();
     match handlers.stack.pop() {
-        Some(saved) => {
-            handlers.conditions = saved;
+        Some((conditions, abend)) => {
+            handlers.conditions = conditions;
+            handlers.abend = abend;
             ok(x, at)
         }
         None => raise(x, at, Condition::INVREQ, 0),
     }
 }
 
-/// `reset` is CANCEL or RESET.
-pub(super) fn handle_abend<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, program: bool, label: Option<ParaId>, reset: bool) -> R<Flow> {
-    if program {
-        return Err(Abend::ironwork("EXEC CICS HANDLE ABEND PROGRAM is not supported yet; use LABEL", at.pos));
-    }
-    if let Some(p) = label {
-        x.handlers().abend = Some(p);
-    } else if reset {
-        x.handlers().abend = None;
+/// HANDLE ABEND PROGRAM or LABEL replaces the program level's exit, active; RESET reactivates it
+/// and CANCEL, the default, deactivates it (API Reference SC34-7402-00, pp. 314-315). PROGRAM
+/// names a program a LINK could find, else PGMIDERR.
+pub(super) fn handle_abend<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, program: Option<&Datum<P, O, S>>, label: Option<ParaId>, reset: bool) -> R<Flow> {
+    let target = match (text(x, program, at.pos)?, label) {
+        (Some(name), _) => {
+            let name = name.to_ascii_uppercase();
+            match x.unit().load(&name) {
+                Ok(_) => Some(ExitTarget::Program(name)),
+                Err(LoadError::NotFound) => return raise(x, at, Condition::PGMIDERR, 1),
+                Err(LoadError::Compile(m)) => return Err(Abend::ironwork(format!("EXEC CICS HANDLE ABEND PROGRAM({name}): {m}"), at.pos)),
+            }
+        }
+        (None, Some(p)) => Some(ExitTarget::Label(p)),
+        (None, None) => None,
+    };
+    let handlers = x.handlers();
+    match (target, &mut handlers.abend) {
+        (Some(target), exit) => *exit = Some(AbendExit { target, active: true }),
+        (None, Some(exit)) => exit.active = reset,
+        (None, None) => {}
     }
     ok(x, at)
 }

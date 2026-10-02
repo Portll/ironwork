@@ -261,6 +261,7 @@ pub const SET_TO_ENTRY: &str = "C140";
 pub const HEX_CURRENCY_SIGN: &str = "C141";
 pub const INITIALIZE_FLOAT_NUMERIC: &str = "C171";
 pub const FLOAT_VALUE_LITERAL: &str = "C172";
+pub const CICS_ABEND_EXITS: &str = "C142";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -409,8 +410,8 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: CICS_HANDLE_ABEND_CATCHES_CONDITIONS,
-        claim: "HANDLE ABEND LABEL receives control when a condition nothing handles would abend the task (AEIx), and is cancelled by being taken",
-        basis: Basis::Recalled,
+        claim: "A HANDLE ABEND exit receives control when a condition nothing handles abends the task (AEIx), as for any abend it can intercept, and is deactivated by being taken (C142)",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
@@ -1652,6 +1653,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: FLOAT_VALUE_LITERAL,
         claim: "A floating-point literal in the VALUE clause of a COMP-1 or COMP-2 item (Language Reference SC27-8713-03, pp. 45, 246) gives the item the value its mantissa times ten to its exponent has, written in fixed point and converted to hexadecimal floating point as MOVE converts a fixed-point literal; Enterprise COBOL converts the literal when it compiles, and its conversion may round the last hexadecimal digit differently. One whose value needs more than 31 digits in fixed point, such as 1.0E+40 or 1.0E-35, is refused, as is a floating-point literal in the VALUE of a fixed-point item, as IBM refuses it. A floating-point literal is read as one only in an item's VALUE clause, not in a level-88 VALUE or the PROCEDURE DIVISION, and a fixed-point VALUE on a COMP-1 or COMP-2 item, which IBM refuses unless it is zero, is still accepted",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CICS_ABEND_EXITS,
+        claim: "HANDLE ABEND gives each logical level one exit: PROGRAM or LABEL replaces the level's exit, active, CANCEL (the default) deactivates it and RESET reactivates it, also after CICS deactivated it on entry; PUSH HANDLE suspends it until POP HANDLE (CICS TS 5.3 Application Programming Reference SC34-7402-00, pp. 314-315; Application Programming Guide SC34-7401-00, pp. 364-365, 371-373). When the task abends, the exit of the level the abend happened at, else of each level above in turn, takes the first active one, deactivated as it is entered. A LABEL is a GO TO the paragraph from the procedure's start, so the PERFORMs in progress at the abend are left, where IBM restores the registers of the HANDLE ABEND and then goes to the label; the program levels below are gone. A PROGRAM must be one a LINK could find when HANDLE ABEND runs, else PGMIDERR, and is entered as by LINK with the COMMAREA and EIBCALEN of the program that set the exit; when it returns, the level that set it ends and control passes to the level above, or the task ends normally, and an abend in it goes on to the levels above; one that cannot be loaded then abends APCT, which goes on likewise. Intercepted are the transaction abends: a condition's AEIx, ABEND ABCODE, ASRA for a program check and APCT; not ABEND CANCEL, ASPx or APSJ, and, by ironwork's choice, not its own IRONWORK refusals or the batch codes a CICS task does not end with here (S806 from CALL, file status abends). ASSIGN ABCODE gives the code of the abend an exit was given, spaces before any. An exit set by a CALLed subprogram, which is at its caller's logical level, lasts only until the subprogram returns, and XCTL drops the exit of the program that issues it; the manuals say neither",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

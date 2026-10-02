@@ -59,8 +59,8 @@ pub(super) fn formattime<'w, P: Copy, O, S>(
 }
 
 pub(super) fn assign<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, a: &Assign<P, O, S>) -> R<Flow> {
-    let (applid, sysid, userid, termid) = match x.unit().cics.as_ref() {
-        Some(t) => (t.applid.clone(), t.sysid.clone(), t.userid.clone(), t.termid.clone()),
+    let (applid, sysid, userid, termid, abcode) = match x.unit().cics.as_ref() {
+        Some(t) => (t.applid.clone(), t.sysid.clone(), t.userid.clone(), t.termid.clone(), t.abcode.clone().unwrap_or_default()),
         None => Default::default(),
     };
     let texts = [
@@ -70,7 +70,7 @@ pub(super) fn assign<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: 
         ("NETNAME", &a.netname, termid.clone()),
         ("FACILITY", &a.facility, termid),
         ("STARTCODE", &a.startcode, "TD".to_owned()),
-        ("ABCODE", &a.abcode, String::new()),
+        ("ABCODE", &a.abcode, abcode),
         ("PROGRAM", &a.program, x.program_id()),
     ];
     for (name, option, text) in texts {

@@ -63,8 +63,25 @@ pub trait CicsHost<'w, P: Copy, O, S>: Host<P> {
 #[derive(Clone, Debug, Default)]
 pub struct Handlers {
     pub conditions: HashMap<Condition, Handler>,
-    pub stack: Vec<HashMap<Condition, Handler>>,
-    pub abend: Option<ParaId>,
+    /// What each PUSH HANDLE suspended.
+    pub stack: Vec<(HashMap<Condition, Handler>, Option<AbendExit>)>,
+    pub abend: Option<AbendExit>,
+}
+
+/// The program level's HANDLE ABEND exit, which CANCEL and entering it deactivate and RESET
+/// reactivates.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AbendExit {
+    pub target: ExitTarget,
+    pub active: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExitTarget {
+    /// A paragraph of the program that set the exit.
+    Label(ParaId),
+    /// A program, entered as by LINK.
+    Program(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,7 +94,7 @@ pub enum Handler {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Flow {
     Next,
-    /// A handled condition or HANDLE ABEND.
+    /// A handled condition.
     GoTo(ParaId),
     /// RETURN, XCTL, or a LINKed program's STOP RUN.
     End(Ending),
@@ -130,7 +147,7 @@ pub fn run<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, command: &Cics
         Cics::IgnoreCondition(conditions) => program::ignore_condition(x, &at, conditions),
         Cics::PushHandle => program::push_handle(x, &at),
         Cics::PopHandle => program::pop_handle(x, &at),
-        Cics::HandleAbend { program, label, reset } => program::handle_abend(x, &at, *program, *label, *reset),
+        Cics::HandleAbend { program, label, reset } => program::handle_abend(x, &at, program.as_ref(), *label, *reset),
         Cics::HandleAid | Cics::Freemain | Cics::Enq | Cics::Deq | Cics::Delay => ok(x, &at),
         Cics::SendMap { map, mapset, from, maponly, dataonly, cursor, control } => {
             maps::send_map(x, &at, maps::MapNames { map: map.as_ref(), mapset: mapset.as_ref() }, from.as_ref(), (*maponly, *dataonly), cursor.as_ref(), *control)
@@ -331,8 +348,8 @@ pub fn ok<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S
 }
 
 /// Raises a condition. RESP or NOHANDLE take it; otherwise HANDLE CONDITION (the condition's own
-/// entry, else ERROR) or IGNORE CONDITION decides; otherwise HANDLE ABEND, if active, or the task
-/// abends with the condition's AEIx code.
+/// entry, else ERROR) or IGNORE CONDITION decides; otherwise the task abends with the condition's
+/// AEIx code, which a HANDLE ABEND exit can intercept.
 pub fn raise<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, condition: Condition, resp2: i32) -> R<Flow> {
     let resp = condition.resp();
     eib_fullword(x.unit(), EIBRESP, resp);
@@ -349,14 +366,11 @@ pub fn raise<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O
     match handlers.conditions.get(&condition).or_else(|| handlers.conditions.get(&Condition::ERROR)).copied() {
         Some(Handler::Ignore) => Ok(Flow::Next),
         Some(Handler::Label(p)) => Ok(Flow::GoTo(p)),
-        None => match handlers.abend.take() {
-            Some(p) => Ok(Flow::GoTo(p)),
-            None => Err(Abend {
-                code: AbendCode::Cics(condition.default_abend().into()),
-                message: format!("EXEC CICS {}: {} was raised with no RESP, HANDLE CONDITION or IGNORE CONDITION", at.name, condition.name()),
-                pos: at.pos,
-                file: None,
-            }),
-        },
+        None => Err(Abend {
+            code: AbendCode::Cics(condition.default_abend().into()),
+            message: format!("EXEC CICS {}: {} was raised with no RESP, HANDLE CONDITION or IGNORE CONDITION", at.name, condition.name()),
+            pos: at.pos,
+            file: None,
+        }),
     }
 }

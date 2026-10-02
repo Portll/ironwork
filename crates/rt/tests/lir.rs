@@ -847,7 +847,7 @@ fn cics_commands_round_trip_with_every_tag() {
         Cics::IgnoreCondition(vec![Condition::LENGERR, Condition::BUSY]),
         Cics::PushHandle,
         Cics::PopHandle,
-        Cics::HandleAbend { program: false, label: Some(2), reset: true },
+        Cics::HandleAbend { program: None, label: Some(2), reset: true },
         Cics::HandleAid,
         Cics::SendMap { map: text, mapset: None, from: place, maponly: false, dataonly: true, cursor: Some(Datum::Bare), control },
         Cics::ReceiveMap { map: text, mapset: text, into: place, set: None },

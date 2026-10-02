@@ -970,9 +970,9 @@ impl Parser<'_> {
                     }
                 }
                 let labels = block.command.starts_with("HANDLE");
-                for (_, arg) in &mut block.options {
+                for (name, arg) in &mut block.options {
                     if let Some(ExecArg::Text(t)) = arg
-                        && !labels
+                        && (!labels || matches!(name.as_str(), "RESP" | "RESP2" | "PROGRAM"))
                         && let Some(op) = operand_of(t, pos)
                     {
                         *arg = Some(ExecArg::Operand(op));

@@ -1924,6 +1924,93 @@ fn cics_time_assign_and_abend() {
 }
 
 #[test]
+fn a_handle_abend_label_takes_an_abend_from_a_lower_level_and_reset_rearms_it() {
+    let main = cics_program(
+        "MAINP",
+        "       01  WS-N PIC 9 VALUE 0.\n       01  WS-CODE PIC X(4).\n",
+        "",
+        &[
+            "       MAIN-LINE.\n",
+            &line("EXEC CICS HANDLE ABEND LABEL(RECOVER) END-EXEC"),
+            &line("EXEC CICS LINK PROGRAM('BADP') END-EXEC"),
+            &line("DISPLAY 'NOT REACHED'."),
+            "       RECOVER.\n",
+            &line("ADD 1 TO WS-N"),
+            &line("EXEC CICS ASSIGN ABCODE(WS-CODE) END-EXEC"),
+            &line("DISPLAY 'RECOVERED ' WS-N ' ' WS-CODE"),
+            &line("IF WS-N = 1"),
+            &line("    EXEC CICS HANDLE ABEND RESET END-EXEC"),
+            &line("    EXEC CICS ABEND ABCODE('XY12') END-EXEC"),
+            &line("END-IF"),
+            &line("EXEC CICS ABEND ABCODE('XY34') END-EXEC."),
+        ]
+        .concat(),
+    );
+    let bad = cics_program("BADP", "", "       01  DFHCOMMAREA PIC X(10).\n", &line("DISPLAY DFHCOMMAREA."));
+    let source = format!("{main}       END PROGRAM MAINP.\n{bad}       END PROGRAM BADP.\n");
+    let (out, ending) = run_cics(&source, task("TR08"), None, unit::Clock::System);
+    assert_eq!(out, "RECOVERED 1 ASRA\nRECOVERED 2 XY12\n");
+    assert_eq!(ending.unwrap_err().code, "XY34");
+}
+
+#[test]
+fn a_handle_abend_program_is_linked_to_with_its_levels_commarea_and_returns_to_the_level_above() {
+    let main = cics_program(
+        "MAINP",
+        "       01  WS-AREA PIC X(5) VALUE 'MIDDL'.\n",
+        "",
+        &[line("EXEC CICS LINK PROGRAM('MIDP') COMMAREA(WS-AREA) END-EXEC"), line("DISPLAY 'BACK IN MAIN'"), line("EXEC CICS RETURN END-EXEC.")].concat(),
+    );
+    let mid = cics_program(
+        "MIDP",
+        "       01  WS-RESP PIC S9(8) COMP.\n",
+        "       01  DFHCOMMAREA PIC X(5).\n",
+        &[
+            line("EXEC CICS HANDLE ABEND PROGRAM('NOPROG') RESP(WS-RESP)"),
+            line("    END-EXEC"),
+            line("IF WS-RESP = DFHRESP(PGMIDERR) DISPLAY 'PGMIDERR' END-IF"),
+            line("EXEC CICS HANDLE ABEND PROGRAM('EXITP') END-EXEC"),
+            line("EXEC CICS LINK PROGRAM('BOTP') END-EXEC"),
+            line("DISPLAY 'NOT REACHED'."),
+        ]
+        .concat(),
+    );
+    let bottom = cics_program(
+        "BOTP",
+        "",
+        "",
+        &[line("EXEC CICS HANDLE ABEND LABEL(OWN) END-EXEC"), line("EXEC CICS HANDLE ABEND CANCEL END-EXEC"), line("EXEC CICS ABEND ABCODE('BOT1') END-EXEC."), "       OWN.\n".into(), line("DISPLAY 'NOT REACHED'.")]
+            .concat(),
+    );
+    let exit = cics_program(
+        "EXITP",
+        "       01  WS-CODE PIC X(4).\n",
+        "       01  DFHCOMMAREA PIC X(5).\n",
+        &[line("EXEC CICS ASSIGN ABCODE(WS-CODE) END-EXEC"), line("DISPLAY 'EXIT ' DFHCOMMAREA ' ' WS-CODE"), line("EXEC CICS RETURN END-EXEC.")].concat(),
+    );
+    let source = format!("{main}       END PROGRAM MAINP.\n{mid}       END PROGRAM MIDP.\n{bottom}       END PROGRAM BOTP.\n{exit}       END PROGRAM EXITP.\n");
+    let (out, ending) = run_cics(&source, task("TR09"), None, unit::Clock::System);
+    assert!(ending.is_ok(), "{ending:?}");
+    assert_eq!(out, "PGMIDERR\nEXIT MIDDL BOT1\nBACK IN MAIN\n");
+}
+
+#[test]
+fn push_handle_suspends_the_abend_exit_and_abend_cancel_passes_every_exit() {
+    let with = |between: &[&str], abend: &str| {
+        let mut body = vec!["       MAIN-LINE.\n".to_owned(), line("EXEC CICS HANDLE ABEND LABEL(RECOVER) END-EXEC")];
+        body.extend(between.iter().map(|s| line(s)));
+        body.extend([line(abend), "       RECOVER.\n".to_owned(), line("DISPLAY 'RECOVERED'"), line("EXEC CICS RETURN END-EXEC.")]);
+        let (out, ending) = run_cics(&cics_program("PUSHP", "", "", &body.concat()), task("TR10"), None, unit::Clock::System);
+        (out, ending.err().map(|a| a.code.to_string()))
+    };
+    assert_eq!(with(&["EXEC CICS PUSH HANDLE END-EXEC"], "EXEC CICS ABEND ABCODE('PSH1') END-EXEC."), (String::new(), Some("PSH1".into())));
+    assert_eq!(with(&["EXEC CICS PUSH HANDLE END-EXEC", "EXEC CICS POP HANDLE END-EXEC"], "EXEC CICS ABEND ABCODE('POP1') END-EXEC."), ("RECOVERED\n".into(), None));
+    assert_eq!(with(&[], "EXEC CICS ABEND ABCODE('CAN1') CANCEL END-EXEC."), (String::new(), Some("CAN1".into())));
+    let both = cics_program("BOTH", "", "", &[line("EXEC CICS HANDLE ABEND LABEL(X) RESET END-EXEC."), "       X.\n".into(), line("GOBACK.")].concat());
+    assert!(run_cics(&both, task("TR11"), None, unit::Clock::System).1.unwrap_err().message.contains("takes one of PROGRAM, LABEL, CANCEL and RESET"));
+}
+
+#[test]
 fn a_program_check_in_a_cics_task_is_asra() {
     let source = cics_program("CICS7", "", "       01  DFHCOMMAREA PIC X(10).\n", &line("DISPLAY DFHCOMMAREA."));
     let (_, ending) = run_cics(&source, task("TR07"), None, unit::Clock::System);

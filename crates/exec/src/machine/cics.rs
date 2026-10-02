@@ -64,6 +64,27 @@ impl<'p> Machine<'p, '_, '_> {
         }
     }
 
+    /// Runs this program as a logical level of the task: an abend that reaches it while its HANDLE
+    /// ABEND exit is active goes to the exit, a LABEL taken as a GO TO from the procedure's start
+    /// and a PROGRAM in place of the rest of this level (C142).
+    pub(crate) fn run_level(&mut self) -> R<Ending> {
+        let mut start = None;
+        loop {
+            let abend = match self.run_from(start) {
+                Err(abend) => abend,
+                done => return done,
+            };
+            match cics::abend_exit(self.unit, &mut self.cics_handlers, &abend) {
+                None => return Err(abend),
+                Some(cics::ExitTarget::Label(p)) => start = Some((p as usize, 0)),
+                Some(cics::ExitTarget::Program(name)) => {
+                    let ending = cics::enter_exit_program(self, &name, abend.pos)?;
+                    return Ok(if ending == Ending::StopRun { ending } else { Ending::Goback });
+                }
+            }
+        }
+    }
+
     /// Fills the EXEC interface block for the task's first program and binds DFHEIBLK and
     /// DFHCOMMAREA, the USING items the translator gave it.
     pub(crate) fn begin_task(&mut self, commarea: Option<usize>, length: usize) {
@@ -135,7 +156,7 @@ impl<'a, 'w> CicsHost<'w, &'a Ref, &'a Operand, &'a str> for Machine<'_, '_, 'w>
         let ending = Machine::activation(&program, index, &mut *self.unit, self.main && xctl).and_then(|mut callee| {
             let eib = callee.unit.eib;
             callee.bind(&[Some(eib), commarea]);
-            callee.run_procedure()
+            callee.run_level()
         });
         ending.map_err(|a| self.in_loaded(index, &program, a))
     }

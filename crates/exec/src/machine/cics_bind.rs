@@ -138,12 +138,14 @@ fn bind_other<'b>(block: &'b ExecBlock, command: &str, label: &dyn Fn(&str) -> R
         "PUSH HANDLE" => Cics::PushHandle,
         "POP HANDLE" => Cics::PopHandle,
         "HANDLE ABEND" => {
-            let program = has(block, "PROGRAM");
+            if ["PROGRAM", "LABEL", "CANCEL", "RESET"].iter().filter(|o| has(block, o)).count() > 1 {
+                return Err(Abend::ironwork("EXEC CICS HANDLE ABEND takes one of PROGRAM, LABEL, CANCEL and RESET", block.pos));
+            }
             let label = match option(block, "LABEL") {
-                Some(Some(ExecArg::Text(t))) if !program => Some(label(t)?),
+                Some(Some(ExecArg::Text(t))) => Some(label(t)?),
                 _ => None,
             };
-            Cics::HandleAbend { program, label, reset: has(block, "CANCEL") || has(block, "RESET") }
+            Cics::HandleAbend { program: arg(block, "PROGRAM"), label, reset: has(block, "RESET") }
         }
         "HANDLE AID" => Cics::HandleAid,
         "SEND" | "SEND MAP" if map_command("SEND MAP") => Cics::SendMap {

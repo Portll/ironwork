@@ -292,7 +292,7 @@ impl Execute for Compiled {
         run_unit.cics = Some(task);
         let ending = machine::Machine::activation(self, me, &mut run_unit, true).and_then(|mut m| {
             m.begin_task(commarea, length);
-            m.run_procedure()
+            m.run_level()
         });
         let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.end_task(&self.program.id, ending.is_ok()).map(drop));
         let mut closed = run_unit.close_all();

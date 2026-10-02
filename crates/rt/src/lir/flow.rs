@@ -72,7 +72,7 @@ pub enum Step {
     Next,
     /// The handler a service selected, for the block's `Select`.
     Arm(u8),
-    /// A transfer a service chose at run time (HANDLE CONDITION, HANDLE ABEND), or a procedure it
+    /// A transfer a service chose at run time (HANDLE CONDITION), or a procedure it
     /// ran left by.
     GoTo(ParaId),
     End(Ending),
