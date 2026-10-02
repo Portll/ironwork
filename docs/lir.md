@@ -228,6 +228,8 @@ pub struct Place {
     pub name: SymId,
     /// The Ref's position, which the walker names in this place's abends.
     pub at: DebugId,
+    /// What the compiler fixed of NUMCHECK's test where this reference reads its item (§9.14).
+    pub numcheck: PlaceNumcheck,
 }
 
 pub enum Base {
@@ -259,6 +261,10 @@ pub enum Base {
 pub struct Subscript { pub stride: u32, pub value: IntExpr, pub check: Option<u32> }
 pub struct Odo { pub object: IntExpr, pub max: u32, pub element: u32, pub check: bool }
 pub struct RefMod { pub start: IntExpr, pub length: Option<IntExpr>, pub check: bool }
+/// What `compile::numcheck` fixed (§9.14): under ZON(LAX), what the item may hold because of the
+/// item its record redefines (C280); and that the compiler removed the test here, having found it
+/// always fails (C281).
+pub struct PlaceNumcheck { pub lax: Option<rt::store::LaxRedefinition>, pub removed: bool }
 ```
 
 ### 5.2 Bases
@@ -1929,6 +1935,11 @@ executors call the same `rt` functions: `store::numcheck`, `store::move_check`,
 `as_integer` false and the place's `at` as its position, after the place is evaluated to a `Loc`
 and before the item is read, at each read of this table and at no other. Under MSG it writes its
 warning and the read goes on; under ABD it ends the run with U4038 before the read.
+`store::numcheck` reads two facts of the `Loc` through `ProgramFacts`, which an executor gives from
+the place's `numcheck`: `lax_redefinition`, the tolerance ZON(LAX) gives an item redefining a
+signed or numeric-edited one, and `numcheck_removed`, set where the compiler found the test always
+fails, reported it and removed it. The walker keys the removal by the reference's position and its
+item, as a place is keyed.
 
 | The walker's read | In the LIR | Tested |
 |---|---|---|

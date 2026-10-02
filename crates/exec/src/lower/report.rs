@@ -140,6 +140,7 @@ impl Lower<'_> {
             refmod: None,
             name,
             at: self.at(item.pos),
+            numcheck: self.place_numcheck(i, item.pos),
         };
         let id = self.push_place(place, Some(i))?;
         self.place_ids.insert(key, id);

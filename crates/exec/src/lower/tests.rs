@@ -1584,6 +1584,27 @@ fn under_numcheck_a_condition_name_whose_values_compare_differently_is_refused()
 }
 
 #[test]
+fn a_place_carries_zon_lax_s_tolerance_and_the_compiler_s_removal_of_its_test() {
+    use rt::store::LaxRedefinition::{LeadingSpaces, Signed};
+    let data = concat!(
+        "       01  S1 PIC S999.\n       01  R1 REDEFINES S1.\n           05 R1A PIC 9.\n           05 R1B PIC 99.\n",
+        "       01  E1 PIC ZZ,ZZ9.99.\n       01  R3 REDEFINES E1 PIC 9(6).\n       01  W PIC 9(6).\n",
+    );
+    let lax = |options: &str| {
+        let p = lowered(&program(options, data, &[line("COMPUTE W = R1B + R3 + R1A"), line("GOBACK.")].concat()));
+        ["R1B", "R3", "R1A", "W"].map(|name| place_named(&p, name)[0].numcheck.lax)
+    };
+    assert_eq!(lax("NUMCHECK(ZON(LAX))"), [Some(Signed), Some(LeadingSpaces(5)), None, None]);
+    assert_eq!(lax("NUMCHECK"), [None; 4], "only ZON(LAX) reads them");
+    let constant = |options: &str| {
+        let p = lowered(&program(options, "       01  G VALUE ' 12'.\n           05 Z PIC 999.\n       01  W PIC 999.\n", &[line("COMPUTE W = Z + 1"), line("GOBACK.")].concat()));
+        place_named(&p, "Z").iter().map(|q| q.numcheck.removed).collect::<Vec<_>>()
+    };
+    assert_eq!(constant("NUMCHECK"), [true]);
+    assert_eq!(constant(""), [false]);
+}
+
+#[test]
 fn parmcheck_s_buffer_is_in_the_storage_the_lir_describes() {
     let source = |options: &str| program(options, "       01  A PIC X(3).\n", &[line("CALL 'SUB' USING A"), line("GOBACK.")].concat());
     let c = compiled(&source("PARMCHECK(ABD,50)"));

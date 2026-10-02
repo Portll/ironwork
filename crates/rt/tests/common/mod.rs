@@ -56,6 +56,7 @@ pub fn payroll() -> Program {
         refmod: None,
         name,
         at,
+        numcheck: PlaceNumcheck::default(),
     };
     let subscript = Subscript { stride: 4, value: IntExpr::Item(WS_I), check: Some(10) };
     let places = vec![

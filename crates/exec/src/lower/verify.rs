@@ -97,9 +97,14 @@ fn verify_program(p: &Program) -> Result<(), String> {
         return Err(format!("a PARMCHECK buffer at {offset} for {len} in a slab of {}, or without PARMCHECK", p.storage.size));
     }
 
+    let numcheck = p.options.options.numcheck;
+    let lax = numcheck.and_then(|c| c.zon).is_some_and(|z| z.lax);
     for (k, q) in p.places.iter().enumerate() {
         let Place { subscripts, odo, refmod, at, .. } = q;
         within("debug entry", *at, p.debug.positions.len())?;
+        if q.numcheck.lax.is_some() && !lax || q.numcheck.removed && numcheck.is_none() {
+            return Err(format!("place {k}: NUMCHECK facts {:?} its options do not read", q.numcheck));
+        }
         for s in subscripts {
             int(&s.value)?;
             if s.check.is_some() != ssrange {

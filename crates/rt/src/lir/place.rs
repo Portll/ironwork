@@ -1,6 +1,6 @@
 //! Places (lir.md §5): data references resolved at lowering, which an executor evaluates to a `Loc`.
 
-use super::{DebugId, IntExpr, SymId, XmlRegister};
+use super::{DebugId, IntExpr, PlaceNumcheck, SymId, XmlRegister};
 use crate::storage::Kind;
 use crate::{codec_enum, codec_struct};
 
@@ -19,6 +19,7 @@ pub struct Place {
     pub refmod: Option<RefMod>,
     pub name: SymId,
     pub at: DebugId,
+    pub numcheck: PlaceNumcheck,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,7 +62,7 @@ pub struct RefMod {
     pub check: bool,
 }
 
-codec_struct!(Place { base, offset, len, kind, scaling, subscripts, odo, refmod, name, at });
+codec_struct!(Place { base, offset, len, kind, scaling, subscripts, odo, refmod, name, at, numcheck });
 codec_enum!(Base {
     Program = 0,
     Local = 1,

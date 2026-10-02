@@ -107,7 +107,7 @@ impl Lower<'_> {
         // `oo_register`: SELF's cell and JNIENVPTR's, whole, whatever reference modification says.
         if r.qualifiers.is_empty() && r.subscripts.is_empty() && matches!(r.name.as_str(), "SELF" | "JNIENVPTR") && layout.resolve(&r.name, &[], r.pos).is_err() {
             let (base, kind) = if r.name == "SELF" { (lir::Base::SelfRef, Kind::ObjectReference) } else { (lir::Base::JniEnv, Kind::Pointer) };
-            let place = lir::Place { base, offset: 0, len: 4, kind, scaling: 0, subscripts: Vec::new(), odo: None, refmod: None, name: self.sym(&r.name), at: self.at(r.pos) };
+            let place = lir::Place { base, offset: 0, len: 4, kind, scaling: 0, subscripts: Vec::new(), odo: None, refmod: None, name: self.sym(&r.name), at: self.at(r.pos), numcheck: Default::default() };
             return self.push_place(place, None);
         }
         if compile::markup::xml_register(layout, r) {
@@ -126,6 +126,7 @@ impl Lower<'_> {
                 refmod: None,
                 name: self.sym(&r.name),
                 at: self.at(r.pos),
+                numcheck: Default::default(),
             };
             return self.push_place(place, None);
         }
@@ -178,7 +179,8 @@ impl Lower<'_> {
                 (kind, Some(lir::RefMod { start, length, check: ssrange }))
             }
         };
-        let place = lir::Place { base, offset: item.offset, len: item.size, kind, scaling: item.scaling, subscripts, odo, refmod, name: self.sym(&r.name), at: self.at(r.pos) };
+        let numcheck = self.place_numcheck(index, r.pos);
+        let place = lir::Place { base, offset: item.offset, len: item.size, kind, scaling: item.scaling, subscripts, odo, refmod, name: self.sym(&r.name), at: self.at(r.pos), numcheck };
         self.push_place(place, Some(index))
     }
 

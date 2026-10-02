@@ -14,6 +14,7 @@ use ironwork_rt::module::codec::{Decode, Encode, Writer, decode_all};
 use ironwork_rt::module::{ModuleError, StringTable};
 use ironwork_rt::picture::Sym;
 use ironwork_rt::sql::{HostType, fingerprint};
+use ironwork_rt::store::LaxRedefinition;
 use ironwork_rt::storage::Kind;
 use ironwork_rt::vocab::{AcceptFrom, BinOp, Figurative, InspectMode, OpenMode, Pos, RelOp, SignClause, SignPosition};
 use numeric::precision::{Fixed, Places};
@@ -479,9 +480,11 @@ fn places_round_trip_with_every_base() {
         refmod: Some(REFMOD),
         name: 3,
         at: 9,
+        numcheck: PlaceNumcheck { lax: Some(LaxRedefinition::LeadingSpaces(3)), removed: true },
     };
-    let bare = Place { base: Base::ReturnCode, subscripts: vec![], odo: None, refmod: None, ..place.clone() };
+    let bare = Place { base: Base::ReturnCode, subscripts: vec![], odo: None, refmod: None, numcheck: PlaceNumcheck::default(), ..place.clone() };
     round_trip(&[place, bare]);
+    every_variant(&[LaxRedefinition::Signed, LaxRedefinition::LeadingSpaces(1)], 2);
 }
 
 #[test]

@@ -4,6 +4,7 @@
 //! references in the interpreter.
 
 use super::{AbendId, Comparand, Compare, Count, DebugId, IntExpr, Operand, PlaceId, RefMod, StorePlan, SymId};
+use crate::store::LaxRedefinition;
 use crate::vocab::Figurative;
 use crate::{codec_enum, codec_struct};
 use zarch::hfp::Precision;
@@ -71,6 +72,15 @@ pub enum SenderCheck {
     Item,
     /// An alphanumeric or group sender moved to a numeric receiver: an unsigned integer's digits.
     Integer,
+}
+
+/// NUMCHECK's facts of a reference, fixed when compiled (`compile::numcheck`): under ZON(LAX), what
+/// its item may hold because of the item its record redefines; and whether the compiler removed
+/// the test where this reference reads the item, having found it always fails.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PlaceNumcheck {
+    pub lax: Option<LaxRedefinition>,
+    pub removed: bool,
 }
 
 /// INITIALIZE of one item: each elementary item the walk reaches, every occurrence listed.
@@ -349,6 +359,8 @@ codec_enum!(NumericFrom {
 });
 codec_enum!(FloatFrom { Float = 0, Fixed = 1, Zero = 2 });
 codec_enum!(SenderCheck { None = 0, Item = 1, Integer = 2 });
+codec_struct!(PlaceNumcheck { lax, removed });
+codec_enum!(LaxRedefinition { Signed = 0, LeadingSpaces(spaces) = 1 });
 codec_struct!(InitPlan { fields });
 codec_struct!(InitField { offset, len, value, store });
 codec_struct!(DisplayPlan { items, no_advancing });
