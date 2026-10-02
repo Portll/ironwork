@@ -312,6 +312,7 @@ fn program_shape_round_trips() {
         using: vec![0, 1],
         returning: Some(1),
         file_areas: vec![(0, 80), (80, 132)],
+        parmcheck: Some((1, 2)),
     };
     round_trip(&[Storage::default(), storage]);
     let item = Item {
@@ -419,6 +420,14 @@ fn a_slab_size_that_differs_from_its_image_is_malformed() {
     let storage = Storage { size: 4, image: vec![0; 3], ..Storage::default() };
     let (bytes, strings) = encoded(&storage);
     assert_eq!(refused::<Storage>(&bytes, &strings), (0, "an image of 3 bytes for a slab of 4".into()));
+}
+
+#[test]
+fn a_parmcheck_buffer_past_the_slab_is_malformed() {
+    let storage = Storage { size: 4, image: vec![0; 4], parmcheck: Some((2, 3)), ..Storage::default() };
+    let (bytes, strings) = encoded(&storage);
+    assert_eq!(refused::<Storage>(&bytes, &strings), (0, "a PARMCHECK buffer at 2 for 3 in a slab of 4".into()));
+    round_trip(&[Storage { parmcheck: Some((2, 2)), ..storage }]);
 }
 
 #[test]
@@ -559,7 +568,7 @@ fn arithmetic_plans_round_trip_with_every_tag() {
 fn control_flow_round_trips_with_every_tag() {
     let move_plan = MovePlan::Numeric { from: NumericFrom::Value, store: PACKED };
     let ops = [
-        Op::Move { from: Operand::Const(0), to: 1, plan: move_plan },
+        Op::Move { from: Operand::Load(0), to: 1, plan: move_plan, check: SenderCheck::Item },
         Op::Initialize { target: 1, plan: 0 },
         Op::Arith(0),
         Op::SetAddress { records: vec![1, 0], address: Operand::AddressOf(2) },
@@ -672,6 +681,7 @@ fn statement_payloads_round_trip_with_every_tag() {
     ];
     every_variant(&numeric, 7);
     every_variant(&[FloatFrom::Float, FloatFrom::Fixed, FloatFrom::Zero], 3);
+    every_variant(&[SenderCheck::None, SenderCheck::Item, SenderCheck::Integer], 3);
     every_variant(Func::ALL, 82);
     for &func in Func::ALL {
         assert_eq!(Func::named(func.name()), Some(func));
@@ -800,7 +810,7 @@ fn sort_plans_round_trip_with_every_tag() {
     let fixed = TableSort { count: Count::Fixed(10), ..table.clone() };
     every_variant(&[SortPlan::File(file_sort()), SortPlan::Table(table), SortPlan::Table(fixed)], 2);
     round_trip(&[
-        ReleasePlan { record: 4, file: Some(1), from: Some(FromMove { from: Operand::Load(2), to: 5, plan: ALNUM }), sort_return: 9, name: 3 },
+        ReleasePlan { record: 4, file: Some(1), from: Some(FromMove { from: Operand::Load(2), to: 5, plan: ALNUM, check: SenderCheck::Integer }), sort_return: 9, name: 3 },
         ReleasePlan { record: 4, file: None, from: None, sort_return: 9, name: 3 },
     ]);
     round_trip(&[ReturnPlan { file: Some(1), into: Some((6, ALNUM)), sort_return: 9, name: 2 }, ReturnPlan { file: None, into: None, sort_return: 9, name: 2 }]);
@@ -1018,7 +1028,7 @@ fn file_declarations_and_statements_round_trip_with_every_tag() {
     every_variant(&[Access::Sequential, Access::Random, Access::Dynamic], 3);
     every_variant(&[Format::Fixed, Format::Variable, Format::Text], 3);
     every_variant(&[OpenMode::Input, OpenMode::Output, OpenMode::Extend, OpenMode::InputOutput], 4);
-    let from = FromMove { from: Operand::Const(0), to: 8, plan: ALNUM };
+    let from = FromMove { from: Operand::Const(0), to: 8, plan: ALNUM, check: SenderCheck::None };
     let verbs = [
         FileVerb::Open(OpenMode::Extend),
         FileVerb::Close,

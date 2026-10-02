@@ -192,7 +192,7 @@ impl Lower<'_> {
                 let to = self.place(record, true)?;
                 let sender = self.operand(op, pos)?;
                 let plan = self.move_plan(&sender.side, self.kind_of(to), self.place_items[to as usize])?;
-                Some(FromMove { from: sender.operand, to, plan })
+                Some(FromMove { from: sender.operand, to, plan, check: self.move_check(sender.operand, to) })
             }
         };
         Ok(ReleasePlan { record: place, file, from, sort_return, name: self.sym(&record.name) })

@@ -2,7 +2,7 @@
 //! `Machine::compare` each pair of operands takes.
 
 use super::data::{Side, Value};
-use super::{Lower, LowerError, R, push};
+use super::{Lower, LowerError, R, push, unsupported};
 use crate::layout::Resolved;
 use numeric::Numproc;
 use rt::lir::{self, AbendId, ByteClass, Comparand, Compare, CondId, Mode, SignTest};
@@ -228,6 +228,10 @@ impl Lower<'_> {
         let how = hows.first().copied().unwrap_or(Compare::Alphanumeric);
         if hows.iter().all(|&h| h == how) {
             return Ok(Test::Cond(self.cond(lir::Cond::Name { subject, values, how })?));
+        }
+        // NUMCHECK tests the subject once, where each comparison below would read it again.
+        if self.c.options.numcheck.is_some() {
+            return unsupported("NUMCHECK with a condition-name whose values are of different categories", pos);
         }
         // Values of different categories: each compared as the walker compares it, in its order.
         let mut hows = hows.into_iter();

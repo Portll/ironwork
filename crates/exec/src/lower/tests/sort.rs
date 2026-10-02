@@ -1,5 +1,5 @@
 use super::*;
-use rt::lir::{Count, FromMove, RangeKind, SortIo, SortPlan};
+use rt::lir::{Count, FromMove, RangeKind, SenderCheck, SortIo, SortPlan};
 
 fn sort_program(collating: &str, data: &str, procedure: &str) -> String {
     let configuration = if collating.is_empty() {
@@ -100,7 +100,7 @@ fn procedures_are_sort_ranges_of_the_whole_program_and_release_and_return_name_t
     assert!(!p.blocks.iter().any(|b| matches!(b.end, Terminator::GoTo(_))));
     let [plain, from] = &p.services.releases[..] else { panic!("{:?}", p.services.releases) };
     assert_eq!((named(&p, plain.record), plain.file, plain.from), ("S-REC", Some(file(&p, "S-FILE")), None));
-    let Some(FromMove { from: LirOperand::Load(w), to, plan: MovePlan::Alnum { .. } }) = from.from else { panic!("{from:?}") };
+    let Some(FromMove { from: LirOperand::Load(w), to, plan: MovePlan::Alnum { .. }, check: SenderCheck::None }) = from.from else { panic!("{from:?}") };
     assert_eq!((named(&p, w), named(&p, to), named(&p, from.sort_return)), ("W", "S-REC", "SORT-RETURN"));
     let returned = &p.services.returns[0];
     let Some((into, MovePlan::Alnum { .. })) = returned.into else { panic!("{returned:?}") };

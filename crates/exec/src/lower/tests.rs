@@ -2,7 +2,7 @@ use super::*;
 use crate::testing::{check_lowering, encoded, line};
 use rt::lir::{
     ArithPlan, Base, CallArg, CallTarget, Chars, Collating, Comparand, Cond as LirCond, Const, DisplayItem, Image, IntExpr, LeService, MethodName, Mode,
-    MovePlan, NationalFrom, NumericFrom, Op, Operand as LirOperand, Place, Program, Receiver, SignTest, StorePlan, Terminator,
+    MovePlan, NationalFrom, NumericFrom, Op, Operand as LirOperand, Place, Program, Receiver, SenderCheck, SignTest, StorePlan, Terminator,
 };
 use rt::abend::Ending;
 use rt::module::codec::decode_all;
@@ -1137,7 +1137,7 @@ fn set_lowers_each_form_as_the_walker_runs_it() {
     let name = |q: u32| symbol(&p, p.places[q as usize].name);
     let b = &p.blocks[0].ops;
     let numeric = MovePlan::Numeric { from: NumericFrom::Value, store: StorePlan::Zoned { digits: 1, scale: 0, signed: false, sign: None } };
-    let Op::Move { from: LirOperand::Const(on), to, plan } = b[0] else { panic!("{:?}", b[0]) };
+    let Op::Move { from: LirOperand::Const(on), to, plan, check: SenderCheck::None } = b[0] else { panic!("{:?}", b[0]) };
     assert_eq!((name(to), plan, &p.consts[on as usize]), ("K-ON", numeric, &Const::Number(numeric::precision::Fixed::new(1, numeric::precision::Places::new(1, 0)))));
     let Op::Move { from: LirOperand::Const(off), to, .. } = b[1] else { panic!("{:?}", b[1]) };
     assert!(name(to) == "K-ON" && matches!(p.consts[off as usize], Const::Number(f) if f.magnitude.is_zero()));
@@ -1498,12 +1498,92 @@ fn a_record_length_item_is_left_to_the_interpreter() {
 }
 
 #[test]
-fn numcheck_and_parmcheck_programs_are_refused_until_the_lir_carries_their_checks() {
-    let refused = |options: &str| lower(&compiled(&program(options, "       01  A PIC 9.\n", &[line("ADD 1 TO A"), line("GOBACK.")].concat()))).unwrap_err();
-    assert!(matches!(refused("NUMCHECK(ABD)"), LowerError::Unsupported("NUMCHECK or ZONECHECK", _)));
-    assert!(matches!(refused("ZONECHECK(MSG)"), LowerError::Unsupported("NUMCHECK or ZONECHECK", _)));
-    assert!(matches!(refused("PARMCHECK"), LowerError::Unsupported("PARMCHECK", _)));
-    lowered(&program("INITCHECK", "       01  A PIC 9.\n", &[line("ADD 1 TO A"), line("GOBACK.")].concat()));
+fn a_move_s_sender_carries_the_test_numcheck_makes_of_it_as_the_walker_decides_it() {
+    let data = concat!(
+        "       01  Z PIC 999.\n       01  W PIC 999.\n       01  X PIC X(3).\n       01  A PIC X(3).\n       01  P PIC 999 COMP-3.\n",
+        "       01  K PIC 9.\n       01  T.\n           05 E PIC X OCCURS 3 INDEXED BY IX.\n",
+    );
+    let procedure = [
+        line("MOVE A TO W"),
+        line("MOVE Z TO X"),
+        line("MOVE Z TO W"),
+        line("MOVE Z TO P"),
+        line("MOVE A TO X"),
+        line("MOVE 5 TO W"),
+        line("SET IX TO Z"),
+        line("PERFORM VARYING K FROM Z BY 1 UNTIL K > 3"),
+        line("    CONTINUE"),
+        line("END-PERFORM"),
+        line("GOBACK."),
+    ]
+    .concat();
+    let checks = |options: &str| {
+        let p = lowered(&program(options, data, &procedure));
+        assert_eq!(ops(&p).filter(|op| matches!(op, Op::Set { .. })).count(), 2, "SET TO and VARYING FROM read as an operand reads");
+        ops(&p).filter_map(|op| if let Op::Move { check, .. } = op { Some(*check) } else { None }).collect::<Vec<_>>()
+    };
+    use SenderCheck::{Integer, Item, None as Untested};
+    assert_eq!(checks("NUMCHECK(ZON)"), [Integer, Item, Item, Item, Item, Untested]);
+    assert_eq!(checks("NUMCHECK(ZON(LAX))"), [Integer, Untested, Untested, Item, Item, Untested]);
+    assert_eq!(checks(""), [Untested; 6]);
+}
+
+#[test]
+fn write_from_carries_the_test_a_move_makes_of_its_sender() {
+    let source = |options: &str| {
+        with_files(
+            options,
+            &["    SELECT OUT-F ASSIGN TO OUTDD."],
+            &["FD  OUT-F.", "01  OUT-R PIC 999."],
+            "       01  Z PIC 999.\n       01  A PIC X(3).\n",
+            &["M.", "    OPEN OUTPUT OUT-F", "    WRITE OUT-R FROM A", "    WRITE OUT-R FROM Z", "    CLOSE OUT-F", "    GOBACK."],
+        )
+    };
+    let checks = |options: &str| {
+        let p = lowered(&source(options));
+        file_ops(&p).into_iter().filter_map(|(op, _)| if let lir::FileVerb::Write { from: Some(m), .. } = op.verb { Some(m.check) } else { None }).collect::<Vec<_>>()
+    };
+    assert_eq!(checks("NUMCHECK"), [SenderCheck::Integer, SenderCheck::Item]);
+    assert_eq!(checks("NUMCHECK(ZON(LAX))"), [SenderCheck::Integer, SenderCheck::None]);
+    assert_eq!(checks(""), [SenderCheck::None; 2]);
+}
+
+#[test]
+fn under_numcheck_a_condition_name_whose_values_compare_differently_is_refused() {
+    let mixed = |options: &str| program(options, "       01  N PIC 9.\n          88 NONE VALUE ZERO SPACE.\n", &[line("IF NONE DISPLAY 'NONE' END-IF"), line("GOBACK.")].concat());
+    let e = lower(&compiled(&mixed("NUMCHECK"))).unwrap_err();
+    assert!(matches!(e, LowerError::Unsupported("NUMCHECK with a condition-name whose values are of different categories", _)), "{e}");
+    lowered(&mixed(""));
+    let p = lowered(&program("NUMCHECK", "       01  N PIC 9.\n          88 LOW VALUE 1 THRU 3.\n", &[line("IF LOW DISPLAY 'LOW' END-IF"), line("GOBACK.")].concat()));
+    assert!(p.conds.iter().any(|c| matches!(c, LirCond::Name { .. })));
+}
+
+#[test]
+fn parmcheck_s_buffer_is_in_the_storage_the_lir_describes() {
+    let source = |options: &str| program(options, "       01  A PIC X(3).\n", &[line("CALL 'SUB' USING A"), line("GOBACK.")].concat());
+    let c = compiled(&source("PARMCHECK(ABD,50)"));
+    let p = lowered(&source("PARMCHECK(ABD,50)"));
+    assert_eq!(p.storage.parmcheck, c.layout.parmcheck);
+    let Some((offset, len)) = p.storage.parmcheck else { panic!("{:?}", p.storage) };
+    assert!(len == 50 && offset + len <= p.storage.size, "{offset} {len} {}", p.storage.size);
+    assert_eq!(lowered(&source("")).storage.parmcheck, None);
+}
+
+#[test]
+fn verify_refuses_a_sender_test_numcheck_cannot_make_and_a_parmcheck_buffer_without_parmcheck() {
+    let source = |options: &str| program(options, "       01  Z PIC 999.\n       01  W PIC 999.\n", &[line("MOVE Z TO W"), line("GOBACK.")].concat());
+    fn first_move(p: &mut Program) -> (&mut LirOperand, &mut SenderCheck) {
+        p.blocks.iter_mut().flat_map(|b| &mut b.ops).find_map(|op| if let Op::Move { from, check, .. } = op { Some((from, check)) } else { None }).unwrap()
+    }
+    let mut constant = lowered(&source("NUMCHECK"));
+    *first_move(&mut constant).0 = LirOperand::Const(0);
+    assert!(verify(&constant).unwrap_err().contains("a NUMCHECK test Item of a sender that is not a data item"));
+    let mut unchecked = lowered(&source(""));
+    *first_move(&mut unchecked).1 = SenderCheck::Integer;
+    assert!(verify(&unchecked).unwrap_err().contains("without NUMCHECK"));
+    let mut buffer = lowered(&source(""));
+    buffer.storage.parmcheck = Some((0, 1));
+    assert!(verify(&buffer).unwrap_err().contains("without PARMCHECK"));
 }
 
 #[test]

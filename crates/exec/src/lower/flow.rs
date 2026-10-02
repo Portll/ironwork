@@ -352,7 +352,8 @@ impl Lower<'_> {
                     let dest = self.place(r, true)?;
                     let sender = self.operand(from, pos)?;
                     let plan = self.move_plan(&sender.side, self.kind_of(dest), self.place_items[dest as usize])?;
-                    self.op(Op::Move { from: sender.operand, to: dest, plan }, pos)?;
+                    let check = self.move_check(sender.operand, dest);
+                    self.op(Op::Move { from: sender.operand, to: dest, plan, check }, pos)?;
                 }
             }
             Stmt::Compute { targets, expr, size_error, .. } => {

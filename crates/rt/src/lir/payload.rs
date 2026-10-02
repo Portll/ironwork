@@ -61,6 +61,18 @@ pub enum FloatFrom {
     Zero,
 }
 
+/// NUMCHECK's test of a MOVE's sending item, once the item is located and before it is read
+/// (`rt::store::numcheck_sender`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SenderCheck {
+    /// No test: no NUMCHECK, a sender that is not a data item, or a zoned sender ZON(LAX) exempts.
+    None,
+    /// The test `Operand::Load` makes of its item.
+    Item,
+    /// An alphanumeric or group sender moved to a numeric receiver: an unsigned integer's digits.
+    Integer,
+}
+
 /// INITIALIZE of one item: each elementary item the walk reaches, every occurrence listed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InitPlan {
@@ -336,6 +348,7 @@ codec_enum!(NumericFrom {
     DeEdit { edit, digits, scale } = 6,
 });
 codec_enum!(FloatFrom { Float = 0, Fixed = 1, Zero = 2 });
+codec_enum!(SenderCheck { None = 0, Item = 1, Integer = 2 });
 codec_struct!(InitPlan { fields });
 codec_struct!(InitField { offset, len, value, store });
 codec_struct!(DisplayPlan { items, no_advancing });

@@ -5,7 +5,7 @@
 use super::data::Value;
 use super::{Lower, R, unsupported};
 use crate::layout::Resolved;
-use rt::lir::{MovePlan, Op, StepPlan, Terminator, UpDown};
+use rt::lir::{MovePlan, Op, SenderCheck, StepPlan, Terminator, UpDown};
 use rt::storage::Kind;
 use syntax::Pos;
 use syntax::ast::{Figurative, SetStmt};
@@ -36,7 +36,7 @@ impl Lower<'_> {
                     };
                     let (from, side) = self.literal_const(value, pos)?;
                     let plan = self.move_plan(&side, self.kind_of(to), self.place_items[to as usize])?;
-                    self.op(Op::Move { from: rt::lir::Operand::Const(from), to, plan }, pos)?;
+                    self.op(Op::Move { from: rt::lir::Operand::Const(from), to, plan, check: SenderCheck::None }, pos)?;
                 }
             }
             SetStmt::To { targets, value } => {

@@ -5,7 +5,7 @@ use crate::abend::{Abend, AbendCode};
 use crate::codec;
 use crate::edit;
 use crate::fixed::{MAX_DIGITS, align, compare_fixed, fixed, places_of, pow10, scaled_down, scaled_up, zoned_digits};
-use crate::lir::{ByteClass, SignTest};
+use crate::lir::{ByteClass, SenderCheck, SignTest};
 use crate::picture::Sym;
 use crate::storage::{Kind, Loc, Val};
 use crate::unit::{Loader, RunUnit};
@@ -653,6 +653,41 @@ pub fn numcheck<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_
     }
     let _ = writeln!(unit.err, "ironwork: {pos}: {message}; the statement runs");
     Ok(())
+}
+
+/// What NUMCHECK tests of a MOVE's sending item of kind `sender` moved to a receiver of kind
+/// `receiver`: an alphanumeric or group sender to a numeric receiver as an unsigned integer's
+/// digits, any other as `numcheck` tests an item, and under ZON(LAX) a zoned sender to a zoned,
+/// alphanumeric or group receiver not at all (Programming Guide SC27-8714-03, pp. 388-391).
+pub fn move_check(options: &Options, sender: Kind, receiver: Kind) -> SenderCheck {
+    let Some(check) = options.numcheck else { return SenderCheck::None };
+    let lax = check.zon.is_some_and(|z| z.lax);
+    if lax && matches!(sender, Kind::Zoned { .. }) && matches!(receiver, Kind::Zoned { .. } | Kind::Alnum { .. } | Kind::Group) {
+        return SenderCheck::None;
+    }
+    let receiver_numeric = matches!(receiver, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Float(_) | Kind::NumericEdited { .. });
+    if receiver_numeric && matches!(sender, Kind::Alnum { .. } | Kind::Group) { SenderCheck::Integer } else { SenderCheck::Item }
+}
+
+/// NUMCHECK's test of a MOVE's sending item as `check` names it.
+pub fn numcheck_sender<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, loc: Loc, check: SenderCheck, program: &str, pos: Pos) -> R<()> {
+    match check {
+        SenderCheck::None => Ok(()),
+        SenderCheck::Item => numcheck(facts, unit, loc, false, program, pos),
+        SenderCheck::Integer => numcheck(facts, unit, loc, true, program, pos),
+    }
+}
+
+/// ZON(NOALPHNUM): NUMCHECK leaves an item compared with an alphanumeric operand untested
+/// (Programming Guide SC27-8714-03, pp. 389-390).
+pub fn noalphnum(options: &Options) -> bool {
+    options.numcheck.and_then(|c| c.zon).is_some_and(|z| !z.alphnum)
+}
+
+/// Whether an item of `kind` is a nonnumeric operand of a comparison: one that ZON(NOALPHNUM)
+/// spares the other operand's test against, and that a zoned integer is compared with by its bytes.
+pub fn nonnumeric(kind: Kind) -> bool {
+    matches!(kind, Kind::Group | Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::NumericEdited { .. })
 }
 
 /// NUMERIC, ALPHABETIC, ALPHABETIC-LOWER or ALPHABETIC-UPPER, tested on an item's bytes.

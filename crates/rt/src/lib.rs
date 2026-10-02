@@ -30,6 +30,7 @@ pub mod loc;
 pub mod lir;
 pub mod module;
 pub mod oo;
+pub mod parmcheck;
 pub mod picture;
 pub mod printer;
 pub mod report;

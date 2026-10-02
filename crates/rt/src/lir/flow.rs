@@ -3,7 +3,7 @@
 
 use super::{
     AbendId, ArithId, BlockId, CallId, CicsId, CondId, DisplayId, ExprId, FileOpId, InitId, InspectId, IntExpr,
-    InvokeId, MarkupId, MovePlan, Operand, ParaId, PlaceId, RangeId, ReleaseId, ReportOp, ReturnId, SearchAllId, SortId, SqlId,
+    InvokeId, MarkupId, MovePlan, Operand, ParaId, PlaceId, RangeId, ReleaseId, ReportOp, ReturnId, SearchAllId, SenderCheck, SortId, SqlId,
     StepPlan, StringId, SymId, TempId, UnstringId, UpDown,
 };
 use crate::abend::Ending;
@@ -13,7 +13,8 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Op {
-    Move { from: Operand, to: PlaceId, plan: MovePlan },
+    /// `to` located, then `from`, which takes NUMCHECK's `check` before it is read.
+    Move { from: Operand, to: PlaceId, plan: MovePlan, check: SenderCheck },
     /// SET TO, and PERFORM VARYING's FROM: as `Move`, but a data item sender is read as a number,
     /// its digits checked, where MOVE carries a zoned or packed sender's invalid digits (C260).
     Set { from: Operand, to: PlaceId, plan: MovePlan },
@@ -205,7 +206,7 @@ pub struct Returns {
 }
 
 codec_enum!(Op {
-    Move { from, to, plan } = 0,
+    Move { from, to, plan, check } = 0,
     Initialize { target, plan } = 1,
     Arith(id) = 2,
     SetAddress { records, address } = 3,

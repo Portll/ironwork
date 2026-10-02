@@ -726,18 +726,12 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         rt::store::numcheck(&facts, self.unit, loc, as_integer, &self.program.id, pos)
     }
 
-    /// A MOVE's sender: NUMCHECK tests a zoned or packed sender, and an alphanumeric one moved to a
-    /// numeric receiver as an integer; under ZON(LAX) a zoned sender moved to a zoned or
-    /// alphanumeric receiver is not tested (Programming Guide SC27-8714-03, pp. 388-391).
+    /// A MOVE's sender, tested as `rt::store::move_check` says.
     fn move_source(&mut self, from: &Operand, dest: Loc, pos: Pos) -> R<(Val, Option<Loc>)> {
         let Operand::Ref(r) = from else { return self.operand_with_loc(from, pos) };
         let loc = self.locate(r)?;
-        let receiver_numeric = matches!(dest.kind, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Float(_) | Kind::NumericEdited { .. });
-        let lax = self.options.numcheck.and_then(|c| c.zon).is_some_and(|z| z.lax);
-        let exempt = lax && matches!(loc.kind, Kind::Zoned { .. }) && matches!(dest.kind, Kind::Zoned { .. } | Kind::Alnum { .. } | Kind::Group);
-        if !exempt {
-            self.numcheck(loc, receiver_numeric && matches!(loc.kind, Kind::Alnum { .. } | Kind::Group), r.pos)?;
-        }
+        let check = store::move_check(&self.options, loc.kind, dest.kind);
+        store::numcheck_sender(&self.facts(), self.unit, loc, check, &self.program.id, r.pos)?;
         Ok((store::move_sender(&self.facts(), &self.unit.mem, loc, dest, r.pos)?, Some(loc)))
     }
 
@@ -1095,7 +1089,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         if ending? == Ending::StopRun {
             return Ok(Flow::End(Ending::StopRun));
         }
-        self.parmcheck_test(c, &addresses, |m| m.unit.programs[index].name.clone())?;
+        self.parmcheck_test(c, &addresses, |unit| unit.programs[index].name.clone())?;
         if let (Some(target), Some(val)) = (&c.returning, returned) {
             let dest = self.locate(target)?;
             self.assign(dest, val, None, pos)?;
@@ -1594,7 +1588,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Expr::Operand(Operand::Literal(l)) => {
                 matches!(l, Literal::Alnum(_) | Literal::Hex(_) | Literal::All(_)) || matches!(l, Literal::Figurative(f) if !matches!(f, Figurative::Zero | Figurative::Null))
             }
-            Expr::Operand(Operand::Ref(o)) => matches!(self.locate(o)?.kind, Kind::Group | Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::NumericEdited { .. }),
+            Expr::Operand(Operand::Ref(o)) => store::nonnumeric(self.locate(o)?.kind),
             _ => false,
         })
     }
@@ -1602,7 +1596,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     /// Whether NUMCHECK tests a zoned item compared with `other`: always, but under ZON(NOALPHNUM)
     /// not against an alphanumeric operand (Programming Guide SC27-8714-03, pp. 389-390).
     fn checks_against(&mut self, other: &Expr) -> R<bool> {
-        Ok(self.options.numcheck.and_then(|c| c.zon).is_none_or(|z| z.alphnum) || !self.nonnumeric(other)?)
+        Ok(!store::noalphnum(&self.options) || !self.nonnumeric(other)?)
     }
 
     /// A comparand, NUMCHECK testing an item unless ZON(NOALPHNUM) exempts it against `other`.

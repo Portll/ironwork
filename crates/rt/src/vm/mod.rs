@@ -272,6 +272,12 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
         if !storage.local_image.is_empty() && (storage.init_abend.is_some() || !storage.init_reports.is_empty()) {
             return Err(not_yet("VALUE initialization that reports or abends in a program with LOCAL-STORAGE"));
         }
+        if p.options.options.numcheck.is_some() {
+            return Err(not_yet("NUMCHECK"));
+        }
+        if p.options.options.parmcheck.is_some() {
+            return Err(not_yet("PARMCHECK"));
+        }
         let (base, fresh) = unit.activate(me, p.initial);
         let main_frame = Frame { id: 0, kind: FrameKind::Main, displaced: None, segment: 0, depth: unit.depth as u32, temps: Vec::new() };
         let mut vm = Self {

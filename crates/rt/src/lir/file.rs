@@ -2,7 +2,7 @@
 //! statements stay `rt::files` calls; these name the places, plans and procedures the walker finds
 //! by name on each execution.
 
-use super::{IntExpr, MovePlan, Operand, PlaceId, RangeId, StorePlan, SymId};
+use super::{IntExpr, MovePlan, Operand, PlaceId, RangeId, SenderCheck, StorePlan, SymId};
 use crate::files::Format;
 use crate::vocab::{Closing, OpenMode};
 use crate::{codec_enum, codec_struct};
@@ -143,12 +143,14 @@ pub enum FileVerb {
     Start { rel: StartRel, key: StartKey },
 }
 
-/// WRITE or REWRITE FROM: `to` is the record as a receiving item.
+/// WRITE, REWRITE or RELEASE FROM: `to` is the record as a receiving item, and `check` NUMCHECK's
+/// test of `from` before it is read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FromMove {
     pub from: Operand,
     pub to: PlaceId,
     pub plan: MovePlan,
+    pub check: SenderCheck,
 }
 
 /// WRITE's ADVANCING phrase. A count below zero moves as zero; PAGE is channel 1, or the next
@@ -212,7 +214,7 @@ codec_enum!(FileVerb {
     Start { rel, key } = 6,
     CloseWith(closing) = 7,
 });
-codec_struct!(FromMove { from, to, plan });
+codec_struct!(FromMove { from, to, plan, check });
 codec_enum!(Advance { Lines { before, count } = 0, Page { before } = 1, Mnemonic { before, space } = 2 });
 codec_enum!(Spacing { Lines(n) = 0, Channel(c) = 1, PageMode = 2 });
 codec_enum!(StartRel { Equal = 0, Greater = 1, NotLess = 2 });

@@ -5,7 +5,7 @@
 use rt::cics::Handles;
 use rt::lir::{
     Advance, Argument, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Convert, ConvertTable, Count, DisplayItem, Inspected, Expr, FileVerb, Flag, Func, HostPlace, IntExpr,
-    JsonValue, Marker, Markup, MethodName, MovePlan, Named, Op, Operand, ParseValue, Place, PlaceId, Program, RangeKind, Receiver, Replacement, ReportOp, SetTo, SortIo, SortPlan,
+    JsonValue, Marker, Markup, MethodName, MovePlan, Named, Op, Operand, ParseValue, Place, PlaceId, Program, RangeKind, Receiver, Replacement, ReportOp, SenderCheck, SetTo, SortIo, SortPlan,
     SqlStatement, StartKey, StorePlan, SymId, Terminator, UpDown, XmlValue,
 };
 use rt::report::{FieldContent, GroupKind, Origin};
@@ -86,6 +86,16 @@ fn verify_program(p: &Program) -> Result<(), String> {
         Comparand::Expr { expr: e, prepass, .. } => expr(*e).and_then(|()| places(prepass)),
     };
     let ssrange = p.options.ssrange;
+    let sender = |from: &Operand, check: SenderCheck| match (from, check) {
+        (_, SenderCheck::None) => operand(from),
+        (Operand::Load(q), _) if p.options.options.numcheck.is_some() => place(*q),
+        _ => Err(format!("a NUMCHECK test {check:?} of a sender that is not a data item, or without NUMCHECK")),
+    };
+    if let Some((offset, len)) = p.storage.parmcheck
+        && (p.options.options.parmcheck.is_none() || offset.checked_add(len).is_none_or(|end| end > p.storage.size))
+    {
+        return Err(format!("a PARMCHECK buffer at {offset} for {len} in a slab of {}, or without PARMCHECK", p.storage.size));
+    }
 
     for (k, q) in p.places.iter().enumerate() {
         let Place { subscripts, odo, refmod, at, .. } = q;
@@ -240,14 +250,14 @@ fn verify_program(p: &Program) -> Result<(), String> {
             }
             FileVerb::Write { record, from, advancing } => {
                 place(*record)?;
-                from.map_or(Ok(()), |m| operand(&m.from).and_then(|()| place(m.to)))?;
+                from.map_or(Ok(()), |m| sender(&m.from, m.check).and_then(|()| place(m.to)))?;
                 if let Some(Advance::Lines { count, .. }) = advancing {
                     int(count)?;
                 }
             }
             FileVerb::Rewrite { record, from } => {
                 place(*record)?;
-                from.map_or(Ok(()), |m| operand(&m.from).and_then(|()| place(m.to)))?;
+                from.map_or(Ok(()), |m| sender(&m.from, m.check).and_then(|()| place(m.to)))?;
             }
             FileVerb::Start { key, .. } => match key {
                 StartKey::Named { key, .. } if usize::from(*key) >= keys => return Err(format!("key {key} of a file with {keys}")),
@@ -515,7 +525,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
     for r in &p.services.releases {
         place(r.record)?;
         r.file.map_or(Ok(()), files)?;
-        r.from.as_ref().map_or(Ok(()), |m| operand(&m.from).and_then(|()| place(m.to)).and_then(|()| moved(&m.plan)))?;
+        r.from.as_ref().map_or(Ok(()), |m| sender(&m.from, m.check).and_then(|()| place(m.to)).and_then(|()| moved(&m.plan)))?;
         place(r.sort_return)?;
         symbol(r.name)?;
     }
@@ -636,7 +646,11 @@ fn verify_program(p: &Program) -> Result<(), String> {
         }
         for op in &blk.ops {
             match op {
-                Op::Move { from, to, .. } | Op::Set { from, to, .. } => {
+                Op::Move { from, to, check, .. } => {
+                    sender(from, *check)?;
+                    place(*to)?;
+                }
+                Op::Set { from, to, .. } => {
                     operand(from)?;
                     place(*to)?;
                 }

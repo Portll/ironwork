@@ -34,7 +34,7 @@ pub use crate::cics::CicsCommand;
 pub use crate::report::{ReportOp, Writer as ReportWriter};
 pub use payload::{
     Argument, DisplayItem, DisplayPlan, FloatFrom, Func, FunctionPlan, Image, InitField, InitPlan,
-    InvokePlan, MethodName, MovePlan, NationalFrom, NumericFrom, Receiver, SearchAllPlan, SearchKey, TrimSide,
+    InvokePlan, MethodName, MovePlan, NationalFrom, NumericFrom, Receiver, SearchAllPlan, SearchKey, SenderCheck, TrimSide,
 };
 pub use place::{Base, Odo, Place, RefMod, Subscript};
 pub use sort::{FileSort, ReleasePlan, ReturnPlan, SortIo, SortKey, SortKeys, SortPlan, TableSort};
@@ -167,6 +167,8 @@ pub struct Storage {
     pub returning: Option<u16>,
     /// Offset and size of each file's record area in the slab.
     pub file_areas: Vec<(u32, u32)>,
+    /// PARMCHECK's buffer in the slab: offset and size.
+    pub parmcheck: Option<(u32, u32)>,
 }
 
 /// A data item for `dump` and a debugger; no executor reads it.
@@ -265,7 +267,7 @@ codec_struct!(Edit { syms, currency });
 codec_struct!(CompileTime { seconds, hundredths, source } check compile_time_valid);
 codec_enum!(TimeSource { SourceDateEpoch = 0, Clock = 1 });
 codec_struct!(Storage {
-    size, image, local_image, init_reports, init_abend, linkage, using, returning, file_areas,
+    size, image, local_image, init_reports, init_abend, linkage, using, returning, file_areas, parmcheck,
 } check storage_valid);
 codec_struct!(Item {
     name, level, parent, offset, size, occurs, dims, kind, local, linkage, redefines, depending_on, keys, at,
@@ -289,9 +291,11 @@ fn compile_time_valid(t: &CompileTime) -> Result<(), String> {
 }
 
 fn storage_valid(storage: &Storage) -> Result<(), String> {
-    if u32::try_from(storage.image.len()) == Ok(storage.size) {
-        Ok(())
-    } else {
-        Err(format!("an image of {} bytes for a slab of {}", storage.image.len(), storage.size))
+    if u32::try_from(storage.image.len()) != Ok(storage.size) {
+        return Err(format!("an image of {} bytes for a slab of {}", storage.image.len(), storage.size));
+    }
+    match storage.parmcheck {
+        Some((offset, len)) if offset.checked_add(len).is_none_or(|end| end > storage.size) => Err(format!("a PARMCHECK buffer at {offset} for {len} in a slab of {}", storage.size)),
+        _ => Ok(()),
     }
 }

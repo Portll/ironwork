@@ -6,7 +6,7 @@ use crate::abend::Abend;
 use crate::accept;
 use crate::display;
 use crate::host::{Host, Values};
-use crate::lir::{DisplayItem, InitPlan, Inspected, MovePlan, NumericFrom, Op, Operand, PlaceId, SearchAllPlan, Step, StorePlan};
+use crate::lir::{DisplayItem, InitPlan, Inspected, MovePlan, NumericFrom, Op, Operand, PlaceId, SearchAllPlan, SenderCheck, Step, StorePlan};
 use crate::set;
 use crate::storage::{Kind, Loc, Val};
 use crate::store;
@@ -60,7 +60,8 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let p = self.p;
         let pos = self.pos(at);
         match op {
-            Op::Move { from, to, plan } | Op::Set { from, to, plan } => {
+            Op::Move { check, .. } if *check != SenderCheck::None => return Err(not_yet("NUMCHECK")),
+            Op::Move { from, to, plan, .. } | Op::Set { from, to, plan } => {
                 let dest = self.loc(*to)?;
                 let (val, src) = match (op, from) {
                     (Op::Move { .. }, Operand::Load(p)) => {
