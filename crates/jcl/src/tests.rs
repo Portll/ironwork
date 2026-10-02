@@ -148,10 +148,42 @@ fn what_is_not_modelled_is_refused_by_name() {
 }
 
 #[test]
+fn what_the_system_supplies_is_read_as_it_supplies_it() {
+    let j = parse(concat!(
+        "//NIGHTLY JOB (ACCT),'A PERSON',NOTIFY=&SYSUID,CLASS=A\n",
+        "//JOBLIB  DD DSN=PROD.LOADLIB,DISP=SHR\n",
+        "//        DD DSN=COMMON.LOADLIB,DISP=SHR\n",
+        "//S1      EXEC PGM=A\n",
+        "//WORK    DD UNIT=SYSDA,SPACE=(CYL,(1,1))\n",
+        "//KEEP    DD UNIT=SYSDA,DISP=(NEW,PASS)\n",
+        "12345\n",
+        "//S2      EXEC PGM=B\n",
+        "//IN      DD DSN=*.S1.KEEP,DISP=(OLD,DELETE)\n",
+    ))
+    .unwrap();
+    assert_eq!(j.joblib.as_ref().map(|d| d.parts.iter().map(|p| p.source.clone()).collect::<Vec<_>>()), Some(vec![Source::Dataset { dsn: "PROD.LOADLIB".into(), member: None }, Source::Dataset { dsn: "COMMON.LOADLIB".into(), member: None }]));
+    let s = steps(&j);
+    let temp = |n: &str| Source::Temporary { name: n.into(), member: None };
+    assert_eq!(s[0].dds.iter().map(|d| (d.name.as_str(), d.parts[0].source.clone())).collect::<Vec<_>>(), [("WORK", temp("SYS.00001")), ("KEEP", temp("SYS.00002")), ("SYSIN", Source::InStream(vec!["12345".into()]))]);
+    assert_eq!(s[1].dds[0].parts[0].source, temp("SYS.00002"));
+    let dsn = |job: &str, submitter: Option<&str>| {
+        let j = parse_with(&format!("{job}\n//S1 EXEC PGM=A\n//IN DD DSN=&SYSUID..DATA,DISP=SHR\n"), &|_, _| Ok(None), submitter)?;
+        Ok::<_, Error>(steps(&j)[0].dds[0].parts[0].source.clone())
+    };
+    let data = |hlq: &str| Source::Dataset { dsn: format!("{hlq}.DATA"), member: None };
+    assert_eq!(dsn("//J JOB 1,USER=PAYROLL", Some("ROGERS")), Ok(data("PAYROLL")));
+    assert_eq!(dsn("//J JOB 1", Some("ROGERS")), Ok(data("ROGERS")));
+    assert!(dsn("//J JOB 1", None).unwrap_err().message.contains("&SYSUID is the user ID the job runs under"));
+}
+
+#[test]
 fn malformed_jobs_are_refused() {
     assert!(parse("//S1 EXEC PGM=A\n").unwrap_err().message.contains("not a JOB statement"));
     assert!(refused("//IN DD DSN=A.B,DISP=SHR\n").contains("follows no EXEC"));
-    assert!(refused("//S1 EXEC PGM=A\nDATA\n").contains("data lines outside"));
+    assert!(refused("//S1 EXEC PGM=A\n//IN DD\n").contains("names no data set"));
+    assert!(refused("//    DD DSN=A.LOADLIB,DISP=SHR\n//S1 EXEC PGM=A\n").contains("follows no EXEC"));
+    assert!(refused("//JOBLIB DD DSN=A.LOADLIB,DISP=SHR\n// SET X=1\n//    DD DSN=B.LOADLIB,DISP=SHR\n//S1 EXEC PGM=A\n").contains("follows no EXEC"));
+    assert!(parse("//J JOB 1,COND=(&RC,LT)\n//S1 EXEC PGM=A\n").unwrap_err().message.contains("symbolic parameter in the JOB statement's COND"));
     assert!(refused("//S1 EXEC PGM=A\n//IN DD DSN=A,DISP=SHR\n//IN DD DSN=B,DISP=SHR\n").contains("appears twice"));
     assert!(refused("// IF RC = 0 THEN\n//S1 EXEC PGM=A\n").contains("IF without ENDIF"));
     assert!(refused("//S1 EXEC PGM=A\n// ENDIF\n").contains("ENDIF without IF"));
@@ -225,14 +257,14 @@ fn cataloged_procedures_and_include_members_come_from_the_libraries() {
         ("LOOP", "//LOOP PROC\n//S EXEC LOOP\n"),
     ];
     let text = "//J JOB 1\n//LIBS JCLLIB ORDER=MY.PROCLIB\n//S1 EXEC OUTER\n//S2 EXEC PGM=C\n// INCLUDE MEMBER=COMMON\n";
-    let j = parse_with(text, &library(members)).unwrap();
+    let j = parse_with(text, &library(members), None).unwrap();
     let s = steps(&j);
     assert_eq!(s.iter().map(|s| s.shown()).collect::<Vec<_>>(), ["S1.FIRST", "S1.DEEP", "S2"]);
     assert_eq!(s[1].parm.as_deref(), Some("1"));
     assert_eq!(s[2].dds[0].name, "LOG");
-    let e = parse_with("//J JOB 1\n//LIBS JCLLIB ORDER=MY.PROCLIB\n//S1 EXEC LOOP\n", &library(members)).unwrap_err();
+    let e = parse_with("//J JOB 1\n//LIBS JCLLIB ORDER=MY.PROCLIB\n//S1 EXEC LOOP\n", &library(members), None).unwrap_err();
     assert!(e.message.contains("nest more than 15 deep"), "{e}");
-    let e = parse_with("//J JOB 1\n//LIBS JCLLIB ORDER=MY.PROCLIB\n//S1 EXEC OUTER,NOSUCH=1\n", &library(members)).unwrap_err();
+    let e = parse_with("//J JOB 1\n//LIBS JCLLIB ORDER=MY.PROCLIB\n//S1 EXEC OUTER,NOSUCH=1\n", &library(members), None).unwrap_err();
     assert_eq!(e.line, 3);
 }
 

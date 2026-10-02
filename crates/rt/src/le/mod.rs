@@ -3,6 +3,7 @@
 //! services. `services` reads and writes a CALL's arguments and runs each service. What the manual
 //! leaves open is `numeric::assumptions` L1 to L18.
 
+pub mod parm;
 mod services;
 
 pub use services::{LeHost, call};

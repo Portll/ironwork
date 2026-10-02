@@ -123,22 +123,33 @@ causes is kept once by code and place, with the smallest input found that still 
 journal of a run on that input and its coverage; `COBOLWORK_ABENDS=fuzz-run cobolwork scan --only
 abend .` reports them as findings ([docs/evidence.md](docs/evidence.md) §5).
 
-    cargo run -p ironwork -- job payroll.jcl --datasets data[:text] [--proclib procs]... [-L proglib]... [-I copylib]... [--clock 2026-09-27T12:00:00] [--sql-replay calls.txt]
+    cargo run -p ironwork -- job payroll.jcl --datasets data[:text] [--proclib procs]... [--user ID] [-L proglib]... [-I copylib]... [--clock 2026-09-27T12:00:00] [--sql-replay calls.txt]
 
 `ironwork job` reads one job's JCL and runs its steps in order. Each EXEC PGM= runs a COBOL program
 found in a `-L` library as PGM.cbl or PGM.cob, IEFBR14, IEBGENER without control statements (SYSUT1
 copied to SYSUT2 as it stands, or return code 12 without either DD), IDCAMS with DELETE, REPRO,
 DEFINE CLUSTER and GDG, SET, IF and DO, whose IDC messages go to SYSPRINT, or SORT (and ICEMAN):
 SORT, MERGE and COPY with FIELDS in DFSORT's CH, AC, ZD, CLO, CSL, CST, PD, BI and FI formats and
-SUM FIELDS=NONE, over `rt::sort`. A DD's RECFM and LRECL (alone or in DCB) give its records; a text
-data set's lines are sorted as EBCDIC, so CH keys collate as on z/OS. Data sets live in the
+SUM FIELDS=NONE, over `rt::sort`; INCLUDE and OMIT, comparing CH, BI, FI, ZD and PD fields with
+each other or with C'...', X'...' and decimal constants, joined by AND and OR; INREC and OUTREC
+with BUILD, FIELDS or OVERLAY of columns, fields, blanks, binary zeros and C'...' and X'...'
+strings; and OUTFIL groups with FNAMES or FILES, INCLUDE, OMIT or SAVE, and the same reformatting.
+A DD's RECFM and LRECL (alone or in DCB) give its records; a text data set's lines are sorted as
+EBCDIC, so CH keys collate as on z/OS. A COBOL program gets the step's PARM as Language Environment
+passes it: its first PROCEDURE DIVISION USING item addresses a halfword length and the program
+arguments, what precedes the last slash when runtime options follow it (CBLOPTS(ON); assumptions
+C250 and C251), and a step with no PARM passes a length of zero. JOBLIB and STEPLIB are not
+allocated, since programs come from `-L`. Data sets live in the
 `--datasets` directory: DSN=A.B is the file A.B there and DSN=A.B(M) the file M in the directory
 A.B, a partitioned data set being a directory of members. They hold z/OS records, fixed or variable
 behind 4-byte RDWs, or UTF-8 lines with `:text`; in-stream data and SYSOUT are always lines. DD
-DUMMY and DSN=NULLFILE are an empty input, an unnamed DD concatenates to the one before it, and
-&&NAME is a temporary data set that lasts until the job ends. Procedures are expanded: in-stream
-ones, and cataloged ones found in the data sets JCLLIB ORDER names and then each `--proclib`
-directory, with symbolic parameters (the EXEC's over the PROC's defaults over SET), INCLUDE members,
+DUMMY and DSN=NULLFILE are an empty input, an unnamed DD concatenates to the one before it,
+&&NAME is a temporary data set that lasts until the job ends, and a DD that names no data set but
+asks for one (UNIT=, SPACE=) gets a new temporary one of its own. Data with no DD before it is
+SYSIN, as z/OS supplies a `//SYSIN DD *` for it, and &SYSUID is the JOB statement's USER= or the
+`--user` that submitted the job. Procedures are expanded: in-stream ones, and cataloged ones found
+in the data sets JCLLIB ORDER names and then each `--proclib` directory, with symbolic parameters
+(the EXEC's over the PROC's defaults over SET), INCLUDE members,
 PARM and COND overrides and DD overrides; a step in a procedure is stepname.procstepname.
 DSN=*.stepname.ddname names an earlier DD's data set. A generation data group's base is the file
 BASE that DEFINE GDG writes and generation n the file BASE.GnnnnV00: (0), (-1) and (+1) count from
@@ -146,10 +157,10 @@ the generations the job began with, DSN=BASE reads them all newest first, and a 
 rolls the oldest off past LIMIT, or all but itself under EMPTY.
 
 DISP=NEW creates the data set when the step starts; OLD and SHR need it to exist; MOD writes after
-what it holds, or creates it as NEW would where it is not there; and a data set
-that must exist and does not, or that DISP=NEW names and that exists, is a JCL error that ends the
-job. As a step ends its normal disposition applies, or its abnormal one after an abend: DELETE
-removes the data set, KEEP, CATLG and UNCATLG keep it, and PASS keeps it for later steps, a data
+what it holds, a generation's included, or creates it as NEW would where it is not there; and a
+data set that must exist and does not, or that DISP=NEW names and that exists, is a JCL error that
+ends the job. As a step ends its normal disposition applies, or its abnormal one after an abend:
+DELETE removes the data set, KEEP, CATLG and UNCATLG keep it, and PASS keeps it for later steps, a data
 set the job created and only passed being deleted when the job ends. With no disposition stated, a
 data set the step created is deleted and one that existed is kept. COND on the JOB statement ends
 the job when a test is true, COND on EXEC bypasses the step, and IF/THEN/ELSE/ENDIF nest to 15
@@ -157,8 +168,9 @@ levels over RC, stepname.RC, ABEND, ABENDCC=, stepname.ABEND and stepname.RUN. A
 runs only under COND=EVEN or ONLY, or in the branch of an IF that tests an abend or whether a step
 ran. A program no library holds abends S806. A step's DISPLAY output and SYSOUT DDs go to standard
 output, and a line per step to standard error: the step, the program and RC=nnnn, ABEND and its
-code, BYPASSED and why, or JCL ERROR. PARM, DFSORT's INCLUDE, OMIT, INREC, OUTREC and OUTFIL, and
-IBM's other programs are refused by name before any step runs. Exit status: the highest
+code, BYPASSED and why, or JCL ERROR. IBM's other programs, PARM to a utility, and DFSORT's
+IFTHEN, field conversion and editing, and the statements and parameters not named here are refused
+by name before any step runs. Exit status: the highest
 return code; 16 when a step abended or a JCL error ended the job; 2 for a job refused.
 `--expected DATASETS=DIR` runs the job on a copy of the data sets and compares what it leaves with
 production's, as [docs/evidence.md](docs/evidence.md) §4 describes.

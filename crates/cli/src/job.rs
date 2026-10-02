@@ -29,6 +29,8 @@ pub struct Request {
     pub program_dirs: Vec<PathBuf>,
     /// Procedure libraries searched after the job's JCLLIB, each a directory of members.
     pub proclibs: Vec<PathBuf>,
+    /// The user ID that submitted the job.
+    pub user: Option<String>,
     pub flags: Vec<String>,
     pub clock: exec::unit::Clock,
     pub replay: Option<PathBuf>,
@@ -81,6 +83,12 @@ fn program_of(pgm: &str, dirs: &[PathBuf]) -> Program {
     Program::Missing
 }
 
+/// The step's DDs a run allocates: STEPLIB, like JOBLIB, names load libraries, and programs come
+/// from the program libraries instead.
+fn allocated_dds(step: &Step) -> impl Iterator<Item = &Dd> {
+    step.dds.iter().filter(|d| d.name != "STEPLIB")
+}
+
 fn is_in_stream(dd: &Dd) -> bool {
     dd.parts.iter().any(|p| matches!(p.source, Source::InStream(_)))
 }
@@ -95,15 +103,10 @@ fn refusals(job: &Job, req: &Request) -> Vec<String> {
             out.push(at(format!("PGM={} is not supported yet", step.pgm)));
         }
         let program = program_of(&step.pgm, &req.program_dirs);
-        if step.parm.is_some() && !matches!(program, Program::Iefbr14) {
+        if step.parm.is_some() && !matches!(program, Program::Iefbr14 | Program::Cobol(_) | Program::Missing) {
             out.push(at(format!("PARM for PGM={} is not supported yet", step.pgm)));
         }
-        for dd in &step.dds {
-            for part in &dd.parts {
-                if part.disp.status == Status::Mod && (dd.parts.len() > 1 || matches!(part.source, Source::Generation { .. })) {
-                    out.push(format!("line {}: DISP=MOD on a generation or in a concatenation is not supported yet", part.line));
-                }
-            }
+        for dd in allocated_dds(step) {
             let text_parts = dd.parts.iter().filter(|p| matches!(p.source, Source::InStream(_))).count();
             if dd.parts.len() > 1 && text_parts > 0 && text_parts < dd.parts.len() && !req.text {
                 out.push(at(format!("DD {} concatenates in-stream data with data sets of z/OS records", dd.name)));
@@ -260,16 +263,18 @@ impl Runner<'_> {
                 Source::Generation { base, relative } => {
                     let shown = format!("{base}({relative:+})").replace("(+0)", "(0)");
                     let path = self.generation_path(base, *relative).map_err(|e| format!("DD {}: {shown}: {e}", dd.name))?;
-                    let created = part.disp.status == Status::New;
+                    let fresh = !path.exists();
+                    if part.disp.status == Status::New && !fresh {
+                        return Err(format!("DD {}: {shown} already exists, and DISP=NEW creates it", dd.name));
+                    }
+                    let created = part.disp.status == Status::New || (part.disp.status == Status::Mod && fresh);
                     if created {
-                        if path.exists() {
-                            return Err(format!("DD {}: {shown} already exists, and DISP=NEW creates it", dd.name));
-                        }
                         fs::write(&path, b"").map_err(|e| format!("DD {}: {e}", dd.name))?;
-                    } else if !path.is_file() {
+                    } else if fresh {
                         return Err(format!("DD {}: {shown} was not found", dd.name));
                     }
-                    disposals.push(Disposal { path: path.clone(), disp: part.disp, created, temporary: false, group: created.then(|| base.clone()) });
+                    let disp = if created { jcl::Disp { status: Status::New, ..part.disp } } else { part.disp };
+                    disposals.push(Disposal { path: path.clone(), disp, created, temporary: false, group: created.then(|| base.clone()) });
                     paths.push(path);
                 }
                 Source::Refer(path) => return Err(format!("DD {}: *.{path} was not resolved", dd.name)),
@@ -413,10 +418,10 @@ impl Runner<'_> {
     }
 }
 
-/// Runs a COBOL program with the step's DDs: its return code, or the abend's code and message.
-/// Each program CALL loads from a library goes into `called`.
+/// Runs a COBOL program with the step's DDs and PARM: its return code, or the abend's code and
+/// message. Each program CALL loads from a library goes into `called`.
 #[allow(clippy::too_many_arguments)]
-fn run_cobol(path: &Path, req: &Request, dds: &[Allocated], database: Option<&mut (dyn exec::sql::Database + '_)>, out: &mut dyn Write, called: &mut BTreeSet<PathBuf>, evidence: Option<&Rc<RefCell<crate::evidence::Run>>>, roots: &[PathBuf]) -> Result<i16, (AbendCode, String)> {
+fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database: Option<&mut (dyn exec::sql::Database + '_)>, out: &mut dyn Write, called: &mut BTreeSet<PathBuf>, evidence: Option<&Rc<RefCell<crate::evidence::Run>>>, roots: &[PathBuf]) -> Result<i16, (AbendCode, String)> {
     let ironwork = |m: String| (AbendCode::Ironwork, m);
     let text = fs::read(path).map(|b| syntax::copy::decode(&b)).map_err(|e| ironwork(format!("{}: {e}", path.display())))?;
     let own = path.parent().map(Path::to_path_buf).unwrap_or_default();
@@ -444,7 +449,7 @@ fn run_cobol(path: &Path, req: &Request, dds: &[Allocated], database: Option<&mu
             run.borrow_mut().observe(event);
         }
     });
-    let ended = compiled.execute_observed(library, dds, Some(sysin), req.clock, database, out, &mut err, Some(observer));
+    let ended = compiled.execute_main(library, dds, Some(sysin), req.clock, database, out, &mut err, Some(observer), parm);
     called.extend(loads.into_inner());
     match ended {
         Ok((_, rc)) => Ok(rc),
@@ -673,10 +678,11 @@ fn write_records(dd: &Allocated, records: &[Vec<u8>], variable: bool, page: &Cod
 }
 
 /// DFSORT over the step's DDs: SORT, MERGE or COPY from SORTIN (or SORTIN01-99 for MERGE) to
-/// SORTOUT, with SUM FIELDS=NONE keeping the first of records with equal keys. Text records are
-/// EBCDIC through the code page while they are sorted, so CH keys collate as on z/OS, and are
-/// padded with blanks to the longest so a key past a line's end reads blanks. Return code 0, or 16
-/// with the reason on SYSOUT.
+/// SORTOUT or the OUTFIL groups' DDs, in DFSORT's order: INCLUDE or OMIT, INREC, the sort, SUM
+/// FIELDS=NONE keeping the first of records with equal keys, OUTREC, then each OUTFIL group's
+/// selection and reformatting. Text records are EBCDIC through the code page while they are
+/// sorted, so CH keys collate as on z/OS, and are padded with blanks to the longest so a key past
+/// a line's end reads blanks. Return code 0, or 16 with the reason on SYSOUT.
 fn sort_step(dds: &[Allocated]) -> i16 {
     let dd = |n: &str| dds.iter().find(|d| d.name == n);
     let fail = |why: String| {
@@ -696,7 +702,22 @@ fn sort_step(dds: &[Allocated]) -> i16 {
     if inputs.is_empty() {
         return fail(format!("no {} DD", if control.kind == jcl::sort::Kind::Merge { "SORTIN01" } else { "SORTIN" }));
     }
-    let Some(out) = dd("SORTOUT") else { return fail("no SORTOUT DD".into()) };
+    let groups: Vec<jcl::sort::Outfil> = if control.outfil.is_empty() {
+        vec![jcl::sort::Outfil { names: vec!["SORTOUT".into()], selection: None, save: false, edit: None }]
+    } else {
+        control.outfil.clone()
+    };
+    let mut targets: Vec<Vec<&Allocated>> = Vec::new();
+    for group in &groups {
+        let mut these = Vec::new();
+        for name in &group.names {
+            match dd(name) {
+                Some(d) => these.push(d),
+                None => return fail(format!("no {name} DD")),
+            }
+        }
+        targets.push(these);
+    }
     let keys = rt::sort::Keys::new(
         control
             .fields
@@ -738,6 +759,23 @@ fn sort_step(dds: &[Allocated]) -> i16 {
                 r.resize(width, 0x40);
             }
         }
+        if let Some(selection) = &control.selection {
+            let mut kept = Vec::with_capacity(these.len());
+            for r in these {
+                match crate::dfsort::keeps(selection, &r, page) {
+                    Ok(true) => kept.push(r),
+                    Ok(false) => {}
+                    Err(e) => return fail(format!("{} in DD {}: {e}", if selection.include { "INCLUDE" } else { "OMIT" }, input.name)),
+                }
+            }
+            these = kept;
+        }
+        if let Some(edit) = &control.inrec {
+            match these.iter().map(|r| crate::dfsort::reformat(edit, r, matches!(shape, Layout::Variable), page)).collect() {
+                Ok(r) => these = r,
+                Err(e) => return fail(format!("INREC in DD {}: {e}", input.name)),
+            }
+        }
         if control.kind == jcl::sort::Kind::Merge {
             match keys.out_of_order(&these) {
                 Ok(Some(i)) => return fail(format!("record {} of DD {} is out of order for the MERGE", i + 1, input.name)),
@@ -765,11 +803,55 @@ fn sort_step(dds: &[Allocated]) -> i16 {
         }
         sorted = kept;
     }
-    let count = sorted.len();
-    if let Err(e) = write_records(out, &sorted, variable, page) {
-        return fail(e);
+    if let Some(edit) = &control.outrec {
+        match sorted.iter().map(|r| crate::dfsort::reformat(edit, r, variable, page)).collect() {
+            Ok(r) => sorted = r,
+            Err(e) => return fail(format!("OUTREC: {e}")),
+        }
     }
-    write_print(dd("SYSOUT"), &[format!("ironwork SORT: {count} records written to SORTOUT")]);
+    let mut outputs: Vec<Vec<Vec<u8>>> = vec![Vec::new(); groups.len()];
+    for record in &sorted {
+        let mut taken = false;
+        for (k, group) in groups.iter().enumerate() {
+            if group.save {
+                continue;
+            }
+            let selected = match &group.selection {
+                Some(s) => crate::dfsort::keeps(s, record, page),
+                None => Ok(true),
+            };
+            match selected {
+                Ok(true) => {
+                    taken = true;
+                    outputs[k].push(record.clone());
+                }
+                Ok(false) => {}
+                Err(e) => return fail(format!("OUTFIL {}: {e}", group.names.join(","))),
+            }
+        }
+        if !taken {
+            for (k, _) in groups.iter().enumerate().filter(|(_, g)| g.save) {
+                outputs[k].push(record.clone());
+            }
+        }
+    }
+    let mut written = Vec::new();
+    for ((group, records), dds) in groups.iter().zip(outputs).zip(&targets) {
+        let records = match &group.edit {
+            Some(edit) => match records.iter().map(|r| crate::dfsort::reformat(edit, r, variable, page)).collect::<Result<Vec<_>, _>>() {
+                Ok(r) => r,
+                Err(e) => return fail(format!("OUTFIL {}: {e}", group.names.join(","))),
+            },
+            None => records,
+        };
+        for out in dds {
+            if let Err(e) = write_records(out, &records, variable, page) {
+                return fail(e);
+            }
+            written.push(format!("ironwork SORT: {} records written to {}", records.len(), out.name));
+        }
+    }
+    write_print(dd("SYSOUT"), &written);
     0
 }
 
@@ -800,7 +882,7 @@ pub fn run(req: Request) -> ExitCode {
         }
         Ok(None)
     };
-    let job = match jcl::parse_with(&text, &libraries) {
+    let job = match jcl::parse_with(&text, &libraries, req.user.as_deref()) {
         Ok(j) => j,
         Err(e) => {
             eprintln!("ironwork: {shown}:{}: {}", e.line, e.message);
@@ -947,7 +1029,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                 let mut disposals = Vec::new();
                 let mut dds = Vec::new();
                 let mut jcl_error = None;
-                for dd in &step.dds {
+                for dd in allocated_dds(step) {
                     match runner.allocate(step, dd, &mut disposals) {
                         Ok(a) => dds.push(a),
                         Err(e) => {
@@ -982,7 +1064,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                     Program::Sort => Ok(sort_step(&dds)),
                     Program::Cobol(path) => {
                         programs.insert(path.clone());
-                        run_cobol(&path, runner.req, &dds, database.as_deref_mut(), &mut stdout, &mut programs, run.as_ref(), roots)
+                        run_cobol(&path, step.parm.as_deref().unwrap_or(""), runner.req, &dds, database.as_deref_mut(), &mut stdout, &mut programs, run.as_ref(), roots)
                     }
                     Program::Missing => Err((AbendCode::ModuleNotFound, format!("program {} is not in the program libraries", step.pgm))),
                 };

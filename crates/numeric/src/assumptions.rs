@@ -249,6 +249,8 @@ pub const NUMCHECK_SENDERS: &str = "C228";
 pub const NUMCHECK_MESSAGE: &str = "C229";
 pub const PARMCHECK_BUFFER: &str = "C226";
 pub const PARMCHECK_MESSAGE: &str = "C227";
+pub const PARM_ARGUMENTS_BEFORE_LAST_SLASH: &str = "C250";
+pub const PARM_AREA_PADDED: &str = "C251";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1568,6 +1570,18 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: NUMCHECK_MESSAGE,
         claim: "NUMCHECK's run-time message names the item, its bytes in hexadecimal, the program and, by its position, the line, as IBM's does (Programming Guide SC27-8714-03, p. 391), in ironwork's words with no IGZ message number, since no Enterprise COBOL output ironwork has shows one. Under MSG it is written to the error stream and the statement runs; under ABD the run ends with U4038, the abend a Language Environment condition of severity 3 gives, as SSRANGE's does",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PARM_ARGUMENTS_BEFORE_LAST_SLASH,
+        claim: "A COBOL main program that EXEC PGM=,PARM= starts receives as its program arguments what precedes the PARM's last slash, the rest being runtime options; when there are only invalid runtime options the whole string is the argument, so 11/16/1967 reaches the program whole. This is CBLOPTS(ON), the non-CICS default CBLOPTS=((ON),OVR) (Language Environment Programming Guide, COBOL compatibility considerations; Programming Reference, CBLOPTS)",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PARM_AREA_PADDED,
+        claim: "A runtime option after the last slash is known by its full name, or its NO form, from the CEEXOPT sample's list; an abbreviation counts as invalid, so a PARM whose only runtime options are abbreviated reaches the program whole. The first PROCEDURE DIVISION USING item addresses a halfword length and the arguments in the program's code page, followed by X'00' up to 100 bytes, JCL's longest PARM, so a program that reads its whole PIC X(100) parameter field reads zeros past the arguments rather than leaving storage. A step with no PARM passes a length of zero. Items after the first are not addressed",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

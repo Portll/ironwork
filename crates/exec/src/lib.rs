@@ -88,6 +88,23 @@ pub trait Execute {
         observer: Option<unit::Observer<'w>>,
     ) -> Result<(Ending, i16), Abend>;
 
+    /// Runs as [`Execute::execute_observed`] does, as the main program of a job step that EXEC
+    /// PGM= started with `parm`: the first PROCEDURE DIVISION USING item addresses a halfword
+    /// length and the program arguments Language Environment finds in it.
+    #[allow(clippy::too_many_arguments)]
+    fn execute_main<'w>(
+        &self,
+        library: unit::Library,
+        dds: files::Dds,
+        sysin: Option<Box<dyn BufRead + 'w>>,
+        clock: unit::Clock,
+        database: Option<&'w mut (dyn sql::Database + '_)>,
+        out: &'w mut dyn Write,
+        err: &'w mut dyn Write,
+        observer: Option<unit::Observer<'w>>,
+        parm: &str,
+    ) -> Result<(Ending, i16), Abend>;
+
     /// Runs as the first program of a CICS task. `task` says who started it, what COMMAREA it
     /// starts with, and what files and queues it has. Returns how the run ended and the task, with
     /// RETURN TRANSID and COMMAREA if it ended that way.
@@ -177,18 +194,22 @@ impl Execute for Compiled {
         err: &'w mut dyn Write,
         observer: Option<unit::Observer<'w>>,
     ) -> Result<(Ending, i16), Abend> {
-        oo::refuse_to_run(&self.program)?;
-        let mut run_unit = unit::RunUnit::new(library, dds, sysin, clock, out, err);
-        run_unit.observer = observer;
-        run_unit.sql = database.map(sql::Session::new);
-        let me = run_unit.add(None, &self.program, self.layout.size as usize);
-        let ending = machine::Machine::activation(self, me, &mut run_unit, true).and_then(|mut m| m.run_procedure());
-        let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(&self.program.id, ending.is_ok()).map(drop));
-        let closed = run_unit.close_all();
-        let ending = ending?;
-        settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default(), file: None })?;
-        closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default(), file: None })?;
-        Ok((ending, run_unit.return_code()))
+        run_main(self, library, dds, sysin, clock, database, out, err, observer, None)
+    }
+
+    fn execute_main<'w>(
+        &self,
+        library: unit::Library,
+        dds: files::Dds,
+        sysin: Option<Box<dyn BufRead + 'w>>,
+        clock: unit::Clock,
+        database: Option<&'w mut (dyn sql::Database + '_)>,
+        out: &'w mut dyn Write,
+        err: &'w mut dyn Write,
+        observer: Option<unit::Observer<'w>>,
+        parm: &str,
+    ) -> Result<(Ending, i16), Abend> {
+        run_main(self, library, dds, sysin, clock, database, out, err, observer, Some(parm))
     }
 
     fn execute_cics<'w>(
@@ -260,6 +281,41 @@ impl Execute for Compiled {
         closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default(), file: None })?;
         Ok((ending, task))
     }
+}
+
+/// Runs `compiled` as the first program of a batch run unit; with `parm`, as a job step's main
+/// program.
+#[allow(clippy::too_many_arguments)]
+fn run_main<'w>(
+    compiled: &Compiled,
+    library: unit::Library,
+    dds: files::Dds,
+    sysin: Option<Box<dyn BufRead + 'w>>,
+    clock: unit::Clock,
+    database: Option<&'w mut (dyn sql::Database + '_)>,
+    out: &'w mut dyn Write,
+    err: &'w mut dyn Write,
+    observer: Option<unit::Observer<'w>>,
+    parm: Option<&str>,
+) -> Result<(Ending, i16), Abend> {
+    oo::refuse_to_run(&compiled.program)?;
+    let mut run_unit = unit::RunUnit::new(library, dds, sysin, clock, out, err);
+    run_unit.observer = observer;
+    run_unit.sql = database.map(sql::Session::new);
+    let me = run_unit.add(None, &compiled.program, compiled.layout.size as usize);
+    let parm = parm.map(|p| run_unit.push_temporary(&rt::le::parm::parameter_area(rt::le::parm::program_arguments(p), compiled.options.code_page())));
+    let ending = machine::Machine::activation(compiled, me, &mut run_unit, true).and_then(|mut m| {
+        if parm.is_some() {
+            m.bind(&[parm]);
+        }
+        m.run_procedure()
+    });
+    let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(&compiled.program.id, ending.is_ok()).map(drop));
+    let closed = run_unit.close_all();
+    let ending = ending?;
+    settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default(), file: None })?;
+    closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default(), file: None })?;
+    Ok((ending, run_unit.return_code()))
 }
 
 #[cfg(test)]

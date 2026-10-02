@@ -21,7 +21,7 @@ usage:
                [-I <dir>]... [-L <dir>]...                compile and lower each source's programs to a load module
   ironwork dump [--section NAME]... [--strings] [--no-check] <module.iwm>
                                                        print a load module, one fact per line
-  ironwork job <job.jcl> --datasets DIR[:text] [--proclib DIR]... [run flags] [-I <dir>]... [-L <dir>]... [--clock <time>] [--sql-replay path]
+  ironwork job <job.jcl> --datasets DIR[:text] [--proclib DIR]... [--user ID] [run flags] [-I <dir>]... [-L <dir>]... [--clock <time>] [--sql-replay path]
                                                        run a job's steps in order
   ironwork fuzz <program.cbl> -o <dir> [--runs N] [--seed N] [--timeout SECONDS] [--root DIR] [--clock <time>]
                [-I <dir>]... [-L <dir>]... [-silent] [-strict-sort-keys] [-debug]
@@ -173,12 +173,18 @@ job flags:
              COBOL program found in -L as PGM.cbl or PGM.cob, IEFBR14, IEBGENER without control
              statements, IDCAMS (DELETE, REPRO, DEFINE CLUSTER and GDG, SET, IF and DO, its
              messages to SYSPRINT), or SORT/ICEMAN (SORT, MERGE and COPY with FIELDS in CH, AC, ZD,
-             CLO, CSL, CST, PD, BI and FI, SUM FIELDS=NONE, RECORD; a text data set's lines collate
-             as EBCDIC); DISP creates, keeps and deletes data sets as each step ends, and
-             COND and IF/THEN/ELSE choose the steps. A step's DISPLAY output and its SYSOUT DDs go
-             to standard output, a line per step to standard error. What the job uses that
-             ironwork does not run (PARM, other IDCAMS commands, DFSORT's INCLUDE, OMIT, INREC,
-             OUTREC and OUTFIL, and IBM's other programs) is refused before any step runs. DISP=MOD writes after what a data set holds, and
+             CLO, CSL, CST, PD, BI and FI, SUM FIELDS=NONE, RECORD, INCLUDE and OMIT, INREC and
+             OUTREC with BUILD, FIELDS or OVERLAY, OUTFIL with FNAMES, FILES, INCLUDE, OMIT, SAVE
+             and the same reformatting; a text data set's lines collate as EBCDIC). A COBOL
+             program's first USING item gets the step's PARM as Language Environment passes it,
+             a halfword length and the arguments before the last slash. DISP creates, keeps and
+             deletes data sets as each step ends, and COND and IF/THEN/ELSE choose the steps. A
+             step's DISPLAY output and its SYSOUT DDs go to standard output, a line per step to
+             standard error. What the job uses that ironwork does not run (other IDCAMS commands,
+             PARM to a utility, DFSORT's IFTHEN and field conversions, and IBM's other programs)
+             is refused before any step runs. JOBLIB and STEPLIB are not allocated; a DD that
+             names no data set but asks for one (UNIT=, SPACE=) gets a temporary one; data with no
+             DD before it is SYSIN. DISP=MOD writes after what a data set or generation holds, and
              creates it, as NEW would, where it is not there. A generation data group's base is the file
              DIR/BASE that DEFINE GDG writes, and generation n the file DIR/BASE.GnnnnV00; (0),
              (-1) and (+1) count from the generations the job began with, DSN=BASE reads them all,
@@ -197,6 +203,9 @@ job flags:
              a procedure library, searched for cataloged procedures and INCLUDE members after the
              data sets JCLLIB ORDER names: member M is the file DIR/M or DIR/M.jcl. In-stream
              procedures, SET, symbolic parameters and EXEC and DD overrides are expanded
+  --user ID
+             the user ID that submitted the job: &SYSUID's value when the JOB statement gives no
+             USER=
 fuzz flags:
   -o <dir>   the fuzz run's directory, which must be new or empty and outside the program's
              directory and its libraries: manifest.json, evidence/ with the journal of a run on each
@@ -250,6 +259,7 @@ mod compare;
 mod compile;
 mod coverage;
 mod ddl;
+mod dfsort;
 mod dump;
 mod evidence;
 mod fuzz;
@@ -306,6 +316,7 @@ fn driver() -> ExitCode {
     let mut datasets: Option<String> = None;
     let mut coverage_file: Option<std::path::PathBuf> = None;
     let mut proclibs: Vec<std::path::PathBuf> = Vec::new();
+    let mut user: Option<String> = None;
     let (mut out_dir, mut bundle, mut source_prefix): (Option<std::path::PathBuf>, Option<String>, Option<String>) = (None, None, None);
     let mut dump_options = dump::Options { check: true, ..Default::default() };
     let mut clock_text: Option<String> = None;
@@ -360,6 +371,10 @@ fn driver() -> ExitCode {
             "--proclib" => match args.next() {
                 Some(dir) => proclibs.push(std::path::PathBuf::from(dir)),
                 None => return usage_error("--proclib needs a directory"),
+            },
+            "--user" => match args.next().filter(|u| jcl::is_name(u)) {
+                Some(id) => user = Some(id),
+                None => return usage_error("--user needs a user ID of one to eight upper-case letters, digits, #, $ or @"),
             },
             "--dd" => match args.next() {
                 Some(spec) => dds.push(spec),
@@ -460,7 +475,7 @@ fn driver() -> ExitCode {
     let run_flags = !dds.is_empty() || replay.is_some() || keyed || sql_db.is_some() || sql_record.is_some() || evidence_dir.is_some() || trace_marker.is_some()
         || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() || !matches!(clock, exec::unit::Clock::System)
         || compare_base.is_some() || compare_head.is_some() || declare.is_some() || statement.is_some() || !expected.is_empty() || datasets.is_some()
-        || !proclibs.is_empty();
+        || !proclibs.is_empty() || user.is_some();
     let dump_flags = !dump_options.only.is_empty() || dump_options.strings || !dump_options.check;
     let fuzz_flags = fuzz_root.is_some() || fuzz_runs.is_some() || fuzz_seed.is_some() || fuzz_timeout.is_some();
     if let [c, program] = rest.as_slice()
@@ -568,10 +583,10 @@ fn driver() -> ExitCode {
             (exec::unit::Clock::System, Some(_)) => exec::unit::Clock::Fixed(1_767_225_600, 0),
             (c, _) => c,
         };
-        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, flags, clock, replay: replay.map(std::path::PathBuf::from), expected: expected_dir, expected_steps, declare, statement, evidence: evidence_dir, trace_marker });
+        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, user, flags, clock, replay: replay.map(std::path::PathBuf::from), expected: expected_dir, expected_steps, declare, statement, evidence: evidence_dir, trace_marker });
     }
-    if datasets.is_some() || !proclibs.is_empty() {
-        return usage_error("--datasets and --proclib are for job");
+    if datasets.is_some() || !proclibs.is_empty() || user.is_some() {
+        return usage_error("--datasets, --proclib and --user are for job");
     }
     if compare_base.is_some() || compare_head.is_some() || !expected.is_empty() || declare.is_some() || statement.is_some() {
         return usage_error("--base, --head, --expected, --declare and --statement are for compare");

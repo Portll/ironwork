@@ -221,10 +221,10 @@ fn members_of_a_partitioned_data_set_are_files_in_its_directory() {
 #[test]
 fn what_ironwork_does_not_run_is_refused_before_any_step() {
     let dir = temp("refuse");
-    let o = job(&dir, "//S1 EXEC PGM=IEFBR14\n//NEW DD DSN=MADE.EARLY,DISP=(NEW,CATLG)\n//S2 EXEC PGM=ICETOOL\n//S3 EXEC PGM=IEFBR14\n//X DD DSN=G.BASE(+1),DISP=MOD\n//S4 EXEC PGM=IDCAMS\n//SYSIN DD *\n  LISTCAT ALL\n");
+    let o = job(&dir, "//S1 EXEC PGM=IEFBR14\n//NEW DD DSN=MADE.EARLY,DISP=(NEW,CATLG)\n//S2 EXEC PGM=ICETOOL\n//S4 EXEC PGM=IDCAMS\n//SYSIN DD *\n  LISTCAT ALL\n");
     assert_eq!(o.status.code(), Some(2));
     let l = log(&o);
-    assert!(l.contains("PGM=ICETOOL is not supported yet") && l.contains("DISP=MOD on a generation or in a concatenation is not supported yet") && l.contains("IDCAMS: the IDCAMS command LISTCAT is not supported yet"), "{l}");
+    assert!(l.contains("PGM=ICETOOL is not supported yet") && l.contains("IDCAMS: the IDCAMS command LISTCAT is not supported yet"), "{l}");
     assert!(!dir.join("data/MADE.EARLY").exists());
     let o = job(&dir, "//S1 EXEC MYPROC\n");
     assert_eq!(o.status.code(), Some(2));
@@ -413,6 +413,69 @@ fn disp_mod_writes_after_what_the_data_set_holds_and_creates_one_that_is_missing
 }
 
 #[test]
+fn parm_reaches_the_main_program_as_language_environment_passes_it() {
+    let dir = temp("parm");
+    let text = cobol(&[
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. SHOWPARM.",
+        "DATA DIVISION.",
+        "LINKAGE SECTION.",
+        "01 PARM-AREA.",
+        "    05 PARM-LEN PIC S9(4) COMP.",
+        "    05 PARM-TEXT PIC X(100).",
+        "PROCEDURE DIVISION USING PARM-AREA.",
+        "    IF PARM-LEN > 0",
+        "        DISPLAY PARM-LEN ' ' PARM-TEXT(1:PARM-LEN)",
+        "    ELSE",
+        "        DISPLAY PARM-LEN",
+        "    END-IF.",
+        "    IF PARM-TEXT = LOW-VALUES",
+        "        DISPLAY 'ZEROS PAST THE ARGUMENTS'",
+        "    END-IF.",
+        "    GOBACK.",
+    ]);
+    fs::write(dir.join("lib/SHOWPARM.cbl"), text).unwrap();
+    let o = job(&dir, "//P1 EXEC PGM=SHOWPARM,PARM='RUN=1,MODE=X/RPTOPTS(ON)'\n//P2 EXEC PGM=SHOWPARM,PARM='11/16/1967'\n//P3 EXEC PGM=SHOWPARM\n");
+    assert_eq!(o.status.code(), Some(0), "{}", log(&o));
+    assert_eq!(String::from_utf8_lossy(&o.stdout), "0012 RUN=1,MODE=X\n0010 11/16/1967\n0000\nZEROS PAST THE ARGUMENTS\n");
+}
+
+#[test]
+fn load_libraries_work_files_implied_sysin_and_mod_on_generations_and_concatenations() {
+    let dir = temp("system");
+    upcase(&dir);
+    fs::write(dir.join("data/IN.NAMES"), "gamma\n").unwrap();
+    fs::write(dir.join("data/PART.TWO"), "two\n").unwrap();
+    let o = job(&dir, "//DEF EXEC PGM=IDCAMS\n//SYSPRINT DD DUMMY\n//SYSIN DD *\n  DEFINE GDG(NAME(RUN.LOG) LIMIT(3))\n/*\n");
+    assert_eq!(o.status.code(), Some(0), "{}", log(&o));
+    let o = job(
+        &dir,
+        concat!(
+            "//JOBLIB   DD DSN=PROD.LOADLIB,DISP=SHR\n",
+            "//         DD DSN=COMMON.LOADLIB,DISP=SHR\n",
+            "//WORK     EXEC PGM=IEBGENER\n",
+            "//SYSUT1   DD DSN=IN.NAMES,DISP=SHR\n",
+            "//SYSUT2   DD UNIT=SYSDA,SPACE=(CYL,(1,1)),DISP=(NEW,PASS)\n",
+            "//SYSIN    DD DUMMY\n",
+            "//UP       EXEC PGM=UPCASE\n",
+            "//STEPLIB  DD DSN=APP.LOADLIB,DISP=SHR\n",
+            "//IN       DD DSN=*.WORK.SYSUT2,DISP=(OLD,DELETE)\n",
+            "//         DD DSN=PART.ONE,DISP=MOD\n",
+            "//         DD DSN=PART.TWO,DISP=MOD\n",
+            "//OUT      DD DSN=RUN.LOG(+1),DISP=(MOD,CATLG)\n",
+            "//SORTWK01 DD UNIT=SYSDA,SPACE=(CYL,(10,10))\n",
+            "0004\n",
+        ),
+    );
+    assert_eq!(o.status.code(), Some(4), "{}", log(&o));
+    assert_eq!(fs::read_to_string(dir.join("data/RUN.LOG.G0001V00")).unwrap(), "GAMMA\nTWO\n");
+    assert!(!dir.join("data/PART.ONE").exists(), "DISP=MOD made PART.ONE for the step and deleted it as NEW would");
+    let o = job(&dir, "//MORE EXEC PGM=IEBGENER\n//SYSUT1 DD *\nlater\n/*\n//SYSUT2 DD DSN=RUN.LOG(0),DISP=MOD\n//SYSIN DD DUMMY\n");
+    assert_eq!(o.status.code(), Some(0), "{}", log(&o));
+    assert_eq!(fs::read_to_string(dir.join("data/RUN.LOG.G0001V00")).unwrap(), "GAMMA\nTWO\nlater\n");
+}
+
+#[test]
 fn sort_orders_records_as_dfsort_does_and_merges_sorted_inputs() {
     let dir = temp("sort");
     fs::write(dir.join("data/IN.KEYS"), "B 003\nA 001\nC 002\nA 001\nb 009\n1 000\n").unwrap();
@@ -445,7 +508,34 @@ fn sort_reads_fixed_records_by_their_length_and_refuses_what_it_does_not_model()
     let o = Command::new(env!("CARGO_BIN_EXE_ironwork")).args(["job", path.to_str().unwrap(), "--datasets", dir.join("data").to_str().unwrap()]).output().unwrap();
     assert_eq!(o.status.code(), Some(0), "{}", log(&o));
     assert_eq!(fs::read(dir.join("data/BIN.OUT")).unwrap(), [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 1, 0, 0, 0, 2], "FI is signed: -1 sorts first");
-    let o = job(&dir, "//S1 EXEC PGM=SORT\n//SYSIN DD *\n  SORT FIELDS=(1,1,CH,A)\n  INCLUDE COND=(1,1,CH,EQ,C'A')\n/*\n");
+    let o = job(&dir, "//S1 EXEC PGM=SORT\n//SYSIN DD *\n  SORT FIELDS=(1,1,CH,A)\n  OUTREC IFTHEN=(WHEN=(1,1,CH,EQ,C'A'),OVERLAY=(2:C'B'))\n/*\n");
     assert_eq!(o.status.code(), Some(2));
-    assert!(log(&o).contains("SORT: the DFSORT INCLUDE statement is not supported yet"), "{}", log(&o));
+    assert!(log(&o).contains("SORT: the OUTREC parameter IFTHEN is not supported yet"), "{}", log(&o));
+}
+
+#[test]
+fn sort_selects_reformats_and_splits_records_as_dfsort_does() {
+    let dir = temp("sortedit");
+    fs::write(dir.join("data/IN.EMP"), "A001 SMITH  0100\nB002 JONES  0200\nA003 BROWN  0050\nC004 GREEN  0300\n").unwrap();
+    let o = job(
+        &dir,
+        concat!(
+            "//S1 EXEC PGM=SORT\n//SYSOUT DD SYSOUT=*\n//SORTIN DD DSN=IN.EMP,DISP=SHR\n",
+            "//BIG DD DSN=OUT.BIG,DISP=(NEW,CATLG)\n//REST DD DSN=OUT.REST,DISP=(NEW,CATLG)\n//ALLB DD DSN=OUT.ALLB,DISP=(NEW,CATLG)\n",
+            "//SYSIN DD *\n",
+            "  OMIT COND=(1,1,CH,EQ,C'C')\n",
+            "  INREC BUILD=(1,4,C'-',6,6,13,4)\n",
+            "  SORT FIELDS=(12,4,ZD,D)\n",
+            "  OUTREC OVERLAY=(16:C'*')\n",
+            "  OUTFIL FNAMES=BIG,INCLUDE=(12,4,ZD,GE,100),BUILD=(1,4,X,12,4)\n",
+            "  OUTFIL FNAMES=REST,SAVE\n",
+            "  OUTFIL FNAMES=ALLB,INCLUDE=(1,1,CH,EQ,C'B')\n",
+            "/*\n",
+        ),
+    );
+    assert_eq!(o.status.code(), Some(0), "{}{}", log(&o), String::from_utf8_lossy(&o.stdout));
+    assert_eq!(fs::read_to_string(dir.join("data/OUT.BIG")).unwrap(), "B002 0200\nA001 0100\n");
+    assert_eq!(fs::read_to_string(dir.join("data/OUT.REST")).unwrap(), "A003-BROWN 0050*\n", "SAVE keeps what no other group selects");
+    assert_eq!(fs::read_to_string(dir.join("data/OUT.ALLB")).unwrap(), "B002-JONES 0200*\n");
+    assert!(String::from_utf8_lossy(&o.stdout).contains("ironwork SORT: 2 records written to BIG"));
 }

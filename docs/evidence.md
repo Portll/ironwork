@@ -69,7 +69,7 @@ and line. A CICS operand is recorded before the command runs, so a command ironw
 out yet (START, WEB) is still traced before it stops the task; an operand that cannot be read is
 left to the command, so tracing never changes how a run ends. Not traced, because ironwork does not
 run them yet: MQPUT, dynamic SQL, sockets, ASSIGN to a data item, and the sources ACCEPT FROM
-COMMAND-LINE or ENVIRONMENT and PARM.
+COMMAND-LINE or ENVIRONMENT. PARM reaches a program only through `ironwork job`.
 
 ## 2. Build provenance: `--provenance FILE`
 

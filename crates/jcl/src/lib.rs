@@ -1,8 +1,8 @@
 //! A job's JCL as the z/OS MVS JCL Reference describes it: the JOB statement, EXEC steps, DD
 //! statements with their data sets, dispositions and in-stream data, IF/THEN/ELSE/ENDIF, and
 //! procedures (in-stream and cataloged, with symbolic parameters, SET, JCLLIB, INCLUDE, and EXEC
-//! and DD overrides) expanded into the steps they run. What the reader does not model (generation
-//! data groups, backward references) it refuses by name rather than reading it some other way.
+//! and DD overrides) expanded into the steps they run. What the reader does not model it refuses
+//! by name rather than reading it some other way.
 
 pub mod cond;
 pub mod idcams;
@@ -15,6 +15,8 @@ use std::collections::HashMap;
 pub struct Job {
     pub name: String,
     pub cond: Cond,
+    /// The JOBLIB DD's libraries, searched for every step's program that has no STEPLIB.
+    pub joblib: Option<Dd>,
     pub items: Vec<Item>,
 }
 
@@ -70,7 +72,8 @@ pub struct Part {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
     Dataset { dsn: String, member: Option<String> },
-    /// `&&NAME`, a data set that lasts until the job ends.
+    /// `&&NAME`, a data set that lasts until the job ends. A DD that names no data set and asks
+    /// for one (UNIT=, SPACE=) gets a new one, named as no `&&NAME` can be: `SYS.nnnnn`.
     Temporary { name: String, member: Option<String> },
     /// A generation of a generation data group, relative to the newest when the job began: 0 the
     /// newest, -1 the one before, +1 the next.
@@ -289,7 +292,12 @@ fn substitute(text: &str, symbols: &HashMap<String, String>, line: usize) -> Res
         if !is_name(&name) {
             return err(line, format!("& is not followed by a symbolic parameter name in {text}"));
         }
-        let Some(value) = symbols.get(&name) else { return err(line, format!("symbolic parameter &{name} has no value")) };
+        let Some(value) = symbols.get(&name) else {
+            if name == "SYSUID" {
+                return err(line, "&SYSUID is the user ID the job runs under: USER= on the JOB statement, or the user that submitted it");
+            }
+            return err(line, format!("symbolic parameter &{name} has no value"));
+        };
         out.push_str(value);
         i = end;
         if chars.get(i) == Some(&'.') {
@@ -340,7 +348,8 @@ impl<'a> Reader<'a> {
                     self.at += 1;
                     continue;
                 }
-                return err(line, "data lines outside a DD * or DD DATA statement");
+                // JCL Reference, SYSIN DD statement: data with no DD before it gets a //SYSIN DD *.
+                return Ok(Some(Raw { line, name: Some("SYSIN".into()), operation: "DD".into(), operands: "*".into(), data: None }));
             }
             if text[2..].trim().is_empty() {
                 return Ok(None);
@@ -439,12 +448,13 @@ pub type Libraries<'a> = dyn Fn(&[String], &str) -> Result<Option<String>, Strin
 
 /// Reads one job with no procedure libraries.
 pub fn parse(text: &str) -> Result<Job, Error> {
-    parse_with(text, &|_, _| Ok(None))
+    parse_with(text, &|_, _| Ok(None), None)
 }
 
 /// Reads one job, finding cataloged procedures and INCLUDE members through `libraries`. Names
-/// must be in upper case, as z/OS requires.
-pub fn parse_with(text: &str, libraries: &Libraries<'_>) -> Result<Job, Error> {
+/// must be in upper case, as z/OS requires. `submitter` is the user ID the job was submitted
+/// from, &SYSUID's value when the JOB statement gives no USER=.
+pub fn parse_with(text: &str, libraries: &Libraries<'_>, submitter: Option<&str>) -> Result<Job, Error> {
     let raws = read(text)?;
     let Some(first) = raws.first() else { return err(1, "no JOB statement") };
     if first.operation != "JOB" {
@@ -454,23 +464,25 @@ pub fn parse_with(text: &str, libraries: &Libraries<'_>) -> Result<Job, Error> {
         Some(n) if is_name(n) => n.clone(),
         _ => return err(first.line, "the JOB statement needs a job name of one to eight characters"),
     };
-    let cond = job_operands(first)?;
-    let mut expander = Expander { libraries, procs: HashMap::new(), order: Vec::new(), symbols: HashMap::new(), items: Vec::new() };
+    let (cond, user) = job_operands(first)?;
+    let symbols: HashMap<String, String> = user.or(submitter.map(str::to_string)).map(|u| ("SYSUID".to_string(), u)).into_iter().collect();
+    let mut expander = Expander { libraries, procs: HashMap::new(), order: Vec::new(), symbols, joblib: None, items: Vec::new() };
     expander.statements(&raws[1..], None, &HashMap::new(), 0)?;
     check_nesting(&expander.items)?;
     let mut items = expander.items;
+    name_unnamed(&mut items);
     resolve_references(&mut items)?;
-    Ok(Job { name, cond, items })
+    Ok(Job { name, cond, joblib: expander.joblib, items })
 }
 
-fn job_operands(st: &Raw) -> Result<Cond, Error> {
-    let mut cond = Cond::default();
+/// The JOB statement's COND, and the user ID its USER= names.
+fn job_operands(st: &Raw) -> Result<(Cond, Option<String>), Error> {
+    let (mut cond, mut user) = (Cond::default(), None);
     for op in split_operands(&st.operands, st.line)? {
-        if op.contains('&') && !op.contains('\'') {
-            return err(st.line, "symbolic parameters on the JOB statement are not supported yet");
-        }
         match keyword(&op) {
             (None, _) => {}
+            (Some("USER"), value) if is_name(value) => user = Some(value.to_string()),
+            (Some("COND"), value) if value.contains('&') => return err(st.line, "a symbolic parameter in the JOB statement's COND is not supported yet"),
             (Some("COND"), value) => {
                 cond = cond::parse_cond(value).map_err(|m| Error { line: st.line, message: m })?;
                 if cond.mode != cond::Mode::Plain || cond.tests.iter().any(|t| t.step.is_some()) {
@@ -483,7 +495,7 @@ fn job_operands(st: &Raw) -> Result<Cond, Error> {
             (Some(k), _) => return err(st.line, format!("JOB keyword {k} is not supported yet")),
         }
     }
-    Ok(cond)
+    Ok((cond, user))
 }
 
 /// A procedure's statements between its PROC and PEND, and the defaults its PROC statement gives.
@@ -498,6 +510,7 @@ struct Expander<'a, 'l> {
     order: Vec<String>,
     /// Values from SET statements, in force from the SET onward.
     symbols: HashMap<String, String>,
+    joblib: Option<Dd>,
     items: Vec<Item>,
 }
 
@@ -614,6 +627,19 @@ impl Expander<'_, '_> {
                     }
                 }
                 "DD" => {
+                    let before_steps = caller.is_none() && depth == 0 && !self.items.iter().any(|it| matches!(it, Item::Step(_)));
+                    if before_steps && raw.name.as_deref() == Some("JOBLIB") && self.joblib.is_none() {
+                        self.joblib = Some(Dd { name: "JOBLIB".into(), parts: vec![dd_part(raw, &operands)?] });
+                        continue;
+                    }
+                    if before_steps
+                        && raw.name.is_none()
+                        && let Some(lib) = &mut self.joblib
+                        && raws[i - 2].operation == "DD"
+                    {
+                        lib.parts.push(dd_part(raw, &operands)?);
+                        continue;
+                    }
                     let Some(Item::Step(step)) = self.items.last_mut() else { return err(raw.line, "a DD statement that follows no EXEC statement") };
                     let part = dd_part(raw, &operands)?;
                     add_dd(step, raw, part)?;
@@ -904,7 +930,8 @@ fn dd_fields(raw: &Raw, operands: &str) -> Result<(Option<Source>, Option<Disp>)
 
 fn dd_part(raw: &Raw, operands: &str) -> Result<Part, Error> {
     let (source, disp) = dd_fields(raw, operands)?;
-    let Some(source) = source else { return err(raw.line, "the DD statement names no data set, in-stream data, DUMMY or SYSOUT") };
+    let unnamed = (!operands.is_empty()).then(|| Source::Temporary { name: String::new(), member: None });
+    let Some(source) = source.or(unnamed) else { return err(raw.line, "the DD statement names no data set, in-stream data, DUMMY or SYSOUT") };
     let (recfm, lrecl) = record_format(&split_operands(operands, raw.line)?, raw.line)?;
     Ok(Part { source, disp: disp.unwrap_or_default(), line: raw.line, recfm, lrecl })
 }
@@ -963,6 +990,22 @@ fn override_dd(step: &mut Step, name: &str, index: usize, raw: &Raw, operands: &
             Ok(())
         }
         None => err(raw.line, "an unnamed DD statement with nothing to concatenate to"),
+    }
+}
+
+/// Each DD that asked for a new data set without naming one gets a temporary name of its own.
+fn name_unnamed(items: &mut [Item]) {
+    let mut n = 0;
+    for item in items {
+        let Item::Step(step) = item else { continue };
+        for part in step.dds.iter_mut().flat_map(|d| d.parts.iter_mut()) {
+            if let Source::Temporary { name, .. } = &mut part.source
+                && name.is_empty()
+            {
+                n += 1;
+                *name = format!("SYS.{n:05}");
+            }
+        }
     }
 }
 

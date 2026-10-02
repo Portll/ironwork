@@ -1013,7 +1013,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     /// Gives each PROCEDURE DIVISION USING item the address of the argument in its position.
-    fn bind(&mut self, addresses: &[Option<usize>]) {
+    pub(crate) fn bind(&mut self, addresses: &[Option<usize>]) {
         let program = self.program;
         self.bind_using(&program.using, addresses);
     }
