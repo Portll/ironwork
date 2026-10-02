@@ -54,7 +54,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             Base::ReturnCode => RETURN_CODE,
             Base::Eib => return Err(not_yet("EXEC CICS")),
             Base::SelfRef | Base::JniEnv => return Err(not_yet("object-oriented COBOL")),
-            Base::Xml(_) => return Err(not_yet("JSON and XML statements")),
+            Base::Xml(register) => return self.xml_register(register, id, pos),
         };
         let mut offset = (base + place.offset as usize) as i64;
         for (k, s) in place.subscripts.iter().enumerate() {
@@ -96,7 +96,10 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 let v = self.eval_fixed(*expr, *dmax, pos)?;
                 Ok(whole(&v, pos)?)
             }
-            IntExpr::Walk(_) => Err(not_yet("JSON and XML statements")),
+            IntExpr::Walk(k) => match self.markup.walk.get(usize::from(*k)) {
+                Some(&s) => Ok(i64::from(s)),
+                None => Err(not_yet("a JSON walk subscript outside the walk")),
+            },
         }
     }
 

@@ -9,6 +9,7 @@ mod arith;
 mod call;
 mod cond;
 mod flow;
+mod markup;
 mod ops;
 mod place;
 mod value;
@@ -260,6 +261,8 @@ struct Vm<'p, 'u, 'w, L: Loader<Rc<Code>>> {
     locating: u32,
     /// What a callback of the semantics library stopped for, its error being an `Abend`.
     pending: Option<String>,
+    /// The JSON walk's subscripts and XML PARSE's fragment registers.
+    markup: markup::State,
     unit: &'u mut RunUnit<'w, Rc<Code>, L>,
 }
 
@@ -295,6 +298,7 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
             debugging: false,
             locating: 0,
             pending: None,
+            markup: markup::State::default(),
             unit,
         };
         if !storage.local_image.is_empty() {

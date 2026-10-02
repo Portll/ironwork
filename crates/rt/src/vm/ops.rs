@@ -151,7 +151,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             Op::Invoke(_) => return Err(not_yet("object-oriented COBOL")),
             Op::Cics(_) => return Err(not_yet("EXEC CICS")),
             Op::Sql(_) => return Err(not_yet("EXEC SQL")),
-            Op::Markup(_) => return Err(not_yet("JSON and XML statements")),
+            Op::Markup(id) => return self.markup(&p.services.markup[*id as usize], at, pos),
             Op::Alter { para, to } => {
                 let paragraphs = p.paragraphs.len();
                 let altered = &mut self.unit.programs[self.me].altered;

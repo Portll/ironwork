@@ -137,7 +137,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                         arith::float_operand(val, p, pos)?
                     }
                     IntExpr::Fixed { expr, .. } => self.eval_float(*expr, p, pos)?,
-                    IntExpr::Walk(_) => return Err(not_yet("JSON and XML statements")),
+                    IntExpr::Walk(_) => return Err(not_yet("a JSON walk subscript as an exponent")),
                 };
                 Ok(arith::float_binop(x, BinOp::Pow, y, p, pos)?)
             }
@@ -186,7 +186,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                     IntExpr::Const(_) => None,
                     IntExpr::Item(place) => Some(binary_item(items, *place)),
                     IntExpr::Fixed { expr, .. } => self.binary_operands(*expr, items)?,
-                    IntExpr::Walk(_) => return Err(not_yet("JSON and XML statements")),
+                    IntExpr::Walk(_) => return Err(not_yet("a JSON walk subscript as an exponent")),
                 };
                 both(base, exponent)
             }

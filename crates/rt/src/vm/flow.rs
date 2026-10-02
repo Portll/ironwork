@@ -316,7 +316,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
     }
 
     /// Runs `range` as a procedure under a frame of its own, in a dispatch loop of its own.
-    fn run_procedure(&mut self, range: RangeId) -> R<Exit> {
+    pub(super) fn run_procedure(&mut self, range: RangeId) -> R<Exit> {
         let r = self.p.ranges[range as usize];
         self.push(FrameKind::Procedure { range }, r.last, None);
         let floor = self.returns.frames.len() - 1;
