@@ -1,12 +1,24 @@
 use super::*;
 
-fn displays(data: &str, statements: &[&str]) -> String {
+fn source(data: &str, statements: &[&str]) -> String {
     let long = statements.iter().flat_map(|s| s.split('\n')).find(|l| l.len() > 61);
     assert!(long.is_none(), "past column 72: {long:?}");
     let body: String = statements.iter().flat_map(|s| s.split('\n')).map(line).chain([line("GOBACK.")]).collect();
-    let o = Harness::source(&program("", data, &body)).run(Executor::Interpreter);
+    program("", data, &body)
+}
+
+fn displays(data: &str, statements: &[&str]) -> String {
+    let o = Harness::source(&source(data, statements)).run(Executor::Interpreter);
     assert!(o.ending.is_ok(), "{:?}\n{}", o.ending, o.err);
     o.out
+}
+
+/// As `displays`, and the VM must run the program to its end with the same output.
+fn displays_on_both(data: &str, statements: &[&str]) -> String {
+    let out = displays(data, statements);
+    let vm = Harness::source(&source(data, statements)).run(Executor::Vm);
+    assert_eq!((vm.out.as_str(), vm.ending.is_ok()), (out.as_str(), true), "{}", vm.err);
+    out
 }
 
 const CODES: &str = "       01  Code-Out PIC 9(3).\n       01  Status-Out PIC 9(3).\n";
@@ -238,14 +250,14 @@ fn the_programming_guides_client_data_moves_into_edited_and_national_items() {
 #[test]
 fn integers_go_into_national_and_alphanumeric_items_and_any_number_into_floating_point() {
     let data = format!("{CODES}       01  T PIC X(40) VALUE '{{\"G\":{{\"N\":42,\"F\":1.5E1,\"A\":7}}}}'.\n       01  G.\n           05 N PIC N(4).\n           05 F COMP-2.\n           05 A PIC X(3).\n");
-    let out = displays(&data, &["JSON PARSE T INTO G ENCODING 1140", SHOW, "DISPLAY FUNCTION DISPLAY-OF(N) '|' A '|'", "COMPUTE Code-Out = F", "DISPLAY Code-Out"]);
+    let out = displays_on_both(&data, &["JSON PARSE T INTO G ENCODING 1140", SHOW, "DISPLAY FUNCTION DISPLAY-OF(N) '|' A '|'", "COMPUTE Code-Out = F", "DISPLAY Code-Out"]);
     assert_eq!(out, "CODE 000 STATUS 000\n42  |7  |\n015\n");
 }
 
 #[test]
 fn a_number_moves_only_where_table_46_allows_and_an_exponent_is_never_expanded() {
     let data = format!("{CODES}       01  T PIC X(60).\n       01  G.\n           05 ALPHA PIC A(5).\n           05 ALNUM PIC X(5).\n           05 NUM PIC 9(4).\n");
-    let out = displays(
+    let out = displays_on_both(
         &data,
         &[
             "MOVE '{\"G\":{\"ALPHA\":42}}' TO T",
@@ -264,6 +276,26 @@ fn a_number_moves_only_where_table_46_allows_and_an_exponent_is_never_expanded()
         ],
     );
     assert_eq!(out, "CODE 104 STATUS 000\nCODE 104 STATUS 000\nCODE 000 STATUS 001\nCODE 000 STATUS 129\n42    0000\n");
+}
+
+#[test]
+fn an_alphabetic_item_a_contained_program_inherits_takes_no_number() {
+    let source = [
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OUTER.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n",
+        "       01  G GLOBAL.\n           05 ALPHA PIC A(5) VALUE 'ABCDE'.\n       PROCEDURE DIVISION.\n",
+        &line("CALL 'INNER'"),
+        &line("GOBACK."),
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. INNER.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n",
+        "       01  T PIC X(40) VALUE '{\"G\":{\"ALPHA\":42}}'.\n       01  C PIC 9(3).\n       PROCEDURE DIVISION.\n",
+        &line("JSON PARSE T INTO G ENCODING 1140"),
+        &line("MOVE JSON-CODE TO C"),
+        &line("DISPLAY C ' ' ALPHA"),
+        &line("GOBACK."),
+        "       END PROGRAM INNER.\n       END PROGRAM OUTER.\n",
+    ]
+    .concat();
+    let o = Harness::source(&source).run(Executor::Interpreter);
+    assert_eq!((o.out.as_str(), o.ending.is_ok()), ("104 ABCDE\n", true), "{}", o.err);
 }
 
 #[test]

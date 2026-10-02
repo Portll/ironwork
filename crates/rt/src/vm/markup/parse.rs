@@ -238,9 +238,6 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 Ok(Ok(()))
             }
             Value::String(s) => self.parse_string(at, leaf, loc, s, g),
-            Value::Number(_) if leaf.number == NumberInto::Digits && matches!(loc.kind, Kind::Alnum { .. }) => {
-                Err(not_yet("a JSON number into an alphanumeric item, which the walker refuses when its PICTURE is alphabetic"))
-            }
             Value::Number(n) => {
                 let (negative, int, frac) = json::decimal(n);
                 let integer = !n.contains(['.', 'e', 'E']);

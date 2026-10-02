@@ -60,6 +60,21 @@ fn a_group_carries_its_null_test_and_one_whose_members_are_all_ignored_is_left_o
 }
 
 #[test]
+fn no_json_number_goes_into_an_alphabetic_item() {
+    let data = "       01  T PIC X(80).\n       01  G.\n           05 ALPHA PIC A(5).\n           05 ALNUM PIC X(5).\n";
+    let p = lowered(&program("", data, &[line("JSON PARSE T INTO G"), line("GOBACK.")].concat()));
+    let [Markup::JsonParse(j)] = markup(&p) else { panic!() };
+    let numbers: Vec<NumberInto> = j.nodes[1..]
+        .iter()
+        .map(|n| match &n.value {
+            ParseValue::Leaf(leaf) => leaf.number,
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(numbers, [NumberInto::Incompatible, NumberInto::Digits]);
+}
+
+#[test]
 fn a_phrase_naming_a_condition_name_abends_where_the_walker_would() {
     let data = "       01  D PIC X(80).\n       01  G.\n           05 A PIC X.\n              88 A-ON VALUE 'Y'.\n";
     let p = lowered(&program("", data, &[line("JSON GENERATE D FROM G SUPPRESS A-ON"), line("GOBACK.")].concat()));

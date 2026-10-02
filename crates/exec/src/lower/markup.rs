@@ -824,6 +824,7 @@ impl Lower<'_> {
             Kind::Float(_) => NumberInto::Float(self.move_plan(&side(Value::Float), kind, Some(item))?),
             Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } => NumberInto::Store(self.store_plan(kind, Some(item))?),
             Kind::NumericEdited { .. } => NumberInto::Edited(self.move_plan(&side(Value::Num(None)), kind, Some(item))?),
+            Kind::Alnum { .. } if self.layout.items[item].alphabetic => NumberInto::Incompatible,
             Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::National => NumberInto::Digits,
             _ => NumberInto::Incompatible,
         };

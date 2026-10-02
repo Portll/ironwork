@@ -289,6 +289,7 @@ pub enum NumberInto {
     /// An integer only: an alphanumeric or alphanumeric-edited item takes it as MOVE takes an
     /// unsigned integer of as many digits, a national item its digits as UTF-16.
     Digits,
+    /// An alphabetic item, or any other no number moves to.
     Incompatible,
 }
 

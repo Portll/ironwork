@@ -263,7 +263,7 @@ impl<'p> Machine<'p, '_, '_> {
                 Ok(Ok(()))
             }
             Value::String(s) => self.parse_string(loc, s, g, pos),
-            Value::Number(_) if self.alphabetic(item) => Ok(Err(INCOMPATIBLE)),
+            Value::Number(_) if self.layout.items[item].alphabetic => Ok(Err(INCOMPATIBLE)),
             Value::Number(n) => {
                 let (negative, int, frac) = json::decimal(n);
                 let integer = !n.contains(['.', 'e', 'E']);
@@ -312,15 +312,6 @@ impl<'p> Machine<'p, '_, '_> {
                 None => Ok(Err(INCOMPATIBLE)),
             },
         }
-    }
-
-    /// Whether data item `item` is of category alphabetic, which no JSON number moves to (p. 395,
-    /// Table 46).
-    fn alphabetic(&self, item: usize) -> bool {
-        let at = self.layout.items[item].pos;
-        let program = self.program;
-        let mut entries = program.working_storage.iter().chain(&program.local_storage).chain(&program.linkage).chain(program.files.iter().flat_map(|f| &f.records));
-        entries.any(|e| e.pos == at && e.picture.as_deref().is_some_and(compile::is_alphabetic))
     }
 
     /// A number into a receiver, by MOVE; an alphanumeric or national receiver takes only a number
