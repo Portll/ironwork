@@ -1176,7 +1176,7 @@ each execution; the status, the record, the DD and the in-memory file are run-ti
 pub struct FileDesc {
     pub name: SymId, pub assign: SymId, pub organization: Organization, pub access: Access,
     pub optional: bool, pub format: rt::files::Format, pub read_lengths: (u32, u32),
-    pub fixed: bool, pub record_min: Option<u32>,
+    pub fixed: bool, pub record_min: Option<u32>, pub depending: Option<RecordDepending>,
     pub status: Option<(PlaceId, MovePlan)>,
     /// RECORD KEY, then each ALTERNATE RECORD KEY with WITH DUPLICATES, as spans of the record area.
     pub keys: Option<IndexKeys>,
@@ -1186,6 +1186,9 @@ pub struct FileDesc {
 }
 pub struct IndexKeys { pub prime: RecordSpan, pub alternates: Vec<(RecordSpan, bool)> }
 pub struct RecordSpan { pub offset: u32, pub len: u32 }
+/// RECORD IS VARYING DEPENDING ON (`fileio::Depending`): the item, read as an integer and stored as
+/// `set_integer` stores, and the shortest and longest record the clause allows (`compile::varying_lengths`).
+pub struct RecordDepending { pub item: PlaceId, pub lengths: (u32, u32) }
 /// Read as `value`, stored by `store` when a sequential READ or WRITE sets it; `digits` bounds the
 /// record numbers it holds (`relative_fits`).
 pub struct RelativeKey { pub place: PlaceId, pub value: IntExpr, pub store: StorePlan, pub digits: Option<u32> }
@@ -1238,6 +1241,11 @@ pub enum StartKey { Prime, Named { key: u8, span: RecordSpan }, Relative(IntExpr
 - **WRITE's phrases.** A WRITE to a file open with a page (LINAGE, OUTPUT or EXTEND) runs END-OF-PAGE
   or NOT END-OF-PAGE; to a held file, INVALID KEY or NOT INVALID KEY through `conclude`; to a
   streamed file neither. Which applies is known only at run time, so the op carries both.
+- **RECORD IS VARYING DEPENDING ON.** `depending` gives `rt::fileio` the item a successful READ or
+  RETURN stores the record's length in (`deliver`, `return_record`) and WRITE, REWRITE and RELEASE
+  take it from (`record_length`): the record area's first n bytes go out, or status 44 when n lies
+  outside `lengths` or past the area, and RELEASE stops the sort. The item is located where the
+  walker locates it, each time, and is never a receiving item.
 - **Fixed at lowering:** the file by name; each key's span, from its place, which must be a static
   item of the file's record area; which key READ KEY or START KEY names, a leading part for START;
   START's relation, one other than =, > or NOT < being the walker's abend at the statement; the

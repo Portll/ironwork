@@ -1539,17 +1539,58 @@ fn inspect_of_a_national_item_keeps_its_literals_for_rt_to_read_as_national_char
 }
 
 #[test]
-fn a_record_length_item_is_left_to_the_interpreter() {
-    let source = [
-        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n",
-        "           SELECT A ASSIGN TO ADD.\n       DATA DIVISION.\n       FILE SECTION.\n",
-        "       FD  A RECORD VARYING FROM 1 TO 80 DEPENDING ON N.\n       01  A-REC PIC X(80).\n",
-        "       WORKING-STORAGE SECTION.\n       01  N PIC 99.\n       PROCEDURE DIVISION.\n",
-        &line("GOBACK."),
-    ]
-    .concat();
-    let e = lower(&compiled(&source)).unwrap_err();
-    assert!(matches!(e, LowerError::Unsupported("RECORD IS VARYING DEPENDING ON", _)), "{e}");
+fn record_varying_depending_on_names_its_item_and_the_lengths_the_clause_allows() {
+    let p = lowered(&with_files(
+        "",
+        &["    SELECT A ASSIGN TO ADD.", "    SELECT B ASSIGN TO BDD.", "    SELECT C ASSIGN TO CDD."],
+        &[
+            "FD  A RECORD VARYING FROM 5 TO 60 DEPENDING ON N.",
+            "01  A-REC PIC X(80).",
+            "FD  B RECORD IS VARYING IN SIZE TO 30 CHARACTERS DEPENDING ON M.",
+            "01  B-10 PIC X(10).",
+            "01  B-30 PIC X(30).",
+            "FD  C.",
+            "01  C-REC PIC X(8).",
+        ],
+        "       01  N PIC 99.\n       01  M PIC 9(4) COMP.\n",
+        &["M.", "    WRITE A-REC", "    GOBACK."],
+    ));
+    let depending: Vec<_> = p.services.files.iter().map(|f| f.depending.map(|d| (symbol(&p, p.places[d.item as usize].name), p.places[d.item as usize].subscripts.len(), d.lengths))).collect();
+    assert_eq!(depending, [Some(("N", 0, (5, 60))), Some(("M", 0, (10, 30))), None]);
+    verify(&p).unwrap();
+}
+
+#[test]
+fn release_and_return_take_and_set_an_sd_s_record_length_item_on_both_executors() {
+    let source = with_files(
+        "",
+        &["    SELECT S ASSIGN TO SORTWK."],
+        &["SD  S RECORD IS VARYING IN SIZE FROM 1 TO 10 DEPENDING ON N.", "01  S-REC.", "    05 S-KEY PIC X.", "    05 FILLER PIC X(9)."],
+        "       01  N PIC 99.\n",
+        &[
+            "M.",
+            "    SORT S ON ASCENDING KEY S-KEY INPUT PROCEDURE IS IN-P",
+            "        OUTPUT PROCEDURE IS OUT-P THRU OUT-X",
+            "    GOBACK.",
+            "IN-P.",
+            "    MOVE 3 TO N",
+            "    MOVE 'CCCCCCCCCC' TO S-REC",
+            "    RELEASE S-REC",
+            "    MOVE 5 TO N",
+            "    MOVE 'AAAAAAAAAA' TO S-REC",
+            "    RELEASE S-REC.",
+            "OUT-P.",
+            "    RETURN S AT END GO TO OUT-X END-RETURN",
+            "    DISPLAY N ' ' S-REC(1:N)",
+            "    GO TO OUT-P.",
+            "OUT-X.",
+            "    EXIT.",
+        ],
+    );
+    let walker = crate::testing::Harness::source(&source).run(crate::testing::Executor::Interpreter);
+    let vm = crate::testing::Harness::source(&source).run(crate::testing::Executor::Vm);
+    assert_eq!((walker.out.as_str(), &walker.ending), ("05 AAAAA\n03 CCC\n", &Ok(Ending::Goback)), "{}", walker.err);
+    assert_eq!((vm.out, vm.ending), (walker.out, walker.ending));
 }
 
 #[test]

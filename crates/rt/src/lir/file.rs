@@ -26,6 +26,7 @@ pub struct FileDesc {
     pub fixed: bool,
     /// The RECORD clause's smallest record.
     pub record_min: Option<u32>,
+    pub depending: Option<RecordDepending>,
     pub status: Option<(PlaceId, MovePlan)>,
     /// An indexed file's keys, as spans of its record area.
     pub keys: Option<IndexKeys>,
@@ -52,6 +53,15 @@ pub enum Access {
     Sequential,
     Random,
     Dynamic,
+}
+
+/// RECORD IS VARYING DEPENDING ON ([`crate::fileio::Depending`]): the item a successful READ or
+/// RETURN stores the record's length in and WRITE, REWRITE and RELEASE take it from, read as an
+/// integer and stored as `set_integer` stores; and the shortest and longest record the clause allows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecordDepending {
+    pub item: PlaceId,
+    pub lengths: (u32, u32),
 }
 
 /// Bytes of a record: from `offset` in the file's record area, `len` long.
@@ -193,8 +203,9 @@ pub enum StartKey {
 }
 
 codec_struct!(FileDesc {
-    name, assign, organization, access, optional, format, read_lengths, fixed, record_min, status, keys, relative, linage, carriage, sort, error,
+    name, assign, organization, access, optional, format, read_lengths, fixed, record_min, depending, status, keys, relative, linage, carriage, sort, error,
 } check file_valid);
+codec_struct!(RecordDepending { item, lengths });
 codec_enum!(Organization { Sequential = 0, LineSequential = 1, Indexed = 2, Relative = 3 });
 codec_enum!(Access { Sequential = 0, Random = 1, Dynamic = 2 });
 codec_struct!(RecordSpan { offset, len });

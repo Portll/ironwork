@@ -98,7 +98,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             carriage: d.carriage,
             area: (self.base + offset as usize, size as usize),
             read_lengths: (d.read_lengths.0 as usize, d.read_lengths.1 as usize),
-            depending: None,
+            depending: d.depending.map(|r| fileio::Depending { item: Handle::Place(r.item), lengths: (r.lengths.0 as usize, r.lengths.1 as usize) }),
         }
     }
 

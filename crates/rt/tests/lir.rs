@@ -1025,6 +1025,7 @@ fn master() -> FileDesc {
         read_lengths: (26, 300),
         fixed: false,
         record_min: Some(26),
+        depending: Some(RecordDepending { item: 6, lengths: (26, 280) }),
         status: Some((3, ALNUM)),
         keys: Some(IndexKeys { prime: span, alternates: vec![(RecordSpan { offset: 6, len: 20 }, true)] }),
         relative: None,

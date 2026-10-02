@@ -7,7 +7,9 @@ use super::{Lower, R, is_static, push, unsupported};
 use crate::layout::Resolved;
 use crate::printer::{self, Space};
 use rt::files::Format;
-use rt::lir::{self, Advance, FileDesc, FileOp, FileVerb, FromMove, IndexKeys, Op, Phrase, RecordSpan, RelativeKey, Spacing, StartKey, StartRel, Terminator};
+use rt::lir::{
+    self, Advance, FileDesc, FileOp, FileVerb, FromMove, IndexKeys, Op, Phrase, RecordDepending, RecordSpan, RelativeKey, Spacing, StartKey, StartRel, Terminator,
+};
 use syntax::Pos;
 use syntax::ast::{Access, Advancing, Expr, FileDecl, Handlers, LinageValue, Operand, Organization, Ref, RelOp, Stmt};
 
@@ -42,9 +44,13 @@ impl Lower<'_> {
             (Organization::Indexed, None) => return unsupported("an indexed file without a RECORD KEY", f.pos),
             _ => None,
         };
-        if f.record_depending.is_some() {
-            return unsupported("RECORD IS VARYING DEPENDING ON", f.pos);
-        }
+        let depending = match &f.record_depending {
+            None => None,
+            Some(r) => {
+                let (shortest, longest) = compile::varying_lengths(f, self.layout, k);
+                Some(RecordDepending { item: self.place(r, false)?, lengths: (shortest, longest) })
+            }
+        };
         let relative = match &f.relative_key {
             None => None,
             Some(r) => {
@@ -104,6 +110,7 @@ impl Lower<'_> {
             read_lengths: compile::read_lengths(f, self.layout, k, self.c.options.vlr),
             fixed: !compile::variable_records(f, self.layout, k),
             record_min: f.record_min,
+            depending,
             status,
             keys,
             relative,

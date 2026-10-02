@@ -22,8 +22,8 @@ pub use class::{Class, ClassPart, Method};
 pub use collating::{Collating, Sequence};
 pub use debug::Debug;
 pub use file::{
-    Access, Advance, Carriage, FileDesc, FileOp, FileVerb, FromMove, IndexKeys, Linage, Organization, Phrase, RecordSpan,
-    RelativeKey, Spacing, StartKey, StartRel,
+    Access, Advance, Carriage, FileDesc, FileOp, FileVerb, FromMove, IndexKeys, Linage, Organization, Phrase, RecordDepending,
+    RecordSpan, RelativeKey, Spacing, StartKey, StartRel,
 };
 pub use markup::{
     Ccsid, Convert, Flag, Indicator, JsonGenerate, JsonLeaf, JsonNode, JsonParse, JsonValue, Marker, Markup, Named, NumberInto, ParseLeaf, ParseNode, ParseValue,
