@@ -46,6 +46,7 @@ pub const WORKING_STORAGE_LAYOUT: &str = "C12";
 pub const NOPFD_REPAIRS_UNSIGNED_INPUT: &str = "C13";
 pub const DISPLAY_OF_NONDISPLAY_NUMERIC: &str = "C14";
 pub const ACCEPT_AT_END: &str = "C15";
+pub const SYSIN_CARD_IMAGES: &str = "C261";
 pub const CONTENT_LITERAL_ZONED: &str = "C16";
 pub const KEYED_FILE_STATUS: &str = "C17";
 pub const ALTERNATE_KEY_ORDER: &str = "C18";
@@ -370,6 +371,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: ACCEPT_AT_END,
         claim: "ACCEPT from SYSIN at its end leaves the receiving item unchanged and the run continues",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SYSIN_CARD_IMAGES,
+        claim: "ACCEPT from SYSIN reads each line of the SYSIN file as one record, 80 bytes as a card of in-stream data is: a shorter line is padded with spaces to 80, and a longer line is a record of its own length, as a variable-length record would be. The receiving item is filled from consecutive records with no conversion, editing or check, the last record cut where the item ends; at the end of SYSIN after some data the rest of the item is spaces, and before any data the item is unchanged (C15) (Language Reference SC27-8713-03, pp. 307-308: 'There is no editing or error checking of the incoming data', each record concatenated with the previous, a fixed-length record used whole). A numeric receiver takes the characters as they are, so an empty line gives spaces and a non-digit is a data exception only where the item is next read as a number. The record length of a SYSIN data set other than in-stream cards is not known to ironwork, and 80 is chosen. A national receiver still takes one line, converted from the code page, where IBM takes UTF-16 data unconverted",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

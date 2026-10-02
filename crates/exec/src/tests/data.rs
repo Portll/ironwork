@@ -55,6 +55,31 @@ fn a_long_zoned_item_keeps_the_data_exception_and_the_numproc_sign_rules() {
 const ODO_RECORD: &str = "       01  REC.\n           05 CNT PIC 9.\n           05 ITEM PIC X OCCURS 1 TO 5 DEPENDING ON CNT.\n";
 
 #[test]
+fn accept_from_sysin_transfers_card_images_unconverted() {
+    let data = "       01  N PIC 9.\n       01  AMT PIC 9(02)V9(02).\n       01  B PIC 9(04).\n       01  LONG PIC X(100).\n";
+    let procedure = [
+        line("ACCEPT N"),
+        line("ACCEPT AMT"),
+        line("DISPLAY FUNCTION HEX-OF(AMT)"),
+        line("ACCEPT B"),
+        line("DISPLAY FUNCTION HEX-OF(B)"),
+        line("ACCEPT LONG"),
+        line("DISPLAY '[' LONG(78:6) ']'"),
+        line("ACCEPT N"),
+        line("ADD 1 TO B"),
+        line("GOBACK."),
+    ]
+    .concat();
+    let source = program("", data, &procedure);
+    let (out, err, ending) = run_unit(&source, vec![], &format!("6\n\nQNB*\n{}\nTAIL\n", "X".repeat(80)));
+    assert_eq!(out, "40404040\nD8D5C25C\n[XXXTAI]\n");
+    assert!(err.contains("ACCEPT found SYSIN at its end; N is unchanged"), "{err}");
+    let abend = ending.unwrap_err();
+    let add = source.lines().position(|l| l.contains("ADD 1 TO B")).unwrap() as u32 + 1;
+    assert_eq!((abend.code.as_str(), abend.pos.line), ("S0C7", add));
+}
+
+#[test]
 fn a_group_holding_its_own_occurs_depending_on_object_receives_at_its_maximum_length() {
     let source = program(
         "",
