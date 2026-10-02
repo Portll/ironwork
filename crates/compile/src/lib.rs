@@ -140,6 +140,7 @@ fn compile_time_from(epoch: Option<&std::ffi::OsStr>, clock: std::time::Duration
 pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: bool, when_compiled: CompileTime) -> Result<Compiled, Vec<Error>> {
     let mut errors = std::mem::take(&mut program.messages);
     reserved::check(&program, &mut errors);
+    let declared = program.working_storage.len();
     let mut program = declaratives::with_debug_item(markup::with_special_registers(sort::with_special_registers(program)));
     qualify_in_own_section(&mut program);
     let mut options = Options::default();
@@ -190,7 +191,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         errors.push(e);
         (0..files.len()).collect()
     });
-    let mut layout = match layout::build(&program.working_storage, &files, &shared, &program.linkage, &program.local_storage, crate::picture::Notation::of(&program.environment), options.qualify) {
+    let mut layout = match layout::build(&program.working_storage, &files, &shared, &program.linkage, &program.local_storage, crate::picture::Notation::of(&program.environment), options.qualify, options.parmcheck.map(|p| (declared, p.bytes.into()))) {
         Ok(l) => l,
         Err(e) => {
             errors.push(e);

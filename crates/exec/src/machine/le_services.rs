@@ -8,9 +8,12 @@ use std::rc::Rc;
 impl<'p> Machine<'p, '_, '_> {
     pub(super) fn le_call(&mut self, c: &'p Call, name: &str) -> R<Flow> {
         let mark = self.unit.mem.len();
-        let outcome = self.le_arguments(c).and_then(|args| self.le_service(name, &args, c.pos));
+        let outcome = self.le_arguments(c).and_then(|args| {
+            self.parmcheck_set();
+            self.le_service(name, &args, c.pos).map(|()| args)
+        });
         self.unit.release_temporaries(mark);
-        outcome?;
+        self.parmcheck_test(c, &outcome?, |_| name.to_owned())?;
         match &c.not_on_exception {
             Some(body) => self.run_block(body),
             None => Ok(Flow::Next),

@@ -35,6 +35,7 @@ mod intrinsic;
 mod json;
 mod le_services;
 mod oo;
+mod parmcheck;
 mod perform;
 mod report;
 mod sort;
@@ -975,6 +976,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             };
             addresses.push(Some(at));
         }
+        self.parmcheck_set();
         let outcome = {
             let mut callee = Machine::activation(&compiled, index, &mut *self.unit, false)?;
             let entry = entry.and_then(|k| compiled.entries.get(k));
@@ -998,6 +1000,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         if ending? == Ending::StopRun {
             return Ok(Flow::End(Ending::StopRun));
         }
+        self.parmcheck_test(c, &addresses, |m| m.unit.programs[index].name.clone())?;
         if let (Some(target), Some(val)) = (&c.returning, returned) {
             let dest = self.locate(target)?;
             self.assign(dest, val, None, pos)?;

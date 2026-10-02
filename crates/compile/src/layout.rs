@@ -91,6 +91,9 @@ pub struct Layout {
     pub linage_counters: Vec<Option<usize>>,
     /// The QUALIFY option [`Layout::resolve`] follows.
     pub qualify: Qualify,
+    /// PARMCHECK's buffer: its offset, at the end of the WORKING-STORAGE the program declares, and
+    /// its length (assumption [`numeric::assumptions::PARMCHECK_BUFFER`]).
+    pub parmcheck: Option<(u32, u32)>,
 }
 
 const LEVEL_ALIGNMENT: u32 = 8;
@@ -101,6 +104,10 @@ pub const MAX_STORAGE: u32 = 128 << 20;
 /// which is at least `record_max` bytes. Files whose `shared` entry names the same file share one
 /// area, as large as the largest of them (see [`record_area_owners`]). `notation` is what
 /// SPECIAL-NAMES changes in the PICTUREs; `qualify` how RENAMES and later references resolve.
+/// Under PARMCHECK, `parmcheck` is how many of `entries` the program declares itself, the special
+/// registers the compiler adds following them, and the bytes of the buffer that goes between
+/// (Programming Guide SC27-8714-03, p. 397).
+#[allow(clippy::too_many_arguments)]
 pub fn build(
     entries: &[DataEntry],
     files: &[(&[DataEntry], Option<u32>)],
@@ -109,6 +116,7 @@ pub fn build(
     local: &[DataEntry],
     notation: picture::Notation,
     qualify: Qualify,
+    parmcheck: Option<(usize, u32)>,
 ) -> Result<Layout, Error> {
     let mut items: Vec<Item> = Vec::new();
     let mut usages: Vec<Option<Usage>> = Vec::new();
@@ -323,6 +331,8 @@ pub fn build(
     let mut cursor = 0u32;
     let mut root_offsets: Vec<(String, u32)> = Vec::new();
     let mut area_starts: Vec<Option<u32>> = vec![None; files.len()];
+    let mut pending = parmcheck.map(|(declared, bytes)| (entries[..declared.min(entries.len())].iter().filter(|e| e.level != 88).count(), bytes));
+    let mut buffer = None;
     for &r in &roots {
         if items[r].local {
             continue;
@@ -330,6 +340,13 @@ pub fn build(
         if items[r].linkage.is_some() {
             place(&mut items, r, 0, Vec::new());
             continue;
+        }
+        if let Some((own, bytes)) = pending
+            && r >= own
+        {
+            buffer = Some((cursor, bytes));
+            cursor += bytes;
+            pending = None;
         }
         if let Some(k) = items[r].file {
             let g = owner(k as usize);
@@ -355,6 +372,10 @@ pub fn build(
             root_offsets.push((name.clone(), offset));
         }
         place(&mut items, r, offset, Vec::new());
+    }
+    if let Some((_, bytes)) = pending {
+        buffer = Some((cursor, bytes));
+        cursor += bytes;
     }
     let tables: Vec<usize> = (0..items.len()).filter(|&i| items[i].depending_on.is_some()).collect();
     for t in tables {
@@ -397,7 +418,7 @@ pub fn build(
         let lengths = &mut record_lengths[k as usize];
         *lengths = Some(lengths.map_or((least, most), |(l, m)| (l.min(least), m.max(most))));
     }
-    Ok(Layout { items, conditions, edits, currencies, file_areas: areas, record_lengths, linkage_roots, local_size: local_cursor, size: cursor, file_names: Vec::new(), linage_counters: Vec::new(), qualify })
+    Ok(Layout { items, conditions, edits, currencies, file_areas: areas, record_lengths, linkage_roots, local_size: local_cursor, size: cursor, file_names: Vec::new(), linage_counters: Vec::new(), qualify, parmcheck: buffer })
 }
 
 /// The names of item `start` and each group above it, nearest first: the hierarchy of names that

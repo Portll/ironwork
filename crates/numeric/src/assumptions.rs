@@ -244,6 +244,8 @@ pub const INVDATA_ZONES_COMPARED: &str = "C223";
 pub const ALPHANUMERIC_MOVED_UNCHECKED: &str = "C240";
 pub const NUMCHECK_SENDERS: &str = "C228";
 pub const NUMCHECK_MESSAGE: &str = "C229";
+pub const PARMCHECK_BUFFER: &str = "C226";
+pub const PARMCHECK_MESSAGE: &str = "C227";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1522,6 +1524,18 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: ALPHANUMERIC_MOVED_UNCHECKED,
         claim: "An alphanumeric sender MOVEd to a zoned or packed integer item without P scaling is not checked for digits at the MOVE: the receiver gets the low half of each of the sender's last bytes as its digits, zeros to the left, stored as a positive value, and a byte whose low half is not a digit (an asterisk, X'5C') leaves that half in the receiver, so the data exception comes where the item is next read as a number. The Language Reference treats such a sender as an unsigned numeric integer (MOVE statement, elementary moves); the instructions a MOVE compiles to, a byte copy, PACK and UNPK, raise no data exception (z/Architecture Principles of Operation, PACK and UNPACK), and the decimal instructions of arithmetic do. A receiver with decimal places or P scaling, a binary receiver (CVB checks digits) and a numeric-edited one still read the sender as a number at the MOVE",
         basis: Basis::Recalled,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PARMCHECK_BUFFER,
+        claim: "Under PARMCHECK the buffer of n bytes, 100 by default, starts at the byte after the end of the WORKING-STORAGE the program declares, the furthest any of its 01 and 77 items reaches, with no slack bytes between, so a CALL that writes one byte past the last item changes it: IBM puts it 'following the last data item in the WORKING-STORAGE section' (Programming Guide SC27-8714-03, p. 397) and does not say whether it is aligned; were it on a doubleword, a write into the slack bytes before it would go unseen on z/OS. The special registers and Report Writer data ironwork adds to WORKING-STORAGE after the program's own items (the SORT, XML and JSON registers, DEBUG-ITEM, LINAGE-COUNTER, a report's counters), which are no items the program declares, follow the buffer, as do the file record areas and index-names; every offset after the buffer moves by n, and a program compiled without PARMCHECK keeps its layout byte for byte. The buffer is no data item and nothing names it. It holds zeros until a CALL sets it to X'AA'; each CALL of a program, of a Language Environment callable service and through a function-pointer sets it after the arguments are evaluated and checks it once the called program returns, before RETURNING is stored and before NOT ON EXCEPTION runs. A CALL after which the run ends, by STOP RUN or an abend in the called program, is not checked",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PARMCHECK_MESSAGE,
+        claim: "IBM documents what PARMCHECK's message holds but not its number or text: under MSG a runtime warning with the name of the parameter, the line number of the CALL statement and the program name, issued after the CALL, and under ABD a similar message at a terminating level that causes an abend (Programming Guide SC27-8714-03, p. 397); the corpus of public job output searched has PARMCHECK only in option listings. The message is ironwork's, with no IGZ number: 'PARMCHECK: SUB, called at line 14 of program MAIN, wrote past the end of WORKING-STORAGE, beyond parameter LAST-ITEM', the program being the one with the CALL. Under MSG it goes to standard error after 'ironwork: line:column: ' and the run goes on; under ABD the run ends with U4038, as a Language Environment condition of severity 3 that nothing handles ends it under the default ABTERMENC(ABEND), as an SSRANGE failure does. The parameter named is chosen: of the CALL's arguments whose storage starts in the calling program's own WORKING-STORAGE, so BY REFERENCE ones (a BY CONTENT or BY VALUE argument is a copy elsewhere), a LINKAGE item counting when its address is there, the one starting nearest the buffer, since a called program that declares it longer reaches the buffer soonest; of two starting at the same byte, the later in the USING list. With no such argument the message names none. Which bytes changed is not reported",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {

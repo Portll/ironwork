@@ -111,7 +111,9 @@ impl<'p> Machine<'p, '_, '_> {
             return Ok(None);
         }
         let args: Vec<CallArg<&'p Ref, &'p Operand>> = c.using.iter().map(|a| a.value.as_ref().map_or(CallArg::Omitted, CallArg::Value)).collect();
+        self.parmcheck_set();
         classes::call_through_pointer(self, r, &args, c.returning.as_ref(), c.pos)?;
+        self.parmcheck_test(c, &[], |_| r.name.clone())?;
         Ok(Some(match &c.not_on_exception {
             Some(body) => self.run_block(body)?,
             None => Flow::Next,

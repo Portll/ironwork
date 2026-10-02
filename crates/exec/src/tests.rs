@@ -18,6 +18,7 @@ mod json_parse;
 mod linage;
 mod numcheck;
 mod oo;
+mod parmcheck;
 mod printer;
 mod procedure;
 mod quote_currency_nsymbol;
