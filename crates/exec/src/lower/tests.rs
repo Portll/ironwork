@@ -1469,3 +1469,12 @@ fn a_record_length_item_is_left_to_the_interpreter() {
     let e = lower(&compiled(&source)).unwrap_err();
     assert!(matches!(e, LowerError::Unsupported("RECORD IS VARYING DEPENDING ON", _)), "{e}");
 }
+
+#[test]
+fn numcheck_and_parmcheck_programs_are_refused_until_the_lir_carries_their_checks() {
+    let refused = |options: &str| lower(&compiled(&program(options, "       01  A PIC 9.\n", &[line("ADD 1 TO A"), line("GOBACK.")].concat()))).unwrap_err();
+    assert!(matches!(refused("NUMCHECK(ABD)"), LowerError::Unsupported("NUMCHECK or ZONECHECK", _)));
+    assert!(matches!(refused("ZONECHECK(MSG)"), LowerError::Unsupported("NUMCHECK or ZONECHECK", _)));
+    assert!(matches!(refused("PARMCHECK"), LowerError::Unsupported("PARMCHECK", _)));
+    lowered(&program("INITCHECK", "       01  A PIC 9.\n", &[line("ADD 1 TO A"), line("GOBACK.")].concat()));
+}

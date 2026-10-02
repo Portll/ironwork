@@ -100,6 +100,13 @@ fn push<T>(table: &mut Vec<T>, value: T, what: &'static str) -> R<u32> {
 /// Lowers one compiled program, or a class definition with its data and methods. One that passes
 /// Check and uses only the constructs lowered so far lowers.
 pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
+    // The walker runs these checks at statement points the LIR has no op for yet.
+    if compiled.options.numcheck.is_some() {
+        return unsupported("NUMCHECK or ZONECHECK", Pos::default());
+    }
+    if compiled.options.parmcheck.is_some() {
+        return unsupported("PARMCHECK", Pos::default());
+    }
     let mut l = Lower::new(compiled);
     let id = l.sym(&compiled.program.id);
     let sources = compiled.program.sources.iter().map(|s| l.sym(s)).collect();
