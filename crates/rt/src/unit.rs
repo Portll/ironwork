@@ -89,6 +89,10 @@ pub trait Loader<H> {
 
     /// The COBOL class definition of this external name, compiled; None for a Java class.
     fn class(&mut self, external: &str) -> Result<Option<FoundClass<Self::Class>>, String>;
+
+    /// A BMS mapset from the copy libraries, which SEND MAP and RECEIVE MAP read; None when no
+    /// library holds it.
+    fn mapset(&mut self, name: &str) -> Option<Result<crate::bms::Mapset, String>>;
 }
 
 /// An executor's activation, as each service's host trait reaches the run unit through it: `Program`

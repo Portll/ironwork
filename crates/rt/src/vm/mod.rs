@@ -7,6 +7,7 @@
 
 mod arith;
 mod call;
+mod cics;
 mod cond;
 mod files;
 mod flow;
@@ -15,11 +16,14 @@ mod ops;
 mod place;
 mod report;
 mod sort;
+mod sql;
 mod value;
 
 use crate::abend::{Abend, Ending};
+use crate::cics::Handlers;
 use crate::lir::{AbendId, Block, Collating, DebugId, Frame, FrameKind, MovePlan, Op, PlaceId, Program, Returns, StorePlan, SymId, UpDown};
 use crate::picture::Sym;
+use crate::sql::Ran;
 use crate::store::ProgramFacts;
 use crate::unit::{Loader, RunUnit};
 use crate::vocab::{Figurative, Pos};
@@ -28,6 +32,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use zarch::ebcdic::{self, CodePage, Collation};
 
+pub use cics::run_task;
 pub(crate) use flow::Arrival;
 
 type R<T> = Result<T, Halt>;
@@ -271,6 +276,10 @@ struct Vm<'p, 'u, 'w, L: Loader<Rc<Code>>> {
     /// The JSON walk's subscripts and XML PARSE's fragment registers.
     markup: markup::State,
     io: files::State,
+    /// HANDLE CONDITION, IGNORE CONDITION and HANDLE ABEND, which belong to the program level.
+    cics_handlers: Handlers,
+    /// SQLCODE and SQLWARN0 of the last EXEC SQL statement, which WHENEVER tests.
+    whenever: Option<Ran>,
     unit: &'u mut RunUnit<'w, Rc<Code>, L>,
 }
 
@@ -308,6 +317,8 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
             pending: None,
             markup: markup::State::default(),
             io: files::State::default(),
+            cics_handlers: Handlers::default(),
+            whenever: None,
             unit,
         };
         if !storage.local_image.is_empty() {

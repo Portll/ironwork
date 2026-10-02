@@ -5,7 +5,7 @@
 use crate::loader::Library;
 use crate::lower::{self, LowerError};
 use crate::unit::{Clock, Observer, Remains};
-use crate::{Compiled, files, oo, sql};
+use crate::{Compiled, cics, files, oo, sql};
 use rt::abend::{Abend, AbendCode, Ending};
 use rt::unit::{FoundClass, LoadError, LoadedProgram, Loader};
 pub use rt::vm::{Code, Halt};
@@ -48,6 +48,10 @@ impl Loader<Rc<Code>> for VmLibrary {
 
     fn class(&mut self, _external: &str) -> Result<Option<FoundClass<()>>, String> {
         Ok(None)
+    }
+
+    fn mapset(&mut self, name: &str) -> Option<Result<rt::bms::Mapset, String>> {
+        self.0.mapset(name)
     }
 }
 
@@ -104,4 +108,37 @@ pub fn execute<'w>(
     settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default(), file: None })?;
     closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default(), file: None })?;
     Ok((ending, run_unit.return_code()))
+}
+
+/// Runs `compiled`, lowered as `code`, on the VM as the first program of a CICS task, as
+/// `Execute::execute_cics_observed` runs it on the interpreter; `kept` takes what the run left in
+/// its run unit, and the task comes back however the run ended.
+#[allow(clippy::too_many_arguments)]
+pub fn execute_cics<'w>(
+    compiled: &Compiled,
+    code: &Code,
+    library: Library,
+    dds: files::Dds,
+    task: cics::Task,
+    clock: Clock,
+    database: Option<&'w mut (dyn sql::Database + '_)>,
+    out: &'w mut dyn Write,
+    err: &'w mut dyn Write,
+    observer: Option<Observer<'w>>,
+    kept: &mut Option<Remains>,
+) -> (Result<Ending, Halt>, cics::Task) {
+    if let Err(abend) = oo::refuse_to_run(&compiled.program) {
+        return (Err(abend.into()), task);
+    }
+    let statements = library.trace_statements.clone();
+    let mut run_unit = rt::unit::RunUnit::new(VmLibrary(library), dds, None, clock, out, err);
+    run_unit.observer = observer;
+    run_unit.statements = statements;
+    run_unit.sql = database.map(sql::Session::new);
+    let (ending, ended, task) = crate::run_task(compiled, run_unit, task, kept, |unit, me, commarea, length| rt::vm::run_task(code, me, unit, commarea, length));
+    let ending = match ending {
+        Err(Halt::Abend(abend)) => Err(Halt::Abend(crate::asra(abend))),
+        other => other,
+    };
+    (ending.and_then(|e| ended.map(|()| e).map_err(Halt::Abend)), task)
 }

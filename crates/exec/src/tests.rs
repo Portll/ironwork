@@ -2103,10 +2103,9 @@ fn bms_line(text: &str, continued: bool) -> String {
     if continued { format!("{text:<71}X\n") } else { format!("{text}\n") }
 }
 
-#[test]
-fn bms_maps_send_and_receive_through_a_scripted_terminal() {
-    let dir = temp("bms");
-    std::fs::create_dir_all(&dir).unwrap();
+/// Writes ORDSET, a mapset holding the one map ORDMAP, in `dir`.
+fn ordset(dir: &std::path::Path) {
+    std::fs::create_dir_all(dir).unwrap();
     let bms = [
         bms_line("ORDSET   DFHMSD TYPE=&SYSPARM,MODE=INOUT,LANG=COBOL,STORAGE=AUTO,", true),
         bms_line("               CTRL=(FREEKB,FRSET)", false),
@@ -2124,6 +2123,38 @@ fn bms_maps_send_and_receive_through_a_scripted_terminal() {
     ]
     .concat();
     std::fs::write(dir.join("ORDSET.bms"), bms).unwrap();
+}
+
+/// Runs `source`, with `dir` as its copy library, as a CICS task on a terminal that plays `script`,
+/// on the VM with `vm`: what it displays, each screen it sends, and how it ends.
+fn on_terminal(source: &str, dir: &std::path::Path, script: &str, vm: bool) -> (String, Vec<String>, Result<Ending, String>) {
+    let libraries = syntax::copy::Libraries::new(vec![dir.to_path_buf()]);
+    let mut programs = syntax::parse_all_with(source, &libraries).unwrap_or_else(|e| panic!("{e}"));
+    let compiled = compile(programs.remove(0), &[]).unwrap_or_else(|e| panic!("{e:?}"));
+    let scripted = terminal::Scripted::new(24, 80, terminal::parse_script(script).unwrap(), compiled.options.code_page());
+    let shown = scripted.shown.clone();
+    let t = cics::Task { terminal: Some(Box::new(scripted)), ..task("ORD1") };
+    let library = unit::Library { programs, copy: libraries, ..Default::default() };
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let clock = unit::Clock::Fixed(1_790_514_309, 25);
+    let ending = if vm {
+        let code = crate::vm::lowered(&compiled).unwrap_or_else(|e| panic!("{e}"));
+        match crate::vm::execute_cics(&compiled, &code, library, files::Dds::default(), t, clock, None, &mut out, &mut err, None, &mut None).0 {
+            Ok(ending) => Ok(ending),
+            Err(crate::vm::Halt::Abend(abend)) => Err(format!("{abend:?}")),
+            Err(crate::vm::Halt::Unimplemented(what)) => Err(format!("not run yet: {what}")),
+        }
+    } else {
+        compiled.execute_cics(library, files::Dds::default(), t, clock, &mut out, &mut err).map(|(ending, _)| ending).map_err(|abend| format!("{abend:?}"))
+    };
+    let screens = shown.borrow().clone();
+    (String::from_utf8(out).unwrap(), screens, ending)
+}
+
+#[test]
+fn bms_maps_send_and_receive_through_a_scripted_terminal() {
+    let dir = temp("bms");
+    ordset(&dir);
     let source = cics_program(
         "ORDERS",
         "           COPY ORDSET.\n           COPY DFHAID.\n       01  WS-RESP PIC S9(8) COMP.\n",
@@ -2144,25 +2175,47 @@ fn bms_maps_send_and_receive_through_a_scripted_terminal() {
         ]
         .concat(),
     );
-    let libraries = syntax::copy::Libraries::new(vec![dir.clone()]);
-    let mut programs = syntax::parse_all_with(&source, &libraries).unwrap_or_else(|e| panic!("{e}"));
-    let compiled = compile(programs.remove(0), &[]).unwrap_or_else(|e| panic!("{e:?}"));
-    let page = compiled.options.code_page();
-    let script = terminal::parse_script("type 3 12 ACME\ntype 4 12 7\nENTER\nCLEAR\n").unwrap();
-    let scripted = terminal::Scripted::new(24, 80, script, page);
-    let shown = scripted.shown.clone();
-    let t = cics::Task { terminal: Some(Box::new(scripted)), ..task("ORD1") };
-    let library = unit::Library { programs, copy: libraries, ..Default::default() };
-    let (mut out, mut err) = (Vec::new(), Vec::new());
-    let ending = compiled.execute_cics(library, files::Dds::default(), t, unit::Clock::System, &mut out, &mut err);
-    let out = String::from_utf8(out).unwrap();
+    let script = "type 3 12 ACME\ntype 4 12 7\nENTER\nCLEAR\n";
+    let (out, screens, ending) = on_terminal(&source, &dir, script, false);
     assert!(ending.is_ok(), "{ending:?}\n{out}");
     assert_eq!(out, "CUST ACME     L=0004 QTY 007\nENTER\nMAPFAIL\nCLEAR\n");
-    let screen = shown.borrow()[0].clone();
-    let rows: Vec<&str> = screen.lines().collect();
+    let rows: Vec<&str> = screens[0].lines().collect();
     assert_eq!(rows[0], " ORDER ENTRY");
     assert_eq!(rows[2], " CUSTOMER:");
     assert_eq!(rows[5], " ENTER AN ORDER");
+    let on_vm = on_terminal(&source, &dir, script, true).2;
+    assert_eq!(on_vm, Err("not run yet: SEND MAP with no FROM, whose symbolic map the LIR has no place for".into()));
+}
+
+#[test]
+fn bms_maps_sent_from_and_received_into_a_named_area_run_alike_on_the_vm() {
+    let dir = temp("bms-vm");
+    ordset(&dir);
+    let source = cics_program(
+        "ORDERS",
+        "           COPY ORDSET.\n       01  WS-RESP PIC S9(8) COMP.\n",
+        "",
+        &[
+            line("MOVE LOW-VALUES TO ORDMAPO"),
+            line("MOVE 'ENTER AN ORDER' TO MSGO"),
+            line("MOVE -1 TO QTYL"),
+            line("EXEC CICS SEND MAP('ORDMAP') MAPSET('ORDSET') FROM(ORDMAPO)"),
+            line("    ERASE CURSOR END-EXEC"),
+            line("EXEC CICS RECEIVE MAP('ORDMAP') MAPSET('ORDSET')"),
+            line("    INTO(ORDMAPI) END-EXEC"),
+            line("DISPLAY 'CUST ' CUSTI ' L=' CUSTL ' QTY ' QTYI ' AID ' EIBAID"),
+            line("EXEC CICS RECEIVE MAP('ORDMAP') MAPSET('ORDSET')"),
+            line("    INTO(ORDMAPI) RESP(WS-RESP) END-EXEC"),
+            line("IF WS-RESP = DFHRESP(MAPFAIL) DISPLAY 'MAPFAIL' END-IF"),
+            line("EXEC CICS SEND CONTROL ERASE FREEKB END-EXEC"),
+            line("EXEC CICS RETURN END-EXEC."),
+        ]
+        .concat(),
+    );
+    let script = "type 3 12 ACME\ntype 4 12 7\nENTER\nCLEAR\n";
+    let interpreted = on_terminal(&source, &dir, script, false);
+    assert_eq!((interpreted.0.as_str(), &interpreted.2), ("CUST ACME     L=0004 QTY 007 AID '\nMAPFAIL\n", &Ok(Ending::Goback)));
+    assert_eq!(on_terminal(&source, &dir, script, true), interpreted);
 }
 
 #[test]

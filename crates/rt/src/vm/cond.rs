@@ -58,7 +58,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
                 let i = self.int_place(*index, pos)?;
                 (1..=count).contains(&i)
             }
-            Cond::Sql(_) => return Err(not_yet("EXEC SQL")),
+            Cond::Sql(test) => self.sql_test(*test)?,
         })
     }
 

@@ -140,8 +140,8 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             Op::Return(id) => return self.return_record(&p.services.returns[*id as usize], pos),
             Op::Report(op) => return self.report(*op, pos),
             Op::Invoke(_) => return Err(not_yet("object-oriented COBOL")),
-            Op::Cics(_) => return Err(not_yet("EXEC CICS")),
-            Op::Sql(_) => return Err(not_yet("EXEC SQL")),
+            Op::Cics(id) => return self.cics(*id, pos),
+            Op::Sql(ordinal) => return self.sql(*ordinal, pos),
             Op::Markup(id) => return self.markup(&p.services.markup[*id as usize], at, pos),
             Op::Alter { para, to } => {
                 let paragraphs = p.paragraphs.len();

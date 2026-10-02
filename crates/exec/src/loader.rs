@@ -104,6 +104,10 @@ impl Loader<Rc<Compiled>> for Library {
         }
         Ok(Some(FoundClass { code: Rc::new(code), sources }))
     }
+
+    fn mapset(&mut self, name: &str) -> Option<Result<rt::bms::Mapset, String>> {
+        syntax::bms::find_mapset(&self.copy, name).map(|found| found.map_err(|e| e.message))
+    }
 }
 
 /// Adding a program to the interpreter's run unit by its source's PROGRAM-ID and FILE-CONTROL.

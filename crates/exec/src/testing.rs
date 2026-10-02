@@ -1,11 +1,12 @@
 use crate::lower::{self, LowerError};
 use crate::unit::{Event, Remains};
 use crate::vm::{self, Code, Halt};
-use crate::{Abend, Compiled, Ending, Execute, cics, compile, compile_at, files, unit};
+use crate::{Abend, Compiled, Ending, Execute, cics, compile, compile_at, files, sql, unit};
 use rt::lir::{CompileTime, Program};
 use rt::module::StringTable;
 use rt::module::codec::{Encode, Writer, decode_all};
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::io::{Cursor, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
@@ -25,6 +26,9 @@ pub struct Outcome {
     pub task: Option<cics::Task>,
 }
 
+/// Makes the database of one run, afresh for each executor.
+type Databases = Rc<dyn Fn() -> Box<dyn sql::Database>>;
+
 /// Parses, compiles and runs one source with what a test sets; a CICS task makes it a CICS run.
 pub struct Harness {
     source: String,
@@ -37,6 +41,7 @@ pub struct Harness {
     task: Option<cics::Task>,
     commarea: Option<String>,
     when_compiled: Option<CompileTime>,
+    database: Option<Databases>,
 }
 
 impl Harness {
@@ -52,6 +57,7 @@ impl Harness {
             task: None,
             commarea: None,
             when_compiled: None,
+            database: None,
         }
     }
 
@@ -102,9 +108,17 @@ impl Harness {
         self
     }
 
-    /// Runs the program. Under the interpreter, a program that lowers runs on the VM too with the
-    /// same inputs, the system clock read once for both, and the two must agree in everything
-    /// [`Run`] holds (docs/lir.md §12.3); what the VM does not run yet is counted, not failed.
+    /// EXEC SQL answered by the database `make` gives each run; the differential test compares
+    /// the calls each executor's run makes and the answers it takes.
+    pub fn database(mut self, make: impl Fn() -> Box<dyn sql::Database> + 'static) -> Self {
+        self.database = Some(Rc::new(make));
+        self
+    }
+
+    /// Runs the program, as a CICS task when a test gives one. Under the interpreter, a program
+    /// that lowers runs on the VM too with the same inputs, the system clock read once for both,
+    /// and the two must agree in everything [`Run`] holds (docs/lir.md §12.3); what the VM does
+    /// not run yet is counted, not failed.
     pub fn run(self, executor: Executor) -> Outcome {
         let mut programs = syntax::parse_all_with(&self.source, &syntax::copy::Libraries::default()).unwrap_or_else(|e| panic!("{e}"));
         let main = programs.remove(0);
@@ -123,22 +137,6 @@ impl Harness {
                 check_lowering(&c, fingerprint, None);
             }
         }
-        if let Some(task) = self.task {
-            if let Executor::Vm = executor {
-                panic!("the VM does not run a CICS task yet");
-            }
-            if lowered.is_some() {
-                report_vm(&compiled, fingerprint, "unimplemented\ta CICS task");
-            }
-            let task = cics::Task { commarea: self.commarea.map(|c| compiled.options.code_page().encode(&c).unwrap()), ..task };
-            let dds = files::Dds::new(&self.dds, false).unwrap();
-            let (mut out, mut err) = (Vec::new(), Vec::new());
-            let (ending, task) = match compiled.execute_cics(library, dds, task, self.clock, &mut out, &mut err) {
-                Ok((ending, task)) => (Ok(ending), Some(task)),
-                Err(abend) => (Err(abend), None),
-            };
-            return Outcome { out: String::from_utf8(out).unwrap(), err: String::from_utf8(err).unwrap(), ending, return_code: 0, task };
-        }
         let clock = match self.clock {
             unit::Clock::System => {
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
@@ -146,50 +144,56 @@ impl Harness {
             }
             fixed => fixed,
         };
-        let inputs = Inputs { compiled: &compiled, library, dds: self.dds, sysin: self.sysin, clock };
-        match executor {
+        let task = self.task.map(|task| cics::Task { commarea: self.commarea.map(|c| compiled.options.code_page().encode(&c).unwrap()), ..task });
+        let paths = paths(&self.dds, task.as_ref());
+        let inputs = Inputs { compiled: &compiled, library, dds: self.dds, sysin: self.sysin, clock, database: self.database, paths };
+        let run = match executor {
             Executor::Vm => {
-                let run = inputs.vm(&vm::code(&compiled));
-                let ending = match run.ending {
-                    Ok(e) => Ok(e),
-                    Err(Halt::Abend(a)) => Err(a),
+                let run = inputs.vm(&vm::code(&compiled), task);
+                match run.ending {
                     Err(Halt::Unimplemented(what)) => panic!("the VM does not run {what} yet"),
-                };
-                Outcome { out: run.out, err: run.err, ending, return_code: run.return_code, task: None }
+                    _ => run,
+                }
             }
             Executor::Interpreter => {
-                let before = inputs.files();
-                let walker = inputs.walker();
-                if lowered.is_some() {
-                    let after = inputs.files();
-                    restore(&before);
-                    let code = vm::code(&compiled);
-                    let vm = catch_unwind(AssertUnwindSafe(|| inputs.vm(&code)));
-                    restore(&after);
-                    differential(&compiled, fingerprint, &walker, vm);
+                let twin = task.as_ref().and_then(twin);
+                let terminal = task.as_ref().is_some_and(|t| t.terminal.is_some());
+                let before = files(&inputs.paths);
+                let walker = inputs.walker(task);
+                match lowered {
+                    Some(_) if terminal => report_vm(&compiled, fingerprint, "unimplemented\ta CICS task with a terminal, which the harness cannot give both executors"),
+                    Some(_) => {
+                        let after = files(&inputs.paths);
+                        restore(&before);
+                        let code = vm::code(&compiled);
+                        let vm = catch_unwind(AssertUnwindSafe(|| inputs.vm(&code, twin)));
+                        restore(&after);
+                        differential(&compiled, fingerprint, &walker, vm);
+                    }
+                    None => {}
                 }
-                Outcome {
-                    out: walker.out,
-                    err: walker.err,
-                    ending: walker.ending.map_err(|h| match h {
-                        Halt::Abend(a) => a,
-                        Halt::Unimplemented(what) => unreachable!("the interpreter stopped for {what}"),
-                    }),
-                    return_code: walker.return_code,
-                    task: None,
-                }
+                walker
             }
-        }
+        };
+        let ending = run.ending.map_err(|h| match h {
+            Halt::Abend(a) => a,
+            Halt::Unimplemented(what) => unreachable!("the interpreter stopped for {what}"),
+        });
+        let task = run.task.filter(|_| ending.is_ok());
+        Outcome { out: run.out, err: run.err, ending, return_code: run.return_code, task }
     }
 }
 
-/// What a batch run takes, given alike to the interpreter and the VM.
+/// What a run takes, given alike to the interpreter and the VM, and the files the differential
+/// test compares.
 struct Inputs<'c> {
     compiled: &'c Compiled,
     library: unit::Library,
     dds: Vec<String>,
     sysin: Option<String>,
     clock: unit::Clock,
+    database: Option<Databases>,
+    paths: Vec<PathBuf>,
 }
 
 /// What the differential test compares of a run.
@@ -201,6 +205,9 @@ struct Run {
     events: Events,
     remains: Option<Remains>,
     files: Vec<(PathBuf, Option<Vec<u8>>)>,
+    task: Option<cics::Task>,
+    /// The recording of the run's EXEC SQL calls and the database's answers.
+    sql: String,
 }
 
 /// The events a run told its observer: how many, a digest of them all, and the first few.
@@ -238,44 +245,104 @@ impl Inputs<'_> {
         self.sysin.clone().map(|s| Box::new(Cursor::new(s.into_bytes())) as Box<dyn std::io::BufRead>)
     }
 
-    /// The files the DDs name, as they stand, None where there is none.
-    fn files(&self) -> Vec<(PathBuf, Option<Vec<u8>>)> {
-        let dds = files::Dds::new(&self.dds, false).unwrap();
-        let names = self.dds.iter().filter_map(|spec| spec.split_once('=')).map(|(name, _)| name.to_ascii_uppercase());
-        names.filter_map(|name| dds.get(&name)).map(|dd| (dd.path.clone(), std::fs::read(&dd.path).ok())).collect()
+    /// The database of one run, recording what it is asked and answers.
+    fn database(&self) -> Option<(rt::sql::Recorder<'static>, Recording)> {
+        let make = self.database.as_ref()?;
+        let recording = Recording::default();
+        let recorder = rt::sql::Recorder::new(make(), Box::new(recording.clone()), "the test harness").unwrap();
+        Some((recorder, recording))
     }
 
-    fn walker(&self) -> Run {
+    fn walker(&self, task: Option<cics::Task>) -> Run {
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let events = Rc::new(RefCell::new(Events::default()));
-        let recorder = events.clone();
-        let observer: unit::Observer<'_> = Box::new(move |e: Event<'_>| recorder.borrow_mut().record(&e));
+        let (events, observer) = observed();
         let mut remains = None;
         let dds = files::Dds::new(&self.dds, false).unwrap();
-        let ended = self.compiled.execute_kept(self.library.clone(), dds, self.sysin(), self.clock, None, &mut out, &mut err, Some(observer), &mut remains);
-        let (ending, return_code) = match ended {
-            Ok((ending, code)) => (Ok(ending), code),
-            Err(abend) => (Err(Halt::Abend(abend)), 0),
+        let (mut database, recording) = self.database().unzip();
+        let db = database.as_mut().map(|d| d as &mut dyn sql::Database);
+        let (ending, return_code, task) = match task {
+            Some(task) => {
+                let (ending, task) = crate::execute_task(self.compiled, self.library.clone(), dds, task, self.clock, db, &mut out, &mut err, Some(observer), &mut remains);
+                (ending.map_err(Halt::Abend), 0, Some(task))
+            }
+            None => match self.compiled.execute_kept(self.library.clone(), dds, self.sysin(), self.clock, db, &mut out, &mut err, Some(observer), &mut remains) {
+                Ok((ending, code)) => (Ok(ending), code, None),
+                Err(abend) => (Err(Halt::Abend(abend)), 0, None),
+            },
         };
-        let events = Rc::try_unwrap(events).map(RefCell::into_inner).unwrap_or_default();
-        Run { out: String::from_utf8(out).unwrap(), err: String::from_utf8(err).unwrap(), ending, return_code, events, remains, files: self.files() }
+        drop(database);
+        let (out, err) = (String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap());
+        Run { out, err, ending, return_code, events: events.take(), remains, files: files(&self.paths), task, sql: recording.map(|r| r.text()).unwrap_or_default() }
     }
 
-    fn vm(&self, code: &Code) -> Run {
+    fn vm(&self, code: &Code, task: Option<cics::Task>) -> Run {
         let (mut out, mut err) = (Vec::new(), Vec::new());
-        let events = Rc::new(RefCell::new(Events::default()));
-        let recorder = events.clone();
-        let observer: unit::Observer<'_> = Box::new(move |e: Event<'_>| recorder.borrow_mut().record(&e));
+        let (events, observer) = observed();
         let mut remains = None;
         let dds = files::Dds::new(&self.dds, false).unwrap();
-        let ended = vm::execute(self.compiled, code, self.library.clone(), dds, self.sysin(), self.clock, None, &mut out, &mut err, Some(observer), None, &mut remains);
-        let (ending, return_code) = match ended {
-            Ok((ending, code)) => (Ok(ending), code),
-            Err(halt) => (Err(halt), 0),
+        let (mut database, recording) = self.database().unzip();
+        let db = database.as_mut().map(|d| d as &mut dyn sql::Database);
+        let (ending, return_code, task) = match task {
+            Some(task) => {
+                let (ending, task) = vm::execute_cics(self.compiled, code, self.library.clone(), dds, task, self.clock, db, &mut out, &mut err, Some(observer), &mut remains);
+                (ending, 0, Some(task))
+            }
+            None => match vm::execute(self.compiled, code, self.library.clone(), dds, self.sysin(), self.clock, db, &mut out, &mut err, Some(observer), None, &mut remains) {
+                Ok((ending, code)) => (Ok(ending), code, None),
+                Err(halt) => (Err(halt), 0, None),
+            },
         };
-        let events = Rc::try_unwrap(events).map(RefCell::into_inner).unwrap_or_default();
-        Run { out: String::from_utf8_lossy(&out).into_owned(), err: String::from_utf8_lossy(&err).into_owned(), ending, return_code, events, remains, files: self.files() }
+        drop(database);
+        let (out, err) = (String::from_utf8_lossy(&out).into_owned(), String::from_utf8_lossy(&err).into_owned());
+        Run { out, err, ending, return_code, events: events.take(), remains, files: files(&self.paths), task, sql: recording.map(|r| r.text()).unwrap_or_default() }
     }
+}
+
+/// An observer that keeps what it is told, and what it has kept.
+fn observed<'w>() -> (Rc<RefCell<Events>>, unit::Observer<'w>) {
+    let events = Rc::new(RefCell::new(Events::default()));
+    let recorder = events.clone();
+    (events, Box::new(move |e: Event<'_>| recorder.borrow_mut().record(&e)))
+}
+
+/// A recording's text, as the recorder writes it.
+#[derive(Clone, Default)]
+struct Recording(Rc<RefCell<Vec<u8>>>);
+
+impl Recording {
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.borrow()).into_owned()
+    }
+}
+
+impl Write for Recording {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.borrow_mut().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The files the DDs name, then a task's data sets and the host files its transient-data queues
+/// are written to.
+fn paths(specs: &[String], task: Option<&cics::Task>) -> Vec<PathBuf> {
+    let dds = files::Dds::new(specs, false).unwrap();
+    let names = specs.iter().filter_map(|spec| spec.split_once('=')).map(|(name, _)| name.to_ascii_uppercase());
+    let mut paths: Vec<PathBuf> = names.filter_map(|name| dds.get(&name)).map(|dd| dd.path.clone()).collect();
+    if let Some(t) = task {
+        let mut held: Vec<PathBuf> = t.files.values().map(|f| f.dd.path.clone()).chain(t.td_files.values().cloned()).collect();
+        held.sort();
+        paths.extend(held);
+    }
+    paths
+}
+
+/// Each file as it stands, None where there is none.
+fn files(paths: &[PathBuf]) -> Vec<(PathBuf, Option<Vec<u8>>)> {
+    paths.iter().map(|path| (path.clone(), std::fs::read(path).ok())).collect()
 }
 
 fn restore(files: &[(PathBuf, Option<Vec<u8>>)]) {
@@ -287,6 +354,44 @@ fn restore(files: &[(PathBuf, Option<Vec<u8>>)]) {
             }
         }
     }
+}
+
+/// A copy of a task for the second executor's run; None for one with a terminal, which a run
+/// consumes.
+fn twin(t: &cics::Task) -> Option<cics::Task> {
+    if t.terminal.is_some() {
+        return None;
+    }
+    Some(cics::Task {
+        transid: t.transid.clone(),
+        termid: t.termid.clone(),
+        userid: t.userid.clone(),
+        applid: t.applid.clone(),
+        sysid: t.sysid.clone(),
+        number: t.number,
+        commarea: t.commarea.clone(),
+        files: t.files.clone(),
+        ts: t.ts.clone(),
+        td: t.td.clone(),
+        td_files: t.td_files.clone(),
+        held: t.held.clone(),
+        browses: t.browses.clone(),
+        terminal: None,
+        initial_aid: t.initial_aid,
+        mapsets: t.mapsets.clone(),
+        next_transid: t.next_transid.clone(),
+        returned_commarea: t.returned_commarea.clone(),
+        abcode: t.abcode.clone(),
+        cancelling: t.cancelling,
+    })
+}
+
+/// What a task ended with that the differential test compares: RETURN's TRANSID and COMMAREA, the
+/// queues, the records READ UPDATE holds, the open browses, and the abend code ASSIGN gives.
+fn task_state(t: &cics::Task) -> String {
+    let held: BTreeMap<_, _> = t.held.iter().collect();
+    let browses: BTreeMap<_, _> = t.browses.iter().collect();
+    format!("{:?}", (&t.next_transid, &t.returned_commarea, &t.ts, &t.td, held, browses, &t.abcode, t.cancelling))
 }
 
 /// With `IRONWORK_VM_REPORT` set, appends a line to that file: the test, the PROGRAM-ID, the
@@ -326,7 +431,7 @@ fn differential(compiled: &Compiled, fingerprint: u32, walker: &Run, vm: std::th
 
 fn differences(walker: &Run, vm: &Run) -> Vec<String> {
     let mut found = Vec::new();
-    for (what, a, b) in [("DISPLAY output", &walker.out, &vm.out), ("standard error", &walker.err, &vm.err)] {
+    for (what, a, b) in [("DISPLAY output", &walker.out, &vm.out), ("standard error", &walker.err, &vm.err), ("the SQL recording", &walker.sql, &vm.sql)] {
         if a != b {
             let (x, y) = (a.split_inclusive('\n').collect::<Vec<_>>(), b.split_inclusive('\n').collect::<Vec<_>>());
             let k = x.iter().zip(&y).position(|(p, q)| p != q).unwrap_or(x.len().min(y.len()));
@@ -338,6 +443,10 @@ fn differences(walker: &Run, vm: &Run) -> Vec<String> {
     }
     if walker.return_code != vm.return_code {
         found.push(format!("RETURN-CODE differs: interpreter {}, VM {}", walker.return_code, vm.return_code));
+    }
+    let (a, b) = (walker.task.as_ref().map(task_state), vm.task.as_ref().map(task_state));
+    if a != b {
+        found.push(format!("the task differs: interpreter {a:?}, VM {b:?}"));
     }
     let (e, f) = (&walker.events, &vm.events);
     if (e.count, e.digest) != (f.count, f.digest) {

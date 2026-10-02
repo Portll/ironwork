@@ -273,7 +273,7 @@ impl Execute for Compiled {
         &self,
         library: unit::Library,
         dds: files::Dds,
-        mut task: cics::Task,
+        task: cics::Task,
         clock: unit::Clock,
         database: Option<&'w mut (dyn sql::Database + '_)>,
         out: &'w mut dyn Write,
@@ -281,37 +281,81 @@ impl Execute for Compiled {
         observer: Option<unit::Observer<'w>>,
     ) -> Result<(Ending, cics::Task), Abend> {
         oo::refuse_to_run(&self.program)?;
-        let mut run_unit = unit::RunUnit::new(library, dds, None, clock, out, err);
-        run_unit.observer = observer;
-        run_unit.sql = database.map(sql::Session::new);
-        let me = run_unit.add(None, &self.program, self.layout.size as usize);
-        run_unit.eib = run_unit.push_temporary(&[0; cics::EIB_LEN]);
-        let commarea = task.commarea.take();
-        let length = commarea.as_ref().map_or(0, Vec::len);
-        let commarea = commarea.map(|c| run_unit.push_temporary(&c));
-        run_unit.cics = Some(task);
-        let ending = machine::Machine::activation(self, me, &mut run_unit, true).and_then(|mut m| {
+        let (ending, task) = execute_task(self, library, dds, task, clock, database, out, err, observer, &mut None);
+        ending.map(|e| (e, task))
+    }
+}
+
+/// Runs `compiled` on the interpreter as the first program of a CICS task, as
+/// [`Execute::execute_cics_observed`] does; `kept` takes what the run left in its run unit, and the
+/// task comes back however the run ended.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn execute_task<'w>(
+    compiled: &Compiled,
+    library: unit::Library,
+    dds: files::Dds,
+    task: cics::Task,
+    clock: unit::Clock,
+    database: Option<&'w mut (dyn sql::Database + '_)>,
+    out: &'w mut dyn Write,
+    err: &'w mut dyn Write,
+    observer: Option<unit::Observer<'w>>,
+    kept: &mut Option<unit::Remains>,
+) -> (Result<Ending, Abend>, cics::Task) {
+    let statements = library.trace_statements.clone();
+    let mut run_unit = unit::RunUnit::new(library, dds, None, clock, out, err);
+    run_unit.observer = observer;
+    run_unit.statements = statements;
+    run_unit.sql = database.map(sql::Session::new);
+    let (ending, ended, task) = run_task(compiled, run_unit, task, kept, |unit, me, commarea, length| {
+        machine::Machine::activation(compiled, me, unit, true).and_then(|mut m| {
             m.begin_task(commarea, length);
             m.run_level()
-        });
-        let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.end_task(&self.program.id, ending.is_ok()).map(drop));
-        let mut closed = run_unit.close_all();
-        for (name, f) in run_unit.cics_files.drain() {
-            if let Err(e) = f.close() {
-                closed = closed.and(Err(format!("closing CICS file {name}: {e}")));
-            }
+        })
+    });
+    (ending.map_err(asra).and_then(|e| ended.map(|()| e)), task)
+}
+
+/// A CICS task's run unit given the task, its EXEC interface block and its COMMAREA, and the task's
+/// first program added as `me` and run by `run` with the COMMAREA's address and length; then the
+/// task's unit of work ended, its files closed and its transient data written. Returns how the run
+/// ended, how ending the task went, and the task; `kept` takes what the run left in its run unit.
+pub(crate) fn run_task<'w, H: Clone, L: unit::Loader<H>, E>(
+    compiled: &Compiled,
+    mut run_unit: rt::unit::RunUnit<'w, H, L>,
+    mut task: cics::Task,
+    kept: &mut Option<unit::Remains>,
+    run: impl FnOnce(&mut rt::unit::RunUnit<'w, H, L>, usize, Option<usize>, usize) -> Result<Ending, E>,
+) -> (Result<Ending, E>, Result<(), Abend>, cics::Task) {
+    let me = run_unit.add_named(None, compiled.program.id.to_ascii_uppercase(), compiled.program.files.len(), compiled.layout.size as usize);
+    run_unit.eib = run_unit.push_temporary(&[0; cics::EIB_LEN]);
+    let commarea = task.commarea.take();
+    let length = commarea.as_ref().map_or(0, Vec::len);
+    let commarea = commarea.map(|c| run_unit.push_temporary(&c));
+    run_unit.cics = Some(task);
+    let ending = run(&mut run_unit, me, commarea, length);
+    let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.end_task(&compiled.program.id, ending.is_ok()).map(drop));
+    let mut closed = run_unit.close_all();
+    for (name, f) in run_unit.cics_files.drain() {
+        if let Err(e) = f.close() {
+            closed = closed.and(Err(format!("closing CICS file {name}: {e}")));
         }
-        let mut task = run_unit.cics.take().unwrap_or_default();
-        if let Err(e) = task.flush_td(self.options.code_page()) {
-            closed = closed.and(Err(format!("writing transient data: {e}")));
-        }
-        let ending = ending.map_err(|a| match a.code {
-            AbendCode::Check(_) | AbendCode::Protection => Abend { message: format!("{} ({}, which CICS reports as ASRA)", a.message, a.code), code: AbendCode::Cics("ASRA".into()), pos: a.pos, file: a.file },
-            _ => a,
-        })?;
-        settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default(), file: None })?;
-        closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default(), file: None })?;
-        Ok((ending, task))
+    }
+    *kept = Some(unit::Remains::of(&run_unit));
+    let mut task = run_unit.cics.take().unwrap_or_default();
+    if let Err(e) = task.flush_td(compiled.options.code_page()) {
+        closed = closed.and(Err(format!("writing transient data: {e}")));
+    }
+    let settled = settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default(), file: None });
+    let closed = closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default(), file: None });
+    (ending, settled.and(closed), task)
+}
+
+/// A program check in a CICS task, which CICS reports as ASRA.
+pub(crate) fn asra(a: Abend) -> Abend {
+    match a.code {
+        AbendCode::Check(_) | AbendCode::Protection => Abend { message: format!("{} ({}, which CICS reports as ASRA)", a.message, a.code), code: AbendCode::Cics("ASRA".into()), pos: a.pos, file: a.file },
+        _ => a,
     }
 }
 

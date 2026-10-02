@@ -199,6 +199,7 @@ impl<'a, 'w> SqlHost<'w, &'a Ref, String> for Bound<'_, '_, '_, 'w> {
 mod tests {
     use crate::Execute;
     use crate::sql::{Abandoned, Answer, Call, Database, Outcome, Value};
+    use crate::testing::{Executor, Harness};
     use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::rc::Rc;
@@ -262,7 +263,19 @@ mod tests {
         "       PROCEDURE DIVISION.\n",
     );
 
+    /// Runs `source` under the test harness, each executor's run with a database answering
+    /// `answers`, and in a CICS task with `task`; the two runs must agree.
+    fn both(source: &str, answers: &[Outcome], task: bool) {
+        let answers = answers.to_vec();
+        let mut harness = Harness::source(source).database(move || Box::new(Script { answers: answers.clone().into(), calls: Calls::default() }));
+        if task {
+            harness = harness.task(crate::cics::Task { transid: "T1".into(), ..Default::default() });
+        }
+        harness.run(Executor::Interpreter);
+    }
+
     fn run(procedure: &str, answers: Vec<Outcome>) -> (Result<String, String>, Vec<Logged>) {
+        both(&format!("{DATA}{procedure}"), &answers, false);
         let program = syntax::parse(&format!("{DATA}{procedure}")).expect("parses");
         let compiled = crate::compile(program, &[]).expect("compiles");
         crate::testing::check_lowering(&compiled, rt::sql::fingerprint(procedure), None);
@@ -425,6 +438,7 @@ mod tests {
         crate::testing::check_lowering(&compiled, rt::sql::fingerprint(source), None);
         let calls = Calls::default();
         let row = vec![Value::Char("ADAMS".into()), Value::Int(42), Value::Null];
+        both(source, &[Outcome::rows(vec![row.clone()])], false);
         let mut db = Script { answers: vec![Outcome::rows(vec![row])].into(), calls: calls.clone() };
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let ran = compiled.execute_with(crate::unit::Library::default(), crate::files::Dds::default(), None, crate::unit::Clock::System, Some(&mut db), &mut out, &mut err);
@@ -535,6 +549,7 @@ mod tests {
     }
 
     fn run_task(procedure: &str, answers: Vec<Outcome>) -> (String, Result<(), String>, Vec<Logged>) {
+        both(&format!("{DATA}{procedure}"), &answers, true);
         let compiled = crate::compile(syntax::parse(&format!("{DATA}{procedure}")).expect("parses"), &[]).expect("compiles");
         crate::testing::check_lowering(&compiled, rt::sql::fingerprint(procedure), None);
         let calls = Calls::default();
@@ -590,6 +605,7 @@ mod tests {
             "           EXEC CICS RETURN END-EXEC.\n",
         ]
         .concat();
+        both(&format!("{DATA}{procedure}"), &[], true);
         let compiled = crate::compile(syntax::parse(&format!("{DATA}{procedure}")).expect("parses"), &[]).expect("compiles");
         crate::testing::check_lowering(&compiled, rt::sql::fingerprint(&procedure), None);
         let calls = Calls::default();
@@ -627,6 +643,8 @@ mod tests {
     }
 
     fn replayed(procedure: &str, recording: &str) -> Result<String, (String, String)> {
+        let text = recording.to_owned();
+        Harness::source(&format!("{DATA}{procedure}")).database(move || Box::new(crate::sql::Replay::parse(&text, false).expect("the recording parses"))).run(Executor::Interpreter);
         let compiled = crate::compile(syntax::parse(&format!("{DATA}{procedure}")).expect("parses"), &[]).expect("compiles");
         crate::testing::check_lowering(&compiled, rt::sql::fingerprint(procedure), None);
         let mut replay = crate::sql::Replay::parse(recording, false).expect("the recording parses");

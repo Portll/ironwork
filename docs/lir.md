@@ -1303,7 +1303,17 @@ options the translator gives and resolving HANDLE labels there. SYNCPOINT is a s
   gives both. HANDLE ABEND, whose exit the walker takes when an abend reaches the program's
   activation (`run_level`), which the VM has no frame for yet.
 - **Not lowered:** the observer's sinks (`cics_sinks`), which tell an observer a command's operands
-  and change no result, as with CALL's and DISPLAY's.
+  and change no result, as with CALL's and DISPLAY's. The VM tells them from the options the
+  command keeps, which leave out SYSID on any command but ASSIGN, WRITE's FROM under JOURNALNAME or
+  JOURNALNUM, and QNAME written beside QUEUE; an observed command kept as `Unsupported` stops the VM
+  as `Halt::Unimplemented`.
+- **On the VM.** A program level's handlers live in its activation. An abend that reaches a level
+  whose HANDLE ABEND exit is active goes to the exit as `run_level` sends it: a LABEL restarts the
+  activation's dispatch at the label, its frames gone as the walker's Rust calls are, the points
+  they armed still armed and the depth the activation's. LINK and XCTL run the program as a new
+  activation through `CicsHost::run_program`. The mapset comes from `Loader::mapset`; the LIR has
+  no place for the symbolic map SEND MAP without FROM and RECEIVE MAP without INTO or SET find by
+  name, so those stop the VM as `Halt::Unimplemented`.
 
 ### 9.6 SORT, MERGE and Report Writer
 
@@ -2141,17 +2151,20 @@ The golden programs of §12.2 run in both, which exercises C99.
 **What runs now.** `rt::vm` runs the core: storage, every data op, conditions, control flow and
 CALL within the run unit; the file statements with LINAGE and their USE AFTER EXCEPTION/ERROR
 procedures, SORT, MERGE, RELEASE and RETURN with their procedures, and the Report Writer with its
-USE BEFORE REPORTING procedures, each a host of the `rt` service the walker calls; and JSON and XML
-GENERATE and PARSE. EXEC CICS and SQL, LE callable services, the virtual printer, OO COBOL,
-NUMCHECK and PARMCHECK stop a run as `Halt::Unimplemented`, naming what was reached, and so do
-FUNCTION UUID4, whose value differs on every run, and the few places where the LIR does not keep
-what decides the interpreter's result.
-The test `Harness` runs every batch program that lowers on both executors, the system clock read
-once for both, and fails the test when they differ in DISPLAY output, standard error, the ending or
-abend (code, message, position and file), RETURN-CODE, the events an observer is told (Load, Open,
-Close, Paragraph, Sink), run-unit memory and each program's place in it, or a DD's file; a run the
-VM stops is counted, not failed. With `IRONWORK_VM_REPORT` set it appends a line per run, and
-`tools/vm-coverage.sh` totals them. A CICS task does not run on the VM yet.
+USE BEFORE REPORTING procedures, each a host of the `rt` service the walker calls; JSON and XML
+GENERATE and PARSE; EXEC SQL; and EXEC CICS in a task (`rt::vm::run_task`), LINK and XCTL included.
+LE callable services, the virtual printer, OO COBOL, NUMCHECK and PARMCHECK stop a run as
+`Halt::Unimplemented`, naming what was reached, and so do FUNCTION UUID4, whose value differs on
+every run, the CICS cases of §9.5, and the few places where the LIR does not keep what decides the
+interpreter's result. The test `Harness` runs every program that lowers on both executors, a CICS
+task included, the system clock read once for both, and fails the test when they differ in DISPLAY
+output, standard error, the ending or abend (code, message, position and file), RETURN-CODE, the
+events an observer is told (Load, Open, Close, Paragraph, Sink, Statement), run-unit memory and each
+program's place in it, a DD's file, a task's data sets and transient-data files, the task the run
+returns (RETURN's TRANSID and COMMAREA, the queues, held records, browses and abend code), or, with a
+database, the recording of the EXEC SQL calls and answers; a run the VM stops is counted, not
+failed. A task with a terminal runs on the interpreter alone, since a run consumes its terminal.
+With `IRONWORK_VM_REPORT` set it appends a line per run, and `tools/vm-coverage.sh` totals them.
 
 ### 12.4 What lowering refuses
 

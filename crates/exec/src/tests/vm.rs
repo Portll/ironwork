@@ -332,3 +332,29 @@ fn the_vm_writes_a_report_and_runs_its_use_before_reporting_procedure() {
     assert_eq!(out, "3\n");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "1\n3\nSUM  6\n");
 }
+
+#[test]
+fn the_vm_runs_a_cics_task_through_link_a_handled_condition_and_return() {
+    let main = cics_program(
+        "MAINP",
+        "       01  WS-AREA PIC X(5) VALUE 'AAAAA'.\n       01  WS-DATA PIC X(8).\n",
+        "",
+        &[
+            "       MAIN-LINE.\n",
+            &line("EXEC CICS HANDLE CONDITION QIDERR(NO-QUEUE) END-EXEC"),
+            &line("EXEC CICS LINK PROGRAM('SUBP') COMMAREA(WS-AREA) END-EXEC"),
+            &line("EXEC CICS READQ TS QUEUE('NOQ') INTO(WS-DATA) END-EXEC"),
+            &line("DISPLAY 'NOT REACHED'."),
+            "       NO-QUEUE.\n",
+            &line("DISPLAY 'BACK ' WS-AREA"),
+            &line("EXEC CICS RETURN TRANSID('NEXT') COMMAREA(WS-AREA) END-EXEC."),
+        ]
+        .concat(),
+    );
+    let sub = cics_program("SUBP", "", "       01  DFHCOMMAREA PIC X(5).\n", &[line("MOVE 'BBBBB' TO DFHCOMMAREA"), line("EXEC CICS RETURN END-EXEC.")].concat());
+    let source = format!("{main}       END PROGRAM MAINP.\n{sub}       END PROGRAM SUBP.\n");
+    let o = Harness::source(&source).task(task("TR12")).run(Executor::Vm);
+    assert_eq!((o.out.as_str(), o.ending), ("BACK BBBBB\n", Ok(Ending::Goback)));
+    let t = o.task.expect("the task");
+    assert_eq!((t.next_transid.as_deref(), t.returned_commarea), (Some("NEXT"), Some(ebcdic("BBBBB"))));
+}

@@ -5,6 +5,7 @@ use super::*;
 use super::cics_bind::operand;
 use crate::cics::{self, CicsHost};
 use rt::bms::Mapset;
+use rt::unit::Loader;
 use std::rc::Rc;
 
 use super::cics_bind::has;
@@ -130,7 +131,7 @@ impl<'a, 'w> CicsHost<'w, &'a Ref, &'a Operand, &'a str> for Machine<'_, '_, 'w>
     }
 
     fn mapset(&mut self, name: &str) -> Option<Result<Mapset, String>> {
-        syntax::bms::find_mapset(&self.unit.library.copy, name).map(|found| found.map_err(|e| e.message))
+        self.unit.library.mapset(name)
     }
 
     fn item_named(&mut self, name: &str, pos: Pos) -> R<Option<Loc>> {

@@ -23,7 +23,7 @@ fn scale(kind: Kind) -> u32 {
 }
 
 /// `Machine::integer`'s whole part, refused past 64 bits.
-fn whole(v: &Fixed, pos: Pos) -> Result<i64, Abend> {
+pub(super) fn whole(v: &Fixed, pos: Pos) -> Result<i64, Abend> {
     let m = align(v, 0, false).and_then(|m| m.to_u128()).and_then(|m| i64::try_from(m).ok());
     let m = m.ok_or_else(|| Abend::ironwork("an integer operand beyond 64 bits", pos))?;
     Ok(if v.negative { -m } else { m })
