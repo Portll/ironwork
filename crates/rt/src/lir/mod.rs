@@ -40,8 +40,8 @@ pub use place::{Base, Odo, Place, RefMod, Subscript};
 pub use sort::{FileSort, ReleasePlan, ReturnPlan, SortIo, SortKey, SortKeys, SortPlan, TableSort};
 pub use sql::{HostPlace, SqlEntry, SqlStatement, Sqlca, SqlcaField};
 pub use text::{
-    Bound, Chars, ConvertTable, Converting, DelimiterIn, InspectPhrase, InspectPlan, Replacement, StringPlan,
-    StringSource, UnstringInto, UnstringPlan,
+    Bound, Chars, ConvertTable, Converting, DelimiterIn, InspectPhrase, InspectPlan, Inspected, Replacement,
+    StringPlan, StringSource, UnstringInto, UnstringPlan,
 };
 pub use value::{ByteClass, Compare, Comparand, Cond, Const, Count, Expr, IntExpr, Operand, SignTest, SqlTest};
 

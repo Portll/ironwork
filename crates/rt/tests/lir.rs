@@ -331,7 +331,7 @@ fn program_shape_round_trips() {
         arith: vec![ArithPlan { dmax: 0, arith: Arith::Extend, prepass: vec![], steps: vec![], remainder: None, handled: false }],
         init: vec![InitPlan { fields: vec![InitField { offset: 0, len: 2, value: Figurative::Null, store: FILL }] }],
         display: vec![DisplayPlan { items: vec![DisplayItem::Text(0)], no_advancing: false }],
-        inspect: vec![InspectPlan { target: 0, tallying: vec![], replacing: vec![], converting: None }],
+        inspect: vec![InspectPlan { target: Inspected::Item(0), tallying: vec![], replacing: vec![], converting: None }],
         string: vec![StringPlan { into: 0, pointer: None, sources: vec![] }],
         unstring: vec![UnstringPlan { source: 0, pointer: None, delimiters: vec![], into: vec![], tallying: None }],
         search_all: vec![SearchAllPlan { index: 0, store: StorePlan::Index, count: Count::Fixed(5), keys: vec![] }],
@@ -1093,8 +1093,8 @@ fn inspect_string_and_unstring_round_trip_with_every_tag() {
         bounds: vec![Bound { after: false, value: Chars::Place(2) }, Bound { after: false, value: Chars::Place(8) }],
     };
     let converting = Converting { table: built, bounds: vec![] };
-    let inspect = InspectPlan { target: 0, tallying: vec![tally], replacing: vec![replace], converting: Some(converting) };
-    round_trip(&[inspect, InspectPlan { target: 1, tallying: vec![], replacing: vec![], converting: None }]);
+    let inspect = InspectPlan { target: Inspected::Item(0), tallying: vec![tally], replacing: vec![replace], converting: Some(converting) };
+    round_trip(&[inspect, InspectPlan { target: Inspected::Value(Operand::Function(0)), tallying: vec![], replacing: vec![], converting: None }]);
     let sources = vec![
         StringSource { chars: Chars::Place(2), delimiter: Some(Chars::Literal(vec![0x40])) },
         StringSource { chars: Chars::Literal(vec![0xC1, 0xC2]), delimiter: None },

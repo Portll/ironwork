@@ -6,7 +6,7 @@ use super::{Lower, R, push, unsupported};
 use crate::machine::literal_fixed;
 use rt::fixed::zoned_digits;
 use rt::lir::{
-    Bound, Chars, ConvertTable, Converting, DelimiterIn, InspectId, InspectPhrase, InspectPlan, PlaceId, Replacement, StepPlan,
+    Bound, Chars, ConvertTable, Converting, DelimiterIn, InspectId, InspectPhrase, InspectPlan, Inspected, PlaceId, Replacement, StepPlan,
     StorePlan, StringId, StringPlan, StringSource, UnstringId, UnstringInto, UnstringPlan,
 };
 use rt::storage::Kind;
@@ -69,14 +69,19 @@ impl Lower<'_> {
 
     /// CONVERTING's table is built here when both operands are literals of the same length; else
     /// the operands are kept and read, and their lengths compared, when the statement runs.
+    /// A function's value is tallied alone, as the walker's `rt::text::tally` ignores REPLACING and
+    /// CONVERTING there.
     pub(super) fn inspect_plan(&mut self, i: &Inspect, pos: Pos) -> R<InspectId> {
-        let Operand::Ref(target) = &i.target else {
-            return unsupported("INSPECT of a function result", pos);
+        let target = match &i.target {
+            Operand::Ref(r) => Inspected::Item(self.place(r, false)?),
+            op => Inspected::Value(self.operand(op, pos)?.operand),
         };
-        let target = self.place(target, false)?;
         let mut tallying = Vec::with_capacity(i.tallying.len());
         for p in &i.tallying {
             tallying.push(self.inspect_phrase(p, pos)?);
+        }
+        if matches!(target, Inspected::Value(_)) {
+            return push(&mut self.plans.inspect, InspectPlan { target, tallying, replacing: Vec::new(), converting: None }, "INSPECT plans");
         }
         let mut replacing = Vec::with_capacity(i.replacing.len());
         for p in &i.replacing {

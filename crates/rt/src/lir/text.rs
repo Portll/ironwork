@@ -16,9 +16,17 @@ pub enum Chars<P = PlaceId, O = Operand> {
     Value(O),
 }
 
+/// What INSPECT examines: a data item, or for TALLYING alone a function's value, which
+/// `rt::text::tally` evaluates once before the phrases' operands.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Inspected<P = PlaceId, O = Operand> {
+    Item(P),
+    Value(O),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InspectPlan<P = PlaceId, O = Operand> {
-    pub target: P,
+    pub target: Inspected<P, O>,
     pub tallying: Vec<InspectPhrase<P, O>>,
     pub replacing: Vec<InspectPhrase<P, O>>,
     pub converting: Option<Converting<P, O>>,
@@ -108,6 +116,7 @@ pub struct DelimiterIn<P = PlaceId> {
 }
 
 codec_enum!(Chars { Literal(bytes) = 0, Place(place) = 1, Value(value) = 2 });
+codec_enum!(Inspected { Item(place) = 0, Value(value) = 1 });
 codec_struct!(InspectPlan { target, tallying, replacing, converting });
 codec_struct!(InspectPhrase { mode, pattern, by, counter, bounds });
 codec_enum!(Replacement { Chars(chars) = 0, Fill(byte) = 1 });

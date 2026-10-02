@@ -430,8 +430,6 @@ fn constructs_outside_the_slice_are_refused_by_name() {
     assert!(matches!(all, LowerError::Unsupported("a FUNCTION of fixed arguments given a table whose ALL subscripts run to an OCCURS DEPENDING ON count", _)));
     let numval = refused("MOVE FUNCTION MAX(N M) TO A", "       01  A PIC X.\n       01  N PIC 9.\n       01  M PIC 99.\n");
     assert!(matches!(numval, LowerError::Unsupported(n, _) if n.starts_with("a FUNCTION result whose digits")));
-    let inspected = refused("INSPECT FUNCTION REVERSE(A) TALLYING C FOR LEADING SPACES", "       01  A PIC X.\n       01  C PIC 9.\n");
-    assert!(matches!(inspected, LowerError::Unsupported("INSPECT of a function result", _)));
     let e = refused("SEARCH T WHEN T(X) = 'A' CONTINUE END-SEARCH", "       01  G.\n           05 N PIC 9.\n           05 T PIC X OCCURS 1 TO 3 DEPENDING ON N.\n       01  X PIC 9.\n");
     assert_eq!(e.to_string(), "lowering: SEARCH of an OCCURS DEPENDING ON table with neither INDEXED BY nor VARYING is not lowered yet");
     assert_eq!(syntax::Error::from(e).pos.line, 10);
@@ -1444,4 +1442,16 @@ fn each_file_carries_the_lengths_its_vlr_setting_checks_a_read_against() {
     };
     assert_eq!(lengths(""), [(20, 50), (20, 50), (20, 50), (7, 52)]);
     assert_eq!(lengths("       CBL VLR(COMPAT)\n"), [(10, 80), (20, 80), (20, 50), (7, 52)]);
+}
+
+#[test]
+fn inspect_of_a_function_result_tallies_the_value_alone() {
+    let p = lowered(&program(
+        "",
+        "       01  A PIC X(3).\n       01  C PIC 9.\n",
+        &[line("INSPECT FUNCTION REVERSE(A) TALLYING C FOR LEADING SPACES"), line("GOBACK.")].concat(),
+    ));
+    let [plan] = &p.plans.inspect[..] else { panic!("{:?}", p.plans.inspect) };
+    assert!(matches!(plan.target, lir::Inspected::Value(LirOperand::Function(0))));
+    assert_eq!((plan.tallying.len(), plan.replacing.len(), plan.converting.is_none()), (1, 0, true));
 }

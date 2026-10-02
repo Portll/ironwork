@@ -4,7 +4,7 @@
 
 use rt::cics::Handles;
 use rt::lir::{
-    Advance, Argument, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Convert, ConvertTable, Count, DisplayItem, Expr, FileVerb, Flag, Func, HostPlace, IntExpr,
+    Advance, Argument, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Convert, ConvertTable, Count, DisplayItem, Inspected, Expr, FileVerb, Flag, Func, HostPlace, IntExpr,
     JsonValue, Marker, Markup, MethodName, MovePlan, Named, Op, Operand, ParseValue, Place, PlaceId, Program, RangeKind, Receiver, Replacement, ReportOp, SetTo, SortIo, SortPlan,
     SqlStatement, StartKey, StorePlan, SymId, Terminator, UpDown, XmlValue,
 };
@@ -289,7 +289,10 @@ fn verify_program(p: &Program) -> Result<(), String> {
         plan.tallying.as_ref().map_or(Ok(()), |(q, s)| place(*q).and_then(|()| store(&s.store)))?;
     }
     for plan in &p.plans.inspect {
-        place(plan.target)?;
+        match &plan.target {
+            Inspected::Item(q) => place(*q)?,
+            Inspected::Value(o) => operand(o)?,
+        }
         for phrase in plan.tallying.iter().chain(&plan.replacing) {
             phrase.pattern.as_ref().map_or(Ok(()), chars)?;
             if let Some(Replacement::Chars(c)) = &phrase.by {
