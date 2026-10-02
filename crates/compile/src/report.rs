@@ -74,6 +74,8 @@ pub(crate) fn entry(level: u8, name: Option<String>, picture: Option<String>, us
         false_value: None,
         renames: None,
         object_class: None,
+        external: false,
+        global: false,
         pos,
     }
 }

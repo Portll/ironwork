@@ -74,6 +74,8 @@ pub struct FileDecl {
     pub relative_key: Option<Ref>,
     pub optional: bool,
     pub status: Option<Ref>,
+    /// FILE STATUS's second data-name, for a VSAM file: the return, function and feedback codes.
+    pub vsam_status: Option<Ref>,
     /// RECORDING MODE: F, V, U or S.
     pub recording: Option<char>,
     pub record_min: Option<u32>,
@@ -185,6 +187,10 @@ pub struct DataEntry {
     pub renames: Option<(Ref, Option<Ref>)>,
     /// USAGE OBJECT REFERENCE class-name: the class; None for a universal reference.
     pub object_class: Option<String>,
+    /// EXTERNAL: the record belongs to the run unit, shared by every program that describes it.
+    pub external: bool,
+    /// GLOBAL: the programs this one contains may reference the record too.
+    pub global: bool,
     pub pos: Pos,
 }
 

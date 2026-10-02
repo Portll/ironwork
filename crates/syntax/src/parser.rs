@@ -550,6 +550,7 @@ impl Parser<'_> {
             relative_key: None,
             optional,
             status: None,
+            vsam_status: None,
             recording: None,
             record_min: None,
             record_max: None,
@@ -650,7 +651,7 @@ impl Parser<'_> {
                     self.accept_word("IS");
                     f.status = Some(self.reference()?);
                     if self.starts_ref() && !self.word().is_some_and(|w| SELECT_CLAUSES.contains(&w)) {
-                        self.reference()?;
+                        f.vsam_status = Some(self.reference()?);
                     }
                 }
                 "RESERVE" | "PADDING" => {
@@ -1007,6 +1008,8 @@ impl Parser<'_> {
             false_value: None,
             renames: None,
             object_class: None,
+            external: false,
+            global: false,
             pos,
         };
         if let Some(w) = self.word()
@@ -1113,7 +1116,8 @@ impl Parser<'_> {
                     self.blank_when_zero()?;
                     e.blank_when_zero = true;
                 }
-                "GLOBAL" | "EXTERNAL" => {}
+                "GLOBAL" => e.global = true,
+                "EXTERNAL" => e.external = true,
                 other => match usage_word(other) {
                     Some(u) => e.usage = Some(u),
                     None => return Err(Error::at(self.tokens[self.at - 1].pos, format!("{other} is not a data description clause ironwork for COBOL supports yet"))),

@@ -198,3 +198,21 @@ fn a_call_of_ceecbldy_under_intdate_lilian_is_a_warning_on_its_line_and_calls_ce
     let checked = ironwork(&["check", ansi.path()]);
     assert_eq!((checked.status.code(), stderr(&checked)), (Some(0), String::new()));
 }
+
+#[test]
+fn initcheck_warns_at_compile_time_with_return_code_4_and_the_program_runs() {
+    let program = |card: &str| {
+        format!("{card}       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  Y PIC X VALUE '7'.\n       01  Z PIC X.\n       PROCEDURE DIVISION.\n           IF Y > '5'\n             MOVE '2' TO Z\n           END-IF\n           DISPLAY Z\n           GOBACK.\n")
+    };
+    let strict = Source::new("initcheck-strict", &program("       CBL INITCHECK(STRICT)\n"));
+    let warning = format!("{}:12:12: warning: INITCHECK(STRICT): Z may be used uninitialized: a path to this statement does not set it (see C224)\n", strict.path());
+    let checked = ironwork(&["check", strict.path()]);
+    assert_eq!((checked.status.code(), stderr(&checked)), (Some(4), warning.clone()));
+    let ran = ironwork(&["run", strict.path()]);
+    assert_eq!((ran.status.code(), stderr(&ran), String::from_utf8_lossy(&ran.stdout).into_owned()), (Some(0), warning, "2\n".into()));
+    for card in ["       CBL INITCHECK\n", ""] {
+        let quiet = Source::new("initcheck-lax", &program(card));
+        let checked = ironwork(&["check", quiet.path()]);
+        assert_eq!((checked.status.code(), stderr(&checked)), (Some(0), String::new()), "{card}");
+    }
+}

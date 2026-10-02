@@ -84,12 +84,16 @@ CEEDAYS; QUALIFY(EXTEND), under which a complete set of qualifiers names its one
 which starts every program from its VALUE clauses on each CALL, and which THREAD drops; and
 VLR(COMPAT), under which a READ checks a variable-length record only against RECORD VARYING.
 VSAMOPENFS is read and kept, but no OPEN in ironwork reaches the verified open it changes.
-Assumptions C210 to C220 hold what the manuals leave open. NUMCHECK, with ZONECHECK as its zoned
-check, tests each zoned, packed or binary item a statement reads as a sender, and reports invalid
-data on the error stream (MSG) or ends the run with U4038 (ABD) (C228, C229). PARMCHECK(MSG|ABD,n)
-puts n bytes, 100 by default, after the WORKING-STORAGE a program declares and sets them to X'AA'
-before each CALL; when the called program has written into them, a warning on standard error names
-the parameter, the CALL's line and the program, and under ABD the run ends with U4038 (C226, C227).
+Assumptions C210 to C220 hold what the manuals leave open. INITCHECK (or IC) warns at compile time,
+return code 4, of each statement that uses a WORKING-STORAGE or LOCAL-STORAGE item no path to the
+statement sets, and INITCHECK(STRICT) of each that some path leaves unset, following PERFORM, GO TO
+and fall-through, and changes nothing at run time (C224, C225). NUMCHECK, with ZONECHECK as its
+zoned check, tests each zoned, packed or binary item a statement reads as a sender, and reports
+invalid data on the error stream (MSG) or ends the run with U4038 (ABD) (C228, C229).
+PARMCHECK(MSG|ABD,n) puts n bytes, 100 by default, after the WORKING-STORAGE a program declares and
+sets them to X'AA' before each CALL; when the called program has written into them, a warning on
+standard error names the parameter, the CALL's line and the program, and under ABD the run ends
+with U4038 (C226, C227).
 
 ironwork runs no operating-system command: a CALL of SYSTEM or C$SYSTEM that no library answers
 abends S806, unless it prints. In a run given DD PRINTER, the virtual printer, a command that is lp

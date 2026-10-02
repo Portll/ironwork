@@ -12,6 +12,7 @@ mod data;
 mod data_division;
 mod declaratives;
 mod diagnostics;
+mod initcheck;
 mod intrinsic;
 mod json;
 mod json_parse;

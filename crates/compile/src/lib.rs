@@ -4,6 +4,7 @@
 pub mod collating;
 mod corresponding;
 pub mod declaratives;
+mod initcheck;
 pub mod layout;
 pub mod linage;
 pub mod markup;
@@ -240,6 +241,9 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         program_end(&program, &options, &mut errors);
     }
     oo::check(&layout, &program, &mut errors);
+    if let Some(mode) = options.initcheck {
+        errors.extend(initcheck::check(&program, &layout, declared, mode));
+    }
     let errors: Vec<Error> = errors.into_iter().map(|e| e.in_files(&program.sources)).collect();
     if refused(&errors, &options) {
         Err(errors)
