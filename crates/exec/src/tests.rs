@@ -2139,3 +2139,41 @@ fn record_varying_depending_on_gives_the_length_written_and_takes_the_length_rea
     let signed = source.replace("REC-LEN PIC 9(4)", "REC-LEN PIC S9(4)");
     assert!(compile_errors(&signed).contains("REC-LEN: the DEPENDING ON item of F must be an elementary unsigned integer"), "{}", compile_errors(&signed));
 }
+
+/// Each abbreviated combined relation condition and its unabbreviated form agree for every A, B, C
+/// and D from 1 to 3: the Language Reference's examples (SC27-8713-03, p. 289, Table 31) and the
+/// cases assumption C150 decides.
+#[test]
+fn abbreviated_combined_relations_mean_what_they_abbreviate() {
+    let pairs = [
+        ("A = B AND NOT < C OR D", "((A = B) AND (A NOT < C)) OR (A NOT < D)"),
+        ("A NOT > B OR C", "(A NOT > B) OR (A NOT > C)"),
+        ("NOT A = B OR C", "(NOT (A = B)) OR (A = C)"),
+        ("NOT (A = B OR < C)", "NOT ((A = B) OR (A < C))"),
+        ("NOT (A NOT = B AND C AND NOT D)", "NOT ((((A NOT = B) AND (A NOT = C)) AND (NOT (A NOT = D))))"),
+        ("A > 1 AND <= B", "A > 1 AND A <= B"),
+        ("A GREATER THAN B AND IS NOT LESS THAN C OR D", "(A > B AND A NOT < C) OR A NOT < D"),
+        ("A = (B OR C AND NOT D)", "A = B OR A = C AND NOT A = D"),
+        ("A NOT = (B OR C) AND D", "(A NOT = B OR A NOT = C) AND A NOT = D"),
+        ("A = B AND (C OR < D) OR 2", "A = B AND (A = C OR A < D) OR A = 2"),
+        ("A = B AND NOT NOT = C", "A = B AND NOT (A NOT = C)"),
+        ("(A = B OR C) AND D-ON", "(A = B OR A = C) AND D = 3"),
+    ];
+    let mut body = vec!["       M.\n".to_owned(), line("PERFORM P VARYING A FROM 1 BY 1 UNTIL A > 3"), line("    AFTER B FROM 1 BY 1 UNTIL B > 3")];
+    body.extend([line("    AFTER C FROM 1 BY 1 UNTIL C > 3"), line("    AFTER D FROM 1 BY 1 UNTIL D > 3"), line("DISPLAY LONG-TRUE ' ' SHORT-TRUE")]);
+    body.extend([line("STOP RUN."), "       P.\n".to_owned()]);
+    for (k, (short, long)) in pairs.iter().enumerate() {
+        for (cond, count) in [(short, "S"), (long, "L")] {
+            let (first, rest) = cond.split_at(if cond.len() > 40 { cond[..40].rfind(' ').unwrap() } else { cond.len() });
+            body.extend([line(&format!("IF {first}")), line(&format!("   {rest}")), line(&format!("    ADD 1 TO {count} ({})", k + 1)), line("END-IF")]);
+        }
+    }
+    let data = concat!(
+        "       01  A PIC 9.\n       01  B PIC 9.\n       01  C PIC 9.\n       01  D PIC 9.\n           88 D-ON VALUE 3.\n",
+        "       01  LONG-TRUE.\n           05 L PIC 99 OCCURS 12 VALUE 0.\n       01  SHORT-TRUE.\n           05 S PIC 99 OCCURS 12 VALUE 0.\n",
+    );
+    let out = run(&program("", data, &body.concat()));
+    let (w, y) = out.trim_end().split_once(' ').unwrap();
+    assert_eq!(w, y);
+    assert!(w.as_bytes().chunks(2).all(|n| n != b"00" && n != b"81"), "{w}");
+}

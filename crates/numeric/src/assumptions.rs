@@ -251,6 +251,7 @@ pub const PARMCHECK_BUFFER: &str = "C226";
 pub const PARMCHECK_MESSAGE: &str = "C227";
 pub const PARM_ARGUMENTS_BEFORE_LAST_SLASH: &str = "C250";
 pub const PARM_AREA_PADDED: &str = "C251";
+pub const ABBREVIATED_RELATIONS: &str = "C150";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1582,6 +1583,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: PARM_AREA_PADDED,
         claim: "A runtime option after the last slash is known by its full name, or its NO form, from the CEEXOPT sample's list; an abbreviation counts as invalid, so a PARM whose only runtime options are abbreviated reaches the program whole. The first PROCEDURE DIVISION USING item addresses a halfword length and the arguments in the program's code page, followed by X'00' up to 100 bytes, JCL's longest PARM, so a program that reads its whole PIC X(100) parameter field reads zeros past the arguments rather than leaving storage. A step with no PARM passes a length of zero. Items after the first are not addressed",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ABBREVIATED_RELATIONS,
+        claim: "An abbreviated combined relation condition (Language Reference SC27-8713-03, pp. 287-289) implies the last stated subject, or the last stated subject and relational operator, a NOT just before the operator being part of it, so A NOT > B OR C is (A NOT > B) OR (A NOT > C), and IS may come before an implied operator, as CCVS85 NC250A writes AND IS NOT LESS THAN. Parentheses after AND, OR or NOT take the implied subject and operator in. After the right parenthesis the subject and operator stated before the parentheses are current again, whatever was stated inside, so A = B AND (C OR < D) OR 2 ends with A = 2; the manual's rule 10 does not say which operator follows a right parenthesis. A class or sign condition leaves the implied subject and operator as they were. A bare name after AND or OR, with NOT or left parentheses between or not, is a condition-name when it names one and otherwise an object, decided when the name is resolved. A relational operator followed by parentheses that hold objects joined by AND, OR and NOT is distributed over them (rule 5), and NOT just after that parenthesis is refused. The manual's examples (Table 31, p. 289) agree with their unabbreviated forms in ironwork's tests; no Enterprise COBOL listing ironwork has shows what follows a right parenthesis or a class condition in an abbreviation",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
