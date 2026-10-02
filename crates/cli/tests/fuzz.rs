@@ -214,6 +214,21 @@ fn a_generated_indexed_file_repeats_no_alternate_key_that_allows_no_duplicates()
 }
 
 #[test]
+fn the_manifest_names_each_root_from_the_repository_root_as_the_journal_numbers_them() {
+    let dir = temp("roots");
+    fs::create_dir_all(dir.join("repo/copy")).unwrap();
+    fs::write(dir.join("repo/copy/ADDQTY.cpy"), "                 ADD IN-QTY TO WS-TOTAL\n").unwrap();
+    rewrite(&dir, &[("                 ADD IN-QTY TO WS-TOTAL", "                 COPY ADDQTY.")]);
+    let o = fuzz(&dir, "run", &["--runs", "40", "-I", "copy"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let manifest = fs::read_to_string(dir.join("run/manifest.json")).unwrap();
+    assert!(manifest.contains("\"roots\":[\"src\",\"copy\"]"), "{manifest}");
+    assert!(manifest.contains("\"code\":\"S0C7\",\"file\":\"ADDQTY.cpy\",\"line\":1"), "{manifest}");
+    let journals: Vec<String> = fs::read_dir(dir.join("run/evidence/runs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap()).collect();
+    assert!(journals.iter().flat_map(|j| j.lines()).any(|l| l.contains("\"kind\":\"input\"") && l.contains("\"path\":\"ADDQTY.cpy\"") && l.contains("\"root\":1")));
+}
+
+#[test]
 fn every_occurrence_of_a_table_is_varied() {
     let dir = temp("occurs");
     rewrite(

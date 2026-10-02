@@ -665,6 +665,18 @@ pub fn run(req: Request) -> ExitCode {
     let _ = fs::remove_dir_all(&runner.work);
 
     let kept = runs_out.len();
+    // Each directory a run reads, by its path from --root (null outside it), in the order a journal's
+    // `input` records number them: cobolwork finds an abend's file under the root that supplied it.
+    let top = resolved(&req.root);
+    let roots = req
+        .roots()
+        .iter()
+        .map(|r| match resolved(r).strip_prefix(&top) {
+            Ok(rest) if rest.as_os_str().is_empty() => ".".into(),
+            Ok(rest) => rest.to_string_lossy().replace('\\', "/").into(),
+            Err(_) => Value::Null,
+        })
+        .collect();
     let manifest = obj(vec![
         ("tool", "ironwork-fuzz".into()),
         ("version", env!("CARGO_PKG_VERSION").into()),
@@ -672,6 +684,7 @@ pub fn run(req: Request) -> ExitCode {
         ("strategy", "fields".into()),
         ("clock", req.clock.as_str().into()),
         ("program", obj(vec![("file", file.into()), ("id", compiled.program.id.as_str().into())])),
+        ("roots", Value::Arr(roots)),
         ("entry", "run".into()),
         ("inputs", Value::Arr(inputs_out)),
         ("counts", Value::Obj(counts.iter().map(|(k, v)| (k.to_string(), Value::Int(*v))).collect())),

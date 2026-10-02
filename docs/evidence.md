@@ -196,6 +196,9 @@ cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
 
 `DIR/manifest.json` holds `tool` (`ironwork-fuzz`), `version`, `seed`, `strategy` (`fields`),
 `clock`, `program` (`file`, relative to `--root`, the current directory without it, and `id`),
+`roots` (the program's directory, then each `-I` and `-L` library, by path from `--root`, `.` for
+`--root` itself and null for one outside it: the order a journal's `input` records number them, so
+a file named relative to its library is found under that library),
 `entry` (`run`), `inputs` (`id`, `kind` `dd` or `sysin`, `name`, `bytes` in base64, `minimized`,
 false when the 200 runs ran out first), `counts` (`runs`, `clean`, `abend`, `timeout`, `refused`,
 over the generated runs; an abend that says what the surroundings lack counts as refused and is not
