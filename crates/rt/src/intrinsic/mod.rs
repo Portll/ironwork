@@ -9,6 +9,12 @@ pub mod real;
 pub mod text;
 pub mod unicode;
 
+/// The first twenty-one functions ironwork for COBOL runs.
+pub const FIRST: &[&str] = &[
+    "CHAR", "ORD", "NATIONAL-OF", "LENGTH", "UPPER-CASE", "LOWER-CASE", "REVERSE", "CURRENT-DATE", "NUMVAL", "NUMVAL-C", "TRIM", "MOD", "REM",
+    "INTEGER", "INTEGER-PART", "ABS", "MIN", "MAX", "INTEGER-OF-DATE", "DATE-OF-INTEGER", "RANDOM",
+];
+
 /// The functions beyond the first twenty-one that ironwork for COBOL runs.
 pub const FUNCTIONS: &[&str] = &[
     "ACOS", "ANNUITY", "ASIN", "ATAN", "BIT-OF", "BIT-TO-CHAR", "BYTE-LENGTH", "COS", "DATE-TO-YYYYMMDD", "DAY-OF-INTEGER",

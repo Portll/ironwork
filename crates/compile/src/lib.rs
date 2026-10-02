@@ -79,10 +79,7 @@ pub fn read_lengths(file: &FileDecl, layout: &Layout, k: usize, vlr: Vlr) -> (u3
     }
 }
 
-const FUNCTIONS: &[&str] = &[
-    "CHAR", "ORD", "NATIONAL-OF", "LENGTH", "UPPER-CASE", "LOWER-CASE", "REVERSE", "CURRENT-DATE", "NUMVAL", "NUMVAL-C", "TRIM", "MOD", "REM",
-    "INTEGER", "INTEGER-PART", "ABS", "MIN", "MAX", "INTEGER-OF-DATE", "DATE-OF-INTEGER", "RANDOM",
-];
+const FUNCTIONS: &[&str] = rt::intrinsic::FIRST;
 
 /// Checks and lays out a parsed program. `flags` are this compiler's own, such as `-silent`. A
 /// program is refused, with every message, when one stops its object code: under IBM's default

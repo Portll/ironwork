@@ -314,3 +314,28 @@ fn numval_c_takes_the_currency_option_as_its_default_currency_sign() {
     let body: String = ["COMPUTE R = FUNCTION NUMVAL-C('£1,234.50')", "DISPLAY R", "GOBACK."].into_iter().map(line).collect();
     assert_eq!(run_at_noon(&program("CURRENCY('£')", data, &body)).0, "123450\n");
 }
+
+#[test]
+fn the_repository_paragraph_lets_intrinsic_functions_go_without_the_word_function() {
+    let source = |entry: &str| {
+        [
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. REPO.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       REPOSITORY.\n",
+            &format!("           {entry}.\n"),
+            "       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  X PIC 9(3).\n       PROCEDURE DIVISION.\n",
+            &line("COMPUTE X = MAX(3 7 2)"),
+            &line("DISPLAY X ' ' LENGTH OF X ' ' UPPER-CASE('abc')"),
+            &line("CALL 'INNER'"),
+            &line("GOBACK."),
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. INNER.\n       PROCEDURE DIVISION.\n",
+            &line("DISPLAY REVERSE('xyz')"),
+            &line("GOBACK."),
+            "       END PROGRAM INNER.\n       END PROGRAM REPO.\n",
+        ]
+        .concat()
+    };
+    assert_eq!(run_at_noon(&source("FUNCTION ALL INTRINSIC")).0, "007 000000003 ABC\nzyx\n");
+    assert_eq!(run_at_noon(&source("FUNCTION MAX UPPER-CASE REVERSE INTRINSIC")).0, "007 000000003 ABC\nzyx\n");
+    let refused = |entry: &str| syntax::parse(&source(entry)).err().map(|e| e.message).unwrap_or_default();
+    assert!(refused("FUNCTION WHEN-COMPILED INTRINSIC").contains("special register"));
+    assert!(refused("FUNCTION FROBNICATE INTRINSIC").contains("not an intrinsic function"));
+}

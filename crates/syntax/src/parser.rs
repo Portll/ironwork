@@ -128,6 +128,9 @@ struct Parser<'a> {
     cics: bool,
     /// Whether it has EXEC DLI, so the translator adds the DL/I interface block.
     dli: bool,
+    /// The intrinsic functions the REPOSITORY paragraph lets the program, and the programs it
+    /// contains, invoke without the word FUNCTION.
+    intrinsics: Vec<String>,
     /// The WRITE ADVANCING mnemonic-names in scope: the program's own, then those of the programs
     /// containing it, whose configuration section applies to it too.
     mnemonics: Vec<(String, String)>,
@@ -160,6 +163,7 @@ impl<'a> Parser<'a> {
             exec_declarations: Vec::new(),
             cics: false,
             dli: false,
+            intrinsics: Vec::new(),
             sql: SqlState::default(),
             mnemonics: Vec::new(),
             debugging: false,
@@ -264,7 +268,9 @@ impl Parser<'_> {
         let (start, first) = (self.at, out.len());
         let outer = (std::mem::take(&mut self.exec_declarations), std::mem::take(&mut self.cics), std::mem::take(&mut self.dli), std::mem::take(&mut self.sql.blocks), self.mnemonics.clone(), self.debugging);
         let outer_messages = std::mem::take(&mut self.messages);
+        let outer_intrinsics = self.intrinsics.clone();
         let parsed = self.one_program(options, out);
+        self.intrinsics = outer_intrinsics;
         (self.exec_declarations, self.cics, self.dli, self.sql.blocks, self.mnemonics, self.debugging) = outer;
         let own = std::mem::replace(&mut self.messages, outer_messages);
         parsed?;
@@ -566,6 +572,19 @@ impl Parser<'_> {
                     self.at += 1;
                     let target = target.to_ascii_uppercase();
                     f.assign = target.rsplit('-').next().filter(|_| target.contains("-S-") || target.starts_with("S-") || target.starts_with("AS-")).unwrap_or(&target).to_owned();
+                    // Assignment-names after the first are syntax-checked and have no effect (LR p. 142).
+                    while match self.peek() {
+                        Some(Tok::Alnum(_)) => true,
+                        Some(Tok::Word(w)) => !SELECT_CLAUSES.contains(&w.as_str()),
+                        _ => false,
+                    } {
+                        self.at += 1;
+                    }
+                }
+                // Files here have no passwords, so the password items are read and not checked (LR p. 152).
+                "PASSWORD" => {
+                    self.accept_word("IS");
+                    self.reference()?;
                 }
                 // RECORD DELIMITER is syntax-checked and has no effect (LR, 'RECORD DELIMITER clause').
                 "RECORD" if self.accept_word("DELIMITER") => {
@@ -2524,32 +2543,38 @@ impl Parser<'_> {
         }
     }
 
+    /// A function's name, arguments and reference modification, the word FUNCTION already read.
+    fn function_call(&mut self, pos: Pos) -> R<Operand> {
+        let name = self.name("a function name")?;
+        let (mut args, mut modifier, mut all_subscripts) = (Vec::new(), None, Vec::new());
+        if self.qualifying_paren_at(self.at) && !self.refmod_ahead() {
+            self.at += 1;
+            while !self.accept(&Tok::RParen) {
+                if let Some(m) = self.accept_any(&["LEADING", "TRAILING"]) {
+                    modifier = Some(m);
+                    continue;
+                }
+                if self.all_subscript_ahead() {
+                    let (table, all) = self.table_with_all()?;
+                    all_subscripts.push((args.len(), all));
+                    args.push(Expr::Operand(Operand::Ref(table)));
+                    continue;
+                }
+                args.push(self.expr()?);
+            }
+        }
+        let refmod = self.refmod()?;
+        Ok(Operand::Function(FunctionCall { name, args, modifier, refmod, all_subscripts, pos }))
+    }
+
     fn operand(&mut self) -> R<Operand> {
         let pos = self.pos();
         match self.peek() {
             Some(Tok::Word(w)) if w == "FUNCTION" => {
                 self.at += 1;
-                let name = self.name("a function name")?;
-                let (mut args, mut modifier, mut all_subscripts) = (Vec::new(), None, Vec::new());
-                if self.qualifying_paren_at(self.at) && !self.refmod_ahead() {
-                    self.at += 1;
-                    while !self.accept(&Tok::RParen) {
-                        if let Some(m) = self.accept_any(&["LEADING", "TRAILING"]) {
-                            modifier = Some(m);
-                            continue;
-                        }
-                        if self.all_subscript_ahead() {
-                            let (table, all) = self.table_with_all()?;
-                            all_subscripts.push((args.len(), all));
-                            args.push(Expr::Operand(Operand::Ref(table)));
-                            continue;
-                        }
-                        args.push(self.expr()?);
-                    }
-                }
-                let refmod = self.refmod()?;
-                Ok(Operand::Function(FunctionCall { name, args, modifier, refmod, all_subscripts, pos }))
+                self.function_call(pos)
             }
+            Some(Tok::Word(w)) if self.intrinsics.contains(w) && !(w == "LENGTH" && self.word_at(1) == Some("OF")) => self.function_call(pos),
             Some(Tok::Word(w)) if w == "LENGTH" && self.word_at(1) == Some("OF") => {
                 self.at += 2;
                 Ok(Operand::LengthOf(self.reference()?))
@@ -2760,9 +2785,11 @@ impl Parser<'_> {
     }
 
     fn primary_cond(&mut self, last: &mut Option<(Expr, RelOp, bool)>) -> R<Cond> {
+        let is = usize::from(self.is_word("IS"));
         if let Some((subject, ..)) = last.clone()
-            && (self.relop_ahead(0) || self.is_word("NOT") && self.relop_ahead(1))
+            && (self.relop_ahead(is) || self.word_at(is) == Some("NOT") && self.relop_ahead(is + 1))
         {
+            self.accept_word("IS");
             let negated = self.accept_word("NOT");
             let op = self.relop()?.ok_or_else(|| self.error("a relational operator"))?;
             return self.objects(subject, op, negated, last);
@@ -3010,7 +3037,7 @@ fn system_text_entries(text: &str) -> R<Vec<DataEntry>> {
 /// Words that begin a SELECT clause, and so end the one before.
 const SELECT_CLAUSES: &[&str] = &[
     "ASSIGN", "ORGANIZATION", "ACCESS", "FILE", "STATUS", "RECORD", "ALTERNATE", "RELATIVE", "LINE", "SEQUENTIAL", "INDEXED", "RESERVE",
-    "PADDING", "LOCK", "SHARING",
+    "PADDING", "LOCK", "SHARING", "PASSWORD",
 ];
 
 /// Words that begin an FD clause, and so end the clause or the list of report names before them.
@@ -3232,6 +3259,21 @@ mod tests {
         let alternates: Vec<(&str, bool)> = f[2].alternate_keys.iter().map(|(k, d)| (k.name.as_str(), *d)).collect();
         assert_eq!(alternates, [("X-ALT", false), ("X-ALT2", true)]);
         assert!(f[3].record_key.is_none() && f[3].organization == Organization::Sequential);
+    }
+
+    #[test]
+    fn assign_keeps_its_first_name_and_password_is_read() {
+        let text = [
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n",
+            "           SELECT F ASSIGN TO UT-S-FDD XXXXX044 'B.DAT'\n               ORGANIZATION SEQUENTIAL.\n",
+            "           SELECT K ASSIGN KDD ORGANIZATION INDEXED\n               RECORD KEY IS KK PASSWORD IS PW\n               ALTERNATE RECORD KA PASSWORD PW.\n",
+            "       DATA DIVISION.\n       FILE SECTION.\n       FD  F.\n       01  R PIC X.\n       FD  K.\n       01  KR.\n           05 KK PIC X.\n           05 KA PIC X.\n",
+            "       WORKING-STORAGE SECTION.\n       01  PW PIC X(8).\n       PROCEDURE DIVISION.\n           GOBACK.\n",
+        ]
+        .concat();
+        let p = crate::parse(&text).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!((p.files[0].assign.as_str(), p.files[0].organization), ("FDD", Organization::Sequential));
+        assert_eq!(p.files[1].alternate_keys.iter().map(|(k, _)| k.name.as_str()).collect::<Vec<_>>(), ["KA"]);
     }
 
     #[test]

@@ -154,14 +154,16 @@ impl Parser<'_> {
                 continue;
             }
             if self.accept_word("FUNCTION") {
-                while self.peek().is_some()
-                    && self.peek() != Some(&Tok::Period)
-                    && !self.is_word("CLASS")
-                    && !self.is_word("FUNCTION")
-                    && !self.section_header()
-                    && !self.at_division(&["DATA", "PROCEDURE", "IDENTIFICATION", "ID"])
-                {
+                let mut names = Vec::new();
+                while let Some(w) = self.word().filter(|w| !matches!(*w, "INTRINSIC" | "CLASS" | "FUNCTION")) {
+                    if self.section_header() || self.at_division(&["DATA", "PROCEDURE", "IDENTIFICATION", "ID"]) {
+                        break;
+                    }
+                    names.push((w.to_owned(), self.pos()));
                     self.at += 1;
+                }
+                if self.accept_word("INTRINSIC") {
+                    self.repository_intrinsics(&names)?;
                 }
                 continue;
             }
@@ -170,6 +172,29 @@ impl Parser<'_> {
             }
             return Err(self.error("CLASS or FUNCTION in the REPOSITORY paragraph"));
         }
+    }
+
+    /// FUNCTION ... INTRINSIC: each name, or ALL of them, invoked without the word FUNCTION
+    /// (Language Reference SC27-8713-03, pp. 133-134). WHEN-COMPILED stays the special register.
+    fn repository_intrinsics(&mut self, names: &[(String, Pos)]) -> R<()> {
+        let known = |n: &str| rt::intrinsic::FIRST.contains(&n) || rt::intrinsic::FUNCTIONS.contains(&n);
+        if let [(all, _)] = names
+            && all == "ALL"
+        {
+            let every = rt::intrinsic::FIRST.iter().chain(rt::intrinsic::FUNCTIONS).filter(|n| **n != "WHEN-COMPILED");
+            self.intrinsics.extend(every.map(|n| (*n).to_owned()));
+            return Ok(());
+        }
+        for (name, pos) in names {
+            if name == "WHEN-COMPILED" {
+                return Err(Error::at(*pos, "WHEN-COMPILED is a special register too, so the REPOSITORY paragraph cannot name it"));
+            }
+            if !known(name) {
+                return Err(Error::at(*pos, format!("FUNCTION {name} INTRINSIC: {name} is not an intrinsic function ironwork for COBOL knows")));
+            }
+            self.intrinsics.push(name.clone());
+        }
+        Ok(())
     }
 
     /// A FACTORY or OBJECT paragraph: WORKING-STORAGE, then method definitions, then END FACTORY

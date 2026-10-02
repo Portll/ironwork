@@ -213,6 +213,7 @@ pub const XML_PARSE_RULES: &str = "C118";
 pub const XML_GENERATE_RULES: &str = "C119";
 pub const JSON_PARSE_RULES: &str = "C200";
 pub const DLI_TRANSLATION: &str = "C201";
+pub const PASSWORD_IGNORED: &str = "C202";
 pub const CORRESPONDING_PAIRS: &str = "C130";
 pub const CORRESPONDING_CHOICES: &str = "C131";
 pub const STOP_LITERAL: &str = "C132";
@@ -1343,6 +1344,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: DLI_TRANSLATION,
         claim: "EXEC DLI is read as the IMS translator reads it (IMS Application Programming: EXEC DLI Commands for CICS and IMS, SC18-7811-04, chapters 4-6): a command by its name or longer spelling (DELETE, from the book's C sample, for DLET), its options checked against the book's Format diagrams (pp. 35-81), GHU, GHN and GHNP taking their Get command's (p. 102), AIB allowed wherever PCB is (p. 5), and GMSG, ICMD and RCMD, which the book leaves to the Operations Guide, not checked; the data an option names and the right-hand side of each WHERE comparison declared; SEGMENT or PSB in double parentheses naming an area. The book names no relational operators or connectors beyond its examples' =, >=, >, < and AND and OR, so EQ, NE, GT, GE, LT, LE, <=, ¬= and the symbols &, |, * and + are accepted too. The DL/I interface block is declared at the head of WORKING-STORAGE with the book's COBOL labels over the 40 bytes its C declaration gives (p. 6), the unnamed bytes FILLER, unless the program declares DIBSTAT itself; the book does not name the 01 level, so it is DLZDIB, DL/I's name for the block, and the translator's IS GLOBAL is left out. A command is checked, not run: reaching one ends the run",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PASSWORD_IGNORED,
+        claim: "A SELECT's PASSWORD clause is read and has no effect: the files ironwork for COBOL opens carry no VSAM passwords, so the password items are neither checked against the file nor required to hold one before OPEN (Language Reference SC27-8713-03, p. 152, where IBM requires a valid password for a VSAM file)",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

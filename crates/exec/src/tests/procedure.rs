@@ -631,3 +631,19 @@ fn an_evaluate_subject_that_is_a_condition_name_takes_truth_values() {
     ));
     assert_eq!(out, "A\nB\nC\n");
 }
+
+#[test]
+fn an_abbreviated_relation_may_write_is_before_its_operator() {
+    let body = |a: u8| {
+        [
+            line(&format!("MOVE {a} TO A")),
+            line("IF A GREATER THAN B"),
+            line("    AND IS NOT LESS THAN C OR D"),
+            line("    DISPLAY 'TRUE' ELSE DISPLAY 'FALSE' END-IF"),
+        ]
+        .concat()
+    };
+    let data = "       01  A PIC 9.\n       01  B PIC 9 VALUE 1.\n       01  C PIC 9 VALUE 3.\n       01  D PIC 9 VALUE 9.\n";
+    let source = program("", data, &[body(5), body(2), line("GOBACK.")].concat());
+    assert_eq!(run(&source), "TRUE\nFALSE\n");
+}
