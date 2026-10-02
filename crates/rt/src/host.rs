@@ -6,6 +6,7 @@
 use crate::abend::Abend;
 use crate::storage::{Loc, Val};
 use crate::store::{self, ProgramFacts};
+use crate::taint::Taint;
 use crate::vocab::Pos;
 use numeric::precision::{Fixed, Places};
 
@@ -15,6 +16,9 @@ pub trait Host<P: Copy> {
     type Facts: ProgramFacts;
     fn facts(&self) -> Self::Facts;
     fn mem(&mut self) -> &mut [u8];
+    /// The run unit's taint, when it traces input; a write through [`Host::mem`] marks its bytes
+    /// here, as [`write`] does.
+    fn taint(&mut self) -> Option<&mut Taint>;
     /// With `receiving`, a group holding the object of its own OCCURS DEPENDING ON is its maximum length.
     fn locate(&mut self, place: P, receiving: bool) -> R<Loc>;
     /// The place's value as a subscript takes it.
@@ -27,6 +31,27 @@ pub trait Host<P: Copy> {
 
 pub trait Values<P: Copy, O>: Host<P> {
     fn value(&mut self, operand: &O, pos: Pos) -> R<Val>;
+}
+
+/// `RunUnit::write` for a host: `bytes` into `loc`, marked with what the statement has read.
+pub fn write<P: Copy>(x: &mut impl Host<P>, loc: Loc, bytes: &[u8]) {
+    x.mem()[loc.offset..loc.offset + loc.len].copy_from_slice(bytes);
+    mark(x, loc.offset, loc.len);
+}
+
+/// `RunUnit::unfollowed` for a host.
+pub fn unfollowed<P: Copy>(x: &mut impl Host<P>, what: &'static str) {
+    if let Some(t) = x.taint() {
+        t.unfollowed(what);
+    }
+}
+
+/// `RunUnit::mark` for a host.
+pub fn mark<P: Copy>(x: &mut impl Host<P>, offset: usize, len: usize) {
+    if let Some(t) = x.taint() {
+        let pending = t.pending();
+        t.set(offset, len, pending);
+    }
 }
 
 pub fn read<P: Copy>(x: &mut impl Host<P>, loc: Loc, pos: Pos) -> R<Val> {

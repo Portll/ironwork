@@ -93,6 +93,10 @@ pub fn output(journal: &mut Journal, name: &str, bytes: &[u8], path: &Path, root
     let _ = journal.append("output", fields([("name", name.into()), ("sha256", sha.into()), ("bytes", Value::Int(bytes.len() as i64)), ("path", relative(path, roots).into())]));
 }
 
+/// A sink record already written: kind, file, line, whether the marker was reached, and under
+/// `--trace-input` whether an input byte may have been in the operand.
+type SinkRecord = (&'static str, String, u32, Option<bool>, Option<Option<bool>>);
+
 /// How many starts of one listed statement a journal records.
 pub const STATEMENT_CAP: u32 = 100;
 
@@ -122,7 +126,8 @@ pub struct Run {
     program: String,
     opened: BTreeSet<(String, PathBuf)>,
     marker: Option<String>,
-    sinks: BTreeSet<(&'static str, String, u32, bool)>,
+    sinks: BTreeSet<SinkRecord>,
+    input: bool,
     statements: BTreeMap<(String, u32), u32>,
     failed: Option<String>,
 }
@@ -136,9 +141,17 @@ impl Run {
             opened: BTreeSet::new(),
             marker: marker.map(str::to_string),
             sinks: BTreeSet::new(),
+            input: false,
             statements: BTreeMap::new(),
             failed: None,
         }
+    }
+
+    /// Records at each sink whether an input byte may be in its operand, as the run unit's taint
+    /// says.
+    pub fn with_input(mut self, input: bool) -> Self {
+        self.input = input;
+        self
     }
 
     /// Records each start of these statements, by file name and line, up to [`STATEMENT_CAP`].
@@ -198,13 +211,22 @@ impl Run {
                 }
                 self.write("statement", f);
             }
-            Event::Sink { kind, file, line, operand } => {
-                let Some(marker) = &self.marker else { return };
-                let reached = operand.contains(marker.as_str());
-                if self.sinks.insert((kind, file.to_string(), line, reached)) {
-                    let marker = marker.clone();
+            Event::Sink { kind, file, line, operand, input } => {
+                if self.marker.is_none() && !self.input {
+                    return;
+                }
+                let reached = self.marker.as_ref().map(|m| operand.contains(m.as_str()));
+                let input = self.input.then_some(input);
+                if self.sinks.insert((kind, file.to_string(), line, reached, input)) {
                     let file = relative(Path::new(if file.is_empty() { self.program.as_str() } else { file }), &self.roots);
-                    let f = fields([("sink", kind.into()), ("file", file.into()), ("line", i64::from(line).into()), ("marker", marker.into()), ("reached", reached.into())]);
+                    let mut f = fields([("sink", kind.into()), ("file", file.into()), ("line", i64::from(line).into())]);
+                    if let (Some(marker), Some(reached)) = (&self.marker, reached) {
+                        f.insert("marker".into(), marker.clone().into());
+                        f.insert("reached".into(), reached.into());
+                    }
+                    if let Some(input) = input {
+                        f.insert("input".into(), input.map_or(Value::Null, Value::Bool));
+                    }
                     self.write("sink", f);
                 }
             }

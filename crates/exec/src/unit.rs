@@ -16,10 +16,14 @@ pub type Loaded = rt::unit::Loaded<Rc<Compiled>>;
 pub struct Remains {
     pub mem: Vec<u8>,
     pub programs: Vec<(String, usize)>,
+    /// Which bytes may hold input, and the first operation taint did not follow, when the run
+    /// traced input.
+    pub taint: Option<(Vec<u64>, Option<&'static str>)>,
 }
 
 impl Remains {
     pub fn of<H: Clone, L: Loader<H>>(unit: &rt::unit::RunUnit<'_, H, L>) -> Self {
-        Self { mem: unit.mem.clone(), programs: unit.programs.iter().map(|p| (p.name.clone(), p.base)).collect() }
+        let taint = unit.taint.as_ref().map(|t| (t.bits(), t.not_followed()));
+        Self { mem: unit.mem.clone(), programs: unit.programs.iter().map(|p| (p.name.clone(), p.base)).collect(), taint }
     }
 }

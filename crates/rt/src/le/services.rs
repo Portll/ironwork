@@ -31,6 +31,7 @@ pub trait LeHost<'w>: UnitHost<'w> {
 
 /// Runs `service` with each argument's address in run-unit memory, as a CALL to a program passes it.
 pub fn call<'w, X: LeHost<'w>>(x: &mut X, service: LeService, args: &[Option<usize>], pos: Pos) -> R<()> {
+    x.unit().unfollowed("Language Environment callable services");
     let page = x.page();
     Services { unit: x.unit(), page, method_name: X::method_name }.le_service(service, args, pos)
 }

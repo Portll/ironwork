@@ -62,7 +62,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         match op {
             Op::Move { check, .. } if *check != SenderCheck::None => return Err(not_yet("NUMCHECK")),
             Op::Move { from, to, plan, .. } | Op::Set { from, to, plan } => {
-                let dest = self.loc(*to)?;
+                let dest = self.loc_written(*to)?;
                 self.move_to(matches!(op, Op::Set { .. }), *from, dest, plan, at)?;
             }
             Op::Initialize { target, plan } => self.initialize(*target, &p.plans.init[*plan as usize], pos)?,
@@ -128,7 +128,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             }
             Op::Display(id) => self.display(*id, pos)?,
             Op::Accept { target, from, .. } => {
-                let dest = self.loc(*target)?;
+                let dest = self.loc_written(*target)?;
                 let name = self.sym(p.places[*target as usize].name);
                 accept::accept(&self.facts(), self.unit, dest, *from, name, pos)?;
             }
@@ -197,7 +197,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     /// `Machine::initialize`: each elementary item the walk reaches given SPACE, ZERO or NULL by
     /// MOVE rules.
     fn initialize(&mut self, target: PlaceId, plan: &InitPlan, pos: Pos) -> R<()> {
-        let loc = self.loc(target)?;
+        let loc = self.loc_written(target)?;
         for field in &plan.fields {
             let Some(kind) = field_kind(&field.store) else { return Err(not_yet("an INITIALIZE field with no MOVE plan")) };
             let at = Loc { offset: loc.offset + field.offset as usize, len: field.len as usize, kind, item: usize::MAX };
@@ -291,6 +291,10 @@ impl<'p, L: Loader<Rc<Code>>> Host<PlaceId> for Vm<'p, '_, '_, L> {
 
     fn mem(&mut self) -> &mut [u8] {
         &mut self.unit.mem
+    }
+
+    fn taint(&mut self) -> Option<&mut crate::taint::Taint> {
+        self.unit.taint.as_mut()
     }
 
     fn locate(&mut self, place: PlaceId, _receiving: bool) -> Result<Loc, Abend> {

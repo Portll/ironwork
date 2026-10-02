@@ -70,6 +70,8 @@ pub fn bytes(mem: &[u8], loc: Loc) -> &[u8] {
     &mem[loc.offset..loc.offset + loc.len]
 }
 
+/// A write taint does not see: only for operations that mark the run unfollowed
+/// (`RunUnit::unfollowed`); any other goes through `RunUnit::write`.
 pub fn write(mem: &mut [u8], loc: Loc, bytes: &[u8]) {
     mem[loc.offset..loc.offset + loc.len].copy_from_slice(bytes);
 }
@@ -162,12 +164,12 @@ pub fn store_value<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit
     match (loc.kind, value) {
         (Kind::Float(p), Val::Float(h)) => {
             let h = if h.precision.digits() > p.digits() { float::narrow_rounded(h, p).map_err(|c| Abend::check(c, pos))? } else { h.lengthen(p) };
-            write(&mut unit.mem, loc, &h.to_bytes());
+            unit.write(loc.offset, &h.to_bytes());
             Ok(false)
         }
         (Kind::Float(p), Val::Num(f)) => {
             let h = float::from_fixed(f, p, ProgramMask::default()).map_err(|c| Abend::check(c, pos))?;
-            write(&mut unit.mem, loc, &h.to_bytes());
+            unit.write(loc.offset, &h.to_bytes());
             Ok(false)
         }
         (_, Val::Float(h)) => {
@@ -252,7 +254,7 @@ pub fn store_fixed_checked<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut
     if size_error && keep_on_size_error {
         return Ok(true);
     }
-    write(&mut unit.mem, loc, &bytes);
+    unit.write(loc.offset, &bytes);
     Ok(size_error)
 }
 
@@ -300,7 +302,7 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
         let mut out = vec![ebcdic::SPACE; dest.len];
         let n = s.len.min(dest.len);
         out[..n].copy_from_slice(&bytes(&unit.mem, s)[..n]);
-        write(&mut unit.mem, dest, &out);
+        unit.write(dest.offset, &out);
         return Ok(());
     }
     let page = facts.page();
@@ -320,7 +322,7 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
                 let n = image.len().min(dest.len);
                 out[..n].copy_from_slice(&image[..n]);
             }
-            write(&mut unit.mem, dest, &out);
+            unit.write(dest.offset, &out);
         }
         Kind::National => {
             let units: Vec<u16> = match val {
@@ -333,11 +335,11 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
             while out.len() < dest.len {
                 out.extend_from_slice(&0x0020u16.to_be_bytes());
             }
-            write(&mut unit.mem, dest, &out);
+            unit.write(dest.offset, &out);
         }
         Kind::Pointer | Kind::ObjectReference | Kind::ProgramPointer => match val {
-            Val::Address(a) => write(&mut unit.mem, dest, &a.to_be_bytes()),
-            Val::Fig(Figurative::Null) => write(&mut unit.mem, dest, &[0; 4]),
+            Val::Address(a) => unit.write(dest.offset, &a.to_be_bytes()),
+            Val::Fig(Figurative::Null) => unit.write(dest.offset, &[0; 4]),
             _ => return Err(Abend::ironwork("a pointer takes an address: use SET ... TO ADDRESS OF or NULL", pos)),
         },
         Kind::Index => match val {
@@ -349,7 +351,7 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
             let positions = syms.iter().filter(|s| !matches!(s, Sym::Insert(_))).count();
             let image = alnum_image(facts, &val, src, positions, pos)?;
             let out = edit::alphanumeric(syms, &image, ebcdic::SPACE, |c| page.encode_char(c).unwrap_or(ebcdic::SPACE));
-            write(&mut unit.mem, dest, &out);
+            unit.write(dest.offset, &out);
         }
         Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::NumericEdited { .. } => match val {
             Val::Num(f) => {
@@ -357,7 +359,7 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
                     && packed_copy(facts, s, dest)
                 {
                     let copied = sign::move_packed(bytes(&unit.mem, s), true, Numproc::Pfd);
-                    write(&mut unit.mem, dest, &copied);
+                    unit.write(dest.offset, &copied);
                 } else {
                     store_fixed(facts, unit, dest, &f, false, pos)?;
                 }
@@ -367,10 +369,10 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
                 store_fixed(facts, unit, dest, &f, false, pos)?;
             }
             Val::Fig(Figurative::Zero) => store_fixed(facts, unit, dest, &Fixed::new(0, Places::new(1, 0)), false, pos)?,
-            Val::Fig(f) => write(&mut unit.mem, dest, &vec![facts.figurative(f); dest.len]),
+            Val::Fig(f) => unit.write(dest.offset, &vec![facts.figurative(f); dest.len]),
             Val::All(b) => {
                 let fill: Vec<u8> = b.iter().copied().cycle().take(dest.len).collect();
-                write(&mut unit.mem, dest, &fill);
+                unit.write(dest.offset, &fill);
             }
             Val::Bytes(b) if let Some(s) = src
                 && is_decimal(s.kind)
@@ -406,7 +408,7 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
                 Val::Fig(Figurative::Zero) => Hfp::zero(p),
                 _ => return Err(Abend::ironwork("this value cannot be moved to a floating-point item", pos)),
             };
-            write(&mut unit.mem, dest, &h.to_bytes());
+            unit.write(dest.offset, &h.to_bytes());
         }
     }
     Ok(())
@@ -486,7 +488,7 @@ fn digit_halves(kind: Kind, b: &[u8]) -> (Vec<u8>, Option<u8>) {
 /// read as a number (C260).
 fn carry_digits<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, dest: Loc, src: Loc, sender: &[u8], pos: Pos) -> R<()> {
     if packed_copy(facts, src, dest) {
-        write(&mut unit.mem, dest, sender);
+        unit.write(dest.offset, sender);
         return Ok(());
     }
     let (halves, sign) = digit_halves(src.kind, sender);
@@ -542,7 +544,7 @@ fn store_digit_halves<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunU
             _ => {}
         }
     }
-    write(&mut unit.mem, dest, &out);
+    unit.write(dest.offset, &out);
     Ok(())
 }
 

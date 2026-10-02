@@ -118,6 +118,10 @@ impl<'a, 'p> Host<&'a Ref> for Machine<'p, '_, '_> {
         &mut self.unit.mem
     }
 
+    fn taint(&mut self) -> Option<&mut rt::taint::Taint> {
+        self.unit.taint.as_mut()
+    }
+
     fn locate(&mut self, place: &'a Ref, receiving: bool) -> R<Loc> {
         self.locate_as(place, receiving)
     }

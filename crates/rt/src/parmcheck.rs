@@ -9,10 +9,11 @@ use crate::vocab::Pos;
 type R<T> = Result<T, Abend>;
 
 /// Sets the buffer, at `buffer`'s offset from the caller's slab at `base`, to X'AA'.
-pub fn set(mem: &mut [u8], base: usize, buffer: Option<(u32, u32)>) {
+pub fn set<H, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, base: usize, buffer: Option<(u32, u32)>) {
     if let Some((offset, len)) = buffer {
         let at = base + offset as usize;
-        mem[at..at + len as usize].fill(0xAA);
+        unit.mem[at..at + len as usize].fill(0xAA);
+        unit.mark(at, len as usize);
     }
 }
 

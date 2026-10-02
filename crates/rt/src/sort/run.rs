@@ -642,6 +642,7 @@ fn run_sort_procedure<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, pr
 /// A SORT or MERGE of a file. A failure is reported as DFSORT reports one on SYSOUT, with
 /// SORT-RETURN 16, and the run goes on; a STOP RUN or GOBACK in a procedure ends it.
 pub fn sort<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, plan: &FileSort<H::Register, H::Procedure, H::Keys, H::File>, pos: Pos) -> R<Option<Ending>> {
+    crate::host::unfollowed(x, "SORT and MERGE");
     let sd = usize::from(plan.sd);
     let name = x.sort_file(sd).file.name;
     let verb = if plan.merge { "MERGE" } else { "SORT" };
@@ -719,6 +720,7 @@ fn sort_end<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, merge: bool,
 /// record's) is the one being sorted, and SORT-RETURN does not stop the sort. `name` is the record
 /// as written.
 pub fn release_ready<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, file: Option<usize>, sort_return: H::Register, name: &str, pos: Pos) -> R<()> {
+    crate::host::unfollowed(x, "SORT and MERGE");
     let Some(Active { sd, phase: Phase::Input(_), .. }) = x.active() else {
         return Err(Abend::ironwork(format!("RELEASE {name}: no SORT input procedure is running"), pos));
     };
@@ -734,6 +736,7 @@ pub fn release_ready<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, fil
 /// RELEASE of the record at `loc`, once [`release_ready`] has passed: a fixed-length SD's whole
 /// record area, else the record.
 pub fn release<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, loc: Loc, name: &str, pos: Pos) -> R<()> {
+    crate::host::unfollowed(x, "SORT and MERGE");
     let Some(Active { sd, keys, phase: Phase::Input(_) }) = x.active() else {
         return Err(Abend::ironwork(format!("RELEASE {name}: no SORT input procedure is running"), pos));
     };
@@ -758,6 +761,7 @@ pub fn release<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, loc: Loc,
 /// RETURN of `file` (`name` as written) into its record area, and moved to `into`: true when a
 /// record came, false at end.
 pub fn return_record<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, file: Option<usize>, into: Option<P>, sort_return: H::Register, name: &str, pos: Pos) -> R<bool> {
+    crate::host::unfollowed(x, "SORT and MERGE");
     let Some(Active { sd, phase: Phase::Output { .. }, .. }) = x.active() else {
         return Err(Abend::ironwork(format!("RETURN {name}: no SORT or MERGE output procedure is running"), pos));
     };
@@ -798,6 +802,7 @@ pub fn return_record<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, fil
 /// its keys, which `keys` gives once the table is known to lie in storage. `name` is the table as
 /// written.
 pub fn sort_table<P: Copy, H: Host<P>>(x: &mut H, base: usize, count: usize, stride: usize, keys: impl FnOnce(&mut H) -> R<Vec<ItemKey>>, name: &str, pos: Pos) -> R<()> {
+    crate::host::unfollowed(x, "SORT and MERGE");
     if base + count * stride > x.mem().len() {
         return Err(Abend::ironwork(format!("SORT {name} reaches outside the run unit's storage"), pos));
     }

@@ -323,9 +323,11 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
         };
         if !storage.local_image.is_empty() {
             vm.local_base = vm.unit.push_temporary(&storage.local_image);
+            vm.unit.mark_input(vm.local_base, storage.local_image.len(), false);
         }
         if fresh {
             vm.unit.mem[base..base + storage.image.len()].copy_from_slice(&storage.image);
+            vm.unit.mark_input(base, storage.image.len(), false);
             for &report in &storage.init_reports {
                 let _ = writeln!(vm.unit.err, "{}", vm.sym(report));
             }

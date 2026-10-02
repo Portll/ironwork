@@ -22,7 +22,7 @@ by `prev` and `seq`.
 | `call` | `program`, `from`, `sha256` | each program CALL loads from a library, with its source's digest |
 | `abend` | `code`, `file`, `line` | the abend the run ended with |
 | `step` | `step`, `pgm`, `outcome` | for `job`, each step as the job log shows it: `RC=0004`, an abend, BYPASSED or JCL ERROR, with why |
-| `sink` | `sink`, `file`, `line`, `marker`, `reached` | with `--trace-marker`, an operation an input could steer, the first time it is reached with the marker in its operand and the first time without (§1.1) |
+| `sink` | `sink`, `file`, `line`, `marker`, `reached`, `input` | with `--trace-marker`, an operation an input could steer, the first time it is reached with the marker in its operand and the first time without (§1.1); with `--trace-input`, `input` true, false or null, and a record for each value it first takes (§1.3). `marker` and `reached` only with a marker |
 | `statement` | `file`, `line`, `capped` | with `--trace-statements`, each start of a listed statement, in the order the run made them, up to 100 per statement, the 100th with `capped` true (§1.2) |
 | `close` | `exit`, `counts`, `durationMs`, `ledger` | last |
 
@@ -92,6 +92,32 @@ path recorded from another directory still matches.
 - **Cost.** The run unit tells the observer only of statements on a listed line, and nothing
   without the flag. The table of statement starts is in every lowered program, so the VM raises the
   same events as the walker.
+
+### 1.3 Input trace by taint: `--trace-input`
+
+With `--evidence`, `run` follows which bytes of run-unit memory may hold input, with no marker. At
+each operation §1.1 names, the sink record says whether an input byte may be in its operand:
+`input` true, false, or null. cobolwork needs this before coverage may refute a finding (cobolwork
+`docs/spec/reach.md` §9.8, fact 3): a step that changes bytes (a numeric MOVE, a COMPUTE, a
+FUNCTION) loses the marker, but it does not lose the taint.
+
+- **Input.** A READ's record and its INTO item, ACCEPT from SYSIN or the console, the host
+  variables and SQLCA a row EXEC SQL fetched fills, a job step's PARM and a CICS task's COMMAREA.
+  ACCEPT FROM DATE, DAY or TIME is not input.
+- **Through statements.** Each statement's writes may hold input when the statement has read a
+  byte that may, since it started: the bytes of every item it locates, which includes a subscript's
+  item, and a BY CONTENT or BY VALUE copy. A receiver a statement only writes is not read: MOVE's,
+  SET's, ACCEPT's, INITIALIZE's, PERFORM VARYING's FROM and CALL's RETURNING. So `MOVE SPACES TO X`
+  clears X. A program's initial values and LOCAL-STORAGE hold none.
+- **What it does not say.** A condition on input steers which constant is stored, but it puts no
+  input byte in the receiver, and taint does not follow it. A whole receiver may hold input when any
+  operand did, so taint over-approximates. It never under-approximates where it follows the run.
+- **Not followed yet.** SORT and MERGE, the Report Writer, XML and JSON statements, EXEC CICS,
+  object-oriented COBOL, calls through pointers, and Language Environment services. After the first
+  of these, a sink is null where it would be false, and true stays true.
+- **Equal under both executors.** The rt write funnel (`RunUnit::write`) and the locate of each
+  executor carry it, and the differential compares the taint of every byte and each sink's `input`
+  between the interpreter and the VM (lir.md §12.3).
 
 ## 2. Build provenance: `--provenance FILE`
 

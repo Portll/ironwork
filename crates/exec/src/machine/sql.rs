@@ -152,6 +152,10 @@ impl<'a, 'p> Host<&'a Ref> for Bound<'_, 'p, '_, '_> {
         &mut self.machine.unit.mem
     }
 
+    fn taint(&mut self) -> Option<&mut rt::taint::Taint> {
+        self.machine.unit.taint.as_mut()
+    }
+
     fn locate(&mut self, place: &'a Ref, receiving: bool) -> R<Loc> {
         self.machine.locate_as(place, receiving)
     }

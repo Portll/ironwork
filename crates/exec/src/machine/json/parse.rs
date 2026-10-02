@@ -418,6 +418,7 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     pub(in crate::machine) fn json_parse(&mut self, j: &'p JsonParse) -> R<Flow> {
+        self.unit.unfollowed("JSON PARSE");
         let p = self.parse_phrases(j)?;
         let (code, status) = self.parse_document(j, &p)?;
         self.json_code(code, j.pos)?;

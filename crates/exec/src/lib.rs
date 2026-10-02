@@ -302,10 +302,11 @@ pub(crate) fn execute_task<'w>(
     observer: Option<unit::Observer<'w>>,
     kept: &mut Option<unit::Remains>,
 ) -> (Result<Ending, Abend>, cics::Task) {
-    let statements = library.trace_statements.clone();
+    let (statements, taint) = (library.trace_statements.clone(), library.trace_input.then(rt::taint::Taint::default));
     let mut run_unit = unit::RunUnit::new(library, dds, None, clock, out, err);
     run_unit.observer = observer;
     run_unit.statements = statements;
+    run_unit.taint = taint;
     run_unit.sql = database.map(sql::Session::new);
     let (ending, ended, task) = run_task(compiled, run_unit, task, kept, |unit, me, commarea, length| {
         machine::Machine::activation(compiled, me, unit, true).and_then(|mut m| {
@@ -331,7 +332,11 @@ pub(crate) fn run_task<'w, H: Clone, L: unit::Loader<H>, E>(
     run_unit.eib = run_unit.push_temporary(&[0; cics::EIB_LEN]);
     let commarea = task.commarea.take();
     let length = commarea.as_ref().map_or(0, Vec::len);
-    let commarea = commarea.map(|c| run_unit.push_temporary(&c));
+    let commarea = commarea.map(|c| {
+        let at = run_unit.push_temporary(&c);
+        run_unit.mark_input(at, c.len(), true);
+        at
+    });
     run_unit.cics = Some(task);
     let ending = run(&mut run_unit, me, commarea, length);
     let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.end_task(&compiled.program.id, ending.is_ok()).map(drop));
@@ -376,13 +381,14 @@ fn run_main<'w>(
     kept: &mut Option<unit::Remains>,
 ) -> Result<(Ending, i16), Abend> {
     oo::refuse_to_run(&compiled.program)?;
-    let statements = library.trace_statements.clone();
+    let (statements, taint) = (library.trace_statements.clone(), library.trace_input.then(rt::taint::Taint::default));
     let mut run_unit = unit::RunUnit::new(library, dds, sysin, clock, out, err);
     run_unit.observer = observer;
     run_unit.statements = statements;
+    run_unit.taint = taint;
     run_unit.sql = database.map(sql::Session::new);
     let me = run_unit.add(None, &compiled.program, compiled.layout.size as usize);
-    let parm = parm.map(|p| run_unit.push_temporary(&rt::le::parm::parameter_area(rt::le::parm::program_arguments(p), compiled.options.code_page())));
+    let parm = parm.map(|p| push_parm(&mut run_unit, compiled, p));
     let ending = machine::Machine::activation(compiled, me, &mut run_unit, true).and_then(|mut m| {
         if parm.is_some() {
             m.bind(&[parm]);
@@ -396,6 +402,14 @@ fn run_main<'w>(
     settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default(), file: None })?;
     closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default(), file: None })?;
     Ok((ending, run_unit.return_code()))
+}
+
+/// A job step's PARM as Language Environment passes it, at the end of memory: input.
+pub(crate) fn push_parm<H: Clone, L: rt::unit::Loader<H>>(run_unit: &mut rt::unit::RunUnit<'_, H, L>, compiled: &Compiled, parm: &str) -> usize {
+    let area = rt::le::parm::parameter_area(rt::le::parm::program_arguments(parm), compiled.options.code_page());
+    let at = run_unit.push_temporary(&area);
+    run_unit.mark_input(at, area.len(), true);
+    at
 }
 
 #[cfg(test)]

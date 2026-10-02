@@ -34,6 +34,14 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         self.loc_with(place, &[])
     }
 
+    /// `Machine::locate_written`: a receiver the op only writes, whose old bytes are not read.
+    pub(super) fn loc_written(&mut self, place: PlaceId) -> R<Loc> {
+        let was = self.unit.writing(true);
+        let loc = self.loc(place);
+        self.unit.writing(was);
+        loc
+    }
+
     /// `place` with each subscript `fixed` names set to its constant, as the walker writes an ALL
     /// subscript as a literal for each element.
     pub(super) fn loc_with(&mut self, place: PlaceId, fixed: &[(u32, i64)]) -> R<Loc> {
@@ -81,7 +89,9 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             len = length * unit;
         }
         let (offset, len) = loc::within(offset, len, self.unit.mem.len(), name, pos)?;
-        Ok(Loc { offset, len, kind: place.kind, item: id as usize })
+        let loc = Loc { offset, len, kind: place.kind, item: id as usize };
+        self.unit.taint_read(loc);
+        Ok(loc)
     }
 
     /// `Machine::integer`: the dmax pass's locates, then the value, its whole part.

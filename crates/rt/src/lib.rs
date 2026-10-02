@@ -42,6 +42,7 @@ pub mod sql;
 pub mod storage;
 pub mod store;
 pub mod strings;
+pub mod taint;
 pub mod terminal;
 pub mod text;
 pub mod tn3270;

@@ -98,6 +98,7 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     pub(super) fn xml_parse(&mut self, x: &'p XmlParse) -> R<Flow> {
+        self.unit.unfollowed("XML PARSE");
         let (start, first_end) = self.procedure(&x.procedure, x.pos)?;
         let end = match &x.thru {
             Some(t) => self.procedure(t, x.pos)?.1,

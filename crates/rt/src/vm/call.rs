@@ -87,7 +87,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             return Ok(Step::End(Ending::StopRun));
         }
         if let (Some(target), Some(val)) = (plan.returning, returned) {
-            let dest = self.loc(target)?;
+            let dest = self.loc_written(target)?;
             store::assign(&self.facts(), self.unit, dest, val, None, pos)?;
         }
         Ok(if plan.on_exception || plan.not_on_exception { Step::Arm(0) } else { Step::Next })
@@ -111,6 +111,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 Loc { offset, len: len as usize, kind, item: usize::MAX }
             }
         };
+        self.unit.taint_read(loc);
         self.read(loc, pos)
     }
 
@@ -122,7 +123,8 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     /// `Machine::sink`: tells the observer an operation an input could steer, and its operand.
     pub(super) fn sink(&mut self, kind: &'static str, pos: Pos, operand: &str) {
         let file = self.event_file(pos);
-        self.unit.notify(Event::Sink { kind, file: &file, line: pos.line, operand });
+        let input = self.unit.input_at_sink();
+        self.unit.notify(Event::Sink { kind, file: &file, line: pos.line, operand, input });
     }
 
     /// `Machine::event_file`: a library program's own source by its path, a COPY member by the

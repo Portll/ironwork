@@ -66,6 +66,7 @@ pub trait ReportHost<'w, X: 'w, C: 'w, V: 'w, U: 'w>: Host<&'w C> {
 
 /// One report statement. A STOP RUN or GOBACK in a USE BEFORE REPORTING procedure ends the run.
 pub fn run<'w, X, C, V, U, H: ReportHost<'w, X, C, V, U>>(x: &mut H, writer: &'w Writer<X, C, V, U>, op: ReportOp, pos: Pos) -> R<Option<Ending>> {
+    crate::host::unfollowed(x, "the Report Writer");
     let mut r = Reporting { x, w: writer };
     let done = match op {
         ReportOp::Initiate(ri) => r.initiate(ri as usize, pos),

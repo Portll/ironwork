@@ -86,7 +86,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             let b = &p.blocks[block as usize];
             let at = &p.debug.ops[block as usize];
             let starts = &p.debug.statements[block as usize];
-            let tracing = self.unit.statements.is_some() && !starts.is_empty();
+            let tracing = (self.unit.statements.is_some() || self.unit.taint.is_some()) && !starts.is_empty();
             let mut told = 0;
             let mut arm = None;
             let mut transfer = None;
@@ -117,13 +117,15 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         }
     }
 
-    /// Tells the observer of each statement of `starts`, from the `told`th, that starts before op
-    /// `k`, as the walker's `exec` does; how many of `starts` are told after.
+    /// Starts each statement of `starts`, from the `told`th, that starts before op `k`, as the
+    /// walker's `exec` does: taint's statement starts, and the observer told; how many of `starts`
+    /// are started after.
     fn statements_before(&mut self, starts: &[(u32, DebugId)], mut told: usize, k: usize) -> usize {
         while let Some(&(op, id)) = starts.get(told)
             && op as usize <= k
         {
             let pos = self.pos(id);
+            self.unit.statement_starts();
             if self.unit.traces(pos.line) {
                 let file = self.event_file(pos);
                 self.unit.notify(Event::Statement { file: &file, line: pos.line });
@@ -350,6 +352,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
                 let n = bytes.len().min(width);
                 self.unit.mem[at + field..at + field + n].copy_from_slice(&bytes[..n]);
             }
+            self.unit.mark(at, len as usize);
         }
         let saved = self.line;
         self.debugging = true;

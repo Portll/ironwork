@@ -145,6 +145,12 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     /// The statement, its code stored; Arm(1) for an exception and Arm(0) otherwise when it has
     /// either phrase.
     pub(super) fn markup(&mut self, m: &'p Markup, at: DebugId, pos: Pos) -> R<Step> {
+        self.unit.unfollowed(match m {
+            Markup::JsonGenerate(_) => "JSON GENERATE",
+            Markup::XmlGenerate(_) => "XML GENERATE",
+            Markup::XmlParse(_) => "XML PARSE",
+            Markup::JsonParse(_) => "JSON PARSE",
+        });
         let code = match m {
             Markup::JsonGenerate(g) => {
                 let code = self.json_generate(g, at, pos)?;

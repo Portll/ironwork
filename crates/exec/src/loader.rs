@@ -22,6 +22,8 @@ pub struct Library {
     pub flags: Vec<String>,
     /// The statements whose start the run unit tells its observer of (`RunUnit::statements`).
     pub trace_statements: Option<rt::unit::StatementFilter>,
+    /// Whether the run unit follows which bytes may hold input (`RunUnit::taint`).
+    pub trace_input: bool,
 }
 
 fn member_name(name: &str) -> bool {

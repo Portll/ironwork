@@ -6,7 +6,7 @@ use crate::abend::Abend;
 use crate::host::{self, Host};
 use crate::loc;
 use crate::storage::{Kind, Loc, Val};
-use crate::store::{self, ProgramFacts};
+use crate::store::ProgramFacts;
 use crate::vocab::{Figurative, Pos};
 use numeric::precision::{Fixed, Places};
 
@@ -69,7 +69,7 @@ pub fn up_down<P: Copy>(x: &mut impl Host<P>, by: i64, down: bool, targets: &[P]
         match host::read(x, dest, pos)? {
             Val::Address(a) => {
                 let moved = u32::try_from(a as i64 + step).map_err(|_| Abend::ironwork("a pointer moved below zero", pos))?;
-                store::write(x.mem(), dest, &moved.to_be_bytes());
+                host::write(x, dest, &moved.to_be_bytes());
             }
             Val::Num(f) => {
                 let arith = x.facts().options().arith;

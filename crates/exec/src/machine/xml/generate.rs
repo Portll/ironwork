@@ -281,6 +281,7 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     pub(in crate::machine) fn xml_generate(&mut self, x: &'p XmlGenerate) -> R<Flow> {
+        self.unit.unfollowed("XML GENERATE");
         let code = self.xml_generated(x)?;
         self.set_integer(&special("XML-CODE"), code, x.pos)?;
         let handler = if code == 0 { &x.not_on_exception } else { &x.on_exception };

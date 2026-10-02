@@ -229,12 +229,20 @@ fn deliver<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, re
     if !variable {
         mem[offset + n..offset + size].fill(ebcdic::SPACE);
     }
+    if let Some(t) = x.taint() {
+        t.set(offset, n, true);
+        t.set(offset + n, if variable { 0 } else { size - n }, false);
+    }
     if let Some(d) = file.depending {
         host::set_integer(x, d.item, n as i64, pos)?;
     }
     if let Some(r) = into {
         let dest = x.locate(r, true)?;
-        let bytes = x.mem()[offset..offset + if variable { n } else { size }].to_vec();
+        let moved = if variable { n } else { size };
+        if let Some(t) = x.taint() {
+            t.read(offset, moved);
+        }
+        let bytes = x.mem()[offset..offset + moved].to_vec();
         x.assign(dest, Val::Bytes(bytes), None, pos)?;
     }
     Ok(record.len() > size)
@@ -599,6 +607,7 @@ fn put_line<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, l
     let reserved = usize::from(file.carriage.is_some_and(|c| c.reserved));
     if let Some(c) = controls.filter(|_| reserved == 1 && loc.len > 0) {
         x.mem()[loc.offset] = c.data;
+        host::mark(x, loc.offset, 1);
     }
     let bytes = record_bytes(x, file, loc, f.format);
     let written = match (f.format, controls) {

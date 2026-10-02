@@ -355,6 +355,7 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     pub(super) fn json_generate(&mut self, g: &'p JsonGenerate) -> R<Flow> {
+        self.unit.unfollowed("JSON GENERATE");
         let p = self.json_phrases(g)?;
         let document = self.json_document(g, &p)?;
         let receiver = self.locate_receiving(&g.receiver)?;

@@ -313,6 +313,10 @@ impl<'p, L: Loader<Rc<Code>>> Host<Handle<'p>> for Io<'_, 'p, '_, '_, L> {
         &mut self.vm.unit.mem
     }
 
+    fn taint(&mut self) -> Option<&mut crate::taint::Taint> {
+        self.vm.unit.taint.as_mut()
+    }
+
     fn locate(&mut self, handle: Handle<'p>, receiving: bool) -> Result<Loc, Abend> {
         match handle {
             Handle::Place(place) | Handle::Relative(&RelativeKey { place, .. }) => Host::<PlaceId>::locate(&mut *self.vm, place, receiving),

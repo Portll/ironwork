@@ -2150,6 +2150,11 @@ the SQL call log (verb, ordinal, text, inputs), from the scripted database of ma
 or a recording; and for CICS the returned task: next TRANSID, COMMAREA, TS and TD queues, and
 terminal screens. The run unit's events are compared too, with `RunUnit.statements` set to all
 statements in both, so each run checks the statement starts of §10 against the walker's `exec`.
+Both run with `RunUnit.taint` on, and the taint of every byte and each sink's `input` are compared
+(evidence.md §1.3). So the VM follows three rules. It writes data to memory through
+`RunUnit::write` or `rt::host::write`, or marks what it wrote with `RunUnit::mark`. It locates a
+receiver it only writes with `loc_written`, where the walker uses `locate_written`. And an op that
+runs something taint does not follow calls `RunUnit::unfollowed`, as the walker does.
 The fuzz target of B2 runs both with a step limit, and passes when they agree or both stop at it.
 The golden programs of §12.2 run in both, which exercises C99.
 

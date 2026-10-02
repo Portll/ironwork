@@ -69,6 +69,7 @@ pub fn string<P: Copy, O>(x: &mut impl Values<P, O>, into: P, pointer: Option<P>
                     break 'sources;
                 }
                 x.mem()[dest.offset + at as usize - 1] = b;
+                host::mark(x, dest.offset + at as usize - 1, 1);
                 at += 1;
             }
         }
@@ -183,7 +184,7 @@ pub fn inspect<P: Copy, O>(
         }
     }
     strings::inspect(&mut data, 1, &changes);
-    store::write(x.mem(), loc, &data);
+    host::write(x, loc, &data);
     Ok(())
 }
 

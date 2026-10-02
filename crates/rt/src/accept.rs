@@ -44,11 +44,15 @@ pub fn accept<H: Clone, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUn
                 return Ok(());
             }
             area.resize(dest.len, space);
-            store::write(&mut unit.mem, dest, &area);
+            unit.write_input(dest.offset, &area);
             return Ok(());
         }
     };
-    store::assign(facts, unit, dest, val, None, pos)
+    store::assign(facts, unit, dest, val, None, pos)?;
+    if from == AcceptFrom::Sysin {
+        unit.mark_input(dest.offset, dest.len, true);
+    }
+    Ok(())
 }
 
 /// An in-stream SYSIN record: a card of 80 bytes (assumption [`numeric::assumptions::SYSIN_CARD_IMAGES`]).

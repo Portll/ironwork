@@ -174,6 +174,7 @@ impl<'p> Machine<'p, '_, '_> {
                 let n = bytes.len().min(len);
                 self.unit.mem[at + offset..at + offset + n].copy_from_slice(&bytes[..n]);
             }
+            self.unit.mark(at, size);
         }
         let saved = self.uses.line;
         self.uses.debugging = true;

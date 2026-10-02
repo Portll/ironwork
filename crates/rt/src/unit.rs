@@ -7,6 +7,8 @@
 
 use crate::abend::Abend;
 use crate::files::{Dds, Open};
+use crate::storage::Loc;
+use crate::taint::Taint;
 use crate::vocab::{OpenMode, Pos};
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, Write};
@@ -120,8 +122,10 @@ pub enum Event<'a> {
     /// Control entering paragraph (or section header) `index` of `program` at its start.
     Paragraph { program: &'a str, name: &'a str, index: usize },
     /// `kind` is cobolwork's name for the sink (`dynamic-program-load`, `log`, ...); `file` is the
-    /// library file or COPY member the operation is in, empty for the first program's own source.
-    Sink { kind: &'static str, file: &'a str, line: u32, operand: &'a str },
+    /// library file or COPY member the operation is in, empty for the first program's own source;
+    /// `input`, under [`RunUnit::taint`], whether an input byte may be in the operand
+    /// ([`crate::taint::Taint::at_sink`]).
+    Sink { kind: &'static str, file: &'a str, line: u32, operand: &'a str, input: Option<bool> },
     /// A statement starting, under [`RunUnit::statements`]; `file` as `Sink`'s.
     Statement { file: &'a str, line: u32 },
 }
@@ -199,6 +203,82 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     pub entries: Vec<crate::set::Entry>,
     /// The statements an observer is told of as each starts; None tells it of none.
     pub statements: Option<StatementFilter>,
+    /// Which bytes may hold input, when the run traces input.
+    pub taint: Option<Taint>,
+}
+
+impl<H, L: Loader<H>> RunUnit<'_, H, L> {
+    /// Copies `bytes` into memory at `offset`; under taint they may hold input when the running
+    /// statement has read a byte that may. Every write of data to memory goes through here or
+    /// [`RunUnit::write_input`], or marks its bytes with [`RunUnit::mark`].
+    pub fn write(&mut self, offset: usize, bytes: &[u8]) {
+        self.mem[offset..offset + bytes.len()].copy_from_slice(bytes);
+        self.mark(offset, bytes.len());
+    }
+
+    /// Copies input into memory at `offset`: bytes a READ, ACCEPT or row brought in.
+    pub fn write_input(&mut self, offset: usize, bytes: &[u8]) {
+        self.mem[offset..offset + bytes.len()].copy_from_slice(bytes);
+        self.mark_input(offset, bytes.len(), true);
+    }
+
+    /// Marks bytes written outside [`RunUnit::write`] as it would.
+    pub fn mark(&mut self, offset: usize, len: usize) {
+        if let Some(t) = self.taint.as_mut() {
+            let pending = t.pending();
+            t.set(offset, len, pending);
+        }
+    }
+
+    /// Marks bytes as input, or as holding none: initial values, which are constants.
+    pub fn mark_input(&mut self, offset: usize, len: usize, input: bool) {
+        if let Some(t) = self.taint.as_mut() {
+            t.set(offset, len, input);
+        }
+    }
+
+    /// A read of `loc` by the running statement.
+    pub fn taint_read(&mut self, loc: Loc) {
+        if let Some(t) = self.taint.as_mut() {
+            t.read(loc.offset, loc.len);
+        }
+    }
+
+    /// [`Taint::writing`], when the run traces input.
+    pub fn writing(&mut self, on: bool) -> bool {
+        self.taint.as_mut().is_some_and(|t| t.writing(on))
+    }
+
+    /// A statement with a position starts: its writes carry only what it reads.
+    pub fn statement_starts(&mut self) {
+        if let Some(t) = self.taint.as_mut() {
+            t.start_statement();
+        }
+    }
+
+    /// Whether the running statement has read a byte that may hold input.
+    pub fn pending(&self) -> bool {
+        self.taint.as_ref().is_some_and(Taint::pending)
+    }
+
+    /// [`Taint::resume_statement`], when the run traces input.
+    pub fn resume_statement(&mut self, read_before: bool) {
+        if let Some(t) = self.taint.as_mut() {
+            t.resume_statement(read_before);
+        }
+    }
+
+    /// The run did `what`, which taint does not follow.
+    pub fn unfollowed(&mut self, what: &'static str) {
+        if let Some(t) = self.taint.as_mut() {
+            t.unfollowed(what);
+        }
+    }
+
+    /// Whether an input byte may be in a sink's operand; None without taint.
+    pub fn input_at_sink(&self) -> Option<bool> {
+        self.taint.as_ref().and_then(Taint::at_sink)
+    }
 }
 
 impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
@@ -226,6 +306,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             connectors: HashMap::new(),
             entries: Vec::new(),
             statements: None,
+            taint: None,
         }
     }
 
@@ -271,10 +352,11 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         Ok((copy, Some(entry)))
     }
 
-    /// Storage for a BY CONTENT or BY VALUE argument, at the end of memory.
+    /// Storage for a BY CONTENT or BY VALUE argument, at the end of memory, written as
+    /// [`RunUnit::write`] writes.
     pub fn push_temporary(&mut self, bytes: &[u8]) -> usize {
         let at = self.allocate(bytes.len());
-        self.mem[at..at + bytes.len()].copy_from_slice(bytes);
+        self.write(at, bytes);
         at
     }
 
@@ -284,6 +366,9 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         let external = self.externals.storage.values().all(|&(at, _)| at < mark);
         if self.programs.iter().all(|p| p.base < mark) && self.le.heap_end() <= mark && external {
             self.mem.truncate(mark.max(RESERVED));
+            if let Some(t) = self.taint.as_mut() {
+                t.truncate(self.mem.len());
+            }
         }
     }
 

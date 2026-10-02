@@ -105,6 +105,14 @@ pub(super) fn assign<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, into: &[Hos
             mem[at..at + 2].copy_from_slice(&indicator.to_be_bytes());
         }
     }
+    if let Some(taint) = x.taint() {
+        for t in &targets {
+            taint.set(t.offset, t.len, true);
+            if let Some(at) = t.indicator {
+                taint.set(at, 2, true);
+            }
+        }
+    }
     Ok(Ok(()))
 }
 
@@ -127,5 +135,9 @@ pub(super) fn sqlca<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, sqlca: &Sqlc
         };
         let Ok(loc) = x.locate(*place, false) else { continue };
         let _ = write(&value, &mut x.mem()[loc.offset..loc.offset + loc.len], ty, page);
+        // The database's answer, SQLERRMC's tokens among it, is input.
+        if let Some(t) = x.taint() {
+            t.set(loc.offset, loc.len, true);
+        }
     }
 }

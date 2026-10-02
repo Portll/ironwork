@@ -376,6 +376,7 @@ fn succeeded<P, O, S>(plan: &InvokePlan<P, O, S>) -> Step {
 /// INVOKE: Arm(1) when no method matches and ON EXCEPTION is written, Arm(0) after a method ran
 /// when a phrase is written, Next when none is, or End after a STOP RUN.
 pub fn invoke<'w, P: Copy, O, S, X: OoHost<'w, P, O, S>>(x: &mut X, plan: &InvokePlan<P, O, S>, pos: Pos) -> R<Step> {
+    x.unit().unfollowed("object-oriented COBOL and calls through pointers");
     let name = method_name(x, &plan.method, pos)?;
     let written = target_name(x, &plan.receiver, pos)?;
     let what = format!("INVOKE {written} \"{name}\"");
@@ -553,6 +554,7 @@ fn run_method<'w, P: Copy, O, S, X: OoHost<'w, P, O, S>>(x: &mut X, plan: &Invok
 /// run here when it needs no JVM. Each argument is `Value` or `Omitted`, OMITTED as NULL. The
 /// reference services keep the JNI's rules for local and global references (see [`LOCAL_FRAMES`]).
 pub fn call_through_pointer<'w, P: Copy, O, S, X: OoHost<'w, P, O, S>>(x: &mut X, pointer: P, args: &[CallArg<P, O>], returning: Option<P>, pos: Pos) -> R<()> {
+    x.unit().unfollowed("object-oriented COBOL and calls through pointers");
     let name = x.place_name(pointer);
     let loc = x.locate(pointer, false)?;
     let Ok(value) = <[u8; 4]>::try_from(store::bytes(x.mem(), loc)).map(u32::from_be_bytes) else {

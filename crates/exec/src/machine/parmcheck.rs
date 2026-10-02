@@ -5,7 +5,7 @@ use super::*;
 impl<'p> Machine<'p, '_, '_> {
     /// Sets PARMCHECK's buffer to X'AA' before a CALL.
     pub(super) fn parmcheck_set(&mut self) {
-        rt::parmcheck::set(&mut self.unit.mem, self.base, self.layout.parmcheck);
+        rt::parmcheck::set(self.unit, self.base, self.layout.parmcheck);
     }
 
     /// After a CALL that returned, its arguments at `addresses`: `rt::parmcheck::test`, the called

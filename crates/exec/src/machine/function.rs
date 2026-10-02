@@ -43,7 +43,9 @@ impl<'p> Machine<'p, '_, '_> {
         self.nest(pos)?;
         let active = self.unit.programs[index].active;
         let mark = self.unit.mem.len();
+        let read_before = self.unit.pending();
         let outcome = run(&compiled, index, &mut *self.unit, &bound, pos);
+        self.unit.resume_statement(read_before);
         self.unit.programs[index].active = active;
         self.unit.release_temporaries(mark);
         self.unit.depth -= 1;

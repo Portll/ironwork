@@ -102,6 +102,13 @@ flags:
              OPERATOR or JOURNALNAME, SEND and WEB write. Enter TEXT where the input comes in
              (SYSIN, a DD, the COMMAREA, a replayed row); each operation is recorded once reached
              and once not. run, job and cics
+  --trace-input
+             with --evidence: follow which bytes of memory may hold input (READ, ACCEPT from
+             SYSIN, a row EXEC SQL fetched, PARM) through each statement, and record at each
+             operation --trace-marker names whether an input byte may be in its operand (input
+             true), none is (false), or the run did something not followed yet (null: SORT and
+             MERGE, the Report Writer, XML and JSON statements, EXEC CICS, object-oriented COBOL,
+             Language Environment services). run only
   --trace-statements FILE
              with --evidence: record each start of a statement FILE lists, one FILE:LINE per
              line, a file matched by its name: cobolwork's routes.statements. The first 100
@@ -358,6 +365,7 @@ fn driver() -> ExitCode {
     let mut evidence_dir: Option<std::path::PathBuf> = None;
     let mut trace_marker: Option<String> = None;
     let mut trace_statements: Option<std::path::PathBuf> = None;
+    let mut trace_input = false;
     let mut provenance_file: Option<std::path::PathBuf> = None;
     let (mut compare_base, mut compare_head, mut declare, mut statement) = (None, None, None, None);
     let mut expected: Vec<(String, std::path::PathBuf)> = Vec::new();
@@ -430,6 +438,7 @@ fn driver() -> ExitCode {
                 Some(m) => trace_marker = Some(m),
                 None => return usage_error("--trace-marker needs the text entered at the input"),
             },
+            "--trace-input" => trace_input = true,
             "--trace-statements" => match args.next() {
                 Some(file) => trace_statements = Some(std::path::PathBuf::from(file)),
                 None => return usage_error("--trace-statements needs a file of FILE:LINE statements"),
@@ -545,7 +554,7 @@ fn driver() -> ExitCode {
         return usage_error("unknown flag --c-series");
     }
     let run_flags = !dds.is_empty() || replay.is_some() || keyed || sql_db.is_some() || sql_record.is_some() || evidence_dir.is_some() || trace_marker.is_some()
-        || trace_statements.is_some() || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() || !matches!(clock, exec::unit::Clock::System)
+        || trace_statements.is_some() || trace_input || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() || !matches!(clock, exec::unit::Clock::System)
         || compare_base.is_some() || compare_head.is_some() || declare.is_some() || statement.is_some() || !expected.is_empty() || datasets.is_some()
         || !proclibs.is_empty() || user.is_some()
         || vm || parm.is_some();
@@ -568,7 +577,7 @@ fn driver() -> ExitCode {
         }
         // Fuzz makes every input, DD, journal and coverage report itself; a flag it would not use is
         // refused rather than ignored.
-        let made = !dds.is_empty() || replay.is_some() || keyed || sql_db.is_some() || sql_record.is_some() || evidence_dir.is_some() || coverage_file.is_some() || provenance_file.is_some() || trace_marker.is_some() || trace_statements.is_some();
+        let made = !dds.is_empty() || replay.is_some() || keyed || sql_db.is_some() || sql_record.is_some() || evidence_dir.is_some() || coverage_file.is_some() || provenance_file.is_some() || trace_marker.is_some() || trace_statements.is_some() || trace_input;
         let elsewhere = compare_base.is_some() || compare_head.is_some() || declare.is_some() || statement.is_some() || !expected.is_empty() || dump_flags || bundle.is_some() || source_prefix.is_some();
         let job_only = !fuzz_job && (!proclibs.is_empty() || user.is_some() || datasets.is_some()) || datasets.as_deref().is_some_and(|d| d.ends_with(":text"));
         let cics_only = !fuzz_cics && !cics_options.is_empty();
@@ -638,6 +647,9 @@ fn driver() -> ExitCode {
     }
     if trace_statements.is_some() && (evidence_dir.is_none() || rest.first().map(String::as_str) != Some("run")) {
         return usage_error("--trace-statements goes with --evidence, for run");
+    }
+    if trace_input && (evidence_dir.is_none() || rest.first().map(String::as_str) != Some("run")) {
+        return usage_error("--trace-input goes with --evidence, for run");
     }
     let listed = match trace_statements.as_deref().map(evidence::listed_statements).transpose() {
         Ok(listed) => listed,
@@ -756,6 +768,7 @@ fn driver() -> ExitCode {
         copy: libraries,
         flags: flags.clone(),
         trace_statements: listed.as_ref().map(|l| exec::unit::StatementFilter::Lines(l.iter().map(|&(_, line)| line).collect())),
+        trace_input,
     };
     let compiled = match exec::compile(first, &flags) {
         Ok(c) => c,
@@ -843,7 +856,7 @@ fn driver() -> ExitCode {
         None => Box::new(io::stdin().lock()),
     };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
-    let shared = journal.map(|j| std::rc::Rc::new(std::cell::RefCell::new(evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()))));
+    let shared = journal.map(|j| std::rc::Rc::new(std::cell::RefCell::new(evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()).with_input(trace_input))));
     let covered = coverage_file.as_ref().map(|_| std::rc::Rc::new(std::cell::RefCell::new(coverage::Coverage::default())));
     let observer = (shared.is_some() || covered.is_some()).then(|| {
         let (run, cov) = (shared.clone(), covered.clone());

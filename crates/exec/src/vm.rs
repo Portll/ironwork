@@ -93,13 +93,14 @@ pub fn execute<'w>(
     kept: &mut Option<Remains>,
 ) -> Result<(Ending, i16), Halt> {
     oo::refuse_to_run(&compiled.program)?;
-    let statements = library.trace_statements.clone();
+    let (statements, taint) = (library.trace_statements.clone(), library.trace_input.then(rt::taint::Taint::default));
     let mut run_unit = rt::unit::RunUnit::new(VmLibrary(library), dds, sysin, clock, out, err);
     run_unit.observer = observer;
     run_unit.statements = statements;
+    run_unit.taint = taint;
     run_unit.sql = database.map(sql::Session::new);
     let me = run_unit.add_named(None, compiled.program.id.to_ascii_uppercase(), compiled.program.files.len(), compiled.layout.size as usize);
-    let parm = parm.map(|p| run_unit.push_temporary(&rt::le::parm::parameter_area(rt::le::parm::program_arguments(p), compiled.options.code_page())));
+    let parm = parm.map(|p| crate::push_parm(&mut run_unit, compiled, p));
     let ending = rt::vm::run(code, me, &mut run_unit, &parm.map_or_else(Vec::new, |p| vec![Some(p)]));
     let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(&compiled.program.id, ending.is_ok()).map(drop));
     let closed = run_unit.close_all();
@@ -130,10 +131,11 @@ pub fn execute_cics<'w>(
     if let Err(abend) = oo::refuse_to_run(&compiled.program) {
         return (Err(abend.into()), task);
     }
-    let statements = library.trace_statements.clone();
+    let (statements, taint) = (library.trace_statements.clone(), library.trace_input.then(rt::taint::Taint::default));
     let mut run_unit = rt::unit::RunUnit::new(VmLibrary(library), dds, None, clock, out, err);
     run_unit.observer = observer;
     run_unit.statements = statements;
+    run_unit.taint = taint;
     run_unit.sql = database.map(sql::Session::new);
     let (ending, ended, task) = crate::run_task(compiled, run_unit, task, kept, |unit, me, commarea, length| rt::vm::run_task(code, me, unit, commarea, length));
     let ending = match ending {

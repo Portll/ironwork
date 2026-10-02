@@ -130,6 +130,7 @@ pub fn begin_command<H, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>) {
 
 /// Runs a command.
 pub fn run<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, command: &CicsCommand<P, O, S>, pos: Pos) -> R<Flow> {
+    crate::host::unfollowed(x, "EXEC CICS");
     let name = x.text(&command.name);
     in_task(x.unit(), &name, pos)?;
     begin_command(x.unit());

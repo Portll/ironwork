@@ -129,7 +129,7 @@ impl Harness {
         let compiled = compiled.unwrap_or_else(|e| panic!("{e:?}"));
         programs.extend(self.classes.iter().map(|c| syntax::parse(c).unwrap_or_else(|e| panic!("{e}\n{c}"))));
         let fingerprint = rt::sql::fingerprint(&format!("{}\n{}", self.source, self.flags.join(" ")));
-        let library = unit::Library { programs, dirs: self.dirs, flags: self.flags, trace_statements: Some(unit::StatementFilter::All), ..Default::default() };
+        let library = unit::Library { programs, dirs: self.dirs, flags: self.flags, trace_statements: Some(unit::StatementFilter::All), trace_input: true, ..Default::default() };
         let lowered = check_lowering(&compiled, fingerprint, None);
         for program in &library.programs {
             // Compiled as `RunUnit::load` compiles a CALLed program; one that does not compile is left out.
@@ -227,7 +227,7 @@ impl Events {
             Event::Close { dd, path } => format!("close {dd} {}", path.display()),
             Event::Load { program, source } => format!("load {program} {}", source.map(|s| s.display().to_string()).unwrap_or_default()),
             Event::Paragraph { program, name, index } => format!("paragraph {program} {name} {index}"),
-            Event::Sink { kind, file, line, operand } => format!("sink {kind} {file}:{line} {operand}"),
+            Event::Sink { kind, file, line, operand, input } => format!("sink {kind} {file}:{line} {operand} {input:?}"),
             Event::Statement { file, line } => format!("statement {file}:{line}"),
         };
         for b in text.bytes().chain([0]) {
@@ -478,6 +478,10 @@ fn differences(walker: &Run, vm: &Run) -> Vec<String> {
 fn storage_difference(a: &Remains, b: &Remains) -> String {
     if a.programs != b.programs {
         return format!("the run unit's programs differ: interpreter {:?}, VM {:?}", a.programs, b.programs);
+    }
+    if a.mem == b.mem {
+        let bytes = |t: &Option<(Vec<u64>, Option<&'static str>)>| t.as_ref().map(|(w, u)| ((0..w.len() * 64).filter(|&i| w[i / 64] >> (i % 64) & 1 == 1).take(12).collect::<Vec<_>>(), *u));
+        return format!("taint differs: interpreter {:?}, VM {:?} (input bytes, first not followed)", bytes(&a.taint), bytes(&b.taint));
     }
     let owner = |offset: usize| a.programs.iter().filter(|(_, base)| *base <= offset).max_by_key(|(_, base)| *base).map_or_else(|| "the reserved area".to_owned(), |(name, base)| format!("{name}+{}", offset - base));
     let differing: Vec<String> = (0..a.mem.len().max(b.mem.len()))

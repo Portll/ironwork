@@ -44,6 +44,10 @@ impl<'p, L: Loader<Rc<Code>>> Host<&'p PlaceId> for Reports<'_, 'p, '_, '_, L> {
         &mut self.vm.unit.mem
     }
 
+    fn taint(&mut self) -> Option<&mut crate::taint::Taint> {
+        self.vm.unit.taint.as_mut()
+    }
+
     fn locate(&mut self, place: &'p PlaceId, receiving: bool) -> Result<Loc, Abend> {
         Host::<PlaceId>::locate(&mut *self.vm, *place, receiving)
     }

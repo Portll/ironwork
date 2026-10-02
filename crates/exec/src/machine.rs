@@ -126,10 +126,12 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         if compiled.layout.local_size > 0 {
             m.local_base = m.unit.push_temporary(&vec![0; compiled.layout.local_size as usize]);
             m.initialize_values(true)?;
+            m.unit.mark_input(m.local_base, compiled.layout.local_size as usize, false);
         }
         if fresh {
             m.unit.mem[base..base + compiled.layout.size as usize].fill(0);
             m.initialize_values(false)?;
+            m.unit.mark_input(base, compiled.layout.size as usize, false);
             m.unit.initialized(me);
         }
         Ok(m)
@@ -245,12 +247,14 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         {
             self.uses.line = pos;
         }
-        if self.unit.statements.is_some()
+        if (self.unit.statements.is_some() || self.unit.taint.is_some())
             && let Some(pos) = declaratives::statement_pos(s)
-            && self.unit.traces(pos.line)
         {
-            let file = self.event_file(pos);
-            self.unit.notify(Event::Statement { file: &file, line: pos.line });
+            self.unit.statement_starts();
+            if self.unit.traces(pos.line) {
+                let file = self.event_file(pos);
+                self.unit.notify(Event::Statement { file: &file, line: pos.line });
+            }
         }
         match self.statement(s) {
             Err(Abend { code: AbendCode::Signal(Signal::DeclarativeExit), .. }) => Ok(self.declarative_exit()),
@@ -263,7 +267,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         match s {
             Stmt::Move { from, to, pos } => {
                 for r in to {
-                    let dest = self.locate_receiving(r)?;
+                    let dest = self.locate_written(|m| m.locate_receiving(r))?;
                     let (val, src) = self.move_source(from, dest, *pos)?;
                     self.assign(dest, val, src, *pos)?;
                 }
@@ -320,7 +324,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Stmt::Initialize { targets, with, pos } => {
                 let with = with.as_deref().unwrap_or(&NO_PHRASES);
                 for r in targets {
-                    let loc = self.locate(r)?;
+                    let loc = self.locate_written(|m| m.locate(r))?;
                     if loc.item != usize::MAX {
                         self.initialize(loc.item, loc.offset, with, *pos)?;
                         continue;
@@ -521,7 +525,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn vary_from(&mut self, v: &Varying, pos: Pos) -> R<()> {
-        let var = self.locate(&v.var)?;
+        let var = self.locate_written(|m| m.locate(&v.var))?;
         let start = self.expr_value(&v.from, pos)?;
         self.assign(var, start, None, pos)
     }
@@ -548,6 +552,15 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         self.locate_as(r, false)
     }
 
+    /// A receiver the statement only writes, located as `locate` would: under taint its old bytes
+    /// are not read (`Taint::writing`).
+    fn locate_written(&mut self, locate: impl FnOnce(&mut Self) -> R<Loc>) -> R<Loc> {
+        let was = self.unit.writing(true);
+        let loc = locate(self);
+        self.unit.writing(was);
+        loc
+    }
+
     /// The receiving item of MOVE, ACCEPT, STRING, UNSTRING, READ and RETURN INTO, and WRITE,
     /// REWRITE and RELEASE FROM: a group holding the object of its own OCCURS DEPENDING ON is its
     /// maximum length (Language Reference SC27-8713-03, pp. 205-206).
@@ -557,10 +570,13 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     fn locate_as(&mut self, r: &Ref, receiving: bool) -> R<Loc> {
         if let Some(loc) = self.oo_register(r)?.or(self.xml_register(r)?) {
+            self.unit.taint_read(loc);
             return Ok(loc);
         }
         if r.name == "RETURN-CODE" && r.qualifiers.is_empty() && !self.layout.items.iter().any(|i| i.name.as_deref() == Some("RETURN-CODE")) {
-            return Ok(Loc { offset: RETURN_CODE, len: 2, kind: Kind::Binary { digits: 4, scale: 0, signed: true, native: false }, item: usize::MAX });
+            let loc = Loc { offset: RETURN_CODE, len: 2, kind: Kind::Binary { digits: 4, scale: 0, signed: true, native: false }, item: usize::MAX };
+            self.unit.taint_read(loc);
+            return Ok(loc);
         }
         let Resolved::Item(index) = self.resolve(r)? else {
             return Err(Abend::ironwork(format!("{} is a condition-name, not a data item", r.name), r.pos));
@@ -612,7 +628,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             }
         }
         let (offset, len) = loc::within(offset, len, self.unit.mem.len(), &r.name, r.pos)?;
-        Ok(Loc { offset, len, kind, item: index })
+        let loc = Loc { offset, len, kind, item: index };
+        self.unit.taint_read(loc);
+        Ok(loc)
     }
 
     /// Whether the objects of these tables' OCCURS DEPENDING ON all lie within item `group`.
@@ -675,7 +693,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn write(&mut self, loc: Loc, bytes: &[u8]) {
-        store::write(&mut self.unit.mem, loc, bytes);
+        self.unit.write(loc.offset, bytes);
     }
 
     fn integer(&mut self, e: &Expr, pos: Pos) -> R<i64> {
@@ -893,7 +911,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     /// Tells the observer, for the input trace, the operand of an operation an input could steer.
     pub(crate) fn sink(&mut self, kind: &'static str, pos: Pos, operand: &str) {
         let file = self.event_file(pos);
-        self.unit.notify(Event::Sink { kind, file: &file, line: pos.line, operand });
+        let input = self.unit.input_at_sink();
+        self.unit.notify(Event::Sink { kind, file: &file, line: pos.line, operand, input });
     }
 
     /// The file an event names for `pos`: a library program's own source by its path, a COPY
@@ -982,7 +1001,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 let dest = self.locate(target)?;
                 self.assign(dest, Val::Num(Fixed::new(i128::from(status), Places::new(9, 0))), None, c.pos)?;
             }
-            None => self.unit.mem[RETURN_CODE..RETURN_CODE + 2].copy_from_slice(&status.to_be_bytes()),
+            None => self.unit.write(RETURN_CODE, &status.to_be_bytes()),
         }
         Ok(Some(match &c.not_on_exception {
             Some(body) => self.run_block(body)?,
@@ -1042,7 +1061,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
         self.parmcheck_test(c, &addresses, |unit| unit.programs[index].name.clone())?;
         if let (Some(target), Some(val)) = (&c.returning, returned) {
-            let dest = self.locate(target)?;
+            let dest = self.locate_written(|m| m.locate(target))?;
             self.assign(dest, val, None, pos)?;
         }
         match &c.not_on_exception {
@@ -1085,14 +1104,14 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     let condition = &self.layout.conditions[index];
                     let value = if truth { condition.values.first().map(|(v, _)| v) } else { condition.false_value.as_ref() };
                     let Some(value) = value else { continue };
-                    let dest = self.locate_item(condition.item, r, false)?;
+                    let dest = self.locate_written(|m| m.locate_item(condition.item, r, false))?;
                     let val = self.literal_value(value, pos)?;
                     self.assign(dest, val, None, pos)?;
                 }
             }
             SetStmt::To { targets, value } => {
                 for r in targets {
-                    let dest = self.locate(r)?;
+                    let dest = self.locate_written(|m| m.locate(r))?;
                     let (val, src) = self.operand_with_loc(value, pos)?;
                     let (val, src) = rt::set::to(dest, val, src, pos)?;
                     self.assign(dest, val, src, pos)?;
@@ -1102,7 +1121,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 let (name, dynamic) = self.entry_named(entry, pos)?;
                 let value = rt::set::entry(&mut self.unit.entries, &name, dynamic, pos)?;
                 for r in targets {
-                    let dest = self.locate(r)?;
+                    let dest = self.locate_written(|m| m.locate(r))?;
                     self.assign(dest, Val::Address(value), None, pos)?;
                 }
             }
@@ -1129,7 +1148,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn accept(&mut self, target: &Ref, from: AcceptFrom, pos: Pos) -> R<()> {
-        let dest = self.locate_receiving(target)?;
+        let dest = self.locate_written(|m| m.locate_receiving(target))?;
         rt::accept::accept(&self.facts(), self.unit, dest, from, &target.name, pos)
     }
 
