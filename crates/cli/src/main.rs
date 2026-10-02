@@ -12,7 +12,7 @@ usage:
                                                        compile and run; CBL and PROCESS cards set the options
   ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]...
                                                        compile only
-  ironwork cics <program.cbl> [run flags] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
+  ironwork cics <program.cbl> [run flags] [--vm] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
                [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]... [--td QUEUE=path]...
                [--screens path | --serve HOST:PORT [--serve-public] [--transaction TRAN=PROGRAM]... [--csd path]]
                                                        run as the first program of a CICS task
@@ -55,10 +55,11 @@ flags:
              always gives that warning; once (the default) gives an informational note in its
              place, once per run, as the CICS translator turns RETURN and XCTL into a CALL;
              never gives nothing. A program with none of these gets the warning whatever the flag
-  --vm       run: lower the program and run it on the VM rather than the interpreter. A program
-             lowering refuses gets the compile's 12; a run that reaches what the VM does not run
-             yet (file I/O, SORT, Report Writer, EXEC CICS and SQL, JSON and XML, LE services,
-             INVOKE) stops there with a message naming it and exit status 12. Not with --evidence
+  --vm       run and cics: lower the program and run it on the VM rather than the interpreter. A
+             program lowering refuses gets the compile's 12; a run that reaches what the VM does not
+             run yet (file I/O, SORT, Report Writer, JSON and XML, LE services, INVOKE, and SEND MAP
+             or RECEIVE MAP with no FROM or INTO) stops there with a message naming it and exit
+             status 12. Not with --evidence or --serve
   -I <dir>   a copy library for COPY members, searched after the program's own directory
   -L <dir>   a program library: CALL finds a program there by name, after the programs in the
              same source and the program's own directory
@@ -537,8 +538,8 @@ fn driver() -> ExitCode {
         || vm || parm.is_some();
     let dump_flags = !dump_options.only.is_empty() || dump_options.strings || !dump_options.check;
     let fuzz_flags = fuzz_root.is_some() || fuzz_runs.is_some() || fuzz_seed.is_some() || fuzz_timeout.is_some() || fuzz_job || fuzz_cics;
-    if vm && (rest.first().map(String::as_str) != Some("run") || evidence_dir.is_some()) {
-        return usage_error("--vm is for run, and not with --evidence");
+    if vm && (!matches!(rest.first().map(String::as_str), Some("run" | "cics")) || evidence_dir.is_some()) {
+        return usage_error("--vm is for run and cics, and not with --evidence");
     }
     if parm.is_some() && rest.first().map(String::as_str) != Some("run") {
         return usage_error("--parm is for run; a job's PARM comes from its EXEC, and fuzz makes its own");
@@ -782,7 +783,7 @@ fn driver() -> ExitCode {
         eprintln!("ironwork: {path}: FUNCTION-ID {}: the source holds user-defined functions and no program to run", compiled.program.id);
         return evidence::finish(journal, 16);
     }
-    let code = match vm.then(|| exec::vm::lowered(&compiled)) {
+    let code = match (vm && command == "run").then(|| exec::vm::lowered(&compiled)) {
         None => None,
         Some(Ok(code)) => Some(code),
         Some(Err(e)) => {
@@ -815,7 +816,7 @@ fn driver() -> ExitCode {
     };
     if command == "cics" {
         let run = journal.map(|j| evidence::Run::new(j, &reads, path, trace_marker.as_deref()));
-        return run_cics(&compiled, path, library, dds, clock, database, &cics_options, run);
+        return run_cics(&compiled, path, library, dds, clock, database, &cics_options, run, vm);
     }
     let sysin: Box<dyn io::BufRead> = match dds.get("SYSIN") {
         Some(dd) => match fs::File::open(&dd.path) {
@@ -1200,10 +1201,14 @@ fn run_cics(
     mut database: Option<Box<dyn exec::sql::Database>>,
     options: &[(String, String)],
     evidence: Option<evidence::Run>,
+    vm: bool,
 ) -> ExitCode {
     let page = compiled.options.code_page();
     let get = |name: &str| options.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone());
     if get("--serve").is_some() {
+        if vm {
+            return usage_error("--vm is not for --serve");
+        }
         if get("--screens").is_some() || get("--commarea").is_some() || get("--commarea-out").is_some() {
             return usage_error("--serve cannot be combined with --screens, --commarea or --commarea-out");
         }
@@ -1272,7 +1277,15 @@ fn run_cics(
     let ran = loop {
         let program = current.as_deref().unwrap_or(compiled);
         let observer = shared.clone().map(|run| Box::new(move |event: exec::unit::Event<'_>| run.borrow_mut().observe(event)) as exec::unit::Observer<'_>);
-        let ran = program.execute_cics_observed(transactions.library.clone(), dds.clone(), task, clock, transactions.database.as_deref_mut(), &mut out, &mut err, observer);
+        let ran = match cics_run(program, path, vm, transactions.library.clone(), dds.clone(), task, clock, transactions.database.as_deref_mut(), &mut out, &mut err, observer) {
+            Ok(ran) => ran,
+            Err(message) => {
+                drop(out);
+                print_screens();
+                eprintln!("{message}");
+                return ExitCode::from(12);
+            }
+        };
         let (Some(terminal), Ok((_, ended))) = (&conversation, &ran) else { break ran };
         let Some(next) = ended.next_transid.as_deref().map(|t| t.trim().to_ascii_uppercase()) else { break ran };
         let record = match exec::terminal::Terminal::receive(&mut *terminal.borrow_mut()) {
@@ -1333,6 +1346,32 @@ fn run_cics(
         }
         Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => ExitCode::SUCCESS,
         Err(abend) => report_abend(compiled, path, &abend),
+    }
+}
+
+/// One task's run, on the VM with `vm`; Err with what to say when the VM does not run the program.
+#[allow(clippy::too_many_arguments)]
+fn cics_run<'w>(
+    program: &exec::Compiled,
+    path: &str,
+    vm: bool,
+    library: exec::unit::Library,
+    dds: exec::files::Dds,
+    task: exec::cics::Task,
+    clock: exec::unit::Clock,
+    database: Option<&'w mut (dyn exec::sql::Database + '_)>,
+    out: &'w mut dyn io::Write,
+    err: &'w mut dyn io::Write,
+    observer: Option<exec::unit::Observer<'w>>,
+) -> Result<Result<(exec::Ending, exec::cics::Task), exec::Abend>, String> {
+    if !vm {
+        return Ok(program.execute_cics_observed(library, dds, task, clock, database, out, err, observer));
+    }
+    let code = exec::vm::lowered(program).map_err(|e| syntax::Error::from(e).place(path).to_string())?;
+    match exec::vm::execute_cics(program, &code, library, dds, task, clock, database, out, err, observer, &mut None) {
+        (Ok(ending), task) => Ok(Ok((ending, task))),
+        (Err(exec::vm::Halt::Abend(abend)), _) => Ok(Err(abend)),
+        (Err(exec::vm::Halt::Unimplemented(what)), _) => Err(format!("ironwork: {path}: the VM does not run {what} yet; run it without --vm")),
     }
 }
 
