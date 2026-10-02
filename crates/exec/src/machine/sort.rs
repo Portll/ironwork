@@ -67,8 +67,7 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     fn fixed_length(&self, k: usize) -> bool {
-        let decl = &self.program.files[k];
-        decl.recording != Some('V') && decl.record_min == decl.record_max
+        !compile::variable_records(&self.program.files[k], self.layout, k)
     }
 
     /// Runs `op`; true when a statement on file k failed in it.

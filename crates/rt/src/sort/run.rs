@@ -740,6 +740,9 @@ pub fn release<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, loc: Loc,
     let (sd, keys) = (*sd, keys.clone());
     let f = x.sort_file(sd);
     let (area, size) = f.file.area;
+    let Ok(loc) = fileio::record_length(x, &f.file, loc, pos)? else {
+        return Err(stop(format!("RELEASE {name}: the record's length is outside its RECORD clause"), pos));
+    };
     let bytes = if f.fixed { x.mem()[area..area + size].to_vec() } else { store::bytes(x.mem(), loc).to_vec() };
     match entry(x, sd, &keys, bytes, size, pos)? {
         Ok(e) => {
@@ -779,6 +782,9 @@ pub fn return_record<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, fil
     x.mem()[area..area + len].copy_from_slice(&record[..len]);
     if f.fixed {
         x.mem()[area + len..area + size].fill(ebcdic::SPACE);
+    }
+    if let Some(d) = f.file.depending {
+        host::set_integer(x, d.item, len as i64, pos)?;
     }
     if let Some(p) = into {
         let dest = x.locate(p, true)?;

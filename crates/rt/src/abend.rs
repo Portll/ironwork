@@ -273,7 +273,7 @@ impl FileStatus {
             Self::RelativeKeyOverflow => "the record number is too large for the RELATIVE KEY",
             Self::BoundaryViolation => "the record number is outside the file",
             Self::NoPriorRead => "the last statement on the file was not a successful READ",
-            Self::RecordLengthChanged => "the record is not the length of the one it replaces",
+            Self::RecordLengthChanged => "the record is not the length of the one it replaces, or outside the lengths RECORD IS VARYING allows",
             Self::NoNextRecord => "there is no next record: the last READ reached the end, or START found nothing",
             Self::NotOpenInput => "the file is not open INPUT or I-O",
             Self::NotOpenOutput => "the file is not open for output",

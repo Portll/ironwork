@@ -1455,3 +1455,17 @@ fn inspect_of_a_function_result_tallies_the_value_alone() {
     assert!(matches!(plan.target, lir::Inspected::Value(LirOperand::Function(0))));
     assert_eq!((plan.tallying.len(), plan.replacing.len(), plan.converting.is_none()), (1, 0, true));
 }
+
+#[test]
+fn a_record_length_item_is_left_to_the_interpreter() {
+    let source = [
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n",
+        "           SELECT A ASSIGN TO ADD.\n       DATA DIVISION.\n       FILE SECTION.\n",
+        "       FD  A RECORD VARYING FROM 1 TO 80 DEPENDING ON N.\n       01  A-REC PIC X(80).\n",
+        "       WORKING-STORAGE SECTION.\n       01  N PIC 99.\n       PROCEDURE DIVISION.\n",
+        &line("GOBACK."),
+    ]
+    .concat();
+    let e = lower(&compiled(&source)).unwrap_err();
+    assert!(matches!(e, LowerError::Unsupported("RECORD IS VARYING DEPENDING ON", _)), "{e}");
+}

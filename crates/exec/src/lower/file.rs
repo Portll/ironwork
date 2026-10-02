@@ -42,6 +42,9 @@ impl Lower<'_> {
             (Organization::Indexed, None) => return unsupported("an indexed file without a RECORD KEY", f.pos),
             _ => None,
         };
+        if f.record_depending.is_some() {
+            return unsupported("RECORD IS VARYING DEPENDING ON", f.pos);
+        }
         let relative = match &f.relative_key {
             None => None,
             Some(r) => {
@@ -95,11 +98,11 @@ impl Lower<'_> {
             optional: f.optional,
             format: match f.organization {
                 Organization::LineSequential => Format::Text,
-                _ if f.recording == Some('V') || f.record_min != f.record_max => Format::Variable,
+                _ if compile::variable_records(f, self.layout, k) => Format::Variable,
                 _ => Format::Fixed,
             },
             read_lengths: compile::read_lengths(f, self.layout, k, self.c.options.vlr),
-            fixed: f.recording != Some('V') && f.record_min == f.record_max,
+            fixed: !compile::variable_records(f, self.layout, k),
             record_min: f.record_min,
             status,
             keys,

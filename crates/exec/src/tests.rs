@@ -2069,3 +2069,54 @@ fn bms_maps_send_and_receive_through_a_scripted_terminal() {
     assert_eq!(rows[2], " CUSTOMER:");
     assert_eq!(rows[5], " ENTER AN ORDER");
 }
+
+#[test]
+fn records_of_different_lengths_with_no_record_clause_make_a_variable_file() {
+    let data = temp("variable-records.dat");
+    let source = file_program(
+        "           SELECT F ASSIGN TO FDD.\n",
+        "       FD  F.\n       01  SHORT-R PIC X(3).\n       01  LONG-R PIC X(6).\n",
+        "",
+        &[line("OPEN OUTPUT F"), line("WRITE SHORT-R FROM 'ABC'"), line("WRITE LONG-R FROM 'DEFGHI'"), line("CLOSE F"), line("GOBACK.")].concat(),
+    );
+    let (_, err, ending) = run_files(&source, &[format!("FDD={}", data.display())]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(std::fs::metadata(&data).map(|m| m.len()).unwrap_or(0), 4 + 3 + 4 + 6);
+    let _ = std::fs::remove_file(data);
+}
+
+#[test]
+fn record_varying_depending_on_gives_the_length_written_and_takes_the_length_read() {
+    let data = temp("record-depending.dat");
+    let source = file_program(
+        "           SELECT F ASSIGN TO FDD FILE STATUS IS STAT.\n",
+        "       FD  F RECORD IS VARYING IN SIZE FROM 1 TO 10\n           DEPENDING ON REC-LEN.\n       01  R PIC X(10).\n",
+        "       01  REC-LEN PIC 9(4) COMP.\n       01  STAT PIC XX.\n       01  W PIC X(10) VALUE ALL '*'.\n",
+        &[
+            line("OPEN OUTPUT F"),
+            line("MOVE 3 TO REC-LEN"),
+            line("WRITE R FROM 'ABCDEFGHIJ'"),
+            line("MOVE 5 TO REC-LEN"),
+            line("WRITE R FROM 'KLMNOPQRST'"),
+            line("MOVE 11 TO REC-LEN"),
+            line("WRITE R"),
+            line("DISPLAY STAT"),
+            line("CLOSE F"),
+            line("OPEN INPUT F"),
+            line("READ F INTO W"),
+            line("DISPLAY REC-LEN ' ' W '|'"),
+            line("READ F"),
+            line("DISPLAY REC-LEN ' ' R(1:REC-LEN)"),
+            line("CLOSE F"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    );
+    let (out, err, ending) = run_files(&source, &[format!("FDD={}", data.display())]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(out, "44\n0003 ABC       |\n0005 KLMNO\n");
+    assert_eq!(std::fs::metadata(&data).map(|m| m.len()).unwrap_or(0), 4 + 3 + 4 + 5);
+    let _ = std::fs::remove_file(data);
+    let signed = source.replace("REC-LEN PIC 9(4)", "REC-LEN PIC S9(4)");
+    assert!(compile_errors(&signed).contains("REC-LEN: the DEPENDING ON item of F must be an elementary unsigned integer"), "{}", compile_errors(&signed));
+}

@@ -962,8 +962,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             (ending, returned)
         };
         self.unit.programs[index].active = false;
+        // Leaving an INITIAL program is a CANCEL of it (Language Reference SC27-8713-03, p. 349).
         if compiled.program.initial {
-            self.unit.programs[index].initialized = false;
+            self.cancel_program(index, pos)?;
         }
         self.unit.release_temporaries(mark);
         let (ending, returned) = outcome;
@@ -1051,11 +1052,23 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         if self.unit.programs[index].active {
             return Err(Abend::ironwork(format!("CANCEL {name}: the program is active"), pos));
         }
+        self.cancel_program(index, pos)
+    }
+
+    /// Closes the files of program `index` and of the programs it contains, each of which next
+    /// starts in its initial state (pp. 103, 349).
+    fn cancel_program(&mut self, index: usize, pos: Pos) -> R<()> {
         let files: Vec<_> = self.unit.programs[index].files.iter_mut().filter_map(Option::take).collect();
         for f in files {
-            f.close().map_err(|e| Abend::ironwork(format!("CANCEL {name}: {e}"), pos))?;
+            f.close().map_err(|e| Abend::ironwork(format!("CANCEL {}: {e}", self.unit.programs[index].name), pos))?;
         }
         self.unit.programs[index].initialized = false;
+        let nested = self.unit.programs[index].compiled.as_ref().map(|c| c.program.nested.clone()).unwrap_or_default();
+        for name in nested {
+            if let Some(contained) = self.unit.find(&name) {
+                self.cancel_program(contained, pos)?;
+            }
+        }
         Ok(())
     }
 

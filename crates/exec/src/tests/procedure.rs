@@ -647,3 +647,31 @@ fn an_abbreviated_relation_may_write_is_before_its_operator() {
     let source = program("", data, &[body(5), body(2), line("GOBACK.")].concat());
     assert_eq!(run(&source), "TRUE\nFALSE\n");
 }
+
+#[test]
+fn an_initial_program_resets_the_programs_it_contains_and_closes_its_files_when_it_returns() {
+    let out = temp("initial-out.txt");
+    let source = [
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. MAIN.\n       PROCEDURE DIVISION.\n",
+        &line("CALL 'SUB'"),
+        &line("CALL 'SUB'"),
+        &line("GOBACK."),
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. SUB IS INITIAL.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n",
+        "           SELECT F ASSIGN TO OUTDD ORGANIZATION LINE SEQUENTIAL\n               FILE STATUS IS FS.\n",
+        "       DATA DIVISION.\n       FILE SECTION.\n       FD  F.\n       01  R PIC X(3).\n       WORKING-STORAGE SECTION.\n       01  FS PIC XX.\n       PROCEDURE DIVISION.\n",
+        &line("OPEN OUTPUT F"),
+        &line("DISPLAY 'OPEN ' FS"),
+        &line("CALL 'INNER'"),
+        &line("GOBACK."),
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. INNER.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  N PIC 9 VALUE 0.\n       PROCEDURE DIVISION.\n",
+        &line("ADD 1 TO N"),
+        &line("DISPLAY 'INN' N"),
+        &line("GOBACK."),
+        "       END PROGRAM INNER.\n       END PROGRAM SUB.\n       END PROGRAM MAIN.\n",
+    ]
+    .concat();
+    let (stdout, err, ending) = run_files(&source, &[format!("OUTDD={}", out.display())]);
+    assert!(ending.is_ok(), "{ending:?} {err}");
+    assert_eq!(stdout, "OPEN 00\nINN1\nOPEN 00\nINN1\n");
+    let _ = std::fs::remove_file(out);
+}

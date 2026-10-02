@@ -81,6 +81,8 @@ pub struct FileDecl {
     /// RECORD IS VARYING: `record_min` and `record_max` are its FROM and TO, each None when not
     /// written (Language Reference SC27-8713-03, p. 187).
     pub record_varying: bool,
+    /// RECORD IS VARYING ... DEPENDING ON: the item holding each record's length.
+    pub record_depending: Option<Ref>,
     pub records: Vec<DataEntry>,
     /// FD ... REPORT IS: the reports written to the file.
     pub reports: Vec<String>,

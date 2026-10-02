@@ -129,7 +129,7 @@ impl<'p> Machine<'p, '_, '_> {
         let decl = &self.program.files[k];
         match decl.organization {
             Organization::LineSequential => Format::Text,
-            _ if decl.recording == Some('V') || decl.record_min != decl.record_max => Format::Variable,
+            _ if compile::variable_records(decl, self.layout, k) => Format::Variable,
             _ => Format::Fixed,
         }
     }

@@ -66,17 +66,36 @@ pub fn entry_points(program: &Program) -> Vec<EntryPoint> {
     out
 }
 
+/// Whether file k's records vary in length: RECORDING MODE V, RECORD IS VARYING, a RECORD clause
+/// with two bounds, or, with neither RECORDING MODE nor RECORD, level-01 records of different
+/// lengths or with an OCCURS DEPENDING ON table, an SD's as well (Language Reference SC27-8713-03,
+/// p. 191; Programming Guide SC27-8714-03, pp. 227-228).
+pub fn variable_records(file: &FileDecl, layout: &Layout, k: usize) -> bool {
+    let undeclared = file.recording.is_none() && file.record_min.is_none() && file.record_max.is_none() && !file.record_varying;
+    file.recording == Some('V') || file.record_varying || file.record_min != file.record_max || undeclared && layout.record_lengths[k].is_some_and(|(shortest, longest)| shortest != longest)
+}
+
 /// The shortest and longest variable-length record a READ of file k takes without a record length
 /// conflict: under VLR(STANDARD) its level-01 records', under VLR(COMPAT) its RECORD IS VARYING
 /// clause's, where a bound the clause leaves out is the level-01 records' (Programming Guide
 /// SC27-8714-03, pp. 422-424; Language Reference SC27-8713-03, pp. 187, 300, 431). See
 /// [`numeric::assumptions::VLR_WITHOUT_VARYING`] and [`numeric::assumptions::VLR_RECORDS_CHECKED`].
 pub fn read_lengths(file: &FileDecl, layout: &Layout, k: usize, vlr: Vlr) -> (u32, u32) {
-    let (shortest, longest) = layout.record_lengths[k].unwrap_or((0, layout.file_areas[k].1));
     match vlr {
-        Vlr::Compat if file.record_varying => (file.record_min.unwrap_or(shortest), file.record_max.unwrap_or(longest)),
-        _ => (shortest, longest),
+        Vlr::Compat if file.record_varying => varying_lengths(file, layout, k),
+        _ => record_lengths(layout, k),
     }
+}
+
+/// The shortest and longest record RECORD IS VARYING allows file k, a bound it leaves out being the
+/// level-01 records' (Language Reference SC27-8713-03, p. 187).
+pub fn varying_lengths(file: &FileDecl, layout: &Layout, k: usize) -> (u32, u32) {
+    let (shortest, longest) = record_lengths(layout, k);
+    (file.record_min.unwrap_or(shortest), file.record_max.unwrap_or(longest))
+}
+
+fn record_lengths(layout: &Layout, k: usize) -> (u32, u32) {
+    layout.record_lengths[k].unwrap_or((0, layout.file_areas[k].1))
 }
 
 const FUNCTIONS: &[&str] = rt::intrinsic::FIRST;
@@ -204,6 +223,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     let mut check = Check { layout: &layout, program: &program, errors: &mut errors, debugging: false, max_digits: options.arith.max_picture_digits(), inline_performs: 0 };
     for k in 0..program.files.len() {
         check.file_keys(k);
+        check.record_depending(k);
         linage::check_file(check.program, check.layout, k, check.errors);
     }
     for block in &program.exec_declarations {
@@ -215,7 +235,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     }
     let entries = entry_points(&program);
     procedure_rules(&program, &layout, &entries, &options, &mut errors);
-    if whole {
+    if whole && !program.oo.as_deref().is_some_and(|o| o.method().is_some()) {
         program_end(&program, &options, &mut errors);
     }
     oo::check(&layout, &program, &mut errors);
@@ -1022,6 +1042,17 @@ impl Check<'_> {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// RECORD IS VARYING's DEPENDING ON item is an elementary unsigned integer (Language Reference
+    /// SC27-8713-03, p. 188).
+    fn record_depending(&mut self, k: usize) {
+        let f = &self.program.files[k];
+        let Some(r) = &f.record_depending else { return };
+        self.reference(r);
+        if self.item(r).is_some() && linage::unsigned_integer(self.layout, r).is_none() {
+            self.errors.push(Error::at(r.pos, format!("{}: the DEPENDING ON item of {} must be an elementary unsigned integer", r.name, f.name)));
         }
     }
 

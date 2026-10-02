@@ -178,6 +178,10 @@ impl<'p> Machine<'p, '_, '_> {
                 let (shortest, longest) = compile::read_lengths(decl, layout, k, self.options.vlr);
                 (shortest as usize, longest as usize)
             },
+            depending: decl.record_depending.as_ref().map(|item| {
+                let (shortest, longest) = compile::varying_lengths(decl, layout, k);
+                fileio::Depending { item, lengths: (shortest as usize, longest as usize) }
+            }),
         }
     }
 }

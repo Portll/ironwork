@@ -37,7 +37,7 @@ pub(crate) fn add_counters(program: &mut Program, qualify: numeric::Qualify) -> 
 }
 
 /// The digits and USAGE of an unsigned integer data item, as LINAGE wants its data-names.
-fn unsigned_integer(layout: &Layout, r: &Ref) -> Option<(u32, Usage)> {
+pub(crate) fn unsigned_integer(layout: &Layout, r: &Ref) -> Option<(u32, Usage)> {
     let Ok(Resolved::Item(i)) = layout.resolve(&r.name, &r.qualifiers, r.pos) else { return None };
     let item = &layout.items[i];
     if !item.dims.is_empty() {

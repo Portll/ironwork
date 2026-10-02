@@ -143,7 +143,7 @@ fn release_from_and_return_into_use_the_maximum_length_too() {
     );
     let (out, err, ending) = run_files(&source, &[]);
     assert!(ending.is_ok(), "{ending:?} {err}");
-    assert_eq!(out, "[3ABC] E\n");
+    assert_eq!(out, "[3ABC]  \n");
 }
 
 #[test]

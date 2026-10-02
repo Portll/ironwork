@@ -81,7 +81,14 @@ fn account() -> String {
     )
 }
 
-const ACCOUNT_DATA: &str = "       01  A1 USAGE OBJECT REFERENCE Account.\n       01  A2 USAGE OBJECT REFERENCE Account.\n       01  U USAGE OBJECT REFERENCE.\n       01  AMOUNT PIC S9(9) BINARY.\n       01  SMALL PIC S9(4) BINARY VALUE 3.\n       01  BAL PIC S9(9) BINARY.\n       01  SHOWN PIC ZZZ9.\n       01  MNAME PIC X(20).\n";
+#[test]
+fn a_class_and_its_methods_get_no_warning_for_a_missing_program_end() {
+    let compiled = compile(syntax::parse(&account()).unwrap_or_else(|e| panic!("{e}")), &[]).unwrap_or_else(|e| panic!("{e:?}"));
+    let warned: Vec<&str> = compiled.diagnostics.iter().map(|d| d.message.as_str()).filter(|m| m.contains("STOP RUN")).collect();
+    assert!(warned.is_empty(), "{warned:?}");
+}
+
+const ACCOUNT_DATA: &str ="       01  A1 USAGE OBJECT REFERENCE Account.\n       01  A2 USAGE OBJECT REFERENCE Account.\n       01  U USAGE OBJECT REFERENCE.\n       01  AMOUNT PIC S9(9) BINARY.\n       01  SMALL PIC S9(4) BINARY VALUE 3.\n       01  BAL PIC S9(9) BINARY.\n       01  SHOWN PIC ZZZ9.\n       01  MNAME PIC X(20).\n";
 
 #[test]
 fn instances_keep_their_own_data_and_factory_data_is_shared() {

@@ -554,6 +554,7 @@ impl Parser<'_> {
             record_min: None,
             record_max: None,
             record_varying: false,
+            record_depending: None,
             records: Vec::new(),
             reports: Vec::new(),
             linage: None,
@@ -714,7 +715,7 @@ impl Parser<'_> {
                         self.accept_word("CHARACTERS");
                         if self.accept_word("DEPENDING") {
                             self.accept_word("ON");
-                            self.reference()?;
+                            files[index].record_depending = Some(self.reference()?);
                         }
                     }
                     "REPORT" | "REPORTS" if files[index].sort => return Err(Error::at(pos, format!("SD {name}: a sort or merge file takes no REPORT clause"))),

@@ -42,6 +42,15 @@ pub struct File<'a, P, X> {
     /// The shortest and longest variable-length record a READ takes without a record length
     /// conflict ([`crate::lir::FileDesc::read_lengths`]).
     pub read_lengths: (usize, usize),
+    pub depending: Option<Depending<P>>,
+}
+
+/// RECORD IS VARYING DEPENDING ON: the item holding a record's length, and the shortest and longest
+/// record the clause allows.
+#[derive(Clone, Copy)]
+pub struct Depending<P> {
+    pub item: P,
+    pub lengths: (usize, usize),
 }
 
 /// LINAGE's values, evaluated in this order whenever the page's geometry is taken, and
@@ -196,8 +205,22 @@ fn record_bytes<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X
     bytes
 }
 
+/// The record WRITE, REWRITE or RELEASE puts out: under DEPENDING ON the record area's first n
+/// bytes, n the item's value, or status 44 when n is outside the clause's lengths (Language
+/// Reference SC27-8713-03, pp. 188, 302).
+pub fn record_length<P: Copy, X: Copy>(x: &mut impl Host<P>, file: &File<'_, P, X>, loc: Loc, pos: Pos) -> R<Result<Loc, FileStatus>> {
+    let Some(d) = file.depending else { return Ok(Ok(loc)) };
+    let n = x.integer(d.item, pos)?;
+    let (shortest, longest) = d.lengths;
+    if n < shortest as i64 || n > longest.min(file.area.1) as i64 {
+        return Ok(Err(FileStatus::RecordLengthChanged));
+    }
+    Ok(Ok(Loc { offset: file.area.0, len: n as usize, ..loc }))
+}
+
 /// Moves a record into the file's area, and to INTO's item; a variable-length record fills only
-/// its own length. True when the record was longer than the area.
+/// its own length, which DEPENDING ON's item receives. True when the record was longer than the
+/// area.
 fn deliver<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, record: &[u8], variable: bool, into: Option<P>, pos: Pos) -> R<bool> {
     let (offset, size) = file.area;
     let n = record.len().min(size);
@@ -205,6 +228,9 @@ fn deliver<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, re
     mem[offset..offset + n].copy_from_slice(&record[..n]);
     if !variable {
         mem[offset + n..offset + size].fill(ebcdic::SPACE);
+    }
+    if let Some(d) = file.depending {
+        host::set_integer(x, d.item, n as i64, pos)?;
     }
     if let Some(r) = into {
         let dest = x.locate(r, true)?;
@@ -448,6 +474,10 @@ fn read_stream<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>
 /// WRITE of the record at `loc`: to a LINAGE file's page, a stream, or a held file.
 pub fn write<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, loc: Loc, advancing: Option<Advance<'_, X>>, pos: Pos) -> R<Outcome> {
     let k = file.index;
+    let loc = match record_length(x, file, loc, pos)? {
+        Ok(loc) => loc,
+        Err(status) => return Ok(Outcome::Status { status, at_end: false }),
+    };
     if paged(x, k) {
         return write_page(x, file, loc, advancing, pos);
     }
@@ -597,6 +627,10 @@ fn put_line<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, l
 
 /// REWRITE of the record at `loc`; its phrase is INVALID KEY.
 pub fn rewrite<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, loc: Loc, pos: Pos) -> R<FileStatus> {
+    let loc = match record_length(x, file, loc, pos)? {
+        Ok(loc) => loc,
+        Err(status) => return Ok(status),
+    };
     let sequential = sequential(file);
     let added = held_control_byte(x, file);
     Ok(held(x, file.index, |x, mode, format, keyed| {
