@@ -924,15 +924,27 @@ fn xml_parse() -> XmlParse {
 }
 
 fn json_generate() -> JsonGenerate {
-    let leaf = JsonLeaf {
+    let leaf = JsonLeaf { suppress: vec![Figurative::Space, Figurative::Zero], boolean: Some(Marker::Condition(2)), convert: Convert::Fixed { integers: 5 } };
+    let group = JsonNode {
+        offset: 0,
+        len: 12,
+        kind: Kind::Group,
+        name: 1,
+        occurs: Some(Count::Odo(ODO)),
+        indicator: Some((Err(3), Marker::Refused(4))),
+        null: Some(Figurative::Space),
+        value: JsonValue::Object { members: vec![1], eligible: true },
+    };
+    let field = JsonNode {
+        offset: 2,
+        len: 5,
+        kind: Kind::Zoned { digits: 5, scale: 0, signed: false, sign: None },
+        name: 2,
+        occurs: None,
         indicator: Some((Ok(6), Marker::Byte(Some(0xE8)))),
         null: Some(Figurative::Zero),
-        suppress: vec![Figurative::Space, Figurative::Zero],
-        boolean: Some(Marker::Condition(2)),
-        convert: Convert::Fixed { integers: 5 },
+        value: JsonValue::Leaf(leaf),
     };
-    let group = JsonNode { offset: 0, len: 12, kind: Kind::Group, name: 1, occurs: Some(Count::Odo(ODO)), value: JsonValue::Object { members: vec![1], eligible: true } };
-    let field = JsonNode { offset: 2, len: 5, kind: Kind::Zoned { digits: 5, scale: 0, signed: false, sign: None }, name: 2, occurs: None, value: JsonValue::Leaf(leaf) };
     JsonGenerate {
         from: 0,
         subscripts: vec![IntExpr::Item(1)],

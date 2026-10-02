@@ -89,6 +89,8 @@ pub struct JsonGenerate {
 
 /// An item of the tree, `offset` bytes into the occurrence of the node that holds it, `len` its
 /// size; a table's elements are `len` apart, `occurs` of them. `name` is a member's JSON string.
+/// Each occurrence, of a group or an elementary item, is null when `indicator`'s marker holds or
+/// it equals `null`, tested in that order before its value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JsonNode {
     pub offset: u32,
@@ -96,6 +98,11 @@ pub struct JsonNode {
     pub kind: Kind,
     pub name: SymId,
     pub occurs: Option<Count>,
+    /// INDICATING: the indicator, located with the walk's subscripts, whose first byte `Marker`
+    /// tests; or the abend of locating it with too few.
+    pub indicator: Option<(Result<PlaceId, AbendId>, Marker)>,
+    /// CONVERTING ... TO JSON NULL: null when the item equals this figurative constant.
+    pub null: Option<Figurative>,
     pub value: JsonValue,
 }
 
@@ -108,14 +115,9 @@ pub enum JsonValue {
     Leaf(JsonLeaf),
 }
 
-/// Tested in this order: `indicator` (null), `null`, `suppress` (left out), `boolean`, `convert`.
+/// Tested in this order, after the node's null tests: `suppress` (left out), `boolean`, `convert`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JsonLeaf {
-    /// INDICATING: the indicator, located with the walk's subscripts, whose first byte `Marker`
-    /// tests; or the abend of locating it with too few.
-    pub indicator: Option<(Result<PlaceId, AbendId>, Marker)>,
-    /// CONVERTING ... TO JSON NULL: null when the item equals this figurative constant.
-    pub null: Option<Figurative>,
     /// SUPPRESS: the item's own WHEN constants, then each EVERY phrase's that selects its kind.
     pub suppress: Vec<Figurative>,
     /// CONVERTING ... TO BOOLEAN: true when the marker holds of the item's first byte.
@@ -340,9 +342,9 @@ codec_enum!(Ccsid { Unnamed = 0, CodePage = 1, Operand(o) = 2 });
 codec_enum!(Convert { Chars { justified } = 0, National = 1, Float(precision) = 2, Fixed { integers } = 3, Refused(abend) = 4 });
 codec_enum!(Marker { Byte(b) = 0, Condition(c) = 1, Refused(abend) = 2 });
 codec_struct!(JsonGenerate { from, subscripts, nodes, name, receiver, encoding, count, code, on_exception, not_on_exception } check json_valid);
-codec_struct!(JsonNode { offset, len, kind, name, occurs, value });
+codec_struct!(JsonNode { offset, len, kind, name, occurs, indicator, null, value });
 codec_enum!(JsonValue { Object { members, eligible } = 0, Leaf(leaf) = 1 });
-codec_struct!(JsonLeaf { indicator, null, suppress, boolean, convert });
+codec_struct!(JsonLeaf { suppress, boolean, convert });
 codec_struct!(XmlGenerate {
     receiver, encoding, namespace, prefix, declaration, from, subscripts, nodes, suppressing, count, code, on_exception, not_on_exception,
 } check xml_valid);

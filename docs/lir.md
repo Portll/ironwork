@@ -1841,12 +1841,12 @@ pub struct JsonGenerate {
     pub receiver: PlaceId, pub encoding: Ccsid, pub count: Option<(PlaceId, StorePlan)>,
     pub code: (PlaceId, StorePlan), pub on_exception: bool, pub not_on_exception: bool,
 }
-pub struct JsonNode { pub offset: u32, pub len: u32, pub kind: Kind, pub name: SymId, pub occurs: Option<Count>, pub value: JsonValue }
-pub enum JsonValue { Object { members: Vec<u32>, eligible: bool }, Leaf(JsonLeaf) }
-pub struct JsonLeaf {
-    pub indicator: Option<(Result<PlaceId, AbendId>, Marker)>, pub null: Option<Figurative>,
-    pub suppress: Vec<Figurative>, pub boolean: Option<Marker>, pub convert: Convert,
+pub struct JsonNode {
+    pub offset: u32, pub len: u32, pub kind: Kind, pub name: SymId, pub occurs: Option<Count>,
+    pub indicator: Option<(Result<PlaceId, AbendId>, Marker)>, pub null: Option<Figurative>, pub value: JsonValue,
 }
+pub enum JsonValue { Object { members: Vec<u32>, eligible: bool }, Leaf(JsonLeaf) }
+pub struct JsonLeaf { pub suppress: Vec<Figurative>, pub boolean: Option<Marker>, pub convert: Convert }
 
 pub struct XmlGenerate {
     pub receiver: PlaceId, pub encoding: Ccsid, pub namespace: Option<Operand>, pub prefix: Option<Operand>,
@@ -1900,9 +1900,11 @@ pub enum SetTo { Nothing, Move { place: PlaceId, value: ConstId, plan: MovePlan 
 - **JSON GENERATE** (`json_generate`, machine/json.rs): FROM located (its first element when it
   names a whole table, which makes `nodes[0]` a table), its subscripts, the tree, then the receiver
   located (as a receiving item), the CCSID read, the document written, COUNT IN and JSON-CODE stored.
+  Each occurrence of a node, a group or a leaf alike, is null when its indicator's marker holds or
+  it equals `null`, tested in that order as `json_null` tests them, before its members or value.
   An `Object` with no member left is left out when `eligible`, else `{}`; a table whose elements are
-  all left out is left out; the root left out is `{}`, or `[]` for a whole table. A leaf tests, in
-  order, its indicator's marker (null), `null`, `suppress` (left out), `boolean`, then converts.
+  all left out is left out; the root left out is `{}`, or `[]` for a whole table. A leaf then tests
+  `suppress` (left out) and `boolean`, then converts.
 - **XML GENERATE** (`xml_generated`, machine/xml/generate.rs): the receiver, the CCSID (`Unnamed` is
   UTF-16 for a national receiver, else CODEPAGE), XML-CODE 415, 411 or 414 ending it there; the
   namespace (416), the prefix read only for a namespace that is not empty (419); FROM, its

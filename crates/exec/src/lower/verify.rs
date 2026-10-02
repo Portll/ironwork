@@ -442,13 +442,13 @@ fn verify_program(p: &Program) -> Result<(), String> {
                 for (k, n) in g.nodes.iter().enumerate() {
                     symbol(n.name)?;
                     n.occurs.as_ref().map_or(Ok(()), count)?;
+                    if let Some((at, test)) = &n.indicator {
+                        at.map_or_else(abend, place)?;
+                        marker(test)?;
+                    }
                     match &n.value {
                         JsonValue::Object { members: held, .. } => members(k, held, g.nodes.len())?,
                         JsonValue::Leaf(leaf) => {
-                            if let Some((at, test)) = &leaf.indicator {
-                                at.map_or_else(abend, place)?;
-                                marker(test)?;
-                            }
                             leaf.boolean.as_ref().map_or(Ok(()), marker)?;
                             convert(&leaf.convert)?;
                         }

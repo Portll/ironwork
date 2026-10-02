@@ -8,7 +8,7 @@ use super::{Code, Facts, R, Vm, not_yet};
 use crate::abend::Abend;
 use crate::display::utf16_text;
 use crate::json;
-use crate::lir::{Ccsid, Convert, DebugId, IntExpr, JsonGenerate, JsonNode, JsonValue, Marker, Markup, MovePlan, PlaceId, Step, StorePlan, SymId, XmlForm, XmlGenerate, XmlRegister, XmlValue};
+use crate::lir::{Ccsid, Convert, DebugId, IntExpr, JsonGenerate, JsonLeaf, JsonNode, JsonValue, Marker, Markup, MovePlan, PlaceId, Step, StorePlan, SymId, XmlForm, XmlGenerate, XmlRegister, XmlValue};
 use crate::picture::Sym;
 use crate::storage::{Kind, Loc, Val};
 use crate::store::{self, ProgramFacts};
@@ -295,12 +295,16 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         Ok(if fits { 0 } else { json::RECEIVER_TOO_SMALL })
     }
 
-    /// One occurrence of node `k`: a group's object, or an elementary item's value; None when it
-    /// is left out.
+    /// One occurrence of node `k`: null, a group's object, or an elementary item's value; None when
+    /// it is left out.
     fn json_value(&mut self, g: &'p JsonGenerate, k: usize, offset: usize, at: DebugId, pos: Pos) -> R<Option<String>> {
         let node = &g.nodes[k];
+        let loc = node_loc(offset, node.len, node.kind);
+        if self.json_null(node, loc, at, pos)? {
+            return Ok(Some("null".into()));
+        }
         let (members, eligible) = match &node.value {
-            JsonValue::Leaf(_) => return self.json_leaf(node, node_loc(offset, node.len, node.kind), at, pos),
+            JsonValue::Leaf(leaf) => return self.json_leaf(leaf, loc, at, pos),
             JsonValue::Object { members, eligible } => (members, *eligible),
         };
         let mut pairs = Vec::new();
@@ -337,23 +341,25 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         Ok((!all_left_out).then(|| format!("[{}]", elements.join(","))))
     }
 
-    fn json_leaf(&mut self, node: &'p JsonNode, loc: Loc, at: DebugId, pos: Pos) -> R<Option<String>> {
-        let JsonValue::Leaf(leaf) = &node.value else { return Err(not_yet("a JSON GENERATE group read as an elementary item")) };
-        if let Some((indicator, marker)) = &leaf.indicator {
+    /// `json_null`: the indicator's marker holds, or the item equals CONVERTING's constant.
+    fn json_null(&mut self, node: &JsonNode, loc: Loc, at: DebugId, pos: Pos) -> R<bool> {
+        if let Some((indicator, marker)) = &node.indicator {
             let indicator = match indicator {
                 Ok(place) => self.loc(*place)?,
                 Err(abend) => return Err(self.abend(*abend, Some(at)).into()),
             };
             let byte = store::bytes(&self.unit.mem, indicator).first().copied().unwrap_or(0);
             if self.marker_holds(marker, byte, at, pos)? {
-                return Ok(Some("null".into()));
+                return Ok(true);
             }
         }
-        if let Some(f) = leaf.null
-            && self.equals(loc, f, pos)?
-        {
-            return Ok(Some("null".into()));
+        match node.null {
+            Some(f) => self.equals(loc, f, pos),
+            None => Ok(false),
         }
+    }
+
+    fn json_leaf(&mut self, leaf: &JsonLeaf, loc: Loc, at: DebugId, pos: Pos) -> R<Option<String>> {
         for &f in &leaf.suppress {
             if self.equals(loc, f, pos)? {
                 return Ok(None);

@@ -384,8 +384,10 @@ impl Lower<'_> {
         let i = &self.layout.items[item];
         let name = self.sym(&rt::json::string(&self.json_name(item, p).unwrap_or_default()));
         let (len, kind) = (i.size, i.kind);
+        let indicator = self.json_indicator(item, depth, p, pos)?;
+        let null = p.null_when.get(&item).copied();
         let placeholder = lir::JsonValue::Object { members: Vec::new(), eligible: false };
-        let k = push(nodes, lir::JsonNode { offset, len, kind, name, occurs, value: placeholder }, "JSON GENERATE's items")?;
+        let k = push(nodes, lir::JsonNode { offset, len, kind, name, occurs, indicator, null, value: placeholder }, "JSON GENERATE's items")?;
         let value = if i.children.is_empty() || i.kind != Kind::Group {
             lir::JsonValue::Leaf(self.json_leaf(item, depth, p, pos)?)
         } else {
@@ -422,20 +424,20 @@ impl Lower<'_> {
         Ok(())
     }
 
+    /// INDICATING's indicator and marker for item `item`, at the walk's `depth`.
+    fn json_indicator(&mut self, item: usize, depth: usize, p: &JsonPhrases, pos: Pos) -> M<Option<(Result<PlaceId, AbendId>, lir::Marker)>> {
+        let Some(i) = p.indicated.get(&item) else { return Ok(None) };
+        let (k, named) = match (&i.indicator, &i.marker) {
+            (Some(r), _) => (self.item_of(r)?, r),
+            (None, Marker::Condition(c)) => (self.variable_of(c)?.1, c),
+            (None, Marker::Literal(_)) => return Err(LowerError::Invalid("INDICATING a literal without IN".into()).into()),
+        };
+        let at = self.walked_or_refused(k, named, depth)?;
+        Ok(Some((at, self.marker(&i.marker, depth, pos)?)))
+    }
+
     fn json_leaf(&mut self, item: usize, depth: usize, p: &JsonPhrases, pos: Pos) -> M<lir::JsonLeaf> {
         let kind = self.layout.items[item].kind;
-        let indicator = match p.indicated.get(&item) {
-            None => None,
-            Some(i) => {
-                let (k, named) = match (&i.indicator, &i.marker) {
-                    (Some(r), _) => (self.item_of(r)?, r),
-                    (None, Marker::Condition(c)) => (self.variable_of(c)?.1, c),
-                    (None, Marker::Literal(_)) => return Err(LowerError::Invalid("INDICATING a literal without IN".into()).into()),
-                };
-                let at = self.walked_or_refused(k, named, depth)?;
-                Some((at, self.marker(&i.marker, depth, pos)?))
-            }
-        };
         let mut suppress: Vec<Figurative> = p.suppressed_when.get(&item).map(|w| w.to_vec()).unwrap_or_default();
         for (numeric, when) in &p.every {
             suppress.extend(when.iter().copied().filter(|&f| every_selects(kind, *numeric, f)));
@@ -445,7 +447,7 @@ impl Lower<'_> {
             None => None,
         };
         let convert = self.convert(item, kind, "JSON GENERATE", pos)?;
-        Ok(lir::JsonLeaf { indicator, null: p.null_when.get(&item).copied(), suppress, boolean, convert })
+        Ok(lir::JsonLeaf { suppress, boolean, convert })
     }
 
     fn xml_phrases<'x>(&mut self, x: &'x XmlGenerate) -> M<XmlPhrases<'x>> {

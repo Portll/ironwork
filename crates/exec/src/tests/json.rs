@@ -1,10 +1,22 @@
 use super::*;
 
-fn displays(data: &str, statements: &[&str]) -> String {
+fn source(data: &str, statements: &[&str]) -> String {
     let body: String = statements.iter().flat_map(|s| s.split('\n')).map(line).chain([line("GOBACK.")]).collect();
-    let o = Harness::source(&program("", data, &body)).run(Executor::Interpreter);
+    program("", data, &body)
+}
+
+fn displays(data: &str, statements: &[&str]) -> String {
+    let o = Harness::source(&source(data, statements)).run(Executor::Interpreter);
     assert!(o.ending.is_ok(), "{:?}\n{}", o.ending, o.err);
     o.out
+}
+
+/// As `displays`, and the VM must run the program to its end with the same output.
+fn displays_on_both(data: &str, statements: &[&str]) -> String {
+    let out = displays(data, statements);
+    let vm = Harness::source(&source(data, statements)).run(Executor::Vm);
+    assert_eq!((vm.out.as_str(), vm.ending.is_ok()), (out.as_str(), true), "{}", vm.err);
+    out
 }
 
 const DOC: &str = "       01  D PIC X(200) VALUE SPACES.\n       01  N PIC 9(4).\n";
@@ -100,6 +112,28 @@ fn a_group_converted_to_json_null_is_null_and_one_whose_members_are_all_ignored_
         ],
     );
     assert_eq!(out, "{\"A\":{\"SUB\":null,\"B\":\"b\"}}\n{\"A\":{\"SUB\":{\"S1\":\" \",\"S2\":\" \"},\"B\":\"b\"}}\n");
+}
+
+#[test]
+fn a_group_is_tested_for_null_in_each_occurrence_before_its_members() {
+    let data = format!(
+        "{DOC}       01  A.\n           02 SUB VALUE SPACES.\n              03 S1 PIC X.\n              03 S2 PIC X.\n           02 B PIC X VALUE 'b'.\n       01  T.\n           02 E OCCURS 2.\n              03 E-NULL PIC X.\n              03 G.\n                 04 V PIC X VALUE 'v'.\n"
+    );
+    let out = displays_on_both(
+        &data,
+        &[
+            "JSON GENERATE D FROM A COUNT N ENCODING 1140\n    CONVERTING SUB TO JSON NULL USING SPACE",
+            "DISPLAY D(1:N)",
+            "MOVE SPACES TO A",
+            "JSON GENERATE D FROM A COUNT N ENCODING 1140\n    CONVERTING A TO JSON NULL USING SPACE",
+            "DISPLAY D(1:N)",
+            "MOVE 'Y' TO E-NULL(1)",
+            "MOVE 'N' TO E-NULL(2)",
+            "JSON GENERATE D FROM T COUNT N ENCODING 1140\n    INDICATING G IS JSON NULL USING 'Y' IN E-NULL",
+            "DISPLAY D(1:N)",
+        ],
+    );
+    assert_eq!(out, "{\"A\":{\"SUB\":null,\"B\":\"b\"}}\n{\"A\":null}\n{\"T\":{\"E\":[{\"G\":null},{\"G\":{\"V\":\"v\"}}]}}\n");
 }
 
 #[test]

@@ -44,8 +44,7 @@ fn an_indicator_in_a_table_is_located_with_the_walk_s_subscripts_and_a_whole_tab
     let [Markup::JsonGenerate(g)] = markup(&p) else { panic!() };
     assert_eq!((g.nodes.len(), g.nodes[0].occurs.clone(), g.subscripts.len()), (2, Some(Count::Fixed(2)), 0));
     assert!(matches!(&p.places[g.from as usize].subscripts[..], [lir::Subscript { value: IntExpr::Const(1), .. }]));
-    let JsonValue::Leaf(v) = &g.nodes[1].value else { panic!() };
-    let Some((Ok(at), Marker::Byte(Some(0xE8)))) = v.indicator else { panic!("{:?}", v.indicator) };
+    let Some((Ok(at), Marker::Byte(Some(0xE8)))) = g.nodes[1].indicator else { panic!("{:?}", g.nodes[1]) };
     assert!(matches!(&p.places[at as usize].subscripts[..], [lir::Subscript { value: IntExpr::Walk(0), stride: 11, .. }]));
 }
 
