@@ -75,8 +75,9 @@ pub struct AbendExit {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExitTarget {
-    /// A paragraph of the program that set the exit.
-    Label(ParaId),
+    /// A paragraph of the program that set the exit, entered as by a GO TO at the HANDLE ABEND
+    /// command `at`.
+    Label { paragraph: ParaId, at: Pos },
     /// A program, entered as by LINK.
     Program(String),
 }

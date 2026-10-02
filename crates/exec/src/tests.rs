@@ -2088,6 +2088,75 @@ fn push_handle_suspends_the_abend_exit_and_abend_cancel_passes_every_exit() {
 }
 
 #[test]
+fn a_handle_abend_label_is_a_go_to_that_leaves_the_performs_in_progress_armed() {
+    let source = cics_program(
+        "GOTOP",
+        "       01  WS-N PIC 9 VALUE 0.\n",
+        "",
+        &[
+            "       MAIN-LINE.\n",
+            &line("EXEC CICS HANDLE ABEND LABEL(RECOVER) END-EXEC"),
+            &line("PERFORM A THRU C"),
+            &line("DISPLAY 'AFTER A THRU C'"),
+            &line("EXEC CICS RETURN END-EXEC."),
+            "       RECOVER.\n",
+            &line("DISPLAY 'RECOVERED'"),
+            &line("GO TO C."),
+            "       A.\n",
+            &line("DISPLAY 'A'"),
+            &line("PERFORM C"),
+            &line("DISPLAY 'BACK IN A'."),
+            "       B.\n",
+            &line("DISPLAY 'B'."),
+            "       C.\n",
+            &line("DISPLAY 'C ' WS-N"),
+            &line("ADD 1 TO WS-N"),
+            &line("IF WS-N = 1"),
+            &line("    EXEC CICS ABEND ABCODE('C001') END-EXEC"),
+            &line("END-IF."),
+            "       Z.\n",
+            &line("DISPLAY 'FELL THROUGH'."),
+        ]
+        .concat(),
+    );
+    let (out, ending) = run_cics(&source, task("TR12"), None, unit::Clock::System);
+    assert!(ending.is_ok(), "{ending:?}");
+    assert_eq!(out, "A\nC 0\nRECOVERED\nC 1\nBACK IN A\nB\nC 2\nAFTER A THRU C\n");
+}
+
+#[test]
+fn a_handle_abend_label_is_entered_by_a_go_to_at_the_handle_abend_command() {
+    let lines = [
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. DBGH.",
+        "ENVIRONMENT DIVISION.",
+        "CONFIGURATION SECTION.",
+        "SOURCE-COMPUTER. IBM-370 WITH DEBUGGING MODE.",
+        "PROCEDURE DIVISION.",
+        "DECLARATIVES.",
+        "DBG SECTION.",
+        "    USE FOR DEBUGGING ON RECOVER.",
+        "DBG-1.",
+        "    DISPLAY DEBUG-NAME(1:8) '|' DEBUG-CONTENTS(1:4)",
+        "        '|' DEBUG-LINE.",
+        "END DECLARATIVES.",
+        "MAIN SECTION.",
+        "MAIN-LINE.",
+        "    EXEC CICS HANDLE ABEND LABEL(RECOVER) END-EXEC",
+        "    PERFORM WORK.",
+        "WORK.",
+        "    EXEC CICS ABEND ABCODE('W001') END-EXEC.",
+        "RECOVER.",
+        "    EXEC CICS RETURN END-EXEC.",
+    ];
+    let source: String = lines.iter().map(|l| format!("       {l}\n")).collect();
+    let handle = lines.iter().position(|l| l.contains("HANDLE ABEND")).unwrap() + 1;
+    let o = Harness::source(&source).task(task("TR13")).flags(&["-debug"]).run(Executor::Interpreter);
+    assert!(o.ending.is_ok(), "{:?}", o.ending);
+    assert_eq!(o.out, format!("RECOVER |    |{handle:06}\n"));
+}
+
+#[test]
 fn a_program_check_in_a_cics_task_is_asra() {
     let source = cics_program("CICS7", "", "       01  DFHCOMMAREA PIC X(10).\n", &line("DISPLAY DFHCOMMAREA."));
     let (_, ending) = run_cics(&source, task("TR07"), None, unit::Clock::System);

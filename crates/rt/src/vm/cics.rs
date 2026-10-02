@@ -96,7 +96,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             };
             match cics::abend_exit(self.unit, &mut self.cics_handlers, &abend) {
                 None => return Err(abend.into()),
-                Some(ExitTarget::Label(p)) => {
+                Some(ExitTarget::Label { paragraph: p, .. }) => {
                     self.unwind();
                     start = Some((p, self.p.paragraphs[p as usize].entry));
                 }

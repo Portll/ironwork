@@ -198,7 +198,7 @@ pub(super) fn handle_abend<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>
                 Err(LoadError::Compile(m)) => return Err(Abend::ironwork(format!("EXEC CICS HANDLE ABEND PROGRAM({name}): {m}"), at.pos)),
             }
         }
-        (None, Some(p)) => Some(ExitTarget::Label(p)),
+        (None, Some(p)) => Some(ExitTarget::Label { paragraph: p, at: at.pos }),
         (None, None) => None,
     };
     let handlers = x.handlers();

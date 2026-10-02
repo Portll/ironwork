@@ -35,12 +35,23 @@ impl Returns {
 impl<'p> Machine<'p, '_, '_> {
     /// Runs the procedure from its start, or from paragraph and statement `at`.
     pub(super) fn run_from(&mut self, at: Option<(usize, usize)>) -> R<Ending> {
-        let (start, skip) = at.unwrap_or((self.program.report_writer.procedure_start, 0));
+        let at = at.unwrap_or((self.program.report_writer.procedure_start, 0));
+        self.run_at(at, declaratives::Arrival::Start)
+    }
+
+    /// Runs the procedure from paragraph `p` as a GO TO at `from` reaches it, with the return
+    /// points of the PERFORMs control left still armed.
+    pub(super) fn go_to(&mut self, p: usize, from: Pos) -> R<Ending> {
+        self.uses.line = from;
+        self.run_at((p, 0), declaratives::Arrival::GoTo)
+    }
+
+    fn run_at(&mut self, (start, skip): (usize, usize), arrival: declaratives::Arrival) -> R<Ending> {
         if self.program.paragraphs.len() <= start {
             return Ok(Ending::EndOfProgram);
         }
         self.segment = self.program.paragraphs[start].priority;
-        self.uses.arrival = declaratives::Arrival::Start;
+        self.uses.arrival = arrival;
         match self.run_region((start, skip), (0, self.program.paragraphs.len() - 1), 0)? {
             Flow::End(e) => Ok(e),
             _ => Ok(Ending::EndOfProgram),
@@ -56,7 +67,8 @@ impl<'p> Machine<'p, '_, '_> {
     /// Paragraphs `from` through `to` with the end of `to` armed to return here while they run. A
     /// GO TO to a paragraph in `region` stays in this call; by default that is the range, or
     /// from `from` on when `to` comes before it. `statement` is the PERFORM's address and where
-    /// control resumes after it.
+    /// control resumes after it. An abend leaves the range as a GO TO out of it does, which a
+    /// HANDLE ABEND LABEL continues (C236).
     pub(super) fn perform_range(&mut self, from: usize, to: usize, region: Option<(usize, usize)>, statement: Option<(usize, (usize, usize))>) -> R<Flow> {
         let last = self.program.paragraphs.len() - 1;
         let region = region.unwrap_or(if from <= to { (from, to) } else { (from, last) });
@@ -66,12 +78,12 @@ impl<'p> Machine<'p, '_, '_> {
         self.returns.active.push(frame);
         let flow = self.run_region((from, 0), region, frame);
         self.returns.active.pop();
-        match flow? {
-            Flow::Next => {
+        match flow {
+            Ok(Flow::Next) => {
                 self.returns.armed[to] = saved;
                 Ok(Flow::Next)
             }
-            Flow::Return(f) if f == frame => {
+            Ok(Flow::Return(f)) if f == frame => {
                 self.returns.armed[to] = saved;
                 Ok(Flow::Next)
             }
@@ -79,7 +91,7 @@ impl<'p> Machine<'p, '_, '_> {
                 if let Some((address, _)) = statement {
                     self.returns.saved.insert(address, saved);
                 }
-                Ok(left)
+                left
             }
         }
     }

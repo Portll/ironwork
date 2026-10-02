@@ -66,18 +66,19 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     /// Runs this program as a logical level of the task: an abend that reaches it while its HANDLE
-    /// ABEND exit is active goes to the exit, a LABEL taken as a GO TO from the procedure's start
-    /// and a PROGRAM in place of the rest of this level (C142).
+    /// ABEND exit is active goes to the exit, a LABEL taken as a GO TO at the HANDLE ABEND command
+    /// with the PERFORMs the abend left still armed (C236), and a PROGRAM in place of the rest of
+    /// this level (C142).
     pub(crate) fn run_level(&mut self) -> R<Ending> {
-        let mut start = None;
+        let mut ending = self.run_from(None);
         loop {
-            let abend = match self.run_from(start) {
+            let abend = match ending {
                 Err(abend) => abend,
                 done => return done,
             };
             match cics::abend_exit(self.unit, &mut self.cics_handlers, &abend) {
                 None => return Err(abend),
-                Some(cics::ExitTarget::Label(p)) => start = Some((p as usize, 0)),
+                Some(cics::ExitTarget::Label { paragraph, at }) => ending = self.go_to(paragraph as usize, at),
                 Some(cics::ExitTarget::Program(name)) => {
                     let ending = cics::enter_exit_program(self, &name, abend.pos)?;
                     return Ok(if ending == Ending::StopRun { ending } else { Ending::Goback });
