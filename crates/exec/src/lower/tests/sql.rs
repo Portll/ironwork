@@ -114,3 +114,15 @@ fn a_host_structure_is_its_members_with_the_indicator_array_s_elements_and_an_un
     assert_eq!(text.at.map(|at| p.debug.positions[at as usize].line), Some(13));
     assert!(p.services.sqlca.fields.is_empty());
 }
+
+#[test]
+fn a_whenever_label_two_sections_have_is_the_one_in_the_sql_statement_s_section() {
+    let section = |name: &str| {
+        let whenever = line("EXEC SQL WHENEVER NOT FOUND GO TO NONE END-EXEC.");
+        format!("       {name} SECTION.\n{whenever}{}       NONE.\n{}", line("EXEC SQL DELETE FROM T END-EXEC."), line("GOBACK."))
+    };
+    let p = lowered(&program("", DATA, &[section("S1"), section("S2")].concat()));
+    let (first, second) = (p.paragraphs[1].entry, p.paragraphs[3].entry);
+    assert_eq!(whenever(&p, block_of(&p, 2)), [(SqlTest::NotFound, Terminator::Jump(first))]);
+    assert_eq!(whenever(&p, block_of(&p, 4)), [(SqlTest::NotFound, Terminator::Jump(second))]);
+}

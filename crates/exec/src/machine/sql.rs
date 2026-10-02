@@ -112,7 +112,10 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
         };
         match action {
             Action::Continue => Ok(Flow::Next),
-            Action::GoTo(label) => Ok(Flow::GoTo(self.procedure(&ProcName { name: label.clone(), section: None }, pos)?.0)),
+            Action::GoTo(label) => {
+                let label = ProcName { name: label.clone(), section: None };
+                Ok(Flow::GoTo(crate::procedure_from(self.program, &label, self.returns.running).map_err(|m| Abend::ironwork(m, pos))?.0))
+            }
         }
     }
 }
@@ -349,6 +352,23 @@ mod tests {
             "           GOBACK.\n",
         );
         assert_eq!(run(procedure, vec![Outcome::rows(Vec::new())]).0.as_deref(), Ok("NONE 100\n"));
+    }
+
+    #[test]
+    fn a_whenever_label_two_sections_have_is_the_one_in_the_statement_s_section() {
+        let procedure = concat!(
+            "       S1 SECTION.\n",
+            "           PERFORM S2.\n",
+            "           GOBACK.\n",
+            "       NONE.\n",
+            "           DISPLAY 'NONE OF S1'.\n",
+            "       S2 SECTION.\n",
+            "           EXEC SQL WHENEVER NOT FOUND GO TO NONE END-EXEC.\n",
+            "           EXEC SQL SELECT NAME INTO :WS-NAME FROM T END-EXEC.\n",
+            "       NONE.\n",
+            "           DISPLAY 'NONE OF S2'.\n",
+        );
+        assert_eq!(run(procedure, vec![Outcome::rows(Vec::new())]).0.as_deref(), Ok("NONE OF S2\n"));
     }
 
     #[test]

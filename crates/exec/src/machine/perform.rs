@@ -23,7 +23,7 @@ pub(super) struct Returns {
     active: Vec<u64>,
     frames: u64,
     /// The paragraph control is in.
-    running: usize,
+    pub(super) running: usize,
 }
 
 impl Returns {

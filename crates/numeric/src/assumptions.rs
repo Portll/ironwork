@@ -252,6 +252,7 @@ pub const PARMCHECK_MESSAGE: &str = "C227";
 pub const PARM_ARGUMENTS_BEFORE_LAST_SLASH: &str = "C250";
 pub const PARM_AREA_PADDED: &str = "C251";
 pub const ABBREVIATED_RELATIONS: &str = "C150";
+pub const PARAGRAPH_IN_OWN_SECTION: &str = "C151";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1589,6 +1590,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: ABBREVIATED_RELATIONS,
         claim: "An abbreviated combined relation condition (Language Reference SC27-8713-03, pp. 287-289) implies the last stated subject, or the last stated subject and relational operator, a NOT just before the operator being part of it, so A NOT > B OR C is (A NOT > B) OR (A NOT > C), and IS may come before an implied operator, as CCVS85 NC250A writes AND IS NOT LESS THAN. Parentheses after AND, OR or NOT take the implied subject and operator in. After the right parenthesis the subject and operator stated before the parentheses are current again, whatever was stated inside, so A = B AND (C OR < D) OR 2 ends with A = 2; the manual's rule 10 does not say which operator follows a right parenthesis. A class or sign condition leaves the implied subject and operator as they were. A bare name after AND or OR, with NOT or left parentheses between or not, is a condition-name when it names one and otherwise an object, decided when the name is resolved. A relational operator followed by parentheses that hold objects joined by AND, OR and NOT is distributed over them (rule 5), and NOT just after that parenthesis is refused. The manual's examples (Table 31, p. 289) agree with their unabbreviated forms in ironwork's tests; no Enterprise COBOL listing ironwork has shows what follows a right parenthesis or a class condition in an abbreviation",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PARAGRAPH_IN_OWN_SECTION,
+        claim: "A paragraph-name need not be qualified when referred to within the section in which it appears (Language Reference SC27-8713-03, p. 68), so an unqualified name that more than one procedure has names the paragraph of that name in the section the reference is written in, when that section has one; from any other section it is refused as naming more than one paragraph, as before. The manual states the rule for references in general; ironwork applies it to each. Before any check, the compiler qualifies the names of GO TO, GO TO DEPENDING ON, PERFORM and its THRU, ALTER, SORT and MERGE procedures and XML PARSE's processing procedure with the section they are written in, so the compiler, the interpreter and the LIR lowering find the same paragraph. USE FOR DEBUGGING ON resolves from its declarative section, EXEC SQL WHENEVER GO TO from the paragraph of the SQL statement it follows, as the precompiler writes its GO TO there, and an EXEC CICS HANDLE label from the paragraph of the HANDLE command, with the same rule. CCVS85 NC208A's GO TO PAR-3C, unqualified in the section that has a PAR-3C, is the corpus case",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

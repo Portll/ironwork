@@ -195,15 +195,15 @@ fn bind_other<'b>(block: &'b ExecBlock, command: &str, label: &dyn Fn(&str) -> R
     })
 }
 
-/// A HANDLE label: the paragraph or section it names, where control goes.
-pub(crate) fn label(program: &syntax::ast::Program, block: &ExecBlock, text: &str) -> R<ParaId> {
+/// A HANDLE label in paragraph `from`: the paragraph or section it names, where control goes.
+pub(crate) fn label(program: &syntax::ast::Program, block: &ExecBlock, text: &str, from: usize) -> R<ParaId> {
     let p = ProcName { name: text.trim().to_ascii_uppercase(), section: None };
-    crate::procedure(program, &p).map(|(start, _)| start as ParaId).map_err(|m| Abend::ironwork(format!("EXEC CICS {}: {m}", block.command), block.pos))
+    crate::procedure_from(program, &p, from).map(|(start, _)| start as ParaId).map_err(|m| Abend::ironwork(format!("EXEC CICS {}: {m}", block.command), block.pos))
 }
 
 impl<'p> Machine<'p, '_, '_> {
     pub(super) fn bind_cics(&self, block: &'p ExecBlock) -> R<Command<'p>> {
-        bind(block, &|text| label(self.program, block, text))
+        bind(block, &|text| label(self.program, block, text, self.returns.running))
     }
 }
 

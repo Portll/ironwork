@@ -462,20 +462,37 @@ pub fn section_end(program: &Program, i: usize) -> usize {
 
 /// Qualifies each unqualified paragraph-name that more than one section holds with the section it
 /// is written in, when that section holds it: within its own section a paragraph-name needs no
-/// qualifier, so every later lookup must find that paragraph.
+/// qualifier, so every later lookup must find that paragraph (assumption C151).
 fn qualify_in_own_section(program: &mut Program) {
-    let paragraphs: Vec<(String, Option<String>, bool)> = program.paragraphs.iter().map(|p| (p.name.clone(), p.section.clone(), p.is_section)).collect();
-    let in_section = |name: &str, section: &str| paragraphs.iter().any(|(n, s, is_section)| n == name && !is_section && s.as_deref() == Some(section));
-    let named = |name: &str| paragraphs.iter().filter(|(n, ..)| n == name).count();
-    for p in &mut program.paragraphs {
-        let Some(section) = p.section.clone() else { continue };
-        oo::each_mut(&mut p.statements, &mut |s| {
+    for i in 0..program.paragraphs.len() {
+        let Some(section) = program.paragraphs[i].section.clone() else { continue };
+        let mut statements = std::mem::take(&mut program.paragraphs[i].statements);
+        oo::each_mut(&mut statements, &mut |s| {
             for name in procedure_names_mut(s) {
-                if name.section.is_none() && named(&name.name) > 1 && in_section(&name.name, &section) {
+                if name.section.is_none() && names_own_paragraph(&program.paragraphs, &name.name, &section) {
                     name.section = Some(section.clone());
                 }
             }
         });
+        program.paragraphs[i].statements = statements;
+    }
+}
+
+/// Whether an unqualified `name` written in `section` names that section's own paragraph: more than
+/// one procedure has the name, and `section` holds a paragraph of it.
+fn names_own_paragraph(paragraphs: &[Paragraph], name: &str, section: &str) -> bool {
+    paragraphs.iter().filter(|p| p.name == name).count() > 1 && paragraphs.iter().any(|p| p.name == name && !p.is_section && p.section.as_deref() == Some(section))
+}
+
+/// `procedure` for a name written in paragraph `from` that no statement holds as a procedure-name,
+/// such as a WHENEVER or HANDLE label or a USE FOR DEBUGGING operand, qualified with `from`'s
+/// section as `qualify_in_own_section` qualifies a statement's.
+pub fn procedure_from(program: &Program, p: &ProcName, from: usize) -> Result<(usize, usize), String> {
+    match program.paragraphs.get(from).and_then(|q| q.section.as_deref()) {
+        Some(section) if p.section.is_none() && names_own_paragraph(&program.paragraphs, &p.name, section) => {
+            procedure(program, &ProcName { name: p.name.clone(), section: Some(section.to_owned()) })
+        }
+        _ => procedure(program, p),
     }
 }
 

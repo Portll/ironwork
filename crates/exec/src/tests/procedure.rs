@@ -754,3 +754,34 @@ fn perform_times_takes_a_subscripted_count_and_test_needs_no_with() {
     ));
     assert_eq!(out, "P1\nP2\nI\nP3\nP4\nP5\n6\n");
 }
+
+#[test]
+fn an_unqualified_paragraph_name_names_the_one_in_its_own_section() {
+    let source = perform_program(&[
+        "       S1 SECTION.\n       S1-START.\n",
+        &line("PERFORM P"),
+        &line("PERFORM P THRU Q"),
+        &line("PERFORM S2"),
+        &line("GO TO Q."),
+        "       P.\n",
+        &line("DISPLAY 'P OF S1'."),
+        "       Q.\n",
+        &line("DISPLAY 'Q OF S1'."),
+        "       Z.\n",
+        &line("STOP RUN."),
+        "       S2 SECTION.\n       S2-START.\n",
+        &line("MOVE 1 TO K"),
+        &line("GO TO P Q DEPENDING ON K."),
+        "       P.\n",
+        &line("DISPLAY 'P OF S2'"),
+        &line("ALTER R TO PROCEED TO Q"),
+        &line("PERFORM R THRU Q."),
+        "       R.\n",
+        &line("GO TO P."),
+        "       Q.\n",
+        &line("DISPLAY 'Q OF S2'."),
+    ]);
+    assert_eq!(run(&source), "P OF S1\nP OF S1\nQ OF S1\nP OF S2\nQ OF S2\nQ OF S2\nQ OF S1\n");
+    let elsewhere = format!("{source}       S3 SECTION.\n{}", line("GO TO P."));
+    assert_eq!(compile_errors(&elsewhere), "P names more than one paragraph; qualify it with OF and its section");
+}

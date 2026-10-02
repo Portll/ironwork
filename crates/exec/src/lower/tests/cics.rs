@@ -86,3 +86,11 @@ fn exec_dli_ends_its_block_in_the_walker_s_exec_abend() {
     let text = &p.abends[a as usize];
     assert_eq!((&text.code, symbol(&p, text.message), text.at), (&AbendCode::Exec, "EXEC DLI GN was reached: ironwork for COBOL checks EXEC statements but does not run them yet", None));
 }
+
+#[test]
+fn a_handle_label_two_sections_have_is_the_one_in_the_handle_command_s_section() {
+    let section = |name: &str| format!("       {name} SECTION.\n{}       OOPS.\n{}", line("EXEC CICS HANDLE CONDITION ERROR(OOPS) END-EXEC."), line("GOBACK."));
+    let p = lowered(&program("", DATA, &[section("S1"), section("S2")].concat()));
+    let labels: Vec<Cics> = commands(&p).into_iter().map(|(_, c)| c.command.clone()).collect();
+    assert_eq!(labels, [Cics::HandleCondition(vec![(Condition::ERROR, Some(1))]), Cics::HandleCondition(vec![(Condition::ERROR, Some(3))])]);
+}

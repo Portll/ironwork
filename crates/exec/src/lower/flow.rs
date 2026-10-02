@@ -47,7 +47,7 @@ impl Blocks {
 /// SENTENCE), a position for statements that carry none, and the inline PERFORMs around it.
 #[derive(Clone)]
 pub(super) struct Ctx {
-    para: usize,
+    pub(super) para: usize,
     top: usize,
     pos: Pos,
     loops: Vec<Inline>,
@@ -463,7 +463,7 @@ impl Lower<'_> {
             }
             Stmt::Exec(block) => match block.kind {
                 ExecKind::Sql if block.declarative() => {}
-                ExecKind::Cics => self.cics(block, pos)?,
+                ExecKind::Cics => self.cics(block, pos, ctx.para)?,
                 ExecKind::Sql => self.sql(block, pos, &inner)?,
                 ExecKind::Dli | ExecKind::Other => {
                     let kind = if block.kind == ExecKind::Dli { "DLI" } else { "" };

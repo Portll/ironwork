@@ -150,7 +150,7 @@ impl Lower<'_> {
             let (taken, next) = (self.new_block()?, self.new_block()?);
             self.end(Terminator::Branch { cond, then: taken, otherwise: next }, pos)?;
             self.switch(taken)?;
-            match crate::procedure(self.program, &ProcName { name: label.clone(), section: None }) {
+            match crate::procedure_from(self.program, &ProcName { name: label.clone(), section: None }, ctx.para) {
                 Ok((t, _)) => self.go_to(t, ctx, pos)?,
                 Err(message) => {
                     let abend = self.ironwork(&message)?;

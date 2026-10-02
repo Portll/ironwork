@@ -1498,3 +1498,13 @@ fn perform_times_with_a_subscripted_count_sets_its_counter_from_that_element_onc
     let place = &p.places[*v as usize];
     assert_eq!((p.symbols[place.name as usize].as_str(), place.subscripts.len()), ("V", 1));
 }
+
+#[test]
+fn an_unqualified_paragraph_name_lowers_to_the_one_in_its_own_section() {
+    let section = |name: &str| format!("       {name} SECTION.\n       {name}-START.\n{}       P.\n{}       Q.\n{}", line("GO TO P."), line("PERFORM Q."), line("DISPLAY 'Q'."));
+    let p = lowered(&program("", "", &[section("S1"), section("S2")].concat()));
+    let go_to = |from: usize| p.blocks[p.paragraphs[from].entry as usize].end.clone();
+    assert_eq!((go_to(1), go_to(5)), (Terminator::Jump(p.paragraphs[2].entry), Terminator::Jump(p.paragraphs[6].entry)));
+    let performed: Vec<(u32, u32)> = p.ranges.iter().map(|r| (r.first, r.last)).collect();
+    assert_eq!(performed, [(3, 3), (7, 7)]);
+}

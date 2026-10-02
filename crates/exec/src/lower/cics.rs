@@ -36,10 +36,10 @@ impl<'b> Handles<&'b Ref, &'b Operand, &'b str> for Lowering<'_, '_> {
 }
 
 impl Lower<'_> {
-    pub(super) fn cics(&mut self, block: &ExecBlock, pos: Pos) -> R<()> {
+    pub(super) fn cics(&mut self, block: &ExecBlock, pos: Pos, para: usize) -> R<()> {
         let program = self.program;
         // The walker abends at a label that names no procedure only once the block is in a task.
-        let Ok(bound) = cics_bind::bind(block, &|text| cics_bind::label(program, block, text)) else {
+        let Ok(bound) = cics_bind::bind(block, &|text| cics_bind::label(program, block, text, para)) else {
             return unsupported("a HANDLE label that names no procedure", pos);
         };
         let command = bound.map(&mut Lowering { l: self, pos })?;

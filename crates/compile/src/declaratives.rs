@@ -128,7 +128,7 @@ pub(crate) fn resolve(program: &Program, layout: &Layout, options: &Options, err
         }
         for name in &u.procedures {
             let error = |why: &str| Error::at(u.pos, format!("USE FOR DEBUGGING ON {}: {why}", name.name));
-            match crate::procedure(program, name) {
+            match crate::procedure_from(program, name, section.0) {
                 Err(m) => errors.push(error(&m)),
                 Ok((i, _)) if in_debugging(i) => errors.push(error("the procedure is in a debugging section")),
                 Ok((i, _)) if triggers[i].is_some() => errors.push(error("the procedure is named in another USE FOR DEBUGGING, or twice in this one")),
