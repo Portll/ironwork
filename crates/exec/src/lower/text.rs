@@ -76,16 +76,17 @@ impl Lower<'_> {
             Operand::Ref(r) => Inspected::Item(self.place(r, false)?),
             op => Inspected::Value(self.operand(op, pos)?.operand),
         };
+        let valued = matches!(target, Inspected::Value(_));
         let mut tallying = Vec::with_capacity(i.tallying.len());
         for p in &i.tallying {
-            tallying.push(self.inspect_phrase(p, pos)?);
+            tallying.push(self.inspect_phrase(p, valued, pos)?);
         }
-        if matches!(target, Inspected::Value(_)) {
+        if valued {
             return push(&mut self.plans.inspect, InspectPlan { target, tallying, replacing: Vec::new(), converting: None }, "INSPECT plans");
         }
         let mut replacing = Vec::with_capacity(i.replacing.len());
         for p in &i.replacing {
-            replacing.push(self.inspect_phrase(p, pos)?);
+            replacing.push(self.inspect_phrase(p, false, pos)?);
         }
         let converting = match &i.converting {
             None => None,
@@ -108,8 +109,15 @@ impl Lower<'_> {
         push(&mut self.plans.inspect, InspectPlan { target, tallying, replacing, converting }, "INSPECT plans")
     }
 
-    fn inspect_phrase(&mut self, p: &ast::InspectPhrase, pos: Pos) -> R<InspectPhrase> {
-        let pattern = p.pattern.as_ref().map(|op| self.chars(op, pos)).transpose()?;
+    /// `valued`: the phrase tallies a function's value, whose national character positions are two
+    /// bytes, so a literal stays a value, as `rt::text::tally` reads a figurative constant as one
+    /// national character.
+    fn inspect_phrase(&mut self, p: &ast::InspectPhrase, valued: bool, pos: Pos) -> R<InspectPhrase> {
+        let operand = |l: &mut Self, op: &Operand| match op {
+            Operand::Literal(_) if valued => Ok(Chars::Value(l.operand(op, pos)?.operand)),
+            _ => l.chars(op, pos),
+        };
+        let pattern = p.pattern.as_ref().map(|op| operand(self, op)).transpose()?;
         let by = match &p.by {
             None => None,
             Some(Operand::Literal(Literal::Figurative(f))) => Some(Replacement::Fill(self.c.collating.figurative(*f))),
@@ -122,7 +130,8 @@ impl Lower<'_> {
                 Some((place, self.count_plan(place, "a TALLYING counter must be numeric")?))
             }
         };
-        Ok(InspectPhrase { mode: p.mode, pattern, by, counter, bounds: self.bounds(&p.bounds, pos)? })
+        let bounds = p.bounds.iter().map(|b| Ok(Bound { after: b.after, value: operand(self, &b.value)? })).collect::<R<_>>()?;
+        Ok(InspectPhrase { mode: p.mode, pattern, by, counter, bounds })
     }
 
     fn bounds(&mut self, bounds: &[ast::Bound], pos: Pos) -> R<Vec<Bound>> {
