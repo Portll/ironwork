@@ -12,6 +12,9 @@ use syntax::Pos;
 use syntax::ast::{BinOp, Expr, Figurative, Literal, Operand, Ref};
 use zarch::wide::U256;
 
+/// Why a reference does not lower: the walker looks its name up only when it runs, and fails.
+pub(super) const UNRESOLVED: &str = "a data name the walker resolves only when it runs";
+
 /// What the walker reads from an operand (`Machine::read`, `literal_value`), which decides the
 /// MOVE and comparison plans.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -152,7 +155,7 @@ impl Lower<'_> {
         match layout.resolve(&r.name, &r.qualifiers, r.pos) {
             Ok(Resolved::Item(index)) => self.item_place(index, r, receiving),
             Ok(Resolved::Condition(_)) => unsupported("a condition-name used as data", r.pos),
-            Err(_) => unsupported("a data name the walker resolves only when it runs", r.pos),
+            Err(_) => unsupported(UNRESOLVED, r.pos),
         }
     }
 

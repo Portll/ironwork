@@ -1,9 +1,9 @@
 //! Files (lir.md §9.4): each file's declaration from its SELECT and FD, and each file statement as
 //! `file_io` runs it, with what it finds by name on every execution resolved here.
 
-use super::data::{Side, Value};
+use super::data::{Side, UNRESOLVED, Value};
 use super::flow::Ctx;
-use super::{Lower, R, is_static, push, unsupported};
+use super::{Lower, LowerError, R, is_static, push, unsupported};
 use crate::layout::Resolved;
 use crate::printer::{self, Space};
 use rt::files::Format;
@@ -27,10 +27,11 @@ impl Lower<'_> {
     fn file_desc(&mut self, k: usize, f: &FileDecl) -> R<FileDesc> {
         let status = match &f.status {
             None => None,
-            Some(r) => {
-                let place = self.place(r, false)?;
-                Some((place, self.bytes_into(place)?))
-            }
+            Some(r) => match self.place(r, false) {
+                Ok(place) => Some((place, self.bytes_into(place)?)),
+                Err(LowerError::Unsupported(what, _)) if what == UNRESOLVED => None,
+                Err(e) => return Err(e),
+            },
         };
         let keys = match (f.organization, &f.record_key) {
             (Organization::Indexed, Some(prime)) => {
@@ -119,6 +120,31 @@ impl Lower<'_> {
             sort: f.sort,
             error: self.c.declaratives.files.get(k).copied().flatten().map(|s| self.span_range(s, lir::RangeKind::UseProcedure)).transpose()?,
         })
+    }
+
+    /// A FILE STATUS that names no data item is left out of its file's declaration: the walker looks
+    /// the name up only when a statement on the file sets the status, so a program none of whose
+    /// statements names the file runs the same without it.
+    pub(super) fn unresolved_statuses(&self) -> R<()> {
+        for (k, f) in self.program.files.iter().enumerate() {
+            let Some(r) = &f.status else { continue };
+            if self.services.files[k].status.is_none() && self.names_file(k) {
+                return unsupported("a statement on a file whose FILE STATUS names no data item", r.pos);
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether a lowered statement, SORT or MERGE, RELEASE, RETURN or report names file `k`.
+    fn names_file(&self, k: usize) -> bool {
+        let s = &self.services;
+        let named = |f: u16| usize::from(f) == k;
+        let sorted = |io: &Option<lir::SortIo>| matches!(io, Some(lir::SortIo::Files(files)) if files.iter().any(|&f| named(f)));
+        s.file_ops.iter().any(|op| named(op.file))
+            || s.sorts.iter().any(|plan| matches!(plan, lir::SortPlan::File(f) if named(f.sd) || sorted(&f.input) || sorted(&f.output)))
+            || s.releases.iter().any(|r| r.file.is_some_and(named))
+            || s.returns.iter().any(|r| r.file.is_some_and(named))
+            || s.report.reports.iter().any(|r| r.file == k)
     }
 
     /// `assign` of a status or a record's bytes, which reach it as alphanumeric bytes.

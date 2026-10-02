@@ -1188,7 +1188,7 @@ each execution; the status, the record, the DD and the in-memory file are run-ti
 /// record as long as its largest, which a SORT's records follow (`fixed_length`, machine/sort.rs);
 /// `record_min` the RECORD clause's smallest record, which a variable-length report record is cut
 /// to no shorter than (`ReportFile`); `status` FILE STATUS with the MOVE its two characters take
-/// (`set_status`).
+/// (`set_status`), None also when it names no data item and no statement names the file.
 pub struct FileDesc {
     pub name: SymId, pub assign: SymId, pub organization: Organization, pub access: Access,
     pub optional: bool, pub format: rt::files::Format, pub read_lengths: (u32, u32),
@@ -1262,6 +1262,11 @@ pub enum StartKey { Prime, Named { key: u8, span: RecordSpan }, Relative(IntExpr
   take it from (`record_length`): the record area's first n bytes go out, or status 44 when n lies
   outside `lengths` or past the area, and RELEASE stops the sort. The item is located where the
   walker locates it, each time, and is never a receiving item.
+- **A FILE STATUS that names no data item.** The walker looks the name up only when `set_status`
+  runs, on a statement that names the file, a SORT or MERGE that uses or gives it, or a report
+  written to it, and abends there; and a file with a FILE STATUS clause takes no `IO-xx` abend
+  however it is named. Lowering leaves `status` None when no lowered statement names the file,
+  which gives the walker's result, and refuses the program otherwise.
 - **Fixed at lowering:** the file by name; each key's span, from its place, which must be a static
   item of the file's record area; which key READ KEY or START KEY names, a leading part for START;
   START's relation, one other than =, > or NOT < being the walker's abend at the statement; the

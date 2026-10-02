@@ -1,5 +1,5 @@
-//! SEARCH of an OCCURS DEPENDING ON table and literals the code page cannot encode, each lowered
-//! and run on both executors.
+//! SEARCH of an OCCURS DEPENDING ON table, literals the code page cannot encode, and a FILE STATUS
+//! that names no data item, each lowered and run on both executors.
 
 use super::*;
 use crate::testing::{Executor, Harness, Outcome};
@@ -87,4 +87,22 @@ fn a_literal_the_code_page_cannot_encode_abends_where_the_walker_converts_it() {
         let (_, o) = run(body);
         assert_eq!(abend_of(&o), (AbendCode::Ironwork, unmappable.to_owned(), 8), "{body:?}");
     }
+}
+
+#[test]
+fn a_file_status_that_names_nothing_lowers_without_it_while_no_statement_names_its_file() {
+    let source = |body: &str| {
+        with_files(
+            "",
+            &["    SELECT F ASSIGN TO FDD FILE STATUS IS NOWHERE."],
+            &["FD  F.", "01  F-REC PIC X(8)."],
+            "       01  W PIC X.\n",
+            &["M.", body, "    GOBACK."],
+        )
+    };
+    let p = lowered(&source("    DISPLAY 'NONE'"));
+    assert_eq!(p.services.files[0].status, None);
+    verify(&p).unwrap();
+    let e = lower(&compiled(&source("    OPEN INPUT F"))).unwrap_err();
+    assert!(matches!(e, LowerError::Unsupported("a statement on a file whose FILE STATUS names no data item", _)), "{e}");
 }

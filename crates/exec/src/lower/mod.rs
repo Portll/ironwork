@@ -112,6 +112,7 @@ pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
     l.services.report = l.report_writer()?;
     (l.sql, l.services.sqlca) = l.sql_table()?;
     let paragraphs = l.procedure()?;
+    l.unresolved_statuses()?;
     l.services.entries = l.entry_points()?;
     l.services.class = l.class_definition()?;
     let procedure_start = compiled.program.report_writer.procedure_start.min(compiled.program.paragraphs.len());
