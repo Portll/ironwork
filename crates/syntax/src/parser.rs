@@ -563,6 +563,7 @@ impl Parser<'_> {
             sort: false,
             pos,
         };
+        let mut delimiter = None;
         while !self.accept(&Tok::Period) {
             let clause = self.name("a SELECT clause or a period")?;
             match clause.as_str() {
@@ -589,7 +590,9 @@ impl Parser<'_> {
                     f.passwords.push(self.reference()?);
                 }
                 // RECORD DELIMITER is syntax-checked and has no effect (LR, 'RECORD DELIMITER clause').
-                "RECORD" if self.accept_word("DELIMITER") => {
+                "RECORD" if self.is_word("DELIMITER") => {
+                    delimiter = Some(self.pos());
+                    self.at += 1;
                     self.accept_word("IS");
                     self.name("STANDARD-1 or an assignment-name")?;
                 }
@@ -661,6 +664,9 @@ impl Parser<'_> {
                 }
                 other => return Err(self.error(format!("{other} is not a SELECT clause ironwork for COBOL supports yet"))),
             }
+        }
+        if let Some(at) = delimiter.filter(|_| f.organization != Organization::Sequential) {
+            return Err(Error::at(at, format!("RECORD DELIMITER on {}: the clause is for a file of ORGANIZATION SEQUENTIAL", f.name)));
         }
         Ok(f)
     }
@@ -3512,5 +3518,18 @@ mod tests {
         assert!(matches!(&s[2], Stmt::PerformProc { from, thru: Some(t), repeat: Loop::Times(_), .. } if from.name == "3" && t.name == "4"));
         assert!(matches!(&s[3], Stmt::Display { items, .. } if items.len() == 1));
         assert!(matches!(&p.paragraphs[2].statements[0], Stmt::Alter { pairs, .. } if pairs[0].0.name == "4" && pairs[0].1.name == "3"));
+    }
+
+    #[test]
+    fn record_delimiter_is_for_a_sequential_file() {
+        let program = |selects: &str| {
+            let head = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n";
+            format!("{head}{selects}       DATA DIVISION.\n       FILE SECTION.\n       FD  S.\n       01  S-REC PIC X(80).\n       PROCEDURE DIVISION.\n           GOBACK.\n")
+        };
+        let p = crate::parse(&program("           SELECT S ASSIGN TO SDD RECORD DELIMITER IS STANDARD-1\n               ORGANIZATION IS SEQUENTIAL.\n")).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(p.files[0].organization, Organization::Sequential);
+        crate::parse(&program("           SELECT S ASSIGN TO SDD RECORD DELIMITER TAPEDEL.\n")).unwrap_or_else(|e| panic!("{e}"));
+        let err = crate::parse(&program("           SELECT S ASSIGN TO SDD ORGANIZATION LINE SEQUENTIAL\n               RECORD DELIMITER STANDARD-1.\n")).unwrap_err();
+        assert_eq!(err.message, "RECORD DELIMITER on S: the clause is for a file of ORGANIZATION SEQUENTIAL");
     }
 }
