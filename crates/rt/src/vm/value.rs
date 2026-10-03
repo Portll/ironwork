@@ -5,7 +5,7 @@ use super::{Code, Facts, Halt, R, Vm, not_yet};
 use crate::abend::Abend;
 use crate::arith;
 use crate::intrinsic::function::{self as intrinsic, Evaluator};
-use crate::lir::{AbendId, Argument, Base, Comparand, Const, Count, Expr, ExprId, Func, FunctionId, FunctionPlan, IntExpr, Mode, Operand, PlaceId};
+use crate::lir::{AbendId, Argument, Base, Comparand, Const, Count, Expr, ExprId, Func, FunctionId, FunctionPlan, IntExpr, Mode, Operand, PlaceId, RefMod};
 use crate::storage::{Kind, Loc, Val};
 use crate::store::{self, ProgramFacts};
 use crate::unit::{ADDRESS_BASE, Loader};
@@ -53,6 +53,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 Ok(Val::Address(ADDRESS_BASE + loc.offset as u32))
             }
             Operand::Function(f) => self.function(f),
+            Operand::UserFunction(f) => self.user_function(f),
         }
     }
 
@@ -231,7 +232,12 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             let result = intrinsic::evaluate(&mut Call { vm: self, plan }, plan.func.name(), plan.side, args, pos);
             self.settle(result)?
         };
-        let Some(rm) = &plan.refmod else { return Ok(value) };
+        self.refmodded(value, plan.refmod.as_ref(), pos)
+    }
+
+    /// A function's value reference-modified by `refmod`, its start and length evaluated now.
+    pub(super) fn refmodded(&mut self, value: Val, refmod: Option<&RefMod>, pos: Pos) -> R<Val> {
+        let Some(rm) = refmod else { return Ok(value) };
         let result = intrinsic::refmod(value, pos, || {
             let start = self.int(&rm.start, pos);
             let start = self.lift(start, pos)?;

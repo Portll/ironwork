@@ -1,6 +1,6 @@
 //! Values, expressions and conditions (lir.md §6).
 
-use super::{AbendId, CondId, ConstId, ExprId, FunctionId, Mode, Odo, PlaceId, TempId};
+use super::{AbendId, CondId, ConstId, ExprId, FunctionId, Mode, Odo, PlaceId, TempId, UserFunctionId};
 use crate::codec_enum;
 use crate::vocab::{BinOp, Figurative, RelOp};
 use numeric::precision::Fixed;
@@ -12,6 +12,7 @@ pub enum Operand {
     LengthOf(PlaceId),
     AddressOf(PlaceId),
     Function(FunctionId),
+    UserFunction(UserFunctionId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -120,7 +121,7 @@ pub enum SqlTest {
     Warning,
 }
 
-codec_enum!(Operand { Load(place) = 0, Const(id) = 1, LengthOf(place) = 2, AddressOf(place) = 3, Function(id) = 4 });
+codec_enum!(Operand { Load(place) = 0, Const(id) = 1, LengthOf(place) = 2, AddressOf(place) = 3, Function(id) = 4, UserFunction(id) = 5 });
 codec_enum!(Const { Bytes(b) = 0, National(n) = 1, Number(f) = 2, Figurative(f) = 3, All(b) = 4, Refused(abend) = 5 });
 codec_enum!(IntExpr { Const(n) = 0, Item(place) = 1, Fixed { expr, dmax, prepass } = 2, Walk(k) = 3 });
 codec_enum!(Expr { Operand(o) = 0, Neg(e) = 1, Bin(a, op, b) = 2, Pow(base, exponent) = 3 });

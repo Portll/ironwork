@@ -380,6 +380,8 @@ fn program_shape_round_trips() {
         sqlca: Sqlca { fields: vec![(SqlcaField::Code, 0, INTEGER)] },
         entries: vec![EntryPoint { name: 2, paragraph: 1, block: 4, using: vec![0, 1] }],
         class: Some(Box::new(account())),
+        user_functions: vec![UserFunctionPlan { name: 4, external: 5, args: vec![], refmod: None, at: 3 }],
+        function: Some(FunctionDefinition { params: vec![0, 2], returning: 1 }),
         declaratives: Declaratives { modes: [Some(0), None, None, Some(2)], debug_item: Some((120, 86)) },
         markup: vec![Markup::XmlParse(xml_parse())],
         report: ReportWriter { reports: vec![report()], print_switch: Some(16) },
@@ -393,6 +395,20 @@ fn account() -> Class {
     let method = Method { name: 3, factory: false, params: vec![4], returns: Some(5), own_records: 1, code: payroll() };
     let open = Method { factory: true, params: vec![], returns: None, own_records: 0, ..method.clone() };
     Class { external: 1, parent: 2, factory: Some(part.clone()), object: Some(part), methods: vec![method, open] }
+}
+
+#[test]
+fn user_defined_functions_round_trip() {
+    every_variant(&[UserArgument::Reference(2), UserArgument::Value(FLOAT_EXPR)], 2);
+    let plan = UserFunctionPlan {
+        name: 1,
+        external: 2,
+        args: vec![UserArgument::Reference(0), UserArgument::Value(Comparand::Operand(Operand::UserFunction(1)))],
+        refmod: Some(RefMod { length: None, ..REFMOD }),
+        at: 7,
+    };
+    round_trip(&[plan, UserFunctionPlan { name: 0, external: 0, args: vec![], refmod: None, at: 0 }]);
+    round_trip(&[FunctionDefinition { params: vec![], returning: 0 }, FunctionDefinition { params: vec![3, 1], returning: 2 }]);
 }
 
 #[test]
@@ -489,8 +505,8 @@ fn places_round_trip_with_every_base() {
 
 #[test]
 fn values_and_conditions_round_trip_with_every_tag() {
-    let operands = [Operand::Load(1), Operand::Const(2), Operand::LengthOf(3), Operand::AddressOf(4), Operand::Function(5)];
-    every_variant(&operands, 5);
+    let operands = [Operand::Load(1), Operand::Const(2), Operand::LengthOf(3), Operand::AddressOf(4), Operand::Function(5), Operand::UserFunction(6)];
+    every_variant(&operands, 6);
     let consts = [
         Const::Bytes(vec![0xC1, 0x40]),
         Const::National(vec![0x00, 0x41]),

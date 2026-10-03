@@ -6,7 +6,7 @@ use super::{Lower, R, push, unsupported};
 use crate::layout::Resolved;
 use numeric::Arith;
 use numeric::precision::{Places, carried, sum_places};
-use rt::lir::{Argument, Comparand, Count, Func, FunctionId, FunctionPlan, Mode, Odo, RefMod, TrimSide};
+use rt::lir::{Argument, Comparand, Count, Func, FunctionPlan, Mode, Odo, RefMod, TrimSide};
 use syntax::Pos;
 use syntax::ast::{Expr, Figurative, FunctionCall, Literal, Operand, Ref};
 
@@ -26,9 +26,9 @@ struct Arg {
 }
 
 impl Lower<'_> {
-    pub(super) fn function(&mut self, f: &FunctionCall) -> R<(FunctionId, Side)> {
-        if self.c.functions.iter().any(|u| u.name == f.name) {
-            return unsupported("an invocation of a user-defined function (FUNCTION-ID)", f.pos);
+    pub(super) fn function(&mut self, f: &FunctionCall) -> R<(rt::lir::Operand, Side)> {
+        if let Some(udf) = self.user_defined(&f.name) {
+            return self.user_function(udf, f);
         }
         let Some(func) = Func::named(&f.name) else { return unsupported("a FUNCTION the LIR does not name", f.pos) };
         let pos = f.pos;
@@ -67,7 +67,7 @@ impl Lower<'_> {
         let result = result(func, &sides, self.c.options.arith, pos)?;
         let at = self.at(pos);
         let id = push(&mut self.plans.function, FunctionPlan { func, args, integer, side, refmod, arity, at }, "FUNCTION plans")?;
-        Ok((id, result))
+        Ok((rt::lir::Operand::Function(id), result))
     }
 
     /// `function_arguments`: each argument as it evaluates it, and a table written with ALL

@@ -1,6 +1,6 @@
 //! User-defined functions from the command line: `run` enters the program after the functions
 //! before it, `check` reports a function's own errors, a source of functions alone has nothing to
-//! run, and `compile` writes no module for a prototype and refuses a program that invokes one.
+//! run, and `compile` writes no module for a prototype and one for a program that invokes one.
 
 use std::fs;
 use std::path::PathBuf;
@@ -76,7 +76,7 @@ fn check_reports_a_functions_errors_and_a_source_of_functions_has_nothing_to_run
 }
 
 #[test]
-fn compile_writes_no_module_for_a_prototype_and_refuses_a_program_that_invokes_a_function() {
+fn compile_writes_no_module_for_a_prototype_and_one_for_a_program_that_invokes_a_function() {
     let dir = temp("compile");
     let prototype: Vec<&str> = DOUBLE.iter().map(|&l| if l == "FUNCTION-ID. DOUBLE." { "FUNCTION-ID. DOUBLE IS PROTOTYPE." } else { l }).filter(|l| !l.starts_with("    ")).collect();
     let functions = dir.join("DOUBLE.cbl");
@@ -85,10 +85,9 @@ fn compile_writes_no_module_for_a_prototype_and_refuses_a_program_that_invokes_a
     let modules: Vec<String> = fs::read_dir(dir.join("out")).map(|d| d.map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
     let program = dir.join("main.cbl");
     fs::write(&program, source(DOUBLE) + &source(MAIN)).unwrap();
-    let refused = ironwork(&["compile", program.to_str().unwrap(), "-o", dir.join("out2").to_str().unwrap()]);
+    let invoking = ironwork(&["compile", program.to_str().unwrap(), "-o", dir.join("out2").to_str().unwrap()]);
+    let written_too = dir.join("out2").join("main.iwm").is_file();
     fs::remove_dir_all(&dir).unwrap();
     assert_eq!((written.status.code(), modules), (Some(0), vec!["DOUBLE.iwm".to_owned()]), "{}", String::from_utf8_lossy(&written.stderr));
-    let stderr = String::from_utf8_lossy(&refused.stderr);
-    assert!(stderr.contains("an invocation of a user-defined function (FUNCTION-ID) is not lowered yet"), "{stderr}");
-    assert_eq!(refused.status.code(), Some(12));
+    assert_eq!((invoking.status.code(), written_too), (Some(0), true), "{}", String::from_utf8_lossy(&invoking.stderr));
 }

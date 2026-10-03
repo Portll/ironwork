@@ -299,6 +299,7 @@ impl Lower<'_> {
                 let p = self.place(r, false)?;
                 scale(self.kind_of(p))
             }
+            Expr::Operand(Operand::Function(f)) => self.user_defined(&f.name).map_or(0, |u| scale(u.result.kind)),
             Expr::Operand(_) => 0,
             Expr::Neg(inner) => self.dmax(inner)?,
             Expr::Bin(a, BinOp::Div | BinOp::Pow, _) => self.dmax(a)?,
@@ -331,6 +332,9 @@ impl Lower<'_> {
                 matches!(self.kind_of(p), Kind::Float(_))
             }
             Expr::Operand(Operand::Function(f)) => {
+                if let Some(udf) = self.user_defined(&f.name) {
+                    return Ok(matches!(udf.result.kind, Kind::Float(_)));
+                }
                 let name = f.name.as_str();
                 if rt::intrinsic::FLOATING_POINT.contains(&name) {
                     return Ok(true);
@@ -385,8 +389,8 @@ impl Lower<'_> {
                 Ok(Lowered { operand: lir::Operand::AddressOf(p), side: Side { value: Value::Address, src: None, digits: 0 } })
             }
             Operand::Function(f) => {
-                let (id, side) = self.function(f)?;
-                Ok(Lowered { operand: lir::Operand::Function(id), side })
+                let (operand, side) = self.function(f)?;
+                Ok(Lowered { operand, side })
             }
         }
     }

@@ -6,7 +6,7 @@
 //! CALL, CANCEL, ENTRY, INVOKE, SET, STRING, UNSTRING, INSPECT, SEARCH, ACCEPT, the file
 //! statements, intrinsic functions, independent segments, class definitions, USE AFTER
 //! EXCEPTION/ERROR, USE FOR DEBUGGING, JSON and XML GENERATE and PARSE, the EXEC blocks, SORT,
-//! MERGE, RELEASE and RETURN, and the Report Writer.
+//! MERGE, RELEASE and RETURN, the Report Writer, and user-defined functions.
 //! Anything else is [`LowerError::Unsupported`], naming the construct.
 
 mod call;
@@ -26,6 +26,7 @@ mod set;
 mod sort;
 mod sql;
 mod text;
+mod user_function;
 mod verify;
 
 #[cfg(test)]
@@ -115,6 +116,7 @@ pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
     l.unresolved_statuses()?;
     l.services.entries = l.entry_points()?;
     l.services.class = l.class_definition()?;
+    l.services.function = l.function_definition()?;
     let procedure_start = compiled.program.report_writer.procedure_start.min(compiled.program.paragraphs.len());
     let (blocks, debug) = l.blocks.finish()?;
     let program = lir::Program {

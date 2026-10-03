@@ -48,7 +48,7 @@ impl Lower<'_> {
             Expr::Operand(Operand::Load(p)) => self.read_tested(*p),
             Expr::Operand(Operand::LengthOf(p) | Operand::AddressOf(p)) => self.locate_tested(*p),
             Expr::Operand(Operand::Const(_)) => false,
-            Expr::Operand(Operand::Function(_)) => self.c.options.numcheck.is_some(),
+            Expr::Operand(Operand::Function(_) | Operand::UserFunction(_)) => self.c.options.numcheck.is_some(),
             Expr::Neg(a) => self.expr_tested(*a),
             Expr::Bin(a, _, b) => self.expr_tested(*a) || self.expr_tested(*b),
             Expr::Pow(a, n) => self.expr_tested(*a) || self.int_tested(n),

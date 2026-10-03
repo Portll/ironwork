@@ -1,8 +1,8 @@
 //! Control flow (lir.md §8.4, §9.10): the dispatch loop over blocks, the frames and return points
 //! of assumption C99, transfers, and a procedure a statement or a `Debug` runs in a loop of its own.
 
-use super::{Code, R, Vm, not_yet};
-use crate::abend::Ending;
+use super::{Code, Halt, R, Vm, not_yet};
+use crate::abend::{Abend, AbendCode, Ending, Signal};
 use crate::lir::{BlockId, DebugId, Frame, FrameKind, ParaId, RangeId, ReturnPoint, Step, Terminator};
 use crate::unit::{Event, Loader};
 use crate::vocab::Pos;
@@ -45,6 +45,12 @@ pub(super) enum Exit {
 enum Next {
     Block(BlockId),
     Exit(Exit),
+}
+
+/// STOP RUN in a user-defined function an op or a condition ran: the run ends there, as the
+/// walker's `exec` ends it at the statement holding the invocation.
+fn stops_run(halt: &Halt) -> bool {
+    matches!(halt, Halt::Abend(Abend { code: AbendCode::Signal(Signal::StopRun), .. }))
 }
 
 /// DEBUG-ITEM's DEBUG-LINE, DEBUG-NAME and DEBUG-CONTENTS: offset and length.
@@ -94,13 +100,18 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
                 if tracing {
                     told = self.statements_before(starts, told, k)?;
                 }
-                match self.op(op, id)? {
-                    Step::Next => {}
-                    Step::Arm(a) => arm = Some(a),
-                    step => {
+                match self.op(op, id) {
+                    Ok(Step::Next) => {}
+                    Ok(Step::Arm(a)) => arm = Some(a),
+                    Ok(step) => {
                         transfer = Some(step);
                         break;
                     }
+                    Err(halt) if stops_run(&halt) => {
+                        transfer = Some(Step::End(Ending::StopRun));
+                        break;
+                    }
+                    Err(halt) => return Err(halt),
                 }
             }
             if tracing && transfer.is_none() {
@@ -108,7 +119,10 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             }
             let next = match transfer {
                 Some(step) => self.transfer(step, floor)?,
-                None => self.terminator(&b.end, at[b.ops.len()], arm, floor)?,
+                None => match self.terminator(&b.end, at[b.ops.len()], arm, floor) {
+                    Err(halt) if stops_run(&halt) => Next::Exit(Exit::End(Ending::StopRun)),
+                    next => next?,
+                },
             };
             match next {
                 Next::Block(b) => block = b,

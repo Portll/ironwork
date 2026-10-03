@@ -127,7 +127,28 @@ fn a_by_value_parameter_is_a_copy() {
 fn stop_run_in_a_function_ends_the_run_at_the_statement_that_invoked_it() {
     let quit = function("QUIT", &[], &["01 R PIC X."], "RETURNING R", &["DISPLAY 'IN QUIT'", "STOP RUN."]);
     let main = program(&[], &["01 C PIC X."], &["MOVE FUNCTION QUIT TO C", "DISPLAY 'NOT REACHED'", "GOBACK."]);
-    assert_eq!(run(&(quit + &main)), ("IN QUIT\n".into(), Ok(Ending::StopRun)));
+    assert_eq!(run(&(quit.clone() + &main)), ("IN QUIT\n".into(), Ok(Ending::StopRun)));
+    for invoking in [&["IF FUNCTION QUIT = 'Y'", "    DISPLAY 'YES'", "END-IF"][..], &["PERFORM UNTIL FUNCTION QUIT = 'Y'", "    DISPLAY 'LOOP'", "END-PERFORM"]] {
+        let main = program(&[], &[], &[invoking, &["DISPLAY 'NOT REACHED'", "GOBACK."]].concat());
+        assert_eq!(run(&(quit.clone() + &main)), ("IN QUIT\n".into(), Ok(Ending::StopRun)), "{invoking:?}");
+    }
+}
+
+#[test]
+fn an_abend_in_a_function_names_its_source_and_a_program_is_no_function() {
+    let prototype = |head: &str| format!("       IDENTIFICATION DIVISION.\n       FUNCTION-ID. {head} IS PROTOTYPE.\n       DATA DIVISION.\n       LINKAGE SECTION.\n       01 R PIC X.\n       PROCEDURE DIVISION RETURNING R.\n       END FUNCTION {}.\n", head.split(' ').next().unwrap());
+    let library = temp("udf-abend");
+    std::fs::create_dir_all(&library).unwrap();
+    std::fs::write(library.join("BADF.cbl"), function("BADF", &[], &["01 R PIC X."], "RETURNING R", &["CALL 'NOSUCHPG'", "GOBACK."])).unwrap();
+    std::fs::write(library.join("PROG1.cbl"), "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROG1.\n       PROCEDURE DIVISION.\n           GOBACK.\n       END PROGRAM PROG1.\n").unwrap();
+    let run_in = |head: &str, name: &str| {
+        let main = program(&[], &["01 C PIC X."], &[&format!("MOVE FUNCTION {name} TO C"), "GOBACK."]);
+        Harness::source(&(prototype(head) + &main)).dirs(vec![library.clone()]).run(Executor::Interpreter).ending.unwrap_err()
+    };
+    let (bad, not_one) = (run_in("BADF", "BADF"), run_in("NOTFN AS 'PROG1'", "NOTFN"));
+    std::fs::remove_dir_all(&library).unwrap();
+    assert_eq!((&bad.code, bad.file.as_deref().is_some_and(|f| f.ends_with("BADF.cbl"))), (&AbendCode::ModuleNotFound, true), "{bad:?}");
+    assert_eq!(not_one.message, "FUNCTION NOTFN: PROG1 is a program, not a user-defined function");
 }
 
 #[test]
@@ -226,11 +247,27 @@ fn the_first_program_comes_ahead_of_the_functions_before_it_and_each_knows_those
 }
 
 #[test]
-fn an_invocation_is_not_lowered_yet() {
-    let source = wrap() + &program(&[], &[], &["DISPLAY FUNCTION WRAP('abc')", "GOBACK."]);
-    let compiled = compile(syntax::parse(&source).unwrap(), &[]).unwrap();
-    match lower::lower(&compiled) {
-        Err(lower::LowerError::Unsupported(what, _)) => assert_eq!(what, "an invocation of a user-defined function (FUNCTION-ID)"),
+fn an_invocation_lowers_to_a_plan_and_a_definition_names_its_records() {
+    use rt::lir::{Base, Comparand, DisplayItem, FunctionDefinition, Operand as LirOperand, UserArgument};
+    let bump = function("BUMP", &[], &["01 N PIC 9(4) COMP.", "01 R PIC 9(4) COMP."], "USING BY VALUE N RETURNING R", &["MOVE N TO R", "GOBACK."]);
+    let main = program(&[], &["01 W PIC X(3).", "01 K PIC 9(4) COMP."], &["DISPLAY FUNCTION WRAP(W) FUNCTION WRAP('xyz')(2:3)", "    FUNCTION BUMP(K)", "GOBACK."]);
+    let lowered: Vec<_> = syntax::parse_all_with(&[wrap(), bump, main].concat(), &Default::default()).unwrap().into_iter().map(|p| lower::lower(&compile(p, &[]).unwrap()).unwrap()).collect();
+    let [main, wrap, bump] = &lowered[..] else { panic!("{lowered:?}") };
+    let shown = &main.plans.display[0].items;
+    assert_eq!(shown, &[DisplayItem::Value(LirOperand::UserFunction(0)), DisplayItem::Value(LirOperand::UserFunction(1)), DisplayItem::Value(LirOperand::UserFunction(2))]);
+    let plans = &main.services.user_functions;
+    assert!(matches!(plans[0].args[..], [UserArgument::Reference(_)]) && plans[0].refmod.is_none());
+    assert!(matches!(plans[1].args[..], [UserArgument::Value(Comparand::Operand(LirOperand::Const(_)))]) && plans[1].refmod.as_ref().is_some_and(|r| !r.check));
+    assert!(matches!(plans[2].args[..], [UserArgument::Value(Comparand::Operand(LirOperand::Load(_)))]));
+    assert_eq!((main.symbols[plans[2].name as usize].as_str(), main.services.function.as_ref()), ("BUMP", None));
+    for f in [wrap, bump] {
+        let Some(FunctionDefinition { params, returning }) = &f.services.function else { panic!("{f:?}") };
+        let bases: Vec<Base> = params.iter().chain([returning]).map(|&q| f.places[q as usize].base).collect();
+        assert_eq!(bases, [Base::Linkage(0), Base::Linkage(1)]);
+    }
+    let odo = function("ODO", &[], &["01 R.", "   05 N PIC 9.", "   05 T PIC X OCCURS 1 TO 5 DEPENDING ON N."], "RETURNING R", &["GOBACK."]);
+    match lower::lower(&compile(syntax::parse(&odo).unwrap(), &[]).unwrap()) {
+        Err(lower::LowerError::Unsupported(what, _)) => assert_eq!(what, "a user-defined function's parameter or RETURNING record holding an OCCURS DEPENDING ON table"),
         other => panic!("{other:?}"),
     }
 }

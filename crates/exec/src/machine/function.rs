@@ -1,16 +1,10 @@
-//! Invoking a user-defined function: the arguments evaluated here, the function run as a CALLed
-//! program runs, and the value of its RETURNING item the invocation's value.
+//! Invoking a user-defined function: the arguments evaluated here, the function run as a callee
+//! through `rt::callee`, and the value of its RETURNING item the invocation's value.
 
 use super::*;
 use compile::function::Udf;
+use rt::callee::Bound;
 use std::rc::Rc;
-
-/// An argument as the function receives it: the address of the invoker's data item, or a value
-/// the function's own storage takes, in a temporary shaped as its formal parameter.
-enum Bound {
-    At(usize),
-    Value(Val),
-}
 
 impl<'p> Machine<'p, '_, '_> {
     pub(super) fn user_function(&self, name: &str) -> Option<&'p Udf> {
@@ -41,15 +35,15 @@ impl<'p> Machine<'p, '_, '_> {
             });
         }
         self.nest(pos)?;
-        let active = self.unit.programs[index].active;
         let mark = self.unit.mem.len();
         let read_before = self.unit.pending();
-        let outcome = run(&compiled, index, &mut *self.unit, &bound, pos);
-        self.unit.resume_statement(read_before);
-        self.unit.programs[index].active = active;
-        self.unit.release_temporaries(mark);
+        let (outcome, ()) = callee::run(self, &Callee { index, by: By::Function, mark: Some(mark), pos }, |m| {
+            let outcome = run(&compiled, index, &mut *m.unit, &bound, pos);
+            m.unit.resume_statement(read_before);
+            Ok::<_, Abend>((outcome, ()))
+        })?;
         self.unit.depth -= 1;
-        match outcome.map_err(|a| callee::in_loaded(self.unit, index, a))? {
+        match outcome? {
             (Ending::StopRun, _) => Err(Abend { code: AbendCode::Signal(Signal::StopRun), message: String::new(), pos, file: None }),
             (_, value) => Ok(value),
         }
@@ -61,16 +55,7 @@ impl<'p> Machine<'p, '_, '_> {
 fn run(compiled: &Rc<Compiled>, index: usize, unit: &mut RunUnit<'_>, bound: &[Bound], pos: Pos) -> R<(Ending, Val)> {
     let mut callee = Machine::activation(compiled, index, unit, false)?;
     let using = &compiled.program.using;
-    let mut addresses = Vec::with_capacity(bound.len());
-    for (param, b) in using.iter().zip(bound) {
-        addresses.push(Some(match b {
-            Bound::At(at) => *at,
-            Bound::Value(_) => {
-                let size = callee.record_size(&param.name);
-                callee.unit.push_temporary(&vec![0; size])
-            }
-        }));
-    }
+    let addresses = rt::callee::bound_addresses(callee.unit, bound, using.iter().map(|param| record_size(&compiled.layout, &param.name)));
     callee.bind_linkage(&[], using, &addresses, false);
     for (param, b) in using.iter().zip(bound) {
         if let Bound::Value(value) = b {
@@ -89,9 +74,9 @@ impl Machine<'_, '_, '_> {
     fn parameter(&mut self, name: &str, pos: Pos) -> R<Loc> {
         self.locate(&Ref { name: name.to_owned(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos })
     }
+}
 
-    fn record_size(&self, name: &str) -> usize {
-        let root = self.layout.linkage_roots.iter().find(|&&i| self.layout.items[i].name.as_deref() == Some(name));
-        root.map_or(0, |&i| self.layout.items[i].size as usize)
-    }
+fn record_size(layout: &Layout, name: &str) -> usize {
+    let root = layout.linkage_roots.iter().find(|&&i| layout.items[i].name.as_deref() == Some(name));
+    root.map_or(0, |&i| layout.items[i].size as usize)
 }

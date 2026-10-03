@@ -83,8 +83,8 @@ pub type DebugId = u32; pub type AbendId = u32; pub type TempId = u16;
 /// An `SqlEntry`'s ordinal (§9.7).
 pub type SqlId = u32;
 // And a `u32` id per plan or service table: ArithId, InitId, DisplayId, InspectId, StringId,
-// UnstringId, SearchAllId, FunctionId, FileOpId, CallId, SortId, ReleaseId, ReturnId, InvokeId,
-// CicsId, MarkupId.
+// UnstringId, SearchAllId, FunctionId, UserFunctionId, FileOpId, CallId, SortId, ReleaseId,
+// ReturnId, InvokeId, CicsId, MarkupId.
 
 /// One program, lowered. Methods and FACTORY or OBJECT data lower as programs too (§9.8).
 pub struct Program {
@@ -99,7 +99,8 @@ pub struct Program {
     pub plans: Plans,
     /// The FileOp, FileDesc, CallPlan, SortPlan, ReleasePlan, ReturnPlan, InvokePlan and
     /// CicsCommand tables, the Sqlca, the ENTRY points (§9.3), for a class definition its class
-    /// (§9.8), the declaratives' `Declaratives` (§9.10), the JSON and XML statements (§9.13), and
+    /// (§9.8), the UserFunctionPlan table and for a function definition its FunctionDefinition
+    /// (§9.15), the declaratives' `Declaratives` (§9.10), the JSON and XML statements (§9.13), and
     /// the report model `Op::Report` names (§9.6).
     pub services: Services,
     pub sql: Vec<SqlEntry>, pub abends: Vec<AbendText>, pub edits: Vec<Edit>,
@@ -336,6 +337,8 @@ pub enum Operand {
     /// NULL for a LINKAGE record with no address (machine.rs:946-955).
     AddressOf(PlaceId),
     Function(FunctionId),
+    /// An invocation of a user-defined function (§9.15).
+    UserFunction(UserFunctionId),
 }
 
 /// A literal, converted once, where `literal_value` converts it on every use (machine.rs:621-634).
@@ -1169,11 +1172,12 @@ unit.rs:150-171 (f2)).
   temporaries (machine.rs:973-1122). How a static CALL binds is load-module.md §8.3.
 - **PARMCHECK and NUMCHECK** run inside the op: the buffer is set after the arguments and tested
   after the callee returns, and a BY CONTENT or BY VALUE data item is tested as it is copied (§9.14).
-- **One sequence in `rt::callee`** for both executors, and for LINK, XCTL and INVOKE: `addresses`
-  builds the arguments, `Bindings` gives the callee's LINKAGE records their addresses, and `run`
-  wraps the executor's activation of the callee (inactive after, an INITIAL program a CALL entered
-  cancelled, temporaries released, an abend named by a library program's own files). CANCEL is
-  `rt::callee::cancel`. Each host trait reaches the run unit through `rt::unit::UnitHost`.
+- **One sequence in `rt::callee`** for both executors, and for LINK, XCTL, INVOKE and a user-defined
+  function's invocation (§9.15): `addresses` builds the arguments, `Bindings` gives the callee's
+  LINKAGE records their addresses, and `run` wraps the executor's activation of the callee
+  (inactive after, an INITIAL program a CALL entered cancelled, temporaries released, an abend
+  named by a library program's own files). CANCEL is `rt::callee::cancel`. Each host trait reaches
+  the run unit through `rt::unit::UnitHost`.
 
 ### 9.4 Files
 
@@ -2006,7 +2010,7 @@ item, as a place is keyed.
 
 | The walker's read | In the LIR | Tested |
 |---|---|---|
-| `operand` and `operand_with_loc` of a data item | `Operand::Load` read for its value: in an `Expr`; as a `Comparand` of `Cond::Sign`, of a FUNCTION's `Argument::Value` other than HEX-OF's, BIT-OF's and BYTE-LENGTH's, or of a report's SOURCE, SUM or CONTROL; `Op::Set`'s `from`; `SetAddress`, `Cancel`, `CallTarget::Dynamic`, `CallArg::Value`; `Chars::Value`, `Inspected::Value`; a markup statement's ENCODING, NAMESPACE and NAMESPACE-PREFIX; what the library reads through `Values::value` | At each read |
+| `operand` and `operand_with_loc` of a data item | `Operand::Load` read for its value: in an `Expr`; as a `Comparand` of `Cond::Sign`, of a FUNCTION's `Argument::Value` other than HEX-OF's, BIT-OF's and BYTE-LENGTH's, or of a report's SOURCE, SUM or CONTROL; `Op::Set`'s `from`; `SetAddress`, `Cancel`, `CallTarget::Dynamic`, `CallArg::Value`, `UserArgument::Value`; `Chars::Value`, `Inspected::Value`; a markup statement's ENCODING, NAMESPACE and NAMESPACE-PREFIX; what the library reads through `Values::value` | At each read |
 | `operand` of each element of a table written with ALL subscripts | `Argument::All`'s elements | At each element |
 | `integer`, through `eval_fixed` or `eval_float` | `IntExpr::Item` and the `Load`s of an `IntExpr::Fixed`, wherever they stand: a place's subscripts, OCCURS DEPENDING ON object and reference modification, so at each evaluation of the place, as each locate of the walker's tests them; a `Pow` exponent, `SetTemp`, `Switch`, `SetInt`, `SetUpDown`'s `by`, `Cond::InTable`'s index, `Count::Odo`, a FUNCTION's `integer` and `refmod`, LINAGE, RELATIVE KEY, START's KEY, ADVANCING, XML-CODE, a markup walk's subscripts; what the library reads through `Host::integer` | At each read |
 | `eval_fixed` of an ADD or SUBTRACT receiver's own value, and of PERFORM VARYING's variable | The receiver's read under `ArithPlan.per_receiver`; `Op::Step`'s `var` | At each read |
@@ -2068,6 +2072,60 @@ argument that is a data item: `Reference`, `Content(Chars::Place)` and `Value(Lo
 | A service through a pointer | Before the arguments | After the service returns, with no arguments. The pointer as written |
 
 A CALL that abends or finds no program is not tested, and INVOKE has no PARMCHECK.
+
+### 9.15 User-defined functions
+
+```rust
+/// In `Services.user_functions`, which `Operand::UserFunction` names. `name` is the function-name
+/// as written, which messages give; `external` finds the definition.
+pub struct UserFunctionPlan {
+    pub name: SymId, pub external: SymId, pub args: Vec<UserArgument>,
+    pub refmod: Option<RefMod>, pub at: DebugId,
+}
+pub enum UserArgument { Reference(PlaceId), Value(Comparand) }
+/// `Services.function` of a function definition (FUNCTION-ID without IS PROTOTYPE): a place for
+/// each formal parameter's LINKAGE record, in order, and one for the RETURNING record.
+pub struct FunctionDefinition { pub params: Vec<PlaceId>, pub returning: PlaceId }
+```
+
+`Machine::invoke_function` (exec/src/machine/function.rs) and `rt::vm`'s `user_function` run the
+same sequence when the operand is evaluated (assumption C274):
+
+1. **The definition** is loaded by `external` as a static CALL loads a program
+   (`RunUnit::load_entry`). None has the name: S806 "FUNCTION F: its definition, X, is in neither
+   the source nor the program libraries". The program found is not a definition, or is the run
+   unit's first program: IRONWORK "FUNCTION F: X is a program, not a user-defined function". A
+   definition that does not lower stops the VM.
+2. **Each argument**, in order. A data item whose formal parameter is not BY VALUE is `Reference`:
+   located, its address passed, a reference-modified item at its first byte (C272). Any other, a
+   BY VALUE item, a literal, an expression, LENGTH OF, ADDRESS OF or a function, is `Value`: the
+   `Comparand` `expr_value` evaluates, a nested intrinsic function's arguments in their own
+   arithmetic whatever arithmetic holds the invocation.
+3. **The depth** is raised (§8.7), then `rt::callee::run` with `By::Function` wraps the
+   activation, taint's pending read taken before it and resumed after it
+   (`RunUnit::resume_statement`), since the function's statements start inside the invoking one.
+4. **The activation**: the function's storage as a CALL gives it; each formal parameter given its
+   argument's address, or a temporary of zeros the size of its record (`rt::callee::Bound`,
+   `bound_addresses`); the USING records bound; each `Value` moved into its parameter by MOVE
+   rules, located through `FunctionDefinition.params`, with the function's facts and the
+   invocation's position; the RETURNING record given a temporary; the procedure run; and the
+   RETURNING item located through `FunctionDefinition.returning` and read, after STOP RUN too.
+5. **After it** the program's `active` flag is what it was before, since functions are recursive;
+   the temporaries pushed since the arguments are released; an abend is named by the function's own
+   files; the depth is lowered.
+6. **STOP RUN** in the function abends `Signal::StopRun` at the invocation, and the run ends at the
+   statement holding it: the walker's `exec` takes the signal, and the VM's dispatch loop takes it
+   from an op or a terminator's condition as `End(StopRun)`.
+7. **The value** is reference-modified last, by `refmod`, checked whatever SSRANGE says.
+
+- **The value reads as** the RETURNING item's description (`compile::function::Formal`) reads: a
+  number with its decimal places and its digits, PICTURE scaling positions counted; a float;
+  alphanumeric or national bytes; an address. The description gives the dmax pass and the float
+  test the invocation's kind (`Machine::operand_kind`, `is_floating_point`) without running it.
+- **The definition's places** are the records the PROCEDURE DIVISION header names, with no
+  subscripts, as `Machine::parameter` and `returned` locate them by name. Lowering refuses a record
+  holding an OCCURS DEPENDING ON table: locating it reads the count and may abend at the
+  invocation's position, which the definition does not know.
 
 ## 10. The debug table
 
@@ -2200,11 +2258,12 @@ runs something taint does not follow calls `RunUnit::unfollowed`, as the walker 
 The fuzz target of B2 runs both with a step limit, and passes when they agree or both stop at it.
 The golden programs of §12.2 run in both, which exercises C99.
 
-**What runs now.** `rt::vm` runs the core: storage, every data op, conditions, control flow and
-CALL within the run unit; the file statements with LINAGE and their USE AFTER EXCEPTION/ERROR
-procedures, SORT, MERGE, RELEASE and RETURN with their procedures, and the Report Writer with its
-USE BEFORE REPORTING procedures, each a host of the `rt` service the walker calls; JSON and XML
-GENERATE and PARSE; EXEC SQL; and EXEC CICS in a task (`rt::vm::run_task`), LINK and XCTL included.
+**What runs now.** `rt::vm` runs the core: storage, every data op, conditions, control flow, and
+CALL and user-defined functions within the run unit; the file statements with LINAGE and their USE
+AFTER EXCEPTION/ERROR procedures, SORT, MERGE, RELEASE and RETURN with their procedures, and the
+Report Writer with its USE BEFORE REPORTING procedures, each a host of the `rt` service the walker
+calls; JSON and XML GENERATE and PARSE; EXEC SQL; and EXEC CICS in a task (`rt::vm::run_task`),
+LINK and XCTL included.
 LE callable services, the virtual printer, OO COBOL, NUMCHECK and PARMCHECK stop a run as
 `Halt::Unimplemented`, naming what was reached, and so do FUNCTION UUID4, whose value differs on
 every run, the CICS cases of §9.5, and the few places where the LIR does not keep what decides the

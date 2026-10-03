@@ -95,3 +95,27 @@ fn after_an_operation_taint_does_not_follow_a_clear_sink_is_unknown() {
     let shown = at("DISPLAY K");
     assert_eq!(sinks(&source, ""), [(shown[0], Some(false)), (shown[1], None)]);
 }
+
+#[test]
+fn a_function_s_value_carries_input_and_its_statements_leave_what_the_invoking_one_read() {
+    let function = |name: &str, linkage: &str, header: &str, body: &str| {
+        format!("       IDENTIFICATION DIVISION.\n       FUNCTION-ID. {name}.\n       DATA DIVISION.\n       LINKAGE SECTION.\n{linkage}       PROCEDURE DIVISION {header}.\n{body}       END FUNCTION {name}.\n")
+    };
+    let echoed = function("ECHOED", "       01  W PIC X(8).\n       01  R PIC X(8).\n", "USING W RETURNING R", &[line("MOVE W TO R"), line("GOBACK.")].concat());
+    let constant = function("CONSTANT", "       01  R PIC X(4).\n", "RETURNING R", &[line("MOVE 'SAFE' TO R"), line("GOBACK.")].concat());
+    let body = [
+        line("ACCEPT A"),
+        line("DISPLAY 'READ ' A FUNCTION CONSTANT"),
+        line("DISPLAY 'NONE ' FUNCTION CONSTANT"),
+        line("MOVE FUNCTION ECHOED(A) TO B"),
+        line("MOVE FUNCTION ECHOED('CLEAN') TO C"),
+        line("DISPLAY 'B ' B"),
+        line("DISPLAY 'C ' C"),
+        line("GOBACK."),
+    ]
+    .concat();
+    let source = [echoed, constant, program("", DATA, &body)].concat();
+    let at = |text: &str| line_of(&source, text);
+    let expected = [(at("'READ '"), Some(true)), (at("'NONE '"), Some(false)), (at("'B '"), Some(true)), (at("'C '"), Some(false))];
+    assert_eq!(sinks(&source, "ATTACK\n"), expected);
+}

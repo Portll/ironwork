@@ -17,7 +17,7 @@ mod text;
 mod value;
 
 pub use arith::{ArithPlan, ArithStep, Mode, RemainderPlan, StepPlan, StorePlan, UpDown};
-pub use call::{CallArg, CallPlan, CallTarget, EntryPoint, LeService};
+pub use call::{CallArg, CallPlan, CallTarget, EntryPoint, FunctionDefinition, LeService, UserArgument, UserFunctionPlan};
 pub use class::{Class, ClassPart, Method};
 pub use collating::{Collating, Sequence};
 pub use debug::Debug;
@@ -71,6 +71,7 @@ pub type StringId = u32;
 pub type UnstringId = u32;
 pub type SearchAllId = u32;
 pub type FunctionId = u32;
+pub type UserFunctionId = u32;
 pub type FileOpId = u32;
 pub type CallId = u32;
 pub type SortId = u32;
@@ -251,6 +252,10 @@ pub struct Services {
     pub entries: Vec<EntryPoint>,
     /// A class definition's data and methods; None for any other program.
     pub class: Option<Box<Class>>,
+    /// The invocations of user-defined functions, by `Operand::UserFunction`.
+    pub user_functions: Vec<UserFunctionPlan>,
+    /// A user-defined function's definition; None for any other program.
+    pub function: Option<FunctionDefinition>,
     pub declaratives: Declaratives,
     /// JSON GENERATE, JSON PARSE, XML GENERATE and XML PARSE, by `Op::Markup`.
     pub markup: Vec<Markup>,
@@ -276,7 +281,9 @@ codec_struct!(AbendText { code, message, at });
 codec_struct!(Paragraph { name, is_section, entry, section_end, priority, at, abandoned });
 codec_struct!(Block { ops, end });
 codec_struct!(Plans { arith, init, display, inspect, string, unstring, search_all, function });
-codec_struct!(Services { file_ops, files, calls, sorts, releases, returns, invokes, cics, sqlca, entries, class, declaratives, markup, report });
+codec_struct!(Services {
+    file_ops, files, calls, sorts, releases, returns, invokes, cics, sqlca, entries, class, user_functions, function, declaratives, markup, report,
+});
 
 pub(crate) fn program_valid(program: &Program) -> Result<(), String> {
     sql::table_valid(&program.sql, &program.symbols)

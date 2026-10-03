@@ -1,8 +1,9 @@
-//! The VM (codegen-runtime.md §14, step 3): runs a lowered program, and the programs it CALLs, over
-//! the run unit, calling the semantics library the interpreter calls with the `Loc`s and values the
-//! interpreter would pass, so the two agree by construction. Control follows lir.md §8: frames and
-//! return points per activation (assumption C99), a dispatch loop over blocks, and Rust recursion
-//! for CALL and for a procedure a statement runs, bounded by `MAX_DEPTH` as the interpreter is.
+//! The VM (codegen-runtime.md §14, step 3): runs a lowered program, and the programs and functions
+//! it calls, over the run unit, calling the semantics library the interpreter calls with the `Loc`s
+//! and values the interpreter would pass, so the two agree by construction. Control follows lir.md
+//! §8: frames and return points per activation (assumption C99), a dispatch loop over blocks, and
+//! Rust recursion for CALL, a user-defined function and a procedure a statement runs, bounded by
+//! `MAX_DEPTH` as the interpreter is.
 //! What this slice does not run stops the run as [`Halt::Unimplemented`], never as an abend.
 
 mod arith;
@@ -11,6 +12,7 @@ mod cics;
 mod cond;
 mod files;
 mod flow;
+mod function;
 mod markup;
 mod oo;
 mod ops;

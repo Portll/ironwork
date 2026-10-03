@@ -4,9 +4,9 @@
 
 use rt::cics::Handles;
 use rt::lir::{
-    Advance, Argument, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Const, Convert, ConvertTable, Count, DisplayItem, Inspected, Expr, FileVerb, Flag, Func, HostPlace, IntExpr,
+    Advance, Argument, Base, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Const, Convert, ConvertTable, Count, DisplayItem, Inspected, Expr, FileVerb, Flag, Func, HostPlace, IntExpr,
     JsonValue, Marker, Markup, MethodName, MovePlan, Named, Op, Operand, ParseValue, Place, PlaceId, Program, RangeKind, Receiver, Replacement, ReportOp, SenderCheck, SetTo, SortIo, SortPlan,
-    SqlStatement, StartKey, StorePlan, SymId, Terminator, UpDown, XmlValue,
+    SqlStatement, StartKey, StorePlan, SymId, Terminator, UpDown, UserArgument, XmlValue,
 };
 use rt::report::{FieldContent, GroupKind, Origin};
 
@@ -80,6 +80,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
         Operand::Load(q) | Operand::LengthOf(q) | Operand::AddressOf(q) => place(q),
         Operand::Const(c) => within("constant", c, p.consts.len()),
         Operand::Function(f) => within("function plan", f, p.plans.function.len()),
+        Operand::UserFunction(f) => within("user-defined function invocation", f, p.services.user_functions.len()),
     };
     let comparand = |c: &Comparand| match c {
         Comparand::Operand(o) => operand(o),
@@ -380,6 +381,31 @@ fn verify_program(p: &Program) -> Result<(), String> {
         if let Some((q, java)) = i.returning {
             place(q)?;
             symbol(java)?;
+        }
+    }
+    for u in &p.services.user_functions {
+        symbol(u.name)?;
+        symbol(u.external)?;
+        for a in &u.args {
+            match a {
+                UserArgument::Reference(q) => place(*q)?,
+                UserArgument::Value(c) => comparand(c)?,
+            }
+        }
+        if let Some(r) = &u.refmod {
+            int(&r.start)?;
+            r.length.as_ref().map_or(Ok(()), int)?;
+            if r.check {
+                return Err("a user-defined function's reference modification with an SSRANGE check".into());
+            }
+        }
+        within("debug entry", u.at, p.debug.positions.len())?;
+    }
+    if let Some(f) = &p.services.function {
+        let record = |q: PlaceId| p.places.get(q as usize).map(|q| q.base);
+        let using: Vec<_> = p.storage.using.iter().map(|&o| Some(Base::Linkage(o))).collect();
+        if f.params.iter().map(|&q| record(q)).ne(using) || record(f.returning) != p.storage.returning.map(Base::Linkage) {
+            return Err("a function definition whose places are not its USING and RETURNING records".into());
         }
     }
     for c in &p.services.cics {

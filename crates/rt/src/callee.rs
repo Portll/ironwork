@@ -1,8 +1,9 @@
-//! A program run within the run unit, as CALL, LINK, XCTL and INVOKE run one: the addresses a USING
-//! phrase passes, the LINKAGE records they bind, and what happens around the callee's run, whose
-//! activation and procedure are the executor's. CANCEL, which undoes what a run leaves, is here too.
+//! A program run within the run unit, as CALL, LINK, XCTL, INVOKE and a user-defined function's
+//! invocation run one: the addresses a USING phrase passes, the LINKAGE records they bind, and what
+//! happens around the callee's run, whose activation and procedure are the executor's. CANCEL,
+//! which undoes what a run leaves, is here too.
 
-use crate::abend::{Abend, Ending};
+use crate::abend::Abend;
 use crate::fixed::{align, zoned_digits};
 use crate::host::{Host, Values};
 use crate::lir::{CallArg, Chars};
@@ -166,6 +167,9 @@ pub enum By {
     /// gives it on each one.
     Link,
     Invoke,
+    /// A user-defined function's invocation. Functions are recursive, so the program stays active
+    /// after one when an activation of it was running before.
+    Function,
 }
 
 /// A loaded program run as a callee.
@@ -182,16 +186,18 @@ pub struct Callee {
 /// Runs program `callee.index`: `run` activates it, binds its LINKAGE, runs its procedure and reads
 /// what it returns, giving how the run ended with that. An error `run` gives comes before the
 /// callee ran or after it ended, and leaves it as it is. Once it has returned the program is
-/// inactive, an INITIAL program a CALL entered is cancelled, the temporaries since `mark` are
-/// released, and an abend that ended it names its files. The caller passes STOP RUN up.
-pub fn run<'w, X: UnitHost<'w>, T, E: From<Abend>>(x: &mut X, callee: &Callee, run: impl FnOnce(&mut X) -> Result<(R<Ending>, T), E>) -> Result<(R<Ending>, T), E> {
+/// inactive (a function stays active while an earlier activation of it runs), an INITIAL program a
+/// CALL entered is cancelled, the temporaries since `mark` are released, and an abend that ended it
+/// names its files. The caller passes STOP RUN up.
+pub fn run<'w, X: UnitHost<'w>, O, T, E: From<Abend>>(x: &mut X, callee: &Callee, run: impl FnOnce(&mut X) -> Result<(R<O>, T), E>) -> Result<(R<O>, T), E> {
     let index = callee.index;
     if callee.by == By::Link {
         x.unit().programs[index].initialized = false;
     }
+    let active = x.unit().programs[index].active;
     let (ending, value) = run(x)?;
     let unit = x.unit();
-    unit.programs[index].active = false;
+    unit.programs[index].active = callee.by == By::Function && active;
     if callee.by == (By::Call { initial: true }) {
         cancel_program(unit, index, callee.pos)?;
     }
@@ -200,6 +206,29 @@ pub fn run<'w, X: UnitHost<'w>, T, E: From<Abend>>(x: &mut X, callee: &Callee, r
     }
     // A method's abend is named by its class's source table, which its INVOKE fills.
     Ok((ending.map_err(|a| if callee.by == By::Invoke { a } else { in_loaded(unit, index, a) }), value))
+}
+
+/// A user-defined function's argument as its activation takes it: the address of the invoker's
+/// data item, or a value the function's own storage takes (assumption C272).
+#[derive(Clone, Debug)]
+pub enum Bound {
+    At(usize),
+    Value(Val),
+}
+
+/// Each formal parameter's address, for arguments `bound` and the parameters' record sizes: an
+/// item's own, or a temporary of zeros the activation then moves the value into.
+pub fn bound_addresses<H: Clone, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, bound: &[Bound], sizes: impl Iterator<Item = usize>) -> Vec<Option<usize>> {
+    bound
+        .iter()
+        .zip(sizes)
+        .map(|(b, size)| {
+            Some(match b {
+                Bound::At(at) => *at,
+                Bound::Value(_) => unit.push_temporary(&vec![0; size]),
+            })
+        })
+        .collect()
 }
 
 /// An abend from program `index` named by that program's files, which a caller's file table would

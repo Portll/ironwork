@@ -1,7 +1,8 @@
-//! CALL and the LE callable services behind it, and the ENTRY points a CALL enters (lir.md §9.3).
-//! CANCEL is `Op::Cancel`.
+//! CALL and the LE callable services behind it, and the ENTRY points a CALL enters (lir.md §9.3);
+//! invoking a user-defined function, and what its definition gives an invocation (§9.15). CANCEL
+//! is `Op::Cancel`.
 
-use super::{BlockId, Chars, Operand, ParaId, PlaceId, SymId};
+use super::{BlockId, Chars, Comparand, DebugId, Operand, ParaId, PlaceId, RefMod, SymId};
 use crate::{codec_enum, codec_struct};
 
 /// The op returns Arm(0) after a normal return, Arm(1) when no program has the name and ON
@@ -67,7 +68,39 @@ pub enum LeService {
     Ceeutc,
 }
 
+/// An invocation of a user-defined function, `Operand::UserFunction`: its definition is loaded by
+/// `external`, `name` as written naming it in messages; each argument is evaluated in turn; the
+/// function runs as a callee (`rt::callee::By::Function`); its value is its RETURNING item's,
+/// reference-modified last by `refmod`, which is checked whatever SSRANGE says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UserFunctionPlan {
+    pub name: SymId,
+    pub external: SymId,
+    pub args: Vec<UserArgument>,
+    pub refmod: Option<RefMod>,
+    pub at: DebugId,
+}
+
+/// A data item passed BY REFERENCE passes its address. Any other argument passes its value, which
+/// the function's activation moves into a temporary its formal parameter describes (C272).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UserArgument {
+    Reference(PlaceId),
+    Value(Comparand),
+}
+
+/// A user-defined function's definition: a place naming each formal parameter's whole LINKAGE
+/// record, in order, and one naming the RETURNING record.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FunctionDefinition {
+    pub params: Vec<PlaceId>,
+    pub returning: PlaceId,
+}
+
 codec_struct!(CallPlan { target, args, returning, on_exception, not_on_exception });
+codec_struct!(UserFunctionPlan { name, external, args, refmod, at });
+codec_enum!(UserArgument { Reference(place) = 0, Value(value) = 1 });
+codec_struct!(FunctionDefinition { params, returning });
 codec_enum!(CallTarget { Named { name, le } = 0, Dynamic(name) = 1, Pointer(place) = 2 });
 codec_enum!(CallArg { Reference(place) = 0, Content(chars) = 1, Value(value) = 2, Omitted = 3 });
 codec_struct!(EntryPoint { name, paragraph, block, using });
