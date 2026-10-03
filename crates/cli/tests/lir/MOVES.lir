@@ -1,0 +1,67 @@
+program MOVES start MAIN
+paragraph 0 MAIN  @17:8
+b0:
+    statement 18:12
+    Arith C <- (A * B) + 1 [zoned S9(7)V9(2), rounded] {dmax 3, size error}
+    Select b1 b2
+b1:
+    Jump b3
+b2:
+    statement 19:30
+    Display 'TOO BIG'
+    Jump b3
+b3:
+    Jump b4
+b4:
+    statement 21:12
+    Arith C <- A / B [zoned S9(7)V9(2)]; remainder B <- A / B [zoned 9(3), quotient scale 2] {dmax 2, per receiver}
+    Jump b5
+b5:
+    statement 22:12
+    Move NAME <- 'HELLO' [alnum]
+    Jump b6
+b6:
+    statement 23:12
+    Move E(I) <- NAME(2:3) [alnum]
+    Jump b7
+b7:
+    statement 24:12
+    Move AMT OF OUT-REC <- AMT OF IN-REC [numeric value to zoned 9(5)]
+    Jump b8
+b8:
+    statement 25:12
+    Move C <- ZERO [numeric zero to zoned S9(7)V9(2)]
+    Jump b9
+b9:
+    statement 26:12
+    Arith B <- B + 1 [zoned 9(3)] {dmax 0, per receiver}
+    Jump b10
+b10:
+    statement 27:12
+    Display 'C=', C, ' ', NAME
+    Jump b11
+b11:
+    statement 28:12
+    End stop-run
+b12:
+    ParagraphEnd next end  @17:8
+place p0 C program+16 len 9 zoned S9(7)V9(2)  @18:20
+place p1 A program+0 len 4 packed S9(5)V9(2)  @18:32
+place p2 B program+8 len 3 zoned 9(3)  @18:36
+place p3 C program+16 len 9 zoned S9(7)V9(2)  @21:35
+place p4 A program+0 len 4 packed S9(5)V9(2)  @21:26
+place p5 B program+8 len 3 zoned 9(3)  @21:47
+place p6 B program+8 len 3 zoned 9(3)  @21:19
+place p7 NAME program+32 len 10 alnum  @22:28
+place p8 I program+64 len 1 zoned 9(1)  @23:32
+place p9 E(I) program+48 len 2 alnum stride 2  @23:30
+place p10 NAME(2:3) program+32 len 10 alnum  @23:17
+place p11 AMT OF OUT-REC program+80 len 5 zoned 9(5)  @24:34
+place p12 AMT OF IN-REC program+72 len 3 zoned 9(3)  @24:17
+place p13 C program+16 len 9 zoned S9(7)V9(2)  @25:25
+place p14 B program+8 len 3 zoned 9(3)  @26:21
+place p15 C program+16 len 9 zoned S9(7)V9(2)  @27:25
+place p16 NAME program+32 len 10 alnum  @27:31
+const c0 1
+const c1 'HELLO'
+const c2 ZERO

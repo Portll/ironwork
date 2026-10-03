@@ -1,0 +1,33 @@
+program CALLS start MAIN
+paragraph 0 MAIN  @9:8
+b0:
+    statement 10:12
+    Call 'SUB1' using AMOUNT, content 'ABC', value RESULT {on exception}
+    Select b1 b2
+b1:
+    Jump b3
+b2:
+    statement 11:29
+    Display 'NO SUB1'
+    Jump b3
+b3:
+    Jump b4
+b4:
+    statement 13:12
+    Call PGM using AMOUNT returning RESULT
+    Jump b5
+b5:
+    statement 14:12
+    Cancel PGM
+    Jump b6
+b6:
+    statement 15:12
+    End goback
+b7:
+    ParagraphEnd next end  @9:8
+place p0 AMOUNT program+8 len 3 packed S9(5)  @10:30
+place p1 RESULT program+16 len 4 binary S9(9)  @10:63
+place p2 PGM program+0 len 8 alnum  @13:17
+place p3 AMOUNT program+8 len 3 packed S9(5)  @13:40
+place p4 RESULT program+16 len 4 binary S9(9)  @13:57
+place p5 PGM program+0 len 8 alnum  @14:19

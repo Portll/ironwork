@@ -32,14 +32,15 @@ every source's programs go into NAME.iwm under `--bundle NAME`. A program loweri
 named with the construct and its position, and its source writes nothing. The same source,
 libraries and options give the same bytes from any process or directory; a program that uses
 FUNCTION WHEN-COMPILED holds the compile time, SOURCE_DATE_EPOCH's when it is set. `dump` prints a
-module one fact per line, in section order, and exits 1 for a damaged one. `run program.iwm` runs a
-module's first program on the VM of [docs/codegen-runtime.md](docs/codegen-runtime.md) with the
-options it was compiled with, CALL finding programs in the module first, then as `NAME.iwm` or
-source in the program libraries; `cics program.iwm` runs it as the first program of a CICS task.
-Each writes the `--coverage` report and the `--evidence` journal a run of the source writes, from
-the paragraphs, lines, source files and digests the module records
-([docs/load-module.md](docs/load-module.md) §8.2, §9.2); a module refuses the compile flags and
-`--provenance`, which describe a compile, with 246 (usage).
+module one fact per line, in section order, and exits 1 for a damaged one; each program's generated
+code prints as a listing of its blocks, one op to a line with data names and source positions
+([docs/lir.md](docs/lir.md) §13). `run program.iwm` runs a module's first program on the VM of
+[docs/codegen-runtime.md](docs/codegen-runtime.md) with the options it was compiled with, CALL
+finding programs in the module first, then as `NAME.iwm` or source in the program libraries;
+`cics program.iwm` runs it as the first program of a CICS task. Each writes the `--coverage` report
+and the `--evidence` journal a run of the source writes, from the paragraphs, lines, source files
+and digests the module records ([docs/load-module.md](docs/load-module.md) §8.2, §9.2); a module
+refuses the compile flags and `--provenance`, which describe a compile, with 246 (usage).
 
 CBL and PROCESS cards set the options. COPY members are found in the program's own directory, then
 each `-I` library: a copybook (`.cpy`, `.copy`) in any of them before a program source (`.cbl`,

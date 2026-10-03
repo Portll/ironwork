@@ -30,7 +30,7 @@ checkout), which has SORT and MERGE, LE callable services, Report Writer and OO 
 - **Both executors read the same plans.** Plans are compile-time data in `rt`. The VM executes them,
   and step 2 changes the walker to read them too, so the two cannot choose differently.
 - **Lowering never changes a result.** Where the walker's order of locates, reads, stores and
-  abends is observable, the LIR keeps it. A change of behaviour is an open question (§13).
+  abends is observable, the LIR keeps it. A change of behaviour is an open question (§14).
 
 ## 2. Ubiquitous language
 
@@ -2406,7 +2406,8 @@ executors and recorded.
   le/tests.rs use, lowers each program after it compiles it and before it runs it: the program it
   runs, and each program of the run unit's library, compiled as a CALL would compile it. A lowered
   program must pass `verify`, come back equal from the load-module codec and encode again to the
-  same bytes, and lower again the same; any other `LowerError`, or a panic, fails the test and
+  same bytes, print (§13) with every reference resolved and the same once decoded, and lower again
+  the same; any other `LowerError`, or a panic, fails the test and
   names the program. While step 2 is under way `Unsupported` is accepted, and the check never
   changes a test's outcome otherwise. A test in lower/tests.rs puts bench/*.cbl through the same
   check. So do the helpers of machine/sql.rs's tests, `run_flagged` in tests/sort.rs, and the test
@@ -2420,11 +2421,17 @@ executors and recorded.
 - **A verifier passes** on every lowered program, checking invariants 3 to 6. It runs inside `lower`
   in debug builds, and on every program the module reader decodes, since a module is untrusted input
   (load-module.md §4.8).
-- **Golden LIR.** A text printer for `Program`, which `ironwork dump` also uses, and snapshot tests
-  of small programs: PERFORM A THRU C with a GO TO out; overlapping ranges; EXIT SECTION past a
-  range's end; a subscripted, reference-modified item under SSRANGE and without it; COMPUTE ROUNDED
-  with ON SIZE ERROR; an ADD to two subscripted receivers whose second subscript is out of range; an
-  88 with THRU and several values; each MOVE row of §9.2; WHENEVER with two GO TOs.
+- **Golden LIR.** cli/tests/iwm.rs compiles each program of cli/tests/lir and compares the LIR
+  section of its dump, the listing of §13, with NAME.lir beside it; `IRONWORK_BLESS=1` writes the
+  listings instead. They hold COMPUTE ROUNDED with ON SIZE ERROR, DIVIDE with REMAINDER, MOVE of a
+  subscripted, a reference-modified and a qualified item (MOVES); PERFORM TIMES, VARYING and THRU,
+  IF with an 88, EVALUATE with GO TO (FLOW); CALL BY REFERENCE, CONTENT and VALUE with ON
+  EXCEPTION, CALL of an identifier with RETURNING, and CANCEL (CALLS); OPEN, READ AT END, WRITE
+  FROM with ADVANCING, and CLOSE (FILES); EXEC SQL under WHENEVER (SQLWHEN); EXEC CICS HANDLE
+  CONDITION, READ with RESP, SEND TEXT and RETURN (CICSREAD). Not written yet: PERFORM A THRU C
+  with a GO TO out, overlapping ranges, EXIT SECTION past a range's end, SSRANGE, an ADD to two
+  subscripted receivers whose second subscript is out of range, an 88 with THRU, and each MOVE row
+  of §9.2.
 - **Determinism.** Lowering each test program twice gives equal LIR.
 
 ### 12.3 The differential test
@@ -2488,7 +2495,89 @@ this) and a program past an encoding limit (`lowering: WHAT exceeds N`, such as 
 ops; layout already refuses storage over 128 MiB, layout.rs:108-109). Everything the walker refuses
 only on reaching it lowers to an `Abend` op (decision 2).
 
-## 13. Open questions
+## 13. The printed form
+
+`rt::lir::Listing` prints a program's code as text, for `ironwork dump` (load-module.md §11) and any
+other tool; `Program`'s `Display` is its listing. A listing reads the LIR section's fields (`Code`)
+and, where it has them, the item table to qualify data names, the debug table for positions, the
+SQL table for each `Sql` op's statement, and the CCSID literals are decoded in. `dump` takes each
+from its own section and leaves out any that does not decode. Nothing parses a listing back.
+
+- **Deterministic.** The same program prints the same bytes: no address, path or time, and only
+  ordered tables are walked.
+- **Line-oriented.** A header, the ranges, then every block in order with one op or terminator to a
+  line, each paragraph's line before its entry block, then the tables the ops name. A class
+  definition's data and methods follow, each a listing of its own after a `class` line.
+- **Exhaustive.** `op` and `terminator` match every variant with no `_` arm, so an op added to the
+  LIR does not compile until it has a printed form.
+
+```text
+listing    = header {range} {[paragraph] block} {table} [class]
+header     = "program " NAME [" start " PARA] [" initial"] [" recursive"]
+range      = "range r" N " " KIND " " PARA [" thru " PARA]
+paragraph  = "paragraph " N " " NAME [" section thru " PARA] [" priority " N] [" abandoned a" N] ["  @" POS]
+block      = "b" N ":" NL {"    statement " POS NL | "    " OP ["  @" POS] NL} "    " TERMINATOR ["  @" POS] NL
+OP         = VARIANT {" " OPERAND} [" [" STORE "]"] [" {" ATTRS "}"]
+table      = ("place" | "const" | "abend" | "file" | "entry" | "init" | "sqlca" | "declaratives"
+              | "scope" | "function" | "report" | "markup") " " ...
+POS        = LINE ":" COL | MEMBER ":" LINE ":" COL
+```
+
+- **Names.** An op or terminator is named by its `Op` or `Terminator` variant. A place prints as the
+  reference was written: its data name, `OF` its parents where another item has the name, its
+  subscripts and reference modification (`E(I)`, `NAME(2:3)`, `AMT OF OUT-REC`). A paragraph prints
+  by name, `P OF S` where several have it; a block as `bN`, a range as `rN` with its paragraphs, a
+  TIMES counter as `tN`, an abend as `aN`, which the `abend` table gives code and message for.
+- **Values.** An alphanumeric literal decodes in the program's code page, `'HELLO'`, or else prints
+  as `X'C8C5'`; national is `N'...'`; a number prints with every decimal place it holds; a
+  figurative constant by its name. Expressions are infix, an operation inside another in
+  parentheses; a condition is a relation with its `Compare` branch in brackets.
+- **Brackets and braces.** `TO <- FROM` stores; `[...]` after it is how the value moves or is
+  stored (`MovePlan`, `StorePlan`, `StepPlan`); `{...}` after an op or an expression is how it is
+  evaluated (dmax, floating point, prepass) and the phrases written (size error, on exception, at
+  end).
+- **Positions.** A `statement` line marks each statement start of `Debug.statements`. An op or a
+  terminator other than `Jump` and `Select` shows `@POS` where its position differs from the
+  statement in effect in its block. A COPY member's position names the member.
+- **Damaged input.** Text that is not one printable word prints in double quotes with escapes, so
+  a line never breaks. A reference to an entry its table lacks prints its id with `?` (`p12?`), and
+  references that loop stop at `...`.
+- **Left out.** What other sections of a dump print: the storage image, the item and edit tables,
+  the options, an SQL entry's fingerprint. A binary store's TRUNC(OPT) report name, the counts of a
+  function argument's ALL subscripts, and a named SORT key's offset and kind are not printed.
+
+MOVES of cli/tests/lir, in part:
+
+```text
+program MOVES start MAIN
+paragraph 0 MAIN  @17:8
+b0:
+    statement 18:12
+    Arith C <- (A * B) + 1 [zoned S9(7)V9(2), rounded] {dmax 3, size error}
+    Select b1 b2
+b1:
+    Jump b3
+b2:
+    statement 19:30
+    Display 'TOO BIG'
+    Jump b3
+...
+b6:
+    statement 23:12
+    Move E(I) <- NAME(2:3) [alnum]
+    Jump b7
+b7:
+    statement 24:12
+    Move AMT OF OUT-REC <- AMT OF IN-REC [numeric value to zoned 9(5)]
+    Jump b8
+...
+b12:
+    ParagraphEnd next end  @17:8
+place p9 E(I) program+48 len 2 alnum stride 2  @23:30
+const c1 'HELLO'
+```
+
+## 14. Open questions
 
 1. **C99.** Keep the walker's return-point rules as the VM's until an Enterprise COBOL run settles
    C99, with the whole-program region of a SORT procedure (§8.6)? No

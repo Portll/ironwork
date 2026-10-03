@@ -1,0 +1,38 @@
+program SQLWHEN start MAIN
+paragraph 0 MAIN  @9:8
+b0:
+    statement 10:12
+    Jump b2
+paragraph 1 FAILED  @16:8
+b1:
+    statement 17:12
+    Display 'SQLCODE ', SQLCODE [digits 9 signed]
+    Jump b8
+b2:
+    statement 11:12
+    Sql 2 "SELECT NAME FROM CUST WHERE ID = ?" query inputs (CUST-ID [integer]) into (CUST-NAME [char(20)])
+    Branch (sql error) b3 else b4
+b3:
+    Jump b1
+b4:
+    Jump b5
+b5:
+    statement 14:12
+    Display CUST-NAME
+    Jump b6
+b6:
+    statement 15:12
+    End goback
+b7:
+    Jump b1
+b8:
+    statement 18:12
+    End goback
+b9:
+    ParagraphEnd next end  @16:8
+place p0 CUST-ID program+8 len 4 binary S9(9)  @11:12
+place p1 CUST-NAME program+16 len 20 alnum  @11:12
+place p2 SQLCODE program+0 len 4 binary S9(9)  @11:12
+place p3 CUST-NAME program+16 len 20 alnum  @14:20
+place p4 SQLCODE program+0 len 4 binary S9(9)  @17:31
+sqlca SQLCODE SQLCODE [integer]

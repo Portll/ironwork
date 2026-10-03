@@ -1,0 +1,33 @@
+program CICSREAD start MAIN
+paragraph 0 MAIN  @9:8
+b0:
+    statement 10:12
+    Cics HANDLE CONDITION NOTFND(NOT-FOUND)
+    Jump b2
+paragraph 1 NOT-FOUND  @15:8
+b1:
+    statement 16:12
+    Cics SEND TEXT FROM(CUST-KEY) LENGTH(6) {sinks CUST-KEY screen}
+    Jump b5
+b2:
+    statement 11:12
+    Cics READ FILE('CUSTFILE') RIDFLD(CUST-KEY) INTO(CUST-REC) RESP(WS-RESP) {sinks CUST-KEY record-key}
+    Jump b3
+b3:
+    statement 14:12
+    Cics RETURN
+    Jump b4
+b4:
+    Jump b1
+b5:
+    statement 17:12
+    Cics RETURN
+    Jump b6
+b6:
+    ParagraphEnd next end  @15:8
+place p0 CUST-KEY program+8 len 6 alnum  @11:12
+place p1 CUST-REC program+16 len 80 alnum  @11:12
+place p2 WS-RESP program+0 len 4 binary S9(8)  @11:12
+place p3 CUST-KEY program+8 len 6 alnum  @16:12
+const c0 'CUSTFILE'
+const c1 6

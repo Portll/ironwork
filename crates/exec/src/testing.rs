@@ -532,8 +532,9 @@ fn storage_difference(a: &Remains, b: &Remains) -> String {
 }
 
 /// Lowers a compiled program and checks what lir.md §12.2 asks of each test program: it passes
-/// `verify`, comes back equal from the load-module codec and encodes again to the same bytes, and
-/// lowers again the same. `Unsupported` is accepted; any other error, or a panic, fails the test.
+/// `verify`, comes back equal from the load-module codec and encodes again to the same bytes, prints
+/// with every reference resolved and the same once decoded, and lowers again the same.
+/// `Unsupported` is accepted; any other error, or a panic, fails the test.
 /// With `IRONWORK_LOWER_REPORT` set, appends a line to that file: the test (or `origin`), the
 /// PROGRAM-ID, the source's fingerprint and the outcome, tab-separated. The lowered program, when
 /// it lowers.
@@ -573,10 +574,28 @@ fn lowered_soundly(compiled: &Compiled, p: &Program) -> Result<(), String> {
     if decoded != *p || encoded(&decoded) != (bytes, strings) {
         return Err("the lowered program does not round-trip through the load-module codec".into());
     }
+    let listing = p.to_string();
+    if let Some(reference) = unresolved(&listing) {
+        return Err(format!("the lowered program prints {reference}, a reference to nothing"));
+    }
+    if decoded.to_string() != listing {
+        return Err("the lowered program prints differently once decoded".into());
+    }
     if lower::lower(compiled).as_ref() != Ok(p) {
         return Err("lowering the program again gives a different LIR".into());
     }
     Ok(())
+}
+
+/// The first reference in a listing that names nothing, which the printer shows as an id and a
+/// question mark: `p12?`, `symbol3?`.
+fn unresolved(listing: &str) -> Option<&str> {
+    listing.split(|c: char| c.is_whitespace() || "()[]{},".contains(c)).find(|word| {
+        word.strip_suffix('?').is_some_and(|w| {
+            let stem = w.trim_end_matches(|c: char| c.is_ascii_digit());
+            stem.len() < w.len() && !stem.is_empty() && stem.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')
+        })
+    })
 }
 
 pub fn encoded(p: &Program) -> (Vec<u8>, StringTable) {

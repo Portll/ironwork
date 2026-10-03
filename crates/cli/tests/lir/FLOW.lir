@@ -1,0 +1,108 @@
+program FLOW start MAIN
+range r0 perform ADD-ONE
+range r1 perform SHOW thru SHOW-EXIT
+paragraph 0 MAIN  @10:8
+b0:
+    statement 11:12
+    Nest
+    SetTemp t0 <- 3
+    Jump b6
+paragraph 1 FINISH  @25:8
+b1:
+    statement 26:12
+    End goback
+paragraph 2 ADD-ONE abandoned a0  @27:8
+b2:
+    statement 28:12
+    Arith TOTAL <- TOTAL + 1 [zoned 9(4)] {dmax 0, per receiver}
+    Jump b25
+paragraph 3 SHOW  @29:8
+b3:
+    statement 30:12
+    Display 'TOTAL=', TOTAL
+    Jump b26
+paragraph 4 SHOW-EXIT abandoned a1  @31:8
+b4:
+    Jump b27
+b5:
+    Unnest 1  @11:12
+    Jump b8
+b6:
+    Branch (t0 > 0) b7 else b5  @11:12
+b7:
+    DecTemp t0  @11:12
+    PerformEnter r0 ADD-ONE -> b6  @11:12
+b8:
+    statement 12:12
+    Nest
+    Set I <- 1 [numeric value to zoned 9(2)]
+    Jump b10
+b9:
+    Unnest 1  @12:12
+    Jump b13
+b10:
+    Branch (I > 5 [fixed]) b9 else b12  @12:12
+b11:
+    Step I by 1 [zoned 9(2), dmax 0]  @12:12
+    Jump b10
+b12:
+    statement 13:16
+    Arith TOTAL <- TOTAL + I [zoned 9(4)] {dmax 0, per receiver}
+    Jump b11
+b13:
+    statement 15:12
+    Branch (TOTAL > 10 [fixed] and not (DONE in ('Y') [alnum])) b14 else b15
+b14:
+    statement 16:16
+    Move DONE <- 'Y' [alnum]
+    statement 17:16
+    Nest
+    PerformEnter r1 SHOW thru SHOW-EXIT -> b17
+b15:
+    statement 19:16
+    Display 'SMALL'
+    Jump b16
+b16:
+    Jump b18
+b17:
+    Unnest 1  @17:16
+    Jump b16
+b18:
+    statement 21:12
+    Branch (TOTAL = 0 [fixed]) b22 else b21
+b19:
+    Jump b23
+b20:
+    statement 22:31
+    Jump b1
+b21:
+    Jump b19
+b22:
+    Jump b20
+b23:
+    Jump b1
+b24:
+    Jump b2
+b25:
+    ParagraphEnd next SHOW  @27:8
+b26:
+    Jump b4
+b27:
+    ParagraphEnd next end  @31:8
+place p0 I program+0 len 2 zoned 9(2)  @12:28
+place p1 I program+0 len 2 zoned 9(2)  @12:48
+place p2 TOTAL program+8 len 4 zoned 9(4)  @13:25
+place p3 I program+0 len 2 zoned 9(2)  @13:20
+place p4 TOTAL program+8 len 4 zoned 9(4)  @15:15
+place p5 DONE program+16 len 1 alnum  @15:34
+place p6 DONE program+16 len 1 alnum  @16:20
+place p7 TOTAL program+8 len 4 zoned 9(4)  @22:21
+place p8 TOTAL program+8 len 4 zoned 9(4)  @28:21
+place p9 TOTAL program+8 len 4 zoned 9(4)  @30:29
+const c0 1
+const c1 5
+const c2 10
+const c3 'Y'
+const c4 0
+abend a0 IRONWORK "control passed the end of ADD-ONE, which is armed to return to a PERFORM that control left by GO TO; ironwork returns there only to a PERFORM that runs once and is not inside another statement"  @27:8
+abend a1 IRONWORK "control passed the end of SHOW-EXIT, which is armed to return to a PERFORM that control left by GO TO; ironwork returns there only to a PERFORM that runs once and is not inside another statement"  @31:8

@@ -11,6 +11,7 @@ mod flow;
 mod markup;
 mod payload;
 mod place;
+mod print;
 mod scope;
 mod sort;
 mod sql;
@@ -38,6 +39,7 @@ pub use payload::{
     InvokePlan, MethodName, MovePlan, NationalFrom, NumericFrom, PlaceNumcheck, Receiver, SearchAllPlan, SearchKey, SenderCheck, TrimSide,
 };
 pub use place::{Base, Odo, Place, RefMod, Subscript};
+pub use print::{Code, Listing};
 pub use scope::{Binding, Global, GlobalAt, Scope, Section, SharedFile};
 pub use sort::{FileSort, ReleasePlan, ReturnPlan, SortIo, SortKey, SortKeys, SortPlan, TableSort};
 pub use sql::{HostPlace, SqlEntry, SqlStatement, Sqlca, SqlcaField};

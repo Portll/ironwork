@@ -137,7 +137,8 @@ fn a_source_makes_one_module_named_after_it_holding_every_program() {
         "PAYROLL source 1 CUST.cpy",
         "PAYROLL file 1 root 1 CUST.cpy sha256 8062b2395984d8d2ec648e2e3a271fee5a4c2ac0b56191eb72147bee17daadc7 bytes 90",
         "PAYROLL #0 CUST.cpy:1:8",
-        "SUB lir id SUB initial no recursive no procedure_start 0",
+        "program SUB start \"\"",
+        "    Display 'IN SUB'",
         "mapsets 0",
         "module reads",
     ] {
@@ -364,6 +365,65 @@ fn dump_refuses_what_is_not_a_module_by_its_own_check() {
     let mut table = good;
     table[40] ^= 1;
     assert!(refused("table.iwm", &table).contains("header is corrupt (checksum "));
+}
+
+/// The LIR section of a dump: the listing of each program, without the section table or the reader's verdict.
+fn listing(dump: &str) -> &str {
+    let start = dump.find("\nLIR\n").map_or(dump.len(), |at| at + "\nLIR\n".len());
+    let end = dump.rfind("\nmodule ").map_or(dump.len(), |at| at + 1).max(start);
+    &dump[start..end]
+}
+
+/// Each program of tests/lir compiled and its code printed (lir.md §13), against NAME.lir there.
+/// IRONWORK_BLESS=1 writes what is printed as the expected text.
+#[test]
+fn each_golden_program_prints_its_generated_code_as_expected() {
+    let golden = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/lir");
+    let dir = temp("golden");
+    let mut sources: Vec<PathBuf> = fs::read_dir(&golden).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|e| e == "cbl")).collect();
+    sources.sort();
+    assert!(sources.len() >= 6, "{sources:?}");
+    let bless = std::env::var_os("IRONWORK_BLESS").is_some();
+    let mut differing = Vec::new();
+    for source in &sources {
+        let name = source.file_stem().unwrap().to_str().unwrap();
+        compiled(&golden, &[&format!("{name}.cbl"), "-o", dir.to_str().unwrap()], None);
+        let (shown, status, _) = dump(&dir.join(format!("{name}.iwm")), &["--section", "LIR"]);
+        assert_eq!(status, Some(0), "{shown}");
+        let printed = listing(&shown);
+        let expected = golden.join(format!("{name}.lir"));
+        if bless {
+            fs::write(&expected, printed).unwrap();
+        } else if fs::read_to_string(&expected).ok().as_deref() != Some(printed) {
+            differing.push(format!("{name}:\n{printed}"));
+        }
+        assert_eq!(listing(&dump(&dir.join(format!("{name}.iwm")), &["--section", "LIR"]).0), printed, "{name} prints the same twice");
+    }
+    assert!(differing.is_empty(), "printed otherwise than tests/lir/NAME.lir holds (IRONWORK_BLESS=1 rewrites it):\n{}", differing.join("\n"));
+}
+
+#[test]
+fn the_listing_names_what_the_other_sections_hold_and_prints_without_them() {
+    let dir = temp("listing");
+    let golden = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/lir");
+    compiled(&golden, &["SQLWHEN.cbl", "-o", dir.to_str().unwrap()], None);
+    let module = dir.join("SQLWHEN.iwm");
+    let whole = dump(&module, &["--section", "LIR"]).0;
+    assert!(whole.contains("    Sql 2 \"SELECT NAME FROM CUST WHERE ID = ?\" query inputs (CUST-ID [integer]) into (CUST-NAME [char(20)])\n"), "{whole}");
+    assert!(whole.contains("    statement 11:12\n") && whole.contains("    Display 'SQLCODE ', SQLCODE [digits 9 signed]\n"), "{whole}");
+
+    let (shown, _, _) = dump(&module, &[]);
+    let mut bytes = fs::read(&module).unwrap();
+    for section in ["section 6 SQL ", "section 8 DEBUG "] {
+        let offset: usize = shown.lines().find(|l| l.starts_with(section)).unwrap().split(' ').nth(4).unwrap().parse().unwrap();
+        bytes[offset + 1] ^= 0x01;
+    }
+    fs::write(&module, &bytes).unwrap();
+    let (damaged, status, _) = dump(&module, &["--section", "LIR"]);
+    assert_eq!(status, Some(1));
+    let printed = listing(&damaged);
+    assert!(printed.contains("    Sql 2\n") && !printed.contains("statement ") && !printed.contains('@'), "{printed}");
+    assert!(printed.contains("    Display 'SQLCODE ', SQLCODE [digits 9 signed]\n"), "{printed}");
 }
 
 #[test]

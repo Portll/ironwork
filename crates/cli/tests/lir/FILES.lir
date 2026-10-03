@@ -1,0 +1,39 @@
+program FILES start MAIN
+paragraph 0 MAIN  @19:8
+b0:
+    statement 20:12
+    File OPEN INPUT IN-FILE
+    File OPEN OUTPUT OUT-FILE
+    Jump b1
+b1:
+    statement 21:12
+    File READ IN-FILE sequential {at end}
+    Select b2 b3 b2
+b2:
+    Jump b4
+b3:
+    statement 22:23
+    Move EOF-FLAG <- 'Y' [alnum]
+    Jump b2
+b4:
+    statement 24:12
+    File WRITE OUT-REC <- IN-REC [alnum] advancing after 2 lines
+    Jump b5
+b5:
+    statement 25:12
+    File CLOSE IN-FILE
+    File CLOSE OUT-FILE
+    Jump b6
+b6:
+    statement 26:12
+    End goback
+b7:
+    ParagraphEnd next end  @19:8
+place p0 IN-STATUS program+0 len 2 alnum  @7:31
+place p1 EOF-FLAG program+8 len 1 alnum  @22:35
+place p2 OUT-REC program+96 len 80 alnum  @24:18
+place p3 IN-REC program+16 len 80 alnum  @24:31
+place p4 OUT-REC program+96 len 80 alnum  @24:18
+const c0 'Y'
+file 0 IN-FILE assign INDD sequential access sequential format fixed read 80 to 80 fixed-length status IN-STATUS [alnum]
+file 1 OUT-FILE assign OUTDD sequential access sequential format fixed read 80 to 80 fixed-length carriage asa

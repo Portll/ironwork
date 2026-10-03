@@ -5,7 +5,7 @@ use super::{Module, ModuleError, ModuleWriter, Section, StringTable};
 use crate::bms::Mapset;
 use crate::codec_struct;
 use crate::lir::{
-    AbendText, Block, Cond, Const, Debug, Edit, Expr, Item, ParaId, Paragraph, Place, Plans, Program, ProgramOptions, Range,
+    AbendText, Block, Code, Cond, Const, Debug, Edit, Expr, Item, ParaId, Paragraph, Place, Plans, Program, ProgramOptions, Range,
     Services, SqlEntry, Storage, SymId,
 };
 
@@ -160,6 +160,28 @@ pub struct LirRecord {
     pub services: Services,
     pub abends: Vec<AbendText>,
     pub symbols: Vec<String>,
+}
+
+impl LirRecord {
+    pub fn code(&self) -> Code<'_> {
+        Code {
+            id: self.id,
+            initial: self.initial,
+            recursive: self.recursive,
+            paragraphs: &self.paragraphs,
+            procedure_start: self.procedure_start,
+            ranges: &self.ranges,
+            blocks: &self.blocks,
+            places: &self.places,
+            exprs: &self.exprs,
+            conds: &self.conds,
+            consts: &self.consts,
+            plans: &self.plans,
+            services: &self.services,
+            abends: &self.abends,
+            symbols: &self.symbols,
+        }
+    }
 }
 
 impl Decode for LirRecord {

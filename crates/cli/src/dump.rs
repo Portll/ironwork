@@ -1,6 +1,6 @@
 //! `ironwork dump`: a load module as text, one fact per line, in section order (load-module.md §11).
 
-use exec::lir::{Debug as DebugTable, ProgramOptions, SqlEntry};
+use exec::lir::{Debug as DebugTable, Listing, ProgramOptions, SqlEntry};
 use exec::module::codec::decode_all;
 use exec::module::crc::crc32;
 use exec::module::{DirectoryEntry, LayoutRecord, LirRecord, Module, ModuleError, Section, SectionEntry, SourceFile, StringTable};
@@ -221,7 +221,14 @@ pub fn dump(bytes: &[u8], o: &Options) -> Result<(String, bool), ModuleError> {
                     failed(&mut out, &why);
                 }
                 for (k, l) in all.iter().enumerate() {
-                    print_lir(&mut out, &name(k), l);
+                    let listing = Listing {
+                        code: l.code(),
+                        items: layout.as_ref().ok().and_then(|all| all.get(k)).map_or(&[], |(_, items, _)| items),
+                        debug: debug.as_ref().ok().and_then(|all| all.get(k)).map(|(d, _)| d),
+                        sql: sql.as_ref().ok().and_then(|all| all.get(k)).map_or(&[], Vec::as_slice),
+                        ccsid: options.as_ref().ok().and_then(|all| all.get(k)).map(|o| o.options.codepage),
+                    };
+                    let _ = write!(out, "{listing}");
                 }
             }
             Err(e) => failed(&mut out, e),
@@ -330,48 +337,6 @@ pub fn dump(bytes: &[u8], o: &Options) -> Result<(String, bool), ModuleError> {
         }
     }
     Ok((out, sound))
-}
-
-fn print_lir(out: &mut String, program: &str, l: &LirRecord) {
-    let _ = writeln!(
-        out,
-        "{program} lir id {} initial {} recursive {} procedure_start {}",
-        symbol(Some(&l.symbols), l.id),
-        yes(l.initial),
-        yes(l.recursive),
-        l.procedure_start
-    );
-    fn table<T: std::fmt::Debug>(out: &mut String, program: &str, what: &str, rows: &[T]) {
-        for (k, row) in rows.iter().enumerate() {
-            let _ = writeln!(out, "{program} {what} {k} {row:?}");
-        }
-    }
-    table(out, program, "paragraph", &l.paragraphs);
-    table(out, program, "range", &l.ranges);
-    for (b, block) in l.blocks.iter().enumerate() {
-        for (k, op) in block.ops.iter().enumerate() {
-            let _ = writeln!(out, "{program} block {b} op {k} {op:?}");
-        }
-        let _ = writeln!(out, "{program} block {b} end {:?}", block.end);
-    }
-    table(out, program, "place", &l.places);
-    table(out, program, "expr", &l.exprs);
-    table(out, program, "cond", &l.conds);
-    table(out, program, "const", &l.consts);
-    for (group, text) in [("plans", format!("{:?}", l.plans)), ("services", format!("{:?}", l.services))] {
-        for field in parts(&text) {
-            let (name, value) = field.split_once(": ").unwrap_or((field, ""));
-            if value.starts_with('[') {
-                for (k, row) in parts(value).into_iter().enumerate() {
-                    let _ = writeln!(out, "{program} {group}.{name} {k} {row}");
-                }
-            } else {
-                let _ = writeln!(out, "{program} {group}.{name} {value}");
-            }
-        }
-    }
-    table(out, program, "abend", &l.abends);
-    table(out, program, "symbol", &l.symbols);
 }
 
 fn symbol(symbols: Option<&[String]>, id: u32) -> String {

@@ -786,9 +786,10 @@ and finds them different.
   offset, length and whether its checksum matched. The directory (id, ordinal, parent, COMMON,
   dynamic, USING and RETURNING, a function's external name, ENTRY names). Each program's options. The item table (level, name, offset, size, occurs, kind, ODO
   item, keys). Each program's SQL entries as `PAYROLL:3:9f2a41c0 SELECT ...`, the identity a
-  recording uses. Each mapset with its maps and their fields. The LIR, through its printer
-  (lir.md §12.2). The debug table as
-  `#12 PAYROLL.cbl:47:12`, and each source's file as
+  recording uses. Each mapset with its maps and their fields. Each program's code as the listing
+  of lir.md §13: its blocks with one op or terminator to a line, places by data name and source
+  positions from the debug table, then its places, constants and service tables. The debug table
+  as `#12 PAYROLL.cbl:47:12`, and each source's file as
   `PAYROLL file 1 root 1 CUST.cpy sha256 8062b239… bytes 90`, or `PAYROLL file 2 -` for none.
 - **Strings** print only with `--strings`, since every other section prints its strings inline.
 - **Checksums.** A bad section prints `CHECKSUM MISMATCH`, and the dump exits non-zero after
