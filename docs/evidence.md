@@ -76,12 +76,12 @@ COMMAND-LINE or ENVIRONMENT. PARM reaches a program only through `ironwork job`.
 
 ### 1.2 Statement trace: `--trace-statements FILE`
 
-With `--evidence`, `run` records each time a statement FILE lists starts: whether one run executed
-a finding's route in order, which cobolwork needs before coverage may refute the finding (cobolwork
-`docs/spec/reach.md` §9.8, fact 2). FILE holds one `FILE:LINE` per line, split at the last colon,
-blank lines left out: the statements of cobolwork's `flow --all-routes` `routes.statements`. A
-statement is matched by its file's name and its line, as cobolwork joins a sink to a finding, so a
-path recorded from another directory still matches.
+With `--evidence`, `run` and `cics` record each time a statement FILE lists starts: whether one run
+executed a finding's route in order, which cobolwork needs before coverage may refute the finding
+(cobolwork `docs/spec/reach.md` §9.8, fact 2). FILE holds one `FILE:LINE` per line, split at the
+last colon, blank lines left out: the statements of cobolwork's `flow --all-routes`
+`routes.statements`. A statement is matched by its file's name and its line, as cobolwork joins a
+sink to a finding, so a path recorded from another directory still matches.
 
 - **Where.** A statement starts as the walker's `exec` meets it (lir.md §10): every statement but
   NEXT SENTENCE, a separator period, CONTINUE and EXIT, each time control reaches it, in a COPY
@@ -95,24 +95,29 @@ path recorded from another directory still matches.
 
 ### 1.3 Input trace by taint: `--trace-input`
 
-With `--evidence`, `run` follows which bytes of run-unit memory may hold input, with no marker. At
-each operation §1.1 names, the sink record says whether an input byte may be in its operand:
-`input` true, false, or null. cobolwork needs this before coverage may refute a finding (cobolwork
-`docs/spec/reach.md` §9.8, fact 3): a step that changes bytes (a numeric MOVE, a COMPUTE, a
-FUNCTION) loses the marker, but it does not lose the taint.
+With `--evidence`, `run` and `cics` follow which bytes of run-unit memory may hold input, with no
+marker. At each operation §1.1 names, the sink record says whether an input byte may be in its
+operand: `input` true, false, or null. cobolwork needs this before coverage may refute a finding
+(cobolwork `docs/spec/reach.md` §9.8, fact 3): a step that changes bytes (a numeric MOVE, a COMPUTE,
+a FUNCTION) loses the marker, but it does not lose the taint.
 
 - **Input.** A READ's record and its INTO item, ACCEPT from SYSIN or the console, the host
   variables and SQLCA a row EXEC SQL fetched fills, a job step's PARM and a CICS task's COMMAREA.
-  ACCEPT FROM DATE, DAY or TIME is not input.
+  ACCEPT FROM DATE, DAY or TIME is not input. In a CICS task, EIBCALEN when there is a COMMAREA,
+  the AID that started the task, and whatever a command writes once it has taken in data from
+  outside the program: RECEIVE and RECEIVE MAP from the terminal (EIBAID and EIBCPOSN included),
+  READQ TS and READQ TD, and a file READ, READNEXT or READPREV (RIDFLD included).
 - **Through statements.** Each statement's writes may hold input when the statement has read a
   byte that may, since it started: the bytes of every item it locates, which includes a subscript's
   item, and a BY CONTENT or BY VALUE copy. A receiver a statement only writes is not read: MOVE's,
-  SET's, ACCEPT's, INITIALIZE's, PERFORM VARYING's FROM and CALL's RETURNING. So `MOVE SPACES TO X`
-  clears X. A program's initial values and LOCAL-STORAGE hold none.
+  SET's, ACCEPT's, INITIALIZE's, PERFORM VARYING's FROM, CALL's RETURNING, and the options an EXEC
+  CICS command stores into. So `MOVE SPACES TO X` clears X. A program's initial values and
+  LOCAL-STORAGE hold none. What CICS keeps outside the program between commands (queues, files,
+  RETURN's COMMAREA) comes back only through one of the commands above, and is input then.
 - **What it does not say.** A condition on input steers which constant is stored, but it puts no
   input byte in the receiver, and taint does not follow it. A whole receiver may hold input when any
   operand did, so taint over-approximates. It never under-approximates where it follows the run.
-- **Not followed yet.** SORT and MERGE, the Report Writer, XML and JSON statements, EXEC CICS,
+- **Not followed yet.** SORT and MERGE, the Report Writer, XML and JSON statements,
   object-oriented COBOL, calls through pointers, and Language Environment services. After the first
   of these, a sink is null where it would be false, and true stays true.
 - **Equal under both executors.** The rt write funnel (`RunUnit::write`) and the locate of each

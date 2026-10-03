@@ -119,6 +119,7 @@ fn read<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>,
         Ok((None, _)) => return raise(x, at, Condition::NOTFND, 0),
         Ok((Some((key, record)), relative)) => (key, record, relative),
     };
+    x.unit().take_input();
     if o.update
         && let Some(task) = x.unit().cics.as_mut()
     {
@@ -246,6 +247,7 @@ fn browse<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S
         Ok((None, _)) => return raise(x, at, Condition::ENDFILE, 0),
         Ok((Some((key, record)), relative)) => (key, record, relative),
     };
+    x.unit().take_input();
     if let Some(task) = x.unit().cics.as_mut() {
         task.browses.insert((file.to_owned(), reqid), Browse { at: key.clone(), inclusive: false });
     }

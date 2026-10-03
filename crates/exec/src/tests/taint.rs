@@ -1,4 +1,5 @@
 use super::*;
+use crate::testing::page;
 use std::cell::RefCell;
 use std::io::Cursor;
 use std::rc::Rc;
@@ -118,4 +119,117 @@ fn a_function_s_value_carries_input_and_its_statements_leave_what_the_invoking_o
     let at = |text: &str| line_of(&source, text);
     let expected = [(at("'READ '"), Some(true)), (at("'NONE '"), Some(false)), (at("'B '"), Some(true)), (at("'C '"), Some(false))];
     assert_eq!(sinks(&source, "ATTACK\n"), expected);
+}
+
+/// Each sink a CICS task running `source` reached, by line, with whether an input byte may be in
+/// its operand; `dir` is its copy library. A task without a terminal runs under the Harness too,
+/// whose differential compares the VM's taint.
+fn task_sinks(source: &str, dir: Option<&std::path::Path>, commarea: Option<&str>, make: impl Fn() -> cics::Task) -> Vec<(u32, Option<bool>)> {
+    let task = make();
+    if task.terminal.is_none() {
+        let mut harness = Harness::source(source).task(make()).clock(unit::Clock::Fixed(0, 0));
+        if let Some(c) = commarea {
+            harness = harness.commarea(c);
+        }
+        let _ = harness.run(Executor::Interpreter);
+    }
+    let libraries = dir.map_or_else(syntax::copy::Libraries::default, |d| syntax::copy::Libraries::new(vec![d.to_path_buf()]));
+    let mut programs = syntax::parse_all_with(source, &libraries).unwrap_or_else(|e| panic!("{e}"));
+    let compiled = compile(programs.remove(0), &[]).unwrap_or_else(|e| panic!("{e:?}"));
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let recorder = seen.clone();
+    let observer: unit::Observer<'_> = Box::new(move |e| {
+        if let unit::Event::Sink { line, input, .. } = e {
+            recorder.borrow_mut().push((line, input));
+        }
+    });
+    let library = unit::Library { programs, copy: libraries, trace_input: true, ..Default::default() };
+    let task = cics::Task { commarea: commarea.map(ebcdic), ..task };
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let (ended, _) = crate::execute_task(&compiled, library, files::Dds::default(), task, unit::Clock::Fixed(0, 0), None, &mut out, &mut err, Some(observer), &mut None);
+    assert!(ended.is_ok(), "{ended:?} {}", String::from_utf8_lossy(&err));
+    seen.borrow().clone()
+}
+
+/// A TD queue write of `item`, the operation a sink names for each value under test.
+fn logged(item: &str, length: u32) -> String {
+    [line(&format!("EXEC CICS WRITEQ TD FROM({item}) QUEUE('CSMT')")), line(&format!("    LENGTH({length}) END-EXEC"))].concat()
+}
+
+#[test]
+fn the_commarea_and_a_queue_item_are_input_and_a_command_s_own_values_are_not() {
+    let data = "       01  WS-K PIC X(8) VALUE 'CONSTANT'.\n       01  WS-T PIC X(8).\n       01  WS-U PIC X(8).\n       01  WS-Q PIC X(8).\n";
+    let body = [
+        logged("WS-K", 8),
+        line("MOVE DFHCOMMAREA TO WS-T"),
+        logged("WS-T", 8),
+        line("EXEC CICS ASSIGN USERID(WS-U) END-EXEC"),
+        logged("WS-U", 8),
+        line("EXEC CICS READQ TS QUEUE('INQ') INTO(WS-Q) END-EXEC"),
+        logged("WS-Q", 8),
+        line("EXEC CICS RETURN END-EXEC."),
+    ]
+    .concat();
+    let source = cics_program("TAINTQ", data, "       01  DFHCOMMAREA PIC X(8).\n", &body);
+    let make = || {
+        let mut t = task("TR01");
+        t.ts.insert("INQ".into(), cics::TsQueue { items: vec![ebcdic("QUEUED  ")], next: 0 });
+        t
+    };
+    let at = |item: &str| line_of(&source, &format!("FROM({item})"));
+    let expected = [(at("WS-K"), Some(false)), (at("WS-T"), Some(true)), (at("WS-U"), Some(false)), (at("WS-Q"), Some(true))];
+    assert_eq!(task_sinks(&source, None, Some("ATTACK  "), make), expected);
+}
+
+#[test]
+fn a_linked_program_gets_the_commarea_s_input_and_eibcalen_keeps_its_own_across_the_link() {
+    let main = cics_program(
+        "TAINTL",
+        "       01  WS-AREA PIC X(8).\n       01  WS-N PIC 9(4).\n",
+        "       01  DFHCOMMAREA PIC X(8).\n",
+        &[
+            line("MOVE DFHCOMMAREA TO WS-AREA"),
+            line("EXEC CICS LINK PROGRAM('TAINTS') COMMAREA(WS-AREA)"),
+            line("    END-EXEC"),
+            line("MOVE EIBCALEN TO WS-N"),
+            logged("WS-N", 4),
+            line("EXEC CICS RETURN END-EXEC."),
+        ]
+        .concat(),
+    );
+    let sub = cics_program("TAINTS", "", "       01  DFHCOMMAREA PIC X(8).\n", &[logged("DFHCOMMAREA", 8), line("EXEC CICS RETURN END-EXEC.")].concat());
+    let source = [main, sub].concat();
+    let at = |item: &str| line_of(&source, &format!("FROM({item})"));
+    assert_eq!(task_sinks(&source, None, Some("ATTACK  "), || task("TR01")), [(at("DFHCOMMAREA"), Some(true)), (at("WS-N"), Some(true))]);
+}
+
+#[test]
+fn what_the_operator_types_into_a_map_and_the_key_pressed_are_input() {
+    let dir = temp("taint-bms");
+    ordset(&dir);
+    let source = cics_program(
+        "ORDERS",
+        "           COPY ORDSET.\n       01  WS-C PIC X(8).\n       01  WS-A PIC X.\n       01  WS-K PIC X(8) VALUE 'CONSTANT'.\n",
+        "",
+        &[
+            line("MOVE LOW-VALUES TO ORDMAPO"),
+            line("EXEC CICS SEND MAP('ORDMAP') MAPSET('ORDSET') ERASE"),
+            line("    END-EXEC"),
+            line("EXEC CICS RECEIVE MAP('ORDMAP') MAPSET('ORDSET') END-EXEC"),
+            line("MOVE CUSTI TO WS-C"),
+            logged("WS-C", 8),
+            line("MOVE EIBAID TO WS-A"),
+            logged("WS-A", 1),
+            logged("WS-K", 8),
+            line("EXEC CICS RETURN END-EXEC."),
+        ]
+        .concat(),
+    );
+    let make = || {
+        let scripted = terminal::Scripted::new(24, 80, terminal::parse_script("type 3 12 ACME\nENTER\n").unwrap(), page());
+        cics::Task { terminal: Some(Box::new(scripted)), ..task("ORD1") }
+    };
+    let at = |item: &str| line_of(&source, &format!("FROM({item})"));
+    let logs: Vec<_> = task_sinks(&source, Some(&dir), None, make).into_iter().filter(|(l, _)| [at("WS-C"), at("WS-A"), at("WS-K")].contains(l)).collect();
+    assert_eq!(logs, [(at("WS-C"), Some(true)), (at("WS-A"), Some(true)), (at("WS-K"), Some(false))]);
 }

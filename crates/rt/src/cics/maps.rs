@@ -189,6 +189,7 @@ fn next_inbound<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P
     let Some(stream) = with_terminal(x, at, |t| t.receive())? else {
         return Err(Abend::ironwork(format!("EXEC CICS {}: the terminal has no more input", at.name), at.pos));
     };
+    x.unit().take_input();
     let formatted = stream.get(3).is_none_or(|&b| b == terminal::SBA);
     let stream = if formatted { &stream[..] } else { &stream[..3] };
     let read = terminal::parse_inbound(stream).map_err(|m| Abend::ironwork(format!("EXEC CICS {}: {m}", at.name), at.pos))?;
@@ -260,6 +261,7 @@ pub(super) fn receive_raw<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>,
     let Some(stream) = with_terminal(x, at, |t| t.receive())? else {
         return Err(Abend::ironwork("EXEC CICS RECEIVE: the terminal has no more input", at.pos));
     };
+    x.unit().take_input();
     if let Some(&aid) = stream.first() {
         eib_bytes(x.unit(), EIBAID, &[aid]);
     }

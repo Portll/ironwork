@@ -258,6 +258,18 @@ impl<H, L: Loader<H>> RunUnit<'_, H, L> {
         }
     }
 
+    /// [`Taint::take_input`], when the run traces input.
+    pub fn take_input(&mut self) {
+        if let Some(t) = self.taint.as_mut() {
+            t.take_input();
+        }
+    }
+
+    /// Whether any byte of the range may hold input; false without taint.
+    pub fn holds_input(&self, offset: usize, len: usize) -> bool {
+        self.taint.as_ref().is_some_and(|t| t.any(offset, len))
+    }
+
     /// Whether the running statement has read a byte that may hold input.
     pub fn pending(&self) -> bool {
         self.taint.as_ref().is_some_and(Taint::pending)

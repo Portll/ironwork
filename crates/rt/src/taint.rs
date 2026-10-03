@@ -34,6 +34,12 @@ impl Taint {
         }
     }
 
+    /// The running statement takes in input from outside memory, as an EXEC CICS RECEIVE or READQ
+    /// does: what it writes from here may hold input.
+    pub const fn take_input(&mut self) {
+        self.pending = true;
+    }
+
     /// Whether the running statement has read a byte that may hold input.
     pub const fn pending(&self) -> bool {
         self.pending

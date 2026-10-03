@@ -183,6 +183,7 @@ pub(super) fn readq_ts<'w, P: Copy, O, S>(
     let item = if next { None } else { int(x, item, at.pos)?.map(|n| n.max(0) as usize) };
     match task(x).readq_ts(&queue, item) {
         Ok((data, count)) => {
+            x.unit().take_input();
             store_int(x, numitems, count as i64, at.pos)?;
             deliver(x, at, record, &data)
         }
@@ -214,7 +215,10 @@ pub(super) fn writeq_td<'w, P: Copy, O, S>(
 pub(super) fn readq_td<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, queue: Option<&Datum<P, O, S>>, record: &Record<P, O, S>) -> R<Flow> {
     let queue = queue_name(x, at, queue)?;
     match task(x).readq_td(&queue) {
-        Ok(data) => deliver(x, at, record, &data),
+        Ok(data) => {
+            x.unit().take_input();
+            deliver(x, at, record, &data)
+        }
         Err(condition) => raise(x, at, condition, 0),
     }
 }

@@ -5,12 +5,13 @@ use super::command::{Cics, CicsCommand, Datum, Record, Resp};
 use super::{Condition, Task, file_control, maps, program, services};
 use crate::abend::{Abend, AbendCode, Ending};
 use crate::bms::Mapset;
-use crate::host::{self, Host};
+use crate::host::Host;
 use crate::lir::{ParaId, Step};
 use crate::storage::{Loc, Val};
 use crate::store::{self, ProgramFacts};
 use crate::unit::{ADDRESS_BASE, Loader, RunUnit, UnitHost};
 use crate::vocab::Pos;
+use numeric::precision::{Fixed, Places};
 use std::collections::HashMap;
 use zarch::decimal::{self, Decimal};
 use zarch::ebcdic::{self, CodePage};
@@ -171,7 +172,6 @@ pub fn begin_command<H, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>) {
 
 /// Runs a command.
 pub fn run<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, command: &CicsCommand<P, O, S>, pos: Pos) -> R<Flow> {
-    crate::host::unfollowed(x, "EXEC CICS");
     let name = x.text(&command.name);
     in_task(x.unit(), &name, pos)?;
     begin_command(x.unit());
@@ -277,12 +277,20 @@ pub(super) fn text<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, d: Opt
     Ok(bytes(x, d, pos)?.map(|b| page.decode(&b).trim_end().to_owned()))
 }
 
+/// Locates a receiver the command only writes: its old bytes reach nothing, so they are not read.
+fn receiver<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, p: P) -> R<Loc> {
+    let was = x.unit().writing(true);
+    let loc = x.locate(p, false);
+    x.unit().writing(was);
+    loc
+}
+
 /// MOVEs bytes into the data item an option names, as INTO and the like receive them; `name` is
 /// the option's.
 pub(super) fn store_bytes<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, d: Option<&Datum<P, O, S>>, name: &str, bytes: &[u8]) -> R<()> {
     match d {
         Some(Datum::Place(p)) => {
-            let loc = x.locate(*p, false)?;
+            let loc = receiver(x, *p)?;
             x.assign(loc, Val::Bytes(bytes.to_vec()), None, at.pos)
         }
         Some(Datum::Value(_)) => Err(Abend::ironwork(format!("EXEC CICS {}: {name} must name a data item", at.name), at.pos)),
@@ -292,7 +300,10 @@ pub(super) fn store_bytes<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>,
 
 pub(super) fn store_int<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, d: Option<&Datum<P, O, S>>, value: i64, pos: Pos) -> R<()> {
     match d {
-        Some(Datum::Place(p)) => host::set_integer(x, *p, value, pos),
+        Some(Datum::Place(p)) => {
+            let dest = receiver(x, *p)?;
+            x.store_fixed(dest, &Fixed::new(i128::from(value), Places::new(19, 0)), pos)
+        }
         _ => Ok(()),
     }
 }
@@ -300,7 +311,7 @@ pub(super) fn store_int<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, d
 /// Stores an address, or NULL for None, into the POINTER an option names.
 pub(super) fn store_pointer<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, d: Option<&Datum<P, O, S>>, offset: Option<usize>, pos: Pos) -> R<()> {
     if let Some(Datum::Place(p)) = d {
-        let loc = x.locate(*p, false)?;
+        let loc = receiver(x, *p)?;
         let address = offset.map_or(0, |o| ADDRESS_BASE + o as u32);
         x.assign(loc, Val::Address(address), None, pos)?;
     }
@@ -309,7 +320,7 @@ pub(super) fn store_pointer<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S
 
 pub(super) fn eib_bytes<H, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, offset: usize, bytes: &[u8]) {
     let at = unit.eib + offset;
-    unit.mem[at..at + bytes.len()].copy_from_slice(bytes);
+    unit.write(at, bytes);
 }
 
 pub(super) fn eib_halfword<H, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, offset: usize, value: i16) {
@@ -339,6 +350,17 @@ pub(super) fn eib_calen<H, L: Loader<H>>(unit: &RunUnit<'_, H, L>) -> i16 {
     i16::from_be_bytes([unit.mem[at], unit.mem[at + 1]])
 }
 
+/// EIBCALEN and whether it may hold input, to put back as they were when a program run inside
+/// a command returns.
+pub(super) fn kept_calen<H, L: Loader<H>>(unit: &RunUnit<'_, H, L>) -> (i16, bool) {
+    (eib_calen(unit), unit.holds_input(unit.eib + EIBCALEN, 2))
+}
+
+pub(super) fn restore_calen<H, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, (value, input): (i16, bool)) {
+    eib_halfword(unit, EIBCALEN, value);
+    unit.mark_input(unit.eib + EIBCALEN, 2, input);
+}
+
 /// Fills the EXEC interface block for the task's first program: time, date, transaction, task
 /// number, terminal, COMMAREA length and the AID that started it.
 pub fn begin_task<H: Clone, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, page: &CodePage, length: usize) {
@@ -351,8 +373,11 @@ pub fn begin_task<H: Clone, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, page: &C
     eib_packed(unit, EIBTASKN, i64::from(number));
     eib_text(unit, page, EIBTRMID, 4, &termid);
     eib_halfword(unit, EIBCALEN, length as i16);
+    // The caller chose the COMMAREA, and the operator the key that started the task: both input.
+    unit.mark_input(unit.eib + EIBCALEN, 2, length > 0);
     if let Some(aid) = unit.cics.as_ref().and_then(|t| t.initial_aid) {
         eib_bytes(unit, EIBAID, &[aid]);
+        unit.mark_input(unit.eib + EIBAID, 1, true);
     }
 }
 

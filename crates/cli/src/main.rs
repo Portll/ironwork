@@ -115,16 +115,17 @@ flags:
              and once not. run, job and cics
   --trace-input
              with --evidence: follow which bytes of memory may hold input (READ, ACCEPT from
-             SYSIN, a row EXEC SQL fetched, PARM) through each statement, and record at each
-             operation --trace-marker names whether an input byte may be in its operand (input
-             true), none is (false), or the run did something not followed yet (null: SORT and
-             MERGE, the Report Writer, XML and JSON statements, EXEC CICS, object-oriented COBOL,
-             Language Environment services). run only
+             SYSIN, a row EXEC SQL fetched, PARM, and in a CICS task the COMMAREA, RECEIVE,
+             READQ and file reads) through each statement, and record at each operation
+             --trace-marker names whether an input byte may be in its operand (input true), none
+             is (false), or the run did something not followed yet (null: SORT and MERGE, the
+             Report Writer, XML and JSON statements, object-oriented COBOL, Language Environment
+             services). run, and cics for every task of its pseudo-conversation
   --trace-statements FILE
              with --evidence: record each start of a statement FILE lists, one FILE:LINE per
              line, a file matched by its name: cobolwork's routes.statements. The first 100
              starts of each are recorded, in the order the run made them, the 100th marked
-             capped. run only
+             capped. run, and cics for every task of its pseudo-conversation
   --clock YYYY-MM-DDTHH:MM:SS[.hh]
              the time ACCEPT FROM DATE, TIME and FUNCTION CURRENT-DATE report, for a run that must
              repeat; without it they report the system clock in UTC
@@ -679,11 +680,11 @@ fn driver() -> ExitCode {
     if trace_marker.is_some() && (evidence_dir.is_none() || !matches!(rest.first().map(String::as_str), Some("run" | "job" | "cics"))) {
         return usage_error("--trace-marker goes with --evidence, for run, job and cics");
     }
-    if trace_statements.is_some() && (evidence_dir.is_none() || rest.first().map(String::as_str) != Some("run")) {
-        return usage_error("--trace-statements goes with --evidence, for run");
+    if trace_statements.is_some() && (evidence_dir.is_none() || !matches!(rest.first().map(String::as_str), Some("run" | "cics"))) {
+        return usage_error("--trace-statements goes with --evidence, for run and cics");
     }
-    if trace_input && (evidence_dir.is_none() || rest.first().map(String::as_str) != Some("run")) {
-        return usage_error("--trace-input goes with --evidence, for run");
+    if trace_input && (evidence_dir.is_none() || !matches!(rest.first().map(String::as_str), Some("run" | "cics"))) {
+        return usage_error("--trace-input goes with --evidence, for run and cics");
     }
     let listed = match trace_statements.as_deref().map(evidence::listed_statements).transpose() {
         Ok(listed) => listed,
@@ -876,7 +877,7 @@ fn driver() -> ExitCode {
         (None, None, None) => None,
     };
     if command == "cics" {
-        let run = journal.map(|j| evidence::Run::new(j, &reads, path, trace_marker.as_deref()));
+        let run = journal.map(|j| evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()).with_input(trace_input));
         let coverage = coverage_file.as_deref().map(|file| (file, outlines.as_slice()));
         return run_cics(&compiled, path, library, dds, clock, database, &cics_options, run, vm, coverage);
     }

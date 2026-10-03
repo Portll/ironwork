@@ -4,7 +4,7 @@
 use super::Condition;
 use super::command::{Datum, Transfer};
 use super::run::{AbendExit, At, CicsHost, EIBCALEN, EIBFN, EIBRSRCE, ExitTarget, Flow, Handler, Handlers, R};
-use super::run::{bytes_cut, eib_bytes, eib_calen, eib_halfword, eib_text, int, ok, page, raise, task, text};
+use super::run::{bytes_cut, eib_bytes, eib_calen, eib_halfword, eib_text, int, kept_calen, ok, page, raise, restore_calen, task, text};
 use crate::abend::{Abend, AbendCode, Ending};
 use crate::callee::{self, By, Callee};
 use crate::lir::ParaId;
@@ -76,12 +76,12 @@ pub(super) fn link<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &A
         _ => (None, 0),
     };
     let length = int(x, t.length.as_ref(), at.pos)?.map_or(item_len, |n| n.max(0) as usize);
-    let saved = eib_calen(x.unit());
+    let saved = kept_calen(x.unit());
     eib_halfword(x.unit(), EIBCALEN, length as i16);
     let ending = enter(x, program, index, area, xctl, at.pos);
     let unit = x.unit();
     unit.release_temporaries(mark);
-    eib_halfword(unit, EIBCALEN, saved);
+    restore_calen(unit, saved);
     match ending? {
         Ending::StopRun => Ok(Flow::End(Ending::StopRun)),
         _ if xctl => {
@@ -169,14 +169,14 @@ pub fn enter_exit_program<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>,
     };
     let page = page(x);
     eib_text(x.unit(), page, EIBRSRCE, 8, name);
-    let saved = eib_calen(x.unit());
+    let saved = kept_calen(x.unit());
     let (area, length) = match commarea {
         Some((area, length)) => (Some(area), length),
-        None => (x.commarea(), saved),
+        None => (x.commarea(), saved.0),
     };
     eib_halfword(x.unit(), EIBCALEN, length);
     let ending = enter(x, program, index, area, false, pos);
-    eib_halfword(x.unit(), EIBCALEN, saved);
+    restore_calen(x.unit(), saved);
     ending
 }
 
