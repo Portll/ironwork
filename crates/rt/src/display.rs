@@ -72,7 +72,7 @@ pub fn number(written: &str, facts: &dyn ProgramFacts) -> String {
 pub fn value(facts: &dyn ProgramFacts, val: Val, pos: Pos) -> R<String> {
     Ok(match val {
         Val::Bytes(b) | Val::All(b) => facts.page().decode(&b),
-        Val::National(b) => utf16_text(&b),
+        Val::National(b) | Val::AllNational(b) => utf16_text(&b),
         Val::Fig(f) => facts.page().decode_byte(facts.figurative(f)).to_string(),
         Val::Num(f) => facts.page().decode(&zoned_digits(f.magnitude.to_u128().unwrap_or(0), f.places.total() as usize, decimal::UNSIGNED)),
         Val::Float(_) => return Err(Abend::ironwork("DISPLAY of a floating-point value is not supported yet", pos)),

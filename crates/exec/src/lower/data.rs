@@ -440,8 +440,9 @@ impl Lower<'_> {
             Literal::All(inner) => match &**inner {
                 Literal::Alnum(s) => (lir::Const::All(self.encode(s, pos)?), Value::All, 0),
                 Literal::Hex(b) => (lir::Const::All(b.clone()), Value::All, 0),
+                Literal::National(s) => (lir::Const::AllNational(s.encode_utf16().flat_map(u16::to_be_bytes).collect()), Value::National, 0),
                 Literal::Figurative(f) => (lir::Const::Figurative(*f), Value::Fig(*f), 0),
-                _ => return unsupported("ALL with a literal that is not alphanumeric", pos),
+                _ => return unsupported("ALL with a literal that is not alphanumeric or national", pos),
             },
         };
         Ok((self.constant(constant)?, Side { value, src: None, digits }))

@@ -803,13 +803,15 @@ impl Lower<'_> {
         Ok(())
     }
 
-    /// One VARYING or AFTER phrase: FROM stored with MOVE rules, the BY step, and the UNTIL test.
+    /// One VARYING or AFTER phrase: FROM stored with MOVE rules, the BY step, and the UNTIL test. A
+    /// floating-point variable's step is the walker's ADD to it, in floating point.
     fn vary_level(&mut self, v: &Varying, pos: Pos) -> R<VaryLevel> {
         let Varying { var: _, from: _, by: _, until: _ } = v;
         let var = self.place(&v.var, false)?;
         let kind = self.kind_of(var);
-        if !matches!(kind, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Index) {
-            return unsupported("a PERFORM VARYING variable that is not a fixed-point numeric item", v.var.pos);
+        let float = matches!(kind, Kind::Float(_));
+        if !float && !matches!(kind, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Index) {
+            return unsupported("a PERFORM VARYING variable that is not a numeric item", v.var.pos);
         }
         let Expr::Operand(from) = &v.from else { return unsupported("PERFORM VARYING FROM an arithmetic expression", pos) };
         let from = self.operand(from, pos)?;
@@ -817,6 +819,11 @@ impl Lower<'_> {
         let plan = self.move_plan(&Side { src: None, ..from.side }, kind, item)?;
         let from = Op::Set { from: from.operand, to: var, plan };
         let sum = Expr::Bin(Box::new(Expr::Operand(Operand::Ref(v.var.clone()))), BinOp::Add, Box::new(v.by.clone()));
+        if float {
+            let target = Target { r: v.var.clone(), rounded: false };
+            let step = Op::Arith(self.arith_plan(&[(&target, &sum)], None, false, false, pos)?);
+            return Ok(VaryLevel { from, step, until: self.test(&v.until, pos)? });
+        }
         let dmax = scale(kind).max(self.dmax(&sum)?);
         let prepass = self.dmax_places(&sum)?;
         let by = self.expr_within(&v.by, pos, Within::Fixed(dmax))?;

@@ -195,12 +195,18 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
 
     /// MOVE into a receiver by its plan.
     fn move_into(&mut self, dest: Loc, val: Val, plan: &MovePlan, at: DebugId, pos: Pos) -> R<()> {
+        self.move_scaled(dest, val, plan, None, at, pos)
+    }
+
+    /// MOVE into a receiver by its plan, its PICTURE's scaling positions P given where its `Loc`
+    /// names no place.
+    pub(super) fn move_scaled(&mut self, dest: Loc, val: Val, plan: &MovePlan, scaling: Option<u32>, at: DebugId, pos: Pos) -> R<()> {
         let store = match plan {
             MovePlan::Refused(abend) => return Err(self.abend(*abend, Some(at)).into()),
             MovePlan::Numeric { store, .. } => Some(store),
             _ => None,
         };
-        let facts = self.receiving(store);
+        let facts = Receiving { scaling, ..self.receiving(store) };
         Ok(store::assign(&facts, self.unit, dest, val, None, pos)?)
     }
 
@@ -253,10 +259,14 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             Convert::Chars { justified } => chars(&self.facts().page().decode(&bytes), justified),
             Convert::National => chars(&utf16_text(&bytes), false),
             Convert::Float(precision) => Converted::Number(json::float_number(Hfp::from_bytes(precision, &bytes), if precision == Precision::Short { 8 } else { 17 })),
-            Convert::Fixed { integers } => match self.read(loc, pos)? {
-                Val::Num(x) => Converted::Number(json::fixed_number(x.negative, x.magnitude, x.places.dec, integers)),
-                _ => return Err(Abend::ironwork("a numeric item without a numeric value", pos).into()),
-            },
+            Convert::Fixed { integers } | Convert::Scaled { integers, .. } => {
+                let scaling = if let Convert::Scaled { scaling, .. } = convert { Some(scaling) } else { None };
+                let facts = Receiving { facts: self.facts(), name: None, scaling };
+                match store::read(&facts, &self.unit.mem, loc, pos)? {
+                    Val::Num(x) => Converted::Number(json::fixed_number(x.negative, x.magnitude, x.places.dec, integers)),
+                    _ => return Err(Abend::ironwork("a numeric item without a numeric value", pos).into()),
+                }
+            }
             Convert::Refused(abend) => return Err(self.abend(abend, Some(at)).into()),
         })
     }

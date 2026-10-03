@@ -62,6 +62,8 @@ pub enum Val {
     Float(Hfp),
     Fig(Figurative),
     All(Vec<u8>),
+    /// ALL with a national literal: its UTF-16 units, repeated to the length of what it meets.
+    AllNational(Vec<u8>),
     /// A pointer value: `ADDRESS_BASE` (in the interpreter's run unit) plus an offset into run-unit memory, or 0 for NULL.
     Address(u32),
 }

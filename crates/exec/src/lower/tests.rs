@@ -485,6 +485,17 @@ fn constructs_outside_the_slice_are_refused_by_name() {
 }
 
 #[test]
+fn an_all_national_literal_is_its_units_and_a_floating_point_varying_step_is_an_add() {
+    let data = "       01  N PIC N(3) USAGE NATIONAL.\n       01  F COMP-2.\n";
+    let body = [line("MOVE ALL N'AB' TO N"), line("PERFORM VARYING F FROM 1.5 BY 1 UNTIL F > 3"), line("    DISPLAY N"), line("END-PERFORM"), line("GOBACK.")].concat();
+    let p = lowered(&program("", data, &body));
+    assert!(p.consts.contains(&Const::AllNational(vec![0, 0x41, 0, 0x42])), "{:?}", p.consts);
+    assert!(!ops(&p).any(|op| matches!(op, Op::Step { .. })));
+    let plan = ops(&p).find_map(|op| if let Op::Arith(id) = op { Some(&p.plans.arith[*id as usize]) } else { None }).unwrap();
+    assert!(matches!(plan.steps[..], [lir::ArithStep { mode: Mode::Float(_), store: StorePlan::Float(_), rounded: false, .. }]), "{plan:?}");
+}
+
+#[test]
 fn declaratives_that_never_run_lower_as_paragraphs_before_the_procedure_start() {
     let data = "       01  K PIC 9 VALUE 1.\n       01  J PIC 9.\n       01  T.\n           05 E PIC X OCCURS 3.\n";
     // A line indented four columns is in area B; any other starts in area A.

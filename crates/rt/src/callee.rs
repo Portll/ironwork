@@ -72,7 +72,7 @@ fn value_content<'w, P: Copy, O>(x: &mut impl Arguments<'w, P, O>, operand: &O, 
 /// its four bytes, LENGTH OF as a binary fullword.
 pub fn content_argument(facts: &dyn ProgramFacts, val: Val, length_of: bool) -> Vec<u8> {
     match val {
-        Val::Bytes(b) | Val::All(b) | Val::National(b) => b,
+        Val::Bytes(b) | Val::All(b) | Val::National(b) | Val::AllNational(b) => b,
         Val::Fig(f) => vec![facts.figurative(f)],
         Val::Address(a) => a.to_be_bytes().to_vec(),
         Val::Num(f) if length_of => (align(&f, 0, false).and_then(|m| m.to_u128()).unwrap_or(0) as u32).to_be_bytes().to_vec(),

@@ -217,12 +217,12 @@ impl Lower<'_> {
         Ok(moved)
     }
 
-    /// `converted`: how a value of `kind` in item `item` is written.
-    fn convert(&mut self, item: usize, kind: Kind, statement: &str, pos: Pos) -> M<Convert> {
+    /// `converted`: how a value of `kind` in item `item` is written. Positions P right of the digits
+    /// are integer positions, except in a binary item whose integer positions its storage decides.
+    fn convert(&mut self, item: usize, kind: Kind, statement: &str) -> M<Convert> {
         let i = &self.layout.items[item];
-        if i.scaling > 0 {
-            return Err(Fail::Lower(LowerError::Unsupported("JSON or XML GENERATE of an item with PICTURE scaling positions", pos)));
-        }
+        let scaling = i.scaling;
+        let fixed = |integers: u32| if scaling > 0 { Convert::Scaled { integers, scaling } } else { Convert::Fixed { integers } };
         let binary_integers = |digits: u32, scale: u32, native: bool| {
             if native || self.c.options.trunc == Trunc::Bin {
                 let whole = match digits {
@@ -232,7 +232,7 @@ impl Lower<'_> {
                 };
                 whole - scale.min(whole)
             } else {
-                digits.saturating_sub(scale)
+                digits.saturating_sub(scale) + scaling
             }
         };
         Ok(match kind {
@@ -240,8 +240,8 @@ impl Lower<'_> {
             Kind::AlnumEdited { .. } | Kind::NumericEdited { .. } | Kind::Group => Convert::Chars { justified: false },
             Kind::National => Convert::National,
             Kind::Float(precision) => Convert::Float(precision),
-            Kind::Zoned { digits, scale, .. } | Kind::Packed { digits, scale, .. } => Convert::Fixed { integers: digits.saturating_sub(scale) },
-            Kind::Binary { digits, scale, native, .. } => Convert::Fixed { integers: binary_integers(digits, scale, native) },
+            Kind::Zoned { digits, scale, .. } | Kind::Packed { digits, scale, .. } => fixed(digits.saturating_sub(scale) + scaling),
+            Kind::Binary { digits, scale, native, .. } => fixed(binary_integers(digits, scale, native)),
             Kind::Index => Convert::Fixed { integers: 10 },
             Kind::Pointer | Kind::ObjectReference | Kind::ProgramPointer => {
                 let name = i.name.as_deref().unwrap_or("FILLER");
@@ -470,7 +470,7 @@ impl Lower<'_> {
             Some(m) => Some(self.marker(m, depth, pos)?),
             None => None,
         };
-        let convert = self.convert(item, kind, "JSON GENERATE", pos)?;
+        let convert = self.convert(item, kind, "JSON GENERATE")?;
         Ok(lir::JsonLeaf { suppress, boolean, convert })
     }
 
@@ -555,7 +555,7 @@ impl Lower<'_> {
             self.xml_group(from, 0, None, name, false, &p, x.pos, &mut nodes)?;
         } else {
             let kind = self.kind_of(from_place);
-            let convert = self.convert(from, kind, "XML GENERATE", x.pos)?;
+            let convert = self.convert(from, kind, "XML GENERATE")?;
             let value = lir::XmlValue::Leaf { form: XmlForm::Element, suppress: Vec::new(), convert };
             push(&mut nodes, lir::XmlNode { offset: 0, moved: Vec::new(), len, kind, name, occurs: None, value }, "XML GENERATE's items")?;
         }
@@ -611,7 +611,7 @@ impl Lower<'_> {
                         .flat_map(|(numeric, _, when)| when.iter().copied().filter(|&f| every_selects(child.kind, *numeric, f)))
                         .collect(),
                 };
-                let convert = self.convert(c, child.kind, "XML GENERATE", pos)?;
+                let convert = self.convert(c, child.kind, "XML GENERATE")?;
                 let value = lir::XmlValue::Leaf { form: self::form(form), suppress, convert };
                 push(nodes, lir::XmlNode { offset, moved: Vec::new(), len: child.size, kind: child.kind, name, occurs, value }, "XML GENERATE's items")?
             };
@@ -829,10 +829,7 @@ impl Lower<'_> {
     /// `parse_elementary`, `parse_string` and `parse_number` by the item's kind.
     fn parse_leaf(&mut self, item: usize, depth: usize, p: &ParsePhrases, pos: Pos) -> M<lir::ParseLeaf> {
         let i = &self.layout.items[item];
-        let kind = i.kind;
-        if i.scaling > 0 {
-            return Err(Fail::Lower(LowerError::Unsupported("JSON PARSE into an item with PICTURE scaling positions", pos)));
-        }
+        let (kind, scaling) = (i.kind, i.scaling);
         let boolean = match p.booleans.get(&item) {
             Some(flag) => Some(self.parse_flag(flag, Some(item), depth, pos)?),
             None => None,
@@ -845,8 +842,14 @@ impl Lower<'_> {
         };
         let number = match kind {
             Kind::Float(_) => NumberInto::Float(self.move_plan(&side(Value::Float), kind, Some(item))?),
-            Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } => NumberInto::Store(self.store_plan(kind, Some(item))?),
-            Kind::NumericEdited { .. } => NumberInto::Edited(self.move_plan(&side(Value::Num(None)), kind, Some(item))?),
+            Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } => match self.store_plan(kind, Some(item))? {
+                store if scaling > 0 => NumberInto::StoreScaled { store, scaling },
+                store => NumberInto::Store(store),
+            },
+            Kind::NumericEdited { .. } => match self.move_plan(&side(Value::Num(None)), kind, Some(item))? {
+                plan if scaling > 0 => NumberInto::EditedScaled { plan, scaling },
+                plan => NumberInto::Edited(plan),
+            },
             Kind::Alnum { .. } if self.layout.items[item].alphabetic => NumberInto::Incompatible,
             Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::National => NumberInto::Digits,
             _ => NumberInto::Incompatible,

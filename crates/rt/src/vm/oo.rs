@@ -54,7 +54,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
                 Const::Figurative(f) => vec![self.facts().figurative(*f)],
                 Const::Bytes(b) | Const::National(b) => b.clone(),
                 Const::Refused(abend) => return Err(self.abend(*abend, None).into()),
-                Const::All(_) => return Err(Abend::ironwork("this INVOKE argument is not supported", pos).into()),
+                Const::All(_) | Const::AllNational(_) => return Err(Abend::ironwork("this INVOKE argument is not supported", pos).into()),
             },
             Operand::AddressOf(_) | Operand::Function(_) | Operand::UserFunction(_) => return Err(Abend::ironwork("this INVOKE argument is not supported", pos).into()),
         })

@@ -659,3 +659,101 @@ fn the_vm_takes_a_floating_point_function_s_whole_part_as_an_exec_cics_number() 
     let (out, ending) = task_on_both(&cics_program("FLOATLEN", data, "", &body));
     assert_eq!((out.as_str(), ending), ("0005 ABCDE   \n", Ok(Ending::Goback)));
 }
+
+#[test]
+fn the_vm_moves_and_compares_an_all_national_literal_as_the_interpreter_does() {
+    let data = "       01  N PIC N(5) USAGE NATIONAL.\n       01  XA PIC N(4) USAGE NATIONAL VALUE ALL N'AB'.\n";
+    let body = [
+        "MOVE ALL N'AB' TO N",
+        "DISPLAY '[' N '][' XA ']'",
+        "IF N = ALL N'AB' DISPLAY 'EQ' END-IF",
+        "IF ALL N\"AB\" < XA DISPLAY 'LT' ELSE DISPLAY 'GE' END-IF",
+        "IF N > ALL N'AA' DISPLAY 'GT' END-IF",
+        "EVALUATE N WHEN ALL N'AB' DISPLAY 'WHEN' END-EVALUATE",
+        "GOBACK.",
+    ];
+    let (out, ending) = on_both(&program("", data, &body.map(line).concat()));
+    assert!(ending.is_ok(), "{ending:?}");
+    assert_eq!(out, "[ABABA][ABAB]\nEQ\nGE\nGT\nWHEN\n");
+}
+
+#[test]
+fn the_vm_steps_a_floating_point_varying_variable_in_floating_point() {
+    let data = "       01  F COMP-2.\n       01  H COMP-1.\n       01  J PIC 9.\n       01  K PIC 99 VALUE 0.\n       01  D PIC -9.99.\n";
+    let source = paragraphs(
+        data,
+        &[
+            "PERFORM VARYING F FROM 1.5 BY 1 UNTIL F > 3",
+            "    MOVE F TO D",
+            "    DISPLAY D",
+            "END-PERFORM",
+            "PERFORM COUNT-IT VARYING H FROM 0.25 BY 0.5 UNTIL H > 1.5",
+            "    AFTER J FROM 1 BY 1 UNTIL J > 2",
+            "DISPLAY K",
+            "PERFORM WITH TEST AFTER VARYING F FROM 2 BY -0.75 UNTIL F < 0",
+            "    MOVE F TO D",
+            "    DISPLAY D",
+            "END-PERFORM",
+            "GOBACK.",
+        ],
+        &[("COUNT-IT", &["ADD 1 TO K."])],
+    );
+    let (out, ending) = on_both(&source);
+    assert!(ending.is_ok(), "{ending:?}");
+    assert_eq!(out, " 1.50\n 2.50\n06\n 2.00\n 1.25\n 0.50\n-0.25\n");
+}
+
+#[test]
+fn the_vm_evaluates_range_and_max_with_a_floating_point_argument_in_floating_point() {
+    let data = "       01  N PIC 9 VALUE 2.\n       01  M PIC 9V9 VALUE 0.5.\n       01  F COMP-2 VALUE 1.5.\n       01  R COMP-2.\n       01  D PIC -9.99.\n       01  C PIC 9 VALUE 2.\n       01  G.\n           05 T PIC 9 OCCURS 1 TO 3 DEPENDING ON C.\n";
+    let body = [
+        "MOVE 7 TO T(1)",
+        "MOVE 4 TO T(2)",
+        "COMPUTE R = FUNCTION RANGE(N F)",
+        "MOVE R TO D",
+        "DISPLAY D",
+        "MOVE FUNCTION RANGE(N M F) TO D",
+        "DISPLAY D",
+        "IF FUNCTION RANGE(N M F) = 1.5 DISPLAY 'EQ' END-IF",
+        "COMPUTE R = FUNCTION MAX(T(ALL) F)",
+        "MOVE R TO D",
+        "DISPLAY D",
+        "MOVE 0 TO C",
+        "MOVE FUNCTION MAX(T(ALL) F) TO D",
+        "DISPLAY D",
+        "GOBACK.",
+    ];
+    let (out, ending) = on_both(&program("", data, &body.map(line).concat()));
+    assert!(ending.is_ok(), "{ending:?}");
+    assert_eq!(out, " 0.50\n 1.50\nEQ\n 7.00\n 1.50\n");
+}
+
+#[test]
+fn the_vm_writes_and_parses_items_with_picture_scaling_positions() {
+    let data = concat!(
+        "       01  D PIC N(80) USAGE NATIONAL.\n       01  X PIC X(80).\n       01  J PIC N(80) USAGE NATIONAL.\n",
+        "       01  G.\n           05 S PIC 9PP VALUE 300.\n           05 T PIC SVPP9 VALUE -.005.\n",
+        "           05 B PIC 9(2)PP COMP VALUE 1200.\n           05 C PIC S9(2)PP COMP-5 VALUE -4500.\n",
+        "           05 K PIC 9(3)PPP COMP-3 VALUE 45000.\n           05 E PIC Z9PP VALUE 7800.\n",
+    );
+    let body = [
+        "MOVE SPACES TO D",
+        "JSON GENERATE D FROM G",
+        "DISPLAY D",
+        "MOVE SPACES TO X",
+        "XML GENERATE X FROM G",
+        "DISPLAY X",
+        "MOVE D TO J",
+        "MOVE ZERO TO S T B C K E",
+        "JSON PARSE J INTO G",
+        "DISPLAY JSON-CODE ' ' S ' ' T ' ' B ' ' C ' ' K ' ' E",
+        "MOVE S TO X",
+        "DISPLAY X",
+        "GOBACK.",
+    ];
+    let (out, ending) = on_both(&program("", data, &body.map(line).concat()));
+    assert!(ending.is_ok(), "{ending:?}");
+    let json = "{\"G\":{\"S\":300,\"T\":-0.005,\"B\":1200,\"C\":-4500,\"K\":45000,\"E\":\"78\"}}";
+    let xml = "<G><S>300</S><T>-0.005</T><B>1200</B><C>-4500</C><K>45000</K><E>78</E></G>";
+    assert_eq!(out, format!("{json:<80}\n{xml:<80}\n000000000 3 N 12 0004N 045  0\n{:<80}\n", "300"));
+}

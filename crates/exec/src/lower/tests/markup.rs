@@ -75,6 +75,29 @@ fn no_json_number_goes_into_an_alphabetic_item() {
 }
 
 #[test]
+fn an_item_with_picture_scaling_positions_is_read_and_stored_with_them() {
+    let data = "       01  D PIC X(80).\n       01  G.\n           05 S PIC 9PP.\n           05 B PIC 9(2)PP COMP.\n           05 E PIC Z9PP.\n";
+    let p = lowered(&program("", data, &[line("JSON GENERATE D FROM G"), line("JSON PARSE D INTO G"), line("GOBACK.")].concat()));
+    let [Markup::JsonGenerate(g), Markup::JsonParse(j)] = markup(&p) else { panic!("{:?}", markup(&p)) };
+    let converts: Vec<Convert> = g.nodes[1..]
+        .iter()
+        .map(|n| match &n.value {
+            JsonValue::Leaf(leaf) => leaf.convert,
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(converts, [Convert::Scaled { integers: 3, scaling: 2 }, Convert::Scaled { integers: 4, scaling: 2 }, Convert::Chars { justified: false }]);
+    let numbers: Vec<NumberInto> = j.nodes[1..]
+        .iter()
+        .map(|n| match &n.value {
+            ParseValue::Leaf(leaf) => leaf.number,
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert!(matches!(numbers[..], [NumberInto::StoreScaled { scaling: 2, .. }, NumberInto::StoreScaled { scaling: 2, .. }, NumberInto::EditedScaled { scaling: 2, .. }]), "{numbers:?}");
+}
+
+#[test]
 fn a_phrase_naming_a_condition_name_abends_where_the_walker_would() {
     let data = "       01  D PIC X(80).\n       01  G.\n           05 A PIC X.\n              88 A-ON VALUE 'Y'.\n";
     let p = lowered(&program("", data, &[line("JSON GENERATE D FROM G SUPPRESS A-ON"), line("GOBACK.")].concat()));

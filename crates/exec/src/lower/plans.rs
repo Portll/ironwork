@@ -266,8 +266,8 @@ impl Lower<'_> {
             Literal::Number(t) => t.clone(),
             Literal::Figurative(f) => self.page.decode_byte(self.c.collating.figurative(*f)).to_string(),
             Literal::All(inner) => match &**inner {
-                Literal::Alnum(_) | Literal::Hex(_) | Literal::Figurative(_) => self.display_text(inner, pos)?,
-                _ => return unsupported("ALL with a literal that is not alphanumeric", pos),
+                Literal::Alnum(_) | Literal::Hex(_) | Literal::National(_) | Literal::Figurative(_) => self.display_text(inner, pos)?,
+                _ => return unsupported("ALL with a literal that is not alphanumeric or national", pos),
             },
         })
     }

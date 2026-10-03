@@ -228,7 +228,7 @@ fn chars_in<P: Copy, O>(x: &mut impl Values<P, O>, c: &Chars<P, O>, unit: usize,
 fn national<P: Copy, O>(x: &impl Values<P, O>, val: Val, pos: Pos) -> R<Vec<u8>> {
     let facts = x.facts();
     Ok(match val {
-        Val::National(b) => b,
+        Val::National(b) | Val::AllNational(b) => b,
         Val::Fig(f) => store::figurative_unit(f, facts.options().quote).to_be_bytes().to_vec(),
         val => facts.page().decode(&store::natural_bytes(&facts, val, pos)?).encode_utf16().flat_map(u16::to_be_bytes).collect(),
     })

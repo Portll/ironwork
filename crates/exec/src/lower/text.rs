@@ -207,8 +207,8 @@ impl Lower<'_> {
             },
             Literal::Figurative(f) => vec![self.c.collating.figurative(*f)],
             Literal::All(inner) => match &**inner {
-                Literal::Alnum(_) | Literal::Hex(_) | Literal::Figurative(_) => self.natural_bytes(inner, pos)?,
-                _ => return unsupported("ALL with a literal that is not alphanumeric", pos),
+                Literal::Alnum(_) | Literal::Hex(_) | Literal::National(_) | Literal::Figurative(_) => self.natural_bytes(inner, pos)?,
+                _ => return unsupported("ALL with a literal that is not alphanumeric or national", pos),
             },
         })
     }

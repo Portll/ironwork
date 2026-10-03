@@ -245,11 +245,16 @@ fn of(value: Value) -> Side {
 /// What the function's value reads as: alphanumeric bytes, national units, a float, or a number
 /// with its decimal places and digits where they are the same on every call (`Num(None)` where
 /// they depend on the argument's text, on which argument wins or on how many values an OCCURS
-/// DEPENDING ON table gives). A floating-point argument makes ABS, REM, MIN, MAX and SUM
-/// floating-point and INTEGER and INTEGER-PART 30 digits, 31 under ARITH(EXTEND) (`float_function`).
+/// DEPENDING ON table gives). A floating-point argument makes ABS, REM, MIN, MAX, RANGE and SUM
+/// floating-point, whatever count an OCCURS DEPENDING ON table gives where one is given once, and
+/// INTEGER and INTEGER-PART 30 digits, 31 under ARITH(EXTEND) (`float_function`).
 fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
+    let numeric = args.iter().all(|a| matches!(a.side.value, Value::Num(_) | Value::Float));
+    let float_given = args.iter().any(|a| a.side.value == Value::Float && a.times.is_some_and(|n| n > 0));
+    let float_at_any_count = numeric && float_given && matches!(func, Func::Abs | Func::Rem | Func::Min | Func::Max | Func::Sum | Func::Range);
     if let Some(d) = args.iter().find(|a| a.times.is_none())
         && args.iter().any(|a| a.side.value != d.side.value)
+        && !float_at_any_count
     {
         return unsupported("FUNCTION arguments of different kinds with a table whose ALL subscripts run to an OCCURS DEPENDING ON count", pos);
     }
@@ -257,6 +262,7 @@ fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
     let float = args.iter().any(|a| a.side.value == Value::Float);
     Ok(match func {
         Func::Abs | Func::Rem | Func::Min | Func::Max | Func::Sum if float => of(Value::Float),
+        Func::Range if float && numeric => of(Value::Float),
         Func::Integer | Func::IntegerPart if float => integer(if arith == Arith::Compat { 30 } else { 31 }),
         Func::Mod if float => num(None, 0),
         Func::Char
@@ -382,15 +388,14 @@ fn sum(args: &[Arg], arith: Arith) -> Side {
     num(Some(total.dec), total.total())
 }
 
-/// RANGE: the greatest less the least, in fixed point when both are fixed-point, and otherwise in
-/// floating point.
+/// RANGE of fixed-point arguments: the greatest less the least, in fixed point.
 fn range(args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
     let fixed = args.iter().filter(|a| matches!(a.side.value, Value::Num(_))).count();
     if fixed == 0 {
         return Ok(of(Value::Float));
     }
     if fixed < args.len() {
-        return unsupported("FUNCTION RANGE of fixed-point arguments with floating-point or other ones", pos);
+        return unsupported("FUNCTION RANGE of fixed-point arguments with other ones", pos);
     }
     let places: Option<Vec<Places>> = args.iter().map(places).collect();
     Ok(match places.as_deref() {

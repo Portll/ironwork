@@ -550,9 +550,14 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         self.assign(var, start, None, pos)
     }
 
+    /// The step adds BY to the variable; a COMP-1 or COMP-2 variable makes it floating point, as
+    /// an ADD to it is (Programming Guide SC27-8714-03, p. 800).
     fn vary_by(&mut self, v: &Varying, pos: Pos) -> R<()> {
         let var = self.locate(&v.var)?;
         let step = Expr::Bin(Box::new(Expr::Operand(Operand::Ref(v.var.clone()))), BinOp::Add, Box::new(v.by.clone()));
+        if let Kind::Float(_) = var.kind {
+            return self.arithmetic(&[(Target { r: v.var.clone(), rounded: false }, step)], None, None, false, pos).map(|_| ());
+        }
         let dmax = var.kind.digits_scale().map_or(0, |(_, s)| s).max(self.dmax(&step)?);
         let next = self.eval_fixed(&step, dmax, pos)?;
         store::store_fixed(&self.facts(), self.unit, var, &next, false, pos)
@@ -725,8 +730,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Literal::Figurative(f) => Val::Fig(*f),
             Literal::All(inner) => match self.literal_value(inner, pos)? {
                 Val::Bytes(b) => Val::All(b),
+                Val::National(n) => Val::AllNational(n),
                 Val::Fig(f) => Val::Fig(f),
-                _ => return Err(Abend::ironwork("ALL takes an alphanumeric literal", pos)),
+                _ => return Err(Abend::ironwork("ALL takes an alphanumeric or national literal", pos)),
             },
         })
     }

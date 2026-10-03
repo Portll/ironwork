@@ -78,7 +78,7 @@ pub fn storage(facts: &dyn ProgramFacts, name: &str, bytes: &[u8], pos: Pos) -> 
 /// The bytes of an argument that is not a data item, as DISPLAY would hold the value.
 pub fn stored_bytes(facts: &dyn ProgramFacts, val: Val, pos: Pos) -> R<Vec<u8>> {
     Ok(match val {
-        Val::Bytes(b) | Val::National(b) | Val::All(b) => b,
+        Val::Bytes(b) | Val::National(b) | Val::All(b) | Val::AllNational(b) => b,
         Val::Float(h) => h.to_bytes(),
         Val::Fig(fig) => vec![facts.figurative(fig)],
         Val::Address(a) => a.to_be_bytes().to_vec(),
@@ -523,7 +523,7 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
                 "RANGE" => {
                     let least = extreme(facts, &args, Ordering::Less, name, pos)?;
                     match (&args[best], &args[least]) {
-                        (Val::Num(hi), Val::Num(lo)) => {
+                        (Val::Num(hi), Val::Num(lo)) if !floating => {
                             let dmax = hi.places.dec.max(lo.places.dec);
                             Ok(Val::Num(hi.sub(*lo, dmax, arith).map_err(|_| Abend::ironwork("FUNCTION RANGE: a result beyond 256 bits", pos))?))
                         }

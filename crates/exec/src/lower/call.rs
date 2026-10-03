@@ -91,8 +91,8 @@ impl Lower<'_> {
             },
             Literal::Figurative(f) => vec![self.c.collating.figurative(*f)],
             Literal::All(inner) => match &**inner {
-                Literal::Alnum(_) | Literal::Hex(_) | Literal::Figurative(_) => self.content_bytes(inner, pos)?,
-                _ => return unsupported("ALL with a literal that is not alphanumeric", pos),
+                Literal::Alnum(_) | Literal::Hex(_) | Literal::National(_) | Literal::Figurative(_) => self.content_bytes(inner, pos)?,
+                _ => return unsupported("ALL with a literal that is not alphanumeric or national", pos),
             },
         })
     }
@@ -184,8 +184,8 @@ fn literal_error(l: &Lower<'_>, lit: &Literal) -> Result<(), String> {
         Literal::All(inner) => {
             literal_error(l, inner)?;
             match &**inner {
-                Literal::Alnum(_) | Literal::Hex(_) | Literal::Figurative(_) => Ok(()),
-                _ => Err("ALL takes an alphanumeric literal".into()),
+                Literal::Alnum(_) | Literal::Hex(_) | Literal::National(_) | Literal::Figurative(_) => Ok(()),
+                _ => Err("ALL takes an alphanumeric or national literal".into()),
             }
         }
         _ => Ok(()),

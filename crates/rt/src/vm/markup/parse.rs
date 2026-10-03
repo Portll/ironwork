@@ -3,7 +3,7 @@
 
 use super::super::flow::{Arrival, Exit};
 use super::super::value::constant;
-use super::{Code, R, Vm, ccsid_of, node_loc, not_yet, slot};
+use super::{Code, R, Receiving, Vm, ccsid_of, node_loc, not_yet, slot};
 use crate::abend::{Abend, AbendCode};
 use crate::intrinsic::numval::Number;
 use crate::json::parse::{self as json, Invalid, Value, fixed_value};
@@ -302,17 +302,19 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 let value = number.to_real().to_hfp(precision).map_err(|c| Abend::check(c, at.pos))?;
                 self.move_into(loc, Val::Float(value), plan, at.debug, at.pos)?;
             }
-            NumberInto::Store(plan) => {
+            NumberInto::Store(plan) | NumberInto::StoreScaled { store: plan, .. } => {
                 let (Kind::Zoned { scale, .. } | Kind::Packed { scale, .. } | Kind::Binary { scale, .. }) = loc.kind else {
                     return Err(not_yet("a JSON number into a fixed-point plan for another item"));
                 };
                 let (fixed, cut) = fixed_value(negative, int, &frac[..frac.len().min(scale as usize)]);
-                let facts = self.receiving(Some(plan));
+                let scaling = if let NumberInto::StoreScaled { scaling, .. } = leaf.number { Some(scaling) } else { None };
+                let facts = Receiving { scaling, ..self.receiving(Some(plan)) };
                 if store::store_fixed_checked(&facts, self.unit, loc, &fixed, false, false, at.pos)? || cut {
                     g.status |= SIZE_ERROR;
                 }
             }
             NumberInto::Edited(plan) => self.move_into(loc, Val::Num(fixed_value(negative, int, frac).0), plan, at.debug, at.pos)?,
+            NumberInto::EditedScaled { plan, scaling } => self.move_scaled(loc, Val::Num(fixed_value(negative, int, frac).0), plan, Some(*scaling), at.debug, at.pos)?,
             NumberInto::Digits if integer => {
                 let width = if loc.kind == Kind::National { loc.len / 2 } else { loc.len };
                 if int.len() > width {

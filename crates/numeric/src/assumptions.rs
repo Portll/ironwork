@@ -1321,7 +1321,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: FLOAT_FUNCTION_ARGUMENTS,
-        claim: "A floating-point argument, item or expression, is allowed wherever a function takes a numeric argument and refused where it takes an integer (Language Reference SC27-8713-03, p. 507). INTEGER and INTEGER-PART of one return an integer of 30 digits, 31 under ARITH(EXTEND), and ABS, MAX, MIN and REM with one are evaluated in floating point and return it (Programming Guide SC27-8714-03, pp. 799 and 801). The guide names REM a mixed function where the Language Reference types it numeric (p. 633), and gives the precision only of floating-point functions: a mixed function is evaluated here in long floating point, extended under ARITH(EXTEND), as they are",
+        claim: "A floating-point argument, item or expression, is allowed wherever a function takes a numeric argument and refused where it takes an integer (Language Reference SC27-8713-03, p. 507). INTEGER and INTEGER-PART of one return an integer of 30 digits, 31 under ARITH(EXTEND), and ABS, MAX, MIN, RANGE, REM and SUM with one are evaluated in floating point and return it (Programming Guide SC27-8714-03, pp. 799 and 801). The guide names REM a mixed function where the Language Reference types it numeric (p. 633), and gives the precision only of floating-point functions: a mixed function is evaluated here in long floating point, extended under ARITH(EXTEND), as they are",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

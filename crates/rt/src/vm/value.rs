@@ -22,6 +22,7 @@ pub(super) fn constant(c: &Const) -> Result<Val, AbendId> {
         Const::Number(f) => Val::Num(*f),
         Const::Figurative(f) => Val::Fig(*f),
         Const::All(b) => Val::All(b.clone()),
+        Const::AllNational(b) => Val::AllNational(b.clone()),
         Const::Refused(abend) => return Err(*abend),
     })
 }

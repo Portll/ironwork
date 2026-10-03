@@ -53,6 +53,8 @@ pub enum Convert {
     Fixed { integers: u32 },
     /// A pointer, procedure-pointer or object reference: this IRONWORK abend when it is reached.
     Refused(AbendId),
+    /// `Fixed` of an item whose PICTURE has `scaling` positions P right of its digits.
+    Scaled { integers: u32, scaling: u32 },
 }
 
 /// A USING value that stands for true or null.
@@ -297,6 +299,10 @@ pub enum NumberInto {
     Digits,
     /// An alphabetic item, or any other no number moves to.
     Incompatible,
+    /// `Store` into an item whose PICTURE has `scaling` positions P right of its digits.
+    StoreScaled { store: StorePlan, scaling: u32 },
+    /// `Edited` into a numeric-edited item whose PICTURE has `scaling` positions P.
+    EditedScaled { plan: MovePlan, scaling: u32 },
 }
 
 /// INDICATING: the indicator IN names, located with the walk's subscripts whatever the flag,
@@ -346,7 +352,7 @@ impl XmlRegister {
 
 codec_enum!(Markup { JsonGenerate(g) = 0, XmlGenerate(g) = 1, XmlParse(p) = 2, JsonParse(p) = 3 });
 codec_enum!(Ccsid { Unnamed = 0, CodePage = 1, Operand(o) = 2 });
-codec_enum!(Convert { Chars { justified } = 0, National = 1, Float(precision) = 2, Fixed { integers } = 3, Refused(abend) = 4 });
+codec_enum!(Convert { Chars { justified } = 0, National = 1, Float(precision) = 2, Fixed { integers } = 3, Refused(abend) = 4, Scaled { integers, scaling } = 5 });
 codec_enum!(Marker { Byte(b) = 0, Condition(c) = 1, Refused(abend) = 2 });
 codec_struct!(JsonGenerate { from, subscripts, nodes, name, receiver, encoding, count, code, on_exception, not_on_exception } check json_valid);
 codec_struct!(JsonNode { offset, moved, len, kind, name, occurs, indicator, null, value });
@@ -364,7 +370,7 @@ codec_struct!(ParseNode { offset, moved, len, kind, name, occurs, ignored, indic
 codec_enum!(Named { Exactly(name) = 0, Folded(name) = 1, Omitted = 2 });
 codec_enum!(ParseValue { Object { members } = 0, Leaf(leaf) = 1, Suppressed = 2 });
 codec_struct!(ParseLeaf { boolean, text, number });
-codec_enum!(NumberInto { Float(plan) = 0, Store(store) = 1, Edited(plan) = 2, Digits = 3, Incompatible = 4 });
+codec_enum!(NumberInto { Float(plan) = 0, Store(store) = 1, Edited(plan) = 2, Digits = 3, Incompatible = 4, StoreScaled { store, scaling } = 5, EditedScaled { plan, scaling } = 6 });
 codec_struct!(Indicator { place, flag });
 codec_enum!(Flag { Set { on, off } = 0, Literals { on, off } = 1 });
 codec_enum!(SetTo { Nothing = 0, Move { place, value, plan } = 1, Refused(abend) = 2 });

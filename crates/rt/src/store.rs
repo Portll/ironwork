@@ -148,7 +148,7 @@ pub fn zoned_value(numproc: Numproc, bytes: &[u8], signed: bool, sign: Option<Si
 /// figurative constant as one character, a numeric literal as its digits.
 pub fn natural_bytes(facts: &dyn ProgramFacts, val: Val, pos: Pos) -> R<Vec<u8>> {
     Ok(match val {
-        Val::Bytes(b) | Val::All(b) | Val::National(b) => b,
+        Val::Bytes(b) | Val::All(b) | Val::National(b) | Val::AllNational(b) => b,
         Val::Fig(f) => vec![facts.figurative(f)],
         Val::Num(f) => zoned_digits(f.magnitude.to_u128().unwrap_or(0), f.places.total() as usize, decimal::UNSIGNED),
         _ => return Err(Abend::ironwork("this operand has no characters to work on", pos)),
@@ -327,6 +327,7 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
         Kind::National => {
             let units: Vec<u16> = match val {
                 Val::National(b) => b.chunks(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect(),
+                Val::AllNational(b) => b.chunks(2).map(|c| u16::from_be_bytes([c[0], c[1]])).cycle().take(dest.len / 2).collect(),
                 Val::Bytes(b) => page.decode(&b).encode_utf16().collect(),
                 Val::Fig(f) => vec![figurative_unit(f, facts.options().quote); dest.len / 2],
                 _ => return Err(Abend::ironwork("this value cannot be moved to a national item", pos)),
@@ -397,7 +398,7 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
                 };
                 store_fixed(facts, unit, dest, &v, false, pos)?;
             }
-            Val::National(_) => return Err(Abend::ironwork("a national value cannot be moved to a numeric item", pos)),
+            Val::National(_) | Val::AllNational(_) => return Err(Abend::ironwork("a national value cannot be moved to a numeric item", pos)),
             Val::Address(_) => return Err(Abend::ironwork("a pointer cannot be moved to a numeric item", pos)),
         },
         Kind::Float(p) => {
@@ -582,7 +583,7 @@ pub fn alnum_image(facts: &dyn ProgramFacts, val: &Val, src: Option<Loc>, len: u
             let digits = src.and_then(|s| s.kind.digits_scale().map(|(d, _)| d + scaling(facts, s))).unwrap_or(f.places.total());
             zoned_digits(f.magnitude.to_u128().unwrap_or(0), digits as usize, decimal::UNSIGNED)
         }
-        Val::National(_) => return Err(Abend::ironwork("a national value cannot be moved to an alphanumeric item", pos)),
+        Val::National(_) | Val::AllNational(_) => return Err(Abend::ironwork("a national value cannot be moved to an alphanumeric item", pos)),
         _ => return Err(Abend::ironwork("only an integer numeric value can be moved to an alphanumeric item", pos)),
     })
 }
@@ -775,6 +776,8 @@ pub fn compare(facts: &dyn ProgramFacts, mem: &[u8], a: (Val, Option<Loc>), b: (
         (Val::Num(x), Val::Fig(Figurative::Zero)) => Ok(compare_fixed(x, &Fixed::new(0, Places::new(1, 0)))),
         (Val::Fig(Figurative::Zero), Val::Num(y)) => Ok(compare_fixed(&Fixed::new(0, Places::new(1, 0)), y)),
         (Val::National(x), Val::National(y)) => Ok(compare_national(x, y)),
+        (Val::National(x), Val::AllNational(y)) => Ok(compare_national(x, &repeated(y, x.len()))),
+        (Val::AllNational(x), Val::National(y)) => Ok(compare_national(&repeated(x, y.len()), y)),
         _ => {
             let (va, la) = stored_digits(facts, mem, va, la, pos)?;
             let (vb, lb) = stored_digits(facts, mem, vb, lb, pos)?;
@@ -855,6 +858,11 @@ pub fn image_len(v: &Val, loc: Option<Loc>) -> usize {
         (Val::Num(f), None) => f.places.total() as usize,
         _ => 1,
     }
+}
+
+/// An ALL literal's `units` repeated to `len` bytes, or once where `len` is shorter.
+fn repeated(units: &[u8], len: usize) -> Vec<u8> {
+    units.iter().copied().cycle().take(len.max(units.len())).collect()
 }
 
 /// National values compared unit by unit, the shorter padded with national spaces.
