@@ -218,7 +218,8 @@ pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args
                     if b == 0 {
                         return Err(Abend::ironwork(format!("FUNCTION {other} by zero"), pos));
                     }
-                    if other == "MOD" { a - b * a.div_euclid(b) } else { a - b * (a / b) }
+                    let r = a % b;
+                    if other == "MOD" && r != 0 && (r < 0) != (b < 0) { r + b } else { r }
                 }
             };
             Val::Num(Fixed::new(result, Places::new(31 - dec.min(31), dec)))

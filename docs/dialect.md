@@ -228,7 +228,6 @@ Each changes results under `ibm`. Those fixed since are in 5.7.
 
 | Difference | ironwork | IBM, and cobc | Seen in |
 |---|---|---|---|
-| FUNCTION MOD with a negative divisor | MOD(5, -3) is 2: `div_euclid` in `rt/src/intrinsic/function.rs` | -1, FUNCTION INTEGER's floor | CCVS85 IF124A, 5 tests |
 | DISPLAY of a negative or non-integer function value | sign and decimal point dropped, 31 digits: FUNCTION INTEGER(-2.5) shows `0000000000000000000000000000030` (`rt::display::value`) | the sign and the value | test programs |
 | A LINKAGE level-01 item that REDEFINES another | no address: S0C4 | the address of the item it redefines | CCVS85 IC237A |
 | The SIGN clause of a subordinate group | the level-01 item's clause wins | the subordinate entry's (Language Reference, SIGN) | CCVS85 NC116A |
@@ -275,3 +274,4 @@ dialects and on both executors (ironwork-roadmap 3.14).
 | Difference | ironwork and IBM | cobc | Seen in |
 |---|---|---|---|
 | An intermediate quotient's decimal places | the dividend's less the divisor's, or dmax, whichever is more (Programming Guide SC27-8714-03, p. 795; C1): `COMPUTE X = (A * B / C) * K`, A and B 1.11, C 0.7, K 1000, gives 1760.00 | the same | probe |
+| FUNCTION MOD with a negative divisor | argument-1 less argument-2 times FUNCTION INTEGER of their quotient (Language Reference SC27-8713-03, p. 601): MOD(11, -5) is -4 | the same | CCVS85 IF124A, which now passes |

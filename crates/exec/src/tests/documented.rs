@@ -21,3 +21,28 @@ fn a_quotient_keeps_the_dividend_s_decimal_places_less_the_divisor_s() {
     );
     assert_eq!(on_both(&source), "0176000 0000176\n");
 }
+
+/// Language Reference SC27-8713-03, p. 601: argument-1 - (argument-2 * FUNCTION INTEGER
+/// (argument-1 / argument-2)), and the table of 11 and 5 with each sign.
+#[test]
+fn mod_takes_the_sign_of_its_divisor() {
+    let source = program(
+        "",
+        "       01  R PIC S99 SIGN LEADING SEPARATE.\n       01  D PIC S9 VALUE -5.\n",
+        &[
+            line("COMPUTE R = FUNCTION MOD(11, 5)"),
+            line("DISPLAY R"),
+            line("COMPUTE R = FUNCTION MOD(-11, 5)"),
+            line("DISPLAY R"),
+            line("COMPUTE R = FUNCTION MOD(11, D)"),
+            line("DISPLAY R"),
+            line("COMPUTE R = FUNCTION MOD(-11, D)"),
+            line("DISPLAY R"),
+            line("COMPUTE R = FUNCTION MOD(10, D)"),
+            line("DISPLAY R"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    );
+    assert_eq!(on_both(&source), "+01\n+04\n-04\n-01\n+00\n");
+}
