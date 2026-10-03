@@ -1,25 +1,8 @@
 # cobolwork and ironwork: boundary, expansion and priorities
 
-What each product owns, where they overlap, what is done, what becomes an alternate, and what
-needs doing, in priority order with relative sizes.
+What each product owns, where they overlap, and what becomes an alternate.
 
-**Status:** draft, 2026-09-29, for the operator's review. It reflects the operator's rulings of the
-same day:
-
-- the two are "two sides of the same coin";
-- SQL is next, ahead of the VM;
-- the interpreter stays as an option;
-- the runtime is AGPL with a runtime exception.
-
-**Sizes** are relative, calibrated on ironwork's milestones.
-
-| Size | Meaning |
-|---|---|
-| XS | A one-file change |
-| S | About half a milestone |
-| M | One milestone, the size of M6 (indexed and relative files) |
-| L | Two to three milestones |
-| XL | More than three milestones, or blocked by an outside party |
+**Status:** 2026-10-03. The boundary and overlaps reflect the operator's rulings.
 
 ## 1. The boundary
 
@@ -78,45 +61,6 @@ It is zero-dependency Rust.
 | Storage layout | `lib/parser.mjs` sizes, graded against GnuCOBOL | `exec/src/layout.rs` | Keep both. ironwork's layouts become cobolwork fixtures for IBM-only rules once goldens exist |
 | Corpus census | `diag/` corpus runners | `tools/census.py` | Share the corpus lists |
 
-## 3. Done
-
-**cobolwork**
-- **Commands:** `scan`, `flow`, `diff`, `build`, `inventory`, `parse`, `baseline` and `gate`.
-  Fourteen rule sets report into SARIF with fingerprints, evidence kinds, impact and remedy.
-- **Parser accuracy:** graded against GnuCOBOL on 100, 300 and 500 held-out repository sets. On the
-  500 set, data items reach 99.98% recall at 99.998% precision.
-- **Benchmark:** 93 CWE-labelled bench cases, each with a near-miss negative.
-- **Build gate:** policy, SSRANGE, and the compile step.
-- **Precompiler:** SQL and CICS translation, built 2026-09-27.
-- **Remediation gate:** built, but nothing calls it yet.
-- **Compliance:** mappings to DORA, FFIEC and NIST SP 800-53.
-- **CI:** 824 tests. On Windows, 798 pass, one fails on a path bug, and the rest record skips.
-- **History:** squashed for publication.
-
-**ironwork**
-- **M1:** the front end and interpreter on EBCDIC storage, with the `zarch` machine and `numeric`
-  compiler models, and the oracle generator.
-- **M2:** COPY, sections, EVALUATE, edited pictures and sequential files.
-- **M3:** subprograms, pointers, SET, ACCEPT and OCCURS DEPENDING ON.
-- **M4:** STRING, UNSTRING, INSPECT, SEARCH, LOCAL-STORAGE and intrinsic functions.
-- **M5:** EXEC SQL and EXEC CICS parsed and checked.
-- **M6:** indexed and relative files.
-- **M7:** CICS Tiers 1 and 2 as a harness.
-- **Hercules:** every decimal case agrees; the two HFP disagreements were settled by the manual in
-  `zarch`'s favour.
-- **M8:** BMS maps and symbolic maps, SEND and RECEIVE MAP, the terminal model, scripted screens
-  and the TN3270 server.
-- **SQL, steps 1 to 7 of [sql-runtime.md](sql-runtime.md):** typed statements, conversion, the
-  SQLCA and WHENEVER, record and replay, cursors, CICS SYNCPOINT, and the PostgreSQL backend.
-- **CI:** exists.
-
-**In flight**
-- **Four branches:** SORT/MERGE, LE callable services, Report Writer and OO COBOL, integrated and
-  landing (cobolwork-c2).
-- **Specs:** [codegen-runtime.md](codegen-runtime.md), a draft, with its detail in
-  [lir.md](lir.md), [semantics-library.md](semantics-library.md) and
-  [load-module.md](load-module.md). Step 0 is measured in [benchmarks.md](benchmarks.md).
-
 ## 4. What becomes an alternate
 
 | Primary | Alternate | When |
@@ -130,94 +74,6 @@ It is zero-dependency Rust.
 | GnuCOBOL's listing as cobolwork's only external witness | ironwork layouts, for IBM-only size rules | After Enterprise COBOL goldens exist; before that, ironwork is not an independent witness |
 | cobolwork's grading stand-in (`diag/precompiler.mjs`) | cobolwork's translation (`lib/precompile.mjs`) | Already both; the stand-in stays for grading only |
 
-## 5. To do, in priority order
+## Releases and priorities
 
-### P0: now
-
-| # | Item | Repo | Size | Note |
-|---|---|---|---|---|
-| 1 | Fix the Windows test that builds `D:\D:\…` from a URL | cobolwork | XS | Done: cobolwork's CI is green |
-| 2 | Commit approval: the cobolwork-web split | Operator | XS | M8, SQL and these specs have landed; the four-branch integration is landing |
-| 3 | M8: the TN3270 server | ironwork | M | Done |
-| 4 | Integrate SORT/MERGE, LE, Report Writer and OO | ironwork | M | In flight |
-| 5 | Enterprise COBOL goldens: route chosen 2026-09-30, IBM Test Accelerator for Z (On-Demand Environments: Enterprise COBOL 6.4, Db2 13.1, CICS 6.2) on a Linux x86-64 host, with the outputs kept in a private repository | Operator | XL to carry out | ironwork's central claim is unwitnessed until the licence is bought and the first goldens are in |
-
-### P1: next
-
-| # | Item | Repo | Size | Note |
-|---|---|---|---|---|
-| 6 | SQL, [sql-runtime.md](sql-runtime.md) steps 1–6: typed statements (S), conversion (M), SQLCA, WHENEVER and single-row statements (M), the recording format and `--sql-replay` (S), cursors (S), CICS SYNCPOINT (XS), all six built | ironwork | L | Next by ruling. Written as a library service for both executors |
-| 7 | Publish cobolwork: public repository, tagged release, npm decision, the PolyForm links fixed | cobolwork | S | Needs the operator's go-ahead |
-| 8 | Shared data (E2): option table, CICS command table, reserved words, BMS and SQL fixtures, with drift tests | Both | M | The option table, and the BMS and SQL fixtures (`fixtures/cobolwork/`), are shared (2026-09-30), and so are the CICS command, DFHRESP and DFHVALUE tables (`crates/rt/data/`), whose checked dispatch list waits on E11c; IBM's reserved words (`crates/rt/data/reserved-words.tsv`) are refused as user-defined names (2026-09-30: 1344 to 1339 of 3000 in the census, each refusal one Enterprise COBOL makes) |
-| 9 | Rules from ironwork's model (E3): TRUNC(OPT) binary overflow, EBCDIC-dependent order and comparison, intermediates over 30 digits (31 under ARITH(EXTEND)) | cobolwork | M | None exists yet |
-| 10 | A hand-labelled flow corpus: the independent witness for cobolwork's precision | cobolwork | L | Banks will ask for it |
-
-### P2: after SQL
-
-| # | Item | Repo | Size | Note |
-|---|---|---|---|---|
-| 11 | The VM (§6) | ironwork | XL | After SQL, by ruling |
-| 12 | The PostgreSQL backend (SQL step 7) | ironwork | L | Built; TLS in the separate `tls/` build (D2); Q5 passes against PostgreSQL 14.19 |
-| 13 | The build gate running `ironwork check` (E1) | cobolwork | S | `ironwork check` exists now, exiting 12 on a compile error |
-| 14 | A CICS region defined by a CSD, for the TN3270 server (E6) | ironwork | S | Built (2026-09-30): `--serve --csd` reads the DEFINE TRANSACTIONs; cobolwork's CSD fixtures are shared in `fixtures/cobolwork/csd/` |
-| 15 | Crash-fuzzing programs through ironwork (E5) | Both | L | Built: `ironwork fuzz` keeps each abend a generated input causes, with its smallest input, journal and coverage ([evidence.md](evidence.md) §5); cobolwork reports them as findings |
-| 16 | Dynamic witness (E4): `cobolwork confirm` runs ironwork with a payload | Both | L | ironwork's half built (2026-09-30): `--trace-marker` records whether the marker reached each sink ([evidence.md](evidence.md) §1.1); cobolwork's labeller is next |
-| 17 | A caller for cobolwork's remediation gate | cobolwork | M | BACKLOG item |
-| 18 | JCL runner (E7) and migration equivalence testing (E8) | ironwork | XL, then L | E8 builds on SQL replay and E7 |
-
-### P3: later
-
-| # | Item | Repo | Size | Note |
-|---|---|---|---|---|
-| 19 | Native code from LIR | ironwork | L | Only if the VM misses its target |
-| 20 | cobolwork language coverage: PL/I, HLASM, IMS, Db2 DDL | cobolwork | XL | A decision, per BACKLOG |
-| 21 | Dynamic SQL, multi-row FETCH, LOBs, DRDA | ironwork | L to XL | Out of scope in sql-runtime.md |
-| 22 | Coverage reports from ironwork runs (E9); DDL to PostgreSQL schemas (E10) | Both | M each | |
-| 23 | cobolwork BACKLOG items: git-ref source tree, the three extractions, utility knowledge-base rows, PCI and COBIT mappings, the gitleaks pull request | cobolwork | S to L each | As BACKLOG.md lists them |
-| 24 | A verifier for high-assurance builds (E11): each compilation's output checked against its source by a separate tool, which a project's tool qualification can rest on | ironwork | L to XL | After VM step 2 and P0 #5; structured for qualification in [verifier.md](verifier.md) |
-
-## 6. What the VM needs
-
-These are the steps of [codegen-runtime.md](codegen-runtime.md), with the interpreter kept.
-
-| Step | Work | Size |
-|---|---|---|
-| 0 | Benchmarks (file I/O, packed arithmetic, table search, CALL-heavy code) and baseline times for the interpreter and `cobc -O2` | S |
-| 1 | Extract the semantics library from `Machine` (storage access, MOVE, compare, editing, arithmetic stores, abends and every service) and split out `rt`. The boundary test. SQL, built first, is already library-shaped | L |
-| 2 | The LIR: resolved places, arithmetic plans, basic blocks with explicit PERFORM exits (V1, V2), typed service calls and a debug table. The lowering from `Compiled`, covering everything the interpreter runs by then, including SORT, LE, Report Writer, OO and SQL | L |
-| 3 | The VM executor in `rt` | L |
-| 4 | A permanent differential CI job running every test and oracle case in both executors, plus differential fuzzing | M |
-| 5 | The load module: binary format, writer and reader, reproducibility | M |
-| 6 | `RunUnit` loading modules; static and dynamic CALL | M |
-| 7 | The VM as default, with `--interpret` kept | XS |
-| 8 | Oracle cases for V1 and V2, settled when goldens exist | S, blocked by P0 #5 |
-
-Total: XL, about seven to nine milestones. Step 1 decides the rest. If every result is decided in
-the semantics library, the VM is a second walker of the same calls, and keeping the interpreter
-costs nothing but CI time.
-
-## 7. Expansion
-
-| ID | Capability | Priority | Size |
-|---|---|---|---|
-| E1 | The build gate compiles IBM estates with ironwork | P2 | S |
-| E2 | Shared data between the repositories | P1 | M |
-| E3 | cobolwork rules from ironwork's numeric and code-page model | P1 | M |
-| E4 | Confirmed findings: an ironwork run shows the input reaching the sink (operator 2026-09-30: execution labels for cobolwork's precision). Built: `--trace-marker`, a `sink` record per operation reached with and without the marker, [evidence.md](evidence.md) §1.1; sinks ironwork does not run yet (MQ, dynamic SQL, sockets) are not traced | P2 | L |
-| E5 | Fuzzing COBOL programs for abends, reported as findings with their inputs. Built: `ironwork fuzz` for batch programs, varying sequential and indexed fixed-length files and SYSIN ([evidence.md](evidence.md) §5); CICS tasks and jobs are to come | P2 | L |
-| E6 | CSD-defined CICS regions for the TN3270 server | P2 | S |
-| E7 | A JCL runner: steps, DD allocation, COND and IF, in-stream data, and the utilities cobolwork's `lib/utilities.mjs` documents with IBM citations. `ironwork job` runs these with procedures, generation data groups, IEFBR14, IEBGENER, IDCAMS, and SORT with INCLUDE, OMIT, INREC, OUTREC and OUTFIL, and passes PARM to a COBOL main program; DFSORT's IFTHEN, field conversions and editing are to come | P2 | XL |
-| E8 | Migration equivalence: run a job under ironwork against recorded SQL and files, and compare with production's outputs. Built: `ironwork job --expected`, [evidence.md](evidence.md) §4 | P2 | L |
-| E9 | Execution coverage feeding cobolwork, to mark findings in code a test reached | P3 | M |
-| E10 | Db2 DDL to PostgreSQL schemas for SQL tests | P3 | M |
-| E11 | Translation validation for safety-critical estates (avionics, medical devices), where a miscompilation is a hazard: [verifier.md](verifier.md) | P3 | L to XL |
-
-## 8. Outside the code
-
-| Item | Who | Size |
-|---|---|---|
-| Runtime exception text and its eligibility condition | A practitioner | S |
-| LICENSING.md for both products, with the uncapped prices of 2026-09-29 | Drafted on the operator's go-ahead | S |
-| Title opinion on cobolwork's word lists; the ACL addendum; trade marks | A practitioner | S each |
-| Making the repositories public | Operator | XS, after P0 #1 and P1 #7 |
-| The goldens route, P0 #5: chosen 2026-09-30; the licence and whether goldens may be published | Operator; a practitioner on publication | Purchase; S |
+Release contents and their order live in the SPINE plans `cobolwork-roadmap` and `ironwork-roadmap` and on the site's roadmap pages (https://ironwork.commitwork.online/roadmap/ and https://cobolwork.commitwork.online/roadmap/). The steps toward the VM are detailed in [codegen-runtime.md](codegen-runtime.md). This file holds only the boundary between the two products.
