@@ -23,7 +23,8 @@ usage:
                                                        print a load module, one fact per line
   ironwork job <job.jcl> --datasets DIR[:text] [--proclib DIR]... [--user ID] [run flags] [-I <dir>]... [-L <dir>]... [--clock <time>] [--sql-replay path]
                                                        run a job's steps in order
-  ironwork fuzz [--job] <program.cbl|job.jcl> -o <dir> [--runs N] [--seed N] [--timeout SECONDS] [--root DIR] [--clock <time>]
+  ironwork fuzz [--job] <program.cbl|job.jcl> -o <dir> [--runs N] [--seed N] [--timeout SECONDS] [--hang-limit N]
+               [--root DIR] [--clock <time>]
                [-I <dir>]... [-L <dir>]... [-silent] [-strict-sort-keys] [-debug]
                [--datasets DIR] [--proclib DIR]... [--user ID]
                                                        run a batch program, or with --job a job, on generated input
@@ -251,7 +252,12 @@ fuzz flags:
   --runs N   how many generated inputs to run, 200 without it
   --seed N   the generator's seed, 1 without it; the same seed gives the same inputs
   --timeout SECONDS
-             how long one run may take before it is stopped and counted a timeout, 10 without it
+             how long one run may take before it is stopped and counted a timeout, 10 without it.
+             A timed-out input is run again, up to three per fuzz run, with --statement-limit
+             --hang-limit and six times as long: an S322 there, unless the run had found SYSIN at
+             its end, is kept as a loop the input caused
+  --hang-limit N
+             the statements a timed-out input may start when it is run again, 10000000 without it
   --root DIR the repository root the manifest names the program from, the current directory without it
   --job      fuzz the job in the JCL file through ironwork job: each data set a COBOL step reads
              before any step creates it is built from that program's file description, each
@@ -384,6 +390,7 @@ fn driver() -> ExitCode {
     let (mut fuzz_runs, mut fuzz_seed, mut fuzz_timeout): (Option<u32>, Option<u64>, Option<u64>) = (None, None, None);
     let mut parm: Option<String> = None;
     let mut statement_limit: Option<u64> = None;
+    let mut hang_limit: Option<u64> = None;
     let (mut fuzz_job, mut fuzz_cics) = (false, false);
     let mut step_parms: Vec<(String, String)> = Vec::new();
     let mut instream: Vec<(String, std::path::PathBuf)> = Vec::new();
@@ -400,6 +407,10 @@ fn driver() -> ExitCode {
             "--statement-limit" => match args.next().and_then(|n| n.parse().ok()).filter(|&n: &u64| n > 0) {
                 Some(n) => statement_limit = Some(n),
                 None => return usage_error("--statement-limit needs a number of statements"),
+            },
+            "--hang-limit" => match args.next().and_then(|n| n.parse().ok()).filter(|&n: &u64| n > 0) {
+                Some(n) => hang_limit = Some(n),
+                None => return usage_error("--hang-limit needs a number of statements"),
             },
             "--job" => fuzz_job = true,
             "--cics" => fuzz_cics = true,
@@ -568,7 +579,7 @@ fn driver() -> ExitCode {
         || !proclibs.is_empty() || user.is_some()
         || vm || parm.is_some() || statement_limit.is_some();
     let dump_flags = !dump_options.only.is_empty() || dump_options.strings || !dump_options.check;
-    let fuzz_flags = fuzz_root.is_some() || fuzz_runs.is_some() || fuzz_seed.is_some() || fuzz_timeout.is_some() || fuzz_job || fuzz_cics;
+    let fuzz_flags = fuzz_root.is_some() || fuzz_runs.is_some() || fuzz_seed.is_some() || fuzz_timeout.is_some() || hang_limit.is_some() || fuzz_job || fuzz_cics;
     if vm && (!matches!(rest.first().map(String::as_str), Some("run" | "cics")) || evidence_dir.is_some()) {
         return usage_error("--vm is for run and cics, and not with --evidence");
     }
@@ -609,6 +620,7 @@ fn driver() -> ExitCode {
             runs: fuzz_runs.unwrap_or(200),
             seed: fuzz_seed.unwrap_or(1),
             timeout: std::time::Duration::from_secs(fuzz_timeout.unwrap_or(10)),
+            hang_limit: hang_limit.unwrap_or(10_000_000),
             libraries,
             program_dirs,
             flags,
@@ -623,7 +635,7 @@ fn driver() -> ExitCode {
         return fuzz::run(request);
     }
     if fuzz_flags {
-        return usage_error("--runs, --seed, --timeout, --root, --job and --cics are for fuzz");
+        return usage_error("--runs, --seed, --timeout, --hang-limit, --root, --job and --cics are for fuzz");
     }
     let compile_flags = out_dir.is_some() || bundle.is_some() || source_prefix.is_some();
     match rest.split_first() {

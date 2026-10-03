@@ -25,6 +25,8 @@ pub struct Request {
     pub runs: u32,
     pub seed: u64,
     pub timeout: Duration,
+    /// The statements a timed-out input may start when it is re-checked for a hang.
+    pub hang_limit: u64,
     pub libraries: Vec<PathBuf>,
     pub program_dirs: Vec<PathBuf>,
     pub flags: Vec<String>,
@@ -77,6 +79,87 @@ struct Inputs {
     files: BTreeMap<String, Vec<Vec<u8>>>,
     lines: BTreeMap<String, Vec<Vec<u8>>>,
     parms: BTreeMap<String, Vec<u8>>,
+    /// The statement limit a timed-out input is re-checked under, which its runs keep.
+    limit: Option<u64>,
+    /// The marker put in place of the program name an S806 CALLed, which its evidence run traces.
+    marker: Option<String>,
+}
+
+/// How many times --timeout a hang's re-check may take: a loop the input caused ends in S322 within
+/// that and --hang-limit, a run that is only slow finishes. Each re-check can take that long, so a
+/// fuzz run makes only so many.
+const HANG_PATIENCE: u32 = 6;
+const HANG_RECHECKS: usize = 3;
+/// The S806s a fuzz run tries a marker on, each at a CALL of its own.
+const CHOSEN_CHECKS: usize = 5;
+
+/// A run that reached its statement limit after ACCEPT found SYSIN at its end was waiting for input
+/// it was not given, not looping on input it was given: it counts as a timeout.
+fn waited(outcome: Outcome, text: &str) -> Outcome {
+    match outcome {
+        Outcome::Abend { code, .. } if code == "S322" && text.contains("ACCEPT found SYSIN at its end") => Outcome::Timeout,
+        outcome => outcome,
+    }
+}
+
+/// The program name an S806's message says the CALL named.
+fn called(message: &str) -> Option<&str> {
+    message.strip_prefix("CALL ")?.split_once(':').map(|(name, _)| name.trim()).filter(|n| !n.is_empty())
+}
+
+/// A marker as long as `name`, of characters fuzz never generates, so it can come only from where
+/// fuzz puts it.
+fn marker_for(name: &str) -> String {
+    "@#$".chars().cycle().take(name.chars().count()).collect()
+}
+
+/// `bytes` with every `from` given as `to`, which is as long.
+fn swapped(bytes: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if !from.is_empty() && bytes[i..].starts_with(from) {
+            out.extend_from_slice(to);
+            i += from.len();
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// `inputs` with every `name` in them, as text in lines and PARMs and in EBCDIC in records, given as
+/// `to` instead.
+fn renamed(inputs: &Inputs, name: &str, to: &str) -> Inputs {
+    let ebcdic = |text: &str| text.chars().map(|c| CP037.encode_char(c).unwrap_or(SPACE)).collect::<Vec<u8>>();
+    let (from_e, to_e) = (ebcdic(name), ebcdic(to));
+    Inputs {
+        files: inputs.files.iter().map(|(k, records)| (k.clone(), records.iter().map(|r| swapped(r, &from_e, &to_e)).collect())).collect(),
+        lines: inputs.lines.iter().map(|(k, lines)| (k.clone(), lines.iter().map(|l| swapped(l, name.as_bytes(), to.as_bytes())).collect())).collect(),
+        parms: inputs.parms.iter().map(|(k, text)| (k.clone(), swapped(text, name.as_bytes(), to.as_bytes()))).collect(),
+        ..inputs.clone()
+    }
+}
+
+/// Whether `name` is in `inputs` as `renamed` finds it.
+fn named_in(inputs: &Inputs, name: &str) -> bool {
+    let to = marker_for(name);
+    let after = renamed(inputs, name, &to);
+    after.files != inputs.files || after.lines != inputs.lines || after.parms != inputs.parms
+}
+
+/// Whether the run journal records a dynamic program load at `line` whose operand held the marker.
+fn marker_reached(evidence: &Path, journal: &str, line: i64) -> bool {
+    let at = format!("\"line\":{line}");
+    fs::read_to_string(evidence.join("runs").join(format!("{journal}.jsonl"))).is_ok_and(|text| {
+        text.lines().any(|l| {
+            l.contains("\"kind\":\"sink\"")
+                && l.contains("\"sink\":\"dynamic-program-load\"")
+                && l.contains("\"reached\":true")
+                && l.match_indices(&at).any(|(i, _)| !l[i + at.len()..].starts_with(|c: char| c.is_ascii_digit()))
+        })
+    })
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -334,7 +417,7 @@ fn generate(rng: &mut Rng, varied: &Varied) -> Inputs {
     }
     let lines = varied.lines.iter().map(|k| (k.clone(), (0..1 + rng.below(3)).map(|_| sysin_line(rng)).collect())).collect();
     let parms = varied.parms.iter().map(|k| (k.clone(), parm_text(rng))).collect();
-    Inputs { files, lines, parms }
+    Inputs { files, lines, parms, ..Default::default() }
 }
 
 /// Whether the main program's PROCEDURE DIVISION USING takes the parameter Language Environment
@@ -592,14 +675,22 @@ impl Runner<'_> {
         if let Some(parm) = inputs.parms.get("PARM") {
             command.arg("--parm").arg(String::from_utf8_lossy(parm).as_ref());
         }
+        if let Some(limit) = inputs.limit {
+            command.arg("--statement-limit").arg(limit.to_string());
+        }
         for (dd, path) in &given {
             command.arg("--dd").arg(format!("{dd}={}", path.display()));
         }
         if let Some((journal, coverage)) = evidence {
             command.arg("--evidence").arg(journal).arg("--coverage").arg(coverage);
+            if let Some(marker) = &inputs.marker {
+                command.arg("--trace-marker").arg(marker);
+            }
         }
         let roots = self.req.roots();
-        finish(command, &dir, self.req.timeout, &given, |l| abend_line(l, &roots))
+        let timeout = if inputs.limit.is_some() { self.req.timeout * HANG_PATIENCE } else { self.req.timeout };
+        let Some((code, text)) = wait_for(command, &dir, timeout, &given)? else { return Ok(Outcome::Timeout) };
+        Ok(waited(ended(code, &text, |l| abend_line(l, &roots)), &text))
     }
 }
 
@@ -882,7 +973,7 @@ pub fn run(req: Request) -> ExitCode {
     let rdw = feeds.iter().filter(|f| f.variable.is_some()).map(|f| f.dd.clone()).collect();
     let mut runner = Runner { req: &req, work, count: 0, rdw };
     let varied = Varied { feeds, lines: sysin.then(|| "SYSIN".to_string()).into_iter().collect(), parms: parm.then(|| "PARM".to_string()).into_iter().collect() };
-    let found = drive(&req.out, req.runs, req.seed, &varied, &mut |inputs, evidence| runner.run(inputs, &others, evidence));
+    let found = drive(&req.out, req.runs, req.seed, req.hang_limit, &varied, &mut |inputs, evidence| runner.run(inputs, &others, evidence));
     let _ = fs::remove_dir_all(&runner.work);
     let found = match found {
         Ok(f) => f,
@@ -927,7 +1018,7 @@ struct Found {
 /// The loop every entry shares: a run on empty input, whose abend is no input's doing and is not
 /// kept; `runs` generated inputs; then each new abend once, on the smallest input that still gives
 /// it, run a last time with evidence and coverage in `out`.
-fn drive(out: &Path, runs: u32, seed: u64, varied: &Varied, run: &mut RunInput) -> Result<Found, String> {
+fn drive(out: &Path, runs: u32, seed: u64, hang_limit: u64, varied: &Varied, run: &mut RunInput) -> Result<Found, String> {
     let evidence = out.join("evidence");
     let coverage = out.join("coverage");
     let started = |e: std::io::Error| format!("a run could not start: {e}");
@@ -935,16 +1026,44 @@ fn drive(out: &Path, runs: u32, seed: u64, varied: &Varied, run: &mut RunInput) 
         files: varied.feeds.iter().map(|f| (f.dd.clone(), Vec::new())).collect(),
         lines: varied.lines.iter().map(|k| (k.clone(), Vec::new())).collect(),
         parms: varied.parms.iter().map(|k| (k.clone(), Vec::new())).collect(),
+        ..Default::default()
     };
-    let baseline = run(&empty, None).map_err(started)?.place();
+    let mut baseline = run(&empty, None).map_err(started)?;
+    if baseline == Outcome::Timeout {
+        baseline = run(&Inputs { limit: Some(hang_limit), ..empty }, None).map_err(started)?;
+    }
+    let baseline = baseline.place();
     let mut rng = Rng(seed.max(1));
     let mut tally = Tally::new();
     let mut kept: Vec<((String, String, i64), Inputs)> = Vec::new();
+    let mut chosen: Vec<((String, String, i64), String, Inputs)> = Vec::new();
+    let mut rechecks = 0;
     for _ in 0..runs {
         let inputs = generate(&mut rng, varied);
         let outcome = run(&inputs, None).map_err(started)?;
         tally.add(&outcome);
-        if let Some(place) = outcome.place()
+        let found = match &outcome {
+            // A timeout is a finding only where a longer limit ends the same input in S322.
+            Outcome::Timeout if rechecks < HANG_RECHECKS => {
+                rechecks += 1;
+                let limited = Inputs { limit: Some(hang_limit), ..inputs };
+                run(&limited, None).map_err(started)?.place().filter(|p| p.0 == "S322").map(|p| (p, limited))
+            }
+            // An S806 is a finding only where the name it CALLed came from the input, which a
+            // marker in the name's place shows at the end.
+            Outcome::Abend { code, file, line, message } if code == "S806" => {
+                let place = (code.clone(), file.clone(), *line);
+                if let Some(name) = called(message).filter(|n| named_in(&inputs, n))
+                    && chosen.len() < CHOSEN_CHECKS
+                    && !chosen.iter().any(|(p, _, _)| *p == place)
+                {
+                    chosen.push((place, name.to_string(), inputs));
+                }
+                None
+            }
+            outcome => outcome.place().map(|p| (p, inputs)),
+        };
+        if let Some((place, inputs)) = found
             && Some(&place) != baseline.as_ref()
             && !kept.iter().any(|(p, _)| *p == place)
         {
@@ -953,36 +1072,59 @@ fn drive(out: &Path, runs: u32, seed: u64, varied: &Varied, run: &mut RunInput) 
     }
 
     let (mut inputs_out, mut runs_out) = (Vec::new(), Vec::new());
-    for (n, (place, found)) in kept.into_iter().enumerate() {
-        let (small, minimized) = minimize(run, &varied.feeds, found, &place, 200);
+    let mut n = 0;
+    for (place, found) in kept {
+        let budget = if found.limit.is_some() { 10 } else { 200 };
+        let (small, minimized) = minimize(run, &varied.feeds, found, &place, budget);
         let before = journals(&evidence);
         let cover = coverage.join(format!("{n}.json"));
         let outcome = run(&small, Some((&evidence, &cover))).map_err(started)?;
         let came_again = outcome.place().as_ref() == Some(&place);
         let journal = journals(&evidence).into_iter().find(|j| !before.contains(j)).filter(|_| came_again);
-        let Some(journal) = journal else {
-            let why = if came_again { "wrote no journal".to_string() } else { outcome.told() };
-            eprintln!("ironwork fuzz: {} at {}:{} is not kept: its run on the smallest input {why}", place.0, place.1, place.2);
-            continue;
-        };
-        let mut ids = Vec::new();
-        let mut list = |key: &str, kind: &str, bytes: &[u8]| {
-            let id = format!("r{n}-{key}");
-            inputs_out.push(input(&id, kind, key, bytes, minimized));
-            ids.push(Value::from(id));
-        };
-        for (key, records) in &small.files {
-            list(key, "dd", &data_set(records, varied.feeds.iter().any(|f| f.dd == *key && f.variable.is_some())));
+        match journal {
+            Some(journal) => runs_out.push(kept_run(listed(&small, varied, n, minimized, &mut inputs_out), &outcome, journal, n)),
+            None => {
+                let why = if came_again { "wrote no journal".to_string() } else { outcome.told() };
+                eprintln!("ironwork fuzz: {} at {}:{} is not kept: its run on the smallest input {why}", place.0, place.1, place.2);
+            }
         }
-        for (key, lines) in &small.lines {
-            list(key, if key == "SYSIN" || key.ends_with(".SYSIN") { "sysin" } else { "dd" }, &sysin_text(lines));
+        n += 1;
+    }
+    for (place, name, found) in chosen {
+        let marker = marker_for(&name);
+        let marked = Inputs { marker: Some(marker.clone()), ..renamed(&found, &name, &marker) };
+        let before = journals(&evidence);
+        let cover = coverage.join(format!("{n}.json"));
+        let outcome = run(&marked, Some((&evidence, &cover))).map_err(started)?;
+        let named = matches!(&outcome, Outcome::Abend { code, file, line, message } if code == "S806" && *file == place.1 && *line == place.2 && called(message) == Some(marker.as_str()));
+        let journal = journals(&evidence).into_iter().find(|j| !before.contains(j)).filter(|j| named && marker_reached(&evidence, j, place.2));
+        match journal {
+            Some(journal) => runs_out.push(kept_run(listed(&marked, varied, n, false, &mut inputs_out), &outcome, journal, n)),
+            None => eprintln!("ironwork fuzz: S806 at {}:{} is not kept: its run with {marker} in place of {name} did not show the CALL took the name from the input", place.1, place.2),
         }
-        for (key, text) in &small.parms {
-            list(key, "parm", text);
-        }
-        runs_out.push(kept_run(ids, &outcome, journal, n));
+        n += 1;
     }
     Ok(Found { inputs: inputs_out, runs: runs_out, tally, baseline })
+}
+
+/// Lists each of a kept run's inputs in `out` as the manifest gives them, and returns their ids.
+fn listed(small: &Inputs, varied: &Varied, n: usize, minimized: bool, out: &mut Vec<Value>) -> Vec<Value> {
+    let mut ids = Vec::new();
+    let mut list = |key: &str, kind: &str, bytes: &[u8]| {
+        let id = format!("r{n}-{key}");
+        out.push(input(&id, kind, key, bytes, minimized));
+        ids.push(Value::from(id));
+    };
+    for (key, records) in &small.files {
+        list(key, "dd", &data_set(records, varied.feeds.iter().any(|f| f.dd == *key && f.variable.is_some())));
+    }
+    for (key, lines) in &small.lines {
+        list(key, if key == "SYSIN" || key.ends_with(".SYSIN") { "sysin" } else { "dd" }, &sysin_text(lines));
+    }
+    for (key, text) in &small.parms {
+        list(key, "parm", text);
+    }
+    ids
 }
 
 /// The run journals an evidence directory holds, by run id.

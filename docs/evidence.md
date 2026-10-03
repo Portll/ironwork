@@ -257,6 +257,17 @@ cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
    the code, the file and the line. DIR is refused inside the program's directory or a library, as
    that run would refuse its evidence directory. A found abend that is not kept is named on
    standard error with what its last run did instead.
+5. Two outcomes that are counted and never kept become findings under strict conditions. A
+   timeout, up to three per fuzz run, is run again on the same input under `--statement-limit`
+   (`--hang-limit`, 10,000,000 statements without it) for six times `--timeout`; if that run ends
+   in S322 it is kept as a loop the input caused, at the statement the limit ran out on, unless
+   ACCEPT had found SYSIN at its end, which is a program waiting for input, not looping on it. An
+   S806, up to five per fuzz run, each at a CALL of its own, is kept only where the program name
+   its message gives is in the input and a run with every occurrence of that name replaced by a
+   marker of `@`, `#` and `$` (characters fuzz never generates), traced with `--trace-marker`,
+   ends in S806 at the same CALL naming the marker and its journal records the marker reaching
+   that CALL's `dynamic-program-load` sink. A static CALL raises no such sink. A kept hang's input
+   is made smaller within 10 runs; a kept S806's input is the marked one.
 
 `DIR/manifest.json` holds `tool` (`ironwork-fuzz`), `version`, `seed`, `strategy` (`fields`),
 `clock`, `program` (`file`, relative to `--root`, the current directory without it, and `id`),

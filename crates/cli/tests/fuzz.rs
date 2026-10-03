@@ -415,3 +415,75 @@ fn a_job_s_data_sets_in_stream_data_and_step_parms_are_fuzzed_and_each_abend_pla
     }
     assert!(dir.join("run/coverage/0.json").exists());
 }
+
+#[test]
+fn a_loop_only_some_input_causes_is_kept_as_s322_and_one_waiting_at_the_end_of_sysin_is_not() {
+    let dir = temp("hang");
+    rewrite(
+        &dir,
+        &[
+            ("          05 IN-IDX  PIC 9(2).", "          05 IN-IDX  PIC 9(2).\n          05 IN-DIG  PIC 9."),
+            ("       01 WS-EOF PIC X VALUE 'N'.", "       01 WS-EOF PIC X VALUE 'N'.\n       01 WS-N PIC 9(4) COMP VALUE 0."),
+            ("                 ADD IN-QTY TO WS-TOTAL\n", "                 MOVE 0 TO WS-N\n                 IF IN-DIG IS NUMERIC\n                    PERFORM UNTIL WS-N = IN-DIG\n                       ADD 2 TO WS-N\n                    END-PERFORM\n                 END-IF\n"),
+            ("                 MOVE 'ABC' TO WS-SLOT (IN-IDX)\n", ""),
+        ],
+    );
+    let o = fuzz(&dir, "run", &["--runs", "30", "--timeout", "1", "--hang-limit", "20000"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let manifest = fs::read_to_string(dir.join("run/manifest.json")).unwrap();
+    assert!(kept(&manifest).iter().any(|k| k == "S322 29" || k == "S322 30"), "{manifest}");
+
+    let waits = [
+        "       IDENTIFICATION DIVISION.",
+        "       PROGRAM-ID. WAITER.",
+        "       DATA DIVISION.",
+        "       WORKING-STORAGE SECTION.",
+        "       01 WS-CARD PIC X(3).",
+        "       PROCEDURE DIVISION.",
+        "           PERFORM UNTIL WS-CARD = 'END'",
+        "              ACCEPT WS-CARD",
+        "           END-PERFORM",
+        "           GOBACK.",
+    ];
+    fs::write(dir.join("repo/src/WAITER.cbl"), waits.join("\n") + "\n").unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_ironwork")).current_dir(dir.join("repo")).args(["fuzz", "src/WAITER.cbl", "--runs", "5", "--timeout", "1", "--hang-limit", "20000", "-o"]).arg(dir.join("waits")).output().unwrap();
+    assert!(o.status.success(), "{}", stderr(&o));
+    let manifest = fs::read_to_string(dir.join("waits/manifest.json")).unwrap();
+    assert!(!manifest.contains("S322") && count(&manifest, "timeout") > 0, "{manifest}");
+}
+
+#[test]
+fn an_s806_is_kept_only_where_a_marker_in_the_input_reaches_the_call() {
+    let dir = temp("chosen");
+    let program = |static_call: bool| {
+        let call = if static_call { "           CALL 'NOSUCH'" } else { "           CALL WS-PGM" };
+        [
+            "       IDENTIFICATION DIVISION.",
+            "       PROGRAM-ID. PICKER.",
+            "       DATA DIVISION.",
+            "       WORKING-STORAGE SECTION.",
+            "       01 WS-PGM PIC X(8).",
+            "       PROCEDURE DIVISION.",
+            "           ACCEPT WS-PGM",
+            call,
+            "           GOBACK.",
+        ]
+        .join("\n")
+            + "\n"
+    };
+    fs::write(dir.join("repo/src/PICKER.cbl"), program(false)).unwrap();
+    let picker = |out: &str| Command::new(env!("CARGO_BIN_EXE_ironwork")).current_dir(dir.join("repo")).args(["fuzz", "src/PICKER.cbl", "--runs", "20", "-o"]).arg(dir.join(out)).output().unwrap();
+    let o = picker("chosen");
+    assert!(o.status.success(), "{}", stderr(&o));
+    let manifest = fs::read_to_string(dir.join("chosen/manifest.json")).unwrap();
+    assert!(kept(&manifest).iter().any(|k| k == "S806 8"), "{manifest}");
+    assert!(manifest.contains("CALL @#$"), "{manifest}");
+    let journal = manifest.split("\"journal\":\"").nth(1).unwrap().split('"').next().unwrap();
+    let text = fs::read_to_string(dir.join("chosen/evidence/runs").join(format!("{journal}.jsonl"))).unwrap();
+    assert!(text.lines().any(|l| l.contains("\"sink\":\"dynamic-program-load\"") && l.contains("\"reached\":true")), "{text}");
+
+    fs::write(dir.join("repo/src/PICKER.cbl"), program(true)).unwrap();
+    let o = picker("static");
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(!fs::read_to_string(dir.join("static/manifest.json")).unwrap().contains("S806"));
+}

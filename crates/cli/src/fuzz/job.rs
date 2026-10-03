@@ -140,12 +140,19 @@ impl Runner<'_> {
         for (step, text) in &inputs.parms {
             command.arg("--step-parm").arg(format!("{step}={}", String::from_utf8_lossy(text)));
         }
+        if let Some(limit) = inputs.limit {
+            command.arg("--statement-limit").arg(limit.to_string());
+        }
         if let Some((journal, coverage)) = evidence {
             command.arg("--evidence").arg(journal).arg("--coverage").arg(coverage);
+            if let Some(marker) = &inputs.marker {
+                command.arg("--trace-marker").arg(marker);
+            }
         }
         let roots = roots(self.req, &datasets);
-        let Some((code, text)) = super::wait_for(command, &dir, fuzz.timeout, &given)? else { return Ok(Outcome::Timeout) };
-        Ok(match super::ended(code, &text, |l| super::abend_line(l, &roots)) {
+        let timeout = if inputs.limit.is_some() { fuzz.timeout * super::HANG_PATIENCE } else { fuzz.timeout };
+        let Some((code, text)) = super::wait_for(command, &dir, timeout, &given)? else { return Ok(Outcome::Timeout) };
+        Ok(match super::waited(super::ended(code, &text, |l| super::abend_line(l, &roots)), &text) {
             Outcome::Clean => unplaced(&text).unwrap_or(Outcome::Clean),
             outcome => outcome,
         })
@@ -189,7 +196,7 @@ pub fn run(req: Request) -> ExitCode {
         Err(e) => return fail(e),
     };
     let mut runner = Runner { req: &req, plan: &plan, work: work.clone(), count: 0 };
-    let found = super::drive(&req.fuzz.out, req.fuzz.runs, req.fuzz.seed, varied, &mut |inputs, evidence| runner.run(inputs, evidence));
+    let found = super::drive(&req.fuzz.out, req.fuzz.runs, req.fuzz.seed, req.fuzz.hang_limit, varied, &mut |inputs, evidence| runner.run(inputs, evidence));
     let _ = fs::remove_dir_all(&work);
     let found = match found {
         Ok(f) => f,
