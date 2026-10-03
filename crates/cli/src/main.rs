@@ -302,7 +302,7 @@ exit status: for check and compile, and for a run the compile refuses, the compi
   and cics refuse from 12 under IBM's default NOCOMPILE(S), from 4 under -warnings-block, or as a
   card's COMPILE or NOCOMPILE says; compile gives 12 for a program lowering refuses, naming the
   construct and where it is, and 16 for a source it cannot read or a module it cannot write.
-  Otherwise RETURN-CODE when the run ends normally, 16 an abend; 2 usage";
+  Otherwise RETURN-CODE when the run ends normally, 16 an abend; a RETURN-CODE outside 0-255 exits 255; 2 usage";
 
 const FLAGS: &[&str] = &["-silent", "-strict-sort-keys", "-warnings-block", "-debug"];
 const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid", "--sysid", "--commarea", "--commarea-out", "--file", "--td", "--screens", "--serve", "--transaction", "--csd"];
@@ -900,7 +900,14 @@ fn driver() -> ExitCode {
         }
     }
     match ended {
-        Ok((_, return_code)) => ExitCode::from(return_code as u8),
+        Ok((_, return_code)) => {
+            let exit_code = if (0..=255).contains(&return_code) {
+                return_code as u8
+            } else {
+                255
+            };
+            ExitCode::from(exit_code)
+        }
         Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => ExitCode::SUCCESS,
         Err(abend) => report_abend(&compiled, path, &abend),
     }
