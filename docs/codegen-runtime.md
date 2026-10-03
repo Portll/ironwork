@@ -2,8 +2,8 @@
 
 A specification for compiling COBOL ahead of time, and for the runtime that compiled programs link.
 
-**Status:** draft, updated 2026-09-30, for the operator's review. Step 0 is measured; nothing else is
-built. It builds on the operator's rulings of 2026-09-29:
+**Status:** draft, updated 2026-10-03, for the operator's review. Step 0 is measured and step 1 is
+done. It builds on the operator's rulings of 2026-09-29:
 
 - **The runtime licence.** The runtime is AGPL-3.0-or-later with a runtime exception, so a program
   compiled by ironwork is not bound by the AGPL. The exception is published as
@@ -43,11 +43,11 @@ The detail lives in four companion documents:
 | Term | Meaning |
 |---|---|
 | Compiler | The crates that read source and produce target code: `syntax`, the resolver and layout, the lowering, the emitters, and the `ironwork` driver |
-| Runtime | The crates present when a compiled program runs: `zarch`, `numeric` and the new `rt` |
+| Runtime | The crates present when a compiled program runs: `zarch`, `numeric` and `rt` |
 | LIR | The lowered, resolved program: every data reference resolved to storage, every PERFORM exit explicit, every service call named |
 | Load module | A file holding one source file's programs in LIR, with their layout, compile options, debug table and BMS maps. Its extension is `.iwm` |
 | Target code | A load module, or Rust source emitted from LIR together with the object code built from it |
-| Semantics library | The functions both executors call: storage access, MOVE, compare, editing, arithmetic stores, abends, and the file, CICS, BMS and SQL services. Today these are methods on `Machine` |
+| Semantics library | The functions both executors call: storage access, MOVE, compare, editing, arithmetic stores, abends, and the file, CICS, BMS and SQL services. They are `rt`'s (§6) |
 | Executor | What walks a program: the interpreter (`Machine` over the AST, kept as `--interpret`) or the VM (over LIR) |
 | Place | The LIR's static description of a data reference: base, constant offset, subscript and reference-modification expressions, ODO, and SSRANGE checks |
 | Loc | A Place evaluated at run time: a concrete offset, length and kind. The semantics library takes `Loc`s, never Places or AST types |
@@ -104,22 +104,30 @@ The detail lives in four companion documents:
 
 ## 6. The split
 
-| Crate | Holds | Licence |
-|---|---|---|
-| `zarch` | The machine model and code-page tables | AGPL + exception (runtime). The ICU tables stay under the Unicode License v3 |
-| `numeric` | IBM's numeric rules, options and assumptions | AGPL + exception (runtime) |
-| `rt` (new) | `RunUnit` and storage, the LIR types, the VM, the move, compare, edit and arithmetic entry points now inside `Machine`, abends, `files.rs` and `machine/file_io.rs`, `cics.rs` and `machine/cics*.rs`, `terminal.rs`, the SQL runtime (see `sql-runtime.md`), and the load-module reader | AGPL + exception (runtime) |
-| `syntax` | Source, COPY, lexer, parser, BMS parsing, system copybooks | AGPL (compiler) |
-| `compile` (new) | `layout.rs`, `Check`, lowering to LIR, the load-module writer, the Rust emitter | AGPL (compiler) |
-| `cli` (`ironwork`) | The driver | AGPL (compiler) |
+Every crate, by module. A module in brackets is private to its crate.
 
-**BMS.** The map parser, `syntax/src/bms.rs`, stays in the compiler. It writes a map model into the
-load module, and `rt` owns that model's types and the SEND MAP and RECEIVE MAP code. This keeps
-`syntax` out of the runtime. It differs from the M8 working assumption that `bms.rs` is
-runtime-side, and is recorded as D4.
+| Crate | Holds | Depends on | Licence |
+|---|---|---|---|
+| `zarch` | The machine: `decimal` (packed and zoned decimal, and the decimal instructions), `hfp` (hexadecimal floating point), `wide` (256-bit products), `check` (program checks, the condition code and the program mask), `ebcdic` (the code pages) | none | AGPL + exception (runtime). The ICU tables stay under the Unicode License v3 |
+| `numeric` | IBM's numeric rules: `precision` (intermediate results), `binary`, `float`, `sign`, `zoned`, `options` (the compiler options), `assumptions` (the register of assumptions) | `zarch` | AGPL + exception (runtime) |
+| `rt` | Every function that decides a result, every service, and the compiled form. **Vocabulary and storage:** `vocab` (`Pos` and the enums the front end shares), `storage` (`Kind`, `Loc`, `Val`), `picture` (`Sym`), `abend` (`Abend`, `AbendCode`, `Signal`, `FileStatus`, `Ending`), `fixed`, `codec`, `loc` (the location checks), `store` (reads, MOVE, compare and the numeric stores), `host` (what a statement asks of the executor running it). **Statements:** `arith`, `edit`, `strings`, `text` (STRING, UNSTRING and INSPECT), `set`, `accept`, `display`, `intrinsic` (the functions), `calendar`, `json`, `xml`, `parmcheck`. **The run unit:** `unit` (`RunUnit`, `Loader`), `callee` (the one callee sequence and the CALL USING addresses), `taint`, `evidence` (run journals), `digest`. **Services:** `files`, `fileio` (the file verbs), `linage`, `printer`, `virtual_printer`, `sort`, `report`, `le`, `feedback`, `oo`, `jni`, `cics`, `cics_tables`, `bms` (the map model and its slots), `terminal`, `tn3270`, `sql` (see [sql-runtime.md](sql-runtime.md)), `reserved_words`. **The compiled form:** `lir`, `vm`, `module` (the load-module codec, reader and writer) | `numeric`, `zarch` | AGPL + exception (runtime) |
+| `syntax` | Source to syntax tree: `source` (reference format), `copy` (COPY and REPLACING), `lexer`, `parser`, `ast`, `report` (the REPORT SECTION), `sql` (EXEC SQL, typed), `dli`, `bms` (BMS map source), `csd`, `system` (the copy members IBM's products supply), `feedback`, `jni`, (`debugging`). It re-exports the vocabulary it shares with `rt` | `numeric`, `rt` | AGPL (compiler) |
+| `compile` | `Compiled`, `compile` and `Check` in lib.rs; `layout`, `picture`, `collating`, `declaratives`, `function` (FUNCTION-ID), `linage`, `markup`, `numcheck`, `oo`, `printer`, `report`, `sort`, `sql` (host types), (`corresponding`, `initcheck`, `reserved`, `scope`) | `numeric`, `rt`, `syntax`, `zarch` | AGPL (compiler) |
+| `exec` | The interpreter and lowering. `machine` is the walker: `Machine` over the AST, with its control flow (`perform`, `declaratives`, `scope`) and name resolution, and the adapters that build `rt`'s inputs from the AST and answer `rt`'s host traits (`facts`, `cics`, `cics_bind`, `sql`, `file_io`, `sort`, `report`, `oo`, `le_services`, `function`, `intrinsic`, `json`, `xml`, `parmcheck`). `lower` lowers a `Compiled` to the LIR. `loader` (`Library`, which CALL loads from), `unit` (the interpreter's `RunUnit`), `vm` (a program run on `rt::vm`), `oo` (where a class definition is found). `abend`, `le`, `printer`, `report`, `sql` and `terminal` re-export `rt` and `compile` modules, some with tests that compile COBOL against them, and lib.rs re-exports the `rt` and `compile` modules the driver names. (`testing`) is the test harness, which runs a program on both executors | `compile`, `numeric`, `rt`, `syntax`, `zarch` | AGPL (compiler) |
+| `cli` (`ironwork`) | The driver: `main.rs` with `run`, `check`, `cics` and `assumptions`; `compile`, `dump`, `job`, `compare`, `fuzz` and `fuzz_cics`, `ddl`, `dfsort`, and the `--evidence`, `--provenance` and coverage outputs (`evidence`, `provenance`, `coverage`). `tests/boundary.rs` is the boundary test | `exec`, `jcl`, `numeric`, `rt`, `syntax`, `zarch` | AGPL (compiler) |
+| `jcl` | JCL read and procedures expanded (lib.rs), `cond`, `idcams`, `sort` (DFSORT control statements) | none | AGPL (compiler) |
+| `oracle` | Test programs whose results settle `numeric::assumptions` on a real compiler: lib.rs, `families`, `hercules`, and the binary that writes them. `exec` takes it as a dev-dependency | `numeric`, `zarch` | AGPL (compiler) |
+| `tls` | A workspace of its own: the same driver with rustls, which supplies the `Tls` of `rt::sql` for `--sql-db` | `exec`, `jcl`, `numeric`, `rt`, `syntax`, `zarch`, rustls, webpki-roots | AGPL (compiler); rustls and webpki-roots under their own licences |
 
-**Dependency direction.** `rt` depends on `numeric` and `zarch` only, never on `syntax` or
-`compile`. A test reads each crate's manifest and fails if it does.
+**BMS.** The map parser, `syntax::bms`, is the compiler's. The map model, `rt::bms`, and SEND MAP
+and RECEIVE MAP, in `rt::cics`, are the runtime's (D4), and a load module has a `BMS` section for
+the models.
+
+**Dependency direction.** `rt` depends on `numeric` and `zarch` only, as `cargo tree -p
+ironwork-rt` shows, and `syntax` depends on `rt`, never the reverse. `crates/cli/tests/boundary.rs`
+reads the manifests of `zarch`, `numeric` and `rt`, and fails if one names `syntax`, `compile`,
+`exec`, the driver, or any crate outside its rule ([semantics-library.md](semantics-library.md)
+§6).
 
 ## 7. The LIR
 
@@ -258,7 +266,7 @@ The companion documents carry their own open questions for the operator, listed 
 | Step | Work | Done when |
 |---|---|---|
 | 0 | **Measure.** Write four benchmark programs: sequential file read and write, packed arithmetic, table search, and CALL-heavy code. Time the walker and `cobc -O2` on them. | Done: [benchmarks.md](benchmarks.md). The walker takes 1.6 to 234 times `cobc -O2`; B6 holds, with the VM target to be stated per program class |
-| 1 | **Extract the semantics library and split `rt`** out of `exec`, with no change of behaviour. This waits for M8, the SORT, LE, Report Writer and OO integration, and SQL (whose runtime is written as a library service from the start). Add the boundary test. | All tests pass; the boundary test passes |
+| 1 | **Extract the semantics library and split `rt`** out of `exec`, with no change of behaviour. This waits for M8, the SORT, LE, Report Writer and OO integration, and SQL (whose runtime is written as a library service from the start). Add the boundary test. | Done: [semantics-library.md](semantics-library.md) §8, E1 to E12. All tests pass, the boundary test passes, and `rt` depends on `numeric` and `zarch` only (§6) |
 | 2 | **Build the LIR and the lowering** from `Compiled`, covering everything the interpreter runs by then, including SORT and MERGE, LE services, Report Writer, OO COBOL and EXEC SQL. Add assumptions V1 and V2. | Every test program lowers |
 | 3 | **Build the VM** in `rt` on the semantics library. Run the interpreter and the VM on every test and oracle case as a permanent CI job. Extend the fuzz target. | B2 passes |
 | 4 | **Add the load module**, `ironwork compile`, and module loading in `RunUnit`. | B1 and B4 pass |
@@ -281,7 +289,7 @@ Each is argued in the document named, and none blocks step 1.
 | Q3 | lir | Are the walker's four remaining known divergences from IBM fixed in step 2, or only once an oracle confirms them? (Condition-names finding their variable by name was fixed in both executors.) |
 | Q4 | lir | Does an abend carry its program, so that its file name is right in a multi-program run? |
 | Q5 | lir | Answered: MOVE CORRESPONDING, PERFORM VARYING … AFTER and GO TO … DEPENDING ON are all parsed and run; the compiler expands CORRESPONDING before lowering. |
-| Q6 | [sem](semantics-library.md) | Does `syntax` depend on `rt` for the shared vocabulary (recommended), or convert at lowering? |
+| Q6 | [sem](semantics-library.md) | Answered: `syntax` depends on `rt` and re-exports the shared vocabulary. |
 | Q7 | sem | Does the runtime exception cover `tn3270.rs`, the TN3270 server? |
 | Q8 | [lm](load-module.md) | Is a reader kept for the previous major version of the format? |
 | Q9 | lm | Is a checksum enough, or do modules carry a keyed signature? |
