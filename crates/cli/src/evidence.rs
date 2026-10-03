@@ -19,15 +19,30 @@ fn absolute_root(root: &Path) -> PathBuf {
     std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf())
 }
 
-/// A path named relative to the first of `roots` that holds it, or by its file name.
-pub fn relative(path: &Path, roots: &[PathBuf]) -> String {
+/// The root that supplied `path`, as its index and the path from it: the innermost of `roots` that
+/// holds it, so a library inside the program's directory, or inside another library, names its own
+/// members.
+fn holder(path: &Path, roots: &[PathBuf]) -> Option<(usize, String)> {
     let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-    for root in roots {
-        if let Ok(rest) = absolute.strip_prefix(absolute_root(root)) {
-            return rest.to_string_lossy().replace('\\', "/");
+    let mut found: Option<(usize, usize, String)> = None;
+    for (k, root) in roots.iter().enumerate() {
+        let root = absolute_root(root);
+        if let Ok(rest) = absolute.strip_prefix(&root) {
+            let depth = root.components().count();
+            if found.as_ref().is_none_or(|(deepest, _, _)| depth > *deepest) {
+                found = Some((depth, k, rest.to_string_lossy().replace('\\', "/")));
+            }
         }
     }
-    path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+    found.map(|(_, k, rest)| (k, rest))
+}
+
+/// A path named relative to the root that supplied it, or by its file name.
+pub fn relative(path: &Path, roots: &[PathBuf]) -> String {
+    match holder(path, roots) {
+        Some((_, rest)) => rest,
+        None => path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+    }
 }
 
 fn digest(path: &Path) -> Option<(String, u64)> {
@@ -35,8 +50,7 @@ fn digest(path: &Path) -> Option<(String, u64)> {
 }
 
 fn root_of(path: &Path, roots: &[PathBuf]) -> i64 {
-    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-    roots.iter().position(|r| absolute.starts_with(absolute_root(r))).map_or(-1, |i| i as i64)
+    holder(path, roots).map_or(-1, |(k, _)| k as i64)
 }
 
 /// Option names only, and the program by file name: a value may be a path or a URL with a password.

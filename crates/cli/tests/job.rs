@@ -384,7 +384,7 @@ fn a_job_records_its_steps_in_a_hash_chained_journal() {
     assert_eq!(kinds.first(), Some(&"open"));
     assert_eq!(kinds.last(), Some(&"close"));
     assert_eq!(kinds.iter().filter(|k| **k == "step").count(), 3);
-    for want in ["\"outcome\":\"RC=0000\",\"pgm\":\"UPCASE\"", "\"outcome\":\"BYPASSED: COND=(0,EQ) is true\"", "\"path\":\"job.jcl\"", "\"path\":\"lib/UPCASE.cbl\"", "\"dd\":\"OUT\",\"event\":\"end\"", "\"dd\":\"OLD\",\"event\":\"end\""] {
+    for want in ["\"outcome\":\"RC=0000\",\"pgm\":\"UPCASE\"", "\"outcome\":\"BYPASSED: COND=(0,EQ) is true\"", "\"path\":\"job.jcl\"", "\"path\":\"UPCASE.cbl\"", "\"dd\":\"OUT\",\"event\":\"end\"", "\"dd\":\"OLD\",\"event\":\"end\""] {
         assert!(text.contains(want), "{want} in {text}");
     }
     assert!(!text.contains("alpha") && !text.contains("ALPHA"));
@@ -439,8 +439,8 @@ fn a_cobol_steps_abend_record_names_the_source_and_line_and_other_steps_name_non
     assert_eq!(steps.len(), 5, "{text}");
     let divided = "ABEND S0CB: DecimalDivide exception";
     assert_eq!(steps[..3], [
-        ("OWN", divided, Some(("S0CB", Some("lib/DIVIDE.cbl"), Some("8")))),
-        ("CALLS", divided, Some(("S0CB", Some("lib/DIVIDE.cbl"), Some("8")))),
+        ("OWN", divided, Some(("S0CB", Some("DIVIDE.cbl"), Some("8")))),
+        ("CALLS", divided, Some(("S0CB", Some("DIVIDE.cbl"), Some("8")))),
         ("MISSING", "ABEND S806: program NOSUCH is not in the program libraries", Some(("S806", None, None))),
     ], "{text}");
     assert!(steps[3].0 == "COPY" && steps[3].1.starts_with("ABEND IRONWORK: SYSUT1: ") && steps[3].2 == Some(("IRONWORK", None, None)), "{text}");
@@ -693,8 +693,8 @@ fn job_coverage_keeps_apart_two_sources_that_share_a_program_id() {
     assert!(o.status.success(), "{}", log(&o));
     let programs: Vec<&str> = text.split("{\"detail\":").skip(1).collect();
     assert_eq!(programs.len(), 2, "{text}");
-    let a = programs.iter().find(|p| p.contains("\"source\":\"lib/PGMA.cbl\"")).expect("PGMA");
-    let b = programs.iter().find(|p| p.contains("\"source\":\"lib/PGMB.cbl\"")).expect("PGMB");
+    let a = programs.iter().find(|p| p.contains("\"source\":\"PGMA.cbl\"")).expect("PGMA");
+    let b = programs.iter().find(|p| p.contains("\"source\":\"PGMB.cbl\"")).expect("PGMB");
     assert!(a.contains("\"entered\":2,\"line\":4,\"name\":\"A-FIRST\"") && a.contains("\"reached\":2"), "{a}");
     assert!(b.contains("\"entered\":0,\"line\":6,\"name\":\"B-TWO\"") && b.contains("\"paragraphs\":3,\"program\":\"SAMEID\",\"reached\":2"), "{b}");
 }

@@ -39,8 +39,8 @@ by `prev` and `seq`.
   error the line `run` gives. The directory is refused inside the JCL's directory, `--datasets`, a
   library or a procedure library.
 - A path is relative to the directory that supplied it (the program's, a `-I` library, a `-L`
-  library) and otherwise its file name. No record holds a record's data, an option's value, or an
-  absolute path.
+  library), the innermost where one lies inside another, and otherwise its file name. No record
+  holds a record's data, an option's value, or an absolute path.
 - The directory is refused inside the program's directory or a library, through a symbolic link,
   and is created owner-only.
 - Files are hashed as they stream (`crates/rt/src/digest.rs`), so a large data set is not held in
