@@ -8,7 +8,7 @@ use crate::lir::{Bound, Chars, ConvertTable, Converting, Replacement, StringSour
 use crate::storage::{Kind, Loc, Val};
 use crate::store::{self, ProgramFacts};
 use crate::strings::{self, Phrase};
-use crate::vocab::{Figurative, InspectMode, Pos};
+use crate::vocab::{Figurative, InspectMode, Pos, SignClause, SignPosition};
 use numeric::precision::{Fixed, Places};
 
 type R<T> = Result<T, Abend>;
@@ -196,7 +196,8 @@ pub fn unstring<P: Copy, O>(
 }
 
 /// INSPECT: TALLYING counts over the item as it is, then REPLACING and CONVERTING change it. A
-/// national or DBCS item's character positions are two bytes (assumption C230).
+/// national or DBCS item's character positions are two bytes (assumption C230). A signed zoned
+/// item is inspected as its unsigned digits, and keeps its sign (assumption C330).
 pub fn inspect<P: Copy, O>(
     x: &mut impl Values<P, O>,
     target: P,
@@ -208,7 +209,13 @@ pub fn inspect<P: Copy, O>(
     let loc = x.locate(target, false)?;
     let units = Units::of(loc.kind);
     let unit = units.size();
-    let mut data = store::bytes(x.mem(), loc).to_vec();
+    let stored = store::bytes(x.mem(), loc).to_vec();
+    let (span, sign_at) = unsigned_digits(loc.kind, stored.len());
+    let mut data = stored[span.clone()].to_vec();
+    if let Some(at) = sign_at {
+        data[at] |= 0xF0;
+    }
+    let seen = sign_at.map(|at| data[at]);
     count(x, &mut data, units, tallying, pos)?;
     let mut changes = phrases(x, &data, units, replacing, pos)?;
     if let Some(c) = converting {
@@ -235,8 +242,31 @@ pub fn inspect<P: Copy, O>(
         }
     }
     strings::inspect(&mut data, unit, &changes);
-    host::write(x, loc, &data);
+    if let (Some(at), Some(seen)) = (sign_at, seen) {
+        let (was, now) = (stored[span.start + at], data[at]);
+        data[at] = match now {
+            _ if now == seen => was,
+            0xF0..=0xF9 if was >> 4 >= 0xA => was & 0xF0 | now & 0x0F,
+            _ => now,
+        };
+    }
+    let mut out = stored;
+    out[span].copy_from_slice(&data);
+    host::write(x, loc, &out);
     Ok(())
+}
+
+/// The bytes of an item INSPECT examines, and the place among them of a signed zoned item's
+/// overpunched sign: a signed zoned item is examined as if moved to an unsigned one of its length,
+/// a separate sign left out (Language Reference SC27-8713-03, p. 359, Table 40).
+fn unsigned_digits(kind: Kind, len: usize) -> (std::ops::Range<usize>, Option<usize>) {
+    match kind {
+        Kind::Zoned { signed: true, sign: Some(SignClause { separate: true, position: SignPosition::Leading }), .. } => (1..len, None),
+        Kind::Zoned { signed: true, sign: Some(SignClause { separate: true, .. }), .. } => (0..len - 1, None),
+        Kind::Zoned { signed: true, sign: Some(SignClause { position: SignPosition::Leading, .. }), .. } => (0..len, Some(0)),
+        Kind::Zoned { signed: true, .. } => (0..len, len.checked_sub(1)),
+        _ => (0..len, None),
+    }
 }
 
 /// INSPECT TALLYING of a function's value, evaluated once before the phrases' operands. A national

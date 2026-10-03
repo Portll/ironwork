@@ -72,3 +72,23 @@ fn a_subordinate_sign_clause_takes_precedence_over_its_group_s() {
     );
     assert_eq!(on_both(&source), "012--03405O078\n");
 }
+
+/// Language Reference SC27-8713-03, p. 359, Table 40: a signed zoned item is inspected as if moved
+/// to an unsigned item of its length, a separate sign not examined. Its sign stays (assumption C330).
+#[test]
+fn inspect_examines_a_signed_zoned_item_as_its_unsigned_digits() {
+    let source = program(
+        "",
+        "       01  N PIC S9(5) VALUE -12345.\n       01  L PIC S9(3) SIGN LEADING SEPARATE VALUE -505.\n       01  C1 PIC 99 VALUE 0.\n       01  C2 PIC 99 VALUE 0.\n",
+        &[
+            line("INSPECT N TALLYING C1 FOR ALL '5' C2 FOR ALL '-'"),
+            line("DISPLAY C1 ' ' C2"),
+            line("INSPECT N REPLACING ALL '5' BY '7'"),
+            line("INSPECT L REPLACING ALL '5' BY '6'"),
+            line("DISPLAY N ' ' L"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    );
+    assert_eq!(on_both(&source), "01 00\n1234P -606\n");
+}

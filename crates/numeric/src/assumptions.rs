@@ -316,6 +316,7 @@ pub const UPGRADE_SET_AFTER_THE_STEP: &str = "C355";
 pub const BLDINDEX_REFUSALS: &str = "C356";
 pub const PRINT_LISTING_LAYOUT: &str = "C358";
 pub const PRINT_RANGE_ENDS: &str = "C359";
+pub const INSPECT_SIGNED_ZONED: &str = "C330";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -2039,6 +2040,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         claim: "A DBCS item of PICTURE G or N without B is a GRAPHIC host variable of its characters, and a group of a 49-level binary halfword and a 49-level such item VARGRAPHIC, its length counting DBCS characters, as Db2 declares them; an item whose PICTURE has B has no SQL type. A GRAPHIC value reaches PostgreSQL, or a recording, as the text the CODEPAGE's DBCS component gives its characters, and text comes back as DBCS characters padded with DBCS spaces or cut at a character, SQLWARN1 and the indicator taking the length in characters; under a single-byte CODEPAGE, or for a character the DBCS component lacks, the value is SQLCODE -330, as one the code page cannot convert. Db2's own GRAPHIC conversion between CCSIDs is not modelled",
         basis: Basis::Chosen,
         oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: INSPECT_SIGNED_ZONED,
+        claim: "INSPECT examines a signed zoned item as if it had been moved to an unsigned zoned item of its length: an overpunched sign is read as its digit, and a separate sign is not examined and not replaced (Language Reference SC27-8713-03, p. 359, Table 40). The table says REPLACING and CONVERTING copy their result back, and not what becomes of an overpunched sign. ironwork keeps it: a byte at the sign's place that a phrase changes to a digit takes the old sign half, and one no phrase changes is left as it was. The unsigned image changes only the sign byte's zone, as an alphanumeric image of the item does",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
     },
 ];
 
