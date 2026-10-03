@@ -127,7 +127,10 @@ abend .` reports them as findings ([docs/evidence.md](docs/evidence.md) §5). `f
 CICS program as a task instead, on a generated COMMAREA and an operator's generated typing into the
 maps it RECEIVEs (§5.1). `fuzz --interface` runs a subprogram as a caller would, on generated
 arguments for its PROCEDURE DIVISION USING items, shaped by the CALLs that pass them where the
-`-L` libraries hold any (§5.2).
+`-L` libraries hold any (§5.2). `fuzz --differential` runs each generated input on the interpreter
+and on the VM under one statement limit, and keeps each input on which they differ in
+`divergence-N/`, with what each wrote and the command that repeats it; its exit status is 1 when
+any input differs.
 
     cargo run -p ironwork -- job payroll.jcl --datasets data[:text] [--proclib procs]... [--user ID] [-L proglib]... [-I copylib]... [--clock 2026-09-27T12:00:00] [--sql-replay calls.txt]
 

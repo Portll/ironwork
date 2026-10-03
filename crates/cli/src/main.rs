@@ -32,12 +32,13 @@ usage:
   ironwork job <job.jcl> --datasets DIR[:text] [--proclib DIR]... [--user ID] [run flags] [-I <dir>]... [-L <dir>]... [--clock <time>] [--sql-replay path]
                [--exit-code]
                                                        run a job's steps in order
-  ironwork fuzz [--job] <program.cbl|job.jcl> -o <dir> [--runs N] [--seed N] [--timeout SECONDS] [--hang-limit N]
+  ironwork fuzz [--job|--differential] <program.cbl|job.jcl> -o <dir> [--runs N] [--seed N] [--timeout SECONDS] [--hang-limit N]
                [--root DIR] [--clock <time>]
                [-I <dir>]... [-L <dir>]... [-silent] [-strict-sort-keys] [-debug] [--optimize=0|1|2]
                [--compliance strict|extended] [--datasets DIR] [--proclib DIR]... [--user ID]
                                                        run a batch program, or with --job a job, on generated input
-                                                       and keep each abend
+                                                       and keep each abend; with --differential, each input on
+                                                       which the interpreter and the VM differ
   ironwork assumptions [--c-series]                    list the register of assumptions, one per line
   ironwork --version
 flags:
@@ -323,6 +324,15 @@ fuzz flags:
              RETURN TRANSID names, where the source names one, runs the program. AEI0, AEIL, AEYQ
              and AEI1 say what the region lacks and are counted refused. An abend the task gives
              with no COMMAREA and no operator input is not kept
+  --differential
+             run the batch program on each generated input twice, through run and run --vm, each
+             with --statement-limit --hang-limit (1000000 without it), and keep each input on which
+             the interpreter and the VM differ in exit status, abend, standard output, standard
+             error or a DD's data set, one to each way of differing, made smaller while it still
+             differs that way: divergence-N/ holds its input, what each executor wrote, and a
+             report of the differences with the command that repeats the run. Runs that both reach
+             the limit or time out, and runs that reach what the VM does not run yet, pass and are
+             counted. Exit status 1 when any input differs
   --interface
              run a subprogram as a caller would, through ironwork run --argument: each PROCEDURE
              DIVISION USING item gets bytes built field by field from its LINKAGE record. Where a
@@ -471,7 +481,7 @@ fn driver() -> ExitCode {
     let mut parm: Option<String> = None;
     let mut statement_limit: Option<u64> = None;
     let mut hang_limit: Option<u64> = None;
-    let (mut fuzz_job, mut fuzz_cics, mut fuzz_interface) = (false, false, false);
+    let (mut fuzz_job, mut fuzz_cics, mut fuzz_interface, mut fuzz_differential) = (false, false, false, false);
     let mut arguments: Vec<Option<std::path::PathBuf>> = Vec::new();
     let mut step_parms: Vec<(String, String)> = Vec::new();
     let mut instream: Vec<(String, std::path::PathBuf)> = Vec::new();
@@ -504,6 +514,7 @@ fn driver() -> ExitCode {
             },
             "--job" => fuzz_job = true,
             "--cics" => fuzz_cics = true,
+            "--differential" => fuzz_differential = true,
             "--interface" => fuzz_interface = true,
             "--argument" => match args.next() {
                 Some(a) if a == "OMITTED" => arguments.push(None),
@@ -701,7 +712,7 @@ fn driver() -> ExitCode {
         || !proclibs.is_empty() || user.is_some()
         || vm || parm.is_some() || statement_limit.is_some() || !arguments.is_empty();
     let dump_flags = !dump_options.only.is_empty() || dump_options.strings || !dump_options.check;
-    let fuzz_flags = fuzz_root.is_some() || fuzz_runs.is_some() || fuzz_seed.is_some() || fuzz_timeout.is_some() || hang_limit.is_some() || fuzz_job || fuzz_cics || fuzz_interface;
+    let fuzz_flags = fuzz_root.is_some() || fuzz_runs.is_some() || fuzz_seed.is_some() || fuzz_timeout.is_some() || hang_limit.is_some() || fuzz_job || fuzz_cics || fuzz_interface || fuzz_differential;
     if vm && (!matches!(rest.first().map(String::as_str), Some("run" | "cics")) || evidence_dir.is_some()) {
         return usage_error("--vm is for run and cics, and not with --evidence");
     }
@@ -720,8 +731,8 @@ fn driver() -> ExitCode {
     if rest.first().is_some_and(|c| c == "fuzz") {
         let [_, file] = rest.as_slice() else { return usage_error("fuzz needs one program, or one job with --job") };
         let Some(out) = out_dir else { return usage_error("fuzz needs -o DIR") };
-        if [fuzz_job, fuzz_cics, fuzz_interface].iter().filter(|&&on| on).count() > 1 {
-            return usage_error("fuzz takes one of --job, --cics and --interface");
+        if [fuzz_job, fuzz_cics, fuzz_interface, fuzz_differential].iter().filter(|&&on| on).count() > 1 {
+            return usage_error("fuzz takes one of --job, --cics, --interface and --differential");
         }
         if fuzz_interface && hang_limit.is_some() {
             return usage_error("--hang-limit is for fuzz and fuzz --job; fuzz --interface does not run a timed-out input again");
@@ -751,7 +762,7 @@ fn driver() -> ExitCode {
             runs: fuzz_runs.unwrap_or(200),
             seed: fuzz_seed.unwrap_or(1),
             timeout: std::time::Duration::from_secs(fuzz_timeout.unwrap_or(10)),
-            hang_limit: hang_limit.unwrap_or(10_000_000),
+            hang_limit: hang_limit.unwrap_or(if fuzz_differential { 1_000_000 } else { 10_000_000 }),
             libraries,
             program_dirs,
             flags,
@@ -766,10 +777,13 @@ fn driver() -> ExitCode {
         if fuzz_interface {
             return fuzz::interface::run(request);
         }
+        if fuzz_differential {
+            return fuzz::differential::run(request);
+        }
         return fuzz::run(request);
     }
     if fuzz_flags {
-        return usage_error("--runs, --seed, --timeout, --hang-limit, --root, --job, --cics and --interface are for fuzz");
+        return usage_error("--runs, --seed, --timeout, --hang-limit, --root, --job, --cics, --interface and --differential are for fuzz");
     }
     let compile_flags = out_dir.is_some() || bundle.is_some() || source_prefix.is_some();
     match rest.split_first() {

@@ -2425,8 +2425,11 @@ Both run with `RunUnit.taint` on, and the taint of every byte and each sink's `i
 `RunUnit::write` or `rt::host::write`, or marks what it wrote with `RunUnit::mark`. It locates a
 receiver it only writes with `loc_written`, where the walker uses `locate_written`. And an op that
 runs something taint does not follow calls `RunUnit::unfollowed`, as the walker does.
-The fuzz target of B2 runs both with a step limit, and passes when they agree or both stop at it.
-The golden programs of §12.2 run in both, which exercises C99.
+`ironwork fuzz --differential` runs each input it generates for a batch program on both, under one
+statement limit, and passes when they agree or both stop at it; a run the VM stops at what it does
+not run yet is counted. It keeps each input on which they differ, made smaller, with what each
+executor wrote and the command that repeats the run. The golden programs of §12.2 run in both,
+which exercises C99.
 
 **NIST.** `tools/nist.py --vm` runs NIST's CCVS85 audit routines on the interpreter and then on the
 VM, from the same files and with the clock and WHEN-COMPILED fixed, and compares the exit status,

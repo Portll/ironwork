@@ -15,6 +15,7 @@ use rt::vocab::{AcceptFrom, OpenMode, SignPosition};
 use syntax::ast::{FileDecl, Organization, Paragraph, Program, Ref, Stmt};
 use zarch::ebcdic::CodePage;
 
+pub(crate) mod differential;
 pub(crate) mod interface;
 pub(crate) mod job;
 
