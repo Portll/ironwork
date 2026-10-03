@@ -160,3 +160,16 @@ fn handle_abend_keeps_its_label_s_paragraph_and_a_handle_command_s_resp_is_data(
     let got = commands(&p);
     assert_eq!(names(&p, &got[0].1.resp.resp), "WS-RESP");
 }
+
+#[test]
+fn a_function_option_with_a_floating_point_argument_expression_is_refused() {
+    let data = format!("{DATA}       01  F COMP-2 VALUE 2.7.\n");
+    let written = |length: &str| program("", &data, &[line("EXEC CICS WRITEQ TS QUEUE('Q1') FROM(WS-DATA)"), line(&format!("  LENGTH({length}) END-EXEC")), line("GOBACK.")].concat());
+    for length in ["FUNCTION INTEGER(F * 2)", "FUNCTION ABS(FUNCTION INTEGER(F + 1))"] {
+        let e = lower(&compiled(&written(length))).unwrap_err();
+        assert!(matches!(e, LowerError::Unsupported("a FUNCTION with a floating-point argument expression as an EXEC CICS option", _)), "{length}: {e}");
+    }
+    for length in ["FUNCTION INTEGER(F)", "FUNCTION INTEGER(WS-LEN * 2)", "FUNCTION NUMVAL('5.9')"] {
+        lowered(&written(length));
+    }
+}

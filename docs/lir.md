@@ -1371,11 +1371,17 @@ HANDLE labels there. SYNCPOINT is a service (cics/services.rs) that settles the 
 
 - **Lowering binds with the walker's `bind`.** Each EXEC CICS block is one `Op::Cics` naming its
   command in `Services.cics`. Lowering calls machine/cics_bind.rs's `bind` and maps the command it
-  gives through `cics::Handles` (`CicsCommand::map`): a data item becomes a place, located as the
-  walker locates it, not as a receiving item; another operand an `Operand`; text a symbol. So the
-  command, its options and RESP, RESP2 and NOHANDLE are the walker's, and every refusal `run` gives
-  (outside a task, a command ironwork does not carry out, an option it needs) comes from the same
-  code at the same point. A command ironwork does not carry out lowers to `Cics::Unsupported`.
+  gives through `cics::Handles` (`CicsCommand::map`, which names every option of every command): a
+  data item becomes a place, located as the walker locates it, not as a receiving item; another
+  operand an `Operand`; text a symbol. So the command, its options and RESP, RESP2 and NOHANDLE are
+  the walker's, and every refusal `run` gives (outside a task, a command ironwork does not carry
+  out, an option it needs) comes from the same code at the same point. A command ironwork does not
+  carry out lowers to `Cics::Unsupported`. An operand that is not a data item is read as a value
+  (`CicsHost::content`) or as an integer (`integer_of`), which the walker evaluates as `integer`
+  does, its functions' argument expressions in fixed point, the whole part of a floating-point
+  value taken. The LIR keeps one `Operand` for both: a FUNCTION whose arguments, or a nested
+  function's, hold an arithmetic expression in floating point is refused, "a FUNCTION with a
+  floating-point argument expression as an EXEC CICS option".
 - **Labels are paragraphs, and handlers are run-time state.** HANDLE CONDITION holds the `ParaId`
   its labels resolve to, as `crate::procedure_from` resolves them for the walker, with the number of
   the activation that set it. HANDLE, IGNORE, PUSH and POP change the logical level's `Handlers`

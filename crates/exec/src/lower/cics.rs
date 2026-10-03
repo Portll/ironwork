@@ -12,7 +12,7 @@ use rt::abend::AbendCode;
 use rt::cics::{Cics, CicsCommand, Datum, Handles, Resp};
 use rt::lir::{self, Op, PlaceId, SymId};
 use syntax::Pos;
-use syntax::ast::{ExecBlock, Literal, Operand, Ref};
+use syntax::ast::{ExecBlock, Expr, FunctionCall, Literal, Operand, Ref};
 
 /// The walker's references as the LIR's ids: a data item as a place located as the walker locates
 /// it, not as a receiving item; any other operand as its value; text as a symbol.
@@ -32,6 +32,11 @@ impl<'b> Handles<&'b Ref, &'b Operand, &'b str> for Lowering<'_, '_> {
     }
 
     fn value(&mut self, op: &'b Operand) -> R<lir::Operand> {
+        if let Operand::Function(f) = op
+            && self.l.float_argument(f)?
+        {
+            return unsupported("a FUNCTION with a floating-point argument expression as an EXEC CICS option", self.pos);
+        }
         Ok(self.l.operand(op, self.pos)?.operand)
     }
 
@@ -83,6 +88,26 @@ impl Lower<'_> {
         }
         let r = Ref { name, qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos };
         self.place(&r, false).map(Some)
+    }
+
+    /// Whether an intrinsic FUNCTION's arguments, or a nested one's, hold an arithmetic expression
+    /// in floating point: `Machine::integer` computes it in fixed point, a value read in floating
+    /// point, and the LIR keeps one operand for both.
+    fn float_argument(&mut self, f: &FunctionCall) -> R<bool> {
+        if self.user_defined(&f.name).is_some() {
+            return Ok(false);
+        }
+        for a in &f.args {
+            let float = match a {
+                Expr::Operand(Operand::Function(g)) => self.float_argument(g)?,
+                Expr::Operand(_) => false,
+                _ => self.uses_float(a)?,
+            };
+            if float {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// A block whose binding the walker refuses, which it abends at only once the task check and
