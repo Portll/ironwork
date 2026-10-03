@@ -43,6 +43,7 @@ pub struct Harness {
     when_compiled: Option<CompileTime>,
     database: Option<Databases>,
     parm: Option<String>,
+    arguments: Option<Vec<Option<Vec<u8>>>>,
 }
 
 impl Harness {
@@ -60,6 +61,7 @@ impl Harness {
             when_compiled: None,
             database: None,
             parm: None,
+            arguments: None,
         }
     }
 
@@ -91,6 +93,13 @@ impl Harness {
     /// Runs the program as a job step's main program with this PARM.
     pub fn parm(mut self, text: &str) -> Self {
         self.parm = Some(text.to_owned());
+        self
+    }
+
+    /// Runs the program as a subprogram a caller passed these arguments to, one per USING item,
+    /// None for OMITTED.
+    pub fn arguments(mut self, arguments: Vec<Option<Vec<u8>>>) -> Self {
+        self.arguments = Some(arguments);
         self
     }
 
@@ -155,7 +164,7 @@ impl Harness {
         };
         let task = self.task.map(|task| cics::Task { commarea: self.commarea.map(|c| compiled.options.code_page().encode(&c).unwrap()), ..task });
         let paths = paths(&self.dds, task.as_ref());
-        let inputs = Inputs { compiled: &compiled, library, dds: self.dds, sysin: self.sysin, clock, database: self.database, paths, parm: self.parm };
+        let inputs = Inputs { compiled: &compiled, library, dds: self.dds, sysin: self.sysin, clock, database: self.database, paths, parm: self.parm, arguments: self.arguments };
         let run = match executor {
             Executor::Vm => {
                 let run = inputs.vm(&vm::code(&compiled), task);
@@ -204,6 +213,7 @@ struct Inputs<'c> {
     database: Option<Databases>,
     paths: Vec<PathBuf>,
     parm: Option<String>,
+    arguments: Option<Vec<Option<Vec<u8>>>>,
 }
 
 /// What the differential test compares of a run.
@@ -251,6 +261,14 @@ impl Events {
 }
 
 impl Inputs<'_> {
+    fn passed(&self) -> crate::Passed<'_> {
+        match (&self.parm, &self.arguments) {
+            (_, Some(arguments)) => crate::Passed::Arguments(arguments),
+            (Some(parm), None) => crate::Passed::Parm(parm),
+            (None, None) => crate::Passed::Nothing,
+        }
+    }
+
     fn sysin(&self) -> Option<Box<dyn std::io::BufRead>> {
         self.sysin.clone().map(|s| Box::new(Cursor::new(s.into_bytes())) as Box<dyn std::io::BufRead>)
     }
@@ -275,7 +293,7 @@ impl Inputs<'_> {
                 let (ending, task) = crate::execute_task(self.compiled, self.library.clone(), dds, task, self.clock, db, &mut out, &mut err, Some(observer), &mut remains);
                 (ending.map_err(Halt::Abend), 0, Some(task))
             }
-            None => match crate::run_main(self.compiled, self.library.clone(), dds, self.sysin(), self.clock, db, &mut out, &mut err, Some(observer), self.parm.as_deref(), &mut remains) {
+            None => match crate::run_main(self.compiled, self.library.clone(), dds, self.sysin(), self.clock, db, &mut out, &mut err, Some(observer), self.passed(), &mut remains) {
                 Ok((ending, code)) => (Ok(ending), code, None),
                 Err(abend) => (Err(Halt::Abend(abend)), 0, None),
             },
@@ -297,7 +315,7 @@ impl Inputs<'_> {
                 let (ending, task) = vm::execute_cics(self.compiled, code, self.library.clone(), dds, task, self.clock, db, &mut out, &mut err, Some(observer), &mut remains);
                 (ending, 0, Some(task))
             }
-            None => match vm::execute(self.compiled, code, self.library.clone(), dds, self.sysin(), self.clock, db, &mut out, &mut err, Some(observer), self.parm.as_deref(), &mut remains) {
+            None => match vm::execute(self.compiled, code, self.library.clone(), dds, self.sysin(), self.clock, db, &mut out, &mut err, Some(observer), self.passed(), &mut remains) {
                 Ok((ending, code)) => (Ok(ending), code, None),
                 Err(halt) => (Err(halt), 0, None),
             },

@@ -1009,7 +1009,7 @@ fn driver() -> ExitCode {
     let ended = match (&code, &parm) {
         (None, Some(p)) => compiled.execute_main(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, p).map_err(exec::vm::Halt::Abend),
         (None, None) => compiled.execute_observed(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer).map_err(exec::vm::Halt::Abend),
-        (Some(code), parm) => exec::vm::execute(&compiled, code, library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, parm.as_deref(), &mut None),
+        (Some(code), parm) => exec::vm::execute(&compiled, code, library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, parm.as_deref().map_or(exec::Passed::Nothing, exec::Passed::Parm), &mut None),
     };
     let (outcome, abend) = match &ended {
         Ok((_, return_code)) => (Outcome::Ended(i64::from(*return_code)), None),

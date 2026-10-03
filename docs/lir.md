@@ -673,7 +673,8 @@ pub enum Terminator {
     Switch { value: IntExpr, targets: Vec<ParaId>, otherwise: BlockId },
     /// An out-of-line PERFORM: push a frame, arm its return point, enter the range (§8.4).
     PerformEnter { range: RangeId, ret: BlockId, resume: Option<Resume> },
-    /// EXIT PROGRAM: nothing in the run unit's first program, GOBACK in any other (machine.rs:377-378).
+    /// EXIT PROGRAM: nothing in a run unit's main program, GOBACK in any other, including a first
+    /// program run as a subprogram its caller passed arguments to (machine.rs:387-388).
     ExitProgram { next: BlockId },
     End(Ending),
     Abend(AbendId),
@@ -919,7 +920,7 @@ abend.
 | NEXT SENTENCE | `Jump` past the next separator period of the paragraph, or `ParagraphEnd`, with `Unnest` | machine.rs:291, 392 |
 | STOP RUN | `End(StopRun)` | machine.rs:410 |
 | GOBACK, EXIT METHOD | `End(Goback)` | machine.rs:376; 422 (int) |
-| EXIT PROGRAM | `ExitProgram`: whether this is the run unit's first program is known only at run time | machine.rs:377-378 |
+| EXIT PROGRAM | `ExitProgram`: whether this is a run unit's main program is known only at run time; a first program given arguments (`Passed::Arguments`, `rt::vm::run`'s `main` false) is not one | machine.rs:387-388 |
 | Falling off the last paragraph | `ParagraphEnd`, `End(EndOfProgram)` | perform.rs:106-107 (7af) |
 
 ### 8.9 ALTER and independent segments

@@ -184,10 +184,11 @@ fn receivers(p: &Program) -> HashMap<PlaceId, SymId> {
 }
 
 /// Runs program `me` of the run unit, `code`, as its first program, its PROCEDURE DIVISION USING
-/// items given `arguments`' addresses.
-pub fn run<L: Loader<Rc<Code>>>(code: &Code, me: usize, unit: &mut RunUnit<'_, Rc<Code>, L>, arguments: &[Option<usize>]) -> Result<Ending, Halt> {
+/// items given `arguments`' addresses; `main` as a run unit's main program, where EXIT PROGRAM
+/// does nothing, or else as a subprogram a caller passed them to.
+pub fn run<L: Loader<Rc<Code>>>(code: &Code, me: usize, unit: &mut RunUnit<'_, Rc<Code>, L>, arguments: &[Option<usize>], main: bool) -> Result<Ending, Halt> {
     let lowered = code.lowered.as_ref().map_err(|why| not_yet(format!("a program that does not lower ({why})")))?;
-    let mut vm = Vm::activation(lowered, me, unit, true)?;
+    let mut vm = Vm::activation(lowered, me, unit, main)?;
     for (&record, &address) in lowered.program.storage.using.iter().zip(arguments) {
         vm.linkage[usize::from(record)] = address;
     }

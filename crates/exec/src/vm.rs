@@ -5,7 +5,7 @@
 use crate::loader::{Library, loads_as};
 use crate::lower::{self, LowerError};
 use crate::unit::{Clock, Observer, Remains};
-use crate::{Compiled, cics, files, oo, sql};
+use crate::{Compiled, Passed, cics, files, oo, sql};
 use rt::abend::{Abend, AbendCode, Ending};
 use rt::module::{LoadedModule, Modules};
 use rt::oo::{ClassCode, MethodCode, Part};
@@ -15,6 +15,7 @@ use std::io::{BufRead, Write};
 use std::path::Path;
 use std::rc::Rc;
 use syntax::Pos;
+use zarch::ebcdic::CodePage;
 
 /// Where CALL finds a program on the VM (load-module.md §8.2): among the programs already read,
 /// those of the run's first source or module first; then `NAME.iwm` in the program libraries; then
@@ -166,23 +167,24 @@ fn run_unit<'w>(
     run_unit
 }
 
-/// Runs the first program of `run_unit`, `me`, as `code`, with a job step's `parm`, then settles
-/// the database and closes every file, unless an abend the PARM's TRAP(OFF) keeps from Language
+/// Runs the first program of `run_unit`, `me`, as `code`, given `passed`, then settles the
+/// database and closes every file, unless an abend the PARM's TRAP(OFF) keeps from Language
 /// Environment ended it.
-fn run_main(code: &Code, id: &str, me: usize, run_unit: &mut RunUnit<'_, Rc<Code>, VmLibrary>, parm: Option<(usize, bool)>) -> Result<(Ending, i16), Halt> {
-    let (parm, trap_off) = parm.unzip();
-    let ending = rt::vm::run(code, me, run_unit, &parm.map_or_else(Vec::new, |p| vec![Some(p)]));
+fn run_main(code: &Code, id: &str, me: usize, run_unit: &mut RunUnit<'_, Rc<Code>, VmLibrary>, passed: Passed<'_>, page: &CodePage) -> Result<(Ending, i16), Halt> {
+    let trap_off = matches!(passed, Passed::Parm(p) if rt::le::parm::trap_off(p));
+    let addresses = passed.addresses(run_unit, page);
+    let ending = rt::vm::run(code, me, run_unit, &addresses, passed.main());
     let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(id, ending.is_ok()).map(drop));
-    let closed = run_unit.close_all(trap_off == Some(true) && matches!(&ending, Err(Halt::Abend(a)) if a.code.bypasses_trap_off()));
+    let closed = run_unit.close_all(trap_off && matches!(&ending, Err(Halt::Abend(a)) if a.code.bypasses_trap_off()));
     let ending = ending?;
     settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default(), file: None })?;
     closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default(), file: None })?;
     Ok((ending, run_unit.return_code()))
 }
 
-/// Runs `compiled`, lowered as `code`, as the first program of a run unit on the VM, with a job
-/// step's `parm` as `Execute::execute_main` takes it; `kept` takes what the run left in its run
-/// unit.
+/// Runs `compiled`, lowered as `code`, as the first program of a run unit on the VM, given
+/// `passed` as `Execute::execute_main` and `Execute::execute_with_arguments` take it; `kept`
+/// takes what the run left in its run unit.
 #[allow(clippy::too_many_arguments)]
 pub fn execute<'w>(
     compiled: &Compiled,
@@ -195,14 +197,13 @@ pub fn execute<'w>(
     out: &'w mut dyn Write,
     err: &'w mut dyn Write,
     observer: Option<Observer<'w>>,
-    parm: Option<&str>,
+    passed: Passed<'_>,
     kept: &mut Option<Remains>,
 ) -> Result<(Ending, i16), Halt> {
     oo::refuse_to_run(&compiled.program)?;
     let mut run_unit = run_unit(VmLibrary::new(library), dds, sysin, clock, database, out, err, observer);
     let me = run_unit.add_named(None, compiled.program.id.to_ascii_uppercase(), compiled.program.files.len(), compiled.layout.size as usize);
-    let parm = parm.map(|p| (crate::push_parm(&mut run_unit, compiled.options.code_page(), p), rt::le::parm::trap_off(p)));
-    let ran = run_main(code, &compiled.program.id, me, &mut run_unit, parm);
+    let ran = run_main(code, &compiled.program.id, me, &mut run_unit, passed, compiled.options.code_page());
     *kept = Some(Remains::of(&run_unit));
     ran
 }
@@ -240,8 +241,7 @@ pub fn execute_module<'w>(
     let page = program.options.options.code_page();
     let mut run_unit = run_unit(library, dds, sysin, clock, database, out, err, None);
     let me = run_unit.add_named(None, main.name, main.files, main.size);
-    let parm = parm.map(|p| (crate::push_parm(&mut run_unit, page, p), rt::le::parm::trap_off(p)));
-    run_main(&code, &id, me, &mut run_unit, parm)
+    run_main(&code, &id, me, &mut run_unit, parm.map_or(Passed::Nothing, Passed::Parm), page)
 }
 
 /// Runs `compiled`, lowered as `code`, on the VM as the first program of a CICS task, as

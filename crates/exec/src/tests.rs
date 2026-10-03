@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use syntax::ast::Stmt;
 use syntax::{Error, Severity};
 
+mod arguments;
 mod collating;
 mod compliance;
 mod corresponding;

@@ -104,6 +104,23 @@ pub trait Execute {
         parm: &str,
     ) -> Result<(Ending, i16), Abend>;
 
+    /// Runs as [`Execute::execute_observed`] does, as a subprogram whose caller passed `arguments`,
+    /// one per PROCEDURE DIVISION USING item: the bytes of the item passed, or None for OMITTED,
+    /// which passes a null address. Each argument is input to the run, and EXIT PROGRAM returns.
+    #[allow(clippy::too_many_arguments)]
+    fn execute_with_arguments<'w>(
+        &self,
+        library: unit::Library,
+        dds: files::Dds,
+        sysin: Option<Box<dyn BufRead + 'w>>,
+        clock: unit::Clock,
+        database: Option<&'w mut (dyn sql::Database + '_)>,
+        out: &'w mut dyn Write,
+        err: &'w mut dyn Write,
+        observer: Option<unit::Observer<'w>>,
+        arguments: &[Option<Vec<u8>>],
+    ) -> Result<(Ending, i16), Abend>;
+
     /// Runs as [`Execute::execute_observed`] does, and puts what the run left in its run unit in
     /// `kept`.
     #[allow(clippy::too_many_arguments)]
@@ -209,7 +226,7 @@ impl Execute for Compiled {
         err: &'w mut dyn Write,
         observer: Option<unit::Observer<'w>>,
     ) -> Result<(Ending, i16), Abend> {
-        run_main(self, library, dds, sysin, clock, database, out, err, observer, None, &mut None)
+        run_main(self, library, dds, sysin, clock, database, out, err, observer, Passed::Nothing, &mut None)
     }
 
     fn execute_main<'w>(
@@ -224,7 +241,22 @@ impl Execute for Compiled {
         observer: Option<unit::Observer<'w>>,
         parm: &str,
     ) -> Result<(Ending, i16), Abend> {
-        run_main(self, library, dds, sysin, clock, database, out, err, observer, Some(parm), &mut None)
+        run_main(self, library, dds, sysin, clock, database, out, err, observer, Passed::Parm(parm), &mut None)
+    }
+
+    fn execute_with_arguments<'w>(
+        &self,
+        library: unit::Library,
+        dds: files::Dds,
+        sysin: Option<Box<dyn BufRead + 'w>>,
+        clock: unit::Clock,
+        database: Option<&'w mut (dyn sql::Database + '_)>,
+        out: &'w mut dyn Write,
+        err: &'w mut dyn Write,
+        observer: Option<unit::Observer<'w>>,
+        arguments: &[Option<Vec<u8>>],
+    ) -> Result<(Ending, i16), Abend> {
+        run_main(self, library, dds, sysin, clock, database, out, err, observer, Passed::Arguments(arguments), &mut None)
     }
 
     fn execute_kept<'w>(
@@ -239,7 +271,7 @@ impl Execute for Compiled {
         observer: Option<unit::Observer<'w>>,
         kept: &mut Option<unit::Remains>,
     ) -> Result<(Ending, i16), Abend> {
-        run_main(self, library, dds, sysin, clock, database, out, err, observer, None, kept)
+        run_main(self, library, dds, sysin, clock, database, out, err, observer, Passed::Nothing, kept)
     }
 
     fn execute_cics<'w>(
@@ -364,8 +396,38 @@ pub(crate) fn asra(a: Abend) -> Abend {
     }
 }
 
-/// Runs `compiled` as the first program of a batch run unit; with `parm`, as a job step's main
-/// program.
+/// What the first program of a batch run unit is given for its PROCEDURE DIVISION USING items.
+#[derive(Clone, Copy, Debug, Default)]
+pub enum Passed<'a> {
+    /// Nothing: a main program no one passes anything.
+    #[default]
+    Nothing,
+    /// A job step's PARM, as Language Environment builds its parameter list.
+    Parm(&'a str),
+    /// What a caller passes a subprogram, one per USING item: the bytes of the item passed, or
+    /// None for OMITTED.
+    Arguments(&'a [Option<Vec<u8>>]),
+}
+
+impl Passed<'_> {
+    /// The addresses the USING items are bound to, each argument pushed as input.
+    pub(crate) fn addresses<H: Clone, L: rt::unit::Loader<H>>(self, run_unit: &mut rt::unit::RunUnit<'_, H, L>, page: &zarch::ebcdic::CodePage) -> Vec<Option<usize>> {
+        match self {
+            Passed::Nothing => Vec::new(),
+            Passed::Parm(parm) => vec![Some(push_parm(run_unit, page, parm))],
+            Passed::Arguments(arguments) => arguments.iter().map(|a| a.as_deref().map(|bytes| push_input(run_unit, bytes))).collect(),
+        }
+    }
+
+    /// Whether the program runs as a run unit's main program, where EXIT PROGRAM does nothing,
+    /// rather than as one a caller passed arguments to.
+    pub(crate) fn main(self) -> bool {
+        !matches!(self, Passed::Arguments(_))
+    }
+}
+
+/// Runs `compiled` as the first program of a batch run unit, given `passed`: a main program, a
+/// job step's main program, or a subprogram as its caller would run it.
 #[allow(clippy::too_many_arguments)]
 fn run_main<'w>(
     compiled: &Compiled,
@@ -377,7 +439,7 @@ fn run_main<'w>(
     out: &'w mut dyn Write,
     err: &'w mut dyn Write,
     observer: Option<unit::Observer<'w>>,
-    parm: Option<&str>,
+    passed: Passed<'_>,
     kept: &mut Option<unit::Remains>,
 ) -> Result<(Ending, i16), Abend> {
     oo::refuse_to_run(&compiled.program)?;
@@ -390,11 +452,11 @@ fn run_main<'w>(
     run_unit.statement_limit = limit;
     run_unit.sql = database.map(sql::Session::new);
     let me = run_unit.add(None, &compiled.program, compiled.layout.size as usize);
-    let trap_off = parm.is_some_and(rt::le::parm::trap_off);
-    let parm = parm.map(|p| push_parm(&mut run_unit, compiled.options.code_page(), p));
-    let ending = machine::Machine::activation(compiled, me, &mut run_unit, true).and_then(|mut m| {
-        if parm.is_some() {
-            m.bind(&[parm]);
+    let trap_off = matches!(passed, Passed::Parm(p) if rt::le::parm::trap_off(p));
+    let addresses = passed.addresses(&mut run_unit, compiled.options.code_page());
+    let ending = machine::Machine::activation(compiled, me, &mut run_unit, passed.main()).and_then(|mut m| {
+        if !addresses.is_empty() {
+            m.bind(&addresses);
         }
         m.run_procedure()
     });
@@ -410,8 +472,13 @@ fn run_main<'w>(
 /// A job step's PARM as Language Environment passes it, at the end of memory: input.
 pub(crate) fn push_parm<H: Clone, L: rt::unit::Loader<H>>(run_unit: &mut rt::unit::RunUnit<'_, H, L>, page: &zarch::ebcdic::CodePage, parm: &str) -> usize {
     let area = rt::le::parm::parameter_area(rt::le::parm::program_arguments(parm), page);
-    let at = run_unit.push_temporary(&area);
-    run_unit.mark_input(at, area.len(), true);
+    push_input(run_unit, &area)
+}
+
+/// `bytes` at the end of memory, marked as input.
+fn push_input<H: Clone, L: rt::unit::Loader<H>>(run_unit: &mut rt::unit::RunUnit<'_, H, L>, bytes: &[u8]) -> usize {
+    let at = run_unit.push_temporary(bytes);
+    run_unit.mark_input(at, bytes.len(), true);
     at
 }
 
