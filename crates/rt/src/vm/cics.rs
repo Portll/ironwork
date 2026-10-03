@@ -9,7 +9,7 @@ use crate::bms::Mapset;
 use crate::callee;
 use crate::cics::{self, CicsCommand, CicsHost, ExitTarget, Handlers};
 use crate::lir::{Base, BlockId, Chars, CicsId, Operand, ParaId, PlaceId, Step, SymId};
-use crate::storage::{Loc, Val};
+use crate::storage::Loc;
 use crate::store::{self, ProgramFacts};
 use crate::unit::{Loader, RunUnit};
 use crate::vocab::Pos;
@@ -110,12 +110,10 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         callee.run_level()
     }
 
-    /// `Machine::integer` of an operand that is not a data item: its value's whole part.
+    /// `Machine::integer` of an operand that is not a data item: its value's whole part. A value
+    /// that is floating point is a function's, whose dmax there is 0.
     fn integer_value(&mut self, o: Operand, pos: Pos) -> R<i64> {
         let val = self.value(o)?;
-        if matches!(val, Val::Float(_)) {
-            return Err(not_yet("a floating-point EXEC CICS option, whose scale the LIR does not keep"));
-        }
         let v = arith::fixed_operand(val, 0, pos)?;
         Ok(super::place::whole(&v, pos)?)
     }

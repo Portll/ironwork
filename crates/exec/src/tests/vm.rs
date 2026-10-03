@@ -643,3 +643,19 @@ fn the_vm_compares_a_search_all_key_by_its_bytes_where_the_interpreter_does() {
     assert_eq!(search_all_zoned("OPTIMIZE(1)", "9(2)", &["00", " 0", "01"], "ZERO"), "END 3\n");
     assert_eq!(search_all_zoned("", "9(2)", &["00", " 0", "01"], "ZERO"), "FOUND 2\n");
 }
+
+#[test]
+fn the_vm_takes_a_floating_point_function_s_whole_part_as_an_exec_cics_number() {
+    let data = "       01  WS-REC PIC X(8) VALUE 'ABCDEFGH'.\n       01  WS-OUT PIC X(8).\n       01  WS-LEN PIC S9(4) COMP VALUE 8.\n";
+    let body = [
+        line("EXEC CICS WRITEQ TS QUEUE('Q1') FROM(WS-REC)"),
+        line("    LENGTH(FUNCTION NUMVAL('5.9')) END-EXEC"),
+        line("EXEC CICS READQ TS QUEUE('Q1') INTO(WS-OUT) LENGTH(WS-LEN)"),
+        line("    END-EXEC"),
+        line("DISPLAY WS-LEN ' ' WS-OUT"),
+        line("EXEC CICS RETURN END-EXEC."),
+    ]
+    .concat();
+    let (out, ending) = task_on_both(&cics_program("FLOATLEN", data, "", &body));
+    assert_eq!((out.as_str(), ending), ("0005 ABCDE   \n", Ok(Ending::Goback)));
+}
