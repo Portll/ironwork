@@ -116,10 +116,11 @@ a FUNCTION) loses the marker, but it does not lose the taint.
   READQ TS and READQ TD, and a file READ, READNEXT or READPREV (RIDFLD included).
 - **Through statements.** Each statement's writes may hold input when the statement has read a
   byte that may, since it started: the bytes of every item it locates, which includes a subscript's
-  item, and a BY CONTENT or BY VALUE copy. A receiver a statement only writes is not read: MOVE's,
-  SET's, ACCEPT's, INITIALIZE's, PERFORM VARYING's FROM, CALL's RETURNING, and the options an EXEC
-  CICS command stores into. So `MOVE SPACES TO X` clears X. A program's initial values and
-  LOCAL-STORAGE hold none. What CICS keeps outside the program between commands (queues, files,
+  item, a BY CONTENT or BY VALUE copy, and the key a random READ, START or DELETE finds its record
+  by. OPEN reads none of a file's keys. A receiver a statement only writes is not read: MOVE's,
+  SET's, ACCEPT's, INITIALIZE's, PERFORM VARYING's FROM, CALL's RETURNING, a file's FILE STATUS,
+  and the options an EXEC CICS command stores into. So `MOVE SPACES TO X` clears X. A program's
+  initial values and LOCAL-STORAGE hold none. What CICS keeps outside the program between commands (queues, files,
   RETURN's COMMAREA) comes back only through one of the commands above, and is input then.
 - **What it does not say.** A condition on input steers which constant is stored, but it puts no
   input byte in the receiver, and taint does not follow it. A whole receiver may hold input when any

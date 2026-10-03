@@ -90,7 +90,16 @@ impl<'p> Machine<'p, '_, '_> {
         Ok(KeySpan { offset: loc.offset - start, len: loc.len })
     }
 
+    /// How file k finds its records by key. OPEN takes each key's place in the record and reads
+    /// none of its bytes.
     pub(super) fn keying(&mut self, k: usize, pos: Pos) -> R<Keying> {
+        let was = self.unit.writing(true);
+        let keying = self.key_spans(k, pos);
+        self.unit.writing(was);
+        keying
+    }
+
+    fn key_spans(&mut self, k: usize, pos: Pos) -> R<Keying> {
         let program = self.program;
         let decl = &program.files[k];
         Ok(match decl.organization {

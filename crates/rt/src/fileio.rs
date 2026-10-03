@@ -4,7 +4,7 @@
 //! verb returns the status its phrases or the file's error path read; the executor runs those.
 
 use crate::abend::Abend;
-use crate::files::{self, Dd, FileStatus, Format, Keyed, Keying, Move, Open, Record};
+use crate::files::{self, Dd, FileStatus, Format, KeySpan, Keyed, Keying, Move, Open, Record};
 use crate::host::{self, Host};
 use crate::linage::{Geometry, Motion, Page};
 use crate::lir::{Access, Carriage, Organization, Spacing, StartRel};
@@ -121,11 +121,22 @@ pub trait Files<P: Copy, X: Copy>: Host<P> {
 
 pub fn set_status<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, status: FileStatus, pos: Pos) -> R<()> {
     if let Some(p) = file.status {
-        let loc = x.locate(p, false)?;
+        let loc = receiver(x, p)?;
         let bytes = x.facts().page().encode(status.as_str()).map_err(|e| Abend::ironwork(e.to_string(), pos))?;
         x.assign(loc, Val::Bytes(bytes), None, pos)?;
     }
     Ok(())
+}
+
+/// Locates a receiver the verb only writes, FILE STATUS: its old bytes reach nothing, so they are
+/// not read.
+fn receiver<P: Copy>(x: &mut impl Host<P>, p: P) -> R<Loc> {
+    let was = x.taint().is_some_and(|t| t.writing(true));
+    let loc = x.locate(p, false);
+    if let Some(t) = x.taint() {
+        t.writing(was);
+    }
+    loc
 }
 
 /// A failure in the mode file `k` is open in now.
@@ -151,6 +162,14 @@ pub fn dd_format<P: Copy, X: Copy>(x: &impl Files<P, X>, file: &File<'_, P, X>) 
 
 fn record_area<P: Copy>(x: &mut impl Host<P>, (offset, size): (usize, usize)) -> &[u8] {
     &x.mem()[offset..offset + size]
+}
+
+/// The prime key's value in the record area, which a random READ, START or DELETE reads.
+fn read_prime_key<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, prime: &KeySpan) -> Vec<u8> {
+    if let Some(taint) = x.taint() {
+        taint.read(file.area.0 + prime.offset, prime.len);
+    }
+    prime.of(record_area(x, file.area))
 }
 
 fn relative_value<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, pos: Pos) -> R<i64> {
@@ -428,7 +447,7 @@ pub fn read<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, r
         let keying = keyed.keying.clone();
         let (which, value) = match (&keying, r.key) {
             (Keying::Indexed { .. }, Some(key)) => x.key_value(k, &keying, key, false, pos)?,
-            (Keying::Indexed { prime, .. }, None) => (0, prime.of(record_area(x, file.area))),
+            (Keying::Indexed { prime, .. }, None) => (0, read_prime_key(x, file, prime)),
             _ => match relative_number(x, file, pos)? {
                 Some(key) => (0, key),
                 None => {
@@ -712,7 +731,7 @@ pub fn delete<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>,
                 Some(key) => key,
                 None => return Ok(FileStatus::NoPriorRead),
             },
-            (Keying::Indexed { prime, .. }, false) => prime.of(record_area(x, file.area)),
+            (Keying::Indexed { prime, .. }, false) => read_prime_key(x, file, prime),
             _ => match relative_number(x, file, pos)? {
                 Some(key) => key,
                 None => return Ok(FileStatus::NotFound),
@@ -738,7 +757,7 @@ pub fn start<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, 
         let keying = keyed.keying.clone();
         let (which, value) = match (&keying, key) {
             (Keying::Indexed { .. }, Some(r)) => x.key_value(k, &keying, r, true, pos)?,
-            (Keying::Indexed { prime, .. }, None) => (0, prime.of(record_area(x, file.area))),
+            (Keying::Indexed { prime, .. }, None) => (0, read_prime_key(x, file, prime)),
             (_, Some(r)) => (0, files::record_number(x.integer(r, pos)?.max(0) as u64)),
             (_, None) => (0, files::record_number(relative_value(x, file, pos)?.max(0) as u64)),
         };

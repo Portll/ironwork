@@ -381,6 +381,10 @@ impl<'p, L: Loader<Rc<Code>>> Files<Handle<'p>, &'p IntExpr> for Io<'_, 'p, '_, 
     fn key_value(&mut self, k: usize, _keying: &Keying, key: Handle<'p>, _partial: bool, pos: Pos) -> Result<(usize, Vec<u8>), Abend> {
         let Handle::Key(which, span) = key else { return Err(self.not_a_place(pos)) };
         let (offset, size) = self.vm.file_desc(k).area;
-        Ok((which, key_span(span).of(&self.vm.unit.mem[offset..offset + size])))
+        let span = key_span(span);
+        if let Some(taint) = self.taint() {
+            taint.read(offset + span.offset, span.len);
+        }
+        Ok((which, span.of(&self.vm.unit.mem[offset..offset + size])))
     }
 }

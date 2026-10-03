@@ -7,7 +7,12 @@ use std::rc::Rc;
 /// Each sink a run of `source` reached, by line, with whether an input byte may be in its operand;
 /// the same source also runs under the Harness, whose differential compares the VM's taint.
 fn sinks(source: &str, sysin: &str) -> Vec<(u32, Option<bool>)> {
-    let _ = Harness::source(source).sysin(sysin).run(Executor::Interpreter);
+    file_sinks(source, sysin, &[])
+}
+
+/// [`sinks`], with the files of `dds`.
+fn file_sinks(source: &str, sysin: &str, dds: &[String]) -> Vec<(u32, Option<bool>)> {
+    let _ = Harness::source(source).sysin(sysin).dds(dds).run(Executor::Interpreter);
     let mut programs = syntax::parse_all_with(source, &syntax::copy::Libraries::default()).unwrap_or_else(|e| panic!("{e}"));
     let compiled = compile(programs.remove(0), &[]).unwrap_or_else(|e| panic!("{e:?}"));
     let seen = Rc::new(RefCell::new(Vec::new()));
@@ -20,7 +25,7 @@ fn sinks(source: &str, sysin: &str) -> Vec<(u32, Option<bool>)> {
     let library = unit::Library { programs, trace_input: true, ..Default::default() };
     let sysin = Some(Box::new(Cursor::new(sysin.as_bytes().to_vec())) as Box<dyn std::io::BufRead>);
     let (mut out, mut err) = (Vec::new(), Vec::new());
-    let ended = compiled.execute_observed(library, files::Dds::default(), sysin, unit::Clock::Fixed(0, 0), None, &mut out, &mut err, Some(observer));
+    let ended = compiled.execute_observed(library, files::Dds::new(dds, false).unwrap(), sysin, unit::Clock::Fixed(0, 0), None, &mut out, &mut err, Some(observer));
     assert!(ended.is_ok(), "{ended:?} {}", String::from_utf8_lossy(&err));
     seen.borrow().clone()
 }
@@ -232,4 +237,40 @@ fn what_the_operator_types_into_a_map_and_the_key_pressed_are_input() {
     let at = |item: &str| line_of(&source, &format!("FROM({item})"));
     let logs: Vec<_> = task_sinks(&source, Some(&dir), None, make).into_iter().filter(|(l, _)| [at("WS-C"), at("WS-A"), at("WS-K")].contains(l)).collect();
     assert_eq!(logs, [(at("WS-C"), Some(true)), (at("WS-A"), Some(true)), (at("WS-K"), Some(false))]);
+}
+
+#[test]
+fn file_status_holds_input_only_from_a_key_its_verb_reads() {
+    let data = temp("taint-keys.ksds");
+    let _ = std::fs::remove_file(&data);
+    let source = file_program(
+        "           SELECT K-FILE ASSIGN TO KDD ORGANIZATION INDEXED\n               ACCESS DYNAMIC RECORD KEY K-KEY FILE STATUS IS FS.\n",
+        "       FD  K-FILE.\n       01  K-REC.\n           05 K-KEY PIC X(4).\n           05 K-DATA PIC X(4).\n",
+        "       01  FS PIC XX.\n",
+        &[
+            line("OPEN OUTPUT K-FILE"),
+            line("WRITE K-REC FROM 'K001DATA'"),
+            line("WRITE K-REC FROM 'K002MORE'"),
+            line("CLOSE K-FILE"),
+            line("OPEN INPUT K-FILE"),
+            line("READ K-FILE NEXT"),
+            line("CLOSE K-FILE"),
+            line("OPEN INPUT K-FILE"),
+            line("DISPLAY 'OPEN ' FS"),
+            line("READ K-FILE KEY IS K-KEY"),
+            line("DISPLAY 'READ ' FS"),
+            line("START K-FILE KEY IS = K-KEY"),
+            line("DISPLAY 'START INPUT ' FS"),
+            line("MOVE 'K002' TO K-KEY"),
+            line("START K-FILE KEY IS = K-KEY"),
+            line("DISPLAY 'START CONSTANT ' FS"),
+            line("CLOSE K-FILE"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    );
+    let at = |shown: &str| line_of(&source, &format!("'{shown} '"));
+    let shown: Vec<_> = file_sinks(&source, "", &[format!("KDD={}", data.display())]).into_iter().filter(|(l, _)| [at("OPEN"), at("READ"), at("START INPUT"), at("START CONSTANT")].contains(l)).collect();
+    let _ = std::fs::remove_file(&data);
+    assert_eq!(shown, [(at("OPEN"), Some(false)), (at("READ"), Some(true)), (at("START INPUT"), Some(true)), (at("START CONSTANT"), Some(false))]);
 }
