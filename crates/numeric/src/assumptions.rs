@@ -402,7 +402,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: ACCEPT_AT_END,
-        claim: "ACCEPT from SYSIN at its end leaves the receiving item unchanged and the run continues",
+        claim: "ACCEPT from SYSIN at its end leaves the receiving item unchanged and the run continues. Under --dialect gnucobol the item takes a space, as cobc moves one at the end of its input, so a numeric or numeric-edited item becomes zero and any other is filled with spaces",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -1296,7 +1296,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: DECIMAL_COMMA_DISPLAY_LITERAL,
-        claim: "DISPLAY of a numeric literal writes it as the program wrote it, so under DECIMAL-POINT IS COMMA its decimal point is a comma; the Language Reference says nothing of how DISPLAY shows a numeric literal (SC27-8713-03, pp. 333-334)",
+        claim: "DISPLAY of a numeric literal writes it as the program wrote it, so under DECIMAL-POINT IS COMMA its decimal point is a comma; the Language Reference says nothing of how DISPLAY shows a numeric literal (SC27-8713-03, pp. 333-334). Under --dialect gnucobol it writes the literal without its decimal point, as cobc does: 1.5 shows as 15 and -0.25 as -025",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

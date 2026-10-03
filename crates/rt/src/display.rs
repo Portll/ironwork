@@ -84,7 +84,17 @@ fn sign_first(negative: bool, digits: Vec<u8>) -> Vec<u8> {
 
 /// A numeric literal as written, its decimal point the program's.
 pub fn number(written: &str, facts: &dyn ProgramFacts) -> String {
-    written.replace('.', &facts.decimal_point().to_string())
+    literal(written, facts.decimal_point(), facts.options().dialect)
+}
+
+/// DISPLAY's text for a numeric literal written with `.` as its decimal point: as written, the
+/// point the program's, or under --dialect gnucobol without the point, as cobc shows it
+/// (assumption C95).
+pub fn literal(written: &str, decimal_point: char, dialect: Dialect) -> String {
+    match dialect {
+        Dialect::Ibm => written.replace('.', &decimal_point.to_string()),
+        Dialect::Gnucobol => written.replace('.', ""),
+    }
 }
 
 /// A literal, figurative constant, FUNCTION, LENGTH OF or ADDRESS OF, by its value.

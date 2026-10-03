@@ -63,3 +63,33 @@ fn display_shows_packed_and_binary_items_as_cobc_does_under_gnucobol() {
     let separate = source.replacen("       IDENTIFICATION", "       CBL DISPSIGN(SEP)\n       IDENTIFICATION", 1);
     assert_eq!(under(&separate, Dialect::Gnucobol), under(&source, Dialect::Gnucobol).replace("01K", "-012"));
 }
+
+#[test]
+fn display_writes_a_numeric_literal_without_its_decimal_point_under_gnucobol() {
+    let source = program("", "", &[line("DISPLAY 1.5 ' ' -1.50 ' ' .5 ' ' +0.25 ' ' 0.0 ' ' 007"), line("GOBACK.")].concat());
+    assert_eq!(under(&source, Dialect::Ibm), "1.5 -1.50 .5 +0.25 0.0 007\n");
+    assert_eq!(under(&source, Dialect::Gnucobol), "15 -150 5 +025 00 007\n");
+    let comma = source
+        .replace("DATA DIVISION.", "ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       SPECIAL-NAMES.\n           DECIMAL-POINT IS COMMA.\n       DATA DIVISION.")
+        .replace("1.5 ' ' -1.50 ' ' .5 ' ' +0.25 ' ' 0.0", "1,5 ' ' -1,50 ' ' ,5 ' ' +0,25 ' ' 0,0");
+    assert_eq!(under(&comma, Dialect::Ibm), "1,5 -1,50 ,5 +0,25 0,0 007\n");
+    assert_eq!(under(&comma, Dialect::Gnucobol), "15 -150 5 +025 00 007\n");
+}
+
+#[test]
+fn accept_at_the_end_of_sysin_moves_a_space_under_gnucobol() {
+    let source = program(
+        "",
+        "       01  N PIC 9(3) VALUE 7.\n       01  P PIC S9(3) COMP-3 VALUE 7.\n       01  B PIC S9(4) COMP VALUE 7.\n       01  X PIC X(4) VALUE 'QQQQ'.\n       01  E PIC ZZ9 VALUE 5.\n",
+        &[line("ACCEPT X"), line("ACCEPT N"), line("ACCEPT P"), line("ACCEPT B"), line("ACCEPT X"), line("ACCEPT E"), line("DISPLAY '[' N '][' P '][' B '][' X '][' E ']'"), line("GOBACK.")].concat(),
+    );
+    let run = |dialect: Dialect| {
+        let flags = [dialect.flag()];
+        let walker = Harness::source(&source).flags(&flags).sysin("AB\n").run(Executor::Interpreter);
+        let vm = Harness::source(&source).flags(&flags).sysin("AB\n").run(Executor::Vm);
+        assert_eq!((&vm.out, &vm.err), (&walker.out, &walker.err));
+        (walker.out, walker.err.lines().count())
+    };
+    assert_eq!(run(Dialect::Ibm), ("[007][007][0007][AB  ][  5]\n".to_owned(), 5));
+    assert_eq!(run(Dialect::Gnucobol), ("[000][+000][+00000][    ][  0]\n".to_owned(), 5));
+}

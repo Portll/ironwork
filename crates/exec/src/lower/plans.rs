@@ -255,8 +255,10 @@ impl Lower<'_> {
                         _ => DisplayItem::Bytes(place),
                     }
                 }
-                Operand::Literal(Literal::Number(t)) if self.program.environment.decimal_point_comma => DisplayItem::Text(self.sym(&t.replace('.', ","))),
-                Operand::Literal(Literal::Number(t)) => DisplayItem::Text(self.sym(t)),
+                Operand::Literal(Literal::Number(t)) => {
+                    let point = if self.program.environment.decimal_point_comma { ',' } else { '.' };
+                    DisplayItem::Text(self.sym(&rt::display::literal(t, point, self.c.options.dialect)))
+                }
                 Operand::Literal(lit) if self.unencodable(lit).is_some() => DisplayItem::Value(self.operand(op, pos)?.operand),
                 Operand::Literal(lit) => {
                     let text = self.display_text(lit, pos)?;

@@ -6,7 +6,8 @@ use crate::calendar::civil;
 use crate::storage::{Kind, Loc, Val, literal_fixed};
 use crate::store::{self, ProgramFacts};
 use crate::unit::{Loader, RunUnit};
-use crate::vocab::{AcceptFrom, Pos};
+use crate::vocab::{AcceptFrom, Figurative, Pos};
+use numeric::Dialect;
 
 /// `name` is the receiver's, which the message at the end of SYSIN gives.
 pub fn accept<H: Clone, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, dest: Loc, from: AcceptFrom, name: &str, pos: Pos) -> Result<(), Abend> {
@@ -23,10 +24,7 @@ pub fn accept<H: Clone, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUn
         AcceptFrom::Time => digits(format!("{hour:02}{minute:02}{second:02}{hundredths:02}")),
         AcceptFrom::Sysin if dest.kind == Kind::National => match sysin_record(facts, unit, pos)? {
             Some(record) => Val::Bytes(record),
-            None => {
-                at_end(unit, name, pos);
-                return Ok(());
-            }
+            None => return at_end(facts, unit, dest, name, pos),
         },
         AcceptFrom::Sysin => {
             let space = facts.page().encode_char(' ').unwrap_or(0x40);
@@ -40,8 +38,7 @@ pub fn accept<H: Clone, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUn
                 area.extend(record);
             }
             if area.is_empty() {
-                at_end(unit, name, pos);
-                return Ok(());
+                return at_end(facts, unit, dest, name, pos);
             }
             area.resize(dest.len, space);
             unit.write_input(dest.offset, &area);
@@ -73,8 +70,20 @@ fn sysin_record<H: Clone, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut Run
     Ok(Some(line.trim_end_matches(['\n', '\r']).chars().map(|c| page.encode_char(c).unwrap_or(unknown)).collect()))
 }
 
-fn at_end<H: Clone, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, name: &str, pos: Pos) {
+/// ACCEPT with no SYSIN record left: the receiver unchanged (assumption C15), or under
+/// --dialect gnucobol given the space cobc moves, which leaves a numeric receiver zero.
+fn at_end<H: Clone, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, dest: Loc, name: &str, pos: Pos) -> Result<(), Abend> {
+    let ibm = facts.options().dialect == Dialect::Ibm;
     if unit.sysin_ended.insert((pos.file, pos.line, pos.col)) {
-        let _ = writeln!(unit.err, "ironwork: {pos}: ACCEPT found SYSIN at its end; {name} is unchanged");
+        let given = if ibm { "is unchanged" } else { "takes a space, as GnuCOBOL gives it" };
+        let _ = writeln!(unit.err, "ironwork: {pos}: ACCEPT found SYSIN at its end; {name} {given}");
     }
+    if ibm {
+        return Ok(());
+    }
+    let fill = match dest.kind {
+        Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::NumericEdited { .. } | Kind::Float(_) => Figurative::Zero,
+        _ => Figurative::Space,
+    };
+    store::assign(facts, unit, dest, Val::Fig(fill), None, pos)
 }
