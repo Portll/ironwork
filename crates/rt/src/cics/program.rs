@@ -4,21 +4,83 @@
 use super::Condition;
 use super::command::{Datum, Transfer};
 use super::run::{AbendExit, At, CicsHost, EIBCALEN, EIBFN, EIBRSRCE, ExitTarget, Flow, Handler, Handlers, R};
-use super::run::{bytes, bytes_cut, eib_bytes, eib_calen, eib_halfword, eib_text, int, kept_calen, ok, page, raise, restore_calen, task, text};
+use super::run::{eib_bytes, eib_calen, eib_halfword, eib_text, int, kept_calen, ok, page, raise, restore_calen, task, text};
 use crate::abend::{Abend, AbendCode, Ending};
 use crate::callee::{self, By, Callee};
 use crate::lir::ParaId;
+use crate::storage::Loc;
+use crate::store;
 use crate::unit::{LoadError, Loader, RunUnit};
 use crate::vocab::Pos;
 
-/// The longest COMMAREA RETURN passes.
+/// The longest COMMAREA LINK, XCTL and RETURN pass.
 const COMMAREA_LIMIT: i64 = 32_763;
+
+/// A COMMAREA option as the translator passes it, by reference, and its length: LENGTH, else the
+/// item's.
+struct Commarea {
+    area: Area,
+    length: i64,
+}
+
+enum Area {
+    Item(Loc),
+    /// An operand that is not a data item, passed BY CONTENT.
+    Bytes(Vec<u8>),
+    /// A LINKAGE item with no address, which CICS is passed as address zero.
+    Zero,
+}
+
+impl Commarea {
+    fn of<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, area: Option<&Datum<P, O, S>>, length: Option<&Datum<P, O, S>>, pos: Pos) -> R<Option<Self>> {
+        let (area, len) = match area {
+            Some(&Datum::Place(p)) => match x.unaddressed(p) {
+                Some(len) => (Area::Zero, len),
+                None => {
+                    let loc = x.locate(p, false)?;
+                    (Area::Item(loc), loc.len)
+                }
+            },
+            Some(Datum::Value(o)) => {
+                let bytes = x.content(o, pos)?;
+                let len = bytes.len();
+                (Area::Bytes(bytes), len)
+            }
+            _ => return Ok(None),
+        };
+        let length = int(x, length, pos)?.unwrap_or(len as i64);
+        Ok(Some(Commarea { area, length }))
+    }
+
+    /// The LENGERR RESP2 the COMMAREA raises: 11 for a length outside 0 to 32763, 26 for one that
+    /// is not zero at address zero (C103).
+    fn lengerr(&self) -> Option<i32> {
+        if !(0..=COMMAREA_LIMIT).contains(&self.length) {
+            Some(11)
+        } else if matches!(self.area, Area::Zero) && self.length != 0 {
+            Some(26)
+        } else {
+            None
+        }
+    }
+
+    /// A copy of the COMMAREA's bytes, cut to its length when that is shorter.
+    fn bytes<'w, P: Copy, O, S>(self, x: &mut impl CicsHost<'w, P, O, S>) -> Vec<u8> {
+        let mut bytes = match self.area {
+            Area::Item(loc) => store::bytes(x.mem(), loc).to_vec(),
+            Area::Bytes(bytes) => bytes,
+            Area::Zero => Vec::new(),
+        };
+        bytes.truncate(self.length.max(0) as usize);
+        bytes
+    }
+}
 
 /// RETURN ends this program's logical level, CALLed programs and all: the program that LINKed to
 /// it goes on, or the task ends (C233). TRANSID names the next task from any level. COMMAREA, what
 /// the next task starts with, and CHANNEL and IMMEDIATE (`to_cics`) belong to the RETURN to CICS
-/// and raise INVREQ with RESP2 2 below the task's first level (C143). A COMMAREA length, LENGTH or
-/// the item's, outside 0 to 32763 raises LENGERR with RESP2 11 and clears the next TRANSID (C128).
+/// and raise INVREQ with RESP2 2 below the task's first level (C143). A COMMAREA that raises
+/// LENGERR clears the next TRANSID (C128).
 pub(super) fn cics_return<'w, P: Copy, O, S>(
     x: &mut impl CicsHost<'w, P, O, S>,
     at: &At<P, O, S>,
@@ -29,19 +91,15 @@ pub(super) fn cics_return<'w, P: Copy, O, S>(
 ) -> R<Flow> {
     eib_bytes(x.unit(), EIBFN, &[0x0E, 0x08]);
     let transid = text(x, transid, at.pos)?;
-    let mut commarea = bytes(x, commarea, at.pos)?;
-    let length = if commarea.is_some() { int(x, length, at.pos)? } else { None };
+    let commarea = Commarea::of(x, commarea, length, at.pos)?;
     if task(x).links > 0 && (commarea.is_some() || to_cics) {
         return raise(x, at, Condition::INVREQ, 2);
     }
-    if let Some(area) = commarea.as_mut() {
-        let n = length.unwrap_or(area.len() as i64);
-        if !(0..=COMMAREA_LIMIT).contains(&n) {
-            task(x).next_transid = None;
-            return raise(x, at, Condition::LENGERR, 11);
-        }
-        area.truncate(n as usize);
+    if let Some(resp2) = commarea.as_ref().and_then(Commarea::lengerr) {
+        task(x).next_transid = None;
+        return raise(x, at, Condition::LENGERR, resp2);
     }
+    let commarea = commarea.map(|c| c.bytes(x));
     let task = task(x);
     if let Some(t) = transid {
         task.next_transid = Some(t.to_ascii_uppercase());
@@ -62,7 +120,8 @@ pub fn level_ended<H, L: Loader<H>>(unit: &RunUnit<'_, H, L>) -> bool {
 /// LINK runs a program and comes back, from STOP RUN too, which ends a level as RETURN does (C144);
 /// XCTL runs it in place of the program running this logical level, with the level's HANDLE ABEND
 /// exit (C239), and the level ends when it does (C233). A LINKed program gets the COMMAREA item
-/// itself; XCTL passes a copy, since this program's storage goes away. Each LINK or XCTL starts a
+/// itself; XCTL passes a copy, since this program's storage goes away. A COMMAREA that raises
+/// LENGERR does so before a missing program raises PGMIDERR (C103). Each LINK or XCTL starts a
 /// run unit of its own, where the program and those it CALLs start with fresh WORKING-STORAGE.
 pub(super) fn link<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, t: &Transfer<P, O, S>, xctl: bool) -> R<Flow> {
     eib_bytes(x.unit(), EIBFN, if xctl { &[0x0E, 0x04] } else { &[0x0E, 0x02] });
@@ -71,25 +130,26 @@ pub(super) fn link<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &A
     };
     let page = page(x);
     eib_text(x.unit(), page, EIBRSRCE, 8, &name);
+    let commarea = Commarea::of(x, t.commarea.as_ref(), t.length.as_ref(), at.pos)?;
+    if let Some(resp2) = commarea.as_ref().and_then(Commarea::lengerr) {
+        return raise(x, at, Condition::LENGERR, resp2);
+    }
     let index = match x.unit().load(&name) {
         Ok(i) => i,
-        Err(LoadError::NotFound) => return raise(x, at, Condition::PGMIDERR, 0),
+        Err(LoadError::NotFound) => return raise(x, at, Condition::PGMIDERR, 1),
         Err(LoadError::Compile(m)) => return Err(Abend::ironwork(format!("EXEC CICS {} PROGRAM({name}): {m}", at.name), at.pos)),
     };
     let program = x.unit().programs[index].compiled.clone();
     let mark = x.unit().mem.len();
-    let (area, item_len) = match &t.commarea {
-        Some(Datum::Place(p)) if !xctl => {
-            let loc = x.locate(*p, false)?;
-            (Some(loc.offset), loc.len)
-        }
-        Some(Datum::Place(_) | Datum::Value(_)) => {
-            let bytes = bytes_cut(x, t.commarea.as_ref(), t.length.as_ref(), at.pos)?.unwrap_or_default();
-            (Some(x.unit().push_temporary(&bytes)), bytes.len())
+    let (area, length) = match commarea {
+        Some(Commarea { area: Area::Item(loc), length }) if !xctl => (Some(loc.offset), length as usize),
+        Some(c @ Commarea { area: Area::Item(_) | Area::Bytes(_), .. }) => {
+            let length = c.length as usize;
+            let bytes = c.bytes(x);
+            (Some(x.unit().push_temporary(&bytes)), length)
         }
         _ => (None, 0),
     };
-    let length = int(x, t.length.as_ref(), at.pos)?.map_or(item_len, |n| n.max(0) as usize);
     let saved = kept_calen(x.unit());
     eib_halfword(x.unit(), EIBCALEN, length as i16);
     let ending = enter(x, program, index, area, xctl, at.pos);

@@ -8,7 +8,7 @@ use crate::arith;
 use crate::bms::Mapset;
 use crate::callee;
 use crate::cics::{self, CicsCommand, CicsHost, ExitTarget, Handlers};
-use crate::lir::{BlockId, Chars, CicsId, Operand, ParaId, PlaceId, Step, SymId};
+use crate::lir::{Base, BlockId, Chars, CicsId, Operand, ParaId, PlaceId, Step, SymId};
 use crate::storage::{Loc, Val};
 use crate::store::{self, ProgramFacts};
 use crate::unit::{Loader, RunUnit};
@@ -165,6 +165,11 @@ impl<'w, L: Loader<Rc<Code>>> CicsHost<'w, PlaceId, Operand, SymId> for Vm<'_, '
     fn locate_named(&mut self, _name: &str, pos: Pos) -> Result<Loc, Abend> {
         let found = Err(not_yet("RECEIVE MAP with no INTO or SET, whose MAP is no literal that names the symbolic map of a data item"));
         self.lift(found, pos)
+    }
+
+    fn unaddressed(&mut self, place: PlaceId) -> Option<usize> {
+        let place = &self.p.places[place as usize];
+        matches!(place.base, Base::Linkage(record) if self.linkage[usize::from(record)].is_none()).then_some(place.len as usize)
     }
 
     fn run_program(&mut self, program: Option<Rc<Code>>, index: usize, commarea: Option<usize>, xctl: bool) -> Result<Ending, Abend> {

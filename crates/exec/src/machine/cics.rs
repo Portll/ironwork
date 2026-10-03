@@ -132,6 +132,12 @@ impl<'a, 'w> CicsHost<'w, &'a Ref, &'a Operand, &'a str> for Machine<'_, '_, 'w>
         self.locate(&Self::named(name, pos))
     }
 
+    fn unaddressed(&mut self, place: &'a Ref) -> Option<usize> {
+        let Ok(Resolved::Item(i)) = self.resolve(place) else { return None };
+        let item = &self.layout.items[i];
+        item.linkage.filter(|&l| self.linkage[l as usize].is_none()).map(|_| item.size as usize)
+    }
+
     fn run_program(&mut self, program: Option<Rc<Compiled>>, index: usize, commarea: Option<usize>, xctl: bool) -> R<Ending> {
         let first = self.first;
         let Some(compiled) = program.as_deref().or(first) else {

@@ -2457,17 +2457,22 @@ fn return_below_the_first_level_names_the_next_transaction_and_refuses_what_belo
 
 type ReturnedLength = Result<(Option<String>, Option<usize>), String>;
 
-/// The output of a task whose first program runs `body`, then RETURN, with the TRANSID and the
-/// length of the COMMAREA the task ended with, or its abend code. WS-BIG is 32764 bytes, LEN-ERR
-/// shows EIBRESP and EIBRESP2, and RETX, LINKed to, RETURNs TRANSID('NXT2').
+/// The output of a task whose first program, given no COMMAREA, runs `body`, then RETURN, with the
+/// TRANSID and the length of the COMMAREA the task ended with, or its abend code. WS-BIG is 32764
+/// bytes, LK-AREA has no address until SET ADDRESS OF gives it one, LEN-ERR shows EIBRESP and
+/// EIBRESP2, RETX, LINKed to, RETURNs TRANSID('NXT2'), and SHOWCA, LINKed or XCTLed to, shows an
+/// EIBCALEN under 100.
 fn return_length_task(body: &[&str]) -> (String, ReturnedLength) {
     let data = "       01  WS-BIG PIC X(32764) VALUE ALL 'B'.\n       01  WS-LEN PIC S9(4) COMP.\n       01  WS-RESP PIC S9(8) COMP.\n       01  WS-R2 PIC S9(8) COMP.\n";
+    let linkage = "       01  DFHCOMMAREA PIC X(4).\n       01  LK-AREA PIC X(8).\n";
     let mut procedure = vec!["       MAIN-LINE.\n".to_owned()];
     procedure.extend(body.iter().map(|s| line(s)));
     procedure.extend([line("EXEC CICS RETURN END-EXEC."), "       LEN-ERR.\n".into(), line("DISPLAY 'HANDLED ' EIBRESP ' ' EIBRESP2"), line("EXEC CICS RETURN END-EXEC.")]);
-    let main = cics_program("MAINP", data, "", &procedure.concat());
+    let main = cics_program("MAINP", data, linkage, &procedure.concat());
     let retx = cics_program("RETX", "", "", &line("EXEC CICS RETURN TRANSID('NXT2') END-EXEC."));
-    let source = format!("{main}       END PROGRAM MAINP.\n{retx}       END PROGRAM RETX.\n");
+    let showca = ["IF EIBCALEN < 100 DISPLAY 'SHOWCA ' EIBCALEN", "ELSE DISPLAY 'SHOWCA LONG' END-IF", "EXEC CICS RETURN END-EXEC."];
+    let showca = cics_program("SHOWCA", "", "", &showca.map(line).concat());
+    let source = format!("{main}       END PROGRAM MAINP.\n{retx}       END PROGRAM RETX.\n{showca}       END PROGRAM SHOWCA.\n");
     let (out, ending) = run_cics(&source, task("TR21"), None, unit::Clock::System);
     (out, ending.map(|(_, t)| (t.next_transid, t.returned_commarea.map(|c| c.len()))).map_err(|a| a.code.to_string()))
 }
@@ -2490,6 +2495,37 @@ fn return_with_a_commarea_length_outside_0_to_32763_raises_lengerr() {
     let cleared = ["EXEC CICS LINK PROGRAM('RETX') END-EXEC", negative[0], negative[1], resp, lengerr];
     assert_eq!(return_length_task(&cleared), refused("LENGERR 00000011\n"));
     assert_eq!(return_length_task(&["EXEC CICS LINK PROGRAM('RETX') END-EXEC"]), (String::new(), Ok((Some("NXT2".into()), None))));
+    let zero = |length: &str| return_length_task(&["EXEC CICS RETURN TRANSID('NEXT') COMMAREA(LK-AREA)", length, resp, lengerr]);
+    assert_eq!(zero(""), refused("LENGERR 00000026\n"));
+    assert_eq!(zero("    LENGTH(0)"), (String::new(), Ok((Some("NEXT".into()), Some(0)))));
+}
+
+#[test]
+fn link_and_xctl_raise_lengerr_for_a_commarea_length_outside_0_to_32763_or_at_address_zero() {
+    let resp = "    RESP(WS-RESP) RESP2(WS-R2) END-EXEC";
+    let lengerr = "IF WS-RESP = DFHRESP(LENGERR) DISPLAY 'LENGERR ' WS-R2 END-IF";
+    let ended = |out: &str| (out.to_owned(), Ok((None, None)));
+    for verb in ["LINK", "XCTL"] {
+        let to = |area: &str| format!("EXEC CICS {verb} PROGRAM('SHOWCA') COMMAREA({area})");
+        let run = |area: &str, length: &str| return_length_task(&[&to(area), length, resp, lengerr]);
+        assert_eq!(run("WS-BIG", "    LENGTH(32763)"), ended("SHOWCA LONG\n"), "{verb}");
+        assert_eq!(run("WS-BIG", "    LENGTH(32764)"), ended("LENGERR 00000011\n"), "{verb}");
+        assert_eq!(run("WS-BIG", ""), ended("LENGERR 00000011\n"), "{verb}");
+        assert_eq!(run("DFHCOMMAREA", ""), ended("LENGERR 00000026\n"), "{verb}");
+        assert_eq!(run("LK-AREA", "    LENGTH(8)"), ended("LENGERR 00000026\n"), "{verb}");
+        assert_eq!(run("LK-AREA", "    LENGTH(0)"), ended("SHOWCA 0000\n"), "{verb}");
+        let set = "SET ADDRESS OF LK-AREA TO ADDRESS OF WS-BIG";
+        assert_eq!(return_length_task(&[set, &to("LK-AREA"), resp, lengerr]), ended("SHOWCA 0008\n"), "{verb}");
+        let big = to("WS-BIG");
+        let negative = ["MOVE -1 TO WS-LEN", big.as_str(), "    LENGTH(WS-LEN)"];
+        let handled = ["EXEC CICS HANDLE CONDITION LENGERR(LEN-ERR) END-EXEC", negative[0], negative[1], negative[2], "    END-EXEC"];
+        assert_eq!(return_length_task(&handled), ended("HANDLED 00000022 00000011\n"), "{verb}");
+        assert_eq!(return_length_task(&[negative[0], negative[1], negative[2], "    END-EXEC"]), (String::new(), Err("AEIV".into())), "{verb}");
+        let missing = format!("EXEC CICS {verb} PROGRAM('NOPROG')");
+        let pgmiderr = "IF WS-RESP = DFHRESP(PGMIDERR) DISPLAY 'PGMID ' WS-R2 END-IF";
+        assert_eq!(return_length_task(&[&missing, resp, pgmiderr]), ended("PGMID 00000001\n"), "{verb}");
+        assert_eq!(return_length_task(&[&missing, "    COMMAREA(WS-BIG)", resp, lengerr]), ended("LENGERR 00000011\n"), "{verb}");
+    }
 }
 
 const READ_NO_QUEUE: [&str; 2] = ["EXEC CICS READQ TS QUEUE('NOQ') INTO(WS-DATA)", "    LENGTH(WS-LEN) END-EXEC"];

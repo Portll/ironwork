@@ -52,6 +52,9 @@ pub trait CicsHost<'w, P: Copy, O, S>: Host<P> + UnitHost<'w> {
     fn item_named(&mut self, name: &str, pos: Pos) -> R<Option<Loc>>;
     /// The data item a name alone refers to, or the abend a reference to it gives.
     fn locate_named(&mut self, name: &str, pos: Pos) -> R<Loc>;
+    /// The length of the data item `place` when it is in a LINKAGE record with no address, where
+    /// ADDRESS OF gives NULL; None when it has storage to locate.
+    fn unaddressed(&mut self, place: P) -> Option<usize>;
     /// Runs program `index` from its start with DFHEIBLK and `commarea` as its USING items; for
     /// XCTL, in this program's place at its logical level, with the handlers `Handlers::xctl`
     /// leaves it (C239, C146). `program` is None for the task's first program, whose handle the
