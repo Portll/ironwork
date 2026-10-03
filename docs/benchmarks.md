@@ -1,7 +1,7 @@
 # Benchmarks
 
 Step 0 of [codegen-runtime.md](codegen-runtime.md) §14: four programs timed under the interpreter
-(the walker), the VM and GnuCOBOL, as the base for the B6 targets.
+(the walker), the VM and GnuCOBOL, as the base for the VM target and B6's native target.
 
 **Status:** the interpreter and cobc measured 2026-09-30; the VM measured 2026-10-03 on a loaded
 machine (see VM results), to be rerun on a quiet one.
@@ -49,8 +49,9 @@ same load.
 | `tblsrch` | 6.85 | 4.57 | 0.042 | 0.67 | 109 |
 | `callheavy` | 6.34 | 2.57 | 0.452 | 0.40 | 5.7 |
 
-The VM's output equals the interpreter's on all four. It takes 40 to 67 per cent of the
-interpreter's time, against B6's target of 20.
+The VM's output equals the interpreter's on all four. Against the [VM target](#vm-target):
+`tblsrch` 0.67 and `callheavy` 0.40 of the interpreter against 0.20, and `packed` 0.50 against
+0.33. `seqio`'s 0.4 times cobc does not count: the load slowed cobc's `seqio` almost sevenfold.
 
 ## Correctness
 
@@ -66,16 +67,26 @@ interpreter's time, against B6's target of 20.
   S0C6: a zoned item longer than PACK's 16-byte operand. `feat/core-fixes` (b58af60) packs long
   zoned items correctly. `seqio` keeps its total at 15 digits until that lands, then can return to 17.
 
-## B6 against these numbers
+## VM target
 
-**VM at most a fifth of the walker.** The targets are 1.4 s for `seqio`, 0.9 s for `packed`, 1.5 s
-for `tblsrch` and 1.2 s for `callheavy`.
+Fixed per program class before the VM's timing run on a quiet machine (operator, 2026-10-03,
+decision D-4). Native code is built only if the VM misses it. Each target is a ratio measured in
+one interleaved `tools/bench.sh` run on the runner being judged, Linux x86-64 or macOS. The seconds
+are the reference on the machine above, from the 2026-09-30 interpreter and cobc times.
 
-- `tblsrch` and `callheavy` are dispatch- and call-bound, which is what a VM removes. Reachable.
+| Class | Programs | VM at most | Reference |
+|---|---|---|---|
+| Call and dispatch | `tblsrch`, `callheavy` | a fifth of the interpreter | 1.45 s, 1.24 s |
+| Decimal arithmetic | `packed` | a third of the interpreter | 1.53 s |
+| I/O | `seqio` | 1.25 times `cobc -O2` | 5.29 s |
+
+- `tblsrch` and `callheavy` are dispatch- and call-bound, which is what a VM removes.
 - `packed` spends its time in decimal arithmetic that the VM shares with the walker through the
-  semantics library, so the gain is dispatch only. Doubtful at 5 times; not profiled.
-- `seqio`: cobc itself takes 4.2 s, 1.8 s of it system time, so I/O sets the floor. The VM cannot
-  reach 1.4 s unless the interpreter's own time is mostly not I/O. Not profiled; treat as unconfirmed.
+  semantics library. The VM removes only the dispatch around it.
+- `seqio`: cobc itself takes 4.2 s, 1.8 s of it system time. I/O sets the floor for every
+  implementation, and the target is set against cobc's time rather than the interpreter's.
+
+## B6 against these numbers
 
 **Native at most 1.5 times `cobc -O2`.** The limits are 6.3 s for `seqio`, 0.31 s for `packed`,
 0.05 s for `tblsrch` and 0.66 s for `callheavy`.
@@ -85,6 +96,3 @@ for `tblsrch` and 1.2 s for `callheavy`.
   per-operation allocation. Not shown by these numbers.
 - `tblsrch` runs in 31 ms under cobc, close to the process start-up cost, so the ratio cannot be
   measured at this N. Raise N for cobc, or time the search loop alone, before judging it.
-
-**Revision proposed:** keep both targets, but state the VM target per program class, and recheck
-`seqio` and `tblsrch` once they are profiled.

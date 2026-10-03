@@ -234,10 +234,11 @@ Lowering consumes `Compiled` after `Check` has passed, and produces per program:
 
 ### B6: Performance
 
-- **Given** the benchmark programs of step 0 **when** run by the VM **then** they take at most a
-  fifth of the walker's time. **Given** native code **then** it is within 1.5 times the time of
-  `cobc -O2` on the same program. Both figures are targets to be confirmed against step 0's
-  measurements, not promises.
+- **Given** the benchmark programs of step 0 **when** run by the VM **then** each meets its
+  class's target in [benchmarks.md](benchmarks.md#vm-target): at most a fifth of the walker's time
+  for call- and dispatch-bound programs, a third for decimal arithmetic, and 1.25 times `cobc -O2`
+  for I/O-bound programs. **Given** native code **then** it is within 1.5 times the time of
+  `cobc -O2` on the same program.
 
 ## 12. Out of scope
 
@@ -265,7 +266,7 @@ The companion documents carry their own open questions for the operator, listed 
 
 | Step | Work | Done when |
 |---|---|---|
-| 0 | **Measure.** Write four benchmark programs: sequential file read and write, packed arithmetic, table search, and CALL-heavy code. Time the walker and `cobc -O2` on them. | Done: [benchmarks.md](benchmarks.md). The walker takes 1.6 to 234 times `cobc -O2`; B6 holds, with the VM target to be stated per program class |
+| 0 | **Measure.** Write four benchmark programs: sequential file read and write, packed arithmetic, table search, and CALL-heavy code. Time the walker and `cobc -O2` on them. | Done: [benchmarks.md](benchmarks.md). The walker takes 1.6 to 234 times `cobc -O2`; the VM target is stated per program class |
 | 1 | **Extract the semantics library and split `rt`** out of `exec`, with no change of behaviour. This waits for M8, the SORT, LE, Report Writer and OO integration, and SQL (whose runtime is written as a library service from the start). Add the boundary test. | Done: [semantics-library.md](semantics-library.md) §8, E1 to E12. All tests pass, the boundary test passes, and `rt` depends on `numeric` and `zarch` only (§6) |
 | 2 | **Build the LIR and the lowering** from `Compiled`, covering everything the interpreter runs by then, including SORT and MERGE, LE services, Report Writer, OO COBOL and EXEC SQL. Add assumptions V1 and V2. | Every test program lowers |
 | 3 | **Build the VM** in `rt` on the semantics library. Run the interpreter and the VM on every test and oracle case as a permanent CI job. Extend the fuzz target. | B2 passes |
