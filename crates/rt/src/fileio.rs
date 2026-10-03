@@ -177,7 +177,7 @@ fn relative_value<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P,
     x.integer(r, pos)
 }
 
-/// The RELATIVE KEY's record number as a key, or None when it is below 1.
+/// The RELATIVE KEY's record number as a key, or None when it is below 1 (assumption C331).
 fn relative_number<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, pos: Pos) -> R<Option<Vec<u8>>> {
     let n = relative_value(x, file, pos)?;
     Ok((n >= 1).then(|| files::record_number(n as u64)))

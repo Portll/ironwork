@@ -317,6 +317,7 @@ pub const BLDINDEX_REFUSALS: &str = "C356";
 pub const PRINT_LISTING_LAYOUT: &str = "C358";
 pub const PRINT_RANGE_ENDS: &str = "C359";
 pub const INSPECT_SIGNED_ZONED: &str = "C330";
+pub const RELATIVE_NUMBER_BELOW_ONE: &str = "C331";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -435,8 +436,8 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: KEYED_FILE_STATUS,
-        claim: "Indexed and relative files report 02 for a shared alternate key, 14 for a record number too long for the RELATIVE KEY on sequential READ, 21 for a sequential WRITE whose key is not above the last (equal included) or a REWRITE that changed the key, 22 duplicate, 23 not found, 24 a record number below 1 or too long for the RELATIVE KEY on WRITE, 43 REWRITE or DELETE with no READ just before, 46 READ NEXT with no next record, and 47, 48, 49 for the wrong open mode",
-        basis: Basis::Recalled,
+        claim: "Indexed and relative files report the file status values of Table 34 (Language Reference SC27-8713-03, pp. 300-302): 02 only for an indexed file with an alternate key that allows duplicates, when a READ finds the next record by the key of reference has the same key or a WRITE or REWRITE makes a duplicate alternate key value, so never for a relative file; 14 for a sequential READ of a relative file whose record number has more digits than the RELATIVE KEY; 21 for a sequentially accessed indexed file's WRITE whose prime key is not above the last, or a REWRITE that changed the prime key; 22 for a duplicate prime key, relative record number, or alternate key without DUPLICATES; 23 for no such record; 24 for a WRITE beyond the file's boundaries, or a sequential WRITE whose relative record number has more digits than the RELATIVE KEY; 43 for a sequential-access REWRITE or DELETE whose last input-output statement was not a successful READ; 46 for a sequential READ with no valid next record; and 47, 48 and 49 for the wrong open mode",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
@@ -2044,6 +2045,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: INSPECT_SIGNED_ZONED,
         claim: "INSPECT examines a signed zoned item as if it had been moved to an unsigned zoned item of its length: an overpunched sign is read as its digit, and a separate sign is not examined and not replaced (Language Reference SC27-8713-03, p. 359, Table 40). The table says REPLACING and CONVERTING copy their result back, and not what becomes of an overpunched sign. ironwork keeps it: a byte at the sign's place that a phrase changes to a digit takes the old sign half, and one no phrase changes is left as it was. The unsigned image changes only the sign byte's zone, as an alphanumeric image of the item does",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: RELATIVE_NUMBER_BELOW_ONE,
+        claim: "A relative record number below 1 names no record area, the first being number 1 (Language Reference SC27-8713-03, p. 147). A random WRITE with one reports 24, as a write beyond the file's boundaries, and a random READ, REWRITE or DELETE 23, as a record that does not exist. Table 34 (pp. 300-301) gives the meanings of 23 and 24 and does not name a record number below 1",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
