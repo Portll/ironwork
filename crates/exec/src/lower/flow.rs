@@ -153,6 +153,7 @@ impl Lower<'_> {
         }
         self.segments = self.altered.iter().any(|&p| program.paragraphs[p].priority >= 50);
         self.entries = (0..n).map(|_| self.new_block()).collect::<R<_>>()?;
+        let collected = self.ranges.len();
         let mut paragraphs = Vec::with_capacity(n);
         for (p, para) in program.paragraphs.iter().enumerate() {
             self.switch(self.entries[p])?;
@@ -166,6 +167,9 @@ impl Lower<'_> {
                 at: self.at(para.pos),
                 abandoned: None,
             });
+        }
+        if self.ranges.len() != collected {
+            return Err(LowerError::Invalid("a range `collect` missed, which the paragraph ends were decided without".into()));
         }
         for (p, para) in program.paragraphs.iter().enumerate() {
             if self.ranges.iter().any(|r| r.last as usize == p) {
