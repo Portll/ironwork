@@ -116,3 +116,21 @@ fn search_varying_one_of_the_table_s_indexes_searches_with_it() {
     );
     assert_eq!(on_both(&source), "FOUND\n4 3\n");
 }
+
+/// Language Reference SC27-8713-03, p. 17: a figurative constant compared with an item is as long as
+/// the item, so ALL '01' compared with a one-character item is '0'.
+#[test]
+fn an_all_literal_compared_with_an_item_is_cut_to_the_item_s_length() {
+    let source = program(
+        "",
+        "       01  D PIC 9 VALUE 0.\n       01  X PIC X VALUE '0'.\n       01  Y PIC XXX VALUE '010'.\n",
+        &[
+            line("IF ALL '00' NOT > D DISPLAY 'D' END-IF"),
+            line("IF X = ALL '01' DISPLAY 'X' END-IF"),
+            line("IF Y = ALL '01' DISPLAY 'Y' END-IF"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    );
+    assert_eq!(on_both(&source), "D\nX\nY\n");
+}

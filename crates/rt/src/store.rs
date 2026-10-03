@@ -953,9 +953,9 @@ pub fn compare(facts: &dyn ProgramFacts, mem: &[u8], a: (Val, Option<Loc>), b: (
         _ => {
             let (va, la) = stored_digits(facts, mem, va, la, pos)?;
             let (vb, lb) = stored_digits(facts, mem, vb, lb, pos)?;
-            let len = image_len(&va, la).max(image_len(&vb, lb));
-            let x = alnum_image(facts, &va, la, len, pos)?;
-            let y = alnum_image(facts, &vb, lb, len, pos)?;
+            let len = compared_len((&va, la), (&vb, lb));
+            let x = all_cut(&va, alnum_image(facts, &va, la, len, pos)?, len);
+            let y = all_cut(&vb, alnum_image(facts, &vb, lb, len, pos)?, len);
             Ok(ebcdic::compare_alphanumeric(&x, &y, facts.collation()))
         }
     }
@@ -993,10 +993,13 @@ pub fn compare_zoned_bytes(facts: &dyn ProgramFacts, mem: &[u8], image: &[u8], o
         (v, None) if zero(&v) => (Val::Fig(Figurative::Zero), None),
         other => other,
     };
-    let len = image.len().max(image_len(&other.0, other.1));
+    let len = match other.0 {
+        Val::All(_) if other.1.is_none() => image.len(),
+        _ => image.len().max(image_len(&other.0, other.1)),
+    };
     let y = match other.1.and_then(|l| compared_zoned_bytes(facts, mem, l)) {
         Some(bytes) => bytes,
-        None => alnum_image(facts, &other.0, other.1, len, pos)?,
+        None => all_cut(&other.0, alnum_image(facts, &other.0, other.1, len, pos)?, len),
     };
     let o = ebcdic::compare_alphanumeric(image, &y, facts.collation());
     Ok(if zoned_first { o } else { o.reverse() })
@@ -1019,6 +1022,24 @@ pub fn stored_digits(facts: &dyn ProgramFacts, mem: &[u8], v: Val, loc: Option<L
         Some(l) if matches!(v, Val::Num(_)) && scaling(facts, l) > 0 => Ok((read_stored(facts, mem, l, pos)?, None)),
         _ => Ok((v, loc)),
     }
+}
+
+/// How many characters two operands are compared over as alphanumeric: an ALL literal compared with
+/// a data item has the item's length (Language Reference SC27-8713-03, p. 17), and otherwise the
+/// shorter operand is padded to the longer's.
+fn compared_len(a: (&Val, Option<Loc>), b: (&Val, Option<Loc>)) -> usize {
+    match (a, b) {
+        ((Val::All(_), None), (other, Some(item))) | ((other, Some(item)), (Val::All(_), None)) => image_len(other, Some(item)),
+        _ => image_len(a.0, a.1).max(image_len(b.0, b.1)),
+    }
+}
+
+/// An ALL literal's image cut to `len` characters.
+fn all_cut(v: &Val, mut image: Vec<u8>, len: usize) -> Vec<u8> {
+    if matches!(v, Val::All(_)) {
+        image.truncate(len);
+    }
+    image
 }
 
 /// How many characters an operand has when compared as alphanumeric.
