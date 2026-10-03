@@ -1390,8 +1390,19 @@ impl Parser<'_> {
             Some(Tok::National(s)) => Literal::National(s),
             Some(Tok::Number(n)) => Literal::Number(n),
             Some(Tok::Word(w)) if w == "ALL" => {
+                let at = self.pos();
                 self.at += 1;
-                return Ok(Literal::All(Box::new(self.literal()?)));
+                let inner = self.literal()?;
+                // Language Reference SC27-8713-03, p. 16.
+                let written = match &inner {
+                    Literal::Number(n) => Some(format!("ALL {n}")),
+                    Literal::All(_) => Some("ALL ALL".to_owned()),
+                    _ => None,
+                };
+                if let Some(written) = written {
+                    self.messages.push(Error::at(at, format!("{written}: the literal after ALL is alphanumeric, national or a figurative constant other than ALL")));
+                }
+                return Ok(Literal::All(Box::new(inner)));
             }
             Some(Tok::Word(w)) => Literal::Figurative(figurative(&w).ok_or_else(|| self.error("a literal"))?),
             _ => return Err(self.error("a literal")),

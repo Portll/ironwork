@@ -20,6 +20,7 @@ mod json_parse;
 mod linage;
 mod numcheck;
 mod oo;
+mod operands;
 mod parmcheck;
 mod printer;
 mod procedure;
@@ -49,6 +50,14 @@ fn run(source: &str) -> String {
     let (out, err, ending) = run_with(source, &[]);
     assert!(ending.is_ok(), "{ending:?}\n{err}");
     out
+}
+
+/// The severe messages compiling the program gives, none when it compiles.
+fn severe(source: &str) -> Vec<String> {
+    match compile(syntax::parse(source).unwrap_or_else(|e| panic!("{e}")), &[]) {
+        Ok(_) => Vec::new(),
+        Err(errors) => errors.into_iter().filter(|e| e.severity == Severity::Severe).map(|e| e.message).collect(),
+    }
 }
 
 #[test]

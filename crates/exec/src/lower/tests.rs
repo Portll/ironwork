@@ -475,11 +475,6 @@ fn set_to_entry_names_its_entry_and_a_call_through_any_other_pointer_finds_it() 
 #[test]
 fn constructs_outside_the_slice_are_refused_by_name() {
     let refused = |body: &str, data: &str| lower(&compiled(&program("", data, &[line(body), line("GOBACK.")].concat()))).unwrap_err();
-    let mixed = refused("MOVE FUNCTION MAX(A 1) TO A", "       01  A PIC X.\n");
-    assert!(matches!(mixed, LowerError::Unsupported("FUNCTION MIN or MAX of arguments of different kinds", _)));
-    let odo = "       01  A PIC X.\n       01  C PIC 9.\n       01  G.\n           05 T PIC 9 OCCURS 1 TO 3 DEPENDING ON C.\n";
-    let all = refused("COMPUTE C = FUNCTION SQRT(T(ALL))", odo);
-    assert!(matches!(all, LowerError::Unsupported("a FUNCTION of fixed arguments given a table whose ALL subscripts run to an OCCURS DEPENDING ON count", _)));
     let numval = refused("MOVE FUNCTION MAX(N M) TO A", "       01  A PIC X.\n       01  N PIC 9.\n       01  M PIC 99.\n");
     assert!(matches!(numval, LowerError::Unsupported(n, _) if n.starts_with("a FUNCTION result whose digits")));
 }

@@ -63,15 +63,16 @@ fn simple(dir: &Path, id: &str, card: &str, procedure: &[&str]) -> PathBuf {
 fn refused(dir: &Path) -> PathBuf {
     let path = dir.join("MIXED.cbl");
     let text = cobol(&[
+        "CBL NUMCHECK",
         "IDENTIFICATION DIVISION.",
         "PROGRAM-ID. MIXED.",
         "DATA DIVISION.",
         "WORKING-STORAGE SECTION.",
-        "01  A PIC X(3) VALUE 'ABC'.",
         "01  N PIC 9(3) VALUE 5.",
-        "01  R PIC X(3).",
         "PROCEDURE DIVISION.",
-        "    MOVE FUNCTION MAX(A N) TO R.",
+        "    IF N = ALL ZERO",
+        "        DISPLAY 'Z'",
+        "    END-IF.",
         "    STOP RUN.",
     ]);
     fs::write(&path, text).unwrap();
@@ -236,7 +237,7 @@ fn a_construct_lowering_refuses_is_named_where_it_is_and_nothing_is_written_for_
     let o = ironwork(&dir, &["compile", "MIXED.cbl", "PAYROLL.cbl", "-I", "lib", "-o", "out"], None);
     assert_eq!(o.status.code(), Some(12));
     let err = text(&o.stderr);
-    assert!(err.contains("MIXED.cbl:9:17: lowering: FUNCTION MIN or MAX of arguments of different kinds is not lowered yet"), "{err}");
+    assert!(err.contains("MIXED.cbl:8:12: lowering: NUMCHECK with ALL ZERO or ALL NULL compared with a data item it may test is not lowered yet"), "{err}");
     assert!(err.contains("ironwork: MIXED.iwm not written"), "{err}");
     assert!(!dir.join("out/MIXED.iwm").exists());
     assert!(dir.join("out/PAYROLL.iwm").exists());

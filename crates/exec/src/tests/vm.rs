@@ -561,7 +561,6 @@ fn the_vm_abends_where_the_interpreter_refuses_to_bind_a_cics_block() {
         ending.unwrap_err().message
     };
     assert_eq!(refused("EXEC CICS HANDLE ABEND LABEL(X) RESET SYSID(WS-SYS) END-EXEC"), "EXEC CICS HANDLE ABEND takes one of PROGRAM, LABEL, CANCEL and RESET");
-    assert!(refused("EXEC CICS HANDLE CONDITION ERROR(NOWHERE) END-EXEC").starts_with("EXEC CICS HANDLE CONDITION: "));
 }
 
 #[test]

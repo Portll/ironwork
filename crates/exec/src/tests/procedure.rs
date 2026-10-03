@@ -843,3 +843,51 @@ fn alphabetic_lower_and_upper_test_each_character_and_allow_spaces() {
     let out = run(&program("", data, &[line(&test("U")), line(&test("L")), line(&test("M")), line("IF U(2:2) ALPHABETIC-UPPER AND L(1:1) ALPHABETIC-LOWER"), line("    DISPLAY 'BOTH' END-IF"), line("GOBACK.")].concat()));
     assert_eq!(out, "U U\nU NOT L\nM NOT L\nBOTH\n");
 }
+
+#[test]
+fn procedure_division_returning_names_an_01_or_77_item_of_the_linkage_section() {
+    let with = |head: &str| {
+        severe(&format!(
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. SUB.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  R PIC X(3) VALUE 'XYZ'.\n       LINKAGE SECTION.\n       01  L.\n           05 L1 PIC X(3).\n       PROCEDURE DIVISION{head}.\n{}",
+            line("GOBACK.")
+        ))
+    };
+    assert_eq!(with(" RETURNING R"), ["PROCEDURE DIVISION RETURNING R: not an 01 or 77 item of the LINKAGE SECTION"]);
+    assert_eq!(with(" RETURNING L1"), ["PROCEDURE DIVISION RETURNING L1: not an 01 or 77 item of the LINKAGE SECTION"]);
+    assert_eq!(with(" RETURNING L"), Vec::<String>::new());
+}
+
+#[test]
+fn perform_varying_steps_a_numeric_item_from_and_by_an_identifier_or_literal() {
+    let data = "       01  I PIC 99.\n       01  J PIC 99.\n       01  X PIC X(4).\n       01  F COMP-2.\n       01  G.\n           05 T PIC X OCCURS 3 INDEXED BY K.\n";
+    let refused = |body: &str| severe(&program("", data, &[line(body), line("    CONTINUE"), line("END-PERFORM"), line("GOBACK.")].concat()));
+    assert_eq!(refused("PERFORM VARYING J FROM I + 1 BY 1 UNTIL J > 3"), ["PERFORM VARYING J FROM: an arithmetic expression, where FROM takes an identifier, index-name or literal"]);
+    assert_eq!(refused("PERFORM VARYING J FROM 1 BY I * 2 UNTIL J > 3"), ["PERFORM VARYING J BY: an arithmetic expression, where BY takes an identifier, index-name or literal"]);
+    assert_eq!(refused("PERFORM VARYING X FROM 1 BY 1 UNTIL X > 3"), ["PERFORM VARYING X: not a numeric elementary item or an index-name"]);
+    for accepted in ["PERFORM VARYING I FROM 10 BY -1 UNTIL I < 8", "PERFORM VARYING I FROM FUNCTION LENGTH(X) BY 1 UNTIL I > 5", "PERFORM VARYING F FROM 1.5 BY 0.5 UNTIL F > 3", "PERFORM VARYING K FROM 1 BY 1 UNTIL K > 3"] {
+        assert_eq!(refused(accepted), Vec::<String>::new(), "{accepted}");
+    }
+}
+
+#[test]
+fn search_varying_names_an_index_or_an_elementary_integer_item() {
+    let data = "       01  G.\n           05 E PIC X OCCURS 3 INDEXED BY K M.\n       01  V PIC 9(2)V9.\n       01  A PIC X.\n       01  F COMP-2.\n       01  IX USAGE INDEX.\n       01  B PIC S9(4) COMP.\n";
+    let refused = |v: &str| severe(&program("", data, &[line(&format!("SEARCH E VARYING {v} WHEN E(K) = 'A' CONTINUE END-SEARCH")), line("GOBACK.")].concat()));
+    for (v, refusal) in [("V", "SEARCH E VARYING V"), ("A", "SEARCH E VARYING A"), ("F", "SEARCH E VARYING F")] {
+        assert_eq!(refused(v), [format!("{refusal}: not an index-name, an index data item or an elementary integer item")]);
+    }
+    for accepted in ["M", "IX", "B"] {
+        assert_eq!(refused(accepted), Vec::<String>::new(), "{accepted}");
+    }
+}
+
+#[test]
+fn a_handle_label_names_a_paragraph_or_section_of_the_program() {
+    let refused = |block: &str| severe(&program("", "", &["       MAIN.\n".to_owned(), line(block), line("GOBACK."), "       ERR-1.\n".to_owned(), line("GOBACK.")].concat()));
+    assert_eq!(refused("EXEC CICS HANDLE CONDITION ERROR(NOPARA) END-EXEC"), ["EXEC CICS HANDLE CONDITION ERROR(NOPARA): no paragraph or section named NOPARA"]);
+    assert_eq!(refused("EXEC CICS HANDLE AID PF3(NOPARA) END-EXEC"), ["EXEC CICS HANDLE AID PF3(NOPARA): no paragraph or section named NOPARA"]);
+    assert_eq!(refused("EXEC CICS HANDLE ABEND LABEL(NOPARA) END-EXEC"), ["EXEC CICS HANDLE ABEND LABEL(NOPARA): no paragraph or section named NOPARA"]);
+    for accepted in ["EXEC CICS HANDLE CONDITION ERROR(ERR-1) LENGERR END-EXEC", "EXEC CICS HANDLE AID PF3(err-1) END-EXEC", "EXEC CICS HANDLE ABEND PROGRAM('X') END-EXEC"] {
+        assert_eq!(refused(accepted), Vec::<String>::new(), "{accepted}");
+    }
+}

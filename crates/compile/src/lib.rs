@@ -12,6 +12,7 @@ pub mod linage;
 pub mod markup;
 pub mod numcheck;
 pub mod oo;
+mod operands;
 pub mod picture;
 pub mod printer;
 pub mod report;
@@ -233,11 +234,19 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
             }
         }
     }
+    let is_record = |name: &str| layout.linkage_roots.iter().enumerate().any(|(o, &i)| layout.is_argument(o) && layout.items[i].name.as_deref() == Some(name));
     for param in &program.using {
-        let is_record = layout.linkage_roots.iter().enumerate().any(|(o, &i)| layout.is_argument(o) && layout.items[i].name.as_deref() == Some(param.name.as_str()));
-        if !is_record {
+        if !is_record(&param.name) {
             errors.push(Error::at(Pos::default(), format!("PROCEDURE DIVISION USING {}: not an 01 or 77 item of the LINKAGE SECTION", param.name)));
         }
+    }
+    // Language Reference SC27-8713-03, pp. 262-263; a method's and a function's are checked with their signatures.
+    if let Some(name) = &program.returning
+        && program.function.is_none()
+        && program.oo.as_deref().and_then(Oo::method).is_none()
+        && !is_record(name)
+    {
+        errors.push(Error::at(Pos::default(), format!("PROCEDURE DIVISION RETURNING {name}: not an 01 or 77 item of the LINKAGE SECTION")));
     }
     let report_writer = report::resolve(&program, &layout, drafts, &mut errors);
     let carriage = printer::carriages(&program, &layout, options.adv);
@@ -260,6 +269,8 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         inline_performs: 0,
         functions: Some(&functions),
         alphabetic: &alphabetic,
+        at: Pos::default(),
+        paragraph: 0,
     };
     for k in 0..program.files.len() {
         check.file_keys(k);
@@ -272,6 +283,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     }
     for (i, p) in program.paragraphs.iter().enumerate() {
         check.debugging = debugging.iter().any(|&(first, last)| (first..=last).contains(&i));
+        check.paragraph = i;
         check.statements(&p.statements);
     }
     let entries = entry_points(&program);
@@ -674,6 +686,10 @@ struct Check<'a> {
     functions: Option<&'a [function::Udf]>,
     /// Where each item of category alphabetic is declared.
     alphabetic: &'a [Pos],
+    /// The statement whose conditions are being checked, which their messages name.
+    at: Pos,
+    /// The paragraph the statements are in, from which a HANDLE label is found.
+    paragraph: usize,
 }
 
 impl Check<'_> {
@@ -685,6 +701,12 @@ impl Check<'_> {
 
     fn statement(&mut self, s: &Stmt) {
         linage::check_receivers(self.layout, s, self.errors);
+        if let Stmt::If { pos, .. } | Stmt::Evaluate { pos, .. } | Stmt::PerformInline { pos, .. } | Stmt::PerformProc { pos, .. } = s {
+            self.at = *pos;
+        }
+        if let Stmt::Search(se) = s {
+            self.at = se.pos;
+        }
         match s {
             Stmt::Move { from, to, .. } => {
                 self.operand(from);
@@ -750,6 +772,9 @@ impl Check<'_> {
                                     self.expr(from);
                                     if let Some(t) = thru {
                                         self.expr(t);
+                                    }
+                                    if let Subject::Expr(e) = subject {
+                                        std::iter::once(from).chain(thru).for_each(|o| self.comparison(e, o));
                                     }
                                 }
                             }
@@ -861,10 +886,10 @@ impl Check<'_> {
             }
             Stmt::Cancel { targets, .. } => targets.iter().for_each(|t| self.operand(t)),
             Stmt::Set { set, .. } => match set {
-                SetStmt::ConditionTrue(targets) => targets.iter().for_each(|r| self.reference(r)),
+                SetStmt::ConditionTrue(targets) => targets.iter().for_each(|r| self.reference_or_condition(r)),
                 SetStmt::ConditionFalse(targets) => {
                     for r in targets {
-                        self.reference(r);
+                        self.reference_or_condition(r);
                         if let Ok(layout::Resolved::Condition(c)) = self.layout.resolve(&r.name, &r.qualifiers, r.pos)
                             && self.layout.conditions[c].false_value.is_none()
                         {
@@ -936,6 +961,7 @@ impl Check<'_> {
                 self.reference_unsubscripted(&se.table);
                 if let Some(v) = &se.varying {
                     self.reference(v);
+                    self.search_varying(se, v);
                 }
                 self.statements(se.at_end.as_deref().unwrap_or_default());
                 for (cond, body) in &se.whens {
@@ -1053,7 +1079,24 @@ impl Check<'_> {
                     self.expr(&v.from);
                     self.expr(&v.by);
                     self.cond(&v.until);
+                    self.varying(v);
                 }
+            }
+        }
+    }
+
+    /// A VARYING or AFTER variable is a numeric elementary item or an index-name, and its FROM and
+    /// BY an identifier, index-name or literal (Language Reference SC27-8713-03, p. 419).
+    fn varying(&mut self, v: &Varying) {
+        use rt::storage::Kind;
+        if let Some(i) = self.item(&v.var)
+            && !matches!(self.layout.items[i].kind, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Float(_) | Kind::Index)
+        {
+            self.errors.push(Error::at(self.at, format!("PERFORM VARYING {}: not a numeric elementary item or an index-name", v.var.name)));
+        }
+        for (phrase, e) in [("FROM", &v.from), ("BY", &v.by)] {
+            if !matches!(e, Expr::Operand(_)) {
+                self.errors.push(Error::at(self.at, format!("PERFORM VARYING {} {phrase}: an arithmetic expression, where {phrase} takes an identifier, index-name or literal", v.var.name)));
             }
         }
     }
@@ -1171,7 +1214,17 @@ impl Check<'_> {
         }
     }
 
+    /// A reference to data: an identifier names a data item or a function, and a condition-name
+    /// is neither (Language Reference SC27-8713-03, p. 69).
     fn reference(&mut self, r: &Ref) {
+        self.reference_or_condition(r);
+        if let Ok(layout::Resolved::Condition(_)) = self.layout.resolve(&r.name, &r.qualifiers, r.pos) {
+            self.errors.push(Error::at(r.pos, format!("{} is a condition-name, not a data item", r.name)));
+        }
+    }
+
+    /// A reference that may name a condition-name: a condition's, or SET TO TRUE's or FALSE's.
+    fn reference_or_condition(&mut self, r: &Ref) {
         if r.name == "RETURN-CODE" && r.qualifiers.is_empty() && self.layout.resolve(&r.name, &r.qualifiers, r.pos).is_err() {
             return;
         }
@@ -1203,6 +1256,9 @@ impl Check<'_> {
     fn exec_block(&mut self, block: &ExecBlock) {
         if block.kind == ExecKind::Dli {
             self.dli_block(block);
+        }
+        if block.kind == ExecKind::Cics && matches!(block.command.as_str(), "HANDLE CONDITION" | "HANDLE AID" | "HANDLE ABEND") {
+            self.handle_labels(block);
         }
         if let Some(syntax::sql::Sql { statement: syntax::sql::Statement::Malformed(why), .. }) = &block.sql {
             self.errors.push(Error::at(block.pos, format!("EXEC SQL {}: {why}", block.command)));
@@ -1321,6 +1377,33 @@ impl Check<'_> {
         }
     }
 
+    /// A HANDLE label is a paragraph or section of the program, where control goes when the
+    /// condition, attention key or abend comes (Programming Guide SC27-8714-03, p. 503).
+    fn handle_labels(&mut self, block: &ExecBlock) {
+        let abend = block.command == "HANDLE ABEND";
+        for (option, arg) in &block.options {
+            let Some(ExecArg::Text(label)) = arg else { continue };
+            let label = label.trim();
+            if label.is_empty() || matches!(option.as_str(), "RESP" | "RESP2" | "NOHANDLE") || abend && option != "LABEL" {
+                continue;
+            }
+            let name = ProcName { name: label.to_ascii_uppercase(), section: None };
+            if let Err(m) = procedure_from(self.program, &name, self.paragraph) {
+                self.errors.push(Error::at(block.pos, format!("EXEC CICS {} {option}({label}): {m}", block.command)));
+            }
+        }
+    }
+
+    /// SEARCH VARYING names an index-name, an index data item or an elementary integer item
+    /// (Language Reference SC27-8713-03, p. 437).
+    fn search_varying(&mut self, se: &Search, v: &Ref) {
+        use rt::storage::Kind;
+        let Some(i) = self.item(v) else { return };
+        if !matches!(self.layout.items[i].kind, Kind::Index | Kind::Zoned { scale: 0, .. } | Kind::Packed { scale: 0, .. } | Kind::Binary { scale: 0, .. }) {
+            self.errors.push(Error::at(v.pos, format!("SEARCH {} VARYING {}: not an index-name, an index data item or an elementary integer item", se.table.name, v.name)));
+        }
+    }
+
     /// SEARCH names a table without a subscript.
     fn reference_unsubscripted(&mut self, r: &Ref) {
         if let Err(e) = self.layout.resolve(&r.name, &r.qualifiers, r.pos) {
@@ -1344,6 +1427,7 @@ impl Check<'_> {
                         None => self.errors.push(Error::at(f.pos, format!("FUNCTION {}: a user-defined function is not supported here yet", f.name))),
                     }
                 }
+                self.function_arguments(f);
                 f.args.iter().for_each(|a| self.expr(a));
             }
         }
@@ -1365,12 +1449,16 @@ impl Check<'_> {
             Cond::Rel(a, _, b) => {
                 self.expr(a);
                 self.expr(b);
+                self.comparison(a, b);
             }
             Cond::Class(e, _) => self.expr(e),
-            Cond::Name(r) => self.reference(r),
+            Cond::Name(r) => self.reference_or_condition(r),
             Cond::NameOrRel { subject, name, .. } => {
                 self.expr(subject);
-                self.reference(name);
+                self.reference_or_condition(name);
+                if self.item(name).is_some() {
+                    self.comparison(subject, &Expr::Operand(Operand::Ref(name.clone())));
+                }
             }
             Cond::Not(inner) => self.cond(inner),
             Cond::And(a, b) | Cond::Or(a, b) => {

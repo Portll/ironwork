@@ -78,9 +78,6 @@ fn a_block_the_walker_refuses_as_it_binds_it_keeps_the_walker_s_message() {
         let Cics::Refused(why) = got[0].1.command else { panic!("{:?}", got[0]) };
         (got[0].0.to_owned(), symbol(&p, why).to_owned())
     };
-    let label = refused("EXEC CICS HANDLE CONDITION ERROR(NOWHERE) END-EXEC");
-    assert_eq!(label.0, "HANDLE CONDITION");
-    assert!(label.1.starts_with("EXEC CICS HANDLE CONDITION: "), "{}", label.1);
     let two = refused("EXEC CICS HANDLE ABEND LABEL(X) RESET END-EXEC");
     assert_eq!(two, ("HANDLE ABEND".to_owned(), "EXEC CICS HANDLE ABEND takes one of PROGRAM, LABEL, CANCEL and RESET".to_owned()));
 }
