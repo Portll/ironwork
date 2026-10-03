@@ -60,10 +60,13 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let p = self.p;
         let pos = self.pos(at);
         match op {
-            Op::Move { check, .. } if *check != SenderCheck::None => return Err(not_yet("NUMCHECK")),
-            Op::Move { from, to, plan, .. } | Op::Set { from, to, plan } => {
+            Op::Move { from, to, plan, check } => {
                 let dest = self.loc_written(*to)?;
-                self.move_to(matches!(op, Op::Set { .. }), *from, dest, plan, at)?;
+                self.move_to(Some(*check), *from, dest, plan, at)?;
+            }
+            Op::Set { from, to, plan } => {
+                let dest = self.loc_written(*to)?;
+                self.move_to(None, *from, dest, plan, at)?;
             }
             Op::Initialize { target, plan } => self.initialize(*target, &p.plans.init[*plan as usize], pos)?,
             Op::Arith(id) => return self.arith(&p.plans.arith[*id as usize], pos),
@@ -160,12 +163,15 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         Ok(Step::Next)
     }
 
-    /// MOVE of `from` into `dest`, located already, by `plan`; with `set`, as SET TO moves it.
-    pub(super) fn move_to(&mut self, set: bool, from: Operand, dest: Loc, plan: &MovePlan, at: u32) -> R<()> {
-        let (val, src) = match (set, from) {
-            (false, Operand::Load(p)) => {
+    /// MOVE of `from` into `dest`, located already, by `plan`, a data item sender tested as `check`
+    /// says (`Machine::move_source`); without `check`, as SET TO moves it.
+    pub(super) fn move_to(&mut self, check: Option<SenderCheck>, from: Operand, dest: Loc, plan: &MovePlan, at: u32) -> R<()> {
+        let (val, src) = match (check, from) {
+            (Some(check), Operand::Load(p)) => {
                 let src = self.loc(p)?;
-                (store::move_sender(&self.facts(), &self.unit.mem, src, dest, self.pos(self.p.places[p as usize].at))?, Some(src))
+                let pos = self.pos(self.p.places[p as usize].at);
+                self.numcheck(src, check, pos)?;
+                (store::move_sender(&self.facts(), &self.unit.mem, src, dest, pos)?, Some(src))
             }
             _ => self.value_with_loc(from)?,
         };

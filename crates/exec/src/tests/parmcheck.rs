@@ -67,6 +67,40 @@ fn parmcheck_checks_a_call_of_a_language_environment_service() {
     assert_eq!(err, "ironwork: 11:12: PARMCHECK: CEEGMTO, called at line 11 of program T, wrote past the end of WORKING-STORAGE, beyond parameter FC\n");
 }
 
+/// The run on the VM alone, which fails where the VM stops.
+fn on_vm(source: &str) -> (String, String, Result<Ending, Abend>) {
+    let o = Harness::source(source).clock(unit::Clock::Fixed(1_790_510_400, 42)).run(Executor::Vm);
+    (o.out, o.err, o.ending)
+}
+
+#[test]
+fn a_callee_that_ends_the_run_with_stop_run_is_not_tested() {
+    let source = caller_and_callees("PARMCHECK(ABD)", &[line("CALL 'LONGER' USING LAST-ITEM")]).replace("GOBACK.\n       END PROGRAM LONGER.", "STOP RUN.\n       END PROGRAM LONGER.");
+    let (out, err, ending) = run_unit(&source, vec![], "");
+    assert_eq!(ending.map(|(e, _)| e), Ok(Ending::StopRun), "{err}");
+    assert_eq!((out.as_str(), err.as_str()), ("", ""));
+    assert_eq!(on_vm(&source), (String::new(), String::new(), Ok(Ending::StopRun)));
+}
+
+#[test]
+fn a_call_through_a_function_pointer_sets_and_tests_the_buffer_with_no_arguments() {
+    let source = [
+        "       CBL PARMCHECK(ABD)\n       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n",
+        "       01  R USAGE OBJECT REFERENCE.\n       LINKAGE SECTION.\n           COPY JNI.\n       PROCEDURE DIVISION.\n",
+        &line("SET ADDRESS OF JNIENV TO JNIENVPTR"),
+        &line("SET ADDRESS OF JNINATIVEINTERFACE TO JNIENV"),
+        &line("CALL NewGlobalRef USING BY VALUE JNIENVPTR NULL"),
+        &line("    RETURNING R"),
+        &line("IF R = NULL DISPLAY 'NULL' END-IF"),
+        &line("GOBACK."),
+    ]
+    .concat();
+    let (out, err, ending) = run_unit(&source, vec![], "");
+    assert_eq!(ending.map(|(e, _)| e), Ok(Ending::Goback), "{err}");
+    assert_eq!((out.as_str(), err.as_str()), ("NULL\n", ""));
+    assert_eq!(on_vm(&source), (out, err, Ok(Ending::Goback)));
+}
+
 #[test]
 fn the_buffer_is_n_bytes_after_the_programs_own_working_storage_and_before_what_the_compiler_adds() {
     let laid_out = |card: &str| {

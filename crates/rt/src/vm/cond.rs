@@ -2,14 +2,37 @@
 
 use super::value::constant;
 use super::{Code, R, Vm, not_yet};
-use crate::lir::{Comparand, Compare, Cond, CondId, Const, Operand, PlaceId};
+use crate::lir::{Base, Comparand, Compare, Cond, CondId, Const, Item, Operand, PlaceId, Program, SenderCheck};
 use crate::oo;
 use crate::storage::{Kind, Loc, Val};
 use crate::store::{self, ProgramFacts};
 use crate::unit::Loader;
 use crate::vocab::{Figurative, Pos, RelOp};
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::rc::Rc;
+
+/// The name NUMCHECK's message gives the conditional variable of each condition-name test, whose
+/// place bears the condition-name's: the one name of the items of its place's storage and shape,
+/// or None where items of other names share them.
+pub(super) fn conditional_variables(p: &Program) -> HashMap<PlaceId, Option<String>> {
+    let mut names = HashMap::new();
+    for c in &p.conds {
+        let Cond::Name { subject, .. } = c else { continue };
+        let place = &p.places[*subject as usize];
+        let base = |i: &Item| match i.linkage {
+            Some(record) => Base::Linkage(record),
+            None if i.local => Base::Local,
+            None => Base::Program,
+        };
+        let mut shaped = p.items.iter().filter(|i| base(i) == place.base && i.offset == place.offset && i.size == place.len && i.kind == place.kind && i.dims.len() == place.subscripts.len());
+        let name = |i: &Item| i.name.map_or("FILLER", |n| p.symbols[n as usize].as_str());
+        let first = shaped.next().map(name);
+        let one = first.filter(|&n| shaped.all(|i| name(i) == n));
+        names.entry(*subject).or_insert(one.map(str::to_owned));
+    }
+    names
+}
 
 fn holds(op: RelOp, o: Ordering) -> bool {
     match op {
@@ -35,9 +58,12 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
                 let v = self.comparand(value, pos)?;
                 store::sign_test(v, *test, pos)?
             }
-            Cond::Name { subject, values, .. } => {
-                let loc = self.loc(*subject)?;
-                let subject = (self.read(loc, self.pos(p.places[*subject as usize].at))?, Some(loc));
+            Cond::Name { subject: place, values, .. } => {
+                let loc = self.loc(*place)?;
+                if self.code.variables.get(place).is_some_and(Option::is_none) && store::numcheck_fault(&self.facts(), &self.unit.mem, loc, false).is_some() && !self.facts().numcheck_removed(loc.item, pos) {
+                    return Err(not_yet("NUMCHECK of a conditional variable whose storage another item of its shape names"));
+                }
+                let subject = (self.read_tested(*place, loc)?, Some(loc));
                 for (low, high) in values {
                     let hit = match high {
                         None => self.compare_constant(&subject, *low, pos)? == Ordering::Equal,
@@ -69,7 +95,8 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
 
     /// `Machine::compare`: the zoned-bytes test of each side against the other, with its locates,
     /// then the branch the plan names: a zoned integer's bytes, or both sides as they read, object
-    /// references by what they identify, and anything else as `store::compare` orders it.
+    /// references by what they identify, and anything else as `store::compare` orders it. NUMCHECK
+    /// tests a data item side unless `checks_against` the other says not.
     pub(super) fn compare(&mut self, a: &Comparand, b: &Comparand, how: Compare, pos: Pos) -> R<Ordering> {
         let mut zoned = self.zoned_against(a, b)?;
         if how != (Compare::ZonedBytes { zoned_first: true }) {
@@ -84,17 +111,22 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             };
             let facts = self.facts();
             let Some(image) = store::compared_zoned_bytes(&facts, &self.unit.mem, loc) else { return Err(not_yet("zoned bytes of an item that is not a zoned integer")) };
+            if self.checks_against(other)? {
+                let loc = self.loc(*place)?;
+                self.numcheck(loc, SenderCheck::Item, self.pos(self.p.places[*place as usize].at))?;
+            }
             let other = match other {
                 Comparand::Operand(Operand::Load(q)) if self.zone_sensitive(*q)? => {
                     let loc = self.loc(*q)?;
+                    self.numcheck(loc, SenderCheck::Item, self.pos(self.p.places[*q as usize].at))?;
                     (Val::Bytes(Vec::new()), Some(loc))
                 }
-                _ => self.comparand_with_loc(other, pos)?,
+                _ => self.comparand_against(other, side, pos)?,
             };
             return Ok(store::compare_zoned_bytes(&facts, &self.unit.mem, &image, other, zoned_first, pos)?);
         }
-        let (va, la) = self.comparand_with_loc(a, pos)?;
-        let (vb, lb) = self.comparand_with_loc(b, pos)?;
+        let (va, la) = self.comparand_against(a, b, pos)?;
+        let (vb, lb) = self.comparand_against(b, a, pos)?;
         let names = || (self.operand_name(a), self.operand_name(b));
         if let Some(o) = oo::compare_references(&self.unit.oo, names, (&va, la), (&vb, lb), pos)? {
             return Ok(o);
@@ -109,22 +141,44 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         }
     }
 
-    /// The locates of `Machine::zoned_bytes_against(e, other)`, and `e`'s `Loc` where it reaches
-    /// the zoned bytes.
-    fn zoned_against(&mut self, e: &Comparand, other: &Comparand) -> R<Option<Loc>> {
-        let Comparand::Operand(Operand::Load(r)) = e else { return Ok(None) };
-        let nonnumeric = match other {
+    /// `Machine::comparand_against`: a data item read untested where `checks_against` the other
+    /// operand says not, anything else as it reads.
+    fn comparand_against(&mut self, c: &Comparand, other: &Comparand, pos: Pos) -> R<(Val, Option<Loc>)> {
+        match c {
+            Comparand::Operand(Operand::Load(p)) if !self.checks_against(other)? => {
+                let loc = self.loc(*p)?;
+                Ok((self.read(loc, self.pos(self.p.places[*p as usize].at))?, Some(loc)))
+            }
+            _ => self.comparand_with_loc(c, pos),
+        }
+    }
+
+    /// `Machine::checks_against`: NUMCHECK tests an item compared with `other` unless ZON(NOALPHNUM)
+    /// spares it a nonnumeric one, which is located to find its kind.
+    fn checks_against(&mut self, other: &Comparand) -> R<bool> {
+        Ok(!store::noalphnum(&self.p.options.options) || !self.nonnumeric(other)?)
+    }
+
+    /// `Machine::nonnumeric`: an alphanumeric literal, a figurative constant other than ZERO and
+    /// NULL, or an item of a kind `store::nonnumeric` names, located. Lowering refuses ALL ZERO and
+    /// ALL NULL where this decides, as the LIR keeps them as ZERO and NULL.
+    fn nonnumeric(&mut self, e: &Comparand) -> R<bool> {
+        Ok(match e {
             Comparand::Operand(Operand::Const(c)) => match &self.p.consts[*c as usize] {
                 Const::Bytes(_) | Const::All(_) | Const::Refused(_) => true,
                 Const::Figurative(f) => !matches!(f, Figurative::Zero | Figurative::Null),
                 Const::National(_) | Const::Number(_) => false,
             },
-            Comparand::Operand(Operand::Load(o)) => {
-                let kind = self.loc(*o)?.kind;
-                matches!(kind, Kind::Group | Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::NumericEdited { .. })
-            }
+            Comparand::Operand(Operand::Load(o)) => store::nonnumeric(self.loc(*o)?.kind),
             _ => false,
-        };
+        })
+    }
+
+    /// The locates of `Machine::zoned_bytes_against(e, other)`, and `e`'s `Loc` where it reaches
+    /// the zoned bytes.
+    fn zoned_against(&mut self, e: &Comparand, other: &Comparand) -> R<Option<Loc>> {
+        let Comparand::Operand(Operand::Load(r)) = e else { return Ok(None) };
+        let nonnumeric = self.nonnumeric(other)?;
         let options = self.p.options.options;
         let zones_count = options.invdata.is_some_and(|i| !i.forcenumcmp)
             && self.zone_sensitive(*r)?

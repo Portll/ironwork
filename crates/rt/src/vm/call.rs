@@ -6,9 +6,9 @@
 use super::{Code, Halt, Lowered, R, Vm, not_yet};
 use crate::abend::{Abend, AbendCode, Ending};
 use crate::callee::{self, Arguments, Bindings, By, Callee};
-use crate::host::Host;
 use crate::le::{self, LeHost};
-use crate::lir::{Base, CallPlan, CallTarget, LeService, Operand, PlaceId, Step};
+use crate::lir::{Base, CallArg, CallPlan, CallTarget, Chars, LeService, Operand, PlaceId, SenderCheck, Step};
+use crate::parmcheck;
 use crate::storage::{Kind, Loc, Val};
 use crate::store;
 use crate::unit::{Event, LoadError, Loader, OS_COMMAND_ROUTINES, RETURN_CODE, RunUnit, UnitHost};
@@ -43,7 +43,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             Ok(found) => found,
             Err(LoadError::NotFound) => {
                 if let Some(service) = le::service(&name) {
-                    return self.le_call(plan, service, pos);
+                    return self.le_call(plan, service, &name, pos);
                 }
                 if let Some(step) = self.virtual_print(plan, &name, pos)? {
                     return Ok(step);
@@ -73,6 +73,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let mark = self.unit.mem.len();
         let addresses = callee::addresses(self, &plan.args, pos);
         let addresses = self.settle(addresses)?;
+        self.parmcheck_set();
         let program = &lowered.program;
         let containers = self.containers_of(program);
         let by = By::Call { initial: program.initial };
@@ -96,6 +97,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         if ending? == Ending::StopRun {
             return Ok(Step::End(Ending::StopRun));
         }
+        self.parmcheck_test(plan, &addresses, |unit| unit.programs[index].name.clone(), pos)?;
         if let (Some(target), Some(val)) = (plan.returning, returned) {
             let dest = self.loc_written(target)?;
             store::assign(&self.facts(), self.unit, dest, val, None, pos)?;
@@ -104,17 +106,38 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     }
 
     /// `Machine::le_call`: a callable service run with its arguments' addresses, which are released
-    /// however it ends. No depth is counted and ON EXCEPTION never runs.
-    fn le_call(&mut self, plan: &CallPlan, service: LeService, pos: Pos) -> R<Step> {
+    /// however it ends, PARMCHECK's buffer set around it. No depth is counted and ON EXCEPTION
+    /// never runs.
+    fn le_call(&mut self, plan: &CallPlan, service: LeService, name: &str, pos: Pos) -> R<Step> {
         let mark = self.unit.mem.len();
         let addresses = callee::addresses(self, &plan.args, pos);
         let ran = match self.settle(addresses) {
-            Ok(args) => le::call(self, service, &args, pos).map_err(Halt::Abend),
+            Ok(args) => {
+                self.parmcheck_set();
+                le::call(self, service, &args, pos).map(|()| args).map_err(Halt::Abend)
+            }
             Err(halt) => Err(halt),
         };
         self.unit.release_temporaries(mark);
-        ran?;
+        self.parmcheck_test(plan, &ran?, |_| name.to_owned(), pos)?;
         Ok(if plan.on_exception || plan.not_on_exception { Step::Arm(0) } else { Step::Next })
+    }
+
+    /// `Machine::parmcheck_set`: PARMCHECK's buffer set to X'AA' before a CALL.
+    pub(super) fn parmcheck_set(&mut self) {
+        parmcheck::set(self.unit, self.base, self.p.storage.parmcheck);
+    }
+
+    /// `Machine::parmcheck_test`: after a CALL that returned, its data item arguments at
+    /// `addresses`, the called program's name worked out by `called` only when the buffer changed.
+    pub(super) fn parmcheck_test(&mut self, plan: &CallPlan, addresses: &[Option<usize>], called: impl FnOnce(&RunUnit<'_, Rc<Code>, L>) -> String, pos: Pos) -> R<()> {
+        let p = self.p;
+        let arguments = plan.args.iter().zip(addresses).filter_map(|(arg, &address)| match (arg, address) {
+            (CallArg::Reference(q) | CallArg::Content(Chars::Place(q)) | CallArg::Value(Operand::Load(q)), Some(a)) => Some((a, p.symbols[p.places[*q as usize].name as usize].as_str())),
+            _ => None,
+        });
+        let abd = p.options.options.parmcheck.is_some_and(|c| c.abd);
+        Ok(parmcheck::test(self.unit, self.base, p.storage.parmcheck, arguments, called, &p.symbols[p.id as usize], abd, pos)?)
     }
 
     /// `Machine::virtual_print`: SYSTEM or C$SYSTEM with an lp or lpr command, in a run given DD
@@ -225,8 +248,9 @@ impl<'w, L: Loader<Rc<Code>>> Arguments<'w, PlaceId, Operand> for Vm<'_, '_, 'w,
         matches!(operand, Operand::LengthOf(_))
     }
 
-    /// `Vm::activation` refuses a program compiled with NUMCHECK, so no test is made.
     fn content_item(&mut self, place: PlaceId) -> Result<Loc, Abend> {
-        Host::locate(self, place, false)
+        let pos = self.pos(self.p.places[place as usize].at);
+        let tested = self.loc(place).and_then(|loc| self.numcheck(loc, SenderCheck::Item, pos).map(|()| loc));
+        self.lift(tested, pos)
     }
 }

@@ -5,7 +5,7 @@ use super::{Code, Facts, Halt, R, Vm, not_yet};
 use crate::abend::Abend;
 use crate::arith;
 use crate::intrinsic::function::{self as intrinsic, Evaluator};
-use crate::lir::{AbendId, Argument, Base, Comparand, Const, Count, Expr, ExprId, Func, FunctionId, FunctionPlan, IntExpr, Mode, Operand, PlaceId, RefMod};
+use crate::lir::{AbendId, Argument, Base, Comparand, Const, Count, Expr, ExprId, Func, FunctionId, FunctionPlan, IntExpr, Mode, Operand, PlaceId, RefMod, SenderCheck};
 use crate::storage::{Kind, Loc, Val};
 use crate::store::{self, ProgramFacts};
 use crate::unit::{ADDRESS_BASE, Loader};
@@ -31,12 +31,28 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         Ok(store::read(&self.facts(), &self.unit.mem, loc, pos)?)
     }
 
+    /// NUMCHECK's test of an item once located and before it is read, under the option.
+    pub(super) fn numcheck(&mut self, loc: Loc, check: SenderCheck, pos: Pos) -> R<()> {
+        if self.p.options.options.numcheck.is_none() {
+            return Ok(());
+        }
+        let facts = self.facts();
+        Ok(store::numcheck_sender(&facts, self.unit, loc, check, self.sym(self.p.id), pos)?)
+    }
+
+    /// Place `p`, located at `loc`, tested and read as `Machine::operand` reads a data item.
+    pub(super) fn read_tested(&mut self, p: PlaceId, loc: Loc) -> R<Val> {
+        let pos = self.pos(self.p.places[p as usize].at);
+        self.numcheck(loc, SenderCheck::Item, pos)?;
+        self.read(loc, pos)
+    }
+
     /// `Machine::operand`: a data item located and read, a literal, LENGTH OF, ADDRESS OF or FUNCTION.
     pub(super) fn value(&mut self, o: Operand) -> R<Val> {
         match o {
             Operand::Load(p) => {
                 let loc = self.loc(p)?;
-                self.read(loc, self.pos(self.p.places[p as usize].at))
+                self.read_tested(p, loc)
             }
             Operand::Const(c) => constant(&self.p.consts[c as usize]).map_err(|a| self.abend(a, None).into()),
             Operand::LengthOf(p) => {
@@ -61,7 +77,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     pub(super) fn value_with_loc(&mut self, o: Operand) -> R<(Val, Option<Loc>)> {
         if let Operand::Load(p) = o {
             let loc = self.loc(p)?;
-            return Ok((self.read(loc, self.pos(self.p.places[p as usize].at))?, Some(loc)));
+            return Ok((self.read_tested(p, loc)?, Some(loc)));
         }
         Ok((self.value(o)?, None))
     }
@@ -147,51 +163,60 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
 
     /// `Machine::binary_division`: whether a zero divisor is the fixed-point divide's (S0C9),
     /// every operand of both sides an integer binary item or integer literal and one an item.
-    pub(super) fn binary_division(&self, a: ExprId, b: ExprId) -> R<bool> {
-        let mut items = 0;
-        let (x, y) = (self.binary_operands(a, &mut items)?, self.binary_operands(b, &mut items)?);
-        match (x, y) {
-            (Some(false), _) | (_, Some(false)) => Ok(false),
-            _ if items == 0 => Ok(false),
-            (Some(true), Some(true)) => Ok(true),
-            _ => Err(not_yet("a zero divisor beside ZERO or an integer exponent, which may have been written ALL ZERO or with a decimal point")),
+    pub(super) fn binary_division(&mut self, a: ExprId, b: ExprId) -> R<bool> {
+        let mut walk = Division::default();
+        let all = self.binary_operands(a, &mut walk)? && self.binary_operands(b, &mut walk)?;
+        let undecided = || not_yet("a zero divisor beside ZERO or an integer exponent, which may have been written ALL ZERO or with a decimal point");
+        match all {
+            false if walk.undecided && self.p.options.options.numcheck.is_some() => Err(undecided()),
+            false => Ok(false),
+            true if walk.items == 0 => Ok(false),
+            true if walk.undecided => Err(undecided()),
+            true => Ok(true),
         }
     }
 
-    /// Whether every operand is one the fixed-point divide takes, counting the items; None where
-    /// the LIR does not keep what decides it: ZERO, which may have been written ALL ZERO, and an
-    /// integer exponent, which may have been written with a decimal point.
-    fn binary_operands(&self, e: ExprId, items: &mut usize) -> R<Option<bool>> {
-        let binary_item = |items: &mut usize, place: PlaceId| {
-            let binary = matches!(self.p.places[place as usize].kind, Kind::Binary { scale: 0, .. } | Kind::Index);
-            *items += usize::from(binary);
-            binary
-        };
+    /// Whether each operand, left to right, is one the fixed-point divide takes, each item located
+    /// again, until one is not. An operand the LIR does not keep enough of to decide is taken to be
+    /// one and noted: ZERO, which may have been written ALL ZERO, and an integer exponent, which
+    /// may have been written with a decimal point.
+    fn binary_operands(&mut self, e: ExprId, walk: &mut Division) -> R<bool> {
         Ok(match &self.p.exprs[e as usize] {
             Expr::Operand(Operand::Const(c)) => match &self.p.consts[*c as usize] {
-                Const::Number(f) => Some(f.places.dec == 0),
-                Const::Figurative(Figurative::Zero) => None,
-                _ => Some(false),
+                Const::Number(f) => f.places.dec == 0,
+                Const::Figurative(Figurative::Zero) => {
+                    walk.undecided = true;
+                    true
+                }
+                _ => false,
             },
             Expr::Operand(Operand::LengthOf(_)) => {
-                *items += 1;
-                Some(true)
+                walk.items += 1;
+                true
             }
-            Expr::Operand(Operand::Load(place)) => Some(binary_item(items, *place)),
-            Expr::Operand(_) => Some(false),
-            Expr::Neg(inner) => self.binary_operands(*inner, items)?,
-            Expr::Bin(x, _, y) => both(self.binary_operands(*x, items)?, self.binary_operands(*y, items)?),
+            Expr::Operand(Operand::Load(place)) => self.binary_item(*place, walk)?,
+            Expr::Operand(_) => false,
+            Expr::Neg(inner) => self.binary_operands(*inner, walk)?,
+            Expr::Bin(x, _, y) => self.binary_operands(*x, walk)? && self.binary_operands(*y, walk)?,
             Expr::Pow(x, exponent) => {
-                let base = self.binary_operands(*x, items)?;
-                let exponent = match exponent {
-                    IntExpr::Const(_) => None,
-                    IntExpr::Item(place) => Some(binary_item(items, *place)),
-                    IntExpr::Fixed { expr, .. } => self.binary_operands(*expr, items)?,
-                    IntExpr::Walk(_) => return Err(not_yet("a JSON walk subscript as an exponent")),
-                };
-                both(base, exponent)
+                self.binary_operands(*x, walk)?
+                    && match exponent {
+                        IntExpr::Const(_) => {
+                            walk.undecided = true;
+                            true
+                        }
+                        IntExpr::Item(place) => self.binary_item(*place, walk)?,
+                        IntExpr::Fixed { expr, .. } => self.binary_operands(*expr, walk)?,
+                        IntExpr::Walk(_) => return Err(not_yet("a JSON walk subscript as an exponent")),
+                    }
             }
         })
+    }
+
+    fn binary_item(&mut self, place: PlaceId, walk: &mut Division) -> R<bool> {
+        let binary = matches!(self.loc(place)?.kind, Kind::Binary { scale: 0, .. } | Kind::Index);
+        walk.items += usize::from(binary);
+        Ok(binary)
     }
 
     /// `Machine::function`: HEX-OF, BIT-OF and BYTE-LENGTH read an argument's storage; any other
@@ -267,7 +292,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let mut current: Vec<(u32, i64)> = all.iter().map(|&(at, _)| (at, 1)).collect();
         loop {
             let loc = self.loc_with(element, &current)?;
-            out.push(self.read(loc, pos)?);
+            out.push(self.read_tested(element, loc)?);
             let mut k = current.len();
             loop {
                 if k == 0 {
@@ -292,12 +317,12 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     }
 }
 
-fn both(x: Option<bool>, y: Option<bool>) -> Option<bool> {
-    match (x, y) {
-        (Some(false), _) | (_, Some(false)) => Some(false),
-        (Some(true), Some(true)) => Some(true),
-        _ => None,
-    }
+/// What `binary_operands` has found so far: the items, and whether an operand it took to be one
+/// the fixed-point divide takes may not have been.
+#[derive(Default)]
+struct Division {
+    items: usize,
+    undecided: bool,
 }
 
 /// What a FUNCTION reads beyond its arguments' values: its plan's integer argument again, the run

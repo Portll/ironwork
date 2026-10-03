@@ -2007,7 +2007,11 @@ warning and the read goes on; under ABD it ends the run with U4038 before the re
 the place's `numcheck`: `lax_redefinition`, the tolerance ZON(LAX) gives an item redefining a
 signed or numeric-edited one, and `numcheck_removed`, set where the compiler found the test always
 fails, reported it and removed it. The walker keys the removal by the reference's position and its
-item, as a place is keyed.
+item, as a place is keyed. The warning names the `Loc`'s item through `item_name`: for a
+condition-name's subject that is its conditional variable, not the condition-name its place bears,
+so the VM finds it among `Program.items` of the place's storage and shape, and stops as
+`Halt::Unimplemented` where items of other names share them and the test fails; an XML register's
+`Loc` has no item in the walker, which names it RETURN-CODE.
 
 | The walker's read | In the LIR | Tested |
 |---|---|---|

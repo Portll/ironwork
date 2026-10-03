@@ -8,7 +8,7 @@ use crate::abend::{Abend, AbendCode, Signal};
 use crate::fileio::{self, File, Files, Outcome, Read};
 use crate::files::{Dd, FileStatus, KeySpan, Keying, Open};
 use crate::host::Host;
-use crate::lir::{Advance, DebugId, FileOp, FileVerb, FromMove, IntExpr, Organization, Phrase, PlaceId, RangeId, RecordSpan, RelativeKey, SenderCheck, Spacing, StartKey, Step};
+use crate::lir::{Advance, DebugId, FileOp, FileVerb, FromMove, IntExpr, Organization, Phrase, PlaceId, RangeId, RecordSpan, RelativeKey, Spacing, StartKey, Step};
 use crate::sort::Active;
 use crate::storage::{Loc, Val};
 use crate::store;
@@ -146,10 +146,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
 
     /// FROM's MOVE into the record, located already as its receiver.
     pub(super) fn move_from(&mut self, from: &FromMove, dest: Loc, at: DebugId) -> R<()> {
-        if from.check != SenderCheck::None {
-            return Err(not_yet("NUMCHECK"));
-        }
-        self.move_to(false, from.from, dest, &from.plan, at)
+        self.move_to(Some(from.check), from.from, dest, &from.plan, at)
     }
 
     /// Abandons the statement running a declarative procedure, which left by `step`.

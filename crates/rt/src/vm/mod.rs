@@ -25,11 +25,11 @@ mod value;
 
 use crate::abend::{Abend, Ending};
 use crate::cics::Handlers;
-use crate::lir::{AbendId, Block, Collating, DebugId, Frame, FrameKind, MovePlan, Op, PlaceId, Program, Returns, StorePlan, SymId, UpDown};
+use crate::lir::{AbendId, Base, Block, Collating, DebugId, Frame, FrameKind, MovePlan, Op, Place, PlaceId, Program, Returns, StorePlan, SymId, UpDown};
 use crate::oo::Running;
 use crate::picture::Sym;
 use crate::sql::Ran;
-use crate::store::ProgramFacts;
+use crate::store::{LaxRedefinition, ProgramFacts};
 use crate::unit::{Loader, RunUnit};
 use crate::vocab::{Figurative, Pos};
 use numeric::Options;
@@ -74,8 +74,9 @@ pub struct Code {
 }
 
 /// A lowered program with what the VM works out from it once: its collating sequence as the
-/// semantics library takes it, the paragraph each entry block begins, and the name a TRUNC(OPT)
-/// report gives each binary receiver.
+/// semantics library takes it, the paragraph each entry block begins, the name a TRUNC(OPT)
+/// report gives each binary receiver, and under NUMCHECK the name its message gives each
+/// conditional variable (`cond::conditional_variables`).
 struct Lowered {
     program: Program,
     collation: Collation,
@@ -84,6 +85,7 @@ struct Lowered {
     low_value: u8,
     entry_of: Vec<Option<u32>>,
     receivers: HashMap<PlaceId, SymId>,
+    variables: HashMap<PlaceId, Option<String>>,
 }
 
 impl Code {
@@ -125,7 +127,8 @@ impl Lowered {
             }
         }
         let receivers = receivers(&program);
-        Self { program, collation, ordinals, high_value, low_value, entry_of, receivers }
+        let variables = if program.options.options.numcheck.is_some() { cond::conditional_variables(&program) } else { HashMap::new() };
+        Self { program, collation, ordinals, high_value, low_value, entry_of, receivers, variables }
     }
 }
 
@@ -247,14 +250,26 @@ impl ProgramFacts for Facts<'_> {
         self.code.program.places.get(item).map_or(0, |p| p.scaling)
     }
 
+    /// The walker names an item by its `Loc`'s item, which an XML register's has none of.
     fn item_name(&self, item: usize) -> String {
         let p = &self.code.program;
         let name = match (u32::try_from(item).ok().and_then(|i| self.code.receivers.get(&i)), p.places.get(item)) {
             (Some(&name), _) => name,
-            (None, Some(place)) => place.name,
-            (None, None) => return "RETURN-CODE".into(),
+            (None, Some(Place { base: Base::Xml(_), .. }) | None) => return "RETURN-CODE".into(),
+            (None, Some(place)) => match self.code.variables.get(&(item as u32)) {
+                Some(Some(name)) => return name.clone(),
+                _ => place.name,
+            },
         };
         p.symbols[name as usize].clone()
+    }
+
+    fn lax_redefinition(&self, item: usize) -> Option<LaxRedefinition> {
+        self.code.program.places.get(item).and_then(|p| p.numcheck.lax)
+    }
+
+    fn numcheck_removed(&self, item: usize, _pos: Pos) -> bool {
+        self.code.program.places.get(item).is_some_and(|p| p.numcheck.removed)
     }
 }
 
@@ -307,12 +322,6 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
         let storage = &p.storage;
         if !storage.local_image.is_empty() && (storage.init_abend.is_some() || !storage.init_reports.is_empty()) {
             return Err(not_yet("VALUE initialization that reports or abends in a program with LOCAL-STORAGE"));
-        }
-        if p.options.options.numcheck.is_some() {
-            return Err(not_yet("NUMCHECK"));
-        }
-        if p.options.options.parmcheck.is_some() {
-            return Err(not_yet("PARMCHECK"));
         }
         let (base, fresh) = unit.activate(me, p.initial);
         let mut vm = Self::over(code, me, base, unit, main, containers);

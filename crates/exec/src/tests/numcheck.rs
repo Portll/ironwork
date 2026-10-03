@@ -256,6 +256,92 @@ fn an_item_any_statement_may_set_is_not_taken_as_constant() {
     }
 }
 
+/// Runs `source` on the interpreter, which runs it on the VM too and fails where the two differ,
+/// and on the VM alone, which fails where it stops; the reports of the run.
+fn on_both(source: &str) -> (Vec<String>, Result<Ending, Abend>) {
+    let walker = Harness::source(source).run(Executor::Interpreter);
+    let vm = Harness::source(source).run(Executor::Vm);
+    assert_eq!((&vm.out, &vm.err, &vm.ending), (&walker.out, &walker.err, &walker.ending));
+    (messages(&walker.err).into_iter().map(str::to_owned).collect(), walker.ending)
+}
+
+/// E(2) and the subscript I that reaches it hold a space, B is binary zero, and SUB takes one
+/// argument.
+fn subscripted(card: &str, statements: &[&str]) -> String {
+    let data = concat!(
+        "       01  TB.\n           05 E PIC 99 OCCURS 3.\n               88 E-TEN VALUE 10.\n       01  I PIC 99.\n       01  IX REDEFINES I PIC XX.\n",
+        "       01  W PIC 999.\n       01  X PIC XX VALUE 'AB'.\n       01  K PIC 99 VALUE 5.\n",
+        "       01  BT.\n           05 B PIC S9(4) COMP OCCURS 3.\n       01  ZB PIC S9(4) COMP VALUE 0.\n",
+    );
+    let mut body: String = ["MOVE X'40F2' TO IX", "MOVE X'F0F140F2F1F0' TO TB", "MOVE LOW-VALUES TO BT"].iter().map(|s| line(s)).collect();
+    body.extend(statements.iter().flat_map(|s| s.split('\n')).map(line));
+    body.push_str(&line("GOBACK."));
+    format!(
+        "       CBL {card}\n       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n{data}       PROCEDURE DIVISION.\n{body}\
+         \x20      IDENTIFICATION DIVISION.\n       PROGRAM-ID. SUB.\n       DATA DIVISION.\n       LINKAGE SECTION.\n       01  L PIC 99.\n\
+         \x20      PROCEDURE DIVISION USING L.\n{}       END PROGRAM SUB.\n       END PROGRAM T.\n",
+        line("GOBACK.")
+    )
+}
+
+const SUBSCRIPTED: [&str; 17] = [
+    "MOVE E(I) TO W",
+    "COMPUTE W = E(I) + 1",
+    "IF E(I) = 'AB' DISPLAY 'LITERAL' END-IF",
+    "IF E(I) = X DISPLAY 'X' END-IF",
+    "IF E(I) = K DISPLAY 'K' END-IF",
+    "IF E(I) = ZERO DISPLAY 'ZERO' END-IF",
+    "IF E(I) = E(1) DISPLAY 'E1' END-IF",
+    "IF E-TEN(I) DISPLAY 'TEN' END-IF",
+    "EVALUATE E(I)\n    WHEN 2 DISPLAY 'TWO'\n    WHEN OTHER DISPLAY 'OTHER'\nEND-EVALUATE",
+    "COMPUTE W = FUNCTION MAX(E(ALL))",
+    "COMPUTE W = B(I) / ZB\n    ON SIZE ERROR DISPLAY 'BINARY'\nEND-COMPUTE",
+    "COMPUTE W = K / B(I)\n    ON SIZE ERROR DISPLAY 'DECIMAL'\nEND-COMPUTE",
+    "DIVIDE ZB INTO B(I)\n    ON SIZE ERROR DISPLAY 'RECEIVER'\nEND-DIVIDE",
+    "CALL 'SUB' USING BY CONTENT E(I)",
+    "PERFORM VARYING W FROM E(I) BY K UNTIL W > 9\n    CONTINUE\nEND-PERFORM",
+    "ADD 1 TO E(I)",
+    "DISPLAY E(I)",
+];
+
+#[test]
+fn each_locate_tests_the_subscripts_it_reads_as_the_interpreter_s_does() {
+    for card in ["NUMCHECK", "NUMCHECK(ZON(NOALPHNUM))", "NUMCHECK,INVDATA", "NUMCHECK(ZON(LAX,NOALPHNUM)),INVDATA", "NUMCHECK(ABD)"] {
+        let (reports, ending) = on_both(&subscripted(card, &SUBSCRIPTED));
+        if card.contains("ABD") {
+            assert_eq!(ending.unwrap_err().code, AbendCode::user(4038));
+            continue;
+        }
+        assert!(ending.is_ok(), "{card}: {ending:?}");
+        let subscript = reports.iter().filter(|m| m.starts_with("I X'40F2'")).count();
+        assert!(subscript > SUBSCRIPTED.len(), "{card}: {reports:?}");
+        assert!(reports.iter().any(|m| m.starts_with("E X'40F2'")), "{card}: {reports:?}");
+        assert!(!reports.iter().any(|m| m.starts_with("E-TEN")), "the conditional variable is named: {reports:?}");
+    }
+}
+
+#[test]
+fn write_from_tests_its_sender_as_a_move_does() {
+    let output = temp("numcheck-from.dat");
+    let procedure = ["MOVE ' 12' TO A G", "OPEN OUTPUT OUT-F", "WRITE OUT-R FROM A", "WRITE OUT-R FROM Z", "CLOSE OUT-F", "GOBACK."];
+    let source = format!(
+        "       CBL NUMCHECK\n{}",
+        file_program(
+            "           SELECT OUT-F ASSIGN TO OUTDD.\n",
+            "       FD  OUT-F.\n       01  OUT-R PIC 999.\n",
+            "       01  A PIC X(3).\n       01  G.\n           05 Z PIC 999.\n",
+            &procedure.iter().map(|s| line(s)).collect::<String>(),
+        )
+    );
+    let dds = [format!("OUTDD={}", output.display())];
+    let walker = Harness::source(&source).dds(&dds).run(Executor::Interpreter);
+    let vm = Harness::source(&source).dds(&dds).run(Executor::Vm);
+    assert!(walker.ending.is_ok(), "{:?}", walker.ending);
+    assert_eq!((&vm.err, &vm.ending), (&walker.err, &walker.ending));
+    let not_numeric = |item: &str| format!("{item} X'40F1F2' in program F is not NUMERIC; the statement runs");
+    assert_eq!(messages(&walker.err), [not_numeric("A"), not_numeric("Z")]);
+}
+
 #[test]
 fn a_by_content_argument_that_always_fails_is_named_where_the_call_tests_it() {
     let source = |tail: &str| {
