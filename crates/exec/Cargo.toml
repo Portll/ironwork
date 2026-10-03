@@ -12,11 +12,11 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-compile = { package = "ironwork-compile", path = "../compile", version = "0.4.0" }
-numeric = { package = "ironwork-numeric", path = "../numeric", version = "0.4.0" }
-rt = { package = "ironwork-rt", path = "../rt", version = "0.4.0" }
-syntax = { package = "ironwork-syntax", path = "../syntax", version = "0.4.0" }
-zarch = { package = "ironwork-zarch", path = "../zarch", version = "0.4.0" }
+compile = { package = "ironwork-compile", path = "../compile", version = "0.4.1" }
+numeric = { package = "ironwork-numeric", path = "../numeric", version = "0.4.1" }
+rt = { package = "ironwork-rt", path = "../rt", version = "0.4.1" }
+syntax = { package = "ironwork-syntax", path = "../syntax", version = "0.4.1" }
+zarch = { package = "ironwork-zarch", path = "../zarch", version = "0.4.1" }
 
 [dev-dependencies]
 oracle = { package = "ironwork-oracle", path = "../oracle" }
