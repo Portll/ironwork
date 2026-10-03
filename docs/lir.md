@@ -1307,22 +1307,25 @@ pub type Opt<P, O, S> = Option<Datum<P, O, S>>;
 pub enum Cics<P, O, S> { /* … */ }
 ```
 
-`name` is the command as written, which messages give (SEND for SEND MAP written as SEND
-MAP(name)). `cics::Condition` is the one RESP and default-abend table (semantics-library.md §7,
-DRY-4). An option is evaluated when the service reads it, in the order the walker read it, so
-binding evaluates nothing. `rt::cics::run` returns `Next`, `GoTo(ParaId)` for a handled condition,
-or `End` for RETURN, XCTL and a LINKed program's STOP RUN. A HANDLE ABEND exit is not a transfer
-`run` returns: an abend that reaches a program's activation, from the program, a CALL or a lower
-logical level, goes to `rt::cics::abend_exit` with the activation's number, and the executor runs
-a LABEL that activation set as a GO TO, or enters the PROGRAM with `enter_exit_program` where the
-program runs the logical level (the walker's `run_level`; a CALLed program's `run_called` takes
-only a LABEL). Handler tables, the task,
-the EIB and the terminal stay run-time state. What `run` asks of its executor is `CicsHost`: the
-run unit and the program's handlers, operands that are not data items, DFHCOMMAREA's address, a
-mapset from the copy libraries, the symbolic map's `mapI` and `mapO` by name, and running a program
-for LINK and XCTL. The walker binds a block in machine/cics_bind.rs, matching the command words and
-options the translator gives and resolving HANDLE labels there. SYNCPOINT is a service
-(cics/services.rs) that settles the SQL session through `Session::settle`.
+`name` is the command as written, which messages give (SEND for SEND MAP written as SEND MAP(name)).
+`cics::Condition` is the one RESP and default-abend table (semantics-library.md §7, DRY-4). An
+option is evaluated when the service reads it, in the order the walker read it, so binding evaluates
+nothing. `rt::cics::run` returns `Next`, `GoTo(ParaId)` for a handled condition, or `End` for
+RETURN, XCTL and a LINKed program's STOP RUN. RETURN and XCTL end the logical level, not only the
+program: they set the task's `ending_level`, and a CALL that comes back while
+`rt::cics::level_ended` holds ends its program too, in the walker's and the VM's `call_nested`
+alike, until the LINK, XCTL or exit that ran the level clears it (C233). A HANDLE ABEND exit is not
+a transfer `run` returns: an abend that reaches a program's activation, from the program, a CALL or
+a lower logical level, goes to `rt::cics::abend_exit` with the activation's number, and the executor
+runs a LABEL that activation set as a GO TO, or enters the PROGRAM with `enter_exit_program` where
+the program runs the logical level (the walker's `run_level`; a CALLed program's `run_called` takes
+only a LABEL). Handler tables, the task, the EIB and the terminal stay run-time state. What `run`
+asks of its executor is `CicsHost`: the run unit and the program's handlers, operands that are not
+data items, DFHCOMMAREA's address, a mapset from the copy libraries, the symbolic map's `mapI` and
+`mapO` by name, and running a program for LINK and XCTL. The walker binds a block in
+machine/cics_bind.rs, matching the command words and options the translator gives and resolving
+HANDLE labels there. SYNCPOINT is a service (cics/services.rs) that settles the SQL session through
+`Session::settle`.
 
 - **Lowering binds with the walker's `bind`.** Each EXEC CICS block is one `Op::Cics` naming its
   command in `Services.cics`. Lowering calls machine/cics_bind.rs's `bind` and maps the command it

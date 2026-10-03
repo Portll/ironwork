@@ -6,6 +6,7 @@
 use super::{Code, Halt, Lowered, R, Vm, not_yet};
 use crate::abend::{Abend, AbendCode, Ending};
 use crate::callee::{self, Arguments, Bindings, By, Callee};
+use crate::cics;
 use crate::le::{self, LeHost};
 use crate::lir::{Base, CallArg, CallPlan, CallTarget, Chars, LeService, Operand, PlaceId, SenderCheck, Step};
 use crate::parmcheck;
@@ -96,6 +97,9 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         })?;
         if ending? == Ending::StopRun {
             return Ok(Step::End(Ending::StopRun));
+        }
+        if cics::level_ended(self.unit) {
+            return Ok(Step::End(Ending::Goback));
         }
         self.parmcheck_test(plan, &addresses, |unit| unit.programs[index].name.clone(), pos)?;
         if let (Some(target), Some(val)) = (plan.returning, returned) {

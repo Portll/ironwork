@@ -4,15 +4,16 @@
 use super::Condition;
 use super::command::{Datum, Transfer};
 use super::run::{AbendExit, At, CicsHost, EIBCALEN, EIBFN, EIBRSRCE, ExitTarget, Flow, Handler, Handlers, R};
-use super::run::{bytes_cut, eib_bytes, eib_calen, eib_halfword, eib_text, int, ok, page, raise, text};
+use super::run::{bytes_cut, eib_bytes, eib_calen, eib_halfword, eib_text, int, ok, page, raise, task, text};
 use crate::abend::{Abend, AbendCode, Ending};
 use crate::callee::{self, By, Callee};
 use crate::lir::ParaId;
 use crate::unit::{LoadError, Loader, RunUnit};
 use crate::vocab::Pos;
 
-/// RETURN ends this program. At the task's top level TRANSID and COMMAREA name the next task and
-/// what it starts with; in a LINKed program they raise INVREQ.
+/// RETURN ends this program's logical level, CALLed programs and all: the program that LINKed to
+/// it goes on, or the task ends (C233). At the task's first level TRANSID and COMMAREA name the
+/// next task and what it starts with; below it they raise INVREQ.
 pub(super) fn cics_return<'w, P: Copy, O, S>(
     x: &mut impl CicsHost<'w, P, O, S>,
     at: &At<P, O, S>,
@@ -23,24 +24,30 @@ pub(super) fn cics_return<'w, P: Copy, O, S>(
     eib_bytes(x.unit(), EIBFN, &[0x0E, 0x08]);
     let transid = text(x, transid, at.pos)?;
     let commarea = bytes_cut(x, commarea, length, at.pos)?;
-    if !x.main() && (transid.is_some() || commarea.is_some()) {
+    if task(x).links > 0 && (transid.is_some() || commarea.is_some()) {
         return raise(x, at, Condition::INVREQ, 0);
     }
-    if let Some(task) = x.unit().cics.as_mut() {
-        if let Some(t) = transid {
-            task.next_transid = Some(t.to_ascii_uppercase());
-        }
-        if commarea.is_some() {
-            task.returned_commarea = commarea;
-        }
+    let task = task(x);
+    if let Some(t) = transid {
+        task.next_transid = Some(t.to_ascii_uppercase());
     }
+    if commarea.is_some() {
+        task.returned_commarea = commarea;
+    }
+    task.ending_level = true;
     Ok(Flow::End(Ending::Goback))
 }
 
-/// LINK runs a program and comes back; XCTL runs it in this program's place, at its logical level
-/// with its HANDLE ABEND exit (C239). A LINKed program gets the COMMAREA item itself; XCTL passes
-/// a copy, since this program's storage goes away. Each LINK or XCTL starts the program with
-/// fresh WORKING-STORAGE, as CICS gives it.
+/// RETURN or XCTL has ended the logical level: the program whose CALL has just come back ends too
+/// (C233).
+pub fn level_ended<H, L: Loader<H>>(unit: &RunUnit<'_, H, L>) -> bool {
+    unit.cics.as_ref().is_some_and(|t| t.ending_level)
+}
+
+/// LINK runs a program and comes back; XCTL runs it in place of the program running this logical
+/// level, with the level's HANDLE ABEND exit (C239), and the level ends when it does (C233). A
+/// LINKed program gets the COMMAREA item itself; XCTL passes a copy, since this program's storage
+/// goes away. Each LINK or XCTL starts the program with fresh WORKING-STORAGE, as CICS gives it.
 pub(super) fn link<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, t: &Transfer<P, O, S>, xctl: bool) -> R<Flow> {
     eib_bytes(x.unit(), EIBFN, if xctl { &[0x0E, 0x04] } else { &[0x0E, 0x02] });
     let Some(name) = text(x, t.program.as_ref(), at.pos)?.map(|n| n.to_ascii_uppercase()) else {
@@ -77,22 +84,30 @@ pub(super) fn link<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &A
     eib_halfword(unit, EIBCALEN, saved);
     match ending? {
         Ending::StopRun => Ok(Flow::End(Ending::StopRun)),
-        _ if xctl => Ok(Flow::End(Ending::Goback)),
+        _ if xctl => {
+            task(x).ending_level = true;
+            Ok(Flow::End(Ending::Goback))
+        }
         _ => ok(x, at),
     }
 }
 
 /// Runs program `index` with fresh WORKING-STORAGE at the next logical level, or for XCTL in this
-/// program's place.
+/// program's place; the level it ran has ended when it comes back.
 fn enter<'w, P: Copy, O, S, X: CicsHost<'w, P, O, S>>(x: &mut X, program: X::Program, index: usize, area: Option<usize>, xctl: bool, pos: Pos) -> R<Ending> {
+    let below = u32::from(!xctl);
+    task(x).links += below;
     let callee = Callee { index, by: By::Link, mark: None, pos };
-    let (ending, ()) = callee::run(x, &callee, |x| {
+    let ran = callee::run(x, &callee, |x| {
         x.unit().enter(pos)?;
         let ending = x.run_program(program, index, area, xctl);
         x.unit().depth -= 1;
         Ok::<_, Abend>((ending, ()))
-    })?;
-    ending
+    });
+    let task = task(x);
+    task.links -= below;
+    task.ending_level = false;
+    ran?.0
 }
 
 /// ABEND ends the task with ABCODE; a HANDLE ABEND exit can intercept it unless CANCEL is given.
@@ -127,6 +142,7 @@ pub fn abend_exit<H, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, handlers: &mut 
     };
     exit.active = false;
     task.abcode = Some(code);
+    task.ending_level = false;
     match &exit.target {
         ExitTarget::Label { owner, .. } if *owner != me => Err(Abend {
             message: format!("{}; the HANDLE ABEND LABEL is in a program that is not running there, which CICS cannot branch to", abend.message),

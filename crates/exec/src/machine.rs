@@ -1068,8 +1068,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
     }
 
-    /// The CALL's callee run, through RETURNING; `Some` when the run unit ends. NOT ON EXCEPTION is
-    /// the caller's, after the CALL's nesting is released, as INVOKE's and an LE service's are.
+    /// The CALL's callee run, through RETURNING; `Some` when the run unit or the logical level ends
+    /// (C233). NOT ON EXCEPTION is the caller's, after the CALL's nesting is released, as INVOKE's
+    /// and an LE service's are.
     fn call_nested(&mut self, c: &'p Call, index: usize, entry: Option<usize>, compiled: std::rc::Rc<Compiled>, dynamic: bool) -> R<Option<Flow>> {
         let pos = c.pos;
         let mark = self.unit.mem.len();
@@ -1098,6 +1099,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         })?;
         if ending? == Ending::StopRun {
             return Ok(Some(Flow::End(Ending::StopRun)));
+        }
+        if crate::cics::level_ended(self.unit) {
+            return Ok(Some(Flow::End(Ending::Goback)));
         }
         self.parmcheck_test(c, &addresses, |unit| unit.programs[index].name.clone())?;
         if let (Some(target), Some(val)) = (&c.returning, returned) {

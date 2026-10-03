@@ -384,6 +384,8 @@ fn twin(t: &cics::Task) -> Option<cics::Task> {
         abcode: t.abcode.clone(),
         cancelling: t.cancelling,
         activations: t.activations,
+        links: t.links,
+        ending_level: t.ending_level,
     })
 }
 

@@ -15,7 +15,7 @@ pub use run::{
     EIBTRNID, Flow, Handler, Handlers, begin_command, begin_task, bytes, in_task, ok, raise, run, unsupported,
 };
 pub use run::{AbendExit, ExitTarget};
-pub use program::{abend_exit, enter_exit_program};
+pub use program::{abend_exit, enter_exit_program, level_ended};
 
 use crate::files::{Dd, Format, KeySpan, Keying};
 use crate::calendar::{civil, EPOCH_1900_TO_1970_MILLIS, EPOCH_1900_TO_1970_SECONDS, SECONDS_PER_DAY};
@@ -257,6 +257,12 @@ pub struct Task {
     pub cancelling: bool,
     /// The program activations the task has started, which number each one.
     pub activations: u64,
+    /// The LINKs and HANDLE ABEND PROGRAM exits running, each a logical level below the task's
+    /// first; RETURN TRANSID and COMMAREA belong to that first level.
+    pub links: u32,
+    /// RETURN or XCTL has ended the logical level running: each program CALLed at it ends as its
+    /// CALL comes back (C233).
+    pub ending_level: bool,
 }
 
 impl Task {

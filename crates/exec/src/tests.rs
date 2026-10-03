@@ -2227,6 +2227,63 @@ fn xctl_keeps_the_levels_abend_exit_and_a_program_exit_gets_the_commarea_of_the_
     assert_eq!(label, ("RECOVERED APC2\n".into(), None));
 }
 
+type LevelEnd = Result<(Option<String>, Option<Vec<u8>>), String>;
+
+/// The output of a task whose first program runs `body`, then RETURN, with the TRANSID and
+/// COMMAREA the task ended with, or its abend code. RETP RETURNs, RETT RETURNs TRANSID('NEXT')
+/// COMMAREA('DONE') or shows INVREQ, and XCTP XCTLs to LASTX, which shows its COMMAREA; MIDC
+/// PERFORMs a paragraph that CALLs RETP, and CALLER CALLs the program its COMMAREA names.
+fn level_task(body: &[&str]) -> (String, LevelEnd) {
+    let mut procedure: Vec<String> = body.iter().map(|s| line(s)).collect();
+    procedure.push(line("EXEC CICS RETURN END-EXEC."));
+    let main = cics_program("MAINP", "       01  WS-PGM PIC X(8).\n", "", &procedure.concat());
+    let rett = ["EXEC CICS RETURN TRANSID('NEXT') COMMAREA(WS-OUT) LENGTH(4)", "    RESP(WS-RESP) END-EXEC", "IF WS-RESP = DFHRESP(INVREQ) DISPLAY 'INVREQ' END-IF", "GOBACK."];
+    let midc = ["       MID-LINE.\n".to_owned(), line("PERFORM CALL-RETP"), line("DISPLAY 'AFTER PERFORM'"), line("GOBACK."), "       CALL-RETP.\n".to_owned(), line("CALL 'RETP'"), line("DISPLAY 'AFTER CALL'.")];
+    let programs = [
+        ("RETP", cics_program("RETP", "", "", &["DISPLAY 'IN RETP'", "EXEC CICS RETURN END-EXEC", "DISPLAY 'AFTER RETURN'", "GOBACK."].map(line).concat())),
+        ("RETT", cics_program("RETT", "       01  WS-OUT PIC X(4) VALUE 'DONE'.\n       01  WS-RESP PIC S9(8) COMP.\n", "", &rett.map(line).concat())),
+        ("XCTP", cics_program("XCTP", "       01  WS-XC PIC X(2) VALUE 'XC'.\n", "", &["EXEC CICS XCTL PROGRAM('LASTX') COMMAREA(WS-XC)", "    LENGTH(2) END-EXEC", "DISPLAY 'AFTER XCTL'", "GOBACK."].map(line).concat())),
+        ("LASTX", cics_program("LASTX", "", "       01  DFHCOMMAREA PIC X(2).\n", &["DISPLAY 'LAST ' DFHCOMMAREA ' ' EIBCALEN", "EXEC CICS RETURN END-EXEC."].map(line).concat())),
+        ("MIDC", cics_program("MIDC", "", "", &midc.concat())),
+        ("CALLER", cics_program("CALLER", "       01  WS-NAME PIC X(8).\n", "       01  DFHCOMMAREA PIC X(8).\n", &["MOVE DFHCOMMAREA TO WS-NAME", "CALL WS-NAME", "DISPLAY 'BACK IN CALLER'", "EXEC CICS RETURN END-EXEC."].map(line).concat())),
+    ];
+    let mut source = format!("{main}       END PROGRAM MAINP.\n");
+    for (id, program) in programs {
+        source.push_str(&format!("{program}       END PROGRAM {id}.\n"));
+    }
+    let (out, ending) = run_cics(&source, task("TR15"), None, unit::Clock::System);
+    (out, ending.map(|(_, t)| (t.next_transid, t.returned_commarea)).map_err(|a| a.code.to_string()))
+}
+
+/// `level_task` with CALLER LINKed to, CALLing `program`.
+fn linked_caller(program: &str) -> (String, LevelEnd) {
+    let name = format!("MOVE '{program}' TO WS-PGM");
+    level_task(&[&name, "EXEC CICS LINK PROGRAM('CALLER') COMMAREA(WS-PGM)", "    LENGTH(8) END-EXEC", "DISPLAY 'BACK IN MAIN'"])
+}
+
+#[test]
+fn return_in_a_called_program_ends_its_logical_level() {
+    let ended = |out: &str| (out.to_owned(), Ok((None, None)));
+    assert_eq!(level_task(&["CALL 'RETP'", "DISPLAY 'BACK IN MAIN'"]), ended("IN RETP\n"));
+    let dynamic = ["MOVE 'RETP' TO WS-PGM", "CALL WS-PGM", "    NOT ON EXCEPTION DISPLAY 'NOT ON EXCEPTION'", "END-CALL", "DISPLAY 'BACK IN MAIN'"];
+    assert_eq!(level_task(&dynamic), ended("IN RETP\n"));
+    assert_eq!(level_task(&["CALL 'MIDC'", "DISPLAY 'BACK IN MAIN'"]), ended("IN RETP\n"));
+    assert_eq!(level_task(&["EXEC CICS LINK PROGRAM('MIDC') END-EXEC", "DISPLAY 'BACK IN MAIN'"]), ended("IN RETP\nBACK IN MAIN\n"));
+    assert_eq!(linked_caller("RETP"), ended("IN RETP\nBACK IN MAIN\n"));
+}
+
+#[test]
+fn return_transid_and_commarea_in_a_called_program_belong_to_its_level() {
+    assert_eq!(level_task(&["CALL 'RETT'", "DISPLAY 'BACK IN MAIN'"]), (String::new(), Ok((Some("NEXT".into()), Some(ebcdic("DONE"))))));
+    assert_eq!(linked_caller("RETT"), ("INVREQ\nBACK IN CALLER\nBACK IN MAIN\n".into(), Ok((None, None))));
+}
+
+#[test]
+fn xctl_in_a_called_program_replaces_the_program_running_its_level() {
+    assert_eq!(level_task(&["CALL 'XCTP'", "DISPLAY 'BACK IN MAIN'"]), ("LAST XC 0002\n".into(), Ok((None, None))));
+    assert_eq!(linked_caller("XCTP"), ("LAST XC 0002\nBACK IN MAIN\n".into(), Ok((None, None))));
+}
+
 #[test]
 fn a_program_check_in_a_cics_task_is_asra() {
     let source = cics_program("CICS7", "", "       01  DFHCOMMAREA PIC X(10).\n", &line("DISPLAY DFHCOMMAREA."));

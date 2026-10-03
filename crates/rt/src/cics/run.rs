@@ -40,8 +40,6 @@ pub trait CicsHost<'w, P: Copy, O, S>: Host<P> + UnitHost<'w> {
     /// An operand's value as a subscript takes it.
     fn integer_of(&mut self, operand: &O, pos: Pos) -> R<i64>;
     fn text(&self, text: &S) -> String;
-    /// The run unit's first program, from which RETURN TRANSID and COMMAREA end the task.
-    fn main(&self) -> bool;
     /// This activation of the program, which a HANDLE ABEND LABEL it sets belongs to.
     fn activation(&self) -> u64;
     fn program_id(&self) -> String;

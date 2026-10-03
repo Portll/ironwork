@@ -128,10 +128,6 @@ impl<'a, 'w> CicsHost<'w, &'a Ref, &'a Operand, &'a str> for Machine<'_, '_, 'w>
         (*text).to_owned()
     }
 
-    fn main(&self) -> bool {
-        self.main
-    }
-
     fn activation(&self) -> u64 {
         self.serial
     }

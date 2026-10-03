@@ -166,10 +166,6 @@ impl<'w, L: Loader<Rc<Code>>> CicsHost<'w, PlaceId, Operand, SymId> for Vm<'_, '
         self.sym(*text).to_owned()
     }
 
-    fn main(&self) -> bool {
-        self.main
-    }
-
     // Lowering refuses HANDLE ABEND, so no exit names a VM activation.
     fn activation(&self) -> u64 {
         0
