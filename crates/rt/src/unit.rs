@@ -7,12 +7,14 @@
 
 use crate::abend::Abend;
 use crate::files::{Dds, Open};
+use crate::oo::ClassCode;
 use crate::storage::Loc;
 use crate::taint::Taint;
 use crate::vocab::{OpenMode, Pos};
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 /// A pointer's value is its offset into run-unit memory plus this, so that no item's address is
 /// NULL.
@@ -68,9 +70,6 @@ pub struct FoundClass<C> {
 
 /// Where CALL finds programs, and what the run unit needs to know about one it loaded.
 pub trait Loader<H> {
-    /// The executor's handle to a loaded class definition.
-    type Class;
-
     /// The program whose PROGRAM-ID CALL names, compiled.
     fn program(&mut self, name: &str) -> Result<LoadedProgram<H>, LoadError>;
 
@@ -89,8 +88,9 @@ pub trait Loader<H> {
     /// Source file `file` of a loaded program's source table, by name.
     fn source(program: &H, file: usize) -> Option<String>;
 
-    /// The COBOL class definition of this external name, compiled; None for a Java class.
-    fn class(&mut self, external: &str) -> Result<Option<FoundClass<Self::Class>>, String>;
+    /// The COBOL class definition of this external name, its data and methods each a program the
+    /// executor runs; None for a Java class.
+    fn class(&mut self, external: &str) -> Result<Option<FoundClass<Rc<ClassCode<H>>>>, String>;
 
     /// A BMS mapset from the copy libraries, which SEND MAP and RECEIVE MAP read; None when no
     /// library holds it.
@@ -191,7 +191,7 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     /// Language Environment's heap storage and message files.
     pub le: crate::le::State,
     /// Classes, objects and the JNI environment of the run unit's object-oriented programs.
-    pub oo: crate::oo::Objects<L::Class>,
+    pub oo: crate::oo::Objects<Rc<ClassCode<H>>>,
     /// Told what the run opens, closes and loads, when a caller keeps evidence of it.
     pub observer: Option<Observer<'w>>,
     /// FUNCTION RANDOM's generator, one for the run unit, from the first reference on.

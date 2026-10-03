@@ -67,8 +67,6 @@ fn loads_as(program: &Program, name: &str) -> bool {
 }
 
 impl Loader<Rc<Compiled>> for Library {
-    type Class = Rc<ClassCode>;
-
     fn program(&mut self, name: &str) -> Result<LoadedProgram<Rc<Compiled>>, LoadError> {
         if !member_name(name) {
             return Err(LoadError::NotFound);

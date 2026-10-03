@@ -24,7 +24,7 @@ type R<T> = Result<T, Abend>;
 
 /// What INVOKE and the JNI services ask of the executor beyond `Values` and the run unit: the method
 /// the activation runs, names and Java signatures, an argument's bytes, and running a method.
-pub trait OoHost<'w, P: Copy, O, S>: Values<P, O> + UnitHost<'w, Loader: Loader<<Self as UnitHost<'w>>::Program, Class = Rc<ClassCode<<Self as UnitHost<'w>>::Program>>>> {
+pub trait OoHost<'w, P: Copy, O, S>: Values<P, O> + UnitHost<'w> {
     fn running(&self) -> Option<Running>;
     fn program_id(&self) -> String;
     /// A name, or a Java type signature, which an executor may work out only when it is read.

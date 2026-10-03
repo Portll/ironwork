@@ -7,6 +7,7 @@ use crate::lower::{self, LowerError};
 use crate::unit::{Clock, Observer, Remains};
 use crate::{Compiled, cics, files, oo, sql};
 use rt::abend::{Abend, AbendCode, Ending};
+use rt::oo::ClassCode;
 use rt::unit::{FoundClass, LoadError, LoadedProgram, Loader};
 pub use rt::vm::{Code, Halt};
 use std::io::{BufRead, Write};
@@ -17,9 +18,6 @@ use syntax::Pos;
 pub struct VmLibrary(pub Library);
 
 impl Loader<Rc<Code>> for VmLibrary {
-    /// INVOKE is not run by the VM yet, so no class is loaded.
-    type Class = ();
-
     fn program(&mut self, name: &str) -> Result<LoadedProgram<Rc<Code>>, LoadError> {
         let found = <Library as Loader<Rc<Compiled>>>::program(&mut self.0, name)?;
         Ok(LoadedProgram { compiled: Rc::new(code(&found.compiled)), name: found.name, files: found.files, size: found.size, source: found.source })
@@ -46,7 +44,8 @@ impl Loader<Rc<Code>> for VmLibrary {
         p.debug.sources.get(file).map(|&s| p.symbols[s as usize].clone())
     }
 
-    fn class(&mut self, _external: &str) -> Result<Option<FoundClass<()>>, String> {
+    /// INVOKE is not run by the VM yet, so no class is loaded.
+    fn class(&mut self, _external: &str) -> Result<Option<FoundClass<Rc<ClassCode<Rc<Code>>>>>, String> {
         Ok(None)
     }
 
