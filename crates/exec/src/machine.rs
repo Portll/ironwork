@@ -329,7 +329,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 });
             }
             Stmt::PerformInline { body, repeat, pos } => return self.repeat(repeat, *pos, &mut |m: &mut Self| m.run_block(body)),
-            Stmt::Display { items, no_advancing, pos } => self.display(items, *no_advancing, *pos)?,
+            Stmt::Display { items, no_advancing, pos, .. } => self.display(items, *no_advancing, *pos)?,
             Stmt::Open { files, pos } => {
                 for (mode, name) in files {
                     self.open_file(*mode, name, *pos)?;

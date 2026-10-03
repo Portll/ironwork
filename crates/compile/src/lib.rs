@@ -574,6 +574,10 @@ fn dbcs_values(layout: &Layout, errors: &mut Vec<Error>) {
     }
 }
 
+/// The environment-names DISPLAY UPON takes, directly or by a mnemonic-name (Language Reference
+/// SC27-8713-03, pp. 126, 334).
+const DISPLAY_DEVICES: &[&str] = &["SYSOUT", "SYSLIST", "SYSLST", "SYSPUNCH", "SYSPCH", "CONSOLE"];
+
 /// A numeric item's VALUE literal must be numeric (Language Reference SC27-8713-03, p. 246); a
 /// figurative constant stands for a literal as its own rules allow (p. 17).
 fn numeric_values(layout: &Layout, errors: &mut Vec<Error>) {
@@ -852,12 +856,22 @@ impl Check<'_> {
                 }
                 self.statements(other);
             }
-            Stmt::Display { items, .. } => {
+            Stmt::Display { items, upon, pos, .. } => {
                 for o in items {
                     self.operand(o);
                     if let Operand::Function(f) = o {
                         self.displayed_function(f);
                     }
+                }
+                if let Some(upon) = upon
+                    && !DISPLAY_DEVICES.contains(&upon.device.as_str())
+                {
+                    let why = if upon.name == upon.device {
+                        "neither an environment-name DISPLAY writes to, SYSOUT, SYSLIST, SYSLST, SYSPUNCH, SYSPCH or CONSOLE, nor a mnemonic-name for one".to_owned()
+                    } else {
+                        format!("a mnemonic-name for {}, which DISPLAY does not write to", upon.device)
+                    };
+                    self.errors.push(Error::at(*pos, format!("DISPLAY UPON {}: {why}", upon.name)));
                 }
             }
             Stmt::Open { files, pos } => files.iter().for_each(|(_, f)| self.file(f, *pos)),

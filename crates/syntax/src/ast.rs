@@ -466,7 +466,7 @@ pub enum Stmt {
     PerformInline { body: Vec<Stmt>, repeat: Loop, pos: Pos },
     PerformProc { from: ProcName, thru: Option<ProcName>, repeat: Loop, pos: Pos },
     Evaluate { subjects: Vec<Subject>, whens: Vec<When>, other: Vec<Stmt>, pos: Pos },
-    Display { items: Vec<Operand>, no_advancing: bool, pos: Pos },
+    Display { items: Vec<Operand>, upon: Option<Upon>, no_advancing: bool, pos: Pos },
     Open { files: Vec<(OpenMode, String)>, pos: Pos },
     Close { files: Vec<(String, Option<Closing>)>, pos: Pos },
     Read(Box<ReadStmt>),
@@ -866,8 +866,8 @@ pub struct Environment {
     /// I-O-CONTROL SAME RECORD AREA and SAME AREA clauses, each with the files it names.
     pub same_record_areas: Vec<Vec<String>>,
     pub same_areas: Vec<Vec<String>>,
-    /// SPECIAL-NAMES entries naming a printer channel, space suppression, a punch pocket or AFP:
-    /// each mnemonic-name and its environment-name.
+    /// SPECIAL-NAMES entries naming a printer channel, space suppression, a punch pocket, AFP, or
+    /// a device ACCEPT or DISPLAY takes: each mnemonic-name and its environment-name.
     pub mnemonics: Vec<(String, String)>,
     /// SOURCE-COMPUTER ... WITH DEBUGGING MODE: debugging lines and USE FOR DEBUGGING sections are
     /// compiled rather than read as comments.
@@ -877,6 +877,14 @@ pub struct Environment {
     pub decimal_point_comma: bool,
     /// SPECIAL-NAMES CURRENCY SIGN clauses in order; none means the symbol and value $.
     pub currency: Vec<CurrencySign>,
+}
+
+/// DISPLAY's UPON phrase: the name as written, and the environment-name it stands for, a
+/// SPECIAL-NAMES mnemonic-name's or the name itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Upon {
+    pub name: String,
+    pub device: String,
 }
 
 /// A CURRENCY SIGN clause: the currency sign value, and the PICTURE symbol that stands for it.

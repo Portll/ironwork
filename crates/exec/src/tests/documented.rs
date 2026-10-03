@@ -216,3 +216,21 @@ fn a_numeric_item_refuses_a_value_literal_that_is_not_numeric() {
     );
     assert_eq!(on_both(&source), "0700  7\n");
 }
+
+/// Language Reference SC27-8713-03, pp. 126 and 334: DISPLAY UPON names the environment-name of an
+/// output device, SYSOUT, SYSLIST, SYSLST, SYSPUNCH, SYSPCH or CONSOLE, or a SPECIAL-NAMES
+/// mnemonic-name for one.
+#[test]
+fn display_upon_takes_an_output_device_or_a_mnemonic_name_for_one() {
+    let source = |upon: &str| {
+        let head = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       SPECIAL-NAMES.\n           CONSOLE IS CRT\n           SYSIN IS INP.\n       PROCEDURE DIVISION.\n";
+        format!("{head}{}{}", line(&format!("DISPLAY 'A' UPON {upon}")), line("GOBACK."))
+    };
+    for upon in ["SYSOUT", "SYSLST", "SYSPCH", "CONSOLE", "CRT"] {
+        assert_eq!(on_both(&source(upon)), "A\n", "{upon}");
+    }
+    let errors = compile_errors(&source("SYSERR"));
+    assert!(errors.contains("DISPLAY UPON SYSERR: neither an environment-name DISPLAY writes to"), "{errors}");
+    let errors = compile_errors(&source("INP"));
+    assert!(errors.contains("DISPLAY UPON INP: a mnemonic-name for SYSIN, which DISPLAY does not write to"), "{errors}");
+}

@@ -64,6 +64,10 @@ const JSON_PHRASES: &[&str] = &["COUNT", "INDICATING", "ENCODING", "NAME", "SUPP
 const XML_PHRASES: &[&str] =
     &["COUNT", "WITH", "ENCODING", "XML-DECLARATION", "ATTRIBUTES", "NAMESPACE", "NAMESPACE-PREFIX", "NAME", "TYPE", "SUPPRESS", "EVERY", "ON", "NOT", "EXCEPTION", "END-XML"];
 
+/// The environment-names of ACCEPT's and DISPLAY's devices (Language Reference SC27-8713-03, p. 126,
+/// Table 5).
+pub const DEVICE_ENVIRONMENT_NAMES: &[&str] = &["SYSIN", "SYSIPT", "SYSOUT", "SYSLIST", "SYSLST", "SYSPUNCH", "SYSPCH", "CONSOLE"];
+
 /// The environment-names a WRITE ADVANCING mnemonic-name can stand for (Language Reference,
 /// SPECIAL-NAMES, Table 5): channels C01 to C12, CSP, pockets S01 to S05, and AFP-5A.
 fn advancing_environment_name(word: &str) -> bool {
@@ -218,8 +222,9 @@ struct Parser<'a> {
     /// The intrinsic functions the REPOSITORY paragraph lets the program, and the programs it
     /// contains, invoke without the word FUNCTION.
     intrinsics: Vec<String>,
-    /// The WRITE ADVANCING mnemonic-names in scope: the program's own, then those of the programs
-    /// containing it, whose configuration section applies to it too.
+    /// The SPECIAL-NAMES mnemonic-names in scope, for WRITE ADVANCING and DISPLAY UPON: the
+    /// program's own, then those of the programs containing it, whose configuration section applies
+    /// to it too.
     mnemonics: Vec<(String, String)>,
     sql: SqlState,
     /// WITH DEBUGGING MODE, from the program's configuration section or its container's.
@@ -662,7 +667,7 @@ impl Parser<'_> {
                 clauses.debugging_mode = true;
                 continue;
             }
-            if let Some(environment) = self.word().filter(|w| advancing_environment_name(w)).map(str::to_owned) {
+            if let Some(environment) = self.word().filter(|w| advancing_environment_name(w) || DEVICE_ENVIRONMENT_NAMES.contains(w)).map(str::to_owned) {
                 let at_name = if self.word_at(1) == Some("IS") { 2 } else { 1 };
                 if let Some(name) = self.word_at(at_name).map(str::to_owned) {
                     self.at += at_name + 1;
@@ -1538,9 +1543,13 @@ impl Parser<'_> {
                 while self.starts_operand() && !no_advancing_ahead(self) {
                     items.push(self.operand()?);
                 }
-                if self.accept_word("UPON") {
-                    self.name("a mnemonic name")?;
-                }
+                let upon = if self.accept_word("UPON") {
+                    let name = self.name("a mnemonic name")?;
+                    let device = self.mnemonics.iter().find(|(m, _)| *m == name).map_or_else(|| name.clone(), |(_, e)| e.clone());
+                    Some(Upon { name, device })
+                } else {
+                    None
+                };
                 let no_advancing = self.accept_word("WITH") | no_advancing_ahead(self);
                 if no_advancing {
                     self.expect_word("NO")?;
@@ -1550,7 +1559,7 @@ impl Parser<'_> {
                     }
                 }
                 self.accept_word("END-DISPLAY");
-                Stmt::Display { items, no_advancing, pos }
+                Stmt::Display { items, upon, no_advancing, pos }
             }
             "INITIALIZE" => self.initialize(pos)?,
             "CALL" => Stmt::Call(Box::new(self.call(pos)?)),
@@ -1709,7 +1718,7 @@ impl Parser<'_> {
                 if let Some(side) = self.accept_any(&["BEFORE", "AFTER"]) {
                     let before = side == "BEFORE";
                     self.accept_word("ADVANCING");
-                    let mnemonic = self.word().and_then(|w| self.mnemonics.iter().find(|(name, _)| name == w)).cloned();
+                    let mnemonic = self.word().and_then(|w| self.mnemonics.iter().find(|(name, environment)| name == w && advancing_environment_name(environment))).cloned();
                     advancing = Some(if self.accept_word("PAGE") {
                         Advancing::Page { before }
                     } else if let Some((name, environment)) = mnemonic {
@@ -1782,7 +1791,7 @@ impl Parser<'_> {
             "GOBACK" => Stmt::Goback { pos },
             "STOP" if self.accept_word("RUN") => Stmt::StopRun { pos },
             // STOP literal waits for the operator, whom ironwork does not have (assumption C132).
-            "STOP" if self.starts_operand() && !self.starts_ref() => Stmt::Display { items: vec![self.operand()?], no_advancing: false, pos },
+            "STOP" if self.starts_operand() && !self.starts_ref() => Stmt::Display { items: vec![self.operand()?], upon: Some(Upon { name: "CONSOLE".into(), device: "CONSOLE".into() }), no_advancing: false, pos },
             "STOP" => return Err(self.error("RUN or a literal after STOP")),
             "CONTINUE" => Stmt::Continue,
             "EXIT" if self.is_word("FUNCTION") => return Err(Error::at(pos, "EXIT FUNCTION: Enterprise COBOL does not yet support the format 4 EXIT statement; GOBACK ends a user-defined function")),
