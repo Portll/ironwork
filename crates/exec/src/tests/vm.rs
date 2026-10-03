@@ -381,3 +381,30 @@ fn the_vm_inspects_a_national_item_in_national_characters() {
     assert_eq!(ending, Ok(Ending::Goback));
     assert_eq!(out, "02 04 Ab0AB0\nab-aB0\n");
 }
+
+#[test]
+fn not_on_exception_runs_after_the_call_releases_its_nesting_in_both_executors() {
+    std::thread::Builder::new().stack_size(64 << 20).spawn(not_on_exception_at_the_nesting_limit).unwrap().join().unwrap();
+}
+
+fn not_on_exception_at_the_nesting_limit() {
+    let source = |limit: u32| {
+        [
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. MAIN.\n       PROCEDURE DIVISION.\n",
+            &line("CALL 'REC'"),
+            "           GOBACK.\n       END PROGRAM MAIN.\n",
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. REC IS RECURSIVE.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  N PIC 999 VALUE 0.\n       PROCEDURE DIVISION.\n",
+            &line("ADD 1 TO N"),
+            &line(&format!("IF N < {limit} CALL 'REC'")),
+            &line("ELSE CALL 'LEAF' NOT ON EXCEPTION PERFORM P END-CALL"),
+            &line("END-IF"),
+            "           GOBACK.\n       P.\n",
+            &line("DISPLAY 'P ' N."),
+            "       END PROGRAM REC.\n",
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. LEAF.\n       PROCEDURE DIVISION.\n           GOBACK.\n       END PROGRAM LEAF.\n",
+        ]
+        .concat()
+    };
+    let endings: Vec<bool> = (94..=101).map(|limit| on_both(&source(limit)).1.is_ok()).collect();
+    assert!(endings.contains(&true) && endings.contains(&false), "{endings:?}");
+}

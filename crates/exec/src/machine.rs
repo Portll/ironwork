@@ -982,7 +982,13 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         self.nest(pos)?;
         let result = self.call_nested(c, index, entry, compiled, dynamic);
         self.unit.depth -= 1;
-        result
+        if let Some(flow) = result? {
+            return Ok(flow);
+        }
+        match &c.not_on_exception {
+            Some(body) => self.run_block(body),
+            None => Ok(Flow::Next),
+        }
     }
 
     /// A CALL no library answers that the virtual printer serves: SYSTEM or C$SYSTEM with an lp or
@@ -1045,7 +1051,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
     }
 
-    fn call_nested(&mut self, c: &'p Call, index: usize, entry: Option<usize>, compiled: std::rc::Rc<Compiled>, dynamic: bool) -> R<Flow> {
+    /// The CALL's callee run, through RETURNING; `Some` when the run unit ends. NOT ON EXCEPTION is
+    /// the caller's, after the CALL's nesting is released, as INVOKE's and an LE service's are.
+    fn call_nested(&mut self, c: &'p Call, index: usize, entry: Option<usize>, compiled: std::rc::Rc<Compiled>, dynamic: bool) -> R<Option<Flow>> {
         let pos = c.pos;
         let mark = self.unit.mem.len();
         let addresses = callee::addresses(self, &call_args(&c.using), pos)?;
@@ -1072,17 +1080,14 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Ok::<_, Abend>((ending, returned))
         })?;
         if ending? == Ending::StopRun {
-            return Ok(Flow::End(Ending::StopRun));
+            return Ok(Some(Flow::End(Ending::StopRun)));
         }
         self.parmcheck_test(c, &addresses, |unit| unit.programs[index].name.clone())?;
         if let (Some(target), Some(val)) = (&c.returning, returned) {
             let dest = self.locate_written(|m| m.locate(target))?;
             self.assign(dest, val, None, pos)?;
         }
-        match &c.not_on_exception {
-            Some(body) => self.run_block(body),
-            None => Ok(Flow::Next),
-        }
+        Ok(None)
     }
 
     /// Gives each PROCEDURE DIVISION USING item the address of the argument in its position.
