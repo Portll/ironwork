@@ -21,6 +21,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Portll/cobolwork
+          # Pinned to cobolwork commits whose shared tables drift tests pass against.
+          ref: 35f8a48c8a1f8b1b5c3024f9101c7b456ffada4d
           path: cobolwork
           persist-credentials: false
           sparse-checkout: |

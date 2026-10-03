@@ -19,6 +19,7 @@ It prints PASS, FAIL or TODO for each step and exits 1 on any FAIL.
 2. **CI.** `--before` passes only when main's last CI run is for main's head and every job passed.
    CI runs clippy from the latest stable Rust, so run that version locally too:
    `cargo +<stable> clippy --workspace --all-targets --locked -- -D warnings`.
+   Bump the cobolwork `ref` in `.github/workflows/ci.yml` deliberately and only to a cobolwork commit whose shared tables ironwork's drift tests pass against.
 3. **Notes.** Start from the commits `--before` lists since the previous release. Each feature and
    fix there is either named in the notes or left out on purpose.
 4. **Version.** One commit bumps both workspaces: `version` under `[workspace.package]` in
