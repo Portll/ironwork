@@ -15,6 +15,26 @@ impl Outline {
     pub fn of(program: &syntax::ast::Program) -> Self {
         Outline { program: program.id.clone(), paragraphs: program.paragraphs.iter().map(|p| (p.name.clone(), p.pos.line, p.is_section)).collect() }
     }
+
+    /// A load module's program: its paragraphs from the LIR, each line from the debug table.
+    pub fn of_lir(program: &exec::lir::Program) -> Self {
+        let sym = |id: u32| program.symbols.get(id as usize).cloned().unwrap_or_default();
+        let line = |at: u32| program.debug.positions.get(at as usize).map_or(0, |pos| pos.line);
+        Outline { program: sym(program.id), paragraphs: program.paragraphs.iter().map(|p| (sym(p.name), line(p.at), p.is_section)).collect() }
+    }
+}
+
+/// The programs of a source a run outlines: each but a function prototype, which holds no code, so
+/// that the function it declares is reported as called.
+pub fn source_outlines(programs: &[syntax::ast::Program]) -> Vec<Outline> {
+    programs.iter().filter(|p| !p.is_prototype()).map(Outline::of).collect()
+}
+
+/// The programs a run that begins with `module` outlines: those compiled from the source its
+/// program 0 was, as a run of that source outlines them.
+pub fn module_outlines(module: &exec::module::LoadedModule) -> Vec<Outline> {
+    let first = module.files.first().and_then(|f| f.first());
+    module.programs.iter().zip(&module.files).filter(|(_, files)| files.first() == first).map(|(p, _)| Outline::of_lir(p)).collect()
 }
 
 #[derive(Default)]

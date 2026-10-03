@@ -37,6 +37,31 @@ impl VmLibrary {
         Self { source, modules, modules_first: false }
     }
 
+    /// A library for a run that begins with `module`, read from `path`, whose programs come before
+    /// any other's.
+    pub fn for_module(source: Library, path: &Path, module: LoadedModule) -> Self {
+        let mut library = Self::new(source);
+        library.modules_first = true;
+        library.modules.add_first(path.to_owned(), module);
+        library
+    }
+
+    /// Program 0 of the module the run began with, or the program `name` as a CALL of it finds
+    /// one; Err says why there is none to run.
+    fn first_program(&mut self, path: &Path, name: Option<&str>) -> Result<Found, String> {
+        let found = match name {
+            None => self.modules.take(0, 0).unwrap_or_else(|| Err(format!("{}: the module holds no program", path.display()))),
+            Some(name) => self.program(name).map_err(|e| match e {
+                LoadError::NotFound => format!("program {name} not found"),
+                LoadError::Compile(message) => message,
+            }),
+        }?;
+        match found.compiled.program() {
+            Some(p) if p.services.class.is_some() => Err(format!("{} is a class definition: run a program that uses it", p.symbols.get(p.id as usize).cloned().unwrap_or_default())),
+            _ => Ok(found),
+        }
+    }
+
     /// A program of a source already read, lowered; None when no source read holds one.
     fn read_source(&mut self, name: &str) -> Option<Result<Found, LoadError>> {
         self.source.programs.iter().any(|p| loads_as(p, name)).then(|| self.lowered_source(name))
@@ -44,7 +69,7 @@ impl VmLibrary {
 
     fn lowered_source(&mut self, name: &str) -> Result<Found, LoadError> {
         let found = <Library as Loader<Rc<Compiled>>>::program(&mut self.source, name)?;
-        Ok(LoadedProgram { compiled: Rc::new(code(&found.compiled)), name: found.name, files: found.files, size: found.size, source: found.source })
+        Ok(LoadedProgram { compiled: Rc::new(code(&found.compiled)), name: found.name, files: found.files, size: found.size, source: found.source, recorded: Vec::new() })
     }
 
     /// The class the interpreter's library finds and compiles, with its FACTORY and OBJECT data and
@@ -208,9 +233,18 @@ pub fn execute<'w>(
     ran
 }
 
+fn refused(message: String) -> Halt {
+    Halt::Abend(Abend::ironwork(message, Pos::default()))
+}
+
+/// The source names of a program's debug table, which an abend's position indexes.
+fn sources(program: &rt::lir::Program) -> Vec<String> {
+    program.debug.sources.iter().map(|&s| program.symbols.get(s as usize).cloned().unwrap_or_default()).collect()
+}
+
 /// Runs program 0 of `module`, read from `path`, as the first program of a run unit on the VM,
-/// with a job step's `parm`. CALL finds the module's other programs before any other, then as
-/// [`VmLibrary`] finds them in `library`'s directories.
+/// with a job step's `parm`, telling `observer` what the run does. CALL finds the module's other
+/// programs before any other, then as [`VmLibrary`] finds them in `library`'s directories.
 #[allow(clippy::too_many_arguments)]
 pub fn execute_module<'w>(
     module: LoadedModule,
@@ -222,26 +256,66 @@ pub fn execute_module<'w>(
     database: Option<&'w mut (dyn sql::Database + '_)>,
     out: &'w mut dyn Write,
     err: &'w mut dyn Write,
+    observer: Option<Observer<'w>>,
     parm: Option<&str>,
 ) -> Result<(Ending, i16), Halt> {
-    let refused = |message: String| Halt::Abend(Abend::ironwork(message, Pos::default()));
-    let mut library = VmLibrary::new(library);
-    library.modules_first = true;
-    let first = library.modules.add(path.to_owned(), module);
-    let main = match library.modules.take(first, 0) {
-        Some(found) => found.map_err(refused)?,
-        None => return Err(refused(format!("{}: the module holds no program", path.display()))),
-    };
+    let mut library = VmLibrary::for_module(library, path, module);
+    let main = library.first_program(path, None).map_err(refused)?;
     let code = main.compiled;
     let Some(program) = code.program() else { return Err(refused(format!("{}: program 0 is not lowered", path.display()))) };
     let id = program.symbols.get(program.id as usize).cloned().unwrap_or_default();
-    if program.services.class.is_some() {
-        return Err(refused(format!("{id} is a class definition: run a program that uses it")));
-    }
     let page = program.options.options.code_page();
-    let mut run_unit = run_unit(library, dds, sysin, clock, database, out, err, None);
+    let mut run_unit = run_unit(library, dds, sysin, clock, database, out, err, observer);
     let me = run_unit.add_named(None, main.name, main.files, main.size);
     run_main(&code, &id, me, &mut run_unit, parm.map_or(Passed::Nothing, Passed::Parm), page)
+}
+
+/// Whether a CICS task of a run that began with `module` can begin with the program `name`, as a
+/// CALL of it finds one, and if so the files a module records for it ([`LoadedProgram::recorded`]);
+/// Err says why not.
+pub fn module_program(module: &LoadedModule, path: &Path, library: Library, name: &str) -> Result<Vec<(String, Option<rt::module::SourceFile>)>, String> {
+    VmLibrary::for_module(library, path, module.clone()).first_program(path, Some(name)).map(|found| found.recorded)
+}
+
+/// Runs a CICS task on the VM whose first program is program 0 of `module`, read from `path`, or
+/// with `name` the program a CALL of that name finds, as [`execute_cics`] runs a compiled one.
+/// Returns the task however the run ended, and the source names of its first program's debug
+/// table, its own source by path when a program library supplied it.
+#[allow(clippy::too_many_arguments)]
+pub fn execute_module_cics<'w>(
+    module: &LoadedModule,
+    path: &Path,
+    name: Option<&str>,
+    library: Library,
+    dds: files::Dds,
+    task: cics::Task,
+    clock: Clock,
+    database: Option<&'w mut (dyn sql::Database + '_)>,
+    out: &'w mut dyn Write,
+    err: &'w mut dyn Write,
+    observer: Option<Observer<'w>>,
+) -> (Result<Ending, Halt>, cics::Task, Vec<String>) {
+    let mut library = VmLibrary::for_module(library, path, module.clone());
+    let found = match library.first_program(path, name) {
+        Ok(found) => found,
+        Err(message) => return (Err(refused(message)), task, Vec::new()),
+    };
+    let code = found.compiled;
+    let program = code.program();
+    let mut names = program.map(sources).unwrap_or_default();
+    if let (Some(own), Some(path)) = (names.first_mut(), &found.source) {
+        *own = path.display().to_string();
+    }
+    let id = program.and_then(|p| p.symbols.get(p.id as usize).cloned()).unwrap_or_default();
+    let page = program.map_or_else(|| numeric::Options::default().code_page(), |p| p.options.options.code_page());
+    let first = crate::First { id: &id, name: found.name, files: found.files, size: found.size, page, source: found.source };
+    let run_unit = run_unit(library, dds, None, clock, database, out, err, observer);
+    let (ending, ended, task) = crate::run_task(first, run_unit, task, &mut None, |unit, me, commarea, length| rt::vm::run_task(&code, me, unit, commarea, length));
+    let ending = match ending {
+        Err(Halt::Abend(abend)) => Err(Halt::Abend(crate::asra(abend))),
+        other => other,
+    };
+    (ending.and_then(|e| ended.map(|()| e).map_err(Halt::Abend)), task, names)
 }
 
 /// Runs `compiled`, lowered as `code`, on the VM as the first program of a CICS task, as
@@ -265,7 +339,7 @@ pub fn execute_cics<'w>(
         return (Err(abend.into()), task);
     }
     let run_unit = run_unit(VmLibrary::new(library), dds, None, clock, database, out, err, observer);
-    let (ending, ended, task) = crate::run_task(compiled, run_unit, task, kept, |unit, me, commarea, length| rt::vm::run_task(code, me, unit, commarea, length));
+    let (ending, ended, task) = crate::run_task(crate::First::of(compiled), run_unit, task, kept, |unit, me, commarea, length| rt::vm::run_task(code, me, unit, commarea, length));
     let ending = match ending {
         Err(Halt::Abend(abend)) => Err(Halt::Abend(crate::asra(abend))),
         other => other,

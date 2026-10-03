@@ -586,7 +586,7 @@ fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database
     let mut programs = syntax::parse_all_with(&text, &libraries).map_err(|e| Failed::before(Outcome::Refused, e.place(&path.display().to_string()).to_string()))?;
     if let Some(c) = coverage {
         let outlines = &mut c.borrow_mut().1;
-        for p in &programs {
+        for p in programs.iter().filter(|p| !p.is_prototype()) {
             if !outlines.iter().any(|o| o.program == p.id) {
                 outlines.push(crate::coverage::Outline::of(p));
             }

@@ -14,7 +14,7 @@ usage:
                                                        compile and run; CBL and PROCESS cards set the options
   ironwork run <module.iwm> [-L <dir>]... [-I <dir>]... [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
                [--statement-limit N] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
-               [--exit-code]
+               [--exit-code] [--coverage FILE] [--evidence DIR [--trace-marker TEXT] [--trace-input] [--trace-statements FILE]]
                                                        run a load module's first program on the VM, with the options
                                                        it was compiled with
   ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]...
@@ -24,6 +24,11 @@ usage:
                [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]... [--td QUEUE=path]...
                [--screens path | --serve HOST:PORT [--serve-public] [--transaction TRAN=PROGRAM]... [--csd path]]
                                                        run as the first program of a CICS task
+  ironwork cics <module.iwm> [run's flags for a module but --parm and --statement-limit] [--transid T] [--termid T]
+               [--userid U] [--applid A] [--sysid S] [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]...
+               [--td QUEUE=path]... [--screens path [--transaction TRAN=PROGRAM]... [--csd path]]
+                                                       run a load module's first program on the VM as the first
+                                                       program of a CICS task; --serve takes a source
   ironwork compile <program.cbl>... [-o <dir>] [--bundle NAME] [--source-prefix DIR] [-silent] [-strict-sort-keys]
                [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never]
                [--optimize=0|1|2]
@@ -133,12 +138,16 @@ flags:
              DIR may not be inside the program's directory or a library. run, check, job and cics
              (one task, not --serve); a job's journal holds the JCL, each program's sources, each
              step's DDs and CALLs, the data sets each step left, and a step record with each
-             step's outcome
+             step's outcome. A load module's run records the source and COPY members its compile
+             read, by the digests the module holds, and is the journal a run of the source with the
+             same libraries writes, but for the file named on the command line
   --coverage FILE
              write which paragraphs the run entered: for each program of the source every
              paragraph with its line and how often control entered it, and for each program CALL
              loaded from a library the paragraphs it reached. run, cics for every task of its
-             pseudo-conversation, and job for every step's programs
+             pseudo-conversation, and job for every step's programs. A load module's run reports
+             each program of the module compiled from its first program's source, as a run of that
+             source does
   --trace-marker TEXT
              with --evidence: record each operation an input could steer, and whether TEXT was in
              its operand: a CALL of a variable program name or of an operating-system command
@@ -425,6 +434,7 @@ mod exit;
 mod fuzz;
 mod fuzz_cics;
 mod job;
+mod module;
 mod provenance;
 
 fn usage_error(message: &str) -> ExitCode {
@@ -917,13 +927,17 @@ fn driver() -> ExitCode {
     };
     let own_directory = std::path::Path::new(path).parent().map(|p| p.to_path_buf()).unwrap_or_default();
     if bytes.starts_with(&exec::module::MAGIC[..4]) || path.to_ascii_lowercase().ends_with(".iwm") {
-        if command != "run" {
-            return usage_error(&format!("{path} is a load module, which run runs; check and cics take a source"));
+        if command == "check" {
+            return usage_error(&format!("{path} is a load module, which run and cics run; check takes a source"));
         }
-        if !flags.is_empty() || evidence_dir.is_some() || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() || !arguments.is_empty() {
-            return usage_error(&format!(
-                "{path} is a load module, which holds the options it was compiled with; the compile flags, --evidence, --provenance, --coverage, --argument and the cics flags are for a source"
-            ));
+        if !flags.is_empty() || provenance_file.is_some() || !arguments.is_empty() {
+            return usage_error(&format!("{path} is a load module, which holds the options it was compiled with; the compile flags, --provenance and --argument are for a source"));
+        }
+        if command == "cics" && cics_options.iter().any(|(n, _)| n == "--serve" || n == "--serve-public") {
+            return usage_error(&format!("{path} is a load module, which runs on the VM; --serve and --serve-public serve a source's tasks on the interpreter"));
+        }
+        if command == "run" && !cics_options.is_empty() {
+            return usage_error(&format!("{path} is a load module, which run runs as a batch program; the cics flags are for cics"));
         }
         let dds = match exec::files::Dds::new(&dds, true) {
             Ok(d) => d,
@@ -933,17 +947,17 @@ fn driver() -> ExitCode {
             Ok(d) => d,
             Err(code) => return code,
         };
-        let sysin = match open_sysin(&dds) {
-            Ok(s) => s,
-            Err(code) => return code,
-        };
+        let reads: Vec<std::path::PathBuf> = std::iter::once(own_directory.clone()).chain(libraries.iter().cloned()).chain(program_dirs.iter().cloned()).collect();
         let library = exec::unit::Library {
             dirs: std::iter::once(own_directory).chain(program_dirs).collect(),
             copy: syntax::copy::Libraries::new(libraries),
+            trace_statements: listed.as_ref().map(|l| exec::unit::StatementFilter::Lines(l.iter().map(|&(_, line)| line).collect())),
+            trace_input,
             statement_limit,
             ..Default::default()
         };
-        return run_module(path, &bytes, library, dds, sysin, clock, database, parm.as_deref());
+        let evidence = evidence_dir.map(|dir| module::Evidence { dir, marker: trace_marker, statements: listed.unwrap_or_default(), input: trace_input });
+        return module::run(module::Request { command, path, bytes: &bytes, library, reads, dds, clock, database, parm: parm.as_deref(), options: &cics_options, evidence, coverage: coverage_file });
     }
     let text = syntax::copy::decode(&bytes);
     if coverage_file.is_some() && command == "check" {
@@ -968,7 +982,7 @@ fn driver() -> ExitCode {
         Ok(p) => p,
         Err(e) => return no_program(journal, command, path, report(std::slice::from_ref(&e), path)),
     };
-    let outlines: Vec<coverage::Outline> = programs.iter().map(coverage::Outline::of).collect();
+    let outlines = coverage::source_outlines(&programs);
     if let Some(j) = journal.as_mut() {
         evidence::sources(j, &programs[0].sources, path, &reads);
     }
@@ -1167,62 +1181,6 @@ fn open_sysin(dds: &exec::files::Dds) -> Result<Box<dyn io::BufRead>, ExitCode> 
     }
 }
 
-/// `ironwork run x.iwm`: program 0 of the module on the VM, CALL finding the module's other
-/// programs first. A module the reader refuses, or whose program 0 does not pass the checks a
-/// program from a module must, does not run.
-#[allow(clippy::too_many_arguments)]
-fn run_module(
-    path: &str,
-    bytes: &[u8],
-    library: exec::unit::Library,
-    dds: exec::files::Dds,
-    sysin: Box<dyn io::BufRead>,
-    clock: exec::unit::Clock,
-    mut database: Option<Box<dyn exec::sql::Database>>,
-    parm: Option<&str>,
-) -> ExitCode {
-    let module = match exec::module::read(bytes) {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("ironwork: {path}: {e}");
-            return exit::status(Outcome::Unreadable);
-        }
-    };
-    let Some(main) = module.programs.first() else {
-        eprintln!("ironwork: {path}: the module holds no program");
-        return exit::status(Outcome::Unreadable);
-    };
-    let symbol = |id: u32| main.symbols.get(id as usize).cloned().unwrap_or_default();
-    if let Err(e) = exec::lower::verify(main) {
-        eprintln!("ironwork: {path}: program {}: {e}", symbol(main.id));
-        return exit::status(Outcome::Unreadable);
-    }
-    if main.services.function.is_some() {
-        eprintln!("ironwork: {path}: FUNCTION-ID {}: the module holds user-defined functions and no program to run", symbol(main.id));
-        return exit::status(Outcome::Refused);
-    }
-    let sources: Vec<String> = main.debug.sources.iter().map(|&s| symbol(s)).collect();
-    let library = match main.options.options.compliance {
-        numeric::Compliance::Strict => library,
-        level => exec::unit::Library { copy: library.copy.with_compliance(level), flags: [library.flags, vec![level.flag().to_owned()]].concat(), ..library },
-    };
-    let (mut out, mut err) = (io::stdout().lock(), io::stderr());
-    let ended = exec::vm::execute_module(module, std::path::Path::new(path), library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, parm);
-    exit::status(match ended {
-        Ok((_, return_code)) => Outcome::Ended(i64::from(return_code)),
-        Err(exec::vm::Halt::Abend(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. })) => Outcome::Ended(0),
-        Err(exec::vm::Halt::Abend(abend)) => {
-            let file = abend.file.as_deref().or_else(|| sources.get(abend.pos.file as usize).map(String::as_str)).filter(|f| !f.is_empty()).unwrap_or(path);
-            eprintln!("{file}:{}: ABEND {}: {}", abend.pos, abend.code, abend.message);
-            Outcome::of_abend(&abend.code)
-        }
-        Err(exec::vm::Halt::Unimplemented(what)) => {
-            eprintln!("ironwork: {path}: the VM does not run {what} yet; run the source without --vm");
-            Outcome::Stopped
-        }
-    })
-}
-
 /// A compile's messages as standard error shows them: errors first, then warnings, then
 /// informational messages, each in the order the compiler found them.
 fn listing(messages: &[syntax::Error], path: &str) -> Vec<String> {
@@ -1360,7 +1318,7 @@ fn serve_cics(
     if let Err(e) = cics_task(options, 1) {
         return usage_error(&e);
     }
-    let table = match transaction_table(first, options) {
+    let table = match transaction_table(&first.program.id, options) {
         Ok(t) => t,
         Err(e) => return usage_error(&e),
     };
@@ -1411,14 +1369,14 @@ fn serve_cics(
 
 /// The program each transaction runs: --csd's DEFINE TRANSACTIONs, then --transid for the first
 /// program, then each --transaction.
-fn transaction_table(first: &exec::Compiled, options: &[(String, String)]) -> Result<std::collections::HashMap<String, String>, String> {
+fn transaction_table(first: &str, options: &[(String, String)]) -> Result<std::collections::HashMap<String, String>, String> {
     let get = |name: &str| options.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone());
     let mut table = std::collections::HashMap::new();
     if let Some(file) = get("--csd") {
         let csd = fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|text| syntax::csd::parse(&text).map_err(|e| e.to_string())).map_err(|e| format!("--csd {file}: {e}"))?;
         table.extend(csd.transactions.into_iter().filter_map(|(tran, t)| Some((tran, t.program?))));
     }
-    table.insert(get("--transid").unwrap_or_else(|| "TRAN".into()).to_ascii_uppercase(), first.program.id.to_ascii_uppercase());
+    table.insert(get("--transid").unwrap_or_else(|| "TRAN".into()).to_ascii_uppercase(), first.to_ascii_uppercase());
     for (_, spec) in options.iter().filter(|(n, _)| n == "--transaction") {
         match spec.split_once('=') {
             Some((tran, program)) if !tran.is_empty() && !program.is_empty() => {
@@ -1532,11 +1490,63 @@ fn conversation(
     Conversation::Ended
 }
 
-/// Runs the program as a CICS task built from the cics flags; reports RETURN TRANSID and writes
-/// RETURN's COMMAREA where --commarea-out says. With --screens, a task that returns TRANSID is
-/// followed by that transaction's task on the same terminal, started by the script's next AID key,
-/// until one ends without TRANSID or the script has no key left; one journal records them all, and
-/// one coverage report the paragraphs all of them entered.
+/// The programs a CICS run's tasks begin with: compiled from source and run on the interpreter, or
+/// with --vm on the VM, or a load module's on the VM.
+trait Tasks {
+    /// Makes the program `name` the one the next task begins with, giving the files a load module
+    /// records for it by their debug-table names; Err says why it cannot be.
+    fn begin_with(&mut self, name: &str) -> Result<Vec<(String, Option<exec::module::SourceFile>)>, String>;
+    /// Runs one task, beginning with the run's first program or the one `begin_with` last named;
+    /// Err is how the run ends and what to say when the VM does not run it.
+    fn run<'w>(
+        &'w mut self,
+        dds: exec::files::Dds,
+        task: exec::cics::Task,
+        clock: exec::unit::Clock,
+        out: &'w mut dyn io::Write,
+        err: &'w mut dyn io::Write,
+        observer: Option<exec::unit::Observer<'w>>,
+    ) -> Result<Result<(exec::Ending, exec::cics::Task), exec::Abend>, (Outcome, String)>;
+    /// The source an abend in the last task names: its own, else the file its position names in
+    /// the program that task began with.
+    fn abend_file(&self, abend: &exec::Abend) -> Option<String>;
+}
+
+/// Tasks whose programs are compiled from the source and the program libraries.
+struct SourceTasks<'a> {
+    first: &'a exec::Compiled,
+    current: Option<std::rc::Rc<exec::Compiled>>,
+    transactions: Transactions,
+    path: &'a str,
+    vm: bool,
+}
+
+impl Tasks for SourceTasks<'_> {
+    fn begin_with(&mut self, name: &str) -> Result<Vec<(String, Option<exec::module::SourceFile>)>, String> {
+        self.current = Some(self.transactions.program(name)?);
+        Ok(Vec::new())
+    }
+
+    fn run<'w>(
+        &'w mut self,
+        dds: exec::files::Dds,
+        task: exec::cics::Task,
+        clock: exec::unit::Clock,
+        out: &'w mut dyn io::Write,
+        err: &'w mut dyn io::Write,
+        observer: Option<exec::unit::Observer<'w>>,
+    ) -> Result<Result<(exec::Ending, exec::cics::Task), exec::Abend>, (Outcome, String)> {
+        let program = self.current.as_deref().unwrap_or(self.first);
+        cics_run(program, self.path, self.vm, self.transactions.library.clone(), dds, task, clock, self.transactions.database.as_deref_mut(), out, err, observer)
+    }
+
+    fn abend_file(&self, abend: &exec::Abend) -> Option<String> {
+        abend_file(self.current.as_deref().unwrap_or(self.first), abend).map(str::to_owned)
+    }
+}
+
+/// Runs the program as a CICS task built from the cics flags, as [`cics_tasks`] does, or with
+/// --serve serves a terminal.
 #[allow(clippy::too_many_arguments)]
 fn run_cics(
     compiled: &exec::Compiled,
@@ -1544,13 +1554,12 @@ fn run_cics(
     library: exec::unit::Library,
     dds: exec::files::Dds,
     clock: exec::unit::Clock,
-    mut database: Option<Box<dyn exec::sql::Database>>,
+    database: Option<Box<dyn exec::sql::Database>>,
     options: &[(String, String)],
     evidence: Option<evidence::Run>,
     vm: bool,
     coverage: Option<(&std::path::Path, &[coverage::Outline])>,
 ) -> ExitCode {
-    let page = compiled.options.code_page();
     let get = |name: &str| options.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone());
     if get("--serve").is_some() {
         if vm {
@@ -1561,13 +1570,39 @@ fn run_cics(
         }
         return serve_cics(compiled, library, dds, clock, database, options);
     }
+    let mut library = library;
+    library.programs.insert(0, compiled.program.clone());
+    let transactions = Transactions { library, table: Default::default(), compiled: Default::default(), database };
+    let mut tasks = SourceTasks { first: compiled, current: None, transactions, path, vm };
+    cics_tasks(&mut tasks, compiled.options.code_page(), &compiled.program.id, path, dds, clock, options, evidence, coverage)
+}
+
+/// Runs a CICS task built from the cics flags, beginning with `tasks`' first program, whose
+/// PROGRAM-ID is `first` and code page `page`; reports RETURN TRANSID and writes RETURN's COMMAREA
+/// where --commarea-out says. With --screens, a task that returns TRANSID is followed by that
+/// transaction's task on the same terminal, started by the script's next AID key, until one ends
+/// without TRANSID or the script has no key left; one journal records them all, and one coverage
+/// report the paragraphs all of them entered.
+#[allow(clippy::too_many_arguments)]
+fn cics_tasks(
+    tasks: &mut dyn Tasks,
+    page: &'static zarch::ebcdic::CodePage,
+    first: &str,
+    path: &str,
+    dds: exec::files::Dds,
+    clock: exec::unit::Clock,
+    options: &[(String, String)],
+    evidence: Option<evidence::Run>,
+    coverage: Option<(&std::path::Path, &[coverage::Outline])>,
+) -> ExitCode {
+    let get = |name: &str| options.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone());
     if (get("--transaction").is_some() || get("--csd").is_some()) && get("--screens").is_none() {
         return usage_error("--transaction and --csd need --serve or --screens");
     }
     if get("--serve-public").is_some() {
         return usage_error("--serve-public is for --serve");
     }
-    let table = match transaction_table(compiled, options) {
+    let table = match transaction_table(first, options) {
         Ok(t) => t,
         Err(e) => return usage_error(&e),
     };
@@ -1614,16 +1649,11 @@ fn run_cics(
             println!("--- screen {} ---\n{screen}", n + 1);
         }
     };
-    let mut library = library;
-    library.programs.insert(0, compiled.program.clone());
-    let mut transactions = Transactions { library, table, compiled: Default::default(), database: database.take() };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
     let shared = evidence.map(|run| std::rc::Rc::new(std::cell::RefCell::new(run)));
     let covered = coverage.map(|_| std::rc::Rc::new(std::cell::RefCell::new(coverage::Coverage::default())));
-    let mut current: Option<std::rc::Rc<exec::Compiled>> = None;
     let mut number = 1;
     let ran = loop {
-        let program = current.as_deref().unwrap_or(compiled);
         let observer = (shared.is_some() || covered.is_some()).then(|| {
             let (run, cov) = (shared.clone(), covered.clone());
             Box::new(move |event: exec::unit::Event<'_>| {
@@ -1635,7 +1665,7 @@ fn run_cics(
                 }
             }) as exec::unit::Observer<'_>
         });
-        let ran = match cics_run(program, path, vm, transactions.library.clone(), dds.clone(), task, clock, transactions.database.as_deref_mut(), &mut out, &mut err, observer) {
+        let ran = match tasks.run(dds.clone(), task, clock, &mut out, &mut err, observer) {
             Ok(ran) => ran,
             Err((outcome, message)) => {
                 drop(out);
@@ -1655,12 +1685,16 @@ fn run_cics(
                 break ran;
             }
         };
-        let Some(name) = transactions.table.get(&next).cloned() else {
+        let Some(name) = table.get(&next).cloned() else {
             eprintln!("ironwork: TRANSACTION {next} IS NOT DEFINED");
             break ran;
         };
-        match transactions.program(&name) {
-            Ok(c) => current = Some(c),
+        match tasks.begin_with(&name) {
+            Ok(recorded) => {
+                if let Some(run) = &shared {
+                    run.borrow_mut().record(recorded.iter().map(|(name, file)| (name.as_str(), file)));
+                }
+            }
             Err(e) => {
                 eprintln!("ironwork: {next}: {e}");
                 break ran;
@@ -1686,11 +1720,10 @@ fn run_cics(
             eprintln!("ironwork: --coverage {}: {e}", file.display());
         }
     }
-    let compiled = current.as_deref().unwrap_or(compiled);
     if let Some(run) = shared.and_then(|r| std::rc::Rc::try_unwrap(r).ok()) {
         let abend = ran.as_ref().err().filter(|a| !matches!(a.code, AbendCode::Signal(Signal::ClosedOutput)));
-        let file = abend.and_then(|a| abend_file(compiled, a));
-        let journal = run.into_inner().end(abend.map(|a| (a.code.to_string(), file, i64::from(a.pos.line))));
+        let file = abend.and_then(|a| tasks.abend_file(a));
+        let journal = run.into_inner().end(abend.map(|a| (a.code.to_string(), file.as_deref(), i64::from(a.pos.line))));
         evidence::finish(Some(journal), exit::recorded(abend.map_or(Outcome::Ended(0), |a| Outcome::of_abend(&a.code))));
     }
     match ran {
@@ -1710,7 +1743,11 @@ fn run_cics(
             exit::status(Outcome::Ended(0))
         }
         Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => exit::status(Outcome::Ended(0)),
-        Err(abend) => report_abend(compiled, path, &abend),
+        Err(abend) => {
+            let file = tasks.abend_file(&abend).filter(|f| !f.is_empty()).unwrap_or_else(|| path.to_owned());
+            eprintln!("{file}:{}: ABEND {}: {}", abend.pos, abend.code, abend.message);
+            exit::status(Outcome::of_abend(&abend.code))
+        }
     }
 }
 

@@ -1,7 +1,8 @@
-//! `ironwork run x.iwm` (docs/load-module.md §8): modules `ironwork compile` writes run on the VM
-//! and give the output and status the interpreter gives running their source, with CALL, CANCEL,
-//! INVOKE, a user-defined function and SEND MAP reaching programs, classes and mapsets through the
-//! loader; a module the loader cannot load stops the run and says why.
+//! `ironwork run x.iwm` and `ironwork cics x.iwm` (docs/load-module.md §8): modules `ironwork
+//! compile` writes run on the VM and give the output and status the interpreter gives running their
+//! source, with CALL, CANCEL, INVOKE, a user-defined function and SEND MAP reaching programs,
+//! classes and mapsets through the loader, and with the coverage report and evidence journal the
+//! source's run gives; a module the loader cannot load stops the run and says why.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -435,17 +436,307 @@ fn a_map_a_module_s_program_sends_comes_from_the_module() {
 }
 
 #[test]
-fn a_module_runs_with_run_alone_and_without_the_flags_a_source_takes() {
+fn a_module_runs_with_run_and_cics_and_refuses_what_only_a_source_takes() {
     let dir = temp("usage");
     missing(&dir);
     compiled(&dir, &["MISS.cbl", "-o", "out"]);
-    for (args, usage) in [(&["check", "out/MISS.iwm"][..], 2), (&["cics", "out/MISS.iwm"], 246), (&["run", "out/MISS.iwm", "-silent"], 246), (&["run", "out/MISS.iwm", "--coverage", "c.json"], 246)] {
+    let refused = [
+        (&["check", "out/MISS.iwm"][..], "check takes a source", 2),
+        (&["run", "out/MISS.iwm", "-silent"], "the compile flags", 246),
+        (&["cics", "out/MISS.iwm", "--optimize=2"], "the compile flags", 246),
+        (&["run", "out/MISS.iwm", "--provenance", "p.json"], "--provenance", 246),
+        (&["cics", "out/MISS.iwm", "--serve", "127.0.0.1:0"], "--serve", 246),
+        (&["cics", "out/MISS.iwm", "--serve-public"], "--serve-public", 246),
+        (&["run", "out/MISS.iwm", "--transid", "MISS"], "the cics flags are for cics", 246),
+    ];
+    for (args, named, usage) in refused {
         let o = ironwork(&dir, args);
         assert_eq!(o.status.code(), Some(usage), "{args:?}: {}", text(&o.stderr));
-        assert!(text(&o.stderr).contains("out/MISS.iwm is a load module"), "{args:?}: {}", text(&o.stderr));
+        let first = text(&o.stderr).lines().next().unwrap_or_default().to_owned();
+        assert!(first.contains("out/MISS.iwm is a load module") && first.contains(named), "{args:?}: {first}");
     }
     let o = ironwork(&dir, &["compile", "out/MISS.iwm", "-o", "again"]);
     assert_eq!((o.status.code(), text(&o.stderr)), (Some(16), "ironwork: out/MISS.iwm is a load module; compile takes a source\nironwork: MISS.iwm not written\n".to_owned()));
+}
+
+/// FIRSTP shows what started its task, reads a CICS file, writes a transient-data queue, LINKs to
+/// HELPER and returns TRANSID NEXT with a COMMAREA. LIBPGM, which NEXT runs, divides by zero.
+fn conversation(dir: &Path) {
+    write(
+        dir,
+        "src/FIRSTP.cbl",
+        &[
+            "IDENTIFICATION DIVISION.",
+            "PROGRAM-ID. FIRSTP.",
+            "DATA DIVISION.",
+            "WORKING-STORAGE SECTION.",
+            "01  WS-AREA PIC X(10) VALUE 'FROMFIRST '.",
+            "01  WS-KEY PIC X(5) VALUE '00002'.",
+            "01  WS-REC PIC X(15).",
+            "01  WS-USER PIC X(8).",
+            "01  WS-APPL PIC X(8).",
+            "01  WS-SYS PIC X(4).",
+            "LINKAGE SECTION.",
+            "01  DFHCOMMAREA PIC X(10).",
+            "PROCEDURE DIVISION.",
+            "MAIN-PARA.",
+            "    IF EIBCALEN > 0",
+            "        DISPLAY 'GOT ' DFHCOMMAREA",
+            "    END-IF",
+            "    EXEC CICS ASSIGN USERID(WS-USER) APPLID(WS-APPL)",
+            "        SYSID(WS-SYS) END-EXEC",
+            "    DISPLAY EIBTRNID ' ' EIBTRMID ' ' WS-USER ' ' WS-APPL",
+            "        ' ' WS-SYS",
+            "    EXEC CICS READ FILE('CUSTF') INTO(WS-REC)",
+            "        RIDFLD(WS-KEY) END-EXEC",
+            "    DISPLAY 'READ ' WS-REC",
+            "    EXEC CICS WRITEQ TD QUEUE('LOGQ') FROM(WS-AREA)",
+            "        LENGTH(10) END-EXEC",
+            "    EXEC CICS LINK PROGRAM('HELPER') END-EXEC",
+            "    PERFORM SHOW",
+            "    EXEC CICS RETURN TRANSID('NEXT') COMMAREA(WS-AREA)",
+            "        END-EXEC.",
+            "SHOW.",
+            "    DISPLAY 'FIRST DONE'.",
+        ],
+    );
+    write(dir, "lib/HELPER.cbl", &["IDENTIFICATION DIVISION.", "PROGRAM-ID. HELPER.", "PROCEDURE DIVISION.", "H1.", "    DISPLAY 'HELPER'", "    EXEC CICS RETURN END-EXEC."]);
+    write(
+        dir,
+        "lib/LIBPGM.cbl",
+        &[
+            "IDENTIFICATION DIVISION.",
+            "PROGRAM-ID. LIBPGM.",
+            "DATA DIVISION.",
+            "WORKING-STORAGE SECTION.",
+            "01  D PIC 9 VALUE 0.",
+            "01  Q PIC 9.",
+            "LINKAGE SECTION.",
+            "01  DFHCOMMAREA PIC X(10).",
+            "PROCEDURE DIVISION.",
+            "L1.",
+            "    DISPLAY 'NEXT GOT ' DFHCOMMAREA ' ' EIBTRNID",
+            "    DIVIDE 10 BY D GIVING Q",
+            "    EXEC CICS RETURN END-EXEC.",
+        ],
+    );
+    fs::write(dir.join("custf.txt"), "00001ALICE     \n00002BOB       \n").unwrap();
+    fs::write(dir.join("comm"), "HELLO     \n").unwrap();
+    fs::write(dir.join("screens"), "ENTER\n").unwrap();
+    fs::write(dir.join("next.csd"), " DEFINE TRANSACTION(NEXT) GROUP(G) PROGRAM(LIBPGM)\n").unwrap();
+    compiled(dir, &["src/FIRSTP.cbl", "-o", "src"]);
+    compiled(dir, &["lib/HELPER.cbl", "lib/LIBPGM.cbl", "-o", "mods"]);
+}
+
+/// A `cics` run of `program` with every flag a task takes, its files and queue named after `tag`.
+fn task(dir: &Path, program: &str, tag: &str, extra: &[&str]) -> Output {
+    fs::copy(dir.join("custf.txt"), dir.join(format!("custf-{tag}.txt"))).unwrap();
+    let file = format!("CUSTF=custf-{tag}.txt,KSDS,key=0:5,len=15,text");
+    let (td, out) = (format!("LOGQ=td-{tag}.txt"), format!("comm-{tag}:text"));
+    let identity = ["--transid", "FIRS", "--termid", "T001", "--userid", "ADA", "--applid", "APPL1", "--sysid", "SYS1"];
+    let args = [&["cics", program][..], &identity, &["--file", &file, "--td", &td, "--commarea", "comm:text", "--commarea-out", &out], extra].concat();
+    ironwork(dir, &args)
+}
+
+#[test]
+fn a_cics_task_from_a_module_runs_as_the_source_s_task_runs() {
+    let dir = temp("cics");
+    conversation(&dir);
+    let source = task(&dir, "src/FIRSTP.cbl", "cbl", &["-L", "lib"]);
+    assert_eq!(ran(&source), ("GOT HELLO     \nFIRS T001 ADA      APPL1    SYS1\nREAD 00002BOB       \nHELPER\nFIRST DONE\n".to_owned(), Some(0)), "{}", text(&source.stderr));
+    assert!(text(&source.stderr).ends_with("ironwork: RETURN TRANSID(NEXT) with a 10-byte COMMAREA\n"), "{}", text(&source.stderr));
+    for lib in ["mods", "lib"] {
+        let tag = format!("iwm-{lib}");
+        let module = task(&dir, "src/FIRSTP.iwm", &tag, &["-L", lib]);
+        assert_eq!(ran(&module), ran(&source), "-L {lib}: {}", text(&module.stderr));
+        assert_eq!(text(&module.stderr), "ironwork: RETURN TRANSID(NEXT) with a 10-byte COMMAREA\n");
+        for kept in ["comm", "td", "custf"] {
+            let (made, given) = (fs::read(dir.join(format!("{kept}-{tag}{}", if kept == "comm" { "" } else { ".txt" }))), fs::read(dir.join(format!("{kept}-cbl{}", if kept == "comm" { "" } else { ".txt" }))));
+            assert_eq!(made.unwrap(), given.unwrap(), "{kept}, -L {lib}");
+        }
+    }
+
+    for next in [&["--transaction", "NEXT=LIBPGM"][..], &["--csd", "next.csd"]] {
+        let conversed = |program: &str, tag: &str, lib: &str| task(&dir, program, tag, &[&["-L", lib, "--screens", "screens"][..], next].concat());
+        let source = conversed("src/FIRSTP.cbl", "cbl", "lib");
+        assert!(text(&source.stdout).contains("FIRST DONE\nNEXT GOT FROMFIRST  NEXT\n"), "{}", text(&source.stderr));
+        assert_eq!(source.status.code(), Some(240));
+        for lib in ["mods", "lib"] {
+            let module = conversed("src/FIRSTP.iwm", &format!("iwm-{lib}"), lib);
+            assert_eq!(ran(&module), ran(&source), "{next:?} -L {lib}: {}", text(&module.stderr));
+            let (from_module, from_source) = (abends(&module), abends(&source));
+            assert_eq!(from_module.len(), 1, "{}", text(&module.stderr));
+            assert!(from_source[0].ends_with(&from_module[0]), "{from_source:?} {from_module:?}");
+            assert!(from_module[0].contains("LIBPGM.cbl:12:12: ABEND ASRA: "), "{from_module:?}");
+            assert!(text(&module.stderr).contains("ironwork: task 2: NEXT runs LIBPGM\n"));
+        }
+    }
+}
+
+/// A journal's records, without what each run's journal has of its own: when each record was
+/// written, the chain and hashes that link them, and how long the run took.
+fn journal(dir: &Path) -> Vec<String> {
+    let runs: Vec<PathBuf> = fs::read_dir(dir.join("runs")).unwrap().map(|e| e.unwrap().path()).collect();
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    let own = |line: &str| {
+        let mut kept = line.to_owned();
+        for key in ["at", "chain", "hash", "prev", "durationMs"] {
+            let needle = format!("\"{key}\":");
+            if let Some(start) = kept.find(&needle) {
+                let end = kept[start..].find([',', '}']).map_or(kept.len(), |e| start + e + usize::from(kept[start + e..].starts_with(',')));
+                kept.replace_range(start..end, "");
+            }
+        }
+        kept
+    };
+    fs::read_to_string(&runs[0]).unwrap().lines().map(own).collect()
+}
+
+/// The module run's journal is the source run's, but for the file its command line names.
+fn same_journal(module: &[String], source: &[String], iwm: &str, cbl: &str) {
+    let (iwm, cbl) = (format!("\"{iwm}\"]"), format!("\"{cbl}\"]"));
+    assert!(module[0].contains("\"kind\":\"open\"") && module[0].contains(&iwm), "{}", module[0]);
+    assert_eq!(module[0].replace(&iwm, &cbl), source[0]);
+    assert_eq!(module[1..], source[1..]);
+}
+
+#[test]
+fn a_module_run_writes_the_coverage_and_journal_its_source_s_run_writes() {
+    let dir = temp("evidence");
+    write(
+        &dir,
+        "src/EVD.cbl",
+        &[
+            "IDENTIFICATION DIVISION.",
+            "FUNCTION-ID. DOUBLE AS 'dbl'.",
+            "DATA DIVISION.",
+            "LINKAGE SECTION.",
+            "01  N PIC 9(3).",
+            "01  R PIC 9(4).",
+            "PROCEDURE DIVISION USING N RETURNING R.",
+            "CALC.",
+            "    COMPUTE R = N * 2",
+            "    GOBACK.",
+            "END FUNCTION DOUBLE.",
+            "IDENTIFICATION DIVISION.",
+            "FUNCTION-ID. TRIPLE AS 'trp' IS PROTOTYPE.",
+            "DATA DIVISION.",
+            "LINKAGE SECTION.",
+            "01  N PIC 9(3).",
+            "01  R PIC 9(4).",
+            "PROCEDURE DIVISION USING N RETURNING R.",
+            "END FUNCTION TRIPLE.",
+            "IDENTIFICATION DIVISION.",
+            "PROGRAM-ID. EVD.",
+            "ENVIRONMENT DIVISION.",
+            "INPUT-OUTPUT SECTION.",
+            "FILE-CONTROL.",
+            "    SELECT IN-FILE ASSIGN TO INFILE.",
+            "    SELECT OUT-FILE ASSIGN TO OUTFILE.",
+            "DATA DIVISION.",
+            "FILE SECTION.",
+            "FD IN-FILE.",
+            "    COPY INREC.",
+            "FD OUT-FILE.",
+            "01 OUT-REC PIC X(10).",
+            "WORKING-STORAGE SECTION.",
+            "    COPY BADNUM.",
+            "01 NAME PIC X(8) VALUE 'HELPER'.",
+            "01 K PIC 9(3) VALUE 7.",
+            "PROCEDURE DIVISION.",
+            "FIRST-PART SECTION.",
+            "OPENING.",
+            "    OPEN INPUT IN-FILE OUTPUT OUT-FILE",
+            "    READ IN-FILE END-READ",
+            "    MOVE IN-REC TO OUT-REC",
+            "    DISPLAY 'REC ' IN-REC",
+            "    PERFORM TWICE 2 TIMES",
+            "    CALL NAME",
+            "    CALL 'INNER'",
+            "    DISPLAY FUNCTION DOUBLE(K) ' ' FUNCTION TRIPLE(K)",
+            "    WRITE OUT-REC",
+            "    CLOSE IN-FILE OUT-FILE.",
+            "    COPY ADDBAD.",
+            "    GOBACK.",
+            "TWICE.",
+            "    DISPLAY 'TWICE'.",
+            "NEVER.",
+            "    DISPLAY 'NEVER'.",
+            "IDENTIFICATION DIVISION.",
+            "PROGRAM-ID. INNER.",
+            "PROCEDURE DIVISION.",
+            "    DISPLAY 'INNER'",
+            "    GOBACK.",
+            "END PROGRAM INNER.",
+            "END PROGRAM EVD.",
+        ],
+    );
+    write(&dir, "copy/sys/INREC.cpy", &["01 IN-REC PIC X(10)."]);
+    write(&dir, "copy/BADNUM.cpy", &["01 WS-A PIC X(3) VALUE '***'.", "01 WS-N REDEFINES WS-A PIC 9(3).", "01 WS-T PIC 9(3) VALUE 0."]);
+    write(&dir, "copy/ADDBAD.cpy", &["    ADD WS-N TO WS-T."]);
+    write(
+        &dir,
+        "lib/HELPER.cbl",
+        &["IDENTIFICATION DIVISION.", "PROGRAM-ID. HELPER.", "PROCEDURE DIVISION.", "    DISPLAY 'HELPER'", "    CALL 'HELPIN'", "    GOBACK.", "IDENTIFICATION DIVISION.", "PROGRAM-ID. HELPIN.", "PROCEDURE DIVISION.", "    DISPLAY 'HELPIN'", "    GOBACK.", "END PROGRAM HELPIN.", "END PROGRAM HELPER."],
+    );
+    write(
+        &dir,
+        "lib/TRP.cbl",
+        &["IDENTIFICATION DIVISION.", "FUNCTION-ID. TRIPLE AS 'trp'.", "DATA DIVISION.", "LINKAGE SECTION.", "01  N PIC 9(3).", "01  R PIC 9(4).", "PROCEDURE DIVISION USING N RETURNING R.", "    COMPUTE R = N * 3", "    GOBACK.", "END FUNCTION TRIPLE."],
+    );
+    fs::write(dir.join("in.txt"), "HELLOWORLD\n").unwrap();
+    fs::write(dir.join("statements"), "EVD.cbl:43\nADDBAD.cpy:1\nHELPER.cbl:4\n").unwrap();
+    compiled(&dir, &["src/EVD.cbl", "-I", "copy", "-I", "copy/sys", "-o", "src"]);
+    compiled(&dir, &["lib/HELPER.cbl", "lib/TRP.cbl", "-o", "lib"]);
+    let run = |program: &str, tag: &str| {
+        let output = format!("OUTFILE=out-{tag}.txt:text");
+        let (coverage, evidence) = (format!("coverage-{tag}.json"), format!("ev-{tag}"));
+        let flags = ["--trace-statements", "statements", "--trace-marker", "HELPER", "--trace-input"];
+        ironwork(&dir, &[&["run", program, "-I", "copy", "-I", "copy/sys", "-L", "lib", "--dd", "INFILE=in.txt:text", "--dd", &output, "--coverage", &coverage, "--evidence", &evidence][..], &flags].concat())
+    };
+    let source = run("src/EVD.cbl", "cbl");
+    assert_eq!(ran(&source), ("REC HELLOWORLD\nTWICE\nTWICE\nHELPER\nHELPIN\nINNER\n0014 0021\n".to_owned(), Some(240)), "{}", text(&source.stderr));
+    let module = run("src/EVD.iwm", "iwm");
+    assert_eq!(ran(&module), ran(&source), "{}", text(&module.stderr));
+
+    let coverage = fs::read_to_string(dir.join("coverage-cbl.json")).unwrap();
+    assert_eq!(fs::read_to_string(dir.join("coverage-iwm.json")).unwrap(), coverage);
+    for part in [
+        "{\"entered\":2,\"line\":52,\"name\":\"TWICE\",\"section\":false}",
+        "{\"entered\":0,\"line\":54,\"name\":\"NEVER\",\"section\":false}",
+        "\"called\":[{\"program\":\"HELPER\",\"reached\":[\"\"]},{\"program\":\"HELPIN\",\"reached\":[\"\"]},{\"program\":\"TRIPLE\",\"reached\":[\"\"]}]",
+    ] {
+        assert!(coverage.contains(part), "{part}\n{coverage}");
+    }
+
+    let (from_module, from_source) = (journal(&dir.join("ev-iwm")), journal(&dir.join("ev-cbl")));
+    same_journal(&from_module, &from_source, "EVD.iwm", "EVD.cbl");
+    for kind in ["\"kind\":\"input\",\"path\":\"INREC.cpy\",\"root\":2", "\"from\":\"HELPER.cbl\",\"kind\":\"call\",\"program\":\"HELPIN\"", "\"from\":\"TRP.cbl\",\"kind\":\"call\",\"program\":\"TRP\"", "\"file\":\"ADDBAD.cpy\",\"kind\":\"statement\"", "\"kind\":\"sink\"", "\"code\":\"S0C7\",\"file\":\"ADDBAD.cpy\",\"kind\":\"abend\",\"line\":1"] {
+        assert!(from_module.iter().any(|r| r.contains(kind)), "{kind}\n{from_module:#?}");
+    }
+}
+
+#[test]
+fn a_module_s_cics_tasks_write_the_coverage_and_journal_the_source_s_write() {
+    let dir = temp("cics-evidence");
+    conversation(&dir);
+    compiled(&dir, &["lib/HELPER.cbl", "lib/LIBPGM.cbl", "-o", "lib"]);
+    let run = |program: &str, tag: &str, lib: &str| {
+        let (coverage, evidence) = (format!("coverage-{tag}.json"), format!("ev-{tag}"));
+        task(&dir, program, tag, &["-L", lib, "--screens", "screens", "--transaction", "NEXT=LIBPGM", "--coverage", &coverage, "--evidence", &evidence, "--trace-input", "--trace-marker", "HELLO"])
+    };
+    let source = run("src/FIRSTP.cbl", "cbl", "lib");
+    assert_eq!(source.status.code(), Some(240), "{}", text(&source.stderr));
+    let module = run("src/FIRSTP.iwm", "iwm", "lib");
+    assert_eq!(ran(&module), ran(&source), "{}", text(&module.stderr));
+    let coverage = fs::read_to_string(dir.join("coverage-cbl.json")).unwrap();
+    assert_eq!(fs::read_to_string(dir.join("coverage-iwm.json")).unwrap(), coverage);
+    assert!(coverage.contains("{\"program\":\"HELPER\",\"reached\":[\"H1\"]},{\"program\":\"LIBPGM\",\"reached\":[\"L1\"]}"), "{coverage}");
+    let (from_module, from_source) = (journal(&dir.join("ev-iwm")), journal(&dir.join("ev-cbl")));
+    same_journal(&from_module, &from_source, "FIRSTP.iwm", "FIRSTP.cbl");
+    for kind in ["\"from\":\"HELPER.cbl\",\"kind\":\"call\",\"program\":\"HELPER\"", "\"code\":\"ASRA\",\"file\":\"LIBPGM.cbl\",\"kind\":\"abend\",\"line\":12", "\"marker\":\"HELLO\""] {
+        assert!(from_module.iter().any(|r| r.contains(kind)), "{kind}\n{from_module:#?}");
+    }
 }
 
 #[test]

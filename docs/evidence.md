@@ -5,11 +5,12 @@ The record format, the ledger, seals and witnesses are cobolwork's (cobolwork
 `docs/spec/evidence.md`), so `cobolwork evidence verify`, `seal` and `anchor` work on ironwork's
 evidence directory unchanged.
 
-**Status:** built, 2026-09-30. `--evidence` and `--provenance` on `run` and `check`; `compare`.
+**Status:** built, 2026-09-30. `--evidence` on `run`, `check`, `job` and `cics`, of a source or,
+for `run` and `cics`, a load module; `--provenance` on `run` and `check`; `compare`.
 
 ## 1. Run journal: `--evidence DIR`
 
-`ironwork run`, `check` and `job` write `DIR/runs/<runId>.jsonl` and append the run's tip to
+`ironwork run`, `check`, `job` and `cics` write `DIR/runs/<runId>.jsonl` and append the run's tip to
 `DIR/ledger.jsonl` (`crates/rt/src/evidence.rs`, `crates/cli/src/evidence.rs`). Each record is
 canonical JSON hashed as SHA-256(`"cobolwork-evidence/v1\n"` || the record without `hash`), linked
 by `prev` and `seq`.
@@ -41,17 +42,29 @@ by `prev` and `seq`.
 - A path is relative to the directory that supplied it (the program's, a `-I` library, a `-L`
   library), the innermost where one lies inside another, and otherwise its file name. No record
   holds a record's data, an option's value, or an absolute path.
+- A run of a load module (`run x.iwm`, `cics x.iwm`) reads no source, and records what its module
+  records of the compile (load-module.md §9.2): its `input` records are the source and each COPY
+  member the compile read, by the library index and path the compile found them under and the
+  digests they had then; a program CALL loads from another module is a `call` record with its
+  source's path and digest as that module records them; and a sink, statement or abend in a
+  module's program names its file by the path its module records. The journal is the one a run of
+  the source writes when the module runs with the source's libraries in the same order from a
+  directory of the source directory's name, but for the module's file name in `argv`.
 - The directory is refused inside the program's directory or a library, through a symbolic link,
   and is created owner-only.
 - Files are hashed as they stream (`crates/rt/src/digest.rs`), so a large data set is not held in
   memory; hashing an indexed file at OPEN still reads all of it.
-- `run --coverage FILE` writes, for each program of the source, every paragraph with its line and
-  how often control entered it, from the run unit's `Paragraph` events; `job --coverage FILE` the
-  same for every program the job's steps ran, each also naming its `source`, so steps that run one
-  source add up and programs of two sources that share a PROGRAM-ID stay apart.
+- `run --coverage FILE` writes, for each program of the source but a function prototype, every
+  paragraph with its line and how often control entered it, from the run unit's `Paragraph`
+  events, and the paragraphs reached in each program CALL loaded from a library; `job --coverage
+  FILE` the same for every program the job's steps ran, each also naming its `source`, so steps
+  that run one source add up and programs of two sources that share a PROGRAM-ID stay apart. A
+  load module's run reports each program of the module compiled from its first program's source,
+  its paragraphs from the LIR and their lines from the debug table, which is the report a run of
+  the source writes.
 - The run unit tells an observer what it opens, closes and loads, and each paragraph control
-  enters (`exec::unit::Observer`); the
-  interpreter and, when it lands, the VM raise the same events, so a journal is the same under both.
+  enters (`exec::unit::Observer`); the interpreter and the VM raise the same events, so a journal
+  is the same under both.
 - `cics` keeps a journal for one task; `--serve` does not.
 
 ### 1.1 Input trace: `--trace-marker TEXT`

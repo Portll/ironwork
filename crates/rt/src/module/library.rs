@@ -2,7 +2,7 @@
 //! a program found by the name a CALL or a function invocation gives, and a class by its external
 //! name, each as the VM holds it.
 
-use super::{DirectoryEntry, LoadedModule, read};
+use super::{DirectoryEntry, LoadedModule, SourceFile, read};
 use crate::bms::Mapset;
 use crate::lir::{Class, ClassPart, Program, SymId};
 use crate::oo::{ClassCode, JAVA_LANG_OBJECT, MethodCode, Part};
@@ -26,12 +26,15 @@ pub struct Modules {
     read: Vec<Read>,
 }
 
-/// A module the run has read: its directory, the programs no CALL has taken yet, and its mapsets.
+/// A module the run has read: its directory, the programs no CALL has taken yet, its mapsets, the
+/// files each program's compile read, and whether the run began with it.
 struct Read {
     path: PathBuf,
     directory: Vec<DirectoryEntry>,
     programs: Vec<Option<Program>>,
     mapsets: Vec<Mapset>,
+    files: Vec<Vec<Option<SourceFile>>>,
+    first: bool,
 }
 
 type Found = LoadedProgram<Rc<Code>>;
@@ -45,8 +48,19 @@ impl Modules {
     /// Registers a module read from `path`, whose programs are found by name from now on; its
     /// number is what [`Modules::take`] takes.
     pub fn add(&mut self, path: PathBuf, module: LoadedModule) -> usize {
-        let LoadedModule { directory, programs, mapsets, .. } = module;
-        self.read.push(Read { path, directory, programs: programs.into_iter().map(Some).collect(), mapsets });
+        self.register(path, module, false)
+    }
+
+    /// Registers the module the run began with, as [`Modules::add`] does; a program of the same
+    /// source as its program 0 is loaded with no files to record, as a program of the run's first
+    /// source is.
+    pub fn add_first(&mut self, path: PathBuf, module: LoadedModule) -> usize {
+        self.register(path, module, true)
+    }
+
+    fn register(&mut self, path: PathBuf, module: LoadedModule, first: bool) -> usize {
+        let LoadedModule { directory, programs, mapsets, files } = module;
+        self.read.push(Read { path, directory, programs: programs.into_iter().map(Some).collect(), mapsets, files, first });
         self.read.len() - 1
     }
 
@@ -58,10 +72,16 @@ impl Modules {
         let nested = held.directory.iter().filter(|e| e.parent == Some(ordinal as u32)).map(|e| e.id.clone()).collect();
         let name = entry.load_name().to_ascii_uppercase();
         let checked = (self.check)(&program).map_err(|e| format!("{}: program {}: {e}", held.path.display(), entry.id));
+        let own = held.files.get(ordinal).map(Vec::as_slice).unwrap_or_default();
+        let recorded = if held.first && own.first() == held.files.first().and_then(|f| f.first()) {
+            Vec::new()
+        } else {
+            program.debug.sources.iter().map(|&s| symbol(&program, s)).zip(own.iter().cloned()).collect()
+        };
         Some(checked.map(|()| {
             let code = code(program, nested, None);
             let (files, size) = code.shape();
-            LoadedProgram { compiled: Rc::new(code), name, files, size, source: None }
+            LoadedProgram { compiled: Rc::new(code), name, files, size, source: None, recorded }
         }))
     }
 

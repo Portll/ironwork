@@ -115,6 +115,9 @@ pub struct LoadedProgram<H> {
     pub size: usize,
     /// The file it was read from, when a program library supplied it.
     pub source: Option<PathBuf>,
+    /// For a program a load module holds, unless of the source the run began with: each source of
+    /// its debug table by name, with the file the module records for it, its own source first.
+    pub recorded: Vec<(String, Option<crate::module::SourceFile>)>,
 }
 
 /// A class definition a loader found and compiled, and its source table, its own source first by
@@ -174,7 +177,8 @@ pub enum Clock {
 pub enum Event<'a> {
     Open { dd: &'a str, mode: OpenMode, path: &'a Path },
     Close { dd: &'a str, path: &'a Path },
-    Load { program: &'a str, source: Option<&'a Path> },
+    /// `recorded` is [`LoadedProgram::recorded`], empty for a program read from source.
+    Load { program: &'a str, source: Option<&'a Path>, recorded: &'a [(String, Option<crate::module::SourceFile>)] },
     /// Control entering paragraph (or section header) `index` of `program` at its start.
     Paragraph { program: &'a str, name: &'a str, index: usize },
     /// `kind` is cobolwork's name for the sink (`dynamic-program-load`, `log`, ...); `file` is the
@@ -585,7 +589,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             return Ok(i);
         }
         let loaded = self.library.program(&name)?;
-        self.notify(Event::Load { program: &name, source: loaded.source.as_deref() });
+        self.notify(Event::Load { program: &name, source: loaded.source.as_deref(), recorded: &loaded.recorded });
         let index = self.add_named(Some(loaded.compiled), loaded.name, loaded.files, loaded.size);
         self.programs[index].source = loaded.source;
         Ok(index)

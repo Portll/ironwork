@@ -253,7 +253,7 @@ impl Events {
         let text = match event {
             Event::Open { dd, mode, path } => format!("open {dd} {mode:?} {}", path.display()),
             Event::Close { dd, path } => format!("close {dd} {}", path.display()),
-            Event::Load { program, source } => format!("load {program} {}", source.map(|s| s.display().to_string()).unwrap_or_default()),
+            Event::Load { program, source, .. } => format!("load {program} {}", source.map(|s| s.display().to_string()).unwrap_or_default()),
             Event::Paragraph { program, name, index } => format!("paragraph {program} {name} {index}"),
             Event::Sink { kind, file, line, operand, input } => format!("sink {kind} {file}:{line} {operand} {input:?}"),
             Event::Statement { file, line } => format!("statement {file}:{line}"),

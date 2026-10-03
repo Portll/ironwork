@@ -6,9 +6,10 @@ The `.iwm` file format, and how a run unit loads it. It details §8 of
 **Status:** draft, for the operator's review. The container, the encoding rules and every section's
 codec (§3 to §7, §9) are built in `rt::module`; `ironwork compile` writes modules, with the mapsets
 their programs name (§5.3) and the files their compile read (§9.2), and `ironwork dump` (§11)
-prints them. The loader (§8.2) is built:
-`ironwork run x.iwm` runs a module's first program on the VM, and on the VM CALL, CANCEL, a
-user-defined function, INVOKE and EXEC CICS LINK and XCTL reach programs and classes in modules. A
+prints them. The loader (§8.2) is built: `ironwork run x.iwm` runs a module's first program on the
+VM, `ironwork cics x.iwm` runs it as the first program of a CICS task, each with the coverage report
+and evidence journal a run of its source gives, and on the VM CALL, CANCEL, a user-defined
+function, INVOKE and EXEC CICS LINK and XCTL reach programs and classes in modules. A
 static CALL is resolved when it runs, not at compile time (§8.3), and the scope rules of question 6
 are not applied. The types a module holds are [lir.md](lir.md)'s; this document gives the
 container, the encoding rules, which apply to any of them, and the program directory.
@@ -620,13 +621,32 @@ started with, then each `-L` in order. A program is found in this order:
   as far as the loader goes; whether a failed compile should remove an older module stays open.
 
 `ironwork run x.iwm` runs program 0 of the module on the VM with the options it was compiled with.
-It refuses the compile flags, `--evidence`, `--provenance`, `--coverage` and the cics flags, and
-`check`, `cics` and `compile` refuse a module. It takes `-L`, `-I`, `--dd`, `--clock`, `--parm`,
-`--statement-limit` and the SQL flags as a run of source does. A module the reader refuses, or
-whose program 0 the verifier refuses, exits 245 with the reason and runs nothing; one whose program
-0 is a user-defined function exits 241, as such a source does, and a construct the VM does not run
-yet stops the run with 243 (the README's Exit status). An abend names the source the debug table
-gives (§9.1), so it reads as the source's own run does from the source's directory.
+It takes `-L`, `-I`, `--dd`, `--clock`, `--parm`, `--statement-limit`, the SQL flags,
+`--exit-code`, `--coverage` and `--evidence` with its traces as a run of source does, and refuses
+the compile flags, `--provenance` and the cics flags with 246, usage; `check` and `compile` refuse
+a module. A module the reader refuses, or whose program 0 the verifier refuses, exits 245 with the
+reason and runs nothing; one whose program 0 is a user-defined function exits 241, as such a
+source does, and a construct the VM does not run yet stops the run with 243 (the README's Exit
+status). An abend names the source the debug table gives (§9.1), so it reads as the source's own
+run does from the source's directory.
+
+`ironwork cics x.iwm` runs program 0 as the first program of a CICS task on the VM, as `ironwork
+cics --vm` runs a source's, and exits as `cics` does. It takes what `run` takes of a module, but
+`--parm` and `--statement-limit`, which `cics` refuses for a source too, and the cics flags but
+`--serve` and `--serve-public`, which serve a source's tasks on the interpreter and are refused for
+a module with 246. Under `--screens`, the program a transaction names (`--transaction`, `--csd`)
+is found as a CALL of it finds one: in the module first, then as `NAME.iwm` or as source in the
+directories.
+
+A module run's `--coverage` report outlines each program of the module compiled from the source
+its program 0 was, its paragraphs from the LIR and their lines from the debug table, which is the
+report a run of that source writes. Its `--evidence` journal records, as its `input` records, the
+files program 0's `DEBUG` record holds (§9.2), and a program CALL loads from another module as a
+`call` record with that program's source file as its module records it; event and abend records
+name a file by the path its module records for it. That is the journal a run of the source writes
+when the module run is given the source's libraries in the same order and its own directory has
+the name of the source's, since the open record names each root by its directory's name: equal but
+for the file the command line names.
 
 ### 8.3 Static and dynamic CALL
 
@@ -702,8 +722,8 @@ bytes each. The reader decodes it with the rest of the module.
 
 Each program's `DEBUG` record ends with `files`, one `Option<SourceFile>` for each of its `sources`
 in order: the file the compile read for that source, named as the evidence journal of a run of the
-source names it ([evidence.md](evidence.md) §1), so that a run of the module can record what it
-was compiled from.
+source names it ([evidence.md](evidence.md) §1), so that a run of the module records what it was
+compiled from (§8.2).
 
 ```rust
 pub struct SourceFile {
@@ -886,8 +906,21 @@ scenarios that wait for question 6 do not run yet.
 - **Given** a module with one byte of a section changed **when** it is run **then** it exits 245
   with the reader's message, **and** nothing runs.
 - **Given** a module **when** it is checked **then** the command is refused with exit status 2;
-  run as a CICS task, or run with a compile flag or `--coverage`, with 246 (usage), **and** given
-  to `compile` it is refused with 16.
+  run or run as a CICS task with a compile flag or `--provenance`, run with a cics flag, or run as a
+  CICS task with `--serve` or `--serve-public`, with 246 (usage), naming what it refuses, **and**
+  given to `compile` it is refused with 16.
+- **Given** FIRSTP.cbl, which reads a CICS file, writes a transient-data queue, LINKs to HELPER and
+  returns TRANSID NEXT with a COMMAREA, compiled to FIRSTP.iwm **when** `ironwork cics FIRSTP.iwm`
+  runs with every flag a task takes **then** its output, exit status, RETURN COMMAREA, queue and
+  file are those of `ironwork cics FIRSTP.cbl`, **and** with `--screens` and `--transaction` or
+  `--csd` the next task runs LIBPGM from LIBPGM.iwm or from source, as the source's does.
+- **Given** a module whose source has sections, a nested program, a user-defined function, a
+  function prototype and COPY members in nested libraries, and whose run reads and writes DDs, CALLs
+  a program from another module, traces statements, sinks and input, and abends in a COPY member
+  **when** it runs with `--coverage` and `--evidence` **then** the coverage report is the source
+  run's byte for byte, **and** the journal is the source run's but for the file `argv` names, the
+  times, the chain and hashes, and the run's duration; **and** so for `ironwork cics` over a
+  two-task pseudo-conversation.
 
 ### L6: SQL replay
 

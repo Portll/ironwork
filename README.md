@@ -23,6 +23,8 @@ From a checkout:
     cargo run -p ironwork -- check program.cbl [-warnings-block] [--cics-return-warning=once|always|never] [--compliance strict|extended] [--dialect ibm|gnucobol] [-I copylib]...
     cargo run -p ironwork -- compile program.cbl... [-o dir] [--bundle NAME] [--source-prefix DIR] [run's compile flags] [-I copylib]...
     cargo run -p ironwork -- dump [--section NAME]... [--strings] [--no-check] program.iwm
+    cargo run -p ironwork -- run program.iwm [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--coverage FILE] [--evidence DIR]
+    cargo run -p ironwork -- cics program.iwm [-L proglib]... [--transid T] [--commarea path[:text]] [--screens script] [--coverage FILE] [--evidence DIR]
 
 `compile` lowers each source's programs and writes them as one load module,
 [docs/load-module.md](docs/load-module.md): PAYROLL.cbl gives PAYROLL.iwm in `-o`'s directory, or
@@ -30,8 +32,14 @@ every source's programs go into NAME.iwm under `--bundle NAME`. A program loweri
 named with the construct and its position, and its source writes nothing. The same source,
 libraries and options give the same bytes from any process or directory; a program that uses
 FUNCTION WHEN-COMPILED holds the compile time, SOURCE_DATE_EPOCH's when it is set. `dump` prints a
-module one fact per line, in section order, and exits 1 for a damaged one. `run` does not run a
-module yet: that needs the VM of [docs/codegen-runtime.md](docs/codegen-runtime.md).
+module one fact per line, in section order, and exits 1 for a damaged one. `run program.iwm` runs a
+module's first program on the VM of [docs/codegen-runtime.md](docs/codegen-runtime.md) with the
+options it was compiled with, CALL finding programs in the module first, then as `NAME.iwm` or
+source in the program libraries; `cics program.iwm` runs it as the first program of a CICS task.
+Each writes the `--coverage` report and the `--evidence` journal a run of the source writes, from
+the paragraphs, lines, source files and digests the module records
+([docs/load-module.md](docs/load-module.md) §8.2, §9.2); a module refuses the compile flags and
+`--provenance`, which describe a compile, with 246 (usage).
 
 CBL and PROCESS cards set the options. COPY members are found in the program's own directory, then
 each `-I` library: a copybook (`.cpy`, `.copy`) in any of them before a program source (`.cbl`,
@@ -517,6 +525,8 @@ The subset the interpreter runs today:
   files (READ with GENERIC, GTEQ and UPDATE, WRITE, REWRITE, DELETE, UNLOCK, and browsing with
   STARTBR, READNEXT, READPREV, RESETBR and ENDBR). Without a screen script the task ends with
   RETURN TRANSID's COMMAREA written out, so a pseudo-conversation runs one task at a time.
+  `ironwork cics program.iwm` runs a load module's first program as the task's first program, on
+  the VM, with every flag but `--serve` and `--serve-public`, which serve a source's tasks.
 - **BMS maps and a 3270 terminal.** COPY of a mapset reads `NAME.bms` (DFHMSD, DFHMDI, DFHMDF) from
   the copy libraries and gives the symbolic map the BMS assembly would; DFHAID and DFHBMSCA carry
   their values. SEND MAP (ERASE, MAPONLY, DATAONLY, CURSOR, symbolic cursor, FREEKB, ALARM, FRSET),

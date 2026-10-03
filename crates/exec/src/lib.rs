@@ -340,7 +340,7 @@ pub(crate) fn execute_task<'w>(
     run_unit.taint = taint;
     run_unit.statement_limit = limit;
     run_unit.sql = database.map(sql::Session::new);
-    let (ending, ended, task) = run_task(compiled, run_unit, task, kept, |unit, me, commarea, length| {
+    let (ending, ended, task) = run_task(First::of(compiled), run_unit, task, kept, |unit, me, commarea, length| {
         machine::Machine::activation(compiled, me, unit, true).and_then(|mut m| {
             m.begin_task(commarea, length);
             m.run_level()
@@ -354,13 +354,14 @@ pub(crate) fn execute_task<'w>(
 /// task's unit of work ended, its files closed and its transient data written. Returns how the run
 /// ended, how ending the task went, and the task; `kept` takes what the run left in its run unit.
 pub(crate) fn run_task<'w, H: Clone, L: unit::Loader<H>, E>(
-    compiled: &Compiled,
+    first: First<'_>,
     mut run_unit: rt::unit::RunUnit<'w, H, L>,
     mut task: cics::Task,
     kept: &mut Option<unit::Remains>,
     run: impl FnOnce(&mut rt::unit::RunUnit<'w, H, L>, usize, Option<usize>, usize) -> Result<Ending, E>,
 ) -> (Result<Ending, E>, Result<(), Abend>, cics::Task) {
-    let me = run_unit.add_named(None, compiled.program.id.to_ascii_uppercase(), compiled.program.files.len(), compiled.layout.size as usize);
+    let me = run_unit.add_named(None, first.name, first.files, first.size);
+    run_unit.programs[me].source = first.source;
     run_unit.eib = run_unit.push_temporary(&[0; cics::EIB_LEN]);
     let commarea = task.commarea.take();
     let length = commarea.as_ref().map_or(0, Vec::len);
@@ -371,7 +372,7 @@ pub(crate) fn run_task<'w, H: Clone, L: unit::Loader<H>, E>(
     });
     run_unit.cics = Some(task);
     let ending = run(&mut run_unit, me, commarea, length);
-    let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.end_task(&compiled.program.id, ending.is_ok()).map(drop));
+    let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.end_task(first.id, ending.is_ok()).map(drop));
     let mut closed = run_unit.close_all(false);
     for (name, f) in run_unit.cics_files.drain() {
         if let Err(e) = f.close() {
@@ -380,12 +381,31 @@ pub(crate) fn run_task<'w, H: Clone, L: unit::Loader<H>, E>(
     }
     *kept = Some(unit::Remains::of(&run_unit));
     let mut task = run_unit.cics.take().unwrap_or_default();
-    if let Err(e) = task.flush_td(compiled.options.code_page()) {
+    if let Err(e) = task.flush_td(first.page) {
         closed = closed.and(Err(format!("writing transient data: {e}")));
     }
     let settled = settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default(), file: None });
     let closed = closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default(), file: None });
     (ending, settled.and(closed), task)
+}
+
+/// What a CICS task's run unit needs of its first program besides its code: the PROGRAM-ID, which
+/// names the task's unit of work, the name the run unit holds it by, its shape, its code page, and
+/// the file a program library supplied it from.
+pub(crate) struct First<'a> {
+    pub id: &'a str,
+    pub name: String,
+    pub files: usize,
+    pub size: usize,
+    pub page: &'static zarch::ebcdic::CodePage,
+    pub source: Option<std::path::PathBuf>,
+}
+
+impl<'a> First<'a> {
+    pub(crate) fn of(compiled: &'a Compiled) -> Self {
+        let p = &compiled.program;
+        Self { id: &p.id, name: p.id.to_ascii_uppercase(), files: p.files.len(), size: compiled.layout.size as usize, page: compiled.options.code_page(), source: None }
+    }
 }
 
 /// A program check in a CICS task, which CICS reports as ASRA.

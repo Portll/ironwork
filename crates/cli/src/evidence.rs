@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use exec::digest::{hex, sha256_reader};
 use exec::evidence::{fields, Journal, Ledger, Value};
+use exec::module::SourceFile;
 use exec::unit::Event;
 use syntax::ast::OpenMode;
 
@@ -100,6 +101,17 @@ pub fn sources(journal: &mut Journal, sources: &[String], program: &str, roots: 
     }
 }
 
+/// The files a load module records its program's compile read, as `sources` records a source's:
+/// the source, then each COPY member, each once.
+pub fn recorded_sources(journal: &mut Journal, files: &[Option<SourceFile>]) {
+    let mut seen = BTreeSet::new();
+    for file in files.iter().flatten() {
+        if seen.insert((file.root, file.path.as_str())) {
+            let _ = journal.append("input", fields([("root", Value::Int(i64::from(file.root))), ("path", file.path.clone().into()), ("sha256", hex(&file.sha256).into()), ("bytes", file.bytes.into())]));
+        }
+    }
+}
+
 const fn mode_name(mode: OpenMode) -> &'static str {
     match mode {
         OpenMode::Input => "INPUT",
@@ -140,12 +152,14 @@ fn file_name(path: &str) -> Option<String> {
 }
 
 /// A run in progress: the journal, every DD it opened, so their final state is recorded, for an
-/// input trace the marker and each sink already recorded as reached or not, and for a statement
-/// trace the statements listed and how many starts of each are recorded.
+/// input trace the marker and each sink already recorded as reached or not, for a statement trace
+/// the statements listed and how many starts of each are recorded, and the path the journal gives
+/// each debug-table name of a load module's programs.
 pub struct Run {
     journal: Journal,
     roots: Vec<PathBuf>,
     program: String,
+    recorded: BTreeMap<String, String>,
     opened: BTreeSet<(String, PathBuf)>,
     marker: Option<String>,
     sinks: BTreeSet<SinkRecord>,
@@ -160,6 +174,7 @@ impl Run {
             journal,
             roots: roots.to_vec(),
             program: program.to_string(),
+            recorded: BTreeMap::new(),
             opened: BTreeSet::new(),
             marker: marker.map(str::to_string),
             sinks: BTreeSet::new(),
@@ -174,6 +189,30 @@ impl Run {
     pub fn with_input(mut self, input: bool) -> Self {
         self.input = input;
         self
+    }
+
+    /// Names each file a load module's program names by the path the module records for it, where
+    /// it records one: what its compile read, relative to the library it was found in.
+    pub fn with_recorded<'a>(mut self, names: impl IntoIterator<Item = (&'a str, &'a Option<SourceFile>)>) -> Self {
+        self.record(names);
+        self
+    }
+
+    pub fn record<'a>(&mut self, names: impl IntoIterator<Item = (&'a str, &'a Option<SourceFile>)>) {
+        for (name, file) in names {
+            if let Some(file) = file {
+                self.recorded.insert(name.to_owned(), file.path.clone());
+            }
+        }
+    }
+
+    /// A file an event or an abend names, as the journal records it: by the path a load module
+    /// records for it, else relative to its root, the run's own program for the empty name.
+    fn named(&self, file: &str) -> String {
+        match self.recorded.get(file) {
+            Some(path) => path.clone(),
+            None => relative(Path::new(if file.is_empty() { self.program.as_str() } else { file }), &self.roots),
+        }
     }
 
     /// Records each start of these statements, by file name and line, up to [`STATEMENT_CAP`].
@@ -208,7 +247,7 @@ impl Run {
             }
             Event::Close { dd, path } => self.dd(dd, "close", None, path),
             Event::Paragraph { .. } => {}
-            Event::Load { program, source } => {
+            Event::Load { program, source, recorded } => {
                 let mut f = fields([("program", program.into())]);
                 if let Some((sha, _)) = source.and_then(digest) {
                     f.insert("sha256".into(), sha.into());
@@ -216,6 +255,11 @@ impl Run {
                 if let Some(p) = source {
                     f.insert("from".into(), relative(p, &self.roots).into());
                 }
+                if let Some((_, Some(own))) = recorded.first() {
+                    f.insert("sha256".into(), hex(&own.sha256).into());
+                    f.insert("from".into(), own.path.clone().into());
+                }
+                self.record(recorded.iter().map(|(name, file)| (name.as_str(), file)));
                 self.write("call", f);
             }
             Event::Statement { file, line } => {
@@ -227,7 +271,7 @@ impl Run {
                 }
                 *count += 1;
                 let capped = *count == STATEMENT_CAP;
-                let mut f = fields([("file", relative(Path::new(file), &self.roots).into()), ("line", i64::from(line).into())]);
+                let mut f = fields([("file", self.named(file).into()), ("line", i64::from(line).into())]);
                 if capped {
                     f.insert("capped".into(), true.into());
                 }
@@ -240,8 +284,7 @@ impl Run {
                 let reached = self.marker.as_ref().map(|m| operand.contains(m.as_str()));
                 let input = self.input.then_some(input);
                 if self.sinks.insert((kind, file.to_string(), line, reached, input)) {
-                    let file = relative(Path::new(if file.is_empty() { self.program.as_str() } else { file }), &self.roots);
-                    let mut f = fields([("sink", kind.into()), ("file", file.into()), ("line", i64::from(line).into())]);
+                    let mut f = fields([("sink", kind.into()), ("file", self.named(file).into()), ("line", i64::from(line).into())]);
                     if let (Some(marker), Some(reached)) = (&self.marker, reached) {
                         f.insert("marker".into(), marker.clone().into());
                         f.insert("reached".into(), reached.into());
@@ -272,8 +315,8 @@ impl Run {
         if let Some((code, file, line)) = abend {
             let mut f = fields([("code", code.into())]);
             // The program's own source is file 0, which the compile leaves unnamed.
-            if let Some(file) = file.map(|f| if f.is_empty() { self.program.as_str() } else { f }).filter(|f| !f.is_empty() && line > 0) {
-                f.insert("file".into(), relative(Path::new(file), &self.roots).into());
+            if let Some(file) = file.filter(|f| (!f.is_empty() || !self.program.is_empty()) && line > 0) {
+                f.insert("file".into(), self.named(file).into());
                 f.insert("line".into(), Value::Int(line));
             }
             self.write("abend", f);

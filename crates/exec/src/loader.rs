@@ -83,7 +83,7 @@ impl Loader<Rc<Compiled>> for Library {
         })?;
         let compiled = Rc::new(compiled);
         let (files, size) = Self::shape(&compiled);
-        Ok(LoadedProgram { name: compiled.program.load_name().to_ascii_uppercase(), files, size, source, compiled })
+        Ok(LoadedProgram { name: compiled.program.load_name().to_ascii_uppercase(), files, size, source, compiled, recorded: Vec::new() })
     }
 
     fn holder(&self, entry: &str) -> Option<String> {
