@@ -9,11 +9,13 @@ use crate::{Error, Pos};
 use std::path::{Path, PathBuf};
 
 /// Directories searched for COPY members, in order. A `COPY X OF LIB` looks in `<dir>/LIB` first.
-/// The file being compiled, when named, is never one of its own members.
+/// The file being compiled, when named, is never one of its own members. The compliance level is
+/// how the program and its members are read.
 #[derive(Clone, Debug, Default)]
 pub struct Libraries {
     dirs: Vec<PathBuf>,
     program: Option<PathBuf>,
+    compliance: numeric::Compliance,
 }
 
 const COPYBOOKS: &[&str] = &[".cpy", ".CPY", ".copy", ".COPY"];
@@ -23,12 +25,21 @@ const MAX_DEPTH: usize = 32;
 
 impl Libraries {
     pub fn new(dirs: Vec<PathBuf>) -> Self {
-        Self { dirs, program: None }
+        Self { dirs, program: None, compliance: numeric::Compliance::Strict }
     }
 
     /// These libraries, for compiling the program in `program`.
     pub fn with_program(&self, program: &Path) -> Self {
-        Self { dirs: self.dirs.clone(), program: Some(program.to_path_buf()) }
+        Self { program: Some(program.to_path_buf()), ..self.clone() }
+    }
+
+    /// These libraries, read under `compliance`.
+    pub fn with_compliance(&self, compliance: numeric::Compliance) -> Self {
+        Self { compliance, ..self.clone() }
+    }
+
+    pub fn compliance(&self) -> numeric::Compliance {
+        self.compliance
     }
 
     /// A round of extensions searches every library before the next round starts, so a copybook in
@@ -249,11 +260,11 @@ fn copy_span(out: &mut Source, chars: &[char], positions: &[Pos], range: std::op
 
 fn apply(src: &Source, replacing: &[Replacing]) -> Source {
     if replacing.is_empty() {
-        return Source { text: src.text.clone(), positions: src.positions.clone(), options: Vec::new(), debugging: None };
+        return Source { text: src.text.clone(), positions: src.positions.clone(), options: Vec::new(), debugging: None, free: Vec::new() };
     }
     let chars: Vec<char> = src.text.chars().collect();
     let words = text_words(&chars);
-    let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new(), debugging: None };
+    let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new(), debugging: None, free: Vec::new() };
     let emit = |out: &mut Source, text: &str, pos: Pos| {
         for c in text.chars() {
             out.text.push(c);
@@ -324,8 +335,8 @@ fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>,
     if !words.iter().any(|w| w.text.eq_ignore_ascii_case("COPY") || w.text.eq_ignore_ascii_case("INCLUDE")) {
         return Ok(source);
     }
-    let mut out = Source { text: String::new(), positions: Vec::new(), options: source.options.clone(), debugging: source.debugging.clone() };
-    let read = |text: &str, file: u16| if source.debugging.is_some() { source::read_file_debugging(text, file) } else { source::read_file(text, file) };
+    let mut out = Source { text: String::new(), positions: Vec::new(), options: source.options.clone(), debugging: source.debugging.clone(), free: source.free.clone() };
+    let read = |text: &str, file: u16| source::read_under(text, file, source.debugging.is_some(), libraries.compliance());
     let (mut cursor, mut i) = (0usize, 0usize);
     while i < words.len() {
         let pos = source.positions[words[i].start];
@@ -344,7 +355,11 @@ fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>,
         let verb = if sql { "EXEC SQL INCLUDE" } else { "COPY" };
         let mapset = if own || path.is_some() { None } else { bms::load(libraries, &name, library.as_deref()) };
         let (key, member) = match (path, mapset) {
-            (Some(path), _) => (path.display().to_string(), read_member(&path, pos, files, &read)?),
+            (Some(path), _) => {
+                let copied_free = source.free_at(pos).is_some();
+                let copied = |text: &str, file: u16| source::read_copied(text, file, source.debugging.is_some(), libraries.compliance(), copied_free);
+                (path.display().to_string(), read_member(&path, pos, files, &copied)?)
+            }
             (None, Some((path, mapset))) => {
                 let mapset = mapset.map_err(|e| Error::at(pos, format!("{verb} {name}: {}", e.place(&path.display().to_string()))))?;
                 let file = u16::try_from(files.len()).map_err(|_| Error::at(pos, "more than 65535 copy members"))?;
@@ -372,6 +387,7 @@ fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>,
             }
             lines.extend(copied);
         }
+        out.free.extend(member.free.iter().cloned());
         let replaced = apply(&member, &replacing);
         out.text.push_str(&replaced.text);
         out.positions.extend(replaced.positions);
@@ -395,9 +411,9 @@ pub fn replace(source: Source) -> Result<Source, Error> {
     if !(0..words.len()).any(starts) {
         return Ok(source);
     }
-    let mut out = Source { text: String::new(), positions: Vec::new(), options: source.options.clone(), debugging: source.debugging.clone() };
+    let mut out = Source { text: String::new(), positions: Vec::new(), options: source.options.clone(), debugging: source.debugging.clone(), free: source.free.clone() };
     let segment = |out: &mut Source, range: std::ops::Range<usize>, active: &[Replacing]| {
-        let text = Source { text: chars[range.clone()].iter().collect(), positions: source.positions[range].to_vec(), options: Vec::new(), debugging: None };
+        let text = Source { text: chars[range.clone()].iter().collect(), positions: source.positions[range].to_vec(), options: Vec::new(), debugging: None, free: Vec::new() };
         let replaced = apply(&text, active);
         out.text.push_str(&replaced.text);
         out.positions.extend(replaced.positions);

@@ -10,7 +10,7 @@ use crate::storage::Kind;
 use crate::vocab::{AcceptFrom, BinOp, Closing, Figurative, InspectMode, OpenMode, Pos, RelOp, SignClause, SignPosition};
 use crate::{codec_enum, codec_struct};
 use numeric::precision::{Fixed, Places};
-use numeric::options::{Compile, FastsrtAdvPrint, Invdata, Stop, Warnings};
+use numeric::options::{Compile, Compliance, FastsrtAdvPrint, Invdata, Stop, Warnings};
 use numeric::{
     Arith, BinCheck, CicsReturnWarning, Currency, DispSign, Initcheck, IntDate, Nsymbol, Numcheck, Numproc, Options, Parmcheck, Qualify, Quote, SortKeys, Trunc,
     TruncCheck, Vlr, VsamOpenFs, ZonCheck,
@@ -140,7 +140,7 @@ codec_enum!(FileStatus {
 codec_struct!(Options {
     arith, trunc, numproc, codepage, trunc_check, fastsrt, fastsrt_adv_print, sort_keys, adv, thread, dll, rent, dbcs,
     warnings, compile, dynam, debug, cics_return_warning, invdata, zwb, quote, currency, nsymbol, dispsign, intdate, qualify, initial,
-    vlr, vsamopenfs, numcheck, parmcheck, initcheck, optimize,
+    vlr, vsamopenfs, numcheck, parmcheck, initcheck, optimize, compliance,
 } check options_valid);
 codec_struct!(Invdata { forcenumcmp, cleansign });
 codec_enum!(Arith { Compat = 0, Extend = 1 });
@@ -161,6 +161,7 @@ codec_enum!(IntDate { Ansi = 0, Lilian = 1 });
 codec_enum!(Qualify { Compat = 0, Extend = 1 });
 codec_enum!(Vlr { Standard = 0, Compat = 1 });
 codec_enum!(VsamOpenFs { Compat = 0, Succ = 1 });
+codec_enum!(Compliance { Strict = 0, Extended = 1 });
 codec_struct!(Numcheck { zon, pac, bin, abd });
 codec_struct!(ZonCheck { alphnum, lax });
 codec_struct!(BinCheck { truncbin });

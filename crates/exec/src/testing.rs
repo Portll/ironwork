@@ -128,7 +128,8 @@ impl Harness {
     /// and the two must agree in everything [`Run`] holds (docs/lir.md §12.3); what the VM does
     /// not run yet is counted, not failed.
     pub fn run(self, executor: Executor) -> Outcome {
-        let mut programs = syntax::parse_all_with(&self.source, &syntax::copy::Libraries::default()).unwrap_or_else(|e| panic!("{e}"));
+        let copy = syntax::copy::Libraries::default().with_compliance(numeric::Compliance::of(&self.flags));
+        let mut programs = syntax::parse_all_with(&self.source, &copy).unwrap_or_else(|e| panic!("{e}"));
         let main = programs.remove(0);
         let compiled = match self.when_compiled {
             Some(at) => compile_at(main, &self.flags, at),
@@ -137,7 +138,7 @@ impl Harness {
         let compiled = compiled.unwrap_or_else(|e| panic!("{e:?}"));
         programs.extend(self.classes.iter().map(|c| syntax::parse(c).unwrap_or_else(|e| panic!("{e}\n{c}"))));
         let fingerprint = rt::sql::fingerprint(&format!("{}\n{}", self.source, self.flags.join(" ")));
-        let library = unit::Library { programs, dirs: self.dirs, flags: self.flags, trace_statements: Some(unit::StatementFilter::All), trace_input: true, ..Default::default() };
+        let library = unit::Library { programs, dirs: self.dirs, copy, flags: self.flags, trace_statements: Some(unit::StatementFilter::All), trace_input: true, ..Default::default() };
         let lowered = check_lowering(&compiled, fingerprint, None);
         for program in &library.programs {
             // Compiled as `RunUnit::load` compiles a CALLed program; one that does not compile is left out.

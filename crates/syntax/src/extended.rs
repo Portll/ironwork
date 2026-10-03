@@ -1,0 +1,325 @@
+//! What `--compliance extended` does to the tokens before the parser reads them: each constant
+//! entry comes out and every later use of its name stands for its value, literals joined by `&`
+//! become one literal, and BINARY-SHORT, BINARY-LONG and BINARY-DOUBLE become COMP-5 PICTUREs
+//! (docs/compliance.md).
+
+use crate::lexer::{Tok, Token};
+use crate::{Error, Pos};
+use std::collections::HashMap;
+
+pub const CONSTANT: &str = "IWX0002-W constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause)";
+pub const CONCATENATION: &str = "IWX0004-W literal concatenation with & (Micro Focus and GnuCOBOL; Enterprise COBOL has none)";
+pub const BINARY_USAGE: &str = "IWX0005-W the COBOL 2002 binary usage (Micro Focus and GnuCOBOL; not Enterprise COBOL's)";
+pub const NO_IDENTIFICATION_HEADER: &str = "IWX0006-W PROGRAM-ID with no IDENTIFICATION DIVISION header before it (COBOL 2002, Micro Focus and GnuCOBOL; Enterprise COBOL requires the header)";
+
+/// BINARY-SHORT, BINARY-LONG and BINARY-DOUBLE, and the COMP-5 PICTURE each is: two, four and eight
+/// bytes of native binary.
+const BINARY_USAGES: &[(&str, &str)] = &[("BINARY-SHORT", "9(4)"), ("BINARY-LONG", "9(9)"), ("BINARY-DOUBLE", "9(18)")];
+
+const FIGURATIVES: &[&str] = &["ZERO", "ZEROS", "ZEROES", "SPACE", "SPACES", "HIGH-VALUE", "HIGH-VALUES", "LOW-VALUE", "LOW-VALUES", "QUOTE", "QUOTES", "NULL", "NULLS"];
+
+/// The tokens with constant entries taken out, their names replaced by their values, `&`
+/// concatenations joined and the binary usages rewritten. `cards` are the CBL and PROCESS options,
+/// whose code page reads a hexadecimal literal joined to an alphanumeric one.
+pub fn rewrite(tokens: Vec<Token>, cards: &[String]) -> Result<Vec<Token>, Error> {
+    let mut options = numeric::Options::default();
+    for card in cards {
+        options.apply(card).ok();
+    }
+    let mut r = Rewrite { tokens, at: 0, out: Vec::new(), constants: HashMap::new(), pending: Vec::new(), options };
+    let mut data = false;
+    while r.at < r.tokens.len() {
+        let division = r.tokens.get(r.at + 1).is_some_and(|t| matches!(&t.tok, Tok::Word(w) if w == "DIVISION"));
+        match &r.tokens[r.at].tok {
+            Tok::Word(w) if division => data = w == "DATA",
+            Tok::Number(n) if data && r.out.last().is_none_or(|t| t.tok == Tok::Period) && matches!(r.tokens.get(r.at + 1).map(|t| &t.tok), Some(Tok::Word(_))) && (n == "78" || r.word_at(2) == Some("CONSTANT") && matches!(n.as_str(), "01" | "1")) => {
+                r.constant()?;
+                continue;
+            }
+            Tok::Word(w) if data && (w == "BINARY-CHAR" || BINARY_USAGES.iter().any(|(u, _)| u == w)) => {
+                r.binary_usage()?;
+                continue;
+            }
+            Tok::Word(w) if w == "PROGRAM-ID" && !ends_with_header(&r.out) => r.identification_header(),
+            _ => {}
+        }
+        let value = r.value()?;
+        r.push(value);
+    }
+    if let Some(last) = r.out.last_mut() {
+        last.messages.append(&mut r.pending);
+    }
+    Ok(r.out)
+}
+
+struct Rewrite {
+    tokens: Vec<Token>,
+    at: usize,
+    out: Vec<Token>,
+    constants: HashMap<String, Tok>,
+    /// Messages of tokens taken out, for the next token kept.
+    pending: Vec<Error>,
+    /// The cards' options, whose code page reads a hexadecimal literal joined to an alphanumeric one.
+    options: numeric::Options,
+}
+
+impl Rewrite {
+    fn push(&mut self, mut token: Token) {
+        token.messages.splice(0..0, self.pending.drain(..));
+        self.out.push(token);
+    }
+
+    /// Token `k`, a constant's name replaced by its value and a PICTURE's `(name)` by the number.
+    fn substituted(&self, k: usize) -> Token {
+        let mut token = self.tokens[k].clone();
+        match &token.tok {
+            Tok::Word(w) => {
+                if let Some(value) = self.constants.get(w) {
+                    token.tok = value.clone();
+                    token.spelled = None;
+                }
+            }
+            Tok::Pic(p) => {
+                if let Some(p) = picture(p, &self.constants) {
+                    token.tok = Tok::Pic(p);
+                }
+            }
+            _ => {}
+        }
+        token
+    }
+
+    /// The token at `at`, substituted, and the literals any `&` joins to it.
+    fn value(&mut self) -> Result<Token, Error> {
+        let mut left = self.substituted(self.at);
+        self.at += 1;
+        while self.tokens.get(self.at).is_some_and(|t| t.tok == Tok::Ampersand) {
+            let amp = self.tokens[self.at].clone();
+            if self.at + 1 >= self.tokens.len() {
+                return Err(Error::at(amp.pos, "& with no literal after it"));
+            }
+            let right = self.substituted(self.at + 1);
+            self.at += 2;
+            left = join(left, amp, right, |bytes| self.options.code_page().decode(bytes))?;
+        }
+        Ok(left)
+    }
+
+    fn word_at(&self, ahead: usize) -> Option<&str> {
+        match self.tokens.get(self.at + ahead).map(|t| &t.tok) {
+            Some(Tok::Word(w)) => Some(w),
+            _ => None,
+        }
+    }
+
+    /// A constant entry from its level number, `78 name [IS] [GLOBAL] VALUE [IS] value.` or
+    /// `01 name CONSTANT [IS] [GLOBAL] [AS] value.`, where the value is a literal, a figurative
+    /// constant, a constant already defined, or literals joined by `&`. The entry is taken out of
+    /// the tokens.
+    fn constant(&mut self) -> Result<(), Error> {
+        let level = self.tokens[self.at].clone();
+        let named = self.tokens[self.at + 1].clone();
+        let Tok::Word(name) = named.tok else { unreachable!("the caller saw a word") };
+        let seventy_eight = level.tok == Tok::Number("78".into());
+        self.at += if seventy_eight { 2 } else { 3 };
+        self.pending.extend(level.messages);
+        self.pending.extend(named.messages);
+        let refused = |at: Pos, why: &str| Error::at(at, format!("constant {name}: {why}"));
+        match (self.word_at(0), self.word_at(1)) {
+            (Some("IS"), Some("GLOBAL")) => self.at += 2,
+            (Some("GLOBAL"), _) => self.at += 1,
+            _ => {}
+        }
+        let here = self.tokens.get(self.at).map_or(named.pos, |t| t.pos);
+        if seventy_eight {
+            if self.word_at(0) != Some("VALUE") {
+                return Err(refused(here, "a level-78 entry is VALUE and its value, then a period"));
+            }
+            self.at += 1;
+            if self.word_at(0) == Some("IS") {
+                self.at += 1;
+            }
+        } else if self.word_at(0) == Some("AS") {
+            self.at += 1;
+        }
+        if self.at >= self.tokens.len() {
+            return Err(refused(here, "VALUE with no value"));
+        }
+        let value = self.value()?;
+        let literal = match &value.tok {
+            Tok::Alnum(_) | Tok::Hex(_) | Tok::National(_) | Tok::Number(_) => true,
+            Tok::Word(w) => FIGURATIVES.contains(&w.as_str()),
+            _ => false,
+        };
+        let ended = self.tokens.get(self.at).is_some_and(|t| t.tok == Tok::Period);
+        if !literal || !ended {
+            let at = if literal { self.tokens.get(self.at).map_or(value.pos, |t| t.pos) } else { value.pos };
+            return Err(refused(at, "the value is a literal, a figurative constant, a constant defined before, or literals joined by &; ironwork computes no expression there"));
+        }
+        self.pending.extend(self.tokens[self.at].messages.iter().cloned());
+        self.at += 1;
+        self.pending.push(Error::warning(level.pos, format!("{CONSTANT}: {name} stands for its value wherever it is used after this entry")));
+        self.pending.extend(value.messages);
+        self.constants.insert(name, value.tok);
+        Ok(())
+    }
+
+    /// `IDENTIFICATION DIVISION.` before a PROGRAM-ID that has none, which it means.
+    fn identification_header(&mut self) {
+        let at = self.tokens[self.at].clone();
+        let made = |tok: Tok, messages: Vec<Error>| Token { tok, pos: at.pos, area_a: at.area_a, spelled: None, after_comma: false, messages };
+        let warning = Error::warning(at.pos, format!("{NO_IDENTIFICATION_HEADER}: the program reads as though IDENTIFICATION DIVISION. came before it"));
+        self.push(made(Tok::Word("IDENTIFICATION".into()), vec![warning]));
+        self.push(made(Tok::Word("DIVISION".into()), Vec::new()));
+        self.push(made(Tok::Period, Vec::new()));
+    }
+
+    /// `[USAGE [IS]] BINARY-SHORT|BINARY-LONG|BINARY-DOUBLE [SIGNED|UNSIGNED]` in a data entry, as
+    /// `PIC S9(n) COMP-5`, or `PIC 9(n) COMP-5` when UNSIGNED: SIGNED is the default.
+    fn binary_usage(&mut self) -> Result<(), Error> {
+        let token = self.tokens[self.at].clone();
+        let Tok::Word(usage) = &token.tok else { unreachable!("the caller saw a word") };
+        let Some(&(_, digits)) = BINARY_USAGES.iter().find(|(u, _)| u == usage) else {
+            return Err(Error::at(token.pos, "BINARY-CHAR is a one-byte binary item, and ironwork's binary items are two, four or eight bytes, as Enterprise COBOL's are"));
+        };
+        let mut messages = Vec::new();
+        if self.out.last().is_some_and(|t| t.tok == Tok::Word("IS".into())) && self.out.len() >= 2 && self.out[self.out.len() - 2].tok == Tok::Word("USAGE".into()) {
+            messages.extend(self.out.pop().map(|t| t.messages).unwrap_or_default());
+        }
+        if self.out.last().is_some_and(|t| t.tok == Tok::Word("USAGE".into())) {
+            messages.extend(self.out.pop().map(|t| t.messages).unwrap_or_default());
+        }
+        self.at += 1;
+        let signed = match self.tokens.get(self.at).map(|t| &t.tok) {
+            Some(Tok::Word(w)) if w == "SIGNED" || w == "UNSIGNED" => {
+                self.at += 1;
+                w == "SIGNED"
+            }
+            _ => true,
+        };
+        let picture = format!("{}{digits}", if signed { "S" } else { "" });
+        let shown = format!("{BINARY_USAGE}: {usage}{} is read as PIC {picture} COMP-5", if signed { "" } else { " UNSIGNED" });
+        messages.push(Error::warning(token.pos, shown));
+        messages.extend(token.messages.iter().cloned());
+        let made = |tok: Tok, messages: Vec<Error>| Token { tok, pos: token.pos, area_a: false, spelled: None, after_comma: false, messages };
+        self.push(made(Tok::Word("PIC".into()), messages));
+        self.push(made(Tok::Pic(picture), Vec::new()));
+        self.push(made(Tok::Word("COMP-5".into()), Vec::new()));
+        Ok(())
+    }
+}
+
+/// Whether the tokens end with `IDENTIFICATION DIVISION.` or `ID DIVISION.`.
+fn ends_with_header(tokens: &[Token]) -> bool {
+    matches!(tokens, [.., a, b, c] if matches!(&a.tok, Tok::Word(w) if w == "IDENTIFICATION" || w == "ID") && b.tok == Tok::Word("DIVISION".into()) && c.tok == Tok::Period)
+}
+
+/// `(name)` in a PICTURE, where `name` is a constant whose value is an unsigned integer, with the
+/// integer in its place.
+fn picture(text: &str, constants: &HashMap<String, Tok>) -> Option<String> {
+    let (mut out, mut rest, mut changed) = (String::new(), text, false);
+    while let Some(open) = rest.find('(') {
+        let Some(close) = rest[open..].find(')').map(|c| open + c) else { break };
+        match constants.get(&rest[open + 1..close]) {
+            Some(Tok::Number(n)) if n.bytes().all(|b| b.is_ascii_digit()) => {
+                out.push_str(&rest[..=open]);
+                out.push_str(n);
+                out.push(')');
+                changed = true;
+            }
+            _ => out.push_str(&rest[..=close]),
+        }
+        rest = &rest[close + 1..];
+    }
+    out.push_str(rest);
+    changed.then_some(out)
+}
+
+/// `left & right` as one literal, at `left`'s place. Alphanumeric and hexadecimal literals join
+/// into an alphanumeric one, a hexadecimal one's bytes read in the program's code page, two
+/// hexadecimal literals into a hexadecimal one, and national literals into a national one.
+fn join(left: Token, amp: Token, right: Token, decode: impl Fn(&[u8]) -> String) -> Result<Token, Error> {
+    let tok = match (&left.tok, &right.tok) {
+        (Tok::Alnum(a), Tok::Alnum(b)) => Tok::Alnum(format!("{a}{b}")),
+        (Tok::Hex(a), Tok::Hex(b)) => Tok::Hex([a.as_slice(), b].concat()),
+        (Tok::Alnum(a), Tok::Hex(b)) => Tok::Alnum(format!("{a}{}", decode(b))),
+        (Tok::Hex(a), Tok::Alnum(b)) => Tok::Alnum(format!("{}{b}", decode(a))),
+        (Tok::National(a), Tok::National(b)) => Tok::National(format!("{a}{b}")),
+        _ => return Err(Error::at(amp.pos, "& joins two alphanumeric or hexadecimal literals, or two national literals, either of which may be a level-78 constant standing for one")),
+    };
+    let mut messages = left.messages;
+    messages.push(Error::warning(amp.pos, format!("{CONCATENATION}: the literals on either side are one literal")));
+    messages.extend(amp.messages);
+    messages.extend(right.messages);
+    Ok(Token { tok, pos: left.pos, area_a: left.area_a, spelled: None, after_comma: left.after_comma, messages })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ast::{Literal, Usage};
+    use crate::copy::Libraries;
+    use numeric::Compliance;
+
+    fn source(data: &str, procedure: &str) -> String {
+        format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n{data}       PROCEDURE DIVISION.\n{procedure}           GOBACK.\n")
+    }
+
+    fn extended(text: &str) -> Result<crate::ast::Program, crate::Error> {
+        crate::parse_with(text, &Libraries::default().with_compliance(Compliance::Extended))
+    }
+
+    #[test]
+    fn a_constant_stands_for_its_value_in_pictures_values_occurs_and_statements() {
+        let data = concat!(
+            "       78  MAX-LEN VALUE 3.\n",
+            "       78  GREETING IS GLOBAL VALUE IS 'AB' & X'C1'.\n",
+            "       01  QUOTED CONSTANT AS 'Q'.\n",
+            "       01  NOTHING CONSTANT GLOBAL SPACE.\n",
+            "       01  X PIC X(MAX-LEN) VALUE GREETING.\n",
+            "       01  G.\n",
+            "           05 T OCCURS MAX-LEN TIMES PIC X VALUE NOTHING.\n",
+        );
+        let p = extended(&source(data, "           MOVE QUOTED TO X.\n")).unwrap();
+        let names: Vec<&str> = p.working_storage.iter().filter_map(|e| e.name.as_deref()).collect();
+        assert_eq!(names, ["X", "G", "T"]);
+        let x = &p.working_storage[0];
+        assert_eq!((x.picture.as_deref(), x.value.clone()), (Some("X(3)"), Some(Literal::Alnum("ABA".into()))));
+        assert_eq!(p.working_storage[2].occurs, Some(3));
+        let warnings: Vec<(u32, String)> = p.messages.iter().map(|m| (m.pos.line, m.message.clone())).collect();
+        assert_eq!(warnings.len(), 5, "{warnings:?}");
+        assert!(warnings[..2].iter().all(|(_, m)| m.starts_with(super::CONSTANT)) && warnings[0].0 == 5 && warnings[0].1.ends_with("MAX-LEN stands for its value wherever it is used after this entry"));
+        assert!(warnings[2].1.starts_with(super::CONCATENATION) && warnings[2].0 == 6);
+        assert!(warnings[3..].iter().all(|(_, m)| m.starts_with(super::CONSTANT)));
+        assert!(format!("{:?}", p.paragraphs[0].statements[0]).contains("Alnum(\"Q\")"));
+    }
+
+    #[test]
+    fn a_constant_whose_value_is_an_expression_or_missing_is_refused_by_name() {
+        let refused = |data: &str| extended(&source(data, "")).unwrap_err().message;
+        assert_eq!(refused("       78  N VALUE 1 + 2.\n"), "constant N: the value is a literal, a figurative constant, a constant defined before, or literals joined by &; ironwork computes no expression there");
+        assert_eq!(refused("       78  N PIC 9 VALUE 1.\n"), "constant N: a level-78 entry is VALUE and its value, then a period");
+        assert!(refused("       01  N PIC X VALUE 'A' & B.\n").starts_with("& joins two alphanumeric or hexadecimal literals"));
+        assert!(refused("       01  N PIC X VALUE 'A' & N'B'.\n").starts_with("& joins two alphanumeric or hexadecimal literals"));
+    }
+
+    #[test]
+    fn the_binary_usages_are_comp_5_pictures_and_binary_char_is_refused() {
+        let data = "       01  A USAGE IS BINARY-LONG.\n       01  B BINARY-SHORT UNSIGNED VALUE 7.\n       01  C BINARY-DOUBLE SIGNED.\n";
+        let p = extended(&source(data, "")).unwrap();
+        let read: Vec<(Option<&str>, Option<Usage>)> = p.working_storage.iter().map(|e| (e.picture.as_deref(), e.usage)).collect();
+        assert_eq!(read, [(Some("S9(9)"), Some(Usage::NativeBinary)), (Some("9(4)"), Some(Usage::NativeBinary)), (Some("S9(18)"), Some(Usage::NativeBinary))]);
+        assert_eq!(p.working_storage[1].value, Some(Literal::Number("7".into())));
+        let shown: Vec<String> = p.messages.iter().map(|m| m.message.clone()).collect();
+        assert_eq!(shown[1], format!("{}: BINARY-SHORT UNSIGNED is read as PIC 9(4) COMP-5", super::BINARY_USAGE));
+        let refused = extended(&source("       01  D BINARY-CHAR.\n", "")).unwrap_err();
+        assert!(refused.message.starts_with("BINARY-CHAR is a one-byte binary item") && refused.pos.line == 5);
+    }
+
+    #[test]
+    fn strict_reads_none_of_it() {
+        let strict = |data: &str| crate::parse(&source(data, ""));
+        assert_eq!(strict("       01  N PIC X(2) VALUE 'A' & 'B'.\n").unwrap_err().message, "literal concatenation with & is not Enterprise COBOL's");
+        assert_eq!(strict("       78  N VALUE 1.\n").unwrap().working_storage[0].level, 78);
+        assert!(strict("       01  A BINARY-LONG.\n").unwrap_err().message.contains("BINARY-LONG is not a data description clause"));
+    }
+}

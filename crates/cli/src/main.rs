@@ -10,14 +10,14 @@ usage:
                [-debug] [--cics-return-warning=once|always|never] [--optimize=0|1|2] [-I <dir>]... [-L <dir>]... [--vm]
                [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT] [--exit-code]
                [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
-                                                       compile and run; CBL and PROCESS cards set the options
+               [--compliance strict|extended]          compile and run; CBL and PROCESS cards set the options
   ironwork run <module.iwm> [-L <dir>]... [-I <dir>]... [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
                [--statement-limit N] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                [--exit-code]
                                                        run a load module's first program on the VM, with the options
                                                        it was compiled with
   ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]...
-                                                       compile only
+               [--compliance strict|extended]          compile only
   ironwork cics <program.cbl> [run flags] [--vm] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
                [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]... [--td QUEUE=path]...
                [--screens path | --serve HOST:PORT [--serve-public] [--transaction TRAN=PROGRAM]... [--csd path]]
@@ -25,7 +25,8 @@ usage:
   ironwork compile <program.cbl>... [-o <dir>] [--bundle NAME] [--source-prefix DIR] [-silent] [-strict-sort-keys]
                [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never]
                [--optimize=0|1|2]
-               [-I <dir>]... [-L <dir>]...                compile and lower each source's programs to a load module
+               [--compliance strict|extended] [-I <dir>]... [-L <dir>]...
+                                                       compile and lower each source's programs to a load module
   ironwork dump [--section NAME]... [--strings] [--no-check] <module.iwm>
                                                        print a load module, one fact per line
   ironwork job <job.jcl> --datasets DIR[:text] [--proclib DIR]... [--user ID] [run flags] [-I <dir>]... [-L <dir>]... [--clock <time>] [--sql-replay path]
@@ -34,7 +35,7 @@ usage:
   ironwork fuzz [--job] <program.cbl|job.jcl> -o <dir> [--runs N] [--seed N] [--timeout SECONDS] [--hang-limit N]
                [--root DIR] [--clock <time>]
                [-I <dir>]... [-L <dir>]... [-silent] [-strict-sort-keys] [-debug] [--optimize=0|1|2]
-               [--datasets DIR] [--proclib DIR]... [--user ID]
+               [--compliance strict|extended] [--datasets DIR] [--proclib DIR]... [--user ID]
                                                        run a batch program, or with --job a job, on generated input
                                                        and keep each abend
   ironwork assumptions [--c-series]                    list the register of assumptions, one per line
@@ -64,6 +65,13 @@ flags:
              always gives that warning; once (the default) gives an informational note in its
              place, once per run, as the CICS translator turns RETURN and XCTL into a CALL;
              never gives nothing. A program with none of these gets the warning whatever the flag
+  --compliance strict|extended
+             strict (the default) refuses what Enterprise COBOL refuses. extended reads the Micro
+             Focus and GnuCOBOL extensions docs/compliance.md lists: free-form source, level-78 and
+             CONSTANT entries, <>, literal concatenation with &, BINARY-SHORT, -LONG and -DOUBLE,
+             and PROGRAM-ID with no IDENTIFICATION DIVISION header, each with a warning naming it
+             and where it is (IWX0001-W to IWX0006-W), so check's return code is 4, and runs them.
+             run, check, cics, compile, job, fuzz and compare. --compliance=extended works too
   --optimize=0|1|2
              the compiler invocation's OPTIMIZE level; a CBL or PROCESS card's OPTIMIZE wins over it.
              Under NOINVDATA, 1 and 2 compare an unsigned zoned item with zero, or with one of its
@@ -618,6 +626,14 @@ fn driver() -> ExitCode {
                 Some(dir) => libraries.push(std::path::PathBuf::from(dir)),
                 None => refuse!("-I needs a directory"),
             },
+            "--compliance" => match args.next().as_deref().and_then(numeric::Compliance::named) {
+                Some(c) => flags.push(c.flag().to_owned()),
+                None => refuse!("--compliance needs strict or extended"),
+            },
+            f if f.starts_with("--compliance=") => match numeric::Compliance::named(&f["--compliance=".len()..]) {
+                Some(c) => flags.push(c.flag().to_owned()),
+                None => refuse!("--compliance needs strict or extended"),
+            },
             f if f.starts_with("--fastsrt-adv-print") => match f {
                 "--fastsrt-adv-print=exclude" | "--fastsrt-adv-print=include" => flags.push(a),
                 _ => refuse!("--fastsrt-adv-print needs =exclude or =include"),
@@ -880,7 +896,7 @@ fn driver() -> ExitCode {
         },
         None => None,
     };
-    let libraries = syntax::copy::Libraries::new(std::iter::once(own_directory.clone()).chain(libraries).collect()).with_program(std::path::Path::new(path));
+    let libraries = syntax::copy::Libraries::new(std::iter::once(own_directory.clone()).chain(libraries).collect()).with_program(std::path::Path::new(path)).with_compliance(numeric::Compliance::of(&flags));
     let mut programs = match syntax::parse_all_with(&text, &libraries) {
         Ok(p) => p,
         Err(e) => return no_program(journal, command, path, report(std::slice::from_ref(&e), path)),
@@ -1113,6 +1129,10 @@ fn run_module(
         return exit::status(Outcome::Refused);
     }
     let sources: Vec<String> = main.debug.sources.iter().map(|&s| symbol(s)).collect();
+    let library = match main.options.options.compliance {
+        numeric::Compliance::Strict => library,
+        level => exec::unit::Library { copy: library.copy.with_compliance(level), flags: [library.flags, vec![level.flag().to_owned()]].concat(), ..library },
+    };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
     let ended = exec::vm::execute_module(module, std::path::Path::new(path), library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, parm);
     exit::status(match ended {

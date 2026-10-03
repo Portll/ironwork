@@ -1,5 +1,6 @@
-use crate::source::Source;
+use crate::source::{FreeSpan, Source};
 use crate::{Error, Pos};
+use numeric::Compliance;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Tok {
@@ -27,7 +28,13 @@ pub enum Tok {
     Gt,
     Le,
     Ge,
+    /// `&` after a literal or a word, under `--compliance extended`: [`crate::extended`] joins the
+    /// literals on either side before the parser sees it.
+    Ampersand,
 }
+
+/// The warning for `<>`, which the lexer reads as NOT =.
+pub const NOT_EQUAL: &str = "IWX0003-W <> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Token {
@@ -58,10 +65,33 @@ struct Lexer<'a> {
     comma_pending: bool,
     /// Messages for the next token emitted.
     pending: Vec<Error>,
+    extended: bool,
+    /// The lines read in free form, and whether a token from each has carried its warning.
+    free: &'a [FreeSpan],
+    warned: Vec<bool>,
 }
 
 pub fn lex(source: &Source) -> Result<Vec<Token>, Error> {
-    let mut lx = Lexer { chars: source.text.chars().collect(), positions: &source.positions, at: 0, tokens: Vec::new(), decimal_comma: false, currency: Vec::new(), outer: Vec::new(), comma_pending: false, pending: Vec::new() };
+    lex_under(source, Compliance::Strict)
+}
+
+/// Lexes `source` under `compliance`: `--compliance extended` reads `<>` as NOT = and keeps `&`
+/// after a literal or a word for [`crate::extended`].
+pub fn lex_under(source: &Source, compliance: Compliance) -> Result<Vec<Token>, Error> {
+    let mut lx = Lexer {
+        chars: source.text.chars().collect(),
+        positions: &source.positions,
+        at: 0,
+        tokens: Vec::new(),
+        decimal_comma: false,
+        currency: Vec::new(),
+        outer: Vec::new(),
+        comma_pending: false,
+        pending: Vec::new(),
+        extended: compliance == Compliance::Extended,
+        free: &source.free,
+        warned: vec![false; source.free.len()],
+    };
     while lx.at < lx.chars.len() {
         lx.next_token()?;
     }
@@ -143,7 +173,19 @@ impl Lexer<'_> {
             _ => None,
         };
         let after_comma = std::mem::take(&mut self.comma_pending);
-        self.tokens.push(Token { tok, pos, area_a: (8..=11).contains(&pos.col), spelled, after_comma, messages: std::mem::take(&mut self.pending) });
+        let span = self.free.iter().position(|s| s.holds(pos));
+        let area_a = match span {
+            Some(k) => {
+                if !std::mem::replace(&mut self.warned[k], true)
+                    && let Some(warning) = &self.free[k].warning
+                {
+                    self.pending.insert(0, warning.clone());
+                }
+                self.tokens.last().is_none_or(|t| t.tok == Tok::Period) && !matches!(&tok, Tok::Word(w) if rt::reserved_words::is_reserved(w))
+            }
+            None => (8..=11).contains(&pos.col),
+        };
+        self.tokens.push(Token { tok, pos, area_a, spelled, after_comma, messages: std::mem::take(&mut self.pending) });
     }
 
     /// The character that is a numeric literal's decimal point.
@@ -231,6 +273,17 @@ impl Lexer<'_> {
                     }
                     tok => self.emit(tok, pos),
                 }
+            }
+            '<' if self.extended && next == Some('>') => {
+                self.pending.push(Error::warning(pos, NOT_EQUAL));
+                self.at += 2;
+                self.emit(Tok::Word("NOT".into()), pos);
+                let at = self.positions.get(self.at - 1).copied().unwrap_or(pos);
+                self.emit(Tok::Eq, at);
+            }
+            '&' if self.extended && matches!(self.tokens.last().map(|t| &t.tok), Some(Tok::Alnum(_) | Tok::Hex(_) | Tok::National(_) | Tok::Word(_))) => {
+                self.at += 1;
+                self.emit(Tok::Ampersand, pos);
             }
             _ => {
                 let (tok, len) = match (c, next) {
@@ -493,6 +546,29 @@ mod tests {
         let error = |text: &str| lex(&source::read(text).unwrap()).unwrap_err().message;
         assert_eq!(error("           MOVE $X"), "unexpected character '$'");
         assert_eq!(error("           MOVE \u{3042}"), "unexpected character '\u{3042}'");
+    }
+
+    #[test]
+    fn under_extended_not_equal_is_not_and_equals_and_an_ampersand_is_kept() {
+        let lexed = lex_under(&source::read("           IF A <> 'B' & X'C1' MOVE C & D").unwrap(), Compliance::Extended).unwrap();
+        let toks: Vec<Tok> = lexed.iter().map(|t| t.tok.clone()).collect();
+        assert_eq!(toks, [w("IF"), w("A"), w("NOT"), Tok::Eq, Tok::Alnum("B".into()), Tok::Ampersand, Tok::Hex(vec![0xC1]), w("MOVE"), w("C"), Tok::Ampersand, w("D")]);
+        assert_eq!(lexed[2].messages.iter().map(|m| (m.pos.col, m.message.as_str(), m.severity)).collect::<Vec<_>>(), [(17, NOT_EQUAL, crate::Severity::Warning)]);
+        assert_eq!(lexed[3].pos.col, 18);
+        let strict = |text: &str| lex(&source::read(text).unwrap()).map(|t| t.into_iter().map(|t| t.tok).collect::<Vec<_>>());
+        assert_eq!(strict("           A <> B"), Ok(vec![w("A"), Tok::Lt, Tok::Gt, w("B")]));
+        assert!(lex_under(&source::read("           NOTIFY=&SYSUID").unwrap(), Compliance::Extended).unwrap_err().message.contains("unexpected character '&'"));
+    }
+
+    #[test]
+    fn in_free_form_area_a_is_a_word_after_a_period_that_is_not_reserved() {
+        let text = "IDENTIFICATION DIVISION.\nPROCEDURE DIVISION.\nMAIN-P.\n    MOVE A TO\n  B.\n    GOBACK.\n0100.\n";
+        let free = source::read_under(text, 0, false, Compliance::Extended).unwrap();
+        let lexed = lex_under(&free, Compliance::Extended).unwrap();
+        let marked: Vec<Tok> = lexed.iter().filter(|t| t.area_a).map(|t| t.tok.clone()).collect();
+        assert_eq!(marked, [w("MAIN-P"), Tok::Number("0100".into())]);
+        assert!(lexed[0].messages[0].message.starts_with("IWX0001-W"), "{:?}", lexed[0].messages);
+        assert!(lexed[1..].iter().all(|t| t.messages.is_empty()));
     }
 
     #[test]

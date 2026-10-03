@@ -18,7 +18,7 @@ use ironwork_rt::store::LaxRedefinition;
 use ironwork_rt::storage::Kind;
 use ironwork_rt::vocab::{AcceptFrom, BinOp, Figurative, InspectMode, OpenMode, Pos, RelOp, SignClause, SignPosition};
 use numeric::precision::{Fixed, Places};
-use numeric::options::{Compile, FastsrtAdvPrint, Invdata, Stop, Warnings};
+use numeric::options::{Compile, Compliance, FastsrtAdvPrint, Invdata, Stop, Warnings};
 use numeric::{Arith, BinCheck, CicsReturnWarning, Currency, DispSign, Initcheck, IntDate, Nsymbol, Numcheck, Numproc, Options, Parmcheck, Qualify, Quote, SortKeys, Trunc, TruncCheck, Vlr, VsamOpenFs, ZonCheck};
 use zarch::check::ProgramCheck;
 use zarch::hfp::Precision;
@@ -173,6 +173,7 @@ fn options_round_trip_with_every_field_off_its_default() {
         parmcheck: Some(Parmcheck { abd: true, bytes: 9999 }),
         initcheck: Some(Initcheck::Strict),
         optimize: 2,
+        compliance: Compliance::Extended,
     };
     round_trip(&[every, Options { currency: Some(Currency::Hex(0x5B)), ..every }]);
     let each = [
@@ -197,6 +198,7 @@ fn options_round_trip_with_every_field_off_its_default() {
         Options { parmcheck: Some(Parmcheck { abd: false, bytes: 100 }), ..Options::default() },
         Options { initcheck: Some(Initcheck::Lax), ..Options::default() },
         Options { optimize: 1, ..Options::default() },
+        Options { compliance: Compliance::Extended, ..Options::default() },
     ];
     round_trip(&each);
     for options in each {
@@ -216,6 +218,7 @@ fn options_round_trip_with_every_field_off_its_default() {
     every_variant(&[Vlr::Standard, Vlr::Compat], 2);
     every_variant(&[VsamOpenFs::Compat, VsamOpenFs::Succ], 2);
     every_variant(&[Initcheck::Lax, Initcheck::Strict], 2);
+    every_variant(&[Compliance::Strict, Compliance::Extended], 2);
 }
 
 #[test]
@@ -227,7 +230,7 @@ fn kinds_and_options_have_load_module_s_bytes() {
         encoded(&options).0,
         [
             0x01, 0x01, 0x00, 0xF4, 0x08, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
         ]
     );
     let (bytes, strings) = encoded(&(7u8, Options { codepage: 999, ..options }));

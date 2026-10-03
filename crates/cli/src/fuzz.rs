@@ -1013,7 +1013,7 @@ fn compile(req: &Request) -> Result<(exec::Compiled, Vec<Program>), String> {
     let bytes = fs::read(&req.program).map_err(|e| format!("{path}: {e}"))?;
     let text = syntax::copy::decode(&bytes);
     let own = req.program.parent().map(Path::to_path_buf).unwrap_or_default();
-    let libraries = syntax::copy::Libraries::new(std::iter::once(own).chain(req.libraries.iter().cloned()).collect()).with_program(&req.program);
+    let libraries = syntax::copy::Libraries::new(std::iter::once(own).chain(req.libraries.iter().cloned()).collect()).with_program(&req.program).with_compliance(numeric::Compliance::of(&req.flags));
     let mut programs = syntax::parse_all_with(&text, &libraries).map_err(|e| e.place(&path))?;
     let first = programs.remove(0);
     let compiled = exec::compile(first, &req.flags).map_err(|messages| messages.iter().map(|m| m.place(&path)).collect::<Vec<_>>().join("\n"))?;

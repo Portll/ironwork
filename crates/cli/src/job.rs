@@ -499,7 +499,7 @@ impl Runner<'_> {
 fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database: Option<&mut (dyn exec::sql::Database + '_)>, out: &mut dyn Write, called: &mut BTreeSet<PathBuf>, evidence: Option<&Rc<RefCell<crate::evidence::Run>>>, roots: &[PathBuf], place: &mut Option<(Option<String>, i64)>, coverage: Option<&RefCell<(crate::coverage::Coverage, Vec<crate::coverage::Outline>)>>) -> Result<i16, Failed> {
     let text = fs::read(path).map(|b| syntax::copy::decode(&b)).map_err(|e| Failed::before(Outcome::Unreadable, format!("{}: {e}", path.display())))?;
     let own = path.parent().map(Path::to_path_buf).unwrap_or_default();
-    let libraries = syntax::copy::Libraries::new(std::iter::once(own.clone()).chain(req.libraries.iter().cloned()).collect()).with_program(path);
+    let libraries = syntax::copy::Libraries::new(std::iter::once(own.clone()).chain(req.libraries.iter().cloned()).collect()).with_program(path).with_compliance(numeric::Compliance::of(&req.flags));
     let mut programs = syntax::parse_all_with(&text, &libraries).map_err(|e| Failed::before(Outcome::Refused, e.place(&path.display().to_string()).to_string()))?;
     if let Some(c) = coverage {
         let outlines = &mut c.borrow_mut().1;

@@ -1,8 +1,10 @@
 //! Fixed-format reference format: columns 1-6 sequence, 7 indicator, 8-72 program text, 73 on
 //! ignored. The result is one logical text with continuation lines joined, and the options of any
-//! CBL or PROCESS cards ahead of the program.
+//! CBL or PROCESS cards ahead of the program. Under `--compliance extended` a file may be read in
+//! free form instead (docs/compliance.md).
 
 use crate::{Error, Pos};
+use numeric::Compliance;
 
 pub struct Source {
     pub text: String,
@@ -12,7 +14,35 @@ pub struct Source {
     /// None when debugging lines (D in column 7) were read as comments; else the file and line of
     /// each one read as program text.
     pub debugging: Option<Vec<(u16, u32)>>,
+    /// The lines read in free form.
+    pub free: Vec<FreeSpan>,
 }
+
+/// Lines `first` to `last` of file `file`, read in free form, and the warning that says so; a
+/// COPY member read in free form as the line that copies it was has none of its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FreeSpan {
+    pub file: u16,
+    pub first: u32,
+    pub last: u32,
+    pub warning: Option<Error>,
+}
+
+impl FreeSpan {
+    pub fn holds(&self, pos: Pos) -> bool {
+        self.file == pos.file && (self.first..=self.last).contains(&pos.line)
+    }
+}
+
+impl Source {
+    /// The free-form span position `pos` is in, by its index in [`Source::free`].
+    pub fn free_at(&self, pos: Pos) -> Option<usize> {
+        self.free.iter().position(|s| s.holds(pos))
+    }
+}
+
+/// The stable identifier and text of the warning for free-form source.
+pub const FREE_FORM: &str = "IWX0001-W free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone)";
 
 const TEXT_START: usize = 7;
 const AREA_B: usize = 11;
@@ -29,23 +59,93 @@ pub fn read(input: &str) -> Result<Source, Error> {
 /// Reads one file's text; `file` indexes its name in the program's file table. A comment-entry is
 /// left out of the text, so neither COPY nor the lexer sees it (LR pp. 117, 700).
 pub fn read_file(input: &str, file: u16) -> Result<Source, Error> {
-    read_lines(input, file, false)
+    read_lines(input, file, false, false, false)
 }
 
 /// Reads one file's text with its debugging lines as program text.
 pub fn read_file_debugging(input: &str, file: u16) -> Result<Source, Error> {
-    read_lines(input, file, true)
+    read_lines(input, file, true, false, false)
 }
 
-fn read_lines(input: &str, file: u16, debugging: bool) -> Result<Source, Error> {
-    let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new(), debugging: debugging.then(Vec::new) };
+/// Reads one file's text under `compliance`, with its debugging lines as program text when
+/// `debugging` is set.
+pub fn read_under(input: &str, file: u16, debugging: bool, compliance: Compliance) -> Result<Source, Error> {
+    read_lines(input, file, debugging, compliance == Compliance::Extended, false)
+}
+
+/// Reads a COPY member's text as [`read_under`] does, starting in free form when the line that
+/// copies it is free form, as GnuCOBOL and Micro Focus carry the source format into a member.
+pub fn read_copied(input: &str, file: u16, debugging: bool, compliance: Compliance, copied_free: bool) -> Result<Source, Error> {
+    let extended = compliance == Compliance::Extended;
+    read_lines(input, file, debugging, extended, extended && copied_free)
+}
+
+fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_free: bool) -> Result<Source, Error> {
+    let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new(), debugging: debugging.then(Vec::new), free: Vec::new() };
     let mut seen_program = false;
     let mut open_quote: Option<char> = None;
     let mut closed_at_72: Option<char> = None;
     let (mut identification, mut comment_entry) = (false, false);
-    for (index, raw) in input.lines().enumerate() {
+    let lines: Vec<Vec<char>> = input.lines().map(|raw| raw.trim_end_matches('\r').chars().map(|c| if c == '\t' { ' ' } else { c }).collect()).collect();
+    let mut free = match (extended, copied_free) {
+        (true, true) => Some((1, None)),
+        (true, false) => free_from_the_start(input, file).map(|(first, warning)| (first, Some(warning))),
+        (false, _) => None,
+    };
+    for (index, chars) in lines.iter().enumerate() {
         let line = index as u32 + 1;
-        let chars: Vec<char> = raw.trim_end_matches('\r').chars().map(|c| if c == '\t' { ' ' } else { c }).collect();
+        if extended && let Some(found) = directive(chars, Pos { file, line, col: 1 }) {
+            let (format, pos) = found?;
+            match format {
+                Format::Free if free.is_none() => free = Some((line + 1, Some(Error::warning(pos, format!("{FREE_FORM}: this directive makes the lines after it free form"))))),
+                Format::Fixed => {
+                    if let Some((first, warning)) = free.take().filter(|(first, _)| *first < line) {
+                        out.free.push(FreeSpan { file, first, last: line - 1, warning });
+                    }
+                }
+                Format::Free => {}
+            }
+            continue;
+        }
+        if free.is_some() {
+            if !seen_program && let Some(options) = option_card(&chars.iter().collect::<String>()) {
+                out.options.extend(options);
+                continue;
+            }
+            let Some((start, debugging_line)) = free_line(chars) else { continue };
+            if debugging_line && out.debugging.is_none() {
+                continue;
+            }
+            let area = &chars[start..];
+            if area.iter().all(|c| *c == ' ') {
+                continue;
+            }
+            if open_quote.is_some() {
+                return Err(Error::at(Pos { file, line, col: 1 }, "a literal runs to the end of the line with no continuation"));
+            }
+            if debugging_line && let Some(lines) = &mut out.debugging {
+                lines.push((file, line));
+            }
+            seen_program = true;
+            comment_entry = false;
+            closed_at_72 = None;
+            if listing_control(area) {
+                continue;
+            }
+            if let Some(entering) = division_header(area).or(program_id_first(area).then_some(true)) {
+                identification = entering;
+            }
+            let header_end = if identification { comment_paragraph(area) } else { None };
+            out.text.push('\n');
+            out.positions.push(Pos { file, line, col: 0 });
+            for (i, &c) in area.iter().enumerate().take(header_end.map_or(area.len(), |period| period + 1)) {
+                if floating_comment(area, i, open_quote) {
+                    break;
+                }
+                push(&mut out, c, Pos { file, line, col: (start + i) as u32 + 1 }, &mut open_quote);
+            }
+            continue;
+        }
         let body: String = chars.iter().take(TEXT_END).collect();
         if !seen_program && let Some(options) = option_card(&body) {
             out.options.extend(options);
@@ -104,7 +204,7 @@ fn read_lines(input: &str, file: u16, debugging: bool) -> Result<Source, Error> 
             if open_quote.is_some() {
                 return Err(Error::at(Pos { file, line, col: 1 }, "a literal runs to the end of the line with no continuation"));
             }
-            if let Some(entering) = division_header(&area) {
+            if let Some(entering) = division_header(&area).or((extended && program_id_first(&area)).then_some(true)) {
                 identification = entering;
             }
             let header_end = if identification { comment_paragraph(&area) } else { None };
@@ -131,7 +231,86 @@ fn read_lines(input: &str, file: u16, debugging: bool) -> Result<Source, Error> 
     if open_quote.is_some() {
         return Err(Error::at(out.positions.last().copied().unwrap_or_default(), "an unterminated literal"));
     }
+    if let Some((first, warning)) = free {
+        out.free.push(FreeSpan { file, first, last: u32::MAX, warning });
+    }
     Ok(out)
+}
+
+/// A file is free form from its first line when a line before any source-format directive cannot
+/// be fixed form: its text starts in columns 1 to 6, with a character other than a digit, and runs
+/// on through column 7 with a character other than a space or an indicator (`*`, `/`, `-`, `D`,
+/// `d`). A tab advances to the next column after a multiple of 8 here, as GnuCOBOL and Micro Focus
+/// place it. The warning is at column 7.
+fn free_from_the_start(input: &str, file: u16) -> Option<(u32, Error)> {
+    for (index, raw) in input.lines().enumerate() {
+        let line = index as u32 + 1;
+        let mut chars = Vec::new();
+        for c in raw.trim_end_matches('\r').chars() {
+            match c {
+                '\t' => chars.resize((chars.len() / 8 + 1) * 8, ' '),
+                c => chars.push(c),
+            }
+        }
+        if directive(&chars, Pos { file, line, col: 1 }).is_some() {
+            return None;
+        }
+        let (Some(start), Some(&c)) = (chars.iter().position(|c| *c != ' '), chars.get(TEXT_START - 1)) else { continue };
+        let card = option_card(&chars.iter().take(TEXT_END).collect::<String>()).is_some();
+        if start < TEXT_START - 1 && !chars[start].is_ascii_digit() && !matches!(c, ' ' | '*' | '/' | '-' | 'D' | 'd') && !card {
+            let why = format!("{FREE_FORM}: column 7 holds {c:?}, which no fixed-form line can, so the file is read in free form");
+            return Some((1, Error::warning(Pos { file, line, col: TEXT_START as u32 }, why)));
+        }
+    }
+    None
+}
+
+/// The column a free-form line's text starts at and whether it is a debugging line, or None for a
+/// comment line: `*` or `/` in column 1 makes a comment line, and `D` followed by a space a
+/// debugging line, as in Micro Focus's free format. GnuCOBOL refuses such lines unless they begin
+/// `*>`.
+fn free_line(chars: &[char]) -> Option<(usize, bool)> {
+    match (chars.first(), chars.get(1)) {
+        (Some('*' | '/'), _) => None,
+        (Some('D' | 'd'), Some(' ')) => Some((1, true)),
+        _ => Some((0, false)),
+    }
+}
+
+enum Format {
+    Free,
+    Fixed,
+}
+
+/// A compiler directive, alone on its line, and where it starts: `>>` first on the line, or `$`
+/// first in column 1 or 7, Micro Focus's directive indicator. Err for any but a source-format
+/// directive: `>>SOURCE [FORMAT] [IS] FREE|FIXED`, or `$SET` or `>>SET` with `SOURCEFORMAT"FREE"`,
+/// `SOURCEFORMAT"FIXED"` or `SOURCEFORMAT(FREE)`.
+fn directive(chars: &[char], pos: Pos) -> Option<Result<(Format, Pos), Error>> {
+    let start = chars.iter().position(|c| *c != ' ')?;
+    let text: String = chars[start..].iter().collect();
+    let words = if let Some(rest) = text.strip_prefix(">>") {
+        rest
+    } else if text.starts_with('$') && (start == 0 || start == TEXT_START - 1) {
+        &text[1..]
+    } else {
+        return None;
+    };
+    let upper = words.trim().to_ascii_uppercase();
+    let words: Vec<&str> = upper.split_whitespace().filter(|w| !matches!(*w, "FORMAT" | "IS")).collect();
+    let format = |value: &str| match value.trim_matches(|c| matches!(c, '"' | '\'' | '(' | ')')) {
+        "FREE" => Some(Format::Free),
+        "FIXED" => Some(Format::Fixed),
+        _ => None,
+    };
+    let found = match words.as_slice() {
+        ["SOURCE", value] => format(value),
+        ["SET", setting] => setting.strip_prefix("SOURCEFORMAT").and_then(format),
+        _ => None,
+    };
+    let pos = Pos { col: start as u32 + 1, ..pos };
+    let shown = text.trim_end();
+    Some(found.map(|f| (f, pos)).ok_or_else(|| Error::at(pos, format!("{shown}: the source-format directives >>SOURCE and $SET SOURCEFORMAT, giving FREE or FIXED, are the only compiler directives ironwork reads"))))
 }
 
 /// EJECT, SKIP1, SKIP2, SKIP3 or TITLE with its literal, alone on the line and perhaps ended by a
@@ -173,6 +352,12 @@ fn word_from(area: &[char], from: usize) -> Option<(String, usize)> {
     let start = from + area.get(from..)?.iter().position(|c| *c != ' ')?;
     let len = area[start..].iter().take_while(|c| c.is_ascii_alphanumeric() || **c == '-' || **c == '_').count();
     (len > 0).then(|| (area[start..start + len].iter().collect::<String>().to_ascii_uppercase(), start + len))
+}
+
+/// Whether a line starts with PROGRAM-ID, which begins the IDENTIFICATION DIVISION of a program
+/// whose header `--compliance extended` lets it leave out.
+fn program_id_first(area: &[char]) -> bool {
+    word_from(area, 0).is_some_and(|(word, _)| word == "PROGRAM-ID")
 }
 
 /// For a line that starts with a division header, whether it is the IDENTIFICATION DIVISION's.
@@ -369,6 +554,80 @@ mod tests {
         let s = read("       IDENTIFICATION DIVISION.\n").unwrap();
         let i = s.text.find('D').unwrap();
         assert_eq!(s.positions[i], Pos { file: 0, line: 1, col: 9 });
+    }
+
+    fn extended(text: &str) -> Result<Source, Error> {
+        read_under(text, 0, false, Compliance::Extended)
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_fixed_form_is_read_in_free_form_under_extended_alone() {
+        let text = "*\nIDENTIFICATION DIVISION.\n* a comment line\n*> another\nPROGRAM-ID. F.\n    DISPLAY 'A *> B' *> gone\n";
+        let s = extended(text).unwrap();
+        let words: Vec<&str> = s.text.split_whitespace().collect();
+        assert_eq!(words, ["IDENTIFICATION", "DIVISION.", "PROGRAM-ID.", "F.", "DISPLAY", "'A", "*>", "B'"]);
+        assert_eq!(s.free.len(), 1);
+        let warning = s.free[0].warning.clone().unwrap();
+        assert_eq!((s.free[0].first, s.free[0].last, warning.pos), (1, u32::MAX, Pos { file: 0, line: 2, col: 7 }));
+        assert!(warning.message.starts_with("IWX0001-W free-form source") && warning.message.contains("column 7 holds 'F'"));
+        assert_eq!(s.positions[s.text.find('I').unwrap()], Pos { file: 0, line: 2, col: 1 });
+        let strict = read(text).unwrap();
+        assert!(strict.free.is_empty() && strict.text.contains("ICATION DIVISION."), "{}", strict.text);
+    }
+
+    #[test]
+    fn a_free_form_line_runs_past_column_72_and_has_no_continuation() {
+        let long = format!("01 A PIC X(80) VALUE '{}'.", "Z".repeat(70));
+        let s = extended(&format!("IDENTIFICATION DIVISION.\n{long}\n")).unwrap();
+        assert!(s.text.contains(&long));
+        let Err(open) = extended("IDENTIFICATION DIVISION.\n    DISPLAY 'AB\n-    'C'.\n") else { panic!("an open literal is refused") };
+        assert_eq!((open.message.as_str(), open.pos.line), ("a literal runs to the end of the line with no continuation", 3));
+    }
+
+    #[test]
+    fn a_d_and_a_space_in_column_1_is_a_debugging_line_and_a_comment_entry_ends_with_its_line() {
+        let text = "IDENTIFICATION DIVISION.\nPROGRAM-ID. D.\nAUTHOR. A & B.\nD   DISPLAY 'DEBUG'\nDISPLAY 'KEPT'\n";
+        assert!(!extended(text).unwrap().text.contains("DEBUG"));
+        let debugging = read_under(text, 0, true, Compliance::Extended).unwrap();
+        assert!(debugging.text.contains("DISPLAY 'DEBUG'") && debugging.text.contains("DISPLAY 'KEPT'") && !debugging.text.contains("A & B"));
+        assert_eq!(debugging.debugging, Some(vec![(0, 4)]));
+    }
+
+    #[test]
+    fn a_source_format_directive_switches_the_form_from_the_next_line() {
+        let text = "      $SET SOURCEFORMAT\"FREE\"\nIDENTIFICATION DIVISION.\n>>SOURCE FORMAT IS FIXED\n000100 PROGRAM-ID. P.\n  >>source free\nDATA DIVISION.\n";
+        let s = extended(text).unwrap();
+        let words: Vec<&str> = s.text.split_whitespace().collect();
+        assert_eq!(words, ["IDENTIFICATION", "DIVISION.", "PROGRAM-ID.", "P.", "DATA", "DIVISION."]);
+        let spans: Vec<(u32, u32, Option<Pos>)> = s.free.iter().map(|f| (f.first, f.last, f.warning.as_ref().map(|w| w.pos))).collect();
+        assert_eq!(spans, [(2, 2, Some(Pos { file: 0, line: 1, col: 7 })), (6, u32::MAX, Some(Pos { file: 0, line: 5, col: 3 }))]);
+        let Err(other) = extended("       >>IF X DEFINED\n") else { panic!("another directive is refused") };
+        assert!(other.message.starts_with(">>IF X DEFINED: the source-format directives"), "{}", other.message);
+        assert_eq!(other.pos.col, 8);
+    }
+
+    #[test]
+    fn a_fixed_form_file_stays_fixed_under_extended() {
+        let text = concat!(
+            "000100 IDENTIFICATION DIVISION.                                         SEQ00001\n",
+            "007000C    LABEL RECORDS                                                SQ1054.2\n",
+            "\t   RECORD IS VARYING\n",
+            "       CBL APOST\n",
+            "ABC123 MOVE A TO B.\n",
+        );
+        let s = extended(text).unwrap();
+        assert!(s.free.is_empty());
+        assert_eq!(s.text, read(text).unwrap().text);
+    }
+
+    #[test]
+    fn a_member_copied_from_a_free_form_line_starts_free_with_no_warning_of_its_own() {
+        let member = "    *> a member indented as free form\n    02 B PIC X(80) VALUE 'past column seventy-two, which free form keeps whole as it reads it'.\n";
+        let copied = read_copied(member, 2, false, Compliance::Extended, true).unwrap();
+        assert!(copied.text.contains("02 B PIC X(80)") && copied.text.trim_end().ends_with("whole as it reads it'."), "{}", copied.text);
+        assert_eq!((copied.free.len(), copied.free[0].first, copied.free[0].warning.clone()), (1, 1, None));
+        assert!(read_copied(member, 2, false, Compliance::Extended, false).is_err());
+        assert!(read_copied(member, 2, false, Compliance::Strict, true).is_err());
     }
 
     #[test]

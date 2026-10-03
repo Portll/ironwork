@@ -19,8 +19,8 @@ The PyPI and npm packages carry builds for Linux (static, x64 and arm64), macOS 
 Windows (x64). The same builds are attached to each [release](https://github.com/Portll/ironwork/releases).
 From a checkout:
 
-    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
-    cargo run -p ironwork -- check program.cbl [-warnings-block] [--cics-return-warning=once|always|never] [-I copylib]...
+    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never] [--compliance strict|extended] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
+    cargo run -p ironwork -- check program.cbl [-warnings-block] [--cics-return-warning=once|always|never] [--compliance strict|extended] [-I copylib]...
     cargo run -p ironwork -- compile program.cbl... [-o dir] [--bundle NAME] [--source-prefix DIR] [run's compile flags] [-I copylib]...
     cargo run -p ironwork -- dump [--section NAME]... [--strings] [--no-check] program.iwm
 
@@ -244,6 +244,14 @@ as NOCOMPILE(S) does, since IGYWCLG would bypass its GO step above 8 whatever th
 NOCOMPILE alone is a syntax check that runs nothing. `-warnings-block` is ironwork's command-line NOCOMPILE(W), and a card's COMPILE or
 NOCOMPILE wins over it, as IBM's PROCESS statements outrank the compiler's invocation. Neither
 changes the return code (C47).
+
+`--compliance extended` reads six extensions Micro Focus and GnuCOBOL share, which Enterprise COBOL
+refuses and `--compliance strict`, the default, still refuses: free-form source, level-78 and
+CONSTANT entries, `<>`, literal concatenation with `&`, BINARY-SHORT, BINARY-LONG and
+BINARY-DOUBLE, and PROGRAM-ID with no IDENTIFICATION DIVISION header. Each use is a warning,
+IWX0001-W to IWX0006-W, naming the extension and where it is, so `check` returns 4, and the program
+runs on the interpreter and the VM alike. [docs/compliance.md](docs/compliance.md) gives each one's
+meaning, the census that chose them, and what stays refused and why.
 
 A program with no STOP RUN, GOBACK or EXIT PROGRAM gets IBM's IGYPS2091-W, a warning that it may
 run past its end. One that leaves by EXEC CICS RETURN or XCTL, which the CICS translator turns into

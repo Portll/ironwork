@@ -7,6 +7,7 @@ pub mod copy;
 pub mod csd;
 mod debugging;
 pub mod dli;
+pub mod extended;
 pub mod feedback;
 pub mod jni;
 pub mod lexer;
@@ -135,16 +136,21 @@ pub fn parse_with(text: &str, libraries: &copy::Libraries) -> Result<ast::Progra
     Ok(parse_all_with(text, libraries)?.remove(0))
 }
 
-/// Every program in the source, in order, nested programs after the one that contains them.
+/// Every program in the source, in order, nested programs after the one that contains them. The
+/// libraries' compliance level says how the source and its members are read.
 pub fn parse_all_with(text: &str, libraries: &copy::Libraries) -> Result<Vec<ast::Program>, Error> {
+    let compliance = libraries.compliance();
     let mut files = vec![String::new()];
-    let mut source = source::read(text).and_then(|s| copy::expand(s, libraries, &mut files)).and_then(copy::replace).map_err(|e| e.in_files(&files))?;
-    let mut tokens = lexer::lex(&source).map_err(|e| e.in_files(&files))?;
+    let mut source = source::read_under(text, 0, false, compliance).and_then(|s| copy::expand(s, libraries, &mut files)).and_then(copy::replace).map_err(|e| e.in_files(&files))?;
+    let mut tokens = lexer::lex_under(&source, compliance).map_err(|e| e.in_files(&files))?;
     if debugging::requested(&tokens) {
         files.truncate(1);
-        source = source::read_file_debugging(text, 0).and_then(|s| copy::expand(s, libraries, &mut files)).and_then(copy::replace).map_err(|e| e.in_files(&files))?;
-        let lexed = lexer::lex(&source).map_err(|e| e.in_files(&files))?;
+        source = source::read_under(text, 0, true, compliance).and_then(|s| copy::expand(s, libraries, &mut files)).and_then(copy::replace).map_err(|e| e.in_files(&files))?;
+        let lexed = lexer::lex_under(&source, compliance).map_err(|e| e.in_files(&files))?;
         tokens = debugging::keep(lexed, source.debugging.as_deref().unwrap_or_default());
+    }
+    if compliance == numeric::Compliance::Extended {
+        tokens = extended::rewrite(tokens, &source.options).map_err(|e| e.in_files(&files))?;
     }
     dbcs_literal(&tokens, &source.options).map_err(|e| e.in_files(&files))?;
     let mut programs = parser::parse(&tokens, source.options).map_err(|e| e.in_files(&files))?;

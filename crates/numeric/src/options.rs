@@ -369,6 +369,42 @@ impl Compile {
     }
 }
 
+/// Whether the compile refuses what Enterprise COBOL refuses (`Strict`), or accepts, each with a
+/// warning, the other dialects' extensions docs/compliance.md lists (`Extended`,
+/// `--compliance extended`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Compliance {
+    #[default]
+    Strict,
+    Extended,
+}
+
+impl Compliance {
+    pub const fn flag(self) -> &'static str {
+        match self {
+            Self::Strict => "--compliance=strict",
+            Self::Extended => "--compliance=extended",
+        }
+    }
+
+    /// The value `--compliance` takes for it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Strict => "strict",
+            Self::Extended => "extended",
+        }
+    }
+
+    pub fn named(value: &str) -> Option<Self> {
+        [Self::Strict, Self::Extended].into_iter().find(|c| c.name() == value)
+    }
+
+    /// The level the last `--compliance=` flag among `flags` gives, strict without one.
+    pub fn of(flags: &[String]) -> Self {
+        flags.iter().rev().find_map(|f| f.strip_prefix("--compliance=").and_then(Self::named)).unwrap_or_default()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Options {
     pub arith: Arith,
@@ -420,6 +456,7 @@ pub struct Options {
     pub initcheck: Option<Initcheck>,
     /// OPTIMIZE's level, 0 to 2.
     pub optimize: u8,
+    pub compliance: Compliance,
 }
 
 impl Default for Options {
@@ -458,6 +495,7 @@ impl Default for Options {
             parmcheck: None,
             initcheck: None,
             optimize: 0,
+            compliance: Compliance::default(),
         }
     }
 }
@@ -815,6 +853,10 @@ impl Options {
             "--optimize=0" => self.optimize = 0,
             "--optimize=1" => self.optimize = 1,
             "--optimize=2" => self.optimize = 2,
+            f if f.starts_with("--compliance=") => match Compliance::named(&f["--compliance=".len()..]) {
+                Some(c) => self.compliance = c,
+                None => return Err(OptionError::UnknownFlag(flag.to_owned())),
+            },
             _ => return Err(OptionError::UnknownFlag(flag.to_owned())),
         }
         Ok(())
@@ -1213,5 +1255,23 @@ mod tests {
         }
         assert!(o.apply_flag("--cics-return-warning=sometimes").is_err());
         assert!(o.apply_flag("--cics-return-warning").is_err());
+    }
+
+    #[test]
+    fn compliance_is_strict_unless_the_flag_says_extended() {
+        let mut o = Options::default();
+        assert_eq!(o.compliance, Compliance::Strict);
+        for level in [Compliance::Extended, Compliance::Strict] {
+            o.apply_flag(level.flag()).unwrap();
+            assert_eq!(o.compliance, level);
+            assert_eq!(Compliance::named(level.name()), Some(level));
+        }
+        for bad in ["--compliance=EXTENDED", "--compliance=", "--compliance", "--compliance=mf"] {
+            assert!(o.apply_flag(bad).is_err(), "{bad}");
+        }
+        let flags = |given: &[&str]| Compliance::of(&given.iter().map(|f| f.to_string()).collect::<Vec<_>>());
+        assert_eq!(flags(&[]), Compliance::Strict);
+        assert_eq!(flags(&["-silent", "--compliance=extended"]), Compliance::Extended);
+        assert_eq!(flags(&["--compliance=extended", "--compliance=strict"]), Compliance::Strict);
     }
 }

@@ -57,6 +57,7 @@ fn flags(options: &Options) -> Vec<String> {
         FastsrtAdvPrint::Exclude => "--fastsrt-adv-print=exclude",
         FastsrtAdvPrint::Include => "--fastsrt-adv-print=include",
     });
+    flags.push(options.compliance.flag());
     if options.warnings == Warnings::Block {
         flags.push("-warnings-block");
     }

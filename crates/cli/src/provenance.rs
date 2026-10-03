@@ -79,6 +79,7 @@ pub fn statement(i: &Inputs<'_>) -> String {
         ("truncCheck", format!("{:?}", o.trunc_check).into()),
         ("fastsrt", o.fastsrt.into()),
         ("adv", o.adv.into()),
+        ("compliance", o.compliance.name().into()),
         ("ssrange", i.compiled.ssrange.into()),
     ]));
     let libraries = strings(i.roots.iter().skip(1).map(|r| r.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));

@@ -3374,7 +3374,7 @@ fn cics_options(body: &str) -> Vec<(String, Option<ExecArg>)> {
 
 /// An argument as the COBOL operand it names, through ironwork's own lexer and parser.
 fn operand_of(text: &str, pos: Pos) -> Option<Operand> {
-    let source = crate::source::Source { text: text.to_owned(), positions: vec![pos; text.chars().count()], options: Vec::new(), debugging: None };
+    let source = crate::source::Source { text: text.to_owned(), positions: vec![pos; text.chars().count()], options: Vec::new(), debugging: None, free: Vec::new() };
     let tokens = crate::lexer::lex(&source).ok()?;
     let mut p = Parser::new(&tokens);
     let op = p.operand().ok()?;
