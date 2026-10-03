@@ -920,6 +920,24 @@ impl Options {
         }
     }
 
+    /// Whether an unsigned zoned integer compared with zero is compared by its bytes: where zones
+    /// are compared, but under NOINVDATA and --dialect gnucobol as a number at every OPTIMIZE
+    /// level, as cobc compares it (C262).
+    pub fn zones_compared_with_zero(&self) -> bool {
+        self.zones_compared() && !self.cobc_zoned_compare()
+    }
+
+    /// Whether an unsigned zoned integer compared with one of its own length is compared by its
+    /// bytes: where zones are compared, and under NOINVDATA and --dialect gnucobol at every
+    /// OPTIMIZE level, as cobc compares two such items with memcmp (C262).
+    pub fn zones_compared_between_items(&self) -> bool {
+        self.zones_compared() || self.cobc_zoned_compare()
+    }
+
+    fn cobc_zoned_compare(&self) -> bool {
+        self.invdata.is_none() && self.dialect == Dialect::Gnucobol
+    }
+
     pub fn code_page(&self) -> &'static CodePage {
         CodePage::by_ccsid(self.codepage).expect("codepage validated when applied")
     }

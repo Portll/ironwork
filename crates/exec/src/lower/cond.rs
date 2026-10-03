@@ -124,9 +124,10 @@ impl Lower<'_> {
             },
             _ => false,
         };
-        let zones_count = self.c.options.zones_compared()
-            && unsigned(x)
-            && (zero || unsigned(other) && self.unscaled_zoned(oc, other).is_some_and(|q| self.places[q].len == self.places[p].len));
+        let options = self.c.options;
+        let zones_count = unsigned(x)
+            && (options.zones_compared_with_zero() && zero
+                || options.zones_compared_between_items() && unsigned(other) && self.unscaled_zoned(oc, other).is_some_and(|q| self.places[q].len == self.places[p].len));
         nonnumeric || zones_count
     }
 

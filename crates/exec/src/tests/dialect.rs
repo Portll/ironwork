@@ -93,3 +93,106 @@ fn accept_at_the_end_of_sysin_moves_a_space_under_gnucobol() {
     assert_eq!(run(Dialect::Ibm), ("[007][007][0007][AB  ][  5]\n".to_owned(), 5));
     assert_eq!(run(Dialect::Gnucobol), ("[000][+000][+00000][    ][  0]\n".to_owned(), 5));
 }
+
+/// `lines` as fixed-format source, each from column 8.
+fn cobol(lines: &[&str]) -> String {
+    lines.iter().map(|l| format!("       {l}\n")).collect()
+}
+
+#[test]
+fn a_dynamic_call_of_an_entry_name_shares_the_programs_storage_under_gnucobol() {
+    let source = cobol(&[
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. CALLER.",
+        "DATA DIVISION.",
+        "WORKING-STORAGE SECTION.",
+        "01  REC PIC X(5) VALUE 'HELLO'.",
+        "01  PGM PIC X(8) VALUE 'PAYMASTR'.",
+        "01  PGM2 PIC X(8) VALUE 'SUBPROG'.",
+        "PROCEDURE DIVISION.",
+        "    CALL 'SUBPROG' USING REC",
+        "    CALL PGM USING REC",
+        "    CALL PGM USING REC",
+        "    CANCEL PGM",
+        "    CALL PGM USING REC",
+        "    CALL 'SUBPROG' USING REC",
+        "    CANCEL PGM2",
+        "    CALL PGM USING REC",
+        "    GOBACK.",
+        "END PROGRAM CALLER.",
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. SUBPROG.",
+        "DATA DIVISION.",
+        "WORKING-STORAGE SECTION.",
+        "01  COUNTER PIC 9 VALUE 0.",
+        "LINKAGE SECTION.",
+        "01  PAYREC PIC X(5).",
+        "PROCEDURE DIVISION USING PAYREC.",
+        "    ADD 1 TO COUNTER",
+        "    DISPLAY 'SUBPROG ' COUNTER",
+        "    GOBACK.",
+        "ENTRY 'PAYMASTR' USING PAYREC.",
+        "    ADD 1 TO COUNTER",
+        "    DISPLAY 'PAYMASTR ' COUNTER",
+        "    GOBACK.",
+        "END PROGRAM SUBPROG.",
+    ]);
+    assert_eq!(under(&source, Dialect::Ibm), "SUBPROG 1\nPAYMASTR 1\nPAYMASTR 2\nPAYMASTR 1\nSUBPROG 2\nPAYMASTR 2\n");
+    assert_eq!(under(&source, Dialect::Gnucobol), "SUBPROG 1\nPAYMASTR 2\nPAYMASTR 3\nPAYMASTR 4\nSUBPROG 5\nPAYMASTR 1\n");
+}
+
+#[test]
+fn a_shorter_external_record_shares_the_storage_under_gnucobol() {
+    let source = cobol(&[
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. MAIN.",
+        "DATA DIVISION.",
+        "WORKING-STORAGE SECTION.",
+        "01  SHARED PIC X(9) EXTERNAL.",
+        "PROCEDURE DIVISION.",
+        "    MOVE 'ALPHA0010' TO SHARED",
+        "    CALL 'SUB'",
+        "    DISPLAY 'MAIN AFTER [' SHARED ']'",
+        "    GOBACK.",
+        "END PROGRAM MAIN.",
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. SUB.",
+        "DATA DIVISION.",
+        "WORKING-STORAGE SECTION.",
+        "01  SHARED IS EXTERNAL.",
+        "    05  S-NAME PIC X(5).",
+        "    05  S-COUNT PIC 9(3).",
+        "PROCEDURE DIVISION.",
+        "    DISPLAY 'SUB SEES [' SHARED ']'",
+        "    MOVE 'OMEGA' TO S-NAME",
+        "    ADD 1 TO S-COUNT",
+        "    GOBACK.",
+        "END PROGRAM SUB.",
+    ]);
+    let ibm = Harness::source(&source).run(Executor::Interpreter);
+    assert!(ibm.ending.unwrap_err().message.contains("EXTERNAL record SHARED has 9 bytes in the run unit, and this program describes 8"));
+    assert_eq!(under(&source, Dialect::Gnucobol), "SUB SEES [ALPHA001]\nMAIN AFTER [OMEGA0020]\n");
+    let longer = source.replace("PIC X(9) EXTERNAL", "PIC X(7) EXTERNAL").replace("'ALPHA0010'", "'ALPHA00'");
+    let flags = [Dialect::Gnucobol.flag()];
+    let refused = Harness::source(&longer).flags(&flags).run(Executor::Interpreter);
+    assert!(refused.ending.unwrap_err().message.contains("EXTERNAL record SHARED has 7 bytes in the run unit, and this program describes 8"));
+}
+
+#[test]
+fn unsigned_zoned_items_of_one_length_compare_by_their_bytes_under_gnucobol() {
+    let source = program(
+        "",
+        "       01  VALUE0 PIC X(4) VALUE '00 0'.\n       01  VALUE1 REDEFINES VALUE0 PIC 9(4).\n       01  W PIC 9(4) VALUE 0.\n",
+        &[
+            line("IF VALUE1 = ZERO DISPLAY 'ZERO' ELSE DISPLAY 'ZONES' END-IF"),
+            line("IF VALUE1 = W DISPLAY 'W' ELSE DISPLAY 'NOT W' END-IF"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    );
+    assert_eq!(under(&source, Dialect::Ibm), "ZERO\nW\n");
+    assert_eq!(under(&source, Dialect::Gnucobol), "ZERO\nNOT W\n");
+    let optimized = [Dialect::Gnucobol.flag(), "--optimize=2"];
+    assert_eq!(Harness::source(&source).flags(&optimized).run(Executor::Interpreter).out, "ZERO\nNOT W\n");
+    assert_eq!(Harness::source(&source).flags(&["--optimize=2"]).run(Executor::Interpreter).out, "ZONES\nNOT W\n");
+}

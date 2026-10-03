@@ -12,6 +12,7 @@ use crate::oo::ClassCode;
 use crate::storage::Loc;
 use crate::taint::Taint;
 use crate::vocab::{OpenMode, Pos};
+use numeric::Dialect;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -499,9 +500,9 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
     }
 
     /// The program a CALL of `name` enters, and which of its ENTRY statements when `name` is not
-    /// its PROGRAM-ID. A static CALL of an entry name enters the one copy of the program; a dynamic
-    /// CALL gets a copy of its own for each entry name (assumption C51).
-    pub fn load_entry(&mut self, name: &str, dynamic: bool) -> Result<(usize, Option<usize>), LoadError> {
+    /// its PROGRAM-ID: the one copy of the program, or with `copy` a copy of its own for the entry
+    /// name ([`crate::callee::entry_copy`]).
+    pub fn load_entry(&mut self, name: &str, copy: bool) -> Result<(usize, Option<usize>), LoadError> {
         let name = name.to_ascii_uppercase();
         if let Some(i) = self.find(&name) {
             return Ok((i, self.programs[i].entry));
@@ -515,7 +516,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         };
         let Some(compiled) = self.programs[index].compiled.clone() else { return Ok((index, None)) };
         let Some(entry) = L::entry(&compiled, &name) else { return Ok((index, None)) };
-        if !dynamic {
+        if !copy {
             return Ok((index, Some(entry)));
         }
         let (files, size) = L::shape(&compiled);
@@ -669,11 +670,15 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
 
     /// Where EXTERNAL record `name` is, or EXTERNAL file `name`'s record area when `file`: storage
     /// of `size` bytes, zeroed, the first time a program describes it. A description of another
-    /// size is refused (assumption C180).
-    pub fn external(&mut self, name: &str, file: bool, size: usize) -> Result<usize, String> {
+    /// size is refused (assumption C180), except under --dialect gnucobol a shorter record's, which
+    /// shares the storage with a warning, as cobc's does.
+    pub fn external(&mut self, name: &str, file: bool, size: usize, dialect: Dialect) -> Result<usize, String> {
         let key = (file, name.to_owned());
         if let Some(&(at, had)) = self.externals.storage.get(&key) {
             return if had == size {
+                Ok(at)
+            } else if size < had && !file && dialect == Dialect::Gnucobol {
+                let _ = writeln!(self.err, "ironwork: EXTERNAL record {name} has {had} bytes in the run unit, and this program describes {size}");
                 Ok(at)
             } else {
                 let what = if file { "the record area of EXTERNAL file" } else { "EXTERNAL record" };

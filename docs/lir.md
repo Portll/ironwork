@@ -426,7 +426,9 @@ pub enum Count { Fixed(u32), Odo(Odo), Temp(TempId) }
   NOINVDATA at OPTIMIZE(1) or (2) (C262), an unsigned zoned integer against zero (ZERO or a numeric
   literal of value zero, read as ZERO's zeros), or against an unsigned zoned integer of its own
   length, is `ZonedBytes` too, the other item taken by its bytes the same way
-  (`rt::store::compare_zoned_bytes`). INVDATA(CLEANSIGN) reads a sign half-byte of
+  (`rt::store::compare_zoned_bytes`). Under NOINVDATA and `--dialect gnucobol` the comparison with
+  zero is not, at any OPTIMIZE level, and the one between two such items is, at every level
+  (`Options::zones_compared_with_zero`, `Options::zones_compared_between_items`; dialect.md). INVDATA(CLEANSIGN) reads a sign half-byte of
   0 to 9 as F wherever a zoned or packed item is read as a number (`rt::store::read_stored`, C222).
 - **Condition-names.** `Name` holds the conditional variable's place, with the 88-level reference's
   subscripts, and each VALUE as a constant, a THRU pair as `(low, Some(high))`. Each value is
@@ -1159,7 +1161,8 @@ pub struct EntryPoint { pub name: SymId, pub paragraph: ParaId, pub block: Block
 
 `Services.entries` holds them in source order, the order `Loaded.entry` numbers them. A dynamic
 CALL of an entry name gets a copy of the program of its own (assumption C51 `ENTRY_CALLS`,
-unit.rs:150-171 (f2)).
+unit.rs:150-171 (f2)), except under `--dialect gnucobol`, where it enters the one copy
+(`rt::callee::entry_copy`).
 
 - **The op returns** `Arm(0)` after a normal return, `Arm(1)` when the program is not found and ON
   EXCEPTION is written, or `End(StopRun)`; `Next` in place of `Arm(0)` when neither ON EXCEPTION

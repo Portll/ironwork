@@ -45,10 +45,10 @@ impl<'p> Machine<'p, '_, '_> {
             let external = |m: String| Abend::ironwork(m, Pos::default());
             self.linkage[ordinal] = match binding {
                 Binding::Argument => continue,
-                Binding::External { name, size } => Some(self.unit.external(name, false, *size as usize).map_err(external)?),
+                Binding::External { name, size } => Some(self.unit.external(name, false, *size as usize, self.options.dialect).map_err(external)?),
                 Binding::ExternalFile(k) => {
                     let k = usize::from(*k);
-                    Some(self.unit.external(&self.program.files[k].name, true, layout.file_areas[k].1 as usize).map_err(external)?)
+                    Some(self.unit.external(&self.program.files[k].name, true, layout.file_areas[k].1 as usize, self.options.dialect).map_err(external)?)
                 }
                 Binding::Global { program, record, section } => self.global_address(program, record, section)?,
             };

@@ -11,6 +11,7 @@ use crate::storage::{Loc, Val};
 use crate::store::{self, ProgramFacts};
 use crate::unit::{Loader, RunUnit, UnitHost};
 use crate::vocab::{Figurative, Pos};
+use numeric::Dialect;
 use zarch::decimal;
 
 type R<T> = Result<T, Abend>;
@@ -248,6 +249,13 @@ pub fn recursive_call(program: &str, unit: &str, pos: Pos) -> Abend {
     let (program, unit) = (program.to_ascii_uppercase(), unit.to_ascii_uppercase());
     let message = format!("IGZ0064S A recursive call to active program {program} in compilation unit {unit} was attempted.");
     Abend { code: AbendCode::user(4038), message, pos, file: None }
+}
+
+/// Whether a CALL of an entry name gets a copy of the program with WORKING-STORAGE of its own: a
+/// dynamic CALL does (assumption C51), except under --dialect gnucobol, where every entry name
+/// shares the program's one copy, as cobc's do.
+pub fn entry_copy(dynamic: bool, dialect: Dialect) -> bool {
+    dynamic && dialect == Dialect::Ibm
 }
 
 /// CANCEL of a program a dynamic CALL entered, or of a contained program; a program only ever

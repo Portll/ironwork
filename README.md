@@ -272,8 +272,11 @@ gives nothing. Whether Enterprise COBOL warns such a program is open until an IB
 
 `--dialect gnucobol` gives GnuCOBOL's `cobc -std=ibm` result in place of Enterprise COBOL's where
 ironwork's register of assumptions chose one and cobc chose another: a ROUNDED receiver's extra
-decimal place reaches only a statement's last operation (C101), and DISPLAY shows packed and binary
-items as cobc does (C14). `--dialect ibm` is the default. [docs/dialect.md](docs/dialect.md) lists
+decimal place reaches only a statement's last operation (C101); DISPLAY shows packed and binary
+items (C14) and numeric literals (C95) as cobc does; ACCEPT at the end of SYSIN moves a space (C15);
+an ENTRY name shares its program's storage (C51); a shorter EXTERNAL record shares the run unit's
+(C180); and two unsigned zoned items of one length compare by their bytes at every OPTIMIZE level
+(C262). `--dialect ibm` is the default. [docs/dialect.md](docs/dialect.md) lists
 these and every other difference found from cobc, which the dialect leaves alone: the platform, what
 IBM documents and cobc does differently, and bugs.
 

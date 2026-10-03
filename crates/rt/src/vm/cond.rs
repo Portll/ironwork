@@ -197,11 +197,11 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         let Comparand::Operand(Operand::Load(r)) = e else { return Ok(None) };
         let nonnumeric = self.nonnumeric(other)?;
         let options = self.p.options.options;
-        let zones_count = options.zones_compared()
+        let zones_count = (options.zones_compared_with_zero() || options.zones_compared_between_items())
             && self.zone_sensitive(*r)?
             && match other {
-                Comparand::Operand(Operand::Const(c)) => constant(&self.p.consts[*c as usize]).is_ok_and(|v| store::zero(&v)),
-                Comparand::Operand(Operand::Load(o)) => self.zone_sensitive(*o)? && self.loc(*o)?.len == self.loc(*r)?.len,
+                Comparand::Operand(Operand::Const(c)) => options.zones_compared_with_zero() && constant(&self.p.consts[*c as usize]).is_ok_and(|v| store::zero(&v)),
+                Comparand::Operand(Operand::Load(o)) => options.zones_compared_between_items() && self.zone_sensitive(*o)? && self.loc(*o)?.len == self.loc(*r)?.len,
                 _ => false,
             };
         if !nonnumeric && !zones_count {

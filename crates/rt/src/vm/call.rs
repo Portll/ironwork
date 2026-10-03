@@ -52,7 +52,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 }
             }
         }
-        let (index, entry) = match self.unit.load_entry(&name, dynamic) {
+        let (index, entry) = match self.unit.load_entry(&name, callee::entry_copy(dynamic, self.p.options.options.dialect)) {
             Ok(found) => found,
             Err(LoadError::NotFound) => {
                 if let Some(service) = le::service(&name) {
@@ -243,7 +243,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             self.sink("dynamic-program-load", pos, &name);
         }
         let dynamic = self.p.options.options.dynam || variable;
-        match self.unit.load_entry(&name, dynamic) {
+        match self.unit.load_entry(&name, callee::entry_copy(dynamic, self.p.options.options.dialect)) {
             Ok(_) => {}
             Err(LoadError::NotFound) if le::provides(&name) => {}
             Err(LoadError::NotFound) => return Err(Abend { code: AbendCode::ModuleNotFound, message: le::missing(&name), pos, file: None }.into()),

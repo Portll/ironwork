@@ -971,7 +971,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         {
             self.sink("os-command", pos, &text);
         }
-        let (index, entry) = match self.unit.load_entry(&name, dynamic) {
+        let (index, entry) = match self.unit.load_entry(&name, rt::callee::entry_copy(dynamic, self.options.dialect)) {
             Ok(i) => i,
             Err(LoadError::NotFound) if crate::le::provides(&name) => return self.le_call(c, &name),
             Err(LoadError::NotFound) => {
@@ -1059,7 +1059,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             self.sink("dynamic-program-load", pos, &name);
         }
         let dynamic = self.options.dynam || variable;
-        match self.unit.load_entry(&name, dynamic) {
+        match self.unit.load_entry(&name, rt::callee::entry_copy(dynamic, self.options.dialect)) {
             Ok(_) => Ok((name, dynamic)),
             Err(LoadError::NotFound) if crate::le::provides(&name) => Ok((name, dynamic)),
             Err(LoadError::NotFound) => Err(Abend { code: AbendCode::ModuleNotFound, message: crate::le::missing(&name), pos, file: None }),
@@ -1550,11 +1550,11 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let nonnumeric = self.nonnumeric(other)?;
         // Where zones are compared, an unsigned zoned integer against zero or one of its own
         // length compares its zones too (assumptions C223, C262).
-        let zones_count = self.options.zones_compared()
+        let zones_count = (self.options.zones_compared_with_zero() || self.options.zones_compared_between_items())
             && self.zone_sensitive(e)?
             && match other {
-                Expr::Operand(Operand::Literal(l)) => self.zero_literal(l),
-                Expr::Operand(Operand::Ref(o)) => self.zone_sensitive(other)? && self.locate(o)?.len == self.locate(r)?.len,
+                Expr::Operand(Operand::Literal(l)) => self.options.zones_compared_with_zero() && self.zero_literal(l),
+                Expr::Operand(Operand::Ref(o)) => self.options.zones_compared_between_items() && self.zone_sensitive(other)? && self.locate(o)?.len == self.locate(r)?.len,
                 _ => false,
             };
         if !nonnumeric && !zones_count {
@@ -1588,7 +1588,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     /// take them, otherwise as numbers, the variable read once into `subject` at `at`.
     fn compare_value(&mut self, loc: Loc, subject: &mut Option<(Val, Option<Loc>)>, value: &Literal, at: Pos, pos: Pos) -> R<Ordering> {
         let nonnumeric = matches!(value, Literal::Alnum(_) | Literal::Hex(_) | Literal::All(_)) || matches!(value, Literal::Figurative(f) if !matches!(f, Figurative::Zero | Figurative::Null));
-        let zones_count = self.options.zones_compared() && self.zone_sensitive_at(loc) && self.zero_literal(value);
+        let zones_count = self.options.zones_compared_with_zero() && self.zone_sensitive_at(loc) && self.zero_literal(value);
         if (nonnumeric || zones_count)
             && let Some(image) = store::compared_zoned_bytes(&self.facts(), &self.unit.mem, loc)
         {
