@@ -2332,14 +2332,17 @@ The fuzz target of B2 runs both with a step limit, and passes when they agree or
 The golden programs of §12.2 run in both, which exercises C99.
 
 **What runs now.** `rt::vm` runs the core: storage, every data op, conditions, control flow, and
-CALL and user-defined functions within the run unit; the file statements with LINAGE and their USE
-AFTER EXCEPTION/ERROR procedures, SORT, MERGE, RELEASE and RETURN with their procedures, and the
-Report Writer with its USE BEFORE REPORTING procedures, each a host of the `rt` service the walker
-calls; EXTERNAL and GLOBAL records and files and USE GLOBAL procedures; JSON and XML GENERATE and
-PARSE; EXEC SQL; and EXEC CICS in a task (`rt::vm::run_task`), LINK and XCTL included.
-LE callable services, the virtual printer, OO COBOL, NUMCHECK and PARMCHECK stop a run as
-`Halt::Unimplemented`, naming what was reached, and so do FUNCTION UUID4, whose value differs on
-every run, the CICS cases of §9.5, and the few places where the LIR does not keep what decides the
+CALL and user-defined functions within the run unit, with NUMCHECK, ZONECHECK and PARMCHECK; LE
+callable services and the virtual printer; OO COBOL, INVOKE and CALL through a function-pointer; the
+file statements with LINAGE and their USE AFTER EXCEPTION/ERROR procedures, SORT, MERGE, RELEASE and
+RETURN with their procedures, and the Report Writer with its USE BEFORE REPORTING procedures, each a
+host of the `rt` service the walker calls; EXTERNAL and GLOBAL records and files and USE GLOBAL
+procedures; JSON and XML GENERATE and PARSE; EXEC SQL; and EXEC CICS in a task (`rt::vm::run_task`),
+LINK and XCTL included. A run stops as `Halt::Unimplemented`, naming what was reached, at a CALL,
+LINK or XCTL of a program, or a function, method or class data, that does not lower; at FUNCTION
+UUID4, whose value differs on every run, and FUNCTION RANDOM in a subscript, reference modification
+or OCCURS DEPENDING ON; at the CICS cases of §9.5, SEND MAP with no FROM and RECEIVE MAP with no
+INTO or SET among them; and at the few places where the LIR does not keep what decides the
 interpreter's result. The test `Harness` runs every program that lowers on both executors, a CICS
 task included, the system clock read once for both, and fails the test when they differ in DISPLAY
 output, standard error, the ending or abend (code, message, position and file), RETURN-CODE, the
