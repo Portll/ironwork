@@ -2431,6 +2431,31 @@ fn xctl_drops_the_programs_condition_handlers_and_keeps_the_levels_push_handle_s
     assert_eq!(condition_task(&[exit, push, push, &xctl("ABEND1")]), (String::new(), Some("XC01".into())));
 }
 
+/// The output and abend code of a task whose first program, MAINP, counts its activations in N,
+/// shows the COMMAREA it was given and RETURNs, or with none runs `body` and shows N. BACKX XCTLs
+/// to MAINP, CALLX does so from a CALL, and LINKM LINKs to it.
+fn first_program_task(body: &[&str]) -> (String, Option<String>) {
+    let again = ["ADD 1 TO N", "IF EIBCALEN > 0", "    DISPLAY 'MAIN AGAIN ' N ' ' DFHCOMMAREA", "    EXEC CICS RETURN END-EXEC", "END-IF"];
+    let mut procedure: Vec<String> = again.iter().chain(body).map(|s| line(s)).collect();
+    procedure.extend([line("DISPLAY 'MAIN ENDS ' N"), line("EXEC CICS RETURN END-EXEC.")]);
+    let main = cics_program("MAINP", "       01  N PIC 9 VALUE 0.\n", "       01  DFHCOMMAREA PIC X(4).\n", &procedure.concat());
+    let to_main = |verb: &str, area: &str| [line(&format!("EXEC CICS {verb} PROGRAM('MAINP') COMMAREA('{area}') LENGTH(4)")), line("    END-EXEC"), line("EXEC CICS RETURN END-EXEC.")].concat();
+    let programs = [("BACKX", to_main("XCTL", "XCTL")), ("CALLX", to_main("XCTL", "CALL")), ("LINKM", to_main("LINK", "LINK"))];
+    let mut source = format!("{main}       END PROGRAM MAINP.\n");
+    for (id, procedure) in programs {
+        source.push_str(&format!("{}       END PROGRAM {id}.\n", cics_program(id, "", "", &procedure)));
+    }
+    let (out, ending) = run_cics(&source, task("TR19"), None, unit::Clock::System);
+    (out, ending.err().map(|a| a.code.to_string()))
+}
+
+#[test]
+fn xctl_and_link_start_the_tasks_first_program_afresh_wherever_it_is() {
+    assert_eq!(first_program_task(&["EXEC CICS XCTL PROGRAM('BACKX') END-EXEC"]), ("MAIN AGAIN 1 XCTL\n".into(), None));
+    assert_eq!(first_program_task(&["CALL 'CALLX'", "DISPLAY 'NOT REACHED'"]), ("MAIN AGAIN 1 CALL\n".into(), None));
+    assert_eq!(first_program_task(&["EXEC CICS LINK PROGRAM('LINKM') END-EXEC", "ADD 1 TO N"]), ("MAIN AGAIN 1 LINK\nMAIN ENDS 2\n".into(), None));
+}
+
 #[test]
 fn xctl_in_a_called_program_replaces_the_program_running_its_level() {
     assert_eq!(level_task(&["CALL 'XCTP'", "DISPLAY 'BACK IN MAIN'"]), ("LAST XC 0002\n".into(), Ok((None, None))));

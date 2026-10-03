@@ -63,9 +63,7 @@ pub(super) fn link<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &A
         Err(LoadError::NotFound) => return raise(x, at, Condition::PGMIDERR, 0),
         Err(LoadError::Compile(m)) => return Err(Abend::ironwork(format!("EXEC CICS {} PROGRAM({name}): {m}", at.name), at.pos)),
     };
-    let Some(program) = x.unit().programs[index].compiled.clone() else {
-        return Err(Abend::ironwork(format!("EXEC CICS {} PROGRAM({name}): the task's first program is already running", at.name), at.pos));
-    };
+    let program = x.unit().programs[index].compiled.clone();
     let mark = x.unit().mem.len();
     let (area, item_len) = match &t.commarea {
         Some(Datum::Place(p)) if !xctl => {
@@ -97,7 +95,7 @@ pub(super) fn link<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &A
 
 /// Runs program `index` in a run unit of its own (C145) at the next logical level, or for XCTL in
 /// this program's place; the level it ran has ended when it comes back.
-fn enter<'w, P: Copy, O, S, X: CicsHost<'w, P, O, S>>(x: &mut X, program: X::Program, index: usize, area: Option<usize>, xctl: bool, pos: Pos) -> R<Ending> {
+fn enter<'w, P: Copy, O, S, X: CicsHost<'w, P, O, S>>(x: &mut X, program: Option<X::Program>, index: usize, area: Option<usize>, xctl: bool, pos: Pos) -> R<Ending> {
     let below = u32::from(!xctl);
     task(x).links += below;
     x.unit().begin_cics_run_unit();
@@ -172,9 +170,7 @@ pub fn enter_exit_program<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>,
         Err(LoadError::NotFound) => return Err(apct(format!("HANDLE ABEND PROGRAM({name}): no program of the name"))),
         Err(LoadError::Compile(m)) => return Err(Abend::ironwork(format!("HANDLE ABEND PROGRAM({name}): {m}"), pos)),
     };
-    let Some(program) = x.unit().programs[index].compiled.clone() else {
-        return Err(apct(format!("HANDLE ABEND PROGRAM({name}): the task's first program is already running")));
-    };
+    let program = x.unit().programs[index].compiled.clone();
     let page = page(x);
     eib_text(x.unit(), page, EIBRSRCE, 8, name);
     let saved = kept_calen(x.unit());

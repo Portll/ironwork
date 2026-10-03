@@ -54,8 +54,9 @@ pub trait CicsHost<'w, P: Copy, O, S>: Host<P> + UnitHost<'w> {
     fn locate_named(&mut self, name: &str, pos: Pos) -> R<Loc>;
     /// Runs program `index` from its start with DFHEIBLK and `commarea` as its USING items; for
     /// XCTL, in this program's place at its logical level, with the handlers `Handlers::xctl`
-    /// leaves it (C239, C146).
-    fn run_program(&mut self, program: Self::Program, index: usize, commarea: Option<usize>, xctl: bool) -> R<Ending>;
+    /// leaves it (C239, C146). `program` is None for the task's first program, whose handle the
+    /// run unit does not hold (C148).
+    fn run_program(&mut self, program: Option<Self::Program>, index: usize, commarea: Option<usize>, xctl: bool) -> R<Ending>;
 }
 
 /// HANDLE CONDITION, IGNORE CONDITION and HANDLE ABEND, which belong to the logical level: every

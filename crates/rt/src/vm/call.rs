@@ -86,7 +86,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             let using = entry.map_or(&program.storage.using, |e| &e.using).iter().map(|&o| Some(usize::from(o))).collect();
             let returning = program.storage.returning.map(|o| (usize::from(o), program.storage.linkage[usize::from(o)] as usize));
             Bindings { records: &[], using, addresses: &addresses, returning }.bind(vm.unit, &mut vm.linkage);
-            vm.cics_handlers = caller.cics_handlers.lend(suspends);
+            (vm.cics_handlers, vm.cics_first) = (caller.cics_handlers.lend(suspends), caller.cics_first);
             let ending = match vm.run_from(entry.map(|e| (e.paragraph, e.block))) {
                 Err(Halt::Unimplemented(what)) => return Err(Halt::Unimplemented(what)),
                 Err(Halt::Abend(a)) => Err(a),

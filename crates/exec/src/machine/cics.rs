@@ -100,6 +100,7 @@ impl<'p> Machine<'p, '_, '_> {
     /// Fills the EXEC interface block for the task's first program and binds DFHEIBLK and
     /// DFHCOMMAREA, the USING items the translator gave it.
     pub(crate) fn begin_task(&mut self, commarea: Option<usize>, length: usize) {
+        self.cics_first = Some(self.compiled);
         cics::begin_task(self.unit, self.page, length);
         let eib = self.unit.eib;
         self.bind(&[Some(eib), commarea]);
@@ -157,12 +158,16 @@ impl<'a, 'w> CicsHost<'w, &'a Ref, &'a Operand, &'a str> for Machine<'_, '_, 'w>
         self.locate(&Self::named(name, pos))
     }
 
-    fn run_program(&mut self, program: Rc<Compiled>, index: usize, commarea: Option<usize>, xctl: bool) -> R<Ending> {
+    fn run_program(&mut self, program: Option<Rc<Compiled>>, index: usize, commarea: Option<usize>, xctl: bool) -> R<Ending> {
+        let first = self.cics_first;
+        let Some(compiled) = program.as_deref().or(first) else {
+            return Err(Abend::ironwork("the CICS task's first program cannot be LINKed or XCTLed to from a function or a method", Pos::default()));
+        };
         let handlers = if xctl { self.cics_handlers.xctl() } else { Handlers::default() };
-        Machine::activation(&program, index, &mut *self.unit, self.main && xctl).and_then(|mut callee| {
+        Machine::activation(compiled, index, &mut *self.unit, self.main && xctl).and_then(|mut callee| {
             let eib = callee.unit.eib;
             callee.bind(&[Some(eib), commarea]);
-            callee.cics_handlers = handlers;
+            (callee.cics_handlers, callee.cics_first) = (handlers, first);
             callee.run_level()
         })
     }

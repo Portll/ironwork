@@ -287,6 +287,7 @@ pub const CICS_STOP_RUN_ENDS_THE_LEVEL: &str = "C144";
 pub const CICS_RUN_UNIT_PER_LINK: &str = "C145";
 pub const CICS_HANDLERS_ACROSS_XCTL: &str = "C146";
 pub const CICS_NO_OBJECT_ORIENTED_COBOL: &str = "C147";
+pub const CICS_TRANSFER_TO_A_RUNNING_PROGRAM: &str = "C148";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1834,6 +1835,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: CICS_NO_OBJECT_ORIENTED_COBOL,
         claim: "COBOL programs that have object-oriented syntax for Java interoperability cannot run in CICS (Programming Guide SC27-8714-03, p. 495), and COBOL class definitions and methods cannot contain EXEC CICS statements, cannot be run in CICS and cannot be compiled with the CICS option (p. 679); the CICS reserved-word table flags INVOKE, METHOD, OBJECT and FACTORY (p. 502). An INVOKEd method therefore shares no CICS handlers with the program that invokes it, and starts with none either: it does not run. ironwork compiles such a program as before and refuses an INVOKE that a CICS task reaches, before any operand is evaluated, with an IRONWORK abend",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CICS_TRANSFER_TO_A_RUNNING_PROGRAM,
+        claim: "XCTL releases the program that issues it, and the program it transfers control to is loaded only if it is not already in main storage (CICS TS 6.x, XCTL, dfhp4_xctl); none of XCTL's conditions is for a target that is running or in the CALL chain. XCTL and LINK each pass control to a new Language Environment enclave (z/OS 3.1 Language Environment Programming Guide, 'CICS run unit', ceea200254), where the target starts afresh (C145). So XCTL to the program that issues it, to one in the CALL chain it releases, or to the task's first program, runs that program from its start with new storage, and LINK to a program running at a higher level, the task's first program included, runs a copy of its own; a HANDLE ABEND PROGRAM exit naming one is entered the same way. ironwork's run unit holds no handle for the task's first program, so each activation carries a reference to it for these transfers; a CALL of it is still refused",
         basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },

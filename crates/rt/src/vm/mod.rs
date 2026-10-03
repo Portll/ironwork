@@ -303,6 +303,8 @@ struct Vm<'p, 'u, 'w, L: Loader<Rc<Code>>> {
     cics_handlers: Handlers,
     /// This activation's number in the CICS task, which owns the HANDLE labels it sets.
     serial: u64,
+    /// `Machine::cics_first`: the CICS task's first program, for a LINK or XCTL of it.
+    cics_first: Option<&'p Lowered>,
     /// SQLCODE and SQLWARN0 of the last EXEC SQL statement, which WHENEVER tests.
     whenever: Option<Ran>,
     /// The method this activation runs, if it is one: its class and SELF.
@@ -371,6 +373,7 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
             io: files::State::default(),
             cics_handlers: Handlers::default(),
             serial,
+            cics_first: None,
             whenever: None,
             method: None,
             containers,

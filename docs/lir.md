@@ -1370,7 +1370,9 @@ HANDLE labels there. SYNCPOINT is a service (cics/services.rs) that settles the 
   whose HANDLE ABEND exit is active goes to the exit as `run_level` sends it: a LABEL restarts the
   activation's dispatch at the label, its frames gone as the walker's Rust calls are, the points
   they armed still armed and the depth the activation's. LINK and XCTL run the program as a new
-  activation through `CicsHost::run_program`. The mapset comes from `Loader::mapset`; the LIR has
+  activation through `CicsHost::run_program`; the task's first program, which the run unit holds no
+  handle for, comes from the reference each activation carries from it (`cics_first`, the walker's
+  too; C148). The mapset comes from `Loader::mapset`; the LIR has
   no place for the symbolic map SEND MAP without FROM and RECEIVE MAP without INTO or SET find by
   name, so those stop the VM as `Halt::Unimplemented`.
 

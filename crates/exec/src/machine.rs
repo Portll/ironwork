@@ -87,6 +87,9 @@ pub struct Machine<'p, 'u, 'w> {
     cics_handlers: cics::Handlers,
     /// This activation's number in the CICS task, which owns the HANDLE labels it sets.
     serial: u64,
+    /// The CICS task's first program, which the run unit holds no handle to, for a LINK or XCTL
+    /// of it from this activation (C148).
+    cics_first: Option<&'p Compiled>,
     report_writer: &'p crate::report::Writer,
     /// Each file's printer control character, when it is a print file.
     carriage: &'p [Option<crate::printer::Carriage>],
@@ -173,6 +176,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             main,
             cics_handlers: cics::Handlers::default(),
             serial,
+            cics_first: None,
             report_writer: &compiled.report_writer,
             carriage: &compiled.carriage,
             oo: oo::Frame::default(),
@@ -1063,7 +1067,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             let mut callee = Machine::activation_within(&compiled, index, &mut *m.unit, false, containers)?;
             let entry = entry.and_then(|k| compiled.entries.get(k));
             callee.bind_linkage(&[], entry.map_or(&compiled.program.using, |e| &e.using), &addresses, true);
-            callee.cics_handlers = m.cics_handlers.lend(suspends);
+            (callee.cics_handlers, callee.cics_first) = (m.cics_handlers.lend(suspends), m.cics_first);
             let ending = callee.run_called(entry.map(|e| (e.paragraph, e.statement)));
             m.cics_handlers.take_back(&mut callee.cics_handlers, suspends && ending.is_ok());
             let returned = match (&compiled.program.returning, &ending) {
