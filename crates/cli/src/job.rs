@@ -334,7 +334,7 @@ impl Runner<'_> {
     /// Before a step runs: the base clusters it allocates whose alternate indexes are upgraded.
     fn watch(&mut self, dds: &[Allocated]) {
         for d in dds {
-            let Some(name) = self.name_of(&d.path) else { continue };
+            let Some(name) = self.name_of(&d.path).filter(|n| matches!(catalog::get(&self.datasets, n), Some(catalog::Entry::Cluster(_)))) else { continue };
             if catalog::alternate_indexes(&self.datasets, &name).iter().any(|a| a.upgrade) && !self.watched.iter().any(|(n, _)| *n == name) {
                 let bytes = fs::read(&d.path).unwrap_or_default();
                 self.watched.push((name, bytes));

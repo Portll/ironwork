@@ -37,6 +37,13 @@ pub const DEFAULT_KEYS: Keys = Keys { length: 64, offset: 0 };
 pub const DEFAULT_RECORD_SIZE: RecordSize = RecordSize { average: 4089, maximum: 4089 };
 pub const DEFAULT_AIX_RECORD_SIZE: RecordSize = RecordSize { average: 4086, maximum: 32600 };
 
+/// The names DATA(NAME()) and INDEX(NAME()) give a cluster's or an alternate index's components.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Components {
+    pub data: Option<String>,
+    pub index: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cluster {
     pub name: String,
@@ -44,6 +51,9 @@ pub struct Cluster {
     /// An indexed cluster's prime key.
     pub keys: Option<Keys>,
     pub record_size: RecordSize,
+    pub components: Components,
+    /// RECATALOG: catalog a data set that is already there instead of making a new one.
+    pub recatalog: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,7 +65,10 @@ pub struct AlternateIndex {
     pub unique: bool,
     /// Kept current as the base cluster changes.
     pub upgrade: bool,
+    /// BLDINDEX may build it again over the records it holds.
+    pub reuse: bool,
     pub record_size: RecordSize,
+    pub components: Components,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -597,10 +610,11 @@ fn print(args: &[Token]) -> Result<Command, String> {
     Ok(Command::Print(Print { from, format, first, last, out }))
 }
 
-/// A LISTCAT ENTRIES name: a data set name, a qualifier of which may be an asterisk.
+/// A LISTCAT ENTRIES or LEVEL name: a data set name, a qualifier of which may be an asterisk
+/// and a character of which may be a percent sign.
 fn listed_name(v: &str) -> Result<String, String> {
     let v = v.trim().trim_matches('\'');
-    let stand_in = v.split('.').map(|q| if q == "*" { "A" } else { q }).collect::<Vec<_>>().join(".");
+    let stand_in = v.split('.').map(|q| if q == "*" { "A".to_string() } else { q.replace('%', "A") }).collect::<Vec<_>>().join(".");
     if crate::is_dsn(&stand_in) { Ok(v.to_string()) } else { Err(format!("{v} is not a data set name or a generic name")) }
 }
 
@@ -610,6 +624,7 @@ fn listcat(args: &[Token]) -> Result<Command, String> {
         match a {
             Token::Keyed(k, v) => match k.as_str() {
                 "ENTRIES" | "ENTRY" | "ENT" => entries = Entries::Named(v.split([' ', ',']).filter(|n| !n.is_empty()).map(listed_name).collect::<Result<_, _>>()?),
+                "LEVEL" | "LVL" if v.trim().ends_with('*') => return Err(format!("LEVEL({v}) must not end with *")),
                 "LEVEL" | "LVL" => entries = Entries::Level(listed_name(v)?),
                 "OUTFILE" | "OFILE" => out = Some(dd_name(v)?),
                 "CATALOG" | "CAT" => {}
@@ -688,14 +703,19 @@ fn sizes(object: &[Token], data: &[Token]) -> Result<(Option<Keys>, Option<Recor
     Ok((k, r))
 }
 
-fn define_cluster(object: &[Token], data: &[Token]) -> Result<Cluster, String> {
+fn define_cluster(object: &[Token], data: &[Token], components: Components) -> Result<Cluster, String> {
     let name = object_name(object)?.ok_or("DEFINE CLUSTER needs NAME")?;
-    let mut organization = Organization::Indexed;
+    let (mut organization, mut recatalog) = (Organization::Indexed, false);
     for t in object.iter().chain(data) {
         if let Token::Keyed(k, _) | Token::Word(k) = t
             && (k == "DATABASE" || k == "ZFS")
         {
             return Err(format!("DEFINE CLUSTER {k} is not supported yet"));
+        }
+        if let Token::Word(w) = t
+            && (w == "RECATALOG" || w == "RCTLG" || w == "NORECATALOG" || w == "NRCTLG")
+        {
+            recatalog = w == "RECATALOG" || w == "RCTLG";
         }
         if let Token::Word(w) = t {
             organization = match w.as_str() {
@@ -711,7 +731,7 @@ fn define_cluster(object: &[Token], data: &[Token]) -> Result<Cluster, String> {
     let keys = (organization == Organization::Indexed).then(|| k.unwrap_or(DEFAULT_KEYS));
     let record_size = r.unwrap_or(DEFAULT_RECORD_SIZE);
     fits(&name, keys, record_size)?;
-    Ok(Cluster { name, organization, keys, record_size })
+    Ok(Cluster { name, organization, keys, record_size, components, recatalog })
 }
 
 fn fits(name: &str, keys: Option<Keys>, size: RecordSize) -> Result<(), String> {
@@ -721,9 +741,9 @@ fn fits(name: &str, keys: Option<Keys>, size: RecordSize) -> Result<(), String> 
     }
 }
 
-fn define_alternate_index(object: &[Token], data: &[Token]) -> Result<AlternateIndex, String> {
+fn define_alternate_index(object: &[Token], data: &[Token], components: Components) -> Result<AlternateIndex, String> {
     let name = object_name(object)?.ok_or("DEFINE ALTERNATEINDEX needs NAME")?;
-    let (mut relate, mut unique, mut upgrade) = (None, false, true);
+    let (mut relate, mut unique, mut upgrade, mut reuse) = (None, false, true, false);
     for t in object {
         match t {
             Token::Keyed(k, v) if k == "RELATE" || k == "REL" => relate = Some(name_of(v)?),
@@ -732,13 +752,15 @@ fn define_alternate_index(object: &[Token], data: &[Token]) -> Result<AlternateI
             Token::Word(w) if w == "NONUNIQUEKEY" || w == "NUNQK" => unique = false,
             Token::Word(w) if w == "UPGRADE" || w == "UPG" => upgrade = true,
             Token::Word(w) if w == "NOUPGRADE" || w == "NUPG" => upgrade = false,
+            Token::Word(w) if w == "REUSE" || w == "RUS" => reuse = true,
+            Token::Word(w) if w == "NOREUSE" || w == "NRUS" => reuse = false,
             _ => {}
         }
     }
     let relate = relate.ok_or("DEFINE ALTERNATEINDEX needs RELATE")?;
     let (k, r) = sizes(object, data)?;
     let (keys, record_size) = (k.unwrap_or(DEFAULT_KEYS), r.unwrap_or(DEFAULT_AIX_RECORD_SIZE));
-    Ok(AlternateIndex { name, relate, keys, unique, upgrade, record_size })
+    Ok(AlternateIndex { name, relate, keys, unique, upgrade, reuse, record_size, components })
 }
 
 fn define_path(object: &[Token]) -> Result<Path, String> {
@@ -758,7 +780,7 @@ fn define_path(object: &[Token]) -> Result<Path, String> {
 }
 
 fn define(args: &[Token]) -> Result<Command, String> {
-    let (mut object, mut data) = (None, Vec::new());
+    let (mut object, mut data, mut index) = (None, Vec::new(), Vec::new());
     for a in args {
         match a {
             Token::Keyed(k, v) if k == "GENERATIONDATAGROUP" || k == "GDG" => return define_gdg(v),
@@ -771,7 +793,11 @@ fn define(args: &[Token]) -> Result<Command, String> {
                         data = tokens(v)?;
                         continue;
                     }
-                    "INDEX" | "IX" | "CATALOG" | "CAT" => continue,
+                    "INDEX" | "IX" => {
+                        index = tokens(v)?;
+                        continue;
+                    }
+                    "CATALOG" | "CAT" => continue,
                     k => return Err(format!("DEFINE {k} is not supported yet; DEFINE CLUSTER, ALTERNATEINDEX, PATH and GDG are")),
                 };
                 object = Some((kind, tokens(v)?));
@@ -780,9 +806,10 @@ fn define(args: &[Token]) -> Result<Command, String> {
             other => return Err(format!("DEFINE has {other:?} where a parameter belongs")),
         }
     }
+    let components = Components { data: object_name(&data)?, index: object_name(&index)? };
     match object {
-        Some((Object::Cluster, o)) => Ok(Command::DefineCluster(define_cluster(&o, &data)?)),
-        Some((Object::AlternateIndex, o)) => Ok(Command::DefineAlternateIndex(define_alternate_index(&o, &data)?)),
+        Some((Object::Cluster, o)) => Ok(Command::DefineCluster(define_cluster(&o, &data, components)?)),
+        Some((Object::AlternateIndex, o)) => Ok(Command::DefineAlternateIndex(define_alternate_index(&o, &data, components)?)),
         Some((Object::Path, o)) => Ok(Command::DefinePath(define_path(&o)?)),
         None => Err("DEFINE needs CLUSTER, ALTERNATEINDEX, PATH or GDG".into()),
     }
@@ -809,7 +836,7 @@ mod tests {
             Command::Delete(vec!["PROD.A".into(), "PROD.B".into()]),
             Command::Set { max: true, value: 0 },
             Command::Repro { from: Target::Dd("IN".into()), to: Target::Dataset("PROD.COPY".into()) },
-            Command::DefineCluster(Cluster { name: "PROD.KSDS".into(), organization: Organization::Indexed, keys: Some(Keys { length: 8, offset: 0 }), record_size: DEFAULT_RECORD_SIZE }),
+            Command::DefineCluster(Cluster { name: "PROD.KSDS".into(), organization: Organization::Indexed, keys: Some(Keys { length: 8, offset: 0 }), record_size: DEFAULT_RECORD_SIZE, components: Components { data: Some("PROD.KSDS.DATA".into()), index: None }, recatalog: false }),
             Command::Delete(vec!["PROD.LIB(MEM1)".into()]),
         ]);
         assert_eq!(parse(&cards("DEFINE GDG (NAME(PROD.DAILY) LIMIT(3) SCRATCH EMPTY)")).unwrap(), [Command::DefineGdg { name: "PROD.DAILY".into(), limit: 3, scratch: true, empty: true }]);
@@ -826,19 +853,19 @@ mod tests {
     #[test]
     fn alternate_indexes_paths_and_their_build() {
         let c = parse(&cards(concat!(
-            "DEFINE CLUSTER(NAME(PAY.EMP) NUMBERED RECORDSIZE(40 40))\n",
+            "DEFINE CLUSTER(NAME(PAY.EMP) NUMBERED RECORDSIZE(40 40) RCTLG)\n",
             "DEFINE AIX(NAME(PAY.EMP.AIX) RELATE(PAY.KSDS) -\n",
             "  KEYS(10 8) UNIQUEKEY NOUPGRADE)\n",
-            "DEFINE ALTERNATEINDEX(NAME(PAY.EMP.AIX2) RELATE(PAY.KSDS)) -\n",
-            "  DATA(KEYS(6 2) RECSZ(30 300))\n",
+            "DEFINE ALTERNATEINDEX(NAME(PAY.EMP.AIX2) RELATE(PAY.KSDS) RUS) -\n",
+            "  DATA(KEYS(6 2) RECSZ(30 300)) INDEX(NAME(PAY.X2.I))\n",
             "DEFINE PATH(NAME(PAY.EMP.PATH) PATHENTRY(PAY.EMP.AIX) NOUPDATE)\n",
             "BLDINDEX INDATASET(PAY.KSDS) OUTFILE(AIXDD AIX2DD) INTERNALSORT\n",
         )))
         .unwrap();
         assert_eq!(c, [
-            Command::DefineCluster(Cluster { name: "PAY.EMP".into(), organization: Organization::Numbered, keys: None, record_size: RecordSize { average: 40, maximum: 40 } }),
-            Command::DefineAlternateIndex(AlternateIndex { name: "PAY.EMP.AIX".into(), relate: "PAY.KSDS".into(), keys: Keys { length: 10, offset: 8 }, unique: true, upgrade: false, record_size: DEFAULT_AIX_RECORD_SIZE }),
-            Command::DefineAlternateIndex(AlternateIndex { name: "PAY.EMP.AIX2".into(), relate: "PAY.KSDS".into(), keys: Keys { length: 6, offset: 2 }, unique: false, upgrade: true, record_size: RecordSize { average: 30, maximum: 300 } }),
+            Command::DefineCluster(Cluster { name: "PAY.EMP".into(), organization: Organization::Numbered, keys: None, record_size: RecordSize { average: 40, maximum: 40 }, components: Components::default(), recatalog: true }),
+            Command::DefineAlternateIndex(AlternateIndex { name: "PAY.EMP.AIX".into(), relate: "PAY.KSDS".into(), keys: Keys { length: 10, offset: 8 }, unique: true, upgrade: false, reuse: false, record_size: DEFAULT_AIX_RECORD_SIZE, components: Components::default() }),
+            Command::DefineAlternateIndex(AlternateIndex { name: "PAY.EMP.AIX2".into(), relate: "PAY.KSDS".into(), keys: Keys { length: 6, offset: 2 }, unique: false, upgrade: true, reuse: true, record_size: RecordSize { average: 30, maximum: 300 }, components: Components { data: None, index: Some("PAY.X2.I".into()) } }),
             Command::DefinePath(Path { name: "PAY.EMP.PATH".into(), entry: "PAY.EMP.AIX".into(), update: false }),
             Command::Bldindex { from: Target::Dataset("PAY.KSDS".into()), to: vec![Target::Dd("AIXDD".into()), Target::Dd("AIX2DD".into())] },
         ]);
@@ -870,6 +897,7 @@ mod tests {
             ("PRINT INFILE(X) FROMKEY(X'C1C')", "X'C1C' is not an even number of hexadecimal digits"),
             ("PRINT CHARACTER", "PRINT needs INFILE or INDATASET"),
             ("LISTCAT ALL HISTORY", "LISTCAT parameter HISTORY is not supported yet"),
+            ("LISTCAT LEVEL(PAY.*)", "LEVEL(PAY.*) must not end with *"),
             ("LISTCAT USERCATALOG", "LISTCAT parameter USERCATALOG is not supported yet"),
             ("BLDINDEX INDATASET(A.B)", "BLDINDEX needs INFILE or INDATASET, and OUTFILE or OUTDATASET"),
             ("DEFINE AIX(NAME(A.AIX) KEYS(4 0))", "DEFINE ALTERNATEINDEX needs RELATE"),

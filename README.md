@@ -137,7 +137,8 @@ any input differs.
 `ironwork job` reads one job's JCL and runs its steps in order. Each EXEC PGM= runs a COBOL program
 found in a `-L` library as PGM.cbl or PGM.cob, IEFBR14, IEBGENER without control statements (SYSUT1
 copied to SYSUT2 as it stands, or return code 12 without either DD), IDCAMS with DELETE, REPRO,
-DEFINE CLUSTER and GDG, SET, IF and DO, whose IDC messages go to SYSPRINT, or SORT (and ICEMAN):
+DEFINE CLUSTER, ALTERNATEINDEX, PATH and GDG, BLDINDEX, LISTCAT, PRINT, SET, IF and DO, whose IDC
+messages go to SYSPRINT, or SORT (and ICEMAN):
 SORT, MERGE and COPY with FIELDS in DFSORT's CH, AC, ZD, CLO, CSL, CST, PD, BI and FI formats and
 SUM FIELDS=NONE, over `rt::sort`; INCLUDE and OMIT, comparing CH, BI, FI, ZD and PD fields with
 each other or with C'...', X'...' and decimal constants, joined by AND and OR; INREC and OUTREC
@@ -169,6 +170,23 @@ DSN=*.stepname.ddname names an earlier DD's data set. A generation data group's 
 BASE that DEFINE GDG writes and generation n the file BASE.GnnnnV00: (0), (-1) and (+1) count from
 the generations the job began with, DSN=BASE reads them all newest first, and a kept new generation
 rolls the oldest off past LIMIT, or all but itself under EMPTY.
+
+A VSAM cluster, alternate index or path that IDCAMS defines has a catalog entry beside its name, the
+file NAME.catalog-entry holding the DEFINE that made it: KEYS, RECORDSIZE and the organization for a
+cluster, RELATE, KEYS, UNIQUEKEY and UPGRADE for an alternate index, PATHENTRY and UPDATE for a
+path. A data set already in the directory joins the catalog through DEFINE CLUSTER with RECATALOG,
+which keeps its records. A cluster's records are fixed-length when RECORDSIZE's average is its
+maximum and behind RDWs otherwise, or lines with `:text`. BLDINDEX builds an alternate index's
+records from its base cluster's, a five-byte header, the alternate key and the prime keys in
+ascending order, with IDC1644I, IDC1645I and IDC1646I for the records it leaves out or cuts short
+(C353). When a step changes a base cluster, the alternate indexes in its upgrade set are rebuilt as
+the step ends (C355). A DD that names a path reads the base cluster's records in the alternate
+index's order, and what a program writes there goes back to the base cluster (C351). A program's
+ALTERNATE RECORD KEY reads use the base cluster's records as they stand, and the DDs the Programming
+Guide asks for, the base ddname with 1, 2 and on, are not opened (C350). DELETE of a cluster removes
+its alternate indexes and paths, and LISTCAT lists the directory as a catalog: by name, the
+components and paths of each cluster and alternate index beneath it, or with ALL the attributes the
+entries keep (C354).
 
 DISP=NEW creates the data set when the step starts; OLD and SHR need it to exist; MOD writes after
 what it holds, a generation's included, or creates it as NEW would where it is not there; and a

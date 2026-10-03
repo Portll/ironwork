@@ -302,6 +302,13 @@ pub const SORT_INVALID_DIGIT_ABENDS: &str = "C340";
 pub const SORT_IFTHEN_FIXED_LENGTH: &str = "C341";
 pub const SORT_MASK_GROUPS_OF_THREE: &str = "C342";
 pub const SORT_PATTERN_DECIMAL_POINT: &str = "C343";
+pub const ALTERNATE_KEYS_FROM_THE_BASE: &str = "C350";
+pub const PATH_PRESENTS_THE_BASE: &str = "C351";
+pub const GENERATED_COMPONENT_NAMES: &str = "C352";
+pub const BLDINDEX_NON_ENDING_ERRORS: &str = "C353";
+pub const LISTCAT_WHAT_THE_CATALOG_KEEPS: &str = "C354";
+pub const UPGRADE_SET_AFTER_THE_STEP: &str = "C355";
+pub const BLDINDEX_REFUSALS: &str = "C356";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1939,6 +1946,48 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: SORT_PATTERN_DECIMAL_POINT,
         claim: "In an EDIT or EDxy pattern, a period immediately followed by a digit position is the significant decimal point DFSORT names: digits before the first nonzero insignificant digit, significant digit or significant decimal point become blanks, and an insignificant digit after one is shown (OUTFIL OUTREC, edit patterns). The manual does not define which period is significant; so EDIT=(III.II) edits 5 as .05 and EDIT=(IIT.TT) as 0.05",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ALTERNATE_KEYS_FROM_THE_BASE,
+        claim: "A program's ALTERNATE RECORD KEY reads and writes go to the base cluster's records as they stand, as an alternate index in the upgrade set holds them. Each alternate index path has its own DD, named from the base cluster's ddname with 1, 2 and on (Programming Guide SC27-8714-03, 'Allocating VSAM files'). ironwork does not open those DDs. An alternate index defined NOUPGRADE or never built gives the program the same records as a current one, and a key that does not match the catalog, which gives OPEN status 39 on z/OS ('Opening a file'), is not checked",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PATH_PRESENTS_THE_BASE,
+        claim: "A DD that names a path gives the program the base cluster's records in the order of the path's alternate index: by alternate key, and under one key in the order its prime keys are stored. A path over the cluster itself gives them in prime key order. A prime key the base cluster no longer holds reaches no record. What the program writes through the path goes back to the base cluster by prime key when the step ends. The path's alternate index is then rebuilt, and so is the rest of the upgrade set when the path is defined with UPDATE",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: GENERATED_COMPONENT_NAMES,
+        claim: "A data or index component that DEFINE does not name gets the name VSAM generates (z/OS 3.1 DFSMS Using Data Sets, 'Naming a cluster'): a last qualifier CLUSTER becomes DATA or INDEX, a name of up to 38 characters gains .DATA or .INDEX, and one of 39 to 42 gains .D or .I. A longer name keeps its first four qualifiers at most and gains qualifiers VSAM makes up. ironwork derives those from the name, so they differ from a z/OS catalog's",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: BLDINDEX_NON_ENDING_ERRORS,
+        claim: "BLDINDEX's non-ending errors end the command with condition code 4: a base record too short for the alternate key (IDC1644I), a repeated key in a UNIQUEKEY alternate index (IDC1645I, once for each prime key it leaves out), and prime keys past the record size (IDC1646I), each followed by IDC1653I. IBM's message pages give no code, and in the condition-code table 4 is a function that continued after a warning. An alternate index record starts with a five-byte header: X'01' for prime-key pointers, a halfword count, the pointer length and the key length. IBM gives the header's length and contents but not their order",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: LISTCAT_WHAT_THE_CATALOG_KEEPS,
+        claim: "LISTCAT names the catalog IRONWORK.CATALOG and lists every data set in the data set directory that is not a VSAM object or a generation data group as NONVSAM. ALL lists what ironwork's catalog keeps: associations, KEYLEN, RKP, AXRKP, AVGLRECL, MAXLRECL, the organization, key uniqueness, REC-TOTAL, UPGRADE or UPDATE, and a generation data group's LIMIT, SCRATCH and EMPTY. It leaves out HISTORY, SMSDATA, RLSDATA, PROTECTION, space, volumes and control interval sizes, which ironwork does not keep",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: UPGRADE_SET_AFTER_THE_STEP,
+        claim: "VSAM brings an alternate index in the upgrade set up to date as each record is written. ironwork rebuilds it from the base cluster when a step that changed the base cluster's data set ends, abended or not, and after a REPRO into the base cluster. A program sees no difference between the two, since its own ALTERNATE RECORD KEY reads use the base cluster (C350)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: BLDINDEX_REFUSALS,
+        claim: "BLDINDEX needs a base cluster with at least one record, and an empty alternate index or one defined with REUSE (z/OS 3.1 DFSMS Access Method Services, BLDINDEX). Otherwise ironwork refuses it with its own message and condition code 12. IBM documents both conditions but not the message or code. A duplicate name on DEFINE is condition code 8, as the condition-code table says",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

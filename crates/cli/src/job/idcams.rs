@@ -124,7 +124,7 @@ impl Step<'_> {
                 let path = self.runner.catalog_path(name);
                 if path.exists() {
                     out.sysprint.push(format!("ironwork: DEFINE GDG {name}: the name is in use"));
-                    return 12;
+                    return 8;
                 }
                 match fs::write(&path, gdg_text(*limit, *scratch, *empty)) {
                     Ok(()) => 0,
@@ -184,7 +184,8 @@ impl Step<'_> {
         }
     }
 
-    /// Catalogs an entry, and makes an empty data set for a cluster or an alternate index.
+    /// Catalogs an entry, and makes an empty data set for a cluster or an alternate index. A
+    /// cluster defined with RECATALOG catalogs the data set already there, records and all.
     fn define(&self, entry: Entry, print: &mut Vec<String>) -> u16 {
         let (name, dir) = (entry.name().to_string(), &self.runner.datasets);
         let path = self.runner.catalog_path(&name);
@@ -193,12 +194,22 @@ impl Step<'_> {
             Entry::AlternateIndex(_) => "ALTERNATEINDEX",
             Entry::Path(_) => "PATH",
         };
-        if path.exists() || catalog::get(dir, &name).is_some() {
+        let recatalog = matches!(&entry, Entry::Cluster(c) if c.recatalog);
+        if catalog::get(dir, &name).is_some() || path.exists() && !recatalog {
             print.push(format!("ironwork: DEFINE {what} {name}: the data set exists"));
+            return 8;
+        }
+        if recatalog && !path.is_file() {
+            print.push(format!("ironwork: DEFINE CLUSTER {name} RECATALOG: there is no data set to catalog"));
             return 12;
         }
+        let entry = match entry {
+            Entry::Cluster(c) => Entry::Cluster(Cluster { recatalog: false, ..c }),
+            other => other,
+        };
         let made = match &entry {
             Entry::Path(_) => Ok(()),
+            _ if recatalog => Ok(()),
             _ => fs::write(&path, b"").and_then(|()| exec::files::clear_open_mark(&path)),
         };
         match made.and_then(|()| catalog::put(dir, &entry)) {
@@ -210,51 +221,59 @@ impl Step<'_> {
         }
     }
 
-    /// DELETE of one entry. A cluster takes its alternate indexes and their paths with it, and an
-    /// alternate index its paths.
+    /// DELETE of one entry. A cluster takes its alternate indexes and paths with it, an alternate
+    /// index its paths, and each its data and index components; a path takes nothing else.
     fn delete(&self, name: &str, print: &mut Vec<String>) -> u16 {
         let (runner, dir) = (self.runner, &self.runner.datasets);
-        let remove = |n: &str, letter: char, data: bool, print: &mut Vec<String>| {
-            if data {
-                let _ = delete_data_set(&runner.catalog_path(n));
+        let Some(entry) = catalog::get(dir, name) else {
+            if runner.gdg(name).is_some() {
+                for number in runner.generations(name) {
+                    let _ = fs::remove_file(runner.datasets.join(format!("{name}.G{number:04}V00")));
+                }
             }
-            let _ = catalog::remove(dir, n);
-            print.push(format!("IDC0550I ENTRY ({letter}) {n} DELETED"));
+            if delete_data_set(&runner.catalog_path(name)).is_err() {
+                print.push(format!("IDC3012I ENTRY {name} NOT FOUND"));
+                return 8;
+            }
+            print.push(format!("IDC0550I ENTRY (A) {name} DELETED"));
+            return 0;
         };
-        match catalog::get(dir, name) {
-            Some(Entry::Path(_)) => remove(name, 'R', false, print),
-            Some(Entry::AlternateIndex(a)) => {
-                for p in catalog::paths_through(dir, &a.name) {
-                    remove(&p.name, 'R', false, print);
-                }
-                remove(name, 'G', true, print);
-            }
-            Some(Entry::Cluster(c)) => {
-                for p in catalog::paths_through(dir, &c.name) {
-                    remove(&p.name, 'R', false, print);
-                }
-                for a in catalog::alternate_indexes(dir, &c.name) {
-                    for p in catalog::paths_through(dir, &a.name) {
-                        remove(&p.name, 'R', false, print);
-                    }
-                    remove(&a.name, 'G', true, print);
-                }
-                remove(name, 'C', true, print);
-            }
-            None => {
-                if runner.gdg(name).is_some() {
-                    for number in runner.generations(name) {
-                        let _ = fs::remove_file(runner.datasets.join(format!("{name}.G{number:04}V00")));
-                    }
-                }
-                if delete_data_set(&runner.catalog_path(name)).is_err() {
-                    print.push(format!("IDC3012I ENTRY {name} NOT FOUND"));
-                    return 8;
-                }
-                print.push(format!("IDC0550I ENTRY (A) {name} DELETED"));
+        if !matches!(entry, Entry::Path(_)) {
+            for p in catalog::paths_through(dir, name) {
+                self.remove(&Entry::Path(p), print);
             }
         }
+        if let Entry::Cluster(c) = &entry {
+            for a in catalog::alternate_indexes(dir, &c.name) {
+                for p in catalog::paths_through(dir, &a.name) {
+                    self.remove(&Entry::Path(p), print);
+                }
+                self.remove(&Entry::AlternateIndex(a), print);
+            }
+        }
+        self.remove(&entry, print);
         0
+    }
+
+    /// Removes one entry, its data set and its components, each with its IDC0550I.
+    fn remove(&self, entry: &Entry, print: &mut Vec<String>) {
+        let name = entry.name();
+        let (letter, indexed) = match entry {
+            Entry::Path(_) => ('R', false),
+            Entry::AlternateIndex(_) => ('G', true),
+            Entry::Cluster(c) => ('C', c.organization == Organization::Indexed),
+        };
+        if !matches!(entry, Entry::Path(_)) {
+            let _ = delete_data_set(&self.runner.catalog_path(name));
+            if let Some(data) = catalog::component_name(entry, true) {
+                print.push(format!("IDC0550I ENTRY (D) {data} DELETED"));
+            }
+            if let Some(index) = catalog::component_name(entry, false).filter(|_| indexed) {
+                print.push(format!("IDC0550I ENTRY (I) {index} DELETED"));
+            }
+        }
+        let _ = catalog::remove(&self.runner.datasets, name);
+        print.push(format!("IDC0550I ENTRY ({letter}) {name} DELETED"));
     }
 
     fn repro(&self, from: &Target, to: &Target, print: &mut Vec<String>) -> u16 {
@@ -290,15 +309,32 @@ impl Step<'_> {
         };
         let mut code = 0;
         for t in to {
-            let aix = self.name(t).and_then(|n| match catalog::get(&self.runner.datasets, &n) {
-                Some(Entry::AlternateIndex(a)) if a.relate == base.name => Some(a),
-                _ => None,
+            let dir = &self.runner.datasets;
+            let aix = self.name(t).and_then(|n| match catalog::get(dir, &n)? {
+                Entry::Path(p) => match catalog::get(dir, &p.entry)? {
+                    Entry::AlternateIndex(a) => Some(a),
+                    _ => None,
+                },
+                Entry::AlternateIndex(a) => Some(a),
+                Entry::Cluster(_) => None,
             });
+            let aix = aix.filter(|a| a.relate == base.name);
             let Some(aix) = aix else {
                 print.push(format!("ironwork: BLDINDEX: {} is not an alternate index over {}", shown(t), base.name));
                 code = code.max(12);
                 continue;
             };
+            let holds_records = |name: &str| fs::metadata(self.runner.catalog_path(name)).is_ok_and(|m| m.len() > 0);
+            if !holds_records(&base.name) {
+                print.push(format!("ironwork: BLDINDEX: {} holds no records; BLDINDEX needs at least one", base.name));
+                code = code.max(12);
+                continue;
+            }
+            if holds_records(&aix.name) && !aix.reuse {
+                print.push(format!("ironwork: BLDINDEX: {} holds records and is not defined with REUSE", aix.name));
+                code = code.max(12);
+                continue;
+            }
             match build(self.runner, &base, &aix) {
                 Ok(built) => {
                     print.extend(built.messages);
@@ -362,6 +398,14 @@ pub(super) const AIX_HEADER: usize = 5;
 /// The flag byte of an alternate index over a key-sequenced cluster, whose pointers are prime keys.
 const KSDS_POINTERS: u8 = 0x01;
 
+/// Up to the first ten bytes of a key in hexadecimal, as BLDINDEX's messages show one.
+fn shown_key(key: &[u8]) -> String {
+    key.iter().take(10).map(|b| format!("{b:02X}")).collect()
+}
+
+/// The most prime keys one alternate index record holds.
+const MAX_POINTERS: usize = 32_767;
+
 /// What BLDINDEX reported, and its condition code.
 pub(super) struct Built {
     pub messages: Vec<String>,
@@ -370,17 +414,19 @@ pub(super) struct Built {
 
 /// Builds the alternate index's records from its base cluster's: one per alternate key, holding
 /// the prime keys of the records that have it in ascending order, as BLDINDEX sorts the
-/// key-pointer pairs. A record too short to hold the alternate key is left out.
+/// key-pointer pairs. A record too short to hold the alternate key is left out, a unique key
+/// keeps its first prime key, and a record keeps the pointers that fit; each is a non-ending
+/// error with condition code 4 (C353).
 pub(super) fn build(runner: &Runner<'_>, base: &Cluster, aix: &AlternateIndex) -> Result<Built, String> {
     let (page, text) = (page(), runner.req.text);
     let prime = base.keys.ok_or_else(|| format!("{} has no prime key", base.name))?;
     let base_entry = Entry::Cluster(base.clone());
     let records = catalog::read(&runner.catalog_path(&base.name), catalog::form(&base_entry, text), page)?;
-    let (mut pairs, mut short) = (Vec::new(), 0usize);
+    let (mut pairs, mut messages) = (Vec::new(), Vec::new());
     for r in &records {
         match (catalog::key_of(r, aix.keys), catalog::key_of(r, prime)) {
             (Some(a), Some(p)) => pairs.push((a.to_vec(), p.to_vec())),
-            _ => short += 1,
+            _ => messages.push(format!("IDC1644I ALTERNATE INDEX KEY NOT IN BASE RECORD {}", shown_key(r.get(prime.offset..).unwrap_or_default()))),
         }
     }
     pairs.sort();
@@ -391,24 +437,18 @@ pub(super) fn build(runner: &Runner<'_>, base: &Cluster, aix: &AlternateIndex) -
             _ => grouped.push((alternate, vec![pointer])),
         }
     }
-    let mut messages = Vec::new();
-    let mut code = 0;
-    if short > 0 {
-        messages.push(format!("IDC1644I {short} ALTERNATE KEYS NOT CONTAINED IN BASE CLUSTER RECORDS"));
-        code = 4;
-    }
-    let room = aix.record_size.maximum.saturating_sub(AIX_HEADER + aix.keys.length) / prime.length;
+    let room = (aix.record_size.maximum.saturating_sub(AIX_HEADER + aix.keys.length) / prime.length).min(MAX_POINTERS);
     let mut out = Vec::with_capacity(grouped.len());
     for (alternate, mut pointers) in grouped {
         if aix.unique && pointers.len() > 1 {
-            messages.push(format!("IDC1645I DUPLICATE PRIME KEYS FOR UNIQUE AIX KEY {}", page.decode(&alternate)));
+            for extra in &pointers[1..] {
+                messages.push(format!("IDC1645I NONUNIQUE AIX KEY {} PRIME KEY IS {}", shown_key(&alternate), shown_key(extra)));
+            }
             pointers.truncate(1);
-            code = code.max(8);
         }
         if pointers.len() > room {
-            messages.push(format!("IDC1646I {} EXCESS PRIME KEY VALUES FOR AIX KEY {}", pointers.len() - room, page.decode(&alternate)));
+            messages.push(format!("IDC1646I {} EXCESS PRIME KEY VALUES FOR AIX KEY {}", pointers.len() - room, shown_key(&alternate)));
             pointers.truncate(room);
-            code = code.max(8);
         }
         let mut record = vec![KSDS_POINTERS];
         record.extend(u16::try_from(pointers.len()).unwrap_or(u16::MAX).to_be_bytes());
@@ -421,7 +461,8 @@ pub(super) fn build(runner: &Runner<'_>, base: &Cluster, aix: &AlternateIndex) -
         out.push(record);
     }
     catalog::write(&runner.catalog_path(&aix.name), Form::Variable, &out, page)?;
-    messages.push(if code == 0 { format!("IDC0652I {} SUCCESSFULLY BUILT", aix.name) } else { format!("IDC1652I {} BUILT WITH ERRORS", aix.name) });
+    let code = if messages.is_empty() { 0 } else { 4 };
+    messages.push(if code == 0 { format!("IDC0652I {} SUCCESSFULLY BUILT", aix.name) } else { format!("IDC1653I {} BUILT WITH ERRORS", aix.name) });
     Ok(Built { messages, code })
 }
 

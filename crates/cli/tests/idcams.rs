@@ -103,7 +103,7 @@ fn a_program_reads_a_cluster_through_a_path_in_alternate_key_order_and_sees_what
 fn a_noupgrade_index_stays_as_bldindex_left_it_until_it_is_built_again() {
     let dir = temp("noupgrade");
     programs(&dir);
-    let jcl = DEFINE_AND_BUILD.replace("KEYS(6 4) UNIQUEKEY)", "KEYS(6 4) UNIQUEKEY NUPG)");
+    let jcl = DEFINE_AND_BUILD.replace("KEYS(6 4) UNIQUEKEY)", "KEYS(6 4) UNIQUEKEY -\n         NUPG RUS)");
     let rebuild = "//BIX EXEC PGM=IDCAMS\n//SYSPRINT DD SYSOUT=*\n//SYSIN DD *\n  BLDINDEX INDATASET(EMP.KSDS) OUTDATASET(EMP.AIX)\n/*\n";
     let o = job(&dir, &format!("{jcl}//ADD EXEC PGM=ADDK\n//KSDS DD DSN=EMP.KSDS,DISP=OLD\n//READ1 EXEC PGM=READP\n//PATHDD DD DSN=EMP.PATH,DISP=SHR\n{rebuild}//READ2 EXEC PGM=READP\n//PATHDD DD DSN=EMP.PATH,DISP=SHR\n"));
     assert_eq!(o.status.code(), Some(0), "{}{}", log(&o), stdout(&o));
@@ -115,13 +115,106 @@ fn a_noupgrade_index_stays_as_bldindex_left_it_until_it_is_built_again() {
 fn bldindex_keeps_the_first_prime_key_of_a_duplicate_unique_key_and_deleting_the_cluster_takes_its_index_and_path() {
     let dir = temp("dupes");
     let jcl = DEFINE_AND_BUILD.replace("0002JONES Beta", "0002SMITH Beta");
-    let o = job(&dir, &format!("{jcl}//DEL EXEC PGM=IDCAMS\n//SYSPRINT DD SYSOUT=*\n//SYSIN DD *\n  DELETE EMP.KSDS CLUSTER\n/*\n"));
-    let out = stdout(&o);
-    assert!(log(&o).contains("DEF PGM=IDCAMS RC=0008"), "{}", log(&o));
-    assert!(out.contains("IDC1645I") && out.contains("IDC1652I EMP.AIX BUILT WITH ERRORS"), "{out}");
-    for want in ["IDC0550I ENTRY (R) EMP.PATH DELETED", "IDC0550I ENTRY (G) EMP.AIX DELETED", "IDC0550I ENTRY (C) EMP.KSDS DELETED"] {
+    let again = "//BIX EXEC PGM=IDCAMS\n//SYSPRINT DD SYSOUT=*\n//SYSIN DD *\n  BLDINDEX INDATASET(EMP.KSDS) OUTDATASET(EMP.PATH)\n/*\n";
+    let o = job(&dir, &format!("{jcl}{again}//DEL EXEC PGM=IDCAMS,COND=EVEN\n//SYSPRINT DD SYSOUT=*\n//SYSIN DD *\n  DELETE EMP.KSDS CLUSTER\n/*\n"));
+    let (l, out) = (log(&o), stdout(&o));
+    assert!(l.contains("DEF PGM=IDCAMS RC=0004") && l.contains("BIX PGM=IDCAMS RC=0012"), "{l}");
+    for want in [
+        "IDC1645I NONUNIQUE AIX KEY E2D4C9E3C840 PRIME KEY IS F0F0F0F2",
+        "IDC1653I EMP.AIX BUILT WITH ERRORS",
+        "ironwork: BLDINDEX: EMP.AIX holds records and is not defined with REUSE",
+        "IDC0550I ENTRY (R) EMP.PATH DELETED",
+        "IDC0550I ENTRY (D) EMP.AIX.DATA DELETED",
+        "IDC0550I ENTRY (I) EMP.AIX.INDEX DELETED",
+        "IDC0550I ENTRY (G) EMP.AIX DELETED",
+        "IDC0550I ENTRY (D) EMP.KSDS.DATA DELETED",
+        "IDC0550I ENTRY (I) EMP.KSDS.INDEX DELETED",
+        "IDC0550I ENTRY (C) EMP.KSDS DELETED",
+    ] {
         assert!(out.contains(want), "{want} in {out}");
     }
     let left: Vec<String> = fs::read_dir(dir.join("data")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
     assert!(left.is_empty(), "{left:?}");
+}
+
+#[test]
+fn listcat_lists_the_catalog_its_entries_and_their_attributes() {
+    let dir = temp("listcat");
+    fs::write(dir.join("data/OTHER.SEQ"), "x\n").unwrap();
+    let list = concat!(
+        "//LIST EXEC PGM=IDCAMS\n//SYSPRINT DD SYSOUT=*\n//SYSIN DD *\n",
+        "  LISTCAT\n",
+        "  LISTCAT ENTRIES(EMP.AIX.DATA) ALL\n",
+        "  LISTCAT LEVEL(EMP) PATH CLUSTER\n",
+        "  LISTCAT ENTRIES(NOT.THERE)\n",
+        "/*\n",
+    );
+    let o = job(&dir, &format!("{DEFINE_AND_BUILD}{list}"));
+    assert!(log(&o).contains("LIST PGM=IDCAMS RC=0004"), "{}", log(&o));
+    let out = stdout(&o);
+    let whole = concat!(
+        "                             LISTING FROM CATALOG -- IRONWORK.CATALOG\n",
+        "AIX ----------- EMP.AIX\n",
+        "   DATA ------- EMP.AIX.DATA\n",
+        "   INDEX ------ EMP.AIX.INDEX\n",
+        "   PATH ------- EMP.PATH\n",
+        "CLUSTER ------- EMP.KSDS\n",
+        "   DATA ------- EMP.KSDS.DATA\n",
+        "   INDEX ------ EMP.KSDS.INDEX\n",
+        "NONVSAM ------- OTHER.SEQ\n",
+        "         THE NUMBER OF ENTRIES PROCESSED WAS:\n",
+        "                   AIX -------------------1\n",
+        "                   ALIAS -----------------0\n",
+        "                   CLUSTER ---------------1\n",
+        "                   DATA ------------------2\n",
+        "                   GDG -------------------0\n",
+        "                   INDEX -----------------2\n",
+        "                   NONVSAM ---------------1\n",
+        "                   PAGESPACE -------------0\n",
+        "                   PATH ------------------1\n",
+        "                   SPACE -----------------0\n",
+        "                   USERCATALOG -----------0\n",
+        "                   TOTAL -----------------8\n",
+        "         THE NUMBER OF PROTECTED ENTRIES SUPPRESSED WAS 0\n",
+        "IDC0001I FUNCTION COMPLETED, HIGHEST CONDITION CODE WAS 0\n",
+    );
+    assert!(out.contains(whole), "{out}");
+    let data = concat!(
+        "DATA ---------- EMP.AIX.DATA\n",
+        "     ASSOCIATIONS\n",
+        "       AIX------EMP.AIX\n",
+        "     ATTRIBUTES\n",
+        "       KEYLEN-----------------6     AVGLRECL------------4086\n",
+        "       RKP--------------------5     MAXLRECL-----------32600\n",
+        "       AXRKP------------------4\n",
+        "       INDEXED       UNIQKEY\n",
+        "     STATISTICS\n",
+        "       REC-TOTAL--------------3\n",
+    );
+    assert!(out.contains(data), "{out}");
+    assert!(out.contains("CLUSTER ------- EMP.KSDS\nPATH ---------- EMP.PATH\n         THE NUMBER"), "{out}");
+    assert!(out.contains("IDC3012I ENTRY NOT.THERE NOT FOUND\n"), "{out}");
+}
+
+#[test]
+fn recatalog_takes_a_data_set_already_there_into_the_catalog_with_its_records() {
+    let dir = temp("recatalog");
+    programs(&dir);
+    fs::write(dir.join("data/EMP.KSDS"), "0001SMITH Alpha\n0002JONES Beta\n").unwrap();
+    let define = concat!(
+        "//DEF EXEC PGM=IDCAMS\n//SYSPRINT DD SYSOUT=*\n//SYSIN DD *\n",
+        "  DEFINE CLUSTER(NAME(EMP.KSDS) KEYS(4 0) RECORDSIZE(20 20))\n",
+        "  IF LASTCC = 8 THEN SET MAXCC = 0\n",
+        "  DEFINE CLUSTER(NAME(EMP.KSDS) KEYS(4 0) RECORDSIZE(20 20) RCTLG)\n",
+        "  DEFINE AIX(NAME(EMP.AIX) RELATE(EMP.KSDS) KEYS(6 4))\n",
+        "  BLDINDEX INDATASET(EMP.KSDS) OUTDATASET(EMP.AIX)\n",
+        "  DEFINE PATH(NAME(EMP.PATH) PATHENTRY(EMP.AIX))\n",
+        "/*\n//READ EXEC PGM=READP\n//PATHDD DD DSN=EMP.PATH,DISP=SHR\n",
+    );
+    let o = job(&dir, define);
+    assert_eq!(o.status.code(), Some(0), "{}{}", log(&o), stdout(&o));
+    let out = stdout(&o);
+    assert!(out.contains("ironwork: DEFINE CLUSTER EMP.KSDS: the data set exists\nIDC0001I FUNCTION COMPLETED, HIGHEST CONDITION CODE WAS 8"), "{out}");
+    let shown: Vec<&str> = out.lines().filter(|l| l.starts_with("000")).map(str::trim_end).collect();
+    assert_eq!(shown, ["0002JONES Beta", "0001SMITH Alpha"]);
 }

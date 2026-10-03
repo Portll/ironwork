@@ -3,7 +3,7 @@
 //! than eight characters, so no data set name can be one. A cluster's and an alternate index's
 //! records are the data set at the name; a path has an entry and no data set.
 
-use jcl::idcams::{AlternateIndex, Cluster, Command, Keys, Organization, Path as PathEntry};
+use jcl::idcams::{AlternateIndex, Cluster, Command, Components, Keys, Organization, Path as PathEntry};
 use std::fs;
 use std::path::{Path, PathBuf};
 use zarch::ebcdic::{self, CodePage};
@@ -34,26 +34,72 @@ impl Entry {
             Organization::Linear => "LINEAR",
         };
         let keys = |k: Keys| format!("KEYS({} {})", k.length, k.offset);
+        let named = |c: &Components| c.data.iter().map(|n| format!("DATA(NAME({n}))")).chain(c.index.iter().map(|n| format!("INDEX(NAME({n}))"))).collect::<Vec<_>>();
         let parts = match self {
             Entry::Cluster(c) => {
                 let mut p = vec![format!("CLUSTER(NAME({})", c.name), organization(c.organization).to_string()];
                 p.extend(c.keys.map(keys));
                 p.push(format!("RECORDSIZE({} {}))", c.record_size.average, c.record_size.maximum));
+                p.extend(named(&c.components));
                 p
             }
-            Entry::AlternateIndex(a) => vec![
-                format!("ALTERNATEINDEX(NAME({})", a.name),
-                format!("RELATE({})", a.relate),
-                keys(a.keys),
-                if a.unique { "UNIQUEKEY" } else { "NONUNIQUEKEY" }.into(),
-                if a.upgrade { "UPGRADE" } else { "NOUPGRADE" }.into(),
-                format!("RECORDSIZE({} {}))", a.record_size.average, a.record_size.maximum),
-            ],
+            Entry::AlternateIndex(a) => {
+                let mut p = vec![
+                    format!("ALTERNATEINDEX(NAME({})", a.name),
+                    format!("RELATE({})", a.relate),
+                    keys(a.keys),
+                    if a.unique { "UNIQUEKEY" } else { "NONUNIQUEKEY" }.into(),
+                    if a.upgrade { "UPGRADE" } else { "NOUPGRADE" }.into(),
+                    if a.reuse { "REUSE" } else { "NOREUSE" }.into(),
+                    format!("RECORDSIZE({} {}))", a.record_size.average, a.record_size.maximum),
+                ];
+                p.extend(named(&a.components));
+                p
+            }
             Entry::Path(p) => vec![format!("PATH(NAME({})", p.name), format!("PATHENTRY({})", p.entry), format!("{})", if p.update { "UPDATE" } else { "NOUPDATE" })],
         };
         let last = parts.len() - 1;
         std::iter::once(" DEFINE -".to_string()).chain(parts.into_iter().enumerate().map(|(i, p)| format!("   {p}{}", if i < last { " -" } else { "" }))).collect()
     }
+}
+
+/// The name of a cluster's or an alternate index's data or index component: the one DEFINE gave,
+/// or the one VSAM generates (z/OS 3.1 DFSMS Using Data Sets, "Naming a cluster"). VSAM makes up
+/// the qualifiers it adds to a name longer than 42 characters; ironwork derives them from the
+/// name (C352).
+pub(super) fn component_name(entry: &Entry, data: bool) -> Option<String> {
+    let (name, given) = match entry {
+        Entry::Cluster(c) => (&c.name, &c.components),
+        Entry::AlternateIndex(a) => (&a.name, &a.components),
+        Entry::Path(_) => return None,
+    };
+    if let Some(n) = if data { &given.data } else { &given.index } {
+        return Some(n.clone());
+    }
+    let qualifiers: Vec<&str> = name.split('.').collect();
+    let (long, short) = if data { ("DATA", "D") } else { ("INDEX", "I") };
+    Some(if qualifiers.last() == Some(&"CLUSTER") {
+        format!("{}.{long}", qualifiers[..qualifiers.len() - 1].join("."))
+    } else if name.len() <= 38 {
+        format!("{name}.{long}")
+    } else if name.len() <= 42 {
+        format!("{name}.{short}")
+    } else {
+        let kept = &qualifiers[..(qualifiers.len() - 1).min(4)];
+        let mut out: Vec<String> = kept.iter().map(|q| q.to_string()).collect();
+        let mut seed = name.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3)) ^ u64::from(data);
+        while out.len() < 5 {
+            let qualifier: String = (0..8)
+                .map(|i| {
+                    seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+                    let n = (seed >> 33) as usize;
+                    if i == 0 { b"ABCDEFGHIJKLMNOPQRSTUVWXYZ"[n % 26] as char } else { b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[n % 36] as char }
+                })
+                .collect();
+            out.push(qualifier);
+        }
+        out.join(".")
+    })
 }
 
 pub(super) fn entry_file(datasets: &Path, name: &str) -> PathBuf {

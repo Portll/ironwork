@@ -248,9 +248,10 @@ job flags:
              partitioned data set being a directory of members. They hold z/OS records, or UTF-8
              lines with :text; in-stream data and SYSOUT are always lines. Each EXEC PGM= runs a
              COBOL program found in -L as PGM.cbl or PGM.cob, IEFBR14, IEBGENER without control
-             statements, IDCAMS (DELETE, REPRO, DEFINE CLUSTER and GDG, SET, IF and DO, its
-             messages to SYSPRINT), or SORT/ICEMAN (SORT, MERGE and COPY with FIELDS in CH, AC, ZD,
-             CLO, CSL, CST, PD, BI and FI, SUM FIELDS=NONE, RECORD, INCLUDE and OMIT, INREC and
+             statements, IDCAMS (DELETE, REPRO, DEFINE CLUSTER, ALTERNATEINDEX, PATH and GDG,
+             BLDINDEX, LISTCAT, PRINT, SET, IF and DO, its messages to SYSPRINT), or SORT/ICEMAN
+             (SORT, MERGE and COPY with FIELDS in CH, AC, ZD, CLO, CSL, CST, PD, BI and FI,
+             SUM FIELDS=NONE, RECORD, INCLUDE and OMIT, INREC and
              OUTREC with BUILD, FIELDS or OVERLAY, numeric editing by M0-M26, EDIT and EDxy and
              conversion by TO=, IFTHEN with WHEN=INIT, GROUP, conditions and NONE, OUTFIL with
              FNAMES, FILES, INCLUDE, OMIT, SAVE and the same reformatting, and SYMNAMES with its
@@ -269,6 +270,9 @@ job flags:
              DIR/BASE that DEFINE GDG writes, and generation n the file DIR/BASE.GnnnnV00; (0),
              (-1) and (+1) count from the generations the job began with, DSN=BASE reads them all,
              newest first, and generations past LIMIT roll off, all but the newest under EMPTY.
+             A VSAM cluster, alternate index or path has its DEFINE in DIR/NAME.catalog-entry; a
+             DD that names a path reads the base cluster in alternate key order, and a step that
+             changes a base cluster rebuilds the alternate indexes in its upgrade set.
              DSN=*.stepname.ddname and *.stepname.procstepname.ddname name an earlier DD's data set. Exit status: the highest return
              code, or as the first step that ended without one, or a JCL error, says (exit status, below)
   --expected DATASETS=DIR
