@@ -220,7 +220,11 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let place = &self.p.places[id as usize];
         let (offset, len) = self.markup.xml[slot(register)];
         let kind = place.kind;
-        let Some(rm) = &place.refmod else { return Ok(Loc { offset, len, kind, item: id as usize }) };
+        let Some(rm) = &place.refmod else {
+            let loc = Loc { offset, len, kind, item: id as usize };
+            self.unit.taint_read(loc);
+            return Ok(loc);
+        };
         let unit = if kind == Kind::National { 2 } else { 1 };
         let start = self.int(&rm.start, pos)?;
         let length = match &rm.length {
@@ -231,7 +235,9 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             let message = format!("reference modification ({start}:{length}) of {} is outside its {len} bytes", self.sym(place.name));
             return Err(Abend::ironwork(message, pos).into());
         }
-        Ok(Loc { offset: offset + (start as usize - 1) * unit, len: length as usize * unit, kind, item: id as usize })
+        let loc = Loc { offset: offset + (start as usize - 1) * unit, len: length as usize * unit, kind, item: id as usize };
+        self.unit.taint_read(loc);
+        Ok(loc)
     }
 
     fn equals(&self, loc: Loc, f: Figurative, pos: Pos) -> R<bool> {
