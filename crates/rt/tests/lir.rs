@@ -519,14 +519,15 @@ fn places_round_trip_with_every_base() {
         len: 12,
         kind: Kind::Alnum { justified: false },
         scaling: 2,
+        moved: vec![Odo { element: 3, ..ODO }],
         subscripts: vec![subscript.clone(), subscript],
-        odo: Some(ODO),
+        odo: vec![ODO, Odo { max: 2, ..ODO }],
         refmod: Some(REFMOD),
         name: 3,
         at: 9,
         numcheck: PlaceNumcheck { lax: Some(LaxRedefinition::LeadingSpaces(3)), removed: true },
     };
-    let bare = Place { base: Base::ReturnCode, subscripts: vec![], odo: None, refmod: None, numcheck: PlaceNumcheck::default(), ..place.clone() };
+    let bare = Place { base: Base::ReturnCode, moved: vec![], subscripts: vec![], odo: vec![], refmod: None, numcheck: PlaceNumcheck::default(), ..place.clone() };
     round_trip(&[place, bare]);
     every_variant(&[LaxRedefinition::Signed, LaxRedefinition::LeadingSpaces(1)], 2);
 }
@@ -990,6 +991,7 @@ fn json_generate() -> JsonGenerate {
     let leaf = JsonLeaf { suppress: vec![Figurative::Space, Figurative::Zero], boolean: Some(Marker::Condition(2)), convert: Convert::Fixed { integers: 5 } };
     let group = JsonNode {
         offset: 0,
+        moved: vec![],
         len: 12,
         kind: Kind::Group,
         name: 1,
@@ -1000,6 +1002,7 @@ fn json_generate() -> JsonGenerate {
     };
     let field = JsonNode {
         offset: 2,
+        moved: vec![ODO],
         len: 5,
         kind: Kind::Zoned { digits: 5, scale: 0, signed: false, sign: None },
         name: 2,
@@ -1025,9 +1028,9 @@ fn json_generate() -> JsonGenerate {
 fn xml_generate() -> XmlGenerate {
     let leaf = XmlValue::Leaf { form: XmlForm::Attribute, suppress: vec![Figurative::Space], convert: Convert::Chars { justified: true } };
     let nodes = vec![
-        XmlNode { offset: 0, len: 20, kind: Kind::Group, name: 1, occurs: None, value: XmlValue::Element { members: vec![1] } },
-        XmlNode { offset: 0, len: 10, kind: Kind::Group, name: 2, occurs: Some(Count::Fixed(2)), value: XmlValue::Members { members: vec![2] } },
-        XmlNode { offset: 0, len: 10, kind: Kind::Alnum { justified: true }, name: 3, occurs: None, value: leaf },
+        XmlNode { offset: 0, moved: vec![], len: 20, kind: Kind::Group, name: 1, occurs: None, value: XmlValue::Element { members: vec![1] } },
+        XmlNode { offset: 0, moved: vec![ODO], len: 10, kind: Kind::Group, name: 2, occurs: Some(Count::Fixed(2)), value: XmlValue::Members { members: vec![2] } },
+        XmlNode { offset: 0, moved: vec![], len: 10, kind: Kind::Alnum { justified: true }, name: 3, occurs: None, value: leaf },
     ];
     XmlGenerate {
         receiver: 0,

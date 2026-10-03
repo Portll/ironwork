@@ -112,7 +112,7 @@ impl Lower<'_> {
                 Some(lir::RefMod { start, length, check: self.c.ssrange })
             }
         };
-        Ok(lir::Place { base: lir::Base::Xml(register), offset: 0, len: 0, kind, scaling: 0, subscripts: Vec::new(), odo: None, refmod, name: self.sym(&r.name), at: self.at(r.pos), numcheck: Default::default() })
+        Ok(lir::Place { base: lir::Base::Xml(register), offset: 0, len: 0, kind, scaling: 0, moved: Vec::new(), subscripts: Vec::new(), odo: Vec::new(), refmod, name: self.sym(&r.name), at: self.at(r.pos), numcheck: Default::default() })
     }
 
     /// The range XML PARSE's PROCESSING PROCEDURE names, as the walker's `procedure` finds it.
@@ -204,6 +204,17 @@ impl Lower<'_> {
         let (max, element) = (i.occurs, i.size);
         let object = self.int_expr(&Expr::Operand(Operand::Ref(object.clone())), pos)?;
         Ok(Count::Odo(lir::Odo { object, max, element, check: self.c.ssrange }))
+    }
+
+    /// The OCCURS DEPENDING ON tables that move `member` back and not `holder`, in the walker's
+    /// order (`Machine::moved_within`).
+    fn moved_within(&mut self, member: usize, holder: usize, pos: Pos) -> R<Vec<lir::Odo>> {
+        let layout = self.layout;
+        let mut moved = Vec::new();
+        for &t in layout.items[member].moved_by.iter().filter(|t| !layout.items[holder].moved_by.contains(t)) {
+            moved.push(self.odo(t, pos)?);
+        }
+        Ok(moved)
     }
 
     /// `converted`: how a value of `kind` in item `item` is written.
@@ -393,7 +404,7 @@ impl Lower<'_> {
         let indicator = self.json_indicator(item, depth, p, pos)?;
         let null = p.null_when.get(&item).copied();
         let placeholder = lir::JsonValue::Object { members: Vec::new(), eligible: false };
-        let k = push(nodes, lir::JsonNode { offset, len, kind, name, occurs, indicator, null, value: placeholder }, "JSON GENERATE's items")?;
+        let k = push(nodes, lir::JsonNode { offset, moved: Vec::new(), len, kind, name, occurs, indicator, null, value: placeholder }, "JSON GENERATE's items")?;
         let value = if i.children.is_empty() || i.kind != Kind::Group {
             lir::JsonValue::Leaf(self.json_leaf(item, depth, p, pos)?)
         } else {
@@ -419,13 +430,18 @@ impl Lower<'_> {
             }
             let child = &layout.items[c];
             if child.name.is_none() && !child.table {
+                if !self.moved_within(c, group, pos)?.is_empty() {
+                    return Err(Fail::Lower(LowerError::Unsupported("JSON GENERATE of an unnamed group that follows an OCCURS DEPENDING ON table", pos)));
+                }
                 self.json_members(holder, c, depth, p, pos, nodes, members, eligible)?;
                 continue;
             }
             *eligible = true;
             let offset = child.offset - layout.items[holder].offset;
             let (occurs, inner) = if child.table { (Some(self.occurs(c, pos)?), depth + 1) } else { (None, depth) };
-            members.push(self.json_node(c, offset, occurs, inner, p, pos, nodes)?);
+            let k = self.json_node(c, offset, occurs, inner, p, pos, nodes)?;
+            nodes[k as usize].moved = self.moved_within(c, holder, pos)?;
+            members.push(k);
         }
         Ok(())
     }
@@ -539,7 +555,7 @@ impl Lower<'_> {
             let kind = self.kind_of(from_place);
             let convert = self.convert(from, kind, "XML GENERATE", x.pos)?;
             let value = lir::XmlValue::Leaf { form: XmlForm::Element, suppress: Vec::new(), convert };
-            push(&mut nodes, lir::XmlNode { offset: 0, len, kind, name, occurs: None, value }, "XML GENERATE's items")?;
+            push(&mut nodes, lir::XmlNode { offset: 0, moved: Vec::new(), len, kind, name, occurs: None, value }, "XML GENERATE's items")?;
         }
         let count = x.count.as_ref().map(|r| self.counted(r)).transpose()?;
         let code = self.register("XML-CODE", Pos::default())?;
@@ -566,7 +582,7 @@ impl Lower<'_> {
         let i = &self.layout.items[item];
         let (len, kind) = (i.size, i.kind);
         let placeholder = lir::XmlValue::Element { members: Vec::new() };
-        let k = push(nodes, lir::XmlNode { offset, len, kind, name, occurs, value: placeholder }, "XML GENERATE's items")?;
+        let k = push(nodes, lir::XmlNode { offset, moved: Vec::new(), len, kind, name, occurs, value: placeholder }, "XML GENERATE's items")?;
         let mut members = Vec::new();
         let layout = self.layout;
         for &c in &layout.items[item].children {
@@ -577,6 +593,7 @@ impl Lower<'_> {
             let offset = child.offset - layout.items[item].offset;
             let occurs = if child.table { Some(self.occurs(c, pos)?) } else { None };
             let name = self.sym(&self.xml_name(c, p));
+            let moved = self.moved_within(c, item, pos)?;
             let node = if child.name.is_none() {
                 self.xml_group(c, offset, occurs, name, true, p, pos, nodes)?
             } else if child.kind == Kind::Group && !child.children.is_empty() {
@@ -594,8 +611,9 @@ impl Lower<'_> {
                 };
                 let convert = self.convert(c, child.kind, "XML GENERATE", pos)?;
                 let value = lir::XmlValue::Leaf { form: self::form(form), suppress, convert };
-                push(nodes, lir::XmlNode { offset, len: child.size, kind: child.kind, name, occurs, value }, "XML GENERATE's items")?
+                push(nodes, lir::XmlNode { offset, moved: Vec::new(), len: child.size, kind: child.kind, name, occurs, value }, "XML GENERATE's items")?
             };
+            nodes[node as usize].moved = moved;
             members.push(node);
         }
         nodes[k as usize].value = if unnamed { lir::XmlValue::Members { members } } else { lir::XmlValue::Element { members } };
@@ -752,7 +770,7 @@ impl Lower<'_> {
             Some(&f) => Some((f, self.move_plan(&Side { value: Value::Fig(f), src: None, digits: 0 }, kind, Some(item))?)),
             None => None,
         };
-        let node = lir::ParseNode { offset, len, kind, name, occurs, ignored: p.ignored.contains(&item), indicator, null, value: lir::ParseValue::Suppressed };
+        let node = lir::ParseNode { offset, moved: Vec::new(), len, kind, name, occurs, ignored: p.ignored.contains(&item), indicator, null, value: lir::ParseValue::Suppressed };
         let k = push(nodes, node, "JSON PARSE's items")?;
         let value = if group {
             let mut members = Vec::new();
@@ -783,6 +801,7 @@ impl Lower<'_> {
                     let name = self.parse_named(c, p);
                     let node = lir::ParseNode {
                         offset,
+                        moved: self.moved_within(c, holder, pos)?,
                         len: child.size,
                         kind: child.kind,
                         name,
@@ -796,7 +815,9 @@ impl Lower<'_> {
                 }
                 (false, table) => {
                     let (occurs, inner) = if table { (Some(self.occurs(c, pos)?), depth + 1) } else { (None, depth) };
-                    members.push(self.parse_node(c, offset, occurs, inner, p, pos, nodes)?);
+                    let k = self.parse_node(c, offset, occurs, inner, p, pos, nodes)?;
+                    nodes[k as usize].moved = self.moved_within(c, holder, pos)?;
+                    members.push(k);
                 }
             }
         }

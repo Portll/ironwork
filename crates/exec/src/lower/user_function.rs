@@ -74,7 +74,7 @@ impl<'c> Lower<'c> {
     fn record(&mut self, name: &str, pos: Pos) -> R<PlaceId> {
         let r = Ref { name: name.to_owned(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos };
         let place = self.place(&r, false)?;
-        if self.places[place as usize].odo.is_some() {
+        if !self.places[place as usize].odo.is_empty() {
             return unsupported("a user-defined function's parameter or RETURNING record holding an OCCURS DEPENDING ON table", pos);
         }
         Ok(place)

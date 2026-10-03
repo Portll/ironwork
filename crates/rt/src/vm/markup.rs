@@ -301,7 +301,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         for &m in members {
             let member = &g.nodes[m as usize];
             let name = self.sym(member.name);
-            let at_member = offset + member.offset as usize;
+            let at_member = offset + member.offset as usize - self.unused(&member.moved, pos)? as usize;
             let value = if member.occurs.is_some() { self.json_array(g, m as usize, at_member, at, pos)? } else { self.json_value(g, m as usize, at_member, at, pos)? };
             if let Some(v) = value {
                 pairs.push(format!("{name}:{v}"));
@@ -471,7 +471,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let (XmlValue::Element { members } | XmlValue::Members { members }) = &x.nodes[k].value else { return Ok(()) };
         for &m in members {
             let node = &x.nodes[m as usize];
-            let first = offset + node.offset as usize;
+            let first = offset + node.offset as usize - self.unused(&node.moved, pos)? as usize;
             let count = match &node.occurs {
                 Some(c) => self.count(c, pos)?,
                 None => 1,

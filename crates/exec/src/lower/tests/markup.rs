@@ -166,3 +166,13 @@ fn json_parse_lays_out_what_names_reach_and_what_each_flag_sets() {
     let ParseValue::Leaf(v) = &j.nodes[1].value else { panic!() };
     assert!(matches!((v.text, v.number), (Some(MovePlan::Alnum { image: Image::Bytes, .. }), NumberInto::Digits)));
 }
+
+#[test]
+fn json_generate_of_an_unnamed_group_after_an_occurs_depending_on_table_is_refused() {
+    let data = concat!(
+        "       01  REC.\n           05 CNT PIC 9.\n           05 ITEM PIC X OCCURS 1 TO 3 DEPENDING ON CNT.\n",
+        "           05 FILLER.\n              10 A PIC X.\n       01  D PIC X(100).\n",
+    );
+    let error = lower(&compiled(&program("", data, &[line("JSON GENERATE D FROM REC"), line("GOBACK.")].concat()))).unwrap_err();
+    assert!(matches!(error, LowerError::Unsupported("JSON GENERATE of an unnamed group that follows an OCCURS DEPENDING ON table", _)), "{error}");
+}

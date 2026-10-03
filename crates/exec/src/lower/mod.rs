@@ -388,5 +388,5 @@ fn edits(layout: &Layout) -> R<Vec<lir::Edit>> {
 /// Whether the place cannot abend when evaluated: a slab, LOCAL-STORAGE or RETURN-CODE base and a
 /// constant offset and length.
 fn is_static(place: &lir::Place) -> bool {
-    matches!(place.base, lir::Base::Program | lir::Base::Local | lir::Base::ReturnCode) && place.subscripts.is_empty() && place.odo.is_none() && place.refmod.is_none()
+    matches!(place.base, lir::Base::Program | lir::Base::Local | lir::Base::ReturnCode) && place.moved.is_empty() && place.subscripts.is_empty() && place.odo.is_empty() && place.refmod.is_none()
 }

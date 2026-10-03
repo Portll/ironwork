@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 /// A place that cannot abend: its address is its base's plus a constant.
 pub(super) fn is_static(place: &Place) -> bool {
-    matches!(place.base, Base::Program | Base::Local | Base::ReturnCode) && place.subscripts.is_empty() && place.odo.is_none() && place.refmod.is_none()
+    matches!(place.base, Base::Program | Base::Local | Base::ReturnCode) && place.moved.is_empty() && place.subscripts.is_empty() && place.odo.is_empty() && place.refmod.is_none()
 }
 
 fn scale(kind: Kind) -> u32 {
@@ -72,7 +72,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             }
             Base::Xml(register) => return self.xml_register(register, id, pos),
         };
-        let mut offset = (base + place.offset as usize) as i64;
+        let mut offset = (base + place.offset as usize) as i64 - self.unused(&place.moved, pos)?;
         for (k, s) in place.subscripts.iter().enumerate() {
             let value = match fixed.iter().find(|&&(at, _)| at as usize == k) {
                 Some(&(_, v)) => v,
@@ -81,7 +81,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             offset += loc::subscript(value, s.stride, s.check, name, pos)?;
         }
         let mut len = i64::from(place.len);
-        if let Some(odo) = &place.odo {
+        for odo in &place.odo {
             let current = self.occurrences(odo, pos)?;
             len = loc::odo_len(len, odo.max, current, odo.element);
         }
@@ -130,6 +130,17 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let val = self.value(Operand::Load(p))?;
         let v = arith::fixed_operand(val, scale(place.kind), pos)?;
         Ok(whole(&v, pos)?)
+    }
+
+    /// The bytes these OCCURS DEPENDING ON tables' occurrences past their current counts take,
+    /// which an item after them in its record is moved back by, counted in turn.
+    pub(super) fn unused(&mut self, tables: &[Odo], pos: Pos) -> R<i64> {
+        let mut unused = 0;
+        for odo in tables {
+            let current = self.occurrences(odo, pos)?;
+            unused += loc::unused(odo.max, current, odo.element);
+        }
+        Ok(unused)
     }
 
     /// An OCCURS DEPENDING ON table's current count, kept within its maximum.

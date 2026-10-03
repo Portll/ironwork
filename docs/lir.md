@@ -221,10 +221,15 @@ pub struct Place {
     /// `Item.scaling`: PICTURE P positions right of the digits, which `ProgramFacts::scaling`
     /// gives for the place's `Loc`, so a read and a store scale the value as the walker's do.
     pub scaling: u32,
+    /// The OCCURS DEPENDING ON tables ahead of a variably located item in its record and not
+    /// within it (`Item.moved_by`, C161): each moves the item back by its unused occurrences.
+    pub moved: Vec<Odo>,
     /// One per entry of `Item.dims` (layout.rs:69-70), outermost first.
     pub subscripts: Vec<Subscript>,
-    /// On a group that ends with an OCCURS DEPENDING ON table (layout.rs:289-300).
-    pub odo: Option<Odo>,
+    /// On a group holding OCCURS DEPENDING ON tables (`Item.odo`): each leaves its unused
+    /// occurrences out of the length, unless the group receives whole, holds their objects and
+    /// nothing after it moves with them.
+    pub odo: Vec<Odo>,
     pub refmod: Option<RefMod>,
     pub name: SymId,
     /// The Ref's position, which the walker names in this place's abends.
@@ -298,16 +303,18 @@ pub struct PlaceNumcheck { pub lax: Option<rt::store::LaxRedefinition>, pub remo
 | LOCAL-STORAGE | `Base::Local` | 556 |
 | LINKAGE, pointer-based | `Base::Linkage(n)`; S0C4 checked at run time | 550-555 |
 | Constant offset | `offset` | 559 |
+| A variably located item | `moved`: offset −= (max − current) × element (`loc::unused`), per table, before the subscripts | `locate_item`, `unused` |
 | Subscripts | `Subscript { stride, value, check }`: offset += (s − 1) × stride | 560-566 |
-| OCCURS DEPENDING ON | `Odo`: length −= (max − current) × element | 567-572, and `occurrences` 594-603 |
+| OCCURS DEPENDING ON | `odo`: length −= (max − current) × element, per table | 567-572, and `occurrences` 594-603 |
 | Reference modification | `RefMod`; kind alphanumeric | 573-585 |
 | Run-unit bounds | Checked at run time for places that are not static | 586-588 |
 
 ### 5.4 Evaluation at run time
 
 An executor evaluates a place to a `Loc` in the walker's order and with its messages: the base (S0C4
-for an unbound LINKAGE record); each subscript, outermost first, then its check; the OCCURS
-DEPENDING ON object, its check, and the clamp to 0 to `max` (machine.rs:602); the
+for an unbound LINKAGE record); each table of `moved`, its object, check and clamp as below; each
+subscript, outermost first, then its check; each table of `odo`, its OCCURS DEPENDING ON object,
+its check, and the clamp to 0 to `max` (machine.rs:602); the
 reference-modification start, then length (default: to the end), then its check; last the run-unit
 bound. The checks are library functions over the evaluated integers, which `locate` and the VM both
 call (semantics-library.md §8, E10b). The DEPENDING ON object is an `IntExpr` because the walker
@@ -316,7 +323,7 @@ walker runs it. Each `IntExpr::Fixed` among them locates its `prepass` before it
 (§7.5), so a place nested in a subscript is evaluated in the walker's order too.
 
 A place is **static** when its base is Program, Local or ReturnCode and it has no subscripts, no
-OCCURS DEPENDING ON and no reference modification. It cannot abend, and its address is the
+OCCURS DEPENDING ON table moving it or in it, and no reference modification. It cannot abend, and its address is the
 activation's base plus a constant. Most places in batch code are static.
 
 ### 5.5 SSRANGE
@@ -1934,7 +1941,7 @@ pub struct JsonGenerate {
     pub code: (PlaceId, StorePlan), pub on_exception: bool, pub not_on_exception: bool,
 }
 pub struct JsonNode {
-    pub offset: u32, pub len: u32, pub kind: Kind, pub name: SymId, pub occurs: Option<Count>,
+    pub offset: u32, pub moved: Vec<Odo>, pub len: u32, pub kind: Kind, pub name: SymId, pub occurs: Option<Count>,
     pub indicator: Option<(Result<PlaceId, AbendId>, Marker)>, pub null: Option<Figurative>, pub value: JsonValue,
 }
 pub enum JsonValue { Object { members: Vec<u32>, eligible: bool }, Leaf(JsonLeaf) }
@@ -1946,7 +1953,7 @@ pub struct XmlGenerate {
     pub suppressing: bool, pub count: Option<(PlaceId, StorePlan)>, pub code: (PlaceId, StorePlan),
     pub on_exception: bool, pub not_on_exception: bool,
 }
-pub struct XmlNode { pub offset: u32, pub len: u32, pub kind: Kind, pub name: SymId, pub occurs: Option<Count>, pub value: XmlValue }
+pub struct XmlNode { pub offset: u32, pub moved: Vec<Odo>, pub len: u32, pub kind: Kind, pub name: SymId, pub occurs: Option<Count>, pub value: XmlValue }
 pub enum XmlValue { Element { members: Vec<u32> }, Members { members: Vec<u32> }, Leaf { form: XmlForm, suppress: Vec<Figurative>, convert: Convert } }
 
 pub struct XmlParse {
@@ -1962,7 +1969,7 @@ pub struct JsonParse {
     pub on_exception: bool, pub not_on_exception: bool,
 }
 pub struct ParseNode {
-    pub offset: u32, pub len: u32, pub kind: Kind, pub name: Named, pub occurs: Option<Count>, pub ignored: bool,
+    pub offset: u32, pub moved: Vec<Odo>, pub len: u32, pub kind: Kind, pub name: Named, pub occurs: Option<Count>, pub ignored: bool,
     pub indicator: Option<Indicator>, pub null: Option<(Figurative, MovePlan)>, pub value: ParseValue,
 }
 pub enum Named { Exactly(SymId), Folded(SymId), Omitted }
@@ -1974,6 +1981,14 @@ pub enum Flag { Set { on: SetTo, off: SetTo }, Literals { on: (ConstId, MovePlan
 pub enum SetTo { Nothing, Move { place: PlaceId, value: ConstId, plan: MovePlan }, Refused(AbendId) }
 ```
 
+- **A variably located member.** A node's `moved` are the OCCURS DEPENDING ON tables ahead of its
+  item in its record and not ahead of the node that holds it (`Machine::moved_within`); the walk
+  takes their unused occurrences off the node's offset where the walker does, before `occurs`: for
+  JSON and XML GENERATE as it reaches the member, for JSON PARSE as the member's pair is reached,
+  after any earlier pair has set a count, unless SUPPRESS names it. XML GENERATE keeps an unnamed
+  group as a node of its own, as the walker walks it; JSON GENERATE folds its members into the
+  group holding it, so one the tables move relative to that group is refused by name, and JSON
+  PARSE takes its members' moves from the holder, as the walker does.
 - **The op and its phrases.** With ON EXCEPTION or NOT ON EXCEPTION written the op returns `Arm(1)`
   when the code it stores is not 0 and `Arm(0)` when it is, for a `Select` of two blocks, as CALL's;
   with neither, `Next`.

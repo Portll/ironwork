@@ -2,7 +2,7 @@
 //! phrases, and the tree of items its walk reaches with every choice the walker makes by name or
 //! kind made once. Trees nest by index: a node's members come after it in its node table.
 
-use super::{AbendId, CondId, ConstId, Count, IntExpr, MovePlan, Operand, PlaceId, RangeId, StorePlan, SymId};
+use super::{AbendId, CondId, ConstId, Count, IntExpr, MovePlan, Odo, Operand, PlaceId, RangeId, StorePlan, SymId};
 use crate::storage::Kind;
 use crate::vocab::Figurative;
 use crate::{codec_enum, codec_struct};
@@ -87,13 +87,16 @@ pub struct JsonGenerate {
     pub not_on_exception: bool,
 }
 
-/// An item of the tree, `offset` bytes into the occurrence of the node that holds it, `len` its
-/// size; a table's elements are `len` apart, `occurs` of them. `name` is a member's JSON string.
-/// Each occurrence, of a group or an elementary item, is null when `indicator`'s marker holds or
-/// it equals `null`, tested in that order before its value.
+/// An item of the tree, `offset` bytes into the occurrence of the node that holds it, less the
+/// unused occurrences of the `moved` tables, which lie ahead of it in its record and not ahead of
+/// that node and are counted as the walk reaches it (C161), before `occurs`; `len` its size; a
+/// table's elements are `len` apart, `occurs` of them. `name` is a member's JSON string. Each
+/// occurrence, of a group or an elementary item, is null when `indicator`'s marker holds or it
+/// equals `null`, tested in that order before its value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JsonNode {
     pub offset: u32,
+    pub moved: Vec<Odo>,
     pub len: u32,
     pub kind: Kind,
     pub name: SymId,
@@ -155,6 +158,7 @@ pub struct XmlGenerate {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct XmlNode {
     pub offset: u32,
+    pub moved: Vec<Odo>,
     pub len: u32,
     pub kind: Kind,
     pub name: SymId,
@@ -231,12 +235,14 @@ pub struct JsonParse {
     pub not_on_exception: bool,
 }
 
-/// As `JsonNode`. Each item takes a value in this order: a second value at the same item and
-/// offset is a duplicate; `indicator`; then a null goes to `null`'s MOVE, or is ignored, or is a
-/// status; an object fills a group's members; any other value goes to a leaf.
+/// As `JsonNode`, a member's `moved` counted as its pair is reached, unless SUPPRESS names it. Each
+/// item takes a value in this order: a second value at the same item and offset is a duplicate;
+/// `indicator`; then a null goes to `null`'s MOVE, or is ignored, or is a status; an object fills a
+/// group's members; any other value goes to a leaf.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParseNode {
     pub offset: u32,
+    pub moved: Vec<Odo>,
     pub len: u32,
     pub kind: Kind,
     pub name: Named,
@@ -343,18 +349,18 @@ codec_enum!(Ccsid { Unnamed = 0, CodePage = 1, Operand(o) = 2 });
 codec_enum!(Convert { Chars { justified } = 0, National = 1, Float(precision) = 2, Fixed { integers } = 3, Refused(abend) = 4 });
 codec_enum!(Marker { Byte(b) = 0, Condition(c) = 1, Refused(abend) = 2 });
 codec_struct!(JsonGenerate { from, subscripts, nodes, name, receiver, encoding, count, code, on_exception, not_on_exception } check json_valid);
-codec_struct!(JsonNode { offset, len, kind, name, occurs, indicator, null, value });
+codec_struct!(JsonNode { offset, moved, len, kind, name, occurs, indicator, null, value });
 codec_enum!(JsonValue { Object { members, eligible } = 0, Leaf(leaf) = 1 });
 codec_struct!(JsonLeaf { suppress, boolean, convert });
 codec_struct!(XmlGenerate {
     receiver, encoding, namespace, prefix, declaration, from, subscripts, nodes, suppressing, count, code, on_exception, not_on_exception,
 } check xml_valid);
-codec_struct!(XmlNode { offset, len, kind, name, occurs, value });
+codec_struct!(XmlNode { offset, moved, len, kind, name, occurs, value });
 codec_enum!(XmlValue { Element { members } = 0, Members { members } = 1, Leaf { form, suppress, convert } = 2 });
 codec_enum!(XmlForm { Attribute = 0, Element = 1, Content = 2 });
 codec_struct!(XmlParse { document, encoding, national, procedure, event, code, information, code_value, on_exception, not_on_exception });
 codec_struct!(JsonParse { source, encoding, into, subscripts, nodes, ignore_all, code, status, on_exception, not_on_exception } check parse_valid);
-codec_struct!(ParseNode { offset, len, kind, name, occurs, ignored, indicator, null, value });
+codec_struct!(ParseNode { offset, moved, len, kind, name, occurs, ignored, indicator, null, value });
 codec_enum!(Named { Exactly(name) = 0, Folded(name) = 1, Omitted = 2 });
 codec_enum!(ParseValue { Object { members } = 0, Leaf(leaf) = 1, Suppressed = 2 });
 codec_struct!(ParseLeaf { boolean, text, number });

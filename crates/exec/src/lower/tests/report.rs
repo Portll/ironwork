@@ -68,7 +68,7 @@ fn the_report_model_is_in_services_with_comparands_places_constants_and_a_range_
     let items = fields.iter().map(|f| f.item).chain(report.sums.iter().map(|s| s.total)).chain([report.page_counter, report.line_counter, report.state]);
     for q in items {
         let place = &p.places[q];
-        assert!(place.base == Base::Program && place.subscripts.is_empty() && place.odo.is_none() && place.refmod.is_none(), "{place:?}");
+        assert!(place.base == Base::Program && place.moved.is_empty() && place.subscripts.is_empty() && place.odo.is_empty() && place.refmod.is_none(), "{place:?}");
     }
     assert_eq!(name(fields[0].item), "R-AMT");
     let r = group.declarative.unwrap();

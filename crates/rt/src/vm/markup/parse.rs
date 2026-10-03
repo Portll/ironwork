@@ -166,7 +166,8 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             if nodes[m].value == ParseValue::Suppressed {
                 continue;
             }
-            if let Err(code) = self.parse_member(at, m, offset + nodes[m].offset as usize, value, g)? {
+            let moved = self.unused(&nodes[m].moved, at.pos)? as usize;
+            if let Err(code) = self.parse_member(at, m, offset + nodes[m].offset as usize - moved, value, g)? {
                 return Ok(Err(code));
             }
         }

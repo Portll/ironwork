@@ -203,7 +203,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let len = p.storage.linkage[usize::from(ordinal)];
         let odo = p.items.iter().any(|i| i.linkage == Some(ordinal) && i.depending_on.is_some());
         let whole = |q: &crate::lir::Place| {
-            q.base == Base::Linkage(ordinal) && q.offset == 0 && q.len == len && q.subscripts.is_empty() && q.refmod.is_none() && (q.odo.is_some() || !odo)
+            q.base == Base::Linkage(ordinal) && q.offset == 0 && q.len == len && q.subscripts.is_empty() && q.refmod.is_none() && (!q.odo.is_empty() || !odo)
         };
         let loc = match p.places.iter().position(whole) {
             Some(q) => self.loc(q as u32)?,

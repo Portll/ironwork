@@ -45,7 +45,13 @@ pub fn occurrences(count: i64, max: u32, check: bool, object: &str, pos: Pos) ->
 
 /// A group's length with its table at `current` of `max` occurrences of `element` bytes.
 pub fn odo_len(len: i64, max: u32, current: u32, element: u32) -> i64 {
-    len - (max - current) as i64 * element as i64
+    len - unused(max, current, element)
+}
+
+/// The bytes of a table's occurrences past `current` of `max`, `element` bytes each: what an item
+/// after the table in its record is moved back by.
+pub fn unused(max: u32, current: u32, element: u32) -> i64 {
+    (max - current) as i64 * element as i64
 }
 
 /// Reference modification of an item of `len` bytes: what it adds to the offset, and the length.

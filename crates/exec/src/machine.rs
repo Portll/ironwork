@@ -668,7 +668,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let table = &self.layout.items[t];
         let (max, element) = (table.occurs, table.size);
         let current = self.occurrences(t, pos)?;
-        Ok(-loc::odo_len(0, max, current, element))
+        Ok(loc::unused(max, current, element))
     }
 
     /// The bytes the OCCURS DEPENDING ON tables ahead of item `member` in its record, and not ahead

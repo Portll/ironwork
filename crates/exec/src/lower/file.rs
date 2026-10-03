@@ -170,7 +170,7 @@ impl Lower<'_> {
             // Each record bound to a file's area is bound to the same storage (machine/scope.rs).
             lir::Base::Linkage(o) => {
                 let record = &layout.items[layout.linkage_roots[usize::from(o)]];
-                q.subscripts.is_empty() && q.odo.is_none() && q.refmod.is_none() && !layout.is_argument(usize::from(o)) && record.file == Some(k as u16)
+                q.moved.is_empty() && q.subscripts.is_empty() && q.odo.is_empty() && q.refmod.is_none() && !layout.is_argument(usize::from(o)) && record.file == Some(k as u16)
             }
             _ => false,
         };

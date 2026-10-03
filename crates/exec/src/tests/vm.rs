@@ -390,6 +390,126 @@ fn the_vm_initializes_with_the_interpreter_s_receivers_senders_scaling_and_repor
     assert!(err.contains("TRUNC(OPT) store of 12345 into B PIC S9(4) BINARY"), "{err}");
 }
 
+const MOVING: &str = concat!(
+    "       01  REC.\n           05 CNT PIC 9 VALUE 2.\n           05 CNT2 PIC 9 VALUE 1.\n",
+    "           05 ITEM PIC X OCCURS 1 TO 5 DEPENDING ON CNT.\n           05 MID.\n              10 M1 PIC X.\n",
+    "              10 MORE PIC X OCCURS 1 TO 3 DEPENDING ON CNT2.\n              10 M2 PIC X.\n           05 LAST PIC XX.\n",
+    "       01  W PIC X(20).\n       01  D PIC X(300).\n       01  N PIC 9(4).\n",
+);
+
+#[test]
+fn the_vm_places_items_after_occurs_depending_on_tables_where_the_interpreter_does() {
+    let body = [
+        "MOVE 'A' TO ITEM (1) MOVE 'B' TO ITEM (2)",
+        "MOVE 'M' TO M1 MOVE 'X' TO MORE (1) MOVE 'Z' TO M2",
+        "MOVE 'LL' TO LAST",
+        "DISPLAY REC '|' LENGTH OF REC '|' LENGTH OF MID",
+        "MOVE REC TO W DISPLAY W '|'",
+        "JSON GENERATE D FROM REC COUNT N ENCODING 1140",
+        "DISPLAY D(1:N)",
+        "XML GENERATE D FROM REC COUNT IN N",
+        "DISPLAY D(1:N)",
+        "MOVE 3 TO CNT MOVE 2 TO CNT2",
+        "DISPLAY M1 MORE (2) M2 LAST",
+        "MOVE '{\"REC\":{\"CNT\":1,\"CNT2\":2,\"ITEM\":[\"Q\"],' TO D",
+        "MOVE '\"MID\":{\"M1\":\"R\",\"MORE\":[\"S\",\"T\"],\"M2\":\"U\"},' TO D(39:)",
+        "MOVE '\"LAST\":\"VW\"}}' TO D(82:)",
+        "JSON PARSE D(1:94) INTO REC ENCODING 1140",
+        "DISPLAY REC '|' JSON-CODE",
+        "GOBACK.",
+    ]
+    .iter()
+    .flat_map(|s| s.split('\n'))
+    .map(line)
+    .collect::<String>();
+    let (out, ending) = on_both(&program("", MOVING, &body));
+    assert_eq!(ending, Ok(Ending::Goback));
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines[0], "21ABMXZLL|000000009|000000003");
+    assert_eq!(lines[1], "21ABMXZLL           |");
+    assert_eq!(lines[2], "{\"REC\":{\"CNT\":2,\"CNT2\":1,\"ITEM\":[\"A\",\"B\"],\"MID\":{\"M1\":\"M\",\"MORE\":[\"X\"],\"M2\":\"Z\"},\"LAST\":\"LL\"}}");
+    assert!(lines[3].starts_with("<REC><CNT>2</CNT><CNT2>1</CNT2><ITEM>A</ITEM><ITEM>B</ITEM><MID><M1>M</M1><MORE>X</MORE><M2>Z</M2></MID>"), "{}", lines[3]);
+    assert_eq!(lines.len(), 6, "{out}");
+    assert_eq!(lines[5], "12QRSTUVW|000000000");
+}
+
+#[test]
+fn the_vm_places_an_unnamed_group_after_a_table_in_xml_generate_and_json_parse() {
+    let data = concat!(
+        "       01  REC.\n           05 CNT PIC 9 VALUE 2.\n           05 ITEM PIC X OCCURS 1 TO 3 DEPENDING ON CNT.\n",
+        "           05 FILLER.\n              10 A PIC X.\n              10 B PIC X.\n       01  D PIC X(100).\n       01  N PIC 9(4).\n",
+    );
+    let body = [
+        "MOVE 'P' TO ITEM (1) MOVE 'Q' TO ITEM (2)",
+        "MOVE 'A' TO A MOVE 'B' TO B",
+        "XML GENERATE D FROM REC COUNT IN N",
+        "DISPLAY D(1:N)",
+        "MOVE '{\"REC\":{\"CNT\":1,\"ITEM\":[\"X\"],\"A\":\"Y\",\"B\":\"Z\"}}' TO D",
+        "JSON PARSE D(1:46) INTO REC ENCODING 1140",
+        "DISPLAY REC '|' JSON-CODE",
+        "GOBACK.",
+    ]
+    .map(line)
+    .concat();
+    let (out, ending) = on_both(&program("", data, &body));
+    assert_eq!(ending, Ok(Ending::Goback));
+    assert_eq!(out, "<REC><CNT>2</CNT><ITEM>P</ITEM><ITEM>Q</ITEM><A>A</A><B>B</B></REC>\n1XYZ|000000000\n");
+}
+
+#[test]
+fn the_vm_checks_the_count_that_moves_an_item_under_ssrange() {
+    let body = [line("MOVE 7 TO CNT"), line("DISPLAY 'BEFORE'"), line("DISPLAY LAST"), line("GOBACK.")].concat();
+    let (out, ending) = on_both(&program("SSRANGE", MOVING, &body));
+    assert_eq!(out, "BEFORE\n");
+    let abend = ending.unwrap_err();
+    assert!(abend.message.starts_with("IGZ0007S CNT = 7"), "{}", abend.message);
+}
+
+#[test]
+fn the_vm_places_an_item_after_a_table_in_an_external_record_shared_with_a_called_program() {
+    let shared = "       01  XREC EXTERNAL.\n           05 XCNT PIC 9.\n           05 XT PIC X OCCURS 1 TO 4 DEPENDING ON XCNT.\n           05 XLATER PIC XX.\n";
+    let source = two_programs(
+        shared,
+        &[line("MOVE SPACES TO XREC"), line("MOVE 2 TO XCNT"), line("MOVE 'AB' TO XREC (2:2)"), line("MOVE 'ZZ' TO XLATER"), line("CALL 'SUB'"), line("DISPLAY XREC"), line("STOP RUN.")].concat(),
+        "SUB",
+        &format!("       WORKING-STORAGE SECTION.\n{shared}"),
+        &["       PROCEDURE DIVISION.\n", &line("DISPLAY XLATER"), &line("MOVE 3 TO XCNT"), &line("DISPLAY XLATER"), &line("GOBACK.")].concat(),
+    );
+    let (out, ending) = on_both(&source);
+    assert_eq!(ending, Ok(Ending::StopRun));
+    assert_eq!(out, "ZZ\nZ \n3ABZZ \n");
+}
+
+#[test]
+fn the_vm_places_an_item_after_a_table_in_a_global_record_a_contained_program_reads() {
+    let lines = [
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. MAIN.",
+        "DATA DIVISION.",
+        "WORKING-STORAGE SECTION.",
+        "01  GREC GLOBAL.",
+        "    05 GCNT PIC 9.",
+        "    05 GT PIC X OCCURS 1 TO 4 DEPENDING ON GCNT.",
+        "    05 GLATER PIC XX.",
+        "PROCEDURE DIVISION.",
+        "    MOVE SPACES TO GREC MOVE 2 TO GCNT MOVE 'ZZ' TO GLATER",
+        "    CALL 'INNER'",
+        "    DISPLAY GREC",
+        "    STOP RUN.",
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. INNER.",
+        "PROCEDURE DIVISION.",
+        "    DISPLAY GLATER MOVE 1 TO GCNT DISPLAY GLATER",
+        "    GOBACK.",
+        "END PROGRAM INNER.",
+        "END PROGRAM MAIN.",
+    ];
+    let source: String = lines.iter().map(|l| format!("       {l}\n")).collect();
+    let (out, ending) = on_both(&source);
+    assert_eq!(ending, Ok(Ending::StopRun));
+    assert_eq!(out, "ZZ\n Z\n1  Z\n");
+}
+
 #[test]
 fn the_vm_calls_through_a_pointer_that_holds_no_entry_as_the_interpreter_does() {
     let data = "       01  PP USAGE PROCEDURE-POINTER.\n";

@@ -2,7 +2,7 @@ use super::*;
 use crate::testing::{check_lowering, encoded, line};
 use rt::lir::{
     ArithPlan, Base, CallArg, CallTarget, Chars, Collating, Comparand, Cond as LirCond, Const, DisplayItem, Image, InitField, InitValue, IntExpr, LeService,
-    MethodName, Mode, MovePlan, NationalFrom, NumericFrom, Op, Operand as LirOperand, Place, Program, Receiver, SenderCheck, SignTest, StorePlan, Terminator,
+    MethodName, Mode, MovePlan, NationalFrom, NumericFrom, Odo, Op, Operand as LirOperand, Place, Program, Receiver, SenderCheck, SignTest, StorePlan, Terminator,
 };
 use rt::abend::Ending;
 use rt::module::codec::decode_all;
@@ -216,7 +216,7 @@ fn subscripts_reference_modification_and_odo_carry_checks_only_under_ssrange() {
         assert!(matches!(refmod.length, Some(IntExpr::Item(_))));
         assert_eq!(refmod.check, ssrange);
         let t = place_named(&p, "T");
-        let odo = t.iter().find_map(|q| q.odo.clone()).unwrap();
+        let odo = t.iter().find_map(|q| q.odo.first().cloned()).unwrap();
         assert_eq!((odo.max, odo.element, odo.check), (5, 4, ssrange));
     }
 }
@@ -227,18 +227,24 @@ fn a_receiving_group_holding_its_own_odo_object_is_at_its_maximum_length() {
     let p = lowered(&program("", data, &[line("MOVE W TO REC"), line("MOVE REC TO W"), line("GOBACK.")].concat()));
     let rec = place_named(&p, "REC");
     assert_eq!(rec.len(), 2);
-    assert_eq!(rec.iter().filter(|q| q.odo.is_none()).count(), 1);
+    assert_eq!(rec.iter().filter(|q| q.odo.is_empty()).count(), 1);
 }
 
 #[test]
-fn a_variably_located_item_and_a_group_holding_what_moves_are_refused() {
-    let data = "       01  REC.\n           05 CNT PIC 9.\n           05 ITEM PIC X OCCURS 1 TO 5 DEPENDING ON CNT.\n           05 LATER PIC X.\n       01  W PIC X(7).\n";
-    let why = "an item that follows an OCCURS DEPENDING ON table in its record, or a group holding such a table and what follows it";
-    for body in ["MOVE LATER TO W", "MOVE REC TO W", "MOVE W TO REC"] {
-        let error = lower(&compiled(&program("", data, &[line(body), line("GOBACK.")].concat()))).unwrap_err();
-        assert!(matches!(error, LowerError::Unsupported(n, _) if n == why), "{body}: {error}");
-    }
-    lowered(&program("", data, &[line("MOVE CNT TO W"), line("MOVE ITEM (1) TO W"), line("GOBACK.")].concat()));
+fn a_variably_located_item_moves_back_by_the_tables_ahead_of_it_and_its_group_counts_both() {
+    let data = concat!(
+        "       01  REC.\n           05 CNT PIC 9.\n           05 ITEM PIC X OCCURS 1 TO 5 DEPENDING ON CNT.\n",
+        "           05 LATER PIC X.\n           05 MORE PIC X OCCURS 1 TO 3 DEPENDING ON CNT.\n           05 LAST PIC X.\n       01  W PIC X(11).\n",
+    );
+    let body = ["MOVE LATER TO W", "MOVE MORE (2) TO W", "MOVE LAST TO W", "MOVE REC TO W", "MOVE W TO REC", "GOBACK."].map(line).concat();
+    let p = lowered(&program("", data, &body));
+    let tables = |odos: &[Odo]| odos.iter().map(|o| (o.max, o.element)).collect::<Vec<_>>();
+    let shape = |name: &str| place_named(&p, name).iter().map(|q| (tables(&q.moved), q.subscripts.len(), tables(&q.odo))).collect::<Vec<_>>();
+    assert_eq!(shape("LATER"), [(vec![(5, 1)], 0, vec![])]);
+    assert_eq!(shape("MORE"), [(vec![(5, 1)], 1, vec![])]);
+    assert_eq!(shape("LAST"), [(vec![(5, 1), (3, 1)], 0, vec![])]);
+    // A sender REC is as long as both counts make it; as a receiver holding its objects, its maximum.
+    assert_eq!(shape("REC"), [(vec![], 0, vec![(5, 1), (3, 1)]), (vec![], 0, vec![])]);
 }
 
 #[test]

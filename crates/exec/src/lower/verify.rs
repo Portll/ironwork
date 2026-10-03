@@ -101,7 +101,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
     let numcheck = p.options.options.numcheck;
     let lax = numcheck.and_then(|c| c.zon).is_some_and(|z| z.lax);
     for (k, q) in p.places.iter().enumerate() {
-        let Place { subscripts, odo, refmod, at, .. } = q;
+        let Place { moved, subscripts, odo, refmod, at, .. } = q;
         within("debug entry", *at, p.debug.positions.len())?;
         if q.numcheck.lax.is_some() && !lax || q.numcheck.removed && numcheck.is_none() {
             return Err(format!("place {k}: NUMCHECK facts {:?} its options do not read", q.numcheck));
@@ -112,7 +112,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
                 return Err(format!("place {k}: a subscript check without SSRANGE, or none with it"));
             }
         }
-        if let Some(o) = odo {
+        for o in moved.iter().chain(odo) {
             int(&o.object)?;
             if o.check != ssrange {
                 return Err(format!("place {k}: an OCCURS DEPENDING ON check that disagrees with SSRANGE"));

@@ -13,9 +13,14 @@ pub struct Place {
     pub kind: Kind,
     /// PICTURE P positions right of the item's digits: its value is its digits times ten to this.
     pub scaling: u32,
+    /// The OCCURS DEPENDING ON tables ahead of the item in its record, not within it: each moves
+    /// the item back by its occurrences past the current count, evaluated before the subscripts.
+    pub moved: Vec<Odo>,
     /// One per OCCURS level, outermost first.
     pub subscripts: Vec<Subscript>,
-    pub odo: Option<Odo>,
+    /// The OCCURS DEPENDING ON tables within the item, other than one within another of them: each
+    /// leaves its occurrences past the current count out of the length.
+    pub odo: Vec<Odo>,
     pub refmod: Option<RefMod>,
     pub name: SymId,
     pub at: DebugId,
@@ -62,7 +67,7 @@ pub struct RefMod {
     pub check: bool,
 }
 
-codec_struct!(Place { base, offset, len, kind, scaling, subscripts, odo, refmod, name, at, numcheck });
+codec_struct!(Place { base, offset, len, kind, scaling, moved, subscripts, odo, refmod, name, at, numcheck });
 codec_enum!(Base {
     Program = 0,
     Local = 1,

@@ -129,7 +129,7 @@ impl Lower<'_> {
         // `oo_register`: SELF's cell and JNIENVPTR's, whole, whatever reference modification says.
         if r.qualifiers.is_empty() && r.subscripts.is_empty() && matches!(r.name.as_str(), "SELF" | "JNIENVPTR") && layout.resolve(&r.name, &[], r.pos).is_err() {
             let (base, kind) = if r.name == "SELF" { (lir::Base::SelfRef, Kind::ObjectReference) } else { (lir::Base::JniEnv, Kind::Pointer) };
-            let place = lir::Place { base, offset: 0, len: 4, kind, scaling: 0, subscripts: Vec::new(), odo: None, refmod: None, name: self.sym(&r.name), at: self.at(r.pos), numcheck: Default::default() };
+            let place = lir::Place { base, offset: 0, len: 4, kind, scaling: 0, moved: Vec::new(), subscripts: Vec::new(), odo: Vec::new(), refmod: None, name: self.sym(&r.name), at: self.at(r.pos), numcheck: Default::default() };
             return self.push_place(place, None);
         }
         if compile::markup::xml_register(layout, r) {
@@ -143,8 +143,9 @@ impl Lower<'_> {
                 len: 2,
                 kind: Kind::Binary { digits: 4, scale: 0, signed: true, native: false },
                 scaling: 0,
+                moved: Vec::new(),
                 subscripts: Vec::new(),
-                odo: None,
+                odo: Vec::new(),
                 refmod: None,
                 name: self.sym(&r.name),
                 at: self.at(r.pos),
@@ -173,21 +174,19 @@ impl Lower<'_> {
             None if item.local => lir::Base::Local,
             None => lir::Base::Program,
         };
+        let mut moved = Vec::with_capacity(item.moved_by.len());
+        for &t in &item.moved_by {
+            moved.push(self.odo(t, r.pos)?);
+        }
         let mut subscripts = Vec::with_capacity(item.dims.len());
         for (&(stride, count), sub) in item.dims.iter().zip(&r.subscripts) {
             subscripts.push(lir::Subscript { stride, value: self.int_expr(sub, r.pos)?, check: ssrange.then_some(count) });
         }
-        if !item.moved_by.is_empty() || item.odo.iter().any(|&t| layout.items[t].followed) {
-            return unsupported("an item that follows an OCCURS DEPENDING ON table in its record, or a group holding such a table and what follows it", r.pos);
-        }
-        let mut odo = None;
-        if let Some(&t) = item.odo.first()
-            && !(receiving && r.refmod.is_none() && self.object_within(t, index)?)
-        {
-            let table = &layout.items[t];
-            let Some(object) = &table.depending_on else { return unsupported("an OCCURS DEPENDING ON table without its object", r.pos) };
-            let object = self.int_expr(&Expr::Operand(Operand::Ref(object.clone())), r.pos)?;
-            odo = Some(lir::Odo { object, max: table.occurs, element: table.size, check: ssrange });
+        let mut odo = Vec::new();
+        if !item.odo.is_empty() && !(receiving && r.refmod.is_none() && !item.followed && self.objects_within(&item.odo, index)?) {
+            for &t in &item.odo {
+                odo.push(self.odo(t, r.pos)?);
+            }
         }
         let (kind, refmod) = match &r.refmod {
             None => (item.kind, None),
@@ -202,8 +201,28 @@ impl Lower<'_> {
             }
         };
         let numcheck = self.place_numcheck(index, r.pos);
-        let place = lir::Place { base, offset: item.offset, len: item.size, kind, scaling: item.scaling, subscripts, odo, refmod, name: self.sym(&r.name), at: self.at(r.pos), numcheck };
+        let place = lir::Place { base, offset: item.offset, len: item.size, kind, scaling: item.scaling, moved, subscripts, odo, refmod, name: self.sym(&r.name), at: self.at(r.pos), numcheck };
         self.push_place(place, Some(index))
+    }
+
+    /// OCCURS DEPENDING ON table `t`'s count, as `Machine::occurrences` reads it for a reference at
+    /// `pos`.
+    pub(super) fn odo(&mut self, t: usize, pos: Pos) -> R<lir::Odo> {
+        let table = &self.layout.items[t];
+        let Some(object) = &table.depending_on else { return unsupported("an OCCURS DEPENDING ON table without its object", pos) };
+        let (max, element) = (table.occurs, table.size);
+        let object = self.int_expr(&Expr::Operand(Operand::Ref(object.clone())), pos)?;
+        Ok(lir::Odo { object, max, element, check: self.c.ssrange })
+    }
+
+    /// Whether the objects of these tables' OCCURS DEPENDING ON all lie within item `group`.
+    fn objects_within(&self, tables: &[usize], group: usize) -> R<bool> {
+        for &t in tables {
+            if !self.object_within(t, group)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     pub(super) fn push_place(&mut self, place: lir::Place, item: Option<usize>) -> R<PlaceId> {

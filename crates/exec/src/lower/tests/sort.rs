@@ -119,7 +119,7 @@ fn release_from_a_record_holding_its_own_odo_object_moves_into_it_whole_and_rele
     let p = lowered(&format!("{source}{body}"));
     let release = &p.services.releases[0];
     let to = release.from.unwrap().to;
-    assert_eq!((p.places[to as usize].odo.is_none(), p.places[release.record as usize].odo.is_some()), (true, true));
+    assert_eq!((p.places[to as usize].odo.is_empty(), p.places[release.record as usize].odo.is_empty()), (true, false));
 }
 
 #[test]

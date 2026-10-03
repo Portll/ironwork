@@ -38,8 +38,8 @@ impl Lower<'_> {
 
     fn locate_tested(&self, p: PlaceId) -> bool {
         let place = &self.places[p as usize];
-        place.subscripts.iter().any(|s| self.int_tested(&s.value))
-            || place.odo.as_ref().is_some_and(|o| self.int_tested(&o.object))
+        place.moved.iter().chain(&place.odo).any(|o| self.int_tested(&o.object))
+            || place.subscripts.iter().any(|s| self.int_tested(&s.value))
             || place.refmod.as_ref().is_some_and(|r| self.int_tested(&r.start) || r.length.as_ref().is_some_and(|l| self.int_tested(l)))
     }
 
