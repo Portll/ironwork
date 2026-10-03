@@ -2,7 +2,7 @@
 //! tool that shows it. The same program prints the same bytes; nothing reads the text back.
 
 use super::{
-    AbendId, AbendText, Access, Advance, Argument, ArithId, ArithStep, Base, Binding, Block, BlockId, Bound, CallArg, CallId, CallTarget, Ccsid,
+    AbendId, AbendText, Access, Advance, Argument, ArithId, ArithPlan, ArithStep, Base, Binding, Block, BlockId, Bound, CallArg, CallId, CallTarget, Ccsid,
     Chars, CicsId, Class, Comparand, Compare, Cond, CondId, Const, ConstId, Convert, ConvertTable, Count, Debug, DebugId, DisplayId, DisplayItem,
     Expr, ExprId, FileDesc, FileOpId, FileVerb, Flag, FloatFrom, FromMove, FunctionId, GlobalAt, Image, Indicator, InitValue, InspectId,
     InspectPhrase, Inspected, IntExpr, InvokeId, Item, JsonLeaf, JsonNode, JsonValue, Marker, MarkupId, MethodName, Mode, MovePlan, Named,
@@ -741,9 +741,11 @@ impl<'a> Printer<'a> {
     }
 
     fn arith(&self, id: ArithId) -> String {
-        let Some(a) = self.c.plans.arith.get(id as usize) else { return format!("Arith arith{id}?") };
-        let mut steps: Vec<String> = a.steps.iter().map(|s| self.arith_step(s)).collect();
-        if let Some(r) = &a.remainder {
+        let Some(ArithPlan { dmax, arith, prepass, steps, remainder, handled, per_receiver, inner_dmax }) = self.c.plans.arith.get(id as usize) else {
+            return format!("Arith arith{id}?");
+        };
+        let mut steps: Vec<String> = steps.iter().map(|s| self.arith_step(s)).collect();
+        if let Some(r) = remainder {
             steps.push(format!(
                 "remainder {} <- {} / {} [{}, quotient scale {}]",
                 self.place(r.target),
@@ -753,16 +755,19 @@ impl<'a> Printer<'a> {
                 r.quotient_scale
             ));
         }
-        let mut how = vec![format!("dmax {}", a.dmax)];
-        match a.arith {
+        let mut how = vec![format!("dmax {dmax}")];
+        if inner_dmax != dmax {
+            how.push(format!("inner dmax {inner_dmax}"));
+        }
+        match arith {
             Arith::Compat => {}
             Arith::Extend => how.push("arith extend".to_owned()),
         }
-        if !a.prepass.is_empty() {
-            how.push(format!("prepass {}", self.places(&a.prepass)));
+        if !prepass.is_empty() {
+            how.push(format!("prepass {}", self.places(prepass)));
         }
-        how.extend(yes(a.per_receiver, "per receiver"));
-        how.extend(yes(a.handled, "size error"));
+        how.extend(yes(*per_receiver, "per receiver"));
+        how.extend(yes(*handled, "size error"));
         format!("Arith {}{}", steps.join("; "), attrs('{', how))
     }
 
