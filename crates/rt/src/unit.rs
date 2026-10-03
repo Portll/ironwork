@@ -31,8 +31,8 @@ pub struct Loaded<H> {
     pub name: String,
     pub base: usize,
     pub size: usize,
-    /// False once a CICS run unit has set the program's storage at `base` aside: its next
-    /// activation gets storage of its own.
+    /// False once a CICS run unit has set the program's storage at `base` aside, or has ended and
+    /// released it: its next activation gets storage of its own.
     pub placed: bool,
     pub files: Vec<Option<Open>>,
     /// The files CLOSE WITH LOCK has closed, which OPEN refuses with status 38.
@@ -406,8 +406,8 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
 
     /// Ends the run unit [`RunUnit::begin_cics_run_unit`] started, closing the files its programs
     /// and its EXTERNAL files left open as Language Environment closes an enclave's, and dropping
-    /// its EXTERNAL data and heap: a program it loaded is left in its initial state, and the run
-    /// unit set aside has everything back.
+    /// its programs' storage, EXTERNAL data and heap: a program it loaded stays loaded, in its
+    /// initial state with no storage (C129), and the run unit set aside has everything back.
     pub fn end_cics_run_unit(&mut self) -> Result<(), String> {
         let mut closed = Ok(());
         for program in &mut self.programs {
@@ -417,7 +417,6 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
                 }
             }
             drop(program.set_aside());
-            program.placed = true;
         }
         closed = closed.and(self.close_external_files());
         let Some(enclave) = self.set_aside.pop() else { return closed };
@@ -463,11 +462,11 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         at
     }
 
-    /// Releases arguments pushed since `mark`, unless a program, heap storage or EXTERNAL storage
-    /// was placed behind them.
+    /// Releases arguments pushed since `mark`, unless a program's storage, heap storage or EXTERNAL
+    /// storage was placed behind them.
     pub fn release_temporaries(&mut self, mark: usize) {
         let external = self.externals.storage.values().all(|&(at, _)| at < mark);
-        if self.programs.iter().all(|p| p.base < mark) && self.le.heap_end() <= mark && external {
+        if self.programs.iter().all(|p| !p.placed || p.base + p.size <= mark) && self.le.heap_end() <= mark && external {
             self.mem.truncate(mark.max(RESERVED));
             if let Some(t) = self.taint.as_mut() {
                 t.truncate(self.mem.len());

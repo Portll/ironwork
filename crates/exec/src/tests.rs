@@ -2590,6 +2590,39 @@ fn each_run_unit_a_link_starts_has_external_data_and_heap_storage_of_its_own() {
     assert_eq!(enclave_task(&heap), ("HEAPL FREES OUTER 0810\nMAIN FREES INNER 0810\nMAIN FREES OWN 0000\n".into(), None));
 }
 
+/// The output of a task whose first program runs `body`, then RETURN, and how many bytes of memory
+/// its run unit is left with. LINKP CALLs COUNTED, whose WORKING-STORAGE of 10,001 bytes counts
+/// its CALLs, and RETURNs.
+fn released_task(body: &[&str]) -> (String, usize) {
+    let mut procedure: Vec<String> = body.iter().map(|s| line(s)).collect();
+    procedure.push(line("EXEC CICS RETURN END-EXEC."));
+    let counted = cics_program("COUNTED", "       01  N PIC 9 VALUE 0.\n       01  BIG PIC X(10000).\n", "", &["ADD 1 TO N", "DISPLAY 'COUNTED ' N", "GOBACK."].map(line).concat());
+    let linkp = cics_program("LINKP", "", "", &["CALL 'COUNTED'", "EXEC CICS RETURN END-EXEC."].map(line).concat());
+    let source = format!("{}       END PROGRAM MAINP.\n{counted}       END PROGRAM COUNTED.\n{linkp}       END PROGRAM LINKP.\n", cics_program("MAINP", "", "", &procedure.concat()));
+    let (out, ending) = run_cics(&source, task("TR22"), None, unit::Clock::System);
+    assert!(ending.is_ok(), "{ending:?}");
+    let mut programs = syntax::parse_all_with(&source, &syntax::copy::Libraries::default()).unwrap();
+    let compiled = compile(programs.remove(0), &[]).unwrap();
+    let (mut kept, mut sink, mut errors) = (None, Vec::new(), Vec::new());
+    let library = unit::Library { programs, ..Default::default() };
+    let (ran, _) = execute_task(&compiled, library, files::Dds::new(&[], false).unwrap(), task("TR22"), unit::Clock::System, None, &mut sink, &mut errors, None, &mut kept);
+    assert!(ran.is_ok(), "{ran:?}");
+    (out, kept.unwrap().mem.len())
+}
+
+#[test]
+fn a_program_first_loaded_in_a_links_run_unit_is_released_when_it_ends() {
+    let link = "EXEC CICS LINK PROGRAM('LINKP') END-EXEC";
+    let (_, none) = released_task(&[]);
+    let (out, once) = released_task(&[link]);
+    assert_eq!(out, "COUNTED 1\n");
+    assert!(once < none + 1_000, "{once} bytes after a LINK, {none} with none");
+    assert_eq!(released_task(&[link, link, link]).1, once);
+    let (out, called) = released_task(&[link, link, "CALL 'COUNTED'", link, "CALL 'COUNTED'"]);
+    assert_eq!(out, "COUNTED 1\nCOUNTED 1\nCOUNTED 1\nCOUNTED 1\nCOUNTED 2\n");
+    assert!((once + 10_001..once + 10_100).contains(&called), "{called} bytes after a CALL at the first level, {once} without");
+}
+
 #[test]
 fn xctl_in_a_called_program_replaces_the_program_running_its_level() {
     assert_eq!(level_task(&["CALL 'XCTP'", "DISPLAY 'BACK IN MAIN'"]), ("LAST XC 0002\n".into(), Ok((None, None))));

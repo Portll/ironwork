@@ -291,6 +291,7 @@ pub const CICS_TRANSFER_TO_A_RUNNING_PROGRAM: &str = "C148";
 pub const CICS_ENCLAVE_EXTERNALS_AND_HEAP: &str = "C126";
 pub const RECURSIVE_CALL_OF_AN_ACTIVE_PROGRAM: &str = "C127";
 pub const CICS_RETURN_COMMAREA_LENGTH: &str = "C128";
+pub const CICS_RUN_UNIT_STORAGE_RELEASED: &str = "C129";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1862,6 +1863,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: CICS_RETURN_COMMAREA_LENGTH,
         claim: "The valid range for the length of the COMMAREA RETURN passes is 0 through 32763 bytes, and outside it the LENGERR condition occurs, RESP2 11, whose default action terminates the task abnormally (CICS TS 6.x, RETURN, dfhp4_return), with AEIV. The length is LENGTH when it is given, and otherwise the COMMAREA item's, as the translator supplies it. A TRANSID specified below the highest level is cleared when there is an error on COMMAREA on the final RETURN (dfhp4_return); ironwork clears the next TRANSID on that LENGERR whichever program named it, the failing RETURN included, and a RETURN that RESP or a handler goes on from has set neither TRANSID nor COMMAREA. COMMAREA below the highest level raises INVREQ with RESP2 2 whatever its length (C143); the manual does not order the two conditions, and ironwork tests the level first, so LENGERR comes only from the RETURN to CICS. A LENGTH greater than the COMMAREA item, which the manual says gives unpredictable results and may give LENGERR, passes the item's bytes. RESP2 26, a COMMAREA address of zero with a length that is not, is not raised: RETURN locating a LINKAGE item with no address abends ASRA",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CICS_RUN_UNIT_STORAGE_RELEASED,
+        claim: "Running in CICS, a reentrant COBOL program's WORKING-STORAGE is allocated from heap storage (Programming Guide SC27-8714-03, p. 40) and persists until the end of the run unit or until the program is cancelled (p. 479); each enclave has its own heap (z/OS 3.1 Language Environment Programming Guide, 'CICS run unit', ceea200254; C126), freed when the program at the CICS link level terminates (CICS TS 6.x, 'Language Environment storage', dfhp3_langenv_storage). When the run unit a LINK, an XCTL or a HANDLE ABEND PROGRAM exit started ends (C145), ironwork therefore releases the storage of every program activated in it with the rest of the memory the run unit took. A program first loaded there stays loaded, as CICS keeps a program in main storage once loaded (XCTL, dfhp4_xctl), with no storage of its own: its next activation, in a later LINK's run unit or by a CALL at a higher level, gets new storage in its initial state. A pointer the level above kept to the released storage no longer reaches the program's, which on z/OS has been freed. The program a LINK or XCTL names is loaded before its run unit starts, in the run unit that issued the command, and keeps the storage loading gave it there",
         basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
