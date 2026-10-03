@@ -310,7 +310,8 @@ The subset the interpreter runs today:
 - **Procedure:** sections and paragraphs; MOVE (with editing and de-editing), COMPUTE, ADD,
   SUBTRACT, MULTIPLY, DIVIDE (GIVING, REMAINDER, ROUNDED, ON SIZE ERROR), IF, EVALUATE (ALSO,
   THRU, ANY, TRUE/FALSE, OTHER), PERFORM (procedures, sections, THRU, TIMES, UNTIL, VARYING with
-  up to six AFTER phrases on a performed procedure, inline), EXIT PARAGRAPH/SECTION/PERFORM
+  up to six AFTER phrases on a performed procedure, inline; a COMP-1 or COMP-2 variable steps in
+  floating point), EXIT PARAGRAPH/SECTION/PERFORM
   [CYCLE], NEXT SENTENCE, STRING, UNSTRING, INSPECT (TALLYING, also of a function's value: C190;
 
   REPLACING, CONVERTING, BEFORE/AFTER INITIAL; a national item in national characters: C230), SEARCH and SEARCH ALL (a binary search on the table's keys, as IBM's is, so an unsorted
@@ -333,7 +334,15 @@ The subset the interpreter runs today:
   XML-DECLARATION, ATTRIBUTES, NAMESPACE and its prefix, NAME, TYPE, SUPPRESS and ON EXCEPTION, sets
   XML-CODE (C119). JSON PARSE, with NAME and OMITTED, SUPPRESS, CONVERTING, INDICATING, IGNORING and
   ENCODING, moves each matched value by MOVE's rules and sets JSON-CODE and JSON-STATUS (C200). What is not Enterprise COBOL is refused as such:
-  `<>`, literals joined with `&`, SET ENVIRONMENT and ACCEPT ... FROM ENVIRONMENT.
+  `<>`, literals joined with `&`, SET ENVIRONMENT and ACCEPT ... FROM ENVIRONMENT. As Enterprise
+  COBOL does, the compile refuses ALL with a numeric literal, a condition-name used as data, an
+  arithmetic expression or numeric function compared with an operand that is not numeric, a
+  figurative constant as a function argument outside an expression, ALL subscripts where the
+  function takes a fixed number of arguments, MAX, MIN, ORD-MAX and ORD-MIN arguments of different
+  classes, PERFORM VARYING of an item that is not numeric or FROM or BY an arithmetic expression,
+  SEARCH VARYING an item that is neither an index nor an integer, PROCEDURE DIVISION RETURNING an
+  item outside the LINKAGE SECTION, and an EXEC CICS HANDLE label that names no paragraph or
+  section.
 - **Subprograms:** several and nested programs per source; CALL (static and dynamic) USING BY
   REFERENCE, BY CONTENT, BY VALUE and OMITTED, RETURNING, ON EXCEPTION; PROCEDURE DIVISION USING
   and RETURNING; ENTRY [USING], whose name a CALL begins at and whose USING list alone gives LINKAGE

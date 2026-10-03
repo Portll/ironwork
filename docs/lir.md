@@ -59,8 +59,8 @@ is what `Machine::locate` returns today (machine.rs:69-75). An executor evaluate
    `Figurative`, `RelOp`, `BinOp`, `OpenMode` and `InspectMode` live in `rt`
    (semantics-library.md §4.3).
 2. **A run-time failure stays a run-time failure.** Where the walker abends only on reaching a
-   construct (a condition-name used as data, a national value moved to a numeric item, FUNCTION
-   CHAR with two arguments, a host variable with no SQL type), lowering keeps its code and message
+   construct (a national value moved to a numeric item, FUNCTION CHAR with two arguments, a host
+   variable with no SQL type), lowering keeps its code and message
    as an `Abend` op or plan entry, so every program the walker runs lowers.
 3. **Plans are shared, not copied.** Lowering builds each plan once; the VM and, from step 2, the
    walker execute it.
@@ -297,7 +297,7 @@ pub struct PlaceNumcheck { pub lax: Option<rt::store::LaxRedefinition>, pub remo
 | Undeclared RETURN-CODE | `Base::ReturnCode`, offset 0, length 2, BINARY S9(4) | 539-541 |
 | SELF, JNIENVPTR | `Base::SelfRef`, `Base::JniEnv` | 553-555 (int), calling oo.rs:71-81 (int) |
 | XML-TEXT, XML-NTEXT and the namespace registers, undeclared | `Base::Xml(register)` | `xml_register` (machine/xml.rs) |
-| Name lookup and its memo | Resolved at lowering; a condition-name used as data becomes an `Abend` op | 528-536, 542-544 |
+| Name lookup and its memo | Resolved at lowering; the compiler refuses a condition-name used as data | 528-536, 542-544 |
 | Subscript count | Check refuses a wrong count (lib.rs:565-568); lowering asserts it | 547-549 |
 | WORKING-STORAGE, record areas | `Base::Program` | 557 |
 | LOCAL-STORAGE | `Base::Local` | 556 |
@@ -350,9 +350,11 @@ pub enum Operand {
 }
 
 /// A literal, converted once, where `literal_value` converts it on every use (machine.rs:621-634).
-/// Bytes are alphanumeric in the program's code page, or hexadecimal. `Refused` is an alphanumeric
-/// literal, or ALL one, the code page cannot encode, whose reading abends.
-pub enum Const { Bytes(Vec<u8>), National(Vec<u8>), Number(Fixed), Figurative(Figurative), All(Vec<u8>), Refused(AbendId) }
+/// Bytes are alphanumeric in the program's code page, or hexadecimal. `AllNational` is ALL with a
+/// national literal, its UTF-16 units repeated to the length of what it is moved to or compared
+/// with. `Refused` is an alphanumeric literal, or ALL one, the code page cannot encode, whose
+/// reading abends.
+pub enum Const { Bytes(Vec<u8>), National(Vec<u8>), Number(Fixed), Figurative(Figurative), All(Vec<u8>), Refused(AbendId), AllNational(Vec<u8>) }
 
 /// A subscript, bound, TIMES count or exponent, as `integer()` gives it (machine.rs:613-619).
 /// `Fixed` locates each place of `prepass`, then evaluates `expr` with `dmax` (§7.5).
@@ -580,7 +582,7 @@ rather than before.
 | `IntExpr::Fixed`: a subscript, reference-modification bound, DEPENDING ON object, TIMES count or exponent | `integer`: the dmax pass, then `eval_fixed` (machine.rs:613-619) | The dmax pass's places | `dmax`; always fixed |
 | `Comparand::Expr`: an expression compared | `expr_value`: the float test, then for a fixed-point expression the dmax pass (machine.rs:1382-1391, 1400-1417) | The float test's places, then in `Mode::Fixed` the dmax pass's, so a place both reach is listed twice | `dmax`, 0 in `Mode::Float`; `mode` as `ArithStep.mode` |
 | `Cond::Sign` of an expression | `class`, through `expr_value` (machine.rs:1840-1849) | As `Comparand::Expr`, which it holds | As `Comparand::Expr` |
-| `Op::Step`: PERFORM VARYING's increment | Locates the variable, then the dmax pass over variable + BY, then `eval_fixed` (machine.rs:517-521) | The places of that dmax pass, the variable's first, located after the variable | `StepPlan.dmax`; always fixed |
+| `Op::Step`: PERFORM VARYING's increment of a fixed-point variable or index | Locates the variable, then the dmax pass over variable + BY, then `eval_fixed` (machine.rs:517-521) | The places of that dmax pass, the variable's first, located after the variable | `StepPlan.dmax`; always fixed |
 | `Argument::Value(Comparand::Expr)`: a FUNCTION's argument expression | `function_arguments`: in a fixed-point expression the argument's dmax pass, then `eval_fixed`; in a floating-point one `eval_float`; outside any arithmetic expression `expr_value` | The dmax pass's places; none in float; outside, as `Comparand::Expr` | The larger of the holding expression's dmax and the argument's, or the holding expression's `Mode::Float`; outside, as `Comparand::Expr` |
 
 - **The dmax pass** locates every operand of the expression except divisors and exponents, left to
@@ -615,8 +617,10 @@ pub enum Op {
     /// SET TO ENTRY: `entry` read as a program name and its program loaded, then each receiver
     /// given the value naming the entry in the run unit's list (§9.3).
     SetEntry { entry: Operand, targets: Vec<PlaceId> },
-    /// PERFORM VARYING's increment: `var` located, then each place of `prepass` (§7.5), then
-    /// `var + by` computed with `plan.dmax` and stored.
+    /// PERFORM VARYING's increment of a fixed-point variable or index: `var` located, then each
+    /// place of `prepass` (§7.5), then `var + by` computed with `plan.dmax` and stored. A COMP-1 or
+    /// COMP-2 variable's increment is an `Arith`, `var + by` computed in floating point as an ADD
+    /// to it would be (Programming Guide SC27-8714-03, p. 800).
     Step { var: PlaceId, by: ExprId, plan: StepPlan, prepass: Vec<PlaceId> },
     /// SEARCH's index steps, SORT-RETURN.
     SetInt { target: PlaceId, value: IntExpr },
@@ -741,7 +745,8 @@ b3: Unnest(1); Jump next                  b3: Step I by 1; Jump b1
   and for VARYING before the Step (machine.rs:497, 514-521).
 - **VARYING:** FROM is stored with MOVE rules, as `Set` (machine.rs:502-504); each step
   re-evaluates the variable's place, locates the places of BY in `Op::Step.prepass` (§7.5), and
-  stores with `StepPlan`, no ROUNDED and no size error (machine.rs:517-521).
+  stores with `StepPlan`, no ROUNDED and no size error (machine.rs:517-521). A COMP-1 or COMP-2
+  variable steps by an `Arith` with no size-error phrase, in floating point.
 - **VARYING … AFTER** lowers as `vary` runs it (machine.rs:598-636 (f2)), which follows the
   Language Reference's figures (SC27-8713-03, pp. 425-428): one loop per variable, the last
   varying fastest. An inner loop's test coming true augments the variable outside it, then sets
@@ -1075,6 +1080,7 @@ Every category pair, by the value the walker reads from the sender (line numbers
 | SPACE, QUOTE, HIGH-, LOW-VALUE | Filled | Filled, edited | Its unit | Bytes filled | Refused | Refused | Refused |
 | NULL | Filled with X'00' | Filled, edited | U+0000 | Bytes filled | Refused | NULL | Refused |
 | ALL literal | Repeated | Repeated, edited | Refused | Bytes filled cyclically | Refused | Refused | Refused |
+| ALL national literal | Refused | Refused | Units repeated | Refused | Refused | Refused | Refused |
 | Pointer kinds | Refused | Refused | Refused | Refused | Refused | Copied | Refused |
 
 - **Group moves** convert nothing, as `assign` (machine.rs:1953-1970 (7af)) and the Language
@@ -1396,9 +1402,9 @@ HANDLE labels there. SYNCPOINT is a service (cics/services.rs) that settles the 
   none of the HANDLE CONDITION and IGNORE CONDITION entries, pushed or not (`Handlers::xctl`, C146).
   The VM numbers its activations, lends its table and hands it on at XCTL as the walker does. RETURN
   and XCTL return `Step::End`. No new terminator is needed.
-- **A block the walker refuses as it binds it** (a HANDLE label that names no procedure, HANDLE
-  ABEND with two of PROGRAM, LABEL, CANCEL and RESET) lowers to `Cics::Refused` with the walker's
-  message. The walker abends IRONWORK at the block only after the task check and the observer's
+- **A block the walker refuses as it binds it** (HANDLE ABEND with two of PROGRAM, LABEL, CANCEL
+  and RESET) lowers to `Cics::Refused` with the walker's message. A HANDLE label that names no
+  paragraph or section is a compile error (Programming Guide SC27-8714-03, p. 503). The walker abends IRONWORK at the block only after the task check and the observer's
   sinks, and `run` gives the abend before anything else, so the op keeps that order.
 - **HANDLE ABEND** keeps the paragraph its LABEL names, as HANDLE CONDITION does. Its exit is
   taken when an abend reaches a program's activation, in the walker's `run_level` and
@@ -1755,8 +1761,9 @@ COMBINED-DATETIME and CONTENT-OF. Every function the walker runs has a row.
   MEDIAN, MIDRANGE, VARIANCE, STANDARD-DEVIATION), and PRESENT-VALUE's "needs a rate and at least
   one amount". `arity` is None where no count the arguments can give is wrong. Where an OCCURS
   DEPENDING ON count leaves the number to run time, the plan carries the abend and the executor
-  tests it; a message that names the count (a function of fixed arguments past the first
-  twenty-one) is refused.
+  tests it. Check refuses ALL subscripts in a function of a fixed number of arguments (Language
+  Reference SC27-8713-03, p. 501), so lowering's refusal of a message that names such a count is a
+  guard no compiled program reaches.
 - **HEX-OF, BIT-OF and BYTE-LENGTH** (`storage_function`) count their arguments as written before
   evaluating any, "FUNCTION X takes one argument", and read an item's storage rather than its value,
   so invalid data is shown rather than ending the run. A wrong count lowers with no arguments and
@@ -1780,7 +1787,7 @@ COMBINED-DATETIME and CONTENT-OF. Every function the walker runs has a row.
   | Alphanumeric or national as the first argument is | USUBSTR |
   | Alphanumeric bytes | CHAR, TRIM, UPPER-CASE, LOWER-CASE, REVERSE, CURRENT-DATE, WHEN-COMPILED, HEX-OF, BIT-OF, HEX-TO-CHAR, BIT-TO-CHAR, DISPLAY-OF, UUID4 |
   | National | NATIONAL-OF; FORMATTED-CURRENT-DATE, FORMATTED-DATE, FORMATTED-TIME and FORMATTED-DATETIME of a national format, alphanumeric otherwise |
-  | Floating point, long under ARITH(COMPAT) and extended under ARITH(EXTEND) | NUMVAL, NUMVAL-C, COMBINED-DATETIME (long rounded, then lengthened), RANDOM, ACOS, ANNUITY, ASIN, ATAN, COS, E, EXP, EXP10, LOG, LOG10, MEAN, MEDIAN, MIDRANGE, NUMVAL-F, PI, PRESENT-VALUE, SECONDS-FROM-FORMATTED-TIME, SECONDS-PAST-MIDNIGHT, SIN, SQRT, STANDARD-DEVIATION, TAN, VARIANCE; ABS, REM, MIN, MAX and SUM of a floating-point argument; RANGE when neither its greatest nor its least argument is fixed-point |
+  | Floating point, long under ARITH(COMPAT) and extended under ARITH(EXTEND) | NUMVAL, NUMVAL-C, COMBINED-DATETIME (long rounded, then lengthened), RANDOM, ACOS, ANNUITY, ASIN, ATAN, COS, E, EXP, EXP10, LOG, LOG10, MEAN, MEDIAN, MIDRANGE, NUMVAL-F, PI, PRESENT-VALUE, SECONDS-FROM-FORMATTED-TIME, SECONDS-PAST-MIDNIGHT, SIN, SQRT, STANDARD-DEVIATION, TAN, VARIANCE; ABS, REM, MIN, MAX, RANGE and SUM of a floating-point argument (Programming Guide SC27-8714-03, p. 799) |
   | An integer of 1 digit | SIGN, TEST-DATE-YYYYMMDD, TEST-DAY-YYYYDDD |
   | 3 digits | ORD |
   | 4 digits | YEAR-TO-YYYY |
@@ -1797,10 +1804,13 @@ COMBINED-DATETIME and CONTENT-OF. Every function the walker runs has a row.
   (MIN, MAX and RANGE of arguments of different sizes), on an argument that is an expression or an
   item with PICTURE scaling positions, or on how many elements an OCCURS DEPENDING ON table gives
   (SUM), the result is a number of unknown scale, and moving or comparing it as alphanumeric is
-  refused, since the walker decides that by the value. MIN or MAX of arguments of different
-  categories, RANGE of fixed-point arguments with floating-point or ZERO ones, and an OCCURS
+  refused, since the walker decides that by the value. Check refuses MIN and MAX of arguments of
+  different classes or of a pointer, and a figurative constant as an argument (Language Reference
+  SC27-8713-03, pp. 16, 591, 599), so lowering's refusal of MIN or MAX of arguments of different
+  categories is a guard. RANGE of fixed-point arguments with nonnumeric ones, and an OCCURS
   DEPENDING ON table among arguments of another category, whose count would decide the result's
-  category, are refused.
+  category, are refused, but not where a floating-point argument given once makes ABS, MAX, MIN,
+  RANGE, REM or SUM floating point whatever the count.
 - **The float test** (`uses_float`, `is_floating_point`) counts the functions of
   `rt::intrinsic::FLOATING_POINT` as floating-point without locating anything, and those of
   `rt::intrinsic::MIXED` (ABS, MAX, MIN, RANGE, REM, SUM) as floating-point when an argument is,
@@ -1942,8 +1952,10 @@ run-time data, read where the walker reads them.
 pub enum Markup { JsonGenerate(JsonGenerate), XmlGenerate(XmlGenerate), XmlParse(XmlParse), JsonParse(JsonParse) }
 /// None written, the program's CODEPAGE (ENCODING FROM CODEPAGE), or an operand.
 pub enum Ccsid { Unnamed, CodePage, Operand(Operand) }
-/// How GENERATE writes an elementary value (`converted`, machine/json.rs).
-pub enum Convert { Chars { justified: bool }, National, Float(Precision), Fixed { integers: u32 }, Refused(AbendId) }
+/// How GENERATE writes an elementary value (`converted`, machine/json.rs). `Scaled` is `Fixed` for
+/// an item whose PICTURE has `scaling` positions P right of its digits: a node's `Loc` names no
+/// place, so the value is read with them given.
+pub enum Convert { Chars { justified: bool }, National, Float(Precision), Fixed { integers: u32 }, Refused(AbendId), Scaled { integers: u32, scaling: u32 } }
 /// A USING value of JSON GENERATE: a literal's first byte, a condition-name, or the walker's abend.
 pub enum Marker { Byte(Option<u8>), Condition(CondId), Refused(AbendId) }
 
@@ -1987,7 +1999,12 @@ pub struct ParseNode {
 pub enum Named { Exactly(SymId), Folded(SymId), Omitted }
 pub enum ParseValue { Object { members: Vec<u32> }, Leaf(ParseLeaf), Suppressed }
 pub struct ParseLeaf { pub boolean: Option<Flag>, pub text: Option<MovePlan>, pub number: NumberInto }
-pub enum NumberInto { Float(MovePlan), Store(StorePlan), Edited(MovePlan), Digits, Incompatible }
+/// `StoreScaled` and `EditedScaled` are `Store` and `Edited` into an item whose PICTURE has
+/// `scaling` positions P.
+pub enum NumberInto {
+    Float(MovePlan), Store(StorePlan), Edited(MovePlan), Digits, Incompatible,
+    StoreScaled { store: StorePlan, scaling: u32 }, EditedScaled { plan: MovePlan, scaling: u32 },
+}
 pub struct Indicator { pub place: Option<Result<PlaceId, AbendId>>, pub flag: Flag }
 pub enum Flag { Set { on: SetTo, off: SetTo }, Literals { on: (ConstId, MovePlan), off: (ConstId, MovePlan) } }
 pub enum SetTo { Nothing, Move { place: PlaceId, value: ConstId, plan: MovePlan }, Refused(AbendId) }
