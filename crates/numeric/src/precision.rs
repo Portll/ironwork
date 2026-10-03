@@ -13,19 +13,23 @@ pub struct Places {
 }
 
 impl Places {
+    #[inline]
     pub const fn new(int: u32, dec: u32) -> Self {
         Self { int, dec }
     }
 
+    #[inline]
     pub const fn total(self) -> u32 {
         self.int + self.dec
     }
 }
 
+#[inline]
 pub fn sum_places(a: Places, b: Places) -> Places {
     Places::new(a.int.max(b.int) + 1, a.dec.max(b.dec))
 }
 
+#[inline]
 pub fn product_places(a: Places, b: Places) -> Places {
     Places::new(a.int + b.int, a.dec + b.dec)
 }
@@ -104,15 +108,18 @@ pub struct Fixed {
     pub places: Places,
 }
 
+#[inline]
 fn pow10(n: u32) -> U256 {
     U256::pow10(n)
 }
 
 impl Fixed {
+    #[inline]
     pub fn new(value: i128, places: Places) -> Self {
         Self::signed(value < 0, U256::from_u128(value.unsigned_abs()), places)
     }
 
+    #[inline]
     fn signed(negative: bool, magnitude: U256, places: Places) -> Self {
         Self { negative: negative && !magnitude.is_zero(), magnitude, places }
     }

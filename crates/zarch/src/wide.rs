@@ -10,9 +10,27 @@ pub struct U256 {
 
 const LOW64: u128 = u64::MAX as u128;
 
+const fn times_ten(x: U256) -> U256 {
+    let low = (x.lo & LOW64) * 10;
+    let high = (x.lo >> 64) * 10 + (low >> 64);
+    U256 { hi: x.hi * 10 + (high >> 64), lo: (low & LOW64) | ((high & LOW64) << 64) }
+}
+
+/// 10^0 to 10^77, the powers of ten below 2^256.
+const POW10: [U256; 78] = {
+    let mut table = [U256::from_u128(1); 78];
+    let mut n = 1;
+    while n < table.len() {
+        table[n] = times_ten(table[n - 1]);
+        n += 1;
+    }
+    table
+};
+
 impl U256 {
     pub const ZERO: Self = Self { hi: 0, lo: 0 };
 
+    #[inline]
     pub const fn from_u128(lo: u128) -> Self {
         Self { hi: 0, lo }
     }
@@ -24,7 +42,15 @@ impl U256 {
         Self { hi: p11 + (p01 >> 64) + (p10 >> 64) + (mid >> 64), lo: (p00 & LOW64) | ((mid & LOW64) << 64) }
     }
 
+    #[inline]
     pub fn checked_mul(self, other: Self) -> Option<Self> {
+        if (self.hi | other.hi | (self.lo >> 64) | (other.lo >> 64)) == 0 {
+            return Some(Self::from_u128(self.lo * other.lo));
+        }
+        self.checked_mul_wide(other)
+    }
+
+    fn checked_mul_wide(self, other: Self) -> Option<Self> {
         if self.hi != 0 && other.hi != 0 {
             return None;
         }
@@ -33,15 +59,18 @@ impl U256 {
         Some(Self { hi: low.hi.checked_add(cross)?, lo: low.lo })
     }
 
+    #[inline]
     pub fn checked_add(self, other: Self) -> Option<Self> {
         let (lo, carry) = self.lo.overflowing_add(other.lo);
         Some(Self { hi: self.hi.checked_add(other.hi)?.checked_add(carry as u128)?, lo })
     }
 
+    #[inline]
     pub fn to_u128(self) -> Option<u128> {
         (self.hi == 0).then_some(self.lo)
     }
 
+    #[inline]
     pub fn is_zero(self) -> bool {
         self == Self::ZERO
     }
@@ -50,14 +79,30 @@ impl U256 {
         if self.hi != 0 { 256 - self.hi.leading_zeros() } else { 128 - self.lo.leading_zeros() }
     }
 
+    #[inline]
     pub fn pow10(n: u32) -> Self {
-        (0..n).fold(Self::from_u128(1), |acc, _| acc.checked_mul(Self::from_u128(10)).expect("10^n beyond 256 bits"))
+        *POW10.get(n as usize).expect("10^n beyond 256 bits")
     }
 
+    #[inline]
     pub fn div_rem(self, divisor: Self) -> (Self, Self) {
+        if (self.hi | divisor.hi) == 0 && (self.lo | divisor.lo) <= LOW64 && divisor.lo != 0 {
+            let (a, d) = (self.lo as u64, divisor.lo as u64);
+            return (Self::from_u128(u128::from(a / d)), Self::from_u128(u128::from(a % d)));
+        }
+        self.div_rem_wide(divisor)
+    }
+
+    fn div_rem_wide(self, divisor: Self) -> (Self, Self) {
         assert!(!divisor.is_zero(), "division by zero");
         if self < divisor {
             return (Self::ZERO, self);
+        }
+        if self.hi == 0 {
+            return (Self::from_u128(self.lo / divisor.lo), Self::from_u128(self.lo % divisor.lo));
+        }
+        if divisor.hi == 0 && divisor.lo <= LOW64 {
+            return self.div_rem_short(divisor.lo);
         }
         let mut quotient = Self::ZERO;
         let mut rem = Self::ZERO;
@@ -72,10 +117,23 @@ impl U256 {
         }
         (quotient, rem)
     }
+
+    /// Schoolbook division by a divisor below 2^64, a 64-bit limb at a time, most significant first.
+    fn div_rem_short(self, divisor: u128) -> (Self, Self) {
+        let mut rem = 0u128;
+        let mut limbs = [self.hi >> 64, self.hi & LOW64, self.lo >> 64, self.lo & LOW64];
+        for limb in &mut limbs {
+            let current = (rem << 64) | *limb;
+            *limb = current / divisor;
+            rem = current % divisor;
+        }
+        (Self { hi: (limbs[0] << 64) | limbs[1], lo: (limbs[2] << 64) | limbs[3] }, Self::from_u128(rem))
+    }
 }
 
 impl Add for U256 {
     type Output = Self;
+    #[inline]
     fn add(self, other: Self) -> Self {
         self.checked_add(other).expect("U256 overflow")
     }
@@ -83,6 +141,7 @@ impl Add for U256 {
 
 impl Sub for U256 {
     type Output = Self;
+    #[inline]
     fn sub(self, other: Self) -> Self {
         let (lo, borrow) = self.lo.overflowing_sub(other.lo);
         Self { hi: self.hi - other.hi - borrow as u128, lo }
@@ -136,6 +195,77 @@ mod tests {
         let (q, r) = a.div_rem(d);
         assert!(r < d);
         assert_eq!(q.checked_mul(d).unwrap() + r, a);
+    }
+
+    fn bitwise_div_rem(a: U256, d: U256) -> (U256, U256) {
+        let (mut quotient, mut rem) = (U256::ZERO, U256::ZERO);
+        for bit in (0..a.bits()).rev() {
+            rem = rem << 1;
+            rem.lo |= (a >> bit).lo & 1;
+            quotient = quotient << 1;
+            if rem >= d {
+                rem = rem - d;
+                quotient.lo |= 1;
+            }
+        }
+        (quotient, rem)
+    }
+
+    fn widening_checked_mul(a: U256, b: U256) -> Option<U256> {
+        if a.hi != 0 && b.hi != 0 {
+            return None;
+        }
+        let low = U256::widening_mul(a.lo, b.lo);
+        let cross = a.hi.checked_mul(b.lo)?.checked_add(b.hi.checked_mul(a.lo)?)?;
+        Some(U256 { hi: low.hi.checked_add(cross)?, lo: low.lo })
+    }
+
+    /// Values of every width, from xorshift64*, each kept to a random number of low bits.
+    fn samples(count: usize) -> Vec<U256> {
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move || {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            u128::from(state.wrapping_mul(0x2545_F491_4F6C_DD1D))
+        };
+        (0..count)
+            .map(|_| {
+                let full = U256 { hi: next() << 64 | next(), lo: next() << 64 | next() };
+                let bits = (next() % 257) as u32;
+                if bits == 0 { U256::ZERO } else { (full << (256 - bits)) >> (256 - bits) }
+            })
+            .chain((0..78).map(U256::pow10))
+            .chain([U256::from_u128(u128::MAX), U256 { hi: 1, lo: 0 }, U256 { hi: u128::MAX, lo: u128::MAX }, U256::from_u128(LOW64), U256::from_u128(LOW64 + 1)])
+            .collect()
+    }
+
+    #[test]
+    fn pow10_is_ten_multiplied_n_times() {
+        let mut p = U256::from_u128(1);
+        for n in 0..78 {
+            assert_eq!(U256::pow10(n), p, "10^{n}");
+            p = widening_checked_mul(p, U256::from_u128(10)).unwrap_or(U256::ZERO);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "10^n beyond 256 bits")]
+    fn pow10_refuses_78() {
+        U256::pow10(78);
+    }
+
+    #[test]
+    fn div_rem_and_checked_mul_agree_with_the_bitwise_forms() {
+        let values = samples(600);
+        for &a in &values {
+            for &d in values.iter().step_by(7) {
+                if !d.is_zero() {
+                    assert_eq!(a.div_rem(d), bitwise_div_rem(a, d), "{a:?} / {d:?}");
+                }
+                assert_eq!(a.checked_mul(d), widening_checked_mul(a, d), "{a:?} * {d:?}");
+            }
+        }
     }
 
     #[test]

@@ -62,13 +62,56 @@ pub fn scaled_down(f: Fixed, k: u32) -> Fixed {
 
 pub fn zoned_digits(magnitude: u128, digits: usize, sign_zone: u8) -> Vec<u8> {
     let mut out = vec![0xF0u8; digits];
+    zoned_digits_into(&mut out, magnitude, sign_zone);
+    out
+}
+
+/// `zoned_digits` written over `out`, as many digits as it has.
+pub fn zoned_digits_into(out: &mut [u8], magnitude: u128, sign_zone: u8) {
     let mut m = magnitude;
-    for b in out.iter_mut().rev() {
+    let mut digits = out.iter_mut().rev();
+    while m > u128::from(u64::MAX) {
+        let Some(b) = digits.next() else { break };
+        *b = 0xF0 | (m % 10) as u8;
+        m /= 10;
+    }
+    let mut m = m as u64;
+    for b in digits {
         *b = 0xF0 | (m % 10) as u8;
         m /= 10;
     }
     if let Some(last) = out.last_mut() {
         *last = (sign_zone << 4) | (*last & 0x0F);
     }
-    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zoned_digits_keep_the_low_order_digits_of_any_magnitude() {
+        let mut m = 1u128;
+        let mut magnitudes = vec![0, u128::from(u64::MAX), u128::from(u64::MAX) + 1, u128::MAX];
+        while let Some(next) = m.checked_mul(7) {
+            magnitudes.extend([next, next - 1, next + 1]);
+            m = next;
+        }
+        for &magnitude in &magnitudes {
+            for digits in 0..42 {
+                for zone in [0xC, 0xD, 0xF] {
+                    let mut expected = vec![0xF0u8; digits];
+                    let mut rest = magnitude;
+                    for b in expected.iter_mut().rev() {
+                        *b = 0xF0 | (rest % 10) as u8;
+                        rest /= 10;
+                    }
+                    if let Some(last) = expected.last_mut() {
+                        *last = (zone << 4) | (*last & 0x0F);
+                    }
+                    assert_eq!(zoned_digits(magnitude, digits, zone), expected, "{magnitude} in {digits} digits");
+                }
+            }
+        }
+    }
 }

@@ -4,7 +4,7 @@
 use crate::abend::{Abend, AbendCode};
 use crate::codec;
 use crate::edit;
-use crate::fixed::{MAX_DIGITS, align, compare_fixed, fixed, places_of, pow10, scaled_down, scaled_up, zoned_digits};
+use crate::fixed::{MAX_DIGITS, align, compare_fixed, fixed, places_of, pow10, scaled_down, scaled_up, zoned_digits, zoned_digits_into};
 use crate::lir::{ByteClass, SenderCheck, SignTest};
 use crate::picture::Sym;
 use crate::storage::{Kind, Loc, Val};
@@ -98,9 +98,26 @@ pub fn read(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<Val> 
     })
 }
 
+/// The value `read` gives an integer item, an index or an unscaled binary, packed or zoned item,
+/// when it reads without an abend and fits an `i64`; None where it must be read as `read` reads it.
+pub fn read_integer(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc) -> Option<i64> {
+    let bytes = bytes(mem, loc);
+    let decimal = |d: Decimal| i64::try_from(d.magnitude).ok().map(|m| if d.negative { -m } else { m });
+    match loc.kind {
+        Kind::Index => Some(i64::from(i32::from_be_bytes(bytes.try_into().ok()?))),
+        _ if facts.scaling(loc.item) != 0 => None,
+        Kind::Binary { digits, scale: 0, signed, native } => i64::try_from(Binary { digits: digits as u8, signed, native }.load(bytes)).ok(),
+        Kind::Packed { scale: 0, .. } | Kind::Zoned { scale: 0, .. } if facts.options().invdata.is_some_and(|i| i.cleansign) => None,
+        Kind::Packed { scale: 0, signed, .. } => codec::packed(bytes, signed, facts.options().numproc).ok().and_then(decimal),
+        Kind::Zoned { scale: 0, signed, sign, .. } => codec::zoned(bytes, signed, sign, facts.options().numproc).ok().and_then(decimal),
+        _ => None,
+    }
+}
+
 /// An item's value as its digits hold it, before any scaling positions to their right.
 pub fn read_stored(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<Val> {
-    let cleaned = facts.options().invdata.is_some_and(|i| i.cleansign).then(|| sign_cleaned(bytes(mem, loc), loc.kind)).flatten();
+    let options = facts.options();
+    let cleaned = options.invdata.is_some_and(|i| i.cleansign).then(|| sign_cleaned(bytes(mem, loc), loc.kind)).flatten();
     let bytes = cleaned.as_deref().unwrap_or(bytes(mem, loc));
     let places = places_of(loc.kind);
     Ok(match loc.kind {
@@ -112,10 +129,10 @@ pub fn read_stored(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> 
         Kind::Float(p) => Val::Float(Hfp::from_bytes(p, bytes)),
         Kind::Binary { digits, signed, native, .. } => Val::Num(Fixed::new(Binary { digits: digits as u8, signed, native }.load(bytes), places)),
         Kind::Packed { signed, .. } => {
-            let d = codec::packed(bytes, signed, facts.options().numproc).map_err(|c| Abend::check(c, pos))?;
+            let d = codec::packed(bytes, signed, options.numproc).map_err(|c| Abend::check(c, pos))?;
             Val::Num(fixed(d.negative, U256::from_u128(d.magnitude), places))
         }
-        Kind::Zoned { signed, sign, .. } => Val::Num(zoned_value(facts.options().numproc, bytes, signed, sign, places, pos)?),
+        Kind::Zoned { signed, sign, .. } => Val::Num(zoned_value(options.numproc, bytes, signed, sign, places, pos)?),
     })
 }
 
@@ -157,6 +174,12 @@ pub fn natural_bytes(facts: &dyn ProgramFacts, val: Val, pos: Pos) -> R<Vec<u8>>
 }
 
 pub fn set_integer<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, dest: Loc, value: i64, pos: Pos) -> R<()> {
+    if dest.kind == Kind::Index
+        && let Ok(magnitude) = i32::try_from(value.unsigned_abs())
+    {
+        unit.write(dest.offset, &(if value < 0 { -magnitude } else { magnitude }).to_be_bytes());
+        return Ok(());
+    }
     store_fixed(facts, unit, dest, &Fixed::new(value as i128, Places::new(19, 0)), false, pos)
 }
 
@@ -195,22 +218,24 @@ pub fn store_fixed_checked<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut
     let beyond = || Abend::ironwork("a value wider than 256 bits", pos);
     let value = &scaled_down(*value, scaling(facts, loc));
     let options = facts.options();
-    let (bytes, size_error) = match loc.kind {
+    let (image, size_error) = match loc.kind {
         Kind::Zoned { digits, scale, signed, sign } => {
             let m = align(value, scale, rounded).ok_or_else(beyond)?;
             let cap = pow10(digits);
             let kept = m.div_rem(cap).1.to_u128().unwrap();
             let negative = signed && value.negative && kept != 0;
-            (zoned_image(kept, digits, signed, negative, sign), m >= cap)
+            let mut out = Image::zeroed(digits as usize + usize::from(sign.is_some_and(|s| s.separate)));
+            zoned_image_into(out.bytes_mut(), kept, signed, negative, sign);
+            (out, m >= cap)
         }
         Kind::Packed { digits, scale, signed } => {
             let m = align(value, scale, rounded).ok_or_else(beyond)?;
             let cap = pow10(digits);
             let kept = m.div_rem(cap).1.to_u128().unwrap();
-            let mut out = vec![0u8; loc.len];
-            decimal::encode(&mut out, Decimal { negative: signed && value.negative && kept != 0, magnitude: kept }).map_err(|c| Abend::check(c, pos))?;
+            let mut out = Image::zeroed(loc.len);
+            decimal::encode(out.bytes_mut(), Decimal { negative: signed && value.negative && kept != 0, magnitude: kept }).map_err(|c| Abend::check(c, pos))?;
             if !signed {
-                *out.last_mut().unwrap() |= 0x0F;
+                *out.bytes_mut().last_mut().unwrap() |= 0x0F;
             }
             (out, m >= cap)
         }
@@ -219,8 +244,8 @@ pub fn store_fixed_checked<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut
             let magnitude = m.to_u128().and_then(|m| i128::try_from(m).ok()).ok_or_else(beyond)?;
             let v = if value.negative { -magnitude } else { magnitude };
             let item = Binary { digits: digits as u8, signed, native };
-            let stored = binary::store(item, v, &options);
-            if let Some(d) = stored.divergence {
+            let (kept, divergence) = binary::kept(item, v, &options);
+            if let Some(d) = divergence {
                 let name = facts.item_name(loc.item);
                 let _ = writeln!(
                     unit.err,
@@ -235,12 +260,12 @@ pub fn store_fixed_checked<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut
             let bits = 8 * item.bytes() as u32;
             let binary_range = if signed { v >= -(1i128 << (bits - 1)) && v < (1i128 << (bits - 1)) } else { (0..(1i128 << bits)).contains(&v.abs()) };
             let exceeds = if native || options.trunc == Trunc::Bin { !binary_range } else { v.unsigned_abs() >= 10u128.pow(digits) };
-            (stored.bytes, exceeds)
+            (Image::of(&kept.to_be_bytes()[16 - item.bytes()..]), exceeds)
         }
-        Kind::Float(p) => (float::from_fixed(*value, p, ProgramMask::default()).map_err(|c| Abend::check(c, pos))?.to_bytes(), false),
+        Kind::Float(p) => (Image::Grown(float::from_fixed(*value, p, ProgramMask::default()).map_err(|c| Abend::check(c, pos))?.to_bytes()), false),
         Kind::Index => {
             let whole = align(value, 0, false).and_then(|m| m.to_u128()).and_then(|m| i32::try_from(m).ok()).ok_or_else(beyond)?;
-            ((if value.negative { -whole } else { whole }).to_be_bytes().to_vec(), false)
+            (Image::of(&(if value.negative { -whole } else { whole }).to_be_bytes()), false)
         }
         Kind::NumericEdited { edit, digits, scale, blank_when_zero } => {
             let m = align(value, scale, rounded).ok_or_else(beyond)?;
@@ -248,19 +273,58 @@ pub fn store_fixed_checked<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut
             let kept = m.div_rem(cap).1.to_u128().unwrap();
             let (syms, currency) = facts.edit(edit);
             let text = edit::numeric(syms, digits, value.negative && kept != 0, kept, blank_when_zero, facts.decimal_point(), currency);
-            (facts.page().encode(&text).map_err(|e| Abend::ironwork(e.to_string(), pos))?, m >= cap)
+            (Image::Grown(facts.page().encode(&text).map_err(|e| Abend::ironwork(e.to_string(), pos))?), m >= cap)
         }
         _ => return Err(Abend::ironwork("a numeric value stored into a non-numeric item", pos)),
     };
     if size_error && keep_on_size_error {
         return Ok(true);
     }
-    unit.write(loc.offset, &bytes);
+    unit.write(loc.offset, image.bytes());
     Ok(size_error)
+}
+
+/// The bytes a numeric store writes, held without an allocation when they fit.
+enum Image {
+    Held([u8; MAX_DIGITS + 1], usize),
+    Grown(Vec<u8>),
+}
+
+impl Image {
+    fn zeroed(len: usize) -> Self {
+        if len <= MAX_DIGITS + 1 { Self::Held([0; MAX_DIGITS + 1], len) } else { Self::Grown(vec![0; len]) }
+    }
+
+    fn of(bytes: &[u8]) -> Self {
+        let mut image = Self::zeroed(bytes.len());
+        image.bytes_mut().copy_from_slice(bytes);
+        image
+    }
+
+    fn bytes(&self) -> &[u8] {
+        match self {
+            Self::Held(held, len) => &held[..*len],
+            Self::Grown(grown) => grown,
+        }
+    }
+
+    fn bytes_mut(&mut self) -> &mut [u8] {
+        match self {
+            Self::Held(held, len) => &mut held[..*len],
+            Self::Grown(grown) => grown,
+        }
+    }
 }
 
 /// A zoned item's bytes for a magnitude, with its sign as the SIGN clause places it.
 pub fn zoned_image(magnitude: u128, digits: u32, signed: bool, negative: bool, sign: Option<SignClause>) -> Vec<u8> {
+    let mut out = vec![0; digits as usize + usize::from(sign.is_some_and(|s| s.separate))];
+    zoned_image_into(&mut out, magnitude, signed, negative, sign);
+    out
+}
+
+/// `zoned_image` written over `out`, which has as many bytes.
+fn zoned_image_into(out: &mut [u8], magnitude: u128, signed: bool, negative: bool, sign: Option<SignClause>) {
     let zone = match (signed, negative) {
         (false, _) => decimal::UNSIGNED,
         (true, true) => decimal::MINUS,
@@ -268,16 +332,16 @@ pub fn zoned_image(magnitude: u128, digits: u32, signed: bool, negative: bool, s
     };
     match sign {
         Some(SignClause { separate: true, position }) => {
-            let body = zoned_digits(magnitude, digits as usize, decimal::UNSIGNED);
             let s = if negative { 0x60 } else { 0x4E };
-            if position == SignPosition::Leading { [&[s][..], &body].concat() } else { [&body[..], &[s]].concat() }
+            let (sign_byte, body) = if position == SignPosition::Leading { out.split_first_mut().unwrap() } else { out.split_last_mut().unwrap() };
+            *sign_byte = s;
+            zoned_digits_into(body, magnitude, decimal::UNSIGNED);
         }
         Some(SignClause { separate: false, position: SignPosition::Leading }) => {
-            let mut body = zoned_digits(magnitude, digits as usize, decimal::UNSIGNED);
-            body[0] = (zone << 4) | (body[0] & 0x0F);
-            body
+            zoned_digits_into(out, magnitude, decimal::UNSIGNED);
+            out[0] = (zone << 4) | (out[0] & 0x0F);
         }
-        _ => zoned_digits(magnitude, digits as usize, zone),
+        _ => zoned_digits_into(out, magnitude, zone),
     }
 }
 
@@ -929,4 +993,117 @@ pub fn compare_national(a: &[u8], b: &[u8]) -> Ordering {
     let unit = |s: &[u8], i: usize| if i + 1 < s.len() { u16::from_be_bytes([s[i], s[i + 1]]) } else { 0x0020 };
     let len = a.len().max(b.len());
     (0..len).step_by(2).map(|i| unit(a, i).cmp(&unit(b, i))).find(|o| o.is_ne()).unwrap_or(Ordering::Equal)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use numeric::options::Invdata;
+
+    struct Facts {
+        options: Options,
+        scaling: u32,
+        collation: Collation,
+    }
+
+    impl ProgramFacts for Facts {
+        fn options(&self) -> Options {
+            self.options
+        }
+        fn page(&self) -> &'static CodePage {
+            self.options.code_page()
+        }
+        fn figurative(&self, _: Figurative) -> u8 {
+            0
+        }
+        fn collation(&self) -> &Collation {
+            &self.collation
+        }
+        fn ordinal(&self, byte: u8) -> u16 {
+            u16::from(byte) + 1
+        }
+        fn character(&self, _: i64) -> Option<u8> {
+            None
+        }
+        fn characters(&self) -> usize {
+            256
+        }
+        fn decimal_point(&self) -> char {
+            '.'
+        }
+        fn edit(&self, _: u32) -> (&[Sym], &str) {
+            (&[], "")
+        }
+        fn scaling(&self, _: usize) -> u32 {
+            self.scaling
+        }
+        fn item_name(&self, _: usize) -> String {
+            String::new()
+        }
+    }
+
+    /// Every numeric kind with an integer or scaled PICTURE, and the bytes each takes.
+    fn kinds() -> Vec<(Kind, usize)> {
+        let mut kinds = vec![(Kind::Index, 4)];
+        for signed in [false, true] {
+            for scale in [0, 2] {
+                for digits in [1, 4, 5, 9, 10, 18] {
+                    for native in [false, true] {
+                        kinds.push((Kind::Binary { digits, scale, signed, native }, Binary { digits: digits as u8, signed, native }.bytes()));
+                    }
+                }
+                for digits in [1, 2, 7, 18, 19, 31] {
+                    kinds.push((Kind::Packed { digits, scale, signed }, digits as usize / 2 + 1));
+                    for sign in [None, Some((SignPosition::Leading, false)), Some((SignPosition::Leading, true)), Some((SignPosition::Trailing, true))] {
+                        let sign = sign.map(|(position, separate)| SignClause { position, separate });
+                        kinds.push((Kind::Zoned { digits, scale, signed, sign }, digits as usize + usize::from(sign.is_some_and(|s| s.separate))));
+                    }
+                }
+            }
+        }
+        kinds
+    }
+
+    #[test]
+    fn an_integer_reads_as_its_value_is_read() {
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move || {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            (state.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 32) as u8
+        };
+        let invdata = [None, Some(Invdata { forcenumcmp: false, cleansign: true }), Some(Invdata { forcenumcmp: false, cleansign: false })];
+        let mut fast = 0;
+        for (kind, len) in kinds() {
+            for _ in 0..200 {
+                let mem: Vec<u8> = (0..len)
+                    .map(|_| match next() % 8 {
+                        0 => next(),
+                        1 => 0xC0 | (next() % 10),
+                        2 => 0xD0 | (next() % 10),
+                        3 => 0x4E,
+                        4 => 0x60,
+                        5 => ((next() % 10) << 4) | 0x0C,
+                        _ => 0xF0 | (next() % 10),
+                    })
+                    .collect();
+                let loc = Loc { offset: 0, len, kind, item: 0 };
+                for numproc in [Numproc::Nopfd, Numproc::Pfd] {
+                    for invdata in invdata {
+                        for scaling in [0, 2] {
+                            let facts = Facts { options: Options { numproc, invdata, ..Options::default() }, scaling, collation: Collation::Native };
+                            let Some(n) = read_integer(&facts, &mem, loc) else { continue };
+                            fast += 1;
+                            let Ok(Val::Num(v)) = read(&facts, &mem, loc, Pos::default()) else { panic!("{kind:?} {mem:02X?} reads as no number") };
+                            let whole = align(&v, 0, false).and_then(|m| m.to_u128()).and_then(|m| i64::try_from(m).ok()).map(|m| if v.negative { -m } else { m });
+                            assert_eq!(Some(n), whole, "{kind:?} {mem:02X?}");
+                            assert_eq!(v.places.dec, 0, "{kind:?}");
+                        }
+                    }
+                }
+            }
+        }
+        assert!(fast > 20_000, "only {fast} reads took the integer path");
+    }
 }

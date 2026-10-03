@@ -507,10 +507,10 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
     /// its PROGRAM-ID: the one copy of the program, or with `copy` a copy of its own for the entry
     /// name ([`crate::callee::entry_copy`]).
     pub fn load_entry(&mut self, name: &str, copy: bool) -> Result<(usize, Option<usize>), LoadError> {
-        let name = name.to_ascii_uppercase();
-        if let Some(i) = self.find(&name) {
+        if let Some(i) = self.find(name) {
             return Ok((i, self.programs[i].entry));
         }
+        let name = name.to_ascii_uppercase();
         let index = match self.programs.iter().position(|p| p.compiled.as_ref().is_some_and(|c| L::entry(c, &name).is_some())) {
             Some(i) => i,
             None => {
@@ -579,7 +579,10 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
     }
 
     pub fn find(&self, name: &str) -> Option<usize> {
-        self.names.get(&name.to_ascii_uppercase()).copied()
+        if name.bytes().any(|b| b.is_ascii_lowercase()) {
+            return self.names.get(&name.to_ascii_uppercase()).copied();
+        }
+        self.names.get(name).copied()
     }
 
     /// The program CALL names, compiling and loading it the first time.

@@ -65,19 +65,34 @@ pub fn decode(op: &[u8]) -> Result<Decimal, ProgramCheck> {
         return Err(ProgramCheck::Data);
     }
     let (last, body) = op.split_last().unwrap();
-    let magnitude = body.iter().fold(0u128, |m, b| (m * 10 + (b >> 4) as u128) * 10 + (b & 0xF) as u128);
+    let magnitude = if body.len() <= U64_BYTES {
+        u128::from(body.iter().fold(0u64, |m, b| (m * 10 + u64::from(b >> 4)) * 10 + u64::from(b & 0xF)))
+    } else {
+        body.iter().fold(0u128, |m, b| (m * 10 + (b >> 4) as u128) * 10 + (b & 0xF) as u128)
+    };
     Ok(Decimal { negative: is_minus(last & 0xF), magnitude: magnitude * 10 + (last >> 4) as u128 })
 }
 
-fn write_digits(op: &mut [u8], negative: bool, mut magnitude: u128) {
+/// The most bytes before the sign byte whose digits, 19 with the sign byte's, fit a `u64`.
+const U64_BYTES: usize = 9;
+
+fn write_digits(op: &mut [u8], negative: bool, magnitude: u128) {
     let (last, body) = op.split_last_mut().unwrap();
-    *last = ((magnitude % 10) as u8) << 4 | if negative { MINUS } else { PLUS };
-    magnitude /= 10;
-    for byte in body.iter_mut().rev() {
-        let lo = (magnitude % 10) as u8;
-        let hi = (magnitude / 10 % 10) as u8;
-        magnitude /= 100;
-        *byte = hi << 4 | lo;
+    let (low, mut wide) = match u64::try_from(magnitude) {
+        Ok(m) => (m % 10, u128::from(m / 10)),
+        Err(_) => ((magnitude % 10) as u64, magnitude / 10),
+    };
+    *last = (low as u8) << 4 | if negative { MINUS } else { PLUS };
+    let mut bytes = body.iter_mut().rev();
+    while wide > u128::from(u64::MAX) {
+        let Some(byte) = bytes.next() else { return };
+        *byte = ((wide / 10 % 10) as u8) << 4 | (wide % 10) as u8;
+        wide /= 100;
+    }
+    let mut m = wide as u64;
+    for byte in bytes {
+        *byte = ((m / 10 % 10) as u8) << 4 | (m % 10) as u8;
+        m /= 100;
     }
 }
 
@@ -96,7 +111,8 @@ fn set_result(op: &mut [u8], negative: bool, kept: u128, overflow: bool) -> Cc {
 
 fn set_value(op: &mut [u8], v: Decimal) -> Cc {
     let cap = 10u128.pow(digits_in(op.len()));
-    set_result(op, v.negative && v.magnitude != 0, v.magnitude % cap, v.magnitude >= cap)
+    let kept = if v.magnitude < cap { v.magnitude } else { v.magnitude % cap };
+    set_result(op, v.negative && v.magnitude != 0, kept, v.magnitude >= cap)
 }
 
 /// Stores `value` with a preferred sign, keeping the low-order digits that fit, as ZAP does.
@@ -395,6 +411,57 @@ mod tests {
         assert_eq!(tp(&packed("1A3C")), Ok(Cc(2)));
         assert_eq!(tp(&packed("1A34")), Ok(Cc(3)));
         assert_eq!(tp(&[0; 17]), Err(ProgramCheck::Specification));
+    }
+
+    fn decode_by_u128(op: &[u8]) -> Result<Decimal, ProgramCheck> {
+        if tp(op)?.0 != 0 {
+            return Err(ProgramCheck::Data);
+        }
+        let (last, body) = op.split_last().unwrap();
+        let magnitude = body.iter().fold(0u128, |m, b| (m * 10 + (b >> 4) as u128) * 10 + (b & 0xF) as u128);
+        Ok(Decimal { negative: is_minus(last & 0xF), magnitude: magnitude * 10 + (last >> 4) as u128 })
+    }
+
+    fn write_digits_by_u128(op: &mut [u8], negative: bool, mut magnitude: u128) {
+        let (last, body) = op.split_last_mut().unwrap();
+        *last = ((magnitude % 10) as u8) << 4 | if negative { MINUS } else { PLUS };
+        magnitude /= 10;
+        for byte in body.iter_mut().rev() {
+            let lo = (magnitude % 10) as u8;
+            let hi = (magnitude / 10 % 10) as u8;
+            magnitude /= 100;
+            *byte = hi << 4 | lo;
+        }
+    }
+
+    #[test]
+    fn digits_read_and_write_as_u128_arithmetic_does() {
+        let mut seed = 0x2545_F491_4F6C_DD1Du64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for _ in 0..50_000 {
+            let len = 1 + (next() % 16) as usize;
+            let digits = (next() % 40) as u32;
+            let magnitude = (u128::from(next()) << 64 | u128::from(next())) % 10u128.pow(digits.min(38));
+            let negative = next() % 2 == 0;
+            let (mut ours, mut theirs) = (vec![0u8; len], vec![0u8; len]);
+            write_digits(&mut ours, negative, magnitude);
+            write_digits_by_u128(&mut theirs, negative, magnitude);
+            assert_eq!(ours, theirs, "{magnitude} in {len} bytes");
+            assert_eq!(decode(&ours), decode_by_u128(&ours));
+            let mut noisy = ours.clone();
+            noisy[(next() as usize) % len] = next() as u8;
+            assert_eq!(decode(&noisy), decode_by_u128(&noisy));
+            let (mut a, mut b) = (vec![0u8; len], vec![0u8; len]);
+            let value = Decimal { negative, magnitude };
+            let cap = 10u128.pow(digits_in(len));
+            assert_eq!(encode(&mut a, value), Ok(set_result(&mut b, negative && magnitude != 0, magnitude % cap, magnitude >= cap)));
+            assert_eq!(a, b);
+        }
     }
 
     #[test]

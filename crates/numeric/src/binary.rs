@@ -55,18 +55,23 @@ pub struct Stored {
 /// Stores `value`, already scaled to the item's decimal places. An unsigned item takes the absolute
 /// value. See [`crate::assumptions::TRUNC_OPT_IS_BINARY`] for what TRUNC(OPT) keeps.
 pub fn store(item: Binary, value: i128, options: &Options) -> Stored {
+    let (kept, divergence) = kept(item, value, options);
+    Stored { bytes: kept.to_be_bytes()[16 - item.bytes()..].to_vec(), value: kept, divergence }
+}
+
+/// The value `store` keeps, whose low-order `item.bytes()` bytes it stores, and its divergence.
+pub fn kept(item: Binary, value: i128, options: &Options) -> (i128, Option<TruncOptDivergence>) {
     let value = if item.signed { value } else { value.unsigned_abs() as i128 };
     let decimal = item.decimal_truncation(value);
     let binary = item.binary_truncation(value);
-    let (kept, divergence) = match (item.native, options.trunc) {
+    match (item.native, options.trunc) {
         (true, _) | (false, Trunc::Bin) => (binary, None),
         (false, Trunc::Std) => (decimal, None),
         (false, Trunc::Opt) => {
             let report = decimal != binary && options.trunc_check == TruncCheck::Report;
             (binary, report.then_some(TruncOptDivergence { value, decimal, binary }))
         }
-    };
-    Stored { bytes: kept.to_be_bytes()[16 - item.bytes()..].to_vec(), value: kept, divergence }
+    }
 }
 
 #[cfg(test)]
