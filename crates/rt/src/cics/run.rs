@@ -30,7 +30,7 @@ pub const EIBRSRCE: usize = 0x33;
 pub const EIBRESP: usize = 0x4C;
 pub const EIBRESP2: usize = 0x50;
 
-/// What a command asks of the executor running it beyond `Host` and the run unit: the program
+/// What a command asks of the executor running it beyond `Host` and the run unit: the logical
 /// level's handlers, operands that are not data items, names only the executor can resolve, and
 /// running a program for LINK and XCTL.
 pub trait CicsHost<'w, P: Copy, O, S>: Host<P> + UnitHost<'w> {
@@ -57,13 +57,50 @@ pub trait CicsHost<'w, P: Copy, O, S>: Host<P> + UnitHost<'w> {
     fn run_program(&mut self, program: Self::Program, index: usize, commarea: Option<usize>, xctl: bool) -> R<Ending>;
 }
 
-/// HANDLE CONDITION, IGNORE CONDITION and HANDLE ABEND, which belong to the program level.
+/// HANDLE CONDITION, IGNORE CONDITION and HANDLE ABEND, which belong to the logical level: every
+/// program CALLed at it shares them (C234).
 #[derive(Clone, Debug, Default)]
 pub struct Handlers {
     pub conditions: HashMap<Condition, Handler>,
-    /// What each PUSH HANDLE suspended.
+    /// What each PUSH HANDLE at this logical level suspended.
     pub stack: Vec<(HashMap<Condition, Handler>, Option<AbendExit>)>,
     pub abend: Option<AbendExit>,
+}
+
+impl Handlers {
+    /// PUSH HANDLE: suspends HANDLE CONDITION, IGNORE CONDITION and HANDLE ABEND until `pop`.
+    pub fn push(&mut self) {
+        let suspended = (std::mem::take(&mut self.conditions), self.abend.take());
+        self.stack.push(suspended);
+    }
+
+    /// POP HANDLE: false when no PUSH HANDLE at this logical level is left to undo.
+    pub fn pop(&mut self) -> bool {
+        let Some((conditions, abend)) = self.stack.pop() else { return false };
+        self.conditions = conditions;
+        self.abend = abend;
+        true
+    }
+
+    /// The handlers a CALLed program starts with: the level's, which a dynamic CALL first
+    /// suspends with the PUSH HANDLE of CBLPSHPOP(ON) (C234).
+    pub fn lend(&mut self, pushes: bool) -> Handlers {
+        let mut level = std::mem::take(self);
+        if pushes {
+            level.push();
+        }
+        level
+    }
+
+    /// Takes the level's handlers back from a CALLed program that has ended, as it left them; with
+    /// `pops`, for a dynamic CALL it returned from, the POP HANDLE that undoes the CALL's PUSH, which
+    /// changes nothing when no PUSH is left (C234).
+    pub fn take_back(&mut self, callee: &mut Handlers, pops: bool) {
+        *self = std::mem::take(callee);
+        if pops {
+            self.pop();
+        }
+    }
 }
 
 /// The program level's HANDLE ABEND exit, which CANCEL and entering it deactivate and RESET
@@ -86,7 +123,8 @@ pub enum ExitTarget {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Handler {
-    Label(ParaId),
+    /// A paragraph of the program activation `owner` that issued the HANDLE CONDITION (C235).
+    Label { paragraph: ParaId, owner: u64 },
     Ignore,
 }
 
@@ -349,8 +387,9 @@ pub fn ok<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S
 }
 
 /// Raises a condition. RESP or NOHANDLE take it; otherwise HANDLE CONDITION (the condition's own
-/// entry, else ERROR) or IGNORE CONDITION decides; otherwise the task abends with the condition's
-/// AEIx code, which a HANDLE ABEND exit can intercept.
+/// entry, else ERROR) or IGNORE CONDITION decides, a label set by another activation abending
+/// APC2 (C235); otherwise the task abends with the condition's AEIx code. A HANDLE ABEND exit can
+/// intercept either abend.
 pub fn raise<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, condition: Condition, resp2: i32) -> R<Flow> {
     let resp = condition.resp();
     eib_fullword(x.unit(), EIBRESP, resp);
@@ -363,10 +402,17 @@ pub fn raise<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O
     if at.resp.nohandle {
         return Ok(Flow::Next);
     }
+    let me = x.activation();
     let handlers = x.handlers();
     match handlers.conditions.get(&condition).or_else(|| handlers.conditions.get(&Condition::ERROR)).copied() {
         Some(Handler::Ignore) => Ok(Flow::Next),
-        Some(Handler::Label(p)) => Ok(Flow::GoTo(p)),
+        Some(Handler::Label { paragraph, owner }) if owner == me => Ok(Flow::GoTo(paragraph)),
+        Some(Handler::Label { .. }) => Err(Abend {
+            code: AbendCode::Cics("APC2".into()),
+            message: format!("EXEC CICS {}: {} was raised; its HANDLE CONDITION label is in a program that is not running there, which CICS cannot branch to", at.name, condition.name()),
+            pos: at.pos,
+            file: None,
+        }),
         None => Err(Abend {
             code: AbendCode::Cics(condition.default_abend().into()),
             message: format!("EXEC CICS {}: {} was raised with no RESP, HANDLE CONDITION or IGNORE CONDITION", at.name, condition.name()),

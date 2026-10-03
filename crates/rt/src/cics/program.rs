@@ -181,10 +181,11 @@ pub fn enter_exit_program<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>,
 }
 
 pub(super) fn handle_condition<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, labels: &[(Condition, Option<ParaId>)]) -> R<Flow> {
+    let owner = x.activation();
     let conditions = &mut x.handlers().conditions;
     for &(condition, label) in labels {
         match label {
-            Some(p) => conditions.insert(condition, Handler::Label(p)),
+            Some(paragraph) => conditions.insert(condition, Handler::Label { paragraph, owner }),
             None => conditions.remove(&condition),
         };
     }
@@ -201,22 +202,12 @@ pub(super) fn ignore_condition<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O
 
 /// PUSH HANDLE suspends HANDLE CONDITION, IGNORE CONDITION and HANDLE ABEND until POP HANDLE.
 pub(super) fn push_handle<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>) -> R<Flow> {
-    let handlers = x.handlers();
-    let saved = (std::mem::take(&mut handlers.conditions), handlers.abend.take());
-    handlers.stack.push(saved);
+    x.handlers().push();
     ok(x, at)
 }
 
 pub(super) fn pop_handle<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>) -> R<Flow> {
-    let handlers = x.handlers();
-    match handlers.stack.pop() {
-        Some((conditions, abend)) => {
-            handlers.conditions = conditions;
-            handlers.abend = abend;
-            ok(x, at)
-        }
-        None => raise(x, at, Condition::INVREQ, 0),
-    }
+    if x.handlers().pop() { ok(x, at) } else { raise(x, at, Condition::INVREQ, 0) }
 }
 
 /// HANDLE ABEND PROGRAM or LABEL replaces the program level's exit, active; RESET reactivates it

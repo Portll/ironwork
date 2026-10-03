@@ -65,12 +65,14 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             return Err(Abend::ironwork(format!("CALL {name}: the program is already active and is not RECURSIVE"), pos).into());
         }
         self.unit.enter(pos)?;
-        let result = self.call_nested(plan, index, entry, lowered, pos);
+        // A dynamic CALL suspends the caller's handlers, as CBLPSHPOP(ON) does (C234).
+        let suspends = dynamic && lowered.program.services.scope.containers.is_empty();
+        let result = self.call_nested(plan, index, entry, lowered, suspends, pos);
         self.unit.depth = self.unit.depth.saturating_sub(1);
         result
     }
 
-    fn call_nested(&mut self, plan: &CallPlan, index: usize, entry: Option<usize>, lowered: &Lowered, pos: Pos) -> R<Step> {
+    fn call_nested(&mut self, plan: &CallPlan, index: usize, entry: Option<usize>, lowered: &Lowered, suspends: bool, pos: Pos) -> R<Step> {
         let mark = self.unit.mem.len();
         let addresses = callee::addresses(self, &plan.args, pos);
         let addresses = self.settle(addresses)?;
@@ -84,11 +86,13 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             let using = entry.map_or(&program.storage.using, |e| &e.using).iter().map(|&o| Some(usize::from(o))).collect();
             let returning = program.storage.returning.map(|o| (usize::from(o), program.storage.linkage[usize::from(o)] as usize));
             Bindings { records: &[], using, addresses: &addresses, returning }.bind(vm.unit, &mut vm.linkage);
+            vm.cics_handlers = caller.cics_handlers.lend(suspends);
             let ending = match vm.run_from(entry.map(|e| (e.paragraph, e.block))) {
                 Err(Halt::Unimplemented(what)) => return Err(Halt::Unimplemented(what)),
                 Err(Halt::Abend(a)) => Err(a),
                 Ok(e) => Ok(e),
             };
+            caller.cics_handlers.take_back(&mut vm.cics_handlers, suspends && ending.is_ok());
             let returned = match (program.storage.returning, &ending) {
                 (Some(ordinal), Ok(_)) => Some(vm.returned(ordinal, pos)?),
                 _ => None,

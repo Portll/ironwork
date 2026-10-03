@@ -266,6 +266,12 @@ pub struct Task {
 }
 
 impl Task {
+    /// The number of a program activation starting, which owns the HANDLE labels it sets.
+    pub fn next_activation(&mut self) -> u64 {
+        self.activations += 1;
+        self.activations
+    }
+
     /// WRITEQ TS: appends and returns the new item's number; with Some(item) (REWRITE) replaces
     /// that item and returns it.
     pub fn writeq_ts(

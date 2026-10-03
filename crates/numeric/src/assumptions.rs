@@ -279,6 +279,8 @@ pub const CICS_ABEND_EXIT_ACROSS_CALL: &str = "C237";
 pub const CICS_ABEND_LABEL_OWNER: &str = "C238";
 pub const CICS_ABEND_EXIT_ACROSS_XCTL: &str = "C239";
 pub const CICS_RETURN_ENDS_THE_LEVEL: &str = "C233";
+pub const CICS_HANDLERS_ACROSS_CALL: &str = "C234";
+pub const CICS_CONDITION_LABEL_OWNER: &str = "C235";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -433,7 +435,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: CICS_HANDLE_ABEND_CATCHES_CONDITIONS,
-        claim: "A HANDLE ABEND exit receives control when a condition nothing handles abends the task (AEIx), as for any abend it can intercept, and is deactivated by being taken (C142)",
+        claim: "A HANDLE ABEND exit receives control when a condition nothing handles abends the task (AEIx), and when a condition whose HANDLE CONDITION label another program set abends it APC2 (C235), as for any abend it can intercept, and is deactivated by being taken (C142)",
         basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -1759,7 +1761,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: CICS_ABEND_EXIT_ACROSS_CALL,
-        claim: "A CALLed subprogram runs at its caller's logical level (CICS TS 6.x, 'Flow of control between programs and subprograms', dfhp3_cobol_subprog_flow). A static CALL, and a CALL of a contained program, leaves the level's HANDLE ABEND exit in effect in the subprogram, and an exit the subprogram sets is the level's after it returns ('Rules for calling subprograms', dfhp3_cobol_subprog_rules: for a statically called program, abend handling remains in effect irrespective of CBLPSHPOP). A dynamic CALL runs as under CBLPSHPOP(ON), the default (Enterprise COBOL 6.4 Performance Tuning Guide, CBLPSHPOP): the caller's exit is suspended, as by PUSH HANDLE, until the subprogram returns, when the exit the subprogram set is dropped and the caller's put back, as by POP HANDLE; an abend in the subprogram meets the exit as the subprogram left it. The Programming Guide describes that PUSH for a CALL of any program that is not contained and says nothing of static calls (SC27-8714-03, p. 503); ironwork follows the CICS rule. Only the abend exit goes with a static CALL: HANDLE CONDITION, IGNORE CONDITION and PUSH HANDLE's stack stay with the program that issued them",
+        claim: "A CALLed subprogram runs at its caller's logical level (CICS TS 6.x, 'Flow of control between programs and subprograms', dfhp3_cobol_subprog_flow). A static CALL, and a CALL of a contained program, leaves the level's HANDLE ABEND exit in effect in the subprogram, and an exit the subprogram sets is the level's after it returns ('Rules for calling subprograms', dfhp3_cobol_subprog_rules: for a statically called program, abend handling remains in effect irrespective of CBLPSHPOP). A dynamic CALL runs as under CBLPSHPOP(ON), the default (Enterprise COBOL 6.4 Performance Tuning Guide, CBLPSHPOP): the caller's exit is suspended, as by PUSH HANDLE, until the subprogram returns, when the exit the subprogram set is dropped and the caller's put back, as by POP HANDLE; an abend in the subprogram meets the exit as the subprogram left it. The Programming Guide describes that PUSH for a CALL of any program that is not contained and says nothing of static calls (SC27-8714-03, p. 503); ironwork follows the CICS rule. HANDLE CONDITION, IGNORE CONDITION and PUSH HANDLE's stack go with a CALL in the same way (C234)",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -1778,6 +1780,18 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: CICS_RETURN_ENDS_THE_LEVEL,
         claim: "EXEC CICS RETURN and XCTL end the logical level they are issued at, whichever of its programs issues them. A program a COBOL CALL reaches, static or dynamic, is at its caller's logical level, and a run unit is what the task, a LINK or an XCTL starts, with the programs it CALLs (CICS TS 6.x, 'Flow of control between programs and subprograms', dfhp3_cobol_subprog_flow). RETURN in a CALLed program terminates the calling program ('Rules for calling subprograms', dfhp3_cobol_subprog_rules) and goes back to the program that LINKed to the level, or at the task's first level to CICS (dfhp3_cobol_subprog_flow; RETURN, dfhp4_return); TRANSID and COMMAREA are allowed there, where RETURN goes back to CICS, as for the program running the level, and raise INVREQ below it, where the RETURN reference allows TRANSID and ironwork does not yet. XCTL in a CALLed program starts its program as the one running the level, the CALL chain released with the run unit (XCTL, dfhp4_xctl), with a copy of the COMMAREA, as every XCTL passes, and the exit C239 gives; the level ends when that program does. Each program of the CALL chain then ends as its CALL comes back, as by GOBACK there: nothing after the CALL runs, NOT ON EXCEPTION and the RETURNING item included, and the PERFORMs in progress end with the activations whose return points they are (C99). The manuals do not say what becomes of the CALL statements; ironwork ends their programs so",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CICS_HANDLERS_ACROSS_CALL,
+        claim: "HANDLE CONDITION, IGNORE CONDITION and the PUSH HANDLE stack belong to the logical level, as the HANDLE ABEND exit does (C237): a program a CALL reaches is at its caller's level and inherits the current HANDLE commands, and POP HANDLE undoes the last PUSH HANDLE at the current link level (CICS TS 6.x, PUSH HANDLE, dfhp4_pushhandle; POP HANDLE, dfhp4_pophandle). For a static CALL, and a CALL of a contained program, condition, AID and abend handling remain in effect whatever CBLPSHPOP says ('Rules for calling subprograms', dfhp3_cobol_subprog_rules): the subprogram starts with the caller's handlers and stack, and the caller has them as the subprogram left them, its HANDLE CONDITION, IGNORE CONDITION, PUSH and POP HANDLE included, as with a CALL that pushes nothing, where the caller inherits any settings made in the subprogram (Enterprise COBOL 6.4 Performance Tuning Guide, CBLPSHPOP). A dynamic CALL runs under CBLPSHPOP(ON), the default: COBOL issues a PUSH HANDLE on entry, after which no condition or abend handling is active in the subprogram until it issues its own, and a POP HANDLE when control returns, which drops what the subprogram set and puts the caller's back (dfhp3_cobol_subprog_rules; Programming Guide SC27-8714-03, p. 503). ironwork takes those as a PUSH and a POP on the level's stack: a POP HANDLE in the subprogram with no PUSH of its own undoes the CALL's, the return's POP then undoes the PUSH before it, and with none left, which the manuals do not cover, changes nothing. A subprogram that abends does not return: the abend meets the handlers as it left them",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CICS_CONDITION_LABEL_OWNER,
+        claim: "A HANDLE CONDITION label, like a HANDLE ABEND one (C238), belongs to the program activation that issued the HANDLE CONDITION. The label must be in the same PROCEDURE DIVISION as the command that causes the branch, a HANDLE label cannot handle a condition caused by another program invoked with CALL, and the attempt at cross-program branching ends the transaction (Programming Guide SC27-8714-03, pp. 503-504). A condition raised where the label it goes to was set by another activation, a program the CALL passed the handlers from or to, or one that has returned, therefore abends the task APC2, the code CICS ends a dynamically called program with when it abends under CBLPSHPOP(OFF) with its caller's condition handling active (dfhp3_cobol_subprog_rules; CICS TS 6.x, abend code APC2), and a HANDLE ABEND exit can intercept it (C24). The Programming Guide says a condition in a nested program goes to its container's label with unpredictable results (p. 504); ironwork abends APC2 there too. IGNORE CONDITION, which names no label, applies in whichever program raises the condition, and a program CALLed again is a new activation, which does not take a label its earlier one set",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

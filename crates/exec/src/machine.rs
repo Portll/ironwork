@@ -81,9 +81,10 @@ pub struct Machine<'p, 'u, 'w> {
     local_base: usize,
     /// The first program of the run unit, where EXIT PROGRAM does nothing.
     main: bool,
-    /// HANDLE CONDITION, IGNORE CONDITION and HANDLE ABEND, which belong to the program level.
+    /// The logical level's HANDLE CONDITION, IGNORE CONDITION and HANDLE ABEND, which the
+    /// activation running holds (C234).
     cics_handlers: cics::Handlers,
-    /// This activation's number in the CICS task, which owns the HANDLE ABEND LABELs it sets.
+    /// This activation's number in the CICS task, which owns the HANDLE labels it sets.
     serial: u64,
     report_writer: &'p crate::report::Writer,
     /// Each file's printer control character, when it is a print file.
@@ -153,10 +154,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     /// Program `me` over its storage at `base`, with nothing bound or initialized.
     fn over(compiled: &'p Compiled, me: usize, base: usize, unit: &'u mut RunUnit<'w>, main: bool) -> Self {
-        let serial = unit.cics.as_mut().map_or(0, |task| {
-            task.activations += 1;
-            task.activations
-        });
+        let serial = unit.cics.as_mut().map_or(0, crate::cics::Task::next_activation);
         Self {
             compiled,
             program: &compiled.program,
@@ -1076,7 +1074,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let mark = self.unit.mem.len();
         let addresses = callee::addresses(self, &call_args(&c.using), pos)?;
         self.parmcheck_set();
-        // A dynamic CALL suspends the caller's HANDLE ABEND exit, as CBLPSHPOP(ON) does (C237).
+        // A dynamic CALL suspends the caller's handlers, as CBLPSHPOP(ON) does (C234).
         let suspends = dynamic && compiled.program.containers.is_empty();
         let containers = self.containers_of(&compiled.program);
         let by = By::Call { initial: compiled.program.initial };
@@ -1084,13 +1082,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             let mut callee = Machine::activation_within(&compiled, index, &mut *m.unit, false, containers)?;
             let entry = entry.and_then(|k| compiled.entries.get(k));
             callee.bind_linkage(&[], entry.map_or(&compiled.program.using, |e| &e.using), &addresses, true);
-            if !suspends {
-                callee.cics_handlers.abend = m.cics_handlers.abend.take();
-            }
+            callee.cics_handlers = m.cics_handlers.lend(suspends);
             let ending = callee.run_called(entry.map(|e| (e.paragraph, e.statement)));
-            if !suspends || ending.is_err() {
-                m.cics_handlers.abend = callee.cics_handlers.abend.take();
-            }
+            m.cics_handlers.take_back(&mut callee.cics_handlers, suspends && ending.is_ok());
             let returned = match (&compiled.program.returning, &ending) {
                 (Some(item), Ok(_)) => Some(callee.returned(item, pos)?),
                 _ => None,

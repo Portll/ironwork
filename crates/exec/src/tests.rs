@@ -2278,6 +2278,76 @@ fn return_transid_and_commarea_in_a_called_program_belong_to_its_level() {
     assert_eq!(linked_caller("RETT"), ("INVREQ\nBACK IN CALLER\nBACK IN MAIN\n".into(), Ok((None, None))));
 }
 
+const READ_NO_QUEUE: [&str; 2] = ["EXEC CICS READQ TS QUEUE('NOQ') INTO(WS-DATA)", "    LENGTH(WS-LEN) END-EXEC"];
+
+/// The output and abend code of a task whose first program runs `body`, then RETURN, with
+/// MAIN-ERR a QIDERR label of its own. READP raises QIDERR with no handler of its own; SETH and
+/// SETI HANDLE and IGNORE QIDERR and return; OWNH takes its own QIDERR at its label; POPP pops a
+/// PUSH HANDLE, showing INVREQ when there is none; SHOWAB is a HANDLE ABEND PROGRAM.
+fn condition_task(body: &[&str]) -> (String, Option<String>) {
+    let data = "       01  WS-DATA PIC X(8).\n       01  WS-LEN PIC S9(4) COMP VALUE 8.\n       01  WS-PGM PIC X(8).\n       01  WS-RESP PIC S9(8) COMP.\n       01  WS-CODE PIC X(4).\n";
+    let mut procedure = vec!["       MAIN-LINE.\n".to_owned()];
+    procedure.extend(body.iter().map(|s| line(s)));
+    procedure.extend([line("EXEC CICS RETURN END-EXEC."), "       MAIN-ERR.\n".into(), line("DISPLAY 'MAIN HANDLED'"), line("EXEC CICS RETURN END-EXEC.")]);
+    let main = cics_program("MAINP", data, "", &procedure.concat());
+    let read = || READ_NO_QUEUE.map(line).concat();
+    let own = [line("EXEC CICS HANDLE CONDITION QIDERR(OWN-ERR) END-EXEC"), read(), line("DISPLAY 'NOT REACHED'."), "       OWN-ERR.\n".into(), line("DISPLAY 'OWN HANDLED'"), line("GOBACK.")];
+    let pop = ["EXEC CICS POP HANDLE RESP(WS-RESP) END-EXEC", "IF WS-RESP = DFHRESP(INVREQ) DISPLAY 'NOTHING TO POP' END-IF", "GOBACK."];
+    let show = ["EXEC CICS ASSIGN ABCODE(WS-CODE) END-EXEC", "DISPLAY 'ABEND ' WS-CODE", "EXEC CICS RETURN END-EXEC."];
+    let programs = [
+        ("READP", cics_program("READP", data, "", &[read(), line("DISPLAY 'READP GOES ON'"), line("GOBACK.")].concat())),
+        ("SETH", cics_program("SETH", "", "", &[line("EXEC CICS HANDLE CONDITION QIDERR(SET-ERR) END-EXEC"), line("GOBACK."), "       SET-ERR.\n".into(), line("DISPLAY 'NOT REACHED'.")].concat())),
+        ("SETI", cics_program("SETI", "", "", &[line("EXEC CICS IGNORE CONDITION QIDERR END-EXEC"), line("GOBACK.")].concat())),
+        ("OWNH", cics_program("OWNH", data, "", &own.concat())),
+        ("POPP", cics_program("POPP", "       01  WS-RESP PIC S9(8) COMP.\n", "", &pop.map(line).concat())),
+        ("SHOWAB", cics_program("SHOWAB", "       01  WS-CODE PIC X(4).\n", "", &show.map(line).concat())),
+    ];
+    let mut source = format!("{main}       END PROGRAM MAINP.\n");
+    for (id, program) in programs {
+        source.push_str(&format!("{program}       END PROGRAM {id}.\n"));
+    }
+    let (out, ending) = run_cics(&source, task("TR16"), None, unit::Clock::System);
+    (out, ending.err().map(|a| a.code.to_string()))
+}
+
+/// `condition_task` with `before`, a CALL of `program`, statically or dynamically, and a READQ
+/// that raises QIDERR.
+fn condition_call(before: &[&str], program: &str, dynamic: bool) -> (String, Option<String>) {
+    let call = if dynamic { vec![format!("MOVE '{program}' TO WS-PGM"), "CALL WS-PGM".to_owned()] } else { vec![format!("CALL '{program}'")] };
+    let mut body: Vec<String> = before.iter().map(|s| s.to_string()).collect();
+    body.extend(call);
+    body.extend(READ_NO_QUEUE.map(str::to_owned));
+    body.push("DISPLAY 'MAIN GOES ON'".into());
+    condition_task(&body.iter().map(String::as_str).collect::<Vec<_>>())
+}
+
+#[test]
+fn a_static_call_shares_the_levels_condition_handlers_both_ways() {
+    let ignore = "EXEC CICS IGNORE CONDITION QIDERR END-EXEC";
+    let handle = "EXEC CICS HANDLE CONDITION QIDERR(MAIN-ERR) END-EXEC";
+    assert_eq!(condition_call(&[ignore], "READP", false), ("READP GOES ON\nMAIN GOES ON\n".into(), None));
+    assert_eq!(condition_call(&[handle], "READP", false), (String::new(), Some("APC2".into())));
+    assert_eq!(condition_call(&[], "SETI", false), ("MAIN GOES ON\n".into(), None));
+    assert_eq!(condition_call(&[], "SETH", false), (String::new(), Some("APC2".into())));
+    assert_eq!(condition_call(&[handle], "OWNH", false), ("OWN HANDLED\n".into(), Some("APC2".into())));
+    assert_eq!(condition_call(&[ignore, "EXEC CICS PUSH HANDLE END-EXEC"], "POPP", false), ("MAIN GOES ON\n".into(), None));
+    assert_eq!(condition_call(&[], "POPP", false), ("NOTHING TO POP\n".into(), Some("AEYH".into())));
+    let caught = condition_call(&["EXEC CICS HANDLE ABEND PROGRAM('SHOWAB') END-EXEC", handle], "READP", false);
+    assert_eq!(caught, ("ABEND APC2\n".into(), None));
+}
+
+#[test]
+fn a_dynamic_call_suspends_the_condition_handlers_until_the_subprogram_returns() {
+    let ignore = "EXEC CICS IGNORE CONDITION QIDERR END-EXEC";
+    let handle = "EXEC CICS HANDLE CONDITION QIDERR(MAIN-ERR) END-EXEC";
+    assert_eq!(condition_call(&[ignore], "READP", true), (String::new(), Some("AEYH".into())));
+    assert_eq!(condition_call(&[handle], "READP", true), (String::new(), Some("AEYH".into())));
+    assert_eq!(condition_call(&[], "SETI", true), (String::new(), Some("AEYH".into())));
+    assert_eq!(condition_call(&[ignore], "SETH", true), ("MAIN GOES ON\n".into(), None));
+    assert_eq!(condition_call(&[handle], "OWNH", true), ("OWN HANDLED\nMAIN HANDLED\n".into(), None));
+    assert_eq!(condition_call(&[ignore], "POPP", true), ("MAIN GOES ON\n".into(), None));
+}
+
 #[test]
 fn xctl_in_a_called_program_replaces_the_program_running_its_level() {
     assert_eq!(level_task(&["CALL 'XCTP'", "DISPLAY 'BACK IN MAIN'"]), ("LAST XC 0002\n".into(), Ok((None, None))));

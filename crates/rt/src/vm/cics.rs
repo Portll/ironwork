@@ -1,5 +1,5 @@
 //! EXEC CICS (lir.md §9.5): a command run by `rt::cics::run` over the activation as its
-//! `CicsHost`, with the program level's handler table; a logical level whose HANDLE ABEND exit an
+//! `CicsHost`, with the logical level's handler table; a logical level whose HANDLE ABEND exit an
 //! abend reaches; and LINK and XCTL as a new activation at a level of its own.
 
 use super::{Code, Halt, R, Vm, not_yet};
@@ -166,9 +166,8 @@ impl<'w, L: Loader<Rc<Code>>> CicsHost<'w, PlaceId, Operand, SymId> for Vm<'_, '
         self.sym(*text).to_owned()
     }
 
-    // Lowering refuses HANDLE ABEND, so no exit names a VM activation.
     fn activation(&self) -> u64 {
-        0
+        self.serial
     }
 
     fn program_id(&self) -> String {

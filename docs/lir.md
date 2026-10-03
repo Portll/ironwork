@@ -1335,26 +1335,29 @@ HANDLE labels there. SYNCPOINT is a service (cics/services.rs) that settles the 
   (outside a task, a command ironwork does not carry out, an option it needs) comes from the same
   code at the same point. A command ironwork does not carry out lowers to `Cics::Unsupported`.
 - **Labels are paragraphs, and handlers are run-time state.** HANDLE CONDITION holds the `ParaId`
-  its labels resolve to, as `crate::procedure_from` resolves them for the walker. HANDLE, IGNORE,
-  PUSH and POP change the program level's `Handlers` when the op runs, and a condition `raise`
-  sends to a label makes the op return
+  its labels resolve to, as `crate::procedure_from` resolves them for the walker, with the number of
+  the activation that set it. HANDLE, IGNORE, PUSH and POP change the logical level's `Handlers`
+  when the op runs, and a condition `raise` sends to a label that activation set makes the op return
   `Step::GoTo(para)`, which the VM takes as a GO TO by the transfer rules of §8.4: it leaves every
-  frame whose region does not hold the paragraph and resets the depth, as the walker's
-  `Flow::GoTo` does. The table is per activation, as the walker's `Machine.cics_handlers` is, so a
-  LINKed program starts with none; the walker moves the HANDLE ABEND exit into a statically CALLed
-  program and back (C237). RETURN and XCTL return `Step::End`. No new terminator is needed.
+  frame whose region does not hold the paragraph and resets the depth, as the walker's `Flow::GoTo`
+  does. A label another activation set abends APC2 (C235). The table lives in the activation running
+  the level, as the walker's `Machine.cics_handlers` does, so a LINKed program starts with none, and
+  a CALL lends it to the CALLed program and takes it back (`Handlers::lend`, `take_back`), a dynamic
+  CALL of a program no other contains pushing it first and popping it when the program returns
+  (C234); the VM numbers its activations and lends its table as the walker does. RETURN and XCTL
+  return `Step::End`. No new terminator is needed.
 - **Refused:** a HANDLE label that names no procedure, which the walker abends on only after the
   task check (IRONWORK at the block, or the outside-a-task abend first), so no one terminator
   gives both. HANDLE ABEND, whose exit an abend takes when it reaches the program's activation,
   in the walker's `run_level` and the VM's alike (below); lowering still refuses it, so no VM
-  activation sets an exit, and the VM has none of the walker's CALL and XCTL rules for one
-  (C237-C239).
+  activation sets an exit, and the walker's rules for one at a CALL and at XCTL (C237-C239) have
+  nothing to carry on the VM.
 - **Not lowered:** the observer's sinks (`cics_sinks`), which tell an observer a command's operands
   and change no result, as with CALL's and DISPLAY's. The VM tells them from the options the
   command keeps, which leave out SYSID on any command but ASSIGN, WRITE's FROM under JOURNALNAME or
   JOURNALNUM, and QNAME written beside QUEUE; an observed command kept as `Unsupported` stops the VM
   as `Halt::Unimplemented`.
-- **On the VM.** A program level's handlers live in its activation. An abend that reaches a level
+- **On the VM.** Handlers live in the activation running the level. An abend that reaches a level
   whose HANDLE ABEND exit is active goes to the exit as `run_level` sends it: a LABEL restarts the
   activation's dispatch at the label, its frames gone as the walker's Rust calls are, the points
   they armed still armed and the depth the activation's. LINK and XCTL run the program as a new
