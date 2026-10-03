@@ -98,12 +98,15 @@ fn a_list_without_a_journal_or_not_of_file_and_line_is_refused() {
 #[test]
 fn a_statement_limit_ends_the_run_with_s322_at_the_same_statement_on_both_executors_and_in_a_job() {
     let dir = temp("limit");
-    let limited = |extra: &[&str]| Command::new(env!("CARGO_BIN_EXE_ironwork")).arg("run").arg(dir.join("src/LOOPER.cbl")).args(["--statement-limit", "100"]).args(extra).output().unwrap();
-    for extra in [&[][..], &["--vm"]] {
-        let o = limited(extra);
-        let err = String::from_utf8_lossy(&o.stderr);
-        assert_eq!(o.status.code(), Some(240), "{extra:?} {err}");
-        assert!(err.contains("LOOPER.cbl:8:16: ABEND S322:"), "{extra:?} {err}");
+    let limited = |limit: &str, extra: &[&str]| Command::new(env!("CARGO_BIN_EXE_ironwork")).arg("run").arg(dir.join("src/LOOPER.cbl")).args(["--statement-limit", limit]).args(extra).output().unwrap();
+    // Wherever in the loop the count runs out, the S322 is placed at the loop's first statement.
+    for limit in ["100", "101", "102"] {
+        for extra in [&[][..], &["--vm"]] {
+            let o = limited(limit, extra);
+            let err = String::from_utf8_lossy(&o.stderr);
+            assert_eq!(o.status.code(), Some(240), "{limit} {extra:?} {err}");
+            assert!(err.contains("LOOPER.cbl:8:16: ABEND S322:") && err.contains("in the loop over lines 8"), "{limit} {extra:?} {err}");
+        }
     }
     let done = Command::new(env!("CARGO_BIN_EXE_ironwork")).arg("run").arg(dir.join("src/LOOPER.cbl")).args(["--statement-limit", "200"]).output().unwrap();
     assert!(done.status.success(), "{}", String::from_utf8_lossy(&done.stderr));

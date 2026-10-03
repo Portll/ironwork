@@ -74,5 +74,7 @@ fn sysin_record<H: Clone, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut Run
 }
 
 fn at_end<H: Clone, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, name: &str, pos: Pos) {
-    let _ = writeln!(unit.err, "ironwork: {pos}: ACCEPT found SYSIN at its end; {name} is unchanged");
+    if unit.sysin_ended.insert((pos.file, pos.line, pos.col)) {
+        let _ = writeln!(unit.err, "ironwork: {pos}: ACCEPT found SYSIN at its end; {name} is unchanged");
+    }
 }

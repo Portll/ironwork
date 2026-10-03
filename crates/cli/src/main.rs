@@ -679,6 +679,9 @@ fn driver() -> ExitCode {
         if fuzz_job && fuzz_cics {
             return usage_error("fuzz takes --job or --cics, not both");
         }
+        if fuzz_cics && hang_limit.is_some() {
+            return usage_error("--hang-limit is for fuzz and fuzz --job; fuzz --cics does not run a timed-out task again");
+        }
         // Fuzz makes every input, DD, journal and coverage report itself; a flag it would not use is
         // refused rather than ignored.
         let made = !dds.is_empty() || replay.is_some() || keyed || sql_db.is_some() || sql_record.is_some() || evidence_dir.is_some() || coverage_file.is_some() || provenance_file.is_some() || trace_marker.is_some() || trace_statements.is_some() || trace_input;

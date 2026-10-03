@@ -40,6 +40,7 @@ fn root_of(path: &Path, roots: &[PathBuf]) -> i64 {
 }
 
 /// Option names only, and the program by file name: a value may be a path or a URL with a password.
+/// A statement limit is kept, since the place of an S322 depends on it.
 fn recorded_argv(command: &str, program: &str) -> Vec<String> {
     let mut out = vec![command.to_string()];
     let mut args = std::env::args().skip(1).peekable();
@@ -47,8 +48,8 @@ fn recorded_argv(command: &str, program: &str) -> Vec<String> {
         if a.starts_with('-') {
             out.push(a.clone());
             if args.peek().is_some_and(|v| !v.starts_with('-')) && !matches!(a.as_str(), "-silent" | "-strict-sort-keys" | "--exit-code") {
-                args.next();
-                out.push("<value>".into());
+                let value = args.next().unwrap_or_default();
+                out.push(if a == "--statement-limit" && value.parse::<u64>().is_ok() { value } else { "<value>".into() });
             }
         }
     }

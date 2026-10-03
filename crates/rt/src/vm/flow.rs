@@ -159,7 +159,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             && op as usize <= k
         {
             let pos = self.pos(id);
-            self.unit.start_statement(pos)?;
+            self.unit.start_statement(self.me, pos)?;
             self.unit.statement_starts();
             if self.unit.traces(pos.line) {
                 let file = self.event_file(pos);

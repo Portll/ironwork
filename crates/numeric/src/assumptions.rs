@@ -1597,7 +1597,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: STATEMENT_LIMIT_IS_TIME,
-        claim: "A run given a statement limit (run or job --statement-limit) ends with S322 at the statement whose start exceeds it, standing for the system completion code z/OS gives a job step that runs past the CPU time its JOB or EXEC TIME= parameter allows (MVS System Codes, 322). A count of statement starts stands in for CPU time so the end falls at the same statement on every run and on both executors; it says nothing of how long the program would run on z/OS, and a loop whose iterations start no statement is not stopped by it",
+        claim: "A run given a statement limit (run or job --statement-limit) ends with S322 once that many statements have started, at the next start of the first statement of the loop it is in (the lowest-placed of the statements that recur among the last 4,096 starts, in their outermost frame and the program's own source), or where the count ran out when no statement recurs or that one does not start again within 4,096 more; S322 stands for the system completion code z/OS gives a job step that runs past the CPU time its JOB or EXEC TIME= parameter allows (MVS System Codes, 322). A count of statement starts stands in for CPU time so the end falls at the same statement on every run and on both executors, and placing it at the loop rather than where the count ran out keeps it there whatever ran before the loop; it says nothing of how long the program would run on z/OS, and a loop whose iterations start no statement is not stopped by it",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

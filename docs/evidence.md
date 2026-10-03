@@ -47,7 +47,8 @@ by `prev` and `seq`.
   memory; hashing an indexed file at OPEN still reads all of it.
 - `run --coverage FILE` writes, for each program of the source, every paragraph with its line and
   how often control entered it, from the run unit's `Paragraph` events; `job --coverage FILE` the
-  same for every program the job's steps ran.
+  same for every program the job's steps ran, each also naming its `source`, so steps that run one
+  source add up and programs of two sources that share a PROGRAM-ID stay apart.
 - The run unit tells an observer what it opens, closes and loads, and each paragraph control
   enters (`exec::unit::Observer`); the
   interpreter and, when it lands, the VM raise the same events, so a journal is the same under both.
@@ -245,13 +246,16 @@ cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
    (VLR decides which), or now and then shorter than READ allows. A line-sequential file, an
    indexed file whose keys lie past its shortest record, a contained program's file and a DD that
    more than one file names are given an empty data set. A file assigned to SYSIN reads the SYSIN
-   lines. A blank SYSIN card is 80 spaces, never an empty line. A program whose one USING item is
+   lines. A blank SYSIN card is 80 spaces, never an empty line, and no card starts `/*` or `//`,
+   where the reader would end in-stream data. A program whose one USING item is
    the parameter Language Environment gives a job step (a group led by a halfword binary length)
    gets a PARM of up to 100 characters through `run --parm`, which the run's journal does not
    record; the manifest holds it.
    With `--job`, the inputs are those of the job's COBOL steps: each data set a step reads before
    any step creates it, built from the first reading program's file description and named by its
-   data set name; each in-stream DD a step reads as SYSIN lines or as its file, named `STEP.DD`;
+   data set name (a generation data group's base or a relative generation by the generation it
+   reads, the newest for the base, so the group's own entry is never written); each in-stream DD
+   a step reads as SYSIN lines or as its file, named `STEP.DD`;
    and each step whose program takes a PARM, named by the step as the job log names it. They reach
    `ironwork job` through `--datasets` (a fresh copy per run of `--datasets` given to fuzz, with
    the fed data sets written in), `--instream` and `--step-parm`. A data set the job reads that is
@@ -273,20 +277,26 @@ cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
 5. Two outcomes that are counted and never kept become findings under strict conditions. A
    timeout, up to three per fuzz run, is run again on the same input under `--statement-limit`
    (`--hang-limit`, 10,000,000 statements without it) for six times `--timeout`; if that run ends
-   in S322 it is kept as a loop the input caused, at the statement the limit ran out on, unless
-   ACCEPT had found SYSIN at its end, which is a program waiting for input, not looping on it. An
-   S806, up to five per fuzz run, each at a CALL of its own, is kept only where the program name
-   its message gives is in the input and a run with every occurrence of that name replaced by a
-   marker of `@`, `#` and `$` (characters fuzz never generates), traced with `--trace-marker`,
+   in S322 it is kept as an input that keeps the program running past the limit, at the first
+   statement of the loop it is in (assumption C241), which the message names with the loop's
+   lines. It is not kept when the empty input's run ends in S322 in the same loop (in the same
+   file, sharing a line), nor a second time for a loop already kept. A run that had ACCEPT find
+   SYSIN at its end, stopped at its timeout or its limit, is a program waiting for input, not
+   looping on it: it is counted as a timeout and not run again. A kept S322 says the run passed
+   the limit; it does not show the loop would never end. An S806, up to five per fuzz run, each
+   at a CALL of its own, is kept only where the program name its message gives is in the input
+   and a run with every occurrence of that name replaced by a marker of `@`, `#` and `$`, traced
+   with `--trace-marker`,
    ends in S806 at the same CALL naming the marker and its journal records the marker reaching
    that CALL's `dynamic-program-load` sink. A static CALL raises no such sink. A kept hang's input
    is made smaller within 10 runs; a kept S806's input is the marked one.
-6. Each kept input runs once more, with no evidence, compiled with `--optimize=2`, the compiler
+6. Each kept input other than an S322 or an S806 runs once more, with no evidence, compiled with `--optimize=2`, the compiler
    invocation's OPTIMIZE(2), which a CBL or PROCESS card's OPTIMIZE outranks. IBM leaves what invalid
    data does to the generated code, and at OPTIMIZE(1) and (2) it may compare an unsigned zoned item
    with zero by its bytes where OPTIMIZE(0), its default, reads it as a number and ends in a data
    exception (assumption C262). Whether that run ends in the same abend at the same place is the
-   abend's `optimized`.
+   abend's `optimized`. OPTIMIZE changes neither where a loop passes the statement limit nor the
+   name a CALL takes, so a kept S322 or S806 is `optimized` without that run.
 
 `DIR/manifest.json` holds `tool` (`ironwork-fuzz`), `format`, `version` (the ironwork release that
 wrote it), `seed`, `strategy` (`fields`),
@@ -307,7 +317,8 @@ ironwork itself panicked, 255; standard error gives the first refusal's reason a
 panic) and `runs`,
 one per kept abend (`input` ids, `outcome` `abend`, `abend` with `code`, `file` relative to the
 program's directory or the library it came from, `line`, `message` and `optimized` (item 6),
-`journal` the run id, and `coverage`). `optimized` rests on the manifest's word: the run it comes
+`journal` the run id, `coverage`, and `limit`, the statement limit a kept S322's runs were given,
+which its place depends on and its journal's `argv` also records). `optimized` rests on the manifest's word: the run it comes
 from keeps no journal. A program that takes any other PROCEDURE DIVISION USING is refused: a CALL would
 supply its parameters.
 

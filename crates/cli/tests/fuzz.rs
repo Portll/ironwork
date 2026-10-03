@@ -359,7 +359,7 @@ fn run_passes_a_parm_as_language_environment_does_and_fuzz_varies_it() {
 #[test]
 fn fuzz_refuses_a_flag_it_would_not_use() {
     let dir = temp("flags");
-    for extra in [&["--declare", "x"][..], &["--sql-record", "x"], &["--proclib", "x"], &["--transid", "T"], &["--parm", "X"], &["--job", "--cics"], &["--datasets", "x"], &["--job", "--datasets", "x:text"], &["--step-parm", "S=X"]] {
+    for extra in [&["--declare", "x"][..], &["--sql-record", "x"], &["--proclib", "x"], &["--transid", "T"], &["--parm", "X"], &["--job", "--cics"], &["--datasets", "x"], &["--job", "--datasets", "x:text"], &["--step-parm", "S=X"], &["--cics", "--hang-limit", "5"]] {
         let o = fuzz(&dir, "run", extra);
         assert_eq!(o.status.code(), Some(2), "{extra:?}");
         assert!(!dir.join("run").exists(), "{extra:?}");
@@ -435,7 +435,8 @@ fn a_loop_only_some_input_causes_is_kept_as_s322_and_one_waiting_at_the_end_of_s
     let o = fuzz(&dir, "run", &["--runs", "30", "--timeout", "1", "--hang-limit", "20000"]);
     assert!(o.status.success(), "{}", stderr(&o));
     let manifest = read_manifest(&dir.join("run"));
-    assert!(kept(&manifest).iter().any(|k| k == "S322 29" || k == "S322 30"), "{manifest}");
+    assert!(kept(&manifest).iter().any(|k| k == "S322 30"), "{manifest}");
+    assert!(manifest.contains("\"limit\":20000") && manifest.contains("in the loop over lines 30"), "{manifest}");
 
     let waits = [
         "       IDENTIFICATION DIVISION.",
@@ -454,6 +455,43 @@ fn a_loop_only_some_input_causes_is_kept_as_s322_and_one_waiting_at_the_end_of_s
     assert!(o.status.success(), "{}", stderr(&o));
     let manifest = read_manifest(&dir.join("waits"));
     assert!(!manifest.contains("S322") && count(&manifest, "timeout") > 0, "{manifest}");
+
+    // The loop runs on empty input too; a record makes two more statements run before it, which
+    // moves where the limit runs out but not the loop the S322 is placed at.
+    let loops = [
+        "       IDENTIFICATION DIVISION.",
+        "       PROGRAM-ID. LOOPS.",
+        "       ENVIRONMENT DIVISION.",
+        "       INPUT-OUTPUT SECTION.",
+        "       FILE-CONTROL.",
+        "           SELECT IN-FILE ASSIGN TO INFILE.",
+        "       DATA DIVISION.",
+        "       FILE SECTION.",
+        "       FD IN-FILE.",
+        "       01 IN-REC PIC X(10).",
+        "       WORKING-STORAGE SECTION.",
+        "       01 WS-EOF PIC X VALUE 'N'.",
+        "       01 WS-A PIC 9(4) COMP VALUE 0.",
+        "       PROCEDURE DIVISION.",
+        "           OPEN INPUT IN-FILE",
+        "           READ IN-FILE AT END MOVE 'Y' TO WS-EOF END-READ",
+        "           IF WS-EOF = 'N'",
+        "              DISPLAY 'ONE'",
+        "              DISPLAY 'TWO'",
+        "           END-IF",
+        "           PERFORM UNTIL WS-EOF = 'Z'",
+        "              ADD 1 TO WS-A",
+        "              ADD 2 TO WS-A",
+        "              ADD 3 TO WS-A",
+        "           END-PERFORM",
+        "           GOBACK.",
+    ];
+    fs::write(dir.join("repo/src/LOOPS.cbl"), loops.join("\n") + "\n").unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_ironwork")).current_dir(dir.join("repo")).args(["fuzz", "src/LOOPS.cbl", "--runs", "6", "--timeout", "1", "--hang-limit", "20000", "-o"]).arg(dir.join("loops")).output().unwrap();
+    assert!(o.status.success(), "{}", stderr(&o));
+    let manifest = read_manifest(&dir.join("loops"));
+    assert!(!manifest.contains("S322"), "{manifest}");
+    assert!(stderr(&o).contains("ends with S322 at LOOPS.cbl:22 on empty input"), "{}", stderr(&o));
 }
 
 #[test]
@@ -520,4 +558,35 @@ fn each_kept_abend_says_whether_its_input_gives_it_again_compiled_with_optimize_
     let found = optimized(&read_manifest(&dir.join("optimized")));
     assert!(found.contains(&"S0C7 26 true".to_string()), "{found:?}");
     assert!(!found.iter().any(|k| k.starts_with("S0C7 25")), "{found:?}");
+}
+
+#[test]
+fn a_job_reading_a_generation_data_group_is_fed_its_newest_generation_and_the_group_stays() {
+    let dir = temp("gdg");
+    fs::create_dir_all(dir.join("repo/jcl")).unwrap();
+    fs::create_dir_all(dir.join("ds")).unwrap();
+    fs::write(dir.join("ds/MY.GDG"), "IRONWORK-GDG LIMIT=5 NOSCRATCH NOEMPTY\n").unwrap();
+    fs::write(dir.join("ds/MY.GDG.G0001V00"), [0xF0u8; 17]).unwrap();
+    let jcl = [
+        "//GDGJOB   JOB",
+        "//STEP1    EXEC PGM=QTYSUM",
+        "//INFILE   DD DSN=MY.GDG,DISP=SHR",
+        "//STEP2    EXEC PGM=IEFBR14,COND=EVEN",
+        "//NEWGEN   DD DSN=MY.GDG(+1),DISP=(NEW,CATLG),",
+        "//            SPACE=(TRK,1),RECFM=FB,LRECL=17",
+    ];
+    fs::write(dir.join("repo/jcl/GDG.jcl"), jcl.join("\n") + "\n").unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_ironwork"))
+        .current_dir(dir.join("repo"))
+        .args(["fuzz", "--job", "jcl/GDG.jcl", "-L", "src", "--runs", "20", "--datasets"])
+        .arg(dir.join("ds"))
+        .arg("-o")
+        .arg(dir.join("run"))
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", stderr(&o));
+    let manifest = read_manifest(&dir.join("run"));
+    assert!(!stderr(&o).contains("not a generation data group"), "{}", stderr(&o));
+    assert_eq!(count(&manifest, "refused"), 0, "{manifest}");
+    assert!(manifest.contains("\"name\":\"MY.GDG.G0001V00\""), "{manifest}");
 }

@@ -51,33 +51,49 @@ fn plan(job: &jcl::Job, req: &Request) -> Plan {
         };
         let (own, sysin) = compiled.as_ref().map(|(c, rest)| super::inputs_of(c, rest)).map_or((Vec::new(), false), |(f, s, _)| (f, s));
         let reads = |dd: &str| own.iter().find(|f| f.dd == dd);
+        let generation = |base: &str, relative: i32| req.datasets.as_deref().and_then(|d| crate::job::existing_generation(d, base, relative));
         for dd in &step.dds {
             let [part] = dd.parts.as_slice() else { continue };
-            match &part.source {
-                Source::Dataset { dsn, member } => {
-                    let name = member.as_ref().map_or_else(|| dsn.clone(), |m| format!("{dsn}({m})"));
-                    if matches!(part.disp.status, Status::New | Status::Mod) {
-                        created.insert(name);
-                        continue;
-                    }
-                    if created.contains(&name) || files.contains_key(&name) {
-                        continue;
-                    }
-                    let path = path_of(dsn, member.as_deref());
-                    match reads(&dd.name) {
-                        Some(f) => {
-                            feeds.push(Feed { dd: name.clone(), ..f.clone() });
-                            empty.remove(&path);
-                            files.insert(name, path);
-                        }
-                        None if !req.datasets.as_ref().is_some_and(|d| d.join(&path).exists()) => {
-                            empty.insert(path);
-                        }
-                        None => {}
-                    }
+            let name = match &part.source {
+                Source::Dataset { dsn, member: Some(m) } => format!("{dsn}({m})"),
+                // A group's base reads every generation, newest first. The newest is fed; the base
+                // is the group's catalogue entry and is never written.
+                Source::Dataset { dsn, member: None } if req.datasets.as_deref().is_some_and(|d| crate::job::is_gdg(d, dsn)) => match generation(dsn, 0) {
+                    Some(g) => g,
+                    None => continue,
+                },
+                Source::Dataset { dsn, member: None } => dsn.clone(),
+                Source::Generation { base, relative } => match generation(base, *relative) {
+                    Some(g) => g,
+                    None => continue,
+                },
+                Source::InStream(_) if (dd.name == "SYSIN" && sysin) || reads(&dd.name).is_some() => {
+                    lines.push(format!("{}.{}", step.shown(), dd.name));
+                    continue;
                 }
-                Source::InStream(_) if (dd.name == "SYSIN" && sysin) || reads(&dd.name).is_some() => lines.push(format!("{}.{}", step.shown(), dd.name)),
-                _ => {}
+                _ => continue,
+            };
+            if matches!(part.disp.status, Status::New | Status::Mod) {
+                created.insert(name);
+                continue;
+            }
+            if created.contains(&name) || files.contains_key(&name) {
+                continue;
+            }
+            let path = match &part.source {
+                Source::Dataset { dsn, member: Some(m) } => path_of(dsn, Some(m)),
+                _ => path_of(&name, None),
+            };
+            match reads(&dd.name) {
+                Some(f) => {
+                    feeds.push(Feed { dd: name.clone(), ..f.clone() });
+                    empty.remove(&path);
+                    files.insert(name, path);
+                }
+                None if !req.datasets.as_ref().is_some_and(|d| d.join(&path).exists()) => {
+                    empty.insert(path);
+                }
+                None => {}
             }
         }
         if compiled.as_ref().is_some_and(|(c, _)| super::takes_parm(c)) {
@@ -154,8 +170,9 @@ impl Runner<'_> {
         }
         let roots = roots(self.req, &datasets);
         let timeout = if inputs.limit.is_some() { fuzz.timeout * super::HANG_PATIENCE } else { fuzz.timeout };
-        let Some((code, text)) = super::wait_for(command, &dir, timeout, &given)? else { return Ok(Outcome::Timeout) };
-        Ok(match super::waited(super::ended(code, &text, |l| super::abend_line(l, &roots)), &text) {
+        let (exit, text) = super::wait_for(command, &dir, timeout, &given)?;
+        let outcome = exit.map_or(Outcome::Timeout, |code| super::ended(code, &text, |l| super::abend_line(l, &roots)));
+        Ok(match super::waited(outcome, &text) {
             Outcome::Refused(why) => unplaced(&text).unwrap_or(Outcome::Refused(why)),
             outcome => outcome,
         })
@@ -208,7 +225,6 @@ pub fn run(req: Request) -> ExitCode {
     // Each run's data sets are its own, under .work and gone when fuzz ends; the manifest names
     // .work for them.
     let header = super::Header { seed: req.fuzz.seed, clock: &req.fuzz.clock, file: &file, id: &job.name, root: &req.fuzz.root, roots: &roots(&req, &work), entry: "job" };
-    let kept = found.runs.len();
     if let Err(e) = super::write_manifest(&req.fuzz.out, &header, found.inputs, &found.tally, found.runs) {
         return fail(format!("-o {}: {e}", req.fuzz.out.display()));
     }
@@ -219,6 +235,6 @@ pub fn run(req: Request) -> ExitCode {
     if let Some((code, file, line)) = found.baseline {
         eprintln!("ironwork fuzz: the job ends with {code} at {file}:{line} on empty input; that abend is not kept");
     }
-    println!("{}", found.tally.summary(kept, &req.fuzz.out));
+    println!("{}", found.tally.summary(&found.codes, &req.fuzz.out));
     ExitCode::SUCCESS
 }

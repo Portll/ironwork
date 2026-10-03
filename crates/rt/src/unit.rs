@@ -12,7 +12,7 @@ use crate::oo::ClassCode;
 use crate::storage::Loc;
 use crate::taint::Taint;
 use crate::vocab::{OpenMode, Pos};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -262,12 +262,62 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     pub taint: Option<Taint>,
     /// How many more statements may start before the run ends with S322; None for no limit.
     pub statement_limit: Option<u64>,
+    /// The last statements started under a statement limit, oldest first, and once it is spent the
+    /// loop statement the S322 waits for.
+    recent: VecDeque<Started>,
+    overrun: Option<Overrun>,
+    /// The ACCEPTs, by position, that have said they found SYSIN at its end; a loop around one
+    /// would otherwise write a line each time round.
+    pub(crate) sysin_ended: HashSet<(u16, u32, u32)>,
     /// The CICS run units the LINKs and XCTLs running have set aside, the innermost last.
     set_aside: Vec<Enclave>,
 }
 
 fn end_file(f: Open, unclosed: bool) -> std::io::Result<()> {
     if unclosed { f.abandon() } else { f.close() }
+}
+
+/// How many of the last statement starts an S322 looks back over for the loop the run is in, and
+/// how many more it lets start while it waits for that loop's first statement.
+const LOOP_WINDOW: usize = 4096;
+
+/// A statement start: the loaded program, how deep PERFORMs and CALLs had nested, and where.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Started {
+    program: usize,
+    depth: usize,
+    pos: Pos,
+}
+
+/// A spent statement limit: the loop's first statement, the S322's place, its lines, and the starts
+/// left before the run ends wherever it is.
+struct Overrun {
+    head: Started,
+    lines: Vec<u32>,
+    grace: usize,
+}
+
+/// The loop the last starts ran: the statements that started more than once among them, those of
+/// their outermost frame, in its program's own source before any COPY member, and the first of
+/// them by position. A loop's statements recur at one depth however many statements ran before
+/// it, and anything it PERFORMs or CALLs runs deeper. With none recurring, the statement starting
+/// now and no lines.
+fn loop_of(recent: &VecDeque<Started>, now: Started) -> Overrun {
+    let key = |s: &Started| (s.program, s.depth, s.pos.file, s.pos.line, s.pos.col);
+    let mut seen: HashMap<_, usize> = HashMap::new();
+    for s in recent {
+        *seen.entry(key(s)).or_default() += 1;
+    }
+    let recurring: Vec<&Started> = recent.iter().filter(|s| seen[&key(s)] > 1).collect();
+    let Some(outer) = recurring.iter().map(|s| s.depth).min() else { return Overrun { head: now, lines: Vec::new(), grace: 0 } };
+    let program = recurring.iter().rev().find(|s| s.depth == outer).map_or(now.program, |s| s.program);
+    let frame: Vec<&Started> = recurring.into_iter().filter(|s| s.depth == outer && s.program == program).collect();
+    let file = frame.iter().map(|s| s.pos.file).min().unwrap_or(now.pos.file);
+    let head = frame.iter().filter(|s| s.pos.file == file).min_by_key(|s| (s.pos.line, s.pos.col)).map_or(now, |s| **s);
+    let mut lines: Vec<u32> = frame.iter().filter(|s| s.pos.file == file).map(|s| s.pos.line).collect();
+    lines.sort_unstable();
+    lines.dedup();
+    Overrun { head, lines, grace: LOOP_WINDOW }
 }
 
 impl<H, L: Loader<H>> RunUnit<'_, H, L> {
@@ -383,6 +433,9 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             statements: None,
             taint: None,
             statement_limit: None,
+            recent: VecDeque::new(),
+            overrun: None,
+            sysin_ended: HashSet::new(),
             set_aside: Vec::new(),
         }
     }
@@ -542,17 +595,36 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
     }
 
     /// Whether a statement starting on `line` is told to the observer.
-    /// Counts the start of the statement at `pos` against the statement limit: once it is spent the
-    /// run ends there with S322, as z/OS ends a step that runs past its TIME= (assumption C241).
-    pub fn start_statement(&mut self, pos: Pos) -> Result<(), Abend> {
-        match self.statement_limit.as_mut() {
-            Some(0) => Err(Abend { code: crate::abend::AbendCode::TimeLimit, message: "the run reached its statement limit, as a step past its TIME= ends".into(), pos, file: None }),
-            Some(left) => {
-                *left -= 1;
-                Ok(())
+    /// Counts the start of `program`'s statement at `pos` against the statement limit. Once it is
+    /// spent the run ends with S322, as z/OS ends a step that runs past its TIME=, at the next start
+    /// of the loop it is in, so the place does not depend on how many statements ran before the
+    /// loop (assumption C241).
+    pub fn start_statement(&mut self, program: usize, pos: Pos) -> Result<(), Abend> {
+        let Some(left) = self.statement_limit.as_mut() else { return Ok(()) };
+        let now = Started { program, depth: self.depth, pos };
+        if *left > 0 {
+            *left -= 1;
+            if self.recent.len() == LOOP_WINDOW {
+                self.recent.pop_front();
             }
-            None => Ok(()),
+            self.recent.push_back(now);
+            return Ok(());
         }
+        let overrun = self.overrun.get_or_insert_with(|| loop_of(&self.recent, now));
+        let message = "the run reached its statement limit, as a step past its TIME= ends";
+        if now == overrun.head && !overrun.lines.is_empty() {
+            const SHOWN: usize = 24;
+            let mut lines = overrun.lines.iter().take(SHOWN).map(u32::to_string).collect::<Vec<_>>().join(", ");
+            if overrun.lines.len() > SHOWN {
+                lines += &format!(" and {} more", overrun.lines.len() - SHOWN);
+            }
+            return Err(Abend { code: crate::abend::AbendCode::TimeLimit, message: format!("{message}, in the loop over lines {lines}"), pos, file: None });
+        }
+        if overrun.grace == 0 {
+            return Err(Abend { code: crate::abend::AbendCode::TimeLimit, message: message.into(), pos, file: None });
+        }
+        overrun.grace -= 1;
+        Ok(())
     }
 
     pub fn traces(&self, line: u32) -> bool {

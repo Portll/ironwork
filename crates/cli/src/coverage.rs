@@ -64,4 +64,52 @@ impl Coverage {
             .collect();
         Value::Obj(fields([("programs", Value::Arr(programs)), ("called", Value::Arr(called))]))
     }
+
+    fn absorb(&mut self, other: Coverage) {
+        for (program, paragraphs) in other.entered {
+            let mine = self.entered.entry(program).or_default();
+            for (index, (name, n)) in paragraphs {
+                mine.entry(index).or_insert_with(|| (name, 0)).1 += n;
+            }
+        }
+    }
+}
+
+/// A job's coverage by the source each COBOL step ran: steps that run one source add up, and the
+/// programs of two sources stay apart even where they share a PROGRAM-ID.
+#[derive(Default)]
+pub struct BySource(Vec<(String, Coverage, Vec<Outline>)>);
+
+impl BySource {
+    pub fn add(&mut self, source: String, coverage: Coverage, outlines: Vec<Outline>) {
+        match self.0.iter_mut().find(|(s, _, _)| *s == source) {
+            Some((_, mine, known)) => {
+                mine.absorb(coverage);
+                known.extend(outlines.into_iter().filter(|o| !known.iter().any(|k| k.program == o.program)).collect::<Vec<_>>());
+            }
+            None => self.0.push((source, coverage, outlines)),
+        }
+    }
+
+    /// As [`Coverage::report`], each program also naming the `source` it is in; the programs CALL
+    /// loaded from a library once each.
+    pub fn report(&self) -> Value {
+        let (mut programs, mut called) = (Vec::new(), Vec::new());
+        for (source, coverage, outlines) in &self.0 {
+            let Value::Obj(mut report) = coverage.report(outlines) else { continue };
+            if let Some(Value::Arr(list)) = report.remove("programs") {
+                programs.extend(list.into_iter().map(|p| match p {
+                    Value::Obj(mut p) => {
+                        p.insert("source".into(), source.clone().into());
+                        Value::Obj(p)
+                    }
+                    p => p,
+                }));
+            }
+            if let Some(Value::Arr(list)) = report.remove("called") {
+                called.extend(list.into_iter().filter(|c| !called.contains(c)).collect::<Vec<_>>());
+            }
+        }
+        Value::Obj(fields([("programs", Value::Arr(programs)), ("called", Value::Arr(called))]))
+    }
 }

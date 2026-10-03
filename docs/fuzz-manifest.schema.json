@@ -121,12 +121,13 @@
             "file": { "description": "The source it ended in, relative to the root that supplied it.", "type": "string" },
             "line": { "description": "The line it ended at.", "type": "integer", "minimum": 1 },
             "message": { "description": "The message the run ended with.", "type": "string" },
-            "optimized": { "description": "Whether the same input, compiled with OPTIMIZE(2), ends in the same abend at the same file and line.", "type": "boolean" }
+            "optimized": { "description": "Whether the same input, compiled with OPTIMIZE(2), ends in the same abend at the same file and line. True without a run for S322 and S806, which OPTIMIZE cannot change.", "type": "boolean" }
           },
           "additionalProperties": false
         },
         "journal": { "description": "The run id of its journal under evidence/runs.", "type": "string" },
-        "coverage": { "description": "Its coverage, in run --coverage's format, by path from DIR.", "type": "string" }
+        "coverage": { "description": "Its coverage, in run --coverage's format, by path from DIR.", "type": "string" },
+        "limit": { "description": "The statement limit the run was given (run --statement-limit): a kept S322's place depends on it. Absent for a run with no limit.", "type": "integer", "minimum": 1 }
       },
       "additionalProperties": false
     }

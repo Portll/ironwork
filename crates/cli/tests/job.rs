@@ -643,3 +643,23 @@ fn sort_selects_reformats_and_splits_records_as_dfsort_does() {
     assert_eq!(fs::read_to_string(dir.join("data/OUT.ALLB")).unwrap(), "B002-JONES 0200*\n");
     assert!(String::from_utf8_lossy(&o.stdout).contains("ironwork SORT: 2 records written to BIG"));
 }
+
+#[test]
+fn job_coverage_keeps_apart_two_sources_that_share_a_program_id() {
+    let dir = temp("coverage");
+    let first = cobol(&["IDENTIFICATION DIVISION.", "PROGRAM-ID. SAMEID.", "PROCEDURE DIVISION.", "A-FIRST.", "    DISPLAY 'A'.", "A-LAST.", "    GOBACK."]);
+    let second = cobol(&["IDENTIFICATION DIVISION.", "PROGRAM-ID. SAMEID.", "PROCEDURE DIVISION.", "B-ONE.", "    GO TO B-THREE.", "B-TWO.", "    DISPLAY 'B'.", "B-THREE.", "    GOBACK."]);
+    fs::write(dir.join("lib/PGMA.cbl"), first).unwrap();
+    fs::write(dir.join("lib/PGMB.cbl"), second).unwrap();
+    let file = dir.join("coverage.json");
+    let o = job_with(&dir, "//S1 EXEC PGM=PGMA\n//S2 EXEC PGM=PGMB\n//S3 EXEC PGM=PGMA\n", &["--coverage", file.to_str().unwrap()]);
+    let text = fs::read_to_string(&file).unwrap_or_default();
+    let _ = fs::remove_dir_all(&dir);
+    assert!(o.status.success(), "{}", log(&o));
+    let programs: Vec<&str> = text.split("{\"detail\":").skip(1).collect();
+    assert_eq!(programs.len(), 2, "{text}");
+    let a = programs.iter().find(|p| p.contains("\"source\":\"lib/PGMA.cbl\"")).expect("PGMA");
+    let b = programs.iter().find(|p| p.contains("\"source\":\"lib/PGMB.cbl\"")).expect("PGMB");
+    assert!(a.contains("\"entered\":2,\"line\":4,\"name\":\"A-FIRST\"") && a.contains("\"reached\":2"), "{a}");
+    assert!(b.contains("\"entered\":0,\"line\":6,\"name\":\"B-TWO\"") && b.contains("\"paragraphs\":3,\"program\":\"SAMEID\",\"reached\":2"), "{b}");
+}

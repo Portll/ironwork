@@ -95,12 +95,30 @@ const HANG_RECHECKS: usize = 3;
 /// The S806s a fuzz run tries a marker on, each at a CALL of its own.
 const CHOSEN_CHECKS: usize = 5;
 
-/// A run that reached its statement limit after ACCEPT found SYSIN at its end was waiting for input
-/// it was not given, not looping on input it was given: it counts as a timeout.
+/// A run stopped at its timeout or its statement limit after ACCEPT found SYSIN at its end was
+/// waiting for input it was not given, not looping on input it was given.
 fn waited(outcome: Outcome, text: &str) -> Outcome {
+    let waiting = text.contains("ACCEPT found SYSIN at its end");
     match outcome {
-        Outcome::Abend { code, .. } if code == "S322" && text.contains("ACCEPT found SYSIN at its end") => Outcome::Timeout,
+        Outcome::Timeout if waiting => Outcome::Waiting,
+        Outcome::Abend { code, .. } if code == "S322" && waiting => Outcome::Waiting,
         outcome => outcome,
+    }
+}
+
+/// The lines an S322's message says its loop runs, from "in the loop over lines 12, 14 and 3 more".
+fn loop_lines(message: &str) -> BTreeSet<i64> {
+    let Some((_, list)) = message.rsplit_once("in the loop over lines ") else { return BTreeSet::new() };
+    list.split(" and ").next().unwrap_or("").split(", ").filter_map(|n| n.trim().parse().ok()).collect()
+}
+
+/// Whether two S322s are one loop: in one file, and running a line in common.
+fn same_loop(a: &Outcome, b: &Outcome) -> bool {
+    match (a, b) {
+        (Outcome::Abend { code: c, file: f, line: l, message: m }, Outcome::Abend { code: d, file: g, line: k, message: n }) if c == "S322" && d == "S322" && f == g => {
+            l == k || !loop_lines(m).is_disjoint(&loop_lines(n))
+        }
+        _ => false,
     }
 }
 
@@ -169,6 +187,8 @@ pub(crate) enum Outcome {
     Clean,
     Abend { code: String, file: String, line: i64, message: String },
     Timeout,
+    /// Stopped at its timeout or statement limit while ACCEPT kept finding SYSIN at its end.
+    Waiting,
     /// The run stopped for a reason of its surroundings, with the last line it said.
     Refused(String),
     /// ironwork itself failed, with where and why it panicked.
@@ -193,6 +213,7 @@ impl Outcome {
             Outcome::Clean => "ended normally".into(),
             Outcome::Abend { code, file, line, .. } => format!("ended with {code} at {file}:{line}"),
             Outcome::Timeout => "timed out".into(),
+            Outcome::Waiting => "kept waiting for input after SYSIN's end".into(),
             Outcome::Refused(why) => format!("was refused: {why}"),
             Outcome::Crash(why) => format!("crashed ironwork: {why}"),
         }
@@ -373,12 +394,17 @@ fn data_set(records: &[Vec<u8>], rdw: bool) -> Vec<u8> {
     records.iter().flat_map(|r| ((r.len() + 4) as u16).to_be_bytes().into_iter().chain([0, 0]).chain(r.iter().copied())).collect()
 }
 
-/// A SYSIN card. A z/OS SYSIN record has 80 bytes, so a blank card is spaces, never empty.
+/// A SYSIN card. A z/OS SYSIN record has 80 bytes, so a blank card is spaces, never empty; and the
+/// reader ends in-stream data at a card that starts `/*` or `//`, so no card does.
 fn sysin_line(rng: &mut Rng) -> Vec<u8> {
-    match text_line(rng, &[80, 80, 10, 1, 0]) {
+    let mut line = match text_line(rng, &[80, 80, 10, 1, 0]) {
         line if line.is_empty() => vec![b' '; 80],
         line => line,
+    };
+    if line.starts_with(b"/*") || line.starts_with(b"//") {
+        line[0] = b' ';
     }
+    line
 }
 
 /// A PARM of up to the 100 characters JCL allows; a slash in it may set runtime options apart.
@@ -599,14 +625,15 @@ pub(crate) fn elementary(layout: &exec::layout::Layout, root: usize, base: u32, 
 /// it was given for. `dir` is removed.
 pub(crate) fn finish(command: Command, dir: &Path, timeout: Duration, given: &[(&str, PathBuf)], abend: impl Fn(&str) -> Option<Outcome>) -> std::io::Result<Outcome> {
     Ok(match wait_for(command, dir, timeout, given)? {
-        None => Outcome::Timeout,
-        Some((code, text)) => ended(code, &text, abend),
+        (None, _) => Outcome::Timeout,
+        (Some(code), text) => ended(code, &text, abend),
     })
 }
 
-/// As [`finish`], the exit code and standard error of a run that ended, None for one stopped at
-/// `timeout`.
-fn wait_for(mut command: Command, dir: &Path, timeout: Duration, given: &[(&str, PathBuf)]) -> std::io::Result<Option<(Option<i32>, String)>> {
+/// As [`finish`]: the exit code of a run that ended, Some(None) when a signal ended it and None
+/// when it was stopped at `timeout`, and its standard error either way, at most [`STDERR_KEPT`]
+/// bytes from each end.
+fn wait_for(mut command: Command, dir: &Path, timeout: Duration, given: &[(&str, PathBuf)]) -> std::io::Result<(Option<Option<i32>>, String)> {
     // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path -- a fixed name in the run's own scratch directory
     let stderr = fs::File::create(dir.join("stderr"))?;
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(stderr);
@@ -624,12 +651,34 @@ fn wait_for(mut command: Command, dir: &Path, timeout: Duration, given: &[(&str,
         std::thread::sleep(Duration::from_millis(5));
     };
     // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path -- a fixed name in the run's own scratch directory
-    let mut text = String::from_utf8_lossy(&fs::read(dir.join("stderr")).unwrap_or_default()).into_owned();
+    let mut text = String::from_utf8_lossy(&ends_of(&dir.join("stderr"))?).into_owned();
     for (dd, path) in given {
         text = text.replace(&path.display().to_string(), dd);
     }
     let _ = fs::remove_dir_all(dir);
-    Ok(status.map(|s| (s.code(), text)))
+    Ok((status.map(|s| s.code()), text))
+}
+
+/// How much of a run's standard error is read from each end: a refusal leads it, an abend or a
+/// panic ends it, and a program can write without bound between.
+const STDERR_KEPT: u64 = 1 << 20;
+
+/// A file's bytes, or its first and last [`STDERR_KEPT`] bytes when it holds more.
+fn ends_of(path: &Path) -> std::io::Result<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = fs::File::open(path)?;
+    let size = file.metadata()?.len();
+    if size <= 2 * STDERR_KEPT {
+        let mut all = Vec::new();
+        file.read_to_end(&mut all)?;
+        return Ok(all);
+    }
+    let mut out = vec![0; STDERR_KEPT as usize];
+    file.read_exact(&mut out)?;
+    out.push(b'\n');
+    file.seek(SeekFrom::End(-(STDERR_KEPT as i64)))?;
+    file.read_to_end(&mut out)?;
+    Ok(out)
 }
 
 /// One run as its own process, so a run that loops is stopped and one that fails stops nothing else.
@@ -696,8 +745,9 @@ impl Runner<'_> {
         }
         let roots = self.req.roots();
         let timeout = if inputs.limit.is_some() { self.req.timeout * HANG_PATIENCE } else { self.req.timeout };
-        let Some((code, text)) = wait_for(command, &dir, timeout, &given)? else { return Ok(Outcome::Timeout) };
-        Ok(waited(ended(code, &text, |l| abend_line(l, &roots)), &text))
+        let (exit, text) = wait_for(command, &dir, timeout, &given)?;
+        let outcome = exit.map_or(Outcome::Timeout, |code| ended(code, &text, |l| abend_line(l, &roots)));
+        Ok(waited(outcome, &text))
     }
 }
 
@@ -803,16 +853,21 @@ pub(crate) fn input(id: &str, kind: &str, name: &str, bytes: &[u8], minimized: b
 }
 
 /// A kept run as the manifest lists it: its inputs by id, its abend and whether the same input gives
-/// it again compiled with OPTIMIZE(2), and its journal and coverage.
-pub(crate) fn kept_run(ids: Vec<Value>, abend: &Outcome, optimized: bool, journal: String, n: usize) -> Value {
+/// it again compiled with OPTIMIZE(2), the statement limit it ran under, and its journal and
+/// coverage.
+pub(crate) fn kept_run(ids: Vec<Value>, abend: &Outcome, optimized: bool, limit: Option<u64>, journal: String, n: usize) -> Value {
     let Outcome::Abend { code, file, line, message } = abend else { unreachable!("only an abend is kept") };
-    obj(vec![
+    let mut pairs = vec![
         ("input", Value::Arr(ids)),
         ("outcome", "abend".into()),
         ("abend", obj(vec![("code", code.as_str().into()), ("file", file.as_str().into()), ("line", (*line).into()), ("message", message.as_str().into()), ("optimized", optimized.into())])),
         ("journal", journal.into()),
         ("coverage", format!("coverage/{n}.json").into()),
-    ])
+    ];
+    if let Some(limit) = limit {
+        pairs.push(("limit", Value::from(limit)));
+    }
+    obj(pairs)
 }
 
 /// A directory resolved, `..` and links included; an empty path is the current directory.
@@ -890,7 +945,7 @@ impl Tally {
     pub(crate) fn add(&mut self, outcome: &Outcome) {
         let tally = match outcome {
             Outcome::Clean => "clean",
-            Outcome::Timeout => "timeout",
+            Outcome::Timeout | Outcome::Waiting => "timeout",
             Outcome::Refused(why) => {
                 self.refused.get_or_insert_with(|| why.clone());
                 "refused"
@@ -920,9 +975,19 @@ impl Tally {
         }
     }
 
-    pub(crate) fn summary(&self, kept: usize, out: &Path) -> String {
+    /// The last line a fuzz run prints. A kept S322 came from a timeout and a kept S806 from a
+    /// refusal, so the kept runs are counted apart from the outcomes.
+    pub(crate) fn summary(&self, kept: &[String], out: &Path) -> String {
         let c = &self.counts;
-        format!("ironwork fuzz: {} runs, {} clean, {} abend ({kept} kept), {} timeout, {} refused: {}", c["runs"], c["clean"], c["abend"], c["timeout"], c["refused"], out.display())
+        let of = |code: &str| kept.iter().filter(|k| *k == code).count();
+        let (hangs, chosen) = (of("S322"), of("S806"));
+        let kinds: Vec<String> = [(hangs, "hang", "hangs"), (chosen, "CALL the input named", "CALLs the input named")]
+            .into_iter()
+            .filter(|&(n, _, _)| n > 0)
+            .map(|(n, one, many)| format!("{n} {}", if n == 1 { one } else { many }))
+            .collect();
+        let kinds = if kinds.is_empty() { String::new() } else { format!(" ({})", kinds.join(", ")) };
+        format!("ironwork fuzz: {} runs, {} clean, {} abend, {} timeout, {} refused; {} kept{kinds}: {}", c["runs"], c["clean"], c["abend"], c["timeout"], c["refused"], kept.len(), out.display())
     }
 }
 
@@ -993,7 +1058,6 @@ pub fn run(req: Request) -> ExitCode {
         Err(e) => return fail(e),
     };
     let header = Header { seed: req.seed, clock: &req.clock, file: &file, id: &compiled.program.id, root: &req.root, roots: &req.roots(), entry: "run" };
-    let kept = found.runs.len();
     if let Err(e) = write_manifest(&req.out, &header, found.inputs, &found.tally, found.runs) {
         return fail(format!("-o {}: {e}", req.out.display()));
     }
@@ -1007,7 +1071,7 @@ pub fn run(req: Request) -> ExitCode {
     if let Some((code, file, line)) = found.baseline {
         eprintln!("ironwork fuzz: the program ends with {code} at {file}:{line} on empty input; that abend is not kept");
     }
-    println!("{}", found.tally.summary(kept, &req.out));
+    println!("{}", found.tally.summary(&found.codes, &req.out));
     ExitCode::SUCCESS
 }
 
@@ -1019,11 +1083,12 @@ struct Varied {
     parms: Vec<String>,
 }
 
-/// The kept abends' inputs and runs as the manifest lists them, what the runs came to, and the
-/// abend the run on empty input gave.
+/// The kept abends' inputs and runs as the manifest lists them and their codes, what the runs came
+/// to, and the abend the run on empty input gave.
 struct Found {
     inputs: Vec<Value>,
     runs: Vec<Value>,
+    codes: Vec<String>,
     tally: Tally,
     baseline: Option<(String, String, i64)>,
 }
@@ -1041,14 +1106,14 @@ fn drive(out: &Path, runs: u32, seed: u64, hang_limit: u64, varied: &Varied, run
         parms: varied.parms.iter().map(|k| (k.clone(), Vec::new())).collect(),
         ..Default::default()
     };
-    let mut baseline = run(&empty, None).map_err(started)?;
-    if baseline == Outcome::Timeout {
-        baseline = run(&Inputs { limit: Some(hang_limit), ..empty }, None).map_err(started)?;
+    let mut ended_empty = run(&empty, None).map_err(started)?;
+    if ended_empty == Outcome::Timeout {
+        ended_empty = run(&Inputs { limit: Some(hang_limit), ..empty }, None).map_err(started)?;
     }
-    let baseline = baseline.place();
+    let baseline = ended_empty.place();
     let mut rng = Rng(seed.max(1));
     let mut tally = Tally::new();
-    let mut kept: Vec<((String, String, i64), Inputs)> = Vec::new();
+    let mut kept: Vec<((String, String, i64), Inputs, Outcome)> = Vec::new();
     let mut chosen: Vec<((String, String, i64), String, Inputs)> = Vec::new();
     let mut rechecks = 0;
     for _ in 0..runs {
@@ -1056,11 +1121,13 @@ fn drive(out: &Path, runs: u32, seed: u64, hang_limit: u64, varied: &Varied, run
         let outcome = run(&inputs, None).map_err(started)?;
         tally.add(&outcome);
         let found = match &outcome {
-            // A timeout is a finding only where a longer limit ends the same input in S322.
+            // A timeout is a finding only where a longer limit ends the same input in S322, in a
+            // loop the empty input does not run.
             Outcome::Timeout if rechecks < HANG_RECHECKS => {
                 rechecks += 1;
                 let limited = Inputs { limit: Some(hang_limit), ..inputs };
-                run(&limited, None).map_err(started)?.place().filter(|p| p.0 == "S322").map(|p| (p, limited))
+                let hang = run(&limited, None).map_err(started)?;
+                hang.place().filter(|p| p.0 == "S322" && !same_loop(&hang, &ended_empty)).map(|p| (p, limited, hang))
             }
             // An S806 is a finding only where the name it CALLed came from the input, which a
             // marker in the name's place shows at the end.
@@ -1074,19 +1141,19 @@ fn drive(out: &Path, runs: u32, seed: u64, hang_limit: u64, varied: &Varied, run
                 }
                 None
             }
-            outcome => outcome.place().map(|p| (p, inputs)),
+            outcome => outcome.place().map(|p| (p, inputs, outcome.clone())),
         };
-        if let Some((place, inputs)) = found
+        if let Some((place, inputs, outcome)) = found
             && Some(&place) != baseline.as_ref()
-            && !kept.iter().any(|(p, _)| *p == place)
+            && !kept.iter().any(|(p, _, o)| *p == place || same_loop(o, &outcome))
         {
-            kept.push((place, inputs));
+            kept.push((place, inputs, outcome));
         }
     }
 
-    let (mut inputs_out, mut runs_out) = (Vec::new(), Vec::new());
+    let (mut inputs_out, mut runs_out, mut codes) = (Vec::new(), Vec::new(), Vec::new());
     let mut n = 0;
-    for (place, found) in kept {
+    for (place, found, _) in kept {
         let budget = if found.limit.is_some() { 10 } else { 200 };
         let (small, minimized) = minimize(run, &varied.feeds, found, &place, budget);
         let before = journals(&evidence);
@@ -1096,8 +1163,9 @@ fn drive(out: &Path, runs: u32, seed: u64, hang_limit: u64, varied: &Varied, run
         let journal = journals(&evidence).into_iter().find(|j| !before.contains(j)).filter(|_| came_again);
         match journal {
             Some(journal) => {
-                let optimized = gives_again(run, &small, &place).map_err(started)?;
-                runs_out.push(kept_run(listed(&small, varied, n, minimized, &mut inputs_out), &outcome, optimized, journal, n));
+                let optimized = place.0 == "S322" || gives_again(run, &small, &place).map_err(started)?;
+                runs_out.push(kept_run(listed(&small, varied, n, minimized, &mut inputs_out), &outcome, optimized, small.limit, journal, n));
+                codes.push(place.0.clone());
             }
             None => {
                 let why = if came_again { "wrote no journal".to_string() } else { outcome.told() };
@@ -1116,14 +1184,14 @@ fn drive(out: &Path, runs: u32, seed: u64, hang_limit: u64, varied: &Varied, run
         let journal = journals(&evidence).into_iter().find(|j| !before.contains(j)).filter(|j| named && marker_reached(&evidence, j, place.2));
         match journal {
             Some(journal) => {
-                let optimized = gives_again(run, &marked, &place).map_err(started)?;
-                runs_out.push(kept_run(listed(&marked, varied, n, false, &mut inputs_out), &outcome, optimized, journal, n));
+                runs_out.push(kept_run(listed(&marked, varied, n, false, &mut inputs_out), &outcome, true, None, journal, n));
+                codes.push(place.0.clone());
             }
             None => eprintln!("ironwork fuzz: S806 at {}:{} is not kept: its run with {marker} in place of {name} did not show the CALL took the name from the input", place.1, place.2),
         }
         n += 1;
     }
-    Ok(Found { inputs: inputs_out, runs: runs_out, tally, baseline })
+    Ok(Found { inputs: inputs_out, runs: runs_out, codes, tally, baseline })
 }
 
 /// Whether `inputs` end at `place` again with the program compiled at OPTIMIZE(2), where IBM may
@@ -1162,6 +1230,25 @@ pub(crate) fn journals(evidence: &Path) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_sysin_card_starts_as_the_end_of_in_stream_data() {
+        let mut rng = Rng(11);
+        for _ in 0..20_000 {
+            let card = sysin_line(&mut rng);
+            assert!(!card.starts_with(b"/*") && !card.starts_with(b"//"), "{}", String::from_utf8_lossy(&card));
+        }
+    }
+
+    #[test]
+    fn two_s322s_are_one_loop_in_one_file_with_a_line_in_common() {
+        let s322 = |file: &str, line: i64, lines: &str| Outcome::Abend { code: "S322".into(), file: file.into(), line, message: format!("the run reached its statement limit, as a step past its TIME= ends, in the loop over lines {lines}") };
+        assert_eq!(loop_lines("…, in the loop over lines 12, 14 and 3 more"), [12, 14].into());
+        assert!(same_loop(&s322("P.cbl", 30, "30, 31, 32"), &s322("P.cbl", 25, "25, 26, 30")));
+        assert!(!same_loop(&s322("P.cbl", 30, "30, 31"), &s322("P.cbl", 40, "40, 41")));
+        assert!(!same_loop(&s322("P.cbl", 30, "30"), &s322("Q.cbl", 30, "30")));
+        assert!(!same_loop(&s322("P.cbl", 30, "30"), &Outcome::Timeout));
+    }
 
     #[test]
     fn base64_pads_as_rfc_4648_does() {

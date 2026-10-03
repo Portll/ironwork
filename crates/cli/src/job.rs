@@ -230,6 +230,52 @@ fn gdg_text(limit: u16, scratch: bool, empty: bool) -> String {
     format!("{GDG_MAGIC} LIMIT={limit} {} {}\n", if scratch { "SCRATCH" } else { "NOSCRATCH" }, if empty { "EMPTY" } else { "NOEMPTY" })
 }
 
+/// The group's base under `datasets`, when `base` names one.
+fn gdg_in(datasets: &Path, base: &str) -> Option<Gdg> {
+    let text = fs::read_to_string(datasets.join(base)).ok()?;
+    let mut words = text.lines().next()?.split_whitespace();
+    if words.next()? != GDG_MAGIC {
+        return None;
+    }
+    let limit = words.next()?.strip_prefix("LIMIT=")?.parse().ok()?;
+    let rest: Vec<&str> = words.collect();
+    Some(Gdg { limit, empty: rest.contains(&"EMPTY") })
+}
+
+/// The generation numbers catalogued for `base` under `datasets`, oldest first.
+fn generations_in(datasets: &Path, base: &str) -> Vec<u32> {
+    let prefix = format!("{base}.G");
+    let mut out: Vec<u32> = fs::read_dir(datasets)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let rest = name.strip_prefix(&prefix)?;
+            let (number, version) = rest.split_once('V')?;
+            (number.len() == 4 && version == "00").then(|| number.parse().ok()).flatten()
+        })
+        .collect();
+    out.sort_unstable();
+    out
+}
+
+/// Whether `base` under `datasets` is a generation data group's base.
+pub(crate) fn is_gdg(datasets: &Path, base: &str) -> bool {
+    gdg_in(datasets, base).is_some()
+}
+
+/// The data set name of the generation of group `base` under `datasets` that `relative` names
+/// among those catalogued there (0 the newest, -1 the one before), when `base` is a group and has
+/// it.
+pub(crate) fn existing_generation(datasets: &Path, base: &str, relative: i32) -> Option<String> {
+    gdg_in(datasets, base)?;
+    let all = generations_in(datasets, base);
+    let back = usize::try_from(relative.checked_neg()?).ok()?;
+    let number = all.len().checked_sub(back + 1).map(|k| all[k])?;
+    Some(format!("{base}.G{number:04}V00"))
+}
+
 struct Runner<'a> {
     req: &'a Request,
     datasets: PathBuf,
@@ -240,8 +286,9 @@ struct Runner<'a> {
     /// Data sets this job created that are only passed so far: deleted when the job ends.
     passed_new: BTreeSet<PathBuf>,
     files: usize,
-    /// With --coverage, the paragraphs the job's programs entered and each program's outline.
-    coverage: Option<RefCell<(crate::coverage::Coverage, Vec<crate::coverage::Outline>)>>,
+    /// With --coverage, the paragraphs the job's programs entered and each program's outline, by
+    /// the source each step ran.
+    coverage: Option<RefCell<crate::coverage::BySource>>,
 }
 
 fn fresh_name(dir: &Path, n: &mut usize, what: &str) -> PathBuf {
@@ -397,34 +444,12 @@ impl Runner<'_> {
         }
     }
 
-    /// The group's base, when `base` names one.
     fn gdg(&self, base: &str) -> Option<Gdg> {
-        let text = fs::read_to_string(self.datasets.join(base)).ok()?;
-        let mut words = text.lines().next()?.split_whitespace();
-        if words.next()? != GDG_MAGIC {
-            return None;
-        }
-        let limit = words.next()?.strip_prefix("LIMIT=")?.parse().ok()?;
-        let rest: Vec<&str> = words.collect();
-        Some(Gdg { limit, empty: rest.contains(&"EMPTY") })
+        gdg_in(&self.datasets, base)
     }
 
-    /// The generation numbers catalogued for `base`, oldest first.
     fn generations(&self, base: &str) -> Vec<u32> {
-        let prefix = format!("{base}.G");
-        let mut out: Vec<u32> = fs::read_dir(&self.datasets)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter_map(|e| {
-                let name = e.file_name().to_string_lossy().into_owned();
-                let rest = name.strip_prefix(&prefix)?;
-                let (number, version) = rest.split_once('V')?;
-                (number.len() == 4 && version == "00").then(|| number.parse().ok()).flatten()
-            })
-            .collect();
-        out.sort_unstable();
-        out
+        generations_in(&self.datasets, base)
     }
 
     /// The file of a relative generation. Numbers are relative to the generations the job began
@@ -1039,11 +1064,10 @@ pub fn run(req: Request) -> ExitCode {
     if let Some(j) = journal.into_inner() {
         crate::evidence::finish(Some(j), exit::recorded(report.outcome));
     }
-    if let (Some(file), Some(c)) = (&req.coverage, &runner.coverage) {
-        let (covered, outlines) = &*c.borrow();
-        if let Err(e) = fs::write(file, format!("{}\n", exec::evidence::canonical(&covered.report(outlines)))) {
-            eprintln!("ironwork: --coverage {}: {e}", file.display());
-        }
+    if let (Some(file), Some(c)) = (&req.coverage, &runner.coverage)
+        && let Err(e) = fs::write(file, format!("{}\n", exec::evidence::canonical(&c.borrow().report())))
+    {
+        eprintln!("ironwork: --coverage {}: {e}", file.display());
     }
     for path in std::mem::take(&mut runner.passed_new) {
         let _ = delete_data_set(&path);
@@ -1147,7 +1171,13 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                     Program::Sort => Ok(sort_step(&dds)),
                     Program::Cobol(path) => {
                         programs.insert(path.clone());
-                        run_cobol(&path, step.parm.as_deref().unwrap_or(""), runner.req, &dds, database.as_deref_mut(), &mut stdout, &mut programs, run.as_ref(), roots, &mut place, runner.coverage.as_ref())
+                        let covered = runner.coverage.as_ref().map(|_| RefCell::new(Default::default()));
+                        let ended = run_cobol(&path, step.parm.as_deref().unwrap_or(""), runner.req, &dds, database.as_deref_mut(), &mut stdout, &mut programs, run.as_ref(), roots, &mut place, covered.as_ref());
+                        if let (Some(all), Some(step)) = (&runner.coverage, covered) {
+                            let (coverage, outlines) = step.into_inner();
+                            all.borrow_mut().add(crate::evidence::relative(&path, roots), coverage, outlines);
+                        }
+                        ended
                     }
                     Program::Missing => Err(Failed::abend(AbendCode::ModuleNotFound, format!("program {} is not in the program libraries", step.pgm))),
                 };

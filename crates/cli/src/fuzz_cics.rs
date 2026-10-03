@@ -520,7 +520,7 @@ pub fn run(req: Request) -> ExitCode {
         }
     }
 
-    let (mut inputs_out, mut runs_out) = (Vec::new(), Vec::new());
+    let (mut inputs_out, mut runs_out, mut codes) = (Vec::new(), Vec::new(), Vec::new());
     for (n, (place, found)) in kept.into_iter().enumerate() {
         let (small, minimized) = minimize(&mut runner, shape.as_ref(), found, &place, 200);
         let before = journals(&evidence);
@@ -551,11 +551,11 @@ pub fn run(req: Request) -> ExitCode {
             inputs_out.push(input(&id, "terminal", &termid, script(turns).as_bytes(), minimized));
             ids.push(Value::from(id));
         }
-        runs_out.push(kept_run(ids, &outcome, optimized, journal, n));
+        codes.push(place.0.clone());
+        runs_out.push(kept_run(ids, &outcome, optimized, None, journal, n));
     }
     let _ = fs::remove_dir_all(&runner.work);
 
-    let kept = runs_out.len();
     let header = Header { seed: f.seed, clock: &f.clock, file: &file, id: &compiled.program.id, root: &f.root, roots: &roots, entry: "cics" };
     if let Err(e) = write_manifest(&f.out, &header, inputs_out, &tally, runs_out) {
         return fail(format!("-o {}: {e}", f.out.display()));
@@ -570,7 +570,7 @@ pub fn run(req: Request) -> ExitCode {
     if let Some((code, file, line)) = baseline {
         eprintln!("ironwork fuzz: the task ends with {code} at {file}:{line} with no COMMAREA and no operator input; that abend is not kept");
     }
-    println!("{}", tally.summary(kept, &f.out));
+    println!("{}", tally.summary(&codes, &f.out));
     ExitCode::SUCCESS
 }
 
