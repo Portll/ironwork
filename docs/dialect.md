@@ -228,7 +228,6 @@ Each changes results under `ibm`. Those fixed since are in 5.7.
 
 | Difference | ironwork | IBM, and cobc | Seen in |
 |---|---|---|---|
-| DISPLAY of a negative or non-integer function value | sign and decimal point dropped, 31 digits: FUNCTION INTEGER(-2.5) shows `0000000000000000000000000000030` (`rt::display::value`) | the sign and the value | test programs |
 | A BY VALUE argument to a BY REFERENCE parameter | the callee gets a copy and runs | the value is in the parameter list, so the callee reads it as an address; cobc faults | test programs |
 | DISPLAY of a national item to SYSOUT | converted from UTF-16 | written as its UTF-16 bytes; only UPON CONSOLE converts (Programming Guide, Displaying values) | corpus |
 | `PIC 99 VALUE "7"` | accepted, 7 stored | refused by IBM; cobc warns and stores 70 | corpus |
@@ -244,7 +243,7 @@ Each changes results under `ibm`. Those fixed since are in 5.7.
 | C99, control passing the end of a paragraph armed to return to a PERFORM that repeats, left by GO TO | refused at run time, abend IRONWORK | returns, and the PERFORM goes on with its iterations | ironwork has no model of that return in either executor |
 | C112, an argument outside a function's domain | abend IRONWORK | EC-ARGUMENT-FUNCTION set and never raised, the result 0; FACTORIAL exact past 28 | Language Environment's math services signal a condition there, so zero would hide what z/OS does |
 | C181, a contained program CALLed from outside its container | found in ironwork's flat library, and the run ends when it uses a GLOBAL name | the CALL finds no program, as IBM's scope rules say | IBM documents the scope; a scope check belongs under both dialects |
-| No assumption: DISPLAY of LENGTH OF and of a function's value | the digits of the value's places: LENGTH OF and LENGTH 9, ORD 3, MOD and INTEGER 31, INTEGER-OF-DATE 7 | by each result's field: a fixed size's LENGTH OF or LENGTH folded to a literal (`4`), a variable one `+0000000004`, an integer function's value in 10 digits, ABS as its argument's PICTURE | unrecorded; it needs an assumption first, and a rule per function |
+| No assumption: DISPLAY of LENGTH OF | its value's 9 digits | a fixed size's LENGTH OF folded to a literal (`4`), a variable one `+0000000004` | unrecorded; it needs an assumption first |
 | No assumption: the rest of an XML GENERATE receiver | kept as it was | filled with spaces (libcob/mlio.c) | unrecorded; C119 does not say it |
 
 ### 5.6 Programs one compiler refuses
@@ -275,3 +274,4 @@ dialects and on both executors (ironwork-roadmap 3.14).
 | INSPECT of a signed zoned item | examined as if moved to an unsigned item of its length, a separate sign not examined (p. 359, Table 40); REPLACING and CONVERTING keep the sign (C330) | the same | CCVS85 NC216A, which now passes |
 | SEARCH ... VARYING one of the table's own indexes | the search uses that index, and the table's first is left alone (p. 437) | the same | CCVS85 NC235A, which now passes |
 | An ALL literal compared with an item | as long as the item, so cut when it is longer (p. 17): ALL '00' compared with a `PIC 9` item is '0' | the same | CCVS85 NC250A, which now passes |
+| DISPLAY of an integer or numeric intrinsic function, FUNCTION INTEGER(-2.5) | refused when compiled: such a function can be used only where an arithmetic expression can (Language Reference SC27-8713-03, p. 499; Programming Guide SC27-8714-03, p. 56; C332), and COMPUTE gives its value to an item DISPLAY shows | shows the value and its sign | test programs |

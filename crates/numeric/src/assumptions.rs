@@ -318,6 +318,7 @@ pub const PRINT_LISTING_LAYOUT: &str = "C358";
 pub const PRINT_RANGE_ENDS: &str = "C359";
 pub const INSPECT_SIGNED_ZONED: &str = "C330";
 pub const RELATIVE_NUMBER_BELOW_ONE: &str = "C331";
+pub const DISPLAY_NUMERIC_FUNCTION: &str = "C332";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -2052,6 +2053,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: RELATIVE_NUMBER_BELOW_ONE,
         claim: "A relative record number below 1 names no record area, the first being number 1 (Language Reference SC27-8713-03, p. 147). A random WRITE with one reports 24, as a write beyond the file's boundaries, and a random READ, REWRITE or DELETE 23, as a record that does not exist. Table 34 (pp. 300-301) gives the meanings of 23 and 24 and does not name a record number below 1",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: DISPLAY_NUMERIC_FUNCTION,
+        claim: "DISPLAY of an integer or numeric intrinsic function is refused when compiled (S): such a function can be used only where an arithmetic expression can be specified (Language Reference SC27-8713-03, p. 499; Programming Guide SC27-8714-03, p. 56), and DISPLAY's operands are identifiers and literals (p. 333). The manuals give neither the message number nor its text: the message is ironwork's, and the severity is the one C190 gives INSPECT of such a function. MIN, MAX and CONTENT-OF, whose type follows their arguments, are not refused. Nor is a user-defined function: the Language Reference lets a numeric one be used wherever an arithmetic expression can be (p. 77) without saying only there, and DISPLAY shows its value as its RETURNING item",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

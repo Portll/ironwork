@@ -837,7 +837,14 @@ impl Check<'_> {
                 }
                 self.statements(other);
             }
-            Stmt::Display { items, .. } => items.iter().for_each(|o| self.operand(o)),
+            Stmt::Display { items, .. } => {
+                for o in items {
+                    self.operand(o);
+                    if let Operand::Function(f) = o {
+                        self.displayed_function(f);
+                    }
+                }
+            }
             Stmt::Open { files, pos } => files.iter().for_each(|(_, f)| self.file(f, *pos)),
             Stmt::Close { files, pos } => {
                 for (name, closing) in files {
@@ -1399,6 +1406,18 @@ impl Check<'_> {
         };
         if let Some(phrase) = stores {
             self.errors.push(Error::at(f.pos, format!("INSPECT FUNCTION {name} {phrase}: {phrase} stores into the inspected item, and a function-identifier cannot be a receiving operand")));
+        }
+    }
+
+    /// An integer or numeric intrinsic function can be used only where an arithmetic expression can
+    /// (Language Reference SC27-8713-03, p. 499; Programming Guide SC27-8714-03, p. 56), and
+    /// DISPLAY's operands are identifiers and literals (assumption C332).
+    fn displayed_function(&mut self, f: &FunctionCall) {
+        let name = f.name.as_str();
+        let intrinsic = FUNCTIONS.contains(&name) || rt::intrinsic::FUNCTIONS.contains(&name);
+        let user_defined = self.functions.into_iter().flatten().any(|u| u.name == name);
+        if intrinsic && !user_defined && !rt::intrinsic::CHARACTER_VALUED.contains(&name) {
+            self.errors.push(Error::at(f.pos, format!("DISPLAY FUNCTION {name}: an integer or numeric function can be used only where an arithmetic expression can, and DISPLAY takes none")));
         }
     }
 

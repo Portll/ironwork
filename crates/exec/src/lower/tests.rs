@@ -1227,7 +1227,7 @@ fn a_function_evaluates_its_arguments_then_any_again_as_an_integer_then_its_refe
             line("MOVE FUNCTION CHAR(N + 1) TO A"),
             line("MOVE FUNCTION MAX(F 1) TO N"),
             line("COMPUTE N = FUNCTION MOD(N 7) + FUNCTION RANDOM"),
-            line("DISPLAY FUNCTION TRIM(A LEADING) FUNCTION LENGTH(A N)"),
+            line("DISPLAY FUNCTION TRIM(A LEADING) FUNCTION REVERSE(A N)"),
             line("GOBACK."),
         ]
         .concat(),
@@ -1242,7 +1242,7 @@ fn a_function_evaluates_its_arguments_then_any_again_as_an_integer_then_its_refe
     assert_eq!(compute.mode, Mode::Float(numeric::Arith::Compat.float_intermediate()));
     assert_eq!((f[5].side, f[5].arity), (Some(lir::TrimSide::Leading), None));
     let arity = f[6].arity.unwrap();
-    assert_eq!((f[6].func, symbol(&p, p.abends[arity as usize].message)), (lir::Func::Length, "FUNCTION LENGTH takes 1..=1 arguments"));
+    assert_eq!((f[6].func, symbol(&p, p.abends[arity as usize].message)), (lir::Func::Reverse, "FUNCTION REVERSE takes 1..=1 arguments"));
     let Op::Display(d) = ops(&p).find(|op| matches!(op, Op::Display(_))).unwrap() else { unreachable!() };
     assert!(matches!(p.plans.display[*d as usize].items[..], [DisplayItem::Value(LirOperand::Function(5)), DisplayItem::Value(LirOperand::Function(6))]));
 }

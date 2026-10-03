@@ -134,3 +134,20 @@ fn an_all_literal_compared_with_an_item_is_cut_to_the_item_s_length() {
     );
     assert_eq!(on_both(&source), "D\nX\nY\n");
 }
+
+/// Language Reference SC27-8713-03, p. 499, and Programming Guide SC27-8714-03, p. 56: an integer or
+/// numeric function can be used only where an arithmetic expression can, which DISPLAY's operands
+/// are not. COMPUTE gives the value to an item DISPLAY shows.
+#[test]
+fn display_refuses_a_numeric_function_and_shows_the_item_compute_gives_it_to() {
+    let refused = program("", "", &[line("DISPLAY FUNCTION INTEGER(-2.5) FUNCTION UPPER-CASE('a')"), line("GOBACK.")].concat());
+    let errors = compile_errors(&refused);
+    assert!(errors.contains("DISPLAY FUNCTION INTEGER: an integer or numeric function can be used only where an arithmetic expression can"), "{errors}");
+    assert!(!errors.contains("UPPER-CASE"), "{errors}");
+    let source = program(
+        "",
+        "       01  R PIC S9(3)V9 SIGN LEADING SEPARATE.\n",
+        &[line("COMPUTE R = FUNCTION INTEGER(-2.5)"), line("DISPLAY R ' ' FUNCTION UPPER-CASE('a')"), line("GOBACK.")].concat(),
+    );
+    assert_eq!(on_both(&source), "-0030 A\n");
+}
