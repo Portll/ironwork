@@ -17,12 +17,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # cobolwork's option and CICS tables and fixtures/cobolwork are vendored; drift tests compare them.
+      # cobolwork's option and CICS tables and fixtures/cobolwork are vendored; drift tests compare them,
+      # and cobolwork's evidence verifier reads the evidence of ironwork runs.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Portll/cobolwork
           # Pinned to cobolwork commits whose shared tables drift tests pass against.
-          ref: 35f8a48c8a1f8b1b5c3024f9101c7b456ffada4d
+          ref: 2afba01205099f6a7d609b87cdca2cdbaeb0f5c3
           path: cobolwork
           persist-credentials: false
           sparse-checkout: |
@@ -34,6 +35,8 @@ jobs:
             test/fixtures/outbound/REGION.csd
             test/fixtures/priv/REGION.csd
             test/fixtures/web-csd/REGION.csd
+            test/fixtures/evidence/
+            lib/evidence/
           sparse-checkout-cone-mode: false
       # NIST's CCVS85 audit routines, one program to a file, which tools/nist.py runs.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,6 +47,10 @@ jobs:
           persist-credentials: false
           sparse-checkout: src/
           sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
       - name: Toolchain
         run: |
           rustup toolchain install stable --profile minimal --component clippy

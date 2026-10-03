@@ -108,7 +108,7 @@ fn region_definitions_read_as_cobolwork_reads_them() {
 fn the_vendored_fixtures_are_cobolworks() {
     let Ok(dir) = std::env::var("IRONWORK_COBOLWORK_DIR") else { return };
     let theirs = Path::new(&dir).join("test/fixtures");
-    for sub in ["bms", "sql"] {
+    for sub in ["bms", "sql", "evidence"] {
         let files = |root: &Path| {
             let mut names: Vec<String> = std::fs::read_dir(root.join(sub)).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).filter(|n| !n.starts_with('.')).collect();
             names.sort();

@@ -124,24 +124,27 @@ pub fn record_hash(record: &BTreeMap<String, Value>) -> String {
     hex(&sha256(text.as_bytes()))
 }
 
-/// The fields each kind ironwork writes may carry, and those it must.
+/// Each kind ironwork writes: the file it goes in, the fields it may carry and those it must. Each
+/// row stays within cobolwork's kinds table (fixtures/cobolwork/evidence/kinds.tsv), which its
+/// verifier holds every record to.
+const KINDS: [(&str, &str, &[&str], &[&str]); 13] = [
+    ("open", "journal", &["tool", "toolVersion", "toolRevision", "command", "argv", "roots", "platform"], &["tool", "toolVersion", "command", "argv", "roots"]),
+    ("input", "journal", &["root", "path", "sha256", "bytes"], &["root", "path", "sha256"]),
+    ("dd", "journal", &["dd", "event", "mode", "sha256", "bytes"], &["dd", "event"]),
+    ("call", "journal", &["program", "from", "sha256"], &["program"]),
+    ("abend", "journal", &["code", "file", "line"], &["code"]),
+    ("step", "journal", &["step", "pgm", "outcome"], &["step", "pgm", "outcome"]),
+    ("sink", "journal", &["sink", "file", "line", "marker", "reached", "input"], &["sink", "file", "line"]),
+    ("statement", "journal", &["file", "line", "capped"], &["file", "line"]),
+    ("output", "journal", &["name", "sha256", "bytes", "path", "stdout"], &["name", "sha256"]),
+    ("close", "journal", &["exit", "counts", "durationMs", "ledger"], &["exit"]),
+    ("genesis", "ledger", &["createdAt"], &["createdAt"]),
+    ("run", "ledger", &["run", "runChain", "runLength", "runTip"], &["run", "runChain", "runLength", "runTip"]),
+    ("lock-broken", "ledger", &["holderPid", "ageMs"], &["holderPid", "ageMs"]),
+];
+
 fn kind_fields(kind: &str) -> Option<(&'static [&'static str], &'static [&'static str])> {
-    Some(match kind {
-        "open" => (&["tool", "toolVersion", "toolRevision", "command", "argv", "roots", "platform"], &["tool", "toolVersion", "command", "argv", "roots"]),
-        "input" => (&["root", "path", "sha256", "bytes"], &["root", "path", "sha256"]),
-        "dd" => (&["dd", "event", "mode", "sha256", "bytes"], &["dd", "event"]),
-        "call" => (&["program", "from", "sha256"], &["program"]),
-        "abend" => (&["code", "file", "line"], &["code"]),
-        "step" => (&["step", "pgm", "outcome"], &["step", "pgm", "outcome"]),
-        "sink" => (&["sink", "file", "line", "marker", "reached", "input"], &["sink", "file", "line"]),
-        "statement" => (&["file", "line", "capped"], &["file", "line"]),
-        "output" => (&["name", "sha256", "bytes", "path", "stdout"], &["name", "sha256"]),
-        "close" => (&["exit", "counts", "durationMs", "ledger"], &["exit"]),
-        "genesis" => (&["createdAt", "rotatedFrom"], &["createdAt"]),
-        "run" => (&["run", "runChain", "runLength", "runTip"], &["run", "runChain", "runLength", "runTip"]),
-        "lock-broken" => (&["holderPid", "ageMs"], &["holderPid", "ageMs"]),
-        _ => return None,
-    })
+    KINDS.iter().find(|(name, ..)| *name == kind).map(|(_, _, allowed, required)| (*allowed, *required))
 }
 
 fn check(kind: &str, record: &BTreeMap<String, Value>) -> io::Result<()> {
@@ -508,6 +511,33 @@ mod tests {
         let mut j = Journal::create(&dir.join("ev"), &[], "run", &[], "0.0.0").unwrap();
         assert!(j.append("dd", fields([("dd", "IN".into()), ("event", "open".into()), ("record", "SECRET".into())])).is_err());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// cobolwork's verifier refuses a kind it does not know, a field it does not list, and a record
+    /// without a field it requires.
+    #[test]
+    fn every_kind_ironwork_writes_is_one_cobolworks_verifier_accepts() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/cobolwork/evidence/kinds.tsv");
+        let table = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let words = |cell: &str| cell.split(' ').filter(|w| !w.is_empty()).map(String::from).collect::<Vec<_>>();
+        let theirs: BTreeMap<&str, (&str, Vec<String>, Vec<String>)> = table
+            .lines()
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .map(|l| match l.split('\t').collect::<Vec<_>>()[..] {
+                [kind, file, fields, required] => (kind, (file, words(fields), words(required))),
+                ref row => panic!("a row has four cells: {row:?}"),
+            })
+            .collect();
+        for (kind, file, allowed, required) in KINDS {
+            let (their_file, their_fields, their_required) = theirs.get(kind).unwrap_or_else(|| panic!("cobolwork's verifier knows no {kind} record"));
+            assert_eq!(file, *their_file, "{kind}: cobolwork reads it from the {their_file}");
+            for field in allowed {
+                assert!(their_fields.iter().any(|f| f == field), "{kind}: cobolwork's verifier refuses {field}");
+            }
+            for field in their_required {
+                assert!(required.contains(&field.as_str()), "{kind}: cobolwork's verifier requires {field}, which ironwork may leave out");
+            }
+        }
     }
 
     #[test]

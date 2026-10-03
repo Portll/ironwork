@@ -1,6 +1,6 @@
 //! `ironwork run --evidence`: the journal records the source, the COPY member, each DD's digest and
 //! the CALL and where an abend was, in whichever source, links every record to the one before,
-//! reaches the ledger, and is refused inside a directory the run reads.
+//! reaches the ledger, is refused inside a directory the run reads, and verifies under cobolwork.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -317,5 +317,75 @@ fn an_abend_in_a_later_cics_task_names_the_library_source_of_its_program() {
     let journal = fs::read_to_string(fs::read_dir(dir.join("ev/runs")).unwrap().next().unwrap().unwrap().path()).unwrap();
     let abend = journal.lines().find(|l| field(l, "kind") == Some("abend")).unwrap();
     assert_eq!((field(abend, "file"), field(abend, "line")), (Some("LIBPGM.cbl"), Some("8")), "{abend}");
+    fs::remove_dir_all(dir).unwrap();
+}
+
+/// A lock as a writer that died holding it a few minutes ago left it.
+fn stale_lock(ev: &Path, contents: &str) {
+    let lock = fs::File::create(ev.join("ledger.lock")).unwrap();
+    std::io::Write::write_all(&mut &lock, contents.as_bytes()).unwrap();
+    lock.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(180)).unwrap();
+}
+
+/// Run with IRONWORK_COBOLWORK_DIR naming a cobolwork checkout and node on the PATH; CI does.
+#[test]
+fn cobolworks_verifier_accepts_the_evidence_of_real_runs() {
+    let Ok(cobolwork) = std::env::var("IRONWORK_COBOLWORK_DIR") else { return };
+    let dir = temp("cobolwork-verify");
+    write_program(&dir);
+    fs::write(dir.join("src/DIVIDE.cbl"), cobol(&divides("DIVIDE"))).unwrap();
+    let dynamic = ["IDENTIFICATION DIVISION.", "PROGRAM-ID. DYNAMIC.", "DATA DIVISION.", "WORKING-STORAGE SECTION.", "01 N PIC X(8) VALUE 'HELPER'.", "PROCEDURE DIVISION.", "    CALL N.", "    GOBACK."];
+    fs::write(dir.join("src/DYNAMIC.cbl"), cobol(&dynamic.map(String::from))).unwrap();
+    fs::write(dir.join("data/statements"), "EVDEMO.cbl:17\n").unwrap();
+    let ev = dir.join("ev");
+    let run = |program: &str, extra: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_ironwork"))
+            .arg("run")
+            .arg(dir.join("src").join(program))
+            .arg("-L")
+            .arg(dir.join("lib"))
+            .arg("--dd")
+            .arg(format!("INFILE={}:text", dir.join("data/in.txt").display()))
+            .arg("--dd")
+            .arg(format!("OUTFILE={}:text", dir.join("data/out.txt").display()))
+            .arg("--evidence")
+            .arg(&ev)
+            .args(extra)
+            .output()
+            .unwrap()
+            .status
+            .code()
+    };
+    assert_eq!(run("EVDEMO.cbl", &["--trace-statements", &dir.join("data/statements").display().to_string()]), Some(0));
+    stale_lock(&ev, "");
+    assert_eq!(run("DIVIDE.cbl", &[]), Some(240));
+    let mut gone = Command::new(env!("CARGO_BIN_EXE_ironwork")).arg("--version").stdout(std::process::Stdio::null()).spawn().unwrap();
+    gone.wait().unwrap();
+    let old = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() - 180_000;
+    stale_lock(&ev, &format!("{} {old}\n", gone.id()));
+    assert_eq!(run("DYNAMIC.cbl", &["--trace-input"]), Some(0));
+
+    let mut kinds: Vec<String> = fs::read_dir(ev.join("runs"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .chain([ev.join("ledger.jsonl")])
+        .flat_map(|p| fs::read_to_string(p).unwrap().lines().map(|l| field(l, "kind").unwrap().to_string()).collect::<Vec<_>>())
+        .collect();
+    kinds.sort();
+    kinds.dedup();
+    assert_eq!(kinds, ["abend", "call", "close", "dd", "genesis", "input", "lock-broken", "open", "run", "sink", "statement"]);
+
+    let verify = "import { pathToFileURL } from 'node:url';
+        const { verifyEvidence } = await import(pathToFileURL(process.argv[1]).href);
+        const v = verifyEvidence(process.argv[2]);
+        process.stdout.write(JSON.stringify({ verified: v.verified, broken: v.broken, unrecorded: v.unrecorded, open: v.open }));";
+    let out = Command::new("node")
+        .args(["--input-type=module", "-e", verify])
+        .arg(Path::new(&cobolwork).join("lib/evidence/verify.mjs"))
+        .arg(&ev)
+        .output()
+        .expect("node, to run cobolwork's verifier");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), r#"{"verified":true,"broken":[],"unrecorded":[],"open":[]}"#);
     fs::remove_dir_all(dir).unwrap();
 }
