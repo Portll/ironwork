@@ -10,6 +10,10 @@ usage:
                [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
                [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                                                        compile and run; CBL and PROCESS cards set the options
+  ironwork run <module.iwm> [-L <dir>]... [-I <dir>]... [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
+               [--statement-limit N] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
+                                                       run a load module's first program on the VM, with the options
+                                                       it was compiled with
   ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]...
                                                        compile only
   ironwork cics <program.cbl> [run flags] [--vm] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
@@ -69,7 +73,10 @@ flags:
              --evidence or --serve
   -I <dir>   a copy library for COPY members, searched after the program's own directory
   -L <dir>   a program library: CALL finds a program there by name, after the programs in the
-             same source and the program's own directory
+             same source or module and the program's own directory. On the VM (--vm, or a module
+             run) CALL takes NAME.iwm, a load module, from any of these directories before NAME.cbl
+             source from any, and a module beside newer source is still the one that runs; the
+             interpreter reads source only
   --dd NAME=path[:format][:mod]
              the file a DD name stands for, as JCL would give it; DD_NAME in the environment also
              works. Binary files hold z/OS records (fixed, or variable behind 4-byte RDWs); :text
@@ -149,8 +156,11 @@ compile flags:
              PAYROLL.iwm. A source that does not compile or lower writes nothing, and a module is
              written whole or not at all. The same source, libraries and options give the same
              bytes; a program that uses FUNCTION WHEN-COMPILED holds the compile time, which is
-             SOURCE_DATE_EPOCH's when it is set. -L is taken as run takes it: every CALL is
-             resolved by name when it runs, so it does not change the module
+             SOURCE_DATE_EPOCH's when it is set. A mapset a SEND MAP or RECEIVE MAP names by a
+             literal is read from the copy libraries as NAME.bms into the module, which a run takes
+             it from; one named by a data item is looked for when the module runs. -L is taken as
+             run takes it: every CALL is resolved by name when it runs, so it does not change the
+             module
   --bundle NAME
              every source's programs in one module, NAME.iwm, with one directory, written only if
              every source compiles and lowers
@@ -318,7 +328,8 @@ exit status: for check and compile, and for a run the compile refuses, the compi
   of its messages' severities as IBM's: 0 none or informational, 4 warnings, 8, 12 or 16 errors; run
   and cics refuse from 12 under IBM's default NOCOMPILE(S), from 4 under -warnings-block, or as a
   card's COMPILE or NOCOMPILE says; compile gives 12 for a program lowering refuses, naming the
-  construct and where it is, and 16 for a source it cannot read or a module it cannot write.
+  construct and where it is, and 16 for a source it cannot read or a module it cannot write. run
+  gives 2 for a module the reader refuses (damaged, or another format version), which does not run.
   Otherwise RETURN-CODE when the run ends normally, 16 an abend; a RETURN-CODE outside 0-255 exits 255; 2 usage";
 
 const FLAGS: &[&str] = &["-silent", "-strict-sort-keys", "-warnings-block", "-debug"];
@@ -752,14 +763,44 @@ fn driver() -> ExitCode {
         [c, p] if c == "run" || c == "check" || c == "cics" => (c.as_str(), p.as_str()),
         _ => return usage_error("expected run, check or cics, and one program"),
     };
-    let text = match fs::read(path) {
-        Ok(bytes) => syntax::copy::decode(&bytes),
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
         Err(e) => {
             eprintln!("ironwork: {path}: {e}");
             return ExitCode::from(2);
         }
     };
     let own_directory = std::path::Path::new(path).parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    if bytes.starts_with(&exec::module::MAGIC[..4]) || path.to_ascii_lowercase().ends_with(".iwm") {
+        if command != "run" {
+            return usage_error(&format!("{path} is a load module, which run runs; check and cics take a source"));
+        }
+        if !flags.is_empty() || evidence_dir.is_some() || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() {
+            return usage_error(&format!(
+                "{path} is a load module, which holds the options it was compiled with; the compile flags, --evidence, --provenance, --coverage and the cics flags are for a source"
+            ));
+        }
+        let dds = match exec::files::Dds::new(&dds, true) {
+            Ok(d) => d,
+            Err(e) => return usage_error(&e),
+        };
+        let database = match open_database(replay, sql_db, sql_record, keyed) {
+            Ok(d) => d,
+            Err(code) => return code,
+        };
+        let sysin = match open_sysin(&dds) {
+            Ok(s) => s,
+            Err(code) => return code,
+        };
+        let library = exec::unit::Library {
+            dirs: std::iter::once(own_directory).chain(program_dirs).collect(),
+            copy: syntax::copy::Libraries::new(libraries),
+            statement_limit,
+            ..Default::default()
+        };
+        return run_module(path, &bytes, library, dds, sysin, clock, database, parm.as_deref());
+    }
+    let text = syntax::copy::decode(&bytes);
     if coverage_file.is_some() && command == "check" {
         return usage_error("--coverage is for run, cics and job");
     }
@@ -857,39 +898,18 @@ fn driver() -> ExitCode {
         Ok(d) => d,
         Err(e) => return usage_error(&e),
     };
-    let mut database = match (replay, sql_db, sql_record) {
-        (Some(_), Some(_), _) => return usage_error("--sql-replay and --sql-db are two databases; give one"),
-        (_, None, Some(_)) => return usage_error("--sql-record needs --sql-db"),
-        (Some(file), None, None) => match fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|text| exec::sql::Replay::parse(&text, keyed)) {
-            Ok(r) => Some(Box::new(r) as Box<dyn exec::sql::Database>),
-            Err(e) => {
-                eprintln!("ironwork: --sql-replay {file}: {e}");
-                return ExitCode::from(2);
-            }
-        },
-        (None, Some(url), record) => match live_database(&url, record.as_deref()) {
-            Ok(db) => Some(db),
-            Err(e) => {
-                eprintln!("ironwork: {e}");
-                return ExitCode::from(2);
-            }
-        },
-        (None, None, None) => None,
+    let mut database = match open_database(replay, sql_db, sql_record, keyed) {
+        Ok(d) => d,
+        Err(code) => return code,
     };
     if command == "cics" {
         let run = journal.map(|j| evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()).with_input(trace_input));
         let coverage = coverage_file.as_deref().map(|file| (file, outlines.as_slice()));
         return run_cics(&compiled, path, library, dds, clock, database, &cics_options, run, vm, coverage);
     }
-    let sysin: Box<dyn io::BufRead> = match dds.get("SYSIN") {
-        Some(dd) => match fs::File::open(&dd.path) {
-            Ok(f) => Box::new(io::BufReader::new(f)),
-            Err(e) => {
-                eprintln!("ironwork: DD SYSIN {}: {e}", dd.path.display());
-                return ExitCode::from(2);
-            }
-        },
-        None => Box::new(io::stdin().lock()),
+    let sysin = match open_sysin(&dds) {
+        Ok(s) => s,
+        Err(code) => return code,
     };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
     let shared = journal.map(|j| std::rc::Rc::new(std::cell::RefCell::new(evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()).with_input(trace_input))));
@@ -946,6 +966,96 @@ fn driver() -> ExitCode {
         }
         Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => ExitCode::SUCCESS,
         Err(abend) => report_abend(&compiled, path, &abend),
+    }
+}
+
+/// The database EXEC SQL reaches: a recording, PostgreSQL, or none; Err with the exit status after
+/// saying why not.
+fn open_database(replay: Option<String>, sql_db: Option<String>, sql_record: Option<String>, keyed: bool) -> Result<Option<Box<dyn exec::sql::Database>>, ExitCode> {
+    match (replay, sql_db, sql_record) {
+        (Some(_), Some(_), _) => Err(usage_error("--sql-replay and --sql-db are two databases; give one")),
+        (_, None, Some(_)) => Err(usage_error("--sql-record needs --sql-db")),
+        (Some(file), None, None) => match fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|text| exec::sql::Replay::parse(&text, keyed)) {
+            Ok(r) => Ok(Some(Box::new(r))),
+            Err(e) => {
+                eprintln!("ironwork: --sql-replay {file}: {e}");
+                Err(ExitCode::from(2))
+            }
+        },
+        (None, Some(url), record) => match live_database(&url, record.as_deref()) {
+            Ok(db) => Ok(Some(db)),
+            Err(e) => {
+                eprintln!("ironwork: {e}");
+                Err(ExitCode::from(2))
+            }
+        },
+        (None, None, None) => Ok(None),
+    }
+}
+
+/// What ACCEPT reads: DD SYSIN, else standard input.
+fn open_sysin(dds: &exec::files::Dds) -> Result<Box<dyn io::BufRead>, ExitCode> {
+    match dds.get("SYSIN") {
+        Some(dd) => match fs::File::open(&dd.path) {
+            Ok(f) => Ok(Box::new(io::BufReader::new(f))),
+            Err(e) => {
+                eprintln!("ironwork: DD SYSIN {}: {e}", dd.path.display());
+                Err(ExitCode::from(2))
+            }
+        },
+        None => Ok(Box::new(io::stdin().lock())),
+    }
+}
+
+/// `ironwork run x.iwm`: program 0 of the module on the VM, CALL finding the module's other
+/// programs first. A module the reader refuses, or whose program 0 does not pass the checks a
+/// program from a module must, exits 2 without running.
+#[allow(clippy::too_many_arguments)]
+fn run_module(
+    path: &str,
+    bytes: &[u8],
+    library: exec::unit::Library,
+    dds: exec::files::Dds,
+    sysin: Box<dyn io::BufRead>,
+    clock: exec::unit::Clock,
+    mut database: Option<Box<dyn exec::sql::Database>>,
+    parm: Option<&str>,
+) -> ExitCode {
+    let module = match exec::module::read(bytes) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("ironwork: {path}: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let Some(main) = module.programs.first() else {
+        eprintln!("ironwork: {path}: the module holds no program");
+        return ExitCode::from(2);
+    };
+    let symbol = |id: u32| main.symbols.get(id as usize).cloned().unwrap_or_default();
+    if let Err(e) = exec::lower::verify(main) {
+        eprintln!("ironwork: {path}: program {}: {e}", symbol(main.id));
+        return ExitCode::from(2);
+    }
+    if main.services.function.is_some() {
+        eprintln!("ironwork: {path}: FUNCTION-ID {}: the module holds user-defined functions and no program to run", symbol(main.id));
+        return ExitCode::from(16);
+    }
+    let sources: Vec<String> = main.debug.sources.iter().map(|&s| symbol(s)).collect();
+    let (mut out, mut err) = (io::stdout().lock(), io::stderr());
+    let ended = exec::vm::execute_module(module, std::path::Path::new(path), library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, parm);
+    match ended {
+        Ok((_, return_code)) => ExitCode::from(u8::try_from(return_code).unwrap_or(255)),
+        Err(exec::vm::Halt::Abend(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. })) => ExitCode::SUCCESS,
+        Err(exec::vm::Halt::Abend(abend)) => {
+            let file = abend.file.as_deref().or_else(|| sources.get(abend.pos.file as usize).map(String::as_str)).filter(|f| !f.is_empty()).unwrap_or(path);
+            eprintln!("{file}:{}: ABEND {}: {}", abend.pos, abend.code, abend.message);
+            ExitCode::from(16)
+        }
+        Err(exec::vm::Halt::Unimplemented(what)) => {
+            eprintln!("ironwork: {path}: the VM does not run {what} yet; run the source without --vm");
+            ExitCode::from(12)
+        }
     }
 }
 

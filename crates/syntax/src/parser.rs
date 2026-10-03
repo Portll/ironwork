@@ -403,7 +403,7 @@ impl Parser<'_> {
             }
             _ => self.name("a program name")?,
         };
-        let (mut initial, mut recursive) = (false, false);
+        let (mut initial, mut recursive, mut common) = (false, false, false);
         while let Some(t) = self.peek() {
             if *t == Tok::Period {
                 self.at += 1;
@@ -411,9 +411,13 @@ impl Parser<'_> {
             }
             initial |= self.is_word("INITIAL");
             recursive |= self.is_word("RECURSIVE");
+            common |= self.is_word("COMMON");
             self.at += 1;
         }
-        self.program_body(id, initial, recursive, options, out, false)
+        let first = out.len();
+        self.program_body(id, initial, recursive, options, out, false)?;
+        out[first].common = common;
+        Ok(())
     }
 
     /// The rest of a program, or of a method after its METHOD-ID paragraph; a method's END METHOD
@@ -3485,6 +3489,10 @@ mod tests {
         let all = crate::parse_all_with(&text, &Default::default()).unwrap_or_else(|e| panic!("{e}"));
         let contained: Vec<(&str, &[String])> = all.iter().map(|p| (p.id.as_str(), p.nested.as_slice())).collect();
         assert_eq!(contained, [("OUTER", &["A".to_owned(), "B".to_owned()][..]), ("A", &["A1".to_owned()][..]), ("A1", &[][..]), ("B", &[][..])]);
+        let text = program("OUTER", &[program("A IS COMMON", &program("A1 COMMON INITIAL", "")), program("B", "")].concat()).replace("END PROGRAM A IS COMMON", "END PROGRAM A").replace("END PROGRAM A1 COMMON INITIAL", "END PROGRAM A1");
+        let all = crate::parse_all_with(&text, &Default::default()).unwrap_or_else(|e| panic!("{e}"));
+        let common: Vec<(&str, bool, bool)> = all.iter().map(|p| (p.id.as_str(), p.common, p.initial)).collect();
+        assert_eq!(common, [("OUTER", false, false), ("A", true, false), ("A1", true, true), ("B", false, false)]);
     }
 
     #[test]

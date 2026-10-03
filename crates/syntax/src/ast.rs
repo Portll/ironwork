@@ -12,6 +12,8 @@ pub struct Program {
     /// afresh on every CALL.
     pub initial: bool,
     pub recursive: bool,
+    /// PROGRAM-ID ... IS COMMON, for a program another contains.
+    pub common: bool,
     pub working_storage: Vec<DataEntry>,
     /// LOCAL-STORAGE: fresh for every activation of the program.
     pub local_storage: Vec<DataEntry>,

@@ -47,6 +47,7 @@ pub struct Loaded<H> {
 
 pub enum LoadError {
     NotFound,
+    /// Found, but its source does not compile or its load module does not load.
     Compile(String),
 }
 

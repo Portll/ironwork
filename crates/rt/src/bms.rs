@@ -1,5 +1,8 @@
 //! The mapset model BMS map source describes: each map's fields with their positions, attributes
-//! and initial data, as SEND MAP and RECEIVE MAP use it.
+//! and initial data, as SEND MAP and RECEIVE MAP use it, and as a load module's `BMS` section holds
+//! it (load-module.md §5.3).
+
+use crate::{codec_enum, codec_struct};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -79,6 +82,15 @@ pub struct Mapset {
     pub ctrl: Vec<String>,
     pub maps: Vec<Map>,
 }
+
+codec_enum!(Mode { In = 0, Out = 1, InOut = 2 });
+codec_enum!(Protection { Askip = 0, Prot = 1, Unprot = 2 });
+codec_enum!(Intensity { Norm = 0, Brt = 1, Drk = 2 });
+codec_enum!(Initial { Text(text) = 0, Bytes(bytes) = 1 });
+codec_struct!(Attrb { protection, numeric, intensity, detectable, cursor, fset });
+codec_struct!(Field { name, line, column, length, attrb, initial, picin, picout, occurs, group, justify_right, fill_zero, color, hilight });
+codec_struct!(Map { name, lines, columns, line, column, ctrl, tioapfx, dsatts, fields });
+codec_struct!(Mapset { name, mode, ctrl, maps });
 
 /// The extended attributes in symbolic-map order: name, field-name suffix, and whether EXTATT=YES implies it.
 pub const EXTENDED: &[(&str, char, bool)] = &[

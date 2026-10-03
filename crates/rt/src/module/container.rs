@@ -22,7 +22,7 @@ pub struct Version {
 }
 
 impl Version {
-    pub const CURRENT: Self = Self { major: 0, minor: 1 };
+    pub const CURRENT: Self = Self { major: 0, minor: 2 };
 
     /// Whether this reader reads `found`: the same major, and before 1.0 the same minor (§8.1).
     pub const fn reads(self, found: Self) -> bool {
@@ -368,7 +368,7 @@ mod tests {
     fn the_header_and_table_have_the_documented_layout() {
         let bytes = sample(&names(&["A"]));
         assert_eq!(bytes[..8], [0x89, 0x49, 0x57, 0x4D, 0x0D, 0x0A, 0x1A, 0x0A]);
-        assert_eq!(bytes[8..20], [0, 0, 1, 0, 0, 0, 0, 0, 8, 0, 0, 0]);
+        assert_eq!(bytes[8..20], [0, 0, 2, 0, 0, 0, 0, 0, 8, 0, 0, 0]);
         assert_eq!(u64_at(&bytes, 20), Some(bytes.len() as u64));
         assert_eq!(u32_at(&bytes, HEADER_CRC), Some(extend(crc32(&bytes[..28]), &bytes[32..TABLE_END])));
         let strings_body = [1, 1, b'A'];
@@ -426,17 +426,17 @@ mod tests {
 
     #[test]
     fn another_major_or_before_one_another_minor_is_refused() {
-        for version in [Version { major: 1, minor: 0 }, Version { major: 0, minor: 2 }, Version { major: 0, minor: 0 }]
+        for version in [Version { major: 1, minor: 0 }, Version { major: 0, minor: 1 }, Version { major: 0, minor: 3 }]
         {
             assert_eq!(read(&assemble(version, 0, &plain())), Err(ModuleError::Version(version)));
         }
         let message = ModuleError::Version(Version { major: 2, minor: 0 }).to_string();
-        assert_eq!(message, "load module format 2.0; this ironwork reads 0.1. Compile the source again");
+        assert_eq!(message, "load module format 2.0; this ironwork reads 0.2. Compile the source again");
         let reader = Version { major: 1, minor: 2 };
         assert!(reader.reads(Version { major: 1, minor: 0 }));
         assert!(reader.reads(Version { major: 1, minor: 5 }));
         assert!(!reader.reads(Version { major: 2, minor: 0 }));
-        assert!(!reader.reads(Version { major: 0, minor: 2 }));
+        assert!(!reader.reads(Version { major: 0, minor: 1 }));
         assert!(Version::CURRENT.reads(Version::CURRENT));
     }
 

@@ -390,7 +390,7 @@ fn run_main<'w>(
     run_unit.statement_limit = limit;
     run_unit.sql = database.map(sql::Session::new);
     let me = run_unit.add(None, &compiled.program, compiled.layout.size as usize);
-    let parm = parm.map(|p| push_parm(&mut run_unit, compiled, p));
+    let parm = parm.map(|p| push_parm(&mut run_unit, compiled.options.code_page(), p));
     let ending = machine::Machine::activation(compiled, me, &mut run_unit, true).and_then(|mut m| {
         if parm.is_some() {
             m.bind(&[parm]);
@@ -407,8 +407,8 @@ fn run_main<'w>(
 }
 
 /// A job step's PARM as Language Environment passes it, at the end of memory: input.
-pub(crate) fn push_parm<H: Clone, L: rt::unit::Loader<H>>(run_unit: &mut rt::unit::RunUnit<'_, H, L>, compiled: &Compiled, parm: &str) -> usize {
-    let area = rt::le::parm::parameter_area(rt::le::parm::program_arguments(parm), compiled.options.code_page());
+pub(crate) fn push_parm<H: Clone, L: rt::unit::Loader<H>>(run_unit: &mut rt::unit::RunUnit<'_, H, L>, page: &zarch::ebcdic::CodePage, parm: &str) -> usize {
+    let area = rt::le::parm::parameter_area(rt::le::parm::program_arguments(parm), page);
     let at = run_unit.push_temporary(&area);
     run_unit.mark_input(at, area.len(), true);
     at

@@ -1,8 +1,11 @@
 //! `ironwork compile`: each source's programs compiled, lowered and written as one load module
 //! (docs/load-module.md), or every source's into one module under `--bundle`.
 
-use exec::lir::Program;
+use exec::cics::{Cics, Datum};
+use exec::lir::{Const, Operand, Program};
 use exec::module::DirectoryEntry;
+use rt::bms::Mapset;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
@@ -16,10 +19,11 @@ pub struct Request {
     pub source_prefix: Option<String>,
 }
 
-/// A source's programs in ordinal order, with their directory entries.
+/// A source's programs in ordinal order, with their directory entries and the mapsets they name.
 struct Lowered {
     programs: Vec<Program>,
     directory: Vec<DirectoryEntry>,
+    mapsets: Vec<Mapset>,
 }
 
 /// Every `.iwm` this request writes, as file name and the sources it holds.
@@ -79,17 +83,33 @@ pub fn run(r: Request) -> ExitCode {
         })
         .collect();
     for (name, members) in outputs {
-        let mut all = Lowered { programs: Vec::new(), directory: Vec::new() };
+        let mut all = Lowered { programs: Vec::new(), directory: Vec::new(), mapsets: Vec::new() };
         let Some(parts) = members.iter().map(|&k| lowered[k].as_ref()).collect::<Option<Vec<_>>>() else {
             eprintln!("ironwork: {name} not written");
             continue;
         };
+        let mut mapsets: BTreeMap<String, Mapset> = BTreeMap::new();
+        let mut differ = None;
         for part in parts {
             let base = all.programs.len() as u32;
             all.programs.extend(part.programs.iter().cloned());
             all.directory.extend(part.directory.iter().map(|e| DirectoryEntry { parent: e.parent.map(|p| p + base), ..e.clone() }));
+            for mapset in &part.mapsets {
+                match mapsets.get(&mapset.name) {
+                    Some(held) if held != mapset => differ = Some(mapset.name.clone()),
+                    _ => {
+                        mapsets.insert(mapset.name.clone(), mapset.clone());
+                    }
+                }
+            }
         }
-        let bytes = match exec::module::write_with(&all.programs, &all.directory) {
+        if let Some(mapset) = differ {
+            eprintln!("ironwork: {name}: two sources read different mapsets named {mapset}; compile them apart");
+            status = status.max(12);
+            continue;
+        }
+        all.mapsets = mapsets.into_values().collect();
+        let bytes = match exec::module::write_with(&all.programs, &all.directory, &all.mapsets) {
             Ok(b) => b,
             Err(e) => {
                 eprintln!("ironwork: {name}: the lowered programs make no valid module: {e}");
@@ -120,6 +140,10 @@ fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 fn lower_source(source: &Path, r: &Request, at: exec::lir::CompileTime) -> Result<(Lowered, u8), u8> {
     let shown = source.display().to_string();
     let text = match fs::read(source) {
+        Ok(bytes) if bytes.starts_with(&exec::module::MAGIC[..4]) => {
+            eprintln!("ironwork: {shown} is a load module; compile takes a source");
+            return Err(16);
+        }
         Ok(bytes) => syntax::copy::decode(&bytes),
         Err(e) => {
             eprintln!("ironwork: {shown}: {e}");
@@ -136,11 +160,14 @@ fn lower_source(source: &Path, r: &Request, at: exec::lir::CompileTime) -> Resul
     let parsed: Vec<_> = parsed.into_iter().filter(|p| !p.is_prototype()).collect();
     let parents = parents(&parsed);
     let mut code = 0u8;
-    let mut lowered = Lowered { programs: Vec::new(), directory: Vec::new() };
+    let mut lowered = Lowered { programs: Vec::new(), directory: Vec::new(), mapsets: Vec::new() };
+    let mut named = BTreeSet::new();
     for (ast, parent) in parsed.into_iter().zip(parents) {
         let id = ast.id.clone();
         let params: Vec<bool> = ast.using.iter().map(|p| p.by_value).collect();
         let returning = ast.returning.is_some();
+        let external = ast.function.as_ref().map(|f| f.external.clone());
+        let common = ast.common;
         let paths = ast.sources.clone();
         let mut compiled = match exec::compile_at(ast, &r.flags, at) {
             Ok(c) => c,
@@ -166,10 +193,53 @@ fn lower_source(source: &Path, r: &Request, at: exec::lir::CompileTime) -> Resul
         };
         let entries = program.services.entries.iter().map(|e| (program.symbols.get(e.name as usize).cloned().unwrap_or_default(), e.paragraph)).collect();
         let id = program.symbols.get(program.id as usize).cloned().unwrap_or_default();
-        lowered.directory.push(DirectoryEntry { id, parent, common: false, entries, params, returning, dynamic: true });
+        mapsets_named(&program, &mut named);
+        lowered.directory.push(DirectoryEntry { id, external, parent, common, entries, params, returning, dynamic: true });
         lowered.programs.push(program);
     }
+    for name in named {
+        match syntax::bms::find_mapset(&libraries, &name) {
+            None => {}
+            Some(Ok(mapset)) => lowered.mapsets.push(mapset),
+            Some(Err(e)) => {
+                eprintln!("{shown}: mapset {name}: {}", e.message);
+                return Err(12);
+            }
+        }
+    }
     Ok((lowered, code))
+}
+
+/// The mapsets a SEND MAP or RECEIVE MAP of the program, or of a class's data or methods, names by
+/// a literal: MAPSET, else MAP, upper-cased as the run reads them. One named by a data item is
+/// found only when the module runs.
+fn mapsets_named(program: &Program, out: &mut BTreeSet<String>) {
+    for command in &program.services.cics {
+        let (Cics::SendMap { map, mapset, .. } | Cics::ReceiveMap { map, mapset, .. }) = &command.command else { continue };
+        if let Some(name) = mapset.as_ref().or(map.as_ref()).and_then(|d| literal(program, d)) {
+            out.insert(name);
+        }
+    }
+    if let Some(class) = &program.services.class {
+        for part in class.factory.iter().chain(&class.object) {
+            mapsets_named(&part.data, out);
+        }
+        for method in &class.methods {
+            mapsets_named(&method.code, out);
+        }
+    }
+}
+
+fn literal(program: &Program, datum: &Datum) -> Option<String> {
+    let text = match datum {
+        Datum::Text(t) => program.symbols.get(*t as usize)?.trim().trim_matches(['\'', '"']).to_owned(),
+        Datum::Value(Operand::Const(c)) => match program.consts.get(*c as usize)? {
+            Const::Bytes(bytes) => program.options.options.code_page().decode(bytes).trim_end().to_owned(),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    (!text.is_empty()).then(|| text.to_ascii_uppercase())
 }
 
 /// Each program's containing program: the nearest before it that lists it among those it contains.

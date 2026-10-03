@@ -3,7 +3,8 @@
 use exec::lir::{Debug as DebugTable, ProgramOptions, SqlEntry};
 use exec::module::codec::decode_all;
 use exec::module::crc::crc32;
-use exec::module::{DirectoryEntry, LayoutRecord, LirRecord, Module, ModuleError, Reader, Section, SectionEntry, StringTable};
+use exec::module::{DirectoryEntry, LayoutRecord, LirRecord, Module, ModuleError, Section, SectionEntry, StringTable};
+use rt::bms::Mapset;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -92,7 +93,7 @@ pub fn dump(bytes: &[u8], o: &Options) -> Result<(String, bool), ModuleError> {
     let layout: Decoded<LayoutRecord> = records(body(Section::LAYOUT), Section::LAYOUT, &table);
     let lir: Decoded<LirRecord> = records(body(Section::LIR), Section::LIR, &table);
     let sql: Decoded<Vec<SqlEntry>> = records(body(Section::SQL), Section::SQL, &table);
-    let bms = body(Section::BMS).and_then(|b| mapsets(b, &table).map_err(|e| e.to_string()));
+    let bms: Result<Vec<Mapset>, String> = body(Section::BMS).and_then(|b| decode_all::<Vec<Mapset>>(Section::BMS.name, b, &table).map_err(|e| e.to_string()));
     let debug: Decoded<DebugTable> = records(body(Section::DEBUG), Section::DEBUG, &table);
 
     let count = directory.as_ref().map_or(0, Vec::len);
@@ -137,6 +138,9 @@ pub fn dump(bytes: &[u8], o: &Options) -> Result<(String, bool), ModuleError> {
                         params.join(" "),
                         yes(e.returning)
                     );
+                    if let Some(external) = &e.external {
+                        let _ = writeln!(out, "program {k} external {external}");
+                    }
                     for (entry, paragraph) in &e.entries {
                         let _ = writeln!(out, "program {k} entry {entry} paragraph {paragraph}");
                     }
@@ -251,8 +255,29 @@ pub fn dump(bytes: &[u8], o: &Options) -> Result<(String, bool), ModuleError> {
     if shows(Section::BMS) {
         let _ = writeln!(out, "BMS");
         match &bms {
-            Ok(n) => {
-                let _ = writeln!(out, "mapsets {n}");
+            Ok(all) => {
+                let _ = writeln!(out, "mapsets {}", all.len());
+                for set in all {
+                    let _ = writeln!(out, "mapset {} mode {:?} ctrl [{}] maps {}", set.name, set.mode, set.ctrl.join(" "), set.maps.len());
+                    for map in &set.maps {
+                        let _ = writeln!(
+                            out,
+                            "mapset {} map {} size {}x{} at {},{} ctrl [{}] tioapfx {} dsatts [{}]",
+                            set.name,
+                            map.name,
+                            map.lines,
+                            map.columns,
+                            map.line,
+                            map.column,
+                            map.ctrl.join(" "),
+                            yes(map.tioapfx),
+                            map.dsatts.join(" ")
+                        );
+                        for (k, field) in map.fields.iter().enumerate() {
+                            let _ = writeln!(out, "mapset {} map {} field {k} {field:?}", set.name, map.name);
+                        }
+                    }
+                }
             }
             Err(e) => failed(&mut out, e),
         }
@@ -337,18 +362,6 @@ fn print_lir(out: &mut String, program: &str, l: &LirRecord) {
     }
     table(out, program, "abend", &l.abends);
     table(out, program, "symbol", &l.symbols);
-}
-
-/// The count of the `BMS` section, which this ironwork writes and reads only as zero.
-fn mapsets(body: &[u8], strings: &StringTable) -> Result<usize, ModuleError> {
-    let mut r = Reader::new(Section::BMS.name, body, strings);
-    let at = r.position();
-    let count = r.count()?;
-    if count != 0 {
-        return Err(r.malformed(at, format!("{count} mapsets, which this ironwork cannot hold")));
-    }
-    r.finish()?;
-    Ok(count)
 }
 
 fn symbol(symbols: Option<&[String]>, id: u32) -> String {

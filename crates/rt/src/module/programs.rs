@@ -2,6 +2,7 @@
 
 use super::codec::{Decode, Encode, Reader, Writer};
 use super::{Module, ModuleError, ModuleWriter, Section, StringTable};
+use crate::bms::Mapset;
 use crate::codec_struct;
 use crate::lir::{
     AbendText, Block, Cond, Const, Debug, Edit, Expr, Item, ParaId, Paragraph, Place, Plans, Program, ProgramOptions, Range,
@@ -13,6 +14,9 @@ use crate::lir::{
 pub struct DirectoryEntry {
     /// PROGRAM-ID exactly as written.
     pub id: String,
+    /// A user-defined function's external name, which an invocation loads it by; None for a
+    /// program, which a CALL loads by `id`.
+    pub external: Option<String>,
     /// The ordinal of the containing program.
     pub parent: Option<u32>,
     pub common: bool,
@@ -25,13 +29,14 @@ pub struct DirectoryEntry {
     pub dynamic: bool,
 }
 
-codec_struct!(DirectoryEntry { id, parent, common, entries, params, returning, dynamic });
+codec_struct!(DirectoryEntry { id, external, parent, common, entries, params, returning, dynamic });
 
 impl DirectoryEntry {
     /// The entry for a top-level program that no parse of nesting or ENTRY has refined.
     pub fn top_level(program: &Program) -> Self {
         Self {
             id: program.symbols.get(program.id as usize).cloned().unwrap_or_default(),
+            external: None,
             parent: None,
             common: false,
             entries: Vec::new(),
@@ -40,13 +45,19 @@ impl DirectoryEntry {
             dynamic: true,
         }
     }
+
+    /// The name a CALL or a function invocation finds it by.
+    pub fn load_name(&self) -> &str {
+        self.external.as_deref().unwrap_or(&self.id)
+    }
 }
 
-/// The programs of a module, in ordinal order, with their directory.
+/// The programs of a module, in ordinal order, with their directory and the mapsets they use.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoadedModule {
     pub directory: Vec<DirectoryEntry>,
     pub programs: Vec<Program>,
+    pub mapsets: Vec<Mapset>,
 }
 
 /// Every field of a `Program`, listed once so a new field is a compile error here.
@@ -158,7 +169,7 @@ fn per_program(w: &mut Writer, programs: &[Program], record: impl Fn(&Parts<'_>,
     }
 }
 
-fn encode_module(programs: &[Program], directory: &[DirectoryEntry]) -> Vec<u8> {
+fn encode_module(programs: &[Program], directory: &[DirectoryEntry], mapsets: &[Mapset]) -> Vec<u8> {
     let mut m = ModuleWriter::new();
     m.section(Section::DIRECTORY, |w| {
         w.count(directory.len());
@@ -176,24 +187,40 @@ fn encode_module(programs: &[Program], directory: &[DirectoryEntry]) -> Vec<u8> 
     });
     m.section(Section::LIR, |w| per_program(w, programs, |p, w| p.encode_lir(w)));
     m.section(Section::SQL, |w| per_program(w, programs, |p, w| p.sql.encode(w)));
-    m.section(Section::BMS, |w| w.count(0));
+    m.section(Section::BMS, |w| {
+        w.count(mapsets.len());
+        for mapset in mapsets {
+            mapset.encode(w);
+        }
+    });
     m.section(Section::DEBUG, |w| per_program(w, programs, |p, w| p.debug.encode(w)));
     m.finish()
 }
 
-/// A module of `programs`, each a top-level program in the directory. Same input, same bytes.
+/// A module of `programs`, each a top-level program in the directory, with no mapsets. Same input,
+/// same bytes.
 pub fn write(programs: &[Program]) -> Vec<u8> {
     let directory: Vec<_> = programs.iter().map(DirectoryEntry::top_level).collect();
-    encode_module(programs, &directory)
+    encode_module(programs, &directory, &[])
 }
 
-/// A module with the caller's directory, refused (as the reader would) if it or a program is invalid.
-pub fn write_with(programs: &[Program], directory: &[DirectoryEntry]) -> Result<Vec<u8>, ModuleError> {
+/// A module with the caller's directory and mapsets, refused (as the reader would) if either, or a
+/// program, is invalid.
+pub fn write_with(programs: &[Program], directory: &[DirectoryEntry], mapsets: &[Mapset]) -> Result<Vec<u8>, ModuleError> {
     check_directory(directory, programs)?;
     for program in programs {
         crate::lir::program_valid(program).map_err(|reason| bad("LIR", reason))?;
     }
-    Ok(encode_module(programs, directory))
+    check_mapsets(mapsets).map_err(|reason| bad(Section::BMS.name, reason))?;
+    Ok(encode_module(programs, directory, mapsets))
+}
+
+/// Mapsets are held once each, in ascending order of name (load-module.md §5.3).
+fn check_mapsets(mapsets: &[Mapset]) -> Result<(), String> {
+    match mapsets.windows(2).find(|pair| pair[0].name >= pair[1].name) {
+        Some(pair) => Err(format!("mapset {} follows mapset {}", pair[1].name, pair[0].name)),
+        None => Ok(()),
+    }
 }
 
 fn bad(section: &'static str, reason: impl Into<String>) -> ModuleError {
@@ -252,12 +279,9 @@ pub fn read(bytes: &[u8]) -> Result<LoadedModule, ModuleError> {
     let debug = records::<Debug>(&module, &strings, Section::DEBUG, count)?;
 
     let mut r = module.reader(Section::BMS, &strings)?;
-    let at = r.position();
-    let maps = r.count()?;
-    if maps != 0 {
-        return Err(r.malformed(at, format!("{maps} mapsets, which this ironwork cannot hold")));
-    }
+    let mapsets = Vec::<Mapset>::decode(&mut r)?;
     r.finish()?;
+    check_mapsets(&mapsets).map_err(|reason| bad(Section::BMS.name, reason))?;
 
     let parts = options.into_iter().zip(layouts).zip(bodies).zip(sql).zip(debug);
     let mut programs = Vec::with_capacity(count);
@@ -274,5 +298,5 @@ pub fn read(bytes: &[u8]) -> Result<LoadedModule, ModuleError> {
         programs.push(program);
     }
     check_directory(&directory, &programs)?;
-    Ok(LoadedModule { directory, programs })
+    Ok(LoadedModule { directory, programs, mapsets })
 }

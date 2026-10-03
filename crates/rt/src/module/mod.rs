@@ -1,9 +1,11 @@
-//! The load module (`.iwm`) of docs/load-module.md: its container, encoding rules and codec.
+//! The load module (`.iwm`) of docs/load-module.md: its container, encoding rules and codec, and
+//! the modules a run loads programs from.
 
 pub mod codec;
 mod container;
 pub mod crc;
 pub mod leb;
+mod library;
 mod programs;
 mod strings;
 
@@ -11,6 +13,7 @@ use std::fmt;
 
 pub use codec::{Decode, Encode, Reader, Writer};
 pub use container::{EXTENSIONS, MAGIC, Module, ModuleWriter, OPTIONAL, Section, SectionEntry, Version};
+pub use library::{Check, Modules, member_name};
 pub use programs::{DirectoryEntry, LayoutRecord, LirRecord, LoadedModule, read, write, write_with};
 pub use strings::StringTable;
 

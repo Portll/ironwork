@@ -127,7 +127,7 @@ fn a_source_makes_one_module_named_after_it_holding_every_program() {
     let (shown, status, _) = dump(&module, &[]);
     assert_eq!(status, Some(0), "{shown}");
     for line in [
-        "format 0.1",
+        "format 0.2",
         &format!("length {}", bytes.len()),
         "program 0 PAYROLL parent - common no dynamic yes using [] returning no",
         "program 1 SUB parent 0 common no dynamic yes using [] returning no",
@@ -162,7 +162,7 @@ fn a_module_read_and_written_again_is_the_same_bytes() {
     compiled(&dir, &["PAYROLL.cbl", "-I", "lib", "-o", "."], None);
     let bytes = fs::read(dir.join("PAYROLL.iwm")).unwrap();
     let loaded = exec::module::read(&bytes).unwrap();
-    let again = exec::module::write_with(&loaded.programs, &loaded.directory).unwrap();
+    let again = exec::module::write_with(&loaded.programs, &loaded.directory, &loaded.mapsets).unwrap();
     assert_eq!(again, bytes);
     fs::write(dir.join("AGAIN.iwm"), &again).unwrap();
     assert_eq!(dump(&dir.join("AGAIN.iwm"), &[]).0, dump(&dir.join("PAYROLL.iwm"), &[]).0);
@@ -347,10 +347,10 @@ fn dump_refuses_what_is_not_a_module_by_its_own_check() {
     assert!(refused("cut.iwm", &good[..100]).ends_with(&format!("cut.iwm: truncated: 100 bytes of {}\n", good.len())));
     let mut major = good.clone();
     major[8..12].copy_from_slice(&[1, 0, 0, 0]);
-    assert!(refused("major.iwm", &major).ends_with("major.iwm: load module format 1.0; this ironwork reads 0.1. Compile the source again\n"));
+    assert!(refused("major.iwm", &major).ends_with("major.iwm: load module format 1.0; this ironwork reads 0.2. Compile the source again\n"));
     let mut minor = good.clone();
-    minor[10] = 2;
-    assert!(refused("minor.iwm", &minor).contains("load module format 0.2;"));
+    minor[10] = 1;
+    assert!(refused("minor.iwm", &minor).contains("load module format 0.1;"));
     let mut feature = good.clone();
     feature[12] = 4;
     let count = u32::from_le_bytes(feature[16..20].try_into().unwrap()) as usize;

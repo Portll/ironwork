@@ -3,6 +3,7 @@
 mod common;
 
 use common::payroll;
+use ironwork_rt::bms::{Attrb, Field, Initial, Intensity, Map, Mapset, Mode, Protection};
 use ironwork_rt::lir::{Program, SqlEntry, SqlStatement};
 use ironwork_rt::module::{
     DirectoryEntry, Module, ModuleError, ModuleWriter, Section, Version, read, write, write_with,
@@ -56,15 +57,18 @@ fn a_caller_s_directory_is_kept() {
     directory[1].common = true;
     directory[1].entries = vec![("ALT".into(), 1)];
     directory[1].params = vec![true];
-    let loaded = read(&write_with(&programs, &directory).unwrap()).unwrap();
+    directory[1].external = Some("Report".into());
+    let loaded = read(&write_with(&programs, &directory, &[]).unwrap()).unwrap();
     assert_eq!(loaded.directory, directory);
+    assert_eq!(loaded.directory[1].load_name(), "Report");
+    assert_eq!(loaded.directory[0].load_name(), "PAYROLL");
 }
 
 #[test]
 fn a_directory_that_disagrees_with_the_programs_is_refused_by_the_writer() {
     let programs = two();
     let base: Vec<_> = programs.iter().map(DirectoryEntry::top_level).collect();
-    let refused = |directory: &[DirectoryEntry]| match write_with(&programs, directory) {
+    let refused = |directory: &[DirectoryEntry]| match write_with(&programs, directory, &[]) {
         Err(ModuleError::Malformed { section: "DIRECTORY", .. }) => (),
         other => panic!("{other:?}"),
     };
@@ -141,11 +145,11 @@ fn another_format_version_is_refused() {
     let mut major = bytes.clone();
     major[8] = 1;
     let error = read(&major).unwrap_err();
-    assert_eq!(error, ModuleError::Version(Version { major: 1, minor: 1 }));
-    assert_eq!(error.to_string(), "load module format 1.1; this ironwork reads 0.1. Compile the source again");
+    assert_eq!(error, ModuleError::Version(Version { major: 1, minor: 2 }));
+    assert_eq!(error.to_string(), "load module format 1.2; this ironwork reads 0.2. Compile the source again");
     let mut minor = bytes;
-    minor[10] = 2;
-    assert_eq!(read(&minor), Err(ModuleError::Version(Version { major: 0, minor: 2 })));
+    minor[10] = 1;
+    assert_eq!(read(&minor), Err(ModuleError::Version(Version { major: 0, minor: 1 })));
 }
 
 /// A module whose sections each hold a count: the directory's, OPTIONS' and BMS's as given, else zero.
@@ -168,6 +172,41 @@ fn a_section_that_disagrees_with_the_directory_is_malformed() {
 }
 
 #[test]
-fn a_mapset_is_malformed_while_rt_holds_no_map_models() {
+fn a_mapset_count_past_the_section_s_bytes_is_malformed() {
     assert!(matches!(read(&with(0, 0, 1)), Err(ModuleError::Malformed { section: "BMS", .. })));
+}
+
+fn mapset(name: &str) -> Mapset {
+    let attrb = Attrb { protection: Protection::Unprot, numeric: true, intensity: Intensity::Brt, detectable: false, cursor: true, fset: false };
+    let field = |name: Option<&str>, initial| Field {
+        name: name.map(str::to_owned),
+        line: 2,
+        column: 10,
+        length: 5,
+        attrb,
+        initial,
+        picin: Some("9(5)".into()),
+        picout: None,
+        occurs: 1,
+        group: None,
+        justify_right: true,
+        fill_zero: false,
+        color: Some("RED".into()),
+        hilight: None,
+    };
+    let fields = vec![field(Some("AMOUNT"), None), field(None, Some(Initial::Text("Amount:".into()))), field(None, Some(Initial::Bytes(vec![0xC1, 0x00])))];
+    let map = Map { name: "MAP1".into(), lines: 24, columns: 80, line: 1, column: 1, ctrl: vec!["FREEKB".into()], tioapfx: true, dsatts: vec!["COLOR".into()], fields };
+    Mapset { name: name.into(), mode: Mode::InOut, ctrl: Vec::new(), maps: vec![map] }
+}
+
+#[test]
+fn mapsets_round_trip_in_name_order_and_are_refused_out_of_it() {
+    let programs = two();
+    let directory: Vec<_> = programs.iter().map(DirectoryEntry::top_level).collect();
+    let mapsets = [mapset("ACCTSET"), mapset("MENUSET")];
+    let bytes = write_with(&programs, &directory, &mapsets).unwrap();
+    assert_eq!(read(&bytes).unwrap().mapsets, mapsets);
+    for wrong in [[mapset("MENUSET"), mapset("ACCTSET")], [mapset("ACCTSET"), mapset("ACCTSET")]] {
+        assert!(matches!(write_with(&programs, &directory, &wrong), Err(ModuleError::Malformed { section: "BMS", .. })));
+    }
 }

@@ -28,10 +28,6 @@ pub struct Library {
     pub statement_limit: Option<u64>,
 }
 
-fn member_name(name: &str) -> bool {
-    !name.is_empty() && name.len() <= 30 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '@' || c == '#' || c == '$')
-}
-
 impl Library {
     fn search(&mut self, name: &str) -> Result<(Program, PathBuf), LoadError> {
         let candidates = [name.to_owned(), name.to_ascii_lowercase()];
@@ -64,13 +60,13 @@ impl Library {
 
 /// Whether a CALL or function invocation of `name` loads `program`: by PROGRAM-ID, or a function
 /// definition by its external name; a prototype has no code to load.
-fn loads_as(program: &Program, name: &str) -> bool {
+pub(crate) fn loads_as(program: &Program, name: &str) -> bool {
     !program.is_prototype() && program.load_name().eq_ignore_ascii_case(name)
 }
 
 impl Loader<Rc<Compiled>> for Library {
     fn program(&mut self, name: &str) -> Result<LoadedProgram<Rc<Compiled>>, LoadError> {
-        if !member_name(name) {
+        if !rt::module::member_name(name) {
             return Err(LoadError::NotFound);
         }
         let (program, source) = match self.programs.iter().position(|p| loads_as(p, name)) {
