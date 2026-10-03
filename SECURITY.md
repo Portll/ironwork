@@ -38,6 +38,8 @@ confined; anything that lets it act outside those bounds is scoped for vulnerabi
 | job | ✓ | ✓ | ✗ | ✓ (--sql-db) | ✗ |
 | fuzz | ✓ | ✓ | ✗ | ✗ | ✗ |
 | assumptions | ✗ | ✗ | ✗ | ✗ | ✗ |
+| compare | ✓ | ✓ (copies of each DD, --statement) | ✗ | ✗ | ✗ |
+| ddl | ✓ | ✗ | ✗ | ✗ | ✗ |
 | --version | ✗ | ✗ | ✗ | ✗ | ✗ |
 
 `unsafe` code is forbidden across the workspace.
