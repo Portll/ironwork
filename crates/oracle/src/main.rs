@@ -123,7 +123,7 @@ fn smoke(dir: &Path) -> Result<bool, String> {
         let source = dir.join(format!("{}.cbl", p.name));
         let binary = dir.join(p.name);
         write(&source, &p.source(true))?;
-        let compile = Command::new("cobc").args(["-x", "-std=ibm", "-o"]).arg(&binary).arg(&source).output().map_err(|e| format!("cobc: {e}"))?;
+        let compile = Command::new("cobc").args(["-x", "-std=ibm-strict", "-o"]).arg(&binary).arg(&source).output().map_err(|e| format!("cobc: {e}"))?;
         if !compile.status.success() {
             return Err(format!("{} does not compile:\n{}", p.name, String::from_utf8_lossy(&compile.stderr)));
         }
