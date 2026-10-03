@@ -683,11 +683,11 @@ fn driver() -> ExitCode {
             },
             "--dialect" => match args.next().as_deref().and_then(numeric::Dialect::named) {
                 Some(d) => flags.push(d.flag().to_owned()),
-                None => return usage_error("--dialect needs ibm or gnucobol"),
+                None => refuse!("--dialect needs ibm or gnucobol"),
             },
             f if f.starts_with("--dialect=") => match numeric::Dialect::named(&f["--dialect=".len()..]) {
                 Some(d) => flags.push(d.flag().to_owned()),
-                None => return usage_error("--dialect needs ibm or gnucobol"),
+                None => refuse!("--dialect needs ibm or gnucobol"),
             },
             f if f.starts_with("--optimize") => match f {
                 "--optimize=0" | "--optimize=1" | "--optimize=2" => flags.push(a),

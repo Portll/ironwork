@@ -31,12 +31,12 @@ It does not switch:
 
 | | |
 |---|---|
-| Flag | `--dialect ibm`, `--dialect gnucobol`, or `--dialect=ibm`, `--dialect=gnucobol`; anything else is a usage error (exit status 2) |
+| Flag | `--dialect ibm`, `--dialect gnucobol`, or `--dialect=ibm`, `--dialect=gnucobol`; anything else is a usage error (exit status 246 for `run`, `cics` and `job`, 2 for the others) |
 | Commands | `run`, `check`, `cics`, `job`, `compile`, `fuzz` and `compare`; `dump` refuses it |
 | Options | `numeric::options::Options::dialect`, a `Dialect` (`Ibm`, `Gnucobol`), set by `Options::apply_flag("--dialect=...")`. A CALLed program, a class's methods and a job step compile with it too |
 | Load module | the last field of the `OPTIONS` section's `Options`, tag `Ibm` 0, `Gnucobol` 1 ([load-module.md](load-module.md) §4.7, §5.1); `ironwork dump` prints it as `dialect` |
 | Provenance | `--provenance` records the flag in `externalParameters.flags` and the dialect in `internalParameters.optionsInForce.dialect` ([evidence.md](evidence.md) §2) |
-| Evidence | the journal's `open` record keeps `--dialect` and its value in `argv`, the one option value it records ([evidence.md](evidence.md) §1) |
+| Evidence | the journal's `open` record keeps `--dialect` and its value in `argv`, as it keeps `--compliance`'s and `--statement-limit`'s ([evidence.md](evidence.md) §1) |
 
 The interpreter and the VM read the dialect from the same options and give the same result. The
 lowering reads it where it fixes a result in the LIR: an arithmetic plan's `inner_dmax` (C101), a
@@ -256,8 +256,8 @@ Each is a separate fix; under `ibm` it changes results, so none is made here.
 
 ### 5.6 Programs one compiler refuses
 
-Not results, so not the dialect's: what ironwork refuses that cobc accepts is the compliance option's
-ground (ironwork-roadmap 3.12). CCVS85: both refuse the communication routines (CM), IX110A and
+Not results, so not the dialect's: what ironwork refuses that cobc accepts is `--compliance`'s
+ground ([compliance.md](compliance.md)). CCVS85: both refuse the communication routines (CM), IX110A and
 NC211A; cobc alone refuses an ALL subscript in an intrinsic function's argument (11 routines from
 IF119A to IF141A) and OBNC1M; ironwork alone refuses the debugging routines DB201A to DB205A, NC108M,
 NC174A, NC254A, SM201A, SM202A and SM206A. Corpus: of 300, ironwork refused 30 cobc ran (18 for
@@ -265,5 +265,5 @@ syntax IBM does not have, 3 for IBM's limits, 5 for layout, 4 others, and `FUNCT
 in REPOSITORY, which IBM 6.4 accepts and ironwork does not), and cobc refused 3 ironwork ran.
 Test programs: cobc refused 30 that ironwork runs.
 
-A RETURN-CODE outside 0 to 255 ends `ironwork run` with exit status 255, and a cobc program with the
-value modulo 256.
+A RETURN-CODE of 239 or outside 0 to 238 ends `ironwork run` with exit status 239, its value named
+on standard error, and a cobc program with the value modulo 256.

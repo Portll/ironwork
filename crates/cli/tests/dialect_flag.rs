@@ -56,6 +56,8 @@ fn run_takes_the_dialect_in_either_spelling_on_both_executors() {
         let o = ironwork(&argv);
         assert_eq!(o.status.code(), Some(2), "{bad:?}");
         assert!(String::from_utf8_lossy(&o.stderr).contains("--dialect needs ibm or gnucobol"), "{bad:?}");
+        let ran = ironwork(&["run", path.as_str(), bad[0]].iter().copied().chain(bad[1..].iter().copied()).collect::<Vec<_>>());
+        assert_eq!(ran.status.code(), Some(246), "{bad:?}");
     }
     fs::remove_dir_all(dir).unwrap();
 }
