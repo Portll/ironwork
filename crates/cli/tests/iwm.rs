@@ -59,7 +59,7 @@ fn simple(dir: &Path, id: &str, card: &str, procedure: &[&str]) -> PathBuf {
     path
 }
 
-/// A program lowering refuses: MAX of an alphanumeric and a numeric argument.
+/// A program lowering refuses: NUMCHECK beside a compare with ALL ZERO.
 fn refused(dir: &Path) -> PathBuf {
     let path = dir.join("MIXED.cbl");
     let text = cobol(&[

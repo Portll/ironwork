@@ -131,11 +131,13 @@ fn a_program_the_compile_refuses_exits_241_with_the_compile_s_return_code_and_wi
 #[test]
 fn a_construct_code_generation_refuses_exits_242_and_with_exit_code_4() {
     let dir = Dir::new("lowering");
-    let program = dir.program("MIXED", &["01 A PIC X(3) VALUE 'ABC'.", "01 N PIC 9(3) VALUE 5.", "01 R PIC X(3)."], &["MOVE FUNCTION MAX(A N) TO R.", "STOP RUN."]);
+    let program = dir.program("MIXED", &["01 N PIC 9(3) VALUE 5."], &["IF N = ALL ZERO DISPLAY 'Z' END-IF.", "STOP RUN."]);
+    let text = fs::read_to_string(&program).unwrap();
+    fs::write(&program, format!("       CBL NUMCHECK\n{text}")).unwrap();
     for command in ["run", "cics"] {
         let ((band, said), (verdict, _)) = both(&[command, &program, "--vm"]);
         assert_eq!((band, verdict), (Some(242), Some(4)), "{command}: {said}");
-        assert!(said.contains(": lowering: FUNCTION MIN or MAX of arguments of different kinds is not lowered yet"), "{command}: {said}");
+        assert!(said.contains(": lowering: NUMCHECK with ALL ZERO or ALL NULL compared with a data item it may test is not lowered yet"), "{command}: {said}");
     }
     assert_eq!(ironwork(&["compile", &program, "-o", &dir.path("out")]).status.code(), Some(12));
 }
