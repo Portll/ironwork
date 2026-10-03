@@ -655,5 +655,7 @@ interpreter runs the four oracle programs and must reproduce every predicted byt
 The front end is fuzzed two ways. `cargo test` mutates real programs (the oracle's, plus fragments
 chosen to break the reader, lexer, parser and layout) and fails on any panic, leaving the input in
 the temp directory; `IRONWORK_FUZZ_ITERATIONS=30000 cargo test -p ironwork-exec mutated` runs longer.
+Each mutated program that compiles also runs on the interpreter and on the VM under a statement
+limit, and the two must agree; `IRONWORK_DIFFERENTIAL_ITERATIONS` sets how many are tried.
 `fuzz/` is a coverage-guided cargo-fuzz target over the same path, seeded with the oracle programs;
 it needs a nightly toolchain and `cargo install cargo-fuzz`, then `cargo +nightly fuzz run front_end`.

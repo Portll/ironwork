@@ -14,6 +14,7 @@ mod data;
 mod data_division;
 mod declaratives;
 mod diagnostics;
+mod differential;
 mod function;
 mod initcheck;
 mod intrinsic;
@@ -1333,12 +1334,9 @@ fn mutate(base: &str, next: &mut impl FnMut() -> u64) -> String {
     chars.into_iter().collect()
 }
 
-/// Mutated programs may be refused, but must never panic the reader, lexer, parser or compiler.
-/// `IRONWORK_FUZZ_ITERATIONS` raises the count for a longer run.
-#[test]
-fn mutated_programs_never_panic_the_front_end() {
-    let iterations: usize = std::env::var("IRONWORK_FUZZ_ITERATIONS").ok().and_then(|v| v.parse().ok()).unwrap_or(2_000);
-    let corpus: Vec<String> = oracle::programs()
+/// The programs the fuzz tests mutate.
+fn fuzz_corpus() -> Vec<String> {
+    oracle::programs()
         .iter()
         .map(|p| p.source(false))
         .chain([
@@ -1449,7 +1447,15 @@ fn mutated_programs_never_panic_the_front_end() {
         .chain(collating::fuzz_seeds())
         .chain(procedure::fuzz_seeds())
         .chain(declaratives::fuzz_seeds())
-        .collect();
+        .collect()
+}
+
+/// Mutated programs may be refused, but must never panic the reader, lexer, parser or compiler.
+/// `IRONWORK_FUZZ_ITERATIONS` raises the count for a longer run.
+#[test]
+fn mutated_programs_never_panic_the_front_end() {
+    let iterations: usize = std::env::var("IRONWORK_FUZZ_ITERATIONS").ok().and_then(|v| v.parse().ok()).unwrap_or(2_000);
+    let corpus = fuzz_corpus();
     let mut seed = 0x853C_49E6_748F_EA9Bu64;
     let mut next = move || {
         seed ^= seed << 13;

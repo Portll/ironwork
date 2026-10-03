@@ -44,6 +44,7 @@ pub struct Harness {
     database: Option<Databases>,
     parm: Option<String>,
     arguments: Option<Vec<Option<Vec<u8>>>>,
+    statement_limit: Option<u64>,
 }
 
 impl Harness {
@@ -62,7 +63,14 @@ impl Harness {
             database: None,
             parm: None,
             arguments: None,
+            statement_limit: None,
         }
+    }
+
+    /// The statements a run may start before it ends with S322 (`RunUnit::statement_limit`).
+    pub fn statement_limit(mut self, limit: u64) -> Self {
+        self.statement_limit = Some(limit);
+        self
     }
 
     pub fn classes(mut self, classes: &[String]) -> Self {
@@ -147,7 +155,7 @@ impl Harness {
         let compiled = compiled.unwrap_or_else(|e| panic!("{e:?}"));
         programs.extend(self.classes.iter().map(|c| syntax::parse(c).unwrap_or_else(|e| panic!("{e}\n{c}"))));
         let fingerprint = rt::sql::fingerprint(&format!("{}\n{}", self.source, self.flags.join(" ")));
-        let library = unit::Library { programs, dirs: self.dirs, copy, flags: self.flags, trace_statements: Some(unit::StatementFilter::All), trace_input: true, ..Default::default() };
+        let library = unit::Library { programs, dirs: self.dirs, copy, flags: self.flags, trace_statements: Some(unit::StatementFilter::All), trace_input: true, statement_limit: self.statement_limit };
         let lowered = check_lowering(&compiled, fingerprint, None);
         for program in &library.programs {
             // Compiled as `RunUnit::load` compiles a CALLed program; one that does not compile is left out.

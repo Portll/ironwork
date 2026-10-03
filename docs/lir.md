@@ -2425,6 +2425,9 @@ Both run with `RunUnit.taint` on, and the taint of every byte and each sink's `i
 `RunUnit::write` or `rt::host::write`, or marks what it wrote with `RunUnit::mark`. It locates a
 receiver it only writes with `loc_written`, where the walker uses `locate_written`. And an op that
 runs something taint does not follow calls `RunUnit::unfollowed`, as the walker does.
+The front-end fuzz test's mutated programs that compile run through the `Harness` with a statement
+limit of 20,000 (exec/src/tests/differential.rs), so one that loops ends in S322 at the same
+statement on both; each failing input is written to the temp directory.
 `ironwork fuzz --differential` runs each input it generates for a batch program on both, under one
 statement limit, and passes when they agree or both stop at it; a run the VM stops at what it does
 not run yet is counted. It keeps each input on which they differ, made smaller, with what each
