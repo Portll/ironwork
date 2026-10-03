@@ -9,6 +9,7 @@ use crate::callee::{self, Arguments, Bindings, By, Callee};
 use crate::cics;
 use crate::le::{self, LeHost};
 use crate::lir::{Base, CallArg, CallPlan, CallTarget, Chars, LeService, Operand, PlaceId, SenderCheck, Step};
+use crate::loc;
 use crate::parmcheck;
 use crate::set;
 use crate::storage::{Kind, Loc, Val};
@@ -195,11 +196,19 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         Ok(Some(if plan.on_exception || plan.not_on_exception { Step::Arm(0) } else { Step::Next }))
     }
 
+    /// Where RETURNING record `ordinal` is once the callee has returned; with no address, the
+    /// abend the walker's locate of it gives at `pos`, the statement that ran the callee.
+    pub(super) fn returning_address(&self, ordinal: u16, pos: Pos) -> Result<usize, Abend> {
+        let record = self.p.items.iter().find(|i| i.linkage == Some(ordinal) && i.parent.is_none());
+        let name = record.and_then(|i| i.name).map_or("", |n| self.sym(n));
+        loc::linkage_base(self.linkage[usize::from(ordinal)], name, pos)
+    }
+
     /// The callee's RETURNING item, located by a place naming the whole record and read as its
     /// kind once the callee has returned.
     pub(super) fn returned(&mut self, ordinal: u16, pos: Pos) -> R<Val> {
         let p = self.p;
-        let Some(offset) = self.linkage[usize::from(ordinal)] else { return Err(not_yet("a RETURNING item with no storage")) };
+        let offset = self.returning_address(ordinal, pos)?;
         let len = p.storage.linkage[usize::from(ordinal)];
         let odo = p.items.iter().any(|i| i.linkage == Some(ordinal) && i.depending_on.is_some());
         let whole = |q: &crate::lir::Place| {

@@ -423,6 +423,27 @@ fn initialize_of_a_reference_modified_item_moves_to_its_characters_alone_as_one_
     assert_eq!(out, "[  CDEF]\n[0  0]\n[1   YZ]\n[ABQ   ]\n[0  0][ABQ   ][AZ D][A C]\n");
 }
 
+#[test]
+fn a_returning_item_with_no_address_abends_s0c4_at_the_call_on_both_executors() {
+    let sub = |data: &str, call: &str, header: &str, body: &[&str]| {
+        two_programs(
+            "       01  A PIC X(3) VALUE 'ABC'.\n       01  P POINTER.\n",
+            &[line(call), line("DISPLAY '[' A ']'"), line("GOBACK.")].concat(),
+            "SUB",
+            &format!("       LINKAGE SECTION.\n       01  LA PIC X(3).\n{data}"),
+            &[format!("       PROCEDURE DIVISION {header}.\n"), body.iter().map(|s| line(s)).collect()].concat(),
+        )
+    };
+    let nulled = sub("       01  LP POINTER.\n", "CALL 'SUB' USING BY VALUE P RETURNING A", "USING BY VALUE LP RETURNING LA", &["SET ADDRESS OF LA TO LP", "GOBACK."]);
+    let abend = on_both(&nulled).1.unwrap_err();
+    assert_eq!((abend.code.as_str(), abend.pos.line, abend.pos.col), ("S0C4", 8, 12));
+    assert!(abend.message.starts_with("LA is a LINKAGE item with no address"), "{}", abend.message);
+    let unset = on_both(&sub("", "CALL 'SUB' RETURNING A", "RETURNING LA", &["GOBACK."]));
+    assert_eq!(unset.1, Ok(Ending::Goback));
+    let unasked = on_both(&sub("", "CALL 'SUB'", "RETURNING LA", &["MOVE 'XYZ' TO LA", "GOBACK."]));
+    assert_eq!(unasked, ("[ABC]\n".to_owned(), Ok(Ending::Goback)));
+}
+
 const MOVING: &str = concat!(
     "       01  REC.\n           05 CNT PIC 9 VALUE 2.\n           05 CNT2 PIC 9 VALUE 1.\n",
     "           05 ITEM PIC X OCCURS 1 TO 5 DEPENDING ON CNT.\n           05 MID.\n              10 M1 PIC X.\n",

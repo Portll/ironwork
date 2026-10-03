@@ -754,6 +754,16 @@ fn on_both(main: &str, classes: &[String], sysin: &str) -> (String, Result<(Endi
 }
 
 #[test]
+fn a_method_s_returning_item_with_no_address_abends_s0c4_at_the_invoke_on_both_executors() {
+    let nulled = method("nulled", "       LINKAGE SECTION.\n       01  N PIC S9(9) BINARY.\n", " RETURNING N", &["SET ADDRESS OF N TO NULL."]);
+    let nulls = class("Nulls INHERITS Base", &["Base IS \"java.lang.Object\"", "Nulls IS \"Nulls\""], &part("FACTORY", "", &[nulled]));
+    let main = client(&["Nulls IS \"Nulls\""], "       01  BAL PIC S9(9) BINARY.\n", &["INVOKE Nulls \"nulled\" RETURNING BAL", "GOBACK."]);
+    let abend = on_both(&main, &[nulls], "").1.unwrap_err();
+    assert_eq!((abend.code.as_str(), abend.pos.line, abend.pos.col), ("S0C4", 12, 12));
+    assert!(abend.message.starts_with("N is a LINKAGE item with no address"), "{}", abend.message);
+}
+
+#[test]
 fn the_vm_invokes_methods_with_input_in_an_argument_self_and_super() {
     let data = [ACCOUNT_DATA, "       01  D USAGE OBJECT REFERENCE Dog.\n       01  TYPED PIC X(4).\n"].concat();
     let main = client(

@@ -77,6 +77,9 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         }
         Bindings { records: &[], using: Vec::new(), addresses: &[], returning: storage.returning.map(record) }.bind(vm.unit, &mut vm.linkage);
         let ending = vm.run_from(None)?;
+        if let Some(ordinal) = storage.returning {
+            vm.returning_address(ordinal, pos)?;
+        }
         let loc = vm.loc(definition.returning)?;
         Ok((ending, vm.read(loc, pos)?))
     }

@@ -135,6 +135,17 @@ fn stop_run_in_a_function_ends_the_run_at_the_statement_that_invoked_it() {
 }
 
 #[test]
+fn a_returning_item_with_no_address_abends_s0c4_at_the_invocation_on_both_executors() {
+    let nulled = function("NULLR", &[], &["01 R PIC X(3)."], "RETURNING R", &["SET ADDRESS OF R TO NULL", "GOBACK."]);
+    let source = nulled + &program(&[], &["01 A PIC X(3)."], &["MOVE FUNCTION NULLR TO A", "GOBACK."]);
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let abend = Harness::source(&source).run(executor).ending.unwrap_err();
+        assert_eq!((abend.code.as_str(), abend.pos.line, abend.pos.col), ("S0C4", 17, 17));
+        assert!(abend.message.starts_with("R is a LINKAGE item with no address"), "{}", abend.message);
+    }
+}
+
+#[test]
 fn an_abend_in_a_function_names_its_source_and_a_program_is_no_function() {
     let prototype = |head: &str| format!("       IDENTIFICATION DIVISION.\n       FUNCTION-ID. {head} IS PROTOTYPE.\n       DATA DIVISION.\n       LINKAGE SECTION.\n       01 R PIC X.\n       PROCEDURE DIVISION RETURNING R.\n       END FUNCTION {}.\n", head.split(' ').next().unwrap());
     let library = temp("udf-abend");
