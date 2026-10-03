@@ -56,13 +56,16 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             }
             Err(LoadError::Compile(message)) => return Err(Abend::ironwork(format!("CALL {name}: {message}"), pos).into()),
         };
-        let Some(code) = self.unit.programs[index].compiled.clone() else {
-            return Err(Abend::ironwork(format!("CALL {name}: the first program of the run unit is already active"), pos).into());
+        let held = self.unit.programs[index].compiled.clone();
+        let lowered = match held.as_deref() {
+            Some(code) => code.lowered.as_ref().map_err(|why| not_yet(format!("CALL of a program that does not lower ({why})")))?,
+            None => self.first.ok_or_else(|| Abend::ironwork(format!("CALL {name}: the run unit's first program cannot be CALLed from a function or a method"), pos))?,
         };
         self.unit.programs[index].dynamic |= dynamic;
-        let lowered = code.lowered.as_ref().map_err(|why| not_yet(format!("CALL of a program that does not lower ({why})")))?;
-        if self.unit.programs[index].active && !lowered.program.recursive {
-            return Err(Abend::ironwork(format!("CALL {name}: the program is already active and is not RECURSIVE"), pos).into());
+        let p = &lowered.program;
+        if self.unit.programs[index].active && !p.recursive {
+            let unit = p.services.scope.containers.last().unwrap_or(&p.id);
+            return Err(callee::recursive_call(&p.symbols[p.id as usize], &p.symbols[*unit as usize], pos).into());
         }
         self.unit.enter(pos)?;
         // A dynamic CALL suspends the caller's handlers, as CBLPSHPOP(ON) does (C234).
@@ -86,7 +89,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             let using = entry.map_or(&program.storage.using, |e| &e.using).iter().map(|&o| Some(usize::from(o))).collect();
             let returning = program.storage.returning.map(|o| (usize::from(o), program.storage.linkage[usize::from(o)] as usize));
             Bindings { records: &[], using, addresses: &addresses, returning }.bind(vm.unit, &mut vm.linkage);
-            (vm.cics_handlers, vm.cics_first) = (caller.cics_handlers.lend(suspends), caller.cics_first);
+            (vm.cics_handlers, vm.first) = (caller.cics_handlers.lend(suspends), caller.first);
             let ending = match vm.run_from(entry.map(|e| (e.paragraph, e.block))) {
                 Err(Halt::Unimplemented(what)) => return Err(Halt::Unimplemented(what)),
                 Err(Halt::Abend(a)) => Err(a),

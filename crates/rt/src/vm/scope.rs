@@ -145,7 +145,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let (me, program) = (self.sym(self.p.id), text(&frame.code.program, frame.code.program.id));
         let ran = {
             let mut vm = Vm::over(frame.code, frame.me, frame.base, &mut *self.unit, false, outer);
-            (vm.linkage, vm.cics_first) = (frame.linkage, self.cics_first);
+            (vm.linkage, vm.first) = (frame.linkage, self.first);
             vm.local_base = frame.local_base;
             let depth = vm.unit.depth;
             let ran = match vm.unit.enter(pos) {

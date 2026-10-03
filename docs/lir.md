@@ -1174,14 +1174,17 @@ unit.rs:150-171 (f2)).
 - **CANCEL** is one `Cancel` per name, in order, each read as `program_name` reads a `Dynamic`
   target (machine.rs:478-483 (f2)).
 - **Dynamic at run time:** loading and compiling on first CALL, RECURSIVE and INITIAL handling, the
-  recursion check, the depth check (after the load, before the arguments), CANCEL's effect, and
-  temporaries (machine.rs:973-1122). How a static CALL binds is load-module.md §8.3.
+  recursion check (IGZ0064S, `rt::callee::recursive_call`; C127), the depth check (after the load,
+  before the arguments), CANCEL's effect, and temporaries (machine.rs:973-1122). The run unit's
+  first program, which it holds no handle for, is the activation's `first`. How a static CALL
+  binds is load-module.md §8.3.
 - **PARMCHECK and NUMCHECK** run inside the op: the buffer is set after the arguments and tested
   after the callee returns, and a BY CONTENT or BY VALUE data item is tested as it is copied (§9.14).
 - **One sequence in `rt::callee`** for both executors, and for LINK, XCTL, INVOKE and a user-defined
   function's invocation (§9.15): `addresses` builds the arguments, `Bindings` gives the callee's
   LINKAGE records their addresses, and `run` wraps the executor's activation of the callee
-  (inactive after, an INITIAL program a CALL entered cancelled, temporaries released, an abend
+  (inactive after unless an earlier activation still runs, an INITIAL program a CALL entered
+  cancelled, temporaries released, an abend
   named by a library program's own files). CANCEL is `rt::callee::cancel`. Each host trait reaches
   the run unit through `rt::unit::UnitHost`.
 
@@ -1371,8 +1374,8 @@ HANDLE labels there. SYNCPOINT is a service (cics/services.rs) that settles the 
   activation's dispatch at the label, its frames gone as the walker's Rust calls are, the points
   they armed still armed and the depth the activation's. LINK and XCTL run the program as a new
   activation through `CicsHost::run_program`; the task's first program, which the run unit holds no
-  handle for, comes from the reference each activation carries from it (`cics_first`, the walker's
-  too; C148). The mapset comes from `Loader::mapset`; the LIR has
+  handle for, comes from the reference each activation carries from it (`first`, the walker's
+  too; C148), as it does for a CALL of it (C127). The mapset comes from `Loader::mapset`; the LIR has
   no place for the symbolic map SEND MAP without FROM and RECEIVE MAP without INTO or SET find by
   name, so those stop the VM as `Halt::Unimplemented`.
 

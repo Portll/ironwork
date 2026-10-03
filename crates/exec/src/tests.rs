@@ -1587,6 +1587,53 @@ fn runaway() {
     assert!(run_unit(source, vec![], "").2.unwrap_err().message.contains("nest deeper"));
 }
 
+/// The Programming Guide's factorial program (SC27-8714-03, pp. 14-15), a RECURSIVE main program
+/// that CALLs itself.
+#[test]
+fn a_recursive_main_program_calls_itself() {
+    let source = [
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. FACT RECURSIVE.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n",
+        "       01  NUMB PIC 9(4) VALUE 5.\n       01  FACT PIC 9(8) VALUE 0.\n       LOCAL-STORAGE SECTION.\n       01  NUM PIC 9(4).\n       PROCEDURE DIVISION.\n",
+        &["MOVE NUMB TO NUM", "IF NUMB = 0", "    MOVE 1 TO FACT", "ELSE", "    SUBTRACT 1 FROM NUMB", "    CALL 'FACT'", "    MULTIPLY NUM BY FACT", "END-IF", "DISPLAY NUM '! = ' FACT", "GOBACK."].map(line).concat(),
+    ]
+    .concat();
+    let (out, _, ending) = run_unit(&source, vec![], "");
+    assert!(ending.is_ok(), "{ending:?}");
+    assert_eq!(out, "0000! = 00000001\n0001! = 00000001\n0002! = 00000002\n0003! = 00000006\n0004! = 00000024\n0005! = 00000120\n");
+}
+
+#[test]
+fn a_call_of_an_active_program_that_is_not_recursive_ends_the_run_with_igz0064s() {
+    let main = two_programs("", &[line("CALL 'SUB'"), line("GOBACK.")].concat(), "SUB", "", &["       PROCEDURE DIVISION.\n".into(), line("CALL 'MAIN'"), line("GOBACK.")].concat());
+    let abend = run_unit(&main, vec![], "").2.unwrap_err();
+    assert_eq!((abend.code.to_string(), abend.message.as_str()), ("U4038".into(), "IGZ0064S A recursive call to active program MAIN in compilation unit MAIN was attempted."));
+    let nested = [
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OUTER.\n       PROCEDURE DIVISION.\n",
+        &line("CALL 'A'"),
+        "           GOBACK.\n       IDENTIFICATION DIVISION.\n       PROGRAM-ID. A IS COMMON.\n       PROCEDURE DIVISION.\n",
+        &line("CALL 'B'"),
+        "           GOBACK.\n       END PROGRAM A.\n       IDENTIFICATION DIVISION.\n       PROGRAM-ID. B IS COMMON.\n       PROCEDURE DIVISION.\n",
+        &line("CALL 'A'"),
+        "           GOBACK.\n       END PROGRAM B.\n       END PROGRAM OUTER.\n",
+    ]
+    .concat();
+    let abend = run_unit(&nested, vec![], "").2.unwrap_err();
+    assert_eq!(abend.message, "IGZ0064S A recursive call to active program A in compilation unit OUTER was attempted.");
+}
+
+#[test]
+fn a_recursive_program_stays_active_after_a_call_of_itself_returns() {
+    let sub = [
+        "       WORKING-STORAGE SECTION.\n       01  N PIC 9 VALUE 0.\n       01  T PIC X(80) VALUE 'ACTIVE'.\n       01  O PIC X(255) VALUE SPACES.\n       01  FC PIC X(12).\n       PROCEDURE DIVISION.\n",
+        &["ADD 1 TO N", "IF N = 1", "    CALL 'SUB'", "    CALL 'CEE3DMP' USING T O FC", "END-IF", "GOBACK."].map(line).concat(),
+    ]
+    .concat();
+    let source = two_programs("", &[line("CALL 'SUB'"), line("GOBACK.")].concat(), "SUB RECURSIVE", &sub, "");
+    let (_, err, ending) = run_unit(&source, vec![], "");
+    assert!(ending.is_ok(), "{ending:?}");
+    assert!(err.contains("\n  MAIN\n  SUB\n"), "{err}");
+}
+
 #[test]
 fn occurs_depending_on_sets_the_group_length() {
     let out = run(&program(
@@ -2433,20 +2480,29 @@ fn xctl_drops_the_programs_condition_handlers_and_keeps_the_levels_push_handle_s
 
 /// The output and abend code of a task whose first program, MAINP, counts its activations in N,
 /// shows the COMMAREA it was given and RETURNs, or with none runs `body` and shows N. BACKX XCTLs
-/// to MAINP, CALLX does so from a CALL, and LINKM LINKs to it.
+/// to MAINP, CALLX does so from a CALL, LINKM LINKs to it, and CALLM CALLs it with the EXEC
+/// interface block and its COMMAREA.
 fn first_program_task(body: &[&str]) -> (String, Option<String>) {
     let again = ["ADD 1 TO N", "IF EIBCALEN > 0", "    DISPLAY 'MAIN AGAIN ' N ' ' DFHCOMMAREA", "    EXEC CICS RETURN END-EXEC", "END-IF"];
     let mut procedure: Vec<String> = again.iter().chain(body).map(|s| line(s)).collect();
     procedure.extend([line("DISPLAY 'MAIN ENDS ' N"), line("EXEC CICS RETURN END-EXEC.")]);
     let main = cics_program("MAINP", "       01  N PIC 9 VALUE 0.\n", "       01  DFHCOMMAREA PIC X(4).\n", &procedure.concat());
     let to_main = |verb: &str, area: &str| [line(&format!("EXEC CICS {verb} PROGRAM('MAINP') COMMAREA('{area}') LENGTH(4)")), line("    END-EXEC"), line("EXEC CICS RETURN END-EXEC.")].concat();
-    let programs = [("BACKX", to_main("XCTL", "XCTL")), ("CALLX", to_main("XCTL", "CALL")), ("LINKM", to_main("LINK", "LINK"))];
+    let callm = ["CALL 'MAINP' USING DFHEIBLK DFHCOMMAREA", "DISPLAY 'BACK IN CALLM'", "EXEC CICS RETURN END-EXEC."].map(line).concat();
+    let programs = [("BACKX", to_main("XCTL", "XCTL")), ("CALLX", to_main("XCTL", "CALL")), ("LINKM", to_main("LINK", "LINK")), ("CALLM", callm)];
     let mut source = format!("{main}       END PROGRAM MAINP.\n");
     for (id, procedure) in programs {
-        source.push_str(&format!("{}       END PROGRAM {id}.\n", cics_program(id, "", "", &procedure)));
+        source.push_str(&format!("{}       END PROGRAM {id}.\n", cics_program(id, "", "       01  DFHCOMMAREA PIC X(4).\n", &procedure)));
     }
     let (out, ending) = run_cics(&source, task("TR19"), None, unit::Clock::System);
     (out, ending.err().map(|a| a.code.to_string()))
+}
+
+#[test]
+fn a_call_of_the_tasks_first_program_is_recursive_in_its_run_unit_and_fresh_in_another() {
+    assert_eq!(first_program_task(&["CALL 'CALLM' USING DFHEIBLK"]), (String::new(), Some("U4038".into())));
+    let linked = first_program_task(&["EXEC CICS LINK PROGRAM('CALLM') COMMAREA('LINK')", "    LENGTH(4) END-EXEC", "ADD 1 TO N"]);
+    assert_eq!(linked, ("MAIN AGAIN 1 LINK\nMAIN ENDS 2\n".into(), None));
 }
 
 #[test]

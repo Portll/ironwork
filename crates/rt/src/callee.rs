@@ -3,7 +3,7 @@
 //! happens around the callee's run, whose activation and procedure are the executor's. CANCEL,
 //! which undoes what a run leaves, is here too.
 
-use crate::abend::Abend;
+use crate::abend::{Abend, AbendCode};
 use crate::fixed::{align, zoned_digits};
 use crate::host::{Host, Values};
 use crate::lir::{CallArg, Chars};
@@ -167,8 +167,7 @@ pub enum By {
     /// starts from fresh storage, as CICS gives it on each one.
     Link,
     Invoke,
-    /// A user-defined function's invocation. Functions are recursive, so the program stays active
-    /// after one when an activation of it was running before.
+    /// A user-defined function's invocation. Functions are recursive.
     Function,
 }
 
@@ -186,15 +185,15 @@ pub struct Callee {
 /// Runs program `callee.index`: `run` activates it, binds its LINKAGE, runs its procedure and reads
 /// what it returns, giving how the run ended with that. An error `run` gives comes before the
 /// callee ran or after it ended, and leaves it as it is. Once it has returned the program is
-/// inactive (a function stays active while an earlier activation of it runs), an INITIAL program a
-/// CALL entered is cancelled, the temporaries since `mark` are released, and an abend that ended it
-/// names its files. The caller passes STOP RUN up.
+/// inactive unless an earlier activation of it, which a RECURSIVE program or a function can have,
+/// is still running (C127), an INITIAL program a CALL entered is cancelled, the temporaries since
+/// `mark` are released, and an abend that ended it names its files. The caller passes STOP RUN up.
 pub fn run<'w, X: UnitHost<'w>, O, T, E: From<Abend>>(x: &mut X, callee: &Callee, run: impl FnOnce(&mut X) -> Result<(R<O>, T), E>) -> Result<(R<O>, T), E> {
     let index = callee.index;
     let active = x.unit().programs[index].active;
     let (ending, value) = run(x)?;
     let unit = x.unit();
-    unit.programs[index].active = callee.by == By::Function && active;
+    unit.programs[index].active = active;
     if callee.by == (By::Call { initial: true }) {
         cancel_program(unit, index, callee.pos)?;
     }
@@ -240,6 +239,15 @@ pub fn in_loaded<H: Clone, L: Loader<H>>(unit: &RunUnit<'_, H, L>, index: usize,
         });
     }
     abend
+}
+
+/// A CALL of `program`, of compilation unit `unit`, while it is active and not RECURSIVE: the
+/// condition Language Environment signals, which nothing handles, ends the run unit with U4038
+/// (Programming Guide SC27-8714-03, p. 557; C127).
+pub fn recursive_call(program: &str, unit: &str, pos: Pos) -> Abend {
+    let (program, unit) = (program.to_ascii_uppercase(), unit.to_ascii_uppercase());
+    let message = format!("IGZ0064S A recursive call to active program {program} in compilation unit {unit} was attempted.");
+    Abend { code: AbendCode::user(4038), message, pos, file: None }
 }
 
 /// CANCEL of a program a dynamic CALL entered, or of a contained program; a program only ever

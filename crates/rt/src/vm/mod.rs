@@ -303,8 +303,8 @@ struct Vm<'p, 'u, 'w, L: Loader<Rc<Code>>> {
     cics_handlers: Handlers,
     /// This activation's number in the CICS task, which owns the HANDLE labels it sets.
     serial: u64,
-    /// `Machine::cics_first`: the CICS task's first program, for a LINK or XCTL of it.
-    cics_first: Option<&'p Lowered>,
+    /// `Machine::first`: the run unit's first program, for a CALL, LINK or XCTL of it.
+    first: Option<&'p Lowered>,
     /// SQLCODE and SQLWARN0 of the last EXEC SQL statement, which WHENEVER tests.
     whenever: Option<Ran>,
     /// The method this activation runs, if it is one: its class and SELF.
@@ -353,6 +353,7 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
     fn over(code: &'p Lowered, me: usize, base: usize, unit: &'u mut RunUnit<'w, Rc<Code>, L>, main: bool, containers: Vec<scope::Container<'p>>) -> Self {
         let p = &code.program;
         let serial = unit.cics.as_mut().map_or(0, crate::cics::Task::next_activation);
+        let first = unit.programs[me].compiled.is_none().then_some(code);
         let main_frame = Frame { id: 0, kind: FrameKind::Main, displaced: None, segment: 0, depth: unit.depth as u32, temps: Vec::new() };
         Self {
             code,
@@ -373,7 +374,7 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
             io: files::State::default(),
             cics_handlers: Handlers::default(),
             serial,
-            cics_first: None,
+            first,
             whenever: None,
             method: None,
             containers,

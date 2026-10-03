@@ -127,7 +127,7 @@ impl<'p> Machine<'p, '_, '_> {
         let (me, program) = (self.program.id.clone(), frame.compiled.program.id.clone());
         let ran = {
             let mut m = Machine::over(frame.compiled, frame.me, frame.base, &mut *self.unit, false);
-            (m.linkage, m.cics_first) = (frame.linkage, self.cics_first);
+            (m.linkage, m.first) = (frame.linkage, self.first);
             m.local_base = frame.local_base;
             m.containers = outer;
             m.run_error_declarative(span, pos).map_err(|a| (a, m.uses.leaving.take()))

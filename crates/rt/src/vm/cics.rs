@@ -21,7 +21,6 @@ use std::rc::Rc;
 pub fn run_task<L: Loader<Rc<Code>>>(code: &Code, me: usize, unit: &mut RunUnit<'_, Rc<Code>, L>, commarea: Option<usize>, length: usize) -> Result<Ending, Halt> {
     let lowered = code.lowered.as_ref().map_err(|why| not_yet(format!("a program that does not lower ({why})")))?;
     let mut vm = Vm::activation(lowered, me, unit, true)?;
-    vm.cics_first = Some(lowered);
     cics::begin_task(vm.unit, lowered.program.options.options.code_page(), length);
     let eib = vm.unit.eib;
     vm.bind_level(Some(eib), commarea);
@@ -132,7 +131,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     /// A LINKed or XCTLed program, `code`, or the task's first program for None, as program
     /// `index` at a logical level of its own.
     fn level(&mut self, code: Option<&Code>, index: usize, commarea: Option<usize>, xctl: bool) -> R<Ending> {
-        let first = self.cics_first;
+        let first = self.first;
         let lowered = match code {
             Some(code) => code.lowered.as_ref().map_err(|why| not_yet(format!("EXEC CICS LINK or XCTL of a program that does not lower ({why})")))?,
             None => first.ok_or_else(|| Abend::ironwork("the CICS task's first program cannot be LINKed or XCTLed to from a function or a method", Pos::default()))?,
@@ -140,7 +139,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let (eib, handlers) = (self.unit.eib, if xctl { self.cics_handlers.xctl() } else { Handlers::default() });
         let mut callee = Vm::activation(lowered, index, &mut *self.unit, self.main && xctl)?;
         callee.bind_level(Some(eib), commarea);
-        (callee.cics_handlers, callee.cics_first) = (handlers, first);
+        (callee.cics_handlers, callee.first) = (handlers, first);
         callee.run_level()
     }
 

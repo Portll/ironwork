@@ -87,9 +87,9 @@ pub struct Machine<'p, 'u, 'w> {
     cics_handlers: cics::Handlers,
     /// This activation's number in the CICS task, which owns the HANDLE labels it sets.
     serial: u64,
-    /// The CICS task's first program, which the run unit holds no handle to, for a LINK or XCTL
-    /// of it from this activation (C148).
-    cics_first: Option<&'p Compiled>,
+    /// The run unit's first program, which the run unit holds no handle to, for a CALL, LINK or
+    /// XCTL of it from this activation (C148, C127).
+    first: Option<&'p Compiled>,
     report_writer: &'p crate::report::Writer,
     /// Each file's printer control character, when it is a print file.
     carriage: &'p [Option<crate::printer::Carriage>],
@@ -159,6 +159,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     /// Program `me` over its storage at `base`, with nothing bound or initialized.
     fn over(compiled: &'p Compiled, me: usize, base: usize, unit: &'u mut RunUnit<'w>, main: bool) -> Self {
         let serial = unit.cics.as_mut().map_or(0, crate::cics::Task::next_activation);
+        let first = unit.programs[me].compiled.is_none().then_some(compiled);
         Self {
             compiled,
             program: &compiled.program,
@@ -176,7 +177,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             main,
             cics_handlers: cics::Handlers::default(),
             serial,
-            cics_first: None,
+            first,
             report_writer: &compiled.report_writer,
             carriage: &compiled.carriage,
             oo: oo::Frame::default(),
@@ -972,12 +973,15 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             }
             Err(LoadError::Compile(message)) => return Err(Abend::ironwork(format!("CALL {name}: {message}"), pos)),
         };
-        let Some(compiled) = self.unit.programs[index].compiled.clone() else {
-            return Err(Abend::ironwork(format!("CALL {name}: the first program of the run unit is already active"), pos));
+        let held = self.unit.programs[index].compiled.clone();
+        let Some(compiled) = held.as_deref().or(self.first) else {
+            return Err(Abend::ironwork(format!("CALL {name}: the run unit's first program cannot be CALLed from a function or a method"), pos));
         };
         self.unit.programs[index].dynamic |= dynamic;
-        if self.unit.programs[index].active && !compiled.program.recursive {
-            return Err(Abend::ironwork(format!("CALL {name}: the program is already active and is not RECURSIVE"), pos));
+        let program = &compiled.program;
+        if self.unit.programs[index].active && !program.recursive {
+            let unit = program.containers.last().map_or(&program.id, |c| &c.id);
+            return Err(callee::recursive_call(&program.id, unit, pos));
         }
         self.unit.enter(pos)?;
         let result = self.call_nested(c, index, entry, compiled, dynamic);
@@ -1054,7 +1058,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     /// The CALL's callee run, through RETURNING; `Some` when the run unit or the logical level ends
     /// (C233). NOT ON EXCEPTION is the caller's, after the CALL's nesting is released, as INVOKE's
     /// and an LE service's are.
-    fn call_nested(&mut self, c: &'p Call, index: usize, entry: Option<usize>, compiled: std::rc::Rc<Compiled>, dynamic: bool) -> R<Option<Flow>> {
+    fn call_nested(&mut self, c: &'p Call, index: usize, entry: Option<usize>, compiled: &Compiled, dynamic: bool) -> R<Option<Flow>> {
         let pos = c.pos;
         let mark = self.unit.mem.len();
         let addresses = callee::addresses(self, &call_args(&c.using), pos)?;
@@ -1064,10 +1068,10 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let containers = self.containers_of(&compiled.program);
         let by = By::Call { initial: compiled.program.initial };
         let (ending, returned) = callee::run(self, &Callee { index, by, mark: Some(mark), pos }, |m| {
-            let mut callee = Machine::activation_within(&compiled, index, &mut *m.unit, false, containers)?;
+            let mut callee = Machine::activation_within(compiled, index, &mut *m.unit, false, containers)?;
             let entry = entry.and_then(|k| compiled.entries.get(k));
             callee.bind_linkage(&[], entry.map_or(&compiled.program.using, |e| &e.using), &addresses, true);
-            (callee.cics_handlers, callee.cics_first) = (m.cics_handlers.lend(suspends), m.cics_first);
+            (callee.cics_handlers, callee.first) = (m.cics_handlers.lend(suspends), m.first);
             let ending = callee.run_called(entry.map(|e| (e.paragraph, e.statement)));
             m.cics_handlers.take_back(&mut callee.cics_handlers, suspends && ending.is_ok());
             let returned = match (&compiled.program.returning, &ending) {
