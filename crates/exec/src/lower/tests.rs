@@ -1354,6 +1354,20 @@ fn a_serial_search_steps_its_index_and_varying_item_and_search_all_matches_keys_
 }
 
 #[test]
+fn a_search_all_key_compares_by_its_bytes_where_a_relation_of_the_two_would() {
+    let data = "       01  T.\n           05 E OCCURS 3 ASCENDING KEY K INDEXED BY IX.\n              10 K PIC 9(3).\n";
+    let how = |options: &str, value: &str| {
+        let p = lowered(&program(options, data, &[line("SEARCH ALL E"), line(&format!("  WHEN {value} CONTINUE END-SEARCH")), line("GOBACK.")].concat()));
+        p.plans.search_all[0].keys[0].how
+    };
+    assert_eq!(how("", "K(IX) = '005'"), lir::Compare::ZonedBytes { zoned_first: true });
+    assert_eq!(how("", "'005' = K(IX)"), lir::Compare::ZonedBytes { zoned_first: true });
+    assert_eq!(how("", "K(IX) = 5"), lir::Compare::Fixed);
+    assert_eq!(how("OPTIMIZE(1)", "K(IX) = ZERO"), lir::Compare::ZonedBytes { zoned_first: true });
+    assert_eq!(how("", "K(IX) = ZERO"), lir::Compare::Fixed);
+}
+
+#[test]
 fn under_numcheck_a_serial_search_that_reads_a_tested_index_again_is_refused() {
     let search = |options: &str, data: &str, statement: &str| program(options, data, &[line(statement), line("GOBACK.")].concat());
     let indexed = "SEARCH E WHEN E(IX) = 'C' CONTINUE END-SEARCH";

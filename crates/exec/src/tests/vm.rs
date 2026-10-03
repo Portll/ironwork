@@ -613,3 +613,33 @@ fn not_on_exception_at_the_nesting_limit() {
     let endings: Vec<bool> = (94..=101).map(|limit| on_both(&source(limit)).1.is_ok()).collect();
     assert!(endings.contains(&true) && endings.contains(&false), "{endings:?}");
 }
+
+/// SEARCH ALL of a table whose element is one zoned key of `pic`, laid over `keys`, for the key
+/// equal to `value`: what each executor finds, and where the binary search leaves the index.
+fn search_all_zoned(options: &str, pic: &str, keys: &[&str], value: &str) -> String {
+    let mut data: String = std::iter::once("       01  TBL.\n".to_owned()).chain(keys.iter().map(|k| format!("           05 FILLER PIC X({}) VALUE '{k}'.\n", k.len()))).collect();
+    data.push_str(&format!("       01  T REDEFINES TBL.\n           05 E OCCURS {} ASCENDING KEY K INDEXED BY IX.\n              10 K PIC {pic}.\n", keys.len()));
+    data.push_str("       01  N PIC 9.\n");
+    let body = [
+        "SEARCH ALL E AT END DISPLAY 'END' WITH NO ADVANCING",
+        &format!("  WHEN K(IX) = {value} DISPLAY 'FOUND' WITH NO ADVANCING"),
+        "END-SEARCH",
+        "SET N TO IX",
+        "DISPLAY ' ' N",
+        "GOBACK.",
+    ]
+    .map(line)
+    .concat();
+    let (out, ending) = on_both(&program(options, &data, &body));
+    assert_eq!(ending, Ok(Ending::Goback));
+    out
+}
+
+#[test]
+fn the_vm_compares_a_search_all_key_by_its_bytes_where_the_interpreter_does() {
+    assert_eq!(search_all_zoned("", "9(3)", &["001", "0 2", "003"], "'0 2'"), "FOUND 2\n");
+    assert_eq!(search_all_zoned("NOZWB", "S9(3)", &["00A", "00B", "00C"], "'002'"), "END 3\n");
+    assert_eq!(search_all_zoned("", "S9(3)", &["00A", "00B", "00C"], "'002'"), "FOUND 2\n");
+    assert_eq!(search_all_zoned("OPTIMIZE(1)", "9(2)", &["00", " 0", "01"], "ZERO"), "END 3\n");
+    assert_eq!(search_all_zoned("", "9(2)", &["00", " 0", "01"], "ZERO"), "FOUND 2\n");
+}

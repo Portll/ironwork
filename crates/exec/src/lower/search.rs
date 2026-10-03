@@ -53,9 +53,7 @@ impl Lower<'_> {
             let mut keys = Vec::new();
             for (ascending, key) in &table.keys {
                 let Some((subject, value)) = key_term(&terms, &key.name) else { continue };
-                let (key, x) = self.comparand(subject, pos)?;
-                let (value, y) = self.comparand(value, pos)?;
-                let how = self.compare(&x, &y, pos)?;
+                let (key, value, how) = self.comparison(subject, value, pos)?;
                 keys.push(SearchKey { ascending: *ascending, key, value, how });
             }
             let store = self.store_plan(self.kind_of(index_place), self.place_items[index_place as usize])?;

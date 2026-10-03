@@ -1912,11 +1912,13 @@ walker does, and once, before its loop. A serial SEARCH of an OCCURS DEPENDING O
 `SetCount`, which evaluates the count there, abending as `occurrences` abends under SSRANGE, and
 holds it in a counter of its own; its `InTable` reads `Count::Temp` of that counter, so a VARYING
 item that is the DEPENDING ON object, or shares its storage, steps without changing the count, as
-in the walker. SEARCH ALL evaluates its plan's `Count` once inside `SearchAll`. A table with neither
-INDEXED BY nor VARYING, serial or ALL, ends the block in the walker's `Abend`, after `SetCount` when
-the table has a DEPENDING ON object, whose evaluation comes first. `SetInt` steps the index and a
-VARYING item that is not the index by one; lowering refuses one that is not an index or an integer
-item, where `integer` + 1 and the item + 1 truncate differently.
+in the walker. SEARCH ALL evaluates its plan's `Count` once inside `SearchAll`, and compares each
+key with its WHEN term as the relation of the two compares them (`comparison`), by a zoned key's
+bytes (`ZonedBytes`) against a nonnumeric value or, where zones are compared, against zero. A table
+with neither INDEXED BY nor VARYING, serial or ALL, ends the block in the walker's `Abend`, after
+`SetCount` when the table has a DEPENDING ON object, whose evaluation comes first. `SetInt` steps
+the index and a VARYING item that is not the index by one; lowering refuses one that is not an
+index or an integer item, where `integer` + 1 and the item + 1 truncate differently.
 
 ### 9.13 JSON and XML
 

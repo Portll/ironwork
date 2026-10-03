@@ -80,6 +80,12 @@ impl Lower<'_> {
     }
 
     pub(super) fn relation(&mut self, a: &Expr, op: RelOp, b: &Expr, pos: Pos) -> R<Test> {
+        let (a, b, how) = self.comparison(a, b, pos)?;
+        Ok(Test::Cond(self.cond(lir::Cond::Rel { a, op, b, how })?))
+    }
+
+    /// Two operands as `Machine::compare` takes them, and the branch it takes for them.
+    pub(super) fn comparison(&mut self, a: &Expr, b: &Expr, pos: Pos) -> R<(Comparand, Comparand, Compare)> {
         let all = |e: &Expr| matches!(e, Expr::Operand(Operand::Literal(Literal::All(_))));
         let all_zero = |e: &Expr| matches!(e, Expr::Operand(Operand::Literal(Literal::All(f))) if matches!(**f, Literal::Figurative(Figurative::Zero | Figurative::Null)));
         let (a_all, b_all) = (all(a), all(b));
@@ -99,7 +105,7 @@ impl Lower<'_> {
         } else {
             self.compare(&x, &y, pos)?
         };
-        Ok(Test::Cond(self.cond(lir::Cond::Rel { a, op, b, how })?))
+        Ok((a, b, how))
     }
 
     /// Whether `c` is an unscaled zoned integer item that `Machine::compare` compares by its bytes:
