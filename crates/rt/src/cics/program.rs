@@ -4,17 +4,21 @@
 use super::Condition;
 use super::command::{Datum, Transfer};
 use super::run::{AbendExit, At, CicsHost, EIBCALEN, EIBFN, EIBRSRCE, ExitTarget, Flow, Handler, Handlers, R};
-use super::run::{bytes_cut, eib_bytes, eib_calen, eib_halfword, eib_text, int, kept_calen, ok, page, raise, restore_calen, task, text};
+use super::run::{bytes, bytes_cut, eib_bytes, eib_calen, eib_halfword, eib_text, int, kept_calen, ok, page, raise, restore_calen, task, text};
 use crate::abend::{Abend, AbendCode, Ending};
 use crate::callee::{self, By, Callee};
 use crate::lir::ParaId;
 use crate::unit::{LoadError, Loader, RunUnit};
 use crate::vocab::Pos;
 
+/// The longest COMMAREA RETURN passes.
+const COMMAREA_LIMIT: i64 = 32_763;
+
 /// RETURN ends this program's logical level, CALLed programs and all: the program that LINKed to
 /// it goes on, or the task ends (C233). TRANSID names the next task from any level. COMMAREA, what
 /// the next task starts with, and CHANNEL and IMMEDIATE (`to_cics`) belong to the RETURN to CICS
-/// and raise INVREQ with RESP2 2 below the task's first level (C143).
+/// and raise INVREQ with RESP2 2 below the task's first level (C143). A COMMAREA length, LENGTH or
+/// the item's, outside 0 to 32763 raises LENGERR with RESP2 11 and clears the next TRANSID (C128).
 pub(super) fn cics_return<'w, P: Copy, O, S>(
     x: &mut impl CicsHost<'w, P, O, S>,
     at: &At<P, O, S>,
@@ -25,9 +29,18 @@ pub(super) fn cics_return<'w, P: Copy, O, S>(
 ) -> R<Flow> {
     eib_bytes(x.unit(), EIBFN, &[0x0E, 0x08]);
     let transid = text(x, transid, at.pos)?;
-    let commarea = bytes_cut(x, commarea, length, at.pos)?;
+    let mut commarea = bytes(x, commarea, at.pos)?;
+    let length = if commarea.is_some() { int(x, length, at.pos)? } else { None };
     if task(x).links > 0 && (commarea.is_some() || to_cics) {
         return raise(x, at, Condition::INVREQ, 2);
+    }
+    if let Some(area) = commarea.as_mut() {
+        let n = length.unwrap_or(area.len() as i64);
+        if !(0..=COMMAREA_LIMIT).contains(&n) {
+            task(x).next_transid = None;
+            return raise(x, at, Condition::LENGERR, 11);
+        }
+        area.truncate(n as usize);
     }
     let task = task(x);
     if let Some(t) = transid {

@@ -290,6 +290,7 @@ pub const CICS_NO_OBJECT_ORIENTED_COBOL: &str = "C147";
 pub const CICS_TRANSFER_TO_A_RUNNING_PROGRAM: &str = "C148";
 pub const CICS_ENCLAVE_EXTERNALS_AND_HEAP: &str = "C126";
 pub const RECURSIVE_CALL_OF_AN_ACTIVE_PROGRAM: &str = "C127";
+pub const CICS_RETURN_COMMAREA_LENGTH: &str = "C128";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1855,6 +1856,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: RECURSIVE_CALL_OF_AN_ACTIVE_PROGRAM,
         claim: "With the RECURSIVE clause a program can be reentered while a previous invocation is still active, and without it an active program cannot be (Language Reference SC27-8713-03, p. 102); only a RECURSIVE program can execute a CALL that directly or indirectly calls itself (p. 318). A recursive CALL of a program without RECURSIVE signals a condition, and if it is unhandled the run unit ends (Programming Guide SC27-8714-03, p. 557): IGZ0064S, 'A recursive call to active program program-name in compilation unit compilation-unit was attempted', and the application is terminated (z/OS 3.1 Language Environment Runtime Messages, IGZ0064S, cs00499). ironwork ends the run with U4038 and that message, as it ends one for an SSRANGE condition nothing handles (L19), naming the outermost program of the CALLed program's source as the compilation unit. The run unit's first program is no exception: a RECURSIVE main program can CALL itself, as the Programming Guide's factorial program does (p. 15), finding its WORKING-STORAGE in its last-used state, and a program stays active when a CALL of it returns while an earlier activation of it is still running. Under CICS a program is active only in its own run unit (C145): a CALL of the task's first program in a run unit a LINK or XCTL started runs a fresh copy, and one in the first program's own run unit is a recursive call. ironwork's run unit holds no handle for the first program, so each activation carries a reference to it (C148); a function or a method, whose activation does not, cannot CALL it, an ironwork refusal",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CICS_RETURN_COMMAREA_LENGTH,
+        claim: "The valid range for the length of the COMMAREA RETURN passes is 0 through 32763 bytes, and outside it the LENGERR condition occurs, RESP2 11, whose default action terminates the task abnormally (CICS TS 6.x, RETURN, dfhp4_return), with AEIV. The length is LENGTH when it is given, and otherwise the COMMAREA item's, as the translator supplies it. A TRANSID specified below the highest level is cleared when there is an error on COMMAREA on the final RETURN (dfhp4_return); ironwork clears the next TRANSID on that LENGERR whichever program named it, the failing RETURN included, and a RETURN that RESP or a handler goes on from has set neither TRANSID nor COMMAREA. COMMAREA below the highest level raises INVREQ with RESP2 2 whatever its length (C143); the manual does not order the two conditions, and ironwork tests the level first, so LENGERR comes only from the RETURN to CICS. A LENGTH greater than the COMMAREA item, which the manual says gives unpredictable results and may give LENGERR, passes the item's bytes. RESP2 26, a COMMAREA address of zero with a length that is not, is not raised: RETURN locating a LINKAGE item with no address abends ASRA",
         basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
