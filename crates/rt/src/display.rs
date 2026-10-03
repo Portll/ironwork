@@ -6,7 +6,7 @@ use crate::fixed::{pow10, zoned_digits};
 use crate::storage::{Kind, Loc, Val};
 use crate::store::{self, ProgramFacts};
 use crate::vocab::{Pos, SignClause, SignPosition};
-use numeric::{DispSign, Trunc};
+use numeric::{Dialect, DispSign, Trunc};
 use std::io::Write;
 use zarch::decimal;
 
@@ -16,11 +16,20 @@ type R<T> = Result<T, Abend>;
 /// binary items as every digit their halfword, fullword or doubleword holds, a negative value's
 /// sign overpunched on the last. Under DISPSIGN(SEP) a signed binary, packed or overpunched zoned
 /// item shows its sign, + or -, before its digits (Programming Guide SC27-8714-03, pp. 362-363,
-/// Table 48; assumption C213).
+/// Table 48; assumption C213). Under --dialect gnucobol packed and binary items show as cobc's do
+/// (assumption C14).
 pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<String> {
     let separate = facts.options().dispsign == DispSign::Sep;
     Ok(match loc.kind {
         Kind::National => utf16_text(store::bytes(mem, loc)),
+        Kind::Packed { digits, signed, .. } | Kind::Binary { digits, signed, .. } if facts.options().dialect == Dialect::Gnucobol => {
+            let Val::Num(f) = store::read_stored(facts, mem, loc, pos)? else { unreachable!() };
+            let shown = match loc.kind {
+                Kind::Binary { .. } => zoned_digits(f.magnitude.to_u128().unwrap_or(0), gnucobol_binary_width(loc.len), decimal::UNSIGNED),
+                _ => zoned_digits(f.magnitude.div_rem(pow10(digits)).1.to_u128().unwrap_or(0), digits as usize, decimal::UNSIGNED),
+            };
+            facts.page().decode(&if signed { sign_first(f.negative, shown) } else { shown })
+        }
         Kind::Packed { digits, signed, .. } | Kind::Binary { digits, signed, .. } => {
             let Val::Num(f) = store::read_stored(facts, mem, loc, pos)? else { unreachable!() };
             let zone = if signed && !separate && f.negative { decimal::MINUS } else { decimal::UNSIGNED };
@@ -54,6 +63,16 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<Stri
         }
         _ => facts.page().decode(store::bytes(mem, loc)),
     })
+}
+
+/// The digits cobc -std=ibm shows a binary item in, by its size: 5, 10 or 20 for a halfword,
+/// fullword or doubleword, whatever its PICTURE.
+pub const fn gnucobol_binary_width(len: usize) -> usize {
+    match len {
+        2 => 5,
+        4 => 10,
+        _ => 20,
+    }
 }
 
 /// Zoned digits after a separate sign, as DISPSIGN(SEP) shows a signed item.

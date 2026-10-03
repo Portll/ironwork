@@ -42,13 +42,14 @@ fn root_of(path: &Path, roots: &[PathBuf]) -> i64 {
 /// Option names only, and the program by file name: a value may be a path or a URL with a password.
 /// A statement limit is kept, since the place of an S322 depends on it.
 /// The compliance level's value is kept, being one of two words that decide what compiles.
+/// The dialect's value is kept, being one of two words that change the run's results.
 fn recorded_argv(command: &str, program: &str) -> Vec<String> {
     let mut out = vec![command.to_string()];
     let mut args = std::env::args().skip(1).peekable();
     while let Some(a) = args.next() {
         if a.starts_with('-') {
             out.push(a.clone());
-            if a == "--compliance" {
+            if a == "--compliance" || a == "--dialect" {
                 out.extend(args.next());
             } else if args.peek().is_some_and(|v| !v.starts_with('-')) && !matches!(a.as_str(), "-silent" | "-strict-sort-keys" | "--exit-code") {
                 let value = args.next().unwrap_or_default();

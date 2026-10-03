@@ -9,7 +9,7 @@ use rt::storage::{Loc, Val};
 pub(crate) use rt::storage::literal_fixed;
 use crate::unit::{ADDRESS_BASE, Event, LoadError, OS_COMMAND_ROUTINES, RETURN_CODE, RunUnit};
 use crate::Compiled;
-use numeric::precision::{self, Fixed, Places};
+use numeric::precision::{Dmax, Fixed, Places};
 use numeric::{Options, Trunc};
 use rt::fixed::{align, places_of};
 use rt::arith;
@@ -1261,29 +1261,35 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn eval_fixed(&mut self, e: &Expr, dmax: u32, pos: Pos) -> R<Fixed> {
+        self.eval_fixed_at(e, dmax, dmax, dmax, pos)
+    }
+
+    /// `e`'s top operation at `last` places and every operation below it at `inner`, a function's
+    /// arguments at the statement's `dmax`.
+    fn eval_fixed_at(&mut self, e: &Expr, last: u32, inner: u32, dmax: u32, pos: Pos) -> R<Fixed> {
         let arith = self.options.arith;
         match e {
             Expr::Operand(Operand::Function(f)) => {
                 let val = self.function(f, Within::Fixed(dmax))?;
-                arith::fixed_operand(val, dmax, pos)
+                arith::fixed_operand(val, last, pos)
             }
             Expr::Operand(op) => {
                 let val = self.operand(op, pos)?;
-                arith::fixed_operand(val, dmax, pos)
+                arith::fixed_operand(val, last, pos)
             }
-            Expr::Neg(inner) => Ok(arith::fixed_neg(self.eval_fixed(inner, dmax, pos)?)),
+            Expr::Neg(operand) => Ok(arith::fixed_neg(self.eval_fixed_at(operand, inner, inner, dmax, pos)?)),
             Expr::Bin(a, op, b) => {
-                let x = self.eval_fixed(a, dmax, pos)?;
+                let x = self.eval_fixed_at(a, inner, inner, dmax, pos)?;
                 if *op == BinOp::Pow {
                     let n = self.integer(b, pos)?;
-                    return arith::pow(x, n, dmax, arith, pos);
+                    return arith::pow(x, n, last, arith, pos);
                 }
-                let y = self.eval_fixed(b, dmax, pos)?;
+                let y = self.eval_fixed_at(b, inner, inner, dmax, pos)?;
                 if arith::divides_by_zero(*op, &y) {
                     let binary = self.binary_division(a, b)?;
                     return Err(arith::zero_divide(binary, pos));
                 }
-                arith::fixed_binop(x, *op, y, dmax, arith, pos)
+                arith::fixed_binop(x, *op, y, last, arith, pos)
             }
         }
     }
@@ -1339,19 +1345,20 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     /// leaves the target unchanged when the statement handles it.
     fn arithmetic(&mut self, computations: &[(Target, Expr)], remainder: Option<&(Target, Expr, Expr)>, handler: Option<&'p SizeError>, per_receiver: bool, pos: Pos) -> R<Flow> {
         let mut size_error = false;
-        let mut dmax = 0;
+        let mut places = Dmax::default();
         // A COMP-1 or COMP-2 receiver makes the statement's arithmetic floating point (Programming
         // Guide SC27-8714-03, p. 800).
         let mut float_receiver = false;
         for (t, e) in computations {
             let loc = self.locate(&t.r)?;
             float_receiver |= matches!(loc.kind, Kind::Float(_));
-            dmax = dmax.max(precision::receiver_dec(loc.kind.digits_scale().map_or(0, |(_, s)| s), t.rounded)).max(self.dmax(e)?);
+            places = places.max(Dmax::receiver(loc.kind.digits_scale().map_or(0, |(_, s)| s), t.rounded, self.options.dialect)).with(self.dmax(e)?);
         }
         if let Some((t, dividend, _)) = remainder {
             let loc = self.locate(&t.r)?;
-            dmax = dmax.max(loc.kind.digits_scale().map_or(0, |(_, s)| s)).max(self.dmax(dividend)?);
+            places = places.with(loc.kind.digits_scale().map_or(0, |(_, s)| s)).with(self.dmax(dividend)?);
         }
+        let dmax = places.last;
         let mut quotient_target: Option<Loc> = None;
         let mut results = Vec::with_capacity(computations.len());
         for (t, e) in computations {
@@ -1365,7 +1372,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             let outcome = if float {
                 self.eval_float(shared, self.options.arith.float_intermediate(), pos).map(Val::Float)
             } else {
-                self.eval_fixed(shared, dmax, pos).map(Val::Num)
+                let last = if with.is_some() { places.inner } else { dmax };
+                self.eval_fixed_at(shared, last, places.inner, dmax, pos).map(Val::Num)
             };
             results.push((t, shared, with, outcome));
         }

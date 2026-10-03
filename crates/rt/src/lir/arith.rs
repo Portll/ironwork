@@ -20,6 +20,10 @@ pub struct ArithPlan {
     /// receiver as an operand of its top operation evaluates the other operand with every step's,
     /// and reads the receiver only when it stores.
     pub per_receiver: bool,
+    /// The dmax of every operation below a step's top one, which `dmax` is for: lower than `dmax`
+    /// only under --dialect gnucobol, where a ROUNDED receiver's extra place counts in the top
+    /// operation alone (assumption C101).
+    pub inner_dmax: u32,
 }
 
 /// `probe` holds the places the walker's float test locates after the receiver, static ones left out.
@@ -77,7 +81,7 @@ pub enum UpDown {
     Refused(AbendId),
 }
 
-codec_struct!(ArithPlan { dmax, arith, prepass, steps, remainder, handled, per_receiver });
+codec_struct!(ArithPlan { dmax, arith, prepass, steps, remainder, handled, per_receiver, inner_dmax });
 codec_struct!(ArithStep { target, expr, mode, store, rounded, probe });
 codec_enum!(Mode { Fixed = 0, Float(precision) = 1 });
 codec_enum!(StorePlan {

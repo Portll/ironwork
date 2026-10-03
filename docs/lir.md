@@ -466,6 +466,7 @@ pub enum Count { Fixed(u32), Odo(Odo), Temp(TempId) }
 | Quantity | Walker | Fixed at lowering as |
 |---|---|---|
 | dmax | Largest scale among the receivers and the expressions, divisors and exponents aside (machine.rs:1493-1501, 1409-1417) | `ArithPlan.dmax` |
+| dmax below the top operation | The same, a ROUNDED receiver counted with its own places under `--dialect gnucobol` (`numeric::precision::Dmax`, assumption C101) | `ArithPlan.inner_dmax` |
 | ARITH | `options.arith` (machine.rs:1420) | `ArithPlan.arith` |
 | Fixed or float | Float for every expression when a receiver is COMP-1 or COMP-2 (Programming Guide SC27-8714-03, p. 800), else `uses_float` on each expression (machine.rs:1506, 1400-1406), which is then not run | `ArithStep.mode`, with an empty `probe` when a receiver decides it |
 | Float intermediate | `arith.float_intermediate()` (machine.rs:1507) | inside `Mode::Float` |
@@ -496,6 +497,9 @@ pub struct ArithPlan {
     /// a binary operation with its receiver as an operand evaluates only the other operand with
     /// the rest, and reads the receiver when it stores (§7.4).
     pub per_receiver: bool,
+    /// The dmax of every operation below a step's top one; `dmax` itself except under
+    /// --dialect gnucobol (dialect.md, C101).
+    pub inner_dmax: u32,
 }
 
 /// `probe` holds the places the walker's float test locates before the step is evaluated (§7.4).

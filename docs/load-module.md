@@ -324,9 +324,10 @@ tests, and the debug positions (§9).
 | `initcheck` | `None` | `00` |
 | `optimize` | 0 as LEB128 | `00` |
 | `compliance` | `Strict`, tag 0 | `00` |
+| `dialect` | `Ibm`, tag 0 | `00` |
 
-Thirty-five bytes: `01 01 00 F4 08 00 00 00 00 01 00 00 01 01 00 00 00 00 00 00 01 00 00 00 00 00 00
-00 00 00 00 00 00 00 00`.
+Thirty-six bytes: `01 01 00 F4 08 00 00 00 00 01 00 00 01 01 00 00 00 00 00 00 01 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00`.
 
 ### 4.8 Bounds on decoding
 
@@ -363,9 +364,9 @@ their own, each `Some` only when it uses the function. `CompileTime` is `seconds
 compiler takes it from the build's SOURCE_DATE_EPOCH when set, and from the clock otherwise.
 
 The spellings a card or PARM may use come from IBM's option table, vendored as
-`crates/numeric/data/enterprise-options.tsv` and read by `Options::apply`. Seven fields have no IBM
+`crates/numeric/data/enterprise-options.tsv` and read by `Options::apply`. Eight fields have no IBM
 compiler option: `trunc_check`, `fastsrt_adv_print`, `sort_keys`, `warnings`, `debug`,
-`cics_return_warning` and `compliance` are set by this compiler's own flags.
+`cics_return_warning`, `compliance` and `dialect` are set by this compiler's own flags.
 
 | Field | Type | Encoding | Set by |
 |---|---|---|---|
@@ -403,13 +404,14 @@ compiler option: `trunc_check`, `fastsrt_adv_print`, `sort_keys`, `warnings`, `d
 | `initcheck` | `Option<Initcheck>` (:204) | `None` for NOINITCHECK, or `Some` then the tag: `Lax` 0, `Strict` 1 | `INITCHECK`, `IC`, with `LAX` or `STRICT`; `NOINITCHECK`, `NOIC` |
 | `optimize` | `u8` | LEB128, 0 to 2. The `check` function refuses any other level. Under NOINVDATA a level above 0 compares some zoned items by their bytes (assumption C262) | `OPTIMIZE(0\|1\|2)`, `OPT(n)`; `NOOPTIMIZE` as 0, and `OPTIMIZE`, `OPTIMIZE(STD)` and `OPTIMIZE(FULL)` as 2 (Programming Guide SC27-8714-03, Table 51, p. 395) |
 | `compliance` | `Compliance` | tag: `Strict` 0, `Extended` 1. Whether the compile accepted the other dialects' extensions docs/compliance.md lists; the program's LIR already holds what they meant | `--compliance strict\|extended` |
+| `dialect` | `Dialect` | tag: `Ibm` 0, `Gnucobol` 1. Whose result a computation gives where ironwork knowingly differs from GnuCOBOL's `cobc -std=ibm` ([dialect.md](dialect.md)) | `--dialect ibm\|gnucobol` |
 
 `ADV`, `APOST`, `DBCS`, `DLL`, `INITIAL`, `INTDATE`, `NUMPROC`, `RENT`, `THREAD`, `TRUNC` and `ZWB`
 have no abbreviations. The defaults are `Compat`, `Std`, `Nopfd`, 1140, `Report`, false, `Exclude`,
 `Dfsort`, true, false, false, true, true, `Proceed`, `None` (IBM's default NOCOMPILE(S) in force),
 false, false, `Once`, `None` (NOINVDATA), true, `Quote`, `None` (NOCURRENCY), `National`, `Compat`,
 `Ansi`, `Compat`, false, `Standard`, `Compat`, `None` for NONUMCHECK, NOPARMCHECK and
-NOINITCHECK, 0, and `Strict`.
+NOINITCHECK, 0, `Strict` and `Ibm`.
 
 ### 5.2 Storage and the item table
 

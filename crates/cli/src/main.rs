@@ -10,14 +10,16 @@ usage:
                [-debug] [--cics-return-warning=once|always|never] [--optimize=0|1|2] [-I <dir>]... [-L <dir>]... [--vm]
                [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT | --argument path|OMITTED...]
                [--exit-code] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
-               [--compliance strict|extended]          compile and run; CBL and PROCESS cards set the options
+               [--compliance strict|extended] [--dialect ibm|gnucobol]
+                                                       compile and run; CBL and PROCESS cards set the options
   ironwork run <module.iwm> [-L <dir>]... [-I <dir>]... [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
                [--statement-limit N] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                [--exit-code]
                                                        run a load module's first program on the VM, with the options
                                                        it was compiled with
   ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]...
-               [--compliance strict|extended]          compile only
+               [--compliance strict|extended] [--dialect ibm|gnucobol]
+                                                       compile only
   ironwork cics <program.cbl> [run flags] [--vm] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
                [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]... [--td QUEUE=path]...
                [--screens path | --serve HOST:PORT [--serve-public] [--transaction TRAN=PROGRAM]... [--csd path]]
@@ -25,7 +27,7 @@ usage:
   ironwork compile <program.cbl>... [-o <dir>] [--bundle NAME] [--source-prefix DIR] [-silent] [-strict-sort-keys]
                [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never]
                [--optimize=0|1|2]
-               [--compliance strict|extended] [-I <dir>]... [-L <dir>]...
+               [--compliance strict|extended] [--dialect ibm|gnucobol] [-I <dir>]... [-L <dir>]...
                                                        compile and lower each source's programs to a load module
   ironwork dump [--section NAME]... [--strings] [--no-check] <module.iwm>
                                                        print a load module, one fact per line
@@ -35,7 +37,7 @@ usage:
   ironwork fuzz [--job|--differential] <program.cbl|job.jcl> -o <dir> [--runs N] [--seed N] [--timeout SECONDS] [--hang-limit N]
                [--root DIR] [--clock <time>]
                [-I <dir>]... [-L <dir>]... [-silent] [-strict-sort-keys] [-debug] [--optimize=0|1|2]
-               [--compliance strict|extended] [--datasets DIR] [--proclib DIR]... [--user ID]
+               [--compliance strict|extended] [--dialect ibm|gnucobol] [--datasets DIR] [--proclib DIR]... [--user ID]
                                                        run a batch program, or with --job a job, on generated input
                                                        and keep each abend; with --differential, each input on
                                                        which the interpreter and the VM differ
@@ -77,6 +79,11 @@ flags:
              the compiler invocation's OPTIMIZE level; a CBL or PROCESS card's OPTIMIZE wins over it.
              Under NOINVDATA, 1 and 2 compare an unsigned zoned item with zero, or with one of its
              own length, by its bytes, as IBM's optimizer may (assumption C262)
+  --dialect ibm|gnucobol
+             whose result to give where ironwork knowingly differs from GnuCOBOL: ibm (the default)
+             gives Enterprise COBOL's, as the register of assumptions reads it; gnucobol gives that
+             of GnuCOBOL's cobc -std=ibm, to compare a migration with a GnuCOBOL build.
+             docs/dialect.md lists each difference. --dialect=ibm and --dialect=gnucobol work too
   --vm       run and cics: lower the program and run it on the VM rather than the interpreter. A
              program lowering refuses exits 242; a run that reaches what the VM does not run yet (a
              CALLed program, user-defined function, method or LINK that does not lower, FUNCTION
@@ -673,6 +680,14 @@ fn driver() -> ExitCode {
             f if f.starts_with("--fastsrt-adv-print") => match f {
                 "--fastsrt-adv-print=exclude" | "--fastsrt-adv-print=include" => flags.push(a),
                 _ => refuse!("--fastsrt-adv-print needs =exclude or =include"),
+            },
+            "--dialect" => match args.next().as_deref().and_then(numeric::Dialect::named) {
+                Some(d) => flags.push(d.flag().to_owned()),
+                None => return usage_error("--dialect needs ibm or gnucobol"),
+            },
+            f if f.starts_with("--dialect=") => match numeric::Dialect::named(&f["--dialect=".len()..]) {
+                Some(d) => flags.push(d.flag().to_owned()),
+                None => return usage_error("--dialect needs ibm or gnucobol"),
             },
             f if f.starts_with("--optimize") => match f {
                 "--optimize=0" | "--optimize=1" | "--optimize=2" => flags.push(a),

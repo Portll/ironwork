@@ -64,5 +64,6 @@ fn flags(options: &Options) -> Vec<String> {
     if options.debug {
         flags.push("-debug");
     }
+    flags.push(options.dialect.flag());
     flags.into_iter().map(String::from).collect()
 }

@@ -145,6 +145,7 @@ fn a_source_makes_one_module_named_after_it_holding_every_program() {
     let options = [
         "arith", "trunc", "numproc", "codepage", "trunc_check", "fastsrt", "fastsrt_adv_print", "sort_keys", "adv", "thread", "dll", "rent", "dbcs", "warnings", "compile",
         "dynam", "debug", "cics_return_warning", "invdata", "zwb", "quote", "currency", "nsymbol", "dispsign", "intdate", "qualify", "initial", "vlr", "vsamopenfs",
+        "dialect",
         "ssrange", "cards", "collating", "decimal_point_comma", "numval_currency", "when_compiled",
     ];
     for field in options {

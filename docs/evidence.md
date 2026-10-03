@@ -16,7 +16,7 @@ by `prev` and `seq`.
 
 | kind | fields | written |
 |---|---|---|
-| `open` | `tool` (`ironwork`), `toolVersion`, `command`, `argv` (option names, `<value>` for values but `--compliance`'s, which is kept, the program by file name), `roots`, `platform` | first |
+| `open` | `tool` (`ironwork`), `toolVersion`, `command`, `argv` (option names, `<value>` for values but `--compliance`'s and `--dialect`'s, which are kept, the program by file name), `roots`, `platform` | first |
 | `input` | `root`, `path`, `sha256`, `bytes` | the program and each COPY member it read |
 | `dd` | `dd`, `event` (`open`, `close`, `end`), `mode`, `sha256`, `bytes` | a file's digest before each OPEN, after each CLOSE, and as the run left it |
 | `call` | `program`, `from`, `sha256` | each program CALL loads from a library, with its source's digest |
@@ -145,7 +145,8 @@ predicate (`crates/cli/src/provenance.rs`), `buildType`
   itself (`(system member X)`) by name only.
 - `externalParameters`: the `CBL`/`PROCESS` cards as written, the flags, the library names.
 - `internalParameters.optionsInForce`: ARITH, TRUNC, NUMPROC, CODEPAGE, the TRUNC check, FASTSRT,
-  ADV, the compliance level (`strict` or `extended`) and SSRANGE as the compile decided them.
+  ADV, the compliance level (`strict` or `extended`) and SSRANGE as the compile decided them, and
+  the dialect (`ibm` or `gnucobol`, [dialect.md](dialect.md)).
 - `runDetails.builder`: `IRONWORK_BUILDER_ID` or `https://github.com/Portll/ironwork/local`, the
   version, and the ironwork executable's digest; `byproducts` the run journal's tip when `--evidence`
   is on.

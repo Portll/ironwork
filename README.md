@@ -19,8 +19,8 @@ The PyPI and npm packages carry builds for Linux (static, x64 and arm64), macOS 
 Windows (x64). The same builds are attached to each [release](https://github.com/Portll/ironwork/releases).
 From a checkout:
 
-    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never] [--compliance strict|extended] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
-    cargo run -p ironwork -- check program.cbl [-warnings-block] [--cics-return-warning=once|always|never] [--compliance strict|extended] [-I copylib]...
+    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never] [--compliance strict|extended] [--dialect ibm|gnucobol] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
+    cargo run -p ironwork -- check program.cbl [-warnings-block] [--cics-return-warning=once|always|never] [--compliance strict|extended] [--dialect ibm|gnucobol] [-I copylib]...
     cargo run -p ironwork -- compile program.cbl... [-o dir] [--bundle NAME] [--source-prefix DIR] [run's compile flags] [-I copylib]...
     cargo run -p ironwork -- dump [--section NAME]... [--strings] [--no-check] program.iwm
 
@@ -269,6 +269,13 @@ a CALL, is exempt unless asked: `--cics-return-warning=once` (the default) gives
 note in place of the warning, once in a run; `=always` gives the warning, return code 4; `=never`
 gives nothing. Whether Enterprise COBOL warns such a program is open until an IBM listing settles it
 (C124).
+
+`--dialect gnucobol` gives GnuCOBOL's `cobc -std=ibm` result in place of Enterprise COBOL's where
+ironwork's register of assumptions chose one and cobc chose another: a ROUNDED receiver's extra
+decimal place reaches only a statement's last operation (C101), and DISPLAY shows packed and binary
+items as cobc does (C14). `--dialect ibm` is the default. [docs/dialect.md](docs/dialect.md) lists
+these and every other difference found from cobc, which the dialect leaves alone: the platform, what
+IBM documents and cobc does differently, and bugs.
 
 Messages go to standard error, one to a line: errors first, then warnings, then informational
 messages, each in the order ironwork found them.
@@ -537,6 +544,12 @@ at the host's paths; install it as `gcobol`, and as `gcobol-exec` to run what it
 
 With `--vm`, differ.py runs each program under `ironwork run --vm` in gcobol's place and reports
 where the VM and the interpreter differ, and what stops the VM where it stops.
+
+With `--cobc` it compiles with GnuCOBOL's `cobc -x -std=ibm` instead and runs ironwork with
+`--dialect gnucobol`; `fixtures/dialect` holds a program for each switched assumption, which should
+agree:
+
+    tools/differ.py target/release/ironwork fixtures/dialect bench/packed.cbl --cobc
 
 `tools/nist.py` runs NIST's CCVS85 audit routines, one program to a file as in
 [z390development/nistcobol85](https://github.com/z390development/nistcobol85)'s `src/`, after

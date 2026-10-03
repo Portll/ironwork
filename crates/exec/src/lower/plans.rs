@@ -4,8 +4,8 @@
 
 use super::data::{Side, Value, Within, scale};
 use super::{Lower, R, push, unsupported};
-use numeric::precision::receiver_dec;
-use numeric::{Numproc, Trunc};
+use numeric::precision::Dmax;
+use numeric::{Dialect, Numproc, Trunc};
 use crate::machine::value_kind;
 use rt::lir::{
     self, ArithId, ArithPlan, ArithStep, DisplayId, DisplayItem, ExprId, FloatFrom, Image, InitField, InitId, InitPlan, InitValue, Mode, MovePlan,
@@ -111,7 +111,7 @@ impl Lower<'_> {
     /// receiver's store fixed here, and the places its two locate passes reach kept in order.
     pub(super) fn arith_plan(&mut self, computations: &[(&Target, &Expr)], remainder: Option<&(Target, Expr, Expr)>, handled: bool, per_receiver: bool, pos: Pos) -> R<ArithId> {
         let mut prepass = Vec::new();
-        let mut dmax = 0;
+        let mut places = Dmax::default();
         let sources = computations.iter().map(|&(t, e)| (t, e)).chain(remainder.map(|(t, dividend, _)| (t, dividend)));
         for (Target { r, rounded }, e) in sources {
             let target = self.place(r, false)?;
@@ -119,8 +119,9 @@ impl Lower<'_> {
                 prepass.push(target);
             }
             prepass.extend(self.dmax_places(e)?);
-            dmax = dmax.max(receiver_dec(scale(self.kind_of(target)), *rounded)).max(self.dmax(e)?);
+            places = places.max(Dmax::receiver(scale(self.kind_of(target)), *rounded, self.c.options.dialect)).with(self.dmax(e)?);
         }
+        let dmax = places.last;
         let arith = self.c.options.arith;
         let mut float_receiver = false;
         for &(t, _) in computations {
@@ -155,7 +156,7 @@ impl Lower<'_> {
             }
             _ => None,
         };
-        push(&mut self.plans.arith, ArithPlan { dmax, arith, prepass, steps, remainder, handled, per_receiver }, "arithmetic plans")
+        push(&mut self.plans.arith, ArithPlan { dmax, arith, prepass, steps, remainder, handled, per_receiver, inner_dmax: places.inner }, "arithmetic plans")
     }
 
     /// `Machine::initialize` unrolled: every elementary item the walk reaches with `with`'s FILLER,
@@ -238,6 +239,7 @@ impl Lower<'_> {
                         Kind::Binary { digits, signed, native, .. } => {
                             let whole = native || self.c.options.trunc == Trunc::Bin;
                             let digits = match self.places[place as usize].len {
+                                len if self.c.options.dialect == Dialect::Gnucobol => rt::display::gnucobol_binary_width(len as usize) as u32,
                                 _ if !whole => digits,
                                 2 => 5,
                                 4 => 10,

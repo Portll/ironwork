@@ -14,6 +14,7 @@ mod data;
 mod data_division;
 mod declaratives;
 mod diagnostics;
+mod dialect;
 mod differential;
 mod function;
 mod initcheck;

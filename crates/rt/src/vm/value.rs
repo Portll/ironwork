@@ -108,26 +108,32 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     }
 
     pub(super) fn eval_fixed(&mut self, e: ExprId, dmax: u32, pos: Pos) -> R<Fixed> {
+        self.eval_fixed_at(e, dmax, dmax, pos)
+    }
+
+    /// `Machine::eval_fixed_at`: `e`'s top operation at `last` places and every operation below
+    /// it at `inner`.
+    pub(super) fn eval_fixed_at(&mut self, e: ExprId, last: u32, inner: u32, pos: Pos) -> R<Fixed> {
         let arith = self.p.options.options.arith;
         match &self.p.exprs[e as usize] {
             Expr::Operand(o) => {
                 let val = self.value(*o)?;
-                Ok(arith::fixed_operand(val, dmax, pos)?)
+                Ok(arith::fixed_operand(val, last, pos)?)
             }
-            Expr::Neg(inner) => Ok(arith::fixed_neg(self.eval_fixed(*inner, dmax, pos)?)),
+            Expr::Neg(operand) => Ok(arith::fixed_neg(self.eval_fixed_at(*operand, inner, inner, pos)?)),
             Expr::Bin(a, op, b) => {
-                let x = self.eval_fixed(*a, dmax, pos)?;
-                let y = self.eval_fixed(*b, dmax, pos)?;
+                let x = self.eval_fixed_at(*a, inner, inner, pos)?;
+                let y = self.eval_fixed_at(*b, inner, inner, pos)?;
                 if arith::divides_by_zero(*op, &y) {
                     let binary = self.binary_division(*a, *b)?;
                     return Err(arith::zero_divide(binary, pos).into());
                 }
-                Ok(arith::fixed_binop(x, *op, y, dmax, arith, pos)?)
+                Ok(arith::fixed_binop(x, *op, y, last, arith, pos)?)
             }
             Expr::Pow(base, exponent) => {
-                let x = self.eval_fixed(*base, dmax, pos)?;
+                let x = self.eval_fixed_at(*base, inner, inner, pos)?;
                 let n = self.int(exponent, pos)?;
-                Ok(arith::pow(x, n, dmax, arith, pos)?)
+                Ok(arith::pow(x, n, last, arith, pos)?)
             }
         }
     }

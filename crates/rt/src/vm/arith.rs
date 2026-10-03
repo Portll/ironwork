@@ -30,7 +30,10 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             let (shared, own) = self.shared(plan, step);
             let outcome = match step.mode {
                 Mode::Float(p) => self.eval_float(shared, p, pos).map(Val::Float),
-                Mode::Fixed => self.eval_fixed(shared, plan.dmax, pos).map(Val::Num),
+                Mode::Fixed => {
+                    let last = if own.is_some() { plan.inner_dmax } else { plan.dmax };
+                    self.eval_fixed_at(shared, last, plan.inner_dmax, pos).map(Val::Num)
+                }
             };
             let outcome = match outcome {
                 Err(Halt::Unimplemented(what)) => return Err(Halt::Unimplemented(what)),

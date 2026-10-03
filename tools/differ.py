@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Run each COBOL program under `ironwork run` and compiled by gcobol, and report where the two
-disagree: what DISPLAY wrote, the return code, or which one abended.
+"""Run each COBOL program under `ironwork run` and compiled by gcobol, or with --cobc by GnuCOBOL's
+cobc, and report where the two disagree: what DISPLAY wrote, the return code, or which one abended.
 
-gcobol is no oracle. It keeps storage in ASCII and its own numeric model, so a difference is either
-behaviour that changes when a program leaves z/OS, or an ironwork bug; Enterprise COBOL settles
-which. CBL and PROCESS cards are removed for gcobol, which does not read them, and gcobol runs
-with -dialect ibm. Its clock cannot be fixed, so a program that reads the date differs by design.
+Neither compiler is an oracle. Both keep storage in ASCII and have their own numeric model, so a
+difference is either behaviour that changes when a program leaves z/OS, or an ironwork bug;
+Enterprise COBOL settles which. CBL and PROCESS cards are removed for the other compiler, which does
+not read them. gcobol runs with -dialect ibm; cobc with -x -std=ibm, and ironwork then with
+--dialect gnucobol, so what differs is what docs/dialect.md lists as not switched. The other
+compiler's clock cannot be fixed, so a program that reads the date differs by design.
 
 --vm runs each program under `ironwork run --vm` in gcobol's place, and reports where the VM and the
 interpreter differ in exit status, standard output or standard error (docs/lir.md §12.3). A program
@@ -13,11 +15,12 @@ lowering refuses, or a run the VM stops at what it does not run yet, is vm-stops
 it.
 
 usage: differ.py <ironwork binary> <program or directory>... [-I dir]... [--stdin file]
-                 [--gcobol command] [--exec command] [--timeout seconds] [--vm]
+                 [--cobc] [--gcobol command] [--exec command] [--timeout seconds] [--vm]
 
---gcobol names the compiler (default gcobol). --exec is what runs the executable it links:
-tools/gcobol/gcobol installed as gcobol-exec runs it in the same container; on Linux leave it out.
-Exit status: 0 every program agrees, 1 some differ (with --vm, only a difference counts), 2 usage.
+--gcobol names the compiler (default gcobol, or cobc with --cobc). --exec is what runs the
+executable it links: tools/gcobol/gcobol installed as gcobol-exec runs it in the same container; on
+Linux, and with --cobc, leave it out. Exit status: 0 every program agrees, 1 some differ (with --vm,
+only a difference counts), 2 usage.
 """
 import argparse, calendar, os, re, shlex, shutil, subprocess, sys, tempfile, time
 
@@ -82,8 +85,8 @@ def compile_failure(source, err):
         return f"libgcobol has no {missing.group(1)}"
     return first_line(err, r"error:")
 
-def ironwork(binary, path, libraries, stdin, timeout):
-    status, out, err = run([binary, "run", path, "-silent", "--clock", CLOCK, *libraries], stdin, timeout)
+def ironwork(binary, path, libraries, stdin, timeout, flags):
+    status, out, err = run([binary, "run", path, "-silent", "--clock", CLOCK, *flags, *libraries], stdin, timeout)
     if status is None:
         return ("timeout", err, "")
     if status in IRONWORK_REFUSED:
@@ -95,14 +98,15 @@ def ironwork(binary, path, libraries, stdin, timeout):
     said = OUTSIDE.search(err) if status == 239 else None
     return ("ran", int(said.group(1)) if said else status, out)
 
-def gcobol(compiler, runner, path, libraries, stdin, timeout, scratch):
+def gcobol(compiler, runner, path, libraries, stdin, timeout, scratch, cobc):
     source = os.path.join(scratch, os.path.basename(path))
     with open(path, encoding="latin-1") as f:
         text = f.read()
     with open(source, "w", encoding="latin-1") as f:
         f.write(without_option_cards(text))
     exe = os.path.join(scratch, "program")
-    argv = [*compiler, "-dialect", "ibm", "-I", os.path.dirname(os.path.abspath(path)), *libraries, "-o", exe, source]
+    dialect = ["-x", "-std=ibm"] if cobc else ["-dialect", "ibm"]
+    argv = [*compiler, *dialect, "-I", os.path.dirname(os.path.abspath(path)), *libraries, "-o", exe, source]
     status, _, err = run(argv, None, timeout, cwd=scratch)
     if status is None:
         return ("timeout", err, "")
@@ -115,27 +119,27 @@ def gcobol(compiler, runner, path, libraries, stdin, timeout, scratch):
         return ("abend", first_line(err, r"exception"), out)
     return ("ran", status, out)
 
-def compare(iw, gc):
+def compare(iw, gc, name):
     """One verdict and what it rests on."""
     if iw[0] == "ran" and gc[0] == "ran":
         a, b = iw[2].splitlines(), gc[2].splitlines()
         for n, (x, y) in enumerate(zip(a, b), 1):
             if x.rstrip() != y.rstrip():
-                return "differ", f"line {n}: ironwork {x.rstrip()!r}, gcobol {y.rstrip()!r}"
+                return "differ", f"line {n}: ironwork {x.rstrip()!r}, {name} {y.rstrip()!r}"
         if len(a) != len(b):
-            return "differ", f"ironwork wrote {len(a)} lines, gcobol {len(b)}"
+            return "differ", f"ironwork wrote {len(a)} lines, {name} {len(b)}"
         if iw[1] % 256 != gc[1] % 256:
-            return "differ", f"return code: ironwork {iw[1]}, gcobol {gc[1]}"
+            return "differ", f"return code: ironwork {iw[1]}, {name} {gc[1]}"
         return "agree", ""
     if iw[0] == gc[0] == "abend":
-        return "agree", f"both abend: ironwork {iw[1]}; gcobol {gc[1]}"
+        return "agree", f"both abend: ironwork {iw[1]}; {name} {gc[1]}"
     if iw[0] == "refused" and gc[0] == "refused":
-        return "both-refuse", f"ironwork {iw[1]}; gcobol {gc[1]}"
+        return "both-refuse", f"ironwork {iw[1]}; {name} {gc[1]}"
     if iw[0] == "refused":
         return "ironwork-refuses", iw[1]
     if gc[0] == "refused":
-        return "gcobol-refuses", gc[1]
-    return "differ", f"ironwork {iw[0]}: {iw[1]}; gcobol {gc[0]}: {gc[1]}"
+        return f"{name}-refuses", gc[1]
+    return "differ", f"ironwork {iw[0]}: {iw[1]}; {name} {gc[0]}: {gc[1]}"
 
 VM_STOPPED = re.compile(r"the VM does not run (.+) yet; run it without --vm|: (lowering: .+)")
 # A Rust panic names its thread by a number that differs from run to run.
@@ -165,7 +169,8 @@ def main():
     ap.add_argument("paths", nargs="+")
     ap.add_argument("-I", dest="libraries", action="append", default=[])
     ap.add_argument("--stdin")
-    ap.add_argument("--gcobol", default="gcobol")
+    ap.add_argument("--cobc", action="store_true")
+    ap.add_argument("--gcobol")
     ap.add_argument("--exec", dest="runner", default="")
     ap.add_argument("--timeout", type=float, default=60)
     ap.add_argument("--vm", action="store_true")
@@ -186,7 +191,8 @@ def main():
             print(f"{verdict}\t{path}" + (f"\t{why}" if why else ""))
         print("# " + ", ".join(f"{n} {v}" for v, n in sorted(tally.items(), key=lambda kv: -kv[1])))
         return 1 if tally.get("differ") else 0
-    compiler, runner = shlex.split(args.gcobol), shlex.split(args.runner)
+    compiler, runner = shlex.split(args.gcobol or ("cobc" if args.cobc else "gcobol")), shlex.split(args.runner)
+    name, flags = ("cobc", ["--dialect", "gnucobol"]) if args.cobc else ("gcobol", [])
     if not shutil.which(compiler[0]) or (runner and not shutil.which(runner[0])):
         print(f"differ: {compiler[0] if not shutil.which(compiler[0]) else runner[0]} is not on PATH", file=sys.stderr)
         return 2
@@ -196,9 +202,9 @@ def main():
     tally, differ = {}, False
     for path in programs(args.paths):
         with tempfile.TemporaryDirectory(prefix="differ-") as scratch:
-            iw = ironwork(args.binary, path, libraries, args.stdin, args.timeout)
-            gc = gcobol(compiler, runner, path, libraries, args.stdin, args.timeout, scratch)
-        verdict, why = compare(iw, gc)
+            iw = ironwork(args.binary, path, libraries, args.stdin, args.timeout, flags)
+            gc = gcobol(compiler, runner, path, libraries, args.stdin, args.timeout, scratch, args.cobc)
+        verdict, why = compare(iw, gc, name)
         tally[verdict] = tally.get(verdict, 0) + 1
         differ |= verdict != "agree"
         print(f"{verdict}\t{path}" + (f"\t{why}" if why else ""))

@@ -97,6 +97,7 @@ pub fn payroll() -> Program {
         remainder: None,
         handled: true,
         per_receiver: true,
+        inner_dmax: 2,
     };
 
     let at = |line, col| Pos { file: 0, line, col };

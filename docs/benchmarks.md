@@ -60,7 +60,8 @@ The VM's output equals the interpreter's on all four. Against the [VM target](#v
   `ACC=0003652155505.65`. Since b6c3b48 a ROUNDED receiver counts one more decimal place in dmax
   (assumption C101, chosen because CCVS85 NC117A and NC171A expect the digit rounding reads), and
   GnuCOBOL carries no such place. Which matches Enterprise COBOL waits for the goldens. The other
-  three programs agree under both dialects.
+  three programs agree under both dialects. `--dialect gnucobol` gives cobc's checksums
+  ([dialect.md](dialect.md), C101).
 - **Level 78 is not IBM.** ironwork refuses it (`level 78 is not a data level`), so N is an ordinary
   `01` item.
 - **A 17-digit DISPLAY target abends at 79a199e.** `ADD A TO T` with `T` `PIC 9(15)V99` ends in

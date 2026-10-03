@@ -329,6 +329,38 @@ pub enum Warnings {
     Block,
 }
 
+/// Whose result a computation gives where ironwork knowingly differs from GnuCOBOL: Enterprise
+/// COBOL's as the assumptions register reads it (`Ibm`), or that of GnuCOBOL's `cobc -std=ibm`
+/// (`Gnucobol`, `--dialect gnucobol`), so a migration can compare ironwork with a GnuCOBOL build.
+/// docs/dialect.md lists each difference.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Dialect {
+    #[default]
+    Ibm,
+    Gnucobol,
+}
+
+impl Dialect {
+    pub const fn flag(self) -> &'static str {
+        match self {
+            Self::Ibm => "--dialect=ibm",
+            Self::Gnucobol => "--dialect=gnucobol",
+        }
+    }
+
+    /// The value `--dialect` takes for it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Ibm => "ibm",
+            Self::Gnucobol => "gnucobol",
+        }
+    }
+
+    pub fn named(value: &str) -> Option<Self> {
+        [Self::Ibm, Self::Gnucobol].into_iter().find(|d| d.name() == value)
+    }
+}
+
 /// The COMPILE option: which messages stop the object code, so that run and cics refuse the
 /// program (Programming Guide SC27-8714-03, p. 355).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -457,6 +489,7 @@ pub struct Options {
     /// OPTIMIZE's level, 0 to 2.
     pub optimize: u8,
     pub compliance: Compliance,
+    pub dialect: Dialect,
 }
 
 impl Default for Options {
@@ -496,6 +529,7 @@ impl Default for Options {
             initcheck: None,
             optimize: 0,
             compliance: Compliance::default(),
+            dialect: Dialect::default(),
         }
     }
 }
@@ -855,6 +889,10 @@ impl Options {
             "--optimize=2" => self.optimize = 2,
             f if f.starts_with("--compliance=") => match Compliance::named(&f["--compliance=".len()..]) {
                 Some(c) => self.compliance = c,
+                None => return Err(OptionError::UnknownFlag(flag.to_owned())),
+            },
+            f if f.starts_with("--dialect=") => match Dialect::named(&f["--dialect=".len()..]) {
+                Some(d) => self.dialect = d,
                 None => return Err(OptionError::UnknownFlag(flag.to_owned())),
             },
             _ => return Err(OptionError::UnknownFlag(flag.to_owned())),
@@ -1273,5 +1311,20 @@ mod tests {
         assert_eq!(flags(&[]), Compliance::Strict);
         assert_eq!(flags(&["-silent", "--compliance=extended"]), Compliance::Extended);
         assert_eq!(flags(&["--compliance=extended", "--compliance=strict"]), Compliance::Strict);
+    }
+
+    #[test]
+    fn the_dialect_is_ibm_unless_the_flag_says_gnucobol() {
+        let mut o = Options::default();
+        assert_eq!(o.dialect, Dialect::Ibm);
+        for dialect in [Dialect::Gnucobol, Dialect::Ibm] {
+            o.apply_flag(dialect.flag()).unwrap();
+            assert_eq!(o.dialect, dialect);
+            assert_eq!(Dialect::named(dialect.name()), Some(dialect));
+        }
+        for bad in ["--dialect=GNUCOBOL", "--dialect=", "--dialect", "--dialect=mf"] {
+            assert!(o.apply_flag(bad).is_err(), "{bad}");
+        }
+        assert_eq!(o.dialect, Dialect::Ibm);
     }
 }

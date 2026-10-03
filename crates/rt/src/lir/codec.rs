@@ -12,7 +12,7 @@ use crate::{codec_enum, codec_struct};
 use numeric::precision::{Fixed, Places};
 use numeric::options::{Compile, Compliance, FastsrtAdvPrint, Invdata, Stop, Warnings};
 use numeric::{
-    Arith, BinCheck, CicsReturnWarning, Currency, DispSign, Initcheck, IntDate, Nsymbol, Numcheck, Numproc, Options, Parmcheck, Qualify, Quote, SortKeys, Trunc,
+    Arith, BinCheck, CicsReturnWarning, Currency, Dialect, DispSign, Initcheck, IntDate, Nsymbol, Numcheck, Numproc, Options, Parmcheck, Qualify, Quote, SortKeys, Trunc,
     TruncCheck, Vlr, VsamOpenFs, ZonCheck,
 };
 use zarch::check::ProgramCheck;
@@ -140,7 +140,7 @@ codec_enum!(FileStatus {
 codec_struct!(Options {
     arith, trunc, numproc, codepage, trunc_check, fastsrt, fastsrt_adv_print, sort_keys, adv, thread, dll, rent, dbcs,
     warnings, compile, dynam, debug, cics_return_warning, invdata, zwb, quote, currency, nsymbol, dispsign, intdate, qualify, initial,
-    vlr, vsamopenfs, numcheck, parmcheck, initcheck, optimize, compliance,
+    vlr, vsamopenfs, numcheck, parmcheck, initcheck, optimize, compliance, dialect,
 } check options_valid);
 codec_struct!(Invdata { forcenumcmp, cleansign });
 codec_enum!(Arith { Compat = 0, Extend = 1 });
@@ -167,6 +167,7 @@ codec_struct!(ZonCheck { alphnum, lax });
 codec_struct!(BinCheck { truncbin });
 codec_struct!(Parmcheck { abd, bytes });
 codec_enum!(Initcheck { Lax = 0, Strict = 1 });
+codec_enum!(Dialect { Ibm = 0, Gnucobol = 1 });
 
 /// `Options::code_page` panics on a CCSID the tables do not carry, and OPTIMIZE has three levels.
 fn options_valid(options: &Options) -> Result<(), String> {

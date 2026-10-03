@@ -19,7 +19,7 @@ use ironwork_rt::storage::Kind;
 use ironwork_rt::vocab::{AcceptFrom, BinOp, Figurative, InspectMode, OpenMode, Pos, RelOp, SignClause, SignPosition};
 use numeric::precision::{Fixed, Places};
 use numeric::options::{Compile, Compliance, FastsrtAdvPrint, Invdata, Stop, Warnings};
-use numeric::{Arith, BinCheck, CicsReturnWarning, Currency, DispSign, Initcheck, IntDate, Nsymbol, Numcheck, Numproc, Options, Parmcheck, Qualify, Quote, SortKeys, Trunc, TruncCheck, Vlr, VsamOpenFs, ZonCheck};
+use numeric::{Arith, BinCheck, CicsReturnWarning, Currency, Dialect, DispSign, Initcheck, IntDate, Nsymbol, Numcheck, Numproc, Options, Parmcheck, Qualify, Quote, SortKeys, Trunc, TruncCheck, Vlr, VsamOpenFs, ZonCheck};
 use zarch::check::ProgramCheck;
 use zarch::hfp::Precision;
 use zarch::wide::U256;
@@ -174,6 +174,7 @@ fn options_round_trip_with_every_field_off_its_default() {
         initcheck: Some(Initcheck::Strict),
         optimize: 2,
         compliance: Compliance::Extended,
+        dialect: Dialect::Gnucobol,
     };
     round_trip(&[every, Options { currency: Some(Currency::Hex(0x5B)), ..every }]);
     let each = [
@@ -199,6 +200,7 @@ fn options_round_trip_with_every_field_off_its_default() {
         Options { initcheck: Some(Initcheck::Lax), ..Options::default() },
         Options { optimize: 1, ..Options::default() },
         Options { compliance: Compliance::Extended, ..Options::default() },
+        Options { dialect: Dialect::Gnucobol, ..Options::default() },
     ];
     round_trip(&each);
     for options in each {
@@ -219,6 +221,7 @@ fn options_round_trip_with_every_field_off_its_default() {
     every_variant(&[VsamOpenFs::Compat, VsamOpenFs::Succ], 2);
     every_variant(&[Initcheck::Lax, Initcheck::Strict], 2);
     every_variant(&[Compliance::Strict, Compliance::Extended], 2);
+    every_variant(&[Dialect::Ibm, Dialect::Gnucobol], 2);
 }
 
 #[test]
@@ -230,7 +233,7 @@ fn kinds_and_options_have_load_module_s_bytes() {
         encoded(&options).0,
         [
             0x01, 0x01, 0x00, 0xF4, 0x08, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
         ]
     );
     let (bytes, strings) = encoded(&(7u8, Options { codepage: 999, ..options }));
@@ -347,7 +350,7 @@ fn program_shape_round_trips() {
     round_trip(&[Paragraph { name: 1, is_section: true, entry: 0, section_end: 3, priority: 50, at: 2, abandoned: Some(4) }]);
     round_trip(&[Block { ops: vec![], end: Terminator::Jump(1) }, Block { ops: vec![Op::Nest, Op::Arith(0)], end: Terminator::Abend(0) }]);
     let plans = Plans {
-        arith: vec![ArithPlan { dmax: 0, arith: Arith::Extend, prepass: vec![], steps: vec![], remainder: None, handled: false, per_receiver: false }],
+        arith: vec![ArithPlan { dmax: 0, arith: Arith::Extend, prepass: vec![], steps: vec![], remainder: None, handled: false, per_receiver: false, inner_dmax: 0 }],
         init: vec![InitPlan { fields: vec![InitField { offset: 0, len: 2, value: InitValue::Default(Figurative::Null), store: FILL, scaling: 0 }] }],
         display: vec![DisplayPlan { items: vec![DisplayItem::Text(0)], no_advancing: false }],
         inspect: vec![InspectPlan { target: Inspected::Item(0), tallying: vec![], replacing: vec![], converting: None }],
@@ -615,6 +618,7 @@ fn arithmetic_plans_round_trip_with_every_tag() {
         remainder: Some(remainder),
         handled: true,
         per_receiver: true,
+        inner_dmax: 1,
     };
     round_trip(&[plan]);
 }
