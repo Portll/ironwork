@@ -32,19 +32,34 @@ It prints PASS, FAIL or TODO for each step and exits 1 on any FAIL.
 ## The tag and the registries
 
 5. **Tag.** An annotated tag `v<version>` with the message `ironwork <version>`, on the commit
-   whose CI passed. Pushing it runs `release.yml`: builds for five targets and the TLS builds,
-   `SHA256SUMS`, provenance, the npm tarball, the GitHub release and PyPI.
-6. **Notes.** The workflow's notes carry only the install paragraph. Add what the release contains
-   with `gh release edit v<version> --notes-file <file>`, opening with a `## Summary` section,
-   which the site renders as the release's row: the first paragraph is the benefit, each line
-   opening with a hyphen a sub-item, a paragraph opening `**Limit:**` the limit. Until the release
-   has that section, every cobolwork-web deploy fails at its build step.
-7. **crates.io.** From the tagged commit, `cargo publish --workspace --dry-run --locked`, then
-   `cargo publish --workspace --locked`; cargo orders the crates. A crate new since the last
-   release publishes for the first time the same way.
-8. **npm.** Download `portll-ironwork-<version>.tgz` from the release and check it against
-   `SHA256SUMS`. `npm publish <tarball> --access public` needs the maintainer's browser 2FA. A
-   later 409 "previously staged" means the publish is still processing.
+   whose CI passed. Pushing the tag runs `release.yml`.
+   Its `check` job fails the run unless the tag is `v` plus the version at the tagged commit, the
+   commit is an ancestor of `origin/main`, and `ci.yml` has a successful run for that commit; every
+   other job then skips. The builds run next, with provenance, and nothing publishes until all of
+   them pass. Publishing is one job per registry, in order: GitHub release, npm, crates.io, PyPI. Each
+   job needs every build and the job before it. The GitHub release job has no environment and
+   runs when the builds pass; each registry job then waits in the run's "Review deployments"
+   until the operator approves it.
+   If a job fails, re-run that job from the run's page; never move or delete a release tag, since
+   the tag ruleset forbids it. Until the npm trusted publisher is set (`npm trust github
+   @portll/ironwork --repo Portll/ironwork --file release.yml --env npm --allow-publish`), the npm job
+   fails and the jobs after it wait. To check the workflow without a release, run `gh workflow run
+   release.yml -R Portll/ironwork --ref main -f dry_run=true`: the checks and builds run and every
+   publish job is skipped.
+6. **Notes.** The release job creates the GitHub release with `SHA256SUMS`, provenance and the npm
+   tarball; its notes carry only the install paragraph. Add what the release contains with `gh
+   release edit v<version> --notes-file <file>`, opening with a `## Summary` section, which the
+   site renders as the release's row: the first paragraph is the benefit, each line opening with a
+   hyphen a sub-item, a paragraph opening `**Limit:**` the limit. Until the release has that
+   section, every cobolwork-web deploy fails at its build step.
+7. **crates.io.** The crates.io job publishes with `cargo publish --workspace --locked` after
+   `rust-lang/crates-io-auth-action` trades the run's identity for a short-lived token; cargo
+   orders the crates, and a crate new since the last release publishes the same way. Trusted
+   publishing is set for each crate, so a crate that is new needs its trusted publisher added
+   first.
+8. **npm.** The npm job publishes `portll-ironwork-<version>.tgz`, the tarball the build packed and
+   the release carries, with `npm publish --access public` through trusted publishing: no token,
+   no 2FA prompt. A 409 "previously staged" means the publish is still processing.
 
 ## After
 
