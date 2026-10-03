@@ -89,8 +89,8 @@ impl<'p> Machine<'p, '_, '_> {
             match cics::abend_exit(self.unit, &mut self.cics_handlers, &abend, self.serial, runs_level)? {
                 None => return Err(abend),
                 Some(cics::ExitTarget::Label { paragraph, at, .. }) => ending = self.go_to(paragraph as usize, at),
-                Some(cics::ExitTarget::Program(name)) => {
-                    let ending = cics::enter_exit_program(self, &name, abend.pos)?;
+                Some(cics::ExitTarget::Program { name, commarea }) => {
+                    let ending = cics::enter_exit_program(self, &name, commarea, abend.pos)?;
                     return Ok(if ending == Ending::StopRun { ending } else { Ending::Goback });
                 }
             }
@@ -162,9 +162,11 @@ impl<'a, 'w> CicsHost<'w, &'a Ref, &'a Operand, &'a str> for Machine<'_, '_, 'w>
     }
 
     fn run_program(&mut self, program: Rc<Compiled>, index: usize, commarea: Option<usize>, xctl: bool) -> R<Ending> {
+        let exit = if xctl { self.cics_handlers.abend.take() } else { None };
         Machine::activation(&program, index, &mut *self.unit, self.main && xctl).and_then(|mut callee| {
             let eib = callee.unit.eib;
             callee.bind(&[Some(eib), commarea]);
+            callee.cics_handlers.abend = exit;
             callee.run_level()
         })
     }

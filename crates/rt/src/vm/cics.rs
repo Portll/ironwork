@@ -101,8 +101,8 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                     self.unwind();
                     start = Some((p, self.p.paragraphs[p as usize].entry));
                 }
-                Some(ExitTarget::Program(name)) => {
-                    let ending = cics::enter_exit_program(self, &name, abend.pos);
+                Some(ExitTarget::Program { name, commarea }) => {
+                    let ending = cics::enter_exit_program(self, &name, commarea, abend.pos);
                     let ending = self.settle(ending)?;
                     return Ok(if ending == Ending::StopRun { ending } else { Ending::Goback });
                 }

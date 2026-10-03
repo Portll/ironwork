@@ -2158,10 +2158,12 @@ fn a_handle_abend_label_is_entered_by_a_go_to_at_the_handle_abend_command() {
 
 /// The output and abend code of a task whose first program runs `body`, then RETURN, with
 /// RECOVER showing the abend code. It can CALL or LINK OWNL, which takes its own abend at its
-/// label, SETP and SETL, which set a PROGRAM and a LABEL exit and return, BADP, which abends, and
-/// MIDP, which CALLs SETL and abends; EXITP is the PROGRAM exit.
+/// label, SETP and SETL, which set a PROGRAM and a LABEL exit and return, BADP, which abends,
+/// MIDP, which CALLs SETL and abends, and MIDX and MIDL, which set a PROGRAM and a LABEL exit and
+/// XCTL to LASTP, which abends; EXITP and EXITC, which shows its COMMAREA, are PROGRAM exits.
 fn handle_abend_task(body: &[&str]) -> (String, Option<String>) {
     let code = "       01  WS-CODE PIC X(4).\n";
+    let area = "       01  DFHCOMMAREA PIC X(5).\n";
     let mut procedure = vec!["       MAIN-LINE.\n".to_owned()];
     procedure.extend(body.iter().map(|s| line(s)));
     procedure.extend([line("EXEC CICS RETURN END-EXEC."), "       RECOVER.\n".into()]);
@@ -2182,6 +2184,10 @@ fn handle_abend_task(body: &[&str]) -> (String, Option<String>) {
         ("BADP", cics_program("BADP", "", "", &line("EXEC CICS ABEND ABCODE('BD01') END-EXEC."))),
         ("MIDP", cics_program("MIDP", "", "", &[line("CALL 'SETL'"), line("DISPLAY 'BACK IN MID'"), line("EXEC CICS ABEND ABCODE('MD01') END-EXEC.")].concat())),
         ("EXITP", cics_program("EXITP", code, "", &[line("EXEC CICS ASSIGN ABCODE(WS-CODE) END-EXEC"), line("DISPLAY 'EXIT ' WS-CODE"), line("EXEC CICS RETURN END-EXEC.")].concat())),
+        ("MIDX", cics_program("MIDX", "       01  WS-XC PIC X(2) VALUE 'XC'.\n", area, &[line("EXEC CICS HANDLE ABEND PROGRAM('EXITC') END-EXEC"), line("EXEC CICS XCTL PROGRAM('LASTP') COMMAREA(WS-XC)"), line("    LENGTH(2) END-EXEC.")].concat())),
+        ("MIDL", cics_program("MIDL", "", "", &[line("EXEC CICS HANDLE ABEND LABEL(OWN) END-EXEC"), line("EXEC CICS XCTL PROGRAM('LASTP') END-EXEC."), "       OWN.\n".into(), line("DISPLAY 'NOT REACHED'.")].concat())),
+        ("LASTP", cics_program("LASTP", "", "", &line("EXEC CICS ABEND ABCODE('LS01') END-EXEC."))),
+        ("EXITC", cics_program("EXITC", code, area, &[line("EXEC CICS ASSIGN ABCODE(WS-CODE) END-EXEC"), line("DISPLAY 'EXIT ' DFHCOMMAREA ' ' EIBCALEN ' ' WS-CODE"), line("EXEC CICS RETURN END-EXEC.")].concat())),
     ];
     let mut source = format!("{main}       END PROGRAM MAINP.\n");
     for (id, program) in programs {
@@ -2211,6 +2217,14 @@ fn a_dynamic_call_suspends_the_callers_abend_exit_until_the_subprogram_returns()
     assert_eq!(call("BADP", &[]), (String::new(), Some("BD01".into())));
     assert_eq!(call("SETP", &["EXEC CICS ABEND ABCODE('MN03') END-EXEC"]), ("RECOVERED MN03\n".into(), None));
     assert_eq!(call("OWNL", &["DISPLAY 'BACK IN MAIN'"]), ("OWN OW01\nBACK IN MAIN\n".into(), None));
+}
+
+#[test]
+fn xctl_keeps_the_levels_abend_exit_and_a_program_exit_gets_the_commarea_of_the_program_that_set_it() {
+    let program = handle_abend_task(&["MOVE 'MIDDL' TO WS-PGM", "EXEC CICS LINK PROGRAM('MIDX') COMMAREA(WS-PGM)", "    LENGTH(5) END-EXEC", "DISPLAY 'BACK IN MAIN'"]);
+    assert_eq!(program, ("EXIT MIDDL 0005 LS01\nBACK IN MAIN\n".into(), None));
+    let label = handle_abend_task(&["EXEC CICS HANDLE ABEND LABEL(RECOVER) END-EXEC", "EXEC CICS LINK PROGRAM('MIDL') END-EXEC"]);
+    assert_eq!(label, ("RECOVERED APC2\n".into(), None));
 }
 
 #[test]

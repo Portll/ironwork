@@ -1338,7 +1338,9 @@ options the translator gives and resolving HANDLE labels there. SYNCPOINT is a s
 - **Refused:** a HANDLE label that names no procedure, which the walker abends on only after the
   task check (IRONWORK at the block, or the outside-a-task abend first), so no one terminator
   gives both. HANDLE ABEND, whose exit an abend takes when it reaches the program's activation,
-  in the walker's `run_level` and the VM's alike (below); lowering still refuses it.
+  in the walker's `run_level` and the VM's alike (below); lowering still refuses it, so no VM
+  activation sets an exit, and the VM has none of the walker's CALL and XCTL rules for one
+  (C237-C239).
 - **Not lowered:** the observer's sinks (`cics_sinks`), which tell an observer a command's operands
   and change no result, as with CALL's and DISPLAY's. The VM tells them from the options the
   command keeps, which leave out SYSID on any command but ASSIGN, WRITE's FROM under JOURNALNAME or

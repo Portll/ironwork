@@ -54,7 +54,8 @@ pub trait CicsHost<'w, P: Copy, O, S>: Host<P> + UnitHost<'w> {
     /// The data item a name alone refers to, or the abend a reference to it gives.
     fn locate_named(&mut self, name: &str, pos: Pos) -> R<Loc>;
     /// Runs program `index` from its start with DFHEIBLK and `commarea` as its USING items; for
-    /// XCTL, in this program's place.
+    /// XCTL, in this program's place at its logical level, with the level's HANDLE ABEND exit
+    /// (C239).
     fn run_program(&mut self, program: Self::Program, index: usize, commarea: Option<usize>, xctl: bool) -> R<Ending>;
 }
 
@@ -80,8 +81,9 @@ pub enum ExitTarget {
     /// A paragraph of the program activation `owner` that set the exit, entered as by a GO TO at
     /// the HANDLE ABEND command `at`.
     Label { paragraph: ParaId, owner: u64, at: Pos },
-    /// A program, entered as by LINK.
-    Program(String),
+    /// A program, entered as by LINK with the COMMAREA and EIBCALEN of the program that set the
+    /// exit, when it had a COMMAREA.
+    Program { name: String, commarea: Option<(usize, i16)> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

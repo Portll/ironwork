@@ -37,9 +37,10 @@ pub(super) fn cics_return<'w, P: Copy, O, S>(
     Ok(Flow::End(Ending::Goback))
 }
 
-/// LINK runs a program and comes back; XCTL runs it in this program's place. A LINKed program gets
-/// the COMMAREA item itself; XCTL passes a copy, since this program's storage goes away. Each LINK
-/// or XCTL starts the program with fresh WORKING-STORAGE, as CICS gives it.
+/// LINK runs a program and comes back; XCTL runs it in this program's place, at its logical level
+/// with its HANDLE ABEND exit (C239). A LINKed program gets the COMMAREA item itself; XCTL passes
+/// a copy, since this program's storage goes away. Each LINK or XCTL starts the program with
+/// fresh WORKING-STORAGE, as CICS gives it.
 pub(super) fn link<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, t: &Transfer<P, O, S>, xctl: bool) -> R<Flow> {
     eib_bytes(x.unit(), EIBFN, if xctl { &[0x0E, 0x04] } else { &[0x0E, 0x02] });
     let Some(name) = text(x, t.program.as_ref(), at.pos)?.map(|n| n.to_ascii_uppercase()) else {
@@ -70,9 +71,6 @@ pub(super) fn link<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &A
     let length = int(x, t.length.as_ref(), at.pos)?.map_or(item_len, |n| n.max(0) as usize);
     let saved = eib_calen(x.unit());
     eib_halfword(x.unit(), EIBCALEN, length as i16);
-    if xctl {
-        x.handlers().abend = None;
-    }
     let ending = enter(x, program, index, area, xctl, at.pos);
     let unit = x.unit();
     unit.release_temporaries(mark);
@@ -140,9 +138,10 @@ pub fn abend_exit<H, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, handlers: &mut 
     }
 }
 
-/// A HANDLE ABEND PROGRAM exit, entered as by LINK with the COMMAREA of the program that set it.
-/// One that cannot be loaded abends APCT, which passes to the next higher level.
-pub fn enter_exit_program<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, name: &str, pos: Pos) -> R<Ending> {
+/// A HANDLE ABEND PROGRAM exit, entered as by LINK with the COMMAREA and EIBCALEN of the program
+/// that set it, else of the program running the level. One that cannot be loaded abends APCT,
+/// which passes to the next higher level.
+pub fn enter_exit_program<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, name: &str, commarea: Option<(usize, i16)>, pos: Pos) -> R<Ending> {
     let apct = |message: String| Abend { code: AbendCode::Cics("APCT".into()), message, pos, file: None };
     let index = match x.unit().load(name) {
         Ok(i) => i,
@@ -154,8 +153,15 @@ pub fn enter_exit_program<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>,
     };
     let page = page(x);
     eib_text(x.unit(), page, EIBRSRCE, 8, name);
-    let commarea = x.commarea();
-    enter(x, program, index, commarea, false, pos)
+    let saved = eib_calen(x.unit());
+    let (area, length) = match commarea {
+        Some((area, length)) => (Some(area), length),
+        None => (x.commarea(), saved),
+    };
+    eib_halfword(x.unit(), EIBCALEN, length);
+    let ending = enter(x, program, index, area, false, pos);
+    eib_halfword(x.unit(), EIBCALEN, saved);
+    ending
 }
 
 pub(super) fn handle_condition<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, labels: &[(Condition, Option<ParaId>)]) -> R<Flow> {
@@ -199,13 +205,13 @@ pub(super) fn pop_handle<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, 
 
 /// HANDLE ABEND PROGRAM or LABEL replaces the program level's exit, active; RESET reactivates it
 /// and CANCEL, the default, deactivates it (API Reference SC34-7402-00, pp. 314-315). PROGRAM
-/// names a program a LINK could find, else PGMIDERR.
+/// names a program a LINK could find, else PGMIDERR, and keeps this program's COMMAREA for it.
 pub(super) fn handle_abend<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, program: Option<&Datum<P, O, S>>, label: Option<ParaId>, reset: bool) -> R<Flow> {
     let target = match (text(x, program, at.pos)?, label) {
         (Some(name), _) => {
             let name = name.to_ascii_uppercase();
             match x.unit().load(&name) {
-                Ok(_) => Some(ExitTarget::Program(name)),
+                Ok(_) => Some(ExitTarget::Program { name, commarea: x.commarea().map(|area| (area, eib_calen(x.unit()))) }),
                 Err(LoadError::NotFound) => return raise(x, at, Condition::PGMIDERR, 1),
                 Err(LoadError::Compile(m)) => return Err(Abend::ironwork(format!("EXEC CICS HANDLE ABEND PROGRAM({name}): {m}"), at.pos)),
             }
