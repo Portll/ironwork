@@ -7,14 +7,19 @@ behaviour that changes when a program leaves z/OS, or an ironwork bug; Enterpris
 which. CBL and PROCESS cards are removed for gcobol, which does not read them, and gcobol runs
 with -dialect ibm. Its clock cannot be fixed, so a program that reads the date differs by design.
 
+--vm runs each program under `ironwork run --vm` in gcobol's place, and reports where the VM and the
+interpreter differ in exit status, standard output or standard error (docs/lir.md §12.3). A program
+lowering refuses, or a run the VM stops at what it does not run yet, is vm-stops, with what stopped
+it.
+
 usage: differ.py <ironwork binary> <program or directory>... [-I dir]... [--stdin file]
-                 [--gcobol command] [--exec command] [--timeout seconds]
+                 [--gcobol command] [--exec command] [--timeout seconds] [--vm]
 
 --gcobol names the compiler (default gcobol). --exec is what runs the executable it links:
 tools/gcobol/gcobol installed as gcobol-exec runs it in the same container; on Linux leave it out.
-Exit status: 0 every program agrees, 1 some differ, 2 usage.
+Exit status: 0 every program agrees, 1 some differ (with --vm, only a difference counts), 2 usage.
 """
-import argparse, os, re, shlex, shutil, subprocess, sys, tempfile
+import argparse, calendar, os, re, shlex, shutil, subprocess, sys, tempfile, time
 
 CLOCK = "2026-01-02T03:04:05"
 PROGRAM = (".cbl", ".cob")
@@ -23,6 +28,8 @@ PROGRAM = (".cbl", ".cob")
 IRONWORK_REFUSED, IRONWORK_ABEND, IRONWORK_PANIC = (241, 242, 243, 245, 246), (240, 244), 255
 # The status a RETURN-CODE outside 0-238, or of 239, exits with; standard error gives its value.
 OUTSIDE = re.compile(r"^ironwork: RETURN-CODE (-?\d+) exits 239$", re.M)
+# Lowering refused the program, or the VM stopped at what it does not run yet; stderr says which.
+VM_STOPPED_STATUS = (242, 243)
 # A gcobol program that raises a fatal exception condition ends in abort(): SIGTRAP, which a
 # container reports as 128 + 5.
 SIGTRAP_STATUSES = (133, -5)
@@ -130,6 +137,28 @@ def compare(iw, gc):
         return "gcobol-refuses", gc[1]
     return "differ", f"ironwork {iw[0]}: {iw[1]}; gcobol {gc[0]}: {gc[1]}"
 
+VM_STOPPED = re.compile(r"the VM does not run (.+) yet; run it without --vm|: (lowering: .+)")
+# A Rust panic names its thread by a number that differs from run to run.
+PANIC_THREAD = re.compile(r"^(thread '[^']*') \(\d+\)(?= panicked at )", re.M)
+
+def compare_vm(iw, vm):
+    """One verdict on a program's runs on the interpreter and the VM, each (status, stdout,
+    stderr), and what it rests on."""
+    iw, vm = ((s, out, PANIC_THREAD.sub(r"\1", err)) for s, out, err in (iw, vm))
+    if iw[0] is None or vm[0] is None:
+        return ("both-timeout", "") if iw[0] is vm[0] is None else ("differ", f"{'the interpreter' if iw[0] is None else 'the VM'} timed out")
+    stopped = VM_STOPPED.search(vm[2])
+    if vm[0] in VM_STOPPED_STATUS and stopped:
+        return "vm-stops", stopped.group(1) or stopped.group(2)
+    if iw == vm:
+        return ("both-refuse", first_line(iw[2])) if iw[0] in IRONWORK_REFUSED else ("agree", "")
+    for what, a, b in (("standard output", iw[1], vm[1]), ("standard error", iw[2], vm[2])):
+        x, y = a.splitlines(), b.splitlines()
+        n = next((i for i, (p, q) in enumerate(zip(x, y)) if p != q), min(len(x), len(y)))
+        if x != y:
+            return "differ", f"{what} line {n + 1}: interpreter {x[n] if n < len(x) else None!r}, VM {y[n] if n < len(y) else None!r}"
+    return "differ", f"exit status: interpreter {iw[0]}, VM {vm[0]}"
+
 def main():
     ap = argparse.ArgumentParser(usage=__doc__.split("usage: ")[1].split("\n\n")[0])
     ap.add_argument("binary")
@@ -139,10 +168,24 @@ def main():
     ap.add_argument("--gcobol", default="gcobol")
     ap.add_argument("--exec", dest="runner", default="")
     ap.add_argument("--timeout", type=float, default=60)
+    ap.add_argument("--vm", action="store_true")
     try:
         args = ap.parse_args()
     except SystemExit:
         return 2
+    libraries = [arg for d in args.libraries for arg in ("-I", os.path.abspath(d))]
+    if args.vm:
+        # Each run compiles afresh, so WHEN-COMPILED is fixed at the clock's time too.
+        os.environ["SOURCE_DATE_EPOCH"] = str(calendar.timegm(time.strptime(CLOCK, "%Y-%m-%dT%H:%M:%S")))
+        print(f"# the interpreter and the VM; clock and WHEN-COMPILED {CLOCK}")
+        tally = {}
+        for path in programs(args.paths):
+            argv = [args.binary, "run", path, "-silent", "--clock", CLOCK, *libraries]
+            verdict, why = compare_vm(run(argv, args.stdin, args.timeout), run([*argv, "--vm"], args.stdin, args.timeout))
+            tally[verdict] = tally.get(verdict, 0) + 1
+            print(f"{verdict}\t{path}" + (f"\t{why}" if why else ""))
+        print("# " + ", ".join(f"{n} {v}" for v, n in sorted(tally.items(), key=lambda kv: -kv[1])))
+        return 1 if tally.get("differ") else 0
     compiler, runner = shlex.split(args.gcobol), shlex.split(args.runner)
     if not shutil.which(compiler[0]) or (runner and not shutil.which(runner[0])):
         print(f"differ: {compiler[0] if not shutil.which(compiler[0]) else runner[0]} is not on PATH", file=sys.stderr)
@@ -150,7 +193,6 @@ def main():
     # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args -- the compiler named on the command line, as an argument list
     version = subprocess.run([*compiler, "--version"], capture_output=True, text=True).stdout.splitlines()
     print(f"# {version[0] if version else compiler[0]}; ironwork clock {CLOCK}")
-    libraries = [arg for d in args.libraries for arg in ("-I", os.path.abspath(d))]
     tally, differ = {}, False
     for path in programs(args.paths):
         with tempfile.TemporaryDirectory(prefix="differ-") as scratch:

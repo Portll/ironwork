@@ -2428,6 +2428,12 @@ runs something taint does not follow calls `RunUnit::unfollowed`, as the walker 
 The fuzz target of B2 runs both with a step limit, and passes when they agree or both stop at it.
 The golden programs of §12.2 run in both, which exercises C99.
 
+**NIST.** `tools/nist.py --vm` runs NIST's CCVS85 audit routines on the interpreter and then on the
+VM, from the same files and with the clock and WHEN-COMPILED fixed, and compares the exit status,
+standard output, standard error and every file the two runs leave, the print file among them. CI
+runs it on every push and fails on any difference. `tools/differ.py --vm` does the same for any
+directory of programs, files aside.
+
 **What runs now.** `rt::vm` runs the core: storage, every data op, conditions, control flow, and
 CALL and user-defined functions within the run unit, with NUMCHECK, ZONECHECK and PARMCHECK; LE
 callable services and the virtual printer; OO COBOL, INVOKE and CALL through a function-pointer; the

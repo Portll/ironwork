@@ -36,14 +36,26 @@ and on standard output.
 The results file has a line per program: name, class, and the first line ironwork wrote to
 standard error, with the work directory's path removed.
 
+--vm runs each program that runs on the interpreter again on the VM (`ironwork run --vm`), from
+the same files and both with the clock and WHEN-COMPILED (SOURCE_DATE_EPOCH) fixed at CLOCK, and
+compares the two runs' exit status, standard output, standard error and every file of the work
+directory, the print file among them; the interpreter's files are what the next program finds.
+The results file then has two more columns, the VM's verdict and what it rests on:
+
+  same     the two runs agree in all of these
+  differ   they do not; the first difference
+  stopped  the VM stopped at what it does not run yet, or lowering refused the program; what
+  -        the program did not run on the interpreter (refused, called, a flagging test, timeout)
+
 usage: nist.py <ironwork binary> <CCVS85 src directory> [--out results.tsv]
-               [--baseline results.tsv] [--workdir dir] [--timeout seconds]
+               [--baseline results.tsv] [--workdir dir] [--timeout seconds] [--vm]
 
 --workdir keeps the work directory, which must not exist yet; otherwise a temporary one is used
 and removed. --baseline lists each program whose class differs from an earlier results file.
-Exit status: 0; 1 when a program clean in the baseline now fails, is refused or abends; 2 usage.
+Exit status: 0; 1 when a program clean in the baseline now fails, is refused or abends, or with
+--vm when a program differs; 2 usage.
 """
-import argparse, collections, glob, os, re, shutil, subprocess, sys, tempfile
+import argparse, calendar, collections, glob, os, re, shutil, subprocess, sys, tempfile, time
 
 SELECTED_SWITCHES = set("AEHLYT")
 PRINT_FILE = "XXXXX055"
@@ -68,6 +80,13 @@ X_CARD_TEXT = {
     "090": "194",  # ordinal numbers of A (X'C1') and 0 (X'F0') in EBCDIC
     "091": "241",
 }
+CLOCK = "2026-01-02T03:04:05"
+# ironwork run's exit statuses besides a RETURN-CODE (README, Exit status).
+REFUSED, ABEND = (241,), (240, 244)
+# Lowering refused the program, or the VM stopped at what it does not run yet; stderr says which.
+VM_STOPPED_STATUS = (242, 243)
+# A Rust panic names its thread by a number that differs from run to run.
+PANIC_THREAD = re.compile(r"^(thread '[^']*') \(\d+\)(?= panicked at )", re.M)
 ABSENT_FILES = {
     "IX111A": ("025",),
     "IX216A": ("025",),
@@ -119,29 +138,97 @@ def classify(flagging, code, report):
         return "compiled"
     if code == 0:
         return "failed" if "FAIL*" in report else "clean"
-    return {241: "refused", 240: "abend", 244: "abend"}.get(code, f"exit-{code}")
+    return "refused" if code in REFUSED else "abend" if code in ABEND else f"exit-{code}"
 
-def run(binary, workdir, name, env, include, sysin, timeout):
+def execute(binary, workdir, name, env, include, sysin, timeout, command, *flags):
+    """A run's exit status (None when it timed out), standard output, and standard error with the
+    work directory's path removed."""
+    try:
+        r = subprocess.run([binary, command, os.path.join(workdir, f"{name}.CBL"), "-I", include, *flags],
+                           cwd=workdir, env=env, input=sysin, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None, b"", ""
+    return r.returncode, r.stdout, PANIC_THREAD.sub(r"\1", r.stderr.decode("utf-8", "replace").replace(workdir + os.sep, ""))
+
+def data_files(workdir):
+    """Every file of the work directory but the sources, by name."""
+    files = {}
+    for name in os.listdir(workdir):
+        path = os.path.join(workdir, name)
+        if os.path.isfile(path) and not name.endswith(".CBL"):
+            with open(path, "rb") as f:
+                files[name] = f.read()
+    return files
+
+def restore(workdir, files):
+    for name in set(data_files(workdir)) - set(files):
+        os.remove(os.path.join(workdir, name))
+    for name, data in files.items():
+        with open(os.path.join(workdir, name), "wb") as f:
+            f.write(data)
+
+VM_STOPPED = (re.compile(r"the VM does not run (.+) yet; run it without --vm"), re.compile(r": (lowering: .+)$", re.M))
+
+def first_difference(x, y):
+    return next((i for i, (a, b) in enumerate(zip(x, y)) if a != b), min(len(x), len(y)))
+
+def line_at(lines, n):
+    return lines[n].decode("utf-8", "replace") if n < len(lines) else "(none)"
+
+def compare(walker, vm):
+    """The VM's verdict on a run the interpreter made, each a (status, stdout, stderr, files)."""
+    status, out, err, files = vm
+    if status is None:
+        return "differ", "the VM timed out"
+    stopped = next((m.group(1) for m in (p.search(err) for p in VM_STOPPED) if m), None)
+    if status in VM_STOPPED_STATUS and stopped:
+        return "stopped", stopped
+    if status != walker[0]:
+        said = err.strip().splitlines()
+        return "differ", f"exit status: interpreter {walker[0]}, VM {status}" + (f": {said[0]}" if said else "")
+    for what, x, y in (("standard output", walker[1], out), ("standard error", walker[2].encode(), err.encode())):
+        if x != y:
+            a, b = x.splitlines(), y.splitlines()
+            n = first_difference(a, b)
+            return "differ", f"{what} line {n + 1}: interpreter {line_at(a, n)!r}, VM {line_at(b, n)!r}"
+    for name in sorted(set(walker[3]) | set(files)):
+        x, y = walker[3].get(name), files.get(name)
+        if x != y:
+            if x is None or y is None:
+                return "differ", f"{name} written by the {'VM' if x is None else 'interpreter'} alone"
+            return "differ", f"{name} differs from byte {first_difference(x, y)}: interpreter {len(x)} bytes, VM {len(y)}"
+    return "same", ""
+
+def run(binary, workdir, name, env, include, sysin, timeout, vm):
+    """The program's class and first line of standard error, and with `vm` the VM's verdict and
+    what it rests on."""
     for f in (PRINT_FILE, *(f"XXXXX{n}" for n in ABSENT_FILES.get(name, ()))):
         if os.path.exists(os.path.join(workdir, f)):
             os.remove(os.path.join(workdir, f))
     print_file = os.path.join(workdir, PRINT_FILE)
     flagging = FLAGGING_TEST.match(name) is not None
-    try:
-        r = subprocess.run([binary, "check" if flagging else "run", os.path.join(workdir, f"{name}.CBL"),
-                            "-I", include],
-                           cwd=workdir, env=env, input=sysin, capture_output=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return "timeout", ""
-    report = r.stdout.decode("utf-8", "replace")
+    before = data_files(workdir) if vm else None
+    clock = ("--clock", CLOCK) if vm else ()
+    status, out, err = execute(binary, workdir, name, env, include, sysin, timeout, *(("check",) if flagging else ("run", *clock)))
+    skipped = ("-", "") if vm else ()
+    if status is None:
+        return ("timeout", "", *skipped)
+    report = out.decode("utf-8", "replace")
     if os.path.exists(print_file):
         with open(print_file, "rb") as f:
             report += f.read().decode("cp037", "replace")
-    stderr = r.stderr.decode("utf-8", "replace").strip().splitlines()
-    first = stderr[0].replace(workdir + os.sep, "").replace("\t", " ") if stderr else ""
-    return classify(flagging, r.returncode, report), first
+    stderr = err.strip().splitlines()
+    first = stderr[0].replace("\t", " ") if stderr else ""
+    cls = classify(flagging, status, report)
+    if not vm or flagging or cls == "refused":
+        return (cls, first, *skipped)
+    after = data_files(workdir)
+    restore(workdir, before)
+    verdict = compare((status, out, err, after), (*execute(binary, workdir, name, env, include, sysin, timeout, "run", *clock, "--vm"), data_files(workdir)))
+    restore(workdir, after)
+    return (cls, first, *verdict)
 
-def sweep(binary, src, workdir, timeout):
+def sweep(binary, src, workdir, timeout, vm):
     library = os.path.join(workdir, "copy")
     os.makedirs(library)
     sources, members = [], []
@@ -161,9 +248,11 @@ def sweep(binary, src, workdir, timeout):
     for _, text in sources + members:
         for dd in X_CARD.findall(text):
             env[f"DD_{dd}"] = os.path.join(workdir, dd)
+    if vm:
+        env["SOURCE_DATE_EPOCH"] = str(calendar.timegm(time.strptime(CLOCK, "%Y-%m-%dT%H:%M:%S")))
     called = {target for _, text in sources for target in call_targets(text) - {program_id(text)}}
-    return [(name, "called", "") if program_id(text) in called
-            else (name, *run(binary, workdir, name, env, library, sysin(src, name), timeout))
+    return [(name, "called", "", *(("-", "") if vm else ())) if program_id(text) in called
+            else (name, *run(binary, workdir, name, env, library, sysin(src, name), timeout, vm))
             for name, text in sources]
 
 def sysin(src, name):
@@ -186,6 +275,7 @@ def main():
     p.add_argument("--baseline")
     p.add_argument("--workdir")
     p.add_argument("--timeout", type=float, default=120)
+    p.add_argument("--vm", action="store_true")
     a = p.parse_args()
     binary = os.path.abspath(a.binary)
     if not os.path.isdir(a.src):
@@ -196,28 +286,41 @@ def main():
     else:
         workdir = tempfile.mkdtemp(prefix="nist-")
     try:
-        results = sweep(binary, os.path.abspath(a.src), workdir, a.timeout)
+        results = sweep(binary, os.path.abspath(a.src), workdir, a.timeout, a.vm)
     finally:
         if not a.workdir:
             shutil.rmtree(workdir, ignore_errors=True)
 
     if a.out:
         with open(a.out, "w") as f:
-            f.write("program\tclass\tstderr\n")
+            f.write("program\tclass\tstderr" + ("\tvm\tvm detail" if a.vm else "") + "\n")
             for row in results:
                 f.write("\t".join(row) + "\n")
-    tally = collections.Counter(cls for _, cls, _ in results)
+    tally = collections.Counter(row[1] for row in results)
     others = sorted(set(tally) - set(CLASSES))
     print(f"{len(results)} programs: " + ", ".join(f"{cls} {tally[cls]}" for cls in (*CLASSES, *others)))
+
+    differ = False
+    if a.vm:
+        ran = [row for row in results if row[3] != "-"]
+        verdicts = collections.Counter(row[3] for row in ran)
+        print(f"vm: {len(ran)} programs ran on the interpreter: {verdicts['same']} same on the VM, "
+              f"{verdicts['differ']} differ, {verdicts['stopped']} stopped by the VM")
+        for why, n in collections.Counter(row[4] for row in ran if row[3] == "stopped").most_common():
+            print(f"  {n:4d}  {why}")
+        for row in ran:
+            if row[3] == "differ":
+                print(f"{row[0]}\tdiffers: {row[4]}")
+        differ = verdicts["differ"] > 0
 
     regressed = False
     if a.baseline:
         before = read_results(a.baseline)
-        for name, cls, _ in results:
+        for name, cls, *_ in results:
             if before.get(name, "new") != cls:
                 print(f"{name}\t{before.get(name, 'new')} -> {cls}")
                 regressed |= before.get(name) == "clean" and cls not in ("called", "compiled")
-    return 1 if regressed else 0
+    return 1 if regressed or differ else 0
 
 if __name__ == "__main__":
     sys.exit(main())

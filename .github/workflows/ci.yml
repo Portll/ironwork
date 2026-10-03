@@ -35,6 +35,15 @@ jobs:
             test/fixtures/priv/REGION.csd
             test/fixtures/web-csd/REGION.csd
           sparse-checkout-cone-mode: false
+      # NIST's CCVS85 audit routines, one program to a file, which tools/nist.py runs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: z390development/nistcobol85
+          ref: 272a401985c66dfca4302ff9bb037def167bc5f3
+          path: nistcobol85
+          persist-credentials: false
+          sparse-checkout: src/
+          sparse-checkout-cone-mode: false
       - name: Toolchain
         run: |
           rustup toolchain install stable --profile minimal --component clippy
@@ -43,6 +52,10 @@ jobs:
         env:
           IRONWORK_COBOLWORK_DIR: ${{ github.workspace }}/cobolwork
         run: cargo test --workspace --locked
+      - name: NIST CCVS85 on the interpreter and the VM
+        run: |
+          cargo build --locked -p ironwork
+          python3 tools/nist.py target/debug/ironwork nistcobol85/src --vm
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # tls/ is a workspace of its own with rustls, so the one above stays free of dependencies.
