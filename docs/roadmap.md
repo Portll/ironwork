@@ -76,4 +76,4 @@ It is zero-dependency Rust.
 
 ## Releases and priorities
 
-Release contents and their order live in the SPINE plans `cobolwork-roadmap` and `ironwork-roadmap` and on the site's roadmap pages (https://ironwork.commitwork.online/roadmap/ and https://cobolwork.commitwork.online/roadmap/). The steps toward the VM are detailed in [codegen-runtime.md](codegen-runtime.md). This file holds only the boundary between the two products.
+Release contents and their order live in the SPINE plans `cobolwork-roadmap` and `ironwork-roadmap` and on the site's roadmap pages (https://ironwork.commitwork.online/ironwork/roadmap/ and https://cobolwork.commitwork.online/cobolwork/roadmap/). The steps toward the VM are detailed in [codegen-runtime.md](codegen-runtime.md). This file holds only the boundary between the two products.
