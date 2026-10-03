@@ -15,9 +15,9 @@ const KEPT: usize = 20;
 /// The run pairs spent making each kept input smaller.
 const BUDGET: u32 = 100;
 /// `ironwork run`'s exit statuses for an abend, and for a program lowering refused or a run the VM
-/// stopped, whose standard error says which: as they were, then as roadmap 3.9 rules them.
-const ABEND: [i32; 2] = [16, 240];
-const VM_STOPPED: [i32; 3] = [12, 242, 243];
+/// stopped, whose standard error says which (README, Exit status).
+const ABEND: [i32; 2] = [240, 244];
+const VM_STOPPED: [i32; 2] = [242, 243];
 
 /// One executor's run: whether it was stopped at the timeout; its exit status, None when a signal
 /// ended it; standard output; standard error; and each DD's data set as the run left it, None
@@ -411,7 +411,7 @@ mod tests {
         assert_eq!(found, ["standard output differs at line 1: interpreter \"TOTAL 1\", VM \"TOTAL 2\""]);
         assert_eq!(signature(&interpreter, &vm, &found), "exit status 0 / exit status 0: standard output");
 
-        let abend = Ran { files: [("OUTFILE".to_string(), Some(b"AB".to_vec()))].into(), ..ran(16, "", "P.cbl:7:12: ABEND S0C7: data exception\n") };
+        let abend = Ran { files: [("OUTFILE".to_string(), Some(b"AB".to_vec()))].into(), ..ran(240, "", "P.cbl:7:12: ABEND S0C7: data exception\n") };
         let written = Ran { files: [("OUTFILE".to_string(), Some(b"ABC".to_vec()))].into(), ..ran(0, "", "") };
         let Verdict::Differ(found) = verdict(&written, &abend) else { panic!("they differ") };
         assert_eq!(found[0], "the ending differs: interpreter exit status 0, VM S0C7 at P.cbl:7:12");
@@ -421,10 +421,10 @@ mod tests {
 
     #[test]
     fn both_at_the_limit_pass_and_the_vm_stopping_is_counted_not_failed() {
-        let limited = ran(16, "A\n", "P.cbl:9:12: ABEND S322: the run reached its statement limit\n");
+        let limited = ran(240, "A\n", "P.cbl:9:12: ABEND S322: the run reached its statement limit\n");
         let timed_out = Ran { timed_out: true, status: None, ..ran(0, "", "") };
         assert!(matches!(verdict(&limited, &timed_out), Verdict::Limited));
-        let stopped = ran(12, "", "ironwork: P.cbl: the VM does not run FUNCTION UUID4, which gives another value on every run yet; run it without --vm\n");
+        let stopped = ran(243, "", "ironwork: P.cbl: the VM does not run FUNCTION UUID4, which gives another value on every run yet; run it without --vm\n");
         assert!(matches!(verdict(&ran(0, "X\n", ""), &stopped), Verdict::Unimplemented(what) if what == "FUNCTION UUID4, which gives another value on every run"));
         let refused = ran(242, "", "P.cbl:4:12: lowering: INITIALIZE with FILLER is not lowered yet\n");
         assert!(matches!(verdict(&ran(0, "", ""), &refused), Verdict::Unimplemented(what) if what == "lowering: INITIALIZE with FILLER is not lowered yet"));
