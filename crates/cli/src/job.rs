@@ -1170,6 +1170,7 @@ struct Report {
 
 pub(crate) fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     fs::create_dir_all(to)?;
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path -- each name is one component read from the directory, and links are skipped
     for entry in fs::read_dir(from)? {
         let entry = entry?;
         let kind = entry.file_type()?;

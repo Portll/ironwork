@@ -489,7 +489,9 @@ pub fn open_keyed(dd: Option<&Dd>, mode: OpenMode, format: Format, keying: Keyin
 
 pub fn open(dd: &Dd, mode: OpenMode, format: Format) -> io::Result<Open> {
     let handle = match mode {
+        // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path -- a DD names the file the job assigned
         OpenMode::Input => Handle::Reader(BufReader::new(File::open(&dd.path)?)),
+        // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path -- a DD names the file the job assigned
         OpenMode::Output if !dd.append => Handle::Writer(BufWriter::new(File::create(&dd.path)?)),
         OpenMode::Output | OpenMode::Extend => Handle::Writer(BufWriter::new(OpenOptions::new().append(true).create(true).open(&dd.path)?)),
         OpenMode::InputOutput => return Err(io::Error::new(io::ErrorKind::Unsupported, "OPEN I-O of a line-sequential file")),

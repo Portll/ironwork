@@ -139,6 +139,7 @@ def main():
         dirs = libraries.get(repo, set()) | member_libraries(path, repositories[repo])
         flags = [arg for d in sorted(dirs) for arg in ("-I", d)]
         try:
+            # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args -- an argument list, no shell
             r = subprocess.run([binary, "check", path, *flags], capture_output=True, text=True, timeout=20)
         except subprocess.TimeoutExpired:
             tally["(timeout)"] += 1

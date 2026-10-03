@@ -607,6 +607,7 @@ pub(crate) fn finish(command: Command, dir: &Path, timeout: Duration, given: &[(
 /// As [`finish`], the exit code and standard error of a run that ended, None for one stopped at
 /// `timeout`.
 fn wait_for(mut command: Command, dir: &Path, timeout: Duration, given: &[(&str, PathBuf)]) -> std::io::Result<Option<(Option<i32>, String)>> {
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path -- a fixed name in the run's own scratch directory
     let stderr = fs::File::create(dir.join("stderr"))?;
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(stderr);
     let mut child = command.spawn()?;
@@ -622,6 +623,7 @@ fn wait_for(mut command: Command, dir: &Path, timeout: Duration, given: &[(&str,
         }
         std::thread::sleep(Duration::from_millis(5));
     };
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path -- a fixed name in the run's own scratch directory
     let mut text = String::from_utf8_lossy(&fs::read(dir.join("stderr")).unwrap_or_default()).into_owned();
     for (dd, path) in given {
         text = text.replace(&path.display().to_string(), dd);

@@ -140,6 +140,7 @@ def main():
     if not shutil.which(compiler[0]) or (runner and not shutil.which(runner[0])):
         print(f"differ: {compiler[0] if not shutil.which(compiler[0]) else runner[0]} is not on PATH", file=sys.stderr)
         return 2
+    # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args -- the compiler named on the command line, as an argument list
     version = subprocess.run([*compiler, "--version"], capture_output=True, text=True).stdout.splitlines()
     print(f"# {version[0] if version else compiler[0]}; ironwork clock {CLOCK}")
     libraries = [arg for d in args.libraries for arg in ("-I", os.path.abspath(d))]

@@ -392,6 +392,7 @@ fn take_lock(path: &Path) -> Result<Option<Broken>, String> {
 /// The last line of the ledger, or None for an empty or absent one; an unterminated last line is
 /// refused rather than extended.
 fn ledger_tail(path: &Path) -> io::Result<Option<String>> {
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path -- the ledger path the run was given
     let mut f = match File::open(path) {
         Ok(f) => f,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
