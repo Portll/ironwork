@@ -11,7 +11,7 @@
       "const": "ironwork-fuzz"
     },
     "format": {
-      "description": "The manifest's shape: a key added keeps it, a key removed, renamed or given another meaning takes a new one.",
+      "description": "The manifest's shape: a key added keeps it; a key removed, renamed or given another meaning, or a new entry or input kind value that changes what a kept run shows, takes a new one.",
       "const": "ironwork-fuzz/v1"
     },
     "version": {

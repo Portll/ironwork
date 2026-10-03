@@ -325,7 +325,9 @@ supply its parameters.
 `format` is `ironwork-fuzz/v1`, the shape [fuzz-manifest.schema.json](fuzz-manifest.schema.json)
 describes, apart from `version` so a reader checks the shape and not the release. A key added to
 the manifest keeps the format, and a reader skips keys it does not know; a key removed or renamed,
-or a value given another meaning, takes a new format, which a reader of the old one refuses.
+or a value given another meaning, takes a new format, which a reader of the old one refuses. So
+does a new value of `entry` or of an input's `kind` that changes what a kept run shows, since a
+reader that does not look at the value would read the run as one it knows.
 A manifest from ironwork 0.3.0 or earlier has the v1 shape without `format` and `optimized`, and one
 from before 0.3.0 has no `roots` either.
 
