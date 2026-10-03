@@ -34,6 +34,12 @@ pub(super) fn conditional_variables(p: &Program) -> HashMap<PlaceId, Option<Stri
     names
 }
 
+/// A condition-name's variable as its values are compared with it.
+enum Variable {
+    Read(Val, Loc),
+    Bytes(Vec<u8>),
+}
+
 fn holds(op: RelOp, o: Ordering) -> bool {
     match op {
         RelOp::Eq => o == Ordering::Equal,
@@ -58,12 +64,18 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
                 let v = self.comparand(value, pos)?;
                 store::sign_test(v, *test, pos)?
             }
-            Cond::Name { subject: place, values, .. } => {
+            Cond::Name { subject: place, values, how } => {
                 let loc = self.loc(*place)?;
                 if self.code.variables.get(place).is_some_and(Option::is_none) && store::numcheck_fault(&self.facts(), &self.unit.mem, loc, false).is_some() && !self.facts().numcheck_removed(loc.item, pos) {
                     return Err(not_yet("NUMCHECK of a conditional variable whose storage another item of its shape names"));
                 }
-                let subject = (self.read_tested(*place, loc)?, Some(loc));
+                let subject = if *how == (Compare::ZonedBytes { zoned_first: true }) {
+                    self.numcheck(loc, SenderCheck::Item, self.pos(p.places[*place as usize].at))?;
+                    let Some(image) = store::compared_zoned_bytes(&self.facts(), &self.unit.mem, loc) else { return Err(not_yet("zoned bytes of an item that is not a zoned integer")) };
+                    Variable::Bytes(image)
+                } else {
+                    Variable::Read(self.read_tested(*place, loc)?, loc)
+                };
                 for (low, high) in values {
                     let hit = match high {
                         None => self.compare_constant(&subject, *low, pos)? == Ordering::Equal,
@@ -88,9 +100,14 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         })
     }
 
-    fn compare_constant(&self, subject: &(Val, Option<Loc>), c: u32, pos: Pos) -> R<Ordering> {
+    /// Constant `c` compared with a condition-name's variable: its value as read, or, where the plan
+    /// compares the variable's bytes, those bytes.
+    fn compare_constant(&self, subject: &Variable, c: u32, pos: Pos) -> R<Ordering> {
         let value = constant(&self.p.consts[c as usize]).map_err(|a| self.abend(a, None))?;
-        Ok(store::compare(&self.facts(), &self.unit.mem, subject.clone(), (value, None), pos)?)
+        Ok(match subject {
+            Variable::Read(v, loc) => store::compare(&self.facts(), &self.unit.mem, (v.clone(), Some(*loc)), (value, None), pos)?,
+            Variable::Bytes(image) => store::compare_zoned_bytes(&self.facts(), &self.unit.mem, image, (value, None), true, pos)?,
+        })
     }
 
     /// `Machine::compare`: the zoned-bytes test of each side against the other, with its locates,
@@ -180,10 +197,10 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         let Comparand::Operand(Operand::Load(r)) = e else { return Ok(None) };
         let nonnumeric = self.nonnumeric(other)?;
         let options = self.p.options.options;
-        let zones_count = options.invdata.is_some_and(|i| !i.forcenumcmp)
+        let zones_count = options.zones_compared()
             && self.zone_sensitive(*r)?
             && match other {
-                Comparand::Operand(Operand::Const(c)) => matches!(self.p.consts[*c as usize], Const::Figurative(Figurative::Zero)),
+                Comparand::Operand(Operand::Const(c)) => constant(&self.p.consts[*c as usize]).is_ok_and(|v| store::zero(&v)),
                 Comparand::Operand(Operand::Load(o)) => self.zone_sensitive(*o)? && self.loc(*o)?.len == self.loc(*r)?.len,
                 _ => false,
             };

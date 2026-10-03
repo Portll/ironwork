@@ -242,6 +242,7 @@ pub const INSPECT_NATIONAL_FUNCTION_RESULT: &str = "C191";
 pub const NATIONAL_CASE_AND_REVERSE: &str = "C192";
 pub const INVDATA_CLEANSIGN: &str = "C222";
 pub const INVDATA_ZONES_COMPARED: &str = "C223";
+pub const OPTIMIZED_ZONES_COMPARED: &str = "C262";
 pub const ALPHANUMERIC_MOVED_UNCHECKED: &str = "C240";
 pub const NUMERIC_MOVED_UNCHECKED: &str = "C260";
 pub const STATEMENT_LIMIT_IS_TIME: &str = "C241";
@@ -1557,7 +1558,13 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: INVDATA_ZONES_COMPARED,
-        claim: "Under INVDATA(NOFORCENUMCMP), the default once INVDATA is given and part of ZONEDATA(NOPFD), an unsigned zoned integer compared with ZERO, or with an unsigned zoned integer of its own length, is compared as the bytes it holds, zones included, so an item holding X'F0F040F0' is not equal to ZERO: the compiler compares zoned data 'in the same manner as COBOL 4 or earlier versions', by an alphanumeric comparison where those considered the zone bits, and IBM's VALUE1 example gives false under INVDATA(NOFORCENUMCMP) at any OPT setting (Programming Guide SC27-8714-03, pp. 377-378). Which comparisons COBOL 4 made by their bytes is not listed; these two, where the bytes of equal values are always equal, are chosen. Other comparisons, and every comparison under FORCENUMCMP, ZONEDATA(MIG) and NOINVDATA, read the digits and ignore the zones; under NOINVDATA IBM's result depends on OPT, and OPT(0)'s is chosen",
+        claim: "Under INVDATA(NOFORCENUMCMP), the default once INVDATA is given and part of ZONEDATA(NOPFD), an unsigned zoned integer compared with zero (ZERO, or a numeric literal of value zero), or with an unsigned zoned integer of its own length, is compared as the bytes it holds, zones included, so an item holding X'F0F040F0' is not equal to ZERO: the compiler compares zoned data 'in the same manner as COBOL 4 or earlier versions', by an alphanumeric comparison where those considered the zone bits, and IBM's VALUE1 example gives false under INVDATA(NOFORCENUMCMP) at any OPT setting (Programming Guide SC27-8714-03, pp. 377-378). Which comparisons COBOL 4 made by their bytes is not listed; these two, where the bytes of equal values are always equal, are chosen, and a condition-name's value is compared as the relation of the two would be. Other comparisons, and every comparison under FORCENUMCMP and ZONEDATA(MIG), read the digits and ignore the zones; NOINVDATA is C262",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: OPTIMIZED_ZONES_COMPARED,
+        claim: "Under NOINVDATA, IBM's default, the comparisons of C223 (an unsigned zoned integer against zero or against an unsigned zoned integer of its own length, a condition-name's values included) are made by their bytes, zones included, at OPTIMIZE(1) and OPTIMIZE(2), and as numbers at OPTIMIZE(0), IBM's default: NOINVDATA lets 'the compiler ... generate a string comparison to avoid numeric conversion', and IBM's VALUE1 example, X'F0F040F0' compared with ZERO, is true at OPT(0) and false at OPT(1) and OPT(2) (Programming Guide SC27-8714-03, pp. 377-378). Every other comparison reads its operands' digits at any level, so a digit half above 9, or a sign the NUMPROC setting does not accept, is a data exception at the comparison, as PACK and CP give it; that this is IBM's code for them at OPT(1) and OPT(2) is recalled, not documented. IBM states only that invalid data makes a reference 'undefined' and its results 'unpredictable' (p. 53), that 'digits and sign codes must be valid no matter what options are used' and data that is not may 'behave differently at different levels of optimization' (p. 395), and that NOCLEANSIGN increases 'the probability of a S0C7 abend' when an operand of a comparison has an invalid sign (p. 378). A numeric literal of value zero is compared as ZERO is, which the optimizer cannot tell apart; that too is chosen",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

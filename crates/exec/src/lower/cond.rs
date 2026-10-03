@@ -103,19 +103,24 @@ impl Lower<'_> {
     }
 
     /// Whether `c` is an unscaled zoned integer item that `Machine::compare` compares by its bytes:
-    /// against a nonnumeric operand, any ALL literal (`other_all`) among them, or under
-    /// INVDATA(NOFORCENUMCMP), unsigned, against ZERO or an unsigned zoned integer of its own
-    /// length (assumption C223).
+    /// against a nonnumeric operand, any ALL literal (`other_all`) among them, or where zones are
+    /// compared, unsigned, against zero or an unsigned zoned integer of its own length (assumptions
+    /// C223, C262).
     fn zoned_against(&self, c: &Comparand, x: &Side, oc: &Comparand, other: &Side, other_all: bool) -> bool {
         let Some(p) = self.unscaled_zoned(c, x) else { return false };
         let nonnumeric = other_all || matches!(other.value, Value::Bytes | Value::All) || matches!(other.value, Value::Fig(f) if !matches!(f, Figurative::Zero | Figurative::Null));
         let unsigned = |s: &Side| matches!(s.src, Some(Kind::Zoned { signed: false, .. }));
-        let zones_count = self.c.options.invdata.is_some_and(|i| !i.forcenumcmp)
+        let zero = match oc {
+            Comparand::Operand(lir::Operand::Const(k)) => match &self.consts[*k as usize] {
+                lir::Const::Figurative(Figurative::Zero) => true,
+                lir::Const::Number(f) => f.magnitude == zarch::wide::U256::ZERO,
+                _ => false,
+            },
+            _ => false,
+        };
+        let zones_count = self.c.options.zones_compared()
             && unsigned(x)
-            && match other.value {
-                Value::Fig(Figurative::Zero) => true,
-                _ => unsigned(other) && self.unscaled_zoned(oc, other).is_some_and(|q| self.places[q].len == self.places[p].len),
-            };
+            && (zero || unsigned(other) && self.unscaled_zoned(oc, other).is_some_and(|q| self.places[q].len == self.places[p].len));
         nonnumeric || zones_count
     }
 
@@ -213,20 +218,28 @@ impl Lower<'_> {
         self.condition_values(index, subject, pos)
     }
 
-    /// Condition-name `index` tested against its conditional variable at `subject`.
+    /// Condition-name `index` tested against its conditional variable at `subject`, each value
+    /// compared as `Machine::compare_value` compares it.
     pub(super) fn condition_values(&mut self, index: usize, subject: lir::PlaceId, pos: Pos) -> R<Test> {
         let condition = &self.layout.conditions[index];
         let kind = self.kind_of(subject);
         let x = Side { value: super::data::value_of(kind), src: Some(kind), digits: kind.digits_scale().map_or(0, |(d, _)| d) };
+        let variable = Comparand::Operand(lir::Operand::Load(subject));
+        let how = |lower: &mut Self, literal: &Literal| -> R<(lir::ConstId, Compare)> {
+            let (c, side) = lower.literal_const(literal, pos)?;
+            let all = matches!(literal, Literal::All(_));
+            let how = if lower.zoned_against(&variable, &x, &Comparand::Operand(lir::Operand::Const(c)), &side, all) { Compare::ZonedBytes { zoned_first: true } } else { lower.compare(&x, &side, pos)? };
+            Ok((c, how))
+        };
         let mut values = Vec::new();
         let mut hows = Vec::new();
         for (low, high) in &condition.values {
-            let (low, side) = self.literal_const(low, pos)?;
-            hows.push(self.compare(&x, &side, pos)?);
+            let (low, low_how) = how(self, low)?;
+            hows.push(low_how);
             let high = match high {
                 Some(h) => {
-                    let (h, side) = self.literal_const(h, pos)?;
-                    hows.push(self.compare(&x, &side, pos)?);
+                    let (h, high_how) = how(self, h)?;
+                    hows.push(high_how);
                     Some(h)
                 }
                 None => None,

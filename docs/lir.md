@@ -413,14 +413,19 @@ pub enum Count { Fixed(u32), Odo(Odo), Temp(TempId) }
 - **A zoned integer against a nonnumeric operand** is `ZonedBytes`: the item's bytes, its sign
   removed under ZWB and kept under NOZWB, never its value, compared as alphanumeric
   (`rt::store::compared_zoned_bytes`, assumption C221), so invalid data compares rather than abends.
-  Under INVDATA(NOFORCENUMCMP) an unsigned zoned integer against ZERO, or against an unsigned zoned
-  integer of its own length, is `ZonedBytes` too, the other item taken by its bytes the same way
-  (`rt::store::compare_zoned_bytes`, assumption C223). INVDATA(CLEANSIGN) reads a sign half-byte of
+  Where `Options::zones_compared` holds, under INVDATA(NOFORCENUMCMP) (assumption C223) or under
+  NOINVDATA at OPTIMIZE(1) or (2) (C262), an unsigned zoned integer against zero (ZERO or a numeric
+  literal of value zero, read as ZERO's zeros), or against an unsigned zoned integer of its own
+  length, is `ZonedBytes` too, the other item taken by its bytes the same way
+  (`rt::store::compare_zoned_bytes`). INVDATA(CLEANSIGN) reads a sign half-byte of
   0 to 9 as F wherever a zoned or packed item is read as a number (`rt::store::read_stored`, C222).
 - **Condition-names.** `Name` holds the conditional variable's place, with the 88-level reference's
-  subscripts, and each VALUE as a constant, a THRU pair as `(low, Some(high))`. The walker reads the
-  subject once per value (machine.rs:1806-1818) and the VM once, with the same result, since nothing
-  is stored between. SET TO TRUE moves the first value's low end (machine.rs:1132-1137).
+  subscripts, and each VALUE as a constant, a THRU pair as `(low, Some(high))`. Each value is
+  compared as the relation of the variable and the value would be, so a value the relation compares
+  by the variable's bytes is `ZonedBytes` (`Machine::compare_value`). The walker reads the subject
+  once, at the first value compared as a number, and the VM once before the first value unless the
+  plan is `ZonedBytes`, with the same result, since nothing is stored between. SET TO TRUE moves the
+  first value's low end (machine.rs:1132-1137).
 - **Condition-names of mixed categories.** `Name` has one `Compare` for all its values. When the
   values take different branches of `compare` (a numeric subject with the values ZERO and SPACE,
   say), lowering writes the test out as the walker runs it: an `Or` of one alternative
@@ -2025,7 +2030,7 @@ so the VM finds it among `Program.items` of the place's storage and shape, and s
 | `operand` of each element of a table written with ALL subscripts | `Argument::All`'s elements | At each element |
 | `integer`, through `eval_fixed` or `eval_float` | `IntExpr::Item` and the `Load`s of an `IntExpr::Fixed`, wherever they stand: a place's subscripts, OCCURS DEPENDING ON object and reference modification, so at each evaluation of the place, as each locate of the walker's tests them; a `Pow` exponent, `SetTemp`, `Switch`, `SetInt`, `SetUpDown`'s `by`, `Cond::InTable`'s index, `Count::Odo`, a FUNCTION's `integer` and `refmod`, LINAGE, RELATIVE KEY, START's KEY, ADVANCING, XML-CODE, a markup walk's subscripts; what the library reads through `Host::integer` | At each read |
 | `eval_fixed` of an ADD or SUBTRACT receiver's own value, and of PERFORM VARYING's variable | The receiver's read under `ArithPlan.per_receiver`; `Op::Step`'s `var` | At each read |
-| `condition` of a condition-name | `Cond::Name`'s `subject` | Once, before its one read |
+| `condition` of a condition-name | `Cond::Name`'s `subject` | Once, before its one read or its bytes |
 | `content_argument` of a data item | `CallArg::Content(Chars::Place)` of a CALL of a program or an LE service; an EXEC CICS option's content (`CicsHost::content`) | Before its bytes are copied |
 | `move_source` | `Op::Move`'s and `FromMove`'s `from` | As `check` names, with `store::numcheck_sender` |
 | `compare` | `Cond::Rel` and `SearchKey` | As below |

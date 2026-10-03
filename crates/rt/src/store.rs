@@ -814,6 +814,10 @@ pub fn compared_zoned_bytes(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc) -> O
 /// are taken the same way when it is a zoned integer too; `zoned_first` is whether the zoned item
 /// is the comparison's first operand.
 pub fn compare_zoned_bytes(facts: &dyn ProgramFacts, mem: &[u8], image: &[u8], other: (Val, Option<Loc>), zoned_first: bool, pos: Pos) -> R<Ordering> {
+    let other = match other {
+        (v, None) if zero(&v) => (Val::Fig(Figurative::Zero), None),
+        other => other,
+    };
     let len = image.len().max(image_len(&other.0, other.1));
     let y = match other.1.and_then(|l| compared_zoned_bytes(facts, mem, l)) {
         Some(bytes) => bytes,
@@ -821,6 +825,16 @@ pub fn compare_zoned_bytes(facts: &dyn ProgramFacts, mem: &[u8], image: &[u8], o
     };
     let o = ebcdic::compare_alphanumeric(image, &y, facts.collation());
     Ok(if zoned_first { o } else { o.reverse() })
+}
+
+/// Whether a comparand is zero as a constant gives it: ZERO, or a number of value zero, which a
+/// comparison by bytes reads as ZERO's zeros (assumption C262).
+pub fn zero(v: &Val) -> bool {
+    match v {
+        Val::Fig(Figurative::Zero) => true,
+        Val::Num(f) => f.magnitude == U256::ZERO,
+        _ => false,
+    }
 }
 
 /// A numeric operand compared with a nonnumeric one is its digits, scaling positions ignored

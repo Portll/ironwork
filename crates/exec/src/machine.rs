@@ -1459,11 +1459,11 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 let condition = &self.layout.conditions[index];
                 let loc = self.locate_item(condition.item, r, false)?;
                 self.numcheck(loc, false, r.pos)?;
-                let subject = (self.read(loc, r.pos)?, Some(loc));
+                let mut subject = None;
                 for (low, high) in &condition.values {
                     let hit = match high {
-                        None => self.compare_literal(&subject, low, pos)? == Ordering::Equal,
-                        Some(high) => self.compare_literal(&subject, low, pos)? != Ordering::Less && self.compare_literal(&subject, high, pos)? != Ordering::Greater,
+                        None => self.compare_value(loc, &mut subject, low, r.pos, pos)? == Ordering::Equal,
+                        Some(high) => self.compare_value(loc, &mut subject, low, r.pos, pos)? != Ordering::Less && self.compare_value(loc, &mut subject, high, r.pos, pos)? != Ordering::Greater,
                     };
                     if hit {
                         return Ok(true);
@@ -1557,12 +1557,12 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     fn zoned_bytes_against(&mut self, e: &Expr, other: &Expr) -> R<Option<Vec<u8>>> {
         let Expr::Operand(Operand::Ref(r)) = e else { return Ok(None) };
         let nonnumeric = self.nonnumeric(other)?;
-        // INVDATA(NOFORCENUMCMP): an unsigned zoned integer against ZERO or one of its own length
-        // compares its zones too (assumption C223).
-        let zones_count = self.options.invdata.is_some_and(|i| !i.forcenumcmp)
+        // Where zones are compared, an unsigned zoned integer against zero or one of its own
+        // length compares its zones too (assumptions C223, C262).
+        let zones_count = self.options.zones_compared()
             && self.zone_sensitive(e)?
             && match other {
-                Expr::Operand(Operand::Literal(Literal::Figurative(Figurative::Zero))) => true,
+                Expr::Operand(Operand::Literal(l)) => self.zero_literal(l),
                 Expr::Operand(Operand::Ref(o)) => self.zone_sensitive(other)? && self.locate(o)?.len == self.locate(r)?.len,
                 _ => false,
             };
@@ -1577,7 +1577,38 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     fn zone_sensitive(&mut self, e: &Expr) -> R<bool> {
         let Expr::Operand(Operand::Ref(r)) = e else { return Ok(false) };
         let loc = self.locate(r)?;
-        Ok(matches!(loc.kind, Kind::Zoned { scale: 0, signed: false, .. }) && self.layout.items.get(loc.item).is_none_or(|i| i.scaling == 0))
+        Ok(self.zone_sensitive_at(loc))
+    }
+
+    fn zone_sensitive_at(&self, loc: Loc) -> bool {
+        matches!(loc.kind, Kind::Zoned { scale: 0, signed: false, .. }) && self.layout.items.get(loc.item).is_none_or(|i| i.scaling == 0)
+    }
+
+    fn zero_literal(&self, l: &Literal) -> bool {
+        match l {
+            Literal::Figurative(Figurative::Zero) => true,
+            Literal::Number(t) => literal_fixed(t).is_some_and(|f| store::zero(&Val::Num(f))),
+            _ => false,
+        }
+    }
+
+    /// A condition-name's value compared with its conditional variable at `loc` as the relation
+    /// of the two would compare them: by the variable's bytes where `zoned_bytes_against` would
+    /// take them, otherwise as numbers, the variable read once into `subject` at `at`.
+    fn compare_value(&mut self, loc: Loc, subject: &mut Option<(Val, Option<Loc>)>, value: &Literal, at: Pos, pos: Pos) -> R<Ordering> {
+        let nonnumeric = matches!(value, Literal::Alnum(_) | Literal::Hex(_) | Literal::All(_)) || matches!(value, Literal::Figurative(f) if !matches!(f, Figurative::Zero | Figurative::Null));
+        let zones_count = self.options.zones_compared() && self.zone_sensitive_at(loc) && self.zero_literal(value);
+        if (nonnumeric || zones_count)
+            && let Some(image) = store::compared_zoned_bytes(&self.facts(), &self.unit.mem, loc)
+        {
+            let value = self.literal_value(value, pos)?;
+            return store::compare_zoned_bytes(&self.facts(), &self.unit.mem, &image, (value, None), true, pos);
+        }
+        let subject = match subject {
+            Some(s) => s.clone(),
+            None => subject.insert((self.read(loc, at)?, Some(loc))).clone(),
+        };
+        self.compare_literal(&subject, value, pos)
     }
 
     fn compare_literal(&mut self, subject: &(Val, Option<Loc>), literal: &Literal, pos: Pos) -> R<Ordering> {

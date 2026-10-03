@@ -267,7 +267,7 @@ Every field and element must itself be encodable (§4.1 to §4.4).
     codec_struct!(Options { arith, trunc, numproc, codepage, trunc_check, fastsrt, fastsrt_adv_print,
         sort_keys, adv, thread, dll, rent, dbcs, warnings, compile, dynam, debug, cics_return_warning,
         invdata, zwb, quote, currency, nsymbol, dispsign, intdate, qualify, initial, vlr, vsamopenfs,
-        numcheck, parmcheck, initcheck } check options_valid);
+        numcheck, parmcheck, initcheck, optimize } check options_valid);
     codec_enum!(Arith { Compat = 0, Extend = 1 });
     codec_enum!(Kind {
         Group = 0,
@@ -318,9 +318,10 @@ tests, and the debug positions (§9).
 | `numcheck` | `None` | `00` |
 | `parmcheck` | `None` | `00` |
 | `initcheck` | `None` | `00` |
+| `optimize` | 0 as LEB128 | `00` |
 
-Thirty-three bytes: `01 01 00 F4 08 00 00 00 00 01 00 00 01 01 00 00 00 00 00 00 01 00 00 00 00 00 00
-00 00 00 00 00 00`.
+Thirty-four bytes: `01 01 00 F4 08 00 00 00 00 01 00 00 01 01 00 00 00 00 00 00 01 00 00 00 00 00 00
+00 00 00 00 00 00 00`.
 
 ### 4.8 Bounds on decoding
 
@@ -395,13 +396,14 @@ compiler option: `trunc_check`, `fastsrt_adv_print`, `sort_keys`, `warnings`, `d
 | `numcheck` | `Option<Numcheck>` (:158) | `None` for NONUMCHECK, or `Some` then `zon` (`Option` of `ZonCheck`: `alphnum` and `lax` as bools), `pac` as a bool, `bin` (`Option` of `BinCheck`: `truncbin` as a bool) and `abd` as a bool | `NUMCHECK`, `NC`, with `ZON`, `NOZON`, `PAC`, `NOPAC`, `BIN`, `NOBIN`, `MSG` or `ABD`, ZON taking `ALPHNUM`, `NOALPHNUM`, `LAX` or `STRICT` and BIN `TRUNCBIN` or `NOTRUNCBIN`; `NONUMCHECK`, `NONC`; `ZONECHECK(MSG\|ABD)`, `ZC`, as NUMCHECK(ZON,MSG\|ABD), and `NOZONECHECK`, `NOZC` |
 | `parmcheck` | `Option<Parmcheck>` (:195) | `None` for NOPARMCHECK, or `Some` then `abd` as a bool and `bytes` as LEB128 | `PARMCHECK`, `PC`, with `MSG` or `ABD` and a size from 1 to 9999; `NOPARMCHECK`, `NOPC` |
 | `initcheck` | `Option<Initcheck>` (:204) | `None` for NOINITCHECK, or `Some` then the tag: `Lax` 0, `Strict` 1 | `INITCHECK`, `IC`, with `LAX` or `STRICT`; `NOINITCHECK`, `NOIC` |
+| `optimize` | `u8` | LEB128, 0 to 2. The `check` function refuses any other level. Under NOINVDATA a level above 0 compares some zoned items by their bytes (assumption C262) | `OPTIMIZE(0\|1\|2)`, `OPT(n)`; `NOOPTIMIZE` as 0, and `OPTIMIZE`, `OPTIMIZE(STD)` and `OPTIMIZE(FULL)` as 2 (Programming Guide SC27-8714-03, Table 51, p. 395) |
 
 `ADV`, `APOST`, `DBCS`, `DLL`, `INITIAL`, `INTDATE`, `NUMPROC`, `RENT`, `THREAD`, `TRUNC` and `ZWB`
 have no abbreviations. The defaults are `Compat`, `Std`, `Nopfd`, 1140, `Report`, false, `Exclude`,
 `Dfsort`, true, false, false, true, true, `Proceed`, `None` (IBM's default NOCOMPILE(S) in force),
 false, false, `Once`, `None` (NOINVDATA), true, `Quote`, `None` (NOCURRENCY), `National`, `Compat`,
-`Ansi`, `Compat`, false, `Standard`, `Compat`, and `None` for NONUMCHECK, NOPARMCHECK and
-NOINITCHECK.
+`Ansi`, `Compat`, false, `Standard`, `Compat`, `None` for NONUMCHECK, NOPARMCHECK and
+NOINITCHECK, and 0.
 
 ### 5.2 Storage and the item table
 

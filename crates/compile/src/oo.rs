@@ -142,11 +142,11 @@ pub fn class_code(program: &Program, flags: &[String], at: CompileTime) -> Resul
     let Some(def) = oo.class() else { return Err(vec![Error::at(Pos::default(), "not a class definition")]) };
     let mut errors = Vec::new();
     let mut options = Options::default();
-    for option in &program.options {
-        options.apply(option).ok();
-    }
     for flag in flags {
         options.apply_flag(flag).ok();
+    }
+    for option in &program.options {
+        options.apply(option).ok();
     }
     option_rules(program, &options, &mut errors);
     let external = defined_class(program).unwrap_or_default();

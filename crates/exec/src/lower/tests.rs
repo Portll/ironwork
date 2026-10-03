@@ -596,7 +596,7 @@ fn a_condition_name_whose_values_compare_differently_is_an_or_of_relations_in_va
     let p = lowered(&program("", "       01  N PIC 9.\n          88 NONE VALUE ZERO SPACE.\n", &[line("IF NONE DISPLAY 'NONE' END-IF"), line("GOBACK.")].concat()));
     assert!(!p.conds.iter().any(|c| matches!(c, LirCond::Name { .. })));
     let hows: Vec<_> = p.conds.iter().filter_map(|c| if let LirCond::Rel { op: ast::RelOp::Eq, how, .. } = c { Some(*how) } else { None }).collect();
-    assert_eq!(hows, [lir::Compare::Fixed, lir::Compare::Alphanumeric]);
+    assert_eq!(hows, [lir::Compare::Fixed, lir::Compare::ZonedBytes { zoned_first: true }]);
     let or = p.conds.iter().find_map(|c| if let LirCond::Or(a, b) = c { Some((*a, *b)) } else { None }).unwrap();
     assert_eq!(or, (0, 1));
 }
@@ -611,8 +611,28 @@ fn under_invdata_an_unsigned_zoned_integer_compares_with_zero_or_its_like_by_byt
     };
     let bytes = lir::Compare::ZonedBytes { zoned_first: true };
     assert_eq!(hows("INVDATA"), [bytes, bytes, lir::Compare::Fixed, lir::Compare::Fixed]);
+    assert_eq!(hows("OPT(2)"), [bytes, bytes, lir::Compare::Fixed, lir::Compare::Fixed]);
     assert_eq!(hows("INVDATA(FNC)"), [lir::Compare::Fixed; 4]);
+    assert_eq!(hows("INVDATA(FNC),OPT(2)"), [lir::Compare::Fixed; 4]);
     assert_eq!(hows(""), [lir::Compare::Fixed; 4]);
+}
+
+#[test]
+fn optimized_a_condition_name_of_value_zero_compares_its_unsigned_zoned_variable_by_bytes() {
+    let data = "       01  F PIC 9.
+          88 ENTERED VALUE 0.
+          88 STARTED VALUE 0 5.
+";
+    let how = |options: &str, name: &str| {
+        let p = lowered(&program(options, data, &[line(&format!("IF {name} DISPLAY 'Y' END-IF")), line("GOBACK.")].concat()));
+        let names: Vec<_> = p.conds.iter().filter_map(|c| if let LirCond::Name { how, .. } = c { Some(*how) } else { None }).collect();
+        let rels: Vec<_> = p.conds.iter().filter_map(|c| if let LirCond::Rel { how, .. } = c { Some(*how) } else { None }).collect();
+        (names, rels)
+    };
+    let bytes = lir::Compare::ZonedBytes { zoned_first: true };
+    assert_eq!(how("", "ENTERED"), (vec![lir::Compare::Fixed], vec![]));
+    assert_eq!(how("OPT(1)", "ENTERED"), (vec![bytes], vec![]));
+    assert_eq!(how("OPT(2)", "STARTED"), (vec![], vec![bytes, lir::Compare::Fixed]));
 }
 
 /// Where control goes from a block through plain jumps to blocks with no ops.

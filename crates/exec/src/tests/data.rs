@@ -362,3 +362,49 @@ fn invdata_noforcenumcmp_compares_an_unsigned_zoned_item_with_zero_by_its_zones(
         assert_eq!(run(&program(options, data, &procedure)), "ZONES\nNOT W\n", "{options}");
     }
 }
+
+#[test]
+fn noinvdata_compares_an_unsigned_zoned_item_with_zero_by_its_zones_only_when_optimized() {
+    let data = "       01  VALUE0 PIC X(4) VALUE '00 0'.\n       01  VALUE1 REDEFINES VALUE0 PIC 9(4).\n       01  W PIC 9(4) VALUE 0.\n";
+    let procedure = [
+        line("IF VALUE1 = ZERO DISPLAY 'ZERO' ELSE DISPLAY 'ZONES' END-IF"),
+        line("IF VALUE1 = 0 DISPLAY 'ZERO' ELSE DISPLAY 'ZONES' END-IF"),
+        line("IF VALUE1 = W DISPLAY 'W' ELSE DISPLAY 'NOT W' END-IF"),
+        line("GOBACK."),
+    ]
+    .concat();
+    for options in ["", "OPT(0)", "NOOPTIMIZE", "OPT(2),INVDATA(FNC)"] {
+        assert_eq!(run(&program(options, data, &procedure)), "ZERO\nZERO\nW\n", "{options}");
+    }
+    for options in ["OPT(1)", "OPT(2)", "OPTIMIZE", "OPT(2),NUMPROC(PFD)"] {
+        assert_eq!(run(&program(options, data, &procedure)), "ZONES\nZONES\nNOT W\n", "{options}");
+    }
+}
+
+#[test]
+fn a_non_digit_compared_with_zero_abends_at_opt_0_and_compares_by_bytes_when_optimized() {
+    let data = "       01  A-X PIC X(5) VALUE '12*34'.\n       01  A REDEFINES A-X PIC 9(5).\n       01  F-X PIC X VALUE '*'.\n       01  F REDEFINES F-X PIC 9.\n          88 ENTERED VALUE 0.\n          88 STARTED VALUE ZERO 5.\n";
+    let at = |source: &str, statement: &str| source.lines().position(|l| l.contains(statement)).unwrap() as u32 + 1;
+    for statement in ["IF A = ZERO DISPLAY 'Y' END-IF", "IF A NOT = 0 DISPLAY 'Y' END-IF", "IF ENTERED DISPLAY 'Y' END-IF", "IF A > 5 DISPLAY 'Y' END-IF"] {
+        let source = program("", data, &[line(statement), line("GOBACK.")].concat());
+        let abend = run_with(&source, &[]).2.unwrap_err();
+        assert_eq!((abend.code.as_str(), abend.pos.line), ("S0C7", at(&source, statement)), "{statement}");
+    }
+    let optimized = program("OPT(2)", data, &[line("IF A = ZERO DISPLAY 'ZERO' END-IF"), line("IF A NOT = 0 DISPLAY 'NOT 0' END-IF"), line("IF ENTERED DISPLAY 'ENTERED' ELSE DISPLAY 'NO' END-IF"), line("GOBACK.")].concat());
+    assert_eq!(run(&optimized), "NOT 0\nNO\n");
+    for statement in ["IF A > 5 DISPLAY 'Y' END-IF", "IF STARTED DISPLAY 'Y' END-IF"] {
+        let source = program("OPT(2)", data, &[line(statement), line("GOBACK.")].concat());
+        let abend = run_with(&source, &[]).2.unwrap_err();
+        assert_eq!((abend.code.as_str(), abend.pos.line), ("S0C7", at(&source, statement)), "{statement}");
+    }
+}
+
+#[test]
+fn a_condition_name_of_a_nonnumeric_value_compares_a_zoned_variable_by_its_bytes() {
+    let data = "       01  S-X PIC X(2) VALUE SPACES.\n       01  S REDEFINES S-X PIC S9(2).\n          88 EMPTY VALUE SPACES.\n          88 NONE VALUE ZERO.\n";
+    let procedure = [line("IF EMPTY DISPLAY 'EMPTY' ELSE DISPLAY 'SIGNED' END-IF"), line("GOBACK.")].concat();
+    assert_eq!(run(&program("NOZWB", data, &procedure)), "EMPTY\n");
+    assert_eq!(run(&program("", data, &procedure)), "SIGNED\n");
+    let none = program("", data, &[line("IF NONE DISPLAY 'NONE' END-IF"), line("GOBACK.")].concat());
+    assert_eq!(run_with(&none, &[]).2.unwrap_err().code, "S0C7");
+}

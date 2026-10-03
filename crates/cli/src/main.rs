@@ -6,7 +6,7 @@ use std::{env, fs, io};
 const USAGE: &str = "ironwork for COBOL
 usage:
   ironwork run <program.cbl> [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include]
-               [-debug] [--cics-return-warning=once|always|never] [-I <dir>]... [-L <dir>]... [--vm]
+               [-debug] [--cics-return-warning=once|always|never] [--optimize=0|1|2] [-I <dir>]... [-L <dir>]... [--vm]
                [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
                [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                                                        compile and run; CBL and PROCESS cards set the options
@@ -18,6 +18,7 @@ usage:
                                                        run as the first program of a CICS task
   ironwork compile <program.cbl>... [-o <dir>] [--bundle NAME] [--source-prefix DIR] [-silent] [-strict-sort-keys]
                [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never]
+               [--optimize=0|1|2]
                [-I <dir>]... [-L <dir>]...                compile and lower each source's programs to a load module
   ironwork dump [--section NAME]... [--strings] [--no-check] <module.iwm>
                                                        print a load module, one fact per line
@@ -25,7 +26,7 @@ usage:
                                                        run a job's steps in order
   ironwork fuzz [--job] <program.cbl|job.jcl> -o <dir> [--runs N] [--seed N] [--timeout SECONDS] [--hang-limit N]
                [--root DIR] [--clock <time>]
-               [-I <dir>]... [-L <dir>]... [-silent] [-strict-sort-keys] [-debug]
+               [-I <dir>]... [-L <dir>]... [-silent] [-strict-sort-keys] [-debug] [--optimize=0|1|2]
                [--datasets DIR] [--proclib DIR]... [--user ID]
                                                        run a batch program, or with --job a job, on generated input
                                                        and keep each abend
@@ -56,6 +57,10 @@ flags:
              always gives that warning; once (the default) gives an informational note in its
              place, once per run, as the CICS translator turns RETURN and XCTL into a CALL;
              never gives nothing. A program with none of these gets the warning whatever the flag
+  --optimize=0|1|2
+             the compiler invocation's OPTIMIZE level; a CBL or PROCESS card's OPTIMIZE wins over it.
+             Under NOINVDATA, 1 and 2 compare an unsigned zoned item with zero, or with one of its
+             own length, by its bytes, as IBM's optimizer may (assumption C262)
   --vm       run and cics: lower the program and run it on the VM rather than the interpreter. A
              program lowering refuses gets the compile's 12; a run that reaches what the VM does not
              run yet (a CALLed program, user-defined function, method or LINK that does not lower,
@@ -558,6 +563,10 @@ fn driver() -> ExitCode {
             f if f.starts_with("--fastsrt-adv-print") => match f {
                 "--fastsrt-adv-print=exclude" | "--fastsrt-adv-print=include" => flags.push(a),
                 _ => return usage_error("--fastsrt-adv-print needs =exclude or =include"),
+            },
+            f if f.starts_with("--optimize") => match f {
+                "--optimize=0" | "--optimize=1" | "--optimize=2" => flags.push(a),
+                _ => return usage_error("--optimize needs =0, =1 or =2"),
             },
             f if f.starts_with("--cics-return-warning") => match f {
                 "--cics-return-warning=once" | "--cics-return-warning=always" | "--cics-return-warning=never" => flags.push(a),

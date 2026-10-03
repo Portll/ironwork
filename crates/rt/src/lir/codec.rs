@@ -139,7 +139,7 @@ codec_enum!(FileStatus {
 codec_struct!(Options {
     arith, trunc, numproc, codepage, trunc_check, fastsrt, fastsrt_adv_print, sort_keys, adv, thread, dll, rent, dbcs,
     warnings, compile, dynam, debug, cics_return_warning, invdata, zwb, quote, currency, nsymbol, dispsign, intdate, qualify, initial,
-    vlr, vsamopenfs, numcheck, parmcheck, initcheck,
+    vlr, vsamopenfs, numcheck, parmcheck, initcheck, optimize,
 } check options_valid);
 codec_struct!(Invdata { forcenumcmp, cleansign });
 codec_enum!(Arith { Compat = 0, Extend = 1 });
@@ -166,8 +166,11 @@ codec_struct!(BinCheck { truncbin });
 codec_struct!(Parmcheck { abd, bytes });
 codec_enum!(Initcheck { Lax = 0, Strict = 1 });
 
-/// `Options::code_page` panics on a CCSID the tables do not carry.
+/// `Options::code_page` panics on a CCSID the tables do not carry, and OPTIMIZE has three levels.
 fn options_valid(options: &Options) -> Result<(), String> {
+    if options.optimize > 2 {
+        return Err(format!("OPTIMIZE({}) is not a level", options.optimize));
+    }
     match CodePage::by_ccsid(options.codepage) {
         Some(_) => Ok(()),
         None => Err(format!("CODEPAGE({}) is not a page the tables carry", options.codepage)),

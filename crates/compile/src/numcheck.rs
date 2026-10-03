@@ -411,10 +411,10 @@ impl Tested<'_> {
     }
 
     /// One side of a relation: an arithmetic expression's operands are tested, and a numeric item
-    /// compared with a number, ZERO, an arithmetic expression or another numeric item. Under
-    /// INVDATA(NOFORCENUMCMP), which compares some zoned items by their bytes, none is.
+    /// compared with a number, ZERO, an arithmetic expression or another numeric item. Where zones
+    /// are compared, as some zoned items then are by their bytes, none is.
     fn compared(&mut self, e: &Expr, other: &Expr) {
-        if self.options.invdata.is_some_and(|i| !i.forcenumcmp) {
+        if self.options.zones_compared() {
             return;
         }
         let numeric = |kind: Kind| matches!(kind, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Float(_));

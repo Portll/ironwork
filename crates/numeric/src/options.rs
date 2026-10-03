@@ -418,6 +418,8 @@ pub struct Options {
     pub numcheck: Option<Numcheck>,
     pub parmcheck: Option<Parmcheck>,
     pub initcheck: Option<Initcheck>,
+    /// OPTIMIZE's level, 0 to 2.
+    pub optimize: u8,
 }
 
 impl Default for Options {
@@ -455,6 +457,7 @@ impl Default for Options {
             numcheck: None,
             parmcheck: None,
             initcheck: None,
+            optimize: 0,
         }
     }
 }
@@ -780,6 +783,16 @@ impl Options {
                     _ => return Err(bad()),
                 }
             }
+            // NOOPTIMIZE, OPTIMIZE, OPTIMIZE(STD) and OPTIMIZE(FULL) are tolerated as Table 51
+            // maps them; FULL's STGOPT changes nothing ironwork runs.
+            "OPTIMIZE" => {
+                self.optimize = match (off, sub) {
+                    (true, "") | (false, "0") => 0,
+                    (false, "1") => 1,
+                    (false, "2" | "" | "STD" | "FULL") => 2,
+                    _ => return Err(bad()),
+                }
+            }
             "APOST/QUOTE" | "INITIAL" => return Err(bad()),
             _ => return Ok(false),
         }
@@ -798,6 +811,10 @@ impl Options {
             "--cics-return-warning=once" => self.cics_return_warning = CicsReturnWarning::Once,
             "--cics-return-warning=always" => self.cics_return_warning = CicsReturnWarning::Always,
             "--cics-return-warning=never" => self.cics_return_warning = CicsReturnWarning::Never,
+            // The compiler invocation's OPTIMIZE, which a card's outranks.
+            "--optimize=0" => self.optimize = 0,
+            "--optimize=1" => self.optimize = 1,
+            "--optimize=2" => self.optimize = 2,
             _ => return Err(OptionError::UnknownFlag(flag.to_owned())),
         }
         Ok(())
@@ -811,6 +828,16 @@ impl Options {
             Warnings::Block => Compile::Until(Stop::W),
             Warnings::Proceed => Compile::default(),
         })
+    }
+
+    /// Whether an unsigned zoned integer compared with zero, or with an unsigned zoned integer of
+    /// its own length, is compared by its bytes, zones included: under INVDATA(NOFORCENUMCMP)
+    /// (assumption C223), and under NOINVDATA at OPTIMIZE(1) or OPTIMIZE(2) (C262).
+    pub fn zones_compared(&self) -> bool {
+        match self.invdata {
+            Some(i) => !i.forcenumcmp,
+            None => self.optimize > 0,
+        }
     }
 
     pub fn code_page(&self) -> &'static CodePage {
@@ -860,6 +887,34 @@ mod tests {
         assert!(o.apply("INVDATA(SOMETIMES)").is_err());
         assert_eq!(o.apply("NOZWB"), Ok(true));
         assert!(!o.zwb);
+    }
+
+    #[test]
+    fn optimize_levels_and_the_removed_spellings_table_51_maps() {
+        let mut o = Options::default();
+        assert_eq!(o.optimize, 0);
+        for (option, level) in [("OPT(1)", 1), ("OPTIMIZE(0)", 0), ("opt(2)", 2), ("NOOPTIMIZE", 0), ("OPTIMIZE", 2), ("NOOPTIMIZE", 0), ("OPTIMIZE(STD)", 2), ("OPT(0)", 0), ("OPTIMIZE(FULL)", 2)] {
+            assert_eq!(o.apply(option), Ok(true), "{option}");
+            assert_eq!(o.optimize, level, "{option}");
+        }
+        assert!(o.apply("OPT(3)").is_err());
+        assert!(o.apply("NOOPTIMIZE(2)").is_err());
+        assert_eq!(o.optimize, 2);
+    }
+
+    #[test]
+    fn zones_are_compared_under_invdata_noforcenumcmp_or_noinvdata_optimized() {
+        let compared = |options: &[&str]| {
+            let mut o = Options::default();
+            options.iter().for_each(|x| assert_eq!(o.apply(x), Ok(true)));
+            o.zones_compared()
+        };
+        assert!(!compared(&[]));
+        assert!(compared(&["OPT(1)"]));
+        assert!(compared(&["OPT(2)"]));
+        assert!(compared(&["INVDATA"]));
+        assert!(!compared(&["INVDATA(FNC)", "OPT(2)"]));
+        assert!(!compared(&["ZONEDATA(MIG)", "OPT(2)"]));
     }
 
     #[test]
@@ -931,7 +986,7 @@ mod tests {
             "ZONEDATA" => "(MIG)",
             _ => "",
         };
-        for name in ["ARITH", "CODEPAGE", "TRUNC", "NUMPROC", "FASTSRT", "COMPILE", "INVDATA", "ZONEDATA", "ZWB"] {
+        for name in ["ARITH", "CODEPAGE", "TRUNC", "NUMPROC", "FASTSRT", "COMPILE", "INVDATA", "ZONEDATA", "ZWB", "OPTIMIZE"] {
             let o = documented().find(|o| o.name == name).unwrap();
             for s in o.spellings() {
                 assert_eq!(Options::default().apply(&format!("{s}{}", suboption(name))), Ok(true), "{s}");

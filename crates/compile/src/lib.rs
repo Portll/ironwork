@@ -152,17 +152,19 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     qualify_in_own_section(&mut program);
     let mut options = Options::default();
     let mut ssrange = false;
+    // The flags first, as the compiler's invocation, then the cards, which outrank it (Programming
+    // Guide SC27-8714-03, p. 273).
+    for flag in flags {
+        if let Err(e) = options.apply_flag(flag) {
+            errors.push(Error::at(Pos::default(), e.to_string()));
+        }
+    }
     for option in &program.options {
         if let Some(on) = numeric::options::switch(option, "SSRANGE") {
             ssrange = on;
         }
         if let Err(e) = options.apply(option) {
             errors.push(Error::at(Pos::default(), format!("CBL {option}: {e}")).graded(option_severity(&e)));
-        }
-    }
-    for flag in flags {
-        if let Err(e) = options.apply_flag(flag) {
-            errors.push(Error::at(Pos::default(), e.to_string()));
         }
     }
     let page = options.code_page();

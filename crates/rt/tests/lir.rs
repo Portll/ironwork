@@ -172,6 +172,7 @@ fn options_round_trip_with_every_field_off_its_default() {
         numcheck: Some(Numcheck { zon: Some(ZonCheck { alphnum: false, lax: true }), pac: false, bin: Some(BinCheck { truncbin: false }), abd: true }),
         parmcheck: Some(Parmcheck { abd: true, bytes: 9999 }),
         initcheck: Some(Initcheck::Strict),
+        optimize: 2,
     };
     round_trip(&[every, Options { currency: Some(Currency::Hex(0x5B)), ..every }]);
     let each = [
@@ -195,6 +196,7 @@ fn options_round_trip_with_every_field_off_its_default() {
         Options { numcheck: Some(Numcheck::default()), ..Options::default() },
         Options { parmcheck: Some(Parmcheck { abd: false, bytes: 100 }), ..Options::default() },
         Options { initcheck: Some(Initcheck::Lax), ..Options::default() },
+        Options { optimize: 1, ..Options::default() },
     ];
     round_trip(&each);
     for options in each {
@@ -225,12 +227,14 @@ fn kinds_and_options_have_load_module_s_bytes() {
         encoded(&options).0,
         [
             0x01, 0x01, 0x00, 0xF4, 0x08, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
         ]
     );
     let (bytes, strings) = encoded(&(7u8, Options { codepage: 999, ..options }));
     let reason = "CODEPAGE(999) is not a page the tables carry".to_owned();
     assert_eq!(refused::<(u8, Options)>(&bytes, &strings), (1, reason));
+    let (bytes, strings) = encoded(&(7u8, Options { optimize: 3, ..options }));
+    assert_eq!(refused::<(u8, Options)>(&bytes, &strings), (1, "OPTIMIZE(3) is not a level".to_owned()));
 }
 
 #[test]
