@@ -84,7 +84,8 @@ pub struct PlaceNumcheck {
 }
 
 /// INITIALIZE of one item: each elementary item the walk reaches, every occurrence listed, with
-/// FILLER and its phrases' choice of receivers and senders made.
+/// FILLER and its phrases' choice of receivers and senders made. A reference-modified item is one
+/// field, which is the item as located.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InitPlan {
     pub fields: Vec<InitField>,

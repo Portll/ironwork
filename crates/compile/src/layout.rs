@@ -861,6 +861,19 @@ impl Layout {
         })
     }
 
+    /// The category of the elementary item reference modification makes of `item` of `kind`, or of
+    /// a special register of `kind` when there is no item: national when `kind` is, alphabetic for
+    /// an alphabetic item, and alphanumeric otherwise (Language Reference SC27-8713-03, p. 76;
+    /// assumption [`numeric::assumptions::INITIALIZE_REFERENCE_MODIFIED`]).
+    pub fn refmod_category(&self, item: Option<usize>, kind: Kind) -> syntax::ast::DataCategory {
+        use syntax::ast::DataCategory;
+        match item.and_then(|i| self.category(i)) {
+            Some(DataCategory::Alphabetic) => DataCategory::Alphabetic,
+            _ if kind == Kind::National => DataCategory::National,
+            _ => DataCategory::Alphanumeric,
+        }
+    }
+
     /// LENGTH OF a table element written without subscripts gives one occurrence's length (Language
     /// Reference SC27-8713-03, p. 23): the reference with each subscript 1.
     pub fn length_of_ref<'r>(&self, r: &'r Ref) -> std::borrow::Cow<'r, Ref> {

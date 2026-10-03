@@ -390,6 +390,39 @@ fn the_vm_initializes_with_the_interpreter_s_receivers_senders_scaling_and_repor
     assert!(err.contains("TRUNC(OPT) store of 12345 into B PIC S9(4) BINARY"), "{err}");
 }
 
+/// N, last in WORKING-STORAGE, has nothing after it for a receiver that overruns it to reach.
+#[test]
+fn initialize_of_a_reference_modified_item_moves_to_its_characters_alone_as_one_alphanumeric_item() {
+    let data = concat!(
+        "       01  X PIC X(6) VALUE 'ABCDEF'.\n",
+        "       01  G.\n           05 G1 PIC 9(3) VALUE 123.\n           05 G2 PIC X(3) VALUE 'XYZ'.\n",
+        "       01  A PIC A(4) VALUE 'ABCD'.\n       01  W PIC N(3) VALUE N'ABC'.\n       01  I PIC 9 VALUE 3.\n",
+        "       01  N PIC 9(4) VALUE ZERO.\n",
+    );
+    let body = [
+        "INITIALIZE X (1:2)",
+        "DISPLAY '[' X ']'",
+        "INITIALIZE N (2:2)",
+        "DISPLAY '[' N ']'",
+        "INITIALIZE G (2:I)",
+        "DISPLAY '[' G ']'",
+        "MOVE 'ABCDEF' TO X",
+        "INITIALIZE X (I:) REPLACING ALPHANUMERIC BY 'Q'",
+        "DISPLAY '[' X ']'",
+        "INITIALIZE N (1:1) REPLACING NUMERIC BY 9",
+        "INITIALIZE X (1:1) ALPHANUMERIC TO VALUE",
+        "INITIALIZE A (2:2) REPLACING ALPHABETIC BY 'Z'",
+        "INITIALIZE W (2:1)",
+        "DISPLAY '[' N '][' X '][' A '][' W ']'",
+        "GOBACK.",
+    ]
+    .map(line)
+    .concat();
+    let (out, ending) = on_both(&program("", data, &body));
+    assert_eq!(ending, Ok(Ending::Goback));
+    assert_eq!(out, "[  CDEF]\n[0  0]\n[1   YZ]\n[ABQ   ]\n[0  0][ABQ   ][AZ D][A C]\n");
+}
+
 const MOVING: &str = concat!(
     "       01  REC.\n           05 CNT PIC 9 VALUE 2.\n           05 CNT2 PIC 9 VALUE 1.\n",
     "           05 ITEM PIC X OCCURS 1 TO 5 DEPENDING ON CNT.\n           05 MID.\n              10 M1 PIC X.\n",

@@ -468,10 +468,14 @@ fn initialize_replacing_that_no_item_matches_warns_as_igyps2047() {
     assert!(message.contains("INITIALIZE ALPHA: none of its items is of a category REPLACING names (ALPHABETIC), so it is not initialized"), "{message}");
     assert!(message.starts_with("warning"), "{message}");
     assert_eq!(run(&source("INITIALIZE ALPHA REPLACING ALPHABETIC DATA BY ALL '3'")), "AB CD EF\n");
+    let edited = compile_errors(&source("INITIALIZE ALPHA (1:2) REPLACING\n               ALPHANUMERIC-EDITED DATA BY ALL '3'"));
+    assert!(edited.contains("INITIALIZE ALPHA: none of its items is of a category REPLACING names (ALPHANUMERIC-EDITED)"), "{edited}");
+    assert_eq!(run(&source("INITIALIZE ALPHA (1:2) REPLACING ALPHANUMERIC DATA BY ALL '3'")), "33 CD EF\n");
     for quiet in [
         "INITIALIZE GROUP1 REPLACING ALPHABETIC DATA BY ALL '5'",
         "INITIALIZE ALPHA REPLACING\n               ALPHANUMERIC-EDITED DATA BY ALL '3'",
         "INITIALIZE ALPHA REPLACING ALPHABETIC DATA BY ALL '3'\n               THEN TO DEFAULT",
+        "INITIALIZE ALPHA (1:2) REPLACING ALPHANUMERIC DATA BY ALL '3'",
     ] {
         assert_eq!(compile_errors(&source(quiet)), "", "{quiet}");
     }

@@ -297,6 +297,7 @@ pub const CICS_TRANSFER_COMMAREA_LENGTH: &str = "C103";
 pub const CICS_RANDOM_PER_RUN_UNIT: &str = "C104";
 pub const CICS_RETURN_CODE_PER_RUN_UNIT: &str = "C105";
 pub const CICS_ENTRY_POINTERS_ACROSS_RUN_UNITS: &str = "C106";
+pub const INITIALIZE_REFERENCE_MODIFIED: &str = "C300";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1905,6 +1906,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: CICS_ENTRY_POINTERS_ACROSS_RUN_UNITS,
         claim: "A function-pointer or procedure-pointer SET TO ENTRY holds a value of ironwork's own naming the entry (C140), and the task keeps one list of those entries rather than one per CICS run unit: a pointer set in one run unit and passed to another, in a COMMAREA or by a CALL, enters the entry as a CALL of its name in the run unit that CALLs through it does, where the program starts afresh if it has not run there (C145), and so does one set in a run unit that has since ended. On z/OS the pointer holds the entry's address, and CICS keeps a program in main storage once it is loaded (XCTL, dfhp4_xctl). The manuals say only that a pointer to an entry of a program later cancelled is undefined (Programming Guide SC27-8714-03, p. 558), not what a pointer means in another enclave",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: INITIALIZE_REFERENCE_MODIFIED,
+        claim: "INITIALIZE of a reference-modified identifier has one receiver, the unique data item reference modification creates, which is an elementary item of category alphanumeric, national for a national item and alphabetic for an alphabetic one (Language Reference SC27-8713-03, pp. 75-76). Only its character positions change: a group is not walked for its elementary items, and a numeric DISPLAY item takes SPACE there, the implied sending item for those categories, not ZERO (pp. 351-353). The unique data item has no data description entry, so the VALUE phrase finds no VALUE clause for it (p. 352): the VALUE phrase alone leaves it unchanged, REPLACING moves to it when it names its category, and DEFAULT or no phrase gives it SPACE. The compiler's IGYPS2047-W check takes the same category",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

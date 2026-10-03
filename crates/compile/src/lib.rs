@@ -1285,8 +1285,11 @@ impl Check<'_> {
         }
         for r in targets {
             let Some(i) = self.item(r) else { continue };
-            let receivers = self.layout.initialize_receivers(i, with.filler);
-            if !receivers.iter().any(|&(e, _)| with.initial_value(self.layout.category(e), false).is_some()) {
+            let initialized = match r.refmod {
+                Some(_) => with.initial_value(Some(self.layout.refmod_category(Some(i), self.layout.items[i].kind)), false).is_some(),
+                None => self.layout.initialize_receivers(i, with.filler).iter().any(|&(e, _)| with.initial_value(self.layout.category(e), false).is_some()),
+            };
+            if !initialized {
                 let categories: Vec<&str> = with.replacing.iter().map(|(c, _)| c.word()).collect();
                 self.errors.push(Error::warning(
                     pos,

@@ -349,15 +349,21 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 let with = with.as_deref().unwrap_or(&NO_PHRASES);
                 for r in targets {
                     let loc = self.locate_written(|m| m.locate(r))?;
-                    if loc.item != usize::MAX {
-                        self.initialize(loc.item, loc.offset, with, *pos)?;
-                        continue;
-                    }
-                    match with.initial_value(Some(DataCategory::Numeric), false) {
+                    let item = (loc.item != usize::MAX).then_some(loc.item);
+                    let category = match (item, &r.refmod) {
+                        (_, Some(_)) => self.layout.refmod_category(item, loc.kind),
+                        (Some(item), None) => {
+                            self.initialize(item, loc.offset, with, *pos)?;
+                            continue;
+                        }
+                        (None, None) => DataCategory::Numeric,
+                    };
+                    match with.initial_value(Some(category), false) {
                         Some(InitialValue::Replacing(by)) => {
                             let (val, src) = self.operand_with_loc(by, *pos)?;
                             self.assign(loc, val, src, *pos)?;
                         }
+                        Some(_) if r.refmod.is_some() => self.assign(loc, Val::Fig(Figurative::Space), None, *pos)?,
                         Some(_) => self.unit.write(loc.offset, &vec![0; loc.len]),
                         None => {}
                     }

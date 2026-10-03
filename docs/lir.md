@@ -985,7 +985,7 @@ walker does on each execution; the last column names that work.
 |---|---|---|---|
 | MOVE | `Move` per receiver (§9.2) | Lowered | Category dispatch in `assign` and `alnum_image` (machine.rs:1657-1768) |
 | COMPUTE, ADD, SUBTRACT, MULTIPLY, DIVIDE | `Arith`, then `Select` if handled | Lowered | §7.1 |
-| INITIALIZE | `Initialize` with a flat plan of (offset, length, value, store, scaling): FILLER's receivers, and each one's SPACE, ZERO or NULL, VALUE literal or REPLACING operand, which is read again for each | Lowered | The walk over the item's children and the phrases' choice of receiver and sender (machine.rs `initialize`) |
+| INITIALIZE | `Initialize` with a flat plan of (offset, length, value, store, scaling): FILLER's receivers, and each one's SPACE, ZERO or NULL, VALUE literal or REPLACING operand, which is read again for each; a reference-modified target is one field, the target as located, SPACE or REPLACING's operand by its category (C300) | Lowered | The walk over the item's children and the phrases' choice of receiver and sender (machine.rs `initialize`) |
 | SET TO TRUE, TO FALSE | `Move` of the first VALUE's low end, or of WHEN SET TO FALSE's value, into the conditional variable by item index; nothing when there is none | Lowered | The conditional variable by item index (machine.rs `set`) |
 | SET TO | `Set` per receiver; a `POINTER` receiver takes only an address or NULL, else `Refused` | One call | The kind test |
 | SET TO ENTRY | `SetEntry`: the name read, the program loaded, the receivers given the entry's value (§9.3) | One call | The entry loaded and named in the run unit's list |

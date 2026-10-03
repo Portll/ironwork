@@ -160,26 +160,36 @@ impl Lower<'_> {
 
     /// `Machine::initialize` unrolled: every elementary item the walk reaches with `with`'s FILLER,
     /// offset from the target's start, every occurrence listed, each with what its phrases send it.
-    /// A target that is no data item's, RETURN-CODE, takes zeros or REPLACING NUMERIC's operand.
+    /// A reference-modified target is one field, SPACE or REPLACING's operand by its category; a
+    /// target that is no data item's, RETURN-CODE, takes zeros or REPLACING NUMERIC's operand.
     pub(super) fn init_plan(&mut self, target: PlaceId, with: &InitializeWith, pos: Pos) -> R<InitId> {
         let mut fields = Vec::new();
-        match self.place_items[target as usize] {
-            None => {
-                let (kind, len) = (self.kind_of(target), self.places[target as usize].len);
-                match with.initial_value(Some(DataCategory::Numeric), false) {
-                    Some(InitialValue::Replacing(by)) => {
-                        let by = self.operand(by, pos)?;
-                        let store = self.move_plan(&by.side, kind, None)?;
-                        fields.push(InitField { offset: 0, len, value: InitValue::Replacing(by.operand), store, scaling: 0 });
-                    }
-                    Some(_) => {
-                        let store = MovePlan::Numeric { from: NumericFrom::Zero, store: self.store_plan(kind, None)? };
-                        fields.push(InitField { offset: 0, len, value: InitValue::Default(Figurative::Zero), store, scaling: 0 });
-                    }
-                    None => {}
-                }
+        let place = &self.places[target as usize];
+        let (kind, len, refmod) = (place.kind, place.len, place.refmod.is_some());
+        let item = self.place_items[target as usize];
+        let category = match (item, refmod) {
+            (_, true) => self.layout.refmod_category(item, kind),
+            (Some(item), false) => {
+                self.init_fields(item, with, pos, &mut fields)?;
+                return push(&mut self.plans.init, InitPlan { fields }, "INITIALIZE plans");
             }
-            Some(item) => self.init_fields(item, with, pos, &mut fields)?,
+            (None, false) => DataCategory::Numeric,
+        };
+        match with.initial_value(Some(category), false) {
+            Some(InitialValue::Replacing(by)) => {
+                let by = self.operand(by, pos)?;
+                let store = self.move_plan(&by.side, kind, None)?;
+                fields.push(InitField { offset: 0, len, value: InitValue::Replacing(by.operand), store, scaling: 0 });
+            }
+            Some(_) if refmod => {
+                let store = self.move_plan(&Side { value: Value::Fig(Figurative::Space), src: None, digits: 0 }, kind, None)?;
+                fields.push(InitField { offset: 0, len, value: InitValue::Default(Figurative::Space), store, scaling: 0 });
+            }
+            Some(_) => {
+                let store = MovePlan::Numeric { from: NumericFrom::Zero, store: self.store_plan(kind, None)? };
+                fields.push(InitField { offset: 0, len, value: InitValue::Default(Figurative::Zero), store, scaling: 0 });
+            }
+            None => {}
         }
         push(&mut self.plans.init, InitPlan { fields }, "INITIALIZE plans")
     }

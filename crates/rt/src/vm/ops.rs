@@ -212,10 +212,12 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     }
 
     /// `Machine::initialize`: each elementary item the walk reaches sent its field's value by MOVE
-    /// rules, a data item REPLACING names located and read again for each.
+    /// rules, a data item REPLACING names located and read again for each. A reference-modified
+    /// target's one field is the target as located.
     fn initialize(&mut self, target: PlaceId, plan: &InitPlan, at: u32) -> R<()> {
         let pos = self.pos(at);
         let loc = self.loc_written(target)?;
+        let refmod = self.p.places[target as usize].refmod.is_some();
         for field in &plan.fields {
             let (val, src) = match field.value {
                 InitValue::Default(Figurative::Null) => (Val::Address(0), None),
@@ -229,7 +231,8 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 _ => None,
             };
             let Some(kind) = field_kind(&field.store) else { return Err(not_yet("an INITIALIZE field with no MOVE plan")) };
-            let dest = Loc { offset: loc.offset + field.offset as usize, len: field.len as usize, kind, item: usize::MAX };
+            let (offset, len) = if refmod { (loc.offset, loc.len) } else { (loc.offset + field.offset as usize, field.len as usize) };
+            let dest = Loc { offset, len, kind, item: usize::MAX };
             let facts = Receiving { scaling: Some(field.scaling), ..self.receiving(store.as_ref()) };
             store::assign(&facts, self.unit, dest, val, src, pos)?;
         }
