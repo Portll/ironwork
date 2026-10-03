@@ -2302,7 +2302,8 @@ const READ_NO_QUEUE: [&str; 2] = ["EXEC CICS READQ TS QUEUE('NOQ') INTO(WS-DATA)
 /// The output and abend code of a task whose first program runs `body`, then RETURN, with
 /// MAIN-ERR a QIDERR label of its own. READP raises QIDERR with no handler of its own; SETH and
 /// SETI HANDLE and IGNORE QIDERR and return; OWNH takes its own QIDERR at its label; POPP pops a
-/// PUSH HANDLE, showing INVREQ when there is none; SHOWAB is a HANDLE ABEND PROGRAM.
+/// PUSH HANDLE, showing INVREQ when there is none, and POPR does too, then RETURNs or, after
+/// ABEND1, abends; SHOWAB is a HANDLE ABEND PROGRAM.
 fn condition_task(body: &[&str]) -> (String, Option<String>) {
     let data = "       01  WS-DATA PIC X(8).\n       01  WS-LEN PIC S9(4) COMP VALUE 8.\n       01  WS-PGM PIC X(8).\n       01  WS-RESP PIC S9(8) COMP.\n       01  WS-CODE PIC X(4).\n";
     let mut procedure = vec!["       MAIN-LINE.\n".to_owned()];
@@ -2313,6 +2314,8 @@ fn condition_task(body: &[&str]) -> (String, Option<String>) {
     let own = [line("EXEC CICS HANDLE CONDITION QIDERR(OWN-ERR) END-EXEC"), read(), line("DISPLAY 'NOT REACHED'."), "       OWN-ERR.\n".into(), line("DISPLAY 'OWN HANDLED'"), line("GOBACK.")];
     let pop = ["EXEC CICS POP HANDLE RESP(WS-RESP) END-EXEC", "IF WS-RESP = DFHRESP(INVREQ) DISPLAY 'NOTHING TO POP' END-IF", "GOBACK."];
     let show = ["EXEC CICS ASSIGN ABCODE(WS-CODE) END-EXEC", "DISPLAY 'ABEND ' WS-CODE", "EXEC CICS RETURN END-EXEC."];
+    let popr = [line(pop[0]), line(pop[1]), read(), line("DISPLAY 'POPR GOES ON'"), line("EXEC CICS RETURN END-EXEC.")].concat();
+    let abend1 = [line(pop[0]), line(pop[1]), line("EXEC CICS ABEND ABCODE('XC01') END-EXEC.")].concat();
     let programs = [
         ("READP", cics_program("READP", data, "", &[read(), line("DISPLAY 'READP GOES ON'"), line("GOBACK.")].concat())),
         ("SETH", cics_program("SETH", "", "", &[line("EXEC CICS HANDLE CONDITION QIDERR(SET-ERR) END-EXEC"), line("GOBACK."), "       SET-ERR.\n".into(), line("DISPLAY 'NOT REACHED'.")].concat())),
@@ -2320,6 +2323,8 @@ fn condition_task(body: &[&str]) -> (String, Option<String>) {
         ("OWNH", cics_program("OWNH", data, "", &own.concat())),
         ("POPP", cics_program("POPP", "       01  WS-RESP PIC S9(8) COMP.\n", "", &pop.map(line).concat())),
         ("SHOWAB", cics_program("SHOWAB", "       01  WS-CODE PIC X(4).\n", "", &show.map(line).concat())),
+        ("POPR", cics_program("POPR", data, "", &popr)),
+        ("ABEND1", cics_program("ABEND1", data, "", &abend1)),
     ];
     let mut source = format!("{main}       END PROGRAM MAINP.\n");
     for (id, program) in programs {
@@ -2409,6 +2414,21 @@ fn a_called_program_starts_afresh_in_each_run_unit_a_link_or_xctl_starts() {
     assert_eq!(counted, ("COUNTER 1\nCOUNTER 1\nCOUNTER 2\nCOUNTER 1\nCOUNTER 1\nCOUNTER 2\nCOUNTER 2\n".into(), None));
     let level = |n: u8| format!("SUBL {n}\nSUB 1 AT 0001\nSUBL {n}\nSUB {n} AT 0000\n");
     assert_eq!(run_unit_task(&["CALL 'SUB' USING DFHEIBLK", "CALL 'SUB' USING DFHEIBLK"]), (level(1) + &level(2), None));
+}
+
+#[test]
+fn xctl_drops_the_programs_condition_handlers_and_keeps_the_levels_push_handle_stack() {
+    let (ignore, push) = ("EXEC CICS IGNORE CONDITION QIDERR END-EXEC", "EXEC CICS PUSH HANDLE END-EXEC");
+    let handle = "EXEC CICS HANDLE CONDITION QIDERR(MAIN-ERR) END-EXEC";
+    let xctl = |to: &str| format!("EXEC CICS XCTL PROGRAM('{to}') END-EXEC");
+    assert_eq!(condition_task(&[ignore, &xctl("READP")]), (String::new(), Some("AEYH".into())));
+    assert_eq!(condition_task(&[handle, &xctl("READP")]), (String::new(), Some("AEYH".into())));
+    assert_eq!(condition_task(&[&xctl("POPR")]), ("NOTHING TO POP\n".into(), Some("AEYH".into())));
+    assert_eq!(condition_task(&[ignore, push, &xctl("POPR")]), (String::new(), Some("AEYH".into())));
+    let exit = "EXEC CICS HANDLE ABEND PROGRAM('SHOWAB') END-EXEC";
+    assert_eq!(condition_task(&[exit, &xctl("ABEND1")]), ("NOTHING TO POP\nABEND XC01\n".into(), None));
+    assert_eq!(condition_task(&[exit, push, &xctl("ABEND1")]), ("ABEND XC01\n".into(), None));
+    assert_eq!(condition_task(&[exit, push, push, &xctl("ABEND1")]), (String::new(), Some("XC01".into())));
 }
 
 #[test]

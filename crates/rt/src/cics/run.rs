@@ -53,8 +53,8 @@ pub trait CicsHost<'w, P: Copy, O, S>: Host<P> + UnitHost<'w> {
     /// The data item a name alone refers to, or the abend a reference to it gives.
     fn locate_named(&mut self, name: &str, pos: Pos) -> R<Loc>;
     /// Runs program `index` from its start with DFHEIBLK and `commarea` as its USING items; for
-    /// XCTL, in this program's place at its logical level, with the level's HANDLE ABEND exit
-    /// (C239).
+    /// XCTL, in this program's place at its logical level, with the handlers `Handlers::xctl`
+    /// leaves it (C239, C146).
     fn run_program(&mut self, program: Self::Program, index: usize, commarea: Option<usize>, xctl: bool) -> R<Ending>;
 }
 
@@ -91,6 +91,14 @@ impl Handlers {
             level.push();
         }
         level
+    }
+
+    /// The handlers the program XCTL starts has: the level's HANDLE ABEND exit and PUSH HANDLE
+    /// stack, each exit the stack holds kept, and no HANDLE CONDITION or IGNORE CONDITION, which
+    /// belong to the program XCTL releases, pushed or not (C146).
+    pub fn xctl(&mut self) -> Handlers {
+        let stack = std::mem::take(&mut self.stack).into_iter().map(|(_, abend)| (HashMap::new(), abend)).collect();
+        Handlers { conditions: HashMap::new(), stack, abend: self.abend.take() }
     }
 
     /// Takes the level's handlers back from a CALLed program that has ended, as it left them; with

@@ -131,9 +131,10 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     /// A LINKed or XCTLed program, `code`, as program `index` at a logical level of its own.
     fn level(&mut self, code: &Code, index: usize, commarea: Option<usize>, xctl: bool) -> R<Ending> {
         let lowered = code.lowered.as_ref().map_err(|why| not_yet(format!("EXEC CICS LINK or XCTL of a program that does not lower ({why})")))?;
-        let eib = self.unit.eib;
+        let (eib, handlers) = (self.unit.eib, if xctl { self.cics_handlers.xctl() } else { Handlers::default() });
         let mut callee = Vm::activation(lowered, index, &mut *self.unit, self.main && xctl)?;
         callee.bind_level(Some(eib), commarea);
+        callee.cics_handlers = handlers;
         callee.run_level()
     }
 

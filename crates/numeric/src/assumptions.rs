@@ -285,6 +285,7 @@ pub const CICS_CONDITION_LABEL_OWNER: &str = "C235";
 pub const CICS_RETURN_BELOW_THE_FIRST_LEVEL: &str = "C143";
 pub const CICS_STOP_RUN_ENDS_THE_LEVEL: &str = "C144";
 pub const CICS_RUN_UNIT_PER_LINK: &str = "C145";
+pub const CICS_HANDLERS_ACROSS_XCTL: &str = "C146";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1821,6 +1822,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: CICS_RUN_UNIT_PER_LINK,
         claim: "Under CICS a run unit, the Language Environment enclave, is entered at the start of the task or by a LINK or XCTL, and each enclave has its own heap storage and other Language Environment resources (CICS TS 6.x, 'Flow of control between programs and subprograms', dfhp3_cobol_subprog_flow; z/OS 3.1 Language Environment Programming Guide, 'CICS run unit', ceea200254). On each entry to a LINKed program a new initialized copy of its WORKING-STORAGE is provided and the run unit is reinitialized; a program a static or dynamic CALL reaches gets a new initialized copy on its first entry within a logical level and its last-used state on later entries at the same level ('Rules for calling subprograms', dfhp3_cobol_subprog_rules). ironwork therefore keeps each loaded program's state, its storage, open files, CLOSE WITH LOCK, ALTERs, activity and whether a dynamic CALL entered it, per CICS run unit: a LINK, an XCTL and a HANDLE ABEND PROGRAM exit, entered as by LINK, each start one where every program starts in its initial state with storage of its own, and when it ends the files its programs left open are closed, as an enclave's are, and the run unit that started it has its programs as it left them. A program active in a higher run unit can be CALLed in a lower one. CANCEL and INITIAL act within the run unit. XCTL passes control to a new enclave at the same logical level (ceea200254), so a program CALLed both before and after an XCTL starts afresh after it, which the logical-level wording of the rules leaves open. The files are closed as when STOP RUN ends an enclave (ceea200118). EXTERNAL data, Language Environment heap storage and the objects of object-oriented programs stay with the task",
         basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CICS_HANDLERS_ACROSS_XCTL,
+        claim: "HANDLE CONDITION and IGNORE CONDITION apply only to the program in which they are specified and remain active while it is being executed (CICS TS 6.x, HANDLE CONDITION, dfhp4_handlecondition; IGNORE CONDITION, dfhp4_ignorecondition), and when control passes to another program by LINK or XCTL the HANDLE CONDITION commands active in the calling program are deactivated ('Using the HANDLE CONDITION command', dfhp3_exc_handlecondition). XCTL releases the program that issues it (XCTL, dfhp4_xctl), so the program it starts has none of them. The HANDLE ABEND exit belongs to the logical level and stays (C239). POP HANDLE restores the state before a PUSH HANDLE executed at the current link level, and raises INVREQ only when no such PUSH has been executed (POP HANDLE, dfhp4_pophandle); XCTL keeps the link level, and the manuals do not say it discards the stack. ironwork keeps the level's PUSH HANDLE stack across XCTL, with the HANDLE ABEND exit each entry suspended, and empties each entry's HANDLE CONDITION and IGNORE CONDITION, which belonged to the released program: a POP HANDLE in the new program undoes a PUSH the released one made and restores that exit, with no condition handling. HANDLE AID, which ironwork accepts and does not act on, has no state to carry",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

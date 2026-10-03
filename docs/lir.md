@@ -1351,8 +1351,10 @@ HANDLE labels there. SYNCPOINT is a service (cics/services.rs) that settles the 
   the level, as the walker's `Machine.cics_handlers` does, so a LINKed program starts with none, and
   a CALL lends it to the CALLed program and takes it back (`Handlers::lend`, `take_back`), a dynamic
   CALL of a program no other contains pushing it first and popping it when the program returns
-  (C234); the VM numbers its activations and lends its table as the walker does. RETURN and XCTL
-  return `Step::End`. No new terminator is needed.
+  (C234). XCTL hands the program it starts the level's PUSH HANDLE stack and HANDLE ABEND exit but
+  none of the HANDLE CONDITION and IGNORE CONDITION entries, pushed or not (`Handlers::xctl`, C146).
+  The VM numbers its activations, lends its table and hands it on at XCTL as the walker does. RETURN
+  and XCTL return `Step::End`. No new terminator is needed.
 - **Refused:** a HANDLE label that names no procedure, which the walker abends on only after the
   task check (IRONWORK at the block, or the outside-a-task abend first), so no one terminator
   gives both. HANDLE ABEND, whose exit an abend takes when it reaches the program's activation,
