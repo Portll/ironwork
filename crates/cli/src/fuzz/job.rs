@@ -124,6 +124,9 @@ impl Runner<'_> {
         let mut command = Command::new(std::env::current_exe()?);
         command.arg("job").arg(&fuzz.program).arg("--datasets").arg(&datasets).arg("--clock").arg(&fuzz.clock);
         command.args(&fuzz.flags);
+        if inputs.optimized {
+            command.arg("--optimize=2");
+        }
         for (flag, dirs) in [("-I", &fuzz.libraries), ("-L", &fuzz.program_dirs), ("--proclib", &self.req.proclibs)] {
             for d in dirs {
                 command.arg(flag).arg(d);

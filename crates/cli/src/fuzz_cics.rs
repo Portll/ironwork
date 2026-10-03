@@ -73,11 +73,13 @@ struct Turn {
     key: &'static str,
 }
 
-/// What one task is given: its COMMAREA, and the operator's turns when the program uses a terminal.
+/// What one task is given: its COMMAREA, and the operator's turns when the program uses a terminal;
+/// and whether it is compiled with OPTIMIZE(2), a kept abend's re-check.
 #[derive(Clone, Default)]
 struct Inputs {
     commarea: Option<Vec<u8>>,
     turns: Option<Vec<Turn>>,
+    optimized: bool,
 }
 
 /// Every statement of the program, nested ones included.
@@ -267,7 +269,7 @@ fn turn(rng: &mut Rng, terminal: &Terminal) -> Turn {
 fn generate(rng: &mut Rng, shape: Option<&Commarea>, terminal: &Terminal) -> Inputs {
     let commarea = shape.and_then(|s| commarea(rng, s));
     let turns = terminal.used.then(|| if terminal.reads || !terminal.transids.is_empty() { (0..1 + rng.below(4)).map(|_| turn(rng, terminal)).collect() } else { Vec::new() });
-    Inputs { commarea, turns }
+    Inputs { commarea, turns, optimized: false }
 }
 
 /// The operator's turns as a screen script: each field reached from the first by Home and Tab,
@@ -324,6 +326,9 @@ impl Runner<'_> {
         let mut command = Command::new(std::env::current_exe()?);
         command.arg("cics").arg(&f.program).arg("--clock").arg(&f.clock);
         command.args(&f.flags);
+        if inputs.optimized {
+            command.arg("--optimize=2");
+        }
         for d in &f.libraries {
             command.arg("-I").arg(d);
         }
@@ -492,7 +497,7 @@ pub fn run(req: Request) -> ExitCode {
 
     // What the task does with no COMMAREA and no operator input is no input's doing, so an abend it
     // gives then is not kept.
-    let empty = Inputs { commarea: None, turns: terminal.used.then(Vec::new) };
+    let empty = Inputs { commarea: None, turns: terminal.used.then(Vec::new), optimized: false };
     let baseline = match runner.run(&empty, None) {
         Ok(o) => o.place(),
         Err(e) => return fail(format!("a run could not start: {e}")),
@@ -531,6 +536,10 @@ pub fn run(req: Request) -> ExitCode {
             eprintln!("ironwork fuzz: {} at {}:{} is not kept: its task on the smallest input {why}", place.0, place.1, place.2);
             continue;
         };
+        let optimized = match runner.run(&Inputs { optimized: true, ..small.clone() }, None) {
+            Ok(o) => o.place().as_ref() == Some(&place),
+            Err(e) => return fail(format!("a run could not start: {e}")),
+        };
         let mut ids = Vec::new();
         if let Some(bytes) = &small.commarea {
             let id = format!("r{n}-DFHCOMMAREA");
@@ -542,7 +551,7 @@ pub fn run(req: Request) -> ExitCode {
             inputs_out.push(input(&id, "terminal", &termid, script(turns).as_bytes(), minimized));
             ids.push(Value::from(id));
         }
-        runs_out.push(kept_run(ids, &outcome, journal, n));
+        runs_out.push(kept_run(ids, &outcome, optimized, journal, n));
     }
     let _ = fs::remove_dir_all(&runner.work);
 

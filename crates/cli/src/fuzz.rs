@@ -83,6 +83,8 @@ struct Inputs {
     limit: Option<u64>,
     /// The marker put in place of the program name an S806 CALLed, which its evidence run traces.
     marker: Option<String>,
+    /// The run is compiled with OPTIMIZE(2): a kept abend's re-check.
+    optimized: bool,
 }
 
 /// How many times --timeout a hang's re-check may take: a loop the input caused ends in S322 within
@@ -645,6 +647,9 @@ impl Runner<'_> {
         let mut command = Command::new(std::env::current_exe()?);
         command.arg("run").arg(&self.req.program).arg("--clock").arg(&self.req.clock);
         command.args(&self.req.flags);
+        if inputs.optimized {
+            command.arg("--optimize=2");
+        }
         for d in &self.req.libraries {
             command.arg("-I").arg(d);
         }
@@ -795,13 +800,14 @@ pub(crate) fn input(id: &str, kind: &str, name: &str, bytes: &[u8], minimized: b
     obj(vec![("id", id.into()), ("kind", kind.into()), ("name", name.into()), ("bytes", base64(bytes).into()), ("minimized", minimized.into())])
 }
 
-/// A kept run as the manifest lists it: its inputs by id, its abend, and its journal and coverage.
-pub(crate) fn kept_run(ids: Vec<Value>, abend: &Outcome, journal: String, n: usize) -> Value {
+/// A kept run as the manifest lists it: its inputs by id, its abend and whether the same input gives
+/// it again compiled with OPTIMIZE(2), and its journal and coverage.
+pub(crate) fn kept_run(ids: Vec<Value>, abend: &Outcome, optimized: bool, journal: String, n: usize) -> Value {
     let Outcome::Abend { code, file, line, message } = abend else { unreachable!("only an abend is kept") };
     obj(vec![
         ("input", Value::Arr(ids)),
         ("outcome", "abend".into()),
-        ("abend", obj(vec![("code", code.as_str().into()), ("file", file.as_str().into()), ("line", (*line).into()), ("message", message.as_str().into())])),
+        ("abend", obj(vec![("code", code.as_str().into()), ("file", file.as_str().into()), ("line", (*line).into()), ("message", message.as_str().into()), ("optimized", optimized.into())])),
         ("journal", journal.into()),
         ("coverage", format!("coverage/{n}.json").into()),
     ])
@@ -1017,7 +1023,7 @@ struct Found {
 
 /// The loop every entry shares: a run on empty input, whose abend is no input's doing and is not
 /// kept; `runs` generated inputs; then each new abend once, on the smallest input that still gives
-/// it, run a last time with evidence and coverage in `out`.
+/// it, run with evidence and coverage in `out`, and once more compiled with OPTIMIZE(2).
 fn drive(out: &Path, runs: u32, seed: u64, hang_limit: u64, varied: &Varied, run: &mut RunInput) -> Result<Found, String> {
     let evidence = out.join("evidence");
     let coverage = out.join("coverage");
@@ -1082,7 +1088,10 @@ fn drive(out: &Path, runs: u32, seed: u64, hang_limit: u64, varied: &Varied, run
         let came_again = outcome.place().as_ref() == Some(&place);
         let journal = journals(&evidence).into_iter().find(|j| !before.contains(j)).filter(|_| came_again);
         match journal {
-            Some(journal) => runs_out.push(kept_run(listed(&small, varied, n, minimized, &mut inputs_out), &outcome, journal, n)),
+            Some(journal) => {
+                let optimized = gives_again(run, &small, &place).map_err(started)?;
+                runs_out.push(kept_run(listed(&small, varied, n, minimized, &mut inputs_out), &outcome, optimized, journal, n));
+            }
             None => {
                 let why = if came_again { "wrote no journal".to_string() } else { outcome.told() };
                 eprintln!("ironwork fuzz: {} at {}:{} is not kept: its run on the smallest input {why}", place.0, place.1, place.2);
@@ -1099,12 +1108,21 @@ fn drive(out: &Path, runs: u32, seed: u64, hang_limit: u64, varied: &Varied, run
         let named = matches!(&outcome, Outcome::Abend { code, file, line, message } if code == "S806" && *file == place.1 && *line == place.2 && called(message) == Some(marker.as_str()));
         let journal = journals(&evidence).into_iter().find(|j| !before.contains(j)).filter(|j| named && marker_reached(&evidence, j, place.2));
         match journal {
-            Some(journal) => runs_out.push(kept_run(listed(&marked, varied, n, false, &mut inputs_out), &outcome, journal, n)),
+            Some(journal) => {
+                let optimized = gives_again(run, &marked, &place).map_err(started)?;
+                runs_out.push(kept_run(listed(&marked, varied, n, false, &mut inputs_out), &outcome, optimized, journal, n));
+            }
             None => eprintln!("ironwork fuzz: S806 at {}:{} is not kept: its run with {marker} in place of {name} did not show the CALL took the name from the input", place.1, place.2),
         }
         n += 1;
     }
     Ok(Found { inputs: inputs_out, runs: runs_out, tally, baseline })
+}
+
+/// Whether `inputs` end at `place` again with the program compiled at OPTIMIZE(2), where IBM may
+/// compare some invalid data by its bytes rather than end in a data exception (assumption C262).
+fn gives_again(run: &mut RunInput, inputs: &Inputs, place: &(String, String, i64)) -> std::io::Result<bool> {
+    Ok(run(&Inputs { optimized: true, ..inputs.clone() }, None)?.place().as_ref() == Some(place))
 }
 
 /// Lists each of a kept run's inputs in `out` as the manifest gives them, and returns their ids.

@@ -268,6 +268,12 @@ cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
    ends in S806 at the same CALL naming the marker and its journal records the marker reaching
    that CALL's `dynamic-program-load` sink. A static CALL raises no such sink. A kept hang's input
    is made smaller within 10 runs; a kept S806's input is the marked one.
+6. Each kept input runs once more, with no evidence, compiled with `--optimize=2`, the compiler
+   invocation's OPTIMIZE(2), which a CBL or PROCESS card's OPTIMIZE outranks. IBM leaves what invalid
+   data does to the generated code, and at OPTIMIZE(1) and (2) it may compare an unsigned zoned item
+   with zero by its bytes where OPTIMIZE(0), its default, reads it as a number and ends in a data
+   exception (assumption C262). Whether that run ends in the same abend at the same place is the
+   abend's `optimized`.
 
 `DIR/manifest.json` holds `tool` (`ironwork-fuzz`), `version`, `seed`, `strategy` (`fields`),
 `clock`, `program` (`file`, relative to `--root`, the current directory without it, and `id`),
@@ -286,8 +292,9 @@ gives; so do a run ironwork refused, told by its `ironwork:` line and not by the
 program's RETURN-CODE can also give, and a run in which ironwork itself panicked; standard error
 gives the first refusal's reason and the first panic) and `runs`,
 one per kept abend (`input` ids, `outcome` `abend`, `abend` with `code`, `file` relative to the
-program's directory or the library it came from, `line` and `message`, `journal` the run id, and
-`coverage`). A program that takes any other PROCEDURE DIVISION USING is refused: a CALL would
+program's directory or the library it came from, `line`, `message` and `optimized` (item 6),
+`journal` the run id, and `coverage`). `optimized` rests on the manifest's word: the run it comes
+from keeps no journal. A program that takes any other PROCEDURE DIVISION USING is refused: a CALL would
 supply its parameters.
 
 ### 5.1 A CICS task: `ironwork fuzz --cics`
@@ -320,4 +327,5 @@ each run an `ironwork cics`, and writes the same directory with `entry` `cics`
    protection exception in a task is ASRA, its message naming S0C7 or S0C4.
 5. A kept run's inputs are `kind` `commarea` (`name` `DFHCOMMAREA`, the EBCDIC bytes `--commarea`
    takes) and `terminal` (`name` the terminal id, `--termid` or `TERM`, and the screen script as
-   UTF-8). Its journal and coverage take in every task of its pseudo-conversation.
+   UTF-8). Its journal and coverage take in every task of its pseudo-conversation. Its input runs
+   once more compiled with `--optimize=2`, which gives its abend's `optimized`, as in §5.

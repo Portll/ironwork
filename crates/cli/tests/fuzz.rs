@@ -487,3 +487,33 @@ fn an_s806_is_kept_only_where_a_marker_in_the_input_reaches_the_call() {
     assert!(o.status.success(), "{}", stderr(&o));
     assert!(!fs::read_to_string(dir.join("static/manifest.json")).unwrap().contains("S806"));
 }
+
+/// Each kept run's abend as `code line optimized`.
+fn optimized(manifest: &str) -> Vec<String> {
+    let runs = manifest.split("\"runs\":[").nth(1).unwrap();
+    runs.split("\"abend\":{")
+        .skip(1)
+        .map(|a| {
+            let abend = a.split('}').next().unwrap();
+            let field = |key: &str| abend.split(&format!("\"{key}\":")).nth(1).unwrap().split(',').next().unwrap().trim_matches('"').to_string();
+            format!("{} {} {}", field("code"), field("line"), field("optimized"))
+        })
+        .collect()
+}
+
+#[test]
+fn each_kept_abend_says_whether_its_input_gives_it_again_compiled_with_optimize_2() {
+    let dir = temp("optimized");
+    rewrite(&dir, &[("                 ADD IN-QTY TO WS-TOTAL", "                 IF IN-QTY NOT = ZERO\n                    ADD IN-QTY TO WS-TOTAL\n                 END-IF")]);
+    let o = fuzz(&dir, "run", &["--runs", "40"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let found = optimized(&fs::read_to_string(dir.join("run/manifest.json")).unwrap());
+    assert!(found.contains(&"S0C7 25 false".to_string()), "{found:?}");
+    assert!(found.contains(&"U4038 28 true".to_string()), "{found:?}");
+
+    let o = fuzz(&dir, "optimized", &["--runs", "40", "--optimize=2"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let found = optimized(&fs::read_to_string(dir.join("optimized/manifest.json")).unwrap());
+    assert!(found.contains(&"S0C7 26 true".to_string()), "{found:?}");
+    assert!(!found.iter().any(|k| k.starts_with("S0C7 25")), "{found:?}");
+}
