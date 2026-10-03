@@ -182,7 +182,7 @@ fn an_abend_bypasses_later_steps_except_even_and_abend_tests() {
         assert!(l.contains(&format!("{ran} PGM=IEFBR14 RC=0000")), "{ran}: {l}");
     }
     assert!(l.contains("S6 PGM=NOSUCH ABEND S806"), "{l}");
-    assert_eq!(o.status.code(), Some(16));
+    assert_eq!(o.status.code(), Some(240));
 }
 
 #[test]
@@ -193,7 +193,7 @@ fn a_missing_data_set_is_a_jcl_error_that_ends_the_job() {
     let l = log(&o);
     assert!(l.contains("S1 PGM=IEFBR14 JCL ERROR: DD IN: NOT.THERE was not found; the job ends"), "{l}");
     assert!(l.contains("S2 PGM=IEFBR14 BYPASSED: the job ended"), "{l}");
-    assert_eq!(o.status.code(), Some(16));
+    assert_eq!(o.status.code(), Some(240));
 }
 
 #[test]
@@ -222,12 +222,12 @@ fn members_of_a_partitioned_data_set_are_files_in_its_directory() {
 fn what_ironwork_does_not_run_is_refused_before_any_step() {
     let dir = temp("refuse");
     let o = job(&dir, "//S1 EXEC PGM=IEFBR14\n//NEW DD DSN=MADE.EARLY,DISP=(NEW,CATLG)\n//S2 EXEC PGM=ICETOOL\n//S4 EXEC PGM=IDCAMS\n//SYSIN DD *\n  LISTCAT ALL\n");
-    assert_eq!(o.status.code(), Some(2));
+    assert_eq!(o.status.code(), Some(244));
     let l = log(&o);
     assert!(l.contains("PGM=ICETOOL is not supported yet") && l.contains("IDCAMS: the IDCAMS command LISTCAT is not supported yet"), "{l}");
     assert!(!dir.join("data/MADE.EARLY").exists());
     let o = job(&dir, "//S1 EXEC MYPROC\n");
-    assert_eq!(o.status.code(), Some(2));
+    assert_eq!(o.status.code(), Some(244));
     assert!(log(&o).contains("job.jcl:2: no procedure library holds member MYPROC"), "{}", log(&o));
 }
 
@@ -424,7 +424,7 @@ fn a_cobol_steps_abend_record_names_the_source_and_line_and_other_steps_name_non
         &["--evidence", ev.to_str().unwrap()],
     );
     let l = log(&o);
-    assert_eq!(o.status.code(), Some(16), "{l}");
+    assert_eq!(o.status.code(), Some(240), "{l}");
     assert_eq!(l.matches(&format!("{}:8:", dir.join("lib/DIVIDE.cbl").display())).count(), 2, "{l}");
     let runs: Vec<_> = fs::read_dir(ev.join("runs")).unwrap().flatten().collect();
     let text = fs::read_to_string(runs[0].path()).unwrap();
@@ -613,7 +613,7 @@ fn sort_reads_fixed_records_by_their_length_and_refuses_what_it_does_not_model()
     assert_eq!(o.status.code(), Some(0), "{}", log(&o));
     assert_eq!(fs::read(dir.join("data/BIN.OUT")).unwrap(), [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 1, 0, 0, 0, 2], "FI is signed: -1 sorts first");
     let o = job(&dir, "//S1 EXEC PGM=SORT\n//SYSIN DD *\n  SORT FIELDS=(1,1,CH,A)\n  OUTREC IFTHEN=(WHEN=(1,1,CH,EQ,C'A'),OVERLAY=(2:C'B'))\n/*\n");
-    assert_eq!(o.status.code(), Some(2));
+    assert_eq!(o.status.code(), Some(244));
     assert!(log(&o).contains("SORT: the OUTREC parameter IFTHEN is not supported yet"), "{}", log(&o));
 }
 

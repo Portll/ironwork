@@ -15,11 +15,11 @@ fn an_address_beyond_loopback_is_refused_without_serve_public() {
 
     let open = run(&["--serve", "0.0.0.0:0"]);
     let said = String::from_utf8_lossy(&open.stderr);
-    assert_eq!(open.status.code(), Some(2), "{said}");
+    assert_eq!(open.status.code(), Some(246), "{said}");
     assert!(said.contains("0.0.0.0 is not a loopback address") && said.contains("--serve-public"), "{said}");
 
     let stray = run(&["--serve-public"]);
-    assert_eq!(stray.status.code(), Some(2));
+    assert_eq!(stray.status.code(), Some(246));
     assert!(String::from_utf8_lossy(&stray.stderr).contains("--serve-public is for --serve"));
     std::fs::remove_dir_all(dir).unwrap();
 }

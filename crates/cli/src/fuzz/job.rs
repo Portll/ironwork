@@ -156,7 +156,7 @@ impl Runner<'_> {
         let timeout = if inputs.limit.is_some() { fuzz.timeout * super::HANG_PATIENCE } else { fuzz.timeout };
         let Some((code, text)) = super::wait_for(command, &dir, timeout, &given)? else { return Ok(Outcome::Timeout) };
         Ok(match super::waited(super::ended(code, &text, |l| super::abend_line(l, &roots)), &text) {
-            Outcome::Clean => unplaced(&text).unwrap_or(Outcome::Clean),
+            Outcome::Refused(why) => unplaced(&text).unwrap_or(Outcome::Refused(why)),
             outcome => outcome,
         })
     }
@@ -183,7 +183,7 @@ pub fn run(req: Request) -> ExitCode {
     let jcl = &req.fuzz.program;
     let job = match crate::job::parse(jcl, &req.datasets.clone().unwrap_or_default(), &req.proclibs, req.user.as_deref()) {
         Ok(j) => j,
-        Err(e) => return fail(e),
+        Err((_, e)) => return fail(e),
     };
     let Some(file) = super::from_root(jcl, &req.fuzz.root) else {
         return fail(format!("{} is not under --root {}", jcl.display(), req.fuzz.root.display()));

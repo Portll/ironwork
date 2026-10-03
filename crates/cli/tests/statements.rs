@@ -89,9 +89,9 @@ fn a_list_without_a_journal_or_not_of_file_and_line_is_refused() {
     let alone = run(&dir, Some("LOOPER.cbl:8\n"), false);
     let malformed = run(&dir, Some("LOOPER.cbl\n"), true);
     let _ = fs::remove_dir_all(&dir);
-    assert_eq!(alone.status.code(), Some(2));
+    assert_eq!(alone.status.code(), Some(246));
     assert!(String::from_utf8_lossy(&alone.stderr).contains("--trace-statements goes with --evidence, for run"));
-    assert_eq!(malformed.status.code(), Some(2));
+    assert_eq!(malformed.status.code(), Some(246));
     assert!(String::from_utf8_lossy(&malformed.stderr).contains("line 1: \"LOOPER.cbl\" is not FILE:LINE"), "{}", String::from_utf8_lossy(&malformed.stderr));
 }
 
@@ -102,7 +102,7 @@ fn a_statement_limit_ends_the_run_with_s322_at_the_same_statement_on_both_execut
     for extra in [&[][..], &["--vm"]] {
         let o = limited(extra);
         let err = String::from_utf8_lossy(&o.stderr);
-        assert_eq!(o.status.code(), Some(16), "{extra:?} {err}");
+        assert_eq!(o.status.code(), Some(240), "{extra:?} {err}");
         assert!(err.contains("LOOPER.cbl:8:16: ABEND S322:"), "{extra:?} {err}");
     }
     let done = Command::new(env!("CARGO_BIN_EXE_ironwork")).arg("run").arg(dir.join("src/LOOPER.cbl")).args(["--statement-limit", "200"]).output().unwrap();

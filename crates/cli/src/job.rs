@@ -4,6 +4,7 @@
 //! the files a step's DDs stand for, and dispositions create, keep and delete them as the step
 //! ends. COND and IF/THEN/ELSE decide which steps run, from the return codes and abends before.
 
+use crate::exit::{self, Outcome};
 use exec::abend::{AbendCode, Signal};
 use jcl::cond::{self, Ran};
 use jcl::{Dd, End, Item, Job, Source, Status, Step};
@@ -56,10 +57,11 @@ pub struct Request {
 }
 
 /// The job in `jcl`, its procedures and INCLUDE members found in the data sets JCLLIB names under
-/// `datasets` and then in `proclibs`.
-pub(crate) fn parse(jcl: &Path, datasets: &Path, proclibs: &[PathBuf], user: Option<&str>) -> Result<Job, String> {
+/// `datasets` and then in `proclibs`; Err with why, as a JCL that cannot be read or one ironwork
+/// refuses.
+pub(crate) fn parse(jcl: &Path, datasets: &Path, proclibs: &[PathBuf], user: Option<&str>) -> Result<Job, (Outcome, String)> {
     let shown = jcl.display().to_string();
-    let text = fs::read_to_string(jcl).map_err(|e| format!("{shown}: {e}"))?;
+    let text = fs::read_to_string(jcl).map_err(|e| (Outcome::Unreadable, format!("{shown}: {e}")))?;
     let libraries = |order: &[String], member: &str| -> Result<Option<String>, String> {
         let dirs = order.iter().map(|dsn| datasets.join(dsn)).chain(proclibs.iter().cloned());
         for dir in dirs {
@@ -71,7 +73,7 @@ pub(crate) fn parse(jcl: &Path, datasets: &Path, proclibs: &[PathBuf], user: Opt
         }
         Ok(None)
     };
-    jcl::parse_with(&text, &libraries, user).map_err(|e| format!("{shown}:{}: {}", e.line, e.message))
+    jcl::parse_with(&text, &libraries, user).map_err(|e| (Outcome::NotRun, format!("{shown}:{}: {}", e.line, e.message)))
 }
 
 /// The job with the request's PARMs and in-stream data in place of the JCL's.
@@ -469,12 +471,11 @@ impl Runner<'_> {
 /// message, with its file and line in `place` and on standard error as `run` gives them. Each
 /// program CALL loads from a library goes into `called`.
 #[allow(clippy::too_many_arguments)]
-fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database: Option<&mut (dyn exec::sql::Database + '_)>, out: &mut dyn Write, called: &mut BTreeSet<PathBuf>, evidence: Option<&Rc<RefCell<crate::evidence::Run>>>, roots: &[PathBuf], place: &mut Option<(Option<String>, i64)>, coverage: Option<&RefCell<(crate::coverage::Coverage, Vec<crate::coverage::Outline>)>>) -> Result<i16, (AbendCode, String)> {
-    let ironwork = |m: String| (AbendCode::Ironwork, m);
-    let text = fs::read(path).map(|b| syntax::copy::decode(&b)).map_err(|e| ironwork(format!("{}: {e}", path.display())))?;
+fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database: Option<&mut (dyn exec::sql::Database + '_)>, out: &mut dyn Write, called: &mut BTreeSet<PathBuf>, evidence: Option<&Rc<RefCell<crate::evidence::Run>>>, roots: &[PathBuf], place: &mut Option<(Option<String>, i64)>, coverage: Option<&RefCell<(crate::coverage::Coverage, Vec<crate::coverage::Outline>)>>) -> Result<i16, Failed> {
+    let text = fs::read(path).map(|b| syntax::copy::decode(&b)).map_err(|e| Failed::before(Outcome::Unreadable, format!("{}: {e}", path.display())))?;
     let own = path.parent().map(Path::to_path_buf).unwrap_or_default();
     let libraries = syntax::copy::Libraries::new(std::iter::once(own.clone()).chain(req.libraries.iter().cloned()).collect()).with_program(path);
-    let mut programs = syntax::parse_all_with(&text, &libraries).map_err(|e| ironwork(e.place(&path.display().to_string()).to_string()))?;
+    let mut programs = syntax::parse_all_with(&text, &libraries).map_err(|e| Failed::before(Outcome::Refused, e.place(&path.display().to_string()).to_string()))?;
     if let Some(c) = coverage {
         let outlines = &mut c.borrow_mut().1;
         for p in &programs {
@@ -488,9 +489,9 @@ fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database
         crate::evidence::sources(run.borrow_mut().journal_mut(), &first.sources, &path.display().to_string(), roots);
     }
     let library = exec::unit::Library { programs, dirs: std::iter::once(own).chain(req.program_dirs.iter().cloned()).collect(), copy: libraries, flags: req.flags.clone(), trace_statements: None, trace_input: false, statement_limit: req.statement_limit };
-    let compiled = exec::compile(first, &req.flags).map_err(|errors| ironwork(syntax::most_severe(&errors).map(|e| e.place(&path.display().to_string()).to_string()).unwrap_or_default()))?;
+    let compiled = exec::compile(first, &req.flags).map_err(|errors| Failed::before(Outcome::Refused, syntax::most_severe(&errors).map(|e| e.place(&path.display().to_string()).to_string()).unwrap_or_default()))?;
     let specs: Vec<String> = dds.iter().map(|d| format!("{}={}{}{}", d.name, d.path.display(), if d.text { ":text" } else { "" }, if d.append { ":mod" } else { "" })).collect();
-    let dds = exec::files::Dds::new(&specs, false).map_err(ironwork)?;
+    let dds = exec::files::Dds::new(&specs, false).map_err(|m| Failed::abend(AbendCode::Ironwork, m))?;
     let sysin: Box<dyn std::io::BufRead> = match dds.get("SYSIN").and_then(|d| fs::File::open(d.path).ok()) {
         Some(f) => Box::new(std::io::BufReader::new(f)),
         None => Box::new(std::io::empty()),
@@ -517,7 +518,7 @@ fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database
             let (file, shown) = (crate::abend_file(&compiled, &a), path.display().to_string());
             eprintln!("{}:{}: ABEND {}: {}", file.filter(|f| !f.is_empty()).unwrap_or(&shown), a.pos, a.code, a.message);
             *place = Some((file.map(str::to_string), i64::from(a.pos.line)));
-            Err((a.code, a.message))
+            Err(Failed::abend(a.code, a.message))
         }
     }
 }
@@ -530,6 +531,25 @@ fn delete_data_set(path: &Path) -> std::io::Result<()> {
     gone.and(unmarked)
 }
 
+/// A step that ended without a return code: the abend its log line, COND and IF see, and what the
+/// job's exit status makes of it.
+struct Failed {
+    code: AbendCode,
+    message: String,
+    outcome: Outcome,
+}
+
+impl Failed {
+    fn abend(code: AbendCode, message: String) -> Self {
+        Self { outcome: Outcome::of_abend(&code), code, message }
+    }
+
+    /// What kept a COBOL step's program from running, which COND and IF see as an IRONWORK abend.
+    fn before(outcome: Outcome, message: String) -> Self {
+        Self { code: AbendCode::Ironwork, message, outcome }
+    }
+}
+
 /// Writes `bytes` to `path`, after what it holds when `append`.
 fn put(path: &Path, bytes: &[u8], append: bool) -> std::io::Result<()> {
     if !append {
@@ -540,11 +560,11 @@ fn put(path: &Path, bytes: &[u8], append: bool) -> std::io::Result<()> {
 
 /// IEBGENER with no control statements: SYSUT1 copied to SYSUT2 as it stands. Without either
 /// DD it ends with return code 12.
-fn iebgener(dds: &[Allocated]) -> Result<i16, (AbendCode, String)> {
+fn iebgener(dds: &[Allocated]) -> Result<i16, Failed> {
     let dd = |n: &str| dds.iter().find(|d| d.name == n);
     let (Some(from), Some(to)) = (dd("SYSUT1"), dd("SYSUT2")) else { return Ok(12) };
-    let bytes = fs::read(&from.path).map_err(|e| (AbendCode::Ironwork, format!("SYSUT1: {e}")))?;
-    put(&to.path, &bytes, to.append).map_err(|e| (AbendCode::Ironwork, format!("SYSUT2: {e}")))?;
+    let bytes = fs::read(&from.path).map_err(|e| Failed::abend(AbendCode::Ironwork, format!("SYSUT1: {e}")))?;
+    put(&to.path, &bytes, to.append).map_err(|e| Failed::abend(AbendCode::Ironwork, format!("SYSUT2: {e}")))?;
     Ok(0)
 }
 
@@ -936,9 +956,9 @@ pub fn run(req: Request) -> ExitCode {
     let shown = req.jcl.display().to_string();
     let mut job = match parse(&req.jcl, &req.datasets, &req.proclibs, req.user.as_deref()) {
         Ok(j) => j,
-        Err(e) => {
+        Err((outcome, e)) => {
             eprintln!("ironwork: {e}");
-            return ExitCode::from(2);
+            return exit::job_status(outcome);
         }
     };
     if let Err(e) = override_steps(&mut job, &req) {
@@ -946,21 +966,21 @@ pub fn run(req: Request) -> ExitCode {
     }
     if !req.datasets.is_dir() {
         eprintln!("ironwork: --datasets {}: not a directory", req.datasets.display());
-        return ExitCode::from(2);
+        return exit::job_status(Outcome::Usage);
     }
     let refused = refusals(&job, &req);
     if !refused.is_empty() {
         for r in refused {
             eprintln!("ironwork: {shown}: {r}");
         }
-        return ExitCode::from(2);
+        return exit::job_status(Outcome::NotRun);
     }
     let mut replay = match &req.replay {
         Some(file) => match fs::read_to_string(file).map_err(|e| e.to_string()).and_then(|t| exec::sql::Replay::parse(&t, false)) {
             Ok(r) => Some(r),
             Err(e) => {
                 eprintln!("ironwork: --sql-replay {}: {e}", file.display());
-                return ExitCode::from(2);
+                return exit::job_status(Outcome::Usage);
             }
         },
         None => None,
@@ -969,7 +989,7 @@ pub fn run(req: Request) -> ExitCode {
         Ok(d) => d,
         Err(e) => {
             eprintln!("ironwork: a scratch directory: {e}");
-            return ExitCode::from(2);
+            return exit::job_status(Outcome::Internal);
         }
     };
     let declared = match &req.declare {
@@ -985,7 +1005,7 @@ pub fn run(req: Request) -> ExitCode {
             if let Err(e) = copy_tree(&req.datasets, &copy) {
                 eprintln!("ironwork: copying --datasets {}: {e}", req.datasets.display());
                 let _ = fs::remove_dir_all(&scratch);
-                return ExitCode::from(2);
+                return exit::job_status(Outcome::Usage);
             }
             copy
         }
@@ -1009,7 +1029,7 @@ pub fn run(req: Request) -> ExitCode {
             Err(e) => {
                 eprintln!("ironwork: --evidence {}: {e}", dir.display());
                 let _ = fs::remove_dir_all(&runner.scratch);
-                return ExitCode::from(2);
+                return exit::job_status(Outcome::Usage);
             }
         },
         None => None,
@@ -1017,7 +1037,7 @@ pub fn run(req: Request) -> ExitCode {
     let journal = RefCell::new(journal);
     let report = run_job(&job, &mut runner, replay.as_mut().map(|r| r as &mut dyn exec::sql::Database), &journal, &roots);
     if let Some(j) = journal.into_inner() {
-        crate::evidence::finish(Some(j), i64::from(report.status));
+        crate::evidence::finish(Some(j), exit::recorded(report.outcome));
     }
     if let (Some(file), Some(c)) = (&req.coverage, &runner.coverage) {
         let (covered, outlines) = &*c.borrow();
@@ -1030,17 +1050,17 @@ pub fn run(req: Request) -> ExitCode {
     }
     let code = match &req.expected {
         Some(expected) => equivalence(&req, &job, &report, expected, &runner.datasets, &inputs, &declared),
-        None => ExitCode::from(report.status),
+        None => exit::job_status(report.outcome),
     };
     let _ = fs::remove_dir_all(&runner.scratch);
     code
 }
 
-/// Runs every step the job's conditions allow; the exit status is the highest return code, or
-/// 16 when a step abended or the job ended on a JCL error.
+/// Runs every step the job's conditions allow. The job ends as the first step that ended without
+/// a return code says, or a JCL error that ended it, and otherwise with the highest return code.
 /// With a journal, each step's DDs, CALLs, sources and outcome go into it as the step ends.
 fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exec::sql::Database>, journal: &RefCell<Option<exec::evidence::Journal>>, roots: &[PathBuf]) -> Report {
-    let (mut ran, mut abended, mut failed) = (Vec::<Ran>::new(), false, false);
+    let (mut ran, mut abended, mut stopped) = (Vec::<Ran>::new(), false, None);
     let mut frames: Vec<Frame> = Vec::new();
     let mut stdout = std::io::stdout().lock();
     let (mut steps, mut gaps, mut programs) = (Vec::new(), Vec::new(), BTreeSet::new());
@@ -1103,7 +1123,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                 if let Some(e) = jcl_error {
                     log(name, &step.pgm, format!("JCL ERROR: {e}; the job ends"));
                     runner.dispose(disposals, true);
-                    failed = true;
+                    stopped.get_or_insert(Outcome::Abend);
                     ended = true;
                     continue;
                 }
@@ -1129,7 +1149,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                         programs.insert(path.clone());
                         run_cobol(&path, step.parm.as_deref().unwrap_or(""), runner.req, &dds, database.as_deref_mut(), &mut stdout, &mut programs, run.as_ref(), roots, &mut place, runner.coverage.as_ref())
                     }
-                    Program::Missing => Err((AbendCode::ModuleNotFound, format!("program {} is not in the program libraries", step.pgm))),
+                    Program::Missing => Err(Failed::abend(AbendCode::ModuleNotFound, format!("program {} is not in the program libraries", step.pgm))),
                 };
                 for d in dds.iter().filter(|d| d.sysout) {
                     if let Ok(bytes) = fs::read(&d.path) {
@@ -1138,7 +1158,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                 }
                 let _ = stdout.flush();
                 if let Some(run) = run.and_then(|r| Rc::try_unwrap(r).ok()) {
-                    let abend = outcome.as_ref().err().map(|(code, _)| (code.to_string(), place.as_ref().and_then(|(f, _)| f.as_deref()), place.as_ref().map_or(0, |(_, l)| *l)));
+                    let abend = outcome.as_ref().err().map(|failed| (failed.code.to_string(), place.as_ref().and_then(|(f, _)| f.as_deref()), place.as_ref().map_or(0, |(_, l)| *l)));
                     *journal.borrow_mut() = Some(run.into_inner().end(abend));
                 }
                 match outcome {
@@ -1148,27 +1168,28 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                         runner.dispose(disposals, false);
                         ran.push(Ran { name: step.name.clone(), caller: step.caller.clone(), rc: Some(rc), abend: None });
                     }
-                    Err((code, message)) => {
+                    Err(Failed { code, message, outcome: exits }) => {
                         if code == AbendCode::Ironwork {
                             gaps.push(format!("step {name} reached what ironwork does not model: {message}"));
                         }
                         log(name, &step.pgm, format!("ABEND {code}: {message}"));
                         runner.dispose(disposals, true);
                         abended = true;
+                        stopped.get_or_insert(exits);
                         ran.push(Ran { name: step.name.clone(), caller: step.caller.clone(), rc: None, abend: Some(code.to_string()) });
                     }
                 }
             }
         }
     }
-    let status = if abended || failed { 16 } else { ran.iter().filter_map(|r| r.rc).max().map_or(0, |rc| rc.min(255) as u8) };
-    Report { status, steps, gaps, programs }
+    let outcome = stopped.unwrap_or_else(|| Outcome::Ended(ran.iter().filter_map(|r| r.rc).max().map_or(0, i64::from)));
+    Report { outcome, steps, gaps, programs }
 }
 
-/// What a job did: its exit status, a record per step, what it reached that ironwork does not
-/// model, and the COBOL programs it ran.
+/// What a job did: how it ended, a record per step, what it reached that ironwork does not model,
+/// and the COBOL programs it ran.
 struct Report {
-    status: u8,
+    outcome: Outcome,
     steps: Vec<Value>,
     gaps: Vec<String>,
     programs: BTreeSet<PathBuf>,

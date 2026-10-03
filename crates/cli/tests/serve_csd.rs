@@ -31,10 +31,10 @@ fn a_csd_needs_serve_and_a_broken_one_is_refused() {
     std::fs::write(dir.join("BAD.csd"), "* no name\n DEFINE TRANSACTION GROUP(X)\n").unwrap();
     let program = dir.join("MENU.cbl");
     let alone = run(&["cics", program.to_str().unwrap(), "--csd", "x.csd"]);
-    assert_eq!(alone.status.code(), Some(2));
+    assert_eq!(alone.status.code(), Some(246));
     assert!(String::from_utf8_lossy(&alone.stderr).contains("--csd need --serve"));
     let broken = run(&["cics", program.to_str().unwrap(), "--serve", "127.0.0.1:0", "--csd", dir.join("BAD.csd").to_str().unwrap()]);
-    assert_eq!(broken.status.code(), Some(2));
+    assert_eq!(broken.status.code(), Some(246));
     assert!(String::from_utf8_lossy(&broken.stderr).contains("BAD.csd: 2:1: DEFINE names no KIND(NAME)"), "{}", String::from_utf8_lossy(&broken.stderr));
     std::fs::remove_dir_all(dir).unwrap();
 }

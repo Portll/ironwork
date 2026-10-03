@@ -615,9 +615,10 @@ started with, then each `-L` in order. A program is found in this order:
 It refuses the compile flags, `--evidence`, `--provenance`, `--coverage` and the cics flags, and
 `check`, `cics` and `compile` refuse a module. It takes `-L`, `-I`, `--dd`, `--clock`, `--parm`,
 `--statement-limit` and the SQL flags as a run of source does. A module the reader refuses, or
-whose program 0 the verifier refuses, exits 2 with the reason and runs nothing; one whose program 0
-is a user-defined function exits 16, as such a source does. An abend names the source the debug
-table gives (§9.1), so it reads as the source's own run does from the source's directory.
+whose program 0 the verifier refuses, exits 245 with the reason and runs nothing; one whose program
+0 is a user-defined function exits 241, as such a source does, and a construct the VM does not run
+yet stops the run with 243 (the README's Exit status). An abend names the source the debug table
+gives (§9.1), so it reads as the source's own run does from the source's directory.
 
 ### 8.3 Static and dynamic CALL
 
@@ -775,7 +776,7 @@ scenarios that wait for question 6 do not run yet.
 
 - **Given** a module whose `major` is higher than the reader's **when** it is run **then** the run
   stops with `X: load module format 1.0; this ironwork reads 0.3. Compile the source again`, and
-  exit status is non-zero, **and** no program runs.
+  exit status 245, **and** no program runs.
 - **Given** a module with a higher `minor` and an unknown optional section **then** it runs, and the
   section is ignored. **Given** an unknown required section **then** it is refused, naming the
   section.
@@ -837,11 +838,11 @@ scenarios that wait for question 6 do not run yet.
   program on the VM with no copy library shows the screen the source's task shows.
 - **Given** a module's program 0 that abends, run with `--parm` **then** the output, PARM and abend
   line are those of the source run from its own directory.
-- **Given** a module with one byte of a section changed **when** it is run **then** it exits 2
+- **Given** a module with one byte of a section changed **when** it is run **then** it exits 245
   with the reader's message, **and** nothing runs.
-- **Given** a module **when** it is checked, run as a CICS task, or run with a compile flag or
-  `--coverage` **then** the command is refused with exit status 2, **and** given to `compile` it is
-  refused with 16.
+- **Given** a module **when** it is checked **then** the command is refused with exit status 2;
+  run as a CICS task, or run with a compile flag or `--coverage`, with 246 (usage), **and** given
+  to `compile` it is refused with 16.
 
 ### L6: SQL replay
 

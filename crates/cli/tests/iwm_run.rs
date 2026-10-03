@@ -272,7 +272,7 @@ fn a_program_that_is_nowhere_runs_on_exception_or_abends_s806_as_the_source_does
     let dir = temp("missing");
     missing(&dir);
     let source = ironwork(&dir, &["run", "MISS.cbl"]);
-    assert_eq!(ran(&source), ("ON EXCEPTION\nAGAIN\n".to_owned(), Some(16)));
+    assert_eq!(ran(&source), ("ON EXCEPTION\nAGAIN\n".to_owned(), Some(240)));
     compiled(&dir, &["MISS.cbl", "-o", "out"]);
     let module = ironwork(&dir, &["run", "out/MISS.iwm"]);
     assert_eq!(ran(&module), ran(&source));
@@ -287,7 +287,7 @@ fn a_module_holding_no_program_of_the_name_is_a_load_error_that_on_exception_doe
     compiled(&dir, &["MISS.cbl", "-o", "out"]);
     fs::copy(dir.join("out/MISS.iwm"), dir.join("out/NOSUCH.iwm")).unwrap();
     let module = ironwork(&dir, &["run", "out/MISS.iwm"]);
-    assert_eq!(ran(&module), (String::new(), Some(16)));
+    assert_eq!(ran(&module), (String::new(), Some(244)));
     assert_eq!(abends(&module), ["MISS.cbl:4:12: ABEND IRONWORK: CALL NOSUCH: out/NOSUCH.iwm: the module holds no program NOSUCH"]);
 }
 
@@ -310,21 +310,21 @@ fn a_damaged_module_is_refused_whether_called_or_run() {
     let sub = dir.join("out/SUB.iwm");
     fs::write(&sub, damaged(&sub, "LIR")).unwrap();
     let called = ironwork(&dir, &["run", "out/MAIN.iwm"]);
-    assert_eq!(ran(&called), (String::new(), Some(16)));
+    assert_eq!(ran(&called), (String::new(), Some(244)));
     let line = &abends(&called)[0];
     assert!(line.starts_with("MAIN.cbl:18:12: ABEND IRONWORK: CALL SUB: out/SUB.iwm: section LIR is corrupt (checksum "), "{line}");
 
     let main = dir.join("out/MAIN.iwm");
     fs::write(dir.join("out/BAD.iwm"), damaged(&main, "LAYOUT")).unwrap();
     let run = ironwork(&dir, &["run", "out/BAD.iwm"]);
-    assert_eq!(ran(&run), (String::new(), Some(2)));
+    assert_eq!(ran(&run), (String::new(), Some(245)));
     assert!(text(&run.stderr).starts_with("ironwork: out/BAD.iwm: section LAYOUT is corrupt (checksum "), "{}", text(&run.stderr));
 
     let mut old = fs::read(&main).unwrap();
     old[10] = 1;
     fs::write(dir.join("out/OLD.iwm"), old).unwrap();
     let run = ironwork(&dir, &["run", "out/OLD.iwm"]);
-    assert_eq!((ran(&run), text(&run.stderr)), ((String::new(), Some(2)), "ironwork: out/OLD.iwm: load module format 0.1; this ironwork reads 0.3. Compile the source again\n".to_owned()));
+    assert_eq!((ran(&run), text(&run.stderr)), ((String::new(), Some(245)), "ironwork: out/OLD.iwm: load module format 0.1; this ironwork reads 0.3. Compile the source again\n".to_owned()));
 }
 
 #[test]
@@ -439,9 +439,9 @@ fn a_module_runs_with_run_alone_and_without_the_flags_a_source_takes() {
     let dir = temp("usage");
     missing(&dir);
     compiled(&dir, &["MISS.cbl", "-o", "out"]);
-    for args in [&["check", "out/MISS.iwm"][..], &["cics", "out/MISS.iwm"], &["run", "out/MISS.iwm", "-silent"], &["run", "out/MISS.iwm", "--coverage", "c.json"]] {
+    for (args, usage) in [(&["check", "out/MISS.iwm"][..], 2), (&["cics", "out/MISS.iwm"], 246), (&["run", "out/MISS.iwm", "-silent"], 246), (&["run", "out/MISS.iwm", "--coverage", "c.json"], 246)] {
         let o = ironwork(&dir, args);
-        assert_eq!(o.status.code(), Some(2), "{args:?}: {}", text(&o.stderr));
+        assert_eq!(o.status.code(), Some(usage), "{args:?}: {}", text(&o.stderr));
         assert!(text(&o.stderr).contains("out/MISS.iwm is a load module"), "{args:?}: {}", text(&o.stderr));
     }
     let o = ironwork(&dir, &["compile", "out/MISS.iwm", "-o", "again"]);

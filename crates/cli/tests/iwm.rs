@@ -377,9 +377,10 @@ fn dump_shows_the_string_table_only_when_asked() {
 fn the_flags_of_compile_and_dump_are_theirs_alone() {
     let dir = temp("usage");
     payroll(&dir);
+    let o = ironwork(&dir, &["run", "PAYROLL.cbl", "-o", "out"], None);
+    assert_eq!(o.status.code(), Some(246), "run's usage: {}", text(&o.stderr));
     for args in [
-        &["run", "PAYROLL.cbl", "-o", "out"][..],
-        &["check", "PAYROLL.cbl", "--strings"],
+        &["check", "PAYROLL.cbl", "--strings"][..],
         &["compile"],
         &["compile", "PAYROLL.cbl", "--dd", "X=y"],
         &["compile", "PAYROLL.cbl", "--no-check"],

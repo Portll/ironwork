@@ -18,7 +18,11 @@ import argparse, os, re, shlex, shutil, subprocess, sys, tempfile
 
 CLOCK = "2026-01-02T03:04:05"
 PROGRAM = (".cbl", ".cob")
-IRONWORK_REFUSED, IRONWORK_ABEND = 12, 16
+# ironwork run's exit statuses besides a RETURN-CODE (README, Exit status): 244 is an abend whose
+# code is ironwork's own, IRONWORK, EXEC or JAVA.
+IRONWORK_REFUSED, IRONWORK_ABEND, IRONWORK_PANIC = (241, 242, 243, 245, 246), (240, 244), 255
+# The status a RETURN-CODE outside 0-238, or of 239, exits with; standard error gives its value.
+OUTSIDE = re.compile(r"^ironwork: RETURN-CODE (-?\d+) exits 239$", re.M)
 # A gcobol program that raises a fatal exception condition ends in abort(): SIGTRAP, which a
 # container reports as 128 + 5.
 SIGTRAP_STATUSES = (133, -5)
@@ -75,11 +79,14 @@ def ironwork(binary, path, libraries, stdin, timeout):
     status, out, err = run([binary, "run", path, "-silent", "--clock", CLOCK, *libraries], stdin, timeout)
     if status is None:
         return ("timeout", err, "")
-    if status == IRONWORK_REFUSED:
+    if status in IRONWORK_REFUSED:
         return ("refused", first_line(err), out)
-    if status == IRONWORK_ABEND:
+    if status in IRONWORK_ABEND:
         return ("abend", first_line(err), out)
-    return ("ran", status, out)
+    if status == IRONWORK_PANIC:
+        return ("crash", first_line(err, r"panicked at"), out)
+    said = OUTSIDE.search(err) if status == 239 else None
+    return ("ran", int(said.group(1)) if said else status, out)
 
 def gcobol(compiler, runner, path, libraries, stdin, timeout, scratch):
     source = os.path.join(scratch, os.path.basename(path))

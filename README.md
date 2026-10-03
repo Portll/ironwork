@@ -114,13 +114,8 @@ of the command text. The destination, copies and title are read and not acted on
 to the CALL's RETURNING item, or else RETURN-CODE. `compare` compares DD PRINTER as it does any DD,
 so a change that stops a program printing diverges.
 
-Exit status: RETURN-CODE when the run ends normally; for `check`, and for a run the compile refuses,
-the compile's return code (below); 16 an abend, whose message names the system completion code
-(S0C7 for a data exception, S0C4 for a LINKAGE item with no address, S806 for a program CALL cannot
-find, S0CB, S0C9 or S0CF for a zero divisor no ON SIZE ERROR takes, as the division is decimal,
-binary or floating-point, assumption C55), the user completion code (U0999 from CEE3ABD, U4038 for
-a Language Environment condition nothing handled) or the file status of an unhandled I/O failure; 2
-usage.
+Exit status: the program's RETURN-CODE up to 238, and 239 and above as [Exit status](#exit-status)
+says.
 
     cargo run -p ironwork -- fuzz src/PAYROLL.cbl -o fuzz-run [--runs 200] [--seed 1] [--timeout 10] [--root .] [-I copylib]... [-L proglib]...
 
@@ -179,10 +174,49 @@ ran. A program no library holds abends S806. A step's DISPLAY output and SYSOUT 
 output, and a line per step to standard error: the step, the program and RC=nnnn, ABEND and its
 code, BYPASSED and why, or JCL ERROR. IBM's other programs, PARM to a utility, and DFSORT's
 IFTHEN, field conversion and editing, and the statements and parameters not named here are refused
-by name before any step runs. Exit status: the highest
-return code; 16 when a step abended or a JCL error ended the job; 2 for a job refused.
+by name before any step runs. Exit status: the highest return code, or as the first step that
+ended without one, or a JCL error, says ([Exit status](#exit-status)).
 `--expected DATASETS=DIR` runs the job on a copy of the data sets and compares what it leaves with
 production's, as [docs/evidence.md](docs/evidence.md) §4 describes.
+
+## Exit status
+
+`check` and `compile` exit with the compile's return code (below), and 2 for usage. `run`, `cics`
+and `job` keep 239 and above for the ends ironwork gives a run, so a CI step can tell a program's
+RETURN-CODE from a run ironwork refused, stopped or could not finish:
+
+| Status | How the run ended |
+|---|---|
+| 0–238 | It ran to its end: the program's RETURN-CODE, a job's highest step return code, or 0 for a CICS task. |
+| 239 | It ran to its end with a RETURN-CODE outside 0–238, or of 239. Standard error gives the value (`ironwork: RETURN-CODE 1000 exits 239`), and an `--evidence` journal's `close` record holds it as `exit`. |
+| 240 | An abend, which the message names: the system completion code (S0C7 for a data exception, S0C4 for a LINKAGE item with no address, S806 for a program CALL cannot find, S0CB, S0C9 or S0CF for a zero divisor no ON SIZE ERROR takes, as the division is decimal, binary or floating-point, assumption C55), the user completion code (U0999 from CEE3ABD, U4038 for a Language Environment condition nothing handled), a CICS abend code, the file status of an unhandled I/O failure, or SQL and SQLR from the database or its recording. For a job, a step's abend or a JCL error that ended it. |
+| 241 | The compile gave no program to run: its return code, which standard error gives, reached the refusal level (below), a card's NOCOMPILE asked for a syntax check, or the source or module holds only user-defined functions. |
+| 242 | Code generation refused a construct, named with where it is (`--vm`). |
+| 243 | The VM stopped at a construct it does not run yet (`--vm`, or a module). |
+| 244 | The run reached a construct ironwork does not run: an abend with one of ironwork's own codes, IRONWORK (INVOKE in a CICS task among them), EXEC (EXEC DLI) or JAVA. For a job, also JCL ironwork refuses before any step runs. |
+| 245 | The source, JCL or load module cannot be read, or the reader refuses the module (damaged, or another format version). |
+| 246 | Usage, or a file, directory, address or database a flag names cannot be used. |
+| 255 | An internal error: ironwork panicked, or could not make a scratch directory. |
+
+A job exits as its first step that ended without a return code says: 240 for an abend, 241 for a
+program the compile refused, 244 for an IRONWORK, EXEC or JAVA abend, 245 for a source that cannot
+be read. Its COND and IF tests see each of these as the abend the job log names. `job --expected`
+exits with its equivalence verdict ([docs/evidence.md](docs/evidence.md) §4) and 2 for usage.
+
+With `--exit-code`, `run`, `cics` and `job` exit with a verdict instead, the convention cobolwork's
+`--exit-code` follows:
+
+| Status | Verdict |
+|---|---|
+| 0 | It ran to its end with RETURN-CODE 0. |
+| 1 | It ran to its end with another RETURN-CODE, which standard error and the journal give. |
+| 2 | Usage, or an input that cannot be read (246, 245). |
+| 3 | An abend (240). |
+| 4 | Refused: by the compile, by code generation, or a construct ironwork does not run (241, 242, 244). |
+| 5 | Stopped: the VM does not run a construct yet (243). |
+| 70 | An internal error (255). |
+
+An `--evidence` journal records the same `exit` whichever table the run exits by.
 
 ## Compiler messages
 
@@ -200,9 +234,9 @@ messages', 0 when there is none (Enterprise COBOL Programming Guide SC27-8714-03
 Every refusal ironwork makes is S (assumption C45). A class definition, or a program with INVOKE or
 object references, compiled without THREAD, DLL, RENT or DBCS, or with NORENT beside THREAD or DLL,
 is W (J19). `ironwork check` exits with the return code. `ironwork run` and `ironwork cics` print
-the messages, then run the program at 0, 4 or 8, and otherwise exit with the return code without
-running anything, as IBM's IGYWCLG procedure runs its GO step only up to 8 and the default
-NOCOMPILE(S) produces object code after E-level messages (C46).
+the messages, then run the program at 0, 4 or 8, and otherwise exit 241 without running anything,
+standard error giving the return code, as IBM's IGYWCLG procedure runs its GO step only up to 8
+and the default NOCOMPILE(S) produces object code after E-level messages (C46).
 
 A CBL or PROCESS card's COMPILE option moves the refusal: NOCOMPILE(W), NOCOMPILE(E) or
 NOCOMPILE(S) (abbreviated NOC) refuses from the first message of that severity, COMPILE (C) from S

@@ -14,9 +14,9 @@ fn c_series_belongs_to_assumptions() {
 
 #[test]
 fn other_commands_refuse_c_series() {
-    for command in ["run", "check", "cics"] {
+    for (command, usage) in [("run", 246), ("check", 2), ("cics", 246)] {
         let out = ironwork(&[command, "--c-series", "missing.cbl"]);
-        assert_eq!(out.status.code(), Some(2), "{command}");
+        assert_eq!(out.status.code(), Some(usage), "{command}");
         assert!(String::from_utf8_lossy(&out.stderr).contains("unknown flag --c-series"), "{command}");
     }
 }

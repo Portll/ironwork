@@ -6,7 +6,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
 
 use exec::digest::{hex, sha256_reader};
 use exec::evidence::{fields, Journal, Ledger, Value};
@@ -47,7 +46,7 @@ fn recorded_argv(command: &str, program: &str) -> Vec<String> {
     while let Some(a) = args.next() {
         if a.starts_with('-') {
             out.push(a.clone());
-            if args.peek().is_some_and(|v| !v.starts_with('-')) && !matches!(a.as_str(), "-silent" | "-strict-sort-keys") {
+            if args.peek().is_some_and(|v| !v.starts_with('-')) && !matches!(a.as_str(), "-silent" | "-strict-sort-keys" | "--exit-code") {
                 args.next();
                 out.push("<value>".into());
             }
@@ -263,9 +262,9 @@ impl Run {
     }
 }
 
-/// Closes the journal and returns the command's own status; a ledger that could not be written is
-/// said on standard error and does not change it.
-pub fn finish(journal: Option<Journal>, status: i64) -> ExitCode {
+/// Closes the journal with the command's status; a ledger that could not be written is said on
+/// standard error and does not change the command's exit status.
+pub fn finish(journal: Option<Journal>, status: i64) {
     if let Some(j) = journal {
         let id = j.id.clone();
         match j.close(Some(status)) {
@@ -274,5 +273,4 @@ pub fn finish(journal: Option<Journal>, status: i64) -> ExitCode {
             Err(e) => eprintln!("ironwork: --evidence: run {id} could not be closed: {e}"),
         }
     }
-    ExitCode::from(u8::try_from(status.clamp(0, 255)).unwrap_or(2))
 }

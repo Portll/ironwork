@@ -72,7 +72,7 @@ fn check_reports_a_functions_errors_and_a_source_of_functions_has_nothing_to_run
     assert!(stderr.contains("2:8: FUNCTION-ID DOUBLE: a user-defined function needs PROCEDURE DIVISION RETURNING"), "{stderr}");
     assert_eq!(checked.status.code(), Some(12));
     assert!(String::from_utf8_lossy(&run.stderr).contains("FUNCTION-ID DOUBLE: the source holds user-defined functions and no program to run"));
-    assert_eq!((run.status.code(), checked_alone.status.code()), (Some(16), Some(0)));
+    assert_eq!((run.status.code(), checked_alone.status.code()), (Some(241), Some(0)));
 }
 
 #[test]

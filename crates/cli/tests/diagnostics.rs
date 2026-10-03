@@ -40,6 +40,11 @@ fn stderr(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
+/// What run and cics add to the compile's messages when the compile gives no program to run.
+fn not_run(path: &str, return_code: u8) -> String {
+    format!("ironwork: {path}: the program does not run: the compile's return code is {return_code}\n")
+}
+
 #[test]
 fn check_exits_0_with_nothing_to_say() {
     let source = Source::new("clean", "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       PROCEDURE DIVISION.\n           GOBACK.\n");
@@ -65,9 +70,10 @@ fn an_object_oriented_program_without_thread_and_dll_checks_with_return_code_4_a
 fn warnings_block_refuses_the_run_and_keeps_return_code_4() {
     let source = Source::new("blocked", &object_oriented("", ""));
     let warning = format!("{}: {MISSING}\n", source.path());
-    for command in ["check", "run", "cics"] {
+    let refused = warning.clone() + &not_run(source.path(), 4);
+    for (command, status, said) in [("check", 4, &warning), ("run", 241, &refused), ("cics", 241, &refused)] {
         let out = ironwork(&[command, source.path(), "-warnings-block"]);
-        assert_eq!((out.status.code(), stderr(&out), out.stdout.is_empty()), (Some(4), warning.clone(), true), "{command}");
+        assert_eq!((out.status.code(), stderr(&out), out.stdout.is_empty()), (Some(status), said.clone(), true), "{command}");
     }
 }
 
@@ -75,9 +81,9 @@ fn warnings_block_refuses_the_run_and_keeps_return_code_4() {
 fn an_error_keeps_its_line_and_return_code_12_and_is_listed_before_warnings() {
     let refused = Source::new("undefined", "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  X PIC X.\n       PROCEDURE DIVISION.\n           MOVE Y TO X.\n           GOBACK.\n");
     let error = format!("{}:7:17: Y is not defined\n", refused.path());
-    for command in ["check", "run"] {
+    for (command, status, said) in [("check", 12, error.clone()), ("run", 241, error.clone() + &not_run(refused.path(), 12))] {
         let out = ironwork(&[command, refused.path()]);
-        assert_eq!((out.status.code(), stderr(&out), out.stdout.is_empty()), (Some(12), error.clone(), true), "{command}");
+        assert_eq!((out.status.code(), stderr(&out), out.stdout.is_empty()), (Some(status), said, true), "{command}");
     }
     let mixed = Source::new("mixed", &object_oriented("       01  X PIC X.\n", "           MOVE Y TO X\n"));
     let out = ironwork(&["check", mixed.path()]);
@@ -101,9 +107,10 @@ fn carded(card: &str) -> String {
 fn a_nocompile_card_says_where_run_refuses_and_outranks_warnings_block() {
     let blocked = Source::new("nocompile-w", &carded("NOCOMPILE(W)"));
     let warning = format!("{}: {MISSING}\n", blocked.path());
-    for command in ["check", "run", "cics"] {
+    let refused = warning.clone() + &not_run(blocked.path(), 4);
+    for (command, status, said) in [("check", 4, &warning), ("run", 241, &refused), ("cics", 241, &refused)] {
         let out = ironwork(&[command, blocked.path()]);
-        assert_eq!((out.status.code(), stderr(&out), out.stdout.is_empty()), (Some(4), warning.clone(), true), "{command}");
+        assert_eq!((out.status.code(), stderr(&out), out.stdout.is_empty()), (Some(status), said.clone(), true), "{command}");
     }
     for (k, card) in ["NOC(E)", "NOCOMPILE(S)", "COMPILE"].into_iter().enumerate() {
         let source = Source::new(&format!("card-{k}"), &carded(card));
@@ -122,7 +129,7 @@ fn nocompile_alone_checks_the_program_and_runs_nothing() {
     assert_eq!((checked.status.code(), stderr(&checked)), (Some(0), String::new()));
     let ran = ironwork(&["run", source.path()]);
     let note = format!("ironwork: {}: NOCOMPILE is a syntax check, with no program to run\n", source.path());
-    assert_eq!((ran.status.code(), stderr(&ran), ran.stdout.is_empty()), (Some(0), note, true));
+    assert_eq!((ran.status.code(), stderr(&ran), ran.stdout.is_empty()), (Some(241), note, true));
 }
 
 fn ending_with(id: &str, last: &str) -> String {

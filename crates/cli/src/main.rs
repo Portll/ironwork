@@ -1,5 +1,6 @@
 use exec::Execute;
 use exec::abend::{AbendCode, Signal};
+use exit::Outcome;
 use std::process::ExitCode;
 use std::{env, fs, io};
 
@@ -7,11 +8,12 @@ const USAGE: &str = "ironwork for COBOL
 usage:
   ironwork run <program.cbl> [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include]
                [-debug] [--cics-return-warning=once|always|never] [--optimize=0|1|2] [-I <dir>]... [-L <dir>]... [--vm]
-               [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
+               [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT] [--exit-code]
                [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                                                        compile and run; CBL and PROCESS cards set the options
   ironwork run <module.iwm> [-L <dir>]... [-I <dir>]... [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
                [--statement-limit N] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
+               [--exit-code]
                                                        run a load module's first program on the VM, with the options
                                                        it was compiled with
   ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]...
@@ -27,6 +29,7 @@ usage:
   ironwork dump [--section NAME]... [--strings] [--no-check] <module.iwm>
                                                        print a load module, one fact per line
   ironwork job <job.jcl> --datasets DIR[:text] [--proclib DIR]... [--user ID] [run flags] [-I <dir>]... [-L <dir>]... [--clock <time>] [--sql-replay path]
+               [--exit-code]
                                                        run a job's steps in order
   ironwork fuzz [--job] <program.cbl|job.jcl> -o <dir> [--runs N] [--seed N] [--timeout SECONDS] [--hang-limit N]
                [--root DIR] [--clock <time>]
@@ -66,11 +69,14 @@ flags:
              Under NOINVDATA, 1 and 2 compare an unsigned zoned item with zero, or with one of its
              own length, by its bytes, as IBM's optimizer may (assumption C262)
   --vm       run and cics: lower the program and run it on the VM rather than the interpreter. A
-             program lowering refuses gets the compile's 12; a run that reaches what the VM does not
-             run yet (a CALLed program, user-defined function, method or LINK that does not lower,
-             FUNCTION UUID4, FUNCTION RANDOM in a subscript, SEND MAP with no FROM, RECEIVE MAP with
-             no INTO or SET) stops there with a message naming it and exit status 12. Not with
-             --evidence or --serve
+             program lowering refuses exits 242; a run that reaches what the VM does not run yet (a
+             CALLed program, user-defined function, method or LINK that does not lower, FUNCTION
+             UUID4, FUNCTION RANDOM in a subscript, SEND MAP with no FROM, RECEIVE MAP with no INTO
+             or SET) stops there with a message naming it and exits 243. Not with --evidence or
+             --serve
+  --exit-code
+             run, cics and job: exit with a verdict, 0 to 5 or 70, in place of the reserved band, as
+             cobolwork's --exit-code does (exit status, below)
   -I <dir>   a copy library for COPY members, searched after the program's own directory
   -L <dir>   a program library: CALL finds a program there by name, after the programs in the
              same source or module and the program's own directory. On the VM (--vm, or a module
@@ -240,7 +246,7 @@ job flags:
              (-1) and (+1) count from the generations the job began with, DSN=BASE reads them all,
              newest first, and generations past LIMIT roll off, all but the newest under EMPTY.
              DSN=*.stepname.ddname and *.stepname.procstepname.ddname name an earlier DD's data set. Exit status: the highest return
-             code, 16 when a step abended or a JCL error ended the job, 2 for a job refused
+             code, or as the first step that ended without one, or a JCL error, says (exit status, below)
   --expected DATASETS=DIR
              migration equivalence: the job runs on a copy of --datasets with a fixed clock
              (--clock, or 2026-01-01), and each file in DIR, laid out as --datasets is, is compared
@@ -324,13 +330,39 @@ compare flags: ironwork compare --base OLD.cbl --head NEW.cbl [--dd NAME=path]..
   exit status 0 equivalent or equivalent as declared, 1 diverged, 3 inconclusive, 2 usage
 compile messages go to standard error, errors first, then warnings, then informational messages:
   `path:line:col: message`, `path:line:col: warning: message`, `path:line:col: informational: message`
-exit status: for check and compile, and for a run the compile refuses, the compile's return code, the highest
-  of its messages' severities as IBM's: 0 none or informational, 4 warnings, 8, 12 or 16 errors; run
-  and cics refuse from 12 under IBM's default NOCOMPILE(S), from 4 under -warnings-block, or as a
-  card's COMPILE or NOCOMPILE says; compile gives 12 for a program lowering refuses, naming the
-  construct and where it is, and 16 for a source it cannot read or a module it cannot write. run
-  gives 2 for a module the reader refuses (damaged, or another format version), which does not run.
-  Otherwise RETURN-CODE when the run ends normally, 16 an abend; a RETURN-CODE outside 0-255 exits 255; 2 usage";
+exit status: for check and compile, the compile's return code, the highest of its messages' severities as
+  IBM's: 0 none or informational, 4 warnings, 8, 12 or 16 errors; compile gives 12 for a program
+  lowering refuses, naming the construct and where it is, and 16 for a source it cannot read or a
+  module it cannot write; 2 usage. run and cics refuse a program from 12 under IBM's default
+  NOCOMPILE(S), from 4 under -warnings-block, or as a card's COMPILE or NOCOMPILE says. run, cics
+  and job keep 239 and above for the ends ironwork gives a run:
+  0-238  the run ended: the program's RETURN-CODE, a job's highest step return code, 0 for a task
+  239    the run ended with a RETURN-CODE outside 0-238, or of 239; standard error gives it
+         (ironwork: RETURN-CODE n exits 239) and --evidence's journal records it
+  240    an abend, which the message names: a system or user completion code, a CICS abend code,
+         an I/O status nothing handled, or SQL or SQLR; for a job, a step's abend or a JCL error
+  241    the compile gave no program to run: its return code, which standard error gives, reached
+         the refusal level, NOCOMPILE asked for a syntax check, or the source or module holds only
+         user-defined functions
+  242    code generation refused a construct, named with where it is (--vm)
+  243    the VM stopped at a construct it does not run yet (--vm, a module)
+  244    the run reached a construct ironwork does not run, an IRONWORK, EXEC or JAVA abend
+         (INVOKE in a CICS task among them), or the job holds JCL ironwork refuses before any step
+  245    the source, JCL or load module cannot be read, or the reader refuses the module (damaged,
+         or another format version)
+  246    usage, or a file, directory, address or database a flag names cannot be used
+  255    an internal error: ironwork panicked, or could not make a scratch directory
+  A job exits as its first step that ended without a return code says. With --exit-code:
+  0      the run ended with RETURN-CODE 0
+  1      the run ended with another RETURN-CODE, which standard error and the journal give
+  2      usage, or an input that cannot be read (246, 245)
+  3      an abend (240)
+  4      refused: by the compile, by code generation, or a construct ironwork does not run (241,
+         242, 244)
+  5      stopped: the VM does not run a construct yet (243)
+  70     an internal error (255)
+  compare and job --expected exit 0 equivalent, 1 diverged, 3 inconclusive; every other command
+  2 for usage";
 
 const FLAGS: &[&str] = &["-silent", "-strict-sort-keys", "-warnings-block", "-debug"];
 const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid", "--sysid", "--commarea", "--commarea-out", "--file", "--td", "--screens", "--serve", "--transaction", "--csd"];
@@ -342,6 +374,7 @@ mod ddl;
 mod dfsort;
 mod dump;
 mod evidence;
+mod exit;
 mod fuzz;
 mod fuzz_cics;
 mod job;
@@ -349,7 +382,7 @@ mod provenance;
 
 fn usage_error(message: &str) -> ExitCode {
     eprintln!("ironwork: {message}\n{USAGE}");
-    ExitCode::from(2)
+    exit::status(Outcome::Usage)
 }
 
 fn list_assumptions(c_series: bool) -> ExitCode {
@@ -378,7 +411,10 @@ fn list_assumptions(c_series: bool) -> ExitCode {
 /// The interpreter recurses as COBOL PERFORMs and CALLs nest, so it runs on a thread whose stack
 /// holds the deepest nesting the run unit allows.
 fn main() -> ExitCode {
-    std::thread::Builder::new().stack_size(64 << 20).spawn(driver).map_or(ExitCode::from(2), |t| t.join().unwrap_or(ExitCode::from(16)))
+    match std::thread::Builder::new().stack_size(64 << 20).spawn(driver).map(|t| t.join()) {
+        Ok(Ok(code)) => code,
+        _ => exit::status(Outcome::Internal),
+    }
 }
 
 fn driver() -> ExitCode {
@@ -412,35 +448,44 @@ fn driver() -> ExitCode {
     let (mut fuzz_job, mut fuzz_cics) = (false, false);
     let mut step_parms: Vec<(String, String)> = Vec::new();
     let mut instream: Vec<(String, std::path::PathBuf)> = Vec::new();
+    let mut exit_code = false;
+    // A usage error waits for the command, whose convention its exit status follows.
+    let mut usage: Option<String> = None;
+    macro_rules! refuse {
+        ($message:expr) => {{
+            usage.get_or_insert_with(|| $message.to_string());
+            continue;
+        }};
+    }
     while let Some(a) = args.next() {
         match a.as_str() {
             "--step-parm" => match args.next().and_then(|v| v.split_once('=').map(|(s, t)| (s.to_ascii_uppercase(), t.to_string()))).filter(|(_, t)| t.chars().count() <= rt::le::parm::PARM_LIMIT) {
                 Some(pair) => step_parms.push(pair),
-                None => return usage_error(&format!("--step-parm needs STEP=TEXT, the text at most {} characters", rt::le::parm::PARM_LIMIT)),
+                None => refuse!(format!("--step-parm needs STEP=TEXT, the text at most {} characters", rt::le::parm::PARM_LIMIT)),
             },
             "--instream" => match args.next().and_then(|v| v.split_once('=').map(|(k, p)| (k.to_ascii_uppercase(), std::path::PathBuf::from(p)))) {
                 Some(pair) => instream.push(pair),
-                None => return usage_error("--instream needs STEP.DD=path"),
+                None => refuse!("--instream needs STEP.DD=path"),
             },
             "--statement-limit" => match args.next().and_then(|n| n.parse().ok()).filter(|&n: &u64| n > 0) {
                 Some(n) => statement_limit = Some(n),
-                None => return usage_error("--statement-limit needs a number of statements"),
+                None => refuse!("--statement-limit needs a number of statements"),
             },
             "--hang-limit" => match args.next().and_then(|n| n.parse().ok()).filter(|&n: &u64| n > 0) {
                 Some(n) => hang_limit = Some(n),
-                None => return usage_error("--hang-limit needs a number of statements"),
+                None => refuse!("--hang-limit needs a number of statements"),
             },
             "--job" => fuzz_job = true,
             "--cics" => fuzz_cics = true,
             "--parm" => match args.next().filter(|p| p.chars().count() <= rt::le::parm::PARM_LIMIT) {
                 Some(p) => parm = Some(p),
-                None => return usage_error(&format!("--parm needs the text of a PARM, at most {} characters", rt::le::parm::PARM_LIMIT)),
+                None => refuse!(format!("--parm needs the text of a PARM, at most {} characters", rt::le::parm::PARM_LIMIT)),
             },
-            "-h" | "--help" => {
+            "-h" | "--help" if usage.is_none() => {
                 println!("{USAGE}");
                 return ExitCode::SUCCESS;
             }
-            "-V" | "--version" => {
+            "-V" | "--version" if usage.is_none() => {
                 println!("ironwork for COBOL {}", env!("CARGO_PKG_VERSION"));
                 return ExitCode::SUCCESS;
             }
@@ -454,140 +499,154 @@ fn driver() -> ExitCode {
                         _ => statement = v,
                     }
                 }
-                None => return usage_error(&format!("{a} needs a path")),
+                None => refuse!(format!("{a} needs a path")),
             },
             "--expected" => match args.next().and_then(|v| v.split_once('=').map(|(n, p)| (n.to_string(), std::path::PathBuf::from(p)))) {
                 Some(pair) => expected.push(pair),
-                None => return usage_error("--expected needs NAME=path"),
+                None => refuse!("--expected needs NAME=path"),
             },
             "--coverage" => match args.next() {
                 Some(file) => coverage_file = Some(std::path::PathBuf::from(file)),
-                None => return usage_error("--coverage needs a file"),
+                None => refuse!("--coverage needs a file"),
             },
             "--provenance" => match args.next() {
                 Some(file) => provenance_file = Some(std::path::PathBuf::from(file)),
-                None => return usage_error("--provenance needs a file"),
+                None => refuse!("--provenance needs a file"),
             },
             "--evidence" => match args.next() {
                 Some(dir) => evidence_dir = Some(std::path::PathBuf::from(dir)),
-                None => return usage_error("--evidence needs a directory"),
+                None => refuse!("--evidence needs a directory"),
             },
             "--trace-marker" => match args.next().filter(|m| !m.is_empty()) {
                 Some(m) => trace_marker = Some(m),
-                None => return usage_error("--trace-marker needs the text entered at the input"),
+                None => refuse!("--trace-marker needs the text entered at the input"),
             },
             "--trace-input" => trace_input = true,
             "--trace-statements" => match args.next() {
                 Some(file) => trace_statements = Some(std::path::PathBuf::from(file)),
-                None => return usage_error("--trace-statements needs a file of FILE:LINE statements"),
+                None => refuse!("--trace-statements needs a file of FILE:LINE statements"),
             },
             "--datasets" => match args.next() {
                 Some(dir) => datasets = Some(dir),
-                None => return usage_error("--datasets needs a directory"),
+                None => refuse!("--datasets needs a directory"),
             },
             "--proclib" => match args.next() {
                 Some(dir) => proclibs.push(std::path::PathBuf::from(dir)),
-                None => return usage_error("--proclib needs a directory"),
+                None => refuse!("--proclib needs a directory"),
             },
             "--user" => match args.next().filter(|u| jcl::is_name(u)) {
                 Some(id) => user = Some(id),
-                None => return usage_error("--user needs a user ID of one to eight upper-case letters, digits, #, $ or @"),
+                None => refuse!("--user needs a user ID of one to eight upper-case letters, digits, #, $ or @"),
             },
             "--dd" => match args.next() {
                 Some(spec) => dds.push(spec),
-                None => return usage_error("--dd needs NAME=path"),
+                None => refuse!("--dd needs NAME=path"),
             },
             "-L" => match args.next() {
                 Some(dir) => program_dirs.push(std::path::PathBuf::from(dir)),
-                None => return usage_error("-L needs a directory"),
+                None => refuse!("-L needs a directory"),
             },
             "--clock" => match args.next().map(|t| (parse_clock(&t), t)) {
                 Some((Some(c), t)) => {
                     clock = c;
                     clock_text = Some(t);
                 }
-                _ => return usage_error("--clock needs YYYY-MM-DDTHH:MM:SS[.hh]"),
+                _ => refuse!("--clock needs YYYY-MM-DDTHH:MM:SS[.hh]"),
             },
             "--root" => match args.next() {
                 Some(dir) => fuzz_root = Some(std::path::PathBuf::from(dir)),
-                None => return usage_error("--root needs a directory"),
+                None => refuse!("--root needs a directory"),
             },
             "--runs" => match args.next().and_then(|n| n.parse().ok()) {
                 Some(n) => fuzz_runs = Some(n),
-                None => return usage_error("--runs needs a number"),
+                None => refuse!("--runs needs a number"),
             },
             // The manifest records the seed as a JSON integer, so it stays within i64.
             "--seed" => match args.next().and_then(|n| n.parse().ok()).filter(|&n: &u64| i64::try_from(n).is_ok()) {
                 Some(n) => fuzz_seed = Some(n),
-                None => return usage_error("--seed needs a number from 0 to 9223372036854775807"),
+                None => refuse!("--seed needs a number from 0 to 9223372036854775807"),
             },
             "--timeout" => match args.next().and_then(|n| n.parse().ok()).filter(|&n: &u64| n > 0) {
                 Some(n) => fuzz_timeout = Some(n),
-                None => return usage_error("--timeout needs a number of seconds"),
+                None => refuse!("--timeout needs a number of seconds"),
             },
             "--sql-replay" => match args.next() {
                 Some(file) => replay = Some(file),
-                None => return usage_error("--sql-replay needs a recording"),
+                None => refuse!("--sql-replay needs a recording"),
             },
             "--sql-db" => match args.next() {
                 Some(url) => sql_db = Some(url),
-                None => return usage_error("--sql-db needs a postgres:// URL"),
+                None => refuse!("--sql-db needs a postgres:// URL"),
             },
             "--sql-record" => match args.next() {
                 Some(file) => sql_record = Some(file),
-                None => return usage_error("--sql-record needs a path"),
+                None => refuse!("--sql-record needs a path"),
             },
             "--sql-replay-mode" => match args.next().as_deref() {
                 Some("strict") => keyed = false,
                 Some("keyed") => keyed = true,
-                _ => return usage_error("--sql-replay-mode needs strict or keyed"),
+                _ => refuse!("--sql-replay-mode needs strict or keyed"),
             },
             "--serve-public" => cics_options.push((a.clone(), String::new())),
             o if CICS_OPTIONS.contains(&o) => match args.next() {
                 Some(value) => cics_options.push((a.clone(), value)),
-                None => return usage_error(&format!("{o} needs a value")),
+                None => refuse!(format!("{o} needs a value")),
             },
             "-o" => match args.next() {
                 Some(dir) => out_dir = Some(std::path::PathBuf::from(dir)),
-                None => return usage_error("-o needs a directory"),
+                None => refuse!("-o needs a directory"),
             },
             "--bundle" => match args.next() {
                 Some(name) => bundle = Some(name),
-                None => return usage_error("--bundle needs a module name"),
+                None => refuse!("--bundle needs a module name"),
             },
             "--source-prefix" => match args.next() {
                 Some(prefix) => source_prefix = Some(prefix),
-                None => return usage_error("--source-prefix needs a directory"),
+                None => refuse!("--source-prefix needs a directory"),
             },
             "--section" => match args.next().as_deref().map(|n| (n.to_owned(), dump::section_named(n))) {
                 Some((_, Some(section))) => dump_options.only.push(section),
-                Some((name, None)) => return usage_error(&format!("--section {name}: no such section")),
-                None => return usage_error("--section needs a section name"),
+                Some((name, None)) => refuse!(format!("--section {name}: no such section")),
+                None => refuse!("--section needs a section name"),
             },
             "--strings" => dump_options.strings = true,
             "--no-check" => dump_options.check = false,
             "--c-series" => c_series = true,
+            "--exit-code" => exit_code = true,
             "--vm" => vm = true,
             "-I" => match args.next() {
                 Some(dir) => libraries.push(std::path::PathBuf::from(dir)),
-                None => return usage_error("-I needs a directory"),
+                None => refuse!("-I needs a directory"),
             },
             f if f.starts_with("--fastsrt-adv-print") => match f {
                 "--fastsrt-adv-print=exclude" | "--fastsrt-adv-print=include" => flags.push(a),
-                _ => return usage_error("--fastsrt-adv-print needs =exclude or =include"),
+                _ => refuse!("--fastsrt-adv-print needs =exclude or =include"),
             },
             f if f.starts_with("--optimize") => match f {
                 "--optimize=0" | "--optimize=1" | "--optimize=2" => flags.push(a),
-                _ => return usage_error("--optimize needs =0, =1 or =2"),
+                _ => refuse!("--optimize needs =0, =1 or =2"),
             },
             f if f.starts_with("--cics-return-warning") => match f {
                 "--cics-return-warning=once" | "--cics-return-warning=always" | "--cics-return-warning=never" => flags.push(a),
-                _ => return usage_error("--cics-return-warning needs =once, =always or =never"),
+                _ => refuse!("--cics-return-warning needs =once, =always or =never"),
             },
-            f if f.starts_with('-') && f.len() > 1 && !FLAGS.contains(&f) => return usage_error(&format!("unknown flag {f}")),
+            f if f.starts_with('-') && f.len() > 1 && !FLAGS.contains(&f) => refuse!(format!("unknown flag {f}")),
             f if f.starts_with('-') && f.len() > 1 => flags.push(a),
             _ => rest.push(a),
         }
+    }
+    let command = rest.first().map(String::as_str);
+    let banded = matches!(command, Some("run" | "cics")) || command == Some("job") && expected.is_empty();
+    exit::follow(match (banded, exit_code) {
+        (true, false) => exit::Convention::Band,
+        (true, true) => exit::Convention::Verdict,
+        (false, _) => exit::Convention::Own,
+    });
+    if let Some(message) = usage {
+        return usage_error(&message);
+    }
+    if exit_code && !banded {
+        return usage_error("--exit-code is for run, cics and job, and not with --expected");
     }
     if rest == ["assumptions"] {
         return list_assumptions(c_series);
@@ -701,7 +760,7 @@ fn driver() -> ExitCode {
         Ok(listed) => listed,
         Err(e) => {
             eprintln!("ironwork: --trace-statements {}: {e}", trace_statements.unwrap_or_default().display());
-            return ExitCode::from(2);
+            return exit::status(Outcome::Usage);
         }
     };
     if let [c, file] = rest.as_slice()
@@ -767,7 +826,7 @@ fn driver() -> ExitCode {
         Ok(bytes) => bytes,
         Err(e) => {
             eprintln!("ironwork: {path}: {e}");
-            return ExitCode::from(2);
+            return exit::status(Outcome::Unreadable);
         }
     };
     let own_directory = std::path::Path::new(path).parent().map(|p| p.to_path_buf()).unwrap_or_default();
@@ -813,7 +872,7 @@ fn driver() -> ExitCode {
             Ok(j) => Some(j),
             Err(e) => {
                 eprintln!("ironwork: --evidence {}: {e}", dir.display());
-                return ExitCode::from(2);
+                return exit::status(Outcome::Usage);
             }
         },
         None => None,
@@ -821,7 +880,7 @@ fn driver() -> ExitCode {
     let libraries = syntax::copy::Libraries::new(std::iter::once(own_directory.clone()).chain(libraries).collect()).with_program(std::path::Path::new(path));
     let mut programs = match syntax::parse_all_with(&text, &libraries) {
         Ok(p) => p,
-        Err(e) => return evidence::finish(journal, i64::from(report(std::slice::from_ref(&e), path))),
+        Err(e) => return no_program(journal, command, path, report(std::slice::from_ref(&e), path)),
     };
     let outlines: Vec<coverage::Outline> = programs.iter().map(coverage::Outline::of).collect();
     if let Some(j) = journal.as_mut() {
@@ -849,17 +908,11 @@ fn driver() -> ExitCode {
     };
     let compiled = match exec::compile(first, &flags) {
         Ok(c) => c,
-        Err(messages) => {
-            let return_code = report(&messages, path).max(functions_code);
-            if command != "check" && return_code == 0 {
-                eprintln!("ironwork: {path}: NOCOMPILE is a syntax check, with no program to run");
-            }
-            return evidence::finish(journal, i64::from(return_code));
-        }
+        Err(messages) => return no_program(journal, command, path, report(&messages, path).max(functions_code)),
     };
     let return_code = report(&compiled.diagnostics, path).max(functions_code);
     if functions_refused && command != "check" {
-        return evidence::finish(journal, i64::from(return_code));
+        return no_program(journal, command, path, return_code);
     }
     if let Some(file) = &provenance_file {
         let text = provenance::statement(&provenance::Inputs {
@@ -873,25 +926,30 @@ fn driver() -> ExitCode {
         });
         if let Err(e) = fs::write(file, &text) {
             eprintln!("ironwork: --provenance {}: {e}", file.display());
-            return evidence::finish(journal, 2);
+            if command == "check" {
+                evidence::finish(journal, 2);
+                return ExitCode::from(2);
+            }
+            return finished(journal, Outcome::Usage);
         }
         if let Some(j) = journal.as_mut() {
             evidence::output(j, "provenance", text.as_bytes(), file, &reads);
         }
     }
     if command == "check" {
-        return evidence::finish(journal, i64::from(return_code));
+        evidence::finish(journal, i64::from(return_code));
+        return ExitCode::from(return_code);
     }
     if compiled.program.function.is_some() {
         eprintln!("ironwork: {path}: FUNCTION-ID {}: the source holds user-defined functions and no program to run", compiled.program.id);
-        return evidence::finish(journal, 16);
+        return finished(journal, Outcome::Refused);
     }
     let code = match (vm && command == "run").then(|| exec::vm::lowered(&compiled)) {
         None => None,
         Some(Ok(code)) => Some(code),
         Some(Err(e)) => {
             eprintln!("{}", syntax::Error::from(e).place(path));
-            return evidence::finish(journal, 12);
+            return finished(journal, Outcome::NotGenerated);
         }
     };
     let dds = match exec::files::Dds::new(&dds, true) {
@@ -926,21 +984,18 @@ fn driver() -> ExitCode {
         }) as exec::unit::Observer<'_>
     });
     let ended = match (&code, &parm) {
-        (None, Some(p)) => compiled.execute_main(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, p),
-        (None, None) => compiled.execute_observed(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer),
-        (Some(code), parm) => match exec::vm::execute(&compiled, code, library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, parm.as_deref(), &mut None) {
-            Ok(done) => Ok(done),
-            Err(exec::vm::Halt::Abend(abend)) => Err(abend),
-            Err(exec::vm::Halt::Unimplemented(what)) => {
-                eprintln!("ironwork: {path}: the VM does not run {what} yet; run it without --vm");
-                Ok((exec::Ending::EndOfProgram, 12))
-            }
-        },
+        (None, Some(p)) => compiled.execute_main(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, p).map_err(exec::vm::Halt::Abend),
+        (None, None) => compiled.execute_observed(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer).map_err(exec::vm::Halt::Abend),
+        (Some(code), parm) => exec::vm::execute(&compiled, code, library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, parm.as_deref(), &mut None),
     };
-    let (status, abend) = match &ended {
-        Ok((_, return_code)) => (i64::from(*return_code), None),
-        Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => (0, None),
-        Err(abend) => (16, Some(abend)),
+    let (outcome, abend) = match &ended {
+        Ok((_, return_code)) => (Outcome::Ended(i64::from(*return_code)), None),
+        Err(exec::vm::Halt::Abend(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. })) => (Outcome::Ended(0), None),
+        Err(exec::vm::Halt::Abend(abend)) => (Outcome::of_abend(&abend.code), Some(abend)),
+        Err(exec::vm::Halt::Unimplemented(what)) => {
+            eprintln!("ironwork: {path}: the VM does not run {what} yet; run it without --vm");
+            (Outcome::Stopped, None)
+        }
     };
     if let (Some(file), Some(c)) = (&coverage_file, &covered) {
         let text = format!("{}\n", exec::evidence::canonical(&c.borrow().report(&outlines)));
@@ -952,21 +1007,34 @@ fn driver() -> ExitCode {
         let run = std::rc::Rc::try_unwrap(run).map(std::cell::RefCell::into_inner);
         if let Ok(run) = run {
             let file = abend.and_then(|a| abend_file(&compiled, a));
-            evidence::finish(Some(run.end(abend.map(|a| (a.code.to_string(), file, i64::from(a.pos.line))))), status);
+            evidence::finish(Some(run.end(abend.map(|a| (a.code.to_string(), file, i64::from(a.pos.line))))), exit::recorded(outcome));
         }
     }
-    match ended {
-        Ok((_, return_code)) => {
-            let exit_code = if (0..=255).contains(&return_code) {
-                return_code as u8
-            } else {
-                255
-            };
-            ExitCode::from(exit_code)
-        }
-        Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => ExitCode::SUCCESS,
-        Err(abend) => report_abend(&compiled, path, &abend),
+    match abend {
+        Some(abend) => report_abend(&compiled, path, abend),
+        None => exit::status(outcome),
     }
+}
+
+/// Closes the journal on how the run ended and gives the exit status.
+fn finished(journal: Option<exec::evidence::Journal>, outcome: Outcome) -> ExitCode {
+    evidence::finish(journal, exit::recorded(outcome));
+    exit::status(outcome)
+}
+
+/// The end of a check, or of a run or task the compile gives no program to run: check exits with
+/// the compile's return code, and run and cics say it and exit as a refusal.
+fn no_program(journal: Option<exec::evidence::Journal>, command: &str, path: &str, return_code: u8) -> ExitCode {
+    if command == "check" {
+        evidence::finish(journal, i64::from(return_code));
+        return ExitCode::from(return_code);
+    }
+    if return_code == 0 {
+        eprintln!("ironwork: {path}: NOCOMPILE is a syntax check, with no program to run");
+    } else {
+        eprintln!("ironwork: {path}: the program does not run: the compile's return code is {return_code}");
+    }
+    finished(journal, Outcome::Refused)
 }
 
 /// The database EXEC SQL reaches: a recording, PostgreSQL, or none; Err with the exit status after
@@ -979,14 +1047,14 @@ fn open_database(replay: Option<String>, sql_db: Option<String>, sql_record: Opt
             Ok(r) => Ok(Some(Box::new(r))),
             Err(e) => {
                 eprintln!("ironwork: --sql-replay {file}: {e}");
-                Err(ExitCode::from(2))
+                Err(exit::status(Outcome::Usage))
             }
         },
         (None, Some(url), record) => match live_database(&url, record.as_deref()) {
             Ok(db) => Ok(Some(db)),
             Err(e) => {
                 eprintln!("ironwork: {e}");
-                Err(ExitCode::from(2))
+                Err(exit::status(Outcome::Usage))
             }
         },
         (None, None, None) => Ok(None),
@@ -1000,7 +1068,7 @@ fn open_sysin(dds: &exec::files::Dds) -> Result<Box<dyn io::BufRead>, ExitCode> 
             Ok(f) => Ok(Box::new(io::BufReader::new(f))),
             Err(e) => {
                 eprintln!("ironwork: DD SYSIN {}: {e}", dd.path.display());
-                Err(ExitCode::from(2))
+                Err(exit::status(Outcome::Usage))
             }
         },
         None => Ok(Box::new(io::stdin().lock())),
@@ -1009,7 +1077,7 @@ fn open_sysin(dds: &exec::files::Dds) -> Result<Box<dyn io::BufRead>, ExitCode> 
 
 /// `ironwork run x.iwm`: program 0 of the module on the VM, CALL finding the module's other
 /// programs first. A module the reader refuses, or whose program 0 does not pass the checks a
-/// program from a module must, exits 2 without running.
+/// program from a module must, does not run.
 #[allow(clippy::too_many_arguments)]
 fn run_module(
     path: &str,
@@ -1025,38 +1093,38 @@ fn run_module(
         Ok(m) => m,
         Err(e) => {
             eprintln!("ironwork: {path}: {e}");
-            return ExitCode::from(2);
+            return exit::status(Outcome::Unreadable);
         }
     };
     let Some(main) = module.programs.first() else {
         eprintln!("ironwork: {path}: the module holds no program");
-        return ExitCode::from(2);
+        return exit::status(Outcome::Unreadable);
     };
     let symbol = |id: u32| main.symbols.get(id as usize).cloned().unwrap_or_default();
     if let Err(e) = exec::lower::verify(main) {
         eprintln!("ironwork: {path}: program {}: {e}", symbol(main.id));
-        return ExitCode::from(2);
+        return exit::status(Outcome::Unreadable);
     }
     if main.services.function.is_some() {
         eprintln!("ironwork: {path}: FUNCTION-ID {}: the module holds user-defined functions and no program to run", symbol(main.id));
-        return ExitCode::from(16);
+        return exit::status(Outcome::Refused);
     }
     let sources: Vec<String> = main.debug.sources.iter().map(|&s| symbol(s)).collect();
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
     let ended = exec::vm::execute_module(module, std::path::Path::new(path), library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, parm);
-    match ended {
-        Ok((_, return_code)) => ExitCode::from(u8::try_from(return_code).unwrap_or(255)),
-        Err(exec::vm::Halt::Abend(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. })) => ExitCode::SUCCESS,
+    exit::status(match ended {
+        Ok((_, return_code)) => Outcome::Ended(i64::from(return_code)),
+        Err(exec::vm::Halt::Abend(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. })) => Outcome::Ended(0),
         Err(exec::vm::Halt::Abend(abend)) => {
             let file = abend.file.as_deref().or_else(|| sources.get(abend.pos.file as usize).map(String::as_str)).filter(|f| !f.is_empty()).unwrap_or(path);
             eprintln!("{file}:{}: ABEND {}: {}", abend.pos, abend.code, abend.message);
-            ExitCode::from(16)
+            Outcome::of_abend(&abend.code)
         }
         Err(exec::vm::Halt::Unimplemented(what)) => {
             eprintln!("ironwork: {path}: the VM does not run {what} yet; run the source without --vm");
-            ExitCode::from(12)
+            Outcome::Stopped
         }
-    }
+    })
 }
 
 /// A compile's messages as standard error shows them: errors first, then warnings, then
@@ -1105,7 +1173,7 @@ fn abend_file<'a>(compiled: &'a exec::Compiled, abend: &'a exec::machine::Abend)
 fn report_abend(compiled: &exec::Compiled, path: &str, abend: &exec::machine::Abend) -> ExitCode {
     let file = abend_file(compiled, abend).filter(|f| !f.is_empty()).unwrap_or(path);
     eprintln!("{file}:{}: ABEND {}: {}", abend.pos, abend.code, abend.message);
-    ExitCode::from(16)
+    exit::status(Outcome::of_abend(&abend.code))
 }
 
 /// A task with the identity, files and queues the cics flags give.
@@ -1206,7 +1274,7 @@ fn serve_cics(
     let resolved: Vec<std::net::SocketAddr> = std::net::ToSocketAddrs::to_socket_addrs(address.as_str()).map(Iterator::collect).unwrap_or_default();
     if let Some(open) = resolved.iter().find(|a| !a.ip().is_loopback()).filter(|_| !public) {
         eprintln!("ironwork: --serve {address}: {} is not a loopback address, and the server asks for no credentials; give --serve-public to serve it anyway", open.ip());
-        return ExitCode::from(2);
+        return exit::status(Outcome::Usage);
     }
     library.programs.insert(0, first.program.clone());
     let page = first.options.code_page();
@@ -1214,7 +1282,7 @@ fn serve_cics(
         Ok(l) => l,
         Err(e) => {
             eprintln!("ironwork: --serve {address}: {e}");
-            return ExitCode::from(2);
+            return exit::status(Outcome::Usage);
         }
     };
     let served = listener.local_addr().map_or(address, |a| a.to_string());
@@ -1419,7 +1487,7 @@ fn run_cics(
                 Ok(b) => b,
                 Err(e) => {
                     eprintln!("ironwork: --commarea {file}: {e}");
-                    return ExitCode::from(2);
+                    return exit::status(Outcome::Usage);
                 }
             };
             if !text {
@@ -1473,11 +1541,11 @@ fn run_cics(
         });
         let ran = match cics_run(program, path, vm, transactions.library.clone(), dds.clone(), task, clock, transactions.database.as_deref_mut(), &mut out, &mut err, observer) {
             Ok(ran) => ran,
-            Err(message) => {
+            Err((outcome, message)) => {
                 drop(out);
                 print_screens();
                 eprintln!("{message}");
-                return ExitCode::from(12);
+                return exit::status(outcome);
             }
         };
         let (Some(terminal), Ok((_, ended))) = (&conversation, &ran) else { break ran };
@@ -1527,7 +1595,7 @@ fn run_cics(
         let abend = ran.as_ref().err().filter(|a| !matches!(a.code, AbendCode::Signal(Signal::ClosedOutput)));
         let file = abend.and_then(|a| abend_file(compiled, a));
         let journal = run.into_inner().end(abend.map(|a| (a.code.to_string(), file, i64::from(a.pos.line))));
-        evidence::finish(Some(journal), if abend.is_some() { 16 } else { 0 });
+        evidence::finish(Some(journal), exit::recorded(abend.map_or(Outcome::Ended(0), |a| Outcome::of_abend(&a.code))));
     }
     match ran {
         Ok((_, task)) => {
@@ -1540,17 +1608,17 @@ fn run_cics(
                 let data = if text { format!("{}\n", page.decode(bytes)).into_bytes() } else { bytes.clone() };
                 if let Err(e) = fs::write(file, data) {
                     eprintln!("ironwork: --commarea-out {file}: {e}");
-                    return ExitCode::from(2);
+                    return exit::status(Outcome::Usage);
                 }
             }
-            ExitCode::SUCCESS
+            exit::status(Outcome::Ended(0))
         }
-        Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => ExitCode::SUCCESS,
+        Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => exit::status(Outcome::Ended(0)),
         Err(abend) => report_abend(compiled, path, &abend),
     }
 }
 
-/// One task's run, on the VM with `vm`; Err with what to say when the VM does not run the program.
+/// One task's run, on the VM with `vm`; Err with how and why when the VM does not run the program.
 #[allow(clippy::too_many_arguments)]
 fn cics_run<'w>(
     program: &exec::Compiled,
@@ -1564,15 +1632,15 @@ fn cics_run<'w>(
     out: &'w mut dyn io::Write,
     err: &'w mut dyn io::Write,
     observer: Option<exec::unit::Observer<'w>>,
-) -> Result<Result<(exec::Ending, exec::cics::Task), exec::Abend>, String> {
+) -> Result<Result<(exec::Ending, exec::cics::Task), exec::Abend>, (Outcome, String)> {
     if !vm {
         return Ok(program.execute_cics_observed(library, dds, task, clock, database, out, err, observer));
     }
-    let code = exec::vm::lowered(program).map_err(|e| syntax::Error::from(e).place(path).to_string())?;
+    let code = exec::vm::lowered(program).map_err(|e| (Outcome::NotGenerated, syntax::Error::from(e).place(path).to_string()))?;
     match exec::vm::execute_cics(program, &code, library, dds, task, clock, database, out, err, observer, &mut None) {
         (Ok(ending), task) => Ok(Ok((ending, task))),
         (Err(exec::vm::Halt::Abend(abend)), _) => Ok(Err(abend)),
-        (Err(exec::vm::Halt::Unimplemented(what)), _) => Err(format!("ironwork: {path}: the VM does not run {what} yet; run it without --vm")),
+        (Err(exec::vm::Halt::Unimplemented(what)), _) => Err((Outcome::Stopped, format!("ironwork: {path}: the VM does not run {what} yet; run it without --vm"))),
     }
 }
 

@@ -26,8 +26,8 @@ and on standard output.
 
   clean    exit 0 and no FAIL* line in the report
   failed   exit 0 and a FAIL* line
-  refused  exit 12: a compile error
-  abend    exit 16
+  refused  exit 241: a compile error
+  abend    exit 240, or 244 for an abend whose code is ironwork's own (IRONWORK, EXEC, JAVA)
   called   a subprogram, not run on its own
   compiled a flagging test (xx3nnM, xx4nnM) that `ironwork check` compiles without error; the
            User Guide's 3.7 says to compile these and not run them
@@ -119,7 +119,7 @@ def classify(flagging, code, report):
         return "compiled"
     if code == 0:
         return "failed" if "FAIL*" in report else "clean"
-    return {12: "refused", 16: "abend"}.get(code, f"exit-{code}")
+    return {241: "refused", 240: "abend", 244: "abend"}.get(code, f"exit-{code}")
 
 def run(binary, workdir, name, env, include, sysin, timeout):
     for f in (PRINT_FILE, *(f"XXXXX{n}" for n in ABSENT_FILES.get(name, ()))):

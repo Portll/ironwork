@@ -181,7 +181,7 @@ fn an_abend_in_a_method_names_the_class_source_on_stderr_and_in_the_journal() {
     fs::write(dir.join("lib/Divider.cbl"), class).unwrap();
     fs::write(dir.join("src/CLIENT.cbl"), client).unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_ironwork")).arg("run").arg(dir.join("src/CLIENT.cbl")).arg("-L").arg(dir.join("lib")).arg("--evidence").arg(dir.join("ev")).output().unwrap();
-    assert_eq!(out.status.code(), Some(16));
+    assert_eq!(out.status.code(), Some(240));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.starts_with(&format!("{}:19:", dir.join("lib/Divider.cbl").display())) && stderr.contains("ABEND S0CB"), "{stderr}");
     let run = fs::read_dir(dir.join("ev/runs")).unwrap().next().unwrap().unwrap().path();
@@ -225,7 +225,7 @@ fn an_abend_names_the_file_and_line_it_happened_at_in_the_program_or_a_library_p
             .stderr(std::process::Stdio::null())
             .status()
             .unwrap();
-        assert_eq!(status.code(), Some(16));
+        assert_eq!(status.code(), Some(240));
         let run = fs::read_dir(ev.join("runs")).unwrap().next().unwrap().unwrap().path();
         let journal = fs::read_to_string(run).unwrap();
         let abend = journal.lines().find(|l| field(l, "kind") == Some("abend")).unwrap();
@@ -283,7 +283,7 @@ fn an_abend_in_a_called_program_names_that_programs_source_on_stderr_and_in_the_
         let place = format!("{}:{line}:", dir.join(file).display());
         for out in [run(&["--evidence".as_ref(), ev.as_os_str()]), run(&["--vm".as_ref()])] {
             let stderr = String::from_utf8_lossy(&out.stderr);
-            assert_eq!(out.status.code(), Some(16), "{program}: {stderr}");
+            assert_eq!(out.status.code(), Some(240), "{program}: {stderr}");
             assert!(stderr.starts_with(&place) && stderr.contains("ABEND S0CB"), "{program}: {stderr}");
         }
         let journal = fs::read_to_string(fs::read_dir(ev.join("runs")).unwrap().next().unwrap().unwrap().path()).unwrap();
@@ -312,7 +312,7 @@ fn an_abend_in_a_later_cics_task_names_the_library_source_of_its_program() {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(out.status.code(), Some(16), "{stderr}");
+    assert_eq!(out.status.code(), Some(240), "{stderr}");
     assert!(stderr.lines().any(|l| l.starts_with(&format!("{}:8:", dir.join("lib/LIBPGM.cbl").display())) && l.contains("ABEND ASRA")), "{stderr}");
     let journal = fs::read_to_string(fs::read_dir(dir.join("ev/runs")).unwrap().next().unwrap().unwrap().path()).unwrap();
     let abend = journal.lines().find(|l| field(l, "kind") == Some("abend")).unwrap();

@@ -199,22 +199,22 @@ impl Outcome {
     }
 }
 
-/// How a finished run ended, from its exit status and standard error. A program's RETURN-CODE can
-/// be any exit status, 2 included, so an abend is told by the line that reports it, a crash by
-/// Rust's panic line, and ironwork's own refusal by a line that ironwork leads.
+/// How a finished run ended, from its exit status in the reserved band (`crate::exit`): a
+/// RETURN-CODE is a clean end, an abend is told by the line that reports it, a panic by Rust's
+/// panic line, and ironwork's other refusals by the first line it leads.
 pub(crate) fn ended(code: Option<i32>, text: &str, abend: impl Fn(&str) -> Option<Outcome>) -> Outcome {
-    let mut lines = text.lines();
-    if let Some(at) = lines.find_map(|l| l.strip_prefix("thread '").and_then(|l| l.split_once(" panicked at ")).map(|(_, at)| at)) {
-        return Outcome::Crash(format!("{at} {}", lines.next().unwrap_or("")).trim_end().to_string());
-    }
-    if let Some(abend) = text.lines().rev().find_map(abend) {
-        return abend;
-    }
-    let refusal = text.lines().find(|l| l.starts_with("ironwork: ")).filter(|_| code == Some(2));
-    match (refusal, code) {
-        (Some(line), _) => Outcome::Refused(line.to_string()),
-        (None, None) => Outcome::Refused(text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").to_string()),
-        (None, Some(_)) => Outcome::Clean,
+    use crate::exit::Outcome as Exit;
+    let last = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").to_string();
+    match code.and_then(|c| u8::try_from(c).ok()).and_then(Exit::read) {
+        Some(Exit::Ended(_)) => Outcome::Clean,
+        Some(Exit::Abend | Exit::NotRun) => text.lines().rev().find_map(abend).unwrap_or(Outcome::Refused(last)),
+        Some(Exit::Internal) => {
+            let mut lines = text.lines();
+            let at = lines.find_map(|l| l.strip_prefix("thread '").and_then(|l| l.split_once(" panicked at ")).map(|(_, at)| at));
+            Outcome::Crash(at.map_or(last, |at| format!("{at} {}", lines.next().unwrap_or("")).trim_end().to_string()))
+        }
+        Some(_) => Outcome::Refused(text.lines().find(|l| l.starts_with("ironwork: ")).map_or(last, str::to_string)),
+        None => Outcome::Refused(last),
     }
 }
 
@@ -1182,17 +1182,27 @@ mod tests {
     #[test]
     fn a_run_that_panics_is_a_crash_not_a_clean_run() {
         let panic = "thread '<unnamed>' (42) panicked at crates/exec/src/x.rs:9:5:\nindex out of bounds\nnote: run with `RUST_BACKTRACE=1`\n";
-        assert!(matches!(ended(Some(16), panic, |_| None), Outcome::Crash(why) if why == "crates/exec/src/x.rs:9:5: index out of bounds"));
-        assert!(matches!(ended(Some(16), "", |_| None), Outcome::Clean));
-        assert!(matches!(ended(Some(2), "ironwork: no such file\n\n", |_| None), Outcome::Refused(why) if why == "ironwork: no such file"));
+        assert!(matches!(ended(Some(255), panic, |_| None), Outcome::Crash(why) if why == "crates/exec/src/x.rs:9:5: index out of bounds"));
+        assert!(matches!(ended(Some(255), "", |_| None), Outcome::Crash(_)));
+        assert!(matches!(ended(Some(245), "ironwork: no such file\n\n", |_| None), Outcome::Refused(why) if why == "ironwork: no such file"));
         assert!(matches!(ended(None, "", |_| None), Outcome::Refused(_)));
     }
 
     #[test]
-    fn a_return_code_of_2_is_the_program_s_and_not_a_refusal() {
-        assert!(matches!(ended(Some(2), "", |_| None), Outcome::Clean));
-        assert!(matches!(ended(Some(2), "TOTAL 2\n", |_| None), Outcome::Clean));
-        assert!(matches!(ended(Some(2), "ironwork: bad DD\nusage: ...\n", |_| None), Outcome::Refused(why) if why == "ironwork: bad DD"));
+    fn a_status_below_240_is_the_program_s_return_code_whatever_it_wrote() {
+        for code in [0, 2, 12, 16, 239] {
+            assert!(matches!(ended(Some(code), "ironwork: bad DD\nthread 'x' panicked at y\n", |_| None), Outcome::Clean), "{code}");
+        }
+        assert!(matches!(ended(Some(246), "ironwork: bad DD\nusage: ...\n", |_| None), Outcome::Refused(why) if why == "ironwork: bad DD"));
+    }
+
+    #[test]
+    fn an_abend_is_told_by_its_line_and_one_ironwork_does_not_run_too() {
+        let line = "P.cbl:12:8: ABEND S0C7: data exception\n";
+        assert!(matches!(ended(Some(240), line, |l| abend_line(l, &[])), Outcome::Abend { code, line: 12, .. } if code == "S0C7"));
+        let line = "P.cbl:4:8: ABEND EXEC: EXEC DLI GN was reached\n";
+        assert!(matches!(ended(Some(244), line, |l| abend_line(l, &[])), Outcome::Abend { code, .. } if code == "EXEC"));
+        assert!(matches!(ended(Some(244), "ironwork: job.jcl: line 2: PGM=ICETOOL is not supported yet\n", |l| abend_line(l, &[])), Outcome::Refused(_)));
     }
 
     #[test]

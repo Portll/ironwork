@@ -222,6 +222,6 @@ fn a_marker_without_a_journal_is_refused() {
     let dir = temp("nojournal");
     write_program(&dir);
     let status = Command::new(env!("CARGO_BIN_EXE_ironwork")).arg("run").arg(dir.join("src/TRACER.cbl")).args(["--trace-marker", MARKER]).status().unwrap();
-    assert_eq!(status.code(), Some(2));
+    assert_eq!(status.code(), Some(246));
     fs::remove_dir_all(dir).unwrap();
 }

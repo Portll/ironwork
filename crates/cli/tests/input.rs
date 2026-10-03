@@ -76,7 +76,7 @@ fn input_tracing_without_a_journal_is_refused() {
     let mut command = Command::new(env!("CARGO_BIN_EXE_ironwork"));
     let out = command.arg("run").arg(dir.join("src/TAINTED.cbl")).arg("--trace-input").output().unwrap();
     let _ = fs::remove_dir_all(&dir);
-    assert_eq!(out.status.code(), Some(2));
+    assert_eq!(out.status.code(), Some(246));
     assert!(String::from_utf8_lossy(&out.stderr).contains("--trace-input goes with --evidence, for run"));
 }
 

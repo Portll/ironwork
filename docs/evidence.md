@@ -26,6 +26,13 @@ by `prev` and `seq`.
 | `statement` | `file`, `line`, `capped` | with `--trace-statements`, each start of a listed statement, in the order the run made them, up to 100 per statement, the 100th with `capped` true (§1.2) |
 | `close` | `exit`, `counts`, `durationMs`, `ledger` | last |
 
+- `exit` is how the run ended: for `check`, the compile's return code; for `run`, `cics` and `job`,
+  the RETURN-CODE of a run that ran to its end, its own value even where the exit status gives it
+  as 239 (a job's highest step return code; 0 for a task), and otherwise the code of the reserved
+  band ([README](../README.md#exit-status)), such as 240 for an abend or 241 for a program the
+  compile refused. `--exit-code` does not change it. A RETURN-CODE from 240 up is told from an
+  abend by the `abend` record an abend writes.
+
 - A job's journal is one run: the JCL as an `input`, then for each step its programs' sources, its
   DDs' `open` and `close` records and CALLs, an `end` record for each data set it was given, and
   its `step` record. A COBOL step's abend gives the `abend` record its file and line, and standard
@@ -294,9 +301,9 @@ false when the 200 runs ran out first), `counts` (`runs`, `clean`, `abend`, `tim
 over the generated runs; an abend that says what the surroundings lack counts as refused and is not
 kept: IRONWORK, a construct ironwork does not run, S806, a CALL of a program no `-L` library holds,
 EXEC, an EXEC statement with no database or region behind it, and IO-35, an OPEN of a file no DD
-gives; so do a run ironwork refused, told by its `ironwork:` line and not by the exit status a
-program's RETURN-CODE can also give, and a run in which ironwork itself panicked; standard error
-gives the first refusal's reason and the first panic) and `runs`,
+gives; so do a run ironwork refused, told by its exit status from 241 up, and a run in which
+ironwork itself panicked, 255; standard error gives the first refusal's reason and the first
+panic) and `runs`,
 one per kept abend (`input` ids, `outcome` `abend`, `abend` with `code`, `file` relative to the
 program's directory or the library it came from, `line`, `message` and `optimized` (item 6),
 `journal` the run id, and `coverage`). `optimized` rests on the manifest's word: the run it comes
