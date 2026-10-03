@@ -11,7 +11,7 @@ use rt::lir::{self, BlockId, DebugId, Op, RangeId, RangeKind, Terminator};
 use rt::storage::Kind;
 use rt::vocab::AcceptFrom;
 use syntax::Pos;
-use syntax::ast::{BinOp, ExecKind, ExitKind, Expr, Loop, Object, Operand, ProcName, RelOp, SizeError, Sorting, Stmt, Subject, Target, Varying, When};
+use syntax::ast::{BinOp, ExecKind, ExitKind, Expr, InitializeWith, Loop, Object, Operand, ProcName, RelOp, SizeError, Sorting, Stmt, Subject, Target, Varying, When};
 
 /// Blocks under construction; `current` is the one ops go into, None after a terminator.
 #[derive(Default)]
@@ -388,11 +388,12 @@ impl Lower<'_> {
                 let plan = self.display_plan(items, *no_advancing, pos)?;
                 self.op(Op::Display(plan), pos)?;
             }
-            Stmt::Initialize { with: Some(_), .. } => return unsupported("INITIALIZE with FILLER, VALUE, REPLACING or DEFAULT", pos),
-            Stmt::Initialize { targets, with: None, .. } => {
+            Stmt::Initialize { targets, with, .. } => {
+                let none = InitializeWith::default();
+                let with = with.as_deref().unwrap_or(&none);
                 for r in targets {
                     let target = self.place(r, false)?;
-                    let plan = self.init_plan(target)?;
+                    let plan = self.init_plan(target, with, pos)?;
                     self.op(Op::Initialize { target, plan }, pos)?;
                 }
             }

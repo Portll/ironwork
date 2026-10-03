@@ -1,8 +1,8 @@
 use super::*;
 use crate::testing::{check_lowering, encoded, line};
 use rt::lir::{
-    ArithPlan, Base, CallArg, CallTarget, Chars, Collating, Comparand, Cond as LirCond, Const, DisplayItem, Image, IntExpr, LeService, MethodName, Mode,
-    MovePlan, NationalFrom, NumericFrom, Op, Operand as LirOperand, Place, Program, Receiver, SenderCheck, SignTest, StorePlan, Terminator,
+    ArithPlan, Base, CallArg, CallTarget, Chars, Collating, Comparand, Cond as LirCond, Const, DisplayItem, Image, InitField, InitValue, IntExpr, LeService,
+    MethodName, Mode, MovePlan, NationalFrom, NumericFrom, Op, Operand as LirOperand, Place, Program, Receiver, SenderCheck, SignTest, StorePlan, Terminator,
 };
 use rt::abend::Ending;
 use rt::module::codec::decode_all;
@@ -433,6 +433,28 @@ fn every_op_and_terminator_names_a_position() {
 }
 
 #[test]
+fn initialize_s_phrases_choose_each_field_and_what_it_is_sent() {
+    let data = "       01  G.\n           05 A PIC 9 VALUE 4.\n           05 FILLER PIC X VALUE 'F'.\n           05 E PIC X/X VALUE 'AB'.\n       01  N PIC 9.\n";
+    let fields = |phrase: &str| {
+        let p = lowered(&program("", data, &[line(&format!("INITIALIZE G {phrase}")), line("GOBACK.")].concat()));
+        let sent = |f: &InitField| match f.value {
+            InitValue::Default(fill) => format!("{fill:?}"),
+            InitValue::Value(c) => format!("{:?}", p.consts[c as usize]),
+            InitValue::Replacing(LirOperand::Load(q)) => symbol(&p, p.places[q as usize].name).to_owned(),
+            other => format!("{other:?}"),
+        };
+        p.plans.init[0].fields.iter().map(|f| (f.offset, sent(f), matches!(f.store, MovePlan::Alnum { .. }))).collect::<Vec<_>>()
+    };
+    let field = |offset: u32, sent: &str, alnum: bool| (offset, sent.to_owned(), alnum);
+    assert_eq!(fields(""), [field(0, "Zero", false), field(2, "Space", false)]);
+    let number = format!("{:?}", Const::Number(crate::machine::literal_fixed("4").unwrap()));
+    let bytes = |text: &str| format!("{:?}", Const::Bytes(crate::testing::ebcdic(text)));
+    assert_eq!(fields("WITH FILLER ALL TO VALUE"), [field(0, &number, false), field(1, &bytes("F"), true), field(2, &bytes("AB"), true)]);
+    assert_eq!(fields("REPLACING NUMERIC BY N"), [field(0, "N", false)]);
+    assert_eq!(fields("ALPHANUMERIC-EDITED TO VALUE THEN TO DEFAULT"), [field(0, "Zero", false), field(2, &bytes("AB"), true)]);
+}
+
+#[test]
 fn constructs_outside_the_slice_are_refused_by_name() {
     let refused = |body: &str, data: &str| lower(&compiled(&program("", data, &[line(body), line("GOBACK.")].concat()))).unwrap_err();
     let mixed = refused("MOVE FUNCTION MAX(A 1) TO A", "       01  A PIC X.\n");
@@ -442,10 +464,6 @@ fn constructs_outside_the_slice_are_refused_by_name() {
     assert!(matches!(all, LowerError::Unsupported("a FUNCTION of fixed arguments given a table whose ALL subscripts run to an OCCURS DEPENDING ON count", _)));
     let numval = refused("MOVE FUNCTION MAX(N M) TO A", "       01  A PIC X.\n       01  N PIC 9.\n       01  M PIC 99.\n");
     assert!(matches!(numval, LowerError::Unsupported(n, _) if n.starts_with("a FUNCTION result whose digits")));
-    for phrase in ["WITH FILLER", "ALL TO VALUE", "REPLACING NUMERIC BY 1", "TO DEFAULT"] {
-        let e = refused(&format!("INITIALIZE A {phrase}"), "       01  A PIC 9.\n");
-        assert!(matches!(e, LowerError::Unsupported("INITIALIZE with FILLER, VALUE, REPLACING or DEFAULT", _)), "{phrase}: {e}");
-    }
     let pointer = "       01  PP USAGE PROCEDURE-POINTER.\n";
     assert!(matches!(refused("SET PP TO ENTRY 'T'", pointer), LowerError::Unsupported("SET TO ENTRY", _)));
     assert!(matches!(refused("CALL PP", pointer), LowerError::Unsupported("a CALL through a pointer SET TO ENTRY can set", _)));

@@ -34,7 +34,7 @@ pub use flow::{Declaratives, Frame, FrameKind, Op, Range, RangeKind, Resume, Ret
 pub use crate::cics::CicsCommand;
 pub use crate::report::{ReportOp, Writer as ReportWriter};
 pub use payload::{
-    Argument, DisplayItem, DisplayPlan, FloatFrom, Func, FunctionPlan, Image, InitField, InitPlan,
+    Argument, DisplayItem, DisplayPlan, FloatFrom, Func, FunctionPlan, Image, InitField, InitPlan, InitValue,
     InvokePlan, MethodName, MovePlan, NationalFrom, NumericFrom, PlaceNumcheck, Receiver, SearchAllPlan, SearchKey, SenderCheck, TrimSide,
 };
 pub use place::{Base, Odo, Place, RefMod, Subscript};

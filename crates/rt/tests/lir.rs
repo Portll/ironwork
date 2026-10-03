@@ -342,7 +342,7 @@ fn program_shape_round_trips() {
     round_trip(&[Block { ops: vec![], end: Terminator::Jump(1) }, Block { ops: vec![Op::Nest, Op::Arith(0)], end: Terminator::Abend(0) }]);
     let plans = Plans {
         arith: vec![ArithPlan { dmax: 0, arith: Arith::Extend, prepass: vec![], steps: vec![], remainder: None, handled: false, per_receiver: false }],
-        init: vec![InitPlan { fields: vec![InitField { offset: 0, len: 2, value: Figurative::Null, store: FILL }] }],
+        init: vec![InitPlan { fields: vec![InitField { offset: 0, len: 2, value: InitValue::Default(Figurative::Null), store: FILL, scaling: 0 }] }],
         display: vec![DisplayPlan { items: vec![DisplayItem::Text(0)], no_advancing: false }],
         inspect: vec![InspectPlan { target: Inspected::Item(0), tallying: vec![], replacing: vec![], converting: None }],
         string: vec![StringPlan { into: 0, pointer: None, sources: vec![] }],
@@ -1149,10 +1149,13 @@ fn keys_on_a_file_that_is_not_indexed_are_malformed() {
 
 #[test]
 fn initialize_display_and_search_all_round_trip_with_every_tag() {
-    let space = InitField { offset: 0, len: 10, value: Figurative::Space, store: FILL };
-    let zero = InitField { offset: 10, len: 5, value: Figurative::Zero, store: MovePlan::Numeric { from: NumericFrom::Zero, store: PACKED } };
-    let null = InitField { offset: 15, len: 4, value: Figurative::Null, store: MovePlan::Address };
-    round_trip(&[InitPlan { fields: vec![] }, InitPlan { fields: vec![space, zero, null] }]);
+    let space = InitField { offset: 0, len: 10, value: InitValue::Default(Figurative::Space), store: FILL, scaling: 0 };
+    let zero = InitField { offset: 10, len: 5, value: InitValue::Default(Figurative::Zero), store: MovePlan::Numeric { from: NumericFrom::Zero, store: PACKED }, scaling: 2 };
+    let null = InitField { offset: 15, len: 4, value: InitValue::Default(Figurative::Null), store: MovePlan::Address, scaling: 0 };
+    let valued = InitField { offset: 19, len: 3, value: InitValue::Value(4), store: FILL, scaling: 0 };
+    let replaced = InitField { offset: 22, len: 5, value: InitValue::Replacing(Operand::Load(6)), store: MovePlan::Refused(1), scaling: 0 };
+    round_trip(&[InitPlan { fields: vec![] }, InitPlan { fields: vec![space, zero, null, valued, replaced] }]);
+    every_variant(&[InitValue::Default(Figurative::Zero), InitValue::Value(4), InitValue::Replacing(Operand::Const(2))], 3);
     let items = [
         DisplayItem::Bytes(0),
         DisplayItem::National(1),

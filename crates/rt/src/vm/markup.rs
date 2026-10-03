@@ -63,10 +63,11 @@ struct Parts {
 }
 
 /// The program's facts, with the name a store plan gives a binary receiver for a TRUNC(OPT)
-/// report where its `Loc` names no place.
-struct Receiving<'p> {
-    facts: Facts<'p>,
-    name: Option<&'p str>,
+/// report where its `Loc` names no place, and the receiver's PICTURE scaling where it is known.
+pub(super) struct Receiving<'p> {
+    pub(super) facts: Facts<'p>,
+    pub(super) name: Option<&'p str>,
+    pub(super) scaling: Option<u32>,
 }
 
 impl ProgramFacts for Receiving<'_> {
@@ -107,7 +108,7 @@ impl ProgramFacts for Receiving<'_> {
     }
 
     fn scaling(&self, item: usize) -> u32 {
-        self.facts.scaling(item)
+        self.scaling.unwrap_or_else(|| self.facts.scaling(item))
     }
 
     fn item_name(&self, item: usize) -> String {
@@ -184,12 +185,12 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     }
 
     /// A store's facts, naming the binary receiver its plan names.
-    fn receiving(&self, store: Option<&StorePlan>) -> Receiving<'p> {
+    pub(super) fn receiving(&self, store: Option<&StorePlan>) -> Receiving<'p> {
         let name = match store {
             Some(StorePlan::Binary { name, .. }) => Some(self.sym(*name)),
             _ => None,
         };
-        Receiving { facts: self.facts(), name }
+        Receiving { facts: self.facts(), name, scaling: None }
     }
 
     /// MOVE into a receiver by its plan.

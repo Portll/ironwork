@@ -1651,7 +1651,7 @@ static NO_PHRASES: InitializeWith = InitializeWith { filler: false, value: Vec::
 
 /// The kind a VALUE clause's literal is placed as: editing is ignored, so an alphanumeric VALUE fills
 /// a numeric-edited or alphanumeric-edited item as alphanumeric data (Language Reference p. 246).
-fn value_kind(kind: Kind, value: &Literal) -> Kind {
+pub(crate) fn value_kind(kind: Kind, value: &Literal) -> Kind {
     match (kind, value) {
         (Kind::NumericEdited { .. } | Kind::AlnumEdited { .. }, Literal::Alnum(_) | Literal::Figurative(_) | Literal::All(_)) => Kind::Alnum { justified: false },
         (kind, _) => kind,

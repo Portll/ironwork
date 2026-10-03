@@ -6,14 +6,15 @@ use super::data::{Side, Value, Within, scale};
 use super::{Lower, R, push, unsupported};
 use numeric::precision::receiver_dec;
 use numeric::{Numproc, Trunc};
+use crate::machine::value_kind;
 use rt::lir::{
-    self, ArithId, ArithPlan, ArithStep, DisplayId, DisplayItem, ExprId, FloatFrom, Image, InitField, InitId, InitPlan, Mode, MovePlan, NationalFrom,
-    NumericFrom, PlaceId, RemainderPlan, StorePlan,
+    self, ArithId, ArithPlan, ArithStep, DisplayId, DisplayItem, ExprId, FloatFrom, Image, InitField, InitId, InitPlan, InitValue, Mode, MovePlan,
+    NationalFrom, NumericFrom, PlaceId, RemainderPlan, StorePlan,
 };
 use rt::picture::Sym;
 use rt::storage::Kind;
 use syntax::Pos;
-use syntax::ast::{Expr, Figurative, Literal, Operand, Target};
+use syntax::ast::{DataCategory, Expr, Figurative, InitialValue, InitializeWith, Literal, Operand, Target};
 
 impl Lower<'_> {
     /// The name a TRUNC(OPT) report gives a binary receiver.
@@ -156,31 +157,57 @@ impl Lower<'_> {
         push(&mut self.plans.arith, ArithPlan { dmax, arith, prepass, steps, remainder, handled, per_receiver }, "arithmetic plans")
     }
 
-    /// `Machine::initialize` unrolled: every elementary item the walk reaches, offset from the
-    /// target's start, every occurrence listed.
-    pub(super) fn init_plan(&mut self, target: PlaceId) -> R<InitId> {
+    /// `Machine::initialize` unrolled: every elementary item the walk reaches with `with`'s FILLER,
+    /// offset from the target's start, every occurrence listed, each with what its phrases send it.
+    /// A target that is no data item's, RETURN-CODE, takes zeros or REPLACING NUMERIC's operand.
+    pub(super) fn init_plan(&mut self, target: PlaceId, with: &InitializeWith, pos: Pos) -> R<InitId> {
         let mut fields = Vec::new();
         match self.place_items[target as usize] {
             None => {
-                let store = self.store_plan(self.kind_of(target), None)?;
-                fields.push(InitField { offset: 0, len: self.places[target as usize].len, value: Figurative::Zero, store: MovePlan::Numeric { from: NumericFrom::Zero, store } });
+                let (kind, len) = (self.kind_of(target), self.places[target as usize].len);
+                match with.initial_value(Some(DataCategory::Numeric), false) {
+                    Some(InitialValue::Replacing(by)) => {
+                        let by = self.operand(by, pos)?;
+                        let store = self.move_plan(&by.side, kind, None)?;
+                        fields.push(InitField { offset: 0, len, value: InitValue::Replacing(by.operand), store, scaling: 0 });
+                    }
+                    Some(_) => {
+                        let store = MovePlan::Numeric { from: NumericFrom::Zero, store: self.store_plan(kind, None)? };
+                        fields.push(InitField { offset: 0, len, value: InitValue::Default(Figurative::Zero), store, scaling: 0 });
+                    }
+                    None => {}
+                }
             }
-            Some(item) => self.init_fields(item, 0, &mut fields)?,
+            Some(item) => self.init_fields(item, with, pos, &mut fields)?,
         }
         push(&mut self.plans.init, InitPlan { fields }, "INITIALIZE plans")
     }
 
-    fn init_fields(&mut self, index: usize, offset: u32, fields: &mut Vec<InitField>) -> R<()> {
+    fn init_fields(&mut self, index: usize, with: &InitializeWith, pos: Pos, fields: &mut Vec<InitField>) -> R<()> {
         let layout = self.layout;
-        for (i, at) in layout.initialize_receivers(index, false) {
-            let kind = layout.items[i].kind;
-            let (value, from) = match kind {
-                Kind::Pointer => (Figurative::Null, Value::Address),
-                Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::National => (Figurative::Space, Value::Fig(Figurative::Space)),
-                _ => (Figurative::Zero, Value::Fig(Figurative::Zero)),
+        for (i, at) in layout.initialize_receivers(index, with.filler) {
+            let item = &layout.items[i];
+            let (value, side, kind) = match (with.initial_value(layout.category(i), item.value.is_some()), &item.value) {
+                (None, _) => continue,
+                (Some(InitialValue::Value), Some(literal)) => {
+                    let (constant, side) = self.literal_const(literal, pos)?;
+                    (InitValue::Value(constant), side, value_kind(item.kind, literal))
+                }
+                (Some(InitialValue::Replacing(by)), _) => {
+                    let by = self.operand(by, pos)?;
+                    (InitValue::Replacing(by.operand), by.side, item.kind)
+                }
+                (Some(_), _) => {
+                    let (fill, from) = match item.kind {
+                        Kind::Pointer => (Figurative::Null, Value::Address),
+                        Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::National => (Figurative::Space, Value::Fig(Figurative::Space)),
+                        _ => (Figurative::Zero, Value::Fig(Figurative::Zero)),
+                    };
+                    (InitValue::Default(fill), Side { value: from, src: None, digits: 0 }, item.kind)
+                }
             };
-            let store = self.move_plan(&Side { value: from, src: None, digits: 0 }, kind, Some(i))?;
-            fields.push(InitField { offset: offset + at, len: layout.items[i].size, value, store });
+            let store = self.move_plan(&side, kind, Some(i))?;
+            fields.push(InitField { offset: at, len: item.size, value, store, scaling: item.scaling });
         }
         Ok(())
     }

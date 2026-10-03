@@ -4,7 +4,7 @@
 
 use rt::cics::Handles;
 use rt::lir::{
-    Advance, Argument, Base, Binding, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Const, Convert, ConvertTable, Count, DisplayItem, Inspected, Expr, FileVerb, Flag, Func, HostPlace, IntExpr,
+    Advance, Argument, Base, Binding, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Const, Convert, ConvertTable, Count, DisplayItem, InitValue, Inspected, Expr, FileVerb, Flag, Func, HostPlace, IntExpr,
     GlobalAt, JsonValue, Marker, Markup, MethodName, MovePlan, Named, Op, Operand, ParseValue, Place, PlaceId, Program, RangeKind, Receiver, Replacement, ReportOp, SenderCheck, SetTo, SortIo, SortPlan,
     SqlStatement, StartKey, StorePlan, SymId, Terminator, UpDown, UserArgument, XmlValue,
 };
@@ -643,6 +643,17 @@ fn verify_program(p: &Program) -> Result<(), String> {
                 DisplayItem::Text(t) => within("symbol", *t, p.symbols.len())?,
                 DisplayItem::Value(o) => operand(o)?,
             }
+        }
+    }
+    for f in p.plans.init.iter().flat_map(|i| &i.fields) {
+        match f.value {
+            InitValue::Default(_) => {}
+            InitValue::Value(c) => within("constant", c, p.consts.len())?,
+            InitValue::Replacing(o) => operand(&o)?,
+        }
+        match f.store {
+            MovePlan::Refused(a) | MovePlan::Numeric { store: StorePlan::Refused(a), .. } => abend(a)?,
+            _ => {}
         }
     }
 

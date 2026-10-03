@@ -6,7 +6,8 @@ use crate::abend::Abend;
 use crate::accept;
 use crate::display;
 use crate::host::{Host, Values};
-use crate::lir::{DisplayItem, InitPlan, Inspected, MovePlan, NumericFrom, Op, Operand, PlaceId, SearchAllPlan, SenderCheck, Step, StorePlan, TempId};
+use super::markup::Receiving;
+use crate::lir::{DisplayItem, InitPlan, InitValue, Inspected, MovePlan, NumericFrom, Op, Operand, PlaceId, SearchAllPlan, SenderCheck, Step, StorePlan, TempId};
 use crate::set;
 use crate::storage::{Kind, Loc, Val};
 use crate::store;
@@ -68,7 +69,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 let dest = self.loc_written(*to)?;
                 self.move_to(None, *from, dest, plan, at)?;
             }
-            Op::Initialize { target, plan } => self.initialize(*target, &p.plans.init[*plan as usize], pos)?,
+            Op::Initialize { target, plan } => self.initialize(*target, &p.plans.init[*plan as usize], at)?,
             Op::Arith(id) => return self.arith(&p.plans.arith[*id as usize], pos),
             Op::SetAddress { records, address } => {
                 let val = self.value(*address)?;
@@ -209,18 +210,27 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         }
     }
 
-    /// `Machine::initialize`: each elementary item the walk reaches given SPACE, ZERO or NULL by
-    /// MOVE rules.
-    fn initialize(&mut self, target: PlaceId, plan: &InitPlan, pos: Pos) -> R<()> {
+    /// `Machine::initialize`: each elementary item the walk reaches sent its field's value by MOVE
+    /// rules, a data item REPLACING names located and read again for each.
+    fn initialize(&mut self, target: PlaceId, plan: &InitPlan, at: u32) -> R<()> {
+        let pos = self.pos(at);
         let loc = self.loc_written(target)?;
         for field in &plan.fields {
-            let Some(kind) = field_kind(&field.store) else { return Err(not_yet("an INITIALIZE field with no MOVE plan")) };
-            let at = Loc { offset: loc.offset + field.offset as usize, len: field.len as usize, kind, item: usize::MAX };
-            let val = match field.value {
-                Figurative::Null => Val::Address(0),
-                other => Val::Fig(other),
+            let (val, src) = match field.value {
+                InitValue::Default(Figurative::Null) => (Val::Address(0), None),
+                InitValue::Default(f) => (Val::Fig(f), None),
+                InitValue::Value(c) => (self.value(Operand::Const(c))?, None),
+                InitValue::Replacing(o) => self.value_with_loc(o)?,
             };
-            store::assign(&self.facts(), self.unit, at, val, None, pos)?;
+            let store = match field.store {
+                MovePlan::Refused(abend) => return Err(self.abend(abend, Some(at)).into()),
+                MovePlan::Numeric { store, .. } => Some(store),
+                _ => None,
+            };
+            let Some(kind) = field_kind(&field.store) else { return Err(not_yet("an INITIALIZE field with no MOVE plan")) };
+            let dest = Loc { offset: loc.offset + field.offset as usize, len: field.len as usize, kind, item: usize::MAX };
+            let facts = Receiving { scaling: Some(field.scaling), ..self.receiving(store.as_ref()) };
+            store::assign(&facts, self.unit, dest, val, src, pos)?;
         }
         Ok(())
     }

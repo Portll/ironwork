@@ -359,6 +359,37 @@ fn the_vm_runs_a_cics_task_through_link_a_handled_condition_and_return() {
     assert_eq!((t.next_transid.as_deref(), t.returned_commarea), (Some("NEXT"), Some(ebcdic("BBBBB"))));
 }
 
+#[test]
+fn the_vm_initializes_with_the_interpreter_s_receivers_senders_scaling_and_reports() {
+    let data = concat!(
+        "       01  G.\n           05 A PIC 9PP VALUE 300.\n           05 B PIC S9(4) COMP VALUE 12.\n",
+        "           05 FILLER PIC X(2) VALUE 'FF'.\n           05 C PIC X(3) VALUE 'CCC'.\n           05 E PIC X(2)/X VALUE 'DE'.\n",
+        "       01  N PIC 9(5) VALUE 12345.\n",
+    );
+    let body = [
+        "MOVE ALL '*' TO G",
+        "INITIALIZE G REPLACING NUMERIC BY N",
+        "DISPLAY A ' ' B ' ' G(4:9)",
+        "INITIALIZE G WITH FILLER ALL TO VALUE",
+        "DISPLAY A ' ' B ' ' G(4:9)",
+        "MOVE ALL '*' TO G",
+        "INITIALIZE G ALPHANUMERIC TO VALUE THEN TO DEFAULT",
+        "DISPLAY A ' ' B ' ' G(4:9)",
+        "INITIALIZE RETURN-CODE REPLACING NUMERIC BY 7",
+        "DISPLAY RETURN-CODE",
+        "INITIALIZE RETURN-CODE",
+        "GOBACK.",
+    ]
+    .map(line)
+    .concat();
+    let source = program("TRUNC(OPT)", data, &body);
+    let (out, ending) = on_both(&source);
+    assert_eq!(ending, Ok(Ending::Goback));
+    assert_eq!(out, "3 2345 *********\n3 0012 FFCCCDE  \n0 0000 **CCC  / \n0007\n");
+    let err = Harness::source(&source).run(Executor::Vm).err;
+    assert!(err.contains("TRUNC(OPT) store of 12345 into B PIC S9(4) BINARY"), "{err}");
+}
+
 /// A CICS task on the interpreter, whose Harness compares the VM's run and the events its observer
 /// is told with its own, then on the VM, which must run it to its end.
 fn task_on_both(source: &str) -> (String, Result<Ending, Abend>) {

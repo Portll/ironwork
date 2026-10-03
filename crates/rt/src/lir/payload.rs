@@ -3,7 +3,7 @@
 //! handles they name (semantics-library.md §9, C6): the LIR's ids by default, the walker's own
 //! references in the interpreter.
 
-use super::{AbendId, Comparand, Compare, Count, DebugId, IntExpr, Operand, PlaceId, RefMod, StorePlan, SymId};
+use super::{AbendId, Comparand, Compare, ConstId, Count, DebugId, IntExpr, Operand, PlaceId, RefMod, StorePlan, SymId};
 use crate::store::LaxRedefinition;
 use crate::vocab::Figurative;
 use crate::{codec_enum, codec_struct};
@@ -83,20 +83,33 @@ pub struct PlaceNumcheck {
     pub removed: bool,
 }
 
-/// INITIALIZE of one item: each elementary item the walk reaches, every occurrence listed.
+/// INITIALIZE of one item: each elementary item the walk reaches, every occurrence listed, with
+/// FILLER and its phrases' choice of receivers and senders made.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InitPlan {
     pub fields: Vec<InitField>,
 }
 
-/// SPACE, ZERO or NULL, as the walker gives the item's kind, moved into `len` bytes at `offset` from
-/// the target's start.
+/// `value` moved into `len` bytes at `offset` from the target's start, by `store`, which was made
+/// for the kind the walker stores as; `scaling` is the item's PICTURE P positions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InitField {
     pub offset: u32,
     pub len: u32,
-    pub value: Figurative,
+    pub value: InitValue,
     pub store: MovePlan,
+    pub scaling: u32,
+}
+
+/// What an INITIALIZE field is sent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InitValue {
+    /// SPACE, ZERO or NULL, as the walker gives the item's kind.
+    Default(Figurative),
+    /// The literal of the item's own VALUE clause.
+    Value(ConstId),
+    /// REPLACING's operand, read for each field it is sent to.
+    Replacing(Operand),
 }
 
 /// DISPLAY's items, each shown as the walker shows its kind, then a newline unless NO ADVANCING.
@@ -362,7 +375,8 @@ codec_enum!(SenderCheck { None = 0, Item = 1, Integer = 2 });
 codec_struct!(PlaceNumcheck { lax, removed });
 codec_enum!(LaxRedefinition { Signed = 0, LeadingSpaces(spaces) = 1 });
 codec_struct!(InitPlan { fields });
-codec_struct!(InitField { offset, len, value, store });
+codec_struct!(InitField { offset, len, value, store, scaling });
+codec_enum!(InitValue { Default(value) = 0, Value(value) = 1, Replacing(value) = 2 });
 codec_struct!(DisplayPlan { items, no_advancing });
 codec_enum!(DisplayItem {
     Bytes(place) = 0,
