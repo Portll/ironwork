@@ -391,6 +391,62 @@ fn a_job_records_its_steps_in_a_hash_chained_journal() {
     assert!(fs::read_to_string(ev.join("ledger.jsonl")).unwrap().contains("\"kind\":\"run\""));
 }
 
+fn field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let needle = format!("\"{key}\":");
+    let start = line.find(&needle)? + needle.len();
+    let rest = &line[start..];
+    match rest.strip_prefix('"') {
+        Some(s) => s.find('"').map(|end| &s[..end]),
+        None => Some(&rest[..rest.find([',', '}']).unwrap_or(rest.len())]),
+    }
+}
+
+#[test]
+fn a_cobol_steps_abend_record_names_the_source_and_line_and_other_steps_name_none() {
+    let dir = temp("abendplace");
+    divide(&dir);
+    fs::write(dir.join("lib/CALLER.cbl"), cobol(&["IDENTIFICATION DIVISION.", "PROGRAM-ID. CALLER.", "PROCEDURE DIVISION.", "    CALL 'DIVIDE'.", "    GOBACK."])).unwrap();
+    fs::create_dir_all(dir.join("data/MY.PDS/DIR")).unwrap();
+    let ev = dir.with_extension("evidence");
+    let _ = fs::remove_dir_all(&ev);
+    let o = job_with(
+        &dir,
+        concat!(
+            "//OWN     EXEC PGM=DIVIDE\n",
+            "//CALLS   EXEC PGM=CALLER,COND=EVEN\n",
+            "//MISSING EXEC PGM=NOSUCH,COND=EVEN\n",
+            "//COPY    EXEC PGM=IEBGENER,COND=EVEN\n",
+            "//SYSUT1  DD DSN=MY.PDS(DIR),DISP=SHR\n",
+            "//SYSUT2  DD SYSOUT=*\n",
+            "//NODD    EXEC PGM=DIVIDE,COND=EVEN\n",
+            "//IN      DD DSN=NOT.THERE,DISP=SHR\n",
+        ),
+        &["--evidence", ev.to_str().unwrap()],
+    );
+    let l = log(&o);
+    assert_eq!(o.status.code(), Some(16), "{l}");
+    assert_eq!(l.matches(&format!("{}:8:", dir.join("lib/DIVIDE.cbl").display())).count(), 2, "{l}");
+    let runs: Vec<_> = fs::read_dir(ev.join("runs")).unwrap().flatten().collect();
+    let text = fs::read_to_string(runs[0].path()).unwrap();
+    let (mut steps, mut abend) = (Vec::new(), None);
+    for line in text.lines() {
+        match field(line, "kind") {
+            Some("abend") => abend = Some((field(line, "code").unwrap(), field(line, "file"), field(line, "line"))),
+            Some("step") => steps.push((field(line, "step").unwrap(), field(line, "outcome").unwrap(), abend.take())),
+            _ => {}
+        }
+    }
+    assert_eq!(steps.len(), 5, "{text}");
+    let divided = "ABEND S0CB: DecimalDivide exception";
+    assert_eq!(steps[..3], [
+        ("OWN", divided, Some(("S0CB", Some("lib/DIVIDE.cbl"), Some("8")))),
+        ("CALLS", divided, Some(("S0CB", Some("lib/DIVIDE.cbl"), Some("8")))),
+        ("MISSING", "ABEND S806: program NOSUCH is not in the program libraries", Some(("S806", None, None))),
+    ], "{text}");
+    assert!(steps[3].0 == "COPY" && steps[3].1.starts_with("ABEND IRONWORK: SYSUT1: ") && steps[3].2 == Some(("IRONWORK", None, None)), "{text}");
+    assert_eq!(steps[4], ("NODD", "JCL ERROR: DD IN: NOT.THERE was not found; the job ends", None), "{text}");
+}
+
 #[test]
 fn disp_mod_writes_after_what_the_data_set_holds_and_creates_one_that_is_missing() {
     let dir = temp("mod");

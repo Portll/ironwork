@@ -469,7 +469,7 @@ impl Runner<'_> {
 /// message, with its file and line in `place` and on standard error as `run` gives them. Each
 /// program CALL loads from a library goes into `called`.
 #[allow(clippy::too_many_arguments)]
-fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database: Option<&mut (dyn exec::sql::Database + '_)>, out: &mut dyn Write, called: &mut BTreeSet<PathBuf>, evidence: Option<&Rc<RefCell<crate::evidence::Run>>>, roots: &[PathBuf], place: &mut Option<(String, i64)>, coverage: Option<&RefCell<(crate::coverage::Coverage, Vec<crate::coverage::Outline>)>>) -> Result<i16, (AbendCode, String)> {
+fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database: Option<&mut (dyn exec::sql::Database + '_)>, out: &mut dyn Write, called: &mut BTreeSet<PathBuf>, evidence: Option<&Rc<RefCell<crate::evidence::Run>>>, roots: &[PathBuf], place: &mut Option<(Option<String>, i64)>, coverage: Option<&RefCell<(crate::coverage::Coverage, Vec<crate::coverage::Outline>)>>) -> Result<i16, (AbendCode, String)> {
     let ironwork = |m: String| (AbendCode::Ironwork, m);
     let text = fs::read(path).map(|b| syntax::copy::decode(&b)).map_err(|e| ironwork(format!("{}: {e}", path.display())))?;
     let own = path.parent().map(Path::to_path_buf).unwrap_or_default();
@@ -514,9 +514,9 @@ fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database
         Ok((_, rc)) => Ok(rc),
         Err(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. }) => Ok(0),
         Err(a) => {
-            let file = a.file.clone().or_else(|| compiled.program.sources.get(a.pos.file as usize).cloned()).filter(|f| !f.is_empty()).unwrap_or_else(|| path.display().to_string());
-            eprintln!("{file}:{}: ABEND {}: {}", a.pos, a.code, a.message);
-            *place = Some((file, i64::from(a.pos.line)));
+            let (file, shown) = (crate::abend_file(&compiled, &a), path.display().to_string());
+            eprintln!("{}:{}: ABEND {}: {}", file.filter(|f| !f.is_empty()).unwrap_or(&shown), a.pos, a.code, a.message);
+            *place = Some((file.map(str::to_string), i64::from(a.pos.line)));
             Err((a.code, a.message))
         }
     }
@@ -1132,7 +1132,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                 }
                 let _ = stdout.flush();
                 if let Some(run) = run.and_then(|r| Rc::try_unwrap(r).ok()) {
-                    let abend = outcome.as_ref().err().map(|(code, _)| (code.to_string(), place.as_ref().map(|(f, _)| f.as_str()), place.as_ref().map_or(0, |(_, l)| *l)));
+                    let abend = outcome.as_ref().err().map(|(code, _)| (code.to_string(), place.as_ref().and_then(|(f, _)| f.as_deref()), place.as_ref().map_or(0, |(_, l)| *l)));
                     *journal.borrow_mut() = Some(run.into_inner().end(abend));
                 }
                 match outcome {
