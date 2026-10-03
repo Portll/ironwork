@@ -6,7 +6,7 @@ use super::data::{Side, Value, Within, scale};
 use super::{Lower, R, push, unsupported};
 use numeric::precision::Dmax;
 use numeric::{Dialect, Numproc, Trunc};
-use crate::machine::value_kind;
+use crate::machine::{divided_exponent, value_kind};
 use rt::lir::{
     self, ArithId, ArithPlan, ArithStep, DisplayId, DisplayItem, ExprId, FloatFrom, Image, InitField, InitId, InitPlan, InitValue, Mode, MovePlan,
     NationalFrom, NumericFrom, PlaceId, RemainderPlan, StorePlan,
@@ -139,7 +139,7 @@ impl Lower<'_> {
         for &(Target { r, rounded }, e) in computations {
             let target = self.place(r, false)?;
             // A COMP-1 or COMP-2 receiver makes every step floating point, and the walker then skips the float test.
-            let (probe, float) = if float_receiver { (Vec::new(), true) } else { (self.float_probe(e)?, self.uses_float(e)?) };
+            let (probe, float) = if float_receiver { (Vec::new(), true) } else { (self.float_probe(e)?, self.uses_float(e)? || (divided_exponent(e) && dmax > 0)) };
             let mode = if float { Mode::Float(arith.float_intermediate()) } else { Mode::Fixed };
             let expr = match lowered.iter().find(|(seen, _)| std::ptr::eq(*seen, e)) {
                 Some(&(_, id)) => id,

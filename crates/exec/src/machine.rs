@@ -1224,7 +1224,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     fn expr_value(&mut self, e: &Expr, pos: Pos) -> R<Val> {
         match e {
             Expr::Operand(op) => self.operand(op, pos),
-            _ if self.uses_float(e)? => Ok(Val::Float(self.eval_float(e, self.options.arith.float_intermediate(), pos)?)),
+            _ if self.uses_float(e)? || (divided_exponent(e) && self.static_dmax(e) > 0) => Ok(Val::Float(self.eval_float(e, self.options.arith.float_intermediate(), pos)?)),
             _ => {
                 let dmax = self.dmax(e)?;
                 Ok(Val::Num(self.eval_fixed(e, dmax, pos)?))
@@ -1246,8 +1246,33 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Expr::Operand(Operand::Function(f)) => self.is_floating_point(f)?,
             Expr::Operand(op) => matches!(self.operand_kind(op)?, Some(Kind::Float(_))),
             Expr::Neg(inner) => self.uses_float(inner)?,
+            Expr::Bin(a, BinOp::Pow, b) => self.uses_float(a)? || self.uses_float(b)? || decimal_exponent(b, &mut |op| Ok::<_, Abend>(self.static_scale(op)))?,
             Expr::Bin(a, _, b) => self.uses_float(a)? || self.uses_float(b)?,
         })
+    }
+
+    /// An operand's decimal places from its description alone, as `dmax` finds them.
+    fn static_scale(&mut self, op: &Operand) -> u32 {
+        let kind = match op {
+            Operand::Ref(r) if r.refmod.is_none() => match self.resolve(r) {
+                Ok(Resolved::Item(i)) => Some(self.layout.items[i].kind),
+                _ => None,
+            },
+            Operand::Function(f) => self.user_function(&f.name).map(|u| u.result.kind),
+            _ => None,
+        };
+        kind.and_then(Kind::digits_scale).map_or(0, |(_, s)| s)
+    }
+
+    /// `dmax` without locating the operands.
+    fn static_dmax(&mut self, e: &Expr) -> u32 {
+        match e {
+            Expr::Operand(Operand::Literal(Literal::Number(t))) => literal_fixed(t).map_or(0, |f| f.places.dec),
+            Expr::Operand(op) => self.static_scale(op),
+            Expr::Neg(inner) => self.static_dmax(inner),
+            Expr::Bin(a, BinOp::Div | BinOp::Pow, _) => self.static_dmax(a),
+            Expr::Bin(a, _, b) => self.static_dmax(a).max(self.static_dmax(b)),
+        }
     }
 
     /// The most decimal places among an expression's operands, divisors and exponents aside. Fixed at
@@ -1365,7 +1390,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let mut results = Vec::with_capacity(computations.len());
         for (t, e) in computations {
             let own = |x: &Expr| per_receiver && matches!(x, Expr::Operand(Operand::Ref(r)) if *r == t.r);
-            let float = float_receiver || self.uses_float(e)?;
+            let float = float_receiver || self.uses_float(e)? || (divided_exponent(e) && dmax > 0);
             let (shared, with) = match e {
                 Expr::Bin(a, op, b) if *op != BinOp::Pow && own(a) => (b.as_ref(), Some((*op, true))),
                 Expr::Bin(a, op, b) if *op != BinOp::Pow && own(b) => (a.as_ref(), Some((*op, false))),
@@ -1724,4 +1749,33 @@ pub(crate) fn key_term<'c>(terms: &[&'c Cond], key: &str) -> Option<(&'c Expr, &
         Cond::Rel(a, RelOp::Eq, b) if is_key(b) => Some((b, a)),
         _ => None,
     })
+}
+
+/// Whether an exponent has decimal places, a literal or an operand with any by `scale`: such an
+/// exponent makes its expression floating point (Programming Guide SC27-8714-03, pp. 796, 800).
+pub(crate) fn decimal_exponent<E>(e: &Expr, scale: &mut impl FnMut(&Operand) -> Result<u32, E>) -> Result<bool, E> {
+    Ok(match e {
+        Expr::Operand(Operand::Literal(Literal::Number(t))) => literal_fixed(t).is_some_and(|f| f.places.dec > 0),
+        Expr::Operand(op) => scale(op)? > 0,
+        Expr::Neg(inner) => decimal_exponent(inner, scale)?,
+        Expr::Bin(a, _, b) => decimal_exponent(a, scale)? || decimal_exponent(b, scale)?,
+    })
+}
+
+/// Whether an exponent in `e` holds a division or an exponentiation, which makes `e` floating
+/// point when its dmax is above zero (Programming Guide SC27-8714-03, p. 800).
+pub(crate) fn divided_exponent(e: &Expr) -> bool {
+    fn quotient_or_power(e: &Expr) -> bool {
+        match e {
+            Expr::Operand(_) => false,
+            Expr::Neg(inner) => quotient_or_power(inner),
+            Expr::Bin(_, BinOp::Div | BinOp::Pow, _) => true,
+            Expr::Bin(a, _, b) => quotient_or_power(a) || quotient_or_power(b),
+        }
+    }
+    match e {
+        Expr::Operand(_) => false,
+        Expr::Neg(inner) => divided_exponent(inner),
+        Expr::Bin(a, op, b) => divided_exponent(a) || divided_exponent(b) || (*op == BinOp::Pow && quotient_or_power(b)),
+    }
 }

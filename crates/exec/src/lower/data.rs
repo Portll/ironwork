@@ -3,7 +3,7 @@
 use super::{Lower, R, is_static, push, unsupported};
 use zarch::hfp::Precision;
 use crate::layout::Resolved;
-use crate::machine::literal_fixed;
+use crate::machine::{decimal_exponent, divided_exponent, literal_fixed};
 use numeric::precision::Fixed;
 use rt::abend::AbendCode;
 use rt::lir::{self, Comparand, ConstId, ExprId, IntExpr, Mode, PlaceId};
@@ -286,7 +286,7 @@ impl Lower<'_> {
     /// locates its operands again.
     pub(super) fn computed(&mut self, e: &Expr, pos: Pos) -> R<Comparand> {
         let mut prepass = self.float_probe(e)?;
-        let (mode, dmax) = if self.uses_float(e)? {
+        let (mode, dmax) = if self.uses_float(e)? || (divided_exponent(e) && self.dmax(e)? > 0) {
             (Mode::Float(self.c.options.arith.float_intermediate()), 0)
         } else {
             prepass.extend(self.dmax_places(e)?);
@@ -377,7 +377,20 @@ impl Lower<'_> {
             }
             Expr::Operand(_) => false,
             Expr::Neg(inner) => self.probe(inner, located)?,
+            Expr::Bin(a, BinOp::Pow, b) => self.probe(a, located)? || self.probe(b, located)? || decimal_exponent(b, &mut |op| self.static_scale(op))?,
             Expr::Bin(a, _, b) => self.probe(a, located)? || self.probe(b, located)?,
+        })
+    }
+
+    /// The walker's `static_scale`: an operand's decimal places from its description alone.
+    fn static_scale(&mut self, op: &Operand) -> R<u32> {
+        Ok(match op {
+            Operand::Ref(r) => {
+                let p = self.place(r, false)?;
+                scale(self.kind_of(p))
+            }
+            Operand::Function(f) => self.user_defined(&f.name).map_or(0, |u| scale(u.result.kind)),
+            _ => 0,
         })
     }
 
@@ -387,7 +400,12 @@ impl Lower<'_> {
             Expr::Neg(inner) => lir::Expr::Neg(self.expr(inner, pos)?),
             Expr::Bin(a, BinOp::Pow, b) => {
                 let base = self.expr(a, pos)?;
-                lir::Expr::Pow(base, self.int_expr(b, pos)?)
+                let exponent = match self.within {
+                    // `Machine::eval_float` evaluates the exponent in floating point as it does the base.
+                    Within::Float(_) => IntExpr::Fixed { expr: self.expr(b, pos)?, dmax: 0, prepass: Vec::new() },
+                    _ => self.int_expr(b, pos)?,
+                };
+                lir::Expr::Pow(base, exponent)
             }
             Expr::Bin(a, op, b) => {
                 let x = self.expr(a, pos)?;

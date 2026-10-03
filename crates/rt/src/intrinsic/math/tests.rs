@@ -125,3 +125,14 @@ fn rounding_to_an_integer_takes_ties_away_from_zero() {
     assert_eq!(Real::ZERO.round_to_integer(), Some(0));
     assert_eq!(n(1).scaled(101).round_to_integer(), None);
 }
+
+#[test]
+fn a_power_rounds_to_the_nearest_value_and_keeps_an_odd_power_s_sign() {
+    check("2 ** 0.5", pow(n(2), half()), "4116A09E667F3BCD", "4116A09E667F3BCC908B2FB1366EA9");
+    assert_eq!(pow(n(2), n(10)), n(1024));
+    assert_eq!(pow(n(-2), n(3)), n(-8));
+    assert_eq!(pow(n(-2), n(-2)), Real::ONE.scaled(-2));
+    assert_eq!(pow(n(-4), half()).to_hfp(Precision::Long).unwrap(), Hfp::from_integer(2, Precision::Long));
+    assert_eq!(pow(n(10), n(100)).to_hfp(Precision::Long), Err(zarch::check::ProgramCheck::HfpExponentOverflow));
+    assert_eq!(pow(n(10), n(-100)).to_hfp(Precision::Long), Ok(Hfp::zero(Precision::Long)));
+}

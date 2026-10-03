@@ -185,8 +185,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         }
     }
 
-    /// `Machine::eval_float`: an exponent is evaluated as a float, without its dmax pass, and then
-    /// refused.
+    /// `Machine::eval_float`: an exponent is evaluated as a float, without its dmax pass.
     pub(super) fn eval_float(&mut self, e: ExprId, p: Precision, pos: Pos) -> R<Hfp> {
         match &self.p.exprs[e as usize] {
             Expr::Operand(o) => {
@@ -202,7 +201,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             Expr::Pow(base, exponent) => {
                 let x = self.eval_float(*base, p, pos)?;
                 let y = match exponent {
-                    IntExpr::Const(_) => x,
+                    IntExpr::Const(n) => Hfp::from_integer(i128::from(*n), p),
                     IntExpr::Item(q) => {
                         let val = self.value(Operand::Load(*q))?;
                         arith::float_operand(val, p, pos)?

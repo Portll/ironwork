@@ -320,6 +320,7 @@ pub const INSPECT_SIGNED_ZONED: &str = "C330";
 pub const RELATIVE_NUMBER_BELOW_ONE: &str = "C331";
 pub const DISPLAY_NUMERIC_FUNCTION: &str = "C332";
 pub const BY_VALUE_TO_REFERENCE: &str = "C333";
+pub const FLOAT_EXPONENTIATION: &str = "C334";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -2065,6 +2066,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: BY_VALUE_TO_REFERENCE,
         claim: "A COBOL program CALLed with an argument BY VALUE whose formal parameter is received BY REFERENCE: the Language Reference requires BY VALUE for both the argument and the parameter (SC27-8713-03, p. 322) and does not say what happens when they differ. On z/OS the parameter list then holds the value where the called program reads an address, and the result turns on what that value addresses. ironwork binds the parameter to storage of its own holding the value, as it does for a parameter received BY VALUE, and the called program runs",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FLOAT_EXPONENTIATION,
+        claim: "An exponent with decimal places, or one holding a division or an exponentiation when dmax is above zero, makes its expression floating point, as a floating-point operand or function does (Programming Guide SC27-8714-03, pp. 796, 800). ironwork takes an operand's decimal places from its description, a function's only from a user-defined function's RETURNING item, and dmax as the statement's or the evaluated expression's. A floating-point exponentiation is evaluated in long precision, extended under ARITH(EXTEND) (p. 800); the manuals do not give Language Environment's algorithm, and ironwork gives the value nearest the exact power, computed as the floating-point functions are (C110): an integer exponent by repeated squaring, any other as e^(y ln |x|). Zero to a positive power is zero. Table 32 of the Language Reference (SC27-8713-03, pp. 296-297) gives the rest: zero to a negative power is a size error, and without ON SIZE ERROR the program ends abnormally, which ironwork does with the HFP divide exception, S0CF, a division by zero raises; zero to the power zero is 1, and a negative number to a fractional power is computed with the base's absolute value, each with a message, when no SIZE ERROR phrase is written. ironwork gives those two values whether or not ON SIZE ERROR is written, issues no message, and does not run the phrase for them",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

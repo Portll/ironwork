@@ -48,7 +48,7 @@ pub enum Expr {
     Operand(Operand),
     Neg(ExprId),
     Bin(ExprId, BinOp, ExprId),
-    /// An exponent from 0 to 31, else abend IRONWORK.
+    /// In fixed point an exponent from 0 to 31, else abend IRONWORK; in floating point any (C334).
     Pow(ExprId, IntExpr),
 }
 

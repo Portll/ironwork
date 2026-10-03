@@ -113,6 +113,29 @@ pub fn sqrt(x: Real) -> Option<Real> {
     (!x.is_negative()).then(|| x.sqrt())
 }
 
+/// x ** y for x other than zero: an integer y by repeated squaring, any other as e^(y ln |x|);
+/// negative when x is and y is an odd integer.
+pub fn pow(x: Real, y: Real) -> Real {
+    let integer = y.round_to_integer().filter(|&n| Real::from_i128(n) == y);
+    let magnitude = match integer {
+        Some(n) => {
+            let beyond = if x.abs().compare(Real::ONE) == Ordering::Greater { Real::huge() } else { Real::ZERO };
+            match (power(x.abs(), n.unsigned_abs()), n < 0) {
+                (Some(p), false) => p,
+                (Some(p), true) => Real::ONE.div(p),
+                (None, false) => beyond,
+                (None, true) if beyond.is_zero() => Real::huge(),
+                (None, true) => Real::ZERO,
+            }
+        }
+        None => match ln(x.abs()) {
+            Some(log) => exp(y.mul(log)),
+            None => Real::ZERO,
+        },
+    };
+    if x.is_negative() && integer.is_some_and(|n| n & 1 == 1) { magnitude.neg() } else { magnitude }
+}
+
 /// |x| - k·π/2 for the nearest integer k, and k mod 4; `None` when k passes 2^63. The first
 /// word of π/2 is taken off exactly, in 256-bit integers.
 fn reduce(x: Real) -> Option<(Real, u32)> {

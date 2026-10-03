@@ -4,11 +4,14 @@
 
 use crate::abend::Abend;
 use crate::fixed::{MAX_DIGITS, align, fixed};
+use crate::intrinsic::math;
+use crate::intrinsic::real::Real;
 use crate::storage::Val;
 use crate::vocab::{BinOp, Figurative, Pos};
 use numeric::Arith;
 use numeric::float;
 use numeric::precision::{ArithError, Fixed, Places};
+use std::cmp::Ordering;
 use zarch::check::{ProgramCheck, ProgramMask};
 use zarch::hfp::{Hfp, Precision};
 
@@ -93,9 +96,27 @@ pub fn float_binop(x: Hfp, op: BinOp, y: Hfp, p: Precision, pos: Pos) -> R<Hfp> 
         BinOp::Sub => x.sub(y, mask),
         BinOp::Mul => x.mul(y, p, mask),
         BinOp::Div => x.div(y, mask),
-        BinOp::Pow => return Err(Abend::ironwork("floating-point exponentiation is not supported yet", pos)),
+        BinOp::Pow => return float_pow(x, y, p, pos),
     };
     result.map_err(|c| Abend::check(c, pos))
+}
+
+/// x ** y in floating point of precision `p`, nearest to the exact power (assumption C334). Zero
+/// to a positive power is zero, to the power zero 1, and to a negative power an HFP divide
+/// exception, which ON SIZE ERROR takes as a size error; a negative base to a power that is not an
+/// integer is taken as its absolute value (Language Reference SC27-8713-03, pp. 296-297, Table 32).
+pub fn float_pow(x: Hfp, y: Hfp, p: Precision, pos: Pos) -> R<Hfp> {
+    let (base, power) = (Real::from_hfp(x), Real::from_hfp(y));
+    let value = if base.is_zero() {
+        match power.compare(Real::ZERO) {
+            Ordering::Greater => Real::ZERO,
+            Ordering::Equal => Real::ONE,
+            Ordering::Less => return Err(Abend::check(ProgramCheck::HfpDivide, pos)),
+        }
+    } else {
+        math::pow(base, power)
+    };
+    value.to_hfp(p).map_err(|c| Abend::check(c, pos))
 }
 
 /// DIVIDE's REMAINDER: the dividend less the product of the divisor and the quotient cut to the

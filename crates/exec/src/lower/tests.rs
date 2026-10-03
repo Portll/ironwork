@@ -535,14 +535,14 @@ const TABLE: &str = "       01  T.\n           05 V PIC 9(3) OCCURS 3.\n       0
 
 #[test]
 fn a_subscript_or_exponent_expression_locates_its_operands_before_it_evaluates_them() {
-    let p = lowered(&program("SSRANGE", TABLE, &[line("MOVE V(A + V(J)) TO A"), line("COMPUTE A = A ** (V(J) - A)"), line("GOBACK.")].concat()));
+    let p = lowered(&program("SSRANGE", TABLE, &[line("MOVE V(A + V(J)) TO A"), line("COMPUTE A = A ** (V(J) - J)"), line("GOBACK.")].concat()));
     let fixed: Vec<_> = p.places.iter().flat_map(|q| &q.subscripts).map(|s| &s.value).filter(|v| matches!(v, IntExpr::Fixed { .. })).collect();
     let IntExpr::Fixed { dmax, prepass, .. } = fixed[0] else { unreachable!() };
     assert_eq!(*dmax, 1);
     assert_eq!(prepass.len(), 1, "A is static; V(J) is located before A is read");
     assert_eq!(p.symbols[p.places[prepass[0] as usize].name as usize], "V");
     let pow = p.exprs.iter().find_map(|e| if let lir::Expr::Pow(_, n) = e { Some(n.clone()) } else { None }).unwrap();
-    assert!(matches!(pow, IntExpr::Fixed { dmax: 1, ref prepass, .. } if prepass.len() == 1), "{pow:?}");
+    assert!(matches!(pow, IntExpr::Fixed { dmax: 0, ref prepass, .. } if prepass.len() == 1), "{pow:?}");
 }
 
 #[test]

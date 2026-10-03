@@ -231,7 +231,6 @@ Each changes results under `ibm`. Those fixed since are in 5.7.
 | DISPLAY of a national item to SYSOUT | converted from UTF-16 | written as its UTF-16 bytes; only UPON CONSOLE converts (Programming Guide, Displaying values) | corpus |
 | `PIC 99 VALUE "7"` | accepted, 7 stored | refused by IBM; cobc warns and stores 70 | corpus |
 | An unknown environment-name in DISPLAY UPON (SYSERR, or any word) | accepted, written to standard output | refused by IBM; cobc writes SYSERR to standard error | corpus |
-| Floating-point exponentiation, `FUNCTION SQRT(10) ** 2` | not run yet: abend IRONWORK | runs it | CCVS85 IF136A |
 
 ### 5.5 Chosen, and not switched
 
@@ -275,3 +274,4 @@ dialects and on both executors (ironwork-roadmap 3.14).
 | SEARCH ... VARYING one of the table's own indexes | the search uses that index, and the table's first is left alone (p. 437) | the same | CCVS85 NC235A, which now passes |
 | An ALL literal compared with an item | as long as the item, so cut when it is longer (p. 17): ALL '00' compared with a `PIC 9` item is '0' | the same | CCVS85 NC250A, which now passes |
 | DISPLAY of an integer or numeric intrinsic function, FUNCTION INTEGER(-2.5) | refused when compiled: such a function can be used only where an arithmetic expression can (Language Reference SC27-8713-03, p. 499; Programming Guide SC27-8714-03, p. 56; C332), and COMPUTE gives its value to an item DISPLAY shows | shows the value and its sign | test programs |
+| Floating-point exponentiation, and an exponent with decimal places or a division | `FUNCTION SQRT(10) ** 2` is 10, `A ** 0.5` and `8 ** (1 / 3)` with dmax above zero are floating point (Programming Guide SC27-8714-03, pp. 796, 800), zero to a negative power a size error (Language Reference SC27-8713-03, pp. 296-297, Table 32); zero to the power zero and a negative base to a fractional power take Table 32's values without running ON SIZE ERROR (C334) | `8 ** (1 / 3)` cuts the quotient first and gives 1.999999; zero to a negative power gives 0, and zero to the power zero is a size error | CCVS85 IF136A, which now passes |

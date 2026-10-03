@@ -166,3 +166,37 @@ fn a_by_value_argument_to_a_by_reference_parameter_gives_it_a_copy() {
     );
     assert_eq!(on_both(&source), "000000042\n000000042\n");
 }
+
+/// Programming Guide SC27-8714-03, pp. 796 and 800: an exponent with decimal places, or one holding
+/// a division when dmax is above zero, makes the expression floating point, as a floating-point
+/// function does. Language Reference SC27-8713-03, pp. 266 and 296-297: 4 ** 0.5 is +2, zero to a
+/// negative power is a size error, and a negative base to a fractional power is taken as its
+/// absolute value (assumption C334).
+#[test]
+fn an_exponent_with_decimal_places_is_evaluated_in_floating_point() {
+    let source = program(
+        "",
+        "       01  W PIC S9(5)V9(7).\n       01  X PIC S9V9(6) SIGN LEADING SEPARATE.\n       01  A PIC 9 VALUE 2.\n       01  N PIC S9 VALUE -4.\n       01  Z PIC 9 VALUE 0.\n       01  D COMP-2 VALUE -2.\n",
+        &[
+            line("COMPUTE W ROUNDED = FUNCTION SQRT(10) ** 2"),
+            line("DISPLAY W"),
+            line("COMPUTE X = 4 ** 0.5"),
+            line("DISPLAY X"),
+            line("COMPUTE X = A ** 0.5"),
+            line("DISPLAY X"),
+            line("COMPUTE X ROUNDED = 8 ** (1 / 3)"),
+            line("DISPLAY X"),
+            line("COMPUTE X = D ** 3"),
+            line("DISPLAY X"),
+            line("COMPUTE X = N ** 0.5"),
+            line("DISPLAY X"),
+            line("COMPUTE X = Z ** -1.5"),
+            line("    ON SIZE ERROR DISPLAY 'SIZE'"),
+            line("END-COMPUTE"),
+            line("DISPLAY X"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    );
+    assert_eq!(on_both(&source), "00010000000{\n+2000000\n+1414214\n+2000000\n-8000000\n+2000000\nSIZE\n+2000000\n");
+}
