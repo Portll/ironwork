@@ -46,10 +46,11 @@ pub fn level_ended<H, L: Loader<H>>(unit: &RunUnit<'_, H, L>) -> bool {
     unit.cics.as_ref().is_some_and(|t| t.ending_level)
 }
 
-/// LINK runs a program and comes back; XCTL runs it in place of the program running this logical
-/// level, with the level's HANDLE ABEND exit (C239), and the level ends when it does (C233). A
-/// LINKed program gets the COMMAREA item itself; XCTL passes a copy, since this program's storage
-/// goes away. Each LINK or XCTL starts the program with fresh WORKING-STORAGE, as CICS gives it.
+/// LINK runs a program and comes back, from STOP RUN too, which ends a level as RETURN does (C144);
+/// XCTL runs it in place of the program running this logical level, with the level's HANDLE ABEND
+/// exit (C239), and the level ends when it does (C233). A LINKed program gets the COMMAREA item
+/// itself; XCTL passes a copy, since this program's storage goes away. Each LINK or XCTL starts the
+/// program with fresh WORKING-STORAGE, as CICS gives it.
 pub(super) fn link<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, t: &Transfer<P, O, S>, xctl: bool) -> R<Flow> {
     eib_bytes(x.unit(), EIBFN, if xctl { &[0x0E, 0x04] } else { &[0x0E, 0x02] });
     let Some(name) = text(x, t.program.as_ref(), at.pos)?.map(|n| n.to_ascii_uppercase()) else {
@@ -85,7 +86,7 @@ pub(super) fn link<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &A
     unit.release_temporaries(mark);
     restore_calen(unit, saved);
     match ending? {
-        Ending::StopRun => Ok(Flow::End(Ending::StopRun)),
+        Ending::StopRun if xctl => Ok(Flow::End(Ending::StopRun)),
         _ if xctl => {
             task(x).ending_level = true;
             Ok(Flow::End(Ending::Goback))

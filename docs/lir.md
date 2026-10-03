@@ -1317,7 +1317,8 @@ pub enum Cics<P, O, S> { /* … */ }
 `cics::Condition` is the one RESP and default-abend table (semantics-library.md §7, DRY-4). An
 option is evaluated when the service reads it, in the order the walker read it, so binding evaluates
 nothing. `rt::cics::run` returns `Next`, `GoTo(ParaId)` for a handled condition, or `End` for
-RETURN, XCTL and a LINKed program's STOP RUN. RETURN and XCTL end the logical level, not only the
+RETURN, XCTL and STOP RUN in a program XCTL started; a LINK comes back from a level STOP RUN ends,
+as from RETURN (C144). RETURN and XCTL end the logical level, not only the
 program: they set the task's `ending_level`, and a CALL that comes back while
 `rt::cics::level_ended` holds ends its program too, in the walker's and the VM's `call_nested`
 alike, until the LINK, XCTL or exit that ran the level clears it (C233). A HANDLE ABEND exit is not

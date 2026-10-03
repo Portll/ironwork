@@ -283,6 +283,7 @@ pub const CICS_RETURN_ENDS_THE_LEVEL: &str = "C233";
 pub const CICS_HANDLERS_ACROSS_CALL: &str = "C234";
 pub const CICS_CONDITION_LABEL_OWNER: &str = "C235";
 pub const CICS_RETURN_BELOW_THE_FIRST_LEVEL: &str = "C143";
+pub const CICS_STOP_RUN_ENDS_THE_LEVEL: &str = "C144";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1807,6 +1808,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: CICS_RETURN_BELOW_THE_FIRST_LEVEL,
         claim: "The COMMAREA, IMMEDIATE and CHANNEL options of RETURN can be used only when RETURN returns control to CICS; otherwise INVREQ occurs with RESP2 2, 'a RETURN command with the CHANNEL, COMMAREA, or IMMEDIATE option is issued by a program that is not at the highest logical level' (CICS TS 6.x, RETURN, dfhp4_return). TRANSID is not among them: specified on a program that is not at the highest level, it is the transaction identifier for the terminal's next input unless an error on COMMAREA, INPUTMSG or CHANNEL on the final RETURN clears it (dfhp4_return). A RETURN TRANSID below the first level therefore names the next transaction, which a later RETURN TRANSID replaces, and one that raises INVREQ names none. ironwork raises none of the errors that clear it, models no terminal-less task (RESP2 1) and keeps CHANNEL only for the INVREQ",
         basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CICS_STOP_RUN_ENDS_THE_LEVEL,
+        claim: "STOP RUN terminates the run unit, the Language Environment enclave, whose main routine it ends (z/OS 3.1 Language Environment Programming Guide, 'The enclave defines the scope of language statements', ceea200118). Under CICS a run unit is what the task, a LINK or an XCTL starts, with the programs it CALLs ('CICS run unit', ceea200254; CICS TS 6.x, 'Flow of control between programs and subprograms', dfhp3_cobol_subprog_flow), and a program at level 2, LINKed, CALLed there or started there by XCTL, can use GOBACK, STOP RUN or EXEC CICS RETURN to return to the level 1 program that LINKed to it (dfhp3_cobol_subprog_flow). STOP RUN therefore ends the logical level it runs at, as RETURN does (C233): a LINK, or a HANDLE ABEND PROGRAM exit entered as by LINK, comes back from it, and at the task's first level it ends the task. The Programming Guide's table of termination statements says instead that in a CICS environment STOP RUN terminates the entire transaction, including all programs running within it (SC27-8714-03, p. 546, Table 70); ironwork follows CICS and Language Environment, whose rules for the level are the more specific",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

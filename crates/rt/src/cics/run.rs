@@ -135,7 +135,8 @@ pub enum Flow {
     Next,
     /// A handled condition.
     GoTo(ParaId),
-    /// RETURN, XCTL, or a LINKed program's STOP RUN.
+    /// RETURN, XCTL, or STOP RUN in the program XCTL started, which ends the level as RETURN does
+    /// (C144).
     End(Ending),
 }
 

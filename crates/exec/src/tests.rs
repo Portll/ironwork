@@ -2232,8 +2232,9 @@ type LevelEnd = Result<(Option<String>, Option<Vec<u8>>), String>;
 /// The output of a task whose first program runs `body`, then RETURN, with the TRANSID and
 /// COMMAREA the task ended with, or its abend code. RETP RETURNs, RETT RETURNs TRANSID('NEXT')
 /// COMMAREA('DONE'), RETX TRANSID('NXT2') and RETI TRANSID('NXT3') IMMEDIATE, RETT and RETI
-/// showing INVREQ and RESP2; XCTP XCTLs to LASTX, which shows its COMMAREA; MIDC PERFORMs a
-/// paragraph that CALLs RETP, and CALLER CALLs the program its COMMAREA names.
+/// showing INVREQ and RESP2; XCTP XCTLs to LASTX, which shows its COMMAREA; STOPR runs STOP RUN
+/// and XCTS XCTLs to it; MIDC PERFORMs a paragraph that CALLs RETP, and CALLER CALLs the program
+/// its COMMAREA names.
 fn level_task(body: &[&str]) -> (String, LevelEnd) {
     let mut procedure: Vec<String> = body.iter().map(|s| line(s)).collect();
     procedure.push(line("EXEC CICS RETURN END-EXEC."));
@@ -2250,6 +2251,8 @@ fn level_task(body: &[&str]) -> (String, LevelEnd) {
         ("RETI", cics_program("RETI", resp, "", &reti.map(line).concat())),
         ("XCTP", cics_program("XCTP", "       01  WS-XC PIC X(2) VALUE 'XC'.\n", "", &["EXEC CICS XCTL PROGRAM('LASTX') COMMAREA(WS-XC)", "    LENGTH(2) END-EXEC", "DISPLAY 'AFTER XCTL'", "GOBACK."].map(line).concat())),
         ("LASTX", cics_program("LASTX", "", "       01  DFHCOMMAREA PIC X(2).\n", &["DISPLAY 'LAST ' DFHCOMMAREA ' ' EIBCALEN", "EXEC CICS RETURN END-EXEC."].map(line).concat())),
+        ("STOPR", cics_program("STOPR", "", "", &["DISPLAY 'IN STOPR'", "STOP RUN."].map(line).concat())),
+        ("XCTS", cics_program("XCTS", "", "", &["EXEC CICS XCTL PROGRAM('STOPR') END-EXEC", "DISPLAY 'AFTER XCTL'", "GOBACK."].map(line).concat())),
         ("MIDC", cics_program("MIDC", "", "", &midc.concat())),
         ("CALLER", cics_program("CALLER", "       01  WS-NAME PIC X(8).\n", "       01  DFHCOMMAREA PIC X(8).\n", &["MOVE DFHCOMMAREA TO WS-NAME", "CALL WS-NAME", "DISPLAY 'BACK IN CALLER'", "EXEC CICS RETURN END-EXEC."].map(line).concat())),
     ];
@@ -2362,6 +2365,16 @@ fn a_dynamic_call_suspends_the_condition_handlers_until_the_subprogram_returns()
     assert_eq!(condition_call(&[ignore], "SETH", true), ("MAIN GOES ON\n".into(), None));
     assert_eq!(condition_call(&[handle], "OWNH", true), ("OWN HANDLED\nMAIN HANDLED\n".into(), None));
     assert_eq!(condition_call(&[ignore], "POPP", true), ("MAIN GOES ON\n".into(), None));
+}
+
+#[test]
+fn stop_run_below_the_first_level_returns_to_the_program_that_linked_to_the_level() {
+    let back = |out: &str| (out.to_owned(), Ok((None, None)));
+    assert_eq!(level_task(&["EXEC CICS LINK PROGRAM('STOPR') END-EXEC", "DISPLAY 'BACK IN MAIN'"]), back("IN STOPR\nBACK IN MAIN\n"));
+    assert_eq!(linked_caller("STOPR"), back("IN STOPR\nBACK IN MAIN\n"));
+    assert_eq!(level_task(&["EXEC CICS LINK PROGRAM('XCTS') END-EXEC", "DISPLAY 'BACK IN MAIN'"]), back("IN STOPR\nBACK IN MAIN\n"));
+    assert_eq!(level_task(&["CALL 'STOPR'", "DISPLAY 'BACK IN MAIN'"]), back("IN STOPR\n"));
+    assert_eq!(level_task(&["EXEC CICS XCTL PROGRAM('STOPR') END-EXEC"]), back("IN STOPR\n"));
 }
 
 #[test]
