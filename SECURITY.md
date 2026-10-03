@@ -25,9 +25,22 @@ confined; anything that lets it act outside those bounds is scoped for vulnerabi
 - **Opening a file no DD maps.** A program reaches only the files its DDs are given, by `--dd` or
   `DD_NAME` in the environment; `ASSIGN` names a DD, not a host path. A way to open, create or
   delete any other file at run time is in scope.
-- **Execution.** Anything that makes `ironwork check` or `ironwork run` start a host process, load
-  native code or open a network connection. They do none of these, and `unsafe` code is forbidden
-  across the workspace.
+- **Execution.** Anything that makes a CLI command start a host process, load native code or open
+  a network connection outside the bounds described below. The table shows per-command properties:
+
+| Command | Reads Files | Writes Files | Starts Host Process | Opens Network | Listens |
+|---------|:-----------:|:------------:|:-------------------:|:--------------:|:-------:|
+| run | ✓ | ✓ | ✗ | ✓ (--sql-db) | ✗ |
+| check | ✓ | ✗ | ✗ | ✗ | ✗ |
+| cics | ✓ | ✓ | ✗ | ✓ (--sql-db) | ✓ (--serve) |
+| compile | ✓ | ✓ | ✗ | ✗ | ✗ |
+| dump | ✓ | ✗ | ✗ | ✗ | ✗ |
+| job | ✓ | ✓ | ✗ | ✓ (--sql-db) | ✗ |
+| fuzz | ✓ | ✓ | ✗ | ✗ | ✗ |
+| assumptions | ✗ | ✗ | ✗ | ✗ | ✗ |
+| --version | ✗ | ✗ | ✗ | ✗ | ✗ |
+
+`unsafe` code is forbidden across the workspace.
 - **A crash or unbounded cost from crafted source.** The front end must refuse bad input with an
   error, never panic, and never take memory or time without bound. It is fuzzed for this; an input
   that gets through is in scope.
