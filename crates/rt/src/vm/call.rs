@@ -90,7 +90,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             let returning = program.storage.returning.map(|o| (usize::from(o), program.storage.linkage[usize::from(o)] as usize));
             Bindings { records: &[], using, addresses: &addresses, returning }.bind(vm.unit, &mut vm.linkage);
             (vm.cics_handlers, vm.first) = (caller.cics_handlers.lend(suspends), caller.first);
-            let ending = match vm.run_from(entry.map(|e| (e.paragraph, e.block))) {
+            let ending = match vm.run_called(entry.map(|e| (e.paragraph, e.block))) {
                 Err(Halt::Unimplemented(what)) => return Err(Halt::Unimplemented(what)),
                 Err(Halt::Abend(a)) => Err(a),
                 Ok(e) => Ok(e),

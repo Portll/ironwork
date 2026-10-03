@@ -1,6 +1,6 @@
 //! EXEC CICS (lir.md §9.5): a command run by `rt::cics::run` over the activation as its
-//! `CicsHost`, with the logical level's handler table; a logical level whose HANDLE ABEND exit an
-//! abend reaches; and LINK and XCTL as a new activation at a level of its own.
+//! `CicsHost`, with the logical level's handler table; an activation whose HANDLE ABEND exit an
+//! abend reaches; and LINK as a new activation at a level of its own, XCTL at this one's.
 
 use super::{Code, Halt, R, Vm, not_yet};
 use crate::abend::{Abend, Ending};
@@ -8,7 +8,7 @@ use crate::arith;
 use crate::bms::Mapset;
 use crate::callee;
 use crate::cics::{self, Cics, CicsCommand, CicsHost, Datum, ExitTarget, Handlers};
-use crate::lir::{Chars, CicsId, Operand, PlaceId, Step, SymId};
+use crate::lir::{BlockId, Chars, CicsId, Operand, ParaId, PlaceId, Step, SymId};
 use crate::storage::{Loc, Val};
 use crate::store::{self, ProgramFacts};
 use crate::unit::{Loader, RunUnit};
@@ -85,38 +85,34 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     }
 
     /// `Machine::run_level`: this activation as a logical level of the task. An abend that reaches
-    /// it while its HANDLE ABEND exit is active goes to the exit (C142): a LABEL as a GO TO from
-    /// the procedure's start, a PROGRAM in place of the rest of this level.
+    /// it while its HANDLE ABEND exit is active goes to the exit (C142): a LABEL as a GO TO at the
+    /// HANDLE ABEND command (C236), a PROGRAM in place of the rest of this level.
     pub(super) fn run_level(&mut self) -> R<Ending> {
-        let mut start = None;
+        self.run_taking_exits(None, true)
+    }
+
+    /// `Machine::run_called`: a CALLed program, at its caller's logical level, takes the level's
+    /// exit only when it is a LABEL (C238).
+    pub(super) fn run_called(&mut self, at: Option<(ParaId, BlockId)>) -> R<Ending> {
+        self.run_taking_exits(at, false)
+    }
+
+    fn run_taking_exits(&mut self, at: Option<(ParaId, BlockId)>, runs_level: bool) -> R<Ending> {
+        let mut ending = self.run_from(at);
         loop {
-            let abend = match self.run_from(start) {
+            let abend = match ending {
                 Err(Halt::Abend(abend)) => abend,
                 done => return done,
             };
-            let me = self.activation();
-            match cics::abend_exit(self.unit, &mut self.cics_handlers, &abend, me, true)? {
+            match cics::abend_exit(self.unit, &mut self.cics_handlers, &abend, self.serial, runs_level)? {
                 None => return Err(abend.into()),
-                Some(ExitTarget::Label { paragraph: p, .. }) => {
-                    self.unwind();
-                    start = Some((p, self.p.paragraphs[p as usize].entry));
-                }
+                Some(ExitTarget::Label { paragraph, at, .. }) => ending = self.go_to(paragraph, at),
                 Some(ExitTarget::Program { name, commarea }) => {
                     let ending = cics::enter_exit_program(self, &name, commarea, abend.pos);
                     let ending = self.settle(ending)?;
                     return Ok(if ending == Ending::StopRun { ending } else { Ending::Goback });
                 }
             }
-        }
-    }
-
-    /// The frames an abend left, gone as the walker's Rust calls are: the points they armed stay
-    /// armed, and the depth is the activation's.
-    fn unwind(&mut self) {
-        self.returns.frames.truncate(1);
-        if let Some(main) = self.returns.frames.first_mut() {
-            main.temps.clear();
-            self.unit.depth = main.depth as usize;
         }
     }
 

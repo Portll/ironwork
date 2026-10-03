@@ -79,6 +79,26 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         }
     }
 
+    /// `Machine::go_to`: after an abend, the procedure from paragraph `p` as a GO TO at `from`
+    /// reaches it. The frames the abend passed through are left as a GO TO leaves them, their points
+    /// still armed, and the depth is the activation's (C236).
+    pub(super) fn go_to(&mut self, p: ParaId, from: Pos) -> R<Ending> {
+        while self.returns.frames.len() > 1 {
+            self.leave();
+        }
+        if let Some(main) = self.returns.frames.first_mut() {
+            main.temps.clear();
+            self.unit.depth = main.depth as usize;
+        }
+        self.line = from.line;
+        self.segment = self.p.paragraphs[p as usize].priority;
+        self.arrival = Arrival::GoTo;
+        match self.dispatch(self.entry(p), 0)? {
+            Exit::End(e) => Ok(e),
+            Exit::Completed | Exit::Left(_) => Ok(Ending::EndOfProgram),
+        }
+    }
+
     /// Runs blocks from `block` until the frame at `floor`, which this loop runs under, completes
     /// or is left, or the run ends. Control reaching a paragraph's entry tells the observer.
     fn dispatch(&mut self, mut block: BlockId, floor: usize) -> R<Exit> {
@@ -341,7 +361,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
     }
 
     /// Runs `range` as a procedure under a frame of its own, in a dispatch loop of its own. An
-    /// abend that unwinds it takes its frames and leaves their points armed, as the walker's
+    /// abend that unwinds it leaves its frames as a GO TO does, their points armed, as the walker's
     /// `perform_range` does when one passes through it.
     pub(super) fn run_procedure(&mut self, range: RangeId, arrival: Arrival) -> R<Exit> {
         let r = self.p.ranges[range as usize];
@@ -350,7 +370,9 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         self.arrival = arrival;
         let exit = self.dispatch(self.entry(r.first), floor);
         if exit.is_err() {
-            self.returns.frames.truncate(floor);
+            while self.returns.frames.len() > floor {
+                self.leave();
+            }
         }
         exit
     }

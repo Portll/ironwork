@@ -94,14 +94,16 @@ fn a_handle_label_two_sections_have_is_the_one_in_the_handle_command_s_section()
 }
 
 #[test]
-fn handle_abend_is_refused_and_a_handle_command_s_resp_is_data() {
-    let refused = |option: &str| {
+fn handle_abend_keeps_its_label_s_paragraph_and_a_handle_command_s_resp_is_data() {
+    let handle_abend = |option: &str| {
         let body = [line(&format!("EXEC CICS HANDLE ABEND {option} END-EXEC")), line("GOBACK."), "       RECOVER.\n".to_owned(), line("GOBACK.")].concat();
-        lower(&compiled(&program("", DATA, &body))).unwrap_err()
+        let p = lowered(&program("", DATA, &body));
+        commands(&p)[0].1.command.clone()
     };
-    for option in ["LABEL(RECOVER)", "PROGRAM('EXITP')", "CANCEL", "RESET"] {
-        assert!(matches!(refused(option), LowerError::Unsupported("EXEC CICS HANDLE ABEND", _)), "{option}");
-    }
+    assert_eq!(handle_abend("LABEL(RECOVER)"), Cics::HandleAbend { program: None, label: Some(1), reset: false });
+    assert!(matches!(handle_abend("PROGRAM('EXITP')"), Cics::HandleAbend { program: Some(Datum::Value(_)), label: None, reset: false }));
+    assert_eq!(handle_abend("CANCEL"), Cics::HandleAbend { program: None, label: None, reset: false });
+    assert_eq!(handle_abend("RESET"), Cics::HandleAbend { program: None, label: None, reset: true });
     let body = [line("EXEC CICS HANDLE CONDITION ERROR(OOPS) RESP(WS-RESP) END-EXEC"), line("GOBACK."), "       OOPS.\n".to_owned(), line("GOBACK.")].concat();
     let p = lowered(&program("", DATA, &body));
     let got = commands(&p);

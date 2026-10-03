@@ -1360,24 +1360,27 @@ HANDLE labels there. SYNCPOINT is a service (cics/services.rs) that settles the 
   and XCTL return `Step::End`. No new terminator is needed.
 - **Refused:** a HANDLE label that names no procedure, which the walker abends on only after the
   task check (IRONWORK at the block, or the outside-a-task abend first), so no one terminator
-  gives both. HANDLE ABEND, whose exit an abend takes when it reaches the program's activation,
-  in the walker's `run_level` and the VM's alike (below); lowering still refuses it, so no VM
-  activation sets an exit, and the walker's rules for one at a CALL and at XCTL (C237-C239) have
-  nothing to carry on the VM.
+  gives both.
+- **HANDLE ABEND** keeps the paragraph its LABEL names, as HANDLE CONDITION does. Its exit is
+  taken when an abend reaches a program's activation, in the walker's `run_level` and
+  `run_called` and the VM's alike (below), so the op only changes the program level's handlers.
 - **Not lowered:** the observer's sinks (`cics_sinks`), which tell an observer a command's operands
   and change no result, as with CALL's and DISPLAY's. The VM tells them from the options the
   command keeps, which leave out SYSID on any command but ASSIGN, WRITE's FROM under JOURNALNAME or
   JOURNALNUM, and QNAME written beside QUEUE; an observed command kept as `Unsupported` stops the VM
   as `Halt::Unimplemented`.
-- **On the VM.** Handlers live in the activation running the level. An abend that reaches a level
-  whose HANDLE ABEND exit is active goes to the exit as `run_level` sends it: a LABEL restarts the
-  activation's dispatch at the label, its frames gone as the walker's Rust calls are, the points
-  they armed still armed and the depth the activation's. LINK and XCTL run the program as a new
-  activation through `CicsHost::run_program`; the task's first program, which the run unit holds no
-  handle for, comes from the reference each activation carries from it (`first`, the walker's
-  too; C148), as it does for a CALL of it (C127). The mapset comes from `Loader::mapset`; the LIR has
-  no place for the symbolic map SEND MAP without FROM and RECEIVE MAP without INTO or SET find by
-  name, so those stop the VM as `Halt::Unimplemented`.
+- **On the VM.** Handlers live in the activation running the level, which the task numbers as the
+  walker numbers its activations, the number a LABEL records. An abend that reaches an activation
+  goes to the exit as the walker's `run_level`, and for a CALLed program `run_called`, sends it: a
+  LABEL is entered as a GO TO at the HANDLE ABEND command (C236), the frames the abend passed
+  through left as a GO TO leaves them, their points still armed and those that can resume keeping
+  what they displaced, the depth the activation's, the arrival register GO TO and the line register
+  the command's. LINK and XCTL run the program as a new activation through `CicsHost::run_program`;
+  the task's first program, which the run unit holds no handle for, comes from the reference each
+  activation carries from it (`first`, the walker's too; C148), as it does for a CALL of it (C127).
+  The mapset comes from `Loader::mapset`; the LIR has no place for the symbolic map SEND MAP without
+  FROM and RECEIVE MAP without INTO or SET find by name, so those stop the VM as
+  `Halt::Unimplemented`.
 
 ### 9.6 SORT, MERGE and Report Writer
 
