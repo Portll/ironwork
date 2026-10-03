@@ -6,7 +6,8 @@
 //! CALL, CANCEL, ENTRY, INVOKE, SET, STRING, UNSTRING, INSPECT, SEARCH, ACCEPT, the file
 //! statements, intrinsic functions, independent segments, class definitions, USE AFTER
 //! EXCEPTION/ERROR, USE FOR DEBUGGING, JSON and XML GENERATE and PARSE, the EXEC blocks, SORT,
-//! MERGE, RELEASE and RETURN, the Report Writer, and user-defined functions.
+//! MERGE, RELEASE and RETURN, the Report Writer, user-defined functions, and EXTERNAL and GLOBAL
+//! records, files and declaratives.
 //! Anything else is [`LowerError::Unsupported`], naming the construct.
 
 mod call;
@@ -21,6 +22,7 @@ mod function;
 mod markup;
 mod plans;
 mod report;
+mod scope;
 mod search;
 mod set;
 mod sort;
@@ -35,7 +37,7 @@ mod tests;
 pub use verify::verify;
 
 use crate::Compiled;
-use crate::layout::{Binding, Layout, Resolved};
+use crate::layout::{Layout, Resolved};
 use crate::machine::Machine;
 use crate::unit::{AddProgram, Clock, Library, RunUnit};
 use rt::abend::AbendCode;
@@ -103,13 +105,13 @@ fn push<T>(table: &mut Vec<T>, value: T, what: &'static str) -> R<u32> {
 /// Check and uses only the constructs lowered so far lowers.
 pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
     let mut l = Lower::new(compiled);
-    l.refuse_shared_storage()?;
     let id = l.sym(&compiled.program.id);
     let sources = compiled.program.sources.iter().map(|s| l.sym(s)).collect();
     let storage = l.storage()?;
     let items = l.items()?;
     l.services.files = l.files()?;
     l.services.declaratives = l.declaratives()?;
+    l.services.scope = l.scope()?;
     l.services.report = l.report_writer()?;
     (l.sql, l.services.sqlca) = l.sql_table()?;
     let paragraphs = l.procedure()?;
@@ -239,23 +241,6 @@ impl<'c> Lower<'c> {
         }
     }
 
-    /// EXTERNAL and GLOBAL storage, files and declaratives, which the LIR has no form for yet.
-    fn refuse_shared_storage(&self) -> R<()> {
-        let program = self.program;
-        if self.layout.bindings.iter().any(|b| *b != Binding::Argument) || program.files.iter().any(|f| f.external || f.declared_in.is_some()) {
-            return unsupported("EXTERNAL data and files, and GLOBAL names of a containing program", Pos::default());
-        }
-        if !program.containers.is_empty() && !program.files.is_empty() {
-            return unsupported("the files of a contained program, which a containing program's GLOBAL declaratives may serve", Pos::default());
-        }
-        let entries = program.working_storage.iter().chain(&program.local_storage).chain(&program.linkage);
-        let declares_global = entries.clone().any(|e| e.global) || program.files.iter().any(|f| f.global) || program.declaratives.errors.iter().any(|u| u.global);
-        if !program.nested.is_empty() && declares_global {
-            return unsupported("GLOBAL names and declaratives of a program that contains others", Pos::default());
-        }
-        Ok(())
-    }
-
     fn sym(&mut self, text: &str) -> SymId {
         if let Some(&id) = self.symbol_ids.get(text) {
             return id;
@@ -303,7 +288,7 @@ impl<'c> Lower<'c> {
         let (image, local_image, abend) = {
             let mut unit = RunUnit::new(Library::default(), crate::files::Dds::default(), None, Clock::Fixed(0, 0), &mut out, &mut err);
             let me = unit.add(None, self.program, size);
-            let abend = Machine::activation(self.c, me, &mut unit, true).err();
+            let abend = Machine::unbound(self.c, me, &mut unit).err();
             let base = unit.programs[me].base;
             let image = unit.mem[base..base + size].to_vec();
             let local_image = if local > 0 { unit.mem[unit.mem.len() - local..].to_vec() } else { Vec::new() };

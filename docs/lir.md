@@ -100,8 +100,8 @@ pub struct Program {
     /// The FileOp, FileDesc, CallPlan, SortPlan, ReleasePlan, ReturnPlan, InvokePlan and
     /// CicsCommand tables, the Sqlca, the ENTRY points (§9.3), for a class definition its class
     /// (§9.8), the UserFunctionPlan table and for a function definition its FunctionDefinition
-    /// (§9.15), the declaratives' `Declaratives` (§9.10), the JSON and XML statements (§9.13), and
-    /// the report model `Op::Report` names (§9.6).
+    /// (§9.15), the declaratives' `Declaratives` (§9.10), the JSON and XML statements (§9.13), the
+    /// report model `Op::Report` names (§9.6), and the EXTERNAL and GLOBAL `Scope` (§9.16).
     pub services: Services,
     pub sql: Vec<SqlEntry>, pub abends: Vec<AbendText>, pub edits: Vec<Edit>,
     pub symbols: Vec<String>, pub debug: Debug,
@@ -274,8 +274,9 @@ pub struct PlaceNumcheck { pub lax: Option<rt::store::LaxRedefinition>, pub remo
   SD's area (machine/sort.rs:180, 215 (int)) are offsets in it. **Local** is pushed at activation
   (machine.rs:217-220).
 - **Linkage(n)** is bound by USING (machine.rs:1054-1060), RETURNING (1064-1069), SET ADDRESS OF
-  (1151-1167), CICS for DFHEIBLK and DFHCOMMAREA (machine/cics.rs:386, 413-428), and method entry
-  for FACTORY and OBJECT data (machine/oo.rs:413-419 (int)).
+  (1151-1167), CICS for DFHEIBLK and DFHCOMMAREA (machine/cics.rs:386, 413-428), method entry
+  for FACTORY and OBJECT data (machine/oo.rs:413-419 (int)), and activation for an EXTERNAL record
+  or a containing program's GLOBAL one, which layout places as LINKAGE records (§9.16).
 - **Pointer-based storage is LINKAGE.** The walker has no BASED items: a pointer reaches data only
   through SET ADDRESS OF a LINKAGE record.
 - **DFHEIBLK stays `Linkage(0)`,** first in USING (syntax/src/parser.rs:495-510) and bound to the
@@ -2127,6 +2128,71 @@ same sequence when the operand is evaluated (assumption C274):
   holding an OCCURS DEPENDING ON table: locating it reads the count and may abend at the
   invocation's position, which the definition does not know.
 
+### 9.16 EXTERNAL and GLOBAL
+
+Layout places an EXTERNAL record, a record redefining one, the records of an EXTERNAL file and a
+containing program's GLOBAL records as LINKAGE records after the program's own (`Layout.bindings`,
+compile/src/scope.rs), so their places are `Base::Linkage(n)` and nothing else in the LIR changes.
+The walker gives each its address when the program is activated, and each EXTERNAL or GLOBAL file
+its connector (`bind_shared`, machine/scope.rs; assumptions C180 and C181). `Services.scope` holds
+what that needs, found by name once at lowering:
+
+```rust
+pub struct Scope {
+    /// The PROGRAM-IDs of the programs containing this one, innermost first.
+    pub containers: Vec<SymId>,
+    /// Each LINKAGE record whose storage the run unit or a containing program holds, in ordinal order.
+    pub records: Vec<(u16, Binding)>,
+    /// Each file whose connector is not its own; each file whose record area is a bound record's.
+    pub files: Vec<SharedFile>, pub areas: Vec<(u16, u16)>,
+    /// A program that contains others: its GLOBAL records and files, and its GLOBAL EXCEPTION/ERROR
+    /// procedures for files and for the open modes.
+    pub globals: Vec<Global>, pub global_files: Vec<(u16, RangeId)>, pub global_modes: [Option<RangeId>; 4],
+}
+pub enum Binding { External { name: SymId, size: u32 }, ExternalFile(u16), Global { program: SymId, section: Section, name: SymId } }
+pub enum Section { WorkingStorage, LocalStorage, Linkage, File }
+pub struct SharedFile { pub file: u16, pub external: bool, pub declared_in: Option<SymId> }
+pub struct Global { pub section: Section, pub name: SymId, pub at: GlobalAt }
+pub enum GlobalAt { Program(u32), Local(u32), Linkage(u16) }
+```
+
+- **Activation.** After the program is marked active and before LOCAL-STORAGE is pushed, as
+  `activation_within` orders them, the executor binds each of `records` in order: `External` to
+  `RunUnit::external` of the name and size, which allocates the record the first time a program
+  describes it and refuses another size; `ExternalFile(k)` to the run unit's record area of file
+  k's name and area size; `Global` to what the containing program of that PROGRAM-ID, as it is
+  running, gives as its GLOBAL `name` of `section` (for `File`, the file's name). Then each of
+  `files`: an EXTERNAL one is connected to `RunUnit::external_file` of its name; a GLOBAL one to
+  the containing program's own file of its name, after its print-file carriage is found to be the
+  same. Each refusal is the walker's IRONWORK abend, with no position: a containing program not
+  running, a record or file it does not have, a size or carriage that differs.
+- **The running containers.** A CALL gives the callee the running programs among its
+  `containers`: the caller and the caller's own containers, matched by PROGRAM-ID, each as it was
+  when control left it (its slab, its LOCAL-STORAGE and a copy of its LINKAGE addresses), as
+  `containers_of` does. LINK, XCTL and the run's first program have none.
+- **What a containing program gives.** Each GLOBAL record and file it declares is in `globals`
+  where `global_address` finds it: the first root item of its name in WORKING-STORAGE or
+  LOCAL-STORAGE (an offset), the first LINKAGE record of its name (the address the container's
+  activation holds), the first file of its name (its record area in the slab, or the record bound
+  to it). A record the walker would not find there has no entry, and binding it gives the walker's
+  abend. Matching a binding's names to these entries is the one lookup by data name at run time,
+  made once per activation, as CALL finds a program by name.
+- **A file's record area** is the slab's, or for a file in `areas` the address of the record bound
+  to it. A key of such a file is the span of its item within that record, which lowering takes
+  from a place on any record bound to the file's area, since every one is bound to the same
+  storage.
+- **USE GLOBAL.** A failing status with no phrase to run and no procedure of the program's own
+  runs the first GLOBAL procedure of its running containers, innermost out: for the file, matched
+  by name and the PROGRAM-ID that declares it, then for the mode it is open or being opened in
+  (`global_declarative`). It runs as a procedure of the containing program (§9.6, §9.10): an
+  activation of that program over its storage as it was left, with nothing armed, nothing in
+  progress, and the containers outside it; one PERFORM deeper than the statement. `Completed` goes
+  back into the statement; STOP RUN leaves it as the program's own procedure's would; any other
+  leaving abends IRONWORK "the GLOBAL EXCEPTION/ERROR procedure of P, run for Q, left by GO TO,
+  GOBACK or EXIT PROGRAM, which is not supported yet" at the statement, as the walker does.
+- **Refused at compile time, not by lowering:** what assumption C181 lists as not supported yet,
+  and EXTERNAL in FACTORY or OBJECT WORKING-STORAGE.
+
 ## 10. The debug table
 
 ```rust
@@ -2201,8 +2267,9 @@ executors and recorded.
 1. **Lowering never changes a result** (§1).
 2. **Every program the walker runs lowers.** Lowering is total over programs that pass Check.
 3. **No data name is looked up at run time.** What is still found by name then is a program (CALL,
-   CANCEL, LINK, XCTL, and an LE service behind them), a class or method, and a CICS resource or
-   map named by data.
+   CANCEL, LINK, XCTL, and an LE service behind them), a class or method, a CICS resource or
+   map named by data, and at activation an EXTERNAL record or file in the run unit and a GLOBAL
+   record or file in a running containing program (§9.16).
 4. **Places match the layout.** A place has one subscript per `Item.dims` entry, and `check` fields
    exactly when the program has SSRANGE.
 5. **The control-flow graph is closed.** Every block ends in one terminator; every `Jump`, `Branch`
@@ -2262,8 +2329,8 @@ The golden programs of §12.2 run in both, which exercises C99.
 CALL and user-defined functions within the run unit; the file statements with LINAGE and their USE
 AFTER EXCEPTION/ERROR procedures, SORT, MERGE, RELEASE and RETURN with their procedures, and the
 Report Writer with its USE BEFORE REPORTING procedures, each a host of the `rt` service the walker
-calls; JSON and XML GENERATE and PARSE; EXEC SQL; and EXEC CICS in a task (`rt::vm::run_task`),
-LINK and XCTL included.
+calls; EXTERNAL and GLOBAL records and files and USE GLOBAL procedures; JSON and XML GENERATE and
+PARSE; EXEC SQL; and EXEC CICS in a task (`rt::vm::run_task`), LINK and XCTL included.
 LE callable services, the virtual printer, OO COBOL, NUMCHECK and PARMCHECK stop a run as
 `Halt::Unimplemented`, naming what was reached, and so do FUNCTION UUID4, whose value differs on
 every run, the CICS cases of §9.5, and the few places where the LIR does not keep what decides the

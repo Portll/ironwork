@@ -51,7 +51,7 @@ pub(super) struct Io<'a, 'p, 'u, 'w, L: Loader<Rc<Code>>> {
 }
 
 /// The open modes in the order `Declaratives.modes` holds their procedures.
-fn mode_index(mode: OpenMode) -> usize {
+pub(super) fn mode_index(mode: OpenMode) -> usize {
     match mode {
         OpenMode::Input => 0,
         OpenMode::Output => 1,
@@ -78,6 +78,10 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let p = self.p;
         let d = &p.services.files[k];
         let (offset, size) = p.storage.file_areas[k];
+        let base = match p.services.scope.areas.iter().find(|&&(f, _)| usize::from(f) == k) {
+            Some(&(_, record)) => self.linkage[usize::from(record)].unwrap_or_default(),
+            None => self.base,
+        };
         File {
             index: k,
             name: self.sym(d.name),
@@ -96,7 +100,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 counter: l.counter.map(|(q, _)| self.static_loc(q)),
             }),
             carriage: d.carriage,
-            area: (self.base + offset as usize, size as usize),
+            area: (base + offset as usize, size as usize),
             read_lengths: (d.read_lengths.0 as usize, d.read_lengths.1 as usize),
             depending: d.depending.map(|r| fileio::Depending { item: Handle::Place(r.item), lengths: (r.lengths.0 as usize, r.lengths.1 as usize) }),
         }
@@ -149,7 +153,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     }
 
     /// Abandons the statement running a declarative procedure, which left by `step`.
-    fn leave_statement(&mut self, step: Step, pos: Pos) -> Abend {
+    pub(super) fn leave_statement(&mut self, step: Step, pos: Pos) -> Abend {
         self.io.leaving = Some(step);
         Abend { code: AbendCode::Signal(Signal::DeclarativeExit), message: String::new(), pos, file: None }
     }
@@ -272,7 +276,7 @@ impl<'p, L: Loader<Rc<Code>>> Io<'_, 'p, '_, '_, L> {
     }
 
     /// `io_failure`: FILE STATUS, then for a failing status the file's EXCEPTION/ERROR procedure,
-    /// or with neither that nor FILE STATUS the run's end.
+    /// or a containing program's GLOBAL one, or with none and no FILE STATUS the run's end.
     pub(super) fn io_failure(&mut self, file: &FileOf<'p>, status: FileStatus, mode: Option<OpenMode>, message: String, pos: Pos) -> Result<(), Abend> {
         fileio::set_status(self, file, status, pos)?;
         if status.covers('0') {
@@ -282,6 +286,9 @@ impl<'p, L: Loader<Rc<Code>>> Io<'_, 'p, '_, '_, L> {
         self.vm.io.failed = Some(k);
         if let Some(range) = self.vm.error_procedure(k, mode) {
             return self.vm.run_error_procedure(range, pos);
+        }
+        if self.vm.global_procedure(k, mode, pos)? {
+            return Ok(());
         }
         if file.status.is_none() {
             return Err(Abend { code: AbendCode::Io(status), message, pos, file: None });

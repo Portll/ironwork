@@ -4,8 +4,8 @@
 
 use rt::cics::Handles;
 use rt::lir::{
-    Advance, Argument, Base, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Const, Convert, ConvertTable, Count, DisplayItem, Inspected, Expr, FileVerb, Flag, Func, HostPlace, IntExpr,
-    JsonValue, Marker, Markup, MethodName, MovePlan, Named, Op, Operand, ParseValue, Place, PlaceId, Program, RangeKind, Receiver, Replacement, ReportOp, SenderCheck, SetTo, SortIo, SortPlan,
+    Advance, Argument, Base, Binding, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Const, Convert, ConvertTable, Count, DisplayItem, Inspected, Expr, FileVerb, Flag, Func, HostPlace, IntExpr,
+    GlobalAt, JsonValue, Marker, Markup, MethodName, MovePlan, Named, Op, Operand, ParseValue, Place, PlaceId, Program, RangeKind, Receiver, Replacement, ReportOp, SenderCheck, SetTo, SortIo, SortPlan,
     SqlStatement, StartKey, StorePlan, SymId, Terminator, UpDown, UserArgument, XmlValue,
 };
 use rt::report::{FieldContent, GroupKind, Origin};
@@ -238,6 +238,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
             l.counter.map_or(Ok(()), |(q, _)| place(q))?;
         }
     }
+    verify_scope(p, &range)?;
     let declaratives = &p.services.declaratives;
     declaratives.modes.iter().flatten().try_for_each(|&r| range(r, RangeKind::UseProcedure))?;
     if let Some((offset, len)) = declaratives.debug_item
@@ -814,4 +815,52 @@ fn verify_program(p: &Program) -> Result<(), String> {
         return Err(format!("procedure start {} of {} paragraphs", p.procedure_start, p.paragraphs.len()));
     }
     Ok(())
+}
+
+/// Every record, file, symbol and range the EXTERNAL and GLOBAL tables name, and a GLOBAL record
+/// within its storage.
+fn verify_scope(p: &Program, range: &dyn Fn(u32, RangeKind) -> Result<(), String>) -> Result<(), String> {
+    let scope = &p.services.scope;
+    let within = |what: &str, id: usize, len: usize| if id < len { Ok(()) } else { Err(format!("{what} {id} of {len}")) };
+    let symbol = |id: SymId| within("symbol", id as usize, p.symbols.len());
+    let record = |o: u16| within("LINKAGE record", usize::from(o), p.storage.linkage.len());
+    let file = |k: u16| within("file", usize::from(k), p.services.files.len());
+    scope.containers.iter().try_for_each(|&s| symbol(s))?;
+    let mut last = None;
+    for &(o, ref binding) in &scope.records {
+        record(o)?;
+        if last.is_some_and(|l| l >= o) {
+            return Err(format!("LINKAGE record {o} bound out of order"));
+        }
+        last = Some(o);
+        match *binding {
+            Binding::External { name, .. } => symbol(name)?,
+            Binding::ExternalFile(k) => file(k)?,
+            Binding::Global { program, name, .. } => symbol(program).and_then(|()| symbol(name))?,
+        }
+    }
+    for f in &scope.files {
+        file(f.file)?;
+        f.declared_in.map_or(Ok(()), symbol)?;
+        if !f.external && f.declared_in.is_none() {
+            return Err(format!("file {} shared as neither EXTERNAL nor GLOBAL", f.file));
+        }
+    }
+    for &(k, o) in &scope.areas {
+        file(k)?;
+        record(o)?;
+    }
+    for g in &scope.globals {
+        symbol(g.name)?;
+        match g.at {
+            GlobalAt::Program(offset) => within("GLOBAL record offset", offset as usize, p.storage.image.len())?,
+            GlobalAt::Local(offset) => within("GLOBAL LOCAL-STORAGE offset", offset as usize, p.storage.local_image.len())?,
+            GlobalAt::Linkage(o) => record(o)?,
+        }
+    }
+    for &(k, r) in &scope.global_files {
+        file(k)?;
+        range(r, RangeKind::UseProcedure)?;
+    }
+    scope.global_modes.iter().flatten().try_for_each(|&r| range(r, RangeKind::UseProcedure))
 }

@@ -385,8 +385,32 @@ fn program_shape_round_trips() {
         declaratives: Declaratives { modes: [Some(0), None, None, Some(2)], debug_item: Some((120, 86)) },
         markup: vec![Markup::XmlParse(xml_parse())],
         report: ReportWriter { reports: vec![report()], print_switch: Some(16) },
+        scope: scope(),
     };
     round_trip(&[Services::default(), services]);
+}
+
+/// A program contained in another, with an EXTERNAL record and file and the GLOBAL names of the
+/// program containing it, which contains others itself.
+fn scope() -> Scope {
+    Scope {
+        containers: vec![4, 5],
+        records: vec![(1, Binding::External { name: 2, size: 40 }), (2, Binding::ExternalFile(0)), (3, Binding::Global { program: 4, section: Section::File, name: 6 })],
+        files: vec![SharedFile { file: 0, external: true, declared_in: None }, SharedFile { file: 1, external: false, declared_in: Some(4) }],
+        areas: vec![(0, 2), (1, 3)],
+        globals: vec![Global { section: Section::WorkingStorage, name: 7, at: GlobalAt::Program(16) }, Global { section: Section::Linkage, name: 8, at: GlobalAt::Linkage(0) }],
+        global_files: vec![(2, 1)],
+        global_modes: [None, Some(1), None, None],
+    }
+}
+
+#[test]
+fn external_and_global_scopes_round_trip() {
+    round_trip(&[Scope::default(), scope()]);
+    let global = |section| Binding::Global { program: 0, section, name: 1 };
+    every_variant(&[Binding::External { name: 0, size: 1 }, Binding::ExternalFile(3), global(Section::Linkage)], 3);
+    every_variant(&[Section::WorkingStorage, Section::LocalStorage, Section::Linkage, Section::File], 4);
+    every_variant(&[GlobalAt::Program(0), GlobalAt::Local(8), GlobalAt::Linkage(2)], 3);
 }
 
 /// A class with FACTORY data, OBJECT data and a method of each, its programs the sample program.

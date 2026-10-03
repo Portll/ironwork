@@ -162,9 +162,19 @@ impl Lower<'_> {
     /// `record_span`: where a data item of file k's record area lies within the record.
     fn record_span(&mut self, k: usize, r: &Ref) -> R<RecordSpan> {
         let place = self.place(r, false)?;
-        let (start, size) = self.layout.file_areas[k];
+        let layout = self.layout;
+        let (start, size) = layout.file_areas[k];
         let q = &self.places[place as usize];
-        if !is_static(q) || q.base != lir::Base::Program || q.offset < start || q.offset + q.len > start + size {
+        let in_area = match q.base {
+            lir::Base::Program => is_static(q) && layout.bound_areas[k].is_none(),
+            // Each record bound to a file's area is bound to the same storage (machine/scope.rs).
+            lir::Base::Linkage(o) => {
+                let record = &layout.items[layout.linkage_roots[usize::from(o)]];
+                q.subscripts.is_empty() && q.odo.is_none() && q.refmod.is_none() && !layout.is_argument(usize::from(o)) && record.file == Some(k as u16)
+            }
+            _ => false,
+        };
+        if !in_area || q.offset < start || q.offset + q.len > start + size {
             return unsupported("a file key that is not a data item of its file's record area", r.pos);
         }
         Ok(RecordSpan { offset: q.offset - start, len: q.len })

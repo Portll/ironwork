@@ -125,18 +125,30 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let mut m = Self::over(compiled, me, base, unit, main);
         m.containers = containers;
         m.bind_shared()?;
-        if compiled.layout.local_size > 0 {
-            m.local_base = m.unit.push_temporary(&vec![0; compiled.layout.local_size as usize]);
-            m.initialize_values(true)?;
-            m.unit.mark_input(m.local_base, compiled.layout.local_size as usize, false);
+        m.initial_values(fresh)
+    }
+
+    /// An activation with no EXTERNAL or GLOBAL record bound, which VALUE clauses never reach:
+    /// the storage lowering keeps as a program's initial image.
+    pub fn unbound(compiled: &'p Compiled, me: usize, unit: &'u mut RunUnit<'w>) -> R<Self> {
+        let (base, fresh) = unit.activate(me, compiled.program.initial);
+        Self::over(compiled, me, base, unit, true).initial_values(fresh)
+    }
+
+    fn initial_values(mut self, fresh: bool) -> R<Self> {
+        let (local, size) = (self.layout.local_size as usize, self.layout.size as usize);
+        if local > 0 {
+            self.local_base = self.unit.push_temporary(&vec![0; local]);
+            self.initialize_values(true)?;
+            self.unit.mark_input(self.local_base, local, false);
         }
         if fresh {
-            m.unit.mem[base..base + compiled.layout.size as usize].fill(0);
-            m.initialize_values(false)?;
-            m.unit.mark_input(base, compiled.layout.size as usize, false);
-            m.unit.initialized(me);
+            self.unit.mem[self.base..self.base + size].fill(0);
+            self.initialize_values(false)?;
+            self.unit.mark_input(self.base, size, false);
+            self.unit.initialized(self.me);
         }
-        Ok(m)
+        Ok(self)
     }
 
     /// Program `me` over its storage at `base`, with nothing bound or initialized.

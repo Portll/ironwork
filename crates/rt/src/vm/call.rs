@@ -74,9 +74,10 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let addresses = callee::addresses(self, &plan.args, pos);
         let addresses = self.settle(addresses)?;
         let program = &lowered.program;
+        let containers = self.containers_of(program);
         let by = By::Call { initial: program.initial };
         let (ending, returned) = callee::run(self, &Callee { index, by, mark: Some(mark), pos }, |caller| {
-            let mut vm = Vm::activation(lowered, index, &mut *caller.unit, false)?;
+            let mut vm = Vm::activation_within(lowered, index, &mut *caller.unit, false, containers)?;
             let entry = entry.and_then(|k| program.services.entries.get(k));
             let using = entry.map_or(&program.storage.using, |e| &e.using).iter().map(|&o| Some(usize::from(o))).collect();
             let returning = program.storage.returning.map(|o| (usize::from(o), program.storage.linkage[usize::from(o)] as usize));

@@ -11,6 +11,7 @@ mod flow;
 mod markup;
 mod payload;
 mod place;
+mod scope;
 mod sort;
 mod sql;
 mod text;
@@ -37,6 +38,7 @@ pub use payload::{
     InvokePlan, MethodName, MovePlan, NationalFrom, NumericFrom, PlaceNumcheck, Receiver, SearchAllPlan, SearchKey, SenderCheck, TrimSide,
 };
 pub use place::{Base, Odo, Place, RefMod, Subscript};
+pub use scope::{Binding, Global, GlobalAt, Scope, Section, SharedFile};
 pub use sort::{FileSort, ReleasePlan, ReturnPlan, SortIo, SortKey, SortKeys, SortPlan, TableSort};
 pub use sql::{HostPlace, SqlEntry, SqlStatement, Sqlca, SqlcaField};
 pub use text::{
@@ -261,6 +263,8 @@ pub struct Services {
     pub markup: Vec<Markup>,
     /// The REPORT SECTION's reports, which `Op::Report` names by index.
     pub report: ReportWriter,
+    /// EXTERNAL and GLOBAL storage, files and procedures.
+    pub scope: Scope,
 }
 
 codec_struct!(Program {
@@ -282,7 +286,7 @@ codec_struct!(Paragraph { name, is_section, entry, section_end, priority, at, ab
 codec_struct!(Block { ops, end });
 codec_struct!(Plans { arith, init, display, inspect, string, unstring, search_all, function });
 codec_struct!(Services {
-    file_ops, files, calls, sorts, releases, returns, invokes, cics, sqlca, entries, class, user_functions, function, declaratives, markup, report,
+    file_ops, files, calls, sorts, releases, returns, invokes, cics, sqlca, entries, class, user_functions, function, declaratives, markup, report, scope,
 });
 
 pub(crate) fn program_valid(program: &Program) -> Result<(), String> {

@@ -306,19 +306,196 @@ fn a_global_files_status_must_be_a_global_name_of_its_program() {
 }
 
 #[test]
-fn external_and_global_storage_does_not_lower_yet() {
-    let unsupported = |source: &str, k: usize| {
+fn external_and_global_storage_lowers_as_what_each_activation_binds() {
+    let lowered = |source: &str, k: usize| {
         let programs = syntax::parse_all_with(source, &syntax::copy::Libraries::default()).unwrap();
-        match lower::lower(&compile(programs[k].clone(), &[]).unwrap()) {
-            Err(lower::LowerError::Unsupported(what, _)) => what,
-            other => panic!("{other:?}"),
-        }
+        lower::lower(&compile(programs[k].clone(), &[]).unwrap()).unwrap_or_else(|e| panic!("{e}"))
     };
-    let external = cobol(&["IDENTIFICATION DIVISION.", "PROGRAM-ID. T.", "DATA DIVISION.", "WORKING-STORAGE SECTION.", "01  X PIC X EXTERNAL.", "PROCEDURE DIVISION.", "    GOBACK."]);
-    assert_eq!(unsupported(&external, 0), "EXTERNAL data and files, and GLOBAL names of a containing program");
+    let name = |p: &rt::lir::Program, s: u32| p.symbols[s as usize].clone();
+    let external = cobol(&["IDENTIFICATION DIVISION.", "PROGRAM-ID. T.", "DATA DIVISION.", "WORKING-STORAGE SECTION.", "01  X PIC X(3) EXTERNAL.", "PROCEDURE DIVISION.", "    GOBACK."]);
+    let t = lowered(&external, 0);
+    let [(0, rt::lir::Binding::External { name: x, size: 3 })] = t.services.scope.records[..] else { panic!("{:?}", t.services.scope) };
+    assert_eq!(name(&t, x), "X");
     let tree = nested(&["01  G GLOBAL PIC X."], &["    GOBACK."], &[], &["    GOBACK."], &[], &["    GOBACK."]);
-    assert_eq!(unsupported(&tree, 0), "GLOBAL names and declaratives of a program that contains others");
-    assert_eq!(unsupported(&tree, 1), "EXTERNAL data and files, and GLOBAL names of a containing program");
-    let reader = global_file(&[], &[], &["    OPEN INPUT GF"]);
-    assert_eq!(unsupported(&reader, 1), "EXTERNAL data and files, and GLOBAL names of a containing program");
+    let (outer, inner, deepest) = (lowered(&tree, 0), lowered(&tree, 1), lowered(&tree, 2));
+    let [rt::lir::Global { section: rt::lir::Section::WorkingStorage, name: g, at: rt::lir::GlobalAt::Program(0) }] = outer.services.scope.globals[..] else { panic!("{:?}", outer.services.scope) };
+    assert_eq!(name(&outer, g), "G");
+    let [(0, rt::lir::Binding::Global { program, section: rt::lir::Section::WorkingStorage, name: g })] = inner.services.scope.records[..] else { panic!("{:?}", inner.services.scope) };
+    assert_eq!((name(&inner, program), name(&inner, g)), ("OUTER".into(), "G".into()));
+    assert_eq!(deepest.services.scope.containers.iter().map(|&s| name(&deepest, s)).collect::<Vec<_>>(), ["INNER", "OUTER"]);
+    let reader = lowered(&global_file(&["G-ERR SECTION.", "    USE GLOBAL AFTER ERROR PROCEDURE ON INPUT.", "G-ERR-1.", "    DISPLAY GS."], &[], &["    OPEN INPUT GF"]), 1);
+    let [rt::lir::SharedFile { file: 0, external: false, declared_in: Some(outer_id) }] = reader.services.scope.files[..] else { panic!("{:?}", reader.services.scope) };
+    assert_eq!(name(&reader, outer_id), "OUTER");
+    assert_eq!(reader.services.scope.areas.len(), 1);
+}
+
+/// Runs `source` on the interpreter, which runs it on the VM too and compares the two, and then
+/// on the VM alone, which must run it to its end; `reset` puts the files back before each run.
+fn on_both(source: &str, dds: &[String], reset: impl Fn()) -> (String, Result<Ending, Abend>) {
+    reset();
+    let walker = Harness::source(source).dds(dds).run(Executor::Interpreter);
+    reset();
+    let vm = Harness::source(source).dds(dds).run(Executor::Vm);
+    assert_eq!((&vm.out, &vm.ending), (&walker.out, &walker.ending), "{}", walker.err);
+    (walker.out, walker.ending)
+}
+
+#[test]
+fn a_global_declarative_left_by_goback_or_exit_program_ends_the_run() {
+    let path = temp("global-leaving.txt");
+    let reset = || std::fs::write(&path, "ABCD\n").unwrap();
+    let dds = [format!("GDD={}:text", path.display())];
+    for exit in ["GOBACK", "EXIT PROGRAM"] {
+        let leave = ["G-ERR SECTION.", "    USE GLOBAL AFTER ERROR PROCEDURE ON GF.", "G-ERR-1.", "    DISPLAY 'LEAVING'", &format!("    {exit}.")];
+        let source = global_file(&leave, &[], &["    OPEN INPUT GF", "    READ GF", "    READ GF", "    DISPLAY 'NOT HERE'"]);
+        let (out, ending) = on_both(&source, &dds, reset);
+        assert_eq!(out, "LEAVING\n");
+        let message = ending.unwrap_err().message;
+        assert_eq!(message, "the GLOBAL EXCEPTION/ERROR procedure of OUTER, run for READER, left by GO TO, GOBACK or EXIT PROGRAM, which is not supported yet");
+    }
+}
+
+#[test]
+fn the_nearest_containing_programs_global_declarative_runs_over_its_own_storage() {
+    let path = temp("global-nearest.txt");
+    let reset = || std::fs::write(&path, "ABCD\n").unwrap();
+    let source = |inner_use: &str| {
+        [
+            cobol(&["IDENTIFICATION DIVISION.", "PROGRAM-ID. OUTER.", "ENVIRONMENT DIVISION.", "INPUT-OUTPUT SECTION.", "FILE-CONTROL."]),
+            cobol(&["    SELECT GF ASSIGN TO GDD FILE STATUS IS GS.", "DATA DIVISION.", "FILE SECTION.", "FD  GF GLOBAL.", "01  G-REC PIC X(4)."]),
+            cobol(&["WORKING-STORAGE SECTION.", "01  GS GLOBAL PIC XX.", "01  SEEN GLOBAL PIC 9 VALUE 0.", "PROCEDURE DIVISION.", "DECLARATIVES."]),
+            cobol(&["O-ERR SECTION.", "    USE GLOBAL AFTER ERROR PROCEDURE ON INPUT.", "O-ERR-1.", "    ADD 1 TO SEEN", "    PERFORM O-SHOW.", "O-SHOW.", "    DISPLAY 'OUTER ' GS ' ' SEEN."]),
+            cobol(&["END DECLARATIVES.", "MAIN SECTION.", "M.", "    CALL 'INNER'", "    DISPLAY 'OUTER AFTER ' SEEN", "    GOBACK."]),
+            cobol(&["IDENTIFICATION DIVISION.", "PROGRAM-ID. INNER.", "DATA DIVISION.", "WORKING-STORAGE SECTION.", "01  MINE PIC X(5) VALUE 'INNER'.", "PROCEDURE DIVISION.", "DECLARATIVES."]),
+            cobol(&["I-ERR SECTION.", inner_use, "I-ERR-1.", "    DISPLAY MINE ' ' GS.", "END DECLARATIVES.", "MAIN SECTION.", "I.", "    CALL 'DEEPEST'", "    GOBACK."]),
+            cobol(&["IDENTIFICATION DIVISION.", "PROGRAM-ID. DEEPEST.", "PROCEDURE DIVISION."]),
+            cobol(&["    OPEN INPUT GF", "    READ GF", "    READ GF", "    DISPLAY 'DEEPEST ' GS", "    CLOSE GF", "    GOBACK."]),
+            cobol(&["END PROGRAM DEEPEST.", "END PROGRAM INNER.", "END PROGRAM OUTER."]),
+        ]
+        .concat()
+    };
+    let dds = [format!("GDD={}:text", path.display())];
+    let (out, ending) = on_both(&source("    USE GLOBAL AFTER ERROR PROCEDURE ON INPUT."), &dds, reset);
+    assert!(ending.is_ok(), "{ending:?}");
+    assert_eq!(out, "INNER 10\nDEEPEST 10\nOUTER AFTER 0\n");
+    let (out, ending) = on_both(&source("    USE AFTER ERROR PROCEDURE ON INPUT."), &dds, reset);
+    assert!(ending.is_ok(), "{ending:?}");
+    assert_eq!(out, "OUTER 10 1\nOUTER 10 1\nDEEPEST 10\nOUTER AFTER 1\n");
+}
+
+#[test]
+fn global_local_storage_and_linkage_records_are_the_containing_activations() {
+    let source = |set: &str| {
+        nested(
+            &["01  W PIC X(4) VALUE 'WORK'.", "LOCAL-STORAGE SECTION.", "01  L GLOBAL PIC X(3) VALUE 'LOC'.", "LINKAGE SECTION.", "01  P GLOBAL PIC X(4)."],
+            &[set, "    CALL 'INNER'", "    DISPLAY 'OUTER ' L ' ' W", "    GOBACK."],
+            &[],
+            &["    DISPLAY 'INNER ' L", "    MOVE 'NEW' TO L", "    DISPLAY 'INNER ' P", "    MOVE 'DONE' TO P", "    GOBACK."],
+            &[],
+            &["    GOBACK."],
+        )
+    };
+    let (out, ending) = on_both(&source("    SET ADDRESS OF P TO ADDRESS OF W"), &[], || ());
+    assert!(ending.is_ok(), "{ending:?}");
+    assert_eq!(out, "INNER LOC\nINNER WORK\nOUTER NEW DONE\n");
+    let (out, ending) = on_both(&source("    CONTINUE"), &[], || ());
+    assert_eq!(out, "INNER LOC\n");
+    assert_eq!(ending.unwrap_err().code, AbendCode::Protection);
+}
+
+/// MAIN and SUB, each describing indexed file XK as EXTERNAL, with `main` and `sub` as their
+/// procedures.
+fn external_indexed(main: &[&str], sub: &[&str]) -> String {
+    let program = |id: &str, prefix: &str, procedure: &[&str]| {
+        let mut lines = vec![
+            "IDENTIFICATION DIVISION.".to_owned(),
+            format!("PROGRAM-ID. {id}."),
+            "ENVIRONMENT DIVISION.".into(),
+            "INPUT-OUTPUT SECTION.".into(),
+            "FILE-CONTROL.".into(),
+            "    SELECT XK ASSIGN TO XKDD ORGANIZATION INDEXED".into(),
+            format!("        ACCESS DYNAMIC RECORD KEY {prefix}-ID FILE STATUS XS."),
+            "DATA DIVISION.".into(),
+            "FILE SECTION.".into(),
+            "FD  XK IS EXTERNAL.".into(),
+            format!("01  {prefix}-REC."),
+            format!("    05  {prefix}-ID PIC X."),
+            format!("    05  {prefix}-DATA PIC X(3)."),
+            "WORKING-STORAGE SECTION.".into(),
+            "01  XS PIC XX EXTERNAL.".into(),
+            "PROCEDURE DIVISION.".into(),
+        ];
+        lines.extend(procedure.iter().map(|l| l.to_string()));
+        lines.push(format!("END PROGRAM {id}."));
+        cobol(&lines.iter().map(String::as_str).collect::<Vec<_>>())
+    };
+    [program("MAIN", "M", main), program("SUB", "S", sub)].concat()
+}
+
+#[test]
+fn an_external_indexed_file_is_read_by_its_key_in_any_program_describing_it() {
+    let path = temp("external-indexed.dat");
+    let reset = || {
+        let _ = std::fs::remove_file(&path);
+    };
+    let main = [
+        "    OPEN OUTPUT XK",
+        "    WRITE M-REC FROM 'AONE'",
+        "    WRITE M-REC FROM 'BTWO'",
+        "    CLOSE XK",
+        "    OPEN I-O XK",
+        "    CALL 'SUB'",
+        "    DISPLAY 'MAIN ' M-REC ' ' XS",
+        "    CLOSE XK WITH LOCK",
+        "    CALL 'SUB'",
+        "    OPEN INPUT XK",
+        "    DISPLAY 'MAIN ' XS",
+        "    GOBACK.",
+    ];
+    let sub = [
+        "    MOVE 'B' TO S-ID",
+        "    READ XK KEY IS S-ID INVALID KEY DISPLAY 'NO B ' XS",
+        "        NOT INVALID KEY DISPLAY 'SUB ' S-DATA ' ' XS",
+        "    END-READ",
+        "    MOVE 'Z' TO S-ID",
+        "    READ XK INVALID KEY DISPLAY 'NO Z ' XS END-READ",
+        "    GOBACK.",
+    ];
+    let (out, ending) = on_both(&external_indexed(&main, &sub), &[format!("XKDD={}", path.display())], reset);
+    assert!(ending.is_ok(), "{ending:?}");
+    assert_eq!(out, "SUB TWO 00\nNO Z 23\nMAIN ZTWO 23\nMAIN 38\n");
+}
+
+#[test]
+fn a_contained_program_reads_a_global_indexed_file_by_its_key() {
+    let path = temp("global-indexed.dat");
+    let reset = || {
+        let _ = std::fs::remove_file(&path);
+    };
+    let source = [
+        cobol(&["IDENTIFICATION DIVISION.", "PROGRAM-ID. OUTER.", "ENVIRONMENT DIVISION.", "INPUT-OUTPUT SECTION.", "FILE-CONTROL."]),
+        cobol(&["    SELECT GK ASSIGN TO GKDD ORGANIZATION INDEXED", "        ACCESS DYNAMIC RECORD KEY GK-ID", "        ALTERNATE RECORD KEY GK-DATA FILE STATUS GKS."]),
+        cobol(&["DATA DIVISION.", "FILE SECTION.", "FD  GK GLOBAL.", "01  GK-REC.", "    05  GK-ID PIC X.", "    05  GK-DATA PIC X(3)."]),
+        cobol(&["WORKING-STORAGE SECTION.", "01  GKS GLOBAL PIC XX.", "PROCEDURE DIVISION."]),
+        cobol(&["    OPEN OUTPUT GK", "    WRITE GK-REC FROM 'AONE'", "    WRITE GK-REC FROM 'BTWO'", "    CLOSE GK"]),
+        cobol(&["    OPEN INPUT GK", "    CALL 'INNER'", "    DISPLAY 'OUTER ' GK-REC ' ' GKS", "    CLOSE GK", "    GOBACK."]),
+        cobol(&["IDENTIFICATION DIVISION.", "PROGRAM-ID. INNER.", "PROCEDURE DIVISION."]),
+        cobol(&["    MOVE 'B' TO GK-ID", "    READ GK INVALID KEY DISPLAY 'NO B'", "        NOT INVALID KEY DISPLAY 'INNER ' GK-DATA", "    END-READ"]),
+        cobol(&["    MOVE 'ONE' TO GK-DATA", "    READ GK KEY IS GK-DATA", "    DISPLAY 'INNER ' GK-ID ' ' GKS"]),
+        cobol(&["    MOVE 'B' TO GK-ID", "    START GK KEY >= GK-ID", "    READ GK NEXT", "    DISPLAY 'INNER ' GK-REC ' ' GKS", "    GOBACK."]),
+        cobol(&["END PROGRAM INNER.", "END PROGRAM OUTER."]),
+    ]
+    .concat();
+    let (out, ending) = on_both(&source, &[format!("GKDD={}", path.display())], reset);
+    assert!(ending.is_ok(), "{ending:?}");
+    assert_eq!(out, "INNER TWO\nINNER A 00\nINNER BTWO 00\nOUTER BTWO 00\n");
+}
+
+#[test]
+fn a_global_file_written_as_a_print_file_by_one_program_only_ends_the_run() {
+    let path = temp("global-print.txt");
+    let reset = || std::fs::write(&path, "").unwrap();
+    let source = global_file(&[], &[], &["    OPEN OUTPUT GF", "    WRITE G-REC"]).replace("    CALL 'READER'", "    WRITE G-REC AFTER ADVANCING 1\n           CALL 'READER'");
+    let (_, ending) = on_both(&source, &[format!("GDD={}", path.display())], reset);
+    assert_eq!(ending.unwrap_err().message, "GF, a GLOBAL file of OUTER, is written as a print file in one of OUTER and READER and not the other, which is not supported yet");
 }

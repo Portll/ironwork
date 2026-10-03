@@ -18,6 +18,7 @@ mod oo;
 mod ops;
 mod place;
 mod report;
+mod scope;
 mod sort;
 mod sql;
 mod value;
@@ -288,6 +289,8 @@ struct Vm<'p, 'u, 'w, L: Loader<Rc<Code>>> {
     whenever: Option<Ran>,
     /// The method this activation runs, if it is one: its class and SELF.
     method: Option<Running>,
+    /// The programs containing this one, innermost first, as they are running.
+    containers: Vec<scope::Container<'p>>,
     unit: &'u mut RunUnit<'w, Rc<Code>, L>,
 }
 
@@ -295,6 +298,11 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
     /// An activation of loaded program `me`, its storage as `Machine::activation` leaves it: fresh
     /// on its first activation, after a CANCEL, and on every activation of an INITIAL program.
     fn activation(code: &'p Lowered, me: usize, unit: &'u mut RunUnit<'w, Rc<Code>, L>, main: bool) -> R<Self> {
+        Self::activation_within(code, me, unit, main, Vec::new())
+    }
+
+    /// An activation of a contained program, called with the programs containing it running.
+    fn activation_within(code: &'p Lowered, me: usize, unit: &'u mut RunUnit<'w, Rc<Code>, L>, main: bool, containers: Vec<scope::Container<'p>>) -> R<Self> {
         let p = &code.program;
         let storage = &p.storage;
         if !storage.local_image.is_empty() && (storage.init_abend.is_some() || !storage.init_reports.is_empty()) {
@@ -307,29 +315,8 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
             return Err(not_yet("PARMCHECK"));
         }
         let (base, fresh) = unit.activate(me, p.initial);
-        let main_frame = Frame { id: 0, kind: FrameKind::Main, displaced: None, segment: 0, depth: unit.depth as u32, temps: Vec::new() };
-        let mut vm = Self {
-            code,
-            p,
-            me,
-            base,
-            local_base: 0,
-            linkage: vec![None; storage.linkage.len()],
-            main,
-            returns: Returns { armed: vec![None; p.paragraphs.len()], saved: BTreeMap::new(), frames: vec![main_frame], next_frame: 1 },
-            segment: 0,
-            line: 0,
-            arrival: Arrival::Start,
-            debugging: false,
-            locating: 0,
-            pending: None,
-            markup: markup::State::default(),
-            io: files::State::default(),
-            cics_handlers: Handlers::default(),
-            whenever: None,
-            method: None,
-            unit,
-        };
+        let mut vm = Self::over(code, me, base, unit, main, containers);
+        vm.bind_shared()?;
         if !storage.local_image.is_empty() {
             vm.local_base = vm.unit.push_temporary(&storage.local_image);
             vm.unit.mark_input(vm.local_base, storage.local_image.len(), false);
@@ -346,6 +333,35 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
             vm.unit.initialized(me);
         }
         Ok(vm)
+    }
+
+    /// Program `me` over its storage at `base`, with nothing bound or initialized.
+    fn over(code: &'p Lowered, me: usize, base: usize, unit: &'u mut RunUnit<'w, Rc<Code>, L>, main: bool, containers: Vec<scope::Container<'p>>) -> Self {
+        let p = &code.program;
+        let main_frame = Frame { id: 0, kind: FrameKind::Main, displaced: None, segment: 0, depth: unit.depth as u32, temps: Vec::new() };
+        Self {
+            code,
+            p,
+            me,
+            base,
+            local_base: 0,
+            linkage: vec![None; p.storage.linkage.len()],
+            main,
+            returns: Returns { armed: vec![None; p.paragraphs.len()], saved: BTreeMap::new(), frames: vec![main_frame], next_frame: 1 },
+            segment: 0,
+            line: 0,
+            arrival: Arrival::Start,
+            debugging: false,
+            locating: 0,
+            pending: None,
+            markup: markup::State::default(),
+            io: files::State::default(),
+            cics_handlers: Handlers::default(),
+            whenever: None,
+            method: None,
+            containers,
+            unit,
+        }
     }
 
     fn facts(&self) -> Facts<'p> {

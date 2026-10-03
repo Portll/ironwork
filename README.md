@@ -314,7 +314,7 @@ The subset the interpreter runs today:
   programs it contains, a name declared again nearer hiding it (C181). Not yet: LINAGE or REPORT
   on an EXTERNAL file, or on a GLOBAL file of a program that contains others; INDEXED BY in such a
   GLOBAL record; a GLOBAL file whose FILE STATUS or keys are not GLOBAL names; SET ADDRESS OF a
-  GLOBAL LINKAGE record from a contained program; lowering any of them to the LIR.
+  GLOBAL LINKAGE record from a contained program.
 - **User-defined functions:** FUNCTION-ID definitions and prototypes (AS, IS PROTOTYPE, ENTRY-NAME,
   ENTRY-INTERFACE) to END FUNCTION, invoked wherever an intrinsic function can be, as FUNCTION
   name(arguments) or, when the REPOSITORY paragraph lists FUNCTION name, by the name alone. An
