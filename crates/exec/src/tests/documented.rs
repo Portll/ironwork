@@ -92,3 +92,27 @@ fn inspect_examines_a_signed_zoned_item_as_its_unsigned_digits() {
     );
     assert_eq!(on_both(&source), "01 00\n1234P -606\n");
 }
+
+/// Language Reference SC27-8713-03, p. 437: VARYING one of the table's own indexes searches with it,
+/// and the table's first index is left as it was.
+#[test]
+fn search_varying_one_of_the_table_s_indexes_searches_with_it() {
+    let source = program(
+        "",
+        "       01  T.\n           05  E PIC X OCCURS 5 INDEXED BY I1 I2.\n       01  N1 PIC 9.\n       01  N2 PIC 9.\n",
+        &[
+            line("MOVE 'ABCDE' TO T"),
+            line("SET I1 TO 4"),
+            line("SET I2 TO 2"),
+            line("SEARCH E VARYING I2 AT END DISPLAY 'END'"),
+            line("    WHEN E(I2) = 'C' DISPLAY 'FOUND'"),
+            line("END-SEARCH"),
+            line("SET N1 TO I1"),
+            line("SET N2 TO I2"),
+            line("DISPLAY N1 ' ' N2"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    );
+    assert_eq!(on_both(&source), "FOUND\n4 3\n");
+}

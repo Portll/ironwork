@@ -847,10 +847,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let layout = self.layout;
         let table = &layout.items[t];
         let count = self.occurrences(t, pos)? as i64;
-        let index = match (&se.varying, table.index_names.first()) {
-            (_, Some(name)) => Ref { name: name.clone(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos },
-            (Some(v), None) => v.clone(),
-            (None, None) => return Err(Abend::ironwork(format!("SEARCH {}: the table has no INDEXED BY", se.table.name), pos)),
+        let Some(index) = table.search_index(se.varying.as_ref(), pos) else {
+            return Err(Abend::ironwork(format!("SEARCH {}: the table has no INDEXED BY", se.table.name), pos));
         };
         let index_expr = Expr::Operand(Operand::Ref(index.clone()));
         if !se.all {

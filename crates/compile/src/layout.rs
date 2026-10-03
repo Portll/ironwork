@@ -863,6 +863,19 @@ fn place(items: &mut [Item], index: usize, offset: u32, mut dims: Vec<(u32, u32)
     }
 }
 
+impl Item {
+    /// The index a SEARCH of this table steps: VARYING's index-name when it is one of the table's
+    /// own, else the table's first index-name, else VARYING's item (Language Reference
+    /// SC27-8713-03, p. 437).
+    pub fn search_index(&self, varying: Option<&Ref>, pos: Pos) -> Option<Ref> {
+        match (varying.filter(|v| self.index_names.contains(&v.name)), self.index_names.first()) {
+            (Some(own), _) => Some(own.clone()),
+            (None, Some(name)) => Some(Ref { name: name.clone(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos }),
+            (None, None) => varying.cloned(),
+        }
+    }
+}
+
 impl Layout {
     /// An elementary item's category as INITIALIZE's phrases name it, a floating-point item's as
     /// NUMERIC (assumption [`numeric::assumptions::INITIALIZE_FLOAT_NUMERIC`]); None for a group

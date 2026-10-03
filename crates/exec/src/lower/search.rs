@@ -28,11 +28,7 @@ impl Lower<'_> {
             }
         };
         let table = &layout.items[t];
-        let index = match (&se.varying, table.index_names.first()) {
-            (_, Some(name)) => Some(Ref { name: name.clone(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos }),
-            (Some(v), None) => Some(v.clone()),
-            (None, None) => None,
-        };
+        let index = table.search_index(se.varying.as_ref(), pos);
         let count = match self.count(t, pos)? {
             Count::Odo(odo) if !se.all || index.is_none() => {
                 let temp = self.temp(pos)?;

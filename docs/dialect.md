@@ -229,7 +229,6 @@ Each changes results under `ibm`. Those fixed since are in 5.7.
 | Difference | ironwork | IBM, and cobc | Seen in |
 |---|---|---|---|
 | DISPLAY of a negative or non-integer function value | sign and decimal point dropped, 31 digits: FUNCTION INTEGER(-2.5) shows `0000000000000000000000000000030` (`rt::display::value`) | the sign and the value | test programs |
-| SEARCH ... VARYING the table's own index | searches with the first index and steps the named one beside it | uses the named index for the search (Language Reference, SEARCH) | CCVS85 NC235A |
 | An ALL literal longer than the item compared with it | not cut to the item's length | cut (Language Reference, figurative constants) | CCVS85 NC250A |
 | A BY VALUE argument to a BY REFERENCE parameter | the callee gets a copy and runs | the value is in the parameter list, so the callee reads it as an address; cobc faults | test programs |
 | DISPLAY of a national item to SYSOUT | converted from UTF-16 | written as its UTF-16 bytes; only UPON CONSOLE converts (Programming Guide, Displaying values) | corpus |
@@ -275,3 +274,4 @@ dialects and on both executors (ironwork-roadmap 3.14).
 | A LINKAGE level-01 item that REDEFINES another | at the address of the item it redefines, whose storage it describes again (Language Reference SC27-8713-03, p. 225) | the same | CCVS85 IC237A, which now passes |
 | The SIGN clause of a group and of an entry below it | a group's clause applies to its signed zoned items, and a subordinate entry's own clause takes precedence for that entry (p. 231) | the same | CCVS85 NC116A, which now passes |
 | INSPECT of a signed zoned item | examined as if moved to an unsigned item of its length, a separate sign not examined (p. 359, Table 40); REPLACING and CONVERTING keep the sign (C330) | the same | CCVS85 NC216A, which now passes |
+| SEARCH ... VARYING one of the table's own indexes | the search uses that index, and the table's first is left alone (p. 437) | the same | CCVS85 NC235A, which now passes |
