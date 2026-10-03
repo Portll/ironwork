@@ -145,8 +145,8 @@ fn another_format_version_is_refused() {
     let mut major = bytes.clone();
     major[8] = 1;
     let error = read(&major).unwrap_err();
-    assert_eq!(error, ModuleError::Version(Version { major: 1, minor: 3 }));
-    assert_eq!(error.to_string(), "load module format 1.3; this ironwork reads 0.3. Compile the source again");
+    assert_eq!(error, ModuleError::Version(Version { major: 1, minor: 4 }));
+    assert_eq!(error.to_string(), "load module format 1.4; this ironwork reads 0.4. Compile the source again");
     let mut minor = bytes;
     minor[10] = 1;
     assert_eq!(read(&minor), Err(ModuleError::Version(Version { major: 0, minor: 1 })));

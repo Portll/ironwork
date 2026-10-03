@@ -109,7 +109,7 @@ sections before it can decode anything else. Section bodies use the rules of §4
 |---|---|---|
 | `NotAModule` | The magic differs (check 1) | `not an ironwork load module` |
 | `Truncated` | Fewer than 32 bytes, or fewer than `file_len` (checks 2, 4) | `truncated: 100 bytes of 240` |
-| `Version` | A version the reader does not read (check 3, §8.1) | `load module format 1.0; this ironwork reads 0.3. Compile the source again` |
+| `Version` | A version the reader does not read (check 3, §8.1) | `load module format 1.0; this ironwork reads 0.4. Compile the source again` |
 | `TrailingBytes` | More bytes than `file_len` (check 4) | `4 bytes after the end of the module at 240` |
 | `HeaderChecksum` | `header_crc` differs (check 5) | `header is corrupt (checksum 1234ABCD, expected 5678EF01)` |
 | `Feature` | Any `features` bit is set (check 6) | `load module needs features 0x00000004, which this ironwork lacks` |
@@ -544,17 +544,19 @@ error if it meets one. `HostType::Zoned`'s sign is `rt::SignClause`.
 
 ### 8.1 Versions
 
-The format version is `major.minor`; this ironwork writes and reads 0.3. A 0.2 module, whose
-places lack the tables that move a variably located item, whose EXEC CICS commands lack their
-sinks, whose INITIALIZE fields lack their phrases' senders and PICTURE scaling, and whose markup
-nodes lack their moving tables (lir.md §5.1, §9.1, §9.5, §9.13), is refused, as is a 0.1 one, whose
-directory entries lack `external` (§6) and whose options lack `optimize` (§5.1); compiling the
-source again is the remedy.
+The format version is `major.minor`; this ironwork writes and reads 0.4. A module of an earlier
+version is refused, and compiling the source again is the remedy: a 0.3 module's options lack
+`compliance` and `dialect` (§5.1), its arithmetic plans `inner_dmax` (lir.md §7.2), and its plan for
+INITIALIZE of a reference-modified item holds the whole item's fields (lir.md §9, C300); a 0.2
+module's places lack the tables that move a variably located item, its EXEC CICS commands their
+sinks, its INITIALIZE fields their phrases' senders and PICTURE scaling, and its markup nodes their
+moving tables (lir.md §5.1, §9.1, §9.5, §9.13); a 0.1 module's directory entries lack `external`
+(§6) and its options `optimize` (§5.1).
 
 | The reader finds | It does |
 |---|---|
 | Bad magic | Refuses: `X: not an ironwork load module` |
-| A different `major` | Refuses: `X: load module format 1.0; this ironwork reads 0.3. Compile the source again`. A reader of major 1 or more names `1.x` |
+| A different `major` | Refuses: `X: load module format 1.0; this ironwork reads 0.4. Compile the source again`. A reader of major 1 or more names `1.x` |
 | The same `major`, a lower `minor` | Reads it. A minor version only adds, and a section body's shape never changes inside a major (new data goes in a new section) |
 | The same `major`, a higher `minor` | Reads it, ignoring sections with the optional flag it does not know. Refuses on an unknown required section or a set `features` bit, naming it |
 | `major` 0 | Requires the same `minor` as well. The format is not frozen until 1.0 |
@@ -779,7 +781,7 @@ scenarios that wait for question 6 do not run yet.
 ### L3: Version mismatch
 
 - **Given** a module whose `major` is higher than the reader's **when** it is run **then** the run
-  stops with `X: load module format 1.0; this ironwork reads 0.3. Compile the source again`, and
+  stops with `X: load module format 1.0; this ironwork reads 0.4. Compile the source again`, and
   exit status 245, **and** no program runs.
 - **Given** a module with a higher `minor` and an unknown optional section **then** it runs, and the
   section is ignored. **Given** an unknown required section **then** it is refused, naming the
