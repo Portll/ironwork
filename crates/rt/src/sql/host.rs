@@ -33,7 +33,7 @@ fn targets<'a, 'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, places: &'a [Host
             _ => {
                 let loc = x.locate(place.var, false)?;
                 let indicator = match place.indicator {
-                    Some((p, _)) => Some(x.locate(p, false)?.offset),
+                    Some((p, _)) => Some(x.locate_indicator(p)?.offset),
                     None => None,
                 };
                 located = Some(((loc.offset, loc.len), indicator));

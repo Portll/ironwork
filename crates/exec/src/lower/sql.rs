@@ -7,9 +7,9 @@ use super::{Lower, LowerError, R, unsupported};
 use crate::layout::Resolved;
 use crate::sql::{HostType, host_type};
 use rt::abend::AbendCode;
-use rt::lir::{self, HostPlace, Op, SqlEntry, SqlStatement, SqlTest, Sqlca, Terminator};
+use rt::lir::{self, HostPlace, Op, PlaceId, SqlEntry, SqlStatement, SqlTest, Sqlca, Terminator};
 use syntax::Pos;
-use syntax::ast::{ExecBlock, ExecKind, ProcName, Stmt};
+use syntax::ast::{ExecBlock, ExecKind, Expr, Literal, Operand, ProcName, Ref, Stmt};
 use syntax::sql::{Action, ChangeKind, HostVar, Statement};
 
 /// The EXEC SQL blocks among `stmts` and the statements inside them, in order.
@@ -88,7 +88,7 @@ impl Lower<'_> {
         let mut out = Vec::new();
         for hv in vars {
             let var = self.place(&hv.var, false)?;
-            let indicator = hv.indicator.as_ref().map(|r| self.place(r, false)).transpose()?;
+            let indicator = hv.indicator.as_ref().map(|r| self.indicator(r)).transpose()?;
             let element = |k: usize| indicator.map(|p| (p, 2 * k as u32));
             let at = Some(hv.var.pos);
             let ty = match layout.resolve(&hv.var.name, &hv.var.qualifiers, hv.var.pos) {
@@ -112,6 +112,19 @@ impl Lower<'_> {
             }
         }
         Ok(out)
+    }
+
+    /// `locate_indicator`: an indicator array named without subscripts at its first element.
+    fn indicator(&mut self, r: &Ref) -> R<PlaceId> {
+        let dims = match self.layout.resolve(&r.name, &r.qualifiers, r.pos) {
+            Ok(Resolved::Item(i)) if r.subscripts.is_empty() => self.layout.items[i].dims.len(),
+            _ => 0,
+        };
+        if dims == 0 {
+            return self.place(r, false);
+        }
+        let one = Expr::Operand(Operand::Literal(Literal::Number("1".into())));
+        self.place(&Ref { subscripts: vec![one; dims], ..r.clone() }, false)
     }
 
     /// The SQLCA fields the program declares with an SQL type. The walker leaves a field it cannot

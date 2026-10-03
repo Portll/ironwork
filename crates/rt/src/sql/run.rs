@@ -7,6 +7,7 @@ use super::{Answer, Call, Database, Outcome, Session};
 use crate::abend::Abend;
 use crate::host::Host;
 use crate::lir::{AbendId, HostPlace, SqlEntry, SqlStatement, Sqlca};
+use crate::storage::Loc;
 use crate::vocab::Pos;
 
 type R<T> = Result<T, Abend>;
@@ -26,6 +27,11 @@ pub trait SqlHost<'w, P: Copy, S>: Host<P> {
     fn place_pos(&self, place: P) -> Pos;
     /// The abend a host variable with no SQL type gives when its statement reaches it.
     fn untyped(&mut self, abend: AbendId) -> Abend;
+    /// An indicator variable's storage; an executor whose place for an indicator array named
+    /// without subscripts is not its first element locates that element here.
+    fn locate_indicator(&mut self, place: P) -> R<Loc> {
+        self.locate(place, false)
+    }
 }
 
 /// What WHENEVER tests after a statement.

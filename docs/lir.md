@@ -1628,15 +1628,17 @@ pub struct Sqlca { pub fields: Vec<(SqlcaField, PlaceId, HostType)> }
 - **Host variables** are lowered as `host_places` builds them: a structure's members, each indicator
   element at 2 × its index, and an item with no SQL type as `Err(AbendId)`, the walker's message
   with the host variable's position in `AbendText.at`. A host variable that names no data item is
-  refused with the place.
+  refused with the place. An indicator array named without subscripts, as `:CLS:CLS-IND` names the
+  table `CLS-IND`, is its first element: lowering places it with subscripts of 1, where the walker
+  locates it so through `SqlHost::locate_indicator`.
 - **No database attached** abends EXEC at run time, as now (machine/sql.rs:28-30).
 - **In `rt`.** `SqlEntry` and `SqlStatement` are generic like §9.5's `CicsCommand`: `P` and `S` are
   `PlaceId` and `SymId`, or the walker's `&Ref` and `String`. `rt::sql::run` runs an entry and fills
   the `Sqlca`, and returns SQLCODE and SQLWARN0 for the WHENEVER tests, or None for a declaration.
   What it asks of its executor is `SqlHost`: the session, whether a CICS task is running, the
-  program id, text, a host variable's position for a program check, and the abend of a host
-  variable with no SQL type. The walker builds the entry, its `HostPlace`s and the `Sqlca` in
-  machine/sql.rs on every statement, and takes the WHENEVER branch there.
+  program id, text, a host variable's position for a program check, the abend of a host variable
+  with no SQL type, and an indicator's storage. The walker builds the entry, its `HostPlace`s and
+  the `Sqlca` in machine/sql.rs on every statement, and takes the WHENEVER branch there.
 
 ### 9.8 OO COBOL
 

@@ -197,6 +197,21 @@ impl<'a, 'w> SqlHost<'w, &'a Ref, String> for Bound<'_, '_, '_, 'w> {
     fn untyped(&mut self, abend: AbendId) -> Abend {
         self.untyped[abend as usize].clone()
     }
+
+    /// An indicator array named without subscripts, as `:CLS:CLS-IND` names one, at its first
+    /// element (Db2 13 for z/OS, SSEPEK_13.0.0 apsg db2z_indicatorvariablecobol).
+    fn locate_indicator(&mut self, place: &'a Ref) -> R<Loc> {
+        let m = &mut *self.machine;
+        let dims = match m.resolve(place) {
+            Ok(Resolved::Item(i)) if place.subscripts.is_empty() => m.layout.items[i].dims.len(),
+            _ => 0,
+        };
+        if dims == 0 {
+            return m.locate_as(place, false);
+        }
+        let one = Expr::Operand(Operand::Literal(Literal::Number("1".into())));
+        m.locate_as(&Ref { subscripts: vec![one; dims], ..place.clone() }, false)
+    }
 }
 
 #[cfg(test)]
@@ -450,6 +465,34 @@ mod tests {
         assert_eq!(String::from_utf8(out).expect("DISPLAY writes text"), "ADAMS 042-001\n");
         let sent = Vec::from([Value::Char("ADAMS".into()), Value::Int(42), Value::Decimal { value: 100, scale: 2 }]);
         assert_eq!(calls.take()[1].3, sent);
+    }
+
+    #[test]
+    fn an_indicator_array_named_without_subscripts_gives_each_member_an_element_in_both_executors() {
+        for indicator in [":H:IND", ":H:I.IND"] {
+            let source = [
+                "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. Q.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n",
+                "           EXEC SQL INCLUDE SQLCA END-EXEC.\n",
+                "       01 H.\n          10 A PIC X(3).\n          10 B PIC X(3) VALUE '---'.\n",
+                "       01 I.\n          10 IND PIC S9(4) COMP OCCURS 2 VALUE 7.\n",
+                "       01 E-NUM PIC -9(3).\n",
+                "       PROCEDURE DIVISION.\n",
+                &format!("           EXEC SQL SELECT A, B INTO {indicator} FROM T END-EXEC.\n"),
+                "           MOVE IND(1) TO E-NUM.\n           DISPLAY A '|' B '|' E-NUM WITH NO ADVANCING.\n",
+                "           MOVE IND(2) TO E-NUM.\n           DISPLAY '|' E-NUM.\n",
+                "           GOBACK.\n",
+            ]
+            .concat();
+            let compiled = crate::compile(syntax::parse(&source).expect("parses"), &[]).expect("compiles");
+            assert!(crate::testing::check_lowering(&compiled, rt::sql::fingerprint(&source), None).is_some(), "{indicator}");
+            let row = vec![Value::Char("XY".into()), Value::Null];
+            both(&source, &[Outcome::rows(vec![row.clone()])], false);
+            let mut db = Script { answers: vec![Outcome::rows(vec![row])].into(), calls: Calls::default() };
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let ran = compiled.execute_with(crate::unit::Library::default(), crate::files::Dds::default(), None, crate::unit::Clock::System, Some(&mut db), &mut out, &mut err);
+            assert!(ran.is_ok(), "{indicator}: {ran:?}");
+            assert_eq!(String::from_utf8(out).expect("DISPLAY writes text"), "XY |---| 000|-001\n", "{indicator}");
+        }
     }
 
     fn verbs(calls: &[Logged]) -> Vec<&str> {
