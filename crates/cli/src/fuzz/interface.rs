@@ -1,14 +1,31 @@
 //! `ironwork fuzz --interface`: a subprogram run as a caller would run it, with generated arguments
 //! for its PROCEDURE DIVISION USING items (docs/evidence.md §5.2).
-// The --interface dispatch arrives with roadmap 5.12 S8, after 4.4.11 lands in fuzz.rs.
-#![cfg_attr(not(test), allow(dead_code))]
 
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitCode};
+
+use exec::evidence::Value;
 use exec::layout::{Layout, Resolved};
 use rt::storage::Kind;
 use rt::vocab::SignPosition;
 use syntax::ast::{Arg, ExecKind, Expr, Literal, Operand, Program, Stmt};
 
-use super::{Field, Rng, SPACE, elementary, field_bytes, neutral};
+use super::{Field, Header, Outcome, Request, Rng, SPACE, Tally, base64, elementary, field_bytes, neutral, obj};
+
+/// The shape an interface run's manifest takes, which docs/fuzz-interface-manifest.schema.json
+/// describes: a reader of `ironwork-fuzz/v1` would take its arguments for a main program's inputs.
+const MANIFEST_FORMAT: &str = "ironwork-fuzz-interface/v1";
+
+/// The runs minimizing one kept input may take.
+const MINIMIZE_BUDGET: u32 = 200;
+
+/// One run's arguments in USING order, None for OMITTED.
+type Arguments = Vec<Option<Vec<u8>>>;
+
+/// An abend's code, file and line.
+type Place = (String, String, i64);
 
 /// The IMS interfaces whose parameters are control blocks the IMS region supplies, not data a
 /// caller passes.
@@ -226,7 +243,7 @@ fn record(rng: &mut Rng, param: &Param, varied: usize, draw_counts: bool) -> Vec
 /// One argument per param. With `site`, each takes what the CALL passes in its position: OMITTED
 /// stays OMITTED, a literal is passed as written, padded with spaces, and an item of a known length
 /// has only the fields within that length varied.
-pub(crate) fn arguments(rng: &mut Rng, params: &[Param], site: Option<&CallSite>) -> Vec<Option<Vec<u8>>> {
+pub(crate) fn arguments(rng: &mut Rng, params: &[Param], site: Option<&CallSite>) -> Arguments {
     params
         .iter()
         .enumerate()
@@ -241,7 +258,7 @@ pub(crate) fn arguments(rng: &mut Rng, params: &[Param], site: Option<&CallSite>
 
 /// Every param passed, every field neutral and every count at its most: the input whose abend is
 /// not the input's doing.
-pub(crate) fn neutral_arguments(params: &[Param]) -> Vec<Option<Vec<u8>>> {
+pub(crate) fn neutral_arguments(params: &[Param]) -> Arguments {
     params.iter().map(|p| Some(record(&mut Rng(0), p, 0, false))).collect()
 }
 
@@ -288,6 +305,237 @@ pub(crate) fn call_sites(name: &str, callers: &[(String, exec::Compiled)]) -> Ve
         }
     }
     sites
+}
+
+/// Every program that could CALL the subprogram: each COBOL source in its own directory and the -L
+/// libraries but itself, compiled as `ironwork run` would, named by its path from --root.
+fn callers(req: &Request) -> Vec<(String, exec::Compiled)> {
+    let me = super::resolved(&req.program);
+    let own = req.program.parent().map(Path::to_path_buf).unwrap_or_default();
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for dir in std::iter::once(own).chain(req.program_dirs.iter().cloned()) {
+        if !seen.insert(super::resolved(&dir)) {
+            continue;
+        }
+        let Ok(entries) = fs::read_dir(if dir.as_os_str().is_empty() { Path::new(".") } else { &dir }) else { continue };
+        let mut paths: Vec<PathBuf> = entries
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().and_then(|e| e.to_str()).is_some_and(|e| ["cbl", "cob", "cobol"].contains(&e.to_ascii_lowercase().as_str())))
+            .collect();
+        paths.sort();
+        for path in paths {
+            if super::resolved(&path) == me {
+                continue;
+            }
+            let Ok(bytes) = fs::read(&path) else { continue };
+            let libraries = syntax::copy::Libraries::new(std::iter::once(dir.clone()).chain(req.libraries.iter().cloned()).collect()).with_program(&path);
+            let Ok(mut programs) = syntax::parse_all_with(&syntax::copy::decode(&bytes), &libraries) else { continue };
+            let Ok(compiled) = exec::compile(programs.remove(0), &req.flags) else { continue };
+            let name = super::from_root(&path, &req.root).unwrap_or_else(|| path.display().to_string());
+            out.push((name, compiled));
+        }
+    }
+    out
+}
+
+/// One run as its own `ironwork run` with the arguments in files of the run's directory.
+struct Runner<'a> {
+    req: &'a Request,
+    work: PathBuf,
+    count: u64,
+}
+
+impl Runner<'_> {
+    fn run(&mut self, arguments: &[Option<Vec<u8>>], optimized: bool, evidence: Option<(&Path, &Path)>) -> std::io::Result<Outcome> {
+        self.count += 1;
+        let dir = self.work.join(format!("run-{}", self.count));
+        fs::create_dir_all(&dir)?;
+        let mut command = Command::new(std::env::current_exe()?);
+        command.arg("run").arg(&self.req.program).arg("--clock").arg(&self.req.clock);
+        command.args(&self.req.flags);
+        if optimized {
+            command.arg("--optimize=2");
+        }
+        for d in &self.req.libraries {
+            command.arg("-I").arg(d);
+        }
+        for d in &self.req.program_dirs {
+            command.arg("-L").arg(d);
+        }
+        for (i, argument) in arguments.iter().enumerate() {
+            command.arg("--argument");
+            match argument {
+                Some(bytes) => {
+                    let path = dir.join(format!("arg{i}"));
+                    fs::write(&path, bytes)?;
+                    command.arg(path);
+                }
+                None => {
+                    command.arg("OMITTED");
+                }
+            }
+        }
+        if let Some((journal, coverage)) = evidence {
+            command.arg("--evidence").arg(journal).arg("--coverage").arg(coverage);
+        }
+        let roots = self.req.roots();
+        super::finish(command, &dir, self.req.timeout, &[], |l| super::abend_line(l, &roots))
+    }
+}
+
+/// The smallest arguments found that still end at `place`: each field of each argument passed put
+/// back to a value that breaks nothing wherever the abend still comes, and whether that finished
+/// within [`MINIMIZE_BUDGET`] runs.
+fn minimize(runner: &mut Runner, params: &[Param], mut arguments: Arguments, place: &Place) -> std::io::Result<(Arguments, bool)> {
+    let mut budget = MINIMIZE_BUDGET;
+    for (i, param) in params.iter().enumerate() {
+        for &f in &param.fields {
+            let value = neutral(f);
+            let Some(Some(bytes)) = arguments.get(i) else { continue };
+            if bytes.get(f.offset..f.offset + f.size).is_none_or(|now| now == value) {
+                continue;
+            }
+            if budget == 0 {
+                return Ok((arguments, false));
+            }
+            budget -= 1;
+            let mut trial = arguments.clone();
+            if let Some(Some(b)) = trial.get_mut(i) {
+                b[f.offset..f.offset + f.size].copy_from_slice(&value);
+            }
+            if runner.run(&trial, false, None)?.place().as_ref() == Some(place) {
+                arguments = trial;
+            }
+        }
+    }
+    Ok((arguments, true))
+}
+
+/// Lists each of a kept run's arguments in `out` as the manifest gives them, and returns their ids.
+fn listed(params: &[Param], arguments: &[Option<Vec<u8>>], n: usize, minimized: bool, out: &mut Vec<Value>) -> Vec<Value> {
+    params
+        .iter()
+        .zip(arguments)
+        .enumerate()
+        .map(|(position, (param, argument))| {
+            let id = format!("r{n}-{}", param.name);
+            let mut pairs = vec![
+                ("id", Value::from(id.as_str())),
+                ("kind", "argument".into()),
+                ("name", param.name.as_str().into()),
+                ("position", Value::from(position as i64)),
+                ("bytes", base64(argument.as_deref().unwrap_or_default()).into()),
+                ("minimized", minimized.into()),
+            ];
+            if argument.is_none() {
+                pairs.push(("omitted", true.into()));
+            }
+            out.push(obj(pairs));
+            Value::from(id)
+        })
+        .collect()
+}
+
+/// The kept abends' arguments and runs as the manifest lists them and their codes, what the runs
+/// came to, and the abend the neutral arguments gave.
+struct Found {
+    inputs: Vec<Value>,
+    runs: Vec<Value>,
+    codes: Vec<String>,
+    tally: Tally,
+    baseline: Option<Place>,
+}
+
+/// A run on arguments that break nothing, whose abend is no input's doing; `req.runs` generated
+/// argument sets, each shaped by a CALL site drawn from `sites` where there are any; then each new
+/// abend once, on the smallest arguments that still give it, run with evidence and coverage, and
+/// once more compiled with OPTIMIZE(2).
+fn drive(req: &Request, params: &[Param], sites: &[CallSite], runner: &mut Runner) -> Result<Found, String> {
+    let started = |e: std::io::Error| format!("a run could not start: {e}");
+    let baseline = runner.run(&neutral_arguments(params), false, None).map_err(started)?.place();
+    let mut rng = Rng(req.seed.max(1));
+    let mut tally = Tally::new();
+    let mut kept: Vec<(Place, Arguments)> = Vec::new();
+    for _ in 0..req.runs {
+        let site = (!sites.is_empty()).then(|| &sites[rng.below(sites.len())]);
+        let generated = arguments(&mut rng, params, site);
+        let outcome = runner.run(&generated, false, None).map_err(started)?;
+        tally.add(&outcome);
+        if let Some(place) = outcome.place()
+            && Some(&place) != baseline.as_ref()
+            && !kept.iter().any(|(p, _)| *p == place)
+        {
+            kept.push((place, generated));
+        }
+    }
+    let (evidence, coverage) = (req.out.join("evidence"), req.out.join("coverage"));
+    let (mut inputs, mut runs, mut codes) = (Vec::new(), Vec::new(), Vec::new());
+    for (n, (place, found)) in kept.into_iter().enumerate() {
+        let (small, minimized) = minimize(runner, params, found, &place).map_err(started)?;
+        let before = super::journals(&evidence);
+        let cover = coverage.join(format!("{n}.json"));
+        let outcome = runner.run(&small, false, Some((&evidence, &cover))).map_err(started)?;
+        let came_again = outcome.place().as_ref() == Some(&place);
+        match super::journals(&evidence).into_iter().find(|j| !before.contains(j)).filter(|_| came_again) {
+            Some(journal) => {
+                let optimized = runner.run(&small, true, None).map_err(started)?.place().as_ref() == Some(&place);
+                runs.push(super::kept_run(listed(params, &small, n, minimized, &mut inputs), &outcome, optimized, None, journal, n));
+                codes.push(place.0.clone());
+            }
+            None => {
+                let why = if came_again { "wrote no journal".to_string() } else { outcome.told() };
+                eprintln!("ironwork fuzz: {} at {}:{} is not kept: its run on the smallest arguments {why}", place.0, place.1, place.2);
+            }
+        }
+    }
+    Ok(Found { inputs, runs, codes, tally, baseline })
+}
+
+/// `ironwork fuzz --interface`: runs the subprogram `req` names as a caller would, many times, and
+/// keeps each abend the arguments caused (docs/evidence.md §5.2).
+pub fn run(req: Request) -> ExitCode {
+    let fail = |message: String| {
+        eprintln!("ironwork fuzz: {message}");
+        ExitCode::from(2)
+    };
+    let (compiled, _) = match super::compile(&req) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::from(12);
+        }
+    };
+    let Some(file) = super::from_root(&req.program, &req.root) else {
+        return fail(format!("{} is not under --root {}", req.program.display(), req.root.display()));
+    };
+    if let Some(why) = refusal(&compiled) {
+        return fail(why);
+    }
+    let params = params(&compiled);
+    let sites = call_sites(&compiled.program.id, &callers(&req));
+    let work = match super::prepare(&req.out, &req.roots()) {
+        Ok(w) => w,
+        Err(e) => return fail(e),
+    };
+    let mut runner = Runner { req: &req, work, count: 0 };
+    let found = drive(&req, &params, &sites, &mut runner);
+    let _ = fs::remove_dir_all(&runner.work);
+    let found = match found {
+        Ok(f) => f,
+        Err(e) => return fail(e),
+    };
+    let header = Header { seed: req.seed, clock: &req.clock, file: &file, id: &compiled.program.id, root: &req.root, roots: &req.roots(), entry: "interface" };
+    let callers = Value::Arr(sites.iter().map(|s| obj(vec![("file", s.file.as_str().into()), ("line", Value::from(i64::from(s.line)))])).collect());
+    if let Err(e) = super::write_manifest_in(MANIFEST_FORMAT, &req.out, &header, found.inputs, &found.tally, found.runs, vec![("callers", callers)]) {
+        return fail(format!("-o {}: {e}", req.out.display()));
+    }
+    found.tally.report();
+    if let Some((code, file, line)) = found.baseline {
+        eprintln!("ironwork fuzz: the subprogram ends with {code} at {file}:{line} on arguments that break nothing; that abend is not kept");
+    }
+    println!("{}", found.tally.summary(&found.codes, &req.out));
+    ExitCode::SUCCESS
 }
 
 #[cfg(test)]

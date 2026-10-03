@@ -901,6 +901,11 @@ pub(crate) struct Header<'a> {
 const MANIFEST_FORMAT: &str = "ironwork-fuzz/v1";
 
 pub(crate) fn write_manifest(out: &Path, header: &Header, inputs: Vec<Value>, tally: &Tally, runs: Vec<Value>) -> std::io::Result<()> {
+    write_manifest_in(MANIFEST_FORMAT, out, header, inputs, tally, runs, Vec::new())
+}
+
+/// The manifest in `format`, with `extra` keys beside the ones every format has.
+pub(crate) fn write_manifest_in(format: &str, out: &Path, header: &Header, inputs: Vec<Value>, tally: &Tally, runs: Vec<Value>, extra: Vec<(&str, Value)>) -> std::io::Result<()> {
     // Each root by its path from --root, null outside it: cobolwork finds an abend's file under the
     // root that supplied it.
     let top = resolved(header.root);
@@ -913,9 +918,9 @@ pub(crate) fn write_manifest(out: &Path, header: &Header, inputs: Vec<Value>, ta
             Err(_) => Value::Null,
         })
         .collect();
-    let manifest = obj(vec![
+    let mut pairs = vec![
         ("tool", "ironwork-fuzz".into()),
-        ("format", MANIFEST_FORMAT.into()),
+        ("format", format.into()),
         ("version", env!("CARGO_PKG_VERSION").into()),
         ("seed", Value::from(header.seed)),
         ("strategy", "fields".into()),
@@ -926,8 +931,9 @@ pub(crate) fn write_manifest(out: &Path, header: &Header, inputs: Vec<Value>, ta
         ("inputs", Value::Arr(inputs)),
         ("counts", Value::Obj(tally.counts.iter().map(|(k, v)| (k.to_string(), Value::Int(*v))).collect())),
         ("runs", Value::Arr(runs)),
-    ]);
-    fs::write(out.join("manifest.json"), format!("{}\n", canonical(&manifest)))
+    ];
+    pairs.extend(extra);
+    fs::write(out.join("manifest.json"), format!("{}\n", canonical(&obj(pairs))))
 }
 
 /// What a fuzz run's runs came to: a count per outcome, the first refusal's reason and how many

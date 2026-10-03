@@ -1,0 +1,279 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Portll/ironwork/blob/main/docs/fuzz-interface-manifest.schema.json",
+  "title": "ironwork-fuzz-interface/v1",
+  "description": "DIR/manifest.json of ironwork fuzz --interface, which runs a subprogram as a caller would, with generated arguments for its PROCEDURE DIVISION USING items (docs/evidence.md section 5.2).",
+  "type": "object",
+  "required": [
+    "tool",
+    "format",
+    "version",
+    "seed",
+    "strategy",
+    "clock",
+    "program",
+    "roots",
+    "entry",
+    "inputs",
+    "counts",
+    "runs",
+    "callers"
+  ],
+  "properties": {
+    "tool": {
+      "description": "The writer.",
+      "const": "ironwork-fuzz"
+    },
+    "format": {
+      "description": "The manifest's shape. A reader of ironwork-fuzz/v1 refuses it: it would take the arguments for a main program's inputs.",
+      "const": "ironwork-fuzz-interface/v1"
+    },
+    "version": {
+      "description": "The ironwork release that wrote the manifest.",
+      "type": "string"
+    },
+    "seed": {
+      "description": "The --seed the inputs were generated from; the same seed gives the same runs.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "strategy": {
+      "description": "How inputs are generated: field by field from the record and parameter descriptions.",
+      "const": "fields"
+    },
+    "clock": {
+      "description": "The time every run's clock was fixed at, --clock or 2026-01-01.",
+      "type": "string"
+    },
+    "program": {
+      "description": "What was fuzzed.",
+      "type": "object",
+      "required": [
+        "file",
+        "id"
+      ],
+      "properties": {
+        "file": {
+          "description": "The subprogram, by path from --root, the current directory without it.",
+          "type": "string"
+        },
+        "id": {
+          "description": "The PROGRAM-ID, or for a job the job's name.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "roots": {
+      "description": "The directories the runs read, numbered as a journal's input records number them: the subprogram's directory, then each -I and -L library.",
+      "type": "array",
+      "items": {
+        "description": "A root by its path from --root, . for --root itself, null for one outside it.",
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "entry": {
+      "description": "Each run was an ironwork run of the subprogram with --argument, one per USING item.",
+      "const": "interface"
+    },
+    "inputs": {
+      "description": "The inputs of the kept runs.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/input"
+      }
+    },
+    "counts": {
+      "description": "Outcomes over the generated runs; an abend that says what the surroundings lack counts as refused.",
+      "type": "object",
+      "required": [
+        "runs",
+        "clean",
+        "abend",
+        "timeout",
+        "refused"
+      ],
+      "properties": {
+        "runs": {
+          "description": "Generated runs.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "clean": {
+          "description": "Runs that ended without an abend.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "abend": {
+          "description": "Runs that ended in an abend the input may have caused.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "timeout": {
+          "description": "Runs stopped after --timeout seconds.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "refused": {
+          "description": "Runs that say nothing of the program's input: ironwork refused them, panicked, or the abend names what the surroundings lack.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "runs": {
+      "description": "One entry per kept abend.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/run"
+      }
+    },
+    "callers": {
+      "description": "Each static CALL of the subprogram by name in its directory or an -L library, the shape a run may take its arguments from.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "file",
+          "line"
+        ],
+        "properties": {
+          "file": {
+            "description": "The calling source, by path from --root, or the COPY member the CALL is in.",
+            "type": "string"
+          },
+          "line": {
+            "description": "The line of the CALL.",
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "input": {
+      "description": "One argument of a kept run.",
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "bytes",
+        "minimized",
+        "position"
+      ],
+      "properties": {
+        "id": {
+          "description": "The id a run's input array names it by.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "An argument passed to a PROCEDURE DIVISION USING item.",
+          "const": "argument"
+        },
+        "name": {
+          "description": "The USING item the argument is passed to.",
+          "type": "string"
+        },
+        "bytes": {
+          "description": "The argument's bytes in base64, as the LINKAGE record lays them out; empty when OMITTED.",
+          "type": "string"
+        },
+        "minimized": {
+          "description": "False when minimizing ran out of runs before the input was as small as still gives the abend.",
+          "type": "boolean"
+        },
+        "position": {
+          "description": "The USING item's place in the PROCEDURE DIVISION USING list, from 0.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "omitted": {
+          "description": "The argument was OMITTED: a null address, as the CALL it was shaped by passes.",
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "run": {
+      "description": "A kept run: its inputs, its abend, and the journal and coverage of its run with --evidence.",
+      "type": "object",
+      "required": [
+        "input",
+        "outcome",
+        "abend",
+        "journal",
+        "coverage"
+      ],
+      "properties": {
+        "input": {
+          "description": "The ids of its inputs.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "outcome": {
+          "description": "Only an abend is kept.",
+          "const": "abend"
+        },
+        "abend": {
+          "description": "The abend the run ended with.",
+          "type": "object",
+          "required": [
+            "code",
+            "file",
+            "line",
+            "message",
+            "optimized"
+          ],
+          "properties": {
+            "code": {
+              "description": "The abend code: S0C7, U4038, ASRA, S322, S806 and so on.",
+              "type": "string"
+            },
+            "file": {
+              "description": "The source it ended in, relative to the root that supplied it.",
+              "type": "string"
+            },
+            "line": {
+              "description": "The line it ended at.",
+              "type": "integer",
+              "minimum": 1
+            },
+            "message": {
+              "description": "The message the run ended with.",
+              "type": "string"
+            },
+            "optimized": {
+              "description": "Whether the same input, compiled with OPTIMIZE(2), ends in the same abend at the same file and line. True without a run for S322 and S806, which OPTIMIZE cannot change.",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "journal": {
+          "description": "The run id of its journal under evidence/runs.",
+          "type": "string"
+        },
+        "coverage": {
+          "description": "Its coverage, in run --coverage's format, by path from DIR.",
+          "type": "string"
+        },
+        "limit": {
+          "description": "The statement limit the run was given (run --statement-limit): a kept S322's place depends on it. Absent for a run with no limit.",
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

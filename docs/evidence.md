@@ -363,3 +363,32 @@ each run an `ironwork cics`, and writes the same directory with `entry` `cics`
    takes) and `terminal` (`name` the terminal id, `--termid` or `TERM`, and the screen script as
    UTF-8). Its journal and coverage take in every task of its pseudo-conversation. Its input runs
    once more compiled with `--optimize=2`, which gives its abend's `optimized`, as in §5.
+
+### 5.2 A subprogram at its interface: `ironwork fuzz --interface`
+
+`ironwork fuzz --interface PROGRAM.cbl -o DIR` runs a subprogram as a caller would, each run an
+`ironwork run --argument`, and writes the same directory in its own format
+(`crates/cli/src/fuzz/interface.rs`):
+
+1. The subprogram must take PROCEDURE DIVISION USING items. Refused, because the arguments are not
+   data a caller makes: one with a pointer among them, an IMS program (ENTRY 'DLITCBL' or
+   'DLITPLI', EXEC DLI, a CALL of CBLTDLI, AIBTDLI or CEETDLI by name or by a data item's VALUE,
+   and an argument passed on to a CALL whose target no literal or VALUE names) and a CICS program,
+   which `--cics` runs.
+2. Each argument is built field by field from its LINKAGE record, as a record is (§5 item 1), with
+   each OCCURS DEPENDING ON object in the record kept within its table's bounds.
+3. Where a source in the subprogram's directory or an `-L` library CALLs it by name, a run takes
+   the shape of one such CALL, drawn per run: an OMITTED position stays OMITTED, a literal is passed
+   as written, padded with spaces, and of an item the caller passes, only as much as it holds is
+   varied. With no such CALL, every field of every argument is varied.
+4. `ironwork run --argument` gives the program the arguments in USING order, each pushed as input,
+   OMITTED as a null address, and runs it as a subprogram: EXIT PROGRAM returns. An abend on
+   arguments that break nothing is not kept; every other is kept once, its arguments made as small
+   as still give it within 200 runs, then run with `--evidence` and `--coverage` and once more with
+   `--optimize=2`, as in §5. A timeout and an S806 are counted, never kept.
+5. The manifest's `format` is `ironwork-fuzz-interface/v1`
+   ([fuzz-interface-manifest.schema.json](fuzz-interface-manifest.schema.json)): `entry`
+   `interface`; `callers`, each CALL a run may take its shape from (`file` from `--root`, `line`);
+   and inputs of `kind` `argument`, `name` the USING item, `position` its place in the USING list,
+   and `omitted` true for an OMITTED one. Its kept runs are described as §5's are. An abend found
+   this way shows that a caller passing those bytes ends the subprogram, not that any caller does.

@@ -48,21 +48,39 @@ pub fn validate(schema: &Json, doc: &Json) -> Vec<String> {
 }
 
 const MANIFEST_SCHEMA: &str = include_str!("../../../../docs/fuzz-manifest.schema.json");
+const INTERFACE_SCHEMA: &str = include_str!("../../../../docs/fuzz-interface-manifest.schema.json");
 
-/// Every way `manifest`, a fuzz run's manifest.json, departs from docs/fuzz-manifest.schema.json.
-pub fn manifest_violations(manifest: &str) -> Vec<String> {
-    let schema = parse(MANIFEST_SCHEMA).expect("docs/fuzz-manifest.schema.json is JSON");
-    match parse(manifest) {
-        Ok(doc) => validate(&schema, &doc),
-        Err(e) => vec![format!("not JSON: {e}")],
+/// The schema each manifest format is described by.
+fn schema_of(format: &str) -> Option<&'static str> {
+    match format {
+        "ironwork-fuzz/v1" => Some(MANIFEST_SCHEMA),
+        "ironwork-fuzz-interface/v1" => Some(INTERFACE_SCHEMA),
+        _ => None,
     }
 }
 
-/// DIR/manifest.json, once it conforms to docs/fuzz-manifest.schema.json.
+/// Every way `manifest`, a fuzz run's manifest.json, departs from the schema its `format` names.
+pub fn manifest_violations(manifest: &str) -> Vec<String> {
+    let doc = match parse(manifest) {
+        Ok(doc) => doc,
+        Err(e) => return vec![format!("not JSON: {e}")],
+    };
+    let format = match &doc {
+        Json::Obj(pairs) => pairs.iter().find(|(k, _)| k == "format").and_then(|(_, v)| if let Json::Str(f) = v { Some(f.as_str()) } else { None }),
+        _ => None,
+    };
+    // A manifest that names no format is judged as the first one, which requires it.
+    match format.map_or(Some(MANIFEST_SCHEMA), schema_of) {
+        Some(text) => validate(&parse(text).expect("a committed schema is JSON"), &doc),
+        None => vec![format!(": format {format:?} has no schema in docs/")],
+    }
+}
+
+/// DIR/manifest.json, once it conforms to the schema its format names.
 pub fn read_manifest(dir: &Path) -> String {
     let text = fs::read_to_string(dir.join("manifest.json")).unwrap();
     let violations = manifest_violations(&text);
-    assert!(violations.is_empty(), "{} departs from docs/fuzz-manifest.schema.json:\n{}\n{text}", dir.display(), violations.join("\n"));
+    assert!(violations.is_empty(), "{} departs from its schema in docs/:\n{}\n{text}", dir.display(), violations.join("\n"));
     text
 }
 
@@ -953,6 +971,18 @@ mod tests {
     }
 
     const MANIFEST: &str = r#"{"clock":"2026-01-01T00:00:00","counts":{"abend":1,"clean":0,"refused":0,"runs":1,"timeout":0},"entry":"run","format":"ironwork-fuzz/v1","inputs":[{"bytes":"","id":"r0-INDD","kind":"dd","minimized":true,"name":"INDD"}],"program":{"file":"A.cbl","id":"A"},"roots":[".",null],"runs":[{"abend":{"code":"S0C7","file":"A.cbl","line":3,"message":"Data exception","optimized":false},"coverage":"coverage/0.json","input":["r0-INDD"],"journal":"20261003T000000Z-0000000000000000","outcome":"abend"}],"seed":1,"strategy":"fields","tool":"ironwork-fuzz","version":"0.3.0"}"#;
+
+    fn run_definition(schema: &str) -> Json {
+        let Ok(Json::Obj(top)) = parse(schema) else { panic!("a schema is an object") };
+        let defs = top.into_iter().find(|(k, _)| k == "$defs").map(|(_, v)| v);
+        let Some(Json::Obj(defs)) = defs else { panic!("the schema has $defs") };
+        defs.into_iter().find(|(k, _)| k == "run").map(|(_, v)| v).expect("$defs.run")
+    }
+
+    #[test]
+    fn an_interface_run_s_kept_runs_are_described_as_a_main_program_s_are() {
+        assert_eq!(run_definition(INTERFACE_SCHEMA), run_definition(MANIFEST_SCHEMA));
+    }
 
     #[test]
     fn the_manifest_schema_refuses_an_undescribed_key_a_missing_one_and_another_format() {

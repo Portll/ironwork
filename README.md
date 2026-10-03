@@ -125,7 +125,9 @@ causes is kept once by code and place, with the smallest input found that still 
 journal of a run on that input and its coverage; `COBOLWORK_ABENDS=fuzz-run cobolwork scan --only
 abend .` reports them as findings ([docs/evidence.md](docs/evidence.md) §5). `fuzz --cics` runs a
 CICS program as a task instead, on a generated COMMAREA and an operator's generated typing into the
-maps it RECEIVEs (§5.1).
+maps it RECEIVEs (§5.1). `fuzz --interface` runs a subprogram as a caller would, on generated
+arguments for its PROCEDURE DIVISION USING items, shaped by the CALLs that pass them where the
+`-L` libraries hold any (§5.2).
 
     cargo run -p ironwork -- job payroll.jcl --datasets data[:text] [--proclib procs]... [--user ID] [-L proglib]... [-I copylib]... [--clock 2026-09-27T12:00:00] [--sql-replay calls.txt]
 

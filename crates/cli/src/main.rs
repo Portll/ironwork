@@ -8,8 +8,8 @@ const USAGE: &str = "ironwork for COBOL
 usage:
   ironwork run <program.cbl> [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include]
                [-debug] [--cics-return-warning=once|always|never] [--optimize=0|1|2] [-I <dir>]... [-L <dir>]... [--vm]
-               [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT] [--exit-code]
-               [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
+               [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT | --argument path|OMITTED...]
+               [--exit-code] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                [--compliance strict|extended]          compile and run; CBL and PROCESS cards set the options
   ironwork run <module.iwm> [-L <dir>]... [-I <dir>]... [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
                [--statement-limit N] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
@@ -109,6 +109,11 @@ flags:
              with run, the PARM an EXEC PGM= would give: the program's first USING item addresses
              a halfword length and the arguments before the last slash, as Language Environment
              passes them under CBLOPTS(ON). The run's journal does not record it
+  --argument path|OMITTED
+             with run, once per PROCEDURE DIVISION USING item in order: run the program as a
+             subprogram a caller passed the file's bytes to, or OMITTED, a null address. Each
+             argument is input to the run, and EXIT PROGRAM returns as it does under a caller. Not
+             with --parm. The run's journal does not record the arguments
   --provenance FILE
              write what the compile read and decided as an in-toto statement with the SLSA
              Provenance v1 predicate: the source and every COPY member by digest, the option cards
@@ -318,6 +323,15 @@ fuzz flags:
              RETURN TRANSID names, where the source names one, runs the program. AEI0, AEIL, AEYQ
              and AEI1 say what the region lacks and are counted refused. An abend the task gives
              with no COMMAREA and no operator input is not kept
+  --interface
+             run a subprogram as a caller would, through ironwork run --argument: each PROCEDURE
+             DIVISION USING item gets bytes built field by field from its LINKAGE record. Where a
+             program in its directory or an -L library CALLs it by name, a run takes that CALL's
+             shape: OMITTED stays OMITTED, a literal is passed as written, and only as much as the
+             caller's item holds is varied. A program with a pointer among its arguments, an IMS
+             program and a CICS program are refused. The manifest's format is
+             ironwork-fuzz-interface/v1 (docs/evidence.md §5.2). An abend on arguments that break
+             nothing is not kept
 assumptions flags:
   --c-series
              put each entry's number in one C series first, its position in the register, with the
@@ -457,7 +471,8 @@ fn driver() -> ExitCode {
     let mut parm: Option<String> = None;
     let mut statement_limit: Option<u64> = None;
     let mut hang_limit: Option<u64> = None;
-    let (mut fuzz_job, mut fuzz_cics) = (false, false);
+    let (mut fuzz_job, mut fuzz_cics, mut fuzz_interface) = (false, false, false);
+    let mut arguments: Vec<Option<std::path::PathBuf>> = Vec::new();
     let mut step_parms: Vec<(String, String)> = Vec::new();
     let mut instream: Vec<(String, std::path::PathBuf)> = Vec::new();
     let mut exit_code = false;
@@ -489,6 +504,12 @@ fn driver() -> ExitCode {
             },
             "--job" => fuzz_job = true,
             "--cics" => fuzz_cics = true,
+            "--interface" => fuzz_interface = true,
+            "--argument" => match args.next() {
+                Some(a) if a == "OMITTED" => arguments.push(None),
+                Some(path) => arguments.push(Some(path.into())),
+                None => refuse!("--argument needs a file holding the argument's bytes, or OMITTED"),
+            },
             "--parm" => match args.next().filter(|p| p.chars().count() <= rt::le::parm::PARM_LIMIT) {
                 Some(p) => parm = Some(p),
                 None => refuse!(format!("--parm needs the text of a PARM, at most {} characters", rt::le::parm::PARM_LIMIT)),
@@ -678,9 +699,9 @@ fn driver() -> ExitCode {
         || trace_statements.is_some() || trace_input || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() || !matches!(clock, exec::unit::Clock::System)
         || compare_base.is_some() || compare_head.is_some() || declare.is_some() || statement.is_some() || !expected.is_empty() || datasets.is_some()
         || !proclibs.is_empty() || user.is_some()
-        || vm || parm.is_some() || statement_limit.is_some();
+        || vm || parm.is_some() || statement_limit.is_some() || !arguments.is_empty();
     let dump_flags = !dump_options.only.is_empty() || dump_options.strings || !dump_options.check;
-    let fuzz_flags = fuzz_root.is_some() || fuzz_runs.is_some() || fuzz_seed.is_some() || fuzz_timeout.is_some() || hang_limit.is_some() || fuzz_job || fuzz_cics;
+    let fuzz_flags = fuzz_root.is_some() || fuzz_runs.is_some() || fuzz_seed.is_some() || fuzz_timeout.is_some() || hang_limit.is_some() || fuzz_job || fuzz_cics || fuzz_interface;
     if vm && (!matches!(rest.first().map(String::as_str), Some("run" | "cics")) || evidence_dir.is_some()) {
         return usage_error("--vm is for run and cics, and not with --evidence");
     }
@@ -690,14 +711,20 @@ fn driver() -> ExitCode {
     if parm.is_some() && rest.first().map(String::as_str) != Some("run") {
         return usage_error("--parm is for run; a job's PARM comes from its EXEC, and fuzz makes its own");
     }
+    if !arguments.is_empty() && (rest.first().map(String::as_str) != Some("run") || parm.is_some()) {
+        return usage_error("--argument is for run, and not with --parm; fuzz --interface makes its own");
+    }
     if (!step_parms.is_empty() || !instream.is_empty()) && rest.first().map(String::as_str) != Some("job") {
         return usage_error("--step-parm and --instream are for job");
     }
     if rest.first().is_some_and(|c| c == "fuzz") {
         let [_, file] = rest.as_slice() else { return usage_error("fuzz needs one program, or one job with --job") };
         let Some(out) = out_dir else { return usage_error("fuzz needs -o DIR") };
-        if fuzz_job && fuzz_cics {
-            return usage_error("fuzz takes --job or --cics, not both");
+        if [fuzz_job, fuzz_cics, fuzz_interface].iter().filter(|&&on| on).count() > 1 {
+            return usage_error("fuzz takes one of --job, --cics and --interface");
+        }
+        if fuzz_interface && hang_limit.is_some() {
+            return usage_error("--hang-limit is for fuzz and fuzz --job; fuzz --interface does not run a timed-out input again");
         }
         if fuzz_cics && hang_limit.is_some() {
             return usage_error("--hang-limit is for fuzz and fuzz --job; fuzz --cics does not run a timed-out task again");
@@ -736,10 +763,13 @@ fn driver() -> ExitCode {
         if fuzz_cics {
             return fuzz_cics::run(fuzz_cics::Request { fuzz: request, options: cics_options });
         }
+        if fuzz_interface {
+            return fuzz::interface::run(request);
+        }
         return fuzz::run(request);
     }
     if fuzz_flags {
-        return usage_error("--runs, --seed, --timeout, --hang-limit, --root, --job and --cics are for fuzz");
+        return usage_error("--runs, --seed, --timeout, --hang-limit, --root, --job, --cics and --interface are for fuzz");
     }
     let compile_flags = out_dir.is_some() || bundle.is_some() || source_prefix.is_some();
     match rest.split_first() {
@@ -857,9 +887,9 @@ fn driver() -> ExitCode {
         if command != "run" {
             return usage_error(&format!("{path} is a load module, which run runs; check and cics take a source"));
         }
-        if !flags.is_empty() || evidence_dir.is_some() || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() {
+        if !flags.is_empty() || evidence_dir.is_some() || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() || !arguments.is_empty() {
             return usage_error(&format!(
-                "{path} is a load module, which holds the options it was compiled with; the compile flags, --evidence, --provenance, --coverage and the cics flags are for a source"
+                "{path} is a load module, which holds the options it was compiled with; the compile flags, --evidence, --provenance, --coverage, --argument and the cics flags are for a source"
             ));
         }
         let dds = match exec::files::Dds::new(&dds, true) {
@@ -1006,7 +1036,13 @@ fn driver() -> ExitCode {
             }
         }) as exec::unit::Observer<'_>
     });
+    let passed_arguments = match arguments.iter().map(|a| a.as_ref().map(fs::read).transpose()).collect::<Result<Vec<_>, _>>() {
+        Ok(a) => a,
+        Err(e) => return usage_error(&format!("--argument: {e}")),
+    };
     let ended = match (&code, &parm) {
+        (None, None) if !passed_arguments.is_empty() => compiled.execute_with_arguments(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, &passed_arguments).map_err(exec::vm::Halt::Abend),
+        (Some(code), None) if !passed_arguments.is_empty() => exec::vm::execute(&compiled, code, library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, exec::Passed::Arguments(&passed_arguments), &mut None),
         (None, Some(p)) => compiled.execute_main(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, p).map_err(exec::vm::Halt::Abend),
         (None, None) => compiled.execute_observed(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer).map_err(exec::vm::Halt::Abend),
         (Some(code), parm) => exec::vm::execute(&compiled, code, library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, parm.as_deref().map_or(exec::Passed::Nothing, exec::Passed::Parm), &mut None),
