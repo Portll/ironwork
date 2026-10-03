@@ -7,7 +7,7 @@ use crate::abend::{Abend, Ending};
 use crate::arith;
 use crate::bms::Mapset;
 use crate::callee;
-use crate::cics::{self, Cics, CicsCommand, CicsHost, Datum, ExitTarget, Handlers};
+use crate::cics::{self, CicsCommand, CicsHost, ExitTarget, Handlers};
 use crate::lir::{BlockId, Chars, CicsId, Operand, ParaId, PlaceId, Step, SymId};
 use crate::storage::{Loc, Val};
 use crate::store::{self, ProgramFacts};
@@ -39,43 +39,14 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         Ok(self.settle(flow)?.into())
     }
 
-    /// `Machine::cics_sinks`: each operand an input could steer, told to the observer before the
-    /// command runs, from the options the command keeps. A command kept as `Unsupported`, whose
-    /// options lowering drops, stops the VM, and so does a WRITE with no FILE, whose FROM a
-    /// JOURNALNAME the command does not keep may make a sink.
+    /// `Machine::cics_sinks`: each data item of the block's options an input could steer, told to
+    /// the observer before the command runs; one that cannot be located is left to the command.
     fn cics_sinks(&mut self, command: &'p CicsCommand, pos: Pos) -> R<()> {
-        let name = self.sym(command.name);
-        let unkept = || not_yet(format!("the operands EXEC CICS {name} tells an observer, which its lowering does not keep"));
-        let queue = matches!(name, "WRITEQ" | "READQ" | "DELETEQ") || ["WRITEQ ", "READQ ", "DELETEQ "].iter().any(|w| name.starts_with(w));
-        let mut sinks: Vec<(Option<&Datum>, &'static str)> = Vec::new();
-        match (name, &command.command) {
-            (_, Cics::Unsupported) => return Err(unkept()),
-            ("LINK" | "XCTL", Cics::Link(t) | Cics::Xctl(t)) => sinks.push((t.program.as_ref(), "cics-dynamic-transfer")),
-            ("READ" | "STARTBR" | "RESETBR", Cics::File { options, .. }) => sinks.push((options.ridfld.as_ref(), "record-key")),
-            ("DELETE", Cics::File { options, .. }) => sinks.push((options.ridfld.as_ref(), "record-update")),
-            ("WRITEQ TD", Cics::WriteqTd { from, .. }) => sinks.push((from.as_ref(), "log")),
-            ("WRITE", Cics::WriteOperator { text, .. }) => sinks.push((text.as_ref(), "log")),
-            ("WRITE", Cics::File { file: None, options, .. }) if matches!(options.from, Some(Datum::Place(_))) => return Err(unkept()),
-            ("SEND TEXT" | "SEND MAP" | "SEND", Cics::SendText { from, .. } | Cics::SendMap { from, .. }) => sinks.push((from.as_ref(), "screen")),
-            _ => {}
-        }
-        if queue {
-            let held = match &command.command {
-                Cics::WriteqTs { queue, .. } | Cics::ReadqTs { queue, .. } | Cics::DeleteqTs { queue } => queue,
-                Cics::WriteqTd { queue, .. } | Cics::ReadqTd { queue, .. } | Cics::DeleteqTd { queue } => queue,
-                _ => return Err(unkept()),
-            };
-            sinks.push((held.as_ref(), "queue-name"));
-        }
-        if let Cics::Assign(assign) = &command.command {
-            sinks.push((assign.sysid.as_ref(), "cics-sysid"));
-        }
-        for (datum, kind) in sinks {
-            let Some(&Datum::Place(place)) = datum else { continue };
+        for &(place, sink) in &command.sinks {
             match self.loc(place) {
                 Ok(loc) => {
                     let text = self.facts().page().decode(store::bytes(&self.unit.mem, loc));
-                    self.sink(kind, pos, &text);
+                    self.sink(sink.kind(), pos, &text);
                 }
                 Err(Halt::Abend(_)) => {}
                 Err(stopped) => return Err(stopped),

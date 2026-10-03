@@ -3,7 +3,7 @@
 //! walker's references. HANDLE CONDITION and HANDLE ABEND labels are resolved here.
 
 use super::*;
-use crate::cics::{Assign, Cics, CicsCommand, Condition, Control, Datum, FileControl, FileOptions, Opt, Record, Resp, Transfer};
+use crate::cics::{Assign, Cics, CicsCommand, Condition, Control, Datum, FileControl, FileOptions, Opt, Record, Resp, Sink, Transfer};
 use rt::lir::ParaId;
 
 pub(crate) type Command<'b> = CicsCommand<&'b Ref, &'b Operand, &'b str>;
@@ -28,15 +28,15 @@ const NOT_CONDITIONS: &[&str] = &["RESP", "RESP2", "NOHANDLE"];
 /// FORMATTIME options that are not outputs.
 const FORMAT_CONTROLS: &[&str] = &["ABSTIME", "DATESEP", "TIMESEP", "RESP", "RESP2", "NOHANDLE"];
 
-pub(super) fn option<'b>(block: &'b ExecBlock, name: &str) -> Option<&'b Option<ExecArg>> {
+fn option<'b>(block: &'b ExecBlock, name: &str) -> Option<&'b Option<ExecArg>> {
     block.options.iter().find(|(n, _)| n == name).map(|(_, a)| a)
 }
 
-pub(super) fn has(block: &ExecBlock, name: &str) -> bool {
+fn has(block: &ExecBlock, name: &str) -> bool {
     option(block, name).is_some()
 }
 
-pub(super) fn operand<'b>(block: &'b ExecBlock, name: &str) -> Option<&'b Operand> {
+fn operand<'b>(block: &'b ExecBlock, name: &str) -> Option<&'b Operand> {
     match option(block, name) {
         Some(Some(ExecArg::Operand(op))) => Some(op),
         _ => None,
@@ -109,7 +109,42 @@ pub(crate) fn bind<'b>(block: &'b ExecBlock, label: &dyn Fn(&str) -> R<ParaId>) 
         (_, Some(verb)) => Cics::File { verb, file: first(block, &["FILE", "DATASET"]), options: file_options(block) },
         (command, None) => bind_other(block, command, label)?,
     };
-    Ok(CicsCommand { name: block.command.as_str(), command, resp: resp(block) })
+    Ok(CicsCommand { name: block.command.as_str(), command, resp: resp(block), sinks: sinks(block) })
+}
+
+/// The data items of a block's options an input could steer, as an observer is told them before
+/// the command runs, so a command ironwork does not carry out yet is still traced. Only a data
+/// item is: a literal operand is the program's own choice.
+pub(crate) fn sinks(block: &ExecBlock) -> Vec<(&Ref, Sink)> {
+    let command = block.command.as_str();
+    let queue = matches!(command, "WRITEQ" | "READQ" | "DELETEQ") || command.starts_with("WRITEQ ") || command.starts_with("READQ ") || command.starts_with("DELETEQ ");
+    let mut options: Vec<(&str, Sink)> = Vec::new();
+    match command {
+        "LINK" | "XCTL" => options.push(("PROGRAM", Sink::DynamicTransfer)),
+        "START" | "START TRANSID" => options.push(("TRANSID", Sink::DynamicTransfer)),
+        "READ" | "STARTBR" | "RESETBR" => options.push(("RIDFLD", Sink::RecordKey)),
+        "DELETE" => options.push(("RIDFLD", Sink::RecordUpdate)),
+        "WRITEQ TD" => options.push(("FROM", Sink::Log)),
+        "WRITE" if has(block, "OPERATOR") => options.push(("TEXT", Sink::Log)),
+        "WRITE" if has(block, "JOURNALNAME") || has(block, "JOURNALNUM") => options.push(("FROM", Sink::Log)),
+        "SEND TEXT" | "SEND MAP" | "SEND" => options.push(("FROM", Sink::Screen)),
+        "WEB SEND" => options.push(("FROM", Sink::WebResponse)),
+        "WEB WRITE" => options.push(("VALUE", Sink::HttpHeader)),
+        "WEB OPEN" => options.extend([("HOST", Sink::OutboundHost), ("URL", Sink::OutboundHost)]),
+        "WEB CONVERSE" => options.extend([("PATH", Sink::OutboundHost), ("FROM", Sink::OutboundHttp)]),
+        _ => {}
+    }
+    if queue {
+        options.extend([("QUEUE", Sink::QueueName), ("QNAME", Sink::QueueName)]);
+    }
+    options.push(("SYSID", Sink::Sysid));
+    options
+        .into_iter()
+        .filter_map(|(option, sink)| match operand(block, option) {
+            Some(Operand::Ref(r)) => Some((r, sink)),
+            _ => None,
+        })
+        .collect()
 }
 
 fn bind_other<'b>(block: &'b ExecBlock, command: &str, label: &dyn Fn(&str) -> R<ParaId>) -> R<Cics<&'b Ref, &'b Operand, &'b str>> {

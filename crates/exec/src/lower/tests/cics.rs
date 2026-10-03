@@ -71,10 +71,37 @@ fn a_command_ironwork_does_not_carry_out_lowers_to_its_op_and_abends_when_reache
 }
 
 #[test]
-fn a_handle_label_that_names_no_procedure_is_refused() {
-    let source = program("", DATA, &[line("EXEC CICS HANDLE CONDITION ERROR(NOWHERE) END-EXEC"), line("GOBACK.")].concat());
-    let error = lower(&compiled(&source)).unwrap_err();
-    assert!(matches!(error, LowerError::Unsupported("a HANDLE label that names no procedure", _)), "{error}");
+fn a_block_the_walker_refuses_as_it_binds_it_keeps_the_walker_s_message() {
+    let refused = |block: &str| {
+        let p = lowered(&program("", DATA, &[line(block), line("GOBACK."), "       X.\n".to_owned(), line("GOBACK.")].concat()));
+        let got = commands(&p);
+        let Cics::Refused(why) = got[0].1.command else { panic!("{:?}", got[0]) };
+        (got[0].0.to_owned(), symbol(&p, why).to_owned())
+    };
+    let label = refused("EXEC CICS HANDLE CONDITION ERROR(NOWHERE) END-EXEC");
+    assert_eq!(label.0, "HANDLE CONDITION");
+    assert!(label.1.starts_with("EXEC CICS HANDLE CONDITION: "), "{}", label.1);
+    let two = refused("EXEC CICS HANDLE ABEND LABEL(X) RESET END-EXEC");
+    assert_eq!(two, ("HANDLE ABEND".to_owned(), "EXEC CICS HANDLE ABEND takes one of PROGRAM, LABEL, CANCEL and RESET".to_owned()));
+}
+
+#[test]
+fn a_command_keeps_every_option_an_observer_is_told_in_the_walker_s_order() {
+    let data = format!("{DATA}       01  WS-SYS PIC X(4).\n       01  WS-Q PIC X(8).\n");
+    let body = [
+        line("EXEC CICS WRITEQ TS QUEUE(WS-Q) QNAME(WS-DATA)"),
+        line("    FROM(WS-DATA) SYSID(WS-SYS) END-EXEC"),
+        line("EXEC CICS WRITE JOURNALNAME('J1') FROM(WS-DATA) END-EXEC"),
+        line("EXEC CICS START TRANSID(WS-Q) SYSID(WS-SYS) END-EXEC"),
+        line("GOBACK."),
+    ]
+    .concat();
+    let p = lowered(&program("", &data, &body));
+    let sinks: Vec<Vec<(String, &str)>> = commands(&p).iter().map(|(_, c)| c.sinks.iter().map(|&(q, s)| (symbol(&p, p.places[q as usize].name).to_owned(), s.kind())).collect()).collect();
+    let pair = |name: &str, kind| (name.to_owned(), kind);
+    assert_eq!(sinks[0], [pair("WS-Q", "queue-name"), pair("WS-DATA", "queue-name"), pair("WS-SYS", "cics-sysid")]);
+    assert_eq!(sinks[1], [pair("WS-DATA", "log")]);
+    assert_eq!(sinks[2], [pair("WS-Q", "cics-dynamic-transfer"), pair("WS-SYS", "cics-sysid")]);
 }
 
 #[test]

@@ -182,6 +182,9 @@ pub fn begin_command<H, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>) {
 
 /// Runs a command.
 pub fn run<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, command: &CicsCommand<P, O, S>, pos: Pos) -> R<Flow> {
+    if let Cics::Refused(why) = &command.command {
+        return Err(Abend::ironwork(x.text(why), pos));
+    }
     let name = x.text(&command.name);
     in_task(x.unit(), &name, pos)?;
     begin_command(x.unit());
@@ -221,6 +224,7 @@ pub fn run<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, command: &Cics
         Cics::ReadqTd { queue, record } => services::readq_td(x, &at, queue.as_ref(), record),
         Cics::DeleteqTd { queue } => services::deleteq_td(x, &at, queue.as_ref()),
         Cics::Unsupported => Err(Abend::ironwork(unsupported(&name), pos)),
+        Cics::Refused(_) => unreachable!("a refused command abends before it runs"),
     }
 }
 

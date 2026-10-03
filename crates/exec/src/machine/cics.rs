@@ -2,13 +2,12 @@
 //! `rt::cics`, which asks the walker what `CicsHost` names.
 
 use super::*;
-use super::cics_bind::operand;
+use super::cics_bind;
 use crate::cics::{self, CicsHost};
 use rt::bms::Mapset;
 use rt::unit::Loader;
 use std::rc::Rc;
 
-use super::cics_bind::has;
 pub(super) use crate::cics::Handlers;
 
 fn flow(f: cics::Flow) -> Flow {
@@ -29,38 +28,14 @@ impl<'p> Machine<'p, '_, '_> {
         cics::run(self, &command, block.pos).map(flow)
     }
 
-    /// The operands of a command an input could steer, told to the observer before the command
-    /// runs, so a command ironwork does not carry out yet is still traced. Only a data item is: a
-    /// literal operand is the program's own choice. An operand that cannot be read is left to the
-    /// command to report, so tracing never changes how a run ends.
+    /// The operands of a command an input could steer (`cics_bind::sinks`), told to the observer
+    /// before the command runs. An operand that cannot be read is left to the command to report,
+    /// so tracing never changes how a run ends.
     fn cics_sinks(&mut self, block: &ExecBlock) {
-        let command = block.command.as_str();
-        let queue = matches!(command, "WRITEQ" | "READQ" | "DELETEQ") || command.starts_with("WRITEQ ") || command.starts_with("READQ ") || command.starts_with("DELETEQ ");
-        let mut sinks: Vec<(&str, &'static str)> = Vec::new();
-        match command {
-            "LINK" | "XCTL" => sinks.push(("PROGRAM", "cics-dynamic-transfer")),
-            "START" | "START TRANSID" => sinks.push(("TRANSID", "cics-dynamic-transfer")),
-            "READ" | "STARTBR" | "RESETBR" => sinks.push(("RIDFLD", "record-key")),
-            "DELETE" => sinks.push(("RIDFLD", "record-update")),
-            "WRITEQ TD" => sinks.push(("FROM", "log")),
-            "WRITE" if has(block, "OPERATOR") => sinks.push(("TEXT", "log")),
-            "WRITE" if has(block, "JOURNALNAME") || has(block, "JOURNALNUM") => sinks.push(("FROM", "log")),
-            "SEND TEXT" | "SEND MAP" | "SEND" => sinks.push(("FROM", "screen")),
-            "WEB SEND" => sinks.push(("FROM", "web-response")),
-            "WEB WRITE" => sinks.push(("VALUE", "http-header")),
-            "WEB OPEN" => sinks.extend([("HOST", "outbound-host"), ("URL", "outbound-host")]),
-            "WEB CONVERSE" => sinks.extend([("PATH", "outbound-host"), ("FROM", "outbound-http")]),
-            _ => {}
-        }
-        if queue {
-            sinks.extend([("QUEUE", "queue-name"), ("QNAME", "queue-name")]);
-        }
-        sinks.push(("SYSID", "cics-sysid"));
-        for (option, kind) in sinks {
-            let Some(Operand::Ref(r)) = operand(block, option) else { continue };
+        for (r, sink) in cics_bind::sinks(block) {
             if let Ok(loc) = self.locate(r) {
                 let text = self.page.decode(store::bytes(&self.unit.mem, loc));
-                self.sink(kind, block.pos, &text);
+                self.sink(sink.kind(), block.pos, &text);
             }
         }
     }

@@ -9,7 +9,7 @@ mod program;
 mod run;
 mod services;
 
-pub use command::{Assign, Cics, CicsCommand, Control, Datum, FileControl, FileOptions, Handles, Opt, Record, Resp, Transfer};
+pub use command::{Assign, Cics, CicsCommand, Control, Datum, FileControl, FileOptions, Handles, Opt, Record, Resp, Sink, Transfer};
 pub use run::{
     At, CicsHost, EIBAID, EIBCALEN, EIBCPOSN, EIBDATE, EIBFN, EIBRESP, EIBRESP2, EIBRSRCE, EIBTASKN, EIBTIME, EIBTRMID,
     EIBTRNID, Flow, Handler, Handlers, begin_command, begin_task, bytes, in_task, ok, raise, run, unsupported,

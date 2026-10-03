@@ -7,7 +7,7 @@ mod common;
 
 use common::payroll;
 use ironwork_rt::abend::{AbendCode, Ending, FileStatus, Signal};
-use ironwork_rt::cics::{Assign, Cics, Condition, Control, Datum, FileControl, FileOptions, Record, Resp, Transfer};
+use ironwork_rt::cics::{Assign, Cics, Condition, Control, Datum, FileControl, FileOptions, Record, Resp, Sink, Transfer};
 use ironwork_rt::files::Format;
 use ironwork_rt::lir::*;
 use ironwork_rt::module::codec::{Decode, Encode, Writer, decode_all};
@@ -380,7 +380,7 @@ fn program_shape_round_trips() {
             on_exception: false,
             not_on_exception: false,
         }],
-        cics: vec![CicsCommand { name: 3, command: Cics::Syncpoint { rollback: false }, resp: Resp { resp: None, resp2: None, nohandle: true } }],
+        cics: vec![CicsCommand { name: 3, command: Cics::Syncpoint { rollback: false }, resp: Resp { resp: None, resp2: None, nohandle: true }, sinks: vec![(2, Sink::Sysid)] }],
         sqlca: Sqlca { fields: vec![(SqlcaField::Code, 0, INTEGER)] },
         entries: vec![EntryPoint { name: 2, paragraph: 1, block: 4, using: vec![0, 1] }],
         class: Some(Box::new(account())),
@@ -931,11 +931,27 @@ fn cics_commands_round_trip_with_every_tag() {
         Cics::ReadqTd { queue: text, record },
         Cics::DeleteqTd { queue: text },
         Cics::Unsupported,
+        Cics::Refused(10),
     ];
     // Tags 1 and 9 are retired (load-module.md §4.3).
-    every_variant_but(&commands, 36, &[1, 9]);
+    every_variant_but(&commands, 37, &[1, 9]);
     let resp = Resp { resp: place, resp2: Some(Datum::Place(8)), nohandle: false };
-    round_trip(&commands.into_iter().map(|command| CicsCommand { name: 9, command, resp: resp.clone() }).collect::<Vec<_>>());
+    let sinks = vec![(1, Sink::QueueName), (11, Sink::Sysid)];
+    round_trip(&commands.into_iter().map(|command| CicsCommand { name: 9, command, resp: resp.clone(), sinks: sinks.clone() }).collect::<Vec<_>>());
+    let kinds = [
+        Sink::DynamicTransfer,
+        Sink::RecordKey,
+        Sink::RecordUpdate,
+        Sink::Log,
+        Sink::Screen,
+        Sink::WebResponse,
+        Sink::HttpHeader,
+        Sink::OutboundHost,
+        Sink::OutboundHttp,
+        Sink::QueueName,
+        Sink::Sysid,
+    ];
+    every_variant(&kinds, 11);
     let verbs = [
         FileControl::Read,
         FileControl::Write,

@@ -359,6 +359,51 @@ fn the_vm_runs_a_cics_task_through_link_a_handled_condition_and_return() {
     assert_eq!((t.next_transid.as_deref(), t.returned_commarea), (Some("NEXT"), Some(ebcdic("BBBBB"))));
 }
 
+/// A CICS task on the interpreter, whose Harness compares the VM's run and the events its observer
+/// is told with its own, then on the VM, which must run it to its end.
+fn task_on_both(source: &str) -> (String, Result<Ending, Abend>) {
+    let walker = Harness::source(source).task(task("TR12")).run(Executor::Interpreter);
+    let vm = Harness::source(source).task(task("TR12")).run(Executor::Vm);
+    assert_eq!((&walker.out, &walker.ending), (&vm.out, &vm.ending));
+    (vm.out, vm.ending)
+}
+
+#[test]
+fn the_vm_tells_an_observer_each_cics_option_the_interpreter_does() {
+    let data = "       01  WS-REC PIC X(4) VALUE 'REC1'.\n       01  WS-SYS PIC X(4) VALUE 'REM1'.\n       01  WS-Q PIC X(8) VALUE 'Q2'.\n";
+    let ending = |last: &str| {
+        let body = [
+            line("EXEC CICS WRITEQ TS QUEUE('Q1') FROM(WS-REC)"),
+            line("    SYSID(WS-SYS) END-EXEC"),
+            line("EXEC CICS WRITEQ TS QUEUE('Q1') QNAME(WS-Q)"),
+            line("    FROM(WS-REC) END-EXEC"),
+            line("EXEC CICS ASKTIME SYSID(WS-SYS) END-EXEC"),
+            line("DISPLAY 'WRITTEN'"),
+            line(last),
+            line("EXEC CICS RETURN END-EXEC."),
+        ]
+        .concat();
+        let (out, ending) = task_on_both(&cics_program("SINKS", data, "", &body));
+        assert_eq!(out, "WRITTEN\n");
+        ending.map_err(|a| a.message)
+    };
+    assert_eq!(ending("EXEC CICS WRITE JOURNALNAME('J1') FROM(WS-REC) END-EXEC"), Err("EXEC CICS WRITE needs FILE".into()));
+    assert_eq!(ending("EXEC CICS START TRANSID(WS-REC) SYSID(WS-SYS) END-EXEC"), Err("EXEC CICS START is not supported yet".into()));
+    assert_eq!(ending("CONTINUE"), Ok(Ending::Goback));
+}
+
+#[test]
+fn the_vm_abends_where_the_interpreter_refuses_to_bind_a_cics_block() {
+    let refused = |block: &str| {
+        let body = [line("DISPLAY 'BEFORE'"), line(block), line("EXEC CICS RETURN END-EXEC."), "       X.\n".into(), line("GOBACK.")].concat();
+        let (out, ending) = task_on_both(&cics_program("REFUSED", "       01  WS-SYS PIC X(4) VALUE 'REM1'.\n", "", &body));
+        assert_eq!(out, "BEFORE\n");
+        ending.unwrap_err().message
+    };
+    assert_eq!(refused("EXEC CICS HANDLE ABEND LABEL(X) RESET SYSID(WS-SYS) END-EXEC"), "EXEC CICS HANDLE ABEND takes one of PROGRAM, LABEL, CANCEL and RESET");
+    assert!(refused("EXEC CICS HANDLE CONDITION ERROR(NOWHERE) END-EXEC").starts_with("EXEC CICS HANDLE CONDITION: "));
+}
+
 #[test]
 fn the_vm_inspects_a_national_item_in_national_characters() {
     let data = "       01  W PIC N(6) VALUE N'AB AB'.\n       01  P PIC N VALUE N'B'.\n       01  C1 PIC 99 VALUE 0.\n       01  C2 PIC 99 VALUE 0.\n";

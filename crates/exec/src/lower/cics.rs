@@ -1,10 +1,13 @@
 //! EXEC CICS (lir.md §9.5): each block bound by the walker's own `cics_bind::bind`, its handles
 //! lowered, as one `Op::Cics`. HANDLE CONDITION keeps the paragraphs its labels name, which the op
-//! returns as `Step::GoTo` when a condition takes one; HANDLE ABEND keeps its LABEL's.
+//! returns as `Step::GoTo` when a condition takes one; HANDLE ABEND keeps its LABEL's. A block the
+//! walker refuses as it binds it lowers to `Cics::Refused` with the walker's message.
 
 use super::{Lower, LowerError, R, push, unsupported};
+use crate::Abend;
 use crate::machine::cics_bind;
-use rt::cics::Handles;
+use rt::abend::AbendCode;
+use rt::cics::{Cics, CicsCommand, Handles, Resp};
 use rt::lir::{self, Op, PlaceId, SymId};
 use syntax::Pos;
 use syntax::ast::{ExecBlock, Operand, Ref};
@@ -38,12 +41,25 @@ impl<'b> Handles<&'b Ref, &'b Operand, &'b str> for Lowering<'_, '_> {
 impl Lower<'_> {
     pub(super) fn cics(&mut self, block: &ExecBlock, pos: Pos, para: usize) -> R<()> {
         let program = self.program;
-        // The walker abends at a label that names no procedure only once the block is in a task.
-        let Ok(bound) = cics_bind::bind(block, &|text| cics_bind::label(program, block, text, para)) else {
-            return unsupported("a HANDLE label that names no procedure", pos);
+        let command = match cics_bind::bind(block, &|text| cics_bind::label(program, block, text, para)) {
+            Ok(bound) => bound.map(&mut Lowering { l: self, pos })?,
+            Err(abend) => self.refused_cics(block, abend, pos)?,
         };
-        let command = bound.map(&mut Lowering { l: self, pos })?;
         let id = push(&mut self.services.cics, command, "EXEC CICS commands")?;
         self.op(Op::Cics(id), pos)
+    }
+
+    /// A block whose binding the walker refuses, which it abends at only once the task check and
+    /// the observer's sinks have passed.
+    fn refused_cics(&mut self, block: &ExecBlock, abend: Abend, pos: Pos) -> R<CicsCommand> {
+        if abend.code != AbendCode::Ironwork || abend.pos != pos {
+            return unsupported("an EXEC CICS block the walker refuses with another abend than IRONWORK at the block", pos);
+        }
+        let mut sinks = Vec::new();
+        for (r, sink) in cics_bind::sinks(block) {
+            sinks.push((self.place(r, false)?, sink));
+        }
+        let (name, why) = (self.sym(&block.command), self.sym(&abend.message));
+        Ok(CicsCommand { name, command: Cics::Refused(why), resp: Resp { resp: None, resp2: None, nohandle: false }, sinks })
     }
 }

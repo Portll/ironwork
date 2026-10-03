@@ -28,6 +28,44 @@ pub struct CicsCommand<P = PlaceId, O = Operand, S = SymId> {
     pub name: S,
     pub command: Cics<P, O, S>,
     pub resp: Resp<P, O, S>,
+    /// The data items of the block's options an input could steer, in the order an observer is
+    /// told them before the command runs, whether or not the command reads them.
+    pub sinks: Vec<(P, Sink)>,
+}
+
+/// What an observer is told an option's data item is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sink {
+    DynamicTransfer,
+    RecordKey,
+    RecordUpdate,
+    Log,
+    Screen,
+    WebResponse,
+    HttpHeader,
+    OutboundHost,
+    OutboundHttp,
+    QueueName,
+    Sysid,
+}
+
+impl Sink {
+    /// The sink's kind, as an observer's event names it.
+    pub fn kind(self) -> &'static str {
+        match self {
+            Self::DynamicTransfer => "cics-dynamic-transfer",
+            Self::RecordKey => "record-key",
+            Self::RecordUpdate => "record-update",
+            Self::Log => "log",
+            Self::Screen => "screen",
+            Self::WebResponse => "web-response",
+            Self::HttpHeader => "http-header",
+            Self::OutboundHost => "outbound-host",
+            Self::OutboundHttp => "outbound-http",
+            Self::QueueName => "queue-name",
+            Self::Sysid => "cics-sysid",
+        }
+    }
 }
 
 /// RESP, RESP2 and NOHANDLE, which decide what raising a condition does.
@@ -81,6 +119,10 @@ pub enum Cics<P = PlaceId, O = Operand, S = SymId> {
     DeleteqTd { queue: Opt<P, O, S> },
     /// "EXEC CICS … is not supported yet", naming the command, when reached.
     Unsupported,
+    /// A block the walker refuses as it binds it (a HANDLE label that names no procedure, HANDLE
+    /// ABEND with two of PROGRAM, LABEL, CANCEL and RESET): this IRONWORK abend, once the task
+    /// check and the observer's sinks have passed. Only lowering makes it.
+    Refused(S),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -191,6 +233,7 @@ impl<P, O, S> Cics<P, O, S> {
             Self::ReadqTd { .. } => "READQ TD",
             Self::DeleteqTd { .. } => "DELETEQ TD",
             Self::Unsupported => "unsupported",
+            Self::Refused(_) => "refused",
         }
     }
 }
@@ -236,7 +279,8 @@ impl<P, O, S> CicsCommand<P, O, S> {
         let name = h.text(self.name)?;
         let command = self.command.map(h)?;
         let resp = Resp { resp: opt(self.resp.resp, h)?, resp2: opt(self.resp.resp2, h)?, nohandle: self.resp.nohandle };
-        Ok(CicsCommand { name, command, resp })
+        let sinks = self.sinks.into_iter().map(|(p, sink)| Ok((h.place(p)?, sink))).collect::<Result<_, _>>()?;
+        Ok(CicsCommand { name, command, resp, sinks })
     }
 }
 
@@ -328,6 +372,7 @@ impl<P, O, S> Cics<P, O, S> {
             Self::ReadqTd { queue, record } => Cics::ReadqTd { queue: opt(queue, h)?, record: record.map(h)? },
             Self::DeleteqTd { queue } => Cics::DeleteqTd { queue: opt(queue, h)? },
             Self::Unsupported => Cics::Unsupported,
+            Self::Refused(why) => Cics::Refused(h.text(why)?),
         })
     }
 
@@ -374,7 +419,20 @@ impl Decode for Condition {
 }
 
 codec_enum!(Datum { Place(place) = 0, Value(value) = 1, Text(text) = 2, Bare = 3 });
-codec_struct!(CicsCommand { name, command, resp });
+codec_struct!(CicsCommand { name, command, resp, sinks });
+codec_enum!(Sink {
+    DynamicTransfer = 0,
+    RecordKey = 1,
+    RecordUpdate = 2,
+    Log = 3,
+    Screen = 4,
+    WebResponse = 5,
+    HttpHeader = 6,
+    OutboundHost = 7,
+    OutboundHttp = 8,
+    QueueName = 9,
+    Sysid = 10,
+});
 codec_struct!(Resp { resp, resp2, nohandle });
 // Tags 1 and 9 are retired; HandleAbend, whose PROGRAM is a datum, is 34, and Return, with CHANNEL
 // and IMMEDIATE, is 35.
@@ -413,6 +471,7 @@ codec_enum!(Cics {
     Unsupported = 33,
     HandleAbend { program, label, reset } = 34,
     Return { transid, commarea, length, channel, immediate } = 35,
+    Refused(why) = 36,
 });
 codec_enum!(FileControl {
     Read = 0,

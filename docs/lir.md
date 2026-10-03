@@ -1298,21 +1298,28 @@ pub enum StartKey { Prime, Named { key: u8, span: RecordSpan }, Relative(IntExpr
 are the LIR's `PlaceId`, `Operand` and `SymId`, or the walker's `&Ref`, `&Operand` and `&str`.
 
 ```rust
-pub struct CicsCommand<P, O, S> { pub name: S, pub command: Cics<P, O, S>, pub resp: Resp<P, O, S> }
+/// `sinks`: the data items of the block's options an input could steer, as `cics_bind::sinks`
+/// lists them, in the order the observer is told them before the command runs.
+pub struct CicsCommand<P, O, S> { pub name: S, pub command: Cics<P, O, S>, pub resp: Resp<P, O, S>, pub sinks: Vec<(P, Sink)> }
+/// What an observer is told an option's data item is: cics-dynamic-transfer, record-key,
+/// record-update, log, screen, web-response, http-header, outbound-host, outbound-http,
+/// queue-name or cics-sysid.
+pub enum Sink { DynamicTransfer, RecordKey, RecordUpdate, Log, Screen, WebResponse, HttpHeader, OutboundHost, OutboundHttp, QueueName, Sysid }
 /// RESP, RESP2 and NOHANDLE decide what `raise` does.
 pub struct Resp<P, O, S> { pub resp: Opt<P, O, S>, pub resp2: Opt<P, O, S>, pub nohandle: bool }
 /// An option's argument; an absent option is None.
 pub enum Datum<P, O, S> { Place(P), Value(O), Text(S), Bare }
 pub type Opt<P, O, S> = Option<Datum<P, O, S>>;
 
-/// 34 variants: File { verb: FileControl, file, options: FileOptions } for the ten file-control
+/// 35 variants: File { verb: FileControl, file, options: FileOptions } for the ten file-control
 /// commands; Return { transid, commarea, length, channel: Opt, immediate }, tag 35 with 1 retired;
 /// Link and Xctl (Transfer); Abend; HandleCondition(Vec<(Condition,
 /// Option<ParaId>)>); IgnoreCondition(Vec<Condition>); PushHandle; PopHandle; HandleAbend
 /// { program: Opt, label: Option<ParaId>, reset }, tag 34 with 9 retired; HandleAid; SendMap; ReceiveMap; SendControl;
 /// Receive(Record); Asktime; Formattime; Assign; Getmain; Freemain; Enq; Deq; Delay;
 /// Syncpoint { rollback }; Address; SendText; WriteOperator; WriteqTs; ReadqTs; DeleteqTs;
-/// WriteqTd; ReadqTd; DeleteqTd; and Unsupported, "EXEC CICS … is not supported yet".
+/// WriteqTd; ReadqTd; DeleteqTd; Unsupported, "EXEC CICS … is not supported yet"; and
+/// Refused(S), tag 36, a block the walker refuses as it binds it, which only lowering makes.
 pub enum Cics<P, O, S> { /* … */ }
 ```
 
@@ -1358,17 +1365,18 @@ HANDLE labels there. SYNCPOINT is a service (cics/services.rs) that settles the 
   none of the HANDLE CONDITION and IGNORE CONDITION entries, pushed or not (`Handlers::xctl`, C146).
   The VM numbers its activations, lends its table and hands it on at XCTL as the walker does. RETURN
   and XCTL return `Step::End`. No new terminator is needed.
-- **Refused:** a HANDLE label that names no procedure, which the walker abends on only after the
-  task check (IRONWORK at the block, or the outside-a-task abend first), so no one terminator
-  gives both.
+- **A block the walker refuses as it binds it** (a HANDLE label that names no procedure, HANDLE
+  ABEND with two of PROGRAM, LABEL, CANCEL and RESET) lowers to `Cics::Refused` with the walker's
+  message. The walker abends IRONWORK at the block only after the task check and the observer's
+  sinks, and `run` gives the abend before anything else, so the op keeps that order.
 - **HANDLE ABEND** keeps the paragraph its LABEL names, as HANDLE CONDITION does. Its exit is
   taken when an abend reaches a program's activation, in the walker's `run_level` and
   `run_called` and the VM's alike (below), so the op only changes the program level's handlers.
-- **Not lowered:** the observer's sinks (`cics_sinks`), which tell an observer a command's operands
-  and change no result, as with CALL's and DISPLAY's. The VM tells them from the options the
-  command keeps, which leave out SYSID on any command but ASSIGN, WRITE's FROM under JOURNALNAME or
-  JOURNALNUM, and QNAME written beside QUEUE; an observed command kept as `Unsupported` stops the VM
-  as `Halt::Unimplemented`.
+- **The observer's sinks** are the command's `sinks`, which `bind` lists from the block's options
+  with `cics_bind::sinks`, the list the walker's `cics_sinks` tells: SYSID on any command, WRITE's
+  FROM under JOURNALNAME or JOURNALNUM, QUEUE and QNAME both, and the options of commands ironwork
+  does not carry out. Each is located as the walker locates it, and one whose locate abends is
+  left out, as the walker leaves it.
 - **On the VM.** Handlers live in the activation running the level, which the task numbers as the
   walker numbers its activations, the number a LABEL records. An abend that reaches an activation
   goes to the exit as the walker's `run_level`, and for a CALLed program `run_called`, sends it: a
