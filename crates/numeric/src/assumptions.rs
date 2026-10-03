@@ -286,6 +286,7 @@ pub const CICS_RETURN_BELOW_THE_FIRST_LEVEL: &str = "C143";
 pub const CICS_STOP_RUN_ENDS_THE_LEVEL: &str = "C144";
 pub const CICS_RUN_UNIT_PER_LINK: &str = "C145";
 pub const CICS_HANDLERS_ACROSS_XCTL: &str = "C146";
+pub const CICS_NO_OBJECT_ORIENTED_COBOL: &str = "C147";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1828,6 +1829,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: CICS_HANDLERS_ACROSS_XCTL,
         claim: "HANDLE CONDITION and IGNORE CONDITION apply only to the program in which they are specified and remain active while it is being executed (CICS TS 6.x, HANDLE CONDITION, dfhp4_handlecondition; IGNORE CONDITION, dfhp4_ignorecondition), and when control passes to another program by LINK or XCTL the HANDLE CONDITION commands active in the calling program are deactivated ('Using the HANDLE CONDITION command', dfhp3_exc_handlecondition). XCTL releases the program that issues it (XCTL, dfhp4_xctl), so the program it starts has none of them. The HANDLE ABEND exit belongs to the logical level and stays (C239). POP HANDLE restores the state before a PUSH HANDLE executed at the current link level, and raises INVREQ only when no such PUSH has been executed (POP HANDLE, dfhp4_pophandle); XCTL keeps the link level, and the manuals do not say it discards the stack. ironwork keeps the level's PUSH HANDLE stack across XCTL, with the HANDLE ABEND exit each entry suspended, and empties each entry's HANDLE CONDITION and IGNORE CONDITION, which belonged to the released program: a POP HANDLE in the new program undoes a PUSH the released one made and restores that exit, with no condition handling. HANDLE AID, which ironwork accepts and does not act on, has no state to carry",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CICS_NO_OBJECT_ORIENTED_COBOL,
+        claim: "COBOL programs that have object-oriented syntax for Java interoperability cannot run in CICS (Programming Guide SC27-8714-03, p. 495), and COBOL class definitions and methods cannot contain EXEC CICS statements, cannot be run in CICS and cannot be compiled with the CICS option (p. 679); the CICS reserved-word table flags INVOKE, METHOD, OBJECT and FACTORY (p. 502). An INVOKEd method therefore shares no CICS handlers with the program that invokes it, and starts with none either: it does not run. ironwork compiles such a program as before and refuses an INVOKE that a CICS task reaches, before any operand is evaluated, with an IRONWORK abend",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

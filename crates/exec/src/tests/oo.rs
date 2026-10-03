@@ -119,6 +119,15 @@ fn instances_keep_their_own_data_and_factory_data_is_shared() {
     assert_eq!(out, "SHORT CREDIT\nA1  125\nA2  110\nOPENED    2\n");
 }
 
+#[test]
+fn an_invoke_in_a_cics_task_is_refused_before_the_method_runs() {
+    let main = client(&["Account IS \"Account\""], ACCOUNT_DATA, &["DISPLAY 'BEFORE'", "INVOKE Account \"open\" RETURNING A1", "DISPLAY 'NOT REACHED'", "GOBACK."]);
+    let o = Harness::source(&main).classes(&[account()]).task(task("TR18")).run(Executor::Interpreter);
+    assert_eq!(o.out, "BEFORE\n");
+    let abend = o.ending.unwrap_err();
+    assert_eq!((abend.code.to_string(), abend.message.as_str()), ("IRONWORK".into(), "INVOKE was reached in a CICS task, where a COBOL program with object-oriented syntax cannot run"));
+}
+
 fn animals() -> Vec<String> {
     let animal = class(
         "Animal INHERITS Base",

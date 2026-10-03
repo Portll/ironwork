@@ -373,8 +373,12 @@ fn succeeded<P, O, S>(plan: &InvokePlan<P, O, S>) -> Step {
 }
 
 /// INVOKE: Arm(1) when no method matches and ON EXCEPTION is written, Arm(0) after a method ran
-/// when a phrase is written, Next when none is, or End after a STOP RUN.
+/// when a phrase is written, Next when none is, or End after a STOP RUN. A CICS task refuses it
+/// (C147).
 pub fn invoke<'w, P: Copy, O, S, X: OoHost<'w, P, O, S>>(x: &mut X, plan: &InvokePlan<P, O, S>, pos: Pos) -> R<Step> {
+    if x.unit().cics.is_some() {
+        return Err(Abend::ironwork("INVOKE was reached in a CICS task, where a COBOL program with object-oriented syntax cannot run", pos));
+    }
     x.unit().unfollowed("object-oriented COBOL and calls through pointers");
     let name = method_name(x, &plan.method, pos)?;
     let written = target_name(x, &plan.receiver, pos)?;
