@@ -3,7 +3,7 @@
 //! activation run by Rust recursion, RETURNING, and what an observer is told. A name no program has
 //! may be an LE callable service or a job for the virtual printer.
 
-use super::{Code, Halt, Lowered, R, Vm, not_yet};
+use super::{Code, Halt, Lowered, R, Spare, Stop, Vm, not_yet};
 use crate::abend::{Abend, AbendCode, Ending};
 use crate::callee::{self, Arguments, Bindings, By, Callee};
 use crate::cics;
@@ -18,6 +18,7 @@ use crate::unit::{Event, LoadError, Loader, OS_COMMAND_ROUTINES, RETURN_CODE, Ru
 use crate::virtual_printer::{self, Job};
 use crate::vocab::Pos;
 use numeric::precision::{Fixed, Places};
+use std::borrow::Cow;
 use std::rc::Rc;
 use zarch::ebcdic::CodePage;
 
@@ -32,22 +33,22 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 return self.call_through_pointer(plan, *pointer, pos);
             }
             CallTarget::Entry(pointer) => match self.entry_in(*pointer)? {
-                Some(entry) => (entry.name, false, entry.dynamic),
+                Some(entry) => (Cow::Owned(entry.name), false, entry.dynamic),
                 None if plan.args.iter().all(|a| matches!(a, CallArg::Value(_) | CallArg::Omitted)) => return self.call_through_pointer(plan, *pointer, pos),
                 None => return Err(not_yet("a CALL BY REFERENCE or BY CONTENT through a pointer that holds no entry, which the walker calls as a JNI service")),
             },
-            CallTarget::Named { name, .. } => (self.sym(*name).to_owned(), false, dynam),
-            CallTarget::Dynamic(o) => (self.program_name(*o, pos)?, true, true),
+            CallTarget::Named { name, .. } => (Cow::Borrowed(self.sym(*name)), false, dynam),
+            CallTarget::Dynamic(o) => (Cow::Owned(self.program_name(*o, pos)?), true, true),
         };
         if self.unit.observed() {
             if variable {
                 self.sink("dynamic-program-load", pos, &name);
             }
-            if OS_COMMAND_ROUTINES.contains(&name.as_str()) {
+            if OS_COMMAND_ROUTINES.contains(&&*name) {
                 let text = callee::arguments_text(self, &plan.args, pos);
-                match self.settle(text) {
+                match self.settle(text).map_err(Stop::halt) {
                     Ok(text) => self.sink("os-command", pos, &text),
-                    Err(Halt::Unimplemented(what)) => return Err(Halt::Unimplemented(what)),
+                    Err(Halt::Unimplemented(what)) => return Err(Halt::Unimplemented(what).into()),
                     Err(Halt::Abend(_)) => {}
                 }
             }
@@ -89,21 +90,32 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
 
     fn call_nested(&mut self, plan: &CallPlan, index: usize, entry: Option<usize>, lowered: &Lowered, suspends: bool, pos: Pos) -> R<Step> {
         let mark = self.unit.mem.len();
-        let addresses = callee::addresses(self, &plan.args, pos);
-        let addresses = self.settle(addresses)?;
+        let mut addresses = std::mem::take(&mut self.spare.addresses);
+        addresses.clear();
+        let filled = callee::addresses_into(self, &plan.args, pos, &mut addresses);
+        self.settle(filled)?;
         self.parmcheck_set();
         let program = &lowered.program;
         let containers = self.containers_of(program);
         let by = By::Call { initial: program.initial };
         let (ending, returned) = callee::run(self, &Callee { index, by, mark: Some(mark), pos }, |caller| {
-            let mut vm = Vm::activation_within(lowered, index, &mut *caller.unit, false, containers)?;
+            let spare = &mut caller.spare;
+            let tables = Spare { linkage: std::mem::take(&mut spare.linkage), armed: std::mem::take(&mut spare.armed), frames: std::mem::take(&mut spare.frames), ..Spare::default() };
+            let mut vm = Vm::activation_within(lowered, index, &mut *caller.unit, false, containers, tables)?;
             let entry = entry.and_then(|k| program.services.entries.get(k));
-            let using = entry.map_or(&program.storage.using, |e| &e.using).iter().map(|&o| Some(usize::from(o))).collect();
+            let mut using = std::mem::take(&mut caller.spare.using);
+            using.clear();
+            using.extend(entry.map_or(&program.storage.using, |e| &e.using).iter().map(|&o| Some(usize::from(o))));
             let returning = program.storage.returning.map(|o| (usize::from(o), program.storage.linkage[usize::from(o)] as usize));
-            Bindings { records: &[], using, addresses: &addresses, returning }.bind(vm.unit, &mut vm.linkage);
+            let bindings = Bindings { records: &[], using, addresses: &addresses, returning };
+            bindings.bind(vm.unit, &mut vm.linkage);
+            caller.spare.using = bindings.using;
             (vm.cics_handlers, vm.first) = (caller.cics_handlers.lend(suspends), caller.first);
-            let ending = match vm.run_called(entry.map(|e| (e.paragraph, e.block))) {
-                Err(Halt::Unimplemented(what)) => return Err(Halt::Unimplemented(what)),
+            vm.spare = std::mem::take(&mut caller.spare);
+            let ran = vm.run_called(entry.map(|e| (e.paragraph, e.block)));
+            caller.spare = std::mem::take(&mut vm.spare);
+            let ending = match ran.map_err(Stop::halt) {
+                Err(Halt::Unimplemented(what)) => return Err(Stop::from(Halt::Unimplemented(what))),
                 Err(Halt::Abend(a)) => Err(a),
                 Ok(e) => Ok(e),
             };
@@ -112,6 +124,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 (Some(ordinal), Ok(_)) => Some(vm.returned(ordinal, pos)?),
                 _ => None,
             };
+            (caller.spare.linkage, caller.spare.armed, caller.spare.frames) = (std::mem::take(&mut vm.linkage), std::mem::take(&mut vm.returns.armed), std::mem::take(&mut vm.returns.frames));
             Ok((ending, returned))
         })?;
         if ending? == Ending::StopRun {
@@ -121,6 +134,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             return Ok(Step::End(Ending::Goback));
         }
         self.parmcheck_test(plan, &addresses, |unit| unit.programs[index].name.clone(), pos)?;
+        self.spare.addresses = addresses;
         if let (Some(target), Some(val)) = (plan.returning, returned) {
             let dest = self.loc_written(target)?;
             store::assign(&self.facts(), self.unit, dest, val, None, pos)?;
@@ -137,7 +151,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let ran = match self.settle(addresses) {
             Ok(args) => {
                 self.parmcheck_set();
-                le::call(self, service, &args, pos).map(|()| args).map_err(Halt::Abend)
+                le::call(self, service, &args, pos).map(|()| args).map_err(Stop::from)
             }
             Err(halt) => Err(halt),
         };
@@ -172,10 +186,10 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         }
         let Some(printer) = self.unit.dds.get(virtual_printer::DD) else { return Ok(None) };
         let text = callee::arguments_text(self, &plan.args, pos);
-        let job = match self.settle(text) {
+        let job = match self.settle(text).map_err(Stop::halt) {
             Ok(text) => Job::parse(&text),
             Err(Halt::Abend(_)) => None,
-            Err(halt) => return Err(halt),
+            Err(halt) => return Err(halt.into()),
         };
         let Some(job) = job else { return Ok(None) };
         let dds = self.unit.dds.clone();

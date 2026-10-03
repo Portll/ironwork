@@ -8,6 +8,7 @@ use crate::storage::{Kind, Loc, Val};
 use crate::store::{self, ProgramFacts};
 use crate::unit::Loader;
 use crate::vocab::{Figurative, Pos, RelOp};
+use numeric::Numproc;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -115,6 +116,59 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
     /// references by what they identify, and anything else as `store::compare` orders it. NUMCHECK
     /// tests a data item side unless `checks_against` the other says not.
     pub(super) fn compare(&mut self, a: &Comparand, b: &Comparand, how: Compare, pos: Pos) -> R<Ordering> {
+        let held = |c: &Comparand| match c {
+            Comparand::Operand(Operand::Load(p)) => self.code.pure[*p as usize],
+            Comparand::Operand(Operand::Const(_)) => true,
+            _ => false,
+        };
+        if !(held(a) && held(b)) {
+            return self.compare_located(a, b, how, pos);
+        }
+        if how == Compare::Fixed
+            && self.unseen()
+            && let Some(o) = self.compare_integers(a, b)?
+        {
+            return Ok(o);
+        }
+        self.memoized(|vm| vm.compare_located(a, b, how, pos))
+    }
+
+    /// Two integer operands, each a pure place or a literal, compared as `store::compare` compares
+    /// their values, each place located as the walker first locates it, the second's first; None
+    /// where either is not an integer that reads without an abend.
+    fn compare_integers(&mut self, a: &Comparand, b: &Comparand) -> R<Option<Ordering>> {
+        let lb = self.located(b)?;
+        let la = self.located(a)?;
+        Ok(match (self.integer_of(a, la), self.integer_of(b, lb)) {
+            (Some(x), Some(y)) => Some(x.cmp(&y)),
+            _ => None,
+        })
+    }
+
+    fn located(&mut self, c: &Comparand) -> R<Option<Loc>> {
+        match c {
+            Comparand::Operand(Operand::Load(p)) => Ok(Some(self.loc(*p)?)),
+            _ => Ok(None),
+        }
+    }
+
+    /// An operand `store::compare` would compare as an integer, where it reads as one without an
+    /// abend: an item as `store::read_integer` reads it, or an integer literal.
+    fn integer_of(&self, c: &Comparand, loc: Option<Loc>) -> Option<i64> {
+        match (c, loc) {
+            (Comparand::Operand(Operand::Load(_)), Some(loc)) => {
+                let packed_pfd = matches!(loc.kind, Kind::Packed { .. }) && self.p.options.options.numproc == Numproc::Pfd;
+                if packed_pfd { None } else { store::read_integer(&self.facts(), &self.unit.mem, loc) }
+            }
+            (Comparand::Operand(Operand::Const(k)), _) => match &self.p.consts[*k as usize] {
+                Const::Number(f) if f.places.dec == 0 && !(f.negative && f.magnitude.is_zero()) => f.to_i128().and_then(|n| i64::try_from(n).ok()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn compare_located(&mut self, a: &Comparand, b: &Comparand, how: Compare, pos: Pos) -> R<Ordering> {
         let mut zoned = self.zoned_against(a, b)?;
         if how != (Compare::ZonedBytes { zoned_first: true }) {
             zoned = self.zoned_against(b, a)?;

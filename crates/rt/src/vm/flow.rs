@@ -1,7 +1,7 @@
 //! Control flow (lir.md §8.4, §9.10): the dispatch loop over blocks, the frames and return points
 //! of assumption C99, transfers, and a procedure a statement or a `Debug` runs in a loop of its own.
 
-use super::{Code, Halt, R, Vm, not_yet};
+use super::{Code, Halt, R, Stop, Vm, not_yet};
 use crate::abend::{Abend, AbendCode, Ending, Signal};
 use crate::lir::{BlockId, DebugId, Frame, FrameKind, ParaId, RangeId, ReturnPoint, Step, Terminator};
 use crate::unit::{Event, Loader};
@@ -49,8 +49,8 @@ enum Next {
 
 /// STOP RUN in a user-defined function an op or a condition ran: the run ends there, as the
 /// walker's `exec` ends it at the statement holding the invocation.
-fn stops_run(halt: &Halt) -> bool {
-    matches!(halt, Halt::Abend(Abend { code: AbendCode::Signal(Signal::StopRun), .. }))
+fn stops_run(stop: &Stop) -> bool {
+    matches!(&*stop.0, Halt::Abend(Abend { code: AbendCode::Signal(Signal::StopRun), .. }))
 }
 
 /// DEBUG-ITEM's DEBUG-LINE, DEBUG-NAME and DEBUG-CONTENTS: offset and length.

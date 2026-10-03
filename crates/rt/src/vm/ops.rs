@@ -1,6 +1,7 @@
 //! The ops (lir.md §8.1, §9): each a call of the semantics library the walker's statement makes,
 //! with the `Loc`s and values it would pass, and the `Host` the library's statements call back.
 
+use super::value::int_binop;
 use super::{Code, Facts, R, Vm, not_yet};
 use crate::abend::Abend;
 use crate::accept;
@@ -13,7 +14,7 @@ use crate::storage::{Kind, Loc, Val};
 use crate::store;
 use crate::text::{self, UnstringField};
 use crate::unit::Loader;
-use crate::vocab::{Figurative, Pos};
+use crate::vocab::{BinOp, Figurative, Pos};
 use numeric::precision::Fixed;
 use std::cmp::Ordering;
 use std::rc::Rc;
@@ -91,10 +92,13 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 for &q in prepass {
                     self.loc(q)?;
                 }
-                let current = self.value(Operand::Load(*var))?;
-                let x = crate::arith::fixed_operand(current, plan.dmax, pos)?;
-                let y = self.eval_fixed(*by, plan.dmax, pos)?;
-                let next = crate::arith::fixed_binop(x, crate::vocab::BinOp::Add, y, plan.dmax, p.options.options.arith, pos)?;
+                let x = self.operand_number(Operand::Load(*var), plan.dmax, pos)?;
+                let y = self.eval_number(*by, plan.dmax, pos)?;
+                let arith = p.options.options.arith;
+                let next = match int_binop(x, BinOp::Add, y, plan.dmax, arith) {
+                    Some(next) => next.fixed(),
+                    None => crate::arith::fixed_binop(x.fixed(), BinOp::Add, y.fixed(), plan.dmax, arith, pos)?,
+                };
                 store::store_fixed(&self.facts(), self.unit, dest, &next, false, pos)?;
             }
             Op::SetInt { target, value } => {

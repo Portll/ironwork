@@ -1,18 +1,26 @@
 //! Places to `Loc`s, and the integers subscripts, bounds and counts take, in the walker's order of
 //! locates, reads and checks (lir.md §5.4, §7.5).
 
+use super::value::Number;
 use super::{Code, R, Vm, not_yet};
 use crate::abend::Abend;
 use crate::arith;
 use crate::fixed::align;
-use crate::lir::{Base, Count, Expr, IntExpr, Odo, Operand, Place, PlaceId};
+use crate::lir::{Base, Count, Expr, ExprId, IntExpr, Odo, Operand, Place, PlaceId, Program, SenderCheck};
 use crate::loc;
 use crate::oo;
 use crate::storage::{Kind, Loc};
+use crate::store;
 use crate::unit::{Loader, RETURN_CODE};
 use crate::vocab::Pos;
 use numeric::precision::Fixed;
 use std::rc::Rc;
+
+/// A place whose `Loc` has the place's own kind: one in the program's storage, LOCAL-STORAGE, a
+/// LINKAGE record or RETURN-CODE.
+pub(super) fn plain(place: &Place) -> bool {
+    matches!(place.base, Base::Program | Base::Local | Base::Linkage(_) | Base::ReturnCode)
+}
 
 /// A place that cannot abend: its address is its base's plus a constant.
 pub(super) fn is_static(place: &Place) -> bool {
@@ -28,6 +36,83 @@ pub(super) fn whole(v: &Fixed, pos: Pos) -> Result<i64, Abend> {
     let m = align(v, 0, false).and_then(|m| m.to_u128()).and_then(|m| i64::try_from(m).ok());
     let m = m.ok_or_else(|| Abend::ironwork("an integer operand beyond 64 bits", pos))?;
     Ok(if v.negative { -m } else { m })
+}
+
+/// Whether each place locates by reading storage alone: its base is the program's, LOCAL-STORAGE,
+/// a LINKAGE record or RETURN-CODE, and its subscripts, OCCURS DEPENDING ON objects and reference
+/// modification are integers, literals and expressions over such places. Located twice with no
+/// write between, such a place gives the same `Loc`, or the same abend.
+pub(super) fn pure_places(p: &Program) -> Vec<bool> {
+    let mut pure = vec![None; p.places.len()];
+    for id in 0..p.places.len() {
+        pure_place(p, id as PlaceId, &mut pure);
+    }
+    pure.into_iter().map(|known| known == Some(true)).collect()
+}
+
+fn pure_place(p: &Program, id: PlaceId, known: &mut [Option<bool>]) -> bool {
+    match known.get(id as usize) {
+        Some(Some(pure)) => return *pure,
+        Some(None) => {}
+        None => return false,
+    }
+    known[id as usize] = Some(false);
+    let place = &p.places[id as usize];
+    let int = |e: &IntExpr, known: &mut [Option<bool>]| pure_int(p, e, known);
+    let pure = plain(place)
+        && place.moved.iter().chain(&place.odo).all(|odo| int(&odo.object, known))
+        && place.subscripts.iter().all(|s| int(&s.value, known))
+        && place.refmod.as_ref().is_none_or(|rm| int(&rm.start, known) && rm.length.as_ref().is_none_or(|l| int(l, known)));
+    known[id as usize] = Some(pure);
+    pure
+}
+
+fn pure_int(p: &Program, e: &IntExpr, known: &mut [Option<bool>]) -> bool {
+    match e {
+        IntExpr::Const(_) => true,
+        IntExpr::Item(q) => pure_place(p, *q, known),
+        IntExpr::Fixed { expr, prepass, .. } => prepass.iter().all(|&q| pure_place(p, q, known)) && pure_expr(p, *expr, known),
+        IntExpr::Walk(_) => false,
+    }
+}
+
+fn pure_expr(p: &Program, e: ExprId, known: &mut [Option<bool>]) -> bool {
+    match &p.exprs[e as usize] {
+        Expr::Operand(Operand::Const(_)) => true,
+        Expr::Operand(Operand::Load(q) | Operand::LengthOf(q)) => pure_place(p, *q, known),
+        Expr::Operand(_) => false,
+        Expr::Neg(inner) => pure_expr(p, *inner, known),
+        Expr::Bin(a, _, b) => pure_expr(p, *a, known) && pure_expr(p, *b, known),
+        Expr::Pow(base, exponent) => pure_expr(p, *base, known) && pure_int(p, exponent, known),
+    }
+}
+
+/// The `Loc`s of pure places located while a comparison runs, which writes nothing: the walker
+/// locates its operands again, and those locates are taken from here. Held only while neither
+/// taint nor NUMCHECK, whose reads a locate makes, can tell.
+pub(super) struct Memo {
+    places: [PlaceId; 4],
+    locs: [Loc; 4],
+    len: usize,
+}
+
+impl Default for Memo {
+    fn default() -> Self {
+        Self { places: [0; 4], locs: [Loc { offset: 0, len: 0, kind: Kind::Group, item: 0 }; 4], len: 0 }
+    }
+}
+
+impl Memo {
+    fn get(&self, place: PlaceId) -> Option<Loc> {
+        self.places[..self.len].iter().position(|&p| p == place).map(|k| self.locs[k])
+    }
+
+    fn put(&mut self, place: PlaceId, loc: Loc) {
+        if self.len < self.places.len() {
+            (self.places[self.len], self.locs[self.len]) = (place, loc);
+            self.len += 1;
+        }
+    }
 }
 
 impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
@@ -46,14 +131,59 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     /// `place` with each subscript `fixed` names set to its constant, as the walker writes an ALL
     /// subscript as a literal for each element.
     pub(super) fn loc_with(&mut self, place: PlaceId, fixed: &[(u32, i64)]) -> R<Loc> {
+        let memo = fixed.is_empty() && self.memo.is_some() && self.code.pure[place as usize];
+        if memo && let Some(loc) = self.memo.as_ref().and_then(|m| m.get(place)) {
+            return Ok(loc);
+        }
         self.locating += 1;
         let loc = self.evaluate(place, fixed);
         self.locating -= 1;
+        if memo && let (Some(m), Ok(loc)) = (self.memo.as_mut(), &loc) {
+            m.put(place, *loc);
+        }
         loc
+    }
+
+    /// Whether neither taint nor NUMCHECK, whose reads a locate makes, can tell a pure place
+    /// located once from the walker's locates of it again.
+    pub(super) fn unseen(&self) -> bool {
+        self.unit.taint.is_none() && self.p.options.options.numcheck.is_none()
+    }
+
+    /// Runs `f` with pure places' locates held, where nothing can tell them apart from the
+    /// walker's repeated locates.
+    pub(super) fn memoized<T>(&mut self, f: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
+        if self.memo.is_some() || !self.unseen() {
+            return f(self);
+        }
+        self.memo = Some(Memo::default());
+        let result = f(self);
+        self.memo = None;
+        result
     }
 
     fn evaluate(&mut self, id: PlaceId, fixed: &[(u32, i64)]) -> R<Loc> {
         let place = &self.p.places[id as usize];
+        let base = match place.base {
+            Base::Program => Some(self.base),
+            Base::Local => Some(self.local_base),
+            Base::Linkage(record) => self.linkage[record as usize],
+            Base::ReturnCode => Some(RETURN_CODE),
+            _ => None,
+        };
+        if let Some(base) = base
+            && place.moved.is_empty()
+            && place.subscripts.is_empty()
+            && place.odo.is_empty()
+            && place.refmod.is_none()
+        {
+            let (offset, len) = (base + place.offset as usize, place.len as usize);
+            if offset + len <= self.unit.mem.len() {
+                let loc = Loc { offset, len, kind: place.kind, item: id as usize };
+                self.unit.taint_read(loc);
+                return Ok(loc);
+            }
+        }
         let pos = self.pos(place.at);
         let name = self.sym(place.name);
         let base = match place.base {
@@ -111,8 +241,10 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 for &q in prepass {
                     self.loc(q)?;
                 }
-                let v = self.eval_fixed(*expr, *dmax, pos)?;
-                Ok(whole(&v, pos)?)
+                match self.eval_number(*expr, *dmax, pos)? {
+                    Number::Int(n, places) if places.dec == 0 => Ok(n),
+                    v => Ok(whole(&v.fixed(), pos)?),
+                }
             }
             IntExpr::Walk(k) => match self.markup.walk.get(usize::from(*k)) {
                 Some(&s) => Ok(i64::from(s)),
@@ -127,7 +259,15 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         if !is_static(place) {
             self.loc(p)?;
         }
-        let val = self.value(Operand::Load(p))?;
+        let loc = self.loc(p)?;
+        let at = self.pos(place.at);
+        self.numcheck(loc, SenderCheck::Item, at)?;
+        if plain(place)
+            && let Some(n) = store::read_integer(&self.facts(), &self.unit.mem, loc)
+        {
+            return Ok(n);
+        }
+        let val = self.read(loc, at)?;
         let v = arith::fixed_operand(val, scale(place.kind), pos)?;
         Ok(whole(&v, pos)?)
     }

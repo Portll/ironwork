@@ -1200,13 +1200,13 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         if let Some(value) = self.storage_function(f)? {
             return self.function_refmod(f, value);
         }
-        let args = self.function_arguments(f, within)?;
+        let mut args = self.function_arguments(f, within)?;
         let side = match f.modifier.as_deref() {
             Some("LEADING") => Some(TrimSide::Leading),
             Some("TRAILING") => Some(TrimSide::Trailing),
             _ => None,
         };
-        let value = rt::intrinsic::function::evaluate(&mut intrinsic::Call { machine: self, f }, &f.name, side, args, f.pos)?;
+        let value = rt::intrinsic::function::evaluate(&mut intrinsic::Call { machine: self, f }, &f.name, side, &mut args, f.pos)?;
         self.function_refmod(f, value)
     }
 

@@ -30,6 +30,12 @@ pub trait Arguments<'w, P: Copy, O>: Values<P, O> + UnitHost<'w> {
 /// argument a temporary's holding its bytes, OMITTED none.
 pub fn addresses<'w, P: Copy, O>(x: &mut impl Arguments<'w, P, O>, args: &[CallArg<P, O>], pos: Pos) -> R<Vec<Option<usize>>> {
     let mut addresses = Vec::with_capacity(args.len());
+    addresses_into(x, args, pos, &mut addresses)?;
+    Ok(addresses)
+}
+
+/// `addresses`, appended to `addresses`.
+pub fn addresses_into<'w, P: Copy, O>(x: &mut impl Arguments<'w, P, O>, args: &[CallArg<P, O>], pos: Pos, addresses: &mut Vec<Option<usize>>) -> R<()> {
     for arg in args {
         let at = match arg {
             CallArg::Omitted => None,
@@ -46,7 +52,7 @@ pub fn addresses<'w, P: Copy, O>(x: &mut impl Arguments<'w, P, O>, args: &[CallA
         };
         addresses.push(at);
     }
-    Ok(addresses)
+    Ok(())
 }
 
 /// A BY CONTENT argument's bytes: a data item's, a literal's as lowering made them, or another

@@ -25,10 +25,11 @@ mod value;
 
 use crate::abend::{Abend, Ending};
 use crate::cics::Handlers;
-use crate::lir::{AbendId, Base, Block, Collating, DebugId, Frame, FrameKind, MovePlan, Op, Place, PlaceId, Program, Returns, StorePlan, SymId, UpDown};
+use crate::lir::{AbendId, Base, Block, Collating, DebugId, Frame, FrameKind, MovePlan, Op, Place, PlaceId, Program, ReturnPoint, Returns, StorePlan, SymId, UpDown};
 use crate::oo::Running;
 use crate::picture::Sym;
 use crate::sql::Ran;
+use crate::storage::Val;
 use crate::store::{LaxRedefinition, ProgramFacts};
 use crate::unit::{Loader, RunUnit};
 use crate::vocab::{Figurative, Pos};
@@ -40,7 +41,7 @@ use zarch::ebcdic::{self, CodePage, Collation};
 pub use cics::run_task;
 pub(crate) use flow::Arrival;
 
-type R<T> = Result<T, Halt>;
+type R<T> = Result<T, Stop>;
 
 /// Why a VM run stopped other than by ending.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,8 +57,36 @@ impl From<Abend> for Halt {
     }
 }
 
-fn not_yet(what: impl Into<String>) -> Halt {
-    Halt::Unimplemented(what.into())
+/// A `Halt` in a box, as the VM's own results carry it: an `R` of a small value is then small.
+#[derive(Debug)]
+struct Stop(Box<Halt>);
+
+impl Stop {
+    fn halt(self) -> Halt {
+        *self.0
+    }
+}
+
+impl From<Halt> for Stop {
+    fn from(halt: Halt) -> Self {
+        Self(Box::new(halt))
+    }
+}
+
+impl From<Abend> for Stop {
+    fn from(a: Abend) -> Self {
+        Self(Box::new(Halt::Abend(a)))
+    }
+}
+
+impl From<Stop> for Halt {
+    fn from(stop: Stop) -> Self {
+        stop.halt()
+    }
+}
+
+fn not_yet(what: impl Into<String>) -> Stop {
+    Halt::Unimplemented(what.into()).into()
 }
 
 /// A program as the VM's run unit holds it: its LIR, or why it did not lower, with its ENTRY names,
@@ -86,6 +115,7 @@ struct Lowered {
     entry_of: Vec<Option<u32>>,
     receivers: HashMap<PlaceId, SymId>,
     variables: HashMap<PlaceId, Option<String>>,
+    pure: Vec<bool>,
 }
 
 impl Code {
@@ -128,7 +158,8 @@ impl Lowered {
         }
         let receivers = receivers(&program);
         let variables = if program.options.options.numcheck.is_some() { cond::conditional_variables(&program) } else { HashMap::new() };
-        Self { program, collation, ordinals, high_value, low_value, entry_of, receivers, variables }
+        let pure = place::pure_places(&program);
+        Self { program, collation, ordinals, high_value, low_value, entry_of, receivers, variables, pure }
     }
 }
 
@@ -192,7 +223,7 @@ pub fn run<L: Loader<Rc<Code>>>(code: &Code, me: usize, unit: &mut RunUnit<'_, R
     for (&record, &address) in lowered.program.storage.using.iter().zip(arguments) {
         vm.linkage[usize::from(record)] = address;
     }
-    vm.run_from(None)
+    Ok(vm.run_from(None)?)
 }
 
 /// What the semantics library reads of the running program, answered from its LIR. A `Loc`'s
@@ -312,25 +343,41 @@ struct Vm<'p, 'u, 'w, L: Loader<Rc<Code>>> {
     method: Option<Running>,
     /// The programs containing this one, innermost first, as they are running.
     containers: Vec<scope::Container<'p>>,
+    memo: Option<place::Memo>,
+    /// What the activations this one CALLs leave, for the next.
+    spare: Spare,
     unit: &'u mut RunUnit<'w, Rc<Code>, L>,
+}
+
+/// The tables an activation the VM CALLs takes, a CALL's argument lists and a FUNCTION's arguments,
+/// kept from one to the next.
+#[derive(Default)]
+struct Spare {
+    linkage: Vec<Option<usize>>,
+    armed: Vec<Option<ReturnPoint>>,
+    frames: Vec<Frame>,
+    using: Vec<Option<usize>>,
+    addresses: Vec<Option<usize>>,
+    args: Vec<Val>,
 }
 
 impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
     /// An activation of loaded program `me`, its storage as `Machine::activation` leaves it: fresh
     /// on its first activation, after a CANCEL, and on every activation of an INITIAL program.
     fn activation(code: &'p Lowered, me: usize, unit: &'u mut RunUnit<'w, Rc<Code>, L>, main: bool) -> R<Self> {
-        Self::activation_within(code, me, unit, main, Vec::new())
+        Self::activation_within(code, me, unit, main, Vec::new(), Spare::default())
     }
 
-    /// An activation of a contained program, called with the programs containing it running.
-    fn activation_within(code: &'p Lowered, me: usize, unit: &'u mut RunUnit<'w, Rc<Code>, L>, main: bool, containers: Vec<scope::Container<'p>>) -> R<Self> {
+    /// An activation of a contained program, called with the programs containing it running, its
+    /// tables taken from `spare`.
+    fn activation_within(code: &'p Lowered, me: usize, unit: &'u mut RunUnit<'w, Rc<Code>, L>, main: bool, containers: Vec<scope::Container<'p>>, spare: Spare) -> R<Self> {
         let p = &code.program;
         let storage = &p.storage;
         if !storage.local_image.is_empty() && (storage.init_abend.is_some() || !storage.init_reports.is_empty()) {
             return Err(not_yet("VALUE initialization that reports or abends in a program with LOCAL-STORAGE"));
         }
         let (base, fresh) = unit.activate(me, p.initial);
-        let mut vm = Self::over(code, me, base, unit, main, containers);
+        let mut vm = Self::over_reusing(code, me, base, unit, main, containers, spare);
         vm.bind_shared()?;
         if !storage.local_image.is_empty() {
             vm.local_base = vm.unit.push_temporary(&storage.local_image);
@@ -352,19 +399,30 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
 
     /// Program `me` over its storage at `base`, with nothing bound or initialized.
     fn over(code: &'p Lowered, me: usize, base: usize, unit: &'u mut RunUnit<'w, Rc<Code>, L>, main: bool, containers: Vec<scope::Container<'p>>) -> Self {
+        Self::over_reusing(code, me, base, unit, main, containers, Spare::default())
+    }
+
+    fn over_reusing(code: &'p Lowered, me: usize, base: usize, unit: &'u mut RunUnit<'w, Rc<Code>, L>, main: bool, containers: Vec<scope::Container<'p>>, spare: Spare) -> Self {
         let p = &code.program;
         let serial = unit.cics.as_mut().map_or(0, crate::cics::Task::next_activation);
         let first = unit.programs[me].compiled.is_none().then_some(code);
         let main_frame = Frame { id: 0, kind: FrameKind::Main, displaced: None, segment: 0, depth: unit.depth as u32, temps: Vec::new() };
+        let Spare { mut linkage, mut armed, mut frames, .. } = spare;
+        linkage.clear();
+        linkage.resize(p.storage.linkage.len(), None);
+        armed.clear();
+        armed.resize(p.paragraphs.len(), None);
+        frames.clear();
+        frames.push(main_frame);
         Self {
             code,
             p,
             me,
             base,
             local_base: 0,
-            linkage: vec![None; p.storage.linkage.len()],
+            linkage,
             main,
-            returns: Returns { armed: vec![None; p.paragraphs.len()], saved: BTreeMap::new(), frames: vec![main_frame], next_frame: 1 },
+            returns: Returns { armed, saved: BTreeMap::new(), frames, next_frame: 1 },
             segment: 0,
             line: 0,
             arrival: Arrival::Start,
@@ -379,6 +437,8 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
             whenever: None,
             method: None,
             containers,
+            memo: None,
+            spare: Spare::default(),
             unit,
         }
     }
@@ -405,7 +465,7 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
     /// A callback's result as the semantics library takes it: an `Unimplemented` is held in
     /// `pending` behind an abend that [`Vm::settle`] turns back into it.
     fn lift<T>(&mut self, result: R<T>, pos: Pos) -> Result<T, Abend> {
-        result.map_err(|halt| match halt {
+        result.map_err(|stop| match stop.halt() {
             Halt::Abend(a) => a,
             Halt::Unimplemented(what) => {
                 self.pending.get_or_insert(what);
@@ -417,8 +477,8 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
     /// A library call's result, with what a callback stopped for in place of its abend.
     fn settle<T>(&mut self, result: Result<T, Abend>) -> R<T> {
         match (result, self.pending.take()) {
-            (_, Some(what)) => Err(Halt::Unimplemented(what)),
-            (result, None) => result.map_err(Halt::Abend),
+            (_, Some(what)) => Err(Halt::Unimplemented(what).into()),
+            (result, None) => result.map_err(Stop::from),
         }
     }
 }

@@ -3,7 +3,7 @@
 //! EXCEPTION/ERROR procedure (§9.10) whose leaving the statement takes as its own transfer.
 
 use super::flow::{Arrival, Exit};
-use super::{Code, Facts, Halt, R, Vm, not_yet};
+use super::{Code, Facts, Halt, R, Stop, Vm, not_yet};
 use crate::abend::{Abend, AbendCode, Signal};
 use crate::fileio::{self, File, Files, Outcome, Read};
 use crate::files::{Dd, FileStatus, KeySpan, Keying, Open};
@@ -128,9 +128,9 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     /// A statement's result as the walker's `exec` takes it: a declarative procedure that left the
     /// statement leaves it by that procedure's transfer.
     pub(super) fn concluded(&mut self, result: Result<Step, Abend>) -> R<Step> {
-        match self.settle(result) {
+        match self.settle(result).map_err(Stop::halt) {
             Err(Halt::Abend(a)) if a.code == AbendCode::Signal(Signal::DeclarativeExit) => Ok(self.io.leaving.take().unwrap_or(Step::Next)),
-            other => other,
+            other => Ok(other?),
         }
     }
 

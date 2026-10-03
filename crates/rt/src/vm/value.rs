@@ -1,16 +1,18 @@
 //! Operands, expressions and FUNCTION, evaluated as the walker's `operand`, `expr_value`,
 //! `eval_fixed`, `eval_float` and `function` evaluate them (lir.md §6, §9.9).
 
-use super::{Code, Facts, Halt, R, Vm, not_yet};
+use super::{Code, Facts, R, Vm, not_yet};
 use crate::abend::Abend;
 use crate::arith;
+use crate::fixed::places_of;
 use crate::intrinsic::function::{self as intrinsic, Evaluator};
 use crate::lir::{AbendId, Argument, Base, Comparand, Const, Count, Expr, ExprId, Func, FunctionId, FunctionPlan, IntExpr, Mode, Operand, PlaceId, RefMod, SenderCheck};
 use crate::storage::{Kind, Loc, Val};
 use crate::store::{self, ProgramFacts};
 use crate::unit::{ADDRESS_BASE, Loader};
 use crate::vocab::{BinOp, Figurative, Pos};
-use numeric::precision::{Fixed, Places};
+use numeric::Arith;
+use numeric::precision::{Fixed, Places, carried, product_places, sum_places};
 use std::rc::Rc;
 use zarch::hfp::{Hfp, Precision};
 
@@ -115,26 +117,70 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     /// `Machine::eval_fixed_at`: `e`'s top operation at `last` places and every operation below
     /// it at `inner`.
     pub(super) fn eval_fixed_at(&mut self, e: ExprId, last: u32, inner: u32, pos: Pos) -> R<Fixed> {
+        Ok(self.eval_number_at(e, last, inner, pos)?.fixed())
+    }
+
+    /// `eval_fixed`, its value held as an integer while it is one.
+    pub(super) fn eval_number(&mut self, e: ExprId, dmax: u32, pos: Pos) -> R<Number> {
+        self.eval_number_at(e, dmax, dmax, pos)
+    }
+
+    /// `eval_fixed_at`, its value held as an integer while it is one.
+    pub(super) fn eval_number_at(&mut self, e: ExprId, last: u32, inner: u32, pos: Pos) -> R<Number> {
         let arith = self.p.options.options.arith;
         match &self.p.exprs[e as usize] {
-            Expr::Operand(o) => {
-                let val = self.value(*o)?;
-                Ok(arith::fixed_operand(val, last, pos)?)
-            }
-            Expr::Neg(operand) => Ok(arith::fixed_neg(self.eval_fixed_at(*operand, inner, inner, pos)?)),
+            Expr::Operand(o) => self.operand_number(*o, last, pos),
+            Expr::Neg(operand) => Ok(match self.eval_number_at(*operand, inner, inner, pos)? {
+                Number::Int(n, places) if n != i64::MIN => Number::Int(-n, places),
+                v => Number::Fixed(arith::fixed_neg(v.fixed())),
+            }),
             Expr::Bin(a, op, b) => {
-                let x = self.eval_fixed_at(*a, inner, inner, pos)?;
-                let y = self.eval_fixed_at(*b, inner, inner, pos)?;
+                let x = self.eval_number_at(*a, inner, inner, pos)?;
+                let y = self.eval_number_at(*b, inner, inner, pos)?;
+                if let Some(r) = int_binop(x, *op, y, last, arith) {
+                    return Ok(r);
+                }
+                let (x, y) = (x.fixed(), y.fixed());
                 if arith::divides_by_zero(*op, &y) {
                     let binary = self.binary_division(*a, *b)?;
                     return Err(arith::zero_divide(binary, pos).into());
                 }
-                Ok(arith::fixed_binop(x, *op, y, last, arith, pos)?)
+                Ok(Number::Fixed(arith::fixed_binop(x, *op, y, last, arith, pos)?))
             }
             Expr::Pow(base, exponent) => {
-                let x = self.eval_fixed_at(*base, inner, inner, pos)?;
+                let x = self.eval_number_at(*base, inner, inner, pos)?.fixed();
                 let n = self.int(exponent, pos)?;
-                Ok(arith::pow(x, n, last, arith, pos)?)
+                Ok(Number::Fixed(arith::pow(x, n, last, arith, pos)?))
+            }
+        }
+    }
+
+    /// An operand as `value` reads it, then `fixed_operand` takes it.
+    pub(super) fn operand_number(&mut self, o: Operand, dmax: u32, pos: Pos) -> R<Number> {
+        match o {
+            Operand::Load(p) => {
+                let place = &self.p.places[p as usize];
+                let loc = self.loc(p)?;
+                let at = self.pos(place.at);
+                self.numcheck(loc, SenderCheck::Item, at)?;
+                if super::place::plain(place)
+                    && let Some(n) = store::read_integer(&self.facts(), &self.unit.mem, loc)
+                {
+                    return Ok(Number::Int(n, places_of(loc.kind)));
+                }
+                let val = self.read(loc, at)?;
+                Ok(Number::Fixed(arith::fixed_operand(val, dmax, pos)?))
+            }
+            Operand::Const(c) => match &self.p.consts[c as usize] {
+                Const::Number(f) if f.places.dec == 0 && !(f.negative && f.magnitude.is_zero()) && let Some(n) = f.to_i128().and_then(|n| i64::try_from(n).ok()) => Ok(Number::Int(n, f.places)),
+                _ => {
+                    let val = self.value(o)?;
+                    Ok(Number::Fixed(arith::fixed_operand(val, dmax, pos)?))
+                }
+            },
+            _ => {
+                let val = self.value(o)?;
+                Ok(Number::Fixed(arith::fixed_operand(val, dmax, pos)?))
             }
         }
     }
@@ -250,7 +296,8 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             };
             intrinsic::storage(&facts, plan.func.name(), &bytes, pos)?
         } else {
-            let mut args = Vec::with_capacity(plan.args.len());
+            let mut args = std::mem::take(&mut self.spare.args);
+            args.clear();
             for a in &plan.args {
                 match a {
                     Argument::Value(c) => args.push(self.comparand(c, pos)?),
@@ -262,7 +309,9 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 Func::Random if self.locating > 0 => return Err(not_yet("FUNCTION RANDOM in a subscript, reference modification or OCCURS DEPENDING ON")),
                 _ => {}
             }
-            let result = intrinsic::evaluate(&mut Call { vm: self, plan }, plan.func.name(), plan.side, args, pos);
+            let result = intrinsic::evaluate(&mut Call { vm: self, plan }, plan.func.name(), plan.side, &mut args, pos);
+            args.clear();
+            self.spare.args = args;
             self.settle(result)?
         };
         self.refmodded(value, plan.refmod.as_ref(), pos)
@@ -325,6 +374,52 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     }
 }
 
+/// A fixed-point value, held as an integer with its places while it is one that fits an `i64`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum Number {
+    Int(i64, Places),
+    Fixed(Fixed),
+}
+
+impl Number {
+    /// `f` as an integer where it is one that fits an `i64`.
+    pub(super) fn of(f: Fixed) -> Self {
+        match f.to_i128().and_then(|n| i64::try_from(n).ok()) {
+            Some(n) if f.places.dec == 0 && !(f.negative && f.magnitude.is_zero()) => Self::Int(n, f.places),
+            _ => Self::Fixed(f),
+        }
+    }
+
+    pub(super) fn fixed(self) -> Fixed {
+        match self {
+            Self::Int(n, places) => Fixed::new(i128::from(n), places),
+            Self::Fixed(f) => f,
+        }
+    }
+}
+
+/// ADD, SUBTRACT or MULTIPLY of two integers as `Fixed` gives them: the exact result kept to the
+/// integer places carried; None where it is not an integer that fits an `i64`.
+pub(super) fn int_binop(x: Number, op: BinOp, y: Number, dmax: u32, arith: Arith) -> Option<Number> {
+    let (Number::Int(x, px), Number::Int(y, py)) = (x, y) else { return None };
+    if px.dec != 0 || py.dec != 0 {
+        return None;
+    }
+    let (x, y) = (i128::from(x), i128::from(y));
+    let (exact, ir) = match op {
+        BinOp::Add => (x + y, sum_places(px, py)),
+        BinOp::Sub => (x - y, sum_places(px, py)),
+        BinOp::Mul => (x * y, product_places(px, py)),
+        BinOp::Div | BinOp::Pow => return None,
+    };
+    let to = carried(ir, dmax, arith);
+    if to.dec != 0 {
+        return None;
+    }
+    let kept = i64::try_from(exact.unsigned_abs() % 10u128.checked_pow(to.int)?).ok()?;
+    Some(Number::Int(if exact < 0 { -kept } else { kept }, to))
+}
+
 /// What `binary_operands` has found so far: the items, and whether an operand it took to be one
 /// the fixed-point divide takes may not have been.
 #[derive(Default)]
@@ -350,7 +445,7 @@ impl<'p, L: Loader<Rc<Code>>> Evaluator for Call<'_, 'p, '_, '_, L> {
     fn integer(&mut self, _k: usize, pos: Pos) -> Result<i64, Abend> {
         let value = match &self.plan.integer {
             Some(e) => self.vm.int(e, pos),
-            None => Err(Halt::Unimplemented("a FUNCTION argument read again without its plan".into())),
+            None => Err(not_yet("a FUNCTION argument read again without its plan")),
         };
         self.vm.lift(value, pos)
     }
@@ -373,5 +468,41 @@ impl<'p, L: Loader<Rc<Code>>> Evaluator for Call<'_, 'p, '_, '_, L> {
 
     fn currency(&self) -> String {
         self.vm.p.options.numval_currency.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn integers_add_subtract_and_multiply_as_fixed_point_does() {
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        let mut next = move || {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            state.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        };
+        let mut fast = 0;
+        for _ in 0..20_000 {
+            let mut operand = || {
+                let digits = 1 + (next() % 31) as u32;
+                let bits = next() % 64;
+                let n = (next() >> (63 - bits)) as i64;
+                (if next() % 2 == 0 { -n } else { n }, Places::new(digits, 0))
+            };
+            let ((x, px), (y, py)) = (operand(), operand());
+            let (dmax, arith) = ((next() % 4) as u32, if next() % 2 == 0 { Arith::Compat } else { Arith::Extend });
+            for op in [BinOp::Add, BinOp::Sub, BinOp::Mul] {
+                let (a, b) = (Number::Int(x, px), Number::Int(y, py));
+                let expected = arith::fixed_binop(a.fixed(), op, b.fixed(), dmax, arith, Pos::default()).unwrap();
+                if let Some(r) = int_binop(a, op, b, dmax, arith) {
+                    fast += 1;
+                    assert_eq!(r.fixed(), expected, "{x} {op:?} {y} at {px:?} {py:?}, dmax {dmax}, {arith:?}");
+                }
+            }
+        }
+        assert!(fast > 40_000, "only {fast} operations were integers");
     }
 }

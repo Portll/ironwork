@@ -2,7 +2,7 @@
 //! `CicsHost`, with the logical level's handler table; an activation whose HANDLE ABEND exit an
 //! abend reaches; and LINK as a new activation at a level of its own, XCTL at this one's.
 
-use super::{Code, Halt, R, Vm, not_yet};
+use super::{Code, Halt, R, Stop, Vm, not_yet};
 use crate::abend::{Abend, Ending};
 use crate::arith;
 use crate::bms::Mapset;
@@ -24,7 +24,7 @@ pub fn run_task<L: Loader<Rc<Code>>>(code: &Code, me: usize, unit: &mut RunUnit<
     cics::begin_task(vm.unit, lowered.program.options.options.code_page(), length);
     let eib = vm.unit.eib;
     vm.bind_level(Some(eib), commarea);
-    vm.run_level()
+    Ok(vm.run_level()?)
 }
 
 impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
@@ -43,13 +43,13 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     /// the observer before the command runs; one that cannot be located is left to the command.
     fn cics_sinks(&mut self, command: &'p CicsCommand, pos: Pos) -> R<()> {
         for &(place, sink) in &command.sinks {
-            match self.loc(place) {
+            match self.loc(place).map_err(Stop::halt) {
                 Ok(loc) => {
                     let text = self.facts().page().decode(store::bytes(&self.unit.mem, loc));
                     self.sink(sink.kind(), pos, &text);
                 }
                 Err(Halt::Abend(_)) => {}
-                Err(stopped) => return Err(stopped),
+                Err(stopped) => return Err(stopped.into()),
             }
         }
         Ok(())
@@ -71,9 +71,9 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     fn run_taking_exits(&mut self, at: Option<(ParaId, BlockId)>, runs_level: bool) -> R<Ending> {
         let mut ending = self.run_from(at);
         loop {
-            let abend = match ending {
+            let abend = match ending.map_err(Stop::halt) {
                 Err(Halt::Abend(abend)) => abend,
-                done => return done,
+                done => return Ok(done?),
             };
             match cics::abend_exit(self.unit, &mut self.cics_handlers, &abend, self.serial, runs_level)? {
                 None => return Err(abend.into()),

@@ -25,7 +25,8 @@ impl Binary {
     }
 
     fn decimal_truncation(self, value: i128) -> i128 {
-        let kept = (value.unsigned_abs() % 10u128.pow(self.digits as u32)) as i128;
+        let (magnitude, cap) = (value.unsigned_abs(), 10u128.pow(self.digits as u32));
+        let kept = (if magnitude < cap { magnitude } else { magnitude % cap }) as i128;
         if value < 0 { -kept } else { kept }
     }
 

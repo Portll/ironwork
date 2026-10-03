@@ -107,9 +107,17 @@ pub fn read_integer(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc) -> Option<i6
         Kind::Index => Some(i64::from(i32::from_be_bytes(bytes.try_into().ok()?))),
         _ if facts.scaling(loc.item) != 0 => None,
         Kind::Binary { digits, scale: 0, signed, native } => i64::try_from(Binary { digits: digits as u8, signed, native }.load(bytes)).ok(),
-        Kind::Packed { scale: 0, .. } | Kind::Zoned { scale: 0, .. } if facts.options().invdata.is_some_and(|i| i.cleansign) => None,
-        Kind::Packed { scale: 0, signed, .. } => codec::packed(bytes, signed, facts.options().numproc).ok().and_then(decimal),
-        Kind::Zoned { scale: 0, signed, sign, .. } => codec::zoned(bytes, signed, sign, facts.options().numproc).ok().and_then(decimal),
+        Kind::Packed { scale: 0, signed, .. } | Kind::Zoned { scale: 0, signed, .. } => {
+            let options = facts.options();
+            if options.invdata.is_some_and(|i| i.cleansign) {
+                return None;
+            }
+            let read = match loc.kind {
+                Kind::Zoned { sign, .. } => codec::zoned(bytes, signed, sign, options.numproc),
+                _ => codec::packed(bytes, signed, options.numproc),
+            };
+            read.ok().and_then(decimal)
+        }
         _ => None,
     }
 }
@@ -174,7 +182,7 @@ pub fn natural_bytes(facts: &dyn ProgramFacts, val: Val, pos: Pos) -> R<Vec<u8>>
 }
 
 pub fn set_integer<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, dest: Loc, value: i64, pos: Pos) -> R<()> {
-    if dest.kind == Kind::Index
+    if matches!(dest.kind, Kind::Index)
         && let Ok(magnitude) = i32::try_from(value.unsigned_abs())
     {
         unit.write(dest.offset, &(if value < 0 { -magnitude } else { magnitude }).to_be_bytes());

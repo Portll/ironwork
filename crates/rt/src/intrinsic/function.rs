@@ -116,7 +116,7 @@ pub fn refmod(value: Val, pos: Pos, bounds: impl FnOnce() -> R<(i64, Option<i64>
 }
 
 /// A function of its arguments' values. `side` is TRIM's LEADING or TRAILING.
-pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args: Vec<Val>, pos: Pos) -> R<Val> {
+pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args: &mut Vec<Val>, pos: Pos) -> R<Val> {
     let facts = x.facts();
     let page = facts.page();
     let arity = |n: RangeInclusive<usize>| {
@@ -193,7 +193,7 @@ pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args
                 "MIN" | "MAX" => 1..=usize::MAX,
                 _ => 1..=1,
             })?;
-            float_function(&facts, name, &args, pos)?
+            float_function(&facts, name, args, pos)?
         }
         "MOD" | "REM" | "INTEGER" | "INTEGER-PART" | "ABS" => {
             arity(if matches!(name, "MOD" | "REM") { 2..=2 } else { 1..=1 })?;
@@ -455,7 +455,7 @@ fn utc_offset(v: Option<&Val>, name: &str, pos: Pos) -> R<i32> {
 }
 
 /// The functions beyond the first twenty-one.
-fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<Val> {
+fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<Val> {
     let facts = x.facts();
     let facts: &dyn ProgramFacts = &facts;
     let arith = facts.options().arith;
@@ -468,7 +468,7 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
     let outside = |x: Real, why: &str| Abend::ironwork(format!("FUNCTION {name}({}): {why}", x.to_f64()), pos);
     match name {
         "SQRT" | "EXP" | "EXP10" | "LOG" | "LOG10" | "SIN" | "COS" | "TAN" | "ASIN" | "ACOS" | "ATAN" => {
-            arity(1..=1, &args)?;
+            arity(1..=1, args)?;
             let x = real(&args[0], p, name, pos)?;
             let (value, why) = match name {
                 "SQRT" => (math::sqrt(x), "the argument must be zero or positive"),
@@ -486,11 +486,11 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             float_result(value.ok_or_else(|| outside(x, why))?, p, pos)
         }
         "E" | "PI" => {
-            arity(0..=0, &args)?;
+            arity(0..=0, args)?;
             float_result(if name == "E" { math::e() } else { math::pi() }, p, pos)
         }
         "ANNUITY" => {
-            arity(2..=2, &args)?;
+            arity(2..=2, args)?;
             let rate = real(&args[0], p, name, pos)?;
             let periods = whole(&args[1], name, pos)?;
             let value = u128::try_from(periods).ok().and_then(|n| math::annuity(rate, n));
@@ -500,13 +500,13 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             if args.len() < 2 {
                 return Err(Abend::ironwork("FUNCTION PRESENT-VALUE needs a rate and at least one amount", pos));
             }
-            let values = reals(&args, p, name, pos)?;
+            let values = reals(args, p, name, pos)?;
             let value = math::present_value(values[0], &values[1..]).ok_or_else(|| outside(values[0], "the rate must be greater than -1"))?;
             float_result(value, p, pos)
         }
         "MEAN" | "MEDIAN" | "MIDRANGE" | "VARIANCE" | "STANDARD-DEVIATION" => {
-            series(&args)?;
-            let values = reals(&args, p, name, pos)?;
+            series(args)?;
+            let values = reals(args, p, name, pos)?;
             let value = match name {
                 "MEAN" => math::mean(&values),
                 "MEDIAN" => math::median(&values),
@@ -517,14 +517,14 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             float_result(value.expect("a series with at least one value"), p, pos)
         }
         "MIN" | "MAX" | "ORD-MIN" | "ORD-MAX" | "RANGE" => {
-            series(&args)?;
+            series(args)?;
             let greatest = name.ends_with("MAX") || name == "RANGE";
-            let best = extreme(facts, &args, if greatest { Ordering::Greater } else { Ordering::Less }, name, pos)?;
+            let best = extreme(facts, args, if greatest { Ordering::Greater } else { Ordering::Less }, name, pos)?;
             let floating = args.iter().any(|v| matches!(v, Val::Float(_)));
             match name {
                 "ORD-MIN" | "ORD-MAX" => Ok(integer(best as i128 + 1, 9)),
                 "RANGE" => {
-                    let least = extreme(facts, &args, Ordering::Less, name, pos)?;
+                    let least = extreme(facts, args, Ordering::Less, name, pos)?;
                     match (&args[best], &args[least]) {
                         (Val::Num(hi), Val::Num(lo)) if !floating => {
                             let dmax = hi.places.dec.max(lo.places.dec);
@@ -541,13 +541,13 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             }
         }
         "SUM" => {
-            series(&args)?;
+            series(args)?;
             if args.iter().any(|v| matches!(v, Val::Float(_))) {
-                let values = reals(&args, p, name, pos)?;
+                let values = reals(args, p, name, pos)?;
                 return float_result(values.iter().fold(Real::ZERO, |s, v| s.add(*v)), p, pos);
             }
             let mut fixed = Vec::with_capacity(args.len());
-            for v in &args {
+            for v in args.iter() {
                 match v {
                     Val::Num(x) => fixed.push(*x),
                     Val::Fig(Figurative::Zero) => fixed.push(Fixed::new(0, Places::new(1, 0))),
@@ -562,7 +562,7 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             Ok(Val::Num(sum))
         }
         "SIGN" => {
-            arity(1..=1, &args)?;
+            arity(1..=1, args)?;
             let sign = match &args[0] {
                 Val::Num(x) if x.magnitude.is_zero() => 0,
                 Val::Num(x) => if x.negative { -1 } else { 1 },
@@ -574,7 +574,7 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             Ok(integer(sign, 1))
         }
         "FACTORIAL" => {
-            arity(1..=1, &args)?;
+            arity(1..=1, args)?;
             let n = whole(&args[0], name, pos)?;
             let (most, digits) = if arith == Arith::Extend { (29, 31) } else { (28, 30) };
             if !(0..=most).contains(&n) {
@@ -583,7 +583,7 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             Ok(integer((1..=n).product(), digits))
         }
         "DAY-OF-INTEGER" | "INTEGER-OF-DAY" | "TEST-DATE-YYYYMMDD" | "TEST-DAY-YYYYDDD" => {
-            arity(1..=1, &args)?;
+            arity(1..=1, args)?;
             let n = i64::try_from(whole(&args[0], name, pos)?).unwrap_or(i64::MAX);
             match name {
                 "DAY-OF-INTEGER" => Ok(integer(dates::day_of_integer(n, intdate).ok_or_else(|| Abend::ironwork(format!("FUNCTION DAY-OF-INTEGER({n}): outside 1 to {}", dates::last_integer_date(intdate)), pos))?.into(), 7)),
@@ -596,7 +596,7 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             }
         }
         "YEAR-TO-YYYY" | "DATE-TO-YYYYMMDD" | "DAY-TO-YYYYDDD" => {
-            arity(1..=2, &args)?;
+            arity(1..=2, args)?;
             let n = i64::try_from(whole(&args[0], name, pos)?).unwrap_or(i64::MAX);
             let window = match args.get(1) {
                 Some(v) => i64::try_from(whole(v, name, pos)?).unwrap_or(i64::MAX),
@@ -612,14 +612,14 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             Ok(integer(value.into(), digits))
         }
         "SECONDS-PAST-MIDNIGHT" => {
-            arity(0..=0, &args)?;
+            arity(0..=0, args)?;
             let (seconds, hundredths) = x.now();
             let c = civil(seconds);
             let of_day = i128::from((c.hour * 3600 + c.minute * 60 + c.second) * 100 + hundredths);
             float_result(Real::from_i128(of_day).div(Real::from_u128(100)), p, pos)
         }
         "NUMVAL-F" | "TEST-NUMVAL" | "TEST-NUMVAL-C" | "TEST-NUMVAL-F" => {
-            arity(if name == "TEST-NUMVAL-C" { 1..=2 } else { 1..=1 }, &args)?;
+            arity(if name == "TEST-NUMVAL-C" { 1..=2 } else { 1..=1 }, args)?;
             let text = text_of(facts, &args[0], name, pos)?;
             let currency = match args.get(1) {
                 Some(v) => text_of(facts, v, name, pos)?,
@@ -639,7 +639,7 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             Ok(integer(numval::test(&text, form, digits, comma) as i128, 9))
         }
         "HEX-TO-CHAR" | "BIT-TO-CHAR" => {
-            arity(1..=1, &args)?;
+            arity(1..=1, args)?;
             let text = text_of(facts, &args[0], name, pos)?;
             let parsed = if name == "HEX-TO-CHAR" { text::hex_to_char(&text) } else { text::bit_to_char(&text) };
             parsed.map(Val::Bytes).map_err(|at| match at {
@@ -648,7 +648,7 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             })
         }
         "DISPLAY-OF" => {
-            arity(1..=2, &args)?;
+            arity(1..=2, args)?;
             let Val::National(units) = &args[0] else {
                 return Err(Abend::ironwork("FUNCTION DISPLAY-OF needs a national argument", pos));
             };
@@ -671,7 +671,7 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
                     "FORMATTED-TIME" => 2..=3,
                     _ => 3..=4,
                 },
-                &args,
+                args,
             )?;
             let format = format_argument(facts, &args[0], name, pos)?;
             let (date, time) = match name {
@@ -707,7 +707,7 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             }
         }
         "INTEGER-OF-FORMATTED-DATE" | "SECONDS-FROM-FORMATTED-TIME" | "TEST-FORMATTED-DATETIME" => {
-            arity(2..=2, &args)?;
+            arity(2..=2, args)?;
             let written = text_of(facts, &args[0], name, pos)?;
             let format = format_argument(facts, &args[0], name, pos)?;
             let value = text_of(facts, &args[1], name, pos)?;
@@ -733,7 +733,7 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             }
         }
         "COMBINED-DATETIME" => {
-            arity(2..=2, &args)?;
+            arity(2..=2, args)?;
             let date = integer_date(&args[0], intdate, name, pos)?;
             let seconds = match &args[1] {
                 Val::Num(x) => exact_real(x),
@@ -748,7 +748,7 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             Ok(Val::Float(if p.digits() > Precision::Long.digits() { long.lengthen(p) } else { long }))
         }
         "CONTENT-OF" => {
-            arity(1..=1, &args)?;
+            arity(1..=1, args)?;
             Ok(args.swap_remove(0))
         }
         "ULENGTH" | "UPOS" | "USUBSTR" | "USUPPLEMENTARY" | "UVALID" | "UWIDTH" => {
@@ -757,7 +757,7 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
                 "USUBSTR" => 3,
                 _ => 1,
             };
-            arity(n..=n, &args)?;
+            arity(n..=n, args)?;
             let (bytes, utf16) = match &args[0] {
                 Val::National(b) => (b.as_slice(), true),
                 Val::Bytes(b) | Val::All(b) => (b.as_slice(), false),
@@ -782,11 +782,11 @@ fn more(x: &mut impl Evaluator, name: &str, mut args: Vec<Val>, pos: Pos) -> R<V
             }
         }
         "WHEN-COMPILED" => {
-            arity(0..=0, &args)?;
+            arity(0..=0, args)?;
             date_and_time(facts, x.compiled(), pos)
         }
         "UUID4" => {
-            arity(0..=0, &args)?;
+            arity(0..=0, args)?;
             use std::hash::BuildHasher;
             let state = std::collections::hash_map::RandomState::new();
             let (seconds, hundredths) = x.now();

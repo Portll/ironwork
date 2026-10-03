@@ -3,7 +3,7 @@
 //! around a new activation that binds the formal parameters, runs the procedure and reads the
 //! RETURNING item.
 
-use super::{Code, Halt, Lowered, R, Vm, not_yet};
+use super::{Code, Halt, Lowered, R, Stop, Vm, not_yet};
 use crate::abend::{Abend, AbendCode, Ending, Signal};
 use crate::callee::{self, Bindings, Bound, By, Callee};
 use crate::lir::{FunctionDefinition, UserArgument, UserFunctionId};
@@ -28,7 +28,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             }
             Err(LoadError::Compile(message)) => return Err(Abend::ironwork(format!("FUNCTION {name}: {message}"), pos).into()),
         };
-        let not_a_function = || Halt::from(Abend::ironwork(format!("FUNCTION {name}: {external} is a program, not a user-defined function"), pos));
+        let not_a_function = || Stop::from(Abend::ironwork(format!("FUNCTION {name}: {external} is a program, not a user-defined function"), pos));
         let code = self.unit.programs[index].compiled.clone().ok_or_else(not_a_function)?;
         let lowered = code.lowered.as_ref().map_err(|why| not_yet(format!("a user-defined function that does not lower ({why})")))?;
         let definition = lowered.program.services.function.as_ref().ok_or_else(not_a_function)?;
@@ -45,8 +45,8 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let ran = callee::run(self, &Callee { index, by: By::Function, mark: Some(mark), pos }, |caller| {
             let outcome = caller.function_activation(lowered, definition, index, &bound, pos);
             caller.unit.resume_statement(read_before);
-            match outcome {
-                Err(Halt::Unimplemented(what)) => Err(Halt::Unimplemented(what)),
+            match outcome.map_err(Stop::halt) {
+                Err(Halt::Unimplemented(what)) => Err(Stop::from(Halt::Unimplemented(what))),
                 Err(Halt::Abend(a)) => Ok((Err(a), ())),
                 Ok(returned) => Ok((Ok(returned), ())),
             }

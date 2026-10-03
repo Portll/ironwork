@@ -2,7 +2,7 @@
 //! VM as `OoHost`: a class's FACTORY and OBJECT data and its methods are lowered programs, each
 //! method run in an activation of its own by Rust recursion, as `call_nested` runs a callee.
 
-use super::{Code, Halt, R, Vm, not_yet};
+use super::{Code, Halt, R, Stop, Vm, not_yet};
 use crate::abend::{Abend, Ending};
 use crate::callee::Bindings;
 use crate::lir::{CallPlan, Const, InvokePlan, Operand, PlaceId, Step, SymId};
@@ -77,8 +77,8 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         let returning = program.storage.returning.map(|o| (usize::from(o), program.storage.linkage[usize::from(o)] as usize));
         Bindings { records: &call.records, using, addresses: &call.arguments, returning }.bind(vm.unit, &mut vm.linkage);
         vm.method = Some(call.running);
-        let ending: Result<Ending, Abend> = match vm.run_from(None) {
-            Err(Halt::Unimplemented(what)) => return Err(Halt::Unimplemented(what)),
+        let ending: Result<Ending, Abend> = match vm.run_from(None).map_err(Stop::halt) {
+            Err(Halt::Unimplemented(what)) => return Err(Halt::Unimplemented(what).into()),
             Err(Halt::Abend(a)) => Err(a),
             Ok(e) => Ok(e),
         };

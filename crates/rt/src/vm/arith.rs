@@ -2,7 +2,8 @@
 //! the dmax pre-pass's locates, every step evaluated with an abend held until its step stores,
 //! the REMAINDER's operands, then each receiver located again and stored.
 
-use super::{Code, Halt, R, Vm};
+use super::value::{Number, int_binop};
+use super::{Code, Halt, R, Stop, Vm};
 use crate::abend::Abend;
 use crate::arith;
 use crate::fixed::places_of;
@@ -17,31 +18,47 @@ use std::rc::Rc;
 /// operand, and the receiver's operand.
 type Own = Option<(BinOp, bool, ExprId)>;
 
+/// A step evaluated, its abend held until it stores.
+type Evaluated<'s> = (&'s ArithStep, ExprId, Own, Result<Val, Abend>);
+
 impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
     pub(super) fn arith(&mut self, plan: &ArithPlan, pos: Pos) -> R<Step> {
         for &q in &plan.prepass {
             self.loc(q)?;
         }
-        let mut results: Vec<(&ArithStep, ExprId, Own, Result<Val, Abend>)> = Vec::with_capacity(plan.steps.len());
-        for step in &plan.steps {
-            for &q in &step.probe {
-                self.loc(q)?;
-            }
-            let (shared, own) = self.shared(plan, step);
-            let outcome = match step.mode {
-                Mode::Float(p) => self.eval_float(shared, p, pos).map(Val::Float),
-                Mode::Fixed => {
-                    let last = if own.is_some() { plan.inner_dmax } else { plan.dmax };
-                    self.eval_fixed_at(shared, last, plan.inner_dmax, pos).map(Val::Num)
-                }
-            };
-            let outcome = match outcome {
-                Err(Halt::Unimplemented(what)) => return Err(Halt::Unimplemented(what)),
-                Err(Halt::Abend(a)) => Err(a),
-                Ok(v) => Ok(v),
-            };
-            results.push((step, shared, own, outcome));
+        if let [step] = plan.steps.as_slice() {
+            let evaluated = self.evaluated(plan, step, pos)?;
+            return self.stored(plan, [evaluated], pos);
         }
+        let mut results = Vec::with_capacity(plan.steps.len());
+        for step in &plan.steps {
+            results.push(self.evaluated(plan, step, pos)?);
+        }
+        self.stored(plan, results, pos)
+    }
+
+    fn evaluated<'s>(&mut self, plan: &ArithPlan, step: &'s ArithStep, pos: Pos) -> R<Evaluated<'s>> {
+        for &q in &step.probe {
+            self.loc(q)?;
+        }
+        let (shared, own) = self.shared(plan, step);
+        let outcome = match step.mode {
+            Mode::Float(p) => self.eval_float(shared, p, pos).map(Val::Float),
+            Mode::Fixed => {
+                let last = if own.is_some() { plan.inner_dmax } else { plan.dmax };
+                self.eval_fixed_at(shared, last, plan.inner_dmax, pos).map(Val::Num)
+            }
+        };
+        let outcome = match outcome.map_err(Stop::halt) {
+            Err(Halt::Unimplemented(what)) => return Err(Halt::Unimplemented(what).into()),
+            Err(Halt::Abend(a)) => Err(a),
+            Ok(v) => Ok(v),
+        };
+        Ok((step, shared, own, outcome))
+    }
+
+    /// The REMAINDER's operands, then each step's receiver located again and stored.
+    fn stored<'s>(&mut self, plan: &ArithPlan, results: impl IntoIterator<Item = Evaluated<'s>>, pos: Pos) -> R<Step> {
         let operands = match &plan.remainder {
             Some(r) => Some((self.eval_fixed(r.dividend, plan.dmax, pos)?, self.eval_fixed(r.divisor, plan.dmax, pos)?)),
             None => None,
@@ -53,14 +70,20 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             quotient.get_or_insert(loc);
             let outcome = match (own, outcome) {
                 (Some((op, receiver_first, receiver)), Ok(Val::Num(value))) => {
-                    let current = self.value(Operand::Load(step.target))?;
-                    let current = arith::fixed_operand(current, plan.dmax, pos)?;
+                    let current = self.operand_number(Operand::Load(step.target), plan.dmax, pos)?;
+                    let value = Number::of(value);
                     let (x, y) = if receiver_first { (current, value) } else { (value, current) };
-                    if arith::divides_by_zero(op, &y) {
-                        let binary = self.binary_division(receiver, shared)?;
-                        Err(arith::zero_divide(binary, pos))
-                    } else {
-                        arith::fixed_binop(x, op, y, plan.dmax, plan.arith, pos).map(Val::Num)
+                    match int_binop(x, op, y, plan.dmax, plan.arith) {
+                        Some(r) => Ok(Val::Num(r.fixed())),
+                        None => {
+                            let (x, y) = (x.fixed(), y.fixed());
+                            if arith::divides_by_zero(op, &y) {
+                                let binary = self.binary_division(receiver, shared)?;
+                                Err(arith::zero_divide(binary, pos))
+                            } else {
+                                arith::fixed_binop(x, op, y, plan.dmax, plan.arith, pos).map(Val::Num)
+                            }
+                        }
                     }
                 }
                 (Some((op, receiver_first, _)), Ok(Val::Float(value))) => {

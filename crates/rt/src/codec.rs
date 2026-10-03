@@ -9,6 +9,8 @@ use zarch::decimal::{self, Decimal};
 /// The longest packed field DECIMAL instructions take, and the most digits a PACK of one gives.
 const PACKED_MAX: usize = 16;
 const ZONED_MAX: usize = 2 * PACKED_MAX - 1;
+/// The most digits, each at most 15 where the data is bad, whose value fits a `u64`.
+const U64_DIGITS: usize = 18;
 
 /// A packed field. Under NUMPROC(NOPFD) an unsigned field's sign nibble is forced to F first.
 pub fn packed(bytes: &[u8], signed: bool, numproc: Numproc) -> Result<Decimal, ProgramCheck> {
@@ -31,6 +33,9 @@ pub fn packed(bytes: &[u8], signed: bool, numproc: Numproc) -> Result<Decimal, P
 
 /// A zoned field, entering through PACK, which keeps only the sign's zone.
 pub fn zoned(bytes: &[u8], signed: bool, sign: Option<SignClause>, numproc: Numproc) -> Result<Decimal, ProgramCheck> {
+    if matches!(sign, None | Some(SignClause { separate: false, position: SignPosition::Trailing })) && (1..=ZONED_MAX).contains(&bytes.len()) {
+        return packed_zoned(bytes, signed, numproc);
+    }
     let mut held = [0u8; ZONED_MAX + 1];
     let mut grown = Vec::new();
     let mut zoned = match held.get_mut(..bytes.len()) {
@@ -72,13 +77,16 @@ pub fn zoned(bytes: &[u8], signed: bool, sign: Option<SignClause>, numproc: Nump
 /// What `packed` gives for PACK of 1 to 31 zoned bytes: their digit nibbles, after a zero nibble
 /// when there are evenly many, then the last zone as the sign.
 fn packed_zoned(zoned: &[u8], signed: bool, numproc: Numproc) -> Result<Decimal, ProgramCheck> {
-    let mut magnitude = 0u128;
     let mut digit_bad = false;
-    for &b in zoned {
-        let digit = b & 0x0F;
-        digit_bad |= digit > 9;
-        magnitude = magnitude * 10 + u128::from(digit);
-    }
+    let mut digit = |b: &u8| {
+        digit_bad |= b & 0x0F > 9;
+        b & 0x0F
+    };
+    let magnitude = if zoned.len() <= U64_DIGITS {
+        u128::from(zoned.iter().fold(0u64, |m, b| m * 10 + u64::from(digit(b))))
+    } else {
+        zoned.iter().fold(0u128, |m, b| m * 10 + u128::from(digit(b)))
+    };
     let sign = if !signed && numproc == Numproc::Nopfd { 0x0F } else { zoned[zoned.len() - 1] >> 4 };
     if digit_bad || !decimal::is_sign(sign) {
         return Err(ProgramCheck::Data);

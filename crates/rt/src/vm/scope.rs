@@ -154,7 +154,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             };
             vm.unit.depth = depth;
             match (ran, vm.pending.take()) {
-                (_, Some(what)) => Err(Halt::Unimplemented(what)),
+                (_, Some(what)) => Err(Halt::Unimplemented(what).into()),
                 (ran, None) => ran,
             }
         };
