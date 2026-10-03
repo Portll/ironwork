@@ -7,6 +7,7 @@ use crate::arith;
 use crate::fixed::align;
 use crate::lir::{Base, Count, Expr, IntExpr, Odo, Operand, Place, PlaceId};
 use crate::loc;
+use crate::oo;
 use crate::storage::{Kind, Loc};
 use crate::unit::{Loader, RETURN_CODE};
 use crate::vocab::Pos;
@@ -61,7 +62,14 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             Base::Linkage(record) => loc::linkage_base(self.linkage[record as usize], name, pos)?,
             Base::ReturnCode => RETURN_CODE,
             Base::Eib => return Err(not_yet("EXEC CICS")),
-            Base::SelfRef | Base::JniEnv => return Err(not_yet("object-oriented COBOL")),
+            Base::SelfRef | Base::JniEnv => {
+                let loc = match place.base {
+                    Base::SelfRef => oo::self_reference(self.unit, self.method, pos)?,
+                    _ => Loc { offset: oo::jni_environment(self.unit, pos)?, len: 4, kind: Kind::Pointer, item: usize::MAX },
+                };
+                self.unit.taint_read(loc);
+                return Ok(loc);
+            }
             Base::Xml(register) => return self.xml_register(register, id, pos),
         };
         let mut offset = (base + place.offset as usize) as i64;

@@ -12,6 +12,7 @@ mod cond;
 mod files;
 mod flow;
 mod markup;
+mod oo;
 mod ops;
 mod place;
 mod report;
@@ -22,6 +23,7 @@ mod value;
 use crate::abend::{Abend, Ending};
 use crate::cics::Handlers;
 use crate::lir::{AbendId, Block, Collating, DebugId, Frame, FrameKind, MovePlan, Op, PlaceId, Program, Returns, StorePlan, SymId, UpDown};
+use crate::oo::Running;
 use crate::picture::Sym;
 use crate::sql::Ran;
 use crate::store::ProgramFacts;
@@ -280,6 +282,8 @@ struct Vm<'p, 'u, 'w, L: Loader<Rc<Code>>> {
     cics_handlers: Handlers,
     /// SQLCODE and SQLWARN0 of the last EXEC SQL statement, which WHENEVER tests.
     whenever: Option<Ran>,
+    /// The method this activation runs, if it is one: its class and SELF.
+    method: Option<Running>,
     unit: &'u mut RunUnit<'w, Rc<Code>, L>,
 }
 
@@ -319,6 +323,7 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
             io: files::State::default(),
             cics_handlers: Handlers::default(),
             whenever: None,
+            method: None,
             unit,
         };
         if !storage.local_image.is_empty() {

@@ -18,7 +18,7 @@ use std::rc::Rc;
 impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     pub(super) fn call(&mut self, plan: &'p CallPlan, pos: Pos) -> R<Step> {
         let (name, variable) = match &plan.target {
-            CallTarget::Pointer(_) => return Err(not_yet("CALL through a FUNCTION-POINTER or PROCEDURE-POINTER")),
+            CallTarget::Pointer(pointer) => return self.call_through_pointer(plan, *pointer, pos),
             CallTarget::Named { name, .. } => (self.sym(*name).to_owned(), false),
             CallTarget::Dynamic(o) => (self.program_name(*o, pos)?, true),
         };
@@ -95,7 +95,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
 
     /// The callee's RETURNING item, located by a place naming the whole record and read as its
     /// kind once the callee has returned.
-    fn returned(&mut self, ordinal: u16, pos: Pos) -> R<Val> {
+    pub(super) fn returned(&mut self, ordinal: u16, pos: Pos) -> R<Val> {
         let p = self.p;
         let Some(offset) = self.linkage[usize::from(ordinal)] else { return Err(not_yet("a RETURNING item with no storage")) };
         let len = p.storage.linkage[usize::from(ordinal)];

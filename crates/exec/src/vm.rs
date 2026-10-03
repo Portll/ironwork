@@ -7,7 +7,7 @@ use crate::lower::{self, LowerError};
 use crate::unit::{Clock, Observer, Remains};
 use crate::{Compiled, cics, files, oo, sql};
 use rt::abend::{Abend, AbendCode, Ending};
-use rt::oo::ClassCode;
+use rt::oo::{ClassCode, MethodCode, Part};
 use rt::unit::{FoundClass, LoadError, LoadedProgram, Loader};
 pub use rt::vm::{Code, Halt};
 use std::io::{BufRead, Write};
@@ -44,9 +44,20 @@ impl Loader<Rc<Code>> for VmLibrary {
         p.debug.sources.get(file).map(|&s| p.symbols[s as usize].clone())
     }
 
-    /// INVOKE is not run by the VM yet, so no class is loaded.
-    fn class(&mut self, _external: &str) -> Result<Option<FoundClass<Rc<ClassCode<Rc<Code>>>>>, String> {
-        Ok(None)
+    /// The class the interpreter's library finds and compiles, with its FACTORY and OBJECT data and
+    /// each method lowered as a program of its own, as lowering a class definition lowers them.
+    fn class(&mut self, external: &str) -> Result<Option<FoundClass<Rc<ClassCode<Rc<Code>>>>>, String> {
+        let Some(found) = <Library as Loader<Rc<Compiled>>>::class(&mut self.0, external)? else { return Ok(None) };
+        let class = &found.code;
+        let lowered = |c: &Rc<Compiled>| Rc::new(code(c));
+        let part = |p: &oo::Part| Part { data: lowered(&p.data), records: p.records.clone() };
+        let methods = class
+            .methods
+            .iter()
+            .map(|m| MethodCode { name: m.name.clone(), factory: m.factory, params: m.params.clone(), returns: m.returns.clone(), code: lowered(&m.code), own_records: m.own_records })
+            .collect();
+        let code = ClassCode { parent: class.parent.clone(), factory: class.factory.as_ref().map(part), object: class.object.as_ref().map(part), methods };
+        Ok(Some(FoundClass { code: Rc::new(code), sources: found.sources }))
     }
 
     fn mapset(&mut self, name: &str) -> Option<Result<rt::bms::Mapset, String>> {

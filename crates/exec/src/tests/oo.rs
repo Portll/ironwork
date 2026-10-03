@@ -734,3 +734,67 @@ fn a_program_that_reaches_java_only_through_the_jni_needs_no_thread_or_dll() {
     .concat();
     assert_eq!(errors(&text), "");
 }
+
+/// Runs on the interpreter, whose Harness compares the VM's run and taint with its own, then on
+/// the VM alone, which must run it to its end and agree.
+fn on_both(main: &str, classes: &[String], sysin: &str) -> (String, Result<(Ending, i16), Abend>) {
+    let run = |executor: Executor| Harness::source(main).classes(classes).sysin(sysin).clock(unit::Clock::Fixed(0, 0)).run(executor);
+    let (walker, vm) = (run(Executor::Interpreter), run(Executor::Vm));
+    assert_eq!((&walker.out, &walker.ending, walker.return_code), (&vm.out, &vm.ending, vm.return_code), "{}", vm.err);
+    (vm.out, vm.ending.map(|e| (e, vm.return_code)))
+}
+
+#[test]
+fn the_vm_invokes_methods_with_input_in_an_argument_self_and_super() {
+    let data = [ACCOUNT_DATA, "       01  D USAGE OBJECT REFERENCE Dog.\n       01  TYPED PIC X(4).\n"].concat();
+    let main = client(
+        &["Account IS \"Account\"", "Dog"],
+        &data,
+        &[
+            "ACCEPT TYPED",
+            "COMPUTE AMOUNT = FUNCTION NUMVAL(TYPED)",
+            "INVOKE Account \"open\" RETURNING A1",
+            "INVOKE A1 \"credit\" USING BY VALUE AMOUNT",
+            "INVOKE A1 \"getBalance\" RETURNING BAL",
+            "MOVE BAL TO SHOWN DISPLAY 'BALANCE ' SHOWN",
+            "INVOKE Dog NEW RETURNING D",
+            "INVOKE D \"describe\"",
+            "INVOKE D \"fly\" ON EXCEPTION DISPLAY 'NO FLYING' END-INVOKE",
+            "GOBACK.",
+        ],
+    );
+    let classes = [vec![account()], animals()].concat();
+    let (out, ending) = on_both(&main, &classes, "25\n");
+    assert_eq!(ending, Ok((Ending::Goback, 0)));
+    assert_eq!(out, "BALANCE  125\nI AM ANIMAL\nWOOF 1 FROM REX   \nSOUND OF ANIMAL\nNO FLYING\n");
+}
+
+#[test]
+fn the_vm_calls_jni_services_through_the_function_table() {
+    let main = [
+        OO_CARD,
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. JNIUSER RECURSIVE.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       REPOSITORY.\n           CLASS Account IS \"Account\".\n",
+        "       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n",
+        ACCOUNT_DATA,
+        "       01  FLAG PIC X.\n           88 FLAG-TRUE VALUE X'01' THRU X'FF'.\n",
+        "       LINKAGE SECTION.\n           COPY JNI.\n       PROCEDURE DIVISION.\n",
+        &line(ENVIRONMENT[0]),
+        &line(ENVIRONMENT[1]),
+        &line("INVOKE Account NEW RETURNING A1"),
+        &line("CALL NewGlobalRef USING BY VALUE JNIENVPTR A1"),
+        &line("    RETURNING A2"),
+        &line("CALL IsSameObject USING BY VALUE JNIENVPTR A1 A2"),
+        &line("    RETURNING FLAG"),
+        &line("IF FLAG-TRUE DISPLAY 'SAME OBJECT' END-IF"),
+        &line("CALL DeleteLocalRef USING BY VALUE JNIENVPTR A2"),
+        &line("GOBACK."),
+    ]
+    .concat();
+    let (out, ending) = on_both(&main, &[account()], "");
+    assert_eq!(out, "SAME OBJECT\n");
+    let abend = ending.unwrap_err();
+    assert!(abend.message.contains("DeleteLocalRef") && abend.message.contains("global reference"), "{abend:?}");
+    let unset = [ENVIRONMENT[0], ENVIRONMENT[1], "INVOKE Account NEW RETURNING A1"].iter().fold(main, |text, l| text.replace(&line(l), ""));
+    let abend = on_both(&unset, &[account()], "").1.unwrap_err();
+    assert!(abend.message.starts_with("NEWGLOBALREF is a LINKAGE item with no address"), "{abend:?}");
+}
