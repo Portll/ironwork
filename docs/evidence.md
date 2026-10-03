@@ -66,6 +66,11 @@ by `prev` and `seq`.
   enters (`exec::unit::Observer`); the interpreter and the VM raise the same events, so a journal
   is the same under both.
 - `cics` keeps a journal for one task; `--serve` does not.
+- The ledger is appended under `ledger.lock`, taken and broken as cobolwork takes and breaks it
+  (cobolwork `docs/spec/evidence.md` §6). A lock older than a minute whose holder is not running
+  is broken, and the break is a `lock-broken` record. A lock whose holder cannot be checked, as on
+  Windows, is taken as not running. `close`'s `ledger` says whether the run held the lock as it
+  closed. Whether the run reached the ledger is what the ledger says.
 
 ### 1.1 Input trace: `--trace-marker TEXT`
 
