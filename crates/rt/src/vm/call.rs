@@ -1,19 +1,22 @@
 //! CALL within the run unit (lir.md §9.3), as `Machine::call` and `call_nested` run it: the program
 //! found through the run unit's loader, then `rt::callee`'s arguments and run around a new
-//! activation run by Rust recursion, RETURNING, and what an observer is told.
+//! activation run by Rust recursion, RETURNING, and what an observer is told. A name no program has
+//! may be an LE callable service or a job for the virtual printer.
 
 use super::{Code, Halt, Lowered, R, Vm, not_yet};
 use crate::abend::{Abend, AbendCode, Ending};
 use crate::callee::{self, Arguments, Bindings, By, Callee};
 use crate::host::Host;
-use crate::le;
-use crate::lir::{Base, CallPlan, CallTarget, Operand, PlaceId, Step};
-use crate::virtual_printer;
+use crate::le::{self, LeHost};
+use crate::lir::{Base, CallPlan, CallTarget, LeService, Operand, PlaceId, Step};
 use crate::storage::{Kind, Loc, Val};
 use crate::store;
-use crate::unit::{Event, LoadError, Loader, OS_COMMAND_ROUTINES, RunUnit, UnitHost};
+use crate::unit::{Event, LoadError, Loader, OS_COMMAND_ROUTINES, RETURN_CODE, RunUnit, UnitHost};
+use crate::virtual_printer::{self, Job};
 use crate::vocab::Pos;
+use numeric::precision::{Fixed, Places};
 use std::rc::Rc;
+use zarch::ebcdic::CodePage;
 
 impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     pub(super) fn call(&mut self, plan: &'p CallPlan, pos: Pos) -> R<Step> {
@@ -38,12 +41,18 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let dynamic = self.p.options.options.dynam || variable;
         let (index, entry) = match self.unit.load_entry(&name, dynamic) {
             Ok(found) => found,
-            Err(LoadError::NotFound) if le::provides(&name) => return Err(not_yet("Language Environment callable services")),
-            Err(LoadError::NotFound) if virtual_printer::ROUTINES.contains(&name.as_str()) && self.unit.dds.get(virtual_printer::DD).is_some() => {
-                return Err(not_yet("the virtual printer"));
+            Err(LoadError::NotFound) => {
+                if let Some(service) = le::service(&name) {
+                    return self.le_call(plan, service, pos);
+                }
+                if let Some(step) = self.virtual_print(plan, &name, pos)? {
+                    return Ok(step);
+                }
+                if plan.on_exception {
+                    return Ok(Step::Arm(1));
+                }
+                return Err(Abend { code: AbendCode::ModuleNotFound, message: le::missing(&name), pos, file: None }.into());
             }
-            Err(LoadError::NotFound) if plan.on_exception => return Ok(Step::Arm(1)),
-            Err(LoadError::NotFound) => return Err(Abend { code: AbendCode::ModuleNotFound, message: le::missing(&name), pos, file: None }.into()),
             Err(LoadError::Compile(message)) => return Err(Abend::ironwork(format!("CALL {name}: {message}"), pos).into()),
         };
         let Some(code) = self.unit.programs[index].compiled.clone() else {
@@ -91,6 +100,53 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             store::assign(&self.facts(), self.unit, dest, val, None, pos)?;
         }
         Ok(if plan.on_exception || plan.not_on_exception { Step::Arm(0) } else { Step::Next })
+    }
+
+    /// `Machine::le_call`: a callable service run with its arguments' addresses, which are released
+    /// however it ends. No depth is counted and ON EXCEPTION never runs.
+    fn le_call(&mut self, plan: &CallPlan, service: LeService, pos: Pos) -> R<Step> {
+        let mark = self.unit.mem.len();
+        let addresses = callee::addresses(self, &plan.args, pos);
+        let ran = match self.settle(addresses) {
+            Ok(args) => le::call(self, service, &args, pos).map_err(Halt::Abend),
+            Err(halt) => Err(halt),
+        };
+        self.unit.release_temporaries(mark);
+        ran?;
+        Ok(if plan.on_exception || plan.not_on_exception { Step::Arm(0) } else { Step::Next })
+    }
+
+    /// `Machine::virtual_print`: SYSTEM or C$SYSTEM with an lp or lpr command, in a run given DD
+    /// PRINTER, prints the job and returns lp's status, 0 printed or 1 not, through RETURNING or
+    /// else RETURN-CODE; None for a CALL the virtual printer does not serve.
+    fn virtual_print(&mut self, plan: &CallPlan, name: &str, pos: Pos) -> R<Option<Step>> {
+        if !virtual_printer::ROUTINES.contains(&name) {
+            return Ok(None);
+        }
+        let Some(printer) = self.unit.dds.get(virtual_printer::DD) else { return Ok(None) };
+        let text = callee::arguments_text(self, &plan.args, pos);
+        let job = match self.settle(text) {
+            Ok(text) => Job::parse(&text),
+            Err(Halt::Abend(_)) => None,
+            Err(halt) => return Err(halt),
+        };
+        let Some(job) = job else { return Ok(None) };
+        let dds = self.unit.dds.clone();
+        let status: i16 = match virtual_printer::print(&dds, &printer, &job, &mut |event| self.unit.notify(event)) {
+            Ok(()) => 0,
+            Err(why) => {
+                let _ = writeln!(self.unit.err, "ironwork: {pos}: CALL {name}: the virtual printer printed nothing: {why}");
+                1
+            }
+        };
+        match plan.returning {
+            Some(target) => {
+                let dest = self.loc(target)?;
+                store::assign(&self.facts(), self.unit, dest, Val::Num(Fixed::new(i128::from(status), Places::new(9, 0))), None, pos)?;
+            }
+            None => self.unit.write(RETURN_CODE, &status.to_be_bytes()),
+        }
+        Ok(Some(if plan.on_exception || plan.not_on_exception { Step::Arm(0) } else { Step::Next }))
     }
 
     /// The callee's RETURNING item, located by a place naming the whole record and read as its
@@ -143,6 +199,16 @@ impl<'w, L: Loader<Rc<Code>>> UnitHost<'w> for Vm<'_, '_, 'w, L> {
 
     fn unit(&mut self) -> &mut RunUnit<'w, Rc<Code>, L> {
         self.unit
+    }
+}
+
+impl<'w, L: Loader<Rc<Code>>> LeHost<'w> for Vm<'_, '_, 'w, L> {
+    fn page(&self) -> &'static CodePage {
+        self.p.options.options.code_page()
+    }
+
+    fn method_name(program: &Rc<Code>) -> Option<String> {
+        program.method.clone()
     }
 }
 

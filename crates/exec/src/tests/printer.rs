@@ -356,3 +356,18 @@ fn a_destination_passed_through_the_environment_still_prints() {
     assert_eq!(o.out, "STATUS 0\n", "{:?}\n{}", o.ending, o.err);
     assert_eq!(printed.as_deref(), Some(&b"PAYROLL 2026\n"[..]));
 }
+
+#[test]
+fn the_vm_prints_on_the_virtual_printer_and_gives_lps_status() {
+    for (command, returning, name, shown, printed) in
+        [("'lpr report.txt'", false, "vp-vm-rc", "STATUS 0\n", Some(&b"PAYROLL 2026\n"[..])), ("'lp report.txt /etc/passwd'", true, "vp-vm-missing", "STATUS 1\n", None)]
+    {
+        let (report, prn) = (temp(&format!("{name}.txt")), temp(&format!("{name}.prn")));
+        let _ = (std::fs::remove_file(&report), std::fs::remove_file(&prn));
+        let dds = [format!("REPORT.TXT={}:text", report.display()), format!("PRINTER={}", prn.display())];
+        let o = Harness::source(&lp_program(&[command], returning)).dds(&dds).run(Executor::Vm);
+        assert_eq!((o.out.as_str(), o.return_code), (shown, 0), "{:?}\n{}", o.ending, o.err);
+        assert!(o.ending.is_ok(), "{:?}", o.ending);
+        assert_eq!(std::fs::read(&prn).ok().as_deref(), printed, "{command}");
+    }
+}

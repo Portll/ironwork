@@ -81,7 +81,8 @@ pub fn lowered(compiled: &Compiled) -> Result<Code, LowerError> {
 
 fn held(compiled: &Compiled, lowered: Result<rt::lir::Program, String>) -> Code {
     let entries = compiled.entries.iter().map(|e| e.name.clone()).collect();
-    Code::new(lowered, entries, compiled.program.files.len(), compiled.layout.size as usize, compiled.program.nested.clone())
+    let method = compiled.program.oo.as_deref().and_then(|o| o.method()).map(|m| format!("{}.{}", m.class, m.name));
+    Code::new(lowered, entries, compiled.program.files.len(), compiled.layout.size as usize, compiled.program.nested.clone(), method)
 }
 
 /// Runs `compiled`, lowered as `code`, as the first program of a run unit on the VM, with a job

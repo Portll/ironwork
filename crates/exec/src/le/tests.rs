@@ -442,3 +442,24 @@ fn a_picture_carries_literal_text_between_its_terms() {
     let expected = format!("{:<20}C O B O L   S P O R T S{:8}09/27/2026{:4}13:05", "Sunday", "", "");
     assert_eq!(lines(&program(data, &body)), [expected]);
 }
+
+#[test]
+fn the_vm_runs_the_services_with_input_in_their_arguments() {
+    let mut body = vec![line("ACCEPT IN-TEXT"), line("MOVE 10 TO IN-LEN")];
+    body.extend(set("PIC", "YYYY-MM-DD"));
+    body.push(line("CALL 'CEEDAYS' USING IN-STR PIC-STR LILIAN FC"));
+    body.push(line("CALL 'CEEDYWK' USING LILIAN DAY-NO FC"));
+    body.extend(set("PIC", "Wwwwwwwwwz, Mmmmmmmmmz ZD, YYYY"));
+    body.push(line("CALL 'CEEDATE' USING LILIAN PIC-STR OUT-80 FC"));
+    body.push(line("DISPLAY LILIAN ' ' DAY-NO ' ' FC-MSG"));
+    body.push(line("DISPLAY OUT-80"));
+    body.push(line("CALL 'CEEDAYS' USING IN-STR PIC-STR LILIAN OMITTED"));
+    let source = program("", &body);
+    let run = |sysin: &str, executor: Executor| Harness::source(&source).sysin(sysin).clock(CLOCK).run(executor);
+    let (walker, vm) = (run("1988-05-16\n", Executor::Interpreter), run("1988-05-16\n", Executor::Vm));
+    assert_eq!((&walker.out, &walker.ending), (&vm.out, &vm.ending));
+    let shown: Vec<&str> = vm.out.lines().map(str::trim_end).collect();
+    assert_eq!(shown, ["000148138 000000002 0000", "Monday, May 16, 1988"]);
+    let abend = vm.ending.unwrap_err();
+    assert_eq!(abend.code, "U4038", "{abend:?}");
+}
