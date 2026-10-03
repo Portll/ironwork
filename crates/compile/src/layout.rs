@@ -5,7 +5,7 @@
 
 use crate::picture::{self, Category, Sym};
 use numeric::Qualify;
-use syntax::ast::{DataEntry, Environment, FileDecl, Literal, Organization, Ref, Usage};
+use syntax::ast::{DataEntry, Environment, FileDecl, Literal, Organization, Ref, SignClause, Usage};
 use syntax::{Error, Pos};
 use zarch::hfp::Precision;
 
@@ -162,6 +162,7 @@ pub fn build(
 ) -> Result<Layout, Error> {
     let mut items: Vec<Item> = Vec::new();
     let mut usages: Vec<Option<Usage>> = Vec::new();
+    let mut signs: Vec<Option<SignClause>> = Vec::new();
     let mut synchronized: Vec<bool> = Vec::new();
     let mut conditions = Vec::new();
     let mut open: Vec<usize> = Vec::new();
@@ -238,6 +239,7 @@ pub fn build(
                 pos: e.pos,
             });
             usages.push(None);
+            signs.push(None);
             synchronized.push(false);
             after_renames = true;
             continue;
@@ -308,6 +310,7 @@ pub fn build(
         }
         let inherited = parent.and_then(|p| usages[p]);
         usages.push(e.usage.or(inherited));
+        signs.push(e.sign.or(parent.and_then(|p| signs[p])));
         synchronized.push(e.sync || parent.is_some_and(|p| synchronized[p]));
         if let Some(p) = parent {
             items[p].children.push(index);
@@ -321,7 +324,7 @@ pub fn build(
             continue;
         }
         let pic = e.picture.as_deref().map(|p| picture::analyse_with(p, notation).map_err(|m| Error::at(e.pos, m))).transpose()?;
-        items[index].kind = kind(e, &items[index], usages[index], pic.as_ref(), &mut edits)?;
+        items[index].kind = kind(e, &items[index], usages[index], signs[index], pic.as_ref(), &mut edits)?;
         if currencies.len() < edits.len() {
             currencies.push(pic.as_ref().and_then(|p| p.currency.clone()).unwrap_or_default());
         }
@@ -673,7 +676,9 @@ fn alignment(kind: Kind) -> u32 {
     }
 }
 
-fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, pic: Option<&picture::Picture>, edits: &mut Vec<Vec<Sym>>) -> Result<Kind, Error> {
+/// An elementary item's kind. `sign` is its own SIGN clause or the nearest group's above it, which
+/// applies to a signed zoned item alone (Language Reference SC27-8713-03, p. 231).
+fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, sign: Option<SignClause>, pic: Option<&picture::Picture>, edits: &mut Vec<Vec<Sym>>) -> Result<Kind, Error> {
     let err = |m: String| Error::at(e.pos, m);
     let usage = usage.unwrap_or_default();
     let handle = matches!(usage, Usage::ObjectReference | Usage::ProgramPointer);
@@ -723,7 +728,7 @@ fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, pic: Option<&picture::
             edits.push(pic.edit.clone().unwrap_or_default());
             Kind::AlnumEdited { edit: edits.len() as u32 - 1 }
         }
-        (Category::Numeric, Usage::Display) => Kind::Zoned { digits: pic.digits, scale: pic.scale, signed: pic.signed, sign: e.sign },
+        (Category::Numeric, Usage::Display) => Kind::Zoned { digits: pic.digits, scale: pic.scale, signed: pic.signed, sign: sign.filter(|_| pic.signed) },
         (Category::Numeric, Usage::Packed) => Kind::Packed { digits: pic.digits, scale: pic.scale, signed: pic.signed },
         (Category::Numeric, Usage::Binary | Usage::NativeBinary) if pic.digits <= 18 => {
             Kind::Binary { digits: pic.digits, scale: pic.scale, signed: pic.signed, native: usage == Usage::NativeBinary }
@@ -745,7 +750,7 @@ fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, pic: Option<&picture::
         (Category::National, Usage::Display | Usage::National) => Kind::National,
         (category, usage) => return Err(err(format!("a {category:?} PICTURE with USAGE {usage:?} is not supported yet"))),
     };
-    if let Kind::Zoned { sign: Some(_), signed: false, .. } = k {
+    if e.sign.is_some() && matches!(k, Kind::Zoned { signed: false, .. }) {
         return Err(err("a SIGN clause needs an S in the PICTURE".into()));
     }
     Ok(k)

@@ -60,3 +60,15 @@ fn a_linkage_record_that_redefines_another_shares_its_argument() {
     );
     assert_eq!(on_both(&source), "CD\nZZCD\n");
 }
+
+/// Language Reference SC27-8713-03, p. 231: a group's SIGN clause applies to its signed zoned items,
+/// and a subordinate entry's own SIGN clause takes precedence for that entry.
+#[test]
+fn a_subordinate_sign_clause_takes_precedence_over_its_group_s() {
+    let source = program(
+        "",
+        "       01  G SIGN TRAILING SEPARATE.\n           03  A PIC S9(3) VALUE -12.\n           03  H SIGN LEADING SEPARATE.\n               05  B PIC S9(3) VALUE -34.\n               05  C PIC S9(3) SIGN TRAILING VALUE -56.\n           03  U PIC 9(3) VALUE 78.\n",
+        &[line("DISPLAY G"), line("GOBACK.")].concat(),
+    );
+    assert_eq!(on_both(&source), "012--03405O078\n");
+}
