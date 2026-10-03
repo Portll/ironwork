@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Portll/ironwork/blob/main/docs/fuzz-manifest.schema.json",
+  "title": "ironwork-fuzz/v1",
+  "description": "DIR/manifest.json, which ironwork fuzz writes for a fuzz run and cobolwork's abend set reads (docs/evidence.md section 5).",
+  "type": "object",
+  "required": ["tool", "format", "version", "seed", "strategy", "clock", "program", "roots", "entry", "inputs", "counts", "runs"],
+  "properties": {
+    "tool": {
+      "description": "The writer.",
+      "const": "ironwork-fuzz"
+    },
+    "format": {
+      "description": "The manifest's shape: a key added keeps it, a key removed, renamed or given another meaning takes a new one.",
+      "const": "ironwork-fuzz/v1"
+    },
+    "version": {
+      "description": "The ironwork release that wrote the manifest.",
+      "type": "string"
+    },
+    "seed": {
+      "description": "The --seed the inputs were generated from; the same seed gives the same runs.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "strategy": {
+      "description": "How inputs are generated: field by field from the record and parameter descriptions.",
+      "const": "fields"
+    },
+    "clock": {
+      "description": "The time every run's clock was fixed at, --clock or 2026-01-01.",
+      "type": "string"
+    },
+    "program": {
+      "description": "What was fuzzed.",
+      "type": "object",
+      "required": ["file", "id"],
+      "properties": {
+        "file": {
+          "description": "The program, or for a job the JCL, by path from --root, the current directory without it.",
+          "type": "string"
+        },
+        "id": {
+          "description": "The PROGRAM-ID, or for a job the job's name.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "roots": {
+      "description": "The directories the runs read, numbered as a journal's input records number them: the program's directory, then each -I and -L library; for a job, the JCL's directory, .work for each run's own data sets, the libraries, then the procedure libraries.",
+      "type": "array",
+      "items": {
+        "description": "A root by its path from --root, . for --root itself, null for one outside it.",
+        "type": ["string", "null"]
+      }
+    },
+    "entry": {
+      "description": "How each run was made: ironwork run, ironwork job (--job) or ironwork cics (--cics).",
+      "enum": ["run", "job", "cics"]
+    },
+    "inputs": {
+      "description": "The inputs of the kept runs.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/input" }
+    },
+    "counts": {
+      "description": "Outcomes over the generated runs; an abend that says what the surroundings lack counts as refused.",
+      "type": "object",
+      "required": ["runs", "clean", "abend", "timeout", "refused"],
+      "properties": {
+        "runs": { "description": "Generated runs.", "type": "integer", "minimum": 0 },
+        "clean": { "description": "Runs that ended without an abend.", "type": "integer", "minimum": 0 },
+        "abend": { "description": "Runs that ended in an abend the input may have caused.", "type": "integer", "minimum": 0 },
+        "timeout": { "description": "Runs stopped after --timeout seconds.", "type": "integer", "minimum": 0 },
+        "refused": { "description": "Runs that say nothing of the program's input: ironwork refused them, panicked, or the abend names what the surroundings lack.", "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "runs": {
+      "description": "One entry per kept abend.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/run" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "input": {
+      "description": "One input of a kept run.",
+      "type": "object",
+      "required": ["id", "kind", "name", "bytes", "minimized"],
+      "properties": {
+        "id": { "description": "The id a run's input array names it by.", "type": "string" },
+        "kind": {
+          "description": "Where it goes in: a DD's data set, SYSIN lines, a PARM, a CICS COMMAREA, or a terminal's screen script.",
+          "enum": ["dd", "sysin", "parm", "commarea", "terminal"]
+        },
+        "name": { "description": "The name it goes in under: a DD name, SYSIN, PARM, DFHCOMMAREA or the terminal id; for a job, a data set name, STEP.DD or a step.", "type": "string" },
+        "bytes": { "description": "Its bytes in base64, possibly empty; a COMMAREA's in EBCDIC, a PARM's and a screen script's in UTF-8.", "type": "string" },
+        "minimized": { "description": "False when minimizing ran out of runs before the input was as small as still gives the abend.", "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "run": {
+      "description": "A kept run: its inputs, its abend, and the journal and coverage of its run with --evidence.",
+      "type": "object",
+      "required": ["input", "outcome", "abend", "journal", "coverage"],
+      "properties": {
+        "input": {
+          "description": "The ids of its inputs.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "outcome": { "description": "Only an abend is kept.", "const": "abend" },
+        "abend": {
+          "description": "The abend the run ended with.",
+          "type": "object",
+          "required": ["code", "file", "line", "message", "optimized"],
+          "properties": {
+            "code": { "description": "The abend code: S0C7, U4038, ASRA, S322, S806 and so on.", "type": "string" },
+            "file": { "description": "The source it ended in, relative to the root that supplied it.", "type": "string" },
+            "line": { "description": "The line it ended at.", "type": "integer", "minimum": 1 },
+            "message": { "description": "The message the run ended with.", "type": "string" },
+            "optimized": { "description": "Whether the same input, compiled with OPTIMIZE(2), ends in the same abend at the same file and line.", "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "journal": { "description": "The run id of its journal under evidence/runs.", "type": "string" },
+        "coverage": { "description": "Its coverage, in run --coverage's format, by path from DIR.", "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

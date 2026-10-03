@@ -2,9 +2,13 @@
 //! from it ends in a data exception and a range check on generated records; each abend is kept once,
 //! with a journal that records it, and the same seed finds the same abends on the same inputs.
 
+mod schema;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use schema::read_manifest;
 
 const PROGRAM: &[&str] = &[
     "       CBL SSRANGE",
@@ -83,7 +87,7 @@ fn generated_records_find_the_data_exception_and_the_range_check_each_kept_once_
     let dir = temp("find");
     let o = fuzz(&dir, "run", &["--runs", "40"]);
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    let manifest = fs::read_to_string(dir.join("run/manifest.json")).unwrap();
+    let manifest = read_manifest(&dir.join("run"));
     assert!(manifest.contains("\"tool\":\"ironwork-fuzz\""));
     assert!(manifest.contains("\"program\":{\"file\":\"src/QTYSUM.cbl\",\"id\":\"QTYSUM\"}"));
     assert!(manifest.contains("\"runs\":40"), "{manifest}");
@@ -110,7 +114,7 @@ fn the_same_seed_finds_the_same_abends_on_the_same_inputs() {
         let o = fuzz(&dir, out, &["--runs", "25", "--seed", "7"]);
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     }
-    let read = |out: &str| kept(&fs::read_to_string(dir.join(out).join("manifest.json")).unwrap());
+    let read = |out: &str| kept(&read_manifest(&dir.join(out)));
     assert_eq!(read("a"), read("b"));
 }
 
@@ -157,7 +161,7 @@ fn an_assign_literal_that_names_a_path_reaches_nothing_outside_the_fuzz_director
     assert!(o.status.success(), "{}", stderr(&o));
     assert_eq!(fs::read_to_string(dir.join("VICTIM")).unwrap(), "precious");
     assert!(!dir.join("WRITTEN").exists());
-    assert!(fs::read_to_string(dir.join("run/manifest.json")).unwrap().contains("\"name\":\"../../../VICTIM\""));
+    assert!(read_manifest(&dir.join("run")).contains("\"name\":\"../../../VICTIM\""));
 }
 
 #[test]
@@ -174,7 +178,7 @@ fn files_that_share_a_dd_get_one_empty_data_set_and_the_rest_is_still_varied() {
     let o = fuzz(&dir, "run", &["--runs", "40"]);
     assert!(o.status.success(), "{}", stderr(&o));
     assert!(stderr(&o).contains("not varied, given empty: DISK"), "{}", stderr(&o));
-    assert!(kept(&fs::read_to_string(dir.join("run/manifest.json")).unwrap()).iter().any(|k| k.starts_with("S0C7 ")));
+    assert!(kept(&read_manifest(&dir.join("run"))).iter().any(|k| k.starts_with("S0C7 ")));
 }
 
 #[test]
@@ -187,7 +191,7 @@ fn a_program_in_the_current_directory_is_named_relative_to_it_in_the_manifest_an
         .output()
         .unwrap();
     assert!(o.status.success(), "{}", stderr(&o));
-    let manifest = fs::read_to_string(dir.join("run/manifest.json")).unwrap();
+    let manifest = read_manifest(&dir.join("run"));
     assert!(manifest.contains("\"program\":{\"file\":\"src/QTYSUM.cbl\""), "{manifest}");
     assert!(kept(&manifest).iter().any(|k| k == "S0C7 25"));
     let journals = fs::read_dir(dir.join("run/evidence/runs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap());
@@ -209,7 +213,7 @@ fn a_generated_indexed_file_repeats_no_alternate_key_that_allows_no_duplicates()
     );
     let o = fuzz(&dir, "run", &["--runs", "60"]);
     assert!(o.status.success(), "{}", stderr(&o));
-    let manifest = fs::read_to_string(dir.join("run/manifest.json")).unwrap();
+    let manifest = read_manifest(&dir.join("run"));
     assert!(manifest.contains("\"abend\":0"), "{manifest}");
 }
 
@@ -221,7 +225,7 @@ fn the_manifest_names_each_root_from_the_repository_root_as_the_journal_numbers_
     rewrite(&dir, &[("                 ADD IN-QTY TO WS-TOTAL", "                 COPY ADDQTY.")]);
     let o = fuzz(&dir, "run", &["--runs", "40", "-I", "copy"]);
     assert!(o.status.success(), "{}", stderr(&o));
-    let manifest = fs::read_to_string(dir.join("run/manifest.json")).unwrap();
+    let manifest = read_manifest(&dir.join("run"));
     assert!(manifest.contains("\"roots\":[\"src\",\"copy\"]"), "{manifest}");
     assert!(manifest.contains("\"code\":\"S0C7\",\"file\":\"ADDQTY.cpy\",\"line\":1"), "{manifest}");
     let journals: Vec<String> = fs::read_dir(dir.join("run/evidence/runs")).unwrap().map(|e| fs::read_to_string(e.unwrap().path()).unwrap()).collect();
@@ -245,7 +249,7 @@ fn every_occurrence_of_a_table_is_varied() {
     );
     let o = fuzz(&dir, "run", &["--runs", "30"]);
     assert!(o.status.success(), "{}", stderr(&o));
-    assert!(kept(&fs::read_to_string(dir.join("run/manifest.json")).unwrap()).iter().any(|k| k.starts_with("U4038 ")));
+    assert!(kept(&read_manifest(&dir.join("run"))).iter().any(|k| k.starts_with("U4038 ")));
 }
 
 fn count(manifest: &str, key: &str) -> i64 {
@@ -264,7 +268,7 @@ fn variable_length_records_are_fed_behind_rdws() {
     );
     let o = fuzz(&dir, "run", &["--runs", "60"]);
     assert!(o.status.success(), "{}", stderr(&o));
-    let manifest = fs::read_to_string(dir.join("run/manifest.json")).unwrap();
+    let manifest = read_manifest(&dir.join("run"));
     assert_eq!(count(&manifest, "refused"), 0, "{manifest}");
     assert!(kept(&manifest).iter().any(|k| k.starts_with("S0C7 ")), "{manifest}");
 }
@@ -275,7 +279,7 @@ fn a_relative_file_is_fed_a_record_a_slot() {
     rewrite(&dir, &[("ASSIGN TO INFILE.", "ASSIGN TO INFILE\n               ORGANIZATION RELATIVE ACCESS SEQUENTIAL.")]);
     let o = fuzz(&dir, "run", &["--runs", "40"]);
     assert!(o.status.success(), "{}", stderr(&o));
-    let manifest = fs::read_to_string(dir.join("run/manifest.json")).unwrap();
+    let manifest = read_manifest(&dir.join("run"));
     assert!(kept(&manifest).iter().any(|k| k.starts_with("S0C7 ")), "{manifest}");
 }
 
@@ -295,7 +299,7 @@ fn a_contained_program_s_file_gets_its_dd() {
     let o = fuzz(&dir, "run", &["--runs", "40"]);
     assert!(o.status.success(), "{}", stderr(&o));
     assert!(stderr(&o).contains("not varied, given empty: AUXDD"), "{}", stderr(&o));
-    assert!(kept(&fs::read_to_string(dir.join("run/manifest.json")).unwrap()).iter().any(|k| k.starts_with("S0C7 ")));
+    assert!(kept(&read_manifest(&dir.join("run"))).iter().any(|k| k.starts_with("S0C7 ")));
 }
 
 #[test]
@@ -304,7 +308,7 @@ fn a_program_s_return_code_of_2_is_not_a_refusal_and_a_refusal_says_why() {
     rewrite(&dir, &[("           GOBACK.", "           MOVE 2 TO RETURN-CODE\n           GOBACK.")]);
     let o = fuzz(&dir, "run", &["--runs", "20"]);
     assert!(o.status.success(), "{}", stderr(&o));
-    assert_eq!(count(&fs::read_to_string(dir.join("run/manifest.json")).unwrap(), "refused"), 0);
+    assert_eq!(count(&read_manifest(&dir.join("run")), "refused"), 0);
 
     rewrite(&dir, &[("           OPEN INPUT IN-FILE", "           CALL 'NOSUCH'\n           OPEN INPUT IN-FILE")]);
     let o = fuzz(&dir, "called", &["--runs", "5"]);
@@ -345,7 +349,7 @@ fn run_passes_a_parm_as_language_environment_does_and_fuzz_varies_it() {
 
     let o = Command::new(env!("CARGO_BIN_EXE_ironwork")).current_dir(dir.join("repo")).args(["fuzz", "src/PARMSUM.cbl", "--runs", "60", "-o"]).arg(dir.join("run")).output().unwrap();
     assert!(o.status.success(), "{}", stderr(&o));
-    let manifest = fs::read_to_string(dir.join("run/manifest.json")).unwrap();
+    let manifest = read_manifest(&dir.join("run"));
     assert!(manifest.contains("\"kind\":\"parm\",\"minimized\""), "{manifest}");
     let found = kept(&manifest);
     assert!(found.iter().any(|k| k == "S0C7 18"), "{found:?}");
@@ -398,7 +402,7 @@ fn a_job_s_data_sets_in_stream_data_and_step_parms_are_fuzzed_and_each_abend_pla
     fs::write(dir.join("repo/jcl/FUZZ.jcl"), jcl.join("\n") + "\n").unwrap();
     let o = Command::new(env!("CARGO_BIN_EXE_ironwork")).current_dir(dir.join("repo")).args(["fuzz", "--job", "jcl/FUZZ.jcl", "-L", "src", "--runs", "60", "-o"]).arg(dir.join("run")).output().unwrap();
     assert!(o.status.success(), "{}", stderr(&o));
-    let manifest = fs::read_to_string(dir.join("run/manifest.json")).unwrap();
+    let manifest = read_manifest(&dir.join("run"));
     assert!(manifest.contains("\"entry\":\"job\""), "{manifest}");
     assert!(manifest.contains("\"program\":{\"file\":\"jcl/FUZZ.jcl\",\"id\":\"FUZZJOB\"}"), "{manifest}");
     for (kind, name) in [("dd", "MY.INPUT"), ("parm", "STEP2"), ("sysin", "STEP3.SYSIN")] {
@@ -430,7 +434,7 @@ fn a_loop_only_some_input_causes_is_kept_as_s322_and_one_waiting_at_the_end_of_s
     );
     let o = fuzz(&dir, "run", &["--runs", "30", "--timeout", "1", "--hang-limit", "20000"]);
     assert!(o.status.success(), "{}", stderr(&o));
-    let manifest = fs::read_to_string(dir.join("run/manifest.json")).unwrap();
+    let manifest = read_manifest(&dir.join("run"));
     assert!(kept(&manifest).iter().any(|k| k == "S322 29" || k == "S322 30"), "{manifest}");
 
     let waits = [
@@ -448,7 +452,7 @@ fn a_loop_only_some_input_causes_is_kept_as_s322_and_one_waiting_at_the_end_of_s
     fs::write(dir.join("repo/src/WAITER.cbl"), waits.join("\n") + "\n").unwrap();
     let o = Command::new(env!("CARGO_BIN_EXE_ironwork")).current_dir(dir.join("repo")).args(["fuzz", "src/WAITER.cbl", "--runs", "5", "--timeout", "1", "--hang-limit", "20000", "-o"]).arg(dir.join("waits")).output().unwrap();
     assert!(o.status.success(), "{}", stderr(&o));
-    let manifest = fs::read_to_string(dir.join("waits/manifest.json")).unwrap();
+    let manifest = read_manifest(&dir.join("waits"));
     assert!(!manifest.contains("S322") && count(&manifest, "timeout") > 0, "{manifest}");
 }
 
@@ -475,7 +479,7 @@ fn an_s806_is_kept_only_where_a_marker_in_the_input_reaches_the_call() {
     let picker = |out: &str| Command::new(env!("CARGO_BIN_EXE_ironwork")).current_dir(dir.join("repo")).args(["fuzz", "src/PICKER.cbl", "--runs", "20", "-o"]).arg(dir.join(out)).output().unwrap();
     let o = picker("chosen");
     assert!(o.status.success(), "{}", stderr(&o));
-    let manifest = fs::read_to_string(dir.join("chosen/manifest.json")).unwrap();
+    let manifest = read_manifest(&dir.join("chosen"));
     assert!(kept(&manifest).iter().any(|k| k == "S806 8"), "{manifest}");
     assert!(manifest.contains("CALL @#$"), "{manifest}");
     let journal = manifest.split("\"journal\":\"").nth(1).unwrap().split('"').next().unwrap();
@@ -485,7 +489,7 @@ fn an_s806_is_kept_only_where_a_marker_in_the_input_reaches_the_call() {
     fs::write(dir.join("repo/src/PICKER.cbl"), program(true)).unwrap();
     let o = picker("static");
     assert!(o.status.success(), "{}", stderr(&o));
-    assert!(!fs::read_to_string(dir.join("static/manifest.json")).unwrap().contains("S806"));
+    assert!(!read_manifest(&dir.join("static")).contains("S806"));
 }
 
 /// Each kept run's abend as `code line optimized`.
@@ -507,13 +511,13 @@ fn each_kept_abend_says_whether_its_input_gives_it_again_compiled_with_optimize_
     rewrite(&dir, &[("                 ADD IN-QTY TO WS-TOTAL", "                 IF IN-QTY NOT = ZERO\n                    ADD IN-QTY TO WS-TOTAL\n                 END-IF")]);
     let o = fuzz(&dir, "run", &["--runs", "40"]);
     assert!(o.status.success(), "{}", stderr(&o));
-    let found = optimized(&fs::read_to_string(dir.join("run/manifest.json")).unwrap());
+    let found = optimized(&read_manifest(&dir.join("run")));
     assert!(found.contains(&"S0C7 25 false".to_string()), "{found:?}");
     assert!(found.contains(&"U4038 28 true".to_string()), "{found:?}");
 
     let o = fuzz(&dir, "optimized", &["--runs", "40", "--optimize=2"]);
     assert!(o.status.success(), "{}", stderr(&o));
-    let found = optimized(&fs::read_to_string(dir.join("optimized/manifest.json")).unwrap());
+    let found = optimized(&read_manifest(&dir.join("optimized")));
     assert!(found.contains(&"S0C7 26 true".to_string()), "{found:?}");
     assert!(!found.iter().any(|k| k.starts_with("S0C7 25")), "{found:?}");
 }

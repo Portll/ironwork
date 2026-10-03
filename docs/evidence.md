@@ -280,7 +280,8 @@ cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
    exception (assumption C262). Whether that run ends in the same abend at the same place is the
    abend's `optimized`.
 
-`DIR/manifest.json` holds `tool` (`ironwork-fuzz`), `version`, `seed`, `strategy` (`fields`),
+`DIR/manifest.json` holds `tool` (`ironwork-fuzz`), `format`, `version` (the ironwork release that
+wrote it), `seed`, `strategy` (`fields`),
 `clock`, `program` (`file`, relative to `--root`, the current directory without it, and `id`),
 `roots` (the program's directory, then each `-I` and `-L` library, by path from `--root`, `.` for
 `--root` itself and null for one outside it: the order a journal's `input` records number them, so
@@ -301,6 +302,13 @@ program's directory or the library it came from, `line`, `message` and `optimize
 `journal` the run id, and `coverage`). `optimized` rests on the manifest's word: the run it comes
 from keeps no journal. A program that takes any other PROCEDURE DIVISION USING is refused: a CALL would
 supply its parameters.
+
+`format` is `ironwork-fuzz/v1`, the shape [fuzz-manifest.schema.json](fuzz-manifest.schema.json)
+describes, apart from `version` so a reader checks the shape and not the release. A key added to
+the manifest keeps the format, and a reader skips keys it does not know; a key removed or renamed,
+or a value given another meaning, takes a new format, which a reader of the old one refuses.
+A manifest from ironwork 0.3.0 or earlier has the v1 shape without `format` and `optimized`, and one
+from before 0.3.0 has no `roots` either.
 
 ### 5.1 A CICS task: `ironwork fuzz --cics`
 

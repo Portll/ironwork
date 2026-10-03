@@ -838,6 +838,10 @@ pub(crate) struct Header<'a> {
     pub(crate) entry: &'a str,
 }
 
+/// The manifest's shape, which docs/fuzz-manifest.schema.json describes. A key added keeps it; a key
+/// removed, renamed or given another meaning takes a new one.
+const MANIFEST_FORMAT: &str = "ironwork-fuzz/v1";
+
 pub(crate) fn write_manifest(out: &Path, header: &Header, inputs: Vec<Value>, tally: &Tally, runs: Vec<Value>) -> std::io::Result<()> {
     // Each root by its path from --root, null outside it: cobolwork finds an abend's file under the
     // root that supplied it.
@@ -853,6 +857,7 @@ pub(crate) fn write_manifest(out: &Path, header: &Header, inputs: Vec<Value>, ta
         .collect();
     let manifest = obj(vec![
         ("tool", "ironwork-fuzz".into()),
+        ("format", MANIFEST_FORMAT.into()),
         ("version", env!("CARGO_PKG_VERSION").into()),
         ("seed", Value::from(header.seed)),
         ("strategy", "fields".into()),

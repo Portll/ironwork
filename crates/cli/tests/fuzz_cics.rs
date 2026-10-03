@@ -3,9 +3,13 @@
 //! abend is kept once with a journal that records it and the input that gave it, and the
 //! pseudo-conversation runs as the transaction RETURN TRANSID names.
 
+mod schema;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use schema::read_manifest;
 
 const PROGRAM: &[&str] = &[
     "       IDENTIFICATION DIVISION.",
@@ -98,7 +102,7 @@ fn a_generated_commarea_and_typed_quantity_each_end_in_asra_kept_once_with_its_j
     let o = fuzz(&dir, "src/ORDCICS.cbl", "run", &["--runs", "40"]);
     assert!(o.status.success(), "{}", stderr(&o));
     assert!(stderr(&o).contains("each task runs as transaction ORD1"), "{}", stderr(&o));
-    let manifest = fs::read_to_string(dir.join("run/manifest.json")).unwrap();
+    let manifest = read_manifest(&dir.join("run"));
     assert!(manifest.contains("\"entry\":\"cics\""));
     assert!(manifest.contains("\"program\":{\"file\":\"src/ORDCICS.cbl\",\"id\":\"ORDCICS\"}"));
     let found = kept(&manifest);
@@ -134,7 +138,7 @@ fn the_same_seed_finds_the_same_abends_on_the_same_inputs() {
         let o = fuzz(&dir, "src/ORDCICS.cbl", out, &["--runs", "20", "--seed", "11"]);
         assert!(o.status.success(), "{}", stderr(&o));
     }
-    let read = |out: &str| fs::read_to_string(dir.join(out).join("manifest.json")).unwrap();
+    let read = |out: &str| read_manifest(&dir.join(out));
     assert_eq!(kept(&read("a")), kept(&read("b")));
     let inputs = |m: String| m.split("\"inputs\":").nth(1).unwrap().split("\"program\":").next().unwrap().to_string();
     assert_eq!(inputs(read("a")), inputs(read("b")));
