@@ -2058,7 +2058,9 @@ before the S0C9 or size error.
 or what locating it reads, lowering refuses the program: a condition-name whose values compare
 differently (§6), whose `Or` of relations reads the subject once per value where the walker tests
 and reads it once; and a serial SEARCH, whose loop reads the index twice at each step, where the
-walker reads it once. The count `SetCount` holds is read once, as the walker reads it.
+walker reads it once. The count `SetCount` holds is read once, as the walker reads it. Lowering
+refuses too ALL ZERO or ALL NULL compared with a data item NUMCHECK may test or locate, which
+`Machine::nonnumeric` takes for nonnumeric and the LIR keeps as ZERO or NULL.
 
 **PARMCHECK.** `Storage.parmcheck` is the buffer after the WORKING-STORAGE the program declares
 (assumption PARMCHECK_BUFFER). Inside the CALL op an executor runs `parmcheck::set` over the calling

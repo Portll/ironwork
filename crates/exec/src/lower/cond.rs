@@ -81,9 +81,17 @@ impl Lower<'_> {
 
     pub(super) fn relation(&mut self, a: &Expr, op: RelOp, b: &Expr, pos: Pos) -> R<Test> {
         let all = |e: &Expr| matches!(e, Expr::Operand(Operand::Literal(Literal::All(_))));
+        let all_zero = |e: &Expr| matches!(e, Expr::Operand(Operand::Literal(Literal::All(f))) if matches!(**f, Literal::Figurative(Figurative::Zero | Figurative::Null)));
         let (a_all, b_all) = (all(a), all(b));
+        let (a_zero, b_zero) = (all_zero(a), all_zero(b));
         let (a, x) = self.comparand(a, pos)?;
         let (b, y) = self.comparand(b, pos)?;
+        // NUMCHECK tests and locates an item by whether the other operand is nonnumeric, as ALL ZERO
+        // and ALL NULL are and ZERO and NULL, which the LIR keeps them as, are not.
+        let tested = |lower: &Self, c: &Comparand| matches!(c, Comparand::Operand(lir::Operand::Load(p)) if lower.read_tested(*p));
+        if self.c.options.numcheck.is_some() && (a_zero && tested(self, &b) || b_zero && tested(self, &a)) {
+            return unsupported("NUMCHECK with ALL ZERO or ALL NULL compared with a data item it may test", pos);
+        }
         let how = if self.zoned_against(&a, &x, &b, &y, b_all) {
             Compare::ZonedBytes { zoned_first: true }
         } else if self.zoned_against(&b, &y, &a, &x, a_all) {

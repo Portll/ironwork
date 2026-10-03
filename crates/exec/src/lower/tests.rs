@@ -1650,6 +1650,19 @@ fn under_numcheck_a_condition_name_whose_values_compare_differently_is_refused()
 }
 
 #[test]
+fn under_numcheck_all_zero_compared_with_an_item_it_may_test_is_refused() {
+    let data = "       01  N PIC 9.\n       01  X PIC X.\n";
+    let compared = |options: &str, condition: &str| program(options, data, &[line(&format!("IF {condition} DISPLAY 'EQ' END-IF")), line("GOBACK.")].concat());
+    for condition in ["N = ALL ZEROS", "ALL ZERO = N"] {
+        let e = lower(&compiled(&compared("NUMCHECK", condition))).unwrap_err();
+        assert!(matches!(e, LowerError::Unsupported("NUMCHECK with ALL ZERO or ALL NULL compared with a data item it may test", _)), "{condition}: {e}");
+        lowered(&compared("", condition));
+    }
+    lowered(&compared("NUMCHECK", "N = ZERO"));
+    lowered(&compared("NUMCHECK", "X = ALL ZEROS"));
+}
+
+#[test]
 fn a_place_carries_zon_lax_s_tolerance_and_the_compiler_s_removal_of_its_test() {
     use rt::store::LaxRedefinition::{LeadingSpaces, Signed};
     let data = concat!(
