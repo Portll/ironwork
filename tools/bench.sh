@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Times the bench/ programs under the ironwork interpreter and under GnuCOBOL (cobc -O2).
+# Times the bench/ programs under the ironwork interpreter, the ironwork VM and GnuCOBOL (cobc -O2).
 # usage: tools/bench.sh [program...]    (default: all four; RUNS sets the repeat count, default 5)
 # env: COBC (default cobc on PATH); CARGO_TARGET_DIR is honoured as cargo honours it
 set -euo pipefail
@@ -26,17 +26,19 @@ timed() {
     echo "$t"
 }
 
-printf '%-10s %-40s %9s %9s %7s\n' program checksum ironwork cobc ratio
+printf '%-10s %-40s %9s %9s %9s %7s %7s\n' program checksum interp vm cobc vm/int vm/cobc
 for p in "${programs[@]}"; do
     src=$root/bench/$p.cbl
     "$cobc" -x -O2 -std=ibm -o "$work/$p" "$src"
     export DD_BENCHF=$work/$p.dat
-    iw_t=(); cb_t=()
+    iw_t=(); vm_t=(); cb_t=()
     for _ in $(seq "$runs"); do
         iw_t+=("$(timed "$work/iw.out" "$iw" run "$src" --dd "BENCHF=$DD_BENCHF:fixed")")
+        vm_t+=("$(timed "$work/vm.out" "$iw" run --vm "$src" --dd "BENCHF=$DD_BENCHF:fixed")")
         cb_t+=("$(timed "$work/cb.out" "$work/$p")")
-        cmp -s "$work/iw.out" "$work/cb.out" || { echo "$p: CHECKSUM MISMATCH" >&2; cat "$work/iw.out" "$work/cb.out" >&2; }
+        cmp -s "$work/iw.out" "$work/cb.out" || { echo "$p: ironwork and cobc differ (see docs/benchmarks.md, Correctness)" >&2; cat "$work/iw.out" "$work/cb.out" >&2; }
+        cmp -s "$work/vm.out" "$work/iw.out" || { echo "$p: VM CHECKSUM MISMATCH" >&2; cat "$work/vm.out" "$work/vm.out.err" >&2; }
     done
-    mi=$(median "${iw_t[@]}"); mc=$(median "${cb_t[@]}")
-    printf '%-10s %-40s %8ss %8ss %6.1fx\n' "$p" "$(head -1 "$work/iw.out")" "$mi" "$mc" "$(echo "$mi / $mc" | bc -l)"
+    mi=$(median "${iw_t[@]}"); mv=$(median "${vm_t[@]}"); mc=$(median "${cb_t[@]}")
+    printf '%-10s %-40s %8ss %8ss %8ss %6.2fx %6.1fx\n' "$p" "$(head -1 "$work/iw.out")" "$mi" "$mv" "$mc" "$(echo "$mv / $mi" | bc -l)" "$(echo "$mv / $mc" | bc -l)"
 done
