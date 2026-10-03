@@ -319,6 +319,7 @@ pub const PRINT_RANGE_ENDS: &str = "C359";
 pub const INSPECT_SIGNED_ZONED: &str = "C330";
 pub const RELATIVE_NUMBER_BELOW_ONE: &str = "C331";
 pub const DISPLAY_NUMERIC_FUNCTION: &str = "C332";
+pub const BY_VALUE_TO_REFERENCE: &str = "C333";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -2059,6 +2060,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: DISPLAY_NUMERIC_FUNCTION,
         claim: "DISPLAY of an integer or numeric intrinsic function is refused when compiled (S): such a function can be used only where an arithmetic expression can be specified (Language Reference SC27-8713-03, p. 499; Programming Guide SC27-8714-03, p. 56), and DISPLAY's operands are identifiers and literals (p. 333). The manuals give neither the message number nor its text: the message is ironwork's, and the severity is the one C190 gives INSPECT of such a function. MIN, MAX and CONTENT-OF, whose type follows their arguments, are not refused. Nor is a user-defined function: the Language Reference lets a numeric one be used wherever an arithmetic expression can be (p. 77) without saying only there, and DISPLAY shows its value as its RETURNING item",
         basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: BY_VALUE_TO_REFERENCE,
+        claim: "A COBOL program CALLed with an argument BY VALUE whose formal parameter is received BY REFERENCE: the Language Reference requires BY VALUE for both the argument and the parameter (SC27-8713-03, p. 322) and does not say what happens when they differ. On z/OS the parameter list then holds the value where the called program reads an address, and the result turns on what that value addresses. ironwork binds the parameter to storage of its own holding the value, as it does for a parameter received BY VALUE, and the called program runs",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

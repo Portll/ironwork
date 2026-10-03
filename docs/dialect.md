@@ -228,7 +228,6 @@ Each changes results under `ibm`. Those fixed since are in 5.7.
 
 | Difference | ironwork | IBM, and cobc | Seen in |
 |---|---|---|---|
-| A BY VALUE argument to a BY REFERENCE parameter | the callee gets a copy and runs | the value is in the parameter list, so the callee reads it as an address; cobc faults | test programs |
 | DISPLAY of a national item to SYSOUT | converted from UTF-16 | written as its UTF-16 bytes; only UPON CONSOLE converts (Programming Guide, Displaying values) | corpus |
 | `PIC 99 VALUE "7"` | accepted, 7 stored | refused by IBM; cobc warns and stores 70 | corpus |
 | An unknown environment-name in DISPLAY UPON (SYSERR, or any word) | accepted, written to standard output | refused by IBM; cobc writes SYSERR to standard error | corpus |
@@ -243,6 +242,7 @@ Each changes results under `ibm`. Those fixed since are in 5.7.
 | C99, control passing the end of a paragraph armed to return to a PERFORM that repeats, left by GO TO | refused at run time, abend IRONWORK | returns, and the PERFORM goes on with its iterations | ironwork has no model of that return in either executor |
 | C112, an argument outside a function's domain | abend IRONWORK | EC-ARGUMENT-FUNCTION set and never raised, the result 0; FACTORIAL exact past 28 | Language Environment's math services signal a condition there, so zero would hide what z/OS does |
 | C181, a contained program CALLed from outside its container | found in ironwork's flat library, and the run ends when it uses a GLOBAL name | the CALL finds no program, as IBM's scope rules say | IBM documents the scope; a scope check belongs under both dialects |
+| C333, a BY VALUE argument to a parameter received BY REFERENCE | the parameter gets storage of its own holding the value, and the called program runs | the value is read as an address, and the program faults | the Language Reference requires BY VALUE on both sides (p. 322) and gives no result; what the value addresses has no counterpart in ironwork's storage |
 | No assumption: DISPLAY of LENGTH OF | its value's 9 digits | a fixed size's LENGTH OF folded to a literal (`4`), a variable one `+0000000004` | unrecorded; it needs an assumption first |
 | No assumption: the rest of an XML GENERATE receiver | kept as it was | filled with spaces (libcob/mlio.c) | unrecorded; C119 does not say it |
 

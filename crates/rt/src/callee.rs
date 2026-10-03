@@ -27,7 +27,8 @@ pub trait Arguments<'w, P: Copy, O>: Values<P, O> + UnitHost<'w> {
 }
 
 /// Each argument's address in run-unit memory, in order: a data item BY REFERENCE its own, any other
-/// argument a temporary's holding its bytes, OMITTED none.
+/// argument a temporary's holding its bytes, OMITTED none. A BY VALUE argument's temporary is bound
+/// to the parameter whether it is received BY VALUE or BY REFERENCE (assumption C333).
 pub fn addresses<'w, P: Copy, O>(x: &mut impl Arguments<'w, P, O>, args: &[CallArg<P, O>], pos: Pos) -> R<Vec<Option<usize>>> {
     let mut addresses = Vec::with_capacity(args.len());
     addresses_into(x, args, pos, &mut addresses)?;

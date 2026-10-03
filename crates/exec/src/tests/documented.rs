@@ -151,3 +151,18 @@ fn display_refuses_a_numeric_function_and_shows_the_item_compute_gives_it_to() {
     );
     assert_eq!(on_both(&source), "-0030 A\n");
 }
+
+/// Language Reference SC27-8713-03, p. 322: BY VALUE is specified for both the argument and the
+/// parameter, and the manual gives no result when the parameter is received BY REFERENCE. The
+/// parameter gets storage of its own holding the value (assumption C333).
+#[test]
+fn a_by_value_argument_to_a_by_reference_parameter_gives_it_a_copy() {
+    let source = two_programs(
+        "       01  N PIC S9(9) BINARY VALUE 42.\n",
+        &[line("CALL 'SUB' USING BY VALUE N"), line("DISPLAY N"), line("GOBACK.")].concat(),
+        "SUB",
+        "       LINKAGE SECTION.\n       01  L PIC S9(9) BINARY.\n",
+        &["       PROCEDURE DIVISION USING L.\n", &line("DISPLAY L"), &line("ADD 1 TO L"), &line("GOBACK.")].concat(),
+    );
+    assert_eq!(on_both(&source), "000000042\n000000042\n");
+}
