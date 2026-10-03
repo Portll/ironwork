@@ -298,6 +298,10 @@ pub const CICS_RANDOM_PER_RUN_UNIT: &str = "C104";
 pub const CICS_RETURN_CODE_PER_RUN_UNIT: &str = "C105";
 pub const CICS_ENTRY_POINTERS_ACROSS_RUN_UNITS: &str = "C106";
 pub const INITIALIZE_REFERENCE_MODIFIED: &str = "C300";
+pub const SORT_INVALID_DIGIT_ABENDS: &str = "C340";
+pub const SORT_IFTHEN_FIXED_LENGTH: &str = "C341";
+pub const SORT_MASK_GROUPS_OF_THREE: &str = "C342";
+pub const SORT_PATTERN_DECIMAL_POINT: &str = "C343";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1912,6 +1916,30 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: INITIALIZE_REFERENCE_MODIFIED,
         claim: "INITIALIZE of a reference-modified identifier has one receiver, the unique data item reference modification creates, which is an elementary item of category alphanumeric, national for a national item and alphabetic for an alphabetic one (Language Reference SC27-8713-03, pp. 75-76). Only its character positions change: a group is not walked for its elementary items, and a numeric DISPLAY item takes SPACE there, the implied sending item for those categories, not ZERO (pp. 351-353). The unique data item has no data description entry, so the VALUE phrase finds no VALUE clause for it (p. 352): the VALUE phrase alone leaves it unchanged, REPLACING moves to it when it names its category, and DEFAULT or no phrase gives it SPACE. The compiler's IGYPS2047-W check takes the same category",
         basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SORT_INVALID_DIGIT_ABENDS,
+        claim: "A SORT step that edits or converts a ZD or PD field holding a digit nibble above 9 ends with a data exception, S0C7. DFSORT's manual gives two outcomes for an invalid digit, 'a data exception (0C7 ABEND) or incorrect numeric output' (z/OS 3.1 DFSORT Application Programming Guide, OUTFIL OUTREC, p,m,f,edit, Table 7 notes), without saying which happens when; ironwork takes the abend",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SORT_IFTHEN_FIXED_LENGTH,
+        claim: "Fixed-length records an INREC, OUTREC or OUTFIL IFTHEN edit makes all take one length: IFOUTLEN when it is given, else the longest of the input record and of the record each clause's BUILD, OVERLAY or PUSH items make, the shorter records padded with blanks. DFSORT says it 'sets an appropriate LRECL ... based on the build, overlay, find/replace and group operation items specified by the IFTHEN clauses' and 'does not analyze the possible results of WHEN=(logexp) conditions' (INREC control statement, IFTHEN and IFOUTLEN), without giving the rule; this one is chosen to match it",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SORT_MASK_GROUPS_OF_THREE,
+        claim: "The edit masks M0-M5 and M10-M26 are built as 31-digit patterns whose integer digits are grouped in threes from the decimal point or the right, as Table 8 of OUTFIL OUTREC shows them and as Table 11's output lengths imply. Table 8 prints M22 as SI III III III III IIII III III III IIT,TT, with one group of four; ironwork takes that group as three, the M22 length d + 1 + d/3 holding only then",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SORT_PATTERN_DECIMAL_POINT,
+        claim: "In an EDIT or EDxy pattern, a period immediately followed by a digit position is the significant decimal point DFSORT names: digits before the first nonzero insignificant digit, significant digit or significant decimal point become blanks, and an insignificant digit after one is shown (OUTFIL OUTREC, edit patterns). The manual does not define which period is significant; so EDIT=(III.II) edits 5 as .05 and EDIT=(IIT.TT) as 0.05",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

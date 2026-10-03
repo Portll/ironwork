@@ -238,15 +238,18 @@ job flags:
              statements, IDCAMS (DELETE, REPRO, DEFINE CLUSTER and GDG, SET, IF and DO, its
              messages to SYSPRINT), or SORT/ICEMAN (SORT, MERGE and COPY with FIELDS in CH, AC, ZD,
              CLO, CSL, CST, PD, BI and FI, SUM FIELDS=NONE, RECORD, INCLUDE and OMIT, INREC and
-             OUTREC with BUILD, FIELDS or OVERLAY, OUTFIL with FNAMES, FILES, INCLUDE, OMIT, SAVE
-             and the same reformatting; a text data set's lines collate as EBCDIC). A COBOL
+             OUTREC with BUILD, FIELDS or OVERLAY, numeric editing by M0-M26, EDIT and EDxy and
+             conversion by TO=, IFTHEN with WHEN=INIT, GROUP, conditions and NONE, OUTFIL with
+             FNAMES, FILES, INCLUDE, OMIT, SAVE and the same reformatting, and SYMNAMES with its
+             table to SYMNOUT; a text data set's lines collate as EBCDIC). A COBOL
              program's first USING item gets the step's PARM as Language Environment passes it,
              a halfword length and the arguments before the last slash. DISP creates, keeps and
              deletes data sets as each step ends, and COND and IF/THEN/ELSE choose the steps. A
              step's DISPLAY output and its SYSOUT DDs go to standard output, a line per step to
              standard error. What the job uses that ironwork does not run (other IDCAMS commands,
-             PARM to a utility, DFSORT's IFTHEN and field conversions, and IBM's other programs)
-             is refused before any step runs. JOBLIB and STEPLIB are not allocated; a DD that
+             PARM to a utility, DFSORT's FINDREP, PARSE, arithmetic, dates and SEQNUM, and IBM's
+             other programs) is refused before any step runs. JOBLIB and STEPLIB are not
+             allocated; a DD that
              names no data set but asks for one (UNIT=, SPACE=) gets a temporary one; data with no
              DD before it is SYSIN. DISP=MOD writes after what a data set or generation holds, and
              creates it, as NEW would, where it is not there. A generation data group's base is the file
@@ -380,6 +383,7 @@ mod compile;
 mod coverage;
 mod ddl;
 mod dfsort;
+mod dfsort_number;
 mod dump;
 mod evidence;
 mod exit;

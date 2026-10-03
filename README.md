@@ -137,7 +137,12 @@ SORT, MERGE and COPY with FIELDS in DFSORT's CH, AC, ZD, CLO, CSL, CST, PD, BI a
 SUM FIELDS=NONE, over `rt::sort`; INCLUDE and OMIT, comparing CH, BI, FI, ZD and PD fields with
 each other or with C'...', X'...' and decimal constants, joined by AND and OR; INREC and OUTREC
 with BUILD, FIELDS or OVERLAY of columns, fields, blanks, binary zeros and C'...' and X'...'
-strings; and OUTFIL groups with FNAMES or FILES, INCLUDE, OMIT or SAVE, and the same reformatting.
+strings, numeric fields edited by M0 to M26, EDIT and EDxy patterns with SIGNS and LENGTH, or
+converted by TO= or a target format, and IFTHEN with WHEN=INIT, GROUP (BEGIN, KEYBEGIN, END,
+RECORDS and PUSH), conditions with HIT=NEXT, and NONE; OUTFIL groups with FNAMES or FILES,
+INCLUDE, OMIT or SAVE, and the same reformatting; and SYMNAMES, whose symbols stand for fields and
+constants in these statements and whose table goes to SYMNOUT. An invalid digit in a field a
+statement reads as a number abends the step S0C7 (assumption C340).
 A DD's RECFM and LRECL (alone or in DCB) give its records; a text data set's lines are sorted as
 EBCDIC, so CH keys collate as on z/OS. A COBOL program gets the step's PARM as Language Environment
 passes it: its first PROCEDURE DIVISION USING item addresses a halfword length and the program
@@ -172,9 +177,9 @@ levels over RC, stepname.RC, ABEND, ABENDCC=, stepname.ABEND and stepname.RUN. A
 runs only under COND=EVEN or ONLY, or in the branch of an IF that tests an abend or whether a step
 ran. A program no library holds abends S806. A step's DISPLAY output and SYSOUT DDs go to standard
 output, and a line per step to standard error: the step, the program and RC=nnnn, ABEND and its
-code, BYPASSED and why, or JCL ERROR. IBM's other programs, PARM to a utility, and DFSORT's
-IFTHEN, field conversion and editing, and the statements and parameters not named here are refused
-by name before any step runs. Exit status: the highest return code, or as the first step that
+code, BYPASSED and why, or JCL ERROR. IBM's other programs, PARM to a utility, DFSORT's FINDREP,
+PARSE, arithmetic, date formats and SEQNUM, and the statements and parameters not named here are
+refused by name before any step runs. Exit status: the highest return code, or as the first step that
 ended without one, or a JCL error, says ([Exit status](#exit-status)).
 `--expected DATASETS=DIR` runs the job on a copy of the data sets and compares what it leaves with
 production's, as [docs/evidence.md](docs/evidence.md) §4 describes.

@@ -159,11 +159,20 @@ fn refusals(job: &Job, req: &Request) -> Vec<String> {
                 out.push(at(format!("DD {} concatenates in-stream data with data sets of z/OS records", dd.name)));
             }
         }
+        let in_stream = |name: &str| match step.dds.iter().find(|d| d.name == name).map(|d| &d.parts[..]) {
+            Some([jcl::Part { source: Source::InStream(cards), .. }]) => Some(Some(cards)),
+            Some(_) => None,
+            None => Some(None),
+        };
+        // SYMNAMES from a data set is read when the step runs, so its control statements are too.
         if matches!(program, Program::Sort)
-            && let Some([jcl::Part { source: Source::InStream(cards), .. }]) = step.dds.iter().find(|d| d.name == "SYSIN").map(|d| &d.parts[..])
-            && let Err(e) = jcl::sort::parse(cards)
+            && let Some(Some(cards)) = in_stream("SYSIN")
+            && let Some(symnames) = in_stream("SYMNAMES")
         {
-            out.push(at(format!("{}: {e}", step.pgm)));
+            let checked = jcl::symnames::Symbols::read(symnames.map_or(&[][..], |c| &c[..])).and_then(|symbols| jcl::sort::parse_with(cards, &symbols).map(drop));
+            if let Err(e) = checked {
+                out.push(at(format!("{}: {e}", step.pgm)));
+            }
         }
         if matches!(program, Program::Idcams) {
             match step.dds.iter().find(|d| d.name == "SYSIN").map(|d| &d.parts[..]) {
@@ -797,17 +806,33 @@ fn write_records(dd: &Allocated, records: &[Vec<u8>], variable: bool, page: &Cod
 /// FIELDS=NONE keeping the first of records with equal keys, OUTREC, then each OUTFIL group's
 /// selection and reformatting. Text records are EBCDIC through the code page while they are
 /// sorted, so CH keys collate as on z/OS, and are padded with blanks to the longest so a key past
-/// a line's end reads blanks. Return code 0, or 16 with the reason on SYSOUT.
-fn sort_step(dds: &[Allocated]) -> i16 {
+/// a line's end reads blanks. Symbols come from SYMNAMES, and their table goes to SYMNOUT. Return
+/// code 0, or 16 with the reason on SYSOUT; a number with a digit that is not 0-9 ends the step
+/// with a data exception, as DFSORT's does.
+fn sort_step(dds: &[Allocated]) -> Result<i16, Failed> {
     let dd = |n: &str| dds.iter().find(|d| d.name == n);
     let fail = |why: String| {
         write_print(dd("SYSOUT"), &[format!("ironwork SORT: {why}")]);
         16
     };
-    let cards = dd("SYSIN").and_then(|d| fs::read_to_string(&d.path).ok()).map(|t| t.lines().map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
-    let control = match jcl::sort::parse(&cards) {
+    let stopped = |failure: crate::dfsort::Failure, at: &str| match failure {
+        crate::dfsort::Failure::Refused(why) => Ok(fail(format!("{at}: {why}"))),
+        crate::dfsort::Failure::DataException(why) => {
+            write_print(dd("SYSOUT"), &[format!("ironwork SORT: {at}: {why}")]);
+            Err(Failed::abend(AbendCode::Check(zarch::check::ProgramCheck::Data), format!("{at}: {why}")))
+        }
+    };
+    let lines = |name: &str| dd(name).and_then(|d| fs::read_to_string(&d.path).ok()).map(|t| t.lines().map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
+    let symbols = match jcl::symnames::Symbols::read(&lines("SYMNAMES")) {
+        Ok(s) => s,
+        Err(e) => return Ok(fail(e)),
+    };
+    if !symbols.is_empty() {
+        write_print(dd("SYMNOUT"), &symbols.table());
+    }
+    let control = match jcl::sort::parse_with(&lines("SYSIN"), &symbols) {
         Ok(c) => c,
-        Err(e) => return fail(e),
+        Err(e) => return Ok(fail(e)),
     };
     let page = numeric::options::Options::default().code_page();
     let inputs: Vec<&Allocated> = match control.kind {
@@ -815,7 +840,7 @@ fn sort_step(dds: &[Allocated]) -> i16 {
         _ => dd("SORTIN").into_iter().collect(),
     };
     if inputs.is_empty() {
-        return fail(format!("no {} DD", if control.kind == jcl::sort::Kind::Merge { "SORTIN01" } else { "SORTIN" }));
+        return Ok(fail(format!("no {} DD", if control.kind == jcl::sort::Kind::Merge { "SORTIN01" } else { "SORTIN" })));
     }
     let groups: Vec<jcl::sort::Outfil> = if control.outfil.is_empty() {
         vec![jcl::sort::Outfil { names: vec!["SORTOUT".into()], selection: None, save: false, edit: None }]
@@ -828,7 +853,7 @@ fn sort_step(dds: &[Allocated]) -> i16 {
         for name in &group.names {
             match dd(name) {
                 Some(d) => these.push(d),
-                None => return fail(format!("no {name} DD")),
+                None => return Ok(fail(format!("no {name} DD"))),
             }
         }
         targets.push(these);
@@ -861,12 +886,12 @@ fn sort_step(dds: &[Allocated]) -> i16 {
     for input in &inputs {
         let shape = match layout(input, control.record) {
             Ok(l) => l,
-            Err(e) => return fail(e),
+            Err(e) => return Ok(fail(e)),
         };
         variable |= matches!(shape, Layout::Variable);
         let mut these = match read_records(input, &shape, page) {
             Ok(r) => r,
-            Err(e) => return fail(e),
+            Err(e) => return Ok(fail(e)),
         };
         if matches!(shape, Layout::Lines) {
             let width = these.iter().map(Vec::len).max().unwrap_or(0).max(input.lrecl.unwrap_or(0));
@@ -880,22 +905,22 @@ fn sort_step(dds: &[Allocated]) -> i16 {
                 match crate::dfsort::keeps(selection, &r, page) {
                     Ok(true) => kept.push(r),
                     Ok(false) => {}
-                    Err(e) => return fail(format!("{} in DD {}: {e}", if selection.include { "INCLUDE" } else { "OMIT" }, input.name)),
+                    Err(e) => return Ok(fail(format!("{} in DD {}: {e}", if selection.include { "INCLUDE" } else { "OMIT" }, input.name))),
                 }
             }
             these = kept;
         }
         if let Some(edit) = &control.inrec {
-            match these.iter().map(|r| crate::dfsort::reformat(edit, r, matches!(shape, Layout::Variable), page)).collect() {
+            match reformatted(edit, &these, matches!(shape, Layout::Variable), page) {
                 Ok(r) => these = r,
-                Err(e) => return fail(format!("INREC in DD {}: {e}", input.name)),
+                Err(f) => return stopped(f, &format!("INREC in DD {}", input.name)),
             }
         }
         if control.kind == jcl::sort::Kind::Merge {
             match keys.out_of_order(&these) {
-                Ok(Some(i)) => return fail(format!("record {} of DD {} is out of order for the MERGE", i + 1, input.name)),
+                Ok(Some(i)) => return Ok(fail(format!("record {} of DD {} is out of order for the MERGE", i + 1, input.name))),
                 Ok(None) => {}
-                Err(e) => return fail(format!("DD {}: {e}", input.name)),
+                Err(e) => return Ok(fail(format!("DD {}: {e}", input.name))),
             }
         }
         records.extend(these);
@@ -905,7 +930,7 @@ fn sort_step(dds: &[Allocated]) -> i16 {
     } else {
         match keys.sort(records) {
             Ok(r) => r,
-            Err(e) => return fail(e.to_string()),
+            Err(e) => return Ok(fail(e.to_string())),
         }
     };
     if control.drop_duplicates && !control.fields.is_empty() {
@@ -919,9 +944,9 @@ fn sort_step(dds: &[Allocated]) -> i16 {
         sorted = kept;
     }
     if let Some(edit) = &control.outrec {
-        match sorted.iter().map(|r| crate::dfsort::reformat(edit, r, variable, page)).collect() {
+        match reformatted(edit, &sorted, variable, page) {
             Ok(r) => sorted = r,
-            Err(e) => return fail(format!("OUTREC: {e}")),
+            Err(f) => return stopped(f, "OUTREC"),
         }
     }
     let mut outputs: Vec<Vec<Vec<u8>>> = vec![Vec::new(); groups.len()];
@@ -941,7 +966,7 @@ fn sort_step(dds: &[Allocated]) -> i16 {
                     outputs[k].push(record.clone());
                 }
                 Ok(false) => {}
-                Err(e) => return fail(format!("OUTFIL {}: {e}", group.names.join(","))),
+                Err(e) => return Ok(fail(format!("OUTFIL {}: {e}", group.names.join(",")))),
             }
         }
         if !taken {
@@ -953,21 +978,27 @@ fn sort_step(dds: &[Allocated]) -> i16 {
     let mut written = Vec::new();
     for ((group, records), dds) in groups.iter().zip(outputs).zip(&targets) {
         let records = match &group.edit {
-            Some(edit) => match records.iter().map(|r| crate::dfsort::reformat(edit, r, variable, page)).collect::<Result<Vec<_>, _>>() {
+            Some(edit) => match reformatted(edit, &records, variable, page) {
                 Ok(r) => r,
-                Err(e) => return fail(format!("OUTFIL {}: {e}", group.names.join(","))),
+                Err(f) => return stopped(f, &format!("OUTFIL {}", group.names.join(","))),
             },
             None => records,
         };
         for out in dds {
             if let Err(e) = write_records(out, &records, variable, page) {
-                return fail(e);
+                return Ok(fail(e));
             }
             written.push(format!("ironwork SORT: {} records written to {}", records.len(), out.name));
         }
     }
     write_print(dd("SYSOUT"), &written);
-    0
+    Ok(0)
+}
+
+/// Each record through one edit, in order, so WHEN=GROUP carries from record to record.
+fn reformatted(edit: &jcl::sort::Edit, records: &[Vec<u8>], variable: bool, page: &CodePage) -> Result<Vec<Vec<u8>>, crate::dfsort::Failure> {
+    let mut reformatter = crate::dfsort::Reformatter::new(edit, variable, page);
+    records.iter().map(|r| reformatter.apply(r)).collect()
 }
 
 struct Frame {
@@ -1168,7 +1199,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                     Program::Iefbr14 => Ok(0),
                     Program::Iebgener => iebgener(&dds),
                     Program::Idcams => Ok(idcams(runner, &dds)),
-                    Program::Sort => Ok(sort_step(&dds)),
+                    Program::Sort => sort_step(&dds),
                     Program::Cobol(path) => {
                         programs.insert(path.clone());
                         let covered = runner.coverage.as_ref().map(|_| RefCell::new(Default::default()));

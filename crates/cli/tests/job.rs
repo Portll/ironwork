@@ -612,9 +612,44 @@ fn sort_reads_fixed_records_by_their_length_and_refuses_what_it_does_not_model()
     let o = Command::new(env!("CARGO_BIN_EXE_ironwork")).args(["job", path.to_str().unwrap(), "--datasets", dir.join("data").to_str().unwrap()]).output().unwrap();
     assert_eq!(o.status.code(), Some(0), "{}", log(&o));
     assert_eq!(fs::read(dir.join("data/BIN.OUT")).unwrap(), [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 1, 0, 0, 0, 2], "FI is signed: -1 sorts first");
-    let o = job(&dir, "//S1 EXEC PGM=SORT\n//SYSIN DD *\n  SORT FIELDS=(1,1,CH,A)\n  OUTREC IFTHEN=(WHEN=(1,1,CH,EQ,C'A'),OVERLAY=(2:C'B'))\n/*\n");
+    let o = job(&dir, "//S1 EXEC PGM=SORT\n//SYSIN DD *\n  SORT FIELDS=(1,1,CH,A)\n  OUTREC FINDREP=(IN=C'A',OUT=C'B')\n/*\n");
     assert_eq!(o.status.code(), Some(244));
-    assert!(log(&o).contains("SORT: the OUTREC parameter IFTHEN is not supported yet"), "{}", log(&o));
+    assert!(log(&o).contains("SORT: the OUTREC parameter FINDREP is not supported yet"), "{}", log(&o));
+}
+
+#[test]
+fn sort_groups_edits_and_converts_with_symbols_from_symnames() {
+    let dir = temp("sortsym");
+    fs::write(dir.join("data/IN.SALES"), "NW 01250 AA\nNW 00090 AA\nSE 12000 BB\nXX 99999 CC\n").unwrap();
+    let o = job(
+        &dir,
+        concat!(
+            "//S1 EXEC PGM=SORT\n//SYSOUT DD SYSOUT=*\n//SYMNOUT DD SYSOUT=*\n",
+            "//SORTIN DD DSN=IN.SALES,DISP=SHR\n//SORTOUT DD DSN=OUT.SALES,DISP=(NEW,CATLG)\n",
+            "//SYMNAMES DD *\n",
+            "* the sales record\n",
+            "Code,1,2,CH\n",
+            "Amount,4,5,ZD\n",
+            "Region,10,2,CH\n",
+            "High,+10000\n",
+            "/*\n",
+            "//SYSIN DD *\n",
+            "  OPTION COPY\n",
+            "  INCLUDE COND=(Code,NE,C'XX')\n",
+            "  INREC IFTHEN=(WHEN=GROUP,KEYBEGIN=(Region),PUSH=(20:ID=2)),\n",
+            "   IFTHEN=(WHEN=(Amount,GT,High),OVERLAY=(15:C'BIG')),\n",
+            "   IFTHEN=(WHEN=NONE,OVERLAY=(15:C'---'))\n",
+            "  OUTREC BUILD=(Code,X,Amount,M12,X,15,3,X,20,2,X,\n",
+            "   Amount,TO=FS,LENGTH=6)\n",
+            "/*\n",
+        ),
+    );
+    assert_eq!(o.status.code(), Some(0), "{}{}", log(&o), String::from_utf8_lossy(&o.stdout));
+    assert_eq!(fs::read_to_string(dir.join("data/OUT.SALES")).unwrap(), "NW   1,250 --- 01   1250\nNW      90 --- 01     90\nSE  12,000 BIG 02  12000\n");
+    assert!(String::from_utf8_lossy(&o.stdout).contains("Amount,4,5,ZD"), "SYMNOUT shows the symbol table");
+    fs::write(dir.join("data/IN.BAD"), "12*45\n").unwrap();
+    let o = job(&dir, "//S1 EXEC PGM=SORT\n//SYSOUT DD SYSOUT=*\n//SORTIN DD DSN=IN.BAD,DISP=SHR\n//SORTOUT DD DUMMY\n//SYSIN DD *\n  OPTION COPY\n  OUTREC BUILD=(1,5,ZD,M0)\n/*\n");
+    assert!(log(&o).contains("S1 PGM=SORT ABEND S0C7"), "{}", log(&o));
 }
 
 #[test]

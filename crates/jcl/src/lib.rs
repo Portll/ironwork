@@ -7,6 +7,7 @@
 pub mod cond;
 pub mod idcams;
 pub mod sort;
+pub mod symnames;
 
 use cond::Cond;
 use std::collections::HashMap;
