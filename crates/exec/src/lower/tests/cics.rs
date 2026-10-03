@@ -86,6 +86,30 @@ fn a_block_the_walker_refuses_as_it_binds_it_keeps_the_walker_s_message() {
 }
 
 #[test]
+fn a_literal_map_s_symbolic_map_is_written_as_send_map_s_from_and_receive_map_s_into() {
+    let data = format!("{DATA}       01  MAP1O PIC X(10).\n       01  MAP1I PIC X(10).\n");
+    let body = [
+        line("EXEC CICS SEND MAP('map1') END-EXEC"),
+        line("EXEC CICS RECEIVE MAP('MAP1') MAPSET('SET1') END-EXEC"),
+        line("EXEC CICS SEND MAP('MAP1') MAPONLY END-EXEC"),
+        line("EXEC CICS SEND MAP(WS-DATA) END-EXEC"),
+        line("EXEC CICS RECEIVE MAP('NOMAP') END-EXEC"),
+        line("GOBACK."),
+    ]
+    .concat();
+    let p = lowered(&program("", &data, &body));
+    let areas: Vec<String> = commands(&p)
+        .iter()
+        .map(|(_, c)| match &c.command {
+            Cics::SendMap { from, .. } => names(&p, from),
+            Cics::ReceiveMap { into, set: None, .. } => names(&p, into),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(areas, ["MAP1O", "MAP1I", "None", "None", "None"]);
+}
+
+#[test]
 fn a_command_keeps_every_option_an_observer_is_told_in_the_walker_s_order() {
     let data = format!("{DATA}       01  WS-SYS PIC X(4).\n       01  WS-Q PIC X(8).\n");
     let body = [

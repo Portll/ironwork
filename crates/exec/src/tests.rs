@@ -2800,8 +2800,7 @@ fn bms_maps_send_and_receive_through_a_scripted_terminal() {
     assert_eq!(rows[0], " ORDER ENTRY");
     assert_eq!(rows[2], " CUSTOMER:");
     assert_eq!(rows[5], " ENTER AN ORDER");
-    let on_vm = on_terminal(&source, &dir, script, true).2;
-    assert_eq!(on_vm, Err("not run yet: SEND MAP with no FROM, whose symbolic map the LIR has no place for".into()));
+    assert_eq!(on_terminal(&source, &dir, script, true), (out, screens, ending));
 }
 
 #[test]

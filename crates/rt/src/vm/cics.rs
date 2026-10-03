@@ -158,12 +158,12 @@ impl<'w, L: Loader<Rc<Code>>> CicsHost<'w, PlaceId, Operand, SymId> for Vm<'_, '
     }
 
     fn item_named(&mut self, _name: &str, pos: Pos) -> Result<Option<Loc>, Abend> {
-        let found = Err(not_yet("SEND MAP with no FROM, whose symbolic map the LIR has no place for"));
+        let found = Err(not_yet("SEND MAP with no FROM, whose MAP is no literal that names the symbolic map of a data item"));
         self.lift(found, pos)
     }
 
     fn locate_named(&mut self, _name: &str, pos: Pos) -> Result<Loc, Abend> {
-        let found = Err(not_yet("RECEIVE MAP with no INTO or SET, whose symbolic map the LIR has no place for"));
+        let found = Err(not_yet("RECEIVE MAP with no INTO or SET, whose MAP is no literal that names the symbolic map of a data item"));
         self.lift(found, pos)
     }
 

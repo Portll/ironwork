@@ -1386,8 +1386,13 @@ HANDLE labels there. SYNCPOINT is a service (cics/services.rs) that settles the 
   the command's. LINK and XCTL run the program as a new activation through `CicsHost::run_program`;
   the task's first program, which the run unit holds no handle for, comes from the reference each
   activation carries from it (`first`, the walker's too; C148), as it does for a CALL of it (C127).
-  The mapset comes from `Loader::mapset`; the LIR has no place for the symbolic map SEND MAP without
-  FROM and RECEIVE MAP without INTO or SET find by name, so those stop the VM as
+  The mapset comes from `Loader::mapset`.
+- **The symbolic map.** SEND MAP without FROM reads mapO, and RECEIVE MAP without INTO or SET
+  stores mapI, each found by name when the command runs (`CicsHost::item_named`, `locate_named`).
+  When MAP is a literal and the name is a data item's, lowering writes that item as FROM or INTO,
+  which `rt::cics::maps` locates and reads, or stores through the write funnel once the terminal's
+  input is taken (`take_input`), as it does the item the name finds. A MAP held in a data item, or
+  a name that is no data item's, leaves the name to run time, which stops the VM as
   `Halt::Unimplemented`.
 
 ### 9.6 SORT, MERGE and Report Writer
