@@ -287,7 +287,7 @@ impl<'p, L: Loader<Rc<Code>>> Io<'_, 'p, '_, '_, L> {
         if self.vm.global_procedure(k, mode, pos)? {
             return Ok(());
         }
-        if file.status.is_none() {
+        if file.status.is_none() && status.ends_the_run() {
             return Err(Abend { code: AbendCode::Io(status), message, pos, file: None });
         }
         Ok(())

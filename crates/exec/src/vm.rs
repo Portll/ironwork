@@ -167,11 +167,13 @@ fn run_unit<'w>(
 }
 
 /// Runs the first program of `run_unit`, `me`, as `code`, with a job step's `parm`, then settles
-/// the database and closes every file.
-fn run_main(code: &Code, id: &str, me: usize, run_unit: &mut RunUnit<'_, Rc<Code>, VmLibrary>, parm: Option<usize>) -> Result<(Ending, i16), Halt> {
+/// the database and closes every file, unless an abend the PARM's TRAP(OFF) keeps from Language
+/// Environment ended it.
+fn run_main(code: &Code, id: &str, me: usize, run_unit: &mut RunUnit<'_, Rc<Code>, VmLibrary>, parm: Option<(usize, bool)>) -> Result<(Ending, i16), Halt> {
+    let (parm, trap_off) = parm.unzip();
     let ending = rt::vm::run(code, me, run_unit, &parm.map_or_else(Vec::new, |p| vec![Some(p)]));
     let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(id, ending.is_ok()).map(drop));
-    let closed = run_unit.close_all();
+    let closed = run_unit.close_all(trap_off == Some(true) && matches!(&ending, Err(Halt::Abend(a)) if a.code.bypasses_trap_off()));
     let ending = ending?;
     settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default(), file: None })?;
     closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default(), file: None })?;
@@ -199,7 +201,7 @@ pub fn execute<'w>(
     oo::refuse_to_run(&compiled.program)?;
     let mut run_unit = run_unit(VmLibrary::new(library), dds, sysin, clock, database, out, err, observer);
     let me = run_unit.add_named(None, compiled.program.id.to_ascii_uppercase(), compiled.program.files.len(), compiled.layout.size as usize);
-    let parm = parm.map(|p| crate::push_parm(&mut run_unit, compiled.options.code_page(), p));
+    let parm = parm.map(|p| (crate::push_parm(&mut run_unit, compiled.options.code_page(), p), rt::le::parm::trap_off(p)));
     let ran = run_main(code, &compiled.program.id, me, &mut run_unit, parm);
     *kept = Some(Remains::of(&run_unit));
     ran
@@ -238,7 +240,7 @@ pub fn execute_module<'w>(
     let page = program.options.options.code_page();
     let mut run_unit = run_unit(library, dds, sysin, clock, database, out, err, None);
     let me = run_unit.add_named(None, main.name, main.files, main.size);
-    let parm = parm.map(|p| crate::push_parm(&mut run_unit, page, p));
+    let parm = parm.map(|p| (crate::push_parm(&mut run_unit, page, p), rt::le::parm::trap_off(p)));
     run_main(&code, &id, me, &mut run_unit, parm)
 }
 

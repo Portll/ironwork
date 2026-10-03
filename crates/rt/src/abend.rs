@@ -141,6 +141,12 @@ impl AbendCode {
         }
     }
 
+    /// A program check or a system abend, which Language Environment is not told of under TRAP(OFF);
+    /// a condition it signals, as for a failing I/O status or a U code, it handles either way.
+    pub fn bypasses_trap_off(&self) -> bool {
+        matches!(self, Self::Check(_) | Self::Protection | Self::TimeLimit)
+    }
+
     /// The program check a zero divisor raises: decimal, fixed-point or HFP divide. An arithmetic
     /// statement with ON SIZE ERROR takes it as a size error instead.
     pub fn zero_divisor(&self) -> bool {
@@ -202,10 +208,12 @@ pub enum FileStatus {
     /// Successful, for a phrase that applies only to a reel or unit medium.
     SuccessNonReel,
     ClosedWithLock,
+    /// A successful VSAM OPEN once the data set's integrity is verified, under VSAMOPENFS(COMPAT).
+    SuccessVerified,
 }
 
 impl FileStatus {
-    pub(crate) const ALL: [Self; 23] = [
+    pub(crate) const ALL: [Self; 24] = [
         Self::Success,
         Self::SuccessDuplicate,
         Self::SuccessWrongLength,
@@ -229,6 +237,7 @@ impl FileStatus {
         Self::NotOpenInputOutput,
         Self::SuccessNonReel,
         Self::ClosedWithLock,
+        Self::SuccessVerified,
     ];
 
     /// The code a run ends with when this status fails a statement and no FILE STATUS holds it.
@@ -257,6 +266,7 @@ impl FileStatus {
             Self::NotOpenInput => "IO-47",
             Self::NotOpenOutput => "IO-48",
             Self::NotOpenInputOutput => "IO-49",
+            Self::SuccessVerified => "IO-97",
         }
     }
 
@@ -267,6 +277,12 @@ impl FileStatus {
     /// Whether the status is of class `class`, its first digit: 0 success, 1 AT END, 2 INVALID KEY.
     pub fn covers(self, class: char) -> bool {
         self.as_str().starts_with(class)
+    }
+
+    /// Whether a failing status that nothing takes ends the run: all but 97, which reports an OPEN
+    /// that succeeded (Language Reference SC27-8713-03, p. 303).
+    pub fn ends_the_run(self) -> bool {
+        self != Self::SuccessVerified
     }
 
     /// What a failing status means, for the message when no FILE STATUS or phrase takes it.

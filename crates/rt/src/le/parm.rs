@@ -23,9 +23,29 @@ pub fn program_arguments(parm: &str) -> &str {
     }
 }
 
+/// Whether the runtime options in `parm` turn TRAP off, the last TRAP among them deciding
+/// ([`numeric::assumptions::TRAP_OFF_LEAVES_FILES_OPEN`]).
+pub fn trap_off(parm: &str) -> bool {
+    let options = match parm.rfind('/') {
+        Some(at) if names_runtime_options(&parm[at + 1..]) => &parm[at + 1..],
+        _ => "",
+    };
+    let trap = words(options).into_iter().rev().find_map(|w| {
+        let (name, value) = w.split_once('(')?;
+        name.eq_ignore_ascii_case("TRAP").then(|| value.trim_end_matches(')').split(',').next().unwrap_or("").trim().to_ascii_uppercase())
+    });
+    trap.as_deref() == Some("OFF")
+}
+
 /// Nothing at all, or at least one runtime option among the words, each NAME or NAME(...),
 /// separated by commas or blanks.
 fn names_runtime_options(text: &str) -> bool {
+    let words = words(text);
+    words.is_empty() || words.iter().any(|w| RUNTIME_OPTIONS.iter().any(|o| o.eq_ignore_ascii_case(w.split('(').next().unwrap_or(w))))
+}
+
+/// The words of runtime options, each NAME or NAME(...), separated by commas or blanks.
+fn words(text: &str) -> Vec<String> {
     let (mut words, mut word, mut depth) = (Vec::new(), String::new(), 0i32);
     for c in text.chars() {
         match c {
@@ -40,8 +60,8 @@ fn names_runtime_options(text: &str) -> bool {
         word.push(c);
     }
     words.push(word);
-    let words: Vec<&String> = words.iter().filter(|w| !w.is_empty()).collect();
-    words.is_empty() || words.iter().any(|w| RUNTIME_OPTIONS.iter().any(|o| o.eq_ignore_ascii_case(w.split('(').next().unwrap_or(w))))
+    words.retain(|w| !w.is_empty());
+    words
 }
 
 /// The storage the main program's first USING item addresses: a halfword length and the
@@ -67,6 +87,16 @@ mod tests {
         assert_eq!(program_arguments("ABC/"), "ABC");
         assert_eq!(program_arguments("/TRAP(OFF)"), "");
         assert_eq!(program_arguments("11/16/1967"), "11/16/1967", "the manual's example: 1967 is no runtime option");
+    }
+
+    #[test]
+    fn trap_is_off_when_the_last_trap_among_the_runtime_options_says_so() {
+        assert!(trap_off("/TRAP(OFF)"));
+        assert!(trap_off("ARGS/RPTOPTS(ON) trap(off,nospie)"));
+        assert!(!trap_off("/TRAP(OFF),TRAP(ON)"));
+        assert!(!trap_off("/TRAP(,NOSPIE)"));
+        assert!(!trap_off("TRAP(OFF)"), "with no slash the PARM is all program arguments");
+        assert!(!trap_off(""));
     }
 
     #[test]

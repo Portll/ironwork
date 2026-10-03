@@ -232,7 +232,7 @@ pub const NSYMBOL_DBCS: &str = "C212";
 pub const INITIAL_UNDER_THREAD: &str = "C217";
 pub const VLR_WITHOUT_VARYING: &str = "C218";
 pub const VLR_RECORDS_CHECKED: &str = "C219";
-pub const VSAM_OPEN_NEVER_VERIFIED: &str = "C220";
+pub const VSAM_DATA_SET_LEFT_OPEN: &str = "C220";
 pub const DISPSIGN_SEPARATE: &str = "C213";
 pub const LILIAN_INTEGER_DATES: &str = "C214";
 pub const CEECBLDY_UNDER_LILIAN: &str = "C215";
@@ -292,6 +292,7 @@ pub const CICS_ENCLAVE_EXTERNALS_AND_HEAP: &str = "C126";
 pub const RECURSIVE_CALL_OF_AN_ACTIVE_PROGRAM: &str = "C127";
 pub const CICS_RETURN_COMMAREA_LENGTH: &str = "C128";
 pub const CICS_RUN_UNIT_STORAGE_RELEASED: &str = "C129";
+pub const TRAP_OFF_LEAVES_FILES_OPEN: &str = "C152";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -542,7 +543,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: LE_CEE3ABD,
-        claim: "CEE3ABD ends the run with user abend abcode modulo 4096, the ABEND macro's user completion code, to which SA38-0683-60 says abcode passes unchecked; every clean-up value ends it alike: open files are closed as at any ironwork abend, and neither a CEEDUMP nor a system dump is written",
+        claim: "CEE3ABD ends the run with user abend abcode modulo 4096, the ABEND macro's user completion code, to which SA38-0683-60 says abcode passes unchecked; every clean-up value ends it alike: open files are closed, as at any U code (C152), and neither a CEEDUMP nor a system dump is written",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -1513,8 +1514,8 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
-        id: VSAM_OPEN_NEVER_VERIFIED,
-        claim: "VSAMOPENFS is read from a card and kept in the load module's options, but no ironwork OPEN reaches the condition it changes: a VSAM OPEN that succeeds once the file's integrity is verified, status 97 under COMPAT and 00 under SUCC (Programming Guide SC27-8714-03, pp. 199, 424; Language Reference SC27-8713-03, p. 303). Neither manual says when the check is made; from memory, z/OS makes it when a data set was left open for output, typically by a run that abended, and OPEN's implicit VERIFY succeeds. ironwork closes every file a run unit leaves open when it ends, abend or not, and holds an indexed or relative file in memory from OPEN to CLOSE, writing it whole at CLOSE, so a data set is always as a CLOSE left it and nothing marks it as not closed. Modelling it needs a mark kept with the data set, set by OPEN OUTPUT, I-O or EXTEND and left by an abend, which rt::files's rule that a program reaches only the files the operator maps does not provide for, and a choice of whether status 97 takes the file's error path. Until then a successful VSAM OPEN is 00, or 05 for an optional file, under either setting",
+        id: VSAM_DATA_SET_LEFT_OPEN,
+        claim: "A VSAM data set, which an indexed or relative file's DD names, keeps the open-for-output indicator of its catalog entry as a file beside it, its path with .open-for-output added: OPEN OUTPUT, I-O or EXTEND sets it, and only the successful CLOSE after an OPEN for output takes it away, so an OPEN INPUT leaves it as it was (z/OS 3.1 DFSMS Using Data Sets, idad400/d4011). At OPEN, VSAM implicitly issues a VERIFY when it finds the indicator on, and the OPEN goes on (d4011, idad400/verif; DFSMS Macro Instructions for Data Sets, idad500/x1cb, reason code 118, X'76', the high-used RBA verified). ironwork's verify always succeeds, and the OPEN's status is 97 under VSAMOPENFS(COMPAT), the default, or 00 under VSAMOPENFS(SUCC) (Programming Guide SC27-8714-03, pp. 199, 424; Language Reference SC27-8713-03, p. 303, Table 34), for an OPTIONAL file too. Status 97 sets file status key 1 to 9, so it runs the file's EXCEPTION/ERROR procedure (LR p. 706), and it reports an OPEN that succeeded, so with no FILE STATUS and no procedure the run goes on (LR p. 411; PG p. 204). Files a run unit leaves open are closed when it ends, and an abend leaves the indicator on only where Language Environment closes no file (C152). Sequential files, which ironwork does not hold as VSAM data sets, are never marked; nor are the files of CICS file control, which opens and closes them with each task. ironwork job deletes the mark with its data set, DEFINE CLUSTER starts a data set without one, and REPRO into a data set takes it away, as the CLOSE after REPRO's OPEN for output does",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -1870,6 +1871,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: CICS_RUN_UNIT_STORAGE_RELEASED,
         claim: "Running in CICS, a reentrant COBOL program's WORKING-STORAGE is allocated from heap storage (Programming Guide SC27-8714-03, p. 40) and persists until the end of the run unit or until the program is cancelled (p. 479); each enclave has its own heap (z/OS 3.1 Language Environment Programming Guide, 'CICS run unit', ceea200254; C126), freed when the program at the CICS link level terminates (CICS TS 6.x, 'Language Environment storage', dfhp3_langenv_storage). When the run unit a LINK, an XCTL or a HANDLE ABEND PROGRAM exit started ends (C145), ironwork therefore releases the storage of every program activated in it with the rest of the memory the run unit took. A program first loaded there stays loaded, as CICS keeps a program in main storage once loaded (XCTL, dfhp4_xctl), with no storage of its own: its next activation, in a later LINK's run unit or by a CALL at a higher level, gets new storage in its initial state. A pointer the level above kept to the released storage no longer reaches the program's, which on z/OS has been freed. The program a LINK or XCTL names is loaded before its run unit starts, in the run unit that issued the command, and keeps the storage loading gave it there",
         basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: TRAP_OFF_LEAVES_FILES_OPEN,
+        claim: "When the run unit ends normally, all open files are closed, and when it ends abnormally they are closed if TRAP(ON) is in effect (Programming Guide SC27-8714-03, p. 203), Language Environment's default (z/OS 3.1 Language Environment Programming Reference, TRAP, ceea300/cltrap). Under TRAP(OFF), Language Environment is not told of a program check or an abend and does not close the files high-level languages opened, so records might be lost (cltrap), and the VSAM CLOSE the abend invokes does not update the data set's catalog information (z/OS 3.1 DFSMS Using Data Sets, idad400/clds9), which leaves a VSAM data set opened for output marked open (C220). ironwork reads TRAP from the runtime options of a job step's PARM or run's --parm, after the last slash (C250), the last TRAP there deciding, as cltrap has the last of several STAE or SPIE decide; a CICS task takes the default. ironwork takes S0C4 to S0CF and S322 as the program checks and abends TRAP(OFF) hides; a failing I/O status or a U code ends the run through a condition Language Environment handles under either setting (CEESGL is unaffected by TRAP, cltrap), closing the files as ironwork's own stops do. A file left open is written as CLOSE writes it, every record reaching the data set, where on z/OS buffers are not flushed",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

@@ -1,7 +1,7 @@
 use crate::lower::{self, LowerError};
 use crate::unit::{Event, Remains};
 use crate::vm::{self, Code, Halt};
-use crate::{Abend, Compiled, Ending, Execute, cics, compile, compile_at, files, sql, unit};
+use crate::{Abend, Compiled, Ending, cics, compile, compile_at, files, sql, unit};
 use rt::lir::{CompileTime, Program};
 use rt::module::StringTable;
 use rt::module::codec::{Encode, Writer, decode_all};
@@ -42,6 +42,7 @@ pub struct Harness {
     commarea: Option<String>,
     when_compiled: Option<CompileTime>,
     database: Option<Databases>,
+    parm: Option<String>,
 }
 
 impl Harness {
@@ -58,6 +59,7 @@ impl Harness {
             commarea: None,
             when_compiled: None,
             database: None,
+            parm: None,
         }
     }
 
@@ -83,6 +85,12 @@ impl Harness {
 
     pub fn sysin(mut self, text: &str) -> Self {
         self.sysin = Some(text.to_owned());
+        self
+    }
+
+    /// Runs the program as a job step's main program with this PARM.
+    pub fn parm(mut self, text: &str) -> Self {
+        self.parm = Some(text.to_owned());
         self
     }
 
@@ -146,7 +154,7 @@ impl Harness {
         };
         let task = self.task.map(|task| cics::Task { commarea: self.commarea.map(|c| compiled.options.code_page().encode(&c).unwrap()), ..task });
         let paths = paths(&self.dds, task.as_ref());
-        let inputs = Inputs { compiled: &compiled, library, dds: self.dds, sysin: self.sysin, clock, database: self.database, paths };
+        let inputs = Inputs { compiled: &compiled, library, dds: self.dds, sysin: self.sysin, clock, database: self.database, paths, parm: self.parm };
         let run = match executor {
             Executor::Vm => {
                 let run = inputs.vm(&vm::code(&compiled), task);
@@ -194,6 +202,7 @@ struct Inputs<'c> {
     clock: unit::Clock,
     database: Option<Databases>,
     paths: Vec<PathBuf>,
+    parm: Option<String>,
 }
 
 /// What the differential test compares of a run.
@@ -265,7 +274,7 @@ impl Inputs<'_> {
                 let (ending, task) = crate::execute_task(self.compiled, self.library.clone(), dds, task, self.clock, db, &mut out, &mut err, Some(observer), &mut remains);
                 (ending.map_err(Halt::Abend), 0, Some(task))
             }
-            None => match self.compiled.execute_kept(self.library.clone(), dds, self.sysin(), self.clock, db, &mut out, &mut err, Some(observer), &mut remains) {
+            None => match crate::run_main(self.compiled, self.library.clone(), dds, self.sysin(), self.clock, db, &mut out, &mut err, Some(observer), self.parm.as_deref(), &mut remains) {
                 Ok((ending, code)) => (Ok(ending), code, None),
                 Err(abend) => (Err(Halt::Abend(abend)), 0, None),
             },
@@ -287,7 +296,7 @@ impl Inputs<'_> {
                 let (ending, task) = vm::execute_cics(self.compiled, code, self.library.clone(), dds, task, self.clock, db, &mut out, &mut err, Some(observer), &mut remains);
                 (ending, 0, Some(task))
             }
-            None => match vm::execute(self.compiled, code, self.library.clone(), dds, self.sysin(), self.clock, db, &mut out, &mut err, Some(observer), None, &mut remains) {
+            None => match vm::execute(self.compiled, code, self.library.clone(), dds, self.sysin(), self.clock, db, &mut out, &mut err, Some(observer), self.parm.as_deref(), &mut remains) {
                 Ok((ending, code)) => (Ok(ending), code, None),
                 Err(halt) => (Err(halt), 0, None),
             },
@@ -326,12 +335,12 @@ impl Write for Recording {
     }
 }
 
-/// The files the DDs name, then a task's data sets and the host files its transient-data queues
-/// are written to.
+/// The files the DDs name and their open marks, then a task's data sets and the host files its
+/// transient-data queues are written to.
 fn paths(specs: &[String], task: Option<&cics::Task>) -> Vec<PathBuf> {
     let dds = files::Dds::new(specs, false).unwrap();
     let names = specs.iter().filter_map(|spec| spec.split_once('=')).map(|(name, _)| name.to_ascii_uppercase());
-    let mut paths: Vec<PathBuf> = names.filter_map(|name| dds.get(&name)).map(|dd| dd.path.clone()).collect();
+    let mut paths: Vec<PathBuf> = names.filter_map(|name| dds.get(&name)).flat_map(|dd| [files::open_mark(&dd.path), dd.path]).collect();
     if let Some(t) = task {
         let mut held: Vec<PathBuf> = t.files.values().map(|f| f.dd.path.clone()).chain(t.td_files.values().cloned()).collect();
         held.sort();

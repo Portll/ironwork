@@ -279,8 +279,11 @@ fn abend_codes_round_trip_with_every_tag() {
         FileStatus::NotOpenInput,
         FileStatus::NotOpenOutput,
         FileStatus::NotOpenInputOutput,
+        FileStatus::SuccessNonReel,
+        FileStatus::ClosedWithLock,
+        FileStatus::SuccessVerified,
     ];
-    every_variant(&statuses, 21);
+    every_variant(&statuses, 24);
     round_trip(&[AbendText { code: AbendCode::Exec, message: 9, at: None }, AbendText { code: AbendCode::Ironwork, message: 2, at: Some(4) }]);
 }
 

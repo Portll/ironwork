@@ -1313,7 +1313,9 @@ pub enum StartKey { Prime, Named { key: u8, span: RecordSpan }, Relative(IntExpr
   file), and lowering refuses it too, by name.
 - **Run-time state:** the open file, its mode and position, the DD and its format, the page, the
   status each call gives, which WRITE path applies, and the last file whose statement failed, which
-  SORT reads.
+  SORT reads. So is the mark beside a VSAM data set that a run left it open for output
+  (`rt::files::open_mark`), which `rt::fileio::open` reads, giving status 97 or 00 as the
+  program's VSAMOPENFS says, for the VM as for the walker.
 
 ### 9.5 EXEC CICS
 

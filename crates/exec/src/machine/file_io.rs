@@ -40,7 +40,7 @@ impl<'p> Machine<'p, '_, '_> {
         if self.global_declarative(k, mode, pos)? {
             return Ok(());
         }
-        if self.program.files[k].status.is_none() {
+        if self.program.files[k].status.is_none() && status.ends_the_run() {
             return Err(Abend { code: AbendCode::Io(status), message, pos, file: None });
         }
         Ok(())

@@ -13,6 +13,7 @@ use crate::storage::{Loc, Val};
 use crate::store::{self, ProgramFacts};
 use crate::unit::Event;
 use crate::vocab::{Closing, OpenMode, Pos};
+use numeric::VsamOpenFs;
 use numeric::precision::{Fixed, Places};
 use std::cmp::Ordering;
 use zarch::ebcdic;
@@ -257,7 +258,9 @@ fn length_conflict<P, X>(file: &File<'_, P, X>, len: usize, variable: bool, long
 }
 
 /// OPEN: a file whose data set is unavailable is status 35, or 05 when it is OPTIONAL, which
-/// OPEN EXTEND then creates (Language Reference SC27-8713-03, pp. 300-301).
+/// OPEN EXTEND then creates (Language Reference SC27-8713-03, pp. 300-301). A VSAM data set a run
+/// left open for output is verified, status 97 under VSAMOPENFS(COMPAT), which takes the error
+/// path but never ends the run, or 00 under SUCC ([`numeric::assumptions::VSAM_DATA_SET_LEFT_OPEN`]).
 pub fn open<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, mode: OpenMode, pos: Pos) -> R<Outcome> {
     let (k, name) = (file.index, file.name);
     let failure = |status, message| Ok(Outcome::Failed(Failure { status, mode: Some(mode), message }));
@@ -292,10 +295,27 @@ pub fn open<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, m
         let keying = x.keying(k, pos)?;
         let format = dd.as_ref().and_then(|d| d.format).unwrap_or(default);
         let record_len = file.area.1 + usize::from(adds_control_byte(file, format));
-        return match files::open_keyed(dd.as_ref(), mode, format, keying, record_len, x.facts().page()) {
-            Ok(f) => opened(x, file, f, status, pos),
-            Err(e) => failure(FileStatus::PermanentError, format!("{name}: {e}")),
+        let vsam = dd.as_ref().filter(|_| matches!(file.organization, Organization::Indexed | Organization::Relative));
+        let verified = vsam.is_some_and(|d| files::left_open(&d.path));
+        let mut f = match files::open_keyed(dd.as_ref(), mode, format, keying, record_len, x.facts().page()) {
+            Ok(f) => f,
+            Err(e) => return failure(FileStatus::PermanentError, format!("{name}: {e}")),
         };
+        if let Some(d) = vsam.filter(|_| mode != OpenMode::Input)
+            && let Err(e) = f.mark_open(&d.path)
+        {
+            return failure(FileStatus::PermanentError, format!("{name}: {}: {e}", files::open_mark(&d.path).display()));
+        }
+        let status = match x.facts().options().vsamopenfs {
+            _ if !verified => status,
+            VsamOpenFs::Compat => FileStatus::SuccessVerified,
+            VsamOpenFs::Succ => FileStatus::Success,
+        };
+        opened(x, file, f, status, pos)?;
+        return Ok(match (status, vsam) {
+            (FileStatus::SuccessVerified, Some(d)) => failed(x, file, status, format!("{name}: {} was left open for output, and OPEN verified it", d.path.display())),
+            _ => Outcome::Done,
+        });
     }
     match dd {
         _ if file.optional && mode == OpenMode::Input && dd.as_ref().is_none_or(|d| !d.path.exists()) => opened(x, file, files::absent(), FileStatus::SuccessOptional, pos),

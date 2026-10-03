@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::ops::Bound;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use zarch::ebcdic::{self, CodePage};
 
 pub use crate::abend::FileStatus;
@@ -185,6 +185,8 @@ pub struct Keyed {
     path: Option<PathBuf>,
     record_len: usize,
     page: &'static CodePage,
+    /// The open mark ([`open_mark`]) CLOSE removes.
+    mark: Option<PathBuf>,
 }
 
 impl Keyed {
@@ -195,7 +197,7 @@ impl Keyed {
             }
             _ => Vec::new(),
         };
-        Self { keying, records: BTreeMap::new(), alternates, arrivals: 0, cursor: Cursor::First, last_read: None, dirty: true, path, record_len, page }
+        Self { keying, records: BTreeMap::new(), alternates, arrivals: 0, cursor: Cursor::First, last_read: None, dirty: true, path, record_len, page, mark: None }
     }
 
     pub fn prime_key(&self, record: &[u8]) -> Option<Vec<u8>> {
@@ -428,6 +430,33 @@ impl Keyed {
     }
 }
 
+/// The file beside a VSAM data set that marks it open for output, as the catalog's open-for-output
+/// indicator does: an OPEN OUTPUT, I-O or EXTEND makes it and the CLOSE after it removes it, so a
+/// data set a run left open keeps it for the next OPEN to verify
+/// ([`numeric::assumptions::VSAM_DATA_SET_LEFT_OPEN`]).
+pub fn open_mark(data_set: &Path) -> PathBuf {
+    let mut name = data_set.as_os_str().to_owned();
+    name.push(".open-for-output");
+    PathBuf::from(name)
+}
+
+/// Whether a run left the VSAM data set at `data_set` open for output.
+pub fn left_open(data_set: &Path) -> bool {
+    data_set.is_file() && open_mark(data_set).is_file()
+}
+
+/// Removes the data set's open mark, if it has one.
+pub fn clear_open_mark(data_set: &Path) -> io::Result<()> {
+    remove_mark(&open_mark(data_set))
+}
+
+fn remove_mark(mark: &Path) -> io::Result<()> {
+    match std::fs::remove_file(mark) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
 pub struct Open {
     pub mode: OpenMode,
     pub format: Format,
@@ -514,6 +543,15 @@ impl Open {
 
     pub fn is_keyed(&self) -> bool {
         matches!(self.handle, Handle::Keyed(_))
+    }
+
+    /// Marks the VSAM data set this file holds open for output until CLOSE ([`open_mark`]).
+    pub fn mark_open(&mut self, data_set: &Path) -> io::Result<()> {
+        let Handle::Keyed(k) = &mut self.handle else { return Ok(()) };
+        let mark = open_mark(data_set);
+        std::fs::write(&mark, b"")?;
+        k.mark = Some(mark);
+        Ok(())
     }
 
     pub fn read(&mut self, fixed_len: usize) -> io::Result<Record> {
@@ -623,9 +661,22 @@ impl Open {
                 }
                 w.flush()
             }
-            Handle::Keyed(k) => k.save(self.format),
+            Handle::Keyed(k) => {
+                k.save(self.format)?;
+                k.mark.as_deref().map_or(Ok(()), remove_mark)
+            }
             _ => Ok(()),
         }
+    }
+
+    /// Ends the file as an abend that Language Environment is not told of leaves it: its records are
+    /// written as CLOSE writes them, and a VSAM data set keeps its open mark
+    /// ([`numeric::assumptions::TRAP_OFF_LEAVES_FILES_OPEN`]).
+    pub fn abandon(mut self) -> io::Result<()> {
+        if let Handle::Keyed(k) = &mut self.handle {
+            k.mark = None;
+        }
+        self.close()
     }
 }
 

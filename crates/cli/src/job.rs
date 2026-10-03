@@ -378,7 +378,7 @@ impl Runner<'_> {
         for d in disposals {
             match d.disp.at_end(abended) {
                 End::Delete => {
-                    let _ = if d.path.is_dir() { fs::remove_dir_all(&d.path) } else { fs::remove_file(&d.path) };
+                    let _ = delete_data_set(&d.path);
                     self.passed_new.remove(&d.path);
                 }
                 End::Pass if d.created && !d.temporary => {
@@ -522,6 +522,14 @@ fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database
     }
 }
 
+/// Deletes a data set, and the mark beside it that says a run left it open for output
+/// ([`exec::files::open_mark`]).
+fn delete_data_set(path: &Path) -> std::io::Result<()> {
+    let gone = if path.is_dir() { fs::remove_dir_all(path) } else { fs::remove_file(path) };
+    let unmarked = exec::files::clear_open_mark(path);
+    gone.and(unmarked)
+}
+
 /// Writes `bytes` to `path`, after what it holds when `append`.
 fn put(path: &Path, bytes: &[u8], append: bool) -> std::io::Result<()> {
     if !append {
@@ -599,9 +607,7 @@ fn idcams(runner: &Runner<'_>, dds: &[Allocated]) -> i16 {
                             let _ = fs::remove_file(runner.datasets.join(format!("{name}.G{number:04}V00")));
                         }
                     }
-                    let path = runner.catalog_path(name);
-                    let gone = if path.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };
-                    match gone {
+                    match delete_data_set(&runner.catalog_path(name)) {
                         Ok(()) => print.push(format!("IDC0550I ENTRY (A) {name} DELETED")),
                         Err(_) => {
                             print.push(format!("IDC3012I ENTRY {name} NOT FOUND"));
@@ -631,7 +637,7 @@ fn idcams(runner: &Runner<'_>, dds: &[Allocated]) -> i16 {
                     print.push(format!("ironwork: DEFINE CLUSTER {name}: the data set exists"));
                     return 12;
                 }
-                match fs::write(&path, b"") {
+                match fs::write(&path, b"").and_then(|()| exec::files::clear_open_mark(&path)) {
                     Ok(()) => 0,
                     Err(e) => {
                         print.push(format!("ironwork: DEFINE CLUSTER {name}: {e}"));
@@ -652,7 +658,7 @@ fn idcams(runner: &Runner<'_>, dds: &[Allocated]) -> i16 {
                     print.push(format!("ironwork: REPRO: {} does not exist", shown(to)));
                     return 12;
                 }
-                match fs::read(&source).and_then(|b| put(&target, &b, append)) {
+                match fs::read(&source).and_then(|b| put(&target, &b, append)).and_then(|()| exec::files::clear_open_mark(&target)) {
                     Ok(()) => 0,
                     Err(e) => {
                         print.push(format!("ironwork: REPRO from {} to {}: {e}", shown(from), shown(to)));
@@ -1020,7 +1026,7 @@ pub fn run(req: Request) -> ExitCode {
         }
     }
     for path in std::mem::take(&mut runner.passed_new) {
-        let _ = if path.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };
+        let _ = delete_data_set(&path);
     }
     let code = match &req.expected {
         Some(expected) => equivalence(&req, &job, &report, expected, &runner.datasets, &inputs, &declared),

@@ -340,7 +340,7 @@ pub(crate) fn run_task<'w, H: Clone, L: unit::Loader<H>, E>(
     run_unit.cics = Some(task);
     let ending = run(&mut run_unit, me, commarea, length);
     let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.end_task(&compiled.program.id, ending.is_ok()).map(drop));
-    let mut closed = run_unit.close_all();
+    let mut closed = run_unit.close_all(false);
     for (name, f) in run_unit.cics_files.drain() {
         if let Err(e) = f.close() {
             closed = closed.and(Err(format!("closing CICS file {name}: {e}")));
@@ -390,6 +390,7 @@ fn run_main<'w>(
     run_unit.statement_limit = limit;
     run_unit.sql = database.map(sql::Session::new);
     let me = run_unit.add(None, &compiled.program, compiled.layout.size as usize);
+    let trap_off = parm.is_some_and(rt::le::parm::trap_off);
     let parm = parm.map(|p| push_parm(&mut run_unit, compiled.options.code_page(), p));
     let ending = machine::Machine::activation(compiled, me, &mut run_unit, true).and_then(|mut m| {
         if parm.is_some() {
@@ -398,7 +399,7 @@ fn run_main<'w>(
         m.run_procedure()
     });
     let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(&compiled.program.id, ending.is_ok()).map(drop));
-    let closed = run_unit.close_all();
+    let closed = run_unit.close_all(trap_off && ending.as_ref().is_err_and(|a| a.code.bypasses_trap_off()));
     *kept = Some(unit::Remains::of(&run_unit));
     let ending = ending?;
     settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default(), file: None })?;

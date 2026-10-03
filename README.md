@@ -85,7 +85,9 @@ which counts the date functions' integer dates from 15 October 1582 and turns CA
 CEEDAYS; QUALIFY(EXTEND), under which a complete set of qualifiers names its one item; INITIAL,
 which starts every program from its VALUE clauses on each CALL, and which THREAD drops; and
 VLR(COMPAT), under which a READ checks a variable-length record only against RECORD VARYING.
-VSAMOPENFS is read and kept, but no OPEN in ironwork reaches the verified open it changes.
+VSAMOPENFS(SUCC) makes 00 the status of an OPEN that verifies an indexed or relative data set a
+run left open for output, 97 under COMPAT; a run leaves one open only when an abend that TRAP(OFF)
+in its PARM keeps from Language Environment ends it (C152).
 Assumptions C210 to C220 hold what the manuals leave open. INITCHECK (or IC) warns at compile time,
 return code 4, of each statement that uses a WORKING-STORAGE or LOCAL-STORAGE item no path to the
 statement sets, and INITCHECK(STRICT) of each that some path leaves unset, following PERFORM, GO TO

@@ -496,6 +496,54 @@ fn parm_reaches_the_main_program_as_language_environment_passes_it() {
     assert_eq!(String::from_utf8_lossy(&o.stdout), "0012 RUN=1,MODE=X\n0010 11/16/1967\n0000\nZEROS PAST THE ARGUMENTS\n");
 }
 
+/// LOADK writes a record to the indexed data set on KSDS and divides by zero; READK opens it I-O,
+/// shows the file status OPEN gave, and reads the record.
+fn ksds_programs(dir: &Path) {
+    let program = |id: &str, body: &[&str]| {
+        let head = [
+            "IDENTIFICATION DIVISION.",
+            &format!("PROGRAM-ID. {id}."),
+            "ENVIRONMENT DIVISION.",
+            "INPUT-OUTPUT SECTION.",
+            "FILE-CONTROL.",
+            "    SELECT K-FILE ASSIGN TO KSDS ORGANIZATION INDEXED",
+            "        RECORD KEY K-KEY FILE STATUS FS.",
+            "DATA DIVISION.",
+            "FILE SECTION.",
+            "FD K-FILE.",
+            "01 K-REC.",
+            "    05 K-KEY PIC X(4).",
+            "    05 K-DATA PIC X(6).",
+            "WORKING-STORAGE SECTION.",
+            "01 FS PIC XX.",
+            "01 N PIC S9(3) COMP-3 VALUE 1.",
+            "01 Z PIC S9(3) COMP-3 VALUE 0.",
+            "PROCEDURE DIVISION.",
+        ];
+        fs::write(dir.join(format!("lib/{id}.cbl")), cobol(&[&head[..], body].concat())).unwrap();
+    };
+    program("LOADK", &["    OPEN OUTPUT K-FILE.", "    MOVE 'K001LOADED' TO K-REC.", "    WRITE K-REC.", "    DIVIDE Z INTO N.", "    GOBACK."]);
+    program("READK", &["    OPEN I-O K-FILE.", "    DISPLAY 'OPEN ' FS.", "    READ K-FILE.", "    DISPLAY K-REC.", "    CLOSE K-FILE.", "    GOBACK."]);
+}
+
+#[test]
+fn a_step_that_abends_under_trap_off_leaves_its_vsam_data_set_for_the_next_step_to_verify() {
+    let dir = temp("left-open");
+    ksds_programs(&dir);
+    let (ksds, mark) = (dir.join("data/MY.KSDS"), dir.join("data/MY.KSDS.open-for-output"));
+    for (parm, shown) in [(",PARM='/TRAP(OFF)'", "OPEN 97\nK001LOADED\n"), ("", "OPEN 00\nK001LOADED\n")] {
+        fs::write(&ksds, "").unwrap();
+        let o = job(&dir, &format!("//LOAD EXEC PGM=LOADK{parm}\n//KSDS DD DSN=MY.KSDS,DISP=OLD\n//READ EXEC PGM=READK,COND=EVEN\n//KSDS DD DSN=MY.KSDS,DISP=OLD\n"));
+        let l = log(&o);
+        assert!(l.contains("LOAD PGM=LOADK ABEND S0CB") && l.contains("READ PGM=READK RC=0000"), "{parm}: {l}");
+        assert_eq!(String::from_utf8_lossy(&o.stdout), shown, "{parm}");
+        assert!(!mark.exists(), "{parm}: READK's CLOSE after OPEN I-O takes the mark away");
+    }
+    let o = job(&dir, "//LOAD EXEC PGM=LOADK,PARM='/TRAP(OFF)'\n//KSDS DD DSN=NEW.KSDS,DISP=(NEW,CATLG,DELETE)\n");
+    assert!(log(&o).contains("LOAD PGM=LOADK ABEND S0CB"), "{}", log(&o));
+    assert!(!dir.join("data/NEW.KSDS").exists() && !dir.join("data/NEW.KSDS.open-for-output").exists(), "the abnormal disposition deletes the data set and its mark");
+}
+
 #[test]
 fn load_libraries_work_files_implied_sysin_and_mod_on_generations_and_concatenations() {
     let dir = temp("system");

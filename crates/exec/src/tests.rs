@@ -626,29 +626,140 @@ fn an_indexed_file_of_variable_length_records_reads_by_table_52_too() {
     std::fs::remove_file(&path).unwrap();
 }
 
-#[test]
-fn a_vsam_open_is_00_under_either_vsamopenfs_setting_as_no_open_verifies_a_file() {
-    let path = temp("vsamopenfs.ksds");
-    let source = |card: &str, body: &[&str]| {
-        let program = file_program(
-            "           SELECT K-FILE ASSIGN TO KDD ORGANIZATION INDEXED\n               RECORD KEY K-KEY FILE STATUS IS FS.\n           SELECT X-FILE ASSIGN TO NODD.\n",
-            "       FD  K-FILE.\n       01  K-REC.\n           05 K-KEY PIC X(4).\n       FD  X-FILE.\n       01  X-REC PIC X.\n",
-            "       01  FS PIC XX.\n",
-            &body.iter().map(|l| line(l)).collect::<String>(),
-        );
-        format!("{card}{program}")
-    };
-    let dds = [format!("KDD={}", path.display())];
-    let abends = ["OPEN OUTPUT K-FILE", "MOVE 'K001' TO K-KEY", "WRITE K-REC", "OPEN INPUT X-FILE", "GOBACK."];
-    let reopens = ["OPEN I-O K-FILE", "DISPLAY FS", "READ K-FILE", "DISPLAY FS ' ' K-KEY", "GOBACK."];
-    for card in ["       CBL VSAMOPENFS(COMPAT)\n", "       CBL VS(S)\n"] {
-        let (_, _, ending) = run_files(&source(card, &abends), &dds);
-        assert_eq!(ending.unwrap_err().code, "IO-35", "{card}");
-        let (out, err, ending) = run_files(&source(card, &reopens), &dds);
-        assert!(ending.is_ok(), "{ending:?} {err}");
-        assert_eq!(out, "00\n00 K001\n", "{card}: the abend left the data set closed, so there is nothing to verify");
+/// An indexed file on KDD and a relative file on RDD, both with FILE STATUS FS, a sequential file on
+/// SDD, and `body` as the procedure, under the CBL `card`.
+fn left_open_program(card: &str, declaratives: &str, body: &[&str]) -> String {
+    let program = file_program(
+        "           SELECT K-FILE ASSIGN TO KDD ORGANIZATION INDEXED\n               RECORD KEY K-KEY FILE STATUS IS FS.\n           SELECT R-FILE ASSIGN TO RDD ORGANIZATION RELATIVE\n               RELATIVE KEY R-NUM FILE STATUS IS FS.\n           SELECT S-FILE ASSIGN TO SDD.\n",
+        "       FD  K-FILE.\n       01  K-REC.\n           05 K-KEY PIC X(4).\n       FD  R-FILE.\n       01  R-REC PIC X(4).\n       FD  S-FILE.\n       01  S-REC PIC X(4).\n",
+        "       01  FS PIC XX.\n       01  R-NUM PIC 9(4).\n       01  N PIC S9(3) COMP-3 VALUE 1.\n       01  Z PIC S9(3) COMP-3 VALUE 0.\n",
+        &[declaratives, &body.iter().map(|l| line(l)).collect::<String>()].concat(),
+    );
+    format!("{card}{program}")
+}
+
+/// The data sets of [`left_open_program`], which `reset` empties of records and marks.
+struct LeftOpen {
+    paths: [std::path::PathBuf; 3],
+}
+
+impl LeftOpen {
+    fn new(name: &str) -> Self {
+        let paths = ["ksds", "rrds", "seq"].map(|kind| temp(&format!("{name}.{kind}")));
+        let it = Self { paths };
+        it.reset();
+        it
     }
-    std::fs::remove_file(&path).unwrap();
+
+    fn dds(&self) -> Vec<String> {
+        ["KDD", "RDD", "SDD"].iter().zip(&self.paths).map(|(dd, p)| format!("{dd}={}", p.display())).collect()
+    }
+
+    fn reset(&self) {
+        for p in &self.paths {
+            let _ = std::fs::remove_file(p);
+            let _ = std::fs::remove_file(files::open_mark(p));
+        }
+    }
+
+    /// Which of the indexed, relative and sequential data sets are marked open for output.
+    fn marked(&self) -> [bool; 3] {
+        self.paths.each_ref().map(|p| files::open_mark(p).exists())
+    }
+
+    /// Writes a record to each file, then ends as `end` says, with `parm` as the job step's PARM;
+    /// the interpreter and the VM must agree.
+    fn write(&self, end: &str, parm: &str) -> Result<Ending, Abend> {
+        let body = ["OPEN OUTPUT K-FILE R-FILE S-FILE", "MOVE 'K001' TO K-KEY", "WRITE K-REC", "MOVE 1 TO R-NUM", "WRITE R-REC FROM 'R001'", "WRITE S-REC FROM 'S001'", end, "GOBACK."];
+        let source = left_open_program("", "", &body);
+        self.reset();
+        let walker = Harness::source(&source).dds(&self.dds()).parm(parm).run(Executor::Interpreter);
+        let marked = self.marked();
+        self.reset();
+        let vm = Harness::source(&source).dds(&self.dds()).parm(parm).run(Executor::Vm);
+        assert_eq!((&vm.out, &vm.ending, self.marked()), (&walker.out, &walker.ending, marked), "{}", walker.err);
+        walker.ending
+    }
+}
+
+#[test]
+fn only_an_abend_trap_off_keeps_from_language_environment_leaves_a_vsam_data_set_open() {
+    let data = LeftOpen::new("left-open");
+    let cases: [(&str, &str, Option<&str>, [bool; 3]); 6] = [
+        ("CLOSE K-FILE R-FILE S-FILE", "", None, [false; 3]),
+        ("CONTINUE", "", None, [false; 3]),
+        ("DIVIDE Z INTO N", "", Some("S0CB"), [false; 3]),
+        ("CLOSE K-FILE R-FILE S-FILE DIVIDE Z INTO N", "/TRAP(OFF)", Some("S0CB"), [false; 3]),
+        ("READ S-FILE", "/TRAP(OFF)", Some("IO-47"), [false; 3]),
+        ("DIVIDE Z INTO N", "/TRAP(OFF)", Some("S0CB"), [true, true, false]),
+    ];
+    for (end, parm, abend, marked) in cases {
+        let ending = data.write(end, parm);
+        assert_eq!(ending.as_ref().err().map(|a| a.code.to_string()), abend.map(str::to_string), "{end} {parm}: {ending:?}");
+        assert_eq!(data.marked(), marked, "{end} {parm}");
+    }
+    let records = std::fs::read(&data.paths[0]).unwrap();
+    assert_eq!(records, ebcdic("K001"), "the records are written as CLOSE writes them");
+    data.reset();
+}
+
+#[test]
+fn the_next_open_of_a_data_set_left_open_is_97_under_vsamopenfs_compat_and_00_under_succ() {
+    let data = LeftOpen::new("verified");
+    let reopen = [
+        "OPEN INPUT K-FILE",
+        "DISPLAY FS",
+        "CLOSE K-FILE",
+        "OPEN INPUT R-FILE",
+        "DISPLAY FS",
+        "CLOSE R-FILE",
+        "OPEN I-O K-FILE",
+        "DISPLAY FS",
+        "CLOSE K-FILE",
+        "OPEN INPUT K-FILE",
+        "DISPLAY FS",
+        "READ K-FILE",
+        "DISPLAY FS ' ' K-KEY",
+        "CLOSE K-FILE",
+        "OPEN INPUT S-FILE",
+        "CLOSE S-FILE",
+        "GOBACK.",
+    ];
+    for (card, verified) in [("", "97"), ("       CBL VSAMOPENFS(COMPAT)\n", "97"), ("       CBL VSAMOPENFS(SUCC)\n", "00"), ("       CBL VS(S)\n", "00")] {
+        assert_eq!(data.write("DIVIDE Z INTO N", "/TRAP(OFF)").unwrap_err().code, "S0CB");
+        let o = Harness::source(&left_open_program(card, "", &reopen)).dds(&data.dds()).run(Executor::Interpreter);
+        assert!(o.ending.is_ok(), "{card}: {:?} {}", o.ending, o.err);
+        assert_eq!(o.out, format!("{verified}\n{verified}\n{verified}\n00\n00 K001\n"), "{card}");
+        assert_eq!(data.marked(), [false, true, false], "{card}: only CLOSE after an OPEN for output takes the mark away");
+    }
+    data.reset();
+}
+
+#[test]
+fn status_97_runs_the_error_procedure_and_with_no_file_status_does_not_end_the_run() {
+    let data = LeftOpen::new("verified-declarative");
+    let declaratives = "       DECLARATIVES.\n       K-ERR SECTION.\n           USE AFTER ERROR PROCEDURE ON K-FILE.\n       K-ERR-1.\n           DISPLAY 'ERROR PROCEDURE ' FS.\n       END DECLARATIVES.\n       MAIN SECTION.\n       M.\n";
+    let reopen = ["OPEN I-O K-FILE", "DISPLAY 'OPEN ' FS", "CLOSE K-FILE", "GOBACK."];
+    for (card, declaratives, out) in [
+        ("", declaratives, "ERROR PROCEDURE 97\nOPEN 97\n"),
+        ("       CBL VSAMOPENFS(SUCC)\n", declaratives, "OPEN 00\n"),
+    ] {
+        assert_eq!(data.write("DIVIDE Z INTO N", "/TRAP(OFF)").unwrap_err().code, "S0CB");
+        let o = Harness::source(&left_open_program(card, declaratives, &reopen)).dds(&data.dds()).run(Executor::Interpreter);
+        assert!(o.ending.is_ok(), "{card}: {:?} {}", o.ending, o.err);
+        assert_eq!(o.out, out, "{card}");
+    }
+    let unhandled = file_program(
+        "           SELECT K-FILE ASSIGN TO KDD ORGANIZATION INDEXED\n               RECORD KEY K-KEY.\n",
+        "       FD  K-FILE.\n       01  K-REC.\n           05 K-KEY PIC X(4).\n",
+        "",
+        &[line("OPEN INPUT K-FILE"), line("READ K-FILE NEXT"), line("DISPLAY K-KEY"), line("GOBACK.")].concat(),
+    );
+    assert_eq!(data.write("DIVIDE Z INTO N", "/TRAP(OFF)").unwrap_err().code, "S0CB");
+    let o = Harness::source(&unhandled).dds(&data.dds()).run(Executor::Interpreter);
+    assert!(o.ending.is_ok(), "{:?} {}", o.ending, o.err);
+    assert_eq!(o.out, "K001\n");
+    data.reset();
 }
 
 #[test]

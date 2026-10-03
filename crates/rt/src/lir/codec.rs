@@ -134,6 +134,7 @@ codec_enum!(FileStatus {
     NotOpenInputOutput = 20,
     SuccessNonReel = 21,
     ClosedWithLock = 22,
+    SuccessVerified = 23,
 });
 
 codec_struct!(Options {

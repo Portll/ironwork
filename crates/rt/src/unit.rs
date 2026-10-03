@@ -262,6 +262,10 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     set_aside: Vec<Enclave>,
 }
 
+fn end_file(f: Open, unclosed: bool) -> std::io::Result<()> {
+    if unclosed { f.abandon() } else { f.close() }
+}
+
 impl<H, L: Loader<H>> RunUnit<'_, H, L> {
     /// Copies `bytes` into memory at `offset`; under taint they may hold input when the running
     /// statement has read a byte that may. Every write of data to memory goes through here or
@@ -418,7 +422,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             }
             drop(program.set_aside());
         }
-        closed = closed.and(self.close_external_files());
+        closed = closed.and(self.close_external_files(false));
         let Some(enclave) = self.set_aside.pop() else { return closed };
         for (program, held) in self.programs.iter_mut().zip(enclave.programs) {
             program.restore(held);
@@ -551,22 +555,25 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         }
     }
 
-    /// Closes every file any program left open, as the runtime does when the run unit ends.
-    pub fn close_all(&mut self) -> Result<(), String> {
+    /// Closes every file any program left open, as the runtime does when the run unit ends, normally
+    /// or by an abend under TRAP(ON). An abend TRAP(OFF) keeps from Language Environment closes
+    /// none (`unclosed`), and each VSAM data set stays marked open for output
+    /// ([`numeric::assumptions::TRAP_OFF_LEAVES_FILES_OPEN`]).
+    pub fn close_all(&mut self, unclosed: bool) -> Result<(), String> {
         for program in &mut self.programs {
             for f in program.files.iter_mut().filter_map(Option::take) {
-                f.close().map_err(|e| format!("closing a file of {}: {e}", program.name))?;
+                end_file(f, unclosed).map_err(|e| format!("closing a file of {}: {e}", program.name))?;
             }
         }
-        self.close_external_files()
+        self.close_external_files(unclosed)
     }
 
     /// Closes the EXTERNAL files left open, giving the first failure.
-    fn close_external_files(&mut self) -> Result<(), String> {
+    fn close_external_files(&mut self, unclosed: bool) -> Result<(), String> {
         let mut closed = Ok(());
         for (name, &k) in &self.externals.file_names {
             if let Some(f) = self.externals.files[k].take()
-                && let Err(e) = f.close()
+                && let Err(e) = end_file(f, unclosed)
             {
                 closed = closed.and(Err(format!("closing EXTERNAL file {name}: {e}")));
             }
