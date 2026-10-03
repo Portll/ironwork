@@ -35,7 +35,7 @@ pub fn product_places(a: Places, b: Places) -> Places {
 }
 
 pub fn quotient_places(dividend: Places, divisor: Places, dmax: u32) -> Places {
-    Places::new(dividend.int + divisor.dec, dividend.dec.max(dmax))
+    Places::new(dividend.int + divisor.dec, dividend.dec.saturating_sub(divisor.dec).max(dmax))
 }
 
 /// A statement's dmax for its last operation, the one whose result the receivers take, and for
@@ -218,6 +218,17 @@ mod tests {
         assert_eq!(sum_places(Places::new(5, 2), Places::new(3, 4)), Places::new(6, 4));
         assert_eq!(product_places(Places::new(5, 2), Places::new(3, 4)), Places::new(8, 6));
         assert_eq!(quotient_places(Places::new(5, 2), Places::new(3, 4), 3), Places::new(9, 3));
+    }
+
+    /// Programming Guide SC27-8714-03, p. 795: a quotient's decimal places are d2 - d1, the
+    /// dividend's less the divisor's, or dmax, whichever is greater.
+    #[test]
+    fn a_quotient_carries_the_dividend_s_places_less_the_divisor_s_or_dmax() {
+        assert_eq!(quotient_places(Places::new(2, 4), Places::new(1, 1), 2), Places::new(3, 3));
+        assert_eq!(quotient_places(Places::new(2, 4), Places::new(1, 3), 2), Places::new(5, 2));
+        let product = Fixed::new(12321, Places::new(2, 4));
+        let q = product.div(Fixed::new(7, Places::new(1, 1)), 2, Arith::Compat).unwrap();
+        assert_eq!((q.to_i128(), q.places.dec), (Some(1760), 3));
     }
 
     #[test]

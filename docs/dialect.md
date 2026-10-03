@@ -224,11 +224,10 @@ removes one, it is named.
 
 ### 5.4 ironwork bugs
 
-Each is a separate fix; under `ibm` it changes results, so none is made here.
+Each changes results under `ibm`. Those fixed since are in 5.7.
 
 | Difference | ironwork | IBM, and cobc | Seen in |
 |---|---|---|---|
-| An intermediate quotient's decimal places | the dividend's or dmax, whichever is more: `COMPUTE X = (A * B / C) * K`, A and B 1.11, C 0.7, K 1000, gives 1760.10 | the dividend's less the divisor's, or dmax (Programming Guide, Fixed-point data and intermediate results; C1 recalled it otherwise): 1760.00 | probe |
 | FUNCTION MOD with a negative divisor | MOD(5, -3) is 2: `div_euclid` in `rt/src/intrinsic/function.rs` | -1, FUNCTION INTEGER's floor | CCVS85 IF124A, 5 tests |
 | DISPLAY of a negative or non-integer function value | sign and decimal point dropped, 31 digits: FUNCTION INTEGER(-2.5) shows `0000000000000000000000000000030` (`rt::display::value`) | the sign and the value | test programs |
 | A LINKAGE level-01 item that REDEFINES another | no address: S0C4 | the address of the item it redefines | CCVS85 IC237A |
@@ -267,3 +266,12 @@ Test programs: cobc refused 30 that ironwork runs.
 
 A RETURN-CODE of 239 or outside 0 to 238 ends `ironwork run` with exit status 239, its value named
 on standard error, and a cobc program with the value modulo 256.
+
+### 5.7 Fixed since the survey
+
+The survey found these as ironwork bugs. ironwork gives the result IBM's manuals state, under both
+dialects and on both executors (ironwork-roadmap 3.14).
+
+| Difference | ironwork and IBM | cobc | Seen in |
+|---|---|---|---|
+| An intermediate quotient's decimal places | the dividend's less the divisor's, or dmax, whichever is more (Programming Guide SC27-8714-03, p. 795; C1): `COMPUTE X = (A * B / C) * K`, A and B 1.11, C 0.7, K 1000, gives 1760.00 | the same | probe |

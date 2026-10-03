@@ -17,6 +17,7 @@ mod declaratives;
 mod diagnostics;
 mod dialect;
 mod differential;
+mod documented;
 mod function;
 mod initcheck;
 mod intrinsic;
