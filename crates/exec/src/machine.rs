@@ -329,7 +329,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 });
             }
             Stmt::PerformInline { body, repeat, pos } => return self.repeat(repeat, *pos, &mut |m: &mut Self| m.run_block(body)),
-            Stmt::Display { items, no_advancing, pos, .. } => self.display(items, *no_advancing, *pos)?,
+            Stmt::Display { items, upon, no_advancing, pos } => self.display(items, upon_console(upon.as_ref()), *no_advancing, *pos)?,
             Stmt::Open { files, pos } => {
                 for (mode, name) in files {
                     self.open_file(*mode, name, *pos)?;
@@ -1643,18 +1643,18 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
     }
 
-    fn display(&mut self, items: &[Operand], no_advancing: bool, pos: Pos) -> R<()> {
+    fn display(&mut self, items: &[Operand], upon_console: bool, no_advancing: bool, pos: Pos) -> R<()> {
         let mut text = String::new();
         for op in items {
             let shown = match op {
                 Operand::Ref(r) => {
                     let loc = self.locate(r)?;
-                    rt::display::place(&self.facts(), &self.unit.mem, loc, r.pos)?
+                    rt::display::place(&self.facts(), &self.unit.mem, loc, r.pos, upon_console)?
                 }
                 Operand::Literal(Literal::Number(t)) => rt::display::number(t, &self.facts()),
                 other => {
                     let val = self.operand(other, pos)?;
-                    rt::display::value(&self.facts(), val, pos)?
+                    rt::display::value(&self.facts(), val, pos, upon_console)?
                 }
             };
             text.push_str(&shown);
@@ -1778,4 +1778,10 @@ pub(crate) fn divided_exponent(e: &Expr) -> bool {
         Expr::Neg(inner) => divided_exponent(inner),
         Expr::Bin(a, op, b) => divided_exponent(a) || divided_exponent(b) || (*op == BinOp::Pow && quotient_or_power(b)),
     }
+}
+
+/// Whether DISPLAY writes to the console, whose national data is converted (Language Reference
+/// SC27-8713-03, p. 333).
+pub(crate) fn upon_console(upon: Option<&Upon>) -> bool {
+    upon.is_some_and(|u| u.device == "CONSOLE")
 }

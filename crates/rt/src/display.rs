@@ -9,6 +9,7 @@ use crate::vocab::{Pos, SignClause, SignPosition};
 use numeric::{Dialect, DispSign, Trunc};
 use std::io::Write;
 use zarch::decimal;
+use zarch::ebcdic::CodePage;
 
 type R<T> = Result<T, Abend>;
 
@@ -17,11 +18,12 @@ type R<T> = Result<T, Abend>;
 /// sign overpunched on the last. Under DISPSIGN(SEP) a signed binary, packed or overpunched zoned
 /// item shows its sign, + or -, before its digits (Programming Guide SC27-8714-03, pp. 362-363,
 /// Table 48; assumption C213). Under --dialect gnucobol packed and binary items show as cobc's do
-/// (assumption C14).
-pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<String> {
+/// (assumption C14). A national item is converted only `upon_console`, and is otherwise written as
+/// its bytes (Language Reference SC27-8713-03, p. 333; Programming Guide SC27-8714-03, p. 36).
+pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos, upon_console: bool) -> R<String> {
     let separate = facts.options().dispsign == DispSign::Sep;
     Ok(match loc.kind {
-        Kind::National => utf16_text(store::bytes(mem, loc)),
+        Kind::National => national(facts.page(), store::bytes(mem, loc), upon_console),
         Kind::Dbcs { .. } => facts.page().decode_dbcs(store::bytes(mem, loc)),
         Kind::Packed { digits, signed, .. } | Kind::Binary { digits, signed, .. } if facts.options().dialect == Dialect::Gnucobol => {
             let Val::Num(f) = store::read_stored(facts, mem, loc, pos)? else { unreachable!() };
@@ -98,11 +100,12 @@ pub fn literal(written: &str, decimal_point: char, dialect: Dialect) -> String {
     }
 }
 
-/// A literal, figurative constant, FUNCTION, LENGTH OF or ADDRESS OF, by its value.
-pub fn value(facts: &dyn ProgramFacts, val: Val, pos: Pos) -> R<String> {
+/// A literal, figurative constant, FUNCTION, LENGTH OF or ADDRESS OF, by its value; a national
+/// value as `place` shows a national item.
+pub fn value(facts: &dyn ProgramFacts, val: Val, pos: Pos, upon_console: bool) -> R<String> {
     Ok(match val {
         Val::Bytes(b) | Val::All(b) => facts.page().decode(&b),
-        Val::National(b) | Val::AllNational(b) => utf16_text(&b),
+        Val::National(b) | Val::AllNational(b) => national(facts.page(), &b, upon_console),
         Val::Dbcs(b) => facts.page().decode_dbcs(&b),
         Val::Fig(f) => facts.page().decode_byte(facts.figurative(f)).to_string(),
         Val::Num(f) => facts.page().decode(&zoned_digits(f.magnitude.to_u128().unwrap_or(0), f.places.total() as usize, decimal::UNSIGNED)),
@@ -119,6 +122,33 @@ pub fn write(out: &mut dyn Write, text: &str, no_advancing: bool, pos: Pos) -> R
         _ => Abend::ironwork(format!("DISPLAY: {e}"), pos),
     })
 }
+
+/// National data DISPLAY writes: UPON CONSOLE converted to the program's code page, otherwise its
+/// bytes unconverted, which standard output shows as the code page's characters.
+pub fn national(page: &CodePage, units: &[u8], upon_console: bool) -> String {
+    if upon_console { page.decode(&to_page(page, units)) } else { page.decode(units) }
+}
+
+/// UTF-16 in a code page, a mixed page's DBCS characters between shift-out and shift-in and a
+/// character the page does not hold given the substitution character X'3F', as UPON CONSOLE and
+/// FUNCTION DISPLAY-OF convert it.
+pub fn to_page(page: &CodePage, units: &[u8]) -> Vec<u8> {
+    let (mut out, mut run) = (Vec::with_capacity(units.len()), String::new());
+    for c in utf16_text(units).chars() {
+        if page.encode(c.encode_utf8(&mut [0; 4])).is_ok() {
+            run.push(c);
+        } else {
+            out.extend(page.encode(&std::mem::take(&mut run)).unwrap_or_default());
+            out.push(SUBSTITUTE);
+        }
+    }
+    out.extend(page.encode(&run).unwrap_or_default());
+    out
+}
+
+/// EBCDIC's substitution character, which DISPLAY-OF gives for a character the code page lacks
+/// (Language Reference SC27-8713-03, p. 551).
+const SUBSTITUTE: u8 = 0x3F;
 
 /// Big-endian UTF-16, an unpaired surrogate shown as U+FFFD.
 pub fn utf16_text(bytes: &[u8]) -> String {

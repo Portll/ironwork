@@ -24,9 +24,6 @@ use zarch::wide::U256;
 
 type R<T> = Result<T, Abend>;
 
-/// EBCDIC's substitution character, which DISPLAY-OF gives for a character the code page lacks
-/// (Language Reference SC27-8713-03, p. 551).
-const SUBSTITUTE: u8 = 0x3F;
 const UTF8: u16 = 1208;
 
 /// What a function reads beyond its arguments' values.
@@ -662,7 +659,7 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
                 return Ok(Val::Bytes(chars.into_bytes()));
             }
             let page = CodePage::by_ccsid(ccsid).ok_or_else(|| Abend::ironwork(format!("FUNCTION DISPLAY-OF: CCSID {ccsid} is not a code page ironwork for COBOL carries"), pos))?;
-            Ok(Val::Bytes(chars.chars().map(|c| page.encode_char(c).unwrap_or(SUBSTITUTE)).collect()))
+            Ok(Val::Bytes(crate::display::to_page(page, units)))
         }
         "FORMATTED-CURRENT-DATE" | "FORMATTED-DATE" | "FORMATTED-TIME" | "FORMATTED-DATETIME" => {
             arity(

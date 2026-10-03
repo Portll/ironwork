@@ -126,8 +126,10 @@ pub struct DisplayPlan<P = PlaceId, O = Operand> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DisplayItem<P = PlaceId, O = Operand> {
-    /// Groups, alphanumeric, zoned and edited items: the storage in the program's code page.
+    /// Groups, alphanumeric, zoned and edited items, and national items written elsewhere than the
+    /// console: the storage in the program's code page.
     Bytes(P),
+    /// A national item UPON CONSOLE: converted to the program's code page.
     National(P),
     /// Packed and binary items: the value's last `digits` digits, which for COMP-5 or TRUNC(BIN)
     /// are as many as the item's halfword, fullword or doubleword holds.
@@ -137,7 +139,8 @@ pub enum DisplayItem<P = PlaceId, O = Operand> {
     /// A literal or figurative constant as DISPLAY shows it; a numeric literal as written, its decimal
     /// point the program's.
     Text(SymId),
-    /// FUNCTION, LENGTH OF or ADDRESS OF, by the value's kind.
+    /// FUNCTION, LENGTH OF or ADDRESS OF, by the value's kind, a national value unconverted; UPON
+    /// CONSOLE a national function's value is DISPLAY-OF's.
     Value(O),
 }
 

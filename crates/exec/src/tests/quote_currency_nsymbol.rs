@@ -4,7 +4,7 @@ fn quotes(card: &str) -> String {
     run(&program(
         card,
         "       01  X PIC X(3).\n       01  Y PIC X VALUE QUOTE.\n       01  N PIC N(2).\n",
-        &[line("MOVE ALL QUOTES TO X"), line("MOVE QUOTE TO N"), line("DISPLAY '[' X '][' Y '][' QUOTE '][' N ']'"), line("GOBACK.")].concat(),
+        &[line("MOVE ALL QUOTES TO X"), line("MOVE QUOTE TO N"), line("DISPLAY '[' X '][' Y '][' QUOTE '][' N ']' UPON CONSOLE"), line("GOBACK.")].concat(),
     ))
 }
 
@@ -76,7 +76,7 @@ fn a_hexadecimal_currency_whose_character_cannot_be_a_currency_symbol_is_discard
 
 #[test]
 fn nsymbol_dbcs_leaves_a_usage_national_item_national() {
-    assert_eq!(run(&program("NSYMBOL(DBCS)", "       01  N PIC N(2) USAGE NATIONAL VALUE ALL SPACE.\n", &[line("DISPLAY '[' N ']'"), line("GOBACK.")].concat())), "[  ]\n");
+    assert_eq!(run(&program("NSYMBOL(DBCS)", "       01  N PIC N(2) USAGE NATIONAL VALUE ALL SPACE.\n", &[line("DISPLAY '[' N ']' UPON CONSOLE"), line("GOBACK.")].concat())), "[  ]\n");
 }
 
 #[test]

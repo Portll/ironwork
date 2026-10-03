@@ -413,7 +413,7 @@ fn initialize_of_a_reference_modified_item_moves_to_its_characters_alone_as_one_
         "INITIALIZE X (1:1) ALPHANUMERIC TO VALUE",
         "INITIALIZE A (2:2) REPLACING ALPHABETIC BY 'Z'",
         "INITIALIZE W (2:1)",
-        "DISPLAY '[' N '][' X '][' A '][' W ']'",
+        "DISPLAY '[' N '][' X '][' A '][' W ']' UPON CONSOLE",
         "GOBACK.",
     ]
     .map(line)
@@ -718,7 +718,7 @@ fn the_vm_moves_and_compares_an_all_national_literal_as_the_interpreter_does() {
     let data = "       01  N PIC N(5) USAGE NATIONAL.\n       01  XA PIC N(4) USAGE NATIONAL VALUE ALL N'AB'.\n";
     let body = [
         "MOVE ALL N'AB' TO N",
-        "DISPLAY '[' N '][' XA ']'",
+        "DISPLAY '[' N '][' XA ']' UPON CONSOLE",
         "IF N = ALL N'AB' DISPLAY 'EQ' END-IF",
         "IF ALL N\"AB\" < XA DISPLAY 'LT' ELSE DISPLAY 'GE' END-IF",
         "IF N > ALL N'AA' DISPLAY 'GT' END-IF",
@@ -792,7 +792,7 @@ fn the_vm_writes_and_parses_items_with_picture_scaling_positions() {
     let body = [
         "MOVE SPACES TO D",
         "JSON GENERATE D FROM G",
-        "DISPLAY D",
+        "DISPLAY D UPON CONSOLE",
         "MOVE SPACES TO X",
         "XML GENERATE X FROM G",
         "DISPLAY X",

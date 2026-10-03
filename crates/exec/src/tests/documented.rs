@@ -234,3 +234,23 @@ fn display_upon_takes_an_output_device_or_a_mnemonic_name_for_one() {
     let errors = compile_errors(&source("INP"));
     assert!(errors.contains("DISPLAY UPON INP: a mnemonic-name for SYSIN, which DISPLAY does not write to"), "{errors}");
 }
+
+/// Language Reference SC27-8713-03, p. 333, and Programming Guide SC27-8714-03, p. 36: national data
+/// DISPLAY writes elsewhere than the console is its UTF-16 bytes, unconverted; UPON CONSOLE converts
+/// it to the code page, a character the page lacks becoming the substitution character.
+#[test]
+fn display_converts_national_data_only_upon_the_console() {
+    let source = program(
+        "",
+        "       01  N PIC N(2) VALUE N'AB'.\n",
+        &[
+            line("DISPLAY N N'AB' FUNCTION NATIONAL-OF('AB')"),
+            line("DISPLAY N N'AB' FUNCTION NATIONAL-OF('AB') UPON CONSOLE"),
+            line("DISPLAY FUNCTION DISPLAY-OF(N) N'\u{65e5}' UPON CONSOLE"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    );
+    let raw = "\0\u{a0}\0\u{e2}";
+    assert_eq!(on_both(&source), format!("{raw}{raw}{raw}\nABABAB\nAB\u{1a}\n"));
+}

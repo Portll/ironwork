@@ -224,11 +224,7 @@ removes one, it is named.
 
 ### 5.4 ironwork bugs
 
-Each changes results under `ibm`. Those fixed since are in 5.7.
-
-| Difference | ironwork | IBM, and cobc | Seen in |
-|---|---|---|---|
-| DISPLAY of a national item to SYSOUT | converted from UTF-16 | written as its UTF-16 bytes; only UPON CONSOLE converts (Programming Guide, Displaying values) | corpus |
+The survey's ironwork bugs each changed results under `ibm`. All are fixed, and listed in 5.7.
 
 ### 5.5 Chosen, and not switched
 
@@ -275,3 +271,4 @@ dialects and on both executors (ironwork-roadmap 3.14).
 | Floating-point exponentiation, and an exponent with decimal places or a division | `FUNCTION SQRT(10) ** 2` is 10, `A ** 0.5` and `8 ** (1 / 3)` with dmax above zero are floating point (Programming Guide SC27-8714-03, pp. 796, 800), zero to a negative power a size error (Language Reference SC27-8713-03, pp. 296-297, Table 32); zero to the power zero and a negative base to a fractional power take Table 32's values without running ON SIZE ERROR (C334) | `8 ** (1 / 3)` cuts the quotient first and gives 1.999999; zero to a negative power gives 0, and zero to the power zero is a size error | CCVS85 IF136A, which now passes |
 | `PIC 99 VALUE "7"` | refused when compiled: a numeric item's VALUE literal must be numeric (Language Reference SC27-8713-03, p. 246) | warns and stores 70 | corpus |
 | An environment-name in DISPLAY UPON other than SYSOUT, SYSLIST, SYSLST, SYSPUNCH, SYSPCH or CONSOLE, or a mnemonic-name for another (SYSERR, or any word) | refused when compiled (Language Reference SC27-8713-03, pp. 126, 334) | SYSERR written to standard error | corpus |
+| DISPLAY of national data elsewhere than the console | written as its UTF-16 bytes, unconverted; only UPON CONSOLE converts to the code page, a character it lacks as X'3F' (Language Reference SC27-8713-03, p. 333; Programming Guide SC27-8714-03, p. 36) | the same | corpus |

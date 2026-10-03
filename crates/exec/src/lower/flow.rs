@@ -391,8 +391,8 @@ impl Lower<'_> {
                 self.perform(repeat, body, pos, &inner)?;
             }
             Stmt::PerformInline { body, repeat, pos: _ } => self.perform(repeat, Body::Inline(body), pos, &inner)?,
-            Stmt::Display { items, upon: _, no_advancing, pos: _ } => {
-                let plan = self.display_plan(items, *no_advancing, pos)?;
+            Stmt::Display { items, upon, no_advancing, pos: _ } => {
+                let plan = self.display_plan(items, crate::machine::upon_console(upon.as_ref()), *no_advancing, pos)?;
                 self.op(Op::Display(plan), pos)?;
             }
             Stmt::Initialize { targets, with, pos: _ } => {

@@ -283,7 +283,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     }
 
     /// `Machine::display`: each item as its kind or value shows, the line told to an observer,
-    /// then written.
+    /// then written. A national item is converted only as `DisplayItem::National`, UPON CONSOLE.
     fn display(&mut self, id: u32, pos: Pos) -> R<()> {
         let p = self.p;
         let plan = &p.plans.display[id as usize];
@@ -292,12 +292,13 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             shown.push_str(&match item {
                 DisplayItem::Bytes(place) | DisplayItem::National(place) | DisplayItem::Digits { place, .. } | DisplayItem::Refused { place, .. } => {
                     let loc = self.loc(*place)?;
-                    display::place(&self.facts(), &self.unit.mem, loc, self.pos(p.places[*place as usize].at))?
+                    let upon_console = matches!(item, DisplayItem::National(_));
+                    display::place(&self.facts(), &self.unit.mem, loc, self.pos(p.places[*place as usize].at), upon_console)?
                 }
                 DisplayItem::Text(text) => self.sym(*text).to_owned(),
                 DisplayItem::Value(o) => {
                     let val = self.value(*o)?;
-                    display::value(&self.facts(), val, pos)?
+                    display::value(&self.facts(), val, pos, false)?
                 }
             });
         }

@@ -106,10 +106,10 @@ fn initialize_reference_modification_length_and_national_of_count_dbcs_character
         "COMPUTE L = FUNCTION LENGTH(D)",
         "DISPLAY L ' ' LENGTH OF D",
         "MOVE FUNCTION NATIONAL-OF(D) TO N",
-        "DISPLAY N",
+        "DISPLAY N UPON CONSOLE",
         "MOVE G'Ｘ' TO D",
         "MOVE D TO N",
-        "DISPLAY N",
+        "DISPLAY N UPON CONSOLE",
         "INITIALIZE G",
         "DISPLAY FUNCTION HEX-OF(D)",
         "INITIALIZE G REPLACING DBCS DATA BY G'Ｙ'",
@@ -145,7 +145,7 @@ fn nsymbol_dbcs_makes_n_dbcs_and_leaves_usage_national_alone() {
     assert_eq!((kind("N1"), kind("N2"), kind("N3")), (Kind::Dbcs { justified: false, edit: None }, Kind::National, Kind::National));
     let c = compiled("NS(NAT)", data);
     assert_eq!(c.layout.items.iter().find(|i| i.name.as_deref() == Some("N1")).unwrap().kind, Kind::National);
-    assert_eq!(shown("NSYMBOL(DBCS),CODEPAGE(939)", "", &["DISPLAY N'ＡＢ' NX'00410042'"]), "ＡＢAB\n");
+    assert_eq!(shown("NSYMBOL(DBCS),CODEPAGE(939)", "", &["DISPLAY N'ＡＢ' NX'00410042' UPON CONSOLE"]), "ＡＢAB\n");
 }
 
 #[test]
@@ -177,9 +177,9 @@ fn national_string_and_unstring_count_national_characters_too() {
     let statements = [
         "MOVE N'----' TO N",
         "STRING N'AB' DELIMITED BY SIZE INTO N WITH POINTER P",
-        "DISPLAY N ' ' P",
+        "DISPLAY N ' ' P UPON CONSOLE",
         "UNSTRING N DELIMITED BY N'B' INTO X COUNT IN C Y",
-        "DISPLAY X '|' Y '|' C",
+        "DISPLAY X '|' Y '|' C UPON CONSOLE",
     ];
     assert_eq!(shown("", data, &statements), "-AB- 04\n-A|- |02\n");
 }

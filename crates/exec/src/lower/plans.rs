@@ -232,15 +232,17 @@ impl Lower<'_> {
         Ok(())
     }
 
-    /// `Machine::display`: each item shown as its kind is, literals as their text.
-    pub(super) fn display_plan(&mut self, items: &[Operand], no_advancing: bool, pos: Pos) -> R<DisplayId> {
+    /// `Machine::display`: each item shown as its kind is, literals as their text, national data
+    /// converted only `upon_console`.
+    pub(super) fn display_plan(&mut self, items: &[Operand], upon_console: bool, no_advancing: bool, pos: Pos) -> R<DisplayId> {
         let mut shown = Vec::with_capacity(items.len());
         for op in items {
             shown.push(match op {
                 Operand::Ref(r) => {
                     let place = self.place(r, false)?;
                     match self.kind_of(place) {
-                        Kind::National => DisplayItem::National(place),
+                        Kind::National if upon_console => DisplayItem::National(place),
+                        Kind::National => DisplayItem::Bytes(place),
                         Kind::Packed { digits, signed, .. } => DisplayItem::Digits { place, digits, signed },
                         Kind::Binary { digits, signed, native, .. } => {
                             let whole = native || self.c.options.trunc == Trunc::Bin;
@@ -267,27 +269,42 @@ impl Lower<'_> {
                 }
                 Operand::Literal(lit) if self.unencodable(lit).is_some() => DisplayItem::Value(self.operand(op, pos)?.operand),
                 Operand::Literal(lit) => {
-                    let text = self.display_text(lit, pos)?;
+                    let text = self.display_text(lit, upon_console, pos)?;
                     DisplayItem::Text(self.sym(&text))
                 }
-                Operand::LengthOf(_) | Operand::AddressOf(_) | Operand::Function(_) => DisplayItem::Value(self.operand(op, pos)?.operand),
+                Operand::LengthOf(_) | Operand::AddressOf(_) | Operand::Function(_) => {
+                    let lowered = self.operand(op, pos)?;
+                    match lowered.side.value {
+                        Value::National if upon_console => DisplayItem::Value(self.display_of(lowered.operand, pos)?),
+                        _ => DisplayItem::Value(lowered.operand),
+                    }
+                }
             });
         }
         push(&mut self.plans.display, lir::DisplayPlan { items: shown, no_advancing }, "DISPLAY plans")
     }
 
+    /// FUNCTION DISPLAY-OF of a national value, which `rt::display::national` converts as it does.
+    fn display_of(&mut self, national: lir::Operand, pos: Pos) -> R<lir::Operand> {
+        let at = self.at(pos);
+        let args = vec![lir::Argument::Value(lir::Comparand::Operand(national))];
+        let plan = lir::FunctionPlan { func: lir::Func::DisplayOf, args, integer: None, side: None, refmod: None, arity: None, at };
+        Ok(lir::Operand::Function(push(&mut self.plans.function, plan, "FUNCTION plans")?))
+    }
+
     /// What DISPLAY shows for a literal other than a number: its characters, a figurative
-    /// constant's one character, an ALL literal once.
-    fn display_text(&mut self, lit: &Literal, pos: Pos) -> R<String> {
+    /// constant's one character, an ALL literal once; a national literal as `rt::display::national`
+    /// writes it.
+    fn display_text(&mut self, lit: &Literal, upon_console: bool, pos: Pos) -> R<String> {
         Ok(match lit {
             Literal::Alnum(s) => self.page.decode(&self.encode(s, pos)?),
             Literal::Hex(b) => self.page.decode(b),
-            Literal::National(s) => String::from_utf16_lossy(&s.encode_utf16().collect::<Vec<_>>()),
+            Literal::National(s) => rt::display::national(self.page, &s.encode_utf16().flat_map(u16::to_be_bytes).collect::<Vec<_>>(), upon_console),
             Literal::Dbcs(s) => self.page.decode_dbcs(&self.dbcs(s, pos)?),
             Literal::Number(t) => t.clone(),
             Literal::Figurative(f) => self.page.decode_byte(self.c.collating.figurative(*f)).to_string(),
             Literal::All(inner) => match &**inner {
-                Literal::Alnum(_) | Literal::Hex(_) | Literal::National(_) | Literal::Figurative(_) => self.display_text(inner, pos)?,
+                Literal::Alnum(_) | Literal::Hex(_) | Literal::National(_) | Literal::Figurative(_) => self.display_text(inner, upon_console, pos)?,
                 _ => return unsupported("ALL with a literal that is not alphanumeric or national", pos),
             },
         })
