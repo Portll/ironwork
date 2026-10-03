@@ -21,6 +21,11 @@ use std::process::ExitCode;
 use exec::Execute;
 use exec::evidence::{canonical, fields, Value};
 
+mod catalog;
+mod idcams;
+mod listcat;
+mod print;
+
 pub struct Request {
     pub jcl: PathBuf,
     pub datasets: PathBuf,
@@ -298,6 +303,11 @@ struct Runner<'a> {
     /// With --coverage, the paragraphs the job's programs entered and each program's outline, by
     /// the source each step ran.
     coverage: Option<RefCell<crate::coverage::BySource>>,
+    /// The step's DDs that name a path: the file holding the path's records, the path, the
+    /// records it started with, and how the file holds them.
+    views: Vec<(PathBuf, jcl::idcams::Path, Vec<Vec<u8>>, catalog::Form)>,
+    /// The base clusters with an upgrade set that the step's DDs allocate, and their bytes before it.
+    watched: Vec<(String, Vec<u8>)>,
 }
 
 fn fresh_name(dir: &Path, n: &mut usize, what: &str) -> PathBuf {
@@ -312,6 +322,58 @@ impl Runner<'_> {
             Some((dsn, member)) => self.datasets.join(dsn).join(member.trim_end_matches(')')),
             None => self.datasets.join(name),
         }
+    }
+
+    fn path_entry(&self, dsn: &str) -> Option<jcl::idcams::Path> {
+        match catalog::get(&self.datasets, dsn)? {
+            catalog::Entry::Path(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    /// Before a step runs: the base clusters it allocates whose alternate indexes are upgraded.
+    fn watch(&mut self, dds: &[Allocated]) {
+        for d in dds {
+            let Some(name) = self.name_of(&d.path) else { continue };
+            if catalog::alternate_indexes(&self.datasets, &name).iter().any(|a| a.upgrade) && !self.watched.iter().any(|(n, _)| *n == name) {
+                let bytes = fs::read(&d.path).unwrap_or_default();
+                self.watched.push((name, bytes));
+            }
+        }
+    }
+
+    /// After a step: what its programs wrote through a path goes back to the base cluster, and a
+    /// base cluster that changed has its upgrade set rebuilt. Returns what could not be done.
+    fn settle(&mut self) -> Vec<String> {
+        let mut problems = Vec::new();
+        for (file, path, before, form) in std::mem::take(&mut self.views) {
+            let after = match catalog::read(&file, form, idcams::page()) {
+                Ok(a) => a,
+                Err(e) => {
+                    problems.push(format!("path {}: {e}", path.name));
+                    continue;
+                }
+            };
+            if after != before
+                && let Err(e) = idcams::write_through(self, &path, &before, &after)
+            {
+                problems.push(format!("path {}: {e}", path.name));
+            }
+        }
+        for (base, bytes) in std::mem::take(&mut self.watched) {
+            if fs::read(self.catalog_path(&base)).ok().as_deref() != Some(&bytes[..])
+                && let Err(e) = idcams::upgrade(self, &base)
+            {
+                problems.push(format!("upgrade set of {base}: {e}"));
+            }
+        }
+        problems
+    }
+
+    /// The name of the catalogued data set at `path`, when it is one.
+    fn name_of(&self, path: &Path) -> Option<String> {
+        let name = path.strip_prefix(&self.datasets).ok()?.to_str()?;
+        jcl::is_dsn(name).then(|| name.to_string())
     }
 
     fn dataset_path(&self, source: &Source) -> Option<PathBuf> {
@@ -383,6 +445,18 @@ impl Runner<'_> {
                     paths.push(path);
                 }
                 Source::Refer(path) => return Err(format!("DD {}: *.{path} was not resolved", dd.name)),
+                Source::Dataset { dsn, member: None } if self.path_entry(dsn).is_some() => {
+                    let path = self.path_entry(dsn).expect("a path's entry");
+                    if part.disp.status == Status::New {
+                        return Err(format!("DD {}: {dsn} is a path, which DEFINE PATH makes", dd.name));
+                    }
+                    let view = idcams::view(self, &path).map_err(|e| format!("DD {}: {e}", dd.name))?;
+                    let form = catalog::form(&catalog::Entry::Cluster(view.base.clone()), self.req.text);
+                    let file = fresh_name(&self.scratch, &mut self.files, &label);
+                    catalog::write(&file, form, &view.records, idcams::page()).map_err(|e| format!("DD {}: {e}", dd.name))?;
+                    self.views.push((file.clone(), path, view.records, form));
+                    paths.push(file);
+                }
                 source @ (Source::Dataset { .. } | Source::Temporary { .. }) => {
                     let path = self.dataset_path(source).expect("a data set has a path");
                     let (member, shown) = match source {
@@ -600,134 +674,6 @@ fn iebgener(dds: &[Allocated]) -> Result<i16, Failed> {
     let bytes = fs::read(&from.path).map_err(|e| Failed::abend(AbendCode::Ironwork, format!("SYSUT1: {e}")))?;
     put(&to.path, &bytes, to.append).map_err(|e| Failed::abend(AbendCode::Ironwork, format!("SYSUT2: {e}")))?;
     Ok(0)
-}
-
-/// IDCAMS over the step's SYSIN: each command's condition code is LASTCC, the highest is MAXCC
-/// and the step's return code, and a code of 16 ends the commands. Messages go to SYSPRINT.
-fn idcams(runner: &Runner<'_>, dds: &[Allocated]) -> i16 {
-    use jcl::idcams::{Command, Target};
-    let dd = |n: &str| dds.iter().find(|d| d.name == n);
-    let mut print = Vec::new();
-    let cards = dd("SYSIN").and_then(|d| fs::read_to_string(&d.path).ok()).map(|t| t.lines().map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
-    let commands = match jcl::idcams::parse(&cards) {
-        Ok(c) => c,
-        Err(e) => {
-            print.push(format!("IDCAMS: {e}"));
-            print.push("IDC0002I IDCAMS PROCESSING COMPLETE. MAXIMUM CONDITION CODE WAS 12".into());
-            write_print(dd("SYSPRINT"), &print);
-            return 12;
-        }
-    };
-    let text_of = |t: &Target| match t {
-        Target::Dd(n) => dd(n).map(|d| (d.path.clone(), d.text, d.append)),
-        Target::Dataset(name) => Some((runner.catalog_path(name), runner.req.text, false)),
-    };
-    let shown = |t: &Target| match t {
-        Target::Dd(n) => format!("DD {n}"),
-        Target::Dataset(n) => n.clone(),
-    };
-    fn run(commands: &[Command], cc: &mut (u16, u16), print: &mut Vec<String>, act: &mut dyn FnMut(&Command, &mut Vec<String>) -> u16) {
-        for c in commands {
-            if cc.1 >= 16 {
-                return;
-            }
-            match c {
-                Command::Set { max: true, value } => cc.1 = *value,
-                Command::Set { max: false, value } => {
-                    cc.0 = *value;
-                    cc.1 = cc.1.max(*value);
-                }
-                Command::If { max, op, value, then, otherwise } => {
-                    let tested = if *max { cc.1 } else { cc.0 };
-                    let branch = if op.holds(tested, *value) { then } else { otherwise };
-                    run(branch, cc, print, act);
-                }
-                other => {
-                    let code = act(other, print);
-                    print.push(format!("IDC0001I FUNCTION COMPLETED, HIGHEST CONDITION CODE WAS {code}"));
-                    cc.0 = code;
-                    cc.1 = cc.1.max(code);
-                }
-            }
-        }
-    }
-    let mut act = |c: &Command, print: &mut Vec<String>| -> u16 {
-        match c {
-            Command::Delete(names) => {
-                let mut code = 0;
-                for name in names {
-                    if runner.gdg(name).is_some() {
-                        for number in runner.generations(name) {
-                            let _ = fs::remove_file(runner.datasets.join(format!("{name}.G{number:04}V00")));
-                        }
-                    }
-                    match delete_data_set(&runner.catalog_path(name)) {
-                        Ok(()) => print.push(format!("IDC0550I ENTRY (A) {name} DELETED")),
-                        Err(_) => {
-                            print.push(format!("IDC3012I ENTRY {name} NOT FOUND"));
-                            code = 8;
-                        }
-                    }
-                }
-                code
-            }
-            Command::DefineGdg { name, limit, scratch, empty } => {
-                let path = runner.catalog_path(name);
-                if path.exists() {
-                    print.push(format!("ironwork: DEFINE GDG {name}: the name is in use"));
-                    return 12;
-                }
-                match fs::write(&path, gdg_text(*limit, *scratch, *empty)) {
-                    Ok(()) => 0,
-                    Err(e) => {
-                        print.push(format!("ironwork: DEFINE GDG {name}: {e}"));
-                        12
-                    }
-                }
-            }
-            Command::DefineCluster(name) => {
-                let path = runner.catalog_path(name);
-                if path.exists() {
-                    print.push(format!("ironwork: DEFINE CLUSTER {name}: the data set exists"));
-                    return 12;
-                }
-                match fs::write(&path, b"").and_then(|()| exec::files::clear_open_mark(&path)) {
-                    Ok(()) => 0,
-                    Err(e) => {
-                        print.push(format!("ironwork: DEFINE CLUSTER {name}: {e}"));
-                        12
-                    }
-                }
-            }
-            Command::Repro { from, to } => {
-                let (Some((source, source_text, _)), Some((target, target_text, append))) = (text_of(from), text_of(to)) else {
-                    print.push(format!("ironwork: REPRO: {} or {} is not allocated to the step", shown(from), shown(to)));
-                    return 12;
-                };
-                if source_text != target_text {
-                    print.push(format!("ironwork: REPRO from {} to {}: one holds UTF-8 lines and the other z/OS records", shown(from), shown(to)));
-                    return 12;
-                }
-                if !target.is_file() {
-                    print.push(format!("ironwork: REPRO: {} does not exist", shown(to)));
-                    return 12;
-                }
-                match fs::read(&source).and_then(|b| put(&target, &b, append)).and_then(|()| exec::files::clear_open_mark(&target)) {
-                    Ok(()) => 0,
-                    Err(e) => {
-                        print.push(format!("ironwork: REPRO from {} to {}: {e}", shown(from), shown(to)));
-                        12
-                    }
-                }
-            }
-            Command::Set { .. } | Command::If { .. } => 0,
-        }
-    };
-    let mut cc = (0u16, 0u16);
-    run(&commands, &mut cc, &mut print, &mut act);
-    print.push(format!("IDC0002I IDCAMS PROCESSING COMPLETE. MAXIMUM CONDITION CODE WAS {}", cc.1));
-    write_print(dd("SYSPRINT"), &print);
-    cc.1 as i16
 }
 
 fn write_print(dd: Option<&Allocated>, lines: &[String]) {
@@ -1069,7 +1015,7 @@ pub fn run(req: Request) -> ExitCode {
     };
     let inputs: Vec<(String, Value)> = if req.expected.is_some() { files_under(&datasets).into_iter().map(|(n, p)| (n, crate::compare::digest_of(fs::read(p).ok().as_deref()))).collect() } else { Vec::new() };
     let coverage = req.coverage.as_ref().map(|_| RefCell::new(Default::default()));
-    let mut runner = Runner { req: &req, datasets, scratch, temporaries: BTreeMap::new(), gdg_start: BTreeMap::new(), passed_new: BTreeSet::new(), files: 0, coverage };
+    let mut runner = Runner { req: &req, datasets, scratch, temporaries: BTreeMap::new(), gdg_start: BTreeMap::new(), passed_new: BTreeSet::new(), files: 0, coverage, views: Vec::new(), watched: Vec::new() };
     let roots: Vec<PathBuf> = std::iter::once(req.jcl.parent().map(Path::to_path_buf).unwrap_or_default())
         .chain([req.datasets.clone()])
         .chain(req.libraries.iter().cloned())
@@ -1177,11 +1123,13 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                 }
                 if let Some(e) = jcl_error {
                     log(name, &step.pgm, format!("JCL ERROR: {e}; the job ends"));
+                    runner.views.clear();
                     runner.dispose(disposals, true);
                     stopped.get_or_insert(Outcome::Abend);
                     ended = true;
                     continue;
                 }
+                runner.watch(&dds);
                 let program = program_of(&step.pgm, &runner.req.program_dirs);
                 let source = match &program {
                     Program::Cobol(path) => path.display().to_string(),
@@ -1198,7 +1146,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                 let outcome = match program {
                     Program::Iefbr14 => Ok(0),
                     Program::Iebgener => iebgener(&dds),
-                    Program::Idcams => Ok(idcams(runner, &dds)),
+                    Program::Idcams => Ok(idcams::run(runner, &dds)),
                     Program::Sort => sort_step(&dds),
                     Program::Cobol(path) => {
                         programs.insert(path.clone());
@@ -1221,6 +1169,9 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                 if let Some(run) = run.and_then(|r| Rc::try_unwrap(r).ok()) {
                     let abend = outcome.as_ref().err().map(|failed| (failed.code.to_string(), place.as_ref().and_then(|(f, _)| f.as_deref()), place.as_ref().map_or(0, |(_, l)| *l)));
                     *journal.borrow_mut() = Some(run.into_inner().end(abend));
+                }
+                for problem in runner.settle() {
+                    eprintln!("ironwork job {}: {name} {problem}", job.name);
                 }
                 match outcome {
                     Ok(rc) => {

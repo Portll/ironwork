@@ -221,10 +221,10 @@ fn members_of_a_partitioned_data_set_are_files_in_its_directory() {
 #[test]
 fn what_ironwork_does_not_run_is_refused_before_any_step() {
     let dir = temp("refuse");
-    let o = job(&dir, "//S1 EXEC PGM=IEFBR14\n//NEW DD DSN=MADE.EARLY,DISP=(NEW,CATLG)\n//S2 EXEC PGM=ICETOOL\n//S4 EXEC PGM=IDCAMS\n//SYSIN DD *\n  LISTCAT ALL\n");
+    let o = job(&dir, "//S1 EXEC PGM=IEFBR14\n//NEW DD DSN=MADE.EARLY,DISP=(NEW,CATLG)\n//S2 EXEC PGM=ICETOOL\n//S4 EXEC PGM=IDCAMS\n//SYSIN DD *\n  VERIFY FILE(X)\n");
     assert_eq!(o.status.code(), Some(244));
     let l = log(&o);
-    assert!(l.contains("PGM=ICETOOL is not supported yet") && l.contains("IDCAMS: the IDCAMS command LISTCAT is not supported yet"), "{l}");
+    assert!(l.contains("PGM=ICETOOL is not supported yet") && l.contains("IDCAMS: the IDCAMS command VERIFY is not supported yet"), "{l}");
     assert!(!dir.join("data/MADE.EARLY").exists());
     let o = job(&dir, "//S1 EXEC MYPROC\n");
     assert_eq!(o.status.code(), Some(244));
