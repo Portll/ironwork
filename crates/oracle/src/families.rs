@@ -69,7 +69,8 @@ fn classify(left: &str, right: &str, result: &str) -> Vec<String> {
     ))
 }
 
-/// Each code page's conversion to UTF-16 through the compiler's own conversion services.
+/// Each code page's conversion to UTF-16 through the compiler's own conversion services. A mixed
+/// page reads X'0E' and X'0F' as shifts, which are no characters, so national spaces pad the rest.
 fn national_of() -> Vec<Case> {
     let bytes: Vec<u8> = (0..=255).collect();
     CodePage::all()
@@ -78,7 +79,7 @@ fn national_of() -> Vec<Case> {
             ibm_only: true,
             items: vec!["05 N-% PIC N(256) USAGE NATIONAL.".into()],
             statements: vec![format!("MOVE FUNCTION NATIONAL-OF(ALL-BYTES, {}) TO N-%", page.ccsid)],
-            expect: page.to_utf16be(&bytes),
+            expect: page.to_utf16be(&bytes).into_iter().chain([0x00, 0x20].into_iter().cycle()).take(512).collect(),
             ..case(format!("nat.{}", page.ccsid), vec![a::CCSID_TABLES])
         })
         .collect()

@@ -27,6 +27,8 @@ pub enum Const {
     /// An alphanumeric literal, or ALL one, the code page cannot encode: reading it abends, as
     /// `literal_value` does each time it converts the literal.
     Refused(AbendId),
+    /// A DBCS literal's bytes in the code page's DBCS component.
+    Dbcs(Vec<u8>),
 }
 
 /// `Fixed` locates each place of `prepass` before it evaluates `expr`, as the walker's dmax pass
@@ -88,6 +90,9 @@ pub enum Compare {
     /// A zoned integer, the first operand when `zoned_first`, against a nonnumeric one: its bytes
     /// as `rt::store::compared_zoned_bytes` gives them, never its value, compared as alphanumeric.
     ZonedBytes { zoned_first: bool },
+    /// A DBCS operand against DBCS, SPACE, ALL or a group, padded with DBCS spaces and in binary
+    /// order, or against national through the code page.
+    Dbcs,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,6 +103,10 @@ pub enum ByteClass {
     Alphabetic,
     AlphabeticLower,
     AlphabeticUpper,
+    /// Two bytes a character, each X'41' to X'FE', or X'4040'.
+    Dbcs,
+    /// Two bytes a character, the first X'41' to X'7E' and the second X'41' to X'FE', or X'4040'.
+    Kanji,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -124,7 +133,7 @@ pub enum SqlTest {
 }
 
 codec_enum!(Operand { Load(place) = 0, Const(id) = 1, LengthOf(place) = 2, AddressOf(place) = 3, Function(id) = 4, UserFunction(id) = 5 });
-codec_enum!(Const { Bytes(b) = 0, National(n) = 1, Number(f) = 2, Figurative(f) = 3, All(b) = 4, Refused(abend) = 5, AllNational(n) = 6 });
+codec_enum!(Const { Bytes(b) = 0, National(n) = 1, Number(f) = 2, Figurative(f) = 3, All(b) = 4, Refused(abend) = 5, AllNational(n) = 6, Dbcs(b) = 7 });
 codec_enum!(IntExpr { Const(n) = 0, Item(place) = 1, Fixed { expr, dmax, prepass } = 2, Walk(k) = 3 });
 codec_enum!(Expr { Operand(o) = 0, Neg(e) = 1, Bin(a, op, b) = 2, Pow(base, exponent) = 3 });
 codec_enum!(Cond {
@@ -150,8 +159,9 @@ codec_enum!(Compare {
     Refused(abend) = 6,
     References = 7,
     ZonedBytes { zoned_first } = 8,
+    Dbcs = 9,
 });
-codec_enum!(ByteClass { Packed { signed } = 0, Zoned { signed } = 1, Digits = 2, Alphabetic = 3, AlphabeticLower = 4, AlphabeticUpper = 5 });
+codec_enum!(ByteClass { Packed { signed } = 0, Zoned { signed } = 1, Digits = 2, Alphabetic = 3, AlphabeticLower = 4, AlphabeticUpper = 5, Dbcs = 6, Kanji = 7 });
 codec_enum!(SignTest { Positive = 0, Negative = 1, Zero = 2 });
 codec_enum!(Count { Fixed(n) = 0, Odo(odo) = 1, Temp(temp) = 2 });
 codec_enum!(SqlTest { Error = 0, NotFound = 1, Warning = 2 });

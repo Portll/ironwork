@@ -727,6 +727,18 @@ fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, pic: Option<&picture::
         }
         (Category::Numeric, Usage::Binary | Usage::NativeBinary) => return Err(err("a binary item holds at most 18 digits".into())),
         (Category::Alphanumeric, Usage::Display) => Kind::Alnum { justified: e.justified },
+        (Category::Dbcs | Category::National, Usage::Dbcs) => {
+            if pic.edit.is_some() && e.justified {
+                return Err(err("JUSTIFIED cannot be given for a DBCS item whose PICTURE has B".into()));
+            }
+            let edit = pic.edit.clone().map(|syms| {
+                edits.push(syms);
+                edits.len() as u32 - 1
+            });
+            Kind::Dbcs { justified: e.justified, edit }
+        }
+        (Category::Dbcs, _) => return Err(err("a PICTURE with G needs USAGE DISPLAY-1 (Language Reference SC27-8713-03, p. 214)".into())),
+        (Category::National, Usage::Display | Usage::National) if pic.edit.is_some() => return Err(err("a national-edited PICTURE is not supported yet".into())),
         (Category::National, Usage::Display | Usage::National) => Kind::National,
         (category, usage) => return Err(err(format!("a {category:?} PICTURE with USAGE {usage:?} is not supported yet"))),
     };
@@ -740,7 +752,7 @@ fn elementary_size(item: &Item, e_size: Option<u32>) -> u32 {
     match item.kind {
         Kind::Group => 0,
         Kind::Alnum { .. } | Kind::NumericEdited { .. } | Kind::AlnumEdited { .. } => e_size.unwrap_or(0),
-        Kind::National => 2 * e_size.unwrap_or(0),
+        Kind::National | Kind::Dbcs { .. } => 2 * e_size.unwrap_or(0),
         Kind::Zoned { digits, sign, .. } => digits + sign.is_some_and(|s| s.separate) as u32,
         Kind::Packed { digits, .. } => digits / 2 + 1,
         Kind::Binary { digits, .. } => match digits {
@@ -855,6 +867,7 @@ impl Layout {
             Kind::Alnum { .. } => DataCategory::Alphanumeric,
             Kind::AlnumEdited { .. } => DataCategory::AlphanumericEdited,
             Kind::National => DataCategory::National,
+            Kind::Dbcs { .. } => DataCategory::Dbcs,
             Kind::NumericEdited { .. } => DataCategory::NumericEdited,
             Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Float(_) => DataCategory::Numeric,
             Kind::Group | Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer => return None,

@@ -239,6 +239,7 @@ impl Lower<'_> {
             Kind::Alnum { justified } => Convert::Chars { justified },
             Kind::AlnumEdited { .. } | Kind::NumericEdited { .. } | Kind::Group => Convert::Chars { justified: false },
             Kind::National => Convert::National,
+            Kind::Dbcs { .. } => Convert::Dbcs,
             Kind::Float(precision) => Convert::Float(precision),
             Kind::Zoned { digits, scale, .. } | Kind::Packed { digits, scale, .. } => fixed(digits.saturating_sub(scale) + scaling),
             Kind::Binary { digits, scale, native, .. } => fixed(binary_integers(digits, scale, native)),

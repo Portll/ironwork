@@ -23,6 +23,7 @@ pub fn host_type(layout: &Layout, item: usize) -> Result<HostType, String> {
         Kind::Float(Precision::Short) => HostType::Real,
         Kind::Float(Precision::Long) => HostType::Double,
         Kind::Alnum { .. } => HostType::Char(it.size),
+        Kind::Dbcs { edit: None, .. } => HostType::Graphic(it.size / 2),
         Kind::Group => structure(layout, item, name)?,
         _ => return Err(format!("{name}: this USAGE or PICTURE has no SQL type")),
     })
@@ -34,8 +35,12 @@ fn structure(layout: &Layout, item: usize, name: &str) -> Result<HostType, Strin
     let members: Vec<usize> = layout.items[item].children.iter().copied().filter(|&c| layout.items[c].redefines.is_none()).collect();
     if let [length, text] = members[..] {
         let (l, t) = (&layout.items[length], &layout.items[text]);
-        if l.level == 49 && t.level == 49 && l.size == 2 && matches!(l.kind, Kind::Binary { scale: 0, .. }) && matches!(t.kind, Kind::Alnum { .. }) {
-            return Ok(HostType::VarChar(t.size));
+        if l.level == 49 && t.level == 49 && l.size == 2 && matches!(l.kind, Kind::Binary { scale: 0, .. }) {
+            match t.kind {
+                Kind::Alnum { .. } => return Ok(HostType::VarChar(t.size)),
+                Kind::Dbcs { edit: None, .. } => return Ok(HostType::VarGraphic(t.size / 2)),
+                _ => {}
+            }
         }
     }
     let mut out = Vec::new();

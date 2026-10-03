@@ -429,7 +429,8 @@ Checked against a build of `main` over the 3,494 programs in the 500-repository 
 EXEC SQL, both builds accept the same 362 programs.
 
 Step 2:
-- `exec/src/sql/`: `Value`, `HostType` from the layout (including VARCHAR and host structures),
+- `exec/src/sql/`: `Value`, `HostType` from the layout (including VARCHAR, GRAPHIC and VARGRAPHIC
+  from DBCS items, and host structures),
   and `read` and `write` by Db2's assignment rules;
 - `exec/src/codec.rs`: the packed and zoned reads, moved out of `Machine`, which now calls them,
   so a host variable sends exactly what a COMPUTE would read.

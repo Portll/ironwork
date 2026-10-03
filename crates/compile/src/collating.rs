@@ -144,6 +144,7 @@ fn characters(literal: &Literal, page: &CodePage, quote: Quote) -> Result<Vec<u8
         Literal::Figurative(Figurative::Null) => return Err("NULL cannot be in an ALPHABET clause".into()),
         Literal::Figurative(f) => vec![native_figurative(*f, quote)],
         Literal::National(_) => return Err("a national literal cannot be in an ALPHABET clause".into()),
+        Literal::Dbcs(_) => return Err("a DBCS literal cannot be in an ALPHABET clause".into()),
         Literal::All(_) => return Err("ALL cannot be in an ALPHABET clause".into()),
     })
 }

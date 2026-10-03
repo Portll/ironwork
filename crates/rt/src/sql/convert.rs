@@ -49,6 +49,14 @@ pub fn read(bytes: &[u8], ty: &HostType, page: &CodePage, numproc: Numproc) -> R
             }
             Value::Char(page.decode(&bytes[2..2 + len as usize]))
         }
+        HostType::Graphic(_) => Value::Char(page.decode_dbcs(bytes)),
+        HostType::VarGraphic(max) => {
+            let len = i16::from_be_bytes([bytes[0], bytes[1]]);
+            if len < 0 || len as u32 > max {
+                return Err(ReadError::Sql(BAD_LENGTH));
+            }
+            Value::Char(page.decode_dbcs(&bytes[2..2 + 2 * len as usize]))
+        }
         HostType::Structure(_) => unreachable!("a host structure is read member by member"),
     })
 }
@@ -74,6 +82,20 @@ pub fn write(value: &Value, bytes: &mut [u8], ty: &HostType, page: &CodePage) ->
             bytes[..2].copy_from_slice(&(n as u16).to_be_bytes());
             bytes[2..2 + n].copy_from_slice(&t[..n]);
             return Ok(Written { truncated_from: (t.len() > n).then_some(t.len()) });
+        }
+        HostType::Graphic(len) => {
+            let t = graphic(value, page)?;
+            let n = t.len().min(2 * len as usize);
+            bytes[..n].copy_from_slice(&t[..n]);
+            bytes[n..].fill(0x40);
+            return Ok(Written { truncated_from: (t.len() > n).then_some(t.len() / 2) });
+        }
+        HostType::VarGraphic(max) => {
+            let t = graphic(value, page)?;
+            let n = t.len().min(2 * max as usize);
+            bytes[..2].copy_from_slice(&((n / 2) as u16).to_be_bytes());
+            bytes[2..2 + n].copy_from_slice(&t[..n]);
+            return Ok(Written { truncated_from: (t.len() > n).then_some(t.len() / 2) });
         }
         HostType::Structure(_) => unreachable!("a host structure is written member by member"),
     }
@@ -210,6 +232,16 @@ fn text(value: &Value, page: &CodePage) -> Result<Vec<u8>, SqlError> {
     }
 }
 
+/// A value's DBCS characters, two bytes each, in the code page's DBCS component; under a page with
+/// none, or for a character it lacks, the value cannot be converted (assumption
+/// [`numeric::assumptions::DBCS_HOST_VARIABLES`]).
+fn graphic(value: &Value, page: &CodePage) -> Result<Vec<u8>, SqlError> {
+    match value {
+        Value::Char(s) => page.dbcs().ok_or(UNCONVERTIBLE)?.encode(s, page.ccsid).map_err(|_| UNCONVERTIBLE),
+        _ => Err(NOT_ASSIGNABLE),
+    }
+}
+
 /// A fixed-length string: padded with the code page's space, or cut and reported.
 fn store_text(t: &[u8], bytes: &mut [u8], page: &CodePage) -> Result<Written, SqlError> {
     let n = t.len().min(bytes.len());
@@ -237,6 +269,23 @@ mod tests {
     }
 
     const S5V2_PACKED: HostType = HostType::Decimal { digits: 7, scale: 2, signed: true };
+
+    #[test]
+    fn graphic_host_variables_are_dbcs_characters_through_the_code_page() {
+        let p939 = CodePage::by_ccsid(939).expect("CCSID 939 is carried");
+        assert_eq!(read(&[0x44, 0x81, 0x40, 0x40], &HostType::Graphic(2), p939, Numproc::Nopfd), Ok(Value::Char("あ\u{3000}".into())));
+        let mut bytes = vec![0xEE; 4];
+        assert_eq!(write(&Value::Char("日本語".into()), &mut bytes, &HostType::Graphic(2), p939), Ok(Written { truncated_from: Some(3) }));
+        assert_eq!(&bytes[..2], [0x45, 0x62]);
+        assert_eq!(write(&Value::Char("あ".into()), &mut bytes, &HostType::Graphic(2), p939), Ok(Written::default()));
+        assert_eq!(bytes, [0x44, 0x81, 0x40, 0x40], "padded with the DBCS space");
+        let mut varying = vec![0xEE; 8];
+        assert_eq!(write(&Value::Char("あ".into()), &mut varying, &HostType::VarGraphic(3), p939), Ok(Written::default()));
+        assert_eq!(&varying[..4], [0x00, 0x01, 0x44, 0x81]);
+        assert_eq!(read(&varying, &HostType::VarGraphic(3), p939, Numproc::Nopfd), Ok(Value::Char("あ".into())));
+        assert_eq!(read(&[0x00, 0x04, 0, 0, 0, 0, 0, 0], &HostType::VarGraphic(3), p939, Numproc::Nopfd), Err(ReadError::Sql(BAD_LENGTH)));
+        assert_eq!(put(Value::Char("あ".into()), 4, &HostType::Graphic(2)).1, Err(UNCONVERTIBLE), "CCSID 37 has no DBCS characters");
+    }
 
     #[test]
     fn binary_host_variables() {

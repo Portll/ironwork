@@ -258,6 +258,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         Ok(match convert {
             Convert::Chars { justified } => chars(&self.facts().page().decode(&bytes), justified),
             Convert::National => chars(&utf16_text(&bytes), false),
+            Convert::Dbcs => chars(&self.facts().page().decode_dbcs(&bytes), false),
             Convert::Float(precision) => Converted::Number(json::float_number(Hfp::from_bytes(precision, &bytes), if precision == Precision::Short { 8 } else { 17 })),
             Convert::Fixed { integers } | Convert::Scaled { integers, .. } => {
                 let scaling = if let Convert::Scaled { scaling, .. } = convert { Some(scaling) } else { None };

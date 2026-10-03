@@ -45,7 +45,7 @@ impl Lower<'_> {
     /// pointer item's bytes as stored.
     pub(super) fn move_plan(&mut self, from: &Side, to: Kind, item: Option<usize>) -> R<MovePlan> {
         let refused = |lower: &mut Self, message: &str| lower.ironwork(message).map(MovePlan::Refused);
-        let unconverted = matches!(to, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Float(_) | Kind::NumericEdited { .. } | Kind::AlnumEdited { .. });
+        let unconverted = matches!(to, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Float(_) | Kind::NumericEdited { .. } | Kind::AlnumEdited { .. } | Kind::Dbcs { .. });
         if from.src == Some(Kind::Group) && unconverted {
             return Ok(MovePlan::Alnum { image: Image::Bytes, justified: false });
         }
@@ -70,8 +70,13 @@ impl Lower<'_> {
             Kind::National => match from.value {
                 Value::National => MovePlan::National(NationalFrom::Units),
                 Value::Bytes => MovePlan::National(NationalFrom::Decoded),
+                Value::Dbcs => MovePlan::National(NationalFrom::Dbcs),
                 Value::Fig(_) => MovePlan::National(NationalFrom::Figurative),
                 _ => refused(self, "this value cannot be moved to a national item")?,
+            },
+            Kind::Dbcs { justified, edit } => match from.value {
+                Value::Dbcs | Value::Fig(Figurative::Space) | Value::All => MovePlan::Dbcs { justified, edit },
+                _ => refused(self, "only DBCS data or SPACE can be moved to a DBCS item")?,
             },
             Kind::Pointer | Kind::ObjectReference | Kind::ProgramPointer => match from.value {
                 Value::Address | Value::Fig(Figurative::Null) => MovePlan::Address,
@@ -94,6 +99,7 @@ impl Lower<'_> {
                         _ => NumericFrom::Zoned,
                     },
                     Value::National => return refused(self, "a national value cannot be moved to a numeric item"),
+                    Value::Dbcs => return refused(self, "a DBCS value cannot be moved to a numeric item"),
                     Value::Address => return refused(self, "a pointer cannot be moved to a numeric item"),
                 };
                 MovePlan::Numeric { from: numeric_from, store: self.store_plan(to, item)? }
@@ -214,7 +220,7 @@ impl Lower<'_> {
                 (Some(_), _) => {
                     let (fill, from) = match item.kind {
                         Kind::Pointer => (Figurative::Null, Value::Address),
-                        Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::National => (Figurative::Space, Value::Fig(Figurative::Space)),
+                        Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::National | Kind::Dbcs { .. } => (Figurative::Space, Value::Fig(Figurative::Space)),
                         _ => (Figurative::Zero, Value::Fig(Figurative::Zero)),
                     };
                     (InitValue::Default(fill), Side { value: from, src: None, digits: 0 }, item.kind)
@@ -277,6 +283,7 @@ impl Lower<'_> {
             Literal::Alnum(s) => self.page.decode(&self.encode(s, pos)?),
             Literal::Hex(b) => self.page.decode(b),
             Literal::National(s) => String::from_utf16_lossy(&s.encode_utf16().collect::<Vec<_>>()),
+            Literal::Dbcs(s) => self.page.decode_dbcs(&self.dbcs(s, pos)?),
             Literal::Number(t) => t.clone(),
             Literal::Figurative(f) => self.page.decode_byte(self.c.collating.figurative(*f)).to_string(),
             Literal::All(inner) => match &**inner {
@@ -290,7 +297,7 @@ impl Lower<'_> {
 /// `alnum_image`: the bytes an alphanumeric receiver takes from a sender, or why it refuses them.
 fn image(from: &Side) -> Result<Image, &'static str> {
     match from.value {
-        Value::Bytes => Ok(Image::Bytes),
+        Value::Bytes | Value::Dbcs => Ok(Image::Bytes),
         Value::All => Ok(Image::All),
         Value::Fig(_) => Ok(Image::Figurative),
         Value::Num(Some(0)) => Ok(Image::Digits { digits: from.digits }),

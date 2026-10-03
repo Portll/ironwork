@@ -11,6 +11,9 @@ pub enum Kind {
     Group,
     Alnum { justified: bool },
     National,
+    /// USAGE DISPLAY-1: DBCS characters, two bytes each, X'4040' the space. `edit` indexes the
+    /// layout's edited PICTUREs for one with B, a position that always holds a DBCS space.
+    Dbcs { justified: bool, edit: Option<u32> },
     Zoned { digits: u32, scale: u32, signed: bool, sign: Option<SignClause> },
     Packed { digits: u32, scale: u32, signed: bool },
     Binary { digits: u32, scale: u32, signed: bool, native: bool },
@@ -58,6 +61,8 @@ pub struct Loc {
 pub enum Val {
     Bytes(Vec<u8>),
     National(Vec<u8>),
+    /// DBCS characters, two bytes each, as a DBCS literal or item holds them.
+    Dbcs(Vec<u8>),
     Num(Fixed),
     Float(Hfp),
     Fig(Figurative),

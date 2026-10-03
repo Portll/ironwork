@@ -22,6 +22,7 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<Stri
     let separate = facts.options().dispsign == DispSign::Sep;
     Ok(match loc.kind {
         Kind::National => utf16_text(store::bytes(mem, loc)),
+        Kind::Dbcs { .. } => facts.page().decode_dbcs(store::bytes(mem, loc)),
         Kind::Packed { digits, signed, .. } | Kind::Binary { digits, signed, .. } if facts.options().dialect == Dialect::Gnucobol => {
             let Val::Num(f) = store::read_stored(facts, mem, loc, pos)? else { unreachable!() };
             let shown = match loc.kind {
@@ -102,6 +103,7 @@ pub fn value(facts: &dyn ProgramFacts, val: Val, pos: Pos) -> R<String> {
     Ok(match val {
         Val::Bytes(b) | Val::All(b) => facts.page().decode(&b),
         Val::National(b) | Val::AllNational(b) => utf16_text(&b),
+        Val::Dbcs(b) => facts.page().decode_dbcs(&b),
         Val::Fig(f) => facts.page().decode_byte(facts.figurative(f)).to_string(),
         Val::Num(f) => facts.page().decode(&zoned_digits(f.magnitude.to_u128().unwrap_or(0), f.places.total() as usize, decimal::UNSIGNED)),
         Val::Float(_) => return Err(Abend::ironwork("DISPLAY of a floating-point value is not supported yet", pos)),

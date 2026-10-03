@@ -1,7 +1,8 @@
 //! Editing: a numeric value laid into a numeric-edited PICTURE, alphanumeric data into an
-//! alphanumeric-edited one, and de-editing back to a number.
+//! alphanumeric-edited one, DBCS data into a DBCS one with B, and de-editing back to a number.
 
 use crate::picture::Sym;
+use zarch::ebcdic;
 
 /// The characters a numeric-edited item holds for a value. `magnitude` is already aligned to the
 /// PICTURE's decimal places and within its digit positions. `point` is what a decimal point
@@ -102,6 +103,18 @@ pub fn alphanumeric(syms: &[Sym], data: &[u8], space: u8, encode: impl Fn(char) 
         .map(|s| match s {
             Sym::Insert(c) => encode(*c),
             _ => source.next().copied().unwrap_or(space),
+        })
+        .collect()
+}
+
+/// DBCS data laid into a DBCS PICTURE with B: two bytes of the data fill each G or N position in
+/// order, a DBCS space each position the data does not reach, and each B is a DBCS space.
+pub fn dbcs(syms: &[Sym], data: &[u8]) -> Vec<u8> {
+    let mut source = data.as_chunks::<2>().0.iter();
+    syms.iter()
+        .flat_map(|s| match s {
+            Sym::Insert(_) => [ebcdic::SPACE; 2],
+            _ => source.next().copied().unwrap_or([ebcdic::SPACE; 2]),
         })
         .collect()
 }

@@ -206,6 +206,7 @@ impl<'p> Machine<'p, '_, '_> {
             Kind::Alnum { justified } => chars(&self.page.decode(&bytes), justified),
             Kind::AlnumEdited { .. } | Kind::NumericEdited { .. } | Kind::Group => chars(&self.page.decode(&bytes), false),
             Kind::National => chars(&utf16_text(&bytes), false),
+            Kind::Dbcs { .. } => chars(&self.page.decode_dbcs(&bytes), false),
             Kind::Float(precision) => Converted::Number(text::float_number(Hfp::from_bytes(precision, &bytes), if precision == Precision::Short { 8 } else { 17 })),
             Kind::Zoned { digits, scale, .. } | Kind::Packed { digits, scale, .. } => Converted::Number(self.json_fixed(loc, digits.saturating_sub(scale) + store::scaling(&self.facts(), loc), pos)?),
             Kind::Binary { digits, scale, native, .. } => {

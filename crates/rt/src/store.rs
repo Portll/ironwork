@@ -106,6 +106,7 @@ pub fn read_stored(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> 
     Ok(match loc.kind {
         Kind::Group | Kind::Alnum { .. } | Kind::NumericEdited { .. } | Kind::AlnumEdited { .. } => Val::Bytes(bytes.to_vec()),
         Kind::National => Val::National(bytes.to_vec()),
+        Kind::Dbcs { .. } => Val::Dbcs(bytes.to_vec()),
         Kind::Pointer | Kind::ObjectReference | Kind::ProgramPointer => Val::Address(u32::from_be_bytes(bytes.try_into().unwrap())),
         Kind::Index => Val::Num(Fixed::new(i32::from_be_bytes(bytes.try_into().unwrap()) as i128, Places::new(9, 0))),
         Kind::Float(p) => Val::Float(Hfp::from_bytes(p, bytes)),
@@ -148,7 +149,7 @@ pub fn zoned_value(numproc: Numproc, bytes: &[u8], signed: bool, sign: Option<Si
 /// figurative constant as one character, a numeric literal as its digits.
 pub fn natural_bytes(facts: &dyn ProgramFacts, val: Val, pos: Pos) -> R<Vec<u8>> {
     Ok(match val {
-        Val::Bytes(b) | Val::All(b) | Val::National(b) | Val::AllNational(b) => b,
+        Val::Bytes(b) | Val::All(b) | Val::National(b) | Val::AllNational(b) | Val::Dbcs(b) => b,
         Val::Fig(f) => vec![facts.figurative(f)],
         Val::Num(f) => zoned_digits(f.magnitude.to_u128().unwrap_or(0), f.places.total() as usize, decimal::UNSIGNED),
         _ => return Err(Abend::ironwork("this operand has no characters to work on", pos)),
@@ -296,9 +297,10 @@ pub fn figurative_unit(f: Figurative, quote: Quote) -> u16 {
 pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, dest: Loc, val: Val, src: Option<Loc>, pos: Pos) -> R<()> {
     if let Some(s) = src
         && s.kind == Kind::Group
-        && matches!(dest.kind, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Float(_) | Kind::NumericEdited { .. } | Kind::AlnumEdited { .. })
+        && matches!(dest.kind, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Float(_) | Kind::NumericEdited { .. } | Kind::AlnumEdited { .. } | Kind::Dbcs { .. })
     {
-        // A group move converts nothing (Language Reference SC27-8713-03, p. 410).
+        // A group move converts nothing (Language Reference SC27-8713-03, p. 410); single-byte
+        // spaces pad a DBCS receiver, two of them a DBCS space (p. 214).
         let mut out = vec![ebcdic::SPACE; dest.len];
         let n = s.len.min(dest.len);
         out[..n].copy_from_slice(&bytes(&unit.mem, s)[..n]);
@@ -329,6 +331,7 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
                 Val::National(b) => b.chunks(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect(),
                 Val::AllNational(b) => b.chunks(2).map(|c| u16::from_be_bytes([c[0], c[1]])).cycle().take(dest.len / 2).collect(),
                 Val::Bytes(b) => page.decode(&b).encode_utf16().collect(),
+                Val::Dbcs(b) => page.decode_dbcs(&b).encode_utf16().collect(),
                 Val::Fig(f) => vec![figurative_unit(f, facts.options().quote); dest.len / 2],
                 _ => return Err(Abend::ironwork("this value cannot be moved to a national item", pos)),
             };
@@ -336,6 +339,28 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
             while out.len() < dest.len {
                 out.extend_from_slice(&0x0020u16.to_be_bytes());
             }
+            unit.write(dest.offset, &out);
+        }
+        Kind::Dbcs { justified, edit } => {
+            let image = match val {
+                Val::Dbcs(b) => b,
+                Val::Fig(Figurative::Space) => Vec::new(),
+                Val::All(b) if !b.is_empty() => b.iter().copied().cycle().take(dest.len).collect(),
+                _ => return Err(Abend::ironwork("only DBCS data or SPACE can be moved to a DBCS item", pos)),
+            };
+            let out = match edit {
+                Some(edit) => edit::dbcs(facts.edit(edit).0, &image),
+                None => {
+                    let mut out = vec![ebcdic::SPACE; dest.len];
+                    let n = image.len().min(dest.len);
+                    if justified {
+                        out[dest.len - n..].copy_from_slice(&image[image.len() - n..]);
+                    } else {
+                        out[..n].copy_from_slice(&image[..n]);
+                    }
+                    out
+                }
+            };
             unit.write(dest.offset, &out);
         }
         Kind::Pointer | Kind::ObjectReference | Kind::ProgramPointer => match val {
@@ -399,6 +424,7 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
                 store_fixed(facts, unit, dest, &v, false, pos)?;
             }
             Val::National(_) | Val::AllNational(_) => return Err(Abend::ironwork("a national value cannot be moved to a numeric item", pos)),
+            Val::Dbcs(_) => return Err(Abend::ironwork("a DBCS value cannot be moved to a numeric item", pos)),
             Val::Address(_) => return Err(Abend::ironwork("a pointer cannot be moved to a numeric item", pos)),
         },
         Kind::Float(p) => {
@@ -583,6 +609,7 @@ pub fn alnum_image(facts: &dyn ProgramFacts, val: &Val, src: Option<Loc>, len: u
             let digits = src.and_then(|s| s.kind.digits_scale().map(|(d, _)| d + scaling(facts, s))).unwrap_or(f.places.total());
             zoned_digits(f.magnitude.to_u128().unwrap_or(0), digits as usize, decimal::UNSIGNED)
         }
+        Val::Dbcs(b) => b.clone(),
         Val::National(_) | Val::AllNational(_) => return Err(Abend::ironwork("a national value cannot be moved to an alphanumeric item", pos)),
         _ => return Err(Abend::ironwork("only an integer numeric value can be moved to an alphanumeric item", pos)),
     })
@@ -722,7 +749,19 @@ pub fn byte_class(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, test: ByteClas
         ByteClass::Alphabetic => bytes.iter().all(|&b| b == ebcdic::SPACE || facts.page().decode_byte(b).is_ascii_alphabetic()),
         ByteClass::AlphabeticLower => bytes.iter().all(|&b| b == ebcdic::SPACE || facts.page().decode_byte(b).is_ascii_lowercase()),
         ByteClass::AlphabeticUpper => bytes.iter().all(|&b| b == ebcdic::SPACE || facts.page().decode_byte(b).is_ascii_uppercase()),
+        ByteClass::Dbcs | ByteClass::Kanji => {
+            let first = if test == ByteClass::Kanji { 0x41..=0x7E } else { 0x41..=0xFE };
+            bytes.len().is_multiple_of(2) && bytes.as_chunks::<2>().0.iter().all(|c| *c == [ebcdic::SPACE; 2] || first.contains(&c[0]) && (0x41..=0xFE).contains(&c[1]))
+        }
     }
+}
+
+/// A DBCS literal's bytes, two for each character, in the program's code page, which must be one
+/// of the mixed pages; a single-byte page has no DBCS characters (assumption
+/// [`numeric::assumptions::DBCS_UNDER_SINGLE_BYTE_PAGE`]).
+pub fn dbcs_literal(page: &CodePage, text: &str) -> Result<Vec<u8>, String> {
+    let dbcs = page.dbcs().ok_or_else(|| format!("CODEPAGE({}) is a single-byte page with no DBCS characters: a DBCS literal needs one of the mixed pages DBCS programs compile with", page.ccsid))?;
+    dbcs.encode(text, page.ccsid).map_err(|e| e.to_string())
 }
 
 /// POSITIVE, NEGATIVE or ZERO, tested on a value.
@@ -778,6 +817,26 @@ pub fn compare(facts: &dyn ProgramFacts, mem: &[u8], a: (Val, Option<Loc>), b: (
         (Val::National(x), Val::National(y)) => Ok(compare_national(x, y)),
         (Val::National(x), Val::AllNational(y)) => Ok(compare_national(x, &repeated(y, x.len()))),
         (Val::AllNational(x), Val::National(y)) => Ok(compare_national(&repeated(x, y.len()), y)),
+        (Val::Dbcs(_), Val::National(_)) | (Val::National(_), Val::Dbcs(_)) => {
+            let national = |v: &Val| match v {
+                Val::Dbcs(b) => facts.page().decode_dbcs(b).encode_utf16().flat_map(u16::to_be_bytes).collect(),
+                Val::National(b) => b.clone(),
+                _ => Vec::new(),
+            };
+            Ok(compare_national(&national(&va), &national(&vb)))
+        }
+        (Val::Dbcs(_), _) | (_, Val::Dbcs(_)) if [&va, &vb].into_iter().all(|v| matches!(v, Val::Dbcs(_) | Val::Fig(Figurative::Space) | Val::All(_))) => {
+            let len = [&va, &vb].into_iter().map(|v| if let Val::Dbcs(b) = v { b.len() } else { 0 }).max().unwrap_or(0);
+            let dbcs = |v: &Val| -> Vec<u8> {
+                match v {
+                    Val::Dbcs(b) => b.clone(),
+                    Val::All(b) if !b.is_empty() => b.iter().copied().cycle().take(len).collect(),
+                    _ => Vec::new(),
+                }
+            };
+            // DBCS comparisons ignore the collating sequence (Language Reference SC27-8713-03, pp. 79, 277).
+            Ok(ebcdic::compare_alphanumeric(&dbcs(&va), &dbcs(&vb), &ebcdic::Collation::Native))
+        }
         _ => {
             let (va, la) = stored_digits(facts, mem, va, la, pos)?;
             let (vb, lb) = stored_digits(facts, mem, vb, lb, pos)?;
@@ -853,7 +912,7 @@ pub fn stored_digits(facts: &dyn ProgramFacts, mem: &[u8], v: Val, loc: Option<L
 pub fn image_len(v: &Val, loc: Option<Loc>) -> usize {
     match (v, loc) {
         (_, Some(l)) if !l.kind.is_numeric() => l.len,
-        (Val::Bytes(b) | Val::All(b), _) => b.len(),
+        (Val::Bytes(b) | Val::All(b) | Val::Dbcs(b), _) => b.len(),
         (Val::Num(f), Some(l)) => l.kind.digits_scale().map_or(f.places.total(), |(d, _)| d) as usize,
         (Val::Num(f), None) => f.places.total() as usize,
         _ => 1,

@@ -87,7 +87,7 @@ rewritten.
 
 The cards also take APOST, which makes QUOTE an apostrophe; CURRENCY(literal), the currency symbol
 in place of $ where no CURRENCY SIGN clause gives one; NSYMBOL(DBCS), under which N literals and
-PICTURE N items with no USAGE would be DBCS, which ironwork refuses; DISPSIGN(SEP), which puts a
+PICTURE N items with no USAGE are DBCS (C212); DISPSIGN(SEP), which puts a
 signed binary, packed or overpunched zoned item's sign before its digits on DISPLAY; INTDATE(LILIAN),
 which counts the date functions' integer dates from 15 October 1582 and turns CALL 'CEECBLDY' into
 CEEDAYS; QUALIFY(EXTEND), under which a complete set of qualifiers names its one item; INITIAL,
@@ -345,7 +345,7 @@ The subset the interpreter runs today:
   cards, and COPY with REPLACING (whole words, pseudo-text, `==:TAG:==` inside words, LEADING,
   TRAILING), nested.
 - **Data:** WORKING-STORAGE, LOCAL-STORAGE, FILE SECTION and LINKAGE SECTION items in DISPLAY, BINARY, COMP-5,
-  PACKED-DECIMAL, COMP-1, COMP-2, NATIONAL, POINTER and INDEX; numeric-edited and
+  PACKED-DECIMAL, COMP-1, COMP-2, NATIONAL, DISPLAY-1, POINTER and INDEX; numeric-edited and
   alphanumeric-edited PICTUREs (zero suppression, `*`, floating `$ + -`, CR, DB, insertion, BLANK
   WHEN ZERO); scaling positions P at either end of the digits; VALUE, REDEFINES, OCCURS with KEY,
   INDEXED BY and DEPENDING ON, SIGN, SYNCHRONIZED with IBM's slack bytes before an item and after
@@ -605,9 +605,22 @@ per line; `--c-series` puts each entry's number in a single C series first, with
 
 `zarch/ucm/` holds IBM's tables as ICU publishes them, pinned to
 [unicode-org/icu-data@8d9eb3e2](https://github.com/unicode-org/icu-data/tree/8d9eb3e27e79f59dd76e278e58d68b4668835027/charset/data/ucm):
-CCSIDs 037, 273, 277, 278, 280, 284, 285, 297, 500, 871, 1047 and 1140–1149. `build.rs` turns them into
-tables at build time and refuses a table that does not map all 256 bytes. The ICU data is under the
-Unicode License v3.
+CCSIDs 037, 273, 277, 278, 280, 284, 285, 297, 500, 871, 1047 and 1140–1149, and the mixed pages DBCS
+programs compile with (the Programming Guide's Table 47): 930, 939, 1390, 1399, 5026 and 5035
+(Japanese), 933 and 1364 (Korean), 935 and 1388 (Simplified Chinese) and 937 (Traditional
+Chinese). `build.rs` turns them into tables at build time and refuses a single-byte table that does
+not map all 256 bytes. A mixed page's single bytes with no character read as U+001A, as IBM's
+conversions substitute, and its two-byte characters become one table for each distinct DBCS
+component, seven in all. The ICU data is under the Unicode License v3.
+
+DBCS data runs on both executors: PICTURE G, N under NSYMBOL(DBCS) or with USAGE DISPLAY-1, and B
+for a DBCS space; G and N literals; MOVE, padded with DBCS spaces, to DBCS, national and group
+items; comparison in binary order, or with a national item through the code page; the DBCS and KANJI
+classes; reference modification, STRING, UNSTRING and INSPECT in DBCS characters; INITIALIZE;
+LENGTH and NATIONAL-OF; JSON and XML GENERATE; and GRAPHIC and VARGRAPHIC host variables. Under a
+mixed CODEPAGE an alphanumeric literal or item may hold DBCS characters between shift-out and
+shift-in (C284), which DISPLAY and NATIONAL-OF convert. Under a single-byte CODEPAGE DBCS data shows
+the DBCS space as U+3000 and other characters as U+FFFD, and a DBCS literal ends the run (C282).
 
 Storage stays in EBCDIC; conversion happens only at I/O. Line feed is X'25' and next line X'15' in
 these tables, which is right for record-oriented data sets. z/OS UNIX text files swap the two.

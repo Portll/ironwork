@@ -91,7 +91,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 Some(l) => Some(self.int(l, pos)?),
                 None => None,
             };
-            let unit = if place.kind == Kind::National { 2 } else { 1 };
+            let unit = if matches!(place.kind, Kind::National | Kind::Dbcs { .. }) { 2 } else { 1 };
             let (from, length) = loc::refmod(len / unit, start, length, rm.check, name, pos)?;
             offset += from * unit;
             len = length * unit;

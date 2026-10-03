@@ -46,6 +46,8 @@ pub enum Convert {
     Chars { justified: bool },
     /// UTF-16 units, trimmed of trailing spaces.
     National,
+    /// DBCS characters through the code page's DBCS component, trimmed as `Chars` is.
+    Dbcs,
     /// COMP-1 (8 decimals) or COMP-2 (17).
     Float(Precision),
     /// Zoned, packed, binary and index items: the value, read as its kind reads it, with at least
@@ -352,7 +354,7 @@ impl XmlRegister {
 
 codec_enum!(Markup { JsonGenerate(g) = 0, XmlGenerate(g) = 1, XmlParse(p) = 2, JsonParse(p) = 3 });
 codec_enum!(Ccsid { Unnamed = 0, CodePage = 1, Operand(o) = 2 });
-codec_enum!(Convert { Chars { justified } = 0, National = 1, Float(precision) = 2, Fixed { integers } = 3, Refused(abend) = 4, Scaled { integers, scaling } = 5 });
+codec_enum!(Convert { Chars { justified } = 0, National = 1, Float(precision) = 2, Fixed { integers } = 3, Refused(abend) = 4, Scaled { integers, scaling } = 5, Dbcs = 6 });
 codec_enum!(Marker { Byte(b) = 0, Condition(c) = 1, Refused(abend) = 2 });
 codec_struct!(JsonGenerate { from, subscripts, nodes, name, receiver, encoding, count, code, on_exception, not_on_exception } check json_valid);
 codec_struct!(JsonNode { offset, moved, len, kind, name, occurs, indicator, null, value });

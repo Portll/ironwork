@@ -12,6 +12,7 @@ mod compliance;
 mod corresponding;
 mod data;
 mod data_division;
+mod dbcs;
 mod declaratives;
 mod diagnostics;
 mod dialect;

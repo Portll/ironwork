@@ -189,7 +189,9 @@ impl Lower<'_> {
     fn chars(&mut self, op: &Operand, pos: Pos) -> R<Chars> {
         Ok(match op {
             Operand::Ref(r) => Chars::Place(self.place(r, false)?),
-            Operand::Literal(lit) if self.unencodable(lit).is_some() => Chars::Value(self.operand(op, pos)?.operand),
+            // A figurative constant is one character of whatever usage the statement works in,
+            // which `rt::text` knows only when it runs.
+            Operand::Literal(lit) if self.unencodable(lit).is_some() || matches!(lit, Literal::Figurative(_)) => Chars::Value(self.operand(op, pos)?.operand),
             Operand::Literal(lit) => Chars::Literal(self.natural_bytes(lit, pos)?),
             _ => Chars::Value(self.operand(op, pos)?.operand),
         })
@@ -201,6 +203,7 @@ impl Lower<'_> {
             Literal::Alnum(s) => self.encode(s, pos)?,
             Literal::Hex(b) => b.clone(),
             Literal::National(s) => s.encode_utf16().flat_map(u16::to_be_bytes).collect(),
+            Literal::Dbcs(s) => self.dbcs(s, pos)?,
             Literal::Number(t) => match literal_fixed(t) {
                 Some(f) => zoned_digits(f.magnitude.to_u128().unwrap_or(0), f.places.total() as usize, decimal::UNSIGNED),
                 None => return unsupported("a numeric literal of more than 31 digits", pos),

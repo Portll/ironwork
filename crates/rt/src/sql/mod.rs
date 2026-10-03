@@ -79,6 +79,11 @@ pub enum HostType {
     Double,
     Char(u32),
     VarChar(u32),
+    /// GRAPHIC: a DBCS item of this many characters.
+    Graphic(u32),
+    /// VARGRAPHIC: a 49-level halfword of DBCS characters and a 49-level DBCS item of at most this
+    /// many.
+    VarGraphic(u32),
     /// A host structure: its members' layout items and types, in order.
     Structure(Vec<(usize, HostType)>),
 }

@@ -40,6 +40,7 @@ fn field_kind(plan: &MovePlan) -> Option<Kind> {
         MovePlan::Alnum { justified, .. } => Kind::Alnum { justified },
         MovePlan::AlnumEdited { edit, .. } => Kind::AlnumEdited { edit },
         MovePlan::National(_) => Kind::National,
+        MovePlan::Dbcs { justified, edit } => Kind::Dbcs { justified, edit },
         MovePlan::Float { precision, .. } => Kind::Float(precision),
         MovePlan::Address => Kind::Pointer,
         MovePlan::Index => Kind::Index,

@@ -173,7 +173,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         errors.push(Error::at(Pos::default(), m));
     }
     default_currency(&mut program, &mut options, &mut errors);
-    national_symbols(&program, &mut options, &mut errors);
+    national_symbols(&mut program, &mut options, &mut errors);
     if options.intdate == numeric::IntDate::Lilian {
         program.paragraphs.iter_mut().for_each(|p| ceecbldy_to_ceedays(&mut p.statements, &mut errors));
     }
@@ -221,6 +221,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     layout.name_files(&program.files, linage_counters.iter().map(|c| c.map(counter_item)).collect());
     corresponding::expand(&mut program, &layout, &mut errors);
     condition_subjects(&mut program, &layout);
+    dbcs_values(&layout, &mut errors);
     for item in &layout.items {
         if let Some(object) = &item.depending_on {
             match layout.resolve(&object.name, &object.qualifiers, object.pos) {
@@ -336,11 +337,11 @@ fn default_currency(program: &mut Program, options: &mut Options, errors: &mut V
     }
 }
 
-/// NSYMBOL(DBCS) makes a PICTURE of N alone with no USAGE, its own or a group's, USAGE DISPLAY-1
-/// (Programming Guide SC27-8714-03, p. 388), which ironwork does not have. NSYMBOL(NATIONAL) with
-/// NODBCS on the cards is IBM's conflict: DBCS in effect, with a warning (p. 344; assumption
+/// NSYMBOL(DBCS) makes a PICTURE of N, with or without B, and no USAGE, its own or a group's,
+/// USAGE DISPLAY-1 (Programming Guide SC27-8714-03, p. 388). NSYMBOL(NATIONAL) with NODBCS on the
+/// cards is IBM's conflict: DBCS in effect, with a warning (p. 344; assumption
 /// [`numeric::assumptions::NSYMBOL_DBCS`]).
-fn national_symbols(program: &Program, options: &mut Options, errors: &mut Vec<Error>) {
+fn national_symbols(program: &mut Program, options: &mut Options, errors: &mut Vec<Error>) {
     if options.nsymbol == numeric::Nsymbol::National {
         if !options.dbcs && program.options.iter().any(|o| numeric::options::switch(o, "NSYMBOL").is_some()) {
             errors.push(Error::warning(Pos::default(), "CBL NODBCS: NSYMBOL(NATIONAL) requires DBCS, which is in effect"));
@@ -348,20 +349,20 @@ fn national_symbols(program: &Program, options: &mut Options, errors: &mut Vec<E
         }
         return;
     }
-    let only_n = |p: &str| p.chars().any(|c| c.eq_ignore_ascii_case(&'N')) && p.chars().all(|c| c.eq_ignore_ascii_case(&'N') || c.is_ascii_digit() || matches!(c, '(' | ')'));
-    let lists = [&program.working_storage, &program.local_storage, &program.linkage].into_iter().chain(program.files.iter().map(|f| &f.records));
+    let only_n = |p: &str| p.chars().any(|c| c.eq_ignore_ascii_case(&'N')) && p.chars().all(|c| c.eq_ignore_ascii_case(&'N') || c.eq_ignore_ascii_case(&'B') || c.is_ascii_digit() || matches!(c, '(' | ')'));
+    let lists = [&mut program.working_storage, &mut program.local_storage, &mut program.linkage].into_iter().chain(program.files.iter_mut().map(|f| &mut f.records));
     for entries in lists {
         let mut groups: Vec<(u8, bool)> = Vec::new();
-        for e in entries.iter().filter(|e| !matches!(e.level, 66 | 88)) {
+        for e in entries.iter_mut().filter(|e| !matches!(e.level, 66 | 88)) {
             let level = if e.level == 77 { 1 } else { e.level };
             while groups.last().is_some_and(|&(l, _)| l >= level) {
                 groups.pop();
             }
             let usage = e.usage.is_some() || groups.iter().any(|&(_, u)| u);
-            if let Some(p) = e.picture.as_deref().filter(|p| !usage && only_n(p)) {
-                errors.push(Error::at(e.pos, format!("PICTURE {p} with no USAGE is DISPLAY-1 under NSYMBOL(DBCS), and ironwork has no DBCS data")));
-            }
             groups.push((level, e.usage.is_some()));
+            if !usage && e.picture.as_deref().is_some_and(only_n) {
+                e.usage = Some(Usage::Dbcs);
+            }
         }
     }
 }
@@ -549,6 +550,29 @@ pub fn procedure_from(program: &Program, p: &ProcName, from: usize) -> Result<(u
 
 /// An EVALUATE subject that is a condition-name is a condition, and so are its WHEN objects
 /// written as names, which the parser could not tell from values.
+/// A DBCS item's VALUE, and a condition-name's of a DBCS item, is a DBCS literal no longer than the
+/// item, SPACE, or ALL with a DBCS literal; a DBCS literal is the VALUE of a DBCS item only
+/// (Language Reference SC27-8713-03, pp. 248-249).
+fn dbcs_values(layout: &Layout, errors: &mut Vec<Error>) {
+    let dbcs = |i: usize| matches!(layout.items[i].kind, rt::storage::Kind::Dbcs { .. });
+    let is_dbcs = |l: &Literal| matches!(l, Literal::Dbcs(_)) || matches!(l, Literal::All(inner) if matches!(**inner, Literal::Dbcs(_)));
+    let fits = |l: &Literal, i: usize| match l {
+        Literal::Dbcs(s) => s.chars().count() <= layout.items[i].size as usize / 2,
+        Literal::Figurative(syntax::ast::Figurative::Space) => true,
+        l => is_dbcs(l),
+    };
+    let values = layout.items.iter().enumerate().filter_map(|(i, it)| it.value.as_ref().map(|v| (i, v, it.pos)));
+    let conditions = layout.conditions.iter().flat_map(|c| c.values.iter().flat_map(|(low, high)| std::iter::once(low).chain(high)).chain(&c.false_value).map(move |v| (c.item, v, layout.items[c.item].pos)));
+    for (i, value, pos) in values.chain(conditions) {
+        let name = layout.items[i].name.as_deref().unwrap_or("FILLER");
+        if dbcs(i) && !fits(value, i) {
+            errors.push(Error::at(pos, format!("{name}: a DBCS item's VALUE is a DBCS literal of at most {} characters, SPACE or ALL with a DBCS literal", layout.items[i].size / 2)));
+        } else if !dbcs(i) && is_dbcs(value) {
+            errors.push(Error::at(pos, format!("{name}: a DBCS literal can be the VALUE of a DBCS item only")));
+        }
+    }
+}
+
 fn condition_subjects(program: &mut Program, layout: &Layout) {
     let is_condition = |r: &Ref| matches!(layout.resolve(&r.name, &r.qualifiers, r.pos), Ok(layout::Resolved::Condition(_)));
     for p in &mut program.paragraphs {
@@ -650,15 +674,44 @@ fn literal_digits(t: &str) -> usize {
     t.chars().filter(char::is_ascii_digit).count()
 }
 
-/// How an INSPECT message names a literal, and whether it is national; None for a figurative
-/// constant, which takes the inspected item's usage.
-fn inspected_literal(l: &Literal) -> Option<(&'static str, bool)> {
+/// The usage of an INSPECT operand's characters.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CharUsage {
+    Display,
+    National,
+    Dbcs,
+}
+
+impl CharUsage {
+    fn of(kind: rt::storage::Kind) -> Self {
+        match kind {
+            rt::storage::Kind::National => Self::National,
+            rt::storage::Kind::Dbcs { .. } => Self::Dbcs,
+            _ => Self::Display,
+        }
+    }
+}
+
+impl std::fmt::Display for CharUsage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Display => "DISPLAY",
+            Self::National => "national",
+            Self::Dbcs => "DBCS",
+        })
+    }
+}
+
+/// How an INSPECT message names a literal, and its usage; None for a figurative constant, which
+/// takes the inspected item's usage.
+fn inspected_literal(l: &Literal) -> Option<(&'static str, CharUsage)> {
     match l {
         Literal::Figurative(_) => None,
         Literal::All(inner) => inspected_literal(inner),
-        Literal::National(_) => Some(("a national literal", true)),
-        Literal::Number(_) => Some(("a numeric literal", false)),
-        Literal::Alnum(_) | Literal::Hex(_) => Some(("an alphanumeric literal", false)),
+        Literal::National(_) => Some(("a national literal", CharUsage::National)),
+        Literal::Dbcs(_) => Some(("a DBCS literal", CharUsage::Dbcs)),
+        Literal::Number(_) => Some(("a numeric literal", CharUsage::Display)),
+        Literal::Alnum(_) | Literal::Hex(_) => Some(("an alphanumeric literal", CharUsage::Display)),
     }
 }
 
@@ -1350,31 +1403,31 @@ impl Check<'_> {
     }
 
     /// INSPECT's identifiers but the count field have the inspected item's usage, and its literals
-    /// are national when it is national and alphanumeric otherwise; a figurative constant is either
-    /// (Language Reference SC27-8713-03, p. 355; assumption C231). A function-identifier's
-    /// category is known only when it runs.
+    /// are national when it is national, DBCS when it is DBCS and alphanumeric otherwise; a
+    /// figurative constant is any of them (Language Reference SC27-8713-03, p. 355; assumption
+    /// C231). A function-identifier's category is known only when it runs.
     fn inspected_usage(&mut self, target: &Ref, i: &Inspect) {
         let Some(t) = self.item(target) else { return };
-        let national = self.layout.items[t].kind == rt::storage::Kind::National;
+        let usage = CharUsage::of(self.layout.items[t].kind);
         let phrases = i.tallying.iter().chain(&i.replacing).flat_map(|p| p.pattern.iter().chain(&p.by).chain(p.bounds.iter().map(|b| &b.value)));
         let converting = i.converting.iter().flat_map(|(from, to, bounds)| [from, to].into_iter().chain(bounds.iter().map(|b| &b.value)));
         for op in phrases.chain(converting) {
-            let (operand, is_national, pos) = match op {
+            let (operand, operand_usage, pos) = match op {
                 Operand::Literal(l) => match inspected_literal(l) {
-                    Some((what, is_national)) => (what.to_owned(), is_national, i.pos),
+                    Some((what, operand_usage)) => (what.to_owned(), operand_usage, i.pos),
                     None => continue,
                 },
                 Operand::Ref(r) => match self.item(r) {
-                    Some(k) => (r.name.clone(), self.layout.items[k].kind == rt::storage::Kind::National, r.pos),
+                    Some(k) => (r.name.clone(), CharUsage::of(self.layout.items[k].kind), r.pos),
                     None => continue,
                 },
                 _ => continue,
             };
             let name = &target.name;
-            let why = match (national, is_national) {
-                (true, false) => format!("{name} is national and every operand but the count field must be national too"),
-                (false, true) => format!("{name} is not national, and an operand can be national only when the inspected item is"),
-                _ => continue,
+            let why = match (usage, operand_usage) {
+                (u, o) if u == o => continue,
+                (CharUsage::Display, o) => format!("{name} is not {o}, and an operand can be {o} only when the inspected item is"),
+                (u, _) => format!("{name} is {u} and every operand but the count field must be {u} too"),
             };
             self.errors.push(Error::at(pos, format!("INSPECT {name}: {operand} cannot be an operand here, since {why}")));
         }

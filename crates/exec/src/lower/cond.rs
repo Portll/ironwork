@@ -176,6 +176,7 @@ impl Lower<'_> {
             (Value::Float, _) | (_, Value::Float) if numeric(x.value) && numeric(y.value) => Compare::Float,
             (Value::Num(_), Value::Num(_)) | (Value::Num(_), Value::Fig(Figurative::Zero)) | (Value::Fig(Figurative::Zero), Value::Num(_)) => Compare::Fixed,
             (Value::National, Value::National) => Compare::National,
+            (Value::Dbcs, _) | (_, Value::Dbcs) => Compare::Dbcs,
             _ => match alphanumeric_refusal(x, pos)?.or(alphanumeric_refusal(y, pos)?) {
                 Some(message) => Compare::Refused(self.ironwork(message)?),
                 None => Compare::Alphanumeric,
@@ -186,7 +187,7 @@ impl Lower<'_> {
     /// `Cond::Class`: NUMERIC or an ALPHABETIC class of a data item tests its bytes; anything else is a sign
     /// test of the value, where NUMERIC and ALPHABETIC fall through to ZERO as in the walker.
     fn class(&mut self, e: &Expr, class: Class, pos: Pos) -> R<Test> {
-        if let (Class::Numeric | Class::Alphabetic | Class::AlphabeticLower | Class::AlphabeticUpper, Expr::Operand(Operand::Ref(r))) = (class, e) {
+        if let (Class::Numeric | Class::Alphabetic | Class::AlphabeticLower | Class::AlphabeticUpper | Class::Dbcs | Class::Kanji, Expr::Operand(Operand::Ref(r))) = (class, e) {
             let place = self.place(r, false)?;
             let test = match (class, self.kind_of(place)) {
                 (Class::Numeric, Kind::Packed { signed, .. }) => ByteClass::Packed { signed },
@@ -194,6 +195,8 @@ impl Lower<'_> {
                 (Class::Numeric, _) => ByteClass::Digits,
                 (Class::AlphabeticLower, _) => ByteClass::AlphabeticLower,
                 (Class::AlphabeticUpper, _) => ByteClass::AlphabeticUpper,
+                (Class::Dbcs, _) => ByteClass::Dbcs,
+                (Class::Kanji, _) => ByteClass::Kanji,
                 _ => ByteClass::Alphabetic,
             };
             return Ok(Test::Cond(self.cond(lir::Cond::Class { place, test })?));
@@ -205,7 +208,7 @@ impl Lower<'_> {
         let test = match class {
             Class::Positive => SignTest::Positive,
             Class::Negative => SignTest::Negative,
-            Class::Numeric | Class::Alphabetic | Class::AlphabeticLower | Class::AlphabeticUpper | Class::Zero => SignTest::Zero,
+            Class::Numeric | Class::Alphabetic | Class::AlphabeticLower | Class::AlphabeticUpper | Class::Dbcs | Class::Kanji | Class::Zero => SignTest::Zero,
         };
         Ok(Test::Cond(self.cond(lir::Cond::Sign { value, test })?))
     }
@@ -286,7 +289,7 @@ impl Lower<'_> {
 /// Why `alnum_image` refuses a side, when it does.
 fn alphanumeric_refusal(side: &Side, pos: Pos) -> R<Option<&'static str>> {
     Ok(match side.value {
-        Value::Bytes | Value::All | Value::Fig(_) | Value::Num(Some(0)) => None,
+        Value::Bytes | Value::All | Value::Fig(_) | Value::Num(Some(0)) | Value::Dbcs => None,
         Value::Num(None) => return super::unsupported("an arithmetic expression compared with a non-numeric operand", pos),
         Value::National => Some("a national value cannot be moved to an alphanumeric item"),
         Value::Num(Some(_)) | Value::Float | Value::Address => Some("only an integer numeric value can be moved to an alphanumeric item"),

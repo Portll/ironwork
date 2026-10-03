@@ -19,6 +19,8 @@ pub enum MovePlan {
     Address,
     Index,
     Refused(AbendId),
+    /// DBCS data or SPACE into a DBCS item, `edit` its PICTURE when it has B.
+    Dbcs { justified: bool, edit: Option<u32> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,6 +38,8 @@ pub enum NationalFrom {
     Units,
     Decoded,
     Figurative,
+    /// DBCS characters through the code page's DBCS component.
+    Dbcs,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -359,9 +363,10 @@ codec_enum!(MovePlan {
     Address = 5,
     Index = 6,
     Refused(abend) = 7,
+    Dbcs { justified, edit } = 8,
 });
 codec_enum!(Image { Bytes = 0, All = 1, Figurative = 2, Digits { digits } = 3, Stored = 4 });
-codec_enum!(NationalFrom { Units = 0, Decoded = 1, Figurative = 2 });
+codec_enum!(NationalFrom { Units = 0, Decoded = 1, Figurative = 2, Dbcs = 3 });
 codec_enum!(NumericFrom {
     Value = 0,
     PackedCopy = 1,

@@ -649,14 +649,17 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 Some(l) => Some(self.integer(l, r.pos)?),
                 None => None,
             };
-            // A national item's character positions are two bytes, and a part of it is national.
-            let unit = if kind == Kind::National { 2 } else { 1 };
+            // A national or DBCS item's character positions are two bytes, and a part of it keeps its
+            // category (Language Reference SC27-8713-03, p. 75).
+            let unit = if matches!(kind, Kind::National | Kind::Dbcs { .. }) { 2 } else { 1 };
             let (from, length) = loc::refmod(len / unit, start, length, self.ssrange, &r.name, r.pos)?;
             offset += from * unit;
             len = length * unit;
-            if kind != Kind::National {
-                kind = Kind::Alnum { justified: false };
-            }
+            kind = match kind {
+                Kind::National => Kind::National,
+                Kind::Dbcs { .. } => Kind::Dbcs { justified: false, edit: None },
+                _ => Kind::Alnum { justified: false },
+            };
         }
         let (offset, len) = loc::within(offset, len, self.unit.mem.len(), &r.name, r.pos)?;
         let loc = Loc { offset, len, kind, item: index };
@@ -732,10 +735,11 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Literal::Alnum(s) => Val::Bytes(self.page.encode(s).map_err(|e| Abend::ironwork(e.to_string(), pos))?),
             Literal::Hex(b) => Val::Bytes(b.clone()),
             Literal::National(s) => Val::National(s.encode_utf16().flat_map(u16::to_be_bytes).collect()),
+            Literal::Dbcs(s) => Val::Dbcs(store::dbcs_literal(self.page, s).map_err(|m| Abend::ironwork(m, pos))?),
             Literal::Number(t) => Val::Num(literal_fixed(t).ok_or_else(|| Abend::ironwork(format!("the literal {t} has more than 31 digits"), pos))?),
             Literal::Figurative(f) => Val::Fig(*f),
             Literal::All(inner) => match self.literal_value(inner, pos)? {
-                Val::Bytes(b) => Val::All(b),
+                Val::Bytes(b) | Val::Dbcs(b) => Val::All(b),
                 Val::National(n) => Val::AllNational(n),
                 Val::Fig(f) => Val::Fig(f),
                 _ => return Err(Abend::ironwork("ALL takes an alphanumeric or national literal", pos)),
@@ -1466,7 +1470,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn class(&mut self, e: &Expr, class: Class, pos: Pos) -> R<bool> {
-        if let (Class::Numeric | Class::Alphabetic | Class::AlphabeticLower | Class::AlphabeticUpper, Expr::Operand(Operand::Ref(r))) = (class, e) {
+        if let (Class::Numeric | Class::Alphabetic | Class::AlphabeticLower | Class::AlphabeticUpper | Class::Dbcs | Class::Kanji, Expr::Operand(Operand::Ref(r))) = (class, e) {
             let loc = self.locate(r)?;
             let test = match (class, loc.kind) {
                 (Class::Numeric, Kind::Packed { signed, .. }) => ByteClass::Packed { signed },
@@ -1474,6 +1478,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 (Class::Numeric, _) => ByteClass::Digits,
                 (Class::AlphabeticLower, _) => ByteClass::AlphabeticLower,
                 (Class::AlphabeticUpper, _) => ByteClass::AlphabeticUpper,
+                (Class::Dbcs, _) => ByteClass::Dbcs,
+                (Class::Kanji, _) => ByteClass::Kanji,
                 (_, _) => ByteClass::Alphabetic,
             };
             return Ok(store::byte_class(&self.facts(), &self.unit.mem, loc, test));
@@ -1697,7 +1703,7 @@ fn call_args(using: &[Arg]) -> Vec<CallArg<&Ref, &Operand>> {
 fn initial_default(kind: Kind) -> Val {
     match kind {
         Kind::Pointer => Val::Address(0),
-        Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::National => Val::Fig(Figurative::Space),
+        Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::National | Kind::Dbcs { .. } => Val::Fig(Figurative::Space),
         _ => Val::Fig(Figurative::Zero),
     }
 }

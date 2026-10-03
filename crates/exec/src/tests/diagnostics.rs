@@ -43,7 +43,7 @@ fn an_invalid_suboption_is_an_error_and_the_option_is_discarded() {
     let messages: Vec<(Severity, &str)> = c.diagnostics.iter().map(|d| (d.severity, d.message.as_str())).collect();
     assert_eq!(messages, [(Severity::Error, "CBL TRUNC(FAST): TRUNC does not take (FAST)")]);
     assert_eq!(run(&program("TRUNC(FAST)", "", &hello())), "HELLO\n");
-    let errors = compile(syntax::parse(&program("CODEPAGE(930)", "", &hello())).unwrap(), &[]).err().expect("a code page ironwork does not carry is refused");
+    let errors = compile(syntax::parse(&program("CODEPAGE(290)", "", &hello())).unwrap(), &[]).err().expect("a code page ironwork does not carry is refused");
     assert_eq!(errors.iter().map(|e| e.severity).collect::<Vec<_>>(), [Severity::Severe]);
 }
 

@@ -82,6 +82,7 @@ impl Lower<'_> {
             Literal::Alnum(s) => self.encode(s, pos)?,
             Literal::Hex(b) => b.clone(),
             Literal::National(s) => s.encode_utf16().flat_map(u16::to_be_bytes).collect(),
+            Literal::Dbcs(s) => self.dbcs(s, pos)?,
             Literal::Number(t) => match literal_fixed(t) {
                 Some(f) => {
                     let zone = if f.negative { decimal::MINUS } else { decimal::UNSIGNED };

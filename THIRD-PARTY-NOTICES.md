@@ -8,10 +8,12 @@ licence and where it came from.
 
 ## ICU code-page mapping tables — Unicode License v3
 
-**Where:** [`crates/zarch/ucm/`](crates/zarch/ucm/), 21 files. [`crates/zarch/build.rs`](crates/zarch/build.rs)
+**Where:** [`crates/zarch/ucm/`](crates/zarch/ucm/), 32 files. [`crates/zarch/build.rs`](crates/zarch/build.rs)
 reads them at build time and generates the code-page tables compiled into `ironwork-zarch`, so
 every build of that crate, and every binary built from it, incorporates this material. Nothing
-generated from them is committed.
+generated from them is committed. Eleven are the mixed pages of the Programming Guide's Table 47
+(930, 933, 935, 937, 939, 1364, 1388, 1390, 1399, 5026, 5035), whose two-byte mappings give DBCS
+data its characters.
 
 | File | CCSID | Lines | IBM copyright in the header | SHA-256 |
 |---|---|---|---|---|
@@ -25,6 +27,11 @@ generated from them is committed.
 | `ibm-297_P100-1999.ucm` | 297 | 373 | 1995-2007 | `b597986b401c21cf7365a4d3801f6bb31894a4e67396a74bb17d67512e519c80` |
 | `ibm-500_P100-1999.ucm` | 500 | 373 | 1995-2007 | `1370a76b4a7f6e1d85e404e1bc29be49367312c6bc5eea5d707a9dfe3626c0df` |
 | `ibm-871_P100-1999.ucm` | 871 | 373 | 1995-2007 | `05ac7ae91ac8e3edcb4877d17ab0d1e2cb9a2ca4f30575ba1db951b01e4ac095` |
+| `ibm-930_P120-1999.ucm` | 930 | 12037 | 1995-2007 | `673df398c7bcf1702cb60d2d38fdb062019da6f0c5096c4c2d80b5c974ebc770` |
+| `ibm-933_P110-1999.ucm` | 933 | 11064 | 1995-2007 | `174af26babdfcf3fade66cd98d250e8e270c1f0d3218969df0d85753e1219337` |
+| `ibm-935_P110-1999.ucm` | 935 | 9616 | 1995-2007 | `8b8ebc79f530916e10223c53cd99aae1fc1c9fbe797d988802e25c9b62f89f16` |
+| `ibm-937_P110-1999.ucm` | 937 | 20537 | 1995-2007 | `1d1c0cc008d88a475d12ac90b948222f1107e0c675ad8090f09f22de2eb5568b` |
+| `ibm-939_P120-1999.ucm` | 939 | 12037 | 1995-2007 | `7948f1d016c7965463cda5fdc7a6795c0b3936cbabbb740ec3eb848bb5cd7527` |
 | `ibm-1047_P100-1995.ucm` | 1047 | 372 | 1995-2002 | `f6de10bcf4f3316a05e9bba055999c1062a0a0c1968d937a724ed0a72e0f1e55` |
 | `ibm-1140_P100-1997.ucm` | 1140 | 372 | 1995-2002 | `8f95b217dc6eec1bf0c694b29e952098922e09184a8956d35b3d2061f9e82e24` |
 | `ibm-1141_P100-1997.ucm` | 1141 | 372 | 1995-2002 | `20f4a0d39aac9d4533b63e01d7cb3c8a2745415218a11008cb65e21dafcb29db` |
@@ -36,12 +43,18 @@ generated from them is committed.
 | `ibm-1147_P100-1997.ucm` | 1147 | 372 | 1995-2002 | `a0ff0dc559e6ccc00fa1c461be3eb458b4fe23a6c2d66a13ac62eeaaeb9f54d0` |
 | `ibm-1148_P100-1997.ucm` | 1148 | 372 | 1995-2002 | `f0f393fa3274ce5e1a966a3ccfb7416051427b98194f19bbb5efc79938007e9e` |
 | `ibm-1149_P100-1997.ucm` | 1149 | 372 | 1995-2002 | `a9cd03b4d79ef568c8674d2dd24c7920cd33e06cb27bd84a950c9136ae460448` |
+| `ibm-1364_P110-2007.ucm` | 1364 | 19809 | 1995-2007 | `a696dc4b8cf78b452dbeed9b2c3406186f22d07438c945359872caaa9684e30f` |
+| `ibm-1388_P103-2001.ucm` | 1388 | 32664 | 1995-2002 | `05ea74684255e5c9d5c31868398e0be829e630f8fd8ff16564820aad21bce271` |
+| `ibm-1390_P110-2003.ucm` | 1390 | 22376 | 1995-2003 | `bb5e49b96693b90a4d35654df5af128b5193ab6da1f5ff34db88ad47ca5a63ce` |
+| `ibm-1399_P110-2003.ucm` | 1399 | 22376 | 1995-2003 | `fd3739a75d7a368f632455bec2260e1585bd873faae57c564d19891e0948b4e2` |
+| `ibm-5026_P120-1999.ucm` | 5026 | 12037 | 1995-2007 | `e19916176400e9f45f2ae831a0ff318f9f037d99175dfbef11c994e7883c72da` |
+| `ibm-5035_P120-1999.ucm` | 5035 | 12037 | 1995-2007 | `7040efb47e5de4970c9621506d678155f31e643ba6d08b97ab5572e52d65f099` |
 
 **Origin:** unicode-org/icu-data, `charset/data/ucm/`, at commit
 `8d9eb3e27e79f59dd76e278e58d68b4668835027`:
 <https://github.com/unicode-org/icu-data/tree/8d9eb3e27e79f59dd76e278e58d68b4668835027/charset/data/ucm>
 
-**Copyright:** each file's header carries IBM's notice, "Copyright (C) 1995-2002" or "1995-2007",
+**Copyright:** each file's header carries IBM's notice, "Copyright (C) 1995-2002", "1995-2003" or "1995-2007",
 "International Business Machines Corporation and others. All Rights Reserved.", with the years the
 table shows. The headers are kept as published. ICU is a project of Unicode, Inc.
 

@@ -47,6 +47,7 @@ enum Category {
     NumericEdited,
     Float,
     National,
+    Dbcs,
 }
 
 impl Category {
@@ -54,9 +55,13 @@ impl Category {
         matches!(self, Self::Integer | Self::Noninteger | Self::NumericEdited | Self::Float)
     }
 
-    /// Whether the table allows an elementary move from `self` to `to`.
+    /// Whether the table allows an elementary move from `self` to `to` (Language Reference
+    /// SC27-8713-03, p. 404): DBCS data moves to DBCS and national items only, and nothing else moves
+    /// to a DBCS item.
     fn moves_to(self, to: Category) -> bool {
         match self {
+            Self::Dbcs => matches!(to, Self::Dbcs | Self::National),
+            _ if to == Self::Dbcs => false,
             Self::Alphanumeric => true,
             Self::Alphabetic | Self::AlphanumericEdited => !to.numeric(),
             Self::Integer | Self::NumericEdited => to != Self::Alphabetic,
@@ -177,6 +182,7 @@ impl Context<'_> {
             Kind::Alnum { .. } if self.alphabetic.contains(&it.pos) => Category::Alphabetic,
             Kind::AlnumEdited { .. } => Category::AlphanumericEdited,
             Kind::National => Category::National,
+            Kind::Dbcs { .. } => Category::Dbcs,
             Kind::NumericEdited { .. } => Category::NumericEdited,
             Kind::Float(_) => Category::Float,
             Kind::Zoned { scale, .. } | Kind::Packed { scale, .. } | Kind::Binary { scale, .. } if scale > 0 => Category::Noninteger,

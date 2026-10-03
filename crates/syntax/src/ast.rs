@@ -200,6 +200,8 @@ pub enum Usage {
     Float1,
     Float2,
     National,
+    /// DISPLAY-1: DBCS characters, two bytes each.
+    Dbcs,
     Pointer,
     Index,
     ObjectReference,
@@ -260,6 +262,8 @@ pub enum Literal {
     Alnum(String),
     Hex(Vec<u8>),
     National(String),
+    /// G'...', or N'...' under NSYMBOL(DBCS): characters the code page's DBCS part encodes.
+    Dbcs(String),
     /// As written: optional sign, digits, optional decimal point.
     Number(String),
     Figurative(Figurative),
@@ -403,6 +407,10 @@ pub enum Class {
     Alphabetic,
     AlphabeticLower,
     AlphabeticUpper,
+    /// Every two bytes a DBCS character, X'41' to X'FE' each, or the DBCS space.
+    Dbcs,
+    /// Every two bytes a DBCS character with a first byte X'41' to X'7E', or the DBCS space.
+    Kanji,
     Positive,
     Negative,
     Zero,

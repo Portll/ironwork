@@ -57,6 +57,14 @@ mod tests {
     }
 
     #[test]
+    fn dbcs_items_bind_as_graphic_and_vargraphic() {
+        let data = "       01 G PIC G(5) DISPLAY-1.\n       01 V.\n          49 V-LEN PIC S9(4) COMP.\n          49 V-TEXT PIC G(30) DISPLAY-1.\n       01 E PIC GBG DISPLAY-1.\n";
+        let got = types(data, &["G", "V", "E"]);
+        assert_eq!((&got[0], &got[1]), (&Ok(HostType::Graphic(5)), &Ok(HostType::VarGraphic(30))));
+        assert!(got[2].is_err(), "a DBCS PICTURE with B has no SQL type");
+    }
+
+    #[test]
     fn declarations_with_no_sql_type() {
         let got = types("       01 E PIC ZZ9.99.\n       01 P USAGE POINTER.\n       01 BS PIC S9(3)V9 COMP.\n", &["E", "P", "BS"]);
         assert!(got.iter().all(Result::is_err), "{got:?}");

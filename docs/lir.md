@@ -352,9 +352,9 @@ pub enum Operand {
 /// A literal, converted once, where `literal_value` converts it on every use (machine.rs:621-634).
 /// Bytes are alphanumeric in the program's code page, or hexadecimal. `AllNational` is ALL with a
 /// national literal, its UTF-16 units repeated to the length of what it is moved to or compared
-/// with. `Refused` is an alphanumeric literal, or ALL one, the code page cannot encode, whose
-/// reading abends.
-pub enum Const { Bytes(Vec<u8>), National(Vec<u8>), Number(Fixed), Figurative(Figurative), All(Vec<u8>), Refused(AbendId), AllNational(Vec<u8>) }
+/// with. `Refused` is an alphanumeric or DBCS literal, or ALL one, the code page cannot encode,
+/// whose reading abends. `Dbcs` is a DBCS literal's bytes in the code page's DBCS component.
+pub enum Const { Bytes(Vec<u8>), National(Vec<u8>), Number(Fixed), Figurative(Figurative), All(Vec<u8>), Refused(AbendId), AllNational(Vec<u8>), Dbcs(Vec<u8>) }
 
 /// A subscript, bound, TIMES count or exponent, as `integer()` gives it (machine.rs:613-619).
 /// `Fixed` locates each place of `prepass`, then evaluates `expr` with `dmax` (§7.5).
@@ -404,10 +404,14 @@ pub enum Comparand {
 /// (`compare_references`, machine/oo.rs:145-158 (f2)): each is looked up in the run unit's objects,
 /// the first first, abending IRONWORK for one freed or never given (the message names the Refs of
 /// both sides as written); equal when both identify the same object, or are both NULL, else less.
-/// NULL written as a figurative constant is not an address, so `A = NULL` is `Address`.
-pub enum Compare { PackedPfd, Address, Float, Fixed, National, Alphanumeric, Refused(AbendId), References, ZonedBytes { zoned_first: bool } }
+/// NULL written as a figurative constant is not an address, so `A = NULL` is `Address`. `Dbcs` is a
+/// DBCS operand against DBCS, SPACE, ALL or a group, padded with DBCS spaces and in binary order,
+/// or against national through the code page, as `store::compare` orders it.
+pub enum Compare { PackedPfd, Address, Float, Fixed, National, Alphanumeric, Refused(AbendId), References, ZonedBytes { zoned_first: bool }, Dbcs }
 
-pub enum ByteClass { Packed { signed: bool }, Zoned { signed: bool }, Digits, Alphabetic }
+/// `Dbcs` and `Kanji` test each two bytes: X'41' to X'FE' each, or for KANJI a first byte X'41' to
+/// X'7E', or the DBCS space X'4040'.
+pub enum ByteClass { Packed { signed: bool }, Zoned { signed: bool }, Digits, Alphabetic, AlphabeticLower, AlphabeticUpper, Dbcs, Kanji }
 pub enum SignTest { Positive, Negative, Zero }
 /// `Temp` is the count `SetCount` held in the top frame earlier in the statement (§9.12).
 pub enum Count { Fixed(u32), Odo(Odo), Temp(TempId) }
@@ -1040,11 +1044,16 @@ pub enum MovePlan {
     Index,
     /// A pair the walker refuses when it moves it.
     Refused(AbendId),
+    /// DBCS data, SPACE or an ALL DBCS literal into a DBCS item: DBCS spaces pad it, or right
+    /// justify it; `edit` is its PICTURE when it has B, each B a DBCS space.
+    Dbcs { justified: bool, edit: Option<u32> },
 }
 
 /// `Stored`: a numeric, floating-point or pointer sender's own bytes as stored, once it has been read.
+/// A DBCS sender into a group or alphanumeric item is `Bytes`.
 pub enum Image { Bytes, All, Figurative, Digits { digits: u32 }, Stored }
-pub enum NationalFrom { Units, Decoded, Figurative }
+/// `Dbcs`: DBCS characters through the code page's DBCS component.
+pub enum NationalFrom { Units, Decoded, Figurative, Dbcs }
 pub enum NumericFrom {
     /// The sender as a number; a zoned or packed sender through `store::move_sender`, which gives
     /// digits that are not decimal as bytes to carry unchecked (C260).
@@ -1962,8 +1971,9 @@ pub enum Markup { JsonGenerate(JsonGenerate), XmlGenerate(XmlGenerate), XmlParse
 pub enum Ccsid { Unnamed, CodePage, Operand(Operand) }
 /// How GENERATE writes an elementary value (`converted`, machine/json.rs). `Scaled` is `Fixed` for
 /// an item whose PICTURE has `scaling` positions P right of its digits: a node's `Loc` names no
-/// place, so the value is read with them given.
-pub enum Convert { Chars { justified: bool }, National, Float(Precision), Fixed { integers: u32 }, Refused(AbendId), Scaled { integers: u32, scaling: u32 } }
+/// place, so the value is read with them given. `Dbcs`: DBCS characters through the code page's
+/// DBCS component.
+pub enum Convert { Chars { justified: bool }, National, Float(Precision), Fixed { integers: u32 }, Refused(AbendId), Scaled { integers: u32, scaling: u32 }, Dbcs }
 /// A USING value of JSON GENERATE: a literal's first byte, a condition-name, or the walker's abend.
 pub enum Marker { Byte(Option<u8>), Condition(CondId), Refused(AbendId) }
 

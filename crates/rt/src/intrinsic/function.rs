@@ -78,7 +78,7 @@ pub fn storage(facts: &dyn ProgramFacts, name: &str, bytes: &[u8], pos: Pos) -> 
 /// The bytes of an argument that is not a data item, as DISPLAY would hold the value.
 pub fn stored_bytes(facts: &dyn ProgramFacts, val: Val, pos: Pos) -> R<Vec<u8>> {
     Ok(match val {
-        Val::Bytes(b) | Val::National(b) | Val::All(b) | Val::AllNational(b) => b,
+        Val::Bytes(b) | Val::National(b) | Val::All(b) | Val::AllNational(b) | Val::Dbcs(b) => b,
         Val::Float(h) => h.to_bytes(),
         Val::Fig(fig) => vec![facts.figurative(fig)],
         Val::Address(a) => a.to_be_bytes().to_vec(),
@@ -144,13 +144,16 @@ pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args
             arity(1..=2)?;
             let ccsid = if args.len() == 2 { x.integer(1, pos)? as u16 } else { facts.options().codepage };
             let page = CodePage::by_ccsid(ccsid).ok_or_else(|| Abend::ironwork(format!("CCSID {ccsid} is not a code page ironwork for COBOL carries"), pos))?;
-            Val::National(page.to_utf16be(&bytes_of(&args[0])?))
+            match &args[0] {
+                Val::Dbcs(b) => Val::National(page.decode_dbcs(b).encode_utf16().flat_map(u16::to_be_bytes).collect()),
+                arg => Val::National(page.to_utf16be(&bytes_of(arg)?)),
+            }
         }
         "LENGTH" => {
             arity(1..=1)?;
             let n = match &args[0] {
                 Val::Bytes(b) | Val::All(b) => b.len(),
-                Val::National(b) => b.len() / 2,
+                Val::National(b) | Val::Dbcs(b) => b.len() / 2,
                 Val::Num(v) => v.places.total() as usize,
                 _ => return Err(Abend::ironwork("FUNCTION LENGTH of this argument is not supported yet", pos)),
             };

@@ -252,6 +252,11 @@ pub const NUMCHECK_SENDERS: &str = "C228";
 pub const NUMCHECK_MESSAGE: &str = "C229";
 pub const NUMCHECK_LAX_REDEFINES: &str = "C280";
 pub const NUMCHECK_ALWAYS_FAILS: &str = "C281";
+pub const DBCS_UNDER_SINGLE_BYTE_PAGE: &str = "C282";
+pub const DBCS_LITERAL_SOURCE: &str = "C283";
+pub const MIXED_PAGE_DATA: &str = "C284";
+pub const DBCS_DISPLAY: &str = "C285";
+pub const DBCS_HOST_VARIABLES: &str = "C286";
 pub const PARMCHECK_BUFFER: &str = "C226";
 pub const PARMCHECK_MESSAGE: &str = "C227";
 pub const PARM_ARGUMENTS_BEFORE_LAST_SLASH: &str = "C250";
@@ -1455,7 +1460,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: INVALID_OPTION_DISCARDED,
-        claim: "A suboption that an option ironwork reads does not have, such as TRUNC(FAST), ARITH(X), NOCOMPILE(U) or a CODEPAGE that is not a number, is an error (E, return code 8) and the option is discarded, the setting before it staying in force, as the Migration Guide records for removed TEST suboptions: 'Error (Invalid option diagnostic, option discarded)' (GC27-8715-03, Table 34, p. 168); the Programming Guide shows the compiler diagnosing a CBL statement's options and carrying on (SC27-8714-03, pp. 279-280). The message's number and text are not in the manuals ironwork has: the text is ironwork's, unchanged from when the option stopped the compile. A CODEPAGE that is a number but no single-byte EBCDIC page ironwork carries still stops the compile (S), since IBM would compile the program in that page and ironwork cannot read it so; an option name that is in no table of IBM's still passes without a message",
+        claim: "A suboption that an option ironwork reads does not have, such as TRUNC(FAST), ARITH(X), NOCOMPILE(U) or a CODEPAGE that is not a number, is an error (E, return code 8) and the option is discarded, the setting before it staying in force, as the Migration Guide records for removed TEST suboptions: 'Error (Invalid option diagnostic, option discarded)' (GC27-8715-03, Table 34, p. 168); the Programming Guide shows the compiler diagnosing a CBL statement's options and carrying on (SC27-8714-03, pp. 279-280). The message's number and text are not in the manuals ironwork has: the text is ironwork's, unchanged from when the option stopped the compile. A CODEPAGE that is a number but no EBCDIC page ironwork carries, single-byte or one of the mixed pages of the Programming Guide's Table 47, still stops the compile (S), since IBM would compile the program in that page and ironwork cannot read it so; an option name that is in no table of IBM's still passes without a message",
         basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -1509,7 +1514,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: NSYMBOL_DBCS,
-        claim: "Under NSYMBOL(DBCS) an N literal is a DBCS literal and a PICTURE of N alone with no USAGE is USAGE DISPLAY-1 (Programming Guide SC27-8714-03, pp. 387-388). ironwork holds no DBCS data, so the first N literal stops the read and each such item is a severe error, both in ironwork's words; a program with neither compiles as under NSYMBOL(NATIONAL), as IBM's text implies it would. NX literals are not N literals. NSYMBOL(NATIONAL) with NODBCS on the cards, which are one level of precedence, leaves DBCS in effect, as Table 46 forces it (p. 344), with a warning (W, return code 4) in ironwork's words, since the message Enterprise COBOL gives for an option dropped in conflict resolution is IGYOS4020-W (J19), as for INITIAL with THREAD (C217); NODBCS alone, with NSYMBOL(NATIONAL) only as the default, is taken as written",
+        claim: "Under NSYMBOL(DBCS) an N literal is a DBCS literal and a PICTURE of N, alone or with B, and no USAGE, its own or a group's, is USAGE DISPLAY-1 (Programming Guide SC27-8714-03, pp. 387-388); the option is read from the CBL and PROCESS cards before the source is read, as a card is the only place a program can set it. NX literals are not N literals. NSYMBOL(NATIONAL) with NODBCS on the cards, which are one level of precedence, leaves DBCS in effect, as Table 46 forces it (p. 344), with a warning (W, return code 4) in ironwork's words, since the message Enterprise COBOL gives for an option dropped in conflict resolution is IGYOS4020-W (J19), as for INITIAL with THREAD (C217); NODBCS alone, with NSYMBOL(NATIONAL) only as the default, is taken as written",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -2004,6 +2009,36 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         claim: "ironwork chooses: a blank line between records; CHARACTER's blank line and RBA's hyphen from dgt3i239 over da6i2249; RELATIVE RECORD NUMBER - n, empty slots unlisted; an RBA as the sum of earlier record lengths, without control interval boundaries; PN as PL/I's 60-character set, recalled, so lower case prints as periods; a short key generic without the asterisk too; FROMKEY with COUNT and SKIP with TOKEY allowed; SKIP and COUNT through a path in alternate key order. FROMKEY above every key or SKIP past the end ends with IDC3006I, code 12 (m009121); key errors follow IDC3302I; errors replace the listing; a listing of no records (an empty sequential data set, TOKEY below the start, COUNT(0)) ends with IDC0005I 0 and code 4",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: DBCS_UNDER_SINGLE_BYTE_PAGE,
+        claim: "The Programming Guide has a program with DBCS data items or DBCS literals compiled with one of the mixed CCSIDs of its Table 47 (SC27-8714-03, p. 354), and does not say what a single-byte CODEPAGE does with them. Under a single-byte page ironwork compiles DBCS items and moves and compares their bytes as under a mixed one, since those operations convert nothing; where DBCS data becomes characters, in DISPLAY, JSON GENERATE, a move to a national item, a comparison with one, and NATIONAL-OF, the DBCS space X'4040' is U+3000 and every other character U+FFFD. A DBCS literal, whose bytes only the DBCS component can give, ends the run with abend code IRONWORK where it is used, in ironwork's words, as an alphanumeric literal the page cannot encode does",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: DBCS_LITERAL_SOURCE,
+        claim: "A DBCS literal's opening delimiter is followed by a shift-out and its closing one preceded by a shift-in (Language Reference SC27-8713-03, p. 41), which a source held in Unicode, as ironwork reads it, no longer carries: ironwork takes the characters between G' (or G\", or N' and N\" under NSYMBOL(DBCS)) and the closing delimiter as the literal, removing a shift-out (U+000E) after the opening delimiter and a shift-in (U+000F) before the closing one where they are present, and encodes each character with the DBCS component of the CODEPAGE, two code points that one DBCS code stands for taking that code. A literal of no character, or of more than 28 (p. 42), is refused when read",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: MIXED_PAGE_DATA,
+        claim: "Under a mixed CODEPAGE an alphanumeric literal may hold DBCS characters, delimited by shift-out and shift-in (Language Reference SC27-8713-03, pp. 39-40), and alphanumeric data converted to characters (DISPLAY, NATIONAL-OF, a move to a national item) is read the same way: a single byte is the single-byte component's character, and the bytes between X'0E' and the next X'0F' are DBCS characters, two bytes each, the shifts themselves no characters. Encoding prefers the single-byte character and opens a shift-out run only for a character the single bytes lack. A single byte the component leaves unassigned is U+001A, as IBM's conversions substitute, an unassigned DBCS code U+FFFD, and an odd byte left before a shift-in U+FFFD; Enterprise COBOL's conversion of such bytes is not documented",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: DBCS_DISPLAY,
+        claim: "DISPLAY transfers a DBCS item to the output device with shift-out and shift-in around it (Language Reference SC27-8713-03, p. 333); ironwork writes DISPLAY's line as Unicode text, where a DBCS item or literal is its characters through the CODEPAGE's DBCS component and the shift codes, which are not characters, are not written",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: DBCS_HOST_VARIABLES,
+        claim: "A DBCS item of PICTURE G or N without B is a GRAPHIC host variable of its characters, and a group of a 49-level binary halfword and a 49-level such item VARGRAPHIC, its length counting DBCS characters, as Db2 declares them; an item whose PICTURE has B has no SQL type. A GRAPHIC value reaches PostgreSQL, or a recording, as the text the CODEPAGE's DBCS component gives its characters, and text comes back as DBCS characters padded with DBCS spaces or cut at a character, SQLWARN1 and the indicator taking the length in characters; under a single-byte CODEPAGE, or for a character the DBCS component lacks, the value is SQLCODE -330, as one the code page cannot convert. Db2's own GRAPHIC conversion between CCSIDs is not modelled",
+        basis: Basis::Chosen,
+        oracle: Oracle::Db2,
     },
 ];
 

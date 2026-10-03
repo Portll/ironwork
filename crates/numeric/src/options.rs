@@ -555,7 +555,7 @@ impl fmt::Display for OptionError {
             Self::BadSuboption { option, given } => write!(f, "{option} does not take ({given})"),
             Self::Removed { option, since, instead } => write!(f, "{option} was removed in Enterprise COBOL {since}, so {instead} is in effect"),
             Self::NoEffect { option, why, .. } => write!(f, "{option} {why}"),
-            Self::UnsupportedCodePage(ccsid) => write!(f, "CODEPAGE({ccsid}) is not a single-byte EBCDIC page this compiler carries"),
+            Self::UnsupportedCodePage(ccsid) => write!(f, "CODEPAGE({ccsid}) is not an EBCDIC page this compiler carries"),
             Self::UnknownFlag(flag) => write!(f, "unknown flag {flag}"),
         }
     }
@@ -1119,7 +1119,7 @@ mod tests {
         o.apply("NUMPROC(PFD)").unwrap();
         o.apply("TRUNC(BIN)").unwrap();
         assert!(matches!(o.apply("TRUNC(FAST)"), Err(OptionError::BadSuboption { .. })));
-        assert_eq!(o.apply("CODEPAGE(930)"), Err(OptionError::UnsupportedCodePage(930)));
+        assert_eq!(o.apply("CODEPAGE(290)"), Err(OptionError::UnsupportedCodePage(290)));
         assert!(matches!(o.apply("CP(X)"), Err(OptionError::BadSuboption { .. })));
         for (option, warns) in [("LIB", false), ("SIZE(MAX)", false), ("sz(2097152)", false), ("FLAGSAA", true), ("NOFDUMP", true)] {
             assert!(matches!(o.apply(option), Err(OptionError::NoEffect { warning, .. }) if warning == warns), "{option}");
@@ -1129,6 +1129,15 @@ mod tests {
         let removed = o.apply("NUMPROC(MIG)").unwrap_err();
         assert_eq!(removed.to_string(), "NUMPROC(MIG) was removed in Enterprise COBOL V5, so NUMPROC(NOPFD) is in effect");
         assert_eq!(o.numproc, Numproc::Nopfd, "the default NUMPROC, not the one before");
+    }
+
+    #[test]
+    fn codepage_takes_the_mixed_pages_dbcs_programs_compile_with() {
+        let mut o = Options::default();
+        for ccsid in [930, 939, 1390, 1399, 5026, 5035, 933, 1364, 935, 1388, 937] {
+            o.apply(&format!("CODEPAGE({ccsid})")).unwrap();
+            assert!(o.code_page().dbcs_ccsid().is_some(), "{ccsid}");
+        }
     }
 
     #[test]

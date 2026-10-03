@@ -198,6 +198,7 @@ fn usage_word(word: &str) -> Option<Usage> {
         "COMP-1" | "COMPUTATIONAL-1" => Usage::Float1,
         "COMP-2" | "COMPUTATIONAL-2" => Usage::Float2,
         "NATIONAL" => Usage::National,
+        "DISPLAY-1" => Usage::Dbcs,
         "POINTER" => Usage::Pointer,
         "INDEX" => Usage::Index,
         "FUNCTION-POINTER" | "PROCEDURE-POINTER" => Usage::ProgramPointer,
@@ -1388,6 +1389,7 @@ impl Parser<'_> {
             Some(Tok::Alnum(s)) => Literal::Alnum(s),
             Some(Tok::Hex(b)) => Literal::Hex(b),
             Some(Tok::National(s)) => Literal::National(s),
+            Some(Tok::Dbcs(s)) => Literal::Dbcs(s),
             Some(Tok::Number(n)) => Literal::Number(n),
             Some(Tok::Word(w)) if w == "ALL" => {
                 let at = self.pos();
@@ -2807,7 +2809,7 @@ impl Parser<'_> {
         let save = self.at;
         self.expr()?;
         let conditional = self.relop_ahead(0) || self.is_word("IS") || self.is_word("NOT")
-            || self.word().is_some_and(|w| matches!(w, "NUMERIC" | "ALPHABETIC" | "ALPHABETIC-LOWER" | "ALPHABETIC-UPPER" | "POSITIVE" | "NEGATIVE" | "ZERO"));
+            || self.word().is_some_and(|w| matches!(w, "NUMERIC" | "ALPHABETIC" | "ALPHABETIC-LOWER" | "ALPHABETIC-UPPER" | "DBCS" | "KANJI" | "POSITIVE" | "NEGATIVE" | "ZERO"));
         self.at = save;
         Ok(if conditional { Subject::Cond(self.cond()?) } else { Subject::Expr(self.expr()?) })
     }
@@ -2875,7 +2877,7 @@ impl Parser<'_> {
 
     fn starts_operand(&self) -> bool {
         match self.peek() {
-            Some(Tok::Alnum(_) | Tok::Hex(_) | Tok::National(_)) => true,
+            Some(Tok::Alnum(_) | Tok::Hex(_) | Tok::National(_) | Tok::Dbcs(_)) => true,
             Some(Tok::Number(_)) => !self.paragraph_header(),
             Some(Tok::Word(w)) => {
                 (figurative(w).is_some() || matches!(w.as_str(), "ALL" | "FUNCTION" | "LENGTH" | "ADDRESS" | "DFHRESP" | "DFHVALUE") || self.starts_ref()) && !self.paragraph_header()
@@ -2940,7 +2942,7 @@ impl Parser<'_> {
             }
             Some(Tok::Word(w)) if figurative(w).is_some() || w == "ALL" => Ok(Operand::Literal(self.literal()?)),
             Some(Tok::Word(_)) => Ok(Operand::Ref(self.reference()?)),
-            Some(Tok::Alnum(_) | Tok::Hex(_) | Tok::National(_) | Tok::Number(_)) => Ok(Operand::Literal(self.literal()?)),
+            Some(Tok::Alnum(_) | Tok::Hex(_) | Tok::National(_) | Tok::Dbcs(_) | Tok::Number(_)) => Ok(Operand::Literal(self.literal()?)),
             _ => Err(self.error("an operand")),
         }
     }
@@ -3162,12 +3164,14 @@ impl Parser<'_> {
         if let Some(op) = self.relop()? {
             return self.objects(left, op, negated, last);
         }
-        if let Some(class) = self.accept_any(&["NUMERIC", "ALPHABETIC", "ALPHABETIC-LOWER", "ALPHABETIC-UPPER", "POSITIVE", "NEGATIVE", "ZERO"]) {
+        if let Some(class) = self.accept_any(&["NUMERIC", "ALPHABETIC", "ALPHABETIC-LOWER", "ALPHABETIC-UPPER", "DBCS", "KANJI", "POSITIVE", "NEGATIVE", "ZERO"]) {
             let class = match class.as_str() {
                 "NUMERIC" => Class::Numeric,
                 "ALPHABETIC" => Class::Alphabetic,
                 "ALPHABETIC-LOWER" => Class::AlphabeticLower,
                 "ALPHABETIC-UPPER" => Class::AlphabeticUpper,
+                "DBCS" => Class::Dbcs,
+                "KANJI" => Class::Kanji,
                 "POSITIVE" => Class::Positive,
                 "NEGATIVE" => Class::Negative,
                 _ => Class::Zero,

@@ -1312,9 +1312,9 @@ fn string_unstring_and_inspect_plans_decide_each_receiver_s_store() {
     ));
     let s = &p.plans.string[0];
     assert!(matches!(s.pointer, Some((_, StorePlan::Zoned { digits: 2, .. }))));
-    assert!(matches!(&s.sources[..], [lir::StringSource { chars: Chars::Place(_), delimiter: Some(Chars::Literal(space)) }, lir::StringSource { chars: Chars::Literal(twelve), delimiter: None }] if space == &[0x40] && twelve == &[0xF1, 0xF2]));
+    assert!(matches!(&s.sources[..], [lir::StringSource { chars: Chars::Place(_), delimiter: Some(Chars::Value(_)) }, lir::StringSource { chars: Chars::Literal(twelve), delimiter: None }] if twelve == &[0xF1, 0xF2]));
     let u = &p.plans.unstring[0];
-    assert_eq!(u.delimiters, [(false, Chars::Literal(vec![0x6B])), (true, Chars::Literal(vec![0x40]))]);
+    assert!(matches!(&u.delimiters[..], [(false, Chars::Literal(comma)), (true, Chars::Value(_))] if comma == &[0x6B]), "SPACE is one character of the statement's usage");
     assert_eq!(u.into[0].plan, MovePlan::Alnum { image: Image::Bytes, justified: false });
     assert_eq!(u.into[1].plan, MovePlan::Numeric { from: NumericFrom::Zoned, store: StorePlan::Zoned { digits: 4, scale: 0, signed: false, sign: None } });
     let d = u.into[0].delimiter.unwrap();
@@ -1324,7 +1324,7 @@ fn string_unstring_and_inspect_plans_decide_each_receiver_s_store() {
     assert!(matches!(tally.store, StorePlan::Refused(a) if symbol(&p, p.abends[a as usize].message) == "TALLYING IN needs a numeric item"));
     let i = &p.plans.inspect[0];
     assert!(matches!(i.tallying[0].counter, Some((_, lir::StepPlan { dmax: 0, store: StorePlan::Zoned { digits: 2, .. } }))));
-    assert_eq!(i.tallying[0].pattern, Some(Chars::Literal(vec![0xF0])));
+    assert!(matches!(i.tallying[0].pattern, Some(Chars::Value(_))));
     assert_eq!(i.replacing[0].by, Some(lir::Replacement::Fill(0x40)));
     assert_eq!(i.converting.as_ref().unwrap().table, lir::ConvertTable::Built(vec![(0x81, 0xC1), (0x82, 0xC2)]));
     assert!(matches!(p.plans.inspect[1].converting.as_ref().unwrap().table, lir::ConvertTable::Operands { from: Chars::Literal(_), to: Chars::Place(_) }));

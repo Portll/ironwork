@@ -75,14 +75,7 @@ fn a_hexadecimal_currency_whose_character_cannot_be_a_currency_symbol_is_discard
 }
 
 #[test]
-fn nsymbol_dbcs_refuses_what_it_would_make_dbcs_and_leaves_the_rest_alone() {
-    let data = "       01  N1 PIC N(3).\n       01  N2 PIC N(3) USAGE NATIONAL.\n       01  G USAGE NATIONAL.\n           05  N3 PIC NN.\n";
-    let errors = compile_errors(&program("NSYMBOL(DBCS)", data, &line("GOBACK.")));
-    assert_eq!(errors.matches("DISPLAY-1 under NSYMBOL(DBCS)").count(), 1, "{errors}");
-    assert!(errors.contains("PICTURE N(3) with no USAGE"), "{errors}");
-    assert_eq!(compile_errors(&program("NS(NAT)", data, &line("GOBACK."))), "");
-    let literal = syntax::parse(&program("NS(DBCS)", "", &[line("DISPLAY N'AB'"), line("GOBACK.")].concat())).unwrap_err();
-    assert_eq!(literal.message, "an N literal is a DBCS literal under NSYMBOL(DBCS), and ironwork has no DBCS data");
+fn nsymbol_dbcs_leaves_a_usage_national_item_national() {
     assert_eq!(run(&program("NSYMBOL(DBCS)", "       01  N PIC N(2) USAGE NATIONAL VALUE ALL SPACE.\n", &[line("DISPLAY '[' N ']'"), line("GOBACK.")].concat())), "[  ]\n");
 }
 

@@ -13,6 +13,7 @@ enum Class {
     Alphabetic,
     Alphanumeric,
     National,
+    Dbcs,
 }
 
 impl Class {
@@ -22,6 +23,7 @@ impl Class {
             Class::Alphabetic => "alphabetic",
             Class::Alphanumeric => "alphanumeric",
             Class::National => "national",
+            Class::Dbcs => "DBCS",
         }
     }
 }
@@ -111,13 +113,15 @@ impl Check<'_> {
             Operand::Literal(Literal::Number(_)) | Operand::LengthOf(_) => Some(Class::Numeric),
             Operand::Literal(Literal::Alnum(_) | Literal::Hex(_)) => Some(Class::Alphanumeric),
             Operand::Literal(Literal::National(_)) => Some(Class::National),
+            Operand::Literal(Literal::Dbcs(_)) => Some(Class::Dbcs),
             Operand::Literal(_) | Operand::AddressOf(_) => None,
             Operand::Ref(r) => match self.layout.resolve(&r.name, &r.qualifiers, r.pos) {
                 Ok(Resolved::Item(i)) => {
                     let item = &self.layout.items[i];
-                    // A reference-modified item is of category alphanumeric, or national (p. 76).
+                    // A reference-modified item is of category alphanumeric, or national or DBCS (p. 75).
                     match item.kind {
                         Kind::National if r.refmod.is_some() => return Some(Class::National),
+                        Kind::Dbcs { .. } if r.refmod.is_some() => return Some(Class::Dbcs),
                         _ if r.refmod.is_some() => return Some(Class::Alphanumeric),
                         _ => {}
                     }
@@ -126,6 +130,7 @@ impl Check<'_> {
                         Kind::Alnum { .. } if item.alphabetic => Some(Class::Alphabetic),
                         Kind::Alnum { .. } | Kind::AlnumEdited { .. } | Kind::NumericEdited { .. } | Kind::Group => Some(Class::Alphanumeric),
                         Kind::National => Some(Class::National),
+                        Kind::Dbcs { .. } => Some(Class::Dbcs),
                         Kind::Pointer | Kind::ObjectReference | Kind::ProgramPointer => None,
                     }
                 }
@@ -159,6 +164,7 @@ fn nonnumeric_literal(l: &Literal) -> Option<&'static str> {
     Some(match l {
         Literal::Alnum(_) | Literal::Hex(_) => "an alphanumeric literal",
         Literal::National(_) => "a national literal",
+        Literal::Dbcs(_) => "a DBCS literal",
         Literal::Figurative(Figurative::Space) => "SPACE",
         Literal::Figurative(Figurative::HighValue) => "HIGH-VALUE",
         Literal::Figurative(Figurative::LowValue) => "LOW-VALUE",
@@ -167,6 +173,7 @@ fn nonnumeric_literal(l: &Literal) -> Option<&'static str> {
         Literal::All(inner) => match &**inner {
             Literal::Figurative(_) => return nonnumeric_literal(inner),
             Literal::National(_) => "an ALL national literal",
+            Literal::Dbcs(_) => "an ALL DBCS literal",
             _ => "an ALL literal",
         },
     })

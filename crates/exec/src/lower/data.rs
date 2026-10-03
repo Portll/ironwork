@@ -26,6 +26,7 @@ pub(super) enum Value {
     Num(Option<u32>),
     Float,
     National,
+    Dbcs,
     Address,
 }
 
@@ -47,6 +48,7 @@ pub(super) fn value_of(kind: Kind) -> Value {
     match kind {
         Kind::Group | Kind::Alnum { .. } | Kind::NumericEdited { .. } | Kind::AlnumEdited { .. } => Value::Bytes,
         Kind::National => Value::National,
+        Kind::Dbcs { .. } => Value::Dbcs,
         Kind::Pointer | Kind::ObjectReference | Kind::ProgramPointer => Value::Address,
         Kind::Index => Value::Num(Some(0)),
         Kind::Float(_) => Value::Float,
@@ -198,7 +200,11 @@ impl Lower<'_> {
                     Some(l) => Some(self.int_expr(l, r.pos)?),
                     None => None,
                 };
-                let kind = if item.kind == Kind::National { Kind::National } else { Kind::Alnum { justified: false } };
+                let kind = match item.kind {
+                    Kind::National => Kind::National,
+                    Kind::Dbcs { .. } => Kind::Dbcs { justified: false, edit: None },
+                    _ => Kind::Alnum { justified: false },
+                };
                 (kind, Some(lir::RefMod { start, length, check: ssrange }))
             }
         };
@@ -425,13 +431,18 @@ impl Lower<'_> {
     pub(super) fn literal_const(&mut self, lit: &Literal, pos: Pos) -> R<(ConstId, Side)> {
         if let Some(message) = self.unencodable(lit) {
             let abend = self.abend(AbendCode::Ironwork, &message, Some(pos))?;
-            let value = if matches!(lit, Literal::All(_)) { Value::All } else { Value::Bytes };
+            let value = match lit {
+                Literal::All(_) => Value::All,
+                Literal::Dbcs(_) => Value::Dbcs,
+                _ => Value::Bytes,
+            };
             return Ok((self.constant(lir::Const::Refused(abend))?, Side { value, src: None, digits: 0 }));
         }
         let (constant, value, digits) = match lit {
             Literal::Alnum(s) => (lir::Const::Bytes(self.encode(s, pos)?), Value::Bytes, 0),
             Literal::Hex(b) => (lir::Const::Bytes(b.clone()), Value::Bytes, 0),
             Literal::National(s) => (lir::Const::National(s.encode_utf16().flat_map(u16::to_be_bytes).collect()), Value::National, 0),
+            Literal::Dbcs(s) => (lir::Const::Dbcs(self.dbcs(s, pos)?), Value::Dbcs, 0),
             Literal::Number(t) => match literal_fixed(t) {
                 Some(f) => (lir::Const::Number(f), Value::Num(Some(f.places.dec)), f.places.total()),
                 None => return unsupported("a numeric literal of more than 31 digits", pos),
@@ -441,6 +452,7 @@ impl Lower<'_> {
                 Literal::Alnum(s) => (lir::Const::All(self.encode(s, pos)?), Value::All, 0),
                 Literal::Hex(b) => (lir::Const::All(b.clone()), Value::All, 0),
                 Literal::National(s) => (lir::Const::AllNational(s.encode_utf16().flat_map(u16::to_be_bytes).collect()), Value::National, 0),
+                Literal::Dbcs(s) => (lir::Const::All(self.dbcs(s, pos)?), Value::All, 0),
                 Literal::Figurative(f) => (lir::Const::Figurative(*f), Value::Fig(*f), 0),
                 _ => return unsupported("ALL with a literal that is not alphanumeric or national", pos),
             },
@@ -452,6 +464,11 @@ impl Lower<'_> {
         self.page.encode(text).or_else(|_| unsupported("a literal the code page cannot encode", pos))
     }
 
+    /// A DBCS literal's bytes, as `literal_value` makes them.
+    pub(super) fn dbcs(&self, text: &str, pos: Pos) -> R<Vec<u8>> {
+        rt::store::dbcs_literal(self.page, text).or_else(|_| unsupported("a DBCS literal the code page cannot encode", pos))
+    }
+
     /// A literal of a report or of JSON PARSE, which a payload holds as a constant: one the code page
     /// cannot encode is refused.
     pub(super) fn encoded_const(&mut self, lit: &Literal, pos: Pos) -> R<(ConstId, Side)> {
@@ -461,18 +478,15 @@ impl Lower<'_> {
         self.literal_const(lit, pos)
     }
 
-    /// The message of `literal_value`'s abend for an alphanumeric literal, or ALL one, the code page
-    /// cannot encode.
+    /// The message of `literal_value`'s abend for an alphanumeric or DBCS literal, or ALL one, the
+    /// code page cannot encode.
     pub(super) fn unencodable(&self, lit: &Literal) -> Option<String> {
-        let text = match lit {
-            Literal::Alnum(s) => s,
-            Literal::All(inner) => match &**inner {
-                Literal::Alnum(s) => s,
-                _ => return None,
-            },
-            _ => return None,
-        };
-        self.page.encode(text).err().map(|e| e.to_string())
+        match lit {
+            Literal::Alnum(s) => self.page.encode(s).err().map(|e| e.to_string()),
+            Literal::Dbcs(s) => rt::store::dbcs_literal(self.page, s).err(),
+            Literal::All(inner) if matches!(**inner, Literal::Alnum(_) | Literal::Dbcs(_)) => self.unencodable(inner),
+            _ => None,
+        }
     }
 
     pub(super) fn constant(&mut self, c: lir::Const) -> R<ConstId> {

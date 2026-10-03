@@ -157,7 +157,7 @@ fn literal_image(literal: &Literal, len: usize, options: &Options, collating: &S
             let pattern = characters(inner).filter(|p| !p.is_empty())?;
             Some(pattern.iter().copied().cycle().take(len).collect())
         }
-        Literal::National(_) | Literal::Number(_) => None,
+        Literal::National(_) | Literal::Dbcs(_) | Literal::Number(_) => None,
     }
 }
 

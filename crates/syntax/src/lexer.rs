@@ -11,6 +11,8 @@ pub enum Tok {
     Alnum(String),
     Hex(Vec<u8>),
     National(String),
+    /// A DBCS literal's characters, its shift-out and shift-in removed.
+    Dbcs(String),
     Pic(String),
     /// An EXEC ... END-EXEC block, as written: SQL, CICS or DLI for a precompiler.
     Exec(String),
@@ -69,7 +71,12 @@ struct Lexer<'a> {
     /// The lines read in free form, and whether a token from each has carried its warning.
     free: &'a [FreeSpan],
     warned: Vec<bool>,
+    /// NSYMBOL(DBCS) is on the cards: N'...' is a DBCS literal.
+    n_is_dbcs: bool,
 }
+
+/// The most characters a DBCS literal holds (Language Reference SC27-8713-03, p. 42).
+const DBCS_LITERAL_MAX: usize = 28;
 
 pub fn lex(source: &Source) -> Result<Vec<Token>, Error> {
     lex_under(source, Compliance::Strict)
@@ -78,6 +85,11 @@ pub fn lex(source: &Source) -> Result<Vec<Token>, Error> {
 /// Lexes `source` under `compliance`: `--compliance extended` reads `<>` as NOT = and keeps `&`
 /// after a literal or a word for [`crate::extended`].
 pub fn lex_under(source: &Source, compliance: Compliance) -> Result<Vec<Token>, Error> {
+    let mut options = numeric::Options::default();
+    for card in &source.options {
+        options.apply(card).ok();
+    }
+    let n_is_dbcs = options.nsymbol == numeric::Nsymbol::Dbcs;
     let mut lx = Lexer {
         chars: source.text.chars().collect(),
         positions: &source.positions,
@@ -91,6 +103,7 @@ pub fn lex_under(source: &Source, compliance: Compliance) -> Result<Vec<Token>, 
         extended: compliance == Compliance::Extended,
         free: &source.free,
         warned: vec![false; source.free.len()],
+        n_is_dbcs,
     };
     while lx.at < lx.chars.len() {
         lx.next_token()?;
@@ -242,6 +255,8 @@ impl Lexer<'_> {
                 let national = national.ok_or_else(|| Error::at(pos, format!("NX'{text}': a national hexadecimal literal is 4 to 320 hex digits, four to each UTF-16 code unit")))?;
                 self.emit(Tok::National(national), pos);
             }
+            'N' | 'n' if quote_next && self.n_is_dbcs => self.dbcs_literal(pos)?,
+            'G' | 'g' if quote_next => self.dbcs_literal(pos)?,
             'N' | 'n' if quote_next => {
                 self.at += 1;
                 let text = self.quoted(pos)?;
@@ -338,6 +353,22 @@ impl Lexer<'_> {
     }
 
     /// Reads a quoted literal starting at the opening quote; a doubled quote stands for one.
+    /// G'...', or N'...' under NSYMBOL(DBCS): the characters, the shift-out after the opening
+    /// delimiter and the shift-in before the closing one, which a source in Unicode drops, removed
+    /// where present.
+    fn dbcs_literal(&mut self, pos: Pos) -> Result<(), Error> {
+        self.at += 1;
+        let text = self.quoted(pos)?;
+        let text = text.strip_prefix('\u{E}').unwrap_or(&text);
+        let text = text.strip_suffix('\u{F}').unwrap_or(text).to_owned();
+        let count = text.chars().count();
+        if count == 0 || count > DBCS_LITERAL_MAX {
+            return Err(Error::at(pos, format!("a DBCS literal holds 1 to {DBCS_LITERAL_MAX} characters, not {count}")));
+        }
+        self.emit(Tok::Dbcs(text), pos);
+        Ok(())
+    }
+
     fn quoted(&mut self, pos: Pos) -> Result<String, Error> {
         let quote = self.chars[self.at];
         self.at += 1;
@@ -449,6 +480,10 @@ mod tests {
     fn literals() {
         assert_eq!(toks("           'IT''S' X'F1C1' N'AB'"), [Tok::Alnum("IT'S".into()), Tok::Hex(vec![0xF1, 0xC1]), Tok::National("AB".into())]);
         assert_eq!(toks("           NX'00410042' nx\"265ED83DDE00\""), [Tok::National("AB".into()), Tok::National("\u{265E}\u{1F600}".into())]);
+        assert_eq!(toks("           G'\u{E}ＡＢ\u{F}' g\"日本\""), [Tok::Dbcs("ＡＢ".into()), Tok::Dbcs("日本".into())]);
+        assert_eq!(toks("       CBL NSYMBOL(DBCS)\n           N'ＡＢ' NX'0041'"), [Tok::Dbcs("ＡＢ".into()), Tok::National("A".into())]);
+        let long = format!("           G'{}'", "Ａ".repeat(29));
+        assert!(lex(&source::read(&long).unwrap()).unwrap_err().message.contains("1 to 28 characters, not 29"));
         for bad in ["NX'GH'", "NX'1'", "NX'004'", "NX'D83D'"] {
             let e = lex(&source::read(&format!("           {bad}")).unwrap()).unwrap_err();
             assert!(e.message.contains("a national hexadecimal literal is 4 to 320 hex digits"), "{bad}: {}", e.message);

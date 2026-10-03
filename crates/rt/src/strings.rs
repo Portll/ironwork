@@ -74,10 +74,11 @@ pub fn inspect(data: &mut [u8], unit: usize, phrases: &[Phrase]) -> Vec<i64> {
     counts
 }
 
-/// Where the next UNSTRING field ends and which delimiter ended it: the earliest position at or
-/// after `from` where any delimiter matches, the first listed winning at a tie.
-pub fn next_delimiter(source: &[u8], from: usize, delimiters: &[(bool, Vec<u8>)]) -> Option<(usize, usize)> {
-    (from..source.len()).find_map(|p| delimiters.iter().position(|(_, d)| !d.is_empty() && source[p..].starts_with(d)).map(|k| (p, k)))
+/// Where the next UNSTRING field ends and which delimiter ended it: the earliest character
+/// position, `unit` bytes each, at or after `from` where any delimiter matches, the first listed
+/// winning at a tie.
+pub fn next_delimiter(source: &[u8], from: usize, delimiters: &[(bool, Vec<u8>)], unit: usize) -> Option<(usize, usize)> {
+    (from..source.len()).step_by(unit).find_map(|p| delimiters.iter().position(|(_, d)| !d.is_empty() && source[p..].starts_with(d)).map(|k| (p, k)))
 }
 
 /// The end of a delimiter at `at`, taking every repetition when it is DELIMITED BY ALL.
@@ -90,11 +91,12 @@ pub fn past_delimiter(source: &[u8], at: usize, delimiter: &[u8], all: bool) -> 
 }
 
 /// STRING's view of a sending item: all of it for DELIMITED BY SIZE, or up to the delimiter.
-pub fn delimited(bytes: &[u8], delimiter: Option<&[u8]>) -> Vec<u8> {
+/// The delimiter is matched at character positions, `unit` bytes each.
+pub fn delimited(bytes: &[u8], delimiter: Option<&[u8]>, unit: usize) -> Vec<u8> {
     match delimiter {
         Some(d) if !d.is_empty() => {
-            let end = bytes.windows(d.len()).position(|w| w == d).unwrap_or(bytes.len());
-            bytes[..end].to_vec()
+            let end = (0..=bytes.len().saturating_sub(d.len())).step_by(unit).find(|&p| bytes[p..].starts_with(d)).unwrap_or(bytes.len());
+            bytes[..end.min(bytes.len())].to_vec()
         }
         _ => bytes.to_vec(),
     }
@@ -157,9 +159,18 @@ mod tests {
     #[test]
     fn delimiters() {
         let d = vec![(true, b" ".to_vec()), (false, b",".to_vec())];
-        assert_eq!(next_delimiter(b"AB  C,D", 0, &d), Some((2, 0)));
+        assert_eq!(next_delimiter(b"AB  C,D", 0, &d, 1), Some((2, 0)));
         assert_eq!(past_delimiter(b"AB  C,D", 2, b" ", true), 4);
-        assert_eq!(next_delimiter(b"AB  C,D", 4, &d), Some((5, 1)));
-        assert_eq!(delimited(b"JOHN  SMITH", Some(b" ")), b"JOHN");
+        assert_eq!(next_delimiter(b"AB  C,D", 4, &d, 1), Some((5, 1)));
+        assert_eq!(delimited(b"JOHN  SMITH", Some(b" "), 1), b"JOHN");
+    }
+
+    #[test]
+    fn two_byte_characters_match_delimiters_only_at_their_own_positions() {
+        let data = [0x42, 0xC1, 0x42, 0x40, 0x42, 0xC2, 0x40, 0x40];
+        assert_eq!(delimited(&data, Some(&[0x40, 0x42]), 2), data, "X'4042' straddles two characters");
+        assert_eq!(delimited(&data, Some(&[0x40, 0x42]), 1), &data[..3]);
+        assert_eq!(delimited(&data, Some(&[0x40, 0x40]), 2), &data[..6]);
+        assert_eq!(next_delimiter(&data, 0, &[(false, vec![0x40, 0x40])], 2), Some((6, 0)));
     }
 }

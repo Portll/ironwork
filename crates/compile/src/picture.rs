@@ -6,6 +6,8 @@ pub enum Category {
     Alphanumeric,
     Numeric,
     National,
+    /// G, with B: DBCS character positions, which USAGE DISPLAY-1 holds.
+    Dbcs,
     NumericEdited,
     AlphanumericEdited,
 }
@@ -13,7 +15,8 @@ pub enum Category {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Picture {
     pub category: Category,
-    /// Character positions: bytes for alphanumeric, digits for numeric, characters for national.
+    /// Character positions: bytes for alphanumeric, digits for numeric, characters for national
+    /// and DBCS.
     pub size: u32,
     pub digits: u32,
     pub scale: u32,
@@ -64,6 +67,10 @@ pub fn analyse(text: &str) -> Result<Picture, String> {
 /// read as $, and the value it stands for kept.
 pub fn analyse_with(text: &str, notation: Notation) -> Result<Picture, String> {
     let (runs, currency) = runs(text, notation)?;
+    let has = |symbol: char| runs.iter().any(|&(c, _)| c == symbol);
+    if has('G') || has('N') && has('B') {
+        return dbcs(text, &runs);
+    }
     if runs.iter().any(|&(c, _)| matches!(c, 'Z' | '*' | '+' | '-' | '.' | ',' | 'B' | '0' | '/' | '$' | 'C' | 'R' | 'D')) {
         return edited(text, &runs, notation.decimal_comma, currency);
     }
@@ -107,6 +114,24 @@ pub fn analyse_with(text: &str, notation: Notation) -> Result<Picture, String> {
         (false, false, true) if !signed && !after_point && !scaled => Ok(Picture { category: Category::National, size: national, digits: 0, scale: 0, signed, edit: None, scaling: 0, currency: None }),
         _ => Err(format!("PICTURE {text}: mixes symbols of different categories")),
     }
+}
+
+/// A PICTURE of G, or of N with B: DBCS character positions, each B one that holds a DBCS space
+/// (Language Reference SC27-8713-03, pp. 214, 219). N with B is national-edited unless the item is
+/// DISPLAY-1, which the item's USAGE decides.
+fn dbcs(text: &str, runs: &[(char, u64)]) -> Result<Picture, String> {
+    let symbol = if runs.iter().any(|&(c, _)| c == 'G') { 'G' } else { 'N' };
+    if let Some(&(c, _)) = runs.iter().find(|&&(c, _)| c != symbol && c != 'B') {
+        return Err(format!("PICTURE {text}: {c:?} cannot be in a PICTURE of {symbol}, which takes {symbol} and B only"));
+    }
+    let size: u64 = runs.iter().map(|&(_, n)| n).sum();
+    let inserts = runs.iter().any(|&(c, _)| c == 'B');
+    if size > MAX_POSITIONS || inserts && size > MAX_EDITED {
+        return Err(format!("PICTURE {text}: more character positions than a DBCS item holds"));
+    }
+    let edit = inserts.then(|| runs.iter().flat_map(|&(c, n)| std::iter::repeat_n(if c == 'B' { Sym::Insert(' ') } else { Sym::Char }, n as usize)).collect());
+    let category = if symbol == 'G' { Category::Dbcs } else { Category::National };
+    Ok(Picture { category, size: size as u32, digits: 0, scale: 0, signed: false, edit, scaling: 0, currency: None })
 }
 
 /// A numeric PICTURE under BLANK WHEN ZERO, which makes the item numeric-edited (Language

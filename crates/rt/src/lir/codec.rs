@@ -34,6 +34,7 @@ codec_enum!(Kind {
     Index = 10,
     ObjectReference = 11,
     ProgramPointer = 12,
+    Dbcs { justified, edit } = 13,
 });
 codec_struct!(SignClause { position, separate });
 codec_struct!(Pos { file, line, col });
@@ -63,6 +64,8 @@ codec_enum!(HostType {
     Char(len) = 7,
     VarChar(max) = 8,
     Structure(members) = 9,
+    Graphic(len) = 10,
+    VarGraphic(max) = 11,
 });
 codec_enum!(Sym {
     Nine = 0,
