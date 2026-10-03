@@ -73,6 +73,16 @@ impl<H> Loaded<H> {
     }
 }
 
+/// What a CICS run unit holds that the LINK or XCTL starting another sets aside until it ends:
+/// each program's state, the EXTERNAL data and files with the connectors to them, and the
+/// Language Environment heap, which belong to the enclave (C126).
+struct Enclave {
+    programs: Vec<Held>,
+    externals: Externals,
+    connectors: HashMap<(usize, usize), Connector>,
+    heap: Vec<(usize, usize, bool)>,
+}
+
 /// A program's state in a CICS run unit that a LINK or XCTL has set aside.
 struct Held {
     base: usize,
@@ -248,9 +258,8 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     pub taint: Option<Taint>,
     /// How many more statements may start before the run ends with S322; None for no limit.
     pub statement_limit: Option<u64>,
-    /// Each program's state in the CICS run units the LINKs and XCTLs running have set aside, the
-    /// innermost last.
-    set_aside: Vec<Vec<Held>>,
+    /// The CICS run units the LINKs and XCTLs running have set aside, the innermost last.
+    set_aside: Vec<Enclave>,
 }
 
 impl<H, L: Loader<H>> RunUnit<'_, H, L> {
@@ -386,16 +395,19 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
     }
 
     /// A CICS LINK or XCTL starts a run unit of its own (C145): every program starts in it in its
-    /// initial state, with storage of its own, and the state of the run unit that issued it is
-    /// set aside until [`RunUnit::end_cics_run_unit`].
+    /// initial state, with storage of its own, it has no EXTERNAL data or files and an empty heap
+    /// (C126), and the state of the run unit that issued it is set aside until
+    /// [`RunUnit::end_cics_run_unit`].
     pub fn begin_cics_run_unit(&mut self) {
-        let held = self.programs.iter_mut().map(Loaded::set_aside).collect();
-        self.set_aside.push(held);
+        let programs = self.programs.iter_mut().map(Loaded::set_aside).collect();
+        let (externals, connectors) = (std::mem::take(&mut self.externals), std::mem::take(&mut self.connectors));
+        self.set_aside.push(Enclave { programs, externals, connectors, heap: std::mem::take(&mut self.le.heap) });
     }
 
     /// Ends the run unit [`RunUnit::begin_cics_run_unit`] started, closing the files its programs
-    /// left open as Language Environment closes an enclave's: a program it loaded is left in its
-    /// initial state, and every other has the state that was set aside back.
+    /// and its EXTERNAL files left open as Language Environment closes an enclave's, and dropping
+    /// its EXTERNAL data and heap: a program it loaded is left in its initial state, and the run
+    /// unit set aside has everything back.
     pub fn end_cics_run_unit(&mut self) -> Result<(), String> {
         let mut closed = Ok(());
         for program in &mut self.programs {
@@ -407,9 +419,12 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             drop(program.set_aside());
             program.placed = true;
         }
-        for (program, held) in self.programs.iter_mut().zip(self.set_aside.pop().unwrap_or_default()) {
+        closed = closed.and(self.close_external_files());
+        let Some(enclave) = self.set_aside.pop() else { return closed };
+        for (program, held) in self.programs.iter_mut().zip(enclave.programs) {
             program.restore(held);
         }
+        (self.externals, self.connectors, self.le.heap) = (enclave.externals, enclave.connectors, enclave.heap);
         closed
     }
 
@@ -544,12 +559,20 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
                 f.close().map_err(|e| format!("closing a file of {}: {e}", program.name))?;
             }
         }
+        self.close_external_files()
+    }
+
+    /// Closes the EXTERNAL files left open, giving the first failure.
+    fn close_external_files(&mut self) -> Result<(), String> {
+        let mut closed = Ok(());
         for (name, &k) in &self.externals.file_names {
-            if let Some(f) = self.externals.files[k].take() {
-                f.close().map_err(|e| format!("closing EXTERNAL file {name}: {e}"))?;
+            if let Some(f) = self.externals.files[k].take()
+                && let Err(e) = f.close()
+            {
+                closed = closed.and(Err(format!("closing EXTERNAL file {name}: {e}")));
             }
         }
-        Ok(())
+        closed
     }
 
     /// Where EXTERNAL record `name` is, or EXTERNAL file `name`'s record area when `file`: storage

@@ -2456,6 +2456,47 @@ fn xctl_and_link_start_the_tasks_first_program_afresh_wherever_it_is() {
     assert_eq!(first_program_task(&["EXEC CICS LINK PROGRAM('LINKM') END-EXEC", "ADD 1 TO N"]), ("MAIN AGAIN 1 LINK\nMAIN ENDS 2\n".into(), None));
 }
 
+/// The output and abend code of a task whose first program, MAINP, has EXTERNAL record EXT-REC
+/// and a CEEGTST block at HEAP-PTR, and runs `body`, then RETURN. EXTL shows EXT-REC, sets it and
+/// CALLs EXTC, which shows it; HEAPL frees the block its COMMAREA points to and puts one of its
+/// own there.
+fn enclave_task(body: &[&str]) -> (String, Option<String>) {
+    let ext = "       01  EXT-REC PIC X(4) EXTERNAL.\n";
+    let heap = "       01  WS-HEAP PIC S9(9) BINARY VALUE 0.\n       01  WS-SIZE PIC S9(9) BINARY VALUE 16.\n       01  FC.\n           05 FC-SEV PIC 9(4) BINARY.\n           05 FC-MSG PIC 9(4) BINARY.\n           05 FILLER PIC X(8).\n";
+    let mut procedure: Vec<String> = ["MOVE 'MAIN' TO EXT-REC", "CALL 'CEEGTST' USING WS-HEAP WS-SIZE HEAP-PTR FC", "SET AREA-PTR TO HEAP-PTR"].iter().chain(body).map(|s| line(s)).collect();
+    procedure.push(line("EXEC CICS RETURN END-EXEC."));
+    let main = cics_program("MAINP", &format!("{ext}{heap}       01  HEAP-PTR POINTER.\n       01  WS-AREA.\n           05 AREA-PTR POINTER.\n"), "", &procedure.concat());
+    let extl = ["IF EXT-REC = LOW-VALUES DISPLAY 'EXTL FRESH'", "ELSE DISPLAY 'EXTL ' EXT-REC END-IF", "MOVE 'LINK' TO EXT-REC", "CALL 'EXTC'", "EXEC CICS RETURN END-EXEC."];
+    let heapl = ["CALL 'CEEFRST' USING LK-PTR FC", "DISPLAY 'HEAPL FREES OUTER ' FC-MSG", "CALL 'CEEGTST' USING WS-HEAP WS-SIZE LK-PTR FC", "EXEC CICS RETURN END-EXEC."];
+    let programs = [
+        ("EXTL", cics_program("EXTL", ext, "", &extl.map(line).concat())),
+        ("EXTC", cics_program("EXTC", ext, "", &["DISPLAY 'EXTC ' EXT-REC", "GOBACK."].map(line).concat())),
+        ("HEAPL", cics_program("HEAPL", heap, "       01  DFHCOMMAREA.\n           05 LK-PTR POINTER.\n", &heapl.map(line).concat())),
+    ];
+    let mut source = format!("{main}       END PROGRAM MAINP.\n");
+    for (id, program) in programs {
+        source.push_str(&format!("{program}       END PROGRAM {id}.\n"));
+    }
+    let (out, ending) = run_cics(&source, task("TR20"), None, unit::Clock::System);
+    (out, ending.err().map(|a| a.code.to_string()))
+}
+
+#[test]
+fn each_run_unit_a_link_starts_has_external_data_and_heap_storage_of_its_own() {
+    let link = "EXEC CICS LINK PROGRAM('EXTL') END-EXEC";
+    let external = enclave_task(&[link, "DISPLAY 'MAIN ' EXT-REC", link, "CALL 'EXTC'"]);
+    assert_eq!(external, ("EXTL FRESH\nEXTC LINK\nMAIN MAIN\nEXTL FRESH\nEXTC LINK\nEXTC MAIN\n".into(), None));
+    let heap = [
+        "EXEC CICS LINK PROGRAM('HEAPL') COMMAREA(WS-AREA) LENGTH(4)",
+        "    END-EXEC",
+        "CALL 'CEEFRST' USING AREA-PTR FC",
+        "DISPLAY 'MAIN FREES INNER ' FC-MSG",
+        "CALL 'CEEFRST' USING HEAP-PTR FC",
+        "DISPLAY 'MAIN FREES OWN ' FC-MSG",
+    ];
+    assert_eq!(enclave_task(&heap), ("HEAPL FREES OUTER 0810\nMAIN FREES INNER 0810\nMAIN FREES OWN 0000\n".into(), None));
+}
+
 #[test]
 fn xctl_in_a_called_program_replaces_the_program_running_its_level() {
     assert_eq!(level_task(&["CALL 'XCTP'", "DISPLAY 'BACK IN MAIN'"]), ("LAST XC 0002\n".into(), Ok((None, None))));
