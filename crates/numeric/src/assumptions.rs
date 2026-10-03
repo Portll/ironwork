@@ -282,6 +282,7 @@ pub const CICS_ABEND_EXIT_ACROSS_XCTL: &str = "C239";
 pub const CICS_RETURN_ENDS_THE_LEVEL: &str = "C233";
 pub const CICS_HANDLERS_ACROSS_CALL: &str = "C234";
 pub const CICS_CONDITION_LABEL_OWNER: &str = "C235";
+pub const CICS_RETURN_BELOW_THE_FIRST_LEVEL: &str = "C143";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1786,7 +1787,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: CICS_RETURN_ENDS_THE_LEVEL,
-        claim: "EXEC CICS RETURN and XCTL end the logical level they are issued at, whichever of its programs issues them. A program a COBOL CALL reaches, static or dynamic, is at its caller's logical level, and a run unit is what the task, a LINK or an XCTL starts, with the programs it CALLs (CICS TS 6.x, 'Flow of control between programs and subprograms', dfhp3_cobol_subprog_flow). RETURN in a CALLed program terminates the calling program ('Rules for calling subprograms', dfhp3_cobol_subprog_rules) and goes back to the program that LINKed to the level, or at the task's first level to CICS (dfhp3_cobol_subprog_flow; RETURN, dfhp4_return); TRANSID and COMMAREA are allowed there, where RETURN goes back to CICS, as for the program running the level, and raise INVREQ below it, where the RETURN reference allows TRANSID and ironwork does not yet. XCTL in a CALLed program starts its program as the one running the level, the CALL chain released with the run unit (XCTL, dfhp4_xctl), with a copy of the COMMAREA, as every XCTL passes, and the exit C239 gives; the level ends when that program does. Each program of the CALL chain then ends as its CALL comes back, as by GOBACK there: nothing after the CALL runs, NOT ON EXCEPTION and the RETURNING item included, and the PERFORMs in progress end with the activations whose return points they are (C99). The manuals do not say what becomes of the CALL statements; ironwork ends their programs so",
+        claim: "EXEC CICS RETURN and XCTL end the logical level they are issued at, whichever of its programs issues them. A program a COBOL CALL reaches, static or dynamic, is at its caller's logical level, and a run unit is what the task, a LINK or an XCTL starts, with the programs it CALLs (CICS TS 6.x, 'Flow of control between programs and subprograms', dfhp3_cobol_subprog_flow). RETURN in a CALLed program terminates the calling program ('Rules for calling subprograms', dfhp3_cobol_subprog_rules) and goes back to the program that LINKed to the level, or at the task's first level to CICS (dfhp3_cobol_subprog_flow; RETURN, dfhp4_return); TRANSID and COMMAREA are allowed there, where RETURN goes back to CICS, as for the program running the level; below it COMMAREA raises INVREQ and TRANSID is allowed (C143). XCTL in a CALLed program starts its program as the one running the level, the CALL chain released with the run unit (XCTL, dfhp4_xctl), with a copy of the COMMAREA, as every XCTL passes, and the exit C239 gives; the level ends when that program does. Each program of the CALL chain then ends as its CALL comes back, as by GOBACK there: nothing after the CALL runs, NOT ON EXCEPTION and the RETURNING item included, and the PERFORMs in progress end with the activations whose return points they are (C99). The manuals do not say what becomes of the CALL statements; ironwork ends their programs so",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -1800,6 +1801,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: CICS_CONDITION_LABEL_OWNER,
         claim: "A HANDLE CONDITION label, like a HANDLE ABEND one (C238), belongs to the program activation that issued the HANDLE CONDITION. The label must be in the same PROCEDURE DIVISION as the command that causes the branch, a HANDLE label cannot handle a condition caused by another program invoked with CALL, and the attempt at cross-program branching ends the transaction (Programming Guide SC27-8714-03, pp. 503-504). A condition raised where the label it goes to was set by another activation, a program the CALL passed the handlers from or to, or one that has returned, therefore abends the task APC2, the code CICS ends a dynamically called program with when it abends under CBLPSHPOP(OFF) with its caller's condition handling active (dfhp3_cobol_subprog_rules; CICS TS 6.x, abend code APC2), and a HANDLE ABEND exit can intercept it (C24). The Programming Guide says a condition in a nested program goes to its container's label with unpredictable results (p. 504); ironwork abends APC2 there too. IGNORE CONDITION, which names no label, applies in whichever program raises the condition, and a program CALLed again is a new activation, which does not take a label its earlier one set",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CICS_RETURN_BELOW_THE_FIRST_LEVEL,
+        claim: "The COMMAREA, IMMEDIATE and CHANNEL options of RETURN can be used only when RETURN returns control to CICS; otherwise INVREQ occurs with RESP2 2, 'a RETURN command with the CHANNEL, COMMAREA, or IMMEDIATE option is issued by a program that is not at the highest logical level' (CICS TS 6.x, RETURN, dfhp4_return). TRANSID is not among them: specified on a program that is not at the highest level, it is the transaction identifier for the terminal's next input unless an error on COMMAREA, INPUTMSG or CHANNEL on the final RETURN clears it (dfhp4_return). A RETURN TRANSID below the first level therefore names the next transaction, which a later RETURN TRANSID replaces, and one that raises INVREQ names none. ironwork raises none of the errors that clear it, models no terminal-less task (RESP2 1) and keeps CHANNEL only for the INVREQ",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

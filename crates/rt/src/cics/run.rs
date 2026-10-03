@@ -178,7 +178,7 @@ pub fn run<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, command: &Cics
     let at = At { name: &name, resp: &command.resp, pos };
     match &command.command {
         Cics::File { verb, file, options } => file_control::run(x, &at, *verb, file.as_ref(), options),
-        Cics::Return { transid, commarea, length } => program::cics_return(x, &at, transid.as_ref(), commarea.as_ref(), length.as_ref()),
+        Cics::Return { transid, commarea, length, channel, immediate } => program::cics_return(x, &at, transid.as_ref(), commarea.as_ref(), length.as_ref(), channel.is_some() || *immediate),
         Cics::Link(t) => program::link(x, &at, t, false),
         Cics::Xctl(t) => program::link(x, &at, t, true),
         Cics::Abend { abcode, cancel } => program::abend(x, &at, abcode.as_ref(), *cancel),

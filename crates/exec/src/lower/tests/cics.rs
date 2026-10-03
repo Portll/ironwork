@@ -54,7 +54,7 @@ fn each_block_is_one_op_whose_command_binds_as_the_walker_binds_it_and_handle_ke
     assert_eq!(got[2].1.command, Cics::IgnoreCondition(vec![Condition::LENGERR]));
     let Cics::Link(Transfer { program: Some(Datum::Value(_)), commarea: Some(Datum::Place(_)), length: None }) = got[5].1.command else { panic!("{:?}", got[5]) };
     assert!(got[5].1.resp.nohandle);
-    let Cics::Return { transid, commarea, length } = &got[6].1.command else { panic!("{:?}", got[6]) };
+    let Cics::Return { transid, commarea, length, channel: None, immediate: false } = &got[6].1.command else { panic!("{:?}", got[6]) };
     assert_eq!(names(&p, commarea), "WS-DATA");
     assert!(matches!((transid, length), (Some(Datum::Value(LirOperand::Const(_))), Some(Datum::Value(LirOperand::Const(_))))));
     assert!(matches!(got[7].1.command, Cics::Abend { abcode: Some(Datum::Value(_)), cancel: true }));

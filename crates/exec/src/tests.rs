@@ -2231,17 +2231,23 @@ type LevelEnd = Result<(Option<String>, Option<Vec<u8>>), String>;
 
 /// The output of a task whose first program runs `body`, then RETURN, with the TRANSID and
 /// COMMAREA the task ended with, or its abend code. RETP RETURNs, RETT RETURNs TRANSID('NEXT')
-/// COMMAREA('DONE') or shows INVREQ, and XCTP XCTLs to LASTX, which shows its COMMAREA; MIDC
-/// PERFORMs a paragraph that CALLs RETP, and CALLER CALLs the program its COMMAREA names.
+/// COMMAREA('DONE'), RETX TRANSID('NXT2') and RETI TRANSID('NXT3') IMMEDIATE, RETT and RETI
+/// showing INVREQ and RESP2; XCTP XCTLs to LASTX, which shows its COMMAREA; MIDC PERFORMs a
+/// paragraph that CALLs RETP, and CALLER CALLs the program its COMMAREA names.
 fn level_task(body: &[&str]) -> (String, LevelEnd) {
     let mut procedure: Vec<String> = body.iter().map(|s| line(s)).collect();
     procedure.push(line("EXEC CICS RETURN END-EXEC."));
     let main = cics_program("MAINP", "       01  WS-PGM PIC X(8).\n", "", &procedure.concat());
-    let rett = ["EXEC CICS RETURN TRANSID('NEXT') COMMAREA(WS-OUT) LENGTH(4)", "    RESP(WS-RESP) END-EXEC", "IF WS-RESP = DFHRESP(INVREQ) DISPLAY 'INVREQ' END-IF", "GOBACK."];
+    let invreq = "IF WS-RESP = DFHRESP(INVREQ) DISPLAY 'INVREQ ' WS-R2 END-IF";
+    let rett = ["EXEC CICS RETURN TRANSID('NEXT') COMMAREA(WS-OUT) LENGTH(4)", "    RESP(WS-RESP) RESP2(WS-R2) END-EXEC", invreq, "GOBACK."];
+    let reti = ["EXEC CICS RETURN TRANSID('NXT3') IMMEDIATE", "    RESP(WS-RESP) RESP2(WS-R2) END-EXEC", invreq, "GOBACK."];
+    let resp = "       01  WS-RESP PIC S9(8) COMP.\n       01  WS-R2 PIC S9(8) COMP.\n";
     let midc = ["       MID-LINE.\n".to_owned(), line("PERFORM CALL-RETP"), line("DISPLAY 'AFTER PERFORM'"), line("GOBACK."), "       CALL-RETP.\n".to_owned(), line("CALL 'RETP'"), line("DISPLAY 'AFTER CALL'.")];
     let programs = [
         ("RETP", cics_program("RETP", "", "", &["DISPLAY 'IN RETP'", "EXEC CICS RETURN END-EXEC", "DISPLAY 'AFTER RETURN'", "GOBACK."].map(line).concat())),
-        ("RETT", cics_program("RETT", "       01  WS-OUT PIC X(4) VALUE 'DONE'.\n       01  WS-RESP PIC S9(8) COMP.\n", "", &rett.map(line).concat())),
+        ("RETT", cics_program("RETT", &format!("       01  WS-OUT PIC X(4) VALUE 'DONE'.\n{resp}"), "", &rett.map(line).concat())),
+        ("RETX", cics_program("RETX", "", "", &["EXEC CICS RETURN TRANSID('NXT2') END-EXEC", "DISPLAY 'AFTER RETURN'", "GOBACK."].map(line).concat())),
+        ("RETI", cics_program("RETI", resp, "", &reti.map(line).concat())),
         ("XCTP", cics_program("XCTP", "       01  WS-XC PIC X(2) VALUE 'XC'.\n", "", &["EXEC CICS XCTL PROGRAM('LASTX') COMMAREA(WS-XC)", "    LENGTH(2) END-EXEC", "DISPLAY 'AFTER XCTL'", "GOBACK."].map(line).concat())),
         ("LASTX", cics_program("LASTX", "", "       01  DFHCOMMAREA PIC X(2).\n", &["DISPLAY 'LAST ' DFHCOMMAREA ' ' EIBCALEN", "EXEC CICS RETURN END-EXEC."].map(line).concat())),
         ("MIDC", cics_program("MIDC", "", "", &midc.concat())),
@@ -2275,7 +2281,17 @@ fn return_in_a_called_program_ends_its_logical_level() {
 #[test]
 fn return_transid_and_commarea_in_a_called_program_belong_to_its_level() {
     assert_eq!(level_task(&["CALL 'RETT'", "DISPLAY 'BACK IN MAIN'"]), (String::new(), Ok((Some("NEXT".into()), Some(ebcdic("DONE"))))));
-    assert_eq!(linked_caller("RETT"), ("INVREQ\nBACK IN CALLER\nBACK IN MAIN\n".into(), Ok((None, None))));
+    assert_eq!(linked_caller("RETT"), ("INVREQ 00000002\nBACK IN CALLER\nBACK IN MAIN\n".into(), Ok((None, None))));
+}
+
+#[test]
+fn return_below_the_first_level_names_the_next_transaction_and_refuses_what_belongs_to_cics() {
+    let link = |program: &str| level_task(&[&format!("EXEC CICS LINK PROGRAM('{program}') END-EXEC"), "DISPLAY 'BACK IN MAIN'"]);
+    assert_eq!(link("RETX"), ("BACK IN MAIN\n".into(), Ok((Some("NXT2".into()), None))));
+    assert_eq!(link("RETI"), ("INVREQ 00000002\nBACK IN MAIN\n".into(), Ok((None, None))));
+    assert_eq!(level_task(&["CALL 'RETI'", "DISPLAY 'BACK IN MAIN'"]), (String::new(), Ok((Some("NXT3".into()), None))));
+    let replaced = level_task(&["EXEC CICS LINK PROGRAM('RETX') END-EXEC", "CALL 'RETT'"]);
+    assert_eq!(replaced, (String::new(), Ok((Some("NEXT".into()), Some(ebcdic("DONE"))))));
 }
 
 const READ_NO_QUEUE: [&str; 2] = ["EXEC CICS READQ TS QUEUE('NOQ') INTO(WS-DATA)", "    LENGTH(WS-LEN) END-EXEC"];

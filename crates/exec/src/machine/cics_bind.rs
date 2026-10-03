@@ -117,7 +117,7 @@ fn bind_other<'b>(block: &'b ExecBlock, command: &str, label: &dyn Fn(&str) -> R
     let queue = || first(block, &["QUEUE", "QNAME"]);
     let map_command = |two_word: &str| has(block, "MAP") || block.command == two_word;
     Ok(match command {
-        "RETURN" => Cics::Return { transid: a("TRANSID"), commarea: a("COMMAREA"), length: a("LENGTH") },
+        "RETURN" => Cics::Return { transid: a("TRANSID"), commarea: a("COMMAREA"), length: a("LENGTH"), channel: a("CHANNEL"), immediate: has(block, "IMMEDIATE") },
         "LINK" => Cics::Link(transfer(block)),
         "XCTL" => Cics::Xctl(transfer(block)),
         "ABEND" => Cics::Abend { abcode: a("ABCODE"), cancel: has(block, "CANCEL") },

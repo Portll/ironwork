@@ -898,7 +898,7 @@ fn cics_commands_round_trip_with_every_tag() {
     };
     let commands = vec![
         Cics::File { verb: FileControl::Readprev, file: text, options },
-        Cics::Return { transid: text, commarea: None, length: None },
+        Cics::Return { transid: text, commarea: None, length: None, channel: value, immediate: true },
         Cics::Link(transfer.clone()),
         Cics::Xctl(transfer),
         Cics::Abend { abcode: value, cancel: true },
@@ -932,8 +932,8 @@ fn cics_commands_round_trip_with_every_tag() {
         Cics::DeleteqTd { queue: text },
         Cics::Unsupported,
     ];
-    // Tag 9 is retired (load-module.md §4.3).
-    every_variant_but(&commands, 35, &[9]);
+    // Tags 1 and 9 are retired (load-module.md §4.3).
+    every_variant_but(&commands, 36, &[1, 9]);
     let resp = Resp { resp: place, resp2: Some(Datum::Place(8)), nohandle: false };
     round_trip(&commands.into_iter().map(|command| CicsCommand { name: 9, command, resp: resp.clone() }).collect::<Vec<_>>());
     let verbs = [

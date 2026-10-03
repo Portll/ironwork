@@ -12,20 +12,22 @@ use crate::unit::{LoadError, Loader, RunUnit};
 use crate::vocab::Pos;
 
 /// RETURN ends this program's logical level, CALLed programs and all: the program that LINKed to
-/// it goes on, or the task ends (C233). At the task's first level TRANSID and COMMAREA name the
-/// next task and what it starts with; below it they raise INVREQ.
+/// it goes on, or the task ends (C233). TRANSID names the next task from any level. COMMAREA, what
+/// the next task starts with, and CHANNEL and IMMEDIATE (`to_cics`) belong to the RETURN to CICS
+/// and raise INVREQ with RESP2 2 below the task's first level (C143).
 pub(super) fn cics_return<'w, P: Copy, O, S>(
     x: &mut impl CicsHost<'w, P, O, S>,
     at: &At<P, O, S>,
     transid: Option<&Datum<P, O, S>>,
     commarea: Option<&Datum<P, O, S>>,
     length: Option<&Datum<P, O, S>>,
+    to_cics: bool,
 ) -> R<Flow> {
     eib_bytes(x.unit(), EIBFN, &[0x0E, 0x08]);
     let transid = text(x, transid, at.pos)?;
     let commarea = bytes_cut(x, commarea, length, at.pos)?;
-    if task(x).links > 0 && (transid.is_some() || commarea.is_some()) {
-        return raise(x, at, Condition::INVREQ, 0);
+    if task(x).links > 0 && (commarea.is_some() || to_cics) {
+        return raise(x, at, Condition::INVREQ, 2);
     }
     let task = task(x);
     if let Some(t) = transid {

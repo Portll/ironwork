@@ -42,7 +42,8 @@ pub struct Resp<P = PlaceId, O = Operand, S = SymId> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Cics<P = PlaceId, O = Operand, S = SymId> {
     File { verb: FileControl, file: Opt<P, O, S>, options: FileOptions<P, O, S> },
-    Return { transid: Opt<P, O, S>, commarea: Opt<P, O, S>, length: Opt<P, O, S> },
+    /// CHANNEL and IMMEDIATE are kept only for the INVREQ they raise below the task's first level.
+    Return { transid: Opt<P, O, S>, commarea: Opt<P, O, S>, length: Opt<P, O, S>, channel: Opt<P, O, S>, immediate: bool },
     Link(Transfer<P, O, S>),
     Xctl(Transfer<P, O, S>),
     Abend { abcode: Opt<P, O, S>, cancel: bool },
@@ -271,7 +272,9 @@ impl<P, O, S> Cics<P, O, S> {
                     update: o.update,
                 },
             },
-            Self::Return { transid, commarea, length } => Cics::Return { transid: opt(transid, h)?, commarea: opt(commarea, h)?, length: opt(length, h)? },
+            Self::Return { transid, commarea, length, channel, immediate } => {
+                Cics::Return { transid: opt(transid, h)?, commarea: opt(commarea, h)?, length: opt(length, h)?, channel: opt(channel, h)?, immediate }
+            }
             Self::Link(t) => Cics::Link(t.map(h)?),
             Self::Xctl(t) => Cics::Xctl(t.map(h)?),
             Self::Abend { abcode, cancel } => Cics::Abend { abcode: opt(abcode, h)?, cancel },
@@ -373,10 +376,10 @@ impl Decode for Condition {
 codec_enum!(Datum { Place(place) = 0, Value(value) = 1, Text(text) = 2, Bare = 3 });
 codec_struct!(CicsCommand { name, command, resp });
 codec_struct!(Resp { resp, resp2, nohandle });
-// Tag 9 is retired; HandleAbend, whose PROGRAM is a datum, is 34.
+// Tags 1 and 9 are retired; HandleAbend, whose PROGRAM is a datum, is 34, and Return, with CHANNEL
+// and IMMEDIATE, is 35.
 codec_enum!(Cics {
     File { verb, file, options } = 0,
-    Return { transid, commarea, length } = 1,
     Link(transfer) = 2,
     Xctl(transfer) = 3,
     Abend { abcode, cancel } = 4,
@@ -409,6 +412,7 @@ codec_enum!(Cics {
     DeleteqTd { queue } = 32,
     Unsupported = 33,
     HandleAbend { program, label, reset } = 34,
+    Return { transid, commarea, length, channel, immediate } = 35,
 });
 codec_enum!(FileControl {
     Read = 0,

@@ -1303,7 +1303,8 @@ pub enum Datum<P, O, S> { Place(P), Value(O), Text(S), Bare }
 pub type Opt<P, O, S> = Option<Datum<P, O, S>>;
 
 /// 34 variants: File { verb: FileControl, file, options: FileOptions } for the ten file-control
-/// commands; Return; Link and Xctl (Transfer); Abend; HandleCondition(Vec<(Condition,
+/// commands; Return { transid, commarea, length, channel: Opt, immediate }, tag 35 with 1 retired;
+/// Link and Xctl (Transfer); Abend; HandleCondition(Vec<(Condition,
 /// Option<ParaId>)>); IgnoreCondition(Vec<Condition>); PushHandle; PopHandle; HandleAbend
 /// { program: Opt, label: Option<ParaId>, reset }, tag 34 with 9 retired; HandleAid; SendMap; ReceiveMap; SendControl;
 /// Receive(Record); Asktime; Formattime; Assign; Getmain; Freemain; Enq; Deq; Delay;
