@@ -294,6 +294,9 @@ pub const CICS_RETURN_COMMAREA_LENGTH: &str = "C128";
 pub const CICS_RUN_UNIT_STORAGE_RELEASED: &str = "C129";
 pub const TRAP_OFF_LEAVES_FILES_OPEN: &str = "C152";
 pub const CICS_TRANSFER_COMMAREA_LENGTH: &str = "C103";
+pub const CICS_RANDOM_PER_RUN_UNIT: &str = "C104";
+pub const CICS_RETURN_CODE_PER_RUN_UNIT: &str = "C105";
+pub const CICS_ENTRY_POINTERS_ACROSS_RUN_UNITS: &str = "C106";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1884,6 +1887,24 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: CICS_TRANSFER_COMMAREA_LENGTH,
         claim: "LINK and XCTL raise LENGERR, whose default action terminates the task abnormally, with AEIV, with RESP2 11 for a COMMAREA length less than 0 or greater than the permitted length, and RESP2 26 for a COMMAREA address of zero with a length that is not (CICS TS 6.x, LINK, dfhp4_link; XCTL, dfhp4_xctl). XCTL's limit is 32763; LINK says only 'the permitted length', and ironwork takes 32763 for it too, the limit XCTL and RETURN state (dfhp4_return, C128) and the longest COMMAREA the EXCI LINK allows (dfhtm4w). The length is LENGTH, else the COMMAREA item's, which the translator moves to the length argument and passes with the item BY REFERENCE ('Translated code for EXEC CICS commands', dfhp4_translatedcode). A LINKAGE item with no address, such as the DFHCOMMAREA of a program given no COMMAREA, whose parameter list entry is X'00000000' (dfhp4_translatedcode), therefore reaches CICS at address zero: it raises RESP2 26, not the ASRA a reference to it gives, and with LENGTH(0) passes no COMMAREA. With no COMMAREA option, EIBCALEN is zero ('Passing data to other programs by using COMMAREA', dfhp37u) and LENGTH is not read. The manuals do not order LENGERR and PGMIDERR; ironwork tests the COMMAREA first. A program the library does not hold raises PGMIDERR with RESP2 1, a program with no installed resource definition and no autoinstall, as HANDLE ABEND PROGRAM does (dfhp4_handleabend): ironwork has no program definitions. Not raised: RESP2 12 and 13, for DATALENGTH, which CICS checks only for a remote or dynamic LINK (dfhp4_link); 27 and 28, for INPUTMSGLEN and for a destructive overlap while copying; INVREQ's RESP2 values, for INPUTMSG, SYSID, SYNCONRETURN, TRANSID, channels, Java, applications on platforms, GLUEs and TRUEs, PLT programs and DPL; NOTAUTH; and PGMIDERR 2, 3, 9 and 21 to 27, for disabled, unloadable and remote program definitions, autoinstall, dynamic routing and Liberty, none of which ironwork has",
         basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CICS_RANDOM_PER_RUN_UNIT,
+        claim: "If the first reference to FUNCTION RANDOM in the run unit does not specify argument-1, the seed value used is zero, an argument starts a new sequence, and later references without one return the next number in the current sequence (Language Reference SC27-8713-03, 'RANDOM', p. 621). Under CICS a LINK, an XCTL and a HANDLE ABEND PROGRAM exit each start a run unit, a Language Environment enclave of its own (C145), so the sequence is the run unit's: the first reference without an argument there starts from seed zero whatever the run unit that issued the command has drawn, a seed given there starts that run unit's sequence only, and when it ends the issuing run unit goes on with its own sequence where it left it. A batch run is one run unit and is unchanged",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CICS_RETURN_CODE_PER_RUN_UNIT,
+        claim: "When a COBOL program ends, its RETURN-CODE goes to the operating system, or to the calling program, whose own RETURN-CODE is set to it; RETURN-CODE is implicitly a binary halfword with VALUE ZERO (Language Reference SC27-8713-03, p. 24). A LINK is not a CALL: when the enclave a LINK or XCTL started ends without the CICS thread ending, its return code is placed in the RESP2 field of the LINK or XCTL and its reason code is discarded (z/OS 3.1 Language Environment Programming Guide, 'Finding the return and reason code from the enclave', ceea200407), the return code being the user return code, a COBOL program's RETURN-CODE, plus the reason code ('How the Language Environment enclave return code is calculated', ceea200105), which is zero for a normal end. Each run unit a LINK, an XCTL or a HANDLE ABEND PROGRAM exit starts (C145) therefore begins with RETURN-CODE zero, and a LINK that comes back sets EIBRESP2 and RESP2 to the RETURN-CODE its run unit ended with, by RETURN or by STOP RUN (C144), with EIBRESP and RESP zero again whatever its programs' commands left, and leaves the issuing program's RETURN-CODE as it was. XCTL releases the program that issues it (dfhp4_xctl), so its RESP2 is never read; ironwork gives the LINK above the level, or the end of the task, the RETURN-CODE the program XCTL started ends with. The manuals do not say what the CALL the translator makes of a command does to the issuing program's RETURN-CODE, and ironwork leaves it as it was for every command. A batch run is one run unit and is unchanged, its programs sharing one RETURN-CODE",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CICS_ENTRY_POINTERS_ACROSS_RUN_UNITS,
+        claim: "A function-pointer or procedure-pointer SET TO ENTRY holds a value of ironwork's own naming the entry (C140), and the task keeps one list of those entries rather than one per CICS run unit: a pointer set in one run unit and passed to another, in a COMMAREA or by a CALL, enters the entry as a CALL of its name in the run unit that CALLs through it does, where the program starts afresh if it has not run there (C145), and so does one set in a run unit that has since ended. On z/OS the pointer holds the entry's address, and CICS keeps a program in main storage once it is loaded (XCTL, dfhp4_xctl). The manuals say only that a pointer to an entry of a program later cancelled is undefined (Programming Guide SC27-8714-03, p. 558), not what a pointer means in another enclave",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

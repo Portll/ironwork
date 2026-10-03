@@ -428,6 +428,16 @@ pub fn ok<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S
     Ok(Flow::Next)
 }
 
+/// A command that succeeded after running other commands, as LINK does: EIBRESP and RESP are zero
+/// again, and EIBRESP2 and RESP2 are `resp2`.
+pub(super) fn normal<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, resp2: i32) -> R<Flow> {
+    eib_fullword(x.unit(), EIBRESP, 0);
+    eib_fullword(x.unit(), EIBRESP2, resp2);
+    store_int(x, at.resp.resp.as_ref(), 0, at.pos)?;
+    store_int(x, at.resp.resp2.as_ref(), i64::from(resp2), at.pos)?;
+    Ok(Flow::Next)
+}
+
 /// Raises a condition. RESP or NOHANDLE take it; otherwise HANDLE CONDITION (the condition's own
 /// entry, else ERROR) or IGNORE CONDITION decides, a label set by another activation abending
 /// APC2 (C235); otherwise the task abends with the condition's AEIx code. A HANDLE ABEND exit can

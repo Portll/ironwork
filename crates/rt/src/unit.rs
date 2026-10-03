@@ -74,13 +74,17 @@ impl<H> Loaded<H> {
 }
 
 /// What a CICS run unit holds that the LINK or XCTL starting another sets aside until it ends:
-/// each program's state, the EXTERNAL data and files with the connectors to them, and the
-/// Language Environment heap, which belong to the enclave (C126).
+/// each program's state, the EXTERNAL data and files with the connectors to them, the Language
+/// Environment heap (C126), FUNCTION RANDOM's sequence (C104) and RETURN-CODE (C105), which
+/// belong to the enclave.
 struct Enclave {
     programs: Vec<Held>,
     externals: Externals,
     connectors: HashMap<(usize, usize), Connector>,
     heap: Vec<(usize, usize, bool)>,
+    random: Option<u32>,
+    /// RETURN-CODE's bytes, and whether they may hold input.
+    return_code: ([u8; 2], bool),
 }
 
 /// A program's state in a CICS run unit that a LINK or XCTL has set aside.
@@ -400,19 +404,24 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
 
     /// A CICS LINK or XCTL starts a run unit of its own (C145): every program starts in it in its
     /// initial state, with storage of its own, it has no EXTERNAL data or files and an empty heap
-    /// (C126), and the state of the run unit that issued it is set aside until
-    /// [`RunUnit::end_cics_run_unit`].
+    /// (C126), FUNCTION RANDOM has not been referenced (C104) and RETURN-CODE is zero (C105), and
+    /// the state of the run unit that issued it is set aside until [`RunUnit::end_cics_run_unit`].
     pub fn begin_cics_run_unit(&mut self) {
         let programs = self.programs.iter_mut().map(Loaded::set_aside).collect();
         let (externals, connectors) = (std::mem::take(&mut self.externals), std::mem::take(&mut self.connectors));
-        self.set_aside.push(Enclave { programs, externals, connectors, heap: std::mem::take(&mut self.le.heap) });
+        let return_code = ([self.mem[RETURN_CODE], self.mem[RETURN_CODE + 1]], self.holds_input(RETURN_CODE, 2));
+        self.mem[RETURN_CODE..RETURN_CODE + 2].fill(0);
+        self.mark_input(RETURN_CODE, 2, false);
+        let (heap, random) = (std::mem::take(&mut self.le.heap), self.random.take());
+        self.set_aside.push(Enclave { programs, externals, connectors, heap, random, return_code });
     }
 
     /// Ends the run unit [`RunUnit::begin_cics_run_unit`] started, closing the files its programs
     /// and its EXTERNAL files left open as Language Environment closes an enclave's, and dropping
     /// its programs' storage, EXTERNAL data and heap: a program it loaded stays loaded, in its
-    /// initial state with no storage (C129), and the run unit set aside has everything back.
-    pub fn end_cics_run_unit(&mut self) -> Result<(), String> {
+    /// initial state with no storage (C129), and the run unit set aside has everything back but,
+    /// after `xctl`, RETURN-CODE, the program XCTL started having taken the issuer's place (C105).
+    pub fn end_cics_run_unit(&mut self, xctl: bool) -> Result<(), String> {
         let mut closed = Ok(());
         for program in &mut self.programs {
             for f in program.files.iter_mut().filter_map(Option::take) {
@@ -427,7 +436,12 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         for (program, held) in self.programs.iter_mut().zip(enclave.programs) {
             program.restore(held);
         }
-        (self.externals, self.connectors, self.le.heap) = (enclave.externals, enclave.connectors, enclave.heap);
+        (self.externals, self.connectors, self.le.heap, self.random) = (enclave.externals, enclave.connectors, enclave.heap, enclave.random);
+        if !xctl {
+            let (bytes, input) = enclave.return_code;
+            self.mem[RETURN_CODE..RETURN_CODE + 2].copy_from_slice(&bytes);
+            self.mark_input(RETURN_CODE, 2, input);
+        }
         closed
     }
 

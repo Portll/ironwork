@@ -4,7 +4,7 @@
 use super::Condition;
 use super::command::{Datum, Transfer};
 use super::run::{AbendExit, At, CicsHost, EIBCALEN, EIBFN, EIBRSRCE, ExitTarget, Flow, Handler, Handlers, R};
-use super::run::{eib_bytes, eib_calen, eib_halfword, eib_text, int, kept_calen, ok, page, raise, restore_calen, task, text};
+use super::run::{eib_bytes, eib_calen, eib_halfword, eib_text, int, kept_calen, normal, ok, page, raise, restore_calen, task, text};
 use crate::abend::{Abend, AbendCode, Ending};
 use crate::callee::{self, By, Callee};
 use crate::lir::ParaId;
@@ -122,7 +122,8 @@ pub fn level_ended<H, L: Loader<H>>(unit: &RunUnit<'_, H, L>) -> bool {
 /// exit (C239), and the level ends when it does (C233). A LINKed program gets the COMMAREA item
 /// itself; XCTL passes a copy, since this program's storage goes away. A COMMAREA that raises
 /// LENGERR does so before a missing program raises PGMIDERR (C103). Each LINK or XCTL starts a
-/// run unit of its own, where the program and those it CALLs start with fresh WORKING-STORAGE.
+/// run unit of its own, where the program and those it CALLs start with fresh WORKING-STORAGE,
+/// and a LINK that comes back gives its RETURN-CODE as RESP2 (C105).
 pub(super) fn link<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, t: &Transfer<P, O, S>, xctl: bool) -> R<Flow> {
     eib_bytes(x.unit(), EIBFN, if xctl { &[0x0E, 0x04] } else { &[0x0E, 0x02] });
     let Some(name) = text(x, t.program.as_ref(), at.pos)?.map(|n| n.to_ascii_uppercase()) else {
@@ -157,18 +158,19 @@ pub(super) fn link<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &A
     unit.release_temporaries(mark);
     restore_calen(unit, saved);
     match ending? {
-        Ending::StopRun if xctl => Ok(Flow::End(Ending::StopRun)),
+        (Ending::StopRun, _) if xctl => Ok(Flow::End(Ending::StopRun)),
         _ if xctl => {
             task(x).ending_level = true;
             Ok(Flow::End(Ending::Goback))
         }
-        _ => ok(x, at),
+        (_, returned) => normal(x, at, i32::from(returned)),
     }
 }
 
 /// Runs program `index` in a run unit of its own (C145) at the next logical level, or for XCTL in
-/// this program's place; the level it ran has ended when it comes back.
-fn enter<'w, P: Copy, O, S, X: CicsHost<'w, P, O, S>>(x: &mut X, program: Option<X::Program>, index: usize, area: Option<usize>, xctl: bool, pos: Pos) -> R<Ending> {
+/// this program's place; the level it ran has ended when it comes back, with the RETURN-CODE it
+/// left.
+fn enter<'w, P: Copy, O, S, X: CicsHost<'w, P, O, S>>(x: &mut X, program: Option<X::Program>, index: usize, area: Option<usize>, xctl: bool, pos: Pos) -> R<(Ending, i16)> {
     let below = u32::from(!xctl);
     task(x).links += below;
     x.unit().begin_cics_run_unit();
@@ -179,13 +181,14 @@ fn enter<'w, P: Copy, O, S, X: CicsHost<'w, P, O, S>>(x: &mut X, program: Option
         x.unit().depth -= 1;
         Ok::<_, Abend>((ending, ()))
     });
-    let closed = x.unit().end_cics_run_unit();
+    let returned = x.unit().return_code();
+    let closed = x.unit().end_cics_run_unit(xctl);
     let task = task(x);
     task.links -= below;
     task.ending_level = false;
     match (ran.and_then(|(ending, ())| ending), closed) {
         (Ok(_), Err(m)) => Err(Abend::ironwork(m, pos)),
-        (ending, _) => ending,
+        (ending, _) => ending.map(|e| (e, returned)),
     }
 }
 
@@ -254,7 +257,7 @@ pub fn enter_exit_program<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>,
     eib_halfword(x.unit(), EIBCALEN, length);
     let ending = enter(x, program, index, area, false, pos);
     restore_calen(x.unit(), saved);
-    ending
+    ending.map(|(e, _)| e)
 }
 
 pub(super) fn handle_condition<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, labels: &[(Condition, Option<ParaId>)]) -> R<Flow> {

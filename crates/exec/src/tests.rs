@@ -2737,6 +2737,66 @@ fn each_run_unit_a_link_starts_has_external_data_and_heap_storage_of_its_own() {
     assert_eq!(enclave_task(&heap), ("HEAPL FREES OUTER 0810\nMAIN FREES INNER 0810\nMAIN FREES OWN 0000\n".into(), None));
 }
 
+/// The output and abend code of a task whose first program runs `body`, then RETURN. RANDL shows
+/// FUNCTION RANDOM's next value; RCL shows the RETURN-CODE it starts with, raises INVREQ and
+/// RETURNs with RETURN-CODE 12, and RCS does the same with 4 and STOP RUN; RCX XCTLs to RCL with
+/// RETURN-CODE 3; PTRL twice CALLs the procedure-pointer its COMMAREA holds, and PTRC counts its
+/// CALLs.
+fn run_unit_state_task(body: &[&str]) -> (String, Option<String>) {
+    let data = "       01  N PIC 9(9).\n       01  WS-RESP PIC S9(8) COMP.\n       01  WS-R2 PIC S9(8) COMP.\n       01  WS-AREA.\n           05 WS-PP USAGE PROCEDURE-POINTER.\n";
+    let mut procedure: Vec<String> = body.iter().map(|s| line(s)).collect();
+    procedure.push(line("EXEC CICS RETURN END-EXEC."));
+    let main = cics_program("MAINP", data, "", &procedure.concat());
+    let rc = |id: &str, code: u8, end: &str| {
+        let procedure = [format!("DISPLAY '{id} ' RETURN-CODE"), "EXEC CICS POP HANDLE RESP(WS-RESP) END-EXEC".into(), format!("MOVE {code} TO RETURN-CODE"), end.into()];
+        cics_program(id, "       01  WS-RESP PIC S9(8) COMP.\n", "", &procedure.map(|s| line(&s)).concat())
+    };
+    let randl = ["COMPUTE N = FUNCTION RANDOM * 1000000000", "DISPLAY 'RANDL ' N", "EXEC CICS RETURN END-EXEC."];
+    let pointer = "       01  DFHCOMMAREA.\n           05 LK-PP USAGE PROCEDURE-POINTER.\n";
+    let programs = [
+        ("RANDL", cics_program("RANDL", "       01  N PIC 9(9).\n", "", &randl.map(line).concat())),
+        ("RCL", rc("RCL", 12, "EXEC CICS RETURN END-EXEC.")),
+        ("RCS", rc("RCS", 4, "STOP RUN.")),
+        ("RCX", cics_program("RCX", "", "", &["MOVE 3 TO RETURN-CODE", "EXEC CICS XCTL PROGRAM('RCL') END-EXEC."].map(line).concat())),
+        ("PTRL", cics_program("PTRL", "", pointer, &["CALL LK-PP", "CALL LK-PP", "EXEC CICS RETURN END-EXEC."].map(line).concat())),
+        ("PTRC", cics_program("PTRC", "       01  CALLS PIC 9 VALUE 0.\n", "", &["ADD 1 TO CALLS", "DISPLAY 'PTRC ' CALLS", "GOBACK."].map(line).concat())),
+    ];
+    let mut source = format!("{main}       END PROGRAM MAINP.\n");
+    for (id, program) in programs {
+        source.push_str(&format!("{program}       END PROGRAM {id}.\n"));
+    }
+    let (out, ending) = run_cics(&source, task("TR24"), None, unit::Clock::System);
+    (out, ending.err().map(|a| a.code.to_string()))
+}
+
+#[test]
+fn each_run_unit_a_link_or_xctl_starts_has_a_random_sequence_of_its_own() {
+    let (seed, draw, show) = ("COMPUTE N = FUNCTION RANDOM(42)", "COMPUTE N = FUNCTION RANDOM * 1000000000", "DISPLAY 'MAIN ' N");
+    let (seeded, _) = run_unit_state_task(&[seed, draw, show]);
+    let linked = run_unit_state_task(&[seed, "EXEC CICS LINK PROGRAM('RANDL') END-EXEC", draw, show]);
+    assert_eq!(linked, (format!("RANDL 000007826\n{seeded}"), None));
+    assert_eq!(run_unit_state_task(&[seed, "EXEC CICS XCTL PROGRAM('RANDL') END-EXEC"]), ("RANDL 000007826\n".into(), None));
+}
+
+#[test]
+fn a_link_gives_the_return_code_its_run_unit_ends_with_as_resp2_and_keeps_the_callers() {
+    let shown = ["DISPLAY 'MAIN ' RETURN-CODE ' ' WS-R2", "DISPLAY 'EIB ' EIBRESP ' ' EIBRESP2"];
+    let link = |program: &str| {
+        let command = format!("EXEC CICS LINK PROGRAM('{program}') RESP(WS-RESP) RESP2(WS-R2)");
+        run_unit_state_task(&["MOVE 5 TO RETURN-CODE", &command, "    END-EXEC", shown[0], shown[1]])
+    };
+    assert_eq!(link("RCL"), ("RCL 0000\nMAIN 0005 00000012\nEIB 00000000 00000012\n".into(), None));
+    assert_eq!(link("RCS"), ("RCS 0000\nMAIN 0005 00000004\nEIB 00000000 00000004\n".into(), None));
+    assert_eq!(link("RCX"), ("RCL 0000\nMAIN 0005 00000012\nEIB 00000000 00000012\n".into(), None));
+    assert_eq!(run_unit_state_task(&["MOVE 5 TO RETURN-CODE", "EXEC CICS XCTL PROGRAM('RCL') END-EXEC"]), ("RCL 0000\n".into(), None));
+}
+
+#[test]
+fn a_procedure_pointer_set_in_one_run_unit_enters_its_program_in_the_run_unit_calling_it() {
+    let body = ["SET WS-PP TO ENTRY 'PTRC'", "CALL WS-PP", "EXEC CICS LINK PROGRAM('PTRL') COMMAREA(WS-AREA)", "    END-EXEC", "CALL WS-PP"];
+    assert_eq!(run_unit_state_task(&body), ("PTRC 1\nPTRC 1\nPTRC 2\nPTRC 2\n".into(), None));
+}
+
 /// The output of a task whose first program runs `body`, then RETURN, and how many bytes of memory
 /// its run unit is left with. LINKP CALLs COUNTED, whose WORKING-STORAGE of 10,001 bytes counts
 /// its CALLs, and RETURNs.
