@@ -299,7 +299,7 @@ jobs:
           npm install -g npm@^11.5.1
           npm --version
       - name: Publish
-        run: npm publish "npm/portll-ironwork-$VERSION.tgz" --access public
+        run: npm publish "./npm/portll-ironwork-$VERSION.tgz" --access public
 
   crates-io:
     name: publish to crates.io

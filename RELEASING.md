@@ -59,7 +59,10 @@ It prints PASS, FAIL or TODO for each step and exits 1 on any FAIL.
    first.
 8. **npm.** The npm job publishes `portll-ironwork-<version>.tgz`, the tarball the build packed and
    the release carries, with `npm publish --access public` through trusted publishing: no token,
-   no 2FA prompt. A 409 "previously staged" means the publish is still processing.
+   no 2FA prompt. A 409 "previously staged" means the publish is still processing. The tarball is
+   named by a path that starts with `./`: npm reads `npm/<file>.tgz` as a GitHub repository.
+   A re-run uses `release.yml` as the tag holds it, so a fault in a publish step can't be fixed for
+   that tag; fix it on main and cut the next patch release, as 0.4.1 followed 0.4.0.
 
 ## After
 
