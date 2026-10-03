@@ -223,10 +223,56 @@ pub fn store_fixed<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit
 /// Stores a value into a numeric item; returns whether it was a size error, and with
 /// `keep_on_size_error` leaves the item unchanged on one.
 pub fn store_fixed_checked<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, loc: Loc, value: &Fixed, rounded: bool, keep_on_size_error: bool, pos: Pos) -> R<bool> {
+    let (image, size_error) = match integer_image(facts, loc, value) {
+        Some(stored) => stored,
+        None => image_of(facts, &mut *unit.err, loc, value, rounded, pos)?,
+    };
+    if size_error && keep_on_size_error {
+        return Ok(true);
+    }
+    unit.write(loc.offset, image.bytes());
+    Ok(size_error)
+}
+
+/// What `image_of` gives an integer below 2^64 stored into an unscaled binary or zoned item with no
+/// PICTURE scaling, where TRUNC(OPT) has nothing to report; None for any other store.
+fn integer_image(facts: &dyn ProgramFacts, loc: Loc, value: &Fixed) -> Option<(Image, bool)> {
+    if value.places.dec != 0 || value.magnitude.hi != 0 || value.magnitude.lo > u128::from(u64::MAX) {
+        return None;
+    }
+    let m = value.magnitude.lo;
+    match loc.kind {
+        Kind::Binary { digits, scale: 0, signed, native } if facts.scaling(loc.item) == 0 => {
+            let options = facts.options();
+            let v = if value.negative { -(m as i128) } else { m as i128 };
+            let item = Binary { digits: digits as u8, signed, native };
+            let (kept, divergence) = binary::kept(item, v, &options);
+            if divergence.is_some() {
+                return None;
+            }
+            let bits = 8 * item.bytes() as u32;
+            let binary_range = if signed { v >= -(1i128 << (bits - 1)) && v < (1i128 << (bits - 1)) } else { (0..(1i128 << bits)).contains(&v.abs()) };
+            let exceeds = if native || options.trunc == Trunc::Bin { !binary_range } else { v.unsigned_abs() >= if digits <= 38 { pow10(digits).lo } else { 10u128.pow(digits) } };
+            Some((Image::of(&kept.to_be_bytes()[16 - item.bytes()..]), exceeds))
+        }
+        Kind::Zoned { digits, scale: 0, signed, sign } if digits <= 38 && facts.scaling(loc.item) == 0 => {
+            let cap = pow10(digits).lo;
+            let kept = if m < cap { m } else { m % cap };
+            let mut out = Image::zeroed(digits as usize + usize::from(sign.is_some_and(|s| s.separate)));
+            zoned_image_into(out.bytes_mut(), kept, signed, signed && value.negative && kept != 0, sign);
+            Some((out, m >= cap))
+        }
+        _ => None,
+    }
+}
+
+/// The bytes a store of `value` into `loc` writes, and whether it is a size error, with a TRUNC(OPT)
+/// report written to `err`.
+fn image_of(facts: &dyn ProgramFacts, err: &mut dyn std::io::Write, loc: Loc, value: &Fixed, rounded: bool, pos: Pos) -> R<(Image, bool)> {
     let beyond = || Abend::ironwork("a value wider than 256 bits", pos);
     let value = &scaled_down(*value, scaling(facts, loc));
     let options = facts.options();
-    let (image, size_error) = match loc.kind {
+    Ok(match loc.kind {
         Kind::Zoned { digits, scale, signed, sign } => {
             let m = align(value, scale, rounded).ok_or_else(beyond)?;
             let cap = pow10(digits);
@@ -256,7 +302,7 @@ pub fn store_fixed_checked<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut
             if let Some(d) = divergence {
                 let name = facts.item_name(loc.item);
                 let _ = writeln!(
-                    unit.err,
+                    err,
                     "ironwork: {pos}: TRUNC(OPT) store of {} into {name} PIC {}9({digits}) BINARY: the PICTURE keeps {}, the binary field {}; {} was stored (-silent stops these reports)",
                     d.value,
                     if signed { "S" } else { "" },
@@ -267,7 +313,7 @@ pub fn store_fixed_checked<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut
             }
             let bits = 8 * item.bytes() as u32;
             let binary_range = if signed { v >= -(1i128 << (bits - 1)) && v < (1i128 << (bits - 1)) } else { (0..(1i128 << bits)).contains(&v.abs()) };
-            let exceeds = if native || options.trunc == Trunc::Bin { !binary_range } else { v.unsigned_abs() >= 10u128.pow(digits) };
+            let exceeds = if native || options.trunc == Trunc::Bin { !binary_range } else { v.unsigned_abs() >= if digits <= 38 { pow10(digits).lo } else { 10u128.pow(digits) } };
             (Image::of(&kept.to_be_bytes()[16 - item.bytes()..]), exceeds)
         }
         Kind::Float(p) => (Image::Grown(float::from_fixed(*value, p, ProgramMask::default()).map_err(|c| Abend::check(c, pos))?.to_bytes()), false),
@@ -284,12 +330,7 @@ pub fn store_fixed_checked<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut
             (Image::Grown(facts.page().encode(&text).map_err(|e| Abend::ironwork(e.to_string(), pos))?), m >= cap)
         }
         _ => return Err(Abend::ironwork("a numeric value stored into a non-numeric item", pos)),
-    };
-    if size_error && keep_on_size_error {
-        return Ok(true);
-    }
-    unit.write(loc.offset, image.bytes());
-    Ok(size_error)
+    })
 }
 
 /// The bytes a numeric store writes, held without an allocation when they fit.
@@ -368,7 +409,7 @@ pub fn figurative_unit(f: Figurative, quote: Quote) -> u16 {
 /// one.
 pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, dest: Loc, val: Val, src: Option<Loc>, pos: Pos) -> R<()> {
     if let Some(s) = src
-        && s.kind == Kind::Group
+        && matches!(s.kind, Kind::Group)
         && matches!(dest.kind, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Float(_) | Kind::NumericEdited { .. } | Kind::AlnumEdited { .. } | Kind::Dbcs { .. })
     {
         // A group move converts nothing (Language Reference SC27-8713-03, p. 410); single-byte
@@ -379,7 +420,6 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
         unit.write(dest.offset, &out);
         return Ok(());
     }
-    let page = facts.page();
     match dest.kind {
         Kind::Group | Kind::Alnum { .. } => {
             let justified = matches!(dest.kind, Kind::Alnum { justified: true });
@@ -402,8 +442,8 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
             let units: Vec<u16> = match val {
                 Val::National(b) => b.chunks(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect(),
                 Val::AllNational(b) => b.chunks(2).map(|c| u16::from_be_bytes([c[0], c[1]])).cycle().take(dest.len / 2).collect(),
-                Val::Bytes(b) => page.decode(&b).encode_utf16().collect(),
-                Val::Dbcs(b) => page.decode_dbcs(&b).encode_utf16().collect(),
+                Val::Bytes(b) => facts.page().decode(&b).encode_utf16().collect(),
+                Val::Dbcs(b) => facts.page().decode_dbcs(&b).encode_utf16().collect(),
                 Val::Fig(f) => vec![figurative_unit(f, facts.options().quote); dest.len / 2],
                 _ => return Err(Abend::ironwork("this value cannot be moved to a national item", pos)),
             };
@@ -448,6 +488,7 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
             let (syms, _) = facts.edit(edit);
             let positions = syms.iter().filter(|s| !matches!(s, Sym::Insert(_))).count();
             let image = alnum_image(facts, &val, src, positions, pos)?;
+            let page = facts.page();
             let out = edit::alphanumeric(syms, &image, ebcdic::SPACE, |c| page.encode_char(c).unwrap_or(ebcdic::SPACE));
             unit.write(dest.offset, &out);
         }
@@ -485,7 +526,7 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
                 let v = match src.map(|s| (s, s.kind)) {
                     Some((s, Kind::NumericEdited { edit, .. })) => {
                         let (syms, currency) = facts.edit(edit);
-                        let (negative, magnitude) = edit::de_edit(syms, &page.decode(&b), currency);
+                        let (negative, magnitude) = edit::de_edit(syms, &facts.page().decode(&b), currency);
                         scaled_up(fixed(negative, U256::from_u128(magnitude), places_of(s.kind)), scaling(facts, s))
                     }
                     _ => {
@@ -1113,5 +1154,51 @@ mod tests {
             }
         }
         assert!(fast > 20_000, "only {fast} reads took the integer path");
+    }
+
+    #[test]
+    fn an_integer_stores_as_any_fixed_value_stores() {
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        let mut next = move || {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            state.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        };
+        let mut kinds = Vec::new();
+        for signed in [false, true] {
+            for digits in [1, 4, 5, 9, 10, 18] {
+                for native in [false, true] {
+                    kinds.push(Kind::Binary { digits, scale: 0, signed, native });
+                }
+            }
+            for digits in [1, 6, 15, 18, 19, 31] {
+                for sign in [None, Some((SignPosition::Trailing, false)), Some((SignPosition::Leading, false)), Some((SignPosition::Leading, true)), Some((SignPosition::Trailing, true))] {
+                    kinds.push(Kind::Zoned { digits, scale: 0, signed, sign: sign.map(|(position, separate)| SignClause { position, separate }) });
+                }
+            }
+        }
+        let mut fast = 0;
+        for kind in kinds {
+            for _ in 0..300 {
+                let bits = next() % 64;
+                let magnitude = u128::from(next() >> (63 - bits));
+                let value = fixed(next() % 2 == 0, U256::from_u128(magnitude), Places::new(1 + (next() % 30) as u32, 0));
+                let loc = Loc { offset: 0, len: 0, kind, item: 0 };
+                for trunc in [Trunc::Std, Trunc::Bin, Trunc::Opt] {
+                    for scaling in [0, 1] {
+                        let options = Options { trunc, ..Options::default() };
+                        let facts = Facts { options, scaling, collation: Collation::Native };
+                        let Some((image, size_error)) = integer_image(&facts, loc, &value) else { continue };
+                        fast += 1;
+                        let mut report = Vec::new();
+                        let (general, general_size_error) = image_of(&facts, &mut report, loc, &value, next() % 2 == 0, Pos::default()).unwrap();
+                        assert_eq!((image.bytes(), size_error), (general.bytes(), general_size_error), "{value:?} into {kind:?} under {trunc:?}");
+                        assert!(report.is_empty(), "{value:?} into {kind:?} under {trunc:?} reports");
+                    }
+                }
+            }
+        }
+        assert!(fast > 30_000, "only {fast} stores took the integer path");
     }
 }

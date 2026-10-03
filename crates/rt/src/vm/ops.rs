@@ -6,6 +6,7 @@ use super::{Code, Facts, R, Vm, not_yet};
 use crate::abend::Abend;
 use crate::accept;
 use crate::display;
+use crate::fixed::places_of;
 use crate::host::{Host, Values};
 use super::markup::Receiving;
 use crate::lir::{DisplayItem, InitPlan, InitValue, Inspected, MovePlan, NumericFrom, Op, Operand, PlaceId, SearchAllPlan, SenderCheck, Step, StorePlan, TempId};
@@ -171,17 +172,34 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     }
 
     /// MOVE of `from` into `dest`, located already, by `plan`, a data item sender tested as `check`
-    /// says (`Machine::move_source`); without `check`, as SET TO moves it.
+    /// says (`Machine::move_source`); without `check`, as SET TO moves it. An integer sender that
+    /// reads without an abend goes to a binary or zoned receiver as `store::assign` stores its value.
     pub(super) fn move_to(&mut self, check: Option<SenderCheck>, from: Operand, dest: Loc, plan: &MovePlan, at: u32) -> R<()> {
-        let (val, src) = match (check, from) {
+        match (check, from) {
             (Some(check), Operand::Load(p)) => {
                 let src = self.loc(p)?;
                 let pos = self.pos(self.p.places[p as usize].at);
                 self.numcheck(src, check, pos)?;
-                (store::move_sender(&self.facts(), &self.unit.mem, src, dest, pos)?, Some(src))
+                if matches!(dest.kind, Kind::Binary { .. } | Kind::Zoned { .. })
+                    && !matches!(plan, MovePlan::Refused(_))
+                    && super::place::plain(&self.p.places[p as usize])
+                    && let Some(n) = store::read_integer(&self.facts(), &self.unit.mem, src)
+                {
+                    let value = Fixed::new(i128::from(n), places_of(src.kind));
+                    return Ok(store::store_fixed(&self.facts(), self.unit, dest, &value, false, self.pos(at))?);
+                }
+                let val = store::move_sender(&self.facts(), &self.unit.mem, src, dest, pos)?;
+                self.moved(val, Some(src), dest, plan, at)
             }
-            _ => self.value_with_loc(from)?,
-        };
+            _ => {
+                let (val, src) = self.value_with_loc(from)?;
+                self.moved(val, src, dest, plan, at)
+            }
+        }
+    }
+
+    /// The sender's value, read, stored into `dest` by `plan`.
+    fn moved(&mut self, val: Val, src: Option<Loc>, dest: Loc, plan: &MovePlan, at: u32) -> R<()> {
         if let MovePlan::Refused(abend) = plan {
             return Err(self.abend(*abend, Some(at)).into());
         }

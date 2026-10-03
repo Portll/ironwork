@@ -1,4 +1,5 @@
 use crate::options::{Options, Trunc, TruncCheck};
+use zarch::wide::U256;
 
 /// A USAGE BINARY, COMP or COMP-4 item, or COMP-5 when `native`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,7 +26,8 @@ impl Binary {
     }
 
     fn decimal_truncation(self, value: i128) -> i128 {
-        let (magnitude, cap) = (value.unsigned_abs(), 10u128.pow(self.digits as u32));
+        let cap = if self.digits <= 38 { U256::pow10(u32::from(self.digits)).lo } else { 10u128.pow(u32::from(self.digits)) };
+        let magnitude = value.unsigned_abs();
         let kept = (if magnitude < cap { magnitude } else { magnitude % cap }) as i128;
         if value < 0 { -kept } else { kept }
     }

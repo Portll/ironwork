@@ -416,7 +416,8 @@ pub(super) fn int_binop(x: Number, op: BinOp, y: Number, dmax: u32, arith: Arith
     if to.dec != 0 {
         return None;
     }
-    let kept = i64::try_from(exact.unsigned_abs() % 10u128.checked_pow(to.int)?).ok()?;
+    let (magnitude, cap) = (exact.unsigned_abs(), 10u128.checked_pow(to.int)?);
+    let kept = i64::try_from(if magnitude < cap { magnitude } else { magnitude % cap }).ok()?;
     Some(Number::Int(if exact < 0 { -kept } else { kept }, to))
 }
 
