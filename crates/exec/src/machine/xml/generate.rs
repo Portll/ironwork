@@ -94,7 +94,7 @@ impl<'p> Machine<'p, '_, '_> {
     fn xml_suppressed(&self, item: usize, loc: Loc, form: XmlForm, p: &Phrases, pos: Pos) -> R<bool> {
         if let Some(when) = p.suppressed_when.get(&item) {
             for &f in *when {
-                if self.equals_figurative(loc, f, pos)? {
+                if rt::json::equals_figurative(&self.facts(), &self.unit.mem, loc, f, pos)? {
                     return Ok(true);
                 }
             }
@@ -105,7 +105,7 @@ impl<'p> Machine<'p, '_, '_> {
                 continue;
             }
             for &f in when {
-                if Self::every_selects(loc.kind, numeric, f) && self.equals_figurative(loc, f, pos)? {
+                if Self::every_selects(loc.kind, numeric, f) && rt::json::equals_figurative(&self.facts(), &self.unit.mem, loc, f, pos)? {
                     return Ok(true);
                 }
             }
@@ -123,7 +123,7 @@ impl<'p> Machine<'p, '_, '_> {
             return Ok((name, text::escaped(&value), true));
         }
         p.illegal = true;
-        let hex = self.bytes(loc).iter().map(|b| format!("{b:02X}")).collect();
+        let hex = store::bytes(&self.unit.mem, loc).iter().map(|b| format!("{b:02X}")).collect();
         Ok((format!("hex.{name}"), hex, false))
     }
 

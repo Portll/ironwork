@@ -4,17 +4,16 @@
 pub mod abend;
 pub use rt::calendar;
 pub use rt::cics;
-pub use rt::codec;
 pub use rt::digest;
 pub use rt::evidence;
 pub use compile::collating;
 pub use compile::declaratives;
-pub mod edit;
+#[cfg(test)]
+mod edit;
 pub use rt::files;
 pub use compile::layout;
 pub mod le;
 pub use rt::lir;
-pub use compile::linage;
 pub mod loader;
 pub mod lower;
 pub mod machine;
@@ -25,7 +24,6 @@ pub mod printer;
 pub mod report;
 use compile::sort;
 pub mod sql;
-pub use rt::strings;
 pub mod terminal;
 #[cfg(test)]
 mod testing;
@@ -33,7 +31,7 @@ pub use rt::tn3270;
 pub mod unit;
 pub mod vm;
 
-pub use compile::{Compiled, EntryPoint, compile, compile_at, compile_time, entry_points, read_lengths, variable_records};
+pub use compile::{Compiled, compile, compile_at, compile_time, entry_points, read_lengths, variable_records};
 pub(crate) use compile::{procedure, procedure_from, section_end};
 pub use machine::{Abend, Ending};
 

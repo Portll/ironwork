@@ -235,7 +235,7 @@ impl<'p> SortHost<'p, &'p Ref, Int<'p>> for Machine<'p, '_, '_> {
             Some(t) => self.procedure(t, pos)?.1,
             None => first_end,
         };
-        let nested = self.nest(pos);
+        let nested = self.unit.enter(pos);
         let flow = nested.and_then(|()| {
             let flow = self.procedure_range(start, end, declaratives::Arrival::Sort(kind.name()));
             self.unit.depth -= 1;

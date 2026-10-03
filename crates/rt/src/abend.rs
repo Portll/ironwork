@@ -160,7 +160,7 @@ impl PartialEq<&str> for AbendCode {
     }
 }
 
-/// The code that prints as `text`, for the SQL runtime and SORT, which still name theirs as text.
+/// The code that prints as `text`, for the SQL runtime, which names its codes as text.
 impl From<&str> for AbendCode {
     fn from(text: &str) -> Self {
         let user = text.len() == 5 && text.starts_with('U') && text[1..].bytes().all(|b| b.is_ascii_digit());

@@ -164,10 +164,6 @@ impl Format {
         self.fields.last() == Some(&Field::Literal('Z'))
     }
 
-    pub fn has_offset(&self) -> bool {
-        self.fields.contains(&Field::OffsetSign)
-    }
-
     pub fn len(&self) -> usize {
         self.fields.iter().map(|f| match f {
             Field::Year => 4,

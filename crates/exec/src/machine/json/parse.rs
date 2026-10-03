@@ -328,7 +328,7 @@ impl<'p> Machine<'p, '_, '_> {
             }
             Kind::Zoned { scale, .. } | Kind::Packed { scale, .. } | Kind::Binary { scale, .. } => {
                 let (fixed, cut) = fixed_value(negative, int, &frac[..frac.len().min(scale as usize)]);
-                if self.store_fixed_checked(loc, &fixed, false, false, pos)? || cut {
+                if store::store_fixed_checked(&self.facts(), self.unit, loc, &fixed, false, false, pos)? || cut {
                     g.status |= SIZE_ERROR;
                 }
             }
@@ -350,7 +350,7 @@ impl<'p> Machine<'p, '_, '_> {
     /// The source's text: UTF-8 unless ENCODING names an EBCDIC code page, UTF-16 when national.
     fn parse_text(&mut self, j: &JsonParse) -> R<Result<String, i64>> {
         let loc = self.locate(&j.source)?;
-        let bytes = self.bytes(loc).to_vec();
+        let bytes = store::bytes(&self.unit.mem, loc).to_vec();
         let national = loc.kind == Kind::National;
         let ccsid = match &j.encoding {
             None => None,

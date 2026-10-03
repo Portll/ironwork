@@ -105,10 +105,6 @@ impl Collating {
         }
     }
 
-    pub fn is_ebcdic(&self) -> bool {
-        matches!(self, Collating::Ebcdic)
-    }
-
     /// Each character's position.
     pub fn collate(&self, bytes: &[u8]) -> Vec<u8> {
         match self {

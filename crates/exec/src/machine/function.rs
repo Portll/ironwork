@@ -34,7 +34,7 @@ impl<'p> Machine<'p, '_, '_> {
                 _ => Bound::Value(self.expr_value(arg, pos)?),
             });
         }
-        self.nest(pos)?;
+        self.unit.enter(pos)?;
         let mark = self.unit.mem.len();
         let read_before = self.unit.pending();
         let (outcome, ()) = callee::run(self, &Callee { index, by: By::Function, mark: Some(mark), pos }, |m| {

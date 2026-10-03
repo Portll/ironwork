@@ -137,12 +137,6 @@ impl<'p> Machine<'p, '_, '_> {
         }
     }
 
-    /// Whether an item equals a figurative constant: numerically for ZERO and a numeric item,
-    /// otherwise character by character.
-    pub(super) fn equals_figurative(&self, loc: Loc, f: Figurative, pos: Pos) -> R<bool> {
-        text::equals_figurative(&self.facts(), &self.unit.mem, loc, f, pos)
-    }
-
     /// Whether EVERY [NUMERIC | NONNUMERIC] WHEN selects an item for this figurative constant (pp. 376-377).
     pub(super) fn every_selects(kind: Kind, numeric: Option<bool>, f: Figurative) -> bool {
         let class_numeric = kind.is_numeric();
@@ -166,13 +160,13 @@ impl<'p> Machine<'p, '_, '_> {
                 (None, Marker::Literal(_)) => unreachable!("checked in json_phrases"),
             };
             let at = self.locate_item(k, &Self::subscripted(named, subscripts, self.layout.items[k].dims.len()), false)?;
-            let byte = self.bytes(at).first().copied().unwrap_or(0);
+            let byte = store::bytes(&self.unit.mem, at).first().copied().unwrap_or(0);
             if self.marker_holds(&i.marker, byte, subscripts, pos)? {
                 return Ok(true);
             }
         }
         match p.null_when.get(&item) {
-            Some(&f) => self.equals_figurative(loc, f, pos),
+            Some(&f) => text::equals_figurative(&self.facts(), &self.unit.mem, loc, f, pos),
             None => Ok(false),
         }
     }
@@ -183,20 +177,20 @@ impl<'p> Machine<'p, '_, '_> {
         }
         if let Some(when) = p.suppressed_when.get(&item) {
             for &f in *when {
-                if self.equals_figurative(loc, f, pos)? {
+                if text::equals_figurative(&self.facts(), &self.unit.mem, loc, f, pos)? {
                     return Ok(None);
                 }
             }
         }
         for (numeric, when) in &p.every {
             for &f in *when {
-                if Self::every_selects(loc.kind, *numeric, f) && self.equals_figurative(loc, f, pos)? {
+                if Self::every_selects(loc.kind, *numeric, f) && text::equals_figurative(&self.facts(), &self.unit.mem, loc, f, pos)? {
                     return Ok(None);
                 }
             }
         }
         if let Some(m) = p.boolean.get(&item) {
-            let byte = self.bytes(loc).first().copied().unwrap_or(0);
+            let byte = store::bytes(&self.unit.mem, loc).first().copied().unwrap_or(0);
             return Ok(Some(if self.marker_holds(m, byte, subscripts, pos)? { "true" } else { "false" }.into()));
         }
         Ok(Some(match self.converted(item, loc, "JSON GENERATE", pos)? {
@@ -206,8 +200,8 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     pub(super) fn converted(&mut self, item: usize, loc: Loc, statement: &str, pos: Pos) -> R<Converted> {
-        let bytes = self.bytes(loc).to_vec();
-        let chars = |t: &str, justified: bool| Converted::Chars(text::trimmed(t, justified).to_owned());
+        let bytes = store::bytes(&self.unit.mem, loc).to_vec();
+        let chars =|t: &str, justified: bool| Converted::Chars(text::trimmed(t, justified).to_owned());
         Ok(match loc.kind {
             Kind::Alnum { justified } => chars(&self.page.decode(&bytes), justified),
             Kind::AlnumEdited { .. } | Kind::NumericEdited { .. } | Kind::Group => chars(&self.page.decode(&bytes), false),
@@ -235,7 +229,7 @@ impl<'p> Machine<'p, '_, '_> {
     }
 
     fn json_fixed(&self, loc: Loc, integers: u32, pos: Pos) -> R<String> {
-        match self.read(loc, pos)? {
+        match store::read(&self.facts(), &self.unit.mem, loc, pos)? {
             Val::Num(x) => Ok(text::fixed_number(x.negative, x.magnitude, x.places.dec, integers)),
             _ => Err(Abend::ironwork("a numeric item without a numeric value", pos)),
         }

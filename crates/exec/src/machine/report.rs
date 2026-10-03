@@ -66,11 +66,11 @@ impl<'p> ReportHost<'p, Expr, Ref, Literal, crate::report::Section> for Machine<
     }
 
     fn store_value(&mut self, dest: Loc, value: Val, rounded: bool, keep_on_size_error: bool, pos: Pos) -> R<bool> {
-        Machine::store_value(self, dest, value, rounded, keep_on_size_error, pos)
+        store::store_value(&self.facts(), self.unit, dest, value, rounded, keep_on_size_error, pos)
     }
 
     fn store_checked(&mut self, dest: Loc, value: &Fixed, pos: Pos) -> R<bool> {
-        self.store_fixed_checked(dest, value, false, true, pos)
+        store::store_fixed_checked(&self.facts(), self.unit, dest, value, false, true, pos)
     }
 
     fn report_file(&mut self, k: usize) -> ReportFile {
@@ -87,7 +87,7 @@ impl<'p> ReportHost<'p, Expr, Ref, Literal, crate::report::Section> for Machine<
     }
 
     fn use_before_reporting(&mut self, &(first, last): &crate::report::Section, pos: Pos) -> R<UseEnd> {
-        self.nest(pos)?;
+        self.unit.enter(pos)?;
         self.uses.arrival = declaratives::Arrival::Use;
         let flow = self.run_paragraphs(first, last);
         self.unit.depth -= 1;

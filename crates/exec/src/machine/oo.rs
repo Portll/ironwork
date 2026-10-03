@@ -43,7 +43,7 @@ impl<'p> Machine<'p, '_, '_> {
         Ok(match op {
             Operand::Ref(r) => {
                 let loc = self.locate(r)?;
-                let bytes = self.bytes(loc).to_vec();
+                let bytes = store::bytes(&self.unit.mem, loc).to_vec();
                 if r.refmod.is_some() && java == "C" {
                     let text = self.page.decode(&bytes);
                     text.encode_utf16().take(1).flat_map(u16::to_be_bytes).collect()

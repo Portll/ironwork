@@ -1,5 +1,3 @@
-pub use rt::edit::{alphanumeric, de_edit, numeric};
-
 #[cfg(test)]
 mod tests {
     use crate::picture::{Notation, Picture, analyse, analyse_with};

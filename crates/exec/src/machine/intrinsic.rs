@@ -167,7 +167,7 @@ impl<'p> Machine<'p, '_, '_> {
     fn stored_bytes(&mut self, e: &Expr, pos: Pos) -> R<Vec<u8>> {
         if let Expr::Operand(Operand::Ref(r)) = e {
             let loc = self.locate(r)?;
-            return Ok(self.bytes(loc).to_vec());
+            return Ok(store::bytes(&self.unit.mem, loc).to_vec());
         }
         let val = self.expr_value(e, pos)?;
         intrinsic_function::stored_bytes(&self.facts(), val, pos)

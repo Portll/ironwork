@@ -74,7 +74,7 @@ impl<'p> Machine<'p, '_, '_> {
         let name = self.page.encode_lossy(&format!("{:<30}", e.kind.name()));
         let event = special("XML-EVENT");
         let loc = self.locate(&event)?;
-        self.write(loc, &name[..30]);
+        self.unit.write(loc.offset, &name[..30]);
         self.set_integer(&special("XML-CODE"), code, pos)?;
         self.set_integer(&special("XML-INFORMATION"), e.information.into(), pos)?;
         let national_character = matches!(e.kind, EventKind::ContentNationalCharacter | EventKind::AttributeNationalCharacter);
@@ -94,7 +94,7 @@ impl<'p> Machine<'p, '_, '_> {
 
     fn xml_document(&mut self, x: &XmlParse, encoding: Encoding, carry: &mut Vec<u8>) -> R<String> {
         let loc = self.locate(&x.document)?;
-        Ok(encoding.decode_segment(carry, self.bytes(loc)))
+        Ok(encoding.decode_segment(carry, store::bytes(&self.unit.mem, loc)))
     }
 
     pub(super) fn xml_parse(&mut self, x: &'p XmlParse) -> R<Flow> {

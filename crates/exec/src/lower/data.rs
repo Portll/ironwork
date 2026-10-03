@@ -15,7 +15,7 @@ use zarch::wide::U256;
 /// Why a reference does not lower: the walker looks its name up only when it runs, and fails.
 pub(super) const UNRESOLVED: &str = "a data name the walker resolves only when it runs";
 
-/// What the walker reads from an operand (`Machine::read`, `literal_value`), which decides the
+/// What the walker reads from an operand (`rt::store::read`, `literal_value`), which decides the
 /// MOVE and comparison plans.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Value {

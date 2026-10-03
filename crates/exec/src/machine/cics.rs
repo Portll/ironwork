@@ -59,7 +59,7 @@ impl<'p> Machine<'p, '_, '_> {
         for (option, kind) in sinks {
             let Some(Operand::Ref(r)) = operand(block, option) else { continue };
             if let Ok(loc) = self.locate(r) {
-                let text = self.page.decode(self.bytes(loc));
+                let text = self.page.decode(store::bytes(&self.unit.mem, loc));
                 self.sink(kind, block.pos, &text);
             }
         }

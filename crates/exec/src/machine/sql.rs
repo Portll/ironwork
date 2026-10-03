@@ -165,11 +165,11 @@ impl<'a, 'p> Host<&'a Ref> for Bound<'_, 'p, '_, '_> {
     }
 
     fn assign(&mut self, dest: Loc, val: Val, src: Option<Loc>, pos: Pos) -> R<()> {
-        self.machine.assign(dest, val, src, pos)
+        Host::assign(self.machine, dest, val, src, pos)
     }
 
     fn store_fixed(&mut self, dest: Loc, value: &Fixed, pos: Pos) -> R<()> {
-        self.machine.store_fixed(dest, value, false, pos)
+        Host::store_fixed(self.machine, dest, value, pos)
     }
 }
 

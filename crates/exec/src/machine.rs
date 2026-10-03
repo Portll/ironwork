@@ -4,7 +4,7 @@
 
 pub use rt::abend::{Abend, Ending};
 use crate::abend::{AbendCode, Signal};
-use crate::layout::{Item, Kind, Layout, Resolved};
+use crate::layout::{Kind, Layout, Resolved};
 use rt::storage::{Loc, Val};
 pub(crate) use rt::storage::literal_fixed;
 use crate::unit::{ADDRESS_BASE, Event, LoadError, OS_COMMAND_ROUTINES, RETURN_CODE, RunUnit};
@@ -15,6 +15,7 @@ use rt::fixed::{align, places_of};
 use rt::arith;
 use rt::callee::{self, Bindings, By, Callee};
 use rt::display::utf16_text;
+use rt::host::Host;
 use rt::lir::{ByteClass, CallArg, ConvertTable, Converting, SignTest, StringSource, TrimSide};
 use rt::loc;
 use rt::store;
@@ -196,17 +197,13 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             let occurrences: u32 = item.dims.iter().map(|&(_, n)| n).product::<u32>().max(1);
             let kind = value_kind(item.kind, &value);
             for k in 0..occurrences {
-                let offset = base + item.offset as usize + self.occurrence_offset(item, k);
+                let offset = base + item.offset as usize + loc::occurrence_offset(&item.dims, k);
                 let loc = Loc { offset, len: item.size as usize, kind, item: index };
                 let val = self.literal_value(&value, item.pos)?;
                 self.assign(loc, val, None, item.pos)?;
             }
         }
         Ok(())
-    }
-
-    fn occurrence_offset(&self, item: &Item, k: u32) -> usize {
-        loc::occurrence_offset(&item.dims, k)
     }
 
     pub fn run_procedure(&mut self) -> R<Ending> {
@@ -356,7 +353,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                             let (val, src) = self.operand_with_loc(by, *pos)?;
                             self.assign(loc, val, src, *pos)?;
                         }
-                        Some(_) => self.write(loc, &vec![0; loc.len]),
+                        Some(_) => self.unit.write(loc.offset, &vec![0; loc.len]),
                         None => {}
                     }
                 }
@@ -461,14 +458,10 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     /// Runs a PERFORM's body as its phrase says. EXIT PERFORM leaves the loop; EXIT PERFORM CYCLE
     /// ends one iteration.
     fn repeat(&mut self, repeat: &'p Loop, pos: Pos, body: &mut dyn FnMut(&mut Self) -> R<Flow>) -> R<Flow> {
-        self.nest(pos)?;
+        self.unit.enter(pos)?;
         let flow = self.repeat_nested(repeat, pos, body);
         self.unit.depth -= 1;
         flow
-    }
-
-    fn nest(&mut self, pos: Pos) -> R<()> {
-        self.unit.enter(pos)
     }
 
     fn repeat_nested(&mut self, repeat: &'p Loop, pos: Pos, body: &mut dyn FnMut(&mut Self) -> R<Flow>) -> R<Flow> {
@@ -557,7 +550,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let step = Expr::Bin(Box::new(Expr::Operand(Operand::Ref(v.var.clone()))), BinOp::Add, Box::new(v.by.clone()));
         let dmax = var.kind.digits_scale().map_or(0, |(_, s)| s).max(self.dmax(&step)?);
         let next = self.eval_fixed(&step, dmax, pos)?;
-        self.store_fixed(var, &next, false, pos)
+        store::store_fixed(&self.facts(), self.unit, var, &next, false, pos)
     }
 
     fn resolve(&mut self, r: &Ref) -> R<Resolved> {
@@ -710,14 +703,6 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         loc::occurrences(count, item.occurs, self.ssrange, &object.name, pos)
     }
 
-    fn bytes(&self, loc: Loc) -> &[u8] {
-        store::bytes(&self.unit.mem, loc)
-    }
-
-    fn write(&mut self, loc: Loc, bytes: &[u8]) {
-        self.unit.write(loc.offset, bytes);
-    }
-
     fn integer(&mut self, e: &Expr, pos: Pos) -> R<i64> {
         let dmax = self.dmax(e)?;
         let v = self.eval_fixed(e, dmax, pos)?;
@@ -750,15 +735,11 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         numval_currency(&self.program.environment.currency)
     }
 
-    fn read(&self, loc: Loc, pos: Pos) -> R<Val> {
-        store::read(&self.facts(), &self.unit.mem, loc, pos)
-    }
-
     fn operand_with_loc(&mut self, op: &Operand, pos: Pos) -> R<(Val, Option<Loc>)> {
         if let Operand::Ref(r) = op {
             let loc = self.locate(r)?;
             self.numcheck(loc, false, r.pos)?;
-            return Ok((self.read(loc, r.pos)?, Some(loc)));
+            return Ok((store::read(&self.facts(), &self.unit.mem, loc, r.pos)?, Some(loc)));
         }
         Ok((self.operand(op, pos)?, None))
     }
@@ -786,7 +767,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Operand::Ref(r) => {
                 let loc = self.locate(r)?;
                 self.numcheck(loc, false, r.pos)?;
-                self.read(loc, r.pos)
+                store::read(&self.facts(), &self.unit.mem, loc, r.pos)
             }
             Operand::Literal(lit) => self.literal_value(lit, pos),
             Operand::LengthOf(r) => {
@@ -994,7 +975,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         if self.unit.programs[index].active && !compiled.program.recursive {
             return Err(Abend::ironwork(format!("CALL {name}: the program is already active and is not RECURSIVE"), pos));
         }
-        self.nest(pos)?;
+        self.unit.enter(pos)?;
         let result = self.call_nested(c, index, entry, compiled, dynamic);
         self.unit.depth -= 1;
         if let Some(flow) = result? {
@@ -1045,7 +1026,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             return Ok(None);
         }
         let loc = self.locate(r)?;
-        let Ok(value) = <[u8; 4]>::try_from(self.bytes(loc)).map(u32::from_be_bytes) else { return Ok(None) };
+        let Ok(value) = <[u8; 4]>::try_from(store::bytes(&self.unit.mem, loc)).map(u32::from_be_bytes) else { return Ok(None) };
         Ok(rt::set::entry_of(&self.unit.entries, value).cloned())
     }
 
@@ -1125,7 +1106,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     fn returned(&mut self, name: &str, pos: Pos) -> R<Val> {
         let r = Ref { name: name.to_owned(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos };
         let loc = self.locate(&r)?;
-        self.read(loc, pos)
+        store::read(&self.facts(), &self.unit.mem, loc, pos)
     }
 
     fn set(&mut self, set: &SetStmt, pos: Pos) -> R<()> {
@@ -1399,36 +1380,18 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 size_error = true;
                 continue;
             };
-            size_error |= self.store_value(loc, value, t.rounded, handler.is_some(), pos)?;
+            size_error |= store::store_value(&self.facts(), self.unit, loc, value, t.rounded, handler.is_some(), pos)?;
         }
         if let (Some((t, _, _)), Some((x, y)), Some(q_loc)) = (remainder, operands, quotient_target)
             && let Some(r) = arith::remainder(x, y, places_of(q_loc.kind).dec, dmax, self.options.arith, pos)?
         {
             let r_loc = self.locate(&t.r)?;
-            size_error |= self.store_value(r_loc, Val::Num(r), false, handler.is_some(), pos)?;
+            size_error |= store::store_value(&self.facts(), self.unit, r_loc, Val::Num(r), false, handler.is_some(), pos)?;
         }
         if let Some(h) = handler {
             return self.run_block(if size_error { &h.on } else { &h.not_on });
         }
         Ok(Flow::Next)
-    }
-
-    /// Stores an arithmetic result; returns whether it was a size error.
-    fn store_value(&mut self, loc: Loc, value: Val, rounded: bool, keep_on_size_error: bool, pos: Pos) -> R<bool> {
-        store::store_value(&self.facts(), self.unit, loc, value, rounded, keep_on_size_error, pos)
-    }
-
-    fn store_fixed(&mut self, loc: Loc, value: &Fixed, rounded: bool, pos: Pos) -> R<()> {
-        store::store_fixed(&self.facts(), self.unit, loc, value, rounded, pos)
-    }
-
-    fn store_fixed_checked(&mut self, loc: Loc, value: &Fixed, rounded: bool, keep_on_size_error: bool, pos: Pos) -> R<bool> {
-        store::store_fixed_checked(&self.facts(), self.unit, loc, value, rounded, keep_on_size_error, pos)
-    }
-
-    /// MOVE, and VALUE at start-up, into one receiving item.
-    fn assign(&mut self, dest: Loc, val: Val, src: Option<Loc>, pos: Pos) -> R<()> {
-        store::assign(&self.facts(), self.unit, dest, val, src, pos)
     }
 
     fn condition(&mut self, c: &Cond, pos: Pos) -> R<bool> {
@@ -1546,7 +1509,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         match e {
             Expr::Operand(Operand::Ref(r)) if !self.checks_against(other)? => {
                 let loc = self.locate(r)?;
-                Ok((self.read(loc, r.pos)?, Some(loc)))
+                Ok((store::read(&self.facts(), &self.unit.mem, loc, r.pos)?, Some(loc)))
             }
             _ => self.comparand(e, pos),
         }
@@ -1606,7 +1569,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
         let subject = match subject {
             Some(s) => s.clone(),
-            None => subject.insert((self.read(loc, at)?, Some(loc))).clone(),
+            None => subject.insert((store::read(&self.facts(), &self.unit.mem, loc, at)?, Some(loc))).clone(),
         };
         self.compare_literal(&subject, value, pos)
     }

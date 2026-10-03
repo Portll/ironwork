@@ -128,11 +128,11 @@ impl<'a, 'p> Host<&'a Ref> for Machine<'p, '_, '_> {
     }
 
     fn assign(&mut self, dest: Loc, val: Val, src: Option<Loc>, pos: Pos) -> R<()> {
-        Machine::assign(self, dest, val, src, pos)
+        store::assign(&self.facts(), self.unit, dest, val, src, pos)
     }
 
     fn store_fixed(&mut self, dest: Loc, value: &Fixed, pos: Pos) -> R<()> {
-        Machine::store_fixed(self, dest, value, false, pos)
+        store::store_fixed(&self.facts(), self.unit, dest, value, false, pos)
     }
 }
 

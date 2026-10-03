@@ -112,7 +112,7 @@ impl<'p> Machine<'p, '_, '_> {
     /// statement, unless the procedure leaves by GO TO, STOP RUN or GOBACK, which the statement's
     /// `exec` then carries out.
     pub(super) fn run_error_declarative(&mut self, (first, last): Span, pos: Pos) -> R<()> {
-        self.nest(pos)?;
+        self.unit.enter(pos)?;
         self.uses.arrival = Arrival::Use;
         let flow = self.run_paragraphs(first, last);
         self.unit.depth -= 1;
@@ -178,7 +178,7 @@ impl<'p> Machine<'p, '_, '_> {
         }
         let saved = self.uses.line;
         self.uses.debugging = true;
-        let flow = self.nest(pos).and_then(|()| {
+        let flow = self.unit.enter(pos).and_then(|()| {
             let flow = self.run_paragraphs(first, last);
             self.unit.depth -= 1;
             flow
