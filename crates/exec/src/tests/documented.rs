@@ -200,3 +200,19 @@ fn an_exponent_with_decimal_places_is_evaluated_in_floating_point() {
     );
     assert_eq!(on_both(&source), "00010000000{\n+2000000\n+1414214\n+2000000\n-8000000\n+2000000\nSIZE\n+2000000\n");
 }
+
+/// Language Reference SC27-8713-03, p. 246: a numeric item's VALUE literal must be numeric; a
+/// numeric-edited item's is alphanumeric, and a figurative constant stands for either.
+#[test]
+fn a_numeric_item_refuses_a_value_literal_that_is_not_numeric() {
+    let refused = program("", "       01  A PIC 99 VALUE \"7\".\n       01  B PIC 9(3) COMP-3 VALUE N'1'.\n", &line("GOBACK."));
+    let errors = compile_errors(&refused);
+    assert!(errors.contains("VALUE of A: an alphanumeric literal, where a numeric item's VALUE literal must be numeric"), "{errors}");
+    assert!(errors.contains("VALUE of B: a national literal"), "{errors}");
+    let source = program(
+        "",
+        "       01  A PIC 99 VALUE 7.\n       01  Z PIC 99 VALUE ZERO.\n       01  E PIC ZZ9 VALUE '  7'.\n",
+        &[line("DISPLAY A Z E"), line("GOBACK.")].concat(),
+    );
+    assert_eq!(on_both(&source), "0700  7\n");
+}

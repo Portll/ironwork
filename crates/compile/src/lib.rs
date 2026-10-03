@@ -222,6 +222,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     corresponding::expand(&mut program, &layout, &mut errors);
     condition_subjects(&mut program, &layout);
     dbcs_values(&layout, &mut errors);
+    numeric_values(&layout, &mut errors);
     for item in &layout.items {
         if let Some(object) = &item.depending_on {
             match layout.resolve(&object.name, &object.qualifiers, object.pos) {
@@ -570,6 +571,20 @@ fn dbcs_values(layout: &Layout, errors: &mut Vec<Error>) {
         } else if !dbcs(i) && is_dbcs(value) {
             errors.push(Error::at(pos, format!("{name}: a DBCS literal can be the VALUE of a DBCS item only")));
         }
+    }
+}
+
+/// A numeric item's VALUE literal must be numeric (Language Reference SC27-8713-03, p. 246); a
+/// figurative constant stands for a literal as its own rules allow (p. 17).
+fn numeric_values(layout: &Layout, errors: &mut Vec<Error>) {
+    for item in layout.items.iter().filter(|i| i.children.is_empty() && i.kind.is_numeric()) {
+        let what = match item.value {
+            Some(Literal::Alnum(_) | Literal::Hex(_)) => "an alphanumeric literal",
+            Some(Literal::National(_)) => "a national literal",
+            _ => continue,
+        };
+        let name = item.name.as_deref().unwrap_or("FILLER");
+        errors.push(Error::at(item.pos, format!("VALUE of {name}: {what}, where a numeric item's VALUE literal must be numeric")));
     }
 }
 
