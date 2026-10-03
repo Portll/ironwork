@@ -16,7 +16,7 @@ impl Lower<'_> {
     /// read as one.
     pub(super) fn call_plan(&mut self, c: &Call, pos: Pos) -> R<Result<CallId, AbendId>> {
         let target = match &c.target {
-            Operand::Ref(r) if self.program_pointer(r) && !self.jni_function(r) => return unsupported("a CALL through a pointer SET TO ENTRY can set", pos),
+            Operand::Ref(r) if self.program_pointer(r) && !self.jni_function(r) => CallTarget::Entry(self.place(r, false)?),
             Operand::Ref(r) if self.program_pointer(r) => CallTarget::Pointer(self.place(r, false)?),
             Operand::Literal(lit) => match program_name(self, lit) {
                 Ok(name) => CallTarget::Named { name: self.sym(&name), le: le_service(&name, pos)? },

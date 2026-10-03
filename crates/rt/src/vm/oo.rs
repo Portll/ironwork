@@ -20,9 +20,8 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
 
     /// `Machine::call_through_pointer`: a JNI service, with no depth counted, after which ON
     /// EXCEPTION never runs, PARMCHECK's buffer set before its arguments and tested with none. The
-    /// pointer is located first, as the walker's look for a SET TO ENTRY entry in it does.
+    /// caller has located the pointer, as the walker's look for a SET TO ENTRY entry in it does.
     pub(super) fn call_through_pointer(&mut self, plan: &CallPlan, pointer: PlaceId, pos: Pos) -> R<Step> {
-        self.loc(pointer)?;
         self.parmcheck_set();
         let ran = oo::call_through_pointer(self, pointer, &plan.args, plan.returning, pos);
         self.settle(ran)?;

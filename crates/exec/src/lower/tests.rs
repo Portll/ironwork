@@ -455,6 +455,18 @@ fn initialize_s_phrases_choose_each_field_and_what_it_is_sent() {
 }
 
 #[test]
+fn set_to_entry_names_its_entry_and_a_call_through_any_other_pointer_finds_it() {
+    let data = "       01  PP USAGE PROCEDURE-POINTER.\n       01  PGM PIC X(8) VALUE 'SUB'.\n       01  A PIC X.\n";
+    let p = lowered(&program("", data, &[line("SET PP TO ENTRY PGM"), line("CALL PP USING A"), line("GOBACK.")].concat()));
+    let Op::SetEntry { entry: LirOperand::Load(pgm), targets } = &p.blocks[0].ops[0] else { panic!("{:?}", p.blocks[0].ops) };
+    assert_eq!((symbol(&p, p.places[*pgm as usize].name), targets.len()), ("PGM", 1));
+    let call = &p.services.calls[0];
+    let CallTarget::Entry(pointer) = call.target else { panic!("{call:?}") };
+    assert_eq!(symbol(&p, p.places[pointer as usize].name), "PP");
+    assert!(matches!(call.args[..], [CallArg::Reference(_)]), "{call:?}");
+}
+
+#[test]
 fn constructs_outside_the_slice_are_refused_by_name() {
     let refused = |body: &str, data: &str| lower(&compiled(&program("", data, &[line(body), line("GOBACK.")].concat()))).unwrap_err();
     let mixed = refused("MOVE FUNCTION MAX(A 1) TO A", "       01  A PIC X.\n");
@@ -464,9 +476,6 @@ fn constructs_outside_the_slice_are_refused_by_name() {
     assert!(matches!(all, LowerError::Unsupported("a FUNCTION of fixed arguments given a table whose ALL subscripts run to an OCCURS DEPENDING ON count", _)));
     let numval = refused("MOVE FUNCTION MAX(N M) TO A", "       01  A PIC X.\n       01  N PIC 9.\n       01  M PIC 99.\n");
     assert!(matches!(numval, LowerError::Unsupported(n, _) if n.starts_with("a FUNCTION result whose digits")));
-    let pointer = "       01  PP USAGE PROCEDURE-POINTER.\n";
-    assert!(matches!(refused("SET PP TO ENTRY 'T'", pointer), LowerError::Unsupported("SET TO ENTRY", _)));
-    assert!(matches!(refused("CALL PP", pointer), LowerError::Unsupported("a CALL through a pointer SET TO ENTRY can set", _)));
 }
 
 #[test]

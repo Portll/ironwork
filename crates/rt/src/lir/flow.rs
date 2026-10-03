@@ -25,6 +25,10 @@ pub enum Op {
     SetAddress { records: Vec<u16>, address: Operand },
     /// SET UP BY or DOWN BY: `by` evaluated once, then each receiver read and moved in turn.
     SetUpDown { by: IntExpr, down: bool, targets: Vec<(PlaceId, UpDown)> },
+    /// SET TO ENTRY: `entry` read as a program name and the program loaded, dynamically unless it
+    /// is a literal under NODYNAM, then each function-pointer or procedure-pointer given the value
+    /// naming it in the run unit's list of entries.
+    SetEntry { entry: Operand, targets: Vec<PlaceId> },
     /// PERFORM VARYING's increment: `var` located, then each place of `prepass`, then `var + by`
     /// computed and stored.
     Step { var: PlaceId, by: ExprId, plan: StepPlan, prepass: Vec<PlaceId> },
@@ -243,6 +247,7 @@ codec_enum!(Op {
     Markup(id) = 32,
     Set { from, to, plan } = 33,
     SetCount(temp, odo) = 34,
+    SetEntry { entry, targets } = 35,
 });
 codec_enum!(Step { Next = 0, Arm(arm) = 1, GoTo(para) = 2, End(ending) = 3, Return(frame) = 4, Resume(resume) = 5 });
 codec_enum!(Terminator {

@@ -390,6 +390,15 @@ fn the_vm_initializes_with_the_interpreter_s_receivers_senders_scaling_and_repor
     assert!(err.contains("TRUNC(OPT) store of 12345 into B PIC S9(4) BINARY"), "{err}");
 }
 
+#[test]
+fn the_vm_calls_through_a_pointer_that_holds_no_entry_as_the_interpreter_does() {
+    let data = "       01  PP USAGE PROCEDURE-POINTER.\n";
+    let (out, ending) = on_both(&program("", data, &[line("SET PP TO NULL"), line("DISPLAY 'CALLING'"), line("CALL PP"), line("GOBACK.")].concat()));
+    assert_eq!(out, "CALLING\n");
+    let abend = ending.unwrap_err();
+    assert!(abend.message.contains("X'00000000' is not a JNI service"), "{}", abend.message);
+}
+
 /// A CICS task on the interpreter, whose Harness compares the VM's run and the events its observer
 /// is told with its own, then on the VM, which must run it to its end.
 fn task_on_both(source: &str) -> (String, Result<Ending, Abend>) {

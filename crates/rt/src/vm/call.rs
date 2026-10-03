@@ -10,6 +10,7 @@ use crate::cics;
 use crate::le::{self, LeHost};
 use crate::lir::{Base, CallArg, CallPlan, CallTarget, Chars, LeService, Operand, PlaceId, SenderCheck, Step};
 use crate::parmcheck;
+use crate::set;
 use crate::storage::{Kind, Loc, Val};
 use crate::store;
 use crate::unit::{Event, LoadError, Loader, OS_COMMAND_ROUTINES, RETURN_CODE, RunUnit, UnitHost};
@@ -21,10 +22,21 @@ use zarch::ebcdic::CodePage;
 
 impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     pub(super) fn call(&mut self, plan: &'p CallPlan, pos: Pos) -> R<Step> {
-        let (name, variable) = match &plan.target {
-            CallTarget::Pointer(pointer) => return self.call_through_pointer(plan, *pointer, pos),
-            CallTarget::Named { name, .. } => (self.sym(*name).to_owned(), false),
-            CallTarget::Dynamic(o) => (self.program_name(*o, pos)?, true),
+        let dynam = self.p.options.options.dynam;
+        let (name, variable, dynamic) = match &plan.target {
+            CallTarget::Pointer(pointer) => {
+                if self.entry_in(*pointer)?.is_some() {
+                    return Err(not_yet("a CALL through a JNI function-pointer SET TO ENTRY, whose arguments the LIR keeps by value"));
+                }
+                return self.call_through_pointer(plan, *pointer, pos);
+            }
+            CallTarget::Entry(pointer) => match self.entry_in(*pointer)? {
+                Some(entry) => (entry.name, false, entry.dynamic),
+                None if plan.args.iter().all(|a| matches!(a, CallArg::Value(_) | CallArg::Omitted)) => return self.call_through_pointer(plan, *pointer, pos),
+                None => return Err(not_yet("a CALL BY REFERENCE or BY CONTENT through a pointer that holds no entry, which the walker calls as a JNI service")),
+            },
+            CallTarget::Named { name, .. } => (self.sym(*name).to_owned(), false, dynam),
+            CallTarget::Dynamic(o) => (self.program_name(*o, pos)?, true, true),
         };
         if self.unit.observed() {
             if variable {
@@ -39,7 +51,6 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 }
             }
         }
-        let dynamic = self.p.options.options.dynam || variable;
         let (index, entry) = match self.unit.load_entry(&name, dynamic) {
             Ok(found) => found,
             Err(LoadError::NotFound) => {
@@ -204,6 +215,37 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         };
         self.unit.taint_read(loc);
         self.read(loc, pos)
+    }
+
+    /// `Machine::entry_pointer`: the entry SET TO ENTRY gave the pointer, once it is located.
+    fn entry_in(&mut self, pointer: PlaceId) -> R<Option<set::Entry>> {
+        let loc = self.loc(pointer)?;
+        let Ok(value) = <[u8; 4]>::try_from(store::bytes(&self.unit.mem, loc)).map(u32::from_be_bytes) else { return Ok(None) };
+        Ok(set::entry_of(&self.unit.entries, value).cloned())
+    }
+
+    /// SET TO ENTRY (`Machine::entry_named`): the entry's program loaded when the SET runs (C140),
+    /// a name no program and no LE service has abending S806, then each receiver given the value
+    /// naming the entry.
+    pub(super) fn set_entry(&mut self, entry: Operand, targets: &[PlaceId], pos: Pos) -> R<()> {
+        let name = self.program_name(entry, pos)?;
+        let variable = !matches!(entry, Operand::Const(_));
+        if variable && self.unit.observed() {
+            self.sink("dynamic-program-load", pos, &name);
+        }
+        let dynamic = self.p.options.options.dynam || variable;
+        match self.unit.load_entry(&name, dynamic) {
+            Ok(_) => {}
+            Err(LoadError::NotFound) if le::provides(&name) => {}
+            Err(LoadError::NotFound) => return Err(Abend { code: AbendCode::ModuleNotFound, message: le::missing(&name), pos, file: None }.into()),
+            Err(LoadError::Compile(message)) => return Err(Abend::ironwork(format!("SET TO ENTRY {name}: {message}"), pos).into()),
+        }
+        let value = set::entry(&mut self.unit.entries, &name, dynamic, pos)?;
+        for &target in targets {
+            let dest = self.loc_written(target)?;
+            store::assign(&self.facts(), self.unit, dest, Val::Address(value), None, pos)?;
+        }
+        Ok(())
     }
 
     pub(super) fn cancel(&mut self, name: Operand, pos: Pos) -> R<()> {

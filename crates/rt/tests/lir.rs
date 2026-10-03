@@ -650,9 +650,10 @@ fn control_flow_round_trips_with_every_tag() {
         Op::Markup(0),
         Op::Set { from: Operand::Load(2), to: 1, plan: MovePlan::Index },
         Op::SetCount(3, ODO),
+        Op::SetEntry { entry: Operand::Const(4), targets: vec![1, 2] },
     ];
     // Tag 29 is retired (load-module.md §4.3).
-    every_variant_but(&ops, 35, &[29]);
+    every_variant_but(&ops, 36, &[29]);
     let resume = Resume { para: 2, block: 11 };
     every_variant(&[Step::Next, Step::Arm(2), Step::GoTo(3), Step::End(Ending::Goback), Step::Return(u64::MAX), Step::Resume(resume)], 6);
     let terminators = [
@@ -1234,8 +1235,8 @@ fn call_plans_round_trip_with_every_tag() {
         LeService::Ceeutc,
     ];
     every_variant(&services, 14);
-    let targets = [CallTarget::Named { name: 1, le: Some(LeService::Ceedate) }, CallTarget::Dynamic(Operand::Load(2)), CallTarget::Pointer(3)];
-    every_variant(&targets, 3);
+    let targets = [CallTarget::Named { name: 1, le: Some(LeService::Ceedate) }, CallTarget::Dynamic(Operand::Load(2)), CallTarget::Pointer(3), CallTarget::Entry(4)];
+    every_variant(&targets, 4);
     let args = [CallArg::Reference(0), CallArg::Content(Chars::Literal(vec![0xF1])), CallArg::Value(Operand::LengthOf(1)), CallArg::Omitted];
     every_variant(&args, 4);
     let call = CallPlan { target: targets[0], args: args.to_vec(), returning: Some(4), on_exception: true, not_on_exception: false };

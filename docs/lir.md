@@ -605,6 +605,9 @@ pub enum Op {
     SetAddress { records: Vec<u16>, address: Operand },
     /// SET UP BY or DOWN BY: `by` evaluated once, then each receiver read and moved in turn.
     SetUpDown { by: IntExpr, down: bool, targets: Vec<(PlaceId, UpDown)> },
+    /// SET TO ENTRY: `entry` read as a program name and its program loaded, then each receiver
+    /// given the value naming the entry in the run unit's list (§9.3).
+    SetEntry { entry: Operand, targets: Vec<PlaceId> },
     /// PERFORM VARYING's increment: `var` located, then each place of `prepass` (§7.5), then
     /// `var + by` computed with `plan.dmax` and stored.
     Step { var: PlaceId, by: ExprId, plan: StepPlan, prepass: Vec<PlaceId> },
@@ -679,7 +682,7 @@ pub enum RangeKind { Perform, SortProcedure, UseBeforeReporting, UseProcedure, D
 ```
 
 - **Tags** (load-module.md §4.3): `PerformEnter` is tag 12 and `Debug` 11 of `Terminator`, and tag 6
-  is retired; `DebugLine` and `DebugAlter` are tags 30 and 31 of `Op`, `Markup` 32, `Set` 33, and tag 29
+  is retired; `DebugLine` and `DebugAlter` are tags 30 and 31 of `Op`, `Markup` 32, `Set` 33, `SetCount` 34, `SetEntry` 35, and tag 29
   (`SetSegment`) is retired. `Processing` is tag 5 of `RangeKind`, `Xml` tag 7 of `Base` and
   `Walk` tag 3 of `IntExpr`.
 - **A range's region** (`Range::region`) is the paragraphs a GO TO stays in it for: `first` to
@@ -973,7 +976,7 @@ walker does on each execution; the last column names that work.
 | INITIALIZE | `Initialize` with a flat plan of (offset, length, value, store, scaling): FILLER's receivers, and each one's SPACE, ZERO or NULL, VALUE literal or REPLACING operand, which is read again for each | Lowered | The walk over the item's children and the phrases' choice of receiver and sender (machine.rs `initialize`) |
 | SET TO TRUE, TO FALSE | `Move` of the first VALUE's low end, or of WHEN SET TO FALSE's value, into the conditional variable by item index; nothing when there is none | Lowered | The conditional variable by item index (machine.rs `set`) |
 | SET TO | `Set` per receiver; a `POINTER` receiver takes only an address or NULL, else `Refused` | One call | The kind test |
-| SET TO ENTRY | None: `Unsupported` | Not lowered | The entry loaded and named in the run unit's list |
+| SET TO ENTRY | `SetEntry`: the name read, the program loaded, the receivers given the entry's value (§9.3) | One call | The entry loaded and named in the run unit's list |
 | SET ADDRESS OF | One `SetAddress` for all the records; a target that is not an 01 or 77 of LINKAGE ends the block in `Abend` after the records before it | One call | Resolve and linkage test |
 | SET UP BY, DOWN BY | One `SetUpDown`: each receiver `Pointer`, `Number` with a `StepPlan` of dmax 0, or `Refused` | One call | Read, then match on the value |
 | INSPECT | `Inspect` over constant patterns and a prebuilt CONVERTING table when both operands are literals of one length and the item is not national; each TALLYING counter with its `StepPlan` | One call | Literal images and the CONVERTING table (machine.rs:822-834, 849-869) |
@@ -1115,6 +1118,9 @@ pub enum CallTarget {
     Dynamic(Operand),
     /// A FUNCTION-POINTER or PROCEDURE-POINTER: a JNI service (machine/oo.rs:446-496 (int)).
     Pointer(PlaceId),
+    /// Any other FUNCTION-POINTER or PROCEDURE-POINTER: the entry SET TO ENTRY gave it, or else
+    /// `Pointer`'s service (machine.rs `entry_pointer`).
+    Entry(PlaceId),
 }
 
 pub enum CallArg {
@@ -1147,9 +1153,14 @@ unit.rs:150-171 (f2)).
   encode, lowers to the walker's IRONWORK abend, an `Abend` terminator at the statement, since the
   walker gives it before looking for a program. A data item holding a FUNCTION-POINTER or
   PROCEDURE-POINTER is `Pointer`, as `call_through_pointer` decides by the item's declared kind
-  (machine/oo.rs:563-568 (f2)), when the item is a field of JNINATIVEINTERFACE; through any other
-  pointer, which SET TO ENTRY can make name a program, the CALL is `Unsupported`, as SET TO ENTRY
-  is. Any other identifier, and LENGTH OF or ADDRESS OF, is `Dynamic`,
+  (machine/oo.rs:563-568 (f2)), when the item is a field of JNINATIVEINTERFACE; any other pointer
+  is `Entry`, with its arguments as a program CALL takes them. Either is located and read first:
+  a value SET TO ENTRY gave names the entry's program, which the CALL loads by its name, dynamically
+  as SET TO ENTRY loaded it, with no dynamic-program-load sink (machine.rs `entry_pointer`); any
+  other is the JNI service. On the VM, a `Pointer` that names an entry and an `Entry` that names
+  none with an argument BY REFERENCE or BY CONTENT stop the run as `Halt::Unimplemented`, since the
+  plan does not hold the arguments the walker would pass. Any other identifier, and LENGTH OF or
+  ADDRESS OF, is `Dynamic`,
   whose operand is read as its kind reads it (a numeric item's invalid data abends S0C7) before a
   value that is not alphanumeric bytes abends IRONWORK "a program name must be alphanumeric".
 - **Arguments** keep `call_nested`'s order and forms (machine.rs:1191-1211 (f2)): OMITTED;
@@ -1173,6 +1184,11 @@ unit.rs:150-171 (f2)).
   the CALL runs.
 - **CANCEL** is one `Cancel` per name, in order, each read as `program_name` reads a `Dynamic`
   target (machine.rs:478-483 (f2)).
+- **SET TO ENTRY** (`SetEntry`) reads its operand as `program_name` does, tells an observer the
+  dynamic-program-load of a name a data item holds, and loads the program as a CALL would,
+  dynamically for a data item or under DYNAM (C140): a name no program has abends S806 at the SET
+  unless an LE callable service has it. `rt::set::entry` gives the value naming the entry, the same
+  each time it is named, and each receiver takes it as an address.
 - **Dynamic at run time:** loading and compiling on first CALL, RECURSIVE and INITIAL handling, the
   recursion check (IGZ0064S, `rt::callee::recursive_call`; C127), the depth check (after the load,
   before the arguments), CANCEL's effect, and temporaries (machine.rs:973-1122). The run unit's

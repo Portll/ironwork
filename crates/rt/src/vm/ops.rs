@@ -78,6 +78,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                     self.linkage[r as usize] = offset;
                 }
             }
+            Op::SetEntry { entry, targets } => self.set_entry(*entry, targets, pos)?,
             Op::SetUpDown { by, down, targets } => {
                 let by = self.int(by, pos)?;
                 let places: Vec<PlaceId> = targets.iter().map(|(place, _)| *place).collect();

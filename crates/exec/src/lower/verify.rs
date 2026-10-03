@@ -346,7 +346,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
         match &c.target {
             CallTarget::Named { name, .. } => symbol(*name)?,
             CallTarget::Dynamic(o) => operand(o)?,
-            CallTarget::Pointer(q) => place(*q)?,
+            CallTarget::Pointer(q) | CallTarget::Entry(q) => place(*q)?,
         }
         for a in &c.args {
             match a {
@@ -732,6 +732,10 @@ fn verify_program(p: &Program) -> Result<(), String> {
                 Op::SetAddress { records, address } => {
                     records.iter().try_for_each(|&r| within("LINKAGE record", u32::from(r), p.storage.linkage.len()))?;
                     operand(address)?;
+                }
+                Op::SetEntry { entry, targets } => {
+                    operand(entry)?;
+                    places(targets)?;
                 }
                 Op::SetUpDown { by, targets, .. } => {
                     int(by)?;

@@ -26,6 +26,9 @@ pub enum CallTarget<P = PlaceId, O = Operand> {
     /// A FUNCTION-POINTER or PROCEDURE-POINTER, which holds a JNI service. Its arguments are all
     /// `Value` or `Omitted`: the service takes each operand's value as it reads, OMITTED as NULL.
     Pointer(P),
+    /// Any other FUNCTION-POINTER or PROCEDURE-POINTER: the program of the entry SET TO ENTRY gave
+    /// it, called by its name and as it was loaded; a value naming no entry is `Pointer`'s service.
+    Entry(P),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -101,7 +104,7 @@ codec_struct!(CallPlan { target, args, returning, on_exception, not_on_exception
 codec_struct!(UserFunctionPlan { name, external, args, refmod, at });
 codec_enum!(UserArgument { Reference(place) = 0, Value(value) = 1 });
 codec_struct!(FunctionDefinition { params, returning });
-codec_enum!(CallTarget { Named { name, le } = 0, Dynamic(name) = 1, Pointer(place) = 2 });
+codec_enum!(CallTarget { Named { name, le } = 0, Dynamic(name) = 1, Pointer(place) = 2, Entry(place) = 3 });
 codec_enum!(CallArg { Reference(place) = 0, Content(chars) = 1, Value(value) = 2, Omitted = 3 });
 codec_struct!(EntryPoint { name, paragraph, block, using });
 codec_enum!(LeService {
