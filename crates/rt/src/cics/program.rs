@@ -49,8 +49,8 @@ pub fn level_ended<H, L: Loader<H>>(unit: &RunUnit<'_, H, L>) -> bool {
 /// LINK runs a program and comes back, from STOP RUN too, which ends a level as RETURN does (C144);
 /// XCTL runs it in place of the program running this logical level, with the level's HANDLE ABEND
 /// exit (C239), and the level ends when it does (C233). A LINKed program gets the COMMAREA item
-/// itself; XCTL passes a copy, since this program's storage goes away. Each LINK or XCTL starts the
-/// program with fresh WORKING-STORAGE, as CICS gives it.
+/// itself; XCTL passes a copy, since this program's storage goes away. Each LINK or XCTL starts a
+/// run unit of its own, where the program and those it CALLs start with fresh WORKING-STORAGE.
 pub(super) fn link<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &At<P, O, S>, t: &Transfer<P, O, S>, xctl: bool) -> R<Flow> {
     eib_bytes(x.unit(), EIBFN, if xctl { &[0x0E, 0x04] } else { &[0x0E, 0x02] });
     let Some(name) = text(x, t.program.as_ref(), at.pos)?.map(|n| n.to_ascii_uppercase()) else {
@@ -95,11 +95,12 @@ pub(super) fn link<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &A
     }
 }
 
-/// Runs program `index` with fresh WORKING-STORAGE at the next logical level, or for XCTL in this
-/// program's place; the level it ran has ended when it comes back.
+/// Runs program `index` in a run unit of its own (C145) at the next logical level, or for XCTL in
+/// this program's place; the level it ran has ended when it comes back.
 fn enter<'w, P: Copy, O, S, X: CicsHost<'w, P, O, S>>(x: &mut X, program: X::Program, index: usize, area: Option<usize>, xctl: bool, pos: Pos) -> R<Ending> {
     let below = u32::from(!xctl);
     task(x).links += below;
+    x.unit().begin_cics_run_unit();
     let callee = Callee { index, by: By::Link, mark: None, pos };
     let ran = callee::run(x, &callee, |x| {
         x.unit().enter(pos)?;
@@ -107,10 +108,14 @@ fn enter<'w, P: Copy, O, S, X: CicsHost<'w, P, O, S>>(x: &mut X, program: X::Pro
         x.unit().depth -= 1;
         Ok::<_, Abend>((ending, ()))
     });
+    let closed = x.unit().end_cics_run_unit();
     let task = task(x);
     task.links -= below;
     task.ending_level = false;
-    ran?.0
+    match (ran.and_then(|(ending, ())| ending), closed) {
+        (Ok(_), Err(m)) => Err(Abend::ironwork(m, pos)),
+        (ending, _) => ending,
+    }
 }
 
 /// ABEND ends the task with ABCODE; a HANDLE ABEND exit can intercept it unless CANCEL is given.

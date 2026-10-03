@@ -1,6 +1,7 @@
 //! The run unit: every program a run calls, sharing one memory as they share an address space on
 //! z/OS. A called program keeps its WORKING-STORAGE and open files from one CALL to the next until
-//! it is cancelled. A reference or pointer can reach anywhere in this memory, but never outside it.
+//! it is cancelled, or in a CICS task until the LINK or XCTL that started its run unit ends it
+//! (C145). A reference or pointer can reach anywhere in this memory, but never outside it.
 //!
 //! `H` is the executor's handle to a loaded program and `L` the loader CALL goes through; the run
 //! unit holds both without looking inside, and asks `L` what it needs to know about an `H`.
@@ -29,6 +30,10 @@ pub struct Loaded<H> {
     pub compiled: Option<H>,
     pub name: String,
     pub base: usize,
+    pub size: usize,
+    /// False once a CICS run unit has set the program's storage at `base` aside: its next
+    /// activation gets storage of its own.
+    pub placed: bool,
     pub files: Vec<Option<Open>>,
     /// The files CLOSE WITH LOCK has closed, which OPEN refuses with status 38.
     pub locked: Vec<bool>,
@@ -43,6 +48,41 @@ pub struct Loaded<H> {
     pub altered: Vec<Option<usize>>,
     /// The library file CALL loaded the program from; None for the programs of the first source.
     pub source: Option<PathBuf>,
+}
+
+impl<H> Loaded<H> {
+    /// A program with `files` files and `size` bytes of storage at `base`, in its initial state.
+    pub fn new(compiled: Option<H>, name: String, base: usize, size: usize, files: usize) -> Self {
+        let (locked, files) = (vec![false; files], (0..files).map(|_| None).collect());
+        Self { compiled, name, base, size, placed: true, files, locked, initialized: false, active: false, dynamic: false, entry: None, altered: Vec::new(), source: None }
+    }
+
+    /// What the program's activations have left, taken away: it is in its initial state, with its
+    /// storage set aside.
+    fn set_aside(&mut self) -> Held {
+        let files = self.files.iter_mut().map(Option::take).collect();
+        let locked = std::mem::replace(&mut self.locked, vec![false; self.files.len()]);
+        let held = Held { base: self.base, placed: self.placed, files, locked, initialized: self.initialized, active: self.active, dynamic: self.dynamic, altered: std::mem::take(&mut self.altered) };
+        (self.placed, self.initialized, self.active, self.dynamic) = (false, false, false, false);
+        held
+    }
+
+    fn restore(&mut self, held: Held) {
+        (self.base, self.placed, self.files, self.locked, self.altered) = (held.base, held.placed, held.files, held.locked, held.altered);
+        (self.initialized, self.active, self.dynamic) = (held.initialized, held.active, held.dynamic);
+    }
+}
+
+/// A program's state in a CICS run unit that a LINK or XCTL has set aside.
+struct Held {
+    base: usize,
+    placed: bool,
+    files: Vec<Option<Open>>,
+    locked: Vec<bool>,
+    initialized: bool,
+    active: bool,
+    dynamic: bool,
+    altered: Vec<Option<usize>>,
 }
 
 pub enum LoadError {
@@ -208,6 +248,9 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     pub taint: Option<Taint>,
     /// How many more statements may start before the run ends with S322; None for no limit.
     pub statement_limit: Option<u64>,
+    /// Each program's state in the CICS run units the LINKs and XCTLs running have set aside, the
+    /// innermost last.
+    set_aside: Vec<Vec<Held>>,
 }
 
 impl<H, L: Loader<H>> RunUnit<'_, H, L> {
@@ -323,6 +366,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             statements: None,
             taint: None,
             statement_limit: None,
+            set_aside: Vec::new(),
         }
     }
 
@@ -337,8 +381,36 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         let base = self.allocate(size);
         let index = self.programs.len();
         self.names.insert(name.clone(), index);
-        self.programs.push(Loaded { compiled, name, base, files: (0..files).map(|_| None).collect(), locked: vec![false; files], initialized: false, active: false, dynamic: false, entry: None, altered: Vec::new(), source: None });
+        self.programs.push(Loaded::new(compiled, name, base, size, files));
         index
+    }
+
+    /// A CICS LINK or XCTL starts a run unit of its own (C145): every program starts in it in its
+    /// initial state, with storage of its own, and the state of the run unit that issued it is
+    /// set aside until [`RunUnit::end_cics_run_unit`].
+    pub fn begin_cics_run_unit(&mut self) {
+        let held = self.programs.iter_mut().map(Loaded::set_aside).collect();
+        self.set_aside.push(held);
+    }
+
+    /// Ends the run unit [`RunUnit::begin_cics_run_unit`] started, closing the files its programs
+    /// left open as Language Environment closes an enclave's: a program it loaded is left in its
+    /// initial state, and every other has the state that was set aside back.
+    pub fn end_cics_run_unit(&mut self) -> Result<(), String> {
+        let mut closed = Ok(());
+        for program in &mut self.programs {
+            for f in program.files.iter_mut().filter_map(Option::take) {
+                if let Err(e) = f.close() {
+                    closed = closed.and(Err(format!("closing a file of {}: {e}", program.name)));
+                }
+            }
+            drop(program.set_aside());
+            program.placed = true;
+        }
+        for (program, held) in self.programs.iter_mut().zip(self.set_aside.pop().unwrap_or_default()) {
+            program.restore(held);
+        }
+        closed
     }
 
     /// The program a CALL of `name` enters, and which of its ENTRY statements when `name` is not
@@ -401,6 +473,10 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
     /// fresh storage, as its first does, the first after a CANCEL, and every one of an INITIAL
     /// program.
     pub fn activate(&mut self, me: usize, initial: bool) -> (usize, bool) {
+        if !self.programs[me].placed {
+            let base = self.allocate(self.programs[me].size);
+            (self.programs[me].base, self.programs[me].placed) = (base, true);
+        }
         let program = &mut self.programs[me];
         program.active = true;
         (program.base, !program.initialized || initial)

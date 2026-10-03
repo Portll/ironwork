@@ -186,9 +186,8 @@ fn room<H, L: Loader<H>>(unit: &RunUnit<'_, H, L>, size: usize, pos: Pos) -> R<(
 fn keep<H: Clone, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, compiled: Option<H>, bytes: &[u8], pos: Pos) -> R<usize> {
     room(unit, bytes.len(), pos)?;
     let base = unit.push_temporary(bytes);
-    let files = compiled.as_ref().map_or(Vec::new(), |c| (0..L::shape(c).0).map(|_| None).collect());
-    let locked = vec![false; files.len()];
-    unit.programs.push(Loaded { compiled, name: String::new(), base, files, locked, initialized: false, active: false, dynamic: false, entry: None, altered: Vec::new(), source: None });
+    let files = compiled.as_ref().map_or(0, |c| L::shape(c).0);
+    unit.programs.push(Loaded::new(compiled, String::new(), base, bytes.len(), files));
     Ok(unit.programs.len() - 1)
 }
 

@@ -284,6 +284,7 @@ pub const CICS_HANDLERS_ACROSS_CALL: &str = "C234";
 pub const CICS_CONDITION_LABEL_OWNER: &str = "C235";
 pub const CICS_RETURN_BELOW_THE_FIRST_LEVEL: &str = "C143";
 pub const CICS_STOP_RUN_ENDS_THE_LEVEL: &str = "C144";
+pub const CICS_RUN_UNIT_PER_LINK: &str = "C145";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1814,6 +1815,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: CICS_STOP_RUN_ENDS_THE_LEVEL,
         claim: "STOP RUN terminates the run unit, the Language Environment enclave, whose main routine it ends (z/OS 3.1 Language Environment Programming Guide, 'The enclave defines the scope of language statements', ceea200118). Under CICS a run unit is what the task, a LINK or an XCTL starts, with the programs it CALLs ('CICS run unit', ceea200254; CICS TS 6.x, 'Flow of control between programs and subprograms', dfhp3_cobol_subprog_flow), and a program at level 2, LINKed, CALLed there or started there by XCTL, can use GOBACK, STOP RUN or EXEC CICS RETURN to return to the level 1 program that LINKed to it (dfhp3_cobol_subprog_flow). STOP RUN therefore ends the logical level it runs at, as RETURN does (C233): a LINK, or a HANDLE ABEND PROGRAM exit entered as by LINK, comes back from it, and at the task's first level it ends the task. The Programming Guide's table of termination statements says instead that in a CICS environment STOP RUN terminates the entire transaction, including all programs running within it (SC27-8714-03, p. 546, Table 70); ironwork follows CICS and Language Environment, whose rules for the level are the more specific",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CICS_RUN_UNIT_PER_LINK,
+        claim: "Under CICS a run unit, the Language Environment enclave, is entered at the start of the task or by a LINK or XCTL, and each enclave has its own heap storage and other Language Environment resources (CICS TS 6.x, 'Flow of control between programs and subprograms', dfhp3_cobol_subprog_flow; z/OS 3.1 Language Environment Programming Guide, 'CICS run unit', ceea200254). On each entry to a LINKed program a new initialized copy of its WORKING-STORAGE is provided and the run unit is reinitialized; a program a static or dynamic CALL reaches gets a new initialized copy on its first entry within a logical level and its last-used state on later entries at the same level ('Rules for calling subprograms', dfhp3_cobol_subprog_rules). ironwork therefore keeps each loaded program's state, its storage, open files, CLOSE WITH LOCK, ALTERs, activity and whether a dynamic CALL entered it, per CICS run unit: a LINK, an XCTL and a HANDLE ABEND PROGRAM exit, entered as by LINK, each start one where every program starts in its initial state with storage of its own, and when it ends the files its programs left open are closed, as an enclave's are, and the run unit that started it has its programs as it left them. A program active in a higher run unit can be CALLed in a lower one. CANCEL and INITIAL act within the run unit. XCTL passes control to a new enclave at the same logical level (ceea200254), so a program CALLed both before and after an XCTL starts afresh after it, which the logical-level wording of the rules leaves open. The files are closed as when STOP RUN ends an enclave (ceea200118). EXTERNAL data, Language Environment heap storage and the objects of object-oriented programs stay with the task",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

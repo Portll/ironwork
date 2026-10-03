@@ -2377,6 +2377,40 @@ fn stop_run_below_the_first_level_returns_to_the_program_that_linked_to_the_leve
     assert_eq!(level_task(&["EXEC CICS XCTL PROGRAM('STOPR') END-EXEC"]), back("IN STOPR\n"));
 }
 
+/// The output and abend code of a task whose first program runs `body`, then RETURN. COUNTER
+/// counts its CALLs; TWICE CALLs it twice and HANDOFF once before XCTL to TWICE. SUB counts its
+/// CALLs and, CALLed with the task's EXEC interface block, LINKs to SUBL with its count as the
+/// COMMAREA when EIBCALEN is 0; SUBL shows the COMMAREA around a CALL of SUB.
+fn run_unit_task(body: &[&str]) -> (String, Option<String>) {
+    let mut procedure: Vec<String> = body.iter().map(|s| line(s)).collect();
+    procedure.push(line("EXEC CICS RETURN END-EXEC."));
+    let main = cics_program("MAINP", "", "", &procedure.concat());
+    let count = "       01  N PIC 9 VALUE 0.\n";
+    let sub = ["ADD 1 TO N", "IF EIBCALEN = 0", "    EXEC CICS LINK PROGRAM('SUBL') COMMAREA(N) LENGTH(1)", "    END-EXEC", "END-IF", "DISPLAY 'SUB ' N ' AT ' EIBCALEN", "GOBACK."];
+    let subl = ["DISPLAY 'SUBL ' DFHCOMMAREA", "CALL 'SUB' USING DFHEIBLK", "DISPLAY 'SUBL ' DFHCOMMAREA", "EXEC CICS RETURN END-EXEC."];
+    let programs = [
+        ("COUNTER", cics_program("COUNTER", count, "", &["ADD 1 TO N", "DISPLAY 'COUNTER ' N", "GOBACK."].map(line).concat())),
+        ("TWICE", cics_program("TWICE", "", "", &["CALL 'COUNTER'", "CALL 'COUNTER'", "EXEC CICS RETURN END-EXEC."].map(line).concat())),
+        ("HANDOFF", cics_program("HANDOFF", "", "", &["CALL 'COUNTER'", "EXEC CICS XCTL PROGRAM('TWICE') END-EXEC."].map(line).concat())),
+        ("SUB", cics_program("SUB", count, "", &sub.map(line).concat())),
+        ("SUBL", cics_program("SUBL", "", "       01  DFHCOMMAREA PIC X.\n", &subl.map(line).concat())),
+    ];
+    let mut source = format!("{main}       END PROGRAM MAINP.\n");
+    for (id, program) in programs {
+        source.push_str(&format!("{program}       END PROGRAM {id}.\n"));
+    }
+    let (out, ending) = run_cics(&source, task("TR17"), None, unit::Clock::System);
+    (out, ending.err().map(|a| a.code.to_string()))
+}
+
+#[test]
+fn a_called_program_starts_afresh_in_each_run_unit_a_link_or_xctl_starts() {
+    let counted = run_unit_task(&["CALL 'COUNTER'", "EXEC CICS LINK PROGRAM('TWICE') END-EXEC", "EXEC CICS LINK PROGRAM('HANDOFF') END-EXEC", "CALL 'COUNTER'"]);
+    assert_eq!(counted, ("COUNTER 1\nCOUNTER 1\nCOUNTER 2\nCOUNTER 1\nCOUNTER 1\nCOUNTER 2\nCOUNTER 2\n".into(), None));
+    let level = |n: u8| format!("SUBL {n}\nSUB 1 AT 0001\nSUBL {n}\nSUB {n} AT 0000\n");
+    assert_eq!(run_unit_task(&["CALL 'SUB' USING DFHEIBLK", "CALL 'SUB' USING DFHEIBLK"]), (level(1) + &level(2), None));
+}
+
 #[test]
 fn xctl_in_a_called_program_replaces_the_program_running_its_level() {
     assert_eq!(level_task(&["CALL 'XCTP'", "DISPLAY 'BACK IN MAIN'"]), ("LAST XC 0002\n".into(), Ok((None, None))));

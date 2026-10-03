@@ -163,8 +163,8 @@ impl Bindings<'_> {
 pub enum By {
     /// Leaving an INITIAL program is a CANCEL of it (Language Reference SC27-8713-03, p. 349).
     Call { initial: bool },
-    /// LINK, XCTL or a HANDLE ABEND PROGRAM exit: the program starts from fresh storage, as CICS
-    /// gives it on each one.
+    /// LINK, XCTL or a HANDLE ABEND PROGRAM exit, each in a run unit of its own, where the program
+    /// starts from fresh storage, as CICS gives it on each one.
     Link,
     Invoke,
     /// A user-defined function's invocation. Functions are recursive, so the program stays active
@@ -191,9 +191,6 @@ pub struct Callee {
 /// names its files. The caller passes STOP RUN up.
 pub fn run<'w, X: UnitHost<'w>, O, T, E: From<Abend>>(x: &mut X, callee: &Callee, run: impl FnOnce(&mut X) -> Result<(R<O>, T), E>) -> Result<(R<O>, T), E> {
     let index = callee.index;
-    if callee.by == By::Link {
-        x.unit().programs[index].initialized = false;
-    }
     let active = x.unit().programs[index].active;
     let (ending, value) = run(x)?;
     let unit = x.unit();
