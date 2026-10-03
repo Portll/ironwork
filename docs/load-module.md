@@ -4,11 +4,13 @@ The `.iwm` file format, and how a run unit loads it. It details §8 of
 [codegen-runtime.md](codegen-runtime.md) and serves invariants 6 and 7 of its §10.
 
 **Status:** draft, for the operator's review. The container, the encoding rules and every section's
-codec (§3 to §7, §9) are built in `rt::module`; `ironwork compile` writes modules and `ironwork
-dump` (§11) prints them. The loader (§8.2) is not built: running a module needs the VM. The writer
-always writes an empty `BMS` section, so a program that uses maps loses them (L2.5). The types a
-module holds are [lir.md](lir.md)'s; this document gives the container, the encoding rules, which
-apply to any of them, and the program directory.
+codec (§3 to §7, §9) are built in `rt::module`; `ironwork compile` writes modules, with the mapsets
+their programs name (§5.3), and `ironwork dump` (§11) prints them. The loader (§8.2) is built:
+`ironwork run x.iwm` runs a module's first program on the VM, and on the VM CALL, CANCEL, a
+user-defined function, INVOKE and EXEC CICS LINK and XCTL reach programs and classes in modules. A
+static CALL is resolved when it runs, not at compile time (§8.3), and the scope rules of question 6
+are not applied. The types a module holds are [lir.md](lir.md)'s; this document gives the
+container, the encoding rules, which apply to any of them, and the program directory.
 
 ## 1. Scope and constraints
 
@@ -21,6 +23,8 @@ apply to any of them, and the program directory.
   container writer, `rt::module::ModuleWriter` (section order, string interning, checksums), lives
   in `rt` too, because no `compile` crate exists yet. The reader never calls it. Once `compile`
   exists it drives the writer: it chooses what each section holds, and `rt` lays the bytes out.
+  The search for modules and what a run has read of them, `rt::module::Modules`, is `rt`'s as well;
+  it takes lir.md's verifier as a function, since the verifier lives with lowering in `exec`.
 - **Untrusted input.** A `.iwm` may be truncated, corrupt or hostile. The reader bounds every count
   and index, never allocates from a length it has not checked (§4.8), and never panics.
 
@@ -105,7 +109,7 @@ sections before it can decode anything else. Section bodies use the rules of §4
 |---|---|---|
 | `NotAModule` | The magic differs (check 1) | `not an ironwork load module` |
 | `Truncated` | Fewer than 32 bytes, or fewer than `file_len` (checks 2, 4) | `truncated: 100 bytes of 240` |
-| `Version` | A version the reader does not read (check 3, §8.1) | `load module format 1.0; this ironwork reads 0.1. Compile the source again` |
+| `Version` | A version the reader does not read (check 3, §8.1) | `load module format 1.0; this ironwork reads 0.2. Compile the source again` |
 | `TrailingBytes` | More bytes than `file_len` (check 4) | `4 bytes after the end of the module at 240` |
 | `HeaderChecksum` | `header_crc` differs (check 5) | `header is corrupt (checksum 1234ABCD, expected 5678EF01)` |
 | `Feature` | Any `features` bit is set (check 6) | `load module needs features 0x00000004, which this ironwork lacks` |
@@ -143,8 +147,8 @@ sections before it can decode anything else. Section bodies use the rules of §4
 | any other | unknown | Skipped if flagged optional, and refused otherwise (§3.3) | no |
 
 - **Per program** means a count equal to the directory's program count, then one record per program
-  in ordinal order. A section never repeats a program's name. A program's records are decoded
-  together, on its first CALL.
+  in ordinal order. A section never repeats a program's name. The reader (`rt::module::read`)
+  decodes every program's records when it reads the module.
 - **Order of writing.** `ModuleWriter::section` takes the known sections in ascending id order and
   panics on any other order, and on `STRINGS`, which `finish` writes. `finish` panics if a required
   section is missing. `extension` takes an id from `0x8000` up and always sets the optional flag.
@@ -453,18 +457,30 @@ encodes as it is. `rt` owns the types (codegen-runtime.md §6, D4; semantics-lib
 - **Order.** The section holds each mapset the module's programs use once, sorted by name in ASCII
   order; names are unique in a module. lir.md's `MapId` is a mapset's position here and a map's
   within it.
+- **Which mapsets.** Those a SEND MAP or RECEIVE MAP of a program in the module, or of a class's
+  data or methods, names by a literal: its MAPSET, or its MAP where MAPSET is not written,
+  upper-cased as the run reads them (`mapsets_named`, cli/src/compile.rs). A mapset named by a data
+  item is not known until the program runs, so it is not in the module.
 - **Where it comes from.** Compilation reads `NAME.bms` from the COPY libraries with `find_mapset`
-  (bms.rs:90), so the module needs no map source at run time.
+  (bms.rs:14), so the module needs no map source at run time. A name no library holds is left out,
+  as a run from source would not find it either. A mapset that does not parse stops the compile with
+  return code 12 and writes no module, since a run from source would abend at that SEND MAP and the
+  module could not. A bundle whose sources read two different mapsets of one name is refused.
+- **At run time.** SEND MAP and RECEIVE MAP take a mapset from any module the run has read, then
+  from the copy libraries, `-I` (§8.2).
 
 ## 6. The program directory
 
-The `DIRECTORY` section is the module's table of contents. The reader parses it first, and
-`RunUnit` answers name lookups from it without decoding any program.
+The `DIRECTORY` section is the module's table of contents. The reader parses it first, and the
+loader (§8.2) answers name lookups from it.
 
 ```rust
 pub struct DirectoryEntry {
     /// PROGRAM-ID exactly as written.
     pub id: String,
+    /// A user-defined function's external name, which an invocation loads it by; None for a
+    /// program, which a CALL loads by `id`.
+    pub external: Option<String>,
     /// The program ordinal of the containing program.
     pub parent: Option<u32>,
     pub common: bool,
@@ -479,18 +495,24 @@ pub struct DirectoryEntry {
 ```
 
 - **`id` is written as it stands in the source**, because the SQL recording identity uses it
-  unchanged (machine/sql.rs:153). Lookups compare case-insensitively, as `RunUnit::add` and `load`
-  do (unit.rs:111, :144). Where two programs share an `id`, the lowest ordinal wins, as the first
-  match does today (question 6).
+  unchanged (machine/sql.rs:153). Lookups compare case-insensitively, as `RunUnit::find` and
+  `load` do (unit.rs:403, :408). Where two programs share an `id`, the lowest ordinal wins, as the
+  first match does today (question 6).
+- **`external`** is a FUNCTION-ID's AS literal, or its function-name when it has none
+  (`ast::Function.external`): what `FUNCTION name` invokes it by, which may differ from `id`. A
+  program is found by `id`, a function by `external` (`DirectoryEntry::load_name`).
 - **`params` and `returning`** are `Program.using` (ast.rs:16, :28) reduced to what a CALL checks.
-  INITIAL, RECURSIVE and the entry paragraph are in the program's LIR. **`entries`** is empty until
-  the parser reads ENTRY.
-- **`parent` and `common`** need the parser to record them: it flattens nested programs
-  (parser.rs:264-290), so `ast::Program` gains `parent: Option<usize>` and `common: bool`.
+  INITIAL, RECURSIVE and the entry paragraph are in the program's LIR. **`entries`** holds each
+  ENTRY statement's name and paragraph.
+- **`parent`** is the program that directly contains this one, the nearest before it that lists it
+  among the programs it contains (`ast::Program.nested`). The loader gives each program the
+  PROGRAM-IDs of the entries whose `parent` it is, which a CANCEL of it reaches (§8.4).
+- **`common`** is PROGRAM-ID ... IS COMMON, which the parser records (`ast::Program.common`). Nothing
+  reads it until question 6 is decided.
 - **`dynamic`** is true for every program, since today's search finds nested programs by name too
-  (question 6).
-- **Main** is ordinal 0, the first top-level program, which `parse_with` returns (lib.rs:72).
-  `ironwork run x.iwm` starts it.
+  (question 6). The loader does not read it.
+- **Main** is ordinal 0, the first program that is not a user-defined function, which `parse_all_with`
+  puts first (assumption C270). `ironwork run x.iwm` starts it.
 
 ## 7. The SQL statement table
 
@@ -518,12 +540,14 @@ error if it meets one. `HostType::Zoned`'s sign is `rt::SignClause`.
 
 ### 8.1 Versions
 
-The format version is `major.minor`, starting at `0.1`.
+The format version is `major.minor`; this ironwork writes and reads 0.2. A 0.1 module, whose
+directory entries lack `external` (§6) and whose options lack `optimize` (§5.1), is refused, and
+compiling the source again is the remedy.
 
 | The reader finds | It does |
 |---|---|
 | Bad magic | Refuses: `X: not an ironwork load module` |
-| A different `major` | Refuses: `X: load module format 1.0; this ironwork reads 0.1. Compile the source again`. A reader of major 1 or more names `1.x` |
+| A different `major` | Refuses: `X: load module format 1.0; this ironwork reads 0.2. Compile the source again`. A reader of major 1 or more names `1.x` |
 | The same `major`, a lower `minor` | Reads it. A minor version only adds, and a section body's shape never changes inside a major (new data goes in a new section) |
 | The same `major`, a higher `minor` | Reads it, ignoring sections with the optional flag it does not know. Refuses on an unknown required section or a set `features` bit, naming it |
 | `major` 0 | Requires the same `minor` as well. The format is not frozen until 1.0 |
@@ -531,74 +555,110 @@ The format version is `major.minor`, starting at `0.1`.
 - **No older readers.** A new major version does not keep the last one's reader: the source is the
   durable artefact, and compiling again is the remedy (question 1).
 - **A major bump** is needed for any change to an existing encoding, tag or section body, and any
-  change to the LIR that lir.md marks as breaking.
+  change to the LIR that lir.md marks as breaking. Before 1.0 a minor bump stands for it.
 - **No compiler version is recorded.** Two compilers that produce the same LIR produce the same
   module; a version string would make every upgrade change every module.
 
 ### 8.2 Loading
 
-`RunUnit::load` (unit.rs:136) finds the program a CALL names, in this order:
+On the VM, a CALL, a user-defined function's invocation, and EXEC CICS LINK and XCTL load a program
+the run unit has not loaded through `exec::vm::VmLibrary`, the `rt::unit::Loader` of a VM run. It
+holds `rt::module::Modules`, the modules the run has read, and the interpreter's `Library`, the
+sources it has read. Both search the same directories: the own directory of the program the run
+started with, then each `-L` in order. A program is found in this order:
 
-1. **A loaded module.** `RunUnit::find` (unit.rs:131) looks today in the names of programs already
-   added. It now looks in the directories of the modules already read, by upper-cased `id`, over
-   the programs whose `dynamic` is set. A program found here is added to the run unit (given its
-   storage) if it is not yet.
-2. **`NAME.iwm` in the `-L` directories**, in their order, as `NAME.iwm` then `name.iwm`, as
-   `search_libraries` tries both cases (unit.rs:159). The module is read, checksummed and its
-   directory registered, then step 1's lookup runs against it. Every `-L` directory is searched for
-   `.iwm` before any is searched for source.
-3. **Source, compiled in memory**, exactly as today: `Library.programs`, then the directories for
-   `NAME`, `.cbl`, `.CBL`, `.cob`, `.COB` (unit.rs:144, :164).
+1. **A program already read and not yet loaded,** by the name the CALL gives, compared without
+   regard to case: in the modules read, the first module holding one and in it the lowest ordinal,
+   matched on `DirectoryEntry::load_name` (§6); in the sources read, `Library.programs` in order.
+   The kind the run started with comes first, so a run of `x.iwm` looks in its modules before any
+   source, and a run of a source the other way round.
+2. **`NAME.iwm` in the directories**, in their order, as `NAME.iwm` then `name.iwm`, the two cases
+   the source search tries. The module is read and every section checksummed, its directory
+   registered, and its program `NAME` taken. Every directory is searched for `.iwm` before any is
+   searched for source.
+3. **Source, compiled in memory** and lowered: each directory in order for `NAME`, `.cbl`, `.CBL`,
+   `.cob` and `.COB` (`Library::search`, loader.rs).
 
-- **The name check comes first.** `member_name` (unit.rs:77) refuses a name outside the member
+- **The name check comes first.** `member_name` (`rt::module`) refuses a name outside the member
   character set before any path is built, so `CALL '../X'` never reaches the filesystem.
-- **Storage is allocated on a program's first CALL,** in call order by `RunUnit::add` as now, so
-  addresses, which programs can observe as pointers, are those of interpreted programs. Two modules
-  holding one top-level `id`: the first registered wins.
-- **A module that fails** (unreadable, corrupt, the wrong version, or holding no program `NAME`) is
-  not "not found": `LoadError` gains `Module(String)`, which abends as `Compile` does
-  (machine.rs:984), outside ON EXCEPTION. CICS LINK draws the same line: `NotFound` raises PGMIDERR
-  and the rest abend (machine/cics.rs:359-362).
-- **Shadowing.** A stale `NAME.iwm` beside newer source is used, because step 2 precedes step 3,
-  and the format carries no time to compare: the compile time a program using WHEN-COMPILED holds
-  is that function's value, not a build stamp, and the loader does not read it (question 4).
+- **A program from a module is checked** with lir.md's verifier (`exec::lower::verify`) when it is
+  taken, since a module is untrusted input. The VM holds it with its ENTRY names, file count and
+  storage size from its LIR, and with the PROGRAM-IDs of the programs it directly contains, the
+  directory entries whose `parent` it is.
+- **Storage is allocated on a program's first CALL,** in call order by `RunUnit::add_named`, as for
+  a program from source, so addresses, which programs can observe as pointers, are those of
+  interpreted programs.
+- **A module that fails** (unreadable, corrupt, another format version, holding no program `NAME`,
+  or holding one the verifier refuses) is not "not found": it is `LoadError::Compile` with the
+  module's path and the reason, which abends IRONWORK outside ON EXCEPTION, as a source that does
+  not compile does: `CALL SUB: lib/SUB.iwm: section LIR is corrupt (checksum …, expected …)`. EXEC
+  CICS LINK draws the same line: `NotFound` raises PGMIDERR and the rest abend.
+- **A user-defined function** is found by its `external` name, which its invocation gives.
+- **A class.** INVOKE looks for a COBOL class definition by its external name among the programs
+  already read; then in each directory for `NAME.iwm`, NAME being the class's simple name or its full
+  name with periods as underscores, as written, in lower case and in upper case, the names the
+  source search tries (assumption `CLASS_SEARCH`); then for its source. Its FACTORY and OBJECT data
+  and its methods come from the class program's `lir::Class`, each held as a program of its own.
+- **A mapset** for SEND MAP and RECEIVE MAP comes from the `BMS` section of any module the run has
+  read, else from the copy libraries, `-I`.
+- **The interpreter reads source only.** Without `--vm`, no `NAME.iwm` is read.
+- **Shadowing.** A `NAME.iwm` beside newer source in one directory is the one that runs, because
+  step 2 precedes step 3. The loader never compares file times: copying or checking out files sets
+  them, so a run that compared them would not repeat, and the module holds no build time (the
+  compile time a program using WHEN-COMPILED holds is that function's value). This decides question 4
+  as far as the loader goes; whether a failed compile should remove an older module stays open.
+
+`ironwork run x.iwm` runs program 0 of the module on the VM with the options it was compiled with.
+It refuses the compile flags, `--evidence`, `--provenance`, `--coverage` and the cics flags, and
+`check`, `cics` and `compile` refuse a module. It takes `-L`, `-I`, `--dd`, `--clock`, `--parm`,
+`--statement-limit` and the SQL flags as a run of source does. A module the reader refuses, or
+whose program 0 the verifier refuses, exits 2 with the reason and runs nothing; one whose program 0
+is a user-defined function exits 16, as such a source does. An abend names the source the debug
+table gives (§9.1), so it reads as the source's own run does from the source's directory.
 
 ### 8.3 Static and dynamic CALL
 
-Today every CALL is dynamic: `Machine::call` (machine.rs:974) reads the name, calls `unit.load`, and
-resolves by a flat name map (`RunUnit.names`, unit.rs:62). `Library.programs` holds the first
-source's other programs, nested or not, and a match removes the first of that `id` (unit.rs:144).
-Nesting and COMMON are not modelled.
+A CALL is resolved when it runs. The VM's `Vm::call` (rt/src/vm/call.rs) reads the name and calls
+`RunUnit::load_entry`, which finds a program the run unit has loaded in a flat name map
+(`RunUnit.names`), else asks the loader (§8.2). A literal under NODYNAM is a static CALL: an ENTRY
+name enters the one copy of its program, and CANCEL leaves the program as it is (§8.4). Under DYNAM,
+or naming an identifier, the CALL is dynamic. Because the modules a run has read are searched
+first, a static CALL from a module finds its callee in that module, or in the bundle it belongs to,
+before anywhere else. The directory records nesting and COMMON, and neither changes the search
+(question 6).
 
 | CALL | Compile option | Resolved | By |
 |---|---|---|---|
-| `CALL 'X'` | NODYNAM | Compile time | The first program of the module named `X`, to a program ordinal |
-| `CALL 'X'` | DYNAM | Run time | `RunUnit::load` (§8.2) |
-| `CALL ID` (identifier) | either | Run time | `RunUnit::load` |
+| `CALL 'X'` | NODYNAM | Run time, static | `RunUnit::load_entry`, then the loader (§8.2) |
+| `CALL 'X'` | DYNAM | Run time | `RunUnit::load_entry`, then the loader (§8.2) |
+| `CALL ID` (identifier) | either | Run time | `RunUnit::load_entry`, then the loader (§8.2) |
 
-- **An unresolved NODYNAM literal**, naming no program of the module, is compiled as a call by
-  name, resolved at run time as under DYNAM, with a compile warning. IBM would fail at link time; a
-  module cannot link (question 5).
+- **No compile-time resolution.** A NODYNAM literal is not resolved to a program ordinal at
+  compile time, so `-L` does not change what `ironwork compile` writes. If it were, a literal naming
+  no program of the module would compile as a call by name with a warning, where IBM fails at link
+  time; a module cannot link (question 5).
 - **IBM's scope rule** would resolve a static CALL from *P* to `X` among the programs directly
   contained in *P*, then, walking outward, among those contained in each enclosing program where a
   match counts only if it is COMMON, and finally among the module's top-level programs; a nested
   program that is not COMMON would be unreachable from outside its container and by dynamic CALL.
   That changes what runs today, so it is question 6.
 - **A bundle.** `ironwork compile A.cbl B.cbl -o out/ --bundle x` reads several sources into one
-  module with one directory, and a static CALL resolves across them. Debug file names keep each
-  program's source (§9).
+  module with one directory, and a CALL from one of its programs finds the others there first.
+  Debug file names keep each program's source (§9).
 - **Shared memory.** A static callee shares the run unit's memory and keeps its WORKING-STORAGE
   between CALLs, as a dynamic one does.
 
 ### 8.4 CANCEL, ON EXCEPTION and S806
 
-- **CANCEL** (machine.rs:380, `cancel` at :1111) looks the program up with `RunUnit::find`, so it
-  reaches only programs already loaded. It does nothing for a name not loaded, abends if the
-  program is active, closes its files, and clears `initialized`, so the next CALL initialises
-  WORKING-STORAGE again from `Storage.image`. The module is data, and does not change. Whether IBM
-  lets CANCEL reach a statically called program is question 7.
-- **Not found** is `LoadError::NotFound`: no loaded module, no `NAME.iwm`, no source. A CALL with ON
-  EXCEPTION runs that block, and one without abends S806 with today's message (machine.rs:978-983).
+- **CANCEL** (`rt::callee::cancel`, callee.rs:251) looks the program up with `RunUnit::find`, so it
+  reaches only programs already loaded. It does nothing for a name not loaded, or for a program only
+  ever called statically that no loaded program contains; it abends if the program is active,
+  closes its files, and clears `initialized`, so the next CALL initialises WORKING-STORAGE again
+  from `Storage.image`, and does the same for each program it contains, named by the directory's
+  `parent` for a program from a module. The module is data, and does not change. Whether IBM lets
+  CANCEL reach a statically called program is question 7.
+- **Not found** is `LoadError::NotFound`: no program read, no `NAME.iwm`, no source. A CALL with ON
+  EXCEPTION runs that block, and one without abends S806 with the interpreter's message.
 - **A LINK or XCTL** through EXEC CICS gets PGMIDERR for the same case.
 
 ## 9. The debug table
@@ -607,7 +667,7 @@ The `DEBUG` section holds each program's `Program.debug` (lir.md §10). `sources
 `statements` encode by §4, in that order with `positions` between `sources` and `ops`.
 `positions` is written in debug-id order, each position as its difference from the one before
 (file, line and column as zigzag LEB128), so a run of positions from one statement costs a few
-bytes each. The reader decodes a program's table on its first abend, not on load.
+bytes each. The reader decodes it with the rest of the module.
 
 ### 9.1 Source names
 
@@ -660,9 +720,10 @@ and finds them different.
   present only where the program uses WHEN-COMPILED, and fixed by SOURCE_DATE_EPOCH.
 - **What it prints.** The version and file length. The section table with each section's id, name,
   offset, length and whether its checksum matched. The directory (id, ordinal, parent, COMMON,
-  dynamic). Each program's options. The item table (level, name, offset, size, occurs, kind, ODO
+  dynamic, USING and RETURNING, a function's external name, ENTRY names). Each program's options. The item table (level, name, offset, size, occurs, kind, ODO
   item, keys). Each program's SQL entries as `PAYROLL:3:9f2a41c0 SELECT ...`, the identity a
-  recording uses. The BMS maps. The LIR, through its printer (lir.md §12.2). The debug table as
+  recording uses. Each mapset with its maps and their fields. The LIR, through its printer
+  (lir.md §12.2). The debug table as
   `#12 PAYROLL.cbl:47:12`.
 - **Strings** print only with `--strings`, since every other section prints its strings inline.
 - **Checksums.** A bad section prints `CHECKSUM MISMATCH`, and the dump exits non-zero after
@@ -673,6 +734,10 @@ and finds them different.
 - **Where it lives.** In `cli`, on `rt`'s reader, with no compiler crate.
 
 ## 12. Specification (BDD)
+
+L5, the first scenario of L6, and L8 run in cli/tests/iwm_run.rs, which compiles each module with
+`ironwork compile` and compares its run with the interpreter's run of the source; the two L5
+scenarios that wait for question 6 do not run yet.
 
 ### L1: Round trip
 
@@ -706,7 +771,7 @@ and finds them different.
 ### L3: Version mismatch
 
 - **Given** a module whose `major` is higher than the reader's **when** it is run **then** the run
-  stops with `X: load module format 1.0; this ironwork reads 0.1. Compile the source again`, and
+  stops with `X: load module format 1.0; this ironwork reads 0.2. Compile the source again`, and
   exit status is non-zero, **and** no program runs.
 - **Given** a module with a higher `minor` and an unknown optional section **then** it runs, and the
   section is ignored. **Given** an unknown required section **then** it is refused, naming the
@@ -749,7 +814,31 @@ and finds them different.
   the run unit on that CALL and not before, **and** its storage address is the one the interpreter
   gives it.
 - **Given** SUB CANCELled and CALLed again **then** its WORKING-STORAGE has its `value`s again,
-  **and** the module's bytes have not changed.
+  **and** so has that of each program it contains, **and** the module's bytes have not changed.
+- **Given** a `SUB.iwm` with one byte of a section changed **when** MAIN calls SUB **then** the run
+  abends IRONWORK with `CALL SUB: X: section LIR is corrupt (…)`, and ON EXCEPTION does not run.
+
+### L8: Running a module
+
+- **Given** MAIN.cbl, which calls SUB statically and dynamically, cancels it and invokes a
+  user-defined function by its AS name, and SUB.cbl, which contains a program it calls, compiled to
+  MAIN.iwm and SUB.iwm **when** `ironwork run MAIN.iwm -L DIR` runs **then** its output and exit
+  status are those of `ironwork run MAIN.cbl -L SRC`, **and** so are those of SUB.iwm beside
+  MAIN.iwm with no `-L`, **and** of `ironwork run --vm MAIN.cbl -L DIR`.
+- **Given** MAIN.cbl and SUB.cbl compiled as one bundle, and another SUB.iwm beside it **when** the
+  bundle runs **then** the bundle's SUB runs.
+- **Given** a client and a COBOL class compiled to CLIENT.iwm and its class's module **when** the
+  client INVOKEs the class **then** the output is the source's.
+- **Given** a program that SENDs a map named by a literal, compiled with its BMS source in a copy
+  library **then** the mapset is in the module's `BMS` section, **and** a task that LINKs to the
+  program on the VM with no copy library shows the screen the source's task shows.
+- **Given** a module's program 0 that abends, run with `--parm` **then** the output, PARM and abend
+  line are those of the source run from its own directory.
+- **Given** a module with one byte of a section changed **when** it is run **then** it exits 2
+  with the reader's message, **and** nothing runs.
+- **Given** a module **when** it is checked, run as a CICS task, or run with a compile flag or
+  `--coverage` **then** the command is refused with exit status 2, **and** given to `compile` it is
+  refused with 16.
 
 ### L6: SQL replay
 
@@ -777,7 +866,7 @@ and finds them different.
   (question 2).
 - **Linking against a load module from z/OS.** The format is ironwork's own.
 - **Memory-mapping.** The reader copies what it decodes, so no alignment is guaranteed.
-- **Partial loading.** A program is decoded whole on its first CALL.
+- **Partial loading.** A module is decoded whole when a run first reads it.
 
 ## 14. Open questions
 
@@ -787,10 +876,11 @@ and finds them different.
    in-tree), so a shop can check that a module is the one it built?
 3. **Stripping.** Should a `--strip-debug` module exist for size, with abends naming only the
    program and instruction? Invariant 3 forbids it as stated.
-4. **Stale modules.** A `NAME.iwm` beside a newer `NAME.cbl` is used, its compile time not compared.
-   A compile that fails leaves an existing `NAME.iwm` in place, as a failed compile on z/OS leaves
-   the old member in the load library, so the loader would run the older module. Is that right, or
-   should the `-L` search prefer source, or the newer file?
+4. **Stale modules.** The loader runs a `NAME.iwm` beside a newer `NAME.cbl` and never compares
+   file times (§8.2). A compile that fails leaves an existing `NAME.iwm` in place, as a failed
+   compile on z/OS leaves the old member in the load library, so the loader runs the older module.
+   Should a compile that fails remove the module it would have written, or the search prefer
+   source?
 5. **Unresolved static CALL.** A NODYNAM literal naming no program of the module compiles as a
    run-time call, with a warning, where IBM fails at link time. Should compiling fail instead,
    unless the caller passes `--allow-unresolved`? And where the name is an LE service, should a
