@@ -218,3 +218,32 @@ fn recatalog_takes_a_data_set_already_there_into_the_catalog_with_its_records() 
     let shown: Vec<&str> = out.lines().filter(|l| l.starts_with("000")).map(str::trim_end).collect();
     assert_eq!(shown, ["0002JONES Beta", "0001SMITH Alpha"]);
 }
+
+#[test]
+fn print_lists_a_cluster_in_key_order_to_its_outfile_and_keeps_its_messages_on_sysprint() {
+    let dir = temp("outfile");
+    let jcl = concat!(
+        "//DEF EXEC PGM=IDCAMS\n//SYSPRINT DD SYSOUT=*\n",
+        "//IN DD *\n0002B\n0001A\n/*\n",
+        "//SLOTS DD *\nONE\n\nTHREE\n/*\n",
+        "//LIST DD DSN=LIST.OUT,DISP=(NEW,CATLG)\n",
+        "//SYSIN DD *\n",
+        "  DEFINE CLUSTER(NAME(K.KSDS) KEYS(4 0) RECORDSIZE(10 10))\n",
+        "  REPRO INFILE(IN) OUTDATASET(K.KSDS)\n",
+        "  DEFINE CLUSTER(NAME(R.RRDS) NUMBERED RECORDSIZE(6 6))\n",
+        "  REPRO INFILE(SLOTS) OUTDATASET(R.RRDS)\n",
+        "  PRINT INDATASET(K.KSDS) CHARACTER OUTFILE(LIST)\n",
+        "  PRINT INDATASET(R.RRDS) CHARACTER\n",
+        "/*\n",
+    );
+    let o = job(&dir, jcl);
+    assert_eq!(o.status.code(), Some(0), "{}{}", log(&o), stdout(&o));
+    let listed = fs::read_to_string(dir.join("data/LIST.OUT")).unwrap();
+    let keys: Vec<&str> = listed.lines().filter(|l| l.starts_with("KEY OF RECORD")).collect();
+    assert_eq!(keys, ["KEY OF RECORD - 0001", "KEY OF RECORD - 0002"], "{listed}");
+    assert!(!listed.contains("IDC"), "{listed}");
+    let out = stdout(&o);
+    assert!(out.contains("IDC0005I NUMBER OF RECORDS PROCESSED WAS 2\nIDC0001I FUNCTION COMPLETED, HIGHEST CONDITION CODE WAS 0"), "{out}");
+    let slots: Vec<&str> = out.lines().filter(|l| l.starts_with("RELATIVE RECORD NUMBER")).collect();
+    assert_eq!(slots, ["RELATIVE RECORD NUMBER - 1", "RELATIVE RECORD NUMBER - 3"], "{out}");
+}

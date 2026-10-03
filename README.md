@@ -186,7 +186,10 @@ ALTERNATE RECORD KEY reads use the base cluster's records as they stand, and the
 Guide asks for, the base ddname with 1, 2 and on, are not opened (C350). DELETE of a cluster removes
 its alternate indexes and paths, and LISTCAT lists the directory as a catalog: by name, the
 components and paths of each cluster and alternate index beneath it, or with ALL the attributes the
-entries keep (C354).
+entries keep (C354). PRINT lists a cluster, an alternate index, a path or a sequential data set in
+DUMP, HEX or CHARACTER format as the Access Method Services samples lay them out, a key-sequenced
+cluster in key order, from SKIP or FROMKEY to COUNT or TOKEY (C358, C359). The listings of LISTCAT
+and PRINT go to OUTFILE when it is given, and their messages to SYSPRINT.
 
 DISP=NEW creates the data set when the step starts; OLD and SHR need it to exist; MOD writes after
 what it holds, a generation's included, or creates it as NEW would where it is not there; and a

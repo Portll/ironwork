@@ -150,7 +150,8 @@ pub(super) fn paths_through(datasets: &Path, aix: &str) -> Vec<PathEntry> {
 }
 
 /// How a VSAM data set holds its records: a text data set's lines through the code page, padded
-/// with blanks to the longest record so a key past a line's end reads blanks, records of one
+/// with blanks to the longest record so a key past a line's end reads blanks (an empty line, a
+/// relative record cluster's empty slot, stays empty), records of one
 /// length back to back when RECORDSIZE's average is its maximum, or each behind
 /// an RDW. An alternate index's records are always behind RDWs, since they hold binary counts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,7 +179,9 @@ pub(super) fn read(path: &Path, form: Form, page: &CodePage) -> Result<Vec<Vec<u
             .lines()
             .map(|l| {
                 let mut r = page.encode_lossy(l);
-                r.resize(r.len().max(longest), ebcdic::SPACE);
+                if !r.is_empty() {
+                    r.resize(r.len().max(longest), ebcdic::SPACE);
+                }
                 r
             })
             .collect()),

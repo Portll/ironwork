@@ -309,6 +309,8 @@ pub const BLDINDEX_NON_ENDING_ERRORS: &str = "C353";
 pub const LISTCAT_WHAT_THE_CATALOG_KEEPS: &str = "C354";
 pub const UPGRADE_SET_AFTER_THE_STEP: &str = "C355";
 pub const BLDINDEX_REFUSALS: &str = "C356";
+pub const PRINT_LISTING_LAYOUT: &str = "C358";
+pub const PRINT_RANGE_ENDS: &str = "C359";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -1988,6 +1990,18 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: BLDINDEX_REFUSALS,
         claim: "BLDINDEX needs a base cluster with at least one record, and an empty alternate index or one defined with REUSE (z/OS 3.1 DFSMS Access Method Services, BLDINDEX). Otherwise ironwork refuses it with its own message and condition code 12. IBM documents both conditions but not the message or code. A duplicate name on DEFINE is condition code 8, as the condition-code table says",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PRINT_LISTING_LAYOUT,
+        claim: "IDCAMS PRINT lists as the Access Method Services samples show (z/OS 3.1, idai200/dgt3i239-dgt3i241, da6i2249): LISTING OF DATA SET -name, each record under KEY OF RECORD - (hexadecimal for DUMP and HEX, characters for CHARACTER, da6i2245), RBA OF RECORD - or RECORD SEQUENCE NUMBER -. DUMP lines are 116 columns: a four-digit offset, 32 bytes in groups of four with a wider gap after 16, characters between asterisks; HEX lines are 120 digits, CHARACTER lines 120 characters after a blank line. Characters are the PN chain's (idai200/parm), others print as periods. IDC0005I counts the records listed (ieam600/idc0005i). FROMKEY starts at its key or the next higher, TOKEY stops at its key or the next lower, a key ending X'5C' is generic; a key longer than the data set's ends with IDC3310I (m009223), a key on a data set without keys with IDC3311I (m009224); an empty cluster fails OPEN with 160 (idad500/x1cb): IDC3300I, IDC3351I, condition code 12 (idai200/ccodes)",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PRINT_RANGE_ENDS,
+        claim: "ironwork chooses: a blank line between records; CHARACTER's blank line and RBA's hyphen from dgt3i239 over da6i2249; RELATIVE RECORD NUMBER - n, empty slots unlisted; an RBA as the sum of earlier record lengths, without control interval boundaries; PN as PL/I's 60-character set, recalled, so lower case prints as periods; a short key generic without the asterisk too; FROMKEY with COUNT and SKIP with TOKEY allowed; SKIP and COUNT through a path in alternate key order. FROMKEY above every key or SKIP past the end ends with IDC3006I, code 12 (m009121); key errors follow IDC3302I; errors replace the listing; a listing of no records (an empty sequential data set, TOKEY below the start, COUNT(0)) ends with IDC0005I 0 and code 4",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

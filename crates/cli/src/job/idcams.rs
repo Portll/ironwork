@@ -12,7 +12,8 @@ use std::fs;
 use std::path::PathBuf;
 use zarch::ebcdic::CodePage;
 
-/// What the commands write: lines for SYSPRINT, and those LISTCAT and PRINT send to an OUTFILE.
+/// What the commands write: lines for SYSPRINT, and the listings LISTCAT and PRINT send to an
+/// OUTFILE, whose messages still go to SYSPRINT.
 #[derive(Default)]
 struct Listing {
     sysprint: Vec<String>,
@@ -109,7 +110,7 @@ impl Step<'_> {
                 }
                 other => {
                     let code = self.act(other, out);
-                    out.sysprint.push(format!("IDC0001I FUNCTION COMPLETED, HIGHEST CONDITION CODE WAS {code}"));
+                    out.sysprint.push(if code >= 12 { format!("IDC3003I FUNCTION TERMINATED. CONDITION CODE IS {code}") } else { format!("IDC0001I FUNCTION COMPLETED, HIGHEST CONDITION CODE WAS {code}") });
                     cc.0 = code;
                     cc.1 = cc.1.max(code);
                 }
@@ -165,9 +166,21 @@ impl Step<'_> {
             },
             Command::Bldindex { from, to } => self.bldindex(from, to, &mut out.sysprint),
             Command::Repro { from, to } => self.repro(from, to, &mut out.sysprint),
-            Command::Listcat(l) => super::listcat::listcat(self.runner, l, out.to(l.out.as_deref())),
+            Command::Listcat(l) => {
+                let (mut listing, mut messages) = (Vec::new(), Vec::new());
+                let code = super::listcat::listcat(self.runner, l, &mut listing, &mut messages);
+                out.to(l.out.as_deref()).extend(listing);
+                out.sysprint.extend(messages);
+                code
+            }
             Command::Print(p) => match self.input(&p.from) {
-                Ok((name, records, kind)) => super::print::print(p, &Input { name: &name, records, kind }, self.page, out.to(p.out.as_deref())),
+                Ok((name, records, kind)) => {
+                    let (mut listing, mut messages) = (Vec::new(), Vec::new());
+                    let code = super::print::print(p, &Input { name: &name, records, kind }, self.page, &mut listing, &mut messages);
+                    out.to(p.out.as_deref()).extend(listing);
+                    out.sysprint.extend(messages);
+                    code
+                }
                 Err(e) => {
                     out.sysprint.push(format!("ironwork: PRINT {}: {e}", shown(&p.from)));
                     12
@@ -349,7 +362,8 @@ impl Step<'_> {
         code
     }
 
-    /// PRINT's input: a catalogued object's records, or those of a DD or data set ironwork's
+    /// PRINT's input: a catalogued object's records, a key-sequenced cluster's in key order as
+    /// VSAM reads them whatever order REPRO left them in, or those of a DD or data set ironwork's
     /// catalog does not hold, by the DD's record format.
     fn input(&self, from: &Target) -> Result<(String, Vec<Vec<u8>>, Kind), String> {
         let (runner, page) = (self.runner, self.page);
@@ -360,7 +374,10 @@ impl Step<'_> {
                 Ok((p.name, view.records, Kind::Keyed(view.keys)))
             }
             Some(entry) => {
-                let records = catalog::read(&runner.catalog_path(entry.name()), catalog::form(&entry, runner.req.text), page)?;
+                let mut records = catalog::read(&runner.catalog_path(entry.name()), catalog::form(&entry, runner.req.text), page)?;
+                if let Entry::Cluster(Cluster { keys: Some(k), .. }) = &entry {
+                    records.sort_by(|a, b| catalog::key_of(a, *k).cmp(&catalog::key_of(b, *k)));
+                }
                 let kind = match &entry {
                     Entry::Cluster(c) => match (c.organization, c.keys) {
                         (Organization::Indexed, Some(k)) => Kind::Keyed(k),

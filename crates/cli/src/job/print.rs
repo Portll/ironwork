@@ -41,18 +41,19 @@ const GENERIC: u8 = 0x5C;
 /// PARM GRAPHICS names another chain or a table; any other byte prints as a period.
 const GRAPHICS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 =+-*/(),.'%;:¬&|><_?$@#";
 
-/// The listing's lines go into `out`; the condition code is returned.
-pub(super) fn print(command: &Print, input: &Input<'_>, page: &CodePage, out: &mut Vec<String>) -> u16 {
+/// The listing's lines go into `out` and the messages into `messages`; the condition code is
+/// returned.
+pub(super) fn print(command: &Print, input: &Input<'_>, page: &CodePage, out: &mut Vec<String>, messages: &mut Vec<String>) -> u16 {
     if input.records.is_empty() && input.kind != Kind::Nonvsam {
-        out.push(format!("IDC3300I ERROR OPENING {}", input.name));
-        out.push("IDC3351I ** VSAM OPEN RETURN CODE IS 160".into());
+        messages.push(format!("IDC3300I ERROR OPENING {}", input.name));
+        messages.push("IDC3351I ** VSAM OPEN RETURN CODE IS 160".into());
         return 12;
     }
     let records = located(input);
     let range = match range(command, input, &records, page) {
         Ok(r) => r,
-        Err(messages) => {
-            out.extend(messages);
+        Err(ended) => {
+            messages.extend(ended);
             return 12;
         }
     };
@@ -72,7 +73,7 @@ pub(super) fn print(command: &Print, input: &Input<'_>, page: &CodePage, out: &m
             PrintFormat::Dump => out.extend(record.chunks(DUMP_BYTES).enumerate().map(|(n, c)| dump_line(n * DUMP_BYTES, c, page))),
         }
     }
-    out.push(format!("IDC0005I NUMBER OF RECORDS PROCESSED WAS {}", listed.len()));
+    messages.push(format!("IDC0005I NUMBER OF RECORDS PROCESSED WAS {}", listed.len()));
     if listed.is_empty() { 4 } else { 0 }
 }
 
@@ -216,8 +217,9 @@ mod tests {
     }
 
     fn run(command: &Print, kind: Kind, records: Vec<Vec<u8>>) -> (u16, Vec<String>) {
-        let mut out = Vec::new();
-        let code = print(command, &Input { name: "PAY.KSDS", records, kind }, page(), &mut out);
+        let (mut out, mut messages) = (Vec::new(), Vec::new());
+        let code = print(command, &Input { name: "PAY.KSDS", records, kind }, page(), &mut out, &mut messages);
+        out.extend(messages);
         (code, out)
     }
 

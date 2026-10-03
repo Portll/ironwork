@@ -43,7 +43,7 @@ fn print_step(dds: &str, sysin: &str) -> String {
     format!("//PRT      EXEC PGM=IDCAMS\n//SYSPRINT DD SYSOUT=*\n{dds}//SYSIN    DD *\n{sysin}/*\n")
 }
 
-/// The lines of each PRINT's listing, from LISTING OF DATA SET to its IDC0001I.
+/// The lines of each PRINT's listing, from LISTING OF DATA SET to its IDC0001I or IDC3003I.
 fn listings(out: &str) -> Vec<Vec<String>> {
     let mut all = Vec::new();
     let mut current: Option<Vec<String>> = None;
@@ -53,7 +53,7 @@ fn listings(out: &str) -> Vec<Vec<String>> {
         }
         if let Some(c) = current.as_mut() {
             c.push(line.to_string());
-            if line.starts_with("IDC0001I") {
+            if line.starts_with("IDC0001I") || line.starts_with("IDC3003I") {
                 all.extend(current.take());
             }
         }
@@ -111,8 +111,8 @@ fn a_print_that_cannot_position_or_finds_the_cluster_empty_ends_with_code_12_and
     let out = stdout(&o);
     assert!(log(&o).contains("PRT PGM=IDCAMS RC=0012"), "{}{out}", log(&o));
     for want in [
-        "IDC3300I ERROR OPENING NONE.KSDS\nIDC3351I ** VSAM OPEN RETURN CODE IS 160\nIDC0001I FUNCTION COMPLETED, HIGHEST CONDITION CODE WAS 12",
-        "IDC3006I FUNCTION TERMINATED DUE TO BEGINNING POSITIONING ERROR\nIDC0001I FUNCTION COMPLETED, HIGHEST CONDITION CODE WAS 12",
+        "IDC3300I ERROR OPENING NONE.KSDS\nIDC3351I ** VSAM OPEN RETURN CODE IS 160\nIDC3003I FUNCTION TERMINATED. CONDITION CODE IS 12",
+        "IDC3006I FUNCTION TERMINATED DUE TO BEGINNING POSITIONING ERROR\nIDC3003I FUNCTION TERMINATED. CONDITION CODE IS 12",
         "IDC3302I ACTION ERROR ON PAY.KSDS\nIDC3310I ** KEY SUPPLIED IS LONGER THAN KEY LENGTH OF DATA SET",
         "LISTING OF DATA SET -PAY.KSDS\nIDC0005I NUMBER OF RECORDS PROCESSED WAS 0\nIDC0001I FUNCTION COMPLETED, HIGHEST CONDITION CODE WAS 4",
     ] {
@@ -132,7 +132,7 @@ fn an_entry_sequenced_cluster_lists_byte_addresses_and_a_relative_record_cluster
     let all = listings(&out);
     assert_eq!(all[0], ["LISTING OF DATA SET -LOG.ESDS", "RBA OF RECORD - 8", "", "SECOND", "", "RBA OF RECORD - 16", "", "THIRD", "IDC0005I NUMBER OF RECORDS PROCESSED WAS 2", "IDC0001I FUNCTION COMPLETED, HIGHEST CONDITION CODE WAS 0"]);
     assert_eq!(all[1][1..6], ["RELATIVE RECORD NUMBER - 1", "D6D5C5404040", "", "RELATIVE RECORD NUMBER - 2", "E3E6D6404040"]);
-    assert_eq!(all[2], ["IDC3302I ACTION ERROR ON SLOT.RRDS", "IDC3311I ** TYPE OF POSITIONING NOT SUPPORTED", "IDC0001I FUNCTION COMPLETED, HIGHEST CONDITION CODE WAS 12"]);
+    assert_eq!(all[2], ["IDC3302I ACTION ERROR ON SLOT.RRDS", "IDC3311I ** TYPE OF POSITIONING NOT SUPPORTED", "IDC3003I FUNCTION TERMINATED. CONDITION CODE IS 12"]);
 }
 
 #[test]

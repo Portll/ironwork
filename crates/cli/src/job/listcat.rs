@@ -235,15 +235,15 @@ fn detail(runner: &Runner<'_>, all: &BTreeMap<String, Kind>, name: &str, kind: &
     out
 }
 
-/// LISTCAT into `out`, with condition code 4 when a named entry is not in the catalog.
-pub(super) fn listcat(runner: &Runner<'_>, command: &Listcat, out: &mut Vec<String>) -> u16 {
+/// LISTCAT's listing into `out` and its messages into `messages`, with condition code 4 when a
+/// named entry is not in the catalog.
+pub(super) fn listcat(runner: &Runner<'_>, command: &Listcat, out: &mut Vec<String>, messages: &mut Vec<String>) -> u16 {
     let all = every_name(runner);
     let wanted = |kind: &Kind| command.types.is_empty() || command.types.contains(&kind.entry_type());
     let generic = matches!(&command.entries, Entries::Named(n) if n.iter().any(|n| n.contains('*') || n.contains('%')));
     let flat = generic || !command.types.is_empty() || matches!(command.entries, Entries::Level(_));
     let mut lines: Vec<(String, bool)> = Vec::new();
     let mut code = 0;
-    let mut messages = Vec::new();
     let nested_names: Vec<&String> = if flat { Vec::new() } else { all.keys().filter(|n| all.keys().any(|top| associated(&all, top).contains(n))).collect() };
     let mut list = |name: &String| {
         if !flat {
@@ -299,7 +299,6 @@ pub(super) fn listcat(runner: &Runner<'_>, command: &Listcat, out: &mut Vec<Stri
         };
         *counts.entry(counted).or_default() += 1;
     }
-    out.extend(messages);
     out.push(format!("{:9}THE NUMBER OF ENTRIES PROCESSED WAS:", ""));
     for label in ["AIX", "ALIAS", "CLUSTER", "DATA", "GDG", "INDEX", "NONVSAM", "PAGESPACE", "PATH", "SPACE", "USERCATALOG"] {
         out.push(count(label, counts.get(label).copied().unwrap_or(0)));
