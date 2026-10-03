@@ -3,7 +3,7 @@
 
 use exec::cics::{Cics, Datum};
 use exec::lir::{Const, Operand, Program};
-use exec::module::DirectoryEntry;
+use exec::module::{DirectoryEntry, LoadedModule, SourceFile};
 use rt::bms::Mapset;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -19,10 +19,12 @@ pub struct Request {
     pub source_prefix: Option<String>,
 }
 
-/// A source's programs in ordinal order, with their directory entries and the mapsets they name.
+/// A source's programs in ordinal order, with their directory entries, the files each one's debug
+/// table names, and the mapsets they name.
 struct Lowered {
     programs: Vec<Program>,
     directory: Vec<DirectoryEntry>,
+    files: Vec<Vec<Option<SourceFile>>>,
     mapsets: Vec<Mapset>,
 }
 
@@ -83,7 +85,7 @@ pub fn run(r: Request) -> ExitCode {
         })
         .collect();
     for (name, members) in outputs {
-        let mut all = Lowered { programs: Vec::new(), directory: Vec::new(), mapsets: Vec::new() };
+        let mut all = Lowered { programs: Vec::new(), directory: Vec::new(), files: Vec::new(), mapsets: Vec::new() };
         let Some(parts) = members.iter().map(|&k| lowered[k].as_ref()).collect::<Option<Vec<_>>>() else {
             eprintln!("ironwork: {name} not written");
             continue;
@@ -93,6 +95,7 @@ pub fn run(r: Request) -> ExitCode {
         for part in parts {
             let base = all.programs.len() as u32;
             all.programs.extend(part.programs.iter().cloned());
+            all.files.extend(part.files.iter().cloned());
             all.directory.extend(part.directory.iter().map(|e| DirectoryEntry { parent: e.parent.map(|p| p + base), ..e.clone() }));
             for mapset in &part.mapsets {
                 match mapsets.get(&mapset.name) {
@@ -109,7 +112,8 @@ pub fn run(r: Request) -> ExitCode {
             continue;
         }
         all.mapsets = mapsets.into_values().collect();
-        let bytes = match exec::module::write_with(&all.programs, &all.directory, &all.mapsets) {
+        let module = LoadedModule { directory: all.directory, programs: all.programs, mapsets: all.mapsets, files: all.files };
+        let bytes = match exec::module::write_module(&module) {
             Ok(b) => b,
             Err(e) => {
                 eprintln!("ironwork: {name}: the lowered programs make no valid module: {e}");
@@ -160,7 +164,8 @@ fn lower_source(source: &Path, r: &Request, at: exec::lir::CompileTime) -> Resul
     let parsed: Vec<_> = parsed.into_iter().filter(|p| !p.is_prototype()).collect();
     let parents = parents(&parsed);
     let mut code = 0u8;
-    let mut lowered = Lowered { programs: Vec::new(), directory: Vec::new(), mapsets: Vec::new() };
+    let mut lowered = Lowered { programs: Vec::new(), directory: Vec::new(), files: Vec::new(), mapsets: Vec::new() };
+    let mut read = None;
     let mut named = BTreeSet::new();
     for (ast, parent) in parsed.into_iter().zip(parents) {
         let id = ast.id.clone();
@@ -169,6 +174,7 @@ fn lower_source(source: &Path, r: &Request, at: exec::lir::CompileTime) -> Resul
         let external = ast.function.as_ref().map(|f| f.external.clone());
         let common = ast.common;
         let paths = ast.sources.clone();
+        let files = read.get_or_insert_with(|| source_files(source, &paths, &dirs)).clone();
         let mut compiled = match exec::compile_at(ast, &r.flags, at) {
             Ok(c) => c,
             Err(messages) => {
@@ -196,6 +202,7 @@ fn lower_source(source: &Path, r: &Request, at: exec::lir::CompileTime) -> Resul
         mapsets_named(&program, &mut named);
         lowered.directory.push(DirectoryEntry { id, external, parent, common, entries, params, returning, dynamic: true });
         lowered.programs.push(program);
+        lowered.files.push(files);
     }
     for name in named {
         match syntax::bms::find_mapset(&libraries, &name) {
@@ -247,6 +254,18 @@ fn parents(programs: &[syntax::ast::Program]) -> Vec<Option<u32>> {
     (0..programs.len())
         .map(|k| (0..k).rev().find(|&j| programs[j].nested.iter().any(|n| n == &programs[k].id)).map(|j| j as u32))
         .collect()
+}
+
+/// The file each name of the debug table stands for, as a run of the source's journal records it
+/// (load-module.md §9.2): the source, then each COPY member, by the library it was found in and its
+/// digest. A member the compiler supplies has no file.
+fn source_files(source: &Path, paths: &[String], dirs: &[PathBuf]) -> Vec<Option<SourceFile>> {
+    let file = |path: &Path| {
+        let (sha256, bytes) = crate::evidence::digest_bytes(path)?;
+        let root = u32::try_from(crate::evidence::root_of(path, dirs).max(0)).unwrap_or_default();
+        Some(SourceFile { root, path: crate::evidence::relative(path, dirs), sha256, bytes })
+    };
+    std::iter::once(file(source)).chain(paths.iter().skip(1).map(|p| if p.starts_with("(system member ") { None } else { file(Path::new(p)) })).collect()
 }
 
 /// The debug table's file names (load-module.md §9.1): the source's file name, behind

@@ -3,7 +3,7 @@
 use exec::lir::{Debug as DebugTable, ProgramOptions, SqlEntry};
 use exec::module::codec::decode_all;
 use exec::module::crc::crc32;
-use exec::module::{DirectoryEntry, LayoutRecord, LirRecord, Module, ModuleError, Section, SectionEntry, StringTable};
+use exec::module::{DirectoryEntry, LayoutRecord, LirRecord, Module, ModuleError, Section, SectionEntry, SourceFile, StringTable};
 use rt::bms::Mapset;
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -94,7 +94,7 @@ pub fn dump(bytes: &[u8], o: &Options) -> Result<(String, bool), ModuleError> {
     let lir: Decoded<LirRecord> = records(body(Section::LIR), Section::LIR, &table);
     let sql: Decoded<Vec<SqlEntry>> = records(body(Section::SQL), Section::SQL, &table);
     let bms: Result<Vec<Mapset>, String> = body(Section::BMS).and_then(|b| decode_all::<Vec<Mapset>>(Section::BMS.name, b, &table).map_err(|e| e.to_string()));
-    let debug: Decoded<DebugTable> = records(body(Section::DEBUG), Section::DEBUG, &table);
+    let debug: Decoded<(DebugTable, Vec<Option<SourceFile>>)> = records(body(Section::DEBUG), Section::DEBUG, &table);
 
     let count = directory.as_ref().map_or(0, Vec::len);
     let names: Vec<String> = match &directory {
@@ -290,11 +290,21 @@ pub fn dump(bytes: &[u8], o: &Options) -> Result<(String, bool), ModuleError> {
                 if let Some(why) = per_program(Section::DEBUG, all.len()) {
                     failed(&mut out, &why);
                 }
-                for (k, d) in all.iter().enumerate() {
+                for (k, (d, read)) in all.iter().enumerate() {
                     let program = name(k);
                     let files: Vec<String> = d.sources.iter().map(|&s| symbol(symbols(k), s)).collect();
                     for (i, file) in files.iter().enumerate() {
                         let _ = writeln!(out, "{program} source {i} {file}");
+                    }
+                    for (i, file) in read.iter().enumerate() {
+                        match file {
+                            Some(f) => {
+                                let _ = writeln!(out, "{program} file {i} root {} {} sha256 {} bytes {}", f.root, f.path, exec::digest::hex(&f.sha256), f.bytes);
+                            }
+                            None => {
+                                let _ = writeln!(out, "{program} file {i} -");
+                            }
+                        }
                     }
                     for (i, pos) in d.positions.iter().enumerate() {
                         let file = files.get(usize::from(pos.file)).cloned().unwrap_or_else(|| format!("file{}", pos.file));

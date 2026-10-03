@@ -5,7 +5,8 @@ The `.iwm` file format, and how a run unit loads it. It details §8 of
 
 **Status:** draft, for the operator's review. The container, the encoding rules and every section's
 codec (§3 to §7, §9) are built in `rt::module`; `ironwork compile` writes modules, with the mapsets
-their programs name (§5.3), and `ironwork dump` (§11) prints them. The loader (§8.2) is built:
+their programs name (§5.3) and the files their compile read (§9.2), and `ironwork dump` (§11)
+prints them. The loader (§8.2) is built:
 `ironwork run x.iwm` runs a module's first program on the VM, and on the VM CALL, CANCEL, a
 user-defined function, INVOKE and EXEC CICS LINK and XCTL reach programs and classes in modules. A
 static CALL is resolved when it runs, not at compile time (§8.3), and the scope rules of question 6
@@ -109,7 +110,7 @@ sections before it can decode anything else. Section bodies use the rules of §4
 |---|---|---|
 | `NotAModule` | The magic differs (check 1) | `not an ironwork load module` |
 | `Truncated` | Fewer than 32 bytes, or fewer than `file_len` (checks 2, 4) | `truncated: 100 bytes of 240` |
-| `Version` | A version the reader does not read (check 3, §8.1) | `load module format 1.0; this ironwork reads 0.4. Compile the source again` |
+| `Version` | A version the reader does not read (check 3, §8.1) | `load module format 1.0; this ironwork reads 0.5. Compile the source again` |
 | `TrailingBytes` | More bytes than `file_len` (check 4) | `4 bytes after the end of the module at 240` |
 | `HeaderChecksum` | `header_crc` differs (check 5) | `header is corrupt (checksum 1234ABCD, expected 5678EF01)` |
 | `Feature` | Any `features` bit is set (check 6) | `load module needs features 0x00000004, which this ironwork lacks` |
@@ -142,7 +143,7 @@ sections before it can decode anything else. Section bodies use the rules of §4
 | 5 | `LIR` | Per program: the rest of `Program` | yes |
 | 6 | `SQL` | Per program: `Program.sql`, the SQL statement table (§7) | yes |
 | 7 | `BMS` | The map models of the mapsets the module's programs use (§5.3) | yes |
-| 8 | `DEBUG` | Per program: `Program.debug` (§9) | yes |
+| 8 | `DEBUG` | Per program: `Program.debug`, then the file each of its sources names (§9) | yes |
 | 0x8000 up | reserved | Extension sections, written with flag bit 0 set | no |
 | any other | unknown | Skipped if flagged optional, and refused otherwise (§3.3) | no |
 
@@ -544,19 +545,20 @@ error if it meets one. `HostType::Zoned`'s sign is `rt::SignClause`.
 
 ### 8.1 Versions
 
-The format version is `major.minor`; this ironwork writes and reads 0.4. A module of an earlier
-version is refused, and compiling the source again is the remedy: a 0.3 module's options lack
-`compliance` and `dialect` (§5.1), its arithmetic plans `inner_dmax` (lir.md §7.2), and its plan for
-INITIALIZE of a reference-modified item holds the whole item's fields (lir.md §9, C300); a 0.2
-module's places lack the tables that move a variably located item, its EXEC CICS commands their
-sinks, its INITIALIZE fields their phrases' senders and PICTURE scaling, and its markup nodes their
-moving tables (lir.md §5.1, §9.1, §9.5, §9.13); a 0.1 module's directory entries lack `external`
-(§6) and its options `optimize` (§5.1).
+The format version is `major.minor`; this ironwork writes and reads 0.5. A module of an earlier
+version is refused, and compiling the source again is the remedy: a 0.4 module's `DEBUG` records
+hold no source files (§9.2); a 0.3 module's options lack `compliance` and `dialect` (§5.1), its
+arithmetic plans `inner_dmax` (lir.md §7.2), and its plan for INITIALIZE of a reference-modified
+item holds the whole item's fields (lir.md §9, C300); a 0.2 module's places lack the tables that
+move a variably located item, its EXEC CICS commands their sinks, its INITIALIZE fields their
+phrases' senders and PICTURE scaling, and its markup nodes their moving tables (lir.md §5.1, §9.1,
+§9.5, §9.13); a 0.1 module's directory entries lack `external` (§6) and its options `optimize`
+(§5.1).
 
 | The reader finds | It does |
 |---|---|
 | Bad magic | Refuses: `X: not an ironwork load module` |
-| A different `major` | Refuses: `X: load module format 1.0; this ironwork reads 0.4. Compile the source again`. A reader of major 1 or more names `1.x` |
+| A different `major` | Refuses: `X: load module format 1.0; this ironwork reads 0.5. Compile the source again`. A reader of major 1 or more names `1.x` |
 | The same `major`, a lower `minor` | Reads it. A minor version only adds, and a section body's shape never changes inside a major (new data goes in a new section) |
 | The same `major`, a higher `minor` | Reads it, ignoring sections with the optional flag it does not know. Refuses on an unknown required section or a set `features` bit, naming it |
 | `major` 0 | Requires the same `minor` as well. The format is not frozen until 1.0 |
@@ -673,8 +675,9 @@ before anywhere else. The directory records nesting and COMMON, and neither chan
 
 ## 9. The debug table
 
-The `DEBUG` section holds each program's `Program.debug` (lir.md §10). `sources`, `ops` and
-`statements` encode by §4, in that order with `positions` between `sources` and `ops`.
+The `DEBUG` section holds each program's `Program.debug` (lir.md §10), followed by its source
+files (§9.2). `sources`, `ops` and `statements` encode by §4, in that order with `positions`
+between `sources` and `ops`.
 `positions` is written in debug-id order, each position as its difference from the one before
 (file, line and column as zigzag LEB128), so a run of positions from one statement costs a few
 bytes each. The reader decodes it with the rest of the module.
@@ -695,6 +698,36 @@ bytes each. The reader decodes it with the rest of the module.
 - **Rejected input.** A source or library-relative name with a `..` component, a leading `/`, or a
   Windows drive letter is a compile error, since it would put a path into the module.
 
+### 9.2 Source files
+
+Each program's `DEBUG` record ends with `files`, one `Option<SourceFile>` for each of its `sources`
+in order: the file the compile read for that source, named as the evidence journal of a run of the
+source names it ([evidence.md](evidence.md) §1), so that a run of the module can record what it
+was compiled from.
+
+```rust
+pub struct SourceFile {
+    /// The directory the compile found it in: 0 the source's own, then each -I in order.
+    pub root: u32,
+    /// Its path from that directory, with / between its parts.
+    pub path: String,
+    pub sha256: [u8; 32],
+    pub bytes: u64,
+}
+```
+
+- **Which directory.** The innermost of the source's directory and the `-I` libraries that holds the
+  file, which is the journal's rule; `path` is relative to it. The main source's `path` is its file
+  name, whatever `--source-prefix` puts before its name in `sources`.
+- **None** for a member the compiler supplies, such as `(system member DFHAID)`, which has no file.
+  `rt::module::write` and `write_with` record none for any source; `write_module` writes the files
+  it is given.
+- **Encoding.** `root` and `bytes` as LEB128, `path` by string index, `sha256` as 32 bytes with no
+  count (§4.4).
+- **Checks.** The reader refuses a record whose count of files differs from its count of `sources`,
+  and a `path` that is empty, starts with `/`, holds a `\`, or has an empty, `.` or `..` part, so a
+  journal never names a place outside a library; `write_module` refuses the same.
+
 ## 10. Reproducibility
 
 Invariant 6 says the same source, libraries and options give a byte-identical module. It holds
@@ -712,9 +745,10 @@ because:
 3. **Every value has one form** (§3.3, §4.1, §4.2, §4.3). Set-like lists are sorted (the mapsets,
    by name); where order carries meaning (programs, items, paragraphs), source order is kept.
 4. **The inputs are named:** the source bytes, every COPY member and BMS file the compile read (by
-   content), the options, including `-L` (which decides what a static CALL can resolve),
-   `--source-prefix` and the option cards, and, for a program using WHEN-COMPILED,
-   SOURCE_DATE_EPOCH.
+   content, which §9.2 records as digests), the options, including `-L` (which decides what a
+   static CALL can resolve), the `-I` libraries in their order (which numbers the directory a
+   source file is recorded under, §9.2), `--source-prefix` and the option cards, and, for a
+   program using WHEN-COMPILED, SOURCE_DATE_EPOCH.
 
 A test compiles every corpus program twice in separate processes and compares the bytes, and a
 second compiles once from two working directories. One that runs today (lower/tests.rs) compiles a
@@ -734,7 +768,8 @@ and finds them different.
   item, keys). Each program's SQL entries as `PAYROLL:3:9f2a41c0 SELECT ...`, the identity a
   recording uses. Each mapset with its maps and their fields. The LIR, through its printer
   (lir.md §12.2). The debug table as
-  `#12 PAYROLL.cbl:47:12`.
+  `#12 PAYROLL.cbl:47:12`, and each source's file as
+  `PAYROLL file 1 root 1 CUST.cpy sha256 8062b239… bytes 90`, or `PAYROLL file 2 -` for none.
 - **Strings** print only with `--strings`, since every other section prints its strings inline.
 - **Checksums.** A bad section prints `CHECKSUM MISMATCH`, and the dump exits non-zero after
   printing what it can; `--no-check` prints regardless. A section whose body will not decode prints
@@ -775,13 +810,17 @@ scenarios that wait for question 6 do not run yet.
 - **Given** a BMS mapset used by two programs **then** the `BMS` section holds it once, in name
   order.
 - **Given** an option changed, such as `TRUNC(BIN)` **then** the modules differ, and only in
-  `OPTIONS`, in `STRINGS` (which holds the option card's text) and in whatever the option changes
-  in `LIR`.
+  `OPTIONS`, in `STRINGS` (which holds the option card's text), in whatever the option changes in
+  `LIR`, and, where a card in the source gives it, in the source's digest in `DEBUG`.
+- **Given** a COPY member in a library inside the source's directory **when** the source is
+  compiled with that library as `-I`, from two directories, or from a copy with the library under
+  another name **then** the member is recorded under that library, **and** the modules are
+  byte-identical.
 
 ### L3: Version mismatch
 
 - **Given** a module whose `major` is higher than the reader's **when** it is run **then** the run
-  stops with `X: load module format 1.0; this ironwork reads 0.4. Compile the source again`, and
+  stops with `X: load module format 1.0; this ironwork reads 0.5. Compile the source again`, and
   exit status 245, **and** no program runs.
 - **Given** a module with a higher `minor` and an unknown optional section **then** it runs, and the
   section is ignored. **Given** an unknown required section **then** it is refused, naming the

@@ -45,7 +45,7 @@ impl Modules {
     /// Registers a module read from `path`, whose programs are found by name from now on; its
     /// number is what [`Modules::take`] takes.
     pub fn add(&mut self, path: PathBuf, module: LoadedModule) -> usize {
-        let LoadedModule { directory, programs, mapsets } = module;
+        let LoadedModule { directory, programs, mapsets, .. } = module;
         self.read.push(Read { path, directory, programs: programs.into_iter().map(Some).collect(), mapsets });
         self.read.len() - 1
     }

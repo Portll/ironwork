@@ -52,12 +52,35 @@ impl DirectoryEntry {
     }
 }
 
-/// The programs of a module, in ordinal order, with their directory and the mapsets they use.
+/// A file the compile read, as the run journal of a run of its source names it (load-module.md
+/// §9.2): the library it was found in, 0 the source's own directory and then each `-I` in order,
+/// its path from there, and its SHA-256 and length.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceFile {
+    pub root: u32,
+    pub path: String,
+    pub sha256: [u8; 32],
+    pub bytes: u64,
+}
+
+codec_struct!(SourceFile { root, path, sha256, bytes } check source_file_valid);
+
+/// A path relative to its library, with `/` between its parts, so no record of one names a place
+/// outside it.
+fn source_file_valid(file: &SourceFile) -> Result<(), String> {
+    let relative = !file.path.contains('\\') && file.path.split('/').all(|part| !matches!(part, "" | "." | ".."));
+    if relative { Ok(()) } else { Err(format!("source file {:?} is not a path within its library", file.path)) }
+}
+
+/// The programs of a module, in ordinal order, with their directory, the mapsets they use, and
+/// for each program the file each source of its debug table names, None where the compiler
+/// supplied the member or no file was recorded.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoadedModule {
     pub directory: Vec<DirectoryEntry>,
     pub programs: Vec<Program>,
     pub mapsets: Vec<Mapset>,
+    pub files: Vec<Vec<Option<SourceFile>>>,
 }
 
 /// Every field of a `Program`, listed once so a new field is a compile error here.
@@ -169,7 +192,7 @@ fn per_program(w: &mut Writer, programs: &[Program], record: impl Fn(&Parts<'_>,
     }
 }
 
-fn encode_module(programs: &[Program], directory: &[DirectoryEntry], mapsets: &[Mapset]) -> Vec<u8> {
+fn encode_module(programs: &[Program], directory: &[DirectoryEntry], mapsets: &[Mapset], files: &[Vec<Option<SourceFile>>]) -> Vec<u8> {
     let mut m = ModuleWriter::new();
     m.section(Section::DIRECTORY, |w| {
         w.count(directory.len());
@@ -193,26 +216,60 @@ fn encode_module(programs: &[Program], directory: &[DirectoryEntry], mapsets: &[
             mapset.encode(w);
         }
     });
-    m.section(Section::DEBUG, |w| per_program(w, programs, |p, w| p.debug.encode(w)));
+    m.section(Section::DEBUG, |w| {
+        w.count(programs.len());
+        for (program, files) in programs.iter().zip(files) {
+            Parts::of(program).debug.encode(w);
+            files.encode(w);
+        }
+    });
     m.finish()
 }
 
-/// A module of `programs`, each a top-level program in the directory, with no mapsets. Same input,
-/// same bytes.
-pub fn write(programs: &[Program]) -> Vec<u8> {
-    let directory: Vec<_> = programs.iter().map(DirectoryEntry::top_level).collect();
-    encode_module(programs, &directory, &[])
+/// For each program, no file recorded for any source of its debug table.
+fn unrecorded(programs: &[Program]) -> Vec<Vec<Option<SourceFile>>> {
+    programs.iter().map(|p| vec![None; p.debug.sources.len()]).collect()
 }
 
-/// A module with the caller's directory and mapsets, refused (as the reader would) if either, or a
-/// program, is invalid.
+/// A module of `programs`, each a top-level program in the directory, with no mapsets and no files
+/// recorded. Same input, same bytes.
+pub fn write(programs: &[Program]) -> Vec<u8> {
+    let directory: Vec<_> = programs.iter().map(DirectoryEntry::top_level).collect();
+    encode_module(programs, &directory, &[], &unrecorded(programs))
+}
+
+/// A module with the caller's directory and mapsets and no files recorded, refused (as the reader
+/// would) if either, or a program, is invalid.
 pub fn write_with(programs: &[Program], directory: &[DirectoryEntry], mapsets: &[Mapset]) -> Result<Vec<u8>, ModuleError> {
+    let files = unrecorded(programs);
+    write_module(&LoadedModule { directory: directory.to_vec(), programs: programs.to_vec(), mapsets: mapsets.to_vec(), files })
+}
+
+/// The module `module` describes, refused (as the reader would) if its directory, mapsets, a
+/// program or a program's files are invalid.
+pub fn write_module(module: &LoadedModule) -> Result<Vec<u8>, ModuleError> {
+    let LoadedModule { directory, programs, mapsets, files } = module;
     check_directory(directory, programs)?;
     for program in programs {
         crate::lir::program_valid(program).map_err(|reason| bad("LIR", reason))?;
     }
     check_mapsets(mapsets).map_err(|reason| bad(Section::BMS.name, reason))?;
-    Ok(encode_module(programs, directory, mapsets))
+    check_files(files, programs).map_err(|reason| bad(Section::DEBUG.name, reason))?;
+    Ok(encode_module(programs, directory, mapsets, files))
+}
+
+/// One file, or none, for each source of each program's debug table.
+fn check_files(files: &[Vec<Option<SourceFile>>], programs: &[Program]) -> Result<(), String> {
+    if files.len() != programs.len() {
+        return Err(format!("files for {} programs of {}", files.len(), programs.len()));
+    }
+    for (ordinal, (files, program)) in files.iter().zip(programs).enumerate() {
+        if files.len() != program.debug.sources.len() {
+            return Err(format!("program {ordinal} records {} files for {} sources", files.len(), program.debug.sources.len()));
+        }
+        files.iter().flatten().try_for_each(source_file_valid)?;
+    }
+    Ok(())
 }
 
 /// Mapsets are held once each, in ascending order of name (load-module.md §5.3).
@@ -276,7 +333,7 @@ pub fn read(bytes: &[u8]) -> Result<LoadedModule, ModuleError> {
     let layouts = records::<LayoutRecord>(&module, &strings, Section::LAYOUT, count)?;
     let bodies = records::<LirRecord>(&module, &strings, Section::LIR, count)?;
     let sql = records::<Vec<SqlEntry>>(&module, &strings, Section::SQL, count)?;
-    let debug = records::<Debug>(&module, &strings, Section::DEBUG, count)?;
+    let (debug, files): (Vec<Debug>, Vec<Vec<Option<SourceFile>>>) = records::<(Debug, Vec<Option<SourceFile>>)>(&module, &strings, Section::DEBUG, count)?.into_iter().unzip();
 
     let mut r = module.reader(Section::BMS, &strings)?;
     let mapsets = Vec::<Mapset>::decode(&mut r)?;
@@ -298,5 +355,6 @@ pub fn read(bytes: &[u8]) -> Result<LoadedModule, ModuleError> {
         programs.push(program);
     }
     check_directory(&directory, &programs)?;
-    Ok(LoadedModule { directory, programs, mapsets })
+    check_files(&files, &programs).map_err(|reason| bad(Section::DEBUG.name, reason))?;
+    Ok(LoadedModule { directory, programs, mapsets, files })
 }

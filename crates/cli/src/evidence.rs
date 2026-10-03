@@ -45,11 +45,15 @@ pub fn relative(path: &Path, roots: &[PathBuf]) -> String {
     }
 }
 
-fn digest(path: &Path) -> Option<(String, u64)> {
-    File::open(path).and_then(sha256_reader).ok().map(|(d, n)| (hex(&d), n))
+pub fn digest_bytes(path: &Path) -> Option<([u8; 32], u64)> {
+    File::open(path).and_then(sha256_reader).ok()
 }
 
-fn root_of(path: &Path, roots: &[PathBuf]) -> i64 {
+fn digest(path: &Path) -> Option<(String, u64)> {
+    digest_bytes(path).map(|(d, n)| (hex(&d), n))
+}
+
+pub fn root_of(path: &Path, roots: &[PathBuf]) -> i64 {
     holder(path, roots).map_or(-1, |(k, _)| k as i64)
 }
 

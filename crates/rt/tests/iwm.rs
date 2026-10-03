@@ -6,7 +6,8 @@ use common::payroll;
 use ironwork_rt::bms::{Attrb, Field, Initial, Intensity, Map, Mapset, Mode, Protection};
 use ironwork_rt::lir::{Program, SqlEntry, SqlStatement};
 use ironwork_rt::module::{
-    DirectoryEntry, Module, ModuleError, ModuleWriter, Section, Version, read, write, write_with,
+    DirectoryEntry, LoadedModule, Module, ModuleError, ModuleWriter, Section, SourceFile, Version, read, write, write_module,
+    write_with,
 };
 use ironwork_rt::sql::fingerprint;
 use numeric::Trunc;
@@ -79,6 +80,23 @@ fn a_directory_that_disagrees_with_the_programs_is_refused_by_the_writer() {
 }
 
 #[test]
+fn the_debug_section_records_the_file_each_source_names() {
+    let unrecorded = read(&write(&two())).unwrap();
+    assert_eq!(unrecorded.files, [vec![None], vec![None]]);
+    let file = |root, path: &str| Some(SourceFile { root, path: path.into(), sha256: [0xA5; 32], bytes: 1234 });
+    let module = LoadedModule { files: vec![vec![file(0, "PAYROLL.cbl")], vec![file(1, "sys/REPORT.cbl")]], ..unrecorded };
+    let bytes = write_module(&module).unwrap();
+    assert_eq!(read(&bytes).unwrap(), module);
+    assert_eq!(write_module(&read(&bytes).unwrap()).unwrap(), bytes);
+    for outside in ["/abs/X.cpy", "../X.cpy", "a/./b.cpy", "a//b.cpy", "a\\b.cpy", ""] {
+        let wrong = LoadedModule { files: vec![vec![file(0, outside)], vec![None]], ..module.clone() };
+        assert!(matches!(write_module(&wrong), Err(ModuleError::Malformed { section: "DEBUG", .. })), "{outside}");
+    }
+    let short = LoadedModule { files: vec![Vec::new(), vec![None]], ..module };
+    assert!(matches!(write_module(&short), Err(ModuleError::Malformed { section: "DEBUG", .. })));
+}
+
+#[test]
 fn the_same_programs_give_the_same_bytes() {
     let first = write(&two());
     assert_eq!(first, write(&two()));
@@ -145,8 +163,8 @@ fn another_format_version_is_refused() {
     let mut major = bytes.clone();
     major[8] = 1;
     let error = read(&major).unwrap_err();
-    assert_eq!(error, ModuleError::Version(Version { major: 1, minor: 4 }));
-    assert_eq!(error.to_string(), "load module format 1.4; this ironwork reads 0.4. Compile the source again");
+    assert_eq!(error, ModuleError::Version(Version { major: 1, minor: 5 }));
+    assert_eq!(error.to_string(), "load module format 1.5; this ironwork reads 0.5. Compile the source again");
     let mut minor = bytes;
     minor[10] = 1;
     assert_eq!(read(&minor), Err(ModuleError::Version(Version { major: 0, minor: 1 })));

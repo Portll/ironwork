@@ -128,13 +128,14 @@ fn a_source_makes_one_module_named_after_it_holding_every_program() {
     let (shown, status, _) = dump(&module, &[]);
     assert_eq!(status, Some(0), "{shown}");
     for line in [
-        "format 0.4",
+        "format 0.5",
         &format!("length {}", bytes.len()),
         "program 0 PAYROLL parent - common no dynamic yes using [] returning no",
         "program 1 SUB parent 0 common no dynamic yes using [] returning no",
         "PAYROLL item 5 level 05 name E offset 40 size 1 occurs 10 kind Alnum { justified: false } depending on item 3 keys []",
         "PAYROLL source 0 PAYROLL.cbl",
         "PAYROLL source 1 CUST.cpy",
+        "PAYROLL file 1 root 1 CUST.cpy sha256 8062b2395984d8d2ec648e2e3a271fee5a4c2ac0b56191eb72147bee17daadc7 bytes 90",
         "PAYROLL #0 CUST.cpy:1:8",
         "SUB lir id SUB initial no recursive no procedure_start 0",
         "mapsets 0",
@@ -164,7 +165,7 @@ fn a_module_read_and_written_again_is_the_same_bytes() {
     compiled(&dir, &["PAYROLL.cbl", "-I", "lib", "-o", "."], None);
     let bytes = fs::read(dir.join("PAYROLL.iwm")).unwrap();
     let loaded = exec::module::read(&bytes).unwrap();
-    let again = exec::module::write_with(&loaded.programs, &loaded.directory, &loaded.mapsets).unwrap();
+    let again = exec::module::write_module(&loaded).unwrap();
     assert_eq!(again, bytes);
     fs::write(dir.join("AGAIN.iwm"), &again).unwrap();
     assert_eq!(dump(&dir.join("AGAIN.iwm"), &[]).0, dump(&dir.join("PAYROLL.iwm"), &[]).0);
@@ -227,7 +228,8 @@ fn an_option_changes_the_options_its_card_s_text_and_what_it_changes_in_the_lir(
     assert!(bin.contains("OPT trunc: Bin") && std.contains("OPT trunc: Std"));
     let changed = differing(&std, &bin);
     assert!(changed.contains(&"OPTIONS".to_owned()));
-    assert!(changed.iter().all(|s| ["STRINGS", "OPTIONS", "LIR"].contains(&s.as_str())), "{changed:?}");
+    assert!(changed.iter().all(|s| ["STRINGS", "OPTIONS", "LIR", "DEBUG"].contains(&s.as_str())), "{changed:?}");
+    assert!(std.lines().zip(bin.lines()).filter(|(a, b)| a != b && a.starts_with("OPT file ")).count() == 1, "only the source's digest differs in DEBUG");
 }
 
 #[test]
@@ -349,7 +351,7 @@ fn dump_refuses_what_is_not_a_module_by_its_own_check() {
     assert!(refused("cut.iwm", &good[..100]).ends_with(&format!("cut.iwm: truncated: 100 bytes of {}\n", good.len())));
     let mut major = good.clone();
     major[8..12].copy_from_slice(&[1, 0, 0, 0]);
-    assert!(refused("major.iwm", &major).ends_with("major.iwm: load module format 1.0; this ironwork reads 0.4. Compile the source again\n"));
+    assert!(refused("major.iwm", &major).ends_with("major.iwm: load module format 1.0; this ironwork reads 0.5. Compile the source again\n"));
     let mut minor = good.clone();
     minor[10] = 1;
     assert!(refused("minor.iwm", &minor).contains("load module format 0.1;"));
