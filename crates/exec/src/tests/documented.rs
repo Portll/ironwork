@@ -46,3 +46,17 @@ fn mod_takes_the_sign_of_its_divisor() {
     );
     assert_eq!(on_both(&source), "+01\n+04\n-04\n-01\n+00\n");
 }
+
+/// Language Reference SC27-8713-03, p. 225: REDEFINES describes the same storage again, so a
+/// LINKAGE record that redefines another is at the argument's address.
+#[test]
+fn a_linkage_record_that_redefines_another_shares_its_argument() {
+    let source = two_programs(
+        "       01  A PIC X(4) VALUE 'ABCD'.\n",
+        &[line("CALL 'SUB' USING A"), line("DISPLAY A"), line("GOBACK.")].concat(),
+        "SUB",
+        "       LINKAGE SECTION.\n       01  L-A PIC X(4).\n       01  L-B REDEFINES L-A.\n           05  L-B1 PIC XX.\n           05  L-B2 PIC XX.\n",
+        &["       PROCEDURE DIVISION USING L-A.\n", &line("DISPLAY L-B2"), &line("MOVE 'ZZ' TO L-B1"), &line("GOBACK.")].concat(),
+    );
+    assert_eq!(on_both(&source), "CD\nZZCD\n");
+}

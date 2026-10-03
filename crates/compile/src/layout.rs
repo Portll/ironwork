@@ -280,12 +280,15 @@ pub fn build(
             redefines: e.redefines.clone(),
             file,
             linkage: if in_linkage {
-                Some(match parent {
-                    None => {
+                Some(match (parent, &e.redefines) {
+                    (None, Some(target)) => linkage_roots.iter().position(|&r: &usize| items[r].name.as_ref() == Some(target)).ok_or_else(|| {
+                        Error::at(e.pos, format!("REDEFINES {target}: no earlier 01-level item of that name"))
+                    })? as u16,
+                    (None, None) => {
                         linkage_roots.push(index);
                         linkage_roots.len() as u16 - 1
                     }
-                    Some(p) => items[p].linkage.unwrap_or_default(),
+                    (Some(p), _) => items[p].linkage.unwrap_or_default(),
                 })
             } else if bound {
                 if parent.is_none() {
