@@ -11,7 +11,7 @@ use rt::lir::{
     self, Advance, FileDesc, FileOp, FileVerb, FromMove, IndexKeys, Op, Phrase, RecordDepending, RecordSpan, RelativeKey, Spacing, StartKey, StartRel, Terminator,
 };
 use syntax::Pos;
-use syntax::ast::{Access, Advancing, Expr, FileDecl, Handlers, LinageValue, Operand, Organization, Ref, RelOp, Stmt};
+use syntax::ast::{Access, Advancing, Expr, FileDecl, Handlers, Linage, LinageValue, Operand, Organization, ReadStmt, Ref, RelOp, Stmt};
 
 impl Lower<'_> {
     /// Every file's declaration, in the program's order, which file ops index.
@@ -77,15 +77,9 @@ impl Lower<'_> {
         let linage = match (&f.linage, counter) {
             (None, None) => None,
             (None, Some(_)) => return unsupported("a LINAGE-COUNTER without LINAGE", f.pos),
-            (Some(l), counter) => {
+            (Some(Linage { lines, footing, top, bottom }), counter) => {
                 let value = |lower: &mut Self, v: &Option<LinageValue>| v.as_ref().map(|v| lower.linage_value(v, f.pos)).transpose();
-                Some(lir::Linage {
-                    lines: self.linage_value(&l.lines, f.pos)?,
-                    footing: value(self, &l.footing)?,
-                    top: value(self, &l.top)?,
-                    bottom: value(self, &l.bottom)?,
-                    counter,
-                })
+                Some(lir::Linage { lines: self.linage_value(lines, f.pos)?, footing: value(self, footing)?, top: value(self, top)?, bottom: value(self, bottom)?, counter })
             }
         };
         Ok(FileDesc {
@@ -225,13 +219,13 @@ impl Lower<'_> {
     pub(super) fn file_statement(&mut self, s: &Stmt, pos: Pos, ctx: &Ctx) -> R<()> {
         let program = self.program;
         match s {
-            Stmt::Open { files, .. } => {
+            Stmt::Open { files, pos: _ } => {
                 for (mode, name) in files {
                     let file = self.file_index(name, pos)?;
                     self.file_op(FileOp { file, verb: FileVerb::Open(*mode), phrase: None, end_of_page: None }, [None, None, None, None], pos, ctx)?;
                 }
             }
-            Stmt::Close { files, .. } => {
+            Stmt::Close { files, pos: _ } => {
                 for (name, closing) in files {
                     let file = self.file_index(name, pos)?;
                     let verb = closing.map_or(FileVerb::Close, FileVerb::CloseWith);
@@ -239,32 +233,33 @@ impl Lower<'_> {
                 }
             }
             Stmt::Read(r) => {
-                let file = self.file_index(&r.file, pos)?;
+                let ReadStmt { file, next, previous, into, key, at_end, invalid, pos: _ } = &**r;
+                let file = self.file_index(file, pos)?;
                 let decl = &program.files[file as usize];
                 // Only a file held in memory reads by key; any other takes AT END (`read_stream`).
                 let sequential = decl.access == Access::Sequential
                     || decl.organization == Organization::Sequential
-                    || decl.access == Access::Dynamic && r.next
+                    || decl.access == Access::Dynamic && *next
                     || decl.organization == Organization::LineSequential;
-                let handlers = if sequential { &r.at_end } else { &r.invalid };
-                let into = match &r.into {
+                let handlers = if sequential { at_end } else { invalid };
+                let into = match into {
                     None => None,
                     Some(t) => {
                         let place = self.place(t, true)?;
                         Some((place, self.bytes_into(place)?))
                     }
                 };
-                let key = match (&r.key, decl.organization) {
+                let key = match (key, decl.organization) {
                     (Some(key), Organization::Indexed) if !sequential => {
                         let keys = self.index_keys(file, pos)?;
                         self.key_of_reference(file as usize, &keys, key, false)?.0
                     }
                     _ => 0,
                 };
-                let verb = FileVerb::Read { sequential, previous: r.previous, into, key };
+                let verb = FileVerb::Read { sequential, previous: *previous, into, key };
                 self.file_op(FileOp { file, verb, phrase: phrase(handlers), end_of_page: None }, bodies(handlers, None), pos, ctx)?;
             }
-            Stmt::Write { record, from, advancing, invalid, end_of_page, .. } => {
+            Stmt::Write { record, from, advancing, invalid, end_of_page, pos: _ } => {
                 let (file, record, from) = self.record_of(record, from.as_ref(), pos)?;
                 let advancing = match advancing {
                     None => None,
@@ -274,16 +269,16 @@ impl Lower<'_> {
                 let op = FileOp { file, verb, phrase: phrase(invalid), end_of_page: phrase(end_of_page) };
                 self.file_op(op, bodies(invalid, Some(end_of_page)), pos, ctx)?;
             }
-            Stmt::Rewrite { record, from, invalid, .. } => {
+            Stmt::Rewrite { record, from, invalid, pos: _ } => {
                 let (file, record, from) = self.record_of(record, from.as_ref(), pos)?;
                 let op = FileOp { file, verb: FileVerb::Rewrite { record, from }, phrase: phrase(invalid), end_of_page: None };
                 self.file_op(op, bodies(invalid, None), pos, ctx)?;
             }
-            Stmt::Delete { file, invalid, .. } => {
+            Stmt::Delete { file, invalid, pos: _ } => {
                 let file = self.file_index(file, pos)?;
                 self.file_op(FileOp { file, verb: FileVerb::Delete, phrase: phrase(invalid), end_of_page: None }, bodies(invalid, None), pos, ctx)?;
             }
-            Stmt::Start { file, key, invalid, .. } => {
+            Stmt::Start { file, key, invalid, pos: _ } => {
                 let file = self.file_index(file, pos)?;
                 let rel = match key.as_ref().map(|(op, _)| *op) {
                     None | Some(RelOp::Eq) => StartRel::Equal,
@@ -325,7 +320,8 @@ impl Lower<'_> {
         Ok(match a {
             Advancing::Lines { before, count } => Advance::Lines { before: *before, count: self.int_expr(count, pos)? },
             Advancing::Page { before } => Advance::Page { before: *before },
-            Advancing::Mnemonic { before, environment, .. } => {
+            // The walker names the mnemonic-name only where it refuses what lowering refuses here.
+            Advancing::Mnemonic { before, environment, name: _ } => {
                 let space = match printer::mnemonic_space(environment) {
                     _ if self.program.files[file as usize].linage.is_some() => return unsupported("ADVANCING a mnemonic-name on a file with LINAGE", pos),
                     Some(Space::Lines(n)) => Spacing::Lines(n),
@@ -371,9 +367,11 @@ impl Lower<'_> {
 }
 
 fn phrase(h: &Handlers) -> Option<Phrase> {
-    (h.on.is_some() || h.not_on.is_some()).then_some(Phrase { on: h.on.is_some(), not_on: h.not_on.is_some() })
+    let Handlers { on, not_on } = h;
+    (on.is_some() || not_on.is_some()).then_some(Phrase { on: on.is_some(), not_on: not_on.is_some() })
 }
 
 fn bodies<'s>(h: &'s Handlers, end_of_page: Option<&'s Handlers>) -> [Option<&'s [Stmt]>; 4] {
-    [h.on.as_deref(), h.not_on.as_deref(), end_of_page.and_then(|e| e.on.as_deref()), end_of_page.and_then(|e| e.not_on.as_deref())]
+    let Handlers { on, not_on } = h;
+    [on.as_deref(), not_on.as_deref(), end_of_page.and_then(|e| e.on.as_deref()), end_of_page.and_then(|e| e.not_on.as_deref())]
 }

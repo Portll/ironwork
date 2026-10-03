@@ -8,7 +8,7 @@ use rt::fixed::places_of;
 use rt::lir::{self, FunctionDefinition, PlaceId, RefMod, UserArgument, UserFunctionPlan};
 use rt::storage::Kind;
 use syntax::Pos;
-use syntax::ast::{Expr, FunctionCall, Operand, Ref};
+use syntax::ast::{self, Expr, FunctionCall, Operand, Ref};
 
 impl<'c> Lower<'c> {
     /// The user-defined function the program may invoke by this name.
@@ -20,16 +20,18 @@ impl<'c> Lower<'c> {
     /// REFERENCE located and any other by `expr_value`, apart from any arithmetic around the
     /// invocation; then reference modification of the value.
     pub(super) fn user_function(&mut self, udf: &Udf, f: &FunctionCall) -> R<(lir::Operand, Side)> {
-        let pos = f.pos;
+        // The walker's `invoke_function` reads neither a modifier nor ALL subscripts.
+        let FunctionCall { name: _, args: _, modifier: _, refmod, all_subscripts: _, pos } = f;
+        let pos = *pos;
         let outer = std::mem::replace(&mut self.within, Within::Own);
         let args = self.user_arguments(udf, f);
         self.within = outer;
         let args = args?;
-        let refmod = match &f.refmod {
+        let refmod = match refmod {
             None => None,
-            Some(rm) => {
-                let start = self.int_expr(&rm.start, pos)?;
-                let length = match &rm.length {
+            Some(ast::RefMod { start, length }) => {
+                let start = self.int_expr(start, pos)?;
+                let length = match length {
                     Some(l) => Some(self.int_expr(l, pos)?),
                     None => None,
                 };

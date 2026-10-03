@@ -8,7 +8,7 @@ use numeric::Arith;
 use numeric::precision::{Places, carried, sum_places};
 use rt::lir::{Argument, Comparand, Count, Func, FunctionPlan, Mode, Odo, RefMod, TrimSide};
 use syntax::Pos;
-use syntax::ast::{Expr, Figurative, FunctionCall, Literal, Operand, Ref};
+use syntax::ast::{self, Expr, Figurative, FunctionCall, Literal, Operand, Ref};
 
 /// A table with ALL subscripts of at most this many elements lowers as its elements, one argument
 /// each; a larger one, or one whose ALL subscripts run to an OCCURS DEPENDING ON count, as
@@ -30,6 +30,8 @@ impl Lower<'_> {
         if let Some(udf) = self.user_defined(&f.name) {
             return self.user_function(udf, f);
         }
+        // Names every part: one the parser gains fails to compile here until it is lowered or refused.
+        let FunctionCall { name: _, args: _, modifier: _, refmod: _, all_subscripts: _, pos: _ } = f;
         let Some(func) = Func::named(&f.name) else { return unsupported("a FUNCTION the LIR does not name", f.pos) };
         let pos = f.pos;
         let (args, sides) = if matches!(func, Func::HexOf | Func::BitOf | Func::ByteLength) { self.stored_argument(f)? } else { self.arguments(f)? };
@@ -55,9 +57,9 @@ impl Lower<'_> {
         };
         let refmod = match &f.refmod {
             None => None,
-            Some(rm) => {
-                let start = self.int_expr(&rm.start, pos)?;
-                let length = match &rm.length {
+            Some(ast::RefMod { start, length }) => {
+                let start = self.int_expr(start, pos)?;
+                let length = match length {
                     Some(l) => Some(self.int_expr(l, pos)?),
                     None => None,
                 };

@@ -106,9 +106,9 @@ impl Lower<'_> {
         let kind = if register.national() { Kind::National } else { Kind::Alnum { justified: false } };
         let refmod = match &r.refmod {
             None => None,
-            Some(rm) => {
-                let start = self.int_expr(&rm.start, r.pos)?;
-                let length = rm.length.as_ref().map(|l| self.int_expr(l, r.pos)).transpose()?;
+            Some(ast::RefMod { start, length }) => {
+                let start = self.int_expr(start, r.pos)?;
+                let length = length.as_ref().map(|l| self.int_expr(l, r.pos)).transpose()?;
                 Some(lir::RefMod { start, length, check: self.c.ssrange })
             }
         };
@@ -325,7 +325,8 @@ impl Lower<'_> {
                 Suppression::Item { item, when } => {
                     p.suppressed_when.insert(self.item_of(item)?, when);
                 }
-                Suppression::Every { numeric, when, .. } => p.every.push((*numeric, when)),
+                // JSON GENERATE's SUPPRESS names no XML form.
+                Suppression::Every { numeric, form: _, when } => p.every.push((*numeric, when)),
             }
         }
         for (r, conversion) in &g.converting {
@@ -340,9 +341,10 @@ impl Lower<'_> {
             }
         }
         for i in &g.indicating {
-            let item = self.item_of(&i.item)?;
+            let NullIndicator { item, marker, indicator } = i;
+            let item = self.item_of(item)?;
             p.indicated.insert(item, i);
-            let indicator = match (&i.indicator, &i.marker) {
+            let indicator = match (indicator, marker) {
                 (Some(r), _) => self.item_of(r)?,
                 (None, Marker::Condition(c)) => self.variable_of(c)?.1,
                 (None, Marker::Literal(_)) => return Err(refusal("INDICATING ... USING a literal takes IN and the indicator", g.pos)),

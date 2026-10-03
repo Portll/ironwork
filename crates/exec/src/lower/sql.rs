@@ -10,7 +10,7 @@ use rt::abend::AbendCode;
 use rt::lir::{self, HostPlace, Op, PlaceId, SqlEntry, SqlStatement, SqlTest, Sqlca, Terminator};
 use syntax::Pos;
 use syntax::ast::{ExecBlock, ExecKind, Expr, Literal, Operand, ProcName, Ref, Stmt};
-use syntax::sql::{Action, ChangeKind, HostVar, Statement};
+use syntax::sql::{Action, ChangeKind, Cursor, HostVar, Statement, Whenever};
 
 /// The EXEC SQL blocks among `stmts` and the statements inside them, in order.
 fn sql_blocks<'s>(stmts: &'s [Stmt], out: &mut Vec<&'s ExecBlock>) {
@@ -63,10 +63,10 @@ impl Lower<'_> {
                 let current_of = current_of.as_deref().map(|c| self.sym(c));
                 (SqlStatement::Change { delete: matches!(kind, ChangeKind::Delete), inputs, current_of }, text.clone(), false)
             }
-            Statement::Open { cursor, declared: Some(declared) } => {
-                let hold = if declared.with_hold { " WITH HOLD" } else { "" };
-                let text = format!("DECLARE {cursor} CURSOR{hold} FOR {}", declared.text);
-                (SqlStatement::Open { cursor: self.sym(cursor), inputs: self.host_places(&declared.inputs, command)? }, text, declared.with_hold)
+            Statement::Open { cursor, declared: Some(Cursor { name: _, text, inputs, with_hold }) } => {
+                let hold = if *with_hold { " WITH HOLD" } else { "" };
+                let text = format!("DECLARE {cursor} CURSOR{hold} FOR {text}");
+                (SqlStatement::Open { cursor: self.sym(cursor), inputs: self.host_places(inputs, command)? }, text, *with_hold)
             }
             Statement::Fetch { cursor, into } => (SqlStatement::Fetch { cursor: self.sym(cursor), into: self.host_places(into, command)? }, format!("FETCH {cursor}"), false),
             Statement::Close { cursor } => (SqlStatement::Close { cursor: self.sym(cursor) }, format!("CLOSE {cursor}"), false),
@@ -86,17 +86,17 @@ impl Lower<'_> {
     fn host_places(&mut self, vars: &[HostVar], command: &str) -> R<Vec<HostPlace>> {
         let layout = self.layout;
         let mut out = Vec::new();
-        for hv in vars {
-            let var = self.place(&hv.var, false)?;
-            let indicator = hv.indicator.as_ref().map(|r| self.indicator(r)).transpose()?;
+        for HostVar { var: host, indicator } in vars {
+            let var = self.place(host, false)?;
+            let indicator = indicator.as_ref().map(|r| self.indicator(r)).transpose()?;
             let element = |k: usize| indicator.map(|p| (p, 2 * k as u32));
-            let at = Some(hv.var.pos);
-            let ty = match layout.resolve(&hv.var.name, &hv.var.qualifiers, hv.var.pos) {
+            let at = Some(host.pos);
+            let ty = match layout.resolve(&host.name, &host.qualifiers, host.pos) {
                 Ok(Resolved::Item(item)) => match host_type(layout, item) {
                     Ok(ty) => Ok((item, ty)),
                     Err(why) => Err(self.abend(AbendCode::Exec, &format!("EXEC SQL {command}: {why}"), at)?),
                 },
-                Ok(_) => Err(self.abend(AbendCode::Ironwork, &format!("{} is a condition-name, not a data item", hv.var.name), at)?),
+                Ok(_) => Err(self.abend(AbendCode::Ironwork, &format!("{} is a condition-name, not a data item", host.name), at)?),
                 Err(e) => Err(self.abend(AbendCode::Ironwork, &e.message, at)?),
             };
             match ty {
@@ -156,8 +156,8 @@ impl Lower<'_> {
         if declaration {
             return Ok(());
         }
-        let w = &sql.whenever;
-        for (test, action) in [(SqlTest::Error, &w.sqlerror), (SqlTest::NotFound, &w.not_found), (SqlTest::Warning, &w.sqlwarning)] {
+        let Whenever { sqlerror, not_found, sqlwarning } = &sql.whenever;
+        for (test, action) in [(SqlTest::Error, sqlerror), (SqlTest::NotFound, not_found), (SqlTest::Warning, sqlwarning)] {
             let Action::GoTo(label) = action else { continue };
             let cond = self.cond(lir::Cond::Sql(test))?;
             let (taken, next) = (self.new_block()?, self.new_block()?);

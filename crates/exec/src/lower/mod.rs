@@ -301,8 +301,9 @@ impl<'c> Lower<'c> {
         };
         let root = |name: &str| layout.linkage_roots.iter().position(|&i| layout.items[i].name.as_deref() == Some(name));
         let mut using = Vec::new();
-        for param in &self.program.using {
-            match root(&param.name).map(u16::try_from) {
+        // BY VALUE or BY REFERENCE is the caller's to honour, for the walker as for the VM.
+        for ast::Param { by_value: _, name } in &self.program.using {
+            match root(name).map(u16::try_from) {
                 Some(Ok(ordinal)) => using.push(ordinal),
                 Some(Err(_)) => return Err(LowerError::Exceeds("LINKAGE records", Pos::default())),
                 None => return unsupported("PROCEDURE DIVISION USING an item that is not a LINKAGE record", Pos::default()),

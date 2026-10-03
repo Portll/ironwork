@@ -11,7 +11,7 @@ use rt::lir::{self, BlockId, DebugId, Op, RangeId, RangeKind, Terminator};
 use rt::storage::Kind;
 use rt::vocab::AcceptFrom;
 use syntax::Pos;
-use syntax::ast::{BinOp, ExecKind, ExitKind, Expr, InitializeWith, Loop, Object, Operand, ProcName, RelOp, SizeError, Sorting, Stmt, Subject, Target, Varying, When};
+use syntax::ast::{Arith, BinOp, ExecBlock, ExecKind, ExitKind, Expr, InitializeWith, Loop, Object, Operand, ProcName, RelOp, SizeError, Sorting, Stmt, Subject, Target, Varying, When};
 
 /// Blocks under construction; `current` is the one ops go into, None after a terminator.
 #[derive(Default)]
@@ -217,10 +217,10 @@ impl Lower<'_> {
     fn collect(&mut self, stmts: &[Stmt]) -> R<()> {
         for s in stmts {
             match s {
-                Stmt::PerformProc { from, thru, pos, .. } => {
+                Stmt::PerformProc { from, thru, repeat: _, pos } => {
                     self.range(from, thru.as_ref(), *pos)?;
                 }
-                Stmt::Alter { pairs, .. } => {
+                Stmt::Alter { pairs, pos: _ } => {
                     for (from, _) in pairs {
                         if let Ok((p, _)) = crate::procedure(self.program, from) {
                             self.altered.insert(p);
@@ -289,7 +289,7 @@ impl Lower<'_> {
                     self.jump(b, pos)?;
                     self.switch(b)?;
                 }
-                Stmt::Entry { .. } => {
+                Stmt::Entry { name: _, using: _, pos: _ } => {
                     self.statement_start(pos)?;
                     let b = self.new_block()?;
                     self.jump(b, pos)?;
@@ -347,7 +347,7 @@ impl Lower<'_> {
         let pos = stmt_pos(s).unwrap_or(ctx.pos);
         let inner = Ctx { pos, ..ctx.clone() };
         match s {
-            Stmt::Move { from, to, .. } => {
+            Stmt::Move { from, to, pos: _ } => {
                 for r in to {
                     let dest = self.place(r, true)?;
                     let sender = self.operand(from, pos)?;
@@ -356,15 +356,18 @@ impl Lower<'_> {
                     self.op(Op::Move { from: sender.operand, to: dest, plan, check }, pos)?;
                 }
             }
-            Stmt::Compute { targets, expr, size_error, .. } => {
+            Stmt::Compute { targets, expr, size_error, pos: _ } => {
                 let computations: Vec<(&Target, &Expr)> = targets.iter().map(|t| (t, expr)).collect();
                 self.arithmetic(&computations, None, size_error.as_ref(), false, pos, &inner)?;
             }
             Stmt::Arith(a) => {
-                let computations: Vec<(&Target, &Expr)> = a.computations.iter().map(|(t, e)| (t, e)).collect();
-                self.arithmetic(&computations, a.remainder.as_ref(), a.size_error.as_ref(), true, pos, &inner)?;
+                // The computations are the verb's, as the walker reads them.
+                let Arith { verb: _, computations, remainder, size_error, pos: _ } = &**a;
+                let computations: Vec<(&Target, &Expr)> = computations.iter().map(|(t, e)| (t, e)).collect();
+                self.arithmetic(&computations, remainder.as_ref(), size_error.as_ref(), true, pos, &inner)?;
             }
-            Stmt::If { cond, then, otherwise, .. } => {
+            Stmt::Corresponding(c) => return unsupported("a CORRESPONDING statement the compiler did not expand", c.pos),
+            Stmt::If { cond, then, otherwise, pos: _ } => {
                 let test = self.test(cond, pos)?;
                 let (yes, no, join) = (self.new_block()?, self.new_block()?, self.new_block()?);
                 self.branch(test, yes, no, pos)?;
@@ -376,19 +379,19 @@ impl Lower<'_> {
                 self.jump(join, pos)?;
                 self.switch(join)?;
             }
-            Stmt::Evaluate { subjects, whens, other, .. } => self.evaluate(subjects, whens, other, pos, &inner)?,
-            Stmt::PerformProc { from, thru, repeat, .. } => {
+            Stmt::Evaluate { subjects, whens, other, pos: _ } => self.evaluate(subjects, whens, other, pos, &inner)?,
+            Stmt::PerformProc { from, thru, repeat, pos: _ } => {
                 let range = self.range(from, thru.as_ref(), pos)?;
                 let own = self.program.paragraphs[ctx.para].statements.get(ctx.top).is_some_and(|top| std::ptr::eq(top, s));
                 let body = Body::Range { range, resumes: own && matches!(repeat, Loop::Once) };
                 self.perform(repeat, body, pos, &inner)?;
             }
-            Stmt::PerformInline { body, repeat, .. } => self.perform(repeat, Body::Inline(body), pos, &inner)?,
-            Stmt::Display { items, no_advancing, .. } => {
+            Stmt::PerformInline { body, repeat, pos: _ } => self.perform(repeat, Body::Inline(body), pos, &inner)?,
+            Stmt::Display { items, no_advancing, pos: _ } => {
                 let plan = self.display_plan(items, *no_advancing, pos)?;
                 self.op(Op::Display(plan), pos)?;
             }
-            Stmt::Initialize { targets, with, .. } => {
+            Stmt::Initialize { targets, with, pos: _ } => {
                 let none = InitializeWith::default();
                 let with = with.as_deref().unwrap_or(&none);
                 for r in targets {
@@ -398,8 +401,9 @@ impl Lower<'_> {
                 }
             }
             // Unaltered, a GO TO with no target does nothing; the paragraph's entry holds the altered one.
-            Stmt::GoTo { target: None, .. } | Stmt::Entry { .. } => {}
-            Stmt::GoToDepending { targets, on, .. } => {
+            // An ENTRY's block and USING are `paragraph`'s and `entry_points`'.
+            Stmt::GoTo { target: None, pos: _ } | Stmt::Entry { name: _, using: _, pos: _ } => {}
+            Stmt::GoToDepending { targets, on, pos: _ } => {
                 let value = self.int_expr(&Expr::Operand(Operand::Ref(on.clone())), pos)?;
                 let mut paragraphs = Vec::with_capacity(targets.len());
                 for target in targets {
@@ -410,7 +414,7 @@ impl Lower<'_> {
                 self.end(Terminator::Switch { value, targets: paragraphs, otherwise: next }, pos)?;
                 self.switch(next)?;
             }
-            Stmt::Alter { pairs, .. } => {
+            Stmt::Alter { pairs, pos: _ } => {
                 let mut altered = Vec::with_capacity(pairs.len());
                 for (from, to) in pairs {
                     let (Ok((para, _)), Ok((target, _))) = (crate::procedure(self.program, from), crate::procedure(self.program, to)) else {
@@ -432,23 +436,15 @@ impl Lower<'_> {
             Stmt::Open { .. } | Stmt::Close { .. } | Stmt::Read(_) | Stmt::Write { .. } | Stmt::Rewrite { .. } | Stmt::Delete { .. } | Stmt::Start { .. } => {
                 self.file_statement(s, pos, &inner)?
             }
-            Stmt::Set { set, .. } => self.set(set, pos)?,
-            Stmt::String(st) => {
-                let plan = self.string_plan(st, pos)?;
-                self.op(Op::String(plan), pos)?;
-                self.select(st.on_overflow.as_deref(), st.not_on_overflow.as_deref(), pos, &inner)?;
-            }
-            Stmt::Unstring(u) => {
-                let plan = self.unstring_plan(u, pos)?;
-                self.op(Op::Unstring(plan), pos)?;
-                self.select(u.on_overflow.as_deref(), u.not_on_overflow.as_deref(), pos, &inner)?;
-            }
+            Stmt::Set { set, pos: _ } => self.set(set, pos)?,
+            Stmt::String(st) => self.string(st, pos, &inner)?,
+            Stmt::Unstring(u) => self.unstring(u, pos, &inner)?,
             Stmt::Inspect(i) => {
                 let plan = self.inspect_plan(i, pos)?;
                 self.op(Op::Inspect(plan), pos)?;
             }
             Stmt::Search(se) => self.search(se, pos, &inner)?,
-            Stmt::Accept { target, from, .. } => {
+            Stmt::Accept { target, from, pos: _ } => {
                 let place = self.place(target, true)?;
                 let value = match from {
                     AcceptFrom::Sysin => Side { value: Value::Bytes, src: None, digits: 0 },
@@ -460,57 +456,52 @@ impl Lower<'_> {
                 let plan = self.move_plan(&value, self.kind_of(place), self.place_items[place as usize])?;
                 self.op(Op::Accept { target: place, from: *from, plan }, pos)?;
             }
-            Stmt::Call(c) => match self.call_plan(c, pos)? {
-                Ok(plan) => {
-                    self.op(Op::Call(plan), pos)?;
-                    self.phrases(c.on_exception.as_deref(), c.not_on_exception.as_deref(), pos, &inner)?;
-                }
-                Err(abend) => self.end(Terminator::Abend(abend), pos)?,
-            },
-            Stmt::Cancel { targets, .. } => {
+            Stmt::Call(c) => self.call(c, pos, &inner)?,
+            Stmt::Cancel { targets, pos: _ } => {
                 for t in targets {
                     let name = self.operand(t, pos)?.operand;
                     self.op(Op::Cancel(name), pos)?;
                 }
             }
-            Stmt::Invoke(i) => {
-                let plan = self.invoke_plan(i, pos)?;
-                self.op(Op::Invoke(plan), pos)?;
-                self.phrases(i.on_exception.as_deref(), i.not_on_exception.as_deref(), pos, &inner)?;
-            }
-            Stmt::GoTo { target: Some(target), .. } => {
+            Stmt::Invoke(i) => self.invoke(i, pos, &inner)?,
+            Stmt::GoTo { target: Some(target), pos: _ } => {
                 let Ok((t, _)) = crate::procedure(self.program, target) else { return unsupported("a GO TO the walker cannot resolve", pos) };
                 self.go_to(t, ctx, pos)?;
             }
-            Stmt::Exec(block) => match block.kind {
-                ExecKind::Sql if block.declarative() => {}
-                ExecKind::Cics => self.cics(block, pos, ctx.para)?,
-                ExecKind::Sql => self.sql(block, pos, &inner)?,
-                ExecKind::Dli | ExecKind::Other => {
-                    let kind = if block.kind == ExecKind::Dli { "DLI" } else { "" };
-                    let message = format!("EXEC {kind} {} was reached: ironwork for COBOL checks EXEC statements but does not run them yet", block.command);
-                    let abend = self.abend(AbendCode::Exec, &message, None)?;
-                    self.end(Terminator::Abend(abend), pos)?;
+            Stmt::Exec(block) => {
+                // The walker's `cics_bind::bind` reads CICS options; the typed `sql` holds SQL's host
+                // variables and text.
+                let ExecBlock { kind, command, options: _, host_variables: _, sql: _, text: _, pos: _ } = &**block;
+                match kind {
+                    ExecKind::Sql if block.declarative() => {}
+                    ExecKind::Cics => self.cics(block, pos, ctx.para)?,
+                    ExecKind::Sql => self.sql(block, pos, &inner)?,
+                    ExecKind::Dli | ExecKind::Other => {
+                        let kind = if *kind == ExecKind::Dli { "DLI" } else { "" };
+                        let message = format!("EXEC {kind} {command} was reached: ironwork for COBOL checks EXEC statements but does not run them yet");
+                        let abend = self.abend(AbendCode::Exec, &message, None)?;
+                        self.end(Terminator::Abend(abend), pos)?;
+                    }
                 }
-            },
+            }
             Stmt::JsonGenerate(_) | Stmt::JsonParse(_) | Stmt::XmlGenerate(_) | Stmt::XmlParse(_) => self.markup(s, pos, &inner)?,
             Stmt::Sorting(so) => self.sorting(so, pos, &inner)?,
             Stmt::Report(r) => self.report_statement(r, pos)?,
-            Stmt::Goback { .. } | Stmt::ExitMethod { .. } => self.end(Terminator::End(Ending::Goback), pos)?,
-            Stmt::StopRun { .. } => self.end(Terminator::End(Ending::StopRun), pos)?,
-            Stmt::ExitProgram { .. } => {
+            Stmt::Goback { pos: _ } | Stmt::ExitMethod { pos: _ } => self.end(Terminator::End(Ending::Goback), pos)?,
+            Stmt::StopRun { pos: _ } => self.end(Terminator::End(Ending::StopRun), pos)?,
+            Stmt::ExitProgram { pos: _ } => {
                 let next = self.new_block()?;
                 self.end(Terminator::ExitProgram { next }, pos)?;
                 self.switch(next)?;
             }
-            Stmt::Continue | Stmt::SentenceEnd | Stmt::Exit { kind: ExitKind::Plain, .. } => {}
-            Stmt::Exit { kind: ExitKind::Paragraph, .. } => self.leave(ctx.para + 1, ctx, pos)?,
-            Stmt::Exit { kind: ExitKind::Section, .. } => self.leave(crate::section_end(self.program, ctx.para) + 1, ctx, pos)?,
-            Stmt::Exit { kind: ExitKind::Perform, .. } => match ctx.loops.last() {
+            Stmt::Continue | Stmt::SentenceEnd | Stmt::Exit { kind: ExitKind::Plain, pos: _ } => {}
+            Stmt::Exit { kind: ExitKind::Paragraph, pos: _ } => self.leave(ctx.para + 1, ctx, pos)?,
+            Stmt::Exit { kind: ExitKind::Section, pos: _ } => self.leave(crate::section_end(self.program, ctx.para) + 1, ctx, pos)?,
+            Stmt::Exit { kind: ExitKind::Perform, pos: _ } => match ctx.loops.last() {
                 Some(l) => self.end(Terminator::Jump(l.exit), pos)?,
                 None => self.leave(ctx.para + 1, ctx, pos)?,
             },
-            Stmt::Exit { kind: ExitKind::PerformCycle, .. } => match ctx.loops.last() {
+            Stmt::Exit { kind: ExitKind::PerformCycle, pos: _ } => match ctx.loops.last() {
                 Some(l) => self.end(Terminator::Jump(l.cont), pos)?,
                 None => self.leave(ctx.para + 1, ctx, pos)?,
             },
@@ -524,7 +515,6 @@ impl Lower<'_> {
                 };
                 self.end(end, pos)?;
             }
-            other => return unsupported(statement_name(other), pos),
         }
         Ok(())
     }
@@ -593,7 +583,7 @@ impl Lower<'_> {
     }
 
     /// The Select after an op that returns Arm(1) or Arm(0), running `on` or `not_on`.
-    fn select(&mut self, on: Option<&[Stmt]>, not_on: Option<&[Stmt]>, pos: Pos, ctx: &Ctx) -> R<()> {
+    pub(super) fn select(&mut self, on: Option<&[Stmt]>, not_on: Option<&[Stmt]>, pos: Pos, ctx: &Ctx) -> R<()> {
         let (normal, exception, join) = (self.new_block()?, self.new_block()?, self.new_block()?);
         self.end(Terminator::Select(vec![normal, exception]), pos)?;
         self.switch(normal)?;
@@ -609,14 +599,14 @@ impl Lower<'_> {
     fn arithmetic(&mut self, computations: &[(&Target, &Expr)], remainder: Option<&(Target, Expr, Expr)>, handler: Option<&SizeError>, per_receiver: bool, pos: Pos, ctx: &Ctx) -> R<()> {
         let plan = self.arith_plan(computations, remainder, handler.is_some(), per_receiver, pos)?;
         self.op(Op::Arith(plan), pos)?;
-        let Some(handler) = handler else { return Ok(()) };
+        let Some(SizeError { on: on_size_error, not_on: not_on_size_error }) = handler else { return Ok(()) };
         let (not_on, on, join) = (self.new_block()?, self.new_block()?, self.new_block()?);
         self.end(Terminator::Select(vec![not_on, on]), pos)?;
         self.switch(not_on)?;
-        self.statements(&handler.not_on, ctx)?;
+        self.statements(not_on_size_error, ctx)?;
         self.jump(join, pos)?;
         self.switch(on)?;
-        self.statements(&handler.on, ctx)?;
+        self.statements(on_size_error, ctx)?;
         self.jump(join, pos)?;
         self.switch(join)
     }
@@ -625,10 +615,10 @@ impl Lower<'_> {
     /// evaluated again at each comparison (lir.md §11, item 6).
     fn evaluate(&mut self, subjects: &[Subject], whens: &[When], other: &[Stmt], pos: Pos, ctx: &Ctx) -> R<()> {
         let join = self.new_block()?;
-        for when in whens.iter().filter(|w| !w.alternatives.is_empty()) {
+        for When { alternatives, body: statements } in whens.iter().filter(|w| !w.alternatives.is_empty()) {
             let (body, fail) = (self.new_block()?, self.new_block()?);
-            for (k, alternative) in when.alternatives.iter().enumerate() {
-                let next = if k + 1 == when.alternatives.len() { fail } else { self.new_block()? };
+            for (k, alternative) in alternatives.iter().enumerate() {
+                let next = if k + 1 == alternatives.len() { fail } else { self.new_block()? };
                 for (subject, object) in subjects.iter().zip(alternative) {
                     if self.blocks.current.is_none() {
                         break;
@@ -641,7 +631,7 @@ impl Lower<'_> {
                 }
             }
             self.switch(body)?;
-            self.statements(&when.body, ctx)?;
+            self.statements(statements, ctx)?;
             self.jump(join, pos)?;
             self.switch(fail)?;
         }
@@ -811,6 +801,7 @@ impl Lower<'_> {
 
     /// One VARYING or AFTER phrase: FROM stored with MOVE rules, the BY step, and the UNTIL test.
     fn vary_level(&mut self, v: &Varying, pos: Pos) -> R<VaryLevel> {
+        let Varying { var: _, from: _, by: _, until: _ } = v;
         let var = self.place(&v.var, false)?;
         let kind = self.kind_of(var);
         if !matches!(kind, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Index) {
@@ -846,50 +837,6 @@ impl Lower<'_> {
                 self.jump(cont, pos)
             }
         }
-    }
-}
-
-/// The name an unsupported statement is refused by.
-fn statement_name(s: &Stmt) -> &'static str {
-    match s {
-        Stmt::Open { .. } => "OPEN",
-        Stmt::Close { .. } => "CLOSE",
-        Stmt::Read(_) => "READ",
-        Stmt::Write { .. } => "WRITE",
-        Stmt::Rewrite { .. } => "REWRITE",
-        Stmt::Delete { .. } => "DELETE",
-        Stmt::Start { .. } => "START",
-        Stmt::Call(_) => "CALL",
-        Stmt::Cancel { .. } => "CANCEL",
-        Stmt::Set { .. } => "SET",
-        Stmt::Accept { .. } => "ACCEPT",
-        Stmt::String(_) => "STRING",
-        Stmt::Unstring(_) => "UNSTRING",
-        Stmt::Inspect(_) => "INSPECT",
-        Stmt::Search(se) if se.all => "SEARCH ALL",
-        Stmt::Search(_) => "SEARCH",
-        Stmt::Sorting(so) => match &**so {
-            Sorting::Sort(st) if st.merge => "MERGE",
-            Sorting::Sort(_) => "SORT",
-            Sorting::Release { .. } => "RELEASE",
-            Sorting::Return { .. } => "RETURN",
-        },
-        Stmt::Exec(block) => match block.kind {
-            ExecKind::Sql => "EXEC SQL",
-            ExecKind::Cics => "EXEC CICS",
-            ExecKind::Dli => "EXEC DLI",
-            ExecKind::Other => "EXEC",
-        },
-        Stmt::GoToDepending { .. } => "GO TO DEPENDING ON",
-        Stmt::Alter { .. } => "ALTER",
-        Stmt::Entry { .. } => "ENTRY",
-        Stmt::Report(_) => "Report Writer",
-        Stmt::Invoke(_) => "INVOKE",
-        Stmt::JsonGenerate(_) => "JSON GENERATE",
-        Stmt::XmlParse(_) => "XML PARSE",
-        Stmt::XmlGenerate(_) => "XML GENERATE",
-        Stmt::JsonParse(_) => "JSON PARSE",
-        _ => "this statement",
     }
 }
 

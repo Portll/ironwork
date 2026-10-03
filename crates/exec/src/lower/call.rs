@@ -1,21 +1,32 @@
 //! CALL, CANCEL's names, ENTRY and INVOKE (lir.md §9.3, §9.8), as the walker's `call`,
 //! `call_through_pointer`, `call_nested`, `program_name` and `invoke` take them.
 
+use super::flow::Ctx;
 use super::{Lower, LowerError, R, push, unsupported};
 use crate::layout::Resolved;
 use crate::machine::literal_fixed;
 use crate::oo::{item_type, operand_type};
-use rt::lir::{self, AbendId, CallArg, CallId, CallPlan, CallTarget, Chars, InvokeId, InvokePlan, LeService, MethodName, Receiver};
+use rt::lir::{self, AbendId, CallArg, CallId, CallPlan, CallTarget, Chars, InvokeId, InvokePlan, LeService, MethodName, Op, Receiver, Terminator};
 use rt::storage::Kind;
 use syntax::Pos;
-use syntax::ast::{ArgMode, Call, Invoke, InvokeMethod, Literal, Operand, Ref};
+use syntax::ast::{Arg, ArgMode, Call, Invoke, InvokeMethod, Literal, Operand, Param, Ref};
 use zarch::decimal;
 
 impl Lower<'_> {
-    /// The CALL's plan, or the abend the walker gives on reaching a literal program name it cannot
-    /// read as one.
-    pub(super) fn call_plan(&mut self, c: &Call, pos: Pos) -> R<Result<CallId, AbendId>> {
-        let target = match &c.target {
+    /// CALL's op and its EXCEPTION phrases, or the abend the walker gives on reaching a literal
+    /// program name it cannot read as one.
+    pub(super) fn call(&mut self, c: &Call, pos: Pos, ctx: &Ctx) -> R<()> {
+        let Call { target, using, returning, on_exception, not_on_exception, pos: _ } = c;
+        let plan = match self.call_plan(target, using, returning.as_ref(), on_exception.is_some(), not_on_exception.is_some(), pos)? {
+            Ok(plan) => plan,
+            Err(abend) => return self.end(Terminator::Abend(abend), pos),
+        };
+        self.op(Op::Call(plan), pos)?;
+        self.phrases(on_exception.as_deref(), not_on_exception.as_deref(), pos, ctx)
+    }
+
+    fn call_plan(&mut self, target: &Operand, using: &[Arg], returning: Option<&Ref>, on_exception: bool, not_on_exception: bool, pos: Pos) -> R<Result<CallId, AbendId>> {
+        let target = match target {
             Operand::Ref(r) if self.program_pointer(r) && !self.jni_function(r) => CallTarget::Entry(self.place(r, false)?),
             Operand::Ref(r) if self.program_pointer(r) => CallTarget::Pointer(self.place(r, false)?),
             Operand::Literal(lit) => match program_name(self, lit) {
@@ -25,9 +36,9 @@ impl Lower<'_> {
             op => CallTarget::Dynamic(self.operand(op, pos)?.operand),
         };
         let pointer = matches!(target, CallTarget::Pointer(_));
-        let mut args = Vec::with_capacity(c.using.len());
-        for arg in &c.using {
-            args.push(match (&arg.value, arg.mode) {
+        let mut args = Vec::with_capacity(using.len());
+        for Arg { mode, value } in using {
+            args.push(match (value, *mode) {
                 (None, _) => CallArg::Omitted,
                 (Some(op), _) if pointer => CallArg::Value(self.operand(op, pos)?.operand),
                 (Some(Operand::Ref(r)), ArgMode::Reference) => CallArg::Reference(self.place(r, false)?),
@@ -35,8 +46,8 @@ impl Lower<'_> {
                 (Some(op), _) => CallArg::Content(self.content(op, pos)?),
             });
         }
-        let returning = c.returning.as_ref().map(|r| self.place(r, false)).transpose()?;
-        let plan = CallPlan { target, args, returning, on_exception: c.on_exception.is_some(), not_on_exception: c.not_on_exception.is_some() };
+        let returning = returning.map(|r| self.place(r, false)).transpose()?;
+        let plan = CallPlan { target, args, returning, on_exception, not_on_exception };
         push(&mut self.services.calls, plan, "CALL plans").map(Ok)
     }
 
@@ -95,8 +106,8 @@ impl Lower<'_> {
                 return Err(LowerError::Invalid(format!("ENTRY '{}' has no block", e.name)));
             };
             let mut using = Vec::with_capacity(e.using.len());
-            for param in &e.using {
-                match layout.linkage_roots.iter().position(|&i| layout.items[i].name.as_deref() == Some(param.name.as_str())).map(u16::try_from) {
+            for Param { by_value: _, name } in &e.using {
+                match layout.linkage_roots.iter().position(|&i| layout.items[i].name.as_deref() == Some(name.as_str())).map(u16::try_from) {
                     Some(Ok(ordinal)) => using.push(ordinal),
                     Some(Err(_)) => return Err(LowerError::Exceeds("LINKAGE records", e.pos)),
                     None => return unsupported("ENTRY USING an item that is not a LINKAGE record", e.pos),
@@ -107,16 +118,23 @@ impl Lower<'_> {
         Ok(out)
     }
 
+    /// INVOKE's op and its EXCEPTION phrases.
+    pub(super) fn invoke(&mut self, i: &Invoke, pos: Pos, ctx: &Ctx) -> R<()> {
+        let plan = self.invoke_plan(i, pos)?;
+        self.op(Op::Invoke(plan), pos)?;
+        self.phrases(i.on_exception.as_deref(), i.not_on_exception.as_deref(), pos, ctx)
+    }
+
     /// INVOKE's receiver, method, arguments with their Java types, and RETURNING with its own, as
     /// `invoke` works them out on each execution.
-    pub(super) fn invoke_plan(&mut self, i: &Invoke, pos: Pos) -> R<InvokeId> {
+    fn invoke_plan(&mut self, i: &Invoke, pos: Pos) -> R<InvokeId> {
+        let Invoke { target: t, method, using, returning, on_exception, not_on_exception, pos: _ } = i;
         let (layout, oo) = (self.layout, self.program.oo.as_deref());
-        let method = match &i.method {
+        let method = match method {
             InvokeMethod::New => MethodName::New,
             InvokeMethod::Named(name) => MethodName::Named(self.sym(name)),
             InvokeMethod::Identifier(r) => MethodName::Dynamic(self.place(r, false)?),
         };
-        let t = &i.target;
         let plain = t.qualifiers.is_empty() && t.subscripts.is_empty() && t.refmod.is_none() && layout.resolve(&t.name, &[], t.pos).is_err();
         let external = oo.and_then(|o| o.external(&t.name));
         let receiver = match (t.name.as_str(), external) {
@@ -125,12 +143,12 @@ impl Lower<'_> {
             (name, Some(external)) if plain => Receiver::Class { name: self.sym(name), external: self.sym(external) },
             _ => Receiver::Object(self.place(t, false)?),
         };
-        let mut args = Vec::with_capacity(i.using.len());
-        for op in &i.using {
+        let mut args = Vec::with_capacity(using.len());
+        for op in using {
             let Ok(java) = operand_type(layout, oo, op) else { return unsupported("an INVOKE argument of no Java type", pos) };
             args.push((self.operand(op, pos)?.operand, self.sym(&java)));
         }
-        let returning = match &i.returning {
+        let returning = match returning {
             None => None,
             Some(r) => {
                 let java = match layout.resolve(&r.name, &r.qualifiers, r.pos) {
@@ -141,7 +159,7 @@ impl Lower<'_> {
                 Some((self.place(r, false)?, self.sym(&java)))
             }
         };
-        let plan = InvokePlan { receiver, method, args, returning, on_exception: i.on_exception.is_some(), not_on_exception: i.not_on_exception.is_some() };
+        let plan = InvokePlan { receiver, method, args, returning, on_exception: on_exception.is_some(), not_on_exception: not_on_exception.is_some() };
         push(&mut self.services.invokes, plan, "INVOKE plans")
     }
 }

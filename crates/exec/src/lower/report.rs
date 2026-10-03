@@ -158,7 +158,7 @@ impl Lower<'_> {
             l.end(Terminator::Abend(abend), pos)
         };
         match s {
-            ReportStmt::Initiate { reports: names, .. } | ReportStmt::Terminate { reports: names, .. } => {
+            ReportStmt::Initiate { reports: names, pos: _ } | ReportStmt::Terminate { reports: names, pos: _ } => {
                 for n in names {
                     let Some(ri) = reports.iter().position(|r| r.name == *n) else { return refused(self, format!("{n} is not a report of this program")) };
                     let ri = ri as u32;
@@ -167,11 +167,11 @@ impl Lower<'_> {
                 }
                 Ok(())
             }
-            ReportStmt::Generate { name, qualifier, .. } => match generate_target(reports, name, qualifier.as_deref()) {
+            ReportStmt::Generate { name, qualifier, pos: _ } => match generate_target(reports, name, qualifier.as_deref()) {
                 Some((ri, detail)) => self.op(Op::Report(ReportOp::Generate { report: ri as u32, detail: detail.map(|d| d as u32) }), pos),
                 None => refused(self, format!("GENERATE {name}: no such DETAIL group or report")),
             },
-            ReportStmt::Suppress { .. } => self.op(Op::Report(ReportOp::Suppress), pos),
+            ReportStmt::Suppress { pos: _ } => self.op(Op::Report(ReportOp::Suppress), pos),
         }
     }
 }

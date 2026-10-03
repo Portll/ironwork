@@ -13,6 +13,8 @@ use syntax::ast::{BinOp, Expr, Literal, Operand, Ref, Search, Stmt};
 
 impl Lower<'_> {
     pub(super) fn search(&mut self, se: &Search, pos: Pos, ctx: &Ctx) -> R<()> {
+        // Names every phrase: one the parser gains fails to compile here until it is lowered or refused.
+        let Search { table: _, all: _, varying: _, at_end: _, whens: _, pos: _ } = se;
         let layout = self.layout;
         let t = match layout.resolve(&se.table.name, &se.table.qualifiers, se.table.pos) {
             Ok(Resolved::Item(t)) => t,

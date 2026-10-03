@@ -9,7 +9,7 @@ use rt::abend::AbendCode;
 use rt::lir::{self, Comparand, ConstId, ExprId, IntExpr, Mode, PlaceId};
 use rt::storage::Kind;
 use syntax::Pos;
-use syntax::ast::{BinOp, Expr, Figurative, Literal, Operand, Ref};
+use syntax::ast::{BinOp, Expr, Figurative, Literal, Operand, Ref, RefMod};
 use zarch::wide::U256;
 
 /// Why a reference does not lower: the walker looks its name up only when it runs, and fails.
@@ -125,6 +125,8 @@ impl Lower<'_> {
     }
 
     fn new_place(&mut self, r: &Ref, receiving: bool) -> R<PlaceId> {
+        // Names every part: one the parser gains fails to compile here until it is lowered or refused.
+        let Ref { name: _, qualifiers: _, subscripts: _, refmod: _, pos: _ } = r;
         let layout = self.layout;
         // `oo_register`: SELF's cell and JNIENVPTR's, whole, whatever reference modification says.
         if r.qualifiers.is_empty() && r.subscripts.is_empty() && matches!(r.name.as_str(), "SELF" | "JNIENVPTR") && layout.resolve(&r.name, &[], r.pos).is_err() {
@@ -190,9 +192,9 @@ impl Lower<'_> {
         }
         let (kind, refmod) = match &r.refmod {
             None => (item.kind, None),
-            Some(rm) => {
-                let start = self.int_expr(&rm.start, r.pos)?;
-                let length = match &rm.length {
+            Some(RefMod { start, length }) => {
+                let start = self.int_expr(start, r.pos)?;
+                let length = match length {
                     Some(l) => Some(self.int_expr(l, r.pos)?),
                     None => None,
                 };

@@ -2,11 +2,12 @@
 //! store and step plan decided from its kind, where the walker leaves them to its `Loc`.
 
 use super::data::{Side, Value};
+use super::flow::Ctx;
 use super::{Lower, R, push, unsupported};
 use crate::machine::literal_fixed;
 use rt::fixed::zoned_digits;
 use rt::lir::{
-    Bound, Chars, ConvertTable, Converting, DelimiterIn, InspectId, InspectPhrase, InspectPlan, Inspected, PlaceId, Replacement, StepPlan,
+    Bound, Chars, ConvertTable, Converting, DelimiterIn, InspectId, InspectPhrase, InspectPlan, Inspected, Op, PlaceId, Replacement, StepPlan,
     StorePlan, StringId, StringPlan, StringSource, UnstringId, UnstringInto, UnstringPlan,
 };
 use rt::storage::Kind;
@@ -15,11 +16,27 @@ use syntax::ast::{self, Delimiter, Figurative, Inspect, Literal, Operand, Ref, S
 use zarch::decimal;
 
 impl Lower<'_> {
-    pub(super) fn string_plan(&mut self, st: &StringStmt, pos: Pos) -> R<StringId> {
-        let into = self.place(&st.into, true)?;
-        let pointer = self.pointer(st.pointer.as_ref())?;
-        let mut sources = Vec::with_capacity(st.sources.len());
-        for (op, delimiter) in &st.sources {
+    /// STRING's op, then its OVERFLOW phrases.
+    pub(super) fn string(&mut self, st: &StringStmt, pos: Pos, ctx: &Ctx) -> R<()> {
+        let StringStmt { sources, into, pointer, on_overflow, not_on_overflow, pos: _ } = st;
+        let plan = self.string_plan(sources, into, pointer.as_ref(), pos)?;
+        self.op(Op::String(plan), pos)?;
+        self.select(on_overflow.as_deref(), not_on_overflow.as_deref(), pos, ctx)
+    }
+
+    /// UNSTRING's op, then its OVERFLOW phrases.
+    pub(super) fn unstring(&mut self, u: &Unstring, pos: Pos, ctx: &Ctx) -> R<()> {
+        let Unstring { source, delimiters, into, pointer, tallying, on_overflow, not_on_overflow, pos: _ } = u;
+        let plan = self.unstring_plan(source, delimiters, into, pointer.as_ref(), tallying.as_ref(), pos)?;
+        self.op(Op::Unstring(plan), pos)?;
+        self.select(on_overflow.as_deref(), not_on_overflow.as_deref(), pos, ctx)
+    }
+
+    fn string_plan(&mut self, written: &[(Operand, Delimiter)], into: &Ref, pointer: Option<&Ref>, pos: Pos) -> R<StringId> {
+        let into = self.place(into, true)?;
+        let pointer = self.pointer(pointer)?;
+        let mut sources = Vec::with_capacity(written.len());
+        for (op, delimiter) in written {
             let chars = self.chars(op, pos)?;
             let delimiter = match delimiter {
                 Delimiter::Size => None,
@@ -30,20 +47,20 @@ impl Lower<'_> {
         push(&mut self.plans.string, StringPlan { into, pointer, sources }, "STRING plans")
     }
 
-    pub(super) fn unstring_plan(&mut self, u: &Unstring, pos: Pos) -> R<UnstringId> {
-        let source = self.place(&u.source, false)?;
-        let pointer = self.pointer(u.pointer.as_ref())?;
-        let mut delimiters = Vec::with_capacity(u.delimiters.len());
-        for (all, d) in &u.delimiters {
+    fn unstring_plan(&mut self, source: &Ref, written: &[(bool, Operand)], fields: &[ast::UnstringInto], pointer: Option<&Ref>, tallying: Option<&Ref>, pos: Pos) -> R<UnstringId> {
+        let source = self.place(source, false)?;
+        let pointer = self.pointer(pointer)?;
+        let mut delimiters = Vec::with_capacity(written.len());
+        for (all, d) in written {
             delimiters.push((*all, self.chars(d, pos)?));
         }
         let bytes = Side { value: Value::Bytes, src: None, digits: 0 };
         let space = Side { value: Value::Fig(Figurative::Space), src: None, digits: 0 };
-        let mut into = Vec::with_capacity(u.into.len());
-        for field in &u.into {
-            let target = self.place(&field.target, true)?;
+        let mut into = Vec::with_capacity(fields.len());
+        for ast::UnstringInto { target, delimiter_in, count_in } in fields {
+            let target = self.place(target, true)?;
             let plan = self.move_plan(&bytes, self.kind_of(target), self.place_items[target as usize])?;
-            let delimiter = match &field.delimiter_in {
+            let delimiter = match delimiter_in {
                 None => None,
                 Some(r) => {
                     let target = self.place(r, true)?;
@@ -51,13 +68,13 @@ impl Lower<'_> {
                     Some(DelimiterIn { target, found: self.move_plan(&bytes, kind, item)?, none: self.move_plan(&space, kind, item)? })
                 }
             };
-            let count = match &field.count_in {
+            let count = match count_in {
                 None => None,
                 Some(r) => Some(self.integer_store(r)?),
             };
             into.push(UnstringInto { target, plan, delimiter, count });
         }
-        let tallying = match &u.tallying {
+        let tallying = match tallying {
             None => None,
             Some(r) => {
                 let place = self.place(r, false)?;
@@ -72,7 +89,8 @@ impl Lower<'_> {
     /// the statement runs. A function's value is tallied alone, as the walker's `rt::text::tally`
     /// ignores REPLACING and CONVERTING there.
     pub(super) fn inspect_plan(&mut self, i: &Inspect, pos: Pos) -> R<InspectId> {
-        let target = match &i.target {
+        let Inspect { target, tallying: tallied, replacing: replaced, converting, pos: _ } = i;
+        let target = match target {
             Operand::Ref(r) => Inspected::Item(self.place(r, false)?),
             op => Inspected::Value(self.operand(op, pos)?.operand),
         };
@@ -80,18 +98,18 @@ impl Lower<'_> {
             Inspected::Value(_) => true,
             Inspected::Item(place) => self.kind_of(place) == Kind::National,
         };
-        let mut tallying = Vec::with_capacity(i.tallying.len());
-        for p in &i.tallying {
+        let mut tallying = Vec::with_capacity(tallied.len());
+        for p in tallied {
             tallying.push(self.inspect_phrase(p, valued, pos)?);
         }
         if let Inspected::Value(_) = target {
             return push(&mut self.plans.inspect, InspectPlan { target, tallying, replacing: Vec::new(), converting: None }, "INSPECT plans");
         }
-        let mut replacing = Vec::with_capacity(i.replacing.len());
-        for p in &i.replacing {
+        let mut replacing = Vec::with_capacity(replaced.len());
+        for p in replaced {
             replacing.push(self.inspect_phrase(p, valued, pos)?);
         }
-        let converting = match &i.converting {
+        let converting = match converting {
             None => None,
             Some((from, to, bounds)) => {
                 let table = match (self.inspect_chars(from, valued, pos)?, self.inspect_chars(to, valued, pos)?) {
@@ -116,24 +134,25 @@ impl Lower<'_> {
     /// character positions are two bytes, so its literals stay values for `rt::text` to read as
     /// national characters, a figurative constant as one.
     fn inspect_phrase(&mut self, p: &ast::InspectPhrase, valued: bool, pos: Pos) -> R<InspectPhrase> {
-        let pattern = p.pattern.as_ref().map(|op| self.inspect_chars(op, valued, pos)).transpose()?;
-        let by = match &p.by {
+        let ast::InspectPhrase { mode, pattern, by, counter, bounds } = p;
+        let pattern = pattern.as_ref().map(|op| self.inspect_chars(op, valued, pos)).transpose()?;
+        let by = match by {
             None => None,
             Some(Operand::Literal(Literal::Figurative(f))) if !valued => Some(Replacement::Fill(self.c.collating.figurative(*f))),
             Some(op) => Some(Replacement::Chars(self.inspect_chars(op, valued, pos)?)),
         };
-        let counter = match &p.counter {
+        let counter = match counter {
             None => None,
             Some(r) => {
                 let place = self.place(r, false)?;
                 Some((place, self.count_plan(place, "a TALLYING counter must be numeric")?))
             }
         };
-        Ok(InspectPhrase { mode: p.mode, pattern, by, counter, bounds: self.bounds(&p.bounds, valued, pos)? })
+        Ok(InspectPhrase { mode: *mode, pattern, by, counter, bounds: self.bounds(bounds, valued, pos)? })
     }
 
     fn bounds(&mut self, bounds: &[ast::Bound], valued: bool, pos: Pos) -> R<Vec<Bound>> {
-        bounds.iter().map(|b| Ok(Bound { after: b.after, value: self.inspect_chars(&b.value, valued, pos)? })).collect()
+        bounds.iter().map(|ast::Bound { after, value }| Ok(Bound { after: *after, value: self.inspect_chars(value, valued, pos)? })).collect()
     }
 
     /// `chars`, a literal kept as a value when `valued`.

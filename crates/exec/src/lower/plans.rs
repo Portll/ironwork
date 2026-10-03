@@ -113,13 +113,13 @@ impl Lower<'_> {
         let mut prepass = Vec::new();
         let mut dmax = 0;
         let sources = computations.iter().map(|&(t, e)| (t, e)).chain(remainder.map(|(t, dividend, _)| (t, dividend)));
-        for (t, e) in sources {
-            let target = self.place(&t.r, false)?;
+        for (Target { r, rounded }, e) in sources {
+            let target = self.place(r, false)?;
             if !self.is_static(target) {
                 prepass.push(target);
             }
             prepass.extend(self.dmax_places(e)?);
-            dmax = dmax.max(receiver_dec(scale(self.kind_of(target)), t.rounded)).max(self.dmax(e)?);
+            dmax = dmax.max(receiver_dec(scale(self.kind_of(target)), *rounded)).max(self.dmax(e)?);
         }
         let arith = self.c.options.arith;
         let mut float_receiver = false;
@@ -129,8 +129,8 @@ impl Lower<'_> {
         }
         let mut lowered: Vec<(&Expr, ExprId)> = Vec::new();
         let mut steps = Vec::new();
-        for &(t, e) in computations {
-            let target = self.place(&t.r, false)?;
+        for &(Target { r, rounded }, e) in computations {
+            let target = self.place(r, false)?;
             // A COMP-1 or COMP-2 receiver makes every step floating point, and the walker then skips the float test.
             let (probe, float) = if float_receiver { (Vec::new(), true) } else { (self.float_probe(e)?, self.uses_float(e)?) };
             let mode = if float { Mode::Float(arith.float_intermediate()) } else { Mode::Fixed };
@@ -143,11 +143,12 @@ impl Lower<'_> {
                 }
             };
             let store = self.store_plan(self.kind_of(target), self.place_items[target as usize])?;
-            steps.push(ArithStep { target, expr, mode, store, rounded: t.rounded, probe });
+            steps.push(ArithStep { target, expr, mode, store, rounded: *rounded, probe });
         }
         let remainder = match (remainder, steps.first().map(|s| s.target)) {
-            (Some((t, dividend, divisor)), Some(quotient)) => {
-                let target = self.place(&t.r, false)?;
+            // The walker stores the remainder unrounded.
+            (Some((Target { r, rounded: _ }, dividend, divisor)), Some(quotient)) => {
+                let target = self.place(r, false)?;
                 let (dividend, divisor) = (self.expr_within(dividend, pos, Within::Fixed(dmax))?, self.expr_within(divisor, pos, Within::Fixed(dmax))?);
                 let store = self.store_plan(self.kind_of(target), self.place_items[target as usize])?;
                 Some(RemainderPlan { target, dividend, divisor, quotient_scale: scale(self.kind_of(quotient)), store })
@@ -184,8 +185,10 @@ impl Lower<'_> {
     }
 
     fn init_fields(&mut self, index: usize, with: &InitializeWith, pos: Pos, fields: &mut Vec<InitField>) -> R<()> {
+        // `initial_value` reads VALUE, REPLACING and DEFAULT, for the walker as for lowering.
+        let InitializeWith { filler, value: _, replacing: _, default: _ } = with;
         let layout = self.layout;
-        for (i, at) in layout.initialize_receivers(index, with.filler) {
+        for (i, at) in layout.initialize_receivers(index, *filler) {
             let item = &layout.items[i];
             let (value, side, kind) = match (with.initial_value(layout.category(i), item.value.is_some()), &item.value) {
                 (None, _) => continue,

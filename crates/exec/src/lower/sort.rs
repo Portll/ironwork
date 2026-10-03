@@ -51,6 +51,8 @@ impl Lower<'_> {
     pub(super) fn sorting(&mut self, so: &Sorting, pos: Pos, ctx: &Ctx) -> R<()> {
         match so {
             Sorting::Sort(st) => {
+                // A stable sort keeps equal keys in order with DUPLICATES or without it.
+                let SortStmt { merge: _, subject: _, keys: _, duplicates: _, collating: _, input: _, output: _, pos: _ } = st;
                 let plan = match self.sort_file_of(st) {
                     Some(sd) => SortPlan::File(self.file_sort(st, sd)?),
                     None => SortPlan::Table(self.table_sort(st)?),
@@ -74,13 +76,14 @@ impl Lower<'_> {
 
     /// AT END and NOT AT END after RETURN, which returns Arm(0) at end and Arm(1) for a record.
     fn at_end(&mut self, at_end: &Handlers, pos: Pos, ctx: &Ctx) -> R<()> {
+        let Handlers { on, not_on } = at_end;
         let (end, record, join) = (self.new_block()?, self.new_block()?, self.new_block()?);
         self.end(Terminator::Select(vec![end, record]), pos)?;
         self.switch(end)?;
-        self.statements(at_end.on.as_deref().unwrap_or_default(), ctx)?;
+        self.statements(on.as_deref().unwrap_or_default(), ctx)?;
         self.jump(join, pos)?;
         self.switch(record)?;
-        self.statements(at_end.not_on.as_deref().unwrap_or_default(), ctx)?;
+        self.statements(not_on.as_deref().unwrap_or_default(), ctx)?;
         self.jump(join, pos)?;
         self.switch(join)
     }
