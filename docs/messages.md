@@ -777,6 +777,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWS0097 | S | `{END-DISPLAY or END-ACCEPT}: Micro Focus's and GnuCOBOL's scope terminator, a word Enterprise COBOL does not reserve; --compliance extended reads it` |
 | IWS0098 | S | `VALUES in a level-{level} entry: Enterprise COBOL writes VALUES only in a level-88 entry, and VALUE in any other; --compliance extended reads it as VALUE` |
 | IWS0099 | E | `{word}: a user-defined word has at most 30 characters, and this one has {count}; it is read as its first 30, {the first 30}` |
+| IWS0100 | E | `{word} begins in Area A, where Enterprise COBOL puts no statement: it is read as though it began in Area B` |
 | IWX0001 | W | `free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}` |
 | IWX0002 | W | `constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry` |
 | IWX0003 | W | `<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =` |
@@ -792,3 +793,4 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0013 | W | `{END-DISPLAY or END-ACCEPT} (Micro Focus and GnuCOBOL; Enterprise COBOL does not reserve the word): it ends the {DISPLAY or ACCEPT} statement` |
 | IWX0014 | W | `VALUES outside a level-88 entry (Micro Focus; Enterprise COBOL writes VALUE there): it is read as VALUE` |
 | IWX0015 | W | `a user-defined word of more than 30 characters (Micro Focus and GnuCOBOL; Enterprise COBOL reads its first 30): {word} is read whole` |
+| IWX0017 | W | `a statement in Area A (Micro Focus and GnuCOBOL; Enterprise COBOL puts statements in Area B): {word} is read as though it began in Area B` |

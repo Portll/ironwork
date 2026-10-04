@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::lexer::{Tok, Token};
-use crate::messages::{IWS0097, IWS0098, IWX0013, IWX0014};
+use crate::messages::{IWS0097, IWS0098, IWS0100, IWX0013, IWX0014, IWX0017};
 use crate::{Error, Pos};
 
 mod declaratives;
@@ -1559,8 +1559,10 @@ impl Parser<'_> {
         });
     }
 
+    /// A user-defined word or digits in Area A, then a period. A reserved word there, as in `EXIT.`,
+    /// begins a statement: Enterprise COBOL reads it as though it began in Area B (IGYPS0009-E).
     fn paragraph_header(&self) -> bool {
-        self.tokens.get(self.at).is_some_and(|t| t.area_a && (matches!(t.tok, Tok::Word(_)) || digits(&t.tok))) && self.peek_at(1) == Some(&Tok::Period)
+        self.tokens.get(self.at).is_some_and(|t| t.area_a && (matches!(&t.tok, Tok::Word(w) if !rt::reserved_words::is_reserved(w)) || digits(&t.tok))) && self.peek_at(1) == Some(&Tok::Period)
     }
 
     fn section_header(&self) -> bool {
@@ -1610,15 +1612,31 @@ impl Parser<'_> {
             }
             return Ok(false);
         }
+        let start = self.at;
         let block = self.block(&[])?;
         if block.is_empty() {
             return Err(self.error("a statement"));
         }
+        self.statement_words_in_area_a(start);
         if paragraphs.is_empty() {
             paragraphs.push(Paragraph { name: String::new(), statements: Vec::new(), section: None, is_section: false, priority: 0, pos: self.pos() });
         }
         paragraphs.last_mut().unwrap().statements.extend(block);
         Ok(false)
+    }
+
+    /// Each word from token `start` on that begins in Area A, where Enterprise COBOL puts headers
+    /// and no statement (Language Reference SC27-8713-03, pp. 55-57). IBM's compiler reads it as
+    /// though it began in Area B, with IGYPS0009-E. An EXEC block is one token, the precompiler's.
+    fn statement_words_in_area_a(&mut self, start: usize) {
+        for token in &self.tokens[start..self.at] {
+            let Token { tok: Tok::Word(word), pos, area_a: true, .. } = token else { continue };
+            self.messages.push(if self.extended {
+                IWX0017.at(*pos, format!("a statement in Area A (Micro Focus and GnuCOBOL; Enterprise COBOL puts statements in Area B): {word} is read as though it began in Area B"))
+            } else {
+                IWS0100.at(*pos, format!("{word} begins in Area A, where Enterprise COBOL puts no statement: it is read as though it began in Area B"))
+            });
+        }
     }
 
     /// Statements up to a period, a paragraph header, or one of `stops`, none of them consumed.

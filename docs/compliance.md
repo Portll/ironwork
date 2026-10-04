@@ -35,10 +35,10 @@ both executors and compares the runs. The tenth, IWX0010-W, the command line, ha
 COBOL form: both executors read it from the run unit's PARM arguments (`rt::le::parm::Arguments`),
 and the LIR carries its ACCEPT sources and the op DISPLAY UPON ARGUMENT-NUMBER becomes. The eleventh,
 IWX0011-W, is the compiler's check on an EXEC SQL INTO list: the name it reads is a host variable as
-any other. The twelfth to fifteenth, IWX0012-W to IWX0015-W, are forms IBM's compiler flags itself:
+any other. IWX0012-W to IWX0015-W and IWX0017-W are forms IBM's compiler flags itself:
 strict gives a message where IBM's does, at the severity IBM's has, and extended reads each as Micro
 Focus and GnuCOBOL do, into a program Enterprise COBOL could hold. A test runs a program using the
-four on both executors and compares the runs, and another gives each one's message under each level.
+five on both executors and compares the runs, and another gives each one's message under each level.
 
 ### IWX0001-W free-form source
 
@@ -355,6 +355,28 @@ refused as ambiguous where a reference cannot tell them apart.
 
 Micro Focus and GnuCOBOL (63 characters under `-std=default` and `-std=mf`) read the word whole;
 extended does the same.
+
+### IWX0017-W a statement in Area A
+
+`IWX0017-W a statement in Area A (Micro Focus and GnuCOBOL; Enterprise COBOL puts statements in Area
+B): DISPLAY is read as though it began in Area B`, at each word of the statement that begins there.
+
+Area A holds division, section and paragraph headers, the level indicators, level-numbers 01 and
+77, DECLARATIVES and the end markers; "entries, sentences, statements, and clauses" begin in Area B
+(Language Reference SC27-8713-03, pp. 55-57). IBM's compiler gives IGYPS0009-E, ""DISPLAY" should
+not begin in area "A". It was processed as if found in area "B"." (a listing quoted in Tek-Tips
+thread 1544944), and compiles the program with return code 8. A reserved word in Area A before a
+period, as in `GOBACK.` or `EXIT.`, names no paragraph and is read as its statement. Strict gives
+`IWS0100-E DISPLAY begins in Area A, where Enterprise COBOL puts no statement: it is read as though it
+began in Area B` at each such word, so `check` returns 8 and `run` runs the program. Micro Focus and
+GnuCOBOL check no area (`areacheck: no` under cobc's `-std=default` and `-std=mf`); extended reads the
+statement the same way, with the warning.
+
+In the census samples below, measured with the five on acc3642, 116 of the 1,161 programs strict
+compiled cleanly in the 3185-repository sample (34 repositories) and 106 of 1,425 in the
+500-repository sample (14) now compile at return code 8, most of them whole programs indented from
+column 8; they still run. Reading `GOBACK.` and `EXIT.` in Area A as statements compiles 7 programs
+under extended that it refused before.
 
 ### What the four change
 

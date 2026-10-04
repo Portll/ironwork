@@ -66,9 +66,12 @@ mod tests {
         assert_eq!(got, ["6: TRUE is a reserved word, so it cannot name a condition", "8: COUNT is a reserved word, so it cannot name an index"]);
     }
 
+    /// A reserved word in Area A before a period names no paragraph: Enterprise COBOL reads it as
+    /// though it began in Area B (IGYPS0009-E; Language Reference SC27-8713-03, pp. 55-57), so
+    /// `EXIT.` there is an EXIT statement.
     #[test]
-    fn paragraph_and_section_names() {
-        let got = refused(&[], &["MAIN-LINE SECTION.", "START.", "    GOBACK.", "SORT SECTION.", "EXIT-POINT.", "    EXIT."]);
-        assert_eq!(got, ["7: START is a reserved word, so it cannot name a paragraph", "9: SORT is a reserved word, so it cannot name a section"]);
+    fn section_names() {
+        let got = refused(&[], &["MAIN-LINE SECTION.", "    GOBACK.", "SORT SECTION.", "EXIT-POINT.", "EXIT."]);
+        assert_eq!(got, ["8: SORT is a reserved word, so it cannot name a section"]);
     }
 }

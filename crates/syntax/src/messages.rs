@@ -801,6 +801,7 @@ catalogue! {
     IWS0097 Severe "{END-DISPLAY or END-ACCEPT}: Micro Focus's and GnuCOBOL's scope terminator, a word Enterprise COBOL does not reserve; --compliance extended reads it";
     IWS0098 Severe "VALUES in a level-{level} entry: Enterprise COBOL writes VALUES only in a level-88 entry, and VALUE in any other; --compliance extended reads it as VALUE";
     IWS0099 Error "{word}: a user-defined word has at most 30 characters, and this one has {count}; it is read as its first 30, {the first 30}";
+    IWS0100 Error "{word} begins in Area A, where Enterprise COBOL puts no statement: it is read as though it began in Area B";
     IWX0001 Warning "free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}";
     IWX0002 Warning "constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry";
     IWX0003 Warning "<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =";
@@ -816,6 +817,7 @@ catalogue! {
     IWX0013 Warning "{END-DISPLAY or END-ACCEPT} (Micro Focus and GnuCOBOL; Enterprise COBOL does not reserve the word): it ends the {DISPLAY or ACCEPT} statement";
     IWX0014 Warning "VALUES outside a level-88 entry (Micro Focus; Enterprise COBOL writes VALUE there): it is read as VALUE";
     IWX0015 Warning "a user-defined word of more than 30 characters (Micro Focus and GnuCOBOL; Enterprise COBOL reads its first 30): {word} is read whole";
+    IWX0017 Warning "a statement in Area A (Micro Focus and GnuCOBOL; Enterprise COBOL puts statements in Area B): {word} is read as though it began in Area B";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

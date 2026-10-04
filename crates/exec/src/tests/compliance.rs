@@ -202,9 +202,9 @@ fn an_into_name_without_its_colon_is_refused_under_strict_and_read_under_extende
     assert_eq!(shown, [(9, Some("IWX0011"), Severity::Warning)]);
 }
 
-/// A program using the four forms Enterprise COBOL flags that Micro Focus and GnuCOBOL read: a
+/// A program using the five forms Enterprise COBOL flags that Micro Focus and GnuCOBOL read: a
 /// numeric VALUE for a numeric-edited item, VALUES for a data item, names of more than 30
-/// characters that differ only after the 30th, and END-DISPLAY.
+/// characters that differ only after the 30th, END-DISPLAY, and statements in Area A.
 const FLAGGED_FORMS: &str = concat!(
     "       IDENTIFICATION DIVISION.\n",
     "       PROGRAM-ID. FLAGGED.\n",
@@ -218,7 +218,8 @@ const FLAGGED_FORMS: &str = concat!(
     "           DISPLAY AMOUNT '|' FLAG END-DISPLAY\n",
     "           DISPLAY CUSTOMER-ACCOUNT-BALANCE-TOTAL-A '|'\n",
     "               CUSTOMER-ACCOUNT-BALANCE-TOTAL-B\n",
-    "           GOBACK.\n",
+    "       DISPLAY 'AREA A'\n",
+    "       GOBACK.\n",
 );
 
 fn diagnostics_under(source: &str, compliance: numeric::Compliance) -> Vec<(u32, u32, Option<&'static str>, Severity)> {
@@ -238,7 +239,7 @@ fn diagnostics_under(source: &str, compliance: numeric::Compliance) -> Vec<(u32,
 #[test]
 fn the_forms_ibm_flags_run_alike_on_the_interpreter_and_the_vm_under_extended() {
     let walked = Harness::source(FLAGGED_FORMS).flags(EXTENDED).run(Executor::Interpreter);
-    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (" 12.50|Y\n00042|00007\n", Some(&Ending::Goback)), "{}", walked.err);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (" 12.50|Y\n00042|00007\nAREA A\n", Some(&Ending::Goback)), "{}", walked.err);
     let vm = Harness::source(FLAGGED_FORMS).flags(EXTENDED).run(Executor::Vm);
     assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
 }
@@ -246,7 +247,7 @@ fn the_forms_ibm_flags_run_alike_on_the_interpreter_and_the_vm_under_extended() 
 #[test]
 fn extended_warns_of_each_form_and_strict_gives_ibms_severity() {
     let warning = |line, col, id| (line, col, Some(id), Severity::Warning);
-    let extended = [warning(5, 8, "IWX0012"), warning(6, 23, "IWX0014"), warning(7, 12, "IWX0015"), warning(8, 12, "IWX0015"), warning(10, 36, "IWX0013"), warning(11, 20, "IWX0015"), warning(12, 16, "IWX0015")];
+    let extended = [warning(5, 8, "IWX0012"), warning(6, 23, "IWX0014"), warning(7, 12, "IWX0015"), warning(8, 12, "IWX0015"), warning(10, 36, "IWX0013"), warning(11, 20, "IWX0015"), warning(12, 16, "IWX0015"), warning(13, 8, "IWX0017"), warning(14, 8, "IWX0017")];
     assert_eq!(diagnostics_under(FLAGGED_FORMS, numeric::Compliance::Extended), extended);
     let strict = diagnostics_under(FLAGGED_FORMS, numeric::Compliance::Strict);
     let given = |id: &str| strict.iter().filter(|m| m.2 == Some(id)).map(|m| (m.0, m.3)).collect::<Vec<_>>();
@@ -254,24 +255,32 @@ fn extended_warns_of_each_form_and_strict_gives_ibms_severity() {
     assert_eq!(given("IWS0098"), [(6, Severity::Severe)]);
     assert_eq!(given("IWS0097"), [(10, Severity::Severe)]);
     assert_eq!(given("IWS0099"), [7, 8, 11, 12].map(|line| (line, Severity::Error)), "IGYDS0023-E");
+    assert_eq!(given("IWS0100"), [(13, Severity::Error), (14, Severity::Error)], "IGYPS0009-E");
     assert_eq!(given("IWC0002"), [(11, Severity::Severe), (12, Severity::Severe)], "the two names are one name in their first 30 characters");
 }
 
-/// Enterprise COBOL compiles a name of more than 30 characters with an error (return code 8) and
-/// runs it under its default NOCOMPILE(S), the name read as its first 30 characters.
+/// Enterprise COBOL compiles a statement in Area A, or a name of more than 30 characters, with an
+/// error (return code 8) and runs it under its default NOCOMPILE(S), the statement read as though
+/// it began in Area B and the name as its first 30 characters.
 #[test]
-fn strict_runs_a_long_name_as_ibm_runs_it_after_an_error() {
+fn strict_runs_what_ibm_compiles_with_an_error() {
     let source = concat!(
         "       IDENTIFICATION DIVISION.\n",
-        "       PROGRAM-ID. LONGNAME.\n",
+        "       PROGRAM-ID. AREAS.\n",
         "       DATA DIVISION.\n",
         "       WORKING-STORAGE SECTION.\n",
         "       01  CUSTOMER-ACCOUNT-BALANCE-TOTAL-AMOUNT PIC 9(3) VALUE 5.\n",
         "       PROCEDURE DIVISION.\n",
-        "           DISPLAY CUSTOMER-ACCOUNT-BALANCE-TOTAL-AMOUNT\n",
-        "           GOBACK.\n",
+        "       MAIN-PARA.\n",
+        "       DISPLAY CUSTOMER-ACCOUNT-BALANCE-TOTAL-AMOUNT\n",
+        "           PERFORM NEXT-PARA\n",
+        "       GOBACK.\n",
+        "       NEXT-PARA.\n",
+        "       EXIT.\n",
     );
-    assert_eq!(diagnostics_under(source, numeric::Compliance::Strict), [(5, 12, Some("IWS0099"), Severity::Error), (7, 20, Some("IWS0099"), Severity::Error)]);
+    let error = |line, col, id| (line, col, Some(id), Severity::Error);
+    let strict = [error(5, 12, "IWS0099"), error(8, 8, "IWS0100"), error(8, 16, "IWS0099"), error(10, 8, "IWS0100"), error(12, 8, "IWS0100")];
+    assert_eq!(diagnostics_under(source, numeric::Compliance::Strict), strict);
     for executor in [Executor::Interpreter, Executor::Vm] {
         let o = Harness::source(source).run(executor);
         assert_eq!((o.out.as_str(), o.ending.as_ref().ok()), ("005\n", Some(&Ending::Goback)), "{}", o.err);
