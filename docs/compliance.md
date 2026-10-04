@@ -33,7 +33,9 @@ eighth, IWX0008-W, is the compiler's check on a MOVE's sender. The ninth, IWX000
 before the parser as the first six are, and a test runs a caller and a program that uses it on
 both executors and compares the runs. The tenth, IWX0010-W, the command line, has no Enterprise
 COBOL form: both executors read it from the run unit's PARM arguments (`rt::le::parm::Arguments`),
-and the LIR carries its ACCEPT sources and the op DISPLAY UPON ARGUMENT-NUMBER becomes.
+and the LIR carries its ACCEPT sources and the op DISPLAY UPON ARGUMENT-NUMBER becomes. The eleventh,
+IWX0011-W, is the compiler's check on an EXEC SQL INTO list: the name it reads is a host variable as
+any other.
 
 ### IWX0001-W free-form source
 
@@ -258,6 +260,20 @@ refuses each form (S), and under extended ON EXCEPTION goes with ARGUMENT-VALUE 
 The 3185-repository corpus has COMMAND-LINE in 628 files, ARGUMENT-VALUE in 333, ARGUMENT-NUMBER in
 215 and `DISPLAY UPON ARGUMENT-NUMBER` 98 times, in 119 repositories; ENVIRONMENT-VALUE, which pairs
 with `DISPLAY UPON ENVIRONMENT-NAME`, stays refused (below).
+
+### IWX0011-W an INTO name without its colon
+
+`IWX0011-W an INTO name written without its colon (Db2 13 for z/OS requires the colon before every
+host variable): CSR-ENTITY is read as a host variable`, at the name.
+
+Db2 13 for z/OS says every reference to a host variable is preceded by a colon, and that its
+precompiler issues an error for a missing one, or reads the name as an unqualified column name where
+a column name can stand (SQL Reference, References to host variables, db2z_refs2hostvars). An INTO
+list is no such place, and in Db2 13 a name there without a colon writes a global variable, SQL
+variable or SQL parameter target (SELECT INTO, db2z_sql_selectinto). Programs in the corpus write
+host variables so (`FETCH C INTO CSR-ENTITY, CSR-PROJ-ID`), and under extended an INTO name without
+its colon is the host variable of that name, in a SELECT INTO, FETCH or rowset FETCH. Strict refuses
+it (S), as Db2's precompiler does (assumption SQ7).
 
 ## How the six were chosen
 

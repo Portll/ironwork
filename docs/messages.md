@@ -369,6 +369,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWP0043 | S | `attribute value for '{key}' exceeds 256 characters` |
 | IWP0044 | S | `unbalanced '(' in attribute value` |
 | IWP0045 | S | `{why the BMS source cannot be read}` |
+| IWP0046 | S | `EXEC SQL {command}: {name} in the INTO list has no colon, which Db2 requires before every host variable` |
 | IWR0001 | S | `XML PARSE VALIDATING WITH {schema}: the schema is in IBM's Optimized Schema Representation (OSR), which ironwork does not read` |
 | IWR0002 | S | `{verb} is not a statement ironwork for COBOL supports yet` |
 | IWR0003 | S | `{clause} is not a data description clause ironwork for COBOL supports yet` |
@@ -531,3 +532,4 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0008 | W | `an integer or numeric function as a MOVE's sender (GnuCOBOL; Enterprise COBOL takes one only where an arithmetic expression can be): FUNCTION {name} is moved as its value` |
 | IWX0009 | W | `PROCEDURE DIVISION RETURNING OMITTED (GnuCOBOL; Enterprise COBOL's RETURNING names an 01 or 77 item of the LINKAGE SECTION): the program is read with no RETURNING phrase, and returns its RETURN-CODE to its caller as any program does` |
 | IWX0010 | W | `{ACCEPT ... FROM COMMAND-LINE, ARGUMENT-NUMBER or ARGUMENT-VALUE, or DISPLAY ... UPON ARGUMENT-NUMBER} (Micro Focus and GnuCOBOL; Enterprise COBOL reads no command line): {what the job step's PARM program arguments give}` |
+| IWX0011 | W | `an INTO name written without its colon (Db2 13 for z/OS requires the colon before every host variable): {name} is read as a host variable` |

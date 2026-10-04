@@ -11,6 +11,8 @@ use std::collections::HashMap;
 pub struct HostVar {
     pub var: Ref,
     pub indicator: Option<Ref>,
+    /// Written with its colon; an INTO list may name a host variable without one.
+    pub colon: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -208,6 +210,17 @@ pub struct Sql {
 
 pub use rt::sql::fingerprint;
 
+impl Statement {
+    /// The names in an INTO list written without their colon.
+    pub fn colonless_into(&self) -> impl Iterator<Item = &Ref> {
+        let into: &[HostVar] = match self {
+            Statement::Query { into, .. } | Statement::Fetch { into, .. } | Statement::FetchRowset { into, .. } => into,
+            _ => &[],
+        };
+        into.iter().filter(|h| !h.colon).map(|h| &h.var)
+    }
+}
+
 /// The statement in `body`, the text between EXEC SQL and END-EXEC.
 pub fn parse(body: &str, pos: Pos) -> Statement {
     match lex(body) {
@@ -325,8 +338,8 @@ fn host_var(toks: &[Tok], i: usize, pos: Pos) -> Option<(HostVar, usize)> {
     let var = reference(path, subscripts, pos);
     let at = if word(toks, i + 1) == "INDICATOR" { i + 2 } else { i + 1 };
     match toks.get(at) {
-        Some(Tok::Host { path, subscripts }) => Some((HostVar { var, indicator: Some(reference(path, subscripts, pos)) }, at + 1)),
-        _ => Some((HostVar { var, indicator: None }, i + 1)),
+        Some(Tok::Host { path, subscripts }) => Some((HostVar { var, indicator: Some(reference(path, subscripts, pos)), colon: true }, at + 1)),
+        _ => Some((HostVar { var, indicator: None, colon: true }, i + 1)),
     }
 }
 
@@ -363,10 +376,10 @@ fn render(toks: &[Tok], pos: Pos) -> (String, Vec<HostVar>) {
 fn host_list(toks: &[Tok], pos: Pos) -> Result<Vec<HostVar>, String> {
     let (mut out, mut i) = (Vec::new(), 0);
     while i < toks.len() {
-        // Only host variables stand in an INTO list, so a name written without its colon is one
-        // (assumption S7).
+        // A name written without its colon is read as a host variable, which the compiler refuses
+        // under strict, as Db2's precompiler does, and accepts under extended (assumption S7).
         let (var, next) = match toks.get(i) {
-            Some(Tok::Word(name)) => (HostVar { var: reference(std::slice::from_ref(name), &[], pos), indicator: None }, i + 1),
+            Some(Tok::Word(name)) => (HostVar { var: reference(std::slice::from_ref(name), &[], pos), indicator: None, colon: false }, i + 1),
             _ => host_var(toks, i, pos).ok_or("INTO lists something other than host variables")?,
         };
         out.push(var);
@@ -1052,7 +1065,7 @@ mod tests {
 
     #[test]
     fn describe_and_fetch_using_descriptor_name_the_sqlda() {
-        assert_eq!(st("DESCRIBE OUTPUT S1 INTO :SDSC"), Statement::Describe { name: "S1".into(), descriptor: HostVar { var: reference(&["SDSC".into()], &[], Pos::default()), indicator: None }, names: Names::Names });
+        assert_eq!(st("DESCRIBE OUTPUT S1 INTO :SDSC"), Statement::Describe { name: "S1".into(), descriptor: HostVar { var: reference(&["SDSC".into()], &[], Pos::default()), indicator: None, colon: true }, names: Names::Names });
         assert!(matches!(st("DESCRIBE S1 INTO :D USING LABELS"), Statement::Describe { names: Names::Labels, .. }));
         assert_eq!(st("DESCRIBE S1 INTO :D USING BOTH"), Statement::Unsupported("DESCRIBE ... USING BOTH".into()));
         assert_eq!(st("DESCRIBE CURSOR C1 INTO :D"), Statement::Unsupported("DESCRIBE CURSOR".into()));

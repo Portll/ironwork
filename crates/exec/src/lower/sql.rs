@@ -129,7 +129,7 @@ impl Lower<'_> {
     fn host_places(&mut self, vars: &[HostVar], command: &str) -> R<Vec<HostPlace>> {
         let layout = self.layout;
         let mut out = Vec::new();
-        for HostVar { var: host, indicator } in vars {
+        for HostVar { var: host, indicator, .. } in vars {
             let var = self.place(host, false)?;
             let indicator = indicator.as_ref().map(|r| self.first_element(r)).transpose()?;
             let element = |k: usize| indicator.map(|p| (p, 2 * k as u32));

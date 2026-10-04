@@ -1050,7 +1050,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: SQL_INTO_WITHOUT_COLONS,
-        claim: "ironwork reads a name in an INTO list written without its colon as a host variable, as real programs write it (FETCH C INTO CSR-ENTITY, CSR-PROJ-ID). Db2 13 for z/OS says all references to host variables must be preceded by a colon, and that the precompiler issues an error for a missing colon or reads the name as an unqualified column name where a column name can be referenced (SQL Reference, References to host variables, db2z_refs2hostvars); an INTO list is not such a place, and a name there without a colon is how Db2 13 writes a global variable, SQL variable or SQL parameter target (SELECT INTO, db2z_sql_selectinto; Global variables, db2z_globalvars). No IBM page found says an older precompiler read it as a host variable",
+        claim: "Db2 13 for z/OS says all references to host variables must be preceded by a colon, and that the precompiler issues an error for a missing colon or reads the name as an unqualified column name where a column name can be referenced (SQL Reference, References to host variables, db2z_refs2hostvars); an INTO list is not such a place, and a name there without a colon is how Db2 13 writes a global variable, SQL variable or SQL parameter target (SELECT INTO, db2z_sql_selectinto; Global variables, db2z_globalvars). Under --compliance strict ironwork refuses an INTO name written without its colon, as the precompiler does. Under extended it reads the name as the host variable of that name, with IWX0011-W, as real programs write it (FETCH C INTO CSR-ENTITY, CSR-PROJ-ID); no IBM page found says an older precompiler read it so",
         basis: Basis::Chosen,
         oracle: Oracle::Db2,
     },

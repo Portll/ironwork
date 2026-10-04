@@ -173,3 +173,27 @@ fn the_command_line_is_a_warning_under_extended_and_refused_under_strict() {
     assert!(messages.iter().any(|m| m.starts_with("ACCEPT ... ON EXCEPTION: of the ACCEPT statements, only ACCEPT ... FROM ARGUMENT-VALUE")), "{messages:?}");
     assert!(messages.iter().any(|m| m.starts_with("DISPLAY UPON ARGUMENT-NUMBER: it shows one numeric item or literal")), "{messages:?}");
 }
+
+/// A FETCH whose INTO list names one host variable without its colon.
+const COLONLESS_INTO: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. COLONS.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  WS-A PIC X(4).\n",
+    "       01  WS-B PIC X(4).\n",
+    "           EXEC SQL DECLARE C1 CURSOR FOR SELECT A, B FROM T END-EXEC\n",
+    "       PROCEDURE DIVISION.\n",
+    "           EXEC SQL FETCH C1 INTO :WS-A, WS-B END-EXEC\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn an_into_name_without_its_colon_is_refused_under_strict_and_read_under_extended() {
+    let strict = compile(syntax::parse(COLONLESS_INTO).unwrap(), &[]).err().unwrap();
+    assert_eq!(strict.iter().map(|e| e.message.as_str()).collect::<Vec<_>>(), ["EXEC SQL FETCH: WS-B in the INTO list has no colon, which Db2 requires before every host variable"]);
+    let parsed = syntax::parse_with(COLONLESS_INTO, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap();
+    let compiled = compile(parsed, &EXTENDED.iter().map(|f| f.to_string()).collect::<Vec<_>>()).unwrap_or_else(|e| panic!("{e:?}"));
+    let shown: Vec<(u32, Option<&str>, Severity)> = compiled.diagnostics.iter().map(|m| (m.pos.line, m.id, m.severity)).collect();
+    assert_eq!(shown, [(9, Some("IWX0011"), Severity::Warning)]);
+}

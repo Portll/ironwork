@@ -448,7 +448,7 @@ again, and its `observed-12.1.5.txt` is what Db2 answered.
 | SQ4 | The PostgreSQL SQLSTATE to Db2 SQLCODE table | Observed for -803, -407, -530, -104, -204 (42704) and -206. Db2 for Linux gives -433 where z/OS documents -404 for a string too long for its column, and -801 where z/OS documents -802 (22012) for division by zero; the table keeps z/OS's. -911 is not provoked |
 | SQ5 | The dialect rewrite table | Chosen |
 | SQ6 | The SCRAM client nonce, where there is no `/dev/urandom` (Windows), comes from `std`'s OS-seeded `RandomState` keys, the process and the clock | Chosen |
-| SQ7 | A name in an INTO list written without its colon is a host variable. Real programs do it (`FETCH C INTO CSR-ENTITY, CSR-PROJ-ID`); Db2 13's precompiler reports the missing colon instead (SQL Reference, db2z_refs2hostvars) | Chosen |
+| SQ7 | A name in an INTO list written without its colon is refused under `--compliance strict`, as Db2 13's precompiler reports the missing colon (SQL Reference, db2z_refs2hostvars), and read as a host variable under extended with IWX0011-W, as real programs write it (`FETCH C INTO CSR-ENTITY, CSR-PROJ-ID`) | Chosen |
 | SQ8 | WHENEVER and cursor declarations carry on in listing order across nested programs, since the precompiler reads the source in order | Chosen |
 | SQ9 | An IEEE double stored into COMP-1 or COMP-2 drops the low-order bits that do not fit, rather than rounding | Chosen |
 | SQ10 | A zoned DISPLAY item without SIGN SEPARATE is a DECIMAL host variable, as SIGN LEADING SEPARATE is | Chosen |
@@ -589,7 +589,7 @@ trial cannot serve, as its licence is for evaluation only.
 Step 1: `syntax/src/sql.rs`, a `sql` field on `ExecBlock`, WHENEVER state in the parser, and
 `Check` reporting malformed statements. Two things the corpus taught are now assumptions:
 - cursor names take hyphens (`PROGRAMS-CSR`);
-- an INTO list may omit colons (SQ7).
+- under `--compliance extended`, an INTO list may omit colons (SQ7).
 
 Checked against a build of `main` over the 3,494 programs in the 500-repository corpus that hold
 EXEC SQL, both builds accept the same 362 programs.

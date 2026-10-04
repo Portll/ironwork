@@ -309,7 +309,8 @@ IWX0008-W; strict refuses it under either dialect, as Enterprise COBOL does. Gnu
 DIVISION RETURNING OMITTED, a program that returns no item, is read as a header with no RETURNING
 phrase, with IWX0009-W. ACCEPT FROM COMMAND-LINE, ARGUMENT-NUMBER and ARGUMENT-VALUE, and DISPLAY
 UPON ARGUMENT-NUMBER, read the job step's PARM program arguments as a command line, with IWX0010-W
-(C442).
+(C442). An EXEC SQL INTO name written without its colon is read as the host variable of that name,
+with IWX0011-W, where strict refuses it as Db2's precompiler does.
 [docs/compliance.md](docs/compliance.md) gives each one's meaning, the census that chose them, and
 what stays refused and why.
 

@@ -112,6 +112,7 @@ fn record_lengths(layout: &Layout, k: usize) -> (u32, u32) {
 const FUNCTIONS: &[&str] = rt::intrinsic::FIRST;
 
 pub const NUMERIC_FUNCTION_MOVED: &str = "an integer or numeric function as a MOVE's sender (GnuCOBOL; Enterprise COBOL takes one only where an arithmetic expression can be)";
+pub const INTO_WITHOUT_COLON: &str = "an INTO name written without its colon (Db2 13 for z/OS requires the colon before every host variable)";
 
 /// Checks and lays out a parsed program. `flags` are this compiler's own, such as `-silent`. A
 /// program is refused, with every message, when one stops its object code: under IBM's default
@@ -1480,6 +1481,15 @@ impl Check<'_> {
         }
         if let Some(syntax::sql::Sql { statement: syntax::sql::Statement::Malformed(why), .. }) = &block.sql {
             self.errors.push(syntax::messages::IWP0003.at(block.pos, format!("EXEC SQL {}: {why}", block.command)));
+        }
+        // Db2 13 requires a colon before every host variable (SQL Reference, db2z_refs2hostvars):
+        // an INTO name without one is refused under strict and read as a host variable under extended.
+        for r in block.sql.iter().flat_map(|sql| sql.statement.colonless_into()) {
+            if self.extended {
+                self.errors.push(syntax::messages::IWX0011.at(r.pos, format!("{INTO_WITHOUT_COLON}: {} is read as a host variable", r.name)));
+            } else {
+                self.errors.push(syntax::messages::IWP0046.at(r.pos, format!("EXEC SQL {}: {} in the INTO list has no colon, which Db2 requires before every host variable", block.command, r.name)));
+            }
         }
         for r in &block.host_variables {
             if r.subscripts.is_empty() {
