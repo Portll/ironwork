@@ -190,6 +190,25 @@ pub enum Event<'a> {
     Statement { file: &'a str, line: u32 },
 }
 
+/// Every kind of [`Event::Sink`] ironwork raises. A sink record joins a cobolwork finding by its
+/// kind, so each is one cobolwork's `lib/dataflow.mjs` names (fixtures/cobolwork/evidence/sinks.tsv).
+pub const SINK_KINDS: [&str; 14] = [
+    "cics-dynamic-transfer",
+    "cics-sysid",
+    "connection-target",
+    "dynamic-program-load",
+    "http-header",
+    "log",
+    "os-command",
+    "outbound-host",
+    "outbound-http",
+    "queue-name",
+    "record-key",
+    "record-update",
+    "screen",
+    "web-response",
+];
+
 /// The statements whose start a run tells its observer of: every one, or those on these lines of
 /// any source, which the observer narrows to their files.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -644,6 +663,9 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
     }
 
     pub fn notify(&mut self, event: Event<'_>) {
+        if let Event::Sink { kind, .. } = &event {
+            debug_assert!(SINK_KINDS.contains(kind), "the sink kind {kind} is not in rt::unit::SINK_KINDS");
+        }
         if let Some(observer) = self.observer.as_mut() {
             observer(event);
         }

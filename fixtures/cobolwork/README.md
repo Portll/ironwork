@@ -16,7 +16,10 @@ read them. cobolwork holds the originals; change them there, then run
 `evidence/kinds.tsv` is generated from the table cobolwork's evidence writer and verifier hold each
 record to. `crates/rt/src/evidence.rs` checks each kind ironwork's run journal writes against it.
 With `IRONWORK_COBOLWORK_DIR` set, `crates/cli/tests/evidence.rs` also has cobolwork's verifier read
-the evidence directory of real runs.
+the evidence directory of real runs. `evidence/sinks.tsv` lists the sink kinds cobolwork's
+`lib/dataflow.mjs` names: a sink record joins a finding by its kind, so `rt::unit::SINK_KINDS`, the
+kinds ironwork raises, stays within it, and a sink event of a kind not in `SINK_KINDS` fails a
+debug build.
 
 `bms/` is AWS CardDemo's `COSGN00` and `COCRDSL` maps with the copybooks CICS generated from them,
 unchanged below a header naming where each came from. They are under the Apache License 2.0; see

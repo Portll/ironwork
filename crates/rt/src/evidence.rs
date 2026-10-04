@@ -586,16 +586,21 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    /// The rows of one of cobolwork's evidence tables (fixtures/cobolwork/evidence).
+    fn cobolwork_table(name: &str) -> Vec<String> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/cobolwork/evidence").join(name);
+        let table = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        table.lines().filter(|l| !l.is_empty() && !l.starts_with('#')).map(String::from).collect()
+    }
+
     /// cobolwork's verifier refuses a kind it does not know, a field it does not list, and a record
     /// without a field it requires.
     #[test]
     fn every_kind_ironwork_writes_is_one_cobolworks_verifier_accepts() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/cobolwork/evidence/kinds.tsv");
-        let table = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let table = cobolwork_table("kinds.tsv");
         let words = |cell: &str| cell.split(' ').filter(|w| !w.is_empty()).map(String::from).collect::<Vec<_>>();
         let theirs: BTreeMap<&str, (&str, Vec<String>, Vec<String>)> = table
-            .lines()
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .iter()
             .map(|l| match l.split('\t').collect::<Vec<_>>()[..] {
                 [kind, file, fields, required] => (kind, (file, words(fields), words(required))),
                 ref row => panic!("a row has four cells: {row:?}"),
@@ -610,6 +615,22 @@ mod tests {
             for field in their_required {
                 assert!(required.contains(&field.as_str()), "{kind}: cobolwork's verifier requires {field}, which ironwork may leave out");
             }
+        }
+    }
+
+    /// A sink record joins a cobolwork finding by its kind.
+    #[test]
+    fn every_sink_kind_ironwork_raises_is_one_cobolwork_names() {
+        use crate::cics::Sink;
+        let theirs = cobolwork_table("sinks.tsv");
+        for kind in crate::unit::SINK_KINDS {
+            assert!(theirs.iter().any(|k| k == kind), "cobolwork names no {kind} sink");
+        }
+        let cics = [Sink::DynamicTransfer, Sink::RecordKey, Sink::RecordUpdate, Sink::Log, Sink::Screen, Sink::WebResponse, Sink::HttpHeader, Sink::OutboundHost, Sink::OutboundHttp, Sink::QueueName, Sink::Sysid];
+        for sink in cics {
+            // No wildcard: a new variant does not compile here until it is listed in `cics`.
+            let (Sink::DynamicTransfer | Sink::RecordKey | Sink::RecordUpdate | Sink::Log | Sink::Screen | Sink::WebResponse | Sink::HttpHeader | Sink::OutboundHost | Sink::OutboundHttp | Sink::QueueName | Sink::Sysid) = sink;
+            assert!(crate::unit::SINK_KINDS.contains(&sink.kind()), "{} is not in SINK_KINDS", sink.kind());
         }
     }
 

@@ -137,6 +137,8 @@ fn said(outcome: Outcome, what: &str) -> ExitCode {
 mod tests {
     use super::{Convention, Outcome, STOPS, code};
 
+    const NOT_RUN: [&str; 3] = ["IRONWORK", "EXEC", "JAVA"];
+
     #[test]
     fn a_return_code_passes_through_up_to_238_and_any_other_exits_239() {
         for rc in [0, 1, 4, 16, 238] {
@@ -178,11 +180,37 @@ mod tests {
     #[test]
     fn ironwork_s_own_abend_codes_say_what_it_does_not_run() {
         use exec::abend::AbendCode;
-        for text in ["IRONWORK", "EXEC", "JAVA"] {
+        for text in NOT_RUN {
             assert_eq!(Outcome::of_abend(&AbendCode::from(text)), Outcome::NotRun, "{text}");
         }
         for text in ["S0C7", "S806", "S322", "U4038", "IO-35", "ASRA", "AEI0", "SQL", "SQLR"] {
             assert_eq!(Outcome::of_abend(&AbendCode::from(text)), Outcome::Abend, "{text}");
         }
+    }
+
+    /// docs/run-endings.tsv, which cobolwork vendors to read how a run ended: each status a run
+    /// ends with other than its RETURN-CODE, and the abend codes that mean ironwork did not run it.
+    #[test]
+    fn docs_run_endings_is_this_table() {
+        let name = |o: Outcome| {
+            let debug = format!("{o:?}");
+            debug.chars().enumerate().fold(String::new(), |mut s, (i, c)| {
+                if c.is_ascii_uppercase() && i > 0 {
+                    s.push('-');
+                }
+                s.push(c.to_ascii_lowercase());
+                s
+            })
+        };
+        let mut table = String::from("# Generated from crates/cli/src/exit.rs by its tests; do not edit.\n# kind\tid\toutcome\n");
+        for o in STOPS {
+            table.push_str(&format!("status\t{}\t{}\n", o.codes().0, name(o)));
+        }
+        for code in NOT_RUN {
+            table.push_str(&format!("abend\t{code}\t{}\n", name(Outcome::NotRun)));
+        }
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/run-endings.tsv");
+        let committed = std::fs::read_to_string(&path).unwrap_or_default().replace('\r', "");
+        assert!(committed == table, "{} is not this table; write it as:\n{table}", path.display());
     }
 }

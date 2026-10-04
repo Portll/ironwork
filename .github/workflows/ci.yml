@@ -23,7 +23,7 @@ jobs:
         with:
           repository: Portll/cobolwork
           # Pinned to cobolwork commits whose shared tables drift tests pass against.
-          ref: 2afba01205099f6a7d609b87cdca2cdbaeb0f5c3
+          ref: 8b5bbbb70a96063d8ea48731e2a42ec6a7c0fdd0
           path: cobolwork
           persist-credentials: false
           sparse-checkout: |

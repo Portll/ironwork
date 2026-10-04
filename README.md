@@ -243,6 +243,10 @@ program the compile refused, 244 for an IRONWORK, EXEC or JAVA abend, 245 for a 
 be read. Its COND and IF tests see each of these as the abend the job log names. `job --expected`
 exits with its equivalence verdict ([docs/evidence.md](docs/evidence.md) §4) and 2 for usage.
 
+[docs/run-endings.tsv](docs/run-endings.tsv) lists the statuses from 240 up and the abend codes that
+exit 244, for a tool that reads how a run ended; cobolwork vendors it, and a test holds it to
+`crates/cli/src/exit.rs`.
+
 With `--exit-code`, `run`, `cics` and `job` exit with a verdict instead, the convention cobolwork's
 `--exit-code` follows:
 
