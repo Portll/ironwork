@@ -72,7 +72,7 @@ pub fn write(value: &Value, bytes: &mut [u8], ty: &HostType, page: &CodePage) ->
                 *bytes.last_mut().unwrap() |= 0x0F;
             }
         }
-        HostType::Zoned { digits, scale, signed, sign } => store_zoned(fitted(scaled(value, scale)?, digits, signed)?, bytes, digits, signed, sign),
+        HostType::Zoned { digits, scale, signed, sign } => store_zoned(fitted(scaled(value, scale)?, digits, signed)?, bytes, signed, sign),
         HostType::Real => bytes.copy_from_slice(&hfp_image(float(value)?, Precision::Short).ok_or(OUT_OF_RANGE)?),
         HostType::Double => bytes.copy_from_slice(&hfp_image(float(value)?, Precision::Long).ok_or(OUT_OF_RANGE)?),
         HostType::Char(_) => return store_text(&text(value, page)?, bytes, page),
@@ -153,12 +153,20 @@ fn store_integer(v: i128, bytes: &mut [u8], signed: bool) -> Result<(), SqlError
     Ok(())
 }
 
-/// Zoned digits through UNPK, then the sign where the SIGN clause puts it.
-fn store_zoned(v: i128, bytes: &mut [u8], digits: u32, signed: bool, sign: Option<SignClause>) {
+/// Zoned digits with the sign in the last digit's zone, as UNPK of the packed value leaves them,
+/// then the sign where the SIGN clause puts it. UNPK itself stops at 16 bytes; a host variable
+/// takes up to 31 digits.
+fn store_zoned(v: i128, bytes: &mut [u8], signed: bool, sign: Option<SignClause>) {
     let negative = v < 0;
-    let mut packed = vec![0u8; digits as usize / 2 + 1];
-    decimal::encode(&mut packed, Decimal { negative, magnitude: v.unsigned_abs() }).expect("the packed image holds the item's digits");
-    let unpack = |zoned: &mut [u8]| decimal::unpk(zoned, &packed).expect("a zoned host variable is 1 to 16 bytes");
+    let unpack = |zoned: &mut [u8]| {
+        let mut magnitude = v.unsigned_abs();
+        for byte in zoned.iter_mut().rev() {
+            *byte = 0xF0 | (magnitude % 10) as u8;
+            magnitude /= 10;
+        }
+        let (last, zone) = (zoned.len() - 1, if negative { 0xD0 } else { 0xC0 });
+        zoned[last] = zone | zoned[last] & 0x0F;
+    };
     match sign {
         Some(SignClause { separate: true, position }) => {
             let n = bytes.len();
@@ -318,6 +326,22 @@ mod tests {
         assert_eq!(get(&[0x60, 0xF0, 0xF0, 0xF1, 0xF2, 0xF3], &leading_separate), Ok(Value::Decimal { value: -123, scale: 0 }));
         let leading = HostType::Zoned { digits: 3, scale: 0, signed: true, sign: Some(SignClause { position: SignPosition::Leading, separate: false }) };
         assert_eq!(put(Value::Int(45), 3, &leading).0, [0xC0, 0xF4, 0xF5]);
+    }
+
+    #[test]
+    fn zoned_host_variables_longer_than_sixteen_digits() {
+        let mut eighteen = vec![0xF0; 15];
+        eighteen.extend([0xF1, 0xF2, 0xD3]);
+        let trailing = HostType::Zoned { digits: 18, scale: 0, signed: true, sign: None };
+        assert_eq!(put(Value::Int(-123), 18, &trailing).0, eighteen);
+        assert_eq!(get(&eighteen, &trailing), Ok(Value::Decimal { value: -123, scale: 0 }));
+        let separate = HostType::Zoned { digits: 31, scale: 2, signed: true, sign: Some(SignClause { position: SignPosition::Leading, separate: true }) };
+        let (bytes, written) = put(Value::Decimal { value: 10i128.pow(30) + 5, scale: 2 }, 32, &separate);
+        assert_eq!((bytes[0], bytes[1], bytes[31], written), (0x4E, 0xF1, 0xF5, Ok(Written::default())));
+        let leading = HostType::Zoned { digits: 17, scale: 0, signed: true, sign: Some(SignClause { position: SignPosition::Leading, separate: false }) };
+        assert_eq!(put(Value::Int(-7), 17, &leading).0[..2], [0xD0, 0xF0]);
+        let unsigned = HostType::Zoned { digits: 20, scale: 0, signed: false, sign: None };
+        assert_eq!(put(Value::Int(9), 20, &unsigned).0[19], 0xF9);
     }
 
     #[test]
