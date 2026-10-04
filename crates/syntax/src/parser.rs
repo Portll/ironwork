@@ -482,7 +482,7 @@ impl Parser<'_> {
                     "LOCAL-STORAGE" => local_storage = self.data_entries()?,
                     "FILE" => self.file_section(&mut files)?,
                     "REPORT" => report_writer.reports.extend(self.report_section()?),
-                    other => return Err(self.error(format!("the {other} SECTION is not supported yet"))),
+                    other => return Err(crate::messages::IWR0006.at(self.pos(), format!("the {other} SECTION is not supported yet"))),
                 }
             }
         }
@@ -940,7 +940,7 @@ impl Parser<'_> {
                         "SEQUENTIAL" => Organization::Sequential,
                         "INDEXED" => Organization::Indexed,
                         "RELATIVE" => Organization::Relative,
-                        other => return Err(self.error(format!("ORGANIZATION {other} is not supported yet"))),
+                        other => return Err(crate::messages::IWR0007.at(self.pos(), format!("ORGANIZATION {other} is not supported yet"))),
                     };
                 }
                 "ACCESS" => {
@@ -968,7 +968,7 @@ impl Parser<'_> {
                         self.at += 1;
                     }
                 }
-                other => return Err(self.error(format!("{other} is not a SELECT clause ironwork for COBOL supports yet"))),
+                other => return Err(crate::messages::IWR0008.at(self.pos(), format!("{other} is not a SELECT clause ironwork for COBOL supports yet"))),
             }
         }
         if let Some(at) = delimiter.filter(|_| f.organization != Organization::Sequential) {
@@ -1357,7 +1357,7 @@ impl Parser<'_> {
                     if w == "OBJECT" {
                         self.object_reference(&mut e)?;
                     } else {
-                        e.usage = Some(usage_word(&w).ok_or_else(|| Error::at(pos, format!("USAGE {w} is not supported yet")))?);
+                        e.usage = Some(usage_word(&w).ok_or_else(|| crate::messages::IWR0004.at(pos, format!("USAGE {w} is not supported yet")))?);
                     }
                 }
                 "OBJECT" => self.object_reference(&mut e)?,
@@ -1454,7 +1454,7 @@ impl Parser<'_> {
                 "IS" if matches!(self.word(), Some("EXTERNAL" | "GLOBAL")) => {}
                 other => match usage_word(other) {
                     Some(u) => e.usage = Some(u),
-                    None => return Err(Error::at(self.tokens[self.at - 1].pos, format!("{other} is not a data description clause ironwork for COBOL supports yet"))),
+                    None => return Err(crate::messages::IWR0003.at(self.tokens[self.at - 1].pos, format!("{other} is not a data description clause ironwork for COBOL supports yet"))),
                 },
             }
         }
@@ -1491,7 +1491,7 @@ impl Parser<'_> {
             return Err(Error::at(at, format!("{written}: a floating-point literal's mantissa has at most 16 digits")));
         }
         let exponent: i32 = exponent.parse().map_err(|_| Error::at(at, format!("{written}: not an exponent")))?;
-        fixed_point(mantissa, exponent).map(Some).ok_or_else(|| Error::at(at, format!("VALUE {written}: a floating-point VALUE of more than 31 digits in fixed point is not supported yet")))
+        fixed_point(mantissa, exponent).map(Some).ok_or_else(|| crate::messages::IWR0005.at(at, format!("VALUE {written}: a floating-point VALUE of more than 31 digits in fixed point is not supported yet")))
     }
 
     fn literal(&mut self) -> R<Literal> {
@@ -1920,7 +1920,7 @@ impl Parser<'_> {
                 Some(_) => Stmt::Exit { kind: ExitKind::Perform, pos },
                 None => Stmt::Exit { kind: ExitKind::Plain, pos },
             },
-            other => return Err(Error::at(pos, format!("{other} is not a statement ironwork for COBOL supports yet"))),
+            other => return Err(crate::messages::IWR0002.at(pos, format!("{other} is not a statement ironwork for COBOL supports yet"))),
         })
     }
 

@@ -110,7 +110,7 @@ pub(crate) fn check_write(program: &Program, layout: &Layout, record: &Ref, adva
         errors.push(Error::at(pos, format!("WRITE ... END-OF-PAGE: the FD of {} has no LINAGE clause", f.name)));
     }
     if let (Some(Advancing::Mnemonic { name, .. }), Some(_)) = (advancing, &f.linage) {
-        errors.push(Error::at(pos, format!("WRITE ... ADVANCING {name} on {}, whose FD has LINAGE, is not supported yet", f.name)));
+        errors.push(syntax::messages::IWR0014.at(pos, format!("WRITE ... ADVANCING {name} on {}, whose FD has LINAGE, is not supported yet", f.name)));
     }
 }
 

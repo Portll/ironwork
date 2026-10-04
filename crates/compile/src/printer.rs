@@ -82,7 +82,7 @@ pub(crate) fn check_write(program: &Program, layout: &Layout, record: &Ref, adva
     if let Advancing::Mnemonic { name, environment, .. } = advancing
         && mnemonic_space(environment).is_none()
     {
-        errors.push(Error::at(pos, format!("ADVANCING {name}: stacker selection ({environment}) on a card punch is not supported yet")));
+        errors.push(syntax::messages::IWR0013.at(pos, format!("ADVANCING {name}: stacker selection ({environment}) on a card punch is not supported yet")));
     }
     let Some(f) = file_of(layout, record).map(|k| &program.files[k]) else { return };
     match f.organization {

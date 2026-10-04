@@ -151,7 +151,7 @@ pub(super) fn contained_programs(writer: &ReportWriter, nested: &[Program]) -> R
         let own = |p: &Program| p.report_writer.uses.iter().any(|v| v.group == u.group);
         let has_group = |p: &Program| p.report_writer.reports.iter().flat_map(|r| &r.groups).any(|g| g.name.as_deref() == Some(u.group.as_str()));
         if nested.iter().any(|p| has_group(p) && !own(p)) {
-            return Err(Error::at(u.pos, format!("USE GLOBAL BEFORE REPORTING {} for a report group of a contained program is not supported yet", u.group)));
+            return Err(crate::messages::IWR0023.at(u.pos, format!("USE GLOBAL BEFORE REPORTING {} for a report group of a contained program is not supported yet", u.group)));
         }
     }
     Ok(())

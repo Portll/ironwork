@@ -179,7 +179,7 @@ fn a_variably_located_object_initialize_or_sort_key_is_refused_by_name() {
         "       01  R.\n           05 N PIC 9.\n           05 A OCCURS 2.\n              10 T PIC X OCCURS 1 TO 5 DEPENDING ON N.\n           05 X PIC X.\n",
         &line("GOBACK."),
     ));
-    assert_eq!(nested, "items after an OCCURS DEPENDING ON table in the same record are not supported yet");
+    assert_eq!(nested, "IWR0012-S items after an OCCURS DEPENDING ON table in the same record are not supported yet");
     let sort = compile_errors(&file_program(
         "           SELECT S-FILE ASSIGN TO SORTWK1.\n           SELECT F ASSIGN TO FDD.\n",
         "       SD  S-FILE.\n       01  S-REC.\n           05 S-CNT PIC 9.\n           05 S-ITEM PIC X OCCURS 1 TO 5 DEPENDING ON S-CNT.\n           05 S-KEY PIC X.\n       FD  F.\n       01  F-REC PIC X(7).\n",

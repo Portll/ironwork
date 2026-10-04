@@ -166,7 +166,7 @@ pub fn class_code(program: &Program, flags: &[String], at: CompileTime) -> Resul
     for (factory, part) in [(true, &def.factory), (false, &def.object)] {
         let Some(part) = part else { continue };
         if let Some(e) = part.working_storage.iter().find(|e| !e.indexed_by.is_empty()) {
-            errors.push(Error::at(e.pos, "INDEXED BY in FACTORY or OBJECT data is not supported yet"));
+            errors.push(syntax::messages::IWR0009.at(e.pos, "INDEXED BY in FACTORY or OBJECT data is not supported yet"));
             continue;
         }
         let mut data = base.clone();
@@ -214,7 +214,7 @@ fn method_code(class: &Program, method: &Program, part: &ClassPart, factory: boo
         }
     };
     if let Some(e) = part.working_storage.iter().find(|e| e.external) {
-        return Err(vec![Error::at(e.pos, format!("{}: EXTERNAL in FACTORY or OBJECT WORKING-STORAGE is not supported yet", e.name.as_deref().unwrap_or("FILLER")))]);
+        return Err(vec![syntax::messages::IWR0010.at(e.pos, format!("{}: EXTERNAL in FACTORY or OBJECT WORKING-STORAGE is not supported yet", e.name.as_deref().unwrap_or("FILLER")))]);
     }
     for e in &part.working_storage {
         let mut e = e.clone();
@@ -477,7 +477,7 @@ pub(crate) fn check(layout: &Layout, program: &Program, errors: &mut Vec<Error>)
         }
     }
     if method && let Some(f) = program.files.first() {
-        rules.errors.push(Error::at(f.pos, "a method's FILE SECTION can define only EXTERNAL files, which ironwork for COBOL does not support yet"));
+        rules.errors.push(syntax::messages::IWR0011.at(f.pos, "a method's FILE SECTION can define only EXTERNAL files, which ironwork for COBOL does not support yet"));
     }
     for p in &program.paragraphs {
         rules.statements(&p.statements);

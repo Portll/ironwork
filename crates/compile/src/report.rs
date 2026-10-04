@@ -154,7 +154,7 @@ pub(crate) fn prepare(program: &mut Program, adv: bool, qualify: numeric::Qualif
                 None
             }
             _ => {
-                errors.push(Error::at(r.pos, format!("report {} in more than one FD (INITIATE ... UPON) is not supported yet", r.name)));
+                errors.push(syntax::messages::IWR0024.at(r.pos, format!("report {} in more than one FD (INITIATE ... UPON) is not supported yet", r.name)));
                 None
             }
         };
@@ -522,7 +522,7 @@ fn check_lines(lines: &[(LineNumber, Vec<DraftField>)], kind: GroupKind, paged: 
                 errors.push(Error::at(pos, "NEXT PAGE needs a PAGE LIMIT"));
             }
             if li > 0 {
-                errors.push(Error::at(pos, "NEXT PAGE on a LINE other than a group's first (MULTIPLE PAGE) is not supported yet"));
+                errors.push(syntax::messages::IWR0025.at(pos, "NEXT PAGE on a LINE other than a group's first (MULTIPLE PAGE) is not supported yet"));
             }
             if matches!(kind, GroupKind::PageHeading | GroupKind::PageFooting) {
                 errors.push(Error::at(pos, "a PAGE HEADING or PAGE FOOTING cannot begin on the NEXT PAGE"));
@@ -550,7 +550,7 @@ fn resolve_report(program: &Program, layout: &Layout, ri: usize, r: &rw::Report,
     for (c, &(saved, len)) in r.controls.iter().zip(&draft.controls) {
         check.reference(c);
         if !c.subscripts.is_empty() || c.refmod.is_some() {
-            check.errors.push(Error::at(c.pos, format!("CONTROL {}: a subscripted or reference-modified control is not supported yet", c.name)));
+            check.errors.push(syntax::messages::IWR0026.at(c.pos, format!("CONTROL {}: a subscripted or reference-modified control is not supported yet", c.name)));
         }
         controls.push(Control { reference: c.clone(), saved, len });
     }
@@ -618,7 +618,7 @@ fn resolve_report(program: &Program, layout: &Layout, ri: usize, r: &rw::Report,
         let unprinted: Vec<Field> = dg.unprinted.iter().map(|f| make(f, 0, &mut check)).collect();
         let indicate = lines.iter().flat_map(|l| &l.fields).any(|f| f.group_indicate).then_some(gi);
         if indicate.is_some() && kind != GroupKind::Detail {
-            check.errors.push(Error::at(g.pos, "GROUP INDICATE outside a DETAIL group is not supported yet"));
+            check.errors.push(syntax::messages::IWR0027.at(g.pos, "GROUP INDICATE outside a DETAIL group is not supported yet"));
         }
         groups.push(Group { name: g.name.clone(), kind, level, next_group: g.next_group, lines, unprinted, cross: Vec::new(), rolls: Vec::new(), totals, indicate, declarative: None });
     }
@@ -648,7 +648,7 @@ fn resolve_report(program: &Program, layout: &Layout, ri: usize, r: &rw::Report,
                 for operand in &clause.operands {
                     if let Some((or, og, oe)) = report_entry(reports, ri, operand) {
                         if or != ri {
-                            check.errors.push(Error::at(operand.pos, "a SUM of an entry in another report is not supported yet"));
+                            check.errors.push(syntax::messages::IWR0028.at(operand.pos, "a SUM of an entry in another report is not supported yet"));
                             continue;
                         }
                         let source = &r.groups[og].entries[oe];

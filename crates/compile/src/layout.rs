@@ -477,7 +477,7 @@ pub fn build(
         }
         let holds_another = tables.iter().any(|&u| u != t && ancestors(&items, u).any(|p| p == t));
         if !followers.is_empty() && (items[t].dims.len() > 1 || holds_another) {
-            return Err(Error::at(items[t].pos, "items after an OCCURS DEPENDING ON table in the same record are not supported yet"));
+            return Err(syntax::messages::IWR0012.at(items[t].pos, "items after an OCCURS DEPENDING ON table in the same record are not supported yet"));
         }
         while let Some(f) = followers.pop() {
             items[f].moved_by.push(t);

@@ -49,7 +49,7 @@ impl Parser<'_> {
     pub(super) fn report_names(&mut self) -> R<Vec<String>> {
         self.accept_any(&["IS", "ARE"]);
         if self.is_word("ALL") {
-            return Err(Error::at(self.pos(), "REPORTS ARE ALL is not supported yet"));
+            return Err(crate::messages::IWR0029.at(self.pos(), "REPORTS ARE ALL is not supported yet"));
         }
         let mut names = Vec::new();
         while let Some(w) = self.word().filter(|w| !FD_WORDS.contains(w)) {
@@ -73,7 +73,7 @@ impl Parser<'_> {
                     return Err(self.error("a report name"));
                 }
                 if self.is_word("UPON") {
-                    return Err(Error::at(pos, "INITIATE ... UPON is not supported yet"));
+                    return Err(crate::messages::IWR0030.at(pos, "INITIATE ... UPON is not supported yet"));
                 }
                 if verb == "INITIATE" { ReportStmt::Initiate { reports, pos } } else { ReportStmt::Terminate { reports, pos } }
             }
@@ -119,14 +119,14 @@ impl Parser<'_> {
             let clause_pos = self.pos();
             let clause = self.name("an RD clause or a period")?;
             match clause.as_str() {
-                "IS" | "GLOBAL" => return Err(Error::at(clause_pos, "a GLOBAL report is not supported yet")),
+                "IS" | "GLOBAL" => return Err(crate::messages::IWR0031.at(clause_pos, "a GLOBAL report is not supported yet")),
                 "WITH" | "CODE" => {
                     if clause == "WITH" {
                         self.expect_word("CODE")?;
                     }
                     self.accept_word("IS");
                     if !matches!(self.peek(), Some(Tok::Alnum(_) | Tok::Hex(_))) {
-                        return Err(Error::at(clause_pos, "CODE with a mnemonic-name or an identifier is not supported yet"));
+                        return Err(crate::messages::IWR0032.at(clause_pos, "CODE with a mnemonic-name or an identifier is not supported yet"));
                     }
                     r.code = Some(self.literal()?);
                 }
@@ -170,7 +170,7 @@ impl Parser<'_> {
                         }
                         self.accept_word("IS");
                         if !self.absolute_integer_ahead() {
-                            return Err(Error::at(clause_pos, "LAST DETAIL with an identifier is not supported yet"));
+                            return Err(crate::messages::IWR0033.at(clause_pos, "LAST DETAIL with an identifier is not supported yet"));
                         }
                         r.last_detail = Some(self.report_integer("the LAST DETAIL line")?);
                     } else {
@@ -195,17 +195,17 @@ impl Parser<'_> {
                     self.expect_word("LIMIT")?;
                     self.accept_word("IS");
                     if !self.absolute_integer_ahead() {
-                        return Err(Error::at(clause_pos, "LINE LIMIT with an identifier is not supported yet"));
+                        return Err(crate::messages::IWR0034.at(clause_pos, "LINE LIMIT with an identifier is not supported yet"));
                     }
                     r.line_limit = Some(self.report_integer("the LINE LIMIT")?);
                 }
-                "ALLOW" | "OVERFLOW" | "SUM" | "STYLE" => return Err(Error::at(clause_pos, format!("the {clause} clause of an RD is not supported yet"))),
-                other => return Err(Error::at(clause_pos, format!("{other} is not an RD clause ironwork for COBOL supports yet"))),
+                "ALLOW" | "OVERFLOW" | "SUM" | "STYLE" => return Err(crate::messages::IWR0035.at(clause_pos, format!("the {clause} clause of an RD is not supported yet"))),
+                other => return Err(crate::messages::IWR0036.at(clause_pos, format!("{other} is not an RD clause ironwork for COBOL supports yet"))),
             }
         }
         while let Some((level, pos)) = self.level_number()? {
             if level == 88 || level == 66 || level == 77 {
-                return Err(Error::at(pos, format!("a level-{level} entry in the REPORT SECTION is not supported yet")));
+                return Err(crate::messages::IWR0037.at(pos, format!("a level-{level} entry in the REPORT SECTION is not supported yet")));
             }
             if !(1..=49).contains(&level) {
                 return Err(Error::at(pos, format!("level {level} is not a data level")));
@@ -305,7 +305,7 @@ impl Parser<'_> {
                     let source = self.source_operand()?;
                     self.report_content(&mut e, Content::Source(source), clause_pos)?;
                     if word == "SOURCES" && self.starts_operand() && !self.word().is_some_and(|w| ENTRY_WORDS.contains(&w)) {
-                        return Err(Error::at(clause_pos, "multiple SOURCES is not supported yet"));
+                        return Err(crate::messages::IWR0038.at(clause_pos, "multiple SOURCES is not supported yet"));
                     }
                 }
                 "VALUE" | "VALUES" => {
@@ -314,7 +314,7 @@ impl Parser<'_> {
                     let lit = self.literal()?;
                     self.report_content(&mut e, Content::Value(lit), clause_pos)?;
                     if matches!(self.peek(), Some(Tok::Alnum(_) | Tok::Hex(_) | Tok::National(_) | Tok::Number(_))) {
-                        return Err(Error::at(clause_pos, "multiple VALUES is not supported yet"));
+                        return Err(crate::messages::IWR0039.at(clause_pos, "multiple VALUES is not supported yet"));
                     }
                 }
                 "SUM" => {
@@ -329,7 +329,7 @@ impl Parser<'_> {
                 "GROUP" => {
                     self.at += 1;
                     if self.is_word("LIMIT") {
-                        return Err(Error::at(clause_pos, "GROUP LIMIT is not supported yet"));
+                        return Err(crate::messages::IWR0040.at(clause_pos, "GROUP LIMIT is not supported yet"));
                     }
                     self.accept_word("INDICATE");
                     e.group_indicate = true;
@@ -354,7 +354,7 @@ impl Parser<'_> {
                         self.accept_word("IS");
                         let usage = self.name("a usage")?;
                         if usage != "DISPLAY" {
-                            return Err(Error::at(clause_pos, format!("USAGE {usage} in a report group is not supported yet")));
+                            return Err(crate::messages::IWR0041.at(clause_pos, format!("USAGE {usage} in a report group is not supported yet")));
                         }
                     }
                 }
@@ -364,10 +364,10 @@ impl Parser<'_> {
                 }
                 w => {
                     if let Some(what) = refused(w) {
-                        return Err(Error::at(clause_pos, format!("{what} is not supported yet")));
+                        return Err(crate::messages::IWR0042.at(clause_pos, format!("{what} is not supported yet")));
                     }
                     if ENTRY_WORDS.contains(&w) || !self.starts_operand() {
-                        return Err(Error::at(clause_pos, format!("{w} is not a report group clause ironwork for COBOL supports yet")));
+                        return Err(crate::messages::IWR0043.at(clause_pos, format!("{w} is not a report group clause ironwork for COBOL supports yet")));
                     }
                     let source = self.source_operand()?;
                     self.report_content(&mut e, Content::Source(source), clause_pos)?;
@@ -379,7 +379,7 @@ impl Parser<'_> {
 
     fn report_content(&mut self, e: &mut Entry, content: Content, pos: Pos) -> R<()> {
         if e.content.is_some() {
-            return Err(Error::at(pos, "an entry with more than one SOURCE, VALUE or SUM (a multiple-choice entry) is not supported yet"));
+            return Err(crate::messages::IWR0044.at(pos, "an entry with more than one SOURCE, VALUE or SUM (a multiple-choice entry) is not supported yet"));
         }
         e.content = Some(content);
         Ok(())
@@ -387,7 +387,7 @@ impl Parser<'_> {
 
     fn source_operand(&mut self) -> R<Expr> {
         if self.word().is_some_and(|w| w == "SUM" || w == "COUNT") {
-            return Err(Error::at(self.pos(), "a SUM or COUNT term in a SOURCE expression is not supported yet"));
+            return Err(crate::messages::IWR0045.at(self.pos(), "a SUM or COUNT term in a SOURCE expression is not supported yet"));
         }
         self.expr()
     }
@@ -422,17 +422,17 @@ impl Parser<'_> {
                 let pos = self.pos();
                 self.accept_any(&["FOR", "ON"]);
                 if self.is_word("ALL") {
-                    return Err(Error::at(pos, "CONTROL FOOTING FOR ALL is not supported yet"));
+                    return Err(crate::messages::IWR0046.at(pos, "CONTROL FOOTING FOR ALL is not supported yet"));
                 }
                 if heading && self.is_word("PAGE") {
-                    return Err(Error::at(pos, "CONTROL HEADING ... OR PAGE is not supported yet"));
+                    return Err(crate::messages::IWR0047.at(pos, "CONTROL HEADING ... OR PAGE is not supported yet"));
                 }
                 let control = self.control_name()?;
                 if heading && self.is_word("OR") {
-                    return Err(Error::at(pos, "CONTROL HEADING ... OR PAGE is not supported yet"));
+                    return Err(crate::messages::IWR0047.at(pos, "CONTROL HEADING ... OR PAGE is not supported yet"));
                 }
                 if !heading && control.is_some() && self.control_name_ahead() {
-                    return Err(Error::at(pos, "a CONTROL FOOTING for more than one control is not supported yet"));
+                    return Err(crate::messages::IWR0048.at(pos, "a CONTROL FOOTING for more than one control is not supported yet"));
                 }
                 if heading { GroupType::ControlHeading(control) } else { GroupType::ControlFooting(control) }
             }
@@ -489,7 +489,7 @@ impl Parser<'_> {
             LineNumber::Plus(1)
         };
         if self.absolute_integer_ahead() || self.plus_integer_ahead() {
-            return Err(Error::at(pos, "multiple LINES is not supported yet"));
+            return Err(crate::messages::IWR0049.at(pos, "multiple LINES is not supported yet"));
         }
         Ok(number)
     }
@@ -516,7 +516,7 @@ impl Parser<'_> {
             ColumnNumber::Plus(1)
         };
         if self.absolute_integer_ahead() || self.plus_integer_ahead() {
-            return Err(Error::at(pos, "multiple COLUMNS is not supported yet"));
+            return Err(crate::messages::IWR0050.at(pos, "multiple COLUMNS is not supported yet"));
         }
         Ok(column)
     }
@@ -529,12 +529,12 @@ impl Parser<'_> {
         while self.sum_operand_ahead() {
             operands.push(self.reference()?);
             if expression(self) {
-                return Err(Error::at(pos, "SUM of an arithmetic expression is not supported yet"));
+                return Err(crate::messages::IWR0051.at(pos, "SUM of an arithmetic expression is not supported yet"));
             }
         }
         if operands.is_empty() {
             if expression(self) {
-                return Err(Error::at(pos, "SUM of an arithmetic expression is not supported yet"));
+                return Err(crate::messages::IWR0051.at(pos, "SUM of an arithmetic expression is not supported yet"));
             }
             return Err(self.error("a SUM operand"));
         }

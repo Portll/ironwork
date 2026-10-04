@@ -360,7 +360,7 @@ fn assign_items(program: &mut Program, layout: &layout::Layout, options: &Option
         if !matches!(layout.items[item].kind, rt::storage::Kind::Group | rt::storage::Kind::Alnum { .. }) {
             errors.push(Error::at(pos, format!("ASSIGN {name}: the item holding the file's name must be alphanumeric or a group")));
         } else if f.sort || sorted.contains(&f.name.as_str()) {
-            errors.push(Error::at(pos, format!("ASSIGN {name}: a file SORT or MERGE reads, writes or describes taking its name from a data item is not supported yet")));
+            errors.push(syntax::messages::IWR0022.at(pos, format!("ASSIGN {name}: a file SORT or MERGE reads, writes or describes taking its name from a data item is not supported yet")));
         } else {
             errors.push(syntax::messages::IWX0007.at(pos, format!("{}: each OPEN of {} takes its DD name from {name}", syntax::extended::ASSIGN_ITEM, f.name)));
             kept.push(k);

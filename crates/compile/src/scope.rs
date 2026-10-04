@@ -60,7 +60,7 @@ pub(crate) fn rules(program: &Program, errors: &mut Vec<Error>) {
                 errors.push(Error::at(e.pos, format!("{name}: an item of EXTERNAL record {} takes no VALUE clause", r.name.as_deref().unwrap_or_default())));
             }
             if contains && !e.indexed_by.is_empty() && record.is_some_and(|r| r.global) {
-                errors.push(Error::at(e.pos, format!("{name}: INDEXED BY in a GLOBAL record, in a program that contains others, is not supported yet")));
+                errors.push(syntax::messages::IWR0015.at(e.pos, format!("{name}: INDEXED BY in a GLOBAL record, in a program that contains others, is not supported yet")));
             }
         }
     }
@@ -69,16 +69,16 @@ pub(crate) fn rules(program: &Program, errors: &mut Vec<Error>) {
             errors.push(Error::at(f.pos, format!("FD {}: a record of an EXTERNAL or GLOBAL file needs a data-name, not FILLER", f.name)));
         }
         if f.external && f.linage.is_some() {
-            errors.push(Error::at(f.pos, format!("FD {}: LINAGE on an EXTERNAL file is not supported yet", f.name)));
+            errors.push(syntax::messages::IWR0016.at(f.pos, format!("FD {}: LINAGE on an EXTERNAL file is not supported yet", f.name)));
         }
         if f.external && !f.reports.is_empty() {
-            errors.push(Error::at(f.pos, format!("FD {}: REPORT on an EXTERNAL file is not supported yet", f.name)));
+            errors.push(syntax::messages::IWR0017.at(f.pos, format!("FD {}: REPORT on an EXTERNAL file is not supported yet", f.name)));
         }
         if contains && f.global && (f.linage.is_some() || !f.reports.is_empty()) {
-            errors.push(Error::at(f.pos, format!("FD {}: LINAGE or REPORT on a GLOBAL file, in a program that contains others, is not supported yet", f.name)));
+            errors.push(syntax::messages::IWR0018.at(f.pos, format!("FD {}: LINAGE or REPORT on a GLOBAL file, in a program that contains others, is not supported yet", f.name)));
         }
         if contains && !f.global && let Some(e) = f.records.iter().find(|e| e.global) {
-            errors.push(Error::at(e.pos, format!("{}: a GLOBAL record of FD {}, which is not GLOBAL, in a program that contains others, is not supported yet", e.name.as_deref().unwrap_or("FILLER"), f.name)));
+            errors.push(syntax::messages::IWR0019.at(e.pos, format!("{}: a GLOBAL record of FD {}, which is not GLOBAL, in a program that contains others, is not supported yet", e.name.as_deref().unwrap_or("FILLER"), f.name)));
         }
     }
 }
@@ -167,7 +167,7 @@ pub(crate) fn check(program: &Program, layout: &Layout, errors: &mut Vec<Error>)
         let refs = f.status.iter().map(|r| ("FILE STATUS", r)).chain(f.record_key.iter().map(|r| ("RECORD KEY", r))).chain(f.alternate_keys.iter().map(|(r, _)| ("ALTERNATE RECORD KEY", r))).chain(f.relative_key.iter().map(|r| ("RELATIVE KEY", r)));
         for (clause, r) in refs {
             if !declared_by(layout, r, declarer) {
-                errors.push(Error::at(r.pos, format!("{}, a GLOBAL file of {declarer}: its {clause} {} is not a GLOBAL name of {declarer}, which is not supported yet", f.name, r.name)));
+                errors.push(syntax::messages::IWR0020.at(r.pos, format!("{}, a GLOBAL file of {declarer}: its {clause} {} is not a GLOBAL name of {declarer}, which is not supported yet", f.name, r.name)));
             }
         }
     }
@@ -189,7 +189,7 @@ pub(crate) fn set_address(layout: &Layout, r: &Ref, errors: &mut Vec<Error>) {
     match &layout.bindings[l as usize] {
         Binding::Argument => {}
         Binding::Global { section: Section::Linkage, program, .. } => {
-            errors.push(Error::at(r.pos, format!("SET ADDRESS OF {}, a GLOBAL LINKAGE record of {program}, in a program it contains is not supported yet", r.name)));
+            errors.push(syntax::messages::IWR0021.at(r.pos, format!("SET ADDRESS OF {}, a GLOBAL LINKAGE record of {program}, in a program it contains is not supported yet", r.name)));
         }
         _ => errors.push(Error::at(r.pos, format!("SET ADDRESS OF {}: an EXTERNAL or GLOBAL record is not a LINKAGE record of the program", r.name))),
     }
