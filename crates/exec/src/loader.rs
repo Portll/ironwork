@@ -89,6 +89,19 @@ impl Library {
         paths
     }
 
+    /// The program a CALL of `name` would load, parsed, not compiled, and kept for that CALL; None
+    /// when no program answers it or its source does not parse.
+    pub fn find(&mut self, name: &str) -> Option<&Program> {
+        if !rt::module::member_name(name) {
+            return None;
+        }
+        if !self.programs.iter().any(|p| loads_as(p, name)) {
+            let (program, path) = self.search(name).ok()?;
+            self.add_read(&path, vec![program]);
+        }
+        self.programs.iter().find(|p| loads_as(p, name))
+    }
+
     /// Keeps programs read from the library file `path` for a later CALL.
     pub fn add_read(&mut self, path: &Path, programs: Vec<Program>) {
         let shown = path.display().to_string();

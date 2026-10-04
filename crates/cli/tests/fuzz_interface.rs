@@ -161,3 +161,75 @@ fn a_subprogram_s_files_are_given_data_sets_so_its_runs_get_past_open() {
     assert!(manifest.contains("\"code\":\"S0C7\",\"file\":\"FILESUB.cbl\",\"line\":22"), "{manifest}");
     assert!(!manifest.contains("IO-35"), "{manifest}");
 }
+
+const LOGGING_SUBPROGRAM: &[&str] = &[
+    "       IDENTIFICATION DIVISION.",
+    "       PROGRAM-ID. LOGSUB.",
+    "       DATA DIVISION.",
+    "       LINKAGE SECTION.",
+    "       01  QTY-REC.",
+    "           05 QTY PIC 9(5).",
+    "       PROCEDURE DIVISION USING QTY-REC.",
+    "           CALL 'LOGGER'",
+    "           ADD 1 TO QTY",
+    "           GOBACK.",
+];
+
+const LOGGER: &[&str] = &[
+    "       IDENTIFICATION DIVISION.",
+    "       PROGRAM-ID. LOGGER.",
+    "       ENVIRONMENT DIVISION.",
+    "       INPUT-OUTPUT SECTION.",
+    "       FILE-CONTROL.",
+    "           SELECT LOG-FILE ASSIGN TO LOGDD.",
+    "           SELECT RPT-FILE ASSIGN TO RPTDD.",
+    "       DATA DIVISION.",
+    "       FILE SECTION.",
+    "       FD  LOG-FILE.",
+    "       01  LOG-REC PIC X(10).",
+    "       FD  RPT-FILE.",
+    "       01  RPT-REC PIC X(10).",
+    "       PROCEDURE DIVISION.",
+    "           OPEN EXTEND LOG-FILE OUTPUT RPT-FILE",
+    "           WRITE LOG-REC FROM 'CALLED'",
+    "           WRITE RPT-REC FROM 'CALLED'",
+    "           CLOSE LOG-FILE RPT-FILE",
+    "           GOBACK.",
+];
+
+/// A program the subprogram CALLs from a library gets data sets for its files too, and a file it
+/// OPENs EXTEND gets one that exists, so the runs get past that program's OPEN.
+#[test]
+fn a_called_program_s_files_are_given_data_sets_and_an_extended_one_exists() {
+    let dir = repo("called", false);
+    fs::write(dir.join("repo/src/LOGSUB.cbl"), LOGGING_SUBPROGRAM.join("\n") + "\n").unwrap();
+    fs::write(dir.join("repo/src/LOGGER.cbl"), LOGGER.join("\n") + "\n").unwrap();
+    let o = fuzz(&dir, "src/LOGSUB.cbl");
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(stderr(&o).contains("ironwork fuzz: not varied, given empty: LOGDD"), "{}", stderr(&o));
+    let manifest = read_manifest(&dir.join("run"));
+    assert!(manifest.contains("\"code\":\"S0C7\",\"file\":\"LOGSUB.cbl\",\"line\":9"), "{manifest}");
+    assert!(!manifest.contains("IO-35"), "{manifest}");
+}
+
+/// A source that holds only a user-defined function is refused before any run.
+#[test]
+fn a_user_defined_function_is_refused() {
+    let dir = repo("function", false);
+    let function = [
+        "       IDENTIFICATION DIVISION.",
+        "       FUNCTION-ID. TWICE.",
+        "       DATA DIVISION.",
+        "       LINKAGE SECTION.",
+        "       01  N PIC 9(5).",
+        "       01  R PIC 9(6).",
+        "       PROCEDURE DIVISION USING N RETURNING R.",
+        "           COMPUTE R = N * 2",
+        "           GOBACK.",
+        "       END FUNCTION TWICE.",
+    ];
+    fs::write(dir.join("repo/src/TWICE.cbl"), function.join("\n") + "\n").unwrap();
+    let o = fuzz(&dir, "src/TWICE.cbl");
+    assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
+    assert!(stderr(&o).contains("TWICE is a user-defined function"), "{}", stderr(&o));
+}

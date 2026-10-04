@@ -95,6 +95,9 @@ pub(crate) fn refusal(compiled: &exec::Compiled) -> Option<String> {
     let program = &compiled.program;
     let layout = &compiled.layout;
     let id = &program.id;
+    if program.function.is_some() {
+        return Some(format!("{id} is a user-defined function, which ironwork run does not enter: fuzz a program that invokes it"));
+    }
     if program.using.is_empty() {
         return Some(format!("{id} has no PROCEDURE DIVISION USING items: fuzz it as a main program"));
     }

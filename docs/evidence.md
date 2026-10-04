@@ -281,8 +281,10 @@ cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
    asterisks in a zoned number, a packed field of spaces). A file whose records have more than one
    length gets each record behind an RDW, at its level-01 record's length, at a length READ allows
    (VLR decides which), or now and then shorter than READ allows. A line-sequential file, an
-   indexed file whose keys lie past its shortest record, a contained program's file and a DD that
-   more than one file names are given an empty data set. A file assigned to SYSIN reads the SYSIN
+   indexed file whose keys lie past its shortest record, a file the program OPENs EXTEND and does
+   not read, the file of a program it contains or reaches by a CALL of a literal (in its source or
+   an `-L` library) that the program reads or extends, and a DD that more than one file names are
+   given an empty data set; a file only written gets a new one. A file assigned to SYSIN reads the SYSIN
    lines. A blank SYSIN card is 80 spaces, never an empty line, and no card starts `/*` or `//`,
    where the reader would end in-stream data. A program whose one USING item is
    the parameter Language Environment gives a job step (a group led by a halfword binary length)
@@ -420,7 +422,8 @@ each run an `ironwork cics`, and writes the same directory with `entry` `cics`
    data a caller makes: one with a pointer among them, an IMS program (ENTRY 'DLITCBL' or
    'DLITPLI', EXEC DLI, a CALL of CBLTDLI, AIBTDLI or CEETDLI by name or by a data item's VALUE,
    and an argument passed on to a CALL whose target no literal or VALUE names) and a CICS program,
-   which `--cics` runs.
+   which `--cics` runs. A user-defined function (FUNCTION-ID) is refused, as `ironwork run` does
+   not enter one.
 2. Each argument is built field by field from its LINKAGE record, as a record is (§5 item 1), with
    each OCCURS DEPENDING ON object in the record kept within its table's bounds.
 3. Where a source in the subprogram's directory or an `-L` library CALLs it by name, a run takes
@@ -429,9 +432,10 @@ each run an `ironwork cics`, and writes the same directory with `entry` `cics`
    varied. With no such CALL, every field of every argument is varied.
 4. `ironwork run --argument` gives the program the arguments in USING order, each pushed as input,
    OMITTED as a null address, and runs it as a subprogram: EXIT PROGRAM returns. The subprogram's
-   files, and those of the programs it contains, get data sets as §5 gives the files it does not
-   vary: an empty one for each file read and a new one for each only written, so an OPEN does not
-   end the run IO-35; their records are not varied, the arguments being the inputs. An abend on
+   files, and those of the programs it contains or reaches by a CALL of a literal, get data sets
+   as §5 gives the files it does not vary: an empty one for each file read or extended and a new
+   one for each only written, so an OPEN does not end the run IO-35; their records are not varied,
+   the arguments being the inputs. An abend on
    arguments that break nothing is not kept; every other is kept once, its arguments made as small
    as still give it within 200 runs, then run with `--evidence` and `--coverage` and once more with
    `--optimize=2`, as in §5. A timeout and an S806 are counted, never kept.

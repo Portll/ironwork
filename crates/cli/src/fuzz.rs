@@ -474,9 +474,9 @@ fn statements<'a>(list: &'a [Stmt], out: &mut Vec<&'a Stmt>) {
     }
 }
 
-/// The DDs of a program's files other than those fed: those it reads that cannot be fed, and a DD
-/// more than one file names, which get an empty data set; those it only writes, which get a new
-/// one; and names `--dd` cannot carry, which get none.
+/// The DDs of a program's files other than those fed: those it reads that cannot be fed, those it
+/// extends, and a DD more than one file names, which get an empty data set; those it only writes,
+/// which get a new one; and names `--dd` cannot carry, which get none.
 #[derive(Default)]
 struct Others {
     unfed: Vec<String>,
@@ -484,29 +484,64 @@ struct Others {
     ungiven: Vec<String>,
 }
 
-/// The files a program OPENs INPUT or I-O, by name in upper case, and whether it ACCEPTs from SYSIN.
-fn reads(paragraphs: &[Paragraph]) -> (BTreeSet<String>, bool) {
+/// How a program's OPEN statements use a file: OPEN EXTEND needs a data set that exists, as OPEN
+/// INPUT and I-O do, and OPEN OUTPUT alone does not.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Opened {
+    Read,
+    Extended,
+    Written,
+}
+
+/// How a program OPENs each file it OPENs other than OUTPUT alone, by name in upper case, and
+/// whether it ACCEPTs from SYSIN.
+fn opens(paragraphs: &[Paragraph]) -> (BTreeMap<String, Opened>, bool) {
     let mut all = Vec::new();
     for p in paragraphs {
         statements(&p.statements, &mut all);
     }
-    let read = all
-        .iter()
-        .filter_map(|s| if let Stmt::Open { files, .. } = s { Some(files) } else { None })
-        .flatten()
-        .filter(|(mode, _)| matches!(mode, OpenMode::Input | OpenMode::InputOutput))
-        .map(|(_, name)| name.to_ascii_uppercase())
-        .collect();
-    (read, all.iter().any(|s| matches!(s, Stmt::Accept { from: AcceptFrom::Sysin, .. })))
+    let mut opened = BTreeMap::new();
+    for (mode, name) in all.iter().filter_map(|s| if let Stmt::Open { files, .. } = s { Some(files) } else { None }).flatten() {
+        let how = match mode {
+            OpenMode::Input | OpenMode::InputOutput => Opened::Read,
+            OpenMode::Extend => Opened::Extended,
+            OpenMode::Output => continue,
+        };
+        let entry = opened.entry(name.to_ascii_uppercase()).or_insert(how);
+        if how == Opened::Read {
+            *entry = how;
+        }
+    }
+    (opened, all.iter().any(|s| matches!(s, Stmt::Accept { from: AcceptFrom::Sysin, .. })))
 }
 
-/// The programs the main program contains, at any depth.
-fn contained<'a>(compiled: &exec::Compiled, rest: &'a [Program]) -> Vec<&'a Program> {
+/// The literal targets of a program's CALL statements.
+fn call_targets(program: &Program) -> Vec<String> {
+    let mut all = Vec::new();
+    for p in &program.paragraphs {
+        statements(&p.statements, &mut all);
+    }
+    all.iter()
+        .filter_map(|s| match s {
+            Stmt::Call(call) => match &call.target {
+                syntax::ast::Operand::Literal(syntax::ast::Literal::Alnum(target)) => Some(target.trim().to_owned()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// The programs a run of the main program may enter besides it: those it contains, at any depth,
+/// and those a CALL of a literal names among the other programs of its source and those `compile`
+/// read from the program libraries, with the programs they contain and call in turn.
+fn reached<'a>(compiled: &exec::Compiled, rest: &'a [Program]) -> Vec<&'a Program> {
     let mut out: Vec<&Program> = Vec::new();
-    let mut names: Vec<&String> = compiled.program.nested.iter().collect();
+    let mut names: Vec<String> = compiled.program.nested.iter().cloned().chain(call_targets(&compiled.program)).collect();
     while let Some(name) = names.pop() {
-        if let Some(p) = rest.iter().find(|p| p.id == *name && !out.iter().any(|o| std::ptr::eq(*o, *p))) {
-            names.extend(p.nested.iter());
+        let answers = |p: &Program| !p.is_prototype() && (p.id.eq_ignore_ascii_case(&name) || p.load_name().eq_ignore_ascii_case(&name));
+        if let Some(p) = rest.iter().find(|p| answers(p) && !out.iter().any(|o| std::ptr::eq(*o, *p))) {
+            names.extend(p.nested.iter().cloned().chain(call_targets(p)));
             out.push(p);
         }
     }
@@ -514,20 +549,19 @@ fn contained<'a>(compiled: &exec::Compiled, rest: &'a [Program]) -> Vec<&'a Prog
 }
 
 /// The files the program reads and whether it ACCEPTs from SYSIN, and the DDs of its other files.
-/// The main program's files are fed; a contained program's files get their DDs, empty where it
-/// reads them.
+/// The main program's files are fed; the files of a program it contains or calls get their DDs,
+/// empty where it reads or extends them.
 fn inputs_of(compiled: &exec::Compiled, rest: &[Program]) -> (Vec<Feed>, bool, Others) {
-    let inner = contained(compiled, rest);
-    let (read, mut sysin) = reads(&compiled.program.paragraphs);
-    let mut files: Vec<(Option<usize>, &FileDecl, bool)> =
-        compiled.program.files.iter().enumerate().filter(|(_, f)| !f.sort).map(|(k, f)| (Some(k), f, read.contains(&f.name.to_ascii_uppercase()))).collect();
-    for p in inner {
-        let (read, accepts) = reads(&p.paragraphs);
+    let how = |opened: &BTreeMap<String, Opened>, f: &FileDecl| opened.get(&f.name.to_ascii_uppercase()).copied().unwrap_or(Opened::Written);
+    let (opened, mut sysin) = opens(&compiled.program.paragraphs);
+    let mut files: Vec<(Option<usize>, &FileDecl, Opened)> = compiled.program.files.iter().enumerate().filter(|(_, f)| !f.sort).map(|(k, f)| (Some(k), f, how(&opened, f))).collect();
+    for p in reached(compiled, rest) {
+        let (opened, accepts) = opens(&p.paragraphs);
         sysin |= accepts;
-        files.extend(p.files.iter().filter(|f| !f.sort).map(|f| (None, f, read.contains(&f.name.to_ascii_uppercase()))));
+        files.extend(p.files.iter().filter(|f| !f.sort).map(|f| (None, f, how(&opened, f))));
     }
     let (mut feeds, mut others) = (Vec::new(), Others::default());
-    for &(index, file, read) in &files {
+    for &(index, file, opened) in &files {
         let dd = &file.assign;
         // A file assigned to SYSIN in a program that ACCEPTs from SYSIN reads the same lines.
         if sysin && dd == "SYSIN" {
@@ -537,14 +571,16 @@ fn inputs_of(compiled: &exec::Compiled, rest: &[Program]) -> (Vec<Feed>, bool, O
             others.ungiven.push(dd.clone());
             continue;
         }
-        if !read {
-            others.written.push(dd.clone());
-            continue;
-        }
-        let shared = files.iter().filter(|(_, f, _)| f.assign == *dd).count() > 1;
-        match index.and_then(|k| feed(compiled, k, file)).filter(|_| !shared) {
-            Some(f) => feeds.push(f),
-            None => others.unfed.push(dd.clone()),
+        match opened {
+            Opened::Written => others.written.push(dd.clone()),
+            Opened::Extended => others.unfed.push(dd.clone()),
+            Opened::Read => {
+                let shared = files.iter().filter(|(_, f, _)| f.assign == *dd).count() > 1;
+                match index.and_then(|k| feed(compiled, k, file)).filter(|_| !shared) {
+                    Some(f) => feeds.push(f),
+                    None => others.unfed.push(dd.clone()),
+                }
+            }
         }
     }
     for list in [&mut others.unfed, &mut others.written, &mut others.ungiven] {
@@ -1102,17 +1138,28 @@ pub(crate) fn prepare(out: &Path, roots: &[PathBuf]) -> Result<PathBuf, String> 
     }
 }
 
-/// The program compiled, and the other programs of its source, those it contains among them.
+/// The program compiled, and the other programs of its source, those it contains among them, with
+/// each program a CALL of a literal reaches in the program libraries, as `ironwork run` finds it.
 fn compile(req: &Request) -> Result<(exec::Compiled, Vec<Program>), String> {
     let path = req.program.display().to_string();
     let bytes = fs::read(&req.program).map_err(|e| format!("{path}: {e}"))?;
     let text = syntax::copy::decode(&bytes);
     let own = req.program.parent().map(Path::to_path_buf).unwrap_or_default();
-    let libraries = syntax::copy::Libraries::new(std::iter::once(own).chain(req.libraries.iter().cloned()).collect()).with_program(&req.program).with_compliance(numeric::Compliance::of(&req.flags));
+    let libraries = syntax::copy::Libraries::new(std::iter::once(own.clone()).chain(req.libraries.iter().cloned()).collect()).with_program(&req.program).with_compliance(numeric::Compliance::of(&req.flags));
     let mut programs = syntax::parse_all_with(&text, &libraries).map_err(|e| e.place(&path))?;
     let first = programs.remove(0);
     let compiled = exec::compile(first, &req.flags).map_err(|messages| messages.iter().map(|m| m.place(&path)).collect::<Vec<_>>().join("\n"))?;
-    Ok((compiled, programs))
+    let mut library = exec::unit::Library { programs, dirs: std::iter::once(own).chain(req.program_dirs.iter().cloned()).collect(), copy: libraries, flags: req.flags.clone(), ..Default::default() };
+    let mut names = call_targets(&compiled.program);
+    let mut seen = BTreeSet::new();
+    while let Some(name) = names.pop() {
+        if seen.insert(name.to_ascii_uppercase())
+            && let Some(p) = library.find(&name)
+        {
+            names.extend(call_targets(p));
+        }
+    }
+    Ok((compiled, library.programs))
 }
 
 pub fn run(req: Request) -> ExitCode {
