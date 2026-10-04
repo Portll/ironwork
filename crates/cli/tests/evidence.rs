@@ -364,18 +364,36 @@ fn cobolworks_verifier_accepts_the_evidence_of_real_runs() {
     gone.wait().unwrap();
     let old = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() - 180_000;
     stale_lock(&ev, &format!("{} {old}\n", gone.id()));
-    assert_eq!(run("DYNAMIC.cbl", &["--trace-input"]), Some(0));
+    assert_eq!(run("DYNAMIC.cbl", &["--trace-input", "--trace-marker", "HELPER"]), Some(0));
     assert_eq!(run("DIVIDE.cbl", &["--vm", "--trace-input"]), Some(240));
+    fs::create_dir_all(dir.join("jcl")).unwrap();
+    fs::write(dir.join("jcl/EVJOB.jcl"), "//EVJOB JOB (1),'T',CLASS=A\n//STEP1 EXEC PGM=HELPER\n").unwrap();
+    let job = Command::new(env!("CARGO_BIN_EXE_ironwork"))
+        .arg("job")
+        .arg(dir.join("jcl/EVJOB.jcl"))
+        .arg("--datasets")
+        .arg(format!("{}:text", dir.join("data").display()))
+        .arg("-L")
+        .arg(dir.join("lib"))
+        .arg("--evidence")
+        .arg(&ev)
+        .output()
+        .unwrap();
+    assert_eq!(job.status.code(), Some(0), "{}", String::from_utf8_lossy(&job.stderr));
+    let check = Command::new(env!("CARGO_BIN_EXE_ironwork")).arg("check").arg(dir.join("src/EVDEMO.cbl")).arg("--provenance").arg(dir.join("prov.json")).arg("--evidence").arg(&ev).status().unwrap();
+    assert!(check.success());
 
-    let mut kinds: Vec<String> = fs::read_dir(ev.join("runs"))
+    let lines: Vec<String> = fs::read_dir(ev.join("runs"))
         .unwrap()
         .map(|e| e.unwrap().path())
         .chain([ev.join("ledger.jsonl")])
-        .flat_map(|p| fs::read_to_string(p).unwrap().lines().map(|l| field(l, "kind").unwrap().to_string()).collect::<Vec<_>>())
+        .flat_map(|p| fs::read_to_string(p).unwrap().lines().map(String::from).collect::<Vec<_>>())
         .collect();
-    kinds.sort();
+    let mut kinds: Vec<&str> = lines.iter().map(|l| field(l, "kind").unwrap()).collect();
+    kinds.sort_unstable();
     kinds.dedup();
-    assert_eq!(kinds, ["abend", "call", "close", "dd", "genesis", "input", "lock-broken", "open", "run", "sink", "statement"]);
+    assert_eq!(kinds, ["abend", "call", "close", "dd", "genesis", "input", "lock-broken", "open", "output", "run", "sink", "statement", "step"]);
+    assert!(lines.iter().any(|l| field(l, "kind") == Some("sink") && field(l, "marker") == Some("HELPER") && field(l, "reached").is_some()), "a sink record with the marker");
 
     let verify = "import { pathToFileURL } from 'node:url';
         const { verifyEvidence } = await import(pathToFileURL(process.argv[1]).href);
