@@ -90,10 +90,11 @@ the runtime keeps the state they need in its session, so every backend answers a
   statement is reached; a string expression is PL/I's, and the compiler refuses one. The value,
   converted through the CODEPAGE as any host variable's is, goes to the input trace as a
   `dynamic-sql` sink before anything else, a run with no database included ([evidence.md](evidence.md)
-  §1.1). The call sends it with each run of white space outside a quoted string as one space.
+  §1.1). The call sends it with its SQL comments dropped, a simple comment ending at the end of
+  its line as Db2 reads it, and each run of white space outside a quoted string as one space.
 - **What may be prepared** is read from the string's first words (assumption C402): an SQL
-  statement Db2 does not prepare is -084 without reaching the database, and words that are no
-  statement go to the database, whose syntax error stands for Db2's. A select-statement can only be run
+  statement Db2 does not prepare is -084, and words that begin no Db2 statement are -104, neither
+  reaching the database, so a statement only the backend has never runs. A select-statement can only be run
   by a cursor: EXECUTE IMMEDIATE of one is -518 (C401), as is EXECUTE of a prepared one. COMMIT and
   ROLLBACK in a statement string end the unit of work as the static statements do, with -925 and
   -926 in a CICS task; SAVEPOINT, RELEASE SAVEPOINT and ROLLBACK TO SAVEPOINT are refused by name.

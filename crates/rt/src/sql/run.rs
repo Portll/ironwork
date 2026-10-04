@@ -265,6 +265,7 @@ fn dynamic_statement<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, at: At, tex
     Ok(match dynamic::kind(text) {
         Kind::Query => Outcome::error(-518, "07003"),
         Kind::Unacceptable => Outcome::error(-84, "42612"),
+        Kind::Unknown => Outcome::error(-104, "42601"),
         Kind::Refused(what) => return Err(refused(format!("ironwork for COBOL does not run {what}"))),
         Kind::Commit => end_unit(x, at, text, true)?,
         Kind::Rollback => end_unit(x, at, text, false)?,
@@ -329,8 +330,10 @@ fn prepare<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, at: At, name: &str, s
     }
     session(x).prepare(at.program, name, None);
     let kind = dynamic::kind(&text);
-    if kind == Kind::Unacceptable {
-        return Ok(Outcome::error(-84, "42612"));
+    match kind {
+        Kind::Unacceptable => return Ok(Outcome::error(-84, "42612")),
+        Kind::Unknown => return Ok(Outcome::error(-104, "42601")),
+        _ => {}
     }
     let mut answer = database(x, &at.call("PREPARE", Some(name), &text, &[]), |db, c| db.prepare(c), at.pos)?;
     if answer.sqlcode >= 0 {
