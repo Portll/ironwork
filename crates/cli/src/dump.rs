@@ -3,7 +3,7 @@
 use exec::lir::{Debug as DebugTable, Listing, ProgramOptions, SqlEntry};
 use exec::module::codec::decode_all;
 use exec::module::crc::crc32;
-use exec::module::{DirectoryEntry, LayoutRecord, LirRecord, Module, ModuleError, OptionRecords, Section, SectionEntry, SourceFile, StringTable};
+use exec::module::{DirectoryEntry, LayoutRecord, LirRecord, LirRecords, Module, ModuleError, OptionRecords, Section, SectionEntry, SourceFile, StringTable};
 use rt::bms::Mapset;
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -91,7 +91,7 @@ pub fn dump(bytes: &[u8], o: &Options) -> Result<(String, bool), ModuleError> {
     let directory: Decoded<DirectoryEntry> = records(body(Section::DIRECTORY), Section::DIRECTORY, &table);
     let options: Decoded<ProgramOptions> = body(Section::OPTIONS).and_then(|b| decode_all::<OptionRecords>(Section::OPTIONS.name, b, &table).map(|o| o.0).map_err(|e| e.to_string()));
     let layout: Decoded<LayoutRecord> = records(body(Section::LAYOUT), Section::LAYOUT, &table);
-    let lir: Decoded<LirRecord> = records(body(Section::LIR), Section::LIR, &table);
+    let lir: Decoded<LirRecord> = body(Section::LIR).and_then(|b| decode_all::<LirRecords>(Section::LIR.name, b, &table).map(|l| l.0).map_err(|e| e.to_string()));
     let sql: Decoded<Vec<SqlEntry>> = records(body(Section::SQL), Section::SQL, &table);
     let bms: Result<Vec<Mapset>, String> = body(Section::BMS).and_then(|b| decode_all::<Vec<Mapset>>(Section::BMS.name, b, &table).map_err(|e| e.to_string()));
     let debug: Decoded<(DebugTable, Vec<Option<SourceFile>>)> = records(body(Section::DEBUG), Section::DEBUG, &table);

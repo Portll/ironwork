@@ -311,29 +311,35 @@ fn assign_items(programs: &[Program]) -> Vec<(u32, u32, AssignItem)> {
     out
 }
 
-/// The LIR section: a record per program, then the files' data items [`assign_items`] wrote.
+/// The LIR section's body: a record per program, then the files' data items [`assign_items`] wrote.
+pub struct LirRecords(pub Vec<LirRecord>);
+
+impl Decode for LirRecords {
+    fn decode(r: &mut Reader<'_>) -> Result<Self, ModuleError> {
+        let mut bodies = Vec::<LirRecord>::decode(r)?;
+        if r.remaining() > 0 {
+            let at = r.position();
+            let count = bodies.len();
+            for (n, k, item) in Vec::<(u32, u32, AssignItem)>::decode(r)? {
+                let body = bodies.get_mut(n as usize).ok_or_else(|| r.malformed(at, format!("an assign item for program {n} of {count}")))?;
+                let places = body.places.len();
+                let file = body.services.files.get_mut(k as usize).ok_or_else(|| r.malformed(at, format!("an assign item for file {k} of program {n}")))?;
+                if item.place as usize >= places {
+                    return Err(r.malformed(at, format!("an assign item's place {} of {places}", item.place)));
+                }
+                file.assign_item = Some(item);
+            }
+        }
+        Ok(Self(bodies))
+    }
+}
+
 fn lir_records(module: &Module<'_>, strings: &StringTable, expected: usize) -> Result<Vec<LirRecord>, ModuleError> {
     let mut r = module.reader(Section::LIR, strings)?;
     let at = r.position();
-    let count = r.count()?;
-    if count != expected {
-        return Err(r.malformed(at, format!("{count} records for {expected} programs")));
-    }
-    let mut bodies = Vec::with_capacity(count);
-    for _ in 0..count {
-        bodies.push(LirRecord::decode(&mut r)?);
-    }
-    if r.remaining() > 0 {
-        let at = r.position();
-        for (n, k, item) in Vec::<(u32, u32, AssignItem)>::decode(&mut r)? {
-            let body = bodies.get_mut(n as usize).ok_or_else(|| r.malformed(at, format!("an assign item for program {n} of {count}")))?;
-            let places = body.places.len();
-            let file = body.services.files.get_mut(k as usize).ok_or_else(|| r.malformed(at, format!("an assign item for file {k} of program {n}")))?;
-            if item.place as usize >= places {
-                return Err(r.malformed(at, format!("an assign item's place {} of {places}", item.place)));
-            }
-            file.assign_item = Some(item);
-        }
+    let LirRecords(bodies) = LirRecords::decode(&mut r)?;
+    if bodies.len() != expected {
+        return Err(r.malformed(at, format!("{} records for {expected} programs", bodies.len())));
     }
     r.finish()?;
     Ok(bodies)

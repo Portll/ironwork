@@ -313,6 +313,33 @@ fn the_sql_table_has_one_entry_per_block_with_dense_ordinals() {
 }
 
 #[test]
+fn dump_reads_the_files_that_take_their_name_from_a_data_item() {
+    let dir = temp("assign-item");
+    let source = cobol(&[
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. DYN.",
+        "ENVIRONMENT DIVISION.",
+        "INPUT-OUTPUT SECTION.",
+        "FILE-CONTROL.",
+        "    SELECT F ASSIGN DYNAMIC FNAME.",
+        "DATA DIVISION.",
+        "FILE SECTION.",
+        "FD  F.",
+        "01  R PIC X(10).",
+        "WORKING-STORAGE SECTION.",
+        "01  FNAME PIC X(8) VALUE 'INDD'.",
+        "PROCEDURE DIVISION.",
+        "    GOBACK.",
+    ]);
+    fs::write(dir.join("DYN.cbl"), source).unwrap();
+    let o = ironwork(&dir, &["compile", "DYN.cbl", "--compliance", "extended"], None);
+    assert_eq!(o.status.code(), Some(4), "IWX0007-W: {}", text(&o.stderr));
+    let (shown, status, _) = dump(&dir.join("DYN.iwm"), &["--section", "LIR"]);
+    assert_eq!(status, Some(0), "{shown}");
+    assert!(shown.lines().any(|l| l.starts_with("file 0 F ") && l.ends_with("assign-item FNAME @6:19")), "{shown}");
+}
+
+#[test]
 fn dump_prints_a_bad_section_as_a_checksum_mismatch_and_the_rest() {
     let dir = temp("damaged");
     payroll(&dir);
