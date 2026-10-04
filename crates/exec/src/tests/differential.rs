@@ -40,7 +40,7 @@ fn mutated_runs() {
             continue;
         }
         // Written first, so a run that aborts the process still leaves its input.
-        let path = std::env::temp_dir().join(format!("ironwork-differential-{i}.cbl"));
+        let path = std::env::temp_dir().join(format!("ironwork-differential-{}-{i}.cbl", std::process::id()));
         std::fs::write(&path, &mutated).unwrap();
         let run = catch_unwind(AssertUnwindSafe(|| Harness::source(&mutated).statement_limit(STATEMENT_LIMIT).clock(unit::Clock::Fixed(1_790_510_400, 42)).run(Executor::Interpreter)));
         match run {
