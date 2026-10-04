@@ -295,7 +295,7 @@ Each is argued in the document named, and none blocks step 1.
 | Q8 | [lm](load-module.md) | Is a reader kept for the previous major version of the format? |
 | Q9 | lm | Is a checksum enough, or do modules carry a keyed signature? |
 | Q10 | lm | Are modules without a debug table (`--strip-debug`) allowed? |
-| Q11 | lm | A `NAME.iwm` beside newer source runs; should a compile that fails remove it, or the search prefer source? |
+| Q11 | lm | Answered: a `NAME.iwm` beside newer source runs, and a compile that fails leaves it in place. |
 | Q12 | lm | Is an unresolved NODYNAM CALL a compile error, and do LE services bind statically? |
 | Q13 | lm | Does ironwork adopt IBM's program scope (non-COMMON nested programs hidden, duplicate ids an error), and how far does COMMON reach? |
 | Q14 | lm | Does Enterprise COBOL agree with the chosen CANCEL of static and nested callees? |

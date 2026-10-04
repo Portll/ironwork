@@ -22,13 +22,26 @@ pub struct Version {
 }
 
 impl Version {
+    /// The version this ironwork writes.
     pub const CURRENT: Self = Self { major: 0, minor: 5 };
 
-    /// Whether this reader reads `found`: the same major, and before 1.0 the same minor (§8.1).
+    /// The oldest version this ironwork reads (§8.1): before 1.0 the last minor whose change was not
+    /// additive, so each such change moves it, and from 1.0 the major's first minor.
+    pub const OLDEST_READABLE: Self = Self { major: 0, minor: 5 };
+
+    /// Whether a reader whose oldest readable version is `self` reads `found`: the same major, at
+    /// that minor or a later one (§8.1).
     pub const fn reads(self, found: Self) -> bool {
-        found.major == self.major && (self.major != 0 || found.minor == self.minor)
+        found.major == self.major && found.minor >= self.minor
     }
 }
+
+const _: () = assert!(
+    Version::OLDEST_READABLE.major == Version::CURRENT.major
+        && Version::OLDEST_READABLE.minor <= Version::CURRENT.minor
+        && (Version::CURRENT.major == 0 || Version::OLDEST_READABLE.minor == 0),
+    "the oldest readable version is a minor of the current major, no later than it, and x.0 from 1.0"
+);
 
 /// A section this version knows (load-module.md §3.4). Every one is required.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -152,13 +165,17 @@ impl ModuleWriter {
 
     /// Panics if a required section was not written.
     pub fn finish(self) -> Vec<u8> {
+        self.finish_as(Version::CURRENT, 0)
+    }
+
+    fn finish_as(self, version: Version, features: u32) -> Vec<u8> {
         for required in &Section::ALL[1..] {
             assert!(self.sections.iter().any(|s| s.0 == required.id), "section {} was not written", required.name);
         }
         let strings = self.writer.strings().encode();
         let mut sections = vec![(Section::STRINGS.id, 0, strings.as_slice())];
         sections.extend(self.sections.iter().map(|(id, flags, body)| (*id, *flags, body.as_slice())));
-        assemble(Version::CURRENT, 0, &sections)
+        assemble(version, features, &sections)
     }
 }
 
@@ -191,7 +208,7 @@ impl<'a> Module<'a> {
             return Err(truncated);
         };
         let version = Version { major, minor };
-        if !Version::CURRENT.reads(version) {
+        if !Version::OLDEST_READABLE.reads(version) {
             return Err(ModuleError::Version(version));
         }
         if actual < file_len {
@@ -424,20 +441,56 @@ mod tests {
         assert_eq!(read(&bytes), Err(ModuleError::TrailingBytes { expected: len, actual: len + 1 }));
     }
 
-    #[test]
-    fn another_major_or_before_one_another_minor_is_refused() {
-        for version in [Version { major: 1, minor: 0 }, Version { major: 0, minor: 4 }, Version { major: 0, minor: 6 }]
-        {
-            assert_eq!(read(&assemble(version, 0, &plain())), Err(ModuleError::Version(version)));
+    /// A module of `version` and `features` holding every known section, each a zero count, and what `extra` writes.
+    fn stamped(version: Version, features: u32, extra: impl FnOnce(&mut ModuleWriter)) -> Vec<u8> {
+        let mut w = ModuleWriter::new();
+        for section in &Section::ALL[1..] {
+            w.section(*section, |w| w.count(0));
         }
-        let message = ModuleError::Version(Version { major: 2, minor: 0 }).to_string();
-        assert_eq!(message, "load module format 2.0; this ironwork reads 0.5. Compile the source again");
-        let reader = Version { major: 1, minor: 2 };
-        assert!(reader.reads(Version { major: 1, minor: 0 }));
-        assert!(reader.reads(Version { major: 1, minor: 5 }));
-        assert!(!reader.reads(Version { major: 2, minor: 0 }));
-        assert!(!reader.reads(Version { major: 0, minor: 1 }));
-        assert!(Version::CURRENT.reads(Version::CURRENT));
+        extra(&mut w);
+        w.finish_as(version, features)
+    }
+
+    #[test]
+    fn a_minor_from_the_oldest_readable_is_read_and_an_older_one_or_another_major_refused() {
+        let current = Version { major: 0, minor: 5 };
+        assert_eq!(Module::read(&stamped(current, 0, |_| {})).unwrap().version(), current);
+        for version in [Version { major: 0, minor: 4 }, Version { major: 1, minor: 0 }] {
+            assert_eq!(read(&stamped(version, 0, |_| {})), Err(ModuleError::Version(version)));
+        }
+        assert_eq!(
+            ModuleError::Version(Version { major: 0, minor: 4 }).to_string(),
+            "load module format 0.4; this ironwork reads 0.5. Compile the source again"
+        );
+        assert_eq!(
+            ModuleError::Version(Version { major: 2, minor: 0 }).to_string(),
+            "load module format 2.0; this ironwork reads 0.5. Compile the source again"
+        );
+        let oldest = Version { major: 0, minor: 3 };
+        assert!(!oldest.reads(Version { major: 0, minor: 2 }));
+        assert!(oldest.reads(Version { major: 0, minor: 3 }) && oldest.reads(Version { major: 0, minor: 9 }));
+        assert!(!oldest.reads(Version { major: 1, minor: 3 }));
+        let frozen = Version { major: 1, minor: 0 };
+        assert!(frozen.reads(Version { major: 1, minor: 0 }) && frozen.reads(Version { major: 1, minor: 5 }));
+        assert!(!frozen.reads(Version { major: 2, minor: 0 }) && !frozen.reads(Version { major: 0, minor: 9 }));
+    }
+
+    #[test]
+    fn a_newer_minor_is_read_past_an_unknown_optional_section_and_refused_for_a_required_one_or_a_feature() {
+        let newer = Version { major: 0, minor: 6 };
+        let optional = stamped(newer, 0, |w| w.push(9, OPTIONAL, |w| w.string("NEXT")));
+        let module = Module::read(&optional).unwrap();
+        assert_eq!(module.version(), newer);
+        let last = module.sections()[8];
+        assert_eq!((last.id, last.name(), last.optional()), (9, None, true));
+        assert_eq!(module.strings().unwrap().get(0), Some("NEXT"));
+        assert!(crate::module::read(&optional).unwrap().programs.is_empty());
+        let extension = stamped(newer, 0, |w| w.extension(EXTENSIONS, |w| w.count(1)));
+        assert_eq!(read(&extension), Ok(vec![1, 2, 3, 4, 5, 6, 7, 8, EXTENSIONS]));
+
+        let required = stamped(newer, 0, |w| w.section(Section { id: 9, name: "NEXT" }, |w| w.count(0)));
+        assert_eq!(read(&required), Err(ModuleError::UnknownSection(9)));
+        assert_eq!(read(&stamped(newer, 4, |_| {})), Err(ModuleError::Feature(4)));
     }
 
     #[test]

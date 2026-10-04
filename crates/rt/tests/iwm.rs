@@ -5,6 +5,7 @@ mod common;
 use common::payroll;
 use ironwork_rt::bms::{Attrb, Field, Initial, Intensity, Map, Mapset, Mode, Protection};
 use ironwork_rt::lir::{Program, SqlEntry, SqlStatement};
+use ironwork_rt::module::crc::{crc32, extend};
 use ironwork_rt::module::{
     DirectoryEntry, LoadedModule, Module, ModuleError, ModuleWriter, Section, SourceFile, Version, read, write, write_module,
     write_with,
@@ -158,16 +159,22 @@ fn a_file_without_the_magic_is_not_a_module() {
 }
 
 #[test]
-fn another_format_version_is_refused() {
+fn another_major_or_an_older_minor_is_refused_and_a_newer_minor_read() {
     let bytes = write(&two());
     let mut major = bytes.clone();
     major[8] = 1;
     let error = read(&major).unwrap_err();
     assert_eq!(error, ModuleError::Version(Version { major: 1, minor: 5 }));
     assert_eq!(error.to_string(), "load module format 1.5; this ironwork reads 0.5. Compile the source again");
-    let mut minor = bytes;
+    let mut minor = bytes.clone();
     minor[10] = 1;
     assert_eq!(read(&minor), Err(ModuleError::Version(Version { major: 0, minor: 1 })));
+    let mut newer = bytes;
+    newer[10] = 6;
+    let count = u32::from_le_bytes(newer[16..20].try_into().unwrap()) as usize;
+    let crc = extend(crc32(&newer[..28]), &newer[32..32 + count * 28]);
+    newer[28..32].copy_from_slice(&crc.to_le_bytes());
+    assert_eq!(read(&newer).unwrap().programs, two());
 }
 
 /// A module whose sections each hold a count: the directory's, OPTIONS' and BMS's as given, else zero.

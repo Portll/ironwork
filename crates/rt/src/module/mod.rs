@@ -64,12 +64,12 @@ impl fmt::Display for ModuleError {
         match self {
             Self::NotAModule => write!(f, "not an ironwork load module"),
             Self::Version(found) => {
-                let reads = Version::CURRENT;
+                let (oldest, current) = (Version::OLDEST_READABLE, Version::CURRENT);
                 write!(f, "load module format {}.{}; this ironwork reads ", found.major, found.minor)?;
-                if reads.major == 0 {
-                    write!(f, "0.{}", reads.minor)?
-                } else {
-                    write!(f, "{}.x", reads.major)?
+                match current.major {
+                    0 if oldest == current => write!(f, "0.{}", current.minor)?,
+                    0 => write!(f, "0.{} to 0.{}", oldest.minor, current.minor)?,
+                    major => write!(f, "{major}.x")?,
                 }
                 write!(f, ". Compile the source again")
             }

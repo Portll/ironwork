@@ -10,7 +10,7 @@ prints them. The loader (§8.2) is built: `ironwork run x.iwm` runs a module's f
 VM, `ironwork cics x.iwm` runs it as the first program of a CICS task, each with the coverage report
 and evidence journal a run of its source gives, and on the VM CALL, CANCEL, a user-defined
 function, INVOKE and EXEC CICS LINK and XCTL reach programs and classes in modules. A
-static CALL is resolved when it runs, not at compile time (§8.3), and the scope rules of question 6
+static CALL is resolved when it runs, not at compile time (§8.3), and the scope rules of question 5
 are not applied. The types a module holds are [lir.md](lir.md)'s; this document gives the
 container, the encoding rules, which apply to any of them, and the program directory.
 
@@ -503,7 +503,7 @@ pub struct DirectoryEntry {
 - **`id` is written as it stands in the source**, because the SQL recording identity uses it
   unchanged (machine/sql.rs:153). Lookups compare case-insensitively, as `RunUnit::find` and
   `load` do (unit.rs:403, :408). Where two programs share an `id`, the lowest ordinal wins, as the
-  first match does today (question 6).
+  first match does today (question 5).
 - **`external`** is a FUNCTION-ID's AS literal, or its function-name when it has none
   (`ast::Function.external`): what `FUNCTION name` invokes it by, which may differ from `id`. A
   program is found by `id`, a function by `external` (`DirectoryEntry::load_name`).
@@ -514,9 +514,9 @@ pub struct DirectoryEntry {
   among the programs it contains (`ast::Program.nested`). The loader gives each program the
   PROGRAM-IDs of the entries whose `parent` it is, which a CANCEL of it reaches (§8.4).
 - **`common`** is PROGRAM-ID ... IS COMMON, which the parser records (`ast::Program.common`). Nothing
-  reads it until question 6 is decided.
+  reads it until question 5 is decided.
 - **`dynamic`** is true for every program, since today's search finds nested programs by name too
-  (question 6). The loader does not read it.
+  (question 5). The loader does not read it.
 - **Main** is ordinal 0, the first program that is not a user-defined function, which `parse_all_with`
   puts first (assumption C270). `ironwork run x.iwm` starts it.
 
@@ -546,28 +546,38 @@ error if it meets one. `HostType::Zoned`'s sign is `rt::SignClause`.
 
 ### 8.1 Versions
 
-The format version is `major.minor`; this ironwork writes and reads 0.5. A module of an earlier
-version is refused, and compiling the source again is the remedy: a 0.4 module's `DEBUG` records
-hold no source files (§9.2); a 0.3 module's options lack `compliance` and `dialect` (§5.1), its
-arithmetic plans `inner_dmax` (lir.md §7.2), and its plan for INITIALIZE of a reference-modified
-item holds the whole item's fields (lir.md §9, C300); a 0.2 module's places lack the tables that
-move a variably located item, its EXEC CICS commands their sinks, its INITIALIZE fields their
-phrases' senders and PICTURE scaling, and its markup nodes their moving tables (lir.md §5.1, §9.1,
-§9.5, §9.13); a 0.1 module's directory entries lack `external` (§6) and its options `optimize`
-(§5.1).
+The format version is `major.minor`; this ironwork writes 0.5. It reads each minor of its major from
+the oldest readable one, `Version::OLDEST_READABLE` in `rt::module`, which is 0.5: the last minor
+whose change was not additive. A module older than that is refused, and compiling the source again
+is the remedy: a 0.4 module's `DEBUG` records hold no source files (§9.2); a 0.3 module's options
+lack `compliance` and `dialect` (§5.1), its arithmetic plans `inner_dmax` (lir.md §7.2), and its
+plan for INITIALIZE of a reference-modified item holds the whole item's fields (lir.md §9, C300); a
+0.2 module's places lack the tables that move a variably located item, its EXEC CICS commands their
+sinks, its INITIALIZE fields their phrases' senders and PICTURE scaling, and its markup nodes their
+moving tables (lir.md §5.1, §9.1, §9.5, §9.13); a 0.1 module's directory entries lack `external`
+(§6) and its options `optimize` (§5.1).
 
 | The reader finds | It does |
 |---|---|
 | Bad magic | Refuses: `X: not an ironwork load module` |
-| A different `major` | Refuses: `X: load module format 1.0; this ironwork reads 0.5. Compile the source again`. A reader of major 1 or more names `1.x` |
-| The same `major`, a lower `minor` | Reads it. A minor version only adds, and a section body's shape never changes inside a major (new data goes in a new section) |
+| A different `major` | Refuses: `X: load module format 1.0; this ironwork reads 0.5. Compile the source again`. A reader of major 1 or more names `1.x`, and one of major 0 whose oldest readable minor is below its own names both, as `0.5 to 0.7` |
+| The same `major`, a lower `minor` | Reads it. From 1.0 a minor version only adds, and a section body's shape never changes inside a major (new data goes in a new section) |
 | The same `major`, a higher `minor` | Reads it, ignoring sections with the optional flag it does not know. Refuses on an unknown required section or a set `features` bit, naming it |
-| `major` 0 | Requires the same `minor` as well. The format is not frozen until 1.0 |
+| `major` 0 | Reads the minors from the oldest readable one to its own, and a higher one as the row above says. Refuses an older one as it refuses another major: `X: load module format 0.4; this ironwork reads 0.5. Compile the source again` |
 
 - **No older readers.** A new major version does not keep the last one's reader: the source is the
   durable artefact, and compiling again is the remedy (question 1).
 - **A major bump** is needed for any change to an existing encoding, tag or section body, and any
-  change to the LIR that lir.md marks as breaking. Before 1.0 a minor bump stands for it.
+  change to the LIR that lir.md marks as breaking.
+- **Before 1.0** a change that cannot be made additive bumps the minor and moves the oldest
+  readable minor to it, so the reader refuses older modules. An additive change (a new section, an
+  optional field at a section's end, a new tag) bumps the minor and keeps them readable: the reader
+  decodes each minor from the oldest readable one, and takes a section or field an older module
+  lacks as absent. A reader older than the module skips a new section flagged optional and refuses
+  a required one, and refuses a field after the values it knows, or a tag it does not know, as
+  malformed; data an older reader may ignore goes in an optional section.
+- **1.0 freezes the format.** From 1.0 the oldest readable version is the major's first minor, and a
+  change that is not additive needs a new major.
 - **No compiler version is recorded.** Two compilers that produce the same LIR produce the same
   module; a version string would make every upgrade change every module.
 
@@ -600,11 +610,12 @@ started with, then each `-L` in order. A program is found in this order:
 - **Storage is allocated on a program's first CALL,** in call order by `RunUnit::add_named`, as for
   a program from source, so addresses, which programs can observe as pointers, are those of
   interpreted programs.
-- **A module that fails** (unreadable, corrupt, another format version, holding no program `NAME`,
-  or holding one the verifier refuses) is not "not found": it is `LoadError::Compile` with the
-  module's path and the reason, which abends IRONWORK outside ON EXCEPTION, as a source that does
-  not compile does: `CALL SUB: lib/SUB.iwm: section LIR is corrupt (checksum …, expected …)`. EXEC
-  CICS LINK draws the same line: `NotFound` raises PGMIDERR and the rest abend.
+- **A module that fails** (unreadable, corrupt, a format version the reader does not read, holding
+  no program `NAME`, or holding one the verifier refuses) is not "not found": it is
+  `LoadError::Compile` with the module's path and the reason, which abends IRONWORK outside ON
+  EXCEPTION, as a source that does not compile does:
+  `CALL SUB: lib/SUB.iwm: section LIR is corrupt (checksum …, expected …)`. EXEC CICS LINK draws
+  the same line: `NotFound` raises PGMIDERR and the rest abend.
 - **A user-defined function** is found by its `external` name, which its invocation gives.
 - **A class.** INVOKE looks for a COBOL class definition by its external name among the programs
   already read; then in each directory for `NAME.iwm`, NAME being the class's simple name or its full
@@ -617,8 +628,9 @@ started with, then each `-L` in order. A program is found in this order:
 - **Shadowing.** A `NAME.iwm` beside newer source in one directory is the one that runs, because
   step 2 precedes step 3. The loader never compares file times: copying or checking out files sets
   them, so a run that compared them would not repeat, and the module holds no build time (the
-  compile time a program using WHEN-COMPILED holds is that function's value). This decides question 4
-  as far as the loader goes; whether a failed compile should remove an older module stays open.
+  compile time a program using WHEN-COMPILED holds is that function's value). A compile that fails
+  writes nothing and leaves an existing `NAME.iwm` in place, as a failed compile on z/OS leaves the
+  old member in the load library, so that older module runs.
 
 `ironwork run x.iwm` runs program 0 of the module on the VM with the options it was compiled with.
 It takes `-L`, `-I`, `--dd`, `--clock`, `--parm`, `--statement-limit`, the SQL flags,
@@ -657,7 +669,7 @@ name enters the one copy of its program, and CANCEL leaves the program as it is 
 or naming an identifier, the CALL is dynamic. Because the modules a run has read are searched
 first, a static CALL from a module finds its callee in that module, or in the bundle it belongs to,
 before anywhere else. The directory records nesting and COMMON, and neither changes the search
-(question 6).
+(question 5).
 
 | CALL | Compile option | Resolved | By |
 |---|---|---|---|
@@ -668,12 +680,12 @@ before anywhere else. The directory records nesting and COMMON, and neither chan
 - **No compile-time resolution.** A NODYNAM literal is not resolved to a program ordinal at
   compile time, so `-L` does not change what `ironwork compile` writes. If it were, a literal naming
   no program of the module would compile as a call by name with a warning, where IBM fails at link
-  time; a module cannot link (question 5).
+  time; a module cannot link (question 4).
 - **IBM's scope rule** would resolve a static CALL from *P* to `X` among the programs directly
   contained in *P*, then, walking outward, among those contained in each enclosing program where a
   match counts only if it is COMMON, and finally among the module's top-level programs; a nested
   program that is not COMMON would be unreachable from outside its container and by dynamic CALL.
-  That changes what runs today, so it is question 6.
+  That changes what runs today, so it is question 5.
 - **A bundle.** `ironwork compile A.cbl B.cbl -o out/ --bundle x` reads several sources into one
   module with one directory, and a CALL from one of its programs finds the others there first.
   Debug file names keep each program's source (§9).
@@ -688,7 +700,7 @@ before anywhere else. The directory records nesting and COMMON, and neither chan
   closes its files, and clears `initialized`, so the next CALL initialises WORKING-STORAGE again
   from `Storage.image`, and does the same for each program it contains, named by the directory's
   `parent` for a program from a module. The module is data, and does not change. Whether IBM lets
-  CANCEL reach a statically called program is question 7.
+  CANCEL reach a statically called program is question 6.
 - **Not found** is `LoadError::NotFound`: no program read, no `NAME.iwm`, no source. A CALL with ON
   EXCEPTION runs that block, and one without abends S806 with the interpreter's message.
 - **A LINK or XCTL** through EXEC CICS gets PGMIDERR for the same case.
@@ -714,7 +726,7 @@ bytes each. The reader decodes it with the rest of the module.
 - **The cost.** Two sources of a bundle with one file name, in different directories, are not told
   apart in an abend; the position and the program name still are. `--source-prefix` adds a
   directory to the name, written as given, and is one of the inputs that decide the bytes
-  (question 8).
+  (question 7).
 - **Rejected input.** A source or library-relative name with a `..` component, a leading `/`, or a
   Windows drive letter is a compile error, since it would put a path into the module.
 
@@ -803,7 +815,7 @@ and finds them different.
 
 L5, the first scenario of L6, and L8 run in cli/tests/iwm_run.rs, which compiles each module with
 `ironwork compile` and compares its run with the interpreter's run of the source; the two L5
-scenarios that wait for question 6 do not run yet.
+scenarios that wait for question 5 do not run yet.
 
 ### L1: Round trip
 
@@ -848,7 +860,9 @@ scenarios that wait for question 6 do not run yet.
   section.
 - **Given** a file that does not start with the magic **then** `X: not an ironwork load module`.
 - **Given** a module with a `features` bit set **then** it is refused, naming the bits.
-- **Given** a `major` 0 reader and a module with another `minor` **then** it is refused.
+- **Given** a `major` 0 reader and a module of a `minor` older than its oldest readable one **then**
+  it is refused, naming the versions it reads. **Given** a higher `minor` **then** it is read as
+  above.
 
 ### L4: Corruption
 
@@ -879,7 +893,7 @@ scenarios that wait for question 6 do not run yet.
 - **Given** `SUB.iwm` and `SUB.cbl` in one `-L` directory **then** the module is used.
 - **Given** a source of three programs, one nested in the second **when** a dynamic CALL names the
   nested one **then** it is not found. **Given** a static CALL from its container **then** it runs.
-  (These two hold once question 6 adopts the scope rule; until then the nested program is found.)
+  (These two hold once question 5 adopts the scope rule; until then the nested program is found.)
 - **Given** a module of two programs A and B and a DYNAM CALL from A to B **then** B is added to
   the run unit on that CALL and not before, **and** its storage address is the one the interpreter
   gives it.
@@ -959,24 +973,19 @@ scenarios that wait for question 6 do not run yet.
    in-tree), so a shop can check that a module is the one it built?
 3. **Stripping.** Should a `--strip-debug` module exist for size, with abends naming only the
    program and instruction? Invariant 3 forbids it as stated.
-4. **Stale modules.** The loader runs a `NAME.iwm` beside a newer `NAME.cbl` and never compares
-   file times (§8.2). A compile that fails leaves an existing `NAME.iwm` in place, as a failed
-   compile on z/OS leaves the old member in the load library, so the loader runs the older module.
-   Should a compile that fails remove the module it would have written, or the search prefer
-   source?
-5. **Unresolved static CALL.** A NODYNAM literal naming no program of the module compiles as a
+4. **Unresolved static CALL.** A NODYNAM literal naming no program of the module compiles as a
    run-time call, with a warning, where IBM fails at link time. Should compiling fail instead,
    unless the caller passes `--allow-unresolved`? And where the name is an LE service, should a
    static CALL bind the service at compile time, or still let a program of that name found at run
    time win, as assumption L1 `LE_SERVICE_AFTER_PROGRAMS` (int) records?
-6. **Program scope.** Adopt IBM's rules, each a change from today: a nested program that is not
+5. **Program scope.** Adopt IBM's rules, each a change from today: a nested program that is not
    COMMON reachable only from its container and never by dynamic CALL (`dynamic` false), static
    CALL resolved by the scope rule of §8.3, and a duplicate `id` a compile error? If so, how far
    does COMMON reach: siblings of its container only, or every program contained anywhere in its
    container? That needs an Enterprise COBOL run, and is recorded as a V-series assumption until
    then.
-7. **CANCEL of a static callee, and of a nested program.** This document keeps today's behaviour:
+6. **CANCEL of a static callee, and of a nested program.** This document keeps today's behaviour:
    reset for a loaded program, nothing for one not registered by name. Does Enterprise COBOL agree?
-8. **Directory in abend lines.** Is a bare `PAYROLL.cbl` in an abend acceptable, or should the
+7. **Directory in abend lines.** Is a bare `PAYROLL.cbl` in an abend acceptable, or should the
    default keep a path relative to the compile invocation, at the price that a module depends on
    where it was built?

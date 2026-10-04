@@ -234,7 +234,7 @@ RETURN-CODE from a run ironwork refused, stopped or could not finish:
 | 242 | Code generation refused a construct, named with where it is (`--vm`). |
 | 243 | The VM stopped at a construct it does not run yet (`--vm`, or a module). |
 | 244 | The run reached a construct ironwork does not run: an abend with one of ironwork's own codes, IRONWORK (INVOKE in a CICS task among them), EXEC (EXEC DLI) or JAVA. For a job, also JCL ironwork refuses before any step runs. |
-| 245 | The source, JCL or load module cannot be read, or the reader refuses the module (damaged, or another format version). |
+| 245 | The source, JCL or load module cannot be read, or the reader refuses the module (damaged, or a format version it does not read). |
 | 246 | Usage, or a file, directory, address or database a flag names cannot be used. |
 | 255 | An internal error: ironwork panicked, or could not make a scratch directory. |
 

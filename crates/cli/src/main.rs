@@ -405,7 +405,7 @@ exit status: for check and compile, the compile's return code, the highest of it
   244    the run reached a construct ironwork does not run, an IRONWORK, EXEC or JAVA abend
          (INVOKE in a CICS task among them), or the job holds JCL ironwork refuses before any step
   245    the source, JCL or load module cannot be read, or the reader refuses the module (damaged,
-         or another format version)
+         or a format version it does not read)
   246    usage, or a file, directory, address or database a flag names cannot be used
   255    an internal error: ironwork panicked, or could not make a scratch directory
   A job exits as its first step that ended without a return code says. With --exit-code:
