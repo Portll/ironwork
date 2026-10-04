@@ -344,6 +344,7 @@ struct Runner<'a> {
     req: &'a Request,
     work: PathBuf,
     count: u64,
+    covered: super::RunCoverage,
 }
 
 impl Runner<'_> {
@@ -376,11 +377,15 @@ impl Runner<'_> {
                 }
             }
         }
-        if let Some((journal, coverage)) = evidence {
-            command.arg("--evidence").arg(journal).arg("--coverage").arg(coverage);
+        let cover = super::coverage_path(evidence, &self.work, self.count);
+        command.arg("--coverage").arg(&cover);
+        if let Some((journal, _)) = evidence {
+            command.arg("--evidence").arg(journal);
         }
         let roots = self.req.roots();
-        super::finish(command, &dir, self.req.timeout, &[], |l| super::abend_line(l, &roots))
+        let outcome = super::finish(command, &dir, self.req.timeout, &[], |l| super::abend_line(l, &roots));
+        self.covered.take(&cover, evidence.is_some());
+        outcome
     }
 }
 
@@ -518,7 +523,7 @@ pub fn run(req: Request) -> ExitCode {
         Ok(w) => w,
         Err(e) => return fail(e),
     };
-    let mut runner = Runner { req: &req, work, count: 0 };
+    let mut runner = Runner { req: &req, work, count: 0, covered: super::RunCoverage::default() };
     let found = drive(&req, &params, &sites, &mut runner);
     let _ = fs::remove_dir_all(&runner.work);
     let found = match found {
@@ -527,7 +532,7 @@ pub fn run(req: Request) -> ExitCode {
     };
     let header = Header { seed: req.seed, clock: &req.clock, file: &file, id: &compiled.program.id, root: &req.root, roots: &req.roots(), entry: "interface" };
     let callers = Value::Arr(sites.iter().map(|s| obj(vec![("file", s.file.as_str().into()), ("line", Value::from(i64::from(s.line)))])).collect());
-    if let Err(e) = super::write_manifest_in(MANIFEST_FORMAT, &req.out, &header, found.inputs, &found.tally, found.runs, vec![("callers", callers)]) {
+    if let Err(e) = runner.covered.write(&req.out).and_then(|key| super::write_manifest_in(MANIFEST_FORMAT, &req.out, &header, found.inputs, &found.tally, found.runs, vec![("callers", callers), key])) {
         return fail(format!("-o {}: {e}", req.out.display()));
     }
     found.tally.report();

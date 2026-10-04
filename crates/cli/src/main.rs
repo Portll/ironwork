@@ -438,6 +438,15 @@ mod job;
 mod module;
 mod provenance;
 
+/// The statements a run tells its observer of: every one when it writes coverage, which counts
+/// them, else those --trace-statements lists.
+fn statement_filter(listed: Option<&std::collections::BTreeSet<(String, u32)>>, coverage: bool) -> Option<exec::unit::StatementFilter> {
+    if coverage {
+        return Some(exec::unit::StatementFilter::All);
+    }
+    listed.map(|l| exec::unit::StatementFilter::Lines(l.iter().map(|(_, line)| *line).collect()))
+}
+
 fn usage_error(message: &str) -> ExitCode {
     eprintln!("ironwork: {message}\n{USAGE}");
     exit::status(Outcome::Usage)
@@ -952,7 +961,7 @@ fn driver() -> ExitCode {
         let library = exec::unit::Library {
             dirs: std::iter::once(own_directory).chain(program_dirs).collect(),
             copy: syntax::copy::Libraries::new(libraries),
-            trace_statements: listed.as_ref().map(|l| exec::unit::StatementFilter::Lines(l.iter().map(|&(_, line)| line).collect())),
+            trace_statements: statement_filter(listed.as_ref(), coverage_file.is_some()),
             trace_input,
             statement_limit,
             ..Default::default()
@@ -1003,7 +1012,7 @@ fn driver() -> ExitCode {
         dirs: std::iter::once(own_directory).chain(program_dirs).collect(),
         copy: libraries,
         flags: flags.clone(),
-        trace_statements: listed.as_ref().map(|l| exec::unit::StatementFilter::Lines(l.iter().map(|&(_, line)| line).collect())),
+        trace_statements: statement_filter(listed.as_ref(), coverage_file.is_some()),
         trace_input,
         statement_limit,
     };
@@ -1063,7 +1072,7 @@ fn driver() -> ExitCode {
     };
     if command == "cics" {
         let run = journal.map(|j| evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()).with_input(trace_input));
-        let coverage = coverage_file.as_deref().map(|file| (file, outlines.as_slice()));
+        let coverage = coverage_file.as_deref().map(|file| (file, outlines.as_slice(), reads.as_slice()));
         return run_cics(&compiled, path, library, dds, clock, database, &cics_options, run, vm, coverage);
     }
     let sysin = match open_sysin(&dds) {
@@ -1072,7 +1081,7 @@ fn driver() -> ExitCode {
     };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
     let shared = journal.map(|j| std::rc::Rc::new(std::cell::RefCell::new(evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()).with_input(trace_input))));
-    let covered = coverage_file.as_ref().map(|_| std::rc::Rc::new(std::cell::RefCell::new(coverage::Coverage::default())));
+    let covered = coverage_file.as_ref().map(|_| std::rc::Rc::new(std::cell::RefCell::new(coverage::Coverage::naming(path, &reads))));
     let observer = (shared.is_some() || covered.is_some()).then(|| {
         let (run, cov) = (shared.clone(), covered.clone());
         Box::new(move |event: exec::unit::Event<'_>| {
@@ -1559,7 +1568,7 @@ fn run_cics(
     options: &[(String, String)],
     evidence: Option<evidence::Run>,
     vm: bool,
-    coverage: Option<(&std::path::Path, &[coverage::Outline])>,
+    coverage: Option<(&std::path::Path, &[coverage::Outline], &[std::path::PathBuf])>,
 ) -> ExitCode {
     let get = |name: &str| options.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone());
     if get("--serve").is_some() {
@@ -1594,7 +1603,7 @@ fn cics_tasks(
     clock: exec::unit::Clock,
     options: &[(String, String)],
     evidence: Option<evidence::Run>,
-    coverage: Option<(&std::path::Path, &[coverage::Outline])>,
+    coverage: Option<(&std::path::Path, &[coverage::Outline], &[std::path::PathBuf])>,
 ) -> ExitCode {
     let get = |name: &str| options.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone());
     if (get("--transaction").is_some() || get("--csd").is_some()) && get("--screens").is_none() {
@@ -1652,7 +1661,7 @@ fn cics_tasks(
     };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
     let shared = evidence.map(|run| std::rc::Rc::new(std::cell::RefCell::new(run)));
-    let covered = coverage.map(|_| std::rc::Rc::new(std::cell::RefCell::new(coverage::Coverage::default())));
+    let covered = coverage.map(|(_, _, roots)| std::rc::Rc::new(std::cell::RefCell::new(coverage::Coverage::naming(path, roots))));
     let mut number = 1;
     let ran = loop {
         let observer = (shared.is_some() || covered.is_some()).then(|| {
@@ -1710,7 +1719,7 @@ fn cics_tasks(
     };
     drop(out);
     print_screens();
-    if let (Some((file, outlines)), Some(c)) = (coverage, &covered) {
+    if let (Some((file, outlines, _)), Some(c)) = (coverage, &covered) {
         let text = format!("{}\n", exec::evidence::canonical(&c.borrow().report(outlines)));
         if let Err(e) = fs::write(file, text) {
             eprintln!("ironwork: --coverage {}: {e}", file.display());

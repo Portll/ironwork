@@ -77,6 +77,10 @@ fn a_subprogram_s_abend_is_kept_with_its_arguments_shaped_by_the_call_that_passe
     let journal = manifest.split("\"journal\":\"").nth(1).and_then(|r| r.split('"').next()).expect("a kept run's journal");
     let text = fs::read_to_string(dir.join("run/evidence/runs").join(format!("{journal}.jsonl"))).unwrap();
     assert!(text.lines().any(|l| l.contains("\"kind\":\"abend\"") && l.contains("\"line\":14")), "{text}");
+    // Every run's coverage is added up, the abending statement among those started.
+    assert!(manifest.contains("\"runCoverage\":\"coverage/runs.json\""), "{manifest}");
+    let covered = fs::read_to_string(dir.join("run/coverage/runs.json")).unwrap();
+    assert!(covered.contains("{\"file\":\"ADDQTY.cbl\",\"line\":14,\"runs\":"), "{covered}");
 }
 
 #[test]

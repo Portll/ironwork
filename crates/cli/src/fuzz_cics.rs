@@ -13,7 +13,7 @@ use rt::bms::{Map, Protection};
 use rt::vocab::BinOp;
 use syntax::ast::{ExecArg, ExecKind, Expr, Literal, Operand, Ref, Stmt};
 
-use crate::fuzz::{self, Field, Header, Outcome, Rng, SPACE, Tally, abend_line, elementary, field_bytes, finish, from_root, input, journals, kept_run, neutral, prepare, write_manifest};
+use crate::fuzz::{self, Field, Header, Outcome, Rng, SPACE, Tally, abend_line, elementary, field_bytes, finish, from_root, input, journals, kept_run, neutral, prepare};
 
 pub struct Request {
     pub fuzz: fuzz::Request,
@@ -315,6 +315,7 @@ struct Runner<'a> {
     passed: Vec<(String, String)>,
     files: Vec<GivenFile>,
     queues: Vec<String>,
+    covered: fuzz::RunCoverage,
 }
 
 impl Runner<'_> {
@@ -364,11 +365,15 @@ impl Runner<'_> {
             command.arg("--screens").arg(&path);
             given.push(("the screen script", path));
         }
-        if let Some((journal, coverage)) = evidence {
-            command.arg("--evidence").arg(journal).arg("--coverage").arg(coverage);
+        let cover = fuzz::coverage_path(evidence, &self.work, self.count);
+        command.arg("--coverage").arg(&cover);
+        if let Some((journal, _)) = evidence {
+            command.arg("--evidence").arg(journal);
         }
         let roots = &self.roots;
-        finish(command, &dir, f.timeout, &given, |l| abend(l, roots))
+        let outcome = finish(command, &dir, f.timeout, &given, |l| abend(l, roots));
+        self.covered.take(&cover, evidence.is_some());
+        outcome
     }
 }
 
@@ -493,7 +498,7 @@ pub fn run(req: Request) -> ExitCode {
         Ok(w) => w,
         Err(e) => return fail(e),
     };
-    let mut runner = Runner { req: &req, roots: roots.clone(), work, count: 0, passed, files, queues };
+    let mut runner = Runner { req: &req, roots: roots.clone(), work, count: 0, passed, files, queues, covered: fuzz::RunCoverage::default() };
 
     // What the task does with no COMMAREA and no operator input is no input's doing, so an abend it
     // gives then is not kept.
@@ -557,7 +562,7 @@ pub fn run(req: Request) -> ExitCode {
     let _ = fs::remove_dir_all(&runner.work);
 
     let header = Header { seed: f.seed, clock: &f.clock, file: &file, id: &compiled.program.id, root: &f.root, roots: &roots, entry: "cics" };
-    if let Err(e) = write_manifest(&f.out, &header, inputs_out, &tally, runs_out) {
+    if let Err(e) = runner.covered.write(&f.out).and_then(|key| fuzz::write_manifest_in(fuzz::MANIFEST_FORMAT, &f.out, &header, inputs_out, &tally, runs_out, vec![key])) {
         return fail(format!("-o {}: {e}", f.out.display()));
     }
     if let Some(t) = inferred {

@@ -697,4 +697,6 @@ fn job_coverage_keeps_apart_two_sources_that_share_a_program_id() {
     let b = programs.iter().find(|p| p.contains("\"source\":\"PGMB.cbl\"")).expect("PGMB");
     assert!(a.contains("\"entered\":2,\"line\":4,\"name\":\"A-FIRST\"") && a.contains("\"reached\":2"), "{a}");
     assert!(b.contains("\"entered\":0,\"line\":6,\"name\":\"B-TWO\"") && b.contains("\"paragraphs\":3,\"program\":\"SAMEID\",\"reached\":2"), "{b}");
+    // Statements by file: PGMA's DISPLAY in both its steps, PGMB's skipped DISPLAY in none.
+    assert!(text.contains("{\"file\":\"PGMA.cbl\",\"line\":5,\"started\":2}") && !text.contains("{\"file\":\"PGMB.cbl\",\"line\":7,"), "{text}");
 }

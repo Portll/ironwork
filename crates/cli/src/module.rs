@@ -86,7 +86,7 @@ pub fn run(r: Request<'_>) -> ExitCode {
         None => None,
     };
     let outlines = crate::coverage::module_outlines(&module);
-    let coverage = r.coverage.as_deref().map(|file| (file, outlines.as_slice()));
+    let coverage = r.coverage.as_deref().map(|file| (file, outlines.as_slice(), r.reads.as_slice()));
     if r.command == "cics" {
         let page = main.options.options.code_page();
         let id = module.directory.first().map(|e| e.id.clone()).unwrap_or_default();
@@ -125,11 +125,11 @@ fn batch(
     parm: Option<&str>,
     path: &str,
     journal: Option<evidence::Run>,
-    coverage: Option<(&Path, &[Outline])>,
+    coverage: Option<(&Path, &[Outline], &[PathBuf])>,
 ) -> ExitCode {
     let sources: Vec<String> = module.programs[0].debug.sources.iter().map(|&s| module.programs[0].symbols.get(s as usize).cloned().unwrap_or_default()).collect();
     let shared = journal.map(|run| Rc::new(RefCell::new(run)));
-    let covered = coverage.map(|_| Rc::new(RefCell::new(Coverage::default())));
+    let covered = coverage.map(|(_, _, roots)| Rc::new(RefCell::new(Coverage::naming(path, roots))));
     let observer = observer(&shared, &covered);
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
     let ended = exec::vm::execute_module(module, Path::new(path), library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, parm);
@@ -174,8 +174,8 @@ fn observer<'w>(run: &Option<Rc<RefCell<evidence::Run>>>, covered: &Option<Rc<Re
     })
 }
 
-fn write_coverage(coverage: Option<(&Path, &[Outline])>, covered: &Option<Rc<RefCell<Coverage>>>) {
-    if let (Some((file, outlines)), Some(c)) = (coverage, covered) {
+fn write_coverage(coverage: Option<(&Path, &[Outline], &[PathBuf])>, covered: &Option<Rc<RefCell<Coverage>>>) {
+    if let (Some((file, outlines, _)), Some(c)) = (coverage, covered) {
         let text = format!("{}\n", exec::evidence::canonical(&c.borrow().report(outlines)));
         if let Err(e) = std::fs::write(file, text) {
             eprintln!("ironwork: --coverage {}: {e}", file.display());

@@ -683,6 +683,93 @@ fn ends_of(path: &Path) -> std::io::Result<Vec<u8>> {
     Ok(out)
 }
 
+/// What the runs of a fuzz run covered, from each run's `--coverage` report: how many runs started
+/// each statement and entered each paragraph, and how often in all. A run stopped at --timeout
+/// writes no report and is not counted.
+#[derive(Default)]
+pub(crate) struct RunCoverage {
+    runs: i64,
+    statements: BTreeMap<(String, i64), (i64, i64)>,
+    paragraphs: BTreeMap<(String, String, i64), (i64, i64)>,
+}
+
+/// Where run `count` writes its coverage: a kept run's report under the output directory, any
+/// other run's a scratch file in `work`.
+pub(crate) fn coverage_path(evidence: Option<(&Path, &Path)>, work: &Path, count: u64) -> PathBuf {
+    evidence.map_or_else(|| work.join(format!("coverage-{count}.json")), |(_, coverage)| coverage.to_path_buf())
+}
+
+impl RunCoverage {
+    /// Adds the report at `path`, then removes it unless it is a kept run's.
+    pub(crate) fn take(&mut self, path: &Path, kept: bool) {
+        let report = fs::read_to_string(path).ok().and_then(|t| rt::json::parse::parse(&t).ok());
+        if !kept {
+            let _ = fs::remove_file(path);
+        }
+        let Some(report) = report else { return };
+        self.runs += 1;
+        for s in json_items(&report, "statements") {
+            if let (Some(file), Some(line), Some(n)) = (json_text(s, "file"), json_int(s, "line"), json_int(s, "started")) {
+                let e = self.statements.entry((file.to_string(), line)).or_default();
+                e.0 += 1;
+                e.1 += n;
+            }
+        }
+        for p in json_items(&report, "programs") {
+            let Some(program) = json_text(p, "program") else { continue };
+            for d in json_items(p, "detail") {
+                if let (Some(name), Some(line), Some(n)) = (json_text(d, "name"), json_int(d, "line"), json_int(d, "entered")) {
+                    let e = self.paragraphs.entry((program.to_string(), name.to_string(), line)).or_default();
+                    e.0 += i64::from(n > 0);
+                    e.1 += n;
+                }
+            }
+        }
+    }
+
+    /// Writes the coverage as `coverage/runs.json` under `out` (docs/evidence.md §5) and returns the
+    /// manifest's `runCoverage` naming it.
+    pub(crate) fn write(&self, out: &Path) -> std::io::Result<(&'static str, Value)> {
+        let statements = self.statements.iter().map(|((file, line), (runs, n))| obj(vec![("file", file.as_str().into()), ("line", (*line).into()), ("runs", (*runs).into()), ("started", (*n).into())])).collect();
+        let paragraphs = self
+            .paragraphs
+            .iter()
+            .map(|((program, name, line), (runs, n))| obj(vec![("program", program.as_str().into()), ("name", name.as_str().into()), ("line", (*line).into()), ("runs", (*runs).into()), ("entered", (*n).into())]))
+            .collect();
+        let doc = obj(vec![("runs", self.runs.into()), ("statements", Value::Arr(statements)), ("paragraphs", Value::Arr(paragraphs))]);
+        fs::write(out.join("coverage").join("runs.json"), format!("{}\n", canonical(&doc)))?;
+        Ok(("runCoverage", "coverage/runs.json".into()))
+    }
+}
+
+fn json_field<'a>(v: &'a rt::json::parse::Value, key: &str) -> Option<&'a rt::json::parse::Value> {
+    match v {
+        rt::json::parse::Value::Object(pairs) => pairs.iter().find(|(k, _)| k == key).map(|(_, v)| v),
+        _ => None,
+    }
+}
+
+fn json_items<'a>(v: &'a rt::json::parse::Value, key: &str) -> &'a [rt::json::parse::Value] {
+    match json_field(v, key) {
+        Some(rt::json::parse::Value::Array(items)) => items,
+        _ => &[],
+    }
+}
+
+fn json_text<'a>(v: &'a rt::json::parse::Value, key: &str) -> Option<&'a str> {
+    match json_field(v, key) {
+        Some(rt::json::parse::Value::String(s)) => Some(s),
+        _ => None,
+    }
+}
+
+fn json_int(v: &rt::json::parse::Value, key: &str) -> Option<i64> {
+    match json_field(v, key) {
+        Some(rt::json::parse::Value::Number(n)) => n.parse().ok(),
+        _ => None,
+    }
+}
+
 /// One run as its own process, so a run that loops is stopped and one that fails stops nothing else.
 /// `rdw` names the DDs whose records carry RDWs.
 struct Runner<'a> {
@@ -690,6 +777,7 @@ struct Runner<'a> {
     work: PathBuf,
     count: u64,
     rdw: BTreeSet<String>,
+    covered: RunCoverage,
 }
 
 impl Runner<'_> {
@@ -739,8 +827,10 @@ impl Runner<'_> {
         for (dd, path) in &given {
             command.arg("--dd").arg(format!("{dd}={}", path.display()));
         }
-        if let Some((journal, coverage)) = evidence {
-            command.arg("--evidence").arg(journal).arg("--coverage").arg(coverage);
+        let cover = coverage_path(evidence, &self.work, self.count);
+        command.arg("--coverage").arg(&cover);
+        if let Some((journal, _)) = evidence {
+            command.arg("--evidence").arg(journal);
             if let Some(marker) = &inputs.marker {
                 command.arg("--trace-marker").arg(marker);
             }
@@ -748,6 +838,7 @@ impl Runner<'_> {
         let roots = self.req.roots();
         let timeout = if inputs.limit.is_some() { self.req.timeout * HANG_PATIENCE } else { self.req.timeout };
         let (exit, text) = wait_for(command, &dir, timeout, &given)?;
+        self.covered.take(&cover, evidence.is_some());
         let outcome = exit.map_or(Outcome::Timeout, |code| ended(code, &text, |l| abend_line(l, &roots)));
         Ok(waited(outcome, &text))
     }
@@ -899,11 +990,7 @@ pub(crate) struct Header<'a> {
 
 /// The manifest's shape, which docs/fuzz-manifest.schema.json describes. A key added keeps it; a key
 /// removed, renamed or given another meaning takes a new one.
-const MANIFEST_FORMAT: &str = "ironwork-fuzz/v1";
-
-pub(crate) fn write_manifest(out: &Path, header: &Header, inputs: Vec<Value>, tally: &Tally, runs: Vec<Value>) -> std::io::Result<()> {
-    write_manifest_in(MANIFEST_FORMAT, out, header, inputs, tally, runs, Vec::new())
-}
+pub(crate) const MANIFEST_FORMAT: &str = "ironwork-fuzz/v1";
 
 /// The manifest in `format`, with `extra` keys beside the ones every format has.
 pub(crate) fn write_manifest_in(format: &str, out: &Path, header: &Header, inputs: Vec<Value>, tally: &Tally, runs: Vec<Value>, extra: Vec<(&str, Value)>) -> std::io::Result<()> {
@@ -1057,7 +1144,7 @@ pub fn run(req: Request) -> ExitCode {
         Err(e) => return fail(e),
     };
     let rdw = feeds.iter().filter(|f| f.variable.is_some()).map(|f| f.dd.clone()).collect();
-    let mut runner = Runner { req: &req, work, count: 0, rdw };
+    let mut runner = Runner { req: &req, work, count: 0, rdw, covered: RunCoverage::default() };
     let varied = Varied { feeds, lines: sysin.then(|| "SYSIN".to_string()).into_iter().collect(), parms: parm.then(|| "PARM".to_string()).into_iter().collect() };
     let found = drive(&req.out, req.runs, req.seed, req.hang_limit, &varied, &mut |inputs, evidence| runner.run(inputs, &others, evidence));
     let _ = fs::remove_dir_all(&runner.work);
@@ -1066,7 +1153,7 @@ pub fn run(req: Request) -> ExitCode {
         Err(e) => return fail(e),
     };
     let header = Header { seed: req.seed, clock: &req.clock, file: &file, id: &compiled.program.id, root: &req.root, roots: &req.roots(), entry: "run" };
-    if let Err(e) = write_manifest(&req.out, &header, found.inputs, &found.tally, found.runs) {
+    if let Err(e) = runner.covered.write(&req.out).and_then(|key| write_manifest_in(MANIFEST_FORMAT, &req.out, &header, found.inputs, &found.tally, found.runs, vec![key])) {
         return fail(format!("-o {}: {e}", req.out.display()));
     }
     if !others.unfed.is_empty() {

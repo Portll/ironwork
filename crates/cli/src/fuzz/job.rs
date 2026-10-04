@@ -109,6 +109,7 @@ struct Runner<'a> {
     plan: &'a Plan,
     work: PathBuf,
     count: u64,
+    covered: super::RunCoverage,
 }
 
 impl Runner<'_> {
@@ -162,8 +163,10 @@ impl Runner<'_> {
         if let Some(limit) = inputs.limit {
             command.arg("--statement-limit").arg(limit.to_string());
         }
-        if let Some((journal, coverage)) = evidence {
-            command.arg("--evidence").arg(journal).arg("--coverage").arg(coverage);
+        let cover = super::coverage_path(evidence, &self.work, self.count);
+        command.arg("--coverage").arg(&cover);
+        if let Some((journal, _)) = evidence {
+            command.arg("--evidence").arg(journal);
             if let Some(marker) = &inputs.marker {
                 command.arg("--trace-marker").arg(marker);
             }
@@ -171,6 +174,7 @@ impl Runner<'_> {
         let roots = roots(self.req, &datasets);
         let timeout = if inputs.limit.is_some() { fuzz.timeout * super::HANG_PATIENCE } else { fuzz.timeout };
         let (exit, text) = super::wait_for(command, &dir, timeout, &given)?;
+        self.covered.take(&cover, evidence.is_some());
         let outcome = exit.map_or(Outcome::Timeout, |code| super::ended(code, &text, |l| super::abend_line(l, &roots)));
         Ok(match super::waited(outcome, &text) {
             Outcome::Refused(why) => unplaced(&text).unwrap_or(Outcome::Refused(why)),
@@ -215,7 +219,7 @@ pub fn run(req: Request) -> ExitCode {
         Ok(w) => w,
         Err(e) => return fail(e),
     };
-    let mut runner = Runner { req: &req, plan: &plan, work: work.clone(), count: 0 };
+    let mut runner = Runner { req: &req, plan: &plan, work: work.clone(), count: 0, covered: super::RunCoverage::default() };
     let found = super::drive(&req.fuzz.out, req.fuzz.runs, req.fuzz.seed, req.fuzz.hang_limit, varied, &mut |inputs, evidence| runner.run(inputs, evidence));
     let _ = fs::remove_dir_all(&work);
     let found = match found {
@@ -225,7 +229,7 @@ pub fn run(req: Request) -> ExitCode {
     // Each run's data sets are its own, under .work and gone when fuzz ends; the manifest names
     // .work for them.
     let header = super::Header { seed: req.fuzz.seed, clock: &req.fuzz.clock, file: &file, id: &job.name, root: &req.fuzz.root, roots: &roots(&req, &work), entry: "job" };
-    if let Err(e) = super::write_manifest(&req.fuzz.out, &header, found.inputs, &found.tally, found.runs) {
+    if let Err(e) = runner.covered.write(&req.fuzz.out).and_then(|key| super::write_manifest_in(super::MANIFEST_FORMAT, &req.fuzz.out, &header, found.inputs, &found.tally, found.runs, vec![key])) {
         return fail(format!("-o {}: {e}", req.fuzz.out.display()));
     }
     if !plan.empty.is_empty() {

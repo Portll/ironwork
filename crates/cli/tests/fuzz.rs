@@ -105,6 +105,17 @@ fn generated_records_find_the_data_exception_and_the_range_check_each_kept_once_
     }
     assert!(dir.join("run/coverage/0.json").exists());
     assert!(!dir.join("run/.work").exists());
+    // Every run's coverage is added up: the OPEN starts in each run that reports coverage, the
+    // ADD only in those that read a record.
+    assert!(manifest.contains("\"runCoverage\":\"coverage/runs.json\""), "{manifest}");
+    let covered = fs::read_to_string(dir.join("run/coverage/runs.json")).unwrap();
+    let field = |text: &str, key: &str| text.split(&format!("\"{key}\":")).nth(1).and_then(|r| r.split([',', '}']).next()).and_then(|n| n.parse::<i64>().ok()).unwrap();
+    let runs = field(&covered, "runs");
+    assert!(runs > 40, "{covered}");
+    let line = |n: i64| covered.split('{').find(|e| e.contains("\"file\":\"QTYSUM.cbl\"") && e.contains(&format!("\"line\":{n},"))).unwrap_or_else(|| panic!("line {n}: {covered}")).to_string();
+    assert_eq!(field(&line(21), "runs"), runs, "{covered}");
+    assert!((1..runs).contains(&field(&line(25), "runs")), "{covered}");
+    assert!(covered.contains("\"paragraphs\":["), "{covered}");
 }
 
 #[test]

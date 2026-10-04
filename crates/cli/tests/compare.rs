@@ -160,5 +160,10 @@ fn run_coverage_counts_each_paragraph_entered() {
     for want in ["{\"entered\":1,\"line\":4,\"name\":\"MAIN-LINE\"", "{\"entered\":2,\"line\":7,\"name\":\"USED-PARA\"", "{\"entered\":0,\"line\":9,\"name\":\"UNUSED-PARA\"", "\"paragraphs\":3,\"program\":\"TWO\",\"reached\":2"] {
         assert!(text.contains(want), "{want} in {text}");
     }
+    // Statements by line: the PERFORM and GOBACK once, the used DISPLAY twice, the unused one never.
+    for want in ["{\"file\":\"TWO.cbl\",\"line\":5,\"started\":1}", "{\"file\":\"TWO.cbl\",\"line\":6,\"started\":1}", "{\"file\":\"TWO.cbl\",\"line\":8,\"started\":2}"] {
+        assert!(text.contains(want), "{want} in {text}");
+    }
+    assert!(!text.contains("\"line\":10,\"started\""), "{text}");
     fs::remove_dir_all(dir).unwrap();
 }

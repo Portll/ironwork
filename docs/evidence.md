@@ -62,7 +62,11 @@ by `prev` and `seq`.
   that run one source add up and programs of two sources that share a PROGRAM-ID stay apart. A
   load module's run reports each program of the module compiled from its first program's source,
   its paragraphs from the LIR and their lines from the debug table, which is the report a run of
-  the source writes.
+  the source writes. Each report also lists `statements`: every line a statement started on, by
+  `file` relative to the root that supplied it (the journal's naming) and `line`, with `started`,
+  how often. A line no statement started on is not listed. Counting them turns on the run unit's
+  `Statement` events (the journal still records only the statements `--trace-statements` lists),
+  which costs a run about 4% more time on the interpreter and 11% on the VM (three million statements).
 - The run unit tells an observer what it opens, closes and loads, and each paragraph control
   enters (`exec::unit::Observer`); the interpreter and the VM raise the same events, so a journal
   is the same under both. `run --vm` and `cics --vm` write the journal and `--coverage` report the
@@ -302,6 +306,13 @@ cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
    the code, the file and the line. DIR is refused inside the program's directory or a library, as
    that run would refuse its evidence directory. A found abend that is not kept is named on
    standard error with what its last run did instead.
+   Every run the fuzz run makes, generated, re-checked, minimizing or kept, writes its coverage,
+   and the fuzz run adds them up in `DIR/coverage/runs.json`: `runs`, how many runs reported
+   coverage (a run stopped at `--timeout` writes none), `statements` (`file`, `line`, `runs` that
+   started a statement there, `started` in all), and `paragraphs` (`program`, `name`, `line`,
+   `runs` that entered it, `entered` in all), every paragraph of an outlined program listed, those
+   no run entered with 0. A fuzzed run carries no marker, so this says which statements ran
+   under fuzzing, never that a value failed to arrive (cobolwork `docs/spec/reach.md` §9.8).
 5. Two outcomes that are counted and never kept become findings under strict conditions. A
    timeout, up to three per fuzz run, is run again on the same input under `--statement-limit`
    (`--hang-limit`, 10,000,000 statements without it) for six times `--timeout`; if that run ends
@@ -346,7 +357,8 @@ panic) and `runs`,
 one per kept abend (`input` ids, `outcome` `abend`, `abend` with `code`, `file` relative to the
 program's directory or the library it came from, `line`, `message` and `optimized` (item 6),
 `journal` the run id, `coverage`, and `limit`, the statement limit a kept S322's runs were given,
-which its place depends on and its journal's `argv` also records). `optimized` rests on the manifest's word: the run it comes
+which its place depends on and its journal's `argv` also records), and `runCoverage`,
+`coverage/runs.json` (item 4). `optimized` rests on the manifest's word: the run it comes
 from keeps no journal. A program that takes any other PROCEDURE DIVISION USING is refused: a CALL would
 supply its parameters.
 
@@ -390,7 +402,8 @@ each run an `ironwork cics`, and writes the same directory with `entry` `cics`
 5. A kept run's inputs are `kind` `commarea` (`name` `DFHCOMMAREA`, the EBCDIC bytes `--commarea`
    takes) and `terminal` (`name` the terminal id, `--termid` or `TERM`, and the screen script as
    UTF-8). Its journal and coverage take in every task of its pseudo-conversation. Its input runs
-   once more compiled with `--optimize=2`, which gives its abend's `optimized`, as in §5.
+   once more compiled with `--optimize=2`, which gives its abend's `optimized`, as in §5. Every
+   pseudo-conversation's coverage goes into `coverage/runs.json`, named by `runCoverage`, as in §5.
 
 ### 5.2 A subprogram at its interface: `ironwork fuzz --interface`
 
@@ -417,6 +430,6 @@ each run an `ironwork cics`, and writes the same directory with `entry` `cics`
 5. The manifest's `format` is `ironwork-fuzz-interface/v1`
    ([fuzz-interface-manifest.schema.json](fuzz-interface-manifest.schema.json)): `entry`
    `interface`; `callers`, each CALL a run may take its shape from (`file` from `--root`, `line`);
-   and inputs of `kind` `argument`, `name` the USING item, `position` its place in the USING list,
+   `runCoverage`, every run's coverage added up, as in §5; and inputs of `kind` `argument`, `name` the USING item, `position` its place in the USING list,
    and `omitted` true for an OMITTED one. Its kept runs are described as §5's are. An abend found
    this way shows that a caller passing those bytes ends the subprogram, not that any caller does.

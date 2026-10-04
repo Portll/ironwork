@@ -154,6 +154,10 @@
         },
         "additionalProperties": false
       }
+    },
+    "runCoverage": {
+      "description": "The coverage of every run the fuzz run made, by path from DIR: coverage/runs.json, with how many runs started each statement and entered each paragraph (docs/evidence.md §5). Absent from a manifest written before ironwork kept it.",
+      "const": "coverage/runs.json"
     }
   },
   "additionalProperties": false,
