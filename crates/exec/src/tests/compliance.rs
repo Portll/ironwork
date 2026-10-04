@@ -160,9 +160,13 @@ fn the_command_line_is_a_warning_under_extended_and_refused_under_strict() {
     let extended = syntax::parse_with(COMMAND_LINE, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap();
     let compiled = compile(extended, &EXTENDED.iter().map(|f| f.to_string()).collect::<Vec<_>>()).unwrap_or_else(|e| panic!("{e:?}"));
     let ids: Vec<(u32, Option<&str>, Severity)> = compiled.diagnostics.iter().map(|m| (m.pos.line, m.id, m.severity)).collect();
+    let (terminators, ids): (Vec<_>, Vec<_>) = ids.into_iter().partition(|m| m.1 == Some("IWX0013"));
     assert_eq!(ids, [10, 11, 15, 20, 21, 23, 24, 26, 27].map(|line| (line, Some("IWX0010"), Severity::Warning)));
+    assert_eq!(terminators, [(18, Some("IWX0013"), Severity::Warning)], "END-ACCEPT");
     let strict = compile(syntax::parse(COMMAND_LINE).unwrap(), &[]).err().unwrap();
-    let refused: Vec<&str> = strict.iter().filter(|e| e.severity == Severity::Severe).map(|e| e.message.as_str()).collect();
+    let (terminators, refused): (Vec<_>, Vec<_>) = strict.iter().filter(|e| e.severity == Severity::Severe).partition(|e| e.id == Some("IWS0097"));
+    assert_eq!(terminators.iter().map(|e| e.pos.line).collect::<Vec<_>>(), [18], "END-ACCEPT, which Enterprise COBOL does not reserve");
+    let refused: Vec<&str> = refused.iter().map(|e| e.message.as_str()).collect();
     assert_eq!(refused.len(), 9, "{refused:?}");
     assert!(refused[0].starts_with("ACCEPT ... FROM COMMAND-LINE: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's"), "{refused:?}");
     assert!(refused.contains(&"DISPLAY UPON ARGUMENT-NUMBER: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it"), "{refused:?}");
@@ -196,4 +200,104 @@ fn an_into_name_without_its_colon_is_refused_under_strict_and_read_under_extende
     let compiled = compile(parsed, &EXTENDED.iter().map(|f| f.to_string()).collect::<Vec<_>>()).unwrap_or_else(|e| panic!("{e:?}"));
     let shown: Vec<(u32, Option<&str>, Severity)> = compiled.diagnostics.iter().map(|m| (m.pos.line, m.id, m.severity)).collect();
     assert_eq!(shown, [(9, Some("IWX0011"), Severity::Warning)]);
+}
+
+/// A program using the four forms Enterprise COBOL flags that Micro Focus and GnuCOBOL read: a
+/// numeric VALUE for a numeric-edited item, VALUES for a data item, names of more than 30
+/// characters that differ only after the 30th, and END-DISPLAY.
+const FLAGGED_FORMS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. FLAGGED.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  AMOUNT PIC ZZ9.99 VALUE 12.5.\n",
+    "       01  FLAG PIC X VALUES 'Y'.\n",
+    "       01  CUSTOMER-ACCOUNT-BALANCE-TOTAL-A PIC 9(5) VALUE 42.\n",
+    "       01  CUSTOMER-ACCOUNT-BALANCE-TOTAL-B PIC 9(5) VALUE 7.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY AMOUNT '|' FLAG END-DISPLAY\n",
+    "           DISPLAY CUSTOMER-ACCOUNT-BALANCE-TOTAL-A '|'\n",
+    "               CUSTOMER-ACCOUNT-BALANCE-TOTAL-B\n",
+    "           GOBACK.\n",
+);
+
+fn diagnostics_under(source: &str, compliance: numeric::Compliance) -> Vec<(u32, u32, Option<&'static str>, Severity)> {
+    let flags: Vec<String> = if compliance == numeric::Compliance::Extended { EXTENDED.iter().map(|f| f.to_string()).collect() } else { Vec::new() };
+    let parsed = syntax::parse_with(source, &syntax::copy::Libraries::default().with_compliance(compliance)).unwrap_or_else(|e| panic!("{e}"));
+    let mut shown: Vec<_> = match compile(parsed, &flags) {
+        Ok(compiled) => compiled.diagnostics,
+        Err(errors) => errors,
+    }
+    .iter()
+    .map(|m| (m.pos.line, m.pos.col, m.id, m.severity))
+    .collect();
+    shown.sort();
+    shown
+}
+
+#[test]
+fn the_forms_ibm_flags_run_alike_on_the_interpreter_and_the_vm_under_extended() {
+    let walked = Harness::source(FLAGGED_FORMS).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (" 12.50|Y\n00042|00007\n", Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(FLAGGED_FORMS).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+}
+
+#[test]
+fn extended_warns_of_each_form_and_strict_gives_ibms_severity() {
+    let warning = |line, col, id| (line, col, Some(id), Severity::Warning);
+    let extended = [warning(5, 8, "IWX0012"), warning(6, 23, "IWX0014"), warning(7, 12, "IWX0015"), warning(8, 12, "IWX0015"), warning(10, 36, "IWX0013"), warning(11, 20, "IWX0015"), warning(12, 16, "IWX0015")];
+    assert_eq!(diagnostics_under(FLAGGED_FORMS, numeric::Compliance::Extended), extended);
+    let strict = diagnostics_under(FLAGGED_FORMS, numeric::Compliance::Strict);
+    let given = |id: &str| strict.iter().filter(|m| m.2 == Some(id)).map(|m| (m.0, m.3)).collect::<Vec<_>>();
+    assert_eq!(given("IWC0292"), [(5, Severity::Severe)], "IGYGR1080-S: {strict:?}");
+    assert_eq!(given("IWS0098"), [(6, Severity::Severe)]);
+    assert_eq!(given("IWS0097"), [(10, Severity::Severe)]);
+    assert_eq!(given("IWS0099"), [7, 8, 11, 12].map(|line| (line, Severity::Error)), "IGYDS0023-E");
+    assert_eq!(given("IWC0002"), [(11, Severity::Severe), (12, Severity::Severe)], "the two names are one name in their first 30 characters");
+}
+
+/// Enterprise COBOL compiles a name of more than 30 characters with an error (return code 8) and
+/// runs it under its default NOCOMPILE(S), the name read as its first 30 characters.
+#[test]
+fn strict_runs_a_long_name_as_ibm_runs_it_after_an_error() {
+    let source = concat!(
+        "       IDENTIFICATION DIVISION.\n",
+        "       PROGRAM-ID. LONGNAME.\n",
+        "       DATA DIVISION.\n",
+        "       WORKING-STORAGE SECTION.\n",
+        "       01  CUSTOMER-ACCOUNT-BALANCE-TOTAL-AMOUNT PIC 9(3) VALUE 5.\n",
+        "       PROCEDURE DIVISION.\n",
+        "           DISPLAY CUSTOMER-ACCOUNT-BALANCE-TOTAL-AMOUNT\n",
+        "           GOBACK.\n",
+    );
+    assert_eq!(diagnostics_under(source, numeric::Compliance::Strict), [(5, 12, Some("IWS0099"), Severity::Error), (7, 20, Some("IWS0099"), Severity::Error)]);
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let o = Harness::source(source).run(executor);
+        assert_eq!((o.out.as_str(), o.ending.as_ref().ok()), ("005\n", Some(&Ending::Goback)), "{}", o.err);
+    }
+}
+
+/// A name in EXEC SQL or EXEC CICS is read as the program's declarations are, cut to its first 30
+/// characters under strict.
+#[test]
+fn a_long_name_in_exec_sql_or_cics_names_what_its_declaration_names() {
+    let source = concat!(
+        "       IDENTIFICATION DIVISION.\n",
+        "       PROGRAM-ID. SQLLONG.\n",
+        "       DATA DIVISION.\n",
+        "       WORKING-STORAGE SECTION.\n",
+        "           EXEC SQL INCLUDE SQLCA END-EXEC.\n",
+        "       01  CUSTOMER-ACCOUNT-BALANCE-TOTAL-AMOUNT PIC S9(7) COMP-3.\n",
+        "       PROCEDURE DIVISION.\n",
+        "           EXEC SQL\n",
+        "             SELECT BAL INTO :CUSTOMER-ACCOUNT-BALANCE-TOTAL-AMOUNT\n",
+        "               FROM ACCT WHERE ID = 1\n",
+        "           END-EXEC\n",
+        "           EXEC CICS WRITEQ TS QUEUE('Q1')\n",
+        "                FROM(CUSTOMER-ACCOUNT-BALANCE-TOTAL-AMOUNT) END-EXEC\n",
+        "           GOBACK.\n",
+    );
+    assert_eq!(diagnostics_under(source, numeric::Compliance::Strict), [(6, 12, Some("IWS0099"), Severity::Error)]);
+    assert_eq!(diagnostics_under(source, numeric::Compliance::Extended), [(6, 12, Some("IWX0015"), Severity::Warning)]);
 }

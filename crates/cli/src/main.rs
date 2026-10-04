@@ -75,15 +75,19 @@ flags:
              place, once per run, as the CICS translator turns RETURN and XCTL into a CALL;
              never gives nothing. A program with none of these gets the warning whatever the flag
   --compliance strict|extended
-             strict (the default) refuses what Enterprise COBOL refuses. extended reads the Micro
-             Focus and GnuCOBOL extensions docs/compliance.md lists: free-form source, level-78 and
-             CONSTANT entries, <>, literal concatenation with &, BINARY-SHORT, -LONG and -DOUBLE,
-             and PROGRAM-ID with no IDENTIFICATION DIVISION header, each with a warning naming it
-             and where it is (IWX0001-W to IWX0006-W), ASSIGN to a data item (IWX0007-W), an
-             integer or numeric function as a MOVE's sender (IWX0008-W), PROCEDURE DIVISION
-             RETURNING OMITTED (IWX0009-W) and the command line, ACCEPT FROM COMMAND-LINE,
-             ARGUMENT-NUMBER and ARGUMENT-VALUE read from the PARM (IWX0010-W), and an EXEC SQL
-             INTO name without its colon (IWX0011-W), so check's return code is 4, and runs them.
+             strict (the default) refuses what Enterprise COBOL refuses, and gives IBM's message
+             at IBM's severity for a form IBM's compiler flags. extended reads the Micro Focus and
+             GnuCOBOL extensions docs/compliance.md lists: free-form source, level-78 and CONSTANT
+             entries, <>, literal concatenation with &, BINARY-SHORT, -LONG and -DOUBLE, and
+             PROGRAM-ID with no IDENTIFICATION DIVISION header, each with a warning naming it and
+             where it is (IWX0001-W to IWX0006-W), ASSIGN to a data item (IWX0007-W), an integer
+             or numeric function as a MOVE's sender (IWX0008-W), PROCEDURE DIVISION RETURNING
+             OMITTED (IWX0009-W), the command line, ACCEPT FROM COMMAND-LINE, ARGUMENT-NUMBER and
+             ARGUMENT-VALUE read from the PARM (IWX0010-W), an EXEC SQL INTO name without its
+             colon (IWX0011-W), a numeric VALUE for a numeric-edited item (IWX0012-W), END-DISPLAY
+             and END-ACCEPT (IWX0013-W), VALUES outside a level-88 entry (IWX0014-W) and
+             user-defined words of more than 30 characters (IWX0015-W), so check's return code is
+             4, and runs them.
              run, check, cics, compile, job, fuzz and compare. --compliance=extended works too
   --optimize=0|1|2
              the compiler invocation's OPTIMIZE level; a CBL or PROCESS card's OPTIMIZE wins over it.

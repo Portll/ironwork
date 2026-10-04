@@ -205,7 +205,7 @@ pub fn parse_all_with(text: &str, libraries: &copy::Libraries) -> Result<Vec<ast
     if compliance == numeric::Compliance::Extended {
         tokens = extended::rewrite(tokens, &source.options).map_err(|e| e.in_files(&files))?;
     }
-    let mut programs = parser::parse(&tokens, source.options).map_err(|e| e.in_files(&files))?;
+    let mut programs = parser::parse(&tokens, source.options, compliance).map_err(|e| e.in_files(&files))?;
     for p in &mut programs {
         p.sources = files.clone();
     }

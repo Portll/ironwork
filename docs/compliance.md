@@ -7,7 +7,7 @@ compiles and runs them; anything else stays refused with the message strict give
 
 | Level | What it does |
 |---|---|
-| `strict` (the default) | Today's behaviour, unchanged: a construct Enterprise COBOL does not have is refused |
+| `strict` (the default) | A construct Enterprise COBOL does not have is refused, and a form IBM's compiler flags gets IBM's message at IBM's severity |
 | `extended` | The extensions below are read as Micro Focus and GnuCOBOL read them, each with a warning |
 
 The flag is `--compliance strict|extended` (or `--compliance=extended`) on `run`, `check`, `cics`,
@@ -35,7 +35,10 @@ both executors and compares the runs. The tenth, IWX0010-W, the command line, ha
 COBOL form: both executors read it from the run unit's PARM arguments (`rt::le::parm::Arguments`),
 and the LIR carries its ACCEPT sources and the op DISPLAY UPON ARGUMENT-NUMBER becomes. The eleventh,
 IWX0011-W, is the compiler's check on an EXEC SQL INTO list: the name it reads is a host variable as
-any other.
+any other. The twelfth to fifteenth, IWX0012-W to IWX0015-W, are forms IBM's compiler flags itself:
+strict gives a message where IBM's does, at the severity IBM's has, and extended reads each as Micro
+Focus and GnuCOBOL do, into a program Enterprise COBOL could hold. A test runs a program using the
+four on both executors and compares the runs, and another gives each one's message under each level.
 
 ### IWX0001-W free-form source
 
@@ -274,6 +277,103 @@ variable or SQL parameter target (SELECT INTO, db2z_sql_selectinto). Programs in
 host variables so (`FETCH C INTO CSR-ENTITY, CSR-PROJ-ID`), and under extended an INTO name without
 its colon is the host variable of that name, in a SELECT INTO, FETCH or rowset FETCH. Strict refuses
 it (S), as Db2's precompiler does (assumption SQ7).
+
+### IWX0012-W a numeric literal as a numeric-edited item's VALUE
+
+`IWX0012-W a numeric literal as a numeric-edited item's VALUE (Micro Focus and GnuCOBOL; Enterprise
+COBOL takes an alphanumeric literal in edited form): AMOUNT starts as the literal moved to it`, at
+the item's level-number.
+
+Enterprise COBOL's VALUE clause for a numeric-edited item of USAGE DISPLAY "must be an alphanumeric
+literal or a figurative constant", and for one of USAGE NATIONAL a national or alphanumeric literal
+or a figurative constant, the editing characters written into the literal (Language Reference
+SC27-8713-03, pp. 245-247). The rule is the one for alphanumeric items, for which IBM documents
+IGYGR1080-S, "A "VALUE" clause literal was not compatible with the data category of the subject data
+item. The "VALUE" clause was discarded." (Migration Guide, COBOL source code differences in
+Enterprise COBOL 5 and 6), and which OS/VS COBOL alone relaxed (Migration Guide, VALUE clause
+condition names). Strict refuses `PIC ZZ9.99 VALUE 12.5` with `IWC0292-S VALUE of AMOUNT: a numeric
+literal, where a numeric-edited item's VALUE is an alphanumeric literal or a figurative constant
+written in edited form; --compliance extended edits the number into it`.
+
+Micro Focus takes a numeric literal there, and "the value contained in the item will be the same as
+if the numeric literal were moved to the numeric edited item" (Visual COBOL Language Reference, The
+VALUE Clause). cobc 3.2 does the same under `-std=default`, and under `-std=mf` with a warning, and
+both give ` 12.50`; extended does the same. A figurative constant, ZERO among them, is no numeric
+literal and is taken under either level.
+
+### IWX0013-W END-DISPLAY and END-ACCEPT
+
+`IWX0013-W END-DISPLAY (Micro Focus and GnuCOBOL; Enterprise COBOL does not reserve the word): it
+ends the DISPLAY statement`, at the word, and the same for END-ACCEPT after ACCEPT.
+
+Enterprise COBOL's DISPLAY and ACCEPT have no scope terminator (Language Reference SC27-8713-03,
+pp. 307, 333). Its reserved words list END-DISPLAY and END-ACCEPT only under "Potential reserved
+words", which "might be reserved in a future release" and are flagged with an I-level message where
+a program uses them as names (Appendix E, pp. 761, 766). IBM's compiler therefore reads `DISPLAY X
+END-DISPLAY` as displaying a data item named END-DISPLAY, and refuses it as undefined (IGYPS2121-S,
+"... was not defined as a data-name. The statement was discarded."), and END-ACCEPT after a complete
+ACCEPT as a word no statement takes. Strict refuses either word after its statement with
+`IWS0097-S END-DISPLAY: Micro Focus's and GnuCOBOL's scope terminator, a word Enterprise COBOL does
+not reserve; --compliance extended reads it`. A program that names a data item END-DISPLAY and
+displays it there, which Enterprise COBOL compiles, is refused the same way.
+
+Micro Focus and GnuCOBOL reserve both words and read each as its statement's terminator, which
+matters where ON EXCEPTION precedes it; extended does the same.
+
+### IWX0014-W VALUES outside a level-88 entry
+
+`IWX0014-W VALUES outside a level-88 entry (Micro Focus; Enterprise COBOL writes VALUE there): it is
+read as VALUE`, at VALUES.
+
+Enterprise COBOL writes VALUES ARE only in format 2 of the VALUE clause, a condition-name's entry;
+format 1, a data item's initial value, is VALUE IS (Language Reference SC27-8713-03, pp. 245, 248).
+No IBM listing of VALUES in format 1 has been found, so the severity is the syntax's: a word a data
+description entry does not take is S, as in IGYDS1089-S, "... was invalid. Scanning was resumed at
+the next area "A" item, level-number, or the start of the next clause.". Strict refuses `01 FLAG PIC
+X VALUES 'Y'.` with `IWS0098-S VALUES in a level-01 entry: Enterprise COBOL writes VALUES only in a
+level-88 entry, and VALUE in any other; --compliance extended reads it as VALUE`.
+
+Micro Focus documents that "VALUES ARE can be used with Format 1", marked as an OS/VS COBOL form
+(Visual COBOL Language Reference, The VALUE Clause), and cobc 3.2 reads it as VALUE under `-std=mf`
+with a warning; cobc refuses it under `-std=default` and `-std=ibm-strict`, giving it no other
+meaning. Extended reads it as VALUE. A list of values after VALUES, the 2002 standard's table form,
+stays refused under either level.
+
+### IWX0015-W user-defined words of more than 30 characters
+
+`IWX0015-W a user-defined word of more than 30 characters (Micro Focus and GnuCOBOL; Enterprise COBOL
+reads its first 30): NAME is read whole`, at the word.
+
+"The maximum length of a user-defined word is 30 bytes" (Language Reference SC27-8713-03, p. 13).
+IBM's compiler gives IGYDS0023-E, "The COBOL word starting in column 23 contained more than 30
+characters. The word was truncated to 30 characters." (IBM APAR PI67249, for two data-names of 31
+characters), and under its default NOCOMPILE(S) the program compiles and runs with return code 8. Strict does the same: `IWS0099-E NAME: a user-defined word has at most 30
+characters, and this one has 32; it is read as its first 30, ...` at each such word, which is read
+as its first 30 characters, so `check` returns 8 and `run` runs the program. A name in EXEC SQL or
+EXEC CICS is cut the same way, and two names alike in their first 30 characters are one name,
+refused as ambiguous where a reference cannot tell them apart.
+
+Micro Focus and GnuCOBOL (63 characters under `-std=default` and `-std=mf`) read the word whole;
+extended does the same.
+
+### What the four change
+
+The census samples of the next section, 3,000 programs from each corpus with seed 1, run with
+`ironwork check` at ef82e8c, and with this change on that commit. Strict compiled 1,161
+programs of the 3185-repository sample (365 repositories) and 1,425 of the 500-repository sample (86);
+with the four it compiles 1,139 (362) and 1,418 (86). No program is refused by more than one:
+
+| Form | Strict's message | First sample: compiled, now not (repositories) | Second sample | Programs holding it, first and second |
+|---|---|---|---|---|
+| A numeric VALUE for a numeric-edited item | IWC0292-S | 1 (1) | 0 | 2, 0 |
+| END-DISPLAY or END-ACCEPT | IWS0097-S | 15 (3), 11 of them GnuCOBOL tests copied into one repository | 5 (2) | 21, 17 |
+| VALUES outside a level-88 entry | IWS0098-S | 4 (2) | 1 (1) | 4, 1 |
+| A user-defined word of more than 30 characters | IWS0099-E | 2 (2), at return code 8, and they still run | 1 (1), the same | 3, 2 |
+
+Under extended both samples compile what they compiled before, 1,376 and 1,484 programs, and no
+more: a program using one of the four that compiled before now carries its warning, and one refused
+before stops on something else. The NIST CCVS85 routines give the same class and first message
+under strict before and after (383 clean of 458): COBOL-85 has none of the four.
 
 ## How the six were chosen
 

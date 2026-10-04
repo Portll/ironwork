@@ -310,7 +310,12 @@ DIVISION RETURNING OMITTED, a program that returns no item, is read as a header 
 phrase, with IWX0009-W. ACCEPT FROM COMMAND-LINE, ARGUMENT-NUMBER and ARGUMENT-VALUE, and DISPLAY
 UPON ARGUMENT-NUMBER, read the job step's PARM program arguments as a command line, with IWX0010-W
 (C442). An EXEC SQL INTO name written without its colon is read as the host variable of that name,
-with IWX0011-W, where strict refuses it as Db2's precompiler does.
+with IWX0011-W, where strict refuses it as Db2's precompiler does. Four forms IBM's compiler flags
+are read as Micro Focus and GnuCOBOL read them, each with its warning: a numeric literal as a
+numeric-edited item's VALUE (IWX0012-W), END-DISPLAY and END-ACCEPT (IWX0013-W), VALUES outside a
+level-88 entry (IWX0014-W), and user-defined words of more than 30 characters (IWX0015-W). Strict
+gives IBM's message for each at IBM's severity: S for the first three, and E for a long word, which
+it reads as its first 30 characters, as Enterprise COBOL does.
 [docs/compliance.md](docs/compliance.md) gives each one's meaning, the census that chose them, and
 what stays refused and why.
 

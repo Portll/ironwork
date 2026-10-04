@@ -223,7 +223,13 @@ impl Statement {
 
 /// The statement in `body`, the text between EXEC SQL and END-EXEC.
 pub fn parse(body: &str, pos: Pos) -> Statement {
-    match lex(body) {
+    parse_naming(body, pos, None)
+}
+
+/// The statement in `body`, each host variable's names cut to `longest` characters where it is
+/// given, as the program's own declarations are read.
+pub fn parse_naming(body: &str, pos: Pos, longest: Option<usize>) -> Statement {
+    match lex(body, longest) {
         Ok(toks) => statement(&toks, pos),
         Err(why) => Statement::Malformed(why),
     }
@@ -238,10 +244,11 @@ enum Tok {
     Host { path: Vec<String>, subscripts: Vec<String> },
 }
 
-fn lex(sql: &str) -> Result<Vec<Tok>, String> {
+fn lex(sql: &str, longest: Option<usize>) -> Result<Vec<Tok>, String> {
     let chars: Vec<char> = sql.chars().collect();
     let (mut out, mut i) = (Vec::new(), 0);
     let text = |from: usize, to: usize| chars[from..to].iter().collect::<String>();
+    let name = |s: String| -> String { s.to_ascii_uppercase().chars().take(longest.unwrap_or(usize::MAX)).collect() };
     while let Some(&c) = chars.get(i) {
         if c.is_whitespace() {
             i += 1;
@@ -268,7 +275,7 @@ fn lex(sql: &str) -> Result<Vec<Tok>, String> {
                 while chars.get(i).is_some_and(|&n| n.is_ascii_alphanumeric() || n == '-' || n == '_') {
                     i += 1;
                 }
-                path.push(text(start, i).to_ascii_uppercase());
+                path.push(name(text(start, i)));
                 if chars.get(i) == Some(&'.') && chars.get(i + 1).is_some_and(char::is_ascii_alphanumeric) {
                     i += 1;
                 } else {
@@ -278,7 +285,7 @@ fn lex(sql: &str) -> Result<Vec<Tok>, String> {
             let mut subscripts = Vec::new();
             if chars.get(i) == Some(&'(') {
                 let close = chars[i..].iter().position(|&n| n == ')').ok_or("a subscript is not closed")? + i;
-                subscripts = text(i + 1, close).split(',').map(|s| s.trim().to_ascii_uppercase()).collect();
+                subscripts = text(i + 1, close).split(',').map(|s| name(s.trim().to_owned())).collect();
                 if subscripts.iter().any(String::is_empty) {
                     return Err("a subscript is empty".into());
                 }

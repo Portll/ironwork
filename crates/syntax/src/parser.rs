@@ -1,5 +1,6 @@
 use crate::ast::*;
 use crate::lexer::{Tok, Token};
+use crate::messages::{IWS0097, IWS0098, IWX0013, IWX0014};
 use crate::{Error, Pos};
 
 mod declaratives;
@@ -10,8 +11,9 @@ mod sort;
 /// Every program in the source, first to last, with nested programs after the one containing them,
 /// except that the first program comes ahead of the user-defined functions and prototypes before
 /// it, as the binder's ENTRY statement makes it the one a run enters (assumption C270).
-pub fn parse(tokens: &[Token], options: Vec<String>) -> Result<Vec<Program>, Error> {
+pub fn parse(tokens: &[Token], options: Vec<String>, compliance: numeric::Compliance) -> Result<Vec<Program>, Error> {
     let mut parser = Parser::new(tokens);
+    parser.extended = compliance == numeric::Compliance::Extended;
     let mut programs = Vec::new();
     parser.program(&options, &mut programs)?;
     while parser.peek().is_some() {
@@ -258,6 +260,8 @@ struct Parser<'a> {
     defined: Vec<String>,
     /// Parsing a function prototype, which may not have a REPOSITORY paragraph.
     in_prototype: bool,
+    /// `--compliance extended` is in force.
+    extended: bool,
 }
 
 /// The WHENEVER actions in force, which carry on in listing order, and the EXEC SQL blocks the
@@ -290,6 +294,7 @@ impl<'a> Parser<'a> {
             functions: Vec::new(),
             defined: Vec::new(),
             in_prototype: false,
+            extended: false,
         }
     }
 }
@@ -1168,7 +1173,8 @@ impl Parser<'_> {
                     ("BEGIN" | "END", "DECLARE", "SECTION") => format!("{} DECLARE SECTION", word(0)),
                     (first, _, _) => first.into(),
                 };
-                let statement = self.sql.cursors.resolve(crate::sql::parse(body, pos));
+                let longest = (!self.extended).then_some(crate::lexer::USER_WORD_MAX);
+                let statement = self.sql.cursors.resolve(crate::sql::parse_naming(body, pos, longest));
                 if let crate::sql::Statement::Whenever { condition, action } = &statement {
                     self.sql.whenever.set(*condition, action.clone());
                 }
@@ -1177,7 +1183,7 @@ impl Parser<'_> {
                     | crate::sql::Statement::Connect { .. }
                     | crate::sql::Statement::Malformed(_)
                     | crate::sql::Statement::Declaration
-                    | crate::sql::Statement::DeclareUnsupported { .. } => host_variables(body, pos),
+                    | crate::sql::Statement::DeclareUnsupported { .. } => host_variables(body, pos, longest),
                     typed => typed.references().into_iter().cloned().collect(),
                 };
                 self.sql.blocks += 1;
@@ -1200,7 +1206,7 @@ impl Parser<'_> {
                 for (name, arg) in &mut block.options {
                     if let Some(ExecArg::Text(t)) = arg
                         && (!labels || matches!(name.as_str(), "RESP" | "RESP2" | "PROGRAM"))
-                        && let Some(op) = operand_of(t, pos)
+                        && let Some(op) = operand_of(t, pos, self.extended)
                     {
                         *arg = Some(ExecArg::Operand(op));
                     }
@@ -1226,7 +1232,7 @@ impl Parser<'_> {
                     if name == "WHERE" {
                         if let Ok(comparisons) = crate::dli::qualification(t) {
                             for (_, _, value) in comparisons {
-                                if let Some(Operand::Ref(r)) = operand_of(&value, pos) {
+                                if let Some(Operand::Ref(r)) = operand_of(&value, pos, self.extended) {
                                     block.host_variables.push(r);
                                 }
                             }
@@ -1239,7 +1245,7 @@ impl Parser<'_> {
                         _ if crate::dli::NAMED.contains(&name.as_str()) => continue,
                         _ => t.as_str(),
                     };
-                    if let Some(op) = operand_of(data, pos) {
+                    if let Some(op) = operand_of(data, pos, self.extended) {
                         *arg = Some(ExecArg::Operand(op));
                     }
                 }
@@ -1302,6 +1308,18 @@ impl Parser<'_> {
         Ok(SignClause { position, separate })
     }
 
+    /// VALUES in an entry other than a condition-name's, the token before this one: Enterprise
+    /// COBOL writes VALUES only in format 2, a level-88 entry's (Language Reference SC27-8713-03,
+    /// pp. 245, 248), and Micro Focus reads VALUES ARE in format 1 as VALUE.
+    fn values_outside_condition(&mut self, level: u8) {
+        let pos = self.tokens[self.at - 1].pos;
+        self.messages.push(if self.extended {
+            IWX0014.at(pos, "VALUES outside a level-88 entry (Micro Focus; Enterprise COBOL writes VALUE there): it is read as VALUE")
+        } else {
+            IWS0098.at(pos, format!("VALUES in a level-{level:02} entry: Enterprise COBOL writes VALUES only in a level-88 entry, and VALUE in any other; --compliance extended reads it as VALUE"))
+        });
+    }
+
     /// WHEN ZERO, after BLANK.
     fn blank_when_zero(&mut self) -> R<()> {
         self.accept_word("WHEN");
@@ -1362,6 +1380,9 @@ impl Parser<'_> {
                 }
                 "OBJECT" => self.object_reference(&mut e)?,
                 "VALUE" | "VALUES" => {
+                    if clause == "VALUES" && level != 88 {
+                        self.values_outside_condition(level);
+                    }
                     self.accept_word("IS");
                     self.accept_word("ARE");
                     if level == 88 {
@@ -1523,6 +1544,21 @@ impl Parser<'_> {
         Ok(lit)
     }
 
+    /// END-DISPLAY or END-ACCEPT ending `verb`: Micro Focus and GnuCOBOL reserve the word, and
+    /// Enterprise COBOL lists it only as a word it may reserve later (Language Reference
+    /// SC27-8713-03, pp. 761, 766), reading it as a data-name.
+    fn unreserved_terminator(&mut self, word: &str, verb: &str) {
+        let pos = self.pos();
+        if !self.accept_word(word) {
+            return;
+        }
+        self.messages.push(if self.extended {
+            IWX0013.at(pos, format!("{word} (Micro Focus and GnuCOBOL; Enterprise COBOL does not reserve the word): it ends the {verb} statement"))
+        } else {
+            IWS0097.at(pos, format!("{word}: Micro Focus's and GnuCOBOL's scope terminator, a word Enterprise COBOL does not reserve; --compliance extended reads it"))
+        });
+    }
+
     fn paragraph_header(&self) -> bool {
         self.tokens.get(self.at).is_some_and(|t| t.area_a && (matches!(t.tok, Tok::Word(_)) || digits(&t.tok))) && self.peek_at(1) == Some(&Tok::Period)
     }
@@ -1662,7 +1698,7 @@ impl Parser<'_> {
                         return Err(self.error("the end of DISPLAY: Enterprise COBOL takes UPON before WITH NO ADVANCING"));
                     }
                 }
-                self.accept_word("END-DISPLAY");
+                self.unreserved_terminator("END-DISPLAY", "DISPLAY");
                 Stmt::Display { items, upon, no_advancing, pos }
             }
             "INITIALIZE" => self.initialize(pos)?,
@@ -1720,7 +1756,7 @@ impl Parser<'_> {
                     p.expect_word("EXCEPTION")?;
                     Ok(0)
                 })?;
-                self.accept_word("END-ACCEPT");
+                self.unreserved_terminator("END-ACCEPT", "ACCEPT");
                 Stmt::Accept { target, from, exception, pos }
             }
             "OPEN" => {
@@ -3463,8 +3499,9 @@ impl Parser<'_> {
     }
 }
 
-/// SQL host variables: `:NAME`, `:GROUP.NAME` and indicator variables, outside quoted strings.
-fn host_variables(sql: &str, pos: Pos) -> Vec<Ref> {
+/// SQL host variables: `:NAME`, `:GROUP.NAME` and indicator variables, outside quoted strings,
+/// each name cut to `longest` characters where it is given.
+fn host_variables(sql: &str, pos: Pos, longest: Option<usize>) -> Vec<Ref> {
     let chars: Vec<char> = sql.chars().collect();
     let (mut out, mut i, mut quote) = (Vec::new(), 0, None);
     while i < chars.len() {
@@ -3480,7 +3517,7 @@ fn host_variables(sql: &str, pos: Pos) -> Vec<Ref> {
                     end += 1;
                 }
                 let path: String = chars[start..end].iter().collect::<String>().to_ascii_uppercase();
-                let mut parts: Vec<String> = path.trim_end_matches('.').split('.').map(str::to_owned).collect();
+                let mut parts: Vec<String> = path.trim_end_matches('.').split('.').map(|part| part.chars().take(longest.unwrap_or(usize::MAX)).collect()).collect();
                 let name = parts.pop().unwrap_or_default();
                 parts.reverse();
                 out.push(Ref { name, qualifiers: parts, subscripts: Vec::new(), refmod: None, pos });
@@ -3540,10 +3577,12 @@ fn cics_options(body: &str) -> Vec<(String, Option<ExecArg>)> {
     out
 }
 
-/// An argument as the COBOL operand it names, through ironwork's own lexer and parser.
-fn operand_of(text: &str, pos: Pos) -> Option<Operand> {
+/// An argument as the COBOL operand it names, through ironwork's own lexer and parser, which
+/// read a name as the program's own declarations are read.
+fn operand_of(text: &str, pos: Pos, extended: bool) -> Option<Operand> {
     let source = crate::source::Source { text: text.to_owned(), positions: vec![pos; text.chars().count()], options: Vec::new(), debugging: None, free: Vec::new() };
-    let tokens = crate::lexer::lex(&source).ok()?;
+    let compliance = if extended { numeric::Compliance::Extended } else { numeric::Compliance::Strict };
+    let tokens = crate::lexer::lex_under(&source, compliance).ok()?;
     let mut p = Parser::new(&tokens);
     let op = p.operand().ok()?;
     (p.at == tokens.len()).then_some(op)

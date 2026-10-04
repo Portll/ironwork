@@ -405,11 +405,15 @@ fn display_takes_no_advancing_with_or_without_with() {
     let out = run(&program(
         "",
         "       01  A PIC X(3) VALUE 'ABC'.\n",
-        &[line("DISPLAY A NO ADVANCING"), line("DISPLAY '-' UPON CONSOLE NO ADVANCING"), line("DISPLAY A WITH NO ADVANCING END-DISPLAY"), line("DISPLAY '!'"), line("GOBACK.")].concat(),
+        &[line("DISPLAY A NO ADVANCING"), line("DISPLAY '-' UPON CONSOLE NO ADVANCING"), line("DISPLAY A WITH NO ADVANCING"), line("DISPLAY '!'"), line("GOBACK.")].concat(),
     ));
     assert_eq!(out, "ABC-ABC!\n");
     let reversed = program("", "", &[line("DISPLAY 'A' WITH NO ADVANCING UPON CONSOLE"), line("GOBACK.")].concat());
     assert!(syntax::parse(&reversed).unwrap_err().message.contains("Enterprise COBOL takes UPON before WITH NO ADVANCING"));
+    // Enterprise COBOL's DISPLAY has no scope terminator, and END-DISPLAY is not a word it reserves (Language Reference SC27-8713-03, pp. 333, 766).
+    let ended = program("", "", &[line("DISPLAY 'A' WITH NO ADVANCING END-DISPLAY"), line("GOBACK.")].concat());
+    let refused = compile(syntax::parse(&ended).unwrap(), &[]).err().unwrap();
+    assert_eq!(refused.iter().map(|e| (e.id, e.severity)).collect::<Vec<_>>(), [(Some(syntax::messages::IWS0097.id), Severity::Severe)]);
 }
 
 #[test]

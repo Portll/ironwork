@@ -313,6 +313,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0289 | W | `INITCHECK(STRICT): {item} may be used uninitialized: a path to this statement does not set {it} (see {analysis})` |
 | IWC0290 | W | `INITCHECK: {item} may be used uninitialized: no path to this statement sets {it} (see {analysis})` |
 | IWC0291 | S | `{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: {a character the program's code page does not hold}` |
+| IWC0292 | S | `VALUE of {name}: a numeric literal, where a numeric-edited item's VALUE is an alphanumeric literal or a figurative constant written in edited form; --compliance extended edits the number into it` |
 | IWL0001 | S | `lowering: {table} exceeds the LIR's limit` |
 | IWL0002 | S | `lowering: the lowered program is invalid: {why}` |
 | IWL0003 | S | `LOCAL-STORAGE exceeds the interpreter's {MAX STORAGE} bytes` |
@@ -522,6 +523,9 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWS0094 | S | `{shown}: the source-format directives >>SOURCE and $SET SOURCEFORMAT, giving FREE or FIXED, are the only compiler directives ironwork reads` |
 | IWS0095 | S | `CURRENCY SIGN {literal} is {character} in the program's code page, which cannot be a PICTURE currency symbol` |
 | IWS0096 | S | `CURRENCY SIGN {literal} is {value} in the program's code page, which contains a digit, +, -, . or ,` |
+| IWS0097 | S | `{END-DISPLAY or END-ACCEPT}: Micro Focus's and GnuCOBOL's scope terminator, a word Enterprise COBOL does not reserve; --compliance extended reads it` |
+| IWS0098 | S | `VALUES in a level-{level} entry: Enterprise COBOL writes VALUES only in a level-88 entry, and VALUE in any other; --compliance extended reads it as VALUE` |
+| IWS0099 | E | `{word}: a user-defined word has at most 30 characters, and this one has {count}; it is read as its first 30, {the first 30}` |
 | IWX0001 | W | `free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}` |
 | IWX0002 | W | `constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry` |
 | IWX0003 | W | `<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =` |
@@ -533,3 +537,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0009 | W | `PROCEDURE DIVISION RETURNING OMITTED (GnuCOBOL; Enterprise COBOL's RETURNING names an 01 or 77 item of the LINKAGE SECTION): the program is read with no RETURNING phrase, and returns its RETURN-CODE to its caller as any program does` |
 | IWX0010 | W | `{ACCEPT ... FROM COMMAND-LINE, ARGUMENT-NUMBER or ARGUMENT-VALUE, or DISPLAY ... UPON ARGUMENT-NUMBER} (Micro Focus and GnuCOBOL; Enterprise COBOL reads no command line): {what the job step's PARM program arguments give}` |
 | IWX0011 | W | `an INTO name written without its colon (Db2 13 for z/OS requires the colon before every host variable): {name} is read as a host variable` |
+| IWX0012 | W | `a numeric literal as a numeric-edited item's VALUE (Micro Focus and GnuCOBOL; Enterprise COBOL takes an alphanumeric literal in edited form): {name} starts as the literal moved to it` |
+| IWX0013 | W | `{END-DISPLAY or END-ACCEPT} (Micro Focus and GnuCOBOL; Enterprise COBOL does not reserve the word): it ends the {DISPLAY or ACCEPT} statement` |
+| IWX0014 | W | `VALUES outside a level-88 entry (Micro Focus; Enterprise COBOL writes VALUE there): it is read as VALUE` |
+| IWX0015 | W | `a user-defined word of more than 30 characters (Micro Focus and GnuCOBOL; Enterprise COBOL reads its first 30): {word} is read whole` |

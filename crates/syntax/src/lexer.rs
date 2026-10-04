@@ -1,3 +1,4 @@
+use crate::messages::{IWS0099, IWX0015};
 use crate::source::{FreeSpan, Source};
 use crate::{Error, Pos};
 use numeric::Compliance;
@@ -77,6 +78,9 @@ struct Lexer<'a> {
 
 /// The most characters a DBCS literal holds (Language Reference SC27-8713-03, p. 42).
 const DBCS_LITERAL_MAX: usize = 28;
+
+/// The most characters a user-defined word has.
+pub(crate) const USER_WORD_MAX: usize = 30;
 
 pub fn lex(source: &Source) -> Result<Vec<Token>, Error> {
     lex_under(source, Compliance::Strict)
@@ -185,6 +189,10 @@ impl Lexer<'_> {
                 .filter(|raw| raw.eq_ignore_ascii_case(w)),
             _ => None,
         };
+        let (tok, spelled) = match tok {
+            Tok::Word(w) if w.chars().count() > USER_WORD_MAX => self.long_word(w, spelled, pos),
+            tok => (tok, spelled),
+        };
         let after_comma = std::mem::take(&mut self.comma_pending);
         let span = self.free.iter().position(|s| s.holds(pos));
         let area_a = match span {
@@ -199,6 +207,20 @@ impl Lexer<'_> {
             None => (8..=11).contains(&pos.col),
         };
         self.tokens.push(Token { tok, pos, area_a, spelled, after_comma, messages: std::mem::take(&mut self.pending) });
+    }
+
+    /// A word longer than a user-defined word can be (Language Reference SC27-8713-03, p. 13).
+    /// Enterprise COBOL reads its first 30 characters, with an error (IGYDS0023-E); Micro Focus
+    /// and GnuCOBOL read it whole.
+    fn long_word(&mut self, word: String, spelled: Option<String>, pos: Pos) -> (Tok, Option<String>) {
+        if self.extended {
+            self.pending.push(IWX0015.at(pos, format!("a user-defined word of more than 30 characters (Micro Focus and GnuCOBOL; Enterprise COBOL reads its first 30): {word} is read whole")));
+            return (Tok::Word(word), spelled);
+        }
+        let first: String = word.chars().take(USER_WORD_MAX).collect();
+        let count = word.chars().count();
+        self.pending.push(IWS0099.at(pos, format!("{word}: a user-defined word has at most 30 characters, and this one has {count}; it is read as its first 30, {first}")));
+        (Tok::Word(first), spelled.map(|s| s.chars().take(USER_WORD_MAX).collect()))
     }
 
     /// The character that is a numeric literal's decimal point.

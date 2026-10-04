@@ -232,6 +232,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     condition_subjects(&mut program, &layout);
     dbcs_values(&layout, &mut errors);
     numeric_values(&layout, &mut errors);
+    edited_values(&layout, options.compliance, &mut errors);
     for item in &layout.items {
         if let Some(object) = &item.depending_on {
             match layout.resolve(&object.name, &object.qualifiers, object.pos) {
@@ -656,6 +657,20 @@ fn numeric_values(layout: &Layout, errors: &mut Vec<Error>) {
         };
         let name = item.name.as_deref().unwrap_or("FILLER");
         errors.push(syntax::messages::IWC0068.at(item.pos, format!("VALUE of {name}: {what}, where a numeric item's VALUE literal must be numeric")));
+    }
+}
+
+/// A numeric-edited item's VALUE is an alphanumeric literal, a national one under USAGE NATIONAL,
+/// or a figurative constant, in edited form (Language Reference SC27-8713-03, pp. 246-247;
+/// IGYGR1080-S). Micro Focus and GnuCOBOL also take a numeric literal, edited as a MOVE edits it.
+fn edited_values(layout: &Layout, compliance: numeric::Compliance, errors: &mut Vec<Error>) {
+    for item in layout.items.iter().filter(|i| matches!(i.kind, rt::storage::Kind::NumericEdited { .. }) && matches!(i.value, Some(Literal::Number(_)))) {
+        let name = item.name.as_deref().unwrap_or("FILLER");
+        errors.push(if compliance == numeric::Compliance::Extended {
+            syntax::messages::IWX0012.at(item.pos, format!("a numeric literal as a numeric-edited item's VALUE (Micro Focus and GnuCOBOL; Enterprise COBOL takes an alphanumeric literal in edited form): {name} starts as the literal moved to it"))
+        } else {
+            syntax::messages::IWC0292.at(item.pos, format!("VALUE of {name}: a numeric literal, where a numeric-edited item's VALUE is an alphanumeric literal or a figurative constant written in edited form; --compliance extended edits the number into it"))
+        });
     }
 }
 

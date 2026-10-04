@@ -783,11 +783,12 @@ fn the_vm_evaluates_range_and_max_with_a_floating_point_argument_in_floating_poi
 
 #[test]
 fn the_vm_writes_and_parses_items_with_picture_scaling_positions() {
+    // E's VALUE is 7800 in edited form: a numeric-edited item takes an alphanumeric literal there (Language Reference SC27-8713-03, p. 246).
     let data = concat!(
         "       01  D PIC N(80) USAGE NATIONAL.\n       01  X PIC X(80).\n       01  J PIC N(80) USAGE NATIONAL.\n",
         "       01  G.\n           05 S PIC 9PP VALUE 300.\n           05 T PIC SVPP9 VALUE -.005.\n",
         "           05 B PIC 9(2)PP COMP VALUE 1200.\n           05 C PIC S9(2)PP COMP-5 VALUE -4500.\n",
-        "           05 K PIC 9(3)PPP COMP-3 VALUE 45000.\n           05 E PIC Z9PP VALUE 7800.\n",
+        "           05 K PIC 9(3)PPP COMP-3 VALUE 45000.\n           05 E PIC Z9PP VALUE '78'.\n",
     );
     let body = [
         "MOVE SPACES TO D",
