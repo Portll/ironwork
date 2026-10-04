@@ -73,9 +73,9 @@ On 2026-09-29 the operator put SQL next after M8, ahead of the VM in
     nothing, as for any declaration; its OPEN abends, naming what it is.
 - **Refused by name.** DISCONNECT comes from other precompilers, so a program that uses it is
   refused at compile time as not a Db2 for z/OS program. CONNECT and SET CONNECTION, which Db2 for
-  z/OS has for DRDA, DESCRIBE and the SQLDA (PREPARE ... INTO, USING DESCRIPTOR), PREPARE ...
-  ATTRIBUTES, OPEN ... USING of a cursor declared for a select-statement, and multi-row FETCH and
-  EXECUTE are refused at run time by name. A CONNECT or SET CONNECTION that names its location by a
+  z/OS has for DRDA, DESCRIBE INPUT and USING BOTH, PREPARE ... ATTRIBUTES, OPEN ... USING of a
+  cursor declared for a select-statement, and multi-row FETCH and EXECUTE are refused at run time
+  by name. A CONNECT or SET CONNECTION that names its location by a
   host variable first gives the input trace a `connection-target` sink with the value
   ([evidence.md](evidence.md) §1.1).
 
@@ -112,6 +112,16 @@ the runtime keeps the state they need in its session, so every backend answers a
   string. FETCH, CLOSE and WHERE CURRENT OF treat it as any cursor.
 - **Lifetime** (assumption C400): a unit of work's end destroys the statements prepared in it, but
   COMMIT keeps the select-statement of an open WITH HOLD cursor, as KEEPDYNAMIC(NO) does.
+- **DESCRIBE [OUTPUT] and PREPARE ... INTO** fill the SQLDA the program declares, read by offset
+  from its start: SQLDAID, SQLDABC and SQLD always, and one SQLVAR per result column when SQLN
+  gives room for them all (SQLTYPE odd for a column that takes NULL, SQLLEN, the CCSID in SQLDATA
+  for a string, and SQLNAME). A statement that is not a query gives SQLD 0. The columns are those
+  the database's `prepare` described, which a recording keeps as `:` lines (§8), and how
+  PostgreSQL's types become Db2's is assumption C403. DESCRIBE of a name not prepared is -516.
+- **USING DESCRIPTOR** on EXECUTE, OPEN and FETCH takes each host variable from the SQLDA: its type
+  from SQLTYPE and SQLLEN, its storage where SQLDATA points, and its indicator where SQLIND points
+  when SQLTYPE is odd. An SQLDA the statement cannot use is -804 with Db2's reason code in SQLERRMC
+  (assumption C404). On EXECUTE and OPEN the marker rule above holds, SQLD counting the variables.
 
 ## 4. The Database interface (run time)
 
@@ -120,7 +130,7 @@ split in [codegen-runtime.md](codegen-runtime.md). It is covered by the runtime 
 
     trait Database {
         fn execute(&mut self, s: &Statement, inputs: &[Value]) -> Outcome;   // SELECT INTO, INSERT, UPDATE, DELETE, SET, EXECUTE
-        fn prepare(&mut self, s: &Statement) -> Outcome;                     // PREPARE
+        fn prepare(&mut self, s: &Statement) -> Outcome;                     // PREPARE, with its result columns
         fn open(&mut self, c: CursorId, s: &Statement, inputs: &[Value]) -> Outcome;
         fn fetch(&mut self, c: CursorId) -> Outcome;
         fn close(&mut self, c: CursorId) -> Outcome;
@@ -213,6 +223,8 @@ Input rules:
 | OPEN of a cursor whose prepared statement is not a select-statement | -517 | 07005 |
 | EXECUTE of a statement not prepared or a select-statement; EXECUTE IMMEDIATE of a select-statement | -518 | 07003 |
 | PREPARE of the statement of an open cursor | -519 | 24506 |
+| DESCRIBE of a statement not prepared | -516 | 26501 |
+| An SQLDA the statement cannot use; SQLERRMC holds Db2's reason code | -804 | 07002 |
 
 ## 7. Units of work
 
@@ -267,6 +279,9 @@ Input rules:
     call sends it, its verb is the string's command word, and a cursor for a prepared statement
     hashes `DECLARE C1 CURSOR [WITH HOLD] FOR` and the string; PREPARE's verb is `PREPARE`, with
     the statement name where a cursor stands.
+  - **`:`** gives one result column of a PREPARE: its name, its type (`char(10)`,
+    `decimal(7,2)`, `timestamp(6)`, `other:"…"` for one Db2 has no type for) and `null` or
+    `notnull`, as `: char:"NAME" char(10) notnull`. DESCRIBE reads them.
   - **`>`** gives the input values, in host-variable order.
   - **`<`** gives SQLCODE, SQLSTATE, rows affected, and any message tokens as
     `tokens=char:"…"`. It holds no warning flags: the runtime sets SQLWARN from what assignment
@@ -456,10 +471,16 @@ is for evaluation only.
   another prepared statement is not (EXECUTE gives -518), and after ROLLBACK OPEN C1 is -514.
 - **Given** the statement string in a PIC X(40) item **then** the statement abends EXEC, naming
   the varying-length rule.
+- **Given** `PREPARE S1 INTO :SQLDA` of a query whose columns are NAME CHAR(10) NOT NULL and AMT
+  DECIMAL(7,2) **then** SQLD is 2, SQLTYPE 452 and 485, and SQLLEN 10 and 1794 (precision 7,
+  scale 2); with SQLN 1 only SQLD and SQLDABC change.
+- **Given** an SQLDA whose SQLDATA points at a host variable **then** FETCH ... USING DESCRIPTOR
+  assigns the column there and its NULL indicator where SQLIND points; an SQLDATA of NULL is -804
+  with reason 12 on input.
 
 ## 13. Out of scope
 
-- **The SQLDA**: DESCRIBE, PREPARE ... INTO and USING DESCRIPTOR.
+- **DESCRIBE INPUT and USING BOTH**, and LOB, binary and NUL-terminated SQLTYPEs in an SQLDA.
 - **Multi-row FETCH and INSERT** with host-variable arrays.
 - **Stored procedures**, and CALL of SQL procedures.
 - **LOB types.**

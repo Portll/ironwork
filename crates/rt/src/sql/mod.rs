@@ -9,9 +9,10 @@ mod host;
 mod postgres;
 mod replay;
 mod run;
+mod sqlda;
 
 pub use convert::{ReadError, Written, read, write};
-pub use database::{Abandoned, Answer, Call, Database, OpenCursor, Outcome, Prepared, Session};
+pub use database::{Abandoned, Answer, Call, Column, ColumnType, Database, OpenCursor, Outcome, Prepared, Session};
 pub use postgres::{Postgres, Stream, Tls};
 pub use replay::{Recorder, Replay};
 pub use run::{Ran, SqlHost, run};

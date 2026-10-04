@@ -31,11 +31,45 @@ pub struct Outcome {
     pub rows: Vec<Vec<Value>>,
     /// SQLERRMC's message tokens.
     pub tokens: String,
+    /// A PREPARE's description of its statement's result columns, which DESCRIBE gives the program.
+    pub columns: Vec<Column>,
+}
+
+/// A result column as DESCRIBE describes it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Column {
+    pub name: String,
+    pub ty: ColumnType,
+    pub nullable: bool,
+}
+
+/// A result column's Db2 data type, as an SQLDA's SQLTYPE and SQLLEN give it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ColumnType {
+    Char(u16),
+    VarChar(u16),
+    /// GRAPHIC and VARGRAPHIC, their lengths in DBCS characters.
+    Graphic(u16),
+    VarGraphic(u16),
+    SmallInt,
+    Integer,
+    BigInt,
+    Decimal { precision: u8, scale: u8 },
+    Real,
+    Double,
+    Date,
+    Time,
+    /// TIMESTAMP(p).
+    Timestamp(u8),
+    Binary(u16),
+    VarBinary(u16),
+    /// A type the backend names that has no Db2 counterpart; DESCRIBE refuses it by this name.
+    Other(String),
 }
 
 impl Outcome {
     pub fn ok() -> Self {
-        Self { sqlcode: 0, sqlstate: "00000".into(), affected: 0, rows: Vec::new(), tokens: String::new() }
+        Self { sqlcode: 0, sqlstate: "00000".into(), affected: 0, rows: Vec::new(), tokens: String::new(), columns: Vec::new() }
     }
 
     pub fn rows(rows: Vec<Vec<Value>>) -> Self {
@@ -85,12 +119,13 @@ pub struct OpenCursor {
     pub statement: Option<String>,
 }
 
-/// A statement PREPARE made, as EXECUTE and OPEN run it.
+/// A statement PREPARE made, as EXECUTE and OPEN run it and DESCRIBE describes it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Prepared {
     pub text: String,
     pub query: bool,
     pub markers: usize,
+    pub columns: Vec<Column>,
 }
 
 /// A run unit's connection to its database, and the state the runtime keeps rather than asking

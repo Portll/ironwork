@@ -1122,6 +1122,11 @@ impl<'a> Printer<'a> {
             SqlStatement::ExecuteImmediate { source } => format!("execute immediate{}", hosts("from", source)),
             SqlStatement::Execute { name, inputs } => format!("execute {}{}", self.name(*name), hosts("using", inputs)),
             SqlStatement::OpenPrepared { cursor, statement, inputs } => format!("open {} for {}{}", self.name(*cursor), self.name(*statement), hosts("using", inputs)),
+            SqlStatement::Describe { name, descriptor, names } => format!("describe {} into {} {names:?}", self.name(*name), self.place(*descriptor)),
+            SqlStatement::PrepareInto { name, source, descriptor, names } => format!("prepare {} into {} {names:?}{}", self.name(*name), self.place(*descriptor), hosts("from", source)),
+            SqlStatement::ExecuteDescriptor { name, descriptor } => format!("execute {} using descriptor {}", self.name(*name), self.place(*descriptor)),
+            SqlStatement::OpenDescriptor { cursor, statement, descriptor } => format!("open {} for {} using descriptor {}", self.name(*cursor), self.name(*statement), self.place(*descriptor)),
+            SqlStatement::FetchDescriptor { cursor, descriptor } => format!("fetch {} using descriptor {}", self.name(*cursor), self.place(*descriptor)),
         };
         format!("Sql {ordinal} {text} {statement}{}", attrs('{', yes(e.with_hold, "with hold").into_iter().collect()))
     }

@@ -5,7 +5,7 @@ mod dialect;
 mod scram;
 mod wire;
 
-use super::{Abandoned, Answer, Call, Database, Outcome, Value};
+use super::{Abandoned, Answer, Call, Column, Database, Outcome, Value};
 use std::collections::HashMap;
 pub use wire::{Stream, Tls};
 use wire::{Connection, Described, Failure, Target};
@@ -100,12 +100,37 @@ impl Postgres {
         let executed = self.conn.execute(&name, &parameters, max_rows)?;
         let mut rows = Vec::new();
         for row in &executed.rows {
-            let values = row.iter().zip(&described.columns).map(|(column, &oid)| column.as_deref().map_or(Ok(Value::Null), |text| dialect::value(oid, text)));
+            let values = row.iter().zip(&described.columns).map(|(column, field)| column.as_deref().map_or(Ok(Value::Null), |text| dialect::value(field.oid, text)));
             rows.push(values.collect::<Result<Vec<_>, _>>().map_err(Failure::Broken)?);
         }
         let changed = matches!(executed.tag.split(' ').next(), Some("INSERT" | "UPDATE" | "DELETE" | "MERGE"));
         let affected = if changed { executed.tag.rsplit(' ').next().and_then(|n| n.parse().ok()).unwrap_or(0) } else { 0 };
         Ok(Outcome { affected, rows, ..Outcome::ok() })
+    }
+
+    /// Each result column with its Db2 type, its name upper-cased and NULL allowed unless it is a
+    /// table's column declared NOT NULL (assumption C403).
+    fn columns(&mut self, described: &Described) -> Result<Vec<Column>, Failure> {
+        let from_tables: Vec<String> = described.columns.iter().filter(|f| f.table != 0).map(|f| format!("({}, {})", f.table, f.attnum)).collect();
+        let mut not_null = Vec::new();
+        if !from_tables.is_empty() {
+            let sql = format!("SELECT attrelid, attnum FROM pg_attribute WHERE attnotnull AND (attrelid, attnum) IN ({})", from_tables.join(", "));
+            let (name, _) = self.parsed(&sql)?;
+            for row in self.conn.execute(&name, &[], 0)?.rows {
+                if let [Some(table), Some(attnum)] = row.as_slice() {
+                    not_null.push((table.clone(), attnum.clone()));
+                }
+            }
+        }
+        Ok(described
+            .columns
+            .iter()
+            .map(|f| Column {
+                name: f.name.to_uppercase(),
+                ty: dialect::column_type(f.oid, f.typmod),
+                nullable: !not_null.contains(&(f.table.to_string(), f.attnum.to_string())),
+            })
+            .collect())
     }
 
     fn end(&mut self, verb: &str) -> Answer {
@@ -128,9 +153,13 @@ impl Database for Postgres {
     fn execute(&mut self, call: &Call) -> Answer {
         self.run(call, 2)
     }
-    /// PostgreSQL parses the statement string as Db2's PREPARE does, so its errors come at PREPARE.
+    /// PostgreSQL parses the statement string as Db2's PREPARE does, so its errors come at PREPARE,
+    /// and describes its result columns.
     fn prepare(&mut self, call: &Call) -> Answer {
-        self.guarded(call, |pg, sql| pg.parsed(sql).map(|_| Outcome::ok()))
+        self.guarded(call, |pg, sql| {
+            let (_, described) = pg.parsed(sql)?;
+            Ok(Outcome { columns: pg.columns(&described)?, ..Outcome::ok() })
+        })
     }
     fn open(&mut self, call: &Call) -> Answer {
         self.run(call, 0)

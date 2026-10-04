@@ -325,7 +325,7 @@ fn a_damaged_module_is_refused_whether_called_or_run() {
     old[10] = 1;
     fs::write(dir.join("out/OLD.iwm"), old).unwrap();
     let run = ironwork(&dir, &["run", "out/OLD.iwm"]);
-    assert_eq!((ran(&run), text(&run.stderr)), ((String::new(), Some(245)), "ironwork: out/OLD.iwm: load module format 0.1; this ironwork reads 0.5 to 0.6. Compile the source again\n".to_owned()));
+    assert_eq!((ran(&run), text(&run.stderr)), ((String::new(), Some(245)), "ironwork: out/OLD.iwm: load module format 0.1; this ironwork reads 0.5 to 0.7. Compile the source again\n".to_owned()));
 }
 
 #[test]

@@ -45,6 +45,15 @@ impl Whenever {
     }
 }
 
+/// What DESCRIBE puts in each SQLNAME: USING NAMES, LABELS or ANY.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Names {
+    #[default]
+    Names,
+    Labels,
+    Any,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChangeKind {
     Insert,
@@ -74,17 +83,23 @@ pub enum Statement {
     /// A cursor ironwork does not run, such as a scrollable one, and what it is.
     DeclareUnsupported { name: String, what: String },
     /// `declared` is the cursor's DECLARE, which [`Cursors::resolve`] fills; `using` the host
-    /// variables OPEN ... USING sends to a prepared statement's parameter markers.
-    Open { cursor: String, declared: Option<Cursor>, using: Vec<HostVar> },
+    /// variables OPEN ... USING sends to a prepared statement's parameter markers, or `descriptor`
+    /// the SQLDA OPEN ... USING DESCRIPTOR names.
+    Open { cursor: String, declared: Option<Cursor>, using: Vec<HostVar>, descriptor: Option<HostVar> },
     Fetch { cursor: String, into: Vec<HostVar> },
+    FetchDescriptor { cursor: String, descriptor: HostVar },
     Close { cursor: String },
     Commit,
     Rollback,
-    /// PREPARE: the statement name and the host variable holding the statement string.
-    Prepare { name: String, source: HostVar },
+    /// PREPARE: the statement name, the host variable holding the statement string, and the SQLDA
+    /// PREPARE ... INTO describes the statement in.
+    Prepare { name: String, source: HostVar, into: Option<(HostVar, Names)> },
     ExecuteImmediate { source: HostVar },
-    /// EXECUTE of a prepared statement, with the host variables USING sends.
-    Execute { name: String, inputs: Vec<HostVar> },
+    /// EXECUTE of a prepared statement, with the host variables USING sends or the SQLDA USING
+    /// DESCRIPTOR names.
+    Execute { name: String, inputs: Vec<HostVar>, descriptor: Option<HostVar> },
+    /// DESCRIBE [OUTPUT] of a prepared statement into an SQLDA.
+    Describe { name: String, descriptor: HostVar, names: Names },
     Whenever { condition: Condition, action: Action },
     /// INCLUDE, DECLARE SECTION, DECLARE TABLE and DECLARE STATEMENT, which declare and do nothing.
     Declaration,
@@ -105,8 +120,9 @@ impl Statement {
             Statement::Query { inputs, into, .. } => into.iter().chain(inputs).collect(),
             Statement::Change { inputs, .. } | Statement::DeclareCursor(Cursor { inputs, .. }) => inputs.iter().collect(),
             Statement::Fetch { into, .. } => into.iter().collect(),
-            Statement::Open { using, .. } | Statement::Execute { inputs: using, .. } => using.iter().collect(),
-            Statement::Prepare { source, .. } | Statement::ExecuteImmediate { source } => vec![source],
+            Statement::Open { using, descriptor, .. } | Statement::Execute { inputs: using, descriptor, .. } => using.iter().chain(descriptor).collect(),
+            Statement::Prepare { source, into, .. } => std::iter::once(source).chain(into.as_ref().map(|(d, _)| d)).collect(),
+            Statement::ExecuteImmediate { source } | Statement::FetchDescriptor { descriptor: source, .. } | Statement::Describe { descriptor: source, .. } => vec![source],
             _ => Vec::new(),
         };
         vars.into_iter().flat_map(|h| std::iter::once(&h.var).chain(&h.indicator)).collect()
@@ -130,14 +146,16 @@ impl Cursors {
                 self.0.insert(name.clone(), Err(what.clone()));
                 return statement;
             }
-            Statement::Open { cursor, .. } | Statement::Fetch { cursor, .. } | Statement::Close { cursor, .. } | Statement::Change { current_of: Some(cursor), .. } => cursor.clone(),
+            Statement::Open { cursor, .. } | Statement::Fetch { cursor, .. } | Statement::FetchDescriptor { cursor, .. } | Statement::Close { cursor, .. } | Statement::Change { current_of: Some(cursor), .. } => cursor.clone(),
             _ => return statement,
         };
         match (self.0.get(&named), statement) {
             (None, _) => Statement::Malformed(format!("cursor {named} is not declared before this statement")),
             (Some(Err(what)), _) => Statement::Unsupported(what.clone()),
-            (Some(Ok(c)), Statement::Open { using, .. }) if c.statement.is_none() && !using.is_empty() => Statement::Unsupported("OPEN ... USING of a cursor declared for a select-statement".into()),
-            (Some(Ok(c)), Statement::Open { cursor, using, .. }) => Statement::Open { cursor, declared: Some(c.clone()), using },
+            (Some(Ok(c)), Statement::Open { using, descriptor, .. }) if c.statement.is_none() && (!using.is_empty() || descriptor.is_some()) => {
+                Statement::Unsupported("OPEN ... USING of a cursor declared for a select-statement".into())
+            }
+            (Some(Ok(c)), Statement::Open { cursor, using, descriptor, .. }) => Statement::Open { cursor, declared: Some(c.clone()), using, descriptor },
             (Some(Ok(_)), statement) => statement,
         }
     }
@@ -371,6 +389,7 @@ fn statement(toks: &[Tok], pos: Pos) -> Statement {
             Err(why) => Statement::Malformed(format!("EXECUTE IMMEDIATE {why}")),
         },
         "EXECUTE" => execute(toks, pos),
+        "DESCRIBE" => describe(toks, pos),
         "WHENEVER" => whenever(toks),
         "INCLUDE" => Statement::Declaration,
         "BEGIN" | "END" if word(toks, 1) == "DECLARE" => Statement::Declaration,
@@ -472,10 +491,14 @@ fn open(toks: &[Tok], pos: Pos) -> Statement {
         return Statement::Malformed("OPEN names no cursor".into());
     }
     match (toks.len(), word(toks, 2), word(toks, 3)) {
-        (2, _, _) => Statement::Open { cursor: cursor.into(), declared: None, using: Vec::new() },
-        (_, "USING", "DESCRIPTOR") => Statement::Unsupported("OPEN ... USING DESCRIPTOR".into()),
+        (2, _, _) => Statement::Open { cursor: cursor.into(), declared: None, using: Vec::new(), descriptor: None },
+        (_, "USING", "DESCRIPTOR") => match descriptor(toks, 4, pos) {
+            Ok((d, next)) if next == toks.len() => Statement::Open { cursor: cursor.into(), declared: None, using: Vec::new(), descriptor: Some(d) },
+            Ok(_) => Statement::Malformed("OPEN ... USING DESCRIPTOR takes only the descriptor".into()),
+            Err(why) => Statement::Malformed(why),
+        },
         (_, "USING", _) => match using_list(&toks[3..], pos) {
-            Ok(using) => Statement::Open { cursor: cursor.into(), declared: None, using },
+            Ok(using) => Statement::Open { cursor: cursor.into(), declared: None, using, descriptor: None },
             Err(why) => Statement::Malformed(why),
         },
         _ => Statement::Malformed("OPEN takes a cursor name and USING".into()),
@@ -498,14 +521,66 @@ fn prepare(toks: &[Tok], pos: Pos) -> Statement {
     if name.is_empty() {
         return Statement::Malformed("PREPARE names no statement".into());
     }
-    match word(toks, 2) {
-        "INTO" => Statement::Unsupported("PREPARE ... INTO a descriptor".into()),
+    let (into, from) = match word(toks, 2) {
+        "INTO" => match descriptor(toks, 3, pos).and_then(|(d, next)| names(toks, next).map(|(n, next)| (d, n, next))) {
+            Ok((_, None, _)) => return Statement::Unsupported("PREPARE ... INTO ... USING BOTH".into()),
+            Ok((d, Some(n), next)) => (Some((d, n)), next),
+            Err(why) => return Statement::Malformed(why),
+        },
+        _ => (None, 2),
+    };
+    match word(toks, from) {
         "ATTRIBUTES" => Statement::Unsupported("PREPARE ... ATTRIBUTES".into()),
-        "FROM" => match source(toks, 3, pos) {
-            Ok(source) => Statement::Prepare { name: name.into(), source },
+        "FROM" => match source(toks, from + 1, pos) {
+            Ok(source) => Statement::Prepare { name: name.into(), source, into },
             Err(why) => Statement::Malformed(format!("PREPARE ... FROM {why}")),
         },
         _ => Statement::Malformed("PREPARE takes a statement name and FROM".into()),
+    }
+}
+
+/// The SQLDA host variable at `toks[at]`, which takes no indicator, and where it ends.
+fn descriptor(toks: &[Tok], at: usize, pos: Pos) -> Result<(HostVar, usize), String> {
+    match host_var(toks, at, pos) {
+        Some((HostVar { indicator: Some(_), .. }, _)) => Err("a descriptor takes no indicator variable".into()),
+        Some((d, next)) => Ok((d, next)),
+        None => Err("DESCRIPTOR and INTO name the SQLDA as a host variable".into()),
+    }
+}
+
+/// An optional USING NAMES, LABELS, ANY or BOTH from `toks[at]`: None for BOTH, which ironwork does
+/// not run, and where it ends.
+fn names(toks: &[Tok], at: usize) -> Result<(Option<Names>, usize), String> {
+    if word(toks, at) != "USING" {
+        return Ok((Some(Names::Names), at));
+    }
+    let names = match word(toks, at + 1) {
+        "NAMES" => Some(Names::Names),
+        "LABELS" => Some(Names::Labels),
+        "ANY" => Some(Names::Any),
+        "BOTH" => None,
+        _ => return Err("USING takes NAMES, LABELS, ANY or BOTH".into()),
+    };
+    Ok((names, at + 2))
+}
+
+/// DESCRIBE [OUTPUT] statement-name INTO descriptor [USING ...].
+fn describe(toks: &[Tok], pos: Pos) -> Statement {
+    let at = match word(toks, 1) {
+        "OUTPUT" => 2,
+        "INPUT" => return Statement::Unsupported("DESCRIBE INPUT".into()),
+        "CURSOR" | "PROCEDURE" | "TABLE" => return Statement::Unsupported(format!("DESCRIBE {}", word(toks, 1))),
+        _ => 1,
+    };
+    let name = word(toks, at);
+    if name.is_empty() || word(toks, at + 1) != "INTO" {
+        return Statement::Malformed("DESCRIBE takes a statement name and INTO".into());
+    }
+    match descriptor(toks, at + 2, pos).and_then(|(d, next)| names(toks, next).map(|(n, next)| (d, n, next))) {
+        Ok((_, None, _)) => Statement::Unsupported("DESCRIBE ... USING BOTH".into()),
+        Ok((descriptor, Some(names), next)) if next == toks.len() => Statement::Describe { name: name.into(), descriptor, names },
+        Ok(_) => Statement::Malformed("DESCRIBE ends with INTO and USING".into()),
+        Err(why) => Statement::Malformed(why),
     }
 }
 
@@ -515,10 +590,14 @@ fn execute(toks: &[Tok], pos: Pos) -> Statement {
         return Statement::Malformed("EXECUTE names no statement".into());
     }
     match (toks.len(), word(toks, 2), word(toks, 3)) {
-        (2, _, _) => Statement::Execute { name: name.into(), inputs: Vec::new() },
-        (_, "USING", "DESCRIPTOR") => Statement::Unsupported("EXECUTE ... USING DESCRIPTOR".into()),
+        (2, _, _) => Statement::Execute { name: name.into(), inputs: Vec::new(), descriptor: None },
+        (_, "USING", "DESCRIPTOR") if top_level(toks, 4, "FOR").is_none() => match descriptor(toks, 4, pos) {
+            Ok((d, next)) if next == toks.len() => Statement::Execute { name: name.into(), inputs: Vec::new(), descriptor: Some(d) },
+            Ok(_) => Statement::Malformed("EXECUTE ... USING DESCRIPTOR takes only the descriptor".into()),
+            Err(why) => Statement::Malformed(why),
+        },
         (_, "USING", _) if top_level(toks, 3, "FOR").is_none() => match using_list(&toks[3..], pos) {
-            Ok(inputs) => Statement::Execute { name: name.into(), inputs },
+            Ok(inputs) => Statement::Execute { name: name.into(), inputs, descriptor: None },
             Err(why) => Statement::Malformed(why),
         },
         (_, "USING" | "FOR", _) => Statement::Unsupported("a multi-row EXECUTE".into()),
@@ -549,7 +628,11 @@ fn fetch(toks: &[Tok], pos: Pos) -> Statement {
             Err(why) => Statement::Malformed(why),
         },
         "FOR" => Statement::Unsupported("a multi-row FETCH".into()),
-        "USING" => Statement::Unsupported("FETCH USING DESCRIPTOR".into()),
+        "USING" if word(toks, i + 1) == "DESCRIPTOR" => match descriptor(toks, i + 2, pos) {
+            Ok((descriptor, next)) if next == toks.len() => Statement::FetchDescriptor { cursor: cursor.into(), descriptor },
+            Ok(_) => Statement::Malformed("FETCH ... USING DESCRIPTOR takes only the descriptor".into()),
+            Err(why) => Statement::Malformed(why),
+        },
         _ => Statement::Malformed("FETCH takes a cursor and INTO".into()),
     }
 }
@@ -639,7 +722,7 @@ mod tests {
         assert_eq!((name.as_str(), with_hold, statement), ("C1", true, None));
         assert_eq!(text, "SELECT NAME FROM EMP WHERE DEPT = ? FOR UPDATE OF SAL");
         assert_eq!(names(&inputs), [("WS-DEPT", None)]);
-        assert_eq!(st("OPEN C1"), Statement::Open { cursor: "C1".into(), declared: None, using: Vec::new() });
+        assert_eq!(st("OPEN C1"), Statement::Open { cursor: "C1".into(), declared: None, using: Vec::new(), descriptor: None });
         assert_eq!(st("CLOSE C1"), Statement::Close { cursor: "C1".into() });
         let Statement::Fetch { cursor, into } = st("FETCH NEXT FROM C1 INTO :A, :B:BI") else { panic!() };
         assert_eq!((cursor.as_str(), names(&into).len()), ("C1", 2));
@@ -703,7 +786,7 @@ mod tests {
     fn what_is_refused_and_why() {
         assert_eq!(st("CONNECT TO DB1"), Statement::Connect { what: "CONNECT".into(), target: None });
         assert!(matches!(st("DISCONNECT ALL"), Statement::Malformed(why) if why.starts_with("DISCONNECT is not a Db2 for z/OS statement")));
-        assert_eq!(st("DESCRIBE S1 INTO :SQLDA"), Statement::Unsupported("DESCRIBE".into()));
+        assert_eq!(st("DESCRIBE INPUT S1 INTO :SQLDA"), Statement::Unsupported("DESCRIBE INPUT".into()));
         assert_eq!(st("FETCH PRIOR FROM C1 INTO :A"), Statement::Unsupported("a scrollable FETCH".into()));
         assert_eq!(st("DECLARE C2 SCROLL CURSOR FOR S1"), Statement::DeclareUnsupported { name: "C2".into(), what: "a scrollable cursor".into() });
         assert!(matches!(st("FETCH INTO :A"), Statement::Malformed(_)));
@@ -755,7 +838,7 @@ mod tests {
         let mut cursors = Cursors::default();
         assert_eq!(cursors.resolve(st("FETCH C1 INTO :A")), Statement::Malformed("cursor C1 is not declared before this statement".into()));
         let Statement::DeclareCursor(c1) = cursors.resolve(st("DECLARE C1 CURSOR WITH HOLD FOR SELECT A FROM T WHERE K = :K")) else { panic!() };
-        assert_eq!(cursors.resolve(st("OPEN C1")), Statement::Open { cursor: "C1".into(), declared: Some(c1), using: Vec::new() });
+        assert_eq!(cursors.resolve(st("OPEN C1")), Statement::Open { cursor: "C1".into(), declared: Some(c1), using: Vec::new(), descriptor: None });
         assert!(matches!(cursors.resolve(st("FETCH C1 INTO :A")), Statement::Fetch { .. }));
         assert!(matches!(cursors.resolve(st("DELETE FROM T WHERE CURRENT OF C1")), Statement::Change { .. }));
         assert!(matches!(cursors.resolve(st("UPDATE T SET A = 1 WHERE CURRENT OF C9")), Statement::Malformed(_)));
@@ -767,27 +850,45 @@ mod tests {
 
     #[test]
     fn prepare_and_execute_immediate_take_the_statement_string_from_a_host_variable() {
-        let Statement::Prepare { name, source } = st("PREPARE PRELT98_SQL FROM :SQLSEL-SQL") else { panic!() };
-        assert_eq!((name.as_str(), source.var.name.as_str(), source.indicator), ("PRELT98_SQL", "SQLSEL-SQL", None));
+        let Statement::Prepare { name, source, into } = st("PREPARE PRELT98_SQL FROM :SQLSEL-SQL") else { panic!() };
+        assert_eq!((name.as_str(), source.var.name.as_str(), source.indicator, into), ("PRELT98_SQL", "SQLSEL-SQL", None, None));
         let Statement::ExecuteImmediate { source } = st("EXECUTE IMMEDIATE :WS-DYN-SQL") else { panic!() };
         assert_eq!(source.var.name, "WS-DYN-SQL");
         assert!(matches!(st("PREPARE S1 FROM 'SELECT 1'"), Statement::Malformed(why) if why.contains("PL/I")));
         assert!(matches!(st("EXECUTE IMMEDIATE :S :S-IND"), Statement::Malformed(why) if why.contains("no indicator")));
         assert!(matches!(st("PREPARE S1 FROM :A :B"), Statement::Malformed(_)));
         assert!(matches!(st("PREPARE FROM :A"), Statement::Malformed(_)));
-        assert_eq!(st("PREPARE S1 INTO :SQLDA FROM :A"), Statement::Unsupported("PREPARE ... INTO a descriptor".into()));
+        let Statement::Prepare { into: Some((descriptor, names)), .. } = st("PREPARE S1 INTO :SQLDA USING ANY FROM :A") else { panic!() };
+        assert_eq!((descriptor.var.name.as_str(), names), ("SQLDA", Names::Any));
+        assert_eq!(st("PREPARE S1 INTO :SQLDA USING BOTH FROM :A"), Statement::Unsupported("PREPARE ... INTO ... USING BOTH".into()));
         assert_eq!(st("PREPARE S1 ATTRIBUTES :ATTR FROM :A"), Statement::Unsupported("PREPARE ... ATTRIBUTES".into()));
     }
 
     #[test]
     fn execute_sends_its_using_list_to_the_parameter_markers() {
-        assert_eq!(st("EXECUTE MMPREPSTMT"), Statement::Execute { name: "MMPREPSTMT".into(), inputs: Vec::new() });
-        let Statement::Execute { name, inputs } = st("EXECUTE INS_STMT USING :EMP-NO, :EMP-NAME:EMP-NAME-IND") else { panic!() };
+        assert_eq!(st("EXECUTE MMPREPSTMT"), Statement::Execute { name: "MMPREPSTMT".into(), inputs: Vec::new(), descriptor: None });
+        let Statement::Execute { name, inputs, .. } = st("EXECUTE INS_STMT USING :EMP-NO, :EMP-NAME:EMP-NAME-IND") else { panic!() };
         assert_eq!((name.as_str(), names(&inputs)), ("INS_STMT", vec![("EMP-NO", None), ("EMP-NAME", Some("EMP-NAME-IND"))]));
-        assert_eq!(st("EXECUTE S1 USING DESCRIPTOR :SQLDA"), Statement::Unsupported("EXECUTE ... USING DESCRIPTOR".into()));
+        assert!(matches!(st("EXECUTE S1 USING DESCRIPTOR :SQLDA"), Statement::Execute { descriptor: Some(d), .. } if d.var.name == "SQLDA"));
         assert_eq!(st("EXECUTE S1 USING :ARR FOR 10 ROWS"), Statement::Unsupported("a multi-row EXECUTE".into()));
         assert!(matches!(st("EXECUTE S1 USING :A,"), Statement::Malformed(_)));
         assert!(matches!(st("EXECUTE S1 USING A"), Statement::Malformed(_)));
+    }
+
+    #[test]
+    fn describe_and_fetch_using_descriptor_name_the_sqlda() {
+        assert_eq!(st("DESCRIBE OUTPUT S1 INTO :SDSC"), Statement::Describe { name: "S1".into(), descriptor: HostVar { var: reference(&["SDSC".into()], &[], Pos::default()), indicator: None }, names: Names::Names });
+        assert!(matches!(st("DESCRIBE S1 INTO :D USING LABELS"), Statement::Describe { names: Names::Labels, .. }));
+        assert_eq!(st("DESCRIBE S1 INTO :D USING BOTH"), Statement::Unsupported("DESCRIBE ... USING BOTH".into()));
+        assert_eq!(st("DESCRIBE CURSOR C1 INTO :D"), Statement::Unsupported("DESCRIBE CURSOR".into()));
+        assert!(matches!(st("DESCRIBE S1 :D"), Statement::Malformed(_)));
+        assert!(matches!(st("DESCRIBE S1 INTO :D :I"), Statement::Malformed(_)));
+        let Statement::FetchDescriptor { cursor, descriptor } = st("FETCH DT USING DESCRIPTOR :SQLDA") else { panic!() };
+        assert_eq!((cursor.as_str(), descriptor.var.name.as_str()), ("DT", "SQLDA"));
+        let mut cursors = Cursors::default();
+        cursors.resolve(st("DECLARE C1 CURSOR FOR SELECT A FROM T"));
+        assert_eq!(cursors.resolve(st("OPEN C1 USING DESCRIPTOR :D")), Statement::Unsupported("OPEN ... USING of a cursor declared for a select-statement".into()));
+        assert!(matches!(cursors.resolve(st("FETCH C9 USING DESCRIPTOR :D")), Statement::Malformed(_)));
     }
 
     #[test]
@@ -795,7 +896,7 @@ mod tests {
         let Statement::DeclareCursor(c) = st("DECLARE DT CURSOR WITH HOLD FOR DYN-STMT") else { panic!() };
         assert_eq!((c.name.as_str(), c.statement.as_deref(), c.with_hold, c.text.as_str()), ("DT", Some("DYN-STMT"), true, ""));
         assert!(matches!(st("DECLARE C1 CURSOR FOR S1 S2"), Statement::Malformed(_)));
-        assert_eq!(st("OPEN C1 USING DESCRIPTOR :SQLDA"), Statement::Unsupported("OPEN ... USING DESCRIPTOR".into()));
+        assert!(matches!(st("OPEN C1 USING DESCRIPTOR :SQLDA"), Statement::Open { descriptor: Some(d), .. } if d.var.name == "SQLDA"));
         assert!(matches!(st("OPEN C1 FOR"), Statement::Malformed(_)));
     }
 

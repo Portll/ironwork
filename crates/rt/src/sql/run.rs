@@ -3,11 +3,13 @@
 //! warning WHENEVER tests.
 
 use super::dynamic::{self, Kind};
-use super::host::{self, COLUMN_COUNT, TRUNCATED, Warnings};
+use super::host::{self, COLUMN_COUNT, TRUNCATED, Target, Warnings};
+use super::sqlda::{self, Invalid, Var};
 use super::{Answer, Call, Database, Outcome, Prepared, Session, SqlError, Value};
 use crate::abend::Abend;
 use crate::host::Host;
-use crate::lir::{AbendId, HostPlace, SqlEntry, SqlStatement, Sqlca};
+use crate::store::ProgramFacts;
+use crate::lir::{AbendId, HostPlace, SqlEntry, SqlNames, SqlStatement, Sqlca};
 use crate::storage::Loc;
 use crate::vocab::Pos;
 
@@ -83,7 +85,7 @@ pub fn run<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, entry: &SqlEntry<P, S
     // A statement string goes to the input trace before the run is refused for want of a database,
     // as CONNECT's location does.
     let string = match &entry.statement {
-        SqlStatement::Prepare { source, .. } | SqlStatement::ExecuteImmediate { source } => match statement_string(x, source, pos)? {
+        SqlStatement::Prepare { source, .. } | SqlStatement::PrepareInto { source, .. } | SqlStatement::ExecuteImmediate { source } => match statement_string(x, source, pos)? {
             None => return Err(refused(STRING_RULE.into())),
             string => string,
         },
@@ -100,7 +102,7 @@ pub fn run<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, entry: &SqlEntry<P, S
             Err(e) => Outcome::error(e.code, e.state),
             Ok(values) => {
                 let answer = database(x, &Call { program: &program, ordinal, verb: &verb, cursor: None, text: &text, inputs: &values }, |db, c| db.execute(c), pos)?;
-                single_row(x, answer, into, &mut warnings)?
+                single_row(x, answer, Receivers::Hosts(into), &mut warnings)?
             }
         },
         SqlStatement::Change { delete, inputs, current_of } => {
@@ -127,19 +129,14 @@ pub fn run<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, entry: &SqlEntry<P, S
         }
         SqlStatement::Fetch { cursor, into } => {
             let cursor = x.text(cursor);
-            if session(x).cursor(&program, &cursor).is_none() {
-                Outcome::error(-501, "24501")
-            } else {
-                let answer = database(x, &Call { program: &program, ordinal, verb: "FETCH", cursor: Some(&cursor), text: &text, inputs: &[] }, |db, c| db.fetch(c), pos)?;
-                if answer.rows.len() > 1 {
-                    return Err(Abend { code: "SQL".into(), message: format!("the database answered FETCH {cursor} with {} rows", answer.rows.len()), pos, file: None });
-                }
-                let on_row = answer.sqlcode >= 0 && answer.rows.len() == 1;
-                if let Some(open) = session(x).cursor(&program, &cursor) {
-                    open.positioned = on_row;
-                }
-                let fetched = single_row(x, answer, into, &mut warnings)?;
-                Outcome { affected: i64::from(on_row), ..fetched }
+            fetch(x, at, (&cursor, &text), Receivers::Hosts(into), &mut warnings)?
+        }
+        SqlStatement::FetchDescriptor { cursor, descriptor } => {
+            let cursor = x.text(cursor);
+            let at_sqlda = x.locate(*descriptor, false)?.offset;
+            match sqlda::vars(x.mem(), at_sqlda, false) {
+                Err(invalid) => invalid_sqlda(invalid),
+                Ok(vars) => fetch(x, at, (&cursor, &text), Receivers::Vars(&vars), &mut warnings)?,
             }
         }
         SqlStatement::Close { cursor } => {
@@ -157,25 +154,25 @@ pub fn run<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, entry: &SqlEntry<P, S
         SqlStatement::Commit => end_unit(x, at, &text, true)?,
         SqlStatement::Rollback => end_unit(x, at, &text, false)?,
         SqlStatement::Prepare { name, .. } => {
-            let name = x.text(name);
-            match string {
-                None => unreachable!("a PREPARE has its statement string"),
-                Some(Err(e)) => Outcome::error(e.code, e.state),
-                Some(Ok(_)) if session(x).running(&program, &name) => Outcome::error(-519, "24506"),
-                Some(Ok(text)) => {
-                    session(x).prepare(&program, &name, None);
-                    let kind = dynamic::kind(&text);
-                    if kind == Kind::Unacceptable {
-                        Outcome::error(-84, "42612")
-                    } else {
-                        let answer = database(x, &at.call("PREPARE", Some(&name), &text, &[]), |db, c| db.prepare(c), pos)?;
-                        if answer.sqlcode >= 0 {
-                            let markers = dynamic::markers(&text);
-                            session(x).prepare(&program, &name, Some(Prepared { text, query: kind == Kind::Query, markers }));
-                        }
-                        answer
-                    }
+            let (name, Some(string)) = (x.text(name), string) else { unreachable!("a PREPARE has its statement string") };
+            prepare(x, at, &name, string)?
+        }
+        SqlStatement::PrepareInto { name, descriptor, names, .. } => {
+            let (name, Some(string)) = (x.text(name), string) else { unreachable!("a PREPARE has its statement string") };
+            let answer = prepare(x, at, &name, string)?;
+            match session(x).prepared(&program, &name).cloned().filter(|_| answer.sqlcode >= 0) {
+                Some(p) => {
+                    let described = describe(x, &p, *descriptor, *names, pos)?;
+                    if described.sqlcode < 0 { described } else { answer }
                 }
+                None => answer,
+            }
+        }
+        SqlStatement::Describe { name, descriptor, names } => {
+            let name = x.text(name);
+            match session(x).prepared(&program, &name).cloned() {
+                None => Outcome::error(-516, "26501"),
+                Some(p) => describe(x, &p, *descriptor, *names, pos)?,
             }
         }
         SqlStatement::ExecuteImmediate { .. } => match string {
@@ -183,41 +180,10 @@ pub fn run<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, entry: &SqlEntry<P, S
             Some(Err(e)) => Outcome::error(e.code, e.state),
             Some(Ok(text)) => dynamic_statement(x, at, &text, Ok(Vec::new()), &refused)?,
         },
-        SqlStatement::Execute { name, inputs } => {
-            let name = x.text(name);
-            match session(x).prepared(&program, &name).cloned() {
-                None | Some(Prepared { query: true, .. }) => Outcome::error(-518, "07003"),
-                Some(p) if p.markers > 0 && p.markers != inputs.len() => Outcome::error(-313, "07001"),
-                Some(p) => {
-                    let values = if p.markers == 0 { Ok(Vec::new()) } else { host::inputs(x, inputs)? };
-                    dynamic_statement(x, at, &p.text, values, &refused)?
-                }
-            }
-        }
-        SqlStatement::OpenPrepared { cursor, statement, inputs } => {
-            let (cursor, statement) = (x.text(cursor), x.text(statement));
-            if session(x).cursor(&program, &cursor).is_some() {
-                Outcome::error(-502, "24502")
-            } else {
-                match session(x).prepared(&program, &statement).cloned() {
-                    None => Outcome::error(-514, "26501"),
-                    Some(Prepared { query: false, .. }) => Outcome::error(-517, "07005"),
-                    Some(p) if p.markers > 0 && p.markers != inputs.len() => Outcome::error(-313, "07001"),
-                    Some(p) => match if p.markers == 0 { Ok(Vec::new()) } else { host::inputs(x, inputs)? } {
-                        Err(e) => Outcome::error(e.code, e.state),
-                        Ok(values) => {
-                            let hold = if entry.with_hold { " WITH HOLD" } else { "" };
-                            let text = format!("DECLARE {cursor} CURSOR{hold} FOR {}", p.text);
-                            let answer = database(x, &at.call("OPEN", Some(&cursor), &text, &values), |db, c| db.open(c), pos)?;
-                            if answer.sqlcode >= 0 {
-                                session(x).opened(&program, &cursor, entry.with_hold, Some(&statement));
-                            }
-                            answer
-                        }
-                    },
-                }
-            }
-        }
+        SqlStatement::Execute { name, inputs } => execute(x, at, &x.text(name), Sources::Hosts(inputs), &refused)?,
+        SqlStatement::ExecuteDescriptor { name, descriptor } => execute(x, at, &x.text(name), Sources::Descriptor(*descriptor), &refused)?,
+        SqlStatement::OpenPrepared { cursor, statement, inputs } => open_prepared(x, at, (&x.text(cursor), &x.text(statement)), entry.with_hold, Sources::Hosts(inputs))?,
+        SqlStatement::OpenDescriptor { cursor, statement, descriptor } => open_prepared(x, at, (&x.text(cursor), &x.text(statement)), entry.with_hold, Sources::Descriptor(*descriptor))?,
         SqlStatement::Declaration => return Ok(None),
         SqlStatement::Unsupported(what) => return Err(refused(format!("ironwork for COBOL does not run {}", x.text(what)))),
         SqlStatement::Connect { .. } => unreachable!("CONNECT is refused before the session is asked"),
@@ -310,14 +276,152 @@ fn dynamic_statement<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, at: At, tex
     })
 }
 
+/// Where a statement's inputs come from: its host variables, or the SQLDA USING DESCRIPTOR names.
+enum Sources<'a, P> {
+    Hosts(&'a [HostPlace<P>]),
+    Descriptor(P),
+}
+
+/// Where a row goes: the INTO host variables, or those an SQLDA describes.
+enum Receivers<'a, P> {
+    Hosts(&'a [HostPlace<P>]),
+    Vars(&'a [Var]),
+}
+
+fn targets(vars: &[Var]) -> Vec<Target<'_>> {
+    vars.iter().map(|v| Target { offset: v.offset, len: v.len, ty: &v.ty, indicator: v.indicator }).collect()
+}
+
+/// SQLCODE -804, Db2's reason code its message token.
+fn invalid_sqlda(Invalid(reason): Invalid) -> Outcome {
+    Outcome { tokens: format!("{reason:02}"), ..Outcome::error(sqlda::INVALID.code, sqlda::INVALID.state) }
+}
+
+/// The values a dynamic statement's `markers` parameter markers take, or the outcome that refuses
+/// them: without markers USING is not read, and with them each needs one value (-313).
+fn marker_values<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, sources: Sources<P>, markers: usize, pos: Pos) -> R<Result<Result<Vec<Value>, SqlError>, Outcome>> {
+    if markers == 0 {
+        return Ok(Ok(Ok(Vec::new())));
+    }
+    match sources {
+        Sources::Hosts(hosts) if hosts.len() != markers => Ok(Err(Outcome::error(-313, "07001"))),
+        Sources::Hosts(hosts) => Ok(Ok(host::inputs(x, hosts)?)),
+        Sources::Descriptor(descriptor) => {
+            let at = x.locate(descriptor, false)?.offset;
+            match sqlda::vars(x.mem(), at, true) {
+                Err(invalid) => Ok(Err(invalid_sqlda(invalid))),
+                Ok(vars) if vars.len() != markers => Ok(Err(Outcome::error(-313, "07001"))),
+                Ok(vars) => Ok(Ok(host::read_targets(x, &targets(&vars), pos)?)),
+            }
+        }
+    }
+}
+
+/// PREPARE: the statement of the same name destroyed, then the new one made, unless it is an open
+/// cursor's (-519) or Db2 does not prepare it (-084).
+fn prepare<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, at: At, name: &str, string: Result<String, SqlError>) -> R<Outcome> {
+    let text = match string {
+        Err(e) => return Ok(Outcome::error(e.code, e.state)),
+        Ok(text) => text,
+    };
+    if session(x).running(at.program, name) {
+        return Ok(Outcome::error(-519, "24506"));
+    }
+    session(x).prepare(at.program, name, None);
+    let kind = dynamic::kind(&text);
+    if kind == Kind::Unacceptable {
+        return Ok(Outcome::error(-84, "42612"));
+    }
+    let mut answer = database(x, &at.call("PREPARE", Some(name), &text, &[]), |db, c| db.prepare(c), at.pos)?;
+    if answer.sqlcode >= 0 {
+        let markers = dynamic::markers(&text);
+        let columns = std::mem::take(&mut answer.columns);
+        session(x).prepare(at.program, name, Some(Prepared { text, query: kind == Kind::Query, markers, columns }));
+    }
+    Ok(answer)
+}
+
+/// DESCRIBE of a prepared statement into the SQLDA at `descriptor`, from what PREPARE's answer
+/// described. The database's description is input, as its rows are.
+fn describe<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, prepared: &Prepared, descriptor: P, names: SqlNames, pos: Pos) -> R<Outcome> {
+    let at = x.locate(descriptor, true)?.offset;
+    let page = x.facts().page();
+    let columns = prepared.query.then_some(prepared.columns.as_slice());
+    match sqlda::describe(x.mem(), at, columns, names, page) {
+        Ok(written) => {
+            if let Some(taint) = x.taint() {
+                taint.set(at, written, true);
+            }
+            Ok(Outcome::ok())
+        }
+        Err(Ok(invalid)) => Ok(invalid_sqlda(invalid)),
+        Err(Err(why)) => Err(Abend { code: "SQL".into(), message: format!("DESCRIBE was reached: {why}"), pos, file: None }),
+    }
+}
+
+fn execute<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, at: At, name: &str, sources: Sources<P>, refused: &dyn Fn(String) -> Abend) -> R<Outcome> {
+    let Some(p) = session(x).prepared(at.program, name).cloned().filter(|p| !p.query) else { return Ok(Outcome::error(-518, "07003")) };
+    match marker_values(x, sources, p.markers, at.pos)? {
+        Err(outcome) => Ok(outcome),
+        Ok(values) => dynamic_statement(x, at, &p.text, values, refused),
+    }
+}
+
+/// OPEN of a cursor for a prepared statement, `names` the cursor's and the statement's.
+fn open_prepared<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, at: At, names: (&str, &str), with_hold: bool, sources: Sources<P>) -> R<Outcome> {
+    let (cursor, statement) = names;
+    if session(x).cursor(at.program, cursor).is_some() {
+        return Ok(Outcome::error(-502, "24502"));
+    }
+    let p = match session(x).prepared(at.program, statement).cloned() {
+        None => return Ok(Outcome::error(-514, "26501")),
+        Some(Prepared { query: false, .. }) => return Ok(Outcome::error(-517, "07005")),
+        Some(p) => p,
+    };
+    let values = match marker_values(x, sources, p.markers, at.pos)? {
+        Err(outcome) => return Ok(outcome),
+        Ok(Err(e)) => return Ok(Outcome::error(e.code, e.state)),
+        Ok(Ok(values)) => values,
+    };
+    let hold = if with_hold { " WITH HOLD" } else { "" };
+    let text = format!("DECLARE {cursor} CURSOR{hold} FOR {}", p.text);
+    let answer = database(x, &at.call("OPEN", Some(cursor), &text, &values), |db, c| db.open(c), at.pos)?;
+    if answer.sqlcode >= 0 {
+        session(x).opened(at.program, cursor, with_hold, Some(statement));
+    }
+    Ok(answer)
+}
+
+/// FETCH, `statement` its cursor and text: one row into the receivers, the cursor on it.
+fn fetch<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, at: At, statement: (&str, &str), into: Receivers<P>, warnings: &mut Warnings) -> R<Outcome> {
+    let (cursor, text) = statement;
+    if session(x).cursor(at.program, cursor).is_none() {
+        return Ok(Outcome::error(-501, "24501"));
+    }
+    let answer = database(x, &at.call("FETCH", Some(cursor), text, &[]), |db, c| db.fetch(c), at.pos)?;
+    if answer.rows.len() > 1 {
+        return Err(Abend { code: "SQL".into(), message: format!("the database answered FETCH {cursor} with {} rows", answer.rows.len()), pos: at.pos, file: None });
+    }
+    let on_row = answer.sqlcode >= 0 && answer.rows.len() == 1;
+    if let Some(open) = session(x).cursor(at.program, cursor) {
+        open.positioned = on_row;
+    }
+    let fetched = single_row(x, answer, into, warnings)?;
+    Ok(Outcome { affected: i64::from(on_row), ..fetched })
+}
+
 /// A SELECT INTO's or a FETCH's answer: one row is assigned, none is +100, more than one is -811.
-fn single_row<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, answer: Outcome, into: &[HostPlace<P>], warnings: &mut Warnings) -> R<Outcome> {
+fn single_row<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, answer: Outcome, into: Receivers<P>, warnings: &mut Warnings) -> R<Outcome> {
     if answer.sqlcode < 0 {
         return Ok(answer);
     }
+    let assigned = |x: &mut _, row: &[Value], warnings: &mut Warnings| match into {
+        Receivers::Hosts(hosts) => host::assign(x, hosts, row, warnings),
+        Receivers::Vars(vars) => host::assign_targets(x, &targets(vars), row, warnings),
+    };
     Ok(match answer.rows.len() {
         0 => Outcome::error(100, "02000"),
-        1 => match host::assign(x, into, &answer.rows[0], warnings)? {
+        1 => match assigned(x, &answer.rows[0], warnings)? {
             Ok(()) => answer,
             Err(e) => Outcome::error(e.code, e.state),
         },

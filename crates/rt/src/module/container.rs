@@ -23,7 +23,7 @@ pub struct Version {
 
 impl Version {
     /// The version this ironwork writes.
-    pub const CURRENT: Self = Self { major: 0, minor: 6 };
+    pub const CURRENT: Self = Self { major: 0, minor: 7 };
 
     /// The oldest version this ironwork reads (§8.1): before 1.0 the last minor whose change was not
     /// additive, so each such change moves it, and from 1.0 the major's first minor.
@@ -385,7 +385,7 @@ mod tests {
     fn the_header_and_table_have_the_documented_layout() {
         let bytes = sample(&names(&["A"]));
         assert_eq!(bytes[..8], [0x89, 0x49, 0x57, 0x4D, 0x0D, 0x0A, 0x1A, 0x0A]);
-        assert_eq!(bytes[8..20], [0, 0, 6, 0, 0, 0, 0, 0, 8, 0, 0, 0]);
+        assert_eq!(bytes[8..20], [0, 0, 7, 0, 0, 0, 0, 0, 8, 0, 0, 0]);
         assert_eq!(u64_at(&bytes, 20), Some(bytes.len() as u64));
         assert_eq!(u32_at(&bytes, HEADER_CRC), Some(extend(crc32(&bytes[..28]), &bytes[32..TABLE_END])));
         let strings_body = [1, 1, b'A'];
@@ -460,11 +460,11 @@ mod tests {
         }
         assert_eq!(
             ModuleError::Version(Version { major: 0, minor: 4 }).to_string(),
-            "load module format 0.4; this ironwork reads 0.5 to 0.6. Compile the source again"
+            "load module format 0.4; this ironwork reads 0.5 to 0.7. Compile the source again"
         );
         assert_eq!(
             ModuleError::Version(Version { major: 2, minor: 0 }).to_string(),
-            "load module format 2.0; this ironwork reads 0.5 to 0.6. Compile the source again"
+            "load module format 2.0; this ironwork reads 0.5 to 0.7. Compile the source again"
         );
         let oldest = Version { major: 0, minor: 3 };
         assert!(!oldest.reads(Version { major: 0, minor: 2 }));
@@ -477,7 +477,7 @@ mod tests {
 
     #[test]
     fn a_newer_minor_is_read_past_an_unknown_optional_section_and_refused_for_a_required_one_or_a_feature() {
-        let newer = Version { major: 0, minor: 7 };
+        let newer = Version { major: 0, minor: 8 };
         let optional = stamped(newer, 0, |w| w.push(9, OPTIONAL, |w| w.string("NEXT")));
         let module = Module::read(&optional).unwrap();
         assert_eq!(module.version(), newer);

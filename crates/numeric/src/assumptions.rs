@@ -334,6 +334,8 @@ pub const STATEMENT_STRING_KINDS: &str = "C402";
 pub const UPSI_SWITCHES: &str = "C410";
 pub const UPSI_FROM_THE_PARM: &str = "C411";
 pub const SET_SWITCH_CONDITION_TRUE: &str = "C412";
+pub const DESCRIBED_COLUMNS: &str = "C403";
+pub const SQLDA_CHECKS: &str = "C404";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -2165,6 +2167,18 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         claim: "SET condition-name TO TRUE of an UPSI switch's condition-name sets the switch to that status when the switch's entry has a mnemonic-name, which the Language Reference makes the condition-names' conditional variable (SC27-8713-03, p. 127), and is refused when it has none, SET TO TRUE needing a conditional variable (p. 443); SET TO FALSE is refused, a switch-status condition having no WHEN SET TO FALSE value. cobc 3.2 refuses SET TO TRUE of a switch-status condition, and a condition-name qualified by a mnemonic-name, in both cases",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: DESCRIBED_COLUMNS,
+        claim: "DESCRIBE describes a result column from what the database gave PREPARE. Against PostgreSQL a column's name is upper-cased, as Db2 folds an undelimited name; it allows NULL unless it is a table's column declared NOT NULL; char(n), varchar(n), smallint, integer, bigint, numeric(p,s), real, double precision, date, time, timestamp(p) and bytea are Db2's CHAR, VARCHAR, SMALLINT, INTEGER, BIGINT, DECIMAL, REAL, DOUBLE, DATE, TIME, TIMESTAMP and VARBINARY, and a string declared without a length is VARCHAR(32704), Db2's longest. A NUMERIC with no precision and any other type have no Db2 type, and DESCRIBE abends SQL naming it. No backend keeps column labels: USING LABELS gives each SQLNAME length 0 and USING ANY the name. A string column's SQLDATA holds the CODEPAGE's CCSID, its DBCS component's for GRAPHIC, and SQLIND is zero. With too few SQLVARs only SQLDAID, SQLDABC and SQLD are set and SQLCODE stays 0, as Db2 13 for z/OS does without the SQL standard option (SQL Reference, DESCRIBE OUTPUT)",
+        basis: Basis::Chosen,
+        oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: SQLDA_CHECKS,
+        claim: "An SQLDA that USING DESCRIPTOR names is checked before the statement runs, and one that cannot be used is SQLCODE -804 (SQLSTATE 07002) with Db2's reason code as SQLERRMC: 07 for a negative SQLN or SQLD or an SQLDA past the run unit's storage, 14 for an SQLDABC below SQLN x 44 + 16, 11 for an SQLD above SQLN, 08 (input) or 16 (output) for an SQLTYPE ironwork does not read (LOBs, binary strings, NUL-terminated strings, or a length that does not fit the type), and 12 (input) or 13 (output) for an SQLDATA, or the SQLIND of an odd SQLTYPE, that is zero or does not address storage the variable fits in. Db2 13 for z/OS lists the reasons (SQLCODE -804) without saying which it checks first",
+        basis: Basis::Chosen,
+        oracle: Oracle::Db2,
     },
 ];
 

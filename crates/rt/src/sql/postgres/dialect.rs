@@ -1,7 +1,7 @@
 //! Db2 statement text as PostgreSQL reads it (assumption SQ5), values as the text PostgreSQL's wire
 //! carries, and PostgreSQL's SQLSTATEs as Db2's SQLCODEs (assumption SQ4).
 
-use crate::sql::Value;
+use crate::sql::{ColumnType, Value};
 
 pub const BOOL: u32 = 16;
 pub const BYTEA: u32 = 17;
@@ -133,6 +133,35 @@ pub fn db2_error(state: &str) -> Option<(i32, &'static str)> {
 
 /// A column's text as a value. Dates and times take Db2's ISO forms, as a character host variable
 /// receives them: `HH.MM.SS` and `YYYY-MM-DD-HH.MM.SS.NNNNNN`.
+/// Db2's longest VARCHAR, the length a PostgreSQL string type declared without one describes as.
+const LONGEST_VARCHAR: u16 = 32704;
+
+/// A PostgreSQL result column's type as Db2's (assumption C403). A NUMERIC with no precision, and
+/// any type Db2 has no counterpart for, stays the backend's to name.
+pub fn column_type(oid: u32, typmod: i32) -> ColumnType {
+    let length = (typmod >= 4).then(|| u16::try_from(typmod - 4).unwrap_or(LONGEST_VARCHAR));
+    match oid {
+        21 => ColumnType::SmallInt,
+        23 => ColumnType::Integer,
+        20 => ColumnType::BigInt,
+        700 => ColumnType::Real,
+        701 => ColumnType::Double,
+        1042 => length.map_or(ColumnType::VarChar(LONGEST_VARCHAR), ColumnType::Char),
+        1043 => ColumnType::VarChar(length.unwrap_or(LONGEST_VARCHAR)),
+        25 => ColumnType::VarChar(LONGEST_VARCHAR),
+        17 => ColumnType::VarBinary(LONGEST_VARCHAR),
+        1082 => ColumnType::Date,
+        1083 => ColumnType::Time,
+        1114 => ColumnType::Timestamp(u8::try_from(typmod).unwrap_or(6)),
+        1700 if typmod >= 4 => {
+            let packed = typmod - 4;
+            ColumnType::Decimal { precision: ((packed >> 16) & 0xFFFF) as u8, scale: (packed & 0xFFFF) as u8 }
+        }
+        1700 => ColumnType::Other("NUMERIC without a precision".into()),
+        other => ColumnType::Other(format!("PostgreSQL type OID {other}")),
+    }
+}
+
 pub fn value(oid: u32, text: &str) -> Result<Value, String> {
     let bad = || format!("PostgreSQL sent \"{text}\" for a column of type {oid}");
     Ok(match oid {
@@ -204,6 +233,16 @@ fn iso_timestamp(s: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn result_columns_take_db2_types() {
+        assert_eq!(column_type(1042, 14), ColumnType::Char(10));
+        assert_eq!(column_type(1043, -1), ColumnType::VarChar(32704));
+        assert_eq!(column_type(1700, (7 << 16 | 2) + 4), ColumnType::Decimal { precision: 7, scale: 2 });
+        assert_eq!(column_type(1700, -1), ColumnType::Other("NUMERIC without a precision".into()));
+        assert_eq!(column_type(1114, -1), ColumnType::Timestamp(6));
+        assert_eq!(column_type(16, -1), ColumnType::Other("PostgreSQL type OID 16".into()));
+    }
 
     const DATE: u32 = 1082;
 

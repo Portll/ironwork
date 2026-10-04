@@ -7,9 +7,12 @@
 //! > char:"00123"
 //! < 0 00000 rows=1
 //! = dec:1234.50 | char:"SMITH" | null
+//! @ 2 PAYROLL:4:1b77e0d2 PREPARE S1
+//! < 0 00000 rows=0
+//! : char:"NAME" char(10) notnull
 //! ```
 
-use super::{Abandoned, Answer, Call, Database, Outcome, Value};
+use super::{Abandoned, Answer, Call, Column, ColumnType, Database, Outcome, Value};
 use std::io::Write;
 use super::fingerprint;
 
@@ -105,6 +108,10 @@ impl Replay {
                 "=" => match entries.last_mut() {
                     Some(e) if !awaiting_outcome => e.outcome.rows.push(parse_values(rest).map_err(fail)?),
                     _ => return Err(fail("an = line belongs after a < line".into())),
+                },
+                ":" => match entries.last_mut() {
+                    Some(e) if !awaiting_outcome => e.outcome.columns.push(parse_column(rest).map_err(fail)?),
+                    _ => return Err(fail("a : line belongs after a < line".into())),
                 },
                 _ => return Err(fail(format!("{mark} starts no kind of line"))),
             }
@@ -232,10 +239,75 @@ fn entry_text(seq: u64, call: &Call, outcome: &Outcome) -> String {
         text += &format!(" tokens={}", value_text(&Value::Char(outcome.tokens.clone())));
     }
     text.push('\n');
+    for column in &outcome.columns {
+        text += &format!(": {}\n", column_text(column));
+    }
     for row in &outcome.rows {
         text += &format!("= {}\n", values_text(row));
     }
     text
+}
+
+/// A result column as a `:` line gives it: its name, its type and whether it takes NULL.
+fn column_text(c: &Column) -> String {
+    let ty = match &c.ty {
+        ColumnType::Char(n) => format!("char({n})"),
+        ColumnType::VarChar(n) => format!("varchar({n})"),
+        ColumnType::Graphic(n) => format!("graphic({n})"),
+        ColumnType::VarGraphic(n) => format!("vargraphic({n})"),
+        ColumnType::SmallInt => "smallint".into(),
+        ColumnType::Integer => "integer".into(),
+        ColumnType::BigInt => "bigint".into(),
+        ColumnType::Decimal { precision, scale } => format!("decimal({precision},{scale})"),
+        ColumnType::Real => "real".into(),
+        ColumnType::Double => "double".into(),
+        ColumnType::Date => "date".into(),
+        ColumnType::Time => "time".into(),
+        ColumnType::Timestamp(p) => format!("timestamp({p})"),
+        ColumnType::Binary(n) => format!("binary({n})"),
+        ColumnType::VarBinary(n) => format!("varbinary({n})"),
+        ColumnType::Other(name) => format!("other:{}", value_text(&Value::Char(name.clone()))),
+    };
+    format!("{} {ty} {}", value_text(&Value::Char(c.name.clone())), if c.nullable { "null" } else { "notnull" })
+}
+
+fn parse_column(text: &str) -> Result<Column, String> {
+    let shape = "a : line is a char:\"name\", a type and null or notnull";
+    let Ok((Value::Char(name), rest)) = parse_value(text.trim_start()) else { return Err(shape.into()) };
+    let rest = rest.trim();
+    let (ty, nullable) = match rest.rsplit_once(' ') {
+        Some((ty, "null")) => (ty.trim(), true),
+        Some((ty, "notnull")) => (ty.trim(), false),
+        _ => return Err(shape.into()),
+    };
+    let sized = |inner: &str| inner.parse::<u16>().map_err(|_| format!("{ty} has no length"));
+    let ty = match ty.split_once('(').map(|(w, r)| (w, r.strip_suffix(')'))) {
+        Some(("char", Some(n))) => ColumnType::Char(sized(n)?),
+        Some(("varchar", Some(n))) => ColumnType::VarChar(sized(n)?),
+        Some(("graphic", Some(n))) => ColumnType::Graphic(sized(n)?),
+        Some(("vargraphic", Some(n))) => ColumnType::VarGraphic(sized(n)?),
+        Some(("binary", Some(n))) => ColumnType::Binary(sized(n)?),
+        Some(("varbinary", Some(n))) => ColumnType::VarBinary(sized(n)?),
+        Some(("timestamp", Some(p))) => ColumnType::Timestamp(p.parse().map_err(|_| format!("{ty} has no precision"))?),
+        Some(("decimal", Some(ps))) => match ps.split_once(',').map(|(p, s)| (p.parse(), s.parse())) {
+            Some((Ok(precision), Ok(scale))) => ColumnType::Decimal { precision, scale },
+            _ => return Err(format!("{ty} is not decimal(p,s)")),
+        },
+        _ => match ty {
+            "smallint" => ColumnType::SmallInt,
+            "integer" => ColumnType::Integer,
+            "bigint" => ColumnType::BigInt,
+            "real" => ColumnType::Real,
+            "double" => ColumnType::Double,
+            "date" => ColumnType::Date,
+            "time" => ColumnType::Time,
+            other => match other.strip_prefix("other:").map(parse_value) {
+                Some(Ok((Value::Char(name), ""))) => ColumnType::Other(name),
+                _ => return Err(format!("{other} is not a column type")),
+            },
+        },
+    };
+    Ok(Column { name, ty, nullable })
 }
 
 fn values_text(values: &[Value]) -> String {
@@ -279,7 +351,7 @@ fn parse_outcome(text: &str) -> Result<Outcome, String> {
             _ => return Err("the rest of a < line is tokens=char:\"...\"".into()),
         },
     };
-    Ok(Outcome { sqlcode, sqlstate: state.into(), affected, rows: Vec::new(), tokens })
+    Ok(Outcome { sqlcode, sqlstate: state.into(), affected, rows: Vec::new(), tokens, columns: Vec::new() })
 }
 
 fn parse_values(text: &str) -> Result<Vec<Value>, String> {
@@ -410,7 +482,13 @@ mod tests {
                 Ok(Outcome { tokens: "T1".into(), ..Outcome::rows(vec![vec![Value::Decimal { value: 150, scale: 2 }, Value::Null]]) })
             }
             fn prepare(&mut self, _: &Call) -> Answer {
-                Ok(Outcome::ok())
+                let columns = vec![
+                    Column { name: "NAME".into(), ty: ColumnType::Char(10), nullable: false },
+                    Column { name: "AMT".into(), ty: ColumnType::Decimal { precision: 7, scale: 2 }, nullable: true },
+                    Column { name: "ODD \"ONE\"".into(), ty: ColumnType::Other("PostgreSQL type OID 16".into()), nullable: true },
+                    Column { name: "TS".into(), ty: ColumnType::Timestamp(6), nullable: true },
+                ];
+                Ok(Outcome { columns, ..Outcome::ok() })
             }
             fn open(&mut self, _: &Call) -> Answer {
                 Ok(Outcome::ok())
@@ -444,8 +522,12 @@ mod tests {
         let live = recorder.execute(&call("SELECT", "SELECT X, Y FROM T WHERE Z = ?", &inputs)).unwrap();
         let text = String::from_utf8(written.borrow().clone()).unwrap();
         assert!(text.starts_with(&format!("{HEADER}\n# source: a test double\n")), "{text}");
+        let prepared = recorder.prepare(&Call { cursor: Some("S1"), ..call("PREPARE", "SELECT NAME, AMT FROM T", &[]) }).unwrap();
+        let text = String::from_utf8(written.borrow().clone()).unwrap();
+        assert!(text.contains("PREPARE S1\n< 0 00000 rows=0\n: char:\"NAME\" char(10) notnull\n: char:\"AMT\" decimal(7,2) null\n"), "{text}");
         let mut replay = Replay::parse(&text, false).unwrap();
         assert_eq!(replay.execute(&call("SELECT", "SELECT X, Y FROM T WHERE Z = ?", &inputs)), Ok(live));
+        assert_eq!(replay.prepare(&Call { cursor: Some("S1"), ..call("PREPARE", "SELECT NAME, AMT FROM T", &[]) }), Ok(prepared));
     }
 
     #[test]

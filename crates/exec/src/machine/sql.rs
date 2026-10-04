@@ -5,8 +5,8 @@ use super::facts::Facts;
 use super::*;
 use crate::sql::{self, HostType, Session, SqlHost};
 use rt::host::Host;
-use rt::lir::{AbendId, HostPlace, SqlEntry, SqlStatement, Sqlca, SqlcaField};
-use syntax::sql::{Action, ChangeKind, HostVar, Statement, Whenever};
+use rt::lir::{AbendId, HostPlace, SqlEntry, SqlNames, SqlStatement, Sqlca, SqlcaField};
+use syntax::sql::{Action, ChangeKind, HostVar, Names, Statement, Whenever};
 
 type Entry<'b> = SqlEntry<&'b Ref, String>;
 
@@ -40,27 +40,46 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
             Statement::Change { kind, text, inputs, current_of } => {
                 (SqlStatement::Change { delete: matches!(kind, ChangeKind::Delete), inputs: places(inputs), current_of: current_of.clone() }, text.clone(), false)
             }
-            Statement::Open { cursor, declared, using } => {
+            Statement::Open { cursor, declared, using, descriptor } => {
                 let declared = declared.as_ref().expect("the parser gives OPEN its DECLARE");
                 let hold = if declared.with_hold { " WITH HOLD" } else { "" };
-                match &declared.statement {
-                    Some(name) => {
+                match (&declared.statement, descriptor) {
+                    (Some(name), Some(d)) => {
+                        let text = format!("DECLARE {cursor} CURSOR{hold} FOR {name}");
+                        (SqlStatement::OpenDescriptor { cursor: cursor.clone(), statement: name.clone(), descriptor: &d.var }, text, declared.with_hold)
+                    }
+                    (Some(name), None) => {
                         let text = format!("DECLARE {cursor} CURSOR{hold} FOR {name}");
                         (SqlStatement::OpenPrepared { cursor: cursor.clone(), statement: name.clone(), inputs: places(using) }, text, declared.with_hold)
                     }
-                    None => {
+                    (None, _) => {
                         let text = format!("DECLARE {cursor} CURSOR{hold} FOR {}", declared.text);
                         (SqlStatement::Open { cursor: cursor.clone(), inputs: places(&declared.inputs) }, text, declared.with_hold)
                     }
                 }
             }
             Statement::Fetch { cursor, into } => (SqlStatement::Fetch { cursor: cursor.clone(), into: places(into) }, format!("FETCH {cursor}"), false),
+            Statement::FetchDescriptor { cursor, descriptor } => (SqlStatement::FetchDescriptor { cursor: cursor.clone(), descriptor: &descriptor.var }, format!("FETCH {cursor}"), false),
             Statement::Close { cursor } => (SqlStatement::Close { cursor: cursor.clone() }, format!("CLOSE {cursor}"), false),
             Statement::Commit => (SqlStatement::Commit, "COMMIT".into(), false),
             Statement::Rollback => (SqlStatement::Rollback, "ROLLBACK".into(), false),
-            Statement::Prepare { name, source } => (SqlStatement::Prepare { name: name.clone(), source: places(std::slice::from_ref(source)) }, format!("PREPARE {name}"), false),
+            Statement::Prepare { name, source, into } => {
+                let source = places(std::slice::from_ref(source));
+                let statement = match into {
+                    Some((d, names)) => SqlStatement::PrepareInto { name: name.clone(), source, descriptor: &d.var, names: sql_names(*names) },
+                    None => SqlStatement::Prepare { name: name.clone(), source },
+                };
+                (statement, format!("PREPARE {name}"), false)
+            }
             Statement::ExecuteImmediate { source } => (SqlStatement::ExecuteImmediate { source: places(std::slice::from_ref(source)) }, "EXECUTE IMMEDIATE".into(), false),
-            Statement::Execute { name, inputs } => (SqlStatement::Execute { name: name.clone(), inputs: places(inputs) }, format!("EXECUTE {name}"), false),
+            Statement::Execute { name, inputs, descriptor } => {
+                let statement = match descriptor {
+                    Some(d) => SqlStatement::ExecuteDescriptor { name: name.clone(), descriptor: &d.var },
+                    None => SqlStatement::Execute { name: name.clone(), inputs: places(inputs) },
+                };
+                (statement, format!("EXECUTE {name}"), false)
+            }
+            Statement::Describe { name, descriptor, names } => (SqlStatement::Describe { name: name.clone(), descriptor: &descriptor.var, names: sql_names(*names) }, format!("DESCRIBE {name}"), false),
             Statement::Whenever { .. } | Statement::Declaration | Statement::DeclareCursor(_) | Statement::DeclareUnsupported { .. } => (SqlStatement::Declaration, String::new(), false),
             Statement::Unsupported(what) => (SqlStatement::Unsupported(what.clone()), String::new(), false),
             Statement::Connect { what, target } => (SqlStatement::Connect { what: what.clone(), location: places(target.as_slice()) }, String::new(), false),
@@ -129,6 +148,14 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
                 Ok(Flow::GoTo(crate::procedure_from(self.program, &label, self.returns.running).map_err(|m| Abend::ironwork(m, pos))?.0))
             }
         }
+    }
+}
+
+pub(crate) fn sql_names(names: Names) -> SqlNames {
+    match names {
+        Names::Names => SqlNames::Names,
+        Names::Labels => SqlNames::Labels,
+        Names::Any => SqlNames::Any,
     }
 }
 
@@ -933,6 +960,125 @@ mod tests {
             let (mut out, mut err) = (Vec::new(), Vec::new());
             let ran = compiled.execute_with(crate::unit::Library::default(), crate::files::Dds::default(), None, crate::unit::Clock::System, Some(&mut replay), &mut out, &mut err);
             assert_eq!(ran.map(|_| String::from_utf8(out).expect("text")).map_err(|a| a.message).as_deref(), Ok(" 000\n 000\n"));
+        }
+
+        const DA: &str = concat!(
+            "       IDENTIFICATION DIVISION.\n",
+            "       PROGRAM-ID. DA.\n",
+            "       DATA DIVISION.\n",
+            "       WORKING-STORAGE SECTION.\n",
+            "           EXEC SQL INCLUDE SQLCA END-EXEC.\n",
+            "           EXEC SQL INCLUDE SQLDA END-EXEC.\n",
+            "       01 STMT.\n",
+            "          49 STMT-LEN  PIC S9(4) COMP.\n",
+            "          49 STMT-TEXT PIC X(120).\n",
+            "       01 IN-DA.\n",
+            "          05 IN-DAID PIC X(8).\n",
+            "          05 IN-DABC PIC S9(9) BINARY VALUE 60.\n",
+            "          05 IN-N    PIC S9(4) BINARY VALUE 1.\n",
+            "          05 IN-D    PIC S9(4) BINARY VALUE 1.\n",
+            "          05 IN-TYPE PIC S9(4) BINARY VALUE 496.\n",
+            "          05 IN-LEN  PIC S9(4) BINARY VALUE 4.\n",
+            "          05 IN-DATA POINTER.\n",
+            "          05 IN-IND  POINTER.\n",
+            "          05 IN-NAME PIC X(32).\n",
+            "       01 WS-ID    PIC S9(9) COMP VALUE 7.\n",
+            "       01 WS-NAME  PIC X(10).\n",
+            "       01 WS-AMT   PIC S9(5)V99 COMP-3 VALUE 0.\n",
+            "       01 WS-IND   PIC S9(4) COMP VALUE 0.\n",
+            "       01 E-CODE   PIC -9(4).\n",
+            "       01 E-NUM    PIC -9(4).\n",
+            "       PROCEDURE DIVISION.\n",
+            "           MOVE 3 TO SQLN.\n",
+            "           SET IN-DATA TO ADDRESS OF WS-ID.\n",
+        );
+
+        fn columns() -> Outcome {
+            let name = crate::sql::Column { name: "NAME".into(), ty: crate::sql::ColumnType::Char(10), nullable: false };
+            let amt = crate::sql::Column { name: "AMT".into(), ty: crate::sql::ColumnType::Decimal { precision: 7, scale: 2 }, nullable: true };
+            Outcome { columns: vec![name, amt], ..Outcome::ok() }
+        }
+
+        /// SQLD and each described SQLVAR's SQLTYPE, SQLLEN and name.
+        const SHOW_DA: &str = concat!(
+            "           MOVE SQLD TO E-NUM.\n",
+            "           DISPLAY 'SQLD ' E-NUM ' SQLDABC ' SQLDABC.\n",
+            "           MOVE SQLTYPE(1) TO E-NUM.\n",
+            "           DISPLAY 'TYPE ' E-NUM ' LEN ' SQLLEN(1)\n",
+            "                   ' NAME ' SQLNAMEC(1)(1:SQLNAMEL(1)).\n",
+            "           MOVE SQLTYPE(2) TO E-NUM.\n",
+            "           DISPLAY 'TYPE ' E-NUM ' LEN ' SQLLEN(2)\n",
+            "                   ' NAME ' SQLNAMEC(2)(1:SQLNAMEL(2)).\n",
+        );
+
+        #[test]
+        fn prepare_into_and_describe_fill_the_sqlda_from_the_statement_s_columns() {
+            let procedure = [
+                set("SELECT NAME, AMT FROM T WHERE ID = ?"),
+                exec("PREPARE S1 INTO :SQLDA FROM :STMT"),
+                SHOW_DA.into(),
+                "           MOVE 1 TO SQLN.\n".into(),
+                exec("DESCRIBE S1 INTO :SQLDA"),
+                "           MOVE SQLD TO E-NUM.\n           DISPLAY 'SQLD ' E-NUM ' SQLDABC ' SQLDABC.\n".into(),
+                exec("DESCRIBE S9 INTO :SQLDA"),
+                set("DELETE FROM T"),
+                exec("PREPARE S2 FROM :STMT"),
+                "           MOVE 3 TO SQLN.\n".into(),
+                exec("DESCRIBE S2 INTO :SQLDA USING LABELS"),
+                "           MOVE SQLD TO E-NUM.\n           DISPLAY 'SQLD ' E-NUM.\n".into(),
+                "           GOBACK.\n".into(),
+            ]
+            .concat();
+            let (shown, calls) = run_source(&format!("{DA}{procedure}"), vec![columns(), Outcome::ok()]);
+            let shown = shown.unwrap();
+            assert_eq!(
+                shown,
+                concat!(
+                    " 0000\n",
+                    "SQLD  0002 SQLDABC 000000148\n",
+                    "TYPE  0452 LEN 0010 NAME NAME\n",
+                    "TYPE  0485 LEN 1794 NAME AMT\n",
+                    " 0000\n",
+                    "SQLD  0002 SQLDABC 000000060\n",
+                    "-0516\n",
+                    " 0000\n",
+                    " 0000\n",
+                    "SQLD  0000\n",
+                )
+            );
+            assert_eq!(verbs(&calls), ["PREPARE", "PREPARE", "COMMIT"]);
+        }
+
+        #[test]
+        fn open_fetch_and_execute_take_their_values_where_the_sqlda_points() {
+            let procedure = [
+                "           EXEC SQL DECLARE C1 CURSOR FOR S1 END-EXEC.\n".into(),
+                set("SELECT NAME, AMT FROM T WHERE ID = ?"),
+                exec("PREPARE S1 INTO :SQLDA FROM :STMT"),
+                "           SET SQLDATA(1) TO ADDRESS OF WS-NAME.\n".into(),
+                "           SET SQLDATA(2) TO ADDRESS OF WS-AMT.\n".into(),
+                "           SET SQLIND(2) TO ADDRESS OF WS-IND.\n".into(),
+                exec("OPEN C1 USING DESCRIPTOR :IN-DA"),
+                exec("FETCH C1 USING DESCRIPTOR :SQLDA"),
+                "           MOVE WS-IND TO E-NUM.\n           DISPLAY WS-NAME '|' E-NUM.\n".into(),
+                exec("CLOSE C1"),
+                set("DELETE FROM T WHERE ID = ?"),
+                exec("PREPARE S2 FROM :STMT"),
+                exec("EXECUTE S2 USING DESCRIPTOR :IN-DA"),
+                "           SET IN-DATA TO NULL.\n".into(),
+                exec("EXECUTE S2 USING DESCRIPTOR :IN-DA"),
+                "           DISPLAY SQLERRMC(1:SQLERRML).\n".into(),
+                "           MOVE 2 TO IN-D.\n".into(),
+                exec("EXECUTE S2 USING DESCRIPTOR :IN-DA"),
+                "           GOBACK.\n".into(),
+            ]
+            .concat();
+            let row = vec![Value::Char("SMITH".into()), Value::Null];
+            let answers = vec![columns(), Outcome::ok(), Outcome::rows(vec![row]), Outcome::ok(), Outcome::ok(), Outcome { affected: 1, ..Outcome::ok() }];
+            let (shown, calls) = run_source(&format!("{DA}{procedure}"), answers);
+            assert_eq!(shown.as_deref(), Ok(" 0000\n 0000\n 0000\nSMITH     |-0001\n 0000\n 0000\n 0000\n-0804\n12\n-0804\n"));
+            assert_eq!(verbs(&calls), ["PREPARE", "OPEN", "FETCH", "CLOSE", "PREPARE", "DELETE", "COMMIT"]);
+            assert_eq!((calls[1].3.as_slice(), calls[5].3.as_slice()), ([Value::Int(7)].as_slice(), [Value::Int(7)].as_slice()));
         }
     }
 }

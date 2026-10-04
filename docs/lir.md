@@ -1618,7 +1618,20 @@ pub enum SqlStatement {
     /// OPEN of a cursor declared for the prepared statement `statement`, `inputs` from OPEN ...
     /// USING (tag 13).
     OpenPrepared { cursor: SymId, statement: SymId, inputs: Vec<HostPlace> },
+    /// DESCRIBE [OUTPUT] of a prepared statement into the SQLDA at `descriptor`, `names` USING
+    /// NAMES, LABELS or ANY (tag 14).
+    Describe { name: SymId, descriptor: PlaceId, names: SqlNames },
+    /// PREPARE ... INTO: PREPARE, then DESCRIBE of the statement it made (tag 15).
+    PrepareInto { name: SymId, source: Vec<HostPlace>, descriptor: PlaceId, names: SqlNames },
+    /// EXECUTE, OPEN and FETCH ... USING DESCRIPTOR: each host variable from the SQLDA at
+    /// `descriptor`, where its SQLDATA and SQLIND point (tags 16, 17 and 18).
+    ExecuteDescriptor { name: SymId, descriptor: PlaceId },
+    OpenDescriptor { cursor: SymId, statement: SymId, descriptor: PlaceId },
+    FetchDescriptor { cursor: SymId, descriptor: PlaceId },
 }
+
+/// What DESCRIBE puts in SQLNAME (tags 0, 1 and 2).
+pub enum SqlNames { Names, Labels, Any }
 
 /// A host variable, or one member of a host structure, resolved (machine/sql.rs:176-198).
 pub struct HostPlace {

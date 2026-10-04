@@ -40,6 +40,13 @@ pub enum SqlStatement<P = PlaceId, S = SymId> {
     Execute { name: S, inputs: Vec<HostPlace<P>> },
     /// OPEN of a cursor declared for the prepared statement `statement`.
     OpenPrepared { cursor: S, statement: S, inputs: Vec<HostPlace<P>> },
+    /// DESCRIBE [OUTPUT] of a prepared statement into the SQLDA at `descriptor`.
+    Describe { name: S, descriptor: P, names: SqlNames },
+    /// PREPARE ... INTO: PREPARE, then DESCRIBE of the statement it made.
+    PrepareInto { name: S, source: Vec<HostPlace<P>>, descriptor: P, names: SqlNames },
+    ExecuteDescriptor { name: S, descriptor: P },
+    OpenDescriptor { cursor: S, statement: S, descriptor: P },
+    FetchDescriptor { cursor: S, descriptor: P },
     /// WHENEVER, DECLARE CURSOR, INCLUDE and the other declarations: no op.
     Declaration,
     /// Abends EXEC, naming it, when reached.
@@ -47,6 +54,14 @@ pub enum SqlStatement<P = PlaceId, S = SymId> {
     /// CONNECT or SET CONNECTION: the host variable naming the location, if any, goes to the
     /// input trace, then the statement abends EXEC as an unsupported one does.
     Connect { what: S, location: Vec<HostPlace<P>> },
+}
+
+/// What DESCRIBE puts in each SQLNAME: the column's name, its label, or its label and else its name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SqlNames {
+    Names,
+    Labels,
+    Any,
 }
 
 /// A host variable, or one member of a host structure at `member`'s offset and length. The
@@ -97,6 +112,16 @@ codec_enum!(SqlStatement {
     ExecuteImmediate { source } = 11,
     Execute { name, inputs } = 12,
     OpenPrepared { cursor, statement, inputs } = 13,
+    Describe { name, descriptor, names } = 14,
+    PrepareInto { name, source, descriptor, names } = 15,
+    ExecuteDescriptor { name, descriptor } = 16,
+    OpenDescriptor { cursor, statement, descriptor } = 17,
+    FetchDescriptor { cursor, descriptor } = 18,
+});
+codec_enum!(SqlNames {
+    Names = 0,
+    Labels = 1,
+    Any = 2,
 });
 codec_struct!(HostPlace { var, member, ty, indicator } check host_place_valid);
 codec_struct!(Sqlca { fields } check sqlca_valid);
@@ -148,7 +173,7 @@ pub(super) fn table_valid(table: &[SqlEntry], symbols: &[String]) -> Result<(), 
             return Err(format!("SQL entry {k} has fingerprint {:08X}, not its text's {:08X}", entry.fingerprint, fingerprint(text)));
         }
         let held = match &entry.statement {
-            SqlStatement::Open { cursor, .. } | SqlStatement::OpenPrepared { cursor, .. } => text.starts_with(&format!("DECLARE {} CURSOR WITH HOLD FOR ", symbol(*cursor)?)),
+            SqlStatement::Open { cursor, .. } | SqlStatement::OpenPrepared { cursor, .. } | SqlStatement::OpenDescriptor { cursor, .. } => text.starts_with(&format!("DECLARE {} CURSOR WITH HOLD FOR ", symbol(*cursor)?)),
             _ => false,
         };
         if entry.with_hold != held {

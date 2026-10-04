@@ -125,7 +125,18 @@ pub struct Executed {
 #[derive(Clone, Debug, Default)]
 pub struct Described {
     pub parameters: Vec<u32>,
-    pub columns: Vec<u32>,
+    pub columns: Vec<Field>,
+}
+
+/// A result column as RowDescription gives it: its table and column number where it is a table's
+/// column, else 0, and its type and type modifier.
+#[derive(Clone, Debug, Default)]
+pub struct Field {
+    pub name: String,
+    pub table: u32,
+    pub attnum: i16,
+    pub oid: u32,
+    pub typmod: i32,
 }
 
 pub struct Connection {
@@ -384,10 +395,12 @@ impl Connection {
                 b'T' => {
                     let n = b.i16()?;
                     for _ in 0..n {
-                        b.cstr()?;
-                        b.take(6)?;
-                        described.columns.push(b.i32()? as u32);
-                        b.take(8)?;
+                        let name = b.cstr()?;
+                        let (table, attnum, oid) = (b.i32()? as u32, b.i16()?, b.i32()? as u32);
+                        b.take(2)?;
+                        let typmod = b.i32()?;
+                        b.take(2)?;
+                        described.columns.push(Field { name, table, attnum, oid, typmod });
                     }
                 }
                 _ => {}

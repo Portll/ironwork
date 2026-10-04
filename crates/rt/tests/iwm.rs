@@ -164,13 +164,13 @@ fn another_major_or_an_older_minor_is_refused_and_a_newer_minor_read() {
     let mut major = bytes.clone();
     major[8] = 1;
     let error = read(&major).unwrap_err();
-    assert_eq!(error, ModuleError::Version(Version { major: 1, minor: 6 }));
-    assert_eq!(error.to_string(), "load module format 1.6; this ironwork reads 0.5 to 0.6. Compile the source again");
+    assert_eq!(error, ModuleError::Version(Version { major: 1, minor: 7 }));
+    assert_eq!(error.to_string(), "load module format 1.7; this ironwork reads 0.5 to 0.7. Compile the source again");
     let mut minor = bytes.clone();
     minor[10] = 1;
     assert_eq!(read(&minor), Err(ModuleError::Version(Version { major: 0, minor: 1 })));
     let mut newer = bytes;
-    newer[10] = 7;
+    newer[10] = 8;
     let count = u32::from_le_bytes(newer[16..20].try_into().unwrap()) as usize;
     let crc = extend(crc32(&newer[..28]), &newer[32..32 + count * 28]);
     newer[28..32].copy_from_slice(&crc.to_le_bytes());

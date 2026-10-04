@@ -2,10 +2,11 @@
 //! INTO list with each indicator set, and the SQLCA filled after it.
 
 use super::run::SqlHost;
-use super::{HostType, NULL_WITHOUT_INDICATOR, Outcome, ReadError, SqlError, Value, read, write};
+use super::{HostType, NULL_WITHOUT_INDICATOR, Outcome, ReadError, SqlError, Value, write};
 use crate::abend::Abend;
 use crate::lir::{HostPlace, Sqlca, SqlcaField};
 use crate::store::ProgramFacts;
+use crate::vocab::Pos;
 
 type R<T> = Result<T, Abend>;
 
@@ -15,11 +16,11 @@ pub(super) const TRUNCATED: usize = 1;
 pub(super) const COLUMN_COUNT: usize = 3;
 
 /// A host variable's storage, its type, and its indicator's storage when it has one.
-struct Target<'a> {
-    offset: usize,
-    len: usize,
-    ty: &'a HostType,
-    indicator: Option<usize>,
+pub(super) struct Target<'a> {
+    pub offset: usize,
+    pub len: usize,
+    pub ty: &'a HostType,
+    pub indicator: Option<usize>,
 }
 
 /// Every place's storage, the whole list located before any is read or written. A host
@@ -58,6 +59,12 @@ fn targets<'a, 'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, places: &'a [Host
 /// is a program check at the first host variable.
 pub(super) fn inputs<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, places: &[HostPlace<P>]) -> R<Result<Vec<Value>, SqlError>> {
     let targets = targets(x, places)?;
+    let at = places.first().map(|p| x.place_pos(p.var)).unwrap_or_default();
+    read_targets(x, &targets, at)
+}
+
+/// The values `targets` send, a program check at `at` for invalid data.
+pub(super) fn read_targets<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, targets: &[Target], at: Pos) -> R<Result<Vec<Value>, SqlError>> {
     let facts = x.facts();
     let (page, numproc) = (facts.page(), facts.options().numproc);
     let mut values = Vec::with_capacity(targets.len());
@@ -69,9 +76,9 @@ pub(super) fn inputs<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, places: &[H
             values.push(Value::Null);
             continue;
         }
-        match read(&mem[t.offset..t.offset + t.len], t.ty, page, numproc) {
+        match super::read(&mem[t.offset..t.offset + t.len], t.ty, page, numproc) {
             Ok(v) => values.push(v),
-            Err(ReadError::Check(c)) => return Err(Abend::check(c, x.place_pos(places[0].var))),
+            Err(ReadError::Check(c)) => return Err(Abend::check(c, at)),
             Err(ReadError::Sql(e)) => return Ok(Err(e)),
         }
     }
@@ -92,6 +99,10 @@ pub(super) fn traced<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, places: &[H
 /// original length, and 0 otherwise.
 pub(super) fn assign<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, into: &[HostPlace<P>], row: &[Value], warnings: &mut Warnings) -> R<Result<(), SqlError>> {
     let targets = targets(x, into)?;
+    assign_targets(x, &targets, row, warnings)
+}
+
+pub(super) fn assign_targets<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, targets: &[Target], row: &[Value], warnings: &mut Warnings) -> R<Result<(), SqlError>> {
     if targets.len() != row.len() {
         warnings[COLUMN_COUNT] = true;
     }
@@ -116,7 +127,7 @@ pub(super) fn assign<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, into: &[Hos
         }
     }
     if let Some(taint) = x.taint() {
-        for t in &targets {
+        for t in targets {
             taint.set(t.offset, t.len, true);
             if let Some(at) = t.indicator {
                 taint.set(at, 2, true);
