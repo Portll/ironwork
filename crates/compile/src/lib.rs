@@ -1586,7 +1586,7 @@ impl Check<'_> {
     /// (assumption C442); ON EXCEPTION goes with ARGUMENT-VALUE alone.
     fn accept_source(&mut self, from: AcceptFrom, exception: &Handlers, target: &Ref, pos: Pos) {
         if (exception.on.is_some() || exception.not_on.is_some()) && from != AcceptFrom::ArgumentValue {
-            self.errors.push(Error::at(pos, "ACCEPT ... ON EXCEPTION: of the ACCEPT statements, only ACCEPT ... FROM ARGUMENT-VALUE under --compliance extended has an exception"));
+            self.errors.push(syntax::messages::IWC0256.at(pos, "ACCEPT ... ON EXCEPTION: of the ACCEPT statements, only ACCEPT ... FROM ARGUMENT-VALUE under --compliance extended has an exception"));
         }
         let (name, what) = match from {
             AcceptFrom::CommandLine => ("COMMAND-LINE", "the job step's PARM program arguments"),
@@ -1597,7 +1597,7 @@ impl Check<'_> {
         if self.extended {
             self.errors.push(syntax::messages::IWX0010.at(pos, format!("ACCEPT ... FROM {name} (Micro Focus and GnuCOBOL; Enterprise COBOL reads no command line): {} receives {what}", target.name)));
         } else {
-            self.errors.push(Error::at(pos, format!("ACCEPT ... FROM {name}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it from the job step's PARM")));
+            self.errors.push(syntax::messages::IWC0257.at(pos, format!("ACCEPT ... FROM {name}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it from the job step's PARM")));
         }
     }
 
@@ -1606,7 +1606,7 @@ impl Check<'_> {
     /// ACCEPT ... FROM ARGUMENT-VALUE takes, with IWX0010-W (assumption C442).
     fn argument_number(&mut self, items: &[Operand], pos: Pos) {
         if !self.extended {
-            self.errors.push(Error::at(pos, "DISPLAY UPON ARGUMENT-NUMBER: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it"));
+            self.errors.push(syntax::messages::IWC0258.at(pos, "DISPLAY UPON ARGUMENT-NUMBER: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it"));
             return;
         }
         let numeric = match items {
@@ -1617,7 +1617,7 @@ impl Check<'_> {
         if numeric {
             self.errors.push(syntax::messages::IWX0010.at(pos, "DISPLAY ... UPON ARGUMENT-NUMBER (Micro Focus and GnuCOBOL; Enterprise COBOL reads no command line): the next ACCEPT ... FROM ARGUMENT-VALUE takes the job step's PARM word it numbers"));
         } else {
-            self.errors.push(Error::at(pos, "DISPLAY UPON ARGUMENT-NUMBER: it shows one numeric item or literal, the number of the argument the next ACCEPT ... FROM ARGUMENT-VALUE takes"));
+            self.errors.push(syntax::messages::IWC0259.at(pos, "DISPLAY UPON ARGUMENT-NUMBER: it shows one numeric item or literal, the number of the argument the next ACCEPT ... FROM ARGUMENT-VALUE takes"));
         }
     }
 

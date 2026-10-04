@@ -230,6 +230,58 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0205 | S | `SET {name} TO {OFF}: {name} is not the mnemonic-name of an UPSI switch` |
 | IWC0206 | S | `{name} is the mnemonic-name of UPSI-{number}: only SET ... TO ON or OFF and a condition-name's qualifier can name it` |
 | IWC0207 | S | `SET {name} TO TRUE: the UPSI switch's entry has no mnemonic-name, which would be its conditional variable` |
+| IWC0208 | S | `{verb} {name}: not a sort or merge file (SD)` |
+| IWC0209 | S | `{verb} {name}: no ASCENDING or DESCENDING KEY` |
+| IWC0210 | S | `{verb} {name}: KEY needs a data name` |
+| IWC0211 | S | `{key}: a key of {verb} {name} must be in its records` |
+| IWC0212 | S | `{key}: a sort key cannot be in a table` |
+| IWC0213 | S | `{key}: a sort key cannot follow an OCCURS DEPENDING ON table in its record` |
+| IWC0214 | S | `{key}: a POINTER, INDEX, object reference or function-pointer item cannot be a sort key` |
+| IWC0215 | S | `{verb} {name}: no {phrase} or {procedure}` |
+| IWC0216 | S | `{phrase} {file}: a sort or merge file (SD) cannot be one` |
+| IWC0217 | S | `{phrase} {file}: the file's ACCESS MODE is RANDOM` |
+| IWC0218 | S | `MERGE {name}: USING names at least two files` |
+| IWC0219 | S | `MERGE {name}: not a merge file (SD)` |
+| IWC0220 | S | `SORT {name}: a table SORT takes no USING, GIVING or procedures` |
+| IWC0221 | S | `SORT {name}: not a table` |
+| IWC0222 | S | `no file or table named {name}` |
+| IWC0223 | S | `SORT {name}: not a table (no OCCURS)` |
+| IWC0224 | S | `SORT {name}: a subscript for each table that contains it, and none for itself` |
+| IWC0225 | S | `SORT {name}: no KEY phrase, and its OCCURS has none` |
+| IWC0226 | S | `{key}: a key of SORT {name} must be its element or an item within it` |
+| IWC0227 | S | `{key}: a table SORT key cannot be in a table within the element` |
+| IWC0228 | S | `{file}: LINAGE is for a sequential file, not a line-sequential one` |
+| IWC0229 | S | `{file}: LINAGE is for a sequential file, not an indexed or relative one` |
+| IWC0230 | S | `{file}: {phrase} {number} is more than the {MOST} lines LINAGE allows` |
+| IWC0231 | S | `{file}: {phrase} {name} is not an unsigned integer data item` |
+| IWC0232 | S | `{file}: LINAGE 0: the page body needs at least one line` |
+| IWC0233 | S | `{file}: FOOTING 0: the footing starts at line 1 or later` |
+| IWC0234 | S | `{file}: FOOTING {footing} is past the page body of {body} lines` |
+| IWC0235 | S | `an elementary item needs a PICTURE` |
+| IWC0236 | S | `a group item cannot have a PICTURE` |
+| IWC0237 | S | `an object reference, function-pointer or procedure-pointer takes no PICTURE and only VALUE NULL` |
+| IWC0238 | S | `POINTER and INDEX items take no PICTURE` |
+| IWC0239 | S | `COMP-1 and COMP-2 items take no PICTURE` |
+| IWC0240 | S | `BLANK WHEN ZERO needs a numeric or numeric-edited item of USAGE DISPLAY or NATIONAL` |
+| IWC0241 | S | `a binary item holds at most 18 digits` |
+| IWC0242 | S | `JUSTIFIED cannot be given for a DBCS item whose PICTURE has B` |
+| IWC0243 | S | `a PICTURE with G needs USAGE DISPLAY-1 (Language Reference SC27-8713-03, p. 214)` |
+| IWC0244 | S | `a SIGN clause needs an S in the PICTURE` |
+| IWC0245 | S | `INVOKE {target}: SELF and SUPER can be used only in a method` |
+| IWC0246 | S | `INVOKE {target}: not an object reference or a class named in the REPOSITORY paragraph` |
+| IWC0247 | S | `INVOKE {target} NEW: NEW takes a class-name from the REPOSITORY paragraph` |
+| IWC0248 | S | `INVOKE ... NEW needs RETURNING an object reference` |
+| IWC0249 | S | `INVOKE ... NEW RETURNING {name}: not an object reference` |
+| IWC0250 | S | `INVOKE with an empty method name` |
+| IWC0251 | S | `INVOKE ... {name}: a method name is held in an alphanumeric or national item` |
+| IWC0252 | S | `INVOKE {target} {name}: a method named by a data item is invoked on a universal object reference` |
+| IWC0253 | S | `INVOKE argument: {message}` |
+| IWC0254 | S | `INVOKE ... RETURNING {name}: not reference-modified` |
+| IWC0255 | S | `INVOKE ... RETURNING {name}: {message}` |
+| IWC0256 | S | `ACCEPT ... ON EXCEPTION: of the ACCEPT statements, only ACCEPT ... FROM ARGUMENT-VALUE under --compliance extended has an exception` |
+| IWC0257 | S | `ACCEPT ... FROM {name}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it from the job step's PARM` |
+| IWC0258 | S | `DISPLAY UPON ARGUMENT-NUMBER: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0259 | S | `DISPLAY UPON ARGUMENT-NUMBER: it shows one numeric item or literal, the number of the argument the next ACCEPT ... FROM ARGUMENT-VALUE takes` |
 | IWL0001 | S | `lowering: {table} exceeds the LIR's limit` |
 | IWL0002 | S | `lowering: the lowered program is invalid: {why}` |
 | IWL0003 | S | `LOCAL-STORAGE exceeds the interpreter's {MAX STORAGE} bytes` |
@@ -247,6 +299,42 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWP0006 | S | `EXEC DLI {command} WHERE({t}): {why}` |
 | IWP0007 | S | `EXEC CICS {command} {option}({label}): {message}` |
 | IWP0008 | S | `a program that uses object-oriented syntax cannot contain EXEC CICS` |
+| IWP0009 | S | `a continuation line is missing` |
+| IWP0010 | S | `a label with no macro` |
+| IWP0011 | S | `a quoted string is not closed` |
+| IWP0012 | S | `a parenthesised list is not closed` |
+| IWP0013 | S | `{key} takes one value` |
+| IWP0014 | S | `{key} takes a quoted string` |
+| IWP0015 | S | `{key}={word} is not a number from {low} to {high}` |
+| IWP0016 | S | `{key}={word}: YES or NO` |
+| IWP0017 | S | `DSATTS={a} is not an extended attribute` |
+| IWP0018 | S | `EXTATT={word}: NO, MAPONLY or YES` |
+| IWP0019 | S | `DFHMSD TYPE=FINAL with no mapset open` |
+| IWP0020 | S | `DFHMDI outside a DFHMSD` |
+| IWP0021 | S | `DFHMDF outside a DFHMDI map` |
+| IWP0022 | S | `unknown macro {word}` |
+| IWP0023 | S | `{what} needs a name` |
+| IWP0024 | S | `{what} name {name} is longer than {max} characters` |
+| IWP0025 | S | `TYPE={t}: DSECT, MAP, FINAL or &SYSPARM` |
+| IWP0026 | S | `MODE={word}: IN, OUT or INOUT` |
+| IWP0027 | S | `SIZE=(lines,columns), each 1 to 240` |
+| IWP0028 | S | `{key}={word} is not a number from 1 to 240` |
+| IWP0029 | S | `ATTRB={word} is not an attribute` |
+| IWP0030 | S | `XINIT takes an even number of hexadecimal digits` |
+| IWP0031 | S | `XINIT takes hexadecimal digits` |
+| IWP0032 | S | `GRPNAME needs a labelled field and does not go with OCCURS` |
+| IWP0033 | S | `GRPNAME is longer than 30 characters` |
+| IWP0034 | S | `LENGTH=0 is allowed only on an unlabelled field, where it delimits an input field` |
+| IWP0035 | S | `LENGTH is missing, or is not from 1 to 256` |
+| IWP0036 | S | `JUSTIFY={word}: LEFT or RIGHT, BLANK or ZERO` |
+| IWP0037 | S | `COLOR={character} is not a colour` |
+| IWP0038 | S | `HILIGHT={h} is not a highlight` |
+| IWP0039 | S | `POS is an offset within the map, or (line,column) inside it` |
+| IWP0040 | S | `unbalanced '(' in DEFINE` |
+| IWP0041 | S | `DEFINE names no KIND(NAME)` |
+| IWP0042 | S | `{kind}({name}): a {kind} name is at most {limit} characters` |
+| IWP0043 | S | `attribute value for '{key}' exceeds 256 characters` |
+| IWP0044 | S | `unbalanced '(' in attribute value` |
 | IWR0001 | S | `XML PARSE VALIDATING WITH {schema}: the schema is in IBM's Optimized Schema Representation (OSR), which ironwork does not read` |
 | IWR0002 | S | `{verb} is not a statement ironwork for COBOL supports yet` |
 | IWR0003 | S | `{clause} is not a data description clause ironwork for COBOL supports yet` |
@@ -299,6 +387,10 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWR0050 | S | `multiple COLUMNS is not supported yet` |
 | IWR0051 | S | `SUM of an arithmetic expression is not supported yet` |
 | IWR0052 | S | `lowering: {construct} is not lowered yet` |
+| IWR0053 | S | `{file}: LINAGE on a report file is not supported yet` |
+| IWR0054 | S | `BLANK WHEN ZERO on a USAGE NATIONAL item is not supported yet` |
+| IWR0055 | S | `a national-edited PICTURE is not supported yet` |
+| IWR0056 | S | `a {category} PICTURE with USAGE {usage} is not supported yet` |
 | IWS0001 | S | `{what the syntax takes there}, found {the word or token there}` |
 | IWS0002 | S | `{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries` |
 | IWS0003 | S | `COPY: {message}` |

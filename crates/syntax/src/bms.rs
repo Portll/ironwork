@@ -2,6 +2,7 @@
 //! COBOL symbolic map a program COPYs for it.
 
 use crate::copy::Libraries;
+use crate::messages::Message;
 use crate::{Error, Pos};
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -49,8 +50,8 @@ struct Statement {
     operands: Vec<(String, Val)>,
 }
 
-fn fail(line: u32, message: impl Into<String>) -> Error {
-    Error::at(Pos { file: 0, line, col: 1 }, message)
+fn fail(line: u32, message: Message, text: impl Into<String>) -> Error {
+    message.at(Pos { file: 0, line, col: 1 }, text)
 }
 
 /// The statements of the source: comments dropped, continuation lines joined, columns 73-80 ignored.
@@ -73,7 +74,7 @@ fn statements(text: &str) -> Result<Vec<Statement>, Error> {
             if !continued {
                 break;
             }
-            let (_, next) = lines.next().ok_or_else(|| fail(start, "a continuation line is missing"))?;
+            let (_, next) = lines.next().ok_or_else(|| fail(start, crate::messages::IWP0009, "a continuation line is missing"))?;
             line = next.chars().take(72).collect();
             from = 15;
         }
@@ -94,7 +95,7 @@ fn statement(text: &str, line: u32) -> Result<Statement, Error> {
     let macro_name = rest[..n].to_ascii_uppercase();
     let rest = rest[n..].trim_start();
     if macro_name.is_empty() {
-        return Err(fail(line, "a label with no macro"));
+        return Err(fail(line, crate::messages::IWP0010, "a label with no macro"));
     }
     Ok(Statement { line, label, macro_name, operands: operands(rest, line)? })
 }
@@ -167,7 +168,7 @@ fn quoted(chars: &[char], at: usize, line: u32) -> Result<(String, usize), Error
         s.push(chars[i]);
         i += 1;
     }
-    Err(fail(line, "a quoted string is not closed"))
+    Err(fail(line, crate::messages::IWP0011, "a quoted string is not closed"))
 }
 
 fn list(chars: &[char], at: usize, line: u32) -> Result<(Vec<String>, usize), Error> {
@@ -191,7 +192,7 @@ fn list(chars: &[char], at: usize, line: u32) -> Result<(Vec<String>, usize), Er
         }
         i += 1;
     }
-    Err(fail(line, "a parenthesised list is not closed"))
+    Err(fail(line, crate::messages::IWP0012, "a parenthesised list is not closed"))
 }
 
 struct Operands<'a> {
@@ -215,7 +216,7 @@ impl Operands<'_> {
         match self.words(key) {
             None => Ok(None),
             Some(mut w) if w.len() == 1 => Ok(w.pop()),
-            Some(_) => Err(fail(self.line, format!("{key} takes one value"))),
+            Some(_) => Err(fail(self.line, crate::messages::IWP0013, format!("{key} takes one value"))),
         }
     }
 
@@ -223,7 +224,7 @@ impl Operands<'_> {
         match self.get(key) {
             None => Ok(None),
             Some(Val::Word(s) | Val::Quoted(s)) => Ok(Some(s.clone())),
-            Some(Val::List(_)) => Err(fail(self.line, format!("{key} takes a quoted string"))),
+            Some(Val::List(_)) => Err(fail(self.line, crate::messages::IWP0014, format!("{key} takes a quoted string"))),
         }
     }
 
@@ -231,7 +232,7 @@ impl Operands<'_> {
         let Some(w) = self.word(key)? else { return Ok(None) };
         match w.parse::<u32>() {
             Ok(n) if (low..=high).contains(&n) => Ok(Some(n)),
-            _ => Err(fail(self.line, format!("{key}={w} is not a number from {low} to {high}"))),
+            _ => Err(fail(self.line, crate::messages::IWP0015, format!("{key}={w} is not a number from {low} to {high}"))),
         }
     }
 
@@ -240,7 +241,7 @@ impl Operands<'_> {
             None => Ok(None),
             Some("YES") => Ok(Some(true)),
             Some("NO") => Ok(Some(false)),
-            Some(other) => Err(fail(self.line, format!("{key}={other}: YES or NO"))),
+            Some(other) => Err(fail(self.line, crate::messages::IWP0016, format!("{key}={other}: YES or NO"))),
         }
     }
 
@@ -250,7 +251,7 @@ impl Operands<'_> {
             let mut out: Vec<String> = Vec::new();
             for a in list {
                 if !EXTENDED.iter().any(|(name, _, _)| *name == a) {
-                    return Err(fail(self.line, format!("DSATTS={a} is not an extended attribute")));
+                    return Err(fail(self.line, crate::messages::IWP0017, format!("DSATTS={a} is not an extended attribute")));
                 }
                 if !out.contains(&a) {
                     out.push(a);
@@ -262,7 +263,7 @@ impl Operands<'_> {
             None => None,
             Some("YES") => Some(EXTENDED.iter().filter(|(_, _, implied)| *implied).map(|(a, _, _)| a.to_string()).collect()),
             Some("NO" | "MAPONLY") => Some(Vec::new()),
-            Some(other) => return Err(fail(self.line, format!("EXTATT={other}: NO, MAPONLY or YES"))),
+            Some(other) => return Err(fail(self.line, crate::messages::IWP0018, format!("EXTATT={other}: NO, MAPONLY or YES"))),
         })
     }
 }
@@ -285,23 +286,23 @@ pub fn parse(text: &str) -> Result<Vec<Mapset>, Error> {
             "PRINT" | "TITLE" | "EJECT" | "SPACE" | "END" => {}
             "DFHMSD" => {
                 if ops.word("TYPE")?.as_deref() == Some("FINAL") {
-                    done.push(open.take().ok_or_else(|| fail(st.line, "DFHMSD TYPE=FINAL with no mapset open"))?.set);
+                    done.push(open.take().ok_or_else(|| fail(st.line, crate::messages::IWP0019, "DFHMSD TYPE=FINAL with no mapset open"))?.set);
                     continue;
                 }
                 done.extend(open.take().map(|o| o.set));
                 open = Some(mapset_header(&st, &ops)?);
             }
             "DFHMDI" => {
-                let o = open.as_mut().ok_or_else(|| fail(st.line, "DFHMDI outside a DFHMSD"))?;
+                let o = open.as_mut().ok_or_else(|| fail(st.line, crate::messages::IWP0020, "DFHMDI outside a DFHMSD"))?;
                 let map = map_header(&st, &ops, o)?;
                 o.set.maps.push(map);
             }
             "DFHMDF" => {
-                let map = open.as_mut().and_then(|o| o.set.maps.last_mut()).ok_or_else(|| fail(st.line, "DFHMDF outside a DFHMDI map"))?;
+                let map = open.as_mut().and_then(|o| o.set.maps.last_mut()).ok_or_else(|| fail(st.line, crate::messages::IWP0021, "DFHMDF outside a DFHMDI map"))?;
                 let field = field(&st, &ops, map)?;
                 map.fields.push(field);
             }
-            other => return Err(fail(st.line, format!("unknown macro {other}"))),
+            other => return Err(fail(st.line, crate::messages::IWP0022, format!("unknown macro {other}"))),
         }
     }
     done.extend(open.map(|o| o.set));
@@ -309,9 +310,9 @@ pub fn parse(text: &str) -> Result<Vec<Mapset>, Error> {
 }
 
 fn name_of(st: &Statement, what: &str, max: usize) -> Result<String, Error> {
-    let name = st.label.clone().ok_or_else(|| fail(st.line, format!("{what} needs a name")))?;
+    let name = st.label.clone().ok_or_else(|| fail(st.line, crate::messages::IWP0023, format!("{what} needs a name")))?;
     if name.len() > max {
-        return Err(fail(st.line, format!("{what} name {name} is longer than {max} characters")));
+        return Err(fail(st.line, crate::messages::IWP0024, format!("{what} name {name} is longer than {max} characters")));
     }
     Ok(name)
 }
@@ -322,13 +323,13 @@ fn mapset_header(st: &Statement, ops: &Operands) -> Result<OpenSet, Error> {
     if let Some(t) = ops.word("TYPE")?
         && !matches!(t.as_str(), "DSECT" | "MAP" | "&SYSPARM" | "&&SYSPARM")
     {
-        return Err(fail(st.line, format!("TYPE={t}: DSECT, MAP, FINAL or &SYSPARM")));
+        return Err(fail(st.line, crate::messages::IWP0025, format!("TYPE={t}: DSECT, MAP, FINAL or &SYSPARM")));
     }
     let mode = match ops.word("MODE")?.as_deref() {
         None | Some("OUT") => Mode::Out,
         Some("IN") => Mode::In,
         Some("INOUT") => Mode::InOut,
-        Some(other) => return Err(fail(st.line, format!("MODE={other}: IN, OUT or INOUT"))),
+        Some(other) => return Err(fail(st.line, crate::messages::IWP0026, format!("MODE={other}: IN, OUT or INOUT"))),
     };
     let auto = ops.word("STORAGE")?.as_deref() == Some("AUTO");
     let tioapfx = ops.yes_no("TIOAPFX")?.unwrap_or(auto);
@@ -344,17 +345,17 @@ fn map_header(st: &Statement, ops: &Operands, open: &OpenSet) -> Result<Map, Err
     let (lines, columns) = match ops.words("SIZE") {
         None => (24, 80),
         Some(v) => {
-            let dims: Vec<u16> = v.iter().map(|s| s.parse().ok().filter(|n| (1..=240).contains(n)).ok_or(())).collect::<Result<_, _>>().map_err(|()| fail(st.line, "SIZE=(lines,columns), each 1 to 240"))?;
+            let dims: Vec<u16> = v.iter().map(|s| s.parse().ok().filter(|n| (1..=240).contains(n)).ok_or(())).collect::<Result<_, _>>().map_err(|()| fail(st.line, crate::messages::IWP0027, "SIZE=(lines,columns), each 1 to 240"))?;
             match dims[..] {
                 [l, c] => (l, c),
-                _ => return Err(fail(st.line, "SIZE=(lines,columns), each 1 to 240")),
+                _ => return Err(fail(st.line, crate::messages::IWP0027, "SIZE=(lines,columns), each 1 to 240")),
             }
         }
     };
     let origin = |key: &str| -> Result<u16, Error> {
         match ops.word(key)?.as_deref() {
             None | Some("NEXT" | "SAME") => Ok(1),
-            Some(w) => w.parse().ok().filter(|n| (1..=240).contains(n)).ok_or_else(|| fail(st.line, format!("{key}={w} is not a number from 1 to 240"))),
+            Some(w) => w.parse().ok().filter(|n| (1..=240).contains(n)).ok_or_else(|| fail(st.line, crate::messages::IWP0028, format!("{key}={w} is not a number from 1 to 240"))),
         }
     };
     Ok(Map {
@@ -386,7 +387,7 @@ fn attrb(ops: &Operands) -> Result<Attrb, Error> {
             "DET" => a.detectable = true,
             "IC" => a.cursor = true,
             "FSET" => a.fset = true,
-            other => return Err(fail(ops.line, format!("ATTRB={other} is not an attribute"))),
+            other => return Err(fail(ops.line, crate::messages::IWP0029, format!("ATTRB={other} is not an attribute"))),
         }
     }
     Ok(a)
@@ -394,9 +395,9 @@ fn attrb(ops: &Operands) -> Result<Attrb, Error> {
 
 fn hex_bytes(s: &str, line: u32) -> Result<Vec<u8>, Error> {
     if !s.len().is_multiple_of(2) || !s.is_ascii() {
-        return Err(fail(line, "XINIT takes an even number of hexadecimal digits"));
+        return Err(fail(line, crate::messages::IWP0030, "XINIT takes an even number of hexadecimal digits"));
     }
-    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|_| fail(line, "XINIT takes hexadecimal digits"))).collect()
+    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|_| fail(line, crate::messages::IWP0031, "XINIT takes hexadecimal digits"))).collect()
 }
 
 fn field(st: &Statement, ops: &Operands, map: &Map) -> Result<Field, Error> {
@@ -406,10 +407,10 @@ fn field(st: &Statement, ops: &Operands, map: &Map) -> Result<Field, Error> {
     let occurs = ops.number("OCCURS", 1, u16::MAX.into())?.unwrap_or(1) as u16;
     let group = ops.word("GRPNAME")?;
     if group.is_some() && (ops.get("OCCURS").is_some() || name.is_none()) {
-        return Err(fail(line, "GRPNAME needs a labelled field and does not go with OCCURS"));
+        return Err(fail(line, crate::messages::IWP0032, "GRPNAME needs a labelled field and does not go with OCCURS"));
     }
     if group.as_ref().is_some_and(|g| g.len() > MAX_NAME) {
-        return Err(fail(line, "GRPNAME is longer than 30 characters"));
+        return Err(fail(line, crate::messages::IWP0033, "GRPNAME is longer than 30 characters"));
     }
     let initial = match (ops.text("INITIAL")?.or(ops.text("GINIT")?), ops.text("XINIT")?) {
         (_, Some(x)) => Some(Initial::Bytes(hex_bytes(&x, line)?)),
@@ -423,18 +424,18 @@ fn field(st: &Statement, ops: &Operands, map: &Map) -> Result<Field, Error> {
         None => 0,
     };
     let length = match ops.number("LENGTH", 0, 256)? {
-        Some(0) if name.is_some() => return Err(fail(line, "LENGTH=0 is allowed only on an unlabelled field, where it delimits an input field")),
+        Some(0) if name.is_some() => return Err(fail(line, crate::messages::IWP0034, "LENGTH=0 is allowed only on an unlabelled field, where it delimits an input field")),
         Some(n) => n,
         None => picin.iter().chain(&picout).map(|p| picture_size(p)).max().unwrap_or(from_data),
     };
     if length > 256 || (length == 0 && name.is_some()) {
-        return Err(fail(line, "LENGTH is missing, or is not from 1 to 256"));
+        return Err(fail(line, crate::messages::IWP0035, "LENGTH is missing, or is not from 1 to 256"));
     }
     let (line_no, column) = position(ops, map)?;
     let justify = ops.words("JUSTIFY").unwrap_or_default();
     for w in &justify {
         if !matches!(w.as_str(), "LEFT" | "RIGHT" | "BLANK" | "ZERO") {
-            return Err(fail(line, format!("JUSTIFY={w}: LEFT or RIGHT, BLANK or ZERO")));
+            return Err(fail(line, crate::messages::IWP0036, format!("JUSTIFY={w}: LEFT or RIGHT, BLANK or ZERO")));
         }
     }
     let has = |w: &str| justify.iter().any(|j| j == w);
@@ -442,13 +443,13 @@ fn field(st: &Statement, ops: &Operands, map: &Map) -> Result<Field, Error> {
     if let Some(c) = &color
         && !matches!(c.as_str(), "BLUE" | "RED" | "PINK" | "GREEN" | "TURQUOISE" | "YELLOW" | "NEUTRAL" | "DEFAULT")
     {
-        return Err(fail(line, format!("COLOR={c} is not a colour")));
+        return Err(fail(line, crate::messages::IWP0037, format!("COLOR={c} is not a colour")));
     }
     let hilight = ops.word("HILIGHT")?;
     if let Some(h) = &hilight
         && !matches!(h.as_str(), "OFF" | "BLINK" | "REVERSE" | "UNDERLINE")
     {
-        return Err(fail(line, format!("HILIGHT={h} is not a highlight")));
+        return Err(fail(line, crate::messages::IWP0038, format!("HILIGHT={h} is not a highlight")));
     }
     Ok(Field {
         name,
@@ -470,7 +471,7 @@ fn field(st: &Statement, ops: &Operands, map: &Map) -> Result<Field, Error> {
 
 /// POS as a 0-based offset or (line,column); without POS the field follows the previous one.
 fn position(ops: &Operands, map: &Map) ->Result<(u16, u16), Error> {
-    let bad = || fail(ops.line, "POS is an offset within the map, or (line,column) inside it");
+    let bad = || fail(ops.line, crate::messages::IWP0039, "POS is an offset within the map, or (line,column) inside it");
     let (lines, columns) = (u32::from(map.lines), u32::from(map.columns));
     let offset = match ops.words("POS") {
         None => map.fields.last().map_or(0, |f| (u32::from(f.line) - 1) * columns + u32::from(f.column) - 1 + u32::from(f.occurs) * (u32::from(f.length) + 1)),

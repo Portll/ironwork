@@ -6,6 +6,7 @@
 
 use crate::layout::{self, Kind, Layout, Resolved};
 use syntax::ast::*;
+use syntax::messages::Message;
 use syntax::{Error, Pos};
 
 pub use rt::linage::{Geometry, Motion, Page, Step};
@@ -58,14 +59,14 @@ const MOST: u64 = 99_999_999;
 pub(crate) fn check_file(program: &Program, layout: &Layout, k: usize, errors: &mut Vec<Error>) {
     let f = &program.files[k];
     let Some(linage) = &f.linage else { return };
-    let fail = |errors: &mut Vec<Error>, pos: Pos, m: String| errors.push(Error::at(pos, m));
+    let fail = |errors: &mut Vec<Error>, pos: Pos, message: Message, m: String| errors.push(message.at(pos, m));
     match f.organization {
         Organization::Sequential => {}
-        Organization::LineSequential => fail(errors, f.pos, format!("{}: LINAGE is for a sequential file, not a line-sequential one", f.name)),
-        Organization::Indexed | Organization::Relative => fail(errors, f.pos, format!("{}: LINAGE is for a sequential file, not an indexed or relative one", f.name)),
+        Organization::LineSequential => fail(errors, f.pos, syntax::messages::IWC0228, format!("{}: LINAGE is for a sequential file, not a line-sequential one", f.name)),
+        Organization::Indexed | Organization::Relative => fail(errors, f.pos, syntax::messages::IWC0229, format!("{}: LINAGE is for a sequential file, not an indexed or relative one", f.name)),
     }
     if !f.reports.is_empty() {
-        fail(errors, f.pos, format!("{}: LINAGE on a report file is not supported yet", f.name));
+        fail(errors, f.pos, syntax::messages::IWR0053, format!("{}: LINAGE on a report file is not supported yet", f.name));
     }
     let phrases = [("LINAGE", Some(&linage.lines)), ("FOOTING", linage.footing.as_ref()), ("TOP", linage.top.as_ref()), ("BOTTOM", linage.bottom.as_ref())];
     let mut integers = [None; 4];
@@ -74,21 +75,21 @@ pub(crate) fn check_file(program: &Program, layout: &Layout, k: usize, errors: &
             None => {}
             Some(LinageValue::Integer(n)) => match n.parse::<u64>().ok().filter(|&v| v <= MOST) {
                 Some(v) => integers[slot] = Some(v),
-                None => fail(errors, f.pos, format!("{}: {phrase} {n} is more than the {MOST} lines LINAGE allows", f.name)),
+                None => fail(errors, f.pos, syntax::messages::IWC0230, format!("{}: {phrase} {n} is more than the {MOST} lines LINAGE allows", f.name)),
             },
             Some(LinageValue::Data(r)) if unsigned_integer(layout, r).is_none() => match layout.resolve(&r.name, &r.qualifiers, r.pos) {
                 Err(e) => errors.push(e),
-                Ok(_) => fail(errors, r.pos, format!("{}: {phrase} {} is not an unsigned integer data item", f.name, r.name)),
+                Ok(_) => fail(errors, r.pos, syntax::messages::IWC0231, format!("{}: {phrase} {} is not an unsigned integer data item", f.name, r.name)),
             },
             Some(LinageValue::Data(_)) => {}
         }
     }
     if integers[0] == Some(0) {
-        fail(errors, f.pos, format!("{}: LINAGE 0: the page body needs at least one line", f.name));
+        fail(errors, f.pos, syntax::messages::IWC0232, format!("{}: LINAGE 0: the page body needs at least one line", f.name));
     }
     match (integers[0], integers[1]) {
-        (_, Some(0)) => fail(errors, f.pos, format!("{}: FOOTING 0: the footing starts at line 1 or later", f.name)),
-        (Some(body), Some(footing)) if footing > body => fail(errors, f.pos, format!("{}: FOOTING {footing} is past the page body of {body} lines", f.name)),
+        (_, Some(0)) => fail(errors, f.pos, syntax::messages::IWC0233, format!("{}: FOOTING 0: the footing starts at line 1 or later", f.name)),
+        (Some(body), Some(footing)) if footing > body => fail(errors, f.pos, syntax::messages::IWC0234, format!("{}: FOOTING {footing} is past the page body of {body} lines", f.name)),
         _ => {}
     }
 }

@@ -12,6 +12,7 @@ use numeric::assumptions::{INITIAL_UNDER_THREAD, OO_OPTIONS_REQUIRED, OO_OPTIONS
 use std::collections::HashSet;
 use std::rc::Rc;
 use syntax::ast::*;
+use syntax::messages::Message;
 use syntax::{Error, Pos};
 
 pub use rt::oo::JAVA_LANG_OBJECT;
@@ -378,64 +379,64 @@ impl Check<'_> {
     pub(crate) fn invoke(&mut self, i: &Invoke) {
         let oo = self.program.oo.as_deref();
         let in_method = oo.and_then(Oo::method).is_some();
-        let err = |m: String| Error::at(i.pos, m);
+        let err = |message: Message, m: String| message.at(i.pos, m);
         let special = is_named(&i.target, "SELF") || is_named(&i.target, "SUPER");
         let class = class_name(self.layout, oo, &i.target).is_some();
         let mut typed = false;
         if special && self.layout.resolve(&i.target.name, &[], i.pos).is_err() {
             if !in_method {
-                self.errors.push(err(format!("INVOKE {}: SELF and SUPER can be used only in a method", i.target.name)));
+                self.errors.push(err(syntax::messages::IWC0245, format!("INVOKE {}: SELF and SUPER can be used only in a method", i.target.name)));
             }
         } else if !class {
             self.reference(&i.target);
             match self.layout.resolve(&i.target.name, &i.target.qualifiers, i.target.pos) {
                 Ok(Resolved::Item(k)) if self.layout.items[k].kind == Kind::ObjectReference => typed = self.layout.items[k].object_class.is_some(),
-                Ok(_) => self.errors.push(err(format!("INVOKE {}: not an object reference or a class named in the REPOSITORY paragraph", i.target.name))),
+                Ok(_) => self.errors.push(err(syntax::messages::IWC0246, format!("INVOKE {}: not an object reference or a class named in the REPOSITORY paragraph", i.target.name))),
                 Err(_) => {}
             }
         }
         match &i.method {
             InvokeMethod::New => {
                 if !class {
-                    self.errors.push(err(format!("INVOKE {} NEW: NEW takes a class-name from the REPOSITORY paragraph", i.target.name)));
+                    self.errors.push(err(syntax::messages::IWC0247, format!("INVOKE {} NEW: NEW takes a class-name from the REPOSITORY paragraph", i.target.name)));
                 }
                 match &i.returning {
-                    None => self.errors.push(err("INVOKE ... NEW needs RETURNING an object reference".into())),
+                    None => self.errors.push(err(syntax::messages::IWC0248, "INVOKE ... NEW needs RETURNING an object reference".into())),
                     Some(r) if !matches!(self.layout.resolve(&r.name, &r.qualifiers, r.pos), Ok(Resolved::Item(k)) if self.layout.items[k].kind == Kind::ObjectReference) => {
-                        self.errors.push(err(format!("INVOKE ... NEW RETURNING {}: not an object reference", r.name)));
+                        self.errors.push(err(syntax::messages::IWC0249, format!("INVOKE ... NEW RETURNING {}: not an object reference", r.name)));
                     }
                     Some(_) => {}
                 }
             }
-            InvokeMethod::Named(name) if name.is_empty() => self.errors.push(err("INVOKE with an empty method name".into())),
+            InvokeMethod::Named(name) if name.is_empty() => self.errors.push(err(syntax::messages::IWC0250, "INVOKE with an empty method name".into())),
             InvokeMethod::Named(_) => {}
             InvokeMethod::Identifier(r) => {
                 self.reference(r);
                 if let Ok(Resolved::Item(k)) = self.layout.resolve(&r.name, &r.qualifiers, r.pos)
                     && !matches!(self.layout.items[k].kind, Kind::Alnum { .. } | Kind::National | Kind::Group)
                 {
-                    self.errors.push(err(format!("INVOKE ... {}: a method name is held in an alphanumeric or national item", r.name)));
+                    self.errors.push(err(syntax::messages::IWC0251, format!("INVOKE ... {}: a method name is held in an alphanumeric or national item", r.name)));
                 }
                 if typed {
-                    self.errors.push(err(format!("INVOKE {} {}: a method named by a data item is invoked on a universal object reference", i.target.name, r.name)));
+                    self.errors.push(err(syntax::messages::IWC0252, format!("INVOKE {} {}: a method named by a data item is invoked on a universal object reference", i.target.name, r.name)));
                 }
             }
         }
         for op in &i.using {
             self.operand(op);
             if let Err(m) = operand_type(self.layout, oo, op) {
-                self.errors.push(err(format!("INVOKE argument: {m}")));
+                self.errors.push(err(syntax::messages::IWC0253, format!("INVOKE argument: {m}")));
             }
         }
         if let Some(r) = &i.returning {
             self.reference(r);
             if r.refmod.is_some() {
-                self.errors.push(err(format!("INVOKE ... RETURNING {}: not reference-modified", r.name)));
+                self.errors.push(err(syntax::messages::IWC0254, format!("INVOKE ... RETURNING {}: not reference-modified", r.name)));
             }
             if let (false, Ok(Resolved::Item(k))) = (i.method == InvokeMethod::New, self.layout.resolve(&r.name, &r.qualifiers, r.pos))
                 && let Err(m) = item_type(self.layout, oo, k)
             {
-                self.errors.push(err(format!("INVOKE ... RETURNING {}: {m}", r.name)));
+                self.errors.push(err(syntax::messages::IWC0255, format!("INVOKE ... RETURNING {}: {m}", r.name)));
             }
         }
         self.statements(i.on_exception.as_deref().unwrap_or_default());

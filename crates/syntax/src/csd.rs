@@ -1,6 +1,7 @@
 //! The CICS system definition as DFHCSDUP reads it: DEFINE commands naming resources, with
 //! KEYWORD(value) attributes running on to the next command.
 
+use crate::messages::Message;
 use crate::{Error, Pos};
 use std::collections::BTreeMap;
 
@@ -61,10 +62,10 @@ pub fn parse(text: &str) -> Result<Csd, Error> {
             continue;
         }
         if block.bytes().filter(|&b| b == b'(').count() > block.bytes().filter(|&b| b == b')').count() {
-            return Err(fail(line, "unbalanced '(' in DEFINE"));
+            return Err(fail(line, crate::messages::IWP0040, "unbalanced '(' in DEFINE"));
         }
         let Some((kind, name, rest)) = parse_head(&block) else {
-            return Err(fail(line, "DEFINE names no KIND(NAME)"));
+            return Err(fail(line, crate::messages::IWP0041, "DEFINE names no KIND(NAME)"));
         };
         let limit = match kind.as_str() {
             "TRANSACTION" => 4,
@@ -72,7 +73,7 @@ pub fn parse(text: &str) -> Result<Csd, Error> {
             _ => continue,
         };
         if name.len() > limit {
-            return Err(fail(line, format!("{kind}({name}): a {kind} name is at most {limit} characters")));
+            return Err(fail(line, crate::messages::IWP0042, format!("{kind}({name}): a {kind} name is at most {limit} characters")));
         }
         let attrs = parse_attrs(rest, line)?;
         let get = |keyword: &str| attrs.get(keyword).cloned();
@@ -119,8 +120,8 @@ impl Csd {
     }
 }
 
-fn fail(line: u32, message: impl Into<String>) -> Error {
-    Error::at(Pos { file: 0, line, col: 1 }, message)
+fn fail(line: u32, message: Message, text: impl Into<String>) -> Error {
+    message.at(Pos { file: 0, line, col: 1 }, text)
 }
 
 const COMMANDS: [&str; 14] = ["DEFINE", "ADD", "ALTER", "APPEND", "COPY", "DELETE", "INITIALIZE", "LIST", "REMOVE", "SCAN", "SERVICE", "UPGRADE", "USERDEFINE", "VERIFY"];
@@ -246,13 +247,13 @@ fn parse_attrs(rest: &str, line: u32) -> Result<BTreeMap<String, String>, Error>
             if val_len > 256 {
                 return Err(fail(
                     line,
-                    format!("attribute value for '{}' exceeds 256 characters", key),
+                    crate::messages::IWP0043, format!("attribute value for '{}' exceeds 256 characters", key),
                 ));
             }
         }
 
         if i >= bytes.len() {
-            return Err(fail(line, "unbalanced '(' in attribute value"));
+            return Err(fail(line, crate::messages::IWP0044, "unbalanced '(' in attribute value"));
         }
         i += 1;
 

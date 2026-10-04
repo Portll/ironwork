@@ -186,7 +186,7 @@ fn a_variably_located_object_initialize_or_sort_key_is_refused_by_name() {
         "",
         &line("SORT S-FILE ON ASCENDING KEY S-KEY USING F GIVING F GOBACK."),
     ));
-    assert_eq!(sort, "S-KEY: a sort key cannot follow an OCCURS DEPENDING ON table in its record");
+    assert_eq!(sort, "IWC0213-S S-KEY: a sort key cannot follow an OCCURS DEPENDING ON table in its record");
 }
 
 #[test]

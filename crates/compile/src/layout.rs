@@ -6,7 +6,7 @@
 use crate::picture::{self, Category, Sym};
 use numeric::Qualify;
 use syntax::ast::{DataEntry, Environment, FileDecl, Literal, Organization, Ref, SignClause, Usage};
-use syntax::messages::{IWC0001, IWC0002};
+use syntax::messages::{IWC0001, IWC0002, Message};
 use syntax::{Error, Pos};
 use zarch::hfp::Precision;
 
@@ -683,44 +683,44 @@ fn alignment(kind: Kind) -> u32 {
 /// An elementary item's kind. `sign` is its own SIGN clause or the nearest group's above it, which
 /// applies to a signed zoned item alone (Language Reference SC27-8713-03, p. 231).
 fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, sign: Option<SignClause>, pic: Option<&picture::Picture>, edits: &mut Vec<Vec<Sym>>) -> Result<Kind, Error> {
-    let err = |m: String| Error::at(e.pos, m);
+    let err = |message: Message, m: String| message.at(e.pos, m);
     let usage = usage.unwrap_or_default();
     let handle = matches!(usage, Usage::ObjectReference | Usage::ProgramPointer);
     let elementary = e.picture.is_some() || (handle || matches!(usage, Usage::Float1 | Usage::Float2 | Usage::Pointer | Usage::Index)) && item.children.is_empty();
     if !elementary {
-        return if item.children.is_empty() { Err(err("an elementary item needs a PICTURE".into())) } else { Ok(Kind::Group) };
+        return if item.children.is_empty() { Err(err(syntax::messages::IWC0235, "an elementary item needs a PICTURE".into())) } else { Ok(Kind::Group) };
     }
     if !item.children.is_empty() {
-        return Err(err("a group item cannot have a PICTURE".into()));
+        return Err(err(syntax::messages::IWC0236, "a group item cannot have a PICTURE".into()));
     }
     if handle {
         if e.picture.is_some() || e.value.as_ref().is_some_and(|v| *v != Literal::Figurative(syntax::ast::Figurative::Null)) {
-            return Err(err("an object reference, function-pointer or procedure-pointer takes no PICTURE and only VALUE NULL".into()));
+            return Err(err(syntax::messages::IWC0237, "an object reference, function-pointer or procedure-pointer takes no PICTURE and only VALUE NULL".into()));
         }
         return Ok(if usage == Usage::ObjectReference { Kind::ObjectReference } else { Kind::ProgramPointer });
     }
     if let Usage::Pointer | Usage::Index = usage {
         if e.picture.is_some() {
-            return Err(err("POINTER and INDEX items take no PICTURE".into()));
+            return Err(err(syntax::messages::IWC0238, "POINTER and INDEX items take no PICTURE".into()));
         }
         return Ok(if usage == Usage::Pointer { Kind::Pointer } else { Kind::Index });
     }
     if let Usage::Float1 | Usage::Float2 = usage {
         if e.picture.is_some() {
-            return Err(err("COMP-1 and COMP-2 items take no PICTURE".into()));
+            return Err(err(syntax::messages::IWC0239, "COMP-1 and COMP-2 items take no PICTURE".into()));
         }
         return Ok(Kind::Float(if usage == Usage::Float1 { Precision::Short } else { Precision::Long }));
     }
-    let Some(pic) = pic else { return Err(err("an elementary item needs a PICTURE".into())) };
+    let Some(pic) = pic else { return Err(err(syntax::messages::IWC0235, "an elementary item needs a PICTURE".into())) };
     let blank_numeric;
     let pic = match pic.category {
         Category::Numeric if e.blank_when_zero && usage == Usage::Display => {
-            blank_numeric = picture::blank_when_zero(pic).map_err(err)?;
+            blank_numeric = picture::blank_when_zero(pic).map_err(|m| Error::at(e.pos, m))?;
             &blank_numeric
         }
         Category::NumericEdited => pic,
-        Category::Numeric if e.blank_when_zero && usage == Usage::National => return Err(err("BLANK WHEN ZERO on a USAGE NATIONAL item is not supported yet".into())),
-        _ if e.blank_when_zero => return Err(err("BLANK WHEN ZERO needs a numeric or numeric-edited item of USAGE DISPLAY or NATIONAL".into())),
+        Category::Numeric if e.blank_when_zero && usage == Usage::National => return Err(err(syntax::messages::IWR0054, "BLANK WHEN ZERO on a USAGE NATIONAL item is not supported yet".into())),
+        _ if e.blank_when_zero => return Err(err(syntax::messages::IWC0240, "BLANK WHEN ZERO needs a numeric or numeric-edited item of USAGE DISPLAY or NATIONAL".into())),
         _ => pic,
     };
     let k = match (pic.category, usage) {
@@ -737,11 +737,11 @@ fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, sign: Option<SignClaus
         (Category::Numeric, Usage::Binary | Usage::NativeBinary) if pic.digits <= 18 => {
             Kind::Binary { digits: pic.digits, scale: pic.scale, signed: pic.signed, native: usage == Usage::NativeBinary }
         }
-        (Category::Numeric, Usage::Binary | Usage::NativeBinary) => return Err(err("a binary item holds at most 18 digits".into())),
+        (Category::Numeric, Usage::Binary | Usage::NativeBinary) => return Err(err(syntax::messages::IWC0241, "a binary item holds at most 18 digits".into())),
         (Category::Alphanumeric, Usage::Display) => Kind::Alnum { justified: e.justified },
         (Category::Dbcs | Category::National, Usage::Dbcs) => {
             if pic.edit.is_some() && e.justified {
-                return Err(err("JUSTIFIED cannot be given for a DBCS item whose PICTURE has B".into()));
+                return Err(err(syntax::messages::IWC0242, "JUSTIFIED cannot be given for a DBCS item whose PICTURE has B".into()));
             }
             let edit = pic.edit.clone().map(|syms| {
                 edits.push(syms);
@@ -749,13 +749,13 @@ fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, sign: Option<SignClaus
             });
             Kind::Dbcs { justified: e.justified, edit }
         }
-        (Category::Dbcs, _) => return Err(err("a PICTURE with G needs USAGE DISPLAY-1 (Language Reference SC27-8713-03, p. 214)".into())),
-        (Category::National, Usage::Display | Usage::National) if pic.edit.is_some() => return Err(err("a national-edited PICTURE is not supported yet".into())),
+        (Category::Dbcs, _) => return Err(err(syntax::messages::IWC0243, "a PICTURE with G needs USAGE DISPLAY-1 (Language Reference SC27-8713-03, p. 214)".into())),
+        (Category::National, Usage::Display | Usage::National) if pic.edit.is_some() => return Err(err(syntax::messages::IWR0055, "a national-edited PICTURE is not supported yet".into())),
         (Category::National, Usage::Display | Usage::National) => Kind::National,
-        (category, usage) => return Err(err(format!("a {category:?} PICTURE with USAGE {usage:?} is not supported yet"))),
+        (category, usage) => return Err(err(syntax::messages::IWR0056, format!("a {category:?} PICTURE with USAGE {usage:?} is not supported yet"))),
     };
     if e.sign.is_some() && matches!(k, Kind::Zoned { signed: false, .. }) {
-        return Err(err("a SIGN clause needs an S in the PICTURE".into()));
+        return Err(err(syntax::messages::IWC0244, "a SIGN clause needs an S in the PICTURE".into()));
     }
     Ok(k)
 }

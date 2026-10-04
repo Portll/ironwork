@@ -4,7 +4,8 @@
 use crate::layout::{Kind, Layout, Resolved};
 use crate::Check;
 use syntax::ast::*;
-use syntax::{Error, Pos};
+use syntax::messages::Message;
+use syntax::Pos;
 
 /// The sort special registers as Enterprise COBOL defines them implicitly.
 const REGISTERS: &str = concat!(
@@ -89,36 +90,36 @@ impl Check<'_> {
     fn sort_file(&mut self, st: &SortStmt, sd: usize) {
         let verb = if st.merge { "MERGE" } else { "SORT" };
         let name = &st.subject.name;
-        let fail = |c: &mut Self, pos: Pos, m: String| c.errors.push(Error::at(pos, m));
+        let fail = |c: &mut Self, pos: Pos, message: Message, m: String| c.errors.push(message.at(pos, m));
         if !self.program.files[sd].sort {
-            fail(self, st.pos, format!("{verb} {name}: not a sort or merge file (SD)"));
+            fail(self, st.pos, syntax::messages::IWC0208, format!("{verb} {name}: not a sort or merge file (SD)"));
             return;
         }
         if st.keys.is_empty() {
-            fail(self, st.pos, format!("{verb} {name}: no ASCENDING or DESCENDING KEY"));
+            fail(self, st.pos, syntax::messages::IWC0209, format!("{verb} {name}: no ASCENDING or DESCENDING KEY"));
         }
         let layout = self.layout;
         for (_, key) in &st.keys {
             if key.name == *name {
-                fail(self, key.pos, format!("{verb} {name}: KEY needs a data name"));
+                fail(self, key.pos, syntax::messages::IWC0210, format!("{verb} {name}: KEY needs a data name"));
                 continue;
             }
             self.reference(key);
             let Some(i) = self.item(key) else { continue };
             let item = &layout.items[i];
             if item.file != Some(sd as u16) {
-                fail(self, key.pos, format!("{}: a key of {verb} {name} must be in its records", key.name));
+                fail(self, key.pos, syntax::messages::IWC0211, format!("{}: a key of {verb} {name} must be in its records", key.name));
             } else if !item.dims.is_empty() {
-                fail(self, key.pos, format!("{}: a sort key cannot be in a table", key.name));
+                fail(self, key.pos, syntax::messages::IWC0212, format!("{}: a sort key cannot be in a table", key.name));
             } else if !item.moved_by.is_empty() {
-                fail(self, key.pos, format!("{}: a sort key cannot follow an OCCURS DEPENDING ON table in its record", key.name));
+                fail(self, key.pos, syntax::messages::IWC0213, format!("{}: a sort key cannot follow an OCCURS DEPENDING ON table in its record", key.name));
             } else if matches!(item.kind, Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer) {
-                fail(self, key.pos, format!("{}: a POINTER, INDEX, object reference or function-pointer item cannot be a sort key", key.name));
+                fail(self, key.pos, syntax::messages::IWC0214, format!("{}: a POINTER, INDEX, object reference or function-pointer item cannot be a sort key", key.name));
             }
         }
         self.collating_sequence(st);
         let files = |c: &mut Self, io: &Option<SortIo>, phrase: &str, procedure: &str| match io {
-            None => fail(c, st.pos, format!("{verb} {name}: no {phrase} or {procedure}")),
+            None => fail(c, st.pos, syntax::messages::IWC0215, format!("{verb} {name}: no {phrase} or {procedure}")),
             Some(SortIo::Procedure { from, thru }) => {
                 c.procedure(from, st.pos);
                 if let Some(t) = thru {
@@ -128,14 +129,14 @@ impl Check<'_> {
             Some(SortIo::Files(names)) => {
                 for f in names {
                     match c.program.files.iter().find(|d| d.name == *f) {
-                        None => fail(c, st.pos, format!("no file named {f}")),
-                        Some(d) if d.sort => fail(c, st.pos, format!("{phrase} {f}: a sort or merge file (SD) cannot be one")),
-                        Some(d) if d.access == Access::Random => fail(c, st.pos, format!("{phrase} {f}: the file's ACCESS MODE is RANDOM")),
+                        None => fail(c, st.pos, syntax::messages::IWC0202, format!("no file named {f}")),
+                        Some(d) if d.sort => fail(c, st.pos, syntax::messages::IWC0216, format!("{phrase} {f}: a sort or merge file (SD) cannot be one")),
+                        Some(d) if d.access == Access::Random => fail(c, st.pos, syntax::messages::IWC0217, format!("{phrase} {f}: the file's ACCESS MODE is RANDOM")),
                         Some(_) => {}
                     }
                 }
                 if st.merge && phrase == "USING" && names.len() < 2 {
-                    fail(c, st.pos, format!("MERGE {name}: USING names at least two files"));
+                    fail(c, st.pos, syntax::messages::IWC0218, format!("MERGE {name}: USING names at least two files"));
                 }
             }
         };
@@ -145,42 +146,42 @@ impl Check<'_> {
 
     fn sort_table(&mut self, st: &SortStmt) {
         let name = &st.subject.name;
-        let fail = |c: &mut Self, pos: Pos, m: String| c.errors.push(Error::at(pos, m));
+        let fail = |c: &mut Self, pos: Pos, message: Message, m: String| c.errors.push(message.at(pos, m));
         if st.merge {
-            fail(self, st.pos, format!("MERGE {name}: not a merge file (SD)"));
+            fail(self, st.pos, syntax::messages::IWC0219, format!("MERGE {name}: not a merge file (SD)"));
             return;
         }
         if st.input.is_some() || st.output.is_some() {
-            fail(self, st.pos, format!("SORT {name}: a table SORT takes no USING, GIVING or procedures"));
+            fail(self, st.pos, syntax::messages::IWC0220, format!("SORT {name}: a table SORT takes no USING, GIVING or procedures"));
         }
         let layout = self.layout;
         let t = match layout.resolve(name, &st.subject.qualifiers, st.subject.pos) {
             Ok(Resolved::Item(t)) => t,
-            Ok(Resolved::Condition(_)) => return fail(self, st.pos, format!("SORT {name}: not a table")),
-            Err(_) => return fail(self, st.pos, format!("no file or table named {name}")),
+            Ok(Resolved::Condition(_)) => return fail(self, st.pos, syntax::messages::IWC0221, format!("SORT {name}: not a table")),
+            Err(_) => return fail(self, st.pos, syntax::messages::IWC0222, format!("no file or table named {name}")),
         };
         let table = &layout.items[t];
         if !table.table {
-            return fail(self, st.pos, format!("SORT {name}: not a table (no OCCURS)"));
+            return fail(self, st.pos, syntax::messages::IWC0223, format!("SORT {name}: not a table (no OCCURS)"));
         }
         if st.subject.subscripts.len() + 1 != table.dims.len() {
-            fail(self, st.pos, format!("SORT {name}: a subscript for each table that contains it, and none for itself"));
+            fail(self, st.pos, syntax::messages::IWC0224, format!("SORT {name}: a subscript for each table that contains it, and none for itself"));
         }
         st.subject.subscripts.iter().for_each(|e| self.expr(e));
         let keys: Vec<(bool, Ref)> = if st.keys.is_empty() { table.keys.clone() } else { st.keys.clone() };
         if keys.is_empty() {
-            fail(self, st.pos, format!("SORT {name}: no KEY phrase, and its OCCURS has none"));
+            fail(self, st.pos, syntax::messages::IWC0225, format!("SORT {name}: no KEY phrase, and its OCCURS has none"));
         }
         for (_, key) in &keys {
             let Some(k) = table_key(layout, t, &key.name) else {
-                fail(self, key.pos, format!("{}: a key of SORT {name} must be its element or an item within it", key.name));
+                fail(self, key.pos, syntax::messages::IWC0226, format!("{}: a key of SORT {name} must be its element or an item within it", key.name));
                 continue;
             };
             let item = &layout.items[k];
             if item.dims.len() != table.dims.len() {
-                fail(self, key.pos, format!("{}: a table SORT key cannot be in a table within the element", key.name));
+                fail(self, key.pos, syntax::messages::IWC0227, format!("{}: a table SORT key cannot be in a table within the element", key.name));
             } else if matches!(item.kind, Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer) {
-                fail(self, key.pos, format!("{}: a POINTER, INDEX, object reference or function-pointer item cannot be a sort key", key.name));
+                fail(self, key.pos, syntax::messages::IWC0214, format!("{}: a POINTER, INDEX, object reference or function-pointer item cannot be a sort key", key.name));
             }
         }
         self.collating_sequence(st);
