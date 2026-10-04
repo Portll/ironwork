@@ -437,3 +437,21 @@ fn max_of_an_integer_and_a_decimal_argument_is_no_integer() {
     assert_eq!(walker.ending, vm.ending);
     assert_eq!(walker.ending.unwrap_err().message, "only an integer numeric value can be moved to an alphanumeric item");
 }
+
+/// MOVE of a numeric function under each dialect and compliance level: the value at the
+/// function's precision (C390 to C392), moved by IBM's rules for a numeric sender, an integer to
+/// an alphanumeric item as its digits; the same on the interpreter and the VM.
+#[test]
+fn a_numeric_function_moves_alike_under_each_dialect_and_compliance_on_both_executors() {
+    let data = "       01  N3 PIC 999 VALUE 5.\n       01  BIG PIC 9(5) VALUE 4.\n       01  A2 PIC 9V99 VALUE 1.5.\n       01  B3 PIC 999 VALUE 7.\n       01  C2 PIC 9V99 VALUE 8.25.\n       01  N1 PIC S9 VALUE -3.\n       01  H3 PIC 999 VALUE 100.\n       01  X PIC X(6).\n       01  R PIC S9(5)V9(3) SIGN LEADING SEPARATE VALUE 0.\n";
+    let moves = ["MAX(N3 BIG) TO X", "MIN(A2 B3) TO R", "INTEGER(C2) TO X", "NUMVAL('12.50') TO R", "MOD(N1 H3) TO R", "RANGE(A2 B3) TO R"];
+    let body: String = moves.iter().flat_map(|m| [line(&format!("MOVE FUNCTION {m}")), line("DISPLAY X '|' R")]).chain([line("GOBACK.")]).collect();
+    let source = program("", data, &body);
+    for flags in [["--dialect=ibm", "--compliance=strict"], ["--dialect=ibm", "--compliance=extended"], ["--dialect=gnucobol", "--compliance=strict"], ["--dialect=gnucobol", "--compliance=extended"]] {
+        let walker = Harness::source(&source).flags(&flags).run(Executor::Interpreter);
+        let vm = Harness::source(&source).flags(&flags).run(Executor::Vm);
+        assert_eq!((&walker.out, &walker.ending), (&vm.out, &vm.ending), "{flags:?}");
+        let expected = ["00005 |+00000000", "00005 |+00001500", "0008  |+00001500", "0008  |+00012500", "0008  |+00007000", "0008  |+00005500"];
+        assert_eq!(walker.out, expected.map(|s| format!("{s}\n")).concat(), "{flags:?}");
+    }
+}
