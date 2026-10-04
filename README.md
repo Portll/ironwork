@@ -294,8 +294,10 @@ refuses and `--compliance strict`, the default, still refuses: free-form source,
 CONSTANT entries, `<>`, literal concatenation with `&`, BINARY-SHORT, BINARY-LONG and
 BINARY-DOUBLE, and PROGRAM-ID with no IDENTIFICATION DIVISION header. Each use is a warning,
 IWX0001-W to IWX0006-W, naming the extension and where it is, so `check` returns 4, and the program
-runs on the interpreter and the VM alike. [docs/compliance.md](docs/compliance.md) gives each one's
-meaning, the census that chose them, and what stays refused and why.
+runs on the interpreter and the VM alike. It also accepts an integer or numeric function as a
+MOVE's sender, as GnuCOBOL does, with IWX0008-W; strict refuses it under either dialect, as
+Enterprise COBOL does. [docs/compliance.md](docs/compliance.md) gives each one's meaning, the
+census that chose them, and what stays refused and why.
 
 A program with no STOP RUN, GOBACK or EXIT PROGRAM gets IBM's IGYPS2091-W, a warning that it may
 run past its end. One that leaves by EXEC CICS RETURN or XCTL, which the CICS translator turns into

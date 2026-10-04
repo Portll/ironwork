@@ -78,7 +78,8 @@ flags:
              Focus and GnuCOBOL extensions docs/compliance.md lists: free-form source, level-78 and
              CONSTANT entries, <>, literal concatenation with &, BINARY-SHORT, -LONG and -DOUBLE,
              and PROGRAM-ID with no IDENTIFICATION DIVISION header, each with a warning naming it
-             and where it is (IWX0001-W to IWX0006-W), so check's return code is 4, and runs them.
+             and where it is (IWX0001-W to IWX0006-W), and an integer or numeric function as a
+             MOVE's sender (IWX0008-W), so check's return code is 4, and runs them.
              run, check, cics, compile, job, fuzz and compare. --compliance=extended works too
   --optimize=0|1|2
              the compiler invocation's OPTIMIZE level; a CBL or PROCESS card's OPTIMIZE wins over it.

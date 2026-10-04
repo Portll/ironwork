@@ -169,6 +169,23 @@ fn display_refuses_max_and_min_of_numeric_arguments() {
     assert_eq!(on_both(&source), "BAB\n");
 }
 
+/// Programming Guide SC27-8714-03, p. 119: "numeric functions are not valid as senders in MOVE
+/// statements", whatever the receiver; MAX and MIN are when their arguments are numeric, and
+/// alphanumeric functions are valid senders (Language Reference SC27-8713-03, pp. 402, 591).
+/// COMPUTE gives the value to an item.
+#[test]
+fn move_refuses_a_numeric_function_whatever_the_receiver() {
+    let data = "       01  N PIC 9(3).\n       01  X PIC X(3).\n";
+    let statements = ["MOVE FUNCTION ORD-MAX(3 9 1) TO N", "MOVE FUNCTION NUMVAL('12') TO X", "MOVE FUNCTION MAX(N 2) TO N", "MOVE FUNCTION UPPER-CASE('a') TO X", "MOVE FUNCTION MAX('a' 'b') TO X", "GOBACK."];
+    let errors = compile_errors(&program("", data, &statements.map(line).concat()));
+    for name in ["ORD-MAX", "NUMVAL", "MAX"] {
+        assert!(errors.contains(&format!("MOVE FUNCTION {name}: an integer or numeric function can be used only where an arithmetic expression can, not as a MOVE's sender")), "{errors}");
+    }
+    assert_eq!(errors.matches("MOVE FUNCTION").count(), 3, "{errors}");
+    let source = program("", data, &[line("COMPUTE N = FUNCTION ORD-MAX(3 9 1)"), line("MOVE FUNCTION UPPER-CASE('a') TO X"), line("DISPLAY N ' ' X"), line("GOBACK.")].concat());
+    assert_eq!(on_both(&source), "002 A  \n");
+}
+
 /// Language Reference SC27-8713-03, p. 322: BY VALUE is specified for both the argument and the
 /// parameter, and the manual gives no result when the parameter is received BY REFERENCE. The
 /// parameter gets storage of its own holding the value (assumption C333).

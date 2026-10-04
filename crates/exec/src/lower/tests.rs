@@ -29,10 +29,17 @@ fn compiled_with(source: &str, flags: &[&str]) -> Compiled {
 }
 
 fn lowered(source: &str) -> Program {
-    let p = lower(&compiled(source)).unwrap_or_else(|e| panic!("{e}"));
+    lowered_with(source, &[])
+}
+
+fn lowered_with(source: &str, flags: &[&str]) -> Program {
+    let p = lower(&compiled_with(source, flags)).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(round_trip(&p), p);
     p
 }
+
+/// `--compliance extended`, under which an integer or numeric function can be a MOVE's sender.
+const EXTENDED: &[&str] = &["--compliance=extended"];
 
 /// The program through the load-module codec, checked to encode again to the same bytes.
 fn round_trip(p: &Program) -> Program {
@@ -474,7 +481,7 @@ fn set_to_entry_names_its_entry_and_a_call_through_any_other_pointer_finds_it() 
 
 #[test]
 fn constructs_outside_the_slice_are_refused_by_name() {
-    let refused = |body: &str, data: &str| lower(&compiled(&program("", data, &[line(body), line("GOBACK.")].concat()))).unwrap_err();
+    let refused = |body: &str, data: &str| lower(&compiled_with(&program("", data, &[line(body), line("GOBACK.")].concat()), EXTENDED)).unwrap_err();
     let numval = refused("MOVE FUNCTION MAX(N + 1 M) TO A", "       01  A PIC X.\n       01  N PIC 9.\n       01  M PIC 99.\n");
     assert!(matches!(numval, LowerError::Unsupported(n, _) if n.starts_with("a FUNCTION result whose digits")));
 }
@@ -485,7 +492,7 @@ fn constructs_outside_the_slice_are_refused_by_name() {
 #[test]
 fn max_of_items_of_different_sizes_moves_its_digits_to_an_alphanumeric_item() {
     let data = "       01  A PIC X(4).\n       01  N PIC 9.\n       01  M PIC 99.\n       01  D PIC 9V9.\n";
-    let p = lowered(&program("", data, &[line("MOVE FUNCTION MAX(N M) TO A"), line("MOVE FUNCTION MIN(N D) TO A"), line("GOBACK.")].concat()));
+    let p = lowered_with(&program("", data, &[line("MOVE FUNCTION MAX(N M) TO A"), line("MOVE FUNCTION MIN(N D) TO A"), line("GOBACK.")].concat()), EXTENDED);
     let m = moves(&p);
     assert_eq!(m[0], MovePlan::Alnum { image: Image::Digits { digits: 2 }, justified: false });
     let MovePlan::Refused(abend) = m[1] else { panic!("{:?}", m[1]) };
@@ -1232,19 +1239,22 @@ fn set_lowers_each_form_as_the_walker_runs_it() {
 
 #[test]
 fn a_function_evaluates_its_arguments_then_any_again_as_an_integer_then_its_reference_modification() {
-    let p = lowered(&program(
-        "",
-        "       01  A PIC X(4).\n       01  N PIC 9(3).\n       01  F COMP-2.\n",
-        &[
-            line("MOVE FUNCTION UPPER-CASE(A)(2:2) TO A"),
-            line("MOVE FUNCTION CHAR(N + 1) TO A"),
-            line("MOVE FUNCTION MAX(F 1) TO N"),
-            line("COMPUTE N = FUNCTION MOD(N 7) + FUNCTION RANDOM"),
-            line("DISPLAY FUNCTION TRIM(A LEADING) FUNCTION REVERSE(A N)"),
-            line("GOBACK."),
-        ]
-        .concat(),
-    ));
+    let p = lowered_with(
+        &program(
+            "",
+            "       01  A PIC X(4).\n       01  N PIC 9(3).\n       01  F COMP-2.\n",
+            &[
+                line("MOVE FUNCTION UPPER-CASE(A)(2:2) TO A"),
+                line("MOVE FUNCTION CHAR(N + 1) TO A"),
+                line("MOVE FUNCTION MAX(F 1) TO N"),
+                line("COMPUTE N = FUNCTION MOD(N 7) + FUNCTION RANDOM"),
+                line("DISPLAY FUNCTION TRIM(A LEADING) FUNCTION REVERSE(A N)"),
+                line("GOBACK."),
+            ]
+            .concat(),
+        ),
+        EXTENDED,
+    );
     let f = &p.plans.function;
     assert_eq!((f[0].func, f[0].args.len(), f[0].integer.is_none()), (lir::Func::UpperCase, 1, true));
     assert!(matches!(f[0].refmod, Some(lir::RefMod { start: IntExpr::Const(2), length: Some(IntExpr::Const(2)), check: false })));
@@ -1440,9 +1450,9 @@ fn each_function_s_result_reads_as_the_walker_s_value_does() {
         "GOBACK.",
     ];
     let source = program("", data, &body.iter().map(|s| line(s)).collect::<String>());
-    let out = crate::testing::Harness::source(&source).run(crate::testing::Executor::Interpreter).out;
+    let out = crate::testing::Harness::source(&source).flags(EXTENDED).run(crate::testing::Executor::Interpreter).out;
     assert_eq!(out, "00008    \n0000     \n000000001\n000000000\n");
-    let p = lowered(&source);
+    let p = lowered_with(&source, EXTENDED);
     let digits = |digits| MovePlan::Alnum { image: Image::Digits { digits }, justified: false };
     let m = moves(&p);
     assert_eq!(m[..4], [digits(5), digits(4), digits(9), digits(30)]);
@@ -1473,7 +1483,7 @@ fn a_wrong_argument_count_abends_with_the_walker_s_message_after_the_arguments()
 fn all_subscripts_list_a_table_s_elements_or_expand_when_the_function_runs() {
     let data = "       01  T VALUE '010020030'.\n           05 N PIC 9(3) OCCURS 3.\n       01  C PIC 9 VALUE 3.\n       01  D.\n           05 V PIC 9(3) OCCURS 1 TO 5 DEPENDING ON C.\n       01  G VALUE '123456'.\n           05 ROW OCCURS 2.\n              10 CELL PIC 9 OCCURS 3.\n       01  BIG.\n           05 B PIC 9 OCCURS 300.\n       01  A PIC X(9).\n";
     let body = ["MOVE FUNCTION SUM(N(ALL)) TO A", "COMPUTE C = FUNCTION SUM(CELL(ALL ALL))", "COMPUTE C = FUNCTION MAX(V(ALL))", "COMPUTE C = FUNCTION SUM(V(ALL) 1)", "COMPUTE C = FUNCTION SUM(B(ALL))", "GOBACK."];
-    let p = lowered(&program("", data, &body.iter().map(|s| line(s)).collect::<String>()));
+    let p = lowered_with(&program("", data, &body.iter().map(|s| line(s)).collect::<String>()), EXTENDED);
     let f = &p.plans.function;
     let subscripts = |a: &lir::Argument| match a {
         lir::Argument::Value(Comparand::Operand(LirOperand::Load(q))) => p.places[*q as usize].subscripts.iter().map(|s| if let IntExpr::Const(n) = s.value { n } else { 0 }).collect::<Vec<_>>(),
@@ -1520,20 +1530,23 @@ fn a_program_without_when_compiled_gives_the_same_module_whenever_it_is_compiled
 #[test]
 fn a_floating_point_receiver_makes_the_statement_float_and_numval_and_the_unicode_functions_read_as_the_walker_s() {
     let data = "       01  N PIC 9(3).\n       01  G.\n           05 T PIC 9 OCCURS 3.\n       01  I PIC 9.\n       01  F COMP-2.\n       01  A PIC X(9).\n       01  NA PIC N(4).\n";
-    let p = lowered(&program(
-        "",
-        data,
-        &[
-            line("COMPUTE N F = T(I) + 1"),
-            line("COMPUTE N = T(I) + 1"),
-            line("MOVE FUNCTION NUMVAL('12') TO N"),
-            line("MOVE FUNCTION ULENGTH(A) TO A"),
-            line("MOVE FUNCTION USUBSTR(NA 1 2) TO NA"),
-            line("MOVE FUNCTION CONTENT-OF(N) TO A"),
-            line("GOBACK."),
-        ]
-        .concat(),
-    ));
+    let p = lowered_with(
+        &program(
+            "",
+            data,
+            &[
+                line("COMPUTE N F = T(I) + 1"),
+                line("COMPUTE N = T(I) + 1"),
+                line("MOVE FUNCTION NUMVAL('12') TO N"),
+                line("MOVE FUNCTION ULENGTH(A) TO A"),
+                line("MOVE FUNCTION USUBSTR(NA 1 2) TO NA"),
+                line("MOVE FUNCTION CONTENT-OF(N) TO A"),
+                line("GOBACK."),
+            ]
+            .concat(),
+        ),
+        EXTENDED,
+    );
     let float = Mode::Float(numeric::Arith::Compat.float_intermediate());
     let steps: Vec<(Mode, usize)> = p.plans.arith[0].steps.iter().map(|s| (s.mode, s.probe.len())).collect();
     assert_eq!(steps, [(float, 0), (float, 0)]);

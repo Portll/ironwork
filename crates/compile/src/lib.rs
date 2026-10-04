@@ -108,6 +108,8 @@ fn record_lengths(layout: &Layout, k: usize) -> (u32, u32) {
 
 const FUNCTIONS: &[&str] = rt::intrinsic::FIRST;
 
+pub const NUMERIC_FUNCTION_MOVED: &str = "IWX0008-W an integer or numeric function as a MOVE's sender (GnuCOBOL; Enterprise COBOL takes one only where an arithmetic expression can be)";
+
 /// Checks and lays out a parsed program. `flags` are this compiler's own, such as `-silent`. A
 /// program is refused, with every message, when one stops its object code: under IBM's default
 /// NOCOMPILE(S) one that is S or U, from W under `-warnings-block`, or as a CBL or PROCESS card's
@@ -273,6 +275,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         alphabetic: &alphabetic,
         at: Pos::default(),
         paragraph: 0,
+        extended: options.compliance == numeric::Compliance::Extended,
     };
     for k in 0..program.files.len() {
         check.file_keys(k);
@@ -762,6 +765,8 @@ struct Check<'a> {
     at: Pos,
     /// The paragraph the statements are in, from which a HANDLE label is found.
     paragraph: usize,
+    /// `--compliance extended` is in force.
+    extended: bool,
 }
 
 impl Check<'_> {
@@ -782,6 +787,9 @@ impl Check<'_> {
         match s {
             Stmt::Move { from, to, .. } => {
                 self.operand(from);
+                if let Operand::Function(f) = from {
+                    self.moved_function(f);
+                }
                 to.iter().for_each(|r| self.reference(r));
             }
             Stmt::Compute { targets, expr, size_error, .. } => {
@@ -1449,6 +1457,26 @@ impl Check<'_> {
         let numeric = !rt::intrinsic::CHARACTER_VALUED.contains(&name) || self.numeric_max_or_min(f);
         if intrinsic && !user_defined && numeric {
             self.errors.push(Error::at(f.pos, format!("DISPLAY FUNCTION {name}: an integer or numeric function can be used only where an arithmetic expression can, and DISPLAY takes none")));
+        }
+    }
+
+    /// An integer or numeric intrinsic function, MAX and MIN among them when their arguments are
+    /// numeric, is no MOVE sender: it can be used only where an arithmetic expression can, and
+    /// MOVE's sender is an identifier or literal (Language Reference SC27-8713-03, pp. 400-402, 499;
+    /// Programming Guide SC27-8714-03, p. 119; assumption C394). `--compliance extended` moves its
+    /// value with IWX0008-W.
+    fn moved_function(&mut self, f: &FunctionCall) {
+        let name = f.name.as_str();
+        let intrinsic = FUNCTIONS.contains(&name) || rt::intrinsic::FUNCTIONS.contains(&name);
+        let user_defined = self.functions.into_iter().flatten().any(|u| u.name == name);
+        let numeric = !rt::intrinsic::CHARACTER_VALUED.contains(&name) || self.numeric_max_or_min(f);
+        if !intrinsic || user_defined || !numeric {
+            return;
+        }
+        if self.extended {
+            self.errors.push(Error::warning(f.pos, format!("{NUMERIC_FUNCTION_MOVED}: FUNCTION {name} is moved as its value")));
+        } else {
+            self.errors.push(Error::at(f.pos, format!("MOVE FUNCTION {name}: an integer or numeric function can be used only where an arithmetic expression can, not as a MOVE's sender")));
         }
     }
 

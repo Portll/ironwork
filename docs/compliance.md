@@ -8,7 +8,7 @@ compiles and runs them; anything else stays refused with the message strict give
 | Level | What it does |
 |---|---|
 | `strict` (the default) | Today's behaviour, unchanged: a construct Enterprise COBOL does not have is refused |
-| `extended` | The six extensions below are read as Micro Focus and GnuCOBOL read them, each with a warning |
+| `extended` | The extensions below are read as Micro Focus and GnuCOBOL read them, each with a warning |
 
 The flag is `--compliance strict|extended` (or `--compliance=extended`) on `run`, `check`, `cics`,
 `compile`, `job`, `fuzz` and `compare`. It is a compile option: `numeric::Options::compliance`,
@@ -127,6 +127,31 @@ GnuCOBOL; Enterprise COBOL requires the header): the program reads as though IDE
 DIVISION. came before it`, at PROGRAM-ID. The 2002 standard made the header optional, and GnuCOBOL
 under its default, `mf` and `ibm` dialects reads a program, or a contained program, that begins
 with PROGRAM-ID. The comment-entries after it are read as after the header.
+
+### IWX0008-W an integer or numeric function as a MOVE's sender
+
+`IWX0008-W an integer or numeric function as a MOVE's sender (GnuCOBOL; Enterprise COBOL takes one
+only where an arithmetic expression can be): FUNCTION NUMVAL is moved as its value`, at the
+function.
+
+Enterprise COBOL refuses `MOVE FUNCTION NUMVAL(X) TO N` and `MOVE FUNCTION MAX(N M) TO A`, whatever
+the receiver: "numeric functions are not valid as senders in MOVE statements" (Programming Guide
+SC27-8714-03, p. 119). An integer or numeric function can be used only where an arithmetic
+expression can (Language Reference SC27-8713-03, p. 499), MOVE sends an identifier or a literal
+(p. 400), and no numeric function is among the valid operands of an elementary move (p. 402).
+Strict refuses it under either dialect, `MOVE FUNCTION NUMVAL: an integer or numeric function can be
+used only where an arithmetic expression can, not as a MOVE's sender` (S), as it refuses DISPLAY of
+one (C332). MAX and MIN count as numeric when their first argument is; CONTENT-OF and user-defined
+functions are not refused (C394). `COMPUTE N = FUNCTION NUMVAL(X)` is what IBM allows.
+
+Unlike the six above, this one is not read before the parser: the compiler's check gives the
+warning, and the MOVE moves the function's value at the precision IBM gives the function (C390 to
+C392), as IBM moves a numeric item of that precision. A numeric or numeric-edited receiver takes the
+value. An alphanumeric receiver takes an integer's digits, `00005` for MAX(N M) with N `999` 5 and M
+`9(5)` 4; a value with decimal places, or a floating-point one such as NUMVAL's, is refused at run
+time, as a MOVE of such an item is (p. 404). `--dialect gnucobol` gives the same: cobc moves the
+digits of the field its function returns, `005` there and `000000008` for INTEGER(8.25)
+([dialect.md](dialect.md) 5.2), which ironwork does not reproduce.
 
 ## How the six were chosen
 

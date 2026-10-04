@@ -383,9 +383,9 @@ fn the_repository_paragraph_lets_intrinsic_functions_go_without_the_word_functio
 
 /// Runs on the interpreter, whose Harness compares the VM's run with its own, and on the VM, which
 /// must run it to its end.
-fn on_both(source: &str) -> String {
-    let walker = Harness::source(source).run(Executor::Interpreter);
-    let vm = Harness::source(source).run(Executor::Vm);
+fn on_both(source: &str, flags: &[&str]) -> String {
+    let walker = Harness::source(source).flags(flags).run(Executor::Interpreter);
+    let vm = Harness::source(source).flags(flags).run(Executor::Vm);
     assert_eq!((&walker.out, &walker.ending), (&vm.out, &vm.ending));
     assert!(walker.ending.is_ok(), "{:?}", walker.ending);
     walker.out
@@ -409,49 +409,59 @@ fn a_mixed_function_s_decimal_places_count_in_the_expression_s_dmax() {
         "10 / 3 * FUNCTION MAX(FUNCTION MIN(D2 C1) B1)",
     ];
     let body: String = statements.iter().flat_map(|s| [line(&format!("COMPUTE R1 = {s}")), line("DISPLAY R1")]).chain([line("GOBACK.")]).collect();
-    assert_eq!(on_both(&program("", PRECISION_DATA, &body)), ["049", "039", "019", "200", "048", "048", "009", "166"].map(|s| format!("{s}\n")).concat());
+    assert_eq!(on_both(&program("", PRECISION_DATA, &body), &[]), ["049", "039", "019", "200", "048", "048", "009", "166"].map(|s| format!("{s}\n")).concat());
 }
 
 /// MAX and MIN have as many integer places as their widest argument (C391); INTEGER one digit more
 /// than its argument, INTEGER-PART as many, MOD as many as its shorter argument, high-order digits
 /// beyond them dropped (Language Reference SC27-8713-03, p. 601; Programming Guide SC27-8714-03,
 /// pp. 798-799; C392); RANGE and REM by the fixed-point table, and ABS its argument's (C393). An
-/// integer value moved to an alphanumeric item shows each digit.
+/// integer value moved to an alphanumeric item under `--compliance extended` shows each digit.
 #[test]
 fn each_numeric_function_s_value_has_ibm_s_digits() {
     let data = "       01  N3 PIC 999 VALUE 5.\n       01  M2 PIC 99 VALUE 3.\n       01  B3 PIC 999 VALUE 7.\n       01  C2 PIC 9V99 VALUE 8.25.\n       01  SN PIC S99 VALUE -5.\n       01  BIG PIC 9(5) VALUE 4.\n       01  N1 PIC S9 VALUE -3.\n       01  H3 PIC 999 VALUE 100.\n       01  X PIC X(8).\n";
     let functions = ["INTEGER(C2)", "INTEGER-PART(C2)", "MOD(B3 M2)", "MOD(N1 H3)", "MAX(N3 BIG)", "MIN(N3 M2)", "RANGE(N3 M2)", "REM(B3 M2)", "ABS(SN)", "SUM(N3 M2)"];
     let body: String = functions.iter().flat_map(|f| [line(&format!("MOVE FUNCTION {f} TO X")), line("DISPLAY '[' X ']'")]).chain([line("GOBACK.")]).collect();
-    let out = on_both(&program("", data, &body));
+    let out = on_both(&program("", data, &body), &["--compliance=extended"]);
     assert_eq!(out, ["0008", "008", "01", "7", "00005", "003", "0002", "000001", "05", "00008"].map(|s| format!("[{s:<8}]\n")).concat());
 }
 
 /// A winning integer argument of MAX or MIN carries the other arguments' decimal places, so its
 /// value is no integer and cannot be moved to an alphanumeric item (Language Reference
-/// SC27-8713-03, p. 404); both executors end the run there.
+/// SC27-8713-03, p. 404); under `--compliance extended` both executors end the run there.
 #[test]
 fn max_of_an_integer_and_a_decimal_argument_is_no_integer() {
     let source = program("", "       01  N PIC 9 VALUE 5.\n       01  D PIC 9V9 VALUE 1.\n       01  X PIC X(4).\n", &[line("MOVE FUNCTION MAX(N D) TO X"), line("GOBACK.")].concat());
-    let walker = Harness::source(&source).run(Executor::Interpreter);
-    let vm = Harness::source(&source).run(Executor::Vm);
+    let walker = Harness::source(&source).flags(&["--compliance=extended"]).run(Executor::Interpreter);
+    let vm = Harness::source(&source).flags(&["--compliance=extended"]).run(Executor::Vm);
     assert_eq!(walker.ending, vm.ending);
     assert_eq!(walker.ending.unwrap_err().message, "only an integer numeric value can be moved to an alphanumeric item");
 }
 
-/// MOVE of a numeric function under each dialect and compliance level: the value at the
-/// function's precision (C390 to C392), moved by IBM's rules for a numeric sender, an integer to
-/// an alphanumeric item as its digits; the same on the interpreter and the VM.
+/// MOVE of an integer or numeric function: refused under `--compliance strict`, whatever the
+/// dialect, as Enterprise COBOL refuses it (Programming Guide SC27-8714-03, p. 119; C394), MAX and
+/// MIN of alphanumeric arguments aside; under `--compliance extended` moved with IWX0008-W, the
+/// value at the function's precision (C390 to C392) moved by IBM's rules for a numeric sender, an
+/// integer to an alphanumeric item as its digits, the same on the interpreter and the VM.
 #[test]
-fn a_numeric_function_moves_alike_under_each_dialect_and_compliance_on_both_executors() {
+fn a_numeric_function_moves_under_extended_alone_alike_on_both_executors() {
     let data = "       01  N3 PIC 999 VALUE 5.\n       01  BIG PIC 9(5) VALUE 4.\n       01  A2 PIC 9V99 VALUE 1.5.\n       01  B3 PIC 999 VALUE 7.\n       01  C2 PIC 9V99 VALUE 8.25.\n       01  N1 PIC S9 VALUE -3.\n       01  H3 PIC 999 VALUE 100.\n       01  X PIC X(6).\n       01  R PIC S9(5)V9(3) SIGN LEADING SEPARATE VALUE 0.\n";
-    let moves = ["MAX(N3 BIG) TO X", "MIN(A2 B3) TO R", "INTEGER(C2) TO X", "NUMVAL('12.50') TO R", "MOD(N1 H3) TO R", "RANGE(A2 B3) TO R"];
+    let moves = ["MAX(N3 BIG) TO X", "MIN(A2 B3) TO R", "INTEGER(C2) TO X", "NUMVAL('12.50') TO R", "MOD(N1 H3) TO R", "RANGE(A2 B3) TO R", "MAX('AB' 'B') TO X"];
     let body: String = moves.iter().flat_map(|m| [line(&format!("MOVE FUNCTION {m}")), line("DISPLAY X '|' R")]).chain([line("GOBACK.")]).collect();
     let source = program("", data, &body);
-    for flags in [["--dialect=ibm", "--compliance=strict"], ["--dialect=ibm", "--compliance=extended"], ["--dialect=gnucobol", "--compliance=strict"], ["--dialect=gnucobol", "--compliance=extended"]] {
+    for dialect in ["--dialect=ibm", "--dialect=gnucobol"] {
+        let strict = compile(syntax::parse(&source).unwrap(), &[dialect.to_owned()]).err().unwrap_or_default();
+        let refused: Vec<&str> = strict.iter().map(|e| e.message.as_str()).collect();
+        let names = ["MAX", "MIN", "INTEGER", "NUMVAL", "MOD", "RANGE"];
+        assert_eq!(refused, names.map(|n| format!("MOVE FUNCTION {n}: an integer or numeric function can be used only where an arithmetic expression can, not as a MOVE's sender")), "{dialect}");
+        let flags = [dialect, "--compliance=extended"];
         let walker = Harness::source(&source).flags(&flags).run(Executor::Interpreter);
         let vm = Harness::source(&source).flags(&flags).run(Executor::Vm);
         assert_eq!((&walker.out, &walker.ending), (&vm.out, &vm.ending), "{flags:?}");
-        let expected = ["00005 |+00000000", "00005 |+00001500", "0008  |+00001500", "0008  |+00012500", "0008  |+00007000", "0008  |+00005500"];
+        let expected = ["00005 |+00000000", "00005 |+00001500", "0008  |+00001500", "0008  |+00012500", "0008  |+00007000", "0008  |+00005500", "B     |+00005500"];
         assert_eq!(walker.out, expected.map(|s| format!("{s}\n")).concat(), "{flags:?}");
+        let extended = compile(syntax::parse(&source).unwrap(), &flags.map(str::to_owned)).unwrap();
+        let warned: Vec<&str> = extended.diagnostics.iter().filter(|e| e.severity == Severity::Warning).map(|e| e.message.as_str()).collect();
+        assert_eq!(warned, names.map(|n| format!("{}: FUNCTION {n} is moved as its value", compile::NUMERIC_FUNCTION_MOVED)));
     }
 }

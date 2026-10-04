@@ -423,7 +423,7 @@ fn function_random_repeats_its_sequence_for_a_seed_between_zero_and_one() {
         line("DISPLAY N"),
         line("COMPUTE N = FUNCTION RANDOM(42) * 1000000000"),
         line("DISPLAY N"),
-        line("MOVE FUNCTION RANDOM TO X"),
+        line("COMPUTE X = FUNCTION RANDOM"),
         line("COMPUTE N = X * 1000000000"),
         line("DISPLAY N"),
         line("MOVE 'A' TO T(FUNCTION RANDOM * 3 + 1)"),
@@ -434,7 +434,7 @@ fn function_random_repeats_its_sequence_for_a_seed_between_zero_and_one() {
     .concat();
     let data = "       01  X COMP-2.\n       01  N PIC 9(9).\n       01  G.\n           05 T PIC X OCCURS 3.\n";
     assert_eq!(run(&program("", data, &body)), "000007826\n131537788\n000007826\n000336534\n656124890\nIN RANGE\n");
-    let (_, _, ending) = run_with(&program("", data, &[line("MOVE FUNCTION RANDOM(-1) TO X"), line("GOBACK.")].concat()), &[]);
+    let (_, _, ending) = run_with(&program("", data, &[line("COMPUTE X = FUNCTION RANDOM(-1)"), line("GOBACK.")].concat()), &[]);
     assert!(ending.unwrap_err().message.contains("FUNCTION RANDOM(-1): the seed must be zero or a positive integer"));
 }
 

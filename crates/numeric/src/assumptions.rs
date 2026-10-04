@@ -325,6 +325,7 @@ pub const MIXED_FUNCTION_PLACES: &str = "C390";
 pub const MAX_MIN_INTEGER_PLACES: &str = "C391";
 pub const INTEGER_FUNCTION_DIGITS: &str = "C392";
 pub const ABS_PLACES: &str = "C393";
+pub const NUMERIC_FUNCTION_MOVED: &str = "C394";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -2101,6 +2102,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: ABS_PLACES,
         claim: "ABS of a fixed-point argument has the argument's places, and its decimal places count in the dmax of an expression holding it as a mixed function's do (C390). IBM types ABS integer or numeric as its argument is (Language Reference SC27-8713-03, p. 517) and gives it no precision, and says a numeric function's result has decimal places when an argument has (Programming Guide SC27-8714-03, p. 62). cobc's ABS has its argument's field (cob_intr_abs)",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: NUMERIC_FUNCTION_MOVED,
+        claim: "MOVE of an integer or numeric intrinsic function is refused when compiled (S) under --compliance strict, under either dialect: 'numeric functions are not valid as senders in MOVE statements' (Programming Guide SC27-8714-03, p. 119), such a function can be used only where an arithmetic expression can (Language Reference SC27-8713-03, p. 499), MOVE's sender is an identifier or a literal (p. 400), and no numeric function is among the valid operands of an elementary move (p. 402), whatever the receiver. MAX and MIN are refused when the first argument is numeric (pp. 591, 599), as C332 decides for DISPLAY; CONTENT-OF and a user-defined function are not. The manuals give neither the message number nor its text: the message is ironwork's, and the severity C332's. Under --compliance extended the MOVE is accepted with IWX0008-W, as cobc accepts it, and moves the function's value at its precision (C390 to C392) by IBM's rules for a numeric sender: an integer's digits to an alphanumeric item, and a value with decimal places refused there at run time (p. 404)",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
 ];
