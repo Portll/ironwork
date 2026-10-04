@@ -186,3 +186,22 @@ fn an_exceptions_text_is_the_current_segment_and_includes_a_duplicate_attribute(
     let out = parse(data, &["XML PARSE SEG(I) PROCESSING PROCEDURE P", "XML PARSE DUP PROCESSING PROCEDURE P"], &handler);
     assert_eq!(trimmed(&out), ["y", "<a x=\"1\" x=\"2\""]);
 }
+
+#[test]
+fn validating_is_refused_by_name_and_an_xml_schema_clause_alone_runs() {
+    let data = "       01  DOC PIC X(8) VALUE '<a>x</a>'.\n       01  OSR PIC X(100).\n";
+    let source = |validating: &str| {
+        let procedure = format!("       MAIN.\n{}{}       P.\n{}", line(&format!("XML PARSE DOC {validating}PROCESSING PROCEDURE P")), line("GOBACK."), line("CONTINUE."));
+        let special_names = "       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       SPECIAL-NAMES.\n           XML-SCHEMA SCH1 IS 'OSRFILE'.\n       DATA DIVISION.\n";
+        program("", data, &procedure).replace("       DATA DIVISION.\n", special_names)
+    };
+    for (validating, column, schema) in [("VALIDATING WITH FILE SCH1 ", 26, "FILE SCH1"), ("VALIDATING OSR ", 26, "OSR"), ("RETURNING NATIONAL VALIDATING WITH OSR ", 45, "OSR")] {
+        let refused = syntax::parse_all_with(&source(validating), &Default::default()).unwrap_err();
+        assert_eq!(
+            refused.to_string(),
+            format!("13:{column}: IWR0001-S XML PARSE VALIDATING WITH {schema}: the schema is in IBM's Optimized Schema Representation (OSR), which ironwork does not read")
+        );
+    }
+    let o = Harness::source(&source("")).run(Executor::Interpreter);
+    assert!(o.ending.is_ok(), "{:?}\n{}", o.ending, o.err);
+}

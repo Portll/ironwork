@@ -2454,7 +2454,12 @@ impl Parser<'_> {
                 self.expect_word("NATIONAL")?;
                 x.returning_national = true;
             } else if self.is_word("VALIDATING") {
-                return Err(self.error("PROCESSING PROCEDURE: XML PARSE VALIDATING is not supported yet"));
+                // VALIDATING [WITH] {identifier-2 | FILE xml-schema-name-1} (Language Reference SC27-8713-03, p. 490).
+                let at = self.pos();
+                self.at += 1;
+                self.accept_word("WITH");
+                let schema = if self.accept_word("FILE") { format!("FILE {}", self.name("an XML schema name")?) } else { self.reference()?.name };
+                return Err(Error::at(at, format!("IWR0001-S XML PARSE VALIDATING WITH {schema}: the schema is in IBM's Optimized Schema Representation (OSR), which ironwork does not read")));
             } else {
                 break;
             }

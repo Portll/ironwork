@@ -276,7 +276,9 @@ messages', 0 when there is none (Enterprise COBOL Programming Guide SC27-8714-03
 | S, severe | 12 | refuse |
 | U, unrecoverable | 16 | refuse |
 
-Every refusal ironwork makes is S (assumption C45). A class definition, or a program with INVOKE or
+Every refusal ironwork makes is S (assumption C45). A message id of ironwork's own starts IWX for an
+extension `--compliance extended` reads and IWR for an Enterprise COBOL construct ironwork refuses,
+as IWR0001-S refuses XML PARSE VALIDATING. A class definition, or a program with INVOKE or
 object references, compiled without THREAD, DLL, RENT or DBCS, or with NORENT beside THREAD or DLL,
 is W (J19). `ironwork check` exits with the return code. `ironwork run` and `ironwork cics` print
 the messages, then run the program at 0, 4 or 8, and otherwise exit 241 without running anything,
@@ -401,7 +403,8 @@ The subset the interpreter runs today:
   ENCODING and ON EXCEPTION, sets JSON-CODE (C117). XML PARSE reports z/OS XML System Services'
   events to its processing procedure, in segments through END-OF-INPUT, with XML-TEXT, XML-NTEXT and
   the namespace registers, XMLSS's codes in XML-CODE, and past an undeclared prefix when the
-  procedure resets XML-CODE (C118). XML GENERATE, with COUNT, ENCODING,
+  procedure resets XML-CODE (C118); VALIDATING is refused as IWR0001-S, since ironwork does not read
+  the Optimized Schema Representation the schema is in. XML GENERATE, with COUNT, ENCODING,
   XML-DECLARATION, ATTRIBUTES, NAMESPACE and its prefix, NAME, TYPE, SUPPRESS and ON EXCEPTION, sets
   XML-CODE (C119). JSON PARSE, with NAME and OMITTED, SUPPRESS, CONVERTING, INDICATING, IGNORING and
   ENCODING, moves each matched value by MOVE's rules and sets JSON-CODE and JSON-STATUS (C200). What is not Enterprise COBOL is refused as such:

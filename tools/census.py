@@ -96,6 +96,7 @@ def repository_files(root):
     return files
 
 RULES = [
+    (r"^(IW[A-Z]\d{4}-[IWESU]) ", r"\1"),
     (r"(\S+) is not a statement ironwork for COBOL supports yet", r"statement \1"),
     (r"the (\S+) SECTION is not supported yet", r"\1 SECTION"),
     (r"FUNCTION (\S+) is not supported yet", r"FUNCTION \1"),
