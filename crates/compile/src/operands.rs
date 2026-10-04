@@ -4,7 +4,6 @@
 use crate::Check;
 use crate::layout::Resolved;
 use rt::storage::Kind;
-use syntax::Error;
 use syntax::ast::{Expr, Figurative, FunctionCall, Literal, Operand};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,7 +46,7 @@ impl Check<'_> {
                 _ => format!("{least} to {most}"),
             };
             let message = format!("FUNCTION {}: an ALL subscript stands for a varying number of arguments, and {} takes {takes}", f.name, f.name);
-            self.errors.push(Error::at(f.pos, message));
+            self.errors.push(syntax::messages::IWC0287.at(f.pos, message));
         }
         let intrinsic = crate::FUNCTIONS.contains(&f.name.as_str()) || rt::intrinsic::FUNCTIONS.contains(&f.name.as_str());
         if intrinsic && f.args.iter().any(|a| matches!(a, Expr::Operand(Operand::Literal(Literal::Figurative(_) | Literal::All(_))))) {
@@ -70,7 +69,7 @@ impl Check<'_> {
             && let Some(other) = rest.iter().find(|&&c| character(c) != character(*first))
         {
             let message = format!("FUNCTION {}: {} and {} arguments, where all must be of the same class", f.name, first.word(), other.word());
-            self.errors.push(Error::at(f.pos, message));
+            self.errors.push(syntax::messages::IWC0288.at(f.pos, message));
         }
     }
 

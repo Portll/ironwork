@@ -69,7 +69,6 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0044 | S | `REDEFINES {target}: no earlier item of that name at this level` |
 | IWC0045 | S | `a SYNCHRONIZED item at the start of a REDEFINES would need {slack} slack bytes: the redefined item must be on a {message}-byte boundary` |
 | IWC0046 | S | `{clause} names {name}, which is not a file` |
-| IWC0047 | S | `ALPHABET {name}: {message}` |
 | IWC0048 | S | `OCCURS DEPENDING ON {object}: the object cannot follow an OCCURS DEPENDING ON table in its record` |
 | IWC0049 | S | `OCCURS DEPENDING ON {object}: not a numeric data item` |
 | IWC0050 | S | `PROCEDURE DIVISION USING {param}: not an 01 or 77 item of the LINKAGE SECTION` |
@@ -282,6 +281,38 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0257 | S | `ACCEPT ... FROM {name}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it from the job step's PARM` |
 | IWC0258 | S | `DISPLAY UPON ARGUMENT-NUMBER: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0259 | S | `DISPLAY UPON ARGUMENT-NUMBER: it shows one numeric item or literal, the number of the argument the next ACCEPT ... FROM ARGUMENT-VALUE takes` |
+| IWC0260 | S | `PICTURE {picture}: P must be one string of scaling positions at the left or right end of the digits` |
+| IWC0261 | S | `PICTURE {picture}: {character} is not a PICTURE symbol` |
+| IWC0262 | S | `PICTURE {picture}: more than 134217727 character positions` |
+| IWC0263 | S | `PICTURE {picture}: more than 31 digits` |
+| IWC0264 | S | `PICTURE {picture}: mixes symbols of different categories` |
+| IWC0265 | S | `PICTURE {picture}: {character} cannot be in a PICTURE of {symbol}, which takes {symbol} and B only` |
+| IWC0266 | S | `PICTURE {picture}: more character positions than a DBCS item holds` |
+| IWC0267 | S | `BLANK WHEN ZERO cannot be given for a PICTURE with S` |
+| IWC0268 | S | `PICTURE {picture}: an edited PICTURE longer than 4096 positions` |
+| IWC0269 | S | `PICTURE {picture}: S and N are not allowed in an edited PICTURE` |
+| IWC0270 | S | `PICTURE {picture}: an alphanumeric-edited PICTURE takes only X, A, 9, B, 0 and /` |
+| IWC0271 | S | `PICTURE {picture}: two floating insertion strings` |
+| IWC0272 | S | `PICTURE {picture}: {character} is not a numeric-edited symbol` |
+| IWC0273 | S | `PICTURE {picture}: more than one decimal point` |
+| IWC0274 | S | `PICTURE {picture}: a numeric-edited PICTURE needs 1 to 31 digit positions` |
+| IWC0275 | S | `PICTURE {picture}: bad repetition ({count})` |
+| IWC0276 | S | `PICTURE {picture}: a repetition with nothing to repeat` |
+| IWC0277 | S | `PICTURE {picture}: two different currency symbols` |
+| IWC0278 | S | `PICTURE {picture}: '$' is not a currency symbol of this program, whose CURRENCY SIGN clauses or CURRENCY option name others` |
+| IWC0279 | S | `{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: not an alphabet-name of SPECIAL-NAMES` |
+| IWC0280 | S | `{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: the character X'{hex}' is given more than one position` |
+| IWC0281 | S | `{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: {number} is not an ordinal position from 1 to 256` |
+| IWC0282 | S | `{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: NULL cannot be in an ALPHABET clause` |
+| IWC0283 | S | `{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: a national literal cannot be in an ALPHABET clause` |
+| IWC0284 | S | `{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: a DBCS literal cannot be in an ALPHABET clause` |
+| IWC0285 | S | `{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: ALL cannot be in an ALPHABET clause` |
+| IWC0286 | S | `{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: a literal of THROUGH or ALSO must be one character` |
+| IWC0287 | S | `FUNCTION {name}: an ALL subscript stands for a varying number of arguments, and {name} takes {count}` |
+| IWC0288 | S | `FUNCTION {name}: {class} and {class} arguments, where all must be of the same class` |
+| IWC0289 | W | `INITCHECK(STRICT): {item} may be used uninitialized: a path to this statement does not set {it} (see {analysis})` |
+| IWC0290 | W | `INITCHECK: {item} may be used uninitialized: no path to this statement sets {it} (see {analysis})` |
+| IWC0291 | S | `{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: {a character the program's code page does not hold}` |
 | IWL0001 | S | `lowering: {table} exceeds the LIR's limit` |
 | IWL0002 | S | `lowering: the lowered program is invalid: {why}` |
 | IWL0003 | S | `LOCAL-STORAGE exceeds the interpreter's {MAX STORAGE} bytes` |
@@ -291,6 +322,8 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWO0001 | S | `CBL {option}: {why}` |
 | IWO0002 | E | `CBL CURRENCY: code page {codepage} reads its byte as {character}, which cannot be a currency symbol` |
 | IWO0003 | W | `CBL NODBCS: NSYMBOL(NATIONAL) requires DBCS, which is in effect` |
+| IWO0004 | S | `SOURCE_DATE_EPOCH={value}: not a whole number of seconds from 0 to 253402300799` |
+| IWO0005 | S | `{a flag this compiler does not take}` |
 | IWP0001 | S | `no mapset {to ascii uppercase} among the {sets} in the file` |
 | IWP0002 | I | `IGYPS2091-W not given: the program ends with EXEC CICS {command}, which the CICS translator turns into a CALL; --cics-return-warning=always gives the warning, =never drops this note` |
 | IWP0003 | S | `EXEC SQL {command}: {why}` |
@@ -335,6 +368,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWP0042 | S | `{kind}({name}): a {kind} name is at most {limit} characters` |
 | IWP0043 | S | `attribute value for '{key}' exceeds 256 characters` |
 | IWP0044 | S | `unbalanced '(' in attribute value` |
+| IWP0045 | S | `{why the BMS source cannot be read}` |
 | IWR0001 | S | `XML PARSE VALIDATING WITH {schema}: the schema is in IBM's Optimized Schema Representation (OSR), which ironwork does not read` |
 | IWR0002 | S | `{verb} is not a statement ironwork for COBOL supports yet` |
 | IWR0003 | S | `{clause} is not a data description clause ironwork for COBOL supports yet` |
@@ -485,6 +519,8 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWS0092 | S | `a literal runs to the end of the line with no continuation` |
 | IWS0093 | S | `a continued literal must resume with its quote` |
 | IWS0094 | S | `{shown}: the source-format directives >>SOURCE and $SET SOURCEFORMAT, giving FREE or FIXED, are the only compiler directives ironwork reads` |
+| IWS0095 | S | `CURRENCY SIGN {literal} is {character} in the program's code page, which cannot be a PICTURE currency symbol` |
+| IWS0096 | S | `CURRENCY SIGN {literal} is {value} in the program's code page, which contains a digit, +, -, . or ,` |
 | IWX0001 | W | `free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}` |
 | IWX0002 | W | `constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry` |
 | IWX0003 | W | `<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =` |

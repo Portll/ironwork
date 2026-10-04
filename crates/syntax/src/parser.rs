@@ -132,7 +132,7 @@ fn hex_text(bytes: &[u8]) -> String {
 
 /// CURRENCY SIGN IS X'...' clauses given their characters by `decode`, the program's code page, and
 /// checked as an alphanumeric literal-6 is (Language Reference SC27-8713-03, pp. 129-130).
-pub fn decode_currency(environment: &mut Environment, decode: impl Fn(&[u8]) -> String) -> Result<(), String> {
+pub fn decode_currency(environment: &mut Environment, decode: impl Fn(&[u8]) -> String) -> Result<(), crate::messages::Refused> {
     for k in 0..environment.currency.len() {
         let sign = &mut environment.currency[k];
         let Some(bytes) = &sign.hex else { continue };
@@ -140,16 +140,16 @@ pub fn decode_currency(environment: &mut Environment, decode: impl Fn(&[u8]) -> 
         if sign.symbol == HEX_SYMBOL {
             match value.chars().next() {
                 Some(symbol) if currency_symbol(symbol) => sign.symbol = symbol,
-                _ => return Err(format!("CURRENCY SIGN {shown} is {value:?} in the program's code page, which cannot be a PICTURE currency symbol")),
+                _ => return Err((crate::messages::IWS0095, format!("CURRENCY SIGN {shown} is {value:?} in the program's code page, which cannot be a PICTURE currency symbol"))),
             }
         } else if value.chars().any(|c| c.is_ascii_digit() || matches!(c, '+' | '-' | '.' | ',')) {
-            return Err(format!("CURRENCY SIGN {shown} is {value:?} in the program's code page, which contains a digit, +, -, . or ,"));
+            return Err((crate::messages::IWS0096, format!("CURRENCY SIGN {shown} is {value:?} in the program's code page, which contains a digit, +, -, . or ,")));
         }
         sign.value = value;
         sign.hex = None;
         let symbol = sign.symbol;
         if environment.currency.iter().filter(|c| c.symbol == symbol).count() > 1 {
-            return Err(format!("a second CURRENCY SIGN clause for the currency symbol {symbol:?}"));
+            return Err((crate::messages::IWS0036, format!("a second CURRENCY SIGN clause for the currency symbol {symbol:?}")));
         }
     }
     Ok(())

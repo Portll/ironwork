@@ -118,7 +118,7 @@ pub const NUMERIC_FUNCTION_MOVED: &str = "an integer or numeric function as a MO
 /// NOCOMPILE(S) one that is S or U, from W under `-warnings-block`, or as a CBL or PROCESS card's
 /// COMPILE or NOCOMPILE says; otherwise its messages are [`Compiled::diagnostics`].
 pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error>> {
-    let at = compile_time().map_err(|message| vec![Error::at(Pos::default(), message)])?;
+    let at = compile_time().map_err(|message| vec![syntax::messages::IWO0004.at(Pos::default(), message)])?;
     compile_at(program, flags, at)
 }
 
@@ -163,7 +163,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     // Guide SC27-8714-03, p. 273).
     for flag in flags {
         if let Err(e) = options.apply_flag(flag) {
-            errors.push(Error::at(Pos::default(), e.to_string()));
+            errors.push(syntax::messages::IWO0005.at(Pos::default(), e.to_string()));
         }
     }
     for option in &program.options {
@@ -175,8 +175,8 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         }
     }
     let page = options.code_page();
-    if let Err(m) = syntax::parser::decode_currency(&mut program.environment, |bytes| page.decode(bytes)) {
-        errors.push(Error::at(Pos::default(), m));
+    if let Err((message, m)) = syntax::parser::decode_currency(&mut program.environment, |bytes| page.decode(bytes)) {
+        errors.push(message.at(Pos::default(), m));
     }
     default_currency(&mut program, &mut options, &mut errors);
     national_symbols(&mut program, &mut options, &mut errors);
@@ -185,13 +185,13 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     }
     for (name, alphabet) in &program.environment.alphabets {
         if program.environment.collating_sequence.as_ref() != Some(name)
-            && let Err(m) = collating::Sequence::of(alphabet, options.code_page(), options.quote)
+            && let Err((message, m)) = collating::Sequence::of(alphabet, options.code_page(), options.quote)
         {
-            errors.push(syntax::messages::IWC0047.at(Pos::default(), format!("ALPHABET {name}: {m}")));
+            errors.push(message.at(Pos::default(), format!("ALPHABET {name}: {m}")));
         }
     }
-    let collating = collating::Sequence::program(&program.environment, options.code_page(), options.quote).unwrap_or_else(|m| {
-        errors.push(Error::at(Pos::default(), m));
+    let collating = collating::Sequence::program(&program.environment, options.code_page(), options.quote).unwrap_or_else(|(message, m)| {
+        errors.push(message.at(Pos::default(), m));
         let mut native = collating::Sequence::native();
         native.quote = options.quote;
         native

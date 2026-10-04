@@ -1,5 +1,6 @@
 pub use rt::picture::Sym;
 use syntax::ast::{CurrencySign, Environment};
+use syntax::messages::{Message, Refused};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Category {
@@ -58,14 +59,14 @@ const MAX_EDITED: u64 = 4096;
 /// Enterprise COBOL's limit on an elementary item's character positions.
 pub const MAX_POSITIONS: u64 = 134_217_727;
 
-pub fn analyse(text: &str) -> Result<Picture, String> {
+pub fn analyse(text: &str) -> Result<Picture, Refused> {
     analyse_with(text, Notation::default())
 }
 
 /// A PICTURE under `notation`. Under DECIMAL-POINT IS COMMA the comma is the decimal point and the
 /// period an insertion character (Language Reference SC27-8713-03, p. 208); a currency symbol is
 /// read as $, and the value it stands for kept.
-pub fn analyse_with(text: &str, notation: Notation) -> Result<Picture, String> {
+pub fn analyse_with(text: &str, notation: Notation) -> Result<Picture, Refused> {
     let (runs, currency) = runs(text, notation)?;
     let has = |symbol: char| runs.iter().any(|&(c, _)| c == symbol);
     if has('G') || has('N') && has('B') {
@@ -77,7 +78,7 @@ pub fn analyse_with(text: &str, notation: Notation) -> Result<Picture, String> {
     let (mut digits, mut scale, mut signed, mut after_point) = (0u64, 0u64, false, false);
     let (mut alnum, mut national) = (0u64, 0u64);
     let (mut left, mut right) = (0u64, 0u64);
-    let misplaced = || Err(format!("PICTURE {text}: P must be one string of scaling positions at the left or right end of the digits"));
+    let misplaced = || Err((syntax::messages::IWC0260, format!("PICTURE {text}: P must be one string of scaling positions at the left or right end of the digits")));
     for (i, &(c, n)) in runs.iter().enumerate() {
         match c {
             '9' if right > 0 => return misplaced(),
@@ -95,11 +96,11 @@ pub fn analyse_with(text: &str, notation: Notation) -> Result<Picture, String> {
             'P' if digits == 0 && runs.get(i + 1).is_some_and(|&(c, _)| matches!(c, 'P' | '9')) => left += n,
             'P' if digits > 0 && left == 0 && !after_point => right += n,
             'P' => return misplaced(),
-            _ => return Err(format!("PICTURE {text}: {c:?} is not a PICTURE symbol")),
+            _ => return Err((syntax::messages::IWC0261, format!("PICTURE {text}: {c:?} is not a PICTURE symbol"))),
         }
     }
     if alnum + digits > MAX_POSITIONS || national > MAX_POSITIONS {
-        return Err(format!("PICTURE {text}: more than {MAX_POSITIONS} character positions"));
+        return Err((syntax::messages::IWC0262, format!("PICTURE {text}: more than {MAX_POSITIONS} character positions")));
     }
     let positions = digits + left + right;
     if left > 0 {
@@ -109,25 +110,25 @@ pub fn analyse_with(text: &str, notation: Notation) -> Result<Picture, String> {
     let scaled = left + right > 0;
     match (digits > 0, alnum > 0, national > 0) {
         (true, false, false) if positions <= 31 => Ok(Picture { category: Category::Numeric, size: digits, digits, scale, signed, edit: None, scaling: right as u32, currency: None }),
-        (true, false, false) => Err(format!("PICTURE {text}: more than 31 digits")),
+        (true, false, false) => Err((syntax::messages::IWC0263, format!("PICTURE {text}: more than 31 digits"))),
         (_, true, false) if !signed && !after_point && !scaled => Ok(Picture { category: Category::Alphanumeric, size: alnum + digits, digits: 0, scale: 0, signed, edit: None, scaling: 0, currency: None }),
         (false, false, true) if !signed && !after_point && !scaled => Ok(Picture { category: Category::National, size: national, digits: 0, scale: 0, signed, edit: None, scaling: 0, currency: None }),
-        _ => Err(format!("PICTURE {text}: mixes symbols of different categories")),
+        _ => Err((syntax::messages::IWC0264, format!("PICTURE {text}: mixes symbols of different categories"))),
     }
 }
 
 /// A PICTURE of G, or of N with B: DBCS character positions, each B one that holds a DBCS space
 /// (Language Reference SC27-8713-03, pp. 214, 219). N with B is national-edited unless the item is
 /// DISPLAY-1, which the item's USAGE decides.
-fn dbcs(text: &str, runs: &[(char, u64)]) -> Result<Picture, String> {
+fn dbcs(text: &str, runs: &[(char, u64)]) -> Result<Picture, Refused> {
     let symbol = if runs.iter().any(|&(c, _)| c == 'G') { 'G' } else { 'N' };
     if let Some(&(c, _)) = runs.iter().find(|&&(c, _)| c != symbol && c != 'B') {
-        return Err(format!("PICTURE {text}: {c:?} cannot be in a PICTURE of {symbol}, which takes {symbol} and B only"));
+        return Err((syntax::messages::IWC0265, format!("PICTURE {text}: {c:?} cannot be in a PICTURE of {symbol}, which takes {symbol} and B only")));
     }
     let size: u64 = runs.iter().map(|&(_, n)| n).sum();
     let inserts = runs.iter().any(|&(c, _)| c == 'B');
     if size > MAX_POSITIONS || inserts && size > MAX_EDITED {
-        return Err(format!("PICTURE {text}: more character positions than a DBCS item holds"));
+        return Err((syntax::messages::IWC0266, format!("PICTURE {text}: more character positions than a DBCS item holds")));
     }
     let edit = inserts.then(|| runs.iter().flat_map(|&(c, n)| std::iter::repeat_n(if c == 'B' { Sym::Insert(' ') } else { Sym::Char }, n as usize)).collect());
     let category = if symbol == 'G' { Category::Dbcs } else { Category::National };
@@ -136,9 +137,9 @@ fn dbcs(text: &str, runs: &[(char, u64)]) -> Result<Picture, String> {
 
 /// A numeric PICTURE under BLANK WHEN ZERO, which makes the item numeric-edited (Language
 /// Reference SC27-8713-03, p. 195).
-pub fn blank_when_zero(p: &Picture) -> Result<Picture, String> {
+pub fn blank_when_zero(p: &Picture) -> Result<Picture, Refused> {
     if p.signed {
-        return Err("BLANK WHEN ZERO cannot be given for a PICTURE with S".into());
+        return Err((syntax::messages::IWC0267, "BLANK WHEN ZERO cannot be given for a PICTURE with S".into()));
     }
     let int = p.digits.saturating_sub(p.scale) as usize;
     let mut syms = vec![Sym::Nine; int];
@@ -149,15 +150,15 @@ pub fn blank_when_zero(p: &Picture) -> Result<Picture, String> {
     Ok(Picture { category: Category::NumericEdited, edit: Some(syms), ..p.clone() })
 }
 
-fn edited(text: &str, runs: &[(char, u64)], decimal_comma: bool, currency: Option<&str>) -> Result<Picture, String> {
+fn edited(text: &str, runs: &[(char, u64)], decimal_comma: bool, currency: Option<&str>) -> Result<Picture, Refused> {
     let total: u64 = runs.iter().map(|&(_, n)| n).sum();
     if total > MAX_EDITED {
-        return Err(format!("PICTURE {text}: an edited PICTURE longer than {MAX_EDITED} positions"));
+        return Err((syntax::messages::IWC0268, format!("PICTURE {text}: an edited PICTURE longer than {MAX_EDITED} positions")));
     }
     let chars: Vec<char> = runs.iter().flat_map(|&(c, n)| std::iter::repeat_n(c, n as usize)).collect();
-    let bad = |why: &str| Err(format!("PICTURE {text}: {why}"));
+    let bad = |message: Message, why: &str| Err((message, format!("PICTURE {text}: {why}")));
     if chars.iter().any(|c| matches!(c, 'S' | 'N')) {
-        return bad("S and N are not allowed in an edited PICTURE");
+        return bad(syntax::messages::IWC0269, "S and N are not allowed in an edited PICTURE");
     }
     if chars.iter().any(|c| matches!(c, 'X' | 'A')) {
         let mut syms = Vec::new();
@@ -166,7 +167,7 @@ fn edited(text: &str, runs: &[(char, u64)], decimal_comma: bool, currency: Optio
                 'X' | 'A' | '9' => Sym::Char,
                 'B' => Sym::Insert(' '),
                 '0' | '/' => Sym::Insert(c),
-                _ => return bad("an alphanumeric-edited PICTURE takes only X, A, 9, B, 0 and /"),
+                _ => return bad(syntax::messages::IWC0270, "an alphanumeric-edited PICTURE takes only X, A, 9, B, 0 and /"),
             });
         }
         let size = syms.len() as u32;
@@ -175,7 +176,7 @@ fn edited(text: &str, runs: &[(char, u64)], decimal_comma: bool, currency: Optio
     let (point, comma) = if decimal_comma { (',', '.') } else { ('.', ',') };
     let floating: Vec<char> = ['+', '-', '$'].into_iter().filter(|f| chars.iter().filter(|c| *c == f).count() >= 2).collect();
     if floating.len() > 1 {
-        return bad("two floating insertion strings");
+        return bad(syntax::messages::IWC0271, "two floating insertion strings");
     }
     let float = floating.first().copied();
     let (mut syms, mut led, mut i) = (Vec::new(), false, 0);
@@ -187,7 +188,7 @@ fn edited(text: &str, runs: &[(char, u64)], decimal_comma: bool, currency: Optio
         if c == 'P' {
             match &mut scaling {
                 Some((at, n, _)) if *at + *n as usize == i => *n += 1,
-                Some(_) => return bad(misplaced),
+                Some(_) => return bad(syntax::messages::IWC0260, misplaced),
                 None => scaling = Some((i, 1, syms.len())),
             }
             i += 1;
@@ -217,14 +218,14 @@ fn edited(text: &str, runs: &[(char, u64)], decimal_comma: bool, currency: Optio
             'B' => Sym::Insert(' '),
             '0' | '/' => Sym::Insert(c),
             c if c == comma => Sym::Insert(c),
-            _ => return bad(&format!("{c:?} is not a numeric-edited symbol")),
+            _ => return bad(syntax::messages::IWC0272, &format!("{c:?} is not a numeric-edited symbol")),
         };
         syms.push(sym);
         i += 1;
     }
     let points = syms.iter().filter(|s| matches!(s, Sym::Point | Sym::Implied)).count();
     if points > 1 {
-        return bad("more than one decimal point");
+        return bad(syntax::messages::IWC0273, "more than one decimal point");
     }
     let digits = syms.iter().filter(|s| s.is_digit()).count() as u32;
     let mut scale = syms.iter().skip_while(|s| !matches!(s, Sym::Point | Sym::Implied)).filter(|s| s.is_digit()).count() as u32;
@@ -234,11 +235,11 @@ fn edited(text: &str, runs: &[(char, u64)], decimal_comma: bool, currency: Optio
         match (points, before) {
             (0, 0) => scale = n + digits,
             (0, b) if b == digits => right = n,
-            _ => return bad(misplaced),
+            _ => return bad(syntax::messages::IWC0260, misplaced),
         }
     }
     if digits == 0 || digits + scaling.map_or(0, |(_, n, _)| n) > 31 {
-        return bad("a numeric-edited PICTURE needs 1 to 31 digit positions");
+        return bad(syntax::messages::IWC0274, "a numeric-edited PICTURE needs 1 to 31 digit positions");
     }
     let widths: u32 = syms.iter().map(|s| s.width() as u32).sum();
     let size = widths + currency.map_or(0, |v| v.chars().count() as u32 - 1);
@@ -250,23 +251,23 @@ type Runs<'a> = (Vec<(char, u64)>, Option<&'a str>);
 
 /// The PICTURE as runs of one symbol and a count, `9(4)` read as four nines without writing them
 /// out, its currency symbol as $, with the value that symbol stands for.
-fn runs<'a>(text: &str, notation: Notation<'a>) -> Result<Runs<'a>, String> {
+fn runs<'a>(text: &str, notation: Notation<'a>) -> Result<Runs<'a>, Refused> {
     let mut out: Vec<(char, u64)> = Vec::new();
     let (mut chars, mut currency) = (text.chars(), None);
     while let Some(c) = chars.next() {
         if c == '(' {
             let count: String = chars.by_ref().take_while(|&d| d != ')').collect();
-            let n: u64 = count.parse().ok().filter(|&n| (1..=MAX_POSITIONS).contains(&n)).ok_or_else(|| format!("PICTURE {text}: bad repetition ({count})"))?;
-            let last = out.last_mut().ok_or_else(|| format!("PICTURE {text}: a repetition with nothing to repeat"))?;
+            let n: u64 = count.parse().ok().filter(|&n| (1..=MAX_POSITIONS).contains(&n)).ok_or_else(|| (syntax::messages::IWC0275, format!("PICTURE {text}: bad repetition ({count})")))?;
+            let last = out.last_mut().ok_or_else(|| (syntax::messages::IWC0276, format!("PICTURE {text}: a repetition with nothing to repeat")))?;
             last.1 += n - 1;
         } else if let Some(value) = notation.currency_value(c) {
             match currency {
-                Some((symbol, _)) if symbol != c => return Err(format!("PICTURE {text}: two different currency symbols")),
+                Some((symbol, _)) if symbol != c => return Err((syntax::messages::IWC0277, format!("PICTURE {text}: two different currency symbols"))),
                 _ => currency = Some((c, value)),
             }
             out.push(('$', 1));
         } else if c == '$' {
-            return Err(format!("PICTURE {text}: '$' is not a currency symbol of this program, whose CURRENCY SIGN clauses or CURRENCY option name others"));
+            return Err((syntax::messages::IWC0278, format!("PICTURE {text}: '$' is not a currency symbol of this program, whose CURRENCY SIGN clauses or CURRENCY option name others")));
         } else {
             out.push((c.to_ascii_uppercase(), 1));
         }
@@ -305,11 +306,11 @@ mod tests {
 
     #[test]
     fn unsupported_and_invalid_pictures_say_why() {
-        assert!(analyse("ZZ9.99.9").unwrap_err().contains("decimal point"));
-        assert!(analyse("9(32)").unwrap_err().contains("31 digits"));
-        assert!(analyse("XN").unwrap_err().contains("categories"));
-        assert!(analyse("X(999999999)").unwrap_err().contains("repetition"));
-        assert!(analyse("X(134217727)X").unwrap_err().contains("character positions"));
+        assert!(analyse("ZZ9.99.9").unwrap_err().1.contains("decimal point"));
+        assert!(analyse("9(32)").unwrap_err().1.contains("31 digits"));
+        assert!(analyse("XN").unwrap_err().1.contains("categories"));
+        assert!(analyse("X(999999999)").unwrap_err().1.contains("repetition"));
+        assert!(analyse("X(134217727)X").unwrap_err().1.contains("character positions"));
         assert_eq!(analyse("XX99").unwrap(), Picture { category: Category::Alphanumeric, size: 4, digits: 0, scale: 0, signed: false, edit: None, scaling: 0, currency: None });
     }
 
@@ -335,7 +336,7 @@ mod tests {
         assert_eq!(p.edit.as_ref().unwrap()[5], Sym::Point);
         assert_eq!(analyse_with("ZZ9.99", Notation::default()).unwrap().scale, 2);
         assert_eq!(analyse_with("ZZ9.99", COMMA).unwrap().scale, 0);
-        assert!(analyse_with("9,99,9", COMMA).unwrap_err().contains("decimal point"));
+        assert!(analyse_with("9,99,9", COMMA).unwrap_err().1.contains("decimal point"));
     }
 
     #[test]
@@ -362,9 +363,9 @@ mod tests {
         let floating = analyse_with("eeee9,99", notation).unwrap();
         assert_eq!((floating.size, floating.digits, floating.currency.as_deref()), (11, 6, Some("EUR ")));
         assert_eq!(floating.edit.as_ref().unwrap()[0], Sym::FloatLead('$'));
-        assert!(analyse_with("$$9", notation).unwrap_err().contains("'$'"));
-        assert!(analyse_with("We9", notation).unwrap_err().contains("two different currency symbols"));
-        assert!(analyse_with("E9", notation).unwrap_err().contains("not a PICTURE symbol"));
+        assert!(analyse_with("$$9", notation).unwrap_err().1.contains("'$'"));
+        assert!(analyse_with("We9", notation).unwrap_err().1.contains("two different currency symbols"));
+        assert!(analyse_with("E9", notation).unwrap_err().1.contains("not a PICTURE symbol"));
         assert_eq!(analyse("$9").unwrap().currency.as_deref(), Some("$"));
     }
 
@@ -374,6 +375,6 @@ mod tests {
         assert_eq!((p.category, p.size, p.digits, p.scale), (Category::NumericEdited, 3, 3, 1));
         assert_eq!(p.edit.unwrap(), [Sym::Nine, Sym::Nine, Sym::Implied, Sym::Nine]);
         assert_eq!(blank_when_zero(&analyse("VPP99").unwrap()).unwrap().edit.unwrap(), [Sym::Implied, Sym::Nine, Sym::Nine]);
-        assert!(blank_when_zero(&analyse("S99").unwrap()).unwrap_err().contains("with S"));
+        assert!(blank_when_zero(&analyse("S99").unwrap()).unwrap_err().1.contains("with S"));
     }
 }

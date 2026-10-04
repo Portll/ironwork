@@ -481,12 +481,12 @@ impl<'p> Analysis<'p> {
             .into_iter()
             .map(|((file, line, col), i, leaf)| {
                 let what = if leaf == i { "it".to_owned() } else { format!("{}, which {} holds", name(leaf), name(i)) };
-                let message = if self.strict {
-                    format!("INITCHECK(STRICT): {} may be used uninitialized: a path to this statement does not set {what} (see {INITCHECK_ANALYSIS})", name(i))
+                let (catalogued, message) = if self.strict {
+                    (syntax::messages::IWC0289, format!("INITCHECK(STRICT): {} may be used uninitialized: a path to this statement does not set {what} (see {INITCHECK_ANALYSIS})", name(i)))
                 } else {
-                    format!("INITCHECK: {} may be used uninitialized: no path to this statement sets {what} (see {INITCHECK_ANALYSIS})", name(i))
+                    (syntax::messages::IWC0290, format!("INITCHECK: {} may be used uninitialized: no path to this statement sets {what} (see {INITCHECK_ANALYSIS})", name(i)))
                 };
-                Error::warning(Pos { file, line, col }, message)
+                catalogued.at(Pos { file, line, col }, message)
             })
             .collect()
     }

@@ -4,6 +4,9 @@
 
 use crate::{Error, Pos, Severity};
 
+/// Why something is refused before its place is known: the catalogue's message and its text.
+pub type Refused = (Message, String);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Message {
     pub id: &'static str,
@@ -85,7 +88,6 @@ catalogue! {
     IWC0044 Severe "REDEFINES {target}: no earlier item of that name at this level";
     IWC0045 Severe "a SYNCHRONIZED item at the start of a REDEFINES would need {slack} slack bytes: the redefined item must be on a {message}-byte boundary";
     IWC0046 Severe "{clause} names {name}, which is not a file";
-    IWC0047 Severe "ALPHABET {name}: {message}";
     IWC0048 Severe "OCCURS DEPENDING ON {object}: the object cannot follow an OCCURS DEPENDING ON table in its record";
     IWC0049 Severe "OCCURS DEPENDING ON {object}: not a numeric data item";
     IWC0050 Severe "PROCEDURE DIVISION USING {param}: not an 01 or 77 item of the LINKAGE SECTION";
@@ -298,6 +300,38 @@ catalogue! {
     IWC0257 Severe "ACCEPT ... FROM {name}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it from the job step's PARM";
     IWC0258 Severe "DISPLAY UPON ARGUMENT-NUMBER: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0259 Severe "DISPLAY UPON ARGUMENT-NUMBER: it shows one numeric item or literal, the number of the argument the next ACCEPT ... FROM ARGUMENT-VALUE takes";
+    IWC0260 Severe "PICTURE {picture}: P must be one string of scaling positions at the left or right end of the digits";
+    IWC0261 Severe "PICTURE {picture}: {character} is not a PICTURE symbol";
+    IWC0262 Severe "PICTURE {picture}: more than 134217727 character positions";
+    IWC0263 Severe "PICTURE {picture}: more than 31 digits";
+    IWC0264 Severe "PICTURE {picture}: mixes symbols of different categories";
+    IWC0265 Severe "PICTURE {picture}: {character} cannot be in a PICTURE of {symbol}, which takes {symbol} and B only";
+    IWC0266 Severe "PICTURE {picture}: more character positions than a DBCS item holds";
+    IWC0267 Severe "BLANK WHEN ZERO cannot be given for a PICTURE with S";
+    IWC0268 Severe "PICTURE {picture}: an edited PICTURE longer than 4096 positions";
+    IWC0269 Severe "PICTURE {picture}: S and N are not allowed in an edited PICTURE";
+    IWC0270 Severe "PICTURE {picture}: an alphanumeric-edited PICTURE takes only X, A, 9, B, 0 and /";
+    IWC0271 Severe "PICTURE {picture}: two floating insertion strings";
+    IWC0272 Severe "PICTURE {picture}: {character} is not a numeric-edited symbol";
+    IWC0273 Severe "PICTURE {picture}: more than one decimal point";
+    IWC0274 Severe "PICTURE {picture}: a numeric-edited PICTURE needs 1 to 31 digit positions";
+    IWC0275 Severe "PICTURE {picture}: bad repetition ({count})";
+    IWC0276 Severe "PICTURE {picture}: a repetition with nothing to repeat";
+    IWC0277 Severe "PICTURE {picture}: two different currency symbols";
+    IWC0278 Severe "PICTURE {picture}: '$' is not a currency symbol of this program, whose CURRENCY SIGN clauses or CURRENCY option name others";
+    IWC0279 Severe "{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: not an alphabet-name of SPECIAL-NAMES";
+    IWC0280 Severe "{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: the character X'{hex}' is given more than one position";
+    IWC0281 Severe "{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: {number} is not an ordinal position from 1 to 256";
+    IWC0282 Severe "{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: NULL cannot be in an ALPHABET clause";
+    IWC0283 Severe "{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: a national literal cannot be in an ALPHABET clause";
+    IWC0284 Severe "{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: a DBCS literal cannot be in an ALPHABET clause";
+    IWC0285 Severe "{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: ALL cannot be in an ALPHABET clause";
+    IWC0286 Severe "{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: a literal of THROUGH or ALSO must be one character";
+    IWC0287 Severe "FUNCTION {name}: an ALL subscript stands for a varying number of arguments, and {name} takes {count}";
+    IWC0288 Severe "FUNCTION {name}: {class} and {class} arguments, where all must be of the same class";
+    IWC0289 Warning "INITCHECK(STRICT): {item} may be used uninitialized: a path to this statement does not set {it} (see {analysis})";
+    IWC0290 Warning "INITCHECK: {item} may be used uninitialized: no path to this statement sets {it} (see {analysis})";
+    IWC0291 Severe "{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: {a character the program's code page does not hold}";
     IWL0001 Severe "lowering: {table} exceeds the LIR's limit";
     IWL0002 Severe "lowering: the lowered program is invalid: {why}";
     IWL0003 Severe "LOCAL-STORAGE exceeds the interpreter's {MAX STORAGE} bytes";
@@ -307,6 +341,8 @@ catalogue! {
     IWO0001 Severe "CBL {option}: {why}";
     IWO0002 Error "CBL CURRENCY: code page {codepage} reads its byte as {character}, which cannot be a currency symbol";
     IWO0003 Warning "CBL NODBCS: NSYMBOL(NATIONAL) requires DBCS, which is in effect";
+    IWO0004 Severe "SOURCE_DATE_EPOCH={value}: not a whole number of seconds from 0 to 253402300799";
+    IWO0005 Severe "{a flag this compiler does not take}";
     IWP0001 Severe "no mapset {to ascii uppercase} among the {sets} in the file";
     IWP0002 Informational "IGYPS2091-W not given: the program ends with EXEC CICS {command}, which the CICS translator turns into a CALL; --cics-return-warning=always gives the warning, =never drops this note";
     IWP0003 Severe "EXEC SQL {command}: {why}";
@@ -351,6 +387,7 @@ catalogue! {
     IWP0042 Severe "{kind}({name}): a {kind} name is at most {limit} characters";
     IWP0043 Severe "attribute value for '{key}' exceeds 256 characters";
     IWP0044 Severe "unbalanced '(' in attribute value";
+    IWP0045 Severe "{why the BMS source cannot be read}";
     IWR0001 Severe "XML PARSE VALIDATING WITH {schema}: the schema is in IBM's Optimized Schema Representation (OSR), which ironwork does not read";
     IWR0002 Severe "{verb} is not a statement ironwork for COBOL supports yet";
     IWR0003 Severe "{clause} is not a data description clause ironwork for COBOL supports yet";
@@ -501,6 +538,8 @@ catalogue! {
     IWS0092 Severe "a literal runs to the end of the line with no continuation";
     IWS0093 Severe "a continued literal must resume with its quote";
     IWS0094 Severe "{shown}: the source-format directives >>SOURCE and $SET SOURCEFORMAT, giving FREE or FIXED, are the only compiler directives ironwork reads";
+    IWS0095 Severe "CURRENCY SIGN {literal} is {character} in the program's code page, which cannot be a PICTURE currency symbol";
+    IWS0096 Severe "CURRENCY SIGN {literal} is {value} in the program's code page, which contains a digit, +, -, . or ,";
     IWX0001 Warning "free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}";
     IWX0002 Warning "constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry";
     IWX0003 Warning "<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =";

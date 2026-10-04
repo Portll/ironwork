@@ -4,6 +4,7 @@
 
 use numeric::Quote;
 use syntax::ast::{Alphabet, AlphabetEntry, Environment, Figurative, Literal};
+use syntax::messages::Refused;
 use zarch::ebcdic::{self, CodePage, Collation};
 
 pub struct Sequence {
@@ -22,20 +23,20 @@ impl Sequence {
     }
 
     /// The program's sequence: its PROGRAM COLLATING SEQUENCE, else EBCDIC.
-    pub fn program(environment: &Environment, page: &CodePage, quote: Quote) -> Result<Self, String> {
+    pub fn program(environment: &Environment, page: &CodePage, quote: Quote) -> Result<Self, Refused> {
         match &environment.collating_sequence {
-            Some(name) => Self::named(environment, name, page, quote).map_err(|m| format!("PROGRAM COLLATING SEQUENCE {name}: {m}")),
+            Some(name) => Self::named(environment, name, page, quote).map_err(|(message, m)| (message, format!("PROGRAM COLLATING SEQUENCE {name}: {m}"))),
             None => Ok(Self { quote, ..Self::native() }),
         }
     }
 
-    pub fn named(environment: &Environment, name: &str, page: &CodePage, quote: Quote) -> Result<Self, String> {
-        let (_, alphabet) = environment.alphabets.iter().find(|(n, _)| n == name).ok_or("not an alphabet-name of SPECIAL-NAMES")?;
+    pub fn named(environment: &Environment, name: &str, page: &CodePage, quote: Quote) -> Result<Self, Refused> {
+        let (_, alphabet) = environment.alphabets.iter().find(|(n, _)| n == name).ok_or_else(|| (syntax::messages::IWC0279, "not an alphabet-name of SPECIAL-NAMES".to_owned()))?;
         Self::of(alphabet, page, quote)
     }
 
     /// STANDARD-1 and STANDARD-2 are 7-bit ASCII's order: ASCII_COLLATION in numeric::assumptions.
-    pub fn of(alphabet: &Alphabet, page: &CodePage, quote: Quote) -> Result<Self, String> {
+    pub fn of(alphabet: &Alphabet, page: &CodePage, quote: Quote) -> Result<Self, Refused> {
         let sequence = match alphabet {
             Alphabet::Ebcdic | Alphabet::Native => Self::native(),
             Alphabet::Standard1 | Alphabet::Standard2 => {
@@ -105,7 +106,7 @@ impl Sequence {
     }
 }
 
-fn literal_positions(entries: &[AlphabetEntry], page: &CodePage, quote: Quote) -> Result<Vec<Vec<u8>>, String> {
+fn literal_positions(entries: &[AlphabetEntry], page: &CodePage, quote: Quote) -> Result<Vec<Vec<u8>>, Refused> {
     let mut positions: Vec<Vec<u8>> = Vec::new();
     for entry in entries {
         match entry {
@@ -124,7 +125,7 @@ fn literal_positions(entries: &[AlphabetEntry], page: &CodePage, quote: Quote) -
     let mut seen = [false; 256];
     for &b in positions.iter().flatten() {
         if std::mem::replace(&mut seen[b as usize], true) {
-            return Err(format!("the character X'{b:02X}' is given more than one position"));
+            return Err((syntax::messages::IWC0280, format!("the character X'{b:02X}' is given more than one position")));
         }
     }
     Ok(positions)
@@ -133,19 +134,19 @@ fn literal_positions(entries: &[AlphabetEntry], page: &CodePage, quote: Quote) -
 /// The characters an ALPHABET literal gives: its own; for a number, the character at that
 /// position of EBCDIC; for a figurative constant, its EBCDIC character (ALPHABET_LITERALS in
 /// numeric::assumptions).
-fn characters(literal: &Literal, page: &CodePage, quote: Quote) -> Result<Vec<u8>, String> {
+fn characters(literal: &Literal, page: &CodePage, quote: Quote) -> Result<Vec<u8>, Refused> {
     Ok(match literal {
-        Literal::Alnum(s) => page.encode(s).map_err(|e| e.to_string())?,
+        Literal::Alnum(s) => page.encode(s).map_err(|e| (syntax::messages::IWC0291, e.to_string()))?,
         Literal::Hex(b) => b.clone(),
         Literal::Number(n) => match n.parse::<u16>() {
             Ok(k @ 1..=256) if n.bytes().all(|c| c.is_ascii_digit()) => vec![(k - 1) as u8],
-            _ => return Err(format!("{n} is not an ordinal position from 1 to 256")),
+            _ => return Err((syntax::messages::IWC0281, format!("{n} is not an ordinal position from 1 to 256"))),
         },
-        Literal::Figurative(Figurative::Null) => return Err("NULL cannot be in an ALPHABET clause".into()),
+        Literal::Figurative(Figurative::Null) => return Err((syntax::messages::IWC0282, "NULL cannot be in an ALPHABET clause".into())),
         Literal::Figurative(f) => vec![native_figurative(*f, quote)],
-        Literal::National(_) => return Err("a national literal cannot be in an ALPHABET clause".into()),
-        Literal::Dbcs(_) => return Err("a DBCS literal cannot be in an ALPHABET clause".into()),
-        Literal::All(_) => return Err("ALL cannot be in an ALPHABET clause".into()),
+        Literal::National(_) => return Err((syntax::messages::IWC0283, "a national literal cannot be in an ALPHABET clause".into())),
+        Literal::Dbcs(_) => return Err((syntax::messages::IWC0284, "a DBCS literal cannot be in an ALPHABET clause".into())),
+        Literal::All(_) => return Err((syntax::messages::IWC0285, "ALL cannot be in an ALPHABET clause".into())),
     })
 }
 
@@ -160,9 +161,9 @@ fn native_figurative(f: Figurative, quote: Quote) -> u8 {
     }
 }
 
-fn single(literal: &Literal, page: &CodePage, quote: Quote) -> Result<u8, String> {
+fn single(literal: &Literal, page: &CodePage, quote: Quote) -> Result<u8, Refused> {
     match characters(literal, page, quote)?.as_slice() {
         [b] => Ok(*b),
-        _ => Err("a literal of THROUGH or ALSO must be one character".into()),
+        _ => Err((syntax::messages::IWC0286, "a literal of THROUGH or ALSO must be one character".into())),
     }
 }

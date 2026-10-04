@@ -326,7 +326,7 @@ pub fn build(
         if e.level == 66 {
             continue;
         }
-        let pic = e.picture.as_deref().map(|p| picture::analyse_with(p, notation).map_err(|m| Error::at(e.pos, m))).transpose()?;
+        let pic = e.picture.as_deref().map(|p| picture::analyse_with(p, notation).map_err(|(message, m)| message.at(e.pos, m))).transpose()?;
         items[index].kind = kind(e, &items[index], usages[index], signs[index], pic.as_ref(), &mut edits)?;
         if currencies.len() < edits.len() {
             currencies.push(pic.as_ref().and_then(|p| p.currency.clone()).unwrap_or_default());
@@ -715,7 +715,7 @@ fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, sign: Option<SignClaus
     let blank_numeric;
     let pic = match pic.category {
         Category::Numeric if e.blank_when_zero && usage == Usage::Display => {
-            blank_numeric = picture::blank_when_zero(pic).map_err(|m| Error::at(e.pos, m))?;
+            blank_numeric = picture::blank_when_zero(pic).map_err(|(message, m)| message.at(e.pos, m))?;
             &blank_numeric
         }
         Category::NumericEdited => pic,

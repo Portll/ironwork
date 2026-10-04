@@ -4,11 +4,11 @@
 use super::*;
 
 fn lax(item: &str, what: &str) -> String {
-    format!("warning: INITCHECK: {item} may be used uninitialized: no path to this statement sets {what} (see C224)")
+    format!("warning: IWC0290-W INITCHECK: {item} may be used uninitialized: no path to this statement sets {what} (see C224)")
 }
 
 fn strict(item: &str, what: &str) -> String {
-    format!("warning: INITCHECK(STRICT): {item} may be used uninitialized: a path to this statement does not set {what} (see C224)")
+    format!("warning: IWC0289-W INITCHECK(STRICT): {item} may be used uninitialized: a path to this statement does not set {what} (see C224)")
 }
 
 const YZ: &str = "       01  Y PIC X.\n       01  Z PIC X.\n";

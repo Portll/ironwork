@@ -19,7 +19,7 @@ pub fn find_mapset(libraries: &Libraries, name: &str) -> Option<Result<Mapset, E
 pub(crate) fn load(libraries: &Libraries, name: &str, library: Option<&str>) -> Option<(PathBuf, Result<Mapset, Error>)> {
     let path = libraries.find_bms(name, library)?;
     let mapset = std::fs::read(&path)
-        .map_err(|e| Error::at(Pos::default(), e.to_string()))
+        .map_err(|e| crate::messages::IWP0045.at(Pos::default(), e.to_string()))
         .map(|bytes| crate::copy::decode(&bytes))
         .and_then(|text| parse(&text))
         .and_then(|mut sets| {

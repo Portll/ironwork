@@ -212,7 +212,7 @@ fn initcheck_warns_at_compile_time_with_return_code_4_and_the_program_runs() {
         format!("{card}       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  Y PIC X VALUE '7'.\n       01  Z PIC X.\n       PROCEDURE DIVISION.\n           IF Y > '5'\n             MOVE '2' TO Z\n           END-IF\n           DISPLAY Z\n           GOBACK.\n")
     };
     let strict = Source::new("initcheck-strict", &program("       CBL INITCHECK(STRICT)\n"));
-    let warning = format!("{}:12:12: warning: INITCHECK(STRICT): Z may be used uninitialized: a path to this statement does not set it (see C224)\n", strict.path());
+    let warning = format!("{}:12:12: warning: IWC0289-W INITCHECK(STRICT): Z may be used uninitialized: a path to this statement does not set it (see C224)\n", strict.path());
     let checked = ironwork(&["check", strict.path()]);
     assert_eq!((checked.status.code(), stderr(&checked)), (Some(4), warning.clone()));
     let ran = ironwork(&["run", strict.path()]);
@@ -228,7 +228,7 @@ const VALIDATING: &str = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. V.
 const REFUSED: &str = "XML PARSE VALIDATING WITH OSR: the schema is in IBM's Optimized Schema Representation (OSR), which ironwork does not read";
 
 #[test]
-fn a_catalogued_message_carries_its_id_in_text_and_json_and_an_uncatalogued_one_none() {
+fn a_catalogued_message_carries_its_id_in_text_and_json() {
     let refused = Source::new("validating", VALIDATING);
     let path = refused.path();
     let text = ironwork(&["check", path]);
@@ -242,9 +242,9 @@ fn a_catalogued_message_carries_its_id_in_text_and_json_and_an_uncatalogued_one_
     assert_eq!(ran.status.code(), Some(241));
     assert!(stderr(&ran).starts_with("{\"col\":26,") && stderr(&ran).ends_with(&not_run(path, 12)), "{}", stderr(&ran));
 
-    let uncatalogued = Source::new("uncatalogued-json", "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  X PIC 9(40).\n       PROCEDURE DIVISION.\n           GOBACK.\n");
-    let json = ironwork(&["check", uncatalogued.path(), "--diagnostics", "json"]);
-    let object = format!("{{\"col\":8,\"file\":\"{}\",\"id\":null,\"line\":5,\"member\":null,\"message\":\"PICTURE 9(40): more than 31 digits\",\"severity\":\"S\"}}\n", uncatalogued.path());
+    let picture = Source::new("picture-json", "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  X PIC 9(40).\n       PROCEDURE DIVISION.\n           GOBACK.\n");
+    let json = ironwork(&["check", picture.path(), "--diagnostics", "json"]);
+    let object = format!("{{\"col\":8,\"file\":\"{}\",\"id\":\"IWC0263\",\"line\":5,\"member\":null,\"message\":\"PICTURE 9(40): more than 31 digits\",\"severity\":\"S\"}}\n", picture.path());
     assert_eq!(stderr(&json), object);
 }
 

@@ -57,7 +57,7 @@ impl<'p> Machine<'p, '_, '_> {
         let sequence = match &st.collating {
             Some(name) => {
                 named = crate::collating::Sequence::named(&self.program.environment, name, self.page, self.options.quote)
-                    .map_err(|m| Abend::ironwork(format!("COLLATING SEQUENCE {name}: {m}"), st.pos))?;
+                    .map_err(|(_, m)| Abend::ironwork(format!("COLLATING SEQUENCE {name}: {m}"), st.pos))?;
                 &named
             }
             None if file => self.collating,

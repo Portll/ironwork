@@ -298,8 +298,8 @@ fn draft_group(
         };
         let analysed = match picture::analyse_with(&picture, notation) {
             Ok(p) => p,
-            Err(m) => {
-                errors.push(Error::at(e.pos, m));
+            Err((message, m)) => {
+                errors.push(message.at(e.pos, m));
                 continue;
             }
         };
