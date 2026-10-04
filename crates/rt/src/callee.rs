@@ -265,14 +265,13 @@ pub fn entry_copy(dynamic: bool, dialect: Dialect) -> bool {
     dynamic && dialect == Dialect::Ibm
 }
 
-/// CANCEL of a program a dynamic CALL entered, or of a contained program; a program only ever
-/// called statically is left as it is (Language Reference SC27-8713-03, p. 327; Programming Guide
-/// SC27-8714-03, pp. 399, 548).
+/// CANCEL of a program a dynamic CALL entered; one only ever called statically, a contained one
+/// too, is left as it is: "No action is taken when a CANCEL statement is executed if the specified
+/// program has not been dynamically called" (Language Reference SC27-8713-03, CANCEL statement;
+/// Programming Guide SC27-8714-03, Canceling a subprogram).
 pub fn cancel<H: Clone, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, name: &str, pos: Pos) -> R<()> {
     let Some(index) = unit.find(name) else { return Ok(()) };
-    let target = &unit.programs[index].name;
-    let contained = unit.programs.iter().any(|p| p.compiled.as_ref().is_some_and(|c| L::nested(c).contains(target)));
-    if !unit.programs[index].dynamic && !contained {
+    if !unit.programs[index].dynamic {
         return Ok(());
     }
     if unit.programs[index].active {

@@ -289,6 +289,33 @@ fn the_initial_option_makes_every_program_of_the_source_initial_and_noinitial_le
 }
 
 #[test]
+fn cancel_acts_only_on_a_contained_program_a_dynamic_call_entered() {
+    let source = [
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. MAIN.\n       PROCEDURE DIVISION.\n",
+        &line("CALL 'SUB'"),
+        &line("GOBACK."),
+        "       END PROGRAM MAIN.\n",
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. SUB.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n",
+        "       01  WS-NAME PIC X(8) VALUE 'COUNTER'.\n       PROCEDURE DIVISION.\n",
+        &line("CALL 'COUNTER'"),
+        &line("CANCEL 'COUNTER'"),
+        &line("CALL 'COUNTER'"),
+        &line("CALL WS-NAME"),
+        &line("CANCEL 'COUNTER'"),
+        &line("CALL WS-NAME"),
+        &line("GOBACK."),
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. COUNTER.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n",
+        "       01  N PIC 9 VALUE 0.\n       PROCEDURE DIVISION.\n",
+        &line("ADD 1 TO N"),
+        &line("DISPLAY N"),
+        &line("GOBACK."),
+        "       END PROGRAM COUNTER.\n       END PROGRAM SUB.\n",
+    ]
+    .concat();
+    assert_eq!(run_unit(&source, vec![], "").0, "1\n2\n3\n1\n");
+}
+
+#[test]
 fn thread_forces_noinitial_on_the_programs_it_compiles() {
     let source = two_programs(
         "",

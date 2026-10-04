@@ -717,13 +717,14 @@ before anywhere else. The directory records nesting and COMMON, and neither chan
 
 ### 8.4 CANCEL, ON EXCEPTION and a missing program
 
-- **CANCEL** (`rt::callee::cancel`, callee.rs:251) looks the program up with `RunUnit::find`, so it
-  reaches only programs already loaded. It does nothing for a name not loaded, or for a program only
-  ever called statically that no loaded program contains; it abends if the program is active,
-  closes its files, and clears `initialized`, so the next CALL initialises WORKING-STORAGE again
-  from `Storage.image`, and does the same for each program it contains, named by the directory's
-  `parent` for a program from a module. The module is data, and does not change. Whether IBM lets
-  CANCEL reach a statically called program is question 6.
+- **CANCEL** (`rt::callee::cancel`) looks the program up with `RunUnit::find`, so it reaches only
+  programs already loaded. It does nothing for a name not loaded, or for a program no dynamic CALL
+  has entered, a contained one too: "No action is taken when a CANCEL statement is executed if the
+  specified program has not been dynamically called" (Language Reference, CANCEL statement;
+  question 6). Otherwise it abends if the program is active, closes its files, and clears
+  `initialized`, so the next CALL initialises WORKING-STORAGE again from `Storage.image`, and does
+  the same for each program it contains, named by the directory's `parent` for a program from a
+  module. The module is data, and does not change.
 - **Not found** is `LoadError::NotFound`: no program read, no `NAME.iwm`, no source. A CALL with ON
   EXCEPTION runs that block, and one without ends with the interpreter's ending (C450).
 - **A LINK or XCTL** through EXEC CICS gets PGMIDERR for the same case.
@@ -1007,8 +1008,9 @@ scenarios that wait for question 5 do not run yet.
    does COMMON reach: siblings of its container only, or every program contained anywhere in its
    container? That needs an Enterprise COBOL run, and is recorded as a V-series assumption until
    then.
-6. **CANCEL of a static callee, and of a nested program.** This document keeps today's behaviour:
-   reset for a loaded program, nothing for one not registered by name. Does Enterprise COBOL agree?
+6. **CANCEL of a static callee, and of a nested program.** Decided 2026-10-04: as the Language
+   Reference documents it. CANCEL does nothing for a program no dynamic CALL entered, a contained
+   one too, and cancelling a program cancels the programs it contains (§8.4).
 7. **Directory in abend lines.** Is a bare `PAYROLL.cbl` in an abend acceptable, or should the
    default keep a path relative to the compile invocation, at the price that a module depends on
    where it was built?
