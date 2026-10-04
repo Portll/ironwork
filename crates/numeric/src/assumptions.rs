@@ -345,6 +345,7 @@ pub const STATEMENT_STRING_KINDS: &str = "C402";
 pub const UPSI_SWITCHES: &str = "C410";
 pub const UPSI_FROM_THE_PARM: &str = "C411";
 pub const SET_SWITCH_CONDITION_TRUE: &str = "C412";
+pub const ACCEPT_FROM_CONSOLE: &str = "C440";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 
@@ -2176,6 +2177,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: SET_SWITCH_CONDITION_TRUE,
         claim: "SET condition-name TO TRUE of an UPSI switch's condition-name sets the switch to that status when the switch's entry has a mnemonic-name, which the Language Reference makes the condition-names' conditional variable (SC27-8713-03, p. 127), and is refused when it has none, SET TO TRUE needing a conditional variable (p. 443); SET TO FALSE is refused, a switch-status condition having no WHEN SET TO FALSE value. cobc 3.2 refuses SET TO TRUE of a switch-status condition, and a condition-name qualified by a mnemonic-name, in both cases",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ACCEPT_FROM_CONSOLE,
+        claim: "ACCEPT ... FROM CONSOLE, or from a mnemonic-name SPECIAL-NAMES gives CONSOLE, reads standard input as ACCEPT from the system input device does, record after record until the receiver is full. On z/OS the operator replies at the console, a system message code and AWAITING REPLY shown first, each reply at most 114 characters, left-justified and padded with spaces, and an empty reply leaving the receiver unchanged (Language Reference SC27-8713-03, pp. 307-308); a run on ironwork has no operator, and a test or job gives the replies as standard input's lines",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

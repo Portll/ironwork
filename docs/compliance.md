@@ -290,7 +290,12 @@ repositories in the first sample where it is the first refusal under extended.
 - **ACCEPT ... FROM ENVIRONMENT, SET ENVIRONMENT** (30, 12): GnuCOBOL's one-statement forms, which
   most of these programs use, are not Micro Focus's (DISPLAY UPON ENVIRONMENT-NAME then ACCEPT FROM
   ENVIRONMENT-VALUE), and the GnuCOBOL programs that set the environment set the screen runtime's
-  options.
+  options. ACCEPT reads SYSIN, SYSIPT and CONSOLE, or a mnemonic-name for one, and any other FROM
+  operand is refused: GnuCOBOL's COMMAND-LINE, ARGUMENT-NUMBER, ARGUMENT-VALUE and
+  ENVIRONMENT-VALUE, its screen sources (ESCAPE, EXCEPTION, LINES, COLUMNS, CRT) and USER, and any
+  other name. COMMAND-LINE, the whole command line under Micro Focus and GnuCOBOL alike, could read
+  a job step's PARM under extended, and ARGUMENT-VALUE its words; that is not done. Assumption C440
+  says how ironwork reads the console.
 - **OCCURS at level 01 or 77** (18, 10): a record that is a table needs a change to the storage
   layout; the next candidate by evidence.
 - **Split keys** (`RECORD KEY IS name = item item`; 35, 5): an indexed file keyed on items that are

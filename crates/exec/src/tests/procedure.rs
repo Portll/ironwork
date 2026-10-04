@@ -463,10 +463,29 @@ fn what_is_not_enterprise_cobol_is_refused_as_such() {
         ("MOVE 'A' & 'B' TO A.", "literal concatenation with & is not Enterprise COBOL's"),
         ("SET ENVIRONMENT 'X' TO 'Y'.", "SET ENVIRONMENT is GnuCOBOL's"),
         ("ACCEPT A FROM ENVIRONMENT 'X'.", "ACCEPT ... FROM ENVIRONMENT is GnuCOBOL's"),
+        ("ACCEPT A FROM COMMAND-LINE.", "ACCEPT ... FROM COMMAND-LINE: GnuCOBOL's, not Enterprise COBOL's"),
+        ("ACCEPT A FROM ARGUMENT-VALUE.", "ACCEPT ... FROM ARGUMENT-VALUE: GnuCOBOL's, not Enterprise COBOL's"),
+        ("ACCEPT A FROM KEYBOARD.", "ACCEPT ... FROM KEYBOARD: neither an environment-name ACCEPT reads, SYSIN, SYSIPT or CONSOLE, nor a mnemonic-name for one"),
     ] {
         let message = refused(body);
         assert!(message.contains(named) && !message.contains("not supported"), "{body}: {message}");
     }
+}
+
+/// Language Reference SC27-8713-03, pp. 126, 307: ACCEPT reads SYSIN, SYSIPT and CONSOLE, by
+/// environment-name or by a mnemonic-name for one, and nothing else.
+#[test]
+fn accept_reads_the_input_devices_ibm_names_and_a_mnemonic_name_for_one() {
+    let with_names = |body: &str| {
+        let special = "       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       SPECIAL-NAMES.\n           SYSIN IS CARDS CONSOLE IS OPERATOR SYSOUT IS PRINTER.\n";
+        program("", "       01  A PIC X(4).\n", &[line(body), line("DISPLAY A"), line("GOBACK.")].concat()).replace("       DATA DIVISION.\n", &format!("{special}       DATA DIVISION.\n"))
+    };
+    for from in ["", " FROM SYSIN", " FROM SYSIPT", " FROM CONSOLE", " FROM CARDS", " FROM OPERATOR"] {
+        let out = Harness::source(&with_names(&format!("ACCEPT A{from}"))).sysin("ABCD\n").run(Executor::Interpreter);
+        assert_eq!(out.out, "ABCD\n", "ACCEPT A{from}: {}", out.err);
+    }
+    let refused = syntax::parse(&with_names("ACCEPT A FROM PRINTER")).unwrap_err().message;
+    assert!(refused.contains("ACCEPT ... FROM PRINTER: a mnemonic-name for SYSOUT, which ACCEPT does not read"), "{refused}");
 }
 
 fn perform_program(procedure: &[&str]) -> String {

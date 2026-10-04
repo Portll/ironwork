@@ -68,6 +68,12 @@ const XML_PHRASES: &[&str] =
 /// Table 5).
 pub const DEVICE_ENVIRONMENT_NAMES: &[&str] = &["SYSIN", "SYSIPT", "SYSOUT", "SYSLIST", "SYSLST", "SYSPUNCH", "SYSPCH", "CONSOLE"];
 
+/// The environment-names ACCEPT reads from (Language Reference SC27-8713-03, p. 126, Table 5).
+const ACCEPT_DEVICES: &[&str] = &["SYSIN", "SYSIPT", "CONSOLE"];
+
+/// GnuCOBOL's sources for ACCEPT ... FROM that Enterprise COBOL does not have.
+const GNUCOBOL_ACCEPT_SOURCES: &[&str] = &["COMMAND-LINE", "ARGUMENT-NUMBER", "ARGUMENT-VALUE", "ENVIRONMENT-VALUE", "ESCAPE", "EXCEPTION", "LINES", "COLUMNS", "CRT", "USER"];
+
 /// The environment-names a WRITE ADVANCING mnemonic-name can stand for (Language Reference,
 /// SPECIAL-NAMES, Table 5): channels C01 to C12, CSP, pockets S01 to S05, and AFP-5A.
 fn advancing_environment_name(word: &str) -> bool {
@@ -1659,12 +1665,16 @@ impl Parser<'_> {
                     return Err(Error::at(pos, "ACCEPT ... FROM ENVIRONMENT is GnuCOBOL's, not Enterprise COBOL's"));
                 }
                 let from = if self.accept_word("FROM") {
-                    match self.name("SYSIN, DATE, DAY, DAY-OF-WEEK or TIME")?.as_str() {
+                    let at = self.pos();
+                    match self.name("SYSIN, SYSIPT, CONSOLE, a mnemonic-name for one, DATE, DAY, DAY-OF-WEEK or TIME")?.as_str() {
                         "DATE" => AcceptFrom::Date { four_digit_year: self.accept_word("YYYYMMDD") },
                         "DAY" => AcceptFrom::Day { four_digit_year: self.accept_word("YYYYDDD") },
                         "DAY-OF-WEEK" => AcceptFrom::DayOfWeek,
                         "TIME" => AcceptFrom::Time,
-                        _ => AcceptFrom::Sysin,
+                        name => {
+                            self.accept_device(name, at)?;
+                            AcceptFrom::Sysin
+                        }
                     }
                 } else {
                     AcceptFrom::Sysin
@@ -2784,6 +2794,25 @@ impl Parser<'_> {
         }
         self.accept_word("END-SEARCH");
         Ok(Search { table, all, varying, at_end, whens, pos })
+    }
+
+    /// ACCEPT's FROM operand other than the date and time: SYSIN, SYSIPT or CONSOLE, or a
+    /// mnemonic-name SPECIAL-NAMES gives one of them, which takes precedence over an
+    /// environment-name of its spelling (Language Reference SC27-8713-03, pp. 126-127, 307-308).
+    /// The console's reply is read as the system input device is (assumption C440).
+    fn accept_device(&self, name: &str, pos: Pos) -> R<()> {
+        let device = self.mnemonics.iter().find(|(m, _)| m == name).map_or(name, |(_, e)| e.as_str());
+        if ACCEPT_DEVICES.contains(&device) {
+            return Ok(());
+        }
+        let why = if GNUCOBOL_ACCEPT_SOURCES.contains(&name) {
+            "GnuCOBOL's, not Enterprise COBOL's".to_owned()
+        } else if device == name {
+            "neither an environment-name ACCEPT reads, SYSIN, SYSIPT or CONSOLE, nor a mnemonic-name for one".to_owned()
+        } else {
+            format!("a mnemonic-name for {device}, which ACCEPT does not read")
+        };
+        Err(Error::at(pos, format!("ACCEPT ... FROM {name}: {why}")))
     }
 
     fn set(&mut self) -> R<SetStmt> {
