@@ -742,6 +742,7 @@ impl Parser<'_> {
         let mut f = FileDecl {
             name,
             assign: String::new(),
+            assign_item: None,
             organization: Organization::Sequential,
             access: Access::Sequential,
             record_key: None,
@@ -770,12 +771,30 @@ impl Parser<'_> {
             let clause = self.name("a SELECT clause or a period")?;
             match clause.as_str() {
                 "ASSIGN" => {
-                    self.accept_word("TO");
-                    let target = match self.peek().cloned() {
-                        Some(Tok::Word(w)) | Some(Tok::Alnum(w)) => w,
+                    let using = self.accept_word("USING");
+                    if !using {
+                        self.accept_word("TO");
+                    }
+                    if using || self.accept_word("DYNAMIC") {
+                        let reference = self.reference()?;
+                        f.assign = reference.name.clone();
+                        f.assign_item = Some(AssignItem { reference, explicit: true });
+                        continue;
+                    }
+                    let external = self.is_word("EXTERNAL") && matches!(self.tokens.get(self.at + 1).map(|t| &t.tok), Some(Tok::Word(_) | Tok::Alnum(_)));
+                    if external {
+                        self.at += 1;
+                    }
+                    let at = self.pos();
+                    let (target, word) = match self.peek().cloned() {
+                        Some(Tok::Word(w)) => (w, !external),
+                        Some(Tok::Alnum(w)) => (w, false),
                         _ => return Err(self.error("a DD name after ASSIGN")),
                     };
                     self.at += 1;
+                    if word {
+                        f.assign_item = Some(AssignItem { reference: Ref { name: target.clone(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos: at }, explicit: false });
+                    }
                     let target = target.to_ascii_uppercase();
                     f.assign = target.rsplit('-').next().filter(|_| target.contains("-S-") || target.starts_with("S-") || target.starts_with("AS-")).unwrap_or(&target).to_owned();
                     // Assignment-names after the first are syntax-checked and have no effect (LR p. 142).

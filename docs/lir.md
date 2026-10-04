@@ -1247,7 +1247,10 @@ each execution; the status, the record, the DD and the in-memory file are run-ti
 /// record as long as its largest, which a SORT's records follow (`fixed_length`, machine/sort.rs);
 /// `record_min` the RECORD clause's smallest record, which a variable-length report record is cut
 /// to no shorter than (`ReportFile`); `status` FILE STATUS with the MOVE its two characters take
-/// (`set_status`), None also when it names no data item and no statement names the file.
+/// (`set_status`), None also when it names no data item and no statement names the file;
+/// `assign_item` the data item whose value is the DD name at each OPEN (`--compliance extended`,
+/// compliance.md IWX0007), with the SELECT's position, where the input trace records it; it is not
+/// in a FileDesc's encoding, and the LIR section's end carries it (load-module.md §3.4).
 pub struct FileDesc {
     pub name: SymId, pub assign: SymId, pub organization: Organization, pub access: Access,
     pub optional: bool, pub format: rt::files::Format, pub read_lengths: (u32, u32),
@@ -1257,8 +1260,9 @@ pub struct FileDesc {
     pub keys: Option<IndexKeys>,
     pub relative: Option<RelativeKey>, pub linage: Option<Linage>, pub carriage: Option<Carriage>,
     /// `error` is the file's own USE AFTER EXCEPTION/ERROR procedure (§9.10).
-    pub sort: bool, pub error: Option<RangeId>,
+    pub sort: bool, pub error: Option<RangeId>, pub assign_item: Option<AssignItem>,
 }
+pub struct AssignItem { pub place: PlaceId, pub select: Pos }
 pub struct IndexKeys { pub prime: RecordSpan, pub alternates: Vec<(RecordSpan, bool)> }
 pub struct RecordSpan { pub offset: u32, pub len: u32 }
 /// RECORD IS VARYING DEPENDING ON (`fileio::Depending`): the item, read as an integer and stored as

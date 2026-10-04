@@ -1337,6 +1337,9 @@ impl<'a> Printer<'a> {
         if let Some(r) = d.error {
             text += &format!(" error {}", self.range(r));
         }
+        if let Some(a) = d.assign_item {
+            text += &format!(" assign-item {} @{}", self.place(a.place), a.select);
+        }
         text
     }
 

@@ -1109,6 +1109,7 @@ fn master() -> FileDesc {
         carriage: Some(Carriage { machine: true, reserved: false }),
         sort: false,
         error: Some(1),
+        assign_item: None,
     }
 }
 

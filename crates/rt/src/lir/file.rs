@@ -4,7 +4,9 @@
 
 use super::{IntExpr, MovePlan, Operand, PlaceId, RangeId, SenderCheck, StorePlan, SymId};
 use crate::files::Format;
-use crate::vocab::{Closing, OpenMode};
+use crate::vocab::{Closing, OpenMode, Pos};
+use crate::module::ModuleError;
+use crate::module::codec::{Decode, Encode, Reader, Writer};
 use crate::{codec_enum, codec_struct};
 
 /// A file as SELECT and FD declare it. `format` is how its records are held when its DD does not
@@ -38,6 +40,16 @@ pub struct FileDesc {
     pub sort: bool,
     /// Its own EXCEPTION/ERROR procedure, which comes before one for its open mode.
     pub error: Option<RangeId>,
+    /// The data item ASSIGN names, whose value is the DD name at each OPEN (`--compliance
+    /// extended`).
+    pub assign_item: Option<AssignItem>,
+}
+
+/// ASSIGN's data item, and where the SELECT is, which the input trace records the value at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AssignItem {
+    pub place: PlaceId,
+    pub select: Pos,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -202,9 +214,59 @@ pub enum StartKey {
     RelativeKey,
 }
 
-codec_struct!(FileDesc {
-    name, assign, organization, access, optional, format, read_lengths, fixed, record_min, depending, status, keys, relative, linage, carriage, sort, error,
-} check file_valid);
+// A FileDesc's encoding is 0.5's, without `assign_item`: the LIR section's end carries the files
+// that have one (load-module.md §3.4), which keeps the change additive (§8.1).
+impl Encode for FileDesc {
+    fn encode(&self, w: &mut Writer) {
+        let FileDesc { name, assign, organization, access, optional, format, read_lengths, fixed, record_min, depending, status, keys, relative, linage, carriage, sort, error, assign_item: _ } = self;
+        name.encode(w);
+        assign.encode(w);
+        organization.encode(w);
+        access.encode(w);
+        optional.encode(w);
+        format.encode(w);
+        read_lengths.encode(w);
+        fixed.encode(w);
+        record_min.encode(w);
+        depending.encode(w);
+        status.encode(w);
+        keys.encode(w);
+        relative.encode(w);
+        linage.encode(w);
+        carriage.encode(w);
+        sort.encode(w);
+        error.encode(w);
+    }
+}
+
+impl Decode for FileDesc {
+    fn decode(r: &mut Reader<'_>) -> Result<Self, ModuleError> {
+        let at = r.position();
+        let file = FileDesc {
+            name: Decode::decode(r)?,
+            assign: Decode::decode(r)?,
+            organization: Decode::decode(r)?,
+            access: Decode::decode(r)?,
+            optional: Decode::decode(r)?,
+            format: Decode::decode(r)?,
+            read_lengths: Decode::decode(r)?,
+            fixed: Decode::decode(r)?,
+            record_min: Decode::decode(r)?,
+            depending: Decode::decode(r)?,
+            status: Decode::decode(r)?,
+            keys: Decode::decode(r)?,
+            relative: Decode::decode(r)?,
+            linage: Decode::decode(r)?,
+            carriage: Decode::decode(r)?,
+            sort: Decode::decode(r)?,
+            error: Decode::decode(r)?,
+            assign_item: None,
+        };
+        file_valid(&file).map_err(|reason| r.malformed(at, reason))?;
+        Ok(file)
+    }
+}
+codec_struct!(AssignItem { place, select });
 codec_struct!(RecordDepending { item, lengths });
 codec_enum!(Organization { Sequential = 0, LineSequential = 1, Indexed = 2, Relative = 3 });
 codec_enum!(Access { Sequential = 0, Random = 1, Dynamic = 2 });

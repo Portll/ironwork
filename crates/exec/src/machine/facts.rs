@@ -190,6 +190,7 @@ impl<'p> Machine<'p, '_, '_> {
             index: k,
             name: &decl.name,
             assign: &decl.assign,
+            assign_item: decl.assign_item.as_ref().map(|a| (&a.reference, decl.pos)),
             organization: match decl.organization {
                 Organization::Sequential => lir::Organization::Sequential,
                 Organization::LineSequential => lir::Organization::LineSequential,
@@ -257,6 +258,10 @@ impl<'a> Files<&'a Ref, Int<'a>> for Machine<'_, '_, '_> {
 
     fn notify(&mut self, event: Event<'_>) {
         self.unit.notify(event);
+    }
+
+    fn sink(&mut self, kind: &'static str, pos: Pos, operand: &str) {
+        Machine::sink(self, kind, pos, operand);
     }
 
     fn int(&mut self, value: Int<'a>, pos: Pos) -> R<i64> {

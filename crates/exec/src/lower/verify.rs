@@ -228,6 +228,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
         f.error.map_or(Ok(()), |r| range(r, RangeKind::UseProcedure))?;
         f.status.map_or(Ok(()), |(q, _)| place(q))?;
         f.depending.map_or(Ok(()), |d| place(d.item))?;
+        f.assign_item.map_or(Ok(()), |a| place(a.place))?;
         if let Some(r) = &f.relative {
             place(r.place)?;
             int(&r.value)?;

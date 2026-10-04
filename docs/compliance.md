@@ -23,10 +23,13 @@ return code 4 and runs; `-warnings-block` refuses it, as it refuses any program 
 
 ## The extensions
 
-All six are read before the parser sees the program, into constructs Enterprise COBOL has, so the
-interpreter and the VM run them with the code they run anything else with, and a module records
-nothing about them beyond the level. A test runs a program using every one on both executors and
-compares the runs (`exec/src/tests/compliance.rs`).
+The first six are read before the parser sees the program, into constructs Enterprise COBOL has,
+so the interpreter and the VM run them with the code they run anything else with, and a module
+records nothing about them beyond the level. A test runs a program using every one on both
+executors and compares the runs (`exec/src/tests/compliance.rs`). The seventh, ASSIGN to a data
+item, has no Enterprise COBOL form: both executors run it through `rt::fileio`, and a module
+records the item with its file (`lir::FileDesc::assign_item`; `exec/src/tests/assign.rs`). The
+eighth, IWX0008-W, is the compiler's check on a MOVE's sender.
 
 ### IWX0001-W free-form source
 
@@ -128,6 +131,30 @@ DIVISION. came before it`, at PROGRAM-ID. The 2002 standard made the header opti
 under its default, `mf` and `ibm` dialects reads a program, or a contained program, that begins
 with PROGRAM-ID. The comment-entries after it are read as after the header.
 
+### IWX0007-W ASSIGN to a data item
+
+`IWX0007-W ASSIGN to a data item (Micro Focus and GnuCOBOL; Enterprise COBOL's assignment-name is
+never a data item): each OPEN of FILE takes its DD name from ITEM`, at the item's name.
+
+`SELECT file ASSIGN TO name` names a data item when `name` is an alphanumeric or group item's, as
+GnuCOBOL's default assign clause and Micro Focus's ASSIGN(DYNAMIC) read it; `ASSIGN [TO] DYNAMIC
+data-name` and `ASSIGN USING data-name` always name one, and `ASSIGN TO EXTERNAL name` never does. A
+name no data item has stays a DD name. Enterprise COBOL's assignment-name "is not the name of a data
+item, and cannot be contained in a data item" (Language Reference, ASSIGN clause), so under strict
+the name is a DD name, as before, and DYNAMIC and USING are refused (C361).
+
+At each OPEN the item's value, its blanks taken off, is the DD name, folded to upper case: GnuCOBOL
+and Micro Focus map a name with no directory to a file through `DD_name`, and a DD maps one here. A
+value that cannot be a DD name, such as a path, names no DD, nor does a name the run was not given,
+and the OPEN fails as it does for a missing DD, with status 35 for a file that must exist. ironwork
+never opens a host file a program names (C360). CLOSE closes the DD the OPEN found. A file that
+SORT or MERGE reads, writes or describes cannot take its name from a data item: the sort opens its
+files by their DD names.
+
+With `--evidence --trace-marker`, each OPEN records the item's value as a `dynamic-file-path` sink
+at the SELECT, where cobolwork places the finding, with the input of that file's item alone
+(evidence.md §1.1).
+
 ### IWX0008-W an integer or numeric function as a MOVE's sender
 
 `IWX0008-W an integer or numeric function as a MOVE's sender (GnuCOBOL; Enterprise COBOL takes one
@@ -144,9 +171,9 @@ used only where an arithmetic expression can, not as a MOVE's sender` (S), as it
 one (C332). MAX and MIN count as numeric when their first argument is; CONTENT-OF and user-defined
 functions are not refused (C394). `COMPUTE N = FUNCTION NUMVAL(X)` is what IBM allows.
 
-Unlike the six above, this one is not read before the parser: the compiler's check gives the
-warning, and the MOVE moves the function's value at the precision IBM gives the function (C390 to
-C392), as IBM moves a numeric item of that precision. A numeric or numeric-edited receiver takes the
+Unlike IWX0001-W to IWX0006-W, this one is not read before the parser: the compiler's check gives
+the warning, and the MOVE moves the function's value at the precision IBM gives the function (C390
+to C392), as IBM moves a numeric item of that precision. A numeric or numeric-edited receiver takes the
 value. An alphanumeric receiver takes an integer's digits, `00005` for MAX(N M) with N `999` 5 and M
 `9(5)` 4; a value with decimal places, or a floating-point one such as NUMVAL's, is refused at run
 time, as a MOVE of such an item is (p. 404). `--dialect gnucobol` gives the same: cobc moves the
@@ -173,6 +200,10 @@ Micro Focus and GnuCOBOL give it one meaning:
 | ACCEPT FROM ENVIRONMENT, SET ENVIRONMENT | 42 | 20 | refused |
 | OCCURS at level 01 or 77 | 40 | 18 | refused |
 | BINARY-CHAR | 32 | 13 | refused |
+
+IWX0007, ASSIGN to a data item, came later and from elsewhere: cobolwork's `dynamic-file-path`
+findings, 689 of them unlabelled in its 500-repository corpus until ironwork could run such a
+program and trace the name it opens.
 
 Of the 1,764 programs strict refuses (294 repositories), many hold more than one; the free-form
 count includes non-COBOL files named `.cbl` and generated programs, which no reading compiles.

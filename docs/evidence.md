@@ -96,6 +96,7 @@ in it (`exec::unit::Event::Sink`). The operand itself is never recorded.
 | `sink` | operation, where its operand is a data item |
 |---|---|
 | `dynamic-program-load` | CALL of a program named by a data item |
+| `dynamic-file-path` | OPEN of a file whose ASSIGN names a data item (`--compliance extended`, compliance.md IWX0007): the item's value, recorded at the SELECT, each file of the OPEN with its own input |
 | `os-command` | CALL SYSTEM, C$SYSTEM, CBL_EXEC_RUN_UNIT, CBL_GC_HOSTED or BXPSYSTM: the arguments. ironwork runs no operating-system command; the CALL loads a program of that name or fails, or, for an lp or lpr command in a run given DD PRINTER, prints on the virtual printer (README), whose DD and each printed DD are journalled as opened and closed |
 | `log` | DISPLAY (literals included); WRITEQ TD FROM; WRITE OPERATOR TEXT; WRITE JOURNALNAME FROM |
 | `cics-dynamic-transfer` | LINK or XCTL PROGRAM; START TRANSID |
@@ -110,8 +111,8 @@ The names are cobolwork's sink kinds (`lib/dataflow.mjs`), so a label joins a fi
 and line. A CICS operand is recorded before the command runs, so a command ironwork does not carry
 out yet (START, WEB) is still traced before it stops the task; an operand that cannot be read is
 left to the command, so tracing never changes how a run ends. Not traced, because ironwork does not
-run them yet: MQPUT, MQCONN, dynamic SQL, sockets, ASSIGN to a data item, and the sources ACCEPT
-FROM COMMAND-LINE or ENVIRONMENT. PARM reaches a program only through `ironwork job`.
+run them yet: MQPUT, MQCONN, dynamic SQL, sockets, and the sources ACCEPT FROM COMMAND-LINE or
+ENVIRONMENT. PARM reaches a program only through `ironwork job`.
 
 ### 1.2 Statement trace: `--trace-statements FILE`
 

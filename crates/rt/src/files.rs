@@ -410,7 +410,7 @@ impl Keyed {
 
     fn save(&self, format: Format) -> io::Result<()> {
         let Some(path) = self.path.as_ref().filter(|_| self.dirty) else { return Ok(()) };
-        let mut out = Open { mode: OpenMode::Output, format, handle: Handle::Writer(BufWriter::new(File::create(path)?)), head: Head::Start, page: None };
+        let mut out = Open { mode: OpenMode::Output, format, handle: Handle::Writer(BufWriter::new(File::create(path)?)), head: Head::Start, page: None, assigned: None };
         let empty = match format {
             Format::Fixed => vec![0; self.record_len],
             Format::Variable => Vec::new(),
@@ -464,6 +464,8 @@ pub struct Open {
     head: Head,
     /// The logical page of a LINAGE file opened OUTPUT or EXTEND.
     pub page: Option<crate::linage::Page>,
+    /// The DD a file whose ASSIGN names a data item was opened on.
+    pub assigned: Option<String>,
 }
 
 /// A movement of the paper, as a text DD shows it: line feeds, or a form feed.
@@ -513,7 +515,7 @@ pub fn open_keyed(dd: Option<&Dd>, mode: OpenMode, format: Format, keying: Keyin
         }
         keyed.dirty = false;
     }
-    Ok(Open { mode, format, handle: Handle::Keyed(Box::new(keyed)), head: Head::Start, page: None })
+    Ok(Open { mode, format, handle: Handle::Keyed(Box::new(keyed)), head: Head::Start, page: None, assigned: None })
 }
 
 pub fn open(dd: &Dd, mode: OpenMode, format: Format) -> io::Result<Open> {
@@ -525,12 +527,12 @@ pub fn open(dd: &Dd, mode: OpenMode, format: Format) -> io::Result<Open> {
         OpenMode::Output | OpenMode::Extend => Handle::Writer(BufWriter::new(OpenOptions::new().append(true).create(true).open(&dd.path)?)),
         OpenMode::InputOutput => return Err(io::Error::new(io::ErrorKind::Unsupported, "OPEN I-O of a line-sequential file")),
     };
-    Ok(Open { mode, format, handle, head: Head::Start, page: None })
+    Ok(Open { mode, format, handle, head: Head::Start, page: None, assigned: None })
 }
 
 /// An OPTIONAL input file with no DD: every READ is at end.
 pub fn absent() -> Open {
-    Open { mode: OpenMode::Input, format: Format::Fixed, handle: Handle::Empty, head: Head::Start, page: None }
+    Open { mode: OpenMode::Input, format: Format::Fixed, handle: Handle::Empty, head: Head::Start, page: None, assigned: None }
 }
 
 impl Open {

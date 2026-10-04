@@ -24,7 +24,7 @@ pub use class::{Class, ClassPart, Method};
 pub use collating::{Collating, Sequence};
 pub use debug::Debug;
 pub use file::{
-    Access, Advance, Carriage, FileDesc, FileOp, FileVerb, FromMove, IndexKeys, Linage, Organization, Phrase, RecordDepending,
+    Access, Advance, AssignItem, Carriage, FileDesc, FileOp, FileVerb, FromMove, IndexKeys, Linage, Organization, Phrase, RecordDepending,
     RecordSpan, RelativeKey, Spacing, StartKey, StartRel,
 };
 pub use markup::{
@@ -269,10 +269,72 @@ pub struct Services {
     pub scope: Scope,
 }
 
-codec_struct!(Program {
-    id, options, initial, recursive, storage, items, paragraphs, procedure_start, ranges, blocks, places, exprs,
-    conds, consts, plans, services, sql, abends, edits, symbols, debug,
-} check program_valid);
+// The whole program as one value, the files' data items last, as the load module's LIR section
+// carries them after its records (load-module.md §3.4).
+impl crate::module::codec::Encode for Program {
+    fn encode(&self, w: &mut crate::module::codec::Writer) {
+        let Program { id, options, initial, recursive, storage, items, paragraphs, procedure_start, ranges, blocks, places, exprs, conds, consts, plans, services, sql, abends, edits, symbols, debug } = self;
+        id.encode(w);
+        options.encode(w);
+        initial.encode(w);
+        recursive.encode(w);
+        storage.encode(w);
+        items.encode(w);
+        paragraphs.encode(w);
+        procedure_start.encode(w);
+        ranges.encode(w);
+        blocks.encode(w);
+        places.encode(w);
+        exprs.encode(w);
+        conds.encode(w);
+        consts.encode(w);
+        plans.encode(w);
+        services.encode(w);
+        sql.encode(w);
+        abends.encode(w);
+        edits.encode(w);
+        symbols.encode(w);
+        debug.encode(w);
+        let assigned: Vec<(u32, AssignItem)> = services.files.iter().enumerate().filter_map(|(k, f)| Some((k as u32, f.assign_item?))).collect();
+        assigned.encode(w);
+    }
+}
+
+impl crate::module::codec::Decode for Program {
+    fn decode(r: &mut crate::module::codec::Reader<'_>) -> Result<Self, crate::module::ModuleError> {
+        use crate::module::codec::Decode;
+        let at = r.position();
+        let mut program = Program {
+            id: Decode::decode(r)?,
+            options: Decode::decode(r)?,
+            initial: Decode::decode(r)?,
+            recursive: Decode::decode(r)?,
+            storage: Decode::decode(r)?,
+            items: Decode::decode(r)?,
+            paragraphs: Decode::decode(r)?,
+            procedure_start: Decode::decode(r)?,
+            ranges: Decode::decode(r)?,
+            blocks: Decode::decode(r)?,
+            places: Decode::decode(r)?,
+            exprs: Decode::decode(r)?,
+            conds: Decode::decode(r)?,
+            consts: Decode::decode(r)?,
+            plans: Decode::decode(r)?,
+            services: Decode::decode(r)?,
+            sql: Decode::decode(r)?,
+            abends: Decode::decode(r)?,
+            edits: Decode::decode(r)?,
+            symbols: Decode::decode(r)?,
+            debug: Decode::decode(r)?,
+        };
+        for (k, item) in Vec::<(u32, AssignItem)>::decode(r)? {
+            let file = program.services.files.get_mut(k as usize).ok_or_else(|| r.malformed(at, format!("an assign item for file {k}")))?;
+            file.assign_item = Some(item);
+        }
+        program_valid(&program).map_err(|reason| r.malformed(at, reason))?;
+        Ok(program)
+    }
+}
 codec_struct!(ProgramOptions { options, ssrange, cards, collating, decimal_point_comma, numval_currency, when_compiled });
 codec_struct!(Edit { syms, currency });
 codec_struct!(CompileTime { seconds, hundredths, source } check compile_time_valid);

@@ -108,6 +108,9 @@ pub struct FileDecl {
     pub name: String,
     /// The DD name ASSIGN gives, with any `UT-S-` style prefix removed.
     pub assign: String,
+    /// ASSIGN's target where it can be a data item holding the file's name at each OPEN. The
+    /// compile keeps it only where it is one, under `--compliance extended`.
+    pub assign_item: Option<AssignItem>,
     pub organization: Organization,
     pub access: Access,
     pub record_key: Option<Ref>,
@@ -141,6 +144,17 @@ pub struct FileDecl {
     /// For a GLOBAL file of a program containing this one, that program's PROGRAM-ID.
     pub declared_in: Option<String>,
     pub pos: Pos,
+}
+
+/// ASSIGN TO a name, or ASSIGN TO DYNAMIC or USING a data-name: Micro Focus and GnuCOBOL take a
+/// name that is a data item's, and the other two forms always, as the item holding the file's
+/// name (Enterprise COBOL's assignment-name is never a data item, Language Reference
+/// SC27-8713-03, ASSIGN clause).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AssignItem {
+    pub reference: Ref,
+    /// DYNAMIC or USING was written.
+    pub explicit: bool,
 }
 
 /// A program containing another, as the contained program sees it: its PROGRAM-ID, and the 01

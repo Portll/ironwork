@@ -326,6 +326,8 @@ pub const MAX_MIN_INTEGER_PLACES: &str = "C391";
 pub const INTEGER_FUNCTION_DIGITS: &str = "C392";
 pub const ABS_PLACES: &str = "C393";
 pub const NUMERIC_FUNCTION_MOVED: &str = "C394";
+pub const ASSIGN_ITEM_NAMES_A_DD: &str = "C360";
+pub const ASSIGN_ITEM_FORMS: &str = "C361";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -2108,6 +2110,18 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: NUMERIC_FUNCTION_MOVED,
         claim: "MOVE of an integer or numeric intrinsic function is refused when compiled (S) under --compliance strict, under either dialect: 'numeric functions are not valid as senders in MOVE statements' (Programming Guide SC27-8714-03, p. 119), such a function can be used only where an arithmetic expression can (Language Reference SC27-8713-03, p. 499), MOVE's sender is an identifier or a literal (p. 400), and no numeric function is among the valid operands of an elementary move (p. 402), whatever the receiver. MAX and MIN are refused when the first argument is numeric (pp. 591, 599), as C332 decides for DISPLAY; CONTENT-OF and a user-defined function are not. The manuals give neither the message number nor its text: the message is ironwork's, and the severity C332's. Under --compliance extended the MOVE is accepted with IWX0008-W, as cobc accepts it, and moves the function's value at its precision (C390 to C392) by IBM's rules for a numeric sender: an integer's digits to an alphanumeric item, and a value with decimal places refused there at run time (p. 404)",
         basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ASSIGN_ITEM_NAMES_A_DD,
+        claim: "A file whose ASSIGN names a data item (--compliance extended) takes, at each OPEN, the item's value without its blanks as a DD name, folded to upper case, as GnuCOBOL maps a name with no directory to a file through DD_name and Micro Focus through dd_name. A value that cannot be a DD name (a path, a name with a period, more than eight characters) names no DD, nor does a name the run was not given, and OPEN fails as it does for a missing DD: status 35 for a file that must exist. ironwork never opens a host file a program names, where GnuCOBOL and Micro Focus would open the path",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ASSIGN_ITEM_FORMS,
+        claim: "Under --compliance extended, ASSIGN TO a name that is an alphanumeric or group item's names that item, as GnuCOBOL's default assign clause and Micro Focus's ASSIGN(DYNAMIC) take it, with IWX0007-W; DYNAMIC and USING always name an item and EXTERNAL never does, and a name no item has stays a DD name. Under strict the name is a DD name, Enterprise COBOL's assignment-name never being a data item (Language Reference SC27-8713-03, ASSIGN clause), and DYNAMIC and USING are refused. The input trace records the item's value as a dynamic-file-path sink at the SELECT, where cobolwork places the finding, once for each file an OPEN names, with that file's input alone",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
 ];

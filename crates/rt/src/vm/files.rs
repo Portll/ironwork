@@ -86,6 +86,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             index: k,
             name: self.sym(d.name),
             assign: self.sym(d.assign),
+            assign_item: d.assign_item.map(|a| (Handle::Place(a.place), a.select)),
             organization: d.organization,
             access: d.access,
             optional: d.optional,
@@ -362,6 +363,10 @@ impl<'p, L: Loader<Rc<Code>>> Files<Handle<'p>, &'p IntExpr> for Io<'_, 'p, '_, 
 
     fn notify(&mut self, event: Event<'_>) {
         self.vm.unit.notify(event);
+    }
+
+    fn sink(&mut self, kind: &'static str, pos: Pos, operand: &str) {
+        self.vm.sink(kind, pos, operand);
     }
 
     fn int(&mut self, value: &'p IntExpr, pos: Pos) -> Result<i64, Abend> {

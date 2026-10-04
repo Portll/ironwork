@@ -29,6 +29,9 @@ pub struct File<'a, P, X> {
     pub name: &'a str,
     /// The DD name ASSIGN gives.
     pub assign: &'a str,
+    /// The data item ASSIGN names, whose value is the DD name at each OPEN, and where the SELECT
+    /// is (`--compliance extended`).
+    pub assign_item: Option<(P, Pos)>,
     pub organization: Organization,
     pub access: Access,
     pub optional: bool,
@@ -111,6 +114,8 @@ pub trait Files<P: Copy, X: Copy>: Host<P> {
     fn locked(&mut self, k: usize) -> &mut bool;
     fn dd(&self, assign: &str) -> Option<Dd>;
     fn notify(&mut self, event: Event<'_>);
+    /// Tells the input trace the operand of an operation an input could steer.
+    fn sink(&mut self, kind: &'static str, pos: Pos, operand: &str);
     fn int(&mut self, value: X, pos: Pos) -> R<i64>;
     /// How file `k` finds its records by key.
     fn keying(&mut self, k: usize, pos: Pos) -> R<Keying>;
@@ -281,7 +286,50 @@ fn length_conflict<P, X>(file: &File<'_, P, X>, len: usize, variable: bool, long
 /// left open for output is verified, status 97 under VSAMOPENFS(COMPAT), which takes the error
 /// path but never ends the run, or 00 under SUCC ([`numeric::assumptions::VSAM_DATA_SET_LEFT_OPEN`]).
 pub fn open<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, mode: OpenMode, pos: Pos) -> R<Outcome> {
+    let assigned = match file.assign_item {
+        Some((item, select)) => Some(assigned_dd(x, item, select)?),
+        None => None,
+    };
+    let closed = x.slot(file.index).is_none();
+    let outcome = open_on(x, file, mode, pos, assigned.as_ref())?;
+    if let Some((dd, _)) = assigned
+        && closed
+        && let Some(f) = x.slot(file.index).as_mut()
+    {
+        f.assigned = Some(dd);
+    }
+    Ok(outcome)
+}
+
+/// The DD the data item ASSIGN names holds, read as OPEN reads it, and the item's value. Micro
+/// Focus and GnuCOBOL take a value with no directory as the name DD_name maps to a file, as a DD
+/// maps one here: the value's blanks go, and one that cannot be a DD name names no DD, so a
+/// program never opens a file it names itself (C360). The input trace has the value at the
+/// SELECT, where cobolwork's finding is, and whether input reached it is the item's alone, not
+/// what the statement read for a file before it.
+fn assigned_dd<P: Copy, X: Copy>(x: &mut impl Files<P, X>, item: P, select: Pos) -> R<(String, String)> {
+    let read_before = x.taint().map(|t| {
+        let pending = t.pending();
+        t.start_statement();
+        pending
+    });
+    let loc = x.locate(item, false)?;
+    if let Some(taint) = x.taint() {
+        taint.read(loc.offset, loc.len);
+    }
+    let bytes = x.mem()[loc.offset..loc.offset + loc.len].to_vec();
+    let value = x.facts().page().decode(&bytes).trim().to_string();
+    x.sink("dynamic-file-path", select, &value);
+    if let (Some(before), Some(taint)) = (read_before, x.taint()) {
+        taint.resume_statement(before);
+    }
+    let named = value.len() <= 8 && value.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || "@#$".contains(c)) && value.chars().all(|c| c.is_ascii_alphanumeric() || "@#$".contains(c));
+    Ok((if named { value.to_ascii_uppercase() } else { String::new() }, value))
+}
+
+fn open_on<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, mode: OpenMode, pos: Pos, assigned: Option<&(String, String)>) -> R<Outcome> {
     let (k, name) = (file.index, file.name);
+    let assign = assigned.map_or(file.assign, |(dd, _)| dd.as_str());
     let failure = |status, message| Ok(Outcome::Failed(Failure { status, mode: Some(mode), message }));
     if *x.locked(k) {
         return failure(FileStatus::ClosedWithLock, format!("{name} was closed WITH LOCK"));
@@ -294,11 +342,14 @@ pub fn open<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, m
         _ => None,
     };
     let default = file.format;
-    let dd = x.dd(file.assign);
+    let dd = if assign.is_empty() { None } else { x.dd(assign) };
     if let Some(d) = &dd {
-        x.notify(Event::Open { dd: file.assign, mode, path: &d.path });
+        x.notify(Event::Open { dd: assign, mode, path: &d.path });
     }
-    let no_dd = format!("{name}: no DD {} was given (--dd {}=path)", file.assign, file.assign);
+    let no_dd = match assigned {
+        Some((dd, value)) if dd.is_empty() => format!("{name}: ASSIGN's data item holds {value:?}, which is not a DD name; a run opens only the files its DDs give"),
+        _ => format!("{name}: no DD {assign} was given (--dd {assign}=path)"),
+    };
     let held = match file.organization {
         Organization::Indexed | Organization::Relative => true,
         Organization::Sequential => mode == OpenMode::InputOutput,
@@ -406,11 +457,14 @@ pub fn close<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, 
     match x.slot(file.index).take() {
         None => Ok(failed(x, file, FileStatus::NotOpen, format!("{name} is not open"))),
         Some(f) => {
-            let mode = Some(f.mode);
+            let (mode, assigned) = (Some(f.mode), f.assigned.clone());
             match f.close() {
                 Ok(()) => {
-                    if let Some(d) = x.dd(file.assign) {
-                        x.notify(Event::Close { dd: file.assign, path: &d.path });
+                    let assign = assigned.as_deref().unwrap_or(file.assign);
+                    if !assign.is_empty()
+                        && let Some(d) = x.dd(assign)
+                    {
+                        x.notify(Event::Close { dd: assign, path: &d.path });
                     }
                     *x.locked(file.index) |= closing == Some(Closing::Lock);
                     let status = if closing == Some(Closing::NoRewind) { FileStatus::SuccessNonReel } else { FileStatus::Success };

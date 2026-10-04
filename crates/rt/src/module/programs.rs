@@ -4,7 +4,7 @@ use super::codec::{Decode, Encode, Reader, Writer};
 use super::{Module, ModuleError, ModuleWriter, Section, StringTable};
 use crate::bms::Mapset;
 use crate::codec_struct;
-use crate::lir::{
+use crate::lir::{AssignItem, 
     AbendText, Block, Code, Cond, Const, Debug, Edit, Expr, Item, ParaId, Paragraph, Place, Plans, Program, ProgramOptions, Range,
     Services, SqlEntry, Storage, SymId,
 };
@@ -230,7 +230,13 @@ fn encode_module(programs: &[Program], directory: &[DirectoryEntry], mapsets: &[
             p.edits.encode(w);
         });
     });
-    m.section(Section::LIR, |w| per_program(w, programs, |p, w| p.encode_lir(w)));
+    m.section(Section::LIR, |w| {
+        per_program(w, programs, |p, w| p.encode_lir(w));
+        let assigned = assign_items(programs);
+        if !assigned.is_empty() {
+            assigned.encode(w);
+        }
+    });
     m.section(Section::SQL, |w| per_program(w, programs, |p, w| p.sql.encode(w)));
     m.section(Section::BMS, |w| {
         w.count(mapsets.len());
@@ -246,6 +252,49 @@ fn encode_module(programs: &[Program], directory: &[DirectoryEntry], mapsets: &[
         }
     });
     m.finish()
+}
+
+/// Each file that takes its name from a data item, as (program, file, item): the LIR section's
+/// last field, written only when there is one, so a module without one keeps 0.5's shape
+/// (load-module.md §3.4).
+fn assign_items(programs: &[Program]) -> Vec<(u32, u32, AssignItem)> {
+    let mut out = Vec::new();
+    for (n, program) in programs.iter().enumerate() {
+        for (k, file) in program.services.files.iter().enumerate() {
+            if let Some(item) = file.assign_item {
+                out.push((n as u32, k as u32, item));
+            }
+        }
+    }
+    out
+}
+
+/// The LIR section: a record per program, then the files' data items [`assign_items`] wrote.
+fn lir_records(module: &Module<'_>, strings: &StringTable, expected: usize) -> Result<Vec<LirRecord>, ModuleError> {
+    let mut r = module.reader(Section::LIR, strings)?;
+    let at = r.position();
+    let count = r.count()?;
+    if count != expected {
+        return Err(r.malformed(at, format!("{count} records for {expected} programs")));
+    }
+    let mut bodies = Vec::with_capacity(count);
+    for _ in 0..count {
+        bodies.push(LirRecord::decode(&mut r)?);
+    }
+    if r.remaining() > 0 {
+        let at = r.position();
+        for (n, k, item) in Vec::<(u32, u32, AssignItem)>::decode(&mut r)? {
+            let body = bodies.get_mut(n as usize).ok_or_else(|| r.malformed(at, format!("an assign item for program {n} of {count}")))?;
+            let places = body.places.len();
+            let file = body.services.files.get_mut(k as usize).ok_or_else(|| r.malformed(at, format!("an assign item for file {k} of program {n}")))?;
+            if item.place as usize >= places {
+                return Err(r.malformed(at, format!("an assign item's place {} of {places}", item.place)));
+            }
+            file.assign_item = Some(item);
+        }
+    }
+    r.finish()?;
+    Ok(bodies)
 }
 
 /// For each program, no file recorded for any source of its debug table.
@@ -353,7 +402,7 @@ pub fn read(bytes: &[u8]) -> Result<LoadedModule, ModuleError> {
 
     let options = records::<ProgramOptions>(&module, &strings, Section::OPTIONS, count)?;
     let layouts = records::<LayoutRecord>(&module, &strings, Section::LAYOUT, count)?;
-    let bodies = records::<LirRecord>(&module, &strings, Section::LIR, count)?;
+    let bodies = lir_records(&module, &strings, count)?;
     let sql = records::<Vec<SqlEntry>>(&module, &strings, Section::SQL, count)?;
     let (debug, files): (Vec<Debug>, Vec<Vec<Option<SourceFile>>>) = records::<(Debug, Vec<Option<SourceFile>>)>(&module, &strings, Section::DEBUG, count)?.into_iter().unzip();
 

@@ -113,6 +113,10 @@ impl Lower<'_> {
             carriage: self.c.carriage.get(k).copied().flatten().map(|c| lir::Carriage { machine: c.machine, reserved: c.reserved }),
             sort: f.sort,
             error: self.c.declaratives.files.get(k).copied().flatten().map(|s| self.span_range(s, lir::RangeKind::UseProcedure)).transpose()?,
+            assign_item: match &f.assign_item {
+                Some(a) => Some(lir::AssignItem { place: self.place(&a.reference, false)?, select: f.pos }),
+                None => None,
+            },
         })
     }
 

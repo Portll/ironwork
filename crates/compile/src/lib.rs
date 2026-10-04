@@ -221,6 +221,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     scope::bind(&mut layout, own_linkage, inherited, &program.files);
     let counter_item = |entry: usize| program.working_storage[..entry].iter().filter(|e| e.level != 88).count();
     layout.name_files(&program.files, linage_counters.iter().map(|c| c.map(counter_item)).collect());
+    assign_items(&mut program, &layout, &options, &mut errors);
     corresponding::expand(&mut program, &layout, &mut errors);
     condition_subjects(&mut program, &layout);
     dbcs_values(&layout, &mut errors);
@@ -307,6 +308,63 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         Err(errors)
     } else {
         Ok(Compiled { program, when_compiled, layout, options, ssrange, report_writer, collating, carriage, diagnostics: errors, entries, declaratives, functions })
+    }
+}
+
+/// Which files take their name from a data item at each OPEN. Under `--compliance extended` an
+/// ASSIGN name that is an alphanumeric or group item's is one, with IWX0007-W, and DYNAMIC or
+/// USING must name one; under strict a name stays the DD name it is in Enterprise COBOL and
+/// DYNAMIC and USING are refused (C361). A file SORT or MERGE reads or writes is refused one, as
+/// the sort opens its files by their DD names.
+fn assign_items(program: &mut Program, layout: &layout::Layout, options: &Options, errors: &mut Vec<Error>) {
+    let extended = options.compliance == numeric::Compliance::Extended;
+    let mut all = Vec::new();
+    program.paragraphs.iter().for_each(|p| inner_statements(&p.statements, &mut all));
+    let sorted: Vec<&str> = all
+        .iter()
+        .filter_map(|s| match s {
+            Stmt::Sorting(sorting) => match sorting.as_ref() {
+                Sorting::Sort(s) => Some(s),
+                _ => None,
+            },
+            _ => None,
+        })
+        .flat_map(|s| [&s.input, &s.output])
+        .filter_map(|io| if let Some(SortIo::Files(names)) = io { Some(names) } else { None })
+        .flatten()
+        .map(String::as_str)
+        .collect();
+    let mut kept = Vec::new();
+    for (k, f) in program.files.iter().enumerate() {
+        let Some(a) = &f.assign_item else { continue };
+        let (name, pos) = (&a.reference.name, a.reference.pos);
+        if !extended {
+            if a.explicit {
+                errors.push(Error::at(pos, format!("ASSIGN USING or DYNAMIC {name}: a Micro Focus and GnuCOBOL form; --compliance extended reads it")));
+            }
+            continue;
+        }
+        let item = match layout.resolve(name, &a.reference.qualifiers, pos) {
+            Ok(layout::Resolved::Item(i)) => i,
+            Ok(layout::Resolved::Condition(_)) | Err(_) if a.explicit => {
+                errors.push(Error::at(pos, format!("ASSIGN {name}: not a data item")));
+                continue;
+            }
+            _ => continue,
+        };
+        if !matches!(layout.items[item].kind, rt::storage::Kind::Group | rt::storage::Kind::Alnum { .. }) {
+            errors.push(Error::at(pos, format!("ASSIGN {name}: the item holding the file's name must be alphanumeric or a group")));
+        } else if f.sort || sorted.contains(&f.name.as_str()) {
+            errors.push(Error::at(pos, format!("ASSIGN {name}: a file SORT or MERGE reads, writes or describes taking its name from a data item is not supported yet")));
+        } else {
+            errors.push(Error::warning(pos, format!("{}: each OPEN of {} takes its DD name from {name}", syntax::extended::ASSIGN_ITEM, f.name)));
+            kept.push(k);
+        }
+    }
+    for (k, f) in program.files.iter_mut().enumerate() {
+        if !kept.contains(&k) {
+            f.assign_item = None;
+        }
     }
 }
 

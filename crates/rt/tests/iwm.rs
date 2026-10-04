@@ -164,8 +164,8 @@ fn another_major_or_an_older_minor_is_refused_and_a_newer_minor_read() {
     let mut major = bytes.clone();
     major[8] = 1;
     let error = read(&major).unwrap_err();
-    assert_eq!(error, ModuleError::Version(Version { major: 1, minor: 5 }));
-    assert_eq!(error.to_string(), "load module format 1.5; this ironwork reads 0.5. Compile the source again");
+    assert_eq!(error, ModuleError::Version(Version { major: 1, minor: 6 }));
+    assert_eq!(error.to_string(), "load module format 1.6; this ironwork reads 0.5 to 0.6. Compile the source again");
     let mut minor = bytes.clone();
     minor[10] = 1;
     assert_eq!(read(&minor), Err(ModuleError::Version(Version { major: 0, minor: 1 })));

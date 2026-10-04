@@ -225,3 +225,46 @@ fn a_marker_without_a_journal_is_refused() {
     assert_eq!(status.code(), Some(246));
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn a_file_assigned_to_a_data_item_records_its_name_at_the_select_under_extended() {
+    let dir = temp("assign");
+    let program = [
+        "       IDENTIFICATION DIVISION.",
+        "       PROGRAM-ID. DYNFILE.",
+        "       ENVIRONMENT DIVISION.",
+        "       INPUT-OUTPUT SECTION.",
+        "       FILE-CONTROL.",
+        "           SELECT IN-FILE ASSIGN TO WS-DD FILE STATUS FS.",
+        "       DATA DIVISION.",
+        "       FILE SECTION.",
+        "       FD  IN-FILE.",
+        "       01  IN-REC PIC X(8).",
+        "       WORKING-STORAGE SECTION.",
+        "       01  WS-DD PIC X(8).",
+        "       01  FS PIC XX.",
+        "       PROCEDURE DIVISION.",
+        "           ACCEPT WS-DD.",
+        "           OPEN INPUT IN-FILE.",
+        "           DISPLAY 'OPEN ' FS.",
+        "           GOBACK.",
+    ];
+    fs::write(dir.join("src/DYNFILE.cbl"), program.join("\n") + "\n").unwrap();
+    fs::write(dir.join("data/sysin.txt"), format!("{MARKER}\n")).unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_ironwork"))
+        .arg("run")
+        .arg(dir.join("src/DYNFILE.cbl"))
+        .arg("--compliance=extended")
+        .arg("--dd")
+        .arg(format!("SYSIN={}:text", dir.join("data/sysin.txt").display()))
+        .arg("--evidence")
+        .arg(dir.join("ev"))
+        .args(["--trace-marker", MARKER])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(String::from_utf8_lossy(&o.stdout), "OPEN 35\n", "the marker names no DD the run has");
+    let at = |sink: &str, line: u32, reached: bool| (sink.to_string(), "DYNFILE.cbl".to_string(), line, reached);
+    assert_eq!(sinks(&journal(&dir)), [at("dynamic-file-path", 6, true), at("log", 17, false)]);
+    fs::remove_dir_all(dir).unwrap();
+}

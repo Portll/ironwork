@@ -11,6 +11,7 @@ pub const CONSTANT: &str = "IWX0002-W constant entry (Micro Focus and GnuCOBOL; 
 pub const CONCATENATION: &str = "IWX0004-W literal concatenation with & (Micro Focus and GnuCOBOL; Enterprise COBOL has none)";
 pub const BINARY_USAGE: &str = "IWX0005-W the COBOL 2002 binary usage (Micro Focus and GnuCOBOL; not Enterprise COBOL's)";
 pub const NO_IDENTIFICATION_HEADER: &str = "IWX0006-W PROGRAM-ID with no IDENTIFICATION DIVISION header before it (COBOL 2002, Micro Focus and GnuCOBOL; Enterprise COBOL requires the header)";
+pub const ASSIGN_ITEM: &str = "IWX0007-W ASSIGN to a data item (Micro Focus and GnuCOBOL; Enterprise COBOL's assignment-name is never a data item)";
 
 /// BINARY-SHORT, BINARY-LONG and BINARY-DOUBLE, and the COMP-5 PICTURE each is: two, four and eight
 /// bytes of native binary.

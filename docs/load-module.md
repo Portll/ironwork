@@ -111,7 +111,7 @@ sections before it can decode anything else. Section bodies use the rules of §4
 |---|---|---|
 | `NotAModule` | The magic differs (check 1) | `not an ironwork load module` |
 | `Truncated` | Fewer than 32 bytes, or fewer than `file_len` (checks 2, 4) | `truncated: 100 bytes of 240` |
-| `Version` | A version the reader does not read (check 3, §8.1) | `load module format 1.0; this ironwork reads 0.5. Compile the source again` |
+| `Version` | A version the reader does not read (check 3, §8.1) | `load module format 1.0; this ironwork reads 0.5 to 0.6. Compile the source again` |
 | `TrailingBytes` | More bytes than `file_len` (check 4) | `4 bytes after the end of the module at 240` |
 | `HeaderChecksum` | `header_crc` differs (check 5) | `header is corrupt (checksum 1234ABCD, expected 5678EF01)` |
 | `Feature` | Any `features` bit is set (check 6) | `load module needs features 0x00000004, which this ironwork lacks` |
@@ -141,7 +141,7 @@ sections before it can decode anything else. Section bodies use the rules of §4
 | 2 | `DIRECTORY` | The program directory (§6) | yes |
 | 3 | `OPTIONS` | Per program: `Program.options` (§5.1) | yes |
 | 4 | `LAYOUT` | Per program: `Program.storage`, `items` and `edits` (§5.2) | yes |
-| 5 | `LIR` | Per program: the rest of `Program` | yes |
+| 5 | `LIR` | Per program: the rest of `Program`; then, only when a file takes its name from a data item, each such file as (program, file, item) (lir.md `FileDesc::assign_item`, from 0.6) | yes |
 | 6 | `SQL` | Per program: `Program.sql`, the SQL statement table (§7) | yes |
 | 7 | `BMS` | The map models of the mapsets the module's programs use (§5.3) | yes |
 | 8 | `DEBUG` | Per program: `Program.debug`, then the file each of its sources names (§9) | yes |
@@ -546,10 +546,12 @@ error if it meets one. `HostType::Zoned`'s sign is `rt::SignClause`.
 
 ### 8.1 Versions
 
-The format version is `major.minor`; this ironwork writes 0.5. It reads each minor of its major from
+The format version is `major.minor`; this ironwork writes 0.6. It reads each minor of its major from
 the oldest readable one, `Version::OLDEST_READABLE` in `rt::module`, which is 0.5: the last minor
-whose change was not additive. A module older than that is refused, and compiling the source again
-is the remedy: a 0.4 module's `DEBUG` records hold no source files (§9.2); a 0.3 module's options
+whose change was not additive. 0.6 is additive: the `LIR` section ends with the files that take
+their name from a data item, written only when one does, so a 0.6 module without one reads in a 0.5
+reader and a 0.5 reader refuses one with them as malformed. A module older than 0.5 is refused, and
+compiling the source again is the remedy: a 0.4 module's `DEBUG` records hold no source files (§9.2); a 0.3 module's options
 lack `compliance` and `dialect` (§5.1), its arithmetic plans `inner_dmax` (lir.md §7.2), and its
 plan for INITIALIZE of a reference-modified item holds the whole item's fields (lir.md §9, C300); a
 0.2 module's places lack the tables that move a variably located item, its EXEC CICS commands their
@@ -560,10 +562,10 @@ moving tables (lir.md §5.1, §9.1, §9.5, §9.13); a 0.1 module's directory ent
 | The reader finds | It does |
 |---|---|
 | Bad magic | Refuses: `X: not an ironwork load module` |
-| A different `major` | Refuses: `X: load module format 1.0; this ironwork reads 0.5. Compile the source again`. A reader of major 1 or more names `1.x`, and one of major 0 whose oldest readable minor is below its own names both, as `0.5 to 0.7` |
+| A different `major` | Refuses: `X: load module format 1.0; this ironwork reads 0.5 to 0.6. Compile the source again`. A reader of major 1 or more names `1.x`, and one of major 0 whose oldest readable minor is below its own names both, as `0.5 to 0.7` |
 | The same `major`, a lower `minor` | Reads it. From 1.0 a minor version only adds, and a section body's shape never changes inside a major (new data goes in a new section) |
 | The same `major`, a higher `minor` | Reads it, ignoring sections with the optional flag it does not know. Refuses on an unknown required section or a set `features` bit, naming it |
-| `major` 0 | Reads the minors from the oldest readable one to its own, and a higher one as the row above says. Refuses an older one as it refuses another major: `X: load module format 0.4; this ironwork reads 0.5. Compile the source again` |
+| `major` 0 | Reads the minors from the oldest readable one to its own, and a higher one as the row above says. Refuses an older one as it refuses another major: `X: load module format 0.4; this ironwork reads 0.5 to 0.6. Compile the source again` |
 
 - **No older readers.** A new major version does not keep the last one's reader: the source is the
   durable artefact, and compiling again is the remedy (question 1).
@@ -853,7 +855,7 @@ scenarios that wait for question 5 do not run yet.
 ### L3: Version mismatch
 
 - **Given** a module whose `major` is higher than the reader's **when** it is run **then** the run
-  stops with `X: load module format 1.0; this ironwork reads 0.5. Compile the source again`, and
+  stops with `X: load module format 1.0; this ironwork reads 0.5 to 0.6. Compile the source again`, and
   exit status 245, **and** no program runs.
 - **Given** a module with a higher `minor` and an unknown optional section **then** it runs, and the
   section is ignored. **Given** an unknown required section **then** it is refused, naming the
