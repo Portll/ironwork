@@ -177,6 +177,39 @@ impl Database for Postgres {
     fn fetch(&mut self, call: &Call) -> Answer {
         self.run(call, 0)
     }
+    fn fetch_rows(&mut self, call: &Call, rows: u32) -> Answer {
+        let text = format!("FETCH FORWARD {rows} FROM {}", call.cursor.unwrap_or_default());
+        self.run(&Call { text: &text, inputs: &[], ..*call }, 0)
+    }
+    /// ATOMIC inserts every row under the call's one savepoint, so a failure undoes them all; NOT
+    /// ATOMIC gives each row its own, as Db2 keeps the rows that went in
+    /// ([`numeric::assumptions::NOT_ATOMIC_SUMMARY`]).
+    fn insert_rows(&mut self, call: &Call, rows: &[Vec<Value>], atomic: bool) -> Answer {
+        if atomic {
+            return self.guarded(call, |pg, sql| {
+                let mut affected = 0;
+                for row in rows {
+                    affected += pg.statement(sql, &Call { inputs: row, ..*call }, 0)?.affected;
+                }
+                Ok(Outcome { affected, ..Outcome::ok() })
+            });
+        }
+        let (mut inserted, mut failed) = (0, 0);
+        for row in rows {
+            let one = Call { inputs: row, ..*call };
+            let outcome = self.guarded(&one, |pg, sql| pg.statement(sql, &one, 0))?;
+            if outcome.sqlcode < 0 {
+                failed += 1;
+            } else {
+                inserted += outcome.affected;
+            }
+        }
+        Ok(match (failed, inserted) {
+            (0, _) => Outcome { affected: inserted, ..Outcome::ok() },
+            (_, 0) => Outcome::error(-254, "22530"),
+            _ => Outcome { affected: inserted, ..Outcome::error(-253, "22529") },
+        })
+    }
     fn close(&mut self, call: &Call) -> Answer {
         self.run(call, 0)
     }

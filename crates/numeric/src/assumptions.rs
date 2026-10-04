@@ -351,6 +351,11 @@ pub const COMMAND_LINE_FROM_PARM: &str = "C442";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
+pub const ROWSET_ENDS_SHORT: &str = "C420";
+pub const ROWSET_ROW_POSITION: &str = "C421";
+pub const POSITIONED_ON_A_ROWSET: &str = "C422";
+pub const CALL_FROM_A_RECORDING: &str = "C423";
+pub const NOT_ATOMIC_SUMMARY: &str = "C424";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -2218,6 +2223,36 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         claim: "A numeric literal of a CLASS clause is an ordinal number from 1 to the number of characters in the alphabet, each corresponding to the ordinal position of a character in the single-byte EBCDIC or ASCII collating sequence, and an alphanumeric literal is an actual single-byte EBCDIC character (Language Reference SC27-8713-03, CLASS clause, p. 129). ironwork takes ordinal n as the character of code point n - 1 in the program's code page, X'C1' for 194 under an EBCDIC page, whatever PROGRAM COLLATING SEQUENCE says, and encodes an alphanumeric literal in that code page, a hexadecimal literal's bytes being taken as written. A THROUGH range holds the code points between its ends, in either order. NIST CCVS85's NC174A bounds its class ORDINAL-A-THROUGH-D by the ordinal numbers of A and D in the native character set, which its User Guide's X-cards 90 and 91 hold",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ROWSET_ENDS_SHORT,
+        claim: "A rowset FETCH that gets every row it asks for is SQLCODE 0, even when the last of them is the result table's last row, and the next FETCH is +100; one that gets fewer is +100 with the rows it got, SQLERRD(3) their count and the arrays' later elements left as they were (Db2 13 SQL, FETCH: 'SQLERRD3 is set to 5 for the 5 returned rows, SQLSTATE is set to 02000, and SQLCODE is set to +100'). IBM's pages differ on the full rowset: GET DIAGNOSTICS says 'An end of data warning might not occur' when the rows returned equal the rows requested, the Application Programming guide that +100 is set 'if the last row in the table has been returned with the set of rows'; PostgreSQL's FETCH FORWARD n does not say whether rows follow. An SQLCODE a recording gives stands",
+        basis: Basis::Chosen,
+        oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: ROWSET_ROW_POSITION,
+        claim: "After a rowset FETCH, a row FETCH moves from the rowset's first row, so after rows 1 to 5 it gives row 2, and a NEXT ROWSET then starts at the row after it; a NEXT ROWSET without FOR n ROWS asks for the rows the last rowset FETCH asked for, or one after a row FETCH (Db2 13 SQL, FETCH, Table 6: 'Cursor is positioned on row 2'). The runtime keeps the rows a rowset read and answers from them, so the database is asked only for rows past them. COMMIT leaves a held cursor before the row after its current position",
+        basis: Basis::Documented,
+        oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: POSITIONED_ON_A_ROWSET,
+        claim: "A positioned UPDATE or DELETE of a cursor on a rowset of more than one row, or on a row a row FETCH took from rows a rowset read, abends EXEC by name: Db2 changes every row of the rowset ('If the cursor is positioned on a rowset, all of the rows in the rowset are updated'), and the backend's own cursor stands on the last row it gave. FOR ROW n OF ROWSET is refused by name",
+        basis: Basis::Chosen,
+        oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: CALL_FROM_A_RECORDING,
+        claim: "CALL of a stored procedure runs from a recording, whose = line gives each host-variable argument as the procedure returns it, or - for one it does not return: Db2 takes each parameter's mode from its catalogue ('The attributes of the parameters are determined by the current server'), which no backend ironwork has holds, and ironwork runs no procedure. The PostgreSQL backend refuses CALL by name. An answer below zero assigns nothing, where Db2 leaves INOUT arguments unchanged and OUT ones undefined; +466 sets SQLWARN9 to Z, and its result sets wait on ASSOCIATE LOCATORS and ALLOCATE CURSOR, which are refused by name. CALL naming its procedure in a host variable, and CALL ... USING DESCRIPTOR, are refused by name",
+        basis: Basis::Chosen,
+        oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: NOT_ATOMIC_SUMMARY,
+        claim: "A NOT ATOMIC CONTINUE ON SQLEXCEPTION INSERT with a row that fails is -253 (22529) when another row went in and -254 (22530) when none did, SQLERRD(3) the rows inserted, as the INSERT statement and SQLCODE -253 pages give it ('SQLSTATE 22529, SQLCODE -253. At least one row was successfully inserted, but one or more errors occurred'); the Application Programming guide's example of the same case gives SQLCODE 0. Each row's own condition is for GET DIAGNOSTICS, which ironwork does not run. The PostgreSQL backend gives each row its own savepoint, and an ATOMIC insert one savepoint for all, so a failure undoes every row and SQLERRD(3) is 0",
+        basis: Basis::Documented,
+        oracle: Oracle::Db2,
     },
 ];
 

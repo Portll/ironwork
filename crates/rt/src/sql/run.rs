@@ -3,13 +3,13 @@
 //! warning WHENEVER tests.
 
 use super::dynamic::{self, Kind};
-use super::host::{self, COLUMN_COUNT, TRUNCATED, Target, Warnings};
+use super::host::{self, COLUMN_COUNT, RESULT_SETS, TRUNCATED, Target, Warnings};
 use super::sqlda::{self, Invalid, Var};
 use super::{Answer, Call, Database, Outcome, Prepared, Session, SqlError, Value};
 use crate::abend::Abend;
 use crate::host::Host;
 use crate::store::ProgramFacts;
-use crate::lir::{AbendId, HostPlace, SqlEntry, SqlNames, SqlStatement, Sqlca};
+use crate::lir::{AbendId, HostArray, HostPlace, RowCount, SqlEntry, SqlNames, SqlStatement, Sqlca};
 use crate::storage::Loc;
 use crate::vocab::Pos;
 
@@ -21,6 +21,13 @@ const DEADLOCK: i32 = -911;
 /// Db2 13 for z/OS SQL, PREPARE and EXECUTE IMMEDIATE: "In ... COBOL ... a host variable must be a
 /// varying-length string variable."
 const STRING_RULE: &str = "its statement string is not one varying-length character or graphic string, as Db2 for z/OS requires of COBOL";
+
+/// Db2 13 SQL, FETCH and INSERT: FOR n ROWS's host variable "must be an exact numeric type with a
+/// scale of zero".
+const ROWS_RULE: &str = "FOR n ROWS's host variable is not an exact numeric item with no decimal places";
+
+/// The most rows FOR n ROWS may ask for: "k must be in the range, 0<k<=32767".
+const MOST_ROWS: u32 = 32767;
 
 /// Where a statement's calls come from.
 #[derive(Clone, Copy)]
@@ -50,9 +57,10 @@ pub trait SqlHost<'w, P: Copy, S>: Host<P> {
     fn untyped(&mut self, abend: AbendId) -> Abend;
     /// Tells the observer, for the input trace, the operand of an operation an input could steer.
     fn sink(&mut self, kind: &'static str, pos: Pos, operand: &str);
-    /// An indicator variable's storage; an executor whose place for an indicator array named
-    /// without subscripts is not its first element locates that element here.
-    fn locate_indicator(&mut self, place: P) -> R<Loc> {
+    /// A table named without subscripts, an indicator array or a multiple-row statement's
+    /// host-variable array, at its first element; an executor whose place for one is not that
+    /// element locates it here.
+    fn locate_first(&mut self, place: P) -> R<Loc> {
         self.locate(place, false)
     }
 }
@@ -137,6 +145,40 @@ pub fn run<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, entry: &SqlEntry<P, S
             match sqlda::vars(x.mem(), at_sqlda, false) {
                 Err(invalid) => invalid_sqlda(invalid),
                 Ok(vars) => fetch(x, at, (&cursor, &text), Receivers::Vars(&vars), &mut warnings)?,
+            }
+        }
+        SqlStatement::FetchRowset { cursor, rows, into, enabled } => {
+            let cursor = x.text(cursor);
+            if session(x).cursor(&program, &cursor).is_none() {
+                Outcome::error(-501, "24501")
+            } else if !enabled {
+                Outcome::error(-249, "24523")
+            } else {
+                let implicit = session(x).cursor(&program, &cursor).and_then(|c| c.rowset_size).unwrap_or(1);
+                match row_count(x, rows, implicit, &refused)? {
+                    Some(k) if fits(k, into.iter()) => fetch_rowset(x, at, &cursor, &text, k, into, &mut warnings)?,
+                    _ => Outcome::error(-246, "42873"),
+                }
+            }
+        }
+        SqlStatement::InsertRows { inputs, rows, atomic } => match row_count(x, rows, 1, &refused)? {
+            Some(k) if fits(k, inputs.iter()) => match host::input_rows(x, inputs, k as usize)? {
+                Err(e) => Outcome::error(e.code, e.state),
+                Ok(values) => {
+                    let flat = values.concat();
+                    database(x, &at.call(&verb, None, &text, &flat), |db, c| db.insert_rows(c, &values, *atomic), pos)?
+                }
+            },
+            _ => Outcome::error(-246, "42873"),
+        },
+        SqlStatement::Call { procedure, args } => {
+            let procedure = x.text(procedure);
+            match host::inputs(x, args)? {
+                Err(e) => Outcome::error(e.code, e.state),
+                Ok(values) => {
+                    let answer = database(x, &at.call("CALL", Some(&procedure), &text, &values), |db, c| db.call(c), pos)?;
+                    returned(x, answer, &procedure, args, &mut warnings, pos)?
+                }
             }
         }
         SqlStatement::Close { cursor } => {
@@ -226,6 +268,14 @@ fn end_unit<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, at: At, text: &str, 
 /// An INSERT, UPDATE or DELETE, `statement` its verb and text: a positioned one needs its cursor on
 /// a row, and a searched one that changes no row is +100, as Db2 answers.
 fn change<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, at: At, statement: (&str, &str), values: Result<Vec<Value>, SqlError>, delete: bool, current_of: Option<&str>) -> R<Outcome> {
+    // The backend's cursor is on the last row it gave, which is the position only when that is one
+    // row; Db2 would change every row of a rowset (C422).
+    if let Some(c) = current_of
+        && session(x).cursor(at.program, c).is_some_and(|c| c.positioned && !c.on_backend_row())
+    {
+        let message = format!("EXEC SQL {} ... WHERE CURRENT OF {c} was reached: ironwork for COBOL does not run a positioned UPDATE or DELETE of a rowset of more than one row, or after a row FETCH from one", statement.0);
+        return Err(Abend { code: "EXEC".into(), message, pos: at.pos, file: None });
+    }
     let position = current_of.map(|c| session(x).cursor(at.program, c).map(|c| c.positioned));
     let values = match (position, values) {
         (Some(None), _) => return Ok(Outcome::error(-507, "24501")),
@@ -241,8 +291,81 @@ fn change<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, at: At, statement: (&s
         && let Some(open) = session(x).cursor(at.program, c)
     {
         open.positioned = false;
+        open.held.clear();
+        open.current = 0;
     }
     Ok(answer)
+}
+/// The rows FOR n ROWS asks for, `implicit` without it; None where n is no integer of a row count.
+fn row_count<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, rows: &RowCount<P>, implicit: u32, refused: &dyn Fn(String) -> Abend) -> R<Option<u32>> {
+    let n = match rows {
+        RowCount::Implicit => return Ok(Some(implicit)),
+        RowCount::Constant(n) => i64::from(*n),
+        RowCount::Host(place) => match host::inputs(x, std::slice::from_ref(place))? {
+            Ok(values) => match values.first() {
+                Some(Value::Int(n)) => *n,
+                Some(Value::Decimal { value, scale: 0 }) => i64::try_from(*value).unwrap_or(i64::MAX),
+                _ => return Err(refused(ROWS_RULE.into())),
+            },
+            Err(_) => return Err(refused(ROWS_RULE.into())),
+        },
+    };
+    Ok(u32::try_from(n).ok().filter(|&k| (1..=MOST_ROWS).contains(&k)))
+}
+
+/// Whether `rows` rows fit every array (-246 where they do not).
+fn fits<'a, P: 'a>(rows: u32, arrays: impl IntoIterator<Item = &'a HostArray<P>>) -> bool {
+    arrays.into_iter().all(|a| a.array.is_none_or(|d| rows <= d.count))
+}
+
+/// FETCH NEXT ROWSET of `rows` rows: past the current rowset, the rows already read first, then
+/// the backend's. A rowset short of `rows` is +100 with its rows; elements after them are left as
+/// they were ([`numeric::assumptions::ROWSET_ENDS_SHORT`]).
+fn fetch_rowset<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, at: At, cursor: &str, text: &str, rows: u32, into: &[HostArray<P>], warnings: &mut Warnings) -> R<Outcome> {
+    let open = session(x).cursor(at.program, cursor).expect("the cursor is open");
+    open.held.drain(..open.current);
+    let mut fetched: Vec<Vec<Value>> = open.held.iter().take(rows as usize).cloned().collect();
+    let mut answer = Outcome::ok();
+    if fetched.len() < rows as usize {
+        let more = rows - fetched.len() as u32;
+        let count = [Value::Int(more.into())];
+        answer = database(x, &at.call("FETCH", Some(cursor), text, &count), |db, c| db.fetch_rows(c, more), at.pos)?;
+        if answer.rows.len() > more as usize {
+            return Err(Abend { code: "SQL".into(), message: format!("the database answered FETCH {cursor} for {more} rows with {}", answer.rows.len()), pos: at.pos, file: None });
+        }
+        let open = session(x).cursor(at.program, cursor).expect("the cursor is open");
+        open.held.extend(answer.rows.iter().cloned());
+        fetched.append(&mut answer.rows);
+    }
+    let open = session(x).cursor(at.program, cursor).expect("the cursor is open");
+    open.current = fetched.len();
+    open.rowset_size = Some(rows);
+    open.positioned = !fetched.is_empty();
+    let (assigned, failed) = if into.is_empty() { (fetched.len(), None) } else { host::assign_rows(x, into, &fetched, warnings)? };
+    let outcome = match failed {
+        Some(e) => Outcome::error(e.code, e.state),
+        None if answer.sqlcode != 0 => answer,
+        None if fetched.len() < rows as usize => Outcome::error(100, "02000"),
+        None => Outcome::ok(),
+    };
+    Ok(Outcome { affected: assigned as i64, rows: Vec::new(), ..outcome })
+}
+
+/// A CALL's answer: unless it is an error, each argument the procedure returns is assigned. +466
+/// says the procedure returned result sets, which SQLWARN9 shows with Z.
+fn returned<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, answer: Outcome, procedure: &str, args: &[HostPlace<P>], warnings: &mut Warnings, pos: Pos) -> R<Outcome> {
+    if answer.sqlcode < 0 || answer.parameters.is_empty() {
+        warnings[RESULT_SETS] = answer.sqlcode == 466;
+        return Ok(answer);
+    }
+    if answer.parameters.len() != args.len() {
+        return Err(Abend { code: "SQL".into(), message: format!("the database answered CALL {procedure} with {} arguments for its {}", answer.parameters.len(), args.len()), pos, file: None });
+    }
+    warnings[RESULT_SETS] = answer.sqlcode == 466;
+    Ok(match host::assign_returned(x, args, &answer.parameters, warnings)? {
+        Ok(()) => answer,
+        Err(e) => Outcome::error(e.code, e.state),
+    })
 }
 
 /// The statement string of a PREPARE or EXECUTE IMMEDIATE, normalised, after the input trace is
@@ -398,16 +521,33 @@ fn open_prepared<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, at: At, names: 
 /// FETCH, `statement` its cursor and text: one row into the receivers, the cursor on it.
 fn fetch<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, at: At, statement: (&str, &str), into: Receivers<P>, warnings: &mut Warnings) -> R<Outcome> {
     let (cursor, text) = statement;
-    if session(x).cursor(at.program, cursor).is_none() {
-        return Ok(Outcome::error(-501, "24501"));
-    }
-    let answer = database(x, &at.call("FETCH", Some(cursor), text, &[]), |db, c| db.fetch(c), at.pos)?;
+    // A row FETCH moves from the first row of the current position, onto a row a rowset FETCH may
+    // have read already (C421).
+    let held = session(x).cursor(at.program, cursor).map(|open| {
+        if open.current > 0 {
+            open.held.pop_front();
+        }
+        open.current = 0;
+        open.rowset_size = None;
+        open.held.front().cloned()
+    });
+    let answer = match held {
+        None => return Ok(Outcome::error(-501, "24501")),
+        Some(Some(row)) => Outcome::rows(vec![row]),
+        Some(None) => database(x, &at.call("FETCH", Some(cursor), text, &[]), |db, c| db.fetch(c), at.pos)?,
+    };
     if answer.rows.len() > 1 {
         return Err(Abend { code: "SQL".into(), message: format!("the database answered FETCH {cursor} with {} rows", answer.rows.len()), pos: at.pos, file: None });
     }
     let on_row = answer.sqlcode >= 0 && answer.rows.len() == 1;
     if let Some(open) = session(x).cursor(at.program, cursor) {
         open.positioned = on_row;
+        if on_row {
+            if open.held.is_empty() {
+                open.held.push_back(answer.rows[0].clone());
+            }
+            open.current = 1;
+        }
     }
     let fetched = single_row(x, answer, into, warnings)?;
     Ok(Outcome { affected: i64::from(on_row), ..fetched })

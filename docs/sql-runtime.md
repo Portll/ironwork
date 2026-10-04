@@ -74,10 +74,11 @@ On 2026-09-29 the operator put SQL next after M8, ahead of the VM in
 - **Refused by name.** DISCONNECT comes from other precompilers, so a program that uses it is
   refused at compile time as not a Db2 for z/OS program. CONNECT and SET CONNECTION, which Db2 for
   z/OS has for DRDA, DESCRIBE INPUT and USING BOTH, PREPARE ... ATTRIBUTES, OPEN ... USING of a
-  cursor declared for a select-statement, and multi-row FETCH and EXECUTE are refused at run time
-  by name. A CONNECT or SET CONNECTION that names its location by a
-  host variable first gives the input trace a `connection-target` sink with the value
-  ([evidence.md](evidence.md) §1.1).
+  cursor declared for a select-statement, multi-row EXECUTE, a rowset orientation other than NEXT
+  ROWSET, FOR ROW n OF ROWSET, CALL of a procedure a host variable names, ASSOCIATE LOCATORS,
+  ALLOCATE CURSOR and GET DIAGNOSTICS are refused at run time by name. A CONNECT or SET CONNECTION
+  that names its location by a host variable first gives the input trace a `connection-target`
+  sink with the value ([evidence.md](evidence.md) §1.1).
 
 ### 3.1 Dynamic SQL
 
@@ -124,6 +125,52 @@ the runtime keeps the state they need in its session, so every backend answers a
   when SQLTYPE is odd. An SQLDA the statement cannot use is -804 with Db2's reason code in SQLERRMC
   (assumption C404). On EXECUTE and OPEN the marker rule above holds, SQLD counting the variables.
 
+### 3.2 Rowsets and multiple-row INSERT
+
+The rules are Db2 13 for z/OS's (SQL Reference: DECLARE CURSOR, FETCH, INSERT; Application
+Programming: host-variable arrays in COBOL).
+
+- **Host-variable arrays.** An array is an item of one OCCURS named without subscripts: its first
+  element and the OCCURS stride locate every element, and an indicator array's own stride its
+  indicators. A VARCHAR array is an OCCURS group of a 49-level length and text. A host-structure
+  array, a table of more than one dimension, or an array whose indicator is not an indicator array
+  abends EXEC, naming it, when the statement is reached; so does a rowset FETCH into something that
+  is no array.
+- **FOR n ROWS** takes an integer constant or an exact numeric host variable with no decimal places
+  and no indicator. n must be from 1 to 32767 and no more than any array's elements, or the
+  statement is -246. A row FETCH with FOR n ROWS is refused when compiled: it takes a rowset
+  orientation.
+- **FETCH NEXT ROWSET** is the one rowset orientation a cursor that does not scroll takes, and
+  needs a cursor declared WITH ROWSET POSITIONING, or it is -249. Without FOR n ROWS it asks for as
+  many rows as the cursor's last rowset FETCH did, or one after a row FETCH. Row k of the rowset
+  goes to element k of each array; a rowset short of n rows is +100 with its rows, SQLERRD(3) their
+  count, and the later elements left as they were; a full rowset is 0 (assumption C420). An array
+  for each column is expected: fewer sets SQLWARN3, more are not filled. A row that cannot be
+  assigned stops the rowset there, with the rows before it assigned and its SQLCODE.
+- **Positioning.** After a rowset, a row FETCH moves from the rowset's first row, and the runtime
+  answers it and a later NEXT ROWSET from the rows the rowset read, asking the database only for
+  rows past them (C421). A positioned UPDATE or DELETE while the cursor is on a rowset of more than
+  one row, or on a row taken from rows a rowset read, abends EXEC by name, since Db2 changes every
+  row of the rowset and the backend's own cursor is on the last row it gave (C422).
+- **INSERT ... FOR n ROWS** sends the INSERT of one row once for each: row k takes element k of each
+  array, and a host variable, constant or expression the same value every time. FOR n ROWS may stand
+  after VALUES, as the syntax diagram puts it, or before it, as IBM's GET DIAGNOSTICS example
+  writes it. ATOMIC, the default, undoes every row when one fails, so SQLERRD(3) is 0; NOT ATOMIC
+  CONTINUE ON SQLEXCEPTION keeps the rows that went in, and is -253 when a row failed and another
+  went in and -254 when none did, with SQLERRD(3) the rows inserted (C424).
+
+### 3.3 CALL
+
+- **CALL procedure-name [(arguments)]** sends each host-variable argument as an input, with a
+  constant, NULL or expression kept in the statement's text. A host structure stands for its
+  members.
+- **What comes back** is each argument as the procedure returns it, or nothing for one it does not
+  return: Db2 takes each parameter's mode from its catalogue, which only a recording stands in for,
+  so CALL runs from a recording (assumption C423) and the PostgreSQL backend refuses it by name. A
+  returned NULL sets the argument's indicator to -1. An answer below zero assigns nothing. +466,
+  result sets returned, sets SQLWARN9 to `Z`; reading them needs ASSOCIATE LOCATORS and ALLOCATE
+  CURSOR, which are refused.
+
 ## 4. The Database interface (run time)
 
 The interface lives in `machine/sql.rs` now, beside `machine/cics.rs`, and moves to `rt` with the
@@ -134,6 +181,9 @@ split in [codegen-runtime.md](codegen-runtime.md). It is covered by the runtime 
         fn prepare(&mut self, s: &Statement) -> Outcome;                     // PREPARE, with its result columns
         fn open(&mut self, c: CursorId, s: &Statement, inputs: &[Value]) -> Outcome;
         fn fetch(&mut self, c: CursorId) -> Outcome;
+        fn fetch_rows(&mut self, c: CursorId, rows: u32) -> Outcome;             // FETCH NEXT ROWSET
+        fn insert_rows(&mut self, s: &Statement, rows: &[Vec<Value>], atomic: bool) -> Outcome;
+        fn call(&mut self, s: &Statement, inputs: &[Value]) -> Outcome;      // CALL; refused by default
         fn close(&mut self, c: CursorId) -> Outcome;
         fn commit(&mut self) -> Outcome;
         fn rollback(&mut self) -> Outcome;
@@ -147,8 +197,9 @@ split in [codegen-runtime.md](codegen-runtime.md). It is covered by the runtime 
 - **Cursor identity.** A cursor is identified by program and cursor name, because two programs may
   declare the same name.
 - **Cursor state.** OPEN on an open cursor, and FETCH or CLOSE on a closed one, are answered by the
-  runtime from its own record of cursor state, before any backend is asked. That keeps the
-  answers the same whatever the backend.
+  runtime from its own record of cursor state, before any backend is asked. So are a rowset FETCH
+  on a cursor without rowset positioning, a row count out of range, and the rows a rowset read
+  ahead (§3.2). That keeps the answers the same whatever the backend.
 
 ## 5. Converting host variables
 
@@ -192,7 +243,7 @@ Input rules:
 - **After every executable statement**, the runtime writes the SQLCA fields `system.rs` defines:
   - SQLCODE and SQLSTATE;
   - SQLERRML and SQLERRMC, the message tokens, truncated to 70 bytes;
-  - SQLERRD(3), the rows an INSERT, UPDATE or DELETE affected;
+  - SQLERRD(3), the rows an INSERT, UPDATE or DELETE affected, or a FETCH returned;
   - SQLWARN0 to SQLWARNA.
 - **No SQLCA.** A program with no SQLCA, but with a standalone SQLCODE and SQLSTATE as STDSQL(YES)
   declares them, gets those two fields.
@@ -226,6 +277,10 @@ Input rules:
 | PREPARE of the statement of an open cursor | -519 | 24506 |
 | DESCRIBE of a statement not prepared | -516 | 26501 |
 | An SQLDA the statement cannot use; SQLERRMC holds Db2's reason code | -804 | 07002 |
+| FOR n ROWS outside 1 to 32767, or more rows than an array holds | -246 | 42873 |
+| A rowset FETCH on a cursor declared without rowset positioning | -249 | 24523 |
+| A NOT ATOMIC multiple-row INSERT with a failed row, another inserted (PostgreSQL backend) | -253 | 22529 |
+| A NOT ATOMIC multiple-row INSERT with no row inserted (PostgreSQL backend) | -254 | 22530 |
 
 ## 7. Units of work
 
@@ -283,11 +338,14 @@ Input rules:
   - **`:`** gives one result column of a PREPARE: its name, its type (`char(10)`,
     `decimal(7,2)`, `timestamp(6)`, `other:"…"` for one Db2 has no type for) and `null` or
     `notnull`, as `: char:"NAME" char(10) notnull`. DESCRIBE reads them.
-  - **`>`** gives the input values, in host-variable order.
+  - **`>`** gives the input values, in host-variable order: a `>` line for each row of a
+    multiple-row INSERT, whose text is the INSERT of one row. A rowset FETCH's text is
+    `FETCH NEXT ROWSET FROM C1 FOR ? ROWS`, and its input the rows the database is asked for.
   - **`<`** gives SQLCODE, SQLSTATE, rows affected, and any message tokens as
     `tokens=char:"…"`. It holds no warning flags: the runtime sets SQLWARN from what assignment
     did, as Db2's precompiled code does.
-  - **`=`** gives one output row.
+  - **`=`** gives one output row. A CALL's one `=` line gives each host-variable argument as the
+    procedure returns it, `-` for one it does not return; its cursor slot names the procedure.
   - **Values** are:
     - `null`, `int:`, `dec:` and `double:`. A decimal's scale is its count of fractional digits, so
       `dec:1234.50` has scale 2; its precision is the column's, not the value's. A double is written
@@ -485,11 +543,29 @@ is for evaluation only.
   assigns the column there and its NULL indicator where SQLIND points; an SQLDATA of NULL is -804
   with reason 12 on input.
 
+### Q8: Rowsets, multiple-row INSERT and CALL
+
+- **Given** a cursor WITH ROWSET POSITIONING over three rows **when** `FETCH NEXT ROWSET FROM C1
+  FOR :N ROWS` runs with N 3, then again without FOR n ROWS over one more row **then** the first
+  fills three elements of each array with SQLCODE 0, and the second fills element 1 with +100 and
+  SQLERRD(3) 1, leaving elements 2 and 3 as they were.
+- **Given** a rowset of rows 1 to 3 **when** a row FETCH runs, then a NEXT ROWSET without FOR n
+  ROWS **then** they give rows 2 and 3, and the database is asked for no more rows.
+- **Given** a cursor declared without rowset positioning **then** a rowset FETCH is -249; FOR 0
+  ROWS, and FOR 4 ROWS into arrays of 3, are -246.
+- **Given** `INSERT ... VALUES (:A, :B :BI, :ID) FOR :N ROWS` with N 2 **then** the database
+  receives two rows, the second with B NULL, ID the same in both; against PostgreSQL a duplicate
+  key in an ATOMIC insert is -803 with no row kept, and in a NOT ATOMIC one -253 with the others kept.
+- **Given** a recorded CALL whose `=` line is `- | char:"DONE"` **then** the first argument keeps its
+  value and the second becomes DONE; +466 sets SQLWARN9 to `Z`; against PostgreSQL the CALL abends
+  EXEC, naming the recording.
+
 ## 13. Out of scope
 
 - **DESCRIBE INPUT and USING BOTH**, and LOB, binary and NUL-terminated SQLTYPEs in an SQLDA.
-- **Multi-row FETCH and INSERT** with host-variable arrays.
-- **Stored procedures**, and CALL of SQL procedures.
+- **Rowsets of a scrollable cursor**, and rowset FETCH into a descriptor.
+- **Running stored procedures**, so CALL against a live database; result sets (ASSOCIATE LOCATORS,
+  ALLOCATE CURSOR, DESCRIBE PROCEDURE); GET DIAGNOSTICS.
 - **LOB types.**
 - **Db2 over DRDA.**
 - **SQLite**, by the 2026-09-28 decision.

@@ -5,7 +5,7 @@
 use rt::cics::Handles;
 use rt::lir::{
     Advance, Argument, Base, Binding, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Const, Convert, ConvertTable, Count, DisplayItem, InitValue, Inspected, Expr, FileVerb, Flag, Func, HostPlace, IntExpr,
-    GlobalAt, JsonValue, Marker, Markup, MethodName, MovePlan, Named, Op, Operand, ParseValue, Place, PlaceId, Program, RangeKind, Receiver, Replacement, ReportOp, SenderCheck, SetTo, SortIo, SortPlan,
+    GlobalAt, JsonValue, Marker, Markup, MethodName, MovePlan, Named, Op, Operand, ParseValue, Place, PlaceId, Program, RangeKind, Receiver, Replacement, ReportOp, RowCount, SenderCheck, SetTo, SortIo, SortPlan,
     SqlStatement, StartKey, StorePlan, SymId, Terminator, UpDown, UserArgument, XmlValue,
 };
 use rt::report::{FieldContent, GroupKind, Origin};
@@ -422,6 +422,10 @@ fn verify_program(p: &Program) -> Result<(), String> {
             h.indicator.map_or(Ok(()), |(q, _)| place(q))
         })
     };
+    let rows_host = |rows: &RowCount| match rows {
+        RowCount::Host(h) => host(std::slice::from_ref(h)),
+        RowCount::Implicit | RowCount::Constant(_) => Ok(()),
+    };
     for e in &p.sql {
         symbol(e.verb)?;
         symbol(e.text)?;
@@ -438,6 +442,16 @@ fn verify_program(p: &Program) -> Result<(), String> {
             SqlStatement::Describe { name, descriptor, .. } | SqlStatement::ExecuteDescriptor { name, descriptor } | SqlStatement::FetchDescriptor { cursor: name, descriptor } => symbol(*name).and_then(|()| place(*descriptor))?,
             SqlStatement::PrepareInto { name, source, descriptor, .. } => symbol(*name).and_then(|()| host(source)).and_then(|()| place(*descriptor))?,
             SqlStatement::OpenDescriptor { cursor, statement, descriptor } => symbol(*cursor).and_then(|()| symbol(*statement)).and_then(|()| place(*descriptor))?,
+            SqlStatement::FetchRowset { cursor, rows, into, .. } => {
+                symbol(*cursor)?;
+                rows_host(rows)?;
+                host(&into.iter().map(|a| a.place.clone()).collect::<Vec<_>>())?
+            }
+            SqlStatement::InsertRows { inputs, rows, .. } => {
+                rows_host(rows)?;
+                host(&inputs.iter().map(|a| a.place.clone()).collect::<Vec<_>>())?
+            }
+            SqlStatement::Call { procedure, args } => symbol(*procedure).and_then(|()| host(args))?,
             SqlStatement::Commit | SqlStatement::Rollback | SqlStatement::Declaration => {}
         }
     }

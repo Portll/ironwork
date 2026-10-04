@@ -11,6 +11,9 @@
 //! < 0 00000 rows=0
 //! : char:"NAME" char(10) notnull
 //! ```
+//!
+//! A multiple-row INSERT has a `>` line for each row. A CALL's `=` line gives each argument as the
+//! procedure returns it, `-` for one it does not return.
 
 use super::{Abandoned, Answer, Call, Column, ColumnType, Database, Outcome, Value};
 use std::io::Write;
@@ -95,7 +98,7 @@ impl Replay {
                     awaiting_outcome = true;
                 }
                 ">" => match entries.last_mut() {
-                    Some(e) if awaiting_outcome && e.inputs.is_empty() => e.inputs = parse_values(rest).map_err(fail)?,
+                    Some(e) if awaiting_outcome => e.inputs.extend(parse_values(rest).map_err(fail)?),
                     _ => return Err(fail("a > line belongs after an @ line, before its < line".into())),
                 },
                 "<" => match entries.last_mut() {
@@ -106,6 +109,8 @@ impl Replay {
                     _ => return Err(fail("a < line belongs after an @ line".into())),
                 },
                 "=" => match entries.last_mut() {
+                    Some(e) if !awaiting_outcome && e.verb == "CALL" && e.outcome.parameters.is_empty() => e.outcome.parameters = parse_parameters(rest).map_err(fail)?,
+                    Some(e) if !awaiting_outcome && e.verb == "CALL" => return Err(fail("a CALL has one = line".into())),
                     Some(e) if !awaiting_outcome => e.outcome.rows.push(parse_values(rest).map_err(fail)?),
                     _ => return Err(fail("an = line belongs after a < line".into())),
                 },
@@ -159,6 +164,15 @@ impl Database for Replay {
     fn fetch(&mut self, call: &Call) -> Answer {
         self.answer(call)
     }
+    fn fetch_rows(&mut self, call: &Call, _: u32) -> Answer {
+        self.answer(call)
+    }
+    fn insert_rows(&mut self, call: &Call, _: &[Vec<Value>], _: bool) -> Answer {
+        self.answer(call)
+    }
+    fn call(&mut self, call: &Call) -> Answer {
+        self.answer(call)
+    }
     fn close(&mut self, call: &Call) -> Answer {
         self.answer(call)
     }
@@ -185,9 +199,14 @@ impl<'w> Recorder<'w> {
     }
 
     fn record(&mut self, call: &Call, answer: Answer) -> Answer {
+        self.record_rows(call, None, answer)
+    }
+
+    /// `rows` are a multiple-row INSERT's, which take a > line each.
+    fn record_rows(&mut self, call: &Call, rows: Option<&[Vec<Value>]>, answer: Answer) -> Answer {
         let outcome = answer?;
         self.seq += 1;
-        let text = entry_text(self.seq, call, &outcome);
+        let text = entry_text(self.seq, call, rows, &outcome);
         // Flushed per call: a served session ends when the server is interrupted, not by returning.
         self.out.write_all(text.as_bytes()).and_then(|()| self.out.flush()).map_err(|e| Abandoned { code: "SQLR", message: format!("the recording could not be written: {e}") })?;
         Ok(outcome)
@@ -211,6 +230,18 @@ impl Database for Recorder<'_> {
         let a = self.inner.fetch(call);
         self.record(call, a)
     }
+    fn fetch_rows(&mut self, call: &Call, rows: u32) -> Answer {
+        let a = self.inner.fetch_rows(call, rows);
+        self.record(call, a)
+    }
+    fn insert_rows(&mut self, call: &Call, rows: &[Vec<Value>], atomic: bool) -> Answer {
+        let a = self.inner.insert_rows(call, rows, atomic);
+        self.record_rows(call, Some(rows), a)
+    }
+    fn call(&mut self, call: &Call) -> Answer {
+        let a = self.inner.call(call);
+        self.record(call, a)
+    }
     fn close(&mut self, call: &Call) -> Answer {
         let a = self.inner.close(call);
         self.record(call, a)
@@ -228,11 +259,13 @@ impl Database for Recorder<'_> {
     }
 }
 
-fn entry_text(seq: u64, call: &Call, outcome: &Outcome) -> String {
+fn entry_text(seq: u64, call: &Call, rows: Option<&[Vec<Value>]>, outcome: &Outcome) -> String {
     let cursor = call.cursor.map(|c| format!(" {c}")).unwrap_or_default();
     let mut text = format!("@ {seq} {}:{}:{:08x} {}{cursor}\n", call.program, call.ordinal, fingerprint(call.text), call.verb);
-    if !call.inputs.is_empty() {
-        text += &format!("> {}\n", values_text(call.inputs));
+    match rows {
+        Some(rows) => rows.iter().for_each(|row| text += &format!("> {}\n", values_text(row))),
+        None if !call.inputs.is_empty() => text += &format!("> {}\n", values_text(call.inputs)),
+        None => {}
     }
     text += &format!("< {} {} rows={}", outcome.sqlcode, outcome.sqlstate, outcome.affected);
     if !outcome.tokens.is_empty() {
@@ -244,6 +277,9 @@ fn entry_text(seq: u64, call: &Call, outcome: &Outcome) -> String {
     }
     for row in &outcome.rows {
         text += &format!("= {}\n", values_text(row));
+    }
+    if !outcome.parameters.is_empty() {
+        text += &format!("= {}\n", outcome.parameters.iter().map(|p| p.as_ref().map_or_else(|| "-".to_owned(), value_text)).collect::<Vec<_>>().join(" | "));
     }
     text
 }
@@ -351,13 +387,26 @@ fn parse_outcome(text: &str) -> Result<Outcome, String> {
             _ => return Err("the rest of a < line is tokens=char:\"...\"".into()),
         },
     };
-    Ok(Outcome { sqlcode, sqlstate: state.into(), affected, rows: Vec::new(), tokens, columns: Vec::new() })
+    Ok(Outcome { sqlcode, sqlstate: state.into(), affected, rows: Vec::new(), tokens, columns: Vec::new(), parameters: Vec::new() })
+}
+
+/// A CALL's = line: a value for each argument, or - for one the procedure does not return.
+fn parse_parameters(text: &str) -> Result<Vec<Option<Value>>, String> {
+    parse_list(text, |item| match item.strip_prefix('-') {
+        Some(rest) if rest.trim_start().is_empty() || rest.trim_start().starts_with('|') => Ok((None, rest)),
+        _ => parse_value(item).map(|(v, rest)| (Some(v), rest)),
+    })
 }
 
 fn parse_values(text: &str) -> Result<Vec<Value>, String> {
+    parse_list(text, parse_value)
+}
+
+/// Items separated by |, each read from the start of what is left by `item`.
+fn parse_list<T>(text: &str, item: impl Fn(&str) -> Result<(T, &str), String>) -> Result<Vec<T>, String> {
     let (mut out, mut rest) = (Vec::new(), text.trim_start());
     while !rest.is_empty() {
-        let (v, after) = parse_value(rest)?;
+        let (v, after) = item(rest)?;
         out.push(v);
         rest = after.trim_start();
         if let Some(next) = rest.strip_prefix('|') {
@@ -442,8 +491,8 @@ mod tests {
     #[test]
     fn a_recording_answers_the_calls_it_holds_in_order() {
         let inputs = [Value::Int(7)];
-        let first = entry_text(1, &call("SELECT", "SELECT A FROM T WHERE K = ?", &inputs), &Outcome::rows(vec![vec![Value::Char("X".into())]]));
-        let second = entry_text(2, &call("COMMIT", "COMMIT", &[]), &Outcome::ok());
+        let first = entry_text(1, &call("SELECT", "SELECT A FROM T WHERE K = ?", &inputs), None, &Outcome::rows(vec![vec![Value::Char("X".into())]]));
+        let second = entry_text(2, &call("COMMIT", "COMMIT", &[]), None, &Outcome::ok());
         let mut replay = Replay::parse(&format!("{HEADER}\n{first}{second}"), false).expect("parses");
         assert_eq!(replay.execute(&call("SELECT", "SELECT A FROM T WHERE K = ?", &inputs)).unwrap().rows, [[Value::Char("X".into())]]);
         assert_eq!(replay.commit(&call("COMMIT", "COMMIT", &[])), Ok(Outcome::ok()));
@@ -453,7 +502,7 @@ mod tests {
 
     #[test]
     fn strict_replay_refuses_a_different_call_and_names_both() {
-        let text = format!("{HEADER}\n{}", entry_text(1, &call("SELECT", "SELECT A FROM T WHERE K = ?", &[Value::Int(7)]), &Outcome::ok()));
+        let text = format!("{HEADER}\n{}", entry_text(1, &call("SELECT", "SELECT A FROM T WHERE K = ?", &[Value::Int(7)]), None, &Outcome::ok()));
         let mut replay = Replay::parse(&text, false).unwrap();
         let err = replay.execute(&call("SELECT", "SELECT A FROM T WHERE K = ?", &[Value::Int(8)])).unwrap_err();
         assert_eq!(err.code, "SQLR");
@@ -465,8 +514,8 @@ mod tests {
         let (a, b) = ([Value::Int(1)], [Value::Int(2)]);
         let text = format!(
             "{HEADER}\n{}{}",
-            entry_text(1, &call("SELECT", "Q", &a), &Outcome::rows(vec![vec![Value::Int(10)]])),
-            entry_text(2, &call("SELECT", "Q", &b), &Outcome::rows(vec![vec![Value::Int(20)]]))
+            entry_text(1, &call("SELECT", "Q", &a), None, &Outcome::rows(vec![vec![Value::Int(10)]])),
+            entry_text(2, &call("SELECT", "Q", &b), None, &Outcome::rows(vec![vec![Value::Int(20)]]))
         );
         let mut replay = Replay::parse(&text, true).unwrap();
         assert_eq!(replay.execute(&call("SELECT", "Q", &b)).unwrap().rows, [[Value::Int(20)]]);
@@ -495,6 +544,15 @@ mod tests {
             }
             fn fetch(&mut self, _: &Call) -> Answer {
                 Ok(Outcome::error(100, "02000"))
+            }
+            fn fetch_rows(&mut self, _: &Call, _: u32) -> Answer {
+                Ok(Outcome { affected: 2, ..Outcome::rows(vec![vec![Value::Int(1)], vec![Value::Int(2)]]) })
+            }
+            fn insert_rows(&mut self, _: &Call, rows: &[Vec<Value>], _: bool) -> Answer {
+                Ok(Outcome { affected: rows.len() as i64, ..Outcome::ok() })
+            }
+            fn call(&mut self, _: &Call) -> Answer {
+                Ok(Outcome { parameters: vec![None, Some(Value::Char("A|B".into())), Some(Value::Null)], ..Outcome::error(466, "0100C") })
             }
             fn close(&mut self, _: &Call) -> Answer {
                 Ok(Outcome::ok())
@@ -528,6 +586,20 @@ mod tests {
         let mut replay = Replay::parse(&text, false).unwrap();
         assert_eq!(replay.execute(&call("SELECT", "SELECT X, Y FROM T WHERE Z = ?", &inputs)), Ok(live));
         assert_eq!(replay.prepare(&Call { cursor: Some("S1"), ..call("PREPARE", "SELECT NAME, AMT FROM T", &[]) }), Ok(prepared));
+
+        written.borrow_mut().clear();
+        let mut recorder = Recorder::new(Box::new(Fixed), Box::new(Sink(written.clone())), "a test double").unwrap();
+        let rows = [vec![Value::Int(1), Value::Char("X".into())], vec![Value::Int(2), Value::Null]];
+        let flat = rows.concat();
+        let insert = Call { cursor: None, ..call("INSERT", "INSERT INTO T VALUES (?, ?)", &flat) };
+        let fetch = Call { cursor: Some("C1"), ..call("FETCH", "FETCH NEXT ROWSET FROM C1 FOR ? ROWS", &[Value::Int(2)]) };
+        let procedure = Call { cursor: Some("P1"), ..call("CALL", "CALL P1 (?, ?, ?)", &inputs) };
+        let live = [recorder.insert_rows(&insert, &rows, true), recorder.fetch_rows(&fetch, 2), recorder.call(&procedure)];
+        let text = String::from_utf8(written.borrow().clone()).unwrap();
+        assert!(text.contains("> int:1 | char:\"X\"\n> int:2 | null\n"), "{text}");
+        assert!(text.contains("= - | char:\"A|B\" | null\n"), "{text}");
+        let mut replay = Replay::parse(&text, false).unwrap();
+        assert_eq!([replay.insert_rows(&insert, &rows, true), replay.fetch_rows(&fetch, 2), replay.call(&procedure)], live);
     }
 
     #[test]
@@ -537,5 +609,9 @@ mod tests {
         assert_eq!(err, "line 3: an = line belongs after a < line");
         assert!(Replay::parse(&format!("{HEADER}\n@ 1 P:1:0 SELECT\n< 0 00000 rows=0\n= int:x\n"), false).err().unwrap().starts_with("line 4: "));
         assert_eq!(Replay::parse(&format!("{HEADER}\n@ 1 P:1:0 SELECT\n"), false).err().unwrap(), "the last call has no < line");
+        let call_lines = |equals: &str| Replay::parse(&format!("{HEADER}\n@ 1 P:1:0 CALL P\n< 0 00000 rows=0\n{equals}"), false).err();
+        assert_eq!(call_lines("= - | int:1\n= int:2\n").unwrap(), "line 5: a CALL has one = line");
+        assert!(call_lines("= -- | int:1\n").unwrap().starts_with("line 4: "));
+        assert_eq!(call_lines("= - | int:1\n"), None);
     }
 }

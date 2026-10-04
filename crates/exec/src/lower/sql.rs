@@ -5,12 +5,12 @@
 use super::flow::Ctx;
 use super::{Lower, LowerError, R, unsupported};
 use crate::layout::Resolved;
-use crate::sql::{HostType, host_type};
+use crate::sql::{HostType, host_array, host_type};
 use rt::abend::AbendCode;
-use rt::lir::{self, HostPlace, Op, PlaceId, SqlEntry, SqlStatement, SqlTest, Sqlca, Terminator};
+use rt::lir::{self, HostArray, HostPlace, Op, PlaceId, RowCount, SqlEntry, SqlStatement, SqlTest, Sqlca, Terminator};
 use syntax::Pos;
 use syntax::ast::{ExecBlock, ExecKind, Expr, Literal, Operand, ProcName, Ref, Stmt};
-use syntax::sql::{Action, ChangeKind, Cursor, HostVar, Statement, Whenever};
+use syntax::sql::{Action, ChangeKind, Cursor, HostVar, Rows, Statement, Whenever};
 
 /// The EXEC SQL blocks among `stmts` and the statements inside them, in order.
 fn sql_blocks<'s>(stmts: &'s [Stmt], out: &mut Vec<&'s ExecBlock>) {
@@ -63,7 +63,7 @@ impl Lower<'_> {
                 let current_of = current_of.as_deref().map(|c| self.sym(c));
                 (SqlStatement::Change { delete: matches!(kind, ChangeKind::Delete), inputs, current_of }, text.clone(), false)
             }
-            Statement::Open { cursor, declared: Some(Cursor { name: _, text, inputs, with_hold, statement }), using, descriptor } => {
+            Statement::Open { cursor, declared: Some(Cursor { name: _, text, inputs, with_hold, statement, rowset: _ }), using, descriptor } => {
                 let hold = if *with_hold { " WITH HOLD" } else { "" };
                 match (statement, descriptor) {
                     (Some(name), Some(d)) => {
@@ -82,6 +82,15 @@ impl Lower<'_> {
             }
             Statement::Fetch { cursor, into } => (SqlStatement::Fetch { cursor: self.sym(cursor), into: self.host_places(into, command)? }, format!("FETCH {cursor}"), false),
             Statement::FetchDescriptor { cursor, descriptor } => (SqlStatement::FetchDescriptor { cursor: self.sym(cursor), descriptor: self.place(&descriptor.var, false)? }, format!("FETCH {cursor}"), false),
+            Statement::FetchRowset { cursor, rows, into, enabled } => {
+                let (rows, into) = (self.row_count(rows, command)?, self.host_arrays(into, command, true)?);
+                (SqlStatement::FetchRowset { cursor: self.sym(cursor), rows, into, enabled: *enabled }, format!("FETCH NEXT ROWSET FROM {cursor} FOR ? ROWS"), false)
+            }
+            Statement::InsertRows { text, inputs, rows, atomic } => {
+                let (rows, inputs) = (self.row_count(rows, command)?, self.host_arrays(inputs, command, false)?);
+                (SqlStatement::InsertRows { inputs, rows, atomic: *atomic }, text.clone(), false)
+            }
+            Statement::Call { procedure, text, args } => (SqlStatement::Call { procedure: self.sym(procedure), args: self.host_places(args, command)? }, text.clone(), false),
             Statement::Close { cursor } => (SqlStatement::Close { cursor: self.sym(cursor) }, format!("CLOSE {cursor}"), false),
             Statement::Commit => (SqlStatement::Commit, "COMMIT".into(), false),
             Statement::Rollback => (SqlStatement::Rollback, "ROLLBACK".into(), false),
@@ -122,7 +131,7 @@ impl Lower<'_> {
         let mut out = Vec::new();
         for HostVar { var: host, indicator } in vars {
             let var = self.place(host, false)?;
-            let indicator = indicator.as_ref().map(|r| self.indicator(r)).transpose()?;
+            let indicator = indicator.as_ref().map(|r| self.first_element(r)).transpose()?;
             let element = |k: usize| indicator.map(|p| (p, 2 * k as u32));
             let at = Some(host.pos);
             let ty = match layout.resolve(&host.name, &host.qualifiers, host.pos) {
@@ -148,8 +157,54 @@ impl Lower<'_> {
         Ok(out)
     }
 
-    /// `locate_indicator`: an indicator array named without subscripts at its first element.
-    fn indicator(&mut self, r: &Ref) -> R<PlaceId> {
+    /// `host_arrays`: each host-variable array with its first element's place and its dimension; a
+    /// rowset FETCH's INTO takes only arrays, and anything else keeps the walker's abend.
+    fn host_arrays(&mut self, vars: &[HostVar], command: &str, arrays_only: bool) -> R<Vec<HostArray>> {
+        let layout = self.layout;
+        let mut out = Vec::new();
+        for hv in vars {
+            let item = |r: &Ref| match layout.resolve(&r.name, &r.qualifiers, r.pos) {
+                Ok(Resolved::Item(i)) => Some(i),
+                _ => None,
+            };
+            let scalar = |l: &mut Self| l.host_places(std::slice::from_ref(hv), command).map(|places| places.into_iter().map(|place| HostArray { place, array: None }).collect::<Vec<_>>());
+            let Some(var) = item(&hv.var) else {
+                out.extend(scalar(self)?);
+                continue;
+            };
+            let indicator = hv.indicator.as_ref().and_then(|r| item(r).map(|i| (i, !r.subscripts.is_empty())));
+            let array = match host_array(layout, var, !hv.var.subscripts.is_empty(), indicator) {
+                Ok(None) if arrays_only => Err(format!("{} is not a host-variable array, which a rowset FETCH's INTO takes", hv.var.name)),
+                Ok(None) => {
+                    out.extend(scalar(self)?);
+                    continue;
+                }
+                Ok(Some(d)) => host_type(layout, var).map(|ty| (ty, d)),
+                Err(why) => Err(why),
+            };
+            let indicator = hv.indicator.as_ref().map(|r| self.first_element(r)).transpose()?.map(|p| (p, 0));
+            out.push(match array {
+                Ok((ty, d)) => HostArray { place: HostPlace { var: self.first_element(&hv.var)?, member: None, ty: Ok(ty), indicator }, array: Some(d) },
+                Err(why) => {
+                    let abend = self.abend(AbendCode::Exec, &format!("EXEC SQL {command}: {why}"), Some(hv.var.pos))?;
+                    HostArray { place: HostPlace { var: self.first_element(&hv.var)?, member: None, ty: Err(abend), indicator }, array: None }
+                }
+            });
+        }
+        Ok(out)
+    }
+
+    fn row_count(&mut self, rows: &Rows, command: &str) -> R<RowCount> {
+        Ok(match rows {
+            Rows::Implicit => RowCount::Implicit,
+            Rows::Constant(n) => RowCount::Constant(*n),
+            Rows::Host(h) => RowCount::Host(self.host_places(std::slice::from_ref(h.as_ref()), command)?.remove(0)),
+        })
+    }
+
+    /// `locate_first`: a table named without subscripts, an indicator or host-variable array, at its
+    /// first element.
+    fn first_element(&mut self, r: &Ref) -> R<PlaceId> {
         let dims = match self.layout.resolve(&r.name, &r.qualifiers, r.pos) {
             Ok(Resolved::Item(i)) if r.subscripts.is_empty() => self.layout.items[i].dims.len(),
             _ => 0,

@@ -564,8 +564,8 @@ whose change was not additive. 0.6 is additive: the `LIR` section ends with the 
 their name from a data item, written only when one does, so a 0.6 module without one reads in a 0.5
 reader and a 0.5 reader refuses one with them as malformed. 0.6 also adds the dynamic SQL
 statements' tags (lir.md §9.7): a 0.5 reader refuses a module holding one as malformed and reads
-one without. 0.7 is additive too: it adds the tags of DESCRIBE and USING DESCRIPTOR, the
-class-name test `ByteClass::Set` (lir.md §6), and the command line under `--compliance extended`
+one without. 0.7 is additive too: it adds the tags of DESCRIBE and USING DESCRIPTOR, rowset FETCH,
+multiple-row INSERT and CALL, the class-name test `ByteClass::Set` (lir.md §6), and the command line under `--compliance extended`
 (`AcceptFrom` 5 to 7 and `Op::ArgumentNumber`, lir.md §9.1), which a 0.6 reader refuses as
 malformed, and the `OPTIONS` section ends with the `--assume` choices, written
 only for a program compiled with one (§5.1), so an earlier reader reads a module without them and

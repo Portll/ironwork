@@ -1279,19 +1279,35 @@ fn the_sql_table_round_trips_with_every_tag() {
     let member = HostPlace { var: 1, member: Some((4, 20)), ty: Ok(HostType::Char(20)), indicator: Some((2, 2)) };
     let untyped = HostPlace { var: 3, member: None, ty: Err(1), indicator: None };
     round_trip(&[id.clone(), member.clone(), untyped.clone()]);
+    let array = HostArray { place: HostPlace { var: 7, member: None, ty: Ok(HostType::Char(3)), indicator: Some((8, 0)) }, array: Some(Dimension { stride: 3, count: 10, indicator_stride: 2 }) };
+    round_trip(std::slice::from_ref(&array));
     let statements = [
         SqlStatement::Query { inputs: vec![id.clone()], into: vec![member.clone(), untyped.clone()] },
         SqlStatement::Change { delete: true, inputs: vec![], current_of: Some(2) },
-        SqlStatement::Open { cursor: 2, inputs: vec![id] },
-        SqlStatement::Fetch { cursor: 2, into: vec![member] },
+        SqlStatement::Open { cursor: 2, inputs: vec![id.clone()] },
+        SqlStatement::Fetch { cursor: 2, into: vec![member.clone()] },
         SqlStatement::Close { cursor: 2 },
         SqlStatement::Commit,
         SqlStatement::Rollback,
         SqlStatement::Declaration,
         SqlStatement::Unsupported(3),
-        SqlStatement::Connect { what: 4, location: vec![untyped] },
+        SqlStatement::Connect { what: 4, location: vec![untyped.clone()] },
+        SqlStatement::Prepare { name: 5, source: vec![id.clone()] },
+        SqlStatement::ExecuteImmediate { source: vec![id.clone()] },
+        SqlStatement::Execute { name: 5, inputs: vec![] },
+        SqlStatement::OpenPrepared { cursor: 2, statement: 5, inputs: vec![id.clone()] },
+        SqlStatement::Describe { name: 5, descriptor: 9, names: SqlNames::Names },
+        SqlStatement::PrepareInto { name: 5, source: vec![id.clone()], descriptor: 9, names: SqlNames::Any },
+        SqlStatement::ExecuteDescriptor { name: 5, descriptor: 9 },
+        SqlStatement::OpenDescriptor { cursor: 2, statement: 5, descriptor: 9 },
+        SqlStatement::FetchDescriptor { cursor: 2, descriptor: 9 },
+        SqlStatement::FetchRowset { cursor: 2, rows: RowCount::Constant(5), into: vec![array.clone()], enabled: true },
+        SqlStatement::InsertRows { inputs: vec![array.clone(), HostArray { place: id.clone(), array: None }], rows: RowCount::Host(id.clone()), atomic: false },
+        SqlStatement::Call { procedure: 6, args: vec![id.clone(), untyped] },
     ];
-    every_variant(&statements, 10);
+    every_variant(&statements, 22);
+    every_variant(&[SqlNames::Names, SqlNames::Labels, SqlNames::Any], 3);
+    every_variant(&[RowCount::Implicit, RowCount::Constant(32767), RowCount::Host(id)], 3);
     let fields = [
         SqlcaField::CaId,
         SqlcaField::CaBc,

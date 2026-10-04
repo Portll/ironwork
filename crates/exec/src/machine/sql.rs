@@ -5,8 +5,8 @@ use super::facts::Facts;
 use super::*;
 use crate::sql::{self, HostType, Session, SqlHost};
 use rt::host::Host;
-use rt::lir::{AbendId, HostPlace, SqlEntry, SqlNames, SqlStatement, Sqlca, SqlcaField};
-use syntax::sql::{Action, ChangeKind, HostVar, Names, Statement, Whenever};
+use rt::lir::{AbendId, HostArray, HostPlace, RowCount, SqlEntry, SqlNames, SqlStatement, Sqlca, SqlcaField};
+use syntax::sql::{Action, ChangeKind, HostVar, Names, Rows, Statement, Whenever};
 
 type Entry<'b> = SqlEntry<&'b Ref, String>;
 
@@ -60,6 +60,15 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
             }
             Statement::Fetch { cursor, into } => (SqlStatement::Fetch { cursor: cursor.clone(), into: places(into) }, format!("FETCH {cursor}"), false),
             Statement::FetchDescriptor { cursor, descriptor } => (SqlStatement::FetchDescriptor { cursor: cursor.clone(), descriptor: &descriptor.var }, format!("FETCH {cursor}"), false),
+            Statement::FetchRowset { cursor, rows, into, enabled } => {
+                let (rows, into) = (self.row_count(rows, command, untyped), self.host_arrays(into, command, true, untyped));
+                (SqlStatement::FetchRowset { cursor: cursor.clone(), rows, into, enabled: *enabled }, format!("FETCH NEXT ROWSET FROM {cursor} FOR ? ROWS"), false)
+            }
+            Statement::InsertRows { text, inputs, rows, atomic } => {
+                let (rows, inputs) = (self.row_count(rows, command, untyped), self.host_arrays(inputs, command, false, untyped));
+                (SqlStatement::InsertRows { inputs, rows, atomic: *atomic }, text.clone(), false)
+            }
+            Statement::Call { procedure, text, args } => (SqlStatement::Call { procedure: procedure.clone(), args: self.host_places(args, command, untyped) }, text.clone(), false),
             Statement::Close { cursor } => (SqlStatement::Close { cursor: cursor.clone() }, format!("CLOSE {cursor}"), false),
             Statement::Commit => (SqlStatement::Commit, "COMMIT".into(), false),
             Statement::Rollback => (SqlStatement::Rollback, "ROLLBACK".into(), false),
@@ -118,6 +127,50 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
             }
         }
         out
+    }
+
+    /// A multiple-row statement's host variables, each host-variable array with its dimension. A
+    /// rowset FETCH's INTO takes only arrays; anything else abends EXEC when the statement reaches it.
+    fn host_arrays<'b>(&mut self, vars: &'b [HostVar], command: &str, arrays_only: bool, untyped: &mut Vec<Abend>) -> Vec<HostArray<&'b Ref>> {
+        let mut out = Vec::new();
+        for hv in vars {
+            let item = |m: &mut Self, r: &Ref| match m.resolve(r) {
+                Ok(Resolved::Item(i)) => Some(i),
+                _ => None,
+            };
+            let Some(var) = item(self, &hv.var) else {
+                out.extend(self.host_places(std::slice::from_ref(hv), command, untyped).into_iter().map(|place| HostArray { place, array: None }));
+                continue;
+            };
+            let indicator = hv.indicator.as_ref().and_then(|r| item(self, r).map(|i| (i, !r.subscripts.is_empty())));
+            let refused = |why: String| Abend { code: "EXEC".into(), message: format!("EXEC SQL {command}: {why}"), pos: hv.var.pos, file: None };
+            let array = match sql::host_array(self.layout, var, !hv.var.subscripts.is_empty(), indicator) {
+                Ok(None) if arrays_only => Err(refused(format!("{} is not a host-variable array, which a rowset FETCH's INTO takes", hv.var.name))),
+                Ok(None) => {
+                    out.extend(self.host_places(std::slice::from_ref(hv), command, untyped).into_iter().map(|place| HostArray { place, array: None }));
+                    continue;
+                }
+                Ok(Some(d)) => sql::host_type(self.layout, var).map(|ty| (ty, d)).map_err(refused),
+                Err(why) => Err(refused(why)),
+            };
+            let indicator = hv.indicator.as_ref().map(|r| (r, 0));
+            out.push(match array {
+                Ok((ty, d)) => HostArray { place: HostPlace { var: &hv.var, member: None, ty: Ok(ty), indicator }, array: Some(d) },
+                Err(abend) => {
+                    untyped.push(abend);
+                    HostArray { place: HostPlace { var: &hv.var, member: None, ty: Err((untyped.len() - 1) as AbendId), indicator }, array: None }
+                }
+            });
+        }
+        out
+    }
+
+    fn row_count<'b>(&mut self, rows: &'b Rows, command: &str, untyped: &mut Vec<Abend>) -> RowCount<&'b Ref> {
+        match rows {
+            Rows::Implicit => RowCount::Implicit,
+            Rows::Constant(n) => RowCount::Constant(*n),
+            Rows::Host(h) => RowCount::Host(self.host_places(std::slice::from_ref(h.as_ref()), command, untyped).remove(0)),
+        }
     }
 
     /// The SQLCA fields the program declares with an SQL type, or its standalone SQLCODE and
@@ -241,9 +294,10 @@ impl<'a, 'w> SqlHost<'w, &'a Ref, String> for Bound<'_, '_, '_, 'w> {
         self.machine.sink(kind, pos, operand);
     }
 
-    /// An indicator array named without subscripts, as `:CLS:CLS-IND` names one, at its first
-    /// element (Db2 13 for z/OS, SSEPEK_13.0.0 apsg db2z_indicatorvariablecobol).
-    fn locate_indicator(&mut self, place: &'a Ref) -> R<Loc> {
+    /// A table named without subscripts at its first element: an indicator array, as `:CLS:CLS-IND`
+    /// names one (Db2 13 for z/OS, SSEPEK_13.0.0 apsg db2z_indicatorvariablecobol), or a
+    /// host-variable array.
+    fn locate_first(&mut self, place: &'a Ref) -> R<Loc> {
         let m = &mut *self.machine;
         let dims = match m.resolve(place) {
             Ok(Resolved::Item(i)) if place.subscripts.is_empty() => m.layout.items[i].dims.len(),
@@ -293,6 +347,16 @@ mod tests {
             self.answer(c)
         }
         fn fetch(&mut self, c: &Call) -> Answer {
+            self.answer(c)
+        }
+        fn fetch_rows(&mut self, c: &Call, _: u32) -> Answer {
+            self.answer(c)
+        }
+        /// Logged under INSERT ATOMIC or INSERT NOT ATOMIC.
+        fn insert_rows(&mut self, c: &Call, _: &[Vec<Value>], atomic: bool) -> Answer {
+            self.answer(&Call { verb: if atomic { "INSERT ATOMIC" } else { "INSERT NOT ATOMIC" }, ..*c })
+        }
+        fn call(&mut self, c: &Call) -> Answer {
             self.answer(c)
         }
         fn close(&mut self, c: &Call) -> Answer {
@@ -1079,6 +1143,233 @@ mod tests {
             assert_eq!(shown.as_deref(), Ok(" 0000\n 0000\n 0000\nSMITH     |-0001\n 0000\n 0000\n 0000\n-0804\n12\n-0804\n"));
             assert_eq!(verbs(&calls), ["PREPARE", "OPEN", "FETCH", "CLOSE", "PREPARE", "DELETE", "COMMIT"]);
             assert_eq!((calls[1].3.as_slice(), calls[5].3.as_slice()), ([Value::Int(7)].as_slice(), [Value::Int(7)].as_slice()));
+        }
+    }
+    mod multirow {
+        use super::*;
+
+        const ROWSETS: &str = concat!(
+            "       IDENTIFICATION DIVISION.\n",
+            "       PROGRAM-ID. M.\n",
+            "       DATA DIVISION.\n",
+            "       WORKING-STORAGE SECTION.\n",
+            "           EXEC SQL INCLUDE SQLCA END-EXEC.\n",
+            "       01 ROWSET-VARS.\n",
+            "          05 COL-A PIC X(3) OCCURS 3.\n",
+            "          05 COL-B PIC S9(4) COMP OCCURS 3.\n",
+            "          05 IND-B PIC S9(4) COMP OCCURS 3.\n",
+            "       01 NAMES.\n",
+            "          05 NAME OCCURS 3.\n",
+            "             49 NAME-LEN PIC S9(4) COMP.\n",
+            "             49 NAME-TEXT PIC X(8).\n",
+            "       01 GRID.\n",
+            "          05 GRID-ROW OCCURS 2.\n",
+            "             10 GRID-A PIC X(3) OCCURS 2.\n",
+            "       01 ENTRIES.\n",
+            "          05 ENTRY-ROW OCCURS 2.\n",
+            "             10 ENTRY-A PIC X(3).\n",
+            "             10 ENTRY-B PIC S9(4) COMP.\n",
+            "       01 N        PIC S9(4) COMP VALUE 3.\n",
+            "       01 ONE      PIC X(3).\n",
+            "       01 WS-ID    PIC S9(9) COMP VALUE 7.\n",
+            "       01 P-IN     PIC X(3) VALUE 'IN1'.\n",
+            "       01 P-OUT    PIC X(5) VALUE 'XXXXX'.\n",
+            "       01 P-NUM    PIC S9(4) COMP VALUE 5.\n",
+            "       01 P-IND    PIC S9(4) COMP VALUE 0.\n",
+            "       01 E-CODE   PIC -9(3).\n",
+            "       01 E-ROWS   PIC 9.\n",
+            "       01 E-IND    PIC -9.\n",
+            "       PROCEDURE DIVISION.\n",
+            "           EXEC SQL DECLARE C1 CURSOR WITH ROWSET POSITIONING\n",
+            "                    FOR SELECT A, B FROM T END-EXEC.\n",
+            "           EXEC SQL DECLARE C2 CURSOR FOR SELECT A FROM T END-EXEC.\n",
+            "           MOVE '---' TO COL-A(1) COL-A(2) COL-A(3).\n",
+        );
+
+        /// The statement in EXEC SQL, its words wrapped inside column 72.
+        fn block(sql: &str) -> String {
+            let mut lines = vec![String::new()];
+            for word in sql.split(' ') {
+                let line = lines.last_mut().expect("a line");
+                if !line.is_empty() && line.len() + word.len() > 50 {
+                    lines.push(word.to_owned());
+                } else {
+                    if !line.is_empty() {
+                        line.push(' ');
+                    }
+                    line.push_str(word);
+                }
+            }
+            let body: String = lines.iter().map(|l| format!("               {l}\n")).collect();
+            format!("           EXEC SQL\n{body}           END-EXEC.\n")
+        }
+
+        /// The statement, then SQLCODE, SQLERRD(3) and the three elements of COL-A.
+        fn exec(sql: &str) -> String {
+            format!("{}           MOVE SQLCODE TO E-CODE.\n           MOVE SQLERRD(3) TO E-ROWS.\n           DISPLAY E-CODE ' ' E-ROWS ' ' COL-A(1) COL-A(2) COL-A(3).\n", block(sql))
+        }
+
+        fn rows(procedure: &str, answers: Vec<Outcome>) -> (Result<String, (String, String)>, Vec<Logged>) {
+            run_source_message(&format!("{ROWSETS}{procedure}           GOBACK.\n"), answers)
+        }
+
+        fn row(a: &str, b: Option<i64>) -> Vec<Value> {
+            vec![Value::Char(a.into()), b.map_or(Value::Null, Value::Int)]
+        }
+
+        /// The FETCH calls' inputs: the rows each asked the database for.
+        fn fetched(calls: &[Logged]) -> Vec<Vec<Value>> {
+            calls.iter().filter(|c| c.0 == "FETCH").map(|c| c.3.clone()).collect()
+        }
+
+        const INTO: &str = "INTO :COL-A, :COL-B :IND-B";
+
+        #[test]
+        fn a_rowset_fills_an_element_a_row_and_a_short_one_is_plus_100_leaving_the_rest() {
+            let procedure = [
+                exec("OPEN C1"),
+                exec(&format!("FETCH NEXT ROWSET FROM C1 FOR :N ROWS {INTO}")),
+                "           MOVE IND-B(2) TO E-IND.\n           DISPLAY E-IND ' ' COL-B(3).\n           MOVE '---' TO COL-A(1) COL-A(2) COL-A(3).\n".into(),
+                exec(&format!("FETCH NEXT ROWSET FROM C1 {INTO}")),
+            ]
+            .concat();
+            let answers = vec![Outcome::ok(), Outcome::rows(vec![row("AAA", Some(1)), row("BBB", None), row("CCC", Some(3))]), Outcome::rows(vec![row("DDD", Some(4))])];
+            let (shown, calls) = rows(&procedure, answers);
+            assert_eq!(shown.as_deref(), Ok(" 000 0 ---------\n 000 3 AAABBBCCC\n-1 0003\n 100 1 DDD------\n"));
+            assert_eq!(fetched(&calls), [[Value::Int(3)], [Value::Int(3)]]);
+            assert!(calls.iter().any(|c| c.2 == "FETCH NEXT ROWSET FROM C1 FOR ? ROWS"), "{calls:?}");
+        }
+
+        #[test]
+        fn a_row_fetch_after_a_rowset_moves_from_its_first_row_and_reads_nothing_again() {
+            let procedure = [
+                exec("OPEN C1"),
+                exec(&format!("FETCH NEXT ROWSET FROM C1 FOR 3 ROWS {INTO}")),
+                "           EXEC SQL FETCH C1 INTO :ONE END-EXEC.\n           DISPLAY ONE.\n".into(),
+                exec(&format!("FETCH NEXT ROWSET FROM C1 {INTO}")),
+                exec(&format!("FETCH NEXT ROWSET FROM C1 FOR 2 ROWS {INTO}")),
+            ]
+            .concat();
+            let answers = vec![Outcome::ok(), Outcome::rows(vec![row("AAA", Some(1)), row("BBB", Some(2)), row("CCC", Some(3))]), Outcome::rows(vec![row("EEE", Some(5)), row("FFF", Some(6))])];
+            let (shown, calls) = rows(&procedure, answers);
+            assert_eq!(shown.as_deref(), Ok(" 000 0 ---------\n 000 3 AAABBBCCC\nBBB\n 000 1 CCCBBBCCC\n 000 2 EEEFFFCCC\n"));
+            assert_eq!(fetched(&calls), [[Value::Int(3)], [Value::Int(2)]]);
+        }
+
+        #[test]
+        fn a_rowset_needs_a_rowset_cursor_an_open_one_and_rows_its_arrays_hold() {
+            let procedure = [
+                exec(&format!("FETCH NEXT ROWSET FROM C1 FOR 2 ROWS {INTO}")),
+                exec("OPEN C2"),
+                exec("FETCH NEXT ROWSET FROM C2 FOR 2 ROWS INTO :COL-A"),
+                exec("OPEN C1"),
+                exec(&format!("FETCH NEXT ROWSET FROM C1 FOR 4 ROWS {INTO}")),
+                exec(&format!("FETCH NEXT ROWSET FROM C1 FOR 0 ROWS {INTO}")),
+                "           MOVE 0 TO N.\n".into(),
+                exec(&format!("FETCH NEXT ROWSET FROM C1 FOR :N ROWS {INTO}")),
+            ]
+            .concat();
+            let (shown, calls) = rows(&procedure, Vec::new());
+            assert_eq!(shown.as_deref(), Ok("-501 0 ---------\n 000 0 ---------\n-249 0 ---------\n 000 0 ---------\n-246 0 ---------\n-246 0 ---------\n-246 0 ---------\n"));
+            assert!(fetched(&calls).is_empty(), "{calls:?}");
+        }
+
+        #[test]
+        fn a_rowset_into_what_is_no_host_variable_array_abends_naming_it() {
+            for (into, why) in [
+                ("ONE", "ONE is not a host-variable array, which a rowset FETCH's INTO takes"),
+                ("ENTRY-ROW", "ENTRY-ROW is a host-structure array, which Db2 for z/OS does not take in COBOL"),
+                ("GRID-A", "GRID-A is a table of more than one dimension, which no host-variable array is"),
+                ("COL-A :ONE", "COL-A's indicator is not an indicator array, as a host-variable array's must be"),
+            ] {
+                let (shown, _) = rows(&[exec("OPEN C1"), exec(&format!("FETCH NEXT ROWSET FROM C1 FOR 1 ROWS INTO :{into}"))].concat(), Vec::new());
+                assert_eq!(shown.unwrap_err(), ("EXEC".into(), format!("EXEC SQL FETCH: {why}")), "{into}");
+            }
+        }
+
+        #[test]
+        fn a_varchar_array_takes_a_string_an_element() {
+            let procedure = [
+                "           MOVE SPACES TO NAMES.\n".into(),
+                exec("OPEN C1"),
+                exec("FETCH NEXT ROWSET FROM C1 FOR 2 ROWS INTO :NAME"),
+                "           MOVE NAME-LEN(2) TO E-ROWS.\n           DISPLAY NAME-TEXT(1) '|' NAME-TEXT(2)(1:E-ROWS) '|'.\n".into(),
+            ]
+            .concat();
+            let answers = vec![Outcome::ok(), Outcome::rows(vec![vec![Value::Char("SMITH".into())], vec![Value::Char("LEE".into())]])];
+            assert_eq!(rows(&procedure, answers).0.as_deref(), Ok(" 000 0 ---------\n 000 2 ---------\nSMITH   |LEE|\n"));
+        }
+
+        #[test]
+        fn a_positioned_change_needs_the_rowset_to_be_the_one_row_the_database_is_on() {
+            let update = block("UPDATE T SET A = 'X' WHERE CURRENT OF C1");
+            let three = [exec("OPEN C1"), exec(&format!("FETCH NEXT ROWSET FROM C1 FOR 3 ROWS {INTO}")), update.clone()].concat();
+            let answers = vec![Outcome::ok(), Outcome::rows(vec![row("AAA", Some(1)), row("BBB", Some(2)), row("CCC", Some(3))])];
+            let (code, message) = rows(&three, answers).0.unwrap_err();
+            assert!(code == "EXEC" && message.contains("of a rowset of more than one row"), "{code} {message}");
+            let one = [exec("OPEN C1"), exec(&format!("FETCH NEXT ROWSET FROM C1 FOR 1 ROWS {INTO}")), update].concat();
+            let (shown, calls) = rows(&one, vec![Outcome::ok(), Outcome::rows(vec![row("AAA", Some(1))]), Outcome { affected: 1, ..Outcome::ok() }]);
+            assert!(shown.is_ok(), "{shown:?}");
+            assert!(calls.iter().any(|c| c.0 == "UPDATE"), "{calls:?}");
+        }
+
+        #[test]
+        fn a_multiple_row_insert_sends_each_row_and_repeats_a_host_variable() {
+            let procedure = [
+                "           MOVE 'AAA' TO COL-A(1). MOVE 'BBB' TO COL-A(2).\n           MOVE 1 TO COL-B(1). MOVE -1 TO IND-B(2).\n           MOVE 0 TO IND-B(1). MOVE 2 TO N.\n".into(),
+                exec("INSERT INTO T (A, B, ID) VALUES (:COL-A, :COL-B :IND-B, :WS-ID) FOR :N ROWS"),
+                exec("INSERT INTO T (A) VALUES (:COL-A) FOR 2 ROWS NOT ATOMIC CONTINUE ON SQLEXCEPTION"),
+                exec("INSERT INTO T (A) VALUES (:COL-A) FOR 4 ROWS"),
+            ]
+            .concat();
+            let answers = vec![Outcome { affected: 2, ..Outcome::ok() }, Outcome { affected: 1, ..Outcome::error(-253, "22529") }];
+            let (shown, calls) = rows(&procedure, answers);
+            assert_eq!(shown.as_deref(), Ok(" 000 2 AAABBB---\n-253 1 AAABBB---\n-246 0 AAABBB---\n"));
+            let (aaa, bbb) = (Value::Char("AAA".into()), Value::Char("BBB".into()));
+            assert_eq!(calls[0], ("INSERT ATOMIC".into(), 3, "INSERT INTO T (A, B, ID) VALUES (?, ?, ?)".into(), vec![aaa.clone(), Value::Int(1), Value::Int(7), bbb.clone(), Value::Null, Value::Int(7)]));
+            assert_eq!((calls[1].0.as_str(), calls[1].3.clone()), ("INSERT NOT ATOMIC", vec![aaa, bbb]));
+            assert_eq!(calls.len(), 3, "the last is the COMMIT at the end: {calls:?}");
+        }
+
+        #[test]
+        fn call_assigns_what_the_procedure_returns_and_leaves_the_rest() {
+            let show = "           MOVE P-IND TO E-IND.\n           DISPLAY P-IN ' ' P-OUT ' ' E-IND ' ' SQLWARN0 SQLWARN9.\n";
+            let procedure = [exec("CALL PROC1 (:P-IN, :P-OUT, :P-NUM :P-IND, 'LIT')"), show.into(), exec("CALL PROC1 (:P-IN, :P-OUT, :P-NUM :P-IND, 'LIT')"), show.into()].concat();
+            let returned = vec![None, Some(Value::Char("HELLO".into())), Some(Value::Null)];
+            let answers = vec![Outcome { parameters: returned, ..Outcome::error(466, "0100C") }, Outcome { parameters: vec![None, Some(Value::Char("NO".into())), None], ..Outcome::error(-440, "42884") }];
+            let (shown, calls) = rows(&procedure, answers);
+            assert_eq!(shown.as_deref(), Ok(" 466 0 ---------\nIN1 HELLO -1 WZ\n-440 0 ---------\nIN1 HELLO -1   \n"));
+            assert_eq!(calls[0], ("CALL".into(), 3, "CALL PROC1 (?, ?, ?, 'LIT')".into(), vec![Value::Char("IN1".into()), Value::Char("XXXXX".into()), Value::Int(5)]));
+            let wrong = vec![Outcome { parameters: vec![None], ..Outcome::ok() }];
+            let (code, message) = rows(&exec("CALL PROC1 (:P-IN, :P-OUT)"), wrong).0.unwrap_err();
+            assert!(code == "SQL" && message.contains("1 arguments for its 2"), "{code} {message}");
+        }
+
+        #[test]
+        fn a_recording_answers_a_call_a_multiple_row_insert_and_a_rowset() {
+            let procedure = [
+                "           MOVE 'AAA' TO COL-A(1). MOVE 'BBB' TO COL-A(2).\n".into(),
+                exec("INSERT INTO T (A) VALUES (:COL-A) FOR 2 ROWS"),
+                exec("CALL PROC1 (:P-IN, :P-OUT)"),
+                "           DISPLAY P-OUT.\n".into(),
+                exec("OPEN C1"),
+                exec(&format!("FETCH NEXT ROWSET FROM C1 FOR 2 ROWS {INTO}")),
+            ]
+            .concat();
+            let source = format!("{ROWSETS}{procedure}           GOBACK.\n");
+            let id = |text: &str| format!("{:08x}", rt::sql::fingerprint(text));
+            let recording = [
+                "# ironwork sql recording 1\n".to_owned(),
+                format!("@ 1 M:3:{} INSERT\n> char:\"AAA\"\n> char:\"BBB\"\n< 0 00000 rows=2\n", id("INSERT INTO T (A) VALUES (?)")),
+                format!("@ 2 M:4:{} CALL PROC1\n> char:\"IN1\" | char:\"XXXXX\"\n< 0 00000 rows=0\n= - | char:\"DONE\"\n", id("CALL PROC1 (?, ?)")),
+                format!("@ 3 M:5:{} OPEN C1\n< 0 00000 rows=0\n", id("DECLARE C1 CURSOR FOR SELECT A, B FROM T")),
+                format!("@ 4 M:6:{} FETCH C1\n> int:2\n< 0 00000 rows=2\n= char:\"R1\" | int:1\n= char:\"R2\" | null\n", id("FETCH NEXT ROWSET FROM C1 FOR ? ROWS")),
+                format!("@ 5 M:0:{} COMMIT\n< 0 00000 rows=0\n", id("COMMIT")),
+            ]
+            .concat();
+            let text = recording.clone();
+            let ran = Harness::source(&source).database(move || Box::new(crate::sql::Replay::parse(&text, false).expect("the recording parses"))).run(Executor::Interpreter);
+            assert_eq!((ran.out.as_str(), ran.ending.is_ok()), (" 000 2 AAABBB---\n 000 0 AAABBB---\nDONE \n 000 0 AAABBB---\n 000 2 R1 R2 ---\n", true), "{}", ran.err);
         }
     }
 }

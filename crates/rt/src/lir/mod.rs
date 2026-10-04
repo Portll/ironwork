@@ -42,7 +42,7 @@ pub use place::{Base, Odo, Place, RefMod, Subscript};
 pub use print::{Code, Listing};
 pub use scope::{Binding, Global, GlobalAt, Scope, Section, SharedFile};
 pub use sort::{FileSort, ReleasePlan, ReturnPlan, SortIo, SortKey, SortKeys, SortPlan, TableSort};
-pub use sql::{HostPlace, SqlEntry, SqlNames, SqlStatement, Sqlca, SqlcaField};
+pub use sql::{Dimension, HostArray, HostPlace, RowCount, SqlEntry, SqlNames, SqlStatement, Sqlca, SqlcaField};
 pub use text::{
     Bound, Chars, ConvertTable, Converting, DelimiterIn, InspectPhrase, InspectPlan, Inspected, Replacement,
     StringPlan, StringSource, UnstringInto, UnstringPlan,

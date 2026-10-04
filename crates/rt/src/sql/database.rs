@@ -3,7 +3,7 @@
 //! program, so every backend answers alike.
 
 use super::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 /// One statement as a backend receives it.
 #[derive(Clone, Copy, Debug)]
@@ -11,10 +11,10 @@ pub struct Call<'a> {
     pub program: &'a str,
     /// The statement's place among its program's EXEC SQL blocks, from 1.
     pub ordinal: u32,
-    /// SELECT, INSERT, UPDATE, DELETE, OPEN, FETCH, CLOSE, COMMIT or ROLLBACK; PREPARE; or a
+    /// SELECT, INSERT, UPDATE, DELETE, OPEN, FETCH, CLOSE, COMMIT or ROLLBACK; PREPARE; CALL; or a
     /// dynamic statement string's own command word.
     pub verb: &'a str,
-    /// The cursor, or the statement name PREPARE gives.
+    /// The cursor, the statement name PREPARE gives, or the procedure CALL names.
     pub cursor: Option<&'a str>,
     /// The canonical text, with `?` for each input; a dynamic statement's string as it runs.
     pub text: &'a str,
@@ -33,6 +33,8 @@ pub struct Outcome {
     pub tokens: String,
     /// A PREPARE's description of its statement's result columns, which DESCRIBE gives the program.
     pub columns: Vec<Column>,
+    /// A CALL's arguments as the procedure returns them, None for one it does not return.
+    pub parameters: Vec<Option<Value>>,
 }
 
 /// A result column as DESCRIBE describes it.
@@ -69,7 +71,7 @@ pub enum ColumnType {
 
 impl Outcome {
     pub fn ok() -> Self {
-        Self { sqlcode: 0, sqlstate: "00000".into(), affected: 0, rows: Vec::new(), tokens: String::new(), columns: Vec::new() }
+        Self { sqlcode: 0, sqlstate: "00000".into(), affected: 0, rows: Vec::new(), tokens: String::new(), columns: Vec::new(), parameters: Vec::new() }
     }
 
     pub fn rows(rows: Vec<Vec<Value>>) -> Self {
@@ -100,6 +102,18 @@ pub trait Database {
     fn open(&mut self, call: &Call) -> Answer;
     /// One row, or no row at the end.
     fn fetch(&mut self, call: &Call) -> Answer;
+    /// Up to `rows` rows for a rowset FETCH, fewer at the end.
+    fn fetch_rows(&mut self, call: &Call, rows: u32) -> Answer;
+    /// A multiple-row INSERT: the INSERT of one row `call` names, once for each of `rows`, whose
+    /// values `call.inputs` holds one after another. SQLERRD(3) is the rows inserted. ATOMIC undoes
+    /// them all when one fails; NOT ATOMIC keeps the rest, -253, or -254 when none went in.
+    fn insert_rows(&mut self, call: &Call, rows: &[Vec<Value>], atomic: bool) -> Answer;
+    /// CALL of a stored procedure, which a backend that runs none refuses; the answer's
+    /// `parameters` give the arguments as the procedure returns them
+    /// ([`numeric::assumptions::CALL_FROM_A_RECORDING`]).
+    fn call(&mut self, call: &Call) -> Answer {
+        Err(Abandoned { code: "EXEC", message: format!("EXEC SQL CALL {} was reached: this database runs no stored procedures; a recording of the CALL answers it (--sql-replay)", call.cursor.unwrap_or_default()) })
+    }
     fn close(&mut self, call: &Call) -> Answer;
     fn commit(&mut self, call: &Call) -> Answer;
     fn rollback(&mut self, call: &Call) -> Answer;
@@ -110,13 +124,29 @@ pub trait Database {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct OpenCursor {
     pub with_hold: bool,
     /// On a row, so a positioned UPDATE or DELETE has one to change.
     pub positioned: bool,
     /// The prepared statement a cursor for one runs.
     pub statement: Option<String>,
+    /// The rows from the current position's first: the current rowset's, then those a rowset
+    /// FETCH read ahead of a row FETCH, which moves from the rowset's first row (Db2 13 SQL, FETCH,
+    /// Table 6).
+    pub held: VecDeque<Vec<Value>>,
+    /// How many of `held` the current position takes, 0 before the first.
+    pub current: usize,
+    /// The rows the last FETCH asked for, when it was a rowset FETCH, which the next asks for again
+    /// without FOR n ROWS.
+    pub rowset_size: Option<u32>,
+}
+
+impl OpenCursor {
+    /// Where the backend's own cursor is: on the one row the position takes.
+    pub fn on_backend_row(&self) -> bool {
+        self.current == 1 && self.held.len() == 1
+    }
 }
 
 /// A statement PREPARE made, as EXECUTE and OPEN run it and DESCRIBE describes it.
@@ -151,7 +181,8 @@ impl<'w> Session<'w> {
     }
 
     pub fn opened(&mut self, program: &str, name: &str, with_hold: bool, statement: Option<&str>) {
-        self.cursors.insert((program.to_owned(), name.to_owned()), OpenCursor { with_hold, positioned: false, statement: statement.map(str::to_owned) });
+        let cursor = OpenCursor { with_hold, positioned: false, statement: statement.map(str::to_owned), held: VecDeque::new(), current: 0, rowset_size: None };
+        self.cursors.insert((program.to_owned(), name.to_owned()), cursor);
     }
 
     pub fn prepared(&self, program: &str, name: &str) -> Option<&Prepared> {
@@ -180,7 +211,11 @@ impl<'w> Session<'w> {
     /// KEEPDYNAMIC(NO) does.
     pub fn committed(&mut self) {
         self.cursors.retain(|_, c| c.with_hold);
-        self.cursors.values_mut().for_each(|c| c.positioned = false);
+        for c in self.cursors.values_mut() {
+            c.positioned = false;
+            c.held.drain(..c.current);
+            c.current = 0;
+        }
         let cursors = &self.cursors;
         self.prepared.retain(|(program, name), _| cursors.iter().any(|((p, _), c)| p == program && c.statement.as_deref() == Some(name)));
         self.pending = false;

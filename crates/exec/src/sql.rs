@@ -1,6 +1,6 @@
 //! The SQL runtime is `rt::sql`, with the host type of a declared item from `compile::sql`.
 
-pub use compile::sql::host_type;
+pub use compile::sql::{host_array, host_type};
 pub use rt::sql::*;
 
 #[cfg(test)]
@@ -310,6 +310,85 @@ mod tests {
             assert!(text.contains(" PREPARE INS\n") && text.contains(" CREATE\n"), "{text}");
             let replayed = run_dynamic(Box::new(Replay::parse(&text, false).expect("the recording parses")));
             assert_eq!(replayed.as_deref(), Ok(DYNAMIC_EXPECTED), "{text}");
+        }
+
+        const ROWS_PROGRAM: &str = concat!(
+            "       IDENTIFICATION DIVISION.\n",
+            "       PROGRAM-ID. PGROWS.\n",
+            "       DATA DIVISION.\n",
+            "       WORKING-STORAGE SECTION.\n",
+            "           EXEC SQL INCLUDE SQLCA END-EXEC.\n",
+            "       01 IDS.\n",
+            "          05 R-ID   PIC S9(9) COMP OCCURS 4.\n",
+            "       01 NAMES.\n",
+            "          05 R-NAME PIC X(3) OCCURS 4.\n",
+            "       01 OUT-IDS.\n",
+            "          05 O-ID   PIC 9 OCCURS 3.\n",
+            "       01 OUT-NAMES.\n",
+            "          05 O-NAME PIC X(3) OCCURS 3.\n",
+            "       01 E-CODE   PIC -9(3).\n",
+            "       01 E-ROWS   PIC 9.\n",
+            "           EXEC SQL DECLARE C3 CURSOR WITH ROWSET POSITIONING FOR\n",
+            "                SELECT ID, NAME FROM RWS ORDER BY ID\n",
+            "           END-EXEC.\n",
+            "       PROCEDURE DIVISION.\n",
+            "           MOVE ZEROS TO OUT-IDS. MOVE SPACES TO OUT-NAMES.\n",
+            "           MOVE 1 TO R-ID(1). MOVE 2 TO R-ID(2).\n",
+            "           MOVE 3 TO R-ID(3). MOVE 1 TO R-ID(4).\n",
+            "           MOVE 'AAA' TO R-NAME(1). MOVE 'BBB' TO R-NAME(2).\n",
+            "           MOVE 'CCC' TO R-NAME(3). MOVE 'DUP' TO R-NAME(4).\n",
+            "           EXEC SQL INSERT INTO RWS (ID, NAME)\n",
+            "                VALUES (:R-ID, :R-NAME) FOR 4 ROWS\n",
+            "           END-EXEC.\n",
+            "           PERFORM SHOW-CODE.\n",
+            "           EXEC SQL INSERT INTO RWS (ID, NAME)\n",
+            "                VALUES (:R-ID, :R-NAME) FOR 4 ROWS\n",
+            "                NOT ATOMIC CONTINUE ON SQLEXCEPTION\n",
+            "           END-EXEC.\n",
+            "           PERFORM SHOW-CODE.\n",
+            "           EXEC SQL OPEN C3 END-EXEC.\n",
+            "           EXEC SQL FETCH NEXT ROWSET FROM C3 FOR 2 ROWS\n",
+            "                INTO :O-ID, :O-NAME\n",
+            "           END-EXEC.\n",
+            "           PERFORM SHOW-CODE.\n",
+            "           EXEC SQL FETCH NEXT ROWSET FROM C3\n",
+            "                INTO :O-ID, :O-NAME\n",
+            "           END-EXEC.\n",
+            "           PERFORM SHOW-CODE.\n",
+            "           EXEC SQL CLOSE C3 END-EXEC.\n",
+            "           GOBACK.\n",
+            "       SHOW-CODE.\n",
+            "           MOVE SQLCODE TO E-CODE.\n",
+            "           MOVE SQLERRD(3) TO E-ROWS.\n",
+            "           DISPLAY E-CODE ' ' E-ROWS ' ' O-ID(1) O-NAME(1)\n",
+            "                   O-ID(2) O-NAME(2).\n",
+        );
+
+        fn run_rows(program: &str, mut database: Box<dyn Database + '_>) -> Result<String, String> {
+            let compiled = crate::compile(syntax::parse(program).expect("parses"), &[]).expect("compiles");
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let ran = compiled.execute_with(crate::unit::Library::default(), crate::files::Dds::default(), None, crate::unit::Clock::System, Some(database.as_mut()), &mut out, &mut err);
+            ran.map(|_| String::from_utf8(out).expect("DISPLAY writes text")).map_err(|a| format!("{}: {}", a.code, a.message))
+        }
+
+        #[test]
+        fn multiple_row_inserts_and_rowsets_run_against_postgresql_and_replay_identically() {
+            let Some(url) = url() else { return };
+            let mut setup = Postgres::connect(&url, None).expect("connects");
+            setup.load_script("DROP TABLE IF EXISTS rws; CREATE TABLE rws (id integer PRIMARY KEY, name char(3))").expect("the table is made");
+            let postgres = Postgres::connect(&url, None).expect("connects");
+            let source = postgres.source().to_owned();
+            let recording = Rc::new(RefCell::new(Vec::new()));
+            let recorder = Recorder::new(Box::new(postgres), Box::new(Sink(recording.clone())), &source).expect("records");
+            let expected = "-803 0 0   0   \n-253 3 0   0   \n 000 2 1AAA2BBB\n 100 1 3CCC2BBB\n";
+            assert_eq!(run_rows(ROWS_PROGRAM, Box::new(recorder)).as_deref(), Ok(expected));
+            let text = String::from_utf8(recording.borrow().clone()).expect("a recording is text");
+            assert!(text.contains("> int:3 | char:\"CCC\"\n> int:1 | char:\"DUP\"\n"), "{text}");
+            let replayed = run_rows(ROWS_PROGRAM, Box::new(Replay::parse(&text, false).expect("the recording parses")));
+            assert_eq!(replayed.as_deref(), Ok(expected), "{text}");
+            let call = ROWS_PROGRAM.replace("           EXEC SQL OPEN C3 END-EXEC.\n", "           EXEC SQL CALL NOPROC (:E-ROWS) END-EXEC.\n");
+            let refused = run_rows(&call, Box::new(Postgres::connect(&url, None).expect("connects")));
+            assert!(refused.as_ref().is_err_and(|e| e.starts_with("EXEC: EXEC SQL CALL NOPROC was reached: this database runs no stored procedures")), "{refused:?}");
         }
     }
 }

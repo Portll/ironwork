@@ -1,6 +1,7 @@
 //! The host type of a declared item, which EXEC SQL binds by: what `rt::sql` needs from the layout.
 
 use crate::layout::Layout;
+use rt::lir::Dimension;
 use rt::sql::HostType;
 use rt::storage::Kind;
 use zarch::hfp::Precision;
@@ -27,6 +28,33 @@ pub fn host_type(layout: &Layout, item: usize) -> Result<HostType, String> {
         Kind::Group => structure(layout, item, name)?,
         _ => return Err(format!("{name}: this USAGE or PICTURE has no SQL type")),
     })
+}
+
+/// How a multiple-row statement takes layout item `var`, named with or without subscripts, and its
+/// indicator: a host-variable array, an item of one OCCURS named without subscripts, with its
+/// dimension; None for one host variable; or why it is neither (Db2 13 for z/OS, Host-variable
+/// arrays in COBOL).
+pub fn host_array(layout: &Layout, var: usize, subscripted: bool, indicator: Option<(usize, bool)>) -> Result<Option<Dimension>, String> {
+    let it = &layout.items[var];
+    let name = it.name.as_deref().unwrap_or("FILLER");
+    match it.dims.len() {
+        _ if subscripted => return Ok(None),
+        0 => return Ok(None),
+        1 => {}
+        _ => return Err(format!("{name} is a table of more than one dimension, which no host-variable array is")),
+    }
+    if matches!(host_type(layout, var), Ok(HostType::Structure(_))) {
+        return Err(format!("{name} is a host-structure array, which Db2 for z/OS does not take in COBOL"));
+    }
+    let (stride, count) = it.dims[0];
+    match indicator {
+        None => Ok(Some(Dimension { stride, count, indicator_stride: 0 })),
+        Some((i, false)) if layout.items[i].dims.len() == 1 => {
+            let (indicator_stride, indicators) = layout.items[i].dims[0];
+            Ok(Some(Dimension { stride, count: count.min(indicators), indicator_stride }))
+        }
+        Some(_) => Err(format!("{name}'s indicator is not an indicator array, as a host-variable array's must be")),
+    }
 }
 
 /// A group is VARCHAR when it is a 49-level length halfword and a 49-level text, and otherwise a

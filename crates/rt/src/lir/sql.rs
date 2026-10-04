@@ -47,6 +47,15 @@ pub enum SqlStatement<P = PlaceId, S = SymId> {
     ExecuteDescriptor { name: S, descriptor: P },
     OpenDescriptor { cursor: S, statement: S, descriptor: P },
     FetchDescriptor { cursor: S, descriptor: P },
+    /// FETCH NEXT ROWSET into host-variable arrays; `enabled` is the cursor's WITH ROWSET
+    /// POSITIONING.
+    FetchRowset { cursor: S, rows: RowCount<P>, into: Vec<HostArray<P>>, enabled: bool },
+    /// INSERT ... FOR n ROWS, the entry's text the INSERT of one row. ATOMIC undoes every row when
+    /// one fails.
+    InsertRows { inputs: Vec<HostArray<P>>, rows: RowCount<P>, atomic: bool },
+    /// CALL of `procedure`: each host-variable argument is sent, and assigned what the procedure
+    /// returns for it.
+    Call { procedure: S, args: Vec<HostPlace<P>> },
     /// WHENEVER, DECLARE CURSOR, INCLUDE and the other declarations: no op.
     Declaration,
     /// Abends EXEC, naming it, when reached.
@@ -73,6 +82,31 @@ pub struct HostPlace<P = PlaceId> {
     /// Never a structure. An item with no SQL type keeps the walker's EXEC abend.
     pub ty: Result<HostType, AbendId>,
     pub indicator: Option<(P, u32)>,
+}
+
+/// A host variable of a multiple-row statement. A host-variable array's `place` is its first
+/// element, and `array` how far apart its elements and its indicator array's are; without `array`
+/// it is one host variable, whose value an INSERT gives every row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostArray<P = PlaceId> {
+    pub place: HostPlace<P>,
+    pub array: Option<Dimension>,
+}
+
+/// `count` is the fewest elements of the array and its indicator array.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Dimension {
+    pub stride: u32,
+    pub count: u32,
+    pub indicator_stride: u32,
+}
+
+/// FOR n ROWS: absent, a constant, or a host variable holding n.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RowCount<P = PlaceId> {
+    Implicit,
+    Constant(u32),
+    Host(HostPlace<P>),
 }
 
 /// The SQLCA fields the program declares, or its own SQLCODE and SQLSTATE, in the order filled.
@@ -117,6 +151,9 @@ codec_enum!(SqlStatement {
     ExecuteDescriptor { name, descriptor } = 16,
     OpenDescriptor { cursor, statement, descriptor } = 17,
     FetchDescriptor { cursor, descriptor } = 18,
+    FetchRowset { cursor, rows, into, enabled } = 19,
+    InsertRows { inputs, rows, atomic } = 20,
+    Call { procedure, args } = 21,
 });
 codec_enum!(SqlNames {
     Names = 0,
@@ -124,6 +161,9 @@ codec_enum!(SqlNames {
     Any = 2,
 });
 codec_struct!(HostPlace { var, member, ty, indicator } check host_place_valid);
+codec_struct!(HostArray { place, array });
+codec_struct!(Dimension { stride, count, indicator_stride });
+codec_enum!(RowCount { Implicit = 0, Constant(n) = 1, Host(place) = 2 });
 codec_struct!(Sqlca { fields } check sqlca_valid);
 codec_enum!(SqlcaField {
     CaId = 0,

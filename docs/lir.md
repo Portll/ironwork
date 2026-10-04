@@ -1606,7 +1606,7 @@ pub enum SqlStatement {
     Commit, Rollback,
     /// WHENEVER, DECLARE CURSOR, INCLUDE, DECLARE SECTION and the other declarations: no op.
     Declaration,
-    /// A scrollable cursor, the SQLDA, multi-row FETCH and the like: abend EXEC naming it, when
+    /// A scrollable cursor, the SQLDA, multi-row EXECUTE and the like: abend EXEC naming it, when
     /// reached.
     Unsupported(SymId),
     /// CONNECT or SET CONNECTION: the host variable naming the location, if any, goes to the
@@ -1634,10 +1634,27 @@ pub enum SqlStatement {
     ExecuteDescriptor { name: SymId, descriptor: PlaceId },
     OpenDescriptor { cursor: SymId, statement: SymId, descriptor: PlaceId },
     FetchDescriptor { cursor: SymId, descriptor: PlaceId },
+    /// FETCH NEXT ROWSET into host-variable arrays; `enabled` is the cursor's WITH ROWSET
+    /// POSITIONING, without which it is -249 (tag 19).
+    FetchRowset { cursor: SymId, rows: RowCount, into: Vec<HostArray>, enabled: bool },
+    /// INSERT ... FOR n ROWS, the entry's text the INSERT of one row (tag 20).
+    InsertRows { inputs: Vec<HostArray>, rows: RowCount, atomic: bool },
+    /// CALL of a stored procedure, each argument sent and assigned what the procedure returns for
+    /// it (tag 21).
+    Call { procedure: SymId, args: Vec<HostPlace> },
 }
 
 /// What DESCRIBE puts in SQLNAME (tags 0, 1 and 2).
 pub enum SqlNames { Names, Labels, Any }
+
+/// A multiple-row statement's host variable: an array's first element and how far apart its
+/// elements and its indicator array's are, or, with no `array`, one host variable an INSERT sends
+/// on every row. A host-structure array keeps the walker's EXEC abend in `place.ty`.
+pub struct HostArray { pub place: HostPlace, pub array: Option<Dimension> }
+pub struct Dimension { pub stride: u32, pub count: u32, pub indicator_stride: u32 }
+
+/// FOR n ROWS: absent (tag 0), a constant (1), or a host variable (2).
+pub enum RowCount { Implicit, Constant(u32), Host(HostPlace) }
 
 /// A host variable, or one member of a host structure, resolved (machine/sql.rs:176-198).
 pub struct HostPlace {
@@ -1693,7 +1710,8 @@ pub struct Sqlca { pub fields: Vec<(SqlcaField, PlaceId, HostType)> }
   with the host variable's position in `AbendText.at`. A host variable that names no data item is
   refused with the place. An indicator array named without subscripts, as `:CLS:CLS-IND` names the
   table `CLS-IND`, is its first element: lowering places it with subscripts of 1, where the walker
-  locates it so through `SqlHost::locate_indicator`.
+  locates it so through `SqlHost::locate_first`. A host-variable array of a multiple-row statement
+  is placed the same way, with its `Dimension` from the item's OCCURS.
 - **No database attached** abends EXEC at run time, as now (machine/sql.rs:28-30).
 - **In `rt`.** `SqlEntry` and `SqlStatement` are generic like §9.5's `CicsCommand`: `P` and `S` are
   `PlaceId` and `SymId`, or the walker's `&Ref` and `String`. `rt::sql::run` runs an entry and fills

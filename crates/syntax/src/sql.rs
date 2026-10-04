@@ -71,6 +71,17 @@ pub struct Cursor {
     pub with_hold: bool,
     /// The statement name of a cursor for a prepared statement; its `text` and `inputs` are empty.
     pub statement: Option<String>,
+    /// WITH ROWSET POSITIONING, which a rowset FETCH needs.
+    pub rowset: bool,
+}
+
+/// FOR n ROWS: absent, so a rowset FETCH asks for as many rows as the cursor's last one did, or
+/// one; a constant; or a host variable.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Rows {
+    Implicit,
+    Constant(u32),
+    Host(Box<HostVar>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -88,7 +99,14 @@ pub enum Statement {
     Open { cursor: String, declared: Option<Cursor>, using: Vec<HostVar>, descriptor: Option<HostVar> },
     Fetch { cursor: String, into: Vec<HostVar> },
     FetchDescriptor { cursor: String, descriptor: HostVar },
+    /// FETCH NEXT ROWSET into host-variable arrays; `enabled` is whether the cursor's DECLARE
+    /// allows rowsets, which [`Cursors::resolve`] fills.
+    FetchRowset { cursor: String, rows: Rows, into: Vec<HostVar>, enabled: bool },
     Close { cursor: String },
+    /// INSERT ... FOR n ROWS: `text` and `inputs` are the INSERT of one row, which runs for each.
+    InsertRows { text: String, inputs: Vec<HostVar>, rows: Rows, atomic: bool },
+    /// CALL of a stored procedure: `text` names it with `?` for each host-variable argument.
+    Call { procedure: String, text: String, args: Vec<HostVar> },
     Commit,
     Rollback,
     /// PREPARE: the statement name, the host variable holding the statement string, and the SQLDA
@@ -120,12 +138,24 @@ impl Statement {
             Statement::Query { inputs, into, .. } => into.iter().chain(inputs).collect(),
             Statement::Change { inputs, .. } | Statement::DeclareCursor(Cursor { inputs, .. }) => inputs.iter().collect(),
             Statement::Fetch { into, .. } => into.iter().collect(),
+            Statement::FetchRowset { rows, into, .. } => into.iter().chain(rows.host()).collect(),
+            Statement::InsertRows { inputs, rows, .. } => inputs.iter().chain(rows.host()).collect(),
+            Statement::Call { args, .. } => args.iter().collect(),
             Statement::Open { using, descriptor, .. } | Statement::Execute { inputs: using, descriptor, .. } => using.iter().chain(descriptor).collect(),
             Statement::Prepare { source, into, .. } => std::iter::once(source).chain(into.as_ref().map(|(d, _)| d)).collect(),
             Statement::ExecuteImmediate { source } | Statement::FetchDescriptor { descriptor: source, .. } | Statement::Describe { descriptor: source, .. } => vec![source],
             _ => Vec::new(),
         };
         vars.into_iter().flat_map(|h| std::iter::once(&h.var).chain(&h.indicator)).collect()
+    }
+}
+
+impl Rows {
+    fn host(&self) -> Option<&HostVar> {
+        match self {
+            Rows::Host(h) => Some(h.as_ref()),
+            _ => None,
+        }
     }
 }
 
@@ -146,7 +176,12 @@ impl Cursors {
                 self.0.insert(name.clone(), Err(what.clone()));
                 return statement;
             }
-            Statement::Open { cursor, .. } | Statement::Fetch { cursor, .. } | Statement::FetchDescriptor { cursor, .. } | Statement::Close { cursor, .. } | Statement::Change { current_of: Some(cursor), .. } => cursor.clone(),
+            Statement::Open { cursor, .. }
+            | Statement::Fetch { cursor, .. }
+            | Statement::FetchDescriptor { cursor, .. }
+            | Statement::FetchRowset { cursor, .. }
+            | Statement::Close { cursor, .. }
+            | Statement::Change { current_of: Some(cursor), .. } => cursor.clone(),
             _ => return statement,
         };
         match (self.0.get(&named), statement) {
@@ -156,6 +191,7 @@ impl Cursors {
                 Statement::Unsupported("OPEN ... USING of a cursor declared for a select-statement".into())
             }
             (Some(Ok(c)), Statement::Open { cursor, using, descriptor, .. }) => Statement::Open { cursor, declared: Some(c.clone()), using, descriptor },
+            (Some(Ok(c)), Statement::FetchRowset { cursor, rows, into, .. }) => Statement::FetchRowset { cursor, rows, into, enabled: c.rowset },
             (Some(Ok(_)), statement) => statement,
         }
     }
@@ -369,7 +405,7 @@ fn statement(toks: &[Tok], pos: Pos) -> Statement {
         "SET" if word(toks, 1) == "CONNECTION" => connect("SET CONNECTION", toks, 2, pos),
         "CONNECT" if word(toks, 1) == "TO" => connect("CONNECT", toks, 2, pos),
         "CONNECT" => Statement::Connect { what: "CONNECT".into(), target: None },
-        "INSERT" => change(ChangeKind::Insert, toks, pos),
+        "INSERT" => insert(toks, pos),
         "UPDATE" => change(ChangeKind::Update, toks, pos),
         "DELETE" => change(ChangeKind::Delete, toks, pos),
         "DECLARE" => declare(toks, pos),
@@ -390,6 +426,7 @@ fn statement(toks: &[Tok], pos: Pos) -> Statement {
         },
         "EXECUTE" => execute(toks, pos),
         "DESCRIBE" => describe(toks, pos),
+        "CALL" => call(toks, pos),
         "WHENEVER" => whenever(toks),
         "INCLUDE" => Statement::Declaration,
         "BEGIN" | "END" if word(toks, 1) == "DECLARE" => Statement::Declaration,
@@ -430,6 +467,9 @@ fn set_host(toks: &[Tok], pos: Pos) -> Statement {
 
 fn change(kind: ChangeKind, toks: &[Tok], pos: Pos) -> Statement {
     let n = toks.len();
+    if n >= 5 && (word(toks, n - 5), word(toks, n - 4), word(toks, n - 2), word(toks, n - 1)) == ("FOR", "ROW", "OF", "ROWSET") {
+        return Statement::Unsupported("a positioned UPDATE or DELETE FOR ROW n OF ROWSET".into());
+    }
     let current_of = (n >= 4 && word(toks, n - 4) == "WHERE" && word(toks, n - 3) == "CURRENT" && word(toks, n - 2) == "OF" && !word(toks, n - 1).is_empty())
         .then(|| word(toks, n - 1).to_owned());
     let (text, inputs) = render(toks, pos);
@@ -454,15 +494,16 @@ fn declare(toks: &[Tok], pos: Pos) -> Statement {
         return Statement::Malformed("DECLARE CURSOR has no FOR".into());
     };
     let with_hold = (cursor + 1..for_at).any(|i| word(toks, i) == "HOLD" && word(toks, i - 1) == "WITH");
+    let rowset = (cursor + 1..for_at).any(|i| word(toks, i) == "ROWSET" && word(toks, i - 1) == "WITH");
     let query = &toks[for_at + 1..];
     if !matches!(word(query, 0), "SELECT" | "WITH" | "VALUES") && !matches!(query.first(), Some(Tok::Punct('('))) {
         return match query {
-            [Tok::Word(statement)] => Statement::DeclareCursor(Cursor { name: name.into(), text: String::new(), inputs: Vec::new(), with_hold, statement: Some(statement.clone()) }),
+            [Tok::Word(statement)] => Statement::DeclareCursor(Cursor { name: name.into(), text: String::new(), inputs: Vec::new(), with_hold, statement: Some(statement.clone()), rowset }),
             _ => Statement::Malformed("DECLARE CURSOR ... FOR takes a select-statement or a statement name".into()),
         };
     }
     let (text, inputs) = render(query, pos);
-    Statement::DeclareCursor(Cursor { name: name.into(), text, inputs, with_hold, statement: None })
+    Statement::DeclareCursor(Cursor { name: name.into(), text, inputs, with_hold, statement: None, rowset })
 }
 
 /// A comma-separated list of host variables after USING.
@@ -605,12 +646,15 @@ fn execute(toks: &[Tok], pos: Pos) -> Statement {
     }
 }
 
+/// A FETCH: row-positioned NEXT, or NEXT ROWSET, the one rowset orientation a cursor that does
+/// not scroll takes (Db2 13 SQL, FETCH).
 fn fetch(toks: &[Tok], pos: Pos) -> Statement {
-    let mut i = 1;
-    if word(toks, i) == "NEXT" {
+    let rowset = word(toks, 1) == "NEXT" && word(toks, 2) == "ROWSET";
+    let mut i = if rowset { 3 } else { 1 };
+    if !rowset && word(toks, i) == "NEXT" {
         i += 1;
     }
-    if matches!(word(toks, i), "PRIOR" | "FIRST" | "LAST" | "ABSOLUTE" | "RELATIVE" | "BEFORE" | "AFTER" | "CURRENT" | "SENSITIVE" | "INSENSITIVE") {
+    if matches!(word(toks, i), "PRIOR" | "FIRST" | "LAST" | "ABSOLUTE" | "RELATIVE" | "BEFORE" | "AFTER" | "CURRENT" | "SENSITIVE" | "INSENSITIVE" | "ROWSET") {
         return Statement::Unsupported("a scrollable FETCH".into());
     }
     if word(toks, i) == "FROM" {
@@ -621,13 +665,16 @@ fn fetch(toks: &[Tok], pos: Pos) -> Statement {
         return Statement::Malformed("FETCH names no cursor".into());
     }
     i += 1;
+    if rowset {
+        return fetch_rowset(cursor, &toks[i..], pos);
+    }
     match word(toks, i) {
         "" if i == toks.len() => Statement::Fetch { cursor: cursor.into(), into: Vec::new() },
         "INTO" => match host_list(&toks[i + 1..], pos) {
             Ok(into) => Statement::Fetch { cursor: cursor.into(), into },
             Err(why) => Statement::Malformed(why),
         },
-        "FOR" => Statement::Unsupported("a multi-row FETCH".into()),
+        "FOR" => Statement::Malformed("FOR n ROWS takes the rowset orientation NEXT ROWSET".into()),
         "USING" if word(toks, i + 1) == "DESCRIPTOR" => match descriptor(toks, i + 2, pos) {
             Ok((descriptor, next)) if next == toks.len() => Statement::FetchDescriptor { cursor: cursor.into(), descriptor },
             Ok(_) => Statement::Malformed("FETCH ... USING DESCRIPTOR takes only the descriptor".into()),
@@ -635,6 +682,134 @@ fn fetch(toks: &[Tok], pos: Pos) -> Statement {
         },
         _ => Statement::Malformed("FETCH takes a cursor and INTO".into()),
     }
+}
+
+/// FETCH NEXT ROWSET's clauses after the cursor: FOR n ROWS, then INTO.
+fn fetch_rowset(cursor: &str, toks: &[Tok], pos: Pos) -> Statement {
+    let (rows, at) = match word(toks, 0) {
+        "FOR" => match rows_clause(toks, pos) {
+            Ok(clause) => clause,
+            Err(why) => return Statement::Malformed(why),
+        },
+        _ => (Rows::Implicit, 0),
+    };
+    let rest = &toks[at..];
+    let into = match (word(rest, 0), word(rest, 1)) {
+        _ if rest.is_empty() => Vec::new(),
+        ("INTO" | "USING", "DESCRIPTOR") => return Statement::Unsupported("FETCH ... INTO DESCRIPTOR".into()),
+        ("INTO", _) => match host_list(&rest[1..], pos) {
+            Ok(into) => into,
+            Err(why) => return Statement::Malformed(why),
+        },
+        _ => return Statement::Malformed("FETCH NEXT ROWSET takes a cursor, FOR n ROWS and INTO".into()),
+    };
+    Statement::FetchRowset { cursor: cursor.into(), rows, into, enabled: false }
+}
+
+/// `FOR n ROWS` at `toks[0]`, and how many tokens it takes. A host variable for n takes no
+/// indicator (Db2 13 SQL, FETCH and INSERT).
+fn rows_clause(toks: &[Tok], pos: Pos) -> Result<(Rows, usize), String> {
+    let (rows, next) = match toks.get(1) {
+        Some(Tok::Number(n)) => (Rows::Constant(n.parse().map_err(|_| format!("FOR {n} ROWS: the number of rows is not an integer"))?), 2),
+        Some(Tok::Host { .. }) => match host_var(toks, 1, pos) {
+            Some((HostVar { indicator: Some(_), .. }, _)) => return Err("FOR n ROWS takes no indicator variable".into()),
+            Some((var, next)) => (Rows::Host(Box::new(var)), next),
+            None => unreachable!("a host token is a host variable"),
+        },
+        _ => return Err("FOR takes a number of rows or a host variable, then ROWS".into()),
+    };
+    match word(toks, next) {
+        "ROWS" => Ok((rows, next + 1)),
+        _ => Err("FOR n takes ROWS".into()),
+    }
+}
+
+/// INSERT, or INSERT ... FOR n ROWS with ATOMIC or NOT ATOMIC CONTINUE ON SQLEXCEPTION, which
+/// IBM writes after VALUES and also before it; without them it is the INSERT of one row.
+fn insert(toks: &[Tok], pos: Pos) -> Statement {
+    let (mut rows, mut atomic, mut kept) = (None, None, Vec::new());
+    let (mut depth, mut i) = (0i32, 0);
+    while i < toks.len() {
+        match &toks[i] {
+            Tok::Punct('(') => depth += 1,
+            Tok::Punct(')') => depth -= 1,
+            _ => {}
+        }
+        if depth == 0 && word(toks, i) == "FOR" && matches!(toks.get(i + 1), Some(Tok::Number(_) | Tok::Host { .. })) {
+            match rows_clause(&toks[i..], pos) {
+                Ok((n, taken)) => {
+                    rows = Some(n);
+                    i += taken;
+                    continue;
+                }
+                Err(why) => return Statement::Malformed(why),
+            }
+        }
+        if depth == 0 && word(toks, i) == "ATOMIC" {
+            atomic = Some(true);
+            i += 1;
+            continue;
+        }
+        if depth == 0 && word(toks, i) == "NOT" && word(toks, i + 1) == "ATOMIC" {
+            if (word(toks, i + 2), word(toks, i + 3), word(toks, i + 4)) != ("CONTINUE", "ON", "SQLEXCEPTION") {
+                return Statement::Malformed("NOT ATOMIC takes CONTINUE ON SQLEXCEPTION".into());
+            }
+            atomic = Some(false);
+            i += 5;
+            continue;
+        }
+        kept.push(toks[i].clone());
+        i += 1;
+    }
+    match rows {
+        None if atomic.is_some() => Statement::Malformed("ATOMIC and NOT ATOMIC take FOR n ROWS".into()),
+        None => change(ChangeKind::Insert, toks, pos),
+        Some(rows) => {
+            let (text, inputs) = render(&kept, pos);
+            Statement::InsertRows { text, inputs, rows, atomic: atomic.unwrap_or(true) }
+        }
+    }
+}
+
+/// CALL of a procedure by its name, with its arguments in parentheses or none.
+fn call(toks: &[Tok], pos: Pos) -> Statement {
+    if matches!(toks.get(1), Some(Tok::Host { .. })) {
+        return Statement::Unsupported("CALL of a procedure a host variable names".into());
+    }
+    let (mut name, mut i) = (Vec::new(), 1);
+    loop {
+        match toks.get(i) {
+            Some(Tok::Word(part) | Tok::Quoted(part)) => name.push(part.clone()),
+            _ => return Statement::Malformed("CALL names no procedure".into()),
+        }
+        i += 1;
+        if toks.get(i) != Some(&Tok::Punct('.')) {
+            break;
+        }
+        i += 1;
+    }
+    let closes_at_end = || {
+        let mut depth = 0i32;
+        for (k, t) in toks[i..].iter().enumerate() {
+            depth += match t {
+                Tok::Punct('(') => 1,
+                Tok::Punct(')') => -1,
+                _ => 0,
+            };
+            if depth == 0 {
+                return i + k == toks.len() - 1;
+            }
+        }
+        false
+    };
+    match (toks.get(i), word(toks, i), word(toks, i + 1)) {
+        (None, _, _) => {}
+        (_, "USING", "DESCRIPTOR") => return Statement::Unsupported("CALL ... USING DESCRIPTOR".into()),
+        (Some(Tok::Punct('(')), _, _) if closes_at_end() => {}
+        _ => return Statement::Malformed("CALL takes a procedure name and its arguments in parentheses".into()),
+    }
+    let (text, args) = render(toks, pos);
+    Statement::Call { procedure: name.join("."), text, args }
 }
 
 fn whenever(toks: &[Tok]) -> Statement {
@@ -718,8 +893,8 @@ mod tests {
 
     #[test]
     fn cursors() {
-        let Statement::DeclareCursor(Cursor { name, text, inputs, with_hold, statement }) = st("DECLARE C1 CURSOR WITH HOLD FOR SELECT NAME FROM EMP WHERE DEPT = :WS-DEPT FOR UPDATE OF SAL") else { panic!() };
-        assert_eq!((name.as_str(), with_hold, statement), ("C1", true, None));
+        let Statement::DeclareCursor(Cursor { name, text, inputs, with_hold, statement, rowset }) = st("DECLARE C1 CURSOR WITH HOLD FOR SELECT NAME FROM EMP WHERE DEPT = :WS-DEPT FOR UPDATE OF SAL") else { panic!() };
+        assert_eq!((name.as_str(), with_hold, statement, rowset), ("C1", true, None, false));
         assert_eq!(text, "SELECT NAME FROM EMP WHERE DEPT = ? FOR UPDATE OF SAL");
         assert_eq!(names(&inputs), [("WS-DEPT", None)]);
         assert_eq!(st("OPEN C1"), Statement::Open { cursor: "C1".into(), declared: None, using: Vec::new(), descriptor: None });
@@ -898,6 +1073,56 @@ mod tests {
         assert!(matches!(st("DECLARE C1 CURSOR FOR S1 S2"), Statement::Malformed(_)));
         assert!(matches!(st("OPEN C1 USING DESCRIPTOR :SQLDA"), Statement::Open { descriptor: Some(d), .. } if d.var.name == "SQLDA"));
         assert!(matches!(st("OPEN C1 FOR"), Statement::Malformed(_)));
+    }
+
+    #[test]
+    fn a_rowset_fetch_takes_next_rowset_its_rows_and_arrays_from_a_rowset_cursor() {
+        let mut cursors = Cursors::default();
+        cursors.resolve(st("DECLARE C1 CURSOR WITH HOLD WITH ROWSET POSITIONING FOR SELECT A, B FROM T"));
+        cursors.resolve(st("DECLARE C2 CURSOR FOR SELECT A FROM T"));
+        let Statement::FetchRowset { cursor, rows, into, enabled } = cursors.resolve(st("FETCH NEXT ROWSET FROM C1 FOR 5 ROWS INTO :COL1 :COL1IND, :COL2")) else { panic!() };
+        assert_eq!((cursor.as_str(), rows, names(&into), enabled), ("C1", Rows::Constant(5), vec![("COL1", Some("COL1IND")), ("COL2", None)], true));
+        let Statement::FetchRowset { rows: Rows::Host(n), enabled, .. } = cursors.resolve(st("FETCH NEXT ROWSET C2 FOR :N ROWS INTO :A")) else { panic!() };
+        assert_eq!((n.var.name.as_str(), enabled), ("N", false));
+        assert!(matches!(st("FETCH NEXT ROWSET FROM C1"), Statement::FetchRowset { rows: Rows::Implicit, into, .. } if into.is_empty()));
+        assert!(matches!(st("FETCH NEXT ROWSET FROM C1 FOR :N :NI ROWS INTO :A"), Statement::Malformed(why) if why.contains("indicator")));
+        assert!(matches!(st("FETCH NEXT FROM BINCSR FOR 50 ROWS INTO :WS-BIN-TABLE"), Statement::Malformed(why) if why.contains("NEXT ROWSET")));
+        assert_eq!(st("FETCH NEXT ROWSET FROM C1 FOR 5 ROWS INTO DESCRIPTOR :D"), Statement::Unsupported("FETCH ... INTO DESCRIPTOR".into()));
+        for scrolled in ["FETCH PRIOR ROWSET FROM C1 FOR 5 ROWS INTO :A", "FETCH ROWSET STARTING AT ABSOLUTE 3 FROM C1 FOR 2 ROWS INTO :A", "FETCH FIRST ROWSET FROM C1 INTO :A"] {
+            assert_eq!(st(scrolled), Statement::Unsupported("a scrollable FETCH".into()), "{scrolled}");
+        }
+        assert!(matches!(Cursors::default().resolve(st("FETCH NEXT ROWSET FROM C9 INTO :A")), Statement::Malformed(_)));
+    }
+
+    #[test]
+    fn a_multiple_row_insert_keeps_the_insert_of_one_row_and_its_atomicity() {
+        let Statement::InsertRows { text, inputs, rows, atomic } = st("INSERT INTO DSN8D10.ACT (ACTNO, ACTKWD, ACTDESC) VALUES (:HVA1, :HVA2 :HVA2-IND, 'X') FOR :NUM-ROWS ROWS") else { panic!() };
+        assert_eq!(text, "INSERT INTO DSN8D10.ACT (ACTNO, ACTKWD, ACTDESC) VALUES (?, ?, 'X')");
+        assert_eq!((names(&inputs), atomic), (vec![("HVA1", None), ("HVA2", Some("HVA2-IND"))], true));
+        assert!(matches!(rows, Rows::Host(h) if h.var.name == "NUM-ROWS" && h.indicator.is_none()));
+        let Statement::InsertRows { text, rows, atomic, .. } = st("INSERT INTO T1 FOR 5 ROWS VALUES (:HVA) NOT ATOMIC CONTINUE ON SQLEXCEPTION") else { panic!() };
+        assert_eq!((text.as_str(), rows, atomic), ("INSERT INTO T1 VALUES (?)", Rows::Constant(5), false));
+        assert!(matches!(st("INSERT INTO T VALUES (:A) FOR 3 ROWS ATOMIC"), Statement::InsertRows { atomic: true, .. }));
+        assert!(matches!(st("INSERT INTO T VALUES (:A) FOR 3 ROWS NOT ATOMIC"), Statement::Malformed(_)));
+        assert!(matches!(st("INSERT INTO T VALUES (:A) ATOMIC"), Statement::Malformed(_)));
+        assert!(matches!(st("INSERT INTO T VALUES (:A)"), Statement::Change { kind: ChangeKind::Insert, .. }));
+        let row_of_rowset = Statement::Unsupported("a positioned UPDATE or DELETE FOR ROW n OF ROWSET".into());
+        assert_eq!(st("UPDATE T SET A = 1 WHERE CURRENT OF C1 FOR ROW :N OF ROWSET"), row_of_rowset);
+        assert_eq!(st("DELETE FROM T WHERE CURRENT OF C1 FOR ROW 5 OF ROWSET"), row_of_rowset);
+    }
+
+    #[test]
+    fn call_names_its_procedure_and_sends_its_arguments() {
+        let Statement::Call { procedure, text, args } = st("CALL PDAPROD.PDASP2 (:PDASP2-USERID, :PDASP2-STATUS :STATUS-IND, 'Y', NULL)") else { panic!() };
+        assert_eq!((procedure.as_str(), text.as_str()), ("PDAPROD.PDASP2", "CALL PDAPROD.PDASP2 (?, ?, 'Y', NULL)"));
+        assert_eq!(names(&args), [("PDASP2-USERID", None), ("PDASP2-STATUS", Some("STATUS-IND"))]);
+        assert!(matches!(st("CALL PCTPROC"), Statement::Call { args, .. } if args.is_empty()));
+        assert!(matches!(st("CALL P()"), Statement::Call { args, .. } if args.is_empty()));
+        assert_eq!(st("CALL :PROC-NAME (:A)"), Statement::Unsupported("CALL of a procedure a host variable names".into()));
+        assert_eq!(st("CALL P USING DESCRIPTOR :D"), Statement::Unsupported("CALL ... USING DESCRIPTOR".into()));
+        for broken in ["CALL", "CALL P (:A", "CALL P (:A) (:B)", "CALL P :A"] {
+            assert!(matches!(st(broken), Statement::Malformed(_)), "{broken}");
+        }
     }
 
     fn sql_blocks(program: &crate::ast::Program) -> Vec<&Sql> {

@@ -1128,8 +1128,33 @@ impl<'a> Printer<'a> {
             SqlStatement::ExecuteDescriptor { name, descriptor } => format!("execute {} using descriptor {}", self.name(*name), self.place(*descriptor)),
             SqlStatement::OpenDescriptor { cursor, statement, descriptor } => format!("open {} for {} using descriptor {}", self.name(*cursor), self.name(*statement), self.place(*descriptor)),
             SqlStatement::FetchDescriptor { cursor, descriptor } => format!("fetch {} using descriptor {}", self.name(*cursor), self.place(*descriptor)),
+            SqlStatement::FetchRowset { cursor, rows, into, enabled } => {
+                let disabled = if *enabled { "" } else { " (no rowset positioning)" };
+                format!("fetch rowset {}{disabled}{}{}", self.name(*cursor), self.rows(rows), self.arrays("into", into))
+            }
+            SqlStatement::InsertRows { inputs, rows, atomic } => format!("insert rows{}{}{}", if *atomic { " atomic" } else { " not atomic" }, self.rows(rows), self.arrays("inputs", inputs)),
+            SqlStatement::Call { procedure, args } => format!("call {}{}", self.name(*procedure), hosts("arguments", args)),
         };
         format!("Sql {ordinal} {text} {statement}{}", attrs('{', yes(e.with_hold, "with hold").into_iter().collect()))
+    }
+
+    fn rows(&self, rows: &super::RowCount) -> String {
+        match rows {
+            super::RowCount::Implicit => String::new(),
+            super::RowCount::Constant(n) => format!(" for {n} rows"),
+            super::RowCount::Host(h) => format!(" for ({}) rows", self.host(h)),
+        }
+    }
+
+    fn arrays(&self, key: &str, list: &[super::HostArray]) -> String {
+        if list.is_empty() {
+            return String::new();
+        }
+        let array = |a: &super::HostArray| match a.array {
+            Some(d) => format!("{} array {} by {} indicator by {}", self.host(&a.place), d.count, d.stride, d.indicator_stride),
+            None => self.host(&a.place),
+        };
+        format!(" {key} ({})", join(list.iter().map(array), ", "))
     }
 
     fn host(&self, h: &super::HostPlace) -> String {

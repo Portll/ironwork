@@ -549,9 +549,11 @@ The subset the interpreter runs today:
 - **EXEC SQL runs** against PostgreSQL (`--sql-db`) or a recording of a run (`--sql-replay`, made
   with `--sql-record`): single-row statements, cursors with WITH HOLD and positioned changes, COMMIT
   and ROLLBACK, CICS SYNCPOINT, dynamic SQL (PREPARE, EXECUTE, EXECUTE IMMEDIATE, DESCRIBE, the
-  SQLDA and cursors for prepared statements), host variables and indicators converted by Db2's
-  rules, the SQLCA and WHENEVER. A normal end commits and an abend rolls back. TLS to PostgreSQL is
-  in a separate build, [tls/](tls/README.md), so that this one keeps no dependencies.
+  SQLDA and cursors for prepared statements), rowset FETCH and multiple-row INSERT with
+  host-variable arrays, CALL of a stored procedure from a recording, host variables and indicators
+  converted by Db2's rules, the SQLCA and WHENEVER. A normal end commits and an abend rolls back.
+  TLS to PostgreSQL is in a separate build, [tls/](tls/README.md), so that this one keeps no
+  dependencies.
   [docs/sql-runtime.md](docs/sql-runtime.md) specifies it, with what Db2 12.1 for Linux settled.
 - **CICS, run as a harness** (`ironwork cics`): one task, with the transaction ID, terminal, user
   and COMMAREA the command line gives, and the EXEC interface block in IBM's layout. Program
