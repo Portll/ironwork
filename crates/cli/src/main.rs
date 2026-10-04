@@ -380,11 +380,6 @@ assumptions flags:
   --c-series
              put each entry's number in one C series first, its position in the register, with the
              original id beside it (C36 L1); the stored ids do not change
-ddl: ironwork ddl FILE.sql
-  write the Db2 for z/OS DDL in FILE as PostgreSQL DDL for the SQL backend's tests: tables, keys
-  and indexes, Db2 types mapped as the conversion layer reads them, NOT NULL WITH DEFAULT given its
-  Db2 default, and every clause PostgreSQL has no use for (IN, CCSID, BUFFERPOOL, ...) kept as a
-  comment
 compare flags: ironwork compare --base OLD.cbl --head NEW.cbl [--dd NAME=path]... [--sql-replay file]
   --base, --head
              the two versions of the program; each runs in its own directory on copies of every DD,
@@ -439,7 +434,6 @@ const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid",
 mod compare;
 mod compile;
 mod coverage;
-mod ddl;
 mod diagnostics;
 mod dfsort;
 mod dfsort_number;
@@ -904,20 +898,6 @@ fn driver() -> ExitCode {
             return exit::status(Outcome::Usage);
         }
     };
-    if let [c, file] = rest.as_slice()
-        && c == "ddl"
-    {
-        return match ddl::convert_file(std::path::Path::new(file)) {
-            Ok(sql) => {
-                print!("{sql}");
-                ExitCode::SUCCESS
-            }
-            Err(e) => {
-                eprintln!("ironwork: ddl {file}: {e}");
-                ExitCode::from(2)
-            }
-        };
-    }
     if rest == ["compare"] {
         let Some(head) = compare_head else { return usage_error("compare needs --head") };
         return compare::run(compare::Request { base: compare_base, head, dds, libraries, program_dirs, flags, clock: match clock {

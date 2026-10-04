@@ -70,7 +70,7 @@ const STOPS: [Outcome; 8] = [Outcome::Abend, Outcome::Refused, Outcome::NotGener
 /// The exit statuses a command follows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Convention {
-    /// `check`, `compile`, `compare`, `dump`, `fuzz`, `ddl` and `job --expected`, whose statuses
+    /// `check`, `compile`, `compare`, `dump`, `fuzz` and `job --expected`, whose statuses
     /// are their own: from here they take only 2 for anything that stops them and 16 for a panic.
     Own = 0,
     Band = 1,
