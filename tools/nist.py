@@ -80,8 +80,8 @@ X_CARD_TEXT = {
     "081": '"@#%&?_!~"',
     "084": "OMITTED",
     "086": 'PIC X(6) VALUE "FILE 1"',
-    "090": "194",  # ordinal numbers of A (X'C1') and 0 (X'F0') in EBCDIC
-    "091": "241",
+    "090": "194",  # ordinal numbers of A (X'C1') and D (X'C4') in EBCDIC; the User Guide's scan reads the D as 0
+    "091": "197",
 }
 CLOCK = "2026-01-02T03:04:05"
 # ironwork run's exit statuses besides a RETURN-CODE (README, Exit status).

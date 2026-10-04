@@ -1,6 +1,7 @@
 //! ironwork for COBOL, the compiler: a parsed program checked against IBM's rules, with its
 //! WORKING-STORAGE laid out as IBM lays it out, ready for the interpreter or for lowering.
 
+mod classes;
 pub mod collating;
 mod corresponding;
 pub use corresponding::is_alphabetic;
@@ -221,6 +222,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         }
     };
     scope::bind(&mut layout, own_linkage, inherited, &program.files);
+    layout.classes = classes::sets(&program.environment.classes, page, &mut errors);
     let counter_item = |entry: usize| program.working_storage[..entry].iter().filter(|e| e.level != 88).count();
     layout.name_files(&program.files, linage_counters.iter().map(|c| c.map(counter_item)).collect());
     assign_items(&mut program, &layout, &options, &mut errors);
@@ -1295,6 +1297,19 @@ impl Check<'_> {
         self.statements(h.not_on.as_deref().unwrap_or_default());
     }
 
+    /// A class-name condition tests a data item of USAGE DISPLAY (Language Reference SC27-8713-03,
+    /// p. 269): alphabetic, alphanumeric, edited, zoned decimal or a group.
+    fn class_name_subject(&mut self, e: &Expr, name: &str) {
+        let Expr::Operand(Operand::Ref(r)) = e else {
+            self.errors.push(Error::at(self.at, format!("class-name {name} tests a data item, not an expression")));
+            return;
+        };
+        let Some(i) = self.item(r) else { return };
+        if !matches!(self.layout.items[i].kind, layout::Kind::Group | layout::Kind::Alnum { .. } | layout::Kind::AlnumEdited { .. } | layout::Kind::NumericEdited { .. } | layout::Kind::Zoned { .. }) {
+            self.errors.push(Error::at(r.pos, format!("class-name {name} tests a data item of USAGE DISPLAY, and {} is not one", r.name)));
+        }
+    }
+
     fn item(&self, r: &Ref) -> Option<usize> {
         match self.layout.resolve(&r.name, &r.qualifiers, r.pos) {
             Ok(layout::Resolved::Item(i)) => Some(i),
@@ -1656,7 +1671,12 @@ impl Check<'_> {
                 self.expr(b);
                 self.comparison(a, b);
             }
-            Cond::Class(e, _) => self.expr(e),
+            Cond::Class(e, class) => {
+                self.expr(e);
+                if let Class::Named(name) = class {
+                    self.class_name_subject(e, name);
+                }
+            }
             Cond::Name(r) => self.reference_or_condition(r),
             Cond::NameOrRel { subject, name, .. } => {
                 self.expr(subject);

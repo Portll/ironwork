@@ -107,6 +107,8 @@ pub enum ByteClass {
     Dbcs,
     /// Two bytes a character, the first X'41' to X'7E' and the second X'41' to X'FE', or X'4040'.
     Kanji,
+    /// Every byte one of a SPECIAL-NAMES class-name's characters: bit b % 8 of `bits[b / 8]`.
+    Set { bits: [u8; 32] },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -161,7 +163,7 @@ codec_enum!(Compare {
     ZonedBytes { zoned_first } = 8,
     Dbcs = 9,
 });
-codec_enum!(ByteClass { Packed { signed } = 0, Zoned { signed } = 1, Digits = 2, Alphabetic = 3, AlphabeticLower = 4, AlphabeticUpper = 5, Dbcs = 6, Kanji = 7 });
+codec_enum!(ByteClass { Packed { signed } = 0, Zoned { signed } = 1, Digits = 2, Alphabetic = 3, AlphabeticLower = 4, AlphabeticUpper = 5, Dbcs = 6, Kanji = 7, Set { bits } = 8 });
 codec_enum!(SignTest { Positive = 0, Negative = 1, Zero = 2 });
 codec_enum!(Count { Fixed(n) = 0, Odo(odo) = 1, Temp(temp) = 2 });
 codec_enum!(SqlTest { Error = 0, NotFound = 1, Warning = 2 });

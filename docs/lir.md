@@ -410,8 +410,9 @@ pub enum Comparand {
 pub enum Compare { PackedPfd, Address, Float, Fixed, National, Alphanumeric, Refused(AbendId), References, ZonedBytes { zoned_first: bool }, Dbcs }
 
 /// `Dbcs` and `Kanji` test each two bytes: X'41' to X'FE' each, or for KANJI a first byte X'41' to
-/// X'7E', or the DBCS space X'4040'.
-pub enum ByteClass { Packed { signed: bool }, Zoned { signed: bool }, Digits, Alphabetic, AlphabeticLower, AlphabeticUpper, Dbcs, Kanji }
+/// X'7E', or the DBCS space X'4040'. `Set` holds a SPECIAL-NAMES class-name's characters, bit b % 8
+/// of `bits[b / 8]` for byte b, and tests that every byte is one of them.
+pub enum ByteClass { Packed { signed: bool }, Zoned { signed: bool }, Digits, Alphabetic, AlphabeticLower, AlphabeticUpper, Dbcs, Kanji, Set { bits: [u8; 32] } }
 pub enum SignTest { Positive, Negative, Zero }
 /// `Temp` is the count `SetCount` held in the top frame earlier in the statement (§9.12).
 pub enum Count { Fixed(u32), Odo(Odo), Temp(TempId) }

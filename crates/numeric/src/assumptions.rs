@@ -349,6 +349,7 @@ pub const ACCEPT_FROM_CONSOLE: &str = "C440";
 pub const CALL_BY_PROGRAM_ID: &str = "C441";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
+pub const CLASS_ORDINALS: &str = "C430";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -2204,6 +2205,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         claim: "An SQLDA that USING DESCRIPTOR names is checked before the statement runs, and one that cannot be used is SQLCODE -804 (SQLSTATE 07002) with Db2's reason code as SQLERRMC: 07 for a negative SQLN or SQLD or an SQLDA past the run unit's storage, 14 for an SQLDABC below SQLN x 44 + 16, 11 for an SQLD above SQLN, 08 (input) or 16 (output) for an SQLTYPE ironwork does not read (LOBs, binary strings, NUL-terminated strings, or a length that does not fit the type), and 12 (input) or 13 (output) for an SQLDATA, or the SQLIND of an odd SQLTYPE, that is zero or does not address storage the variable fits in. Db2 13 for z/OS lists the reasons (SQLCODE -804) without saying which it checks first",
         basis: Basis::Chosen,
         oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: CLASS_ORDINALS,
+        claim: "A numeric literal of a CLASS clause is an ordinal number from 1 to the number of characters in the alphabet, each corresponding to the ordinal position of a character in the single-byte EBCDIC or ASCII collating sequence, and an alphanumeric literal is an actual single-byte EBCDIC character (Language Reference SC27-8713-03, CLASS clause, p. 129). ironwork takes ordinal n as the character of code point n - 1 in the program's code page, X'C1' for 194 under an EBCDIC page, whatever PROGRAM COLLATING SEQUENCE says, and encodes an alphanumeric literal in that code page, a hexadecimal literal's bytes being taken as written. A THROUGH range holds the code points between its ends, in either order. NIST CCVS85's NC174A bounds its class ORDINAL-A-THROUGH-D by the ordinal numbers of A and D in the native character set, which its User Guide's X-cards 90 and 91 hold",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
     },
 ];
 

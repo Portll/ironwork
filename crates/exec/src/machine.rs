@@ -1468,7 +1468,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Cond::Not(inner) => !self.condition(inner, pos)?,
             Cond::And(a, b) => self.condition(a, pos)? && self.condition(b, pos)?,
             Cond::Or(a, b) => self.condition(a, pos)? || self.condition(b, pos)?,
-            Cond::Class(e, class) => self.class(e, *class, pos)?,
+            Cond::Class(e, class) => self.class(e, class, pos)?,
             Cond::NameOrRel { subject, op, negated, name } => match self.resolve(name)? {
                 Resolved::Condition(_) => self.condition(&Cond::Name(name.clone()), pos)?,
                 Resolved::Item(_) => self.condition(&Cond::Rel(subject.clone(), *op, Expr::Operand(Operand::Ref(name.clone()))), pos)? != *negated,
@@ -1495,7 +1495,14 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         })
     }
 
-    fn class(&mut self, e: &Expr, class: Class, pos: Pos) -> R<bool> {
+    fn class(&mut self, e: &Expr, class: &Class, pos: Pos) -> R<bool> {
+        if let Class::Named(name) = class {
+            let (Expr::Operand(Operand::Ref(r)), Some(bits)) = (e, self.layout.class(name)) else {
+                return Err(Abend::ironwork(format!("class-name {name} tests a data item the program defines a CLASS for"), pos));
+            };
+            let loc = self.locate(r)?;
+            return Ok(store::byte_class(&self.facts(), &self.unit.mem, loc, ByteClass::Set { bits }));
+        }
         if let (Class::Numeric | Class::Alphabetic | Class::AlphabeticLower | Class::AlphabeticUpper | Class::Dbcs | Class::Kanji, Expr::Operand(Operand::Ref(r))) = (class, e) {
             let loc = self.locate(r)?;
             let test = match (class, loc.kind) {

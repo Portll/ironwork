@@ -68,7 +68,7 @@ impl Lower<'_> {
             Cond::Not(inner) => self.test(inner, pos)?.not(),
             Cond::And(a, b) => Test::And(Box::new(self.test(a, pos)?), Box::new(self.test(b, pos)?)),
             Cond::Or(a, b) => Test::Or(Box::new(self.test(a, pos)?), Box::new(self.test(b, pos)?)),
-            Cond::Class(e, class) => self.class(e, *class, pos)?,
+            Cond::Class(e, class) => self.class(e, class, pos)?,
             Cond::NameOrRel { subject, op, negated, name } => match self.layout.resolve(&name.name, &name.qualifiers, name.pos) {
                 Ok(Resolved::Condition(_)) => self.condition_name(name, pos)?,
                 Ok(Resolved::Item(_)) if *negated => self.relation(subject, *op, &Expr::Operand(Operand::Ref(name.clone())), pos)?.not(),
@@ -186,7 +186,14 @@ impl Lower<'_> {
 
     /// `Cond::Class`: NUMERIC or an ALPHABETIC class of a data item tests its bytes; anything else is a sign
     /// test of the value, where NUMERIC and ALPHABETIC fall through to ZERO as in the walker.
-    fn class(&mut self, e: &Expr, class: Class, pos: Pos) -> R<Test> {
+    fn class(&mut self, e: &Expr, class: &Class, pos: Pos) -> R<Test> {
+        if let Class::Named(name) = class {
+            let (Expr::Operand(Operand::Ref(r)), Some(bits)) = (e, self.layout.class(name)) else {
+                return super::unsupported("a class-name condition on anything but a data item", pos);
+            };
+            let place = self.place(r, false)?;
+            return Ok(Test::Cond(self.cond(lir::Cond::Class { place, test: ByteClass::Set { bits } })?));
+        }
         if let (Class::Numeric | Class::Alphabetic | Class::AlphabeticLower | Class::AlphabeticUpper | Class::Dbcs | Class::Kanji, Expr::Operand(Operand::Ref(r))) = (class, e) {
             let place = self.place(r, false)?;
             let test = match (class, self.kind_of(place)) {
@@ -208,7 +215,7 @@ impl Lower<'_> {
         let test = match class {
             Class::Positive => SignTest::Positive,
             Class::Negative => SignTest::Negative,
-            Class::Numeric | Class::Alphabetic | Class::AlphabeticLower | Class::AlphabeticUpper | Class::Dbcs | Class::Kanji | Class::Zero => SignTest::Zero,
+            Class::Numeric | Class::Alphabetic | Class::AlphabeticLower | Class::AlphabeticUpper | Class::Dbcs | Class::Kanji | Class::Zero | Class::Named(_) => SignTest::Zero,
         };
         Ok(Test::Cond(self.cond(lir::Cond::Sign { value, test })?))
     }

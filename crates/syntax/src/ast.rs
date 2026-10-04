@@ -415,7 +415,7 @@ pub enum Expr {
     Bin(Box<Expr>, BinOp, Box<Expr>),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Class {
     Numeric,
     Alphabetic,
@@ -428,6 +428,8 @@ pub enum Class {
     Positive,
     Negative,
     Zero,
+    /// A class-name of the SPECIAL-NAMES CLASS clause.
+    Named(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -895,6 +897,16 @@ pub struct Environment {
     pub currency: Vec<CurrencySign>,
     /// SPECIAL-NAMES UPSI-0 to UPSI-7 entries, a contained program's being its container's.
     pub switches: Vec<Switch>,
+    /// SPECIAL-NAMES CLASS clauses, a contained program's being its container's.
+    pub classes: Vec<ClassClause>,
+}
+
+/// SPECIAL-NAMES CLASS class-name IS: each literal, or the two ends of a THROUGH range.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClassClause {
+    pub name: String,
+    pub members: Vec<(Literal, Option<Literal>)>,
+    pub pos: Pos,
 }
 
 /// A SPECIAL-NAMES entry for an UPSI switch: UPSI-`number` [IS mnemonic-name] with the

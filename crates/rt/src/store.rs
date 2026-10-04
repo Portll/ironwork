@@ -866,6 +866,7 @@ pub fn byte_class(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, test: ByteClas
             let first = if test == ByteClass::Kanji { 0x41..=0x7E } else { 0x41..=0xFE };
             bytes.len().is_multiple_of(2) && bytes.as_chunks::<2>().0.iter().all(|c| *c == [ebcdic::SPACE; 2] || first.contains(&c[0]) && (0x41..=0xFE).contains(&c[1]))
         }
+        ByteClass::Set { bits } => bytes.iter().all(|&b| bits[usize::from(b / 8)] >> (b % 8) & 1 == 1),
     }
 }
 

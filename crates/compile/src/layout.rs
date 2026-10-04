@@ -136,6 +136,8 @@ pub struct Layout {
     /// its length (assumption [`numeric::assumptions::PARMCHECK_BUFFER`]).
     pub parmcheck: Option<(u32, u32)>,
     pub numcheck: crate::numcheck::NumcheckFacts,
+    /// Each SPECIAL-NAMES class-name with its characters, one bit per byte value.
+    pub classes: Vec<(String, [u8; 32])>,
 }
 
 const LEVEL_ALIGNMENT: u32 = 8;
@@ -552,6 +554,7 @@ pub fn build(
         qualify,
         parmcheck: buffer,
         numcheck: Default::default(),
+        classes: Vec::new(),
     })
 }
 
@@ -877,6 +880,11 @@ impl Item {
 }
 
 impl Layout {
+    /// The characters of class-name `name`, one bit per byte value.
+    pub fn class(&self, name: &str) -> Option<[u8; 32]> {
+        self.classes.iter().find(|(n, _)| n == name).map(|&(_, bits)| bits)
+    }
+
     /// An elementary item's category as INITIALIZE's phrases name it, a floating-point item's as
     /// NUMERIC (assumption [`numeric::assumptions::INITIALIZE_FLOAT_NUMERIC`]); None for a group
     /// and for a pointer, index or object reference.

@@ -387,7 +387,9 @@ The subset the interpreter runs today:
   editing inserts (assumption C102), a hexadecimal literal in the program's code page (C141), for the program and the programs it contains. SPECIAL-NAMES UPSI-0 to UPSI-7
   entries give switch-status conditions, which the mnemonic-name qualifies, and SET ... TO ON and
   OFF; the eight switches are one copy for the run unit, off unless the PARM's runtime option
-  UPSI(nnnnnnnn) sets them (C410 to C412). Numeric PICTUREs and literals hold at most 18 digits
+  UPSI(nnnnnnnn) sets them (C410 to C412). SPECIAL-NAMES CLASS clauses name sets of characters,
+  given as characters or as ordinal numbers in the code page (C430), alone or in THROUGH ranges,
+  and a class condition tests a USAGE DISPLAY item against one. Numeric PICTUREs and literals hold at most 18 digits
   under ARITH(COMPAT) and 31 under ARITH(EXTEND). A zoned item longer than one PACK takes, up to
   31 digits, is packed in parts (assumption C34). A group that holds the object of its own OCCURS
   DEPENDING ON receives data at its maximum length, as IBM lists for MOVE, ACCEPT, STRING,

@@ -2018,9 +2018,9 @@ fn compare(c: Compare) -> String {
     }
 }
 
-fn byte_class(c: super::ByteClass) -> &'static str {
+fn byte_class(c: super::ByteClass) -> String {
     use super::ByteClass;
-    match c {
+    let name = match c {
         ByteClass::Packed { signed: true } => "numeric [packed signed]",
         ByteClass::Packed { signed: false } => "numeric [packed]",
         ByteClass::Zoned { signed: true } => "numeric [zoned signed]",
@@ -2031,7 +2031,9 @@ fn byte_class(c: super::ByteClass) -> &'static str {
         ByteClass::AlphabeticUpper => "alphabetic-upper",
         ByteClass::Dbcs => "dbcs",
         ByteClass::Kanji => "kanji",
-    }
+        ByteClass::Set { bits } => return format!("class [{}]", (0..=255u8).filter(|&b| bits[usize::from(b / 8)] >> (b % 8) & 1 == 1).map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ")),
+    };
+    name.to_owned()
 }
 
 fn sign_test(t: SignTest) -> &'static str {

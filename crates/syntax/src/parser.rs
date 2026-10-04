@@ -243,6 +243,8 @@ struct Parser<'a> {
     /// The SPECIAL-NAMES UPSI switch entries in scope, from the program's configuration section
     /// or its container's.
     switches: Vec<Switch>,
+    /// The SPECIAL-NAMES CLASS clauses in scope, the program's own and its container's.
+    classes: Vec<ClassClause>,
     sql: SqlState,
     /// WITH DEBUGGING MODE, from the program's configuration section or its container's.
     debugging: bool,
@@ -281,6 +283,7 @@ impl<'a> Parser<'a> {
             sql: SqlState::default(),
             mnemonics: Vec::new(),
             switches: Vec::new(),
+            classes: Vec::new(),
             debugging: false,
             messages: Vec::new(),
             reported: vec![false; tokens.len()],
@@ -386,9 +389,9 @@ impl Parser<'_> {
         let (start, first) = (self.at, out.len());
         let outer = (std::mem::take(&mut self.exec_declarations), std::mem::take(&mut self.cics), std::mem::take(&mut self.dli), std::mem::take(&mut self.sql.blocks), self.mnemonics.clone(), self.debugging);
         let outer_messages = std::mem::take(&mut self.messages);
-        let (outer_intrinsics, outer_switches) = (self.intrinsics.clone(), self.switches.clone());
+        let (outer_intrinsics, outer_switches, outer_classes) = (self.intrinsics.clone(), self.switches.clone(), self.classes.clone());
         let parsed = self.one_program(options, out);
-        (self.intrinsics, self.switches) = (outer_intrinsics, outer_switches);
+        (self.intrinsics, self.switches, self.classes) = (outer_intrinsics, outer_switches, outer_classes);
         (self.exec_declarations, self.cics, self.dli, self.sql.blocks, self.mnemonics, self.debugging) = outer;
         let own = std::mem::replace(&mut self.messages, outer_messages);
         parsed?;
@@ -457,6 +460,8 @@ impl Parser<'_> {
         self.mnemonics.splice(0..0, environment.mnemonics.iter().cloned());
         self.switches.splice(0..0, std::mem::take(&mut environment.switches));
         environment.switches = self.switches.clone();
+        self.classes.splice(0..0, std::mem::take(&mut environment.classes));
+        environment.classes = self.classes.clone();
         self.debugging |= environment.debugging_mode;
         let (mut working_storage, mut local_storage, mut linkage) = (Vec::new(), Vec::new(), Vec::new());
         let mut report_writer = crate::report::ReportWriter::default();
@@ -662,7 +667,11 @@ impl Parser<'_> {
     /// everything else is skipped, except what would change the meaning of the rest of the program.
     fn environment(&mut self, clauses: &mut Environment) -> R<(Vec<FileDecl>, Vec<ClassEntry>)> {
         let (mut files, mut repository) = (Vec::new(), Vec::new());
+        let mut special_names = false;
         while self.peek().is_some() && !self.at_division(&["DATA", "PROCEDURE"]) {
+            if let Some(paragraph) = self.word().filter(|w| matches!(*w, "SPECIAL-NAMES" | "REPOSITORY" | "SOURCE-COMPUTER" | "OBJECT-COMPUTER" | "INPUT-OUTPUT" | "FILE-CONTROL" | "I-O-CONTROL")) {
+                special_names = paragraph == "SPECIAL-NAMES";
+            }
             if self.accept_word("DECIMAL-POINT") {
                 self.accept_word("IS");
                 self.expect_word("COMMA")?;
@@ -685,6 +694,12 @@ impl Parser<'_> {
             if self.is_word("DEBUGGING") && self.word_at(1) == Some("MODE") {
                 self.at += 2;
                 clauses.debugging_mode = true;
+                continue;
+            }
+            if special_names && self.is_word("CLASS") && self.word_at(1).is_some() {
+                let pos = self.pos();
+                self.at += 1;
+                clauses.classes.push(self.class_clause(pos)?);
                 continue;
             }
             if let Some(number) = self.word().and_then(upsi_switch) {
@@ -720,6 +735,24 @@ impl Parser<'_> {
     /// The rest of the SPECIAL-NAMES entry for UPSI-`number`: [IS] mnemonic-name, then the ON
     /// [STATUS] [IS] and OFF [STATUS] [IS] condition-names in either order, at least one of the
     /// three written (Language Reference SC27-8713-03, pp. 125-127).
+    /// The rest of a SPECIAL-NAMES CLASS clause: class-name [IS], then literals, each alone or
+    /// with THROUGH and another (Language Reference SC27-8713-03, pp. 128-129). What the literals
+    /// may be is checked where the code page is known.
+    fn class_clause(&mut self, pos: Pos) -> R<ClassClause> {
+        let name = self.name("a class-name")?;
+        self.accept_word("IS");
+        let mut members = Vec::new();
+        while matches!(self.peek(), Some(Tok::Alnum(_) | Tok::Hex(_) | Tok::Number(_) | Tok::National(_) | Tok::Dbcs(_))) {
+            let first = self.literal()?;
+            let last = if self.accept_any(&["THROUGH", "THRU"]).is_some() { Some(self.literal()?) } else { None };
+            members.push((first, last));
+        }
+        if members.is_empty() {
+            return Err(self.error(format!("a literal after CLASS {name}")));
+        }
+        Ok(ClassClause { name, members, pos })
+    }
+
     fn switch(&mut self, number: u8, pos: Pos) -> R<Switch> {
         let status = |w: &str| matches!(w, "ON" | "OFF");
         let mnemonic = if self.accept_word("IS") || self.word().is_some_and(|w| !status(w) && !rt::reserved_words::is_reserved(w)) {
@@ -3282,6 +3315,10 @@ impl Parser<'_> {
         let wrap = |c: Cond| if negated { Cond::Not(Box::new(c)) } else { c };
         if let Some(op) = self.relop()? {
             return self.objects(left, op, negated, last);
+        }
+        if let Some(name) = self.word().filter(|w| self.classes.iter().any(|c| c.name == *w)).map(str::to_owned) {
+            self.at += 1;
+            return Ok(wrap(Cond::Class(left, Class::Named(name))));
         }
         if let Some(class) = self.accept_any(&["NUMERIC", "ALPHABETIC", "ALPHABETIC-LOWER", "ALPHABETIC-UPPER", "DBCS", "KANJI", "POSITIVE", "NEGATIVE", "ZERO"]) {
             let class = match class.as_str() {
