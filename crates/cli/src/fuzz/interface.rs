@@ -1,7 +1,7 @@
 //! `ironwork fuzz --interface`: a subprogram run as a caller would run it, with generated arguments
 //! for its PROCEDURE DIVISION USING items (docs/evidence.md §5.2).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -482,17 +482,159 @@ struct Found {
 /// argument sets, each shaped by a CALL site drawn from `sites` where there are any; then each new
 /// abend once, on the smallest arguments that still give it, run with evidence and coverage, and
 /// once more compiled with OPTIMIZE(2).
-fn drive(req: &Request, params: &[Param], sites: &[CallSite], runner: &mut Runner) -> Result<Found, String> {
+/// A program name a run may give a CALL whose target an argument supplies, with the items the
+/// sources beside the subprogram store it in.
+struct Candidate {
+    name: String,
+    receivers: BTreeSet<String>,
+}
+
+/// The program names a run may give a CALL whose target an argument supplies: the alphanumeric
+/// literals that the subprogram, and each source beside it that names the subprogram in a literal,
+/// MOVE or give as a VALUE, each a program a CALL finds in the run's program libraries and that
+/// compiles, the subprogram excepted. With them, the programs those names and their CALLs of a
+/// literal reach, whose files a run gives data sets.
+fn candidates(compiled: &exec::Compiled, callers: &[(String, exec::Compiled)], req: &Request) -> (Vec<Candidate>, Vec<Program>) {
+    let own_name = compiled.program.load_name();
+    let mut stored_in: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for c in std::iter::once(compiled).chain(callers.iter().map(|(_, c)| c)) {
+        let (stored, called) = literals(c);
+        if std::ptr::eq(c, compiled) || stored.keys().chain(&called).any(|l| l.eq_ignore_ascii_case(own_name)) {
+            for (name, receivers) in stored {
+                stored_in.entry(name).or_default().extend(receivers);
+            }
+        }
+    }
+    let mut library = super::library_of(req);
+    let mut out = Vec::new();
+    for (name, receivers) in stored_in {
+        if name.len() > NAME_WIDTH || name.eq_ignore_ascii_case(own_name) {
+            continue;
+        }
+        if library.find(&name).is_some_and(|p| exec::compile(p.clone(), &req.flags).is_ok()) {
+            out.push(Candidate { name, receivers });
+        }
+    }
+    super::read_called(&mut library, out.iter().map(|c| c.name.clone()).collect());
+    (out, library.programs)
+}
+
+/// A program's alphanumeric literals in upper case, trimmed: each one a MOVE sends or a VALUE clause
+/// gives, with the names of the items it goes to, and the targets of its CALLs of a literal.
+fn literals(compiled: &exec::Compiled) -> (BTreeMap<String, BTreeSet<String>>, BTreeSet<String>) {
+    let (mut stored, mut called): (BTreeMap<String, BTreeSet<String>>, _) = (BTreeMap::new(), BTreeSet::new());
+    for s in all_statements(&compiled.program) {
+        match s {
+            Stmt::Move { from: Operand::Literal(Literal::Alnum(text)), to, .. } => {
+                stored.entry(text.trim().to_ascii_uppercase()).or_default().extend(to.iter().map(|r| r.name.to_ascii_uppercase()));
+            }
+            Stmt::Call(call) => {
+                if let Operand::Literal(Literal::Alnum(text)) = &call.target {
+                    called.insert(text.trim().to_ascii_uppercase());
+                }
+            }
+            _ => {}
+        }
+    }
+    for item in &compiled.layout.items {
+        if let Some(text) = item.value.as_ref().and_then(literal_text) {
+            stored.entry(text.trim().to_ascii_uppercase()).or_default().extend(item.name.as_ref().map(|n| n.to_ascii_uppercase()));
+        }
+    }
+    (stored, called)
+}
+
+/// The names a slot is given: those stored in an item named as the CALL's target is, or in one
+/// whose name ends in `-` and that name (WS-PUT-MESSAGE for PUT-MESSAGE), or every candidate when
+/// none is or the target is not known.
+fn names_for(candidates: &[Candidate], target: Option<&str>) -> Vec<String> {
+    let matches = |c: &&Candidate| target.is_some_and(|t| c.receivers.iter().any(|r| r == t || r.strip_suffix(t).is_some_and(|head| head.ends_with('-'))));
+    let chosen: Vec<String> = candidates.iter().filter(matches).map(|c| c.name.clone()).collect();
+    if chosen.is_empty() { candidates.iter().map(|c| c.name.clone()).collect() } else { chosen }
+}
+
+/// The width a program name is given in an argument: a z/OS member name's eight characters.
+const NAME_WIDTH: usize = 8;
+
+/// Where an argument held the program name a CALL took: the argument's place in USING order and
+/// the offset in it.
+type NameSlot = (usize, usize);
+
+/// Where each CALL whose target is an item of a USING record takes its program name from, with
+/// that item's name in upper case.
+fn linkage_targets(compiled: &exec::Compiled) -> Vec<(NameSlot, String)> {
+    let layout = &compiled.layout;
+    let records: Vec<usize> = compiled.program.using.iter().filter_map(|p| layout.linkage_roots.iter().copied().find(|&i| layout.items[i].name.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(&p.name)))).collect();
+    let mut slots: Vec<(NameSlot, String)> = Vec::new();
+    for s in all_statements(&compiled.program) {
+        let Stmt::Call(call) = s else { continue };
+        let Operand::Ref(r) = &call.target else { continue };
+        let Ok(Resolved::Item(i)) = layout.resolve(&r.name, &r.qualifiers, r.pos) else { continue };
+        let item = &layout.items[i];
+        let within = |root: &usize| {
+            let record = &layout.items[*root];
+            item.linkage == record.linkage && item.offset >= record.offset && item.offset < record.offset + record.size
+        };
+        if let Some(k) = records.iter().position(within) {
+            let slot = (k, (item.offset - layout.items[records[k]].offset) as usize);
+            if !slots.iter().any(|(s, _)| *s == slot) {
+                slots.push((slot, r.name.to_ascii_uppercase()));
+            }
+        }
+    }
+    slots
+}
+
+/// Where `name` first stands in `arguments`, as EBCDIC.
+fn name_slot(arguments: &Arguments, name: &str) -> Option<NameSlot> {
+    let bytes = super::ebcdic(name);
+    arguments.iter().enumerate().find_map(|(i, a)| a.as_ref()?.windows(bytes.len()).position(|w| w == bytes.as_slice()).map(|at| (i, at)))
+}
+
+/// `arguments` with `name` at `slot`, padded with spaces to the elementary item that starts there
+/// when it is narrower than a program name, to a program name's width otherwise, and never past
+/// the argument's end.
+fn with_name(arguments: &mut Arguments, params: &[Param], (i, at): NameSlot, name: &str) {
+    let Some(Some(argument)) = arguments.get_mut(i) else { return };
+    let field = params.get(i).and_then(|p| p.fields.iter().find(|f| f.offset == at)).map_or(NAME_WIDTH, |f| f.size.min(NAME_WIDTH));
+    let width = field.min(argument.len().saturating_sub(at));
+    let bytes = super::ebcdic(name);
+    if bytes.len() <= width {
+        let padded = bytes.into_iter().chain(std::iter::repeat(SPACE)).take(width);
+        argument[at..at + width].iter_mut().zip(padded).for_each(|(b, n)| *b = n);
+    }
+}
+
+fn drive(req: &Request, compiled: &exec::Compiled, params: &[Param], sites: &[CallSite], candidates: &[Candidate], runner: &mut Runner) -> Result<Found, String> {
     let started = |e: std::io::Error| format!("a run could not start: {e}");
     let baseline = runner.run(&neutral_arguments(params), false, None).map_err(started)?.place();
     let mut rng = Rng(req.seed.max(1));
     let mut tally = Tally::new();
     let mut kept: Vec<(Place, Arguments)> = Vec::new();
+    let mut slots: Vec<(NameSlot, Vec<String>)> = if candidates.is_empty() { Vec::new() } else { linkage_targets(compiled).into_iter().map(|(slot, target)| (slot, names_for(candidates, Some(&target)))).collect() };
+    for ((i, at), names) in &slots {
+        eprintln!("ironwork fuzz: a CALL takes its program name from {} at offset {at}; runs give it one of {}", params[*i].name, names.join(", "));
+    }
     for _ in 0..req.runs {
         let site = (!sites.is_empty()).then(|| &sites[rng.below(sites.len())]);
-        let generated = arguments(&mut rng, params, site);
+        let mut generated = arguments(&mut rng, params, site);
+        for (slot, names) in &slots {
+            with_name(&mut generated, params, *slot, &names[rng.below(names.len())]);
+        }
         let outcome = runner.run(&generated, false, None).map_err(started)?;
         tally.add(&outcome);
+        // A CALL that took its program name from the arguments ends S806 on a generated name;
+        // later runs give that place a name the libraries hold, as a caller would.
+        if let Outcome::Abend { code, file, line, message } = &outcome
+            && code == "S806"
+            && !candidates.is_empty()
+            && let Some(slot) = super::called(message).and_then(|name| name_slot(&generated, name))
+            && !slots.iter().any(|(s, _)| *s == slot)
+        {
+            let names = names_for(candidates, None);
+            eprintln!("ironwork fuzz: the CALL at {file}:{line} takes its program name from {} at offset {}; later runs give it one of {}", params[slot.0].name, slot.1, names.join(", "));
+            slots.push((slot, names));
+        }
         if let Some(place) = outcome.place()
             && Some(&place) != baseline.as_ref()
             && !kept.iter().any(|(p, _)| *p == place)
@@ -530,7 +672,7 @@ pub fn run(req: Request) -> ExitCode {
         eprintln!("ironwork fuzz: {message}");
         ExitCode::from(2)
     };
-    let (compiled, rest) = match super::compile(&req) {
+    let (compiled, mut rest) = match super::compile(&req) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("{e}");
@@ -544,12 +686,16 @@ pub fn run(req: Request) -> ExitCode {
         return fail(why);
     }
     let params = params(&compiled);
-    let sites = call_sites(&compiled.program.id, &callers(&req));
+    let callers = callers(&req);
+    let sites = call_sites(&compiled.program.id, &callers);
+    let (candidates, named) = candidates(&compiled, &callers, &req);
+    rest.extend(named);
+    let names: Vec<String> = candidates.iter().map(|c| c.name.clone()).collect();
     let work = match super::prepare(&req.out, &req.roots()) {
         Ok(w) => w,
         Err(e) => return fail(e),
     };
-    let (feeds, _, others) = super::inputs_of(&compiled, &rest);
+    let (feeds, _, others) = super::inputs_reaching(&compiled, &rest, &names);
     let mut empty: Vec<String> = feeds.into_iter().map(|f| f.dd).chain(others.unfed.iter().cloned()).collect();
     empty.sort();
     empty.dedup();
@@ -561,7 +707,7 @@ pub fn run(req: Request) -> ExitCode {
         eprintln!("ironwork fuzz: no --dd can carry these names, so they are given no data set: {}", others.ungiven.join(", "));
     }
     let mut runner = Runner { req: &req, work, count: 0, covered: super::RunCoverage::default(), data_sets };
-    let found = drive(&req, &params, &sites, &mut runner);
+    let found = drive(&req, &compiled, &params, &sites, &candidates, &mut runner);
     let _ = fs::remove_dir_all(&runner.work);
     let found = match found {
         Ok(f) => f,

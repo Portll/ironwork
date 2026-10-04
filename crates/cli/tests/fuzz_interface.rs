@@ -233,3 +233,52 @@ fn a_user_defined_function_is_refused() {
     assert_eq!(o.status.code(), Some(2), "{}", stderr(&o));
     assert!(stderr(&o).contains("TWICE is a user-defined function"), "{}", stderr(&o));
 }
+
+const NAMED_CALL_SUBPROGRAM: &[&str] = &[
+    "       IDENTIFICATION DIVISION.",
+    "       PROGRAM-ID. NAMESUB.",
+    "       DATA DIVISION.",
+    "       LINKAGE SECTION.",
+    "       01  REQ.",
+    "           05 LOG-PROGRAM PIC X(8).",
+    "           05 QTY PIC 9(5).",
+    "       PROCEDURE DIVISION USING REQ.",
+    "           CALL LOG-PROGRAM",
+    "           ADD 1 TO QTY",
+    "           GOBACK.",
+];
+
+const NAMING_CALLER: &[&str] = &[
+    "       IDENTIFICATION DIVISION.",
+    "       PROGRAM-ID. NAMEMAIN.",
+    "       DATA DIVISION.",
+    "       WORKING-STORAGE SECTION.",
+    "       01  WS-REQ.",
+    "           05 WS-LOG-PROGRAM PIC X(8).",
+    "           05 WS-QTY PIC 9(5) VALUE 1.",
+    "       01  WS-OTHER PIC X(8).",
+    "       PROCEDURE DIVISION.",
+    "           MOVE 'LOGGIT' TO WS-LOG-PROGRAM",
+    "           MOVE 'OTHERP' TO WS-OTHER",
+    "           CALL 'NAMESUB' USING WS-REQ",
+    "           GOBACK.",
+];
+
+/// A CALL whose target is an argument's field is given a program name a caller stores in an item of
+/// that field's name, so the runs get past the CALL to the abend the other field causes.
+#[test]
+fn a_call_target_an_argument_supplies_is_given_a_program_the_callers_name() {
+    let dir = repo("named", false);
+    fs::write(dir.join("repo/src/NAMESUB.cbl"), NAMED_CALL_SUBPROGRAM.join("\n") + "\n").unwrap();
+    fs::write(dir.join("repo/src/NAMEMAIN.cbl"), NAMING_CALLER.join("\n") + "\n").unwrap();
+    for (id, line) in [("LOGGIT", "           GOBACK."), ("OTHERP", "           STOP RUN.")] {
+        let text = format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. {id}.\n       PROCEDURE DIVISION.\n{line}\n");
+        fs::write(dir.join(format!("repo/src/{id}.cbl")), text).unwrap();
+    }
+    let o = fuzz(&dir, "src/NAMESUB.cbl");
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(stderr(&o).contains("a CALL takes its program name from REQ at offset 0; runs give it one of LOGGIT\n"), "{}", stderr(&o));
+    assert!(String::from_utf8_lossy(&o.stdout).contains(" 0 refused"), "{}", String::from_utf8_lossy(&o.stdout));
+    let manifest = read_manifest(&dir.join("run"));
+    assert!(manifest.contains("\"code\":\"S0C7\",\"file\":\"NAMESUB.cbl\",\"line\":10"), "{manifest}");
+}

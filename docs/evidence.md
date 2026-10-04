@@ -435,7 +435,14 @@ each run an `ironwork cics`, and writes the same directory with `entry` `cics`
    files, and those of the programs it contains or reaches by a CALL of a literal, get data sets
    as §5 gives the files it does not vary: an empty one for each file read or extended and a new
    one for each only written, so an OPEN does not end the run IO-35; their records are not varied,
-   the arguments being the inputs. An abend on
+   the arguments being the inputs. A CALL whose target is a field of an argument, or whose S806
+   names bytes a run generated in one, is given in that place a program name a caller would pass:
+   an alphanumeric literal that the subprogram, or a source naming it in a literal, MOVEs or gives
+   as a VALUE, that names a program the libraries hold and that compiles. Where a caller stores
+   such a literal in an item named as the CALL's target, or in one whose name ends in `-` and that
+   name, only those literals are given; otherwise any of them, drawn per run. The programs so
+   named get data sets for their files too, and the name is part of the arguments the manifest
+   records. With no such literal the field is varied as any other. An abend on
    arguments that break nothing is not kept; every other is kept once, its arguments made as small
    as still give it within 200 runs, then run with `--evidence` and `--coverage` and once more with
    `--optimize=2`, as in §5. A timeout and an S806 are counted, never kept.

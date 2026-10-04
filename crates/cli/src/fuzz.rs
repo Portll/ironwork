@@ -151,10 +151,14 @@ fn swapped(bytes: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
     out
 }
 
+/// `text` in EBCDIC as records and arguments hold it, a character CCSID 37 lacks as a space.
+fn ebcdic(text: &str) -> Vec<u8> {
+    text.chars().map(|c| CP037.encode_char(c).unwrap_or(SPACE)).collect()
+}
+
 /// `inputs` with every `name` in them, as text in lines and PARMs and in EBCDIC in records, given as
 /// `to` instead.
 fn renamed(inputs: &Inputs, name: &str, to: &str) -> Inputs {
-    let ebcdic = |text: &str| text.chars().map(|c| CP037.encode_char(c).unwrap_or(SPACE)).collect::<Vec<u8>>();
     let (from_e, to_e) = (ebcdic(name), ebcdic(to));
     Inputs {
         files: inputs.files.iter().map(|(k, records)| (k.clone(), records.iter().map(|r| swapped(r, &from_e, &to_e)).collect())).collect(),
@@ -533,11 +537,12 @@ fn call_targets(program: &Program) -> Vec<String> {
 }
 
 /// The programs a run of the main program may enter besides it: those it contains, at any depth,
-/// and those a CALL of a literal names among the other programs of its source and those `compile`
-/// read from the program libraries, with the programs they contain and call in turn.
-fn reached<'a>(compiled: &exec::Compiled, rest: &'a [Program]) -> Vec<&'a Program> {
+/// those a CALL of a literal names, and those `roots` names, among the other programs of its
+/// source and those read from the program libraries, with the programs they contain and call in
+/// turn.
+fn reached<'a>(compiled: &exec::Compiled, rest: &'a [Program], roots: &[String]) -> Vec<&'a Program> {
     let mut out: Vec<&Program> = Vec::new();
-    let mut names: Vec<String> = compiled.program.nested.iter().cloned().chain(call_targets(&compiled.program)).collect();
+    let mut names: Vec<String> = compiled.program.nested.iter().cloned().chain(call_targets(&compiled.program)).chain(roots.iter().cloned()).collect();
     while let Some(name) = names.pop() {
         let answers = |p: &Program| !p.is_prototype() && (p.id.eq_ignore_ascii_case(&name) || p.load_name().eq_ignore_ascii_case(&name));
         if let Some(p) = rest.iter().find(|p| answers(p) && !out.iter().any(|o| std::ptr::eq(*o, *p))) {
@@ -552,10 +557,15 @@ fn reached<'a>(compiled: &exec::Compiled, rest: &'a [Program]) -> Vec<&'a Progra
 /// The main program's files are fed; the files of a program it contains or calls get their DDs,
 /// empty where it reads or extends them.
 fn inputs_of(compiled: &exec::Compiled, rest: &[Program]) -> (Vec<Feed>, bool, Others) {
+    inputs_reaching(compiled, rest, &[])
+}
+
+/// `inputs_of`, with the programs `roots` names entered as a CALL of a literal enters them.
+fn inputs_reaching(compiled: &exec::Compiled, rest: &[Program], roots: &[String]) -> (Vec<Feed>, bool, Others) {
     let how = |opened: &BTreeMap<String, Opened>, f: &FileDecl| opened.get(&f.name.to_ascii_uppercase()).copied().unwrap_or(Opened::Written);
     let (opened, mut sysin) = opens(&compiled.program.paragraphs);
     let mut files: Vec<(Option<usize>, &FileDecl, Opened)> = compiled.program.files.iter().enumerate().filter(|(_, f)| !f.sort).map(|(k, f)| (Some(k), f, how(&opened, f))).collect();
-    for p in reached(compiled, rest) {
+    for p in reached(compiled, rest, roots) {
         let (opened, accepts) = opens(&p.paragraphs);
         sysin |= accepts;
         files.extend(p.files.iter().filter(|f| !f.sort).map(|f| (None, f, how(&opened, f))));
@@ -1150,7 +1160,20 @@ fn compile(req: &Request) -> Result<(exec::Compiled, Vec<Program>), String> {
     let first = programs.remove(0);
     let compiled = exec::compile(first, &req.flags).map_err(|messages| messages.iter().map(|m| m.place(&path)).collect::<Vec<_>>().join("\n"))?;
     let mut library = exec::unit::Library { programs, dirs: std::iter::once(own).chain(req.program_dirs.iter().cloned()).collect(), copy: libraries, flags: req.flags.clone(), ..Default::default() };
-    let mut names = call_targets(&compiled.program);
+    read_called(&mut library, call_targets(&compiled.program));
+    Ok((compiled, library.programs))
+}
+
+/// The program libraries `ironwork run` searches for `req`'s program, holding no program yet.
+fn library_of(req: &Request) -> exec::unit::Library {
+    let own = req.program.parent().map(Path::to_path_buf).unwrap_or_default();
+    let copy = syntax::copy::Libraries::new(std::iter::once(own.clone()).chain(req.libraries.iter().cloned()).collect()).with_program(&req.program).with_compliance(numeric::Compliance::of(&req.flags));
+    exec::unit::Library { dirs: std::iter::once(own).chain(req.program_dirs.iter().cloned()).collect(), copy, flags: req.flags.clone(), ..Default::default() }
+}
+
+/// Reads into `library` the program a CALL of each of `names` finds, and the programs their CALLs
+/// of a literal reach in turn.
+fn read_called(library: &mut exec::unit::Library, mut names: Vec<String>) {
     let mut seen = BTreeSet::new();
     while let Some(name) = names.pop() {
         if seen.insert(name.to_ascii_uppercase())
@@ -1159,7 +1182,6 @@ fn compile(req: &Request) -> Result<(exec::Compiled, Vec<Program>), String> {
             names.extend(call_targets(p));
         }
     }
-    Ok((compiled, library.programs))
 }
 
 pub fn run(req: Request) -> ExitCode {
