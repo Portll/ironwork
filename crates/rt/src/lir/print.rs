@@ -1117,6 +1117,7 @@ impl<'a> Printer<'a> {
             SqlStatement::Rollback => "rollback".to_owned(),
             SqlStatement::Declaration => "declaration".to_owned(),
             SqlStatement::Unsupported(what) => format!("unsupported {}", self.string(*what)),
+            SqlStatement::Connect { what, location } => format!("connect {}{}", self.string(*what), hosts("location", location)),
         };
         format!("Sql {ordinal} {text} {statement}{}", attrs('{', yes(e.with_hold, "with hold").into_iter().collect()))
     }

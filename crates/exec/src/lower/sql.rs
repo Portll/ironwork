@@ -74,6 +74,7 @@ impl Lower<'_> {
             Statement::Rollback => (SqlStatement::Rollback, "ROLLBACK".into(), false),
             Statement::Whenever { .. } | Statement::Declaration | Statement::DeclareCursor(_) | Statement::DeclareUnsupported { .. } => (SqlStatement::Declaration, String::new(), false),
             Statement::Unsupported(what) => (SqlStatement::Unsupported(self.sym(what)), String::new(), false),
+            Statement::Connect { what, target } => (SqlStatement::Connect { what: self.sym(what), location: self.host_places(target.as_slice(), command)? }, String::new(), false),
             Statement::Open { declared: None, .. } | Statement::Malformed(_) => return unsupported("an EXEC SQL statement the compiler refuses", block.pos),
         };
         let fingerprint = crate::sql::fingerprint(&text);

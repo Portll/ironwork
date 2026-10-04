@@ -35,6 +35,9 @@ pub enum SqlStatement<P = PlaceId, S = SymId> {
     Declaration,
     /// Abends EXEC, naming it, when reached.
     Unsupported(S),
+    /// CONNECT or SET CONNECTION: the host variable naming the location, if any, goes to the
+    /// input trace, then the statement abends EXEC as an unsupported one does.
+    Connect { what: S, location: Vec<HostPlace<P>> },
 }
 
 /// A host variable, or one member of a host structure at `member`'s offset and length. The
@@ -80,6 +83,7 @@ codec_enum!(SqlStatement {
     Rollback = 6,
     Declaration = 7,
     Unsupported(what) = 8,
+    Connect { what, location } = 9,
 });
 codec_struct!(HostPlace { var, member, ty, indicator } check host_place_valid);
 codec_struct!(Sqlca { fields } check sqlca_valid);

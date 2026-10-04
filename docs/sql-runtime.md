@@ -70,9 +70,11 @@ On 2026-09-29 the operator put SQL next after M8, ahead of the VM in
   - **A cursor ironwork does not run** (scrollable, or for a prepared statement) is still declared.
     Reaching its DECLARE does nothing, as for any declaration; its OPEN abends, naming what it is.
 - **Refused by name.** DISCONNECT comes from other precompilers, so a program that uses it is
-  refused at compile time as not a Db2 for z/OS program. CONNECT, which Db2 for z/OS has for DRDA,
-  dynamic SQL (PREPARE, EXECUTE, EXECUTE IMMEDIATE, DESCRIBE) and multi-row FETCH are refused at
-  run time by name.
+  refused at compile time as not a Db2 for z/OS program. CONNECT and SET CONNECTION, which Db2 for
+  z/OS has for DRDA, dynamic SQL (PREPARE, EXECUTE, EXECUTE IMMEDIATE, DESCRIBE) and multi-row
+  FETCH are refused at run time by name. A CONNECT or SET CONNECTION that names its location by a
+  host variable first gives the input trace a `connection-target` sink with the value
+  ([evidence.md](evidence.md) §1.1).
 
 ## 4. The Database interface (run time)
 

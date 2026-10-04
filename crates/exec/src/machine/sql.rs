@@ -52,6 +52,7 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
             Statement::Rollback => (SqlStatement::Rollback, "ROLLBACK".into(), false),
             Statement::Whenever { .. } | Statement::Declaration | Statement::DeclareCursor(_) | Statement::DeclareUnsupported { .. } => (SqlStatement::Declaration, String::new(), false),
             Statement::Unsupported(what) => (SqlStatement::Unsupported(what.clone()), String::new(), false),
+            Statement::Connect { what, target } => (SqlStatement::Connect { what: what.clone(), location: places(target.as_slice()) }, String::new(), false),
             Statement::Malformed(why) => unreachable!("the compiler refuses a malformed statement: {why}"),
         };
         SqlEntry { ordinal, verb: command.to_owned(), statement, fingerprint: sql::fingerprint(&text), text, with_hold }
@@ -196,6 +197,10 @@ impl<'a, 'w> SqlHost<'w, &'a Ref, String> for Bound<'_, '_, '_, 'w> {
 
     fn untyped(&mut self, abend: AbendId) -> Abend {
         self.untyped[abend as usize].clone()
+    }
+
+    fn sink(&mut self, kind: &'static str, pos: Pos, operand: &str) {
+        self.machine.sink(kind, pos, operand);
     }
 
     /// An indicator array named without subscripts, as `:CLS:CLS-IND` names one, at its first

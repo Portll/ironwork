@@ -1597,6 +1597,9 @@ pub enum SqlStatement {
     /// Dynamic SQL, a statement on a cursor declared for it, and the like: abend EXEC naming it,
     /// when reached (machine/sql.rs:123).
     Unsupported(SymId),
+    /// CONNECT or SET CONNECTION: the host variable naming the location, if any, goes to the
+    /// input trace as a `connection-target` sink, then the statement abends EXEC as `Unsupported`.
+    Connect { what: SymId, location: Vec<HostPlace> },
 }
 
 /// A host variable, or one member of a host structure, resolved (machine/sql.rs:176-198).

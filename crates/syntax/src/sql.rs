@@ -79,6 +79,9 @@ pub enum Statement {
     Whenever { condition: Condition, action: Action },
     /// INCLUDE, DECLARE SECTION, DECLARE TABLE and DECLARE STATEMENT, which declare and do nothing.
     Declaration,
+    /// CONNECT and SET CONNECTION, which ironwork does not run: `what` names the statement, and
+    /// `target` is the host variable naming the location, where one does.
+    Connect { what: String, target: Option<HostVar> },
     /// A statement ironwork does not run, named by what it is.
     Unsupported(String),
     /// A statement the precompiler refuses, with the reason: it does not read as its verb requires,
@@ -333,6 +336,9 @@ fn statement(toks: &[Tok], pos: Pos) -> Statement {
     match verb {
         "SELECT" | "VALUES" => into_query(toks, pos),
         "SET" if matches!(toks.get(1), Some(Tok::Host { .. })) => set_host(toks, pos),
+        "SET" if word(toks, 1) == "CONNECTION" => connect("SET CONNECTION", toks, 2, pos),
+        "CONNECT" if word(toks, 1) == "TO" => connect("CONNECT", toks, 2, pos),
+        "CONNECT" => Statement::Connect { what: "CONNECT".into(), target: None },
         "INSERT" => change(ChangeKind::Insert, toks, pos),
         "UPDATE" => change(ChangeKind::Update, toks, pos),
         "DELETE" => change(ChangeKind::Delete, toks, pos),
@@ -358,6 +364,11 @@ fn statement(toks: &[Tok], pos: Pos) -> Statement {
         "" => Statement::Malformed("the block holds no statement".into()),
         other => Statement::Unsupported(other.into()),
     }
+}
+
+/// CONNECT TO or SET CONNECTION, its location at `toks[at]`: a host variable, or a name.
+fn connect(what: &str, toks: &[Tok], at: usize, pos: Pos) -> Statement {
+    Statement::Connect { what: what.into(), target: host_var(toks, at, pos).map(|(var, _)| var) }
 }
 
 fn into_query(toks: &[Tok], pos: Pos) -> Statement {
@@ -579,8 +590,21 @@ mod tests {
     }
 
     #[test]
+    fn connect_and_set_connection_keep_the_host_variable_naming_the_location() {
+        let target = |sql: &str| match st(sql) {
+            Statement::Connect { what, target } => (what, target.map(|t| t.var.name)),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(target("CONNECT TO :LOC USER :ID USING :PW"), ("CONNECT".into(), Some("LOC".into())));
+        assert_eq!(target("SET CONNECTION :WS-LOC"), ("SET CONNECTION".into(), Some("WS-LOC".into())));
+        assert_eq!(target("CONNECT RESET"), ("CONNECT".into(), None));
+        assert_eq!(target("CONNECT USER :ID USING :PW"), ("CONNECT".into(), None));
+        assert_eq!(st("SET CURRENT SQLID = 'X'"), Statement::Unsupported("SET".into()));
+    }
+
+    #[test]
     fn what_is_refused_and_why() {
-        assert_eq!(st("CONNECT TO DB1"), Statement::Unsupported("CONNECT".into()));
+        assert_eq!(st("CONNECT TO DB1"), Statement::Connect { what: "CONNECT".into(), target: None });
         assert!(matches!(st("DISCONNECT ALL"), Statement::Malformed(why) if why.starts_with("DISCONNECT is not a Db2 for z/OS statement")));
         assert_eq!(st("PREPARE S1 FROM :STMT"), Statement::Unsupported("PREPARE".into()));
         assert_eq!(st("FETCH PRIOR FROM C1 INTO :A"), Statement::Unsupported("a scrollable FETCH".into()));

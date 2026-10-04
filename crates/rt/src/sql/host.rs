@@ -78,6 +78,16 @@ pub(super) fn inputs<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, places: &[H
     Ok(Ok(values))
 }
 
+/// The values the host variables send, each read for the input trace as a sink's operand is.
+pub(super) fn traced<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, places: &[HostPlace<P>]) -> R<Result<Vec<Value>, SqlError>> {
+    for t in targets(x, places)? {
+        if let Some(taint) = x.taint() {
+            taint.read(t.offset, t.len);
+        }
+    }
+    inputs(x, places)
+}
+
 /// Assigns a row to the INTO host variables, setting each indicator: -1 for NULL, a cut string's
 /// original length, and 0 otherwise.
 pub(super) fn assign<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, into: &[HostPlace<P>], row: &[Value], warnings: &mut Warnings) -> R<Result<(), SqlError>> {

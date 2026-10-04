@@ -30,6 +30,18 @@ pub enum Value {
 }
 
 impl Value {
+    /// The value as a recording writes it, a string without its trailing blanks; NULL as nothing.
+    pub fn text(&self) -> String {
+        match self {
+            Value::Null => String::new(),
+            Value::Int(n) => n.to_string(),
+            Value::Decimal { value, scale } => Self::decimal_text(*value, *scale),
+            Value::Double(d) => d.to_string(),
+            Value::Char(s) => s.trim_end().to_owned(),
+            Value::Binary(b) => b.iter().map(|byte| format!("{byte:02X}")).collect(),
+        }
+    }
+
     /// A decimal's text, `-1234.50` for -123450 at scale 2, as recordings and backends write it.
     pub fn decimal_text(value: i128, scale: u32) -> String {
         let s = scale as usize;

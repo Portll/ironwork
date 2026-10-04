@@ -3,7 +3,7 @@
 //! warning WHENEVER tests.
 
 use super::host::{self, COLUMN_COUNT, TRUNCATED, Warnings};
-use super::{Answer, Call, Database, Outcome, Session};
+use super::{Answer, Call, Database, Outcome, Session, Value};
 use crate::abend::Abend;
 use crate::host::Host;
 use crate::lir::{AbendId, HostPlace, SqlEntry, SqlStatement, Sqlca};
@@ -27,6 +27,8 @@ pub trait SqlHost<'w, P: Copy, S>: Host<P> {
     fn place_pos(&self, place: P) -> Pos;
     /// The abend a host variable with no SQL type gives when its statement reaches it.
     fn untyped(&mut self, abend: AbendId) -> Abend;
+    /// Tells the observer, for the input trace, the operand of an operation an input could steer.
+    fn sink(&mut self, kind: &'static str, pos: Pos, operand: &str);
     /// An indicator variable's storage; an executor whose place for an indicator array named
     /// without subscripts is not its first element locates that element here.
     fn locate_indicator(&mut self, place: P) -> R<Loc> {
@@ -50,6 +52,15 @@ fn session<'a, 'w: 'a, P: Copy + 'a, S: 'a>(x: &'a mut impl SqlHost<'w, P, S>) -
 pub fn run<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, entry: &SqlEntry<P, S>, sqlca: &Sqlca<P>, pos: Pos) -> R<Option<Ran>> {
     let verb = x.text(&entry.verb);
     let refused = |why: String| Abend { code: "EXEC".into(), message: format!("EXEC SQL {verb} was reached: {why}"), pos, file: None };
+    if let SqlStatement::Connect { what, location } = &entry.statement {
+        // A location the trace cannot read is left to the refusal, so tracing never changes how the run ends.
+        if !location.is_empty()
+            && let Ok(Ok(values)) = host::traced(x, location)
+        {
+            x.sink("connection-target", pos, &values.iter().map(Value::text).collect::<String>());
+        }
+        return Err(refused(format!("ironwork for COBOL does not run {}", x.text(what))));
+    }
     if x.session().is_none() {
         return Err(refused("no database is attached to the run".into()));
     }
@@ -149,6 +160,7 @@ pub fn run<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, entry: &SqlEntry<P, S
         }
         SqlStatement::Declaration => return Ok(None),
         SqlStatement::Unsupported(what) => return Err(refused(format!("ironwork for COBOL does not run {}", x.text(what)))),
+        SqlStatement::Connect { .. } => unreachable!("CONNECT is refused before the session is asked"),
     };
     if outcome.sqlcode == DEADLOCK {
         session(x).rolled_back();

@@ -1065,6 +1065,7 @@ impl Parser<'_> {
                 }
                 block.host_variables = match &statement {
                     crate::sql::Statement::Unsupported(_)
+                    | crate::sql::Statement::Connect { .. }
                     | crate::sql::Statement::Malformed(_)
                     | crate::sql::Statement::Declaration
                     | crate::sql::Statement::DeclareUnsupported { .. } => host_variables(body, pos),

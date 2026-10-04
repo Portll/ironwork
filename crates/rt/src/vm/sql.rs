@@ -54,4 +54,8 @@ impl<'w, L: Loader<Rc<Code>>> SqlHost<'w, PlaceId, SymId> for Vm<'_, '_, 'w, L> 
     fn untyped(&mut self, abend: AbendId) -> Abend {
         self.abend(abend, None)
     }
+
+    fn sink(&mut self, kind: &'static str, pos: Pos, operand: &str) {
+        Vm::sink(self, kind, pos, operand);
+    }
 }

@@ -1277,7 +1277,7 @@ fn the_sql_table_round_trips_with_every_tag() {
     let untyped = HostPlace { var: 3, member: None, ty: Err(1), indicator: None };
     round_trip(&[id.clone(), member.clone(), untyped.clone()]);
     let statements = [
-        SqlStatement::Query { inputs: vec![id.clone()], into: vec![member.clone(), untyped] },
+        SqlStatement::Query { inputs: vec![id.clone()], into: vec![member.clone(), untyped.clone()] },
         SqlStatement::Change { delete: true, inputs: vec![], current_of: Some(2) },
         SqlStatement::Open { cursor: 2, inputs: vec![id] },
         SqlStatement::Fetch { cursor: 2, into: vec![member] },
@@ -1286,8 +1286,9 @@ fn the_sql_table_round_trips_with_every_tag() {
         SqlStatement::Rollback,
         SqlStatement::Declaration,
         SqlStatement::Unsupported(3),
+        SqlStatement::Connect { what: 4, location: vec![untyped] },
     ];
-    every_variant(&statements, 9);
+    every_variant(&statements, 10);
     let fields = [
         SqlcaField::CaId,
         SqlcaField::CaBc,

@@ -12,22 +12,32 @@ fn sinks(source: &str, sysin: &str) -> Vec<(u32, Option<bool>)> {
 
 /// [`sinks`], with the files of `dds`.
 fn file_sinks(source: &str, sysin: &str, dds: &[String]) -> Vec<(u32, Option<bool>)> {
+    let (events, abend) = sink_events(source, sysin, dds);
+    assert!(abend.is_none(), "{abend:?}");
+    events.into_iter().map(|(_, line, _, input)| (line, input)).collect()
+}
+
+type SinkEvent = (&'static str, u32, String, Option<bool>);
+
+/// Each sink a run of `source` reached: its kind, line and operand, and whether an input byte may
+/// be in the operand; and the abend the run ended with, if any.
+fn sink_events(source: &str, sysin: &str, dds: &[String]) -> (Vec<SinkEvent>, Option<String>) {
     let _ = Harness::source(source).sysin(sysin).dds(dds).run(Executor::Interpreter);
     let mut programs = syntax::parse_all_with(source, &syntax::copy::Libraries::default()).unwrap_or_else(|e| panic!("{e}"));
     let compiled = compile(programs.remove(0), &[]).unwrap_or_else(|e| panic!("{e:?}"));
     let seen = Rc::new(RefCell::new(Vec::new()));
     let recorder = seen.clone();
     let observer: unit::Observer<'_> = Box::new(move |e| {
-        if let unit::Event::Sink { line, input, .. } = e {
-            recorder.borrow_mut().push((line, input));
+        if let unit::Event::Sink { kind, line, operand, input, .. } = e {
+            recorder.borrow_mut().push((kind, line, operand.to_owned(), input));
         }
     });
     let library = unit::Library { programs, trace_input: true, ..Default::default() };
     let sysin = Some(Box::new(Cursor::new(sysin.as_bytes().to_vec())) as Box<dyn std::io::BufRead>);
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let ended = compiled.execute_observed(library, files::Dds::new(dds, false).unwrap(), sysin, unit::Clock::Fixed(0, 0), None, &mut out, &mut err, Some(observer));
-    assert!(ended.is_ok(), "{ended:?} {}", String::from_utf8_lossy(&err));
-    seen.borrow().clone()
+    let abend = ended.err().map(|a| format!("{a:?} {}", String::from_utf8_lossy(&err)));
+    (seen.borrow().clone(), abend)
 }
 
 fn line_of(source: &str, text: &str) -> u32 {
@@ -273,4 +283,21 @@ fn file_status_holds_input_only_from_a_key_its_verb_reads() {
     let shown: Vec<_> = file_sinks(&source, "", &[format!("KDD={}", data.display())]).into_iter().filter(|(l, _)| [at("OPEN"), at("READ"), at("START INPUT"), at("START CONSTANT")].contains(l)).collect();
     let _ = std::fs::remove_file(&data);
     assert_eq!(shown, [(at("OPEN"), Some(false)), (at("READ"), Some(true)), (at("START INPUT"), Some(true)), (at("START CONSTANT"), Some(false))]);
+}
+
+#[test]
+fn connect_traces_the_location_a_host_variable_names_before_it_is_refused() {
+    let connect = |data: &str, body: &[&str], sysin: &str| {
+        let source = program("", data, &body.iter().map(|s| line(s)).collect::<String>());
+        let (events, abend) = sink_events(&source, sysin, &[]);
+        (events, line_of(&source, "EXEC SQL"), abend.unwrap_or_default())
+    };
+    let (events, at, abend) = connect(DATA, &["ACCEPT A", "EXEC SQL CONNECT TO :A END-EXEC", "GOBACK."], "CWVRFY01\n");
+    assert_eq!(events, [("connection-target", at, "CWVRFY01".to_owned(), Some(true))]);
+    assert!(abend.contains("does not run CONNECT"), "{abend}");
+    let (events, at, abend) = connect(DATA, &["MOVE 'LOCAL' TO B", "EXEC SQL SET CONNECTION :B END-EXEC", "GOBACK."], "");
+    assert_eq!(events, [("connection-target", at, "LOCAL".to_owned(), Some(false))]);
+    assert!(abend.contains("does not run SET CONNECTION"), "{abend}");
+    let (events, _, abend) = connect(DATA, &["EXEC SQL CONNECT TO DB1 END-EXEC", "GOBACK."], "");
+    assert!(events.is_empty() && abend.contains("does not run CONNECT"), "{events:?} {abend}");
 }

@@ -429,6 +429,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
             SqlStatement::Open { cursor, inputs } => symbol(*cursor).and_then(|()| host(inputs))?,
             SqlStatement::Fetch { cursor, into } => symbol(*cursor).and_then(|()| host(into))?,
             SqlStatement::Close { cursor: s } | SqlStatement::Unsupported(s) => symbol(*s)?,
+            SqlStatement::Connect { what, location } => symbol(*what).and_then(|()| host(location))?,
             SqlStatement::Commit | SqlStatement::Rollback | SqlStatement::Declaration => {}
         }
     }
