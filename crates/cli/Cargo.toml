@@ -12,12 +12,12 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-exec = { package = "ironwork-exec", path = "../exec", version = "0.7.0" }
-jcl = { package = "ironwork-jcl", path = "../jcl", version = "0.7.0" }
-numeric = { package = "ironwork-numeric", path = "../numeric", version = "0.7.0" }
-rt = { package = "ironwork-rt", path = "../rt", version = "0.7.0" }
-syntax = { package = "ironwork-syntax", path = "../syntax", version = "0.7.0" }
-zarch = { package = "ironwork-zarch", path = "../zarch", version = "0.7.0" }
+exec = { package = "ironwork-exec", path = "../exec", version = "0.8.0" }
+jcl = { package = "ironwork-jcl", path = "../jcl", version = "0.8.0" }
+numeric = { package = "ironwork-numeric", path = "../numeric", version = "0.8.0" }
+rt = { package = "ironwork-rt", path = "../rt", version = "0.8.0" }
+syntax = { package = "ironwork-syntax", path = "../syntax", version = "0.8.0" }
+zarch = { package = "ironwork-zarch", path = "../zarch", version = "0.8.0" }
 
 [lints]
 workspace = true

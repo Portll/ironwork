@@ -4,7 +4,7 @@ members = ["crates/*", "tools/ddl"]
 
 [workspace.package]
 edition = "2024"
-version = "0.7.0"
+version = "0.8.0"
 license = "AGPL-3.0-or-later"
 publish = true
 repository = "https://github.com/Portll/ironwork"
