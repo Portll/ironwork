@@ -94,7 +94,7 @@ pub(crate) fn resolve(program: &Program, layout: &Layout, options: &Options, err
         match &u.on {
             ErrorUse::Files(names) => {
                 for name in names {
-                    let error = |why: &str| Error::at(u.pos, format!("USE AFTER EXCEPTION/ERROR ON {name}: {why}"));
+                    let error = |why: &str| syntax::messages::IWC0008.at(u.pos, format!("USE AFTER EXCEPTION/ERROR ON {name}: {why}"));
                     match program.files.iter().position(|f| f.name == *name) {
                         None => errors.push(error("no file has that name")),
                         Some(k) if program.files[k].sort => errors.push(error("a sort or merge file takes no EXCEPTION/ERROR procedure")),
@@ -109,7 +109,7 @@ pub(crate) fn resolve(program: &Program, layout: &Layout, options: &Options, err
                 }
             }
             ErrorUse::Mode(mode) => match &mut table.modes[mode_index(*mode)] {
-                Some(_) => errors.push(Error::at(u.pos, format!("USE AFTER EXCEPTION/ERROR ON {}: another procedure is for the same open mode", mode_name(*mode)))),
+                Some(_) => errors.push(syntax::messages::IWC0009.at(u.pos, format!("USE AFTER EXCEPTION/ERROR ON {}: another procedure is for the same open mode", mode_name(*mode)))),
                 free => {
                     *free = Some(span(u.section));
                     if u.global {
@@ -123,11 +123,11 @@ pub(crate) fn resolve(program: &Program, layout: &Layout, options: &Options, err
     let in_debugging = |i: usize| debugging.iter().any(|&(first, last)| (first..=last).contains(&i));
     let uses = &program.declaratives.debugging;
     if let Some(u) = uses.first().filter(|_| options.thread) {
-        errors.push(Error::at(u.pos, "USE FOR DEBUGGING is not allowed in a program compiled with THREAD"));
+        errors.push(syntax::messages::IWC0010.at(u.pos, "USE FOR DEBUGGING is not allowed in a program compiled with THREAD"));
     }
     let every = uses.iter().filter(|u| u.procedures.is_empty()).count();
     if let Some(u) = uses.iter().find(|u| u.procedures.is_empty()).filter(|_| every > 1 || every < uses.len()) {
-        errors.push(Error::at(u.pos, "USE FOR DEBUGGING ON ALL PROCEDURES: it may be written once, and no other USE FOR DEBUGGING may name a procedure"));
+        errors.push(syntax::messages::IWC0011.at(u.pos, "USE FOR DEBUGGING ON ALL PROCEDURES: it may be written once, and no other USE FOR DEBUGGING may name a procedure"));
     }
     let mut triggers: Vec<Option<(Span, String)>> = vec![None; program.paragraphs.len()];
     for (u, &section) in uses.iter().zip(&debugging) {
@@ -140,7 +140,7 @@ pub(crate) fn resolve(program: &Program, layout: &Layout, options: &Options, err
             continue;
         }
         for name in &u.procedures {
-            let error = |why: &str| Error::at(u.pos, format!("USE FOR DEBUGGING ON {}: {why}", name.name));
+            let error = |why: &str| syntax::messages::IWC0012.at(u.pos, format!("USE FOR DEBUGGING ON {}: {why}", name.name));
             match crate::procedure_from(program, name, section.0) {
                 Err(m) => errors.push(error(&m.text)),
                 Ok((i, _)) if in_debugging(i) => errors.push(error("the procedure is in a debugging section")),
@@ -227,15 +227,15 @@ fn references(program: &Program, debugging: &[Span], errors: &mut Vec<Error>) {
             let (Some(a), b) = (first(from), thru.and_then(first)) else { continue };
             for (target, name) in std::iter::once((a, from)).chain(b.zip(thru)) {
                 if debugging_section(i).is_some() && target >= declaratives_end {
-                    errors.push(Error::at(pos, format!("{}: a debugging section may refer only to declarative procedures", name.name)));
+                    errors.push(syntax::messages::IWC0013.at(pos, format!("{}: a debugging section may refer only to declarative procedures", name.name)));
                 } else if debugging_section(i).is_none() && debugging_section(target).is_some() {
-                    errors.push(Error::at(pos, format!("{}: only a debugging section may refer to a procedure in a debugging section", name.name)));
+                    errors.push(syntax::messages::IWC0014.at(pos, format!("{}: only a debugging section may refer to a procedure in a debugging section", name.name)));
                 }
             }
             if let Some(b) = b.filter(|&b| perform && (a < declaratives_end || b < declaratives_end))
                 && (b >= declaratives_end || a >= declaratives_end || section_of(a) != section_of(b))
             {
-                errors.push(Error::at(pos, "PERFORM ... THRU: a declarative procedure and the other end of the range must be in the same declarative section"));
+                errors.push(syntax::messages::IWC0015.at(pos, "PERFORM ... THRU: a declarative procedure and the other end of the range must be in the same declarative section"));
             }
         }
     }

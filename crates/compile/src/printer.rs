@@ -86,9 +86,9 @@ pub(crate) fn check_write(program: &Program, layout: &Layout, record: &Ref, adva
     }
     let Some(f) = file_of(layout, record).map(|k| &program.files[k]) else { return };
     match f.organization {
-        Organization::Indexed | Organization::Relative => errors.push(Error::at(pos, format!("WRITE ... ADVANCING: {} is not a sequential file", f.name))),
+        Organization::Indexed | Organization::Relative => errors.push(syntax::messages::IWC0144.at(pos, format!("WRITE ... ADVANCING: {} is not a sequential file", f.name))),
         Organization::LineSequential if advancing.before() || matches!(advancing, Advancing::Mnemonic { .. }) => {
-            errors.push(Error::at(pos, format!("WRITE ... BEFORE ADVANCING, or ADVANCING a mnemonic-name, is not allowed for the line-sequential file {}", f.name)));
+            errors.push(syntax::messages::IWC0145.at(pos, format!("WRITE ... BEFORE ADVANCING, or ADVANCING a mnemonic-name, is not allowed for the line-sequential file {}", f.name)));
         }
         _ => {}
     }

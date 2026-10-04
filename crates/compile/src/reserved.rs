@@ -16,7 +16,7 @@ pub(crate) fn check(program: &Program, errors: &mut Vec<Error>) {
     names.extend(program.paragraphs.iter().map(|p| (p.name.as_str(), p.pos, if p.is_section { "a section" } else { "a paragraph" })));
     for (name, pos, what) in names {
         if rt::reserved_words::is_reserved(name) {
-            errors.push(Error::at(pos, format!("{name} is a reserved word, so it cannot name {what}")));
+            errors.push(syntax::messages::IWC0188.at(pos, format!("{name} is a reserved word, so it cannot name {what}")));
         }
     }
 }

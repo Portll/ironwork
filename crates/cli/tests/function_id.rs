@@ -69,7 +69,7 @@ fn check_reports_a_functions_errors_and_a_source_of_functions_has_nothing_to_run
     let checked_alone = ironwork(&["check", alone.to_str().unwrap()]);
     fs::remove_dir_all(&dir).unwrap();
     let stderr = String::from_utf8_lossy(&checked.stderr);
-    assert!(stderr.contains("2:8: FUNCTION-ID DOUBLE: a user-defined function needs PROCEDURE DIVISION RETURNING"), "{stderr}");
+    assert!(stderr.contains("2:8: IWC0017-S FUNCTION-ID DOUBLE: a user-defined function needs PROCEDURE DIVISION RETURNING"), "{stderr}");
     assert_eq!(checked.status.code(), Some(12));
     assert!(String::from_utf8_lossy(&run.stderr).contains("FUNCTION-ID DOUBLE: the source holds user-defined functions and no program to run"));
     assert_eq!((run.status.code(), checked_alone.status.code()), (Some(241), Some(0)));

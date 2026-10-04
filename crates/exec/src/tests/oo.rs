@@ -664,20 +664,20 @@ fn a_program_that_is_not_a_method_makes_its_references_in_the_running_methods_fr
 #[test]
 fn object_oriented_programs_need_the_options_ibm_compiles_them_with() {
     let with = |card: &str, id: &str| errors(&client(&["Account IS \"Account\""], ACCOUNT_DATA, &["INVOKE Account NEW RETURNING A1", "GOBACK."]).replacen(OO_CARD, card, 1).replacen("CLIENT RECURSIVE", id, 1));
-    let needs = |missing: &str| format!("warning: program CLIENT uses object-oriented syntax, which IBM compiles only with THREAD, DLL, RENT and DBCS: {missing} missing from its CBL or PROCESS cards (see J13 and J19)");
+    let needs = |missing: &str| format!("warning: IWC0112-W program CLIENT uses object-oriented syntax, which IBM compiles only with THREAD, DLL, RENT and DBCS: {missing} missing from its CBL or PROCESS cards (see J13 and J19)");
     assert_eq!(with(OO_CARD, "CLIENT RECURSIVE"), "");
     assert_eq!(with("", "CLIENT"), needs("THREAD, DLL"));
     assert_eq!(with("       CBL THREAD\n", "CLIENT RECURSIVE"), needs("DLL"));
     assert_eq!(with("       PROCESS DLL\n", "CLIENT"), needs("THREAD"));
     assert_eq!(with("       CBL THREAD,DLL,NODBCS\n", "CLIENT RECURSIVE"), needs("DBCS"));
     assert_eq!(with("       CBL NORENT\n", "CLIENT"), needs("THREAD, DLL, RENT"));
-    assert!(with("       CBL THREAD,DLL,NORENT\n", "CLIENT RECURSIVE").starts_with("warning: NORENT conflicts with THREAD and DLL, which IBM compiles only as RENT"));
-    assert_eq!(with(OO_CARD, "CLIENT"), "program CLIENT is compiled with THREAD, which requires RECURSIVE in its PROGRAM-ID paragraph");
-    assert_eq!(with(OO_CARD, "CLIENT RECURSIVE INITIAL"), "program CLIENT is INITIAL, which THREAD does not allow");
+    assert!(with("       CBL THREAD,DLL,NORENT\n", "CLIENT RECURSIVE").starts_with("warning: IWC0111-W NORENT conflicts with THREAD and DLL, which IBM compiles only as RENT"));
+    assert_eq!(with(OO_CARD, "CLIENT"), "IWC0114-S program CLIENT is compiled with THREAD, which requires RECURSIVE in its PROGRAM-ID paragraph");
+    assert_eq!(with(OO_CARD, "CLIENT RECURSIVE INITIAL"), "IWC0115-S program CLIENT is INITIAL, which THREAD does not allow");
     let nested = [client(&["Account IS \"Account\""], ACCOUNT_DATA, &["GOBACK."]), "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. INNER.\n       PROCEDURE DIVISION.\n           GOBACK.\n       END PROGRAM INNER.\n       END PROGRAM CLIENT.\n".into()].concat();
-    assert_eq!(errors(&nested), "program CLIENT contains program INNER, and THREAD does not allow nested programs");
+    assert_eq!(errors(&nested), "IWC0116-S program CLIENT contains program INNER, and THREAD does not allow nested programs");
     let bare = account().replacen(OO_CARD, "", 1);
-    assert!(errors(&bare).starts_with("warning: class ACCOUNT uses object-oriented syntax, which IBM compiles only with THREAD, DLL, RENT and DBCS: THREAD, DLL missing"), "{}", errors(&bare));
+    assert!(errors(&bare).starts_with("warning: IWC0112-W class ACCOUNT uses object-oriented syntax, which IBM compiles only with THREAD, DLL, RENT and DBCS: THREAD, DLL missing"), "{}", errors(&bare));
 }
 
 #[test]
@@ -694,7 +694,7 @@ fn a_program_and_class_without_the_options_run_with_a_warning_unless_warnings_bl
     assert_eq!(refused.iter().map(|d| d.severity).collect::<Vec<_>>(), [syntax::Severity::Warning]);
     let blocked = Harness::source(&program).classes(&[bare_class]).flags(&["-warnings-block"]).run(Executor::Interpreter);
     let message = blocked.ending.unwrap_err().message;
-    assert!(message.starts_with("class Account does not compile: Account: warning: class ACCOUNT uses object-oriented syntax") && message.contains("THREAD, DLL missing"), "{message}");
+    assert!(message.starts_with("class Account does not compile: Account: warning: IWC0112-W class ACCOUNT uses object-oriented syntax") && message.contains("THREAD, DLL missing"), "{message}");
 }
 
 #[test]
@@ -716,17 +716,17 @@ fn thread_needs_recursive_and_refuses_initial_and_file_sorts() {
     let merge = ["MERGE S ON ASCENDING KEY S-REC", "    USING F G GIVING G"];
     assert_eq!(t("", "T", &sort), "");
     assert_eq!(t("", "T IS INITIAL", &merge), "");
-    assert_eq!(t("       CBL THREAD\n", "T", &[]), "program T is compiled with THREAD, which requires RECURSIVE in its PROGRAM-ID paragraph");
-    assert_eq!(t("       CBL THREAD\n", "T RECURSIVE INITIAL", &[]), "program T is INITIAL, which THREAD does not allow");
-    let dropped = "warning: INITIAL conflicts with THREAD, which IBM compiles only as NOINITIAL (see C217)";
+    assert_eq!(t("       CBL THREAD\n", "T", &[]), "IWC0114-S program T is compiled with THREAD, which requires RECURSIVE in its PROGRAM-ID paragraph");
+    assert_eq!(t("       CBL THREAD\n", "T RECURSIVE INITIAL", &[]), "IWC0115-S program T is INITIAL, which THREAD does not allow");
+    let dropped = "warning: IWC0113-W INITIAL conflicts with THREAD, which IBM compiles only as NOINITIAL (see C217)";
     assert_eq!(t("       CBL INITIAL\n       PROCESS THREAD\n", "T RECURSIVE", &[]), dropped);
-    assert_eq!(t("       CBL THREAD,INITIAL\n", "T RECURSIVE INITIAL", &[]), format!("{dropped}\nprogram T is INITIAL, which THREAD does not allow"));
+    assert_eq!(t("       CBL THREAD,INITIAL\n", "T RECURSIVE INITIAL", &[]), format!("{dropped}\nIWC0115-S program T is INITIAL, which THREAD does not allow"));
     assert_eq!(t("       CBL THREAD,DLL,INITIAL\n", "T RECURSIVE", &[]), dropped);
     let class = errors(&account().replacen(OO_CARD, "       CBL THREAD,DLL,INITIAL\n", 1));
     assert_eq!(class.matches(dropped).count(), 1, "a class gets it once, its methods not at all: {class}");
     assert_eq!(t("       CBL THREAD\n", "T RECURSIVE", &["SORT E ON ASCENDING KEY E"]), "");
-    assert_eq!(t("       CBL THREAD\n", "T RECURSIVE", &sort), "SORT of a file is not allowed in a program compiled with THREAD");
-    assert_eq!(t("       CBL THREAD\n", "T RECURSIVE", &merge), "MERGE is not allowed in a program compiled with THREAD");
+    assert_eq!(t("       CBL THREAD\n", "T RECURSIVE", &sort), "IWC0117-S SORT of a file is not allowed in a program compiled with THREAD");
+    assert_eq!(t("       CBL THREAD\n", "T RECURSIVE", &merge), "IWC0117-S MERGE is not allowed in a program compiled with THREAD");
 }
 
 #[test]

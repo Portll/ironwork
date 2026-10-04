@@ -14,7 +14,7 @@ pub(crate) fn sets(clauses: &[ClassClause], page: &CodePage, errors: &mut Vec<Er
             for (first, last) in &clause.members {
                 match members(first, last.as_ref(), page) {
                     Ok(bytes) => bytes.into_iter().for_each(|b| bits[usize::from(b / 8)] |= 1 << (b % 8)),
-                    Err(m) => errors.push(Error::at(clause.pos, format!("CLASS {}: {m}", clause.name))),
+                    Err(m) => errors.push(syntax::messages::IWC0005.at(clause.pos, format!("CLASS {}: {m}", clause.name))),
                 }
             }
             (clause.name.clone(), bits)

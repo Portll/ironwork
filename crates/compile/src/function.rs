@@ -49,7 +49,7 @@ pub fn signature(p: &Prototype, qualify: Qualify) -> Result<Udf, Error> {
     let alphabetic: Vec<Pos> = p.linkage.iter().filter(|e| e.picture.as_deref().is_some_and(is_alphabetic)).map(|e| e.pos).collect();
     let formal = |name: &str, by_value: bool| {
         let root = layout.linkage_roots.iter().copied().find(|&i| layout.items[i].name.as_deref() == Some(name));
-        let item = &layout.items[root.ok_or_else(|| Error::at(p.pos, format!("FUNCTION-ID {}: {name} is not an 01 or 77 item of the LINKAGE SECTION", p.name)))?];
+        let item = &layout.items[root.ok_or_else(|| syntax::messages::IWC0016.at(p.pos, format!("FUNCTION-ID {}: {name} is not an 01 or 77 item of the LINKAGE SECTION", p.name)))?];
         let edit = match item.kind {
             Kind::NumericEdited { edit, .. } | Kind::AlnumEdited { edit } => Some((layout.edits[edit as usize].clone(), layout.currencies[edit as usize].clone())),
             _ => None,
@@ -65,7 +65,7 @@ pub fn signature(p: &Prototype, qualify: Qualify) -> Result<Udf, Error> {
             decimal_point_comma: p.environment.decimal_point_comma,
         })
     };
-    let returning = p.returning.as_deref().ok_or_else(|| Error::at(p.pos, format!("FUNCTION-ID {}: a user-defined function needs PROCEDURE DIVISION RETURNING", p.name)))?;
+    let returning = p.returning.as_deref().ok_or_else(|| syntax::messages::IWC0017.at(p.pos, format!("FUNCTION-ID {}: a user-defined function needs PROCEDURE DIVISION RETURNING", p.name)))?;
     let params = p.using.iter().map(|u| formal(&u.name, u.by_value)).collect::<Result<_, _>>()?;
     Ok(Udf { name: p.name.clone(), external: p.external.clone(), params, result: formal(returning, false)?, pos: p.pos })
 }
@@ -104,7 +104,7 @@ fn facilities(program: &Program, errors: &mut Vec<Error>) {
     });
     if let Some(b) = program.exec_declarations.iter().chain(statements).find(|b| matches!(b.kind, ExecKind::Sql | ExecKind::Cics)) {
         let kind = if b.kind == ExecKind::Sql { "SQL" } else { "CICS" };
-        errors.push(Error::at(b.pos, format!("EXEC {kind}: SQL and CICS cannot be used with user-defined functions, so neither in one nor in a program after one in its source (assumption C273)")));
+        errors.push(syntax::messages::IWC0018.at(b.pos, format!("EXEC {kind}: SQL and CICS cannot be used with user-defined functions, so neither in one nor in a program after one in its source (assumption C273)")));
     }
 }
 
@@ -115,12 +115,12 @@ fn definition_rules(program: &Program, functions: &[Udf], own: Pos, errors: &mut
     for f in this.params.iter().filter(|f| f.by_value) {
         let one_character = matches!(f.kind, Kind::Alnum { .. }) && f.size == 1 || f.kind == Kind::National && f.size == 2;
         if !(one_character || matches!(f.kind, Kind::Binary { .. } | Kind::Float(_) | Kind::Pointer | Kind::ProgramPointer)) {
-            errors.push(Error::at(own, format!("PROCEDURE DIVISION USING BY VALUE {}: a function's BY VALUE parameter is binary, floating-point, a pointer, or one alphanumeric or national character", f.name)));
+            errors.push(syntax::messages::IWC0019.at(own, format!("PROCEDURE DIVISION USING BY VALUE {}: a function's BY VALUE parameter is binary, floating-point, a pointer, or one alphanumeric or national character", f.name)));
         }
     }
     for other in functions.iter().filter(|u| u.name == this.name && u.pos != own) {
         if let Some(why) = disagreement(this, other) {
-            errors.push(Error::at(own, format!("FUNCTION-ID {}: {why} from the prototype at line {}", program.id, other.pos.line)));
+            errors.push(syntax::messages::IWC0020.at(own, format!("FUNCTION-ID {}: {why} from the prototype at line {}", program.id, other.pos.line)));
         }
     }
 }
@@ -173,23 +173,23 @@ pub fn conformance(layout: &Layout, item: usize, alphabetic: bool, decimal_point
 pub fn check_invocation(udf: &Udf, f: &FunctionCall, layout: &Layout, alphabetic: &[Pos], decimal_point_comma: bool, errors: &mut Vec<Error>) {
     let name = &f.name;
     if f.args.len() != udf.params.len() {
-        errors.push(Error::at(f.pos, format!("FUNCTION {name} takes {} arguments, not {}", udf.params.len(), f.args.len())));
+        errors.push(syntax::messages::IWC0021.at(f.pos, format!("FUNCTION {name} takes {} arguments, not {}", udf.params.len(), f.args.len())));
         return;
     }
     if f.modifier.is_some() || !f.all_subscripts.is_empty() {
-        errors.push(Error::at(f.pos, format!("FUNCTION {name}: a user-defined function's argument is an identifier, a literal or an arithmetic expression")));
+        errors.push(syntax::messages::IWC0022.at(f.pos, format!("FUNCTION {name}: a user-defined function's argument is an identifier, a literal or an arithmetic expression")));
     }
     if f.refmod.is_some() && !udf.character_valued() {
-        errors.push(Error::at(f.pos, format!("FUNCTION {name}: only an alphanumeric or national function's value can be reference-modified")));
+        errors.push(syntax::messages::IWC0023.at(f.pos, format!("FUNCTION {name}: only an alphanumeric or national function's value can be reference-modified")));
     }
     for (k, (arg, formal)) in f.args.iter().zip(&udf.params).enumerate() {
         let r = match arg {
             Expr::Operand(Operand::Literal(Literal::Figurative(_) | Literal::All(_))) => {
-                errors.push(Error::at(f.pos, format!("FUNCTION {name} argument {}: a function's argument is not a figurative constant", k + 1)));
+                errors.push(syntax::messages::IWC0024.at(f.pos, format!("FUNCTION {name} argument {}: a function's argument is not a figurative constant", k + 1)));
                 continue;
             }
             Expr::Operand(Operand::Literal(Literal::Alnum(_) | Literal::Hex(_) | Literal::National(_))) if arithmetic(formal.kind) => {
-                errors.push(Error::at(f.pos, format!("FUNCTION {name} argument {}: {} is numeric, and takes an argument COMPUTE could send it (assumption C272)", k + 1, formal.name)));
+                errors.push(syntax::messages::IWC0025.at(f.pos, format!("FUNCTION {name} argument {}: {} is numeric, and takes an argument COMPUTE could send it (assumption C272)", k + 1, formal.name)));
                 continue;
             }
             Expr::Operand(Operand::Ref(r)) if r.refmod.is_none() => r,
@@ -198,7 +198,7 @@ pub fn check_invocation(udf: &Udf, f: &FunctionCall, layout: &Layout, alphabetic
         if let Ok(Resolved::Item(i)) = layout.resolve(&r.name, &r.qualifiers, r.pos)
             && let Some(why) = conformance(layout, i, alphabetic.contains(&layout.items[i].pos), decimal_point_comma, formal)
         {
-            errors.push(Error::at(r.pos, format!("FUNCTION {name} argument {} ({}): {why}", k + 1, r.name)));
+            errors.push(syntax::messages::IWC0026.at(r.pos, format!("FUNCTION {name} argument {} ({}): {why}", k + 1, r.name)));
         }
     }
 }

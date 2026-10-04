@@ -65,7 +65,7 @@ fn set_to(switches: &[Switch], groups: &[(Vec<Ref>, bool)], errors: &mut Vec<Err
                 Some(s) if r.qualifiers.is_empty() && r.subscripts.is_empty() && r.refmod.is_none() => {
                     conditions.push(Ref { name: status(s.number, *on), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos: r.pos });
                 }
-                _ => errors.push(Error::at(r.pos, format!("SET {} TO {}: {} is not the mnemonic-name of an UPSI switch", r.name, if *on { "ON" } else { "OFF" }, r.name))),
+                _ => errors.push(syntax::messages::IWC0205.at(r.pos, format!("SET {} TO {}: {} is not the mnemonic-name of an UPSI switch", r.name, if *on { "ON" } else { "OFF" }, r.name))),
             }
         }
     }
@@ -85,7 +85,7 @@ pub(crate) fn switch_of(layout: &Layout, mut i: usize) -> Option<u8> {
 /// condition-name be qualified by it, and nothing else (p. 127).
 pub(crate) fn mnemonic_as_data(r: &Ref, layout: &Layout, i: usize) -> Error {
     let n = switch_of(layout, i).unwrap_or_default();
-    Error::at(r.pos, format!("{} is the mnemonic-name of UPSI-{n}: only SET ... TO ON or OFF and a condition-name's qualifier can name it", r.name))
+    syntax::messages::IWC0206.at(r.pos, format!("{} is the mnemonic-name of UPSI-{n}: only SET ... TO ON or OFF and a condition-name's qualifier can name it", r.name))
 }
 
 /// SET TO TRUE of condition-name `c` of a switch, as `r` names it: its conditional variable is the
@@ -95,5 +95,5 @@ pub(crate) fn without_variable(layout: &Layout, c: usize, r: &Ref) -> Option<Err
     let item = layout.conditions[c].item;
     let unnamed = layout.items[item].name.as_deref().is_none_or(|name| name.contains(' '));
     (switch_of(layout, item).is_some() && unnamed && !r.name.contains(' '))
-        .then(|| Error::at(r.pos, format!("SET {} TO TRUE: the UPSI switch's entry has no mnemonic-name, which would be its conditional variable", r.name)))
+        .then(|| syntax::messages::IWC0207.at(r.pos, format!("SET {} TO TRUE: the UPSI switch's entry has no mnemonic-name, which would be its conditional variable", r.name)))
 }

@@ -299,7 +299,7 @@ fn thread_forces_noinitial_on_the_programs_it_compiles() {
     )
     .replacen("PROGRAM-ID. MAIN.", "PROGRAM-ID. MAIN RECURSIVE.", 1);
     let card = format!("       CBL INITIAL,THREAD\n{source}");
-    assert_eq!(compile_errors(&card), "warning: INITIAL conflicts with THREAD, which IBM compiles only as NOINITIAL (see C217)");
+    assert_eq!(compile_errors(&card), "warning: IWC0113-W INITIAL conflicts with THREAD, which IBM compiles only as NOINITIAL (see C217)");
     assert_eq!(run_unit(&card, vec![], "").0, "1\n2\n");
     assert_eq!(run_unit(&format!("       CBL INITIAL\n{source}"), vec![], "").0, "1\n1\n");
 }

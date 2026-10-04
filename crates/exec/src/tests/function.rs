@@ -209,9 +209,9 @@ fn an_invocation_is_checked_against_the_definition_or_prototype() {
     assert_eq!(
         m,
         [
-            "FUNCTION N argument 1: X is numeric, and takes an argument COMPUTE could send it (assumption C272)",
-            "FUNCTION N argument 2 (WI): BY VALUE V is numeric, and takes an argument COMPUTE could send it",
-            "FUNCTION N argument 1: a function's argument is not a figurative constant",
+            "IWC0025-S FUNCTION N argument 1: X is numeric, and takes an argument COMPUTE could send it (assumption C272)",
+            "IWC0026-S FUNCTION N argument 2 (WI): BY VALUE V is numeric, and takes an argument COMPUTE could send it",
+            "IWC0024-S FUNCTION N argument 1: a function's argument is not a figurative constant",
         ]
         .join("\n")
     );
@@ -220,14 +220,14 @@ fn an_invocation_is_checked_against_the_definition_or_prototype() {
 #[test]
 fn a_definition_keeps_the_rules_ibm_gives_functions() {
     let m = messages(&function("F", &[], &["01 A PIC X(3).", "01 R PIC X."], "USING BY VALUE A RETURNING R", &["GOBACK."]));
-    assert_eq!(m, "PROCEDURE DIVISION USING BY VALUE A: a function's BY VALUE parameter is binary, floating-point, a pointer, or one alphanumeric or national character");
-    assert_eq!(messages(&function("F", &[], &[], "", &["GOBACK."])), "FUNCTION-ID F: a user-defined function needs PROCEDURE DIVISION RETURNING");
+    assert_eq!(m, "IWC0019-S PROCEDURE DIVISION USING BY VALUE A: a function's BY VALUE parameter is binary, floating-point, a pointer, or one alphanumeric or national character");
+    assert_eq!(messages(&function("F", &[], &[], "", &["GOBACK."])), "IWC0017-S FUNCTION-ID F: a user-defined function needs PROCEDURE DIVISION RETURNING");
     let prototype = "       IDENTIFICATION DIVISION.\n       FUNCTION-ID. F IS PROTOTYPE.\n       DATA DIVISION.\n       LINKAGE SECTION.\n       01 R PIC X(2).\n       PROCEDURE DIVISION RETURNING R.\n       END FUNCTION F.\n";
     let m = messages(&(prototype.to_owned() + &function("F", &[], &["01 R PIC X(3)."], "RETURNING R", &["GOBACK."])));
-    assert_eq!(m, "FUNCTION-ID F: the RETURNING item R differs from the prototype at line 2");
+    assert_eq!(m, "IWC0020-S FUNCTION-ID F: the RETURNING item R differs from the prototype at line 2");
     let main = program(&[], &[], &["EXEC SQL COMMIT END-EXEC", "GOBACK."]);
     let m = messages(&(function("F", &[], &["01 R PIC X."], "RETURNING R", &["GOBACK."]) + &main));
-    assert_eq!(m, "EXEC SQL: SQL and CICS cannot be used with user-defined functions, so neither in one nor in a program after one in its source (assumption C273)");
+    assert_eq!(m, "IWC0018-S EXEC SQL: SQL and CICS cannot be used with user-defined functions, so neither in one nor in a program after one in its source (assumption C273)");
 }
 
 #[test]

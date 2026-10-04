@@ -61,7 +61,7 @@ pub(crate) fn option_rules(program: &Program, options: &Options, errors: &mut Ve
     if !method {
         let forcing: Vec<&str> = [(options.thread, "THREAD"), (options.dll, "DLL")].into_iter().filter(|(on, _)| *on).map(|(_, o)| o).collect();
         if !options.rent && !forcing.is_empty() {
-            errors.push(Error::warning(Pos::default(), format!("NORENT conflicts with {}, which IBM compiles only as RENT (see {OO_OPTIONS_REQUIRED})", forcing.join(" and "))));
+            errors.push(syntax::messages::IWC0111.at(Pos::default(), format!("NORENT conflicts with {}, which IBM compiles only as RENT (see {OO_OPTIONS_REQUIRED})", forcing.join(" and "))));
         }
         if object_oriented(program) {
             let missing: Vec<&str> = [(options.thread, "THREAD"), (options.dll, "DLL"), (options.rent || !forcing.is_empty(), "RENT"), (options.dbcs, "DBCS")]
@@ -70,7 +70,7 @@ pub(crate) fn option_rules(program: &Program, options: &Options, errors: &mut Ve
                 .map(|(_, o)| o)
                 .collect();
             if !missing.is_empty() {
-                errors.push(Error::warning(
+                errors.push(syntax::messages::IWC0112.at(
                     Pos::default(),
                     format!(
                         "{who} uses object-oriented syntax, which IBM compiles only with THREAD, DLL, RENT and DBCS: {} missing from its CBL or PROCESS cards (see {OO_OPTIONS_REQUIRED} and {OO_OPTIONS_SEVERITY})",
@@ -84,17 +84,17 @@ pub(crate) fn option_rules(program: &Program, options: &Options, errors: &mut Ve
         return;
     }
     if !method && options.initial {
-        errors.push(Error::warning(Pos::default(), format!("INITIAL conflicts with THREAD, which IBM compiles only as NOINITIAL (see {INITIAL_UNDER_THREAD})")));
+        errors.push(syntax::messages::IWC0113.at(Pos::default(), format!("INITIAL conflicts with THREAD, which IBM compiles only as NOINITIAL (see {INITIAL_UNDER_THREAD})")));
     }
     if !method && oo.and_then(Oo::class).is_none() {
         if !program.recursive {
-            errors.push(Error::at(Pos::default(), format!("{who} is compiled with THREAD, which requires RECURSIVE in its PROGRAM-ID paragraph")));
+            errors.push(syntax::messages::IWC0114.at(Pos::default(), format!("{who} is compiled with THREAD, which requires RECURSIVE in its PROGRAM-ID paragraph")));
         }
         if program.initial {
-            errors.push(Error::at(Pos::default(), format!("{who} is INITIAL, which THREAD does not allow")));
+            errors.push(syntax::messages::IWC0115.at(Pos::default(), format!("{who} is INITIAL, which THREAD does not allow")));
         }
         if let Some(inner) = program.nested.first() {
-            errors.push(Error::at(Pos::default(), format!("{who} contains program {inner}, and THREAD does not allow nested programs")));
+            errors.push(syntax::messages::IWC0116.at(Pos::default(), format!("{who} contains program {inner}, and THREAD does not allow nested programs")));
         }
     }
     for p in &program.paragraphs {
@@ -104,7 +104,7 @@ pub(crate) fn option_rules(program: &Program, options: &Options, errors: &mut Ve
                 && (st.merge || program.files.iter().any(|f| f.name == st.subject.name))
             {
                 let verb = if st.merge { "MERGE" } else { "SORT of a file" };
-                errors.push(Error::at(st.pos, format!("{verb} is not allowed in a program compiled with THREAD")));
+                errors.push(syntax::messages::IWC0117.at(st.pos, format!("{verb} is not allowed in a program compiled with THREAD")));
             }
         });
     }
@@ -138,8 +138,8 @@ fn declared_names(program: &Program) -> HashSet<String> {
 /// A class definition's code, compiled at `at`, and the warnings and informational messages it
 /// compiled with.
 pub fn class_code(program: &Program, flags: &[String], at: CompileTime) -> Result<(ClassCode, Vec<Error>), Vec<Error>> {
-    let Some(oo) = program.oo.as_deref() else { return Err(vec![Error::at(Pos::default(), "not a class definition")]) };
-    let Some(def) = oo.class() else { return Err(vec![Error::at(Pos::default(), "not a class definition")]) };
+    let Some(oo) = program.oo.as_deref() else { return Err(vec![syntax::messages::IWC0118.at(Pos::default(), "not a class definition")]) };
+    let Some(def) = oo.class() else { return Err(vec![syntax::messages::IWC0118.at(Pos::default(), "not a class definition")]) };
     let mut errors = Vec::new();
     let mut options = Options::default();
     for flag in flags {
@@ -153,12 +153,12 @@ pub fn class_code(program: &Program, flags: &[String], at: CompileTime) -> Resul
     let parent = match oo.external(&def.inherits) {
         Some(e) => e.to_owned(),
         None => {
-            errors.push(Error::at(def.pos, format!("{}: the class a class INHERITS must be named in its REPOSITORY paragraph", def.inherits)));
+            errors.push(syntax::messages::IWC0119.at(def.pos, format!("{}: the class a class INHERITS must be named in its REPOSITORY paragraph", def.inherits)));
             String::new()
         }
     };
     if def.inherits == def.name || parent == external {
-        errors.push(Error::at(def.pos, format!("class {} cannot inherit from itself", def.name)));
+        errors.push(syntax::messages::IWC0120.at(def.pos, format!("class {} cannot inherit from itself", def.name)));
     }
     let mut base = program.clone();
     base.oo = None;
@@ -194,7 +194,7 @@ pub fn class_code(program: &Program, flags: &[String], at: CompileTime) -> Resul
         if let Some(twin) = code.methods[..k].iter().find(|o| o.name == m.name && o.params == m.params) {
             let kind = |f: bool| if f { "factory" } else { "instance" };
             let pos = m.code.program.oo.as_deref().and_then(Oo::method).map_or(def.pos, |m| m.pos);
-            errors.push(Error::at(pos, format!("{} method \"{}\" has the same parameter types as {} method \"{}\"", kind(m.factory), m.name, kind(twin.factory), twin.name)));
+            errors.push(syntax::messages::IWC0121.at(pos, format!("{} method \"{}\" has the same parameter types as {} method \"{}\"", kind(m.factory), m.name, kind(twin.factory), twin.name)));
         }
     }
     if crate::refused(&errors, &options) { Err(errors) } else { Ok((code, errors)) }
@@ -235,12 +235,12 @@ fn method_code(class: &Program, method: &Program, part: &ClassPart, factory: boo
     let mut params = Vec::new();
     for param in &compiled.program.using {
         if !param.by_value {
-            errors.push(Error::at(pos, format!("method \"{name}\" receives {} BY REFERENCE: a method's parameters are BY VALUE", param.name)));
+            errors.push(syntax::messages::IWC0122.at(pos, format!("method \"{name}\" receives {} BY REFERENCE: a method's parameters are BY VALUE", param.name)));
         }
         match own(&param.name).map(|i| item_type(layout, oo, i)) {
             Some(Ok(t)) => params.push(t),
-            Some(Err(m)) => errors.push(Error::at(pos, format!("method \"{name}\" parameter {}: {m}", param.name))),
-            None => errors.push(Error::at(pos, format!("method \"{name}\" parameter {}: not a record of the method's own LINKAGE SECTION", param.name))),
+            Some(Err(m)) => errors.push(syntax::messages::IWC0123.at(pos, format!("method \"{name}\" parameter {}: {m}", param.name))),
+            None => errors.push(syntax::messages::IWC0124.at(pos, format!("method \"{name}\" parameter {}: not a record of the method's own LINKAGE SECTION", param.name))),
         }
     }
     let mut shared = Vec::new();
@@ -251,7 +251,7 @@ fn method_code(class: &Program, method: &Program, part: &ClassPart, factory: boo
                     if let Ok(Resolved::Item(i)) = layout.resolve(&r.name, &r.qualifiers, r.pos)
                         && layout.items[i].linkage.is_some_and(|l| l as usize >= own_records)
                     {
-                        shared.push(Error::at(*pos, format!("SET ADDRESS OF {}: FACTORY and OBJECT data is WORKING-STORAGE, not LINKAGE", r.name)));
+                        shared.push(syntax::messages::IWC0125.at(*pos, format!("SET ADDRESS OF {}: FACTORY and OBJECT data is WORKING-STORAGE, not LINKAGE", r.name)));
                     }
                 }
             }
@@ -263,11 +263,11 @@ fn method_code(class: &Program, method: &Program, part: &ClassPart, factory: boo
         Some(r) => match own(r).map(|i| item_type(layout, oo, i)) {
             Some(Ok(t)) => Some(t),
             Some(Err(m)) => {
-                errors.push(Error::at(pos, format!("method \"{name}\" RETURNING {r}: {m}")));
+                errors.push(syntax::messages::IWC0126.at(pos, format!("method \"{name}\" RETURNING {r}: {m}")));
                 None
             }
             None => {
-                errors.push(Error::at(pos, format!("method \"{name}\" RETURNING {r}: not a record of the method's own LINKAGE SECTION")));
+                errors.push(syntax::messages::IWC0127.at(pos, format!("method \"{name}\" RETURNING {r}: not a record of the method's own LINKAGE SECTION")));
                 None
             }
         },
@@ -473,7 +473,7 @@ pub(crate) fn check(layout: &Layout, program: &Program, errors: &mut Vec<Error>)
         if let Some(c) = &item.object_class
             && oo.and_then(|o| o.external(c)).is_none()
         {
-            rules.errors.push(Error::at(item.pos, format!("OBJECT REFERENCE {c}: the class must be named in the REPOSITORY paragraph")));
+            rules.errors.push(syntax::messages::IWC0128.at(item.pos, format!("OBJECT REFERENCE {c}: the class must be named in the REPOSITORY paragraph")));
         }
     }
     if method && let Some(f) = program.files.first() {
@@ -494,9 +494,9 @@ pub(crate) fn check(layout: &Layout, program: &Program, errors: &mut Vec<Error>)
     let exec = program.exec_declarations.iter().map(|b| (b.kind, b.pos)).chain(execs(&program.paragraphs));
     for (kind, pos) in exec {
         if method {
-            rules.errors.push(Error::at(pos, "a class definition cannot contain EXEC statements"));
+            rules.errors.push(syntax::messages::IWC0129.at(pos, "a class definition cannot contain EXEC statements"));
         } else if kind == ExecKind::Cics && rules.uses_oo {
-            rules.errors.push(Error::at(pos, "a program that uses object-oriented syntax cannot contain EXEC CICS"));
+            rules.errors.push(syntax::messages::IWP0008.at(pos, "a program that uses object-oriented syntax cannot contain EXEC CICS"));
         }
     }
 }
@@ -671,8 +671,8 @@ impl Rules<'_> {
             }
             Stmt::Search(se) => se.whens.iter().for_each(|(c, _)| self.cond(c, se.pos)),
             Stmt::Set { set, pos } => self.set(set, *pos),
-            Stmt::ExitMethod { pos } if !self.method => self.errors.push(Error::at(*pos, "EXIT METHOD can be used only in a method")),
-            Stmt::ExitProgram { pos } if self.method => self.errors.push(Error::at(*pos, "EXIT PROGRAM cannot be used in a method: use EXIT METHOD or GOBACK")),
+            Stmt::ExitMethod { pos } if !self.method => self.errors.push(syntax::messages::IWC0130.at(*pos, "EXIT METHOD can be used only in a method")),
+            Stmt::ExitProgram { pos } if self.method => self.errors.push(syntax::messages::IWC0131.at(*pos, "EXIT PROGRAM cannot be used in a method: use EXIT METHOD or GOBACK")),
             Stmt::Invoke(_) => self.uses_oo = true,
             Stmt::Sorting(so) => match &**so {
                 Sorting::Release { from: Some(op), pos, .. } => self.plain(op, *pos),
@@ -690,7 +690,7 @@ impl Rules<'_> {
     fn side_of_ref(&mut self, r: &Ref, pos: Pos) -> Side {
         if self.is_self(r) {
             if !self.method {
-                self.errors.push(Error::at(pos, "SELF can be used only in a method"));
+                self.errors.push(syntax::messages::IWC0132.at(pos, "SELF can be used only in a method"));
             }
             return Side::Object;
         }
@@ -717,14 +717,14 @@ impl Rules<'_> {
             _ => return,
         };
         let name = if let Operand::Ref(r) = op { r.name.as_str() } else { "" };
-        self.errors.push(Error::at(pos, format!("{name} is {what}: it can be used only in SET, INVOKE, CALL and a relation condition")));
+        self.errors.push(syntax::messages::IWC0133.at(pos, format!("{name} is {what}: it can be used only in SET, INVOKE, CALL and a relation condition")));
     }
 
     fn receiver(&mut self, r: &Ref, pos: Pos) {
         if is_named(r, "JNIENVPTR") && self.layout.resolve(&r.name, &[], r.pos).is_err() {
-            self.errors.push(Error::at(pos, "JNIENVPTR cannot receive a value"));
+            self.errors.push(syntax::messages::IWC0134.at(pos, "JNIENVPTR cannot receive a value"));
         } else if self.is_self(r) {
-            self.errors.push(Error::at(pos, "SELF cannot receive a value"));
+            self.errors.push(syntax::messages::IWC0135.at(pos, "SELF cannot receive a value"));
         } else {
             self.plain(&Operand::Ref(r.clone()), pos);
         }
@@ -756,11 +756,11 @@ impl Rules<'_> {
                     return;
                 }
                 if !matches!(op, RelOp::Eq | RelOp::Ne) {
-                    self.errors.push(Error::at(pos, "object references and function-pointers compare only as equal or not equal"));
+                    self.errors.push(syntax::messages::IWC0136.at(pos, "object references and function-pointers compare only as equal or not equal"));
                 }
                 let fits = |s: Side, other: Side| s == other || s == Side::Null || other == Side::Null;
                 if !fits(x, y) {
-                    self.errors.push(Error::at(pos, "an object reference compares with another object reference, SELF or NULL; a function-pointer with another or NULL"));
+                    self.errors.push(syntax::messages::IWC0137.at(pos, "an object reference compares with another object reference, SELF or NULL; a function-pointer with another or NULL"));
                 }
             }
             Cond::Class(e, _) => self.expr(e, pos),
@@ -785,7 +785,7 @@ impl Rules<'_> {
     fn set_entry(&mut self, targets: &[Ref], entry: &Operand, pos: Pos) {
         for r in targets {
             if self.side_of_ref(r, pos) != Side::ProgramPointer {
-                self.errors.push(Error::at(pos, format!("SET {} TO ENTRY: the receiver must be a procedure-pointer or function-pointer", r.name)));
+                self.errors.push(syntax::messages::IWC0138.at(pos, format!("SET {} TO ENTRY: the receiver must be a procedure-pointer or function-pointer", r.name)));
             }
         }
         let fault = match entry {
@@ -802,7 +802,7 @@ impl Rules<'_> {
         };
         if let Some(fault) = fault {
             let names: Vec<&str> = targets.iter().map(|r| r.name.as_str()).collect();
-            self.errors.push(Error::at(pos, format!("SET {} TO ENTRY: {fault}", names.join(" "))));
+            self.errors.push(syntax::messages::IWC0139.at(pos, format!("SET {} TO ENTRY: {fault}", names.join(" "))));
         }
     }
 
@@ -817,11 +817,11 @@ impl Rules<'_> {
         };
         for r in targets {
             if is_named(r, "JNIENVPTR") && self.layout.resolve(&r.name, &[], r.pos).is_err() {
-                self.errors.push(Error::at(pos, "JNIENVPTR cannot receive a value"));
+                self.errors.push(syntax::messages::IWC0134.at(pos, "JNIENVPTR cannot receive a value"));
                 continue;
             }
             if self.is_self(r) {
-                self.errors.push(Error::at(pos, "SELF cannot receive a value"));
+                self.errors.push(syntax::messages::IWC0135.at(pos, "SELF cannot receive a value"));
                 continue;
             }
             let message = match (self.side_of_ref(r, pos), value_side) {
@@ -831,7 +831,7 @@ impl Rules<'_> {
                 (_, Side::Object | Side::ProgramPointer) => "an object reference or function-pointer can be set only into its own kind",
                 _ => continue,
             };
-            self.errors.push(Error::at(pos, format!("SET {} TO: {message}", r.name)));
+            self.errors.push(syntax::messages::IWC0140.at(pos, format!("SET {} TO: {message}", r.name)));
         }
     }
 }

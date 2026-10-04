@@ -66,7 +66,7 @@ impl Check<'_> {
                 let item = self.item(record);
                 let sd = item.and_then(|i| self.layout.items[i].file).map(usize::from);
                 if item.is_some() && !sd.is_some_and(|k| self.program.files[k].sort) {
-                    self.errors.push(Error::at(*pos, format!("RELEASE {}: not a record of a sort file (SD)", record.name)));
+                    self.errors.push(syntax::messages::IWC0201.at(*pos, format!("RELEASE {}: not a record of a sort file (SD)", record.name)));
                 }
                 if let Some(op) = from {
                     self.operand(op);
@@ -74,8 +74,8 @@ impl Check<'_> {
             }
             Sorting::Return { file, into, at_end, pos } => {
                 match self.program.files.iter().find(|f| f.name == *file) {
-                    None => self.errors.push(Error::at(*pos, format!("no file named {file}"))),
-                    Some(f) if !f.sort => self.errors.push(Error::at(*pos, format!("RETURN {file}: not a sort or merge file (SD)"))),
+                    None => self.errors.push(syntax::messages::IWC0202.at(*pos, format!("no file named {file}"))),
+                    Some(f) if !f.sort => self.errors.push(syntax::messages::IWC0203.at(*pos, format!("RETURN {file}: not a sort or merge file (SD)"))),
                     Some(_) => {}
                 }
                 if let Some(r) = into {
@@ -192,7 +192,7 @@ impl Check<'_> {
         if let Some(alphabet) = &st.collating
             && !self.program.environment.alphabets.iter().any(|(n, _)| n == alphabet)
         {
-            self.errors.push(Error::at(st.pos, format!("COLLATING SEQUENCE {alphabet}: not an alphabet-name of SPECIAL-NAMES")));
+            self.errors.push(syntax::messages::IWC0204.at(st.pos, format!("COLLATING SEQUENCE {alphabet}: not an alphabet-name of SPECIAL-NAMES")));
         }
     }
 }

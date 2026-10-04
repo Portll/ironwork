@@ -136,7 +136,7 @@ impl Context<'_> {
             Ok(Resolved::Item(i)) if self.layout.items[i].kind != Kind::Group => "not a group item",
             Ok(Resolved::Item(i)) => return Some(i),
         };
-        errors.push(Error::at(r.pos, format!("{verb} CORRESPONDING {}: {why}", r.name)));
+        errors.push(syntax::messages::IWC0006.at(r.pos, format!("{verb} CORRESPONDING {}: {why}", r.name)));
         None
     }
 
@@ -206,7 +206,7 @@ impl Context<'_> {
         let name = items[i].name.clone().unwrap_or_default();
         match self.layout.resolve(&name, &qualifiers, pos) {
             Ok(Resolved::Item(j)) if j == i => Ok(Ref { name, qualifiers, subscripts: group_ref.subscripts.clone(), refmod: None, pos }),
-            _ => Err(Error::at(pos, format!("CORRESPONDING {}: {name} in it cannot be named uniquely", group_ref.name))),
+            _ => Err(syntax::messages::IWC0007.at(pos, format!("CORRESPONDING {}: {name} in it cannot be named uniquely", group_ref.name))),
         }
     }
 }

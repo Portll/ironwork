@@ -171,7 +171,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
             ssrange = on;
         }
         if let Err(e) = options.apply(option) {
-            errors.push(Error::at(Pos::default(), format!("CBL {option}: {e}")).graded(option_severity(&e)));
+            errors.push(syntax::messages::IWO0001.at(Pos::default(), format!("CBL {option}: {e}")).graded(option_severity(&e)));
         }
     }
     let page = options.code_page();
@@ -187,7 +187,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         if program.environment.collating_sequence.as_ref() != Some(name)
             && let Err(m) = collating::Sequence::of(alphabet, options.code_page(), options.quote)
         {
-            errors.push(Error::at(Pos::default(), format!("ALPHABET {name}: {m}")));
+            errors.push(syntax::messages::IWC0047.at(Pos::default(), format!("ALPHABET {name}: {m}")));
         }
     }
     let collating = collating::Sequence::program(&program.environment, options.code_page(), options.quote).unwrap_or_else(|m| {
@@ -234,12 +234,12 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     for item in &layout.items {
         if let Some(object) = &item.depending_on {
             match layout.resolve(&object.name, &object.qualifiers, object.pos) {
-                Ok(layout::Resolved::Item(i)) if !layout.items[i].moved_by.is_empty() => errors.push(Error::at(
+                Ok(layout::Resolved::Item(i)) if !layout.items[i].moved_by.is_empty() => errors.push(syntax::messages::IWC0048.at(
                     object.pos,
                     format!("OCCURS DEPENDING ON {}: the object cannot follow an OCCURS DEPENDING ON table in its record", object.name),
                 )),
                 Ok(layout::Resolved::Item(i)) if layout.items[i].kind.is_numeric() => {}
-                Ok(_) => errors.push(Error::at(object.pos, format!("OCCURS DEPENDING ON {}: not a numeric data item", object.name))),
+                Ok(_) => errors.push(syntax::messages::IWC0049.at(object.pos, format!("OCCURS DEPENDING ON {}: not a numeric data item", object.name))),
                 Err(e) => errors.push(e),
             }
         }
@@ -247,7 +247,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     let is_record = |name: &str| layout.linkage_roots.iter().enumerate().any(|(o, &i)| layout.is_argument(o) && layout.items[i].name.as_deref() == Some(name));
     for param in &program.using {
         if !is_record(&param.name) {
-            errors.push(Error::at(Pos::default(), format!("PROCEDURE DIVISION USING {}: not an 01 or 77 item of the LINKAGE SECTION", param.name)));
+            errors.push(syntax::messages::IWC0050.at(Pos::default(), format!("PROCEDURE DIVISION USING {}: not an 01 or 77 item of the LINKAGE SECTION", param.name)));
         }
     }
     // Language Reference SC27-8713-03, pp. 262-263; a method's and a function's are checked with their signatures.
@@ -256,7 +256,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         && program.oo.as_deref().and_then(Oo::method).is_none()
         && !is_record(name)
     {
-        errors.push(Error::at(Pos::default(), format!("PROCEDURE DIVISION RETURNING {name}: not an 01 or 77 item of the LINKAGE SECTION")));
+        errors.push(syntax::messages::IWC0051.at(Pos::default(), format!("PROCEDURE DIVISION RETURNING {name}: not an 01 or 77 item of the LINKAGE SECTION")));
     }
     let report_writer = report::resolve(&program, &layout, drafts, &mut errors);
     let carriage = printer::carriages(&program, &layout, options.adv);
@@ -345,20 +345,20 @@ fn assign_items(program: &mut Program, layout: &layout::Layout, options: &Option
         let (name, pos) = (&a.reference.name, a.reference.pos);
         if !extended {
             if a.explicit {
-                errors.push(Error::at(pos, format!("ASSIGN USING or DYNAMIC {name}: a Micro Focus and GnuCOBOL form; --compliance extended reads it")));
+                errors.push(syntax::messages::IWC0052.at(pos, format!("ASSIGN USING or DYNAMIC {name}: a Micro Focus and GnuCOBOL form; --compliance extended reads it")));
             }
             continue;
         }
         let item = match layout.resolve(name, &a.reference.qualifiers, pos) {
             Ok(layout::Resolved::Item(i)) => i,
             Ok(layout::Resolved::Condition(_)) | Err(_) if a.explicit => {
-                errors.push(Error::at(pos, format!("ASSIGN {name}: not a data item")));
+                errors.push(syntax::messages::IWC0053.at(pos, format!("ASSIGN {name}: not a data item")));
                 continue;
             }
             _ => continue,
         };
         if !matches!(layout.items[item].kind, rt::storage::Kind::Group | rt::storage::Kind::Alnum { .. }) {
-            errors.push(Error::at(pos, format!("ASSIGN {name}: the item holding the file's name must be alphanumeric or a group")));
+            errors.push(syntax::messages::IWC0054.at(pos, format!("ASSIGN {name}: the item holding the file's name must be alphanumeric or a group")));
         } else if f.sort || sorted.contains(&f.name.as_str()) {
             errors.push(syntax::messages::IWR0022.at(pos, format!("ASSIGN {name}: a file SORT or MERGE reads, writes or describes taking its name from a data item is not supported yet")));
         } else {
@@ -397,7 +397,7 @@ fn default_currency(program: &mut Program, options: &mut Options, errors: &mut V
     match options.currency_symbol() {
         Some(Ok(symbol)) if program.environment.currency.is_empty() => program.environment.currency.push(CurrencySign { value: symbol.to_string(), symbol, hex: None }),
         Some(Err(c)) => {
-            errors.push(Error::at(Pos::default(), format!("CBL CURRENCY: code page {} reads its byte as {c:?}, which cannot be a currency symbol", options.codepage)).graded(Severity::Error));
+            errors.push(syntax::messages::IWO0002.at(Pos::default(), format!("CBL CURRENCY: code page {} reads its byte as {c:?}, which cannot be a currency symbol", options.codepage)).graded(Severity::Error));
             options.currency = None;
         }
         _ => {}
@@ -411,7 +411,7 @@ fn default_currency(program: &mut Program, options: &mut Options, errors: &mut V
 fn national_symbols(program: &mut Program, options: &mut Options, errors: &mut Vec<Error>) {
     if options.nsymbol == numeric::Nsymbol::National {
         if !options.dbcs && program.options.iter().any(|o| numeric::options::switch(o, "NSYMBOL").is_some()) {
-            errors.push(Error::warning(Pos::default(), "CBL NODBCS: NSYMBOL(NATIONAL) requires DBCS, which is in effect"));
+            errors.push(syntax::messages::IWO0003.at(Pos::default(), "CBL NODBCS: NSYMBOL(NATIONAL) requires DBCS, which is in effect"));
             options.dbcs = true;
         }
         return;
@@ -450,11 +450,11 @@ fn program_end(program: &Program, options: &Options, errors: &mut Vec<Error>) {
     });
     match (cics_end, options.cics_return_warning) {
         (Some(_), CicsReturnWarning::Never) => {}
-        (Some(command), CicsReturnWarning::Once) => errors.push(Error::at(Pos::default(), format!(
+        (Some(command), CicsReturnWarning::Once) => errors.push(syntax::messages::IWP0002.at(Pos::default(), format!(
             "IGYPS2091-W not given: the program ends with EXEC CICS {command}, which the CICS translator turns into a CALL; --cics-return-warning=always gives the warning, =never drops this note"
         )).graded(Severity::Informational)),
         (None, _) | (Some(_), CicsReturnWarning::Always) => {
-            errors.push(Error::warning(Pos::default(), "no STOP RUN, GOBACK or EXIT PROGRAM in the program: check that it ends"));
+            errors.push(syntax::messages::IWC0055.at(Pos::default(), "no STOP RUN, GOBACK or EXIT PROGRAM in the program: check that it ends"));
         }
     }
 }
@@ -470,7 +470,7 @@ fn ceecbldy_to_ceedays(stmts: &mut [Stmt], errors: &mut Vec<Error>) {
             && name.trim().eq_ignore_ascii_case("CEECBLDY")
         {
             *name = "CEEDAYS".into();
-            errors.push(Error::warning(c.pos, "CALL 'CEECBLDY' under INTDATE(LILIAN): CEECBLDY gives an ANSI integer date, which nothing can use under LILIAN, so the CALL is to CEEDAYS"));
+            errors.push(syntax::messages::IWC0056.at(c.pos, "CALL 'CEECBLDY' under INTDATE(LILIAN): CEECBLDY gives an ANSI integer date, which nothing can use under LILIAN, so the CALL is to CEEDAYS"));
         }
         for body in oo::bodies_mut(s) {
             ceecbldy_to_ceedays(body, errors);
@@ -492,14 +492,14 @@ fn procedure_rules(program: &Program, layout: &Layout, entries: &[EntryPoint], o
     let method = program.oo.as_ref().is_some_and(|o| matches!(o.unit, OoUnit::Method(_)));
     for (k, e) in entries.iter().enumerate() {
         if program.returning.is_some() {
-            errors.push(Error::at(e.pos, format!("ENTRY '{}': a program with PROCEDURE DIVISION RETURNING cannot have ENTRY statements", e.name)));
+            errors.push(syntax::messages::IWC0057.at(e.pos, format!("ENTRY '{}': a program with PROCEDURE DIVISION RETURNING cannot have ENTRY statements", e.name)));
         }
         if e.name.eq_ignore_ascii_case(&program.id) || entries[..k].iter().any(|f| f.name == e.name) {
-            errors.push(Error::at(e.pos, format!("ENTRY '{}': the name is already the program's or another ENTRY's", e.name)));
+            errors.push(syntax::messages::IWC0058.at(e.pos, format!("ENTRY '{}': the name is already the program's or another ENTRY's", e.name)));
         }
         for param in &e.using {
             if !layout.linkage_roots.iter().enumerate().any(|(o, &i)| layout.is_argument(o) && layout.items[i].name.as_deref() == Some(param.name.as_str())) {
-                errors.push(Error::at(e.pos, format!("ENTRY '{}' USING {}: not an 01 or 77 item of the LINKAGE SECTION", e.name, param.name)));
+                errors.push(syntax::messages::IWC0059.at(e.pos, format!("ENTRY '{}' USING {}: not an 01 or 77 item of the LINKAGE SECTION", e.name, param.name)));
             }
         }
     }
@@ -517,19 +517,19 @@ fn procedure_rules(program: &Program, layout: &Layout, entries: &[EntryPoint], o
             for (t, nested) in std::iter::once((s, false)).chain(inner.into_iter().map(|t| (t, true))) {
                 match t {
                     Stmt::Entry { name, pos, .. } if nested => {
-                        errors.push(Error::at(*pos, format!("ENTRY '{name}' must be a sentence of its own, not inside another statement")));
+                        errors.push(syntax::messages::IWC0060.at(*pos, format!("ENTRY '{name}' must be a sentence of its own, not inside another statement")));
                     }
                     Stmt::GoTo { target: None, pos } => {
                         if let Some(why) = why_no_alter {
-                            errors.push(Error::at(*pos, format!("a GO TO with no procedure-name cannot be used in {why}")));
+                            errors.push(syntax::messages::IWC0061.at(*pos, format!("a GO TO with no procedure-name cannot be used in {why}")));
                         }
                         if nested || !lone_go_to(p) {
-                            errors.push(Error::at(*pos, "a GO TO with no procedure-name must be its paragraph's only sentence"));
+                            errors.push(syntax::messages::IWC0062.at(*pos, "a GO TO with no procedure-name must be its paragraph's only sentence"));
                         }
                     }
                     Stmt::Alter { pairs, pos } => {
                         if let Some(why) = why_no_alter {
-                            errors.push(Error::at(*pos, format!("ALTER cannot be used in {why}")));
+                            errors.push(syntax::messages::IWC0063.at(*pos, format!("ALTER cannot be used in {why}")));
                         }
                         for (from, to) in pairs {
                             altered_paragraph(program, from, *pos, errors);
@@ -557,9 +557,9 @@ fn inner_statements<'s>(stmts: &'s [Stmt], out: &mut Vec<&'s Stmt>) {
 fn altered_paragraph(program: &Program, name: &ProcName, pos: Pos, errors: &mut Vec<Error>) {
     match procedure(program, name) {
         Err(m) => errors.push(m.at(pos)),
-        Ok((i, _)) if program.paragraphs[i].is_section => errors.push(Error::at(pos, format!("ALTER {}: a section, where ALTER names a paragraph", name.name))),
+        Ok((i, _)) if program.paragraphs[i].is_section => errors.push(syntax::messages::IWC0064.at(pos, format!("ALTER {}: a section, where ALTER names a paragraph", name.name))),
         Ok((i, _)) if !lone_go_to(&program.paragraphs[i]) => {
-            errors.push(Error::at(pos, format!("ALTER {}: the paragraph must hold one sentence, a GO TO without DEPENDING ON", name.name)));
+            errors.push(syntax::messages::IWC0065.at(pos, format!("ALTER {}: the paragraph must hold one sentence, a GO TO without DEPENDING ON", name.name)));
         }
         Ok(_) => {}
     }
@@ -633,9 +633,9 @@ fn dbcs_values(layout: &Layout, errors: &mut Vec<Error>) {
     for (i, value, pos) in values.chain(conditions) {
         let name = layout.items[i].name.as_deref().unwrap_or("FILLER");
         if dbcs(i) && !fits(value, i) {
-            errors.push(Error::at(pos, format!("{name}: a DBCS item's VALUE is a DBCS literal of at most {} characters, SPACE or ALL with a DBCS literal", layout.items[i].size / 2)));
+            errors.push(syntax::messages::IWC0066.at(pos, format!("{name}: a DBCS item's VALUE is a DBCS literal of at most {} characters, SPACE or ALL with a DBCS literal", layout.items[i].size / 2)));
         } else if !dbcs(i) && is_dbcs(value) {
-            errors.push(Error::at(pos, format!("{name}: a DBCS literal can be the VALUE of a DBCS item only")));
+            errors.push(syntax::messages::IWC0067.at(pos, format!("{name}: a DBCS literal can be the VALUE of a DBCS item only")));
         }
     }
 }
@@ -654,7 +654,7 @@ fn numeric_values(layout: &Layout, errors: &mut Vec<Error>) {
             _ => continue,
         };
         let name = item.name.as_deref().unwrap_or("FILLER");
-        errors.push(Error::at(item.pos, format!("VALUE of {name}: {what}, where a numeric item's VALUE literal must be numeric")));
+        errors.push(syntax::messages::IWC0068.at(item.pos, format!("VALUE of {name}: {what}, where a numeric item's VALUE literal must be numeric")));
     }
 }
 
@@ -766,7 +766,7 @@ fn digit_limits(program: &Program, arith: numeric::options::Arith, errors: &mut 
         {
             let positions = pic.digits + pic.scaling + pic.scale.saturating_sub(pic.digits);
             if positions > max {
-                errors.push(Error::at(e.pos, format!("PICTURE {p}: {positions} digit positions, more than the {max} {option} allows")));
+                errors.push(syntax::messages::IWC0069.at(e.pos, format!("PICTURE {p}: {positions} digit positions, more than the {max} {option} allows")));
             }
         }
         let values = e.value.iter().chain(e.condition_values.iter().flat_map(|(low, high)| std::iter::once(low).chain(high))).chain(&e.false_value);
@@ -774,7 +774,7 @@ fn digit_limits(program: &Program, arith: numeric::options::Arith, errors: &mut 
             if let Literal::Number(t) = v
                 && literal_digits(t) > max as usize
             {
-                errors.push(Error::at(e.pos, format!("the literal {t} has more than the {max} digits {option} allows")));
+                errors.push(syntax::messages::IWC0070.at(e.pos, format!("the literal {t} has more than the {max} digits {option} allows")));
             }
         }
     }
@@ -929,12 +929,12 @@ impl Check<'_> {
                             match object {
                                 Object::Any => {}
                                 Object::Bool(_) | Object::Cond(_) if matches!(subject, Subject::Expr(_)) => {
-                                    self.errors.push(Error::at(*pos, "a condition as the WHEN object of a value subject"));
+                                    self.errors.push(syntax::messages::IWC0071.at(*pos, "a condition as the WHEN object of a value subject"));
                                 }
                                 Object::Bool(_) => {}
                                 Object::Cond(c) => self.cond(c),
                                 Object::Value { .. } if !matches!(subject, Subject::Expr(_)) => {
-                                    self.errors.push(Error::at(*pos, "a value as the WHEN object of a TRUE, FALSE or condition subject"));
+                                    self.errors.push(syntax::messages::IWC0072.at(*pos, "a value as the WHEN object of a TRUE, FALSE or condition subject"));
                                 }
                                 Object::Value { from, thru, .. } => {
                                     self.expr(from);
@@ -971,7 +971,7 @@ impl Check<'_> {
                     } else {
                         format!("a mnemonic-name for {}, which DISPLAY does not write to", upon.device)
                     };
-                    self.errors.push(Error::at(*pos, format!("DISPLAY UPON {}: {why}", upon.name)));
+                    self.errors.push(syntax::messages::IWC0073.at(*pos, format!("DISPLAY UPON {}: {why}", upon.name)));
                 }
             }
             Stmt::Open { files, pos } => files.iter().for_each(|(_, f)| self.file(f, *pos)),
@@ -980,7 +980,7 @@ impl Check<'_> {
                     self.file(name, *pos);
                     let keyed = self.program.files.iter().any(|f| f.name == *name && matches!(f.organization, Organization::Indexed | Organization::Relative));
                     if keyed && matches!(closing, Some(Closing::Volume | Closing::NoRewind)) {
-                        self.errors.push(Error::at(*pos, format!("CLOSE {name}: REEL, UNIT and NO REWIND are not valid for an indexed or relative file")));
+                        self.errors.push(syntax::messages::IWC0074.at(*pos, format!("CLOSE {name}: REEL, UNIT and NO REWIND are not valid for an indexed or relative file")));
                     }
                 }
             }
@@ -1005,7 +1005,7 @@ impl Check<'_> {
                 if let Ok(layout::Resolved::Item(i)) = self.layout.resolve(&record.name, &record.qualifiers, record.pos)
                     && self.layout.items[i].file.is_none()
                 {
-                    self.errors.push(Error::at(*pos, format!("{verb} {}: not a record of a file", record.name)));
+                    self.errors.push(syntax::messages::IWC0075.at(*pos, format!("{verb} {}: not a record of a file", record.name)));
                 }
                 if let Some(op) = from {
                     self.operand(op);
@@ -1031,7 +1031,7 @@ impl Check<'_> {
                 self.not_random(file, "START", *pos);
                 if let Some((op, r)) = key {
                     if !matches!(op, RelOp::Eq | RelOp::Gt | RelOp::Ge) {
-                        self.errors.push(Error::at(*pos, "START KEY takes =, >, NOT < or >="));
+                        self.errors.push(syntax::messages::IWC0076.at(*pos, "START KEY takes =, >, NOT < or >="));
                     }
                     self.reference(r);
                     self.key_of(file, r, true);
@@ -1042,11 +1042,11 @@ impl Check<'_> {
                 for r in targets {
                     self.reference(r);
                     if self.item(r).is_some_and(|i| self.layout.items[i].level == 66) {
-                        self.errors.push(Error::at(*pos, format!("INITIALIZE {}: a level-66 RENAMES item cannot be initialized", r.name)));
+                        self.errors.push(syntax::messages::IWC0077.at(*pos, format!("INITIALIZE {}: a level-66 RENAMES item cannot be initialized", r.name)));
                     }
                     let items = &self.layout.items;
                     if self.item(r).is_some_and(|i| !items[i].moved_by.is_empty() || items[i].odo.iter().any(|&t| items[t].followed)) {
-                        self.errors.push(Error::at(*pos, format!("INITIALIZE {}: a variably located item, or a group holding one, cannot be initialized (Language Reference p. 351)", r.name)));
+                        self.errors.push(syntax::messages::IWC0078.at(*pos, format!("INITIALIZE {}: a variably located item, or a group holding one, cannot be initialized (Language Reference p. 351)", r.name)));
                     }
                 }
                 if let Some(with) = with {
@@ -1091,7 +1091,7 @@ impl Check<'_> {
                         if let Ok(layout::Resolved::Condition(c)) = self.layout.resolve(&r.name, &r.qualifiers, r.pos)
                             && self.layout.conditions[c].false_value.is_none()
                         {
-                            self.errors.push(Error::at(r.pos, format!("SET {} TO FALSE: the condition-name has no WHEN SET TO FALSE value", r.name)));
+                            self.errors.push(syntax::messages::IWC0079.at(r.pos, format!("SET {} TO FALSE: the condition-name has no WHEN SET TO FALSE value", r.name)));
                         }
                     }
                 }
@@ -1258,7 +1258,7 @@ impl Check<'_> {
             // Language Reference SC27-8713-03, p. 344.
             Stmt::Exit { kind: kind @ (ExitKind::Perform | ExitKind::PerformCycle), pos } if self.inline_performs == 0 => {
                 let exit = if *kind == ExitKind::Perform { "EXIT PERFORM" } else { "EXIT PERFORM CYCLE" };
-                self.errors.push(Error::at(*pos, format!("{exit} must be inside an inline PERFORM")));
+                self.errors.push(syntax::messages::IWC0080.at(*pos, format!("{exit} must be inside an inline PERFORM")));
             }
             Stmt::Goback { .. } | Stmt::StopRun { .. } | Stmt::ExitProgram { .. } | Stmt::ExitMethod { .. } | Stmt::Continue | Stmt::Exit { .. } | Stmt::NextSentence | Stmt::SentenceEnd => {}
             Stmt::Corresponding(_) => unreachable!("CORRESPONDING is expanded before Check"),
@@ -1296,26 +1296,26 @@ impl Check<'_> {
         if let Some(i) = self.item(&v.var)
             && !matches!(self.layout.items[i].kind, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Float(_) | Kind::Index)
         {
-            self.errors.push(Error::at(self.at, format!("PERFORM VARYING {}: not a numeric elementary item or an index-name", v.var.name)));
+            self.errors.push(syntax::messages::IWC0081.at(self.at, format!("PERFORM VARYING {}: not a numeric elementary item or an index-name", v.var.name)));
         }
         for (phrase, e) in [("FROM", &v.from), ("BY", &v.by)] {
             if !matches!(e, Expr::Operand(_)) {
-                self.errors.push(Error::at(self.at, format!("PERFORM VARYING {} {phrase}: an arithmetic expression, where {phrase} takes an identifier, index-name or literal", v.var.name)));
+                self.errors.push(syntax::messages::IWC0082.at(self.at, format!("PERFORM VARYING {} {phrase}: an arithmetic expression, where {phrase} takes an identifier, index-name or literal", v.var.name)));
             }
         }
     }
 
     fn file(&mut self, name: &str, pos: Pos) {
         if !self.program.files.iter().any(|f| f.name == name) {
-            self.errors.push(Error::at(pos, format!("no file named {name}")));
+            self.errors.push(syntax::messages::IWC0083.at(pos, format!("no file named {name}")));
         }
     }
 
     fn keyed_file(&mut self, name: &str, verb: &str, pos: Pos) {
         match self.program.files.iter().find(|f| f.name == name) {
-            None => self.errors.push(Error::at(pos, format!("no file named {name}"))),
+            None => self.errors.push(syntax::messages::IWC0083.at(pos, format!("no file named {name}"))),
             Some(f) if !matches!(f.organization, Organization::Indexed | Organization::Relative) => {
-                self.errors.push(Error::at(pos, format!("{verb} {name}: not an indexed or relative file")));
+                self.errors.push(syntax::messages::IWC0084.at(pos, format!("{verb} {name}: not an indexed or relative file")));
             }
             Some(_) => {}
         }
@@ -1323,7 +1323,7 @@ impl Check<'_> {
 
     fn not_random(&mut self, name: &str, verb: &str, pos: Pos) {
         if self.program.files.iter().any(|f| f.name == name && f.access == Access::Random) {
-            self.errors.push(Error::at(pos, format!("{verb} {name}: the file's ACCESS MODE is RANDOM")));
+            self.errors.push(syntax::messages::IWC0085.at(pos, format!("{verb} {name}: the file's ACCESS MODE is RANDOM")));
         }
     }
 
@@ -1336,12 +1336,12 @@ impl Check<'_> {
     /// p. 269): alphabetic, alphanumeric, edited, zoned decimal or a group.
     fn class_name_subject(&mut self, e: &Expr, name: &str) {
         let Expr::Operand(Operand::Ref(r)) = e else {
-            self.errors.push(Error::at(self.at, format!("class-name {name} tests a data item, not an expression")));
+            self.errors.push(syntax::messages::IWC0086.at(self.at, format!("class-name {name} tests a data item, not an expression")));
             return;
         };
         let Some(i) = self.item(r) else { return };
         if !matches!(self.layout.items[i].kind, layout::Kind::Group | layout::Kind::Alnum { .. } | layout::Kind::AlnumEdited { .. } | layout::Kind::NumericEdited { .. } | layout::Kind::Zoned { .. }) {
-            self.errors.push(Error::at(r.pos, format!("class-name {name} tests a data item of USAGE DISPLAY, and {} is not one", r.name)));
+            self.errors.push(syntax::messages::IWC0087.at(r.pos, format!("class-name {name} tests a data item of USAGE DISPLAY, and {} is not one", r.name)));
         }
     }
 
@@ -1365,7 +1365,7 @@ impl Check<'_> {
         };
         let named = f.record_key.iter().chain(f.alternate_keys.iter().map(|(r, _)| r)).any(fits);
         if item.file.is_none() || !named {
-            self.errors.push(Error::at(key.pos, format!("{}: not a key of {file}", key.name)));
+            self.errors.push(syntax::messages::IWC0088.at(key.pos, format!("{}: not a key of {file}", key.name)));
         }
     }
 
@@ -1376,12 +1376,12 @@ impl Check<'_> {
         match f.organization {
             Organization::Indexed => {
                 if f.record_key.is_none() {
-                    self.errors.push(Error::at(f.pos, format!("{}: an indexed file needs a RECORD KEY", f.name)));
+                    self.errors.push(syntax::messages::IWC0089.at(f.pos, format!("{}: an indexed file needs a RECORD KEY", f.name)));
                 }
                 for r in f.record_key.iter().chain(f.alternate_keys.iter().map(|(r, _)| r)) {
                     self.reference(r);
                     if self.item(r).is_some() && !in_records(self, r) {
-                        self.errors.push(Error::at(r.pos, format!("{}: a key of {} must be in its records", r.name, f.name)));
+                        self.errors.push(syntax::messages::IWC0090.at(r.pos, format!("{}: a key of {} must be in its records", r.name, f.name)));
                     }
                 }
             }
@@ -1389,10 +1389,10 @@ impl Check<'_> {
                 if let Some(r) = &f.relative_key {
                     self.reference(r);
                     if in_records(self, r) {
-                        self.errors.push(Error::at(r.pos, format!("{}: the RELATIVE KEY of {} must not be in its records", r.name, f.name)));
+                        self.errors.push(syntax::messages::IWC0091.at(r.pos, format!("{}: the RELATIVE KEY of {} must not be in its records", r.name, f.name)));
                     }
                 } else if f.access != Access::Sequential {
-                    self.errors.push(Error::at(f.pos, format!("{}: random or dynamic access needs a RELATIVE KEY", f.name)));
+                    self.errors.push(syntax::messages::IWC0092.at(f.pos, format!("{}: random or dynamic access needs a RELATIVE KEY", f.name)));
                 }
             }
             _ => {}
@@ -1406,7 +1406,7 @@ impl Check<'_> {
         let Some(r) = &f.record_depending else { return };
         self.reference(r);
         if self.item(r).is_some() && linage::unsigned_integer(self.layout, r).is_none() {
-            self.errors.push(Error::at(r.pos, format!("{}: the DEPENDING ON item of {} must be an elementary unsigned integer", r.name, f.name)));
+            self.errors.push(syntax::messages::IWC0093.at(r.pos, format!("{}: the DEPENDING ON item of {} must be an elementary unsigned integer", r.name, f.name)));
         }
     }
 
@@ -1420,7 +1420,7 @@ impl Check<'_> {
             let item = &self.layout.items[i];
             let working = !item.local && item.file.is_none() && item.linkage.is_none();
             if !working || !matches!(item.kind, rt::storage::Kind::Alnum { .. } | rt::storage::Kind::AlnumEdited { .. } | rt::storage::Kind::Group) {
-                self.errors.push(Error::at(r.pos, format!("{}: the PASSWORD of {} must be an alphabetic, alphanumeric or alphanumeric-edited item of WORKING-STORAGE", r.name, f.name)));
+                self.errors.push(syntax::messages::IWC0094.at(r.pos, format!("{}: the PASSWORD of {} must be an alphabetic, alphanumeric or alphanumeric-edited item of WORKING-STORAGE", r.name, f.name)));
             }
         }
     }
@@ -1436,7 +1436,7 @@ impl Check<'_> {
     fn reference(&mut self, r: &Ref) {
         self.reference_or_condition(r);
         if let Ok(layout::Resolved::Condition(_)) = self.layout.resolve(&r.name, &r.qualifiers, r.pos) {
-            self.errors.push(Error::at(r.pos, format!("{} is a condition-name, not a data item", r.name)));
+            self.errors.push(syntax::messages::IWC0095.at(r.pos, format!("{} is a condition-name, not a data item", r.name)));
         }
     }
 
@@ -1449,13 +1449,13 @@ impl Check<'_> {
             return;
         }
         if !self.debugging && !self.program.declaratives.debugging.is_empty() && declaratives::DEBUG_ITEM_NAMES.contains(&r.name.as_str()) {
-            self.errors.push(Error::at(r.pos, format!("{}: only a debugging section may reference DEBUG-ITEM", r.name)));
+            self.errors.push(syntax::messages::IWC0096.at(r.pos, format!("{}: only a debugging section may reference DEBUG-ITEM", r.name)));
             return;
         }
         match self.layout.resolve(&r.name, &r.qualifiers, r.pos) {
             Err(e) => self.errors.push(e),
             Ok(layout::Resolved::Item(i)) if switches::switch_of(self.layout, i).is_some() => self.errors.push(switches::mnemonic_as_data(r, self.layout, i)),
-            Ok(layout::Resolved::Item(i)) if self.layout.items[i].dims.len() != r.subscripts.len() => self.errors.push(Error::at(
+            Ok(layout::Resolved::Item(i)) if self.layout.items[i].dims.len() != r.subscripts.len() => self.errors.push(syntax::messages::IWC0097.at(
                 r.pos,
                 format!("{} takes {} subscripts, not {}", r.name, self.layout.items[i].dims.len(), r.subscripts.len()),
             )),
@@ -1479,7 +1479,7 @@ impl Check<'_> {
             self.handle_labels(block);
         }
         if let Some(syntax::sql::Sql { statement: syntax::sql::Statement::Malformed(why), .. }) = &block.sql {
-            self.errors.push(Error::at(block.pos, format!("EXEC SQL {}: {why}", block.command)));
+            self.errors.push(syntax::messages::IWP0003.at(block.pos, format!("EXEC SQL {}: {why}", block.command)));
         }
         for r in &block.host_variables {
             if r.subscripts.is_empty() {
@@ -1509,7 +1509,7 @@ impl Check<'_> {
             };
             if !initialized {
                 let categories: Vec<&str> = with.replacing.iter().map(|(c, _)| c.word()).collect();
-                self.errors.push(Error::warning(
+                self.errors.push(syntax::messages::IWC0098.at(
                     pos,
                     format!("INITIALIZE {}: none of its items is of a category REPLACING names ({}), so it is not initialized", r.name, categories.join(", ")),
                 ));
@@ -1533,16 +1533,16 @@ impl Check<'_> {
     /// An EXEC DLI command and its options against IMS's table, and each qualification's form.
     fn dli_block(&mut self, block: &ExecBlock) {
         let Some(command) = syntax::dli::find(&block.command) else {
-            self.errors.push(Error::at(block.pos, format!("EXEC DLI {} is not an EXEC DLI command", block.command)));
+            self.errors.push(syntax::messages::IWP0004.at(block.pos, format!("EXEC DLI {} is not an EXEC DLI command", block.command)));
             return;
         };
         for (name, arg) in &block.options {
             if command.options.is_some_and(|options| !options.contains(&name.as_str())) {
-                self.errors.push(Error::at(block.pos, format!("EXEC DLI {}: {name} is not one of its options", command.name)));
+                self.errors.push(syntax::messages::IWP0005.at(block.pos, format!("EXEC DLI {}: {name} is not one of its options", command.name)));
             } else if let (true, Some(ExecArg::Text(t))) = (name == "WHERE", arg)
                 && let Err(why) = syntax::dli::qualification(t)
             {
-                self.errors.push(Error::at(block.pos, format!("EXEC DLI {} WHERE({t}): {why}", command.name)));
+                self.errors.push(syntax::messages::IWP0006.at(block.pos, format!("EXEC DLI {} WHERE({t}): {why}", command.name)));
             }
         }
     }
@@ -1555,7 +1555,7 @@ impl Check<'_> {
         let known = FUNCTIONS.contains(&name) || rt::intrinsic::FUNCTIONS.contains(&name);
         let numeric_udf = self.functions.into_iter().flatten().any(|u| u.name == name && !u.character_valued());
         if known && !rt::intrinsic::CHARACTER_VALUED.contains(&name) || numeric_udf {
-            self.errors.push(Error::at(f.pos, format!("INSPECT FUNCTION {name}: an integer or numeric function can be used only where an arithmetic expression can, not as the inspected item")));
+            self.errors.push(syntax::messages::IWC0099.at(f.pos, format!("INSPECT FUNCTION {name}: an integer or numeric function can be used only where an arithmetic expression can, not as the inspected item")));
         }
         let stores = if !i.replacing.is_empty() {
             Some("REPLACING")
@@ -1563,7 +1563,7 @@ impl Check<'_> {
             i.converting.as_ref().map(|_| "CONVERTING")
         };
         if let Some(phrase) = stores {
-            self.errors.push(Error::at(f.pos, format!("INSPECT FUNCTION {name} {phrase}: {phrase} stores into the inspected item, and a function-identifier cannot be a receiving operand")));
+            self.errors.push(syntax::messages::IWC0100.at(f.pos, format!("INSPECT FUNCTION {name} {phrase}: {phrase} stores into the inspected item, and a function-identifier cannot be a receiving operand")));
         }
     }
 
@@ -1577,7 +1577,7 @@ impl Check<'_> {
         let user_defined = self.functions.into_iter().flatten().any(|u| u.name == name);
         let numeric = !rt::intrinsic::CHARACTER_VALUED.contains(&name) || self.numeric_max_or_min(f);
         if intrinsic && !user_defined && numeric {
-            self.errors.push(Error::at(f.pos, format!("DISPLAY FUNCTION {name}: an integer or numeric function can be used only where an arithmetic expression can, and DISPLAY takes none")));
+            self.errors.push(syntax::messages::IWC0101.at(f.pos, format!("DISPLAY FUNCTION {name}: an integer or numeric function can be used only where an arithmetic expression can, and DISPLAY takes none")));
         }
     }
 
@@ -1637,7 +1637,7 @@ impl Check<'_> {
         if self.extended {
             self.errors.push(syntax::messages::IWX0008.at(f.pos, format!("{NUMERIC_FUNCTION_MOVED}: FUNCTION {name} is moved as its value")));
         } else {
-            self.errors.push(Error::at(f.pos, format!("MOVE FUNCTION {name}: an integer or numeric function can be used only where an arithmetic expression can, not as a MOVE's sender")));
+            self.errors.push(syntax::messages::IWC0102.at(f.pos, format!("MOVE FUNCTION {name}: an integer or numeric function can be used only where an arithmetic expression can, not as a MOVE's sender")));
         }
     }
 
@@ -1668,7 +1668,7 @@ impl Check<'_> {
                 (CharUsage::Display, o) => format!("{name} is not {o}, and an operand can be {o} only when the inspected item is"),
                 (u, _) => format!("{name} is {u} and every operand but the count field must be {u} too"),
             };
-            self.errors.push(Error::at(pos, format!("INSPECT {name}: {operand} cannot be an operand here, since {why}")));
+            self.errors.push(syntax::messages::IWC0103.at(pos, format!("INSPECT {name}: {operand} cannot be an operand here, since {why}")));
         }
     }
 
@@ -1684,7 +1684,7 @@ impl Check<'_> {
             }
             let name = ProcName { name: label.to_ascii_uppercase(), section: None };
             if let Err(m) = procedure_from(self.program, &name, self.paragraph) {
-                self.errors.push(Error::at(block.pos, format!("EXEC CICS {} {option}({label}): {m}", block.command)));
+                self.errors.push(syntax::messages::IWP0007.at(block.pos, format!("EXEC CICS {} {option}({label}): {m}", block.command)));
             }
         }
     }
@@ -1695,7 +1695,7 @@ impl Check<'_> {
         use rt::storage::Kind;
         let Some(i) = self.item(v) else { return };
         if !matches!(self.layout.items[i].kind, Kind::Index | Kind::Zoned { scale: 0, .. } | Kind::Packed { scale: 0, .. } | Kind::Binary { scale: 0, .. }) {
-            self.errors.push(Error::at(v.pos, format!("SEARCH {} VARYING {}: not an index-name, an index data item or an elementary integer item", se.table.name, v.name)));
+            self.errors.push(syntax::messages::IWC0104.at(v.pos, format!("SEARCH {} VARYING {}: not an index-name, an index data item or an elementary integer item", se.table.name, v.name)));
         }
     }
 
@@ -1711,15 +1711,15 @@ impl Check<'_> {
             Operand::LengthOf(r) => self.reference(&self.layout.length_of_ref(r)),
             Operand::Ref(r) | Operand::AddressOf(r) => self.reference(r),
             Operand::Literal(Literal::Number(t)) if literal_fixed(t).is_none() || literal_digits(t) > self.max_digits as usize => {
-                self.errors.push(Error::at(Pos::default(), format!("the literal {t} has more than {} digits", self.max_digits.min(31))));
+                self.errors.push(syntax::messages::IWC0105.at(Pos::default(), format!("the literal {t} has more than {} digits", self.max_digits.min(31))));
             }
             Operand::Literal(_) => {}
             Operand::Function(f) => {
                 if !FUNCTIONS.contains(&f.name.as_str()) && !rt::intrinsic::FUNCTIONS.contains(&f.name.as_str()) {
                     match self.functions.map(|all| all.iter().find(|u| u.name == f.name)) {
                         Some(Some(udf)) => function::check_invocation(udf, f, self.layout, self.alphabetic, self.program.environment.decimal_point_comma, self.errors),
-                        Some(None) => self.errors.push(Error::at(f.pos, format!("FUNCTION {}: neither an intrinsic function nor a user-defined function defined or prototyped before this program", f.name))),
-                        None => self.errors.push(Error::at(f.pos, format!("FUNCTION {}: a user-defined function is not supported here yet", f.name))),
+                        Some(None) => self.errors.push(syntax::messages::IWC0106.at(f.pos, format!("FUNCTION {}: neither an intrinsic function nor a user-defined function defined or prototyped before this program", f.name))),
+                        None => self.errors.push(syntax::messages::IWC0107.at(f.pos, format!("FUNCTION {}: a user-defined function is not supported here yet", f.name))),
                     }
                 }
                 self.function_arguments(f);

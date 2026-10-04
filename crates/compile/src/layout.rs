@@ -193,24 +193,24 @@ pub fn build(
         let file = region.filter(|&r| r != LINKAGE && r != LOCAL);
         let in_linkage = region == Some(LINKAGE);
         if e.occurs.is_some() && matches!(e.level, 1 | 66 | 77 | 88) {
-            return Err(Error::at(e.pos, format!("OCCURS at level {:02}: Enterprise COBOL takes OCCURS only at levels 02 to 49", e.level)));
+            return Err(syntax::messages::IWC0027.at(e.pos, format!("OCCURS at level {:02}: Enterprise COBOL takes OCCURS only at levels 02 to 49", e.level)));
         }
         if e.level == 88 {
             if after_renames {
-                return Err(Error::at(e.pos, "a level-88 entry after a level-66 entry: a RENAMES item cannot be a conditional variable"));
+                return Err(syntax::messages::IWC0028.at(e.pos, "a level-88 entry after a level-66 entry: a RENAMES item cannot be a conditional variable"));
             }
-            let item = *open.last().ok_or_else(|| Error::at(e.pos, "a level-88 entry with no item before it"))?;
-            let name = e.name.clone().ok_or_else(|| Error::at(e.pos, "a level-88 entry needs a name"))?;
+            let item = *open.last().ok_or_else(|| syntax::messages::IWC0029.at(e.pos, "a level-88 entry with no item before it"))?;
+            let name = e.name.clone().ok_or_else(|| syntax::messages::IWC0030.at(e.pos, "a level-88 entry needs a name"))?;
             conditions.push(Condition { name, item, values: e.condition_values.clone(), false_value: e.false_value.clone() });
             continue;
         }
         if e.renames.is_some() != (e.level == 66) {
-            return Err(Error::at(e.pos, "RENAMES goes with level 66, and level 66 with RENAMES"));
+            return Err(syntax::messages::IWC0031.at(e.pos, "RENAMES goes with level 66, and level 66 with RENAMES"));
         }
         if e.level == 66 {
-            let record = open.first().copied().filter(|&r| items[r].level == 1).ok_or_else(|| Error::at(e.pos, "a level-66 entry must follow the entries of a level-01 record"))?;
+            let record = open.first().copied().filter(|&r| items[r].level == 1).ok_or_else(|| syntax::messages::IWC0032.at(e.pos, "a level-66 entry must follow the entries of a level-01 record"))?;
             if e.name.is_none() || e.picture.is_some() || e.usage.is_some() || e.value.is_some() || e.redefines.is_some() || e.sync || e.sign.is_some() {
-                return Err(Error::at(e.pos, "a level-66 entry has a name and a RENAMES clause, and nothing else"));
+                return Err(syntax::messages::IWC0033.at(e.pos, "a level-66 entry has a name and a RENAMES clause, and nothing else"));
             }
             renames.push((items.len(), e));
             items.push(Item {
@@ -248,10 +248,10 @@ pub fn build(
             continue;
         }
         if !(e.level == 1 || e.level == 77 || (2..=49).contains(&e.level)) {
-            return Err(Error::at(e.pos, format!("level {} is not a data level", e.level)));
+            return Err(syntax::messages::IWC0034.at(e.pos, format!("level {} is not a data level", e.level)));
         }
         if after_renames && e.level != 1 && e.level != 77 {
-            return Err(Error::at(e.pos, format!("level {:02} after a level-66 entry: a record's RENAMES entries follow its last entry", e.level)));
+            return Err(syntax::messages::IWC0035.at(e.pos, format!("level {:02} after a level-66 entry: a record's RENAMES entries follow its last entry", e.level)));
         }
         after_renames = false;
         while open.last().is_some_and(|&i| items[i].level >= e.level || items[i].level == 77) {
@@ -259,7 +259,7 @@ pub fn build(
         }
         let parent = if e.level == 1 || e.level == 77 { None } else { open.last().copied() };
         if e.level != 1 && e.level != 77 && parent.is_none() {
-            return Err(Error::at(e.pos, format!("level {} with no group to belong to", e.level)));
+            return Err(syntax::messages::IWC0036.at(e.pos, format!("level {} with no group to belong to", e.level)));
         }
         let index = items.len();
         items.push(Item {
@@ -287,7 +287,7 @@ pub fn build(
             linkage: if in_linkage {
                 Some(match (parent, &e.redefines) {
                     (None, Some(target)) => linkage_roots.iter().position(|&r: &usize| items[r].name.as_ref() == Some(target)).ok_or_else(|| {
-                        Error::at(e.pos, format!("REDEFINES {target}: no earlier 01-level item of that name"))
+                        syntax::messages::IWC0037.at(e.pos, format!("REDEFINES {target}: no earlier 01-level item of that name"))
                     })? as u16,
                     (None, None) => {
                         linkage_roots.push(index);
@@ -309,7 +309,7 @@ pub fn build(
             pos: e.pos,
         });
         if e.occurs == Some(0) {
-            return Err(Error::at(e.pos, "OCCURS 0 is not a table"));
+            return Err(syntax::messages::IWC0038.at(e.pos, "OCCURS 0 is not a table"));
         }
         let inherited = parent.and_then(|p| usages[p]);
         usages.push(e.usage.or(inherited));
@@ -392,7 +392,7 @@ pub fn build(
         let start = local_cursor.div_ceil(LEVEL_ALIGNMENT) * LEVEL_ALIGNMENT;
         local_cursor = start + items[r].size;
         if local_cursor > MAX_STORAGE {
-            return Err(Error::at(items[r].pos, format!("LOCAL-STORAGE exceeds the interpreter's {MAX_STORAGE} bytes")));
+            return Err(syntax::messages::IWL0003.at(items[r].pos, format!("LOCAL-STORAGE exceeds the interpreter's {MAX_STORAGE} bytes")));
         }
         place(&mut items, r, start, Vec::new());
     }
@@ -432,20 +432,20 @@ pub fn build(
             let start = *area_starts[g].get_or_insert(cursor.div_ceil(LEVEL_ALIGNMENT) * LEVEL_ALIGNMENT);
             cursor = cursor.max(start + area_size[g]);
             if cursor > MAX_STORAGE {
-                return Err(Error::at(items[r].pos, format!("storage exceeds the interpreter's {MAX_STORAGE} bytes")));
+                return Err(syntax::messages::IWL0004.at(items[r].pos, format!("storage exceeds the interpreter's {MAX_STORAGE} bytes")));
             }
             place(&mut items, r, start, Vec::new());
             continue;
         }
         let offset = match &items[r].redefines {
             Some(target) => root_offsets.iter().find(|(n, _)| n == target).map(|&(_, o)| o).ok_or_else(|| {
-                Error::at(items[r].pos, format!("REDEFINES {target}: no earlier 01-level item of that name"))
+                syntax::messages::IWC0037.at(items[r].pos, format!("REDEFINES {target}: no earlier 01-level item of that name"))
             })?,
             None => cursor.div_ceil(LEVEL_ALIGNMENT) * LEVEL_ALIGNMENT,
         };
         cursor = cursor.max(offset + items[r].size);
         if cursor > MAX_STORAGE {
-            return Err(Error::at(items[r].pos, format!("WORKING-STORAGE exceeds the interpreter's {MAX_STORAGE} bytes")));
+            return Err(syntax::messages::IWL0005.at(items[r].pos, format!("WORKING-STORAGE exceeds the interpreter's {MAX_STORAGE} bytes")));
         }
         if let Some(name) = &items[r].name {
             root_offsets.push((name.clone(), offset));
@@ -596,7 +596,7 @@ fn rename(items: &mut [Item], index: usize, e: &DataEntry, qualify: Qualify) -> 
     let Some((first, last)) = &e.renames else { return Ok(()) };
     let record = items[index].parent.unwrap_or(index);
     let find = |r: &Ref| -> Result<usize, Error> {
-        let err = |m: String| Err(Error::at(r.pos, format!("RENAMES {}: {m}", r.name)));
+        let err = |m: String| Err(syntax::messages::IWC0039.at(r.pos, format!("RENAMES {}: {m}", r.name)));
         if !r.subscripts.is_empty() || r.refmod.is_some() {
             return err("a renamed item is named without subscripts or reference modification".into());
         }
@@ -627,7 +627,7 @@ fn rename(items: &mut [Item], index: usize, e: &DataEntry, qualify: Qualify) -> 
         Ok(t)
     };
     if first.name == items[record].name.clone().unwrap_or_default() && first.qualifiers.is_empty() {
-        return Err(Error::at(first.pos, format!("RENAMES {}: a level-66 entry cannot rename a level-01 record", first.name)));
+        return Err(syntax::messages::IWC0040.at(first.pos, format!("RENAMES {}: a level-66 entry cannot rename a level-01 record", first.name)));
     }
     let a = find(first)?;
     let Some(last) = last else {
@@ -642,12 +642,12 @@ fn rename(items: &mut [Item], index: usize, e: &DataEntry, qualify: Qualify) -> 
     let mut up = items[b].parent;
     while let Some(p) = up {
         if p == a {
-            return Err(Error::at(last.pos, format!("RENAMES {} THRU {}: the last item cannot be within the first", first.name, last.name)));
+            return Err(syntax::messages::IWC0041.at(last.pos, format!("RENAMES {} THRU {}: the last item cannot be within the first", first.name, last.name)));
         }
         up = items[p].parent;
     }
     if a == b || items[b].offset < items[a].offset || end(b) < end(a) {
-        return Err(Error::at(last.pos, format!("RENAMES {} THRU {}: the last item must start and end no earlier than the first", first.name, last.name)));
+        return Err(syntax::messages::IWC0042.at(last.pos, format!("RENAMES {} THRU {}: the last item must start and end no earlier than the first", first.name, last.name)));
     }
     let root = |mut i: usize| {
         while let Some(p) = items[i].parent {
@@ -656,7 +656,7 @@ fn rename(items: &mut [Item], index: usize, e: &DataEntry, qualify: Qualify) -> 
         i
     };
     if let Some(t) = (0..items.len()).find(|&i| items[i].depending_on.is_some() && root(i) == record && items[i].offset >= items[a].offset && items[i].offset < end(b)) {
-        return Err(Error::at(items[t].pos, format!("RENAMES {} THRU {}: no OCCURS DEPENDING ON between them", first.name, last.name)));
+        return Err(syntax::messages::IWC0043.at(items[t].pos, format!("RENAMES {} THRU {}: no OCCURS DEPENDING ON between them", first.name, last.name)));
     }
     let (offset, size, moved_by) = (items[a].offset, end(b) - items[a].offset, items[a].moved_by.clone());
     let it = &mut items[index];
@@ -791,7 +791,7 @@ fn measure(items: &mut [Item], aligns: &[u32], index: usize, base: u32) -> Resul
     for c in children {
         let redefined = match items[c].redefines.clone() {
             Some(target) => Some(placed.iter().rev().find(|(n, _)| n.as_deref() == Some(target.as_str())).map(|&(_, o)| o).ok_or_else(|| {
-                Error::at(items[c].pos, format!("REDEFINES {target}: no earlier item of that name at this level"))
+                syntax::messages::IWC0044.at(items[c].pos, format!("REDEFINES {target}: no earlier item of that name at this level"))
             })?),
             None => None,
         };
@@ -799,7 +799,7 @@ fn measure(items: &mut [Item], aligns: &[u32], index: usize, base: u32) -> Resul
         let m = first_alignment(items, aligns, c);
         let slack = (m - (base + start) % m) % m;
         if slack > 0 && redefined.is_some() {
-            return Err(Error::at(items[c].pos, format!("a SYNCHRONIZED item at the start of a REDEFINES would need {slack} slack bytes: the redefined item must be on a {m}-byte boundary")));
+            return Err(syntax::messages::IWC0045.at(items[c].pos, format!("a SYNCHRONIZED item at the start of a REDEFINES would need {slack} slack bytes: the redefined item must be on a {m}-byte boundary")));
         }
         if slack > 0 {
             give_slack(items, previous, cursor, slack);
@@ -810,7 +810,7 @@ fn measure(items: &mut [Item], aligns: &[u32], index: usize, base: u32) -> Resul
             let m = widest_alignment(items, aligns, c);
             items[c].size = items[c].size.div_ceil(m) * m;
         }
-        let too_large = || Error::at(items[c].pos, format!("an item larger than the interpreter's {MAX_STORAGE} bytes"));
+        let too_large = || syntax::messages::IWL0006.at(items[c].pos, format!("an item larger than the interpreter's {MAX_STORAGE} bytes"));
         let span = items[c].size.checked_mul(items[c].occurs).filter(|&s| s <= MAX_STORAGE).ok_or_else(too_large)?;
         if redefined.is_none() {
             cursor = offset.checked_add(span).filter(|&s| s <= MAX_STORAGE).ok_or_else(too_large)?;
@@ -1066,7 +1066,7 @@ pub fn record_area_owners(files: &[FileDecl], environment: &Environment) -> Resu
     for (clause, names) in clauses {
         let mut members = Vec::new();
         for name in names {
-            let k = files.iter().position(|f| f.name == *name).ok_or_else(|| Error::at(Pos::default(), format!("{clause} names {name}, which is not a file")))?;
+            let k = files.iter().position(|f| f.name == *name).ok_or_else(|| syntax::messages::IWC0046.at(Pos::default(), format!("{clause} names {name}, which is not a file")))?;
             if clause == "SAME RECORD AREA" || matches!(files[k].organization, Organization::Indexed | Organization::Relative) {
                 members.push(k);
             }

@@ -107,7 +107,7 @@ pub(crate) fn check_write(program: &Program, layout: &Layout, record: &Ref, adva
     let Some(f) = file_of(layout, record).map(|k| &program.files[k]) else { return };
     let phrase = end_of_page.on.is_some() || end_of_page.not_on.is_some();
     if phrase && f.linage.is_none() {
-        errors.push(Error::at(pos, format!("WRITE ... END-OF-PAGE: the FD of {} has no LINAGE clause", f.name)));
+        errors.push(syntax::messages::IWC0108.at(pos, format!("WRITE ... END-OF-PAGE: the FD of {} has no LINAGE clause", f.name)));
     }
     if let (Some(Advancing::Mnemonic { name, .. }), Some(_)) = (advancing, &f.linage) {
         errors.push(syntax::messages::IWR0014.at(pos, format!("WRITE ... ADVANCING {name} on {}, whose FD has LINAGE, is not supported yet", f.name)));
@@ -160,7 +160,7 @@ pub(crate) fn check_receivers(layout: &Layout, s: &Stmt, errors: &mut Vec<Error>
         if let Ok(Resolved::Item(i)) = layout.resolve(&r.name, &r.qualifiers, r.pos)
             && layout.linage_counters.contains(&Some(i))
         {
-            errors.push(Error::at(r.pos, "LINAGE-COUNTER can be read, but no statement can change it"));
+            errors.push(syntax::messages::IWC0109.at(r.pos, "LINAGE-COUNTER can be read, but no statement can change it"));
         }
     }
 }

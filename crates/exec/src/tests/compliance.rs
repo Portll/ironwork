@@ -57,7 +57,7 @@ fn each_extension_is_a_warning_naming_it_and_where_it_is() {
 fn strict_refuses_the_extended_program_as_before() {
     assert!(syntax::parse(EXTENDED_PROGRAM).is_err_and(|e| !e.message.contains("IWX")));
     let fixed = program("", "       78  N VALUE 1.\n", &line("GOBACK."));
-    assert_eq!(compile_errors(&fixed), "level 78 is not a data level");
+    assert_eq!(compile_errors(&fixed), "IWC0034-S level 78 is not a data level");
 }
 
 /// A caller and a subprogram whose header ends RETURNING OMITTED, GnuCOBOL's program that returns

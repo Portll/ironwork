@@ -32,32 +32,32 @@ pub(crate) fn rules(program: &Program, errors: &mut Vec<Error>) {
             let name = e.name.as_deref().unwrap_or("FILLER");
             if e.external {
                 if section != "WORKING-STORAGE" {
-                    errors.push(Error::at(e.pos, format!("{name}: EXTERNAL is not allowed in the {section} SECTION")));
+                    errors.push(syntax::messages::IWC0189.at(e.pos, format!("{name}: EXTERNAL is not allowed in the {section} SECTION")));
                 } else if e.level != 1 {
-                    errors.push(Error::at(e.pos, format!("{name}: EXTERNAL goes on a level-01 entry")));
+                    errors.push(syntax::messages::IWC0190.at(e.pos, format!("{name}: EXTERNAL goes on a level-01 entry")));
                 } else if e.redefines.is_some() {
-                    errors.push(Error::at(e.pos, format!("{name}: EXTERNAL and REDEFINES cannot be in the same entry")));
+                    errors.push(syntax::messages::IWC0191.at(e.pos, format!("{name}: EXTERNAL and REDEFINES cannot be in the same entry")));
                 } else if e.name.is_none() {
-                    errors.push(Error::at(e.pos, "an EXTERNAL record needs a data-name, not FILLER"));
+                    errors.push(syntax::messages::IWC0192.at(e.pos, "an EXTERNAL record needs a data-name, not FILLER"));
                 } else if externals.contains(&name) {
-                    errors.push(Error::at(e.pos, format!("{name}: another EXTERNAL record of the program has the same name")));
+                    errors.push(syntax::messages::IWC0193.at(e.pos, format!("{name}: another EXTERNAL record of the program has the same name")));
                 } else {
                     externals.push(name);
                 }
             }
             if e.global {
                 if e.level != 1 {
-                    errors.push(Error::at(e.pos, format!("{name}: GLOBAL goes on a level-01 entry")));
+                    errors.push(syntax::messages::IWC0194.at(e.pos, format!("{name}: GLOBAL goes on a level-01 entry")));
                 } else if e.name.is_none() {
-                    errors.push(Error::at(e.pos, "a GLOBAL record needs a data-name, not FILLER"));
+                    errors.push(syntax::messages::IWC0195.at(e.pos, "a GLOBAL record needs a data-name, not FILLER"));
                 } else if globals.contains(&name) {
-                    errors.push(Error::at(e.pos, format!("{name}: another GLOBAL record of the DATA DIVISION has the same name")));
+                    errors.push(syntax::messages::IWC0196.at(e.pos, format!("{name}: another GLOBAL record of the DATA DIVISION has the same name")));
                 } else {
                     globals.push(name);
                 }
             }
             if let Some(r) = record.filter(|r| r.external && e.level != 88 && e.value.is_some()) {
-                errors.push(Error::at(e.pos, format!("{name}: an item of EXTERNAL record {} takes no VALUE clause", r.name.as_deref().unwrap_or_default())));
+                errors.push(syntax::messages::IWC0197.at(e.pos, format!("{name}: an item of EXTERNAL record {} takes no VALUE clause", r.name.as_deref().unwrap_or_default())));
             }
             if contains && !e.indexed_by.is_empty() && record.is_some_and(|r| r.global) {
                 errors.push(syntax::messages::IWR0015.at(e.pos, format!("{name}: INDEXED BY in a GLOBAL record, in a program that contains others, is not supported yet")));
@@ -66,7 +66,7 @@ pub(crate) fn rules(program: &Program, errors: &mut Vec<Error>) {
     }
     for f in &program.files {
         if (f.external || f.global) && f.records.iter().any(|e| e.level == 1 && e.name.is_none()) {
-            errors.push(Error::at(f.pos, format!("FD {}: a record of an EXTERNAL or GLOBAL file needs a data-name, not FILLER", f.name)));
+            errors.push(syntax::messages::IWC0198.at(f.pos, format!("FD {}: a record of an EXTERNAL or GLOBAL file needs a data-name, not FILLER", f.name)));
         }
         if f.external && f.linage.is_some() {
             errors.push(syntax::messages::IWR0016.at(f.pos, format!("FD {}: LINAGE on an EXTERNAL file is not supported yet", f.name)));
@@ -159,7 +159,7 @@ pub(crate) fn check(program: &Program, layout: &Layout, errors: &mut Vec<Error>)
             && item.redefines.is_some()
             && item.size > *size
         {
-            errors.push(Error::at(item.pos, format!("{}: {} bytes, larger than the EXTERNAL record {name} it redefines", item.name.as_deref().unwrap_or_default(), item.size)));
+            errors.push(syntax::messages::IWC0199.at(item.pos, format!("{}: {} bytes, larger than the EXTERNAL record {name} it redefines", item.name.as_deref().unwrap_or_default(), item.size)));
         }
     }
     for f in &program.files {
@@ -191,7 +191,7 @@ pub(crate) fn set_address(layout: &Layout, r: &Ref, errors: &mut Vec<Error>) {
         Binding::Global { section: Section::Linkage, program, .. } => {
             errors.push(syntax::messages::IWR0021.at(r.pos, format!("SET ADDRESS OF {}, a GLOBAL LINKAGE record of {program}, in a program it contains is not supported yet", r.name)));
         }
-        _ => errors.push(Error::at(r.pos, format!("SET ADDRESS OF {}: an EXTERNAL or GLOBAL record is not a LINKAGE record of the program", r.name))),
+        _ => errors.push(syntax::messages::IWC0200.at(r.pos, format!("SET ADDRESS OF {}: an EXTERNAL or GLOBAL record is not a LINKAGE record of the program", r.name))),
     }
 }
 

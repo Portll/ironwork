@@ -150,7 +150,7 @@ pub(crate) fn prepare(program: &mut Program, adv: bool, qualify: numeric::Qualif
         let file = match holders.as_slice() {
             [k] => Some(*k),
             [] => {
-                errors.push(Error::at(r.pos, format!("report {} is named in no FD's REPORT clause", r.name)));
+                errors.push(syntax::messages::IWC0146.at(r.pos, format!("report {} is named in no FD's REPORT clause", r.name)));
                 None
             }
             _ => {
@@ -203,10 +203,10 @@ pub(crate) fn prepare(program: &mut Program, adv: bool, qualify: numeric::Qualif
             drafts[ri].width = width;
             let end = line_end(&drafts[ri]);
             if end > width {
-                errors.push(Error::at(reports[ri].pos, format!("report {}: a line reaches column {end}, beyond the {width} bytes of the report file's record", reports[ri].name)));
+                errors.push(syntax::messages::IWC0147.at(reports[ri].pos, format!("report {}: a line reaches column {end}, beyond the {width} bytes of the report file's record", reports[ri].name)));
             }
             if let Some(limit) = reports[ri].line_limit.filter(|&l| end > l as usize) {
-                errors.push(Error::at(reports[ri].pos, format!("report {}: a line reaches column {end}, beyond LINE LIMIT {limit}", reports[ri].name)));
+                errors.push(syntax::messages::IWC0148.at(reports[ri].pos, format!("report {}: a line reaches column {end}, beyond LINE LIMIT {limit}", reports[ri].name)));
             }
         }
     }
@@ -278,16 +278,16 @@ fn draft_group(
         let elementary = g.entries.get(ei + 1).is_none_or(|next| next.level <= e.level);
         if !elementary {
             if e.column.is_some() || e.picture.is_some() || e.content.is_some() {
-                errors.push(Error::at(e.pos, "a group entry in a report group cannot have COLUMN, PICTURE, SOURCE, VALUE or SUM"));
+                errors.push(syntax::messages::IWC0149.at(e.pos, "a group entry in a report group cannot have COLUMN, PICTURE, SOURCE, VALUE or SUM"));
             }
             inherited.push((e.level, gi, bwz, just));
             continue;
         }
         let Some(picture) = entry_picture(e) else {
             match (&e.content, e.column) {
-                (Some(rw::Content::Sum(_)), _) => errors.push(Error::at(e.pos, "a SUM entry needs a PICTURE")),
-                (Some(rw::Content::Value(_)), _) => errors.push(Error::at(e.pos, "a VALUE entry with a figurative constant or ALL needs a PICTURE")),
-                (Some(_), Some(_)) => errors.push(Error::at(e.pos, "a printed SOURCE entry needs a PICTURE")),
+                (Some(rw::Content::Sum(_)), _) => errors.push(syntax::messages::IWC0150.at(e.pos, "a SUM entry needs a PICTURE")),
+                (Some(rw::Content::Value(_)), _) => errors.push(syntax::messages::IWC0151.at(e.pos, "a VALUE entry with a figurative constant or ALL needs a PICTURE")),
+                (Some(_), Some(_)) => errors.push(syntax::messages::IWC0152.at(e.pos, "a printed SOURCE entry needs a PICTURE")),
                 (None, Some(column)) => {
                     let start = column_start(column, last_column, 1, e.pos, errors);
                     last_column = start;
@@ -304,14 +304,14 @@ fn draft_group(
             }
         };
         if e.content.is_none() && e.name.is_none() {
-            errors.push(Error::at(e.pos, "a report entry with no SOURCE, VALUE or SUM needs a data-name for the program to fill it"));
+            errors.push(syntax::messages::IWC0153.at(e.pos, "a report entry with no SOURCE, VALUE or SUM needs a data-name for the program to fill it"));
             continue;
         }
         let size = (analysed.size as usize).max(1);
         let numeric_edited = analysed.category == Category::NumericEdited;
         let numeric = numeric_edited || analysed.category == Category::Numeric;
         if e.blank_when_zero && !numeric {
-            errors.push(Error::at(e.pos, "BLANK WHEN ZERO needs a numeric PICTURE"));
+            errors.push(syntax::messages::IWC0154.at(e.pos, "BLANK WHEN ZERO needs a numeric PICTURE"));
         }
         let mut field = entry(5, None, Some(picture.clone()), Some(Usage::Display), e.pos);
         field.sign = e.sign;
@@ -319,7 +319,7 @@ fn draft_group(
         field.blank_when_zero = bwz && numeric_edited;
         if let Some(rw::Content::Sum(clauses)) = &e.content {
             let Some((mut int, mut dec)) = places(&picture, notation) else {
-                errors.push(Error::at(e.pos, "a SUM entry needs a numeric PICTURE"));
+                errors.push(syntax::messages::IWC0155.at(e.pos, "a SUM entry needs a numeric PICTURE"));
                 continue;
             };
             for operand in clauses.iter().flat_map(|c| &c.operands) {
@@ -347,7 +347,7 @@ fn draft_group(
                 last_column = start + size - 1;
                 match d.lines.last_mut() {
                     Some((_, fields)) => fields.push(DraftField { column: start.saturating_sub(1), ..draft }),
-                    None => errors.push(Error::at(e.pos, "a COLUMN with no LINE above it")),
+                    None => errors.push(syntax::messages::IWC0156.at(e.pos, "a COLUMN with no LINE above it")),
                 }
             }
             None => d.unprinted.push(draft),
@@ -365,7 +365,7 @@ fn column_start(column: ColumnNumber, last: usize, size: usize, pos: Pos, errors
         ColumnNumber::Center(n) => n as i64 - (size as i64 - 1) / 2,
     };
     if start < 1 {
-        errors.push(Error::at(pos, "a report field that starts left of column 1"));
+        errors.push(syntax::messages::IWC0157.at(pos, "a report field that starts left of column 1"));
         return 1;
     }
     start as usize
@@ -440,7 +440,7 @@ pub(crate) fn resolve(program: &Program, layout: &Layout, drafts: Vec<Draft>, er
     let mut writer = Writer::default();
     if reports.is_empty() {
         for u in &program.report_writer.uses {
-            errors.push(Error::at(u.pos, format!("USE BEFORE REPORTING {}: the program has no REPORT SECTION", u.group)));
+            errors.push(syntax::messages::IWC0158.at(u.pos, format!("USE BEFORE REPORTING {}: the program has no REPORT SECTION", u.group)));
         }
         return writer;
     }
@@ -461,8 +461,8 @@ pub(crate) fn resolve(program: &Program, layout: &Layout, drafts: Vec<Draft>, er
             .collect();
         match found.as_slice() {
             [(ri, gi)] => writer.reports[*ri].groups[*gi].declarative = Some((u.section, crate::section_end(program, u.section))),
-            [] => errors.push(Error::at(u.pos, format!("USE BEFORE REPORTING {}: no report group has that name", u.group))),
-            _ => errors.push(Error::at(u.pos, format!("USE BEFORE REPORTING {}: more than one report group has that name; qualify it with IN", u.group))),
+            [] => errors.push(syntax::messages::IWC0159.at(u.pos, format!("USE BEFORE REPORTING {}: no report group has that name", u.group))),
+            _ => errors.push(syntax::messages::IWC0160.at(u.pos, format!("USE BEFORE REPORTING {}: more than one report group has that name; qualify it with IN", u.group))),
         }
     }
     writer
@@ -476,7 +476,7 @@ fn field_content(r: &rw::Report, e: &rw::Entry, f: &DraftField, total: Option<us
             let x = qualified(x, &r.name);
             check.expr(&x);
             if (!matches!(x, Expr::Operand(_)) || e.rounded) && !matches!(f.category, Category::Numeric | Category::NumericEdited) {
-                check.errors.push(Error::at(e.pos, "an arithmetic SOURCE, or ROUNDED, needs a numeric PICTURE"));
+                check.errors.push(syntax::messages::IWC0161.at(e.pos, "an arithmetic SOURCE, or ROUNDED, needs a numeric PICTURE"));
             }
             FieldContent::Source(x)
         }
@@ -504,13 +504,13 @@ fn check_lines(lines: &[(LineNumber, Vec<DraftField>)], kind: GroupKind, paged: 
         match *number {
             LineNumber::Line(n) | LineNumber::NextPage(Some(n)) => {
                 if !paged {
-                    errors.push(Error::at(pos, "an absolute LINE needs a PAGE LIMIT"));
+                    errors.push(syntax::messages::IWC0162.at(pos, "an absolute LINE needs a PAGE LIMIT"));
                 }
                 if relative {
-                    errors.push(Error::at(pos, "a report group whose first LINE is relative must have only relative LINEs"));
+                    errors.push(syntax::messages::IWC0163.at(pos, "a report group whose first LINE is relative must have only relative LINEs"));
                 }
                 if previous.is_some_and(|p| n <= p) {
-                    errors.push(Error::at(pos, "absolute LINE numbers in a report group must increase"));
+                    errors.push(syntax::messages::IWC0164.at(pos, "absolute LINE numbers in a report group must increase"));
                 }
                 previous = Some(n);
             }
@@ -519,13 +519,13 @@ fn check_lines(lines: &[(LineNumber, Vec<DraftField>)], kind: GroupKind, paged: 
         }
         if matches!(number, LineNumber::NextPage(_)) {
             if !paged {
-                errors.push(Error::at(pos, "NEXT PAGE needs a PAGE LIMIT"));
+                errors.push(syntax::messages::IWC0165.at(pos, "NEXT PAGE needs a PAGE LIMIT"));
             }
             if li > 0 {
                 errors.push(syntax::messages::IWR0025.at(pos, "NEXT PAGE on a LINE other than a group's first (MULTIPLE PAGE) is not supported yet"));
             }
             if matches!(kind, GroupKind::PageHeading | GroupKind::PageFooting) {
-                errors.push(Error::at(pos, "a PAGE HEADING or PAGE FOOTING cannot begin on the NEXT PAGE"));
+                errors.push(syntax::messages::IWC0166.at(pos, "a PAGE HEADING or PAGE FOOTING cannot begin on the NEXT PAGE"));
             }
         }
     }
@@ -539,7 +539,7 @@ fn resolve_report(program: &Program, layout: &Layout, ri: usize, r: &rw::Report,
         it.parent.is_none() && it.file.is_none() && it.linkage.is_none() && !it.local && it.name.as_deref() == Some(r.name.as_str())
     });
     let Some(root) = root.filter(|&i| layout.items[i].children.len() == draft.children) else {
-        errors.push(Error::at(r.pos, format!("report {}: its report control area could not be laid out", r.name)));
+        errors.push(syntax::messages::IWC0167.at(r.pos, format!("report {}: its report control area could not be laid out", r.name)));
         return None;
     };
     let children = &layout.items[root].children;
@@ -567,11 +567,11 @@ fn resolve_report(program: &Program, layout: &Layout, ri: usize, r: &rw::Report,
             None => 0,
             Some(None) if levels <= 1 => levels,
             Some(None) => {
-                check.errors.push(Error::at(g.pos, "a CONTROL HEADING or FOOTING must name its control when the report has several"));
+                check.errors.push(syntax::messages::IWC0168.at(g.pos, "a CONTROL HEADING or FOOTING must name its control when the report has several"));
                 0
             }
             Some(Some(name)) => control_level(&r.controls, &name).unwrap_or_else(|| {
-                check.errors.push(Error::at(g.pos, "a CONTROL HEADING or FOOTING names a control that is not in the report's CONTROL clause"));
+                check.errors.push(syntax::messages::IWC0169.at(g.pos, "a CONTROL HEADING or FOOTING names a control that is not in the report's CONTROL clause"));
                 0
             }),
         };
@@ -586,19 +586,19 @@ fn resolve_report(program: &Program, layout: &Layout, ri: usize, r: &rw::Report,
         };
         if let Some(slot) = slot {
             if slot.is_some() {
-                check.errors.push(Error::at(g.pos, format!("report {} has two {kind:?} groups for the same level", r.name)));
+                check.errors.push(syntax::messages::IWC0170.at(g.pos, format!("report {} has two {kind:?} groups for the same level", r.name)));
             }
             *slot = Some(gi);
         }
         if !paged && matches!(kind, GroupKind::PageHeading | GroupKind::PageFooting) {
-            check.errors.push(Error::at(g.pos, "a PAGE HEADING or PAGE FOOTING needs a PAGE LIMIT"));
+            check.errors.push(syntax::messages::IWC0171.at(g.pos, "a PAGE HEADING or PAGE FOOTING needs a PAGE LIMIT"));
         }
         if let Some(ng) = g.next_group {
             if !paged && !matches!(ng, NextGroup::Plus(_)) {
-                check.errors.push(Error::at(g.pos, "NEXT GROUP with a line or NEXT PAGE needs a PAGE LIMIT"));
+                check.errors.push(syntax::messages::IWC0172.at(g.pos, "NEXT GROUP with a line or NEXT PAGE needs a PAGE LIMIT"));
             }
             if matches!(kind, GroupKind::PageHeading | GroupKind::ReportFooting) {
-                check.errors.push(Error::at(g.pos, "NEXT GROUP is not allowed in a PAGE HEADING or REPORT FOOTING"));
+                check.errors.push(syntax::messages::IWC0173.at(g.pos, "NEXT GROUP is not allowed in a PAGE HEADING or REPORT FOOTING"));
             }
         }
         let dg = &draft.groups[gi];
@@ -623,7 +623,7 @@ fn resolve_report(program: &Program, layout: &Layout, ri: usize, r: &rw::Report,
         groups.push(Group { name: g.name.clone(), kind, level, next_group: g.next_group, lines, unprinted, cross: Vec::new(), rolls: Vec::new(), totals, indicate, declarative: None });
     }
     if !groups.iter().any(|g| g.kind.is_body()) {
-        check.errors.push(Error::at(r.pos, format!("report {} has no CONTROL HEADING, DETAIL or CONTROL FOOTING group", r.name)));
+        check.errors.push(syntax::messages::IWC0174.at(r.pos, format!("report {} has no CONTROL HEADING, DETAIL or CONTROL FOOTING group", r.name)));
     }
     let details: Vec<usize> = groups.iter().enumerate().filter(|(_, g)| g.kind == GroupKind::Detail).map(|(i, _)| i).collect();
     let mut subtotals = Vec::new();
@@ -635,14 +635,14 @@ fn resolve_report(program: &Program, layout: &Layout, ri: usize, r: &rw::Report,
                 if let Some(reset) = &clause.reset {
                     match control_level(&r.controls, reset) {
                         Some(level) => sums[s].reset = Some(level),
-                        None => check.errors.push(Error::at(e.pos, "RESET ON names a control that is not in the report's CONTROL clause")),
+                        None => check.errors.push(syntax::messages::IWC0175.at(e.pos, "RESET ON names a control that is not in the report's CONTROL clause")),
                     }
                 }
                 let mut upon = Vec::new();
                 for u in &clause.upon {
                     match details.iter().copied().find(|&d| groups[d].name.as_deref() == Some(u.name.as_str())) {
                         Some(d) => upon.push(d),
-                        None => check.errors.push(Error::at(u.pos, format!("SUM ... UPON {}: not a DETAIL group of report {}", u.name, r.name))),
+                        None => check.errors.push(syntax::messages::IWC0176.at(u.pos, format!("SUM ... UPON {}: not a DETAIL group of report {}", u.name, r.name))),
                     }
                 }
                 for operand in &clause.operands {
@@ -653,7 +653,7 @@ fn resolve_report(program: &Program, layout: &Layout, ri: usize, r: &rw::Report,
                         }
                         let source = &r.groups[og].entries[oe];
                         if entry_picture(source).as_deref().and_then(|p| places(p, crate::picture::Notation::of(&program.environment))).is_none() {
-                            check.errors.push(Error::at(operand.pos, format!("SUM {}: the entry summed must be numeric", operand.name)));
+                            check.errors.push(syntax::messages::IWC0177.at(operand.pos, format!("SUM {}: the entry summed must be numeric", operand.name)));
                             continue;
                         }
                         let origin = match &source.content {
@@ -664,7 +664,7 @@ fn resolve_report(program: &Program, layout: &Layout, ri: usize, r: &rw::Report,
                                 None => continue,
                             },
                             None => {
-                                check.errors.push(Error::at(operand.pos, format!("SUM {}: an entry the program fills itself cannot be summed", operand.name)));
+                                check.errors.push(syntax::messages::IWC0178.at(operand.pos, format!("SUM {}: an entry the program fills itself cannot be summed", operand.name)));
                                 continue;
                             }
                         };
@@ -675,7 +675,7 @@ fn resolve_report(program: &Program, layout: &Layout, ri: usize, r: &rw::Report,
                     if let Some(i) = check.item(operand)
                         && !layout.items[i].kind.is_numeric()
                     {
-                        check.errors.push(Error::at(operand.pos, format!("SUM {}: not a numeric data item", operand.name)));
+                        check.errors.push(syntax::messages::IWC0179.at(operand.pos, format!("SUM {}: not a numeric data item", operand.name)));
                     }
                     let text = ref_text(operand);
                     let correlated: Vec<usize> = details
@@ -698,11 +698,11 @@ fn resolve_report(program: &Program, layout: &Layout, ri: usize, r: &rw::Report,
     for (gi, g) in groups.iter_mut().enumerate() {
         match order_cross(std::mem::take(&mut g.cross)) {
             Ok(ordered) => g.cross = ordered,
-            Err(()) => check.errors.push(Error::at(r.groups[gi].pos, "SUM entries of a report group total each other in a circle")),
+            Err(()) => check.errors.push(syntax::messages::IWC0180.at(r.groups[gi].pos, "SUM entries of a report group total each other in a circle")),
         }
     }
     if !paged && (r.heading.is_some() || r.first_detail.is_some() || r.last_detail.is_some() || r.footing.is_some()) {
-        check.errors.push(Error::at(r.pos, "HEADING, FIRST DETAIL, LAST DETAIL and FOOTING need a PAGE LIMIT"));
+        check.errors.push(syntax::messages::IWC0181.at(r.pos, "HEADING, FIRST DETAIL, LAST DETAIL and FOOTING need a PAGE LIMIT"));
     }
     let page = r.page.map(|limit| regions(r, limit, page_footing.map(|p| &groups[p]), check.errors));
     Some(Report {
@@ -767,7 +767,7 @@ fn regions(r: &rw::Report, limit: u32, page_footing: Option<&Group>, errors: &mu
     let first_detail = r.first_detail.map_or(heading, i64::from);
     let limit = limit.max(last_detail).max(footing);
     if !(1 <= heading && heading <= first_detail && first_detail <= last_detail && last_detail <= footing) {
-        errors.push(Error::at(r.pos, format!("report {}: the page regions must run HEADING <= FIRST DETAIL <= LAST DETAIL <= FOOTING <= PAGE LIMIT", r.name)));
+        errors.push(syntax::messages::IWC0182.at(r.pos, format!("report {}: the page regions must run HEADING <= FIRST DETAIL <= LAST DETAIL <= FOOTING <= PAGE LIMIT", r.name)));
     }
     Page { limit, heading, first_detail, last_detail, footing }
 }
@@ -779,7 +779,7 @@ pub(crate) fn check_statement(program: &Program, s: &ReportStmt, errors: &mut Ve
         ReportStmt::Initiate { reports: names, pos } | ReportStmt::Terminate { reports: names, pos } => {
             for n in names {
                 if !reports.iter().any(|r| r.name == *n) {
-                    errors.push(Error::at(*pos, format!("{n} is not a report of this program")));
+                    errors.push(syntax::messages::IWC0183.at(*pos, format!("{n} is not a report of this program")));
                 }
             }
         }
@@ -788,7 +788,7 @@ pub(crate) fn check_statement(program: &Program, s: &ReportStmt, errors: &mut Ve
                 && let Some(r) = reports.iter().find(|r| r.name == *name)
             {
                 if !r.groups.iter().any(|g| matches!(g.kind, GroupType::ControlHeading(_) | GroupType::ControlFooting(_))) {
-                    errors.push(Error::at(*pos, format!("GENERATE {name}: summary reporting needs a CONTROL HEADING or CONTROL FOOTING group")));
+                    errors.push(syntax::messages::IWC0184.at(*pos, format!("GENERATE {name}: summary reporting needs a CONTROL HEADING or CONTROL FOOTING group")));
                 }
                 return;
             }
@@ -800,9 +800,9 @@ pub(crate) fn check_statement(program: &Program, s: &ReportStmt, errors: &mut Ve
                 .collect::<Vec<_>>();
             match found.as_slice() {
                 [g] if g.kind == GroupType::Detail => {}
-                [_] => errors.push(Error::at(*pos, format!("GENERATE {name}: not a DETAIL group"))),
-                [] => errors.push(Error::at(*pos, format!("GENERATE {name}: no report or DETAIL group of that name"))),
-                _ => errors.push(Error::at(*pos, format!("GENERATE {name}: more than one report has a DETAIL group of that name; qualify it with IN"))),
+                [_] => errors.push(syntax::messages::IWC0185.at(*pos, format!("GENERATE {name}: not a DETAIL group"))),
+                [] => errors.push(syntax::messages::IWC0186.at(*pos, format!("GENERATE {name}: no report or DETAIL group of that name"))),
+                _ => errors.push(syntax::messages::IWC0187.at(*pos, format!("GENERATE {name}: more than one report has a DETAIL group of that name; qualify it with IN"))),
             }
         }
         ReportStmt::Suppress { .. } => {}

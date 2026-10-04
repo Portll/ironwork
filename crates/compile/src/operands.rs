@@ -51,7 +51,7 @@ impl Check<'_> {
         }
         let intrinsic = crate::FUNCTIONS.contains(&f.name.as_str()) || rt::intrinsic::FUNCTIONS.contains(&f.name.as_str());
         if intrinsic && f.args.iter().any(|a| matches!(a, Expr::Operand(Operand::Literal(Literal::Figurative(_) | Literal::All(_))))) {
-            self.errors.push(Error::at(f.pos, format!("FUNCTION {}: a figurative constant is an argument only inside an arithmetic expression", f.name)));
+            self.errors.push(syntax::messages::IWC0141.at(f.pos, format!("FUNCTION {}: a figurative constant is an argument only inside an arithmetic expression", f.name)));
         }
         if !matches!(f.name.as_str(), "MAX" | "MIN" | "ORD-MAX" | "ORD-MIN") {
             return;
@@ -61,7 +61,7 @@ impl Check<'_> {
                 && let Ok(Resolved::Item(i)) = self.layout.resolve(&r.name, &r.qualifiers, r.pos)
                 && matches!(self.layout.items[i].kind, Kind::Pointer | Kind::ObjectReference | Kind::ProgramPointer)
             {
-                self.errors.push(Error::at(f.pos, format!("FUNCTION {}: {} is a pointer or object reference, where an argument is alphabetic, alphanumeric, national or numeric", f.name, r.name)));
+                self.errors.push(syntax::messages::IWC0142.at(f.pos, format!("FUNCTION {}: {} is a pointer or object reference, where an argument is alphabetic, alphanumeric, national or numeric", f.name, r.name)));
             }
         }
         let classes: Vec<Class> = f.args.iter().filter_map(|a| self.class(a)).collect();
@@ -80,7 +80,7 @@ impl Check<'_> {
         for (x, y) in [(a, b), (b, a)] {
             if let (Some(left), Some(right)) = (self.native_numeric(x), self.nonnumeric(y)) {
                 let (first, second) = if std::ptr::eq(x, a) { (left, right) } else { (right, left) };
-                self.errors.push(Error::at(self.at, format!("{first} compared with {second}: an arithmetic expression or a numeric function is compared only with a numeric operand")));
+                self.errors.push(syntax::messages::IWC0143.at(self.at, format!("{first} compared with {second}: an arithmetic expression or a numeric function is compared only with a numeric operand")));
                 return;
             }
         }

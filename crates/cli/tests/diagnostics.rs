@@ -34,7 +34,7 @@ fn object_oriented(data: &str, body: &str) -> String {
     )
 }
 
-const MISSING: &str = "warning: program CLIENT uses object-oriented syntax, which IBM compiles only with THREAD, DLL, RENT and DBCS: THREAD, DLL missing from its CBL or PROCESS cards (see J13 and J19)";
+const MISSING: &str = "warning: IWC0112-W program CLIENT uses object-oriented syntax, which IBM compiles only with THREAD, DLL, RENT and DBCS: THREAD, DLL missing from its CBL or PROCESS cards (see J13 and J19)";
 
 fn stderr(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
@@ -136,8 +136,8 @@ fn ending_with(id: &str, last: &str) -> String {
     format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. {id}.\n       PROCEDURE DIVISION.\n           DISPLAY 'HELLO'\n{last}")
 }
 
-const CICS_NOTE: &str = "informational: IGYPS2091-W not given: the program ends with EXEC CICS RETURN, which the CICS translator turns into a CALL; --cics-return-warning=always gives the warning, =never drops this note";
-const NO_END: &str = "warning: no STOP RUN, GOBACK or EXIT PROGRAM in the program: check that it ends";
+const CICS_NOTE: &str = "informational: IWP0002-I IGYPS2091-W not given: the program ends with EXEC CICS RETURN, which the CICS translator turns into a CALL; --cics-return-warning=always gives the warning, =never drops this note";
+const NO_END: &str = "warning: IWC0055-W no STOP RUN, GOBACK or EXIT PROGRAM in the program: check that it ends";
 
 #[test]
 fn cics_return_warning_gives_a_note_once_the_warning_always_or_nothing_never() {
@@ -183,7 +183,7 @@ fn a_cics_program_with_goback_gets_nothing_and_a_program_with_no_end_and_no_cics
 #[test]
 fn initial_with_thread_checks_with_return_code_4_and_runs_as_noinitial() {
     let source = Source::new("initial-thread", "       CBL THREAD,INITIAL\n       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P RECURSIVE.\n       PROCEDURE DIVISION.\n           DISPLAY 'RAN'.\n           GOBACK.\n");
-    let warning = format!("{}: warning: INITIAL conflicts with THREAD, which IBM compiles only as NOINITIAL (see C217)\n", source.path());
+    let warning = format!("{}: warning: IWC0113-W INITIAL conflicts with THREAD, which IBM compiles only as NOINITIAL (see C217)\n", source.path());
     let checked = ironwork(&["check", source.path()]);
     assert_eq!((checked.status.code(), stderr(&checked)), (Some(4), warning.clone()));
     let ran = ironwork(&["run", source.path()]);
@@ -196,7 +196,7 @@ fn a_call_of_ceecbldy_under_intdate_lilian_is_a_warning_on_its_line_and_calls_ce
         format!("{card}       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  D.\n           05 D-LEN PIC S9(4) BINARY VALUE 8.\n           05 D-TEXT PIC X(8) VALUE '19950215'.\n       01  PICS.\n           05 P-LEN PIC S9(4) BINARY VALUE 8.\n           05 P-TEXT PIC X(8) VALUE 'YYYYMMDD'.\n       01  L PIC 9(9) BINARY.\n       PROCEDURE DIVISION.\n           CALL 'CEECBLDY' USING D PICS L OMITTED\n           DISPLAY L\n           GOBACK.\n")
     };
     let lilian = Source::new("ceecbldy-lilian", &program("       CBL INTDATE(LILIAN)\n"));
-    let warning = format!("{}:14:12: warning: CALL 'CEECBLDY' under INTDATE(LILIAN): CEECBLDY gives an ANSI integer date, which nothing can use under LILIAN, so the CALL is to CEEDAYS\n", lilian.path());
+    let warning = format!("{}:14:12: warning: IWC0056-W CALL 'CEECBLDY' under INTDATE(LILIAN): CEECBLDY gives an ANSI integer date, which nothing can use under LILIAN, so the CALL is to CEEDAYS\n", lilian.path());
     let checked = ironwork(&["check", lilian.path()]);
     assert_eq!((checked.status.code(), stderr(&checked)), (Some(4), warning.clone()));
     let ran = ironwork(&["run", lilian.path()]);

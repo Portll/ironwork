@@ -56,7 +56,7 @@ pub(crate) fn facts(program: &Program, layout: &Layout, declared: usize, options
         let name = layout.items[item].name.as_deref().unwrap_or("FILLER");
         let hex = rt::digest::hex(&bytes).to_ascii_uppercase();
         errors.push(
-            Error::at(pos, format!("NUMCHECK: {name} {why} wherever this statement reads it: its VALUE clauses give it X'{hex}' and no statement changes it, so the test is removed (see {NUMCHECK_ALWAYS_FAILS})"))
+            syntax::messages::IWC0110.at(pos, format!("NUMCHECK: {name} {why} wherever this statement reads it: its VALUE clauses give it X'{hex}' and no statement changes it, so the test is removed (see {NUMCHECK_ALWAYS_FAILS})"))
                 .graded(Severity::Error),
         );
     }
