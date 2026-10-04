@@ -63,15 +63,32 @@ impl Lower<'_> {
                 let current_of = current_of.as_deref().map(|c| self.sym(c));
                 (SqlStatement::Change { delete: matches!(kind, ChangeKind::Delete), inputs, current_of }, text.clone(), false)
             }
-            Statement::Open { cursor, declared: Some(Cursor { name: _, text, inputs, with_hold }) } => {
+            Statement::Open { cursor, declared: Some(Cursor { name: _, text, inputs, with_hold, statement }), using } => {
                 let hold = if *with_hold { " WITH HOLD" } else { "" };
-                let text = format!("DECLARE {cursor} CURSOR{hold} FOR {text}");
-                (SqlStatement::Open { cursor: self.sym(cursor), inputs: self.host_places(inputs, command)? }, text, *with_hold)
+                match statement {
+                    Some(name) => {
+                        let open = SqlStatement::OpenPrepared { cursor: self.sym(cursor), statement: self.sym(name), inputs: self.host_places(using, command)? };
+                        (open, format!("DECLARE {cursor} CURSOR{hold} FOR {name}"), *with_hold)
+                    }
+                    None => {
+                        let text = format!("DECLARE {cursor} CURSOR{hold} FOR {text}");
+                        (SqlStatement::Open { cursor: self.sym(cursor), inputs: self.host_places(inputs, command)? }, text, *with_hold)
+                    }
+                }
             }
             Statement::Fetch { cursor, into } => (SqlStatement::Fetch { cursor: self.sym(cursor), into: self.host_places(into, command)? }, format!("FETCH {cursor}"), false),
             Statement::Close { cursor } => (SqlStatement::Close { cursor: self.sym(cursor) }, format!("CLOSE {cursor}"), false),
             Statement::Commit => (SqlStatement::Commit, "COMMIT".into(), false),
             Statement::Rollback => (SqlStatement::Rollback, "ROLLBACK".into(), false),
+            Statement::Prepare { name, source } => {
+                let source = self.host_places(std::slice::from_ref(source), command)?;
+                (SqlStatement::Prepare { name: self.sym(name), source }, format!("PREPARE {name}"), false)
+            }
+            Statement::ExecuteImmediate { source } => (SqlStatement::ExecuteImmediate { source: self.host_places(std::slice::from_ref(source), command)? }, "EXECUTE IMMEDIATE".into(), false),
+            Statement::Execute { name, inputs } => {
+                let inputs = self.host_places(inputs, command)?;
+                (SqlStatement::Execute { name: self.sym(name), inputs }, format!("EXECUTE {name}"), false)
+            }
             Statement::Whenever { .. } | Statement::Declaration | Statement::DeclareCursor(_) | Statement::DeclareUnsupported { .. } => (SqlStatement::Declaration, String::new(), false),
             Statement::Unsupported(what) => (SqlStatement::Unsupported(self.sym(what)), String::new(), false),
             Statement::Connect { what, target } => (SqlStatement::Connect { what: self.sym(what), location: self.host_places(target.as_slice(), command)? }, String::new(), false),

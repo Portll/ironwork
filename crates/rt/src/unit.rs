@@ -192,12 +192,13 @@ pub enum Event<'a> {
 
 /// Every kind of [`Event::Sink`] ironwork raises. A sink record joins a cobolwork finding by its
 /// kind, so each is one cobolwork's `lib/dataflow.mjs` names (fixtures/cobolwork/evidence/sinks.tsv).
-pub const SINK_KINDS: [&str; 15] = [
+pub const SINK_KINDS: [&str; 16] = [
     "cics-dynamic-transfer",
     "cics-sysid",
     "connection-target",
     "dynamic-file-path",
     "dynamic-program-load",
+    "dynamic-sql",
     "http-header",
     "log",
     "os-command",

@@ -190,5 +190,108 @@ mod tests {
             let replayed = run(Box::new(Replay::parse(&text, false).expect("the recording parses")));
             assert_eq!(replayed.as_deref(), Ok(EXPECTED), "{text}");
         }
+
+        /// Lines that put `text` in STMT, thirty characters at a time.
+        fn set(text: &str) -> String {
+            let mut lines = String::from("           MOVE SPACES TO STMT-TEXT.\n");
+            for (k, chunk) in text.as_bytes().chunks(30).enumerate() {
+                let chunk = std::str::from_utf8(chunk).expect("ASCII");
+                lines += &format!("           MOVE '{chunk}' TO STMT-TEXT({}:{}).\n", 30 * k + 1, chunk.len());
+            }
+            lines + &format!("           MOVE {} TO STMT-LEN.\n", text.len())
+        }
+
+        fn shown(sql: &str, label: &str) -> String {
+            format!("           EXEC SQL {sql} END-EXEC.\n           MOVE SQLCODE TO E-CODE.\n           DISPLAY '{label} ' E-CODE.\n")
+        }
+
+        fn dynamic_program() -> String {
+            [
+                concat!(
+                    "       IDENTIFICATION DIVISION.\n",
+                    "       PROGRAM-ID. PGDYN.\n",
+                    "       DATA DIVISION.\n",
+                    "       WORKING-STORAGE SECTION.\n",
+                    "           EXEC SQL INCLUDE SQLCA END-EXEC.\n",
+                    "       01 STMT.\n",
+                    "          49 STMT-LEN  PIC S9(4) COMP.\n",
+                    "          49 STMT-TEXT PIC X(120).\n",
+                    "       01 WS-ID    PIC S9(9) COMP.\n",
+                    "       01 WS-NAME  PIC X(10).\n",
+                    "       01 E-CODE   PIC -9(3).\n",
+                    "           EXEC SQL DECLARE C2 CURSOR FOR SEL END-EXEC.\n",
+                    "       PROCEDURE DIVISION.\n",
+                ),
+                &set("CREATE TABLE dyn (id integer PRIMARY KEY, name char(10))"),
+                &shown("EXECUTE IMMEDIATE :STMT", "CREATE"),
+                &set("INSERT INTO dyn VALUES (?, ?)"),
+                &shown("PREPARE INS FROM :STMT", "PREPARE"),
+                "           MOVE 1 TO WS-ID. MOVE 'ADAMS' TO WS-NAME.\n",
+                &shown("EXECUTE INS USING :WS-ID, :WS-NAME", "INSERT"),
+                "           MOVE 2 TO WS-ID. MOVE 'BAKER' TO WS-NAME.\n",
+                &shown("EXECUTE INS USING :WS-ID, :WS-NAME", "INSERT"),
+                &shown("EXECUTE INS USING :WS-ID, :WS-NAME", "DUPLICATE"),
+                &set("SELEC name FROM dyn"),
+                &shown("PREPARE BAD FROM :STMT", "SYNTAX"),
+                &set("SELECT name FROM nosuch"),
+                &shown("PREPARE BAD FROM :STMT", "NO TABLE"),
+                &set("SELECT name FROM dyn WHERE id >= ? ORDER BY id"),
+                &shown("PREPARE SEL FROM :STMT", "PREPARE"),
+                "           MOVE 1 TO WS-ID.\n",
+                &shown("OPEN C2 USING :WS-ID", "OPEN"),
+                concat!(
+                    "           PERFORM UNTIL SQLCODE NOT = 0\n",
+                    "               EXEC SQL FETCH C2 INTO :WS-NAME END-EXEC\n",
+                    "               IF SQLCODE = 0\n",
+                    "                   DISPLAY 'ROW ' WS-NAME\n",
+                    "               END-IF\n",
+                    "           END-PERFORM.\n",
+                ),
+                &shown("CLOSE C2", "CLOSE"),
+                &set("DROP TABLE dyn"),
+                &shown("EXECUTE IMMEDIATE :STMT", "DROP"),
+                "           GOBACK.\n",
+            ]
+            .concat()
+        }
+
+        const DYNAMIC_EXPECTED: &str = concat!(
+            "CREATE  000\n",
+            "PREPARE  000\n",
+            "INSERT  000\n",
+            "INSERT  000\n",
+            "DUPLICATE -803\n",
+            "SYNTAX -104\n",
+            "NO TABLE -204\n",
+            "PREPARE  000\n",
+            "OPEN  000\n",
+            "ROW ADAMS     \n",
+            "ROW BAKER     \n",
+            "CLOSE  000\n",
+            "DROP  000\n",
+        );
+
+        fn run_dynamic(mut database: Box<dyn Database + '_>) -> Result<String, String> {
+            let compiled = crate::compile(syntax::parse(&dynamic_program()).expect("parses"), &[]).expect("compiles");
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let ran = compiled.execute_with(crate::unit::Library::default(), crate::files::Dds::default(), None, crate::unit::Clock::System, Some(database.as_mut()), &mut out, &mut err);
+            ran.map(|_| String::from_utf8(out).expect("DISPLAY writes text")).map_err(|a| format!("{}: {}", a.code, a.message))
+        }
+
+        #[test]
+        fn dynamic_statements_run_against_postgresql_and_replay_identically() {
+            let Some(url) = url() else { return };
+            let mut setup = Postgres::connect(&url, None).expect("connects");
+            setup.load_script("DROP TABLE IF EXISTS dyn").expect("the table is dropped");
+            let postgres = Postgres::connect(&url, None).expect("connects");
+            let source = postgres.source().to_owned();
+            let recording = Rc::new(RefCell::new(Vec::new()));
+            let recorder = Recorder::new(Box::new(postgres), Box::new(Sink(recording.clone())), &source).expect("records");
+            assert_eq!(run_dynamic(Box::new(recorder)).as_deref(), Ok(DYNAMIC_EXPECTED));
+            let text = String::from_utf8(recording.borrow().clone()).expect("a recording is text");
+            assert!(text.contains(" PREPARE INS\n") && text.contains(" CREATE\n"), "{text}");
+            let replayed = run_dynamic(Box::new(Replay::parse(&text, false).expect("the recording parses")));
+            assert_eq!(replayed.as_deref(), Ok(DYNAMIC_EXPECTED), "{text}");
+        }
     }
 }

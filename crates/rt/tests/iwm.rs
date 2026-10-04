@@ -170,7 +170,7 @@ fn another_major_or_an_older_minor_is_refused_and_a_newer_minor_read() {
     minor[10] = 1;
     assert_eq!(read(&minor), Err(ModuleError::Version(Version { major: 0, minor: 1 })));
     let mut newer = bytes;
-    newer[10] = 6;
+    newer[10] = 7;
     let count = u32::from_le_bytes(newer[16..20].try_into().unwrap()) as usize;
     let crc = extend(crc32(&newer[..28]), &newer[32..32 + count * 28]);
     newer[28..32].copy_from_slice(&crc.to_le_bytes());

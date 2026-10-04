@@ -143,6 +143,9 @@ impl Database for Replay {
     fn execute(&mut self, call: &Call) -> Answer {
         self.answer(call)
     }
+    fn prepare(&mut self, call: &Call) -> Answer {
+        self.answer(call)
+    }
     fn open(&mut self, call: &Call) -> Answer {
         self.answer(call)
     }
@@ -187,6 +190,10 @@ impl<'w> Recorder<'w> {
 impl Database for Recorder<'_> {
     fn execute(&mut self, call: &Call) -> Answer {
         let a = self.inner.execute(call);
+        self.record(call, a)
+    }
+    fn prepare(&mut self, call: &Call) -> Answer {
+        let a = self.inner.prepare(call);
         self.record(call, a)
     }
     fn open(&mut self, call: &Call) -> Answer {
@@ -401,6 +408,9 @@ mod tests {
         impl Database for Fixed {
             fn execute(&mut self, _: &Call) -> Answer {
                 Ok(Outcome { tokens: "T1".into(), ..Outcome::rows(vec![vec![Value::Decimal { value: 150, scale: 2 }, Value::Null]]) })
+            }
+            fn prepare(&mut self, _: &Call) -> Answer {
+                Ok(Outcome::ok())
             }
             fn open(&mut self, _: &Call) -> Answer {
                 Ok(Outcome::ok())

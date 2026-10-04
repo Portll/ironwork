@@ -2,8 +2,9 @@
 //! database, the cursor and unit-of-work state the session keeps, the SQLCA, and the SQLCODE and
 //! warning WHENEVER tests.
 
+use super::dynamic::{self, Kind};
 use super::host::{self, COLUMN_COUNT, TRUNCATED, Warnings};
-use super::{Answer, Call, Database, Outcome, Session, Value};
+use super::{Answer, Call, Database, Outcome, Prepared, Session, SqlError, Value};
 use crate::abend::Abend;
 use crate::host::Host;
 use crate::lir::{AbendId, HostPlace, SqlEntry, SqlStatement, Sqlca};
@@ -14,6 +15,24 @@ type R<T> = Result<T, Abend>;
 
 /// Deadlock or timeout: the backend has rolled the unit of work back.
 const DEADLOCK: i32 = -911;
+
+/// Db2 13 for z/OS SQL, PREPARE and EXECUTE IMMEDIATE: "In ... COBOL ... a host variable must be a
+/// varying-length string variable."
+const STRING_RULE: &str = "its statement string is not one varying-length character or graphic string, as Db2 for z/OS requires of COBOL";
+
+/// Where a statement's calls come from.
+#[derive(Clone, Copy)]
+struct At<'a> {
+    program: &'a str,
+    ordinal: u32,
+    pos: Pos,
+}
+
+impl<'a> At<'a> {
+    fn call(self, verb: &'a str, cursor: Option<&'a str>, text: &'a str, inputs: &'a [Value]) -> Call<'a> {
+        Call { program: self.program, ordinal: self.ordinal, verb, cursor, text, inputs }
+    }
+}
 
 /// What a statement asks of the executor running it beyond `Host`.
 pub trait SqlHost<'w, P: Copy, S>: Host<P> {
@@ -61,10 +80,20 @@ pub fn run<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, entry: &SqlEntry<P, S
         }
         return Err(refused(format!("ironwork for COBOL does not run {}", x.text(what))));
     }
+    // A statement string goes to the input trace before the run is refused for want of a database,
+    // as CONNECT's location does.
+    let string = match &entry.statement {
+        SqlStatement::Prepare { source, .. } | SqlStatement::ExecuteImmediate { source } => match statement_string(x, source, pos)? {
+            None => return Err(refused(STRING_RULE.into())),
+            string => string,
+        },
+        _ => None,
+    };
     if x.session().is_none() {
         return Err(refused("no database is attached to the run".into()));
     }
     let (program, text, ordinal) = (x.program_id(), x.text(&entry.text), entry.ordinal);
+    let at = At { program: &program, ordinal, pos };
     let mut warnings = Warnings::default();
     let mut outcome = match &entry.statement {
         SqlStatement::Query { inputs, into } => match host::inputs(x, inputs)? {
@@ -76,25 +105,8 @@ pub fn run<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, entry: &SqlEntry<P, S
         },
         SqlStatement::Change { delete, inputs, current_of } => {
             let current_of = current_of.as_ref().map(|c| x.text(c));
-            let position = current_of.as_deref().map(|c| session(x).cursor(&program, c).map(|c| c.positioned));
-            match (position, host::inputs(x, inputs)?) {
-                (Some(None), _) => Outcome::error(-507, "24501"),
-                (Some(Some(false)), _) => Outcome::error(-508, "24504"),
-                (_, Err(e)) => Outcome::error(e.code, e.state),
-                (_, Ok(values)) => {
-                    let mut answer = database(x, &Call { program: &program, ordinal, verb: &verb, cursor: current_of.as_deref(), text: &text, inputs: &values }, |db, c| db.execute(c), pos)?;
-                    // Db2 answers a searched change that finds no row with +100.
-                    if current_of.is_none() && answer.sqlcode == 0 && answer.affected == 0 {
-                        answer = Outcome::error(100, "02000");
-                    }
-                    if let (Some(c), true, true) = (&current_of, *delete, answer.sqlcode >= 0)
-                        && let Some(open) = session(x).cursor(&program, c)
-                    {
-                        open.positioned = false;
-                    }
-                    answer
-                }
-            }
+            let values = host::inputs(x, inputs)?;
+            change(x, at, (&verb, &text), values, *delete, current_of.as_deref())?
         }
         SqlStatement::Open { cursor, inputs } => {
             let cursor = x.text(cursor);
@@ -106,7 +118,7 @@ pub fn run<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, entry: &SqlEntry<P, S
                     Ok(values) => {
                         let answer = database(x, &Call { program: &program, ordinal, verb: "OPEN", cursor: Some(&cursor), text: &text, inputs: &values }, |db, c| db.open(c), pos)?;
                         if answer.sqlcode >= 0 {
-                            session(x).opened(&program, &cursor, entry.with_hold);
+                            session(x).opened(&program, &cursor, entry.with_hold, None);
                         }
                         answer
                     }
@@ -142,21 +154,69 @@ pub fn run<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, entry: &SqlEntry<P, S
                 answer
             }
         }
-        SqlStatement::Commit if x.in_task() => Outcome::error(-925, "2D521"),
-        SqlStatement::Rollback if x.in_task() => Outcome::error(-926, "2D521"),
-        SqlStatement::Commit => {
-            let answer = database(x, &Call { program: &program, ordinal, verb: "COMMIT", cursor: None, text: &text, inputs: &[] }, |db, c| db.commit(c), pos)?;
-            if answer.sqlcode >= 0 {
-                session(x).committed();
+        SqlStatement::Commit => end_unit(x, at, &text, true)?,
+        SqlStatement::Rollback => end_unit(x, at, &text, false)?,
+        SqlStatement::Prepare { name, .. } => {
+            let name = x.text(name);
+            match string {
+                None => unreachable!("a PREPARE has its statement string"),
+                Some(Err(e)) => Outcome::error(e.code, e.state),
+                Some(Ok(_)) if session(x).running(&program, &name) => Outcome::error(-519, "24506"),
+                Some(Ok(text)) => {
+                    session(x).prepare(&program, &name, None);
+                    let kind = dynamic::kind(&text);
+                    if kind == Kind::Unacceptable {
+                        Outcome::error(-84, "42612")
+                    } else {
+                        let answer = database(x, &at.call("PREPARE", Some(&name), &text, &[]), |db, c| db.prepare(c), pos)?;
+                        if answer.sqlcode >= 0 {
+                            let markers = dynamic::markers(&text);
+                            session(x).prepare(&program, &name, Some(Prepared { text, query: kind == Kind::Query, markers }));
+                        }
+                        answer
+                    }
+                }
             }
-            answer
         }
-        SqlStatement::Rollback => {
-            let answer = database(x, &Call { program: &program, ordinal, verb: "ROLLBACK", cursor: None, text: &text, inputs: &[] }, |db, c| db.rollback(c), pos)?;
-            if answer.sqlcode >= 0 {
-                session(x).rolled_back();
+        SqlStatement::ExecuteImmediate { .. } => match string {
+            None => unreachable!("an EXECUTE IMMEDIATE has its statement string"),
+            Some(Err(e)) => Outcome::error(e.code, e.state),
+            Some(Ok(text)) => dynamic_statement(x, at, &text, Ok(Vec::new()), &refused)?,
+        },
+        SqlStatement::Execute { name, inputs } => {
+            let name = x.text(name);
+            match session(x).prepared(&program, &name).cloned() {
+                None | Some(Prepared { query: true, .. }) => Outcome::error(-518, "07003"),
+                Some(p) if p.markers > 0 && p.markers != inputs.len() => Outcome::error(-313, "07001"),
+                Some(p) => {
+                    let values = if p.markers == 0 { Ok(Vec::new()) } else { host::inputs(x, inputs)? };
+                    dynamic_statement(x, at, &p.text, values, &refused)?
+                }
             }
-            answer
+        }
+        SqlStatement::OpenPrepared { cursor, statement, inputs } => {
+            let (cursor, statement) = (x.text(cursor), x.text(statement));
+            if session(x).cursor(&program, &cursor).is_some() {
+                Outcome::error(-502, "24502")
+            } else {
+                match session(x).prepared(&program, &statement).cloned() {
+                    None => Outcome::error(-514, "26501"),
+                    Some(Prepared { query: false, .. }) => Outcome::error(-517, "07005"),
+                    Some(p) if p.markers > 0 && p.markers != inputs.len() => Outcome::error(-313, "07001"),
+                    Some(p) => match if p.markers == 0 { Ok(Vec::new()) } else { host::inputs(x, inputs)? } {
+                        Err(e) => Outcome::error(e.code, e.state),
+                        Ok(values) => {
+                            let hold = if entry.with_hold { " WITH HOLD" } else { "" };
+                            let text = format!("DECLARE {cursor} CURSOR{hold} FOR {}", p.text);
+                            let answer = database(x, &at.call("OPEN", Some(&cursor), &text, &values), |db, c| db.open(c), pos)?;
+                            if answer.sqlcode >= 0 {
+                                session(x).opened(&program, &cursor, entry.with_hold, Some(&statement));
+                            }
+                            answer
+                        }
+                    },
+                }
+            }
         }
         SqlStatement::Declaration => return Ok(None),
         SqlStatement::Unsupported(what) => return Err(refused(format!("ironwork for COBOL does not run {}", x.text(what)))),
@@ -182,6 +242,72 @@ fn database<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, call: &Call, run: im
     let session = session(x);
     session.pending |= !matches!(call.verb, "COMMIT" | "ROLLBACK");
     run(&mut *session.database, call).map_err(|a| Abend { code: a.code.into(), message: a.message, pos, file: None })
+}
+
+/// COMMIT or ROLLBACK, static or dynamic; in a CICS task the unit of work is CICS's.
+fn end_unit<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, at: At, text: &str, commit: bool) -> R<Outcome> {
+    if x.in_task() {
+        return Ok(if commit { Outcome::error(-925, "2D521") } else { Outcome::error(-926, "2D521") });
+    }
+    let verb = if commit { "COMMIT" } else { "ROLLBACK" };
+    let answer = database(x, &at.call(verb, None, text, &[]), |db, c| if commit { db.commit(c) } else { db.rollback(c) }, at.pos)?;
+    if answer.sqlcode >= 0 {
+        if commit { session(x).committed() } else { session(x).rolled_back() }
+    }
+    Ok(answer)
+}
+
+/// An INSERT, UPDATE or DELETE, `statement` its verb and text: a positioned one needs its cursor on
+/// a row, and a searched one that changes no row is +100, as Db2 answers.
+fn change<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, at: At, statement: (&str, &str), values: Result<Vec<Value>, SqlError>, delete: bool, current_of: Option<&str>) -> R<Outcome> {
+    let position = current_of.map(|c| session(x).cursor(at.program, c).map(|c| c.positioned));
+    let values = match (position, values) {
+        (Some(None), _) => return Ok(Outcome::error(-507, "24501")),
+        (Some(Some(false)), _) => return Ok(Outcome::error(-508, "24504")),
+        (_, Err(e)) => return Ok(Outcome::error(e.code, e.state)),
+        (_, Ok(values)) => values,
+    };
+    let mut answer = database(x, &at.call(statement.0, current_of, statement.1, &values), |db, c| db.execute(c), at.pos)?;
+    if current_of.is_none() && answer.sqlcode == 0 && answer.affected == 0 {
+        answer = Outcome::error(100, "02000");
+    }
+    if let (Some(c), true, true) = (current_of, delete, answer.sqlcode >= 0)
+        && let Some(open) = session(x).cursor(at.program, c)
+    {
+        open.positioned = false;
+    }
+    Ok(answer)
+}
+
+/// The statement string of a PREPARE or EXECUTE IMMEDIATE, normalised, after the input trace is
+/// told of it; None where it is not one varying-length string.
+fn statement_string<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, source: &[crate::lir::HostPlace<P>], pos: Pos) -> R<Option<Result<String, SqlError>>> {
+    match source {
+        [place] if matches!(place.ty, Ok(super::HostType::VarChar(_) | super::HostType::VarGraphic(_)) | Err(_)) => {}
+        _ => return Ok(None),
+    }
+    Ok(Some(host::traced(x, source)?.map(|values| {
+        let string = values.first().map(Value::text).unwrap_or_default();
+        x.sink("dynamic-sql", pos, &string);
+        dynamic::normalise(&string)
+    })))
+}
+
+/// A dynamic statement that is not run by a cursor, as EXECUTE and EXECUTE IMMEDIATE run it.
+fn dynamic_statement<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, at: At, text: &str, values: Result<Vec<Value>, SqlError>, refused: &dyn Fn(String) -> Abend) -> R<Outcome> {
+    let verb = dynamic::verb(text);
+    Ok(match dynamic::kind(text) {
+        Kind::Query => Outcome::error(-518, "07003"),
+        Kind::Unacceptable => Outcome::error(-84, "42612"),
+        Kind::Refused(what) => return Err(refused(format!("ironwork for COBOL does not run {what}"))),
+        Kind::Commit => end_unit(x, at, text, true)?,
+        Kind::Rollback => end_unit(x, at, text, false)?,
+        Kind::Change { delete, current_of } => change(x, at, (&verb, text), values, delete, current_of.as_deref())?,
+        Kind::Other => match values {
+            Err(e) => Outcome::error(e.code, e.state),
+            Ok(values) => database(x, &at.call(&verb, None, text, &values), |db, c| db.execute(c), at.pos)?,
+        },
+    })
 }
 
 /// A SELECT INTO's or a FETCH's answer: one row is assigned, none is +100, more than one is -811.

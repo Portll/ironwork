@@ -1118,6 +1118,10 @@ impl<'a> Printer<'a> {
             SqlStatement::Declaration => "declaration".to_owned(),
             SqlStatement::Unsupported(what) => format!("unsupported {}", self.string(*what)),
             SqlStatement::Connect { what, location } => format!("connect {}{}", self.string(*what), hosts("location", location)),
+            SqlStatement::Prepare { name, source } => format!("prepare {}{}", self.name(*name), hosts("from", source)),
+            SqlStatement::ExecuteImmediate { source } => format!("execute immediate{}", hosts("from", source)),
+            SqlStatement::Execute { name, inputs } => format!("execute {}{}", self.name(*name), hosts("using", inputs)),
+            SqlStatement::OpenPrepared { cursor, statement, inputs } => format!("open {} for {}{}", self.name(*cursor), self.name(*statement), hosts("using", inputs)),
         };
         format!("Sql {ordinal} {text} {statement}{}", attrs('{', yes(e.with_hold, "with hold").into_iter().collect()))
     }

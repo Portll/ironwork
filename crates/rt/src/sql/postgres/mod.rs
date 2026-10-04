@@ -48,12 +48,17 @@ impl Postgres {
 
     /// Runs a call as one statement, returning at most `max_rows` rows (0 for all).
     fn run(&mut self, call: &Call, max_rows: i32) -> Answer {
+        self.guarded(call, |pg, sql| pg.statement(sql, call, max_rows))
+    }
+
+    /// `work` on the call's PostgreSQL text under a savepoint, its refusal mapped to a Db2 SQLCODE.
+    fn guarded(&mut self, call: &Call, work: impl FnOnce(&mut Self, &str) -> Result<Outcome, Failure>) -> Answer {
         let sql = dialect::rewrite(call.text, call.cursor);
         if self.conn.status == b'I' {
             self.conn.simple("BEGIN").map_err(abandon)?;
         }
         self.conn.simple("SAVEPOINT ironwork").map_err(abandon)?;
-        match self.statement(&sql, call, max_rows) {
+        match work(self, &sql) {
             Ok(outcome) => {
                 self.conn.simple("RELEASE SAVEPOINT ironwork").map_err(abandon)?;
                 Ok(outcome)
@@ -75,16 +80,19 @@ impl Postgres {
         }
     }
 
+    /// The PostgreSQL statement for `sql`, prepared once per connection.
+    fn parsed(&mut self, sql: &str) -> Result<(String, Described), Failure> {
+        if let Some(p) = self.prepared.get(sql) {
+            return Ok(p.clone());
+        }
+        let name = format!("ironwork{}", self.prepared.len() + 1);
+        let described = self.conn.prepare(&name, sql)?;
+        self.prepared.insert(sql.to_owned(), (name.clone(), described.clone()));
+        Ok((name, described))
+    }
+
     fn statement(&mut self, sql: &str, call: &Call, max_rows: i32) -> Result<Outcome, Failure> {
-        let (name, described) = match self.prepared.get(sql) {
-            Some(p) => p.clone(),
-            None => {
-                let name = format!("ironwork{}", self.prepared.len() + 1);
-                let described = self.conn.prepare(&name, sql)?;
-                self.prepared.insert(sql.to_owned(), (name.clone(), described.clone()));
-                (name, described)
-            }
-        };
+        let (name, described) = self.parsed(sql)?;
         if described.parameters.len() != call.inputs.len() {
             return Err(Failure::Broken(format!("PostgreSQL reads {} parameters in {sql}, and the program sends {}", described.parameters.len(), call.inputs.len())));
         }
@@ -119,6 +127,10 @@ impl Database for Postgres {
     /// Two rows are enough to tell a SELECT INTO's one row from its too many.
     fn execute(&mut self, call: &Call) -> Answer {
         self.run(call, 2)
+    }
+    /// PostgreSQL parses the statement string as Db2's PREPARE does, so its errors come at PREPARE.
+    fn prepare(&mut self, call: &Call) -> Answer {
+        self.guarded(call, |pg, sql| pg.parsed(sql).map(|_| Outcome::ok()))
     }
     fn open(&mut self, call: &Call) -> Answer {
         self.run(call, 0)

@@ -550,8 +550,10 @@ The format version is `major.minor`; this ironwork writes 0.6. It reads each min
 the oldest readable one, `Version::OLDEST_READABLE` in `rt::module`, which is 0.5: the last minor
 whose change was not additive. 0.6 is additive: the `LIR` section ends with the files that take
 their name from a data item, written only when one does, so a 0.6 module without one reads in a 0.5
-reader and a 0.5 reader refuses one with them as malformed. A module older than 0.5 is refused, and
-compiling the source again is the remedy: a 0.4 module's `DEBUG` records hold no source files (§9.2); a 0.3 module's options
+reader and a 0.5 reader refuses one with them as malformed. 0.6 also adds the dynamic SQL
+statements' tags (lir.md §9.7): a 0.5 reader refuses a module holding one as malformed and reads
+one without. A module older than 0.5 is refused, and compiling the source again is the remedy: a 0.4
+module's `DEBUG` records hold no source files (§9.2); a 0.3 module's options
 lack `compliance` and `dialect` (§5.1), its arithmetic plans `inner_dmax` (lir.md §7.2), and its
 plan for INITIALIZE of a reference-modified item holds the whole item's fields (lir.md §9, C300); a
 0.2 module's places lack the tables that move a variably located item, its EXEC CICS commands their

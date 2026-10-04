@@ -477,7 +477,7 @@ mod tests {
 
     #[test]
     fn a_newer_minor_is_read_past_an_unknown_optional_section_and_refused_for_a_required_one_or_a_feature() {
-        let newer = Version { major: 0, minor: 6 };
+        let newer = Version { major: 0, minor: 7 };
         let optional = stamped(newer, 0, |w| w.push(9, OPTIONAL, |w| w.string("NEXT")));
         let module = Module::read(&optional).unwrap();
         assert_eq!(module.version(), newer);

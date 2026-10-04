@@ -431,6 +431,9 @@ fn verify_program(p: &Program) -> Result<(), String> {
             SqlStatement::Fetch { cursor, into } => symbol(*cursor).and_then(|()| host(into))?,
             SqlStatement::Close { cursor: s } | SqlStatement::Unsupported(s) => symbol(*s)?,
             SqlStatement::Connect { what, location } => symbol(*what).and_then(|()| host(location))?,
+            SqlStatement::Prepare { name, source: inputs } | SqlStatement::Execute { name, inputs } => symbol(*name).and_then(|()| host(inputs))?,
+            SqlStatement::ExecuteImmediate { source } => host(source)?,
+            SqlStatement::OpenPrepared { cursor, statement, inputs } => symbol(*cursor).and_then(|()| symbol(*statement)).and_then(|()| host(inputs))?,
             SqlStatement::Commit | SqlStatement::Rollback | SqlStatement::Declaration => {}
         }
     }

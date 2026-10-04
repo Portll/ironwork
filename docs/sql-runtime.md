@@ -32,7 +32,9 @@ On 2026-09-29 the operator put SQL next after M8, ahead of the VM in
 
 | Term | Meaning |
 |---|---|
-| Statement | One executable EXEC SQL block, typed: SELECT INTO, INSERT, UPDATE, DELETE (searched or positioned), OPEN, FETCH, CLOSE, COMMIT, ROLLBACK, SET host variable |
+| Statement | One executable EXEC SQL block, typed: SELECT INTO, INSERT, UPDATE, DELETE (searched or positioned), OPEN, FETCH, CLOSE, COMMIT, ROLLBACK, SET host variable, PREPARE, EXECUTE, EXECUTE IMMEDIATE |
+| Statement string | The text of a dynamic statement, held in a host variable that PREPARE or EXECUTE IMMEDIATE names |
+| Prepared statement | What PREPARE makes of a statement string under a statement name, which EXECUTE runs, or a cursor declared for it opens |
 | Host variable | A COBOL item named `:NAME` in a statement, with a role: input (sent) or output (INTO) |
 | Indicator | The S9(4) binary item that follows a host variable, as `:HV:IND` or `:HV INDICATOR :IND` |
 | Value | A typed SQL value at the database boundary: NULL, SMALLINT, INTEGER, BIGINT, DECIMAL(p,s), CHAR, VARCHAR, DATE, TIME, TIMESTAMP, REAL, DOUBLE, or binary bytes |
@@ -67,14 +69,49 @@ On 2026-09-29 the operator put SQL next after M8, ahead of the VM in
     CURSOR](https://www.ibm.com/docs/en/db2-for-zos/13.0.0?topic=statements-declare-cursor)). The
     parser reads each OPEN, FETCH, CLOSE and WHERE CURRENT OF against the DECLAREs before it, gives
     OPEN its cursor, and refuses a cursor not yet declared at compile time.
-  - **A cursor ironwork does not run** (scrollable, or for a prepared statement) is still declared.
-    Reaching its DECLARE does nothing, as for any declaration; its OPEN abends, naming what it is.
+  - **A cursor ironwork does not run** (scrollable) is still declared. Reaching its DECLARE does
+    nothing, as for any declaration; its OPEN abends, naming what it is.
 - **Refused by name.** DISCONNECT comes from other precompilers, so a program that uses it is
   refused at compile time as not a Db2 for z/OS program. CONNECT and SET CONNECTION, which Db2 for
-  z/OS has for DRDA, dynamic SQL (PREPARE, EXECUTE, EXECUTE IMMEDIATE, DESCRIBE) and multi-row
-  FETCH are refused at run time by name. A CONNECT or SET CONNECTION that names its location by a
+  z/OS has for DRDA, DESCRIBE and the SQLDA (PREPARE ... INTO, USING DESCRIPTOR), PREPARE ...
+  ATTRIBUTES, OPEN ... USING of a cursor declared for a select-statement, and multi-row FETCH and
+  EXECUTE are refused at run time by name. A CONNECT or SET CONNECTION that names its location by a
   host variable first gives the input trace a `connection-target` sink with the value
   ([evidence.md](evidence.md) §1.1).
+
+### 3.1 Dynamic SQL
+
+The rules are Db2 13 for z/OS's (SQL Reference: PREPARE, EXECUTE, EXECUTE IMMEDIATE, OPEN), and
+the runtime keeps the state they need in its session, so every backend answers alike.
+
+- **The statement string.** PREPARE ... FROM and EXECUTE IMMEDIATE name a host variable without an
+  indicator. In COBOL it must be a varying-length string: a group of a 49-level halfword and a
+  49-level character or DBCS item. Any other declaration abends EXEC, naming the rule, when the
+  statement is reached; a string expression is PL/I's, and the compiler refuses one. The value,
+  converted through the CODEPAGE as any host variable's is, goes to the input trace as a
+  `dynamic-sql` sink before anything else, a run with no database included ([evidence.md](evidence.md)
+  §1.1). The call sends it with each run of white space outside a quoted string as one space.
+- **What may be prepared** is read from the string's first words (assumption C402): an SQL
+  statement Db2 does not prepare is -084 without reaching the database, and words that are no
+  statement go to the database, whose syntax error stands for Db2's. A select-statement can only be run
+  by a cursor: EXECUTE IMMEDIATE of one is -518 (C401), as is EXECUTE of a prepared one. COMMIT and
+  ROLLBACK in a statement string end the unit of work as the static statements do, with -925 and
+  -926 in a CICS task; SAVEPOINT, RELEASE SAVEPOINT and ROLLBACK TO SAVEPOINT are refused by name.
+- **PREPARE** asks the database's `prepare`, so a statement the database cannot read is refused at
+  PREPARE, as Db2 refuses it. It first destroys any statement of the same name, and the name stays
+  unprepared if PREPARE fails; preparing the statement of an open cursor is -519 and changes
+  nothing. A statement name's scope is a cursor name's: the program.
+- **EXECUTE** of a name that is not prepared is -518. With parameter markers, its USING list must
+  give one host variable for each, a host structure counting its members, or it is -313; without
+  markers, USING is not read. The statement runs through `execute`, under its string's own command
+  word: a searched INSERT, UPDATE or DELETE that changes no row is +100, and a positioned one is
+  checked against the runtime's cursor state (-507, -508), as static ones are.
+- **A cursor for a prepared statement** (`DECLARE C CURSOR [WITH HOLD] FOR S`) is opened with OPEN
+  ... USING under the same marker rule. OPEN when S is not prepared is -514, and when S is not a
+  select-statement -517. The call's text is `DECLARE C CURSOR [WITH HOLD] FOR` and the statement
+  string. FETCH, CLOSE and WHERE CURRENT OF treat it as any cursor.
+- **Lifetime** (assumption C400): a unit of work's end destroys the statements prepared in it, but
+  COMMIT keeps the select-statement of an open WITH HOLD cursor, as KEEPDYNAMIC(NO) does.
 
 ## 4. The Database interface (run time)
 
@@ -82,7 +119,8 @@ The interface lives in `machine/sql.rs` now, beside `machine/cics.rs`, and moves
 split in [codegen-runtime.md](codegen-runtime.md). It is covered by the runtime exception.
 
     trait Database {
-        fn execute(&mut self, s: &Statement, inputs: &[Value]) -> Outcome;   // SELECT INTO, INSERT, UPDATE, DELETE, SET
+        fn execute(&mut self, s: &Statement, inputs: &[Value]) -> Outcome;   // SELECT INTO, INSERT, UPDATE, DELETE, SET, EXECUTE
+        fn prepare(&mut self, s: &Statement) -> Outcome;                     // PREPARE
         fn open(&mut self, c: CursorId, s: &Statement, inputs: &[Value]) -> Outcome;
         fn fetch(&mut self, c: CursorId) -> Outcome;
         fn close(&mut self, c: CursorId) -> Outcome;
@@ -169,6 +207,12 @@ Input rules:
 | A value whose type cannot be assigned to the host variable | -303 | 42806 |
 | A VARCHAR input whose length is negative or over its maximum | -311 | 22501 |
 | A character the code page cannot represent | -330 | 22021 |
+| PREPARE or EXECUTE IMMEDIATE of a statement Db2 does not prepare | -084 | 42612 |
+| EXECUTE or OPEN USING without a host variable for each parameter marker | -313 | 07001 |
+| OPEN of a cursor whose statement is not prepared | -514 | 26501 |
+| OPEN of a cursor whose prepared statement is not a select-statement | -517 | 07005 |
+| EXECUTE of a statement not prepared or a select-statement; EXECUTE IMMEDIATE of a select-statement | -518 | 07003 |
+| PREPARE of the statement of an open cursor | -519 | 24506 |
 
 ## 7. Units of work
 
@@ -219,7 +263,10 @@ Input rules:
 
   - **`@`** starts a call: sequence number, statement identity, verb and cursor. OPEN's text is its
     cursor's declaration, `DECLARE C1 CURSOR [WITH HOLD] FOR query`; FETCH's and CLOSE's are
-    `FETCH C1` and `CLOSE C1`.
+    `FETCH C1` and `CLOSE C1`. A dynamic statement's identity hashes its statement string as the
+    call sends it, its verb is the string's command word, and a cursor for a prepared statement
+    hashes `DECLARE C1 CURSOR [WITH HOLD] FOR` and the string; PREPARE's verb is `PREPARE`, with
+    the statement name where a cursor stands.
   - **`>`** gives the input values, in host-variable order.
   - **`<`** gives SQLCODE, SQLSTATE, rows affected, and any message tokens as
     `tokens=char:"…"`. It holds no warning flags: the runtime sets SQLWARN from what assignment
@@ -397,9 +444,22 @@ is for evaluation only.
 - **Given** a WHENEVER SQLERROR GO TO in a paragraph after the one holding a statement, where that
   paragraph is performed first at run time **then** the statement is not governed by it.
 
+### Q7: Dynamic SQL
+
+- **Given** `EXECUTE IMMEDIATE :STMT` where STMT holds `UPDATE T   SET A = 1` **then** the database
+  receives `UPDATE T SET A = 1` as an UPDATE, and no row changed is +100.
+- **Given** a statement prepared with two markers **then** `EXECUTE S1 USING :A, :B` sends both,
+  and `EXECUTE S1 USING :A` is -313 without asking the database.
+- **Given** `DECLARE C1 CURSOR FOR S1` **then** OPEN before PREPARE is -514, PREPARE of S1 while C1
+  is open is -519, and OPEN after S1 is prepared as a DELETE is -517.
+- **Given** COMMIT with C1 declared WITH HOLD and open **then** C1's statement is still prepared,
+  another prepared statement is not (EXECUTE gives -518), and after ROLLBACK OPEN C1 is -514.
+- **Given** the statement string in a PIC X(40) item **then** the statement abends EXEC, naming
+  the varying-length rule.
+
 ## 13. Out of scope
 
-- **Dynamic SQL and SQLDA.**
+- **The SQLDA**: DESCRIBE, PREPARE ... INTO and USING DESCRIPTOR.
 - **Multi-row FETCH and INSERT** with host-variable arrays.
 - **Stored procedures**, and CALL of SQL procedures.
 - **LOB types.**

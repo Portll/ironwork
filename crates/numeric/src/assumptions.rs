@@ -328,6 +328,9 @@ pub const ABS_PLACES: &str = "C393";
 pub const NUMERIC_FUNCTION_MOVED: &str = "C394";
 pub const ASSIGN_ITEM_NAMES_A_DD: &str = "C360";
 pub const ASSIGN_ITEM_FORMS: &str = "C361";
+pub const PREPARED_STATEMENT_LIFETIME: &str = "C400";
+pub const EXECUTE_IMMEDIATE_OF_A_QUERY: &str = "C401";
+pub const STATEMENT_STRING_KINDS: &str = "C402";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -2123,6 +2126,24 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         claim: "Under --compliance extended, ASSIGN TO a name that is an alphanumeric or group item's names that item, as GnuCOBOL's default assign clause and Micro Focus's ASSIGN(DYNAMIC) take it, with IWX0007-W; DYNAMIC and USING always name an item and EXTERNAL never does, and a name no item has stays a DD name. Under strict the name is a DD name, Enterprise COBOL's assignment-name never being a data item (Language Reference SC27-8713-03, ASSIGN clause), and DYNAMIC and USING are refused. The input trace records the item's value as a dynamic-file-path sink at the SELECT, where cobolwork places the finding, once for each file an OPEN names, with that file's input alone",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PREPARED_STATEMENT_LIFETIME,
+        claim: "A prepared statement lasts until its name is prepared again or its unit of work ends: COMMIT, ROLLBACK, SYNCPOINT, a -911, or the end of the run unit or CICS task destroys every statement the program prepared, but COMMIT keeps the SELECT of a cursor declared WITH HOLD that is open when it runs, as Db2 13 for z/OS describes prepared-statement persistence (SQL Reference, PREPARE). That is a plan bound with KEEPDYNAMIC(NO), BIND's default: ironwork binds no plan, so no statement is kept further. An EXECUTE of a destroyed statement is -518 and an OPEN of a cursor for one -514",
+        basis: Basis::Documented,
+        oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: EXECUTE_IMMEDIATE_OF_A_QUERY,
+        claim: "EXECUTE IMMEDIATE of a select-statement is SQLCODE -518 (SQLSTATE 07003), as Db2 13 for z/OS's -518 explanation lists it, and does not reach the database. Db2 for Linux, UNIX and Windows documents SQL0084N for the same statement",
+        basis: Basis::Documented,
+        oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: STATEMENT_STRING_KINDS,
+        claim: "The runtime reads what a dynamic statement string is from its first words, outside quoted strings: a select-statement starts with SELECT, WITH, VALUES or a parenthesis; COMMIT and ROLLBACK end the unit of work as the static statements do; SAVEPOINT, RELEASE SAVEPOINT and ROLLBACK TO SAVEPOINT are refused by name, as the static ones are; an SQL statement Db2 13 for z/OS does not prepare (SQL Reference, PREPARE: CALL, CONNECT, DECLARE CURSOR, DESCRIBE, EXECUTE, FETCH, OPEN and the like), or an empty string, is SQLCODE -084 (SQLSTATE 42612) without reaching the database; and any other goes to the database, which answers it, words that are no SQL statement included, so the database's syntax error stands for Db2's. A parameter marker is a question mark outside a quoted string. Db2 parses the whole statement; ironwork leaves everything past the first words to the database",
+        basis: Basis::Chosen,
+        oracle: Oracle::Db2,
     },
 ];
 

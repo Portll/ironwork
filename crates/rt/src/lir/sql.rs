@@ -14,7 +14,8 @@ pub struct SqlEntry<P = PlaceId, S = SymId> {
     /// The command word the call record and the EXEC messages name.
     pub verb: S,
     pub statement: SqlStatement<P, S>,
-    /// What a `Database` call receives, `?` for each input; empty for a declaration.
+    /// What a `Database` call receives, `?` for each input; empty for a declaration. A dynamic
+    /// statement's call sends its statement string instead, and this names the statement.
     pub text: S,
     pub fingerprint: u32,
     /// Set on the OPEN of a cursor declared WITH HOLD, and on no other entry.
@@ -31,6 +32,14 @@ pub enum SqlStatement<P = PlaceId, S = SymId> {
     Close { cursor: S },
     Commit,
     Rollback,
+    /// PREPARE of the statement `name` from the statement string in `source`, which must be one
+    /// varying-length character or graphic string.
+    Prepare { name: S, source: Vec<HostPlace<P>> },
+    ExecuteImmediate { source: Vec<HostPlace<P>> },
+    /// EXECUTE of a prepared statement, `inputs` replacing its parameter markers.
+    Execute { name: S, inputs: Vec<HostPlace<P>> },
+    /// OPEN of a cursor declared for the prepared statement `statement`.
+    OpenPrepared { cursor: S, statement: S, inputs: Vec<HostPlace<P>> },
     /// WHENEVER, DECLARE CURSOR, INCLUDE and the other declarations: no op.
     Declaration,
     /// Abends EXEC, naming it, when reached.
@@ -84,6 +93,10 @@ codec_enum!(SqlStatement {
     Declaration = 7,
     Unsupported(what) = 8,
     Connect { what, location } = 9,
+    Prepare { name, source } = 10,
+    ExecuteImmediate { source } = 11,
+    Execute { name, inputs } = 12,
+    OpenPrepared { cursor, statement, inputs } = 13,
 });
 codec_struct!(HostPlace { var, member, ty, indicator } check host_place_valid);
 codec_struct!(Sqlca { fields } check sqlca_valid);
@@ -135,7 +148,7 @@ pub(super) fn table_valid(table: &[SqlEntry], symbols: &[String]) -> Result<(), 
             return Err(format!("SQL entry {k} has fingerprint {:08X}, not its text's {:08X}", entry.fingerprint, fingerprint(text)));
         }
         let held = match &entry.statement {
-            SqlStatement::Open { cursor, .. } => text.starts_with(&format!("DECLARE {} CURSOR WITH HOLD FOR ", symbol(*cursor)?)),
+            SqlStatement::Open { cursor, .. } | SqlStatement::OpenPrepared { cursor, .. } => text.starts_with(&format!("DECLARE {} CURSOR WITH HOLD FOR ", symbol(*cursor)?)),
             _ => false,
         };
         if entry.with_hold != held {

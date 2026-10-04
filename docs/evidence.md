@@ -106,12 +106,13 @@ in it (`exec::unit::Event::Sink`). The operand itself is never recorded.
 | `web-response`, `http-header`, `outbound-host`, `outbound-http` | WEB SEND FROM; WEB WRITE VALUE; WEB OPEN HOST or URL, WEB CONVERSE PATH; WEB CONVERSE FROM |
 | `cics-sysid` | SYSID of any command |
 | `connection-target` | EXEC SQL CONNECT TO or SET CONNECTION naming the location by a host variable, at the EXEC SQL's line. ironwork runs no CONNECT: the statement is traced, then refused by name as before |
+| `dynamic-sql` | The statement string of EXEC SQL PREPARE ... FROM or EXECUTE IMMEDIATE, at the EXEC SQL's line, traced before the statement runs or a run with no database is refused ([sql-runtime.md](sql-runtime.md) §3.1) |
 
 The names are cobolwork's sink kinds (`lib/dataflow.mjs`), so a label joins a finding by sink, file
 and line. A CICS operand is recorded before the command runs, so a command ironwork does not carry
 out yet (START, WEB) is still traced before it stops the task; an operand that cannot be read is
 left to the command, so tracing never changes how a run ends. Not traced, because ironwork does not
-run them yet: MQPUT, MQCONN, dynamic SQL, sockets, and the sources ACCEPT FROM COMMAND-LINE or
+run them yet: MQPUT, MQCONN, sockets, and the sources ACCEPT FROM COMMAND-LINE or
 ENVIRONMENT. PARM reaches a program only through `ironwork job`.
 
 ### 1.2 Statement trace: `--trace-statements FILE`

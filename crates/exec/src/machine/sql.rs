@@ -40,16 +40,27 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
             Statement::Change { kind, text, inputs, current_of } => {
                 (SqlStatement::Change { delete: matches!(kind, ChangeKind::Delete), inputs: places(inputs), current_of: current_of.clone() }, text.clone(), false)
             }
-            Statement::Open { cursor, declared } => {
+            Statement::Open { cursor, declared, using } => {
                 let declared = declared.as_ref().expect("the parser gives OPEN its DECLARE");
                 let hold = if declared.with_hold { " WITH HOLD" } else { "" };
-                let text = format!("DECLARE {cursor} CURSOR{hold} FOR {}", declared.text);
-                (SqlStatement::Open { cursor: cursor.clone(), inputs: places(&declared.inputs) }, text, declared.with_hold)
+                match &declared.statement {
+                    Some(name) => {
+                        let text = format!("DECLARE {cursor} CURSOR{hold} FOR {name}");
+                        (SqlStatement::OpenPrepared { cursor: cursor.clone(), statement: name.clone(), inputs: places(using) }, text, declared.with_hold)
+                    }
+                    None => {
+                        let text = format!("DECLARE {cursor} CURSOR{hold} FOR {}", declared.text);
+                        (SqlStatement::Open { cursor: cursor.clone(), inputs: places(&declared.inputs) }, text, declared.with_hold)
+                    }
+                }
             }
             Statement::Fetch { cursor, into } => (SqlStatement::Fetch { cursor: cursor.clone(), into: places(into) }, format!("FETCH {cursor}"), false),
             Statement::Close { cursor } => (SqlStatement::Close { cursor: cursor.clone() }, format!("CLOSE {cursor}"), false),
             Statement::Commit => (SqlStatement::Commit, "COMMIT".into(), false),
             Statement::Rollback => (SqlStatement::Rollback, "ROLLBACK".into(), false),
+            Statement::Prepare { name, source } => (SqlStatement::Prepare { name: name.clone(), source: places(std::slice::from_ref(source)) }, format!("PREPARE {name}"), false),
+            Statement::ExecuteImmediate { source } => (SqlStatement::ExecuteImmediate { source: places(std::slice::from_ref(source)) }, "EXECUTE IMMEDIATE".into(), false),
+            Statement::Execute { name, inputs } => (SqlStatement::Execute { name: name.clone(), inputs: places(inputs) }, format!("EXECUTE {name}"), false),
             Statement::Whenever { .. } | Statement::Declaration | Statement::DeclareCursor(_) | Statement::DeclareUnsupported { .. } => (SqlStatement::Declaration, String::new(), false),
             Statement::Unsupported(what) => (SqlStatement::Unsupported(what.clone()), String::new(), false),
             Statement::Connect { what, target } => (SqlStatement::Connect { what: what.clone(), location: places(target.as_slice()) }, String::new(), false),
@@ -248,6 +259,9 @@ mod tests {
         fn execute(&mut self, c: &Call) -> Answer {
             self.answer(c)
         }
+        fn prepare(&mut self, c: &Call) -> Answer {
+            self.answer(c)
+        }
         fn open(&mut self, c: &Call) -> Answer {
             self.answer(c)
         }
@@ -299,15 +313,26 @@ mod tests {
     }
 
     fn run(procedure: &str, answers: Vec<Outcome>) -> (Result<String, String>, Vec<Logged>) {
-        both(&format!("{DATA}{procedure}"), &answers, false);
-        let program = syntax::parse(&format!("{DATA}{procedure}")).expect("parses");
+        run_source(&format!("{DATA}{procedure}"), answers)
+    }
+
+    /// The walker's run of a whole program, after both executors' runs agree, and the calls its
+    /// database received; the abend's code where it abends.
+    fn run_source(source: &str, answers: Vec<Outcome>) -> (Result<String, String>, Vec<Logged>) {
+        let (shown, calls) = run_source_message(source, answers);
+        (shown.map_err(|e| e.0), calls)
+    }
+
+    fn run_source_message(source: &str, answers: Vec<Outcome>) -> (Result<String, (String, String)>, Vec<Logged>) {
+        both(source, &answers, false);
+        let program = syntax::parse(source).expect("parses");
         let compiled = crate::compile(program, &[]).expect("compiles");
-        crate::testing::check_lowering(&compiled, rt::sql::fingerprint(procedure), None);
+        crate::testing::check_lowering(&compiled, rt::sql::fingerprint(source), None);
         let calls = Calls::default();
         let mut db = Script { answers: answers.into(), calls: calls.clone() };
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let ran = compiled.execute_with(crate::unit::Library::default(), crate::files::Dds::default(), None, crate::unit::Clock::System, Some(&mut db), &mut out, &mut err);
-        let shown = ran.map(|_| String::from_utf8(out).expect("DISPLAY writes text")).map_err(|a| a.code.to_string());
+        let shown = ran.map(|_| String::from_utf8(out).expect("DISPLAY writes text")).map_err(|a| (a.code.to_string(), a.message));
         (shown, calls.take())
     }
 
@@ -601,9 +626,13 @@ mod tests {
     }
 
     fn run_task(procedure: &str, answers: Vec<Outcome>) -> (String, Result<(), String>, Vec<Logged>) {
-        both(&format!("{DATA}{procedure}"), &answers, true);
-        let compiled = crate::compile(syntax::parse(&format!("{DATA}{procedure}")).expect("parses"), &[]).expect("compiles");
-        crate::testing::check_lowering(&compiled, rt::sql::fingerprint(procedure), None);
+        run_task_source(&format!("{DATA}{procedure}"), answers)
+    }
+
+    fn run_task_source(source: &str, answers: Vec<Outcome>) -> (String, Result<(), String>, Vec<Logged>) {
+        both(source, &answers, true);
+        let compiled = crate::compile(syntax::parse(source).expect("parses"), &[]).expect("compiles");
+        crate::testing::check_lowering(&compiled, rt::sql::fingerprint(source), None);
         let calls = Calls::default();
         let mut db = Script { answers: answers.into(), calls: calls.clone() };
         let task = crate::cics::Task { transid: "T1".into(), ..Default::default() };
@@ -718,5 +747,192 @@ mod tests {
         let (code, message) = replayed(&other, &recording).unwrap_err();
         assert_eq!(code, "SQLR");
         assert!(message.contains(&format!("Q:1:{hash:08x} SELECT with int:7")) && message.ends_with("SELECT with int:8"), "{message}");
+    }
+
+    /// Dynamic SQL: statement strings in a VARCHAR, prepared statements and the cursors for them.
+    mod dynamic {
+        use super::*;
+
+        const DYN: &str = concat!(
+            "       IDENTIFICATION DIVISION.\n",
+            "       PROGRAM-ID. D.\n",
+            "       DATA DIVISION.\n",
+            "       WORKING-STORAGE SECTION.\n",
+            "           EXEC SQL INCLUDE SQLCA END-EXEC.\n",
+            "       01 STMT.\n",
+            "          49 STMT-LEN  PIC S9(4) COMP.\n",
+            "          49 STMT-TEXT PIC X(120).\n",
+            "       01 FIXED-STMT PIC X(40) VALUE 'DELETE FROM T'.\n",
+            "       01 WS-ID    PIC S9(9) COMP VALUE 7.\n",
+            "       01 WS-NAME  PIC X(10).\n",
+            "       01 WS-RAW   PIC X(4) VALUE 'ABCD'.\n",
+            "       01 WS-BAD   REDEFINES WS-RAW PIC S9(5)V99 COMP-3.\n",
+            "       01 E-CODE   PIC -9(3).\n",
+            "       PROCEDURE DIVISION.\n",
+        );
+
+        /// Lines that put `text` in STMT.
+        fn set(text: &str) -> String {
+            let mut lines = String::from("           MOVE SPACES TO STMT-TEXT.\n");
+            for (k, chunk) in text.as_bytes().chunks(30).enumerate() {
+                let chunk = std::str::from_utf8(chunk).expect("ASCII");
+                lines += &format!("           MOVE '{}' TO STMT-TEXT({}:{}).\n", chunk.replace('\'', "''"), 30 * k + 1, chunk.len());
+            }
+            lines + &format!("           MOVE {} TO STMT-LEN.\n", text.len())
+        }
+
+        /// The statement, then its SQLCODE displayed.
+        fn exec(sql: &str) -> String {
+            format!("           EXEC SQL {sql} END-EXEC.\n           MOVE SQLCODE TO E-CODE.\n           DISPLAY E-CODE.\n")
+        }
+
+        fn source(procedure: &str) -> String {
+            format!("{DYN}{procedure}           GOBACK.\n")
+        }
+
+        fn dynamic(procedure: &str, answers: Vec<Outcome>) -> (Result<String, String>, Vec<Logged>) {
+            run_source(&source(procedure), answers)
+        }
+
+        #[test]
+        fn execute_immediate_sends_the_statement_string_under_its_own_verb() {
+            let procedure = [set("UPDATE T   SET A = 1   WHERE B = 2"), exec("EXECUTE IMMEDIATE :STMT"), exec("EXECUTE IMMEDIATE :STMT")].concat();
+            let (shown, calls) = dynamic(&procedure, vec![Outcome { affected: 1, ..Outcome::ok() }, Outcome::ok()]);
+            assert_eq!(shown.as_deref(), Ok(" 000\n 100\n"));
+            let update = |ordinal| ("UPDATE".to_owned(), ordinal, "UPDATE T SET A = 1 WHERE B = 2".to_owned(), Vec::new());
+            assert_eq!(calls, [update(1), update(2), ("COMMIT".into(), 0, "COMMIT".into(), Vec::new())]);
+        }
+
+        #[test]
+        fn a_prepared_statement_runs_with_its_using_list_in_place_of_its_markers() {
+            let procedure = [
+                set("INSERT INTO T (ID, NAME) VALUES (?, ?)"),
+                exec("PREPARE S1 FROM :STMT"),
+                "           MOVE 'SMITH' TO WS-NAME.\n".into(),
+                exec("EXECUTE S1 USING :WS-ID, :WS-NAME"),
+                exec("EXECUTE S1 USING :WS-ID"),
+                exec("EXECUTE S1"),
+            ]
+            .concat();
+            let (shown, calls) = dynamic(&procedure, vec![Outcome::ok(), Outcome { affected: 1, ..Outcome::ok() }]);
+            assert_eq!(shown.as_deref(), Ok(" 000\n 000\n-313\n-313\n"));
+            assert_eq!(verbs(&calls), ["PREPARE", "INSERT", "COMMIT"]);
+            assert_eq!((calls[0].1, calls[0].2.as_str()), (1, "INSERT INTO T (ID, NAME) VALUES (?, ?)"));
+            assert_eq!((calls[1].1, calls[1].2.as_str(), calls[1].3.len(), &calls[1].3[0]), (2, "INSERT INTO T (ID, NAME) VALUES (?, ?)", 2, &Value::Int(7)));
+        }
+
+        #[test]
+        fn using_is_not_read_for_a_statement_without_markers() {
+            let procedure = [set("DELETE FROM T"), exec("PREPARE S2 FROM :STMT"), exec("EXECUTE S2 USING :WS-BAD")].concat();
+            let (shown, calls) = dynamic(&procedure, Vec::new());
+            assert_eq!(shown.as_deref(), Ok(" 000\n 100\n"));
+            assert_eq!(calls[1], ("DELETE".into(), 2, "DELETE FROM T".into(), Vec::new()));
+        }
+
+        #[test]
+        fn what_execute_and_execute_immediate_refuse_never_reaches_the_database() {
+            let procedure = [
+                exec("EXECUTE S9"),
+                set("SELECT A FROM T"),
+                exec("EXECUTE IMMEDIATE :STMT"),
+                exec("PREPARE S1 FROM :STMT"),
+                exec("EXECUTE S1"),
+                set("CONNECT TO LOC1"),
+                exec("EXECUTE IMMEDIATE :STMT"),
+                exec("PREPARE S3 FROM :STMT"),
+                exec("EXECUTE S3"),
+            ]
+            .concat();
+            let (shown, calls) = dynamic(&procedure, Vec::new());
+            assert_eq!(shown.as_deref(), Ok("-518\n-518\n 000\n-518\n-084\n-084\n-518\n"));
+            assert_eq!(verbs(&calls), ["PREPARE", "COMMIT"]);
+        }
+
+        #[test]
+        fn a_cursor_for_a_prepared_select_opens_with_its_using_list() {
+            let procedure = [
+                "           EXEC SQL DECLARE C1 CURSOR FOR S1 END-EXEC.\n".into(),
+                exec("OPEN C1 USING :WS-ID"),
+                set("SELECT NAME FROM T WHERE ID = ?"),
+                exec("PREPARE S1 FROM :STMT"),
+                exec("OPEN C1"),
+                exec("OPEN C1 USING :WS-ID"),
+                exec("PREPARE S1 FROM :STMT"),
+                exec("FETCH C1 INTO :WS-NAME"),
+                "           DISPLAY WS-NAME.\n".into(),
+                exec("CLOSE C1"),
+                set("DELETE FROM T"),
+                exec("PREPARE S1 FROM :STMT"),
+                exec("OPEN C1 USING :WS-ID"),
+            ]
+            .concat();
+            let answers = vec![Outcome::ok(), Outcome::ok(), Outcome::rows(vec![vec![Value::Char("JONES".into())]])];
+            let (shown, calls) = dynamic(&procedure, answers);
+            assert_eq!(shown.as_deref(), Ok("-514\n 000\n-313\n 000\n-519\n 000\nJONES     \n 000\n 000\n-517\n"));
+            assert_eq!(verbs(&calls), ["PREPARE", "OPEN", "FETCH", "CLOSE", "PREPARE", "COMMIT"]);
+            assert_eq!((calls[1].2.as_str(), calls[1].3.as_slice()), ("DECLARE C1 CURSOR FOR SELECT NAME FROM T WHERE ID = ?", [Value::Int(7)].as_slice()));
+        }
+
+        #[test]
+        fn a_unit_of_work_destroys_its_prepared_statements_but_an_open_held_cursor_s() {
+            let procedure = [
+                "           EXEC SQL DECLARE H1 CURSOR WITH HOLD FOR S1 END-EXEC.\n".into(),
+                set("SELECT NAME FROM T WHERE ID = ?"),
+                exec("PREPARE S1 FROM :STMT"),
+                set("DELETE FROM T"),
+                exec("PREPARE S2 FROM :STMT"),
+                exec("OPEN H1 USING :WS-ID"),
+                exec("COMMIT"),
+                exec("EXECUTE S2"),
+                exec("CLOSE H1"),
+                exec("OPEN H1 USING :WS-ID"),
+                exec("CLOSE H1"),
+                exec("ROLLBACK"),
+                exec("OPEN H1 USING :WS-ID"),
+            ]
+            .concat();
+            let (shown, calls) = dynamic(&procedure, Vec::new());
+            assert_eq!(shown.as_deref(), Ok(" 000\n 000\n 000\n 000\n-518\n 000\n 000\n 000\n 000\n-514\n"));
+            assert_eq!(verbs(&calls), ["PREPARE", "PREPARE", "OPEN", "COMMIT", "CLOSE", "OPEN", "CLOSE", "ROLLBACK"]);
+            assert_eq!(calls[2].2, "DECLARE H1 CURSOR WITH HOLD FOR SELECT NAME FROM T WHERE ID = ?");
+        }
+
+        #[test]
+        fn a_dynamic_commit_ends_the_unit_of_work_except_in_a_cics_task() {
+            let procedure = [set("COMMIT WORK"), exec("EXECUTE IMMEDIATE :STMT")].concat();
+            let (shown, calls) = dynamic(&procedure, Vec::new());
+            assert_eq!((shown.as_deref(), calls), (Ok(" 000\n"), vec![("COMMIT".into(), 1, "COMMIT WORK".into(), Vec::new())]));
+            let (shown, ended, calls) = run_task_source(&source(&procedure), Vec::new());
+            assert_eq!((shown.as_str(), ended, verbs(&calls)), ("-925\n", Ok(()), Vec::<&str>::new()));
+        }
+
+        #[test]
+        fn a_fixed_length_statement_string_and_a_savepoint_are_refused_by_name() {
+            let (shown, _) = run_source_message(&source(&exec("EXECUTE IMMEDIATE :FIXED-STMT")), Vec::new());
+            let (code, message) = shown.unwrap_err();
+            assert!(code == "EXEC" && message.contains("varying-length"), "{code} {message}");
+            let procedure = [set("SAVEPOINT A ON ROLLBACK RETAIN CURSORS"), exec("EXECUTE IMMEDIATE :STMT")].concat();
+            let (code, message) = run_source_message(&source(&procedure), Vec::new()).0.unwrap_err();
+            assert!(code == "EXEC" && message.contains("does not run SAVEPOINT"), "{code} {message}");
+        }
+
+        #[test]
+        fn a_recording_answers_prepare_with_the_statement_name_after_its_verb() {
+            let insert = "INSERT INTO T (ID) VALUES (?)";
+            let procedure = [set(insert), exec("PREPARE INS-1 FROM :STMT"), exec("EXECUTE INS-1 USING :WS-ID")].concat();
+            let hash = rt::sql::fingerprint(insert);
+            let commit = rt::sql::fingerprint("COMMIT");
+            let recording = format!(
+                "# ironwork sql recording 1\n@ 1 D:1:{hash:08x} PREPARE INS-1\n< 0 00000 rows=0\n@ 2 D:2:{hash:08x} INSERT\n> int:7\n< 0 00000 rows=1\n@ 3 D:0:{commit:08x} COMMIT\n< 0 00000 rows=0\n"
+            );
+            let text = recording.clone();
+            let source = source(&procedure);
+            Harness::source(&source).database(move || Box::new(crate::sql::Replay::parse(&text, false).expect("the recording parses"))).run(Executor::Interpreter);
+            let compiled = crate::compile(syntax::parse(&source).expect("parses"), &[]).expect("compiles");
+            let mut replay = crate::sql::Replay::parse(&recording, false).expect("the recording parses");
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let ran = compiled.execute_with(crate::unit::Library::default(), crate::files::Dds::default(), None, crate::unit::Clock::System, Some(&mut replay), &mut out, &mut err);
+            assert_eq!(ran.map(|_| String::from_utf8(out).expect("text")).map_err(|a| a.message).as_deref(), Ok(" 000\n 000\n"));
+        }
     }
 }

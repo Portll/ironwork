@@ -301,3 +301,18 @@ fn connect_traces_the_location_a_host_variable_names_before_it_is_refused() {
     let (events, _, abend) = connect(DATA, &["EXEC SQL CONNECT TO DB1 END-EXEC", "GOBACK."], "");
     assert!(events.is_empty() && abend.contains("does not run CONNECT"), "{events:?} {abend}");
 }
+
+#[test]
+fn a_dynamic_statement_string_is_traced_before_the_run_needs_a_database() {
+    let data = "       01  S.\n           49 S-LEN PIC S9(4) COMP.\n           49 S-TEXT PIC X(40).\n";
+    let traced = |body: &[&str], sysin: &str| {
+        let source = program("", data, &body.iter().map(|s| line(s)).collect::<String>());
+        let (events, abend) = sink_events(&source, sysin, &[]);
+        (events, line_of(&source, "EXEC SQL"), abend.unwrap_or_default())
+    };
+    let (events, at, abend) = traced(&["ACCEPT S-TEXT", "MOVE 20 TO S-LEN", "EXEC SQL EXECUTE IMMEDIATE :S END-EXEC", "GOBACK."], "DELETE FROM T WHERE X\n");
+    assert_eq!(events, [("dynamic-sql", at, "DELETE FROM T WHERE".to_owned(), Some(true))]);
+    assert!(abend.contains("no database is attached"), "{abend}");
+    let (events, at, _) = traced(&["MOVE 'DELETE FROM T' TO S-TEXT", "MOVE 13 TO S-LEN", "EXEC SQL PREPARE S1 FROM :S END-EXEC", "GOBACK."], "");
+    assert_eq!(events, [("dynamic-sql", at, "DELETE FROM T".to_owned(), Some(false))]);
+}

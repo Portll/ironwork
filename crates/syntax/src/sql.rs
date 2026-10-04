@@ -52,13 +52,16 @@ pub enum ChangeKind {
     Delete,
 }
 
-/// A cursor as its DECLARE gives it: the query OPEN runs and the host variables OPEN sends.
+/// A cursor as its DECLARE gives it: the query OPEN runs and the host variables OPEN sends, or
+/// the prepared statement it runs, whose inputs OPEN ... USING sends.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Cursor {
     pub name: String,
     pub text: String,
     pub inputs: Vec<HostVar>,
     pub with_hold: bool,
+    /// The statement name of a cursor for a prepared statement; its `text` and `inputs` are empty.
+    pub statement: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,14 +71,20 @@ pub enum Statement {
     /// INSERT, UPDATE and DELETE; `current_of` names the cursor of a positioned UPDATE or DELETE.
     Change { kind: ChangeKind, text: String, inputs: Vec<HostVar>, current_of: Option<String> },
     DeclareCursor(Cursor),
-    /// A cursor ironwork does not run, such as one for a prepared statement, and what it is.
+    /// A cursor ironwork does not run, such as a scrollable one, and what it is.
     DeclareUnsupported { name: String, what: String },
-    /// `declared` is the cursor's DECLARE, which [`Cursors::resolve`] fills.
-    Open { cursor: String, declared: Option<Cursor> },
+    /// `declared` is the cursor's DECLARE, which [`Cursors::resolve`] fills; `using` the host
+    /// variables OPEN ... USING sends to a prepared statement's parameter markers.
+    Open { cursor: String, declared: Option<Cursor>, using: Vec<HostVar> },
     Fetch { cursor: String, into: Vec<HostVar> },
     Close { cursor: String },
     Commit,
     Rollback,
+    /// PREPARE: the statement name and the host variable holding the statement string.
+    Prepare { name: String, source: HostVar },
+    ExecuteImmediate { source: HostVar },
+    /// EXECUTE of a prepared statement, with the host variables USING sends.
+    Execute { name: String, inputs: Vec<HostVar> },
     Whenever { condition: Condition, action: Action },
     /// INCLUDE, DECLARE SECTION, DECLARE TABLE and DECLARE STATEMENT, which declare and do nothing.
     Declaration,
@@ -96,6 +105,8 @@ impl Statement {
             Statement::Query { inputs, into, .. } => into.iter().chain(inputs).collect(),
             Statement::Change { inputs, .. } | Statement::DeclareCursor(Cursor { inputs, .. }) => inputs.iter().collect(),
             Statement::Fetch { into, .. } => into.iter().collect(),
+            Statement::Open { using, .. } | Statement::Execute { inputs: using, .. } => using.iter().collect(),
+            Statement::Prepare { source, .. } | Statement::ExecuteImmediate { source } => vec![source],
             _ => Vec::new(),
         };
         vars.into_iter().flat_map(|h| std::iter::once(&h.var).chain(&h.indicator)).collect()
@@ -125,7 +136,8 @@ impl Cursors {
         match (self.0.get(&named), statement) {
             (None, _) => Statement::Malformed(format!("cursor {named} is not declared before this statement")),
             (Some(Err(what)), _) => Statement::Unsupported(what.clone()),
-            (Some(Ok(c)), Statement::Open { cursor, .. }) => Statement::Open { cursor, declared: Some(c.clone()) },
+            (Some(Ok(c)), Statement::Open { using, .. }) if c.statement.is_none() && !using.is_empty() => Statement::Unsupported("OPEN ... USING of a cursor declared for a select-statement".into()),
+            (Some(Ok(c)), Statement::Open { cursor, using, .. }) => Statement::Open { cursor, declared: Some(c.clone()), using },
             (Some(Ok(_)), statement) => statement,
         }
     }
@@ -343,11 +355,7 @@ fn statement(toks: &[Tok], pos: Pos) -> Statement {
         "UPDATE" => change(ChangeKind::Update, toks, pos),
         "DELETE" => change(ChangeKind::Delete, toks, pos),
         "DECLARE" => declare(toks, pos),
-        "OPEN" => match (word(toks, 1), toks.len()) {
-            ("", _) => Statement::Malformed("OPEN names no cursor".into()),
-            (cursor, 2) => Statement::Open { cursor: cursor.into(), declared: None },
-            _ => Statement::Unsupported("OPEN with USING".into()),
-        },
+        "OPEN" => open(toks, pos),
         "FETCH" => fetch(toks, pos),
         "CLOSE" => match (word(toks, 1), toks.len()) {
             ("", _) => Statement::Malformed("CLOSE names no cursor".into()),
@@ -357,6 +365,12 @@ fn statement(toks: &[Tok], pos: Pos) -> Statement {
         "COMMIT" if toks.len() == 1 || (toks.len() == 2 && word(toks, 1) == "WORK") => Statement::Commit,
         "ROLLBACK" if toks.len() == 1 || (toks.len() == 2 && word(toks, 1) == "WORK") => Statement::Rollback,
         "ROLLBACK" => Statement::Unsupported("ROLLBACK TO SAVEPOINT".into()),
+        "PREPARE" => prepare(toks, pos),
+        "EXECUTE" if word(toks, 1) == "IMMEDIATE" => match source(toks, 2, pos) {
+            Ok(source) => Statement::ExecuteImmediate { source },
+            Err(why) => Statement::Malformed(format!("EXECUTE IMMEDIATE {why}")),
+        },
+        "EXECUTE" => execute(toks, pos),
         "WHENEVER" => whenever(toks),
         "INCLUDE" => Statement::Declaration,
         "BEGIN" | "END" if word(toks, 1) == "DECLARE" => Statement::Declaration,
@@ -423,10 +437,93 @@ fn declare(toks: &[Tok], pos: Pos) -> Statement {
     let with_hold = (cursor + 1..for_at).any(|i| word(toks, i) == "HOLD" && word(toks, i - 1) == "WITH");
     let query = &toks[for_at + 1..];
     if !matches!(word(query, 0), "SELECT" | "WITH" | "VALUES") && !matches!(query.first(), Some(Tok::Punct('('))) {
-        return unsupported("a cursor for a prepared statement");
+        return match query {
+            [Tok::Word(statement)] => Statement::DeclareCursor(Cursor { name: name.into(), text: String::new(), inputs: Vec::new(), with_hold, statement: Some(statement.clone()) }),
+            _ => Statement::Malformed("DECLARE CURSOR ... FOR takes a select-statement or a statement name".into()),
+        };
     }
     let (text, inputs) = render(query, pos);
-    Statement::DeclareCursor(Cursor { name: name.into(), text, inputs, with_hold })
+    Statement::DeclareCursor(Cursor { name: name.into(), text, inputs, with_hold, statement: None })
+}
+
+/// A comma-separated list of host variables after USING.
+fn using_list(toks: &[Tok], pos: Pos) -> Result<Vec<HostVar>, String> {
+    let (mut out, mut i) = (Vec::new(), 0);
+    while i < toks.len() {
+        let (var, next) = host_var(toks, i, pos).ok_or("USING lists something other than host variables")?;
+        out.push(var);
+        i = next;
+        match toks.get(i) {
+            None => {}
+            Some(Tok::Punct(',')) if i + 1 < toks.len() => i += 1,
+            Some(_) => return Err("USING lists something other than host variables".into()),
+        }
+    }
+    if out.is_empty() {
+        return Err("USING names no host variable".into());
+    }
+    Ok(out)
+}
+
+/// OPEN, and the host variables OPEN ... USING sends.
+fn open(toks: &[Tok], pos: Pos) -> Statement {
+    let cursor = word(toks, 1);
+    if cursor.is_empty() {
+        return Statement::Malformed("OPEN names no cursor".into());
+    }
+    match (toks.len(), word(toks, 2), word(toks, 3)) {
+        (2, _, _) => Statement::Open { cursor: cursor.into(), declared: None, using: Vec::new() },
+        (_, "USING", "DESCRIPTOR") => Statement::Unsupported("OPEN ... USING DESCRIPTOR".into()),
+        (_, "USING", _) => match using_list(&toks[3..], pos) {
+            Ok(using) => Statement::Open { cursor: cursor.into(), declared: None, using },
+            Err(why) => Statement::Malformed(why),
+        },
+        _ => Statement::Malformed("OPEN takes a cursor name and USING".into()),
+    }
+}
+
+/// The statement string's host variable at `toks[at]`, the statement's last token. Db2 takes no
+/// indicator with it, and a string expression only in PL/I (Db2 13 SQL, PREPARE).
+fn source(toks: &[Tok], at: usize, pos: Pos) -> Result<HostVar, String> {
+    match (toks.get(at), host_var(toks, at, pos)) {
+        (Some(Tok::Quoted(_)), _) => Err("takes a host variable; a string expression is PL/I's".into()),
+        (_, Some((HostVar { indicator: Some(_), .. }, _))) => Err("takes no indicator variable with the statement string".into()),
+        (_, Some((var, next))) if next == toks.len() => Ok(var),
+        _ => Err("takes the host variable holding the statement string".into()),
+    }
+}
+
+fn prepare(toks: &[Tok], pos: Pos) -> Statement {
+    let name = word(toks, 1);
+    if name.is_empty() {
+        return Statement::Malformed("PREPARE names no statement".into());
+    }
+    match word(toks, 2) {
+        "INTO" => Statement::Unsupported("PREPARE ... INTO a descriptor".into()),
+        "ATTRIBUTES" => Statement::Unsupported("PREPARE ... ATTRIBUTES".into()),
+        "FROM" => match source(toks, 3, pos) {
+            Ok(source) => Statement::Prepare { name: name.into(), source },
+            Err(why) => Statement::Malformed(format!("PREPARE ... FROM {why}")),
+        },
+        _ => Statement::Malformed("PREPARE takes a statement name and FROM".into()),
+    }
+}
+
+fn execute(toks: &[Tok], pos: Pos) -> Statement {
+    let name = word(toks, 1);
+    if name.is_empty() {
+        return Statement::Malformed("EXECUTE names no statement".into());
+    }
+    match (toks.len(), word(toks, 2), word(toks, 3)) {
+        (2, _, _) => Statement::Execute { name: name.into(), inputs: Vec::new() },
+        (_, "USING", "DESCRIPTOR") => Statement::Unsupported("EXECUTE ... USING DESCRIPTOR".into()),
+        (_, "USING", _) if top_level(toks, 3, "FOR").is_none() => match using_list(&toks[3..], pos) {
+            Ok(inputs) => Statement::Execute { name: name.into(), inputs },
+            Err(why) => Statement::Malformed(why),
+        },
+        (_, "USING" | "FOR", _) => Statement::Unsupported("a multi-row EXECUTE".into()),
+        _ => Statement::Malformed("EXECUTE takes a statement name and USING".into()),
+    }
 }
 
 fn fetch(toks: &[Tok], pos: Pos) -> Statement {
@@ -538,11 +635,11 @@ mod tests {
 
     #[test]
     fn cursors() {
-        let Statement::DeclareCursor(Cursor { name, text, inputs, with_hold }) = st("DECLARE C1 CURSOR WITH HOLD FOR SELECT NAME FROM EMP WHERE DEPT = :WS-DEPT FOR UPDATE OF SAL") else { panic!() };
-        assert_eq!((name.as_str(), with_hold), ("C1", true));
+        let Statement::DeclareCursor(Cursor { name, text, inputs, with_hold, statement }) = st("DECLARE C1 CURSOR WITH HOLD FOR SELECT NAME FROM EMP WHERE DEPT = :WS-DEPT FOR UPDATE OF SAL") else { panic!() };
+        assert_eq!((name.as_str(), with_hold, statement), ("C1", true, None));
         assert_eq!(text, "SELECT NAME FROM EMP WHERE DEPT = ? FOR UPDATE OF SAL");
         assert_eq!(names(&inputs), [("WS-DEPT", None)]);
-        assert_eq!(st("OPEN C1"), Statement::Open { cursor: "C1".into(), declared: None });
+        assert_eq!(st("OPEN C1"), Statement::Open { cursor: "C1".into(), declared: None, using: Vec::new() });
         assert_eq!(st("CLOSE C1"), Statement::Close { cursor: "C1".into() });
         let Statement::Fetch { cursor, into } = st("FETCH NEXT FROM C1 INTO :A, :B:BI") else { panic!() };
         assert_eq!((cursor.as_str(), names(&into).len()), ("C1", 2));
@@ -606,10 +703,9 @@ mod tests {
     fn what_is_refused_and_why() {
         assert_eq!(st("CONNECT TO DB1"), Statement::Connect { what: "CONNECT".into(), target: None });
         assert!(matches!(st("DISCONNECT ALL"), Statement::Malformed(why) if why.starts_with("DISCONNECT is not a Db2 for z/OS statement")));
-        assert_eq!(st("PREPARE S1 FROM :STMT"), Statement::Unsupported("PREPARE".into()));
+        assert_eq!(st("DESCRIBE S1 INTO :SQLDA"), Statement::Unsupported("DESCRIBE".into()));
         assert_eq!(st("FETCH PRIOR FROM C1 INTO :A"), Statement::Unsupported("a scrollable FETCH".into()));
-        let prepared = Statement::DeclareUnsupported { name: "C2".into(), what: "a cursor for a prepared statement".into() };
-        assert_eq!(st("DECLARE C2 CURSOR FOR S1"), prepared);
+        assert_eq!(st("DECLARE C2 SCROLL CURSOR FOR S1"), Statement::DeclareUnsupported { name: "C2".into(), what: "a scrollable cursor".into() });
         assert!(matches!(st("FETCH INTO :A"), Statement::Malformed(_)));
         assert!(matches!(st("SELECT A INTO FROM T"), Statement::Malformed(_)));
         assert!(matches!(st("SELECT A FROM T"), Statement::Malformed(_)));
@@ -659,12 +755,48 @@ mod tests {
         let mut cursors = Cursors::default();
         assert_eq!(cursors.resolve(st("FETCH C1 INTO :A")), Statement::Malformed("cursor C1 is not declared before this statement".into()));
         let Statement::DeclareCursor(c1) = cursors.resolve(st("DECLARE C1 CURSOR WITH HOLD FOR SELECT A FROM T WHERE K = :K")) else { panic!() };
-        assert_eq!(cursors.resolve(st("OPEN C1")), Statement::Open { cursor: "C1".into(), declared: Some(c1) });
+        assert_eq!(cursors.resolve(st("OPEN C1")), Statement::Open { cursor: "C1".into(), declared: Some(c1), using: Vec::new() });
         assert!(matches!(cursors.resolve(st("FETCH C1 INTO :A")), Statement::Fetch { .. }));
         assert!(matches!(cursors.resolve(st("DELETE FROM T WHERE CURRENT OF C1")), Statement::Change { .. }));
         assert!(matches!(cursors.resolve(st("UPDATE T SET A = 1 WHERE CURRENT OF C9")), Statement::Malformed(_)));
-        cursors.resolve(st("DECLARE C2 CURSOR FOR S1"));
-        assert_eq!(cursors.resolve(st("OPEN C2")), Statement::Unsupported("a cursor for a prepared statement".into()));
+        let Statement::DeclareCursor(c2) = cursors.resolve(st("DECLARE C2 CURSOR FOR S1")) else { panic!() };
+        let Statement::Open { declared, using, .. } = cursors.resolve(st("OPEN C2 USING :A, :B")) else { panic!() };
+        assert_eq!((declared, names(&using)), (Some(c2), vec![("A", None), ("B", None)]));
+        assert_eq!(cursors.resolve(st("OPEN C1 USING :A")), Statement::Unsupported("OPEN ... USING of a cursor declared for a select-statement".into()));
+    }
+
+    #[test]
+    fn prepare_and_execute_immediate_take_the_statement_string_from_a_host_variable() {
+        let Statement::Prepare { name, source } = st("PREPARE PRELT98_SQL FROM :SQLSEL-SQL") else { panic!() };
+        assert_eq!((name.as_str(), source.var.name.as_str(), source.indicator), ("PRELT98_SQL", "SQLSEL-SQL", None));
+        let Statement::ExecuteImmediate { source } = st("EXECUTE IMMEDIATE :WS-DYN-SQL") else { panic!() };
+        assert_eq!(source.var.name, "WS-DYN-SQL");
+        assert!(matches!(st("PREPARE S1 FROM 'SELECT 1'"), Statement::Malformed(why) if why.contains("PL/I")));
+        assert!(matches!(st("EXECUTE IMMEDIATE :S :S-IND"), Statement::Malformed(why) if why.contains("no indicator")));
+        assert!(matches!(st("PREPARE S1 FROM :A :B"), Statement::Malformed(_)));
+        assert!(matches!(st("PREPARE FROM :A"), Statement::Malformed(_)));
+        assert_eq!(st("PREPARE S1 INTO :SQLDA FROM :A"), Statement::Unsupported("PREPARE ... INTO a descriptor".into()));
+        assert_eq!(st("PREPARE S1 ATTRIBUTES :ATTR FROM :A"), Statement::Unsupported("PREPARE ... ATTRIBUTES".into()));
+    }
+
+    #[test]
+    fn execute_sends_its_using_list_to_the_parameter_markers() {
+        assert_eq!(st("EXECUTE MMPREPSTMT"), Statement::Execute { name: "MMPREPSTMT".into(), inputs: Vec::new() });
+        let Statement::Execute { name, inputs } = st("EXECUTE INS_STMT USING :EMP-NO, :EMP-NAME:EMP-NAME-IND") else { panic!() };
+        assert_eq!((name.as_str(), names(&inputs)), ("INS_STMT", vec![("EMP-NO", None), ("EMP-NAME", Some("EMP-NAME-IND"))]));
+        assert_eq!(st("EXECUTE S1 USING DESCRIPTOR :SQLDA"), Statement::Unsupported("EXECUTE ... USING DESCRIPTOR".into()));
+        assert_eq!(st("EXECUTE S1 USING :ARR FOR 10 ROWS"), Statement::Unsupported("a multi-row EXECUTE".into()));
+        assert!(matches!(st("EXECUTE S1 USING :A,"), Statement::Malformed(_)));
+        assert!(matches!(st("EXECUTE S1 USING A"), Statement::Malformed(_)));
+    }
+
+    #[test]
+    fn a_cursor_for_a_prepared_statement_names_it() {
+        let Statement::DeclareCursor(c) = st("DECLARE DT CURSOR WITH HOLD FOR DYN-STMT") else { panic!() };
+        assert_eq!((c.name.as_str(), c.statement.as_deref(), c.with_hold, c.text.as_str()), ("DT", Some("DYN-STMT"), true, ""));
+        assert!(matches!(st("DECLARE C1 CURSOR FOR S1 S2"), Statement::Malformed(_)));
+        assert_eq!(st("OPEN C1 USING DESCRIPTOR :SQLDA"), Statement::Unsupported("OPEN ... USING DESCRIPTOR".into()));
+        assert!(matches!(st("OPEN C1 FOR"), Statement::Malformed(_)));
     }
 
     fn sql_blocks(program: &crate::ast::Program) -> Vec<&Sql> {

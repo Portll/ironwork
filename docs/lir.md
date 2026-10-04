@@ -1578,8 +1578,10 @@ pub struct SqlEntry {
     pub statement: SqlStatement,
     /// The canonical text a `Database` call receives and a recording writes: a query's or change's
     /// own, with `?` for each input; `DECLARE C CURSOR [WITH HOLD] FOR …` for OPEN; `FETCH C`,
-    /// `CLOSE C`, `COMMIT` and `ROLLBACK`; empty for a declaration. The walker formats it on every
-    /// call (machine/sql.rs:69-70, 84, 99).
+    /// `CLOSE C`, `COMMIT` and `ROLLBACK`; empty for a declaration. A dynamic statement names
+    /// itself here (`PREPARE S`, `EXECUTE IMMEDIATE`, `EXECUTE S`, `DECLARE C CURSOR [WITH HOLD]
+    /// FOR S`), and its calls send the statement string instead (sql-runtime.md §3.1). The walker
+    /// formats it on every call.
     pub text: SymId,
     /// `fingerprint(text)`: 32-bit FNV-1a (syntax/src/sql.rs:140), which Replay and Recorder now
     /// hash per call (sql/replay.rs:33, 128, 215).
@@ -1598,12 +1600,24 @@ pub enum SqlStatement {
     Commit, Rollback,
     /// WHENEVER, DECLARE CURSOR, INCLUDE, DECLARE SECTION and the other declarations: no op.
     Declaration,
-    /// Dynamic SQL, a statement on a cursor declared for it, and the like: abend EXEC naming it,
-    /// when reached (machine/sql.rs:123).
+    /// A scrollable cursor, the SQLDA, multi-row FETCH and the like: abend EXEC naming it, when
+    /// reached.
     Unsupported(SymId),
     /// CONNECT or SET CONNECTION: the host variable naming the location, if any, goes to the
     /// input trace as a `connection-target` sink, then the statement abends EXEC as `Unsupported`.
     Connect { what: SymId, location: Vec<HostPlace> },
+    /// PREPARE of the statement named from the statement string in `source`, which must be one
+    /// varying-length character or graphic string, else the statement abends EXEC (tag 10). The
+    /// string goes to the input trace as a `dynamic-sql` sink before a run with no database is
+    /// refused.
+    Prepare { name: SymId, source: Vec<HostPlace> },
+    /// Tag 11; `source` as PREPARE's.
+    ExecuteImmediate { source: Vec<HostPlace> },
+    /// EXECUTE of a prepared statement, `inputs` replacing its parameter markers (tag 12).
+    Execute { name: SymId, inputs: Vec<HostPlace> },
+    /// OPEN of a cursor declared for the prepared statement `statement`, `inputs` from OPEN ...
+    /// USING (tag 13).
+    OpenPrepared { cursor: SymId, statement: SymId, inputs: Vec<HostPlace> },
 }
 
 /// A host variable, or one member of a host structure, resolved (machine/sql.rs:176-198).
