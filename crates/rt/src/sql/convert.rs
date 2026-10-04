@@ -234,7 +234,7 @@ fn hfp_image(f: f64, precision: Precision) -> Option<Vec<u8>> {
 
 fn text(value: &Value, page: &CodePage) -> Result<Vec<u8>, SqlError> {
     match value {
-        Value::Char(s) => page.encode(s).map_err(|_| UNCONVERTIBLE),
+        Value::Char(s) | Value::Date(s) | Value::Time(s) | Value::Timestamp(s) => page.encode(s).map_err(|_| UNCONVERTIBLE),
         Value::Binary(b) => Ok(b.clone()),
         _ => Err(NOT_ASSIGNABLE),
     }
@@ -245,7 +245,7 @@ fn text(value: &Value, page: &CodePage) -> Result<Vec<u8>, SqlError> {
 /// [`numeric::assumptions::DBCS_HOST_VARIABLES`]).
 fn graphic(value: &Value, page: &CodePage) -> Result<Vec<u8>, SqlError> {
     match value {
-        Value::Char(s) => page.dbcs().ok_or(UNCONVERTIBLE)?.encode(s, page.ccsid).map_err(|_| UNCONVERTIBLE),
+        Value::Char(s) | Value::Date(s) | Value::Time(s) | Value::Timestamp(s) => page.dbcs().ok_or(UNCONVERTIBLE)?.encode(s, page.ccsid).map_err(|_| UNCONVERTIBLE),
         _ => Err(NOT_ASSIGNABLE),
     }
 }

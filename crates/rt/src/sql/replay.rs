@@ -20,6 +20,7 @@ use std::io::Write;
 use super::fingerprint;
 
 const HEADER: &str = "# ironwork sql recording 1";
+const VERSIONED: &str = "# ironwork sql recording ";
 
 #[derive(Debug)]
 struct Entry {
@@ -70,6 +71,11 @@ impl Replay {
                 continue;
             }
             if line.starts_with('#') {
+                if let Some(version) = line.strip_prefix(VERSIONED)
+                    && line != HEADER
+                {
+                    return Err(fail(format!("this ironwork reads sql recording 1, and this recording is {version}")));
+                }
                 header |= line == HEADER;
                 continue;
             }
@@ -369,7 +375,24 @@ fn value_text(v: &Value) -> String {
             q + "\""
         }
         Value::Binary(b) => format!("hex:{}", b.iter().map(|x| format!("{x:02X}")).collect::<String>()),
+        Value::Date(s) => format!("date:{s}"),
+        Value::Time(s) => format!("time:{s}"),
+        Value::Timestamp(s) => format!("ts:{s}"),
     }
+}
+
+/// Db2's ISO forms: `YYYY-MM-DD`, `HH.MM.SS`, and `YYYY-MM-DD-HH.MM.SS` with any fraction.
+fn iso_date(s: &str) -> bool {
+    s.len() == 10 && s.bytes().enumerate().all(|(i, b)| if i == 4 || i == 7 { b == b'-' } else { b.is_ascii_digit() })
+}
+
+fn iso_time(s: &str) -> bool {
+    s.len() == 8 && s.bytes().enumerate().all(|(i, b)| if i == 2 || i == 5 { b == b'.' } else { b.is_ascii_digit() })
+}
+
+fn iso_timestamp(s: &str) -> bool {
+    let fraction = s.get(19..).unwrap_or("x");
+    s.is_ascii() && s.len() >= 19 && iso_date(&s[..10]) && &s[10..11] == "-" && iso_time(&s[11..19]) && (fraction.is_empty() || fraction.strip_prefix('.').is_some_and(|f| !f.is_empty() && f.bytes().all(|b| b.is_ascii_digit())))
 }
 
 fn parse_outcome(text: &str) -> Result<Outcome, String> {
@@ -457,7 +480,10 @@ fn parse_value(text: &str) -> Result<(Value, &str), String> {
             let bytes: Result<Vec<u8>, _> = (0..h.len()).step_by(2).map(|i| u8::from_str_radix(&h[i..i + 2], 16)).collect();
             Value::Binary(bytes.map_err(|_| format!("{word} is not hexadecimal"))?)
         }
-        _ => return Err(format!("{word} is not a value: null, int:, dec:, double:, char:\"...\" or hex:")),
+        Some(("date", d)) if iso_date(d) => Value::Date(d.into()),
+        Some(("time", t)) if iso_time(t) => Value::Time(t.into()),
+        Some(("ts", t)) if iso_timestamp(t) => Value::Timestamp(t.into()),
+        _ => return Err(format!("{word} is not a value: null, int:, dec:, double:, char:\"...\", hex:, date:, time: or ts:")),
     };
     Ok((value, rest))
 }
@@ -482,10 +508,18 @@ mod tests {
             Value::Double(6.02e23),
             Value::Char("say \"hi\" | x \\ é\n".into()),
             Value::Binary(vec![0xC1, 0x00]),
+            Value::Date("2026-09-30".into()),
+            Value::Time("13.45.06".into()),
+            Value::Timestamp("2026-09-30-13.45.06.500000".into()),
+            Value::Timestamp("2026-09-30-13.45.06".into()),
         ];
         let text = values_text(&values);
         assert!(text.contains("dec:-1234.50") && text.contains("dec:0.05") && text.contains("dec:7"), "{text}");
+        assert!(text.contains("date:2026-09-30 | time:13.45.06 | ts:2026-09-30-13.45.06.500000"), "{text}");
         assert_eq!(parse_values(&text), Ok(values));
+        for bad in ["date:2026-9-30", "time:13:45:06", "ts:2026-09-30 13.45.06", "ts:2026-09-30-13.45.06.", "date:２０２６-09-30"] {
+            assert!(parse_values(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]
@@ -609,6 +643,7 @@ mod tests {
         assert_eq!(err, "line 3: an = line belongs after a < line");
         assert!(Replay::parse(&format!("{HEADER}\n@ 1 P:1:0 SELECT\n< 0 00000 rows=0\n= int:x\n"), false).err().unwrap().starts_with("line 4: "));
         assert_eq!(Replay::parse(&format!("{HEADER}\n@ 1 P:1:0 SELECT\n"), false).err().unwrap(), "the last call has no < line");
+        assert_eq!(Replay::parse("# ironwork sql recording 2\n", false).err().unwrap(), "line 1: this ironwork reads sql recording 1, and this recording is 2");
         let call_lines = |equals: &str| Replay::parse(&format!("{HEADER}\n@ 1 P:1:0 CALL P\n< 0 00000 rows=0\n{equals}"), false).err();
         assert_eq!(call_lines("= - | int:1\n= int:2\n").unwrap(), "line 5: a CALL has one = line");
         assert!(call_lines("= -- | int:1\n").unwrap().starts_with("line 4: "));

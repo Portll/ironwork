@@ -29,6 +29,11 @@ pub enum Value {
     Double(f64),
     Char(String),
     Binary(Vec<u8>),
+    /// DATE, TIME and TIMESTAMP in Db2's ISO forms, `2026-09-30`, `13.45.06` and
+    /// `2026-09-30-13.45.06.500000`, which a character host variable takes as that text.
+    Date(String),
+    Time(String),
+    Timestamp(String),
 }
 
 impl Value {
@@ -39,7 +44,7 @@ impl Value {
             Value::Int(n) => n.to_string(),
             Value::Decimal { value, scale } => Self::decimal_text(*value, *scale),
             Value::Double(d) => d.to_string(),
-            Value::Char(s) => s.trim_end().to_owned(),
+            Value::Char(s) | Value::Date(s) | Value::Time(s) | Value::Timestamp(s) => s.trim_end().to_owned(),
             Value::Binary(b) => b.iter().map(|byte| format!("{byte:02X}")).collect(),
         }
     }

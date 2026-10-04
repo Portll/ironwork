@@ -319,7 +319,10 @@ Input rules:
   program's EXEC SQL blocks in listing order (INCLUDE is expanded as COPY is, and not counted), and
   the 32-bit FNV-1a hash of its normalised text in eight hex digits. Line numbers are not used,
   because an edit above a statement would change them.
-- **The format** is line-oriented text, written and read by ironwork's own code:
+- **The format** is line-oriented text, written and read by ironwork's own code. This is version 1
+  (D1), which ironwork 1.0 reads unchanged: a later version gets a new header, and a reader names
+  the version it was given when it is not one it reads. Lines starting `#` other than the header
+  are comments.
 
       # ironwork sql recording 1
       @ 1 PAYROLL:3:9f2a41c0 SELECT
@@ -351,9 +354,11 @@ Input rules:
       `dec:1234.50` has scale 2; its precision is the column's, not the value's. A double is written
       in shortest round-trip form;
     - `char:"…"`, UTF-8 after CCSID conversion, with `\"`, `\\` and `\xNN` escapes;
-    - `hex:` for binary data.
-  - DATE, TIME and TIMESTAMP travel as `char:` in ISO form, as they reach a COBOL host variable.
-    Typed `date:`, `time:` and `ts:` wait for a backend that sends them.
+    - `hex:` for binary data;
+    - `date:2026-09-30`, `time:13.45.06` and `ts:2026-09-30-13.45.06.500000` for DATE, TIME and
+      TIMESTAMP, in Db2's ISO forms, as the PostgreSQL backend sends them. A character host
+      variable takes the ISO text, as it reaches a COBOL program under DATE(ISO) and TIME(ISO)
+      (SQ11). Older recordings that give them as `char:` replay the same.
 - **Matching.** Replay is strict by default: call *n* must match record *n*'s statement identity
   and inputs. `--sql-replay-mode keyed` instead matches each call to the next unused record with
   the same identity and inputs, for tests whose order does not matter.
@@ -572,7 +577,8 @@ trial cannot serve, as its licence is for evaluation only.
 
 ## 14. Decisions for the operator
 
-- **D1.** The recording format of §8, and strict replay as the default.
+- **D1.** Settled 2026-10-04: the recording format of §8 is version 1, with strict replay as the
+  default and typed `date:`, `time:` and `ts:` values.
 - **D2.** Settled 2026-09-30: TLS as a separate, optional build on rustls (§9), not in-house TLS,
   and not in ironwork's own build.
 - **D3.** Settled 2026-09-30: DISCONNECT is refused at compile time as not Db2 for z/OS. CONNECT is

@@ -10,6 +10,7 @@ pub const INT2: u32 = 21;
 pub const INT4: u32 = 23;
 pub const FLOAT4: u32 = 700;
 pub const FLOAT8: u32 = 701;
+pub const DATE: u32 = 1082;
 pub const TIME: u32 = 1083;
 pub const TIMESTAMP: u32 = 1114;
 pub const TIMESTAMPTZ: u32 = 1184;
@@ -174,13 +175,14 @@ pub fn value(oid: u32, text: &str) -> Result<Value, String> {
             let bytes: Option<Vec<u8>> = (0..hex.len()).step_by(2).map(|i| hex.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok())).collect();
             Value::Binary(bytes.ok_or_else(bad)?)
         }
-        TIME => Value::Char(text.get(..8).ok_or_else(bad)?.replace(':', ".")),
+        DATE => Value::Date(text.to_owned()),
+        TIME => Value::Time(text.get(..8).ok_or_else(bad)?.replace(':', ".")),
         TIMESTAMP | TIMESTAMPTZ => {
             let zone = text.rfind(['+', '-']).filter(|&at| oid == TIMESTAMPTZ && at > 10);
             let stamp = zone.map_or(text, |at| &text[..at]);
             let (date, time) = stamp.split_once(' ').ok_or_else(bad)?;
             let (seconds, fraction) = time.split_once('.').unwrap_or((time, ""));
-            Value::Char(format!("{date}-{}.{fraction:0<6}", seconds.replace(':', ".")))
+            Value::Timestamp(format!("{date}-{}.{fraction:0<6}", seconds.replace(':', ".")))
         }
         _ => Value::Char(text.to_owned()),
     })
@@ -197,7 +199,7 @@ pub fn text(value: &Value, oid: u32) -> Option<String> {
         Value::Double(f) if f.is_infinite() => if *f > 0.0 { "Infinity" } else { "-Infinity" }.into(),
         Value::Double(f) => format!("{f:?}"),
         Value::Binary(b) => format!("\\x{}", b.iter().map(|x| format!("{x:02x}")).collect::<String>()),
-        Value::Char(s) => match oid {
+        Value::Char(s) | Value::Date(s) | Value::Time(s) | Value::Timestamp(s) => match oid {
             TIME => iso_time(s.trim_end()).unwrap_or_else(|| s.clone()),
             TIMESTAMP | TIMESTAMPTZ => iso_timestamp(s.trim_end()).unwrap_or_else(|| s.clone()),
             _ => s.clone(),
@@ -244,7 +246,6 @@ mod tests {
         assert_eq!(column_type(16, -1), ColumnType::Other("PostgreSQL type OID 16".into()));
     }
 
-    const DATE: u32 = 1082;
 
     #[test]
     fn statements_as_postgresql_reads_them() {
@@ -271,11 +272,11 @@ mod tests {
     fn columns_as_db2_hands_them_over() {
         assert_eq!(value(NUMERIC, "-12.340"), Ok(Value::Decimal { value: -12340, scale: 3 }));
         assert_eq!(value(INT8, "9000000000"), Ok(Value::Int(9_000_000_000)));
-        assert_eq!(value(TIME, "13:45:06"), Ok(Value::Char("13.45.06".into())));
-        assert_eq!(value(TIMESTAMP, "2026-09-30 13:45:06.5"), Ok(Value::Char("2026-09-30-13.45.06.500000".into())));
-        assert_eq!(value(TIMESTAMP, "2026-09-30 13:45:06"), Ok(Value::Char("2026-09-30-13.45.06.000000".into())));
-        assert_eq!(value(TIMESTAMPTZ, "2026-09-30 13:45:06.123456+00"), Ok(Value::Char("2026-09-30-13.45.06.123456".into())));
-        assert_eq!(value(DATE, "2026-09-30"), Ok(Value::Char("2026-09-30".into())));
+        assert_eq!(value(TIME, "13:45:06"), Ok(Value::Time("13.45.06".into())));
+        assert_eq!(value(TIMESTAMP, "2026-09-30 13:45:06.5"), Ok(Value::Timestamp("2026-09-30-13.45.06.500000".into())));
+        assert_eq!(value(TIMESTAMP, "2026-09-30 13:45:06"), Ok(Value::Timestamp("2026-09-30-13.45.06.000000".into())));
+        assert_eq!(value(TIMESTAMPTZ, "2026-09-30 13:45:06.123456+00"), Ok(Value::Timestamp("2026-09-30-13.45.06.123456".into())));
+        assert_eq!(value(DATE, "2026-09-30"), Ok(Value::Date("2026-09-30".into())));
         assert_eq!(value(BYTEA, "\\xc1f0"), Ok(Value::Binary(vec![0xC1, 0xF0])));
         assert!(value(NUMERIC, "NaN").is_err());
     }
@@ -288,5 +289,7 @@ mod tests {
         assert_eq!(text(&Value::Char("13.45.06  ".into()), TIME).as_deref(), Some("13:45:06"));
         assert_eq!(text(&Value::Char("13.45.06".into()), 25).as_deref(), Some("13.45.06"));
         assert_eq!(text(&Value::Binary(vec![0, 255]), BYTEA).as_deref(), Some("\\x00ff"));
+        assert_eq!(text(&Value::Timestamp("2026-09-30-13.45.06.000001".into()), TIMESTAMP).as_deref(), Some("2026-09-30 13:45:06.000001"));
+        assert_eq!(text(&Value::Date("2026-09-30".into()), DATE).as_deref(), Some("2026-09-30"));
     }
 }
