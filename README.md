@@ -301,7 +301,9 @@ PROGRAM-ID with no IDENTIFICATION DIVISION header, and ASSIGN to a data item, wh
 file's DD at each OPEN and never a host file. Each use is a warning, IWX0001-W to IWX0007-W, naming
 the extension and where it is, so `check` returns 4, and the program runs on the interpreter and the
 VM alike. It also accepts an integer or numeric function as a MOVE's sender, as GnuCOBOL does, with
-IWX0008-W; strict refuses it under either dialect, as Enterprise COBOL does.
+IWX0008-W; strict refuses it under either dialect, as Enterprise COBOL does. GnuCOBOL's PROCEDURE
+DIVISION RETURNING OMITTED, a program that returns no item, is read as a header with no RETURNING
+phrase, with IWX0009-W.
 [docs/compliance.md](docs/compliance.md) gives each one's meaning, the census that chose them, and
 what stays refused and why.
 

@@ -1,7 +1,7 @@
 //! What `--compliance extended` does to the tokens before the parser reads them: each constant
 //! entry comes out and every later use of its name stands for its value, literals joined by `&`
-//! become one literal, and BINARY-SHORT, BINARY-LONG and BINARY-DOUBLE become COMP-5 PICTUREs
-//! (docs/compliance.md).
+//! become one literal, BINARY-SHORT, BINARY-LONG and BINARY-DOUBLE become COMP-5 PICTUREs, and
+//! RETURNING OMITTED leaves a program's PROCEDURE DIVISION header (docs/compliance.md).
 
 use crate::lexer::{Tok, Token};
 use crate::{Error, Pos};
@@ -12,6 +12,7 @@ pub const CONCATENATION: &str = "IWX0004-W literal concatenation with & (Micro F
 pub const BINARY_USAGE: &str = "IWX0005-W the COBOL 2002 binary usage (Micro Focus and GnuCOBOL; not Enterprise COBOL's)";
 pub const NO_IDENTIFICATION_HEADER: &str = "IWX0006-W PROGRAM-ID with no IDENTIFICATION DIVISION header before it (COBOL 2002, Micro Focus and GnuCOBOL; Enterprise COBOL requires the header)";
 pub const ASSIGN_ITEM: &str = "IWX0007-W ASSIGN to a data item (Micro Focus and GnuCOBOL; Enterprise COBOL's assignment-name is never a data item)";
+pub const RETURNING_OMITTED: &str = "IWX0009-W PROCEDURE DIVISION RETURNING OMITTED (GnuCOBOL; Enterprise COBOL's RETURNING names an 01 or 77 item of the LINKAGE SECTION)";
 
 /// BINARY-SHORT, BINARY-LONG and BINARY-DOUBLE, and the COMP-5 PICTURE each is: two, four and eight
 /// bytes of native binary.
@@ -20,19 +21,34 @@ const BINARY_USAGES: &[(&str, &str)] = &[("BINARY-SHORT", "9(4)"), ("BINARY-LONG
 const FIGURATIVES: &[&str] = &["ZERO", "ZEROS", "ZEROES", "SPACE", "SPACES", "HIGH-VALUE", "HIGH-VALUES", "LOW-VALUE", "LOW-VALUES", "QUOTE", "QUOTES", "NULL", "NULLS"];
 
 /// The tokens with constant entries taken out, their names replaced by their values, `&`
-/// concatenations joined and the binary usages rewritten. `cards` are the CBL and PROCESS options,
-/// whose code page reads a hexadecimal literal joined to an alphanumeric one.
+/// concatenations joined, the binary usages rewritten and RETURNING OMITTED taken out of a
+/// program's PROCEDURE DIVISION header. `cards` are the CBL and PROCESS options, whose code page
+/// reads a hexadecimal literal joined to an alphanumeric one.
 pub fn rewrite(tokens: Vec<Token>, cards: &[String]) -> Result<Vec<Token>, Error> {
     let mut options = numeric::Options::default();
     for card in cards {
         options.apply(card).ok();
     }
     let mut r = Rewrite { tokens, at: 0, out: Vec::new(), constants: HashMap::new(), pending: Vec::new(), options };
-    let mut data = false;
+    // `program`: the last ID paragraph was a PROGRAM-ID, not a function's, class's or method's.
+    let (mut data, mut program, mut header) = (false, false, false);
     while r.at < r.tokens.len() {
         let division = r.tokens.get(r.at + 1).is_some_and(|t| matches!(&t.tok, Tok::Word(w) if w == "DIVISION"));
+        if let Tok::Word(w) = &r.tokens[r.at].tok
+            && matches!(w.as_str(), "PROGRAM-ID" | "FUNCTION-ID" | "METHOD-ID" | "CLASS-ID" | "INTERFACE-ID")
+        {
+            program = w == "PROGRAM-ID";
+        }
         match &r.tokens[r.at].tok {
-            Tok::Word(w) if division => data = w == "DATA",
+            Tok::Word(w) if division => {
+                data = w == "DATA";
+                header = program && w == "PROCEDURE";
+            }
+            Tok::Period => header = false,
+            Tok::Word(w) if header && w == "RETURNING" && r.word_at(1) == Some("OMITTED") && r.tokens.get(r.at + 2).is_some_and(|t| t.tok == Tok::Period) => {
+                r.returning_omitted();
+                continue;
+            }
             Tok::Number(n) if data && r.out.last().is_none_or(|t| t.tok == Tok::Period) && matches!(r.tokens.get(r.at + 1).map(|t| &t.tok), Some(Tok::Word(_))) && (n == "78" || r.word_at(2) == Some("CONSTANT") && matches!(n.as_str(), "01" | "1")) => {
                 r.constant()?;
                 continue;
@@ -175,6 +191,16 @@ impl Rewrite {
         self.push(made(Tok::Period, Vec::new()));
     }
 
+    /// `RETURNING OMITTED` ending a program's PROCEDURE DIVISION header, taken out: GnuCOBOL's
+    /// program that returns no item is one with no RETURNING phrase.
+    fn returning_omitted(&mut self) {
+        let returning = self.tokens[self.at].clone();
+        self.pending.push(Error::warning(returning.pos, format!("{RETURNING_OMITTED}: the program is read with no RETURNING phrase, and returns its RETURN-CODE to its caller as any program does")));
+        self.pending.extend(returning.messages);
+        self.pending.extend(self.tokens[self.at + 1].messages.iter().cloned());
+        self.at += 2;
+    }
+
     /// `[USAGE [IS]] BINARY-SHORT|BINARY-LONG|BINARY-DOUBLE [SIGNED|UNSIGNED]` in a data entry, as
     /// `PIC S9(n) COMP-5`, or `PIC 9(n) COMP-5` when UNSIGNED: SIGNED is the default.
     fn binary_usage(&mut self) -> Result<(), Error> {
@@ -314,6 +340,22 @@ mod tests {
         assert_eq!(shown[1], format!("{}: BINARY-SHORT UNSIGNED is read as PIC 9(4) COMP-5", super::BINARY_USAGE));
         let refused = extended(&source("       01  D BINARY-CHAR.\n", "")).unwrap_err();
         assert!(refused.message.starts_with("BINARY-CHAR is a one-byte binary item") && refused.pos.line == 5);
+    }
+
+    #[test]
+    fn returning_omitted_leaves_a_programs_header_and_nothing_else() {
+        let header = "       PROCEDURE DIVISION USING A RETURNING OMITTED.\n";
+        let text = format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       DATA DIVISION.\n       LINKAGE SECTION.\n       01 A PIC X.\n{header}           CALL 'S' RETURNING OMITTED.\n           GOBACK.\n");
+        let p = extended(&text).unwrap();
+        assert_eq!((p.using.len(), p.returning.as_deref()), (1, None));
+        let shown: Vec<(u32, u32, &str)> = p.messages.iter().map(|m| (m.pos.line, m.pos.col, m.message.as_str())).collect();
+        let warning = format!("{}: the program is read with no RETURNING phrase, and returns its RETURN-CODE to its caller as any program does", super::RETURNING_OMITTED);
+        assert_eq!(shown, [(6, header.find("RETURNING").unwrap() as u32 + 1, warning.as_str())]);
+        assert!(format!("{:?}", p.paragraphs[0].statements[0]).contains("\"OMITTED\""), "a CALL's RETURNING OMITTED is not the header's");
+        assert_eq!(crate::parse(&text).unwrap().returning.as_deref(), Some("OMITTED"));
+        let function = "       IDENTIFICATION DIVISION.\n       FUNCTION-ID. F.\n       PROCEDURE DIVISION RETURNING OMITTED.\n           GOBACK.\n       END FUNCTION F.\n";
+        let f = extended(function).unwrap();
+        assert_eq!((f.returning.as_deref(), f.messages.len()), (Some("OMITTED"), 0), "a function returns an item");
     }
 
     #[test]

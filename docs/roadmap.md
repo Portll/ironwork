@@ -31,7 +31,7 @@ It is zero-dependency Rust.
 
 | Capability | Owner | Note |
 |---|---|---|
-| Reading dialects other than IBM | cobolwork | ironwork refuses what IBM refuses, unless `--compliance extended` reads the six extensions Micro Focus and GnuCOBOL share that docs/compliance.md lists |
+| Reading dialects other than IBM | cobolwork | ironwork refuses what IBM refuses, unless `--compliance extended` reads the Micro Focus and GnuCOBOL extensions docs/compliance.md lists |
 | Security meaning: sources, sinks, CWE, evidence, severity | cobolwork | ironwork reports what happened, never what it means |
 | Executing COBOL, and tracing what executed | ironwork | Interpreter, VM and runtime services |
 | IBM storage layout | ironwork | The reference for IBM rules. cobolwork keeps its own, graded against GnuCOBOL, for flow |

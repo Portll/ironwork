@@ -59,3 +59,44 @@ fn strict_refuses_the_extended_program_as_before() {
     let fixed = program("", "       78  N VALUE 1.\n", &line("GOBACK."));
     assert_eq!(compile_errors(&fixed), "level 78 is not a data level");
 }
+
+/// A caller and a subprogram whose header ends RETURNING OMITTED, GnuCOBOL's program that returns
+/// no item.
+const RETURNING_OMITTED: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. CALLER.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  R PIC 9(4) VALUE 99.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           CALL 'VOIDSUB'\n",
+    "           DISPLAY RETURN-CODE\n",
+    "           CALL 'VOIDSUB' RETURNING R\n",
+    "           DISPLAY R ' ' RETURN-CODE\n",
+    "           GOBACK.\n",
+    "       END PROGRAM CALLER.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. VOIDSUB.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  N PIC 9 VALUE 0.\n",
+    "       PROCEDURE DIVISION RETURNING OMITTED.\n",
+    "           ADD 1 TO N\n",
+    "           MOVE N TO RETURN-CODE\n",
+    "           GOBACK.\n",
+    "       END PROGRAM VOIDSUB.\n",
+);
+
+#[test]
+fn a_program_returning_omitted_returns_its_return_code_and_no_item() {
+    let walked = Harness::source(RETURNING_OMITTED).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("0001\n0099 0002\n", Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(RETURNING_OMITTED).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    let parsed = syntax::parse_all_with(RETURNING_OMITTED, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap();
+    let compiled = compile(parsed[1].clone(), &EXTENDED.iter().map(|f| f.to_string()).collect::<Vec<_>>()).unwrap_or_else(|e| panic!("{e:?}"));
+    let shown: Vec<(u32, u32, &str, Severity)> = compiled.diagnostics.iter().map(|m| (m.pos.line, m.pos.col, m.message.split(' ').next().unwrap(), m.severity)).collect();
+    assert_eq!(shown, [(18, 27, "IWX0009-W", Severity::Warning)]);
+    let strict = compile(syntax::parse_all_with(RETURNING_OMITTED, &syntax::copy::Libraries::default()).unwrap().remove(1), &[]).err().unwrap();
+    assert_eq!(strict.iter().map(|e| e.message.as_str()).collect::<Vec<_>>(), ["PROCEDURE DIVISION RETURNING OMITTED: not an 01 or 77 item of the LINKAGE SECTION"]);
+}

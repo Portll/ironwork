@@ -29,7 +29,9 @@ records nothing about them beyond the level. A test runs a program using every o
 executors and compares the runs (`exec/src/tests/compliance.rs`). The seventh, ASSIGN to a data
 item, has no Enterprise COBOL form: both executors run it through `rt::fileio`, and a module
 records the item with its file (`lir::FileDesc::assign_item`; `exec/src/tests/assign.rs`). The
-eighth, IWX0008-W, is the compiler's check on a MOVE's sender.
+eighth, IWX0008-W, is the compiler's check on a MOVE's sender. The ninth, IWX0009-W, is read
+before the parser as the first six are, and a test runs a caller and a program that uses it on
+both executors and compares the runs.
 
 ### IWX0001-W free-form source
 
@@ -180,6 +182,47 @@ time, as a MOVE of such an item is (p. 404). `--dialect gnucobol` gives the same
 digits of the field its function returns, `005` there and `000000008` for INTEGER(8.25)
 ([dialect.md](dialect.md) 5.2), which ironwork does not reproduce.
 
+### IWX0009-W PROCEDURE DIVISION RETURNING OMITTED
+
+`IWX0009-W PROCEDURE DIVISION RETURNING OMITTED (GnuCOBOL; Enterprise COBOL's RETURNING names an 01
+or 77 item of the LINKAGE SECTION): the program is read with no RETURNING phrase, and returns its
+RETURN-CODE to its caller as any program does`, at RETURNING.
+
+GnuCOBOL 3 writes a program that returns no item as `PROCEDURE DIVISION [USING ...] RETURNING
+OMITTED.`, which cobc compiles to a C function returning `void` (GnuCOBOL 3.2 NEWS: "PROCEDURE
+DIVISION RETURNING OMITTED -> callable as void function"; `_procedure_returning` in
+`cobc/parser.y`). Under extended, `RETURNING OMITTED` before the header's period is taken out of a
+program's header, which leaves a header Enterprise COBOL has; nothing else in the program changes.
+Strict keeps `PROCEDURE DIVISION RETURNING OMITTED: not an 01 or 77 item of the LINKAGE SECTION`
+(S): Enterprise COBOL's RETURNING names such an item (Language Reference SC27-8713-03, pp. 262-263).
+
+What a caller then receives:
+
+- A CALL with no RETURNING phrase: the caller's RETURN-CODE is set from the program's, as after the
+  CALL of any program. cobc calls the `void` function through an `int` pointer and stores whatever
+  the return register holds, a value C leaves undefined; cobc 3.2 on arm64 stored the program's
+  RETURN-CODE.
+- `CALL ... RETURNING item`: the item is left as it was, as for any program with no RETURNING
+  phrase. cobc stores the same undefined value in it.
+- `CALL ... RETURNING OMITTED` or `RETURNING NOTHING`, the one case GnuCOBOL's testsuite fixes (the
+  caller's RETURN-CODE is left as it was: `run_misc.at`, "void PROCEDURE" and "void PROCEDURE,
+  NOTHING return"), is refused under either level (`OMITTED is not defined`). Nearly every program
+  in the two corpora that has it calls a C library with it (raylib, Agar, the C runtime), which
+  ironwork cannot call, or is one of GnuCOBOL's tests.
+
+cobc refuses the phrase in a program compiled as the main program (`-x`: "RETURNING clause cannot
+be OMITTED for main program") and in a function. ironwork compiles every program alike, so such a
+program run as the first of a run unit ends with its RETURN-CODE as any program does. A FUNCTION-ID's
+or method's header keeps the phrase, and is refused as under strict. Micro Focus's header takes a
+data-name after RETURNING, and its documentation gives no OMITTED there.
+
+The programs that use it are GnuCOBOL programs over C libraries, OlegKunitsyn's
+`gnucobol-examples/microservice.cbl` and gnucobol-contrib's `cobweb-agar.cob` among them, each
+copied into several repositories, and GnuCOBOL's own tests of it (copied in
+infinityabundance_gnucobol-rs). The examples still stop on something else first: a COPY member
+their repositories do not hold, `>>IF`, and past those `ANY LENGTH`, BINARY-INT and `EXTERN`; see
+"What extended compiles".
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:
@@ -226,6 +269,13 @@ extension), constants in 11, `<>` in 12, `&` in 1, the binary usages in 4 and th
 Most free-form programs still refused fail on something else first: a member not found, a name
 never defined, a non-COBOL file, or a construct below.
 
+IWX0009-W changes nothing in either sample: at 978e0af and with IWX0009-W on it, strict compiles
+1,166 programs of the first and 1,432 of the second, and extended 1,375 and 1,483, every message and
+return code the same at both commits under either level. Over every program of both corpora (133,343
+and 45,354) under extended, the 9 programs RETURNING OMITTED alone refused now compile, all copies
+of three GnuCOBOL tests in one repository; the other 224 programs that hold `RETURNING OMITTED`, in
+a header or a CALL, give what they gave before.
+
 ## What stays refused, and why
 
 Each is refused under extended with the message strict gives, except BINARY-CHAR and the compiler
@@ -257,3 +307,57 @@ repositories in the first sample where it is the first refusal under extended.
 - **Expressions as constant values**, `H'...'` literals, `UNSIGNED-INT` and `BINARY-LONG-LONG`,
   `FLOAT-*`, `READ ... WITH NO LOCK` and file `LOCK MODE`, `FUNCTION-ID` with GnuCOBOL's
   extensions: each found in only a few programs, or with meanings the two compilers do not share.
+
+### Operands and phrases the Language Reference bars
+
+The compiler refuses at severity S, under either level, the operands and phrases Enterprise COBOL
+bars that it once accepted or left to code generation. Each was measured over every program of
+both corpora under extended at 978e0af; the counts are the programs whose messages hold the refusal
+and, in brackets, those it alone refuses. Only RETURNING OMITTED, above, met both tests: one meaning
+in GnuCOBOL and Micro Focus, and programs written to be run that use it.
+
+- **An arithmetic expression or numeric function compared with an operand that is not numeric**
+  (9 programs, 6 repositories [8]). The four such programs in three repositories that were written
+  to be run (`login.cob` and `registration.cob` of a course project, and one `SCR3USR.cbl` copied
+  into two training repositories) compare `FUNCTION TRIM` or `UPPER-CASE` of a `PIC 9(4)` or
+  `PIC 9(10)` item with an alphanumeric operand: the check takes TRIM of a numeric item to be
+  numeric. Enterprise COBOL refuses these programs too, as TRIM's and UPPER-CASE's argument is
+  alphabetic, alphanumeric, national or UTF-8 (Language Reference SC27-8713-03, pp. 657 and 663),
+  and Micro Focus documents the same classes for TRIM; cobc gives the item's digits for an
+  unsigned integer but text that varies with its dialect for a signed or decimal one (`-012` under
+  `-std=default`, `012-` under `-std=ibm`). The rest are a student's `FUNCTION ORD(X) >= "A"`,
+  three copies of a GnuCOBOL test that continues a literal with `-` after it, and a conformance
+  test. cobc compares an expression with an alphanumeric operand by rules no manual gives (`N + 1 =
+  X` is false where N is 5 and X is `"6"` padded with spaces, `N + 1 = "6"` true), and stops with
+  an internal compiler error at `IF N + 1 = SPACE`.
+- **A condition-name used as data** (16 programs, 7 repositories [5]; 2 in the second corpus [2]):
+  `UNTIL WS-EOF = 'Y'` where WS-EOF is the 88, `IF CUST-STATUS = ACTIVE`, `INSPECT ... FOR ALL`
+  an 88, `EVALUATE item WHEN` its 88, `MOVE 1 TO` or `DISPLAY` of an 88, and GnuCOBOL's own
+  syntax tests. cobc
+  refuses each: "condition-name not allowed here", "invalid use of 88 level in WHEN expression".
+- **PERFORM VARYING FROM or BY an arithmetic expression** (14, 3 [10]): 13 programs written by
+  language models (`FROM I + 1`) and a negative test. cobc refuses it: "syntax error, unexpected
+  +, expecting UNTIL", under `-std=default`, `mf`, `ibm` and `cobol2014`.
+- **PERFORM VARYING an item that is not numeric** (6, 5 [5]): two negative tests, a model's
+  program, and two programs that vary a `PIC X(2)` item or start one `FROM 'BSL'`. cobc refuses it:
+  "PERFORM VARYING ... is not a numeric field".
+- **A figurative constant as an intrinsic function's argument** (19, 2 [17]): a conformance
+  suite's tests and copies of two GnuCOBOL tests. cobc takes `SQRT(ZERO)` and refuses
+  `ABS(SPACE)` ("FUNCTION 'ABS' has invalid argument").
+- **ALL with a numeric literal** (13, 12 [0]): copies of ProLeap's parser and interpreter tests of
+  `VALUE ALL 2`, which also fail on something else. cobc refuses it: "invalid VALUE clause", "invalid MOVE
+  statement".
+- **An EXEC CICS HANDLE label that names no paragraph** (6, 2 [0]): copies of IBM example programs
+  with bugs planted for a study. GnuCOBOL and Micro Focus have no CICS translator to give it a
+  meaning.
+- **ALL subscripts in a function of a fixed number of arguments** (5, 1 [5]), **MAX or MIN of
+  arguments of different classes** (1 [1]) and **SEARCH VARYING an item that is neither an index
+  nor an integer** (1 [1]): negative tests of one conformance suite alone. cobc 3.2 refuses `E(ALL)`
+  as an argument ("syntax error, unexpected ALL"), and takes the other two.
+- **PROCEDURE DIVISION RETURNING an item outside the LINKAGE SECTION**: no program in either
+  corpus but those with OMITTED, and cobc refuses it ("RETURNING item is not defined in LINKAGE
+  SECTION").
+
+`CALL ... RETURNING OMITTED`, `NOTHING` or `NULL`, which these refusals do not include, was refused
+before them (`OMITTED is not defined`), and stays so: of the 237 files in the two corpora that hold
+RETURNING OMITTED, NOTHING or NULL, nearly all call C libraries or are GnuCOBOL's tests.
