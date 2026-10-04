@@ -121,3 +121,43 @@ fn an_ims_program_and_a_main_program_are_refused() {
     assert_eq!(o.status.code(), Some(2));
     assert!(stderr(&o).contains("fuzz it as a main program"), "{}", stderr(&o));
 }
+
+const FILE_SUBPROGRAM: &[&str] = &[
+    "       IDENTIFICATION DIVISION.",
+    "       PROGRAM-ID. FILESUB.",
+    "       ENVIRONMENT DIVISION.",
+    "       INPUT-OUTPUT SECTION.",
+    "       FILE-CONTROL.",
+    "           SELECT IN-FILE ASSIGN TO INDD.",
+    "           SELECT OUT-FILE ASSIGN TO OUTDD.",
+    "       DATA DIVISION.",
+    "       FILE SECTION.",
+    "       FD  IN-FILE.",
+    "       01  IN-REC PIC X(10).",
+    "       FD  OUT-FILE.",
+    "       01  OUT-REC PIC X(10).",
+    "       LINKAGE SECTION.",
+    "       01  QTY-REC.",
+    "           05 QTY PIC 9(5).",
+    "       PROCEDURE DIVISION USING QTY-REC.",
+    "           OPEN INPUT IN-FILE OUTPUT OUT-FILE",
+    "           READ IN-FILE AT END CONTINUE END-READ",
+    "           WRITE OUT-REC FROM QTY-REC",
+    "           CLOSE IN-FILE OUT-FILE",
+    "           ADD 1 TO QTY",
+    "           GOBACK.",
+];
+
+/// The subprogram's files get data sets as the main fuzz gives those it does not vary, so its
+/// OPEN succeeds and the runs reach the abend the arguments cause.
+#[test]
+fn a_subprogram_s_files_are_given_data_sets_so_its_runs_get_past_open() {
+    let dir = repo("files", false);
+    fs::write(dir.join("repo/src/FILESUB.cbl"), FILE_SUBPROGRAM.join("\n") + "\n").unwrap();
+    let o = fuzz(&dir, "src/FILESUB.cbl");
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(stderr(&o).contains("ironwork fuzz: not varied, given empty: INDD"), "{}", stderr(&o));
+    let manifest = read_manifest(&dir.join("run"));
+    assert!(manifest.contains("\"code\":\"S0C7\",\"file\":\"FILESUB.cbl\",\"line\":22"), "{manifest}");
+    assert!(!manifest.contains("IO-35"), "{manifest}");
+}

@@ -339,12 +339,21 @@ fn callers(req: &Request) -> Vec<(String, exec::Compiled)> {
     out
 }
 
+/// The data sets an interface run gives the subprogram's files, as the main fuzz gives those it
+/// does not vary: an empty one for each file it reads and a new one for each it only writes. The
+/// runs vary the arguments alone, which the manifest records.
+struct DataSets {
+    empty: Vec<String>,
+    new: Vec<String>,
+}
+
 /// One run as its own `ironwork run` with the arguments in files of the run's directory.
 struct Runner<'a> {
     req: &'a Request,
     work: PathBuf,
     count: u64,
     covered: super::RunCoverage,
+    data_sets: DataSets,
 }
 
 impl Runner<'_> {
@@ -363,6 +372,20 @@ impl Runner<'_> {
         }
         for d in &self.req.program_dirs {
             command.arg("-L").arg(d);
+        }
+        // A data set is named by its place in the run's directory, never by its DD, as the main
+        // fuzz names one.
+        let mut given: Vec<(&str, PathBuf)> = Vec::new();
+        for dd in &self.data_sets.empty {
+            let path = dir.join(format!("dd{}", given.len()));
+            fs::write(&path, b"")?;
+            given.push((dd, path));
+        }
+        for dd in &self.data_sets.new {
+            given.push((dd, dir.join(format!("dd{}", given.len()))));
+        }
+        for (dd, path) in &given {
+            command.arg("--dd").arg(format!("{dd}={}", path.display()));
         }
         for (i, argument) in arguments.iter().enumerate() {
             command.arg("--argument");
@@ -383,7 +406,7 @@ impl Runner<'_> {
             command.arg("--evidence").arg(journal);
         }
         let roots = self.req.roots();
-        let outcome = super::finish(command, &dir, self.req.timeout, &[], |l| super::abend_line(l, &roots));
+        let outcome = super::finish(command, &dir, self.req.timeout, &given, |l| super::abend_line(l, &roots));
         self.covered.take(&cover, evidence.is_some());
         outcome
     }
@@ -504,7 +527,7 @@ pub fn run(req: Request) -> ExitCode {
         eprintln!("ironwork fuzz: {message}");
         ExitCode::from(2)
     };
-    let (compiled, _) = match super::compile(&req) {
+    let (compiled, rest) = match super::compile(&req) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("{e}");
@@ -523,7 +546,18 @@ pub fn run(req: Request) -> ExitCode {
         Ok(w) => w,
         Err(e) => return fail(e),
     };
-    let mut runner = Runner { req: &req, work, count: 0, covered: super::RunCoverage::default() };
+    let (feeds, _, others) = super::inputs_of(&compiled, &rest);
+    let mut empty: Vec<String> = feeds.into_iter().map(|f| f.dd).chain(others.unfed.iter().cloned()).collect();
+    empty.sort();
+    empty.dedup();
+    let data_sets = DataSets { empty, new: others.written.clone() };
+    if !data_sets.empty.is_empty() {
+        eprintln!("ironwork fuzz: not varied, given empty: {}", data_sets.empty.join(", "));
+    }
+    if !others.ungiven.is_empty() {
+        eprintln!("ironwork fuzz: no --dd can carry these names, so they are given no data set: {}", others.ungiven.join(", "));
+    }
+    let mut runner = Runner { req: &req, work, count: 0, covered: super::RunCoverage::default(), data_sets };
     let found = drive(&req, &params, &sites, &mut runner);
     let _ = fs::remove_dir_all(&runner.work);
     let found = match found {

@@ -427,7 +427,10 @@ each run an `ironwork cics`, and writes the same directory with `entry` `cics`
    as written, padded with spaces, and of an item the caller passes, only as much as it holds is
    varied. With no such CALL, every field of every argument is varied.
 4. `ironwork run --argument` gives the program the arguments in USING order, each pushed as input,
-   OMITTED as a null address, and runs it as a subprogram: EXIT PROGRAM returns. An abend on
+   OMITTED as a null address, and runs it as a subprogram: EXIT PROGRAM returns. The subprogram's
+   files, and those of the programs it contains, get data sets as §5 gives the files it does not
+   vary: an empty one for each file read and a new one for each only written, so an OPEN does not
+   end the run IO-35; their records are not varied, the arguments being the inputs. An abend on
    arguments that break nothing is not kept; every other is kept once, its arguments made as small
    as still give it within 200 runs, then run with `--evidence` and `--coverage` and once more with
    `--optimize=2`, as in §5. A timeout and an S806 are counted, never kept.
