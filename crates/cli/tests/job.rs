@@ -126,6 +126,26 @@ fn steps_pass_data_sets_along_and_dispositions_apply() {
     for want in ["MAKE PGM=IEBGENER RC=0000", "UP PGM=UPCASE RC=0004", "CLEAN PGM=IEFBR14 RC=0000"] {
         assert!(l.contains(want), "{want} in {l}");
     }
+    assert!(!l.contains("NOT DELETED"), "{l}");
+}
+
+/// As z/OS's IEF283I: the data set stays, the log says so after the step's line, and the step's
+/// return code stands.
+#[cfg(unix)]
+#[test]
+fn a_data_set_that_cannot_be_deleted_is_reported_and_kept() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = temp("not-deleted");
+    fs::write(dir.join("data/IN.NAMES"), "alpha\n").unwrap();
+    fs::set_permissions(dir.join("data"), fs::Permissions::from_mode(0o555)).unwrap();
+    let o = job(&dir, "//CLEAN EXEC PGM=IEFBR14\n//OLD DD DSN=IN.NAMES,DISP=(OLD,DELETE)\n");
+    fs::set_permissions(dir.join("data"), fs::Permissions::from_mode(0o755)).unwrap();
+    let l = log(&o);
+    assert_eq!(o.status.code(), Some(0), "{l}");
+    let lines: Vec<&str> = l.lines().collect();
+    assert_eq!(lines[0], "ironwork job TESTJOB: CLEAN PGM=IEFBR14 RC=0000", "{l}");
+    assert!(lines[1].starts_with("ironwork job TESTJOB: CLEAN IN.NAMES NOT DELETED: "), "{l}");
+    assert!(dir.join("data/IN.NAMES").exists());
 }
 
 #[test]

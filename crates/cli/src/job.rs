@@ -225,6 +225,8 @@ struct Allocated {
 
 struct Disposal {
     path: PathBuf,
+    /// The data set's name as the job log gives it.
+    dsname: String,
     disp: jcl::Disp,
     created: bool,
     temporary: bool,
@@ -297,8 +299,9 @@ struct Runner<'a> {
     temporaries: BTreeMap<String, PathBuf>,
     /// Each generation data group's generations when the job first named it.
     gdg_start: BTreeMap<String, Vec<u32>>,
-    /// Data sets this job created that are only passed so far: deleted when the job ends.
-    passed_new: BTreeSet<PathBuf>,
+    /// Data sets this job created that are only passed so far, with their names: deleted when the
+    /// job ends.
+    passed_new: BTreeMap<PathBuf, String>,
     files: usize,
     /// With --coverage, the paragraphs the job's programs entered and each program's outline, by
     /// the source each step ran.
@@ -441,7 +444,8 @@ impl Runner<'_> {
                         return Err(format!("DD {}: {shown} was not found", dd.name));
                     }
                     let disp = if created { jcl::Disp { status: Status::New, ..part.disp } } else { part.disp };
-                    disposals.push(Disposal { path: path.clone(), disp, created, temporary: false, group: created.then(|| base.clone()) });
+                    let dsname = path.file_name().map_or_else(|| shown.clone(), |n| n.to_string_lossy().into_owned());
+                    disposals.push(Disposal { path: path.clone(), dsname, disp, created, temporary: false, group: created.then(|| base.clone()) });
                     paths.push(path);
                 }
                 Source::Refer(path) => return Err(format!("DD {}: *.{path} was not resolved", dd.name)),
@@ -459,11 +463,13 @@ impl Runner<'_> {
                 }
                 source @ (Source::Dataset { .. } | Source::Temporary { .. }) => {
                     let path = self.dataset_path(source).expect("a data set has a path");
-                    let (member, shown) = match source {
-                        Source::Dataset { dsn, member } => (member.is_some(), member.as_ref().map_or(dsn.clone(), |m| format!("{dsn}({m})"))),
-                        Source::Temporary { name, member } => (member.is_some(), format!("&&{name}")),
+                    let (member, dsname) = match source {
+                        Source::Dataset { dsn, member } => (member.as_ref(), dsn.clone()),
+                        Source::Temporary { name, member } => (member.as_ref(), format!("&&{name}")),
                         _ => unreachable!(),
                     };
+                    let shown = member.map_or_else(|| dsname.clone(), |m| format!("{dsname}({m})"));
+                    let member = member.is_some();
                     let whole = if member { path.parent().map(Path::to_path_buf).unwrap_or_default() } else { path.clone() };
                     let temporary = matches!(source, Source::Temporary { .. });
                     let fresh = !whole.exists();
@@ -487,7 +493,7 @@ impl Runner<'_> {
                         return Err(format!("DD {}: {shown} {}", dd.name, if member { "names a member of a data set that has none" } else { "is a partitioned data set; name a member" }));
                     }
                     let disp = if created { jcl::Disp { status: Status::New, ..part.disp } } else { part.disp };
-                    disposals.push(Disposal { path: whole, disp, created, temporary, group: None });
+                    disposals.push(Disposal { path: whole, dsname, disp, created, temporary, group: None });
                     paths.push(path);
                 }
             }
@@ -506,15 +512,20 @@ impl Runner<'_> {
         Ok(Allocated { dataset: false, name: dd.name.clone(), path: joined, text, sysout, append: false, recfm: dd.parts[0].recfm.clone(), lrecl: dd.parts[0].lrecl })
     }
 
-    fn dispose(&mut self, disposals: Vec<Disposal>, abended: bool) {
+    /// Applies each data set's disposition as the step ends. Returns the deletions that failed,
+    /// each as z/OS's IEF283I words it: the data set stays and the step's return code stands.
+    fn dispose(&mut self, disposals: Vec<Disposal>, abended: bool) -> Vec<String> {
+        let mut problems = Vec::new();
         for d in disposals {
             match d.disp.at_end(abended) {
                 End::Delete => {
-                    let _ = delete_data_set(&d.path);
+                    if let Err(e) = delete_data_set(&d.path) {
+                        problems.push(format!("{} NOT DELETED: {e}", d.dsname));
+                    }
                     self.passed_new.remove(&d.path);
                 }
                 End::Pass if d.created && !d.temporary => {
-                    self.passed_new.insert(d.path);
+                    self.passed_new.insert(d.path, d.dsname);
                 }
                 End::Pass => {}
                 End::Keep | End::Catlg | End::Uncatlg => {
@@ -525,6 +536,7 @@ impl Runner<'_> {
                 }
             }
         }
+        problems
     }
 
     fn gdg(&self, base: &str) -> Option<Gdg> {
@@ -1015,7 +1027,7 @@ pub fn run(req: Request) -> ExitCode {
     };
     let inputs: Vec<(String, Value)> = if req.expected.is_some() { files_under(&datasets).into_iter().map(|(n, p)| (n, crate::compare::digest_of(fs::read(p).ok().as_deref()))).collect() } else { Vec::new() };
     let coverage = req.coverage.as_ref().map(|_| RefCell::new(Default::default()));
-    let mut runner = Runner { req: &req, datasets, scratch, temporaries: BTreeMap::new(), gdg_start: BTreeMap::new(), passed_new: BTreeSet::new(), files: 0, coverage, views: Vec::new(), watched: Vec::new() };
+    let mut runner = Runner { req: &req, datasets, scratch, temporaries: BTreeMap::new(), gdg_start: BTreeMap::new(), passed_new: BTreeMap::new(), files: 0, coverage, views: Vec::new(), watched: Vec::new() };
     let roots: Vec<PathBuf> = std::iter::once(req.jcl.parent().map(Path::to_path_buf).unwrap_or_default())
         .chain([req.datasets.clone()])
         .chain(req.libraries.iter().cloned())
@@ -1046,8 +1058,10 @@ pub fn run(req: Request) -> ExitCode {
     {
         eprintln!("ironwork: --coverage {}: {e}", file.display());
     }
-    for path in std::mem::take(&mut runner.passed_new) {
-        let _ = delete_data_set(&path);
+    for (path, dsname) in std::mem::take(&mut runner.passed_new) {
+        if let Err(e) = delete_data_set(&path) {
+            eprintln!("ironwork job {}: {dsname} NOT DELETED: {e}", job.name);
+        }
     }
     let code = match &req.expected {
         Some(expected) => equivalence(&req, &job, &report, expected, &runner.datasets, &inputs, &declared),
@@ -1071,6 +1085,11 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
             let _ = j.append("step", fields([("step", name.into()), ("pgm", pgm.into()), ("outcome", what.clone().into())]));
         }
         steps.push(Value::Obj(fields([("step", name.into()), ("pgm", pgm.into()), ("outcome", what.into())])));
+    };
+    let report = |name: &str, problems: Vec<String>| {
+        for problem in problems {
+            eprintln!("ironwork job {}: {name} {problem}", job.name);
+        }
     };
     let mut ended = false;
     for item in &job.items {
@@ -1124,7 +1143,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                 if let Some(e) = jcl_error {
                     log(name, &step.pgm, format!("JCL ERROR: {e}; the job ends"));
                     runner.views.clear();
-                    runner.dispose(disposals, true);
+                    report(name, runner.dispose(disposals, true));
                     stopped.get_or_insert(Outcome::Abend);
                     ended = true;
                     continue;
@@ -1170,14 +1189,12 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                     let abend = outcome.as_ref().err().map(|failed| (failed.code.to_string(), place.as_ref().and_then(|(f, _)| f.as_deref()), place.as_ref().map_or(0, |(_, l)| *l)));
                     *journal.borrow_mut() = Some(run.into_inner().end(abend));
                 }
-                for problem in runner.settle() {
-                    eprintln!("ironwork job {}: {name} {problem}", job.name);
-                }
+                report(name, runner.settle());
                 match outcome {
                     Ok(rc) => {
                         let rc = rc.clamp(0, 4095) as u16;
                         log(name, &step.pgm, format!("RC={rc:04}"));
-                        runner.dispose(disposals, false);
+                        report(name, runner.dispose(disposals, false));
                         ran.push(Ran { name: step.name.clone(), caller: step.caller.clone(), rc: Some(rc), abend: None });
                     }
                     Err(Failed { code, message, outcome: exits }) => {
@@ -1185,7 +1202,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                             gaps.push(format!("step {name} reached what ironwork does not model: {message}"));
                         }
                         log(name, &step.pgm, format!("ABEND {code}: {message}"));
-                        runner.dispose(disposals, true);
+                        report(name, runner.dispose(disposals, true));
                         abended = true;
                         stopped.get_or_insert(exits);
                         ran.push(Ran { name: step.name.clone(), caller: step.caller.clone(), rc: None, abend: Some(code.to_string()) });

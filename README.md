@@ -206,7 +206,9 @@ what it holds, a generation's included, or creates it as NEW would where it is n
 data set that must exist and does not, or that DISP=NEW names and that exists, is a JCL error that
 ends the job. As a step ends its normal disposition applies, or its abnormal one after an abend:
 DELETE removes the data set, KEEP, CATLG and UNCATLG keep it, and PASS keeps it for later steps, a data
-set the job created and only passed being deleted when the job ends. With no disposition stated, a
+set the job created and only passed being deleted when the job ends. A data set that cannot be
+deleted stays, and standard error says `dsname NOT DELETED` and why, as z/OS's IEF283I does; the
+step's return code is unchanged. With no disposition stated, a
 data set the step created is deleted and one that existed is kept. COND on the JOB statement ends
 the job when a test is true, COND on EXEC bypasses the step, and IF/THEN/ELSE/ENDIF nest to 15
 levels over RC, stepname.RC, ABEND, ABENDCC=, stepname.ABEND and stepname.RUN. After an abend a step
