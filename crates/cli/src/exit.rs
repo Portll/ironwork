@@ -209,8 +209,8 @@ mod tests {
         for code in NOT_RUN {
             table.push_str(&format!("abend\t{code}\t{}\n", name(Outcome::NotRun)));
         }
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/run-endings.tsv");
-        let committed = std::fs::read_to_string(&path).unwrap_or_default().replace('\r', "");
-        assert!(committed == table, "{} is not this table; write it as:\n{table}", path.display());
+        // Relative to this file, since the TLS build compiles it from a manifest in tls/.
+        let committed = include_str!("../../../docs/run-endings.tsv").replace('\r', "");
+        assert!(committed == table, "docs/run-endings.tsv is not this table; write it as:\n{table}");
     }
 }
