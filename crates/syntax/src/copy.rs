@@ -396,7 +396,7 @@ fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>,
                 (path.display().to_string(), read(&bms::symbolic_map(&mapset), file)?)
             }
             (None, None) => {
-                let text = system::member(&name).ok_or_else(|| Error::at(pos, format!("{verb} {name}: no such member in the copy libraries")))?;
+                let text = system::member(&name).ok_or_else(|| crate::messages::IWS0002.at(pos, format!("{verb} {name}: no such member in the copy libraries")))?;
                 let key = format!("(system member {})", name.to_ascii_uppercase());
                 let file = u16::try_from(files.len()).map_err(|_| Error::at(pos, "more than 65535 copy members"))?;
                 files.push(key.clone());

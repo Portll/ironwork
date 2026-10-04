@@ -188,7 +188,7 @@ fn a_complete_set_skips_filler_ends_a_condition_names_at_its_variable_and_resolv
     let errors = compile_errors(&program("", data, &body));
     assert!(errors.contains("RENAMES K: ambiguous"), "{errors}");
     let errors = compile_errors(&program("", &data.replace("       66  R2 RENAMES K OF S.\n", ""), &body.replace(&line("DISPLAY R2"), "")));
-    assert_eq!(errors, ["OK", "K", "K"].map(|n| format!("{n} is ambiguous; qualify it with OF or IN")).join("\n"));
+    assert_eq!(errors, ["OK", "K", "K"].map(|n| format!("IWC0002-S {n} is ambiguous; qualify it with OF or IN")).join("\n"));
 }
 
 #[test]

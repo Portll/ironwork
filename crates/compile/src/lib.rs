@@ -28,6 +28,7 @@ use numeric::{Options, Vlr};
 use rt::lir::{CompileTime, TimeSource};
 use rt::storage::literal_fixed;
 use syntax::ast::*;
+use syntax::messages::{IWC0003, IWC0004, Message};
 use syntax::{Error, Pos, Severity};
 
 pub struct Compiled {
@@ -533,7 +534,7 @@ fn procedure_rules(program: &Program, layout: &Layout, entries: &[EntryPoint], o
                         for (from, to) in pairs {
                             altered_paragraph(program, from, *pos, errors);
                             if let Err(m) = procedure(program, to) {
-                                errors.push(Error::at(*pos, m));
+                                errors.push(m.at(*pos));
                             }
                         }
                     }
@@ -555,7 +556,7 @@ fn inner_statements<'s>(stmts: &'s [Stmt], out: &mut Vec<&'s Stmt>) {
 /// A paragraph ALTER can name: one sentence, a GO TO without DEPENDING ON.
 fn altered_paragraph(program: &Program, name: &ProcName, pos: Pos, errors: &mut Vec<Error>) {
     match procedure(program, name) {
-        Err(m) => errors.push(Error::at(pos, m)),
+        Err(m) => errors.push(m.at(pos)),
         Ok((i, _)) if program.paragraphs[i].is_section => errors.push(Error::at(pos, format!("ALTER {}: a section, where ALTER names a paragraph", name.name))),
         Ok((i, _)) if !lone_go_to(&program.paragraphs[i]) => {
             errors.push(Error::at(pos, format!("ALTER {}: the paragraph must hold one sentence, a GO TO without DEPENDING ON", name.name)));
@@ -605,7 +606,7 @@ fn names_own_paragraph(paragraphs: &[Paragraph], name: &str, section: &str) -> b
 /// `procedure` for a name written in paragraph `from` that no statement holds as a procedure-name,
 /// such as a WHENEVER or HANDLE label or a USE FOR DEBUGGING operand, qualified with `from`'s
 /// section as `qualify_in_own_section` qualifies a statement's.
-pub fn procedure_from(program: &Program, p: &ProcName, from: usize) -> Result<(usize, usize), String> {
+pub fn procedure_from(program: &Program, p: &ProcName, from: usize) -> Result<(usize, usize), Unnamed> {
     match program.paragraphs.get(from).and_then(|q| q.section.as_deref()) {
         Some(section) if p.section.is_none() && names_own_paragraph(&program.paragraphs, &p.name, section) => {
             procedure(program, &ProcName { name: p.name.clone(), section: Some(section.to_owned()) })
@@ -706,8 +707,33 @@ fn procedure_names_mut(s: &mut Stmt) -> Vec<&mut ProcName> {
     }
 }
 
+/// Why a procedure-name names no one procedure: the catalogue's message and its text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Unnamed {
+    pub message: Message,
+    pub text: String,
+}
+
+impl Unnamed {
+    pub fn at(self, pos: Pos) -> Error {
+        self.message.at(pos, self.text)
+    }
+}
+
+impl std::fmt::Display for Unnamed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.text)
+    }
+}
+
+impl From<Unnamed> for String {
+    fn from(u: Unnamed) -> Self {
+        u.text
+    }
+}
+
 /// The first and last paragraph a procedure name covers: one paragraph, or a whole section.
-pub fn procedure(program: &Program, p: &ProcName) -> Result<(usize, usize), String> {
+pub fn procedure(program: &Program, p: &ProcName) -> Result<(usize, usize), Unnamed> {
     let found: Vec<usize> = program
         .paragraphs
         .iter()
@@ -718,8 +744,8 @@ pub fn procedure(program: &Program, p: &ProcName) -> Result<(usize, usize), Stri
     match found.as_slice() {
         [i] if program.paragraphs[*i].is_section => Ok((*i, section_end(program, *i))),
         [i] => Ok((*i, *i)),
-        [] => Err(format!("no paragraph or section named {}", p.name)),
-        _ => Err(format!("{} names more than one paragraph; qualify it with OF and its section", p.name)),
+        [] => Err(Unnamed { message: IWC0003, text: format!("no paragraph or section named {}", p.name) }),
+        _ => Err(Unnamed { message: IWC0004, text: format!("{} names more than one paragraph; qualify it with OF and its section", p.name) }),
     }
 }
 
@@ -1392,7 +1418,7 @@ impl Check<'_> {
 
     fn procedure(&mut self, p: &ProcName, pos: Pos) {
         if let Err(m) = procedure(self.program, p) {
-            self.errors.push(Error::at(pos, m));
+            self.errors.push(m.at(pos));
         }
     }
 

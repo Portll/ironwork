@@ -96,7 +96,6 @@ def repository_files(root):
     return files
 
 RULES = [
-    (r"^(IW[A-Z]\d{4}-[IWESU]) ", r"\1"),
     (r"(\S+) is not a statement ironwork for COBOL supports yet", r"statement \1"),
     (r"the (\S+) SECTION is not supported yet", r"\1 SECTION"),
     (r"FUNCTION (\S+) is not supported yet", r"FUNCTION \1"),
@@ -118,11 +117,13 @@ RULES = [
 def reason(stderr):
     first = stderr.strip().splitlines()[0] if stderr.strip() else "(no message)"
     message = re.sub(r"^[^:]*(:\d+:\d+)?:\s*", "", first)
+    # A catalogued message is tallied by its id and, where a rule reads it, by what it names.
+    id, message = re.match(r"^(?:(IW[A-Z]\d{4})-[IWESU] )?(.*)$", message).groups()
     for pattern, replacement in RULES:
         m = re.search(pattern, message)
         if m:
-            return m.expand(replacement)
-    return re.sub(r"\d+", "N", message)[:80]
+            return f"{id} {m.expand(replacement)}" if id else m.expand(replacement)
+    return id or re.sub(r"\d+", "N", message)[:80]
 
 def main():
     binary, root = sys.argv[1], sys.argv[2]

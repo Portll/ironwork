@@ -80,7 +80,7 @@ fn warnings_block_refuses_the_run_and_keeps_return_code_4() {
 #[test]
 fn an_error_keeps_its_line_and_return_code_12_and_is_listed_before_warnings() {
     let refused = Source::new("undefined", "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  X PIC X.\n       PROCEDURE DIVISION.\n           MOVE Y TO X.\n           GOBACK.\n");
-    let error = format!("{}:7:17: Y is not defined\n", refused.path());
+    let error = format!("{}:7:17: IWC0001-S Y is not defined\n", refused.path());
     for (command, status, said) in [("check", 12, error.clone()), ("run", 241, error.clone() + &not_run(refused.path(), 12))] {
         let out = ironwork(&[command, refused.path()]);
         assert_eq!((out.status.code(), stderr(&out), out.stdout.is_empty()), (Some(status), said, true), "{command}");
@@ -88,14 +88,14 @@ fn an_error_keeps_its_line_and_return_code_12_and_is_listed_before_warnings() {
     let mixed = Source::new("mixed", &object_oriented("       01  X PIC X.\n", "           MOVE Y TO X\n"));
     let out = ironwork(&["check", mixed.path()]);
     assert_eq!(out.status.code(), Some(12));
-    assert_eq!(stderr(&out), format!("{0}:12:17: Y is not defined\n{0}: {MISSING}\n", mixed.path()));
+    assert_eq!(stderr(&out), format!("{0}:12:17: IWC0001-S Y is not defined\n{0}: {MISSING}\n", mixed.path()));
 }
 
 #[test]
 fn a_syntax_error_is_return_code_12() {
     let source = Source::new("syntax", "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       PROCEDURE DIVISION.\n           MOVE TO.\n");
     let out = ironwork(&["check", source.path()]);
-    assert_eq!((out.status.code(), stderr(&out)), (Some(12), format!("{}:4:19: expected TO, found Period\n", source.path())));
+    assert_eq!((out.status.code(), stderr(&out)), (Some(12), format!("{}:4:19: IWS0001-S expected TO, found Period\n", source.path())));
 }
 
 /// `object_oriented`'s program, which compiles with a warning, behind a CBL card.
@@ -242,9 +242,9 @@ fn a_catalogued_message_carries_its_id_in_text_and_json_and_an_uncatalogued_one_
     assert_eq!(ran.status.code(), Some(241));
     assert!(stderr(&ran).starts_with("{\"col\":26,") && stderr(&ran).ends_with(&not_run(path, 12)), "{}", stderr(&ran));
 
-    let undefined = Source::new("undefined-json", "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  X PIC X.\n       PROCEDURE DIVISION.\n           MOVE Y TO X.\n           GOBACK.\n");
-    let json = ironwork(&["check", undefined.path(), "--diagnostics", "json"]);
-    let object = format!("{{\"col\":17,\"file\":\"{}\",\"id\":null,\"line\":7,\"member\":null,\"message\":\"Y is not defined\",\"severity\":\"S\"}}\n", undefined.path());
+    let uncatalogued = Source::new("uncatalogued-json", "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  X PIC 9(40).\n       PROCEDURE DIVISION.\n           GOBACK.\n");
+    let json = ironwork(&["check", uncatalogued.path(), "--diagnostics", "json"]);
+    let object = format!("{{\"col\":8,\"file\":\"{}\",\"id\":null,\"line\":5,\"member\":null,\"message\":\"PICTURE 9(40): more than 31 digits\",\"severity\":\"S\"}}\n", uncatalogued.path());
     assert_eq!(stderr(&json), object);
 }
 

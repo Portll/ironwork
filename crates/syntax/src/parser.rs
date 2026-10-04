@@ -367,7 +367,7 @@ impl Parser<'_> {
             Some(Tok::Word(w)) => w.clone(),
             Some(t) => format!("{t:?}"),
         };
-        Error::at(self.pos(), format!("{}, found {found}", message.into()))
+        crate::messages::IWS0001.at(self.pos(), format!("{}, found {found}", message.into()))
     }
 
     fn name(&mut self, what: &str) -> R<String> {

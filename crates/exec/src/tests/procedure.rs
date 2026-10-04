@@ -850,7 +850,7 @@ fn an_unqualified_paragraph_name_names_the_one_in_its_own_section() {
     ]);
     assert_eq!(run(&source), "P OF S1\nP OF S1\nQ OF S1\nP OF S2\nQ OF S2\nQ OF S2\nQ OF S1\n");
     let elsewhere = format!("{source}       S3 SECTION.\n{}", line("GO TO P."));
-    assert_eq!(compile_errors(&elsewhere), "P names more than one paragraph; qualify it with OF and its section");
+    assert_eq!(compile_errors(&elsewhere), "IWC0004-S P names more than one paragraph; qualify it with OF and its section");
 }
 
 #[test]

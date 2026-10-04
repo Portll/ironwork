@@ -23,7 +23,13 @@ released, an id keeps its meaning and is never given to another message; its wor
 
 | Id | Severity | Text |
 |---|---|---|
+| IWC0001 | S | `{name} is not defined` |
+| IWC0002 | S | `{name} is ambiguous; qualify it with OF or IN` |
+| IWC0003 | S | `no paragraph or section named {name}` |
+| IWC0004 | S | `{name} names more than one paragraph; qualify it with OF and its section` |
 | IWR0001 | S | `XML PARSE VALIDATING WITH {schema}: the schema is in IBM's Optimized Schema Representation (OSR), which ironwork does not read` |
+| IWS0001 | S | `{what the syntax takes there}, found {the word or token there}` |
+| IWS0002 | S | `{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries` |
 | IWX0001 | W | `free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}` |
 | IWX0002 | W | `constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry` |
 | IWX0003 | W | `<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =` |

@@ -6,6 +6,7 @@
 use crate::picture::{self, Category, Sym};
 use numeric::Qualify;
 use syntax::ast::{DataEntry, Environment, FileDecl, Literal, Organization, Ref, SignClause, Usage};
+use syntax::messages::{IWC0001, IWC0002};
 use syntax::{Error, Pos};
 use zarch::hfp::Precision;
 
@@ -1044,8 +1045,8 @@ impl Layout {
         }
         match found.as_slice() {
             [one] => Ok(*one),
-            [] => Err(Error::at(pos, format!("{name} is not defined"))),
-            _ => Err(Error::at(pos, format!("{name} is ambiguous; qualify it with OF or IN"))),
+            [] => Err(IWC0001.at(pos, format!("{name} is not defined"))),
+            _ => Err(IWC0002.at(pos, format!("{name} is ambiguous; qualify it with OF or IN"))),
         }
     }
 }

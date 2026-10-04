@@ -39,7 +39,13 @@ macro_rules! catalogue {
 }
 
 catalogue! {
+    IWC0001 Severe "{name} is not defined";
+    IWC0002 Severe "{name} is ambiguous; qualify it with OF or IN";
+    IWC0003 Severe "no paragraph or section named {name}";
+    IWC0004 Severe "{name} names more than one paragraph; qualify it with OF and its section";
     IWR0001 Severe "XML PARSE VALIDATING WITH {schema}: the schema is in IBM's Optimized Schema Representation (OSR), which ironwork does not read";
+    IWS0001 Severe "{what the syntax takes there}, found {the word or token there}";
+    IWS0002 Severe "{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries";
     IWX0001 Warning "free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}";
     IWX0002 Warning "constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry";
     IWX0003 Warning "<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =";

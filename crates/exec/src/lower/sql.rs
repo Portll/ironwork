@@ -200,7 +200,7 @@ impl Lower<'_> {
             match crate::procedure_from(self.program, &ProcName { name: label.clone(), section: None }, ctx.para) {
                 Ok((t, _)) => self.go_to(t, ctx, pos)?,
                 Err(message) => {
-                    let abend = self.ironwork(&message)?;
+                    let abend = self.ironwork(&message.text)?;
                     self.end(Terminator::Abend(abend), pos)?;
                 }
             }
