@@ -3065,6 +3065,30 @@ fn bms_maps_sent_from_and_received_into_a_named_area_run_alike_on_the_vm() {
 }
 
 #[test]
+fn a_receive_flag_in_the_attribute_byte_leaves_the_field_its_attrb() {
+    let dir = temp("bms-flags");
+    ordset(&dir);
+    let source = cics_program(
+        "ORDERS",
+        "           COPY ORDSET.\n",
+        "",
+        &[
+            line("MOVE LOW-VALUES TO ORDMAPO"),
+            line("MOVE X'82' TO MSGA"),
+            line("EXEC CICS SEND MAP('ORDMAP') MAPSET('ORDSET') ERASE"),
+            line("    END-EXEC"),
+            line("EXEC CICS RECEIVE MAP('ORDMAP') MAPSET('ORDSET') END-EXEC"),
+            line("EXEC CICS RETURN END-EXEC."),
+        ]
+        .concat(),
+    );
+    let script = "type 6 2 HELLO\nENTER\n";
+    let (_, _, ending) = on_terminal(&source, &dir, script, false);
+    assert!(ending.as_ref().is_err_and(|e| e.contains("row 6 column 2 is protected")), "{ending:?}");
+    assert_eq!(on_terminal(&source, &dir, script, true).2, ending);
+}
+
+#[test]
 fn receive_map_of_text_typed_on_an_unformatted_screen_is_mapfail() {
     let dir = temp("bms-unformatted");
     ordset(&dir);

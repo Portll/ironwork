@@ -97,9 +97,11 @@ fn wcc(control: Control, ctrl: &[String]) -> u8 {
     wcc
 }
 
-/// SEND MAP: each field's attribute (ATTRB, or the symbolic map's A byte when it is not null) and
-/// data (the symbolic map's, when its first byte is not null, else INITIAL). MAPONLY sends the map
-/// alone; DATAONLY sends only the program's data. CURSOR(n) places the cursor; bare CURSOR puts it
+/// SEND MAP: each field's attribute (the symbolic map's A byte, unless it is null or one of the
+/// flags RECEIVE MAP leaves, X'80', X'02' and X'82'; else ATTRB) and data (the symbolic map's,
+/// when its first byte is not null; else INITIAL; else nulls), as CICS builds the output screen
+/// (CICS TS 6.x, Building the output screen, dfhp3c3). MAPONLY sends the map alone; DATAONLY sends
+/// only the program's data. CURSOR(n) places the cursor; bare CURSOR puts it
 /// on the first field whose L is -1; otherwise an ATTRB=IC field has it.
 pub(super) fn send_map<'w, P: Copy, O, S>(
     x: &mut impl CicsHost<'w, P, O, S>,
@@ -132,7 +134,7 @@ pub(super) fn send_map<'w, P: Copy, O, S>(
             let address = (row - 1) * columns + column - 1;
             let slot = slots.iter().find(|s| s.field == i && s.occurrence == occurrence);
             let symbolic = |offset: usize, len: usize| area.as_ref().and_then(|a| a.get(offset..offset + len)).filter(|b| b.first().is_some_and(|&x| x != 0));
-            let attribute = slot.and_then(|s| s.attribute_at()).and_then(|o| symbolic(o, 1)).map(|b| b[0]);
+            let attribute = slot.and_then(|s| s.attribute_at()).and_then(|o| symbolic(o, 1)).map(|b| b[0]).filter(|a| !matches!(a, 0x80 | 0x02 | 0x82));
             let data = slot.and_then(|s| symbolic(s.data, s.size.min(usize::from(field.length))).map(<[u8]>::to_vec));
             if slot.and_then(|s| s.length_at()).and_then(|o| area.as_ref().and_then(|a| a.get(o..o + 2))) == Some(&[0xFF, 0xFF][..]) {
                 symbolic_cursor.get_or_insert(address + 1);
@@ -148,8 +150,10 @@ pub(super) fn send_map<'w, P: Copy, O, S>(
             stream.push(terminal::SBA);
             stream.extend(terminal::encode_address(address));
             stream.extend([terminal::SF, attribute.unwrap_or_else(|| attribute_of(&field.attrb))]);
-            if let Some(bytes) = data.or(if dataonly { None } else { initial }) {
-                stream.extend(bytes.iter().take(usize::from(field.length)));
+            match data.or(if dataonly { None } else { initial }) {
+                Some(bytes) => stream.extend(bytes.iter().take(usize::from(field.length))),
+                None if !dataonly => stream.extend(std::iter::repeat_n(0, usize::from(field.length))),
+                None => {}
             }
             if field.attrb.cursor && cursor.is_none() {
                 cursor = Some(address + 1);
