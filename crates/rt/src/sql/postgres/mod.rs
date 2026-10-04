@@ -17,6 +17,11 @@ pub struct Postgres {
     source: String,
 }
 
+/// The statements a connection keeps prepared. Past it they are all deallocated and each prepared
+/// again when next run, so dynamic statements that carry their values in their text do not grow
+/// the server's memory without end.
+const PREPARED_LIMIT: usize = 1024;
+
 fn abandon(f: Failure) -> Abandoned {
     let message = match f {
         Failure::Refused { state, message } => format!("PostgreSQL refused a request of ironwork's own ({state}): {message}"),
@@ -80,10 +85,15 @@ impl Postgres {
         }
     }
 
-    /// The PostgreSQL statement for `sql`, prepared once per connection.
+    /// The PostgreSQL statement for `sql`, prepared on first use and kept while fewer than
+    /// [`PREPARED_LIMIT`] are.
     fn parsed(&mut self, sql: &str) -> Result<(String, Described), Failure> {
         if let Some(p) = self.prepared.get(sql) {
             return Ok(p.clone());
+        }
+        if self.prepared.len() >= PREPARED_LIMIT {
+            self.conn.simple("DEALLOCATE ALL")?;
+            self.prepared.clear();
         }
         let name = format!("ironwork{}", self.prepared.len() + 1);
         let described = self.conn.prepare(&name, sql)?;
@@ -198,5 +208,21 @@ mod tests {
         let wrong = format!("{}:wrong@{tail}", head.rsplit_once(':').map_or(head, |(user, _)| user));
         let refused = Postgres::connect(&wrong, None).err().expect("refused");
         assert!(refused.contains("28P01"), "{refused}");
+    }
+
+    #[test]
+    fn distinct_statements_do_not_pile_up_on_the_server() {
+        let Some(url) = url() else { return };
+        let mut pg = Postgres::connect(&url, None).expect("connects");
+        fn call(text: &str) -> Call<'_> {
+            Call { program: "P", ordinal: 1, verb: "SELECT", cursor: None, text, inputs: &[] }
+        }
+        for n in 0..PREPARED_LIMIT as i64 + 8 {
+            let text = format!("VALUES {n}");
+            assert_eq!(pg.execute(&call(&text)).expect("answers").rows, [[Value::Int(n)]]);
+        }
+        let rows = pg.execute(&call("SELECT COUNT(*) FROM PG_PREPARED_STATEMENTS")).expect("answers").rows;
+        assert!(matches!(rows.as_slice(), [row] if matches!(row.as_slice(), [Value::Int(k)] if *k as usize <= PREPARED_LIMIT)), "{rows:?}");
+        assert!(pg.prepared.len() <= PREPARED_LIMIT);
     }
 }

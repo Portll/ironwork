@@ -311,12 +311,18 @@ Input rules:
   `std::os::unix::net::UnixStream` for a local socket. It uses the extended query protocol (Parse,
   Describe, Bind, Execute, Sync) with text format values, since the boundary already converts to
   typed values. Each distinct statement text is prepared once per connection, and Describe gives the
-  parameter and column types that the text conversions below need.
+  parameter and column types that the text conversions below need. A connection keeps at most 1,024
+  prepared; past that it deallocates them all and prepares each again when it next runs, since
+  dynamic statements that carry their values in their text would otherwise grow the server's
+  memory without end.
 - **The session** sets `client_encoding` UTF8, `DateStyle` ISO, `TimeZone` UTC and
   `extra_float_digits` 3, so every value's text has one form.
 - **Units of work.** The first statement after a COMMIT or ROLLBACK begins a transaction. Each
   statement runs under a savepoint, because Db2 undoes a failed statement and keeps the unit of
   work, where PostgreSQL would abort all of it. A -911 rolls back the whole unit, as Db2 does.
+- **The role.** A run sends every statement its program makes, dynamic ones built from its input
+  included, to the database the URL names, as the URL's user. Give a run a database and a role of
+  its own, with rights to no more than the tables its programs use.
 - **Authentication.** SCRAM-SHA-256 (RFC 5802 and RFC 7677), with SHA-256, HMAC and the PBKDF2 `Hi`
   function written in-house and tested against the RFCs' test vectors. A cleartext password is
   answered too; MD5 is refused, naming SCRAM. The client nonce is 18 bytes from `/dev/urandom` on
