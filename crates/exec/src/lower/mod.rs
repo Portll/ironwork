@@ -80,7 +80,12 @@ impl fmt::Display for LowerError {
 
 impl From<LowerError> for syntax::Error {
     fn from(e: LowerError) -> Self {
-        syntax::Error::at(e.pos(), e.to_string())
+        let message = match e {
+            LowerError::Unsupported(..) => syntax::messages::IWR0052,
+            LowerError::Exceeds(..) => syntax::messages::IWL0001,
+            LowerError::Invalid(_) => syntax::messages::IWL0002,
+        };
+        message.at(e.pos(), e.to_string())
     }
 }
 

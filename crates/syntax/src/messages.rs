@@ -43,6 +43,8 @@ catalogue! {
     IWC0002 Severe "{name} is ambiguous; qualify it with OF or IN";
     IWC0003 Severe "no paragraph or section named {name}";
     IWC0004 Severe "{name} names more than one paragraph; qualify it with OF and its section";
+    IWL0001 Severe "lowering: {table} exceeds the LIR's limit";
+    IWL0002 Severe "lowering: the lowered program is invalid: {why}";
     IWR0001 Severe "XML PARSE VALIDATING WITH {schema}: the schema is in IBM's Optimized Schema Representation (OSR), which ironwork does not read";
     IWR0002 Severe "{verb} is not a statement ironwork for COBOL supports yet";
     IWR0003 Severe "{clause} is not a data description clause ironwork for COBOL supports yet";
@@ -94,6 +96,7 @@ catalogue! {
     IWR0049 Severe "multiple LINES is not supported yet";
     IWR0050 Severe "multiple COLUMNS is not supported yet";
     IWR0051 Severe "SUM of an arithmetic expression is not supported yet";
+    IWR0052 Severe "lowering: {construct} is not lowered yet";
     IWS0001 Severe "{what the syntax takes there}, found {the word or token there}";
     IWS0002 Severe "{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries";
     IWX0001 Warning "free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}";

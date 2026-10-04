@@ -137,7 +137,7 @@ fn a_construct_code_generation_refuses_exits_242_and_with_exit_code_4() {
     for command in ["run", "cics"] {
         let ((band, said), (verdict, _)) = both(&[command, &program, "--vm"]);
         assert_eq!((band, verdict), (Some(242), Some(4)), "{command}: {said}");
-        assert!(said.contains(": lowering: NUMCHECK with ALL ZERO or ALL NULL compared with a data item it may test is not lowered yet"), "{command}: {said}");
+        assert!(said.contains(": IWR0052-S lowering: NUMCHECK with ALL ZERO or ALL NULL compared with a data item it may test is not lowered yet"), "{command}: {said}");
     }
     assert_eq!(ironwork(&["compile", &program, "-o", &dir.path("out")]).status.code(), Some(12));
 }

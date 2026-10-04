@@ -141,7 +141,7 @@ def compare(iw, gc, name):
         return f"{name}-refuses", gc[1]
     return "differ", f"ironwork {iw[0]}: {iw[1]}; {name} {gc[0]}: {gc[1]}"
 
-VM_STOPPED = re.compile(r"the VM does not run (.+) yet; run it without --vm|: (lowering: .+)")
+VM_STOPPED = re.compile(r"the VM does not run (.+) yet; run it without --vm|: (?:IW[A-Z]\d{4}-[IWESU] )?(lowering: .+)")
 # A Rust panic names its thread by a number that differs from run to run.
 PANIC_THREAD = re.compile(r"^(thread '[^']*') \(\d+\)(?= panicked at )", re.M)
 

@@ -27,6 +27,8 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0002 | S | `{name} is ambiguous; qualify it with OF or IN` |
 | IWC0003 | S | `no paragraph or section named {name}` |
 | IWC0004 | S | `{name} names more than one paragraph; qualify it with OF and its section` |
+| IWL0001 | S | `lowering: {table} exceeds the LIR's limit` |
+| IWL0002 | S | `lowering: the lowered program is invalid: {why}` |
 | IWR0001 | S | `XML PARSE VALIDATING WITH {schema}: the schema is in IBM's Optimized Schema Representation (OSR), which ironwork does not read` |
 | IWR0002 | S | `{verb} is not a statement ironwork for COBOL supports yet` |
 | IWR0003 | S | `{clause} is not a data description clause ironwork for COBOL supports yet` |
@@ -78,6 +80,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWR0049 | S | `multiple LINES is not supported yet` |
 | IWR0050 | S | `multiple COLUMNS is not supported yet` |
 | IWR0051 | S | `SUM of an arithmetic expression is not supported yet` |
+| IWR0052 | S | `lowering: {construct} is not lowered yet` |
 | IWS0001 | S | `{what the syntax takes there}, found {the word or token there}` |
 | IWS0002 | S | `{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries` |
 | IWX0001 | W | `free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}` |

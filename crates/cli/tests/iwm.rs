@@ -241,7 +241,7 @@ fn a_construct_lowering_refuses_is_named_where_it_is_and_nothing_is_written_for_
     let o = ironwork(&dir, &["compile", "MIXED.cbl", "PAYROLL.cbl", "-I", "lib", "-o", "out"], None);
     assert_eq!(o.status.code(), Some(12));
     let err = text(&o.stderr);
-    assert!(err.contains("MIXED.cbl:8:12: lowering: NUMCHECK with ALL ZERO or ALL NULL compared with a data item it may test is not lowered yet"), "{err}");
+    assert!(err.contains("MIXED.cbl:8:12: IWR0052-S lowering: NUMCHECK with ALL ZERO or ALL NULL compared with a data item it may test is not lowered yet"), "{err}");
     assert!(err.contains("ironwork: MIXED.iwm not written"), "{err}");
     assert!(!dir.join("out/MIXED.iwm").exists());
     assert!(dir.join("out/PAYROLL.iwm").exists());
