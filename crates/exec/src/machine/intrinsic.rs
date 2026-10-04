@@ -2,6 +2,7 @@
 
 use super::*;
 use super::facts::Facts;
+use compile::function::Udf;
 use rt::intrinsic::function::{self as intrinsic_function, Evaluator};
 use rt::intrinsic;
 
@@ -14,6 +15,35 @@ pub(super) enum Within {
     Own,
     Fixed(u32),
     Float(Precision),
+}
+
+/// The decimal places a FUNCTION operand contributes to the dmax of an expression holding it: a
+/// user-defined function's RETURNING item's, and an intrinsic function's outer-dmax from its
+/// arguments' descriptions (`rt::intrinsic::outer_dmax`). No argument is located, so the walker
+/// and the lowering, which fixes dmax in the plan, read the same descriptions.
+pub(crate) fn function_dmax(layout: &Layout, functions: &[Udf], f: &FunctionCall) -> u32 {
+    if let Some(u) = functions.iter().find(|u| u.name == f.name) {
+        return u.result.kind.digits_scale().map_or(0, |(_, s)| s);
+    }
+    let inner = f.args.iter().map(|a| argument_dmax(layout, functions, a)).max().unwrap_or(0);
+    intrinsic::outer_dmax(&f.name, inner)
+}
+
+/// An argument's dmax by the Programming Guide's terms (SC27-8714-03, p. 794): an elementary
+/// item's or literal's decimal places, an expression's dmax, an embedded function's outer-dmax.
+fn argument_dmax(layout: &Layout, functions: &[Udf], e: &Expr) -> u32 {
+    match e {
+        Expr::Operand(Operand::Literal(Literal::Number(t))) => literal_fixed(t).map_or(0, |f| f.places.dec),
+        Expr::Operand(Operand::Ref(r)) if r.refmod.is_none() => match layout.resolve(&r.name, &r.qualifiers, r.pos) {
+            Ok(Resolved::Item(i)) => layout.items[i].kind.digits_scale().map_or(0, |(_, s)| s),
+            _ => 0,
+        },
+        Expr::Operand(Operand::Function(g)) => function_dmax(layout, functions, g),
+        Expr::Operand(_) => 0,
+        Expr::Neg(inner) => argument_dmax(layout, functions, inner),
+        Expr::Bin(a, BinOp::Div | BinOp::Pow, _) => argument_dmax(layout, functions, a),
+        Expr::Bin(a, _, b) => argument_dmax(layout, functions, a).max(argument_dmax(layout, functions, b)),
+    }
 }
 
 /// A FUNCTION's arguments as written, which CHAR, NATIONAL-OF, INTEGER-OF-DATE, DATE-OF-INTEGER

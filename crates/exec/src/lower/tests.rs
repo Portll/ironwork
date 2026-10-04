@@ -475,8 +475,21 @@ fn set_to_entry_names_its_entry_and_a_call_through_any_other_pointer_finds_it() 
 #[test]
 fn constructs_outside_the_slice_are_refused_by_name() {
     let refused = |body: &str, data: &str| lower(&compiled(&program("", data, &[line(body), line("GOBACK.")].concat()))).unwrap_err();
-    let numval = refused("MOVE FUNCTION MAX(N M) TO A", "       01  A PIC X.\n       01  N PIC 9.\n       01  M PIC 99.\n");
+    let numval = refused("MOVE FUNCTION MAX(N + 1 M) TO A", "       01  A PIC X.\n       01  N PIC 9.\n       01  M PIC 99.\n");
     assert!(matches!(numval, LowerError::Unsupported(n, _) if n.starts_with("a FUNCTION result whose digits")));
+}
+
+/// MAX and MIN of fixed-point items have places their descriptions fix (`rt::intrinsic::fixed_places`),
+/// so the move to an alphanumeric item is planned: the digits of an integer, a refusal of a value
+/// with decimal places, as the walker refuses it.
+#[test]
+fn max_of_items_of_different_sizes_moves_its_digits_to_an_alphanumeric_item() {
+    let data = "       01  A PIC X(4).\n       01  N PIC 9.\n       01  M PIC 99.\n       01  D PIC 9V9.\n";
+    let p = lowered(&program("", data, &[line("MOVE FUNCTION MAX(N M) TO A"), line("MOVE FUNCTION MIN(N D) TO A"), line("GOBACK.")].concat()));
+    let m = moves(&p);
+    assert_eq!(m[0], MovePlan::Alnum { image: Image::Digits { digits: 2 }, justified: false });
+    let MovePlan::Refused(abend) = m[1] else { panic!("{:?}", m[1]) };
+    assert_eq!(symbol(&p, p.abends[abend as usize].message), "only an integer numeric value can be moved to an alphanumeric item");
 }
 
 #[test]

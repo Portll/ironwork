@@ -321,6 +321,10 @@ pub const RELATIVE_NUMBER_BELOW_ONE: &str = "C331";
 pub const DISPLAY_NUMERIC_FUNCTION: &str = "C332";
 pub const BY_VALUE_TO_REFERENCE: &str = "C333";
 pub const FLOAT_EXPONENTIATION: &str = "C334";
+pub const MIXED_FUNCTION_PLACES: &str = "C390";
+pub const MAX_MIN_INTEGER_PLACES: &str = "C391";
+pub const INTEGER_FUNCTION_DIGITS: &str = "C392";
+pub const ABS_PLACES: &str = "C393";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -2072,6 +2076,30 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: FLOAT_EXPONENTIATION,
         claim: "An exponent with decimal places, or one holding a division or an exponentiation when dmax is above zero, makes its expression floating point, as a floating-point operand or function does (Programming Guide SC27-8714-03, pp. 796, 800). ironwork takes an operand's decimal places from its description, a function's only from a user-defined function's RETURNING item, and dmax as the statement's or the evaluated expression's. A floating-point exponentiation is evaluated in long precision, extended under ARITH(EXTEND) (p. 800); the manuals do not give Language Environment's algorithm, and ironwork gives the value nearest the exact power, computed as the floating-point functions are (C110): an integer exponent by repeated squaring, any other as e^(y ln |x|). Zero to a positive power is zero. Table 32 of the Language Reference (SC27-8713-03, pp. 296-297) gives the rest: zero to a negative power is a size error, and without ON SIZE ERROR the program ends abnormally, which ironwork does with the HFP divide exception, S0CF, a division by zero raises; zero to the power zero is 1, and a negative number to a fractional power is computed with the base's absolute value, each with a message, when no SIZE ERROR phrase is written. ironwork gives those two values whether or not ON SIZE ERROR is written, issues no message, and does not run the phrase for them",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: MIXED_FUNCTION_PLACES,
+        claim: "MAX, MIN, RANGE, REM and SUM of fixed-point arguments carry as many decimal places as their arguments have at most, their inner-dmax, whichever argument MAX or MIN returns, and contribute that many to the dmax of an expression holding them, their outer-dmax (Programming Guide SC27-8714-03, pp. 794, 799): COMPUTE R = FUNCTION MAX(A B) / 3 * 3 with A PIC 9V99 VALUE 1, B PIC 9 VALUE 5 and R PIC 99V9 gives 4.9. Each step of their algorithm takes the fixed-point table's places (p. 795): RANGE has one integer place more than MAX's value, REM the integer places of argument-1 and argument-2 and argument-2's decimal places plus one, SUM one more for each argument, each cut to 30 digits, 31 under ARITH(EXTEND) (p. 797). An argument's dmax is read from its description: an item's or literal's decimal places, an expression's dmax, an embedded function's outer-dmax (p. 794)",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: MAX_MIN_INTEGER_PLACES,
+        claim: "MAX and MIN of fixed-point arguments carry as many integer places as the argument with the most. The Language Reference says the value is the content of the winning argument (SC27-8713-03, pp. 591, 599), and the Programming Guide gives its decimal places (C390) and has every argument assigned to one function result (SC27-8714-03, p. 799), which holds them all only so. The integer places show only where the value's digits do, as in a MOVE to an alphanumeric item: MAX(N M) with N PIC 999 VALUE 5 and M PIC 9(5) gives 00005. cobc gives the winning argument's own field, 005 (libcob/intrinsic.c, cob_intr_max); --dialect gnucobol does not switch this, since that field also keeps the winning argument's decimal places, which IBM documents (docs/dialect.md 5.5)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: INTEGER_FUNCTION_DIGITS,
+        claim: "INTEGER of a fixed-point argument has one digit more than the argument, INTEGER-PART as many, and MOD as many as the shorter of its arguments, high-order digits beyond them dropped, so MOD(N H) with N PIC S9 VALUE -3 and H PIC 999 VALUE 100 is 7 (Language Reference SC27-8713-03, p. 601: 'The function result is an integer with as many digits as the shorter of argument-1 and argument-2'; Programming Guide SC27-8714-03, pp. 798-799). Each is an integer function, with no decimal places and an outer-dmax of zero (p. 798). cobc keeps every digit, 97",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ABS_PLACES,
+        claim: "ABS of a fixed-point argument has the argument's places, and its decimal places count in the dmax of an expression holding it as a mixed function's do (C390). IBM types ABS integer or numeric as its argument is (Language Reference SC27-8713-03, p. 517) and gives it no precision, and says a numeric function's result has decimal places when an argument has (Programming Guide SC27-8714-03, p. 62). cobc's ABS has its argument's field (cob_intr_abs)",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

@@ -34,6 +34,7 @@ mod facts;
 mod file_io;
 mod function;
 mod intrinsic;
+pub(crate) use intrinsic::function_dmax;
 use intrinsic::Within;
 mod json;
 mod le_services;
@@ -1280,6 +1281,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     fn dmax(&mut self, e: &Expr) -> R<u32> {
         Ok(match e {
             Expr::Operand(Operand::Literal(Literal::Number(t))) => literal_fixed(t).map_or(0, |f| f.places.dec),
+            Expr::Operand(Operand::Function(f)) => function_dmax(self.layout, self.functions, f),
             Expr::Operand(op) => self.operand_kind(op)?.and_then(Kind::digits_scale).map_or(0, |(_, s)| s),
             Expr::Neg(inner) => self.dmax(inner)?,
             Expr::Bin(a, BinOp::Div | BinOp::Pow, _) => self.dmax(a)?,

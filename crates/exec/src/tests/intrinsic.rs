@@ -380,3 +380,60 @@ fn the_repository_paragraph_lets_intrinsic_functions_go_without_the_word_functio
     assert!(refused("FUNCTION WHEN-COMPILED INTRINSIC").contains("special register"));
     assert!(refused("FUNCTION FROBNICATE INTRINSIC").contains("not an intrinsic function"));
 }
+
+/// Runs on the interpreter, whose Harness compares the VM's run with its own, and on the VM, which
+/// must run it to its end.
+fn on_both(source: &str) -> String {
+    let walker = Harness::source(source).run(Executor::Interpreter);
+    let vm = Harness::source(source).run(Executor::Vm);
+    assert_eq!((&walker.out, &walker.ending), (&vm.out, &vm.ending));
+    assert!(walker.ending.is_ok(), "{:?}", walker.ending);
+    walker.out
+}
+
+const PRECISION_DATA: &str = "       01  A2 PIC 9V99 VALUE 1.\n       01  A3 PIC 9V99 VALUE 4.\n       01  B1 PIC 9 VALUE 5.\n       01  C1 PIC 9 VALUE 3.\n       01  D2 PIC 9V99 VALUE 1.01.\n       01  R1 PIC 99V9.\n";
+
+/// Programming Guide SC27-8714-03, pp. 794 and 799: MAX, MIN, RANGE, REM and SUM carry their
+/// arguments' most decimal places, whichever argument wins, and those places count in the dmax of
+/// the expression holding them (C390). ABS carries its argument's (C393), integer functions none.
+#[test]
+fn a_mixed_function_s_decimal_places_count_in_the_expression_s_dmax() {
+    let statements = [
+        "FUNCTION MAX(A2 B1) / 3 * 3",
+        "FUNCTION MIN(B1 A3) / 3 * 3",
+        "FUNCTION RANGE(A3 B1 C1) / 3 * 3",
+        "10 / 3 * FUNCTION SUM(D2 B1)",
+        "FUNCTION MAX(B1 C1) / 3 * 3",
+        "FUNCTION ABS(B1) / 3 * 3",
+        "FUNCTION INTEGER(D2) / 3 * 3",
+        "10 / 3 * FUNCTION MAX(FUNCTION MIN(D2 C1) B1)",
+    ];
+    let body: String = statements.iter().flat_map(|s| [line(&format!("COMPUTE R1 = {s}")), line("DISPLAY R1")]).chain([line("GOBACK.")]).collect();
+    assert_eq!(on_both(&program("", PRECISION_DATA, &body)), ["049", "039", "019", "200", "048", "048", "009", "166"].map(|s| format!("{s}\n")).concat());
+}
+
+/// MAX and MIN have as many integer places as their widest argument (C391); INTEGER one digit more
+/// than its argument, INTEGER-PART as many, MOD as many as its shorter argument, high-order digits
+/// beyond them dropped (Language Reference SC27-8713-03, p. 601; Programming Guide SC27-8714-03,
+/// pp. 798-799; C392); RANGE and REM by the fixed-point table, and ABS its argument's (C393). An
+/// integer value moved to an alphanumeric item shows each digit.
+#[test]
+fn each_numeric_function_s_value_has_ibm_s_digits() {
+    let data = "       01  N3 PIC 999 VALUE 5.\n       01  M2 PIC 99 VALUE 3.\n       01  B3 PIC 999 VALUE 7.\n       01  C2 PIC 9V99 VALUE 8.25.\n       01  SN PIC S99 VALUE -5.\n       01  BIG PIC 9(5) VALUE 4.\n       01  N1 PIC S9 VALUE -3.\n       01  H3 PIC 999 VALUE 100.\n       01  X PIC X(8).\n";
+    let functions = ["INTEGER(C2)", "INTEGER-PART(C2)", "MOD(B3 M2)", "MOD(N1 H3)", "MAX(N3 BIG)", "MIN(N3 M2)", "RANGE(N3 M2)", "REM(B3 M2)", "ABS(SN)", "SUM(N3 M2)"];
+    let body: String = functions.iter().flat_map(|f| [line(&format!("MOVE FUNCTION {f} TO X")), line("DISPLAY '[' X ']'")]).chain([line("GOBACK.")]).collect();
+    let out = on_both(&program("", data, &body));
+    assert_eq!(out, ["0008", "008", "01", "7", "00005", "003", "0002", "000001", "05", "00008"].map(|s| format!("[{s:<8}]\n")).concat());
+}
+
+/// A winning integer argument of MAX or MIN carries the other arguments' decimal places, so its
+/// value is no integer and cannot be moved to an alphanumeric item (Language Reference
+/// SC27-8713-03, p. 404); both executors end the run there.
+#[test]
+fn max_of_an_integer_and_a_decimal_argument_is_no_integer() {
+    let source = program("", "       01  N PIC 9 VALUE 5.\n       01  D PIC 9V9 VALUE 1.\n       01  X PIC X(4).\n", &[line("MOVE FUNCTION MAX(N D) TO X"), line("GOBACK.")].concat());
+    let walker = Harness::source(&source).run(Executor::Interpreter);
+    let vm = Harness::source(&source).run(Executor::Vm);
+    assert_eq!(walker.ending, vm.ending);
+    assert_eq!(walker.ending.unwrap_err().message, "only an integer numeric value can be moved to an alphanumeric item");
+}

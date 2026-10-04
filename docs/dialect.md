@@ -206,6 +206,8 @@ removes one, it is named.
 | INSPECT of a national item | counts national characters | counts bytes (libcob/strings.c) | corpus |
 | An intermediate result of more than 30 digits | cut to 30 (31 under ARITH(EXTEND)) (Programming Guide, Truncated intermediate results; C1) | every digit kept | probe |
 | MEAN, MEDIAN, NUMVAL and COMBINED-DATETIME | floating-point results, rounded into the receiver (C111, recalled; Programming Guide on NUMVAL; C6) | exact decimal, truncated | corpus; test programs |
+| MAX, MIN, RANGE, REM and SUM of fixed-point arguments | as many decimal places as the arguments have at most, counted in the expression's dmax (Programming Guide SC27-8714-03, pp. 794, 799; C390): `COMPUTE R = FUNCTION MAX(A B) / 3 * 3`, A `9V99` 1.00, B `9` 5, R `99V9`, gives 4.9 | MAX and MIN return the winning argument's own field (`cob_intr_max`, libcob/intrinsic.c), and intermediates around a function value carry other places: `10 / 3 * FUNCTION SUM(D B)`, D `9V99` 1.01, gives 19.8 where IBM's dmax gives 20.0 | probe |
+| INTEGER, INTEGER-PART and MOD of fixed-point arguments | INTEGER one digit more than its argument, INTEGER-PART as many, MOD as many as its shorter argument (Language Reference SC27-8713-03, p. 601; Programming Guide SC27-8714-03, pp. 798-799; C392): `FUNCTION MOD(N H)`, N `S9` -3, H `999` 100, is 7 | a field as large as the value: 97 | probe |
 | Invalid decimal data, and a zero divisor outside ON SIZE ERROR | the program check: S0C7, S0CB or S0C9 | runs on, the receiver unchanged by the division; under `-debug` invalid data stops the run | test programs; corpus |
 
 ### 5.3 cobc bugs
@@ -236,6 +238,7 @@ The survey's ironwork bugs each changed results under `ibm`. All are fixed, and 
 | C112, an argument outside a function's domain | abend IRONWORK | EC-ARGUMENT-FUNCTION set and never raised, the result 0; FACTORIAL exact past 28 | Language Environment's math services signal a condition there, so zero would hide what z/OS does |
 | C181, a contained program CALLed from outside its container | found in ironwork's flat library, and the run ends when it uses a GLOBAL name | the CALL finds no program, as IBM's scope rules say | IBM documents the scope; a scope check belongs under both dialects |
 | C333, a BY VALUE argument to a parameter received BY REFERENCE | the parameter gets storage of its own holding the value, and the called program runs | the value is read as an address, and the program faults | the Language Reference requires BY VALUE on both sides (p. 322) and gives no result; what the value addresses has no counterpart in ironwork's storage |
+| C391, the integer places of MAX and MIN | as many as the widest argument's: MAX(N M), N `999` 5, M `9(5)` 4, moved to an alphanumeric item gives `00005` | the winning argument's own field: `005` | that field keeps the winning argument's decimal places too, which IBM documents (C390), so switching the integer places alone gives cobc's digits only where the arguments' decimal places agree |
 | No assumption: DISPLAY of LENGTH OF | its value's 9 digits | a fixed size's LENGTH OF folded to a literal (`4`), a variable one `+0000000004` | unrecorded; it needs an assumption first |
 | No assumption: the rest of an XML GENERATE receiver | kept as it was | filled with spaces (libcob/mlio.c) | unrecorded; C119 does not say it |
 

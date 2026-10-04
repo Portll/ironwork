@@ -199,7 +199,8 @@ pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args
                 _ => Err(Abend::ironwork(format!("FUNCTION {name} needs numeric arguments"), pos)),
             };
             let x = number(&args[0])?;
-            let dec = if args.len() == 2 { x.places.dec.max(number(&args[1])?.places.dec) } else { x.places.dec };
+            let given = args.iter().map(number).map(|v| v.map(|v| v.places)).collect::<R<Vec<Places>>>()?;
+            let dec = given.iter().map(|p| p.dec).max().unwrap_or(0);
             let scaled = |v: &Fixed| -> R<i128> {
                 let m = align(v, dec, false).and_then(|m| m.to_u128()).and_then(|m| i128::try_from(m).ok()).ok_or_else(|| Abend::ironwork("an argument beyond 38 digits", pos))?;
                 Ok(if v.negative { -m } else { m })
@@ -219,7 +220,10 @@ pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args
                     if other == "MOD" && r != 0 && (r < 0) != (b < 0) { r + b } else { r }
                 }
             };
-            Val::Num(Fixed::new(result, Places::new(31 - dec.min(31), dec)))
+            let places = super::fixed_places(name, &given, facts.options().arith).expect("MOD, REM, INTEGER, INTEGER-PART and ABS have fixed places");
+            let value = Fixed::new(result / 10i128.pow(dec - places.dec.min(dec)), places);
+            // MOD's value has the digits of its shorter argument, high-order digits beyond them dropped.
+            Val::Num(if name == "MOD" { value.fit(places) } else { value })
         }
         "INTEGER-OF-DATE" => {
             arity(1..=1)?;
@@ -403,6 +407,28 @@ fn compare_arguments(facts: &dyn ProgramFacts, a: &Val, b: &Val, name: &str, pos
     })
 }
 
+/// The places of a fixed-point MAX, MIN or RANGE value, when every argument is fixed point; ZERO
+/// is a one-digit integer.
+fn values_places(args: &[Val], name: &str, arith: Arith) -> Option<Places> {
+    let places = args
+        .iter()
+        .map(|v| match v {
+            Val::Num(x) => Some(x.places),
+            Val::Fig(Figurative::Zero) => Some(Places::new(1, 0)),
+            _ => None,
+        })
+        .collect::<Option<Vec<Places>>>()?;
+    super::fixed_places(name, &places, arith)
+}
+
+/// A fixed-point argument at `places`, its decimal places filled out with zeros.
+fn widened(v: &Val, places: Places) -> Fixed {
+    match v {
+        Val::Num(x) => Fixed { magnitude: align(x, places.dec, false).unwrap_or(x.magnitude), places, ..*x },
+        _ => Fixed::new(0, places),
+    }
+}
+
 /// The leftmost argument with the greatest (`Greater`) or least (`Less`) value.
 fn extreme(facts: &dyn ProgramFacts, args: &[Val], want: Ordering, name: &str, pos: Pos) -> R<usize> {
     let mut best = 0;
@@ -523,19 +549,22 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
                 "ORD-MIN" | "ORD-MAX" => Ok(integer(best as i128 + 1, 9)),
                 "RANGE" => {
                     let least = extreme(facts, args, Ordering::Less, name, pos)?;
-                    match (&args[best], &args[least]) {
-                        (Val::Num(hi), Val::Num(lo)) if !floating => {
-                            let dmax = hi.places.dec.max(lo.places.dec);
-                            Ok(Val::Num(hi.sub(*lo, dmax, arith).map_err(|_| Abend::ironwork("FUNCTION RANGE: a result beyond 256 bits", pos))?))
+                    match (values_places(args, "MAX", arith), &args[best], &args[least]) {
+                        (Some(widest), hi, lo) if !floating => {
+                            let (hi, lo) = (widened(hi, widest), widened(lo, widest));
+                            Ok(Val::Num(hi.sub(lo, widest.dec, arith).map_err(|_| Abend::ironwork("FUNCTION RANGE: a result beyond 256 bits", pos))?))
                         }
-                        (hi, lo) => {
+                        (_, hi, lo) => {
                             let (hi, lo) = (real(hi, p, name, pos)?, real(lo, p, name, pos)?);
                             float_result(hi.sub(lo), p, pos)
                         }
                     }
                 }
                 _ if floating => float_result(real(&args[best], p, name, pos)?, p, pos),
-                _ => Ok(args.swap_remove(best)),
+                _ => Ok(match values_places(args, name, arith) {
+                    Some(widest) => Val::Num(widened(&args[best], widest)),
+                    None => args.swap_remove(best),
+                }),
             }
         }
         "SUM" => {

@@ -242,10 +242,15 @@ fn of(value: Value) -> Side {
     Side { value, src: None, digits: 0 }
 }
 
+/// Whether an argument reads as a fixed-point number, ZERO a one-digit integer.
+fn fixed(value: Value) -> bool {
+    matches!(value, Value::Num(_) | Value::Fig(Figurative::Zero))
+}
+
 /// What the function's value reads as: alphanumeric bytes, national units, a float, or a number
 /// with its decimal places and digits where they are the same on every call (`Num(None)` where
-/// they depend on the argument's text, on which argument wins or on how many values an OCCURS
-/// DEPENDING ON table gives). A floating-point argument makes ABS, REM, MIN, MAX, RANGE and SUM
+/// they depend on the argument's text or on how many values an OCCURS DEPENDING ON table gives,
+/// or where an argument's places are not known here). A floating-point argument makes ABS, REM, MIN, MAX, RANGE and SUM
 /// floating-point, whatever count an OCCURS DEPENDING ON table gives where one is given once, and
 /// INTEGER and INTEGER-PART 30 digits, 31 under ARITH(EXTEND) (`float_function`).
 fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
@@ -339,31 +344,20 @@ fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
             None => num(None, 0),
         },
         Func::Sum => sum(args, arith),
-        Func::Range => range(args, arith, pos)?,
-        // The result has 31 digits, as many decimal places as the arguments have at most.
-        Func::Mod | Func::Rem | Func::Integer | Func::IntegerPart | Func::Abs => {
-            let decs: Option<Vec<u32>> = args.iter().map(|a| if let Value::Num(Some(d)) = a.side.value { Some(d) } else { None }).collect();
-            match decs.and_then(|d| d.into_iter().max()) {
-                Some(dec) if dec <= 31 => num(Some(dec), 31),
-                _ => num(None, 0),
+        Func::Range if !args.iter().all(|a| fixed(a.side.value)) => return unsupported("FUNCTION RANGE of fixed-point arguments with other ones", pos),
+        Func::Min | Func::Max if !args.iter().all(|a| fixed(a.side.value)) => {
+            let Some((first, rest)) = args.split_first() else { return Ok(num(None, 0)) };
+            match first.side.value {
+                v @ (Value::Bytes | Value::National | Value::Float) if rest.iter().all(|a| a.side.value == v) => of(v),
+                _ => return unsupported("FUNCTION MIN or MAX of arguments of different kinds", pos),
             }
         }
-        // The winning argument's own value.
-        Func::Min | Func::Max => {
-            let Some((first, rest)) = args.split_first() else { return Ok(num(None, 0)) };
-            let first = first.side;
-            let same = |v: Value| rest.iter().all(|a| a.side.value == v);
-            match first.value {
-                Value::Num(_) if args.iter().all(|a| matches!(a.side.value, Value::Num(_)) && !a.scaled) => {
-                    if same(first.value) && rest.iter().all(|a| a.side.digits == first.digits) {
-                        num(if let Value::Num(d) = first.value { d } else { None }, first.digits)
-                    } else {
-                        num(None, 0)
-                    }
-                }
-                Value::Num(_) if args.iter().all(|a| matches!(a.side.value, Value::Num(_))) => num(None, 0),
-                v @ (Value::Bytes | Value::National | Value::Float) if same(v) => of(v),
-                _ => return unsupported("FUNCTION MIN or MAX of arguments of different kinds", pos),
+        // `rt::intrinsic::fixed_places`, where every argument's places are known.
+        Func::Min | Func::Max | Func::Range | Func::Mod | Func::Rem | Func::Integer | Func::IntegerPart | Func::Abs => {
+            let given: Option<Vec<Places>> = args.iter().map(places).collect();
+            match given.and_then(|p| rt::intrinsic::fixed_places(func.name(), &p, arith)) {
+                Some(p) => num(Some(p.dec), p.total()),
+                None => num(None, 0),
             }
         }
     })
@@ -386,23 +380,4 @@ fn sum(args: &[Arg], arith: Arith) -> Side {
         }
     }
     num(Some(total.dec), total.total())
-}
-
-/// RANGE of fixed-point arguments: the greatest less the least, in fixed point.
-fn range(args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
-    let fixed = args.iter().filter(|a| matches!(a.side.value, Value::Num(_))).count();
-    if fixed == 0 {
-        return Ok(of(Value::Float));
-    }
-    if fixed < args.len() {
-        return unsupported("FUNCTION RANGE of fixed-point arguments with other ones", pos);
-    }
-    let places: Option<Vec<Places>> = args.iter().map(places).collect();
-    Ok(match places.as_deref() {
-        Some([p, rest @ ..]) if rest.iter().all(|q| q == p) => {
-            let r = carried(sum_places(*p, *p), p.dec, arith);
-            num(Some(r.dec), r.total())
-        }
-        _ => num(None, 0),
-    })
 }

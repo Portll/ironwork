@@ -471,7 +471,7 @@ pub enum Count { Fixed(u32), Odo(Odo), Temp(TempId) }
 
 | Quantity | Walker | Fixed at lowering as |
 |---|---|---|
-| dmax | Largest scale among the receivers and the expressions, divisors and exponents aside (machine.rs:1493-1501, 1409-1417) | `ArithPlan.dmax` |
+| dmax | Largest scale among the receivers and the expressions, divisors and exponents aside, a FUNCTION operand counting its outer-dmax from its arguments' descriptions (`machine::function_dmax`, assumption C390) (machine.rs:1493-1501, 1409-1417) | `ArithPlan.dmax` |
 | dmax below the top operation | The same, a ROUNDED receiver counted with its own places under `--dialect gnucobol` (`numeric::precision::Dmax`, assumption C101) | `ArithPlan.inner_dmax` |
 | ARITH | `options.arith` (machine.rs:1420) | `ArithPlan.arith` |
 | Fixed or float | Float for every expression when a receiver is COMP-1 or COMP-2 (Programming Guide SC27-8714-03, p. 800), else `uses_float` on each expression (machine.rs:1506, 1400-1406), which is then not run | `ArithStep.mode`, with an empty `probe` when a receiver decides it |
@@ -1815,16 +1815,13 @@ COMBINED-DATETIME and CONTENT-OF. Every function the walker runs has a row.
   | 8 digits | DATE-OF-INTEGER, DATE-TO-YYYYMMDD |
   | 9 digits | LENGTH, BYTE-LENGTH, ORD-MIN, ORD-MAX, TEST-NUMVAL, TEST-NUMVAL-C, TEST-NUMVAL-F, TEST-FORMATTED-DATETIME, ULENGTH, UPOS, USUPPLEMENTARY, UVALID, UWIDTH |
   | 30 digits, 31 under ARITH(EXTEND) | FACTORIAL; INTEGER and INTEGER-PART of a floating-point argument |
-  | 31 digits, the arguments' most decimal places | MOD, REM, INTEGER, INTEGER-PART, ABS |
+  | `rt::intrinsic::fixed_places` of the arguments' places (assumptions C390 to C393) | MIN and MAX (the widest argument's integer places, the most decimal places), RANGE, REM, MOD (the shorter argument's digits), INTEGER (one digit more than its argument), INTEGER-PART and ABS (the argument's), of fixed-point arguments |
   | `Fixed::add`'s places, from a one-digit zero through each argument | SUM of fixed-point arguments |
-  | `Fixed::sub`'s places for the greatest less the least | RANGE of fixed-point arguments |
-  | The winning argument's own value | MIN, MAX |
 
-  Where the decimal places or digits depend on which argument wins
-  (MIN, MAX and RANGE of arguments of different sizes), on an argument that is an expression or an
-  item with PICTURE scaling positions, or on how many elements an OCCURS DEPENDING ON table gives
-  (SUM), the result is a number of unknown scale, and moving or comparing it as alphanumeric is
-  refused, since the walker decides that by the value. Check refuses MIN and MAX of arguments of
+  Where the decimal places or digits depend on an argument that is an expression or an item with
+  PICTURE scaling positions, or on how many elements an OCCURS DEPENDING ON table gives (SUM), the
+  result is a number of unknown scale, and moving or comparing it as alphanumeric is refused, since
+  the walker decides that by the value. Check refuses MIN and MAX of arguments of
   different classes or of a pointer, and a figurative constant as an argument (Language Reference
   SC27-8713-03, pp. 16, 591, 599), so lowering's refusal of MIN or MAX of arguments of different
   categories is a guard. RANGE of fixed-point arguments with nonnumeric ones, and an OCCURS

@@ -326,7 +326,7 @@ impl Lower<'_> {
                 let p = self.place(r, false)?;
                 scale(self.kind_of(p))
             }
-            Expr::Operand(Operand::Function(f)) => self.user_defined(&f.name).map_or(0, |u| scale(u.result.kind)),
+            Expr::Operand(Operand::Function(f)) => crate::machine::function_dmax(self.layout, &self.c.functions, f),
             Expr::Operand(_) => 0,
             Expr::Neg(inner) => self.dmax(inner)?,
             Expr::Bin(a, BinOp::Div | BinOp::Pow, _) => self.dmax(a)?,
