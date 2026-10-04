@@ -5,7 +5,7 @@ cobc, and report where the two disagree: what DISPLAY wrote, the return code, or
 Neither compiler is an oracle. Both keep storage in ASCII and have their own numeric model, so a
 difference is either behaviour that changes when a program leaves z/OS, or an ironwork bug;
 Enterprise COBOL settles which. CBL and PROCESS cards are removed for the other compiler, which does
-not read them. gcobol runs with -dialect ibm; cobc with -x -std=ibm, and ironwork then with
+not read them. gcobol runs with -dialect ibm; cobc with -x -std=ibm-strict, and ironwork then with
 --dialect gnucobol, so what differs is what docs/dialect.md lists as not switched. The other
 compiler's clock cannot be fixed, so a program that reads the date differs by design.
 
@@ -105,7 +105,7 @@ def gcobol(compiler, runner, path, libraries, stdin, timeout, scratch, cobc):
     with open(source, "w", encoding="latin-1") as f:
         f.write(without_option_cards(text))
     exe = os.path.join(scratch, "program")
-    dialect = ["-x", "-std=ibm"] if cobc else ["-dialect", "ibm"]
+    dialect = ["-x", "-std=ibm-strict"] if cobc else ["-dialect", "ibm"]
     argv = [*compiler, *dialect, "-I", os.path.dirname(os.path.abspath(path)), *libraries, "-o", exe, source]
     status, _, err = run(argv, None, timeout, cwd=scratch)
     if status is None:

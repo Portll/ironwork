@@ -331,9 +331,9 @@ pub enum Warnings {
 }
 
 /// Whose result a computation gives where ironwork knowingly differs from GnuCOBOL: Enterprise
-/// COBOL's as the assumptions register reads it (`Ibm`), or that of GnuCOBOL's `cobc -std=ibm`
-/// (`Gnucobol`, `--dialect gnucobol`), so a migration can compare ironwork with a GnuCOBOL build.
-/// docs/dialect.md lists each difference.
+/// COBOL's as the assumptions register reads it (`Ibm`), or that of GnuCOBOL's
+/// `cobc -std=ibm-strict` (`Gnucobol`, `--dialect gnucobol`), so a migration can compare ironwork
+/// with a GnuCOBOL build. docs/dialect.md lists each difference.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Dialect {
     #[default]

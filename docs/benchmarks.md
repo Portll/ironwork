@@ -10,10 +10,11 @@ programs (see VM results).
 ## Method
 
 `tools/bench.sh` builds ironwork release, compiles each `bench/*.cbl` with
-`cobc -x -O2 -std=ibm`, runs each program `RUNS` times (default five) under the interpreter
+`cobc -x -O2 -std=ibm-strict`, runs each program `RUNS` times (default five) under the interpreter
 (`ironwork run`), the VM (`ironwork run --vm`) and cobc, interleaved, and prints the median wall
 times and the VM's ratio to each. It reports any difference between the VM's output and the
-interpreter's, and any difference between ironwork's and cobc's (see Correctness).
+interpreter's, and any difference between ironwork's and cobc's (see Correctness). The cobc times
+below were taken at `-std=ibm`, under which cobc generates the same C for these four programs.
 
 | | |
 |---|---|
@@ -75,12 +76,12 @@ Against the [VM target](#vm-target):
 ## Correctness
 
 - **`packed` differs from cobc.** ironwork gives `ACC= 0003651477000.78`, `D= 0000000779026.52`;
-  `cobc -std=ibm` gives `ACC= 0003634810833.92`, `D= 0000000777359.78`, and `-std=default`
-  `ACC=0003652155505.65`. Since b6c3b48 a ROUNDED receiver counts one more decimal place in dmax
-  (assumption C101, chosen because CCVS85 NC117A and NC171A expect the digit rounding reads), and
-  GnuCOBOL carries no such place. Which matches Enterprise COBOL waits for the goldens. The other
-  three programs agree under both dialects. `--dialect gnucobol` gives cobc's checksums
-  ([dialect.md](dialect.md), C101).
+  `cobc -std=ibm-strict` gives `ACC= 0003634810833.92`, `D= 0000000777359.78` (2026-10-04, as
+  `-std=ibm` does), and `-std=default` `ACC= 0003652155505.65`, `D= 0000000779033.24`. Since
+  b6c3b48 a ROUNDED receiver counts one more decimal place in dmax (assumption C101, chosen because
+  CCVS85 NC117A and NC171A expect the digit rounding reads), and GnuCOBOL carries no such place.
+  Which matches Enterprise COBOL waits for the goldens. The other three programs agree under both
+  dialects. `--dialect gnucobol` gives cobc's checksums ([dialect.md](dialect.md), C101).
 - **Level 78 is not IBM.** ironwork refuses it (`level 78 is not a data level`), so N is an ordinary
   `01` item.
 - **A 17-digit DISPLAY target abends at 79a199e.** `ADD A TO T` with `T` `PIC 9(15)V99` ends in

@@ -1,5 +1,6 @@
-//! --dialect gnucobol: each place ironwork gives cobc -std=ibm's result in place of the one its
-//! register of assumptions chose (docs/dialect.md). The expected gnucobol output is GnuCOBOL 3.2's.
+//! --dialect gnucobol: each place ironwork gives cobc -std=ibm-strict's result in place of the one
+//! its register of assumptions chose (docs/dialect.md). Each expected gnucobol output is what
+//! GnuCOBOL 3.2 printed.
 
 use super::*;
 use numeric::Dialect;
@@ -83,7 +84,7 @@ fn display_writes_a_numeric_literal_without_its_decimal_point_under_gnucobol() {
 fn accept_at_the_end_of_sysin_moves_a_space_under_gnucobol() {
     let source = program(
         "",
-        "       01  N PIC 9(3) VALUE 7.\n       01  P PIC S9(3) COMP-3 VALUE 7.\n       01  B PIC S9(4) COMP VALUE 7.\n       01  X PIC X(4) VALUE 'QQQQ'.\n       01  E PIC ZZ9 VALUE 5.\n",
+        "       01  N PIC 9(3) VALUE 7.\n       01  P PIC S9(3) COMP-3 VALUE 7.\n       01  B PIC S9(4) COMP VALUE 7.\n       01  X PIC X(4) VALUE 'QQQQ'.\n       01  E PIC ZZ9 VALUE '  5'.\n",
         &[line("ACCEPT X"), line("ACCEPT N"), line("ACCEPT P"), line("ACCEPT B"), line("ACCEPT X"), line("ACCEPT E"), line("DISPLAY '[' N '][' P '][' B '][' X '][' E ']'"), line("GOBACK.")].concat(),
     );
     let run = |dialect: Dialect| {

@@ -319,13 +319,13 @@ note in place of the warning, once in a run; `=always` gives the warning, return
 gives nothing. Whether Enterprise COBOL warns such a program is open until an IBM listing settles it
 (C124).
 
-`--dialect gnucobol` gives GnuCOBOL's `cobc -std=ibm` result in place of Enterprise COBOL's where
-ironwork's register of assumptions chose one and cobc chose another: a ROUNDED receiver's extra
-decimal place reaches only a statement's last operation (C101); DISPLAY shows packed and binary
-items (C14) and numeric literals (C95) as cobc does; ACCEPT at the end of SYSIN moves a space (C15);
-an ENTRY name shares its program's storage (C51); a shorter EXTERNAL record shares the run unit's
-(C180); and two unsigned zoned items of one length compare by their bytes at every OPTIMIZE level
-(C262). `--dialect ibm` is the default. `--assume ID=VALUE` switches one of these seven alone,
+`--dialect gnucobol` gives GnuCOBOL's `cobc -std=ibm-strict` result in place of Enterprise COBOL's
+where ironwork's register of assumptions chose one and cobc chose another: a ROUNDED receiver's
+extra decimal place reaches only a statement's last operation (C101); DISPLAY shows packed and
+binary items (C14) and numeric literals (C95) as cobc does; ACCEPT at the end of SYSIN moves a space
+(C15); an ENTRY name shares its program's storage (C51); a shorter EXTERNAL record shares the run
+unit's (C180); and two unsigned zoned items of one length compare by their bytes at every OPTIMIZE
+level (C262). `--dialect ibm` is the default. `--assume ID=VALUE` switches one of these seven alone,
 whatever the dialect: `ibm` or `gnucobol`, and for C101 also `off`, the extra place counted in no
 operation. It is repeatable, an assumption with no alternative is refused by name, and the choice is
 kept in the load module, the provenance statement and the journal. [docs/dialect.md](docs/dialect.md)
@@ -621,9 +621,9 @@ at the host's paths; install it as `gcobol`, and as `gcobol-exec` to run what it
 With `--vm`, differ.py runs each program under `ironwork run --vm` in gcobol's place and reports
 where the VM and the interpreter differ, and what stops the VM where it stops.
 
-With `--cobc` it compiles with GnuCOBOL's `cobc -x -std=ibm` instead and runs ironwork with
-`--dialect gnucobol`; `fixtures/dialect` holds a program for each switched assumption, which should
-agree:
+With `--cobc` it compiles with GnuCOBOL's `cobc -x -std=ibm-strict` instead and runs ironwork
+with `--dialect gnucobol`; `fixtures/dialect` holds a program for each switched assumption, which
+should agree:
 
     tools/differ.py target/release/ironwork fixtures/dialect bench/packed.cbl --cobc
 

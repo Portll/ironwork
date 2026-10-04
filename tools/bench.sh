@@ -29,7 +29,7 @@ timed() {
 printf '%-10s %-40s %9s %9s %9s %7s %7s\n' program checksum interp vm cobc vm/int vm/cobc
 for p in "${programs[@]}"; do
     src=$root/bench/$p.cbl
-    "$cobc" -x -O2 -std=ibm -o "$work/$p" "$src"
+    "$cobc" -x -O2 -std=ibm-strict -o "$work/$p" "$src"
     export DD_BENCHF=$work/$p.dat
     iw_t=(); vm_t=(); cb_t=()
     for _ in $(seq "$runs"); do

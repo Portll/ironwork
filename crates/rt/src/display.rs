@@ -68,7 +68,7 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos, upon_cons
     })
 }
 
-/// The digits cobc -std=ibm shows a binary item in, by its size: 5, 10 or 20 for a halfword,
+/// The digits cobc -std=ibm-strict shows a binary item in, by its size: 5, 10 or 20 for a halfword,
 /// fullword or doubleword, whatever its PICTURE.
 pub const fn gnucobol_binary_width(len: usize) -> usize {
     match len {

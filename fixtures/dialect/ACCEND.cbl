@@ -7,7 +7,7 @@
        01  P PIC S9(3) COMP-3 VALUE 7.
        01  B PIC S9(4) COMP VALUE 7.
        01  X PIC X(4) VALUE 'QQQQ'.
-       01  E PIC ZZ9 VALUE 5.
+       01  E PIC ZZ9 VALUE '  5'.
        PROCEDURE DIVISION.
            ACCEPT N
            ACCEPT P

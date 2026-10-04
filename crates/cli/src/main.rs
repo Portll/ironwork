@@ -97,7 +97,7 @@ flags:
   --dialect ibm|gnucobol
              whose result to give where ironwork knowingly differs from GnuCOBOL: ibm (the default)
              gives Enterprise COBOL's, as the register of assumptions reads it; gnucobol gives that
-             of GnuCOBOL's cobc -std=ibm, to compare a migration with a GnuCOBOL build.
+             of GnuCOBOL's cobc -std=ibm-strict, to compare a migration with a GnuCOBOL build.
              docs/dialect.md lists each difference. --dialect=ibm and --dialect=gnucobol work too
   --assume ID=VALUE
              switch one chosen assumption, whatever --dialect says: C101, C14, C95, C15, C51, C180

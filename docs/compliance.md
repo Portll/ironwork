@@ -364,11 +364,11 @@ in GnuCOBOL and Micro Focus, and programs written to be run that use it.
   alphabetic, alphanumeric, national or UTF-8 (Language Reference SC27-8713-03, pp. 657 and 663),
   and Micro Focus documents the same classes for TRIM; cobc gives the item's digits for an
   unsigned integer but text that varies with its dialect for a signed or decimal one (`-012` under
-  `-std=default`, `012-` under `-std=ibm`). The rest are a student's `FUNCTION ORD(X) >= "A"`,
-  three copies of a GnuCOBOL test that continues a literal with `-` after it, and a conformance
-  test. cobc compares an expression with an alphanumeric operand by rules no manual gives (`N + 1 =
-  X` is false where N is 5 and X is `"6"` padded with spaces, `N + 1 = "6"` true), and stops with
-  an internal compiler error at `IF N + 1 = SPACE`.
+  `-std=default`, `012-` under `-std=ibm-strict`). The rest are a student's
+  `FUNCTION ORD(X) >= "A"`, three copies of a GnuCOBOL test that continues a literal with `-` after
+  it, and a conformance test. cobc compares an expression with an alphanumeric operand by rules no
+  manual gives (`N + 1 = X` is false where N is 5 and X is `"6"` padded with spaces,
+  `N + 1 = "6"` true), and stops with an internal compiler error at `IF N + 1 = SPACE`.
 - **A condition-name used as data** (16 programs, 7 repositories [5]; 2 in the second corpus [2]):
   `UNTIL WS-EOF = 'Y'` where WS-EOF is the 88, `IF CUST-STATUS = ACTIVE`, `INSPECT ... FOR ALL`
   an 88, `EVALUATE item WHEN` its 88, `MOVE 1 TO` or `DISPLAY` of an 88, and GnuCOBOL's own
