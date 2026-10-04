@@ -2059,7 +2059,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: DISPLAY_NUMERIC_FUNCTION,
-        claim: "DISPLAY of an integer or numeric intrinsic function is refused when compiled (S): such a function can be used only where an arithmetic expression can be specified (Language Reference SC27-8713-03, p. 499; Programming Guide SC27-8714-03, p. 56), and DISPLAY's operands are identifiers and literals (p. 333). The manuals give neither the message number nor its text: the message is ironwork's, and the severity is the one C190 gives INSPECT of such a function. MIN, MAX and CONTENT-OF, whose type follows their arguments, are not refused. Nor is a user-defined function: the Language Reference lets a numeric one be used wherever an arithmetic expression can be (p. 77) without saying only there, and DISPLAY shows its value as its RETURNING item",
+        claim: "DISPLAY of an integer or numeric intrinsic function is refused when compiled (S): such a function can be used only where an arithmetic expression can be specified (Language Reference SC27-8713-03, p. 499; Programming Guide SC27-8714-03, p. 56), and DISPLAY's operands are identifiers and literals (p. 333). The manuals give neither the message number nor its text: the message is ironwork's, and the severity is the one C190 gives INSPECT of such a function. MAX and MIN, whose type follows their arguments, are refused when the first is numeric (pp. 591, 599), and CONTENT-OF is not. Nor is a user-defined function: the Language Reference lets a numeric one be used wherever an arithmetic expression can be (p. 77) without saying only there, and DISPLAY shows its value as its RETURNING item",
         basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },

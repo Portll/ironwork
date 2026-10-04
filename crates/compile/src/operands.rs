@@ -140,6 +140,12 @@ impl Check<'_> {
         }
     }
 
+    /// Whether `f` is MAX or MIN of numeric arguments, a numeric function (Language Reference
+    /// SC27-8713-03, pp. 591, 599).
+    pub(crate) fn numeric_max_or_min(&self, f: &FunctionCall) -> bool {
+        matches!(f.name.as_str(), "MAX" | "MIN") && self.function_class(f) == Some(Class::Numeric)
+    }
+
     /// An intrinsic function's class where its name or its first argument decides it.
     fn function_class(&self, f: &FunctionCall) -> Option<Class> {
         let name = f.name.as_str();

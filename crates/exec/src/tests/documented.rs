@@ -152,6 +152,23 @@ fn display_refuses_a_numeric_function_and_shows_the_item_compute_gives_it_to() {
     assert_eq!(on_both(&source), "-0030 A\n");
 }
 
+/// Language Reference SC27-8713-03, pp. 591 and 599: MAX and MIN of numeric arguments are numeric
+/// functions, refused in DISPLAY as the others are; of alphanumeric arguments they are shown.
+#[test]
+fn display_refuses_max_and_min_of_numeric_arguments() {
+    let refused = program(
+        "",
+        "       01  N PIC S9V9 VALUE -1.5.\n",
+        &[line("DISPLAY FUNCTION MAX(-3 -5) FUNCTION MIN(N 2)"), line("    FUNCTION MAX('AB' 'B')"), line("GOBACK.")].concat(),
+    );
+    let errors = compile_errors(&refused);
+    assert!(errors.contains("DISPLAY FUNCTION MAX: an integer or numeric function"), "{errors}");
+    assert!(errors.contains("DISPLAY FUNCTION MIN: an integer or numeric function"), "{errors}");
+    assert_eq!(errors.matches("DISPLAY FUNCTION").count(), 2, "{errors}");
+    let source = program("", "", &[line("DISPLAY FUNCTION MAX('AB' 'B') FUNCTION MIN('AB' 'B')"), line("GOBACK.")].concat());
+    assert_eq!(on_both(&source), "BAB\n");
+}
+
 /// Language Reference SC27-8713-03, p. 322: BY VALUE is specified for both the argument and the
 /// parameter, and the manual gives no result when the parameter is received BY REFERENCE. The
 /// parameter gets storage of its own holding the value (assumption C333).
