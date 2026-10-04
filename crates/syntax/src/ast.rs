@@ -608,6 +608,8 @@ pub enum SetStmt {
     /// SET ADDRESS OF targets TO pointer.
     AddressOf { targets: Vec<Ref>, value: Operand },
     UpDown { targets: Vec<Ref>, down: bool, by: Expr },
+    /// SET mnemonic-names TO ON or OFF, each group in order: the UPSI switches the names stand for.
+    Switches(Vec<(Vec<Ref>, bool)>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -891,6 +893,19 @@ pub struct Environment {
     pub decimal_point_comma: bool,
     /// SPECIAL-NAMES CURRENCY SIGN clauses in order; none means the symbol and value $.
     pub currency: Vec<CurrencySign>,
+    /// SPECIAL-NAMES UPSI-0 to UPSI-7 entries, a contained program's being its container's.
+    pub switches: Vec<Switch>,
+}
+
+/// A SPECIAL-NAMES entry for an UPSI switch: UPSI-`number` [IS mnemonic-name] with the
+/// condition-names of its ON and OFF status.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Switch {
+    pub number: u8,
+    pub mnemonic: Option<String>,
+    pub on: Option<String>,
+    pub off: Option<String>,
+    pub pos: Pos,
 }
 
 /// DISPLAY's UPON phrase: the name as written, and the environment-name it stands for, a

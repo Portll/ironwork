@@ -75,6 +75,14 @@ fn advancing_environment_name(word: &str) -> bool {
     matches!(word, "CSP" | "AFP-5A") || numbered('C', 12) || numbered('S', 5)
 }
 
+/// The number of the UPSI switch environment-name `word`, UPSI-0 to UPSI-7, names.
+fn upsi_switch(word: &str) -> Option<u8> {
+    match word.strip_prefix("UPSI-")?.as_bytes() {
+        [d @ b'0'..=b'7'] => Some(d - b'0'),
+        _ => None,
+    }
+}
+
 /// `mantissa` times ten to `exponent`, as a fixed-point numeric literal of at most 31 digits.
 fn fixed_point(mantissa: &str, exponent: i32) -> Option<String> {
     let (sign, body) = match mantissa.strip_prefix('-') {
@@ -226,6 +234,9 @@ struct Parser<'a> {
     /// program's own, then those of the programs containing it, whose configuration section applies
     /// to it too.
     mnemonics: Vec<(String, String)>,
+    /// The SPECIAL-NAMES UPSI switch entries in scope, from the program's configuration section
+    /// or its container's.
+    switches: Vec<Switch>,
     sql: SqlState,
     /// WITH DEBUGGING MODE, from the program's configuration section or its container's.
     debugging: bool,
@@ -263,6 +274,7 @@ impl<'a> Parser<'a> {
             intrinsics: Vec::new(),
             sql: SqlState::default(),
             mnemonics: Vec::new(),
+            switches: Vec::new(),
             debugging: false,
             messages: Vec::new(),
             reported: vec![false; tokens.len()],
@@ -368,9 +380,9 @@ impl Parser<'_> {
         let (start, first) = (self.at, out.len());
         let outer = (std::mem::take(&mut self.exec_declarations), std::mem::take(&mut self.cics), std::mem::take(&mut self.dli), std::mem::take(&mut self.sql.blocks), self.mnemonics.clone(), self.debugging);
         let outer_messages = std::mem::take(&mut self.messages);
-        let outer_intrinsics = self.intrinsics.clone();
+        let (outer_intrinsics, outer_switches) = (self.intrinsics.clone(), self.switches.clone());
         let parsed = self.one_program(options, out);
-        self.intrinsics = outer_intrinsics;
+        (self.intrinsics, self.switches) = (outer_intrinsics, outer_switches);
         (self.exec_declarations, self.cics, self.dli, self.sql.blocks, self.mnemonics, self.debugging) = outer;
         let own = std::mem::replace(&mut self.messages, outer_messages);
         parsed?;
@@ -437,6 +449,8 @@ impl Parser<'_> {
             (files, repository) = self.environment(&mut environment)?;
         }
         self.mnemonics.splice(0..0, environment.mnemonics.iter().cloned());
+        self.switches.splice(0..0, std::mem::take(&mut environment.switches));
+        environment.switches = self.switches.clone();
         self.debugging |= environment.debugging_mode;
         let (mut working_storage, mut local_storage, mut linkage) = (Vec::new(), Vec::new(), Vec::new());
         let mut report_writer = crate::report::ReportWriter::default();
@@ -667,6 +681,12 @@ impl Parser<'_> {
                 clauses.debugging_mode = true;
                 continue;
             }
+            if let Some(number) = self.word().and_then(upsi_switch) {
+                let pos = self.pos();
+                self.at += 1;
+                clauses.switches.push(self.switch(number, pos)?);
+                continue;
+            }
             if let Some(environment) = self.word().filter(|w| advancing_environment_name(w) || DEVICE_ENVIRONMENT_NAMES.contains(w)).map(str::to_owned) {
                 let at_name = if self.word_at(1) == Some("IS") { 2 } else { 1 };
                 if let Some(name) = self.word_at(at_name).map(str::to_owned) {
@@ -689,6 +709,32 @@ impl Parser<'_> {
             self.at += 1;
         }
         Ok((files, repository))
+    }
+
+    /// The rest of the SPECIAL-NAMES entry for UPSI-`number`: [IS] mnemonic-name, then the ON
+    /// [STATUS] [IS] and OFF [STATUS] [IS] condition-names in either order, at least one of the
+    /// three written (Language Reference SC27-8713-03, pp. 125-127).
+    fn switch(&mut self, number: u8, pos: Pos) -> R<Switch> {
+        let status = |w: &str| matches!(w, "ON" | "OFF");
+        let mnemonic = if self.accept_word("IS") || self.word().is_some_and(|w| !status(w) && !rt::reserved_words::is_reserved(w)) {
+            Some(self.name("a mnemonic-name")?)
+        } else {
+            None
+        };
+        let (mut on, mut off) = (None, None);
+        while let Some(which) = self.accept_any(&["ON", "OFF"]) {
+            self.accept_word("STATUS");
+            self.accept_word("IS");
+            let name = self.name("a condition-name")?;
+            let slot = if which == "ON" { &mut on } else { &mut off };
+            if slot.replace(name).is_some() {
+                return Err(Error::at(pos, format!("UPSI-{number}: a second {which} STATUS phrase")));
+            }
+        }
+        if mnemonic.is_none() && on.is_none() && off.is_none() {
+            return Err(Error::at(pos, format!("UPSI-{number}: a mnemonic-name or an ON or OFF STATUS phrase must follow it")));
+        }
+        Ok(Switch { number, mnemonic, on, off, pos })
     }
 
     /// CURRENCY [SIGN] [IS] literal-6 [[WITH] PICTURE SYMBOL literal-7], after CURRENCY, checked as
@@ -2759,6 +2805,16 @@ impl Parser<'_> {
             if self.accept_word("ENTRY") {
                 return Ok(SetStmt::Entry { targets, entry: self.operand()? });
             }
+            if let Some(status) = self.accept_any(&["ON", "OFF"]) {
+                let mut groups = vec![(targets, status == "ON")];
+                while self.starts_ref() {
+                    let targets = self.refs()?;
+                    self.expect_word("TO")?;
+                    let status = self.accept_any(&["ON", "OFF"]).ok_or_else(|| self.error("ON or OFF"))?;
+                    groups.push((targets, status == "ON"));
+                }
+                return Ok(SetStmt::Switches(groups));
+            }
             return Ok(SetStmt::To { targets, value: self.operand()? });
         }
         match self.accept_any(&["UP", "DOWN"]).as_deref() {
@@ -3726,6 +3782,44 @@ mod tests {
         assert!(matches!(&s[2], Stmt::Corresponding(c) if c.verb == CorrespondingVerb::Subtract && !c.rounded));
         let text = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       PROCEDURE DIVISION.\n           MOVE CORRESPONDING A TO B C.\n";
         assert!(crate::parse(text).unwrap_err().message.contains("one receiving group"));
+    }
+
+    #[test]
+    fn upsi_switch_entries_take_each_form_and_reach_contained_programs() {
+        let text = [
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OUTER.\n       ENVIRONMENT DIVISION.\n",
+            "       CONFIGURATION SECTION.\n       SPECIAL-NAMES.\n           UPSI-0 IS ABBREV-SWITCH\n",
+            "               ON ON-SWITCH OFF IS OFF-SWITCH\n           UPSI-1 OFF STATUS IS F1 ON T1\n",
+            "           UPSI-7 SW-7 C01 IS TOP.\n       PROCEDURE DIVISION.\n",
+            "           SET ABBREV-SWITCH SW-7 TO ON SW-7 TO OFF.\n",
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. INNER.\n       PROCEDURE DIVISION.\n           GOBACK.\n",
+            "       END PROGRAM INNER.\n       END PROGRAM OUTER.\n",
+        ]
+        .concat();
+        let programs = crate::parse_all_with(&text, &crate::copy::Libraries::default()).unwrap_or_else(|e| panic!("{e}"));
+        let (outer, inner) = (&programs[0], &programs[1]);
+        let entry = |p: &Program, k: usize| {
+            let s = &p.environment.switches[k];
+            format!("{} {:?} {:?} {:?}", s.number, s.mnemonic, s.on, s.off)
+        };
+        let expected = [r#"0 Some("ABBREV-SWITCH") Some("ON-SWITCH") Some("OFF-SWITCH")"#, r#"1 None Some("T1") Some("F1")"#, r#"7 Some("SW-7") None None"#];
+        assert_eq!((0..3).map(|k| entry(outer, k)).collect::<Vec<_>>(), expected);
+        assert_eq!((0..3).map(|k| entry(inner, k)).collect::<Vec<_>>(), expected);
+        assert_eq!(outer.environment.mnemonics, [("TOP".to_owned(), "C01".to_owned())]);
+        let Stmt::Set { set: SetStmt::Switches(groups), .. } = &outer.paragraphs[0].statements[0] else { panic!("{:?}", outer.paragraphs[0].statements) };
+        let names: Vec<(Vec<&str>, bool)> = groups.iter().map(|(t, on)| (t.iter().map(|r| r.name.as_str()).collect(), *on)).collect();
+        assert_eq!(names, [(vec!["ABBREV-SWITCH", "SW-7"], true), (vec!["SW-7"], false)]);
+    }
+
+    #[test]
+    fn an_upsi_switch_entry_names_something_and_each_status_once() {
+        let entry = |clause: &str| {
+            let text = format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       SPECIAL-NAMES.\n           {clause}.\n       PROCEDURE DIVISION.\n           GOBACK.\n");
+            crate::parse(&text).err().map(|e| e.message)
+        };
+        assert_eq!(entry("UPSI-2"), Some("UPSI-2: a mnemonic-name or an ON or OFF STATUS phrase must follow it".into()));
+        assert_eq!(entry("UPSI-2 ON A ON B"), Some("UPSI-2: a second ON STATUS phrase".into()));
+        assert_eq!(entry("UPSI-2 IS S OFF A"), None);
     }
 
     #[test]

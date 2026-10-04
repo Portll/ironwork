@@ -331,6 +331,9 @@ pub const ASSIGN_ITEM_FORMS: &str = "C361";
 pub const PREPARED_STATEMENT_LIFETIME: &str = "C400";
 pub const EXECUTE_IMMEDIATE_OF_A_QUERY: &str = "C401";
 pub const STATEMENT_STRING_KINDS: &str = "C402";
+pub const UPSI_SWITCHES: &str = "C410";
+pub const UPSI_FROM_THE_PARM: &str = "C411";
+pub const SET_SWITCH_CONDITION_TRUE: &str = "C412";
 
 pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
@@ -2144,6 +2147,24 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         claim: "The runtime reads what a dynamic statement string is from its first words, outside quoted strings: a select-statement starts with SELECT, WITH, VALUES or a parenthesis; COMMIT and ROLLBACK end the unit of work as the static statements do; SAVEPOINT, RELEASE SAVEPOINT and ROLLBACK TO SAVEPOINT are refused by name, as the static ones are; an SQL statement Db2 13 for z/OS does not prepare (SQL Reference, PREPARE: CALL, CONNECT, DECLARE CURSOR, DESCRIBE, EXECUTE, FETCH, OPEN and the like), or an empty string, is SQLCODE -084 (SQLSTATE 42612) without reaching the database; and any other goes to the database, which answers it, words that are no SQL statement included, so the database's syntax error stands for Db2's. A parameter marker is a question mark outside a quoted string. Db2 parses the whole statement; ironwork leaves everything past the first words to the database",
         basis: Basis::Chosen,
         oracle: Oracle::Db2,
+    },
+    Assumption {
+        id: UPSI_SWITCHES,
+        claim: "The UPSI switches UPSI-0 to UPSI-7 are one copy that every program of the run unit shares (Programming Guide SC27-8714-03, p. 595). The runtime option UPSI(nnnnnnnn) sets them, its leftmost digit UPSI-0's, 1 on and 0 off, and they are all off without it (Language Environment Programming Reference, UPSI; Programming Guide, p. 431). A SPECIAL-NAMES entry UPSI-n [IS mnemonic-name] with ON STATUS and OFF STATUS condition-names gives the conditions that test the switch, the mnemonic-name being their conditional variable, which can qualify them and which SET ... TO ON or OFF names to set the switch, and nothing else names (Language Reference SC27-8713-03, pp. 125-127, 283, 442-443); a contained program has its container's entries (p. 124). ironwork keeps each switch as a one-byte EXTERNAL record of the run unit that only these names reach",
+        basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: UPSI_FROM_THE_PARM,
+        claim: "ironwork reads the UPSI runtime option from a job step's PARM, after its last slash as CBLOPTS(ON) has it (C250), the last UPSI there deciding; it reads no CEEOPTS DD or _CEE_RUNOPTS, and a CICS task or a run with no PARM has every switch off. An UPSI that is not eight digits, each 0 or 1, is named on standard error and leaves the switches off, as Language Environment ignores a runtime option it cannot read. The switches a PARM sets are marked as input, as the PARM is",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SET_SWITCH_CONDITION_TRUE,
+        claim: "SET condition-name TO TRUE of an UPSI switch's condition-name sets the switch to that status when the switch's entry has a mnemonic-name, which the Language Reference makes the condition-names' conditional variable (SC27-8713-03, p. 127), and is refused when it has none, SET TO TRUE needing a conditional variable (p. 443); SET TO FALSE is refused, a switch-status condition having no WHEN SET TO FALSE value. cobc 3.2 refuses SET TO TRUE of a switch-status condition, and a condition-name qualified by a mnemonic-name, in both cases",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
     },
 ];
 

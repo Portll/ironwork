@@ -1182,6 +1182,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 let targets: Vec<&Ref> = targets.iter().collect();
                 rt::set::up_down(self, by, *down, &targets, pos)?;
             }
+            SetStmt::Switches(_) => return Err(Abend::ironwork("SET ... TO ON or OFF reached the interpreter, which runs it as the SET ... TO TRUE compile makes it", pos)),
         }
         Ok(())
     }

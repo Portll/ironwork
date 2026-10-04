@@ -20,6 +20,7 @@ mod reserved;
 mod scope;
 pub mod sort;
 pub mod sql;
+mod switches;
 
 use layout::Layout;
 use numeric::{Options, Vlr};
@@ -152,6 +153,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     reserved::check(&program, &mut errors);
     let declared = program.working_storage.len();
     let mut program = declaratives::with_debug_item(markup::with_special_registers(sort::with_special_registers(program)));
+    switches::declare(&mut program, &mut errors);
     qualify_in_own_section(&mut program);
     let mut options = Options::default();
     let mut ssrange = false;
@@ -1041,7 +1043,16 @@ impl Check<'_> {
             }
             Stmt::Cancel { targets, .. } => targets.iter().for_each(|t| self.operand(t)),
             Stmt::Set { set, .. } => match set {
-                SetStmt::ConditionTrue(targets) => targets.iter().for_each(|r| self.reference_or_condition(r)),
+                SetStmt::ConditionTrue(targets) => {
+                    for r in targets {
+                        self.reference_or_condition(r);
+                        if let Ok(layout::Resolved::Condition(c)) = self.layout.resolve(&r.name, &r.qualifiers, r.pos)
+                            && let Some(e) = switches::without_variable(self.layout, c, r)
+                        {
+                            self.errors.push(e);
+                        }
+                    }
+                }
                 SetStmt::ConditionFalse(targets) => {
                     for r in targets {
                         self.reference_or_condition(r);
@@ -1065,6 +1076,7 @@ impl Check<'_> {
                     targets.iter().for_each(|r| self.reference(r));
                     self.expr(by);
                 }
+                SetStmt::Switches(_) => {}
             },
             Stmt::Accept { target, .. } => self.reference(target),
             Stmt::String(st) => {
@@ -1392,6 +1404,7 @@ impl Check<'_> {
         }
         match self.layout.resolve(&r.name, &r.qualifiers, r.pos) {
             Err(e) => self.errors.push(e),
+            Ok(layout::Resolved::Item(i)) if switches::switch_of(self.layout, i).is_some() => self.errors.push(switches::mnemonic_as_data(r, self.layout, i)),
             Ok(layout::Resolved::Item(i)) if self.layout.items[i].dims.len() != r.subscripts.len() => self.errors.push(Error::at(
                 r.pos,
                 format!("{} takes {} subscripts, not {}", r.name, self.layout.items[i].dims.len(), r.subscripts.len()),

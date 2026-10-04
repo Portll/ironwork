@@ -238,6 +238,21 @@ pub struct Externals {
     file_names: HashMap<String, usize>,
 }
 
+/// The EXTERNAL record of the run unit that holds UPSI switch `n`: one byte, 1 when the switch is
+/// on and 0 when it is off (assumption C410). No program can spell the name, so only a
+/// SPECIAL-NAMES entry for the switch reaches it.
+pub fn switch_record(n: u8) -> String {
+    format!("UPSI-{n} SWITCH")
+}
+
+/// The UPSI switch whose [`switch_record`] is named `name`.
+pub fn switch_of_record(name: &str) -> Option<u8> {
+    match name.strip_prefix("UPSI-")?.strip_suffix(" SWITCH")?.as_bytes() {
+        [d @ b'0'..=b'7'] => Some(d - b'0'),
+        _ => None,
+    }
+}
+
 /// A file of a program that is another's file connector.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Connector {
@@ -719,6 +734,16 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         let at = self.allocate(size);
         self.externals.storage.insert(key, (at, size));
         Ok(at)
+    }
+
+    /// Sets the eight UPSI switches before a program runs, each [`switch_record`] holding 1 for
+    /// on, and marks them as input, since the PARM that sets them is (assumption C411).
+    pub fn set_switches(&mut self, on: [bool; 8]) {
+        for (n, on) in (0..).zip(on) {
+            let at = self.push_temporary(&[u8::from(on)]);
+            self.externals.storage.insert((false, switch_record(n)), (at, 1));
+            self.mark_input(at, 1, true);
+        }
     }
 
     /// The run unit's connector for EXTERNAL file `name`.

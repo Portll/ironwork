@@ -37,6 +37,7 @@ mod scope;
 mod sort;
 mod vm;
 mod statements;
+mod switches;
 mod taint;
 mod xml;
 mod xml_generate;

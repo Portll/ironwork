@@ -844,6 +844,7 @@ impl<'w, 'p> Walk<'w, 'p> {
                     targets.iter().for_each(|r| self.read(r, *pos, &st));
                     targets.iter().for_each(|r| self.write(r, *pos, &mut st));
                 }
+                SetStmt::Switches(_) => {}
             },
             Stmt::Accept { target, pos, .. } => self.write(target, *pos, &mut st),
             Stmt::String(s) => {

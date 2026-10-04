@@ -3,7 +3,7 @@
 //! each LINKAGE record, and UP BY and DOWN BY with the step evaluated once.
 
 use super::data::Value;
-use super::{Lower, R};
+use super::{Lower, R, unsupported};
 use crate::layout::Resolved;
 use rt::lir::{MovePlan, Op, SenderCheck, StepPlan, Terminator, UpDown};
 use rt::storage::Kind;
@@ -98,6 +98,7 @@ impl Lower<'_> {
                 }
                 self.op(Op::SetUpDown { by, down: *down, targets: moved }, pos)?;
             }
+            SetStmt::Switches(_) => return unsupported("SET ... TO ON or OFF, which compile makes SET ... TO TRUE", pos),
         }
         Ok(())
     }

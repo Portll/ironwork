@@ -26,15 +26,33 @@ pub fn program_arguments(parm: &str) -> &str {
 /// Whether the runtime options in `parm` turn TRAP off, the last TRAP among them deciding
 /// ([`numeric::assumptions::TRAP_OFF_LEAVES_FILES_OPEN`]).
 pub fn trap_off(parm: &str) -> bool {
-    let options = match parm.rfind('/') {
-        Some(at) if names_runtime_options(&parm[at + 1..]) => &parm[at + 1..],
-        _ => "",
-    };
-    let trap = words(options).into_iter().rev().find_map(|w| {
+    let trap = words(runtime_options(parm)).into_iter().rev().find_map(|w| {
         let (name, value) = w.split_once('(')?;
         name.eq_ignore_ascii_case("TRAP").then(|| value.trim_end_matches(')').split(',').next().unwrap_or("").trim().to_ascii_uppercase())
     });
     trap.as_deref() == Some("OFF")
+}
+
+/// The UPSI switches the runtime options in `parm` set, the last UPSI among them deciding: UPSI-0
+/// to UPSI-7, from the leftmost of its eight digits, each 1 for on and 0 for off (Language
+/// Environment Programming Reference, UPSI). None without one, and the message for one that is
+/// not eight such digits, which leaves the switches off (assumption C411).
+pub fn upsi(parm: &str) -> Option<Result<[bool; 8], String>> {
+    let option = words(runtime_options(parm)).into_iter().rev().find(|w| w.split('(').next().is_some_and(|name| name.trim().eq_ignore_ascii_case("UPSI")))?;
+    let digits = option.split_once('(').map(|(_, v)| v.trim_end_matches(')').trim());
+    let switches = digits.filter(|d| d.len() == 8 && d.bytes().all(|b| matches!(b, b'0' | b'1')));
+    Some(match switches {
+        Some(d) => Ok(std::array::from_fn(|n| d.as_bytes()[n] == b'1')),
+        None => Err(format!("runtime option {option}: UPSI takes eight digits, each 0 or 1, so the UPSI switches stay off")),
+    })
+}
+
+/// The runtime options of `parm`: what follows its last slash, if that names any.
+fn runtime_options(parm: &str) -> &str {
+    match parm.rfind('/') {
+        Some(at) if names_runtime_options(&parm[at + 1..]) => &parm[at + 1..],
+        _ => "",
+    }
 }
 
 /// Nothing at all, or at least one runtime option among the words, each NAME or NAME(...),
@@ -97,6 +115,18 @@ mod tests {
         assert!(!trap_off("/TRAP(,NOSPIE)"));
         assert!(!trap_off("TRAP(OFF)"), "with no slash the PARM is all program arguments");
         assert!(!trap_off(""));
+    }
+
+    #[test]
+    fn the_last_upsi_among_the_runtime_options_sets_the_switches_from_its_leftmost_digit() {
+        let on = |digits: &str| -> [bool; 8] { std::array::from_fn(|n| digits.as_bytes()[n] == b'1') };
+        assert_eq!(upsi("/UPSI(10000001)"), Some(Ok(on("10000001"))));
+        assert_eq!(upsi("ARGS/upsi(00000000) RPTOPTS(ON),UPSI( 01000000 )"), Some(Ok(on("01000000"))));
+        assert_eq!(upsi("UPSI(10000000)"), None, "with no slash the PARM is all program arguments");
+        assert_eq!(upsi("/TRAP(OFF)"), None);
+        for malformed in ["/UPSI(1000000)", "/UPSI(100000002)", "/UPSI", "/UPSI(1000000X)"] {
+            assert!(upsi(malformed).is_some_and(|r| r.is_err()), "{malformed}");
+        }
     }
 
     #[test]

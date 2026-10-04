@@ -183,6 +183,7 @@ removes one, it is named.
 | JSON and XML GENERATE write UTF-8 into an alphanumeric receiver; DISPLAY then reads the bytes in the program's EBCDIC code page | corpus |
 | Floating point: IBM hexadecimal under ironwork, IEEE under cobc, in COMP-1 and COMP-2 values, the floating-point functions, and an exponent beyond HFP's range (S0CC) | test programs |
 | The same failure in another form: S0C4 for a LINKAGE item with no address where cobc takes SIGSEGV, S806 where cobc says `module not found` | test programs |
+| Setting the UPSI switches: the runtime option UPSI(nnnnnnnn) in the PARM under ironwork (C411), `COB_SWITCH_0` to `COB_SWITCH_7` set to `ON` in the environment under cobc | CCVS85 NC108M, NC211A, NC254A; probe |
 
 ### 5.2 IBM documents it, and cobc -std=ibm does otherwise
 
@@ -246,13 +247,15 @@ The survey's ironwork bugs each changed results under `ibm`. All are fixed, and 
 ### 5.6 Programs one compiler refuses
 
 Not results, so not the dialect's: what ironwork refuses that cobc accepts is `--compliance`'s
-ground ([compliance.md](compliance.md)). CCVS85: both refuse the communication routines (CM), IX110A and
-NC211A; cobc alone refuses an ALL subscript in an intrinsic function's argument (11 routines from
-IF119A to IF141A) and OBNC1M; ironwork alone refuses the debugging routines DB201A to DB205A, NC108M,
-NC174A, NC254A, SM201A, SM202A and SM206A. Corpus: of 300, ironwork refused 30 cobc ran (18 for
-syntax IBM does not have, 3 for IBM's limits, 5 for layout, 4 others, and `FUNCTION ALL INTRINSIC`
-in REPOSITORY, which IBM 6.4 accepts and ironwork does not), and cobc refused 3 ironwork ran.
-Test programs: cobc refused 30 that ironwork runs.
+ground ([compliance.md](compliance.md)). CCVS85: both refuse the communication routines (CM) and
+IX110A; cobc alone refuses an ALL subscript in an intrinsic function's argument (11 routines from
+IF119A to IF141A), OBNC1M, and NC211A, whose data item NOTHING is a cobc reserved word; ironwork
+alone refuses the debugging routines DB201A to DB205A, NC174A for its SPECIAL-NAMES CLASS clauses,
+SM201A, SM202A and SM206A. cobc also refuses an UPSI switch's condition-name qualified by its
+mnemonic-name, and SET TO TRUE of one, which ironwork runs (C412). Corpus: of 300, ironwork
+refused 30 cobc ran (18 for syntax IBM does not have, 3 for IBM's limits, 5 for layout, 4 others,
+and `FUNCTION ALL INTRINSIC` in REPOSITORY, which IBM 6.4 accepts and ironwork does not), and cobc
+refused 3 ironwork ran. Test programs: cobc refused 30 that ironwork runs.
 
 A RETURN-CODE of 239 or outside 0 to 238 ends `ironwork run` with exit status 239, its value named
 on standard error, and a cobc program with the value modulo 256.

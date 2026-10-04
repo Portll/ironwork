@@ -444,6 +444,19 @@ impl Passed<'_> {
     pub(crate) fn main(self) -> bool {
         !matches!(self, Passed::Arguments(_))
     }
+
+    /// Sets the UPSI switches a job step's PARM gives in its runtime options; they are off
+    /// otherwise, and a malformed UPSI is named on standard error.
+    pub(crate) fn set_switches<H: Clone, L: rt::unit::Loader<H>>(self, run_unit: &mut rt::unit::RunUnit<'_, H, L>) {
+        let Passed::Parm(parm) = self else { return };
+        match rt::le::parm::upsi(parm) {
+            Some(Ok(on)) => run_unit.set_switches(on),
+            Some(Err(m)) => {
+                let _ = writeln!(run_unit.err, "ironwork: {m}");
+            }
+            None => {}
+        }
+    }
 }
 
 /// Runs `compiled` as the first program of a batch run unit, given `passed`: a main program, a
@@ -473,6 +486,7 @@ fn run_main<'w>(
     run_unit.sql = database.map(sql::Session::new);
     let me = run_unit.add(None, &compiled.program, compiled.layout.size as usize);
     let trap_off = matches!(passed, Passed::Parm(p) if rt::le::parm::trap_off(p));
+    passed.set_switches(&mut run_unit);
     let addresses = passed.addresses(&mut run_unit, compiled.options.code_page());
     let ending = machine::Machine::activation(compiled, me, &mut run_unit, passed.main()).and_then(|mut m| {
         if !addresses.is_empty() {

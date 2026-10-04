@@ -162,7 +162,8 @@ A DD's RECFM and LRECL (alone or in DCB) give its records; a text data set's lin
 EBCDIC, so CH keys collate as on z/OS. A COBOL program gets the step's PARM as Language Environment
 passes it: its first PROCEDURE DIVISION USING item addresses a halfword length and the program
 arguments, what precedes the last slash when runtime options follow it (CBLOPTS(ON); assumptions
-C250 and C251), and a step with no PARM passes a length of zero. JOBLIB and STEPLIB are not
+C250 and C251), and a step with no PARM passes a length of zero; the runtime option
+UPSI(nnnnnnnn) after the slash sets the UPSI switches (C411). JOBLIB and STEPLIB are not
 allocated, since programs come from `-L`. Data sets live in the
 `--datasets` directory: DSN=A.B is the file A.B there and DSN=A.B(M) the file M in the directory
 A.B, a partitioned data set being a directory of members. They hold z/OS records, fixed or variable
@@ -361,7 +362,10 @@ The subset the interpreter runs today:
   conditions with THRU ranges and WHEN SET TO FALSE. SPECIAL-NAMES DECIMAL-POINT IS COMMA
   exchanges the comma and the period in PICTUREs, numeric literals and NUMVAL and NUMVAL-C, and
   CURRENCY SIGN clauses, with or without PICTURE SYMBOL, give the currency symbols and the values
-  editing inserts (assumption C102), a hexadecimal literal in the program's code page (C141), for the program and the programs it contains. Numeric PICTUREs and literals hold at most 18 digits
+  editing inserts (assumption C102), a hexadecimal literal in the program's code page (C141), for the program and the programs it contains. SPECIAL-NAMES UPSI-0 to UPSI-7
+  entries give switch-status conditions, which the mnemonic-name qualifies, and SET ... TO ON and
+  OFF; the eight switches are one copy for the run unit, off unless the PARM's runtime option
+  UPSI(nnnnnnnn) sets them (C410 to C412). Numeric PICTUREs and literals hold at most 18 digits
   under ARITH(COMPAT) and 31 under ARITH(EXTEND). A zoned item longer than one PACK takes, up to
   31 digits, is packed in parts (assumption C34). A group that holds the object of its own OCCURS
   DEPENDING ON receives data at its maximum length, as IBM lists for MOVE, ACCEPT, STRING,
@@ -598,7 +602,8 @@ agree:
 [z390development/nistcobol85](https://github.com/z390development/nistcobol85)'s `src/`, after
 EXEC85's default option switches and X-cards, and classes each program as clean, failed (a FAIL*
 line in its report), refused or abended. Subprograms run only when called, and the flagging tests
-are compiled and not run, as the CCVS85 User Guide says. `--baseline` names an earlier results file
+are compiled and not run, as the CCVS85 User Guide says. A program that names an UPSI switch runs
+with the PARM `/UPSI(10000000)`, the settings its tests expect. `--baseline` names an earlier results file
 and lists every program whose class changed; the exit status is 1 when one that was clean is no
 longer. `--vm` runs each program again on the VM from the same files and compares the exit status,
 standard output, standard error and every file the two runs leave; the exit status is 1 when any

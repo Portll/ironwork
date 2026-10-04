@@ -21,8 +21,10 @@ wrote (the User Guide's Appendix B). A program another source CALLs, by literal 
 whose VALUE is its name, is a subprogram and runs only when called. ABSENT_FILES lists the
 routines whose opening comments say a file is not present when they run, and that file is removed
 before each of them. A program's standard input, which ACCEPT reads, is src/<name>.DAT where
-there is one and empty otherwise. A routine reports on the print file XXXXX055, read as EBCDIC,
-and on standard output.
+there is one and empty otherwise. A program that names an UPSI switch runs with the PARM
+UPSI_PARM: X-card 051's UPSI-0 on and 052's UPSI-1 off, as NC174A and NC254A expect and NC211A's
+B lines give the items they fall back on. A routine reports on the print file XXXXX055, read as
+EBCDIC, and on standard output.
 
   clean    exit 0 and no FAIL* line in the report
   failed   exit 0 and a FAIL* line
@@ -60,6 +62,7 @@ import argparse, calendar, collections, glob, os, re, shutil, subprocess, sys, t
 SELECTED_SWITCHES = set("AEHLYT")
 PRINT_FILE = "XXXXX055"
 EXECUTIVE = "EXEC85"
+UPSI_PARM = "/UPSI(10000000)"
 CLASSES = ("clean", "failed", "refused", "abend", "called", "compiled")
 X_CARD = re.compile(r"\bXXXXX\d{3}\b")
 FLAGGING_TEST = re.compile(r"^[A-Z]{2}[34]\d\dM$")
@@ -199,9 +202,9 @@ def compare(walker, vm):
             return "differ", f"{name} differs from byte {first_difference(x, y)}: interpreter {len(x)} bytes, VM {len(y)}"
     return "same", ""
 
-def run(binary, workdir, name, env, include, sysin, timeout, vm):
+def run(binary, workdir, name, env, include, sysin, timeout, vm, switches):
     """The program's class and first line of standard error, and with `vm` the VM's verdict and
-    what it rests on."""
+    what it rests on; `switches` runs it with UPSI_PARM."""
     for f in (PRINT_FILE, *(f"XXXXX{n}" for n in ABSENT_FILES.get(name, ()))):
         if os.path.exists(os.path.join(workdir, f)):
             os.remove(os.path.join(workdir, f))
@@ -209,7 +212,8 @@ def run(binary, workdir, name, env, include, sysin, timeout, vm):
     flagging = FLAGGING_TEST.match(name) is not None
     before = data_files(workdir) if vm else None
     clock = ("--clock", CLOCK) if vm else ()
-    status, out, err = execute(binary, workdir, name, env, include, sysin, timeout, *(("check",) if flagging else ("run", *clock)))
+    parm = ("--parm", UPSI_PARM) if switches else ()
+    status, out, err = execute(binary, workdir, name, env, include, sysin, timeout, *(("check",) if flagging else ("run", *clock, *parm)))
     skipped = ("-", "") if vm else ()
     if status is None:
         return ("timeout", "", *skipped)
@@ -224,7 +228,7 @@ def run(binary, workdir, name, env, include, sysin, timeout, vm):
         return (cls, first, *skipped)
     after = data_files(workdir)
     restore(workdir, before)
-    verdict = compare((status, out, err, after), (*execute(binary, workdir, name, env, include, sysin, timeout, "run", *clock, "--vm"), data_files(workdir)))
+    verdict = compare((status, out, err, after), (*execute(binary, workdir, name, env, include, sysin, timeout, "run", *clock, *parm, "--vm"), data_files(workdir)))
     restore(workdir, after)
     return (cls, first, *verdict)
 
@@ -252,7 +256,7 @@ def sweep(binary, src, workdir, timeout, vm):
         env["SOURCE_DATE_EPOCH"] = str(calendar.timegm(time.strptime(CLOCK, "%Y-%m-%dT%H:%M:%S")))
     called = {target for _, text in sources for target in call_targets(text) - {program_id(text)}}
     return [(name, "called", "", *(("-", "") if vm else ())) if program_id(text) in called
-            else (name, *run(binary, workdir, name, env, library, sysin(src, name), timeout, vm))
+            else (name, *run(binary, workdir, name, env, library, sysin(src, name), timeout, vm, "UPSI-" in text))
             for name, text in sources]
 
 def sysin(src, name):
