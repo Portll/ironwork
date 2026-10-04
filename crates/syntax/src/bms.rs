@@ -25,7 +25,7 @@ pub(crate) fn load(libraries: &Libraries, name: &str, library: Option<&str>) -> 
             match sets.iter().position(|s| s.name.eq_ignore_ascii_case(name)) {
                 Some(i) => Ok(sets.swap_remove(i)),
                 None if sets.len() == 1 => Ok(sets.remove(0)),
-                None => Err(Error::at(Pos::default(), format!("no mapset {} among the {} in the file", name.to_ascii_uppercase(), sets.len()))),
+                None => Err(crate::messages::IWP0001.at(Pos::default(), format!("no mapset {} among the {} in the file", name.to_ascii_uppercase(), sets.len()))),
             }
         })
         .map_err(|mut e| {

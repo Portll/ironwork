@@ -49,7 +49,7 @@ impl Parser<'_> {
             }
             if self.at_end_declaratives() || self.section_header() {
                 let section = &paragraphs[paragraphs.len() - 1].name;
-                self.messages.push(Error::at(self.pos(), format!("{section} SECTION: no paragraph-name after its USE statement")).graded(crate::Severity::Informational));
+                self.messages.push(crate::messages::IWS0066.at(self.pos(), format!("{section} SECTION: no paragraph-name after its USE statement")).graded(crate::Severity::Informational));
             }
         }
         writer.procedure_start = paragraphs.len();
@@ -111,7 +111,7 @@ impl Parser<'_> {
             let mut procedures = Vec::new();
             if self.accept_word("ALL") {
                 if !self.accept_word("PROCEDURES") {
-                    return Err(Error::at(pos, "USE FOR DEBUGGING ON ALL: Enterprise COBOL debugs procedures, by name or as ALL PROCEDURES, and no other items"));
+                    return Err(crate::messages::IWS0067.at(pos, "USE FOR DEBUGGING ON ALL: Enterprise COBOL debugs procedures, by name or as ALL PROCEDURES, and no other items"));
                 }
             } else {
                 while self.peek().is_some_and(|t| *t != Tok::Period) {
@@ -131,8 +131,8 @@ impl Parser<'_> {
 /// Debugging sections are not allowed in a method or a RECURSIVE program (p. 715).
 pub(super) fn debugging_sections_allowed(declaratives: &Declaratives, recursive: bool, method: bool) -> R<()> {
     match declaratives.debugging.first() {
-        Some(u) if method => Err(Error::at(u.pos, "USE FOR DEBUGGING is not allowed in a method")),
-        Some(u) if recursive => Err(Error::at(u.pos, "USE FOR DEBUGGING is not allowed in a RECURSIVE program")),
+        Some(u) if method => Err(crate::messages::IWS0068.at(u.pos, "USE FOR DEBUGGING is not allowed in a method")),
+        Some(u) if recursive => Err(crate::messages::IWS0069.at(u.pos, "USE FOR DEBUGGING is not allowed in a RECURSIVE program")),
         _ => Ok(()),
     }
 }
@@ -142,7 +142,7 @@ pub(super) fn debugging_sections_allowed(declaratives: &Declaratives, recursive:
 /// group is refused (assumption C69).
 pub(super) fn contained_programs(writer: &ReportWriter, nested: &[Program]) -> R<()> {
     if let Some(u) = nested.iter().find_map(|p| p.declaratives.debugging.first()) {
-        return Err(Error::at(u.pos, "USE FOR DEBUGGING in a contained program: debugging sections are allowed only in the outermost program"));
+        return Err(crate::messages::IWS0070.at(u.pos, "USE FOR DEBUGGING in a contained program: debugging sections are allowed only in the outermost program"));
     }
     if nested.is_empty() {
         return Ok(());

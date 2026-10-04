@@ -121,7 +121,7 @@ fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_fr
                 continue;
             }
             if open_quote.is_some() {
-                return Err(Error::at(Pos { file, line, col: 1 }, "a literal runs to the end of the line with no continuation"));
+                return Err(crate::messages::IWS0092.at(Pos { file, line, col: 1 }, "a literal runs to the end of the line with no continuation"));
             }
             if debugging_line && let Some(lines) = &mut out.debugging {
                 lines.push((file, line));
@@ -177,7 +177,7 @@ fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_fr
             let first = area.iter().position(|c| *c != ' ').unwrap();
             let skip = match open_quote {
                 Some(q) if area[first] == q => first + 1,
-                Some(_) => return Err(Error::at(Pos { file, line, col: start_col + first as u32 }, "a continued literal must resume with its quote")),
+                Some(_) => return Err(crate::messages::IWS0093.at(Pos { file, line, col: start_col + first as u32 }, "a continued literal must resume with its quote")),
                 // A closing quote in column 72 and the continuation's first two quotes are one doubled
                 // quote (LR p. 58).
                 None if closed_at_72.is_some_and(|q| area[first] == q && area.get(first + 1) == Some(&q)) => first + 1,
@@ -202,7 +202,7 @@ fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_fr
             }
         } else {
             if open_quote.is_some() {
-                return Err(Error::at(Pos { file, line, col: 1 }, "a literal runs to the end of the line with no continuation"));
+                return Err(crate::messages::IWS0092.at(Pos { file, line, col: 1 }, "a literal runs to the end of the line with no continuation"));
             }
             if let Some(entering) = division_header(&area).or((extended && program_id_first(&area)).then_some(true)) {
                 identification = entering;
@@ -229,7 +229,7 @@ fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_fr
         };
     }
     if open_quote.is_some() {
-        return Err(Error::at(out.positions.last().copied().unwrap_or_default(), "an unterminated literal"));
+        return Err(crate::messages::IWS0024.at(out.positions.last().copied().unwrap_or_default(), "an unterminated literal"));
     }
     if let Some((first, warning)) = free {
         out.free.push(FreeSpan { file, first, last: u32::MAX, warning });
@@ -310,7 +310,7 @@ fn directive(chars: &[char], pos: Pos) -> Option<Result<(Format, Pos), Error>> {
     };
     let pos = Pos { col: start as u32 + 1, ..pos };
     let shown = text.trim_end();
-    Some(found.map(|f| (f, pos)).ok_or_else(|| Error::at(pos, format!("{shown}: the source-format directives >>SOURCE and $SET SOURCEFORMAT, giving FREE or FIXED, are the only compiler directives ironwork reads"))))
+    Some(found.map(|f| (f, pos)).ok_or_else(|| crate::messages::IWS0094.at(pos, format!("{shown}: the source-format directives >>SOURCE and $SET SOURCEFORMAT, giving FREE or FIXED, are the only compiler directives ironwork reads"))))
 }
 
 /// EJECT, SKIP1, SKIP2, SKIP3 or TITLE with its literal, alone on the line and perhaps ended by a

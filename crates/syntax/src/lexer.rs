@@ -243,7 +243,7 @@ impl Lexer<'_> {
             'X' | 'x' if quote_next => {
                 self.at += 1;
                 let text = self.quoted(pos)?;
-                let bytes = unhex(&text).ok_or_else(|| Error::at(pos, format!("X'{text}' is not an even number of hex digits")))?;
+                let bytes = unhex(&text).ok_or_else(|| crate::messages::IWS0017.at(pos, format!("X'{text}' is not an even number of hex digits")))?;
                 self.emit(Tok::Hex(bytes), pos);
             }
             'N' | 'n' if matches!(next, Some('X' | 'x')) && matches!(self.peek(2), Some('\'' | '"')) => {
@@ -252,7 +252,7 @@ impl Lexer<'_> {
                 let units = unhex(&text).filter(|b| !b.is_empty() && b.len().is_multiple_of(2) && b.len() <= 160);
                 let units = units.map(|b| b.chunks(2).map(|u| u16::from_be_bytes([u[0], u[1]])).collect::<Vec<_>>());
                 let national = units.and_then(|u| String::from_utf16(&u).ok());
-                let national = national.ok_or_else(|| Error::at(pos, format!("NX'{text}': a national hexadecimal literal is 4 to 320 hex digits, four to each UTF-16 code unit")))?;
+                let national = national.ok_or_else(|| crate::messages::IWS0018.at(pos, format!("NX'{text}': a national hexadecimal literal is 4 to 320 hex digits, four to each UTF-16 code unit")))?;
                 self.emit(Tok::National(national), pos);
             }
             'N' | 'n' if quote_next && self.n_is_dbcs => self.dbcs_literal(pos)?,
@@ -276,7 +276,7 @@ impl Lexer<'_> {
                 let digits = self.number_or_word(pos)?;
                 match digits {
                     Tok::Number(n) => self.emit(Tok::Number(format!("{c}{n}")), pos),
-                    _ => return Err(Error::at(pos, "a sign must be followed by a number")),
+                    _ => return Err(crate::messages::IWS0019.at(pos, "a sign must be followed by a number")),
                 }
             }
             _ if c.is_ascii_alphanumeric() || c == '.' || non_cobol(c) => {
@@ -316,9 +316,9 @@ impl Lexer<'_> {
                     (')', _) => (Tok::RParen, 1),
                     (':', _) => (Tok::Colon, 1),
                     ('&', _) if matches!(self.tokens.last().map(|t| &t.tok), Some(Tok::Alnum(_) | Tok::Hex(_) | Tok::National(_))) => {
-                        return Err(Error::at(pos, "literal concatenation with & is not Enterprise COBOL's"));
+                        return Err(crate::messages::IWS0020.at(pos, "literal concatenation with & is not Enterprise COBOL's"));
                     }
-                    _ => return Err(Error::at(pos, format!("unexpected character {c:?}"))),
+                    _ => return Err(crate::messages::IWS0021.at(pos, format!("unexpected character {c:?}"))),
                 };
                 self.at += len;
                 self.emit(tok, pos);
@@ -349,7 +349,7 @@ impl Lexer<'_> {
             }
             self.at += 1;
         }
-        Err(Error::at(pos, "EXEC with no END-EXEC"))
+        Err(crate::messages::IWS0022.at(pos, "EXEC with no END-EXEC"))
     }
 
     /// Reads a quoted literal starting at the opening quote; a doubled quote stands for one.
@@ -363,7 +363,7 @@ impl Lexer<'_> {
         let text = text.strip_suffix('\u{F}').unwrap_or(text).to_owned();
         let count = text.chars().count();
         if count == 0 || count > DBCS_LITERAL_MAX {
-            return Err(Error::at(pos, format!("a DBCS literal holds 1 to {DBCS_LITERAL_MAX} characters, not {count}")));
+            return Err(crate::messages::IWS0023.at(pos, format!("a DBCS literal holds 1 to {DBCS_LITERAL_MAX} characters, not {count}")));
         }
         self.emit(Tok::Dbcs(text), pos);
         Ok(())
@@ -375,7 +375,7 @@ impl Lexer<'_> {
         let mut text = String::new();
         loop {
             match self.peek(0) {
-                None | Some('\n') => return Err(Error::at(pos, "an unterminated literal")),
+                None | Some('\n') => return Err(crate::messages::IWS0024.at(pos, "an unterminated literal")),
                 Some(c) if c == quote && self.peek(1) == Some(quote) => {
                     text.push(quote);
                     self.at += 2;
@@ -396,7 +396,7 @@ impl Lexer<'_> {
         let start = self.at;
         while let Some(c) = self.peek(0).filter(|&c| is_word_char(c) || non_cobol(c)) {
             if non_cobol(c) {
-                self.pending.push(Error::at(self.pos(), format!("non-COBOL character {c:?}: the character was accepted")).graded(crate::Severity::Error));
+                self.pending.push(crate::messages::IWS0025.at(self.pos(), format!("non-COBOL character {c:?}: the character was accepted")).graded(crate::Severity::Error));
             }
             self.at += 1;
         }
@@ -412,7 +412,7 @@ impl Lexer<'_> {
             return Ok(Tok::Number(format!("{run}.{frac}")));
         }
         if run.is_empty() {
-            return Err(Error::at(pos, "unexpected '.'"));
+            return Err(crate::messages::IWS0026.at(pos, "unexpected '.'"));
         }
         Ok(if all_digits { Tok::Number(run) } else { Tok::Word(run.to_ascii_uppercase()) })
     }
@@ -429,7 +429,7 @@ impl Lexer<'_> {
         }
         let text: String = self.chars[start..end].iter().collect();
         if text.is_empty() {
-            return Err(Error::at(pos, "PICTURE with no character-string"));
+            return Err(crate::messages::IWS0027.at(pos, "PICTURE with no character-string"));
         }
         self.at = end;
         let text: String = text.chars().map(|c| if self.currency.contains(&c) { c } else { c.to_ascii_uppercase() }).collect();

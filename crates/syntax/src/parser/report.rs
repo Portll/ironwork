@@ -208,7 +208,7 @@ impl Parser<'_> {
                 return Err(crate::messages::IWR0037.at(pos, format!("a level-{level} entry in the REPORT SECTION is not supported yet")));
             }
             if !(1..=49).contains(&level) {
-                return Err(Error::at(pos, format!("level {level} is not a data level")));
+                return Err(crate::messages::IWS0087.at(pos, format!("level {level} is not a data level")));
             }
             let (entry, kind, next_group) = self.report_entry(level, pos)?;
             if level == 1 {
@@ -216,11 +216,11 @@ impl Parser<'_> {
                 continue;
             }
             if kind.is_some() || next_group.is_some() {
-                return Err(Error::at(pos, "TYPE and NEXT GROUP belong on a report group's 01-level entry"));
+                return Err(crate::messages::IWS0088.at(pos, "TYPE and NEXT GROUP belong on a report group's 01-level entry"));
             }
             match r.groups.last_mut() {
                 Some(g) => g.entries.push(entry),
-                None => return Err(Error::at(pos, "a report group entry needs an 01-level entry before it")),
+                None => return Err(crate::messages::IWS0089.at(pos, "a report group entry needs an 01-level entry before it")),
             }
         }
         Ok(r)
@@ -323,7 +323,7 @@ impl Parser<'_> {
                     match &mut e.content {
                         None => e.content = Some(Content::Sum(vec![sum])),
                         Some(Content::Sum(sums)) => sums.push(sum),
-                        Some(_) => return Err(Error::at(clause_pos, "SUM with SOURCE or VALUE in one entry")),
+                        Some(_) => return Err(crate::messages::IWS0090.at(clause_pos, "SUM with SOURCE or VALUE in one entry")),
                     }
                 }
                 "GROUP" => {
@@ -500,7 +500,7 @@ impl Parser<'_> {
         let align = self.accept_any(&["LEFT", "RIGHT", "CENTER", "CENTRE"]);
         let column = if let Some(n) = self.plus_integer()? {
             if matches!(align.as_deref(), Some("RIGHT" | "CENTER" | "CENTRE")) {
-                return Err(Error::at(pos, "COLUMN RIGHT and CENTER take an absolute column"));
+                return Err(crate::messages::IWS0091.at(pos, "COLUMN RIGHT and CENTER take an absolute column"));
             }
             ColumnNumber::Plus(n)
         } else if self.absolute_integer_ahead() {

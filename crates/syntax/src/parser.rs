@@ -502,7 +502,7 @@ impl Parser<'_> {
         };
         declaratives::debugging_sections_allowed(&declaratives, recursive, method)?;
         if let Some(f) = files.iter().find(|f| f.assign.is_empty()) {
-            return Err(Error::at(f.pos, format!("{} has no SELECT ... ASSIGN", f.name)));
+            return Err(crate::messages::IWS0028.at(f.pos, format!("{} has no SELECT ... ASSIGN", f.name)));
         }
         if self.cics {
             self.translator_additions(&mut linkage, &mut using)?;
@@ -515,7 +515,7 @@ impl Parser<'_> {
         let (mut nested, mut contained) = (Vec::new(), Vec::new());
         while self.at_division(&["IDENTIFICATION", "ID"]) {
             if self.word_at(3) == Some("FUNCTION-ID") {
-                return Err(Error::at(self.tokens[self.at + 3].pos, "a user-defined function or prototype cannot be nested within a program, function, method or class"));
+                return Err(crate::messages::IWS0029.at(self.tokens[self.at + 3].pos, "a user-defined function or prototype cannot be nested within a program, function, method or class"));
             }
             let first = nested.len();
             self.program(options, &mut nested)?;
@@ -526,7 +526,7 @@ impl Parser<'_> {
             _ => None,
         });
         if let Some(pos) = entry {
-            return Err(Error::at(pos, "ENTRY cannot be used in a nested program"));
+            return Err(crate::messages::IWS0030.at(pos, "ENTRY cannot be used in a nested program"));
         }
         oo::share_repository(&repository, &mut nested)?;
         let container = Container {
@@ -580,9 +580,9 @@ impl Parser<'_> {
         self.at += 1;
         self.accept(&Tok::Period);
         let name = self.name("a function name")?;
-        function_name(&name).map_err(|why| Error::at(self.tokens[self.at - 1].pos, format!("FUNCTION-ID {name}: {why}")))?;
+        function_name(&name).map_err(|why| crate::messages::IWS0031.at(self.tokens[self.at - 1].pos, format!("FUNCTION-ID {name}: {why}")))?;
         if rt::intrinsic::FIRST.contains(&name.as_str()) || rt::intrinsic::FUNCTIONS.contains(&name.as_str()) {
-            return Err(Error::at(pos, format!("FUNCTION-ID {name}: {name} is an intrinsic function's name (assumption C271)")));
+            return Err(crate::messages::IWS0032.at(pos, format!("FUNCTION-ID {name}: {name} is an intrinsic function's name (assumption C271)")));
         }
         let (mut external, mut prototype) = (name.clone(), false);
         while !self.accept(&Tok::Period) {
@@ -606,7 +606,7 @@ impl Parser<'_> {
             }
         }
         if !prototype && self.defined.contains(&name) {
-            return Err(Error::at(pos, format!("a second definition of user-defined function {name}")));
+            return Err(crate::messages::IWS0033.at(pos, format!("a second definition of user-defined function {name}")));
         }
         let first = out.len();
         self.in_prototype = prototype;
@@ -616,7 +616,7 @@ impl Parser<'_> {
         let program = &mut out[first];
         program.function = Some(Function { external, prototype, pos });
         if let Some(inner) = program.nested.first() {
-            return Err(Error::at(pos, format!("FUNCTION-ID {name}: a user-defined function contains no programs, but {inner} is inside it")));
+            return Err(crate::messages::IWS0034.at(pos, format!("FUNCTION-ID {name}: a user-defined function contains no programs, but {inner} is inside it")));
         }
         if !(self.at_end_program() && self.word_at(1) == Some("FUNCTION")) {
             return Err(self.error(format!("END FUNCTION {name}, which ends a user-defined function")));
@@ -624,7 +624,7 @@ impl Parser<'_> {
         self.at += 2;
         let end = self.name("the function name after END FUNCTION")?;
         if end != name {
-            return Err(Error::at(self.tokens[self.at - 1].pos, format!("END FUNCTION {end} ends function {name}")));
+            return Err(crate::messages::IWS0035.at(self.tokens[self.at - 1].pos, format!("END FUNCTION {end} ends function {name}")));
         }
         self.accept(&Tok::Period);
         let own = Prototype {
@@ -683,7 +683,7 @@ impl Parser<'_> {
                 self.at += 1;
                 let sign = self.currency_sign()?;
                 if sign.symbol != HEX_SYMBOL && clauses.currency.iter().any(|c| c.symbol == sign.symbol) {
-                    return Err(Error::at(pos, format!("a second CURRENCY SIGN clause for the currency symbol {:?}", sign.symbol)));
+                    return Err(crate::messages::IWS0036.at(pos, format!("a second CURRENCY SIGN clause for the currency symbol {:?}", sign.symbol)));
                 }
                 clauses.currency.push(sign);
                 continue;
@@ -767,11 +767,11 @@ impl Parser<'_> {
             let name = self.name("a condition-name")?;
             let slot = if which == "ON" { &mut on } else { &mut off };
             if slot.replace(name).is_some() {
-                return Err(Error::at(pos, format!("UPSI-{number}: a second {which} STATUS phrase")));
+                return Err(crate::messages::IWS0037.at(pos, format!("UPSI-{number}: a second {which} STATUS phrase")));
             }
         }
         if mnemonic.is_none() && on.is_none() && off.is_none() {
-            return Err(Error::at(pos, format!("UPSI-{number}: a mnemonic-name or an ON or OFF STATUS phrase must follow it")));
+            return Err(crate::messages::IWS0038.at(pos, format!("UPSI-{number}: a mnemonic-name or an ON or OFF STATUS phrase must follow it")));
         }
         Ok(Switch { number, mnemonic, on, off, pos })
     }
@@ -785,7 +785,7 @@ impl Parser<'_> {
         let (value, hex) = match self.literal()? {
             Literal::Alnum(v) if !v.is_empty() => (v, None),
             Literal::Hex(b) if !b.is_empty() => (String::new(), Some(b)),
-            _ => return Err(Error::at(pos, "CURRENCY SIGN needs a nonempty alphanumeric literal")),
+            _ => return Err(crate::messages::IWS0039.at(pos, "CURRENCY SIGN needs a nonempty alphanumeric literal")),
         };
         let with = self.accept_word("WITH");
         if !(self.is_word("PICTURE") && self.word_at(1) == Some("SYMBOL")) {
@@ -795,18 +795,18 @@ impl Parser<'_> {
             if let Some(bytes) = hex {
                 return match bytes.len() {
                     1 => Ok(CurrencySign { value, symbol: HEX_SYMBOL, hex: Some(bytes) }),
-                    _ => Err(Error::at(pos, format!("CURRENCY SIGN {} is not one character that can be a PICTURE currency symbol", hex_text(&bytes)))),
+                    _ => Err(crate::messages::IWS0040.at(pos, format!("CURRENCY SIGN {} is not one character that can be a PICTURE currency symbol", hex_text(&bytes)))),
                 };
             }
             let mut chars = value.chars();
             return match (chars.next(), chars.next()) {
                 (Some(symbol), None) if currency_symbol(symbol) => Ok(CurrencySign { value, symbol, hex }),
-                _ => Err(Error::at(pos, format!("CURRENCY SIGN {value:?} is not one character that can be a PICTURE currency symbol"))),
+                _ => Err(crate::messages::IWS0041.at(pos, format!("CURRENCY SIGN {value:?} is not one character that can be a PICTURE currency symbol"))),
             };
         }
         self.at += 2;
         if value.chars().any(|c| c.is_ascii_digit() || matches!(c, '+' | '-' | '.' | ',')) {
-            return Err(Error::at(pos, format!("CURRENCY SIGN {value:?} contains a digit, +, -, . or ,")));
+            return Err(crate::messages::IWS0042.at(pos, format!("CURRENCY SIGN {value:?} contains a digit, +, -, . or ,")));
         }
         let pos = self.pos();
         let symbol = match self.literal()? {
@@ -816,7 +816,7 @@ impl Parser<'_> {
         let mut chars = symbol.chars();
         match (chars.next(), chars.next()) {
             (Some(symbol), None) if currency_symbol(symbol) => Ok(CurrencySign { value, symbol, hex }),
-            _ => Err(Error::at(pos, format!("PICTURE SYMBOL {symbol:?} is not one character that can be a PICTURE currency symbol"))),
+            _ => Err(crate::messages::IWS0043.at(pos, format!("PICTURE SYMBOL {symbol:?} is not one character that can be a PICTURE currency symbol"))),
         }
     }
 
@@ -972,7 +972,7 @@ impl Parser<'_> {
             }
         }
         if let Some(at) = delimiter.filter(|_| f.organization != Organization::Sequential) {
-            return Err(Error::at(at, format!("RECORD DELIMITER on {}: the clause is for a file of ORGANIZATION SEQUENTIAL", f.name)));
+            return Err(crate::messages::IWS0044.at(at, format!("RECORD DELIMITER on {}: the clause is for a file of ORGANIZATION SEQUENTIAL", f.name)));
         }
         Ok(f)
     }
@@ -985,7 +985,7 @@ impl Parser<'_> {
             let pos = self.pos();
             let name = self.name("a file name")?;
             let Some(index) = files.iter().position(|f| f.name == name) else {
-                return Err(Error::at(pos, format!("{indicator} {name} has no SELECT")));
+                return Err(crate::messages::IWS0045.at(pos, format!("{indicator} {name} has no SELECT")));
             };
             files[index].sort = indicator == "SD";
             while !self.accept(&Tok::Period) {
@@ -1031,18 +1031,18 @@ impl Parser<'_> {
                             files[index].record_depending = Some(self.reference()?);
                         }
                     }
-                    "REPORT" | "REPORTS" if files[index].sort => return Err(Error::at(pos, format!("SD {name}: a sort or merge file takes no REPORT clause"))),
+                    "REPORT" | "REPORTS" if files[index].sort => return Err(crate::messages::IWS0046.at(pos, format!("SD {name}: a sort or merge file takes no REPORT clause"))),
                     "REPORT" | "REPORTS" => {
                         let names = self.report_names()?;
                         files[index].reports.extend(names);
                     }
-                    "EXTERNAL" | "GLOBAL" if files[index].sort => return Err(Error::at(pos, format!("SD {name}: a sort or merge file takes no EXTERNAL or GLOBAL clause"))),
+                    "EXTERNAL" | "GLOBAL" if files[index].sort => return Err(crate::messages::IWS0047.at(pos, format!("SD {name}: a sort or merge file takes no EXTERNAL or GLOBAL clause"))),
                     "EXTERNAL" => files[index].external = true,
                     "GLOBAL" => files[index].global = true,
                     "LINAGE" => {
                         let linage = self.linage()?;
                         if files[index].linage.is_some() {
-                            return Err(Error::at(pos, format!("{indicator} {name}: LINAGE is given twice")));
+                            return Err(crate::messages::IWS0048.at(pos, format!("{indicator} {name}: LINAGE is given twice")));
                         }
                         files[index].linage = (indicator == "FD").then_some(linage);
                     }
@@ -1055,7 +1055,7 @@ impl Parser<'_> {
             }
             let mut records = self.data_entries()?;
             if let Some(e) = records.iter().find(|e| e.external) {
-                return Err(Error::at(e.pos, format!("{indicator} {name}: EXTERNAL goes on the FD, not on a record of the FILE SECTION")));
+                return Err(crate::messages::IWS0049.at(e.pos, format!("{indicator} {name}: EXTERNAL goes on the FD, not on a record of the FILE SECTION")));
             }
             let (external, global) = (files[index].external, files[index].global);
             for e in &mut records {
@@ -1110,7 +1110,7 @@ impl Parser<'_> {
             Some(Tok::Word(_)) if self.starts_ref() => {
                 let r = self.reference()?;
                 if !r.subscripts.is_empty() || r.refmod.is_some() {
-                    return Err(Error::at(r.pos, format!("LINAGE: {phrase} {} takes no subscript or reference modification", r.name)));
+                    return Err(crate::messages::IWS0050.at(r.pos, format!("LINAGE: {phrase} {} takes no subscript or reference modification", r.name)));
                 }
                 Ok(LinageValue::Data(r))
             }
@@ -1461,7 +1461,7 @@ impl Parser<'_> {
         if let Some(at) = floating
             && (e.picture.is_some() || e.usage.is_some_and(|u| !matches!(u, Usage::Float1 | Usage::Float2)))
         {
-            return Err(Error::at(at, "a floating-point VALUE literal is for a COMP-1 or COMP-2 item, not a fixed-point one"));
+            return Err(crate::messages::IWS0051.at(at, "a floating-point VALUE literal is for a COMP-1 or COMP-2 item, not a fixed-point one"));
         }
         Ok(e)
     }
@@ -1488,9 +1488,9 @@ impl Parser<'_> {
         self.at += used;
         let written = format!("{mantissa}E{exponent}");
         if mantissa.bytes().filter(u8::is_ascii_digit).count() > 16 {
-            return Err(Error::at(at, format!("{written}: a floating-point literal's mantissa has at most 16 digits")));
+            return Err(crate::messages::IWS0052.at(at, format!("{written}: a floating-point literal's mantissa has at most 16 digits")));
         }
-        let exponent: i32 = exponent.parse().map_err(|_| Error::at(at, format!("{written}: not an exponent")))?;
+        let exponent: i32 = exponent.parse().map_err(|_| crate::messages::IWS0053.at(at, format!("{written}: not an exponent")))?;
         fixed_point(mantissa, exponent).map(Some).ok_or_else(|| crate::messages::IWR0005.at(at, format!("VALUE {written}: a floating-point VALUE of more than 31 digits in fixed point is not supported yet")))
     }
 
@@ -1512,7 +1512,7 @@ impl Parser<'_> {
                     _ => None,
                 };
                 if let Some(written) = written {
-                    self.messages.push(Error::at(at, format!("{written}: the literal after ALL is alphanumeric, national or a figurative constant other than ALL")));
+                    self.messages.push(crate::messages::IWS0054.at(at, format!("{written}: the literal after ALL is alphanumeric, national or a figurative constant other than ALL")));
                 }
                 return Ok(Literal::All(Box::new(inner)));
             }
@@ -1695,7 +1695,7 @@ impl Parser<'_> {
             "ACCEPT" => {
                 let target = self.reference()?;
                 if self.is_word("FROM") && self.word_at(1) == Some("ENVIRONMENT") {
-                    return Err(Error::at(pos, "ACCEPT ... FROM ENVIRONMENT is GnuCOBOL's, not Enterprise COBOL's"));
+                    return Err(crate::messages::IWS0055.at(pos, "ACCEPT ... FROM ENVIRONMENT is GnuCOBOL's, not Enterprise COBOL's"));
                 }
                 let from = if self.accept_word("FROM") {
                     let at = self.pos();
@@ -1910,7 +1910,7 @@ impl Parser<'_> {
             "STOP" if self.starts_operand() && !self.starts_ref() => Stmt::Display { items: vec![self.operand()?], upon: Some(Upon { name: "CONSOLE".into(), device: "CONSOLE".into() }), no_advancing: false, pos },
             "STOP" => return Err(self.error("RUN or a literal after STOP")),
             "CONTINUE" => Stmt::Continue,
-            "EXIT" if self.is_word("FUNCTION") => return Err(Error::at(pos, "EXIT FUNCTION: Enterprise COBOL does not yet support the format 4 EXIT statement; GOBACK ends a user-defined function")),
+            "EXIT" if self.is_word("FUNCTION") => return Err(crate::messages::IWS0056.at(pos, "EXIT FUNCTION: Enterprise COBOL does not yet support the format 4 EXIT statement; GOBACK ends a user-defined function")),
             "EXIT" => match self.accept_any(&["PROGRAM", "PARAGRAPH", "SECTION", "PERFORM", "METHOD"]).as_deref() {
                 Some("PROGRAM") => Stmt::ExitProgram { pos },
                 Some("METHOD") => Stmt::ExitMethod { pos },
@@ -1944,7 +1944,7 @@ impl Parser<'_> {
             _ => (self.accept_word("ROUNDED"), self.size_error()?),
         };
         if self.starts_ref() {
-            return Err(Error::at(self.pos(), "CORRESPONDING takes one receiving group"));
+            return Err(crate::messages::IWS0057.at(self.pos(), "CORRESPONDING takes one receiving group"));
         }
         self.accept_any(&["END-ADD", "END-SUBTRACT"]);
         Ok(Stmt::Corresponding(Box::new(Corresponding { verb, from, to, rounded, size_error, pos })))
@@ -2086,7 +2086,7 @@ impl Parser<'_> {
         }
         let repeat = self.repeat()?;
         if matches!(&repeat, Loop::Varying { after, .. } if !after.is_empty()) {
-            return Err(Error::at(pos, "an inline PERFORM cannot have AFTER phrases: Enterprise COBOL takes them only when PERFORM names a procedure"));
+            return Err(crate::messages::IWS0058.at(pos, "an inline PERFORM cannot have AFTER phrases: Enterprise COBOL takes them only when PERFORM names a procedure"));
         }
         let body = self.block(&["END-PERFORM"])?;
         self.expect_word("END-PERFORM")?;
@@ -2676,7 +2676,7 @@ impl Parser<'_> {
         if targets.is_empty() {
             return Err(self.error("a data name"));
         }
-        let twice = |c: DataCategory, phrase: &str| Error::at(pos, format!("INITIALIZE: {} is named twice in the {phrase} phrase", c.word()));
+        let twice = |c: DataCategory, phrase: &str| crate::messages::IWS0059.at(pos, format!("INITIALIZE: {} is named twice in the {phrase} phrase", c.word()));
         let mut with = InitializeWith::default();
         if self.is_word("FILLER") || self.is_word("WITH") && self.word_at(1) == Some("FILLER") {
             self.accept_word("WITH");
@@ -2853,12 +2853,12 @@ impl Parser<'_> {
         } else {
             format!("a mnemonic-name for {device}, which ACCEPT does not read")
         };
-        Err(Error::at(pos, format!("ACCEPT ... FROM {name}: {why}")))
+        Err(crate::messages::IWS0060.at(pos, format!("ACCEPT ... FROM {name}: {why}")))
     }
 
     fn set(&mut self) -> R<SetStmt> {
         if self.is_word("ENVIRONMENT") {
-            return Err(Error::at(self.pos(), "SET ENVIRONMENT is GnuCOBOL's, not Enterprise COBOL's"));
+            return Err(crate::messages::IWS0061.at(self.pos(), "SET ENVIRONMENT is GnuCOBOL's, not Enterprise COBOL's"));
         }
         if self.is_word("ADDRESS") && self.word_at(1) == Some("OF") {
             let mut targets = Vec::new();
@@ -3086,14 +3086,14 @@ impl Parser<'_> {
                 self.at += 2;
                 let condition = self.name("a CICS condition")?;
                 self.expect(&Tok::RParen, "')'")?;
-                let code = crate::system::resp_code(&condition).ok_or_else(|| Error::at(pos, format!("DFHRESP({condition}): not a CICS condition ironwork for COBOL knows")))?;
+                let code = crate::system::resp_code(&condition).ok_or_else(|| crate::messages::IWS0062.at(pos, format!("DFHRESP({condition}): not a CICS condition ironwork for COBOL knows")))?;
                 Ok(Operand::Literal(Literal::Number(code.to_string())))
             }
             Some(Tok::Word(w)) if w == "DFHVALUE" && self.peek_at(1) == Some(&Tok::LParen) => {
                 self.at += 2;
                 let name = self.name("a CVDA value")?;
                 self.expect(&Tok::RParen, "')'")?;
-                let value = rt::cics_tables::cvda(&name).ok_or_else(|| Error::at(pos, format!("DFHVALUE({name}): not a CVDA ironwork for COBOL knows")))?;
+                let value = rt::cics_tables::cvda(&name).ok_or_else(|| crate::messages::IWS0063.at(pos, format!("DFHVALUE({name}): not a CVDA ironwork for COBOL knows")))?;
                 Ok(Operand::Literal(Literal::Number(value.to_string())))
             }
             Some(Tok::Word(w)) if w == "ADDRESS" && self.word_at(1) == Some("OF") => {
@@ -3358,7 +3358,7 @@ impl Parser<'_> {
     fn objects(&mut self, subject: Expr, op: RelOp, negated: bool, last: &mut Option<(Expr, RelOp, bool)>) -> R<Cond> {
         *last = Some((subject.clone(), op, negated));
         if self.peek() == Some(&Tok::LParen) && self.word_at(1) == Some("NOT") && !self.relop_ahead(2) {
-            return Err(Error::at(self.pos(), "NOT cannot follow the left parenthesis that distributes a relational operator"));
+            return Err(crate::messages::IWS0064.at(self.pos(), "NOT cannot follow the left parenthesis that distributes a relational operator"));
         }
         let start = self.at;
         match self.distributed(&subject, op, negated) {
@@ -3427,7 +3427,7 @@ impl Parser<'_> {
 
     fn relop(&mut self) -> R<Option<RelOp>> {
         if self.peek() == Some(&Tok::Lt) && self.peek_at(1) == Some(&Tok::Gt) {
-            return Err(Error::at(self.pos(), "<> is not an Enterprise COBOL relational operator: it writes NOT ="));
+            return Err(crate::messages::IWS0065.at(self.pos(), "<> is not an Enterprise COBOL relational operator: it writes NOT ="));
         }
         let op = match self.peek() {
             Some(Tok::Eq) => RelOp::Eq,

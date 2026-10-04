@@ -176,7 +176,7 @@ struct Statement {
 }
 
 fn copy_statement(words: &[Word], chars: &[char], at: usize, pos: Pos) -> Result<Statement, Error> {
-    let err = |m: &str| Error::at(pos, format!("COPY: {m}"));
+    let err = |m: &str| crate::messages::IWS0003.at(pos, format!("COPY: {m}"));
     let text = |i: usize| words.get(i).map(|w| w.text.as_str());
     let mut i = at + 1;
     let quoted = |s: &str| s.starts_with(['\'', '"']);
@@ -184,7 +184,7 @@ fn copy_statement(words: &[Word], chars: &[char], at: usize, pos: Pos) -> Result
     // In `COPY X..` the separator period is the second, so the name is `X.` (assumption C88).
     let word = |s: &str| {
         if s.ends_with('.') && !quoted(s) {
-            return Err(Error::at(pos, format!("COPY {s}: the name ends in a period; the period that ends a COPY statement is the one followed by a space")));
+            return Err(crate::messages::IWS0004.at(pos, format!("COPY {s}: the name ends in a period; the period that ends a COPY statement is the one followed by a space")));
         }
         Ok(unquote(s))
     };
@@ -213,7 +213,7 @@ fn copy_statement(words: &[Word], chars: &[char], at: usize, pos: Pos) -> Result
 /// statement, and that period's index. REPLACE takes pseudo-text alone (Language Reference
 /// SC27-8713-03, p. 708).
 fn operands(words: &[Word], chars: &[char], at: usize, verb: &str, pos: Pos) -> Result<(Vec<Replacing>, usize), Error> {
-    let err = |m: &str| Error::at(pos, format!("{verb}: {m}"));
+    let err = |m: &str| crate::messages::IWS0005.at(pos, format!("{verb}: {m}"));
     let text = |i: usize| words.get(i).map(|w| w.text.as_str());
     let replace = verb == "REPLACE";
     let pseudo_text = |i: usize| !replace || text(i) == Some("==");
@@ -390,21 +390,21 @@ fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>,
                 (path.display().to_string(), read_member(&path, pos, files, &copied)?)
             }
             (None, Some((path, mapset))) => {
-                let mapset = mapset.map_err(|e| Error::at(pos, format!("{verb} {name}: {}", e.place(&path.display().to_string()))))?;
-                let file = u16::try_from(files.len()).map_err(|_| Error::at(pos, "more than 65535 copy members"))?;
+                let mapset = mapset.map_err(|e| crate::messages::IWS0006.at(pos, format!("{verb} {name}: {}", e.place(&path.display().to_string()))))?;
+                let file = u16::try_from(files.len()).map_err(|_| crate::messages::IWS0007.at(pos, "more than 65535 copy members"))?;
                 files.push(path.display().to_string());
                 (path.display().to_string(), read(&bms::symbolic_map(&mapset), file)?)
             }
             (None, None) => {
                 let text = system::member(&name).ok_or_else(|| crate::messages::IWS0002.at(pos, format!("{verb} {name}: no such member in the copy libraries")))?;
                 let key = format!("(system member {})", name.to_ascii_uppercase());
-                let file = u16::try_from(files.len()).map_err(|_| Error::at(pos, "more than 65535 copy members"))?;
+                let file = u16::try_from(files.len()).map_err(|_| crate::messages::IWS0007.at(pos, "more than 65535 copy members"))?;
                 files.push(key.clone());
                 (key, read(&text, file)?)
             }
         };
         if stack.contains(&key) || stack.len() >= MAX_DEPTH {
-            return Err(Error::at(pos, format!("{verb} {name}: copies itself, or nests deeper than {MAX_DEPTH}")));
+            return Err(crate::messages::IWS0008.at(pos, format!("{verb} {name}: copies itself, or nests deeper than {MAX_DEPTH}")));
         }
         stack.push(key);
         let mut member = expand_nested(member, libraries, files, stack)?;
@@ -456,12 +456,12 @@ pub fn replace(source: Source) -> Result<Source, Error> {
         let pos = source.positions[words[i].start];
         let next = match words.get(i + 1).map(|w| w.text.to_ascii_uppercase()).as_deref() {
             Some("OFF") if words.get(i + 2).is_some_and(|w| w.text == ".") => (Vec::new(), i + 3),
-            Some("OFF") => return Err(Error::at(pos, "REPLACE OFF: a period to end the statement")),
-            Some("ALSO" | "LAST") => return Err(Error::at(pos, "REPLACE ALSO and REPLACE LAST OFF are the 2014 COBOL standard's; Enterprise COBOL has REPLACE pseudo-text BY pseudo-text and REPLACE OFF")),
+            Some("OFF") => return Err(crate::messages::IWS0009.at(pos, "REPLACE OFF: a period to end the statement")),
+            Some("ALSO" | "LAST") => return Err(crate::messages::IWS0010.at(pos, "REPLACE ALSO and REPLACE LAST OFF are the 2014 COBOL standard's; Enterprise COBOL has REPLACE pseudo-text BY pseudo-text and REPLACE OFF")),
             Some("==" | "LEADING" | "TRAILING") => {
                 let (replacing, period) = operands(&words, &chars, i + 1, "REPLACE", pos)?;
                 if words.get(period).is_none_or(|w| w.text != ".") {
-                    return Err(Error::at(pos, "REPLACE: a period to end the statement"));
+                    return Err(crate::messages::IWS0011.at(pos, "REPLACE: a period to end the statement"));
                 }
                 (replacing, period + 1)
             }
@@ -479,8 +479,8 @@ pub fn replace(source: Source) -> Result<Source, Error> {
 }
 
 fn read_member(path: &Path, pos: Pos, files: &mut Vec<String>, read: &dyn Fn(&str, u16) -> Result<Source, Error>) -> Result<Source, Error> {
-    let bytes = std::fs::read(path).map_err(|e| Error::at(pos, format!("COPY {}: {e}", path.display())))?;
-    let file = u16::try_from(files.len()).map_err(|_| Error::at(pos, "more than 65535 copy members"))?;
+    let bytes = std::fs::read(path).map_err(|e| crate::messages::IWS0012.at(pos, format!("COPY {}: {e}", path.display())))?;
+    let file = u16::try_from(files.len()).map_err(|_| crate::messages::IWS0007.at(pos, "more than 65535 copy members"))?;
     files.push(path.display().to_string());
     read(&decode(&bytes), file)
 }

@@ -13,7 +13,7 @@ pub(super) fn share_repository(repository: &[ClassEntry], nested: &mut [Program]
     for p in nested {
         match &p.oo {
             Some(o) if !o.repository.is_empty() && o.repository.as_slice() != repository => {
-                return Err(Error::at(o.repository[0].pos, "a REPOSITORY paragraph belongs to the outermost program only"));
+                return Err(crate::messages::IWS0071.at(o.repository[0].pos, "a REPOSITORY paragraph belongs to the outermost program only"));
             }
             _ if !repository.is_empty() => p.oo = program_oo(repository.to_vec()),
             _ => {}
@@ -42,7 +42,7 @@ impl Parser<'_> {
     pub(super) fn class_definition(&mut self, options: &[String], out: &mut Vec<Program>) -> R<()> {
         let pos = self.pos();
         if self.at != 3 || !out.is_empty() {
-            return Err(Error::at(pos, "a class definition must be alone in its source file"));
+            return Err(crate::messages::IWS0072.at(pos, "a class definition must be alone in its source file"));
         }
         self.at += 1;
         self.accept(&Tok::Period);
@@ -76,7 +76,7 @@ impl Parser<'_> {
         self.at += 2;
         let end = self.name("the class name after END CLASS")?;
         if end != name {
-            return Err(Error::at(self.tokens[self.at - 1].pos, format!("END CLASS {end} ends class {name}")));
+            return Err(crate::messages::IWS0073.at(self.tokens[self.at - 1].pos, format!("END CLASS {end} ends class {name}")));
         }
         self.accept(&Tok::Period);
         if self.peek().is_some() {
@@ -141,7 +141,7 @@ impl Parser<'_> {
                         let s = s.clone();
                         self.at += 1;
                         if s.is_empty() || s.contains(' ') {
-                            return Err(Error::at(pos, format!("CLASS {name} IS \"{s}\": not a Java class name")));
+                            return Err(crate::messages::IWS0074.at(pos, format!("CLASS {name} IS \"{s}\": not a Java class name")));
                         }
                         s
                     }
@@ -149,7 +149,7 @@ impl Parser<'_> {
                     _ => external_class_name(&name),
                 };
                 if entries.iter().any(|e| e.name == name) {
-                    return Err(Error::at(pos, format!("class {name} is named twice in the REPOSITORY paragraph")));
+                    return Err(crate::messages::IWS0075.at(pos, format!("class {name} is named twice in the REPOSITORY paragraph")));
                 }
                 entries.push(ClassEntry { name, external, pos });
                 continue;
@@ -190,10 +190,10 @@ impl Parser<'_> {
         }
         for (name, pos) in names {
             if name == "WHEN-COMPILED" {
-                return Err(Error::at(*pos, "WHEN-COMPILED is a special register too, so the REPOSITORY paragraph cannot name it"));
+                return Err(crate::messages::IWS0076.at(*pos, "WHEN-COMPILED is a special register too, so the REPOSITORY paragraph cannot name it"));
             }
             if !known(name) {
-                return Err(Error::at(*pos, format!("FUNCTION {name} INTRINSIC: {name} is not an intrinsic function ironwork for COBOL knows")));
+                return Err(crate::messages::IWS0077.at(*pos, format!("FUNCTION {name} INTRINSIC: {name} is not an intrinsic function ironwork for COBOL knows")));
             }
             self.intrinsics.push(name.clone());
         }
@@ -205,13 +205,13 @@ impl Parser<'_> {
     fn repository_functions(&mut self, names: &[(String, Pos)]) -> R<()> {
         for (name, pos) in names {
             if matches!(name.as_str(), "LENGTH" | "RANDOM" | "SIGN" | "SUM" | "WHEN-COMPILED") {
-                return Err(Error::at(*pos, format!("FUNCTION {name}: a user-defined function in the REPOSITORY paragraph cannot be named {name}")));
+                return Err(crate::messages::IWS0078.at(*pos, format!("FUNCTION {name}: a user-defined function in the REPOSITORY paragraph cannot be named {name}")));
             }
             if name == "ALL" {
-                return Err(Error::at(*pos, "FUNCTION ALL: INTRINSIC follows ALL, which names every intrinsic function"));
+                return Err(crate::messages::IWS0079.at(*pos, "FUNCTION ALL: INTRINSIC follows ALL, which names every intrinsic function"));
             }
             if rt::intrinsic::FIRST.contains(&name.as_str()) || rt::intrinsic::FUNCTIONS.contains(&name.as_str()) {
-                return Err(Error::at(*pos, format!("FUNCTION {name}: an intrinsic function is listed with INTRINSIC, and no user-defined function takes its name (assumption C271)")));
+                return Err(crate::messages::IWS0080.at(*pos, format!("FUNCTION {name}: an intrinsic function is listed with INTRINSIC, and no user-defined function takes its name (assumption C271)")));
             }
             self.intrinsics.push(name.clone());
         }
@@ -231,13 +231,13 @@ impl Parser<'_> {
             while self.peek().is_some() && !self.at_division(&["PROCEDURE", "IDENTIFICATION", "ID"]) && !self.at_end_of(kind) {
                 let section = self.name("WORKING-STORAGE SECTION")?;
                 if section != "WORKING-STORAGE" {
-                    return Err(Error::at(self.tokens[self.at - 1].pos, format!("{section}: the DATA DIVISION of a {kind} paragraph has only a WORKING-STORAGE SECTION")));
+                    return Err(crate::messages::IWS0081.at(self.tokens[self.at - 1].pos, format!("{section}: the DATA DIVISION of a {kind} paragraph has only a WORKING-STORAGE SECTION")));
                 }
                 self.expect_word("SECTION")?;
                 self.expect(&Tok::Period, "a period")?;
                 part.working_storage.extend(self.data_entries()?);
                 if let Some(block) = self.exec_declarations.first() {
-                    return Err(Error::at(block.pos, "a class definition cannot contain EXEC statements"));
+                    return Err(crate::messages::IWS0082.at(block.pos, "a class definition cannot contain EXEC statements"));
                 }
             }
         }
@@ -278,7 +278,7 @@ impl Parser<'_> {
         (self.exec_declarations, self.cics, self.sql.blocks) = outer;
         parsed?;
         if out.len() != 1 {
-            return Err(Error::at(pos, format!("method \"{name}\" contains a program: a method cannot contain nested programs")));
+            return Err(crate::messages::IWS0083.at(pos, format!("method \"{name}\" contains a program: a method cannot contain nested programs")));
         }
         if !self.at_end_of("METHOD") {
             return Err(self.error(format!("END METHOD \"{name}\"")));
@@ -291,7 +291,7 @@ impl Parser<'_> {
         self.accept(&Tok::Period);
         let mut method = out.remove(0);
         if method.oo.is_some() {
-            return Err(Error::at(pos, format!("method \"{name}\" has a REPOSITORY paragraph: the class's applies to its methods")));
+            return Err(crate::messages::IWS0084.at(pos, format!("method \"{name}\" has a REPOSITORY paragraph: the class's applies to its methods")));
         }
         method.oo = Some(Box::new(Oo { repository: repository.to_vec(), unit: OoUnit::Method(MethodOf { class: class.to_owned(), factory, name, pos: name_pos }) }));
         Ok(method)
@@ -330,7 +330,7 @@ impl Parser<'_> {
                 let by = self.accept_word("BY");
                 match self.accept_any(&["VALUE", "REFERENCE", "CONTENT"]).as_deref() {
                     Some("VALUE") => {}
-                    Some(other) => return Err(Error::at(self.tokens[self.at - 1].pos, format!("INVOKE passes its arguments BY VALUE, not BY {other}"))),
+                    Some(other) => return Err(crate::messages::IWS0085.at(self.tokens[self.at - 1].pos, format!("INVOKE passes its arguments BY VALUE, not BY {other}"))),
                     None if by => return Err(self.error("VALUE after BY")),
                     None => break,
                 }
@@ -343,7 +343,7 @@ impl Parser<'_> {
                 }
             }
             if using.is_empty() {
-                return Err(Error::at(self.pos(), "INVOKE passes its arguments BY VALUE: write USING BY VALUE"));
+                return Err(crate::messages::IWS0086.at(self.pos(), "INVOKE passes its arguments BY VALUE: write USING BY VALUE"));
             }
         }
         let returning = if self.accept_word("RETURNING") { Some(self.reference()?) } else { None };

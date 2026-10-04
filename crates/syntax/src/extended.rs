@@ -114,7 +114,7 @@ impl Rewrite {
         while self.tokens.get(self.at).is_some_and(|t| t.tok == Tok::Ampersand) {
             let amp = self.tokens[self.at].clone();
             if self.at + 1 >= self.tokens.len() {
-                return Err(Error::at(amp.pos, "& with no literal after it"));
+                return Err(crate::messages::IWS0013.at(amp.pos, "& with no literal after it"));
             }
             let right = self.substituted(self.at + 1);
             self.at += 2;
@@ -142,7 +142,7 @@ impl Rewrite {
         self.at += if seventy_eight { 2 } else { 3 };
         self.pending.extend(level.messages);
         self.pending.extend(named.messages);
-        let refused = |at: Pos, why: &str| Error::at(at, format!("constant {name}: {why}"));
+        let refused = |at: Pos, why: &str| crate::messages::IWS0014.at(at, format!("constant {name}: {why}"));
         match (self.word_at(0), self.word_at(1)) {
             (Some("IS"), Some("GLOBAL")) => self.at += 2,
             (Some("GLOBAL"), _) => self.at += 1,
@@ -208,7 +208,7 @@ impl Rewrite {
         let token = self.tokens[self.at].clone();
         let Tok::Word(usage) = &token.tok else { unreachable!("the caller saw a word") };
         let Some(&(_, digits)) = BINARY_USAGES.iter().find(|(u, _)| u == usage) else {
-            return Err(Error::at(token.pos, "BINARY-CHAR is a one-byte binary item, and ironwork's binary items are two, four or eight bytes, as Enterprise COBOL's are"));
+            return Err(crate::messages::IWS0015.at(token.pos, "BINARY-CHAR is a one-byte binary item, and ironwork's binary items are two, four or eight bytes, as Enterprise COBOL's are"));
         };
         let mut messages = Vec::new();
         if self.out.last().is_some_and(|t| t.tok == Tok::Word("IS".into())) && self.out.len() >= 2 && self.out[self.out.len() - 2].tok == Tok::Word("USAGE".into()) {
@@ -273,7 +273,7 @@ fn join(left: Token, amp: Token, right: Token, decode: impl Fn(&[u8]) -> String)
         (Tok::Alnum(a), Tok::Hex(b)) => Tok::Alnum(format!("{a}{}", decode(b))),
         (Tok::Hex(a), Tok::Alnum(b)) => Tok::Alnum(format!("{}{b}", decode(a))),
         (Tok::National(a), Tok::National(b)) => Tok::National(format!("{a}{b}")),
-        _ => return Err(Error::at(amp.pos, "& joins two alphanumeric or hexadecimal literals, or two national literals, either of which may be a level-78 constant standing for one")),
+        _ => return Err(crate::messages::IWS0016.at(amp.pos, "& joins two alphanumeric or hexadecimal literals, or two national literals, either of which may be a level-78 constant standing for one")),
     };
     let mut messages = left.messages;
     messages.push(IWX0004.at(amp.pos, format!("{CONCATENATION}: the literals on either side are one literal")));
