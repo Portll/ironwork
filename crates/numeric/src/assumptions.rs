@@ -346,6 +346,7 @@ pub const UPSI_SWITCHES: &str = "C410";
 pub const UPSI_FROM_THE_PARM: &str = "C411";
 pub const SET_SWITCH_CONDITION_TRUE: &str = "C412";
 pub const ACCEPT_FROM_CONSOLE: &str = "C440";
+pub const CALL_BY_PROGRAM_ID: &str = "C441";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 
@@ -2183,6 +2184,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: ACCEPT_FROM_CONSOLE,
         claim: "ACCEPT ... FROM CONSOLE, or from a mnemonic-name SPECIAL-NAMES gives CONSOLE, reads standard input as ACCEPT from the system input device does, record after record until the receiver is full. On z/OS the operator replies at the console, a system message code and AWAITING REPLY shown first, each reply at most 114 characters, left-justified and padded with spaces, and an empty reply leaving the receiver unchanged (Language Reference SC27-8713-03, pp. 307-308); a run on ironwork has no operator, and a test or job gives the replies as standard input's lines",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CALL_BY_PROGRAM_ID,
+        claim: "A CALL of a name that no member of the program libraries has, as a file named for it, finds the .cbl or .cob file there whose PROGRAM-ID is the name: the directories in order, each one's files in name order, the first that holds the program. z/OS finds a called program as a member of STEPLIB, JOBLIB or the link list by its member name, and ends the run S806 when none has it; a build that link-edits each program under its PROGRAM-ID gives every program a member of that name, and ironwork's libraries are source directories, whose file names need not be. A member of the name comes first, as before",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

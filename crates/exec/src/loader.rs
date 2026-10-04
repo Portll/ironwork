@@ -26,24 +26,67 @@ pub struct Library {
     pub trace_input: bool,
     /// How many statements may start before the run ends with S322 (`RunUnit::statement_limit`).
     pub statement_limit: Option<u64>,
+    /// Each PROGRAM-ID the source files of `dirs` hold, with its file, read the first time a CALL
+    /// names no member.
+    pub program_ids: Option<Vec<(String, PathBuf)>>,
 }
 
+/// The extensions of a program library's source members.
+const SOURCE_EXTENSIONS: &[&str] = &["cbl", "CBL", "cob", "COB"];
+
 impl Library {
+    /// The program `name` in the member of that name, or else in a source file whose PROGRAM-ID
+    /// it is.
     fn search(&mut self, name: &str) -> Result<(Program, PathBuf), LoadError> {
         let candidates = [name.to_owned(), name.to_ascii_lowercase()];
-        let path = self
+        let member = self
             .dirs
             .iter()
-            .flat_map(|d| candidates.iter().flat_map(move |n| ["", ".cbl", ".CBL", ".cob", ".COB"].iter().map(move |e| d.join(format!("{n}{e}")))))
-            .find(|p| p.is_file())
-            .ok_or(LoadError::NotFound)?;
-        let text = std::fs::read(&path).map(|b| copy::decode(&b)).map_err(|e| LoadError::Compile(format!("{}: {e}", path.display())))?;
-        let mut programs = syntax::parse_all_with(&text, &self.copy.with_program(&path))
-            .map_err(|e| LoadError::Compile(format!("{name} does not compile: {}", e.place(&path.display().to_string()))))?;
-        let wanted = programs.iter().position(|p| loads_as(p, name)).or_else(|| programs.iter().position(|p| !p.is_prototype())).unwrap_or(0);
-        let found = programs.remove(wanted);
-        self.add_read(&path, programs);
-        Ok((found, path))
+            .flat_map(|d| candidates.iter().flat_map(move |n| std::iter::once(String::new()).chain(SOURCE_EXTENSIONS.iter().map(|e| format!(".{e}"))).map(move |e| d.join(format!("{n}{e}")))))
+            .find(|p| p.is_file());
+        if let Some(path) = member {
+            let mut programs = self.read(name, &path)?;
+            let wanted = programs.iter().position(|p| loads_as(p, name)).or_else(|| programs.iter().position(|p| !p.is_prototype())).unwrap_or(0);
+            let found = programs.remove(wanted);
+            self.add_read(&path, programs);
+            return Ok((found, path));
+        }
+        for path in self.holding(name) {
+            let mut programs = self.read(name, &path)?;
+            if let Some(wanted) = programs.iter().position(|p| loads_as(p, name)) {
+                let found = programs.remove(wanted);
+                self.add_read(&path, programs);
+                return Ok((found, path));
+            }
+        }
+        Err(LoadError::NotFound)
+    }
+
+    fn read(&self, name: &str, path: &Path) -> Result<Vec<Program>, LoadError> {
+        let text = std::fs::read(path).map(|b| copy::decode(&b)).map_err(|e| LoadError::Compile(format!("{}: {e}", path.display())))?;
+        syntax::parse_all_with(&text, &self.copy.with_program(path)).map_err(|e| LoadError::Compile(format!("{name} does not compile: {}", e.place(&path.display().to_string()))))
+    }
+
+    /// The source files of the program libraries whose PROGRAM-ID is `name`, the directories in
+    /// order and each one's files by name (assumption C441).
+    fn holding(&mut self, name: &str) -> Vec<PathBuf> {
+        let (dirs, compliance) = (&self.dirs, self.copy.compliance());
+        let index = self.program_ids.get_or_insert_with(|| {
+            let mut index = Vec::new();
+            for dir in dirs {
+                let Ok(entries) = std::fs::read_dir(dir) else { continue };
+                let mut files: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.is_file() && p.extension().is_some_and(|e| SOURCE_EXTENSIONS.iter().any(|x| e == *x))).collect();
+                files.sort();
+                for file in files {
+                    let Ok(bytes) = std::fs::read(&file) else { continue };
+                    index.extend(syntax::program_ids(&copy::decode(&bytes), compliance).into_iter().map(|id| (id, file.clone())));
+                }
+            }
+            index
+        });
+        let mut paths: Vec<PathBuf> = index.iter().filter(|(id, _)| id.eq_ignore_ascii_case(name)).map(|(_, path)| path.clone()).collect();
+        paths.dedup();
+        paths
     }
 
     /// Keeps programs read from the library file `path` for a later CALL.

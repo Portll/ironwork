@@ -618,7 +618,9 @@ started with, then each `-L` in order. A program is found in this order:
    registered, and its program `NAME` taken. Every directory is searched for `.iwm` before any is
    searched for source.
 3. **Source, compiled in memory** and lowered: each directory in order for `NAME`, `.cbl`, `.CBL`,
-   `.cob` and `.COB` (`Library::search`, loader.rs).
+   `.cob` and `.COB` (`Library::search`, loader.rs); with no such member, the `.cbl` or `.cob` file
+   whose PROGRAM-ID is `NAME`, the directories in order and each one's files by name, from an index
+   of the directories' PROGRAM-IDs read on the first CALL that needs it (assumption C441).
 
 - **The name check comes first.** `member_name` (`rt::module`) refuses a name outside the member
   character set before any path is built, so `CALL '../X'` never reaches the filesystem.

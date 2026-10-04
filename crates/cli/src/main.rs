@@ -1050,6 +1050,7 @@ fn driver() -> ExitCode {
         trace_statements: statement_filter(listed.as_ref(), coverage_file.is_some()),
         trace_input,
         statement_limit,
+        program_ids: None,
     };
     let compiled = match exec::compile(first, &flags) {
         Ok(c) => c,

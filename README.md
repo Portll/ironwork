@@ -46,7 +46,8 @@ CBL and PROCESS cards set the options. COPY members are found in the program's o
 each `-I` library: a copybook (`.cpy`, `.copy`) in any of them before a program source (`.cbl`,
 `.cob`), and either before a file named as the member alone, which a literal name tries first; the
 program being compiled is never its own member. CALL finds a program among the others in the same
-source, then in the program's directory and each `-L` library, by name; a dynamic CALL can name only
+source, then in the program's directory and each `-L` library, by name, and failing that in the
+`.cbl` or `.cob` file there whose PROGRAM-ID it is (assumption C441); a dynamic CALL can name only
 such a member, never a path. A user-defined function's definition is found the same way, by its
 external name. `run` and `check` compile a source's functions and function prototypes with its first
 program, which is the one a run enters even when functions come before it (assumption C270).

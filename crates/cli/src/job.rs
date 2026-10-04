@@ -608,7 +608,7 @@ fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database
     if let Some(run) = evidence {
         crate::evidence::sources(run.borrow_mut().journal_mut(), &first.sources, &path.display().to_string(), roots);
     }
-    let library = exec::unit::Library { programs, dirs: std::iter::once(own).chain(req.program_dirs.iter().cloned()).collect(), copy: libraries, flags: req.flags.clone(), trace_statements: req.coverage.is_some().then_some(exec::unit::StatementFilter::All), trace_input: false, statement_limit: req.statement_limit };
+    let library = exec::unit::Library { programs, dirs: std::iter::once(own).chain(req.program_dirs.iter().cloned()).collect(), copy: libraries, flags: req.flags.clone(), trace_statements: req.coverage.is_some().then_some(exec::unit::StatementFilter::All), trace_input: false, statement_limit: req.statement_limit, program_ids: None };
     let compiled = exec::compile(first, &req.flags).map_err(|errors| Failed::before(Outcome::Refused, syntax::most_severe(&errors).map(|e| e.place(&path.display().to_string()).to_string()).unwrap_or_default()))?;
     let specs: Vec<String> = dds.iter().map(|d| format!("{}={}{}{}", d.name, d.path.display(), if d.text { ":text" } else { "" }, if d.append { ":mod" } else { "" })).collect();
     let dds = exec::files::Dds::new(&specs, false).map_err(|m| Failed::abend(AbendCode::Ironwork, m))?;

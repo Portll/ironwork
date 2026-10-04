@@ -153,6 +153,27 @@ pub fn parse_with(text: &str, libraries: &copy::Libraries) -> Result<ast::Progra
     Ok(parse_all_with(text, libraries)?.remove(0))
 }
 
+/// The names after each PROGRAM-ID in the source, read without COPY members or a parse; empty for
+/// a source that does not lex.
+pub fn program_ids(text: &str, compliance: numeric::Compliance) -> Vec<String> {
+    let Ok(tokens) = source::read_under(text, 0, false, compliance).and_then(|s| lexer::lex_under(&s, compliance)) else { return Vec::new() };
+    let mut names = Vec::new();
+    let mut rest = tokens.iter().map(|t| &t.tok);
+    while let Some(tok) = rest.next() {
+        if !matches!(tok, lexer::Tok::Word(w) if w == "PROGRAM-ID") {
+            continue;
+        }
+        let name = match rest.next() {
+            Some(lexer::Tok::Period) => rest.next(),
+            other => other,
+        };
+        if let Some(lexer::Tok::Word(n) | lexer::Tok::Alnum(n)) = name {
+            names.push(n.clone());
+        }
+    }
+    names
+}
+
 /// Every program in the source, in order, nested programs after the one that contains them. The
 /// libraries' compliance level says how the source and its members are read. Debugging lines are
 /// program text through COPY and REPLACE, and comments after them outside a program compiled WITH

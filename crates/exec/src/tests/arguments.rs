@@ -65,3 +65,23 @@ fn every_argument_is_input_to_the_run() {
     assert_eq!(input_of("00042"), Some(true));
     assert_eq!(input_of("OMITTED"), Some(false));
 }
+
+/// A CALL no member of the program libraries answers by name finds the source file whose
+/// PROGRAM-ID it is, a member of the name coming first (assumption C441).
+#[test]
+fn a_call_finds_a_program_id_in_a_library_file_of_another_name() {
+    let library = temp("program-id-library");
+    std::fs::create_dir_all(&library).unwrap();
+    let callee = |id: &str, says: &str| format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. {id}.\n       PROCEDURE DIVISION.\n           DISPLAY '{says}'.\n           GOBACK.\n");
+    std::fs::write(library.join("payroll-batch.cbl"), callee("PAYCALC", "BY PROGRAM-ID")).unwrap();
+    std::fs::write(library.join("another.cbl"), callee("SUBA", "SUBA BY PROGRAM-ID")).unwrap();
+    std::fs::write(library.join("SUBA.cbl"), callee("SUBA", "SUBA BY MEMBER")).unwrap();
+    std::fs::write(library.join("notes.txt"), callee("NOTES", "NOT A LIBRARY MEMBER")).unwrap();
+    let main = program("", "", &[line("CALL 'PAYCALC'"), line("CALL 'SUBA'"), line("CALL 'NOTES'"), line("GOBACK.")].concat());
+    let walker = Harness::source(&main).dirs(vec![library.clone()]).run(Executor::Interpreter);
+    let vm = Harness::source(&main).dirs(vec![library.clone()]).run(Executor::Vm);
+    std::fs::remove_dir_all(&library).unwrap();
+    assert_eq!(walker.out, "BY PROGRAM-ID\nSUBA BY MEMBER\n");
+    assert_eq!(walker.ending.as_ref().map_err(|a| a.code.clone()), Err(AbendCode::ModuleNotFound));
+    assert_eq!((&vm.out, &vm.ending), (&walker.out, &walker.ending));
+}
