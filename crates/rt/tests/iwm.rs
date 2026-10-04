@@ -4,7 +4,8 @@ mod common;
 
 use common::payroll;
 use ironwork_rt::bms::{Attrb, Field, Initial, Intensity, Map, Mapset, Mode, Protection};
-use ironwork_rt::lir::{Program, SqlEntry, SqlStatement};
+use ironwork_rt::lir::{Program, ProgramOptions, SqlEntry, SqlStatement};
+use ironwork_rt::module::codec::decode_all;
 use ironwork_rt::module::crc::{crc32, extend};
 use ironwork_rt::module::{
     DirectoryEntry, LoadedModule, Module, ModuleError, ModuleWriter, Section, SourceFile, Version, read, write, write_module,
@@ -95,6 +96,24 @@ fn the_debug_section_records_the_file_each_source_names() {
     }
     let short = LoadedModule { files: vec![Vec::new(), vec![None]], ..module };
     assert!(matches!(write_module(&short), Err(ModuleError::Malformed { section: "DEBUG", .. })));
+}
+
+#[test]
+fn assume_choices_follow_the_options_records_only_when_a_program_has_them() {
+    let plain = write(&two());
+    let mut programs = two();
+    programs[1].options.options.apply_flag("--assume=C101=off").unwrap();
+    let assumed = write(&programs);
+    assert_eq!(read(&assumed).unwrap().programs, programs);
+    let options = |bytes: &[u8]| {
+        let module = Module::read(bytes).unwrap();
+        (module.strings().unwrap(), module.body(Section::OPTIONS.id).unwrap().to_vec())
+    };
+    let (strings, body) = options(&plain);
+    assert_eq!(decode_all::<Vec<ProgramOptions>>("OPTIONS", &body, &strings).unwrap().len(), 2, "0.5's shape");
+    let (strings, body) = options(&assumed);
+    let refused = decode_all::<Vec<ProgramOptions>>("OPTIONS", &body, &strings).unwrap_err().to_string();
+    assert!(refused.contains("bytes left after the last value"), "a reader that knows no choices refuses them: {refused}");
 }
 
 #[test]

@@ -139,7 +139,7 @@ sections before it can decode anything else. Section bodies use the rules of §4
 |---|---|---|---|
 | 1 | `STRINGS` | The string table (§4.2) | yes |
 | 2 | `DIRECTORY` | The program directory (§6) | yes |
-| 3 | `OPTIONS` | Per program: `Program.options` (§5.1) | yes |
+| 3 | `OPTIONS` | Per program: `Program.options`; then, only when a program was compiled with `--assume`, each such program's choices as (program, `Assumed`) (§5.1, from 0.7) | yes |
 | 4 | `LAYOUT` | Per program: `Program.storage`, `items` and `edits` (§5.2) | yes |
 | 5 | `LIR` | Per program: the rest of `Program`; then, only when a file takes its name from a data item, each such file as (program, file, item) (lir.md `FileDesc::assign_item`, from 0.6) | yes |
 | 6 | `SQL` | Per program: `Program.sql`, the SQL statement table (§7) | yes |
@@ -255,12 +255,13 @@ and the reader checks the two agree.
 
 The macros are exported from `rt` as `codec_struct!` and `codec_enum!`. Their grammar:
 
-    codec_struct!(Type { field, ... } [check path]);
+    codec_struct!(Type { field, ... } [default { field, ... }] [check path]);
     codec_enum!(Type { Variant [{ field, ... } | (elem, ...)] = tag, ... });
 
 | Part | Rule |
 |---|---|
 | `Type { field, ... }` | The type's named fields, in the order they encode. Every field is listed, and a tuple struct is not accepted |
+| `default { field, ... }` | Optional. Fields left out of the encoding and decoded as their type's `Default`, which a section carries elsewhere (`Options::assumed`, §5.1). Every field is still listed once, in one list or the other |
 | `check path` | Optional. A `fn(&T) -> Result<(), String>` run on the decoded value, for a rule the shape cannot state (a code page the tables carry, §5.1). Its `String` becomes the reason of a `Malformed` at the byte where the value began. Without it, no check runs |
 | `Variant` | A unit variant, written bare |
 | `Variant { field, ... }` | A variant with named fields, encoded in the order listed |
@@ -273,7 +274,7 @@ Every field and element must itself be encodable (§4.1 to §4.4).
     codec_struct!(Options { arith, trunc, numproc, codepage, trunc_check, fastsrt, fastsrt_adv_print,
         sort_keys, adv, thread, dll, rent, dbcs, warnings, compile, dynam, debug, cics_return_warning,
         invdata, zwb, quote, currency, nsymbol, dispsign, intdate, qualify, initial, vlr, vsamopenfs,
-        numcheck, parmcheck, initcheck, optimize, compliance } check options_valid);
+        numcheck, parmcheck, initcheck, optimize, compliance, dialect } default { assumed } check options_valid);
     codec_enum!(Arith { Compat = 0, Extend = 1 });
     codec_enum!(Kind {
         Group = 0,
@@ -366,9 +367,20 @@ their own, each `Some` only when it uses the function. `CompileTime` is `seconds
 compiler takes it from the build's SOURCE_DATE_EPOCH when set, and from the clock otherwise.
 
 The spellings a card or PARM may use come from IBM's option table, vendored as
-`crates/numeric/data/enterprise-options.tsv` and read by `Options::apply`. Eight fields have no IBM
+`crates/numeric/data/enterprise-options.tsv` and read by `Options::apply`. Nine fields have no IBM
 compiler option: `trunc_check`, `fastsrt_adv_print`, `sort_keys`, `warnings`, `debug`,
-`cics_return_warning`, `compliance` and `dialect` are set by this compiler's own flags.
+`cics_return_warning`, `compliance`, `dialect` and `assumed` are set by this compiler's own flags.
+The table lists the fields `Options`' encoding holds, which `assumed` is not.
+
+`assumed`, an `Assumed`, is the values `--assume ID=VALUE` gave ([dialect.md](dialect.md)): `given`,
+an array of one byte per switched assumption in `numeric::options::SWITCHES` order (C101, C14, C95,
+C15, C51, C180, C262), 0 where no flag gave one and the dialect decides, else one more than the
+value's place in that switch's list (`ibm` 1, `gnucobol` 2, C101's `off` 3). `Options`' encoding
+leaves it out (`default { assumed }`), so a program compiled without `--assume` has 0.5's bytes. The
+`OPTIONS` section ends, after the per-program records, with each program that has a byte other than
+0 as (program index, `Assumed`), written only when there is one: a reader before 0.7 refuses such a
+module as malformed rather than run it with Enterprise COBOL's results. `Assumed`'s `check` refuses
+a byte past its switch's list.
 
 | Field | Type | Encoding | Set by |
 |---|---|---|---|
@@ -553,8 +565,10 @@ their name from a data item, written only when one does, so a 0.6 module without
 reader and a 0.5 reader refuses one with them as malformed. 0.6 also adds the dynamic SQL
 statements' tags (lir.md §9.7): a 0.5 reader refuses a module holding one as malformed and reads
 one without. 0.7 is additive too: it adds the tags of DESCRIBE and USING DESCRIPTOR, which a 0.6
-reader refuses as malformed. A module older than 0.5 is refused, and compiling the source again is
-the remedy: a 0.4 module's `DEBUG` records hold no source files (§9.2); a 0.3 module's options
+reader refuses as malformed, and the `OPTIONS` section ends with the `--assume` choices, written
+only for a program compiled with one (§5.1), so an earlier reader reads a module without them and
+refuses one with them as malformed. A module older than 0.5 is refused, and compiling the source
+again is the remedy: a 0.4 module's `DEBUG` records hold no source files (§9.2); a 0.3 module's options
 lack `compliance` and `dialect` (§5.1), its arithmetic plans `inner_dmax` (lir.md §7.2), and its
 plan for INITIALIZE of a reference-modified item holds the whole item's fields (lir.md §9, C300); a
 0.2 module's places lack the tables that move a variably located item, its EXEC CICS commands their

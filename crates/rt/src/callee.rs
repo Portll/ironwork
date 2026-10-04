@@ -259,7 +259,7 @@ pub fn recursive_call(program: &str, unit: &str, pos: Pos) -> Abend {
 }
 
 /// Whether a CALL of an entry name gets a copy of the program with WORKING-STORAGE of its own: a
-/// dynamic CALL does (assumption C51), except under --dialect gnucobol, where every entry name
+/// dynamic CALL does (assumption C51), except under gnucobol, where every entry name
 /// shares the program's one copy, as cobc's do.
 pub fn entry_copy(dynamic: bool, dialect: Dialect) -> bool {
     dynamic && dialect == Dialect::Ibm

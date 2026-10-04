@@ -269,8 +269,8 @@ pub struct Services {
     pub scope: Scope,
 }
 
-// The whole program as one value, the files' data items last, as the load module's LIR section
-// carries them after its records (load-module.md §3.4).
+// The whole program as one value, the files' data items and the --assume choices last, as the load
+// module's LIR and OPTIONS sections carry them after their records (load-module.md §3.4, §5.1).
 impl crate::module::codec::Encode for Program {
     fn encode(&self, w: &mut crate::module::codec::Writer) {
         let Program { id, options, initial, recursive, storage, items, paragraphs, procedure_start, ranges, blocks, places, exprs, conds, consts, plans, services, sql, abends, edits, symbols, debug } = self;
@@ -297,6 +297,7 @@ impl crate::module::codec::Encode for Program {
         debug.encode(w);
         let assigned: Vec<(u32, AssignItem)> = services.files.iter().enumerate().filter_map(|(k, f)| Some((k as u32, f.assign_item?))).collect();
         assigned.encode(w);
+        options.options.assumed.encode(w);
     }
 }
 
@@ -331,6 +332,7 @@ impl crate::module::codec::Decode for Program {
             let file = program.services.files.get_mut(k as usize).ok_or_else(|| r.malformed(at, format!("an assign item for file {k}")))?;
             file.assign_item = Some(item);
         }
+        program.options.options.assumed = Decode::decode(r)?;
         program_valid(&program).map_err(|reason| r.malformed(at, reason))?;
         Ok(program)
     }

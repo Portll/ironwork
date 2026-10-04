@@ -10,4 +10,4 @@ pub mod precision;
 pub mod sign;
 pub mod zoned;
 
-pub use options::{Arith, BinCheck, CicsReturnWarning, Compliance, Currency, Dialect, DispSign, FastsrtAdvPrint, Initcheck, IntDate, Nsymbol, Numcheck, Numproc, Options, Parmcheck, Qualify, Quote, SortKeys, Trunc, TruncCheck, Vlr, VsamOpenFs, ZonCheck};
+pub use options::{Arith, Assumed, BinCheck, CicsReturnWarning, Compliance, Currency, Dialect, DispSign, ExtraPlace, FastsrtAdvPrint, Initcheck, IntDate, Nsymbol, Numcheck, Numproc, Options, Parmcheck, Qualify, Quote, SortKeys, Switched, Trunc, TruncCheck, Vlr, VsamOpenFs, ZonCheck};

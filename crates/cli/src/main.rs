@@ -10,7 +10,7 @@ usage:
                [-debug] [--cics-return-warning=once|always|never] [--optimize=0|1|2] [-I <dir>]... [-L <dir>]... [--vm]
                [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT | --argument path|OMITTED...]
                [--exit-code] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
-               [--compliance strict|extended] [--dialect ibm|gnucobol]
+               [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]...
                                                        compile and run; CBL and PROCESS cards set the options
   ironwork run <module.iwm> [-L <dir>]... [-I <dir>]... [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
                [--statement-limit N] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
@@ -18,7 +18,7 @@ usage:
                                                        run a load module's first program on the VM, with the options
                                                        it was compiled with
   ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]...
-               [--compliance strict|extended] [--dialect ibm|gnucobol]
+               [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]...
                                                        compile only
   ironwork cics <program.cbl> [run flags] [--vm] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
                [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]... [--td QUEUE=path]...
@@ -32,7 +32,7 @@ usage:
   ironwork compile <program.cbl>... [-o <dir>] [--bundle NAME] [--source-prefix DIR] [-silent] [-strict-sort-keys]
                [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never]
                [--optimize=0|1|2]
-               [--compliance strict|extended] [--dialect ibm|gnucobol] [-I <dir>]... [-L <dir>]...
+               [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [-I <dir>]... [-L <dir>]...
                                                        compile and lower each source's programs to a load module
   ironwork dump [--section NAME]... [--strings] [--no-check] <module.iwm>
                                                        print a load module, one fact per line
@@ -42,7 +42,8 @@ usage:
   ironwork fuzz [--job|--differential] <program.cbl|job.jcl> -o <dir> [--runs N] [--seed N] [--timeout SECONDS] [--hang-limit N]
                [--root DIR] [--clock <time>]
                [-I <dir>]... [-L <dir>]... [-silent] [-strict-sort-keys] [-debug] [--optimize=0|1|2]
-               [--compliance strict|extended] [--dialect ibm|gnucobol] [--datasets DIR] [--proclib DIR]... [--user ID]
+               [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]...
+               [--datasets DIR] [--proclib DIR]... [--user ID]
                                                        run a batch program, or with --job a job, on generated input
                                                        and keep each abend; with --differential, each input on
                                                        which the interpreter and the VM differ
@@ -90,6 +91,11 @@ flags:
              gives Enterprise COBOL's, as the register of assumptions reads it; gnucobol gives that
              of GnuCOBOL's cobc -std=ibm, to compare a migration with a GnuCOBOL build.
              docs/dialect.md lists each difference. --dialect=ibm and --dialect=gnucobol work too
+  --assume ID=VALUE
+             switch one chosen assumption, whatever --dialect says: C101, C14, C95, C15, C51, C180
+             and C262 each take ibm or gnucobol, and C101 also off, its extra ROUNDED place counted
+             in no operation. Repeatable, the last for an ID winning; an assumption with no
+             alternative is refused by name. docs/dialect.md lists each. --assume=ID=VALUE works too
   --vm       run and cics: lower the program and run it on the VM rather than the interpreter. A
              program lowering refuses exits 242; a run that reaches what the VM does not run yet (a
              CALLed program, user-defined function, method or LINK that does not lower, FUNCTION
@@ -454,14 +460,9 @@ fn usage_error(message: &str) -> ExitCode {
 }
 
 fn list_assumptions(c_series: bool) -> ExitCode {
-    use numeric::assumptions::{Basis, Oracle};
+    use numeric::assumptions::Oracle;
     for (n, a) in numeric::assumptions::c_series() {
-        let basis = match a.basis {
-            Basis::Documented => "documented",
-            Basis::Recalled => "recalled",
-            Basis::Chosen => "chosen",
-            Basis::Observed => "observed",
-        };
+        let basis = a.basis.name();
         let oracle = match a.oracle {
             Oracle::Hercules => "hercules",
             Oracle::EnterpriseCobol => "enterprise-cobol",
@@ -713,6 +714,17 @@ fn driver() -> ExitCode {
             f if f.starts_with("--dialect=") => match numeric::Dialect::named(&f["--dialect=".len()..]) {
                 Some(d) => flags.push(d.flag().to_owned()),
                 None => refuse!("--dialect needs ibm or gnucobol"),
+            },
+            "--assume" => match args.next() {
+                Some(spec) => match numeric::Assumed::parse(&spec) {
+                    Ok(_) => flags.push(format!("--assume={spec}")),
+                    Err(why) => refuse!(why),
+                },
+                None => refuse!("--assume needs ID=VALUE, such as C101=off"),
+            },
+            f if f.starts_with("--assume=") => match numeric::Assumed::parse(&f["--assume=".len()..]) {
+                Ok(_) => flags.push(a),
+                Err(why) => refuse!(why),
             },
             f if f.starts_with("--optimize") => match f {
                 "--optimize=0" | "--optimize=1" | "--optimize=2" => flags.push(a),

@@ -17,6 +17,7 @@ use crate::store;
 use crate::unit::{Event, LoadError, Loader, OS_COMMAND_ROUTINES, RETURN_CODE, RunUnit, UnitHost};
 use crate::virtual_printer::{self, Job};
 use crate::vocab::Pos;
+use numeric::Switched;
 use numeric::precision::{Fixed, Places};
 use std::borrow::Cow;
 use std::rc::Rc;
@@ -53,7 +54,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 }
             }
         }
-        let (index, entry) = match self.unit.load_entry(&name, callee::entry_copy(dynamic, self.p.options.options.dialect)) {
+        let (index, entry) = match self.unit.load_entry(&name, callee::entry_copy(dynamic, self.p.options.options.dialect_of(Switched::EntryCalls))) {
             Ok(found) => found,
             Err(LoadError::NotFound) => {
                 if let Some(service) = le::service(&name) {
@@ -257,7 +258,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             self.sink("dynamic-program-load", pos, &name);
         }
         let dynamic = self.p.options.options.dynam || variable;
-        match self.unit.load_entry(&name, callee::entry_copy(dynamic, self.p.options.options.dialect)) {
+        match self.unit.load_entry(&name, callee::entry_copy(dynamic, self.p.options.options.dialect_of(Switched::EntryCalls))) {
             Ok(_) => {}
             Err(LoadError::NotFound) if le::provides(&name) => {}
             Err(LoadError::NotFound) => return Err(Abend { code: AbendCode::ModuleNotFound, message: le::missing(&name), pos, file: None }.into()),

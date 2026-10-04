@@ -21,6 +21,17 @@ pub enum Basis {
     Observed,
 }
 
+impl Basis {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Documented => "documented",
+            Self::Recalled => "recalled",
+            Self::Chosen => "chosen",
+            Self::Observed => "observed",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Assumption {
     pub id: &'static str,
@@ -1408,7 +1419,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: ROUNDED_EXTRA_PLACE,
-        claim: "A receiver named with ROUNDED counts in dmax with one decimal place more than it holds, so a quotient, or an intermediate cut back to dmax places, keeps the digit that rounding reads: DIVIDE 44.1 INTO a PIC 9(4)V9 of 1661.7 ROUNDED gives 37.7, as CCVS85 NC117A and NC171A expect. The Programming Guide says only that under ROUNDED one more decimal place, and one more integer place, might be carried for accuracy if necessary (SC27-8714-03, p. 794); the Language Reference's ROUNDED phrase compares the result's fraction with the receiver's (SC27-8713-03, p. 296). Under --dialect gnucobol the extra place counts in the statement's last operation alone, whose result the receivers take, and every operation below it carries dmax with each receiver's own places, as cobc -std=ibm truncates intermediate results to dmax and computes the last one exactly: COMPUTE D ROUNDED = D + E / 3 keeps E / 3 to D's two places",
+        claim: "A receiver named with ROUNDED counts in dmax with one decimal place more than it holds, so a quotient, or an intermediate cut back to dmax places, keeps the digit that rounding reads: DIVIDE 44.1 INTO a PIC 9(4)V9 of 1661.7 ROUNDED gives 37.7, as CCVS85 NC117A and NC171A expect. The Programming Guide says only that under ROUNDED one more decimal place, and one more integer place, might be carried for accuracy if necessary (SC27-8714-03, p. 794); the Language Reference's ROUNDED phrase compares the result's fraction with the receiver's (SC27-8713-03, p. 296). Under --dialect gnucobol the extra place counts in the statement's last operation alone, whose result the receivers take, and every operation below it carries dmax with each receiver's own places, as cobc -std=ibm truncates intermediate results to dmax and computes the last one exactly: COMPUTE D ROUNDED = D + E / 3 keeps E / 3 to D's two places. Under --assume C101=off the extra place counts in no operation, as the Programming Guide's 'might be carried' allows: COMPUTE S ROUNDED = 1661.7 / DIV2, DIV2 44.1 and S a PIC 99V9, gives 37.6",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

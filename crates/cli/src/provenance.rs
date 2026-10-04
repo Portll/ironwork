@@ -82,6 +82,7 @@ pub fn statement(i: &Inputs<'_>) -> String {
         ("compliance", o.compliance.name().into()),
         ("ssrange", i.compiled.ssrange.into()),
         ("dialect", o.dialect.name().into()),
+        ("assumed", Value::Obj(o.alternatives_in_force().map(|(id, value)| (id.to_owned(), value.into())).collect())),
     ]));
     let libraries = strings(i.roots.iter().skip(1).map(|r| r.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
     let build_definition = Value::Obj(fields([

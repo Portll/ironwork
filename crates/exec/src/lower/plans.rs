@@ -5,7 +5,7 @@
 use super::data::{Side, Value, Within, scale};
 use super::{Lower, R, push, unsupported};
 use numeric::precision::Dmax;
-use numeric::{Dialect, Numproc, Trunc};
+use numeric::{Dialect, Numproc, Switched, Trunc};
 use crate::machine::{divided_exponent, value_kind};
 use rt::lir::{
     self, ArithId, ArithPlan, ArithStep, DisplayId, DisplayItem, ExprId, FloatFrom, Image, InitField, InitId, InitPlan, InitValue, Mode, MovePlan,
@@ -125,7 +125,7 @@ impl Lower<'_> {
                 prepass.push(target);
             }
             prepass.extend(self.dmax_places(e)?);
-            places = places.max(Dmax::receiver(scale(self.kind_of(target)), *rounded, self.c.options.dialect)).with(self.dmax(e)?);
+            places = places.max(Dmax::receiver(scale(self.kind_of(target)), *rounded, self.c.options.extra_place())).with(self.dmax(e)?);
         }
         let dmax = places.last;
         let arith = self.c.options.arith;
@@ -247,7 +247,7 @@ impl Lower<'_> {
                         Kind::Binary { digits, signed, native, .. } => {
                             let whole = native || self.c.options.trunc == Trunc::Bin;
                             let digits = match self.places[place as usize].len {
-                                len if self.c.options.dialect == Dialect::Gnucobol => rt::display::gnucobol_binary_width(len as usize) as u32,
+                                len if self.c.options.dialect_of(Switched::DisplayOfNondisplayNumeric) == Dialect::Gnucobol => rt::display::gnucobol_binary_width(len as usize) as u32,
                                 _ if !whole => digits,
                                 2 => 5,
                                 4 => 10,
@@ -265,7 +265,7 @@ impl Lower<'_> {
                 }
                 Operand::Literal(Literal::Number(t)) => {
                     let point = if self.program.environment.decimal_point_comma { ',' } else { '.' };
-                    DisplayItem::Text(self.sym(&rt::display::literal(t, point, self.c.options.dialect)))
+                    DisplayItem::Text(self.sym(&rt::display::literal(t, point, self.c.options.dialect_of(Switched::DecimalCommaDisplayLiteral))))
                 }
                 Operand::Literal(lit) if self.unencodable(lit).is_some() => DisplayItem::Value(self.operand(op, pos)?.operand),
                 Operand::Literal(lit) => {

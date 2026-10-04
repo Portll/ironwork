@@ -7,7 +7,7 @@ use crate::storage::{Kind, Loc, Val, literal_fixed};
 use crate::store::{self, ProgramFacts};
 use crate::unit::{Loader, RunUnit};
 use crate::vocab::{AcceptFrom, Figurative, Pos};
-use numeric::Dialect;
+use numeric::{Dialect, Switched};
 
 /// `name` is the receiver's, which the message at the end of SYSIN gives.
 pub fn accept<H: Clone, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, dest: Loc, from: AcceptFrom, name: &str, pos: Pos) -> Result<(), Abend> {
@@ -73,7 +73,7 @@ fn sysin_record<H: Clone, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut Run
 /// ACCEPT with no SYSIN record left: the receiver unchanged (assumption C15), or under
 /// --dialect gnucobol given the space cobc moves, which leaves a numeric receiver zero.
 fn at_end<H: Clone, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, dest: Loc, name: &str, pos: Pos) -> Result<(), Abend> {
-    let ibm = facts.options().dialect == Dialect::Ibm;
+    let ibm = facts.options().dialect_of(Switched::AcceptAtEnd) == Dialect::Ibm;
     if unit.sysin_ended.insert((pos.file, pos.line, pos.col)) {
         let given = if ibm { "is unchanged" } else { "takes a space, as GnuCOBOL gives it" };
         let _ = writeln!(unit.err, "ironwork: {pos}: ACCEPT found SYSIN at its end; {name} {given}");

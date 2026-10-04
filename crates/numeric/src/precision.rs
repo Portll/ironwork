@@ -2,7 +2,7 @@
 //! operation, and exact arithmetic that drops exactly the digits it drops. See
 //! [`crate::assumptions::INTERMEDIATE_TABLE`].
 
-use crate::options::{Arith, Dialect};
+use crate::options::{Arith, ExtraPlace};
 use std::fmt;
 use zarch::wide::U256;
 
@@ -48,13 +48,14 @@ pub struct Dmax {
 
 impl Dmax {
     /// The decimal places a receiver of `scale` counts for: under ROUNDED one more, the digit
-    /// rounding reads, in every operation (`Dialect::Ibm`) or in the last alone
-    /// (`Dialect::Gnucobol`). See [`crate::assumptions::ROUNDED_EXTRA_PLACE`].
-    pub const fn receiver(scale: u32, rounded: bool, dialect: Dialect) -> Self {
+    /// rounding reads, in every operation, in the last alone, or in none, as `place` says. See
+    /// [`crate::assumptions::ROUNDED_EXTRA_PLACE`].
+    pub const fn receiver(scale: u32, rounded: bool, place: ExtraPlace) -> Self {
         let last = scale + rounded as u32;
-        match dialect {
-            Dialect::Ibm => Self { last, inner: last },
-            Dialect::Gnucobol => Self { last, inner: scale },
+        match place {
+            ExtraPlace::Every => Self { last, inner: last },
+            ExtraPlace::Last => Self { last, inner: scale },
+            ExtraPlace::Off => Self { last: scale, inner: scale },
         }
     }
 
@@ -265,21 +266,27 @@ mod tests {
     fn a_rounded_quotient_carries_one_place_more_than_its_receiver() {
         let (dividend, divisor) = (Fixed::new(16617, Places::new(4, 1)), Fixed::new(441, Places::new(2, 1)));
         let receiver = Places::new(4, 1);
-        let truncated = dividend.div(divisor, Dmax::receiver(receiver.dec, false, Dialect::Ibm).last, Arith::Compat).unwrap();
+        let truncated = dividend.div(divisor, Dmax::receiver(receiver.dec, false, ExtraPlace::Every).last, Arith::Compat).unwrap();
         assert_eq!(truncated.to_receiver(receiver, true).0.to_i128(), Some(376));
-        let rounded = dividend.div(divisor, Dmax::receiver(receiver.dec, true, Dialect::Ibm).last, Arith::Compat).unwrap();
+        let rounded = dividend.div(divisor, Dmax::receiver(receiver.dec, true, ExtraPlace::Every).last, Arith::Compat).unwrap();
         assert_eq!((rounded.to_i128(), rounded.places.dec), (Some(3768), 2));
         assert_eq!(rounded.to_receiver(receiver, true).0.to_i128(), Some(377));
     }
 
     #[test]
     fn gnucobol_counts_the_rounded_place_in_the_last_operation_alone() {
-        assert_eq!(Dmax::receiver(2, true, Dialect::Ibm), Dmax { last: 3, inner: 3 });
-        assert_eq!(Dmax::receiver(2, true, Dialect::Gnucobol), Dmax { last: 3, inner: 2 });
-        assert_eq!(Dmax::receiver(2, false, Dialect::Gnucobol), Dmax { last: 2, inner: 2 });
-        let statement = Dmax::receiver(2, true, Dialect::Gnucobol).max(Dmax::receiver(1, false, Dialect::Gnucobol)).with(1);
+        assert_eq!(Dmax::receiver(2, true, ExtraPlace::Every), Dmax { last: 3, inner: 3 });
+        assert_eq!(Dmax::receiver(2, true, ExtraPlace::Last), Dmax { last: 3, inner: 2 });
+        assert_eq!(Dmax::receiver(2, false, ExtraPlace::Last), Dmax { last: 2, inner: 2 });
+        let statement = Dmax::receiver(2, true, ExtraPlace::Last).max(Dmax::receiver(1, false, ExtraPlace::Last)).with(1);
         assert_eq!(statement, Dmax { last: 3, inner: 2 });
         assert_eq!(statement.with(4), Dmax { last: 4, inner: 4 });
+    }
+
+    #[test]
+    fn off_counts_no_rounded_place() {
+        assert_eq!(Dmax::receiver(2, true, ExtraPlace::Off), Dmax { last: 2, inner: 2 });
+        assert_eq!(Dmax::receiver(2, true, ExtraPlace::Off).with(3), Dmax { last: 3, inner: 3 });
     }
 
     #[test]

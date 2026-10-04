@@ -6,7 +6,7 @@ register of assumptions reads it. `gnucobol` is GnuCOBOL 3.2's, so a migration t
 under ironwork and under a GnuCOBOL build sees only the differences that matter to it.
 
 **Status:** built, 2026-10-03 (ironwork-roadmap 3.11). Seven assumptions switch: C101, C14, C95,
-C15, C51, C180 and C262.
+C15, C51, C180 and C262. `--assume ID=VALUE` switches one of them alone (§2.1).
 
 ## 1. What the dialect switches, and what it does not
 
@@ -38,6 +38,29 @@ It does not switch:
 | Provenance | `--provenance` records the flag in `externalParameters.flags` and the dialect in `internalParameters.optionsInForce.dialect` ([evidence.md](evidence.md) §2) |
 | Evidence | the journal's `open` record keeps `--dialect` and its value in `argv`, as it keeps `--compliance`'s and `--statement-limit`'s ([evidence.md](evidence.md) §1) |
 
+### 2.1 `--assume ID=VALUE`: one assumption at a time
+
+`--assume` switches one of the seven, whatever `--dialect` says, so a comparison can find which
+assumption a difference comes from. Each takes `ibm`, the result the register states, or `gnucobol`,
+cobc's; C101 also takes `off`, a ROUNDED receiver's extra decimal place counted in no operation
+(§3). A value names whose result it is or what it does.
+
+| | |
+|---|---|
+| Flag | `--assume ID=VALUE` or `--assume=ID=VALUE`, repeatable; for one ID the last wins, and it wins over `--dialect` in either order. The same commands as `--dialect` take it, and `dump` refuses it |
+| Refused | by name, as a usage error: an ID the register lacks; an assumption with no alternative, its basis named (`--assume C1=off: assumption C1 (documented) has no alternative; --assume switches C101, C14, C95, C15, C51, C180 and C262`); a value its switch does not take (`C14 takes ibm or gnucobol`) |
+| Options | `Options::assumed`, set by `Options::apply_flag("--assume=ID=VALUE")`; `Options::dialect_of` and `Options::extra_place` give the value in force. `numeric::options::SWITCHES` lists the IDs and their values |
+| Load module | after the `OPTIONS` section's records, for each program compiled with one, from format 0.7 ([load-module.md](load-module.md) §5.1); `ironwork dump` prints each as `assume C101=off` |
+| Provenance | the flag in `externalParameters.flags`, and in `optionsInForce.assumed` each switched assumption whose value in force is not `ibm`, with its value ([evidence.md](evidence.md) §2) |
+| Evidence | the journal's `open` record keeps `--assume` and its ID=VALUE in `argv` |
+
+| Flags | `COMPUTE D ROUNDED = D + E / 3`, then `DISPLAY` of an `S9(3)V99 COMP-3` -1.25 and of `1.5` |
+|---|---|
+| none | `000051B`, `0012N 1.5` |
+| `--assume C14=gnucobol` | `000051B`, `-00125 1.5` |
+| `--dialect gnucobol --assume C14=ibm` | `000051A`, `0012N 15` |
+| `--assume C101=off` | `000051A`, `0012N 1.5` |
+
 The interpreter and the VM read the dialect from the same options and give the same result. The
 lowering reads it where it fixes a result in the LIR: an arithmetic plan's `inner_dmax` (C101), a
 binary item's DISPLAY digits (C14), a numeric literal's DISPLAY text (C95) and which zoned
@@ -53,6 +76,11 @@ arithmetic-osvs, which `-std=ibm` sets, truncates each intermediate result to dm
 statement's last operation exactly. Under `gnucobol` the extra place counts in the last operation
 alone, the one whose result the receivers take, and every operation below it carries dmax with each
 receiver's own places.
+
+Under `--assume C101=off` a ROUNDED receiver counts with its own places in every operation, so a
+quotient that is the statement's last operation keeps no digit for rounding to read either:
+`COMPUTE S ROUNDED = 1661.7 / DIV2` gives 37.6, where `ibm` and `gnucobol` give the 37.7 CCVS85
+NC117A and NC171A expect. The Programming Guide's "might be carried" (p. 794) allows it.
 
 `ArithPlan.inner_dmax` carries the second dmax; `numeric::precision::Dmax::receiver` decides both, and
 `eval_fixed_at` in the walker (`crates/exec/src/machine.rs`) and the VM (`crates/rt/src/vm/value.rs`)

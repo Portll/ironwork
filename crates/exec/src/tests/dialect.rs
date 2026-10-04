@@ -4,15 +4,18 @@
 use super::*;
 use numeric::Dialect;
 
-/// The program's output under `dialect`, the same on the interpreter, in the differential run, and
+/// The program's output under `flags`, the same on the interpreter, in the differential run, and
 /// on the VM alone.
-fn under(source: &str, dialect: Dialect) -> String {
-    let flags = [dialect.flag()];
-    let walker = Harness::source(source).flags(&flags).run(Executor::Interpreter);
+fn with_flags(source: &str, flags: &[&str]) -> String {
+    let walker = Harness::source(source).flags(flags).run(Executor::Interpreter);
     assert!(walker.ending.is_ok(), "{:?}\n{}", walker.ending, walker.err);
-    let vm = Harness::source(source).flags(&flags).run(Executor::Vm);
-    assert_eq!(vm.out, walker.out, "the VM under {}", dialect.name());
+    let vm = Harness::source(source).flags(flags).run(Executor::Vm);
+    assert_eq!(vm.out, walker.out, "the VM under {flags:?}");
     walker.out
+}
+
+fn under(source: &str, dialect: Dialect) -> String {
+    with_flags(source, &[dialect.flag()])
 }
 
 #[test]
@@ -195,4 +198,25 @@ fn unsigned_zoned_items_of_one_length_compare_by_their_bytes_under_gnucobol() {
     let optimized = [Dialect::Gnucobol.flag(), "--optimize=2"];
     assert_eq!(Harness::source(&source).flags(&optimized).run(Executor::Interpreter).out, "ZERO\nNOT W\n");
     assert_eq!(Harness::source(&source).flags(&["--optimize=2"]).run(Executor::Interpreter).out, "ZONES\nNOT W\n");
+}
+
+#[test]
+fn assume_switches_one_assumption_whatever_the_dialect_says() {
+    let source = program(
+        "",
+        "       01  D PIC S9(5)V99 VALUE 1.\n       01  E PIC S9(5)V99 VALUE 12.35.\n       01  S PIC 99V9.\n       01  DIV2 PIC 99V9 VALUE 44.1.\n       01  P PIC S9(3)V99 COMP-3 VALUE -1.25.\n",
+        &[line("COMPUTE D ROUNDED = D + E / 3"), line("COMPUTE S ROUNDED = 1661.7 / DIV2"), line("DISPLAY D ' ' S"), line("DISPLAY P ' ' 1.5"), line("GOBACK.")].concat(),
+    );
+    let ibm_c14 = "000051A 377\n0012N 15\n";
+    for (flags, shown) in [
+        (&[][..], "000051B 377\n0012N 1.5\n"),
+        (&["--assume=C14=gnucobol"], "000051B 377\n-00125 1.5\n"),
+        (&["--dialect=gnucobol", "--assume=C14=ibm"], ibm_c14),
+        (&["--assume=C14=ibm", "--dialect=gnucobol"], ibm_c14),
+        (&["--assume=C101=off"], "000051A 376\n0012N 1.5\n"),
+        (&["--dialect=gnucobol", "--assume=C101=off"], "000051A 376\n-00125 15\n"),
+        (&["--assume=C101=off", "--assume=C101=gnucobol"], "000051A 377\n0012N 1.5\n"),
+    ] {
+        assert_eq!(with_flags(&source, flags), shown, "{flags:?}");
+    }
 }

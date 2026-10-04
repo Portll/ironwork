@@ -1,3 +1,4 @@
+use crate::assumptions;
 use std::fmt;
 use zarch::ebcdic::{self, CodePage};
 use zarch::hfp::Precision;
@@ -361,6 +362,79 @@ impl Dialect {
     }
 }
 
+/// A chosen assumption `--assume ID=VALUE` switches, by its place in [`SWITCHES`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Switched {
+    RoundedExtraPlace,
+    DisplayOfNondisplayNumeric,
+    DecimalCommaDisplayLiteral,
+    AcceptAtEnd,
+    EntryCalls,
+    ExternalStorage,
+    OptimizedZonesCompared,
+}
+
+const IBM_OR_GNUCOBOL: &[&str] = &["ibm", "gnucobol"];
+
+/// Each switched assumption's register id and the values `--assume` takes for it: `ibm`, the result
+/// the register states, then `gnucobol`, cobc's, which `--dialect gnucobol` gives, then any other
+/// alternative the claim names (docs/dialect.md).
+pub const SWITCHES: [(&str, &[&str]); 7] = [
+    (assumptions::ROUNDED_EXTRA_PLACE, &["ibm", "gnucobol", "off"]),
+    (assumptions::DISPLAY_OF_NONDISPLAY_NUMERIC, IBM_OR_GNUCOBOL),
+    (assumptions::DECIMAL_COMMA_DISPLAY_LITERAL, IBM_OR_GNUCOBOL),
+    (assumptions::ACCEPT_AT_END, IBM_OR_GNUCOBOL),
+    (assumptions::ENTRY_CALLS, IBM_OR_GNUCOBOL),
+    (assumptions::EXTERNAL_STORAGE, IBM_OR_GNUCOBOL),
+    (assumptions::OPTIMIZED_ZONES_COMPARED, IBM_OR_GNUCOBOL),
+];
+
+/// Where a ROUNDED receiver's extra decimal place counts (assumption C101): in every operation of
+/// the statement (`ibm`), in its last alone (`gnucobol`), or in none (`off`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExtraPlace {
+    Every,
+    Last,
+    Off,
+}
+
+/// The values `--assume` gave, by place in [`SWITCHES`]: 0 where none did and the dialect decides,
+/// else one more than the value's place in the switch's list.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Assumed {
+    pub given: [u8; SWITCHES.len()],
+}
+
+impl Assumed {
+    /// Reads `ID=VALUE` as a switch's place and the value's mark, refusing by name an id the
+    /// register lacks, an assumption with no alternative, and a value the switch does not take.
+    pub fn parse(spec: &str) -> Result<(usize, u8), String> {
+        let Some((id, value)) = spec.split_once('=') else {
+            return Err(format!("--assume {spec}: needs ID=VALUE, such as C101=off"));
+        };
+        let Some(i) = SWITCHES.iter().position(|(s, _)| *s == id) else {
+            let switched = listed(&SWITCHES.map(|(s, _)| s), "and");
+            return Err(match assumptions::ASSUMPTIONS.iter().find(|a| a.id == id) {
+                Some(a) => format!("--assume {spec}: assumption {id} ({}) has no alternative; --assume switches {switched}", a.basis.name()),
+                None => format!("--assume {spec}: the register has no assumption {id}; ironwork assumptions lists them"),
+            });
+        };
+        match SWITCHES[i].1.iter().position(|v| *v == value) {
+            Some(k) => Ok((i, k as u8 + 1)),
+            None => Err(format!("--assume {spec}: {id} takes {}", listed(SWITCHES[i].1, "or"))),
+        }
+    }
+}
+
+/// `a, b and c`, or with `or`.
+fn listed(words: &[&str], last: &str) -> String {
+    match words {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [rest @ .., end] => format!("{} {last} {end}", rest.join(", ")),
+    }
+}
+
 /// The COMPILE option: which messages stop the object code, so that run and cics refuse the
 /// program (Programming Guide SC27-8714-03, p. 355).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -490,6 +564,7 @@ pub struct Options {
     pub optimize: u8,
     pub compliance: Compliance,
     pub dialect: Dialect,
+    pub assumed: Assumed,
 }
 
 impl Default for Options {
@@ -530,6 +605,7 @@ impl Default for Options {
             optimize: 0,
             compliance: Compliance::default(),
             dialect: Dialect::default(),
+            assumed: Assumed::default(),
         }
     }
 }
@@ -895,6 +971,10 @@ impl Options {
                 Some(d) => self.dialect = d,
                 None => return Err(OptionError::UnknownFlag(flag.to_owned())),
             },
+            f if f.starts_with("--assume=") => match Assumed::parse(&f["--assume=".len()..]) {
+                Ok((i, mark)) => self.assumed.given[i] = mark,
+                Err(_) => return Err(OptionError::UnknownFlag(flag.to_owned())),
+            },
             _ => return Err(OptionError::UnknownFlag(flag.to_owned())),
         }
         Ok(())
@@ -921,21 +1001,54 @@ impl Options {
     }
 
     /// Whether an unsigned zoned integer compared with zero is compared by its bytes: where zones
-    /// are compared, but under NOINVDATA and --dialect gnucobol as a number at every OPTIMIZE
+    /// are compared, but under NOINVDATA and C262 gnucobol as a number at every OPTIMIZE
     /// level, as cobc compares it (C262).
     pub fn zones_compared_with_zero(&self) -> bool {
         self.zones_compared() && !self.cobc_zoned_compare()
     }
 
     /// Whether an unsigned zoned integer compared with one of its own length is compared by its
-    /// bytes: where zones are compared, and under NOINVDATA and --dialect gnucobol at every
+    /// bytes: where zones are compared, and under NOINVDATA and C262 gnucobol at every
     /// OPTIMIZE level, as cobc compares two such items with memcmp (C262).
     pub fn zones_compared_between_items(&self) -> bool {
         self.zones_compared() || self.cobc_zoned_compare()
     }
 
     fn cobc_zoned_compare(&self) -> bool {
-        self.invdata.is_none() && self.dialect == Dialect::Gnucobol
+        self.invdata.is_none() && self.dialect_of(Switched::OptimizedZonesCompared) == Dialect::Gnucobol
+    }
+
+    /// The place in its switch's list of the value a switched assumption takes: `--assume`'s, else
+    /// the dialect's.
+    fn switch_value(&self, i: usize) -> usize {
+        match (self.assumed.given[i], self.dialect) {
+            (0, Dialect::Ibm) => 0,
+            (0, Dialect::Gnucobol) => 1,
+            (mark, _) => usize::from(mark) - 1,
+        }
+    }
+
+    /// Whose result a switched assumption gives. C101's `off` is [`Options::extra_place`]'s alone.
+    pub fn dialect_of(&self, switched: Switched) -> Dialect {
+        if self.switch_value(switched as usize) == 1 { Dialect::Gnucobol } else { Dialect::Ibm }
+    }
+
+    pub fn extra_place(&self) -> ExtraPlace {
+        match self.switch_value(Switched::RoundedExtraPlace as usize) {
+            0 => ExtraPlace::Every,
+            1 => ExtraPlace::Last,
+            _ => ExtraPlace::Off,
+        }
+    }
+
+    /// The `--assume` flags that give these options' choices, for a compile that repeats them.
+    pub fn assume_flags(&self) -> impl Iterator<Item = String> {
+        SWITCHES.iter().zip(self.assumed.given).filter(|&(_, mark)| mark > 0).map(|((id, values), mark)| format!("--assume={id}={}", values[usize::from(mark) - 1]))
+    }
+
+    /// Each switched assumption whose value in force is not `ibm`, with that value.
+    pub fn alternatives_in_force(&self) -> impl Iterator<Item = (&'static str, &'static str)> {
+        SWITCHES.iter().enumerate().map(|(i, (id, values))| (*id, values[self.switch_value(i)])).filter(|&(_, value)| value != "ibm")
     }
 
     pub fn code_page(&self) -> &'static CodePage {
@@ -1353,5 +1466,61 @@ mod tests {
             assert!(o.apply_flag(bad).is_err(), "{bad}");
         }
         assert_eq!(o.dialect, Dialect::Ibm);
+    }
+
+    #[test]
+    fn each_switch_names_its_assumption_in_the_order_switched_lists_them() {
+        use assumptions::*;
+        let ids = [ROUNDED_EXTRA_PLACE, DISPLAY_OF_NONDISPLAY_NUMERIC, DECIMAL_COMMA_DISPLAY_LITERAL, ACCEPT_AT_END, ENTRY_CALLS, EXTERNAL_STORAGE, OPTIMIZED_ZONES_COMPARED];
+        let switched = [
+            Switched::RoundedExtraPlace,
+            Switched::DisplayOfNondisplayNumeric,
+            Switched::DecimalCommaDisplayLiteral,
+            Switched::AcceptAtEnd,
+            Switched::EntryCalls,
+            Switched::ExternalStorage,
+            Switched::OptimizedZonesCompared,
+        ];
+        for (s, id) in switched.into_iter().zip(ids) {
+            let (switch, values) = SWITCHES[s as usize];
+            assert_eq!(switch, id);
+            assert_eq!(values[..2], ["ibm", "gnucobol"], "{id}");
+            assert_eq!(get(id).basis, Basis::Chosen, "{id}");
+        }
+    }
+
+    #[test]
+    fn assume_switches_one_assumption_and_wins_over_the_dialect_whatever_the_order() {
+        let mut o = Options::default();
+        assert_eq!((o.extra_place(), o.dialect_of(Switched::AcceptAtEnd)), (ExtraPlace::Every, Dialect::Ibm));
+        o.apply_flag("--assume=C15=gnucobol").unwrap();
+        assert_eq!((o.extra_place(), o.dialect_of(Switched::AcceptAtEnd)), (ExtraPlace::Every, Dialect::Gnucobol));
+        o.apply_flag("--dialect=gnucobol").unwrap();
+        o.apply_flag("--assume=C101=off").unwrap();
+        assert_eq!((o.extra_place(), o.dialect_of(Switched::EntryCalls)), (ExtraPlace::Off, Dialect::Gnucobol));
+        o.apply_flag("--assume=C101=ibm").unwrap();
+        assert_eq!(o.extra_place(), ExtraPlace::Every);
+        assert_eq!(o.assume_flags().collect::<Vec<_>>(), ["--assume=C101=ibm", "--assume=C15=gnucobol"]);
+        assert_eq!(o.alternatives_in_force().map(|(id, _)| id).collect::<Vec<_>>(), ["C14", "C95", "C15", "C51", "C180", "C262"]);
+        o.apply_flag("--dialect=ibm").unwrap();
+        assert_eq!(o.alternatives_in_force().collect::<Vec<_>>(), [("C15", "gnucobol")]);
+        assert!(o.apply_flag("--assume=C101=on").is_err());
+        assert_eq!(o.extra_place(), ExtraPlace::Every);
+    }
+
+    #[test]
+    fn assume_refuses_by_name_what_it_cannot_switch() {
+        assert_eq!(Assumed::parse("C101=off"), Ok((0, 3)));
+        assert_eq!(Assumed::parse("C262=ibm"), Ok((6, 1)));
+        for (spec, said) in [
+            ("C101", "--assume C101: needs ID=VALUE, such as C101=off"),
+            ("C1=gnucobol", "--assume C1=gnucobol: assumption C1 (documented) has no alternative; --assume switches C101, C14, C95, C15, C51, C180 and C262"),
+            ("C16=gnucobol", "--assume C16=gnucobol: assumption C16 (chosen) has no alternative; --assume switches C101, C14, C95, C15, C51, C180 and C262"),
+            ("C9999=off", "--assume C9999=off: the register has no assumption C9999; ironwork assumptions lists them"),
+            ("C14=off", "--assume C14=off: C14 takes ibm or gnucobol"),
+            ("C101=GNUCOBOL", "--assume C101=GNUCOBOL: C101 takes ibm, gnucobol or off"),
+        ] {
+            assert_eq!(Assumed::parse(spec), Err(said.to_owned()), "{spec}");
+        }
     }
 }

@@ -3,7 +3,7 @@
 use exec::lir::{Debug as DebugTable, Listing, ProgramOptions, SqlEntry};
 use exec::module::codec::decode_all;
 use exec::module::crc::crc32;
-use exec::module::{DirectoryEntry, LayoutRecord, LirRecord, Module, ModuleError, Section, SectionEntry, SourceFile, StringTable};
+use exec::module::{DirectoryEntry, LayoutRecord, LirRecord, Module, ModuleError, OptionRecords, Section, SectionEntry, SourceFile, StringTable};
 use rt::bms::Mapset;
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -89,7 +89,7 @@ pub fn dump(bytes: &[u8], o: &Options) -> Result<(String, bool), ModuleError> {
         body.and_then(|b| decode_all::<Vec<T>>(s.name, b, strings).map_err(|e| e.to_string()))
     }
     let directory: Decoded<DirectoryEntry> = records(body(Section::DIRECTORY), Section::DIRECTORY, &table);
-    let options: Decoded<ProgramOptions> = records(body(Section::OPTIONS), Section::OPTIONS, &table);
+    let options: Decoded<ProgramOptions> = body(Section::OPTIONS).and_then(|b| decode_all::<OptionRecords>(Section::OPTIONS.name, b, &table).map(|o| o.0).map_err(|e| e.to_string()));
     let layout: Decoded<LayoutRecord> = records(body(Section::LAYOUT), Section::LAYOUT, &table);
     let lir: Decoded<LirRecord> = records(body(Section::LIR), Section::LIR, &table);
     let sql: Decoded<Vec<SqlEntry>> = records(body(Section::SQL), Section::SQL, &table);
@@ -159,8 +159,11 @@ pub fn dump(bytes: &[u8], o: &Options) -> Result<(String, bool), ModuleError> {
                 }
                 for (k, p) in all.iter().enumerate() {
                     let program = name(k);
-                    for field in parts(&format!("{:?}", p.options)) {
+                    for field in parts(&format!("{:?}", p.options)).into_iter().filter(|f| !f.starts_with("assumed: ")) {
                         let _ = writeln!(out, "{program} {field}");
+                    }
+                    for flag in p.options.assume_flags() {
+                        let _ = writeln!(out, "{program} assume {}", &flag["--assume=".len()..]);
                     }
                     for field in parts(&format!("{p:?}")).into_iter().filter(|f| !f.starts_with("options: ")) {
                         let _ = writeln!(out, "{program} {field}");

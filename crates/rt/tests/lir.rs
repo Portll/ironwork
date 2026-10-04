@@ -19,7 +19,7 @@ use ironwork_rt::storage::Kind;
 use ironwork_rt::vocab::{AcceptFrom, BinOp, Figurative, InspectMode, OpenMode, Pos, RelOp, SignClause, SignPosition};
 use numeric::precision::{Fixed, Places};
 use numeric::options::{Compile, Compliance, FastsrtAdvPrint, Invdata, Stop, Warnings};
-use numeric::{Arith, BinCheck, CicsReturnWarning, Currency, Dialect, DispSign, Initcheck, IntDate, Nsymbol, Numcheck, Numproc, Options, Parmcheck, Qualify, Quote, SortKeys, Trunc, TruncCheck, Vlr, VsamOpenFs, ZonCheck};
+use numeric::{Arith, Assumed, BinCheck, CicsReturnWarning, Currency, Dialect, DispSign, Initcheck, IntDate, Nsymbol, Numcheck, Numproc, Options, Parmcheck, Qualify, Quote, SortKeys, Trunc, TruncCheck, Vlr, VsamOpenFs, ZonCheck};
 use zarch::check::ProgramCheck;
 use zarch::hfp::Precision;
 use zarch::wide::U256;
@@ -175,6 +175,8 @@ fn options_round_trip_with_every_field_off_its_default() {
         optimize: 2,
         compliance: Compliance::Extended,
         dialect: Dialect::Gnucobol,
+        // The OPTIONS section carries it after the programs' records, not in Options' encoding.
+        assumed: Assumed::default(),
     };
     round_trip(&[every, Options { currency: Some(Currency::Hex(0x5B)), ..every }]);
     let each = [

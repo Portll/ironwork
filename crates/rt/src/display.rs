@@ -6,7 +6,7 @@ use crate::fixed::{pow10, zoned_digits};
 use crate::storage::{Kind, Loc, Val};
 use crate::store::{self, ProgramFacts};
 use crate::vocab::{Pos, SignClause, SignPosition};
-use numeric::{Dialect, DispSign, Trunc};
+use numeric::{Dialect, DispSign, Switched, Trunc};
 use std::io::Write;
 use zarch::decimal;
 use zarch::ebcdic::CodePage;
@@ -25,7 +25,7 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos, upon_cons
     Ok(match loc.kind {
         Kind::National => national(facts.page(), store::bytes(mem, loc), upon_console),
         Kind::Dbcs { .. } => facts.page().decode_dbcs(store::bytes(mem, loc)),
-        Kind::Packed { digits, signed, .. } | Kind::Binary { digits, signed, .. } if facts.options().dialect == Dialect::Gnucobol => {
+        Kind::Packed { digits, signed, .. } | Kind::Binary { digits, signed, .. } if facts.options().dialect_of(Switched::DisplayOfNondisplayNumeric) == Dialect::Gnucobol => {
             let Val::Num(f) = store::read_stored(facts, mem, loc, pos)? else { unreachable!() };
             let shown = match loc.kind {
                 Kind::Binary { .. } => zoned_digits(f.magnitude.to_u128().unwrap_or(0), gnucobol_binary_width(loc.len), decimal::UNSIGNED),
@@ -87,11 +87,11 @@ fn sign_first(negative: bool, digits: Vec<u8>) -> Vec<u8> {
 
 /// A numeric literal as written, its decimal point the program's.
 pub fn number(written: &str, facts: &dyn ProgramFacts) -> String {
-    literal(written, facts.decimal_point(), facts.options().dialect)
+    literal(written, facts.decimal_point(), facts.options().dialect_of(Switched::DecimalCommaDisplayLiteral))
 }
 
 /// DISPLAY's text for a numeric literal written with `.` as its decimal point: as written, the
-/// point the program's, or under --dialect gnucobol without the point, as cobc shows it
+/// point the program's, or under gnucobol without the point, as cobc shows it
 /// (assumption C95).
 pub fn literal(written: &str, decimal_point: char, dialect: Dialect) -> String {
     match dialect {

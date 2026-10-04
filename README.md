@@ -19,8 +19,8 @@ The PyPI and npm packages carry builds for Linux (static, x64 and arm64), macOS 
 Windows (x64). The same builds are attached to each [release](https://github.com/Portll/ironwork/releases).
 From a checkout:
 
-    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never] [--compliance strict|extended] [--dialect ibm|gnucobol] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
-    cargo run -p ironwork -- check program.cbl [-warnings-block] [--cics-return-warning=once|always|never] [--compliance strict|extended] [--dialect ibm|gnucobol] [-I copylib]...
+    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never] [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
+    cargo run -p ironwork -- check program.cbl [-warnings-block] [--cics-return-warning=once|always|never] [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [-I copylib]...
     cargo run -p ironwork -- compile program.cbl... [-o dir] [--bundle NAME] [--source-prefix DIR] [run's compile flags] [-I copylib]...
     cargo run -p ironwork -- dump [--section NAME]... [--strings] [--no-check] program.iwm
     cargo run -p ironwork -- run program.iwm [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--coverage FILE] [--evidence DIR]
@@ -316,9 +316,12 @@ decimal place reaches only a statement's last operation (C101); DISPLAY shows pa
 items (C14) and numeric literals (C95) as cobc does; ACCEPT at the end of SYSIN moves a space (C15);
 an ENTRY name shares its program's storage (C51); a shorter EXTERNAL record shares the run unit's
 (C180); and two unsigned zoned items of one length compare by their bytes at every OPTIMIZE level
-(C262). `--dialect ibm` is the default. [docs/dialect.md](docs/dialect.md) lists
-these and every other difference found from cobc, which the dialect leaves alone: the platform, what
-IBM documents and cobc does differently, and bugs.
+(C262). `--dialect ibm` is the default. `--assume ID=VALUE` switches one of these seven alone,
+whatever the dialect: `ibm` or `gnucobol`, and for C101 also `off`, the extra place counted in no
+operation. It is repeatable, an assumption with no alternative is refused by name, and the choice is
+kept in the load module, the provenance statement and the journal. [docs/dialect.md](docs/dialect.md)
+lists these and every other difference found from cobc, which the dialect leaves alone: the
+platform, what IBM documents and cobc does differently, and bugs.
 
 Messages go to standard error, one to a line: errors first, then warnings, then informational
 messages, each in the order ironwork found them.

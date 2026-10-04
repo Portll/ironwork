@@ -10,7 +10,7 @@ pub(crate) use rt::storage::literal_fixed;
 use crate::unit::{ADDRESS_BASE, Event, LoadError, OS_COMMAND_ROUTINES, RETURN_CODE, RunUnit};
 use crate::Compiled;
 use numeric::precision::{Dmax, Fixed, Places};
-use numeric::{Options, Trunc};
+use numeric::{Options, Switched, Trunc};
 use rt::fixed::{align, places_of};
 use rt::arith;
 use rt::callee::{self, Bindings, By, Callee};
@@ -974,7 +974,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         {
             self.sink("os-command", pos, &text);
         }
-        let (index, entry) = match self.unit.load_entry(&name, rt::callee::entry_copy(dynamic, self.options.dialect)) {
+        let (index, entry) = match self.unit.load_entry(&name, rt::callee::entry_copy(dynamic, self.options.dialect_of(Switched::EntryCalls))) {
             Ok(i) => i,
             Err(LoadError::NotFound) if crate::le::provides(&name) => return self.le_call(c, &name),
             Err(LoadError::NotFound) => {
@@ -1062,7 +1062,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             self.sink("dynamic-program-load", pos, &name);
         }
         let dynamic = self.options.dynam || variable;
-        match self.unit.load_entry(&name, rt::callee::entry_copy(dynamic, self.options.dialect)) {
+        match self.unit.load_entry(&name, rt::callee::entry_copy(dynamic, self.options.dialect_of(Switched::EntryCalls))) {
             Ok(_) => Ok((name, dynamic)),
             Err(LoadError::NotFound) if crate::le::provides(&name) => Ok((name, dynamic)),
             Err(LoadError::NotFound) => Err(Abend { code: AbendCode::ModuleNotFound, message: crate::le::missing(&name), pos, file: None }),
@@ -1382,7 +1382,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         for (t, e) in computations {
             let loc = self.locate(&t.r)?;
             float_receiver |= matches!(loc.kind, Kind::Float(_));
-            places = places.max(Dmax::receiver(loc.kind.digits_scale().map_or(0, |(_, s)| s), t.rounded, self.options.dialect)).with(self.dmax(e)?);
+            places = places.max(Dmax::receiver(loc.kind.digits_scale().map_or(0, |(_, s)| s), t.rounded, self.options.extra_place())).with(self.dmax(e)?);
         }
         if let Some((t, dividend, _)) = remainder {
             let loc = self.locate(&t.r)?;

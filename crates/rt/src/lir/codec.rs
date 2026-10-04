@@ -10,7 +10,7 @@ use crate::storage::Kind;
 use crate::vocab::{AcceptFrom, BinOp, Closing, Figurative, InspectMode, OpenMode, Pos, RelOp, SignClause, SignPosition};
 use crate::{codec_enum, codec_struct};
 use numeric::precision::{Fixed, Places};
-use numeric::options::{Compile, Compliance, FastsrtAdvPrint, Invdata, Stop, Warnings};
+use numeric::options::{Assumed, Compile, Compliance, FastsrtAdvPrint, Invdata, SWITCHES, Stop, Warnings};
 use numeric::{
     Arith, BinCheck, CicsReturnWarning, Currency, Dialect, DispSign, Initcheck, IntDate, Nsymbol, Numcheck, Numproc, Options, Parmcheck, Qualify, Quote, SortKeys, Trunc,
     TruncCheck, Vlr, VsamOpenFs, ZonCheck,
@@ -144,7 +144,7 @@ codec_struct!(Options {
     arith, trunc, numproc, codepage, trunc_check, fastsrt, fastsrt_adv_print, sort_keys, adv, thread, dll, rent, dbcs,
     warnings, compile, dynam, debug, cics_return_warning, invdata, zwb, quote, currency, nsymbol, dispsign, intdate, qualify, initial,
     vlr, vsamopenfs, numcheck, parmcheck, initcheck, optimize, compliance, dialect,
-} check options_valid);
+} default { assumed } check options_valid);
 codec_struct!(Invdata { forcenumcmp, cleansign });
 codec_enum!(Arith { Compat = 0, Extend = 1 });
 codec_enum!(Trunc { Std = 0, Opt = 1, Bin = 2 });
@@ -171,6 +171,7 @@ codec_struct!(BinCheck { truncbin });
 codec_struct!(Parmcheck { abd, bytes });
 codec_enum!(Initcheck { Lax = 0, Strict = 1 });
 codec_enum!(Dialect { Ibm = 0, Gnucobol = 1 });
+codec_struct!(Assumed { given } check assumed_valid);
 
 /// `Options::code_page` panics on a CCSID the tables do not carry, and OPTIMIZE has three levels.
 fn options_valid(options: &Options) -> Result<(), String> {
@@ -180,6 +181,14 @@ fn options_valid(options: &Options) -> Result<(), String> {
     match CodePage::by_ccsid(options.codepage) {
         Some(_) => Ok(()),
         None => Err(format!("CODEPAGE({}) is not a page the tables carry", options.codepage)),
+    }
+}
+
+/// Each `--assume` mark names one of its switch's values.
+fn assumed_valid(assumed: &Assumed) -> Result<(), String> {
+    match SWITCHES.iter().zip(assumed.given).find(|((_, values), mark)| usize::from(*mark) > values.len()) {
+        Some(((id, _), mark)) => Err(format!("--assume value {mark} is not one {id} takes")),
+        None => Ok(()),
     }
 }
 

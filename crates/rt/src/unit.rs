@@ -716,7 +716,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
 
     /// Where EXTERNAL record `name` is, or EXTERNAL file `name`'s record area when `file`: storage
     /// of `size` bytes, zeroed, the first time a program describes it. A description of another
-    /// size is refused (assumption C180), except under --dialect gnucobol a shorter record's, which
+    /// size is refused (assumption C180), except under gnucobol a shorter record's, which
     /// shares the storage with a warning, as cobc's does.
     pub fn external(&mut self, name: &str, file: bool, size: usize, dialect: Dialect) -> Result<usize, String> {
         let key = (file, name.to_owned());

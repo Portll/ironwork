@@ -21,8 +21,8 @@ pub struct ArithPlan {
     /// and reads the receiver only when it stores.
     pub per_receiver: bool,
     /// The dmax of every operation below a step's top one, which `dmax` is for: lower than `dmax`
-    /// only under --dialect gnucobol, where a ROUNDED receiver's extra place counts in the top
-    /// operation alone (assumption C101).
+    /// only when C101 is gnucobol, where a ROUNDED receiver's extra place counts in the top
+    /// operation alone (dialect.md).
     pub inner_dmax: u32,
 }
 

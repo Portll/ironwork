@@ -432,16 +432,20 @@ impl<K: Decode + Ord, V: Decode> Decode for BTreeMap<K, V> {
     }
 }
 
-/// `Encode` and `Decode` from one field list; `check` names a `fn(&T) -> Result<(), String>`.
+/// `Encode` and `Decode` from one field list; `default` names fields left out of the encoding and
+/// decoded as their type's default; `check` names a `fn(&T) -> Result<(), String>`.
 #[macro_export]
 macro_rules! codec_struct {
     ($ty:ident { $($field:ident),* $(,)? }) => {
         $crate::codec_struct!($ty { $($field),* } check $crate::module::codec::unchecked);
     };
     ($ty:ident { $($field:ident),* $(,)? } check $check:path) => {
+        $crate::codec_struct!($ty { $($field),* } default {} check $check);
+    };
+    ($ty:ident { $($field:ident),* $(,)? } default { $($left:ident),* $(,)? } check $check:path) => {
         impl $crate::module::codec::Encode for $ty {
             fn encode(&self, w: &mut $crate::module::codec::Writer) {
-                let $ty { $($field),* } = self;
+                let $ty { $($field,)* $($left: _,)* } = self;
                 $($crate::module::codec::Encode::encode($field, w);)*
             }
         }
@@ -452,7 +456,7 @@ macro_rules! codec_struct {
             ) -> ::core::result::Result<Self, $crate::module::ModuleError> {
                 let at = r.position();
                 $(let $field = $crate::module::codec::Decode::decode(r)?;)*
-                let value = $ty { $($field),* };
+                let value = $ty { $($field,)* $($left: ::core::default::Default::default(),)* };
                 $check(&value).map_err(|reason| r.malformed(at, reason))?;
                 ::core::result::Result::Ok(value)
             }

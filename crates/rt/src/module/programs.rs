@@ -2,6 +2,7 @@
 
 use super::codec::{Decode, Encode, Reader, Writer};
 use super::{Module, ModuleError, ModuleWriter, Section, StringTable};
+use numeric::Assumed;
 use crate::bms::Mapset;
 use crate::codec_struct;
 use crate::lir::{AssignItem, 
@@ -222,7 +223,13 @@ fn encode_module(programs: &[Program], directory: &[DirectoryEntry], mapsets: &[
             entry.encode(w);
         }
     });
-    m.section(Section::OPTIONS, |w| per_program(w, programs, |p, w| p.options.encode(w)));
+    m.section(Section::OPTIONS, |w| {
+        per_program(w, programs, |p, w| p.options.encode(w));
+        let assumed = assumed_options(programs);
+        if !assumed.is_empty() {
+            assumed.encode(w);
+        }
+    });
     m.section(Section::LAYOUT, |w| {
         per_program(w, programs, |p, w| {
             p.storage.encode(w);
@@ -252,6 +259,41 @@ fn encode_module(programs: &[Program], directory: &[DirectoryEntry], mapsets: &[
         }
     });
     m.finish()
+}
+
+/// Each program compiled with `--assume`, with its choices: the OPTIONS section's last field,
+/// written only when there is one, so a module without one keeps 0.5's shape (load-module.md §5.1).
+fn assumed_options(programs: &[Program]) -> Vec<(u32, Assumed)> {
+    programs.iter().enumerate().filter(|(_, p)| p.options.options.assumed != Assumed::default()).map(|(n, p)| (n as u32, p.options.options.assumed)).collect()
+}
+
+/// The OPTIONS section's body: a record per program, then the choices [`assumed_options`] wrote.
+pub struct OptionRecords(pub Vec<ProgramOptions>);
+
+impl Decode for OptionRecords {
+    fn decode(r: &mut Reader<'_>) -> Result<Self, ModuleError> {
+        let mut options = Vec::<ProgramOptions>::decode(r)?;
+        if r.remaining() > 0 {
+            let at = r.position();
+            for (n, assumed) in Vec::<(u32, Assumed)>::decode(r)? {
+                let count = options.len();
+                let program = options.get_mut(n as usize).ok_or_else(|| r.malformed(at, format!("--assume choices for program {n} of {count}")))?;
+                program.options.assumed = assumed;
+            }
+        }
+        Ok(Self(options))
+    }
+}
+
+fn option_records(module: &Module<'_>, strings: &StringTable, expected: usize) -> Result<Vec<ProgramOptions>, ModuleError> {
+    let mut r = module.reader(Section::OPTIONS, strings)?;
+    let at = r.position();
+    let OptionRecords(options) = OptionRecords::decode(&mut r)?;
+    if options.len() != expected {
+        return Err(r.malformed(at, format!("{} records for {expected} programs", options.len())));
+    }
+    r.finish()?;
+    Ok(options)
 }
 
 /// Each file that takes its name from a data item, as (program, file, item): the LIR section's
@@ -400,7 +442,7 @@ pub fn read(bytes: &[u8]) -> Result<LoadedModule, ModuleError> {
     r.finish()?;
     let count = directory.len();
 
-    let options = records::<ProgramOptions>(&module, &strings, Section::OPTIONS, count)?;
+    let options = option_records(&module, &strings, count)?;
     let layouts = records::<LayoutRecord>(&module, &strings, Section::LAYOUT, count)?;
     let bodies = lir_records(&module, &strings, count)?;
     let sql = records::<Vec<SqlEntry>>(&module, &strings, Section::SQL, count)?;

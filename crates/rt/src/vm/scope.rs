@@ -10,6 +10,7 @@ use crate::abend::{Abend, Ending};
 use crate::lir::{Binding, GlobalAt, Program, RangeId, Section, Step, SymId};
 use crate::unit::{Connector, Loader};
 use crate::vocab::{OpenMode, Pos};
+use numeric::Switched;
 use std::rc::Rc;
 
 /// A program containing the running one, as it was when control left it for a program it
@@ -67,10 +68,10 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let external = |m: String| Abend::ironwork(m, Pos::default());
         for (ordinal, binding) in &scope.records {
             let address = match *binding {
-                Binding::External { name, size } => Some(self.unit.external(self.sym(name), false, size as usize, p.options.options.dialect).map_err(external)?),
+                Binding::External { name, size } => Some(self.unit.external(self.sym(name), false, size as usize, p.options.options.dialect_of(Switched::ExternalStorage)).map_err(external)?),
                 Binding::ExternalFile(k) => {
                     let k = usize::from(k);
-                    Some(self.unit.external(self.sym(p.services.files[k].name), true, p.storage.file_areas[k].1 as usize, p.options.options.dialect).map_err(external)?)
+                    Some(self.unit.external(self.sym(p.services.files[k].name), true, p.storage.file_areas[k].1 as usize, p.options.options.dialect_of(Switched::ExternalStorage)).map_err(external)?)
                 }
                 Binding::Global { program, section, name } => self.global_address(self.sym(program), section, self.sym(name))?,
             };
