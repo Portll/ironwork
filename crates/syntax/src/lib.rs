@@ -137,18 +137,33 @@ pub fn parse_with(text: &str, libraries: &copy::Libraries) -> Result<ast::Progra
 }
 
 /// Every program in the source, in order, nested programs after the one that contains them. The
-/// libraries' compliance level says how the source and its members are read.
+/// libraries' compliance level says how the source and its members are read. Debugging lines are
+/// program text through COPY and REPLACE, and comments after them outside a program compiled WITH
+/// DEBUGGING MODE (Language Reference SC27-8713-03, p. 693). Outside debugging mode Enterprise
+/// COBOL accepts a debugging line that does not read as text, such as one holding an unclosed
+/// literal; then every debugging line is read as a comment.
 pub fn parse_all_with(text: &str, libraries: &copy::Libraries) -> Result<Vec<ast::Program>, Error> {
     let compliance = libraries.compliance();
     let mut files = vec![String::new()];
-    let mut source = source::read_under(text, 0, false, compliance).and_then(|s| copy::expand(s, libraries, &mut files)).and_then(copy::replace).map_err(|e| e.in_files(&files))?;
-    let mut tokens = lexer::lex_under(&source, compliance).map_err(|e| e.in_files(&files))?;
-    if debugging::requested(&tokens) {
-        files.truncate(1);
-        source = source::read_under(text, 0, true, compliance).and_then(|s| copy::expand(s, libraries, &mut files)).and_then(copy::replace).map_err(|e| e.in_files(&files))?;
-        let lexed = lexer::lex_under(&source, compliance).map_err(|e| e.in_files(&files))?;
-        tokens = debugging::keep(lexed, source.debugging.as_deref().unwrap_or_default());
-    }
+    let read = |debugging: bool, files: &mut Vec<String>| -> Result<(source::Source, Vec<lexer::Token>), Error> {
+        let source = source::read_under(text, 0, debugging, compliance).and_then(|s| copy::expand(s, libraries, files)).and_then(copy::replace).map_err(|e| e.in_files(files))?;
+        let tokens = lexer::lex_under(&source, compliance).map_err(|e| e.in_files(files))?;
+        Ok((source, tokens))
+    };
+    let (source, mut tokens) = match read(true, &mut files) {
+        Ok((source, lexed)) => {
+            let tokens = debugging::keep(lexed, source.debugging.as_deref().unwrap_or_default());
+            (source, tokens)
+        }
+        Err(e) => {
+            files.truncate(1);
+            let (source, tokens) = read(false, &mut files)?;
+            if debugging::requested(&tokens) {
+                return Err(e);
+            }
+            (source, tokens)
+        }
+    };
     if compliance == numeric::Compliance::Extended {
         tokens = extended::rewrite(tokens, &source.options).map_err(|e| e.in_files(&files))?;
     }

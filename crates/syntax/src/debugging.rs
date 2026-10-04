@@ -87,4 +87,21 @@ mod tests {
         assert!(all[1].environment.debugging_mode);
         assert_eq!(displays(&all[2]), 1);
     }
+
+    #[test]
+    fn a_debugging_line_takes_part_in_replace_matching_outside_debugging_mode() {
+        let replace = "           REPLACE ==DISPLAY 'A' DISPLAY 'D'== BY ==CONTINUE==.\n";
+        let text = program("T", "", "").replacen("       PROCEDURE DIVISION.\n", &format!("       PROCEDURE DIVISION.\n{replace}"), 1);
+        assert_eq!(displays(&parse_all(&text)[0]), 0);
+        let unmatched = program("T", "", "").replacen("       PROCEDURE DIVISION.\n", "       PROCEDURE DIVISION.\n           REPLACE ==DISPLAY 'A' DISPLAY 'B'== BY ==CONTINUE==.\n", 1);
+        assert_eq!(displays(&parse_all(&unmatched)[0]), 1);
+    }
+
+    #[test]
+    fn a_debugging_line_that_does_not_read_as_text_is_a_comment_outside_debugging_mode() {
+        let body = "      D             ' SEED=' SEED '\n";
+        assert_eq!(displays(&parse_all(&program("T", "", body))[0]), 1);
+        let err = crate::parse_all_with(&program("T", " WITH DEBUGGING MODE", body), &crate::copy::Libraries::default()).unwrap_err();
+        assert!(err.message.contains("literal"), "{}", err.message);
+    }
 }

@@ -352,7 +352,9 @@ The subset the interpreter runs today:
 
 - **Source:** fixed format with sequence numbers, continuation, `*>` comments, CBL and PROCESS
   cards, and COPY with REPLACING (whole words, pseudo-text, `==:TAG:==` inside words, LEADING,
-  TRAILING), nested.
+  TRAILING, and identifiers with their qualifiers, subscripts and reference modification), nested.
+  A debugging line takes part in COPY and REPLACE matching, and is a comment after them outside
+  debugging mode.
 - **Data:** WORKING-STORAGE, LOCAL-STORAGE, FILE SECTION and LINKAGE SECTION items in DISPLAY, BINARY, COMP-5,
   PACKED-DECIMAL, COMP-1, COMP-2, NATIONAL, DISPLAY-1, POINTER and INDEX; numeric-edited and
   alphanumeric-edited PICTUREs (zero suppression, `*`, floating `$ + -`, CR, DB, insertion, BLANK
