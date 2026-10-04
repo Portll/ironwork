@@ -156,6 +156,9 @@ dependencies = [
 [[package]]
 name = "ironwork-jcl"
 version = "0.8.0"
+dependencies = [
+ "ironwork-syntax",
+]
 
 [[package]]
 name = "ironwork-numeric"

@@ -11,5 +11,8 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[dependencies]
+syntax = { package = "ironwork-syntax", path = "../syntax", version = "0.8.0" }
+
 [lints]
 workspace = true

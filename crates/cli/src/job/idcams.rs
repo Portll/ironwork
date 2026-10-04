@@ -38,7 +38,7 @@ pub(super) fn run(runner: &Runner<'_>, dds: &[Allocated]) -> i16 {
     let commands = match jcl::idcams::parse(&cards) {
         Ok(c) => c,
         Err(e) => {
-            out.sysprint.push(format!("IDCAMS: {e}"));
+            out.sysprint.push(format!("IDCAMS: {}", syntax::messages::labelled(&e)));
             out.sysprint.push("IDC0002I IDCAMS PROCESSING COMPLETE. MAXIMUM CONDITION CODE WAS 12".into());
             write_print(step.dd("SYSPRINT"), &out.sysprint);
             return 12;

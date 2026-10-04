@@ -20,6 +20,7 @@ use std::process::ExitCode;
 
 use exec::Execute;
 use exec::evidence::{canonical, fields, Value};
+use syntax::messages::Message;
 
 mod catalog;
 mod idcams;
@@ -78,7 +79,7 @@ pub(crate) fn parse(jcl: &Path, datasets: &Path, proclibs: &[PathBuf], user: Opt
         }
         Ok(None)
     };
-    jcl::parse_with(&text, &libraries, user).map_err(|e| (Outcome::NotRun, format!("{shown}:{}: {}", e.line, e.message)))
+    jcl::parse_with(&text, &libraries, user).map_err(|e| (Outcome::NotRun, format!("{shown}:{}: {}", e.line, e.labelled())))
 }
 
 /// The job with the request's PARMs and in-stream data in place of the JCL's.
@@ -150,18 +151,18 @@ fn refusals(job: &Job, req: &Request) -> Vec<String> {
     let mut out = Vec::new();
     for item in &job.items {
         let Item::Step(step) = item else { continue };
-        let at = |m: String| format!("line {}: {m}", step.line);
+        let at = |catalogued: Message, m: String| format!("line {}: {}", step.line, syntax::messages::labelled(&(catalogued, m)));
         if NOT_SUPPORTED.contains(&step.pgm.as_str()) {
-            out.push(at(format!("PGM={} is not supported yet", step.pgm)));
+            out.push(at(syntax::messages::IWJ0246, format!("PGM={} is not supported yet", step.pgm)));
         }
         let program = program_of(&step.pgm, &req.program_dirs);
         if step.parm.is_some() && !matches!(program, Program::Iefbr14 | Program::Cobol(_) | Program::Missing) {
-            out.push(at(format!("PARM for PGM={} is not supported yet", step.pgm)));
+            out.push(at(syntax::messages::IWJ0247, format!("PARM for PGM={} is not supported yet", step.pgm)));
         }
         for dd in allocated_dds(step) {
             let text_parts = dd.parts.iter().filter(|p| matches!(p.source, Source::InStream(_))).count();
             if dd.parts.len() > 1 && text_parts > 0 && text_parts < dd.parts.len() && !req.text {
-                out.push(at(format!("DD {} concatenates in-stream data with data sets of z/OS records", dd.name)));
+                out.push(at(syntax::messages::IWJ0248, format!("DD {} concatenates in-stream data with data sets of z/OS records", dd.name)));
             }
         }
         let in_stream = |name: &str| match step.dds.iter().find(|d| d.name == name).map(|d| &d.parts[..]) {
@@ -175,18 +176,18 @@ fn refusals(job: &Job, req: &Request) -> Vec<String> {
             && let Some(symnames) = in_stream("SYMNAMES")
         {
             let checked = jcl::symnames::Symbols::read(symnames.map_or(&[][..], |c| &c[..])).and_then(|symbols| jcl::sort::parse_with(cards, &symbols).map(drop));
-            if let Err(e) = checked {
-                out.push(at(format!("{}: {e}", step.pgm)));
+            if let Err((catalogued, e)) = checked {
+                out.push(at(catalogued, format!("{}: {e}", step.pgm)));
             }
         }
         if matches!(program, Program::Idcams) {
             match step.dds.iter().find(|d| d.name == "SYSIN").map(|d| &d.parts[..]) {
                 Some([jcl::Part { source: Source::InStream(cards), .. }]) => {
-                    if let Err(e) = jcl::idcams::parse(cards) {
-                        out.push(at(format!("IDCAMS: {e}")));
+                    if let Err((catalogued, e)) = jcl::idcams::parse(cards) {
+                        out.push(at(catalogued, format!("IDCAMS: {e}")));
                     }
                 }
-                Some(_) if !req.text => out.push(at("IDCAMS SYSIN from data sets of z/OS records is not supported yet".into())),
+                Some(_) if !req.text => out.push(at(syntax::messages::IWJ0249, "IDCAMS SYSIN from data sets of z/OS records is not supported yet".into())),
                 _ => {}
             }
         }
@@ -195,13 +196,13 @@ fn refusals(job: &Job, req: &Request) -> Vec<String> {
             if let Some(sysin) = dd("SYSIN")
                 && sysin.parts.iter().any(|p| matches!(&p.source, Source::InStream(l) if l.iter().any(|c| !c.trim().is_empty())))
             {
-                out.push(at("IEBGENER control statements are not supported yet".into()));
+                out.push(at(syntax::messages::IWJ0250, "IEBGENER control statements are not supported yet".into()));
             }
             let text_of = |d: Option<&Dd>| d.map(|d| is_in_stream(d) || d.parts.iter().any(|p| p.source == Source::Sysout) || req.text);
             if let (Some(from), Some(to)) = (text_of(dd("SYSUT1")), text_of(dd("SYSUT2")))
                 && from != to
             {
-                out.push(at("IEBGENER between UTF-8 lines and z/OS records needs a record length, which DCB is not read for yet".into()));
+                out.push(at(syntax::messages::IWJ0251, "IEBGENER between UTF-8 lines and z/OS records needs a record length, which DCB is not read for yet".into()));
             }
         }
     }
@@ -783,14 +784,14 @@ fn sort_step(dds: &[Allocated]) -> Result<i16, Failed> {
     let lines = |name: &str| dd(name).and_then(|d| fs::read_to_string(&d.path).ok()).map(|t| t.lines().map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
     let symbols = match jcl::symnames::Symbols::read(&lines("SYMNAMES")) {
         Ok(s) => s,
-        Err(e) => return Ok(fail(e)),
+        Err(e) => return Ok(fail(syntax::messages::labelled(&e))),
     };
     if !symbols.is_empty() {
         write_print(dd("SYMNOUT"), &symbols.table());
     }
     let control = match jcl::sort::parse_with(&lines("SYSIN"), &symbols) {
         Ok(c) => c,
-        Err(e) => return Ok(fail(e)),
+        Err(e) => return Ok(fail(syntax::messages::labelled(&e))),
     };
     let page = numeric::options::Options::default().code_page();
     let inputs: Vec<&Allocated> = match control.kind {

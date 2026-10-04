@@ -4,6 +4,8 @@
 //! items, and the symbols a SYMNAMES data set defines. A statement, operand or item these do not
 //! model (a SUM of fields, FINDREP, PARSE, arithmetic, dates, exits) is refused by name.
 
+use syntax::messages::Refused;
+
 use crate::symnames::Symbols;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -314,7 +316,7 @@ fn parenthesized(value: &str) -> Option<&str> {
     value.strip_prefix('(').and_then(|v| v.strip_suffix(')'))
 }
 
-fn format_of(word: &str) -> Result<Format, String> {
+fn format_of(word: &str) -> Result<Format, Refused> {
     Ok(match word {
         "CH" => Format::Ch,
         "AC" => Format::Ac,
@@ -325,7 +327,7 @@ fn format_of(word: &str) -> Result<Format, String> {
         "PD" => Format::Pd,
         "BI" => Format::Bi,
         "FI" => Format::Fi,
-        f => return Err(format!("the field format {f} is not supported yet")),
+        f => return Err((syntax::messages::IWJ0150, format!("the field format {f} is not supported yet"))),
     })
 }
 
@@ -376,10 +378,10 @@ fn unmodelled_number(word: &str) -> bool {
         || ((word.starts_with("Y2") || word.starts_with("Y4")) && (3..=4).contains(&word.len()))
 }
 
-fn number(text: &str, what: &str) -> Result<usize, String> {
+fn number(text: &str, what: &str) -> Result<usize, Refused> {
     match text.parse::<usize>() {
         Ok(n) if n > 0 => Ok(n),
-        _ => Err(format!("{text} is not a {what}")),
+        _ => Err((syntax::messages::IWJ0151, format!("{text} is not a {what}"))),
     }
 }
 
@@ -405,9 +407,9 @@ fn quoted(token: &str, prefix: &str) -> Option<String> {
     Some(inner.replace("''", "'"))
 }
 
-fn hex(text: &str) -> Result<Vec<u8>, String> {
+fn hex(text: &str) -> Result<Vec<u8>, Refused> {
     if !text.len().is_multiple_of(2) || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(format!("X'{text}' is not pairs of hexadecimal digits"));
+        return Err((syntax::messages::IWJ0152, format!("X'{text}' is not pairs of hexadecimal digits")));
     }
     Ok((0..text.len()).step_by(2).map(|i| u8::from_str_radix(&text[i..i + 2], 16).expect("checked hexadecimal")).collect())
 }
@@ -422,7 +424,7 @@ fn signed_decimal(token: &str) -> Option<i128> {
     Some(if token.starts_with('-') { -n } else { n })
 }
 
-fn constant(token: &str) -> Result<Constant, String> {
+fn constant(token: &str) -> Result<Constant, Refused> {
     if let Some(text) = quoted(token, "C") {
         return Ok(Constant::Chars(text));
     }
@@ -431,10 +433,10 @@ fn constant(token: &str) -> Result<Constant, String> {
     }
     let digits = token.strip_prefix(['+', '-']).unwrap_or(token);
     if is_number(digits) && digits.len() <= 31 {
-        let n: i128 = digits.parse().map_err(|_| format!("{token} is not a decimal constant"))?;
+        let n: i128 = digits.parse().map_err(|_| (syntax::messages::IWJ0227, format!("{token} is not a decimal constant")))?;
         return Ok(Constant::Decimal(if token.starts_with('-') { -n } else { n }));
     }
-    Err(format!("the constant {token} is not supported yet; C'...', X'...' and decimal numbers are"))
+    Err((syntax::messages::IWJ0153, format!("the constant {token} is not supported yet; C'...', X'...' and decimal numbers are")))
 }
 
 /// The longest field each format compares, in bytes.
@@ -462,7 +464,7 @@ fn name(format: Format) -> &'static str {
 }
 
 /// nX, nZ, nC'...' or nX'...', with n 1 when it is left out.
-fn literal(token: &str) -> Result<Option<Piece>, String> {
+fn literal(token: &str) -> Result<Option<Piece>, Refused> {
     let digits = token.bytes().take_while(u8::is_ascii_digit).count();
     let times = if digits == 0 { 1 } else { number(&token[..digits], "repetition")? };
     let rest = &token[digits..];
@@ -508,24 +510,24 @@ fn mask_number(token: &str) -> Option<u8> {
 }
 
 /// A pattern as EDIT=(...) or EDIT=('...') writes it.
-fn pattern_text(value: &str) -> Result<String, String> {
-    let inner = parenthesized(value).ok_or_else(|| format!("the edit pattern {value} is not in parentheses"))?;
+fn pattern_text(value: &str) -> Result<String, Refused> {
+    let inner = parenthesized(value).ok_or_else(|| (syntax::messages::IWJ0228, format!("the edit pattern {value} is not in parentheses")))?;
     let text = match inner.strip_prefix('\'').and_then(|i| i.strip_suffix('\'')) {
         Some(q) => q.replace("''", "'"),
         None => inner.to_string(),
     };
     if text.chars().count() > 44 {
-        return Err(format!("the edit pattern {text} is longer than 44 characters"));
+        return Err((syntax::messages::IWJ0154, format!("the edit pattern {text} is longer than 44 characters")));
     }
     Ok(text)
 }
 
 /// SIGNS=(lp,ln,tp,tn): each a character, quoted where it is a comma, a blank or a parenthesis.
-fn signs(value: &str) -> Result<[Option<char>; 4], String> {
-    let inner = parenthesized(value).ok_or_else(|| format!("SIGNS={value} is not in parentheses"))?;
+fn signs(value: &str) -> Result<[Option<char>; 4], Refused> {
+    let inner = parenthesized(value).ok_or_else(|| (syntax::messages::IWJ0229, format!("SIGNS={value} is not in parentheses")))?;
     let parts = tokens(inner);
     if parts.len() > 4 {
-        return Err(format!("SIGNS=({inner}) has more than four signs"));
+        return Err((syntax::messages::IWJ0155, format!("SIGNS=({inner}) has more than four signs")));
     }
     let mut out = [None; 4];
     for (slot, part) in out.iter_mut().zip(&parts) {
@@ -537,7 +539,7 @@ fn signs(value: &str) -> Result<[Option<char>; 4], String> {
         *slot = match (chars.next(), chars.next()) {
             (None, _) => None,
             (Some(c), None) => Some(c),
-            _ => return Err(format!("the sign {part} is not one character")),
+            _ => return Err((syntax::messages::IWJ0156, format!("the sign {part} is not one character"))),
         };
     }
     Ok(out)
@@ -551,11 +553,11 @@ struct Reader<'s> {
 
 impl Reader<'_> {
     /// FIELDS=(p,l,f,o,...), (p,l,o,...) with FORMAT=f, or COPY.
-    fn fields(&self, value: &str, format: Option<Format>) -> Result<Option<Vec<Field>>, String> {
+    fn fields(&self, value: &str, format: Option<Format>) -> Result<Option<Vec<Field>>, Refused> {
         if value == "COPY" {
             return Ok(None);
         }
-        let inner = parenthesized(value).ok_or_else(|| format!("FIELDS={value} is not in parentheses"))?;
+        let inner = parenthesized(value).ok_or_else(|| (syntax::messages::IWJ0230, format!("FIELDS={value} is not in parentheses")))?;
         let mut parts = Vec::new();
         for p in inner.split(',').map(str::trim) {
             match self.symbols.in_sort_fields(p, format.is_some())? {
@@ -565,7 +567,7 @@ impl Reader<'_> {
         }
         let width = if format.is_some() { 3 } else { 4 };
         if parts.is_empty() || !parts.len().is_multiple_of(width) {
-            return Err(format!("FIELDS=({inner}) is not position, length{}, order for each field", if format.is_some() { "" } else { ", format" }));
+            return Err((syntax::messages::IWJ0157, format!("FIELDS=({inner}) is not position, length{}, order for each field", if format.is_some() { "" } else { ", format" })));
         }
         let mut out = Vec::new();
         for group in parts.chunks(width) {
@@ -576,8 +578,8 @@ impl Reader<'_> {
             let ascending = match group[width - 1].as_str() {
                 "A" => true,
                 "D" => false,
-                "E" => return Err("an E order (an exit's own) is not supported yet".into()),
-                o => return Err(format!("{o} is not A or D")),
+                "E" => return Err((syntax::messages::IWJ0158, "an E order (an exit's own) is not supported yet".into())),
+                o => return Err((syntax::messages::IWJ0159, format!("{o} is not A or D"))),
             };
             out.push(Field { position: number(&group[0], "position")?, length: number(&group[1], "length")?, format, ascending });
         }
@@ -585,7 +587,7 @@ impl Reader<'_> {
     }
 
     /// The tokens of a condition with each symbol replaced by its field or constant.
-    fn expand_condition(&self, raw: Vec<String>, format_given: bool) -> Result<Vec<String>, String> {
+    fn expand_condition(&self, raw: Vec<String>, format_given: bool) -> Result<Vec<String>, Refused> {
         let mut out = Vec::new();
         for t in raw {
             let keyword = relation(&t).is_some() || matches!(t.as_str(), "AND" | "&" | "OR" | "|");
@@ -598,8 +600,8 @@ impl Reader<'_> {
     }
 
     /// A comparison's left or right field: position, length and, unless FORMAT= gives it, format.
-    fn area(&self, t: &[String], at: &mut usize, format: Option<Format>) -> Result<Area, String> {
-        let get = |i: usize| t.get(i).map(String::as_str).ok_or("a comparison ends early".to_string());
+    fn area(&self, t: &[String], at: &mut usize, format: Option<Format>) -> Result<Area, Refused> {
+        let get = |i: usize| t.get(i).map(String::as_str).ok_or_else(|| (syntax::messages::IWJ0245, "a comparison ends early".to_string()));
         let position = number(get(*at)?, "position")?;
         let length = number(get(*at + 1)?, "length")?;
         *at += 2;
@@ -608,27 +610,27 @@ impl Reader<'_> {
                 *at += 1;
                 format_of(w)?
             }
-            _ => format.ok_or_else(|| format!("the field {position},{length} has no format, and no FORMAT= gives one"))?,
+            _ => format.ok_or_else(|| (syntax::messages::IWJ0231, format!("the field {position},{length} has no format, and no FORMAT= gives one")))?,
         };
         if !matches!(format, Format::Ch | Format::Bi | Format::Fi | Format::Zd | Format::Pd) {
-            return Err(format!("the field format {} in a condition is not supported yet; CH, BI, FI, ZD and PD are", name(format)));
+            return Err((syntax::messages::IWJ0160, format!("the field format {} in a condition is not supported yet; CH, BI, FI, ZD and PD are", name(format))));
         }
         if length > longest(format) {
-            return Err(format!("a {} field of {length} bytes is longer than DFSORT compares", name(format)));
+            return Err((syntax::messages::IWJ0161, format!("a {} field of {length} bytes is longer than DFSORT compares", name(format))));
         }
         Ok(Area { position, length, format })
     }
 
-    fn comparison(&self, t: &[String], at: &mut usize, format: Option<Format>) -> Result<Condition, String> {
+    fn comparison(&self, t: &[String], at: &mut usize, format: Option<Format>) -> Result<Condition, Refused> {
         let left = self.area(t, at, format)?;
-        let op = t.get(*at).ok_or("a comparison has no relation")?;
-        let relation = relation(op).ok_or_else(|| format!("{op} is not EQ, NE, GT, GE, LT or LE"))?;
+        let op = t.get(*at).ok_or_else(|| (syntax::messages::IWJ0232, "a comparison has no relation".to_owned()))?;
+        let relation = relation(op).ok_or_else(|| (syntax::messages::IWJ0233, format!("{op} is not EQ, NE, GT, GE, LT or LE")))?;
         *at += 1;
         let right_starts_field = t.get(*at).is_some_and(|w| is_number(w)) && t.get(*at + 1).is_some_and(|w| is_number(w));
         let right = if right_starts_field {
             Operand::Field(self.area(t, at, format)?)
         } else {
-            let token = t.get(*at).ok_or("a comparison has nothing after its relation")?;
+            let token = t.get(*at).ok_or_else(|| (syntax::messages::IWJ0234, "a comparison has nothing after its relation".to_owned()))?;
             *at += 1;
             Operand::Constant(constant(token)?)
         };
@@ -642,18 +644,18 @@ impl Reader<'_> {
             _ => false,
         };
         if !allowed {
-            return Err(format!("comparing {},{},{} with {} is not supported yet", left.position, left.length, name(left.format), match &right {
+            return Err((syntax::messages::IWJ0162, format!("comparing {},{},{} with {} is not supported yet", left.position, left.length, name(left.format), match &right {
                 Operand::Field(r) => format!("{},{},{}", r.position, r.length, name(r.format)),
                 Operand::Constant(Constant::Chars(_)) => "a character string".into(),
                 Operand::Constant(Constant::Hex(_)) => "a hexadecimal string".into(),
                 Operand::Constant(Constant::Decimal(n)) => format!("the decimal number {n}"),
-            }));
+            })));
         }
         Ok(Condition::Compare { left, relation, right })
     }
 
-    fn factor(&self, t: &[String], at: &mut usize, format: Option<Format>) -> Result<Condition, String> {
-        let token = t.get(*at).ok_or("a condition ends early")?;
+    fn factor(&self, t: &[String], at: &mut usize, format: Option<Format>) -> Result<Condition, Refused> {
+        let token = t.get(*at).ok_or_else(|| (syntax::messages::IWJ0235, "a condition ends early".to_owned()))?;
         if let Some(inner) = parenthesized(token) {
             *at += 1;
             return self.expression_of(inner, format);
@@ -662,7 +664,7 @@ impl Reader<'_> {
     }
 
     /// Comparisons joined by AND, which DFSORT evaluates before OR.
-    fn term(&self, t: &[String], at: &mut usize, format: Option<Format>) -> Result<Condition, String> {
+    fn term(&self, t: &[String], at: &mut usize, format: Option<Format>) -> Result<Condition, Refused> {
         let mut left = self.factor(t, at, format)?;
         while t.get(*at).is_some_and(|w| w == "AND" || w == "&") {
             *at += 1;
@@ -671,7 +673,7 @@ impl Reader<'_> {
         Ok(left)
     }
 
-    fn expression_of(&self, text: &str, format: Option<Format>) -> Result<Condition, String> {
+    fn expression_of(&self, text: &str, format: Option<Format>) -> Result<Condition, Refused> {
         let t = self.expand_condition(tokens(text), format.is_some())?;
         let mut at = 0;
         let mut left = self.term(&t, &mut at, format)?;
@@ -680,25 +682,25 @@ impl Reader<'_> {
             left = Condition::Or(Box::new(left), Box::new(self.term(&t, &mut at, format)?));
         }
         match t.get(at) {
-            Some(extra) => Err(format!("{extra} in a condition is not AND or OR")),
+            Some(extra) => Err((syntax::messages::IWJ0163, format!("{extra} in a condition is not AND or OR"))),
             None => Ok(left),
         }
     }
 
     /// COND=(...), ALL or NONE.
-    fn condition(&self, value: &str, format: Option<Format>) -> Result<Condition, String> {
+    fn condition(&self, value: &str, format: Option<Format>) -> Result<Condition, Refused> {
         match value {
             "ALL" | "(ALL)" => return Ok(Condition::Always(true)),
             "NONE" | "(NONE)" => return Ok(Condition::Always(false)),
             _ => {}
         }
-        let inner = parenthesized(value).ok_or_else(|| format!("COND={value} is not in parentheses"))?;
+        let inner = parenthesized(value).ok_or_else(|| (syntax::messages::IWJ0236, format!("COND={value} is not in parentheses")))?;
         self.expression_of(inner, format)
     }
 
     /// The tokens of a list of items with each symbol replaced: c: for a column, p,m,f before an
     /// edit or conversion, p,m otherwise, p for a position, and a constant as itself.
-    fn expand_items(&self, raw: Vec<String>) -> Result<Vec<String>, String> {
+    fn expand_items(&self, raw: Vec<String>) -> Result<Vec<String>, Refused> {
         let mut out = Vec::new();
         for (i, t) in raw.iter().enumerate() {
             let (column, rest) = match t.split_once(':') {
@@ -723,7 +725,7 @@ impl Reader<'_> {
 
     /// The edit or conversion after a number, from `t[*i]` on: Mn, EDIT=, EDxy=, SIGNS=, SIGNz=,
     /// LENGTH=, TO= or a bare output format.
-    fn number_output(&self, t: &[String], i: &mut usize, what: &str) -> Result<(Output, Option<usize>), String> {
+    fn number_output(&self, t: &[String], i: &mut usize, what: &str) -> Result<(Output, Option<usize>), Refused> {
         let (mut mask, mut signed, mut sign_char, mut to, mut length) = (None, None, 'S', None, None);
         while let Some(token) = t.get(*i) {
             let (key, value) = token.split_once('=').unwrap_or((token.as_str(), ""));
@@ -732,11 +734,11 @@ impl Reader<'_> {
             } else if let (Some(f), true) = (to_format(token), value.is_empty() && to.is_none() && length.is_none()) {
                 to = Some(f);
             } else if key == "TO" {
-                to = Some(to_format(parenthesized(value).unwrap_or(value)).ok_or_else(|| format!("TO={value} is not BI, FI, PD, PDC, PDF, ZD, ZDF, ZDC, CSF or FS"))?);
+                to = Some(to_format(parenthesized(value).unwrap_or(value)).ok_or_else(|| (syntax::messages::IWJ0237, format!("TO={value} is not BI, FI, PD, PDC, PDF, ZD, ZDF, ZDC, CSF or FS")))?);
             } else if key == "LENGTH" {
                 let n = number(value, "length")?;
                 if n > 44 {
-                    return Err(format!("LENGTH={n} is longer than 44"));
+                    return Err((syntax::messages::IWJ0164, format!("LENGTH={n} is longer than 44")));
                 }
                 length = Some(n);
             } else if key == "EDIT" {
@@ -744,7 +746,7 @@ impl Reader<'_> {
             } else if key.len() == 4 && key.starts_with("ED") {
                 let (x, y) = (key.as_bytes()[2] as char, key.as_bytes()[3] as char);
                 if x == y {
-                    return Err(format!("{key}: the two digit characters must differ"));
+                    return Err((syntax::messages::IWJ0165, format!("{key}: the two digit characters must differ")));
                 }
                 mask = Some(Mask::Pattern { text: pattern_text(value)?, insignificant: x, significant: y, sign: 'S' });
             } else if key == "SIGNS" {
@@ -753,7 +755,7 @@ impl Reader<'_> {
                 sign_char = key.as_bytes()[4] as char;
                 signed = Some(signs(value)?);
             } else if ARITHMETIC.contains(&key) {
-                return Err(format!("arithmetic in {what} ({key}) is not supported yet"));
+                return Err((syntax::messages::IWJ0166, format!("arithmetic in {what} ({key}) is not supported yet")));
             } else {
                 break;
             }
@@ -763,23 +765,23 @@ impl Reader<'_> {
             *sign = sign_char;
         }
         match (to, mask) {
-            (Some(_), Some(_)) => Err(format!("a {what} number is either edited or converted, not both")),
+            (Some(_), Some(_)) => Err((syntax::messages::IWJ0167, format!("a {what} number is either edited or converted, not both"))),
             (Some(f), None) if signed.is_none() => Ok((Output::To(f), length)),
-            (Some(_), None) => Err(format!("SIGNS goes with an edit mask, not TO, in {what}")),
+            (Some(_), None) => Err((syntax::messages::IWJ0168, format!("SIGNS goes with an edit mask, not TO, in {what}"))),
             (None, mask) => Ok((Output::Edit { mask: mask.unwrap_or(Mask::Predefined(0)), signs: signed }, length)),
         }
     }
 
     /// The items of BUILD=(...), FIELDS=(...) or OVERLAY=(...).
-    fn items(&self, value: &str, what: &str) -> Result<Vec<Item>, String> {
-        let inner = parenthesized(value).ok_or_else(|| format!("{what}={value} is not in parentheses"))?;
+    fn items(&self, value: &str, what: &str) -> Result<Vec<Item>, Refused> {
+        let inner = parenthesized(value).ok_or_else(|| (syntax::messages::IWJ0238, format!("{what}={value} is not in parentheses")))?;
         let t = self.expand_items(tokens(inner))?;
         let mut out = Vec::new();
         let mut i = 0;
         while i < t.len() {
             let (column, token) = match t[i].split_once(':') {
                 Some((c, rest)) if is_number(c) => (Some(number(c, "column")?), rest.to_string()),
-                Some((c, _)) if !c.contains('\'') => return Err(format!("{c} is not a column or a symbol for one")),
+                Some((c, _)) if !c.contains('\'') => return Err((syntax::messages::IWJ0169, format!("{c} is not a column or a symbol for one"))),
                 _ => (None, t[i].clone()),
             };
             i += 1;
@@ -787,7 +789,7 @@ impl Reader<'_> {
                 Some(inner) if inner.split(',').count() == 3 => {
                     let p: Vec<&str> = inner.split(',').collect();
                     if number_format(p[2]).is_none() && !unmodelled_number(p[2]) {
-                        return Err(format!("the {what} item {token} is not supported yet"));
+                        return Err((syntax::messages::IWJ0170, format!("the {what} item {token} is not supported yet")));
                     }
                     Some((number(p[0], "position")?, Some(number(p[1], "length")?), Some(p[2].to_string())))
                 }
@@ -815,11 +817,11 @@ impl Reader<'_> {
                 match (format, length) {
                     (Some(f), Some(length)) => {
                         if unmodelled_number(&f) {
-                            return Err(format!("{what} editing of {f} fields is not supported yet"));
+                            return Err((syntax::messages::IWJ0171, format!("{what} editing of {f} fields is not supported yet")));
                         }
                         let format = number_format(&f).expect("a checked number format");
                         if !longest_number(format).contains(&length) {
-                            return Err(format!("a {f} field of {length} bytes is not one {what} edits"));
+                            return Err((syntax::messages::IWJ0172, format!("a {f} field of {length} bytes is not one {what} edits")));
                         }
                         let (output, out_length) = self.number_output(&t, &mut i, what)?;
                         Piece::Number { value: Numeric::Field { position, length, format }, output, length: out_length }
@@ -827,9 +829,9 @@ impl Reader<'_> {
                     _ => {
                         if let Some(next) = t.get(i).filter(|n| !begins_item(n)) {
                             if ARITHMETIC.contains(&next.as_str()) {
-                                return Err(format!("arithmetic in {what} ({next}) is not supported yet"));
+                                return Err((syntax::messages::IWJ0173, format!("arithmetic in {what} ({next}) is not supported yet")));
                             }
-                            return Err(format!("{what} field conversion and editing ({next}) is not supported yet"));
+                            return Err((syntax::messages::IWJ0174, format!("{what} field conversion and editing ({next}) is not supported yet")));
                         }
                         Piece::Field { position, length }
                     }
@@ -840,20 +842,20 @@ impl Reader<'_> {
             } else {
                 match literal(&token)? {
                     Some(p) => p,
-                    None => return Err(format!("the {what} item {token} is not supported yet")),
+                    None => return Err((syntax::messages::IWJ0170, format!("the {what} item {token} is not supported yet"))),
                 }
             };
             out.push(Item { column, piece });
         }
         if out.is_empty() {
-            return Err(format!("{what}=() has no items"));
+            return Err((syntax::messages::IWJ0175, format!("{what}=() has no items")));
         }
         Ok(out)
     }
 
     /// PUSH=(c:p,m, c:ID=n, c:SEQ=n, ...).
-    fn push(&self, value: &str) -> Result<Vec<Push>, String> {
-        let inner = parenthesized(value).ok_or_else(|| format!("PUSH={value} is not in parentheses"))?;
+    fn push(&self, value: &str) -> Result<Vec<Push>, Refused> {
+        let inner = parenthesized(value).ok_or_else(|| (syntax::messages::IWJ0239, format!("PUSH={value} is not in parentheses")))?;
         let t = self.expand_items(tokens(inner))?;
         let mut out = Vec::new();
         let mut i = 0;
@@ -863,10 +865,10 @@ impl Reader<'_> {
                 _ => (None, t[i].clone()),
             };
             i += 1;
-            let digits = |v: &str, what: &str| -> Result<usize, String> {
+            let digits = |v: &str, what: &str| -> Result<usize, Refused> {
                 let n = number(v, what)?;
                 if n > 15 {
-                    return Err(format!("{what}={n} is longer than 15 digits"));
+                    return Err((syntax::messages::IWJ0176, format!("{what}={n} is longer than 15 digits")));
                 }
                 Ok(n)
             };
@@ -879,21 +881,21 @@ impl Reader<'_> {
                 i += 1;
                 Pushed::Field { position: number(&token, "position")?, length }
             } else {
-                return Err(format!("the PUSH item {token} is not supported yet; p,m, ID=n and SEQ=n are"));
+                return Err((syntax::messages::IWJ0177, format!("the PUSH item {token} is not supported yet; p,m, ID=n and SEQ=n are")));
             };
             out.push(Push { column, value });
         }
         if out.is_empty() {
-            return Err("PUSH=() has no items".into());
+            return Err((syntax::messages::IWJ0178, "PUSH=() has no items".into()));
         }
         Ok(out)
     }
 
     /// One IFTHEN=(...) clause.
-    fn clause(&self, value: &str, verb: &str) -> Result<Clause, String> {
-        let inner = parenthesized(value).ok_or_else(|| format!("IFTHEN={value} is not in parentheses"))?;
+    fn clause(&self, value: &str, verb: &str) -> Result<Clause, Refused> {
+        let inner = parenthesized(value).ok_or_else(|| (syntax::messages::IWJ0240, format!("IFTHEN={value} is not in parentheses")))?;
         let ops = tokens(inner);
-        let when = ops.first().and_then(|w| w.strip_prefix("WHEN=")).ok_or_else(|| format!("IFTHEN=({inner}) does not begin with WHEN="))?;
+        let when = ops.first().and_then(|w| w.strip_prefix("WHEN=")).ok_or_else(|| (syntax::messages::IWJ0241, format!("IFTHEN=({inner}) does not begin with WHEN=")))?;
         let mut group = Group { begin: None, key: None, end: None, records: None, push: Vec::new() };
         let mut clause = Clause {
             when: match when {
@@ -926,7 +928,7 @@ impl Reader<'_> {
                 }
                 "KEYBEGIN" if grouping => {
                     let p = self.expand_items(tokens(parenthesized(value).unwrap_or(value)))?;
-                    let [position, length] = p.as_slice() else { return Err(format!("KEYBEGIN={value} is not (p,m)")) };
+                    let [position, length] = p.as_slice() else { return Err((syntax::messages::IWJ0179, format!("KEYBEGIN={value} is not (p,m)"))) };
                     group.key = Some((number(position, "position")?, number(length, "length")?));
                     continue;
                 }
@@ -938,19 +940,19 @@ impl Reader<'_> {
                     group.push = self.push(value)?;
                     continue;
                 }
-                "PARSE" | "FINDREP" => return Err(format!("{verb} IFTHEN {key} is not supported yet")),
-                k => return Err(format!("{k} is not an operand of this {verb} IFTHEN clause")),
+                "PARSE" | "FINDREP" => return Err((syntax::messages::IWJ0180, format!("{verb} IFTHEN {key} is not supported yet"))),
+                k => return Err((syntax::messages::IWJ0181, format!("{k} is not an operand of this {verb} IFTHEN clause"))),
             };
             if clause.edit.replace(edit).is_some() {
-                return Err(format!("an IFTHEN clause takes one of BUILD and OVERLAY, in {verb}"));
+                return Err((syntax::messages::IWJ0182, format!("an IFTHEN clause takes one of BUILD and OVERLAY, in {verb}")));
             }
         }
         if let When::Group(_) = clause.when {
             if group.push.is_empty() {
-                return Err(format!("{verb} IFTHEN WHEN=GROUP needs PUSH="));
+                return Err((syntax::messages::IWJ0183, format!("{verb} IFTHEN WHEN=GROUP needs PUSH=")));
             }
             if group.begin.is_none() && group.key.is_none() && group.end.is_none() && group.records.is_none() {
-                return Err(format!("{verb} IFTHEN WHEN=GROUP needs BEGIN, KEYBEGIN, END or RECORDS"));
+                return Err((syntax::messages::IWJ0184, format!("{verb} IFTHEN WHEN=GROUP needs BEGIN, KEYBEGIN, END or RECORDS")));
             }
             clause.when = When::Group(group);
         }
@@ -958,7 +960,7 @@ impl Reader<'_> {
     }
 
     /// The reformatting an INREC, OUTREC or OUTFIL statement names, from its operands.
-    fn edit(&self, ops: &[String], verb: &str) -> Result<Option<Edit>, String> {
+    fn edit(&self, ops: &[String], verb: &str) -> Result<Option<Edit>, Refused> {
         let mut found = None;
         let mut clauses = Vec::new();
         let mut outlen = None;
@@ -972,7 +974,7 @@ impl Reader<'_> {
                     if matches!(clause.when, When::Any) {
                         let since = clauses.iter().rev().take_while(|c: &&Clause| !matches!(c.when, When::Any));
                         if !since.into_iter().any(|c| matches!(c.when, When::Condition(_))) {
-                            return Err(format!("{verb} IFTHEN WHEN=ANY needs a WHEN=(cond) clause before it"));
+                            return Err((syntax::messages::IWJ0185, format!("{verb} IFTHEN WHEN=ANY needs a WHEN=(cond) clause before it")));
                         }
                     }
                     clauses.push(clause);
@@ -985,19 +987,19 @@ impl Reader<'_> {
                 _ => continue,
             };
             if found.replace(made).is_some() {
-                return Err(format!("{verb} has more than one of BUILD, FIELDS, OUTREC and OVERLAY"));
+                return Err((syntax::messages::IWJ0186, format!("{verb} has more than one of BUILD, FIELDS, OUTREC and OVERLAY")));
             }
         }
         match (found, clauses.is_empty(), outlen) {
-            (Some(_), false, _) => Err(format!("{verb} takes IFTHEN clauses or BUILD, FIELDS and OVERLAY, not both")),
-            (_, true, Some(_)) => Err(format!("{verb} IFOUTLEN goes with IFTHEN clauses")),
+            (Some(_), false, _) => Err((syntax::messages::IWJ0187, format!("{verb} takes IFTHEN clauses or BUILD, FIELDS and OVERLAY, not both"))),
+            (_, true, Some(_)) => Err((syntax::messages::IWJ0188, format!("{verb} IFOUTLEN goes with IFTHEN clauses"))),
             (Some(e), true, None) => Ok(Some(e)),
             (None, false, length) => Ok(Some(Edit::IfThen { clauses, length })),
             (None, true, None) => Ok(None),
         }
     }
 
-    fn outfil(&self, ops: &[String]) -> Result<Outfil, String> {
+    fn outfil(&self, ops: &[String]) -> Result<Outfil, Refused> {
         let mut group = Outfil { names: Vec::new(), selection: None, save: false, edit: self.edit(ops, "OUTFIL")? };
         for o in ops {
             let (key, value) = o.split_once('=').unwrap_or((o.as_str(), ""));
@@ -1006,37 +1008,37 @@ impl Reader<'_> {
                 "FILES" => group.names.extend(parenthesized(value).unwrap_or(value).split(',').map(|n| format!("SORTOF{n}"))),
                 "INCLUDE" | "OMIT" => {
                     if group.selection.is_some() || group.save {
-                        return Err("OUTFIL takes one of INCLUDE, OMIT and SAVE".into());
+                        return Err((syntax::messages::IWJ0189, "OUTFIL takes one of INCLUDE, OMIT and SAVE".into()));
                     }
                     group.selection = Some(Selection { include: key == "INCLUDE", condition: self.condition(value, None)? });
                 }
                 "SAVE" if value.is_empty() => {
                     if group.selection.is_some() {
-                        return Err("OUTFIL takes one of INCLUDE, OMIT and SAVE".into());
+                        return Err((syntax::messages::IWJ0189, "OUTFIL takes one of INCLUDE, OMIT and SAVE".into()));
                     }
                     group.save = true;
                 }
                 "FIELDS" | "BUILD" | "OUTREC" | "OVERLAY" | "IFTHEN" | "IFOUTLEN" => {}
-                k => return Err(format!("the OUTFIL parameter {k} is not supported yet")),
+                k => return Err((syntax::messages::IWJ0190, format!("the OUTFIL parameter {k} is not supported yet"))),
             }
         }
         if group.names.is_empty() {
             group.names.push("SORTOUT".into());
         }
         if let Some(bad) = group.names.iter().find(|n| n.is_empty() || n.len() > 8) {
-            return Err(format!("{bad} is not a ddname"));
+            return Err((syntax::messages::IWJ0191, format!("{bad} is not a ddname")));
         }
         Ok(group)
     }
 }
 
 /// The control statements in SYSIN's cards, with no symbols.
-pub fn parse(cards: &[String]) -> Result<Control, String> {
+pub fn parse(cards: &[String]) -> Result<Control, Refused> {
     parse_with(cards, &Symbols::default())
 }
 
 /// The control statements in SYSIN's cards, with the symbols SYMNAMES defined.
-pub fn parse_with(cards: &[String], symbols: &Symbols) -> Result<Control, String> {
+pub fn parse_with(cards: &[String], symbols: &Symbols) -> Result<Control, Refused> {
     let reader = Reader { symbols };
     let mut control = Control { kind: Kind::Copy, fields: Vec::new(), drop_duplicates: false, record: None, selection: None, inrec: None, outrec: None, outfil: Vec::new() };
     let mut verb_seen = false;
@@ -1047,13 +1049,13 @@ pub fn parse_with(cards: &[String], symbols: &Symbols) -> Result<Control, String
         match verb {
             "SORT" | "MERGE" => {
                 if verb_seen {
-                    return Err("more than one SORT or MERGE statement".into());
+                    return Err((syntax::messages::IWJ0192, "more than one SORT or MERGE statement".into()));
                 }
                 verb_seen = true;
                 let format = keyword("FORMAT").map(|f| format_of(&f)).transpose()?;
-                let value = keyword("FIELDS").ok_or_else(|| format!("{verb} needs FIELDS="))?;
+                let value = keyword("FIELDS").ok_or_else(|| (syntax::messages::IWJ0225, format!("{verb} needs FIELDS=")))?;
                 if let Some(other) = ops.iter().find(|o| !o.starts_with("FIELDS=") && !o.starts_with("FORMAT=") && !matches!(o.as_str(), "EQUALS" | "NOEQUALS") && !o.starts_with("FILSZ=") && !o.starts_with("SIZE=")) {
-                    return Err(format!("{verb} operand {other} is not supported yet"));
+                    return Err((syntax::messages::IWJ0193, format!("{verb} operand {other} is not supported yet")));
                 }
                 match reader.fields(&value, format)? {
                     None => control.kind = Kind::Copy,
@@ -1065,7 +1067,7 @@ pub fn parse_with(cards: &[String], symbols: &Symbols) -> Result<Control, String
             }
             "SUM" => match keyword("FIELDS").as_deref() {
                 Some("NONE") | Some("(NONE)") => control.drop_duplicates = true,
-                _ => return Err("SUM of fields is not supported yet; SUM FIELDS=NONE is".into()),
+                _ => return Err((syntax::messages::IWJ0194, "SUM of fields is not supported yet; SUM FIELDS=NONE is".into())),
             },
             "OPTION" => {
                 for o in &ops {
@@ -1076,7 +1078,7 @@ pub fn parse_with(cards: &[String], symbols: &Symbols) -> Result<Control, String
                             control.kind = Kind::Copy;
                         }
                         n if OPTION_IGNORED.contains(&n) => {}
-                        n => return Err(format!("OPTION {n} is not supported yet")),
+                        n => return Err((syntax::messages::IWJ0195, format!("OPTION {n} is not supported yet"))),
                     }
                 }
             }
@@ -1084,30 +1086,30 @@ pub fn parse_with(cards: &[String], symbols: &Symbols) -> Result<Control, String
                 let variable = match keyword("TYPE").as_deref() {
                     Some("F") | None => false,
                     Some("V" | "VB") => true,
-                    Some(t) => return Err(format!("RECORD TYPE={t} is not supported yet")),
+                    Some(t) => return Err((syntax::messages::IWJ0196, format!("RECORD TYPE={t} is not supported yet"))),
                 };
                 let length = keyword("LENGTH").and_then(|l| l.trim_start_matches('(').split([',', ')']).next().map(str::to_string)).filter(|l| !l.is_empty()).map(|l| number(&l, "record length")).transpose()?;
                 control.record = Some(Record { variable, length });
             }
             "INCLUDE" | "OMIT" => {
                 if control.selection.is_some() {
-                    return Err("more than one INCLUDE or OMIT statement; INCLUDE and OMIT are mutually exclusive".into());
+                    return Err((syntax::messages::IWJ0197, "more than one INCLUDE or OMIT statement; INCLUDE and OMIT are mutually exclusive".into()));
                 }
                 if let Some(other) = ops.iter().find(|o| !o.starts_with("COND=") && !o.starts_with("FORMAT=")) {
-                    return Err(format!("{verb} operand {other} is not supported yet"));
+                    return Err((syntax::messages::IWJ0193, format!("{verb} operand {other} is not supported yet")));
                 }
                 let format = keyword("FORMAT").map(|f| format_of(&f)).transpose()?;
-                let value = keyword("COND").ok_or_else(|| format!("{verb} needs COND="))?;
+                let value = keyword("COND").ok_or_else(|| (syntax::messages::IWJ0226, format!("{verb} needs COND=")))?;
                 control.selection = Some(Selection { include: verb == "INCLUDE", condition: reader.condition(&value, format)? });
             }
             "INREC" | "OUTREC" => {
                 if let Some(other) = ops.iter().map(|o| o.split('=').next().unwrap_or(o)).find(|k| !matches!(*k, "FIELDS" | "BUILD" | "OVERLAY" | "IFTHEN" | "IFOUTLEN")) {
-                    return Err(format!("the {verb} parameter {other} is not supported yet"));
+                    return Err((syntax::messages::IWJ0198, format!("the {verb} parameter {other} is not supported yet")));
                 }
-                let Some(made) = reader.edit(&ops, verb)? else { return Err(format!("{verb} needs FIELDS=, BUILD=, OVERLAY= or IFTHEN=")) };
+                let Some(made) = reader.edit(&ops, verb)? else { return Err((syntax::messages::IWJ0199, format!("{verb} needs FIELDS=, BUILD=, OVERLAY= or IFTHEN="))) };
                 let slot = if verb == "INREC" { &mut control.inrec } else { &mut control.outrec };
                 if slot.replace(made).is_some() {
-                    return Err(format!("more than one {verb} statement"));
+                    return Err((syntax::messages::IWJ0200, format!("more than one {verb} statement")));
                 }
             }
             "OUTFIL" => {
@@ -1116,12 +1118,12 @@ pub fn parse_with(cards: &[String], symbols: &Symbols) -> Result<Control, String
                 control.outfil.push(group);
             }
             "END" => break,
-            v if REFUSED.contains(&v) => return Err(format!("the DFSORT {v} statement is not supported yet")),
-            v => return Err(format!("{v} is not a DFSORT control statement")),
+            v if REFUSED.contains(&v) => return Err((syntax::messages::IWJ0201, format!("the DFSORT {v} statement is not supported yet"))),
+            v => return Err((syntax::messages::IWJ0202, format!("{v} is not a DFSORT control statement"))),
         }
     }
     if !verb_seen {
-        return Err("no SORT, MERGE or OPTION COPY statement".into());
+        return Err((syntax::messages::IWJ0203, "no SORT, MERGE or OPTION COPY statement".into()));
     }
     Ok(control)
 }
@@ -1287,7 +1289,7 @@ mod tests {
             ("  SORT FIELDS=COPY\n  MODS E15=(X,100)", "the DFSORT MODS statement is not supported yet"),
             ("  SUM FIELDS=NONE", "no SORT, MERGE or OPTION COPY statement"),
         ] {
-            assert_eq!(parse(&cards(text)).unwrap_err(), message, "{text}");
+            assert_eq!(parse(&cards(text)).unwrap_err().1, message, "{text}");
         }
     }
 }

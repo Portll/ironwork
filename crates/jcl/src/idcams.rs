@@ -3,6 +3,8 @@
 //! SET, DO and END around DELETE, REPRO and DEFINE CLUSTER. Every other command, and every
 //! parameter these do not model, is refused by name.
 
+use syntax::messages::Refused;
+
 use crate::cond::Op;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -181,7 +183,7 @@ enum Token {
 
 /// The commands' text: columns 2-72 of each card, comments removed, continued cards joined, and
 /// a newline where each command ends.
-fn command_text(cards: &[String]) -> Result<String, String> {
+fn command_text(cards: &[String]) -> Result<String, Refused> {
     let mut out = String::new();
     let mut in_comment = false;
     for card in cards {
@@ -215,15 +217,15 @@ fn command_text(cards: &[String]) -> Result<String, String> {
         }
     }
     if in_comment {
-        return Err("a comment is not closed with */".into());
+        return Err((syntax::messages::IWJ0098, "a comment is not closed with */".into()));
     }
     Ok(out)
 }
 
-fn tokens(text: &str) -> Result<Vec<Token>, String> {
+fn tokens(text: &str) -> Result<Vec<Token>, Refused> {
     let chars: Vec<char> = text.chars().collect();
     let (mut out, mut i) = (Vec::new(), 0);
-    let group = |i: &mut usize| -> Result<String, String> {
+    let group = |i: &mut usize| -> Result<String, Refused> {
         let (start, mut depth) = (*i + 1, 0i32);
         let mut quoted = false;
         while *i < chars.len() {
@@ -241,7 +243,7 @@ fn tokens(text: &str) -> Result<Vec<Token>, String> {
             }
             *i += 1;
         }
-        Err("a parenthesis is not closed".into())
+        Err((syntax::messages::IWJ0099, "a parenthesis is not closed".into()))
     };
     while i < chars.len() {
         let c = chars[i];
@@ -277,7 +279,7 @@ fn tokens(text: &str) -> Result<Vec<Token>, String> {
                     i += 1;
                 }
                 if start == i {
-                    return Err(format!("{c} has no meaning here"));
+                    return Err((syntax::messages::IWJ0100, format!("{c} has no meaning here")));
                 }
                 let word: String = chars[start..i].iter().collect::<String>().to_ascii_uppercase();
                 let mut j = i;
@@ -310,23 +312,23 @@ struct Parser {
     at: usize,
 }
 
-fn condition_code(text: &str) -> Result<u16, String> {
+fn condition_code(text: &str) -> Result<u16, Refused> {
     match text.parse::<u16>() {
         Ok(n) if n <= 16 && text.bytes().all(|b| b.is_ascii_digit()) => Ok(n),
-        _ => Err(format!("{text} is not a condition code from 0 to 16")),
+        _ => Err((syntax::messages::IWJ0101, format!("{text} is not a condition code from 0 to 16"))),
     }
 }
 
-fn name_of(value: &str) -> Result<String, String> {
+fn name_of(value: &str) -> Result<String, Refused> {
     let v = value.trim().trim_matches('\'').to_string();
     let base = v.split_once('(').map_or(v.as_str(), |(b, _)| b);
     if !crate::is_dsn(base) {
-        return Err(format!("{v} is not a data set name"));
+        return Err((syntax::messages::IWJ0050, format!("{v} is not a data set name")));
     }
     if let Some((_, m)) = v.split_once('(') {
         let m = m.strip_suffix(')').unwrap_or("");
         if !crate::is_name(m) {
-            return Err(format!("{v} is not a data set name"));
+            return Err((syntax::messages::IWJ0050, format!("{v} is not a data set name")));
         }
     }
     Ok(v)
@@ -354,26 +356,26 @@ impl Parser {
         }
     }
 
-    fn commands(&mut self, until_end: bool) -> Result<Vec<Command>, String> {
+    fn commands(&mut self, until_end: bool) -> Result<Vec<Command>, Refused> {
         let mut out = Vec::new();
         loop {
             self.skip_ends();
             match self.peek() {
                 None => {
-                    return if until_end { Err("DO has no END".into()) } else { Ok(out) };
+                    return if until_end { Err((syntax::messages::IWJ0102, "DO has no END".into())) } else { Ok(out) };
                 }
                 Some(Token::Word(w)) if w == "END" => {
                     if !until_end {
-                        return Err("END without DO".into());
+                        return Err((syntax::messages::IWJ0103, "END without DO".into()));
                     }
                     self.at += 1;
                     return Ok(out);
                 }
                 Some(Token::Word(w)) if w == "ELSE" => {
                     if until_end {
-                        return Err("ELSE inside DO with no IF".into());
+                        return Err((syntax::messages::IWJ0104, "ELSE inside DO with no IF".into()));
                     }
-                    return Err("ELSE without IF".into());
+                    return Err((syntax::messages::IWJ0071, "ELSE without IF".into()));
                 }
                 _ => out.push(self.command()?),
             }
@@ -381,7 +383,7 @@ impl Parser {
     }
 
     /// One command, or a DO group, after THEN or ELSE.
-    fn clause(&mut self) -> Result<Vec<Command>, String> {
+    fn clause(&mut self) -> Result<Vec<Command>, Refused> {
         self.skip_ends();
         if self.peek() == Some(&Token::Word("DO".into())) {
             self.at += 1;
@@ -393,7 +395,7 @@ impl Parser {
         Ok(vec![self.command()?])
     }
 
-    fn command(&mut self) -> Result<Command, String> {
+    fn command(&mut self) -> Result<Command, Refused> {
         let mut args = Vec::new();
         let verb = match self.peek().cloned() {
             Some(Token::Word(w)) => w,
@@ -401,7 +403,7 @@ impl Parser {
                 args.push(Token::Group(group));
                 w
             }
-            other => return Err(format!("a command, found {other:?}")),
+            other => return Err((syntax::messages::IWJ0105, format!("a command, found {other:?}"))),
         };
         self.at += 1;
         if verb != "IF" {
@@ -417,7 +419,7 @@ impl Parser {
             "IF" => self.if_command(),
             "SET" => match args.as_slice() {
                 [Token::Word(which), Token::Op(Op::Eq), Token::Word(n)] if which == "MAXCC" || which == "LASTCC" => Ok(Command::Set { max: which == "MAXCC", value: condition_code(n)? }),
-                _ => Err("SET takes MAXCC=n or LASTCC=n".into()),
+                _ => Err((syntax::messages::IWJ0106, "SET takes MAXCC=n or LASTCC=n".into())),
             },
             "DELETE" | "DEL" => delete(&args),
             "REPRO" => repro(&args),
@@ -425,18 +427,18 @@ impl Parser {
             "BLDINDEX" | "BIX" => bldindex(&args),
             "LISTCAT" | "LISTC" => listcat(&args),
             "PRINT" => print(&args),
-            "DO" | "END" | "THEN" | "ELSE" => Err(format!("{verb} is out of place")),
-            v => Err(format!("the IDCAMS command {v} is not supported yet")),
+            "DO" | "END" | "THEN" | "ELSE" => Err((syntax::messages::IWJ0107, format!("{verb} is out of place"))),
+            v => Err((syntax::messages::IWJ0108, format!("the IDCAMS command {v} is not supported yet"))),
         }
     }
 
-    fn if_command(&mut self) -> Result<Command, String> {
-        let which = self.word().filter(|w| w == "MAXCC" || w == "LASTCC").ok_or("IF takes MAXCC or LASTCC")?;
-        let Some(Token::Op(op)) = self.peek().cloned() else { return Err("IF needs a comparison operator".into()) };
+    fn if_command(&mut self) -> Result<Command, Refused> {
+        let which = self.word().filter(|w| w == "MAXCC" || w == "LASTCC").ok_or_else(|| (syntax::messages::IWJ0216, "IF takes MAXCC or LASTCC".to_owned()))?;
+        let Some(Token::Op(op)) = self.peek().cloned() else { return Err((syntax::messages::IWJ0109, "IF needs a comparison operator".into())) };
         self.at += 1;
-        let value = condition_code(&self.word().ok_or("IF needs a condition code")?)?;
+        let value = condition_code(&self.word().ok_or_else(|| (syntax::messages::IWJ0217, "IF needs a condition code".to_owned()))?)?;
         if self.word().as_deref() != Some("THEN") {
-            return Err("IF needs THEN".into());
+            return Err((syntax::messages::IWJ0110, "IF needs THEN".into()));
         }
         let then = self.clause()?;
         let mark = self.at;
@@ -453,12 +455,12 @@ impl Parser {
 
 const DELETE_IGNORED: &[&str] = &["PURGE", "PRG", "NOPURGE", "NPRG", "ERASE", "ERAS", "NOERASE", "NERAS", "SCRATCH", "SCR", "NOSCRATCH", "NSCR", "NONVSAM", "NVSAM", "CLUSTER", "CL", "FORCE", "FRC", "NOFORCE", "NFRC", "GENERATIONDATAGROUP", "GDG"];
 
-fn delete(args: &[Token]) -> Result<Command, String> {
+fn delete(args: &[Token]) -> Result<Command, Refused> {
     let mut names = Vec::new();
     for a in args {
         match a {
             Token::Word(w) if DELETE_IGNORED.contains(&w.as_str()) => {}
-            Token::Word(w) if w.contains('*') || w.contains('%') => return Err(format!("DELETE of a generic name ({w}) is not supported yet")),
+            Token::Word(w) if w.contains('*') || w.contains('%') => return Err((syntax::messages::IWJ0111, format!("DELETE of a generic name ({w}) is not supported yet"))),
             Token::Word(w) => names.push(name_of(w)?),
             Token::Group(g) => {
                 for n in g.split([' ', ',']).filter(|n| !n.is_empty()) {
@@ -466,19 +468,19 @@ fn delete(args: &[Token]) -> Result<Command, String> {
                 }
             }
             Token::Keyed(k, v) if crate::is_dsn(k) => names.push(name_of(&format!("{k}({v})"))?),
-            Token::Keyed(k, _) => return Err(format!("DELETE parameter {k} is not supported yet")),
-            other => return Err(format!("DELETE has {other:?} where a name belongs")),
+            Token::Keyed(k, _) => return Err((syntax::messages::IWJ0112, format!("DELETE parameter {k} is not supported yet"))),
+            other => return Err((syntax::messages::IWJ0113, format!("DELETE has {other:?} where a name belongs"))),
         }
     }
     if names.is_empty() {
-        return Err("DELETE names no entry".into());
+        return Err((syntax::messages::IWJ0114, "DELETE names no entry".into()));
     }
     Ok(Command::Delete(names))
 }
 
 /// INFILE or INDATASET (true), or OUTFILE or OUTDATASET (false), as REPRO and PRINT name their
 /// data sets; None for any other parameter.
-fn in_out(k: &str, v: &str) -> Result<Option<(bool, Target)>, String> {
+fn in_out(k: &str, v: &str) -> Result<Option<(bool, Target)>, Refused> {
     Ok(Some(match k {
         "INFILE" | "IFILE" => (true, Target::Dd(dd_name(v)?)),
         "INDATASET" | "IDS" => (true, Target::Dataset(name_of(v)?)),
@@ -488,29 +490,29 @@ fn in_out(k: &str, v: &str) -> Result<Option<(bool, Target)>, String> {
     }))
 }
 
-fn repro(args: &[Token]) -> Result<Command, String> {
+fn repro(args: &[Token]) -> Result<Command, Refused> {
     let (mut from, mut to) = (None, None);
     for a in args {
         match a {
             Token::Keyed(k, v) => match in_out(k, v)? {
                 Some((true, t)) => from = Some(t),
                 Some((false, t)) => to = Some(t),
-                None => return Err(format!("REPRO parameter {k} is not supported yet")),
+                None => return Err((syntax::messages::IWJ0115, format!("REPRO parameter {k} is not supported yet"))),
             },
-            Token::Word(w) => return Err(format!("REPRO parameter {w} is not supported yet")),
-            other => return Err(format!("REPRO has {other:?} where a parameter belongs")),
+            Token::Word(w) => return Err((syntax::messages::IWJ0116, format!("REPRO parameter {w} is not supported yet"))),
+            other => return Err((syntax::messages::IWJ0117, format!("REPRO has {other:?} where a parameter belongs"))),
         }
     }
     match (from, to) {
         (Some(from), Some(to)) => Ok(Command::Repro { from, to }),
-        _ => Err("REPRO needs INFILE or INDATASET, and OUTFILE or OUTDATASET".into()),
+        _ => Err((syntax::messages::IWJ0118, "REPRO needs INFILE or INDATASET, and OUTFILE or OUTDATASET".into())),
     }
 }
 
 /// The sort BLDINDEX uses and its work files change how it runs, not the index it builds.
 const BLDINDEX_IGNORED: &[&str] = &["INTERNALSORT", "ISORT", "EXTERNALSORT", "ESORT", "WORKFILES", "WFILE", "SORTCALL", "NOSORTCALL", "SORTDEVICETYPE", "SDVT", "SORTFILENUMBER", "SFN", "SORTMESSAGEDD", "SMDD", "SORTMESSAGELEVEL", "SML", "CATALOG", "CAT"];
 
-fn bldindex(args: &[Token]) -> Result<Command, String> {
+fn bldindex(args: &[Token]) -> Result<Command, Refused> {
     let (mut from, mut to) = (None, Vec::new());
     for a in args {
         match a {
@@ -520,53 +522,53 @@ fn bldindex(args: &[Token]) -> Result<Command, String> {
                 "OUTFILE" | "OFILE" => to.extend(v.split([' ', ',']).filter(|n| !n.is_empty()).map(|n| dd_name(n).map(Target::Dd)).collect::<Result<Vec<_>, _>>()?),
                 "OUTDATASET" | "ODS" => to.extend(v.split([' ', ',']).filter(|n| !n.is_empty()).map(|n| name_of(n).map(Target::Dataset)).collect::<Result<Vec<_>, _>>()?),
                 k if BLDINDEX_IGNORED.contains(&k) => {}
-                k => return Err(format!("BLDINDEX parameter {k} is not supported yet")),
+                k => return Err((syntax::messages::IWJ0119, format!("BLDINDEX parameter {k} is not supported yet"))),
             },
             Token::Word(w) if BLDINDEX_IGNORED.contains(&w.as_str()) => {}
-            Token::Word(w) => return Err(format!("BLDINDEX parameter {w} is not supported yet")),
-            other => return Err(format!("BLDINDEX has {other:?} where a parameter belongs")),
+            Token::Word(w) => return Err((syntax::messages::IWJ0120, format!("BLDINDEX parameter {w} is not supported yet"))),
+            other => return Err((syntax::messages::IWJ0121, format!("BLDINDEX has {other:?} where a parameter belongs"))),
         }
     }
     match from {
         Some(from) if !to.is_empty() => Ok(Command::Bldindex { from, to }),
-        _ => Err("BLDINDEX needs INFILE or INDATASET, and OUTFILE or OUTDATASET".into()),
+        _ => Err((syntax::messages::IWJ0122, "BLDINDEX needs INFILE or INDATASET, and OUTFILE or OUTDATASET".into())),
     }
 }
 
-fn dd_name(v: &str) -> Result<String, String> {
+fn dd_name(v: &str) -> Result<String, Refused> {
     let name = v.split_whitespace().next().unwrap_or("");
-    if crate::is_name(name) && v.split_whitespace().count() == 1 { Ok(name.to_string()) } else { Err(format!("{v} is not a DD name")) }
+    if crate::is_name(name) && v.split_whitespace().count() == 1 { Ok(name.to_string()) } else { Err((syntax::messages::IWJ0123, format!("{v} is not a DD name"))) }
 }
 
 /// The whole numbers of a parenthesised value, as KEYS(8 0) or RECORDSIZE(80,80) give them.
-fn numbers<const N: usize>(keyword: &str, v: &str) -> Result<[usize; N], String> {
+fn numbers<const N: usize>(keyword: &str, v: &str) -> Result<[usize; N], Refused> {
     let parts: Vec<&str> = v.split([' ', ',']).filter(|p| !p.is_empty()).collect();
     let parsed: Option<Vec<usize>> = parts.iter().map(|p| p.parse().ok().filter(|_| p.bytes().all(|b| b.is_ascii_digit()))).collect();
-    parsed.and_then(|n| n.try_into().ok()).ok_or_else(|| format!("{keyword}({v}) needs {N} whole numbers"))
+    parsed.and_then(|n| n.try_into().ok()).ok_or_else(|| (syntax::messages::IWJ0218, format!("{keyword}({v}) needs {N} whole numbers")))
 }
 
-fn keys(v: &str) -> Result<Keys, String> {
+fn keys(v: &str) -> Result<Keys, Refused> {
     let [length, offset] = numbers("KEYS", v)?;
     if !(1..=255).contains(&length) {
-        return Err(format!("KEYS({v}) has a length that is not from 1 to 255"));
+        return Err((syntax::messages::IWJ0124, format!("KEYS({v}) has a length that is not from 1 to 255")));
     }
     Ok(Keys { length, offset })
 }
 
-fn record_size(v: &str) -> Result<RecordSize, String> {
+fn record_size(v: &str) -> Result<RecordSize, Refused> {
     let [average, maximum] = numbers("RECORDSIZE", v)?;
     if average == 0 || average > maximum {
-        return Err(format!("RECORDSIZE({v}) needs an average from 1 to the maximum"));
+        return Err((syntax::messages::IWJ0125, format!("RECORDSIZE({v}) needs an average from 1 to the maximum")));
     }
     Ok(RecordSize { average, maximum })
 }
 
-fn key_value(v: &str) -> Result<Key, String> {
+fn key_value(v: &str) -> Result<Key, Refused> {
     let v = v.trim();
     if let Some(hex) = v.strip_prefix("X'").or_else(|| v.strip_prefix("x'")).and_then(|h| h.strip_suffix('\'')) {
         let digits: Vec<u8> = hex.bytes().collect();
         if digits.is_empty() || !digits.len().is_multiple_of(2) || !digits.iter().all(u8::is_ascii_hexdigit) {
-            return Err(format!("{v} is not an even number of hexadecimal digits"));
+            return Err((syntax::messages::IWJ0126, format!("{v} is not an even number of hexadecimal digits")));
         }
         let pairs = digits.chunks(2).map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap_or("00"), 16).unwrap_or(0));
         return Ok(Key::Bytes(pairs.collect()));
@@ -576,59 +578,59 @@ fn key_value(v: &str) -> Result<Key, String> {
         None => v.to_string(),
     };
     if text.is_empty() || text.chars().count() > 255 {
-        return Err(format!("{v} is not a key of 1 to 255 characters"));
+        return Err((syntax::messages::IWJ0127, format!("{v} is not a key of 1 to 255 characters")));
     }
     Ok(Key::Chars(text))
 }
 
-fn print(args: &[Token]) -> Result<Command, String> {
+fn print(args: &[Token]) -> Result<Command, Refused> {
     let (mut from, mut format, mut first, mut last, mut out) = (None, PrintFormat::Dump, First::Start, Last::End, None);
     for a in args {
         match a {
             Token::Keyed(k, v) => match (in_out(k, v)?, k.as_str()) {
                 (Some((true, t)), _) => from = Some(t),
                 (Some((false, Target::Dd(dd))), _) => out = Some(dd),
-                (Some((false, Target::Dataset(_))), _) => return Err("PRINT writes to OUTFILE, not OUTDATASET".into()),
+                (Some((false, Target::Dataset(_))), _) => return Err((syntax::messages::IWJ0128, "PRINT writes to OUTFILE, not OUTDATASET".into())),
                 (None, "SKIP") => first = First::Skip(numbers::<1>("SKIP", v)?[0]),
                 (None, "FROMKEY" | "FKEY") => first = First::Key(key_value(v)?),
                 (None, "COUNT") => last = Last::Count(numbers::<1>("COUNT", v)?[0]),
                 (None, "TOKEY" | "TKEY") => last = Last::Key(key_value(v)?),
-                (None, k) => return Err(format!("PRINT parameter {k} is not supported yet")),
+                (None, k) => return Err((syntax::messages::IWJ0129, format!("PRINT parameter {k} is not supported yet"))),
             },
             Token::Word(w) => {
                 format = match w.as_str() {
                     "CHARACTER" | "CHAR" => PrintFormat::Character,
                     "HEX" => PrintFormat::Hex,
                     "DUMP" => PrintFormat::Dump,
-                    w => return Err(format!("PRINT parameter {w} is not supported yet")),
+                    w => return Err((syntax::messages::IWJ0130, format!("PRINT parameter {w} is not supported yet"))),
                 }
             }
-            other => return Err(format!("PRINT has {other:?} where a parameter belongs")),
+            other => return Err((syntax::messages::IWJ0131, format!("PRINT has {other:?} where a parameter belongs"))),
         }
     }
-    let from = from.ok_or("PRINT needs INFILE or INDATASET")?;
+    let from = from.ok_or_else(|| (syntax::messages::IWJ0219, "PRINT needs INFILE or INDATASET".to_owned()))?;
     Ok(Command::Print(Print { from, format, first, last, out }))
 }
 
 /// A LISTCAT ENTRIES or LEVEL name: a data set name, a qualifier of which may be an asterisk
 /// and a character of which may be a percent sign.
-fn listed_name(v: &str) -> Result<String, String> {
+fn listed_name(v: &str) -> Result<String, Refused> {
     let v = v.trim().trim_matches('\'');
     let stand_in = v.split('.').map(|q| if q == "*" { "A".to_string() } else { q.replace('%', "A") }).collect::<Vec<_>>().join(".");
-    if crate::is_dsn(&stand_in) { Ok(v.to_string()) } else { Err(format!("{v} is not a data set name or a generic name")) }
+    if crate::is_dsn(&stand_in) { Ok(v.to_string()) } else { Err((syntax::messages::IWJ0132, format!("{v} is not a data set name or a generic name"))) }
 }
 
-fn listcat(args: &[Token]) -> Result<Command, String> {
+fn listcat(args: &[Token]) -> Result<Command, Refused> {
     let (mut entries, mut types, mut all, mut out) = (Entries::All, Vec::new(), false, None);
     for a in args {
         match a {
             Token::Keyed(k, v) => match k.as_str() {
                 "ENTRIES" | "ENTRY" | "ENT" => entries = Entries::Named(v.split([' ', ',']).filter(|n| !n.is_empty()).map(listed_name).collect::<Result<_, _>>()?),
-                "LEVEL" | "LVL" if v.trim().ends_with('*') => return Err(format!("LEVEL({v}) must not end with *")),
+                "LEVEL" | "LVL" if v.trim().ends_with('*') => return Err((syntax::messages::IWJ0133, format!("LEVEL({v}) must not end with *"))),
                 "LEVEL" | "LVL" => entries = Entries::Level(listed_name(v)?),
                 "OUTFILE" | "OFILE" => out = Some(dd_name(v)?),
                 "CATALOG" | "CAT" => {}
-                k => return Err(format!("LISTCAT parameter {k} is not supported yet")),
+                k => return Err((syntax::messages::IWJ0134, format!("LISTCAT parameter {k} is not supported yet"))),
             },
             Token::Word(w) => match w.as_str() {
                 "ALL" => all = true,
@@ -640,41 +642,41 @@ fn listcat(args: &[Token]) -> Result<Command, String> {
                 "PATH" => types.push(EntryType::Path),
                 "NONVSAM" | "NVSAM" => types.push(EntryType::Nonvsam),
                 "GENERATIONDATAGROUP" | "GDG" => types.push(EntryType::GenerationDataGroup),
-                w => return Err(format!("LISTCAT parameter {w} is not supported yet")),
+                w => return Err((syntax::messages::IWJ0135, format!("LISTCAT parameter {w} is not supported yet"))),
             },
-            other => return Err(format!("LISTCAT has {other:?} where a parameter belongs")),
+            other => return Err((syntax::messages::IWJ0136, format!("LISTCAT has {other:?} where a parameter belongs"))),
         }
     }
     if matches!(&entries, Entries::Named(n) if n.is_empty()) {
-        return Err("LISTCAT ENTRIES names no entry".into());
+        return Err((syntax::messages::IWJ0137, "LISTCAT ENTRIES names no entry".into()));
     }
     types.sort_unstable();
     types.dedup();
     Ok(Command::Listcat(Listcat { entries, types, all, out }))
 }
 
-fn define_gdg(group: &str) -> Result<Command, String> {
+fn define_gdg(group: &str) -> Result<Command, Refused> {
     let (mut name, mut limit, mut scratch, mut empty) = (None, None, false, false);
     for t in tokens(group)? {
         match t {
             Token::Keyed(k, v) if k == "NAME" => name = Some(name_of(&v)?),
             Token::Keyed(k, v) if k == "LIMIT" || k == "LIM" => match v.trim().parse::<u16>() {
                 Ok(n) if (1..=255).contains(&n) => limit = Some(n),
-                _ => return Err(format!("LIMIT({v}) is not from 1 to 255")),
+                _ => return Err((syntax::messages::IWJ0138, format!("LIMIT({v}) is not from 1 to 255"))),
             },
             Token::Word(w) if w == "SCRATCH" || w == "SCR" => scratch = true,
             Token::Word(w) if w == "NOSCRATCH" || w == "NSCR" => scratch = false,
             Token::Word(w) if w == "EMPTY" || w == "EMP" => empty = true,
             Token::Word(w) if w == "NOEMPTY" || w == "NEMP" => empty = false,
             Token::End => {}
-            Token::Keyed(k, _) | Token::Word(k) => return Err(format!("DEFINE GDG parameter {k} is not supported yet")),
-            other => return Err(format!("DEFINE GDG has {other:?} where a parameter belongs")),
+            Token::Keyed(k, _) | Token::Word(k) => return Err((syntax::messages::IWJ0139, format!("DEFINE GDG parameter {k} is not supported yet"))),
+            other => return Err((syntax::messages::IWJ0140, format!("DEFINE GDG has {other:?} where a parameter belongs"))),
         }
     }
     match (name, limit) {
         (Some(name), Some(limit)) if !name.contains('(') && name.len() <= 35 => Ok(Command::DefineGdg { name, limit, scratch, empty }),
-        (Some(name), Some(_)) => Err(format!("{name} is not a generation data group name of 35 characters or fewer")),
-        _ => Err("DEFINE GDG needs NAME and LIMIT".into()),
+        (Some(name), Some(_)) => Err((syntax::messages::IWJ0141, format!("{name} is not a generation data group name of 35 characters or fewer"))),
+        _ => Err((syntax::messages::IWJ0142, "DEFINE GDG needs NAME and LIMIT".into())),
     }
 }
 
@@ -686,12 +688,12 @@ enum Object {
 }
 
 /// The NAME in an object's parameters.
-fn object_name(object: &[Token]) -> Result<Option<String>, String> {
+fn object_name(object: &[Token]) -> Result<Option<String>, Refused> {
     object.iter().find_map(|t| if let Token::Keyed(k, v) = t && k == "NAME" { Some(name_of(v)) } else { None }).transpose()
 }
 
 /// KEYS and RECORDSIZE, from the object's parameters or its DATA component's.
-fn sizes(object: &[Token], data: &[Token]) -> Result<(Option<Keys>, Option<RecordSize>), String> {
+fn sizes(object: &[Token], data: &[Token]) -> Result<(Option<Keys>, Option<RecordSize>), Refused> {
     let (mut k, mut r) = (None, None);
     for t in object.iter().chain(data) {
         match t {
@@ -703,14 +705,14 @@ fn sizes(object: &[Token], data: &[Token]) -> Result<(Option<Keys>, Option<Recor
     Ok((k, r))
 }
 
-fn define_cluster(object: &[Token], data: &[Token], components: Components) -> Result<Cluster, String> {
-    let name = object_name(object)?.ok_or("DEFINE CLUSTER needs NAME")?;
+fn define_cluster(object: &[Token], data: &[Token], components: Components) -> Result<Cluster, Refused> {
+    let name = object_name(object)?.ok_or_else(|| (syntax::messages::IWJ0220, "DEFINE CLUSTER needs NAME".to_owned()))?;
     let (mut organization, mut recatalog) = (Organization::Indexed, false);
     for t in object.iter().chain(data) {
         if let Token::Keyed(k, _) | Token::Word(k) = t
             && (k == "DATABASE" || k == "ZFS")
         {
-            return Err(format!("DEFINE CLUSTER {k} is not supported yet"));
+            return Err((syntax::messages::IWJ0143, format!("DEFINE CLUSTER {k} is not supported yet")));
         }
         if let Token::Word(w) = t
             && (w == "RECATALOG" || w == "RCTLG" || w == "NORECATALOG" || w == "NRCTLG")
@@ -734,20 +736,20 @@ fn define_cluster(object: &[Token], data: &[Token], components: Components) -> R
     Ok(Cluster { name, organization, keys, record_size, components, recatalog })
 }
 
-fn fits(name: &str, keys: Option<Keys>, size: RecordSize) -> Result<(), String> {
+fn fits(name: &str, keys: Option<Keys>, size: RecordSize) -> Result<(), Refused> {
     match keys {
-        Some(k) if k.offset + k.length > size.maximum => Err(format!("{name}: KEYS({} {}) does not fit in a record of {} bytes", k.length, k.offset, size.maximum)),
+        Some(k) if k.offset + k.length > size.maximum => Err((syntax::messages::IWJ0144, format!("{name}: KEYS({} {}) does not fit in a record of {} bytes", k.length, k.offset, size.maximum))),
         _ => Ok(()),
     }
 }
 
-fn define_alternate_index(object: &[Token], data: &[Token], components: Components) -> Result<AlternateIndex, String> {
-    let name = object_name(object)?.ok_or("DEFINE ALTERNATEINDEX needs NAME")?;
+fn define_alternate_index(object: &[Token], data: &[Token], components: Components) -> Result<AlternateIndex, Refused> {
+    let name = object_name(object)?.ok_or_else(|| (syntax::messages::IWJ0221, "DEFINE ALTERNATEINDEX needs NAME".to_owned()))?;
     let (mut relate, mut unique, mut upgrade, mut reuse) = (None, false, true, false);
     for t in object {
         match t {
             Token::Keyed(k, v) if k == "RELATE" || k == "REL" => relate = Some(name_of(v)?),
-            Token::Keyed(k, _) if k == "ALTKEYS" || k == "ALTKEYSU" => return Err(format!("DEFINE ALTERNATEINDEX {k} is not supported yet")),
+            Token::Keyed(k, _) if k == "ALTKEYS" || k == "ALTKEYSU" => return Err((syntax::messages::IWJ0145, format!("DEFINE ALTERNATEINDEX {k} is not supported yet"))),
             Token::Word(w) if w == "UNIQUEKEY" || w == "UNQK" => unique = true,
             Token::Word(w) if w == "NONUNIQUEKEY" || w == "NUNQK" => unique = false,
             Token::Word(w) if w == "UPGRADE" || w == "UPG" => upgrade = true,
@@ -757,29 +759,29 @@ fn define_alternate_index(object: &[Token], data: &[Token], components: Componen
             _ => {}
         }
     }
-    let relate = relate.ok_or("DEFINE ALTERNATEINDEX needs RELATE")?;
+    let relate = relate.ok_or_else(|| (syntax::messages::IWJ0222, "DEFINE ALTERNATEINDEX needs RELATE".to_owned()))?;
     let (k, r) = sizes(object, data)?;
     let (keys, record_size) = (k.unwrap_or(DEFAULT_KEYS), r.unwrap_or(DEFAULT_AIX_RECORD_SIZE));
     Ok(AlternateIndex { name, relate, keys, unique, upgrade, reuse, record_size, components })
 }
 
-fn define_path(object: &[Token]) -> Result<Path, String> {
-    let name = object_name(object)?.ok_or("DEFINE PATH needs NAME")?;
+fn define_path(object: &[Token]) -> Result<Path, Refused> {
+    let name = object_name(object)?.ok_or_else(|| (syntax::messages::IWJ0223, "DEFINE PATH needs NAME".to_owned()))?;
     let (mut entry, mut update) = (None, true);
     for t in object {
         match t {
             Token::Keyed(k, v) if k == "PATHENTRY" || k == "PENT" => entry = Some(name_of(v)?),
             Token::Word(w) if w == "UPDATE" || w == "UPD" => update = true,
             Token::Word(w) if w == "NOUPDATE" || w == "NUPD" => update = false,
-            Token::Keyed(k, _) | Token::Word(k) if k == "RECATALOG" || k == "RCTLG" => return Err("DEFINE PATH RECATALOG is not supported yet".into()),
+            Token::Keyed(k, _) | Token::Word(k) if k == "RECATALOG" || k == "RCTLG" => return Err((syntax::messages::IWJ0146, "DEFINE PATH RECATALOG is not supported yet".into())),
             _ => {}
         }
     }
-    let entry = entry.ok_or("DEFINE PATH needs PATHENTRY")?;
+    let entry = entry.ok_or_else(|| (syntax::messages::IWJ0224, "DEFINE PATH needs PATHENTRY".to_owned()))?;
     Ok(Path { name, entry, update })
 }
 
-fn define(args: &[Token]) -> Result<Command, String> {
+fn define(args: &[Token]) -> Result<Command, Refused> {
     let (mut object, mut data, mut index) = (None, Vec::new(), Vec::new());
     for a in args {
         match a {
@@ -798,12 +800,12 @@ fn define(args: &[Token]) -> Result<Command, String> {
                         continue;
                     }
                     "CATALOG" | "CAT" => continue,
-                    k => return Err(format!("DEFINE {k} is not supported yet; DEFINE CLUSTER, ALTERNATEINDEX, PATH and GDG are")),
+                    k => return Err((syntax::messages::IWJ0147, format!("DEFINE {k} is not supported yet; DEFINE CLUSTER, ALTERNATEINDEX, PATH and GDG are"))),
                 };
                 object = Some((kind, tokens(v)?));
             }
-            Token::Word(k) => return Err(format!("DEFINE {k} is not supported yet; DEFINE CLUSTER, ALTERNATEINDEX, PATH and GDG are")),
-            other => return Err(format!("DEFINE has {other:?} where a parameter belongs")),
+            Token::Word(k) => return Err((syntax::messages::IWJ0147, format!("DEFINE {k} is not supported yet; DEFINE CLUSTER, ALTERNATEINDEX, PATH and GDG are"))),
+            other => return Err((syntax::messages::IWJ0148, format!("DEFINE has {other:?} where a parameter belongs"))),
         }
     }
     let components = Components { data: object_name(&data)?, index: object_name(&index)? };
@@ -811,12 +813,12 @@ fn define(args: &[Token]) -> Result<Command, String> {
         Some((Object::Cluster, o)) => Ok(Command::DefineCluster(define_cluster(&o, &data, components)?)),
         Some((Object::AlternateIndex, o)) => Ok(Command::DefineAlternateIndex(define_alternate_index(&o, &data, components)?)),
         Some((Object::Path, o)) => Ok(Command::DefinePath(define_path(&o)?)),
-        None => Err("DEFINE needs CLUSTER, ALTERNATEINDEX, PATH or GDG".into()),
+        None => Err((syntax::messages::IWJ0149, "DEFINE needs CLUSTER, ALTERNATEINDEX, PATH or GDG".into())),
     }
 }
 
 /// The commands in SYSIN's cards.
-pub fn parse(cards: &[String]) -> Result<Vec<Command>, String> {
+pub fn parse(cards: &[String]) -> Result<Vec<Command>, Refused> {
     let mut p = Parser { tokens: tokens(&command_text(cards)?)?, at: 0 };
     p.commands(false)
 }
@@ -915,7 +917,7 @@ mod tests {
             ("DO\nDELETE A.B", "DO is out of place"),
             ("/* never closed", "a comment is not closed with */"),
         ] {
-            assert_eq!(parse(&cards(text)).unwrap_err(), message, "{text}");
+            assert_eq!(parse(&cards(text)).unwrap_err().1, message, "{text}");
         }
     }
 }

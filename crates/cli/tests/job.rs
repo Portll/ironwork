@@ -248,7 +248,7 @@ fn what_ironwork_does_not_run_is_refused_before_any_step() {
     assert!(!dir.join("data/MADE.EARLY").exists());
     let o = job(&dir, "//S1 EXEC MYPROC\n");
     assert_eq!(o.status.code(), Some(244));
-    assert!(log(&o).contains("job.jcl:2: no procedure library holds member MYPROC"), "{}", log(&o));
+    assert!(log(&o).contains("job.jcl:2: IWJ0020-S no procedure library holds member MYPROC"), "{}", log(&o));
 }
 
 #[test]

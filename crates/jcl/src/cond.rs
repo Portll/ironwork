@@ -1,6 +1,8 @@
 //! COND on JOB and EXEC statements and the relational expression of an IF statement, read and
 //! decided against the steps that ran before.
 
+use syntax::messages::Refused;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
     Gt,
@@ -44,14 +46,14 @@ pub struct StepRef {
 }
 
 impl StepRef {
-    fn parse(text: &str) -> Result<StepRef, String> {
+    fn parse(text: &str) -> Result<StepRef, Refused> {
         let (step, procstep) = match text.split_once('.') {
             Some((s, p)) => (s, Some(p)),
             None => (text, None),
         };
         for n in std::iter::once(step).chain(procstep) {
             if !crate::is_name(n) {
-                return Err(format!("{n} is not a step name"));
+                return Err((syntax::messages::IWJ0043, format!("{n} is not a step name")));
             }
         }
         Ok(StepRef { step: step.to_string(), procstep: procstep.map(str::to_string) })
@@ -130,14 +132,14 @@ pub struct Ran {
     pub abend: Option<String>,
 }
 
-fn code(text: &str) -> Result<u16, String> {
+fn code(text: &str) -> Result<u16, Refused> {
     match text.parse::<u16>() {
         Ok(n) if n <= 4095 && !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit()) => Ok(n),
-        _ => Err(format!("{text} is not a return code from 0 to 4095")),
+        _ => Err((syntax::messages::IWJ0074, format!("{text} is not a return code from 0 to 4095"))),
     }
 }
 
-fn cond_op(text: &str) -> Result<Op, String> {
+fn cond_op(text: &str) -> Result<Op, Refused> {
     Ok(match text {
         "GT" => Op::Gt,
         "GE" => Op::Ge,
@@ -145,14 +147,14 @@ fn cond_op(text: &str) -> Result<Op, String> {
         "NE" => Op::Ne,
         "LT" => Op::Lt,
         "LE" => Op::Le,
-        _ => return Err(format!("{text} is not a COND operator (GT, GE, EQ, NE, LT or LE)")),
+        _ => return Err((syntax::messages::IWJ0075, format!("{text} is not a COND operator (GT, GE, EQ, NE, LT or LE)"))),
     })
 }
 
-fn cond_test(text: &str) -> Result<Test, String> {
+fn cond_test(text: &str) -> Result<Test, Refused> {
     let parts: Vec<&str> = text.split(',').collect();
     if !(2..=3).contains(&parts.len()) {
-        return Err(format!("COND test ({text}) is not (code,operator) or (code,operator,stepname)"));
+        return Err((syntax::messages::IWJ0076, format!("COND test ({text}) is not (code,operator) or (code,operator,stepname)")));
     }
     let step = parts.get(2).map(|s| StepRef::parse(s)).transpose()?;
     Ok(Test { code: code(parts[0])?, op: cond_op(parts[1])?, step })
@@ -178,13 +180,13 @@ fn top_level(text: &str) -> Vec<&str> {
 
 /// The value of COND=: EVEN, ONLY, one test, or a list of up to eight tests that may end with
 /// EVEN or ONLY.
-pub fn parse_cond(text: &str) -> Result<Cond, String> {
+pub fn parse_cond(text: &str) -> Result<Cond, Refused> {
     match text {
         "EVEN" => return Ok(Cond { tests: Vec::new(), mode: Mode::Even }),
         "ONLY" => return Ok(Cond { tests: Vec::new(), mode: Mode::Only }),
         _ => {}
     }
-    let Some(inner) = text.strip_prefix('(').and_then(|t| t.strip_suffix(')')) else { return Err(format!("COND={text} is not in parentheses")) };
+    let Some(inner) = text.strip_prefix('(').and_then(|t| t.strip_suffix(')')) else { return Err((syntax::messages::IWJ0077, format!("COND={text} is not in parentheses"))) };
     if !inner.starts_with('(') {
         return Ok(Cond { tests: vec![cond_test(inner)?], mode: Mode::Plain });
     }
@@ -193,15 +195,15 @@ pub fn parse_cond(text: &str) -> Result<Cond, String> {
     for (i, item) in items.iter().enumerate() {
         match *item {
             "EVEN" | "ONLY" if i + 1 == items.len() => cond.mode = if *item == "EVEN" { Mode::Even } else { Mode::Only },
-            "EVEN" | "ONLY" => return Err(format!("{item} must come last in COND")),
+            "EVEN" | "ONLY" => return Err((syntax::messages::IWJ0078, format!("{item} must come last in COND"))),
             t => match t.strip_prefix('(').and_then(|t| t.strip_suffix(')')) {
                 Some(t) => cond.tests.push(cond_test(t)?),
-                None => return Err(format!("{t} in COND is not a test in parentheses")),
+                None => return Err((syntax::messages::IWJ0079, format!("{t} in COND is not a test in parentheses"))),
             },
         }
     }
     if cond.tests.len() > 8 {
-        return Err("COND takes at most eight tests".into());
+        return Err((syntax::messages::IWJ0080, "COND takes at most eight tests".into()));
     }
     Ok(cond)
 }
@@ -226,7 +228,7 @@ fn takes_value(word: &str) -> bool {
     word == "ABEND" || word == "ABENDCC" || word.ends_with(".ABEND") || word.ends_with(".RUN")
 }
 
-fn tokens(text: &str) -> Result<Vec<Token>, String> {
+fn tokens(text: &str) -> Result<Vec<Token>, Refused> {
     let chars: Vec<char> = text.chars().collect();
     let (mut out, mut i) = (Vec::new(), 0);
     while i < chars.len() {
@@ -279,7 +281,7 @@ fn tokens(text: &str) -> Result<Vec<Token>, String> {
                 });
                 continue;
             }
-            c => return Err(format!("{c} has no meaning in an IF expression")),
+            c => return Err((syntax::messages::IWJ0081, format!("{c} has no meaning in an IF expression"))),
         };
         out.push(token);
         i += width;
@@ -298,7 +300,7 @@ impl Parser {
         self.tokens.get(self.at)
     }
 
-    fn or(&mut self) -> Result<Expr, String> {
+    fn or(&mut self) -> Result<Expr, Refused> {
         let mut left = self.and()?;
         while self.peek() == Some(&Token::Or) {
             self.at += 1;
@@ -307,7 +309,7 @@ impl Parser {
         Ok(left)
     }
 
-    fn and(&mut self) -> Result<Expr, String> {
+    fn and(&mut self) -> Result<Expr, Refused> {
         let mut left = self.unary()?;
         while self.peek() == Some(&Token::And) {
             self.at += 1;
@@ -317,7 +319,7 @@ impl Parser {
     }
 
     /// NOT binds tighter than a comparison, so NOT RC = 0 negates the comparison it begins.
-    fn unary(&mut self) -> Result<Expr, String> {
+    fn unary(&mut self) -> Result<Expr, Refused> {
         if self.peek() == Some(&Token::Not) {
             self.at += 1;
             return Ok(Expr::Not(Box::new(self.unary()?)));
@@ -325,17 +327,17 @@ impl Parser {
         self.primary()
     }
 
-    fn primary(&mut self) -> Result<Expr, String> {
+    fn primary(&mut self) -> Result<Expr, Refused> {
         match self.tokens.get(self.at).cloned() {
             Some(Token::Open) => {
                 self.depth += 1;
                 if self.depth > 15 {
-                    return Err("parentheses in an IF expression nest more than 15 deep".into());
+                    return Err((syntax::messages::IWJ0082, "parentheses in an IF expression nest more than 15 deep".into()));
                 }
                 self.at += 1;
                 let inner = self.or()?;
                 if self.peek() != Some(&Token::Close) {
-                    return Err("an IF expression is missing a )".into());
+                    return Err((syntax::messages::IWJ0083, "an IF expression is missing a )".into()));
                 }
                 self.at += 1;
                 self.depth -= 1;
@@ -345,28 +347,28 @@ impl Parser {
                 self.at += 1;
                 self.word(&w)
             }
-            Some(t) => Err(format!("an IF expression has {t:?} where a keyword belongs")),
-            None => Err("an IF expression ends early".into()),
+            Some(t) => Err((syntax::messages::IWJ0084, format!("an IF expression has {t:?} where a keyword belongs"))),
+            None => Err((syntax::messages::IWJ0085, "an IF expression ends early".into())),
         }
     }
 
-    fn comparison(&mut self, value: Value) -> Result<Expr, String> {
-        let Some(Token::Op(op)) = self.peek().cloned() else { return Err("RC needs a comparison operator and a number".into()) };
+    fn comparison(&mut self, value: Value) -> Result<Expr, Refused> {
+        let Some(Token::Op(op)) = self.peek().cloned() else { return Err((syntax::messages::IWJ0086, "RC needs a comparison operator and a number".into())) };
         self.at += 1;
         match self.tokens.get(self.at).cloned() {
             Some(Token::Word(n)) => {
                 self.at += 1;
                 Ok(Expr::Compare(value, op, code(&n)?))
             }
-            _ => Err(format!("{} needs a number after it", op.word())),
+            _ => Err((syntax::messages::IWJ0087, format!("{} needs a number after it", op.word()))),
         }
     }
 
-    fn word(&mut self, w: &str) -> Result<Expr, String> {
+    fn word(&mut self, w: &str) -> Result<Expr, Refused> {
         let truth = |base: Expr, value: Option<&str>| match value {
             None | Some("TRUE") => Ok(base),
             Some("FALSE") => Ok(Expr::Not(Box::new(base))),
-            Some(v) => Err(format!("{v} is not TRUE or FALSE")),
+            Some(v) => Err((syntax::messages::IWJ0088, format!("{v} is not TRUE or FALSE"))),
         };
         let (key, value) = match w.split_once('=') {
             Some((k, v)) => (k, Some(v)),
@@ -384,24 +386,24 @@ impl Parser {
                     [b'U', rest @ ..] => rest.len() == 4 && rest.iter().all(u8::is_ascii_digit),
                     _ => false,
                 };
-                if valid { Ok(Expr::AbendCc(v.to_string())) } else { Err(format!("ABENDCC={v} is not Sxxx or Unnnn")) }
+                if valid { Ok(Expr::AbendCc(v.to_string())) } else { Err((syntax::messages::IWJ0089, format!("ABENDCC={v} is not Sxxx or Unnnn"))) }
             }
             (Some(_), "RC") => self.comparison(Value::StepRc(step()?)),
             (Some(_), "ABEND") => truth(Expr::Abend(Some(step()?)), value),
             (Some(_), "RUN") => truth(Expr::Run(step()?), value),
-            (Some(_), "ABENDCC") => Err("stepname.ABENDCC is not supported yet".into()),
-            _ => Err(format!("{w} is not RC, ABEND, ABENDCC or a stepname.RC, .ABEND or .RUN")),
+            (Some(_), "ABENDCC") => Err((syntax::messages::IWJ0090, "stepname.ABENDCC is not supported yet".into())),
+            _ => Err((syntax::messages::IWJ0091, format!("{w} is not RC, ABEND, ABENDCC or a stepname.RC, .ABEND or .RUN"))),
         }
     }
 }
 
 /// The relational expression between IF and THEN. NOT binds first, then the comparisons, then
 /// AND, then OR.
-pub fn parse_expr(text: &str) -> Result<Expr, String> {
+pub fn parse_expr(text: &str) -> Result<Expr, Refused> {
     let mut p = Parser { tokens: tokens(text)?, at: 0, depth: 0 };
     let expr = p.or()?;
     if p.at != p.tokens.len() {
-        return Err(format!("an IF expression has {:?} after its end", p.tokens[p.at]));
+        return Err((syntax::messages::IWJ0092, format!("an IF expression has {:?} after its end", p.tokens[p.at])));
     }
     Ok(expr)
 }
@@ -509,7 +511,7 @@ mod tests {
             assert!(parse_expr(bad).is_err(), "{bad}");
         }
         assert!(parse_expr(&format!("{}RC = 0{}", "(".repeat(15), ")".repeat(15))).is_ok());
-        assert!(parse_expr(&format!("{}RC = 0{}", "(".repeat(16), ")".repeat(16))).unwrap_err().contains("15 deep"));
+        assert!(parse_expr(&format!("{}RC = 0{}", "(".repeat(16), ")".repeat(16))).unwrap_err().1.contains("15 deep"));
     }
 
     #[test]

@@ -11,6 +11,7 @@ pub mod symnames;
 
 use cond::Cond;
 use std::collections::HashMap;
+use syntax::messages::Message;
 
 #[derive(Debug)]
 pub struct Job {
@@ -137,17 +138,26 @@ impl Disp {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error {
     pub line: usize,
+    /// The catalogue's entry for the message (docs/messages.md).
+    pub catalogued: Message,
     pub message: String,
+}
+
+impl Error {
+    /// The message after its id: `IWJ0001-S text`.
+    pub fn labelled(&self) -> String {
+        format!("{}-{} {}", self.catalogued.id, self.catalogued.severity.letter(), self.message)
+    }
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "line {}: {}", self.line, self.message)
+        write!(f, "line {}: {}", self.line, self.labelled())
     }
 }
 
-fn err<T>(line: usize, message: impl Into<String>) -> Result<T, Error> {
-    Err(Error { line, message: message.into() })
+fn err<T>(line: usize, catalogued: Message, message: impl Into<String>) -> Result<T, Error> {
+    Err(Error { line, catalogued, message: message.into() })
 }
 
 /// A name in the name field, a DD name, a step or program name, a member or a symbol's shape.
@@ -197,7 +207,7 @@ fn operand_field(text: &str, line: usize) -> Result<&str, Error> {
         }
     }
     if quoted {
-        return err(line, "a quoted value continued onto the next line is not supported yet");
+        return err(line, syntax::messages::IWJ0001, "a quoted value continued onto the next line is not supported yet");
     }
     Ok(text)
 }
@@ -225,7 +235,7 @@ fn split_operands(text: &str, line: usize) -> Result<Vec<String>, Error> {
             ')' if !quoted => {
                 depth -= 1;
                 if depth < 0 {
-                    return err(line, format!("an unbalanced ) in {text}"));
+                    return err(line, syntax::messages::IWJ0002, format!("an unbalanced ) in {text}"));
                 }
             }
             ',' if !quoted && depth == 0 => {
@@ -237,7 +247,7 @@ fn split_operands(text: &str, line: usize) -> Result<Vec<String>, Error> {
         current.push(c);
     }
     if depth != 0 || quoted {
-        return err(line, format!("unbalanced parentheses or quotes in {text}"));
+        return err(line, syntax::messages::IWJ0003, format!("unbalanced parentheses or quotes in {text}"));
     }
     out.push(current);
     Ok(out)
@@ -291,13 +301,13 @@ fn substitute(text: &str, symbols: &HashMap<String, String>, line: usize) -> Res
         }
         let name: String = chars[start..end].iter().collect();
         if !is_name(&name) {
-            return err(line, format!("& is not followed by a symbolic parameter name in {text}"));
+            return err(line, syntax::messages::IWJ0004, format!("& is not followed by a symbolic parameter name in {text}"));
         }
         let Some(value) = symbols.get(&name) else {
             if name == "SYSUID" {
-                return err(line, "&SYSUID is the user ID the job runs under: USER= on the JOB statement, or the user that submitted it");
+                return err(line, syntax::messages::IWJ0005, "&SYSUID is the user ID the job runs under: USER= on the JOB statement, or the user that submitted it");
             }
-            return err(line, format!("symbolic parameter &{name} has no value"));
+            return err(line, syntax::messages::IWJ0006, format!("symbolic parameter &{name} has no value"));
         };
         out.push_str(value);
         i = end;
@@ -365,13 +375,13 @@ impl<'a> Reader<'a> {
             let mut operands = operand_field(rest, line)?.to_string();
             let mut last = raw;
             while operands.ends_with(',') {
-                let Some(next) = self.peek().map(statement_columns) else { return err(line, "the statement is continued past the end of the job") };
+                let Some(next) = self.peek().map(statement_columns) else { return err(line, syntax::messages::IWJ0007, "the statement is continued past the end of the job") };
                 if !next.starts_with("// ") {
-                    return err(self.at + 1, "a continuation line must start with // and a blank");
+                    return err(self.at + 1, syntax::messages::IWJ0008, "a continuation line must start with // and a blank");
                 }
                 let body = next[2..].trim_start();
                 if next.len() - body.len() > 15 {
-                    return err(self.at + 1, "a continued operand must start in columns 4 to 16");
+                    return err(self.at + 1, syntax::messages::IWJ0009, "a continued operand must start in columns 4 to 16");
                 }
                 operands.push_str(operand_field(body, self.at + 1)?);
                 last = self.lines[self.at];
@@ -396,9 +406,9 @@ impl<'a> Reader<'a> {
             }
             expr.push_str(&words.join(" "));
             expr.push(' ');
-            let Some(next) = self.peek().map(statement_columns) else { return err(line, "IF has no THEN") };
+            let Some(next) = self.peek().map(statement_columns) else { return err(line, syntax::messages::IWJ0010, "IF has no THEN") };
             if !next.starts_with("// ") {
-                return err(self.at + 1, "IF has no THEN");
+                return err(self.at + 1, syntax::messages::IWJ0010, "IF has no THEN");
             }
             text = next[2..].to_string();
             self.at += 1;
@@ -457,13 +467,13 @@ pub fn parse(text: &str) -> Result<Job, Error> {
 /// from, &SYSUID's value when the JOB statement gives no USER=.
 pub fn parse_with(text: &str, libraries: &Libraries<'_>, submitter: Option<&str>) -> Result<Job, Error> {
     let raws = read(text)?;
-    let Some(first) = raws.first() else { return err(1, "no JOB statement") };
+    let Some(first) = raws.first() else { return err(1, syntax::messages::IWJ0011, "no JOB statement") };
     if first.operation != "JOB" {
-        return err(first.line, "the first statement is not a JOB statement");
+        return err(first.line, syntax::messages::IWJ0012, "the first statement is not a JOB statement");
     }
     let name = match &first.name {
         Some(n) if is_name(n) => n.clone(),
-        _ => return err(first.line, "the JOB statement needs a job name of one to eight characters"),
+        _ => return err(first.line, syntax::messages::IWJ0013, "the JOB statement needs a job name of one to eight characters"),
     };
     let (cond, user) = job_operands(first)?;
     let symbols: HashMap<String, String> = user.or(submitter.map(str::to_string)).map(|u| ("SYSUID".to_string(), u)).into_iter().collect();
@@ -483,17 +493,17 @@ fn job_operands(st: &Raw) -> Result<(Cond, Option<String>), Error> {
         match keyword(&op) {
             (None, _) => {}
             (Some("USER"), value) if is_name(value) => user = Some(value.to_string()),
-            (Some("COND"), value) if value.contains('&') => return err(st.line, "a symbolic parameter in the JOB statement's COND is not supported yet"),
+            (Some("COND"), value) if value.contains('&') => return err(st.line, syntax::messages::IWJ0014, "a symbolic parameter in the JOB statement's COND is not supported yet"),
             (Some("COND"), value) => {
-                cond = cond::parse_cond(value).map_err(|m| Error { line: st.line, message: m })?;
+                cond = cond::parse_cond(value).map_err(|(catalogued, m)| Error { line: st.line, catalogued, message: m })?;
                 if cond.mode != cond::Mode::Plain || cond.tests.iter().any(|t| t.step.is_some()) {
-                    return err(st.line, "COND on the JOB statement takes (code,operator) tests only");
+                    return err(st.line, syntax::messages::IWJ0015, "COND on the JOB statement takes (code,operator) tests only");
                 }
             }
-            (Some("RESTART"), _) => return err(st.line, "RESTART is not supported yet"),
-            (Some("TYPRUN"), _) => return err(st.line, "TYPRUN is not supported yet"),
+            (Some("RESTART"), _) => return err(st.line, syntax::messages::IWJ0016, "RESTART is not supported yet"),
+            (Some("TYPRUN"), _) => return err(st.line, syntax::messages::IWJ0017, "TYPRUN is not supported yet"),
             (Some(k), _) if JOB_IGNORED.contains(&k) => {}
-            (Some(k), _) => return err(st.line, format!("JOB keyword {k} is not supported yet")),
+            (Some(k), _) => return err(st.line, syntax::messages::IWJ0018, format!("JOB keyword {k} is not supported yet")),
         }
     }
     Ok((cond, user))
@@ -526,22 +536,22 @@ fn symbol_assignments(operands: &[String], line: usize) -> Result<Vec<(String, S
         .iter()
         .map(|op| match keyword(op) {
             (Some(k), v) if is_name(k) => Ok((k.to_string(), v.to_string())),
-            _ => err(line, format!("{op} is not NAME=value")),
+            _ => err(line, syntax::messages::IWJ0019, format!("{op} is not NAME=value")),
         })
         .collect()
 }
 
 /// Maps an error inside a member or procedure to the statement that brought it in.
 fn inside(what: &str, line: usize) -> impl Fn(Error) -> Error + '_ {
-    move |e| Error { line, message: format!("{what} line {}: {}", e.line, e.message) }
+    move |e| Error { line, catalogued: e.catalogued, message: format!("{what} line {}: {}", e.line, e.message) }
 }
 
 impl Expander<'_, '_> {
     fn member(&self, name: &str, line: usize) -> Result<Vec<Raw>, Error> {
         match (self.libraries)(&self.order, name) {
             Ok(Some(text)) => read(&text).map_err(inside(name, line)),
-            Ok(None) => err(line, format!("no procedure library holds member {name}")),
-            Err(e) => err(line, format!("member {name}: {e}")),
+            Ok(None) => err(line, syntax::messages::IWJ0020, format!("no procedure library holds member {name}")),
+            Err(e) => err(line, syntax::messages::IWJ0021, format!("member {name}: {e}")),
         }
     }
 
@@ -564,7 +574,7 @@ impl Expander<'_, '_> {
             body = &body[..body.len() - 1];
         }
         if let Some(r) = body.iter().find(|r| matches!(r.operation.as_str(), "PROC" | "PEND" | "JOB")) {
-            return Err(inside(name, line)(Error { line: r.line, message: format!("a {} statement inside a procedure", r.operation) }));
+            return Err(inside(name, line)(Error { line: r.line, catalogued: syntax::messages::IWJ0093, message: format!("a {} statement inside a procedure", r.operation) }));
         }
         Ok(Procedure { defaults, body: body.to_vec() })
     }
@@ -573,7 +583,7 @@ impl Expander<'_, '_> {
     /// expanded, and `local` the symbolic parameters in force inside it.
     fn statements(&mut self, raws: &[Raw], caller: Option<&str>, local: &HashMap<String, String>, depth: usize) -> Result<(), Error> {
         if depth > 15 {
-            return err(raws.first().map_or(0, |r| r.line), "procedures and INCLUDE members nest more than 15 deep");
+            return err(raws.first().map_or(0, |r| r.line), syntax::messages::IWJ0022, "procedures and INCLUDE members nest more than 15 deep");
         }
         let mut i = 0;
         while i < raws.len() {
@@ -584,14 +594,14 @@ impl Expander<'_, '_> {
             let operands = if matches!(raw.operation.as_str(), "PROC" | "IF") { raw.operands.clone() } else { substitute(&raw.operands, &symbols, raw.line)? };
             match raw.operation.as_str() {
                 "PROC" if caller.is_none() && depth == 0 => {
-                    let Some(name) = raw.name.clone().filter(|n| is_name(n)) else { return err(raw.line, "an in-stream PROC needs a name") };
-                    let end = raws[i..].iter().position(|r| r.operation == "PEND").ok_or_else(|| Error { line: raw.line, message: format!("PROC {name} has no PEND") })?;
+                    let Some(name) = raw.name.clone().filter(|n| is_name(n)) else { return err(raw.line, syntax::messages::IWJ0023, "an in-stream PROC needs a name") };
+                    let end = raws[i..].iter().position(|r| r.operation == "PEND").ok_or_else(|| Error { line: raw.line, catalogued: syntax::messages::IWJ0094, message: format!("PROC {name} has no PEND") })?;
                     let mut body = vec![raw.clone()];
                     body.extend(raws[i..i + end].iter().cloned());
                     self.procs.insert(name, body);
                     i += end + 1;
                 }
-                "PROC" | "PEND" => return err(raw.line, format!("{} is out of place", raw.operation)),
+                "PROC" | "PEND" => return err(raw.line, syntax::messages::IWJ0024, format!("{} is out of place", raw.operation)),
                 "SET" => {
                     for (k, v) in symbol_assignments(&split_operands(&operands, raw.line)?, raw.line)? {
                         self.symbols.insert(k, v);
@@ -600,20 +610,20 @@ impl Expander<'_, '_> {
                 "JCLLIB" => {
                     let ops = split_operands(&operands, raw.line)?;
                     let order = match ops.as_slice() {
-                        [o] => o.strip_prefix("ORDER=").ok_or_else(|| Error { line: raw.line, message: "JCLLIB takes ORDER=".into() })?,
-                        _ => return err(raw.line, "JCLLIB takes ORDER="),
+                        [o] => o.strip_prefix("ORDER=").ok_or_else(|| Error { line: raw.line, catalogued: syntax::messages::IWJ0025, message: "JCLLIB takes ORDER=".into() })?,
+                        _ => return err(raw.line, syntax::messages::IWJ0025, "JCLLIB takes ORDER="),
                     };
                     let inner = order.strip_prefix('(').and_then(|o| o.strip_suffix(')')).unwrap_or(order);
                     self.order = inner.split(',').map(unquote).collect();
                     if let Some(bad) = self.order.iter().find(|d| !is_dsn(d)) {
-                        return err(raw.line, format!("{bad} is not a data set name"));
+                        return err(raw.line, syntax::messages::IWJ0026, format!("{bad} is not a data set name"));
                     }
                 }
                 "INCLUDE" => {
-                    let Some(member) = operands.strip_prefix("MEMBER=").filter(|m| is_name(m)) else { return err(raw.line, "INCLUDE takes MEMBER=name") };
+                    let Some(member) = operands.strip_prefix("MEMBER=").filter(|m| is_name(m)) else { return err(raw.line, syntax::messages::IWJ0027, "INCLUDE takes MEMBER=name") };
                     let body = self.member(member, raw.line)?;
                     if let Some(r) = body.iter().find(|r| matches!(r.operation.as_str(), "JOB" | "PROC" | "PEND" | "JCLLIB" | "INCLUDE")) {
-                        return Err(inside(member, raw.line)(Error { line: r.line, message: format!("a {} statement in an INCLUDE member is not supported", r.operation) }));
+                        return Err(inside(member, raw.line)(Error { line: r.line, catalogued: syntax::messages::IWJ0095, message: format!("a {} statement in an INCLUDE member is not supported", r.operation) }));
                     }
                     self.statements(&body, caller, local, depth + 1).map_err(inside(member, raw.line))?;
                 }
@@ -641,20 +651,20 @@ impl Expander<'_, '_> {
                         lib.parts.push(dd_part(raw, &operands)?);
                         continue;
                     }
-                    let Some(Item::Step(step)) = self.items.last_mut() else { return err(raw.line, "a DD statement that follows no EXEC statement") };
+                    let Some(Item::Step(step)) = self.items.last_mut() else { return err(raw.line, syntax::messages::IWJ0028, "a DD statement that follows no EXEC statement") };
                     let part = dd_part(raw, &operands)?;
                     add_dd(step, raw, part)?;
                 }
                 "IF" => {
-                    let expr = cond::parse_expr(&operands).map_err(|m| Error { line: raw.line, message: m })?;
+                    let expr = cond::parse_expr(&operands).map_err(|(catalogued, m)| Error { line: raw.line, catalogued, message: m })?;
                     self.items.push(Item::If { expr, caller: caller.map(str::to_string), line: raw.line });
                 }
                 "ELSE" => self.items.push(Item::Else { line: raw.line }),
                 "ENDIF" => self.items.push(Item::EndIf { line: raw.line }),
-                "JOB" => return err(raw.line, "a second JOB statement; give one job a file"),
+                "JOB" => return err(raw.line, syntax::messages::IWJ0029, "a second JOB statement; give one job a file"),
                 "OUTPUT" => {}
-                op if NOT_SUPPORTED_STATEMENTS.contains(&op) => return err(raw.line, format!("{op} statements are not supported yet")),
-                op => return err(raw.line, format!("{op} is not a JCL statement")),
+                op if NOT_SUPPORTED_STATEMENTS.contains(&op) => return err(raw.line, syntax::messages::IWJ0030, format!("{op} statements are not supported yet")),
+                op => return err(raw.line, syntax::messages::IWJ0031, format!("{op} is not a JCL statement")),
             }
         }
         Ok(())
@@ -666,47 +676,47 @@ impl Expander<'_, '_> {
         let ops = split_operands(operands, exec.line)?;
         let name = match keyword(&ops[0]) {
             (Some("PROC"), n) | (None, n) => n.to_string(),
-            _ => return err(exec.line, "EXEC starts with PGM=, PROC= or a procedure name"),
+            _ => return err(exec.line, syntax::messages::IWJ0032, "EXEC starts with PGM=, PROC= or a procedure name"),
         };
         if !is_name(&name) {
-            return err(exec.line, format!("{name} is not a procedure name"));
+            return err(exec.line, syntax::messages::IWJ0033, format!("{name} is not a procedure name"));
         }
         let procedure = self.procedure(&name, exec.line)?;
         let mut local = procedure.defaults.clone();
         let mut exec_parms: Vec<(Option<String>, String)> = Vec::new();
         let mut exec_conds: Vec<(Option<String>, Cond)> = Vec::new();
         for op in &ops[1..] {
-            let (Some(key), value) = keyword(op) else { return err(exec.line, format!("an EXEC operand {op} this reader does not know")) };
+            let (Some(key), value) = keyword(op) else { return err(exec.line, syntax::messages::IWJ0034, format!("an EXEC operand {op} this reader does not know")) };
             let (base, step) = match key.split_once('.') {
                 Some((b, s)) => (b, Some(s.to_string())),
                 None => (key, None),
             };
             match base {
                 "PARM" => exec_parms.push((step, parm_value(value))),
-                "COND" => exec_conds.push((step, cond::parse_cond(value).map_err(|m| Error { line: exec.line, message: m })?)),
-                "PARMDD" => return err(exec.line, "PARMDD is not supported yet"),
+                "COND" => exec_conds.push((step, cond::parse_cond(value).map_err(|(catalogued, m)| Error { line: exec.line, catalogued, message: m })?)),
+                "PARMDD" => return err(exec.line, syntax::messages::IWJ0035, "PARMDD is not supported yet"),
                 k if EXEC_IGNORED.contains(&k) => {}
                 _ if !exec_keyword(key) && is_name(key) => {
                     let used = local.contains_key(key) || procedure.body.iter().any(|r| r.operands.contains(&format!("&{key}")));
                     if !used {
-                        return err(exec.line, format!("procedure {name} does not use symbolic parameter {key}"));
+                        return err(exec.line, syntax::messages::IWJ0036, format!("procedure {name} does not use symbolic parameter {key}"));
                     }
                     local.insert(key.to_string(), value.to_string());
                 }
-                _ => return err(exec.line, format!("EXEC keyword {key} is not supported yet")),
+                _ => return err(exec.line, syntax::messages::IWJ0037, format!("EXEC keyword {key} is not supported yet")),
             }
         }
         let start = self.items.len();
         let caller_name = caller.map(str::to_string).or_else(|| exec.name.clone());
         self.statements(&procedure.body, caller_name.as_deref(), &local, depth + 1).map_err(inside(&name, exec.line))?;
         let steps: Vec<usize> = (start..self.items.len()).filter(|&k| matches!(self.items[k], Item::Step(_))).collect();
-        let Some(&first) = steps.first() else { return err(exec.line, format!("procedure {name} has no steps")) };
+        let Some(&first) = steps.first() else { return err(exec.line, syntax::messages::IWJ0038, format!("procedure {name} has no steps")) };
         let find = |items: &[Item], s: &str| steps.iter().copied().find(|&k| matches!(&items[k], Item::Step(st) if st.name.as_deref() == Some(s)));
         for (step, parm) in exec_parms {
             match step {
                 Some(s) => match find(&self.items, &s) {
                     Some(k) => as_step(&mut self.items[k]).parm = Some(parm),
-                    None => return err(exec.line, format!("PARM.{s}: procedure {name} has no step {s}")),
+                    None => return err(exec.line, syntax::messages::IWJ0039, format!("PARM.{s}: procedure {name} has no step {s}")),
                 },
                 None => {
                     for &k in &steps {
@@ -720,7 +730,7 @@ impl Expander<'_, '_> {
             match step {
                 Some(s) => match find(&self.items, &s) {
                     Some(k) => as_step(&mut self.items[k]).cond = cond,
-                    None => return err(exec.line, format!("COND.{s}: procedure {name} has no step {s}")),
+                    None => return err(exec.line, syntax::messages::IWJ0040, format!("COND.{s}: procedure {name} has no step {s}")),
                 },
                 None => {
                     for &k in &steps {
@@ -735,17 +745,17 @@ impl Expander<'_, '_> {
             let (k, dd, index) = match &raw.name {
                 Some(n) => {
                     let (step, dd) = match n.split_once('.') {
-                        Some((s, d)) => (find(&self.items, s).ok_or_else(|| Error { line: raw.line, message: format!("procedure {name} has no step {s}") })?, d.to_string()),
+                        Some((s, d)) => (find(&self.items, s).ok_or_else(|| Error { line: raw.line, catalogued: syntax::messages::IWJ0096, message: format!("procedure {name} has no step {s}") })?, d.to_string()),
                         None => (first, n.clone()),
                     };
                     if !is_name(&dd) {
-                        return err(raw.line, format!("{dd} is not a DD name"));
+                        return err(raw.line, syntax::messages::IWJ0041, format!("{dd} is not a DD name"));
                     }
                     (step, dd, 0)
                 }
                 None => match &target {
                     Some((k, dd, index)) => (*k, dd.clone(), index + 1),
-                    None => return err(raw.line, "an unnamed DD statement with nothing to concatenate to"),
+                    None => return err(raw.line, syntax::messages::IWJ0042, "an unnamed DD statement with nothing to concatenate to"),
                 },
             };
             target = Some((k, dd.clone(), index));
@@ -772,26 +782,26 @@ fn exec_program(raw: &Raw, operands: &str, caller: Option<&str>) -> Result<Optio
     if let Some(n) = &raw.name
         && !is_name(n)
     {
-        return err(raw.line, format!("{n} is not a step name"));
+        return err(raw.line, syntax::messages::IWJ0043, format!("{n} is not a step name"));
     }
     let ops = split_operands(operands, raw.line)?;
     match ops.first().map(|o| keyword(o)) {
-        None => return err(raw.line, "EXEC needs PGM= or a procedure"),
+        None => return err(raw.line, syntax::messages::IWJ0044, "EXEC needs PGM= or a procedure"),
         Some((Some("PGM"), _)) => {}
         Some(_) => return Ok(None),
     }
     let (mut pgm, mut parm, mut cond) = (None, None, Cond::default());
     for op in &ops {
         match keyword(op) {
-            (Some("PGM"), v) if v.starts_with("*.") => return err(raw.line, "PGM=*.stepname.ddname is not supported yet"),
+            (Some("PGM"), v) if v.starts_with("*.") => return err(raw.line, syntax::messages::IWJ0045, "PGM=*.stepname.ddname is not supported yet"),
             (Some("PGM"), v) if is_name(v) => pgm = Some(v.to_string()),
-            (Some("PGM"), v) => return err(raw.line, format!("{v} is not a program name")),
+            (Some("PGM"), v) => return err(raw.line, syntax::messages::IWJ0046, format!("{v} is not a program name")),
             (Some("PARM"), v) => parm = Some(parm_value(v)),
-            (Some("PARMDD"), _) => return err(raw.line, "PARMDD is not supported yet"),
-            (Some("COND"), v) => cond = cond::parse_cond(v).map_err(|m| Error { line: raw.line, message: m })?,
+            (Some("PARMDD"), _) => return err(raw.line, syntax::messages::IWJ0035, "PARMDD is not supported yet"),
+            (Some("COND"), v) => cond = cond::parse_cond(v).map_err(|(catalogued, m)| Error { line: raw.line, catalogued, message: m })?,
             (Some(k), _) if EXEC_IGNORED.contains(&k) => {}
-            (Some(k), _) => return err(raw.line, format!("EXEC keyword {k} is not supported yet")),
-            (None, v) => return err(raw.line, format!("an EXEC operand {v} this reader does not know")),
+            (Some(k), _) => return err(raw.line, syntax::messages::IWJ0047, format!("EXEC keyword {k} is not supported yet")),
+            (None, v) => return err(raw.line, syntax::messages::IWJ0048, format!("an EXEC operand {v} this reader does not know")),
         }
     }
     let pgm = pgm.expect("the first operand is PGM=");
@@ -802,22 +812,22 @@ fn dataset(value: &str, line: usize) -> Result<Source, Error> {
     let value = unquote(value);
     if let Some(path) = value.strip_prefix("*.") {
         if !path.split('.').all(is_name) || path.split('.').count() > 3 {
-            return err(line, format!("*.{path} is not *.ddname, *.stepname.ddname or *.stepname.procstepname.ddname"));
+            return err(line, syntax::messages::IWJ0049, format!("*.{path} is not *.ddname, *.stepname.ddname or *.stepname.procstepname.ddname"));
         }
         return Ok(Source::Refer(path.to_string()));
     }
     let (base, member) = match value.split_once('(') {
         Some((b, rest)) => {
-            let Some(m) = rest.strip_suffix(')') else { return err(line, format!("{value} is not a data set name")) };
+            let Some(m) = rest.strip_suffix(')') else { return err(line, syntax::messages::IWJ0050, format!("{value} is not a data set name")) };
             if m.starts_with(['+', '-']) || (!m.is_empty() && m.bytes().all(|c| c.is_ascii_digit())) {
-                let relative: i32 = m.trim_start_matches('+').parse().map_err(|_| Error { line, message: format!("{m} is not a relative generation") })?;
+                let relative: i32 = m.trim_start_matches('+').parse().map_err(|_| Error { line, catalogued: syntax::messages::IWJ0097, message: format!("{m} is not a relative generation") })?;
                 if !(-255..=255).contains(&relative) || b.starts_with("&&") || !is_dsn(b) || b.len() > 35 {
-                    return err(line, format!("{value} is not a generation of a generation data group"));
+                    return err(line, syntax::messages::IWJ0051, format!("{value} is not a generation of a generation data group"));
                 }
                 return Ok(Source::Generation { base: b.to_string(), relative });
             }
             if !is_name(m) {
-                return err(line, format!("{m} is not a member name"));
+                return err(line, syntax::messages::IWJ0052, format!("{m} is not a member name"));
             }
             (b, Some(m.to_string()))
         }
@@ -828,12 +838,12 @@ fn dataset(value: &str, line: usize) -> Result<Source, Error> {
     }
     if let Some(temp) = base.strip_prefix("&&") {
         if !is_name(temp) {
-            return err(line, format!("&&{temp} is not a temporary data set name"));
+            return err(line, syntax::messages::IWJ0053, format!("&&{temp} is not a temporary data set name"));
         }
         return Ok(Source::Temporary { name: temp.to_string(), member });
     }
     if !is_dsn(base) {
-        return err(line, format!("{base} is not a data set name"));
+        return err(line, syntax::messages::IWJ0054, format!("{base} is not a data set name"));
     }
     Ok(Source::Dataset { dsn: base.to_string(), member })
 }
@@ -842,14 +852,14 @@ fn disp(value: &str, line: usize) -> Result<Disp, Error> {
     let inner = value.strip_prefix('(').and_then(|v| v.strip_suffix(')')).unwrap_or(value);
     let parts: Vec<&str> = inner.split(',').collect();
     if parts.len() > 3 {
-        return err(line, format!("DISP={value} has more than three subparameters"));
+        return err(line, syntax::messages::IWJ0055, format!("DISP={value} has more than three subparameters"));
     }
     let status = match parts[0] {
         "" | "NEW" => Status::New,
         "OLD" => Status::Old,
         "SHR" => Status::Shr,
         "MOD" => Status::Mod,
-        s => return err(line, format!("{s} is not a DISP status")),
+        s => return err(line, syntax::messages::IWJ0056, format!("{s} is not a DISP status")),
     };
     let end = |s: &str, abnormal: bool| -> Result<Option<End>, Error> {
         Ok(Some(match s {
@@ -859,7 +869,7 @@ fn disp(value: &str, line: usize) -> Result<Disp, Error> {
             "PASS" if !abnormal => End::Pass,
             "CATLG" => End::Catlg,
             "UNCATLG" => End::Uncatlg,
-            s => return err(line, format!("{s} is not a DISP {} disposition", if abnormal { "abnormal" } else { "normal" })),
+            s => return err(line, syntax::messages::IWJ0057, format!("{s} is not a DISP {} disposition", if abnormal { "abnormal" } else { "normal" })),
         }))
     };
     let normal = parts.get(1).map_or(Ok(None), |s| end(s, false))?;
@@ -876,7 +886,7 @@ fn record_format(operands: &[String], line: usize) -> Result<(Option<String>, Op
             "LRECL" => match value.parse::<usize>() {
                 Ok(n) if n > 0 => lrecl = Some(n),
                 _ if value == "X" => {}
-                _ => return err(line, format!("LRECL={value} is not a record length")),
+                _ => return err(line, syntax::messages::IWJ0058, format!("LRECL={value} is not a record length")),
             },
             _ => {}
         }
@@ -906,7 +916,7 @@ fn dd_fields(raw: &Raw, operands: &str) -> Result<(Option<Source>, Option<Disp>)
         match keyword(&op) {
             (None, "*" | "DATA") => source = Some(Source::InStream(raw.data.clone().unwrap_or_default())),
             (None, "DUMMY") => source = Some(Source::Dummy),
-            (None, v) => return err(raw.line, format!("a DD operand {v} this reader does not know")),
+            (None, v) => return err(raw.line, syntax::messages::IWJ0059, format!("a DD operand {v} this reader does not know")),
             (Some("DSN" | "DSNAME"), v) => {
                 if source != Some(Source::Dummy) {
                     source = Some(dataset(v, raw.line)?);
@@ -916,15 +926,15 @@ fn dd_fields(raw: &Raw, operands: &str) -> Result<(Option<Source>, Option<Disp>)
             (Some("SYSOUT"), _) => source = Some(Source::Sysout),
             (Some("DLM"), v) => {
                 if unquote(v).chars().count() != 2 {
-                    return err(raw.line, "DLM takes two characters");
+                    return err(raw.line, syntax::messages::IWJ0060, "DLM takes two characters");
                 }
             }
             (Some(k), _) if DD_IGNORED.contains(&k) => {}
-            (Some(k), _) => return err(raw.line, format!("DD keyword {k} is not supported yet")),
+            (Some(k), _) => return err(raw.line, syntax::messages::IWJ0061, format!("DD keyword {k} is not supported yet")),
         }
     }
     if disposition.is_some() && source.as_ref().is_some_and(|s| !matches!(s, Source::Dataset { .. } | Source::Temporary { .. } | Source::Generation { .. } | Source::Refer(_))) {
-        return err(raw.line, "DISP applies to a data set");
+        return err(raw.line, syntax::messages::IWJ0062, "DISP applies to a data set");
     }
     Ok((source, disposition))
 }
@@ -932,18 +942,18 @@ fn dd_fields(raw: &Raw, operands: &str) -> Result<(Option<Source>, Option<Disp>)
 fn dd_part(raw: &Raw, operands: &str) -> Result<Part, Error> {
     let (source, disp) = dd_fields(raw, operands)?;
     let unnamed = (!operands.is_empty()).then(|| Source::Temporary { name: String::new(), member: None });
-    let Some(source) = source.or(unnamed) else { return err(raw.line, "the DD statement names no data set, in-stream data, DUMMY or SYSOUT") };
+    let Some(source) = source.or(unnamed) else { return err(raw.line, syntax::messages::IWJ0063, "the DD statement names no data set, in-stream data, DUMMY or SYSOUT") };
     let (recfm, lrecl) = record_format(&split_operands(operands, raw.line)?, raw.line)?;
     Ok(Part { source, disp: disp.unwrap_or_default(), line: raw.line, recfm, lrecl })
 }
 
 fn add_dd(step: &mut Step, raw: &Raw, part: Part) -> Result<(), Error> {
     match &raw.name {
-        Some(n) if n.contains('.') => err(raw.line, format!("DD {n} overrides a procedure step, but the EXEC before it runs a program")),
-        Some(n) if !is_name(n) => err(raw.line, format!("{n} is not a DD name")),
+        Some(n) if n.contains('.') => err(raw.line, syntax::messages::IWJ0064, format!("DD {n} overrides a procedure step, but the EXEC before it runs a program")),
+        Some(n) if !is_name(n) => err(raw.line, syntax::messages::IWJ0065, format!("{n} is not a DD name")),
         Some(n) => {
             if step.dds.iter().any(|d| d.name == *n) {
-                return err(raw.line, format!("DD {n} appears twice in the step"));
+                return err(raw.line, syntax::messages::IWJ0066, format!("DD {n} appears twice in the step"));
             }
             step.dds.push(Dd { name: n.clone(), parts: vec![part] });
             Ok(())
@@ -953,7 +963,7 @@ fn add_dd(step: &mut Step, raw: &Raw, part: Part) -> Result<(), Error> {
                 dd.parts.push(part);
                 Ok(())
             }
-            None => err(raw.line, "an unnamed DD statement with nothing to concatenate to"),
+            None => err(raw.line, syntax::messages::IWJ0042, "an unnamed DD statement with nothing to concatenate to"),
         },
     }
 }
@@ -990,7 +1000,7 @@ fn override_dd(step: &mut Step, name: &str, index: usize, raw: &Raw, operands: &
             step.dds.push(Dd { name: name.to_string(), parts: vec![part] });
             Ok(())
         }
-        None => err(raw.line, "an unnamed DD statement with nothing to concatenate to"),
+        None => err(raw.line, syntax::messages::IWJ0042, "an unnamed DD statement with nothing to concatenate to"),
     }
 }
 
@@ -1039,8 +1049,8 @@ fn resolve_references(items: &mut [Item]) -> Result<(), Error> {
                 };
                 match found {
                     Some(src @ (Source::Dataset { .. } | Source::Temporary { .. } | Source::Generation { .. })) => resolved.push((d, p, src.clone())),
-                    Some(_) => return err(part.line, format!("*.{path} names a DD that is no data set")),
-                    None => return err(part.line, format!("*.{path} names no earlier DD")),
+                    Some(_) => return err(part.line, syntax::messages::IWJ0067, format!("*.{path} names a DD that is no data set")),
+                    None => return err(part.line, syntax::messages::IWJ0068, format!("*.{path} names no earlier DD")),
                 }
             }
         }
@@ -1061,24 +1071,24 @@ fn check_nesting(items: &[Item]) -> Result<(), Error> {
             Item::If { line, .. } => {
                 open.push((*line, false));
                 if open.len() > 15 {
-                    return err(*line, "IF statements nest more than 15 deep");
+                    return err(*line, syntax::messages::IWJ0069, "IF statements nest more than 15 deep");
                 }
             }
             Item::Else { line } => match open.last_mut() {
                 Some((_, seen)) if !*seen => *seen = true,
-                Some(_) => return err(*line, "a second ELSE for one IF"),
-                None => return err(*line, "ELSE without IF"),
+                Some(_) => return err(*line, syntax::messages::IWJ0070, "a second ELSE for one IF"),
+                None => return err(*line, syntax::messages::IWJ0071, "ELSE without IF"),
             },
             Item::EndIf { line } => {
                 if open.pop().is_none() {
-                    return err(*line, "ENDIF without IF");
+                    return err(*line, syntax::messages::IWJ0072, "ENDIF without IF");
                 }
             }
             Item::Step(_) => {}
         }
     }
     match open.last() {
-        Some((line, _)) => err(*line, "IF without ENDIF"),
+        Some((line, _)) => err(*line, syntax::messages::IWJ0073, "IF without ENDIF"),
         None => Ok(()),
     }
 }

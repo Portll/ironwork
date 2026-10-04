@@ -3,6 +3,8 @@
 //! constant, the POSITION, SKIP and ALIGN keyword statements, comment and blank statements; and
 //! the substitution of a symbol where a control statement takes a field, a constant or a column.
 
+use syntax::messages::Refused;
+
 use std::collections::HashMap;
 
 /// What a symbol stands for.
@@ -66,10 +68,10 @@ fn value_field(text: &str) -> &str {
     text
 }
 
-fn number(text: &str, what: &str, line: usize) -> Result<usize, String> {
+fn number(text: &str, what: &str, line: usize) -> Result<usize, Refused> {
     match text.parse::<usize>() {
         Ok(n) if (1..=32752).contains(&n) => Ok(n),
-        _ => Err(format!("SYMNAMES line {line}: {text} is not a {what} from 1 to 32752")),
+        _ => Err((syntax::messages::IWJ0204, format!("SYMNAMES line {line}: {text} is not a {what} from 1 to 32752"))),
     }
 }
 
@@ -92,7 +94,7 @@ impl Symbols {
     }
 
     /// The symbols in the SYMNAMES data set's lines, in order.
-    pub fn read(lines: &[String]) -> Result<Symbols, String> {
+    pub fn read(lines: &[String]) -> Result<Symbols, Refused> {
         let mut out = Symbols::default();
         let mut cursor = Cursor::default();
         for (i, raw) in lines.iter().enumerate() {
@@ -102,7 +104,7 @@ impl Symbols {
                 continue;
             }
             let statement = value_field(text.trim_start());
-            let Some((name, value)) = statement.split_once([',', ';']) else { return Err(format!("SYMNAMES line {line}: {statement} is not symbol,value")) };
+            let Some((name, value)) = statement.split_once([',', ';']) else { return Err((syntax::messages::IWJ0205, format!("SYMNAMES line {line}: {statement} is not symbol,value"))) };
             match name {
                 "POSITION" => {
                     let at = match out.map.get(value) {
@@ -118,17 +120,17 @@ impl Symbols {
                         "H" => 2,
                         "F" => 4,
                         "D" => 8,
-                        v => return Err(format!("SYMNAMES line {line}: ALIGN takes H, F or D, not {v}")),
+                        v => return Err((syntax::messages::IWJ0206, format!("SYMNAMES line {line}: ALIGN takes H, F or D, not {v}"))),
                     };
                     let next = cursor.next.unwrap_or(1);
                     cursor.next = Some(next + (boundary - (next - 1) % boundary) % boundary);
                 }
                 _ => {
                     if !valid_name(name) {
-                        return Err(format!("SYMNAMES line {line}: {name} is not a symbol, or is a reserved word"));
+                        return Err((syntax::messages::IWJ0207, format!("SYMNAMES line {line}: {name} is not a symbol, or is a reserved word")));
                     }
                     if out.map.contains_key(name) {
-                        return Err(format!("SYMNAMES line {line}: {name} is defined twice"));
+                        return Err((syntax::messages::IWJ0208, format!("SYMNAMES line {line}: {name} is defined twice")));
                     }
                     let symbol = Self::value(value, &mut cursor, line)?;
                     out.order.push(name.to_string());
@@ -139,12 +141,12 @@ impl Symbols {
         Ok(out)
     }
 
-    fn value(value: &str, cursor: &mut Cursor, line: usize) -> Result<Symbol, String> {
+    fn value(value: &str, cursor: &mut Cursor, line: usize) -> Result<Symbol, Refused> {
         let upper = value.to_ascii_uppercase();
         if value.starts_with('\'') || upper.starts_with("C'") || upper.starts_with("X'") {
             let body = if value.starts_with('\'') { value } else { &value[1..] };
             if !body.ends_with('\'') || body.len() < 2 {
-                return Err(format!("SYMNAMES line {line}: {value} is not a closed string"));
+                return Err((syntax::messages::IWJ0209, format!("SYMNAMES line {line}: {value} is not a closed string")));
             }
             let kind = if upper.starts_with("X'") { 'X' } else { 'C' };
             return Ok(Symbol::Constant(format!("{kind}{body}")));
@@ -158,7 +160,7 @@ impl Symbols {
         if value.starts_with(['+', '-']) {
             let digits = &value[1..];
             if digits.is_empty() || digits.len() > 31 || !digits.bytes().all(|b| b.is_ascii_digit()) {
-                return Err(format!("SYMNAMES line {line}: {value} is not a decimal number"));
+                return Err((syntax::messages::IWJ0210, format!("SYMNAMES line {line}: {value} is not a decimal number")));
             }
             return Ok(Symbol::Constant(value.to_string()));
         }
@@ -168,24 +170,24 @@ impl Symbols {
         }
         let position = match parts[0] {
             "*" => cursor.next.unwrap_or(1),
-            "=" => cursor.position.ok_or_else(|| format!("SYMNAMES line {line}: = for a position before any position was set"))?,
+            "=" => cursor.position.ok_or_else(|| (syntax::messages::IWJ0242, format!("SYMNAMES line {line}: = for a position before any position was set")))?,
             p => number(p, "position", line)?,
         };
         if parts.len() == 1 {
             return Ok(Symbol::Number(position.to_string()));
         }
         let length = match parts[1] {
-            "=" => cursor.length.ok_or_else(|| format!("SYMNAMES line {line}: = for a length before any length was set"))?,
+            "=" => cursor.length.ok_or_else(|| (syntax::messages::IWJ0243, format!("SYMNAMES line {line}: = for a length before any length was set")))?,
             m => number(m, "length", line)?,
         };
         let format = match parts.get(2).map(|f| f.to_ascii_uppercase()) {
             None => None,
-            Some(f) if f == "=" => Some(cursor.format.clone().ok_or_else(|| format!("SYMNAMES line {line}: = for a format before any format was set"))?),
+            Some(f) if f == "=" => Some(cursor.format.clone().ok_or_else(|| (syntax::messages::IWJ0244, format!("SYMNAMES line {line}: = for a format before any format was set")))?),
             Some(f) if FORMATS.contains(&f.as_str()) => Some(f),
-            Some(f) => return Err(format!("SYMNAMES line {line}: {f} is not a field format")),
+            Some(f) => return Err((syntax::messages::IWJ0211, format!("SYMNAMES line {line}: {f} is not a field format"))),
         };
         if parts.len() > 3 {
-            return Err(format!("SYMNAMES line {line}: {value} is not p,m,f"));
+            return Err((syntax::messages::IWJ0212, format!("SYMNAMES line {line}: {value} is not p,m,f")));
         }
         cursor.next = Some(position + length);
         cursor.position = Some(position);
@@ -210,13 +212,13 @@ impl Symbols {
             .collect()
     }
 
-    fn unsupported<T>(what: &str, name: &str) -> Result<T, String> {
-        Err(format!("the symbol {name} stands for {what}, which these statements do not model yet"))
+    fn unsupported<T>(what: &str, name: &str) -> Result<T, Refused> {
+        Err((syntax::messages::IWJ0213, format!("the symbol {name} stands for {what}, which these statements do not model yet")))
     }
 
     /// `token` as the field or constant a comparison takes: p,m,f (p,m under FORMAT=), or the
     /// constant. None when it is no symbol.
-    pub fn in_condition(&self, token: &str, format_given: bool) -> Result<Option<Vec<String>>, String> {
+    pub fn in_condition(&self, token: &str, format_given: bool) -> Result<Option<Vec<String>>, Refused> {
         Ok(Some(match self.map.get(token) {
             None => return Ok(None),
             Some(Symbol::Field { position, length, format }) => {
@@ -233,7 +235,7 @@ impl Symbols {
     }
 
     /// `token` as a SORT or MERGE field: p,m,f, or p,m under FORMAT=.
-    pub fn in_sort_fields(&self, token: &str, format_given: bool) -> Result<Option<Vec<String>>, String> {
+    pub fn in_sort_fields(&self, token: &str, format_given: bool) -> Result<Option<Vec<String>>, Refused> {
         match self.map.get(token) {
             None => Ok(None),
             Some(Symbol::Field { position, length, format }) => {
@@ -241,12 +243,12 @@ impl Symbols {
                 match (format_given, format) {
                     (true, _) => {}
                     (false, Some(f)) => out.push(f.clone()),
-                    (false, None) => return Err(format!("the symbol {token} has no format, and no FORMAT= gives one")),
+                    (false, None) => return Err((syntax::messages::IWJ0214, format!("the symbol {token} has no format, and no FORMAT= gives one"))),
                 }
                 Ok(Some(out))
             }
             Some(Symbol::Unsupported(what)) => Self::unsupported(what, token),
-            Some(_) => Err(format!("the symbol {token} is a constant, not a field to sort on")),
+            Some(_) => Err((syntax::messages::IWJ0215, format!("the symbol {token} is a constant, not a field to sort on"))),
         }
     }
 
@@ -261,7 +263,7 @@ impl Symbols {
 
     /// `token` as a reformatting item: p,m (p,m,f when `edited`, an edit or conversion following),
     /// p for a position, or the constant.
-    pub fn in_items(&self, token: &str, edited: bool) -> Result<Option<Vec<String>>, String> {
+    pub fn in_items(&self, token: &str, edited: bool) -> Result<Option<Vec<String>>, Refused> {
         Ok(Some(match self.map.get(token) {
             None => return Ok(None),
             Some(Symbol::Field { position, length, format }) => {
@@ -282,7 +284,7 @@ impl Symbols {
 mod tests {
     use super::*;
 
-    fn read(text: &str) -> Result<Symbols, String> {
+    fn read(text: &str) -> Result<Symbols, Refused> {
         Symbols::read(&text.lines().map(str::to_string).collect::<Vec<_>>())
     }
 
@@ -312,12 +314,12 @@ mod tests {
     fn constants_remarks_and_comments() {
         let s = read("* a comment\n\nMy_Title,c'My Report' a remark\nDEPT1;'J82'\nStopper,X'FFFFFF'\nLIMIT,+12500\nFlags,B'11010000'").unwrap();
         assert_eq!(s.table(), ["My_Title,C'My Report'", "DEPT1,C'J82'", "Stopper,X'FFFFFF'", "LIMIT,+12500", "Flags: the B string B'11010000'"]);
-        assert!(s.in_condition("Flags", false).unwrap_err().contains("do not model yet"));
-        assert!(read("COUNT,1,2,CH").unwrap_err().contains("reserved word"));
-        assert!(read("M12,1,2,CH").unwrap_err().contains("reserved word"));
+        assert!(s.in_condition("Flags", false).unwrap_err().1.contains("do not model yet"));
+        assert!(read("COUNT,1,2,CH").unwrap_err().1.contains("reserved word"));
+        assert!(read("M12,1,2,CH").unwrap_err().1.contains("reserved word"));
         assert!(read("count,1,2,CH").is_ok(), "only the upper-case form is reserved");
-        assert!(read("1st,1,2,CH").unwrap_err().contains("not a symbol"));
-        assert!(read("X1,=,2").unwrap_err().contains("before any position"));
+        assert!(read("1st,1,2,CH").unwrap_err().1.contains("not a symbol"));
+        assert!(read("X1,=,2").unwrap_err().1.contains("before any position"));
     }
 
     #[test]
@@ -328,7 +330,7 @@ mod tests {
         assert_eq!(s.in_condition("Max", false).unwrap(), Some(vec!["200000".into()]));
         assert_eq!(s.in_condition("Code", false).unwrap(), Some(vec!["C'86A4Z'".into()]));
         assert_eq!(s.in_sort_fields("C_Field1", true).unwrap(), Some(vec!["6".into(), "5".into()]));
-        assert!(s.in_sort_fields("Any_Format", false).unwrap_err().contains("no format"));
+        assert!(s.in_sort_fields("Any_Format", false).unwrap_err().1.contains("no format"));
         assert_eq!(s.in_items("C_Field1", false).unwrap(), Some(vec!["6".into(), "5".into()]));
         assert_eq!(s.in_items("C_Field1", true).unwrap(), Some(vec!["6".into(), "5".into(), "CH".into()]));
         assert_eq!(s.column("Max"), Some(200000));

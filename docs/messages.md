@@ -314,6 +314,257 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0290 | W | `INITCHECK: {item} may be used uninitialized: no path to this statement sets {it} (see {analysis})` |
 | IWC0291 | S | `{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: {a character the program's code page does not hold}` |
 | IWC0292 | S | `VALUE of {name}: a numeric literal, where a numeric-edited item's VALUE is an alphanumeric literal or a figurative constant written in edited form; --compliance extended edits the number into it` |
+| IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
+| IWJ0002 | S | `an unbalanced ) in {text}` |
+| IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
+| IWJ0004 | S | `& is not followed by a symbolic parameter name in {text}` |
+| IWJ0005 | S | `&SYSUID is the user ID the job runs under: USER= on the JOB statement, or the user that submitted it` |
+| IWJ0006 | S | `symbolic parameter &{name} has no value` |
+| IWJ0007 | S | `the statement is continued past the end of the job` |
+| IWJ0008 | S | `a continuation line must start with // and a blank` |
+| IWJ0009 | S | `a continued operand must start in columns 4 to 16` |
+| IWJ0010 | S | `IF has no THEN` |
+| IWJ0011 | S | `no JOB statement` |
+| IWJ0012 | S | `the first statement is not a JOB statement` |
+| IWJ0013 | S | `the JOB statement needs a job name of one to eight characters` |
+| IWJ0014 | S | `a symbolic parameter in the JOB statement's COND is not supported yet` |
+| IWJ0015 | S | `COND on the JOB statement takes (code,operator) tests only` |
+| IWJ0016 | S | `RESTART is not supported yet` |
+| IWJ0017 | S | `TYPRUN is not supported yet` |
+| IWJ0018 | S | `JOB keyword {k} is not supported yet` |
+| IWJ0019 | S | `{op} is not NAME=value` |
+| IWJ0020 | S | `no procedure library holds member {name}` |
+| IWJ0021 | S | `member {name}: {item}` |
+| IWJ0022 | S | `procedures and INCLUDE members nest more than 15 deep` |
+| IWJ0023 | S | `an in-stream PROC needs a name` |
+| IWJ0024 | S | `{operation} is out of place` |
+| IWJ0025 | S | `JCLLIB takes ORDER=` |
+| IWJ0026 | S | `{bad} is not a data set name` |
+| IWJ0027 | S | `INCLUDE takes MEMBER=name` |
+| IWJ0028 | S | `a DD statement that follows no EXEC statement` |
+| IWJ0029 | S | `a second JOB statement; give one job a file` |
+| IWJ0030 | S | `{op} statements are not supported yet` |
+| IWJ0031 | S | `{op} is not a JCL statement` |
+| IWJ0032 | S | `EXEC starts with PGM=, PROC= or a procedure name` |
+| IWJ0033 | S | `{name} is not a procedure name` |
+| IWJ0034 | S | `an EXEC operand {op} this reader does not know` |
+| IWJ0035 | S | `PARMDD is not supported yet` |
+| IWJ0036 | S | `procedure {name} does not use symbolic parameter {key}` |
+| IWJ0037 | S | `EXEC keyword {key} is not supported yet` |
+| IWJ0038 | S | `procedure {name} has no steps` |
+| IWJ0039 | S | `PARM.{text}: procedure {name} has no step {text}` |
+| IWJ0040 | S | `COND.{text}: procedure {name} has no step {text}` |
+| IWJ0041 | S | `{dd} is not a DD name` |
+| IWJ0042 | S | `an unnamed DD statement with nothing to concatenate to` |
+| IWJ0043 | S | `{number} is not a step name` |
+| IWJ0044 | S | `EXEC needs PGM= or a procedure` |
+| IWJ0045 | S | `PGM=*.stepname.ddname is not supported yet` |
+| IWJ0046 | S | `{value} is not a program name` |
+| IWJ0047 | S | `EXEC keyword {k} is not supported yet` |
+| IWJ0048 | S | `an EXEC operand {value} this reader does not know` |
+| IWJ0049 | S | `*.{path} is not *.ddname, *.stepname.ddname or *.stepname.procstepname.ddname` |
+| IWJ0050 | S | `{value} is not a data set name` |
+| IWJ0051 | S | `{value} is not a generation of a generation data group` |
+| IWJ0052 | S | `{message} is not a member name` |
+| IWJ0053 | S | `&&{temp} is not a temporary data set name` |
+| IWJ0054 | S | `{base} is not a data set name` |
+| IWJ0055 | S | `DISP={value} has more than three subparameters` |
+| IWJ0056 | S | `{text} is not a DISP status` |
+| IWJ0057 | S | `{text} is not a DISP {normal} disposition` |
+| IWJ0058 | S | `LRECL={value} is not a record length` |
+| IWJ0059 | S | `a DD operand {value} this reader does not know` |
+| IWJ0060 | S | `DLM takes two characters` |
+| IWJ0061 | S | `DD keyword {k} is not supported yet` |
+| IWJ0062 | S | `DISP applies to a data set` |
+| IWJ0063 | S | `the DD statement names no data set, in-stream data, DUMMY or SYSOUT` |
+| IWJ0064 | S | `DD {number} overrides a procedure step, but the EXEC before it runs a program` |
+| IWJ0065 | S | `{number} is not a DD name` |
+| IWJ0066 | S | `DD {number} appears twice in the step` |
+| IWJ0067 | S | `*.{path} names a DD that is no data set` |
+| IWJ0068 | S | `*.{path} names no earlier DD` |
+| IWJ0069 | S | `IF statements nest more than 15 deep` |
+| IWJ0070 | S | `a second ELSE for one IF` |
+| IWJ0071 | S | `ELSE without IF` |
+| IWJ0072 | S | `ENDIF without IF` |
+| IWJ0073 | S | `IF without ENDIF` |
+| IWJ0074 | S | `{text} is not a return code from 0 to 4095` |
+| IWJ0075 | S | `{text} is not a COND operator (GT, GE, EQ, NE, LT or LE)` |
+| IWJ0076 | S | `COND test ({text}) is not (code,operator) or (code,operator,stepname)` |
+| IWJ0077 | S | `COND={text} is not in parentheses` |
+| IWJ0078 | S | `{item} must come last in COND` |
+| IWJ0079 | S | `{t} in COND is not a test in parentheses` |
+| IWJ0080 | S | `COND takes at most eight tests` |
+| IWJ0081 | S | `{character} has no meaning in an IF expression` |
+| IWJ0082 | S | `parentheses in an IF expression nest more than 15 deep` |
+| IWJ0083 | S | `an IF expression is missing a )` |
+| IWJ0084 | S | `an IF expression has {t} where a keyword belongs` |
+| IWJ0085 | S | `an IF expression ends early` |
+| IWJ0086 | S | `RC needs a comparison operator and a number` |
+| IWJ0087 | S | `{word} needs a number after it` |
+| IWJ0088 | S | `{value} is not TRUE or FALSE` |
+| IWJ0089 | S | `ABENDCC={value} is not Sxxx or Unnnn` |
+| IWJ0090 | S | `stepname.ABENDCC is not supported yet` |
+| IWJ0091 | S | `{word} is not RC, ABEND, ABENDCC or a stepname.RC, .ABEND or .RUN` |
+| IWJ0092 | S | `an IF expression has {at} after its end` |
+| IWJ0093 | S | `a {statement} statement inside a procedure` |
+| IWJ0094 | S | `PROC {name} has no PEND` |
+| IWJ0095 | S | `a {statement} statement in an INCLUDE member is not supported` |
+| IWJ0096 | S | `procedure {name} has no step {step}` |
+| IWJ0097 | S | `{generation} is not a relative generation` |
+| IWJ0098 | S | `a comment is not closed with */` |
+| IWJ0099 | S | `a parenthesis is not closed` |
+| IWJ0100 | S | `{character} has no meaning here` |
+| IWJ0101 | S | `{text} is not a condition code from 0 to 16` |
+| IWJ0102 | S | `DO has no END` |
+| IWJ0103 | S | `END without DO` |
+| IWJ0104 | S | `ELSE inside DO with no IF` |
+| IWJ0105 | S | `a command, found {word}` |
+| IWJ0106 | S | `SET takes MAXCC=n or LASTCC=n` |
+| IWJ0107 | S | `{verb} is out of place` |
+| IWJ0108 | S | `the IDCAMS command {value} is not supported yet` |
+| IWJ0109 | S | `IF needs a comparison operator` |
+| IWJ0110 | S | `IF needs THEN` |
+| IWJ0111 | S | `DELETE of a generic name ({word}) is not supported yet` |
+| IWJ0112 | S | `DELETE parameter {k} is not supported yet` |
+| IWJ0113 | S | `DELETE has {word} where a name belongs` |
+| IWJ0114 | S | `DELETE names no entry` |
+| IWJ0115 | S | `REPRO parameter {k} is not supported yet` |
+| IWJ0116 | S | `REPRO parameter {word} is not supported yet` |
+| IWJ0117 | S | `REPRO has {word} where a parameter belongs` |
+| IWJ0118 | S | `REPRO needs INFILE or INDATASET, and OUTFILE or OUTDATASET` |
+| IWJ0119 | S | `BLDINDEX parameter {k} is not supported yet` |
+| IWJ0120 | S | `BLDINDEX parameter {word} is not supported yet` |
+| IWJ0121 | S | `BLDINDEX has {word} where a parameter belongs` |
+| IWJ0122 | S | `BLDINDEX needs INFILE or INDATASET, and OUTFILE or OUTDATASET` |
+| IWJ0123 | S | `{value} is not a DD name` |
+| IWJ0124 | S | `KEYS({value}) has a length that is not from 1 to 255` |
+| IWJ0125 | S | `RECORDSIZE({value}) needs an average from 1 to the maximum` |
+| IWJ0126 | S | `{value} is not an even number of hexadecimal digits` |
+| IWJ0127 | S | `{value} is not a key of 1 to 255 characters` |
+| IWJ0128 | S | `PRINT writes to OUTFILE, not OUTDATASET` |
+| IWJ0129 | S | `PRINT parameter {k} is not supported yet` |
+| IWJ0130 | S | `PRINT parameter {word} is not supported yet` |
+| IWJ0131 | S | `PRINT has {word} where a parameter belongs` |
+| IWJ0132 | S | `{value} is not a data set name or a generic name` |
+| IWJ0133 | S | `LEVEL({value}) must not end with *` |
+| IWJ0134 | S | `LISTCAT parameter {k} is not supported yet` |
+| IWJ0135 | S | `LISTCAT parameter {word} is not supported yet` |
+| IWJ0136 | S | `LISTCAT has {word} where a parameter belongs` |
+| IWJ0137 | S | `LISTCAT ENTRIES names no entry` |
+| IWJ0138 | S | `LIMIT({value}) is not from 1 to 255` |
+| IWJ0139 | S | `DEFINE GDG parameter {k} is not supported yet` |
+| IWJ0140 | S | `DEFINE GDG has {word} where a parameter belongs` |
+| IWJ0141 | S | `{name} is not a generation data group name of 35 characters or fewer` |
+| IWJ0142 | S | `DEFINE GDG needs NAME and LIMIT` |
+| IWJ0143 | S | `DEFINE CLUSTER {k} is not supported yet` |
+| IWJ0144 | S | `{name}: KEYS({length} {offset}) does not fit in a record of {maximum} bytes` |
+| IWJ0145 | S | `DEFINE ALTERNATEINDEX {k} is not supported yet` |
+| IWJ0146 | S | `DEFINE PATH RECATALOG is not supported yet` |
+| IWJ0147 | S | `DEFINE {k} is not supported yet; DEFINE CLUSTER, ALTERNATEINDEX, PATH and GDG are` |
+| IWJ0148 | S | `DEFINE has {word} where a parameter belongs` |
+| IWJ0149 | S | `DEFINE needs CLUSTER, ALTERNATEINDEX, PATH or GDG` |
+| IWJ0150 | S | `the field format {file} is not supported yet` |
+| IWJ0151 | S | `{text} is not a {what}` |
+| IWJ0152 | S | `X'{text}' is not pairs of hexadecimal digits` |
+| IWJ0153 | S | `the constant {token} is not supported yet; C'...', X'...' and decimal numbers are` |
+| IWJ0154 | S | `the edit pattern {text} is longer than 44 characters` |
+| IWJ0155 | S | `SIGNS=({inner}) has more than four signs` |
+| IWJ0156 | S | `the sign {part} is not one character` |
+| IWJ0157 | S | `FIELDS=({inner}) is not position, length{format}, order for each field` |
+| IWJ0158 | S | `an E order (an exit's own) is not supported yet` |
+| IWJ0159 | S | `{o} is not A or D` |
+| IWJ0160 | S | `the field format {format} in a condition is not supported yet; CH, BI, FI, ZD and PD are` |
+| IWJ0161 | S | `a {format} field of {length} bytes is longer than DFSORT compares` |
+| IWJ0162 | S | `comparing {position},{length},{format} with {number} is not supported yet` |
+| IWJ0163 | S | `{extra} in a condition is not AND or OR` |
+| IWJ0164 | S | `LENGTH={number} is longer than 44` |
+| IWJ0165 | S | `{key}: the two digit characters must differ` |
+| IWJ0166 | S | `arithmetic in {what} ({key}) is not supported yet` |
+| IWJ0167 | S | `a {what} number is either edited or converted, not both` |
+| IWJ0168 | S | `SIGNS goes with an edit mask, not TO, in {what}` |
+| IWJ0169 | S | `{character} is not a column or a symbol for one` |
+| IWJ0170 | S | `the {what} item {token} is not supported yet` |
+| IWJ0171 | S | `{what} editing of {file} fields is not supported yet` |
+| IWJ0172 | S | `a {file} field of {length} bytes is not one {what} edits` |
+| IWJ0173 | S | `arithmetic in {what} ({next}) is not supported yet` |
+| IWJ0174 | S | `{what} field conversion and editing ({next}) is not supported yet` |
+| IWJ0175 | S | `{what}=() has no items` |
+| IWJ0176 | S | `{what}={number} is longer than 15 digits` |
+| IWJ0177 | S | `the PUSH item {token} is not supported yet; p,m, ID=n and SEQ=n are` |
+| IWJ0178 | S | `PUSH=() has no items` |
+| IWJ0179 | S | `KEYBEGIN={value} is not (p,m)` |
+| IWJ0180 | S | `{verb} IFTHEN {key} is not supported yet` |
+| IWJ0181 | S | `{k} is not an operand of this {verb} IFTHEN clause` |
+| IWJ0182 | S | `an IFTHEN clause takes one of BUILD and OVERLAY, in {verb}` |
+| IWJ0183 | S | `{verb} IFTHEN WHEN=GROUP needs PUSH=` |
+| IWJ0184 | S | `{verb} IFTHEN WHEN=GROUP needs BEGIN, KEYBEGIN, END or RECORDS` |
+| IWJ0185 | S | `{verb} IFTHEN WHEN=ANY needs a WHEN=(cond) clause before it` |
+| IWJ0186 | S | `{verb} has more than one of BUILD, FIELDS, OUTREC and OVERLAY` |
+| IWJ0187 | S | `{verb} takes IFTHEN clauses or BUILD, FIELDS and OVERLAY, not both` |
+| IWJ0188 | S | `{verb} IFOUTLEN goes with IFTHEN clauses` |
+| IWJ0189 | S | `OUTFIL takes one of INCLUDE, OMIT and SAVE` |
+| IWJ0190 | S | `the OUTFIL parameter {k} is not supported yet` |
+| IWJ0191 | S | `{bad} is not a ddname` |
+| IWJ0192 | S | `more than one SORT or MERGE statement` |
+| IWJ0193 | S | `{verb} operand {word} is not supported yet` |
+| IWJ0194 | S | `SUM of fields is not supported yet; SUM FIELDS=NONE is` |
+| IWJ0195 | S | `OPTION {number} is not supported yet` |
+| IWJ0196 | S | `RECORD TYPE={t} is not supported yet` |
+| IWJ0197 | S | `more than one INCLUDE or OMIT statement; INCLUDE and OMIT are mutually exclusive` |
+| IWJ0198 | S | `the {verb} parameter {word} is not supported yet` |
+| IWJ0199 | S | `{verb} needs FIELDS=, BUILD=, OVERLAY= or IFTHEN=` |
+| IWJ0200 | S | `more than one {verb} statement` |
+| IWJ0201 | S | `the DFSORT {value} statement is not supported yet` |
+| IWJ0202 | S | `{value} is not a DFSORT control statement` |
+| IWJ0203 | S | `no SORT, MERGE or OPTION COPY statement` |
+| IWJ0204 | S | `SYMNAMES line {line}: {text} is not a {what} from 1 to 32752` |
+| IWJ0205 | S | `SYMNAMES line {line}: {statement} is not symbol,value` |
+| IWJ0206 | S | `SYMNAMES line {line}: ALIGN takes H, F or D, not {value}` |
+| IWJ0207 | S | `SYMNAMES line {line}: {name} is not a symbol, or is a reserved word` |
+| IWJ0208 | S | `SYMNAMES line {line}: {name} is defined twice` |
+| IWJ0209 | S | `SYMNAMES line {line}: {value} is not a closed string` |
+| IWJ0210 | S | `SYMNAMES line {line}: {value} is not a decimal number` |
+| IWJ0211 | S | `SYMNAMES line {line}: {file} is not a field format` |
+| IWJ0212 | S | `SYMNAMES line {line}: {value} is not p,m,f` |
+| IWJ0213 | S | `the symbol {name} stands for {what}, which these statements do not model yet` |
+| IWJ0214 | S | `the symbol {token} has no format, and no FORMAT= gives one` |
+| IWJ0215 | S | `the symbol {token} is a constant, not a field to sort on` |
+| IWJ0216 | S | `IF takes MAXCC or LASTCC` |
+| IWJ0217 | S | `IF needs a condition code` |
+| IWJ0218 | S | `{keyword}({value}) needs {N} whole numbers` |
+| IWJ0219 | S | `PRINT needs INFILE or INDATASET` |
+| IWJ0220 | S | `DEFINE CLUSTER needs NAME` |
+| IWJ0221 | S | `DEFINE ALTERNATEINDEX needs NAME` |
+| IWJ0222 | S | `DEFINE ALTERNATEINDEX needs RELATE` |
+| IWJ0223 | S | `DEFINE PATH needs NAME` |
+| IWJ0224 | S | `DEFINE PATH needs PATHENTRY` |
+| IWJ0225 | S | `{verb} needs FIELDS=` |
+| IWJ0226 | S | `{verb} needs COND=` |
+| IWJ0227 | S | `{token} is not a decimal constant` |
+| IWJ0228 | S | `the edit pattern {value} is not in parentheses` |
+| IWJ0229 | S | `SIGNS={value} is not in parentheses` |
+| IWJ0230 | S | `FIELDS={value} is not in parentheses` |
+| IWJ0231 | S | `the field {position},{length} has no format, and no FORMAT= gives one` |
+| IWJ0232 | S | `a comparison has no relation` |
+| IWJ0233 | S | `{op} is not EQ, NE, GT, GE, LT or LE` |
+| IWJ0234 | S | `a comparison has nothing after its relation` |
+| IWJ0235 | S | `a condition ends early` |
+| IWJ0236 | S | `COND={value} is not in parentheses` |
+| IWJ0237 | S | `TO={value} is not BI, FI, PD, PDC, PDF, ZD, ZDF, ZDC, CSF or FS` |
+| IWJ0238 | S | `{what}={value} is not in parentheses` |
+| IWJ0239 | S | `PUSH={value} is not in parentheses` |
+| IWJ0240 | S | `IFTHEN={value} is not in parentheses` |
+| IWJ0241 | S | `IFTHEN=({inner}) does not begin with WHEN=` |
+| IWJ0242 | S | `SYMNAMES line {line}: = for a position before any position was set` |
+| IWJ0243 | S | `SYMNAMES line {line}: = for a length before any length was set` |
+| IWJ0244 | S | `SYMNAMES line {line}: = for a format before any format was set` |
+| IWJ0245 | S | `a comparison ends early` |
+| IWJ0246 | S | `PGM={pgm} is not supported yet` |
+| IWJ0247 | S | `PARM for PGM={pgm} is not supported yet` |
+| IWJ0248 | S | `DD {dd} concatenates in-stream data with data sets of z/OS records` |
+| IWJ0249 | S | `IDCAMS SYSIN from data sets of z/OS records is not supported yet` |
+| IWJ0250 | S | `IEBGENER control statements are not supported yet` |
+| IWJ0251 | S | `IEBGENER between UTF-8 lines and z/OS records needs a record length, which DCB is not read for yet` |
 | IWL0001 | S | `lowering: {table} exceeds the LIR's limit` |
 | IWL0002 | S | `lowering: the lowered program is invalid: {why}` |
 | IWL0003 | S | `LOCAL-STORAGE exceeds the interpreter's {MAX STORAGE} bytes` |
