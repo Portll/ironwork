@@ -2464,6 +2464,11 @@ standard output, standard error and every file the two runs leave, the print fil
 runs it on every push and fails on any difference. `tools/differ.py --vm` does the same for any
 directory of programs, files aside.
 
+**Evidence.** `run --vm` and `cics --vm` take `--evidence` and `--coverage` with their traces, and
+write the journal and coverage report the interpreter writes, but for `--vm` in the journal's
+`argv` (evidence.md §1). `crates/cli/tests/evidence.rs` runs a batch program and a CICS
+pseudo-conversation on both executors and compares the two.
+
 **What runs now.** `rt::vm` runs the core: storage, every data op, conditions, control flow, and
 CALL and user-defined functions within the run unit, with NUMCHECK, ZONECHECK and PARMCHECK; LE
 callable services and the virtual printer; OO COBOL, INVOKE and CALL through a function-pointer; the

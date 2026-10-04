@@ -1,6 +1,7 @@
 //! `ironwork run --evidence`: the journal records the source, the COPY member, each DD's digest and
 //! the CALL and where an abend was, in whichever source, links every record to the one before,
-//! reaches the ledger, is refused inside a directory the run reads, and verifies under cobolwork.
+//! reaches the ledger, is refused inside a directory the run reads, verifies under cobolwork, and is
+//! the journal the interpreter writes when the program runs on the VM.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -364,6 +365,7 @@ fn cobolworks_verifier_accepts_the_evidence_of_real_runs() {
     let old = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() - 180_000;
     stale_lock(&ev, &format!("{} {old}\n", gone.id()));
     assert_eq!(run("DYNAMIC.cbl", &["--trace-input"]), Some(0));
+    assert_eq!(run("DIVIDE.cbl", &["--vm", "--trace-input"]), Some(240));
 
     let mut kinds: Vec<String> = fs::read_dir(ev.join("runs"))
         .unwrap()
@@ -387,5 +389,327 @@ fn cobolworks_verifier_accepts_the_evidence_of_real_runs() {
         .expect("node, to run cobolwork's verifier");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(String::from_utf8_lossy(&out.stdout), r#"{"verified":true,"broken":[],"unrecorded":[],"open":[]}"#);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+fn source(lines: &[&str]) -> String {
+    lines.iter().map(|l| format!("       {l}\n")).collect()
+}
+
+fn put(dir: &Path, file: &str, text: &str) {
+    let path = dir.join(file);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, text).unwrap();
+}
+
+/// A journal's records without what each run's journal has of its own: when each record was
+/// written, the chain and hashes that link them, and how long the run took; and with `--vm` left
+/// out of `argv`.
+fn records(ev: &Path) -> Vec<String> {
+    let runs: Vec<PathBuf> = fs::read_dir(ev.join("runs")).unwrap().map(|e| e.unwrap().path()).collect();
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    let own = |line: &str| {
+        let mut kept = line.replace("\"--vm\",", "");
+        for key in ["at", "chain", "hash", "prev", "durationMs"] {
+            let needle = format!("\"{key}\":");
+            if let Some(start) = kept.find(&needle) {
+                let end = kept[start..].find([',', '}']).map_or(kept.len(), |e| start + e + usize::from(kept[start + e..].starts_with(',')));
+                kept.replace_range(start..end, "");
+            }
+        }
+        kept
+    };
+    fs::read_to_string(&runs[0]).unwrap().lines().map(own).collect()
+}
+
+/// Runs `args` from `dir` with `--evidence` and `--coverage` on the interpreter, then on the VM,
+/// `{tag}` in an argument naming each run's own files. The two agree on the exit status, standard
+/// output and error, the coverage report, each file `written` names and the journal, but for
+/// `--vm` in its `argv`; the interpreter's journal records.
+fn on_both_executors(dir: &Path, args: &[&str], written: &[&str]) -> Vec<String> {
+    let run = |tag: &str| {
+        let _ = fs::remove_dir_all(dir.join(format!("ev-{tag}")));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_ironwork"));
+        command.current_dir(dir).args(args.iter().map(|a| a.replace("{tag}", tag)));
+        command.args(["--evidence", &format!("ev-{tag}"), "--coverage", &format!("coverage-{tag}.json")]);
+        if tag == "vm" {
+            command.arg("--vm");
+        }
+        command.output().unwrap()
+    };
+    let (walker, vm) = (run("walker"), run("vm"));
+    let shown = |o: &std::process::Output| (o.status.code(), String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned());
+    assert_eq!(shown(&vm), shown(&walker), "{args:?}");
+    let read = |file: String| fs::read_to_string(dir.join(&file)).unwrap_or_else(|e| panic!("{file}: {e}"));
+    assert_eq!(read("coverage-vm.json".into()), read("coverage-walker.json".into()), "{args:?}");
+    for file in written {
+        assert_eq!(read(file.replace("{tag}", "vm")), read(file.replace("{tag}", "walker")), "{file}");
+    }
+    let journal = records(&dir.join("ev-walker"));
+    assert_eq!(records(&dir.join("ev-vm")), journal, "{args:?}");
+    let argv = fs::read_to_string(fs::read_dir(dir.join("ev-vm/runs")).unwrap().next().unwrap().unwrap().path()).unwrap();
+    assert!(argv.lines().next().is_some_and(|open| open.contains("\"--vm\",")), "the VM's argv names --vm");
+    journal
+}
+
+/// Asserts that each of `kinds` is part of some record of `journal`, so the comparison covers it.
+fn holds(journal: &[String], kinds: &[&str]) {
+    for kind in kinds {
+        assert!(journal.iter().any(|r| r.contains(kind)), "{kind}\n{journal:#?}");
+    }
+}
+
+#[test]
+fn a_batch_run_on_the_vm_writes_the_journal_and_coverage_the_interpreter_writes() {
+    let dir = temp("vm-batch");
+    put(
+        &dir,
+        "src/VMEVD.cbl",
+        &source(&[
+            "IDENTIFICATION DIVISION.",
+            "FUNCTION-ID. DOUBLE AS 'dbl'.",
+            "DATA DIVISION.",
+            "LINKAGE SECTION.",
+            "01  N PIC 9(3).",
+            "01  R PIC 9(4).",
+            "PROCEDURE DIVISION USING N RETURNING R.",
+            "    COMPUTE R = N * 2",
+            "    GOBACK.",
+            "END FUNCTION DOUBLE.",
+            "IDENTIFICATION DIVISION.",
+            "FUNCTION-ID. TRIPLE AS 'trp' IS PROTOTYPE.",
+            "DATA DIVISION.",
+            "LINKAGE SECTION.",
+            "01  N PIC 9(3).",
+            "01  R PIC 9(4).",
+            "PROCEDURE DIVISION USING N RETURNING R.",
+            "END FUNCTION TRIPLE.",
+            "IDENTIFICATION DIVISION.",
+            "PROGRAM-ID. VMEVD.",
+            "ENVIRONMENT DIVISION.",
+            "INPUT-OUTPUT SECTION.",
+            "FILE-CONTROL.",
+            "    SELECT IN-FILE ASSIGN TO INFILE.",
+            "    SELECT OUT-FILE ASSIGN TO OUTFILE.",
+            "DATA DIVISION.",
+            "FILE SECTION.",
+            "FD IN-FILE.",
+            "    COPY INREC.",
+            "FD OUT-FILE.",
+            "01 OUT-REC PIC X(10).",
+            "WORKING-STORAGE SECTION.",
+            "    COPY BADNUM.",
+            "01 NAME PIC X(8) VALUE 'HELPER'.",
+            "01 K PIC 9(3) VALUE 7.",
+            "PROCEDURE DIVISION.",
+            "FIRST-PART SECTION.",
+            "OPENING.",
+            "    OPEN INPUT IN-FILE OUTPUT OUT-FILE",
+            "    READ IN-FILE END-READ",
+            "    MOVE IN-REC TO OUT-REC",
+            "    DISPLAY 'REC ' IN-REC",
+            "    PERFORM TWICE 2 TIMES",
+            "    CALL NAME",
+            "    CALL 'INNER'",
+            "    DISPLAY FUNCTION DOUBLE(K) ' ' FUNCTION TRIPLE(K)",
+            "    WRITE OUT-REC",
+            "    CLOSE IN-FILE OUT-FILE.",
+            "    COPY ADDBAD.",
+            "    GOBACK.",
+            "TWICE.",
+            "    DISPLAY 'TWICE'.",
+            "NEVER.",
+            "    DISPLAY 'NEVER'.",
+            "IDENTIFICATION DIVISION.",
+            "PROGRAM-ID. INNER.",
+            "PROCEDURE DIVISION.",
+            "    DISPLAY 'INNER'",
+            "    GOBACK.",
+            "END PROGRAM INNER.",
+            "END PROGRAM VMEVD.",
+        ]),
+    );
+    put(&dir, "copy/sys/INREC.cpy", &source(&["01 IN-REC PIC X(10)."]));
+    put(&dir, "copy/BADNUM.cpy", &source(&["01 WS-A PIC X(3) VALUE '***'.", "01 WS-N REDEFINES WS-A PIC 9(3).", "01 WS-T PIC 9(3) VALUE 0."]));
+    put(&dir, "copy/ADDBAD.cpy", &source(&["    ADD WS-N TO WS-T."]));
+    let helper = ["IDENTIFICATION DIVISION.", "PROGRAM-ID. HELPER.", "PROCEDURE DIVISION.", "    DISPLAY 'HELPER'", "    CALL 'HELPIN'", "    GOBACK.", "IDENTIFICATION DIVISION.", "PROGRAM-ID. HELPIN.", "PROCEDURE DIVISION.", "    DISPLAY 'HELPIN'", "    GOBACK.", "END PROGRAM HELPIN.", "END PROGRAM HELPER."];
+    put(&dir, "lib/HELPER.cbl", &source(&helper));
+    put(
+        &dir,
+        "lib/TRP.cbl",
+        &source(&["IDENTIFICATION DIVISION.", "FUNCTION-ID. TRIPLE AS 'trp'.", "DATA DIVISION.", "LINKAGE SECTION.", "01  N PIC 9(3).", "01  R PIC 9(4).", "PROCEDURE DIVISION USING N RETURNING R.", "    COMPUTE R = N * 3", "    GOBACK.", "END FUNCTION TRIPLE."]),
+    );
+    // The VM's CALL takes HELPER from its load module and TRIPLE from source; the interpreter takes both from source.
+    let compiled = Command::new(env!("CARGO_BIN_EXE_ironwork")).current_dir(&dir).args(["compile", "lib/HELPER.cbl", "-o", "lib"]).output().unwrap();
+    assert!(compiled.status.success(), "{}", String::from_utf8_lossy(&compiled.stderr));
+    put(&dir, "data/in.txt", "HELLOWORLD\n");
+    put(&dir, "statements", &(1..=61).map(|n| format!("VMEVD.cbl:{n}\n")).chain(["ADDBAD.cpy:1\n".into(), "HELPER.cbl:4\n".into(), "HELPER.cbl:10\n".into(), "TRP.cbl:8\n".into()]).collect::<String>());
+    let args = [
+        "run", "src/VMEVD.cbl", "-I", "copy", "-I", "copy/sys", "-L", "lib", "--dd", "INFILE=data/in.txt:text", "--dd", "OUTFILE=data/out-{tag}.txt:text", "--trace-statements", "statements", "--trace-marker", "HELLO", "--trace-input",
+    ];
+    let journal = on_both_executors(&dir, &args, &["data/out-{tag}.txt"]);
+    holds(
+        &journal,
+        &[
+            "\"kind\":\"input\",\"path\":\"INREC.cpy\",\"root\":2",
+            "\"from\":\"HELPER.cbl\",\"kind\":\"call\",\"program\":\"HELPER\"",
+            "\"from\":\"TRP.cbl\",\"kind\":\"call\",\"program\":\"TRP\"",
+            "\"dd\":\"OUTFILE\",\"event\":\"end\"",
+            "\"file\":\"HELPER.cbl\",\"kind\":\"statement\",\"line\":10",
+            "\"file\":\"ADDBAD.cpy\",\"kind\":\"statement\",\"line\":1",
+            "\"file\":\"VMEVD.cbl\",\"input\":true,\"kind\":\"sink\",\"line\":42,\"marker\":\"HELLO\",\"reached\":true",
+            "\"code\":\"S0C7\",\"file\":\"ADDBAD.cpy\",\"kind\":\"abend\",\"line\":1",
+            "\"exit\":240",
+        ],
+    );
+
+    put(
+        &dir,
+        "src/VMTAINT.cbl",
+        &source(&[
+            "IDENTIFICATION DIVISION.",
+            "PROGRAM-ID. VMTAINT.",
+            "DATA DIVISION.",
+            "WORKING-STORAGE SECTION.",
+            "01 WS-IN PIC X(8).",
+            "01 WS-NUM PIC 9(4) VALUE 0.",
+            "01 WS-OUT PIC 9(5).",
+            "01 WS-PGM PIC X(8).",
+            "01 I PIC 9(3) VALUE 0.",
+            "PROCEDURE DIVISION.",
+            "MAIN-PARA.",
+            "    ACCEPT WS-IN",
+            "    ACCEPT WS-NUM",
+            "    PERFORM VARYING I FROM 1 BY 1 UNTIL I > 3",
+            "        DISPLAY 'LOOP ' I",
+            "    END-PERFORM",
+            "    COMPUTE WS-OUT = WS-NUM * 3",
+            "    DISPLAY WS-OUT",
+            "    MOVE WS-IN TO WS-PGM",
+            "    CALL WS-PGM ON EXCEPTION DISPLAY 'NO ' WS-PGM END-CALL",
+            "    MOVE 'SAFE' TO WS-IN",
+            "    DISPLAY WS-IN",
+            "    MOVE 4 TO RETURN-CODE",
+            "    GOBACK.",
+        ]),
+    );
+    put(&dir, "data/sysin.txt", "HELLO\n0042\n");
+    put(&dir, "taint-statements", "VMTAINT.cbl:15\nVMTAINT.cbl:17\nVMTAINT.cbl:20\n");
+    let args = ["run", "src/VMTAINT.cbl", "--dd", "SYSIN=data/sysin.txt:text", "--trace-statements", "taint-statements", "--trace-marker", "HELLO", "--trace-input"];
+    let journal = on_both_executors(&dir, &args, &[]);
+    holds(
+        &journal,
+        &[
+            "\"file\":\"VMTAINT.cbl\",\"input\":true,\"kind\":\"sink\",\"line\":18,\"marker\":\"HELLO\",\"reached\":false",
+            "\"sink\":\"dynamic-program-load\"",
+            "\"file\":\"VMTAINT.cbl\",\"input\":true,\"kind\":\"sink\",\"line\":20,\"marker\":\"HELLO\",\"reached\":true",
+            "\"file\":\"VMTAINT.cbl\",\"input\":false,\"kind\":\"sink\",\"line\":22",
+            "\"file\":\"VMTAINT.cbl\",\"kind\":\"statement\",\"line\":15",
+            "\"exit\":4",
+        ],
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_cics_conversation_on_the_vm_writes_the_journal_and_coverage_the_interpreter_writes() {
+    let dir = temp("vm-cics");
+    put(
+        &dir,
+        "src/FIRSTP.cbl",
+        &source(&[
+            "IDENTIFICATION DIVISION.",
+            "PROGRAM-ID. FIRSTP.",
+            "DATA DIVISION.",
+            "WORKING-STORAGE SECTION.",
+            "01  WS-AREA PIC X(10) VALUE 'FROMFIRST '.",
+            "01  WS-KEY PIC X(5) VALUE '00002'.",
+            "01  WS-REC PIC X(15).",
+            "LINKAGE SECTION.",
+            "01  DFHCOMMAREA PIC X(10).",
+            "PROCEDURE DIVISION.",
+            "MAIN-PARA.",
+            "    IF EIBCALEN > 0",
+            "        DISPLAY 'GOT ' DFHCOMMAREA",
+            "    END-IF",
+            "    EXEC CICS READ FILE('CUSTF') INTO(WS-REC)",
+            "        RIDFLD(WS-KEY) END-EXEC",
+            "    DISPLAY 'READ ' WS-REC",
+            "    EXEC CICS WRITEQ TD QUEUE('LOGQ') FROM(DFHCOMMAREA)",
+            "        LENGTH(10) END-EXEC",
+            "    EXEC CICS LINK PROGRAM('HELPER') END-EXEC",
+            "    PERFORM SHOW",
+            "    EXEC CICS RETURN TRANSID('NEXT') COMMAREA(WS-AREA)",
+            "        END-EXEC.",
+            "SHOW.",
+            "    DISPLAY 'FIRST DONE'.",
+        ]),
+    );
+    put(&dir, "lib/HELPER.cbl", &source(&["IDENTIFICATION DIVISION.", "PROGRAM-ID. HELPER.", "PROCEDURE DIVISION.", "H1.", "    DISPLAY 'HELPER'", "    EXEC CICS RETURN END-EXEC."]));
+    put(
+        &dir,
+        "lib/LIBPGM.cbl",
+        &source(&[
+            "IDENTIFICATION DIVISION.",
+            "PROGRAM-ID. LIBPGM.",
+            "DATA DIVISION.",
+            "WORKING-STORAGE SECTION.",
+            "01  D PIC 9 VALUE 0.",
+            "01  Q PIC 9.",
+            "LINKAGE SECTION.",
+            "01  DFHCOMMAREA PIC X(10).",
+            "PROCEDURE DIVISION.",
+            "L1.",
+            "    DISPLAY 'NEXT GOT ' DFHCOMMAREA ' ' EIBTRNID",
+            "    DIVIDE 10 BY D GIVING Q",
+            "    EXEC CICS RETURN END-EXEC.",
+        ]),
+    );
+    for tag in ["walker", "vm"] {
+        put(&dir, &format!("data/custf-{tag}.txt"), "00001ALICE     \n00002BOB       \n");
+    }
+    put(&dir, "data/comm", "HELLO     \n");
+    put(&dir, "data/screens", "ENTER\n");
+    put(&dir, "statements", "FIRSTP.cbl:17\nFIRSTP.cbl:25\nHELPER.cbl:5\nLIBPGM.cbl:12\n");
+    let args = [
+        "cics", "src/FIRSTP.cbl", "-L", "lib", "--transid", "FIRS", "--termid", "T001", "--file", "CUSTF=data/custf-{tag}.txt,KSDS,key=0:5,len=15,text", "--td", "LOGQ=data/td-{tag}.txt", "--commarea", "data/comm:text",
+        "--commarea-out", "data/comm-{tag}:text", "--screens", "data/screens", "--transaction", "NEXT=LIBPGM", "--trace-input", "--trace-marker", "HELLO", "--trace-statements", "statements",
+    ];
+    let journal = on_both_executors(&dir, &args, &["data/td-{tag}.txt"]);
+    holds(
+        &journal,
+        &[
+            "\"from\":\"HELPER.cbl\",\"kind\":\"call\",\"program\":\"HELPER\"",
+            "\"file\":\"FIRSTP.cbl\",\"input\":true,\"kind\":\"sink\",\"line\":18,\"marker\":\"HELLO\",\"reached\":true",
+            "\"file\":\"LIBPGM.cbl\",\"kind\":\"statement\",\"line\":12",
+            "\"code\":\"ASRA\",\"file\":\"LIBPGM.cbl\",\"kind\":\"abend\",\"line\":12",
+        ],
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_run_the_vm_stops_or_does_not_generate_closes_its_journal_with_that_exit() {
+    let dir = temp("vm-stops");
+    put(&dir, "src/UUID.cbl", &source(&["IDENTIFICATION DIVISION.", "PROGRAM-ID. UUID.", "DATA DIVISION.", "WORKING-STORAGE SECTION.", "01 U PIC X(36).", "PROCEDURE DIVISION.", "    MOVE FUNCTION UUID4 TO U.", "    GOBACK."]));
+    put(
+        &dir,
+        "src/MIXED.cbl",
+        &format!(
+            "       CBL NUMCHECK\n{}",
+            source(&["IDENTIFICATION DIVISION.", "PROGRAM-ID. MIXED.", "DATA DIVISION.", "WORKING-STORAGE SECTION.", "01 N PIC 9(3) VALUE 5.", "PROCEDURE DIVISION.", "    IF N = ALL ZERO DISPLAY 'Z' END-IF.", "    STOP RUN."])
+        ),
+    );
+    for (command, program, status) in [("run", "src/UUID.cbl", 243), ("cics", "src/UUID.cbl", 243), ("run", "src/MIXED.cbl", 242), ("cics", "src/MIXED.cbl", 242)] {
+        let ev = format!("ev-{command}-{status}");
+        let out = Command::new(env!("CARGO_BIN_EXE_ironwork")).current_dir(&dir).args([command, program, "--vm", "--evidence", &ev, "--trace-input"]).output().unwrap();
+        assert_eq!(out.status.code(), Some(status), "{command} {program}: {}", String::from_utf8_lossy(&out.stderr));
+        let journal = fs::read_to_string(fs::read_dir(dir.join(&ev).join("runs")).unwrap().next().unwrap().unwrap().path()).unwrap();
+        let close = journal.lines().last().unwrap();
+        assert_eq!((field(close, "kind"), field(close, "exit")), (Some("close"), Some(status.to_string().as_str())), "{command} {program}");
+        assert!(!journal.lines().any(|l| field(l, "kind") == Some("abend")), "{command} {program}");
+        let ledger = fs::read_to_string(dir.join(&ev).join("ledger.jsonl")).unwrap();
+        assert_eq!(field(ledger.lines().last().unwrap(), "runTip"), field(close, "hash"), "{command} {program}");
+    }
     fs::remove_dir_all(dir).unwrap();
 }

@@ -93,8 +93,9 @@ flags:
              program lowering refuses exits 242; a run that reaches what the VM does not run yet (a
              CALLed program, user-defined function, method or LINK that does not lower, FUNCTION
              UUID4, FUNCTION RANDOM in a subscript, SEND MAP with no FROM, RECEIVE MAP with no INTO
-             or SET) stops there with a message naming it and exits 243. Not with --evidence or
-             --serve
+             or SET) stops there with a message naming it and exits 243. Its --coverage report and
+             --evidence journal are those the interpreter's run writes, but for --vm in the
+             journal's argv. Not with --serve
   --exit-code
              run, cics and job: exit with a verdict, 0 to 5 or 70, in place of the reserved band, as
              cobolwork's --exit-code does (exit status, below)
@@ -742,8 +743,8 @@ fn driver() -> ExitCode {
         || vm || parm.is_some() || statement_limit.is_some() || !arguments.is_empty();
     let dump_flags = !dump_options.only.is_empty() || dump_options.strings || !dump_options.check;
     let fuzz_flags = fuzz_root.is_some() || fuzz_runs.is_some() || fuzz_seed.is_some() || fuzz_timeout.is_some() || hang_limit.is_some() || fuzz_job || fuzz_cics || fuzz_interface || fuzz_differential;
-    if vm && (!matches!(rest.first().map(String::as_str), Some("run" | "cics")) || evidence_dir.is_some()) {
-        return usage_error("--vm is for run and cics, and not with --evidence");
+    if vm && !matches!(rest.first().map(String::as_str), Some("run" | "cics")) {
+        return usage_error("--vm is for run and cics");
     }
     if statement_limit.is_some() && !matches!(rest.first().map(String::as_str), Some("run" | "job")) {
         return usage_error("--statement-limit is for run and job; fuzz sets its own");
@@ -1667,27 +1668,22 @@ fn cics_tasks(
         });
         let ran = match tasks.run(dds.clone(), task, clock, &mut out, &mut err, observer) {
             Ok(ran) => ran,
-            Err((outcome, message)) => {
-                drop(out);
-                print_screens();
-                eprintln!("{message}");
-                return exit::status(outcome);
-            }
+            Err(stopped) => break Err(stopped),
         };
-        let (Some(terminal), Ok((_, ended))) = (&conversation, &ran) else { break ran };
+        let (Some(terminal), Ok((_, ended))) = (&conversation, &ran) else { break Ok(ran) };
         terminal.borrow_mut().discard_pending();
-        let Some(next) = ended.next_transid.as_deref().map(|t| t.trim().to_ascii_uppercase()) else { break ran };
+        let Some(next) = ended.next_transid.as_deref().map(|t| t.trim().to_ascii_uppercase()) else { break Ok(ran) };
         let record = match exec::terminal::Terminal::receive(&mut *terminal.borrow_mut()) {
             Ok(Some(r)) => r,
-            Ok(None) => break ran,
+            Ok(None) => break Ok(ran),
             Err(e) => {
                 eprintln!("ironwork: {e}");
-                break ran;
+                break Ok(ran);
             }
         };
         let Some(name) = table.get(&next).cloned() else {
             eprintln!("ironwork: TRANSACTION {next} IS NOT DEFINED");
-            break ran;
+            break Ok(ran);
         };
         match tasks.begin_with(&name) {
             Ok(recorded) => {
@@ -1697,7 +1693,7 @@ fn cics_tasks(
             }
             Err(e) => {
                 eprintln!("ironwork: {next}: {e}");
-                break ran;
+                break Ok(ran);
             }
         }
         number += 1;
@@ -1720,12 +1716,23 @@ fn cics_tasks(
             eprintln!("ironwork: --coverage {}: {e}", file.display());
         }
     }
+    let abend = ran.as_ref().ok().and_then(|r| r.as_ref().err()).filter(|a| !matches!(a.code, AbendCode::Signal(Signal::ClosedOutput)));
     if let Some(run) = shared.and_then(|r| std::rc::Rc::try_unwrap(r).ok()) {
-        let abend = ran.as_ref().err().filter(|a| !matches!(a.code, AbendCode::Signal(Signal::ClosedOutput)));
         let file = abend.and_then(|a| tasks.abend_file(a));
         let journal = run.into_inner().end(abend.map(|a| (a.code.to_string(), file.as_deref(), i64::from(a.pos.line))));
-        evidence::finish(Some(journal), exit::recorded(abend.map_or(Outcome::Ended(0), |a| Outcome::of_abend(&a.code))));
+        let outcome = match &ran {
+            Err((stopped, _)) => *stopped,
+            Ok(_) => abend.map_or(Outcome::Ended(0), |a| Outcome::of_abend(&a.code)),
+        };
+        evidence::finish(Some(journal), exit::recorded(outcome));
     }
+    let ran = match ran {
+        Ok(ran) => ran,
+        Err((outcome, message)) => {
+            eprintln!("{message}");
+            return exit::status(outcome);
+        }
+    };
     match ran {
         Ok((_, task)) => {
             match &task.next_transid {

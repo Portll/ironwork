@@ -6,7 +6,8 @@ The record format, the ledger, seals and witnesses are cobolwork's (cobolwork
 evidence directory unchanged.
 
 **Status:** built, 2026-09-30. `--evidence` on `run`, `check`, `job` and `cics`, of a source or,
-for `run` and `cics`, a load module; `--provenance` on `run` and `check`; `compare`.
+for `run` and `cics`, a load module, and for `run` and `cics` of a source on the VM (`--vm`) as on
+the interpreter; `--provenance` on `run` and `check`; `compare`.
 
 ## 1. Run journal: `--evidence DIR`
 
@@ -64,7 +65,14 @@ by `prev` and `seq`.
   the source writes.
 - The run unit tells an observer what it opens, closes and loads, and each paragraph control
   enters (`exec::unit::Observer`); the interpreter and the VM raise the same events, so a journal
-  is the same under both.
+  is the same under both. `run --vm` and `cics --vm` write the journal and `--coverage` report the
+  interpreter's run writes, with the same traces, but for `--vm` in `argv`;
+  `crates/cli/tests/evidence.rs` runs a batch program and a CICS pseudo-conversation on both and
+  compares them. A CALL on the VM takes `NAME.iwm` before `NAME.cbl` (load-module.md §8.2), and
+  its `call` record names the source that module records, which is the interpreter's record when
+  the module was compiled from that source. A run whose program code generation refuses (242), or
+  that reaches what the VM does not run yet (243), closes its journal with that `exit` and no
+  `abend` record.
 - `cics` keeps a journal for one task; `--serve` does not.
 - The ledger is appended under `ledger.lock`, taken and broken as cobolwork takes and breaks it
   (cobolwork `docs/spec/evidence.md` §6). A lock older than a minute whose holder is not running
