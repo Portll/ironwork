@@ -24,7 +24,18 @@ pub fn linkage_base(address: Option<usize>, name: &str, pos: Pos) -> R<usize> {
     })
 }
 
-/// What subscript `value` adds to the offset; `check` is the occurrence count under SSRANGE.
+/// Under SSRANGE, a subscripted reference `offset` bytes into its table and `len` long, refused
+/// unless it lies within the table's `extent`: IBM checks the address the subscripts compose, not
+/// each subscript (Programming Guide SC27-8714-03, p. 411; IGZ0006S).
+pub fn table_reference(offset: i64, len: i64, extent: i64, name: &str, pos: Pos) -> R<()> {
+    if offset < 0 || offset + len > extent {
+        return Err(out_of_range(format!("IGZ0006S the reference to {name} addressed an area outside the region of its table (SSRANGE)"), pos));
+    }
+    Ok(())
+}
+
+/// What subscript `value` adds to the offset; `check` is the occurrence count a module written
+/// before load-module format 0.7 checks each subscript against under SSRANGE.
 pub fn subscript(value: i64, stride: u32, check: Option<u32>, name: &str, pos: Pos) -> R<i64> {
     if let Some(count) = check
         && (value < 1 || value > count as i64)

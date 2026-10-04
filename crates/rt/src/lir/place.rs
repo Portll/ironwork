@@ -25,6 +25,17 @@ pub struct Place {
     pub name: SymId,
     pub at: DebugId,
     pub numcheck: PlaceNumcheck,
+    /// Under SSRANGE, where the item lies in its outermost table and the table's extent, which the
+    /// composed subscripts' address is checked against; carried at the LIR section's end.
+    pub table: Option<TableRange>,
+}
+
+/// An item's displacement within its outermost table at its first occurrence, and the table's
+/// bytes with every OCCURS at its maximum.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TableRange {
+    pub displacement: u32,
+    pub extent: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,7 +78,8 @@ pub struct RefMod {
     pub check: bool,
 }
 
-codec_struct!(Place { base, offset, len, kind, scaling, moved, subscripts, odo, refmod, name, at, numcheck });
+codec_struct!(Place { base, offset, len, kind, scaling, moved, subscripts, odo, refmod, name, at, numcheck } default { table } check crate::module::codec::unchecked);
+codec_struct!(TableRange { displacement, extent });
 codec_enum!(Base {
     Program = 0,
     Local = 1,

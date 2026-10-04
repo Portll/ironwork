@@ -236,7 +236,15 @@ pub struct Place {
     pub at: DebugId,
     /// What the compiler fixed of NUMCHECK's test where this reference reads its item (§9.14).
     pub numcheck: PlaceNumcheck,
+    /// Under SSRANGE, a subscripted item's place in its outermost table (`Layout::table_range`):
+    /// the address its subscripts compose must lie within the table, as IBM checks it (L19).
+    /// The load module carries it at the LIR section's end, from 0.7.
+    pub table: Option<TableRange>,
 }
+
+/// The item's displacement within its outermost table at its first occurrence, and the table's
+/// bytes with every OCCURS at its maximum.
+pub struct TableRange { pub displacement: u32, pub extent: u32 }
 
 pub enum Base {
     /// The activation's slab: WORKING-STORAGE, FD and SD record areas (SAME RECORD AREA shares
@@ -262,8 +270,9 @@ pub enum Base {
     Xml(XmlRegister),
 }
 
-/// Each `check` is present only under SSRANGE: 1 to `count`; 0 to `max`; start and length at
-/// least 1 and inside the item.
+/// Each `check` is present only under SSRANGE: 0 to `max`; start and length at least 1 and inside
+/// the item. A subscript's `check`, 1 to `count`, is a module's before 0.7, which checked each
+/// subscript where `Place.table` now checks the composed address.
 pub struct Subscript { pub stride: u32, pub value: IntExpr, pub check: Option<u32> }
 pub struct Odo { pub object: IntExpr, pub max: u32, pub element: u32, pub check: bool }
 pub struct RefMod { pub start: IntExpr, pub length: Option<IntExpr>, pub check: bool }

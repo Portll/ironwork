@@ -112,7 +112,7 @@ impl Lower<'_> {
                 Some(lir::RefMod { start, length, check: self.c.ssrange })
             }
         };
-        Ok(lir::Place { base: lir::Base::Xml(register), offset: 0, len: 0, kind, scaling: 0, moved: Vec::new(), subscripts: Vec::new(), odo: Vec::new(), refmod, name: self.sym(&r.name), at: self.at(r.pos), numcheck: Default::default() })
+        Ok(lir::Place { base: lir::Base::Xml(register), offset: 0, len: 0, kind, scaling: 0, moved: Vec::new(), subscripts: Vec::new(), odo: Vec::new(), refmod, name: self.sym(&r.name), at: self.at(r.pos), numcheck: Default::default(), table: None })
     }
 
     /// The range XML PARSE's PROCESSING PROCEDURE names, as the walker's `procedure` finds it.

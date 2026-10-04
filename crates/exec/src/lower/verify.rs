@@ -109,9 +109,12 @@ fn verify_program(p: &Program) -> Result<(), String> {
         }
         for s in subscripts {
             int(&s.value)?;
-            if s.check.is_some() != ssrange {
-                return Err(format!("place {k}: a subscript check without SSRANGE, or none with it"));
-            }
+        }
+        // Under SSRANGE a subscripted place carries its table's range, or, written before format
+        // 0.7, a check on each subscript; without SSRANGE neither.
+        let checked = q.table.is_some() || (!subscripts.is_empty() && subscripts.iter().all(|s| s.check.is_some()));
+        if subscripts.iter().any(|s| s.check.is_some()) && q.table.is_some() || !subscripts.is_empty() && checked != ssrange || subscripts.is_empty() && q.table.is_some() {
+            return Err(format!("place {k}: a subscript check without SSRANGE, or none with it"));
         }
         for o in moved.iter().chain(odo) {
             int(&o.object)?;

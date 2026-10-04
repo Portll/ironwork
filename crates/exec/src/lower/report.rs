@@ -142,6 +142,7 @@ impl Lower<'_> {
             name,
             at: self.at(item.pos),
             numcheck: self.place_numcheck(i, item.pos),
+            table: None,
         };
         let id = self.push_place(place, Some(i))?;
         self.place_ids.insert(key, id);

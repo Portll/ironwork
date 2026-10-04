@@ -75,7 +75,7 @@ fn the_vm_gives_the_interpreter_s_abend_and_position() {
     let (_, ending) = on_vm(&source);
     let abend = ending.unwrap_err();
     assert_eq!((abend.code.as_str(), abend.pos.line), ("U4038", 10));
-    assert!(abend.message.starts_with("IGZ0006S subscript 4 of E"), "{}", abend.message);
+    assert!(abend.message.starts_with("IGZ0006S the reference to E addressed an area outside"), "{}", abend.message);
 }
 
 /// Runs on the interpreter, whose Harness compares the VM's run with its own, and then on the VM,

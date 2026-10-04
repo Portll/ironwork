@@ -537,6 +537,7 @@ fn places_round_trip_with_every_base() {
         name: 3,
         at: 9,
         numcheck: PlaceNumcheck { lax: Some(LaxRedefinition::LeadingSpaces(3)), removed: true },
+        table: None,
     };
     let bare = Place { base: Base::ReturnCode, moved: vec![], subscripts: vec![], odo: vec![], refmod: None, numcheck: PlaceNumcheck::default(), ..place.clone() };
     round_trip(&[place, bare]);

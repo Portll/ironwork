@@ -1299,6 +1299,9 @@ impl<'a> Printer<'a> {
                 text += &format!(" check {n}");
             }
         }
+        if let Some(t) = p.table {
+            text += &format!(" table check {}+{}", t.displacement, t.extent);
+        }
         for o in &p.odo {
             text += &format!(" odo {}", self.odo(o));
         }

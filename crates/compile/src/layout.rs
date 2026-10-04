@@ -881,6 +881,18 @@ impl Item {
 }
 
 impl Layout {
+    /// Where item `index`, at its first occurrence, lies within its outermost table, and that
+    /// table's bytes with every OCCURS at its maximum: the region SSRANGE checks a reference's
+    /// address against (Programming Guide SC27-8714-03, p. 411). None for an item in no table.
+    pub fn table_range(&self, index: usize) -> Option<(u32, u32)> {
+        let &(stride, count) = self.items[index].dims.first()?;
+        let mut table = index;
+        while let Some(p) = self.items[table].parent.filter(|&p| !self.items[p].dims.is_empty()) {
+            table = p;
+        }
+        Some((self.items[index].offset - self.items[table].offset, stride * count))
+    }
+
     /// The characters of class-name `name`, one bit per byte value.
     pub fn class(&self, name: &str) -> Option<[u8; 32]> {
         self.classes.iter().find(|(n, _)| n == name).map(|&(_, bits)| bits)

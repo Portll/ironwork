@@ -7,7 +7,7 @@ use crate::bms::Mapset;
 use crate::codec_struct;
 use crate::lir::{AssignItem, 
     AbendText, Block, Code, Cond, Const, Debug, Edit, Expr, Item, ParaId, Paragraph, Place, Plans, Program, ProgramOptions, Range,
-    Services, SqlEntry, Storage, SymId,
+    Services, SqlEntry, Storage, SymId, TableRange,
 };
 
 /// A program's line in the `DIRECTORY` section (load-module.md §6).
@@ -239,9 +239,12 @@ fn encode_module(programs: &[Program], directory: &[DirectoryEntry], mapsets: &[
     });
     m.section(Section::LIR, |w| {
         per_program(w, programs, |p, w| p.encode_lir(w));
-        let assigned = assign_items(programs);
-        if !assigned.is_empty() {
+        let (assigned, ranges) = (assign_items(programs), table_ranges(programs));
+        if !assigned.is_empty() || !ranges.is_empty() {
             assigned.encode(w);
+        }
+        if !ranges.is_empty() {
+            ranges.encode(w);
         }
     });
     m.section(Section::SQL, |w| per_program(w, programs, |p, w| p.sql.encode(w)));
@@ -311,7 +314,22 @@ fn assign_items(programs: &[Program]) -> Vec<(u32, u32, AssignItem)> {
     out
 }
 
-/// The LIR section's body: a record per program, then the files' data items [`assign_items`] wrote.
+/// Each place SSRANGE checks against its table, as (program, place, range): the LIR section's
+/// last field, after the assign items, written only when there is one (load-module.md §3.4).
+fn table_ranges(programs: &[Program]) -> Vec<(u32, u32, TableRange)> {
+    let mut out = Vec::new();
+    for (n, program) in programs.iter().enumerate() {
+        for (k, place) in program.places.iter().enumerate() {
+            if let Some(range) = place.table {
+                out.push((n as u32, k as u32, range));
+            }
+        }
+    }
+    out
+}
+
+/// The LIR section's body: a record per program, then the files' data items [`assign_items`] wrote
+/// and the places' table ranges [`table_ranges`] wrote.
 pub struct LirRecords(pub Vec<LirRecord>);
 
 impl Decode for LirRecords {
@@ -328,6 +346,16 @@ impl Decode for LirRecords {
                     return Err(r.malformed(at, format!("an assign item's place {} of {places}", item.place)));
                 }
                 file.assign_item = Some(item);
+            }
+        }
+        if r.remaining() > 0 {
+            let at = r.position();
+            let count = bodies.len();
+            for (n, k, range) in Vec::<(u32, u32, TableRange)>::decode(r)? {
+                let body = bodies.get_mut(n as usize).ok_or_else(|| r.malformed(at, format!("a table range for program {n} of {count}")))?;
+                let places = body.places.len();
+                let place = body.places.get_mut(k as usize).ok_or_else(|| r.malformed(at, format!("a table range for place {k} of {places} in program {n}")))?;
+                place.table = Some(range);
             }
         }
         Ok(Self(bodies))

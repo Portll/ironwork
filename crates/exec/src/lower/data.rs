@@ -133,7 +133,7 @@ impl Lower<'_> {
         // `oo_register`: SELF's cell and JNIENVPTR's, whole, whatever reference modification says.
         if r.qualifiers.is_empty() && r.subscripts.is_empty() && matches!(r.name.as_str(), "SELF" | "JNIENVPTR") && layout.resolve(&r.name, &[], r.pos).is_err() {
             let (base, kind) = if r.name == "SELF" { (lir::Base::SelfRef, Kind::ObjectReference) } else { (lir::Base::JniEnv, Kind::Pointer) };
-            let place = lir::Place { base, offset: 0, len: 4, kind, scaling: 0, moved: Vec::new(), subscripts: Vec::new(), odo: Vec::new(), refmod: None, name: self.sym(&r.name), at: self.at(r.pos), numcheck: Default::default() };
+            let place = lir::Place { base, offset: 0, len: 4, kind, scaling: 0, moved: Vec::new(), subscripts: Vec::new(), odo: Vec::new(), refmod: None, name: self.sym(&r.name), at: self.at(r.pos), numcheck: Default::default(), table: None };
             return self.push_place(place, None);
         }
         if compile::markup::xml_register(layout, r) {
@@ -154,6 +154,7 @@ impl Lower<'_> {
                 name: self.sym(&r.name),
                 at: self.at(r.pos),
                 numcheck: Default::default(),
+                table: None,
             };
             return self.push_place(place, None);
         }
@@ -183,9 +184,10 @@ impl Lower<'_> {
             moved.push(self.odo(t, r.pos)?);
         }
         let mut subscripts = Vec::with_capacity(item.dims.len());
-        for (&(stride, count), sub) in item.dims.iter().zip(&r.subscripts) {
-            subscripts.push(lir::Subscript { stride, value: self.int_expr(sub, r.pos)?, check: ssrange.then_some(count) });
+        for (&(stride, _), sub) in item.dims.iter().zip(&r.subscripts) {
+            subscripts.push(lir::Subscript { stride, value: self.int_expr(sub, r.pos)?, check: None });
         }
+        let table = layout.table_range(index).filter(|_| ssrange).map(|(displacement, extent)| lir::TableRange { displacement, extent });
         let mut odo = Vec::new();
         if !item.odo.is_empty() && !(receiving && r.refmod.is_none() && !item.followed && self.objects_within(&item.odo, index)?) {
             for &t in &item.odo {
@@ -209,7 +211,7 @@ impl Lower<'_> {
             }
         };
         let numcheck = self.place_numcheck(index, r.pos);
-        let place = lir::Place { base, offset: item.offset, len: item.size, kind, scaling: item.scaling, moved, subscripts, odo, refmod, name: self.sym(&r.name), at: self.at(r.pos), numcheck };
+        let place = lir::Place { base, offset: item.offset, len: item.size, kind, scaling: item.scaling, moved, subscripts, odo, refmod, name: self.sym(&r.name), at: self.at(r.pos), numcheck, table };
         self.push_place(place, Some(index))
     }
 

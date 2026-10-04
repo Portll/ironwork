@@ -203,13 +203,18 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             Base::Xml(register) => return self.xml_register(register, id, pos),
         };
         let mut offset = (base + place.offset as usize) as i64 - self.unused(&place.moved, pos)?;
+        let mut composed = 0;
         for (k, s) in place.subscripts.iter().enumerate() {
             let value = match fixed.iter().find(|&&(at, _)| at as usize == k) {
                 Some(&(_, v)) => v,
                 None => self.int(&s.value, pos)?,
             };
-            offset += loc::subscript(value, s.stride, s.check, name, pos)?;
+            composed += loc::subscript(value, s.stride, s.check, name, pos)?;
         }
+        if let Some(t) = place.table {
+            loc::table_reference(i64::from(t.displacement) + composed, i64::from(place.len), i64::from(t.extent), name, pos)?;
+        }
+        offset += composed;
         let mut len = i64::from(place.len);
         for odo in &place.odo {
             let current = self.occurrences(odo, pos)?;

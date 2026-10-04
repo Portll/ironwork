@@ -141,7 +141,7 @@ sections before it can decode anything else. Section bodies use the rules of §4
 | 2 | `DIRECTORY` | The program directory (§6) | yes |
 | 3 | `OPTIONS` | Per program: `Program.options`; then, only when a program was compiled with `--assume`, each such program's choices as (program, `Assumed`) (§5.1, from 0.7) | yes |
 | 4 | `LAYOUT` | Per program: `Program.storage`, `items` and `edits` (§5.2) | yes |
-| 5 | `LIR` | Per program: the rest of `Program`; then, only when a file takes its name from a data item, each such file as (program, file, item) (lir.md `FileDesc::assign_item`, from 0.6) | yes |
+| 5 | `LIR` | Per program: the rest of `Program`; then, only when a file takes its name from a data item or a place carries a table range, each such file as (program, file, item) (lir.md `FileDesc::assign_item`, from 0.6), and then, only when a place carries one, each such place as (program, place, `TableRange`) (lir.md `Place::table`, from 0.7) | yes |
 | 6 | `SQL` | Per program: `Program.sql`, the SQL statement table (§7) | yes |
 | 7 | `BMS` | The map models of the mapsets the module's programs use (§5.3) | yes |
 | 8 | `DEBUG` | Per program: `Program.debug`, then the file each of its sources names (§9) | yes |
@@ -565,7 +565,7 @@ their name from a data item, written only when one does, so a 0.6 module without
 reader and a 0.5 reader refuses one with them as malformed. 0.6 also adds the dynamic SQL
 statements' tags (lir.md §9.7): a 0.5 reader refuses a module holding one as malformed and reads
 one without. 0.7 is additive too: it adds the tags of DESCRIBE and USING DESCRIPTOR, rowset FETCH,
-multiple-row INSERT and CALL, the class-name test `ByteClass::Set` (lir.md §6), and the command line under `--compliance extended`
+multiple-row INSERT and CALL, the class-name test `ByteClass::Set` (lir.md §6), the SSRANGE table ranges at the `LIR` section's end (§3.4), and the command line under `--compliance extended`
 (`AcceptFrom` 5 to 7 and `Op::ArgumentNumber`, lir.md §9.1), which a 0.6 reader refuses as
 malformed, and the `OPTIONS` section ends with the `--assume` choices, written
 only for a program compiled with one (§5.1), so an earlier reader reads a module without them and

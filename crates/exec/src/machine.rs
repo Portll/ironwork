@@ -647,10 +647,17 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         for &t in &item.moved_by {
             offset -= self.unused(t, r.pos)?;
         }
-        for (&(stride, count), sub) in item.dims.iter().zip(&r.subscripts) {
+        let mut composed = 0;
+        for (&(stride, _), sub) in item.dims.iter().zip(&r.subscripts) {
             let s = self.integer(sub, r.pos)?;
-            offset += loc::subscript(s, stride, self.ssrange.then_some(count), &r.name, r.pos)?;
+            composed += loc::subscript(s, stride, None, &r.name, r.pos)?;
         }
+        if self.ssrange
+            && let Some((displacement, extent)) = layout.table_range(index)
+        {
+            loc::table_reference(i64::from(displacement) + composed, i64::from(item.size), i64::from(extent), &r.name, r.pos)?;
+        }
+        offset += composed;
         let (mut len, mut kind) = (item.size as i64, item.kind);
         if !item.odo.is_empty() && !(receiving && r.refmod.is_none() && !item.followed && self.objects_within(&item.odo, index)?) {
             for &t in &item.odo {

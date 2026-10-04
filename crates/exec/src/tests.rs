@@ -1159,6 +1159,38 @@ fn ssrange_catches_what_ibm_would_catch() {
 }
 
 #[test]
+fn ssrange_checks_the_address_the_subscripts_compose_against_the_whole_table() {
+    let data = "       01  G.\n           05 R OCCURS 3.\n             10 E PIC X OCCURS 8.\n       01  I PIC 9.\n       01  J PIC 9.\n";
+    for (i, j, inside) in [(2, 0, true), (1, 9, true), (3, 8, true), (3, 9, false), (1, 0, false)] {
+        let body = [line(&format!("MOVE {i} TO I")), line(&format!("MOVE {j} TO J")), line("MOVE 'A' TO E(I, J)"), line("GOBACK.")].concat();
+        for (executor, on) in [(Executor::Interpreter, "the interpreter"), (Executor::Vm, "the VM")] {
+            let run = Harness::source(&program("SSRANGE", data, &body)).run(executor);
+            match run.ending {
+                Ok(_) => assert!(inside, "E({i}, {j}) on {on} ran"),
+                Err(abend) => {
+                    assert!(!inside, "E({i}, {j}) on {on}: {}", abend.message);
+                    assert!(abend.message.starts_with("IGZ0006S the reference to E"), "{}", abend.message);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_load_module_carries_each_place_s_table_range_and_prints_it() {
+    let data = "       01  G.\n           05 R OCCURS 3.\n             10 E PIC X OCCURS 8.\n       01  I PIC 9.\n       01  J PIC 9.\n";
+    let body = [line("MOVE 'A' TO E(I, J)"), line("GOBACK.")].concat();
+    let compiled = compile(syntax::parse(&program("SSRANGE", data, &body)).unwrap(), &[]).unwrap_or_else(|e| panic!("{e:?}"));
+    let lowered = crate::lower::lower(&compiled).unwrap_or_else(|e| panic!("{e:?}"));
+    let ranges: Vec<rt::lir::TableRange> = lowered.places.iter().filter_map(|p| p.table).collect();
+    assert_eq!(ranges, [rt::lir::TableRange { displacement: 0, extent: 24 }]);
+    let printed = rt::lir::Listing::of(&lowered).to_string();
+    assert!(printed.contains(" table check 0+24"), "{printed}");
+    let module = rt::module::read(&rt::module::write(std::slice::from_ref(&lowered))).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(module.programs[0].places, lowered.places, "the LIR section's end carries them");
+}
+
+#[test]
 fn ssrange_reference_modification_names_the_part_out_of_range() {
     let data = "       01  X PIC X(3).\n       01  S PIC S9.\n       01  L PIC S9.\n";
     for (start, length, id) in [(4, 1, "IGZ0072S"), (0, 1, "IGZ0072S"), (1, 0, "IGZ0073S"), (2, 3, "IGZ0074S")] {

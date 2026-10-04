@@ -38,7 +38,7 @@ pub use payload::{
     Argument, DisplayItem, DisplayPlan, FloatFrom, Func, FunctionPlan, Image, InitField, InitPlan, InitValue,
     InvokePlan, MethodName, MovePlan, NationalFrom, NumericFrom, PlaceNumcheck, Receiver, SearchAllPlan, SearchKey, SenderCheck, TrimSide,
 };
-pub use place::{Base, Odo, Place, RefMod, Subscript};
+pub use place::{Base, Odo, Place, RefMod, Subscript, TableRange};
 pub use print::{Code, Listing};
 pub use scope::{Binding, Global, GlobalAt, Scope, Section, SharedFile};
 pub use sort::{FileSort, ReleasePlan, ReturnPlan, SortIo, SortKey, SortKeys, SortPlan, TableSort};
@@ -298,6 +298,8 @@ impl crate::module::codec::Encode for Program {
         let assigned: Vec<(u32, AssignItem)> = services.files.iter().enumerate().filter_map(|(k, f)| Some((k as u32, f.assign_item?))).collect();
         assigned.encode(w);
         options.options.assumed.encode(w);
+        let ranges: Vec<(u32, TableRange)> = places.iter().enumerate().filter_map(|(k, p)| Some((k as u32, p.table?))).collect();
+        ranges.encode(w);
     }
 }
 
@@ -333,6 +335,10 @@ impl crate::module::codec::Decode for Program {
             file.assign_item = Some(item);
         }
         program.options.options.assumed = Decode::decode(r)?;
+        for (k, range) in Vec::<(u32, TableRange)>::decode(r)? {
+            let place = program.places.get_mut(k as usize).ok_or_else(|| r.malformed(at, format!("a table range for place {k}")))?;
+            place.table = Some(range);
+        }
         program_valid(&program).map_err(|reason| r.malformed(at, reason))?;
         Ok(program)
     }
