@@ -1,12 +1,13 @@
 # Dialect: comparing ironwork with a GnuCOBOL build
 
 `--dialect ibm|gnucobol` chooses whose result ironwork gives where it knowingly computes a different
-one from GnuCOBOL's `cobc -std=ibm`. `ibm`, the default, is Enterprise COBOL's result as ironwork's
-register of assumptions reads it. `gnucobol` is GnuCOBOL 3.2's, so a migration that runs a program
-under ironwork and under a GnuCOBOL build sees only the differences that matter to it.
+one from GnuCOBOL's `cobc -std=ibm-strict`. `ibm`, the default, is Enterprise COBOL's result as
+ironwork's register of assumptions reads it. `gnucobol` is GnuCOBOL 3.2's, so a migration that runs
+a program under ironwork and under a GnuCOBOL build sees only the differences that matter to it.
 
-**Status:** built, 2026-10-03 (ironwork-roadmap 3.11). Seven assumptions switch: C101, C14, C95,
-C15, C51, C180 and C262. `--assume ID=VALUE` switches one of them alone (§2.1).
+**Status:** built, 2026-10-03 (ironwork-roadmap 3.11); checked against `cobc -std=ibm-strict`
+2026-10-04 (3.11.1). Seven assumptions switch: C101, C14, C95, C15, C51, C180 and C262.
+`--assume ID=VALUE` switches one of them alone (§2.1).
 
 ## 1. What the dialect switches, and what it does not
 
@@ -72,10 +73,10 @@ comparisons read bytes (C262).
 
 Under `ibm` a ROUNDED receiver counts in dmax with one decimal place more than it holds, in every
 operation of the statement (assumption C101, chosen so that CCVS85 NC117A and NC171A pass). cobc's
-arithmetic-osvs, which `-std=ibm` sets, truncates each intermediate result to dmax and computes the
-statement's last operation exactly. Under `gnucobol` the extra place counts in the last operation
-alone, the one whose result the receivers take, and every operation below it carries dmax with each
-receiver's own places.
+arithmetic-osvs, which `-std=ibm-strict` sets, truncates each intermediate result to dmax and
+computes the statement's last operation exactly. Under `gnucobol` the extra place counts in the last
+operation alone, the one whose result the receivers take, and every operation below it carries dmax
+with each receiver's own places.
 
 Under `--assume C101=off` a ROUNDED receiver counts with its own places in every operation, so a
 quotient that is the statement's last operation keeps no digit for rounding to read either:
@@ -181,26 +182,32 @@ INVDATA, which cobc lacks, keeps C223 under both dialects.
 
 ## 4. Checking against cobc
 
+cobc compiles at `-std=ibm-strict`, GnuCOBOL's strict reading of Enterprise COBOL. `-std=ibm` adds
+GnuCOBOL's relaxed syntax, limits and reserved words to the same settings (its `ibm.conf` includes
+`ibm-strict.conf`), and gives each switched assumption the same result.
+
 `crates/exec/src/tests/dialect.rs` runs each switched difference under both dialects on the
 interpreter, in the differential run, and on the VM alone; the expected `gnucobol` output is what
 GnuCOBOL 3.2 printed. `crates/cli/tests/dialect_flag.rs` checks the flag on each command and where it
 is recorded.
 
 `fixtures/dialect` holds a program for each switched assumption. `tools/differ.py --cobc` compiles
-each with the installed `cobc -x -std=ibm`, runs it under ironwork with `--dialect gnucobol`, and
-reports any difference; every one agrees, and so does `bench/packed.cbl`:
+each with the installed `cobc -x -std=ibm-strict`, runs it under ironwork with `--dialect gnucobol`,
+and reports any difference; every one agrees, and so does `bench/packed.cbl`:
 
     tools/differ.py target/release/ironwork fixtures/dialect bench/packed.cbl --cobc
 
 ## 5. Found, not switched
 
-Each difference below shows under both dialects. Found on 2026-10-03 by running, under ironwork and
-under `cobc -x -std=ibm` (GnuCOBOL 3.2.0): `bench/`; the 403 CCVS85 routines both run, prepared as
-`tools/nist.py` prepares them; the 161 of ironwork's own test programs both compile (those without
-option cards, files, EXEC, object-oriented COBOL, the clock or random numbers), of which 89 differed;
-and 300 programs drawn from the corpus that need no files, of which 141 ran under both and 26
-differed. Every difference was reduced to a small program run under both. Where a cobc option
-removes one, it is named.
+Each difference below shows under both dialects. Found by running programs under ironwork, on
+2026-10-03, and under `cobc -x -std=ibm-strict` (GnuCOBOL 3.2.0), on 2026-10-04: `bench/`; the 403
+CCVS85 routines, prepared as `tools/nist.py` prepares them, of which both run 375; the 157 of
+ironwork's own test programs both compile (those without option cards, files, EXEC, object-oriented
+COBOL, the clock or random numbers), of which 86 differed; and 300 programs drawn from the corpus
+that need no files, of which 114 ran under both and 20 differed. `-std=ibm` gives each of these
+programs that both standards compile the same result, FUNCTION RANDOM and the clock aside; 5.6 says
+which programs each refuses. Every difference was reduced to a small program run under both. Where a
+cobc option removes one, it is named.
 
 ### 5.1 The platform
 
@@ -213,24 +220,24 @@ removes one, it is named.
 | The same failure in another form: S0C4 for a LINKAGE item with no address where cobc takes SIGSEGV, S806 where cobc says `module not found` | test programs |
 | Setting the UPSI switches: the runtime option UPSI(nnnnnnnn) in the PARM under ironwork (C411), `COB_SWITCH_0` to `COB_SWITCH_7` set to `ON` in the environment under cobc | CCVS85 NC108M, NC211A, NC254A; probe |
 
-### 5.2 IBM documents it, and cobc -std=ibm does otherwise
+### 5.2 IBM documents it, and cobc -std=ibm-strict does otherwise
 
 | Difference | ironwork, as IBM documents | cobc | Seen in |
 |---|---|---|---|
-| DISPLAY of a signed zoned item | the last digit overpunched: -12 in `S9(3)` shows `01K` (Programming Guide, DISPSIGN) | a separate trailing sign, `012-` (`display_numeric`, libcob/termio.c); `-fpretty-display` gives `-012`, which is ironwork under `CBL DISPSIGN(SEP)` | corpus, 7 of 26 differing programs; test programs |
-| DISPLAY of a zoned item holding other characters than digits | the bytes as stored | each one rewritten as 0 (termio.c) | corpus |
+| DISPLAY of a signed zoned item | the last digit overpunched: -12 in `S9(3)` shows `01K` (Programming Guide, DISPSIGN) | a separate trailing sign, `012-` (`display_numeric`, libcob/termio.c); `-fpretty-display` gives `-012`, which is ironwork under `CBL DISPSIGN(SEP)` | corpus, 4 of 20 differing programs; test programs |
+| DISPLAY of a zoned item holding other characters than digits | the bytes as stored | each one rewritten as 0 (termio.c) | probe |
 | The RETURN-CODE special register | `S9(4) BINARY`: DISPLAY shows `+00007` under `gnucobol` | a fullword, `+000000007` | test programs |
-| A binary item larger than its PICTURE | cut to the PICTURE under TRUNC(STD), IBM's default: `MOVE 123456` to `9(4) COMP` keeps 3456 | keeps the halfword's value, 57920: `-std=ibm` sets `binary-truncate: no`, which is TRUNC(BIN); `-fbinary-truncate` cuts. Give ironwork `CBL TRUNC(BIN)` to compare | CCVS85 NC105A; corpus; test programs |
+| A binary item larger than its PICTURE | cut to the PICTURE under TRUNC(STD), IBM's default: `MOVE 123456` to `9(4) COMP` keeps 3456 | keeps the halfword's value, 57920: `-std=ibm-strict` sets `binary-truncate: no`, which is TRUNC(BIN); `-fbinary-truncate` cuts. Give ironwork `CBL TRUNC(BIN)` to compare | CCVS85 NC105A; corpus; test programs |
 | ACCEPT into an item longer than a line | the next records fill it, each concatenated with the one before (Language Reference, ACCEPT) | one line, the rest of the item spaces (termio.c `cob_accept`) | CCVS85 NC204M |
 | ACCEPT into a numeric item | the characters as they come, with no editing or checking (Language Reference, ACCEPT) | the line moved as a MOVE of an alphanumeric item does: `12` gives `012`, `-3.5` gives -3.5 | test programs |
-| MOVE of an alphanumeric item to a numeric one | the sender read as an unsigned integer; a character other than a digit gives the low half of its byte (C240, recalled) and can be a data exception when the item is next read as a number | a sign, decimal point and spaces read as such, any other character giving zero (`cob_move_alphanum_to_display`, libcob/move.c) | corpus, 1 output and 4 S0C7 abends under ironwork; test programs |
+| MOVE of an alphanumeric item to a numeric one | the sender read as an unsigned integer; a character other than a digit gives the low half of its byte (C240, recalled) and can be a data exception when the item is next read as a number | a sign, decimal point and spaces read as such, any other character giving zero (`cob_move_alphanum_to_display`, libcob/move.c) | corpus, 1 output and 2 S0C7 abends under ironwork; test programs |
 | MOVE of a zoned item to a zoned one | each digit the low half of the sender's byte, the zone F (C260, recalled) | the bytes copied (move.c) | test programs |
-| A receiving group holding its own OCCURS DEPENDING ON object | received at its maximum length (Language Reference, OCCURS DEPENDING ON), by MOVE, READ INTO, RETURN INTO, STRING, UNSTRING and ACCEPT | at the object's current value: `-std=ibm` sets `odoslide: yes`; `-fno-odoslide` passes MOVE, but stops sliding the items after the table | CCVS85 NC247A, SQ214A, ST146A; test programs |
+| A receiving group holding its own OCCURS DEPENDING ON object | received at its maximum length (Language Reference, OCCURS DEPENDING ON), by MOVE, READ INTO, RETURN INTO, STRING, UNSTRING and ACCEPT | at the object's current value: `-std=ibm-strict` sets `odoslide: yes`; `-fno-odoslide` passes MOVE, but stops sliding the items after the table | CCVS85 NC247A, SQ214A, ST146A; test programs |
 | `ADD X TO X Y` | the sum of the operands before TO kept in a temporary for every receiver (Language Reference, ADD) | X read again for Y (cobc/typeck.c) | test programs |
 | A signed zoned item holding spaces, compared with SPACES under ZWB | its sign removed first, so not equal (Programming Guide, ZWB) | the space left in the sign position, so equal (libcob/common.c) | test programs |
 | ORD, CHAR and a contained program under a PROGRAM COLLATING SEQUENCE | ordinals in the program's sequence; a contained program takes its container's | ORD and CHAR native; a contained program has its own (libcob/intrinsic.c, cobc/codegen.c) | test programs |
 | CANCEL of a program CALLed by a literal | no action under NODYNAM, IBM's default (Language Reference, CANCEL) | the program is reset; `-fstatic-call` does not change it. Give ironwork `CBL DYNAM` to compare | CCVS85 IC203A; corpus |
-| ALTER in an independent segment | the altered GO TOs are put back each time the segment is entered from one of another priority (Language Reference, Procedures) | never put back: `-std=ibm` sets `section-segments: ignore`; `-fsection-segments=ok` passes | CCVS85 SG102A, SG103A, SG201A, SG203A |
+| ALTER in an independent segment | the altered GO TOs are put back each time the segment is entered from one of another priority (Language Reference, Procedures) | never put back: `-std=ibm-strict` sets `section-segments: ignore`; `-fsection-segments=ok` passes | CCVS85 SG102A, SG103A, SG201A, SG203A |
 | The rest of a JSON GENERATE receiver | kept as it was (Language Reference, JSON GENERATE) | filled with spaces (libcob/mlio.c) | corpus |
 | INSPECT of a national item | counts national characters | counts bytes (libcob/strings.c) | corpus |
 | An intermediate result of more than 30 digits | cut to 30 (31 under ARITH(EXTEND)) (Programming Guide, Truncated intermediate results; C1) | every digit kept | probe |
@@ -276,15 +283,33 @@ The survey's ironwork bugs each changed results under `ibm`. All are fixed, and 
 ### 5.6 Programs one compiler refuses
 
 Not results, so not the dialect's: what ironwork refuses that cobc accepts is `--compliance`'s
-ground ([compliance.md](compliance.md)). CCVS85: both refuse the communication routines (CM) and
-IX110A; cobc alone refuses an ALL subscript in an intrinsic function's argument (11 routines from
-IF119A to IF141A), OBNC1M, and NC211A, whose data item NOTHING is a cobc reserved word; ironwork
-alone refuses the debugging routines DB201A to DB205A, NC174A for its SPECIAL-NAMES CLASS clauses,
-SM201A, SM202A and SM206A. cobc also refuses an UPSI switch's condition-name qualified by its
-mnemonic-name, and SET TO TRUE of one, which ironwork runs (C412). Corpus: of 300, ironwork
-refused 30 cobc ran (18 for syntax IBM does not have, 3 for IBM's limits, 5 for layout, 4 others,
-and `FUNCTION ALL INTRINSIC` in REPOSITORY, which IBM 6.4 accepts and ironwork does not), and cobc
-refused 3 ironwork ran. Test programs: cobc refused 30 that ironwork runs.
+ground ([compliance.md](compliance.md)), and so is what ironwork accepts that IBM's rules refuse.
+
+- **CCVS85.** Both refuse the communication routines (CM101M to CM105M, CM201M and CM202M, and
+  DB205A, which has a COMMUNICATION SECTION) and IX110A. cobc alone refuses an ALL subscript in an
+  intrinsic function's argument (11 routines from IF119A to IF141A), OBNC1M, CALL ... BY CONTENT in
+  IC224A, IC225A and IC227A, and FUNCTION COS in IF106A. ironwork alone refuses the debugging
+  routines DB201A to DB203A. cobc also refuses an UPSI switch's condition-name qualified by its
+  mnemonic-name, and SET TO TRUE of one, which ironwork runs (C412).
+- **Corpus.** Of 300, ironwork refused 10 cobc ran: 5 for syntax IBM does not have, 2 for IBM's
+  limits, 2 for layout or punctuation, and `FUNCTION ALL INTRINSIC` in REPOSITORY, which IBM 6.4
+  accepts and ironwork does not. cobc refused 31 ironwork ran: 17 for its area check (a statement or
+  separator period in Area A, or a header or level-01 entry outside it), 6 for END-DISPLAY, which
+  Enterprise COBOL does not reserve (Language Reference, Reserved words), 2 for VALUES outside a
+  level-88 entry, 1 for a name longer than 30 characters, 1 for a numeric VALUE on a numeric-edited
+  item (Language Reference, VALUE clause, which asks for an alphanumeric literal), and 4 others.
+  ironwork, under its default `--compliance strict`, accepts what cobc refuses in each.
+- **Test programs.** cobc refused 34 that ironwork runs, among them ENTRY in Area B, CALL ... BY
+  CONTENT, FUNCTION COS and END-DISPLAY.
+
+Two kinds of cobc refusal depart from IBM's rules. GnuCOBOL 3.2's IBM word list lacks CONTENT and
+COS, which Enterprise COBOL has: `-freserved=CONTENT` passes CALL ... BY CONTENT, and no option
+restores COS short of another word list. Its area check wants ENTRY in Area A, where IBM's reference
+format puts every statement in Area B (Language Reference, Area B); `fixtures/dialect/ENTRIES.cbl`
+starts its ENTRY in Area A, which both compilers accept. `-std=ibm` makes the area check warn and
+takes GnuCOBOL's own word list in place of IBM's, so it compiles most of what ibm-strict refuses,
+and it refuses NC211A and two test programs that ibm-strict compiles, each for a word that list
+reserves (NOTHING, TAB and FULL).
 
 A RETURN-CODE of 239 or outside 0 to 238 ends `ironwork run` with exit status 239, its value named
 on standard error, and a cobc program with the value modulo 256.
