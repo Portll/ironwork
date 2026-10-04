@@ -115,7 +115,7 @@ fn a_go_to_out_of_an_input_procedure_comes_back_through_its_end() {
 }
 
 #[test]
-fn merge_two_ordered_files_and_refuse_one_out_of_order() {
+fn merge_two_ordered_files_and_one_out_of_order_by_its_selection() {
     let (a, b, c, out) = (
         text_file("merge-a.txt", &["A1a", "B1a", "D1a"]),
         text_file("merge-b.txt", &["B1b", "C1b", "D1b"]),
@@ -134,20 +134,22 @@ fn merge_two_ordered_files_and_refuse_one_out_of_order() {
             &line("MOVE SORT-RETURN TO RC"),
             &line("DISPLAY 'FIRST ' RC"),
             &line("MERGE S-FILE ON ASCENDING KEY S-K USING IN-A IN-C"),
-            &line("    OUTPUT PROCEDURE SHOW-ONE"),
+            &line("    OUTPUT PROCEDURE SHOW-ALL"),
             &line("MOVE SORT-RETURN TO RC"),
             &line("DISPLAY 'SECOND ' RC"),
             &line("GOBACK."),
-            "       SHOW-ONE.\n",
-            &line("RETURN S-FILE AT END CONTINUE NOT AT END DISPLAY S-REC."),
+            "       SHOW-ALL.\n",
+            &line("PERFORM 5 TIMES"),
+            &line("    RETURN S-FILE AT END CONTINUE"),
+            &line("        NOT AT END DISPLAY S-REC END-RETURN"),
+            &line("END-PERFORM."),
         ]
         .concat(),
     );
     let (stdout, err, ending) = run_files(&source, &[dd("ADD", &a), dd("BDD", &b), dd("CDD", &c), dd("ODD", &out)]);
     assert!(ending.is_ok(), "{ending:?} {err}");
-    assert_eq!(stdout, "FIRST 00\nSECOND 16\n");
+    assert_eq!(stdout, "FIRST 00\nA1a\nB1a\nB1c\nA1c\nD1a\nSECOND 00\n");
     assert_eq!(std::fs::read_to_string(&out).unwrap(), "A1a\nB1a\nB1b\nC1b\nD1a\nD1b\n");
-    assert!(err.contains("record 2 of IN-C is out of the merge order"), "{err}");
 }
 
 #[test]

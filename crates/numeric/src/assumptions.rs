@@ -146,7 +146,7 @@ pub const SQL_TRAILING_BLANKS_SENT: &str = "SQ12";
 pub const SQL_FETCH_ROW_COUNT: &str = "SQ13";
 pub const SORT_EQUAL_KEYS_IN_ORDER: &str = "S1";
 pub const MERGE_EQUAL_KEYS_BY_FILE: &str = "S2";
-pub const MERGE_OUT_OF_SEQUENCE_FAILS: &str = "S3";
+pub const MERGE_SEQUENCE_UNCHECKED: &str = "S3";
 pub const SORT_FILE_FAILURE: &str = "S4";
 pub const SORT_DECIMAL_KEYS: &str = "S5";
 pub const SORT_RECORD_LENGTHS: &str = "S6";
@@ -839,8 +839,8 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
-        id: MERGE_OUT_OF_SEQUENCE_FAILS,
-        claim: "ironwork fails a MERGE whose input file holds records out of the merge order with SORT-RETURN 16 before any record is output, as DFSORT's ICE068A ends a merge (z/OS 3.1 DFSORT Messages, Codes and Diagnosis, icem100/kc00066). IBM's documents point the other way for a COBOL MERGE: FASTSRT applies only to the format 1 SORT (Programming Guide SC27-8714-03, p. 369), so the compiler does a MERGE's GIVING through an output procedure (p. 228) that DFSORT reaches as a COBOL-generated E35 exit (z/OS 3.1 Language Environment Programming Guide, ceea200/clcsrt3), and DFSORT does not sequence-check a merge whose E35 exit has no output data set (z/OS 3.1 DFSORT Application Programming Guide, icea100/ase35). Read together they say a COBOL MERGE is not checked, returns 0, and outputs each record as the merge selection reaches it; no single IBM sentence says so, and even under DFSORT's own check the records ahead of the out-of-sequence one have been output when ICE068A ends the merge (icea100, input, user exit and output logic examples)",
+        id: MERGE_SEQUENCE_UNCHECKED,
+        claim: "A MERGE does not check that its input files are in the merge order: it returns SORT-RETURN 0 and outputs each record as its selection reaches it, the lowest of the records at the head of each file, the earliest file's when keys are equal (S2). IBM's books together say so for a COBOL MERGE: FASTSRT applies only to the format 1 SORT (Programming Guide SC27-8714-03, p. 369), so the compiler does a MERGE's GIVING through an output procedure (p. 228) that DFSORT reaches as a COBOL-generated E35 exit (z/OS 3.1 Language Environment Programming Guide, ceea200/clcsrt3), DFSORT does not sequence-check a merge whose E35 exit has no output data set (z/OS 3.1 DFSORT Application Programming Guide, icea100/ase35), and a merge reads a file's next record only after the previous one is output (icea100, input, user exit and output logic examples). No single IBM sentence says a COBOL MERGE is unchecked. DFSORT's ICE068A, which ends a merge it writes itself at an out-of-sequence record (z/OS 3.1 DFSORT Messages, Codes and Diagnosis, icem100/kc00066), does not apply",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

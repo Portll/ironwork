@@ -1,6 +1,6 @@
 //! A program's SORT and MERGE (lir.md §9.6). Records are held in memory: the input phase gathers
-//! them from USING files or RELEASE, a stable sort orders them, and the output phase hands them to
-//! GIVING files or RETURN. SORT-RETURN reports how the statement ended. A table SORT reorders the
+//! them from USING files or RELEASE, a stable sort or a MERGE's selection orders them, and the
+//! output phase hands them to GIVING files or RETURN. SORT-RETURN reports how the statement ended. A table SORT reorders the
 //! table's elements in place.
 
 use super::keys::{Collating, Format, KeyValue, decimal, order};
@@ -14,7 +14,6 @@ use crate::store::{self, ProgramFacts};
 use crate::vocab::{OpenMode, Pos};
 use numeric::precision::{Fixed, Places};
 use numeric::{FastsrtAdvPrint, SortKeys as KeyReading, TruncCheck, assumptions};
-use std::cmp::Ordering;
 use std::io::Write;
 use std::rc::Rc;
 use zarch::ebcdic;
@@ -307,15 +306,14 @@ fn next_input<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, k: usize, 
 /// What one SORT or MERGE runs with: its SD, keys and FASTSRT plan, and SORT-RETURN.
 struct Run<'k, G> {
     sd: usize,
-    merge: bool,
     keys: &'k [ItemKey],
     sort_return: G,
     pos: Pos,
 }
 
-/// Reads every USING file to its end, in order. A MERGE's files must each be in the merge order.
-fn gather<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, run: &Run<'_, H::Register>, plan: &[Fastsrt]) -> R<Result<Vec<Entry>, String>> {
-    let mut entries: Vec<Entry> = Vec::new();
+/// Reads every USING file to its end, in order: each file's records.
+fn gather<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, run: &Run<'_, H::Register>, plan: &[Fastsrt]) -> R<Result<Vec<Vec<Entry>>, String>> {
+    let mut files: Vec<Vec<Entry>> = Vec::new();
     for f in plan.iter().filter(|f| f.input) {
         let read = if f.dfsort(x.facts().options().fastsrt) {
             by_dfsort(x, f.file, |x| read_using(x, run, f.file, true))?
@@ -323,11 +321,31 @@ fn gather<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, run: &Run<'_, 
             read_using(x, run, f.file, false)?
         };
         match read {
-            Ok(records) => entries.extend(records),
+            Ok(records) => files.push(records),
             Err(why) => return Ok(Err(why)),
         }
     }
-    Ok(Ok(entries))
+    Ok(Ok(files))
+}
+
+/// A stable sort keeps equal keys in the order they came
+/// ([`assumptions::SORT_EQUAL_KEYS_IN_ORDER`]).
+fn sorted(mut entries: Vec<Entry>, ascending: &[bool]) -> Vec<Entry> {
+    entries.sort_by(|a, b| order(&a.keys, &b.keys, ascending));
+    entries
+}
+
+/// A MERGE's records in the order its selection outputs them: each time the lowest of the records
+/// at the head of each file, the earliest file's when keys are equal, whether or not each file is
+/// in the merge order ([`assumptions::MERGE_EQUAL_KEYS_BY_FILE`],
+/// [`assumptions::MERGE_SEQUENCE_UNCHECKED`]).
+fn merged(files: Vec<Vec<Entry>>, ascending: &[bool]) -> Vec<Entry> {
+    let mut out = Vec::with_capacity(files.iter().map(Vec::len).sum());
+    let mut heads: Vec<std::collections::VecDeque<Entry>> = files.into_iter().map(Into::into).collect();
+    while let Some(k) = (0..heads.len()).filter_map(|k| heads[k].front().map(|e| (k, e))).min_by(|(_, a), (_, b)| order(&a.keys, &b.keys, ascending)).map(|(k, _)| k) {
+        out.extend(heads[k].pop_front());
+    }
+    out
 }
 
 /// One USING file, opened, read to its end and closed.
@@ -371,12 +389,6 @@ fn read_using<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, run: &Run<
     }
     if dfsort && entries.is_empty() && matches!(file.organization, Organization::Indexed | Organization::Relative) {
         return Ok(Err(format!("{name} is an empty VSAM file, which FASTSRT cannot take as input (see {})", assumptions::FASTSRT_FAILURE)));
-    }
-    let ascending = ascending(keys);
-    if run.merge
-        && let Some(n) = entries.windows(2).position(|w| order(&w[0].keys, &w[1].keys, &ascending) == Ordering::Greater)
-    {
-        return Ok(Err(format!("record {} of {name} is out of the merge order (see {})", n + 2, assumptions::MERGE_OUT_OF_SEQUENCE_FAILS)));
     }
     Ok(Ok(entries))
 }
@@ -658,10 +670,12 @@ pub fn sort<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, plan: &FileS
     if let Some(why) = dfsort_refuses(x, sd, &fastsrt) {
         return end(x, Err(why));
     }
-    let run = Run { sd, merge: plan.merge, keys: &keys, sort_return: plan.sort_return, pos };
-    let mut entries = match &plan.input {
+    let run = Run { sd, keys: &keys, sort_return: plan.sort_return, pos };
+    let up = ascending(&keys);
+    let entries = match &plan.input {
         Some(SortIo::Files(_)) => match gather(x, &run, &fastsrt)? {
-            Ok(entries) => entries,
+            Ok(files) if plan.merge => merged(files, &up),
+            Ok(files) => sorted(files.into_iter().flatten().collect(), &up),
             Err(why) => return end(x, Err(why)),
         },
         Some(SortIo::Procedure(procedure)) => {
@@ -676,16 +690,12 @@ pub fn sort<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, plan: &FileS
                 return end(x, Err(stopped_by_program()));
             }
             match active.map(|a| a.phase) {
-                Some(Phase::Input(entries)) => entries,
+                Some(Phase::Input(entries)) => sorted(entries, &up),
                 _ => Vec::new(),
             }
         }
         None => return Err(Abend::ironwork(format!("{verb} {name}: no input"), pos)),
     };
-    // A stable sort keeps equal keys in the order they came: SORT_EQUAL_KEYS_IN_ORDER and
-    // MERGE_EQUAL_KEYS_BY_FILE in numeric::assumptions.
-    let up = ascending(&keys);
-    entries.sort_by(|a, b| order(&a.keys, &b.keys, &up));
     let records: Vec<Vec<u8>> = entries.into_iter().map(|e| e.record).collect();
     match &plan.output {
         Some(SortIo::Files(_)) => {
