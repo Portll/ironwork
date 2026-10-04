@@ -48,6 +48,9 @@ pub enum Op {
     SetCount(TempId, Odo),
     Display(DisplayId),
     Accept { target: PlaceId, from: AcceptFrom, plan: MovePlan },
+    /// DISPLAY ... UPON ARGUMENT-NUMBER under `--compliance extended`: the next ACCEPT ... FROM
+    /// ARGUMENT-VALUE takes the PARM argument word this numbers.
+    ArgumentNumber(IntExpr),
     File(FileOpId),
     Call(CallId),
     Cancel(Operand),
@@ -248,6 +251,7 @@ codec_enum!(Op {
     Set { from, to, plan } = 33,
     SetCount(temp, odo) = 34,
     SetEntry { entry, targets } = 35,
+    ArgumentNumber(value) = 36,
 });
 codec_enum!(Step { Next = 0, Arm(arm) = 1, GoTo(para) = 2, End(ending) = 3, Return(frame) = 4, Resume(resume) = 5 });
 codec_enum!(Terminator {

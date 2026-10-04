@@ -9,6 +9,7 @@ use rt::lir::{
     SqlStatement, StartKey, StorePlan, SymId, Terminator, UpDown, UserArgument, XmlValue,
 };
 use rt::report::{FieldContent, GroupKind, Origin};
+use rt::vocab::AcceptFrom;
 
 type Check<'a, T> = &'a dyn Fn(T) -> Result<(), String>;
 
@@ -688,7 +689,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
             Op::Call(c) if p.services.calls.get(*c as usize).is_some_and(|plan| plan.on_exception || plan.not_on_exception) => 2,
             Op::Invoke(i) if p.services.invokes.get(*i as usize).is_some_and(|plan| plan.on_exception || plan.not_on_exception) => 2,
             Op::File(f) => p.services.file_ops.get(*f as usize).map_or(0, |op| op.arms()),
-            Op::String(_) | Op::Unstring(_) | Op::SearchAll(_) | Op::Return(_) => 2,
+            Op::String(_) | Op::Unstring(_) | Op::SearchAll(_) | Op::Return(_) | Op::Accept { from: AcceptFrom::ArgumentValue, .. } => 2,
             Op::Markup(m) if p.services.markup.get(*m as usize).is_some_and(|x| x.phrases() != (false, false)) => 2,
             _ => 0,
         };
@@ -717,7 +718,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
                     expr(*by)?;
                     places(prepass)?;
                 }
-                Op::SetTemp(_, n) => int(n)?,
+                Op::SetTemp(_, n) | Op::ArgumentNumber(n) => int(n)?,
                 Op::SetCount(_, o) if o.check != ssrange => return Err(format!("block {b}: a SEARCH count's check that disagrees with SSRANGE")),
                 Op::SetCount(_, o) => int(&o.object)?,
                 Op::Display(d) => within("DISPLAY plan", *d, p.plans.display.len())?,

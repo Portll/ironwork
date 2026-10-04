@@ -506,7 +506,9 @@ pub enum Stmt {
     Call(Box<Call>),
     Cancel { targets: Vec<Operand>, pos: Pos },
     Set { set: SetStmt, pos: Pos },
-    Accept { target: Ref, from: AcceptFrom, pos: Pos },
+    /// ACCEPT; `exception` is the ON EXCEPTION phrases `--compliance extended` reads with
+    /// ARGUMENT-VALUE.
+    Accept { target: Ref, from: AcceptFrom, exception: Handlers, pos: Pos },
     String(Box<StringStmt>),
     Unstring(Box<Unstring>),
     Inspect(Box<Inspect>),

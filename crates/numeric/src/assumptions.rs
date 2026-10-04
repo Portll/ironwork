@@ -347,6 +347,7 @@ pub const UPSI_FROM_THE_PARM: &str = "C411";
 pub const SET_SWITCH_CONDITION_TRUE: &str = "C412";
 pub const ACCEPT_FROM_CONSOLE: &str = "C440";
 pub const CALL_BY_PROGRAM_ID: &str = "C441";
+pub const COMMAND_LINE_FROM_PARM: &str = "C442";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2191,6 +2192,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: CALL_BY_PROGRAM_ID,
         claim: "A CALL of a name that no member of the program libraries has, as a file named for it, finds the .cbl or .cob file there whose PROGRAM-ID is the name: the directories in order, each one's files in name order, the first that holds the program. z/OS finds a called program as a member of STEPLIB, JOBLIB or the link list by its member name, and ends the run S806 when none has it; a build that link-edits each program under its PROGRAM-ID gives every program a member of that name, and ironwork's libraries are source directories, whose file names need not be. A member of the name comes first, as before",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: COMMAND_LINE_FROM_PARM,
+        claim: "Under --compliance extended, ACCEPT ... FROM COMMAND-LINE gives the job step's PARM program arguments as written, what precedes the last slash when runtime options follow it (C250); ARGUMENT-NUMBER how many words they hold, split at blanks; and ARGUMENT-VALUE the next word, the exception taken and the receiver left unchanged once none is left. DISPLAY n UPON ARGUMENT-NUMBER makes word n the next, the last word when n is past them, as cobc 3.2 gives it, and none when n is below 1. Micro Focus and GnuCOBOL read the operating system's command line, whose words the shell splits, quotes kept together, and whose word 0 is the command; a z/OS PARM has neither. A run with no PARM has an empty command line. The text moves as an alphanumeric sender and the count as a numeric one, each marked as input when a PARM gave it, as the PARM is. cobc 3.2 also runs NOT ON EXCEPTION when the exception is taken; ironwork runs the one phrase",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

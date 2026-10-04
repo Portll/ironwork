@@ -846,7 +846,11 @@ impl<'w, 'p> Walk<'w, 'p> {
                 }
                 SetStmt::Switches(_) => {}
             },
-            Stmt::Accept { target, pos, .. } => self.write(target, *pos, &mut st),
+            Stmt::Accept { target, exception, pos, .. } => {
+                let failed = st.clone();
+                self.write(target, *pos, &mut st);
+                st = self.either(&exception.on, &exception.not_on, failed, st);
+            }
             Stmt::String(s) => {
                 for (op, delimiter) in &s.sources {
                     self.operand(op, s.pos, &st);

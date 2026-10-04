@@ -92,4 +92,11 @@ pub enum AcceptFrom {
     Day { four_digit_year: bool },
     DayOfWeek,
     Time,
+    /// Under `--compliance extended`, the job step's PARM program arguments, as Micro Focus and
+    /// GnuCOBOL give the command line.
+    CommandLine,
+    /// Under `--compliance extended`, how many words the PARM's program arguments hold.
+    ArgumentNumber,
+    /// Under `--compliance extended`, the next word of the PARM's program arguments.
+    ArgumentValue,
 }

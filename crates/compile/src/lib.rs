@@ -960,6 +960,10 @@ impl Check<'_> {
                     }
                 }
                 if let Some(upon) = upon
+                    && upon.device == "ARGUMENT-NUMBER"
+                {
+                    self.argument_number(items, *pos);
+                } else if let Some(upon) = upon
                     && !DISPLAY_DEVICES.contains(&upon.device.as_str())
                 {
                     let why = if upon.name == upon.device {
@@ -1106,7 +1110,12 @@ impl Check<'_> {
                 }
                 SetStmt::Switches(_) => {}
             },
-            Stmt::Accept { target, .. } => self.reference(target),
+            Stmt::Accept { target, from, exception, pos } => {
+                self.reference(target);
+                self.accept_source(*from, exception, target, *pos);
+                self.statements(exception.on.as_deref().unwrap_or_default());
+                self.statements(exception.not_on.as_deref().unwrap_or_default());
+            }
             Stmt::String(st) => {
                 for (op, delimiter) in &st.sources {
                     self.operand(op);
@@ -1569,6 +1578,46 @@ impl Check<'_> {
         let numeric = !rt::intrinsic::CHARACTER_VALUED.contains(&name) || self.numeric_max_or_min(f);
         if intrinsic && !user_defined && numeric {
             self.errors.push(Error::at(f.pos, format!("DISPLAY FUNCTION {name}: an integer or numeric function can be used only where an arithmetic expression can, and DISPLAY takes none")));
+        }
+    }
+
+    /// ACCEPT ... FROM COMMAND-LINE, ARGUMENT-NUMBER and ARGUMENT-VALUE are Micro Focus's and
+    /// GnuCOBOL's, which `--compliance extended` reads from the job step's PARM with IWX0010-W
+    /// (assumption C442); ON EXCEPTION goes with ARGUMENT-VALUE alone.
+    fn accept_source(&mut self, from: AcceptFrom, exception: &Handlers, target: &Ref, pos: Pos) {
+        if (exception.on.is_some() || exception.not_on.is_some()) && from != AcceptFrom::ArgumentValue {
+            self.errors.push(Error::at(pos, "ACCEPT ... ON EXCEPTION: of the ACCEPT statements, only ACCEPT ... FROM ARGUMENT-VALUE under --compliance extended has an exception"));
+        }
+        let (name, what) = match from {
+            AcceptFrom::CommandLine => ("COMMAND-LINE", "the job step's PARM program arguments"),
+            AcceptFrom::ArgumentNumber => ("ARGUMENT-NUMBER", "how many words the job step's PARM program arguments hold"),
+            AcceptFrom::ArgumentValue => ("ARGUMENT-VALUE", "the next word of the job step's PARM program arguments"),
+            _ => return,
+        };
+        if self.extended {
+            self.errors.push(syntax::messages::IWX0010.at(pos, format!("ACCEPT ... FROM {name} (Micro Focus and GnuCOBOL; Enterprise COBOL reads no command line): {} receives {what}", target.name)));
+        } else {
+            self.errors.push(Error::at(pos, format!("ACCEPT ... FROM {name}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it from the job step's PARM")));
+        }
+    }
+
+    /// DISPLAY ... UPON ARGUMENT-NUMBER, Micro Focus's and GnuCOBOL's, which under `--compliance
+    /// extended` makes the numeric item or literal it shows the number of the PARM word the next
+    /// ACCEPT ... FROM ARGUMENT-VALUE takes, with IWX0010-W (assumption C442).
+    fn argument_number(&mut self, items: &[Operand], pos: Pos) {
+        if !self.extended {
+            self.errors.push(Error::at(pos, "DISPLAY UPON ARGUMENT-NUMBER: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it"));
+            return;
+        }
+        let numeric = match items {
+            [Operand::Literal(Literal::Number(_))] => true,
+            [Operand::Ref(r)] => self.item(r).is_some_and(|i| self.layout.items[i].kind.is_numeric()),
+            _ => false,
+        };
+        if numeric {
+            self.errors.push(syntax::messages::IWX0010.at(pos, "DISPLAY ... UPON ARGUMENT-NUMBER (Micro Focus and GnuCOBOL; Enterprise COBOL reads no command line): the next ACCEPT ... FROM ARGUMENT-VALUE takes the job step's PARM word it numbers"));
+        } else {
+            self.errors.push(Error::at(pos, "DISPLAY UPON ARGUMENT-NUMBER: it shows one numeric item or literal, the number of the argument the next ACCEPT ... FROM ARGUMENT-VALUE takes"));
         }
     }
 

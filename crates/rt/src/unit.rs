@@ -292,6 +292,9 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     pub observer: Option<Observer<'w>>,
     /// FUNCTION RANDOM's generator, one for the run unit, from the first reference on.
     pub random: Option<u32>,
+    /// The job step's program arguments, which ACCEPT ... FROM COMMAND-LINE and ARGUMENT-VALUE read
+    /// under `--compliance extended`; empty without a PARM.
+    pub arguments: crate::le::parm::Arguments,
     externals: Externals,
     /// The files of loaded programs that are another's connector, by program and file.
     connectors: HashMap<(usize, usize), Connector>,
@@ -468,6 +471,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             oo: Default::default(),
             observer: None,
             random: None,
+            arguments: Default::default(),
             externals: Externals::default(),
             connectors: HashMap::new(),
             entries: Vec::new(),

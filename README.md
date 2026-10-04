@@ -306,7 +306,9 @@ the extension and where it is, so `check` returns 4, and the program runs on the
 VM alike. It also accepts an integer or numeric function as a MOVE's sender, as GnuCOBOL does, with
 IWX0008-W; strict refuses it under either dialect, as Enterprise COBOL does. GnuCOBOL's PROCEDURE
 DIVISION RETURNING OMITTED, a program that returns no item, is read as a header with no RETURNING
-phrase, with IWX0009-W.
+phrase, with IWX0009-W. ACCEPT FROM COMMAND-LINE, ARGUMENT-NUMBER and ARGUMENT-VALUE, and DISPLAY
+UPON ARGUMENT-NUMBER, read the job step's PARM program arguments as a command line, with IWX0010-W
+(C442).
 [docs/compliance.md](docs/compliance.md) gives each one's meaning, the census that chose them, and
 what stays refused and why.
 

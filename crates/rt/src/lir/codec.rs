@@ -48,6 +48,9 @@ codec_enum!(AcceptFrom {
     Day { four_digit_year } = 2,
     DayOfWeek = 3,
     Time = 4,
+    CommandLine = 5,
+    ArgumentNumber = 6,
+    ArgumentValue = 7,
 });
 codec_enum!(InspectMode { Characters = 0, All = 1, Leading = 2, First = 3 });
 codec_enum!(OpenMode { Input = 0, Output = 1, Extend = 2, InputOutput = 3 });

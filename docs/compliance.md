@@ -31,7 +31,9 @@ item, has no Enterprise COBOL form: both executors run it through `rt::fileio`, 
 records the item with its file (`lir::FileDesc::assign_item`; `exec/src/tests/assign.rs`). The
 eighth, IWX0008-W, is the compiler's check on a MOVE's sender. The ninth, IWX0009-W, is read
 before the parser as the first six are, and a test runs a caller and a program that uses it on
-both executors and compares the runs.
+both executors and compares the runs. The tenth, IWX0010-W, the command line, has no Enterprise
+COBOL form: both executors read it from the run unit's PARM arguments (`rt::le::parm::Arguments`),
+and the LIR carries its ACCEPT sources and the op DISPLAY UPON ARGUMENT-NUMBER becomes.
 
 ### IWX0001-W free-form source
 
@@ -223,6 +225,40 @@ infinityabundance_gnucobol-rs). The examples still stop on something else first:
 their repositories do not hold, `>>IF`, and past those `ANY LENGTH`, BINARY-INT and `EXTERN`; see
 "What extended compiles".
 
+### IWX0010-W the command line: ACCEPT FROM COMMAND-LINE, ARGUMENT-NUMBER and ARGUMENT-VALUE
+
+`IWX0010-W ACCEPT ... FROM COMMAND-LINE (Micro Focus and GnuCOBOL; Enterprise COBOL reads no command
+line): CL receives the job step's PARM program arguments`, at the statement, and the same for
+ARGUMENT-NUMBER, ARGUMENT-VALUE and `DISPLAY ... UPON ARGUMENT-NUMBER`.
+
+Micro Focus and GnuCOBOL give a program its command line: `ACCEPT x FROM COMMAND-LINE` the whole
+line after the command, `ACCEPT n FROM ARGUMENT-NUMBER` how many arguments it holds, `ACCEPT x FROM
+ARGUMENT-VALUE [[ON] EXCEPTION ...] [NOT [ON] EXCEPTION ...] [END-ACCEPT]` the next argument each
+time, the exception taken and `x` left as it was once none is left, and `DISPLAY n UPON
+ARGUMENT-NUMBER` which argument comes next. A z/OS batch program's command line is its job step's
+PARM, so under extended these read the PARM's program arguments, what precedes its last slash when
+runtime options follow it (CBLOPTS(ON), C250), split at blanks (assumption C442):
+
+| PARM `alpha be 0042/RPTOPTS(ON)` | ironwork | cobc 3.2, `prog alpha be 0042` |
+|---|---|---|
+| COMMAND-LINE into `X(20)` | `alpha be 0042` and spaces | the same |
+| ARGUMENT-NUMBER | 3 | 3 |
+| ARGUMENT-VALUE, four times | `alpha`, `be`, `0042`, then the exception | the same |
+| `DISPLAY 9 UPON ARGUMENT-NUMBER`, then ARGUMENT-VALUE | `0042`, the last | the same |
+| `DISPLAY 0 UPON ARGUMENT-NUMBER`, then ARGUMENT-VALUE | the exception: a PARM has no word 0 | the command's own name |
+| NOT ON EXCEPTION when the exception is taken | not run | run as well as ON EXCEPTION |
+
+A run with no `--parm`, and a job step with no PARM, have an empty command line: COMMAND-LINE gives
+spaces, ARGUMENT-NUMBER zero, and ARGUMENT-VALUE the exception. The shell's quotes, which keep words
+together on a command line, mean nothing in a PARM. The value moves as an alphanumeric sender and
+the count as a numeric one, and the receiver is input to the trace when a PARM gave it. Strict
+refuses each form (S), and under extended ON EXCEPTION goes with ARGUMENT-VALUE alone, and
+`DISPLAY UPON ARGUMENT-NUMBER` shows one numeric item or literal.
+
+The 3185-repository corpus has COMMAND-LINE in 628 files, ARGUMENT-VALUE in 333, ARGUMENT-NUMBER in
+215 and `DISPLAY UPON ARGUMENT-NUMBER` 98 times, in 119 repositories; ENVIRONMENT-VALUE, which pairs
+with `DISPLAY UPON ENVIRONMENT-NAME`, stays refused (below).
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:
@@ -290,12 +326,10 @@ repositories in the first sample where it is the first refusal under extended.
 - **ACCEPT ... FROM ENVIRONMENT, SET ENVIRONMENT** (30, 12): GnuCOBOL's one-statement forms, which
   most of these programs use, are not Micro Focus's (DISPLAY UPON ENVIRONMENT-NAME then ACCEPT FROM
   ENVIRONMENT-VALUE), and the GnuCOBOL programs that set the environment set the screen runtime's
-  options. ACCEPT reads SYSIN, SYSIPT and CONSOLE, or a mnemonic-name for one, and any other FROM
-  operand is refused: GnuCOBOL's COMMAND-LINE, ARGUMENT-NUMBER, ARGUMENT-VALUE and
-  ENVIRONMENT-VALUE, its screen sources (ESCAPE, EXCEPTION, LINES, COLUMNS, CRT) and USER, and any
-  other name. COMMAND-LINE, the whole command line under Micro Focus and GnuCOBOL alike, could read
-  a job step's PARM under extended, and ARGUMENT-VALUE its words; that is not done. Assumption C440
-  says how ironwork reads the console.
+  options. ACCEPT reads SYSIN, SYSIPT and CONSOLE, or a mnemonic-name for one; extended adds
+  COMMAND-LINE, ARGUMENT-NUMBER and ARGUMENT-VALUE (IWX0010), and any other FROM operand is refused:
+  ENVIRONMENT-VALUE, the screen sources (ESCAPE, EXCEPTION, LINES, COLUMNS, CRT), USER, and any other
+  name. Assumption C440 says how ironwork reads the console.
 - **OCCURS at level 01 or 77** (18, 10): a record that is a table needs a change to the storage
   layout; the next candidate by evidence.
 - **Split keys** (`RECORD KEY IS name = item item`; 35, 5): an indexed file keyed on items that are

@@ -463,8 +463,8 @@ fn what_is_not_enterprise_cobol_is_refused_as_such() {
         ("MOVE 'A' & 'B' TO A.", "literal concatenation with & is not Enterprise COBOL's"),
         ("SET ENVIRONMENT 'X' TO 'Y'.", "SET ENVIRONMENT is GnuCOBOL's"),
         ("ACCEPT A FROM ENVIRONMENT 'X'.", "ACCEPT ... FROM ENVIRONMENT is GnuCOBOL's"),
-        ("ACCEPT A FROM COMMAND-LINE.", "ACCEPT ... FROM COMMAND-LINE: GnuCOBOL's, not Enterprise COBOL's"),
-        ("ACCEPT A FROM ARGUMENT-VALUE.", "ACCEPT ... FROM ARGUMENT-VALUE: GnuCOBOL's, not Enterprise COBOL's"),
+        ("ACCEPT A FROM ENVIRONMENT-VALUE.", "ACCEPT ... FROM ENVIRONMENT-VALUE: GnuCOBOL's, not Enterprise COBOL's"),
+        ("ACCEPT A FROM ESCAPE KEY.", "ACCEPT ... FROM ESCAPE: GnuCOBOL's, not Enterprise COBOL's"),
         ("ACCEPT A FROM KEYBOARD.", "ACCEPT ... FROM KEYBOARD: neither an environment-name ACCEPT reads, SYSIN, SYSIPT or CONSOLE, nor a mnemonic-name for one"),
     ] {
         let message = refused(body);

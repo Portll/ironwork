@@ -391,6 +391,11 @@ impl Lower<'_> {
                 self.perform(repeat, body, pos, &inner)?;
             }
             Stmt::PerformInline { body, repeat, pos: _ } => self.perform(repeat, Body::Inline(body), pos, &inner)?,
+            Stmt::Display { items, upon: Some(upon), .. } if upon.device == "ARGUMENT-NUMBER" => {
+                let [item] = items.as_slice() else { return unsupported("DISPLAY UPON ARGUMENT-NUMBER of more than one item", pos) };
+                let n = self.int_expr(&Expr::Operand(item.clone()), pos)?;
+                self.op(Op::ArgumentNumber(n), pos)?;
+            }
             Stmt::Display { items, upon, no_advancing, pos: _ } => {
                 let plan = self.display_plan(items, crate::machine::upon_console(upon.as_ref()), *no_advancing, pos)?;
                 self.op(Op::Display(plan), pos)?;
@@ -448,10 +453,11 @@ impl Lower<'_> {
                 self.op(Op::Inspect(plan), pos)?;
             }
             Stmt::Search(se) => self.search(se, pos, &inner)?,
-            Stmt::Accept { target, from, pos: _ } => {
+            Stmt::Accept { target, from, exception, pos: _ } => {
                 let place = self.place(target, true)?;
                 let value = match from {
-                    AcceptFrom::Sysin => Side { value: Value::Bytes, src: None, digits: 0 },
+                    AcceptFrom::Sysin | AcceptFrom::CommandLine | AcceptFrom::ArgumentValue => Side { value: Value::Bytes, src: None, digits: 0 },
+                    AcceptFrom::ArgumentNumber => Side { value: Value::Num(Some(0)), src: None, digits: 9 },
                     AcceptFrom::Date { four_digit_year } => Side { value: Value::Num(Some(0)), src: None, digits: if *four_digit_year { 8 } else { 6 } },
                     AcceptFrom::Day { four_digit_year } => Side { value: Value::Num(Some(0)), src: None, digits: if *four_digit_year { 7 } else { 5 } },
                     AcceptFrom::DayOfWeek => Side { value: Value::Num(Some(0)), src: None, digits: 1 },
@@ -459,6 +465,9 @@ impl Lower<'_> {
                 };
                 let plan = self.move_plan(&value, self.kind_of(place), self.place_items[place as usize])?;
                 self.op(Op::Accept { target: place, from: *from, plan }, pos)?;
+                if *from == AcceptFrom::ArgumentValue {
+                    self.select(exception.on.as_deref(), exception.not_on.as_deref(), pos, &inner)?;
+                }
             }
             Stmt::Call(c) => self.call(c, pos, &inner)?,
             Stmt::Cancel { targets, pos: _ } => {

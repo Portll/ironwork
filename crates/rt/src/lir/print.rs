@@ -721,6 +721,7 @@ impl<'a> Printer<'a> {
             Op::DecTemp(t) => format!("DecTemp t{t}"),
             Op::SetCount(t, odo) => format!("SetCount t{t} <- {}", self.odo(odo)),
             Op::Display(id) => self.display(*id),
+            Op::ArgumentNumber(value) => format!("ArgumentNumber <- {}", self.int(value)),
             Op::Accept { target, from, plan } => format!("Accept {} <- {}{}", self.place(*target), accept_from(*from), self.moved(plan, SenderCheck::None)),
             Op::File(id) => self.file_op(*id),
             Op::Call(id) => self.call(*id),
@@ -2119,6 +2120,9 @@ fn accept_from(a: AcceptFrom) -> &'static str {
         AcceptFrom::Day { four_digit_year: true } => "DAY YYYYDDD",
         AcceptFrom::DayOfWeek => "DAY-OF-WEEK",
         AcceptFrom::Time => "TIME",
+        AcceptFrom::CommandLine => "COMMAND-LINE",
+        AcceptFrom::ArgumentNumber => "ARGUMENT-NUMBER",
+        AcceptFrom::ArgumentValue => "ARGUMENT-VALUE",
     }
 }
 

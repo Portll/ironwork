@@ -142,7 +142,8 @@ operand: `input` true, false, or null. cobolwork needs this before coverage may 
 (cobolwork `docs/spec/reach.md` §9.8, fact 3): a step that changes bytes (a numeric MOVE, a COMPUTE,
 a FUNCTION) loses the marker, but it does not lose the taint.
 
-- **Input.** A READ's record and its INTO item, ACCEPT from SYSIN or the console, the host
+- **Input.** A READ's record and its INTO item, ACCEPT from SYSIN or the console, ACCEPT from the
+  command line or its arguments a PARM gave under `--compliance extended` (C442), the host
   variables and SQLCA a row EXEC SQL fetched fills, a job step's PARM and a CICS task's COMMAREA.
   ACCEPT FROM DATE, DAY or TIME is not input. In a CICS task, EIBCALEN when there is a COMMAREA,
   the AID that started the task, and whatever a command writes once it has taken in data from

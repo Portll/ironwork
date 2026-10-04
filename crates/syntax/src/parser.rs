@@ -47,7 +47,7 @@ fn digits(t: &Tok) -> bool {
 }
 
 const PHRASE_WORDS: &[&str] = &[
-    "ELSE", "END-IF", "END-PERFORM", "END-COMPUTE", "END-ADD", "END-SUBTRACT", "END-MULTIPLY", "END-DIVIDE", "END-DISPLAY", "WHEN",
+    "ELSE", "END-IF", "END-PERFORM", "END-COMPUTE", "END-ADD", "END-SUBTRACT", "END-MULTIPLY", "END-DIVIDE", "END-DISPLAY", "END-ACCEPT", "WHEN",
     "TO", "FROM", "BY", "INTO", "GIVING", "REMAINDER", "ROUNDED", "ON", "NOT", "SIZE", "UNTIL", "VARYING", "TIMES", "THRU", "THROUGH",
     "AND", "OR", "THEN", "UPON", "WITH", "IS", "END-EVALUATE", "ALSO", "OTHER", "OF", "IN", "AT", "END", "END-READ", "END-WRITE",
     "BEFORE", "AFTER", "ADVANCING", "INPUT", "OUTPUT", "EXTEND", "I-O", "REVERSED", "USING", "RETURNING", "EXCEPTION", "OVERFLOW",
@@ -71,8 +71,8 @@ pub const DEVICE_ENVIRONMENT_NAMES: &[&str] = &["SYSIN", "SYSIPT", "SYSOUT", "SY
 /// The environment-names ACCEPT reads from (Language Reference SC27-8713-03, p. 126, Table 5).
 const ACCEPT_DEVICES: &[&str] = &["SYSIN", "SYSIPT", "CONSOLE"];
 
-/// GnuCOBOL's sources for ACCEPT ... FROM that Enterprise COBOL does not have.
-const GNUCOBOL_ACCEPT_SOURCES: &[&str] = &["COMMAND-LINE", "ARGUMENT-NUMBER", "ARGUMENT-VALUE", "ENVIRONMENT-VALUE", "ESCAPE", "EXCEPTION", "LINES", "COLUMNS", "CRT", "USER"];
+/// GnuCOBOL's sources for ACCEPT ... FROM that neither Enterprise COBOL nor `--compliance extended` reads.
+const GNUCOBOL_ACCEPT_SOURCES: &[&str] = &["ENVIRONMENT-VALUE", "ESCAPE", "EXCEPTION", "LINES", "COLUMNS", "CRT", "USER"];
 
 /// The environment-names a WRITE ADVANCING mnemonic-name can stand for (Language Reference,
 /// SPECIAL-NAMES, Table 5): channels C01 to C12, CSP, pockets S01 to S05, and AFP-5A.
@@ -1704,6 +1704,9 @@ impl Parser<'_> {
                         "DAY" => AcceptFrom::Day { four_digit_year: self.accept_word("YYYYDDD") },
                         "DAY-OF-WEEK" => AcceptFrom::DayOfWeek,
                         "TIME" => AcceptFrom::Time,
+                        "COMMAND-LINE" => AcceptFrom::CommandLine,
+                        "ARGUMENT-NUMBER" => AcceptFrom::ArgumentNumber,
+                        "ARGUMENT-VALUE" => AcceptFrom::ArgumentValue,
                         name => {
                             self.accept_device(name, at)?;
                             AcceptFrom::Sysin
@@ -1712,8 +1715,13 @@ impl Parser<'_> {
                 } else {
                     AcceptFrom::Sysin
                 };
+                let [exception] = self.on_phrases(&["ON", "EXCEPTION"], &["END-ACCEPT"], |p| {
+                    p.accept_word("ON");
+                    p.expect_word("EXCEPTION")?;
+                    Ok(0)
+                })?;
                 self.accept_word("END-ACCEPT");
-                Stmt::Accept { target, from, pos }
+                Stmt::Accept { target, from, exception, pos }
             }
             "OPEN" => {
                 let mut files = Vec::new();

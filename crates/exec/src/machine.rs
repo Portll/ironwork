@@ -330,6 +330,13 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 });
             }
             Stmt::PerformInline { body, repeat, pos } => return self.repeat(repeat, *pos, &mut |m: &mut Self| m.run_block(body)),
+            Stmt::Display { items, upon: Some(upon), pos, .. } if upon.device == "ARGUMENT-NUMBER" => {
+                let n = match items.as_slice() {
+                    [item] => self.integer(&Expr::Operand(item.clone()), *pos)?,
+                    _ => return Err(Abend::ironwork("DISPLAY UPON ARGUMENT-NUMBER shows one item", *pos)),
+                };
+                self.unit.arguments.position(n);
+            }
             Stmt::Display { items, upon, no_advancing, pos } => self.display(items, upon_console(upon.as_ref()), *no_advancing, *pos)?,
             Stmt::Open { files, pos } => {
                 for (mode, name) in files {
@@ -401,7 +408,13 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 }
             }
             Stmt::Set { set, pos } => self.set(set, *pos)?,
-            Stmt::Accept { target, from, pos } => self.accept(target, *from, *pos)?,
+            Stmt::Accept { target, from: from @ AcceptFrom::ArgumentValue, exception, pos } => {
+                let raised = self.accept(target, *from, *pos)?;
+                return self.overflow_branch(raised, &exception.on, &exception.not_on);
+            }
+            Stmt::Accept { target, from, pos, .. } => {
+                self.accept(target, *from, *pos)?;
+            }
             Stmt::String(st) => return self.string_stmt(st),
             Stmt::Unstring(u) => return self.unstring(u),
             Stmt::Inspect(i) => self.inspect(i)?,
@@ -1187,7 +1200,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         Ok(())
     }
 
-    fn accept(&mut self, target: &Ref, from: AcceptFrom, pos: Pos) -> R<()> {
+    /// True when ARGUMENT-VALUE finds no word left.
+    fn accept(&mut self, target: &Ref, from: AcceptFrom, pos: Pos) -> R<bool> {
         let dest = self.locate_written(|m| m.locate_receiving(target))?;
         rt::accept::accept(&self.facts(), self.unit, dest, from, &target.name, pos)
     }

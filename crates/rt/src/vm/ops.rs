@@ -15,7 +15,7 @@ use crate::storage::{Kind, Loc, Val};
 use crate::store;
 use crate::text::{self, UnstringField};
 use crate::unit::Loader;
-use crate::vocab::{BinOp, Figurative, Pos};
+use crate::vocab::{AcceptFrom, BinOp, Figurative, Pos};
 use numeric::precision::Fixed;
 use std::cmp::Ordering;
 use std::rc::Rc;
@@ -137,10 +137,17 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 }
             }
             Op::Display(id) => self.display(*id, pos)?,
+            Op::ArgumentNumber(value) => {
+                let n = self.int(value, pos)?;
+                self.unit.arguments.position(n);
+            }
             Op::Accept { target, from, .. } => {
                 let dest = self.loc_written(*target)?;
                 let name = self.sym(p.places[*target as usize].name);
-                accept::accept(&self.facts(), self.unit, dest, *from, name, pos)?;
+                let exception = accept::accept(&self.facts(), self.unit, dest, *from, name, pos)?;
+                if *from == AcceptFrom::ArgumentValue {
+                    return Ok(Step::Arm(u8::from(exception)));
+                }
             }
             Op::File(id) => return self.file(&p.services.file_ops[*id as usize], at),
             Op::Call(id) => return self.call(&p.services.calls[*id as usize], pos),

@@ -100,3 +100,76 @@ fn a_program_returning_omitted_returns_its_return_code_and_no_item() {
     let strict = compile(syntax::parse_all_with(RETURNING_OMITTED, &syntax::copy::Libraries::default()).unwrap().remove(1), &[]).err().unwrap();
     assert_eq!(strict.iter().map(|e| e.message.as_str()).collect::<Vec<_>>(), ["PROCEDURE DIVISION RETURNING OMITTED: not an 01 or 77 item of the LINKAGE SECTION"]);
 }
+
+/// A program reading its job step's PARM as Micro Focus and GnuCOBOL read their command line.
+const COMMAND_LINE: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. ARGS.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  CL PIC X(20).\n",
+    "       01  N  PIC 9(3).\n",
+    "       01  V  PIC X(6).\n",
+    "       01  K  PIC 9 VALUE 3.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           ACCEPT CL FROM COMMAND-LINE\n",
+    "           ACCEPT N FROM ARGUMENT-NUMBER\n",
+    "           DISPLAY '[' CL '] ' N\n",
+    "           PERFORM 4 TIMES\n",
+    "               MOVE ALL '*' TO V\n",
+    "               ACCEPT V FROM ARGUMENT-VALUE\n",
+    "                  ON EXCEPTION DISPLAY 'NONE LEFT'\n",
+    "                  NOT ON EXCEPTION DISPLAY V\n",
+    "               END-ACCEPT\n",
+    "           END-PERFORM\n",
+    "           DISPLAY K UPON ARGUMENT-NUMBER\n",
+    "           ACCEPT V FROM ARGUMENT-VALUE\n",
+    "           DISPLAY 'THIRD ' V\n",
+    "           DISPLAY 9 UPON ARGUMENT-NUMBER\n",
+    "           ACCEPT V FROM ARGUMENT-VALUE\n",
+    "           DISPLAY 'LAST ' V\n",
+    "           DISPLAY 0 UPON ARGUMENT-NUMBER\n",
+    "           ACCEPT V FROM ARGUMENT-VALUE EXCEPTION DISPLAY 'NO WORD 0'\n",
+    "           GOBACK.\n",
+);
+
+/// Assumption C442: the PARM's program arguments, before the last slash when runtime options follow
+/// it, are the command line, and its blank-separated words the arguments.
+#[test]
+fn extended_reads_the_command_line_and_arguments_from_the_parm_alike_on_both_executors() {
+    let run = |executor, parm: Option<&str>| {
+        let harness = Harness::source(COMMAND_LINE).flags(EXTENDED);
+        let o = match parm {
+            Some(p) => harness.parm(p),
+            None => harness,
+        }
+        .run(executor);
+        assert!(o.ending.is_ok(), "{:?}\n{}", o.ending, o.err);
+        o.out
+    };
+    let given = run(Executor::Interpreter, Some("alpha be  0042 zed/RPTOPTS(ON)"));
+    assert_eq!(given, "[alpha be  0042 zed  ] 004\nalpha \nbe    \n0042  \nzed   \nTHIRD 0042  \nLAST zed   \nNO WORD 0\n");
+    assert_eq!(run(Executor::Vm, Some("alpha be  0042 zed/RPTOPTS(ON)")), given);
+    let none = run(Executor::Interpreter, None);
+    assert_eq!(none, "[                    ] 000\nNONE LEFT\nNONE LEFT\nNONE LEFT\nNONE LEFT\nTHIRD ******\nLAST ******\nNO WORD 0\n");
+    assert_eq!(run(Executor::Vm, None), none);
+}
+
+#[test]
+fn the_command_line_is_a_warning_under_extended_and_refused_under_strict() {
+    let extended = syntax::parse_with(COMMAND_LINE, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap();
+    let compiled = compile(extended, &EXTENDED.iter().map(|f| f.to_string()).collect::<Vec<_>>()).unwrap_or_else(|e| panic!("{e:?}"));
+    let ids: Vec<(u32, Option<&str>, Severity)> = compiled.diagnostics.iter().map(|m| (m.pos.line, m.id, m.severity)).collect();
+    assert_eq!(ids, [10, 11, 15, 20, 21, 23, 24, 26, 27].map(|line| (line, Some("IWX0010"), Severity::Warning)));
+    let strict = compile(syntax::parse(COMMAND_LINE).unwrap(), &[]).err().unwrap();
+    let refused: Vec<&str> = strict.iter().filter(|e| e.severity == Severity::Severe).map(|e| e.message.as_str()).collect();
+    assert_eq!(refused.len(), 9, "{refused:?}");
+    assert!(refused[0].starts_with("ACCEPT ... FROM COMMAND-LINE: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's"), "{refused:?}");
+    assert!(refused.contains(&"DISPLAY UPON ARGUMENT-NUMBER: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it"), "{refused:?}");
+    let misused = program("", "       01  V PIC X(6).\n", &[line("ACCEPT V FROM SYSIN ON EXCEPTION DISPLAY 'X' END-ACCEPT"), line("DISPLAY V UPON ARGUMENT-NUMBER"), line("GOBACK.")].concat());
+    let parsed = syntax::parse_with(&misused, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap();
+    let errors = compile(parsed, &EXTENDED.iter().map(|f| f.to_string()).collect::<Vec<_>>()).err().unwrap();
+    let messages: Vec<&str> = errors.iter().map(|e| e.message.as_str()).collect();
+    assert!(messages.iter().any(|m| m.starts_with("ACCEPT ... ON EXCEPTION: of the ACCEPT statements, only ACCEPT ... FROM ARGUMENT-VALUE")), "{messages:?}");
+    assert!(messages.iter().any(|m| m.starts_with("DISPLAY UPON ARGUMENT-NUMBER: it shows one numeric item or literal")), "{messages:?}");
+}

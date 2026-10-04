@@ -641,7 +641,11 @@ pub enum Op {
     /// SEARCH's table count, `occurrences` of `Odo` once, held in a counter (§9.12).
     SetCount(TempId, Odo),
     Display(DisplayId),
+    /// ACCEPT FROM ARGUMENT-VALUE returns an arm: 1 for the exception, no word left (§9.1).
     Accept { target: PlaceId, from: AcceptFrom, plan: MovePlan },
+    /// DISPLAY UPON ARGUMENT-NUMBER under --compliance extended: the PARM word the next
+    /// ARGUMENT-VALUE takes (§9.1).
+    ArgumentNumber(IntExpr),
     File(FileOpId), Call(CallId), Cancel(Operand),
     Sort(SortId), Release(ReleaseId), Return(ReturnId), Report(ReportOp),
     Invoke(InvokeId), Cics(CicsId), Sql(SqlId),
@@ -705,7 +709,7 @@ pub enum RangeKind { Perform, SortProcedure, UseBeforeReporting, UseProcedure, D
 ```
 
 - **Tags** (load-module.md §4.3): `PerformEnter` is tag 12 and `Debug` 11 of `Terminator`, and tag 6
-  is retired; `DebugLine` and `DebugAlter` are tags 30 and 31 of `Op`, `Markup` 32, `Set` 33, `SetCount` 34, `SetEntry` 35, and tag 29
+  is retired; `DebugLine` and `DebugAlter` are tags 30 and 31 of `Op`, `Markup` 32, `Set` 33, `SetCount` 34, `SetEntry` 35, `ArgumentNumber` 36, and tag 29
   (`SetSegment`) is retired. `Processing` is tag 5 of `RangeKind`, `Xml` tag 7 of `Base` and
   `Walk` tag 3 of `IntExpr`.
 - **A range's region** (`Range::region`) is the paragraphs a GO TO stays in it for: `first` to
@@ -1011,7 +1015,8 @@ walker does on each execution; the last column names that work.
 | IF | `Branch` | Lowered | - |
 | EVALUATE | A chain of `Branch`, one per object; each comparison evaluates its subject, as the walker does | Lowered | - |
 | DISPLAY | `Display` with a format per item | One call | Kind dispatch (machine.rs:1913-1959) |
-| ACCEPT | `Accept` with the MOVE plan of what its source gives: SYSIN's line as bytes, a date, day, weekday or time as an integer of its digits. `rt::accept` stores SYSIN data itself, card images filling the receiver unconverted (C261); the plan only names the receiver's store | One call | - |
+| ACCEPT | `Accept` with the MOVE plan of what its source gives: SYSIN's line as bytes, a date, day, weekday or time as an integer of its digits, and under `--compliance extended` the PARM's program arguments (COMMAND-LINE, tag 5 of `AcceptFrom`) or its next word (ARGUMENT-VALUE, 7) as bytes and their count (ARGUMENT-NUMBER, 6) as an integer (C442). `rt::accept` stores SYSIN data itself, card images filling the receiver unconverted (C261); the plan only names the receiver's store. ARGUMENT-VALUE's `Accept` ends its block, and a `Select` follows: 1 when no word is left, the receiver unchanged | One call | ARGUMENT-VALUE: the exception arm |
+| DISPLAY UPON ARGUMENT-NUMBER | `ArgumentNumber` with the item or literal shown as an `IntExpr`: the next ARGUMENT-VALUE takes that word, the last when it is past them, none when it is below 1 (C442) | One call | - |
 | CALL, CANCEL | `Call`, then `Select`; `Cancel` (§9.3) | One call | Literal names decoded (machine.rs:966-971) |
 | OPEN … START | `File` per file named, then `Select` when a phrase is written (§9.4) | One call | File by name, keys, FILE STATUS, which phrase applies |
 | SORT, MERGE, RELEASE, RETURN | `Sort`, which runs its procedures as ranges; `Release`; `Return`, then `Select` of two arms (§9.6) | One call | SD, files, keys, collating sequence, special registers and procedures by name |

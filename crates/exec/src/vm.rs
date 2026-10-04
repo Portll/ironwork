@@ -197,7 +197,7 @@ fn run_unit<'w>(
 /// Environment ended it.
 fn run_main(code: &Code, id: &str, me: usize, run_unit: &mut RunUnit<'_, Rc<Code>, VmLibrary>, passed: Passed<'_>, page: &CodePage) -> Result<(Ending, i16), Halt> {
     let trap_off = matches!(passed, Passed::Parm(p) if rt::le::parm::trap_off(p));
-    passed.set_switches(run_unit);
+    passed.apply_parm(run_unit);
     let addresses = passed.addresses(run_unit, page);
     let ending = rt::vm::run(code, me, run_unit, &addresses, passed.main());
     let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(id, ending.is_ok()).map(drop));
