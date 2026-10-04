@@ -43,10 +43,10 @@ fn an_extended_program_runs_alike_on_the_interpreter_and_the_vm() {
 fn each_extension_is_a_warning_naming_it_and_where_it_is() {
     let parsed = syntax::parse_with(EXTENDED_PROGRAM, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap();
     let compiled = compile(parsed, &EXTENDED.iter().map(|f| f.to_string()).collect::<Vec<_>>()).unwrap_or_else(|e| panic!("{e:?}"));
-    let shown: Vec<(u32, u32, &str)> = compiled.diagnostics.iter().map(|m| (m.pos.line, m.pos.col, m.message.split(' ').next().unwrap())).collect();
+    let shown: Vec<(u32, u32, Option<&str>)> = compiled.diagnostics.iter().map(|m| (m.pos.line, m.pos.col, m.id)).collect();
     assert_eq!(
         shown,
-        [(1, 7, "IWX0001-W"), (6, 1, "IWX0002-W"), (7, 1, "IWX0002-W"), (7, 31, "IWX0004-W"), (9, 13, "IWX0005-W"), (10, 19, "IWX0005-W"), (16, 31, "IWX0004-W"), (17, 17, "IWX0003-W")]
+        [(1, 7, "IWX0001"), (6, 1, "IWX0002"), (7, 1, "IWX0002"), (7, 31, "IWX0004"), (9, 13, "IWX0005"), (10, 19, "IWX0005"), (16, 31, "IWX0004"), (17, 17, "IWX0003")].map(|(line, col, id)| (line, col, Some(id)))
     );
     assert!(compiled.diagnostics.iter().all(|m| m.severity == Severity::Warning));
     assert_eq!(syntax::return_code(&compiled.diagnostics), 4);
@@ -95,8 +95,8 @@ fn a_program_returning_omitted_returns_its_return_code_and_no_item() {
     assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
     let parsed = syntax::parse_all_with(RETURNING_OMITTED, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap();
     let compiled = compile(parsed[1].clone(), &EXTENDED.iter().map(|f| f.to_string()).collect::<Vec<_>>()).unwrap_or_else(|e| panic!("{e:?}"));
-    let shown: Vec<(u32, u32, &str, Severity)> = compiled.diagnostics.iter().map(|m| (m.pos.line, m.pos.col, m.message.split(' ').next().unwrap(), m.severity)).collect();
-    assert_eq!(shown, [(18, 27, "IWX0009-W", Severity::Warning)]);
+    let shown: Vec<(u32, u32, Option<&str>, Severity)> = compiled.diagnostics.iter().map(|m| (m.pos.line, m.pos.col, m.id, m.severity)).collect();
+    assert_eq!(shown, [(18, 27, Some("IWX0009"), Severity::Warning)]);
     let strict = compile(syntax::parse_all_with(RETURNING_OMITTED, &syntax::copy::Libraries::default()).unwrap().remove(1), &[]).err().unwrap();
     assert_eq!(strict.iter().map(|e| e.message.as_str()).collect::<Vec<_>>(), ["PROCEDURE DIVISION RETURNING OMITTED: not an 01 or 77 item of the LINKAGE SECTION"]);
 }

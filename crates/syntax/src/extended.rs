@@ -4,15 +4,16 @@
 //! RETURNING OMITTED leaves a program's PROCEDURE DIVISION header (docs/compliance.md).
 
 use crate::lexer::{Tok, Token};
+use crate::messages::{IWX0002, IWX0004, IWX0005, IWX0006, IWX0009};
 use crate::{Error, Pos};
 use std::collections::HashMap;
 
-pub const CONSTANT: &str = "IWX0002-W constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause)";
-pub const CONCATENATION: &str = "IWX0004-W literal concatenation with & (Micro Focus and GnuCOBOL; Enterprise COBOL has none)";
-pub const BINARY_USAGE: &str = "IWX0005-W the COBOL 2002 binary usage (Micro Focus and GnuCOBOL; not Enterprise COBOL's)";
-pub const NO_IDENTIFICATION_HEADER: &str = "IWX0006-W PROGRAM-ID with no IDENTIFICATION DIVISION header before it (COBOL 2002, Micro Focus and GnuCOBOL; Enterprise COBOL requires the header)";
-pub const ASSIGN_ITEM: &str = "IWX0007-W ASSIGN to a data item (Micro Focus and GnuCOBOL; Enterprise COBOL's assignment-name is never a data item)";
-pub const RETURNING_OMITTED: &str = "IWX0009-W PROCEDURE DIVISION RETURNING OMITTED (GnuCOBOL; Enterprise COBOL's RETURNING names an 01 or 77 item of the LINKAGE SECTION)";
+pub const CONSTANT: &str = "constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause)";
+pub const CONCATENATION: &str = "literal concatenation with & (Micro Focus and GnuCOBOL; Enterprise COBOL has none)";
+pub const BINARY_USAGE: &str = "the COBOL 2002 binary usage (Micro Focus and GnuCOBOL; not Enterprise COBOL's)";
+pub const NO_IDENTIFICATION_HEADER: &str = "PROGRAM-ID with no IDENTIFICATION DIVISION header before it (COBOL 2002, Micro Focus and GnuCOBOL; Enterprise COBOL requires the header)";
+pub const ASSIGN_ITEM: &str = "ASSIGN to a data item (Micro Focus and GnuCOBOL; Enterprise COBOL's assignment-name is never a data item)";
+pub const RETURNING_OMITTED: &str = "PROCEDURE DIVISION RETURNING OMITTED (GnuCOBOL; Enterprise COBOL's RETURNING names an 01 or 77 item of the LINKAGE SECTION)";
 
 /// BINARY-SHORT, BINARY-LONG and BINARY-DOUBLE, and the COMP-5 PICTURE each is: two, four and eight
 /// bytes of native binary.
@@ -175,7 +176,7 @@ impl Rewrite {
         }
         self.pending.extend(self.tokens[self.at].messages.iter().cloned());
         self.at += 1;
-        self.pending.push(Error::warning(level.pos, format!("{CONSTANT}: {name} stands for its value wherever it is used after this entry")));
+        self.pending.push(IWX0002.at(level.pos, format!("{CONSTANT}: {name} stands for its value wherever it is used after this entry")));
         self.pending.extend(value.messages);
         self.constants.insert(name, value.tok);
         Ok(())
@@ -185,7 +186,7 @@ impl Rewrite {
     fn identification_header(&mut self) {
         let at = self.tokens[self.at].clone();
         let made = |tok: Tok, messages: Vec<Error>| Token { tok, pos: at.pos, area_a: at.area_a, spelled: None, after_comma: false, messages };
-        let warning = Error::warning(at.pos, format!("{NO_IDENTIFICATION_HEADER}: the program reads as though IDENTIFICATION DIVISION. came before it"));
+        let warning = IWX0006.at(at.pos, format!("{NO_IDENTIFICATION_HEADER}: the program reads as though IDENTIFICATION DIVISION. came before it"));
         self.push(made(Tok::Word("IDENTIFICATION".into()), vec![warning]));
         self.push(made(Tok::Word("DIVISION".into()), Vec::new()));
         self.push(made(Tok::Period, Vec::new()));
@@ -195,7 +196,7 @@ impl Rewrite {
     /// program that returns no item is one with no RETURNING phrase.
     fn returning_omitted(&mut self) {
         let returning = self.tokens[self.at].clone();
-        self.pending.push(Error::warning(returning.pos, format!("{RETURNING_OMITTED}: the program is read with no RETURNING phrase, and returns its RETURN-CODE to its caller as any program does")));
+        self.pending.push(IWX0009.at(returning.pos, format!("{RETURNING_OMITTED}: the program is read with no RETURNING phrase, and returns its RETURN-CODE to its caller as any program does")));
         self.pending.extend(returning.messages);
         self.pending.extend(self.tokens[self.at + 1].messages.iter().cloned());
         self.at += 2;
@@ -226,7 +227,7 @@ impl Rewrite {
         };
         let picture = format!("{}{digits}", if signed { "S" } else { "" });
         let shown = format!("{BINARY_USAGE}: {usage}{} is read as PIC {picture} COMP-5", if signed { "" } else { " UNSIGNED" });
-        messages.push(Error::warning(token.pos, shown));
+        messages.push(IWX0005.at(token.pos, shown));
         messages.extend(token.messages.iter().cloned());
         let made = |tok: Tok, messages: Vec<Error>| Token { tok, pos: token.pos, area_a: false, spelled: None, after_comma: false, messages };
         self.push(made(Tok::Word("PIC".into()), messages));
@@ -275,7 +276,7 @@ fn join(left: Token, amp: Token, right: Token, decode: impl Fn(&[u8]) -> String)
         _ => return Err(Error::at(amp.pos, "& joins two alphanumeric or hexadecimal literals, or two national literals, either of which may be a level-78 constant standing for one")),
     };
     let mut messages = left.messages;
-    messages.push(Error::warning(amp.pos, format!("{CONCATENATION}: the literals on either side are one literal")));
+    messages.push(IWX0004.at(amp.pos, format!("{CONCATENATION}: the literals on either side are one literal")));
     messages.extend(amp.messages);
     messages.extend(right.messages);
     Ok(Token { tok, pos: left.pos, area_a: left.area_a, spelled: None, after_comma: left.after_comma, messages })

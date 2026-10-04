@@ -36,7 +36,7 @@ pub enum Tok {
 }
 
 /// The warning for `<>`, which the lexer reads as NOT =.
-pub const NOT_EQUAL: &str = "IWX0003-W <> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =";
+pub const NOT_EQUAL: &str = "<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Token {
@@ -290,7 +290,7 @@ impl Lexer<'_> {
                 }
             }
             '<' if self.extended && next == Some('>') => {
-                self.pending.push(Error::warning(pos, NOT_EQUAL));
+                self.pending.push(crate::messages::IWX0003.at(pos, NOT_EQUAL));
                 self.at += 2;
                 self.emit(Tok::Word("NOT".into()), pos);
                 let at = self.positions.get(self.at - 1).copied().unwrap_or(pos);
@@ -602,7 +602,7 @@ mod tests {
         let lexed = lex_under(&free, Compliance::Extended).unwrap();
         let marked: Vec<Tok> = lexed.iter().filter(|t| t.area_a).map(|t| t.tok.clone()).collect();
         assert_eq!(marked, [w("MAIN-P"), Tok::Number("0100".into())]);
-        assert!(lexed[0].messages[0].message.starts_with("IWX0001-W"), "{:?}", lexed[0].messages);
+        assert_eq!(lexed[0].messages[0].id, Some("IWX0001"), "{:?}", lexed[0].messages);
         assert!(lexed[1..].iter().all(|t| t.messages.is_empty()));
     }
 

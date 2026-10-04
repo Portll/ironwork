@@ -11,6 +11,7 @@ pub mod extended;
 pub mod feedback;
 pub mod jni;
 pub mod lexer;
+pub mod messages;
 pub mod parser;
 pub mod report;
 pub mod source;
@@ -57,9 +58,21 @@ impl Severity {
             Self::Error | Self::Severe | Self::Unrecoverable => None,
         }
     }
+
+    /// The letter after a message id's number: `IWC0101-S`.
+    pub const fn letter(self) -> char {
+        match self {
+            Self::Informational => 'I',
+            Self::Warning => 'W',
+            Self::Error => 'E',
+            Self::Severe => 'S',
+            Self::Unrecoverable => 'U',
+        }
+    }
 }
 
-/// A compiler message; [`Error::at`] makes a severe one.
+/// A compiler message; [`Error::at`] makes a severe one, and [`messages::Message::at`] one from the
+/// catalogue, with its id.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Error {
     pub pos: Pos,
@@ -67,11 +80,13 @@ pub struct Error {
     /// The COPY member the position is in, when it is not the program itself.
     pub file: Option<String>,
     pub severity: Severity,
+    /// The catalogue's id for the message, without its severity letter (docs/messages.md).
+    pub id: Option<&'static str>,
 }
 
 impl Error {
     pub fn at(pos: Pos, message: impl Into<String>) -> Self {
-        Self { pos, message: message.into(), file: None, severity: Severity::Severe }
+        Self { pos, message: message.into(), file: None, severity: Severity::Severe, id: None }
     }
 
     pub fn warning(pos: Pos, message: impl Into<String>) -> Self {
@@ -90,7 +105,8 @@ impl Error {
     }
 
     /// `file:line:col: message`, with `main` naming the program itself; a warning or informational
-    /// message puts its label before the message: `file:line:col: warning: message`.
+    /// message puts its label before the message, and an id goes before the message:
+    /// `file:line:col: warning: IWX0001-W message`.
     pub fn place(&self, main: &str) -> String {
         match (&self.file, self.pos.line) {
             (Some(f), _) => format!("{f}:{self}"),
@@ -99,11 +115,12 @@ impl Error {
         }
     }
 
-    /// The message, after its severity's label when it has one.
+    /// The message after its id, and both after its severity's label when it has one.
     pub fn labelled(&self) -> String {
+        let id = self.id.map(|id| format!("{id}-{} ", self.severity.letter())).unwrap_or_default();
         match self.severity.label() {
-            Some(label) => format!("{label}: {}", self.message),
-            None => self.message.clone(),
+            Some(label) => format!("{label}: {id}{}", self.message),
+            None => format!("{id}{}", self.message),
         }
     }
 }

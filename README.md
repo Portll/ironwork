@@ -278,9 +278,11 @@ messages', 0 when there is none (Enterprise COBOL Programming Guide SC27-8714-03
 | S, severe | 12 | refuse |
 | U, unrecoverable | 16 | refuse |
 
-Every refusal ironwork makes is S (assumption C45). A message id of ironwork's own starts IWX for an
-extension `--compliance extended` reads and IWR for an Enterprise COBOL construct ironwork refuses,
-as IWR0001-S refuses XML PARSE VALIDATING. A class definition, or a program with INVOKE or
+Every refusal ironwork makes is S (assumption C45). A message from ironwork's catalogue opens with
+its id: `IW`, the area's letter, four digits and the severity it was given, as `IWR0001-S` refuses
+XML PARSE VALIDATING. IWX names an extension `--compliance extended` reads and IWR an Enterprise
+COBOL construct ironwork does not run yet; [docs/messages.md](docs/messages.md) lists the areas and
+the messages catalogued so far, and the rest carry no id yet. A class definition, or a program with INVOKE or
 object references, compiled without THREAD, DLL, RENT or DBCS, or with NORENT beside THREAD or DLL,
 is W (J19). `ironwork check` exits with the return code. `ironwork run` and `ironwork cics` print
 the messages, then run the program at 0, 4 or 8, and otherwise exit 241 without running anything,
@@ -330,20 +332,28 @@ platform, what IBM documents and cobc does differently, and bugs.
 Messages go to standard error, one to a line: errors first, then warnings, then informational
 messages, each in the order ironwork found them.
 
-    path:line:col: message                   E, S or U
-    path:line:col: warning: message          W
-    path:line:col: informational: message    I
-    path: message                            the same three, for a message with no position
-    path: warning: message
-    path: informational: message
+    path:line:col: [ID-S ]message                   E, S or U
+    path:line:col: warning: [ID-W ]message          W
+    path:line:col: informational: [ID-I ]message    I
+    path: [ID-S ]message                            the same three, for a message with no position
+    path: warning: [ID-W ]message
+    path: informational: [ID-I ]message
 
-An error's line carries no severity: E, S and U lines look alike, and the exit status is the
-highest. `path` is the program as given, or the COPY member the position is in. An error's message
-never begins with `warning:` or `informational:`, so a parser can take the word after the position
-as the severity when it is one of those two. For example:
+An error's line carries no severity word: E, S and U lines look alike, and the exit status is the
+highest; an id's last letter is the message's severity. `path` is the program as given, or the COPY
+member the position is in. An error's message never begins with `warning:` or `informational:`, so
+a parser can take the word after the position as the severity when it is one of those two, and an
+id, when one follows, matches `IW[A-Z][0-9]{4}-[IWESU]`. For example:
 
     client.cbl:12:17: Y is not defined
+    client.cbl:8:26: IWR0001-S XML PARSE VALIDATING WITH OSR: the schema is in IBM's Optimized Schema Representation (OSR), which ironwork does not read
     client.cbl: warning: program CLIENT uses object-oriented syntax, which IBM compiles only with THREAD, DLL, RENT and DBCS: THREAD, DLL missing from its CBL or PROCESS cards (see J13 and J19)
+
+`--diagnostics json` on `check`, `run`, `cics` and `compile` writes each message as one JSON object
+a line instead, its keys sorted: `col`, `file` (the program as given), `id` (null for a message the
+catalogue does not list yet), `line`, `member` (the COPY member, or null), `message` and `severity`
+(`I`, `W`, `E`, `S` or `U`); `line` and `col` are null for a message with no position. Every other
+line on standard error is written as before.
 
 ## Crates
 

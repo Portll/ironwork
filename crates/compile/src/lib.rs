@@ -109,7 +109,7 @@ fn record_lengths(layout: &Layout, k: usize) -> (u32, u32) {
 
 const FUNCTIONS: &[&str] = rt::intrinsic::FIRST;
 
-pub const NUMERIC_FUNCTION_MOVED: &str = "IWX0008-W an integer or numeric function as a MOVE's sender (GnuCOBOL; Enterprise COBOL takes one only where an arithmetic expression can be)";
+pub const NUMERIC_FUNCTION_MOVED: &str = "an integer or numeric function as a MOVE's sender (GnuCOBOL; Enterprise COBOL takes one only where an arithmetic expression can be)";
 
 /// Checks and lays out a parsed program. `flags` are this compiler's own, such as `-silent`. A
 /// program is refused, with every message, when one stops its object code: under IBM's default
@@ -359,7 +359,7 @@ fn assign_items(program: &mut Program, layout: &layout::Layout, options: &Option
         } else if f.sort || sorted.contains(&f.name.as_str()) {
             errors.push(Error::at(pos, format!("ASSIGN {name}: a file SORT or MERGE reads, writes or describes taking its name from a data item is not supported yet")));
         } else {
-            errors.push(Error::warning(pos, format!("{}: each OPEN of {} takes its DD name from {name}", syntax::extended::ASSIGN_ITEM, f.name)));
+            errors.push(syntax::messages::IWX0007.at(pos, format!("{}: each OPEN of {} takes its DD name from {name}", syntax::extended::ASSIGN_ITEM, f.name)));
             kept.push(k);
         }
     }
@@ -1545,7 +1545,7 @@ impl Check<'_> {
             return;
         }
         if self.extended {
-            self.errors.push(Error::warning(f.pos, format!("{NUMERIC_FUNCTION_MOVED}: FUNCTION {name} is moved as its value")));
+            self.errors.push(syntax::messages::IWX0008.at(f.pos, format!("{NUMERIC_FUNCTION_MOVED}: FUNCTION {name} is moved as its value")));
         } else {
             self.errors.push(Error::at(f.pos, format!("MOVE FUNCTION {name}: an integer or numeric function can be used only where an arithmetic expression can, not as a MOVE's sender")));
         }

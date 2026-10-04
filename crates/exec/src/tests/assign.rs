@@ -102,10 +102,10 @@ fn extended_compile(source: &str) -> Result<Compiled, Vec<syntax::Error>> {
 #[test]
 fn the_item_is_named_with_a_warning_and_must_be_alphanumeric_and_outside_sort() {
     let compiled = extended_compile(&reader("TO WS-DD")).unwrap_or_else(|e| panic!("{e:?}"));
-    let warning = compiled.diagnostics.iter().find(|m| m.message.starts_with("IWX0007-W")).expect("IWX0007-W");
+    let warning = compiled.diagnostics.iter().find(|m| m.id == Some("IWX0007")).expect("IWX0007-W");
     assert_eq!((warning.pos.line, warning.severity), (6, Severity::Warning));
     assert!(warning.message.ends_with("each OPEN of IN-FILE takes its DD name from WS-DD"), "{}", warning.message);
-    assert!(extended_compile(&reader("TO INDD")).unwrap().diagnostics.iter().all(|m| !m.message.starts_with("IWX0007")), "a name that is no data item stays a DD name");
+    assert!(extended_compile(&reader("TO INDD")).unwrap().diagnostics.iter().all(|m| m.id != Some("IWX0007")), "a name that is no data item stays a DD name");
     let numeric = reader("USING FS").replace("01  FS PIC XX.", "01  FS PIC 99.");
     let errors = extended_compile(&numeric).err().unwrap();
     assert!(errors.iter().any(|e| e.message == "ASSIGN FS: the item holding the file's name must be alphanumeric or a group"), "{errors:?}");

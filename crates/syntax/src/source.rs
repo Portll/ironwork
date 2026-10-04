@@ -42,7 +42,7 @@ impl Source {
 }
 
 /// The stable identifier and text of the warning for free-form source.
-pub const FREE_FORM: &str = "IWX0001-W free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone)";
+pub const FREE_FORM: &str = "free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone)";
 
 const TEXT_START: usize = 7;
 const AREA_B: usize = 11;
@@ -97,7 +97,7 @@ fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_fr
         if extended && let Some(found) = directive(chars, Pos { file, line, col: 1 }) {
             let (format, pos) = found?;
             match format {
-                Format::Free if free.is_none() => free = Some((line + 1, Some(Error::warning(pos, format!("{FREE_FORM}: this directive makes the lines after it free form"))))),
+                Format::Free if free.is_none() => free = Some((line + 1, Some(crate::messages::IWX0001.at(pos, format!("{FREE_FORM}: this directive makes the lines after it free form"))))),
                 Format::Fixed => {
                     if let Some((first, warning)) = free.take().filter(|(first, _)| *first < line) {
                         out.free.push(FreeSpan { file, first, last: line - 1, warning });
@@ -259,7 +259,7 @@ fn free_from_the_start(input: &str, file: u16) -> Option<(u32, Error)> {
         let card = option_card(&chars.iter().take(TEXT_END).collect::<String>()).is_some();
         if start < TEXT_START - 1 && !chars[start].is_ascii_digit() && !matches!(c, ' ' | '*' | '/' | '-' | 'D' | 'd') && !card {
             let why = format!("{FREE_FORM}: column 7 holds {c:?}, which no fixed-form line can, so the file is read in free form");
-            return Some((1, Error::warning(Pos { file, line, col: TEXT_START as u32 }, why)));
+            return Some((1, crate::messages::IWX0001.at(Pos { file, line, col: TEXT_START as u32 }, why)));
         }
     }
     None
@@ -569,7 +569,7 @@ mod tests {
         assert_eq!(s.free.len(), 1);
         let warning = s.free[0].warning.clone().unwrap();
         assert_eq!((s.free[0].first, s.free[0].last, warning.pos), (1, u32::MAX, Pos { file: 0, line: 2, col: 7 }));
-        assert!(warning.message.starts_with("IWX0001-W free-form source") && warning.message.contains("column 7 holds 'F'"));
+        assert!(warning.labelled().starts_with("warning: IWX0001-W free-form source") && warning.message.contains("column 7 holds 'F'"));
         assert_eq!(s.positions[s.text.find('I').unwrap()], Pos { file: 0, line: 2, col: 1 });
         let strict = read(text).unwrap();
         assert!(strict.free.is_empty() && strict.text.contains("ICATION DIVISION."), "{}", strict.text);

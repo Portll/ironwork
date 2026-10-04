@@ -223,3 +223,42 @@ fn initcheck_warns_at_compile_time_with_return_code_4_and_the_program_runs() {
         assert_eq!((checked.status.code(), stderr(&checked)), (Some(0), String::new()), "{card}");
     }
 }
+
+const VALIDATING: &str = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. V.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  DOC PIC X(8) VALUE '<a>x</a>'.\n       01  OSR PIC X(100).\n       PROCEDURE DIVISION.\n           XML PARSE DOC VALIDATING WITH OSR PROCESSING PROCEDURE P.\n           GOBACK.\n       P.\n           CONTINUE.\n";
+const REFUSED: &str = "XML PARSE VALIDATING WITH OSR: the schema is in IBM's Optimized Schema Representation (OSR), which ironwork does not read";
+
+#[test]
+fn a_catalogued_message_carries_its_id_in_text_and_json_and_an_uncatalogued_one_none() {
+    let refused = Source::new("validating", VALIDATING);
+    let path = refused.path();
+    let text = ironwork(&["check", path]);
+    assert_eq!((text.status.code(), stderr(&text)), (Some(12), format!("{path}:8:26: IWR0001-S {REFUSED}\n")));
+    for flags in [&["--diagnostics", "json"][..], &["--diagnostics=json"]] {
+        let json = ironwork(&[&["check", path][..], flags].concat());
+        let object = format!("{{\"col\":26,\"file\":\"{path}\",\"id\":\"IWR0001\",\"line\":8,\"member\":null,\"message\":\"{REFUSED}\",\"severity\":\"S\"}}\n");
+        assert_eq!((json.status.code(), stderr(&json)), (Some(12), object), "{flags:?}");
+    }
+    let ran = ironwork(&["run", path, "--diagnostics", "json"]);
+    assert_eq!(ran.status.code(), Some(241));
+    assert!(stderr(&ran).starts_with("{\"col\":26,") && stderr(&ran).ends_with(&not_run(path, 12)), "{}", stderr(&ran));
+
+    let undefined = Source::new("undefined-json", "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  X PIC X.\n       PROCEDURE DIVISION.\n           MOVE Y TO X.\n           GOBACK.\n");
+    let json = ironwork(&["check", undefined.path(), "--diagnostics", "json"]);
+    let object = format!("{{\"col\":17,\"file\":\"{}\",\"id\":null,\"line\":7,\"member\":null,\"message\":\"Y is not defined\",\"severity\":\"S\"}}\n", undefined.path());
+    assert_eq!(stderr(&json), object);
+}
+
+#[test]
+fn diagnostics_takes_text_or_json_on_the_commands_that_compile() {
+    let source = Source::new("diagnostics-flag", VALIDATING);
+    assert_eq!(ironwork(&["check", source.path(), "--diagnostics", "text"]).status.code(), Some(12));
+    for (args, said) in [
+        (&["check", source.path(), "--diagnostics", "xml"][..], "--diagnostics needs text or json"),
+        (&["check", source.path(), "--diagnostics"], "--diagnostics needs text or json"),
+        (&["assumptions", "--diagnostics", "json"], "--diagnostics is for check, run, cics and compile"),
+    ] {
+        let o = ironwork(args);
+        assert_eq!(o.status.code(), Some(2), "{args:?}");
+        assert!(stderr(&o).contains(said), "{args:?}: {}", stderr(&o));
+    }
+}

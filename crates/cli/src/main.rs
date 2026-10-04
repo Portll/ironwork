@@ -10,7 +10,7 @@ usage:
                [-debug] [--cics-return-warning=once|always|never] [--optimize=0|1|2] [-I <dir>]... [-L <dir>]... [--vm]
                [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT | --argument path|OMITTED...]
                [--exit-code] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
-               [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]...
+               [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
                                                        compile and run; CBL and PROCESS cards set the options
   ironwork run <module.iwm> [-L <dir>]... [-I <dir>]... [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
                [--statement-limit N] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
@@ -18,7 +18,7 @@ usage:
                                                        run a load module's first program on the VM, with the options
                                                        it was compiled with
   ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]...
-               [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]...
+               [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
                                                        compile only
   ironwork cics <program.cbl> [run flags] [--vm] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
                [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]... [--td QUEUE=path]...
@@ -31,7 +31,7 @@ usage:
                                                        program of a CICS task; --serve takes a source
   ironwork compile <program.cbl>... [-o <dir>] [--bundle NAME] [--source-prefix DIR] [-silent] [-strict-sort-keys]
                [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never]
-               [--optimize=0|1|2]
+               [--optimize=0|1|2] [--diagnostics text|json]
                [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [-I <dir>]... [-L <dir>]...
                                                        compile and lower each source's programs to a load module
   ironwork dump [--section NAME]... [--strings] [--no-check] <module.iwm>
@@ -87,6 +87,11 @@ flags:
              the compiler invocation's OPTIMIZE level; a CBL or PROCESS card's OPTIMIZE wins over it.
              Under NOINVDATA, 1 and 2 compare an unsigned zoned item with zero, or with one of its
              own length, by its bytes, as IBM's optimizer may (assumption C262)
+  --diagnostics text|json
+             check, run, cics and compile: how compiler messages reach standard error. text (the
+             default) writes file:line:col: [warning: |informational: ]ID-S message; json writes one
+             object a line, with file, member (the COPY member, or null), line, col, id, severity
+             and message. docs/messages.md lists the ids. --diagnostics=json works too
   --dialect ibm|gnucobol
              whose result to give where ironwork knowingly differs from GnuCOBOL: ibm (the default)
              gives Enterprise COBOL's, as the register of assumptions reads it; gnucobol gives that
@@ -435,6 +440,7 @@ mod compare;
 mod compile;
 mod coverage;
 mod ddl;
+mod diagnostics;
 mod dfsort;
 mod dfsort_number;
 mod dump;
@@ -520,6 +526,7 @@ fn driver() -> ExitCode {
     let mut step_parms: Vec<(String, String)> = Vec::new();
     let mut instream: Vec<(String, std::path::PathBuf)> = Vec::new();
     let mut exit_code = false;
+    let mut json = None;
     // A usage error waits for the command, whose convention its exit status follows.
     let mut usage: Option<String> = None;
     macro_rules! refuse {
@@ -692,6 +699,16 @@ fn driver() -> ExitCode {
             "--c-series" => c_series = true,
             "--exit-code" => exit_code = true,
             "--vm" => vm = true,
+            "--diagnostics" => match args.next().as_deref() {
+                Some("text") => json = Some(false),
+                Some("json") => json = Some(true),
+                _ => refuse!("--diagnostics needs text or json"),
+            },
+            f if f.starts_with("--diagnostics=") => match &f["--diagnostics=".len()..] {
+                "text" => json = Some(false),
+                "json" => json = Some(true),
+                _ => refuse!("--diagnostics needs text or json"),
+            },
             "-I" => match args.next() {
                 Some(dir) => libraries.push(std::path::PathBuf::from(dir)),
                 None => refuse!("-I needs a directory"),
@@ -753,6 +770,10 @@ fn driver() -> ExitCode {
     if exit_code && !banded {
         return usage_error("--exit-code is for run, cics and job, and not with --expected");
     }
+    if json.is_some() && !matches!(rest.first().map(String::as_str), Some("check" | "run" | "cics" | "compile")) {
+        return usage_error("--diagnostics is for check, run, cics and compile");
+    }
+    diagnostics::follow(json == Some(true));
     if rest == ["assumptions"] {
         return list_assumptions(c_series);
     }
@@ -1210,7 +1231,7 @@ fn open_sysin(dds: &exec::files::Dds) -> Result<Box<dyn io::BufRead>, ExitCode> 
 fn listing(messages: &[syntax::Error], path: &str) -> Vec<String> {
     let mut ordered: Vec<&syntax::Error> = messages.iter().collect();
     ordered.sort_by_key(|m| std::cmp::Reverse(m.severity));
-    ordered.into_iter().map(|m| m.place(path)).collect()
+    ordered.into_iter().map(|m| diagnostics::line(m, path)).collect()
 }
 
 /// Prints a compile's messages and gives its return code, the highest of theirs.
