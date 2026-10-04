@@ -369,22 +369,19 @@ struct Broken {
 /// older than a minute whose holder is not running. It is aged from the time it holds or, holding
 /// none, from its modification time. The break goes into the ledger.
 fn take_lock(path: &Path, wait: Duration) -> Result<Option<Broken>, String> {
-    let mut broken = None;
     let deadline = Instant::now() + wait;
     loop {
         match open_new(path) {
             Ok(mut f) => {
                 let _ = writeln!(f, "{} {}", std::process::id(), now_ms());
-                return Ok(broken);
+                return Ok(None);
             }
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
                 if let Some(seen) = read_lock(path)
-                    && seen.age_ms > LOCK_STALE_MS
-                    && !seen.pid.is_some_and(running)
+                    && seen.stale()
                     && break_stale(path, &seen)
                 {
-                    broken = Some(Broken { pid: seen.pid, age_ms: seen.age_ms });
-                    continue;
+                    return Ok(Some(Broken { pid: seen.pid, age_ms: seen.age_ms }));
                 }
                 if Instant::now() >= deadline {
                     return Err("the ledger lock could not be had".into());
@@ -433,6 +430,12 @@ fn read_lock(path: &Path) -> Option<SeenLock> {
     Some(SeenLock { text, file: file_id(&meta), pid, age_ms })
 }
 
+impl SeenLock {
+    fn stale(&self) -> bool {
+        self.age_ms > LOCK_STALE_MS && !self.pid.is_some_and(running)
+    }
+}
+
 /// Whether process `pid` is running; where that cannot be told, it is taken as not running.
 fn running(pid: i64) -> bool {
     #[cfg(target_os = "linux")]
@@ -450,19 +453,25 @@ fn running(pid: i64) -> bool {
     }
 }
 
-/// Moves the stale lock `seen` aside before removing it, so a lock a peer took after it was read
-/// is put back instead of removed. Returns whether the stale lock was the one broken.
+/// Replaces the stale lock `seen` with this writer's own. Breakers hold `ledger.lock.break` while
+/// they break, so one breaks at a time, and rename it over the lock only while the lock is still
+/// the file judged stale: a lock a peer took since is never moved. Returns whether this writer
+/// holds the lock.
 fn break_stale(path: &Path, seen: &SeenLock) -> bool {
-    let aside = path.with_file_name(format!("{LOCK}.{}.{}", std::process::id(), hex(&random(4))));
-    if fs::rename(path, &aside).is_err() {
+    let claim = path.with_file_name(format!("{LOCK}.break"));
+    let Ok(mut f) = open_new(&claim) else {
+        if read_lock(&claim).is_some_and(|left| left.stale()) {
+            let _ = fs::remove_file(&claim);
+        }
         return false;
+    };
+    let _ = writeln!(f, "{} {}", std::process::id(), now_ms());
+    drop(f);
+    if read_lock(path).is_some_and(|current| current.file == seen.file && current.text == seen.text) && fs::rename(&claim, path).is_ok() {
+        return true;
     }
-    let same = fs::symlink_metadata(&aside).is_ok_and(|m| file_id(&m) == seen.file) && fs::read(&aside).is_ok_and(|t| t == seen.text);
-    if !same {
-        let _ = fs::hard_link(&aside, path);
-    }
-    let _ = fs::remove_file(&aside);
-    same
+    let _ = fs::remove_file(&claim);
+    false
 }
 
 /// The last line of the ledger, or None for an empty or absent one; an unterminated last line is
@@ -692,8 +701,22 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    fn locks(dir: &Path) -> Vec<String> {
+        fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with(LOCK)).collect()
+    }
+
+    /// A file's inode and change time. A rename or a link changes the change time, so an unchanged
+    /// pair shows the file never left its path.
+    #[cfg(unix)]
+    fn identity(path: &Path) -> (u64, i64, i64) {
+        use std::os::unix::fs::MetadataExt;
+        let meta = fs::metadata(path).unwrap();
+        (meta.ino(), meta.ctime(), meta.ctime_nsec())
+    }
+
+    #[cfg(unix)]
     #[test]
-    fn a_lock_taken_after_a_stale_one_was_read_is_put_back() {
+    fn a_lock_taken_after_a_stale_one_was_read_is_left_alone() {
         let dir = temp();
         let lock = dir.join(LOCK);
         fs::write(&lock, format!("999999 {}\n", now_ms() - 120_000)).unwrap();
@@ -701,12 +724,34 @@ mod tests {
         fs::remove_file(&lock).unwrap();
         let peer = format!("{} {}\n", std::process::id(), now_ms());
         fs::write(&lock, &peer).unwrap();
-        let locks = || fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with(LOCK)).collect::<Vec<_>>();
+        let before = identity(&lock);
         assert!(!break_stale(&lock, &stale));
+        assert_eq!(identity(&lock), before);
         assert_eq!(fs::read_to_string(&lock).unwrap(), peer);
-        assert_eq!(locks(), [LOCK]);
+        assert_eq!(locks(&dir), [LOCK]);
         assert!(break_stale(&lock, &read_lock(&lock).unwrap()));
-        assert!(locks().is_empty());
+        assert_ne!(identity(&lock).0, before.0);
+        assert_eq!(locks(&dir), [LOCK]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_breakers_claim_is_waited_for_while_held_and_removed_once_stale() {
+        let dir = temp();
+        let ev = dir.join("ev");
+        prepare(&ev, &[]).unwrap();
+        let mut gone = std::process::Command::new(std::env::current_exe().unwrap()).arg("--list").stdout(std::process::Stdio::null()).spawn().unwrap();
+        gone.wait().unwrap();
+        let stale = format!("{} {}\n", gone.id(), now_ms() - 120_000);
+        fs::write(ev.join(LOCK), &stale).unwrap();
+        let claim = ev.join(format!("{LOCK}.break"));
+        fs::write(&claim, format!("{} {}\n", std::process::id(), now_ms())).unwrap();
+        assert!(take_lock(&ev.join(LOCK), Duration::from_millis(100)).is_err());
+        assert_eq!(fs::read_to_string(ev.join(LOCK)).unwrap(), stale);
+        fs::write(&claim, &stale).unwrap();
+        assert_eq!(closed(&ev), Ledger::Recorded);
+        assert_eq!(field_of(&ledger_lines(&ev)[1], "kind").unwrap(), "lock-broken");
+        assert!(locks(&ev).is_empty());
         fs::remove_dir_all(dir).unwrap();
     }
 
