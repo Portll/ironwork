@@ -3,8 +3,9 @@
 Step 0 of [codegen-runtime.md](codegen-runtime.md) §14: four programs timed under the interpreter
 (the walker), the VM and GnuCOBOL, as the base for the VM target and B6's native target.
 
-**Status:** the interpreter and cobc measured 2026-09-30; the VM measured 2026-10-03 on a loaded
-machine (see VM results), to be rerun on a quiet one.
+**Status:** the interpreter and cobc measured 2026-09-30 as the base; the VM measured 2026-10-04
+with the VM performance commits 6489a92..bbf9941, meeting the [VM target](#vm-target) on all four
+programs (see VM results).
 
 ## Method
 
@@ -37,21 +38,39 @@ cobc since b6c3b48 (see Correctness).
 
 ## VM results
 
-Measured 2026-10-03 at ironwork 626802c, release build, `RUNS=3`, while four other ironwork builds
-ran on the machine. Under that load cobc's `seqio` took 28.0 s against 4.23 s on 2026-09-30, so
-the absolute times are inflated, I/O most of all. The ratios compare runs interleaved under the
-same load.
+One `tools/bench.sh` run, 2026-10-04:
+
+| | |
+|---|---|
+| Machine | Apple M5 Pro, 18 cores, 51539607552 bytes (48 GiB) |
+| ironwork | main 356f2d2 with the VM performance commits (on main as 6489a92..bbf9941), release build |
+| rustc | 1.98.1 (48a229cea 2026-09-01) |
+| cobc | GnuCOBOL 3.2.0 |
+| Runs | `RUNS=5`, interleaved; times are medians, in seconds |
+| Load | 1-minute load average 8.1 at the start and 19.1 at the end, from other sessions' ironwork tests and a veld benchmark |
 
 | Program | Interpreter | VM | cobc -O2 | VM / interpreter | VM / cobc |
 |---|---|---|---|---|---|
-| `seqio` | 18.74 | 11.29 | 28.01 | 0.60 | 0.4 |
-| `packed` | 4.76 | 2.37 | 0.238 | 0.50 | 10.0 |
-| `tblsrch` | 6.85 | 4.57 | 0.042 | 0.67 | 109 |
-| `callheavy` | 6.34 | 2.57 | 0.452 | 0.40 | 5.7 |
+| `seqio` | 4.51 | 1.49 | 2.26 | 0.33 | 0.66 |
+| `packed` | 2.83 | 0.831 | 0.156 | 0.29 | 5.3 |
+| `tblsrch` | 4.93 | 0.921 | 0.013 | 0.19 | 71 |
+| `callheavy` | 6.92 | 1.27 | 0.359 | 0.18 | 3.5 |
 
-The VM's output equals the interpreter's on all four. Against the [VM target](#vm-target):
-`tblsrch` 0.67 and `callheavy` 0.40 of the interpreter against 0.20, and `packed` 0.50 against
-0.33. `seqio`'s 0.4 times cobc does not count: the load slowed cobc's `seqio` almost sevenfold.
+Against the [VM target](#vm-target):
+
+| Program | VM | Target | |
+|---|---|---|---|
+| `tblsrch` | 0.187 of the interpreter | at most 0.20 | met |
+| `callheavy` | 0.184 of the interpreter | at most 0.20 | met |
+| `packed` | 0.294 of the interpreter | at most 0.33 | met |
+| `seqio` | 0.66 times cobc | at most 1.25 | met |
+
+- The VM's output equals the interpreter's on all four programs in every run.
+- The interpreter shares the semantics library's decimal reads, stores and arithmetic with the VM,
+  and runs faster than in the base table: `packed` 2.83 s against 4.58 s, `tblsrch` 4.93 s against
+  7.25 s. Each ratio is against this run's interpreter.
+- `tblsrch` and `callheavy` are within 0.02 of their target. `callheavy`'s VM median, 1.27 s, is
+  above the 1.24 s reference in the target table, while its ratio is within the target.
 
 ## Correctness
 
