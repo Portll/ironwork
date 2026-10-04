@@ -448,7 +448,7 @@ again, and its `observed-12.1.5.txt` is what Db2 answered.
 | SQ4 | The PostgreSQL SQLSTATE to Db2 SQLCODE table | Observed for -803, -407, -530, -104, -204 (42704) and -206. Db2 for Linux gives -433 where z/OS documents -404 for a string too long for its column, and -801 where z/OS documents -802 (22012) for division by zero; the table keeps z/OS's. -911 is not provoked |
 | SQ5 | The dialect rewrite table | Chosen |
 | SQ6 | The SCRAM client nonce, where there is no `/dev/urandom` (Windows), comes from `std`'s OS-seeded `RandomState` keys, the process and the clock | Chosen |
-| SQ7 | A name in an INTO list written without its colon is a host variable, as older precompilers assumed. Real programs do it (`FETCH C INTO CSR-ENTITY, CSR-PROJ-ID`) | Recalled |
+| SQ7 | A name in an INTO list written without its colon is a host variable. Real programs do it (`FETCH C INTO CSR-ENTITY, CSR-PROJ-ID`); Db2 13's precompiler reports the missing colon instead (SQL Reference, db2z_refs2hostvars) | Chosen |
 | SQ8 | WHENEVER and cursor declarations carry on in listing order across nested programs, since the precompiler reads the source in order | Chosen |
 | SQ9 | An IEEE double stored into COMP-1 or COMP-2 drops the low-order bits that do not fit, rather than rounding | Chosen |
 | SQ10 | A zoned DISPLAY item without SIGN SEPARATE is a DECIMAL host variable, as SIGN LEADING SEPARATE is | Chosen |
@@ -461,9 +461,9 @@ DELETE that changes none; -811, -305, -304; -501 for FETCH or CLOSE of a cursor 
 after a COMMIT closes it; -502, -507 and -508; a held cursor fetching after COMMIT; and SQLWARN3
 with SQLSTATE 01503 when an INTO list is shorter than the select list.
 
-Not settled here: SQ5 and SQ6 are ironwork's own choices; SQ7 to SQ10 need Db2 for z/OS and its
-COBOL precompiler; -925 and -926 need CICS. IBM's COBOL for Linux trial cannot serve, as its licence
-is for evaluation only.
+Not settled here: SQ5 to SQ7 are ironwork's own choices, SQ7 against Db2's documented rule; SQ8 to
+SQ10 need Db2 for z/OS and its COBOL precompiler; -925 and -926 need CICS. IBM's COBOL for Linux
+trial cannot serve, as its licence is for evaluation only.
 
 ## 11. Invariants
 

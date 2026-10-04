@@ -366,8 +366,8 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: HFP_FROM_FIXED_TRUNCATES,
-        claim: "CONVERT FROM FIXED to HFP truncates the hexadecimal digits the precision cannot hold",
-        basis: Basis::Recalled,
+        claim: "CONVERT FROM FIXED to HFP (CEFR, CDFR, CXFR, CEGR, CDGR, CXGR) normalizes the result and rounds it toward zero, truncating the hexadecimal digits the precision cannot hold (z/Architecture Principles of Operation SA22-7832-13, p. 18-11; Figure 9-15, Comparison of Rounding Action, p. 9-17), and Hercules follows the Principles of Operation",
+        basis: Basis::Documented,
         oracle: Oracle::Hercules,
     },
     Assumption {
@@ -420,8 +420,8 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: PREFERRED_RESULT_SIGNS,
-        claim: "Arithmetic results take the preferred sign under either NUMPROC setting: C or D for a signed item, F for an unsigned one",
-        basis: Basis::Recalled,
+        claim: "Data produced by COBOL arithmetic statements conforms to the IBM system standards: the sign is X'C' when the result is positive or zero and X'D' when it is negative for a signed zoned or packed item, and X'F' for an unsigned one (Programming Guide SC27-8714-03, p. 392, NUMPROC). The sentence carries no NUMPROC condition, and under NUMPROC(NOPFD) the preferred sign is always generated in the receiver (p. 53)",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
@@ -480,8 +480,8 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: ALTERNATE_KEY_ORDER,
-        claim: "Records sharing an alternate key come back in the order they were written; a record REWRITTEN with a new alternate key goes after the others with it",
-        basis: Basis::Recalled,
+        claim: "Records sharing an alternate key come back in the order in which they were placed in the set of records with that key (Language Reference SC27-8713-03, pp. 150, 152, 428; z/OS 3.1 DFSMS Using Data Sets, idad400/d4349). A REWRITE may change an alternate key (Language Reference, p. 434), and VSAM updates the alternate indexes of the upgrade set on every update (idad400/gu123). IBM does not state where a record REWRITTEN with a new alternate key goes among the others with it; ironwork places it after them, the REWRITE being when it enters that key's set",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
@@ -492,14 +492,14 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: START_COMPARES_SHORTER,
-        claim: "START compares the key with its operand over the shorter of the two, left to right, as bytes",
-        basis: Basis::Recalled,
+        claim: "START compares the key with data-name-1 as alphanumeric items, whatever their category, over the shorter length, as if the longer were truncated on the right, and PROGRAM COLLATING SEQUENCE has no effect (Language Reference SC27-8713-03, p. 456). The comparison runs left to right on single-byte character values ordered by their hexadecimal value (pp. 276-277)",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
         id: CICS_FRESH_STORAGE,
-        claim: "A COBOL program reached by EXEC CICS LINK or XCTL starts with fresh WORKING-STORAGE each time, unlike one reached by CALL",
-        basis: Basis::Recalled,
+        claim: "A COBOL program reached by EXEC CICS LINK gets a new initialized copy of its WORKING-STORAGE on each entry, and its run unit is reinitialized; one reached by CALL gets initialized WORKING-STORAGE on its first entry within a CICS logical level and its last-used state on later entries at that level (CICS TS 6.x, Rules for calling subprograms, dfhp3_cobol_subprog_rules). A program reached by XCTL starts a run unit and is not a subprogram (CICS TS 6.x, Flow of control between programs and subprograms, dfhp3_cobol_subprog_flow), CICS obtains a separate copy of working storage every time an application program runs (Quasi-reentrant application programs, dfhp3_concepts_quasirent), and a main program is initialized each time it is called (Programming Guide SC27-8714-03, p. 547). IBM does not say in one sentence that an XCTL target gets fresh WORKING-STORAGE; ironwork reads these together and gives it fresh storage",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
@@ -516,32 +516,32 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: CICS_LENGTH_DEFAULTS_TO_INTO,
-        claim: "READ, READNEXT, READPREV, READQ TS and READQ TD without LENGTH take the INTO item's length as the limit, so a longer record raises LENGERR",
-        basis: Basis::Recalled,
+        claim: "Under the translator's default LENGTH option, a COBOL EXEC CICS command that omits LENGTH gets a generated length, the referenced variable's (CICS TS 6.x, Translator options provided by the CICS-supplied command-level language translator, dfhp3_transl_options_intro; EXEC CICS command argument values, dfhp4_argumentvalues). For READ, READNEXT and READPREV with INTO it is the largest record the program accepts: a longer record is truncated to it, LENGERR is raised, and the LENGTH area gets the record's untruncated length (CICS TS 6.x, READ, dfhp4_read; READNEXT, dfhp4_readnext; READPREV, dfhp4_readprev). For READQ TS and READQ TD with INTO it is the most data the program accepts, and longer data is truncated with LENGERR (READQ TS, dfhp4_readqts; READQ TD, dfhp4_readqtd). CICS also raises LENGERR when it reads a fixed-length record into an area longer than the record (dfhp4_read); ironwork does not, and delivers the shorter record",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
         id: CICS_PROGRAM_CHECK_IS_ASRA,
-        claim: "A program check (S0C4, S0C7 and the like) in a CICS task ends it with transaction abend ASRA",
-        basis: Basis::Recalled,
+        claim: "A program check in a user task abends the task with ASRA (CICS TS 6.x, Processing operating system abends and program checks, dfht21n; ASRA). Protection exceptions (interrupt code 4, S0C4) and data exceptions (code 7, S0C7) are program checks (What type of program check occurred, dfhs10q). CICS reports ASRD instead when the check comes from invoking CICS macros or accessing the CSA or TCA (Transaction abend codes: AEYD, AICA, ASRA, ASRB, and ASRD, dfhs1l7), which a COBOL program on ironwork cannot do, and an active HANDLE ABEND's action takes place (Language Environment abend and condition handling, dfhp3_langenv_abend)",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
         id: CICS_BROWSE_SKIP,
-        claim: "READNEXT after the program changed RIDFLD to a key the browse is not at continues from the first record at or after the new RIDFLD (skip-sequential)",
-        basis: Basis::Recalled,
+        claim: "Changing RIDFLD before the next READNEXT repositions the browse to the new identifier, from which it continues (CICS TS 6.x, READNEXT, dfhp4_readnext), what IBM calls skip sequential processing (Efficient data set operations, dfhp3c00110). In a browse started with GTEQ, STARTBR's default for a KSDS or RRDS (STARTBR, dfhp4_startbr), the next record is the first whose key is greater than or equal to the new RIDFLD (dfhp4_readnext); in a generic browse the new RIDFLD must be generic (dfhp4_readnext), and X'FF' keys cannot reposition a browse (Sequential reading (browsing), dfhp3u7). IBM does not say where a browse started with EQUAL goes when repositioned to a key no record has; ironwork applies the at-or-after rule there too",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
         id: BMS_RECEIVE_NULLS,
-        claim: "RECEIVE MAP sets the input map to nulls, then fills only the fields the operator modified; a field erased to empty gets F = X'80' and L = 0",
-        basis: Basis::Recalled,
+        claim: "RECEIVE MAP sets the whole input structure to nulls before mapping (CICS TS 6.x, Formatted screen input, dfhp31g), except on MAPFAIL, when the input map is not set to nulls (RECEIVE MAP, dfhp4_receivemap). Only fields whose modified data tag is on are transmitted and mapped, the operator setting it by entering, changing or erasing data and the program by sending the field with MDT in its ATTRB (dfhp31g). A field the operator erased has L = 0 and the X'80' bit on in F (dfhp31g; Finding the cursor, dfhp31j). ironwork does not set the cursor flag X'02' that CURSLOC=YES asks for",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
         id: BMS_INPUT_JUSTIFY,
-        claim: "Input data lands left-justified and blank-filled unless JUSTIFY says otherwise, and a NUM field right-justified and zero-filled, the defaults IBM documents for JUSTIFY",
-        basis: Basis::Recalled,
+        claim: "Input data lands left-justified and blank-filled unless JUSTIFY says otherwise, and a field with ATTRB=NUM and no JUSTIFY right-justified and zero-filled (CICS TS 6.x, Formatted screen input, dfhp31g; BMS macro DFHMDF, dfhp473). A JUSTIFY naming one value of a pair implies the other: LEFT implies BLANK, RIGHT implies ZERO, BLANK implies LEFT and ZERO implies RIGHT (dfhp473)",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
@@ -552,20 +552,20 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: BMS_CONSTANTS_UNVERIFIED,
-        claim: "DFHNULL is X'00', and DFHBMPEM, DFHBMPNL, DFHBMPFF and DFHBMPCR are X'19', X'15', X'0C' and X'0D'",
+        claim: "DFHBMSCA names DFHBMPEM, DFHBMPNL, DFHBMPFF and DFHBMPCR as the printer end-of-message, new-line, form-feed and carriage-return characters and lists no values for them (CICS TS 6.x, BMS constants, dfhp4_bmsconstants). IBM gives EM as X'19' (CICS 3270 printers, dfhp3ee) and NL, FF and CR as X'15', X'0C' and X'0D' (BMS support for non-3270 terminals, dfhp31r; CICS 3270 printer options, dfhp3e7), and ironwork gives the four constants those values. ironwork's DFHNULL is X'00'; CICS TS 6.x lists DFHNULL in neither DFHBMSCA nor DFHAID, and TXSeries lists it in DFHAID as the null value. The binding of each constant to its value is recalled",
         basis: Basis::Recalled,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
         id: BMS_SEND_DATA_CHOICE,
-        claim: "SEND MAP without MAPONLY or DATAONLY sends a field's symbolic data when its first byte is not X'00', else the map's INITIAL, and a non-null A byte replaces ATTRB",
-        basis: Basis::Recalled,
+        claim: "Without MAPONLY or DATAONLY, SEND MAP sends every field of the map (CICS TS 6.x, Building the output screen, dfhp3c3). A named field's display data comes from the symbolic map's O subfield when its first character is not null, else from the map's INITIAL value, else nulls; its field attribute comes from the A subfield unless that byte is null or one of the values that remain from an input operation, X'80', X'02' and X'82', else from the field's ATTRB (dfhp3c3). With DATAONLY BMS sends only what the program gave (dfhp3c3)",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
         id: CICS_INITIAL_AID,
-        claim: "A task started by terminal input sees that input's AID in EIBAID before any RECEIVE",
-        basis: Basis::Recalled,
+        claim: "IBM's text conflicts. The application guide says the EIB fields that describe the input, EIBAID among them, are not set at the start of a task initiated by unsolicited terminal input, and that a RECEIVE posts them (CICS TS 6.x, EIB feedback on terminal control operations, dfhp34x); IBM's CEDF example shows EIBAID = X'7D' at program initiation (CEDF, dfha7or), and the 3270 bridge sets EIBAID at task start to the key that started the transaction (MQCIH fields for 3270 transaction request messages, fg15730_; Inbound BRIH message header, dfhtmeu). ironwork sets EIBAID from the initiating input before any RECEIVE, as CEDF shows; a program written to IBM's guidance issues a RECEIVE first and sees the same value either way",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
@@ -600,8 +600,8 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: LE_OMITTED_FC_ABENDS,
-        claim: "With fc OMITTED a failing service signals its condition (SA38-0683-60, Invoking callable services); nothing handles it, so one of severity 2 or more ends the run as the default ABTERMENC(ABEND) does, with user abend U4038, and one of severity 1 lets the run continue",
-        basis: Basis::Recalled,
+        claim: "With fc OMITTED, a service that fails signals its condition (z/OS 3.1 Language Environment Programming Reference, Parameter list for invoking callable services, ceea300/icspl; Programming Guide SC27-8714-03, p. 790), and RETURN-CODE is not altered (p. 790). An unhandled condition of severity 2 or more is promoted to T_I_U and terminates the thread (z/OS 3.1 Language Environment Programming Guide, default responses to unhandled conditions, Table 1, ceea200/ceea200138); under the default ABTERMENC(ABEND) the enclave ends with user abend U4038, reason code 1, for a software-raised condition (Programming Reference, ABTERMENC, ceea300/abterm; Programming Guide, Abend codes generated by ABTERMENC(ABEND), ceea200/encflgf). A severity-1 condition lets the run continue; IBM issues its message when the frame is a COBOL program's (ceea200/inmsg, ceea200/ceea200138), and ironwork issues none",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
@@ -840,8 +840,8 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: MERGE_OUT_OF_SEQUENCE_FAILS,
-        claim: "A MERGE input file whose records are out of the merge order makes the MERGE fail with SORT-RETURN 16 before any record is output, as DFSORT's ICE068A ends a merge",
-        basis: Basis::Recalled,
+        claim: "ironwork fails a MERGE whose input file holds records out of the merge order with SORT-RETURN 16 before any record is output, as DFSORT's ICE068A ends a merge (z/OS 3.1 DFSORT Messages, Codes and Diagnosis, icem100/kc00066). IBM's documents point the other way for a COBOL MERGE: FASTSRT applies only to the format 1 SORT (Programming Guide SC27-8714-03, p. 369), so the compiler does a MERGE's GIVING through an output procedure (p. 228) that DFSORT reaches as a COBOL-generated E35 exit (z/OS 3.1 Language Environment Programming Guide, ceea200/clcsrt3), and DFSORT does not sequence-check a merge whose E35 exit has no output data set (z/OS 3.1 DFSORT Application Programming Guide, icea100/ase35). Read together they say a COBOL MERGE is not checked, returns 0, and outputs each record as the merge selection reaches it; no single IBM sentence says so, and even under DFSORT's own check the records ahead of the out-of-sequence one have been output when ICE068A ends the merge (icea100, input, user exit and output logic examples)",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
@@ -882,8 +882,8 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: SORT_NEGATIVE_ZERO,
-        claim: "A zoned or packed sort key of -0 collates before +0 in ascending order, as under DFSORT's SZERO=YES (Installation and Customization SC23-6881-70, p. 99), the IBM-supplied default",
-        basis: Basis::Recalled,
+        claim: "A zoned (trailing sign) or packed sort or merge key of -0 collates before +0 in ascending order and after it in descending order. The compiler hands such keys to DFSORT as ZD and PD fields (z/OS 3.1 DFSORT Application Programming Guide, DFSORT formats for COBOL data types, icea100), and DFSORT orders them so under SZERO=YES (DFSORT Installation and Customization SC23-6881-70, p. 99), the IBM-supplied default (p. 100). The Language Reference says numeric keys compare by the rules of a relation condition, under which all zero values compare equal (Language Reference SC27-8713-03, pp. 279, 397, 449), and no IBM page reconciles the two; ironwork follows DFSORT's default, and a site running SZERO=NO would see the Language Reference's equality",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
@@ -954,8 +954,8 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: LE_SSRANGE_U4038,
-        claim: "A reference SSRANGE finds out of range signals a severity-3 LE condition; nothing handles it, so the run ends with user abend U4038 under the default ABTERMENC(ABEND). The message ids, from memory of the Enterprise COBOL messages: IGZ0006S for a subscript or index outside its table, IGZ0072S for a reference-modification start outside its item, IGZ0073S for a length below 1, and IGZ0074S for a start and length that reach past the item's end. An OCCURS DEPENDING ON object outside its range gives IGZ0007S, IBM's message for a variable-length group longer than its maximum or shorter than zero (IBM Support, 'Executing a CICS generated application results in abend'); IBM checks the group's composite length, and ironwork checks each object's count",
-        basis: Basis::Recalled,
+        claim: "Under SSRANGE with its default ABD suboption, an out-of-range reference signals a severity-3 condition (Programming Guide SC27-8714-03, pp. 411-412; z/OS 3.1 Language Environment Programming Guide, Interpreting runtime messages, ceea200/inmsg); nothing handles it, so the run ends with user abend U4038 under the default ABTERMENC(ABEND) (Programming Reference, ABTERMENC, ceea300/abterm; Programming Guide, ceea200/encflgf). For reference modification IBM issues IGZ0072S for a start below 1 or past the item's current length, IGZ0073S for a length of 0 or less under NOZLEN, and IGZ0074S for a start and length that reach past the item's end (z/OS 3.1 Language Environment Runtime Messages, ceea900/cs00507, cs00508, cs00509). IBM checks a subscripted reference's effective address against the table taken at its maximum size, not each subscript (Programming Guide, p. 411; IGZ0006S, ceea900/cs00446), and a variable-length group's composite length for IGZ0007S (ceea900/cs00447). ironwork checks each subscript against its own dimension's occurrences and each OCCURS DEPENDING ON object's count, issuing IGZ0006S and IGZ0007S, so a reference whose inner subscript is out of its dimension but whose address stays inside the table abends on ironwork and not on z/OS. SSRANGE(MSG) and SSRANGE(ZLEN) are not modelled",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
@@ -990,8 +990,8 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: SELF_IS_LOCAL,
-        claim: "SELF is a local reference of the method's own frame, made with the invocation, as the JNI passes a native method its object, and it expires when the method returns; the Guide's list of local references names arguments, RETURNING values, JNI results and NEW only (Programming Guide SC27-8714-03, p. 721)",
-        basis: Basis::Recalled,
+        claim: "Enterprise COBOL compiles a class's methods as Java native methods (Programming Guide SC27-8714-03, p. 521), and the JNI passes a nonstatic native method a reference to its object as a local reference, valid for the call and freed after the method returns (JNI Specification, Java SE 21, ch. 2, Native Method Arguments; Global and Local References). SELF refers to the object instance used to invoke the currently executing method (Language Reference SC27-8713-03, p. 15), and the Programming Guide's list of local references names parameters, RETURNING values, JNI results and INVOKE ... NEW without mentioning SELF (p. 721). ironwork reads SELF as the reference the JNI passes, a local reference in the method's own frame that expires when the method returns",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
@@ -1002,8 +1002,8 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: LOCAL_FRAMES,
-        claim: "The JNI reference services run as the JNI specification defines them: NewLocalRef and NewGlobalRef make a new reference to the object, NULL for NULL; DeleteLocalRef and DeleteGlobalRef free one and ignore NULL, and one given the other kind of reference ends the run; IsSameObject compares objects; GetObjectRefType answers 0 for NULL, 1 for local and 2 for global; PushLocalFrame opens a frame whose local references PopLocalFrame frees, giving back a local reference in the frame below to its argument's object, and EnsureLocalCapacity succeeds. PopLocalFrame with no frame of PushLocalFrame's open ends the run, and a method's return frees the frames it left open. The Guide documents NewGlobalRef, DeleteGlobalRef and DeleteLocalRef only (Programming Guide SC27-8714-03, pp. 722-723)",
-        basis: Basis::Recalled,
+        claim: "The JNI reference services behave as the JNI specification defines them (JNI Specification, Java SE 21, ch. 4, Global and Local References; Object Operations): NewGlobalRef and NewLocalRef make a new reference to the object and NULL for NULL; DeleteGlobalRef and DeleteLocalRef do nothing for NULL; IsSameObject is true for two references to one object or two NULLs; GetObjectRefType answers 0 for NULL, 1 for a local reference and 2 for a global one; PopLocalFrame frees the current frame's local references and gives a local reference in the previous frame to its argument's object, or NULL for NULL; and local references are freed when the native method returns, with any frames it left open. The Programming Guide documents NewGlobalRef, DeleteGlobalRef and DeleteLocalRef (SC27-8714-03, pp. 722-723) and IsSameObject (p. 697), and its JNI.cpy declares PushLocalFrame, PopLocalFrame, NewLocalRef, EnsureLocalCapacity (p. 848) and GetObjectRefType (p. 850). Where the specification is silent or allows failure, ironwork chooses: EnsureLocalCapacity always succeeds, a delete given the other kind of reference ends the run, and PopLocalFrame with no frame open ends the run",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
@@ -1050,8 +1050,8 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: SQL_INTO_WITHOUT_COLONS,
-        claim: "A name in an INTO list written without its colon is a host variable, as older precompilers read it",
-        basis: Basis::Recalled,
+        claim: "ironwork reads a name in an INTO list written without its colon as a host variable, as real programs write it (FETCH C INTO CSR-ENTITY, CSR-PROJ-ID). Db2 13 for z/OS says all references to host variables must be preceded by a colon, and that the precompiler issues an error for a missing colon or reads the name as an unqualified column name where a column name can be referenced (SQL Reference, References to host variables, db2z_refs2hostvars); an INTO list is not such a place, and a name there without a colon is how Db2 13 writes a global variable, SQL variable or SQL parameter target (SELECT INTO, db2z_sql_selectinto; Global variables, db2z_globalvars). No IBM page found says an older precompiler read it as a host variable",
+        basis: Basis::Chosen,
         oracle: Oracle::Db2,
     },
     Assumption {
@@ -1392,8 +1392,8 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: FLOATING_POINT_FUNCTIONS,
-        claim: "ACOS, ANNUITY, ASIN, ATAN, COS, LOG, LOG10, MEAN, MEDIAN, MIDRANGE, PRESENT-VALUE, RANDOM, SIN, SQRT, STANDARD-DEVIATION, TAN and VARIANCE are floating-point functions, as earlier Programming Guides listed them; E, PI, EXP, EXP10 and NUMVAL-F are, as the Language Reference says (SC27-8713-03, pp. 553-557, 609); SECONDS-FROM-FORMATTED-TIME is, as its example's inexact result shows (p. 507), and SECONDS-PAST-MIDNIGHT with it. ABS, MAX, MIN, RANGE, REM and SUM are floating point when any argument is (Programming Guide, p. 799; C100). An expression holding a floating-point function is evaluated in floating point (pp. 62-63). NUMVAL and NUMVAL-C are too, long under ARITH(COMPAT) and extended under ARITH(EXTEND), as the Programming Guide says (SC27-8714-03, p. 115); COMBINED-DATETIME is long whatever ARITH says (p. 541)",
-        basis: Basis::Recalled,
+        claim: "ACOS, ASIN, ATAN, COS, EXP, EXP10, LOG, LOG10, SIN, SQRT and TAN give the results of Language Environment's long-precision floating-point services under ARITH(COMPAT) and its extended-precision services under ARITH(EXTEND), and RANDOM a long result under either (Programming Guide SC27-8714-03, p. 58). E and PI are long floating-point approximations under ARITH(COMPAT) (Language Reference SC27-8713-03, pp. 553, 617). NUMVAL, NUMVAL-C and NUMVAL-F return floating-point approximations (pp. 605, 608, 609), long under ARITH(COMPAT) and extended under ARITH(EXTEND) (Programming Guide, p. 115). COMBINED-DATETIME returns a long-precision approximation whatever ARITH says, as IBM Docs' current topic says (Enterprise COBOL 6.4 Language Reference, COMBINED-DATETIME, SS6SG3_6.4.0/lr/ref/rlinfcdt), where the June 2024 PDF shows a 23-digit ARITH(EXTEND) result (Language Reference, p. 535). MAX, MIN, RANGE, REM and SUM are evaluated and returned in floating point when any argument is floating point (Programming Guide, p. 799); ABS's type follows its argument (Language Reference, p. 517), and ironwork treats it as they are (C100). An expression that references a floating-point function, or a mixed function with a floating-point argument, is evaluated in floating point (Programming Guide, pp. 62, 800-801). ironwork also treats ANNUITY, MEAN, MEDIAN, MIDRANGE, PRESENT-VALUE, STANDARD-DEVIATION, VARIANCE, SECONDS-FROM-FORMATTED-TIME and SECONDS-PAST-MIDNIGHT as floating-point functions, which the 6.4 manuals type only as numeric",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
@@ -1644,14 +1644,14 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: ALPHANUMERIC_MOVED_UNCHECKED,
-        claim: "An alphanumeric sender MOVEd to a zoned or packed integer item without P scaling is not checked for digits at the MOVE: the receiver gets the low half of each of the sender's last bytes as its digits, zeros to the left, stored as a positive value, and a byte whose low half is not a digit (an asterisk, X'5C') leaves that half in the receiver, so the data exception comes where the item is next read as a number. The Language Reference treats such a sender as an unsigned numeric integer (MOVE statement, elementary moves); the instructions a MOVE compiles to, a byte copy, PACK and UNPK, raise no data exception (z/Architecture Principles of Operation, PACK and UNPACK), and the decimal instructions of arithmetic do. A receiver with decimal places or P scaling, a binary receiver (CVB checks digits) and a numeric-edited one still read the sender as a number at the MOVE",
-        basis: Basis::Recalled,
+        claim: "An alphanumeric sender MOVEd to a numeric receiver is moved as if it were an unsigned integer, aligned on the assumed decimal point and padded with zeros, and a signed receiver gets a positive sign (Language Reference SC27-8713-03, pp. 175, 404). IBM leaves the result undefined when the sender holds anything but digits (Programming Guide SC27-8714-03, p. 53): NOINVDATA assumes the data is valid (p. 377), NUMCHECK(ZON) adds a class test for each such sender (p. 388), and PACK and UNPACK check no sign or digit codes where CVB, ZAP, SRP and ED do (z/Architecture Principles of Operation SA22-7832-13, pp. 7-318, 7-428, 7-232, 8-14, 8-13, 8-8). ironwork's model of the generated code under NONUMCHECK: for a zoned or packed integer receiver without P scaling the MOVE is a byte copy, PACK or UNPK, the receiver takes the low half of each of the sender's rightmost bytes as its digits with zeros to the left, a low half that is not a digit stays in the receiver, and the data exception comes where the item is next read as a number; a receiver with decimal places or P scaling, a binary receiver and a numeric-edited receiver read the sender as a number at the MOVE",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
         id: NUMERIC_MOVED_UNCHECKED,
-        claim: "A zoned or packed sender is not checked at a MOVE, or at the MOVE of a WRITE, REWRITE or RELEASE FROM phrase, whose generated code checks nothing: to a zoned item, to a packed item from a zoned one, to a packed item of its own kind and scaling under NUMPROC(PFD), and to an alphanumeric, alphanumeric-edited or group item. Those compile to a byte copy, PACK, UNPK and the OI that makes a sign F, which raise no data exception (z/Architecture Principles of Operation, PACK and UNPACK); NUMCHECK(ZON(LAX)) likewise leaves the sender of a zoned-to-zoned or zoned-to-alphanumeric MOVE unchecked and checks it 'if the sender is subsequently used in a numeric context' (Programming Guide SC27-8714-03, p. 391), and IBM leaves what invalid data gives to the generated code, which differs with OPT and ARCH (Migration Guide GC27-8715-03, pp. 201, 205-206). Where the sender's digits or sign are not decimal, each receiver digit takes the low half of the sender's digit of the same power of ten, zero where it has none, so a non-digit stays in the receiver and the data exception comes where the item is next read as a number; a sign half that is a digit stays in a signed receiver's sign place, an unsigned receiver's sign is F, and SIGN SEPARATE reads any character but '-' as positive. An alphanumeric receiver gets a zoned sender's bytes, an overpunched sign's zone made F, or a packed sender's digits unpacked with F zones. A packed sender to another packed shape (ZAP or SRP), and any zoned or packed sender to a binary (CVB), numeric-edited (ED) or floating-point receiver, is still read as a number at the MOVE and ends in S0C7 there. A sender whose digits and sign are decimal moves as before. Which instructions IBM generates for each pair is recalled, not documented",
-        basis: Basis::Recalled,
+        claim: "Under NONUMCHECK the generated code checks a zoned or packed sender at none of these MOVEs, the MOVE of a WRITE, REWRITE or RELEASE FROM phrase included: to a zoned item, to a packed item from a zoned one, to a packed item of its own kind and scaling under NUMPROC(PFD), and to an alphanumeric, alphanumeric-edited or group item. NUMCHECK(ZON) and NUMCHECK(PAC) add a class test for each zoned or packed sender (Programming Guide SC27-8714-03, p. 388), and NUMCHECK(ZON(LAX)) leaves the sender of a zoned-to-zoned or zoned-to-alphanumeric MOVE to be checked if the sender is subsequently used in a numeric context (p. 391). IBM leaves invalid data to the generated code: NOINVDATA assumes valid data (p. 377), and results differ with OPT and ARCH (Migration Guide GC27-8715-03, pp. 201, 205-206). For valid data an alphanumeric receiver gets a signed sender's unsigned value (Language Reference SC27-8713-03, p. 403) and an unsigned zoned sender's sign unchanged (Programming Guide, p. 53). PACK and UNPACK check no codes where ZAP, SRP, CVB and ED do (z/Architecture Principles of Operation SA22-7832-13, pp. 7-318, 7-428, 8-14, 8-13, 7-232, 8-8). ironwork's model of the generated code: these MOVEs are a byte copy, PACK, UNPK and an OI that makes a sign F; where the sender's digits or sign are not decimal, each receiver digit takes the low half of the sender's digit of the same power of ten, or zero where there is none, and the data exception comes where the item is next read as a number; a sign half that is a digit stays in a signed receiver's sign place, an unsigned receiver's sign is F, and SIGN SEPARATE reads any character but '-' as positive; an alphanumeric receiver gets a zoned sender's bytes with an overpunched sign's zone made F, or a packed sender's digits unpacked with F zones; a packed sender to another packed shape (ZAP or SRP), and any zoned or packed sender to a binary (CVB), numeric-edited (ED) or floating-point receiver, is read as a number at the MOVE and ends in S0C7 there",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
