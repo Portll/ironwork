@@ -575,6 +575,35 @@ pub fn document() -> String {
 mod tests {
     use super::*;
 
+    fn sources(dir: &std::path::Path, out: &mut Vec<(std::path::PathBuf, String)>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                if path.file_name().is_some_and(|n| n != "tests") {
+                    sources(&path, out);
+                }
+            } else if path.extension().is_some_and(|e| e == "rs") && path.file_name().is_some_and(|n| n != "tests.rs" && n != "messages.rs") {
+                let text = std::fs::read_to_string(&path).unwrap();
+                let code = text.find("#[cfg(test)]\nmod tests {").map_or(text.as_str(), |at| &text[..at]).to_owned();
+                out.push((path, code));
+            }
+        }
+    }
+
+    #[test]
+    fn syntax_compile_and_code_generation_build_every_message_from_the_catalogue() {
+        let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut files = Vec::new();
+        for krate in ["syntax", "compile", "exec"] {
+            sources(&crates.join(krate).join("src"), &mut files);
+        }
+        let uncatalogued: Vec<String> = files
+            .iter()
+            .flat_map(|(path, code)| code.lines().enumerate().filter(|(_, l)| l.contains("Error::at(") || l.contains("Error::warning(")).map(move |(n, l)| format!("{}:{}: {}", path.display(), n + 1, l.trim())))
+            .collect();
+        assert!(uncatalogued.is_empty(), "give these an entry in syntax::messages and build them with it:\n{}", uncatalogued.join("\n"));
+    }
+
     #[test]
     fn docs_messages_is_the_catalogue() {
         let committed = include_str!("../../../docs/messages.md").replace('\r', "");

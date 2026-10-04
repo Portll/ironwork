@@ -279,11 +279,12 @@ messages', 0 when there is none (Enterprise COBOL Programming Guide SC27-8714-03
 | S, severe | 12 | refuse |
 | U, unrecoverable | 16 | refuse |
 
-Every refusal ironwork makes is S (assumption C45). A message from ironwork's catalogue opens with
-its id: `IW`, the area's letter, four digits and the severity it was given, as `IWR0001-S` refuses
-XML PARSE VALIDATING. IWX names an extension `--compliance extended` reads and IWR an Enterprise
-COBOL construct ironwork does not run yet; [docs/messages.md](docs/messages.md) lists the areas and
-the messages catalogued so far, and the rest carry no id yet. A class definition, or a program with INVOKE or
+Every refusal ironwork makes is S (assumption C45). Every message a compile gives opens with its id
+from ironwork's catalogue: `IW`, the area's letter, four digits and the severity it was given, as
+`IWR0001-S` refuses XML PARSE VALIDATING. IWS is syntax, IWC Enterprise COBOL's compile rules, IWO
+options, IWP EXEC blocks, BMS and CSD, IWR an Enterprise COBOL construct ironwork does not run yet,
+IWL ironwork's own limits and IWX an extension `--compliance extended` reads;
+[docs/messages.md](docs/messages.md) lists every message. A class definition, or a program with INVOKE or
 object references, compiled without THREAD, DLL, RENT or DBCS, or with NORENT beside THREAD or DLL,
 is W (J19). `ironwork check` exits with the return code. `ironwork run` and `ironwork cics` print
 the messages, then run the program at 0, 4 or 8, and otherwise exit 241 without running anything,
@@ -353,8 +354,8 @@ id, when one follows, matches `IW[A-Z][0-9]{4}-[IWESU]`. For example:
     client.cbl: warning: program CLIENT uses object-oriented syntax, which IBM compiles only with THREAD, DLL, RENT and DBCS: THREAD, DLL missing from its CBL or PROCESS cards (see J13 and J19)
 
 `--diagnostics json` on `check`, `run`, `cics` and `compile` writes each message as one JSON object
-a line instead, its keys sorted: `col`, `file` (the program as given), `id` (null for a message the
-catalogue does not list yet), `line`, `member` (the COPY member, or null), `message` and `severity`
+a line instead, its keys sorted: `col`, `file` (the program as given), `id` (the catalogue's, without
+the severity letter), `line`, `member` (the COPY member, or null), `message` and `severity`
 (`I`, `W`, `E`, `S` or `U`); `line` and `col` are null for a message with no position. Every other
 line on standard error is written as before.
 
