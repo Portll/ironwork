@@ -54,7 +54,7 @@ pub fn rewrite(tokens: Vec<Token>, cards: &[String]) -> Result<Vec<Token>, Error
                 r.constant()?;
                 continue;
             }
-            Tok::Word(w) if data && (w == "BINARY-CHAR" || BINARY_USAGES.iter().any(|(u, _)| u == w)) => {
+            Tok::Word(w) if data && BINARY_USAGES.iter().any(|(u, _)| u == w) => {
                 r.binary_usage()?;
                 continue;
             }
@@ -207,9 +207,7 @@ impl Rewrite {
     fn binary_usage(&mut self) -> Result<(), Error> {
         let token = self.tokens[self.at].clone();
         let Tok::Word(usage) = &token.tok else { unreachable!("the caller saw a word") };
-        let Some(&(_, digits)) = BINARY_USAGES.iter().find(|(u, _)| u == usage) else {
-            return Err(crate::messages::IWS0015.at(token.pos, "BINARY-CHAR is a one-byte binary item, and ironwork's binary items are two, four or eight bytes, as Enterprise COBOL's are"));
-        };
+        let Some(&(_, digits)) = BINARY_USAGES.iter().find(|(u, _)| u == usage) else { unreachable!("the caller saw a binary usage") };
         let mut messages = Vec::new();
         if self.out.last().is_some_and(|t| t.tok == Tok::Word("IS".into())) && self.out.len() >= 2 && self.out[self.out.len() - 2].tok == Tok::Word("USAGE".into()) {
             messages.extend(self.out.pop().map(|t| t.messages).unwrap_or_default());
@@ -331,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn the_binary_usages_are_comp_5_pictures_and_binary_char_is_refused() {
+    fn the_binary_usages_are_comp_5_pictures_and_binary_char_is_left_to_the_parser() {
         let data = "       01  A USAGE IS BINARY-LONG.\n       01  B BINARY-SHORT UNSIGNED VALUE 7.\n       01  C BINARY-DOUBLE SIGNED.\n";
         let p = extended(&source(data, "")).unwrap();
         let read: Vec<(Option<&str>, Option<Usage>)> = p.working_storage.iter().map(|e| (e.picture.as_deref(), e.usage)).collect();
@@ -339,8 +337,9 @@ mod tests {
         assert_eq!(p.working_storage[1].value, Some(Literal::Number("7".into())));
         let shown: Vec<String> = p.messages.iter().map(|m| m.message.clone()).collect();
         assert_eq!(shown[1], format!("{}: BINARY-SHORT UNSIGNED is read as PIC 9(4) COMP-5", super::BINARY_USAGE));
-        let refused = extended(&source("       01  D BINARY-CHAR.\n", "")).unwrap_err();
-        assert!(refused.message.starts_with("BINARY-CHAR is a one-byte binary item") && refused.pos.line == 5);
+        let p = extended(&source("       01  D BINARY-CHAR UNSIGNED.\n       01  E USAGE BINARY-CHAR SIGNED.\n", "")).unwrap();
+        let read: Vec<(Option<&str>, Option<Usage>)> = p.working_storage.iter().map(|e| (e.picture.as_deref(), e.usage)).collect();
+        assert_eq!(read, [(None, Some(Usage::BinaryChar { signed: false })), (None, Some(Usage::BinaryChar { signed: true }))]);
     }
 
     #[test]

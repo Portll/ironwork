@@ -177,7 +177,7 @@ fn trunc(options: &Options) -> Vec<Case> {
         .iter()
         .enumerate()
         .map(|(i, &(signed, value, by_move))| {
-            let item = Binary { digits: 4, signed, native: false };
+            let item = Binary { digits: 4, signed, native: numeric::Native::No };
             let stored = binary::store(item, value, options);
             Case {
                 items: vec![

@@ -12,7 +12,7 @@ use crate::{codec_enum, codec_struct};
 use numeric::precision::{Fixed, Places};
 use numeric::options::{Assumed, Compile, Compliance, FastsrtAdvPrint, Invdata, LeServices, ProgramScope, SWITCHES, Stop, UnresolvedCalls, Warnings};
 use numeric::{
-    Arith, BinCheck, CicsReturnWarning, Currency, Dialect, DispSign, Initcheck, IntDate, Nsymbol, Numcheck, Numproc, Options, Parmcheck, Qualify, Quote, SortKeys, Trunc,
+    Arith, Native, BinCheck, CicsReturnWarning, Currency, Dialect, DispSign, Initcheck, IntDate, Nsymbol, Numcheck, Numproc, Options, Parmcheck, Qualify, Quote, SortKeys, Trunc,
     TruncCheck, Vlr, VsamOpenFs, ZonCheck,
 };
 use zarch::check::ProgramCheck;
@@ -36,6 +36,7 @@ codec_enum!(Kind {
     ProgramPointer = 12,
     Dbcs { justified, edit } = 13,
 });
+codec_enum!(Native { No = 0, Comp5 = 1, BinaryChar = 2 });
 codec_struct!(SignClause { position, separate });
 codec_struct!(Pos { file, line, col });
 codec_enum!(SignPosition { Leading = 0, Trailing = 1 });

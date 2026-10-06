@@ -12,7 +12,7 @@ use crate::unit::{Loader, RunUnit};
 use crate::vocab::{Figurative, Pos, SignClause, SignPosition};
 use numeric::binary::{self, Binary};
 use numeric::precision::{Fixed, Places};
-use numeric::{Numproc, Options, Quote, Trunc, float, sign};
+use numeric::{Native, Numproc, Options, Quote, Trunc, float, sign};
 use std::cmp::Ordering;
 use zarch::check::{ProgramCheck, ProgramMask};
 use zarch::decimal::{self, Decimal};
@@ -252,7 +252,7 @@ fn integer_image(facts: &dyn ProgramFacts, loc: Loc, value: &Fixed) -> Option<(I
             }
             let bits = 8 * item.bytes() as u32;
             let binary_range = if signed { v >= -(1i128 << (bits - 1)) && v < (1i128 << (bits - 1)) } else { (0..(1i128 << bits)).contains(&v.abs()) };
-            let exceeds = if native || options.trunc == Trunc::Bin { !binary_range } else { v.unsigned_abs() >= if digits <= 38 { pow10(digits).lo } else { 10u128.pow(digits) } };
+            let exceeds = if native.is_native() || options.trunc == Trunc::Bin { !binary_range } else { v.unsigned_abs() >= if digits <= 38 { pow10(digits).lo } else { 10u128.pow(digits) } };
             Some((Image::of(&kept.to_be_bytes()[16 - item.bytes()..]), exceeds))
         }
         Kind::Zoned { digits, scale: 0, signed, sign } if digits <= 38 && facts.scaling(loc.item) == 0 => {
@@ -313,7 +313,7 @@ fn image_of(facts: &dyn ProgramFacts, err: &mut dyn std::io::Write, loc: Loc, va
             }
             let bits = 8 * item.bytes() as u32;
             let binary_range = if signed { v >= -(1i128 << (bits - 1)) && v < (1i128 << (bits - 1)) } else { (0..(1i128 << bits)).contains(&v.abs()) };
-            let exceeds = if native || options.trunc == Trunc::Bin { !binary_range } else { v.unsigned_abs() >= if digits <= 38 { pow10(digits).lo } else { 10u128.pow(digits) } };
+            let exceeds = if native.is_native() || options.trunc == Trunc::Bin { !binary_range } else { v.unsigned_abs() >= if digits <= 38 { pow10(digits).lo } else { 10u128.pow(digits) } };
             (Image::of(&kept.to_be_bytes()[16 - item.bytes()..]), exceeds)
         }
         Kind::Float(p) => (Image::Grown(float::from_fixed(*value, p, ProgramMask::default()).map_err(|c| Abend::check(c, pos))?.to_bytes()), false),
@@ -772,8 +772,8 @@ pub fn numcheck_fault_in(options: &Options, kind: Kind, stored: &[u8], lax: Opti
             let spare_clear = digits % 2 == 1 || b[0] >> 4 == 0;
             decimal::tp(b).is_ok_and(|cc| cc.0 == 0) && (signed || b[b.len() - 1] & 0x0F == 0x0F) && spare_clear
         }
-        Kind::Binary { digits, signed, .. } => {
-            let raw = Binary { digits: digits as u8, signed, native: true }.load(b);
+        Kind::Binary { digits, signed, native, .. } => {
+            let raw = Binary { digits: digits as u8, signed, native }.load(b);
             raw.unsigned_abs() < 10u128.pow(digits)
         }
         _ => true,
@@ -792,7 +792,7 @@ pub fn numcheck_tests(options: &Options, kind: Kind, as_integer: bool) -> bool {
         Kind::Zoned { .. } => check.zon.is_some(),
         Kind::Group | Kind::Alnum { .. } => as_integer && check.zon.is_some(),
         Kind::Packed { .. } => check.pac,
-        Kind::Binary { native: false, .. } => check.bin.is_some_and(|c| c.truncbin || options.trunc != Trunc::Bin),
+        Kind::Binary { native: Native::No, .. } => check.bin.is_some_and(|c| c.truncbin || options.trunc != Trunc::Bin),
         _ => false,
     }
 }
@@ -1119,10 +1119,11 @@ mod tests {
         for signed in [false, true] {
             for scale in [0, 2] {
                 for digits in [1, 4, 5, 9, 10, 18] {
-                    for native in [false, true] {
+                    for native in [Native::No, Native::Comp5] {
                         kinds.push((Kind::Binary { digits, scale, signed, native }, Binary { digits: digits as u8, signed, native }.bytes()));
                     }
                 }
+                kinds.push((Kind::Binary { digits: 3, scale, signed, native: Native::BinaryChar }, 1));
                 for digits in [1, 2, 7, 18, 19, 31] {
                     kinds.push((Kind::Packed { digits, scale, signed }, digits as usize / 2 + 1));
                     for sign in [None, Some((SignPosition::Leading, false)), Some((SignPosition::Leading, true)), Some((SignPosition::Trailing, true))] {
@@ -1190,10 +1191,11 @@ mod tests {
         let mut kinds = Vec::new();
         for signed in [false, true] {
             for digits in [1, 4, 5, 9, 10, 18] {
-                for native in [false, true] {
+                for native in [Native::No, Native::Comp5] {
                     kinds.push(Kind::Binary { digits, scale: 0, signed, native });
                 }
             }
+            kinds.push(Kind::Binary { digits: 3, scale: 0, signed, native: Native::BinaryChar });
             for digits in [1, 6, 15, 18, 19, 31] {
                 for sign in [None, Some((SignPosition::Trailing, false)), Some((SignPosition::Leading, false)), Some((SignPosition::Leading, true)), Some((SignPosition::Trailing, true))] {
                     kinds.push(Kind::Zoned { digits, scale: 0, signed, sign: sign.map(|(position, separate)| SignClause { position, separate }) });

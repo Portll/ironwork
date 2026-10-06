@@ -310,3 +310,61 @@ fn a_long_name_in_exec_sql_or_cics_names_what_its_declaration_names() {
     assert_eq!(diagnostics_under(source, numeric::Compliance::Strict), [(6, 12, Some("IWS0099"), Severity::Error)]);
     assert_eq!(diagnostics_under(source, numeric::Compliance::Extended), [(6, 12, Some("IWX0015"), Severity::Warning)]);
 }
+
+/// BINARY-CHAR items stored past their byte, and one in a group beside a character.
+const BINARY_CHAR: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. BCHAR.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  S BINARY-CHAR.\n",
+    "       01  U BINARY-CHAR UNSIGNED.\n",
+    "       01  T USAGE BINARY-CHAR SIGNED VALUE 100.\n",
+    "       01  G.\n",
+    "           05  G1 BINARY-CHAR UNSIGNED VALUE 65.\n",
+    "           05  G2 PIC X VALUE 'Z'.\n",
+    "       01  N PIC 9(4).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE -1 TO S\n",
+    "           MOVE 300 TO U\n",
+    "           ADD 50 TO T\n",
+    "           DISPLAY S ' ' U ' ' T\n",
+    "           COMPUTE N = S * 10 + U\n",
+    "           MOVE 255 TO U\n",
+    "           ADD 1 TO U\n",
+    "           COMPUTE S = FUNCTION LENGTH(G)\n",
+    "           DISPLAY N ' ' U ' ' S ' ' G1\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn binary_char_is_one_byte_alike_on_both_executors_and_shown_as_cobc_shows_it() {
+    let run = |executor, flags: &[&str]| {
+        let o = Harness::source(BINARY_CHAR).flags(flags).run(executor);
+        assert!(o.ending.is_ok(), "{:?}\n{}", o.ending, o.err);
+        o.out
+    };
+    let ibm = run(Executor::Interpreter, EXTENDED);
+    assert_eq!(ibm, "00J 044 10O\n0034 000 002 065\n");
+    assert_eq!(run(Executor::Vm, EXTENDED), ibm);
+    let gnucobol = ["--compliance=extended", "--dialect=gnucobol"];
+    let shown = run(Executor::Interpreter, &gnucobol);
+    assert_eq!(shown, "-001 044 -106\n0034 000 +002 065\n");
+    assert_eq!(run(Executor::Vm, &gnucobol), shown);
+}
+
+#[test]
+fn binary_char_is_a_warning_naming_its_range_under_extended_and_refused_under_strict() {
+    let parsed = syntax::parse_with(BINARY_CHAR, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap();
+    let compiled = compile(parsed, &EXTENDED.iter().map(|f| f.to_string()).collect::<Vec<_>>()).unwrap_or_else(|e| panic!("{e:?}"));
+    let shown: Vec<(u32, Option<&str>, Severity)> = compiled.diagnostics.iter().map(|m| (m.pos.line, m.id, m.severity)).collect();
+    assert_eq!(shown, [5, 6, 7, 9].map(|line| (line, Some("IWX0016"), Severity::Warning)));
+    assert!(compiled.diagnostics[1].message.ends_with("U is one byte of binary, 0 to 255"), "{}", compiled.diagnostics[1].message);
+    let strict = compile(syntax::parse(BINARY_CHAR).unwrap(), &[]).err().unwrap();
+    let refused: Vec<(u32, Option<&str>)> = strict.iter().map(|e| (e.pos.line, e.id)).collect();
+    assert_eq!(refused, [5, 6, 7, 9].map(|line| (line, Some("IWC0293"))));
+    let pictured = program("", "       01  P PIC 99 BINARY-CHAR.\n", &line("GOBACK."));
+    let parsed = syntax::parse_with(&pictured, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap();
+    let errors = compile(parsed, &EXTENDED.iter().map(|f| f.to_string()).collect::<Vec<_>>()).err().unwrap();
+    assert!(errors.iter().any(|e| e.id == Some("IWC0294")), "{errors:?}");
+}

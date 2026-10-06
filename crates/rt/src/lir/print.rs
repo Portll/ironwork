@@ -21,7 +21,7 @@ use crate::sql::HostType;
 use crate::storage::Kind;
 use crate::store::LaxRedefinition;
 use crate::vocab::{AcceptFrom, BinOp, Closing, Figurative, InspectMode, OpenMode, Pos, RelOp, SignClause, SignPosition};
-use numeric::Arith;
+use numeric::{Arith, Native};
 use numeric::precision::Fixed;
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -546,7 +546,7 @@ impl<'a> Printer<'a> {
         match *s {
             StorePlan::Zoned { digits, scale, signed, sign } => format!("zoned {}{}", pic(digits, scale, signed), sign_clause(sign)),
             StorePlan::Packed { digits, scale, signed } => format!("packed {}", pic(digits, scale, signed)),
-            StorePlan::Binary { digits, scale, signed, native, name: _ } => format!("binary {}{}", pic(digits, scale, signed), if native { " native" } else { "" }),
+            StorePlan::Binary { digits, scale, signed, native, name: _ } => format!("binary {}{}", pic(digits, scale, signed), native_word(native)),
             StorePlan::NumericEdited { edit, digits, scale, blank_when_zero } => {
                 format!("numeric-edited edit {edit} {}{}", pic(digits, scale, false), if blank_when_zero { " blank-when-zero" } else { "" })
             }
@@ -1931,6 +1931,14 @@ fn decimal(n: &Fixed) -> String {
     if frac.is_empty() { format!("{sign}{int}") } else { format!("{sign}{int}.{frac}") }
 }
 
+fn native_word(native: Native) -> &'static str {
+    match native {
+        Native::No => "",
+        Native::Comp5 => " native",
+        Native::BinaryChar => " binary-char",
+    }
+}
+
 fn pic(digits: u32, scale: u32, signed: bool) -> String {
     let int = digits.saturating_sub(scale);
     let mut text = if signed { "S".to_owned() } else { String::new() };
@@ -1961,7 +1969,7 @@ fn kind(k: &Kind) -> String {
         Kind::Dbcs { justified, edit } => format!("dbcs{}{}", if justified { " justified" } else { "" }, edit.map_or(String::new(), |e| format!(" edit {e}"))),
         Kind::Zoned { digits, scale, signed, sign } => format!("zoned {}{}", pic(digits, scale, signed), sign_clause(sign)),
         Kind::Packed { digits, scale, signed } => format!("packed {}", pic(digits, scale, signed)),
-        Kind::Binary { digits, scale, signed, native } => format!("binary {}{}", pic(digits, scale, signed), if native { " native" } else { "" }),
+        Kind::Binary { digits, scale, signed, native } => format!("binary {}{}", pic(digits, scale, signed), native_word(native)),
         Kind::Float(p) => format!("float {}", precision(p)),
         Kind::NumericEdited { edit, digits, scale, blank_when_zero } => {
             format!("numeric-edited edit {edit} {}{}", pic(digits, scale, false), if blank_when_zero { " blank-when-zero" } else { "" })

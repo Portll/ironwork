@@ -2,6 +2,7 @@
 //! values that move between items.
 
 use crate::vocab::{Figurative, SignClause};
+use numeric::Native;
 use numeric::precision::{Fixed, Places};
 use zarch::hfp::{Hfp, Precision};
 use zarch::wide::U256;
@@ -16,7 +17,7 @@ pub enum Kind {
     Dbcs { justified: bool, edit: Option<u32> },
     Zoned { digits: u32, scale: u32, signed: bool, sign: Option<SignClause> },
     Packed { digits: u32, scale: u32, signed: bool },
-    Binary { digits: u32, scale: u32, signed: bool, native: bool },
+    Binary { digits: u32, scale: u32, signed: bool, native: Native },
     Float(Precision),
     /// `edit` indexes the layout's list of edited PICTUREs.
     NumericEdited { edit: u32, digits: u32, scale: u32, blank_when_zero: bool },

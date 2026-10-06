@@ -245,10 +245,11 @@ impl Lower<'_> {
                         Kind::National => DisplayItem::Bytes(place),
                         Kind::Packed { digits, signed, .. } => DisplayItem::Digits { place, digits, signed },
                         Kind::Binary { digits, signed, native, .. } => {
-                            let whole = native || self.c.options.trunc == Trunc::Bin;
+                            let whole = native.is_native() || self.c.options.trunc == Trunc::Bin;
                             let digits = match self.places[place as usize].len {
-                                len if self.c.options.dialect_of(Switched::DisplayOfNondisplayNumeric) == Dialect::Gnucobol => rt::display::gnucobol_binary_width(len as usize) as u32,
+                                len if self.c.options.dialect_of(Switched::DisplayOfNondisplayNumeric) == Dialect::Gnucobol => rt::display::whole_binary_digits(len as usize) as u32,
                                 _ if !whole => digits,
+                                1 => 3,
                                 2 => 5,
                                 4 => 10,
                                 _ if signed => 19,

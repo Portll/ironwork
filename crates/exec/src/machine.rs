@@ -619,7 +619,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             return Ok(loc);
         }
         if r.name == "RETURN-CODE" && r.qualifiers.is_empty() && !self.layout.items.iter().any(|i| i.name.as_deref() == Some("RETURN-CODE")) {
-            let loc = Loc { offset: RETURN_CODE, len: 2, kind: Kind::Binary { digits: 4, scale: 0, signed: true, native: false }, item: usize::MAX };
+            let loc = Loc { offset: RETURN_CODE, len: 2, kind: Kind::Binary { digits: 4, scale: 0, signed: true, native: numeric::Native::No }, item: usize::MAX };
             self.unit.taint_read(loc);
             return Ok(loc);
         }

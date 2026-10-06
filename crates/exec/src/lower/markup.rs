@@ -7,7 +7,8 @@ use super::data::{Side, Value};
 use super::flow::Ctx;
 use super::{Lower, LowerError, R, push, unsupported};
 use crate::layout::Resolved;
-use numeric::Trunc;
+use numeric::binary::Binary;
+use numeric::{Native, Trunc};
 use rt::abend::AbendCode;
 use rt::lir::{self, AbendId, Ccsid, Convert, Count, IntExpr, Markup, MarkupId, Named, NumberInto, Op, PlaceId, RangeId, RangeKind, SetTo, StorePlan, Terminator, XmlForm, XmlRegister};
 use rt::storage::Kind;
@@ -223,13 +224,9 @@ impl Lower<'_> {
         let i = &self.layout.items[item];
         let scaling = i.scaling;
         let fixed = |integers: u32| if scaling > 0 { Convert::Scaled { integers, scaling } } else { Convert::Fixed { integers } };
-        let binary_integers = |digits: u32, scale: u32, native: bool| {
-            if native || self.c.options.trunc == Trunc::Bin {
-                let whole = match digits {
-                    0..=4 => 5,
-                    5..=9 => 10,
-                    _ => 20,
-                };
+        let binary_integers = |digits: u32, scale: u32, signed: bool, native: Native| {
+            if native.is_native() || self.c.options.trunc == Trunc::Bin {
+                let whole = rt::display::whole_binary_digits(Binary { digits: digits as u8, signed, native }.bytes()) as u32;
                 whole - scale.min(whole)
             } else {
                 digits.saturating_sub(scale) + scaling
@@ -242,7 +239,7 @@ impl Lower<'_> {
             Kind::Dbcs { .. } => Convert::Dbcs,
             Kind::Float(precision) => Convert::Float(precision),
             Kind::Zoned { digits, scale, .. } | Kind::Packed { digits, scale, .. } => fixed(digits.saturating_sub(scale) + scaling),
-            Kind::Binary { digits, scale, native, .. } => fixed(binary_integers(digits, scale, native)),
+            Kind::Binary { digits, scale, signed, native } => fixed(binary_integers(digits, scale, signed, native)),
             Kind::Index => Convert::Fixed { integers: 10 },
             Kind::Pointer | Kind::ObjectReference | Kind::ProgramPointer => {
                 let name = i.name.as_deref().unwrap_or("FILLER");

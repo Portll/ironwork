@@ -4,7 +4,7 @@
 //! for where each 01 level starts.
 
 use crate::picture::{self, Category, Sym};
-use numeric::Qualify;
+use numeric::{Native, Qualify};
 use syntax::ast::{DataEntry, Environment, FileDecl, Literal, Organization, Ref, SignClause, Usage};
 use syntax::messages::{IWC0001, IWC0002, Message};
 use syntax::{Error, Pos};
@@ -673,6 +673,7 @@ fn ancestors(items: &[Item], i: usize) -> impl Iterator<Item = usize> + '_ {
 /// pp. 232-233); 1 for the kinds SYNCHRONIZED leaves where they are.
 fn alignment(kind: Kind) -> u32 {
     match kind {
+        Kind::Binary { native: Native::BinaryChar, .. } => 1,
         Kind::Binary { digits: 0..=4, .. } => 2,
         Kind::Binary { .. } | Kind::Float(Precision::Short) | Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer => 4,
         Kind::Float(_) => 8,
@@ -686,7 +687,7 @@ fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, sign: Option<SignClaus
     let err = |message: Message, m: String| message.at(e.pos, m);
     let usage = usage.unwrap_or_default();
     let handle = matches!(usage, Usage::ObjectReference | Usage::ProgramPointer);
-    let elementary = e.picture.is_some() || (handle || matches!(usage, Usage::Float1 | Usage::Float2 | Usage::Pointer | Usage::Index)) && item.children.is_empty();
+    let elementary = e.picture.is_some() || (handle || matches!(usage, Usage::Float1 | Usage::Float2 | Usage::Pointer | Usage::Index | Usage::BinaryChar { .. })) && item.children.is_empty();
     if !elementary {
         return if item.children.is_empty() { Err(err(syntax::messages::IWC0235, "an elementary item needs a PICTURE".into())) } else { Ok(Kind::Group) };
     }
@@ -710,6 +711,12 @@ fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, sign: Option<SignClaus
             return Err(err(syntax::messages::IWC0239, "COMP-1 and COMP-2 items take no PICTURE".into()));
         }
         return Ok(Kind::Float(if usage == Usage::Float1 { Precision::Short } else { Precision::Long }));
+    }
+    if let Usage::BinaryChar { signed } = usage {
+        if e.picture.is_some() {
+            return Err(err(syntax::messages::IWC0294, "BINARY-CHAR takes no PICTURE".into()));
+        }
+        return Ok(Kind::Binary { digits: 3, scale: 0, signed, native: Native::BinaryChar });
     }
     let Some(pic) = pic else { return Err(err(syntax::messages::IWC0235, "an elementary item needs a PICTURE".into())) };
     let blank_numeric;
@@ -735,7 +742,7 @@ fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, sign: Option<SignClaus
         (Category::Numeric, Usage::Display) => Kind::Zoned { digits: pic.digits, scale: pic.scale, signed: pic.signed, sign: sign.filter(|_| pic.signed) },
         (Category::Numeric, Usage::Packed) => Kind::Packed { digits: pic.digits, scale: pic.scale, signed: pic.signed },
         (Category::Numeric, Usage::Binary | Usage::NativeBinary) if pic.digits <= 18 => {
-            Kind::Binary { digits: pic.digits, scale: pic.scale, signed: pic.signed, native: usage == Usage::NativeBinary }
+            Kind::Binary { digits: pic.digits, scale: pic.scale, signed: pic.signed, native: if usage == Usage::NativeBinary { Native::Comp5 } else { Native::No } }
         }
         (Category::Numeric, Usage::Binary | Usage::NativeBinary) => return Err(err(syntax::messages::IWC0241, "a binary item holds at most 18 digits".into())),
         (Category::Alphanumeric, Usage::Display) => Kind::Alnum { justified: e.justified },
@@ -767,11 +774,7 @@ fn elementary_size(item: &Item, e_size: Option<u32>) -> u32 {
         Kind::National | Kind::Dbcs { .. } => 2 * e_size.unwrap_or(0),
         Kind::Zoned { digits, sign, .. } => digits + sign.is_some_and(|s| s.separate) as u32,
         Kind::Packed { digits, .. } => digits / 2 + 1,
-        Kind::Binary { digits, .. } => match digits {
-            0..=4 => 2,
-            5..=9 => 4,
-            _ => 8,
-        },
+        Kind::Binary { digits, signed, native, .. } => numeric::binary::Binary { digits: digits as u8, signed, native }.bytes() as u32,
         Kind::Float(p) => p.bytes() as u32,
         Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer => 4,
     }

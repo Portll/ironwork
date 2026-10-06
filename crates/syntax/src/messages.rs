@@ -338,6 +338,8 @@ catalogue! {
     IWC0290 Warning "INITCHECK: {item} may be used uninitialized: no path to this statement sets {it} (see {analysis})";
     IWC0291 Severe "{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: {a character the program's code page does not hold}";
     IWC0292 Severe "VALUE of {name}: a numeric literal, where a numeric-edited item's VALUE is an alphanumeric literal or a figurative constant written in edited form; --compliance extended edits the number into it";
+    IWC0293 Severe "BINARY-CHAR: Micro Focus's and GnuCOBOL's one-byte binary, not Enterprise COBOL's; --compliance extended reads it";
+    IWC0294 Severe "BINARY-CHAR takes no PICTURE";
     IWC0295 Severe "{name}: two programs of {program} have this name, and the programs of a separately compiled program each need their own (--program-scope=flexible allows it)";
     IWC0296 Severe "CALL '{name}': no program of the compilation has this name, and --unresolved-calls=fail refuses a static CALL the binder could not resolve";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
@@ -718,7 +720,6 @@ catalogue! {
     IWS0012 Severe "COPY {display}: {item}";
     IWS0013 Severe "& with no literal after it";
     IWS0014 Severe "constant {name}: {why}";
-    IWS0015 Severe "BINARY-CHAR is a one-byte binary item, and ironwork's binary items are two, four or eight bytes, as Enterprise COBOL's are";
     IWS0016 Severe "& joins two alphanumeric or hexadecimal literals, or two national literals, either of which may be a level-78 constant standing for one";
     IWS0017 Severe "X'{text}' is not an even number of hex digits";
     IWS0018 Severe "NX'{text}': a national hexadecimal literal is 4 to 320 hex digits, four to each UTF-16 code unit";
@@ -819,6 +820,7 @@ catalogue! {
     IWX0013 Warning "{END-DISPLAY or END-ACCEPT} (Micro Focus and GnuCOBOL; Enterprise COBOL does not reserve the word): it ends the {DISPLAY or ACCEPT} statement";
     IWX0014 Warning "VALUES outside a level-88 entry (Micro Focus; Enterprise COBOL writes VALUE there): it is read as VALUE";
     IWX0015 Warning "a user-defined word of more than 30 characters (Micro Focus and GnuCOBOL; Enterprise COBOL reads its first 30): {word} is read whole";
+    IWX0016 Warning "BINARY-CHAR (Micro Focus and GnuCOBOL; Enterprise COBOL's binary items are two, four or eight bytes): {name} is one byte of binary, {range}";
     IWX0017 Warning "a statement in Area A (Micro Focus and GnuCOBOL; Enterprise COBOL puts statements in Area B): {word} is read as though it began in Area B";
 }
 

@@ -3,7 +3,7 @@
 use super::{AbendId, ExprId, PlaceId, SymId};
 use crate::vocab::SignClause;
 use crate::{codec_enum, codec_struct};
-use numeric::Arith;
+use numeric::{Arith, Native};
 use zarch::hfp::Precision;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,7 +48,7 @@ pub enum StorePlan {
     Zoned { digits: u32, scale: u32, signed: bool, sign: Option<SignClause> },
     Packed { digits: u32, scale: u32, signed: bool },
     /// `name` labels a TRUNC(OPT) report.
-    Binary { digits: u32, scale: u32, signed: bool, native: bool, name: SymId },
+    Binary { digits: u32, scale: u32, signed: bool, native: Native, name: SymId },
     NumericEdited { edit: u32, digits: u32, scale: u32, blank_when_zero: bool },
     Float(Precision),
     Index,

@@ -47,7 +47,7 @@ pub(crate) fn unsigned_integer(layout: &Layout, r: &Ref) -> Option<(u32, Usage)>
     match item.kind {
         Kind::Zoned { digits, scale: 0, signed: false, .. } => Some((digits, Usage::Display)),
         Kind::Packed { digits, scale: 0, signed: false } => Some((digits, Usage::Packed)),
-        Kind::Binary { digits, scale: 0, signed: false, native } => Some((digits, if native { Usage::NativeBinary } else { Usage::Binary })),
+        Kind::Binary { digits, scale: 0, signed: false, native } => Some((digits, if native.is_native() { Usage::NativeBinary } else { Usage::Binary })),
         _ => None,
     }
 }

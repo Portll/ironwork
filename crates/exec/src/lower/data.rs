@@ -145,7 +145,7 @@ impl Lower<'_> {
                 base: lir::Base::ReturnCode,
                 offset: 0,
                 len: 2,
-                kind: Kind::Binary { digits: 4, scale: 0, signed: true, native: false },
+                kind: Kind::Binary { digits: 4, scale: 0, signed: true, native: numeric::Native::No },
                 scaling: 0,
                 moved: Vec::new(),
                 subscripts: Vec::new(),

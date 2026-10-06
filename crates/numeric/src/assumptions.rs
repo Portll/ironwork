@@ -350,6 +350,7 @@ pub const CALL_BY_PROGRAM_ID: &str = "C441";
 pub const COMMAND_LINE_FROM_PARM: &str = "C442";
 pub const MISSING_PROGRAM: &str = "C450";
 pub const OUT_OF_SCOPE_CALL_NOT_FOUND: &str = "C470";
+pub const BINARY_CHAR: &str = "C460";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -452,7 +453,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: DISPLAY_OF_NONDISPLAY_NUMERIC,
-        claim: "DISPLAY shows a packed or binary item as zoned digits of its PICTURE, a negative value's sign overpunched on the last digit and a positive value's digits unsigned (Programming Guide SC27-8714-03, p. 363, Table 48; Language Reference SC27-8713-03, p. 334); a COMP-5 item, or any binary item under TRUNC(BIN), shows its whole binary value in 5, 10, or 19 (signed) or 20 digits for a halfword, fullword or doubleword. Under --dialect gnucobol DISPLAY shows them as cobc -std=ibm-strict does, whatever DISPSIGN says: a signed item's sign, + or -, before its digits, a packed item's digits those of its PICTURE, and any binary item's whole value in 5, 10 or 20 digits for a halfword, fullword or doubleword",
+        claim: "DISPLAY shows a packed or binary item as zoned digits of its PICTURE, a negative value's sign overpunched on the last digit and a positive value's digits unsigned (Programming Guide SC27-8714-03, p. 363, Table 48; Language Reference SC27-8713-03, p. 334); a COMP-5 item, or any binary item under TRUNC(BIN), shows its whole binary value in 5, 10, or 19 (signed) or 20 digits for a halfword, fullword or doubleword, and a BINARY-CHAR under --compliance extended in 3 for its byte (C460). Under --dialect gnucobol DISPLAY shows them as cobc -std=ibm-strict does, whatever DISPSIGN says: a signed item's sign, + or -, before its digits, a packed item's digits those of its PICTURE, and any binary item's whole value in 3, 5, 10 or 20 digits for a byte, halfword, fullword or doubleword",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -2206,6 +2207,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: MISSING_PROGRAM,
         claim: "A dynamic CALL (of an identifier, or of a literal under DYNAM), SET TO ENTRY or user-defined function invocation that finds no program of the name, with no ON EXCEPTION phrase, raises CEE3501S 'The module name was not found.' (Language Environment Runtime Messages, CEE3501S: 'Module is not loaded. The application might abend'); IBM's own example of a COBOL dynamic CALL of a nonexistent program ends so, the condition unhandled (Language Environment Debugging Guide, 'Calling a nonexistent subroutine'). A condition of severity 3 that nothing handles ends the run U4038 under the default ABTERMENC(ABEND), as an SSRANGE failure does, the message given as IBM words it. Under NODYNAM a CALL of a literal is resolved by the binder, which reports a name no library holds as IEW2456E 'SYMBOL name UNRESOLVED' (MVS System Messages, IEW2456E) and leaves a load module that does not run: ironwork, which binds nothing, stops at the CALL with that message as its own refusal, and by its own choice still runs such a CALL's ON EXCEPTION phrase, which IBM's binder leaves no run to reach. A Language Environment callable service ironwork does not provide is its own refusal too, the service existing on z/OS. A job step whose EXEC PGM= names no program still ends S806, as the system's fetch of it does",
         basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: BINARY_CHAR,
+        claim: "Under --compliance extended, BINARY-CHAR [SIGNED|UNSIGNED], Micro Focus's and GnuCOBOL's one-byte binary, is one byte holding -128 to 127, or 0 to 255 when UNSIGNED, SIGNED being the default; a value it receives keeps its low-order byte whatever TRUNC says, as a COMP-5 item's keeps its bytes, so MOVE 300 to an unsigned one gives 44 and ADD 1 to one holding 255 gives 0, as cobc 3.2 gives them. It takes no PICTURE, counts as three integer digits wherever a PICTURE's digits are asked for, and SYNCHRONIZED leaves it where it is. Enterprise COBOL has no one-byte binary item",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {

@@ -1,19 +1,41 @@
 use crate::options::{Options, Trunc, TruncCheck};
 use zarch::wide::U256;
 
-/// A USAGE BINARY, COMP or COMP-4 item, or COMP-5 when `native`.
+/// Whether a binary item's value is limited by its bytes rather than its PICTURE, and how many
+/// bytes it has.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Native {
+    /// USAGE BINARY, COMP or COMP-4: two, four or eight bytes as the PICTURE's digits need, the
+    /// value truncated as TRUNC says.
+    #[default]
+    No,
+    /// COMP-5: the same sizes, never truncated to the PICTURE.
+    Comp5,
+    /// GnuCOBOL's and Micro Focus's BINARY-CHAR under `--compliance extended`: one byte, never
+    /// truncated to its three digits.
+    BinaryChar,
+}
+
+impl Native {
+    pub const fn is_native(self) -> bool {
+        !matches!(self, Native::No)
+    }
+}
+
+/// A USAGE BINARY, COMP or COMP-4 item, COMP-5 or BINARY-CHAR as `native` says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Binary {
     pub digits: u8,
     pub signed: bool,
-    pub native: bool,
+    pub native: Native,
 }
 
 impl Binary {
     pub const fn bytes(self) -> usize {
-        match self.digits {
-            0..=4 => 2,
-            5..=9 => 4,
+        match (self.native, self.digits) {
+            (Native::BinaryChar, _) => 1,
+            (_, 0..=4) => 2,
+            (_, 5..=9) => 4,
             _ => 8,
         }
     }
@@ -67,7 +89,7 @@ pub fn kept(item: Binary, value: i128, options: &Options) -> (i128, Option<Trunc
     let value = if item.signed { value } else { value.unsigned_abs() as i128 };
     let decimal = item.decimal_truncation(value);
     let binary = item.binary_truncation(value);
-    match (item.native, options.trunc) {
+    match (item.native.is_native(), options.trunc) {
         (true, _) | (false, Trunc::Bin) => (binary, None),
         (false, Trunc::Std) => (decimal, None),
         (false, Trunc::Opt) => {
@@ -82,8 +104,8 @@ mod tests {
     use super::*;
     use crate::options::Options;
 
-    const HALFWORD: Binary = Binary { digits: 4, signed: false, native: false };
-    const SIGNED_HALFWORD: Binary = Binary { digits: 4, signed: true, native: false };
+    const HALFWORD: Binary = Binary { digits: 4, signed: false, native: Native::No };
+    const SIGNED_HALFWORD: Binary = Binary { digits: 4, signed: true, native: Native::No };
 
     fn with(trunc: Trunc) -> Options {
         Options { trunc, ..Options::default() }
@@ -91,7 +113,7 @@ mod tests {
 
     #[test]
     fn sizes_follow_the_picture() {
-        let size = |digits| Binary { digits, signed: true, native: false }.bytes();
+        let size = |digits| Binary { digits, signed: true, native: Native::No }.bytes();
         assert_eq!([size(1), size(4), size(5), size(9), size(10), size(18)], [2, 2, 4, 4, 8, 8]);
     }
 
@@ -112,8 +134,19 @@ mod tests {
 
     #[test]
     fn comp5_ignores_trunc() {
-        let native = Binary { native: true, ..HALFWORD };
+        let native = Binary { native: Native::Comp5, ..HALFWORD };
         assert_eq!(store(native, 12345, &with(Trunc::Std)).value, 12345);
+    }
+
+    #[test]
+    fn binary_char_is_one_byte_truncated_to_it() {
+        let byte = |signed| Binary { digits: 3, signed, native: Native::BinaryChar };
+        assert_eq!(byte(true).bytes(), 1);
+        let s = store(byte(true), -1, &with(Trunc::Std));
+        assert_eq!((s.value, s.bytes.as_slice()), (-1, [0xFF].as_slice()));
+        assert_eq!(store(byte(false), 300, &with(Trunc::Std)).value, 44);
+        assert_eq!(store(byte(true), 200, &with(Trunc::Std)).value, -56);
+        assert_eq!(byte(true).load(&[0x80]), -128);
     }
 
     #[test]

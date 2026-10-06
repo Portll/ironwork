@@ -444,6 +444,8 @@ symbols and the currency sign value it shows, which encode by §4 with these tag
   `Packed{digits,scale,signed}` 4, `Binary{digits,scale,signed,native}` 5, `Float(Precision)` 6,
   `NumericEdited{edit,digits,scale,blank_when_zero}` 7, `AlnumEdited{edit}` 8, `Pointer` 9,
   `Index` 10. `edit` is checked against `edits`.
+- **`Native`** (crates/numeric/src/binary.rs) is `No` 0 (BINARY, COMP, COMP-4), `Comp5` 1, `BinaryChar` 2
+  (one byte).
 - **`Precision`** (crates/zarch/src/hfp.rs:10) is `Short` 0, `Long` 1, `Extended` 2.
 - **`Sym`** (exec/src/picture.rs:12-32) has fourteen variants, four of them carrying a `char`
   (`FloatLead`, `Float`, `Sign`, `Insert`), and encodes as an enum.
@@ -570,7 +572,8 @@ The format version is `major.minor`; this ironwork writes 1.0 and reads every 1.
 what the 0.x formats came to hold, the files that take their name from a data item and the places
 SSRANGE checks against their tables at the `LIR` section's end, and the `--assume` choices at the
 `OPTIONS` section's end, each written only when there is one, and adds `program_scope`,
-`unresolved_calls` and `le_services` to `Options` (§5.1). A 0.x module is refused, and compiling the
+`unresolved_calls` and `le_services` to `Options` (§5.1) and a `Native` of `BinaryChar` for
+BINARY-CHAR under `--compliance extended` (§5.2). A 0.x module is refused, and compiling the
 source again is the remedy (question 1).
 
 | The reader finds | It does |

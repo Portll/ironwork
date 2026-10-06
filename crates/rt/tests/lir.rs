@@ -1,5 +1,6 @@
 //! Every LIR type through the load-module codec, and a small lowered program encoded whole.
 
+use numeric::Native;
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -81,7 +82,7 @@ fn the_borrowed_vocabulary_round_trips_with_every_tag() {
         Kind::National,
         Kind::Zoned { digits: 5, scale: 2, signed: true, sign: Some(SIGN) },
         Kind::Packed { digits: 7, scale: 0, signed: false },
-        Kind::Binary { digits: 9, scale: 1, signed: true, native: true },
+        Kind::Binary { digits: 9, scale: 1, signed: true, native: Native::Comp5 },
         Kind::Float(Precision::Long),
         Kind::NumericEdited { edit: 3, digits: 6, scale: 2, blank_when_zero: true },
         Kind::AlnumEdited { edit: 1 },
@@ -605,7 +606,7 @@ fn arithmetic_plans_round_trip_with_every_tag() {
     let stores = [
         StorePlan::Zoned { digits: 5, scale: 0, signed: true, sign: Some(SIGN) },
         PACKED,
-        StorePlan::Binary { digits: 4, scale: 0, signed: false, native: true, name: 2 },
+        StorePlan::Binary { digits: 4, scale: 0, signed: false, native: Native::Comp5, name: 2 },
         StorePlan::NumericEdited { edit: 0, digits: 7, scale: 2, blank_when_zero: false },
         StorePlan::Float(Precision::Short),
         StorePlan::Index,
@@ -1037,7 +1038,7 @@ fn json_generate() -> JsonGenerate {
         receiver: 2,
         encoding: Ccsid::CodePage,
         count: Some((3, PACKED)),
-        code: (4, StorePlan::Binary { digits: 9, scale: 0, signed: true, native: false, name: 0 }),
+        code: (4, StorePlan::Binary { digits: 9, scale: 0, signed: true, native: Native::No, name: 0 }),
         on_exception: false,
         not_on_exception: true,
     }

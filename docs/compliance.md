@@ -39,6 +39,9 @@ any other. IWX0012-W to IWX0015-W and IWX0017-W are forms IBM's compiler flags i
 strict gives a message where IBM's does, at the severity IBM's has, and extended reads each as Micro
 Focus and GnuCOBOL do, into a program Enterprise COBOL could hold. A test runs a program using the
 five on both executors and compares the runs, and another gives each one's message under each level.
+The sixteenth, IWX0016-W, BINARY-CHAR, has no Enterprise COBOL form: it is a binary item of
+one byte, which a module records as its `Native` (load-module.md §5.2), and a test runs a program
+using it on both executors and compares the runs with cobc's.
 
 ### IWX0001-W free-form source
 
@@ -129,8 +132,7 @@ behaves as such a COMP-5 item does under Enterprise COBOL: a DISPLAY of it shows
 sign as Enterprise COBOL shows a COMP-5 item's, where GnuCOBOL shows a separate sign and one more
 digit for BINARY-LONG.
 
-`BINARY-CHAR` is refused: `BINARY-CHAR is a one-byte binary item, and ironwork's binary items are
-two, four or eight bytes, as Enterprise COBOL's are`.
+`BINARY-CHAR` is one byte, not a COMP-5 PICTURE: IWX0016, below.
 
 ### IWX0006-W PROGRAM-ID without the IDENTIFICATION DIVISION header
 
@@ -396,6 +398,26 @@ Under extended both samples compile what they compiled before, 1,376 and 1,484 p
 more: a program using one of the four that compiled before now carries its warning, and one refused
 before stops on something else. The NIST CCVS85 routines give the same class and first message
 under strict before and after (383 clean of 458): COBOL-85 has none of the four.
+
+### IWX0016-W BINARY-CHAR
+
+`IWX0016-W BINARY-CHAR (Micro Focus and GnuCOBOL; Enterprise COBOL's binary items are two, four or
+eight bytes): U is one byte of binary, 0 to 255`, at the data entry.
+
+`[USAGE [IS]] BINARY-CHAR [SIGNED|UNSIGNED]` is one byte of binary holding -128 to 127, or 0 to 255
+when UNSIGNED; SIGNED is the default. It takes no PICTURE (IWC0294 refuses one). A value it receives
+keeps its low-order byte, whatever TRUNC says, as a COMP-5 item keeps its bytes: MOVE 300 to an
+unsigned one gives 44, ADD 1 to one holding 255 gives 0, and ADD 50 to a signed one holding 100
+gives -106, as cobc 3.2 gives them. Where a PICTURE's digits are asked for it has three integer
+digits: DISPLAY shows three, `00J` for -1 under `--dialect ibm` as a COMP-5 item's whole value is
+shown, `-001` under `--dialect gnucobol` as cobc shows it. SYNCHRONIZED leaves it where it is, a
+JSON or XML number holds three digits, and EXEC SQL refuses it as a host variable, as a binary item
+of one byte has no SQL type. Strict refuses it (IWC0293). Assumption C460.
+
+In the 3,000-program census of v0.7.0 BINARY-CHAR was the first refusal of 48 programs in 12
+repositories under extended, cobc accepting all 48, 27 of them programs of ACAS, a GnuCOBOL
+accounting system; every one of the 48 then stops at a further extension (DISPLAY and ACCEPT AT 17,
+LOCK MODE 8, SET ENVIRONMENT 4, among others), so BINARY-CHAR alone compiles none of them.
 
 ## How the six were chosen
 

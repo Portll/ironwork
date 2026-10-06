@@ -225,6 +225,8 @@ pub enum Usage {
     Binary,
     /// COMP-5: binary, never truncated to the PICTURE.
     NativeBinary,
+    /// GnuCOBOL's and Micro Focus's BINARY-CHAR [SIGNED|UNSIGNED]: one byte of binary, no PICTURE.
+    BinaryChar { signed: bool },
     Packed,
     Float1,
     Float2,

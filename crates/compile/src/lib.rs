@@ -198,6 +198,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         native
     });
     digit_limits(&program, options.arith, &mut errors);
+    binary_chars(&program, &options, &mut errors);
     let drafts = report::prepare(&mut program, options.adv, options.qualify, &mut errors);
     let linage_counters = linage::add_counters(&mut program, options.qualify);
     if whole {
@@ -803,6 +804,22 @@ pub fn procedure(program: &Program, p: &ProcName) -> Result<(usize, usize), Unna
 /// Under ARITH(COMPAT) a numeric or numeric-edited PICTURE, scaling positions P included, and a
 /// fixed-point numeric literal hold at most 18 digits, and under ARITH(EXTEND) 31 (Language
 /// Reference SC27-8713-03, pp. 45, 209, 217-218; Programming Guide SC27-8714-03, p. 349).
+/// BINARY-CHAR, Micro Focus's and GnuCOBOL's one-byte binary: a warning naming its range under
+/// `--compliance extended` (assumption C460), refused under strict.
+fn binary_chars(program: &Program, options: &Options, errors: &mut Vec<Error>) {
+    let entries = program.working_storage.iter().chain(&program.local_storage).chain(&program.linkage).chain(program.files.iter().flat_map(|f| &f.records));
+    for e in entries {
+        let Some(Usage::BinaryChar { signed }) = e.usage else { continue };
+        if options.compliance == numeric::Compliance::Strict {
+            errors.push(syntax::messages::IWC0293.at(e.pos, "BINARY-CHAR: Micro Focus's and GnuCOBOL's one-byte binary, not Enterprise COBOL's; --compliance extended reads it"));
+            continue;
+        }
+        let name = e.name.as_deref().unwrap_or("FILLER");
+        let range = if signed { "-128 to 127" } else { "0 to 255" };
+        errors.push(syntax::messages::IWX0016.at(e.pos, format!("BINARY-CHAR (Micro Focus and GnuCOBOL; Enterprise COBOL's binary items are two, four or eight bytes): {name} is one byte of binary, {range}")));
+    }
+}
+
 fn digit_limits(program: &Program, arith: numeric::options::Arith, errors: &mut Vec<Error>) {
     let max = arith.max_picture_digits();
     let option = match arith {

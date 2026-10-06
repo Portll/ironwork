@@ -10,4 +10,5 @@ pub mod precision;
 pub mod sign;
 pub mod zoned;
 
+pub use binary::Native;
 pub use options::{Arith, Assumed, BinCheck, CicsReturnWarning, Compliance, Currency, Dialect, DispSign, ExtraPlace, FastsrtAdvPrint, Initcheck, IntDate, LeServices, Nsymbol, Numcheck, Numproc, Options, Parmcheck, ProgramScope, Qualify, Quote, SortKeys, Switched, Trunc, TruncCheck, UnresolvedCalls, Vlr, VsamOpenFs, ZonCheck};

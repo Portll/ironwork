@@ -1,5 +1,6 @@
 //! The sample program the LIR and load-module tests share.
 
+use numeric::Native;
 use ironwork_rt::abend::{AbendCode, Ending};
 use ironwork_rt::lir::*;
 use ironwork_rt::storage::Kind;
@@ -20,7 +21,7 @@ const ABANDONED: &str = "control passed the end of ADD-PARA, which is armed to r
 /// `ADD WS-AMT (WS-I) TO WS-TOTAL ROUNDED ON SIZE ERROR STOP RUN`.
 pub fn payroll() -> Program {
     let symbols = ["PAYROLL", "PAYROLL.cbl", "MAIN", "ADD-PARA", "WS-TABLE", "WS-AMT", "WS-I", "WS-TOTAL", ABANDONED];
-    let binary = Kind::Binary { digits: 4, scale: 0, signed: false, native: false };
+    let binary = Kind::Binary { digits: 4, scale: 0, signed: false, native: Native::No };
     let packed = |digits| Kind::Packed { digits, scale: 2, signed: true };
     let item = |name, level, parent, offset, size, kind, at| Item {
         name: Some(name),
@@ -67,7 +68,7 @@ pub fn payroll() -> Program {
         place(42, 5, packed(9), vec![], 7, 10),
     ];
 
-    let step_i = StepPlan { dmax: 0, store: StorePlan::Binary { digits: 4, scale: 0, signed: false, native: false, name: 6 } };
+    let step_i = StepPlan { dmax: 0, store: StorePlan::Binary { digits: 4, scale: 0, signed: false, native: Native::No, name: 6 } };
     let blocks = vec![
         Block {
             ops: vec![Op::SetInt { target: WS_I, value: IntExpr::Const(1) }, Op::Nest, Op::SetTemp(0, IntExpr::Const(3))],

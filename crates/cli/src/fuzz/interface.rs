@@ -843,7 +843,7 @@ mod tests {
         assert_eq!(count_bytes(field(Kind::Zoned { digits: 3, scale: 0, signed: true, sign: None }), 42), [0xF0, 0xF4, 0xC2]);
         assert_eq!(count_bytes(field(Kind::Zoned { digits: 3, scale: 0, signed: false, sign: None }), 1234), [0xF2, 0xF3, 0xF4]);
         assert_eq!(count_bytes(field(Kind::Packed { digits: 3, scale: 0, signed: true }), 42), [0x04, 0x2C]);
-        assert_eq!(count_bytes(field(Kind::Binary { digits: 4, scale: 0, signed: true, native: false }), 42), [0x00, 0x2A]);
+        assert_eq!(count_bytes(field(Kind::Binary { digits: 4, scale: 0, signed: true, native: numeric::Native::No }), 42), [0x00, 0x2A]);
     }
 
     const SUB_PROGRAM: &str = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. CALLER.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  A PIC X(5).\n       01  B PIC X(10).\n       01  FN PIC X(8) VALUE 'SUB'.\n       01  FLAG PIC X VALUE 'Y'.\n       PROCEDURE DIVISION.\n";

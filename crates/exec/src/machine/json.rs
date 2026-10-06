@@ -209,13 +209,9 @@ impl<'p> Machine<'p, '_, '_> {
             Kind::Dbcs { .. } => chars(&self.page.decode_dbcs(&bytes), false),
             Kind::Float(precision) => Converted::Number(text::float_number(Hfp::from_bytes(precision, &bytes), if precision == Precision::Short { 8 } else { 17 })),
             Kind::Zoned { digits, scale, .. } | Kind::Packed { digits, scale, .. } => Converted::Number(self.json_fixed(loc, digits.saturating_sub(scale) + store::scaling(&self.facts(), loc), pos)?),
-            Kind::Binary { digits, scale, native, .. } => {
-                let integers = if native || self.options.trunc == Trunc::Bin {
-                    let whole = match digits {
-                        0..=4 => 5,
-                        5..=9 => 10,
-                        _ => 20,
-                    };
+            Kind::Binary { digits, scale, signed, native } => {
+                let integers = if native.is_native() || self.options.trunc == Trunc::Bin {
+                    let whole = rt::display::whole_binary_digits(numeric::binary::Binary { digits: digits as u8, signed, native }.bytes()) as u32;
                     whole - scale.min(whole)
                 } else {
                     digits.saturating_sub(scale) + store::scaling(&self.facts(), loc)

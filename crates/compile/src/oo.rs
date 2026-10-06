@@ -320,6 +320,7 @@ pub fn item_type(layout: &Layout, oo: Option<&Oo>, item: usize) -> Result<String
     let it = &layout.items[item];
     Ok(match it.kind {
         Kind::Alnum { .. } if it.size == 1 => (if boolean(layout, item) { "Z" } else { "B" }).into(),
+        Kind::Binary { scale: 0, signed: true, native: numeric::Native::BinaryChar, .. } => "B".into(),
         Kind::Binary { digits, scale: 0, signed: true, .. } => (match digits {
             1..=4 => "S",
             5..=9 => "I",

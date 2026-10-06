@@ -266,6 +266,7 @@ fn usage_word(word: &str) -> Option<Usage> {
         "DISPLAY" => Usage::Display,
         "BINARY" | "COMP" | "COMPUTATIONAL" | "COMP-4" | "COMPUTATIONAL-4" => Usage::Binary,
         "COMP-5" | "COMPUTATIONAL-5" => Usage::NativeBinary,
+        "BINARY-CHAR" => Usage::BinaryChar { signed: true },
         "PACKED-DECIMAL" | "COMP-3" | "COMPUTATIONAL-3" => Usage::Packed,
         "COMP-1" | "COMPUTATIONAL-1" => Usage::Float1,
         "COMP-2" | "COMPUTATIONAL-2" => Usage::Float2,
@@ -1428,7 +1429,8 @@ impl Parser<'_> {
                     if w == "OBJECT" {
                         self.object_reference(&mut e)?;
                     } else {
-                        e.usage = Some(usage_word(&w).ok_or_else(|| crate::messages::IWR0004.at(pos, format!("USAGE {w} is not supported yet")))?);
+                        let usage = usage_word(&w).ok_or_else(|| crate::messages::IWR0004.at(pos, format!("USAGE {w} is not supported yet")))?;
+                        e.usage = Some(self.signedness(usage));
                     }
                 }
                 "OBJECT" => self.object_reference(&mut e)?,
@@ -1527,7 +1529,7 @@ impl Parser<'_> {
                 "GLOBAL" => e.global = true,
                 "IS" if matches!(self.word(), Some("EXTERNAL" | "GLOBAL")) => {}
                 other => match usage_word(other) {
-                    Some(u) => e.usage = Some(u),
+                    Some(u) => e.usage = Some(self.signedness(u)),
                     None => return Err(crate::messages::IWR0003.at(self.tokens[self.at - 1].pos, format!("{other} is not a data description clause ironwork for COBOL supports yet"))),
                 },
             }
@@ -1538,6 +1540,18 @@ impl Parser<'_> {
             return Err(crate::messages::IWS0051.at(at, "a floating-point VALUE literal is for a COMP-1 or COMP-2 item, not a fixed-point one"));
         }
         Ok(e)
+    }
+
+    /// BINARY-CHAR's optional SIGNED or UNSIGNED after it; SIGNED is the default.
+    fn signedness(&mut self, usage: Usage) -> Usage {
+        match usage {
+            Usage::BinaryChar { .. } if self.accept_word("UNSIGNED") => Usage::BinaryChar { signed: false },
+            Usage::BinaryChar { .. } => {
+                self.accept_word("SIGNED");
+                usage
+            }
+            _ => usage,
+        }
     }
 
     /// The exponent that makes `mantissa`, the numeric literal at `at`, a floating-point literal
