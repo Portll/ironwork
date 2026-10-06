@@ -2,6 +2,7 @@
 name = "ironwork-jcl"
 description = "ironwork for COBOL: a reader for z/OS job control language"
 edition.workspace = true
+rust-version.workspace = true
 version.workspace = true
 license.workspace = true
 publish.workspace = true

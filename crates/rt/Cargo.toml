@@ -2,6 +2,7 @@
 name = "ironwork-rt"
 description = "ironwork for COBOL: the runtime a compiled program links, under the runtime exception"
 edition.workspace = true
+rust-version.workspace = true
 version.workspace = true
 license.workspace = true
 publish.workspace = true

@@ -2,6 +2,7 @@
 name = "ironwork-ddl"
 description = "Db2 for z/OS DDL as PostgreSQL DDL, for the SQL backend's tests; a development tool, not part of ironwork"
 edition.workspace = true
+rust-version.workspace = true
 version.workspace = true
 license.workspace = true
 publish = false

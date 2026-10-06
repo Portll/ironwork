@@ -2,6 +2,7 @@
 name = "ironwork-zarch"
 description = "ironwork for COBOL: z/Architecture data semantics: EBCDIC code pages, decimal instructions, hexadecimal floating point"
 edition.workspace = true
+rust-version.workspace = true
 version.workspace = true
 license = "AGPL-3.0-or-later AND Unicode-3.0"
 publish.workspace = true

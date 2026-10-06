@@ -3,6 +3,7 @@ name = "ironwork-tls"
 description = "ironwork for COBOL with TLS for --sql-db, through rustls"
 version = "0.8.0"
 edition = "2024"
+rust-version = "1.95"
 license = "AGPL-3.0-or-later"
 publish = false
 repository = "https://github.com/Portll/ironwork"
