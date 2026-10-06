@@ -48,7 +48,8 @@ It prints PASS, FAIL or TODO for each step and exits 1 on any FAIL.
    @portll/ironwork --repo Portll/ironwork --file release.yml --env npm --allow-publish`), the npm job
    fails and the jobs after it wait. To check the workflow without a release, run `gh workflow run
    release.yml -R Portll/ironwork --ref main -f dry_run=true`: the checks and builds run and every
-   publish job is skipped.
+   publish job is skipped. A dry run's `semver` job reports the API changes since the last release
+   without failing the run, since main keeps that release's version until step 4.
 6. **Notes.** The release job creates the GitHub release with `SHA256SUMS`, provenance, the npm
    tarball and the two bills of materials, each attested for its build's archives; its notes carry only the install paragraph. Add what the release contains with `gh
    release edit v<version> --notes-file <file>`, opening with a `## Summary` section, which the

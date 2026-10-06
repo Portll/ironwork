@@ -59,11 +59,13 @@ jobs:
           echo "rust=$(rustc +stable --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
 
   # Each published crate's API against its last release on crates.io: a change that breaks it
-  # needs the version bump semver asks for, which before 1.0 is the minor.
+  # needs the version bump semver asks for, which before 1.0 is the minor. A dry run reports what it
+  # finds without failing, since main keeps the last release's version until the cut bumps it.
   semver:
     name: semver against crates.io
     needs: check
     runs-on: ubuntu-latest
+    continue-on-error: ${{ github.event_name != 'push' }}
     env:
       RUST: ${{ needs.check.outputs.rust }}
     steps:
