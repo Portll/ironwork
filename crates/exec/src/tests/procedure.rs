@@ -511,7 +511,8 @@ fn function_random_repeats_its_sequence_for_a_seed_between_zero_and_one() {
     let data = "       01  X COMP-2.\n       01  N PIC 9(9).\n       01  G.\n           05 T PIC X OCCURS 3.\n";
     assert_eq!(run(&program("", data, &body)), "000007826\n131537788\n000007826\n000336534\n656124890\nIN RANGE\n");
     let (_, _, ending) = run_with(&program("", data, &[line("COMPUTE X = FUNCTION RANDOM(-1)"), line("GOBACK.")].concat()), &[]);
-    assert!(ending.unwrap_err().message.contains("FUNCTION RANDOM(-1): the seed must be zero or a positive integer"));
+    let abend = ending.unwrap_err();
+    assert_eq!((abend.code.to_string(), abend.message), ("U4038".to_owned(), "IGZ0163S Argument-1 for function RANDOM was less than zero. (-1)".to_owned()));
 }
 
 #[test]

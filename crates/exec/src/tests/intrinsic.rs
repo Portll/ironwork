@@ -220,9 +220,26 @@ fn an_argument_outside_a_functions_domain_ends_the_run() {
     assert!(ending("COMPUTE X = FUNCTION SQRT(-1)").contains("FUNCTION SQRT(-1): the argument must be zero or positive"));
     assert!(ending("COMPUTE X = FUNCTION LOG(0)").contains("FUNCTION LOG(0): the argument must be greater than zero"));
     assert!(ending("COMPUTE X = FUNCTION ACOS(2)").contains("FUNCTION ACOS(2): the argument must be from -1 to +1"));
-    assert!(ending("COMPUTE X = FUNCTION FACTORIAL(29)").contains("FUNCTION FACTORIAL(29): the argument must be from 0 to 28"));
-    assert!(ending("MOVE FUNCTION HEX-TO-CHAR('ABC') TO X").contains("a multiple of 2"));
+    assert_eq!(ending("COMPUTE X = FUNCTION FACTORIAL(29)"), "IGZ0156S Argument-1 for function FACTORIAL was less than zero or greater than 28. (29)");
+    assert_eq!(ending("MOVE FUNCTION HEX-TO-CHAR('ABC') TO X"), "IGZ0348S Argument-1 for function HEX-TO-CHAR had a length that was not a multiple of 2 bytes. (3)");
     assert!(ending("COMPUTE X = FUNCTION EXP(200)").contains("HfpExponentOverflow"));
+}
+
+/// An argument Language Environment names a message for ends the run U4038 with it (assumption C452).
+#[test]
+fn an_argument_ibm_gives_a_message_ends_the_run_with_it() {
+    let ending = |statement: &str| {
+        let abend = run_at_noon(&program("", "       01  X COMP-2.\n       01  N PIC 9(8).\n       01  C PIC X(8).\n", &[line(statement), line("GOBACK.")].concat())).1.unwrap_err();
+        assert_eq!(abend.code.to_string(), "U4038", "{statement}: {abend:?}");
+        abend.message
+    };
+    assert_eq!(ending("MOVE FUNCTION CHAR(300) TO C"), "IGZ0162S Argument-1 for function CHAR was less than 1 or greater than the number of positions in the program collating sequence. (300)");
+    assert!(ending("COMPUTE X = FUNCTION ANNUITY(-0.1 3)").starts_with("IGZ0029S Argument-1 for function ANNUITY was less than zero."));
+    assert_eq!(ending("COMPUTE X = FUNCTION ANNUITY(0.1 0)"), "IGZ0030S Argument-2 for function ANNUITY was not a positive integer. (0)");
+    assert!(ending("COMPUTE X = FUNCTION PRESENT-VALUE(-1 100)").starts_with("IGZ0100S Argument-1 for function PRESENT-VALUE was less than or equal to -1."));
+    assert_eq!(ending("COMPUTE N = FUNCTION YEAR-TO-YYYY(100)"), "IGZ0215S Argument-1 for function YEAR-TO-YYYY was less than 0 or greater than 99. (100)");
+    assert!(ending("COMPUTE N = FUNCTION YEAR-TO-YYYY(5 9000)").starts_with("IGZ0218S The sum of the year at the time of execution and the value of argument-2 was less than 1700 or greater than 10000"));
+    assert_eq!(ending("MOVE FUNCTION FORMATTED-TIME('hhmmss' 0 1440) TO C"), "IGZ0374S Argument 3 for function FORMATTED-TIME was less than -1439 or greater than 1439. (1440)");
 }
 
 #[test]
@@ -282,12 +299,13 @@ fn intdate_lilian_numbers_the_integer_dates_from_15_october_1582() {
     assert_eq!(shown(""), "00143951\n16010101\n01601001\n00143951\n20130504\n1601001T000000\n00143951\n20260927T120000\n00000001\n");
     assert_eq!(shown("INTDATE(ANSI)"), shown(""));
     let ending = |card: &str, statement: &str| run_at_noon(&program(card, data, &[line(statement), line("GOBACK.")].concat())).1;
-    assert!(ending("INTDATE(LILIAN)", "COMPUTE S = FUNCTION INTEGER-OF-DATE(15821014)").unwrap_err().message.contains("not a date from 15821015 to 99991231"));
-    assert!(ending("", "COMPUTE S = FUNCTION INTEGER-OF-DATE(15821015)").unwrap_err().message.contains("not a date from 16010101 to 99991231"));
+    assert!(ending("INTDATE(LILIAN)", "COMPUTE S = FUNCTION INTEGER-OF-DATE(15821014)").unwrap_err().message.starts_with("IGZ0160S Argument-1 for function INTEGER-OF-DATE was less than 15821015 or greater than 99991231."));
+    assert!(ending("", "COMPUTE S = FUNCTION INTEGER-OF-DATE(15821015)").unwrap_err().message.starts_with("IGZ0160S Argument-1 for function INTEGER-OF-DATE was less than 16010101 or greater than 99991231."));
     assert!(ending("INTDATE(LILIAN)", "COMPUTE S = FUNCTION DATE-OF-INTEGER(3074324)").is_ok());
-    assert!(ending("", "COMPUTE S = FUNCTION DATE-OF-INTEGER(3074324)").unwrap_err().message.contains("outside 1 to 3067671"));
+    assert!(ending("", "COMPUTE S = FUNCTION DATE-OF-INTEGER(3074324)").unwrap_err().message.starts_with("IGZ0159S Argument-1 for function DATE-OF-INTEGER was less than 1 or greater than 3067671."));
     assert!(ending("INTDATE(LILIAN)", "COMPUTE S = FUNCTION COMBINED-DATETIME(3074324 0)").is_ok());
-    assert!(ending("", "COMPUTE S = FUNCTION COMBINED-DATETIME(3074324 0)").unwrap_err().message.contains("outside 1 to 3067671"));
+    let combined = ending("", "COMPUTE S = FUNCTION COMBINED-DATETIME(3074324 0)").unwrap_err();
+    assert_eq!((combined.code.to_string(), combined.message), ("U4038".to_owned(), "IGZ0372S Argument 1 for function COMBINED-DATETIME was less than 1 or greater than 3067671. (3074324)".to_owned()));
 }
 
 #[test]

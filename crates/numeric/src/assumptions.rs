@@ -350,6 +350,7 @@ pub const CALL_BY_PROGRAM_ID: &str = "C441";
 pub const COMMAND_LINE_FROM_PARM: &str = "C442";
 pub const MISSING_PROGRAM: &str = "C450";
 pub const UNHANDLED_FILE_STATUS: &str = "C451";
+pub const FUNCTION_ARGUMENT_MESSAGES: &str = "C452";
 pub const OUT_OF_SCOPE_CALL_NOT_FOUND: &str = "C470";
 pub const BINARY_CHAR: &str = "C460";
 pub const TOP_LEVEL_TABLE: &str = "C461";
@@ -1403,7 +1404,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: FUNCTION_DOMAIN,
-        claim: "An argument outside a function's domain ends the run with abend IRONWORK: SQRT of a negative number, LOG or LOG10 of zero or less, ASIN or ACOS beyond -1 to +1, ANNUITY with a negative rate or periods that are not a positive integer, PRESENT-VALUE at a rate of -1 or less, FACTORIAL beyond 28 (29 under ARITH(EXTEND)), a century window whose end year is outside 1700 to 9999, HEX-TO-CHAR or BIT-TO-CHAR of other characters or of a length that is not a multiple of 2 or 8. IBM leaves such values undefined (Language Reference SC27-8713-03, p. 500) and Language Environment's math services signal a condition. SIN, COS and TAN of an argument beyond 2^63 times pi/2, which ironwork does not reduce, end the run the same way. A result beyond HFP's range is an exponent overflow, S0CC, and one below it zero (C8)",
+        claim: "An argument outside a function's domain that no Language Environment message names ends the run with abend IRONWORK: SQRT of a negative number, LOG or LOG10 of zero or less, ASIN or ACOS beyond -1 to +1, HEX-TO-CHAR or BIT-TO-CHAR of characters other than hexadecimal digits or 0 and 1. The arguments IBM gives a message end as C452 says. IBM leaves such values undefined (Language Reference SC27-8713-03, p. 500) and Language Environment's math services signal a condition. SIN, COS and TAN of an argument beyond 2^63 times pi/2, which ironwork does not reduce, end the run the same way. A result beyond HFP's range is an exponent overflow, S0CC, and one below it zero (C8)",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -2203,6 +2204,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: CALL_BY_PROGRAM_ID,
         claim: "A CALL of a name that no member of the program libraries has, as a file named for it, finds the .cbl or .cob file there whose PROGRAM-ID is the name: the directories in order, each one's files in name order, the first that holds the program. z/OS finds a called program as a member of STEPLIB, JOBLIB or the link list by its member name, and C450 says how a CALL that none answers ends; a build that link-edits each program under its PROGRAM-ID gives every program a member of that name, and ironwork's libraries are source directories, whose file names need not be. A member of the name comes first, as before",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: FUNCTION_ARGUMENT_MESSAGES,
+        claim: "An argument outside what an intrinsic function takes, where Language Environment names it, ends the run with that message, a severity-3 condition: 'The application was terminated' (LE Runtime Messages), user abend 4038 under the default ABTERMENC(ABEND). CHAR below 1 or past the collating sequence IGZ0162S; RANDOM below zero IGZ0163S; DATE-OF-INTEGER and DAY-OF-INTEGER outside 1 to the last integer date IGZ0159S; INTEGER-OF-DATE IGZ0160S and INTEGER-OF-DAY IGZ0161S outside their dates; FACTORIAL below 0 or above 28 IGZ0156S, above 29 under ARITH(EXTEND) IGZ0223S; ANNUITY's rate below zero IGZ0029S and periods not a positive integer IGZ0030S; PRESENT-VALUE's rate of -1 or less IGZ0100S; YEAR-TO-YYYY, DAY-TO-YYYYDDD and DATE-TO-YYYYMMDD outside 0 to 99, 99366 and 991231 IGZ0215S, IGZ0216S and IGZ0217S, and a window whose year is outside 1700 to 10000 IGZ0218S; HEX-TO-CHAR and BIT-TO-CHAR of a length not a multiple of 2 or 8 IGZ0348S; FORMATTED-DATE, FORMATTED-DATETIME and COMBINED-DATETIME of an integer date outside 1 to 3067671 IGZ0372S, of a time outside 0 to below 86400 IGZ0373S, and of an offset outside -1439 to 1439 IGZ0374S. The message is IBM's text without its program and line, which the abend's place gives, and with what the argument held in parentheses. Under INTDATE(LILIAN) the date ranges are those of C214, which IBM's fixed text does not state",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {

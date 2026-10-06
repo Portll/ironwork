@@ -5,7 +5,7 @@
 use super::numval::{self, Form};
 use super::real::Real;
 use super::{dates, datetime, math, text, unicode};
-use crate::abend::Abend;
+use crate::abend::{Abend, AbendCode};
 use crate::calendar::{SECONDS_PER_DAY, civil};
 use crate::display::utf16_text;
 use crate::fixed::{align, compare_fixed};
@@ -128,7 +128,7 @@ pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args
         "CHAR" => {
             arity(1..=1)?;
             let n = x.integer(0, pos)?;
-            let c = facts.character(n).ok_or_else(|| Abend::ironwork(format!("FUNCTION CHAR({n}) is outside 1 to {}", facts.characters()), pos))?;
+            let c = facts.character(n).ok_or_else(|| out_of_range("IGZ0162S", "Argument-1 for function CHAR was less than 1 or greater than the number of positions in the program collating sequence.".into(), n, pos))?;
             Val::Bytes(vec![c])
         }
         "ORD" => {
@@ -230,14 +230,14 @@ pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args
             let n = x.integer(0, pos)?;
             let intdate = facts.options().intdate;
             let first = dates::date_of_integer(1, intdate).unwrap_or_default();
-            let days = dates::integer_of_date(n, intdate).ok_or_else(|| Abend::ironwork(format!("FUNCTION INTEGER-OF-DATE({n}): not a date from {first} to 99991231"), pos))?;
+            let days = dates::integer_of_date(n, intdate).ok_or_else(|| out_of_range("IGZ0160S", format!("Argument-1 for function INTEGER-OF-DATE was less than {first} or greater than 99991231."), n, pos))?;
             Val::Num(Fixed::new(days.into(), Places::new(7, 0)))
         }
         "DATE-OF-INTEGER" => {
             arity(1..=1)?;
             let n = x.integer(0, pos)?;
             let intdate = facts.options().intdate;
-            let date = dates::date_of_integer(n, intdate).ok_or_else(|| Abend::ironwork(format!("FUNCTION DATE-OF-INTEGER({n}): outside 1 to {}", dates::last_integer_date(intdate)), pos))?;
+            let date = dates::date_of_integer(n, intdate).ok_or_else(|| out_of_range("IGZ0159S", format!("Argument-1 for function DATE-OF-INTEGER was less than 1 or greater than {}.", dates::last_integer_date(intdate)), n, pos))?;
             Val::Num(Fixed::new(date.into(), Places::new(8, 0)))
         }
         "CURRENT-DATE" => {
@@ -324,7 +324,7 @@ fn float_function(facts: &dyn ProgramFacts, name: &str, args: &[Val], pos: Pos) 
 fn random(state: &mut Option<u32>, seed: Option<i64>, pos: Pos) -> R<Hfp> {
     const MODULUS: u64 = 2_147_483_647;
     let current = match (seed, *state) {
-        (Some(n), _) if n < 0 => return Err(Abend::ironwork(format!("FUNCTION RANDOM({n}): the seed must be zero or a positive integer"), pos)),
+        (Some(n), _) if n < 0 => return Err(out_of_range("IGZ0163S", "Argument-1 for function RANDOM was less than zero.".into(), n, pos)),
         (Some(n), _) => n as u64 % (MODULUS - 1) + 1,
         (None, Some(s)) => u64::from(s),
         (None, None) => 1,
@@ -445,17 +445,24 @@ fn format_argument(facts: &dyn ProgramFacts, v: &Val, name: &str, pos: Pos) -> R
     datetime::Format::parse(&written).ok_or_else(|| Abend::ironwork(format!("FUNCTION {name}: {written} is not a date and time format (Language Reference SC27-8713-03, p. 504)"), pos))
 }
 
-fn integer_date(v: &Val, intdate: IntDate, name: &str, pos: Pos) -> R<i64> {
+/// An argument outside what a function takes: IBM's message `id` and its text, a severity-3
+/// condition that ends the run U4038 (assumption C112), what the argument held in parentheses.
+fn out_of_range(id: &str, text: String, held: impl std::fmt::Display, pos: Pos) -> Abend {
+    Abend { code: AbendCode::user(4038), message: format!("{id} {text} ({held})"), pos, file: None }
+}
+
+/// Argument `argument` of `name` as an integer date, refused with IGZ0372S outside 1 to the last.
+fn integer_date(v: &Val, argument: usize, intdate: IntDate, name: &str, pos: Pos) -> R<i64> {
     let n = whole(v, name, pos)?;
     let last = dates::last_integer_date(intdate);
     if !(1..=i128::from(last)).contains(&n) {
-        return Err(Abend::ironwork(format!("FUNCTION {name}: the integer date {n} is outside 1 to {last}"), pos));
+        return Err(out_of_range("IGZ0372S", format!("Argument {argument} for function {name} was less than 1 or greater than {last}."), n, pos));
     }
     Ok(n as i64)
 }
 
 /// Standard numeric time, zero to below 86,400 seconds, in nanoseconds with the rest truncated.
-fn nanos_of_day(v: &Val, name: &str, pos: Pos) -> R<u64> {
+fn nanos_of_day(v: &Val, argument: usize, name: &str, pos: Pos) -> R<u64> {
     let scaled = match v {
         Val::Num(x) if x.places.dec <= 9 => x.magnitude.checked_mul(U256::pow10(9 - x.places.dec)).map(|m| (x.negative, m)),
         Val::Num(x) => Some((x.negative, x.magnitude.div_rem(U256::pow10(x.places.dec - 9)).0)),
@@ -465,15 +472,15 @@ fn nanos_of_day(v: &Val, name: &str, pos: Pos) -> R<u64> {
     };
     match scaled.and_then(|(negative, m)| m.to_u128().filter(|&m| !negative && m < u128::from(datetime::NANOS_PER_DAY))) {
         Some(m) => Ok(m as u64),
-        None => Err(Abend::ironwork(format!("FUNCTION {name}: the time must be from 0 to below 86400 seconds"), pos)),
+        None => Err(out_of_range("IGZ0373S", format!("Argument {argument} for function {name} was less than 0 or greater than or equal to 86400."), "a time outside a day", pos)),
     }
 }
 
-fn utc_offset(v: Option<&Val>, name: &str, pos: Pos) -> R<i32> {
+fn utc_offset(v: Option<&Val>, argument: usize, name: &str, pos: Pos) -> R<i32> {
     let Some(v) = v else { return Ok(0) };
     let minutes = whole(v, name, pos)?;
     if !(-1439..=1439).contains(&minutes) {
-        return Err(Abend::ironwork(format!("FUNCTION {name}: the offset {minutes} is outside -1439 to 1439 minutes"), pos));
+        return Err(out_of_range("IGZ0374S", format!("Argument {argument} for function {name} was less than -1439 or greater than 1439."), minutes, pos));
     }
     Ok(minutes as i32)
 }
@@ -517,15 +524,18 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             arity(2..=2, args)?;
             let rate = real(&args[0], p, name, pos)?;
             let periods = whole(&args[1], name, pos)?;
+            if rate.is_negative() {
+                return Err(out_of_range("IGZ0029S", "Argument-1 for function ANNUITY was less than zero.".into(), rate.to_f64(), pos));
+            }
             let value = u128::try_from(periods).ok().and_then(|n| math::annuity(rate, n));
-            float_result(value.ok_or_else(|| outside(rate, "the rate must be zero or positive and the periods a positive integer"))?, p, pos)
+            float_result(value.ok_or_else(|| out_of_range("IGZ0030S", "Argument-2 for function ANNUITY was not a positive integer.".into(), periods, pos))?, p, pos)
         }
         "PRESENT-VALUE" => {
             if args.len() < 2 {
                 return Err(Abend::ironwork("FUNCTION PRESENT-VALUE needs a rate and at least one amount", pos));
             }
             let values = reals(args, p, name, pos)?;
-            let value = math::present_value(values[0], &values[1..]).ok_or_else(|| outside(values[0], "the rate must be greater than -1"))?;
+            let value = math::present_value(values[0], &values[1..]).ok_or_else(|| out_of_range("IGZ0100S", "Argument-1 for function PRESENT-VALUE was less than or equal to -1.".into(), values[0].to_f64(), pos))?;
             float_result(value, p, pos)
         }
         "MEAN" | "MEDIAN" | "MIDRANGE" | "VARIANCE" | "STANDARD-DEVIATION" => {
@@ -605,7 +615,8 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             let n = whole(&args[0], name, pos)?;
             let (most, digits) = if arith == Arith::Extend { (29, 31) } else { (28, 30) };
             if !(0..=most).contains(&n) {
-                return Err(Abend::ironwork(format!("FUNCTION FACTORIAL({n}): the argument must be from 0 to {most}"), pos));
+                let id = if most == 29 { "IGZ0223S" } else { "IGZ0156S" };
+                return Err(out_of_range(id, format!("Argument-1 for function FACTORIAL was less than zero or greater than {most}."), n, pos));
             }
             Ok(integer((1..=n).product(), digits))
         }
@@ -613,10 +624,10 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             arity(1..=1, args)?;
             let n = i64::try_from(whole(&args[0], name, pos)?).unwrap_or(i64::MAX);
             match name {
-                "DAY-OF-INTEGER" => Ok(integer(dates::day_of_integer(n, intdate).ok_or_else(|| Abend::ironwork(format!("FUNCTION DAY-OF-INTEGER({n}): outside 1 to {}", dates::last_integer_date(intdate)), pos))?.into(), 7)),
+                "DAY-OF-INTEGER" => Ok(integer(dates::day_of_integer(n, intdate).ok_or_else(|| out_of_range("IGZ0159S", format!("Argument-1 for function DAY-OF-INTEGER was less than 1 or greater than {}.", dates::last_integer_date(intdate)), n, pos))?.into(), 7)),
                 "INTEGER-OF-DAY" => {
                     let first = dates::day_of_integer(1, intdate).unwrap_or_default();
-                    Ok(integer(dates::integer_of_day(n, intdate).ok_or_else(|| Abend::ironwork(format!("FUNCTION INTEGER-OF-DAY({n}): not a date from {first} to 9999365"), pos))?.into(), 7))
+                    Ok(integer(dates::integer_of_day(n, intdate).ok_or_else(|| out_of_range("IGZ0161S", format!("Argument-1 for function INTEGER-OF-DAY was less than {first} or greater than 9999365."), n, pos))?.into(), 7))
                 }
                 "TEST-DATE-YYYYMMDD" => Ok(integer(dates::test_date(n).into(), 1)),
                 _ => Ok(integer(dates::test_day(n).into(), 1)),
@@ -635,7 +646,15 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
                 "DATE-TO-YYYYMMDD" => (dates::date_to_yyyymmdd(n, window, year), 8),
                 _ => (dates::day_to_yyyyddd(n, window, year), 7),
             };
-            let value = value.ok_or_else(|| Abend::ironwork(format!("FUNCTION {name}({n} {window}): the argument is out of range, or the window's end year {} is not from 1700 to 9999", year.saturating_add(window)), pos))?;
+            let (id, most) = match name {
+                "YEAR-TO-YYYY" => ("IGZ0215S", 99),
+                "DATE-TO-YYYYMMDD" => ("IGZ0217S", 991_231),
+                _ => ("IGZ0216S", 99_366),
+            };
+            if !(0..=most).contains(&n) {
+                return Err(out_of_range(id, format!("Argument-1 for function {name} was less than 0 or greater than {most}."), n, pos));
+            }
+            let value = value.ok_or_else(|| out_of_range("IGZ0218S", format!("The sum of the year at the time of execution and the value of argument-2 was less than 1700 or greater than 10000 for function {name}."), year.saturating_add(window), pos))?;
             Ok(integer(value.into(), digits))
         }
         "SECONDS-PAST-MIDNIGHT" => {
@@ -670,7 +689,7 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             let text = text_of(facts, &args[0], name, pos)?;
             let parsed = if name == "HEX-TO-CHAR" { text::hex_to_char(&text) } else { text::bit_to_char(&text) };
             parsed.map(Val::Bytes).map_err(|at| match at {
-                0 => Abend::ironwork(format!("FUNCTION {name}: the argument's length must be a multiple of {}", if name == "HEX-TO-CHAR" { 2 } else { 8 }), pos),
+                0 => out_of_range("IGZ0348S", format!("Argument-1 for function {name} had a length that was not a multiple of {} bytes.", if name == "HEX-TO-CHAR" { 2 } else { 8 }), text.len(), pos),
                 at => Abend::ironwork(format!("FUNCTION {name}: character {at} of the argument is not a {}", if name == "HEX-TO-CHAR" { "hexadecimal digit" } else { "0 or 1" }), pos),
             })
         }
@@ -716,9 +735,9 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
                     let integer_date = seconds.div_euclid(SECONDS_PER_DAY) - dates::day_zero(intdate);
                     (integer_date, seconds.rem_euclid(SECONDS_PER_DAY) as u64 * datetime::NANOS_PER_SECOND + u64::from(hundredths) * 10_000_000, 0)
                 }
-                "FORMATTED-DATE" => (self::integer_date(&args[1], intdate, name, pos)?, 0, 0),
-                "FORMATTED-TIME" => (1, nanos_of_day(&args[1], name, pos)?, utc_offset(args.get(2), name, pos)?),
-                _ => (self::integer_date(&args[1], intdate, name, pos)?, nanos_of_day(&args[2], name, pos)?, utc_offset(args.get(3), name, pos)?),
+                "FORMATTED-DATE" => (self::integer_date(&args[1], 2, intdate, name, pos)?, 0, 0),
+                "FORMATTED-TIME" => (1, nanos_of_day(&args[1], 2, name, pos)?, utc_offset(args.get(2), 3, name, pos)?),
+                _ => (self::integer_date(&args[1], 2, intdate, name, pos)?, nanos_of_day(&args[2], 3, name, pos)?, utc_offset(args.get(3), 4, name, pos)?),
             };
             let (integer_date, nanos) = if format.is_utc() {
                 let total = i128::from(integer_date) * i128::from(datetime::NANOS_PER_DAY) + i128::from(nanos) - i128::from(offset) * 60 * i128::from(datetime::NANOS_PER_SECOND);
@@ -761,14 +780,14 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
         }
         "COMBINED-DATETIME" => {
             arity(2..=2, args)?;
-            let date = integer_date(&args[0], intdate, name, pos)?;
+            let date = integer_date(&args[0], 1, intdate, name, pos)?;
             let seconds = match &args[1] {
                 Val::Num(x) => exact_real(x),
                 Val::Float(h) => Real::from_hfp(*h),
                 _ => return Err(Abend::ironwork(format!("FUNCTION {name} needs numeric arguments"), pos)),
             };
             if seconds.is_negative() || seconds.compare(Real::from_u128(86_400)) != Ordering::Less {
-                return Err(outside(seconds, "the time must be from 0 to less than 86400 seconds"));
+                return Err(out_of_range("IGZ0373S", format!("Argument 2 for function {name} was less than 0 or greater than or equal to 86400."), seconds.to_f64(), pos));
             }
             // A long-precision result whatever ARITH says (Language Reference SC27-8713-03, p. 541).
             let long = (Real::from_u128(date as u128) + seconds / Real::from_u128(100_000)).to_hfp(Precision::Long).map_err(|c| Abend::check(c, pos))?;
