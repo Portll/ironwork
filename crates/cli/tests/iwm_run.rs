@@ -322,10 +322,10 @@ fn a_damaged_module_is_refused_whether_called_or_run() {
     assert!(text(&run.stderr).starts_with("ironwork: out/BAD.iwm: section LAYOUT is corrupt (checksum "), "{}", text(&run.stderr));
 
     let mut old = fs::read(&main).unwrap();
-    old[10] = 1;
+    old[8..12].copy_from_slice(&[0, 0, 7, 0]);
     fs::write(dir.join("out/OLD.iwm"), old).unwrap();
     let run = ironwork(&dir, &["run", "out/OLD.iwm"]);
-    assert_eq!((ran(&run), text(&run.stderr)), ((String::new(), Some(245)), "ironwork: out/OLD.iwm: load module format 0.1; this ironwork reads 0.5 to 0.7. Compile the source again\n".to_owned()));
+    assert_eq!((ran(&run), text(&run.stderr)), ((String::new(), Some(245)), "ironwork: out/OLD.iwm: load module format 0.7; this ironwork reads 1.x. Compile the source again\n".to_owned()));
 }
 
 #[test]

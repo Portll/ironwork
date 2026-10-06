@@ -51,7 +51,7 @@ cobc's; C101 also takes `off`, a ROUNDED receiver's extra decimal place counted 
 | Flag | `--assume ID=VALUE` or `--assume=ID=VALUE`, repeatable; for one ID the last wins, and it wins over `--dialect` in either order. The same commands as `--dialect` take it, and `dump` refuses it |
 | Refused | by name, as a usage error: an ID the register lacks; an assumption with no alternative, its basis named (`--assume C1=off: assumption C1 (documented) has no alternative; --assume switches C101, C14, C95, C15, C51, C180 and C262`); a value its switch does not take (`C14 takes ibm or gnucobol`) |
 | Options | `Options::assumed`, set by `Options::apply_flag("--assume=ID=VALUE")`; `Options::dialect_of` and `Options::extra_place` give the value in force. `numeric::options::SWITCHES` lists the IDs and their values |
-| Load module | after the `OPTIONS` section's records, for each program compiled with one, from format 0.7 ([load-module.md](load-module.md) §5.1); `ironwork dump` prints each as `assume C101=off` |
+| Load module | after the `OPTIONS` section's records, for each program compiled with one ([load-module.md](load-module.md) §5.1); `ironwork dump` prints each as `assume C101=off` |
 | Provenance | the flag in `externalParameters.flags`, and in `optionsInForce.assumed` each switched assumption whose value in force is not `ibm`, with its value ([evidence.md](evidence.md) §2) |
 | Evidence | the journal's `open` record keeps `--assume` and its ID=VALUE in `argv` |
 

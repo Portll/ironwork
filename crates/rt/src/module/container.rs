@@ -23,11 +23,10 @@ pub struct Version {
 
 impl Version {
     /// The version this ironwork writes.
-    pub const CURRENT: Self = Self { major: 0, minor: 7 };
+    pub const CURRENT: Self = Self { major: 1, minor: 0 };
 
-    /// The oldest version this ironwork reads (§8.1): before 1.0 the last minor whose change was not
-    /// additive, so each such change moves it, and from 1.0 the major's first minor.
-    pub const OLDEST_READABLE: Self = Self { major: 0, minor: 5 };
+    /// The oldest version this ironwork reads (§8.1): its major's first minor.
+    pub const OLDEST_READABLE: Self = Self { major: 1, minor: 0 };
 
     /// Whether a reader whose oldest readable version is `self` reads `found`: the same major, at
     /// that minor or a later one (§8.1).
@@ -385,7 +384,7 @@ mod tests {
     fn the_header_and_table_have_the_documented_layout() {
         let bytes = sample(&names(&["A"]));
         assert_eq!(bytes[..8], [0x89, 0x49, 0x57, 0x4D, 0x0D, 0x0A, 0x1A, 0x0A]);
-        assert_eq!(bytes[8..20], [0, 0, 7, 0, 0, 0, 0, 0, 8, 0, 0, 0]);
+        assert_eq!(bytes[8..20], [1, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0]);
         assert_eq!(u64_at(&bytes, 20), Some(bytes.len() as u64));
         assert_eq!(u32_at(&bytes, HEADER_CRC), Some(extend(crc32(&bytes[..28]), &bytes[32..TABLE_END])));
         let strings_body = [1, 1, b'A'];
@@ -453,18 +452,18 @@ mod tests {
 
     #[test]
     fn a_minor_from_the_oldest_readable_is_read_and_an_older_one_or_another_major_refused() {
-        let current = Version { major: 0, minor: 5 };
+        let current = Version { major: 1, minor: 0 };
         assert_eq!(Module::read(&stamped(current, 0, |_| {})).unwrap().version(), current);
-        for version in [Version { major: 0, minor: 4 }, Version { major: 1, minor: 0 }] {
+        for version in [Version { major: 0, minor: 7 }, Version { major: 2, minor: 0 }] {
             assert_eq!(read(&stamped(version, 0, |_| {})), Err(ModuleError::Version(version)));
         }
         assert_eq!(
-            ModuleError::Version(Version { major: 0, minor: 4 }).to_string(),
-            "load module format 0.4; this ironwork reads 0.5 to 0.7. Compile the source again"
+            ModuleError::Version(Version { major: 0, minor: 7 }).to_string(),
+            "load module format 0.7; this ironwork reads 1.x. Compile the source again"
         );
         assert_eq!(
             ModuleError::Version(Version { major: 2, minor: 0 }).to_string(),
-            "load module format 2.0; this ironwork reads 0.5 to 0.7. Compile the source again"
+            "load module format 2.0; this ironwork reads 1.x. Compile the source again"
         );
         let oldest = Version { major: 0, minor: 3 };
         assert!(!oldest.reads(Version { major: 0, minor: 2 }));
@@ -477,7 +476,7 @@ mod tests {
 
     #[test]
     fn a_newer_minor_is_read_past_an_unknown_optional_section_and_refused_for_a_required_one_or_a_feature() {
-        let newer = Version { major: 0, minor: 8 };
+        let newer = Version { major: 1, minor: 1 };
         let optional = stamped(newer, 0, |w| w.push(9, OPTIONAL, |w| w.string("NEXT")));
         let module = Module::read(&optional).unwrap();
         assert_eq!(module.version(), newer);

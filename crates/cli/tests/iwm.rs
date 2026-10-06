@@ -128,7 +128,7 @@ fn a_source_makes_one_module_named_after_it_holding_every_program() {
     let (shown, status, _) = dump(&module, &[]);
     assert_eq!(status, Some(0), "{shown}");
     for line in [
-        "format 0.7",
+        "format 1.0",
         &format!("length {}", bytes.len()),
         "program 0 PAYROLL parent - common no dynamic yes using [] returning no",
         "program 1 SUB parent 0 common no dynamic yes using [] returning no",
@@ -378,11 +378,11 @@ fn dump_refuses_what_is_not_a_module_by_its_own_check() {
     assert!(refused("short.iwm", &good[..20]).ends_with("short.iwm: truncated: 20 bytes of 32\n"));
     assert!(refused("cut.iwm", &good[..100]).ends_with(&format!("cut.iwm: truncated: 100 bytes of {}\n", good.len())));
     let mut major = good.clone();
-    major[8..12].copy_from_slice(&[1, 0, 0, 0]);
-    assert!(refused("major.iwm", &major).ends_with("major.iwm: load module format 1.0; this ironwork reads 0.5 to 0.7. Compile the source again\n"));
-    let mut minor = good.clone();
-    minor[10] = 1;
-    assert!(refused("minor.iwm", &minor).contains("load module format 0.1;"));
+    major[8..12].copy_from_slice(&[2, 0, 0, 0]);
+    assert!(refused("major.iwm", &major).ends_with("major.iwm: load module format 2.0; this ironwork reads 1.x. Compile the source again\n"));
+    let mut older = good.clone();
+    older[8..12].copy_from_slice(&[0, 0, 7, 0]);
+    assert!(refused("older.iwm", &older).contains("load module format 0.7;"));
     let mut feature = good.clone();
     feature[12] = 4;
     let count = u32::from_le_bytes(feature[16..20].try_into().unwrap()) as usize;

@@ -10,8 +10,8 @@ prints them. The loader (§8.2) is built: `ironwork run x.iwm` runs a module's f
 VM, `ironwork cics x.iwm` runs it as the first program of a CICS task, each with the coverage report
 and evidence journal a run of its source gives, and on the VM CALL, CANCEL, a user-defined
 function, INVOKE and EXEC CICS LINK and XCTL reach programs and classes in modules. A
-static CALL is resolved when it runs, not at compile time (§8.3), and the scope rules of question 5
-are not applied. The types a module holds are [lir.md](lir.md)'s; this document gives the
+static CALL is resolved when it runs, not at compile time (§8.3), within IBM's scope rules. The
+format is 1.0, frozen (§8.1), and §14's questions are decided. The types a module holds are [lir.md](lir.md)'s; this document gives the
 container, the encoding rules, which apply to any of them, and the program directory.
 
 ## 1. Scope and constraints
@@ -111,7 +111,7 @@ sections before it can decode anything else. Section bodies use the rules of §4
 |---|---|---|
 | `NotAModule` | The magic differs (check 1) | `not an ironwork load module` |
 | `Truncated` | Fewer than 32 bytes, or fewer than `file_len` (checks 2, 4) | `truncated: 100 bytes of 240` |
-| `Version` | A version the reader does not read (check 3, §8.1) | `load module format 1.0; this ironwork reads 0.5 to 0.7. Compile the source again` |
+| `Version` | A version the reader does not read (check 3, §8.1) | `load module format 2.0; this ironwork reads 1.x. Compile the source again` |
 | `TrailingBytes` | More bytes than `file_len` (check 4) | `4 bytes after the end of the module at 240` |
 | `HeaderChecksum` | `header_crc` differs (check 5) | `header is corrupt (checksum 1234ABCD, expected 5678EF01)` |
 | `Feature` | Any `features` bit is set (check 6) | `load module needs features 0x00000004, which this ironwork lacks` |
@@ -139,9 +139,9 @@ sections before it can decode anything else. Section bodies use the rules of §4
 |---|---|---|---|
 | 1 | `STRINGS` | The string table (§4.2) | yes |
 | 2 | `DIRECTORY` | The program directory (§6) | yes |
-| 3 | `OPTIONS` | Per program: `Program.options`; then, only when a program was compiled with `--assume`, each such program's choices as (program, `Assumed`) (§5.1, from 0.7) | yes |
+| 3 | `OPTIONS` | Per program: `Program.options`; then, only when a program was compiled with `--assume`, each such program's choices as (program, `Assumed`) (§5.1) | yes |
 | 4 | `LAYOUT` | Per program: `Program.storage`, `items` and `edits` (§5.2) | yes |
-| 5 | `LIR` | Per program: the rest of `Program`; then, only when a file takes its name from a data item or a place carries a table range, each such file as (program, file, item) (lir.md `FileDesc::assign_item`, from 0.6), and then, only when a place carries one, each such place as (program, place, `TableRange`) (lir.md `Place::table`, from 0.7) | yes |
+| 5 | `LIR` | Per program: the rest of `Program`; then, only when a file takes its name from a data item or a place carries a table range, each such file as (program, file, item) (lir.md `FileDesc::assign_item`), and then, only when a place carries one, each such place as (program, place, `TableRange`) (lir.md `Place::table`) | yes |
 | 6 | `SQL` | Per program: `Program.sql`, the SQL statement table (§7) | yes |
 | 7 | `BMS` | The map models of the mapsets the module's programs use (§5.3) | yes |
 | 8 | `DEBUG` | Per program: `Program.debug`, then the file each of its sources names (§9) | yes |
@@ -381,10 +381,9 @@ The table lists the fields `Options`' encoding holds, which `assumed` is not.
 an array of one byte per switched assumption in `numeric::options::SWITCHES` order (C101, C14, C95,
 C15, C51, C180, C262), 0 where no flag gave one and the dialect decides, else one more than the
 value's place in that switch's list (`ibm` 1, `gnucobol` 2, C101's `off` 3). `Options`' encoding
-leaves it out (`default { assumed }`), so a program compiled without `--assume` has 0.5's bytes. The
-`OPTIONS` section ends, after the per-program records, with each program that has a byte other than
-0 as (program index, `Assumed`), written only when there is one: a reader before 0.7 refuses such a
-module as malformed rather than run it with Enterprise COBOL's results. `Assumed`'s `check` refuses
+leaves it out (`default { assumed }`). The `OPTIONS` section ends, after the per-program records,
+with each program that has a byte other than 0 as (program index, `Assumed`), written only when
+there is one. `Assumed`'s `check` refuses
 a byte past its switch's list.
 
 | Field | Type | Encoding | Set by |
@@ -566,47 +565,32 @@ error if it meets one. `HostType::Zoned`'s sign is `rt::SignClause`.
 
 ### 8.1 Versions
 
-The format version is `major.minor`; this ironwork writes 0.7. It reads each minor of its major from
-the oldest readable one, `Version::OLDEST_READABLE` in `rt::module`, which is 0.5: the last minor
-whose change was not additive. 0.6 is additive: the `LIR` section ends with the files that take
-their name from a data item, written only when one does, so a 0.6 module without one reads in a 0.5
-reader and a 0.5 reader refuses one with them as malformed. 0.6 also adds the dynamic SQL
-statements' tags (lir.md §9.7): a 0.5 reader refuses a module holding one as malformed and reads
-one without. 0.7 is additive too: it adds the tags of DESCRIBE and USING DESCRIPTOR, rowset FETCH,
-multiple-row INSERT and CALL, the class-name test `ByteClass::Set` (lir.md §6), the SSRANGE table ranges at the `LIR` section's end (§3.4), and the command line under `--compliance extended`
-(`AcceptFrom` 5 to 7 and `Op::ArgumentNumber`, lir.md §9.1), which a 0.6 reader refuses as
-malformed, and the `OPTIONS` section ends with the `--assume` choices, written
-only for a program compiled with one (§5.1), so an earlier reader reads a module without them and
-refuses one with them as malformed. A module older than 0.5 is refused, and compiling the source
-again is the remedy: a 0.4 module's `DEBUG` records hold no source files (§9.2); a 0.3 module's options
-lack `compliance` and `dialect` (§5.1), its arithmetic plans `inner_dmax` (lir.md §7.2), and its
-plan for INITIALIZE of a reference-modified item holds the whole item's fields (lir.md §9, C300); a
-0.2 module's places lack the tables that move a variably located item, its EXEC CICS commands their
-sinks, its INITIALIZE fields their phrases' senders and PICTURE scaling, and its markup nodes their
-moving tables (lir.md §5.1, §9.1, §9.5, §9.13); a 0.1 module's directory entries lack `external`
-(§6) and its options `optimize` (§5.1).
+The format version is `major.minor`; this ironwork writes 1.0 and reads every 1.x minor, from
+`Version::OLDEST_READABLE` in `rt::module`, which is 1.0. 1.0 is the first frozen format. It holds
+what the 0.x formats came to hold, the files that take their name from a data item and the places
+SSRANGE checks against their tables at the `LIR` section's end, and the `--assume` choices at the
+`OPTIONS` section's end, each written only when there is one, and adds `program_scope`,
+`unresolved_calls` and `le_services` to `Options` (§5.1). A 0.x module is refused, and compiling the
+source again is the remedy (question 1).
 
 | The reader finds | It does |
 |---|---|
 | Bad magic | Refuses: `X: not an ironwork load module` |
-| A different `major` | Refuses: `X: load module format 1.0; this ironwork reads 0.5 to 0.7. Compile the source again`. A reader of major 1 or more names `1.x`, and one of major 0 whose oldest readable minor is below its own names both, as `0.5 to 0.7` |
+| A different `major` | Refuses: `X: load module format 2.0; this ironwork reads 1.x. Compile the source again`, and the same for a 0.x module |
 | The same `major`, a lower `minor` | Reads it. From 1.0 a minor version only adds, and a section body's shape never changes inside a major (new data goes in a new section) |
 | The same `major`, a higher `minor` | Reads it, ignoring sections with the optional flag it does not know. Refuses on an unknown required section or a set `features` bit, naming it |
-| `major` 0 | Reads the minors from the oldest readable one to its own, and a higher one as the row above says. Refuses an older one as it refuses another major: `X: load module format 0.4; this ironwork reads 0.5 to 0.7. Compile the source again` |
 
 - **No older readers.** A new major version does not keep the last one's reader: the source is the
   durable artefact, and compiling again is the remedy (question 1).
 - **A major bump** is needed for any change to an existing encoding, tag or section body, and any
   change to the LIR that lir.md marks as breaking.
-- **Before 1.0** a change that cannot be made additive bumps the minor and moves the oldest
-  readable minor to it, so the reader refuses older modules. An additive change (a new section, an
-  optional field at a section's end, a new tag) bumps the minor and keeps them readable: the reader
-  decodes each minor from the oldest readable one, and takes a section or field an older module
-  lacks as absent. A reader older than the module skips a new section flagged optional and refuses
-  a required one, and refuses a field after the values it knows, or a tag it does not know, as
-  malformed; data an older reader may ignore goes in an optional section.
-- **1.0 freezes the format.** From 1.0 the oldest readable version is the major's first minor, and a
-  change that is not additive needs a new major.
+- **1.0 freezes the format.** The oldest readable version is the major's first minor, and a change
+  that is not additive needs a new major. An additive change (a new section, an optional field at a
+  section's end, a new tag) bumps the minor: the reader decodes each minor of its major, and takes a
+  section or field an older module lacks as absent. A reader older than the module skips a new
+  section flagged optional and refuses a required one, and refuses a field after the values it
+  knows, or a tag it does not know, as malformed; data an older reader may ignore goes in an
+  optional section.
 - **No compiler version is recorded.** Two compilers that produce the same LIR produce the same
   module; a version string would make every upgrade change every module.
 
@@ -893,16 +877,14 @@ scenarios that wait for question 5 do not run yet.
 ### L3: Version mismatch
 
 - **Given** a module whose `major` is higher than the reader's **when** it is run **then** the run
-  stops with `X: load module format 1.0; this ironwork reads 0.5 to 0.7. Compile the source again`, and
+  stops with `X: load module format 2.0; this ironwork reads 1.x. Compile the source again`, and
   exit status 245, **and** no program runs.
 - **Given** a module with a higher `minor` and an unknown optional section **then** it runs, and the
   section is ignored. **Given** an unknown required section **then** it is refused, naming the
   section.
 - **Given** a file that does not start with the magic **then** `X: not an ironwork load module`.
 - **Given** a module with a `features` bit set **then** it is refused, naming the bits.
-- **Given** a `major` 0 reader and a module of a `minor` older than its oldest readable one **then**
-  it is refused, naming the versions it reads. **Given** a higher `minor` **then** it is read as
-  above.
+- **Given** a 0.x module **then** it is refused as another major is, naming `1.x`.
 
 ### L4: Corruption
 
@@ -1005,14 +987,15 @@ scenarios that wait for question 5 do not run yet.
 - **Memory-mapping.** The reader copies what it decodes, so no alignment is guaranteed.
 - **Partial loading.** A module is decoded whole when a run first reads it.
 
-## 14. Open questions
+## 14. Questions decided
 
-1. **Old modules.** Should a new major version keep a reader for the previous one? Estates keep load
-   modules for years and recompile rarely; this document keeps none, and recompiling is the remedy.
-2. **Integrity.** Is a checksum enough, or should a module carry a keyed signature (a hash written
-   in-tree), so a shop can check that a module is the one it built?
-3. **Stripping.** Should a `--strip-debug` module exist for size, with abends naming only the
-   program and instruction? Invariant 3 forbids it as stated.
+1. **Old modules.** Decided 2026-10-04: a new major keeps no reader for the previous one. The
+   source is the durable artefact, and compiling it again is the remedy (§8.1).
+2. **Integrity.** Decided 2026-10-04: CRC-32 detects damage and the format carries no keyed
+   signature. What a module was built from is the source digests it records (§9.2), which a run's
+   journal repeats.
+3. **Stripping.** Decided 2026-10-04: no `--strip-debug`. Every abend names its source line
+   (invariant 3).
 4. **Unresolved static CALL.** Decided 2026-10-04: a NODYNAM literal naming no program of the
    compilation compiles silently as a run-time CALL. `--unresolved-calls fail` makes it a compile
    error (IWC0296), and `--le-services bind` has a CALL of a service's name reach the service before
@@ -1024,6 +1007,6 @@ scenarios that wait for question 5 do not run yet.
 6. **CANCEL of a static callee, and of a nested program.** Decided 2026-10-04: as the Language
    Reference documents it. CANCEL does nothing for a program no dynamic CALL entered, a contained
    one too, and cancelling a program cancels the programs it contains (§8.4).
-7. **Directory in abend lines.** Is a bare `PAYROLL.cbl` in an abend acceptable, or should the
-   default keep a path relative to the compile invocation, at the price that a module depends on
-   where it was built?
+7. **Directory in abend lines.** Decided 2026-10-04: abend lines name the bare source file by
+   default, and `--source-prefix DIR` gives a path, so a module does not depend on where it was
+   built (§9.2).
