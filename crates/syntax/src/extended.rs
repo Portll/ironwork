@@ -11,13 +11,33 @@ use std::collections::HashMap;
 pub const CONSTANT: &str = "constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause)";
 pub const CONCATENATION: &str = "literal concatenation with & (Micro Focus and GnuCOBOL; Enterprise COBOL has none)";
 pub const BINARY_USAGE: &str = "the COBOL 2002 binary usage (Micro Focus and GnuCOBOL; not Enterprise COBOL's)";
+pub const GNUCOBOL_BINARY_USAGE: &str = "GnuCOBOL's binary usage (not Enterprise COBOL's)";
 pub const NO_IDENTIFICATION_HEADER: &str = "PROGRAM-ID with no IDENTIFICATION DIVISION header before it (COBOL 2002, Micro Focus and GnuCOBOL; Enterprise COBOL requires the header)";
 pub const ASSIGN_ITEM: &str = "ASSIGN to a data item (Micro Focus and GnuCOBOL; Enterprise COBOL's assignment-name is never a data item)";
 pub const RETURNING_OMITTED: &str = "PROCEDURE DIVISION RETURNING OMITTED (GnuCOBOL; Enterprise COBOL's RETURNING names an 01 or 77 item of the LINKAGE SECTION)";
 
-/// BINARY-SHORT, BINARY-LONG and BINARY-DOUBLE, and the COMP-5 PICTURE each is: two, four and eight
-/// bytes of native binary.
-const BINARY_USAGES: &[(&str, &str)] = &[("BINARY-SHORT", "9(4)"), ("BINARY-LONG", "9(9)"), ("BINARY-DOUBLE", "9(18)")];
+/// A binary usage word read as a COMP-5 PICTURE of two, four or eight bytes.
+struct BinaryUsage {
+    word: &'static str,
+    digits: &'static str,
+    /// Whether the word fixes its sign; the others take SIGNED (the default) or UNSIGNED after them.
+    signed: Option<bool>,
+    origin: &'static str,
+}
+
+/// The binary usages and the COMP-5 PICTURE each is, as GnuCOBOL 3.2 sizes them.
+const BINARY_USAGES: &[BinaryUsage] = &[
+    BinaryUsage { word: "BINARY-SHORT", digits: "9(4)", signed: None, origin: BINARY_USAGE },
+    BinaryUsage { word: "BINARY-LONG", digits: "9(9)", signed: None, origin: BINARY_USAGE },
+    BinaryUsage { word: "BINARY-DOUBLE", digits: "9(18)", signed: None, origin: BINARY_USAGE },
+    BinaryUsage { word: "BINARY-LONG-LONG", digits: "9(18)", signed: None, origin: GNUCOBOL_BINARY_USAGE },
+    BinaryUsage { word: "SIGNED-SHORT", digits: "9(4)", signed: Some(true), origin: GNUCOBOL_BINARY_USAGE },
+    BinaryUsage { word: "UNSIGNED-SHORT", digits: "9(4)", signed: Some(false), origin: GNUCOBOL_BINARY_USAGE },
+    BinaryUsage { word: "SIGNED-INT", digits: "9(9)", signed: Some(true), origin: GNUCOBOL_BINARY_USAGE },
+    BinaryUsage { word: "UNSIGNED-INT", digits: "9(9)", signed: Some(false), origin: GNUCOBOL_BINARY_USAGE },
+    BinaryUsage { word: "SIGNED-LONG", digits: "9(18)", signed: Some(true), origin: GNUCOBOL_BINARY_USAGE },
+    BinaryUsage { word: "UNSIGNED-LONG", digits: "9(18)", signed: Some(false), origin: GNUCOBOL_BINARY_USAGE },
+];
 
 const FIGURATIVES: &[&str] = &["ZERO", "ZEROS", "ZEROES", "SPACE", "SPACES", "HIGH-VALUE", "HIGH-VALUES", "LOW-VALUE", "LOW-VALUES", "QUOTE", "QUOTES", "NULL", "NULLS"];
 
@@ -54,7 +74,7 @@ pub fn rewrite(tokens: Vec<Token>, cards: &[String]) -> Result<Vec<Token>, Error
                 r.constant()?;
                 continue;
             }
-            Tok::Word(w) if data && BINARY_USAGES.iter().any(|(u, _)| u == w) => {
+            Tok::Word(w) if data && BINARY_USAGES.iter().any(|u| u.word == w) => {
                 r.binary_usage()?;
                 continue;
             }
@@ -202,12 +222,13 @@ impl Rewrite {
         self.at += 2;
     }
 
-    /// `[USAGE [IS]] BINARY-SHORT|BINARY-LONG|BINARY-DOUBLE [SIGNED|UNSIGNED]` in a data entry, as
-    /// `PIC S9(n) COMP-5`, or `PIC 9(n) COMP-5` when UNSIGNED: SIGNED is the default.
+    /// `[USAGE [IS]] BINARY-SHORT [SIGNED|UNSIGNED]` and the other binary usages in a data entry, as
+    /// `PIC S9(n) COMP-5`, or `PIC 9(n) COMP-5` when unsigned: SIGNED is the default where the word
+    /// does not fix the sign.
     fn binary_usage(&mut self) -> Result<(), Error> {
         let token = self.tokens[self.at].clone();
         let Tok::Word(usage) = &token.tok else { unreachable!("the caller saw a word") };
-        let Some(&(_, digits)) = BINARY_USAGES.iter().find(|(u, _)| u == usage) else { unreachable!("the caller saw a binary usage") };
+        let Some(found) = BINARY_USAGES.iter().find(|u| u.word == usage) else { unreachable!("the caller saw a binary usage") };
         let mut messages = Vec::new();
         if self.out.last().is_some_and(|t| t.tok == Tok::Word("IS".into())) && self.out.len() >= 2 && self.out[self.out.len() - 2].tok == Tok::Word("USAGE".into()) {
             messages.extend(self.out.pop().map(|t| t.messages).unwrap_or_default());
@@ -216,15 +237,17 @@ impl Rewrite {
             messages.extend(self.out.pop().map(|t| t.messages).unwrap_or_default());
         }
         self.at += 1;
-        let signed = match self.tokens.get(self.at).map(|t| &t.tok) {
-            Some(Tok::Word(w)) if w == "SIGNED" || w == "UNSIGNED" => {
+        let signed = match (found.signed, self.tokens.get(self.at).map(|t| &t.tok)) {
+            (Some(fixed), _) => fixed,
+            (None, Some(Tok::Word(w))) if w == "SIGNED" || w == "UNSIGNED" => {
                 self.at += 1;
                 w == "SIGNED"
             }
-            _ => true,
+            (None, _) => true,
         };
-        let picture = format!("{}{digits}", if signed { "S" } else { "" });
-        let shown = format!("{BINARY_USAGE}: {usage}{} is read as PIC {picture} COMP-5", if signed { "" } else { " UNSIGNED" });
+        let picture = format!("{}{}", if signed { "S" } else { "" }, found.digits);
+        let suffix = if found.signed.is_none() && !signed { " UNSIGNED" } else { "" };
+        let shown = format!("{}: {usage}{suffix} is read as PIC {picture} COMP-5", found.origin);
         messages.push(IWX0005.at(token.pos, shown));
         messages.extend(token.messages.iter().cloned());
         let made = |tok: Tok, messages: Vec<Error>| Token { tok, pos: token.pos, area_a: false, spelled: None, after_comma: false, messages };
@@ -337,6 +360,11 @@ mod tests {
         assert_eq!(p.working_storage[1].value, Some(Literal::Number("7".into())));
         let shown: Vec<String> = p.messages.iter().map(|m| m.message.clone()).collect();
         assert_eq!(shown[1], format!("{}: BINARY-SHORT UNSIGNED is read as PIC 9(4) COMP-5", super::BINARY_USAGE));
+        let data = "       01  F UNSIGNED-INT.\n       01  G SIGNED-SHORT.\n       01  H BINARY-LONG-LONG UNSIGNED.\n       01  I UNSIGNED-LONG.\n";
+        let p = extended(&source(data, "")).unwrap();
+        let read: Vec<(Option<&str>, Option<Usage>)> = p.working_storage.iter().map(|e| (e.picture.as_deref(), e.usage)).collect();
+        assert_eq!(read, [(Some("9(9)"), Some(Usage::NativeBinary)), (Some("S9(4)"), Some(Usage::NativeBinary)), (Some("9(18)"), Some(Usage::NativeBinary)), (Some("9(18)"), Some(Usage::NativeBinary))]);
+        assert_eq!(p.messages[0].message, format!("{}: UNSIGNED-INT is read as PIC 9(9) COMP-5", super::GNUCOBOL_BINARY_USAGE));
         let p = extended(&source("       01  D BINARY-CHAR UNSIGNED.\n       01  E USAGE BINARY-CHAR SIGNED.\n", "")).unwrap();
         let read: Vec<(Option<&str>, Option<Usage>)> = p.working_storage.iter().map(|e| (e.picture.as_deref(), e.usage)).collect();
         assert_eq!(read, [(None, Some(Usage::BinaryChar { signed: false })), (None, Some(Usage::BinaryChar { signed: true }))]);

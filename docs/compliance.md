@@ -119,7 +119,7 @@ literal. Either operand may be a constant that stands for such a literal. Anythi
 of which may be a level-78 constant standing for one`. Strict keeps `literal concatenation with &
 is not Enterprise COBOL's`.
 
-### IWX0005-W BINARY-SHORT, BINARY-LONG and BINARY-DOUBLE
+### IWX0005-W BINARY-SHORT, BINARY-LONG, BINARY-DOUBLE and GnuCOBOL's binary usages
 
 `IWX0005-W the COBOL 2002 binary usage (Micro Focus and GnuCOBOL; not Enterprise COBOL's):
 BINARY-LONG is read as PIC S9(9) COMP-5`, at the usage word.
@@ -131,6 +131,14 @@ the equivalences GnuCOBOL documents, and the sizes and ranges Micro Focus gives.
 behaves as such a COMP-5 item does under Enterprise COBOL: a DISPLAY of it shows the digits and
 sign as Enterprise COBOL shows a COMP-5 item's, where GnuCOBOL shows a separate sign and one more
 digit for BINARY-LONG.
+
+GnuCOBOL's own binary usages are read the same way, with `GnuCOBOL's binary usage (not Enterprise
+COBOL's)` in the warning: `BINARY-LONG-LONG [SIGNED|UNSIGNED]` as BINARY-DOUBLE; `SIGNED-SHORT` and
+`UNSIGNED-SHORT` as `PIC S9(4)` and `9(4)` `COMP-5`; `SIGNED-INT` and `UNSIGNED-INT` as `S9(9)` and
+`9(9)`; `SIGNED-LONG` and `UNSIGNED-LONG` as `S9(18)` and `9(18)`. These take no SIGNED or UNSIGNED
+after them. They are cobc 3.2's sizes, two, four and eight bytes, and its results: MOVE 70000 to a
+SIGNED-SHORT gives 4464, and MOVE -1 to an UNSIGNED-INT gives 1. `BINARY-C-LONG`, whose size is the
+C compiler's `long`, stays refused.
 
 `BINARY-CHAR` is one byte, not a COMP-5 PICTURE: IWX0016, below.
 

@@ -368,3 +368,29 @@ fn binary_char_is_a_warning_naming_its_range_under_extended_and_refused_under_st
     let errors = compile(parsed, &EXTENDED.iter().map(|f| f.to_string()).collect::<Vec<_>>()).err().unwrap();
     assert!(errors.iter().any(|e| e.id == Some("IWC0294")), "{errors:?}");
 }
+
+/// GnuCOBOL's binary usages given values past their bytes and below zero.
+const GNUCOBOL_BINARY: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. INTS.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  A SIGNED-SHORT.\n",
+    "       01  B UNSIGNED-SHORT.\n",
+    "       01  D UNSIGNED-INT.\n",
+    "       01  F UNSIGNED-LONG.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE -1 TO B D F\n",
+    "           MOVE 70000 TO A\n",
+    "           DISPLAY A ' ' B ' ' D ' ' F\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn gnucobols_binary_usages_keep_their_bytes_as_cobc_does_on_both_executors() {
+    let flags = ["--compliance=extended", "--dialect=gnucobol"];
+    let walked = Harness::source(GNUCOBOL_BINARY).flags(&flags).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("+04464 00001 0000000001 00000000000000000001\n", Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(GNUCOBOL_BINARY).flags(&flags).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+}
