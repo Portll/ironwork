@@ -83,6 +83,12 @@ by `prev` and `seq`.
   is broken, and the break is a `lock-broken` record. A lock whose holder cannot be checked, as on
   Windows, is taken as not running. `close`'s `ledger` says whether the run held the lock as it
   closed. Whether the run reached the ledger is what the ledger says.
+- **Format.** Records are `cobolwork-evidence/v1`, and the kinds and fields a record may hold are
+  cobolwork's table (`lib/evidence/record.mjs`), vendored as `fixtures/cobolwork/evidence/kinds.tsv`.
+  A test holds every record ironwork writes to that table, and CI runs `cobolwork evidence verify`
+  on the journals of real runs. cobolwork's verifier refuses a kind or field its table lacks, so a
+  new one is added to cobolwork's table and verifier first and written by ironwork after; a
+  verifier from before it refuses the record. A change to a field's meaning takes `v2`.
 
 ### 1.1 Input trace: `--trace-marker TEXT`
 
@@ -121,7 +127,8 @@ With `--evidence`, `run` and `cics` record each time a statement FILE lists star
 executed a finding's route in order, which cobolwork needs before coverage may refute the finding
 (cobolwork `docs/spec/reach.md` §9.8, fact 2). FILE holds one `FILE:LINE` per line, split at the
 last colon, blank lines left out: the statements of cobolwork's `flow --all-routes`
-`routes.statements`. A statement is matched by its file's name and its line, as cobolwork joins a
+`routes.statements`. That form is version 1 and carries no header; a later form starts with the line
+`# ironwork statements N`, which this ironwork refuses as not `FILE:LINE`. A statement is matched by its file's name and its line, as cobolwork joins a
 sink to a finding, so a path recorded from another directory still matches.
 
 - **Where.** A statement starts as the walker's `exec` meets it (lir.md §10): every statement but
@@ -373,7 +380,9 @@ supply its parameters.
 
 `format` is `ironwork-fuzz/v1`, the shape [fuzz-manifest.schema.json](fuzz-manifest.schema.json)
 describes, apart from `version` so a reader checks the shape and not the release. A key added to
-the manifest keeps the format, and a reader skips keys it does not know; a key removed or renamed,
+the manifest keeps the format, and a reader skips keys it does not know: the schema leaves each
+object open to keys it does not list, and ironwork's tests check that it writes only the keys the
+schema lists; a key removed or renamed,
 or a value given another meaning, takes a new format, which a reader of the old one refuses. So
 does a new value of `entry` or of an input's `kind` that changes what a kept run shows, since a
 reader that does not look at the value would read the run as one it knows.

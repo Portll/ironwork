@@ -84,11 +84,14 @@ fn a_run_with_no_list_records_no_statements() {
 }
 
 #[test]
-fn a_list_without_a_journal_or_not_of_file_and_line_is_refused() {
+fn a_list_without_a_journal_or_not_of_file_and_line_or_of_a_later_version_is_refused() {
     let dir = temp("refused");
     let alone = run(&dir, Some("LOOPER.cbl:8\n"), false);
     let malformed = run(&dir, Some("LOOPER.cbl\n"), true);
+    let later = run(&dir, Some("# ironwork statements 2\nLOOPER.cbl:8\n"), true);
     let _ = fs::remove_dir_all(&dir);
+    assert_eq!(later.status.code(), Some(246));
+    assert!(String::from_utf8_lossy(&later.stderr).contains("line 1: \"# ironwork statements 2\" is not FILE:LINE"), "{}", String::from_utf8_lossy(&later.stderr));
     assert_eq!(alone.status.code(), Some(246));
     assert!(String::from_utf8_lossy(&alone.stderr).contains("--trace-statements goes with --evidence, for run"));
     assert_eq!(malformed.status.code(), Some(246));

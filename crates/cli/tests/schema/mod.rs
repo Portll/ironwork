@@ -76,12 +76,37 @@ pub fn manifest_violations(manifest: &str) -> Vec<String> {
     }
 }
 
-/// DIR/manifest.json, once it conforms to the schema its format names.
+/// DIR/manifest.json, once it conforms to the schema its format names with every key it writes
+/// listed there: the published schema leaves objects open to keys a later release adds.
 pub fn read_manifest(dir: &Path) -> String {
     let text = fs::read_to_string(dir.join("manifest.json")).unwrap();
-    let violations = manifest_violations(&text);
+    let mut violations = manifest_violations(&text);
+    if violations.is_empty() {
+        let doc = parse(&text).unwrap();
+        let format = match &doc {
+            Json::Obj(pairs) => pairs.iter().find(|(k, _)| k == "format").and_then(|(_, v)| if let Json::Str(f) = v { schema_of(f) } else { None }),
+            _ => None,
+        };
+        violations = validate(&closed(parse(format.unwrap_or(MANIFEST_SCHEMA)).unwrap()), &doc);
+    }
     assert!(violations.is_empty(), "{} departs from its schema in docs/:\n{}\n{text}", dir.display(), violations.join("\n"));
     text
+}
+
+/// `schema` with every object that lists `properties` refusing the keys it does not list.
+pub fn closed(schema: Json) -> Json {
+    match schema {
+        Json::Obj(pairs) => {
+            let lists = pairs.iter().any(|(k, _)| k == "properties") && !pairs.iter().any(|(k, _)| k == "additionalProperties");
+            let mut pairs: Vec<(String, Json)> = pairs.into_iter().map(|(k, v)| (k, closed(v))).collect();
+            if lists {
+                pairs.push(("additionalProperties".to_owned(), Json::Bool(false)));
+            }
+            Json::Obj(pairs)
+        }
+        Json::Arr(items) => Json::Arr(items.into_iter().map(closed).collect()),
+        other => other,
+    }
 }
 
 fn parse_value(bytes: &[u8], pos: &mut usize, depth: usize) -> Result<Json, String> {
@@ -985,10 +1010,12 @@ mod tests {
     }
 
     #[test]
-    fn the_manifest_schema_refuses_an_undescribed_key_a_missing_one_and_another_format() {
+    fn the_manifest_schema_reads_an_added_key_and_refuses_a_missing_one_and_another_format() {
         assert_eq!(manifest_violations(MANIFEST), Vec::<String>::new());
         let added = MANIFEST.replace(r#""optimized":false"#, r#""optimized":false,"limit":10"#);
-        assert_eq!(manifest_violations(&added), ["/runs/0/abend: additional property 'limit' not allowed"]);
+        assert_eq!(manifest_violations(&added), Vec::<String>::new());
+        let strict = closed(parse(MANIFEST_SCHEMA).unwrap());
+        assert_eq!(validate(&strict, &parse(&added).unwrap()), ["/runs/0/abend: additional property 'limit' not allowed"]);
         let without = MANIFEST.replace(r#""format":"ironwork-fuzz/v1","#, "");
         assert_eq!(manifest_violations(&without), [": missing required property 'format'"]);
         let other = MANIFEST.replace("ironwork-fuzz/v1", "ironwork-fuzz/v2");

@@ -18,12 +18,12 @@ jobs:
         with:
           persist-credentials: false
       # cobolwork's option and CICS tables and fixtures/cobolwork are vendored; drift tests compare them,
-      # and cobolwork's evidence verifier reads the evidence of ironwork runs.
+      # and `cobolwork evidence verify` reads the evidence of ironwork runs.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Portll/cobolwork
           # Pinned to cobolwork commits whose shared tables drift tests pass against.
-          ref: 8b5bbbb70a96063d8ea48731e2a42ec6a7c0fdd0
+          ref: bbbb80a133ebf0feb867652588c7470abf0d20df
           path: cobolwork
           persist-credentials: false
           sparse-checkout: |
@@ -36,7 +36,10 @@ jobs:
             test/fixtures/priv/REGION.csd
             test/fixtures/web-csd/REGION.csd
             test/fixtures/evidence/
-            lib/evidence/
+            bin/
+            lib/
+            rules/
+            package.json
           sparse-checkout-cone-mode: false
       # NIST's CCVS85 audit routines, one program to a file, which tools/nist.py runs.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -44,8 +44,7 @@
           "description": "The PROGRAM-ID, or for a job the job's name.",
           "type": "string"
         }
-      },
-      "additionalProperties": false
+      }
     },
     "roots": {
       "description": "The directories the runs read, numbered as a journal's input records number them: the program's directory, then each -I and -L library; for a job, the JCL's directory, .work for each run's own data sets, the libraries, then the procedure libraries.",
@@ -74,8 +73,7 @@
         "abend": { "description": "Runs that ended in an abend the input may have caused.", "type": "integer", "minimum": 0 },
         "timeout": { "description": "Runs stopped after --timeout seconds.", "type": "integer", "minimum": 0 },
         "refused": { "description": "Runs that say nothing of the program's input: ironwork refused them, panicked, or the abend names what the surroundings lack.", "type": "integer", "minimum": 0 }
-      },
-      "additionalProperties": false
+      }
     },
     "runs": {
       "description": "One entry per kept abend.",
@@ -87,7 +85,6 @@
       "const": "coverage/runs.json"
     }
   },
-  "additionalProperties": false,
   "$defs": {
     "input": {
       "description": "One input of a kept run.",
@@ -102,8 +99,7 @@
         "name": { "description": "The name it goes in under: a DD name, SYSIN, PARM, DFHCOMMAREA or the terminal id; for a job, a data set name, STEP.DD or a step.", "type": "string" },
         "bytes": { "description": "Its bytes in base64, possibly empty; a COMMAREA's in EBCDIC, a PARM's and a screen script's in UTF-8.", "type": "string" },
         "minimized": { "description": "False when minimizing ran out of runs before the input was as small as still gives the abend.", "type": "boolean" }
-      },
-      "additionalProperties": false
+      }
     },
     "run": {
       "description": "A kept run: its inputs, its abend, and the journal and coverage of its run with --evidence.",
@@ -126,14 +122,12 @@
             "line": { "description": "The line it ended at.", "type": "integer", "minimum": 1 },
             "message": { "description": "The message the run ended with.", "type": "string" },
             "optimized": { "description": "Whether the same input, compiled with OPTIMIZE(2), ends in the same abend at the same file and line. True without a run for S322 and a CEE3501S's U4038, which OPTIMIZE cannot change.", "type": "boolean" }
-          },
-          "additionalProperties": false
+          }
         },
         "journal": { "description": "The run id of its journal under evidence/runs.", "type": "string" },
         "coverage": { "description": "Its coverage, in run --coverage's format, by path from DIR.", "type": "string" },
         "limit": { "description": "The statement limit the run was given (run --statement-limit): a kept S322's place depends on it. Absent for a run with no limit.", "type": "integer", "minimum": 1 }
-      },
-      "additionalProperties": false
+      }
     }
   }
 }

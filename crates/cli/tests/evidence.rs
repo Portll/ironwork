@@ -395,18 +395,19 @@ fn cobolworks_verifier_accepts_the_evidence_of_real_runs() {
     assert_eq!(kinds, ["abend", "call", "close", "dd", "genesis", "input", "lock-broken", "open", "output", "run", "sink", "statement", "step"]);
     assert!(lines.iter().any(|l| field(l, "kind") == Some("sink") && field(l, "marker") == Some("HELPER") && field(l, "reached").is_some()), "a sink record with the marker");
 
-    let verify = "import { pathToFileURL } from 'node:url';
-        const { verifyEvidence } = await import(pathToFileURL(process.argv[1]).href);
-        const v = verifyEvidence(process.argv[2]);
-        process.stdout.write(JSON.stringify({ verified: v.verified, broken: v.broken, unrecorded: v.unrecorded, open: v.open }));";
     let out = Command::new("node")
-        .args(["--input-type=module", "-e", verify])
-        .arg(Path::new(&cobolwork).join("lib/evidence/verify.mjs"))
+        .arg(Path::new(&cobolwork).join("bin/cobolwork.mjs"))
+        .args(["evidence", "verify", "--evidence"])
         .arg(&ev)
+        .current_dir(&dir)
         .output()
         .expect("node, to run cobolwork's verifier");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    assert_eq!(String::from_utf8_lossy(&out.stdout), r#"{"verified":true,"broken":[],"unrecorded":[],"open":[]}"#);
+    let shown = String::from_utf8_lossy(&out.stdout);
+    // 3 is cobolwork's undetermined: every chain verifies, and no witness was named to seal them.
+    assert_eq!(out.status.code(), Some(3), "{shown}{}", String::from_utf8_lossy(&out.stderr));
+    for verdict in [r#""verified": true"#, r#""broken": []"#, r#""unrecorded": []"#, r#""open": []"#] {
+        assert!(shown.contains(verdict), "{verdict} in {shown}");
+    }
     fs::remove_dir_all(dir).unwrap();
 }
 

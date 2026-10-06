@@ -61,8 +61,7 @@
           "description": "The PROGRAM-ID, or for a job the job's name.",
           "type": "string"
         }
-      },
-      "additionalProperties": false
+      }
     },
     "roots": {
       "description": "The directories the runs read, numbered as a journal's input records number them: the subprogram's directory, then each -I and -L library.",
@@ -122,8 +121,7 @@
           "type": "integer",
           "minimum": 0
         }
-      },
-      "additionalProperties": false
+      }
     },
     "runs": {
       "description": "One entry per kept abend.",
@@ -151,8 +149,7 @@
             "type": "integer",
             "minimum": 1
           }
-        },
-        "additionalProperties": false
+        }
       }
     },
     "runCoverage": {
@@ -160,7 +157,6 @@
       "const": "coverage/runs.json"
     }
   },
-  "additionalProperties": false,
   "$defs": {
     "input": {
       "description": "One argument of a kept run.",
@@ -203,8 +199,7 @@
           "description": "The argument was OMITTED: a null address, as the CALL it was shaped by passes.",
           "const": true
         }
-      },
-      "additionalProperties": false
+      }
     },
     "run": {
       "description": "A kept run: its inputs, its abend, and the journal and coverage of its run with --evidence.",
@@ -260,8 +255,7 @@
               "description": "Whether the same input, compiled with OPTIMIZE(2), ends in the same abend at the same file and line. True without a run for S322 and a CEE3501S's U4038, which OPTIMIZE cannot change.",
               "type": "boolean"
             }
-          },
-          "additionalProperties": false
+          }
         },
         "journal": {
           "description": "The run id of its journal under evidence/runs.",
@@ -276,8 +270,7 @@
           "type": "integer",
           "minimum": 1
         }
-      },
-      "additionalProperties": false
+      }
     }
   }
 }
