@@ -610,3 +610,74 @@ fn the_environment_is_read_and_set_alike_on_both_executors() {
     let refused: Vec<(u32, Option<&str>)> = strict.iter().filter(|d| d.2 != Some("IWS0097")).map(|d| (d.0, d.2)).collect();
     assert_eq!(refused[..4], [(9, Some("IWS0055")), (12, Some("IWS0055")), (16, Some("IWS0055")), (18, Some("IWS0061"))], "{strict:?}");
 }
+
+/// Files with LOCK MODE and SHARING, and the READ, WRITE and REWRITE phrases and UNLOCK that go
+/// with them.
+const LOCKS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. LOCKS.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       INPUT-OUTPUT SECTION.\n",
+    "       FILE-CONTROL.\n",
+    "           SELECT KF ASSIGN TO 'kf.dat'\n",
+    "               ORGANIZATION INDEXED ACCESS DYNAMIC\n",
+    "               RECORD KEY IS K-ID\n",
+    "               LOCK MODE IS MANUAL WITH LOCK ON MULTIPLE RECORDS\n",
+    "               FILE STATUS IS FS.\n",
+    "           SELECT SF ASSIGN TO 'sf.dat'\n",
+    "               ORGANIZATION LINE SEQUENTIAL\n",
+    "               LOCK MODE AUTOMATIC\n",
+    "               SHARING WITH ALL OTHER.\n",
+    "       DATA DIVISION.\n",
+    "       FILE SECTION.\n",
+    "       FD  KF.\n",
+    "       01  K-REC.\n",
+    "           05  K-ID   PIC 9(3).\n",
+    "           05  K-NAME PIC X(5).\n",
+    "       FD  SF.\n",
+    "       01  S-REC PIC X(10).\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  FS PIC XX.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           OPEN OUTPUT KF\n",
+    "           MOVE 1 TO K-ID MOVE 'ALPHA' TO K-NAME\n",
+    "           WRITE K-REC WITH NO LOCK\n",
+    "           MOVE 2 TO K-ID MOVE 'BETA' TO K-NAME\n",
+    "           WRITE K-REC\n",
+    "           CLOSE KF\n",
+    "           OPEN I-O KF\n",
+    "           MOVE 2 TO K-ID\n",
+    "           READ KF WITH LOCK KEY IS K-ID\n",
+    "           DISPLAY 'READ ' FS ' ' K-NAME\n",
+    "           MOVE 'GAMMA' TO K-NAME\n",
+    "           REWRITE K-REC WITH LOCK\n",
+    "           UNLOCK KF RECORDS\n",
+    "           MOVE 1 TO K-ID\n",
+    "           READ KF WITH NO LOCK\n",
+    "           DISPLAY 'READ ' FS ' ' K-NAME\n",
+    "           CLOSE KF\n",
+    "           OPEN OUTPUT SF\n",
+    "           MOVE 'LINE' TO S-REC\n",
+    "           WRITE S-REC\n",
+    "           CLOSE SF\n",
+    "           OPEN INPUT SF\n",
+    "           READ SF NEXT RECORD\n",
+    "           DISPLAY 'SEQ ' S-REC\n",
+    "           CLOSE SF\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn locking_phrases_change_nothing_a_run_unit_does_alike_on_both_executors() {
+    let dir = temp("locks");
+    std::fs::create_dir_all(&dir).unwrap();
+    let dds = [format!("KF.DAT={}", dir.join("kf.dat").display()), format!("SF.DAT={}:text", dir.join("sf.dat").display())];
+    let walked = Harness::source(LOCKS).flags(EXTENDED).dds(&dds).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("READ 00 BETA \nREAD 00 ALPHA\nSEQ LINE      \n", Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(LOCKS).flags(EXTENDED).dds(&dds).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    let warned = diagnostics_under(LOCKS, numeric::Compliance::Extended);
+    assert_eq!(warned.iter().filter(|d| d.2 == Some("IWX0022")).map(|d| d.0).collect::<Vec<_>>(), [9, 13, 14, 28, 34, 37, 38, 40], "{warned:?}");
+    let strict = syntax::parse(&program("", "       01  A PIC X(4).\n", &line("READ F WITH LOCK."))).unwrap_err();
+    assert_eq!((strict.id, strict.message.as_str()), (Some("IWC0299"), "READ ... WITH LOCK: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it"));
+}

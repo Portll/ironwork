@@ -320,6 +320,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0296 | S | `CALL '{name}': no program of the compilation has this name, and --unresolved-calls=fail refuses a static CALL the binder could not resolve` |
 | IWC0297 | S | `FUNCTION {name}: {argument} is numeric, where {name} takes an alphabetic, alphanumeric or national argument` |
 | IWC0298 | S | `{DISPLAY or ACCEPT on the screen, or the SCREEN SECTION}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0299 | S | `{a locking phrase}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
@@ -805,3 +806,4 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0019 | W | `OCCURS at level {level} (Micro Focus and GnuCOBOL; Enterprise COBOL takes OCCURS only at levels 02 to 49): {name} is read as a table in a record of its own` |
 | IWX0020 | W | `{DISPLAY or ACCEPT} on the screen (Micro Focus and GnuCOBOL; Enterprise COBOL has none): at {where}` |
 | IWX0021 | W | `{the environment form} (Micro Focus and GnuCOBOL; Enterprise COBOL reads and sets no environment variable): {what it does}` |
+| IWX0022 | W | `{a locking phrase} (Micro Focus and GnuCOBOL; Enterprise COBOL has no record locks of its own): the run unit is the file's only user, so nothing it locks waits and the phrase changes nothing` |

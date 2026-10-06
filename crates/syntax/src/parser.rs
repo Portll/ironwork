@@ -1058,6 +1058,34 @@ impl Parser<'_> {
                         self.at += 1;
                     }
                 }
+                "LOCK" if self.extended => {
+                    let at = self.tokens[self.at - 1].pos;
+                    self.accept_word("MODE");
+                    self.accept_word("IS");
+                    let mode = self.name("MANUAL, AUTOMATIC or EXCLUSIVE")?;
+                    if !matches!(mode.as_str(), "MANUAL" | "AUTOMATIC" | "EXCLUSIVE") {
+                        return Err(self.error(format!("LOCK MODE {mode}: MANUAL, AUTOMATIC or EXCLUSIVE")));
+                    }
+                    if self.is_word("WITH") && self.word_at(1) == Some("LOCK") {
+                        self.at += 2;
+                        self.expect_word("ON")?;
+                        self.accept_word("MULTIPLE");
+                        self.accept_any(&["RECORD", "RECORDS"]);
+                    }
+                    self.locked(&format!("LOCK MODE {mode}"), at);
+                }
+                "SHARING" if self.extended => {
+                    let at = self.tokens[self.at - 1].pos;
+                    self.accept_word("WITH");
+                    let with = match self.accept_any(&["ALL", "NO", "READ"]).as_deref() {
+                        Some("ALL") => self.accept_word("OTHER").then_some("ALL OTHER"),
+                        Some("NO") => self.accept_word("OTHER").then_some("NO OTHER"),
+                        Some(_) => self.accept_word("ONLY").then_some("READ ONLY"),
+                        None => None,
+                    };
+                    let with = with.ok_or_else(|| self.error("ALL OTHER, NO OTHER or READ ONLY after SHARING WITH"))?;
+                    self.locked(&format!("SHARING WITH {with}"), at);
+                }
                 other => return Err(crate::messages::IWR0008.at(self.pos(), format!("{other} is not a SELECT clause ironwork for COBOL supports yet"))),
             }
         }
@@ -1573,6 +1601,58 @@ impl Parser<'_> {
         Ok(e)
     }
 
+    /// A locking phrase of Micro Focus and GnuCOBOL, read under `--compliance extended` with
+    /// IWX0022-W and refused under strict.
+    fn lock_phrase(&mut self, phrase: &str, at: Pos) -> R<()> {
+        if !self.extended {
+            return Err(crate::messages::IWC0299.at(at, format!("{phrase}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it")));
+        }
+        self.locked(phrase, at);
+        Ok(())
+    }
+
+    fn locked(&mut self, phrase: &str, at: Pos) {
+        self.messages.push(crate::messages::IWX0022.at(at, format!("{phrase} (Micro Focus and GnuCOBOL; Enterprise COBOL has no record locks of its own): the run unit is the file's only user, so nothing it locks waits and the phrase changes nothing")));
+    }
+
+    /// READ's WITH LOCK, WITH NO LOCK, WITH KEPT LOCK, WITH WAIT or IGNORING LOCK, where written.
+    fn read_lock(&mut self) -> R<()> {
+        let at = self.pos();
+        let phrase = if self.is_word("WITH") && matches!(self.word_at(1), Some("LOCK" | "NO" | "KEPT" | "WAIT")) {
+            self.at += 1;
+            match self.name("LOCK, NO LOCK, KEPT LOCK or WAIT")?.as_str() {
+                "LOCK" => "READ ... WITH LOCK",
+                "NO" => {
+                    self.expect_word("LOCK")?;
+                    "READ ... WITH NO LOCK"
+                }
+                "KEPT" => {
+                    self.expect_word("LOCK")?;
+                    "READ ... WITH KEPT LOCK"
+                }
+                _ => "READ ... WITH WAIT",
+            }
+        } else if self.is_word("IGNORING") && self.word_at(1) == Some("LOCK") {
+            self.at += 2;
+            "READ ... IGNORING LOCK"
+        } else {
+            return Ok(());
+        };
+        self.lock_phrase(phrase, at)
+    }
+
+    /// WRITE's or REWRITE's WITH LOCK or WITH NO LOCK, where written.
+    fn write_lock(&mut self, verb: &str) -> R<()> {
+        let at = self.pos();
+        let no = match (self.word(), self.word_at(1), self.word_at(2)) {
+            (Some("WITH"), Some("LOCK"), _) => false,
+            (Some("WITH"), Some("NO"), Some("LOCK")) => true,
+            _ => return Ok(()),
+        };
+        self.at += if no { 3 } else { 2 };
+        self.lock_phrase(&format!("{verb} ... WITH {}LOCK", if no { "NO " } else { "" }), at)
+    }
+
     /// The SCREEN SECTION's entries as written: Micro Focus's and GnuCOBOL's screens, which the
     /// compiler reads under `--compliance extended` and refuses under strict.
     fn screen_section(&mut self) -> R<Vec<ScreenEntry>> {
@@ -1921,7 +2001,7 @@ impl Parser<'_> {
                 out.push(Stmt::Exec(Box::new(block)));
                 continue;
             }
-            if !self.word().is_some_and(|w| VERBS.contains(&w)) {
+            if !self.word().is_some_and(|w| VERBS.contains(&w) || self.extended && w == "UNLOCK") {
                 break;
             }
             let statement = self.statement()?;
@@ -2087,7 +2167,11 @@ impl Parser<'_> {
                     while self.starts_ref() {
                         files.push((mode, self.name("a file name")?));
                         self.accept_any(&["REVERSED"]);
-                        if self.accept_word("WITH") || self.is_word("NO") {
+                        if self.is_word("WITH") && self.word_at(1) == Some("LOCK") {
+                            let at = self.pos();
+                            self.at += 2;
+                            self.lock_phrase("OPEN ... WITH LOCK", at)?;
+                        } else if self.accept_word("WITH") || self.is_word("NO") {
                             self.expect_word("NO")?;
                             self.expect_word("REWIND")?;
                         }
@@ -2131,12 +2215,14 @@ impl Parser<'_> {
                 let next = previous || self.accept_word("NEXT");
                 self.accept_word("RECORD");
                 let into = if self.accept_word("INTO") { Some(self.reference()?) } else { None };
+                self.read_lock()?;
                 let key = if self.accept_word("KEY") {
                     self.accept_word("IS");
                     Some(self.reference()?)
                 } else {
                     None
                 };
+                self.read_lock()?;
                 let [at_end, invalid] = self.on_phrases(&["AT", "END", "INVALID"], &["END-READ"], |p| {
                     if p.accept_word("INVALID") {
                         p.accept_word("KEY");
@@ -2151,6 +2237,7 @@ impl Parser<'_> {
             "REWRITE" => {
                 let record = self.reference()?;
                 let from = if self.accept_word("FROM") { Some(self.operand()?) } else { None };
+                self.write_lock("REWRITE")?;
                 let invalid = self.invalid_key("END-REWRITE")?;
                 Stmt::Rewrite { record, from, invalid, pos }
             }
@@ -2182,6 +2269,7 @@ impl Parser<'_> {
             "WRITE" => {
                 let record = self.reference()?;
                 let from = if self.accept_word("FROM") { Some(self.operand()?) } else { None };
+                self.write_lock("WRITE")?;
                 let mut advancing = None;
                 if let Some(side) = self.accept_any(&["BEFORE", "AFTER"]) {
                     let before = side == "BEFORE";
@@ -2262,6 +2350,12 @@ impl Parser<'_> {
             "STOP" if self.starts_operand() && !self.starts_ref() => Stmt::Display { items: vec![self.operand()?], upon: Some(Upon { name: "CONSOLE".into(), device: "CONSOLE".into() }), no_advancing: false, screen: None, pos },
             "STOP" => return Err(self.error("RUN or a literal after STOP")),
             "CONTINUE" => Stmt::Continue { pos },
+            "UNLOCK" => {
+                self.name("a file name")?;
+                self.accept_any(&["RECORD", "RECORDS"]);
+                self.lock_phrase("UNLOCK", pos)?;
+                Stmt::Continue { pos }
+            }
             "EXIT" if self.is_word("FUNCTION") => return Err(crate::messages::IWS0056.at(pos, "EXIT FUNCTION: Enterprise COBOL does not yet support the format 4 EXIT statement; GOBACK ends a user-defined function")),
             "EXIT" => match self.accept_any(&["PROGRAM", "PARAGRAPH", "SECTION", "PERFORM", "METHOD"]).as_deref() {
                 Some("PROGRAM") => Stmt::ExitProgram { pos },

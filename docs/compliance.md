@@ -50,7 +50,8 @@ holding the table one level down, which both executors run as any table. IWX0020
 no Enterprise COBOL form: both executors write and read it through `rt::crt`, and the LIR carries
 its ops `ScreenDisplay` and `ScreenAccept`. IWX0021-W, the environment, has none either: both
 executors read and set the run unit's variables (`rt::environment`), and the LIR carries its
-`Environment` op and the ACCEPT source ENVIRONMENT-VALUE.
+`Environment` op and the ACCEPT source ENVIRONMENT-VALUE. IWX0022-W, record locking, is read by the
+parser and changes nothing either executor runs.
 
 ### IWX0001-W free-form source
 
@@ -561,6 +562,26 @@ ironwork does not. The variables are those `ironwork run --env NAME=VALUE` gives
 sets, never the process's own, so a run gives what its command line says (assumption C464). Each
 value ACCEPT reads is the run's input, as a SYSIN record is. Strict refuses each as before: IWS0055,
 IWS0060, IWS0061, and IWC0073 for DISPLAY UPON.
+
+### IWX0022-W record locking
+
+`IWX0022-W LOCK MODE MANUAL (Micro Focus and GnuCOBOL; Enterprise COBOL has no record locks of its
+own): the run unit is the file's only user, so nothing it locks waits and the phrase changes
+nothing`, at the phrase.
+
+    SELECT ... [LOCK MODE [IS] {MANUAL | AUTOMATIC | EXCLUSIVE} [WITH LOCK ON [MULTIPLE] {RECORD | RECORDS}]]
+               [SHARING WITH {ALL OTHER | NO OTHER | READ ONLY}]
+    OPEN mode file WITH LOCK
+    READ file ... [WITH {LOCK | NO LOCK | KEPT LOCK | WAIT} | IGNORING LOCK] ...
+    WRITE record ... [WITH [NO] LOCK] ...
+    REWRITE record ... [WITH [NO] LOCK] ...
+    UNLOCK file [RECORD | RECORDS]
+
+A run unit is the only user of its files, so no lock it takes is ever met by another and none of its
+I/O waits or fails for one: the phrases are read, each with the warning, and change nothing;
+UNLOCK does nothing. cobc 3.2 refuses a READ lock phrase on a file of LOCK MODE AUTOMATIC, which
+ironwork reads. Assumption C465. Strict refuses LOCK MODE and SHARING as before (IWR0008), the
+statement phrases with IWC0299, and UNLOCK is no statement there.
 
 ## How the six were chosen
 

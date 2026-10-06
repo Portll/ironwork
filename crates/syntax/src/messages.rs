@@ -344,6 +344,7 @@ catalogue! {
     IWC0296 Severe "CALL '{name}': no program of the compilation has this name, and --unresolved-calls=fail refuses a static CALL the binder could not resolve";
     IWC0297 Severe "FUNCTION {name}: {argument} is numeric, where {name} takes an alphabetic, alphanumeric or national argument";
     IWC0298 Severe "{DISPLAY or ACCEPT on the screen, or the SCREEN SECTION}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
+    IWC0299 Severe "{a locking phrase}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
     IWJ0003 Severe "unbalanced parentheses or quotes in {text}";
@@ -829,6 +830,7 @@ catalogue! {
     IWX0019 Warning "OCCURS at level {level} (Micro Focus and GnuCOBOL; Enterprise COBOL takes OCCURS only at levels 02 to 49): {name} is read as a table in a record of its own";
     IWX0020 Warning "{DISPLAY or ACCEPT} on the screen (Micro Focus and GnuCOBOL; Enterprise COBOL has none): at {where}";
     IWX0021 Warning "{the environment form} (Micro Focus and GnuCOBOL; Enterprise COBOL reads and sets no environment variable): {what it does}";
+    IWX0022 Warning "{a locking phrase} (Micro Focus and GnuCOBOL; Enterprise COBOL has no record locks of its own): the run unit is the file's only user, so nothing it locks waits and the phrase changes nothing";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.
