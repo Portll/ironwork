@@ -20,6 +20,7 @@ pub mod printer;
 pub mod report;
 mod reserved;
 mod scope;
+mod screens;
 pub mod sort;
 pub mod sql;
 mod switches;
@@ -181,6 +182,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         declared += inserted.iter().filter(|&&at| at < declared).count();
         top_level_tables(&mut program.local_storage, &mut errors);
     }
+    screens::expand(&mut program, options.compliance == numeric::Compliance::Extended, &mut errors);
     let page = options.code_page();
     if let Err((message, m)) = syntax::parser::decode_currency(&mut program.environment, |bytes| page.decode(bytes)) {
         errors.push(message.at(Pos::default(), m));
@@ -1065,7 +1067,7 @@ impl Check<'_> {
                         self.displayed_function(f);
                     }
                 }
-                if let Some(screen) = screen {
+                if let Some(screen) = screen.as_deref().filter(|s| s.screen.is_none()) {
                     self.screen("DISPLAY", screen);
                 }
                 if let Some(upon) = upon
@@ -1220,10 +1222,21 @@ impl Check<'_> {
                 SetStmt::Switches(_) => {}
             },
             Stmt::Accept { target, from, exception, screen, pos } => {
-                self.reference(target);
                 match screen {
-                    Some(screen) => self.screen("ACCEPT", screen),
-                    None => self.accept_source(*from, exception, target, *pos),
+                    Some(screen) if screen.screen.is_some() => {
+                        for i in &screen.inputs {
+                            self.reference(&i.field);
+                            self.reference(&i.target);
+                        }
+                    }
+                    Some(screen) => {
+                        self.reference(target);
+                        self.screen("ACCEPT", screen);
+                    }
+                    None => {
+                        self.reference(target);
+                        self.accept_source(*from, exception, target, *pos);
+                    }
                 }
                 self.statements(exception.on.as_deref().unwrap_or_default());
                 self.statements(exception.not_on.as_deref().unwrap_or_default());

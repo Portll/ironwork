@@ -265,6 +265,14 @@ fn function_name(name: &str) -> Result<(), &'static str> {
 /// screen.
 const CRT_DEVICES: &[&str] = &["CRT", "CRT-UNDER"];
 
+/// The words that begin a SCREEN SECTION entry's clauses, so a name is not taken for one.
+const SCREEN_CLAUSES: &[&str] = &[
+    "LINE", "COL", "COLUMN", "VALUE", "PIC", "PICTURE", "FROM", "TO", "USING", "BLANK", "ERASE", "SECURE", "NO-ECHO", "OCCURS", "JUSTIFIED", "JUST", "SIGN", "USAGE",
+    "PROMPT", "COLOR", "COLOUR", "HIGHLIGHT", "LOWLIGHT", "REVERSE-VIDEO", "BLINK", "UNDERLINE", "BELL", "BEEP", "AUTO", "AUTO-SKIP", "AUTOTERMINATE", "FULL",
+    "LENGTH-CHECK", "REQUIRED", "EMPTY-CHECK", "UPPER", "LOWER", "OVERLINE", "LEFTLINE", "GRID", "FOREGROUND-COLOR", "FOREGROUND-COLOUR", "BACKGROUND-COLOR",
+    "BACKGROUND-COLOUR", "SIZE", "CONTROL",
+];
+
 /// The screen attributes a DISPLAY or ACCEPT may name, kept by name.
 const SCREEN_ATTRIBUTES: &[&str] = &[
     "HIGHLIGHT", "LOWLIGHT", "REVERSE-VIDEO", "BLINK", "UNDERLINE", "BELL", "BEEP", "AUTO", "AUTO-SKIP", "AUTOTERMINATE", "FULL", "LENGTH-CHECK", "REQUIRED",
@@ -533,7 +541,7 @@ impl Parser<'_> {
         self.classes.splice(0..0, std::mem::take(&mut environment.classes));
         environment.classes = self.classes.clone();
         self.debugging |= environment.debugging_mode;
-        let (mut working_storage, mut local_storage, mut linkage) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut working_storage, mut local_storage, mut linkage, mut screens) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         let mut report_writer = crate::report::ReportWriter::default();
         let mut declaratives = Declaratives::default();
         if self.at_division(&["DATA"]) {
@@ -552,6 +560,7 @@ impl Parser<'_> {
                     "LOCAL-STORAGE" => local_storage = self.data_entries()?,
                     "FILE" => self.file_section(&mut files)?,
                     "REPORT" => report_writer.reports.extend(self.report_section()?),
+                    "SCREEN" => screens = self.screen_section()?,
                     other => return Err(crate::messages::IWR0006.at(self.pos(), format!("the {other} SECTION is not supported yet"))),
                 }
             }
@@ -637,6 +646,7 @@ impl Parser<'_> {
             environment,
             nested: contained,
             prototypes: self.functions.clone(),
+            screens,
             ..Program::default()
         });
         out.extend(nested);
@@ -1551,6 +1561,113 @@ impl Parser<'_> {
             return Err(crate::messages::IWS0051.at(at, "a floating-point VALUE literal is for a COMP-1 or COMP-2 item, not a fixed-point one"));
         }
         Ok(e)
+    }
+
+    /// The SCREEN SECTION's entries as written: Micro Focus's and GnuCOBOL's screens, which the
+    /// compiler reads under `--compliance extended` and refuses under strict.
+    fn screen_section(&mut self) -> R<Vec<ScreenEntry>> {
+        let mut entries = Vec::new();
+        while let Some(Tok::Number(n)) = self.peek().cloned() {
+            let pos = self.pos();
+            let level = n.parse().map_err(|_| self.error("a level number"))?;
+            self.at += 1;
+            let mut e = ScreenEntry { level, pos, ..ScreenEntry::default() };
+            if let Some(w) = self.word().map(str::to_owned)
+                && !SCREEN_CLAUSES.contains(&w.as_str())
+            {
+                self.at += 1;
+                e.name = (w != "FILLER").then_some(w);
+            }
+            while self.peek().is_some() && self.peek() != Some(&Tok::Period) {
+                let at = self.pos();
+                let clause = self.name("a screen description clause")?;
+                match clause.as_str() {
+                    "LINE" | "COL" | "COLUMN" => {
+                        self.accept_word("NUMBER");
+                        self.accept_word("IS");
+                        let place = if self.accept(&Tok::Plus) || self.accept_word("PLUS") {
+                            ScreenPlace::Plus(self.screen_number()?)
+                        } else if self.accept(&Tok::Minus) || self.accept_word("MINUS") {
+                            ScreenPlace::Minus(self.screen_number()?)
+                        } else {
+                            ScreenPlace::At(self.screen_number()?)
+                        };
+                        if clause == "LINE" { e.line = Some(place) } else { e.column = Some(place) }
+                    }
+                    "VALUE" => {
+                        self.accept_word("IS");
+                        e.value = Some(self.literal()?);
+                    }
+                    "PIC" | "PICTURE" => e.picture = Some(self.picture()?),
+                    "FROM" => e.from = Some(self.operand()?),
+                    "TO" => e.to = Some(self.reference()?),
+                    "USING" => e.using = Some(self.reference()?),
+                    "BLANK" => match self.accept_any(&["SCREEN", "LINE", "WHEN"]).as_deref() {
+                        Some("SCREEN") => e.blank_screen = true,
+                        Some("LINE") => e.blank_line = true,
+                        Some(_) => {
+                            if self.accept_any(&["ZERO", "ZEROS", "ZEROES"]).is_none() {
+                                return Err(self.error("ZERO after BLANK WHEN"));
+                            }
+                            e.attributes.push("BLANK WHEN ZERO".into());
+                        }
+                        None => return Err(self.error("SCREEN, LINE or WHEN ZERO after BLANK")),
+                    },
+                    "ERASE" => match self.accept_any(&["EOL", "EOS", "SCREEN", "LINE"]).as_deref() {
+                        Some("EOL") => e.erase_eol = true,
+                        Some("SCREEN") => e.blank_screen = true,
+                        Some("LINE") => e.blank_line = true,
+                        _ => e.erase_eos = true,
+                    },
+                    "SECURE" | "NO-ECHO" => e.secure = true,
+                    "OCCURS" => return Err(crate::messages::IWR0057.at(at, "OCCURS in the SCREEN SECTION is not supported yet")),
+                    "JUSTIFIED" | "JUST" => {
+                        self.accept_word("RIGHT");
+                        e.attributes.push(clause);
+                    }
+                    "SIGN" => {
+                        self.accept_word("IS");
+                        self.accept_any(&["LEADING", "TRAILING"]);
+                        if self.accept_word("SEPARATE") {
+                            self.accept_word("CHARACTER");
+                        }
+                        e.attributes.push(clause);
+                    }
+                    "USAGE" => {
+                        self.accept_word("IS");
+                        self.expect_word("DISPLAY")?;
+                    }
+                    "PROMPT" => {
+                        if self.accept_word("CHARACTER") {
+                            self.accept_word("IS");
+                            self.literal()?;
+                        }
+                        e.attributes.push(clause);
+                    }
+                    "FOREGROUND-COLOR" | "FOREGROUND-COLOUR" | "BACKGROUND-COLOR" | "BACKGROUND-COLOUR" | "COLOR" | "COLOUR" | "SIZE" | "CONTROL" => {
+                        self.accept_word("IS");
+                        self.operand()?;
+                        e.attributes.push(clause);
+                    }
+                    other if SCREEN_ATTRIBUTES.contains(&other) => e.attributes.push(clause),
+                    other => return Err(crate::messages::IWS0001.at(at, format!("a screen description clause, found {other}"))),
+                }
+            }
+            self.expect(&Tok::Period, "a period")?;
+            entries.push(e);
+        }
+        Ok(entries)
+    }
+
+    /// A SCREEN SECTION LINE or COLUMN number.
+    fn screen_number(&mut self) -> R<u32> {
+        match self.peek().cloned() {
+            Some(Tok::Number(n)) if n.parse::<u32>().is_ok() => {
+                self.at += 1;
+                Ok(n.parse().unwrap_or_default())
+            }
+            _ => Err(crate::messages::IWR0057.at(self.pos(), "a SCREEN SECTION LINE or COLUMN that is not an integer literal is not supported yet")),
+        }
     }
 
     /// Micro Focus's and GnuCOBOL's screen phrases after a DISPLAY's items or an ACCEPT's target,

@@ -138,6 +138,17 @@ pub struct ScreenPlan {
     pub secure: bool,
 }
 
+/// A field of a screen ACCEPT: the item it shows, the item the operator's entry goes to, and
+/// where it is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScreenInput {
+    pub target: PlaceId,
+    pub field: PlaceId,
+    pub at: ScreenPosition,
+    pub update: bool,
+    pub secure: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScreenPosition {
     Cursor,
@@ -411,6 +422,7 @@ codec_struct!(InitField { offset, len, value, store, scaling });
 codec_enum!(InitValue { Default(value) = 0, Value(value) = 1, Replacing(value) = 2 });
 codec_struct!(DisplayPlan { items, no_advancing });
 codec_struct!(ScreenPlan { at, blank_screen, blank_line, erase_eol, erase_eos, update, secure });
+codec_struct!(ScreenInput { target, field, at, update, secure });
 codec_enum!(ScreenPosition { Cursor = 0, Combined(at) = 1, LineColumn { line, column } = 2 });
 codec_enum!(DisplayItem {
     Bytes(place) = 0,

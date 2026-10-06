@@ -20,6 +20,8 @@ pub struct Program {
     /// LOCAL-STORAGE: fresh for every activation of the program.
     pub local_storage: Vec<DataEntry>,
     pub linkage: Vec<DataEntry>,
+    /// The SCREEN SECTION's entries, as written.
+    pub screens: Vec<ScreenEntry>,
     /// PROCEDURE DIVISION USING: the LINKAGE items the caller's arguments address.
     pub using: Vec<Param>,
     pub returning: Option<String>,
@@ -955,7 +957,53 @@ pub struct ScreenPhrases {
     pub update: bool,
     pub secure: bool,
     pub attributes: Vec<String>,
+    /// An ACCEPT of a SCREEN SECTION's screen: the screen's name, and its TO and USING fields,
+    /// which the compiler puts here. A positioned ACCEPT has neither, its one field its target.
+    pub screen: Option<String>,
+    pub inputs: Vec<ScreenInput>,
     pub pos: Pos,
+}
+
+/// A TO or USING field of a screen: the item that shows it, as its PICTURE edits, the item that
+/// takes the entry, and where it is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScreenInput {
+    pub field: Ref,
+    pub target: Ref,
+    pub line: u32,
+    pub column: u32,
+    pub update: bool,
+    pub secure: bool,
+}
+
+/// An entry of the SCREEN SECTION, as written.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ScreenEntry {
+    pub level: u8,
+    pub name: Option<String>,
+    pub line: Option<ScreenPlace>,
+    pub column: Option<ScreenPlace>,
+    pub value: Option<Literal>,
+    pub picture: Option<String>,
+    pub from: Option<Operand>,
+    pub to: Option<Ref>,
+    pub using: Option<Ref>,
+    pub blank_screen: bool,
+    pub blank_line: bool,
+    pub erase_eol: bool,
+    pub erase_eos: bool,
+    pub secure: bool,
+    pub attributes: Vec<String>,
+    pub pos: Pos,
+}
+
+/// A SCREEN SECTION entry's LINE or COLUMN: a number, or PLUS or MINUS one relative to the entry
+/// before.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScreenPlace {
+    At(u32),
+    Plus(u32),
+    Minus(u32),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

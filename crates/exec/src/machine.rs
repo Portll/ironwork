@@ -414,10 +414,22 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             }
             Stmt::Set { set, pos } => self.set(set, *pos)?,
             Stmt::Accept { target, exception, screen: Some(screen), pos, .. } => {
-                let loc = self.locate(target)?;
-                let shown = rt::display::place(&self.facts(), &self.unit.mem, loc, target.pos, false)?;
-                let at = self.screen_at(screen, *pos)?;
-                let raised = rt::crt::accept(&self.facts(), self.unit, loc, &shown, at, screen.update, screen.secure, *pos)?;
+                let inputs = match screen.screen {
+                    Some(_) => screen
+                        .inputs
+                        .iter()
+                        .map(|i| {
+                            let at = Some((i.line as usize, i.column as usize));
+                            Ok(rt::crt::Input { target: self.locate(&i.target)?, field: self.locate(&i.field)?, at, update: i.update, secure: i.secure })
+                        })
+                        .collect::<R<Vec<_>>>()?,
+                    None => {
+                        let loc = self.locate(target)?;
+                        let at = self.screen_at(screen, *pos)?;
+                        vec![rt::crt::Input { target: loc, field: loc, at, update: screen.update, secure: screen.secure }]
+                    }
+                };
+                let raised = rt::crt::accept(&self.facts(), self.unit, &inputs, *pos)?;
                 return self.overflow_branch(raised, &exception.on, &exception.not_on);
             }
             Stmt::Accept { target, from: from @ AcceptFrom::ArgumentValue, exception, pos, .. } => {

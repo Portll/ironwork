@@ -742,10 +742,12 @@ fn verify_program(p: &Program) -> Result<(), String> {
                     within("DISPLAY plan", *display, p.plans.display.len())?;
                     screen_ints(screen).try_for_each(int)?;
                 }
-                Op::ScreenAccept { target, shown, screen, .. } => {
-                    place(*target)?;
-                    within("DISPLAY plan", *shown, p.plans.display.len())?;
-                    screen_ints(screen).try_for_each(int)?;
+                Op::ScreenAccept { inputs, .. } => {
+                    for i in inputs {
+                        place(i.target)?;
+                        place(i.field)?;
+                        position_ints(&i.at).try_for_each(int)?;
+                    }
                 }
                 Op::Call(c) => within("CALL plan", *c, p.services.calls.len())?,
                 Op::Cancel(o) => operand(o)?,
@@ -916,7 +918,12 @@ fn verify_scope(p: &Program, range: &dyn Fn(u32, RangeKind) -> Result<(), String
 
 /// The integers a screen phrase evaluates.
 fn screen_ints(screen: &rt::lir::ScreenPlan) -> impl Iterator<Item = &IntExpr> {
-    let (a, b, c) = match &screen.at {
+    position_ints(&screen.at)
+}
+
+/// The integers a screen position evaluates.
+fn position_ints(at: &rt::lir::ScreenPosition) -> impl Iterator<Item = &IntExpr> {
+    let (a, b, c) = match at {
         rt::lir::ScreenPosition::Cursor => (None, None, None),
         rt::lir::ScreenPosition::Combined(at) => (Some(at), None, None),
         rt::lir::ScreenPosition::LineColumn { line, column } => (None, line.as_ref(), column.as_ref()),

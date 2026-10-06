@@ -723,8 +723,12 @@ impl<'a> Printer<'a> {
             Op::Display(id) => self.display(*id),
             Op::ArgumentNumber(value) => format!("ArgumentNumber <- {}", self.int(value)),
             Op::ScreenDisplay { display, screen } => format!("Screen{} {}", self.display(*display), self.screen(screen)),
-            Op::ScreenAccept { target, shown, screen, handled } => {
-                format!("ScreenAccept {} shown {} {}{}", self.place(*target), self.display(*shown), self.screen(screen), if *handled { " handled" } else { "" })
+            Op::ScreenAccept { inputs, handled } => {
+                let inputs = inputs.iter().map(|i| {
+                    let flags = format!("{}{}", if i.update { " update" } else { "" }, if i.secure { " secure" } else { "" });
+                    format!("{} <- {} [{}{flags}]", self.place(i.target), self.place(i.field), self.screen_position(&i.at))
+                });
+                format!("ScreenAccept {}{}", join(inputs, ", "), if *handled { " handled" } else { "" })
             }
             Op::Accept { target, from, plan } => format!("Accept {} <- {}{}", self.place(*target), accept_from(*from), self.moved(plan, SenderCheck::None)),
             Op::File(id) => self.file_op(*id),
@@ -789,14 +793,18 @@ impl<'a> Printer<'a> {
         format!("{} <- {}{}", self.place(s.target), self.expr(s.expr), attrs('[', how))
     }
 
-    fn screen(&self, s: &ScreenPlan) -> String {
-        let at = match &s.at {
+    fn screen_position(&self, at: &ScreenPosition) -> String {
+        match at {
             ScreenPosition::Cursor => "cursor".to_owned(),
             ScreenPosition::Combined(at) => format!("at {}", self.int(at)),
             ScreenPosition::LineColumn { line, column } => {
                 format!("line {} column {}", line.as_ref().map_or("cursor".to_owned(), |l| self.int(l)), column.as_ref().map_or("1".to_owned(), |c| self.int(c)))
             }
-        };
+        }
+    }
+
+    fn screen(&self, s: &ScreenPlan) -> String {
+        let at = self.screen_position(&s.at);
         let flags = [(s.blank_screen, " blank-screen"), (s.blank_line, " blank-line"), (s.erase_eol, " erase-eol"), (s.erase_eos, " erase-eos"), (s.update, " update"), (s.secure, " secure")];
         format!("[{at}{}]", flags.iter().filter(|(on, _)| *on).map(|(_, name)| *name).collect::<String>())
     }

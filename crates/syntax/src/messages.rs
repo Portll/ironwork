@@ -343,7 +343,7 @@ catalogue! {
     IWC0295 Severe "{name}: two programs of {program} have this name, and the programs of a separately compiled program each need their own (--program-scope=flexible allows it)";
     IWC0296 Severe "CALL '{name}': no program of the compilation has this name, and --unresolved-calls=fail refuses a static CALL the binder could not resolve";
     IWC0297 Severe "FUNCTION {name}: {argument} is numeric, where {name} takes an alphabetic, alphanumeric or national argument";
-    IWC0298 Severe "{DISPLAY or ACCEPT} on the screen: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
+    IWC0298 Severe "{DISPLAY or ACCEPT on the screen, or the SCREEN SECTION}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
     IWJ0003 Severe "unbalanced parentheses or quotes in {text}";
@@ -708,6 +708,7 @@ catalogue! {
     IWR0054 Severe "BLANK WHEN ZERO on a USAGE NATIONAL item is not supported yet";
     IWR0055 Severe "a national-edited PICTURE is not supported yet";
     IWR0056 Severe "a {category} PICTURE with USAGE {usage} is not supported yet";
+    IWR0057 Severe "{a SCREEN SECTION form ironwork does not run} is not supported yet";
     IWS0001 Severe "{what the syntax takes there}, found {the word or token there}";
     IWS0002 Severe "{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries";
     IWS0003 Severe "COPY: {message}";

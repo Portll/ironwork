@@ -512,10 +512,31 @@ run` prints each screen an ACCEPT showed, before the operator typed, and the las
 This is a clean model of the screen, not cobc's (operator ruling 2026-10-07): cobc 3.2 positions
 only a DISPLAY's last item, overtypes an UPDATE field from the left, reads `3.5` typed into
 `S9(3)V99` as 35.00, and writes a plain DISPLAY on the screen once it is used. Assumption C462.
-Strict refuses each screen phrase with IWC0298. The SCREEN SECTION stays refused (IWR0006).
+Strict refuses each screen phrase with IWC0298.
+
+The SCREEN SECTION describes screens to DISPLAY and ACCEPT by name. Each entry is
+
+    level [name | FILLER] [LINE [NUMBER] [IS] [PLUS | MINUS] n] [COL[UMN] [NUMBER] [IS] [PLUS | MINUS] n]
+          [VALUE literal | PIC[TURE] picture [FROM item | TO item | USING item]]
+          [BLANK {SCREEN | LINE} | ERASE [EOL | EOS] | SECURE | attribute]...
+
+An entry is at the LINE and COLUMN it gives, PLUS and MINUS counting from the entry before; without
+LINE it is on the line of the entry before, and without COLUMN at column 1 when LINE is given, else in
+the column after the entry before. A field is as long as its VALUE or its PICTURE, and a group entry
+places what follows it. `DISPLAY name` writes each entry the screen holds, in order, at its place: a
+VALUE as written, a FROM or USING field as its PICTURE edits the item (the compiler gives each such
+field an item of its PICTURE in WORKING-STORAGE and MOVEs to it), a TO field as spaces or zeros.
+`ACCEPT name` displays the screen and reads its TO and USING fields in one turn of the operator, `tab`
+moving to the next field, each target taking its field as a positioned ACCEPT's does; a USING field
+starts holding the item's value. `DISPLAY name AT LLCC` or `LINE n COL n` moves the whole screen from
+line 1, column 1 to there. Assumption C463. The warning names the screen:
+`IWX0020-W ACCEPT ORDER-SCREEN on the screen (Micro Focus and GnuCOBOL; Enterprise COBOL has none): at
+the lines and columns its SCREEN SECTION entries give`. Strict refuses the SCREEN SECTION with
+IWC0298. OCCURS in it, a LINE or COLUMN that is not an integer literal, and a screen displayed at a
+place an item gives are refused with IWR0057.
 
 In the census, after the level-01 tables, positioned DISPLAY and ACCEPT were the first refusal of
-19 distinct sources that cobc compiles; with them, 40 of the 445 such programs compile, from 35.
+19 distinct sources that cobc compiles, and the SCREEN SECTION of 17.
 
 ## How the six were chosen
 

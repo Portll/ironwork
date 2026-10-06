@@ -459,11 +459,23 @@ impl Lower<'_> {
             }
             Stmt::Search(se) => self.search(se, pos, &inner)?,
             Stmt::Accept { target, exception, screen: Some(screen), .. } => {
-                let place = self.place(target, true)?;
-                let shown = self.display_plan(&[Operand::Ref(target.clone())], false, false, pos)?;
-                let screen = self.screen_plan(screen, pos)?;
+                let inputs = match screen.screen {
+                    Some(_) => {
+                        let mut inputs = Vec::with_capacity(screen.inputs.len());
+                        for i in &screen.inputs {
+                            let at = lir::ScreenPosition::LineColumn { line: Some(lir::IntExpr::Const(i64::from(i.line))), column: Some(lir::IntExpr::Const(i64::from(i.column))) };
+                            inputs.push(lir::ScreenInput { target: self.place(&i.target, true)?, field: self.place(&i.field, true)?, at, update: i.update, secure: i.secure });
+                        }
+                        inputs
+                    }
+                    None => {
+                        let place = self.place(target, true)?;
+                        let at = self.screen_plan(screen, pos)?.at;
+                        vec![lir::ScreenInput { target: place, field: place, at, update: screen.update, secure: screen.secure }]
+                    }
+                };
                 let handled = exception.on.is_some() || exception.not_on.is_some();
-                self.op(Op::ScreenAccept { target: place, shown, screen, handled }, pos)?;
+                self.op(Op::ScreenAccept { inputs, handled }, pos)?;
                 if handled {
                     self.select(exception.on.as_deref(), exception.not_on.as_deref(), pos, &inner)?;
                 }

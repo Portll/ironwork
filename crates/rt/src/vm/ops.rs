@@ -146,11 +146,15 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 let at = self.screen_at(screen, pos)?;
                 crate::crt::display(self.unit, at, &text, clearing(screen));
             }
-            Op::ScreenAccept { target, shown, screen, handled } => {
-                let dest = self.loc_written(*target)?;
-                let text = self.display_text(*shown, pos)?;
-                let at = self.screen_at(screen, pos)?;
-                let raised = crate::crt::accept(&self.facts(), self.unit, dest, &text, at, screen.update, screen.secure, pos)?;
+            Op::ScreenAccept { inputs, handled } => {
+                let mut fields = Vec::with_capacity(inputs.len());
+                for i in inputs {
+                    let target = self.loc_written(i.target)?;
+                    let field = self.loc_written(i.field)?;
+                    let at = self.position(&i.at, pos)?;
+                    fields.push(crate::crt::Input { target, field, at, update: i.update, secure: i.secure });
+                }
+                let raised = crate::crt::accept(&self.facts(), self.unit, &fields, pos)?;
                 if *handled {
                     return Ok(Step::Arm(u8::from(raised)));
                 }
@@ -315,7 +319,11 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
 
     /// Where a screen DISPLAY or ACCEPT is, or None for the cursor.
     fn screen_at(&mut self, screen: &ScreenPlan, pos: Pos) -> R<Option<(usize, usize)>> {
-        Ok(match &screen.at {
+        self.position(&screen.at, pos)
+    }
+
+    fn position(&mut self, at: &ScreenPosition, pos: Pos) -> R<Option<(usize, usize)>> {
+        Ok(match at {
             ScreenPosition::Cursor => None,
             ScreenPosition::Combined(at) => Some(crate::crt::line_column(self.int(at, pos)?.max(0) as u64)),
             ScreenPosition::LineColumn { line, column } => {

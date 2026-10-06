@@ -357,6 +357,7 @@ pub const OUT_OF_SCOPE_CALL_NOT_FOUND: &str = "C470";
 pub const BINARY_CHAR: &str = "C460";
 pub const TOP_LEVEL_TABLE: &str = "C461";
 pub const SCREEN_MODEL: &str = "C462";
+pub const SCREEN_SECTION_LAYOUT: &str = "C463";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2237,6 +2238,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: MISSING_PROGRAM,
         claim: "A dynamic CALL (of an identifier, or of a literal under DYNAM), SET TO ENTRY or user-defined function invocation that finds no program of the name, with no ON EXCEPTION phrase, raises CEE3501S 'The module name was not found.' (Language Environment Runtime Messages, CEE3501S: 'Module is not loaded. The application might abend'); IBM's own example of a COBOL dynamic CALL of a nonexistent program ends so, the condition unhandled (Language Environment Debugging Guide, 'Calling a nonexistent subroutine'). A condition of severity 3 that nothing handles ends the run U4038 under the default ABTERMENC(ABEND), as an SSRANGE failure does, the message given as IBM words it. Under NODYNAM a CALL of a literal is resolved by the binder, which reports a name no library holds as IEW2456E 'SYMBOL name UNRESOLVED' (MVS System Messages, IEW2456E) and leaves a load module that does not run: ironwork, which binds nothing, stops at the CALL with that message as its own refusal, and by its own choice still runs such a CALL's ON EXCEPTION phrase, which IBM's binder leaves no run to reach. A Language Environment callable service ironwork does not provide is its own refusal too, the service existing on z/OS. A job step whose EXEC PGM= names no program still ends S806, as the system's fetch of it does",
         basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SCREEN_SECTION_LAYOUT,
+        claim: "Under --compliance extended, a SCREEN SECTION entry is at the LINE and COLUMN it gives, PLUS and MINUS counting from the entry before; without LINE it is on the line of the entry before, and without COLUMN at column 1 when LINE is given, else in the column after the entry before. A field is as long as its VALUE or its PICTURE, and a group entry places what follows it. DISPLAY of a screen writes each entry it holds in order at its place, a FROM or USING field as its PICTURE edits the item, a TO field as spaces or zeros, after the BLANK and ERASE an entry names; ACCEPT of a screen displays it and then reads its TO and USING fields in one turn of the operator, TAB moving to the next field, each target taking its field as a positioned ACCEPT's does (C462). cobc 3.2 lays out the probes checked the same way and shows an empty input field as underscores, which ironwork shows as spaces",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {

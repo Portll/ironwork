@@ -32,37 +32,65 @@ pub fn display<H, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, at: Option<(usize,
     screen(unit).borrow_mut().display(at, text, clearing);
 }
 
-/// A positioned ACCEPT into `dest`, whose field `shown` is as DISPLAY shows the item: the operator's
-/// entry moved into it, alphanumeric as typed and numeric as NUMVAL reads it, zero where it is not
-/// a number, and the field then showing the item as stored. True when a key other than ENTER
-/// ended it, which ON EXCEPTION takes.
-#[allow(clippy::too_many_arguments)]
-pub fn accept<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, dest: Loc, shown: &str, at: Option<(usize, usize)>, update: bool, secure: bool, pos: Pos) -> Result<bool, Abend> {
+/// One field of a screen ACCEPT: the item it shows, as DISPLAY shows it, and the item the
+/// operator's entry goes to, which a SCREEN SECTION's TO or USING names and a positioned ACCEPT's
+/// target is both.
+#[derive(Clone, Copy, Debug)]
+pub struct Input {
+    pub target: Loc,
+    pub field: Loc,
+    pub at: Option<(usize, usize)>,
+    /// UPDATE or USING: the field starts holding the item's value, else spaces.
+    pub update: bool,
+    pub secure: bool,
+}
+
+/// A screen ACCEPT: each field shows its item, the operator's entry goes to its target,
+/// alphanumeric as typed and numeric as NUMVAL reads it, zero where it is no number, then the field
+/// item takes the target's value and the field shows it. True when a key other than ENTER ended
+/// it, which ON EXCEPTION takes.
+pub fn accept<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, inputs: &[Input], pos: Pos) -> Result<bool, Abend> {
     let crt = screen(unit);
-    let (row, column) = at.unwrap_or_else(|| crt.borrow().cursor_position());
-    let field = Field { row, column, len: shown.chars().count().max(1), secure };
-    let Some(entry) = crt.borrow_mut().accept(field, update.then_some(shown)) else {
+    let mut fields = Vec::with_capacity(inputs.len());
+    let mut shown = Vec::with_capacity(inputs.len());
+    for input in inputs {
+        let text = crate::display::place(facts, &unit.mem, input.field, pos, false)?;
+        let (row, column) = input.at.unwrap_or_else(|| crt.borrow().cursor_position());
+        fields.push(Field { row, column, len: text.chars().count().max(1), secure: input.secure });
+        shown.push(text);
+    }
+    let current: Vec<Option<&str>> = inputs.iter().zip(&shown).map(|(i, t)| i.update.then_some(t.as_str())).collect();
+    let Some(entry) = crt.borrow_mut().accept(&fields, &current) else {
         return Err(Abend::ironwork("ACCEPT: the screen has no more operator input", pos));
     };
-    let numeric = matches!(dest.kind, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::NumericEdited { .. } | Kind::Float(_));
-    let val = if numeric {
-        let typed = entry.text.trim();
-        let number = numval::parse(typed, Form::Numval, 31, facts.decimal_point() == ',').ok().and_then(|n| {
-            let digits = n.digits.to_string();
-            let (int, frac) = digits.split_at(digits.len().saturating_sub(n.decimals as usize));
-            literal_fixed(&format!("{}{}.{frac}", if n.negative { "-" } else { "" }, if int.is_empty() { "0" } else { int }))
-        });
-        Val::Num(number.unwrap_or_else(|| literal_fixed("0").expect("zero")))
-    } else {
-        let page = facts.page();
-        let unknown = page.encode_char('?').unwrap_or(0x6F);
-        Val::Bytes(entry.text.chars().map(|c| page.encode_char(c).unwrap_or(unknown)).collect())
-    };
-    store::assign(facts, unit, dest, val, None, pos)?;
-    unit.mark_input(dest.offset, dest.len, true);
-    let stored = crate::display::place(facts, &unit.mem, dest, pos, false)?;
-    crt.borrow_mut().show(field, &stored);
+    for ((input, field), text) in inputs.iter().zip(&fields).zip(&entry.texts) {
+        let val = if is_numeric(input.field.kind) || is_numeric(input.target.kind) {
+            let typed = text.trim();
+            let number = numval::parse(typed, Form::Numval, 31, facts.decimal_point() == ',').ok().and_then(|n| {
+                let digits = n.digits.to_string();
+                let (int, frac) = digits.split_at(digits.len().saturating_sub(n.decimals as usize));
+                literal_fixed(&format!("{}{}.{frac}", if n.negative { "-" } else { "" }, if int.is_empty() { "0" } else { int }))
+            });
+            Val::Num(number.unwrap_or_else(|| literal_fixed("0").expect("zero")))
+        } else {
+            let page = facts.page();
+            let unknown = page.encode_char('?').unwrap_or(0x6F);
+            Val::Bytes(text.chars().map(|c| page.encode_char(c).unwrap_or(unknown)).collect())
+        };
+        store::assign(facts, unit, input.target, val, None, pos)?;
+        unit.mark_input(input.target.offset, input.target.len, true);
+        if input.field.offset != input.target.offset || input.field.item != input.target.item {
+            let moved = store::read_stored(facts, &unit.mem, input.target, pos)?;
+            store::assign(facts, unit, input.field, moved, Some(input.target), pos)?;
+        }
+        let stored = crate::display::place(facts, &unit.mem, input.field, pos, false)?;
+        crt.borrow_mut().show(*field, &stored);
+    }
     Ok(entry.key != AID_ENTER)
+}
+
+fn is_numeric(kind: Kind) -> bool {
+    matches!(kind, Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::NumericEdited { .. } | Kind::Float(_))
 }
 
 /// What a positioned DISPLAY clears before it writes.
@@ -88,11 +116,11 @@ pub struct Field {
     pub secure: bool,
 }
 
-/// What the operator gave a field: its characters as they stand when the key was pressed, and
-/// the key.
+/// What the operator gave the fields of an ACCEPT: each field's characters as they stand when the
+/// key was pressed, and the key.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
-    pub text: String,
+    pub texts: Vec<String>,
     pub key: u8,
 }
 
@@ -162,52 +190,75 @@ impl Crt {
         self.cursor = at.min(self.cells.len() - 1);
     }
 
-    /// Shows `field` holding `current`, or spaces, keeps the screen in `shown`, and plays the
-    /// script to its next key: text typed at the cursor or at a row and column replaces the field
-    /// from there to its end, as far as the text reaches, and `eof` clears the field from where it
-    /// is given. None when the script has no key left.
-    pub fn accept(&mut self, field: Field, current: Option<&str>) -> Option<Entry> {
+    /// Shows each field holding its `current`, or spaces, keeps the screen in `shown`, and plays
+    /// the script to its next key with the cursor at the first field: text typed at the cursor or
+    /// at a row and column replaces the field it falls in from there to the field's end, `tab`
+    /// moves to the next field and `home` to the first, and `eof` clears a field from where it is
+    /// given. Each field's characters when the key was pressed, or None when the script has no key
+    /// left.
+    pub fn accept(&mut self, fields: &[Field], current: &[Option<&str>]) -> Option<Entry> {
         self.used = true;
-        let start = self.address(Some((field.row, field.column)));
-        let end = (start + field.len).min(self.cells.len());
-        let mut value: Vec<char> = current.unwrap_or("").chars().chain(std::iter::repeat(' ')).take(end - start).collect();
-        let shown = |value: &[char]| -> Vec<char> { value.iter().map(|&c| if field.secure && c != ' ' { '*' } else { c }).collect() };
-        self.cells[start..end].copy_from_slice(&shown(&value));
+        let spans: Vec<(usize, usize)> = fields
+            .iter()
+            .map(|f| {
+                let start = self.address(Some((f.row, f.column)));
+                (start, (start + f.len).min(self.cells.len()))
+            })
+            .collect();
+        let mut values: Vec<Vec<char>> = spans.iter().zip(current).map(|(&(start, end), c)| c.unwrap_or("").chars().chain(std::iter::repeat(' ')).take(end - start).collect()).collect();
+        for (k, f) in fields.iter().enumerate() {
+            self.paint(*f, spans[k], &values[k]);
+        }
         self.shown.push(self.render());
-        let mut cursor = start;
-        let typed = |cursor: &mut usize, text: &str, value: &mut Vec<char>| {
-            if (start..end).contains(cursor) {
-                value[*cursor - start..].fill(' ');
-            }
+        let field_at = |at: usize| spans.iter().position(|&(start, end)| (start..end).contains(&at));
+        let mut cursor = spans.first().map_or(self.cursor, |s| s.0);
+        let typed = |cursor: &mut usize, text: &str, values: &mut Vec<Vec<char>>| {
+            let Some(k) = field_at(*cursor) else { return };
+            let (start, end) = spans[k];
+            values[k][*cursor - start..].fill(' ');
             for c in text.chars() {
-                if (start..end).contains(cursor) {
-                    value[*cursor - start] = c;
+                if *cursor < end {
+                    values[k][*cursor - start] = c;
                 }
                 *cursor += 1;
             }
         };
         while let Some(action) = self.actions.pop_front() {
             match action {
-                Action::Text(text) => typed(&mut cursor, &text, &mut value),
+                Action::Text(text) => typed(&mut cursor, &text, &mut values),
                 Action::Type { row, column, text } => {
                     cursor = self.address(Some((row, column)));
-                    typed(&mut cursor, &text, &mut value);
+                    typed(&mut cursor, &text, &mut values);
                 }
                 Action::EraseEof { row, column } => {
-                    let from = self.address(Some((row, column))).clamp(start, end);
-                    value[from - start..].fill(' ');
-                    cursor = from;
+                    let at = self.address(Some((row, column)));
+                    if let Some(k) = field_at(at) {
+                        values[k][at - spans[k].0..].fill(' ');
+                    }
+                    cursor = at;
                 }
                 Action::Cursor { row, column } => cursor = self.address(Some((row, column))),
-                Action::Home | Action::Tab => cursor = start,
+                Action::Home => cursor = spans.first().map_or(cursor, |s| s.0),
+                Action::Tab => {
+                    let next = spans.iter().position(|&(start, _)| start > cursor).unwrap_or(0);
+                    cursor = spans.get(next).map_or(cursor, |s| s.0);
+                }
                 Action::Key(key) => {
-                    self.cells[start..end].copy_from_slice(&shown(&value));
-                    self.cursor = end.min(self.cells.len() - 1);
-                    return Some(Entry { text: value.into_iter().collect(), key });
+                    for (k, f) in fields.iter().enumerate() {
+                        self.paint(*f, spans[k], &values[k]);
+                    }
+                    self.cursor = spans.last().map_or(self.cursor, |s| s.1.min(self.cells.len() - 1));
+                    return Some(Entry { texts: values.into_iter().map(|v| v.into_iter().collect()).collect(), key });
                 }
             }
         }
         None
+    }
+
+    fn paint(&mut self, field: Field, (start, end): (usize, usize), value: &[char]) {
+        for (cell, &c) in self.cells[start..end].iter_mut().zip(value) {
+            *cell = if field.secure && c != ' ' { '*' } else { c };
+        }
     }
 
     /// Writes `text` into `field`, as far as the field reaches, a secure field's characters as `*`.
@@ -268,24 +319,32 @@ mod tests {
     fn accept_shows_the_screen_then_takes_what_is_typed_into_the_field_up_to_the_key() {
         let mut c = crt("string BOBBY-TOO-LONG\nENTER\ntype 11 3 9\nENTER\n");
         c.display(Some((1, 1)), "NAME:", Clearing::default());
-        let name = c.accept(Field { row: 1, column: 7, len: 5, secure: false }, None).unwrap();
-        assert_eq!(name, Entry { text: "BOBBY".into(), key: AID_ENTER });
+        let name = c.accept(&[Field { row: 1, column: 7, len: 5, secure: false }], &[None]).unwrap();
+        assert_eq!(name, Entry { texts: vec!["BOBBY".into()], key: AID_ENTER });
         assert_eq!(c.shown, ["NAME:"]);
-        let qty = c.accept(Field { row: 11, column: 1, len: 3, secure: false }, Some("007")).unwrap();
-        assert_eq!(qty.text, "009");
+        let qty = c.accept(&[Field { row: 11, column: 1, len: 3, secure: false }], &[Some("007")]).unwrap();
+        assert_eq!(qty.texts, ["009"]);
         assert_eq!(c.shown[1], "NAME: BOBBY\n\n\n\n\n\n\n\n\n\n007");
         assert_eq!(c.render(), "NAME: BOBBY\n\n\n\n\n\n\n\n\n\n009");
-        assert_eq!(c.accept(Field { row: 2, column: 1, len: 1, secure: false }, None), None);
+        assert_eq!(c.accept(&[Field { row: 2, column: 1, len: 1, secure: false }], &[None]), None);
     }
 
     #[test]
     fn a_secure_field_shows_stars_and_eof_clears_the_rest_of_the_field() {
         let mut c = crt("string PW\nENTER\neof 3 3\nstring Z\nENTER\n");
-        let pw = c.accept(Field { row: 2, column: 1, len: 4, secure: true }, None).unwrap();
-        assert_eq!((pw.text.as_str(), c.render()), ("PW  ", "\n**".into()));
-        let rest = c.accept(Field { row: 3, column: 1, len: 5, secure: false }, Some("ABCDE")).unwrap();
-        assert_eq!(rest.text, "ABZ  ");
+        let pw = c.accept(&[Field { row: 2, column: 1, len: 4, secure: true }], &[None]).unwrap();
+        assert_eq!((pw.texts[0].as_str(), c.render()), ("PW  ", "\n**".into()));
+        let rest = c.accept(&[Field { row: 3, column: 1, len: 5, secure: false }], &[Some("ABCDE")]).unwrap();
+        assert_eq!(rest.texts, ["ABZ  "]);
         let mut c = crt("string 42\nENTER\n");
-        assert_eq!(c.accept(Field { row: 1, column: 1, len: 3, secure: false }, Some("007")).unwrap().text, "42 ");
+        assert_eq!(c.accept(&[Field { row: 1, column: 1, len: 3, secure: false }], &[Some("007")]).unwrap().texts, ["42 "]);
+    }
+
+    #[test]
+    fn tab_moves_between_the_fields_of_one_accept() {
+        let mut c = crt("string AL\ntab\nstring 9\ntype 1 1 Z\nPF3\n");
+        let fields = [Field { row: 1, column: 1, len: 3, secure: false }, Field { row: 2, column: 5, len: 2, secure: false }];
+        let e = c.accept(&fields, &[Some("XYZ"), None]).unwrap();
+        assert_eq!((e.texts, e.key), (vec!["Z  ".to_owned(), "9 ".to_owned()], crate::terminal::aid_of("PF3").unwrap()));
     }
 }

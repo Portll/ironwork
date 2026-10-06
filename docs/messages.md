@@ -319,7 +319,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0295 | S | `{name}: two programs of {program} have this name, and the programs of a separately compiled program each need their own (--program-scope=flexible allows it)` |
 | IWC0296 | S | `CALL '{name}': no program of the compilation has this name, and --unresolved-calls=fail refuses a static CALL the binder could not resolve` |
 | IWC0297 | S | `FUNCTION {name}: {argument} is numeric, where {name} takes an alphabetic, alphanumeric or national argument` |
-| IWC0298 | S | `{DISPLAY or ACCEPT} on the screen: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0298 | S | `{DISPLAY or ACCEPT on the screen, or the SCREEN SECTION}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
@@ -684,6 +684,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWR0054 | S | `BLANK WHEN ZERO on a USAGE NATIONAL item is not supported yet` |
 | IWR0055 | S | `a national-edited PICTURE is not supported yet` |
 | IWR0056 | S | `a {category} PICTURE with USAGE {usage} is not supported yet` |
+| IWR0057 | S | `{a SCREEN SECTION form ironwork does not run} is not supported yet` |
 | IWS0001 | S | `{what the syntax takes there}, found {the word or token there}` |
 | IWS0002 | S | `{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries` |
 | IWS0003 | S | `COPY: {message}` |

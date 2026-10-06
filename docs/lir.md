@@ -658,7 +658,7 @@ pub enum Op {
     /// DISPLAY and ACCEPT on the screen under --compliance extended (§9.1); a screen ACCEPT with
     /// ON EXCEPTION, `handled`, returns an arm: 1 when a key other than ENTER ended it.
     ScreenDisplay { display: DisplayId, screen: ScreenPlan },
-    ScreenAccept { target: PlaceId, shown: DisplayId, screen: ScreenPlan, handled: bool },
+    ScreenAccept { inputs: Vec<ScreenInput>, handled: bool },
     File(FileOpId), Call(CallId), Cancel(Operand),
     Sort(SortId), Release(ReleaseId), Return(ReturnId), Report(ReportOp),
     Invoke(InvokeId), Cics(CicsId), Sql(SqlId),
@@ -1030,7 +1030,7 @@ walker does on each execution; the last column names that work.
 | EVALUATE | A chain of `Branch`, one per object; each comparison evaluates its subject, as the walker does | Lowered | - |
 | DISPLAY | `Display` with a format per item | One call | Kind dispatch (machine.rs:1913-1959) |
 | ACCEPT | `Accept` with the MOVE plan of what its source gives: SYSIN's line as bytes, a date, day, weekday or time as an integer of its digits, and under `--compliance extended` the PARM's program arguments (COMMAND-LINE, tag 5 of `AcceptFrom`) or its next word (ARGUMENT-VALUE, 7) as bytes and their count (ARGUMENT-NUMBER, 6) as an integer (C442). `rt::accept` stores SYSIN data itself, card images filling the receiver unconverted (C261); the plan only names the receiver's store. ARGUMENT-VALUE's `Accept` ends its block, and a `Select` follows: 1 when no word is left, the receiver unchanged | One call | ARGUMENT-VALUE: the exception arm |
-| DISPLAY and ACCEPT on the screen | `ScreenDisplay` with the DISPLAY plan of its items, and `ScreenAccept` with the target's DISPLAY plan for the field it shows, each with a `ScreenPlan`: where (`ScreenPosition` `Cursor` 0, `Combined` 1, an `IntExpr` read as LLCC or LLLCCC, `LineColumn` 2) and its ERASE, BLANK, UPDATE and SECURE phrases (IWX0020, C462). `rt::crt` keeps the run unit's screen and plays the operator from the screen script. With ON EXCEPTION, `ScreenAccept` ends its block and a `Select` follows | One call | The exception arm |
+| DISPLAY and ACCEPT on the screen | `ScreenDisplay` with the DISPLAY plan of its items and a `ScreenPlan`: where (`ScreenPosition` `Cursor` 0, `Combined` 1, an `IntExpr` read as LLCC or LLLCCC, `LineColumn` 2) and its ERASE and BLANK phrases. `ScreenAccept` with a `ScreenInput` per field: the place that takes the entry, the place the field shows, where, UPDATE and SECURE; a positioned ACCEPT has one, its target both places, and an ACCEPT of a SCREEN SECTION screen one per TO or USING field (IWX0020, C462, C463). The compiler writes DISPLAY and ACCEPT of a screen out as `Move`s to its fields' items, `ScreenDisplay`s and a `ScreenAccept`. `rt::crt` keeps the run unit's screen and plays the operator from the screen script. With ON EXCEPTION, `ScreenAccept` ends its block and a `Select` follows | One call | The exception arm |
 | DISPLAY UPON ARGUMENT-NUMBER | `ArgumentNumber` with the item or literal shown as an `IntExpr`: the next ARGUMENT-VALUE takes that word, the last when it is past them, none when it is below 1 (C442) | One call | - |
 | CALL, CANCEL | `Call`, then `Select`; `Cancel` (§9.3) | One call | Literal names decoded (machine.rs:966-971) |
 | OPEN … START | `File` per file named, then `Select` when a phrase is written (§9.4) | One call | File by name, keys, FILE STATUS, which phrase applies |

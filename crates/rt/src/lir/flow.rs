@@ -3,7 +3,7 @@
 
 use super::{
     AbendId, ArithId, BlockId, CallId, CicsId, CondId, DisplayId, ExprId, FileOpId, InitId, InspectId, IntExpr,
-    InvokeId, MarkupId, MovePlan, Odo, Operand, ParaId, PlaceId, RangeId, ReleaseId, ReportOp, ReturnId, ScreenPlan, SearchAllId, SenderCheck, SortId, SqlId,
+    InvokeId, MarkupId, MovePlan, Odo, Operand, ParaId, PlaceId, RangeId, ReleaseId, ReportOp, ReturnId, ScreenInput, ScreenPlan, SearchAllId, SenderCheck, SortId, SqlId,
     StepPlan, StringId, SymId, TempId, UnstringId, UpDown,
 };
 use crate::abend::Ending;
@@ -54,10 +54,10 @@ pub enum Op {
     /// DISPLAY on the screen under `--compliance extended`: plan `display`'s text written where
     /// `screen` puts it.
     ScreenDisplay { display: DisplayId, screen: ScreenPlan },
-    /// ACCEPT from a field of the screen under `--compliance extended`: the field shows the
-    /// target as plan `shown` does; with ON EXCEPTION phrases, `handled`, Arm(1) when a key other
-    /// than ENTER ended it.
-    ScreenAccept { target: PlaceId, shown: DisplayId, screen: ScreenPlan, handled: bool },
+    /// ACCEPT from fields of the screen under `--compliance extended`, one for a positioned ACCEPT
+    /// and one for each TO or USING field of a SCREEN SECTION's screen; with ON EXCEPTION
+    /// phrases, `handled`, Arm(1) when a key other than ENTER ended it.
+    ScreenAccept { inputs: Vec<ScreenInput>, handled: bool },
     File(FileOpId),
     Call(CallId),
     Cancel(Operand),
@@ -260,7 +260,7 @@ codec_enum!(Op {
     SetEntry { entry, targets } = 35,
     ArgumentNumber(value) = 36,
     ScreenDisplay { display, screen } = 37,
-    ScreenAccept { target, shown, screen, handled } = 38,
+    ScreenAccept { inputs, handled } = 38,
 });
 codec_enum!(Step { Next = 0, Arm(arm) = 1, GoTo(para) = 2, End(ending) = 3, Return(frame) = 4, Resume(resume) = 5 });
 codec_enum!(Terminator {

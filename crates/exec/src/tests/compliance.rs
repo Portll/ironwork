@@ -511,3 +511,47 @@ fn an_accept_with_no_key_left_ends_the_run_and_strict_refuses_the_screen_by_name
     assert!(extended.iter().all(|d| d.3 == Severity::Warning), "{extended:?}");
     assert_eq!(extended.iter().filter(|d| d.2 == Some("IWX0020")).count(), 11, "{extended:?}");
 }
+
+/// A SCREEN SECTION screen: VALUE literals, FROM, USING and TO fields, an edited PICTURE, and
+/// LINE and COL PLUS relative to the entry before.
+const SCREEN_SECTION: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. SCR2.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  CUST   PIC X(6) VALUE 'ACME'.\n",
+    "       01  AMT    PIC S9(4)V99 VALUE 1234.5.\n",
+    "       01  QTY    PIC 999 VALUE 12.\n",
+    "       01  NOTE   PIC X(5).\n",
+    "       SCREEN SECTION.\n",
+    "       01  ORDER-SCREEN.\n",
+    "           05  BLANK SCREEN.\n",
+    "           05  LINE 2 COL 3 VALUE 'CUSTOMER'.\n",
+    "           05  COL PLUS 2 PIC X(6) FROM CUST.\n",
+    "           05  LINE PLUS 1 COL 3 VALUE 'AMOUNT'.\n",
+    "           05  COL 14 PIC Z,ZZ9.99 FROM AMT.\n",
+    "           05  LINE 5 COL 3 VALUE 'QTY'.\n",
+    "           05  COL 14 PIC ZZ9 USING QTY.\n",
+    "           05  LINE 6 COL 3 VALUE 'NOTE'.\n",
+    "           05  COL 14 PIC X(5) TO NOTE.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY ORDER-SCREEN\n",
+    "           ACCEPT ORDER-SCREEN\n",
+    "           DISPLAY 'QTY=' QTY ' NOTE=' NOTE AT 0801\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn a_screen_section_screen_is_shown_and_read_alike_on_both_executors() {
+    let script = "string 7\ntab\nstring HELLO\nENTER\n";
+    let walked = Harness::source(SCREEN_SECTION).flags(EXTENDED).screens(script).run(Executor::Interpreter);
+    let shown = "\n  CUSTOMER ACME\n  AMOUNT     1,234.50\n\n  QTY";
+    let expected = format!("--- screen 1 ---\n{shown}         12\n  NOTE\n--- screen 2 ---\n{shown}          7\n  NOTE       HELLO\n\nQTY=007 NOTE=HELLO\n");
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (expected.as_str(), Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(SCREEN_SECTION).flags(EXTENDED).screens(script).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    let warned = diagnostics_under(SCREEN_SECTION, numeric::Compliance::Extended);
+    assert_eq!(warned.iter().filter(|d| d.2 == Some("IWX0020")).map(|d| d.0).collect::<Vec<_>>(), [21, 22, 23], "{warned:?}");
+    let strict = diagnostics_under(SCREEN_SECTION, numeric::Compliance::Strict);
+    assert_eq!(strict.iter().find(|d| d.2 == Some("IWC0298")).map(|d| d.0), Some(10), "{strict:?}");
+}
