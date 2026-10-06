@@ -42,7 +42,7 @@ impl Ran {
             return None;
         }
         self.err.lines().find_map(|l| {
-            l.split_once("the VM does not run ").and_then(|(_, rest)| rest.strip_suffix(" yet; run it without --vm")).map(str::to_string).or_else(|| l.split_once(": lowering: ").map(|(_, why)| format!("lowering: {why}")))
+            l.split_once("the VM does not run ").and_then(|(_, rest)| rest.strip_suffix(" yet; run it with --interpret")).map(str::to_string).or_else(|| l.split_once(": lowering: ").map(|(_, why)| format!("lowering: {why}")))
         })
     }
 
@@ -147,9 +147,7 @@ impl Runner<'_> {
             command.arg("--parm").arg(String::from_utf8_lossy(parm).as_ref());
         }
         command.arg("--statement-limit").arg(self.req.hang_limit.to_string());
-        if vm {
-            command.arg("--vm");
-        }
+        command.arg(if vm { "--vm" } else { "--interpret" });
         Ok(command)
     }
 
@@ -301,7 +299,7 @@ fn keep(dir: &Path, runner: &Runner, inputs: &Inputs, interpreter: &Ran, vm: &Ra
         }
     }
     let envs: Vec<String> = command.get_envs().filter_map(|(k, v)| v.map(|v| format!("{}={} ", k.to_string_lossy(), v.to_string_lossy()))).collect();
-    report.push_str(&format!("\nrun it again where fuzz ran, with and without --vm, on a fresh copy of input/ each time:\n  {}ironwork {}\n", envs.concat(), args.join(" ")));
+    report.push_str(&format!("\nrun it again where fuzz ran, with --interpret and with --vm, on a fresh copy of input/ each time:\n  {}ironwork {}\n", envs.concat(), args.join(" ")));
     fs::write(dir.join("report.txt"), report)
 }
 
@@ -424,7 +422,7 @@ mod tests {
         let limited = ran(240, "A\n", "P.cbl:9:12: ABEND S322: the run reached its statement limit\n");
         let timed_out = Ran { timed_out: true, status: None, ..ran(0, "", "") };
         assert!(matches!(verdict(&limited, &timed_out), Verdict::Limited));
-        let stopped = ran(243, "", "ironwork: P.cbl: the VM does not run FUNCTION UUID4, which gives another value on every run yet; run it without --vm\n");
+        let stopped = ran(243, "", "ironwork: P.cbl: the VM does not run FUNCTION UUID4, which gives another value on every run yet; run it with --interpret\n");
         assert!(matches!(verdict(&ran(0, "X\n", ""), &stopped), Verdict::Unimplemented(what) if what == "FUNCTION UUID4, which gives another value on every run"));
         let refused = ran(242, "", "P.cbl:4:12: lowering: INITIALIZE with FILLER is not lowered yet\n");
         assert!(matches!(verdict(&ran(0, "", ""), &refused), Verdict::Unimplemented(what) if what == "lowering: INITIALIZE with FILLER is not lowered yet"));

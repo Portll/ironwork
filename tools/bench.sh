@@ -33,7 +33,7 @@ for p in "${programs[@]}"; do
     export DD_BENCHF=$work/$p.dat
     iw_t=(); vm_t=(); cb_t=()
     for _ in $(seq "$runs"); do
-        iw_t+=("$(timed "$work/iw.out" "$iw" run "$src" --dd "BENCHF=$DD_BENCHF:fixed")")
+        iw_t+=("$(timed "$work/iw.out" "$iw" run --interpret "$src" --dd "BENCHF=$DD_BENCHF:fixed")")
         vm_t+=("$(timed "$work/vm.out" "$iw" run --vm "$src" --dd "BENCHF=$DD_BENCHF:fixed")")
         cb_t+=("$(timed "$work/cb.out" "$work/$p")")
         cmp -s "$work/iw.out" "$work/cb.out" || { echo "$p: ironwork and cobc differ (see docs/benchmarks.md, Correctness)" >&2; cat "$work/iw.out" "$work/cb.out" >&2; }

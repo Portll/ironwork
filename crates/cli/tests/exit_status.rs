@@ -140,6 +140,11 @@ fn a_construct_code_generation_refuses_exits_242_and_with_exit_code_4() {
         assert!(said.contains(": IWR0052-S lowering: NUMCHECK with ALL ZERO or ALL NULL compared with a data item it may test is not lowered yet"), "{command}: {said}");
     }
     assert_eq!(ironwork(&["compile", &program, "-o", &dir.path("out")]).status.code(), Some(12));
+    // Without --vm the program runs on the interpreter, with a line naming what was refused.
+    let out = ironwork(&["run", &program]);
+    let said = stderr(&out);
+    assert_eq!((out.status.code(), String::from_utf8_lossy(&out.stdout).as_ref()), (Some(0), ""), "{said}");
+    assert!(said.contains(&format!("ironwork: {program}:")) && said.contains(": runs on the interpreter (lowering: NUMCHECK with ALL ZERO"), "{said}");
 }
 
 #[test]

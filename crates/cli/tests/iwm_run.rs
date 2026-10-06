@@ -337,7 +337,7 @@ fn a_module_beside_its_source_in_a_program_library_is_the_one_the_vm_runs() {
     sub_program(&dir, "lib/SUB.cbl", "NEWER");
     let vm = ironwork(&dir, &["run", "--vm", "MAIN.cbl", "-L", "lib"]);
     assert_eq!(ran(&vm), (EXPECTED.to_owned(), Some(3)), "{}", text(&vm.stderr));
-    let interpreted = ironwork(&dir, &["run", "MAIN.cbl", "-L", "lib"]);
+    let interpreted = ironwork(&dir, &["run", "--interpret", "MAIN.cbl", "-L", "lib"]);
     assert!(text(&interpreted.stdout).starts_with("NEWER 001\n"), "the interpreter reads source only");
 }
 

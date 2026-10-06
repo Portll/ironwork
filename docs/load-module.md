@@ -644,7 +644,7 @@ started with, then each `-L` in order. A program is found in this order:
   and its methods come from the class program's `lir::Class`, each held as a program of its own.
 - **A mapset** for SEND MAP and RECEIVE MAP comes from the `BMS` section of any module the run has
   read, else from the copy libraries, `-I`.
-- **The interpreter reads source only.** Without `--vm`, no `NAME.iwm` is read.
+- **The interpreter reads source only.** Under `--interpret`, no `NAME.iwm` is read.
 - **Shadowing.** A `NAME.iwm` beside newer source in one directory is the one that runs, because
   step 2 precedes step 3. The loader never compares file times: copying or checking out files sets
   them, so a run that compared them would not repeat, and the module holds no build time (the
@@ -664,7 +664,7 @@ status). An abend names the source the debug table gives (§9.1), so it reads as
 run does from the source's directory.
 
 `ironwork cics x.iwm` runs program 0 as the first program of a CICS task on the VM, as `ironwork
-cics --vm` runs a source's, and exits as `cics` does. It takes what `run` takes of a module, but
+cics` runs a source's, and exits as `cics` does. It takes what `run` takes of a module, but
 `--parm` and the three limits, which `cics` refuses for a source too, and the cics flags but
 `--serve` and `--serve-public`, which serve a source's tasks on the interpreter and are refused for
 a module with 246. Under `--screens`, the program a transaction names (`--transaction`, `--csd`)
@@ -936,7 +936,7 @@ scenarios that wait for question 5 do not run yet.
   user-defined function by its AS name, and SUB.cbl, which contains a program it calls, compiled to
   MAIN.iwm and SUB.iwm **when** `ironwork run MAIN.iwm -L DIR` runs **then** its output and exit
   status are those of `ironwork run MAIN.cbl -L SRC`, **and** so are those of SUB.iwm beside
-  MAIN.iwm with no `-L`, **and** of `ironwork run --vm MAIN.cbl -L DIR`.
+  MAIN.iwm with no `-L`, **and** of `ironwork run MAIN.cbl -L DIR` on the VM.
 - **Given** MAIN.cbl and SUB.cbl compiled as one bundle, and another SUB.iwm beside it **when** the
   bundle runs **then** the bundle's SUB runs.
 - **Given** a client and a COBOL class compiled to CLIENT.iwm and its class's module **when** the

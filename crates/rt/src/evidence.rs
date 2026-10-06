@@ -137,7 +137,7 @@ const KINDS: [(&str, &str, &[&str], &[&str]); 13] = [
     ("sink", "journal", &["sink", "file", "line", "marker", "reached", "input"], &["sink", "file", "line"]),
     ("statement", "journal", &["file", "line", "capped"], &["file", "line"]),
     ("output", "journal", &["name", "sha256", "bytes", "path", "stdout"], &["name", "sha256"]),
-    ("close", "journal", &["exit", "counts", "durationMs", "ledger"], &["exit"]),
+    ("close", "journal", &["exit", "counts", "durationMs", "ledger", "executor"], &["exit"]),
     ("genesis", "ledger", &["createdAt"], &["createdAt"]),
     ("run", "ledger", &["run", "runChain", "runLength", "runTip"], &["run", "runChain", "runLength", "runTip"]),
     ("lock-broken", "ledger", &["holderPid", "ageMs"], &["holderPid", "ageMs"]),
@@ -284,6 +284,8 @@ pub struct Journal {
     chain: Chain,
     counts: BTreeMap<String, i64>,
     started: Instant,
+    /// Which ran the program, `vm` or `interpreter`, for the close record.
+    pub executor: Option<&'static str>,
 }
 
 /// Where a closed run's tip went.
@@ -301,7 +303,7 @@ impl Journal {
         let id = format!("{stamp}Z-{}", hex(&random(8)));
         let path = dir.join("runs").join(format!("{id}.jsonl"));
         let file = open_new(&path)?;
-        let mut journal = Self { id, path, dir, file, chain: Chain { chain: hex(&random(16)), seq: 0, prev: ZERO.into() }, counts: BTreeMap::new(), started: Instant::now() };
+        let mut journal = Self { id, path, dir, file, chain: Chain { chain: hex(&random(16)), seq: 0, prev: ZERO.into() }, counts: BTreeMap::new(), started: Instant::now(), executor: None };
         let roots = reads.iter().map(|r| Value::Str(r.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())).collect();
         journal.append_at(
             "open",
@@ -341,7 +343,11 @@ impl Journal {
         let counts = self.counts.iter().map(|(k, v)| (k.clone(), Value::Int(*v))).collect();
         let ledger = if held.is_ok() { "recorded" } else { "unrecorded" };
         let duration = i64::try_from(self.started.elapsed().as_millis()).unwrap_or(i64::MAX);
-        self.append("close", fields([("exit", exit.map_or(Value::Null, Value::Int)), ("counts", Value::Obj(counts)), ("durationMs", Value::Int(duration)), ("ledger", ledger.into())]))?;
+        let mut close = fields([("exit", exit.map_or(Value::Null, Value::Int)), ("counts", Value::Obj(counts)), ("durationMs", Value::Int(duration)), ("ledger", ledger.into())]);
+        if let Some(executor) = self.executor {
+            close.insert("executor".into(), executor.into());
+        }
+        self.append("close", close)?;
         self.file.sync_all()?;
         let broken = match held {
             Ok(broken) => broken,

@@ -147,13 +147,14 @@ fn batch(
             Outcome::of_abend(&a.code)
         }
         Err(Halt::Unimplemented(what)) => {
-            eprintln!("ironwork: {path}: the VM does not run {what} yet; run the source without --vm");
+            eprintln!("ironwork: {path}: the VM does not run {what} yet; run the source with --interpret");
             Outcome::Stopped
         }
     };
     write_coverage(coverage, &covered);
     if let Some(run) = shared.and_then(|r| Rc::try_unwrap(r).ok()) {
-        let journal = run.into_inner().end(abend.map(|a| (a.code.to_string(), file.as_deref(), i64::from(a.pos.line))));
+        let mut journal = run.into_inner().end(abend.map(|a| (a.code.to_string(), file.as_deref(), i64::from(a.pos.line))));
+        journal.executor = Some("vm");
         evidence::finish(Some(journal), exit::recorded(outcome));
     }
     exit::status(outcome)
@@ -218,7 +219,7 @@ impl crate::Tasks for ModuleTasks<'_> {
         match ended {
             Ok(ending) => Ok(Ok((ending, task))),
             Err(Halt::Abend(abend)) => Ok(Err(abend)),
-            Err(Halt::Unimplemented(what)) => Err((Outcome::Stopped, format!("ironwork: {}: the VM does not run {what} yet; run the source without --vm", self.shown))),
+            Err(Halt::Unimplemented(what)) => Err((Outcome::Stopped, format!("ironwork: {}: the VM does not run {what} yet; run the source with --interpret", self.shown))),
         }
     }
 

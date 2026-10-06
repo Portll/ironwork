@@ -141,7 +141,7 @@ def compare(iw, gc, name):
         return f"{name}-refuses", gc[1]
     return "differ", f"ironwork {iw[0]}: {iw[1]}; {name} {gc[0]}: {gc[1]}"
 
-VM_STOPPED = re.compile(r"the VM does not run (.+) yet; run it without --vm|: (?:IW[A-Z]\d{4}-[IWESU] )?(lowering: .+)")
+VM_STOPPED = re.compile(r"the VM does not run (.+) yet; run it with --interpret|: (?:IW[A-Z]\d{4}-[IWESU] )?(lowering: .+)")
 # A Rust panic names its thread by a number that differs from run to run.
 PANIC_THREAD = re.compile(r"^(thread '[^']*') \(\d+\)(?= panicked at )", re.M)
 
@@ -186,7 +186,7 @@ def main():
         tally = {}
         for path in programs(args.paths):
             argv = [args.binary, "run", path, "-silent", "--clock", CLOCK, *libraries]
-            verdict, why = compare_vm(run(argv, args.stdin, args.timeout), run([*argv, "--vm"], args.stdin, args.timeout))
+            verdict, why = compare_vm(run([*argv, "--interpret"], args.stdin, args.timeout), run([*argv, "--vm"], args.stdin, args.timeout))
             tally[verdict] = tally.get(verdict, 0) + 1
             print(f"{verdict}\t{path}" + (f"\t{why}" if why else ""))
         print("# " + ", ".join(f"{n} {v}" for v, n in sorted(tally.items(), key=lambda kv: -kv[1])))

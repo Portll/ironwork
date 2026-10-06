@@ -428,8 +428,8 @@ fn records(ev: &Path) -> Vec<String> {
     let runs: Vec<PathBuf> = fs::read_dir(ev.join("runs")).unwrap().map(|e| e.unwrap().path()).collect();
     assert_eq!(runs.len(), 1, "{runs:?}");
     let own = |line: &str| {
-        let mut kept = line.replace("\"--vm\",", "");
-        for key in ["at", "chain", "hash", "prev", "durationMs"] {
+        let mut kept = line.replace("\"--vm\",", "").replace("\"--interpret\",", "");
+        for key in ["at", "chain", "hash", "prev", "durationMs", "executor"] {
             let needle = format!("\"{key}\":");
             if let Some(start) = kept.find(&needle) {
                 let end = kept[start..].find([',', '}']).map_or(kept.len(), |e| start + e + usize::from(kept[start + e..].starts_with(',')));
@@ -443,17 +443,16 @@ fn records(ev: &Path) -> Vec<String> {
 
 /// Runs `args` from `dir` with `--evidence` and `--coverage` on the interpreter, then on the VM,
 /// `{tag}` in an argument naming each run's own files. The two agree on the exit status, standard
-/// output and error, the coverage report, each file `written` names and the journal, but for
-/// `--vm` in its `argv`; the interpreter's journal records.
+/// output and error, the coverage report, each file `written` names and the journal, but for the
+/// executor flag in its `argv` and the executor its close record names; the interpreter's journal
+/// records.
 fn on_both_executors(dir: &Path, args: &[&str], written: &[&str]) -> Vec<String> {
     let run = |tag: &str| {
         let _ = fs::remove_dir_all(dir.join(format!("ev-{tag}")));
         let mut command = Command::new(env!("CARGO_BIN_EXE_ironwork"));
         command.current_dir(dir).args(args.iter().map(|a| a.replace("{tag}", tag)));
         command.args(["--evidence", &format!("ev-{tag}"), "--coverage", &format!("coverage-{tag}.json")]);
-        if tag == "vm" {
-            command.arg("--vm");
-        }
+        command.arg(if tag == "vm" { "--vm" } else { "--interpret" });
         command.output().unwrap()
     };
     let (walker, vm) = (run("walker"), run("vm"));
@@ -468,6 +467,10 @@ fn on_both_executors(dir: &Path, args: &[&str], written: &[&str]) -> Vec<String>
     assert_eq!(records(&dir.join("ev-vm")), journal, "{args:?}");
     let argv = fs::read_to_string(fs::read_dir(dir.join("ev-vm/runs")).unwrap().next().unwrap().unwrap().path()).unwrap();
     assert!(argv.lines().next().is_some_and(|open| open.contains("\"--vm\",")), "the VM's argv names --vm");
+    for (tag, executor) in [("vm", "vm"), ("walker", "interpreter")].into_iter().filter(|_| args.first() == Some(&"run")) {
+        let text = fs::read_to_string(fs::read_dir(dir.join(format!("ev-{tag}/runs"))).unwrap().next().unwrap().unwrap().path()).unwrap();
+        assert!(text.lines().last().is_some_and(|close| close.contains(&format!("\"executor\":\"{executor}\""))), "{tag}: {text}");
+    }
     journal
 }
 

@@ -7,7 +7,7 @@ use std::{env, fs, io};
 const USAGE: &str = "ironwork for COBOL
 usage:
   ironwork run <program.cbl> [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include]
-               [-debug] [--cics-return-warning=once|always|never] [--optimize=0|1|2] [-I <dir>]... [-L <dir>]... [--vm]
+               [-debug] [--cics-return-warning=once|always|never] [--optimize=0|1|2] [-I <dir>]... [-L <dir>]... [--vm | --interpret]
                [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT | --argument path|OMITTED...]
                [--exit-code] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
@@ -24,7 +24,7 @@ usage:
                [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
                [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
                                                        compile only
-  ironwork cics <program.cbl> [run flags] [--vm] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
+  ironwork cics <program.cbl> [run flags] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
                [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]... [--td QUEUE=path]...
                [--screens path | --serve HOST:PORT [--serve-public] [--transaction TRAN=PROGRAM]... [--csd path]]
                                                        run as the first program of a CICS task
@@ -127,20 +127,24 @@ flags:
              a CALL of a Language Environment service's name: programs (the default) reaches a
              program of that name when the run has one (assumption L1); bind always reaches the
              service. --le-services=bind works too
-  --vm       run and cics: lower the program and run it on the VM rather than the interpreter. A
-             program lowering refuses exits 242; a run that reaches what the VM does not run yet (a
-             CALLed program, user-defined function, method or LINK that does not lower, FUNCTION
-             UUID4, FUNCTION RANDOM in a subscript, SEND MAP with no FROM, RECEIVE MAP with no INTO
-             or SET) stops there with a message naming it and exits 243. Its --coverage report and
-             --evidence journal are those the interpreter's run writes, but for --vm in the
-             journal's argv. Not with --serve
+  --interpret
+             run and cics: run the program on the interpreter. Without it, run and cics lower the
+             program and run it on the VM: a program code generation refuses runs on the
+             interpreter, with a line naming what was refused, and a run that reaches what the VM
+             does not run yet (a CALLed program, user-defined function, method or LINK that does not
+             lower, FUNCTION UUID4, FUNCTION RANDOM in a subscript, SEND MAP with no FROM, RECEIVE
+             MAP with no INTO or SET) stops there with a message naming it and exits 243. The
+             --coverage report and --evidence journal are those the interpreter's run writes. job
+             runs each step, and cics --serve each task, on the interpreter
+  --vm       run and cics: the VM only; a program code generation refuses exits 242. Not with
+             --serve
   --exit-code
              run, cics and job: exit with a verdict, 0 to 5 or 70, in place of the reserved band, as
              cobolwork's --exit-code does (exit status, below)
   -I <dir>   a copy library for COPY members, searched after the program's own directory
   -L <dir>   a program library: CALL finds a program there by name, after the programs in the
-             same source or module and the program's own directory. On the VM (--vm, or a module
-             run) CALL takes NAME.iwm, a load module, from any of these directories before NAME.cbl
+             same source or module and the program's own directory. On the VM (a run of source
+             or a module) CALL takes NAME.iwm, a load module, from any of these directories before NAME.cbl
              source from any, and a module beside newer source is still the one that runs; the
              interpreter reads source only
   --dd NAME=path[:format][:mod]
@@ -399,14 +403,14 @@ fuzz flags:
              and AEI1 say what the region lacks and are counted refused. An abend the task gives
              with no COMMAREA and no operator input is not kept
   --differential
-             run the batch program on each generated input twice, through run and run --vm, each
-             with --statement-limit --hang-limit (1000000 without it), and keep each input on which
-             the interpreter and the VM differ in exit status, abend, standard output, standard
-             error or a DD's data set, one to each way of differing, made smaller while it still
-             differs that way: divergence-N/ holds its input, what each executor wrote, and a
-             report of the differences with the command that repeats the run. Runs that both reach
-             the limit or time out, and runs that reach what the VM does not run yet, pass and are
-             counted. Exit status 1 when any input differs
+             run the batch program on each generated input twice, through run --interpret and run
+             --vm, each with --statement-limit --hang-limit (1000000 without it), and keep each
+             input on which the interpreter and the VM differ in exit status, abend, standard
+             output, standard error or a DD's data set, one to each way of differing, made smaller
+             while it still differs that way: divergence-N/ holds its input, what each executor
+             wrote, and a report of the differences with the command that repeats the run. Runs that
+             both reach the limit or time out, and runs that reach what the VM does not run yet,
+             pass and are counted. Exit status 1 when any input differs
   --interface
              run a subprogram as a caller would, through ironwork run --argument: each PROCEDURE
              DIVISION USING item gets bytes built field by field from its LINKAGE record. Where a
@@ -449,7 +453,7 @@ exit status: for check and compile, the compile's return code, the highest of it
          the refusal level, NOCOMPILE asked for a syntax check, or the source or module holds only
          user-defined functions
   242    code generation refused a construct, named with where it is (--vm)
-  243    the VM stopped at a construct it does not run yet (--vm, a module)
+  243    the VM stopped at a construct it does not run yet (run, cics, a module)
   244    the run reached a construct ironwork does not run, an IRONWORK, EXEC or JAVA abend
          (INVOKE in a CICS task among them), or the job holds JCL ironwork refuses before any step
   245    the source, JCL or load module cannot be read, or the reader refuses the module (damaged,
@@ -521,6 +525,22 @@ fn storage_bytes(text: &str) -> Option<u64> {
     digits.parse::<u64>().ok().filter(|&n| n > 0)?.checked_mul(unit)
 }
 
+/// Which executor runs a source program: the VM unless --interpret names the interpreter.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Executor {
+    /// --vm: a program code generation refuses ends the run with 242.
+    Vm,
+    /// Neither flag: a program code generation refuses runs on the interpreter, with a line saying so.
+    Default,
+    /// --interpret.
+    Interpreter,
+}
+
+/// The line a run on the interpreter in place of the VM gives, naming what code generation refused.
+fn interpreted(path: &str, e: &exec::lower::LowerError) -> String {
+    format!("ironwork: {path}:{}: runs on the interpreter ({e})", e.pos().line)
+}
+
 fn usage_error(message: &str) -> ExitCode {
     eprintln!("ironwork: {message}\n{USAGE}");
     exit::status(Outcome::Usage)
@@ -561,7 +581,7 @@ fn driver() -> ExitCode {
     let (mut replay, mut keyed) = (None, false);
     let (mut sql_db, mut sql_record) = (None, None);
     let mut c_series = false;
-    let mut vm = false;
+    let (mut vm, mut interpret) = (false, false);
     let mut evidence_dir: Option<std::path::PathBuf> = None;
     let mut trace_marker: Option<String> = None;
     let mut trace_statements: Option<std::path::PathBuf> = None;
@@ -776,6 +796,7 @@ fn driver() -> ExitCode {
             "--c-series" => c_series = true,
             "--exit-code" => exit_code = true,
             "--vm" => vm = true,
+            "--interpret" => interpret = true,
             "--diagnostics" => match args.next().as_deref() {
                 Some("text") => json = Some(false),
                 Some("json") => json = Some(true),
@@ -872,12 +893,16 @@ fn driver() -> ExitCode {
         || trace_statements.is_some() || trace_input || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() || !matches!(clock, exec::unit::Clock::System)
         || compare_base.is_some() || compare_head.is_some() || declare.is_some() || statement.is_some() || !expected.is_empty() || datasets.is_some()
         || !proclibs.is_empty() || user.is_some()
-        || vm || parm.is_some() || statement_limit.is_some() || time_limit.is_some() || storage_limit.is_some() || !arguments.is_empty();
+        || vm || interpret || parm.is_some() || statement_limit.is_some() || time_limit.is_some() || storage_limit.is_some() || !arguments.is_empty();
     let dump_flags = !dump_options.only.is_empty() || dump_options.strings || !dump_options.check;
     let fuzz_flags = fuzz_root.is_some() || fuzz_runs.is_some() || fuzz_seed.is_some() || fuzz_timeout.is_some() || hang_limit.is_some() || fuzz_job || fuzz_cics || fuzz_interface || fuzz_differential;
-    if vm && !matches!(rest.first().map(String::as_str), Some("run" | "cics")) {
-        return usage_error("--vm is for run and cics");
+    if (vm || interpret) && !matches!(rest.first().map(String::as_str), Some("run" | "cics")) {
+        return usage_error("--vm and --interpret are for run and cics");
     }
+    if vm && interpret {
+        return usage_error("--vm and --interpret name different executors; give one");
+    }
+    let executor = if vm { Executor::Vm } else if interpret { Executor::Interpreter } else { Executor::Default };
     if statement_limit.is_some() && !matches!(rest.first().map(String::as_str), Some("run" | "job")) {
         return usage_error("--statement-limit is for run and job; fuzz sets its own");
     }
@@ -1179,12 +1204,16 @@ fn driver() -> ExitCode {
         eprintln!("ironwork: {path}: FUNCTION-ID {}: the source holds user-defined functions and no program to run", compiled.program.id);
         return finished(journal, Outcome::Refused);
     }
-    let code = match (vm && command == "run").then(|| exec::vm::lowered(&compiled)) {
+    let code = match (command == "run" && executor != Executor::Interpreter).then(|| exec::vm::lowered(&compiled)) {
         None => None,
         Some(Ok(code)) => Some(code),
-        Some(Err(e)) => {
+        Some(Err(e)) if executor == Executor::Vm => {
             eprintln!("{}", syntax::Error::from(e).place(path));
             return finished(journal, Outcome::NotGenerated);
+        }
+        Some(Err(e)) => {
+            eprintln!("{}", interpreted(path, &e));
+            None
         }
     };
     let dds = match exec::files::Dds::new(&dds, true) {
@@ -1198,14 +1227,17 @@ fn driver() -> ExitCode {
     if command == "cics" {
         let run = journal.map(|j| evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()).with_input(trace_input));
         let coverage = coverage_file.as_deref().map(|file| (file, outlines.as_slice(), reads.as_slice()));
-        return run_cics(&compiled, path, library, dds, clock, database, &cics_options, run, vm, coverage);
+        return run_cics(&compiled, path, library, dds, clock, database, &cics_options, run, executor, coverage);
     }
     let sysin = match open_sysin(&dds) {
         Ok(s) => s,
         Err(code) => return code,
     };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
-    let shared = journal.map(|j| std::rc::Rc::new(std::cell::RefCell::new(evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()).with_input(trace_input))));
+    let shared = journal.map(|mut j| {
+        j.executor = Some(if code.is_some() { "vm" } else { "interpreter" });
+        std::rc::Rc::new(std::cell::RefCell::new(evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()).with_input(trace_input)))
+    });
     let covered = coverage_file.as_ref().map(|_| std::rc::Rc::new(std::cell::RefCell::new(coverage::Coverage::naming(path, &reads))));
     let observer = (shared.is_some() || covered.is_some()).then(|| {
         let (run, cov) = (shared.clone(), covered.clone());
@@ -1240,7 +1272,7 @@ fn driver() -> ExitCode {
         Err(exec::vm::Halt::Abend(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. })) => (Outcome::Ended(0), None),
         Err(exec::vm::Halt::Abend(abend)) => (Outcome::of_abend(&abend.code), Some(abend)),
         Err(exec::vm::Halt::Unimplemented(what)) => {
-            eprintln!("ironwork: {path}: the VM does not run {what} yet; run it without --vm");
+            eprintln!("ironwork: {path}: the VM does not run {what} yet; run it with --interpret");
             (Outcome::Stopped, None)
         }
     };
@@ -1659,7 +1691,7 @@ struct SourceTasks<'a> {
     current: Option<std::rc::Rc<exec::Compiled>>,
     transactions: Transactions,
     path: &'a str,
-    vm: bool,
+    executor: Executor,
 }
 
 impl Tasks for SourceTasks<'_> {
@@ -1678,7 +1710,7 @@ impl Tasks for SourceTasks<'_> {
         observer: Option<exec::unit::Observer<'w>>,
     ) -> Result<Result<(exec::Ending, exec::cics::Task), exec::Abend>, (Outcome, String)> {
         let program = self.current.as_deref().unwrap_or(self.first);
-        cics_run(program, self.path, self.vm, self.transactions.library.clone(), dds, task, clock, self.transactions.database.as_deref_mut(), out, err, observer)
+        cics_run(program, self.path, self.executor, self.transactions.library.clone(), dds, task, clock, self.transactions.database.as_deref_mut(), out, err, observer)
     }
 
     fn abend_file(&self, abend: &exec::Abend) -> Option<String> {
@@ -1698,13 +1730,13 @@ fn run_cics(
     database: Option<Box<dyn exec::sql::Database>>,
     options: &[(String, String)],
     evidence: Option<evidence::Run>,
-    vm: bool,
+    executor: Executor,
     coverage: Option<(&std::path::Path, &[coverage::Outline], &[std::path::PathBuf])>,
 ) -> ExitCode {
     let get = |name: &str| options.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v.clone());
     if get("--serve").is_some() {
-        if vm {
-            return usage_error("--vm is not for --serve");
+        if executor == Executor::Vm {
+            return usage_error("--vm is not for --serve, whose tasks run on the interpreter");
         }
         if get("--screens").is_some() || get("--commarea").is_some() || get("--commarea-out").is_some() {
             return usage_error("--serve cannot be combined with --screens, --commarea or --commarea-out");
@@ -1714,7 +1746,7 @@ fn run_cics(
     let mut library = library;
     library.programs.insert(0, compiled.program.clone());
     let transactions = Transactions { library, table: Default::default(), compiled: Default::default(), database };
-    let mut tasks = SourceTasks { first: compiled, current: None, transactions, path, vm };
+    let mut tasks = SourceTasks { first: compiled, current: None, transactions, path, executor };
     cics_tasks(&mut tasks, compiled.options.code_page(), &compiled.program.id, path, dds, clock, options, evidence, coverage)
 }
 
@@ -1898,12 +1930,12 @@ fn cics_tasks(
     }
 }
 
-/// One task's run, on the VM with `vm`; Err with how and why when the VM does not run the program.
+/// One task's run on `executor`; Err with how and why when the VM does not run the program.
 #[allow(clippy::too_many_arguments)]
 fn cics_run<'w>(
     program: &exec::Compiled,
     path: &str,
-    vm: bool,
+    executor: Executor,
     library: exec::unit::Library,
     dds: exec::files::Dds,
     task: exec::cics::Task,
@@ -1913,14 +1945,19 @@ fn cics_run<'w>(
     err: &'w mut dyn io::Write,
     observer: Option<exec::unit::Observer<'w>>,
 ) -> Result<Result<(exec::Ending, exec::cics::Task), exec::Abend>, (Outcome, String)> {
-    if !vm {
-        return Ok(program.execute_cics_observed(library, dds, task, clock, database, out, err, observer));
-    }
-    let code = exec::vm::lowered(program).map_err(|e| (Outcome::NotGenerated, syntax::Error::from(e).place(path).to_string()))?;
+    let code = match (executor != Executor::Interpreter).then(|| exec::vm::lowered(program)) {
+        Some(Ok(code)) => code,
+        Some(Err(e)) if executor == Executor::Vm => return Err((Outcome::NotGenerated, syntax::Error::from(e).place(path).to_string())),
+        Some(Err(e)) => {
+            let _ = writeln!(err, "{}", interpreted(path, &e));
+            return Ok(program.execute_cics_observed(library, dds, task, clock, database, out, err, observer));
+        }
+        None => return Ok(program.execute_cics_observed(library, dds, task, clock, database, out, err, observer)),
+    };
     match exec::vm::execute_cics(program, &code, library, dds, task, clock, database, out, err, observer, &mut None) {
         (Ok(ending), task) => Ok(Ok((ending, task))),
         (Err(exec::vm::Halt::Abend(abend)), _) => Ok(Err(abend)),
-        (Err(exec::vm::Halt::Unimplemented(what)), _) => Err((Outcome::Stopped, format!("ironwork: {path}: the VM does not run {what} yet; run it without --vm"))),
+        (Err(exec::vm::Halt::Unimplemented(what)), _) => Err((Outcome::Stopped, format!("ironwork: {path}: the VM does not run {what} yet; run it with --interpret"))),
     }
 }
 

@@ -6,8 +6,8 @@ The record format, the ledger, seals and witnesses are cobolwork's (cobolwork
 evidence directory unchanged.
 
 **Status:** built, 2026-09-30. `--evidence` on `run`, `check`, `job` and `cics`, of a source or,
-for `run` and `cics`, a load module, and for `run` and `cics` of a source on the VM (`--vm`) as on
-the interpreter; `--provenance` on `run` and `check`; `compare`.
+for `run` and `cics`, a load module, and for `run` and `cics` of a source on the VM, their default,
+as on the interpreter (`--interpret`); `--provenance` on `run` and `check`; `compare`.
 
 ## 1. Run journal: `--evidence DIR`
 
@@ -26,7 +26,7 @@ by `prev` and `seq`.
 | `step` | `step`, `pgm`, `outcome` | for `job`, each step as the job log shows it: `RC=0004`, an abend, BYPASSED or JCL ERROR, with why |
 | `sink` | `sink`, `file`, `line`, `marker`, `reached`, `input` | with `--trace-marker`, an operation an input could steer, the first time it is reached with the marker in its operand and the first time without (§1.1); with `--trace-input`, `input` true, false or null, and a record for each value it first takes (§1.3). `marker` and `reached` only with a marker |
 | `statement` | `file`, `line`, `capped` | with `--trace-statements`, each start of a listed statement, in the order the run made them, up to 100 per statement, the 100th with `capped` true (§1.2) |
-| `close` | `exit`, `counts`, `durationMs`, `ledger` | last |
+| `close` | `exit`, `counts`, `durationMs`, `ledger`, and for `run` `executor`: `vm` or `interpreter`, whichever ran the program | last |
 
 - `exit` is how the run ended: for `check`, the compile's return code; for `run`, `cics` and `job`,
   the RETURN-CODE of a run that ran to its end, its own value even where the exit status gives it
@@ -69,8 +69,9 @@ by `prev` and `seq`.
   which costs a run about 4% more time on the interpreter and 11% on the VM (three million statements).
 - The run unit tells an observer what it opens, closes and loads, and each paragraph control
   enters (`exec::unit::Observer`); the interpreter and the VM raise the same events, so a journal
-  is the same under both. `run --vm` and `cics --vm` write the journal and `--coverage` report the
-  interpreter's run writes, with the same traces, but for `--vm` in `argv`;
+  is the same under both. `run` and `cics` on the VM write the journal and `--coverage` report
+  the interpreter's run writes, with the same traces, but for the executor flag given in `argv`
+  and, for `run`, the executor `close` names;
   `crates/cli/tests/evidence.rs` runs a batch program and a CICS pseudo-conversation on both and
   compares them. A CALL on the VM takes `NAME.iwm` before `NAME.cbl` (load-module.md §8.2), and
   its `call` record names the source that module records, which is the interpreter's record when

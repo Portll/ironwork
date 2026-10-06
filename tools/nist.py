@@ -170,7 +170,7 @@ def restore(workdir, files):
         with open(os.path.join(workdir, name), "wb") as f:
             f.write(data)
 
-VM_STOPPED = (re.compile(r"the VM does not run (.+) yet; run it without --vm"), re.compile(r": (?:IW[A-Z]\d{4}-[IWESU] )?(lowering: .+)$", re.M))
+VM_STOPPED = (re.compile(r"the VM does not run (.+) yet; run it with --interpret"), re.compile(r": (?:IW[A-Z]\d{4}-[IWESU] )?(lowering: .+)$", re.M))
 
 def first_difference(x, y):
     return next((i for i, (a, b) in enumerate(zip(x, y)) if a != b), min(len(x), len(y)))
@@ -213,7 +213,7 @@ def run(binary, workdir, name, env, include, sysin, timeout, vm, switches):
     before = data_files(workdir) if vm else None
     clock = ("--clock", CLOCK) if vm else ()
     parm = ("--parm", UPSI_PARM) if switches else ()
-    status, out, err = execute(binary, workdir, name, env, include, sysin, timeout, *(("check",) if flagging else ("run", *clock, *parm)))
+    status, out, err = execute(binary, workdir, name, env, include, sysin, timeout, *(("check",) if flagging else ("run", "--interpret", *clock, *parm)))
     skipped = ("-", "") if vm else ()
     if status is None:
         return ("timeout", "", *skipped)

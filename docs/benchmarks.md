@@ -11,7 +11,7 @@ programs (see VM results).
 
 `tools/bench.sh` builds ironwork release, compiles each `bench/*.cbl` with
 `cobc -x -O2 -std=ibm-strict`, runs each program `RUNS` times (default five) under the interpreter
-(`ironwork run`), the VM (`ironwork run --vm`) and cobc, interleaved, and prints the median wall
+(`ironwork run --interpret`), the VM (`ironwork run --vm`) and cobc, interleaved, and prints the median wall
 times and the VM's ratio to each. It reports any difference between the VM's output and the
 interpreter's, and any difference between ironwork's and cobc's (see Correctness). The cobc times
 below were taken at `-std=ibm`, under which cobc generates the same C for these four programs.

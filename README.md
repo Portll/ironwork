@@ -42,6 +42,11 @@ and the `--evidence` journal a run of the source writes, from the paragraphs, li
 and digests the module records ([docs/load-module.md](docs/load-module.md) §8.2, §9.2); a module
 refuses the compile flags and `--provenance`, which describe a compile, with 246 (usage).
 
+`run` and `cics` of a source run it on the VM too. A program code generation refuses runs on the
+interpreter, with a line naming what was refused; `--interpret` runs any program on the
+interpreter, and `--vm` refuses one code generation refuses with 242. Over 1,027 programs of a
+public corpus that compile, the two executors gave the same exit status and output for every one.
+
 CBL and PROCESS cards set the options. COPY members are found in the program's own directory, then
 each `-I` library: a copybook (`.cpy`, `.copy`) in any of them before a program source (`.cbl`,
 `.cob`), and either before a file named as the member alone, which a literal name tries first; the
@@ -235,8 +240,8 @@ RETURN-CODE from a run ironwork refused, stopped or could not finish:
 | 239 | It ran to its end with a RETURN-CODE outside 0–238, or of 239. Standard error gives the value (`ironwork: RETURN-CODE 1000 exits 239`), and an `--evidence` journal's `close` record holds it as `exit`. |
 | 240 | An abend, which the message names: the system completion code (S0C7 for a data exception, S0C4 for a LINKAGE item with no address, S806 for a job step's program no library holds, S0CB, S0C9 or S0CF for a zero divisor no ON SIZE ERROR takes, as the division is decimal, binary or floating-point, assumption C55), the user completion code (U0999 from CEE3ABD, U4038 for a Language Environment condition nothing handled, CEE3501S among them for a dynamic CALL of a program no library holds, assumption C450), a CICS abend code, U4038 with IGZ0035S or IGZ0020S for an I/O failure no FILE STATUS or declarative takes and IO- with the status for the rest (C451), or SQL and SQLR from the database or its recording. For a job, a step's abend or a JCL error that ended it. |
 | 241 | The compile gave no program to run: its return code, which standard error gives, reached the refusal level (below), a card's NOCOMPILE asked for a syntax check, or the source or module holds only user-defined functions. |
-| 242 | Code generation refused a construct, named with where it is (`--vm`). |
-| 243 | The VM stopped at a construct it does not run yet (`--vm`, or a module). |
+| 242 | Code generation refused a construct, named with where it is (`--vm`; without it, the program runs on the interpreter). |
+| 243 | The VM stopped at a construct it does not run yet (`run` or `cics` without `--interpret`, or a module). |
 | 244 | The run reached a construct ironwork does not run: an abend with one of ironwork's own codes, IRONWORK (INVOKE in a CICS task among them), EXEC (EXEC DLI) or JAVA. For a job, also JCL ironwork refuses before any step runs. |
 | 245 | The source, JCL or load module cannot be read, or the reader refuses the module (damaged, or a format version it does not read). |
 | 246 | Usage, or a file, directory, address or database a flag names cannot be used. |
