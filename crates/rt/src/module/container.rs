@@ -36,10 +36,8 @@ impl Version {
 }
 
 const _: () = assert!(
-    Version::OLDEST_READABLE.major == Version::CURRENT.major
-        && Version::OLDEST_READABLE.minor <= Version::CURRENT.minor
-        && (Version::CURRENT.major == 0 || Version::OLDEST_READABLE.minor == 0),
-    "the oldest readable version is a minor of the current major, no later than it, and x.0 from 1.0"
+    Version::OLDEST_READABLE.major == Version::CURRENT.major && Version::OLDEST_READABLE.minor == 0,
+    "the oldest readable version is the current major's first minor"
 );
 
 /// A section this version knows (load-module.md §3.4). Every one is required.
