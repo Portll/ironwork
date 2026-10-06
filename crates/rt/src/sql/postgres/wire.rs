@@ -202,6 +202,18 @@ fn refusal(body: &[u8]) -> Failure {
     Failure::Refused { state, message }
 }
 
+/// The longest message ironwork reads, 64 MiB: a Db2 row without LOBs is at most 32 KB, and a
+/// longer length is a server that is not answering the protocol.
+const LONGEST_MESSAGE: i32 = 64 << 20;
+
+/// A message's body length from the length its header gives, which counts itself.
+fn body_len(len: i32) -> Result<usize, Failure> {
+    if len > LONGEST_MESSAGE {
+        return Err(Failure::Broken(format!("PostgreSQL sent a message of {len} bytes, more than the {LONGEST_MESSAGE} ironwork reads")));
+    }
+    Ok((len.max(4) - 4) as usize)
+}
+
 impl Connection {
     /// Connects, over TLS where `sslmode` asks for it. Without an sslmode, a TCP connection uses TLS
     /// when this build has it, and a Unix socket never does.
@@ -329,8 +341,7 @@ impl Connection {
     fn receive(&mut self) -> Result<(u8, Vec<u8>), Failure> {
         let mut head = [0u8; 5];
         self.stream.read_exact(&mut head)?;
-        let len = i32::from_be_bytes([head[1], head[2], head[3], head[4]]);
-        let mut body = vec![0u8; (len.max(4) - 4) as usize];
+        let mut body = vec![0u8; body_len(i32::from_be_bytes([head[1], head[2], head[3], head[4]]))?];
         self.stream.read_exact(&mut body)?;
         Ok((head[0], body))
     }
@@ -476,6 +487,13 @@ fn unix_socket(_: &Target) -> std::io::Result<Box<dyn Stream>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_message_longer_than_ironwork_reads_is_refused() {
+        assert_eq!(body_len(4).ok(), Some(0));
+        assert_eq!(body_len(LONGEST_MESSAGE).ok(), Some(LONGEST_MESSAGE as usize - 4));
+        assert!(matches!(body_len(i32::MAX), Err(Failure::Broken(m)) if m.contains("more than")));
+    }
 
     #[test]
     fn urls() {

@@ -390,6 +390,8 @@ Input rules:
   prepared; past that it deallocates them all and prepares each again when it next runs, since
   dynamic statements that carry their values in their text would otherwise grow the server's
   memory without end.
+- **Messages** longer than 64 MiB end the run, naming the length: a Db2 row without LOBs is at most
+  32 KB, and a longer length is a server that is not answering the protocol.
 - **The session** sets `client_encoding` UTF8, `DateStyle` ISO, `TimeZone` UTC and
   `extra_float_digits` 3, so every value's text has one form.
 - **Units of work.** The first statement after a COMMIT or ROLLBACK begins a transaction. Each
