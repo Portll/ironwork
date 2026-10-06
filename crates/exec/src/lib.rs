@@ -333,12 +333,12 @@ pub(crate) fn execute_task<'w>(
     kept: &mut Option<unit::Remains>,
 ) -> (Result<Ending, Abend>, cics::Task) {
     let (statements, taint) = (library.trace_statements.clone(), library.trace_input.then(rt::taint::Taint::default));
-    let limit = library.statement_limit;
+    let limits = (library.statement_limit, library.time_limit, library.storage_limit);
     let mut run_unit = unit::RunUnit::new(library, dds, None, clock, out, err);
     run_unit.observer = observer;
     run_unit.statements = statements;
     run_unit.taint = taint;
-    run_unit.statement_limit = limit;
+    run_unit.limit(limits.0, limits.1, limits.2);
     run_unit.sql = database.map(sql::Session::new);
     let (ending, ended, task) = run_task(First::of(compiled), run_unit, task, kept, |unit, me, commarea, length| {
         machine::Machine::activation(compiled, me, unit, true).and_then(|mut m| {
@@ -481,14 +481,14 @@ fn run_main<'w>(
 ) -> Result<(Ending, i16), Abend> {
     oo::refuse_to_run(&compiled.program)?;
     let (statements, taint) = (library.trace_statements.clone(), library.trace_input.then(rt::taint::Taint::default));
-    let (limit, screen, environment) = (library.statement_limit, library.screen.clone(), library.environment.clone());
+    let (limits, screen, environment) = ((library.statement_limit, library.time_limit, library.storage_limit), library.screen.clone(), library.environment.clone());
     let mut run_unit = unit::RunUnit::new(library, dds, sysin, clock, out, err);
     run_unit.crt = screen;
     run_unit.environment = rt::environment::Environment::of(environment);
     run_unit.observer = observer;
     run_unit.statements = statements;
     run_unit.taint = taint;
-    run_unit.statement_limit = limit;
+    run_unit.limit(limits.0, limits.1, limits.2);
     run_unit.sql = database.map(sql::Session::new);
     let me = run_unit.add(None, &compiled.program, compiled.layout.size as usize);
     let trap_off = matches!(passed, Passed::Parm(p) if rt::le::parm::trap_off(p));

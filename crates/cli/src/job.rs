@@ -60,6 +60,8 @@ pub struct Request {
     pub coverage: Option<PathBuf>,
     /// How many statements each COBOL step may start before it ends with S322.
     pub statement_limit: Option<u64>,
+    pub time_limit: Option<u64>,
+    pub storage_limit: Option<u64>,
 }
 
 /// The job in `jcl`, its procedures and INCLUDE members found in the data sets JCLLIB names under
@@ -609,7 +611,7 @@ fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database
     if let Some(run) = evidence {
         crate::evidence::sources(run.borrow_mut().journal_mut(), &first.sources, &path.display().to_string(), roots);
     }
-    let library = exec::unit::Library { programs, dirs: std::iter::once(own).chain(req.program_dirs.iter().cloned()).collect(), copy: libraries, flags: req.flags.clone(), trace_statements: req.coverage.is_some().then_some(exec::unit::StatementFilter::All), trace_input: false, statement_limit: req.statement_limit, program_ids: None, screen: None, environment: Default::default() };
+    let library = exec::unit::Library { programs, dirs: std::iter::once(own).chain(req.program_dirs.iter().cloned()).collect(), copy: libraries, flags: req.flags.clone(), trace_statements: req.coverage.is_some().then_some(exec::unit::StatementFilter::All), trace_input: false, statement_limit: req.statement_limit, time_limit: req.time_limit, storage_limit: req.storage_limit, program_ids: None, screen: None, environment: Default::default() };
     let compiled = exec::compile(first, &req.flags).map_err(|errors| Failed::before(Outcome::Refused, syntax::most_severe(&errors).map(|e| e.place(&path.display().to_string()).to_string()).unwrap_or_default()))?;
     let specs: Vec<String> = dds.iter().map(|d| format!("{}={}{}{}", d.name, d.path.display(), if d.text { ":text" } else { "" }, if d.append { ":mod" } else { "" })).collect();
     let dds = exec::files::Dds::new(&specs, false).map_err(|m| Failed::abend(AbendCode::Ironwork, m))?;

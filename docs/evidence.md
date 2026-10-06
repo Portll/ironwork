@@ -18,7 +18,7 @@ by `prev` and `seq`.
 
 | kind | fields | written |
 |---|---|---|
-| `open` | `tool` (`ironwork`), `toolVersion`, `command`, `argv` (option names, `<value>` for values but `--compliance`'s, `--dialect`'s and `--assume`'s, which are kept, the program by file name), `roots`, `platform` | first |
+| `open` | `tool` (`ironwork`), `toolVersion`, `command`, `argv` (option names, `<value>` for values but `--compliance`'s, `--dialect`'s, `--assume`'s and the three limits', which are kept, the program by file name), `roots`, `platform` | first |
 | `input` | `root`, `path`, `sha256`, `bytes` | the program and each COPY member it read |
 | `dd` | `dd`, `event` (`open`, `close`, `end`), `mode`, `sha256`, `bytes` | a file's digest before each OPEN, after each CLOSE, and as the run left it |
 | `call` | `program`, `from`, `sha256` | each program CALL loads from a library, with its source's digest |

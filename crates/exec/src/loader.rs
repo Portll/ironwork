@@ -31,6 +31,10 @@ pub struct Library {
     pub screen: Option<std::rc::Rc<std::cell::RefCell<rt::crt::Crt>>>,
     /// The environment variables `--env` gives the run.
     pub environment: std::collections::BTreeMap<String, String>,
+    /// Seconds the run may take before it ends with S322 (`RunUnit::limit`).
+    pub time_limit: Option<u64>,
+    /// Bytes of storage the run unit may hold before the run ends (`RunUnit::limit`).
+    pub storage_limit: Option<u64>,
     /// Each PROGRAM-ID the source files of `dirs` hold, with its file, read the first time a CALL
     /// names no member.
     pub program_ids: Option<Vec<(String, PathBuf)>>,

@@ -120,3 +120,36 @@ fn a_statement_limit_ends_the_run_with_s322_at_the_same_statement_on_both_execut
     let err = String::from_utf8_lossy(&job.stderr);
     assert!(err.contains("LOOPER.cbl:8:16: ABEND S322:") && err.contains("STEP1 PGM=LOOPER ABEND S322"), "{err}");
 }
+
+#[test]
+fn a_time_or_storage_limit_ends_the_run_on_both_executors() {
+    let dir = temp("limits");
+    let source = |id: &str, data: &str, body: &str| {
+        let text = format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. {id}.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n{data}       PROCEDURE DIVISION.\n{body}           GOBACK.\n");
+        fs::write(dir.join(format!("src/{id}.cbl")), text).unwrap();
+    };
+    source("SPINNER", "       01 N PIC 9(3) VALUE 0.\n", "           PERFORM UNTIL N > 999\n               ADD 1 TO N\n           END-PERFORM.\n");
+    source("BIG", "       01 T PIC X(100000).\n", "           MOVE SPACES TO T.\n");
+    let run = |id: &str, flags: &[&str]| Command::new(env!("CARGO_BIN_EXE_ironwork")).arg("run").arg(dir.join(format!("src/{id}.cbl"))).args(flags).output().unwrap();
+    for vm in [&[][..], &["--vm"]] {
+        let spun = run("SPINNER", &[&["--time-limit", "1"][..], vm].concat());
+        let err = String::from_utf8_lossy(&spun.stderr);
+        assert_eq!(spun.status.code(), Some(240), "{vm:?} {err}");
+        assert!(err.contains("ABEND S322") && err.contains("its time limit of 1 second,"), "{vm:?} {err}");
+        let big = run("BIG", &[&["--storage-limit", "64K"][..], vm].concat());
+        let err = String::from_utf8_lossy(&big.stderr);
+        assert!(!big.status.success() && err.contains("past its storage limit of 65536"), "{vm:?} {err}");
+        let room = run("BIG", &[&["--storage-limit", "1M"][..], vm].concat());
+        assert!(room.status.success(), "{vm:?} {}", String::from_utf8_lossy(&room.stderr));
+    }
+    for (flags, code, message) in [
+        (&["check", "--time-limit", "1"][..], 2, "--time-limit and --storage-limit are for run and job"),
+        (&["run", "--storage-limit", "0"], 246, "--storage-limit needs a number of bytes, or of K, M or G"),
+        (&["run", "--storage-limit", "12Q"], 246, "--storage-limit needs a number of bytes, or of K, M or G"),
+        (&["run", "--time-limit", "soon"], 246, "--time-limit needs a number of seconds"),
+    ] {
+        let o = Command::new(env!("CARGO_BIN_EXE_ironwork")).args(flags).arg(dir.join("src/BIG.cbl")).output().unwrap();
+        assert_eq!(o.status.code(), Some(code), "{flags:?}");
+        assert!(String::from_utf8_lossy(&o.stderr).contains(message), "{flags:?} {}", String::from_utf8_lossy(&o.stderr));
+    }
+}

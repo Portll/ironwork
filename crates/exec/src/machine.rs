@@ -267,7 +267,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         {
             self.uses.line = pos;
         }
-        if self.unit.statement_limit.is_some()
+        if self.unit.limited()
             && let Some(pos) = declaratives::statement_pos(s)
         {
             self.unit.start_statement(self.me, pos)?;

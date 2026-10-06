@@ -653,7 +653,8 @@ started with, then each `-L` in order. A program is found in this order:
   old member in the load library, so that older module runs.
 
 `ironwork run x.iwm` runs program 0 of the module on the VM with the options it was compiled with.
-It takes `-L`, `-I`, `--dd`, `--clock`, `--parm`, `--statement-limit`, the SQL flags,
+It takes `-L`, `-I`, `--dd`, `--clock`, `--parm`, the three limits (`--statement-limit`,
+`--time-limit`, `--storage-limit`), the SQL flags,
 `--exit-code`, `--coverage` and `--evidence` with its traces as a run of source does, and refuses
 the compile flags, `--provenance` and the cics flags with 246, usage; `check` and `compile` refuse
 a module. A module the reader refuses, or whose program 0 the verifier refuses, exits 245 with the
@@ -664,7 +665,7 @@ run does from the source's directory.
 
 `ironwork cics x.iwm` runs program 0 as the first program of a CICS task on the VM, as `ironwork
 cics --vm` runs a source's, and exits as `cics` does. It takes what `run` takes of a module, but
-`--parm` and `--statement-limit`, which `cics` refuses for a source too, and the cics flags but
+`--parm` and the three limits, which `cics` refuses for a source too, and the cics flags but
 `--serve` and `--serve-public`, which serve a source's tasks on the interpreter and are refused for
 a module with 246. Under `--screens`, the program a transaction names (`--transaction`, `--csd`)
 is found as a CALL of it finds one: in the module first, then as `NAME.iwm` or as source in the

@@ -112,7 +112,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             let b = &p.blocks[block as usize];
             let at = &p.debug.ops[block as usize];
             let starts = &p.debug.statements[block as usize];
-            let tracing = (self.unit.statements.is_some() || self.unit.taint.is_some() || self.unit.statement_limit.is_some()) && !starts.is_empty();
+            let tracing = (self.unit.statements.is_some() || self.unit.taint.is_some() || self.unit.limited()) && !starts.is_empty();
             let mut told = 0;
             let mut arm = None;
             let mut transfer = None;

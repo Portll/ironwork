@@ -59,7 +59,7 @@ pub fn root_of(path: &Path, roots: &[PathBuf]) -> i64 {
 }
 
 /// Option names only, and the program by file name: a value may be a path or a URL with a password.
-/// A statement limit is kept, since the place of an S322 depends on it.
+/// A statement, time or storage limit is kept, since whether and where the run ends depends on it.
 /// The compliance level's value is kept, being one of two words that decide what compiles.
 /// The dialect's value is kept, being one of two words that change the run's results, and so is
 /// each `--assume` ID=VALUE.
@@ -73,7 +73,8 @@ fn recorded_argv(command: &str, program: &str) -> Vec<String> {
                 out.extend(args.next());
             } else if args.peek().is_some_and(|v| !v.starts_with('-')) && !matches!(a.as_str(), "-silent" | "-strict-sort-keys" | "--exit-code") {
                 let value = args.next().unwrap_or_default();
-                out.push(if a == "--statement-limit" && value.parse::<u64>().is_ok() { value } else { "<value>".into() });
+                let limit = matches!(a.as_str(), "--statement-limit" | "--time-limit" | "--storage-limit") && value.bytes().all(|b| b.is_ascii_alphanumeric());
+                out.push(if limit { value } else { "<value>".into() });
             }
         }
     }

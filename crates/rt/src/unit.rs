@@ -16,6 +16,7 @@ use numeric::Dialect;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 use std::rc::Rc;
 
 /// A pointer's value is its offset into run-unit memory plus this, so that no item's address is
@@ -311,6 +312,12 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     pub taint: Option<Taint>,
     /// How many more statements may start before the run ends with S322; None for no limit.
     pub statement_limit: Option<u64>,
+    /// When the run ends with S322 for its time limit, and that limit in seconds.
+    deadline: Option<(Instant, u64)>,
+    /// Statement starts since the clock was last read against `deadline`.
+    unclocked: u32,
+    /// The bytes of storage the run unit may hold before the run ends; None for no limit.
+    storage_limit: Option<usize>,
     /// The last statements started under a statement limit, oldest first, and once it is spent the
     /// loop statement the S322 waits for.
     recent: VecDeque<Started>,
@@ -325,6 +332,9 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
 fn end_file(f: Open, unclosed: bool) -> std::io::Result<()> {
     if unclosed { f.abandon() } else { f.close() }
 }
+
+/// How many statement starts pass between readings of the clock under a time limit.
+const CLOCK_EVERY: u32 = 256;
 
 /// How many of the last statement starts an S322 looks back over for the loop the run is in, and
 /// how many more it lets start while it waits for that loop's first statement.
@@ -485,6 +495,9 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             statements: None,
             taint: None,
             statement_limit: None,
+            deadline: None,
+            unclocked: 0,
+            storage_limit: None,
             recent: VecDeque::new(),
             overrun: None,
             sysin_ended: HashSet::new(),
@@ -650,11 +663,42 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
     }
 
     /// Whether a statement starting on `line` is told to the observer.
-    /// Counts the start of `program`'s statement at `pos` against the statement limit. Once it is
-    /// spent the run ends with S322, as z/OS ends a step that runs past its TIME=, at the next start
+    /// Sets the run's limits: statements that may start, seconds from now, and bytes of storage.
+    /// Each is checked as a statement starts; a request for storage past the limit is granted, and
+    /// the run ends at the next statement.
+    pub fn limit(&mut self, statements: Option<u64>, seconds: Option<u64>, storage: Option<u64>) {
+        self.statement_limit = statements;
+        self.deadline = seconds.and_then(|s| Some((Instant::now().checked_add(Duration::from_secs(s))?, s)));
+        self.storage_limit = storage.map(|b| usize::try_from(b).unwrap_or(usize::MAX));
+    }
+
+    /// Whether statement starts are checked against a limit.
+    pub const fn limited(&self) -> bool {
+        self.statement_limit.is_some() || self.deadline.is_some() || self.storage_limit.is_some()
+    }
+
+    /// Counts the start of `program`'s statement at `pos` against the run's limits. Storage past
+    /// its limit ends the run there, and so does the time limit, read every `CLOCK_EVERY` starts.
+    /// Once the statement limit is spent the run ends with S322, as z/OS ends a step that runs past its TIME=, at the next start
     /// of the loop it is in, so the place does not depend on how many statements ran before the
     /// loop (assumption C241).
     pub fn start_statement(&mut self, program: usize, pos: Pos) -> Result<(), Abend> {
+        if let Some(limit) = self.storage_limit
+            && self.mem.len() > limit
+        {
+            return Err(Abend::ironwork(format!("the run unit's storage reached {} bytes, past its storage limit of {limit}", self.mem.len()), pos));
+        }
+        if let Some((deadline, seconds)) = self.deadline {
+            self.unclocked += 1;
+            if self.unclocked == CLOCK_EVERY {
+                self.unclocked = 0;
+                if Instant::now() >= deadline {
+                    let unit = if seconds == 1 { "second" } else { "seconds" };
+                    let message = format!("the run reached its time limit of {seconds} {unit}, as a step past its TIME= ends");
+                    return Err(Abend { code: crate::abend::AbendCode::TimeLimit, message, pos, file: None });
+                }
+            }
+        }
         let Some(left) = self.statement_limit.as_mut() else { return Ok(()) };
         let now = Started { program, depth: self.depth, pos };
         if *left > 0 {

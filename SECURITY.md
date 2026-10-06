@@ -47,21 +47,44 @@ confined; anything that lets it act outside those bounds is scoped for vulnerabi
 
 | Command | Reads Files | Writes Files | Starts Host Process | Opens Network | Listens |
 |---------|:-----------:|:------------:|:-------------------:|:--------------:|:-------:|
-| run | ✓ | ✓ | ✗ | ✓ (--sql-db) | ✗ |
+| run | ✓ | ✓ | ✗ (✓ --evidence) | ✓ (--sql-db) | ✗ |
 | check | ✓ | ✗ | ✗ | ✗ | ✗ |
-| cics | ✓ | ✓ | ✗ | ✓ (--sql-db) | ✓ (--serve) |
+| cics | ✓ | ✓ | ✗ (✓ --evidence) | ✓ (--sql-db) | ✓ (--serve) |
 | compile | ✓ | ✓ | ✗ | ✗ | ✗ |
 | dump | ✓ | ✗ | ✗ | ✗ | ✗ |
-| job | ✓ | ✓ | ✗ | ✓ (--sql-db) | ✗ |
-| fuzz | ✓ | ✓ | ✗ | ✗ | ✗ |
+| job | ✓ | ✓ | ✗ (✓ --evidence) | ✓ (--sql-db) | ✗ |
+| fuzz | ✓ | ✓ | ✓ (ironwork itself) | ✗ | ✗ |
 | assumptions | ✗ | ✗ | ✗ | ✗ | ✗ |
 | compare | ✓ | ✓ (copies of each DD, --statement) | ✗ | ✗ | ✗ |
 | --version | ✗ | ✗ | ✗ | ✗ | ✗ |
+
+The processes these start are fixed: `fuzz` runs each input in a new copy of the running
+`ironwork`, and with `--evidence`, on macOS and Windows, `ps` or `tasklist` is asked whether the
+process holding a stale journal lock still runs, with fixed arguments and that process's id. A
+program never chooses a process to start: `CALL 'SYSTEM'` and the other routines that would run a
+command on z/OS or under GnuCOBOL load a program of that name or fail. With DD PRINTER, `SYSTEM` or
+`C$SYSTEM` given an `lp` or `lpr` command appends the files it names to that DD and runs nothing.
 
 `unsafe` code is forbidden across the workspace.
 - **A crash or unbounded cost from crafted source.** The front end must refuse bad input with an
   error, never panic, and never take memory or time without bound. It is fuzzed for this; an input
   that gets through is in scope.
+
+## Limits
+
+A run has no limit by default: an endless loop or growing storage is the program's behaviour, as
+on z/OS. `run` and `job` take three, each checked as a statement starts:
+
+| Flag | Default | When it is reached |
+|---|---|---|
+| `--statement-limit N` | none | S322 at the start of the loop the run is in, the same statement on every run |
+| `--time-limit SECONDS` | none | S322 at a statement that starts once SECONDS have passed |
+| `--storage-limit BYTES[K\|M\|G]` | none | the run ends at the next statement once the run unit's storage passes BYTES |
+
+Each job step gets the whole of each limit. Without a storage limit, a single CICS GETMAIN or
+Language Environment CEEGTST grants at most 256 MiB, and objects at most 1 GiB in all. A program
+waiting on ACCEPT from standard input starts no statement, so none of these ends it. `fuzz`
+always runs each input under a statement limit and a time limit of its own.
 
 ## What doesn't count
 

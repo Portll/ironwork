@@ -15,7 +15,8 @@ usage:
                [--env NAME=VALUE]...
                                                        compile and run; CBL and PROCESS cards set the options
   ironwork run <module.iwm> [-L <dir>]... [-I <dir>]... [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
-               [--statement-limit N] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
+               [--statement-limit N] [--time-limit SECONDS] [--storage-limit BYTES]
+               [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                [--exit-code] [--coverage FILE] [--evidence DIR [--trace-marker TEXT] [--trace-input] [--trace-statements FILE]]
                                                        run a load module's first program on the VM, with the options
                                                        it was compiled with
@@ -27,7 +28,7 @@ usage:
                [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]... [--td QUEUE=path]...
                [--screens path | --serve HOST:PORT [--serve-public] [--transaction TRAN=PROGRAM]... [--csd path]]
                                                        run as the first program of a CICS task
-  ironwork cics <module.iwm> [run's flags for a module but --parm and --statement-limit] [--transid T] [--termid T]
+  ironwork cics <module.iwm> [run's flags for a module but --parm and the three limits] [--transid T] [--termid T]
                [--userid U] [--applid A] [--sysid S] [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]...
                [--td QUEUE=path]... [--screens path [--transaction TRAN=PROGRAM]... [--csd path]]
                                                        run a load module's first program on the VM as the first
@@ -159,6 +160,13 @@ flags:
   --env NAME=VALUE
              under --compliance extended, an environment variable ACCEPT ... FROM ENVIRONMENT
              reads; the run sees these, and those it sets, never the process's own (C464)
+  --time-limit SECONDS
+             with run or job, end the run with S322 at a statement that starts once SECONDS have
+             passed (each job step gets SECONDS); there is no limit without it
+  --storage-limit BYTES[K|M|G]
+             with run or job, end the run at the next statement once the run unit's storage, its
+             programs' data, arguments, EXTERNAL data and heap, passes BYTES; there is no limit
+             without it, and each CICS GETMAIN or CEEGTST grants at most 256 MiB
   --parm TEXT
              with run, the PARM an EXEC PGM= would give: the program's first USING item addresses
              a halfword length and the arguments before the last slash, as Language Environment
@@ -501,6 +509,18 @@ fn call_choices(name: &str) -> &'static str {
     }
 }
 
+/// `--storage-limit`'s bytes: a number, or one of kibibytes, mebibytes or gibibytes with K, M or
+/// G after it, as REGION= writes them.
+fn storage_bytes(text: &str) -> Option<u64> {
+    let (digits, unit) = match text.char_indices().last()? {
+        (i, 'K' | 'k') => (&text[..i], 1 << 10),
+        (i, 'M' | 'm') => (&text[..i], 1 << 20),
+        (i, 'G' | 'g') => (&text[..i], 1 << 30),
+        _ => (text, 1),
+    };
+    digits.parse::<u64>().ok().filter(|&n| n > 0)?.checked_mul(unit)
+}
+
 fn usage_error(message: &str) -> ExitCode {
     eprintln!("ironwork: {message}\n{USAGE}");
     exit::status(Outcome::Usage)
@@ -561,6 +581,8 @@ fn driver() -> ExitCode {
     let mut parm: Option<String> = None;
     let mut environment = std::collections::BTreeMap::new();
     let mut statement_limit: Option<u64> = None;
+    let mut time_limit: Option<u64> = None;
+    let mut storage_limit: Option<u64> = None;
     let mut hang_limit: Option<u64> = None;
     let (mut fuzz_job, mut fuzz_cics, mut fuzz_interface, mut fuzz_differential) = (false, false, false, false);
     let mut arguments: Vec<Option<std::path::PathBuf>> = Vec::new();
@@ -589,6 +611,14 @@ fn driver() -> ExitCode {
             "--statement-limit" => match args.next().and_then(|n| n.parse().ok()).filter(|&n: &u64| n > 0) {
                 Some(n) => statement_limit = Some(n),
                 None => refuse!("--statement-limit needs a number of statements"),
+            },
+            "--time-limit" => match args.next().and_then(|n| n.parse().ok()).filter(|&n: &u64| n > 0) {
+                Some(n) => time_limit = Some(n),
+                None => refuse!("--time-limit needs a number of seconds"),
+            },
+            "--storage-limit" => match args.next().as_deref().and_then(storage_bytes) {
+                Some(n) => storage_limit = Some(n),
+                None => refuse!("--storage-limit needs a number of bytes, or of K, M or G"),
             },
             "--hang-limit" => match args.next().and_then(|n| n.parse().ok()).filter(|&n: &u64| n > 0) {
                 Some(n) => hang_limit = Some(n),
@@ -842,7 +872,7 @@ fn driver() -> ExitCode {
         || trace_statements.is_some() || trace_input || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() || !matches!(clock, exec::unit::Clock::System)
         || compare_base.is_some() || compare_head.is_some() || declare.is_some() || statement.is_some() || !expected.is_empty() || datasets.is_some()
         || !proclibs.is_empty() || user.is_some()
-        || vm || parm.is_some() || statement_limit.is_some() || !arguments.is_empty();
+        || vm || parm.is_some() || statement_limit.is_some() || time_limit.is_some() || storage_limit.is_some() || !arguments.is_empty();
     let dump_flags = !dump_options.only.is_empty() || dump_options.strings || !dump_options.check;
     let fuzz_flags = fuzz_root.is_some() || fuzz_runs.is_some() || fuzz_seed.is_some() || fuzz_timeout.is_some() || hang_limit.is_some() || fuzz_job || fuzz_cics || fuzz_interface || fuzz_differential;
     if vm && !matches!(rest.first().map(String::as_str), Some("run" | "cics")) {
@@ -850,6 +880,9 @@ fn driver() -> ExitCode {
     }
     if statement_limit.is_some() && !matches!(rest.first().map(String::as_str), Some("run" | "job")) {
         return usage_error("--statement-limit is for run and job; fuzz sets its own");
+    }
+    if (time_limit.is_some() || storage_limit.is_some()) && !matches!(rest.first().map(String::as_str), Some("run" | "job")) {
+        return usage_error("--time-limit and --storage-limit are for run and job");
     }
     if parm.is_some() && rest.first().map(String::as_str) != Some("run") {
         return usage_error("--parm is for run; a job's PARM comes from its EXEC, and fuzz makes its own");
@@ -992,7 +1025,7 @@ fn driver() -> ExitCode {
             (exec::unit::Clock::System, Some(_)) => exec::unit::Clock::Fixed(1_767_225_600, 0),
             (c, _) => c,
         };
-        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, user, flags, clock, replay: replay.map(std::path::PathBuf::from), expected: expected_dir, expected_steps, declare, statement, evidence: evidence_dir, trace_marker, parms: step_parms, instream, coverage: coverage_file, statement_limit });
+        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, user, flags, clock, replay: replay.map(std::path::PathBuf::from), expected: expected_dir, expected_steps, declare, statement, evidence: evidence_dir, trace_marker, parms: step_parms, instream, coverage: coverage_file, statement_limit, time_limit, storage_limit });
     }
     if datasets.is_some() || !proclibs.is_empty() || user.is_some() {
         return usage_error("--datasets, --proclib and --user are for job");
@@ -1041,6 +1074,8 @@ fn driver() -> ExitCode {
             trace_input,
             statement_limit,
             environment: environment.clone(),
+            time_limit,
+            storage_limit,
             ..Default::default()
         };
         let evidence = evidence_dir.map(|dir| module::Evidence { dir, marker: trace_marker, statements: listed.unwrap_or_default(), input: trace_input });
@@ -1100,6 +1135,8 @@ fn driver() -> ExitCode {
         trace_statements: statement_filter(listed.as_ref(), coverage_file.is_some()),
         trace_input,
         statement_limit,
+        time_limit,
+        storage_limit,
         program_ids: None,
         screen: Some(screen.clone()),
         environment: environment.clone(),
