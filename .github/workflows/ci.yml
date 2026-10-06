@@ -95,9 +95,9 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
       - name: Test
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
       - name: Test the TLS build
-        run: cargo test --locked --manifest-path tls/Cargo.toml
+        run: cargo test --locked --no-fail-fast --manifest-path tls/Cargo.toml
 
   msrv:
     name: build on the minimum Rust, 1.95

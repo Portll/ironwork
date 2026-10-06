@@ -468,9 +468,13 @@ mod tests {
         assert!(!dir.join("ESCAPE").exists() && !kept.join("ESCAPE").exists());
         let report = fs::read_to_string(kept.join("report.txt")).unwrap();
         let input = super::super::resolved(&kept.join("input"));
+        let at = |name: &str| input.join(name).display().to_string();
         let expected = format!(
-            "run /src/P.cbl --clock 2026-01-01T00:00:00 --dd INFILE={0}/INFILE --dd OUTFILE={0}/OUTFILE --dd ../ESCAPE={0}/dd.2 --dd SYSIN={0}/SYSIN --statement-limit 500 --vm",
-            input.display()
+            "run /src/P.cbl --clock 2026-01-01T00:00:00 --dd INFILE={} --dd OUTFILE={} --dd ../ESCAPE={} --dd SYSIN={} --statement-limit 500 --vm",
+            at("INFILE"),
+            at("OUTFILE"),
+            at("dd.2"),
+            at("SYSIN")
         );
         assert!(report.contains(&expected), "{report}");
         assert!(report.starts_with("interpreter: exit status 0\nvm: exit status 0\nstandard output differs\n"), "{report}");
