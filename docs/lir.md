@@ -1223,7 +1223,7 @@ unit.rs:150-171 (f2)), except under `--dialect gnucobol`, where it enters the on
 - **RETURNING** is located after the callee returns and receives its RETURNING item's value by
   MOVE rules chosen from the value's kind, or the service's result; not after STOP RUN.
 - **LE services** run only after the program search fails, as assumption L1
-  `LE_SERVICE_AFTER_PROGRAMS` (int) records. `LeService` is an enum of the services
+  `LE_SERVICE_AFTER_PROGRAMS` (int) records, or before it under `--le-services bind`. `LeService` is an enum of the services
   `rt::le::call` runs, over an `LeHost` that gives it the run unit, the code page and a loaded
   method's name for CEE3DMP; arguments are addresses, as for a program (`rt::callee::addresses`).
   ON EXCEPTION never runs for a service. A `Dynamic` target's name is matched with a service when
@@ -2326,6 +2326,9 @@ what that needs, found by name once at lowering:
 pub struct Scope {
     /// The PROGRAM-IDs of the programs containing this one, innermost first.
     pub containers: Vec<SymId>,
+    /// The contained programs IBM's scope rules let this one CALL, and the compilation's other
+    /// contained programs and this one's containers, which it may not.
+    pub callable: Vec<SymId>, pub hidden: Vec<SymId>,
     /// Each LINKAGE record whose storage the run unit or a containing program holds, in ordinal order.
     pub records: Vec<(u16, Binding)>,
     /// Each file whose connector is not its own; each file whose record area is a bound record's.
@@ -2355,6 +2358,9 @@ pub enum GlobalAt { Program(u32), Local(u32), Linkage(u16) }
   `containers`: the caller and the caller's own containers, matched by PROGRAM-ID, each as it was
   when control left it (its slab, its LOCAL-STORAGE and a copy of its LINKAGE addresses), as
   `containers_of` does. LINK, XCTL and the run's first program have none.
+- **Program scope.** Under `--program-scope strict` a CALL of a name in `hidden`, or one that
+  loads a contained program whose name is not in `callable`, is not found (load-module.md §8.3,
+  assumption C470). `flexible` reads neither list.
 - **What a containing program gives.** Each GLOBAL record and file it declares is in `globals`
   where `global_address` finds it: the first root item of its name in WORKING-STORAGE or
   LOCAL-STORAGE (an offset), the first LINKAGE record of its name (the address the container's

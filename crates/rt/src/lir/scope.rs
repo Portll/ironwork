@@ -10,6 +10,10 @@ use crate::{codec_enum, codec_struct};
 pub struct Scope {
     /// The PROGRAM-IDs of the programs containing this one, innermost first.
     pub containers: Vec<SymId>,
+    /// The contained programs of its compilation a CALL from it reaches, and those it does not
+    /// (`syntax::ast::Program::callable` and `hidden`).
+    pub callable: Vec<SymId>,
+    pub hidden: Vec<SymId>,
     /// Each LINKAGE record whose storage the run unit or a containing program holds, by ordinal,
     /// in ordinal order.
     pub records: Vec<(u16, Binding)>,
@@ -72,7 +76,7 @@ pub enum GlobalAt {
     Linkage(u16),
 }
 
-codec_struct!(Scope { containers, records, files, areas, globals, global_files, global_modes });
+codec_struct!(Scope { containers, callable, hidden, records, files, areas, globals, global_files, global_modes });
 codec_enum!(Binding { External { name, size } = 0, ExternalFile(file) = 1, Global { program, section, name } = 2 });
 codec_enum!(Section { WorkingStorage = 0, LocalStorage = 1, Linkage = 2, File = 3 });
 codec_struct!(SharedFile { file, external, declared_in });

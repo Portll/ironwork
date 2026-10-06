@@ -1386,6 +1386,12 @@ impl<'a> Printer<'a> {
         for &c in &s.containers {
             writeln!(f, "scope container {}", self.name(c))?;
         }
+        for &c in &s.callable {
+            writeln!(f, "scope callable {}", self.name(c))?;
+        }
+        for &c in &s.hidden {
+            writeln!(f, "scope hidden {}", self.name(c))?;
+        }
         for (record, binding) in &s.records {
             let binding = match binding {
                 Binding::External { name, size } => format!("external {} size {size}", self.name(*name)),

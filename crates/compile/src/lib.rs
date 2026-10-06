@@ -208,6 +208,9 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         program.initial |= options.initial;
     }
     scope::rules(&program, &mut errors);
+    if whole {
+        program_names(&program, &options, &mut errors);
+    }
     let inherited = scope::inherit(&mut program);
     let own_linkage = scope::own_linkage(&program);
     let linkage: Vec<DataEntry> = program.linkage.iter().chain(&inherited.entries).cloned().collect();
@@ -543,6 +546,38 @@ fn procedure_rules(program: &Program, layout: &Layout, entries: &[EntryPoint], o
                     _ => {}
                 }
             }
+        }
+    }
+}
+
+/// Enterprise COBOL's rules for the programs of a compilation (Language Reference, Conventions for
+/// program-names): under strict scope two of them may not share a name, and under
+/// `--unresolved-calls=fail` a static CALL must name one of them that it reaches, or a Language
+/// Environment service, as IBM's binder must resolve it.
+fn program_names(program: &Program, options: &Options, errors: &mut Vec<Error>) {
+    let strict = options.program_scope == numeric::ProgramScope::Strict;
+    if strict {
+        for (name, pos) in &program.duplicates {
+            let text = format!("{name}: two programs of {} have this name, and the programs of a separately compiled program each need their own (--program-scope=flexible allows it)", program.id);
+            errors.push(syntax::messages::IWC0295.at(*pos, text));
+        }
+    }
+    if options.unresolved_calls != numeric::UnresolvedCalls::Fail || options.dynam {
+        return;
+    }
+    let reached = |name: &str| {
+        let contained = program.callable.iter().chain(program.hidden.iter().filter(|_| !strict));
+        program.linked.iter().chain(contained).any(|n| n.eq_ignore_ascii_case(name)) || rt::le::provides(&name.to_ascii_uppercase())
+    };
+    let mut all = Vec::new();
+    program.paragraphs.iter().for_each(|p| inner_statements(&p.statements, &mut all));
+    for s in all {
+        if let Stmt::Call(c) = s
+            && let Operand::Literal(Literal::Alnum(name)) = &c.target
+            && !reached(name.trim_end())
+        {
+            let text = format!("CALL '{}': no program of the compilation has this name, and --unresolved-calls=fail refuses a static CALL the binder could not resolve", name.trim_end());
+            errors.push(syntax::messages::IWC0296.at(c.pos, text));
         }
     }
 }

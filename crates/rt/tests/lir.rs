@@ -19,7 +19,7 @@ use ironwork_rt::storage::Kind;
 use ironwork_rt::vocab::{AcceptFrom, BinOp, Figurative, InspectMode, OpenMode, Pos, RelOp, SignClause, SignPosition};
 use numeric::precision::{Fixed, Places};
 use numeric::options::{Compile, Compliance, FastsrtAdvPrint, Invdata, Stop, Warnings};
-use numeric::{Arith, Assumed, BinCheck, CicsReturnWarning, Currency, Dialect, DispSign, Initcheck, IntDate, Nsymbol, Numcheck, Numproc, Options, Parmcheck, Qualify, Quote, SortKeys, Trunc, TruncCheck, Vlr, VsamOpenFs, ZonCheck};
+use numeric::{Arith, Assumed, BinCheck, CicsReturnWarning, Currency, Dialect, DispSign, Initcheck, IntDate, LeServices, Nsymbol, Numcheck, Numproc, Options, Parmcheck, ProgramScope, Qualify, Quote, SortKeys, Trunc, TruncCheck, UnresolvedCalls, Vlr, VsamOpenFs, ZonCheck};
 use zarch::check::ProgramCheck;
 use zarch::hfp::Precision;
 use zarch::wide::U256;
@@ -175,6 +175,9 @@ fn options_round_trip_with_every_field_off_its_default() {
         optimize: 2,
         compliance: Compliance::Extended,
         dialect: Dialect::Gnucobol,
+        program_scope: ProgramScope::Flexible,
+        unresolved_calls: UnresolvedCalls::Fail,
+        le_services: LeServices::Bind,
         // The OPTIONS section carries it after the programs' records, not in Options' encoding.
         assumed: Assumed::default(),
     };
@@ -235,7 +238,7 @@ fn kinds_and_options_have_load_module_s_bytes() {
         encoded(&options).0,
         [
             0x01, 0x01, 0x00, 0xF4, 0x08, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
         ]
     );
     let (bytes, strings) = encoded(&(7u8, Options { codepage: 999, ..options }));
@@ -410,6 +413,8 @@ fn program_shape_round_trips() {
 fn scope() -> Scope {
     Scope {
         containers: vec![4, 5],
+        callable: vec![9, 10],
+        hidden: vec![11],
         records: vec![(1, Binding::External { name: 2, size: 40 }), (2, Binding::ExternalFile(0)), (3, Binding::Global { program: 4, section: Section::File, name: 6 })],
         files: vec![SharedFile { file: 0, external: true, declared_in: None }, SharedFile { file: 1, external: false, declared_in: Some(4) }],
         areas: vec![(0, 2), (1, 3)],

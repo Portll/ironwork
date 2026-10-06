@@ -315,6 +315,51 @@ fn cancel_acts_only_on_a_contained_program_a_dynamic_call_entered() {
     assert_eq!(run_unit(&source, vec![], "").0, "1\n2\n3\n1\n");
 }
 
+/// The messages compiling `source`'s first program under `flags` gives, one to a line.
+fn compiled_with(source: &str, flags: &[&str]) -> String {
+    let flags: Vec<String> = flags.iter().map(|f| f.to_string()).collect();
+    let messages = compile(syntax::parse(source).unwrap(), &flags).map_or_else(|errors| errors, |c| c.diagnostics);
+    messages.iter().map(syntax::Error::labelled).collect::<Vec<_>>().join("\n")
+}
+
+#[test]
+fn programs_of_one_compilation_share_a_name_only_under_the_flexible_scope() {
+    let nested = |id: &str| format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. {id}.\n       PROCEDURE DIVISION.\n{}", line("GOBACK."));
+    let source = [nested("OUTER"), nested("LEFT"), nested("TWIN"), "       END PROGRAM TWIN.\n       END PROGRAM LEFT.\n".into(), nested("TWIN"), "       END PROGRAM TWIN.\n       END PROGRAM OUTER.\n".into()].concat();
+    let message = "TWIN: two programs of OUTER have this name, and the programs of a separately compiled program each need their own (--program-scope=flexible allows it)";
+    assert_eq!(compiled_with(&source, &[]), format!("IWC0295-S {message}"));
+    assert_eq!(compiled_with(&source, &["--program-scope=flexible"]), "");
+}
+
+#[test]
+fn a_static_call_naming_no_program_of_the_compilation_is_refused_only_under_unresolved_calls_fail() {
+    let data = "       01  WS-NAME PIC X(8) VALUE 'MISSING'.\n       01  HOURS PIC S9(9) BINARY.\n       01  MINUTES PIC S9(9) BINARY.\n       01  SECONDS COMP-2.\n       01  FC PIC X(12).\n";
+    let calls = ["CALL 'MISSING'", "CALL 'SUB'", "CALL 'SUBENTRY'", "CALL WS-NAME", "CALL 'CEEGMTO' USING HOURS MINUTES SECONDS FC", "GOBACK."].map(line).concat();
+    let sub = format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. SUB.\n       PROCEDURE DIVISION.\n{}{}", line("ENTRY 'SUBENTRY'."), line("GOBACK."));
+    let source = |card: &str| format!("{}       END PROGRAM T.\n{sub}", program(card, data, &calls));
+    assert_eq!(compiled_with(&source(""), &[]), "");
+    let refused = "IWC0296-S CALL 'MISSING': no program of the compilation has this name, and --unresolved-calls=fail refuses a static CALL the binder could not resolve";
+    assert_eq!(compiled_with(&source(""), &["--unresolved-calls=fail"]), refused);
+    assert_eq!(compiled_with(&source("DYNAM"), &["--unresolved-calls=fail"]), "", "under DYNAM a literal is called dynamically");
+}
+
+#[test]
+fn a_call_of_a_language_environment_service_reaches_a_program_of_its_name_unless_the_services_are_bound() {
+    let data = "       01  HOURS PIC S9(9) BINARY VALUE 99.\n       01  MINUTES PIC S9(9) BINARY.\n       01  SECONDS COMP-2.\n       01  FC PIC X(12).\n";
+    let calls = ["CALL 'CEEGMTO' USING HOURS MINUTES SECONDS FC", "IF HOURS = 99 DISPLAY 'UNSET' ELSE DISPLAY 'SET' END-IF", "GOBACK."].map(line).concat();
+    let own = [
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. CEEGMTO.\n       DATA DIVISION.\n       LINKAGE SECTION.\n",
+        "       01  H PIC S9(9) BINARY.\n       01  M PIC S9(9) BINARY.\n       01  S COMP-2.\n       01  F PIC X(12).\n",
+        "       PROCEDURE DIVISION USING H M S F.\n",
+        &line("DISPLAY 'MINE'"),
+        &line("GOBACK."),
+    ]
+    .concat();
+    let source = format!("{}       END PROGRAM T.\n{own}", program("", data, &calls));
+    assert_eq!(run_with(&source, &[]).0, "MINE\nUNSET\n");
+    assert_eq!(run_with(&source, &["--le-services=bind"]).0, "SET\n");
+}
+
 #[test]
 fn thread_forces_noinitial_on_the_programs_it_compiles() {
     let source = two_programs(

@@ -10,7 +10,7 @@ pub(crate) use rt::storage::literal_fixed;
 use crate::unit::{ADDRESS_BASE, Event, LoadError, OS_COMMAND_ROUTINES, RETURN_CODE, RunUnit};
 use crate::Compiled;
 use numeric::precision::{Dmax, Fixed, Places};
-use numeric::{Options, Switched, Trunc};
+use numeric::{LeServices, Options, ProgramScope, Switched, Trunc};
 use rt::fixed::{align, places_of};
 use rt::arith;
 use rt::callee::{self, Bindings, By, Callee};
@@ -994,7 +994,23 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         {
             self.sink("os-command", pos, &text);
         }
-        let (index, entry) = match self.unit.load_entry(&name, rt::callee::entry_copy(dynamic, self.options.dialect_of(Switched::EntryCalls))) {
+        if self.options.le_services == LeServices::Bind && crate::le::provides(&name) {
+            return self.le_call(c, &name);
+        }
+        let strict = self.options.program_scope == ProgramScope::Strict;
+        let found = if strict && callee::names(self.program.hidden.iter().map(String::as_str), &name) {
+            Err(LoadError::NotFound)
+        } else {
+            self.unit.load_entry(&name, rt::callee::entry_copy(dynamic, self.options.dialect_of(Switched::EntryCalls)))
+        };
+        let found = found.and_then(|(index, entry)| {
+            let contained = self.unit.programs[index].compiled.as_deref().is_some_and(|t| !t.program.containers.is_empty());
+            match strict && contained && !callee::names(self.program.callable.iter().map(String::as_str), &name) {
+                true => Err(LoadError::NotFound),
+                false => Ok((index, entry)),
+            }
+        });
+        let (index, entry) = match found {
             Ok(i) => i,
             Err(LoadError::NotFound) if crate::le::provides(&name) => return self.le_call(c, &name),
             Err(LoadError::NotFound) => {

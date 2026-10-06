@@ -19,8 +19,8 @@ The PyPI and npm packages carry builds for Linux (static, x64 and arm64), macOS 
 Windows (x64). The same builds are attached to each [release](https://github.com/Portll/ironwork/releases).
 From a checkout:
 
-    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never] [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
-    cargo run -p ironwork -- check program.cbl [-warnings-block] [--cics-return-warning=once|always|never] [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [-I copylib]...
+    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never] [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
+    cargo run -p ironwork -- check program.cbl [-warnings-block] [--cics-return-warning=once|always|never] [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind] [-I copylib]...
     cargo run -p ironwork -- compile program.cbl... [-o dir] [--bundle NAME] [--source-prefix DIR] [run's compile flags] [-I copylib]...
     cargo run -p ironwork -- dump [--section NAME]... [--strings] [--no-check] program.iwm
     cargo run -p ironwork -- run program.iwm [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--coverage FILE] [--evidence DIR]
@@ -338,6 +338,18 @@ operation. It is repeatable, an assumption with no alternative is refused by nam
 kept in the load module, the provenance statement and the journal. [docs/dialect.md](docs/dialect.md)
 lists these and every other difference found from cobc, which the dialect leaves alone: the
 platform, what IBM documents and cobc does differently, and bugs.
+
+A CALL reaches programs by Enterprise COBOL's scope rules (Language Reference, Conventions for
+program-names): a contained program only from the program directly containing it, or, when it is
+COMMON, from any program that program contains but itself and those it contains. Two programs of
+one separately compiled program sharing a name are refused (IWC0295). A CALL of a name only a
+program out of scope has ends as a CALL of a missing program does (C470). `--program-scope
+flexible` reaches every program of the run by its name and allows the duplicate.
+`--unresolved-calls fail` refuses a static CALL naming no program of the compilation, of its
+`--bundle` or of the Language Environment's services (IWC0296), as IBM's binder does; the default
+`run` looks the program up when the CALL runs. `--le-services bind` has a CALL of a service's name
+reach the service even where the run has a program of that name, which the default `programs`
+reaches first (L1). Each choice is kept in the load module.
 
 Messages go to standard error, one to a line: errors first, then warnings, then informational
 messages, each in the order ironwork found them.

@@ -70,10 +70,11 @@ pub fn run(r: Request) -> ExitCode {
         }
     };
     let mut status = 0u8;
+    let bundled = if r.bundle.is_some() { bundled_programs(&r) } else { Vec::new() };
     let lowered: Vec<Option<Lowered>> = r
         .sources
         .iter()
-        .map(|source| match lower_source(source, &r, at) {
+        .map(|source| match lower_source(source, &r, at, &bundled) {
             Ok((l, code)) => {
                 status = status.max(code);
                 Some(l)
@@ -141,7 +142,13 @@ fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 /// Compiles and lowers every program of one source. Messages go to standard error; the error is
 /// the return code that stops the module.
-fn lower_source(source: &Path, r: &Request, at: exec::lir::CompileTime) -> Result<(Lowered, u8), u8> {
+/// The PROGRAM-IDs of every source of a bundle, which a static CALL in any of them resolves to.
+fn bundled_programs(r: &Request) -> Vec<String> {
+    let compliance = numeric::Compliance::of(&r.flags);
+    r.sources.iter().filter_map(|s| fs::read(s).ok()).flat_map(|bytes| syntax::program_ids(&syntax::copy::decode(&bytes), compliance)).collect()
+}
+
+fn lower_source(source: &Path, r: &Request, at: exec::lir::CompileTime, bundled: &[String]) -> Result<(Lowered, u8), u8> {
     let shown = source.display().to_string();
     let text = match fs::read(source) {
         Ok(bytes) if bytes.starts_with(&exec::module::MAGIC[..4]) => {
@@ -167,7 +174,8 @@ fn lower_source(source: &Path, r: &Request, at: exec::lir::CompileTime) -> Resul
     let mut lowered = Lowered { programs: Vec::new(), directory: Vec::new(), files: Vec::new(), mapsets: Vec::new() };
     let mut read = None;
     let mut named = BTreeSet::new();
-    for (ast, parent) in parsed.into_iter().zip(parents) {
+    for (mut ast, parent) in parsed.into_iter().zip(parents) {
+        ast.linked.extend(bundled.iter().cloned());
         let id = ast.id.clone();
         let params: Vec<bool> = ast.using.iter().map(|p| p.by_value).collect();
         let returning = ast.returning.is_some();

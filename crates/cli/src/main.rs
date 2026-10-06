@@ -11,6 +11,7 @@ usage:
                [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT | --argument path|OMITTED...]
                [--exit-code] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
+               [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
                                                        compile and run; CBL and PROCESS cards set the options
   ironwork run <module.iwm> [-L <dir>]... [-I <dir>]... [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
                [--statement-limit N] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
@@ -19,6 +20,7 @@ usage:
                                                        it was compiled with
   ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]...
                [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
+               [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
                                                        compile only
   ironwork cics <program.cbl> [run flags] [--vm] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
                [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]... [--td QUEUE=path]...
@@ -33,6 +35,7 @@ usage:
                [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never]
                [--optimize=0|1|2] [--diagnostics text|json]
                [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [-I <dir>]... [-L <dir>]...
+               [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
                                                        compile and lower each source's programs to a load module
   ironwork dump [--section NAME]... [--strings] [--no-check] <module.iwm>
                                                        print a load module, one fact per line
@@ -43,6 +46,7 @@ usage:
                [--root DIR] [--clock <time>]
                [-I <dir>]... [-L <dir>]... [-silent] [-strict-sort-keys] [-debug] [--optimize=0|1|2]
                [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]...
+               [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
                [--datasets DIR] [--proclib DIR]... [--user ID]
                                                        run a batch program, or with --job a job, on generated input
                                                        and keep each abend; with --differential, each input on
@@ -108,6 +112,19 @@ flags:
              and C262 each take ibm or gnucobol, and C101 also off, its extra ROUNDED place counted
              in no operation. Repeatable, the last for an ID winning; an assumption with no
              alternative is refused by name. docs/dialect.md lists each. --assume=ID=VALUE works too
+  --program-scope strict|flexible
+             which contained programs a CALL reaches: strict (the default) keeps Enterprise COBOL's
+             scope rules, a nested program reached only from the program containing it unless it is
+             COMMON, and refuses two programs of one compilation sharing a name (IWC0295); flexible
+             reaches any program by its name. --program-scope=flexible works too
+  --unresolved-calls run|fail
+             a static CALL naming no program of its compilation, or of its --bundle, nor a Language
+             Environment service: run (the default) compiles it as a CALL found when it runs; fail
+             refuses it (IWC0296), as IBM's binder does. --unresolved-calls=fail works too
+  --le-services programs|bind
+             a CALL of a Language Environment service's name: programs (the default) reaches a
+             program of that name when the run has one (assumption L1); bind always reaches the
+             service. --le-services=bind works too
   --vm       run and cics: lower the program and run it on the VM rather than the interpreter. A
              program lowering refuses exits 242; a run that reaches what the VM does not run yet (a
              CALLed program, user-defined function, method or LINK that does not lower, FUNCTION
@@ -461,6 +478,20 @@ fn statement_filter(listed: Option<&std::collections::BTreeSet<(String, u32)>>, 
     listed.map(|l| exec::unit::StatementFilter::Lines(l.iter().map(|(_, line)| *line).collect()))
 }
 
+/// `--program-scope`, `--unresolved-calls` or `--le-services` with `value`, as the compile flag it
+/// gives, or None for a value it does not take.
+fn call_flag(name: &str, value: &str) -> Option<String> {
+    call_choices(name).split(" or ").any(|c| c == value).then(|| format!("{name}={value}"))
+}
+
+fn call_choices(name: &str) -> &'static str {
+    match name {
+        "--program-scope" => "strict or flexible",
+        "--unresolved-calls" => "run or fail",
+        _ => "programs or bind",
+    }
+}
+
 fn usage_error(message: &str) -> ExitCode {
     eprintln!("ironwork: {message}\n{USAGE}");
     exit::status(Outcome::Usage)
@@ -744,6 +775,17 @@ fn driver() -> ExitCode {
                 Ok(_) => flags.push(a),
                 Err(why) => refuse!(why),
             },
+            "--program-scope" | "--unresolved-calls" | "--le-services" => match args.next().and_then(|v| call_flag(&a, &v)) {
+                Some(flag) => flags.push(flag),
+                None => refuse!(format!("{a} needs {}", call_choices(&a))),
+            },
+            f if f.starts_with("--program-scope=") || f.starts_with("--unresolved-calls=") || f.starts_with("--le-services=") => {
+                let (name, value) = f.split_once('=').unwrap_or((f, ""));
+                match call_flag(name, value) {
+                    Some(flag) => flags.push(flag),
+                    None => refuse!(format!("{name} needs {}", call_choices(name))),
+                }
+            }
             f if f.starts_with("--optimize") => match f {
                 "--optimize=0" | "--optimize=1" | "--optimize=2" => flags.push(a),
                 _ => refuse!("--optimize needs =0, =1 or =2"),

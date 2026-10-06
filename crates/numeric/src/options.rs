@@ -511,6 +511,35 @@ impl Compliance {
     }
 }
 
+/// Which contained programs a CALL reaches: Enterprise COBOL's scope rules (`Strict`, Language
+/// Reference, Conventions for program-names), or any program of the run unit by its name
+/// (`Flexible`, `--program-scope=flexible`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ProgramScope {
+    #[default]
+    Strict,
+    Flexible,
+}
+
+/// What a static CALL of a name no program of its compilation has does: compiles as a CALL found
+/// when it runs (`Run`), or is refused when compiled (`Fail`, `--unresolved-calls=fail`), as
+/// IBM's binder refuses a reference it cannot resolve.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UnresolvedCalls {
+    #[default]
+    Run,
+    Fail,
+}
+
+/// Whether a CALL of a Language Environment service's name finds a program of that name first
+/// (`Programs`, assumption L1), or always the service (`Bind`, `--le-services=bind`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LeServices {
+    #[default]
+    Programs,
+    Bind,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Options {
     pub arith: Arith,
@@ -564,6 +593,9 @@ pub struct Options {
     pub optimize: u8,
     pub compliance: Compliance,
     pub dialect: Dialect,
+    pub program_scope: ProgramScope,
+    pub unresolved_calls: UnresolvedCalls,
+    pub le_services: LeServices,
     pub assumed: Assumed,
 }
 
@@ -605,6 +637,9 @@ impl Default for Options {
             optimize: 0,
             compliance: Compliance::default(),
             dialect: Dialect::default(),
+            program_scope: ProgramScope::default(),
+            unresolved_calls: UnresolvedCalls::default(),
+            le_services: LeServices::default(),
             assumed: Assumed::default(),
         }
     }
@@ -971,6 +1006,12 @@ impl Options {
                 Some(d) => self.dialect = d,
                 None => return Err(OptionError::UnknownFlag(flag.to_owned())),
             },
+            "--program-scope=strict" => self.program_scope = ProgramScope::Strict,
+            "--program-scope=flexible" => self.program_scope = ProgramScope::Flexible,
+            "--unresolved-calls=run" => self.unresolved_calls = UnresolvedCalls::Run,
+            "--unresolved-calls=fail" => self.unresolved_calls = UnresolvedCalls::Fail,
+            "--le-services=programs" => self.le_services = LeServices::Programs,
+            "--le-services=bind" => self.le_services = LeServices::Bind,
             f if f.starts_with("--assume=") => match Assumed::parse(&f["--assume=".len()..]) {
                 Ok((i, mark)) => self.assumed.given[i] = mark,
                 Err(_) => return Err(OptionError::UnknownFlag(flag.to_owned())),

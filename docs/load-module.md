@@ -274,7 +274,8 @@ Every field and element must itself be encodable (§4.1 to §4.4).
     codec_struct!(Options { arith, trunc, numproc, codepage, trunc_check, fastsrt, fastsrt_adv_print,
         sort_keys, adv, thread, dll, rent, dbcs, warnings, compile, dynam, debug, cics_return_warning,
         invdata, zwb, quote, currency, nsymbol, dispsign, intdate, qualify, initial, vlr, vsamopenfs,
-        numcheck, parmcheck, initcheck, optimize, compliance, dialect } default { assumed } check options_valid);
+        numcheck, parmcheck, initcheck, optimize, compliance, dialect, program_scope, unresolved_calls,
+        le_services } default { assumed } check options_valid);
     codec_enum!(Arith { Compat = 0, Extend = 1 });
     codec_enum!(Kind {
         Group = 0,
@@ -328,9 +329,12 @@ tests, and the debug positions (§9).
 | `optimize` | 0 as LEB128 | `00` |
 | `compliance` | `Strict`, tag 0 | `00` |
 | `dialect` | `Ibm`, tag 0 | `00` |
+| `program_scope` | `Strict`, tag 0 | `00` |
+| `unresolved_calls` | `Run`, tag 0 | `00` |
+| `le_services` | `Programs`, tag 0 | `00` |
 
-Thirty-six bytes: `01 01 00 F4 08 00 00 00 00 01 00 00 01 01 00 00 00 00 00 00 01 00 00 00 00 00 00
-00 00 00 00 00 00 00 00 00`.
+Thirty-nine bytes: `01 01 00 F4 08 00 00 00 00 01 00 00 01 01 00 00 00 00 00 00 01 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00`.
 
 ### 4.8 Bounds on decoding
 
@@ -369,7 +373,8 @@ compiler takes it from the build's SOURCE_DATE_EPOCH when set, and from the cloc
 The spellings a card or PARM may use come from IBM's option table, vendored as
 `crates/numeric/data/enterprise-options.tsv` and read by `Options::apply`. Nine fields have no IBM
 compiler option: `trunc_check`, `fastsrt_adv_print`, `sort_keys`, `warnings`, `debug`,
-`cics_return_warning`, `compliance`, `dialect` and `assumed` are set by this compiler's own flags.
+`cics_return_warning`, `compliance`, `dialect`, `program_scope`, `unresolved_calls`, `le_services`
+and `assumed` are set by this compiler's own flags.
 The table lists the fields `Options`' encoding holds, which `assumed` is not.
 
 `assumed`, an `Assumed`, is the values `--assume ID=VALUE` gave ([dialect.md](dialect.md)): `given`,
@@ -419,13 +424,16 @@ a byte past its switch's list.
 | `optimize` | `u8` | LEB128, 0 to 2. The `check` function refuses any other level. Under NOINVDATA a level above 0 compares some zoned items by their bytes (assumption C262) | `OPTIMIZE(0\|1\|2)`, `OPT(n)`; `NOOPTIMIZE` as 0, and `OPTIMIZE`, `OPTIMIZE(STD)` and `OPTIMIZE(FULL)` as 2 (Programming Guide SC27-8714-03, Table 51, p. 395) |
 | `compliance` | `Compliance` | tag: `Strict` 0, `Extended` 1. Whether the compile accepted the other dialects' extensions docs/compliance.md lists; the program's LIR already holds what they meant | `--compliance strict\|extended` |
 | `dialect` | `Dialect` | tag: `Ibm` 0, `Gnucobol` 1. Whose result a computation gives where ironwork knowingly differs from GnuCOBOL's `cobc -std=ibm-strict` ([dialect.md](dialect.md)) | `--dialect ibm\|gnucobol` |
+| `program_scope` | `ProgramScope` | tag: `Strict` 0, `Flexible` 1. Whether CALL reaches a contained program only where IBM's scope rules allow and the compile refuses two programs of one name (§8.3) | `--program-scope strict\|flexible` |
+| `unresolved_calls` | `UnresolvedCalls` | tag: `Run` 0, `Fail` 1. Whether the compile refuses a static CALL naming no program of the compilation (§8.3) | `--unresolved-calls run\|fail` |
+| `le_services` | `LeServices` | tag: `Programs` 0, `Bind` 1. Whether a CALL naming a Language Environment service reaches a program of that name or the service (§8.3) | `--le-services programs\|bind` |
 
 `ADV`, `APOST`, `DBCS`, `DLL`, `INITIAL`, `INTDATE`, `NUMPROC`, `RENT`, `THREAD`, `TRUNC` and `ZWB`
 have no abbreviations. The defaults are `Compat`, `Std`, `Nopfd`, 1140, `Report`, false, `Exclude`,
 `Dfsort`, true, false, false, true, true, `Proceed`, `None` (IBM's default NOCOMPILE(S) in force),
 false, false, `Once`, `None` (NOINVDATA), true, `Quote`, `None` (NOCURRENCY), `National`, `Compat`,
 `Ansi`, `Compat`, false, `Standard`, `Compat`, `None` for NONUMCHECK, NOPARMCHECK and
-NOINITCHECK, 0, `Strict` and `Ibm`.
+NOINITCHECK, 0, `Strict`, `Ibm`, `Strict`, `Run` and `Programs`.
 
 ### 5.2 Storage and the item table
 
@@ -691,8 +699,9 @@ A CALL is resolved when it runs. The VM's `Vm::call` (rt/src/vm/call.rs) reads t
 name enters the one copy of its program, and CANCEL leaves the program as it is (§8.4). Under DYNAM,
 or naming an identifier, the CALL is dynamic. Because the modules a run has read are searched
 first, a static CALL from a module finds its callee in that module, or in the bundle it belongs to,
-before anywhere else. The directory records nesting and COMMON, and neither changes the search
-(question 5).
+before anywhere else. The directory records nesting and COMMON. Under `--program-scope strict`, the
+default, `Scope.callable` and `Scope.hidden` (lir.md §9.11) restrict the search to IBM's scope rules
+(question 5); `--program-scope flexible` searches by name alone.
 
 | CALL | Compile option | Resolved | By |
 |---|---|---|---|
@@ -701,14 +710,21 @@ before anywhere else. The directory records nesting and COMMON, and neither chan
 | `CALL ID` (identifier) | either | Run time | `RunUnit::load_entry`, then the loader (§8.2) |
 
 - **No compile-time resolution.** A NODYNAM literal is not resolved to a program ordinal at
-  compile time, so `-L` does not change what `ironwork compile` writes. If it were, a literal naming
-  no program of the module would compile as a call by name with a warning, where IBM fails at link
-  time; a module cannot link (question 4).
-- **IBM's scope rule** would resolve a static CALL from *P* to `X` among the programs directly
-  contained in *P*, then, walking outward, among those contained in each enclosing program where a
-  match counts only if it is COMMON, and finally among the module's top-level programs; a nested
-  program that is not COMMON would be unreachable from outside its container and by dynamic CALL.
-  That changes what runs today, so it is question 5.
+  compile time, so `-L` does not change what `ironwork compile` writes. A literal naming no program
+  of the compilation, of its bundle or of the Language Environment's services compiles as a run-time
+  CALL; `--unresolved-calls fail` refuses it (IWC0296), as IBM's binder refuses an unresolved
+  reference, unless the program is compiled DYNAM (question 4).
+- **IBM's scope rule.** A CALL from *P*, static or dynamic, reaches a program contained in the
+  compilation only if *P* directly contains it, or if it is COMMON and directly contained in a
+  program that contains *P*, *P* being neither it nor contained in it (Language Reference,
+  Conventions for program-names). `callable` lists those names for *P*, and `hidden` the names of
+  the compilation's other contained programs and of *P*'s containers. A CALL of a `hidden` name, or
+  one that loads a contained program not in `callable`, is `LoadError::NotFound` (§8.4). IBM calls
+  the separately compiled program of that name; a run unit holds one program per name (assumption
+  C470). Two programs of one separately compiled program sharing a name are refused (IWC0295).
+- **LE services.** A CALL of a Language Environment service's name reaches a program of that name
+  when the run has one, and the service otherwise (assumption L1); `--le-services bind` reaches the
+  service first, as a link-edit that resolves the name from SCEELKED does.
 - **A bundle.** `ironwork compile A.cbl B.cbl -o out/ --bundle x` reads several sources into one
   module with one directory, and a CALL from one of its programs finds the others there first.
   Debug file names keep each program's source (§9).
@@ -849,7 +865,7 @@ scenarios that wait for question 5 do not run yet.
   decoded **then** it equals the original, **and** a value with a NaN encodes as the canonical NaN.
 - **Given** `Options` with `arith: Extend`, `trunc: Opt` and every other field at its default
   **then** it encodes as `01 01 00 F4 08 00 00 00 00 01 00 00 01 01 00 00 00 00 00 00 01 00 00 00 00
-  00 00 00 00 00 00 00 00`.
+  00 00 00 00 00 00 00 00 00 00 00 00 00 00`.
 - **Given** an OCCURS DEPENDING ON table **when** the module loads **then** the item holds the
   object's item index, **and** the module contains no `Ref`.
 
@@ -997,17 +1013,14 @@ scenarios that wait for question 5 do not run yet.
    in-tree), so a shop can check that a module is the one it built?
 3. **Stripping.** Should a `--strip-debug` module exist for size, with abends naming only the
    program and instruction? Invariant 3 forbids it as stated.
-4. **Unresolved static CALL.** A NODYNAM literal naming no program of the module compiles as a
-   run-time call, with a warning, where IBM fails at link time. Should compiling fail instead,
-   unless the caller passes `--allow-unresolved`? And where the name is an LE service, should a
-   static CALL bind the service at compile time, or still let a program of that name found at run
-   time win, as assumption L1 `LE_SERVICE_AFTER_PROGRAMS` (int) records?
-5. **Program scope.** Adopt IBM's rules, each a change from today: a nested program that is not
-   COMMON reachable only from its container and never by dynamic CALL (`dynamic` false), static
-   CALL resolved by the scope rule of §8.3, and a duplicate `id` a compile error? If so, how far
-   does COMMON reach: siblings of its container only, or every program contained anywhere in its
-   container? That needs an Enterprise COBOL run, and is recorded as a V-series assumption until
-   then.
+4. **Unresolved static CALL.** Decided 2026-10-04: a NODYNAM literal naming no program of the
+   compilation compiles silently as a run-time CALL. `--unresolved-calls fail` makes it a compile
+   error (IWC0296), and `--le-services bind` has a CALL of a service's name reach the service before
+   a program of that name (§8.3).
+5. **Program scope.** Decided 2026-10-04: IBM's rules by default, `--program-scope flexible` for
+   the search by name alone. COMMON reaches what the Language Reference's Conventions for
+   program-names gives: every program its container holds, directly or not, except itself and the
+   programs it contains (§8.3).
 6. **CANCEL of a static callee, and of a nested program.** Decided 2026-10-04: as the Language
    Reference documents it. CANCEL does nothing for a program no dynamic CALL entered, a contained
    one too, and cancelling a program cancels the programs it contains (§8.4).

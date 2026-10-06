@@ -17,7 +17,7 @@ use crate::store;
 use crate::unit::{Event, LoadError, Loader, OS_COMMAND_ROUTINES, RETURN_CODE, RunUnit, UnitHost};
 use crate::virtual_printer::{self, Job};
 use crate::vocab::Pos;
-use numeric::Switched;
+use numeric::{LeServices, ProgramScope, Switched};
 use numeric::precision::{Fixed, Places};
 use std::borrow::Cow;
 use std::rc::Rc;
@@ -54,7 +54,21 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 }
             }
         }
-        let (index, entry) = match self.unit.load_entry(&name, callee::entry_copy(dynamic, self.p.options.options.dialect_of(Switched::EntryCalls))) {
+        let options = self.p.options.options;
+        if options.le_services == LeServices::Bind
+            && let Some(service) = le::service(&name)
+        {
+            return self.le_call(plan, service, &name, pos);
+        }
+        let strict = options.program_scope == ProgramScope::Strict;
+        let scope = &self.p.services.scope;
+        let (hidden, callable) = (callee::names(scope.hidden.iter().map(|&s| self.sym(s)), &name), callee::names(scope.callable.iter().map(|&s| self.sym(s)), &name));
+        let found = if strict && hidden { Err(LoadError::NotFound) } else { self.unit.load_entry(&name, callee::entry_copy(dynamic, options.dialect_of(Switched::EntryCalls))) };
+        let found = found.and_then(|(index, entry)| {
+            let contained = self.unit.programs[index].compiled.as_deref().and_then(|c| c.lowered.as_ref().ok()).is_some_and(|l| !l.program.services.scope.containers.is_empty());
+            if strict && contained && !callable { Err(LoadError::NotFound) } else { Ok((index, entry)) }
+        });
+        let (index, entry) = match found {
             Ok(found) => found,
             Err(LoadError::NotFound) => {
                 if let Some(service) = le::service(&name) {

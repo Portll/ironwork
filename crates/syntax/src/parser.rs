@@ -8,6 +8,57 @@ mod oo;
 mod report;
 mod sort;
 
+/// Each program's [`Program::callable`] and [`Program::hidden`], and each separately compiled
+/// program's [`Program::duplicates`]. `programs` holds each separately compiled program followed by
+/// the programs it contains.
+fn scope(programs: &mut [Program]) {
+    let mut linked: Vec<String> = Vec::new();
+    for p in programs.iter().filter(|p| p.containers.is_empty()) {
+        linked.push(p.id.clone());
+        let entries = p.paragraphs.iter().flat_map(|q| &q.statements).filter_map(|s| match s {
+            crate::ast::Stmt::Entry { name, .. } => Some(name.clone()),
+            _ => None,
+        });
+        linked.extend(entries);
+    }
+    for p in programs.iter_mut() {
+        p.linked.clone_from(&linked);
+    }
+    let mut start = 0;
+    while start < programs.len() {
+        let end = programs[start + 1..].iter().position(|p| p.containers.is_empty()).map_or(programs.len(), |k| start + 1 + k);
+        let group = &programs[start..end];
+        let contained: Vec<String> = group[1..].iter().map(|p| p.id.clone()).collect();
+        let common = |id: &str| group.iter().find(|p| p.id == id).is_some_and(|p| p.common);
+        let children = |id: &str| group.iter().find(|p| p.id == id).map(|p| p.nested.clone()).unwrap_or_default();
+        let scopes: Vec<(Vec<String>, Vec<String>)> = group
+            .iter()
+            .map(|p| {
+                let enclosing: Vec<&str> = p.containers.iter().map(|c| c.id.as_str()).collect();
+                let mut callable = p.nested.clone();
+                for container in &enclosing {
+                    for y in children(container) {
+                        if common(&y) && y != p.id && !enclosing.contains(&y.as_str()) && !callable.contains(&y) {
+                            callable.push(y);
+                        }
+                    }
+                }
+                let mut hidden: Vec<String> = contained.iter().filter(|c| !callable.contains(c)).cloned().collect();
+                let containers: Vec<String> = enclosing.iter().filter(|c| !hidden.iter().any(|h| h == *c)).map(|c| c.to_string()).collect();
+                hidden.extend(containers);
+                (callable, hidden)
+            })
+            .collect();
+        let mut seen = Vec::new();
+        let duplicates: Vec<(String, Pos)> = group.iter().filter_map(|p| if seen.contains(&p.id) { Some((p.id.clone(), p.pos)) } else { seen.push(p.id.clone()); None }).collect();
+        for (p, (callable, hidden)) in programs[start..end].iter_mut().zip(scopes) {
+            (p.callable, p.hidden) = (callable, hidden);
+        }
+        programs[start].duplicates = duplicates;
+        start = end;
+    }
+}
+
 /// Every program in the source, first to last, with nested programs after the one containing them,
 /// except that the first program comes ahead of the user-defined functions and prototypes before
 /// it, as the binder's ENTRY statement makes it the one a run enters (assumption C270).
@@ -22,6 +73,7 @@ pub fn parse(tokens: &[Token], options: Vec<String>, compliance: numeric::Compli
         }
         parser.program(&options, &mut programs)?;
     }
+    scope(&mut programs);
     if let Some(first) = programs.iter().position(|p| p.function.is_none()) {
         programs[..=first].rotate_right(1);
     }
@@ -427,6 +479,7 @@ impl Parser<'_> {
         }
         self.expect_word("PROGRAM-ID")?;
         self.accept(&Tok::Period);
+        let named_at = self.pos();
         let id = match self.peek() {
             Some(Tok::Alnum(s)) => {
                 let s = s.clone();
@@ -448,7 +501,7 @@ impl Parser<'_> {
         }
         let first = out.len();
         self.program_body(id, initial, recursive, options, out, false)?;
-        out[first].common = common;
+        (out[first].common, out[first].pos) = (common, named_at);
         Ok(())
     }
 

@@ -314,6 +314,8 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0290 | W | `INITCHECK: {item} may be used uninitialized: no path to this statement sets {it} (see {analysis})` |
 | IWC0291 | S | `{ALPHABET or PROGRAM COLLATING SEQUENCE and its name}: {a character the program's code page does not hold}` |
 | IWC0292 | S | `VALUE of {name}: a numeric literal, where a numeric-edited item's VALUE is an alphanumeric literal or a figurative constant written in edited form; --compliance extended edits the number into it` |
+| IWC0295 | S | `{name}: two programs of {program} have this name, and the programs of a separately compiled program each need their own (--program-scope=flexible allows it)` |
+| IWC0296 | S | `CALL '{name}': no program of the compilation has this name, and --unresolved-calls=fail refuses a static CALL the binder could not resolve` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |

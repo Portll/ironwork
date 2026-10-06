@@ -258,6 +258,13 @@ pub fn recursive_call(program: &str, unit: &str, pos: Pos) -> Abend {
     Abend { code: AbendCode::user(4038), message, pos, file: None }
 }
 
+/// Whether `names`, a program's callable or hidden contained programs, holds the program a CALL
+/// names. Under Enterprise COBOL's scope rules a CALL never looks up a hidden one, and reaches a
+/// contained program only when it is callable (Language Reference, Conventions for program-names).
+pub fn names<'a>(names: impl IntoIterator<Item = &'a str>, name: &str) -> bool {
+    names.into_iter().any(|n| n.eq_ignore_ascii_case(name))
+}
+
 /// Whether a CALL of an entry name gets a copy of the program with WORKING-STORAGE of its own: a
 /// dynamic CALL does (assumption C51), except under gnucobol, where every entry name
 /// shares the program's one copy, as cobc's do.

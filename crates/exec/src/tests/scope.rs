@@ -224,7 +224,7 @@ fn a_global_name_reaches_contained_programs_until_one_declares_it_again() {
 }
 
 #[test]
-fn a_contained_program_called_from_outside_its_container_has_no_global_storage() {
+fn a_contained_program_is_out_of_reach_from_outside_its_container_unless_the_scope_is_flexible() {
     let source = [
         nested(&["01  G GLOBAL PIC X VALUE 'G'."], &["    GOBACK."], &[], &["    DISPLAY G", "    GOBACK."], &[], &["    GOBACK."]),
         cobol(&["IDENTIFICATION DIVISION.", "PROGRAM-ID. ELSEWHERE.", "PROCEDURE DIVISION.", "    CALL 'INNER'", "    GOBACK.", "END PROGRAM ELSEWHERE."]),
@@ -232,9 +232,50 @@ fn a_contained_program_called_from_outside_its_container_has_no_global_storage()
     .concat();
     let first = source.find("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. ELSEWHERE.").unwrap();
     let reordered = format!("{}{}", &source[first..], &source[..first]);
-    let (_, _, ending) = run_unit(&reordered, Vec::new(), "");
-    let abend = ending.unwrap_err();
+    let strict = Harness::source(&reordered).run(Executor::Interpreter);
+    assert_eq!(strict.ending.map_err(|a| a.code), Err(AbendCode::ModuleNotFound));
+    let flexible = Harness::source(&reordered).flags(&["--program-scope=flexible"]).run(Executor::Interpreter);
+    let abend = flexible.ending.unwrap_err();
     assert!(abend.message.contains("INNER uses the GLOBAL names of OUTER, which contains it and is not running"), "{abend:?}");
+}
+
+/// OUTER contains LEFT, a COMMON SHARED and RIGHT; LEFT contains DEEP. Each displays its name and
+/// calls the program `calls` gives it, which ON EXCEPTION reports missing.
+fn siblings(calls: &[(&str, &str)]) -> String {
+    let call = |id: &str| calls.iter().find(|(from, _)| *from == id).map(|(_, to)| *to);
+    let program = |id: &str, common: bool| {
+        let header = if common { format!("PROGRAM-ID. {id} IS COMMON.") } else { format!("PROGRAM-ID. {id}.") };
+        let mut body = vec![format!("    DISPLAY '{id}'")];
+        if let Some(to) = call(id) {
+            body.push(format!("    CALL {to} ON EXCEPTION DISPLAY 'NO {}'", to.trim_matches('\'')));
+            body.push("    END-CALL".into());
+        }
+        body.push("    GOBACK.".into());
+        let body: Vec<&str> = body.iter().map(String::as_str).collect();
+        [cobol(&["IDENTIFICATION DIVISION.", &header, "DATA DIVISION.", "WORKING-STORAGE SECTION.", "01  WS-NAME PIC X(8) VALUE 'SHARED'.", "PROCEDURE DIVISION."]), cobol(&body)].concat()
+    };
+    [
+        program("OUTER", false),
+        program("LEFT", false),
+        program("DEEP", false),
+        cobol(&["END PROGRAM DEEP.", "END PROGRAM LEFT."]),
+        program("SHARED", true),
+        cobol(&["END PROGRAM SHARED."]),
+        program("RIGHT", false),
+        cobol(&["END PROGRAM RIGHT.", "END PROGRAM OUTER."]),
+    ]
+    .concat()
+}
+
+#[test]
+fn a_call_reaches_the_programs_its_container_holds_as_ibms_scope_rules_say() {
+    let run = |calls: &[(&str, &str)]| Harness::source(&siblings(calls)).run(Executor::Interpreter).out;
+    assert_eq!(run(&[("OUTER", "'LEFT'"), ("LEFT", "'DEEP'")]), "OUTER\nLEFT\nDEEP\n", "a program reaches those it directly contains");
+    assert_eq!(run(&[("OUTER", "'DEEP'")]), "OUTER\nNO DEEP\n", "not one its contained program contains");
+    assert_eq!(run(&[("OUTER", "'LEFT'"), ("LEFT", "'RIGHT'")]), "OUTER\nLEFT\nNO RIGHT\n", "nor a sibling that is not COMMON");
+    assert_eq!(run(&[("OUTER", "'LEFT'"), ("LEFT", "'DEEP'"), ("DEEP", "'SHARED'")]), "OUTER\nLEFT\nDEEP\nSHARED\n", "a COMMON program is reached from anywhere inside its container");
+    assert_eq!(run(&[("OUTER", "'RIGHT'"), ("RIGHT", "WS-NAME")]), "OUTER\nRIGHT\nSHARED\n", "a dynamic CALL keeps the same rules");
+    assert_eq!(run(&[("OUTER", "'SHARED'"), ("SHARED", "'OUTER'")]), "OUTER\nSHARED\nNO OUTER\n", "a COMMON program does not reach the program containing it");
 }
 
 /// OUTER, with a GLOBAL file and `declaratives`, contains READER, which reads it with `reader_declaratives`.

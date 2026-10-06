@@ -6,6 +6,8 @@ pub use oo::*;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Program {
     pub id: String,
+    /// Where its PROGRAM-ID names it.
+    pub pos: Pos,
     /// Options from CBL and PROCESS cards, in the order written.
     pub options: Vec<String>,
     /// PROGRAM-ID ... IS INITIAL, or once compiled the INITIAL option: WORKING-STORAGE starts
@@ -37,6 +39,19 @@ pub struct Program {
     pub environment: Environment,
     /// The PROGRAM-IDs of the programs it directly contains.
     pub nested: Vec<String>,
+    /// The contained programs of its compilation a CALL from it reaches (Language Reference,
+    /// Conventions for program-names): those it directly contains, and each COMMON one that a
+    /// program containing it directly contains, but itself and those that contain it.
+    pub callable: Vec<String>,
+    /// The other contained programs of its compilation, and those containing it, which a CALL from
+    /// it does not reach.
+    pub hidden: Vec<String>,
+    /// For a separately compiled program, each name two of its programs share, where the second's
+    /// PROGRAM-ID is.
+    pub duplicates: Vec<(String, Pos)>,
+    /// The names a static CALL from it finds in its compilation: its source's separately compiled
+    /// programs and their ENTRY names, and in a bundle the other sources' programs.
+    pub linked: Vec<String>,
     /// The programs that contain it, innermost first, with the names each declares GLOBAL.
     pub containers: Vec<Container>,
     /// The messages reading its source gave that did not stop the parse, in the order found.

@@ -53,7 +53,9 @@ impl Lower<'_> {
                 areas.push((file_index(k)?, *record));
             }
         }
-        let mut scope = lir::Scope { containers, records, files, areas, ..lir::Scope::default() };
+        let callable = program.callable.iter().map(|n| self.sym(n)).collect();
+        let hidden = program.hidden.iter().map(|n| self.sym(n)).collect();
+        let mut scope = lir::Scope { containers, callable, hidden, records, files, areas, ..lir::Scope::default() };
         if !program.nested.is_empty() {
             scope.globals = self.globals()?;
             let table = &self.c.declaratives;

@@ -866,7 +866,7 @@ fn verify_scope(p: &Program, range: &dyn Fn(u32, RangeKind) -> Result<(), String
     let symbol = |id: SymId| within("symbol", id as usize, p.symbols.len());
     let record = |o: u16| within("LINKAGE record", usize::from(o), p.storage.linkage.len());
     let file = |k: u16| within("file", usize::from(k), p.services.files.len());
-    scope.containers.iter().try_for_each(|&s| symbol(s))?;
+    scope.containers.iter().chain(&scope.callable).chain(&scope.hidden).try_for_each(|&s| symbol(s))?;
     let mut last = None;
     for &(o, ref binding) in &scope.records {
         record(o)?;
