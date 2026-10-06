@@ -1191,7 +1191,8 @@ unit.rs:150-171 (f2)), except under `--dialect gnucobol`, where it enters the on
 - **The op returns** `Arm(0)` after a normal return, `Arm(1)` when the program is not found and ON
   EXCEPTION is written, or `End(StopRun)`; `Next` in place of `Arm(0)` when neither ON EXCEPTION
   nor NOT ON EXCEPTION is written, so that only an op with a phrase is followed by a `Select`.
-  Without ON EXCEPTION a missing program abends S806.
+  Without ON EXCEPTION a missing program ends as `le::not_found` says (C450): CEE3501S and U4038
+  for a dynamic CALL, IRONWORK naming the binder's IEW2456E for a static one.
 - **The target.** A literal's name is `literal_value` then `program_name` done at lowering
   (machine.rs:1150-1155 (f2)): the text in the program's code page, decoded, trimmed and
   upper-cased. A literal that is not alphanumeric or hexadecimal, or that the code page cannot
@@ -1231,7 +1232,7 @@ unit.rs:150-171 (f2)), except under `--dialect gnucobol`, where it enters the on
   target (machine.rs:478-483 (f2)).
 - **SET TO ENTRY** (`SetEntry`) reads its operand as `program_name` does, tells an observer the
   dynamic-program-load of a name a data item holds, and loads the program as a CALL would,
-  dynamically for a data item or under DYNAM (C140): a name no program has abends S806 at the SET
+  dynamically for a data item or under DYNAM (C140): a name no program has ends the run at the SET as a CALL of it would (C450)
   unless an LE callable service has it. `rt::set::entry` gives the value naming the entry, the same
   each time it is named, and each receiver takes it as an address.
 - **Dynamic at run time:** loading and compiling on first CALL, RECURSIVE and INITIAL handling, the
@@ -2277,8 +2278,8 @@ pub struct FunctionDefinition { pub params: Vec<PlaceId>, pub returning: PlaceId
 same sequence when the operand is evaluated (assumption C274):
 
 1. **The definition** is loaded by `external` as a static CALL loads a program
-   (`RunUnit::load_entry`). None has the name: S806 "FUNCTION F: its definition, X, is in neither
-   the source nor the program libraries". The program found is not a definition, or is the run
+   (`RunUnit::load_entry`). None has the name: the run ends as a CALL of X would under the
+   program's DYNAM setting (`le::not_found`, C450). The program found is not a definition, or is the run
    unit's first program: IRONWORK "FUNCTION F: X is a program, not a user-defined function". A
    definition that does not lower stops the VM.
 2. **Each argument**, in order. A data item whose formal parameter is not BY VALUE is `Reference`:
@@ -2398,7 +2399,7 @@ position comes from where the walker takes it:
 |---|---|---|
 | Locating a place: S0C4, SSRANGE, bounds | The reference (machine.rs:538-590) | The place's `at` |
 | Invalid data in an operand: S0C7 | The reference (machine.rs:672) | The place's `at` |
-| Divide by zero without SIZE ERROR (S0CB), stores, IO-xx, S806, nesting depth | The statement | The op's entry |
+| Divide by zero without SIZE ERROR (S0CB), stores, IO-xx, a missing program (C450), nesting depth | The statement | The op's entry |
 | A FUNCTION's own failure | The function (machine.rs:1220) | The plan's `at` |
 | EXEC CICS, EXEC SQL, other EXEC | The EXEC block | The op's entry |
 | Invalid data in any SQL input | The first host variable (machine/sql.rs:212) | The op's entry, which holds that position |

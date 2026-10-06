@@ -82,7 +82,7 @@ fn a_prototype_lets_the_definition_follow_the_program_or_sit_in_a_program_librar
     assert_eq!((o.out, o.ending), ("[data  ]at\n".into(), Ok(Ending::Goback)));
     let o = Harness::source(&[prototype, &main].concat()).run(Executor::Interpreter);
     let abend = o.ending.unwrap_err();
-    assert_eq!((abend.code, abend.message.as_str()), (AbendCode::ModuleNotFound, "FUNCTION GETRECORD: its definition, GETREC1, is in neither the source nor the program libraries"));
+    assert_eq!((abend.code, abend.message.as_str()), (AbendCode::Ironwork, "FUNCTION GETRECORD: IEW2456E SYMBOL GETREC1 UNRESOLVED: no program library holds it, and under NODYNAM the binder's load module would not run"));
 }
 
 #[test]
@@ -158,7 +158,7 @@ fn an_abend_in_a_function_names_its_source_and_a_program_is_no_function() {
     };
     let (bad, not_one) = (run_in("BADF", "BADF"), run_in("NOTFN AS 'PROG1'", "NOTFN"));
     std::fs::remove_dir_all(&library).unwrap();
-    assert_eq!((&bad.code, bad.file.as_deref().is_some_and(|f| f.ends_with("BADF.cbl"))), (&AbendCode::ModuleNotFound, true), "{bad:?}");
+    assert_eq!((&bad.code, bad.file.as_deref().is_some_and(|f| f.ends_with("BADF.cbl"))), (&AbendCode::Ironwork, true), "{bad:?}");
     assert_eq!(not_one.message, "FUNCTION NOTFN: PROG1 is a program, not a user-defined function");
 }
 

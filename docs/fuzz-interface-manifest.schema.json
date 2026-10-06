@@ -240,7 +240,7 @@
           ],
           "properties": {
             "code": {
-              "description": "The abend code: S0C7, U4038, ASRA, S322, S806 and so on.",
+              "description": "The abend code: S0C7, U4038, ASRA, S322 and so on.",
               "type": "string"
             },
             "file": {
@@ -257,7 +257,7 @@
               "type": "string"
             },
             "optimized": {
-              "description": "Whether the same input, compiled with OPTIMIZE(2), ends in the same abend at the same file and line. True without a run for S322 and S806, which OPTIMIZE cannot change.",
+              "description": "Whether the same input, compiled with OPTIMIZE(2), ends in the same abend at the same file and line. True without a run for S322 and a CEE3501S's U4038, which OPTIMIZE cannot change.",
               "type": "boolean"
             }
           },

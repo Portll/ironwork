@@ -51,13 +51,20 @@ fn picture_terms_and_delimiters() {
 }
 
 #[test]
-fn dump_options_and_the_s806_message() {
+fn dump_options_and_a_missing_program_s_ending() {
     assert_eq!(dump_options("TRACE FILE VAR STOR"), ("CEEDUMP".to_owned(), false));
     assert_eq!(dump_options("NOTRACEBACK,FNAME(MYDUMP) BLOCKS"), ("MYDUMP".to_owned(), false));
     assert!(dump_options("TRACE BOGUS").1);
-    assert!(missing("CEEHDLR").contains("Language Environment callable service"));
-    assert!(missing("CEESDLOG").contains("Language Environment callable service"));
-    assert!(missing("CEEXYZ").contains("no such program"));
+    let pos = crate::vocab::Pos::default();
+    for service in ["CEEHDLR", "CEESDLOG"] {
+        let abend = not_found("CALL X", service, true, pos);
+        assert!(abend.code == crate::abend::AbendCode::Ironwork && abend.message.contains("Language Environment callable service"), "{abend:?}");
+    }
+    let dynamic = not_found("CALL CEEXYZ", "CEEXYZ", true, pos);
+    assert_eq!((dynamic.code.to_string(), dynamic.message.as_str()), ("U4038".to_owned(), "CEE3501S The module CEEXYZ was not found."));
+    assert_eq!(module_not_found(&dynamic.message), Some("CEEXYZ"));
+    let fixed = not_found("CALL CEEXYZ", "CEEXYZ", false, pos);
+    assert!(fixed.code == crate::abend::AbendCode::Ironwork && fixed.message.starts_with("CALL CEEXYZ: IEW2456E SYMBOL CEEXYZ UNRESOLVED"), "{fixed:?}");
 }
 
 #[test]

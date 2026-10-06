@@ -83,7 +83,7 @@ struct Inputs {
     parms: BTreeMap<String, Vec<u8>>,
     /// The statement limit a timed-out input is re-checked under, which its runs keep.
     limit: Option<u64>,
-    /// The marker put in place of the program name an S806 CALLed, which its evidence run traces.
+    /// The marker put in place of the program name a CEE3501S named, which its evidence run traces.
     marker: Option<String>,
     /// The run is compiled with OPTIMIZE(2): a kept abend's re-check.
     optimized: bool,
@@ -94,7 +94,7 @@ struct Inputs {
 /// fuzz run makes only so many.
 const HANG_PATIENCE: u32 = 6;
 const HANG_RECHECKS: usize = 3;
-/// The S806s a fuzz run tries a marker on, each at a CALL of its own.
+/// The CEE3501S endings a fuzz run tries a marker on, each at a CALL of its own.
 const CHOSEN_CHECKS: usize = 5;
 
 /// A run stopped at its timeout or its statement limit after ACCEPT found SYSIN at its end was
@@ -124,9 +124,9 @@ fn same_loop(a: &Outcome, b: &Outcome) -> bool {
     }
 }
 
-/// The program name an S806's message says the CALL named.
-fn called(message: &str) -> Option<&str> {
-    message.strip_prefix("CALL ")?.split_once(':').map(|(name, _)| name.trim()).filter(|n| !n.is_empty())
+/// The module a dynamic CALL found nowhere, when an ending is CEE3501S's (assumption C450).
+fn missing_module<'a>(code: &str, message: &'a str) -> Option<&'a str> {
+    (code == "U4038").then(|| rt::le::module_not_found(message)).flatten()
 }
 
 /// A marker as long as `name`, of characters fuzz never generates, so it can come only from where
@@ -202,14 +202,20 @@ pub(crate) enum Outcome {
 }
 
 /// Abends that say what the run's surroundings lack, not what its input did: a construct ironwork
-/// does not run, a CALL of a program no library holds, an EXEC statement with no database or region
-/// behind it, and an OPEN of a file no DD gives.
+/// does not run, a job step's program no library holds, an EXEC statement with no database or
+/// region behind it, and an OPEN of a file no DD gives. A dynamic CALL of a program no library
+/// holds, which ends U4038, is one too (`missing_module`).
 const NOT_THE_INPUT: &[&str] = &["IRONWORK", "S806", "EXEC", "IO-35"];
+
+/// Whether an abend says what the run's surroundings lack rather than what its input did.
+fn not_the_input(code: &str, message: &str) -> bool {
+    NOT_THE_INPUT.contains(&code) || missing_module(code, message).is_some()
+}
 
 impl Outcome {
     pub(crate) fn place(&self) -> Option<(String, String, i64)> {
         match self {
-            Outcome::Abend { code, file, line, .. } if !NOT_THE_INPUT.contains(&code.as_str()) => Some((code.clone(), file.clone(), *line)),
+            Outcome::Abend { code, file, line, message } if !not_the_input(code, message) => Some((code.clone(), file.clone(), *line)),
             _ => None,
         }
     }
@@ -1095,7 +1101,7 @@ impl Tally {
                 self.crashes.get_or_insert_with(|| (0, why.clone())).0 += 1;
                 "refused"
             }
-            Outcome::Abend { code, file, line, message } if NOT_THE_INPUT.contains(&code.as_str()) => {
+            Outcome::Abend { code, file, line, message } if not_the_input(code, message) => {
                 self.refused.get_or_insert_with(|| format!("{file}:{line} {code} {message}"));
                 "refused"
             }
@@ -1116,12 +1122,12 @@ impl Tally {
         }
     }
 
-    /// The last line a fuzz run prints. A kept S322 came from a timeout and a kept S806 from a
+    /// The last line a fuzz run prints. A kept S322 came from a timeout and a kept CEE3501S from a
     /// refusal, so the kept runs are counted apart from the outcomes.
     pub(crate) fn summary(&self, kept: &[String], out: &Path) -> String {
         let c = &self.counts;
         let of = |code: &str| kept.iter().filter(|k| *k == code).count();
-        let (hangs, chosen) = (of("S322"), of("S806"));
+        let (hangs, chosen) = (of("S322"), of(rt::le::MODULE_NOT_FOUND));
         let kinds: Vec<String> = [(hangs, "hang", "hangs"), (chosen, "CALL the input named", "CALLs the input named")]
             .into_iter()
             .filter(|&(n, _, _)| n > 0)
@@ -1293,11 +1299,11 @@ fn drive(out: &Path, runs: u32, seed: u64, hang_limit: u64, varied: &Varied, run
                 let hang = run(&limited, None).map_err(started)?;
                 hang.place().filter(|p| p.0 == "S322" && !same_loop(&hang, &ended_empty)).map(|p| (p, limited, hang))
             }
-            // An S806 is a finding only where the name it CALLed came from the input, which a
-            // marker in the name's place shows at the end.
-            Outcome::Abend { code, file, line, message } if code == "S806" => {
-                let place = (code.clone(), file.clone(), *line);
-                if let Some(name) = called(message).filter(|n| named_in(&inputs, n))
+            // A CALL of a missing program is a finding only where the name came from the input,
+            // which a marker in the name's place shows at the end.
+            Outcome::Abend { code, file, line, message } if missing_module(code, message).is_some() => {
+                let place = (rt::le::MODULE_NOT_FOUND.to_string(), file.clone(), *line);
+                if let Some(name) = missing_module(code, message).filter(|n| named_in(&inputs, n))
                     && chosen.len() < CHOSEN_CHECKS
                     && !chosen.iter().any(|(p, _, _)| *p == place)
                 {
@@ -1344,14 +1350,14 @@ fn drive(out: &Path, runs: u32, seed: u64, hang_limit: u64, varied: &Varied, run
         let before = journals(&evidence);
         let cover = coverage.join(format!("{n}.json"));
         let outcome = run(&marked, Some((&evidence, &cover))).map_err(started)?;
-        let named = matches!(&outcome, Outcome::Abend { code, file, line, message } if code == "S806" && *file == place.1 && *line == place.2 && called(message) == Some(marker.as_str()));
+        let named = matches!(&outcome, Outcome::Abend { code, file, line, message } if *file == place.1 && *line == place.2 && missing_module(code, message) == Some(marker.as_str()));
         let journal = journals(&evidence).into_iter().find(|j| !before.contains(j)).filter(|j| named && marker_reached(&evidence, j, place.2));
         match journal {
             Some(journal) => {
                 runs_out.push(kept_run(listed(&marked, varied, n, false, &mut inputs_out), &outcome, true, None, journal, n));
                 codes.push(place.0.clone());
             }
-            None => eprintln!("ironwork fuzz: S806 at {}:{} is not kept: its run with {marker} in place of {name} did not show the CALL took the name from the input", place.1, place.2),
+            None => eprintln!("ironwork fuzz: CEE3501S at {}:{} is not kept: its run with {marker} in place of {name} did not show the CALL took the name from the input", place.1, place.2),
         }
         n += 1;
     }

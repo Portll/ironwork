@@ -82,6 +82,6 @@ fn a_call_finds_a_program_id_in_a_library_file_of_another_name() {
     let vm = Harness::source(&main).dirs(vec![library.clone()]).run(Executor::Vm);
     std::fs::remove_dir_all(&library).unwrap();
     assert_eq!(walker.out, "BY PROGRAM-ID\nSUBA BY MEMBER\n");
-    assert_eq!(walker.ending.as_ref().map_err(|a| a.code.clone()), Err(AbendCode::ModuleNotFound));
+    assert_eq!(walker.ending.as_ref().map_err(|a| a.code.clone()), Err(AbendCode::Ironwork));
     assert_eq!((&vm.out, &vm.ending), (&walker.out, &walker.ending));
 }

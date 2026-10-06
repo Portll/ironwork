@@ -1584,18 +1584,17 @@ fn call_by_reference_content_and_value_with_returning_and_return_code() {
 }
 
 #[test]
-fn a_missing_program_takes_on_exception_or_abends_s806() {
-    let body = [
-        line("MOVE 'NOPE' TO NAME"),
-        line("CALL NAME ON EXCEPTION DISPLAY 'NOT FOUND' END-CALL"),
-        line("CALL 'NOPE2'"),
-        line("GOBACK."),
-    ]
-    .concat();
+fn a_missing_program_takes_on_exception_or_ends_as_ibm_documents() {
+    let body = [line("MOVE 'NOPE' TO NAME"), line("CALL NAME ON EXCEPTION DISPLAY 'NOT FOUND' END-CALL"), line("CALL 'NOPE2'"), line("GOBACK.")].concat();
     let source = program("", "       01  NAME PIC X(8).\n", &body);
     let (out, _, ending) = run_unit(&source, vec![], "");
     assert_eq!(out, "NOT FOUND\n");
-    assert_eq!(ending.unwrap_err().code, "S806");
+    let abend = ending.unwrap_err();
+    assert_eq!(abend.code, "IRONWORK");
+    assert!(abend.message.starts_with("CALL NOPE2: IEW2456E SYMBOL NOPE2 UNRESOLVED"), "{}", abend.message);
+    let dynamic = program("", "       01  NAME PIC X(8) VALUE 'NOPE'.\n", &[line("CALL NAME"), line("GOBACK.")].concat());
+    let abend = run_unit(&dynamic, vec![], "").2.unwrap_err();
+    assert_eq!((abend.code.as_str(), abend.message.as_str()), ("U4038", "CEE3501S The module NOPE was not found."));
 }
 
 #[test]

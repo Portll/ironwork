@@ -269,16 +269,16 @@ fn missing(dir: &Path) {
 }
 
 #[test]
-fn a_program_that_is_nowhere_runs_on_exception_or_abends_s806_as_the_source_does() {
+fn a_program_that_is_nowhere_runs_on_exception_or_stops_as_the_source_does() {
     let dir = temp("missing");
     missing(&dir);
     let source = ironwork(&dir, &["run", "MISS.cbl"]);
-    assert_eq!(ran(&source), ("ON EXCEPTION\nAGAIN\n".to_owned(), Some(240)));
+    assert_eq!(ran(&source), ("ON EXCEPTION\nAGAIN\n".to_owned(), Some(244)));
     compiled(&dir, &["MISS.cbl", "-o", "out"]);
     let module = ironwork(&dir, &["run", "out/MISS.iwm"]);
     assert_eq!(ran(&module), ran(&source));
     assert_eq!(abends(&module), abends(&source));
-    assert!(abends(&module)[0].starts_with("MISS.cbl:6:12: ABEND S806: CALL NOSUCH: "), "{:?}", abends(&module));
+    assert!(abends(&module)[0].starts_with("MISS.cbl:6:12: ABEND IRONWORK: CALL NOSUCH: IEW2456E "), "{:?}", abends(&module));
 }
 
 #[test]

@@ -623,12 +623,11 @@ fn drive(req: &Request, compiled: &exec::Compiled, params: &[Param], sites: &[Ca
         }
         let outcome = runner.run(&generated, false, None).map_err(started)?;
         tally.add(&outcome);
-        // A CALL that took its program name from the arguments ends S806 on a generated name;
+        // A CALL that took its program name from the arguments ends CEE3501S on a generated name;
         // later runs give that place a name the libraries hold, as a caller would.
         if let Outcome::Abend { code, file, line, message } = &outcome
-            && code == "S806"
             && !candidates.is_empty()
-            && let Some(slot) = super::called(message).and_then(|name| name_slot(&generated, name))
+            && let Some(slot) = super::missing_module(code, message).and_then(|name| name_slot(&generated, name))
             && !slots.iter().any(|(s, _)| *s == slot)
         {
             let names = names_for(candidates, None);

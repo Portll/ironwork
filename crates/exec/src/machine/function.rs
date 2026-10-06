@@ -17,10 +17,7 @@ impl<'p> Machine<'p, '_, '_> {
         let pos = f.pos;
         let index = match self.unit.load_entry(&udf.external, false) {
             Ok((index, _)) => index,
-            Err(LoadError::NotFound) => {
-                let message = format!("FUNCTION {}: its definition, {}, is in neither the source nor the program libraries", udf.name, udf.external);
-                return Err(Abend { code: AbendCode::ModuleNotFound, message, pos, file: None });
-            }
+            Err(LoadError::NotFound) => return Err(crate::le::not_found(&format!("FUNCTION {}", udf.name), &udf.external, self.options.dynam, pos)),
             Err(LoadError::Compile(message)) => return Err(Abend::ironwork(format!("FUNCTION {}: {message}", udf.name), pos)),
         };
         let compiled = match self.unit.programs[index].compiled.clone() {

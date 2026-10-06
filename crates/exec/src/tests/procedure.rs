@@ -159,7 +159,7 @@ fn a_call_through_a_pointer_set_to_entry_enters_the_entry_as_a_call_of_its_name(
 fn set_to_entry_of_a_name_no_program_has_abends_at_the_set() {
     let (out, _, ending) = run_unit(&pointer_caller(&[line("SET PP TO ENTRY 'NOSUCH'"), line("DISPLAY 'AFTER'")]), vec![], "");
     assert_eq!(out, "");
-    assert_eq!(ending.unwrap_err().code, "S806");
+    assert_eq!(ending.unwrap_err().code, "IRONWORK");
 }
 
 #[test]

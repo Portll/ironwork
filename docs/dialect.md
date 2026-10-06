@@ -217,7 +217,7 @@ cobc option removes one, it is named.
 | Character codes: hexadecimal literals, ORD and CHAR, HIGH-VALUE and LOW-VALUE shown, an overpunched sign seen through an alphanumeric item, the card images ACCEPT transfers, a character CCSID 1140 has no byte for | test programs; corpus |
 | JSON and XML GENERATE write UTF-8 into an alphanumeric receiver; DISPLAY then reads the bytes in the program's EBCDIC code page | corpus |
 | Floating point: IBM hexadecimal under ironwork, IEEE under cobc, in COMP-1 and COMP-2 values, the floating-point functions, and an exponent beyond HFP's range (S0CC) | test programs |
-| The same failure in another form: S0C4 for a LINKAGE item with no address where cobc takes SIGSEGV, S806 where cobc says `module not found` | test programs |
+| The same failure in another form: S0C4 for a LINKAGE item with no address where cobc takes SIGSEGV, CEE3501S and U4038, or ironwork's IEW2456E refusal, where cobc says `module not found` | test programs |
 | Setting the UPSI switches: the runtime option UPSI(nnnnnnnn) in the PARM under ironwork (C411), `COB_SWITCH_0` to `COB_SWITCH_7` set to `ON` in the environment under cobc | CCVS85 NC108M, NC211A, NC254A; probe |
 
 ### 5.2 IBM documents it, and cobc -std=ibm-strict does otherwise

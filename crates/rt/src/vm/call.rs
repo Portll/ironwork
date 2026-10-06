@@ -4,7 +4,7 @@
 //! may be an LE callable service or a job for the virtual printer.
 
 use super::{Code, Halt, Lowered, R, Spare, Stop, Vm, not_yet};
-use crate::abend::{Abend, AbendCode, Ending};
+use crate::abend::{Abend, Ending};
 use crate::callee::{self, Arguments, Bindings, By, Callee};
 use crate::cics;
 use crate::le::{self, LeHost};
@@ -66,7 +66,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 if plan.on_exception {
                     return Ok(Step::Arm(1));
                 }
-                return Err(Abend { code: AbendCode::ModuleNotFound, message: le::missing(&name), pos, file: None }.into());
+                return Err(le::not_found(&format!("CALL {name}"), &name, dynamic, pos).into());
             }
             Err(LoadError::Compile(message)) => return Err(Abend::ironwork(format!("CALL {name}: {message}"), pos).into()),
         };
@@ -249,7 +249,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     }
 
     /// SET TO ENTRY (`Machine::entry_named`): the entry's program loaded when the SET runs (C140),
-    /// a name no program and no LE service has abending S806, then each receiver given the value
+    /// a name no program and no LE service has ending as `le::not_found` says, then each receiver given the value
     /// naming the entry.
     pub(super) fn set_entry(&mut self, entry: Operand, targets: &[PlaceId], pos: Pos) -> R<()> {
         let name = self.program_name(entry, pos)?;
@@ -261,7 +261,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         match self.unit.load_entry(&name, callee::entry_copy(dynamic, self.p.options.options.dialect_of(Switched::EntryCalls))) {
             Ok(_) => {}
             Err(LoadError::NotFound) if le::provides(&name) => {}
-            Err(LoadError::NotFound) => return Err(Abend { code: AbendCode::ModuleNotFound, message: le::missing(&name), pos, file: None }.into()),
+            Err(LoadError::NotFound) => return Err(le::not_found(&format!("SET TO ENTRY {name}"), &name, dynamic, pos).into()),
             Err(LoadError::Compile(message)) => return Err(Abend::ironwork(format!("SET TO ENTRY {name}: {message}"), pos).into()),
         }
         let value = set::entry(&mut self.unit.entries, &name, dynamic, pos)?;

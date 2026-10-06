@@ -89,13 +89,28 @@ fn documented(name: &str) -> bool {
     DOCUMENTED.contains(&name) || math
 }
 
-/// The S806 message for a CALL that finds nothing.
-pub fn missing(name: &str) -> String {
+/// How a CALL, SET TO ENTRY or function invocation `what` ends when no program answers `name`
+/// (assumption C450). A dynamic one raises CEE3501S, a condition of severity 3 that ends the run
+/// U4038 when nothing handles it. A static one names the reference the binder leaves unresolved,
+/// a program that never reaches run time on z/OS. A Language Environment service ironwork does not
+/// provide is ironwork's own stop.
+pub fn not_found(what: &str, name: &str, dynamic: bool, pos: crate::vocab::Pos) -> crate::abend::Abend {
+    use crate::abend::{Abend, AbendCode};
     if documented(name) {
-        format!("CALL {name}: {name} is a Language Environment callable service that ironwork for COBOL does not provide yet")
+        Abend::ironwork(format!("{what}: {name} is a Language Environment callable service that ironwork for COBOL does not provide yet"), pos)
+    } else if dynamic {
+        Abend { code: AbendCode::user(4038), message: format!("{MODULE_NOT_FOUND} The module {name} was not found."), pos, file: None }
     } else {
-        format!("CALL {name}: no such program in the run unit or its program libraries")
+        Abend::ironwork(format!("{what}: IEW2456E SYMBOL {name} UNRESOLVED: no program library holds it, and under NODYNAM the binder's load module would not run"), pos)
     }
+}
+
+/// The message id of a dynamic load that finds no module.
+pub const MODULE_NOT_FOUND: &str = "CEE3501S";
+
+/// The module a CEE3501S message names.
+pub fn module_not_found(message: &str) -> Option<&str> {
+    message.strip_prefix(MODULE_NOT_FOUND)?.strip_prefix(" The module ")?.strip_suffix(" was not found.")
 }
 
 /// A condition of facility CEE: its severity and message number.

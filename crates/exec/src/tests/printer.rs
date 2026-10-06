@@ -345,7 +345,7 @@ fn any_other_command_or_a_run_without_a_printer_still_finds_no_program() {
     for (command, printer) in [("'lp -d x;id report.txt'", true), ("'lpstat -p'", true), ("'lp report.txt'", false)] {
         let (o, printed) = run_lp(&lp_program(&[command], true), "vp-none", printer);
         let abend = o.ending.expect_err(command);
-        assert_eq!(abend.code, crate::abend::AbendCode::ModuleNotFound, "{command}");
+        assert!(abend.code == crate::abend::AbendCode::Ironwork && abend.message.contains("IEW2456E SYMBOL SYSTEM UNRESOLVED"), "{command}: {abend:?}");
         assert_eq!(printed, None, "{command}");
     }
 }

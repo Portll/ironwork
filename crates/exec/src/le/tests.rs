@@ -336,12 +336,12 @@ fn a_service_is_called_through_an_identifier_and_a_program_of_its_name_comes_fir
 }
 
 #[test]
-fn a_service_ironwork_does_not_provide_is_s806_naming_it() {
+fn a_service_ironwork_does_not_provide_is_ironwork_s_refusal_naming_it() {
     let body = [line("CALL 'CEEHDLR' ON EXCEPTION DISPLAY 'EXCEPTION' END-CALL"), line("CALL 'CEEHDLR' USING FC")];
     let (out, _, ending) = run(&program("", &body), &[]);
     assert_eq!(out, "EXCEPTION\n");
     let abend = ending.unwrap_err();
-    assert_eq!(abend.code, "S806");
+    assert_eq!(abend.code, "IRONWORK");
     assert_eq!(abend.message, "CALL CEEHDLR: CEEHDLR is a Language Environment callable service that ironwork for COBOL does not provide yet");
 }
 

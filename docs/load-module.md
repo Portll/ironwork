@@ -715,7 +715,7 @@ before anywhere else. The directory records nesting and COMMON, and neither chan
 - **Shared memory.** A static callee shares the run unit's memory and keeps its WORKING-STORAGE
   between CALLs, as a dynamic one does.
 
-### 8.4 CANCEL, ON EXCEPTION and S806
+### 8.4 CANCEL, ON EXCEPTION and a missing program
 
 - **CANCEL** (`rt::callee::cancel`, callee.rs:251) looks the program up with `RunUnit::find`, so it
   reaches only programs already loaded. It does nothing for a name not loaded, or for a program only
@@ -725,7 +725,7 @@ before anywhere else. The directory records nesting and COMMON, and neither chan
   `parent` for a program from a module. The module is data, and does not change. Whether IBM lets
   CANCEL reach a statically called program is question 6.
 - **Not found** is `LoadError::NotFound`: no program read, no `NAME.iwm`, no source. A CALL with ON
-  EXCEPTION runs that block, and one without abends S806 with the interpreter's message.
+  EXCEPTION runs that block, and one without ends with the interpreter's ending (C450).
 - **A LINK or XCTL** through EXEC CICS gets PGMIDERR for the same case.
 
 ## 9. The debug table
@@ -910,7 +910,7 @@ scenarios that wait for question 5 do not run yet.
 
 - **Given** `MAIN.iwm` calling `SUB` with no `SUB` in a loaded module, in `-L` as `.iwm`, or as
   source **when** the CALL has ON EXCEPTION **then** that block runs, **and** without it the run
-  abends S806.
+  ends as C450 says.
 - **Given** a `SUB.iwm` that holds no program `SUB` **then** the run abends naming the module, and
   ON EXCEPTION does not run.
 - **Given** `SUB.iwm` and `SUB.cbl` in one `-L` directory **then** the module is used.

@@ -1003,7 +1003,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 }
                 return match &c.on_exception {
                     Some(body) => self.run_block(body),
-                    None => Err(Abend { code: AbendCode::ModuleNotFound, message: crate::le::missing(&name), pos, file: None }),
+                    None => Err(crate::le::not_found(&format!("CALL {name}"), &name, dynamic, pos)),
                 };
             }
             Err(LoadError::Compile(message)) => return Err(Abend::ironwork(format!("CALL {name}: {message}"), pos)),
@@ -1085,7 +1085,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         match self.unit.load_entry(&name, rt::callee::entry_copy(dynamic, self.options.dialect_of(Switched::EntryCalls))) {
             Ok(_) => Ok((name, dynamic)),
             Err(LoadError::NotFound) if crate::le::provides(&name) => Ok((name, dynamic)),
-            Err(LoadError::NotFound) => Err(Abend { code: AbendCode::ModuleNotFound, message: crate::le::missing(&name), pos, file: None }),
+            Err(LoadError::NotFound) => Err(crate::le::not_found(&format!("SET TO ENTRY {name}"), &name, dynamic, pos)),
             Err(LoadError::Compile(message)) => Err(Abend::ironwork(format!("SET TO ENTRY {name}: {message}"), pos)),
         }
     }

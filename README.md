@@ -113,7 +113,7 @@ standard error names the parameter, the CALL's line and the program, and under A
 with U4038 (C226, C227).
 
 ironwork runs no operating-system command: a CALL of SYSTEM or C$SYSTEM that no library answers
-abends S806, unless it prints. In a run given DD PRINTER, the virtual printer, a command that is lp
+ends as any CALL of a missing program does (below), unless it prints. In a run given DD PRINTER, the virtual printer, a command that is lp
 or lpr with options CUPS documents and at least one file appends each file to DD PRINTER, byte for
 byte, and returns 0. Each file is a DD, as an ASSIGN literal names one (report.txt is DD
 REPORT.TXT), so the command reaches only what the run was given; a file with no DD prints nothing
@@ -214,7 +214,7 @@ data set the step created is deleted and one that existed is kept. COND on the J
 the job when a test is true, COND on EXEC bypasses the step, and IF/THEN/ELSE/ENDIF nest to 15
 levels over RC, stepname.RC, ABEND, ABENDCC=, stepname.ABEND and stepname.RUN. After an abend a step
 runs only under COND=EVEN or ONLY, or in the branch of an IF that tests an abend or whether a step
-ran. A program no library holds abends S806. A step's DISPLAY output and SYSOUT DDs go to standard
+ran. A step whose program no library holds abends S806. A step's DISPLAY output and SYSOUT DDs go to standard
 output, and a line per step to standard error: the step, the program and RC=nnnn, ABEND and its
 code, BYPASSED and why, or JCL ERROR. IBM's other programs, PARM to a utility, DFSORT's FINDREP,
 PARSE, arithmetic, date formats and SEQNUM, and the statements and parameters not named here are
@@ -233,7 +233,7 @@ RETURN-CODE from a run ironwork refused, stopped or could not finish:
 |---|---|
 | 0–238 | It ran to its end: the program's RETURN-CODE, a job's highest step return code, or 0 for a CICS task. |
 | 239 | It ran to its end with a RETURN-CODE outside 0–238, or of 239. Standard error gives the value (`ironwork: RETURN-CODE 1000 exits 239`), and an `--evidence` journal's `close` record holds it as `exit`. |
-| 240 | An abend, which the message names: the system completion code (S0C7 for a data exception, S0C4 for a LINKAGE item with no address, S806 for a program CALL cannot find, S0CB, S0C9 or S0CF for a zero divisor no ON SIZE ERROR takes, as the division is decimal, binary or floating-point, assumption C55), the user completion code (U0999 from CEE3ABD, U4038 for a Language Environment condition nothing handled), a CICS abend code, the file status of an unhandled I/O failure, or SQL and SQLR from the database or its recording. For a job, a step's abend or a JCL error that ended it. |
+| 240 | An abend, which the message names: the system completion code (S0C7 for a data exception, S0C4 for a LINKAGE item with no address, S806 for a job step's program no library holds, S0CB, S0C9 or S0CF for a zero divisor no ON SIZE ERROR takes, as the division is decimal, binary or floating-point, assumption C55), the user completion code (U0999 from CEE3ABD, U4038 for a Language Environment condition nothing handled, CEE3501S among them for a dynamic CALL of a program no library holds, assumption C450), a CICS abend code, the file status of an unhandled I/O failure, or SQL and SQLR from the database or its recording. For a job, a step's abend or a JCL error that ended it. |
 | 241 | The compile gave no program to run: its return code, which standard error gives, reached the refusal level (below), a card's NOCOMPILE asked for a syntax check, or the source or module holds only user-defined functions. |
 | 242 | Code generation refused a construct, named with where it is (`--vm`). |
 | 243 | The VM stopped at a construct it does not run yet (`--vm`, or a module). |
@@ -601,7 +601,8 @@ The subset the interpreter runs today:
   ends the run with ironwork's own abend, since what z/OS does then is unpredictable. COPY
   CEEIGZCT, when no library holds it, names the 723 symbolic feedback codes of the Language
   Environment Runtime Messages, written from IBM's manuals rather than taken from IBM's member.
-  Any other LE service ends the run S806, which names it as one ironwork does not provide yet. In
+  A CALL of any other LE service stops the run as ironwork's own refusal (exit 244), naming it as one
+  ironwork does not provide yet. In
   a CICS task, CEE3ABD is a transaction abend with *abcode* as its four-digit ABCODE, and CEEMOUT
   and CEE3DMP write to transient data queue CESE instead of any DD. The choices are assumptions
   L1 to L18.

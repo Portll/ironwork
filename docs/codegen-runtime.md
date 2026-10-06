@@ -164,7 +164,8 @@ Lowering consumes `Compiled` after `Check` has passed, and produces per program:
   `-L` behaviour for callers that ship source.
 - **Static and dynamic CALL.** A static CALL (NODYNAM) resolves within the module, or within a
   bundle linked at build time. A dynamic CALL loads by name at run time. Either way a missing
-  program still raises ON EXCEPTION or S806.
+  program still raises ON EXCEPTION or ends as C450 says: CEE3501S and U4038 for a dynamic CALL,
+  the binder's IEW2456E as ironwork's refusal for a static one.
 
 ## 9. The runtime exception
 
@@ -224,7 +225,7 @@ Lowering consumes `Compiled` after `Check` has passed, and produces per program:
 
 - **Given** `MAIN.iwm` calling `SUB` dynamically, with `SUB.iwm` in a `-L` directory **then** SUB
   runs, shares memory, keeps its WORKING-STORAGE between CALLs, and CANCEL resets it.
-- **Given** no SUB anywhere **then** ON EXCEPTION runs, or the run abends S806.
+- **Given** no SUB anywhere **then** ON EXCEPTION runs, or the run ends as C450 says.
 
 ### B5: The boundary
 

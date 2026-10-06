@@ -324,7 +324,7 @@ fn a_program_s_return_code_of_2_is_not_a_refusal_and_a_refusal_says_why() {
     rewrite(&dir, &[("           OPEN INPUT IN-FILE", "           CALL 'NOSUCH'\n           OPEN INPUT IN-FILE")]);
     let o = fuzz(&dir, "called", &["--runs", "5"]);
     assert!(o.status.success(), "{}", stderr(&o));
-    assert!(stderr(&o).contains("5 runs refused; the first: QTYSUM.cbl:21 S806 CALL NOSUCH"), "{}", stderr(&o));
+    assert!(stderr(&o).contains("5 runs refused; the first: QTYSUM.cbl:21 IRONWORK CALL NOSUCH: IEW2456E SYMBOL NOSUCH UNRESOLVED"), "{}", stderr(&o));
 }
 
 const PARM_PROGRAM: &[&str] = &[
@@ -506,7 +506,7 @@ fn a_loop_only_some_input_causes_is_kept_as_s322_and_one_waiting_at_the_end_of_s
 }
 
 #[test]
-fn an_s806_is_kept_only_where_a_marker_in_the_input_reaches_the_call() {
+fn a_missing_program_is_kept_only_where_a_marker_in_the_input_reaches_the_call() {
     let dir = temp("chosen");
     let program = |static_call: bool| {
         let call = if static_call { "           CALL 'NOSUCH'" } else { "           CALL WS-PGM" };
@@ -529,8 +529,8 @@ fn an_s806_is_kept_only_where_a_marker_in_the_input_reaches_the_call() {
     let o = picker("chosen");
     assert!(o.status.success(), "{}", stderr(&o));
     let manifest = read_manifest(&dir.join("chosen"));
-    assert!(kept(&manifest).iter().any(|k| k == "S806 8"), "{manifest}");
-    assert!(manifest.contains("CALL @#$"), "{manifest}");
+    assert!(kept(&manifest).iter().any(|k| k == "U4038 8"), "{manifest}");
+    assert!(manifest.contains("CEE3501S The module @#$"), "{manifest}");
     let journal = manifest.split("\"journal\":\"").nth(1).unwrap().split('"').next().unwrap();
     let text = fs::read_to_string(dir.join("chosen/evidence/runs").join(format!("{journal}.jsonl"))).unwrap();
     assert!(text.lines().any(|l| l.contains("\"sink\":\"dynamic-program-load\"") && l.contains("\"reached\":true")), "{text}");
@@ -538,7 +538,7 @@ fn an_s806_is_kept_only_where_a_marker_in_the_input_reaches_the_call() {
     fs::write(dir.join("repo/src/PICKER.cbl"), program(true)).unwrap();
     let o = picker("static");
     assert!(o.status.success(), "{}", stderr(&o));
-    assert!(!read_manifest(&dir.join("static")).contains("S806"));
+    assert!(!read_manifest(&dir.join("static")).contains("CEE3501S"));
 }
 
 /// Each kept run's abend as `code line optimized`.

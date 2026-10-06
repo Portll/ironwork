@@ -6,6 +6,7 @@
 use super::{Code, Halt, Lowered, R, Stop, Vm, not_yet};
 use crate::abend::{Abend, AbendCode, Ending, Signal};
 use crate::callee::{self, Bindings, Bound, By, Callee};
+use crate::le;
 use crate::lir::{FunctionDefinition, UserArgument, UserFunctionId};
 use crate::storage::Val;
 use crate::store;
@@ -22,10 +23,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let (name, external) = (self.sym(plan.name), self.sym(plan.external));
         let index = match self.unit.load_entry(external, false) {
             Ok((index, _)) => index,
-            Err(LoadError::NotFound) => {
-                let message = format!("FUNCTION {name}: its definition, {external}, is in neither the source nor the program libraries");
-                return Err(Abend { code: AbendCode::ModuleNotFound, message, pos, file: None }.into());
-            }
+            Err(LoadError::NotFound) => return Err(le::not_found(&format!("FUNCTION {name}"), external, self.p.options.options.dynam, pos).into()),
             Err(LoadError::Compile(message)) => return Err(Abend::ironwork(format!("FUNCTION {name}: {message}"), pos).into()),
         };
         let not_a_function = || Stop::from(Abend::ironwork(format!("FUNCTION {name}: {external} is a program, not a user-defined function"), pos));

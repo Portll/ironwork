@@ -329,20 +329,21 @@ cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
    file, sharing a line), nor a second time for a loop already kept. A run that had ACCEPT find
    SYSIN at its end, stopped at its timeout or its limit, is a program waiting for input, not
    looping on it: it is counted as a timeout and not run again. A kept S322 says the run passed
-   the limit; it does not show the loop would never end. An S806, up to five per fuzz run, each
-   at a CALL of its own, is kept only where the program name its message gives is in the input
+   the limit; it does not show the loop would never end. A dynamic CALL of a missing program, which ends
+   U4038 with CEE3501S (C450), up to five per fuzz run, each at a CALL of its own, is kept only
+   where the module its message names is in the input
    and a run with every occurrence of that name replaced by a marker of `@`, `#` and `$`, traced
    with `--trace-marker`,
-   ends in S806 at the same CALL naming the marker and its journal records the marker reaching
-   that CALL's `dynamic-program-load` sink. A static CALL raises no such sink. A kept hang's input
-   is made smaller within 10 runs; a kept S806's input is the marked one.
-6. Each kept input other than an S322 or an S806 runs once more, with no evidence, compiled with `--optimize=2`, the compiler
+   ends with CEE3501S at the same CALL naming the marker and its journal records the marker
+   reaching that CALL's `dynamic-program-load` sink. A static CALL raises no such sink. A kept
+   hang's input is made smaller within 10 runs; a kept CEE3501S's input is the marked one.
+6. Each kept input other than an S322 or a CEE3501S runs once more, with no evidence, compiled with `--optimize=2`, the compiler
    invocation's OPTIMIZE(2), which a CBL or PROCESS card's OPTIMIZE outranks. IBM leaves what invalid
    data does to the generated code, and at OPTIMIZE(1) and (2) it may compare an unsigned zoned item
    with zero by its bytes where OPTIMIZE(0), its default, reads it as a number and ends in a data
    exception (assumption C262). Whether that run ends in the same abend at the same place is the
    abend's `optimized`. OPTIMIZE changes neither where a loop passes the statement limit nor the
-   name a CALL takes, so a kept S322 or S806 is `optimized` without that run.
+   name a CALL takes, so a kept S322 or CEE3501S is `optimized` without that run.
 
 `DIR/manifest.json` holds `tool` (`ironwork-fuzz`), `format`, `version` (the ironwork release that
 wrote it), `seed`, `strategy` (`fields`),
@@ -356,8 +357,9 @@ name), `inputs` (`id`, `kind` `dd`, `sysin`, `parm`, `commarea` or `terminal`, `
 base64, `minimized`,
 false when the 200 runs ran out first), `counts` (`runs`, `clean`, `abend`, `timeout`, `refused`,
 over the generated runs; an abend that says what the surroundings lack counts as refused and is not
-kept: IRONWORK, a construct ironwork does not run, S806, a CALL of a program no `-L` library holds,
-EXEC, an EXEC statement with no database or region behind it, and IO-35, an OPEN of a file no DD
+kept: IRONWORK, a construct ironwork does not run (a static CALL of a program no `-L` library
+holds among them), U4038 with CEE3501S, a dynamic CALL of one, S806, a job step's program no
+library holds, EXEC, an EXEC statement with no database or region behind it, and IO-35, an OPEN of a file no DD
 gives; so do a run ironwork refused, told by its exit status from 241 up, and a run in which
 ironwork itself panicked, 255; standard error gives the first refusal's reason and the first
 panic) and `runs`,
@@ -435,7 +437,7 @@ each run an `ironwork cics`, and writes the same directory with `entry` `cics`
    files, and those of the programs it contains or reaches by a CALL of a literal, get data sets
    as §5 gives the files it does not vary: an empty one for each file read or extended and a new
    one for each only written, so an OPEN does not end the run IO-35; their records are not varied,
-   the arguments being the inputs. A CALL whose target is a field of an argument, or whose S806
+   the arguments being the inputs. A CALL whose target is a field of an argument, or whose CEE3501S
    names bytes a run generated in one, is given in that place a program name a caller would pass:
    an alphanumeric literal that the subprogram, or a source naming it in a literal, MOVEs or gives
    as a VALUE, that names a program the libraries hold and that compiles. Where a caller stores
@@ -445,7 +447,7 @@ each run an `ironwork cics`, and writes the same directory with `entry` `cics`
    records. With no such literal the field is varied as any other. An abend on
    arguments that break nothing is not kept; every other is kept once, its arguments made as small
    as still give it within 200 runs, then run with `--evidence` and `--coverage` and once more with
-   `--optimize=2`, as in §5. A timeout and an S806 are counted, never kept.
+   `--optimize=2`, as in §5. A timeout and a CEE3501S are counted, never kept.
 5. The manifest's `format` is `ironwork-fuzz-interface/v1`
    ([fuzz-interface-manifest.schema.json](fuzz-interface-manifest.schema.json)): `entry`
    `interface`; `callers`, each CALL a run may take its shape from (`file` from `--root`, `line`);

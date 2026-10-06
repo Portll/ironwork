@@ -41,7 +41,7 @@ pub enum AbendCode {
     Check(ProgramCheck),
     /// S0C4: an address outside the run unit's storage.
     Protection,
-    /// S806: a CALLed program that is not in the library.
+    /// S806: a job step's program that is not in the library.
     ModuleNotFound,
     /// S322: the run reached its statement limit, as a step that runs past its TIME= ends.
     TimeLimit,
