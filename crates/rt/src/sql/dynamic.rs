@@ -66,13 +66,34 @@ pub(super) fn kind(text: &str) -> Kind {
             Kind::Change { delete: verb == "DELETE", current_of: positioned.then(|| word(n - 1).to_owned()) }
         }
         "DECLARE" if (word(1), word(2), word(3)) == ("GLOBAL", "TEMPORARY", "TABLE") => Kind::Other,
-        "SET" if !matches!(word(1), "CONNECTION" | ":") => Kind::Other,
-        "" | "BEGIN" | "CALL" | "CLOSE" | "CONNECT" | "DECLARE" | "DESCRIBE" | "DISCONNECT" | "END" | "EXECUTE" | "FETCH" | "GET" | "INCLUDE" | "OPEN" | "PREPARE" | "RELEASE" | "SET" | "WHENEVER" => {
+        "SET" if matches!(word(1), "CURRENT" | "CURRENT_PATH" | "PATH" | "SCHEMA" | "CURRENT_SCHEMA") => Kind::Other,
+        "SET" if (word(1), word(2), word(3)) == ("SESSION", "TIME", "ZONE") => Kind::Refused("SET SESSION TIME ZONE"),
+        "SET" if assignment(&words[1..]) => Kind::Refused("SET of a global variable"),
+        "SET" if matches!(word(1), "CONNECTION" | ":") => Kind::Unacceptable,
+        "" | "BEGIN" | "CALL" | "CLOSE" | "CONNECT" | "DECLARE" | "DESCRIBE" | "DISCONNECT" | "END" | "EXECUTE" | "FETCH" | "GET" | "INCLUDE" | "OPEN" | "PREPARE" | "RELEASE" | "WHENEVER" => {
             Kind::Unacceptable
         }
         "ALLOCATE" | "ALTER" | "ASSOCIATE" | "COMMENT" | "CREATE" | "DROP" | "EXPLAIN" | "FREE" | "GRANT" | "HOLD" | "LABEL" | "LOCK" | "MERGE" | "REFRESH" | "RENAME" | "REVOKE" | "SIGNAL" | "TRANSFER" | "TRUNCATE" => Kind::Other,
         _ => Kind::Unknown,
     }
+}
+
+/// Whether the words after SET assign a variable: a parenthesised target list, or a name, its
+/// qualifiers before it, and `=`.
+fn assignment(target: &[String]) -> bool {
+    let name = |w: &String| w == "'" || w.starts_with(|c: char| c.is_alphanumeric() || matches!(c, '_' | '#' | '@' | '$'));
+    if target.first().is_some_and(|w| w == "(") {
+        return true;
+    }
+    let mut at = 0;
+    while target.get(at).is_some_and(name) {
+        match target.get(at + 1).map(String::as_str) {
+            Some(".") => at += 2,
+            Some("=") => return true,
+            _ => return false,
+        }
+    }
+    false
 }
 
 /// The parameter markers in `text`: each `?` outside a quoted string.
@@ -175,7 +196,14 @@ mod tests {
         assert_eq!(kind("ROLLBACK WORK TO SAVEPOINT"), Kind::Refused("ROLLBACK TO SAVEPOINT"));
         assert_eq!(kind("TRUNCATE TABLE T IMMEDIATE"), Kind::Other);
         assert_eq!(kind("LOCK TABLE T IN SHARE MODE"), Kind::Other);
-        for unknown in ["SELEC A FROM T", "COMMIT AND CHAIN", "ROLLBACK AND CHAIN", "ABORT", "START TRANSACTION", "DEALLOCATE ALL", "DISCARD ALL", "TABLE T"] {
+        assert_eq!(kind("SET CURRENT DEGREE = 'ANY'"), Kind::Other);
+        assert_eq!(kind("SET SCHEMA PAYROLL"), Kind::Other);
+        assert_eq!(kind("SET SESSION TIME ZONE = '+10:00'"), Kind::Refused("SET SESSION TIME ZONE"));
+        for global in ["SET search_path = x", "SET APP.LIMIT = 5", "SET \"V\" = 1", "SET (A, B) = (1, 2)"] {
+            assert_eq!(kind(global), Kind::Refused("SET of a global variable"), "{global}");
+        }
+        assert_eq!(kind("SET :HV = 1"), Kind::Unacceptable);
+        for unknown in ["SET ROLE admin", "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE", "SET LOCAL work_mem = 1", "SET timezone TO 'UTC'", "SELEC A FROM T", "COMMIT AND CHAIN", "ROLLBACK AND CHAIN", "ABORT", "START TRANSACTION", "DEALLOCATE ALL", "DISCARD ALL", "TABLE T"] {
             assert_eq!(kind(unknown), Kind::Unknown, "{unknown}");
         }
     }

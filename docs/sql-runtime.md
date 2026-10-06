@@ -99,6 +99,10 @@ the runtime keeps the state they need in its session, so every backend answers a
   by a cursor: EXECUTE IMMEDIATE of one is -518 (C401), as is EXECUTE of a prepared one. COMMIT and
   ROLLBACK in a statement string end the unit of work as the static statements do, with -925 and
   -926 in a CICS task; SAVEPOINT, RELEASE SAVEPOINT and ROLLBACK TO SAVEPOINT are refused by name.
+  A SET of a special register, PATH or SCHEMA goes to the database. SET SESSION TIME ZONE is
+  refused by name, since the session's zone stays UTC, and so is a SET that assigns a variable,
+  which in a statement string can only be a global variable; ironwork has none. Any other SET is
+  -104.
 - **PREPARE** asks the database's `prepare`, so a statement the database cannot read is refused at
   PREPARE, as Db2 refuses it. It first destroys any statement of the same name, and the name stays
   unprepared if PREPARE fails; preparing the statement of an open cursor is -519 and changes
