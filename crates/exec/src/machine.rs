@@ -650,7 +650,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let mut composed = 0;
         for (&(stride, _), sub) in item.dims.iter().zip(&r.subscripts) {
             let s = self.integer(sub, r.pos)?;
-            composed += loc::subscript(s, stride, None, &r.name, r.pos)?;
+            composed += loc::subscript(s, stride);
         }
         if self.ssrange
             && let Some((displacement, extent)) = layout.table_range(index)

@@ -217,7 +217,6 @@ fn subscripts_reference_modification_and_odo_carry_checks_only_under_ssrange() {
         assert_eq!(e.kind, rt::storage::Kind::Alnum { justified: false });
         assert_eq!(e.subscripts.len(), 1);
         assert_eq!(e.subscripts[0].stride, 4);
-        assert_eq!(e.subscripts[0].check, None);
         assert_eq!(e.table, ssrange.then_some(rt::lir::TableRange { displacement: 0, extent: 20 }));
         let refmod = e.refmod.clone().unwrap();
         assert_eq!(refmod.start, IntExpr::Const(2));

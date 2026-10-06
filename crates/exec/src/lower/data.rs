@@ -185,7 +185,7 @@ impl Lower<'_> {
         }
         let mut subscripts = Vec::with_capacity(item.dims.len());
         for (&(stride, _), sub) in item.dims.iter().zip(&r.subscripts) {
-            subscripts.push(lir::Subscript { stride, value: self.int_expr(sub, r.pos)?, check: None });
+            subscripts.push(lir::Subscript { stride, value: self.int_expr(sub, r.pos)? });
         }
         let table = layout.table_range(index).filter(|_| ssrange).map(|(displacement, extent)| lir::TableRange { displacement, extent });
         let mut odo = Vec::new();

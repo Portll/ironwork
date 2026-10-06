@@ -525,8 +525,8 @@ fn places_round_trip_with_every_base() {
     let bases =
         [Base::Program, Base::Local, Base::Linkage(2), Base::ReturnCode, Base::Eib, Base::SelfRef, Base::JniEnv, Base::Xml(XmlRegister::NText)];
     every_variant(&bases, 8);
-    let subscript = Subscript { stride: 12, value: IntExpr::Item(1), check: Some(50) };
-    round_trip(&[subscript.clone(), Subscript { stride: 4, value: IntExpr::Const(-1), check: None }]);
+    let subscript = Subscript { stride: 12, value: IntExpr::Item(1) };
+    round_trip(&[subscript.clone(), Subscript { stride: 4, value: IntExpr::Const(-1) }]);
     round_trip(&[ODO, Odo { check: false, ..ODO }]);
     round_trip(&[REFMOD, RefMod { length: None, ..REFMOD }]);
     let place = Place {

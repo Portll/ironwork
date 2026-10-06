@@ -54,12 +54,10 @@ pub enum Base {
     Xml(XmlRegister),
 }
 
-/// `check` is the occurrence count, present only under SSRANGE.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Subscript {
     pub stride: u32,
     pub value: IntExpr,
-    pub check: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -90,6 +88,6 @@ codec_enum!(Base {
     JniEnv = 6,
     Xml(register) = 7,
 });
-codec_struct!(Subscript { stride, value, check });
+codec_struct!(Subscript { stride, value });
 codec_struct!(Odo { object, max, element, check });
 codec_struct!(RefMod { start, length, check });

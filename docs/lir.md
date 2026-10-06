@@ -271,9 +271,8 @@ pub enum Base {
 }
 
 /// Each `check` is present only under SSRANGE: 0 to `max`; start and length at least 1 and inside
-/// the item. A subscript's `check`, 1 to `count`, is a module's before 0.7, which checked each
-/// subscript where `Place.table` now checks the composed address.
-pub struct Subscript { pub stride: u32, pub value: IntExpr, pub check: Option<u32> }
+/// the item. A subscript is not checked alone: `Place.table` checks the address they compose.
+pub struct Subscript { pub stride: u32, pub value: IntExpr }
 pub struct Odo { pub object: IntExpr, pub max: u32, pub element: u32, pub check: bool }
 pub struct RefMod { pub start: IntExpr, pub length: Option<IntExpr>, pub check: bool }
 /// What `compile::numcheck` fixed (§9.14): under ZON(LAX), what the item may hold because of the
@@ -313,7 +312,7 @@ pub struct PlaceNumcheck { pub lax: Option<rt::store::LaxRedefinition>, pub remo
 | LINKAGE, pointer-based | `Base::Linkage(n)`; S0C4 checked at run time | 550-555 |
 | Constant offset | `offset` | 559 |
 | A variably located item | `moved`: offset −= (max − current) × element (`loc::unused`), per table, before the subscripts | `locate_item`, `unused` |
-| Subscripts | `Subscript { stride, value, check }`: offset += (s − 1) × stride | 560-566 |
+| Subscripts | `Subscript { stride, value }`: offset += (s − 1) × stride | 560-566 |
 | OCCURS DEPENDING ON | `odo`: length −= (max − current) × element, per table | 567-572, and `occurrences` 594-603 |
 | Reference modification | `RefMod`; kind alphanumeric | 573-585 |
 | Run-unit bounds | Checked at run time for places that are not static | 586-588 |

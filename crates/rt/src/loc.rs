@@ -34,15 +34,9 @@ pub fn table_reference(offset: i64, len: i64, extent: i64, name: &str, pos: Pos)
     Ok(())
 }
 
-/// What subscript `value` adds to the offset; `check` is the occurrence count a module written
-/// before load-module format 0.7 checks each subscript against under SSRANGE.
-pub fn subscript(value: i64, stride: u32, check: Option<u32>, name: &str, pos: Pos) -> R<i64> {
-    if let Some(count) = check
-        && (value < 1 || value > count as i64)
-    {
-        return Err(out_of_range(format!("IGZ0006S subscript {value} of {name} is out of range 1 to {count} (SSRANGE)"), pos));
-    }
-    Ok((value - 1) * stride as i64)
+/// What subscript `value` adds to the offset.
+pub fn subscript(value: i64, stride: u32) -> i64 {
+    (value - 1) * stride as i64
 }
 
 /// The current count of an OCCURS DEPENDING ON table from its object's value, kept within the

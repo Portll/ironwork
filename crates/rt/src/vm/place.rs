@@ -209,7 +209,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 Some(&(_, v)) => v,
                 None => self.int(&s.value, pos)?,
             };
-            composed += loc::subscript(value, s.stride, s.check, name, pos)?;
+            composed += loc::subscript(value, s.stride);
         }
         if let Some(t) = place.table {
             loc::table_reference(i64::from(t.displacement) + composed, i64::from(place.len), i64::from(t.extent), name, pos)?;

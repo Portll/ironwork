@@ -1295,9 +1295,6 @@ impl<'a> Printer<'a> {
         }
         for s in &p.subscripts {
             text += &format!(" stride {}", s.stride);
-            if let Some(n) = s.check {
-                text += &format!(" check {n}");
-            }
         }
         if let Some(t) = p.table {
             text += &format!(" table check {}+{}", t.displacement, t.extent);

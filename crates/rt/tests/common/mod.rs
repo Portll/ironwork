@@ -60,7 +60,7 @@ pub fn payroll() -> Program {
         numcheck: PlaceNumcheck::default(),
         table: None,
     };
-    let subscript = Subscript { stride: 4, value: IntExpr::Item(WS_I), check: Some(10) };
+    let subscript = Subscript { stride: 4, value: IntExpr::Item(WS_I) };
     let places = vec![
         place(40, 2, binary, vec![], 6, 11),
         place(0, 4, packed(7), vec![subscript], 5, 9),
