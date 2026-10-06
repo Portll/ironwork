@@ -45,6 +45,7 @@ pub struct Harness {
     parm: Option<String>,
     arguments: Option<Vec<Option<Vec<u8>>>>,
     statement_limit: Option<u64>,
+    screens: Option<String>,
 }
 
 impl Harness {
@@ -64,10 +65,17 @@ impl Harness {
             parm: None,
             arguments: None,
             statement_limit: None,
+            screens: None,
         }
     }
 
     /// The statements a run may start before it ends with S322 (`RunUnit::statement_limit`).
+    /// A screen script the operator of positioned ACCEPTs plays, as `ironwork run --screens` reads it.
+    pub fn screens(mut self, script: &str) -> Self {
+        self.screens = Some(script.to_owned());
+        self
+    }
+
     pub fn statement_limit(mut self, limit: u64) -> Self {
         self.statement_limit = Some(limit);
         self
@@ -155,7 +163,7 @@ impl Harness {
         let compiled = compiled.unwrap_or_else(|e| panic!("{e:?}"));
         programs.extend(self.classes.iter().map(|c| syntax::parse(c).unwrap_or_else(|e| panic!("{e}\n{c}"))));
         let fingerprint = rt::sql::fingerprint(&format!("{}\n{}", self.source, self.flags.join(" ")));
-        let library = unit::Library { programs, dirs: self.dirs, copy, flags: self.flags, trace_statements: Some(unit::StatementFilter::All), trace_input: true, statement_limit: self.statement_limit, program_ids: None };
+        let library = unit::Library { programs, dirs: self.dirs, copy, flags: self.flags, trace_statements: Some(unit::StatementFilter::All), trace_input: true, statement_limit: self.statement_limit, program_ids: None, screen: None };
         let lowered = check_lowering(&compiled, fingerprint, None);
         for program in &library.programs {
             // Compiled as `RunUnit::load` compiles a CALLed program; one that does not compile is left out.
@@ -172,7 +180,7 @@ impl Harness {
         };
         let task = self.task.map(|task| cics::Task { commarea: self.commarea.map(|c| compiled.options.code_page().encode(&c).unwrap()), ..task });
         let paths = paths(&self.dds, task.as_ref());
-        let inputs = Inputs { compiled: &compiled, library, dds: self.dds, sysin: self.sysin, clock, database: self.database, paths, parm: self.parm, arguments: self.arguments };
+        let inputs = Inputs { compiled: &compiled, library, dds: self.dds, sysin: self.sysin, clock, database: self.database, paths, parm: self.parm, arguments: self.arguments, screens: self.screens };
         let run = match executor {
             Executor::Vm => {
                 let run = inputs.vm(&vm::code(&compiled), task);
@@ -222,6 +230,7 @@ struct Inputs<'c> {
     paths: Vec<PathBuf>,
     parm: Option<String>,
     arguments: Option<Vec<Option<Vec<u8>>>>,
+    screens: Option<String>,
 }
 
 /// What the differential test compares of a run.
@@ -289,7 +298,15 @@ impl Inputs<'_> {
         Some((recorder, recording))
     }
 
+    /// The library with a screen of its own for one run, and the screen.
+    fn library(&self) -> (unit::Library, Rc<RefCell<rt::crt::Crt>>) {
+        let script = self.screens.as_deref().map(|s| rt::terminal::parse_script(s).unwrap()).unwrap_or_default();
+        let screen = Rc::new(RefCell::new(rt::crt::Crt::new(rt::crt::ROWS, rt::crt::COLUMNS, script)));
+        (unit::Library { screen: Some(screen.clone()), ..self.library.clone() }, screen)
+    }
+
     fn walker(&self, task: Option<cics::Task>) -> Run {
+        let (library, screen) = self.library();
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let (events, observer) = observed();
         let mut remains = None;
@@ -298,20 +315,21 @@ impl Inputs<'_> {
         let db = database.as_mut().map(|d| d as &mut dyn sql::Database);
         let (ending, return_code, task) = match task {
             Some(task) => {
-                let (ending, task) = crate::execute_task(self.compiled, self.library.clone(), dds, task, self.clock, db, &mut out, &mut err, Some(observer), &mut remains);
+                let (ending, task) = crate::execute_task(self.compiled, library, dds, task, self.clock, db, &mut out, &mut err, Some(observer), &mut remains);
                 (ending.map_err(Halt::Abend), 0, Some(task))
             }
-            None => match crate::run_main(self.compiled, self.library.clone(), dds, self.sysin(), self.clock, db, &mut out, &mut err, Some(observer), self.passed(), &mut remains) {
+            None => match crate::run_main(self.compiled, library, dds, self.sysin(), self.clock, db, &mut out, &mut err, Some(observer), self.passed(), &mut remains) {
                 Ok((ending, code)) => (Ok(ending), code, None),
                 Err(abend) => (Err(Halt::Abend(abend)), 0, None),
             },
         };
         drop(database);
-        let (out, err) = (String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap());
+        let (out, err) = (String::from_utf8(out).unwrap() + &screens(&screen), String::from_utf8(err).unwrap());
         Run { out, err, ending, return_code, events: events.take(), remains, files: files(&self.paths), task, sql: recording.map(|r| r.text()).unwrap_or_default() }
     }
 
     fn vm(&self, code: &Code, task: Option<cics::Task>) -> Run {
+        let (library, screen) = self.library();
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let (events, observer) = observed();
         let mut remains = None;
@@ -320,18 +338,28 @@ impl Inputs<'_> {
         let db = database.as_mut().map(|d| d as &mut dyn sql::Database);
         let (ending, return_code, task) = match task {
             Some(task) => {
-                let (ending, task) = vm::execute_cics(self.compiled, code, self.library.clone(), dds, task, self.clock, db, &mut out, &mut err, Some(observer), &mut remains);
+                let (ending, task) = vm::execute_cics(self.compiled, code, library, dds, task, self.clock, db, &mut out, &mut err, Some(observer), &mut remains);
                 (ending, 0, Some(task))
             }
-            None => match vm::execute(self.compiled, code, self.library.clone(), dds, self.sysin(), self.clock, db, &mut out, &mut err, Some(observer), self.passed(), &mut remains) {
+            None => match vm::execute(self.compiled, code, library, dds, self.sysin(), self.clock, db, &mut out, &mut err, Some(observer), self.passed(), &mut remains) {
                 Ok((ending, code)) => (Ok(ending), code, None),
                 Err(halt) => (Err(halt), 0, None),
             },
         };
         drop(database);
-        let (out, err) = (String::from_utf8_lossy(&out).into_owned(), String::from_utf8_lossy(&err).into_owned());
+        let (out, err) = (String::from_utf8_lossy(&out).into_owned() + &screens(&screen), String::from_utf8_lossy(&err).into_owned());
         Run { out, err, ending, return_code, events: events.take(), remains, files: files(&self.paths), task, sql: recording.map(|r| r.text()).unwrap_or_default() }
     }
+}
+
+/// The screens a run showed, as `ironwork run` prints them after the run: each before an ACCEPT,
+/// then the last; nothing when the run did not use the screen.
+fn screens(screen: &Rc<RefCell<rt::crt::Crt>>) -> String {
+    let crt = screen.borrow();
+    if !crt.used {
+        return String::new();
+    }
+    crt.shown.iter().cloned().chain(std::iter::once(crt.render())).enumerate().map(|(n, shown)| format!("--- screen {} ---\n{shown}\n", n + 1)).collect()
 }
 
 /// An observer that keeps what it is told, and what it has kept.

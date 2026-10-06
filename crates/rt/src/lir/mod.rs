@@ -34,7 +34,7 @@ pub use markup::{
 pub use flow::{Declaratives, Frame, FrameKind, Op, Range, RangeKind, Resume, ReturnPoint, Returns, Step, Terminator};
 pub use crate::cics::CicsCommand;
 pub use crate::report::{ReportOp, Writer as ReportWriter};
-pub use payload::{
+pub use payload::{ScreenPlan, ScreenPosition, 
     Argument, DisplayItem, DisplayPlan, FloatFrom, Func, FunctionPlan, Image, InitField, InitPlan, InitValue,
     InvokePlan, MethodName, MovePlan, NationalFrom, NumericFrom, PlaceNumcheck, Receiver, SearchAllPlan, SearchKey, SenderCheck, TrimSide,
 };

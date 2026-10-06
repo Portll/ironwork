@@ -11,7 +11,7 @@ usage:
                [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT | --argument path|OMITTED...]
                [--exit-code] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
-               [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
+               [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind] [--screens path]
                                                        compile and run; CBL and PROCESS cards set the options
   ironwork run <module.iwm> [-L <dir>]... [-I <dir>]... [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
                [--statement-limit N] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
@@ -270,6 +270,10 @@ cics flags:
              libraries as NAME.bms. A task that returns TRANSID is followed, on the same screen,
              by that transaction's task, started by the script's next AID key with the COMMAREA
              RETURN gave, until a task ends without TRANSID or the script has no key left
+             For run under --compliance extended, the operator of the screen positioned DISPLAY
+             and ACCEPT use (24x80): each ACCEPT plays the script to its next key, text typed at
+             the cursor or at ROW COL replacing its field from there; every screen an ACCEPT shows,
+             and the last, is printed after the run
   --serve HOST:PORT
              serve TN3270 on the address, one terminal at a time until interrupted, instead of a
              script. The program runs as --transid's first task with no COMMAREA; RETURN TRANSID
@@ -1068,6 +1072,14 @@ fn driver() -> ExitCode {
         functions_code = functions_code.max(report(&messages, path));
         functions_refused |= refused;
     }
+    let script = match cics_options.iter().find(|(n, _)| command == "run" && n == "--screens") {
+        Some((_, file)) => match fs::read_to_string(file).map_err(|e| e.to_string()).and_then(|t| exec::terminal::parse_script(&t)) {
+            Ok(script) => script,
+            Err(e) => return usage_error(&format!("--screens {file}: {e}")),
+        },
+        None => Vec::new(),
+    };
+    let screen = std::rc::Rc::new(std::cell::RefCell::new(rt::crt::Crt::new(rt::crt::ROWS, rt::crt::COLUMNS, script)));
     let library = exec::unit::Library {
         programs,
         dirs: std::iter::once(own_directory).chain(program_dirs).collect(),
@@ -1077,6 +1089,7 @@ fn driver() -> ExitCode {
         trace_input,
         statement_limit,
         program_ids: None,
+        screen: Some(screen.clone()),
     };
     let compiled = match exec::compile(first, &flags) {
         Ok(c) => c,
@@ -1166,6 +1179,12 @@ fn driver() -> ExitCode {
         (None, None) => compiled.execute_observed(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer).map_err(exec::vm::Halt::Abend),
         (Some(code), parm) => exec::vm::execute(&compiled, code, library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, parm.as_deref().map_or(exec::Passed::Nothing, exec::Passed::Parm), &mut None),
     };
+    if screen.borrow().used {
+        let crt = screen.borrow();
+        for (n, shown) in crt.shown.iter().cloned().chain(std::iter::once(crt.render())).enumerate() {
+            let _ = io::Write::write_fmt(&mut out, format_args!("--- screen {} ---\n{shown}\n", n + 1));
+        }
+    }
     let (outcome, abend) = match &ended {
         Ok((_, return_code)) => (Outcome::Ended(i64::from(*return_code)), None),
         Err(exec::vm::Halt::Abend(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. })) => (Outcome::Ended(0), None),

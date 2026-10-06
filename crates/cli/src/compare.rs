@@ -263,7 +263,7 @@ fn run_side(program: &Path, source: &[u8], req: &Request, specs: &[Spec], snapsh
             }
         }
     }
-    let library = exec::unit::Library { programs, dirs: std::iter::once(own).chain(req.program_dirs.iter().cloned()).collect(), copy: libraries, flags: req.flags.clone(), trace_statements: None, trace_input: false, statement_limit: None, program_ids: None };
+    let library = exec::unit::Library { programs, dirs: std::iter::once(own).chain(req.program_dirs.iter().cloned()).collect(), copy: libraries, flags: req.flags.clone(), trace_statements: None, trace_input: false, statement_limit: None, program_ids: None, screen: None };
     let compiled = match exec::compile(first, &req.flags) {
         Ok(c) => c,
         Err(errors) => return fail(outcome, syntax::most_severe(&errors).map(|e| e.place(&program.display().to_string()).to_string()).unwrap_or_default()),

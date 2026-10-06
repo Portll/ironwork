@@ -261,6 +261,17 @@ fn function_name(name: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// The environment-names DISPLAY UPON and ACCEPT FROM give for Micro Focus's and GnuCOBOL's
+/// screen.
+const CRT_DEVICES: &[&str] = &["CRT", "CRT-UNDER"];
+
+/// The screen attributes a DISPLAY or ACCEPT may name, kept by name.
+const SCREEN_ATTRIBUTES: &[&str] = &[
+    "HIGHLIGHT", "LOWLIGHT", "REVERSE-VIDEO", "BLINK", "UNDERLINE", "BELL", "BEEP", "AUTO", "AUTO-SKIP", "AUTOTERMINATE", "FULL", "LENGTH-CHECK", "REQUIRED",
+    "EMPTY-CHECK", "UPPER", "LOWER", "NO-ECHO", "OVERLINE", "LEFTLINE", "GRID", "PROMPT", "FOREGROUND-COLOR", "FOREGROUND-COLOUR", "BACKGROUND-COLOR",
+    "BACKGROUND-COLOUR", "TIMEOUT", "TIME-OUT", "SIZE", "CONTROL", "SCROLL",
+];
+
 fn usage_word(word: &str) -> Option<Usage> {
     Some(match word {
         "DISPLAY" => Usage::Display,
@@ -1542,6 +1553,70 @@ impl Parser<'_> {
         Ok(e)
     }
 
+    /// Micro Focus's and GnuCOBOL's screen phrases after a DISPLAY's items or an ACCEPT's target,
+    /// added to `phrases`: AT, LINE, COLUMN, ERASE, BLANK, WITH and the field attributes. None when
+    /// there were none and none were written. WITH NO ADVANCING is left for DISPLAY.
+    fn screen_phrases(&mut self, mut phrases: Option<Box<ScreenPhrases>>) -> R<Option<Box<ScreenPhrases>>> {
+        let start = self.pos();
+        loop {
+            if self.is_word("WITH") && self.word_at(1) != Some("NO") {
+                self.at += 1;
+                continue;
+            }
+            let Some(word) = self.word().map(str::to_owned) else { break };
+            let positional = matches!(word.as_str(), "LINE" | "COL" | "COLUMN" | "POSITION");
+            if !(positional || word == "AT" || SCREEN_ATTRIBUTES.contains(&word.as_str()) || matches!(word.as_str(), "ERASE" | "BLANK" | "UPDATE" | "SECURE")) {
+                break;
+            }
+            let p = phrases.get_or_insert_with(|| Box::new(ScreenPhrases { pos: start, ..ScreenPhrases::default() }));
+            self.at += 1;
+            match word.as_str() {
+                "AT" if !matches!(self.word(), Some("LINE" | "COL" | "COLUMN" | "POSITION")) => p.at = Some(ScreenAt::Combined(self.operand()?)),
+                "AT" => {}
+                "LINE" | "COL" | "COLUMN" | "POSITION" => {
+                    self.accept_word("NUMBER");
+                    let at = self.operand()?;
+                    let (mut line, mut column) = match p.at.take() {
+                        Some(ScreenAt::LineColumn { line, column }) => (line, column),
+                        _ => (None, None),
+                    };
+                    if word == "LINE" { line = Some(at) } else { column = Some(at) }
+                    p.at = Some(ScreenAt::LineColumn { line, column });
+                }
+                "ERASE" => match self.accept_any(&["EOL", "EOS", "SCREEN", "LINE"]).as_deref() {
+                    Some("EOL") => p.erase_eol = true,
+                    Some("SCREEN") => p.blank_screen = true,
+                    Some("LINE") => p.blank_line = true,
+                    _ => p.erase_eos = true,
+                },
+                "BLANK" => match self.accept_any(&["SCREEN", "LINE"]).as_deref() {
+                    Some("SCREEN") => p.blank_screen = true,
+                    Some(_) => p.blank_line = true,
+                    None => return Err(self.error("SCREEN or LINE after BLANK")),
+                },
+                "UPDATE" => p.update = true,
+                "SECURE" => p.secure = true,
+                "FOREGROUND-COLOR" | "FOREGROUND-COLOUR" | "BACKGROUND-COLOR" | "BACKGROUND-COLOUR" | "TIMEOUT" | "TIME-OUT" | "SIZE" | "CONTROL" | "SCROLL" => {
+                    self.accept_any(&["IS", "AFTER", "UP", "DOWN"]);
+                    let value = if self.starts_operand() { Some(self.operand()?) } else { None };
+                    p.attributes.push(match value {
+                        Some(Operand::Literal(Literal::Number(n))) => format!("{word} {n}"),
+                        _ => word,
+                    });
+                }
+                "PROMPT" => {
+                    if self.accept_word("CHARACTER") {
+                        self.accept_word("IS");
+                        self.operand()?;
+                    }
+                    p.attributes.push(word);
+                }
+                _ => p.attributes.push(word),
+            }
+        }
+        Ok(phrases)
+    }
+
     /// BINARY-CHAR's optional SIGNED or UNSIGNED after it; SIGNED is the default.
     fn signedness(&mut self, usage: Usage) -> Usage {
         match usage {
@@ -1765,16 +1840,23 @@ impl Parser<'_> {
             "DISPLAY" => {
                 let mut items = Vec::new();
                 let no_advancing_ahead = |p: &Self| p.is_word("NO") && p.word_at(1) == Some("ADVANCING");
-                while self.starts_operand() && !no_advancing_ahead(self) {
+                // LINE and POSITION are reserved words, never items: a screen phrase starts there.
+                while self.starts_operand() && !no_advancing_ahead(self) && !matches!(self.word(), Some("LINE" | "POSITION")) {
                     items.push(self.operand()?);
                 }
-                let upon = if self.accept_word("UPON") {
+                let mut screen = self.screen_phrases(None)?;
+                let mut upon = if self.accept_word("UPON") {
                     let name = self.name("a mnemonic name")?;
                     let device = self.mnemonics.iter().find(|(m, _)| *m == name).map_or_else(|| name.clone(), |(_, e)| e.clone());
                     Some(Upon { name, device })
                 } else {
                     None
                 };
+                if upon.as_ref().is_some_and(|u| CRT_DEVICES.contains(&u.device.as_str())) {
+                    upon = None;
+                    screen.get_or_insert_with(|| Box::new(ScreenPhrases { pos, ..ScreenPhrases::default() }));
+                }
+                screen = self.screen_phrases(screen)?;
                 let no_advancing = self.accept_word("WITH") | no_advancing_ahead(self);
                 if no_advancing {
                     self.expect_word("NO")?;
@@ -1784,7 +1866,7 @@ impl Parser<'_> {
                     }
                 }
                 self.unreserved_terminator("END-DISPLAY", "DISPLAY");
-                Stmt::Display { items, upon, no_advancing, pos }
+                Stmt::Display { items, upon, no_advancing, screen, pos }
             }
             "INITIALIZE" => self.initialize(pos)?,
             "CALL" => Stmt::Call(Box::new(self.call(pos)?)),
@@ -1815,10 +1897,16 @@ impl Parser<'_> {
             }
             "ACCEPT" => {
                 let target = self.reference()?;
+                let mut screen = None;
+                if self.is_word("FROM") && self.word_at(1).is_some_and(|w| CRT_DEVICES.contains(&w)) {
+                    self.at += 2;
+                    screen = Some(Box::new(ScreenPhrases { pos, ..ScreenPhrases::default() }));
+                }
+                let screen = self.screen_phrases(screen)?;
                 if self.is_word("FROM") && self.word_at(1) == Some("ENVIRONMENT") {
                     return Err(crate::messages::IWS0055.at(pos, "ACCEPT ... FROM ENVIRONMENT is GnuCOBOL's, not Enterprise COBOL's"));
                 }
-                let from = if self.accept_word("FROM") {
+                let from = if screen.is_none() && self.accept_word("FROM") {
                     let at = self.pos();
                     match self.name("SYSIN, SYSIPT, CONSOLE, a mnemonic-name for one, DATE, DAY, DAY-OF-WEEK or TIME")?.as_str() {
                         "DATE" => AcceptFrom::Date { four_digit_year: self.accept_word("YYYYMMDD") },
@@ -1842,7 +1930,7 @@ impl Parser<'_> {
                     Ok(0)
                 })?;
                 self.unreserved_terminator("END-ACCEPT", "ACCEPT");
-                Stmt::Accept { target, from, exception, pos }
+                Stmt::Accept { target, from, exception, screen, pos }
             }
             "OPEN" => {
                 let mut files = Vec::new();
@@ -2028,7 +2116,7 @@ impl Parser<'_> {
             "GOBACK" => Stmt::Goback { pos },
             "STOP" if self.accept_word("RUN") => Stmt::StopRun { pos },
             // STOP literal waits for the operator, whom ironwork does not have (assumption C132).
-            "STOP" if self.starts_operand() && !self.starts_ref() => Stmt::Display { items: vec![self.operand()?], upon: Some(Upon { name: "CONSOLE".into(), device: "CONSOLE".into() }), no_advancing: false, pos },
+            "STOP" if self.starts_operand() && !self.starts_ref() => Stmt::Display { items: vec![self.operand()?], upon: Some(Upon { name: "CONSOLE".into(), device: "CONSOLE".into() }), no_advancing: false, screen: None, pos },
             "STOP" => return Err(self.error("RUN or a literal after STOP")),
             "CONTINUE" => Stmt::Continue { pos },
             "EXIT" if self.is_word("FUNCTION") => return Err(crate::messages::IWS0056.at(pos, "EXIT FUNCTION: Enterprise COBOL does not yet support the format 4 EXIT statement; GOBACK ends a user-defined function")),

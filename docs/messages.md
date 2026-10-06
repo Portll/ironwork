@@ -319,6 +319,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0295 | S | `{name}: two programs of {program} have this name, and the programs of a separately compiled program each need their own (--program-scope=flexible allows it)` |
 | IWC0296 | S | `CALL '{name}': no program of the compilation has this name, and --unresolved-calls=fail refuses a static CALL the binder could not resolve` |
 | IWC0297 | S | `FUNCTION {name}: {argument} is numeric, where {name} takes an alphabetic, alphanumeric or national argument` |
+| IWC0298 | S | `{DISPLAY or ACCEPT} on the screen: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
@@ -801,3 +802,4 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0017 | W | `a statement in Area A (Micro Focus and GnuCOBOL; Enterprise COBOL puts statements in Area B): {word} is read as though it began in Area B` |
 | IWX0018 | W | `a numeric argument to FUNCTION {name} (GnuCOBOL; Enterprise COBOL takes an alphabetic, alphanumeric or national one): {item}'s digits are read as its characters` |
 | IWX0019 | W | `OCCURS at level {level} (Micro Focus and GnuCOBOL; Enterprise COBOL takes OCCURS only at levels 02 to 49): {name} is read as a table in a record of its own` |
+| IWX0020 | W | `{DISPLAY or ACCEPT} on the screen (Micro Focus and GnuCOBOL; Enterprise COBOL has none): at {where}` |

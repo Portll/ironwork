@@ -46,7 +46,9 @@ IWX0018-W, a numeric argument to LOWER-CASE, REVERSE, TRIM or UPPER-CASE, is a f
 refuses: both executors evaluate the argument as the item reference-modified from its first
 character (`compile::as_characters`), and a test runs it on both and gives its message under each
 level. IWX0019-W, a table at level 01 or 77, is read before the layout into an unnamed record
-holding the table one level down, which both executors run as any table.
+holding the table one level down, which both executors run as any table. IWX0020-W, the screen, has
+no Enterprise COBOL form: both executors write and read it through `rt::crt`, and the LIR carries
+its ops `ScreenDisplay` and `ScreenAccept`.
 
 ### IWX0001-W free-form source
 
@@ -475,6 +477,45 @@ levels 01 and 77. Assumption C461.
 
 In the census, after BINARY-CHAR, it was the first refusal of 23 distinct sources in 7 directories
 that cobc compiles, all in WORKING-STORAGE at level 01.
+
+### IWX0020-W DISPLAY and ACCEPT on the screen
+
+`IWX0020-W DISPLAY on the screen (Micro Focus and GnuCOBOL; Enterprise COBOL has none): at the line
+and column AT gives`, at the first screen phrase.
+
+A DISPLAY or ACCEPT that names a place on the screen, clears part of it, or gives a field's
+behaviour writes or reads Micro Focus's and GnuCOBOL's screen instead of a device:
+
+    DISPLAY item... [AT {LLCC | LLLCCC | item} | LINE [NUMBER] n | COL[UMN] [NUMBER] n | POSITION n]...
+            [UPON CRT] [WITH] [BLANK {SCREEN | LINE} | ERASE [EOL | EOS | SCREEN | LINE] | attribute]...
+    ACCEPT item [FROM CRT] [AT ... | LINE ... | COL ...] [WITH] [UPDATE | SECURE | attribute]...
+            [ON EXCEPTION ...] [NOT ON EXCEPTION ...] [END-ACCEPT]
+
+`DISPLAY ... UPON CRT` and `ACCEPT ... FROM CRT` with no other phrase use the cursor. The
+attributes (HIGHLIGHT, LOWLIGHT, REVERSE-VIDEO, BLINK, UNDERLINE, BELL, BEEP, AUTO, FULL, REQUIRED,
+PROMPT, FOREGROUND-COLOR n, BACKGROUND-COLOR n, TIMEOUT n and the like) are read and kept by name, and
+change nothing a run shows.
+
+The run unit has one screen of 24 lines of 80 characters, blank at the start. A DISPLAY writes its
+items one after another from its position, after clearing what BLANK or ERASE names, and leaves the
+cursor after them; text past a line's end goes on at the next line, and past the last line is lost.
+An ACCEPT's field is as long as DISPLAY shows the item and holds its value with UPDATE, spaces
+without. `ironwork run --screens path` gives the operator a script, as for a CICS task: `string
+text` typed at the cursor, `type ROW COL text`, `eof ROW COL`, `cursor ROW COL`, `home`, `tab` and a
+key (ENTER, PF1-PF24, PA1-PA3, CLEAR) that ends the ACCEPT. Text typed replaces the field from where
+it is typed to its end. The item takes the field as typed if it is alphanumeric, as NUMVAL reads it
+if numeric (zero where it is no number), and the field then shows the item as stored; SECURE shows
+each character as `*`. A key other than ENTER takes ON EXCEPTION. An ACCEPT the script has no key
+left for ends the run (`ACCEPT: the screen has no more operator input`). After the run, `ironwork
+run` prints each screen an ACCEPT showed, before the operator typed, and the last screen.
+
+This is a clean model of the screen, not cobc's (operator ruling 2026-10-07): cobc 3.2 positions
+only a DISPLAY's last item, overtypes an UPDATE field from the left, reads `3.5` typed into
+`S9(3)V99` as 35.00, and writes a plain DISPLAY on the screen once it is used. Assumption C462.
+Strict refuses each screen phrase with IWC0298. The SCREEN SECTION stays refused (IWR0006).
+
+In the census, after the level-01 tables, positioned DISPLAY and ACCEPT were the first refusal of
+19 distinct sources that cobc compiles; with them, 40 of the 445 such programs compile, from 35.
 
 ## How the six were chosen
 

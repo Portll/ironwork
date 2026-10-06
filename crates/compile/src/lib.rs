@@ -1058,12 +1058,15 @@ impl Check<'_> {
                 }
                 self.statements(other);
             }
-            Stmt::Display { items, upon, pos, .. } => {
+            Stmt::Display { items, upon, screen, pos, .. } => {
                 for o in items {
                     self.operand(o);
                     if let Operand::Function(f) = o {
                         self.displayed_function(f);
                     }
+                }
+                if let Some(screen) = screen {
+                    self.screen("DISPLAY", screen);
                 }
                 if let Some(upon) = upon
                     && upon.device == "ARGUMENT-NUMBER"
@@ -1216,9 +1219,12 @@ impl Check<'_> {
                 }
                 SetStmt::Switches(_) => {}
             },
-            Stmt::Accept { target, from, exception, pos } => {
+            Stmt::Accept { target, from, exception, screen, pos } => {
                 self.reference(target);
-                self.accept_source(*from, exception, target, *pos);
+                match screen {
+                    Some(screen) => self.screen("ACCEPT", screen),
+                    None => self.accept_source(*from, exception, target, *pos),
+                }
                 self.statements(exception.on.as_deref().unwrap_or_default());
                 self.statements(exception.not_on.as_deref().unwrap_or_default());
             }
@@ -1694,6 +1700,32 @@ impl Check<'_> {
         if intrinsic && !user_defined && numeric {
             self.errors.push(syntax::messages::IWC0101.at(f.pos, format!("DISPLAY FUNCTION {name}: an integer or numeric function can be used only where an arithmetic expression can, and DISPLAY takes none")));
         }
+    }
+
+    /// A DISPLAY's or ACCEPT's screen phrases, Micro Focus's and GnuCOBOL's: under `--compliance
+    /// extended` a warning naming where on the screen, refused under strict.
+    fn screen(&mut self, statement: &str, phrases: &ScreenPhrases) {
+        let mut placed = Vec::new();
+        match &phrases.at {
+            Some(ScreenAt::Combined(o)) => placed.push(o),
+            Some(ScreenAt::LineColumn { line, column }) => placed.extend(line.iter().chain(column)),
+            None => {}
+        }
+        for o in placed {
+            self.operand(o);
+        }
+        if !self.extended {
+            self.errors.push(syntax::messages::IWC0298.at(phrases.pos, format!("{statement} on the screen: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it")));
+            return;
+        }
+        let at = match &phrases.at {
+            Some(ScreenAt::Combined(_)) => "the line and column AT gives",
+            Some(ScreenAt::LineColumn { line: Some(_), column: Some(_) }) => "the line and column given",
+            Some(ScreenAt::LineColumn { line: Some(_), column: None }) => "column 1 of the line given",
+            Some(ScreenAt::LineColumn { line: None, .. }) => "the column given on the cursor's line",
+            None => "the cursor",
+        };
+        self.errors.push(syntax::messages::IWX0020.at(phrases.pos, format!("{statement} on the screen (Micro Focus and GnuCOBOL; Enterprise COBOL has none): at {at}")));
     }
 
     /// ACCEPT ... FROM COMMAND-LINE, ARGUMENT-NUMBER and ARGUMENT-VALUE are Micro Focus's and

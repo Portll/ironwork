@@ -295,6 +295,9 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     /// The job step's program arguments, which ACCEPT ... FROM COMMAND-LINE and ARGUMENT-VALUE read
     /// under `--compliance extended`; empty without a PARM.
     pub arguments: crate::le::parm::Arguments,
+    /// The screen positioned DISPLAY and ACCEPT use under `--compliance extended`, and the operator
+    /// a screen script plays; None until one is given or the run first uses the screen.
+    pub crt: Option<Rc<std::cell::RefCell<crate::crt::Crt>>>,
     externals: Externals,
     /// The files of loaded programs that are another's connector, by program and file.
     connectors: HashMap<(usize, usize), Connector>,
@@ -472,6 +475,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             observer: None,
             random: None,
             arguments: Default::default(),
+            crt: None,
             externals: Externals::default(),
             connectors: HashMap::new(),
             entries: Vec::new(),

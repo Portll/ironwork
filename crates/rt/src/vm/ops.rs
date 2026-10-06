@@ -9,7 +9,7 @@ use crate::display;
 use crate::fixed::places_of;
 use crate::host::{Host, Values};
 use super::markup::Receiving;
-use crate::lir::{DisplayItem, InitPlan, InitValue, Inspected, MovePlan, NumericFrom, Op, Operand, PlaceId, SearchAllPlan, SenderCheck, Step, StorePlan, TempId};
+use crate::lir::{DisplayItem, InitPlan, InitValue, Inspected, MovePlan, NumericFrom, Op, Operand, PlaceId, ScreenPlan, ScreenPosition, SearchAllPlan, SenderCheck, Step, StorePlan, TempId};
 use crate::set;
 use crate::storage::{Kind, Loc, Val};
 use crate::store;
@@ -140,6 +140,20 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             Op::ArgumentNumber(value) => {
                 let n = self.int(value, pos)?;
                 self.unit.arguments.position(n);
+            }
+            Op::ScreenDisplay { display, screen } => {
+                let text = self.display_text(*display, pos)?;
+                let at = self.screen_at(screen, pos)?;
+                crate::crt::display(self.unit, at, &text, clearing(screen));
+            }
+            Op::ScreenAccept { target, shown, screen, handled } => {
+                let dest = self.loc_written(*target)?;
+                let text = self.display_text(*shown, pos)?;
+                let at = self.screen_at(screen, pos)?;
+                let raised = crate::crt::accept(&self.facts(), self.unit, dest, &text, at, screen.update, screen.secure, pos)?;
+                if *handled {
+                    return Ok(Step::Arm(u8::from(raised)));
+                }
             }
             Op::Accept { target, from, .. } => {
                 let dest = self.loc_written(*target)?;
@@ -292,6 +306,34 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     /// `Machine::display`: each item as its kind or value shows, the line told to an observer,
     /// then written. A national item is converted only as `DisplayItem::National`, UPON CONSOLE.
     fn display(&mut self, id: u32, pos: Pos) -> R<()> {
+        let shown = self.display_text(id, pos)?;
+        if self.unit.observed() {
+            self.sink("log", pos, &shown);
+        }
+        Ok(display::write(&mut *self.unit.out, &shown, self.p.plans.display[id as usize].no_advancing, pos)?)
+    }
+
+    /// Where a screen DISPLAY or ACCEPT is, or None for the cursor.
+    fn screen_at(&mut self, screen: &ScreenPlan, pos: Pos) -> R<Option<(usize, usize)>> {
+        Ok(match &screen.at {
+            ScreenPosition::Cursor => None,
+            ScreenPosition::Combined(at) => Some(crate::crt::line_column(self.int(at, pos)?.max(0) as u64)),
+            ScreenPosition::LineColumn { line, column } => {
+                let row = match line {
+                    Some(l) => self.int(l, pos)?.max(0) as usize,
+                    None => self.unit.crt.as_ref().map_or(1, |c| c.borrow().cursor_position().0),
+                };
+                let column = match column {
+                    Some(c) => self.int(c, pos)?.max(0) as usize,
+                    None => 1,
+                };
+                Some((row, column))
+            }
+        })
+    }
+
+    /// Plan `id`'s items as one line of text.
+    fn display_text(&mut self, id: u32, pos: Pos) -> R<String> {
         let p = self.p;
         let plan = &p.plans.display[id as usize];
         let mut shown = String::new();
@@ -309,10 +351,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 }
             });
         }
-        if self.unit.observed() {
-            self.sink("log", pos, &shown);
-        }
-        Ok(display::write(&mut *self.unit.out, &shown, plan.no_advancing, pos)?)
+        Ok(shown)
     }
 
     /// `Machine::search` of SEARCH ALL: a binary search setting the index to each occurrence
@@ -382,6 +421,11 @@ impl<L: Loader<Rc<Code>>> Values<PlaceId, Operand> for Vm<'_, '_, '_, L> {
         let val = Vm::value(self, *operand);
         self.lift(val, pos)
     }
+}
+
+/// What a screen DISPLAY clears before it writes.
+fn clearing(screen: &ScreenPlan) -> crate::crt::Clearing {
+    crate::crt::Clearing { screen: screen.blank_screen, line: screen.blank_line, to_line_end: screen.erase_eol, to_screen_end: screen.erase_eos }
 }
 
 #[cfg(test)]

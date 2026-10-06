@@ -706,6 +706,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
             Op::File(f) => p.services.file_ops.get(*f as usize).map_or(0, |op| op.arms()),
             Op::String(_) | Op::Unstring(_) | Op::SearchAll(_) | Op::Return(_) | Op::Accept { from: AcceptFrom::ArgumentValue, .. } => 2,
             Op::Markup(m) if p.services.markup.get(*m as usize).is_some_and(|x| x.phrases() != (false, false)) => 2,
+            Op::ScreenAccept { handled: true, .. } => 2,
             _ => 0,
         };
         let armed = |op: &Op| arms(op) > 0;
@@ -737,6 +738,15 @@ fn verify_program(p: &Program) -> Result<(), String> {
                 Op::SetCount(_, o) if o.check != ssrange => return Err(format!("block {b}: a SEARCH count's check that disagrees with SSRANGE")),
                 Op::SetCount(_, o) => int(&o.object)?,
                 Op::Display(d) => within("DISPLAY plan", *d, p.plans.display.len())?,
+                Op::ScreenDisplay { display, screen } => {
+                    within("DISPLAY plan", *display, p.plans.display.len())?;
+                    screen_ints(screen).try_for_each(int)?;
+                }
+                Op::ScreenAccept { target, shown, screen, .. } => {
+                    place(*target)?;
+                    within("DISPLAY plan", *shown, p.plans.display.len())?;
+                    screen_ints(screen).try_for_each(int)?;
+                }
                 Op::Call(c) => within("CALL plan", *c, p.services.calls.len())?,
                 Op::Cancel(o) => operand(o)?,
                 Op::Invoke(i) => within("INVOKE plan", *i, p.services.invokes.len())?,
@@ -902,4 +912,14 @@ fn verify_scope(p: &Program, range: &dyn Fn(u32, RangeKind) -> Result<(), String
         range(r, RangeKind::UseProcedure)?;
     }
     scope.global_modes.iter().flatten().try_for_each(|&r| range(r, RangeKind::UseProcedure))
+}
+
+/// The integers a screen phrase evaluates.
+fn screen_ints(screen: &rt::lir::ScreenPlan) -> impl Iterator<Item = &IntExpr> {
+    let (a, b, c) = match &screen.at {
+        rt::lir::ScreenPosition::Cursor => (None, None, None),
+        rt::lir::ScreenPosition::Combined(at) => (Some(at), None, None),
+        rt::lir::ScreenPosition::LineColumn { line, column } => (None, line.as_ref(), column.as_ref()),
+    };
+    a.into_iter().chain(b).chain(c)
 }

@@ -124,6 +124,29 @@ pub struct DisplayPlan<P = PlaceId, O = Operand> {
     pub no_advancing: bool,
 }
 
+/// Micro Focus's and GnuCOBOL's screen phrases on a DISPLAY or ACCEPT under `--compliance
+/// extended`: where on the screen, what is cleared before writing, and how an ACCEPT's field
+/// behaves.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScreenPlan {
+    pub at: ScreenPosition,
+    pub blank_screen: bool,
+    pub blank_line: bool,
+    pub erase_eol: bool,
+    pub erase_eos: bool,
+    pub update: bool,
+    pub secure: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ScreenPosition {
+    Cursor,
+    /// AT's number: LLCC, or LLLCCC past 9999.
+    Combined(IntExpr),
+    /// LINE and COLUMN; column 1 without COLUMN, the cursor's line without LINE.
+    LineColumn { line: Option<IntExpr>, column: Option<IntExpr> },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DisplayItem<P = PlaceId, O = Operand> {
     /// Groups, alphanumeric, zoned and edited items, and national items written elsewhere than the
@@ -387,6 +410,8 @@ codec_struct!(InitPlan { fields });
 codec_struct!(InitField { offset, len, value, store, scaling });
 codec_enum!(InitValue { Default(value) = 0, Value(value) = 1, Replacing(value) = 2 });
 codec_struct!(DisplayPlan { items, no_advancing });
+codec_struct!(ScreenPlan { at, blank_screen, blank_line, erase_eol, erase_eos, update, secure });
+codec_enum!(ScreenPosition { Cursor = 0, Combined(at) = 1, LineColumn { line, column } = 2 });
 codec_enum!(DisplayItem {
     Bytes(place) = 0,
     National(place) = 1,

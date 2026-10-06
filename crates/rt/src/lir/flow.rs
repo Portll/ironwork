@@ -3,7 +3,7 @@
 
 use super::{
     AbendId, ArithId, BlockId, CallId, CicsId, CondId, DisplayId, ExprId, FileOpId, InitId, InspectId, IntExpr,
-    InvokeId, MarkupId, MovePlan, Odo, Operand, ParaId, PlaceId, RangeId, ReleaseId, ReportOp, ReturnId, SearchAllId, SenderCheck, SortId, SqlId,
+    InvokeId, MarkupId, MovePlan, Odo, Operand, ParaId, PlaceId, RangeId, ReleaseId, ReportOp, ReturnId, ScreenPlan, SearchAllId, SenderCheck, SortId, SqlId,
     StepPlan, StringId, SymId, TempId, UnstringId, UpDown,
 };
 use crate::abend::Ending;
@@ -51,6 +51,13 @@ pub enum Op {
     /// DISPLAY ... UPON ARGUMENT-NUMBER under `--compliance extended`: the next ACCEPT ... FROM
     /// ARGUMENT-VALUE takes the PARM argument word this numbers.
     ArgumentNumber(IntExpr),
+    /// DISPLAY on the screen under `--compliance extended`: plan `display`'s text written where
+    /// `screen` puts it.
+    ScreenDisplay { display: DisplayId, screen: ScreenPlan },
+    /// ACCEPT from a field of the screen under `--compliance extended`: the field shows the
+    /// target as plan `shown` does; with ON EXCEPTION phrases, `handled`, Arm(1) when a key other
+    /// than ENTER ended it.
+    ScreenAccept { target: PlaceId, shown: DisplayId, screen: ScreenPlan, handled: bool },
     File(FileOpId),
     Call(CallId),
     Cancel(Operand),
@@ -252,6 +259,8 @@ codec_enum!(Op {
     SetCount(temp, odo) = 34,
     SetEntry { entry, targets } = 35,
     ArgumentNumber(value) = 36,
+    ScreenDisplay { display, screen } = 37,
+    ScreenAccept { target, shown, screen, handled } = 38,
 });
 codec_enum!(Step { Next = 0, Arm(arm) = 1, GoTo(para) = 2, End(ending) = 3, Return(frame) = 4, Resume(resume) = 5 });
 codec_enum!(Terminator {

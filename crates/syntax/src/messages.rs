@@ -343,6 +343,7 @@ catalogue! {
     IWC0295 Severe "{name}: two programs of {program} have this name, and the programs of a separately compiled program each need their own (--program-scope=flexible allows it)";
     IWC0296 Severe "CALL '{name}': no program of the compilation has this name, and --unresolved-calls=fail refuses a static CALL the binder could not resolve";
     IWC0297 Severe "FUNCTION {name}: {argument} is numeric, where {name} takes an alphabetic, alphanumeric or national argument";
+    IWC0298 Severe "{DISPLAY or ACCEPT} on the screen: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
     IWJ0003 Severe "unbalanced parentheses or quotes in {text}";
@@ -825,6 +826,7 @@ catalogue! {
     IWX0017 Warning "a statement in Area A (Micro Focus and GnuCOBOL; Enterprise COBOL puts statements in Area B): {word} is read as though it began in Area B";
     IWX0018 Warning "a numeric argument to FUNCTION {name} (GnuCOBOL; Enterprise COBOL takes an alphabetic, alphanumeric or national one): {item}'s digits are read as its characters";
     IWX0019 Warning "OCCURS at level {level} (Micro Focus and GnuCOBOL; Enterprise COBOL takes OCCURS only at levels 02 to 49): {name} is read as a table in a record of its own";
+    IWX0020 Warning "{DISPLAY or ACCEPT} on the screen (Micro Focus and GnuCOBOL; Enterprise COBOL has none): at {where}";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

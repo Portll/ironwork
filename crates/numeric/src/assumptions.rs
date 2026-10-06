@@ -354,6 +354,7 @@ pub const FUNCTION_ARGUMENT_MESSAGES: &str = "C452";
 pub const OUT_OF_SCOPE_CALL_NOT_FOUND: &str = "C470";
 pub const BINARY_CHAR: &str = "C460";
 pub const TOP_LEVEL_TABLE: &str = "C461";
+pub const SCREEN_MODEL: &str = "C462";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2222,6 +2223,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: MISSING_PROGRAM,
         claim: "A dynamic CALL (of an identifier, or of a literal under DYNAM), SET TO ENTRY or user-defined function invocation that finds no program of the name, with no ON EXCEPTION phrase, raises CEE3501S 'The module name was not found.' (Language Environment Runtime Messages, CEE3501S: 'Module is not loaded. The application might abend'); IBM's own example of a COBOL dynamic CALL of a nonexistent program ends so, the condition unhandled (Language Environment Debugging Guide, 'Calling a nonexistent subroutine'). A condition of severity 3 that nothing handles ends the run U4038 under the default ABTERMENC(ABEND), as an SSRANGE failure does, the message given as IBM words it. Under NODYNAM a CALL of a literal is resolved by the binder, which reports a name no library holds as IEW2456E 'SYMBOL name UNRESOLVED' (MVS System Messages, IEW2456E) and leaves a load module that does not run: ironwork, which binds nothing, stops at the CALL with that message as its own refusal, and by its own choice still runs such a CALL's ON EXCEPTION phrase, which IBM's binder leaves no run to reach. A Language Environment callable service ironwork does not provide is its own refusal too, the service existing on z/OS. A job step whose EXEC PGM= names no program still ends S806, as the system's fetch of it does",
         basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: SCREEN_MODEL,
+        claim: "Under --compliance extended, Micro Focus's and GnuCOBOL's positioned DISPLAY and ACCEPT use one screen of 24 lines of 80 characters for the run unit, blank at the start, with a cursor at line 1, column 1. AT's number is LLCC, or LLLCCC past 9999; LINE without COLUMN is column 1, COLUMN without LINE the cursor's line, and neither the cursor. A DISPLAY writes all its items one after another from its position, as DISPLAY joins them on SYSOUT, after BLANK SCREEN or ERASE SCREEN clears the screen, BLANK LINE its line, ERASE EOL the line from the position and ERASE EOS or ERASE the screen from it; text past a line's end goes on at the next, and past the last line is lost. An ACCEPT's field is as long as DISPLAY shows the item, holding its value with UPDATE and spaces without; text the operator types replaces the field from where it is typed to the field's end; ENTER or another key ends it, a key other than ENTER taking ON EXCEPTION; the item then takes the field as typed if alphanumeric, or as NUMVAL reads it, zero where it is no number, and the field shows the item as stored. SECURE shows each character as *. Colours and the other attributes are kept by name and not shown. A plain DISPLAY goes to SYSOUT as before. cobc 3.2 differs: it positions only a DISPLAY's last item, writing the others at the cursor; it overtypes an UPDATE field from the left (007 and 42 give 427); it reads 3.5 typed into S9(3)V99 as 35.00; and a plain DISPLAY after the screen is used writes on it at line 1 (operator ruling 2026-10-07: the documented meaning, not cobc's)",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {

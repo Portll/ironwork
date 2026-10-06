@@ -458,3 +458,56 @@ fn a_table_at_level_01_or_77_is_a_record_of_its_own_alike_on_both_executors() {
     assert_eq!(diagnostics_under(TOP_LEVEL_TABLES, numeric::Compliance::Extended), [(6, 8, Some("IWX0019"), Severity::Warning), (9, 8, Some("IWX0019"), Severity::Warning)]);
     assert_eq!(diagnostics_under(TOP_LEVEL_TABLES, numeric::Compliance::Strict), [(6, 8, Some("IWC0027"), Severity::Severe)]);
 }
+
+/// Positioned DISPLAYs and ACCEPTs on the screen: AT a number and an item, LINE and COL, ERASE,
+/// UPDATE and SECURE fields, and a function key ON EXCEPTION.
+const SCREEN: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. SCR.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  NAME PIC X(8) VALUE 'ALICE'.\n",
+    "       01  QTY  PIC 9(3) VALUE 7.\n",
+    "       01  PW   PIC X(4).\n",
+    "       01  WPOS PIC 9(4) VALUE 0510.\n",
+    "       01  L    PIC 99 VALUE 7.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY 'ROW1COL1' AT 0101\n",
+    "           DISPLAY 'XXXXXXXXXX' AT 0201\n",
+    "           DISPLAY 'AB' AT 0205 WITH ERASE EOL\n",
+    "           DISPLAY NAME AT WPOS\n",
+    "           DISPLAY 'P' 'Q' 'R' LINE L COL 10\n",
+    "           DISPLAY 'HI' AT 0801 WITH HIGHLIGHT FOREGROUND-COLOR 2\n",
+    "           ACCEPT NAME AT 1001\n",
+    "           ACCEPT QTY AT 1101 WITH UPDATE\n",
+    "           ACCEPT PW AT 1201 WITH SECURE\n",
+    "               ON EXCEPTION DISPLAY 'KEY' AT 1301\n",
+    "               NOT ON EXCEPTION DISPLAY 'ENTER' AT 1301\n",
+    "           END-ACCEPT\n",
+    "           DISPLAY NAME '|' QTY '|' PW\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn positioned_display_and_accept_use_one_screen_alike_on_both_executors() {
+    let script = "string BOB\nENTER\nstring 42\nENTER\nstring PW\nPF3\n";
+    let walked = Harness::source(SCREEN).flags(EXTENDED).screens(script).run(Executor::Interpreter);
+    let first = "ROW1COL1\nXXXXAB\n\n\n         ALICE\n\n         PQR\nHI";
+    let expected = format!(
+        "BOB     |042|PW  \n--- screen 1 ---\n{first}\n--- screen 2 ---\n{first}\n\nBOB\n007\n--- screen 3 ---\n{first}\n\nBOB\n042\n--- screen 4 ---\n{first}\n\nBOB\n042\n**\nKEY\n"
+    );
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (expected.as_str(), Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(SCREEN).flags(EXTENDED).screens(script).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+}
+
+#[test]
+fn an_accept_with_no_key_left_ends_the_run_and_strict_refuses_the_screen_by_name() {
+    let short = Harness::source(SCREEN).flags(EXTENDED).screens("string BOB\nENTER\n").run(Executor::Interpreter);
+    assert_eq!(short.ending.as_ref().err().map(|a| a.message.as_str()), Some("ACCEPT: the screen has no more operator input"));
+    let strict = diagnostics_under(SCREEN, numeric::Compliance::Strict);
+    assert_eq!(strict.iter().filter(|d| d.2 == Some("IWC0298")).count(), 11, "{strict:?}");
+    let extended = diagnostics_under(SCREEN, numeric::Compliance::Extended);
+    assert!(extended.iter().all(|d| d.3 == Severity::Warning), "{extended:?}");
+    assert_eq!(extended.iter().filter(|d| d.2 == Some("IWX0020")).count(), 11, "{extended:?}");
+}

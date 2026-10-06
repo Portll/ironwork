@@ -234,6 +234,30 @@ impl Lower<'_> {
 
     /// `Machine::display`: each item shown as its kind is, literals as their text, national data
     /// converted only `upon_console`.
+    /// A DISPLAY's or ACCEPT's screen phrases: where, as integers evaluated when it runs, and what
+    /// is cleared.
+    pub(super) fn screen_plan(&mut self, phrases: &syntax::ast::ScreenPhrases, pos: Pos) -> R<lir::ScreenPlan> {
+        let int = |l: &mut Self, o: &Operand| l.int_expr(&syntax::ast::Expr::Operand(o.clone()), pos);
+        let at = match &phrases.at {
+            None => lir::ScreenPosition::Cursor,
+            Some(syntax::ast::ScreenAt::Combined(o)) => lir::ScreenPosition::Combined(int(self, o)?),
+            Some(syntax::ast::ScreenAt::LineColumn { line, column }) => {
+                let line = line.as_ref().map(|o| int(self, o)).transpose()?;
+                let column = column.as_ref().map(|o| int(self, o)).transpose()?;
+                lir::ScreenPosition::LineColumn { line, column }
+            }
+        };
+        Ok(lir::ScreenPlan {
+            at,
+            blank_screen: phrases.blank_screen,
+            blank_line: phrases.blank_line,
+            erase_eol: phrases.erase_eol,
+            erase_eos: phrases.erase_eos,
+            update: phrases.update,
+            secure: phrases.secure,
+        })
+    }
+
     pub(super) fn display_plan(&mut self, items: &[Operand], upon_console: bool, no_advancing: bool, pos: Pos) -> R<DisplayId> {
         let mut shown = Vec::with_capacity(items.len());
         for op in items {

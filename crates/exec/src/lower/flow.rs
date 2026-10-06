@@ -396,7 +396,12 @@ impl Lower<'_> {
                 let n = self.int_expr(&Expr::Operand(item.clone()), pos)?;
                 self.op(Op::ArgumentNumber(n), pos)?;
             }
-            Stmt::Display { items, upon, no_advancing, pos: _ } => {
+            Stmt::Display { items, screen: Some(screen), .. } => {
+                let display = self.display_plan(items, false, false, pos)?;
+                let screen = self.screen_plan(screen, pos)?;
+                self.op(Op::ScreenDisplay { display, screen }, pos)?;
+            }
+            Stmt::Display { items, upon, no_advancing, screen: None, pos: _ } => {
                 let plan = self.display_plan(items, crate::machine::upon_console(upon.as_ref()), *no_advancing, pos)?;
                 self.op(Op::Display(plan), pos)?;
             }
@@ -453,7 +458,17 @@ impl Lower<'_> {
                 self.op(Op::Inspect(plan), pos)?;
             }
             Stmt::Search(se) => self.search(se, pos, &inner)?,
-            Stmt::Accept { target, from, exception, pos: _ } => {
+            Stmt::Accept { target, exception, screen: Some(screen), .. } => {
+                let place = self.place(target, true)?;
+                let shown = self.display_plan(&[Operand::Ref(target.clone())], false, false, pos)?;
+                let screen = self.screen_plan(screen, pos)?;
+                let handled = exception.on.is_some() || exception.not_on.is_some();
+                self.op(Op::ScreenAccept { target: place, shown, screen, handled }, pos)?;
+                if handled {
+                    self.select(exception.on.as_deref(), exception.not_on.as_deref(), pos, &inner)?;
+                }
+            }
+            Stmt::Accept { target, from, exception, screen: None, pos: _ } => {
                 let place = self.place(target, true)?;
                 let value = match from {
                     AcceptFrom::Sysin | AcceptFrom::CommandLine | AcceptFrom::ArgumentValue => Side { value: Value::Bytes, src: None, digits: 0 },

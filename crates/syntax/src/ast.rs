@@ -499,7 +499,9 @@ pub enum Stmt {
     PerformInline { body: Vec<Stmt>, repeat: Loop, pos: Pos },
     PerformProc { from: ProcName, thru: Option<ProcName>, repeat: Loop, pos: Pos },
     Evaluate { subjects: Vec<Subject>, whens: Vec<When>, other: Vec<Stmt>, pos: Pos },
-    Display { items: Vec<Operand>, upon: Option<Upon>, no_advancing: bool, pos: Pos },
+    /// DISPLAY; `screen` holds Micro Focus's and GnuCOBOL's screen phrases, or UPON CRT, which
+    /// write the items on the screen instead of a device.
+    Display { items: Vec<Operand>, upon: Option<Upon>, no_advancing: bool, screen: Option<Box<ScreenPhrases>>, pos: Pos },
     Open { files: Vec<(OpenMode, String)>, pos: Pos },
     Close { files: Vec<(String, Option<Closing>)>, pos: Pos },
     Read(Box<ReadStmt>),
@@ -524,8 +526,9 @@ pub enum Stmt {
     Cancel { targets: Vec<Operand>, pos: Pos },
     Set { set: SetStmt, pos: Pos },
     /// ACCEPT; `exception` is the ON EXCEPTION phrases `--compliance extended` reads with
-    /// ARGUMENT-VALUE.
-    Accept { target: Ref, from: AcceptFrom, exception: Handlers, pos: Pos },
+    /// ARGUMENT-VALUE, and `screen` the screen phrases, or FROM CRT, that read the target from a
+    /// field of the screen.
+    Accept { target: Ref, from: AcceptFrom, exception: Handlers, screen: Option<Box<ScreenPhrases>>, pos: Pos },
     String(Box<StringStmt>),
     Unstring(Box<Unstring>),
     Inspect(Box<Inspect>),
@@ -937,6 +940,29 @@ pub struct Switch {
     pub on: Option<String>,
     pub off: Option<String>,
     pub pos: Pos,
+}
+
+/// Micro Focus's and GnuCOBOL's phrases that put a DISPLAY's items or an ACCEPT's field on the
+/// screen: where, what is cleared first, and how the field behaves. `attributes` keeps the others
+/// by name, as written.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ScreenPhrases {
+    pub at: Option<ScreenAt>,
+    pub blank_screen: bool,
+    pub blank_line: bool,
+    pub erase_eol: bool,
+    pub erase_eos: bool,
+    pub update: bool,
+    pub secure: bool,
+    pub attributes: Vec<String>,
+    pub pos: Pos,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ScreenAt {
+    /// AT and four or six digits, or an item holding them: the line, then the column.
+    Combined(Operand),
+    LineColumn { line: Option<Operand>, column: Option<Operand> },
 }
 
 /// DISPLAY's UPON phrase: the name as written, and the environment-name it stands for, a

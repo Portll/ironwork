@@ -12,7 +12,7 @@ use super::{
     StorePlan, StringId, SymId, Terminator, TrimSide, UnstringId, UpDown, UserArgument, UserFunctionId, XmlForm, XmlNode, XmlRegister,
     XmlValue,
 };
-use super::{Markup, ReleaseId, SortId, SqlId};
+use super::{Markup, ReleaseId, ScreenPlan, ScreenPosition, SortId, SqlId};
 use crate::abend::Ending;
 use crate::cics::{Cics, CicsCommand, Datum, Handles};
 use crate::files::Format;
@@ -722,6 +722,10 @@ impl<'a> Printer<'a> {
             Op::SetCount(t, odo) => format!("SetCount t{t} <- {}", self.odo(odo)),
             Op::Display(id) => self.display(*id),
             Op::ArgumentNumber(value) => format!("ArgumentNumber <- {}", self.int(value)),
+            Op::ScreenDisplay { display, screen } => format!("Screen{} {}", self.display(*display), self.screen(screen)),
+            Op::ScreenAccept { target, shown, screen, handled } => {
+                format!("ScreenAccept {} shown {} {}{}", self.place(*target), self.display(*shown), self.screen(screen), if *handled { " handled" } else { "" })
+            }
             Op::Accept { target, from, plan } => format!("Accept {} <- {}{}", self.place(*target), accept_from(*from), self.moved(plan, SenderCheck::None)),
             Op::File(id) => self.file_op(*id),
             Op::Call(id) => self.call(*id),
@@ -783,6 +787,18 @@ impl<'a> Printer<'a> {
             how.push(format!("probe {}", self.places(&s.probe)));
         }
         format!("{} <- {}{}", self.place(s.target), self.expr(s.expr), attrs('[', how))
+    }
+
+    fn screen(&self, s: &ScreenPlan) -> String {
+        let at = match &s.at {
+            ScreenPosition::Cursor => "cursor".to_owned(),
+            ScreenPosition::Combined(at) => format!("at {}", self.int(at)),
+            ScreenPosition::LineColumn { line, column } => {
+                format!("line {} column {}", line.as_ref().map_or("cursor".to_owned(), |l| self.int(l)), column.as_ref().map_or("1".to_owned(), |c| self.int(c)))
+            }
+        };
+        let flags = [(s.blank_screen, " blank-screen"), (s.blank_line, " blank-line"), (s.erase_eol, " erase-eol"), (s.erase_eos, " erase-eos"), (s.update, " update"), (s.secure, " secure")];
+        format!("[{at}{}]", flags.iter().filter(|(on, _)| *on).map(|(_, name)| *name).collect::<String>())
     }
 
     fn display(&self, id: DisplayId) -> String {

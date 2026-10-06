@@ -337,7 +337,12 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 };
                 self.unit.arguments.position(n);
             }
-            Stmt::Display { items, upon, no_advancing, pos } => self.display(items, upon_console(upon.as_ref()), *no_advancing, *pos)?,
+            Stmt::Display { items, screen: Some(screen), pos, .. } => {
+                let text = self.display_text(items, false, *pos)?;
+                let at = self.screen_at(screen, *pos)?;
+                rt::crt::display(self.unit, at, &text, clearing(screen));
+            }
+            Stmt::Display { items, upon, no_advancing, pos, .. } => self.display(items, upon_console(upon.as_ref()), *no_advancing, *pos)?,
             Stmt::Open { files, pos } => {
                 for (mode, name) in files {
                     self.open_file(*mode, name, *pos)?;
@@ -408,7 +413,14 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 }
             }
             Stmt::Set { set, pos } => self.set(set, *pos)?,
-            Stmt::Accept { target, from: from @ AcceptFrom::ArgumentValue, exception, pos } => {
+            Stmt::Accept { target, exception, screen: Some(screen), pos, .. } => {
+                let loc = self.locate(target)?;
+                let shown = rt::display::place(&self.facts(), &self.unit.mem, loc, target.pos, false)?;
+                let at = self.screen_at(screen, *pos)?;
+                let raised = rt::crt::accept(&self.facts(), self.unit, loc, &shown, at, screen.update, screen.secure, *pos)?;
+                return self.overflow_branch(raised, &exception.on, &exception.not_on);
+            }
+            Stmt::Accept { target, from: from @ AcceptFrom::ArgumentValue, exception, pos, .. } => {
                 let raised = self.accept(target, *from, *pos)?;
                 return self.overflow_branch(raised, &exception.on, &exception.not_on);
             }
@@ -1691,6 +1703,37 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn display(&mut self, items: &[Operand], upon_console: bool, no_advancing: bool, pos: Pos) -> R<()> {
+        let text = self.display_text(items, upon_console, pos)?;
+        if self.unit.observed() {
+            self.sink("log", pos, &text);
+        }
+        rt::display::write(&mut *self.unit.out, &text, no_advancing, pos)
+    }
+
+    /// The line and column a screen DISPLAY or ACCEPT is at, or None for the cursor: AT's number
+    /// as LLCC or LLLCCC, or LINE and COLUMN, column 1 where only LINE is given and the cursor's
+    /// line where only COLUMN is.
+    fn screen_at(&mut self, screen: &ScreenPhrases, pos: Pos) -> R<Option<(usize, usize)>> {
+        let number = |m: &mut Self, o: &Operand| -> R<usize> { Ok(m.integer(&Expr::Operand(o.clone()), pos)?.max(0) as usize) };
+        Ok(match &screen.at {
+            None => None,
+            Some(ScreenAt::Combined(o)) => Some(rt::crt::line_column(number(self, o)? as u64)),
+            Some(ScreenAt::LineColumn { line, column }) => {
+                let row = match line {
+                    Some(l) => number(self, l)?,
+                    None => self.unit.crt.as_ref().map_or(1, |c| c.borrow().cursor_position().0),
+                };
+                let column = match column {
+                    Some(c) => number(self, c)?,
+                    None => 1,
+                };
+                Some((row, column))
+            }
+        })
+    }
+
+    /// DISPLAY's items as one line of text.
+    fn display_text(&mut self, items: &[Operand], upon_console: bool, pos: Pos) -> R<String> {
         let mut text = String::new();
         for op in items {
             let shown = match op {
@@ -1706,10 +1749,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             };
             text.push_str(&shown);
         }
-        if self.unit.observed() {
-            self.sink("log", pos, &text);
-        }
-        rt::display::write(&mut *self.unit.out, &text, no_advancing, pos)
+        Ok(text)
     }
 
     /// The implicit MOVEs of INITIALIZE to item `index` at `offset`.
@@ -1829,6 +1869,11 @@ pub(crate) fn divided_exponent(e: &Expr) -> bool {
 
 /// Whether DISPLAY writes to the console, whose national data is converted (Language Reference
 /// SC27-8713-03, p. 333).
+/// What a screen DISPLAY clears before it writes.
+pub(crate) fn clearing(screen: &ScreenPhrases) -> rt::crt::Clearing {
+    rt::crt::Clearing { screen: screen.blank_screen, line: screen.blank_line, to_line_end: screen.erase_eol, to_screen_end: screen.erase_eos }
+}
+
 pub(crate) fn upon_console(upon: Option<&Upon>) -> bool {
     upon.is_some_and(|u| u.device == "CONSOLE")
 }

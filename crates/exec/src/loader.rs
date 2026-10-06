@@ -26,6 +26,9 @@ pub struct Library {
     pub trace_input: bool,
     /// How many statements may start before the run ends with S322 (`RunUnit::statement_limit`).
     pub statement_limit: Option<u64>,
+    /// The screen positioned DISPLAY and ACCEPT use, with the operator a screen script plays;
+    /// None gives each run a blank screen with no operator.
+    pub screen: Option<std::rc::Rc<std::cell::RefCell<rt::crt::Crt>>>,
     /// Each PROGRAM-ID the source files of `dirs` hold, with its file, read the first time a CALL
     /// names no member.
     pub program_ids: Option<Vec<(String, PathBuf)>>,

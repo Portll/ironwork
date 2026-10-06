@@ -573,7 +573,8 @@ what the 0.x formats came to hold, the files that take their name from a data it
 SSRANGE checks against their tables at the `LIR` section's end, and the `--assume` choices at the
 `OPTIONS` section's end, each written only when there is one, and adds `program_scope`,
 `unresolved_calls` and `le_services` to `Options` (§5.1) and a `Native` of `BinaryChar` for
-BINARY-CHAR under `--compliance extended` (§5.2). A 0.x module is refused, and compiling the
+BINARY-CHAR under `--compliance extended` (§5.2), and the screen ops `ScreenDisplay` and `ScreenAccept`
+(lir.md §9.1). A 0.x module is refused, and compiling the
 source again is the remedy (question 1).
 
 | The reader finds | It does |
