@@ -45,7 +45,8 @@ using it on both executors and compares the runs with cobc's.
 IWX0018-W, a numeric argument to LOWER-CASE, REVERSE, TRIM or UPPER-CASE, is a form Enterprise COBOL
 refuses: both executors evaluate the argument as the item reference-modified from its first
 character (`compile::as_characters`), and a test runs it on both and gives its message under each
-level.
+level. IWX0019-W, a table at level 01 or 77, is read before the layout into an unnamed record
+holding the table one level down, which both executors run as any table.
 
 ### IWX0001-W free-form source
 
@@ -458,6 +459,22 @@ In the 3,000-program census of v0.7.0 BINARY-CHAR was the first refusal of 48 pr
 repositories under extended, cobc accepting all 48, 27 of them programs of ACAS, a GnuCOBOL
 accounting system; every one of the 48 then stops at a further extension (DISPLAY and ACCEPT AT 17,
 LOCK MODE 8, SET ENVIRONMENT 4, among others), so BINARY-CHAR alone compiles none of them.
+
+### IWX0019-W OCCURS at level 01 or 77
+
+`IWX0019-W OCCURS at level 01 (Micro Focus and GnuCOBOL; Enterprise COBOL takes OCCURS only at
+levels 02 to 49): T is read as a table in a record of its own`, at the entry.
+
+An entry of level 01 or 77 in WORKING-STORAGE or LOCAL-STORAGE with OCCURS is read as an unnamed 01
+record holding the table at level 02, each entry under it a level lower too. Its occurrences follow
+one another as a level-02 table's do, the records before and after it untouched, as cobc 3.2 lays
+it out. A reference to it takes a subscript, and a VALUE on it gives every occurrence that value.
+An entry with REDEFINES, EXTERNAL or GLOBAL, one in the LINKAGE SECTION or a file's records, and one
+with a level-49 entry under it stay refused with IWC0027, as Enterprise COBOL refuses OCCURS at
+levels 01 and 77. Assumption C461.
+
+In the census, after BINARY-CHAR, it was the first refusal of 23 distinct sources in 7 directories
+that cobc compiles, all in WORKING-STORAGE at level 01.
 
 ## How the six were chosen
 

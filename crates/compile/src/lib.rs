@@ -155,7 +155,7 @@ fn compile_time_from(epoch: Option<&std::ffi::OsStr>, clock: std::time::Duration
 pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: bool, when_compiled: CompileTime) -> Result<Compiled, Vec<Error>> {
     let mut errors = std::mem::take(&mut program.messages);
     reserved::check(&program, &mut errors);
-    let declared = program.working_storage.len();
+    let mut declared = program.working_storage.len();
     let mut program = declaratives::with_debug_item(markup::with_special_registers(sort::with_special_registers(program)));
     switches::declare(&mut program, &mut errors);
     qualify_in_own_section(&mut program);
@@ -175,6 +175,11 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         if let Err(e) = options.apply(option) {
             errors.push(syntax::messages::IWO0001.at(Pos::default(), format!("CBL {option}: {e}")).graded(option_severity(&e)));
         }
+    }
+    if options.compliance == numeric::Compliance::Extended {
+        let inserted = top_level_tables(&mut program.working_storage, &mut errors);
+        declared += inserted.iter().filter(|&&at| at < declared).count();
+        top_level_tables(&mut program.local_storage, &mut errors);
     }
     let page = options.code_page();
     if let Err((message, m)) = syntax::parser::decode_currency(&mut program.environment, |bytes| page.decode(bytes)) {
@@ -805,6 +810,38 @@ pub fn procedure(program: &Program, p: &ProcName) -> Result<(usize, usize), Unna
 /// Under ARITH(COMPAT) a numeric or numeric-edited PICTURE, scaling positions P included, and a
 /// fixed-point numeric literal hold at most 18 digits, and under ARITH(EXTEND) 31 (Language
 /// Reference SC27-8713-03, pp. 45, 209, 217-218; Programming Guide SC27-8714-03, p. 349).
+/// An 01 or 77 entry with OCCURS, which Micro Focus and GnuCOBOL take and Enterprise COBOL does not,
+/// read under `--compliance extended` as an unnamed 01 group holding the table one level down, its
+/// subordinate entries a level lower too, with IWX0019-W. An entry REDEFINES, EXTERNAL or GLOBAL
+/// names, or one with a level-49 entry under it, is left for the layout to refuse (IWC0027).
+/// Assumption C461.
+/// Returns where each record was inserted, counted in the entries as they were before.
+fn top_level_tables(entries: &mut Vec<DataEntry>, errors: &mut Vec<Error>) -> Vec<usize> {
+    let mut inserted = Vec::new();
+    let mut at = 0;
+    while at < entries.len() {
+        let e = &entries[at];
+        let end = at + 1 + entries[at + 1..].iter().take_while(|d| (2..=49).contains(&d.level) || d.level == 88).count();
+        let movable = matches!(e.level, 1 | 77) && e.occurs.is_some() && e.redefines.is_none() && !e.external && !e.global && entries[at + 1..end].iter().all(|d| d.level != 49);
+        if !movable {
+            at = end.max(at + 1);
+            continue;
+        }
+        let name = e.name.clone().unwrap_or_else(|| "FILLER".into());
+        errors.push(syntax::messages::IWX0019.at(e.pos, format!("OCCURS at level {:02} (Micro Focus and GnuCOBOL; Enterprise COBOL takes OCCURS only at levels 02 to 49): {name} is read as a table in a record of its own", e.level)));
+        let record = DataEntry { level: 1, name: None, spelled: None, picture: None, usage: None, value: None, redefines: None, occurs: None, occurs_min: None, depending_on: None, sign: None, justified: false, sync: false, blank_when_zero: false, indexed_by: Vec::new(), keys: Vec::new(), condition_values: Vec::new(), false_value: None, renames: None, object_class: None, external: false, global: false, pos: e.pos };
+        for d in &mut entries[at..end] {
+            if d.level != 88 {
+                d.level = if d.level == 77 { 2 } else { d.level + 1 };
+            }
+        }
+        entries.insert(at, record);
+        inserted.push(at - inserted.len());
+        at = end + 1;
+    }
+    inserted
+}
+
 /// BINARY-CHAR, Micro Focus's and GnuCOBOL's one-byte binary: a warning naming its range under
 /// `--compliance extended` (assumption C460), refused under strict.
 fn binary_chars(program: &Program, options: &Options, errors: &mut Vec<Error>) {

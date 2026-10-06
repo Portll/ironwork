@@ -424,3 +424,37 @@ fn gnucobols_binary_usages_keep_their_bytes_as_cobc_does_on_both_executors() {
     let vm = Harness::source(GNUCOBOL_BINARY).flags(&flags).run(Executor::Vm);
     assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
 }
+
+/// Tables declared at level 01 and 77, with records on each side of them.
+const TOP_LEVEL_TABLES: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. OCC01.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  BEFORE-T PIC X(3) VALUE 'ABC'.\n",
+    "       01  T OCCURS 3 TIMES.\n",
+    "           05  T-NAME PIC X(4).\n",
+    "           05  T-NUM  PIC 9(2).\n",
+    "       77  C PIC 9 OCCURS 4 VALUE 7.\n",
+    "       01  AFTER-T PIC X(3) VALUE 'XYZ'.\n",
+    "       01  I PIC 9.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           PERFORM VARYING I FROM 1 BY 1 UNTIL I > 3\n",
+    "               MOVE 'NM' TO T-NAME(I)\n",
+    "               COMPUTE T-NUM(I) = I * 11\n",
+    "           END-PERFORM\n",
+    "           MOVE 5 TO C(2)\n",
+    "           DISPLAY T(1) '|' T(3) '|' T-NUM(2) '|' C(1) C(2) C(4)\n",
+    "           DISPLAY BEFORE-T AFTER-T\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn a_table_at_level_01_or_77_is_a_record_of_its_own_alike_on_both_executors() {
+    let walked = Harness::source(TOP_LEVEL_TABLES).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("NM  11|NM  33|22|757\nABCXYZ\n", Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(TOP_LEVEL_TABLES).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    assert_eq!(diagnostics_under(TOP_LEVEL_TABLES, numeric::Compliance::Extended), [(6, 8, Some("IWX0019"), Severity::Warning), (9, 8, Some("IWX0019"), Severity::Warning)]);
+    assert_eq!(diagnostics_under(TOP_LEVEL_TABLES, numeric::Compliance::Strict), [(6, 8, Some("IWC0027"), Severity::Severe)]);
+}
