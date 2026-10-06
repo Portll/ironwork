@@ -538,14 +538,19 @@ fn what_is_not_enterprise_cobol_is_refused_as_such() {
     for (body, named) in [
         ("IF A <> 'B' CONTINUE END-IF.", "<> is not an Enterprise COBOL relational operator"),
         ("MOVE 'A' & 'B' TO A.", "literal concatenation with & is not Enterprise COBOL's"),
-        ("SET ENVIRONMENT 'X' TO 'Y'.", "SET ENVIRONMENT is GnuCOBOL's"),
-        ("ACCEPT A FROM ENVIRONMENT 'X'.", "ACCEPT ... FROM ENVIRONMENT is GnuCOBOL's"),
-        ("ACCEPT A FROM ENVIRONMENT-VALUE.", "ACCEPT ... FROM ENVIRONMENT-VALUE: GnuCOBOL's, not Enterprise COBOL's"),
         ("ACCEPT A FROM ESCAPE KEY.", "ACCEPT ... FROM ESCAPE: GnuCOBOL's, not Enterprise COBOL's"),
         ("ACCEPT A FROM KEYBOARD.", "ACCEPT ... FROM KEYBOARD: neither an environment-name ACCEPT reads, SYSIN, SYSIPT or CONSOLE, nor a mnemonic-name for one"),
     ] {
         let message = refused(body);
         assert!(message.contains(named) && !message.contains("not supported"), "{body}: {message}");
+    }
+    for (body, named) in [
+        ("SET ENVIRONMENT 'X' TO 'Y'.", "IWS0061-S SET ENVIRONMENT is GnuCOBOL's"),
+        ("ACCEPT A FROM ENVIRONMENT 'X'.", "IWS0055-S ACCEPT ... FROM ENVIRONMENT is GnuCOBOL's"),
+        ("ACCEPT A FROM ENVIRONMENT-VALUE.", "IWS0060-S ACCEPT ... FROM ENVIRONMENT-VALUE: GnuCOBOL's, not Enterprise COBOL's"),
+    ] {
+        let message = compile_errors(&program("", "       01  A PIC X(4).\n", &line(body)));
+        assert!(message.contains(named), "{body}: {message}");
     }
 }
 

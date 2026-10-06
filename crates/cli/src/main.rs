@@ -12,6 +12,7 @@ usage:
                [--exit-code] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
                [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind] [--screens path]
+               [--env NAME=VALUE]...
                                                        compile and run; CBL and PROCESS cards set the options
   ironwork run <module.iwm> [-L <dir>]... [-I <dir>]... [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
                [--statement-limit N] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
@@ -155,6 +156,9 @@ flags:
              with run or job, end the run with S322 at the statement after the Nth to start, as z/OS
              ends a step that runs past its TIME= (each job step gets N); a count stands in for CPU
              time so the end falls at the same statement on every run (assumption C241)
+  --env NAME=VALUE
+             under --compliance extended, an environment variable ACCEPT ... FROM ENVIRONMENT
+             reads; the run sees these, and those it sets, never the process's own (C464)
   --parm TEXT
              with run, the PARM an EXEC PGM= would give: the program's first USING item addresses
              a halfword length and the arguments before the last slash, as Language Environment
@@ -555,6 +559,7 @@ fn driver() -> ExitCode {
     let mut fuzz_root: Option<std::path::PathBuf> = None;
     let (mut fuzz_runs, mut fuzz_seed, mut fuzz_timeout): (Option<u32>, Option<u64>, Option<u64>) = (None, None, None);
     let mut parm: Option<String> = None;
+    let mut environment = std::collections::BTreeMap::new();
     let mut statement_limit: Option<u64> = None;
     let mut hang_limit: Option<u64> = None;
     let (mut fuzz_job, mut fuzz_cics, mut fuzz_interface, mut fuzz_differential) = (false, false, false, false);
@@ -597,6 +602,12 @@ fn driver() -> ExitCode {
                 Some(a) if a == "OMITTED" => arguments.push(None),
                 Some(path) => arguments.push(Some(path.into())),
                 None => refuse!("--argument needs a file holding the argument's bytes, or OMITTED"),
+            },
+            "--env" => match args.next().and_then(|v| v.split_once('=').map(|(n, v)| (n.to_owned(), v.to_owned()))).filter(|(n, _)| !n.is_empty()) {
+                Some((name, value)) => {
+                    environment.insert(name, value);
+                }
+                None => refuse!("--env needs NAME=VALUE"),
             },
             "--parm" => match args.next().filter(|p| p.chars().count() <= rt::le::parm::PARM_LIMIT) {
                 Some(p) => parm = Some(p),
@@ -827,7 +838,7 @@ fn driver() -> ExitCode {
     if c_series {
         return usage_error("unknown flag --c-series");
     }
-    let run_flags = !dds.is_empty() || replay.is_some() || keyed || sql_db.is_some() || sql_record.is_some() || evidence_dir.is_some() || trace_marker.is_some()
+    let run_flags = !dds.is_empty() || !environment.is_empty() || replay.is_some() || keyed || sql_db.is_some() || sql_record.is_some() || evidence_dir.is_some() || trace_marker.is_some()
         || trace_statements.is_some() || trace_input || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() || !matches!(clock, exec::unit::Clock::System)
         || compare_base.is_some() || compare_head.is_some() || declare.is_some() || statement.is_some() || !expected.is_empty() || datasets.is_some()
         || !proclibs.is_empty() || user.is_some()
@@ -1029,6 +1040,7 @@ fn driver() -> ExitCode {
             trace_statements: statement_filter(listed.as_ref(), coverage_file.is_some()),
             trace_input,
             statement_limit,
+            environment: environment.clone(),
             ..Default::default()
         };
         let evidence = evidence_dir.map(|dir| module::Evidence { dir, marker: trace_marker, statements: listed.unwrap_or_default(), input: trace_input });
@@ -1090,6 +1102,7 @@ fn driver() -> ExitCode {
         statement_limit,
         program_ids: None,
         screen: Some(screen.clone()),
+        environment: environment.clone(),
     };
     let compiled = match exec::compile(first, &flags) {
         Ok(c) => c,

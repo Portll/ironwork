@@ -360,6 +360,7 @@ pub const BINARY_CHAR: &str = "C460";
 pub const TOP_LEVEL_TABLE: &str = "C461";
 pub const SCREEN_MODEL: &str = "C462";
 pub const SCREEN_SECTION_LAYOUT: &str = "C463";
+pub const ENVIRONMENT_VARIABLES: &str = "C464";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2252,6 +2253,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: MISSING_PROGRAM,
         claim: "A dynamic CALL (of an identifier, or of a literal under DYNAM), SET TO ENTRY or user-defined function invocation that finds no program of the name, with no ON EXCEPTION phrase, raises CEE3501S 'The module name was not found.' (Language Environment Runtime Messages, CEE3501S: 'Module is not loaded. The application might abend'); IBM's own example of a COBOL dynamic CALL of a nonexistent program ends so, the condition unhandled (Language Environment Debugging Guide, 'Calling a nonexistent subroutine'). A condition of severity 3 that nothing handles ends the run U4038 under the default ABTERMENC(ABEND), as an SSRANGE failure does, the message given as IBM words it. Under NODYNAM a CALL of a literal is resolved by the binder, which reports a name no library holds as IEW2456E 'SYMBOL name UNRESOLVED' (MVS System Messages, IEW2456E) and leaves a load module that does not run: ironwork, which binds nothing, stops at the CALL with that message as its own refusal, and by its own choice still runs such a CALL's ON EXCEPTION phrase, which IBM's binder leaves no run to reach. A Language Environment callable service ironwork does not provide is its own refusal too, the service existing on z/OS. A job step whose EXEC PGM= names no program still ends S806, as the system's fetch of it does",
         basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: ENVIRONMENT_VARIABLES,
+        claim: "Under --compliance extended, the environment variables ACCEPT ... FROM ENVIRONMENT and ENVIRONMENT-VALUE read are those ironwork run's --env NAME=VALUE gives and those the run sets, never the process's own, so a run gives what its command line says. ACCEPT ... FROM ENVIRONMENT name is DISPLAY name UPON ENVIRONMENT-NAME then ACCEPT ... FROM ENVIRONMENT-VALUE, and SET ENVIRONMENT name TO value is DISPLAY name UPON ENVIRONMENT-NAME then DISPLAY value UPON ENVIRONMENT-VALUE, as GnuCOBOL documents them; a name and a value lose their trailing spaces. A variable that is not set gives the receiver spaces and takes ON EXCEPTION. cobc 3.2 also runs NOT ON EXCEPTION after ON EXCEPTION there, as it does for ARGUMENT-VALUE (C442), which ironwork does not",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {

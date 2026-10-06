@@ -298,6 +298,8 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     /// The screen positioned DISPLAY and ACCEPT use under `--compliance extended`, and the operator
     /// a screen script plays; None until one is given or the run first uses the screen.
     pub crt: Option<Rc<std::cell::RefCell<crate::crt::Crt>>>,
+    /// The environment variables ACCEPT ... FROM ENVIRONMENT reads under `--compliance extended`.
+    pub environment: crate::environment::Environment,
     externals: Externals,
     /// The files of loaded programs that are another's connector, by program and file.
     connectors: HashMap<(usize, usize), Connector>,
@@ -476,6 +478,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             random: None,
             arguments: Default::default(),
             crt: None,
+            environment: Default::default(),
             externals: Externals::default(),
             connectors: HashMap::new(),
             entries: Vec::new(),

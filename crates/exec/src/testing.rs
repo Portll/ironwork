@@ -46,6 +46,7 @@ pub struct Harness {
     arguments: Option<Vec<Option<Vec<u8>>>>,
     statement_limit: Option<u64>,
     screens: Option<String>,
+    environment: std::collections::BTreeMap<String, String>,
 }
 
 impl Harness {
@@ -66,10 +67,17 @@ impl Harness {
             arguments: None,
             statement_limit: None,
             screens: None,
+            environment: Default::default(),
         }
     }
 
     /// The statements a run may start before it ends with S322 (`RunUnit::statement_limit`).
+    /// An environment variable the run starts with, as `ironwork run --env NAME=VALUE` gives one.
+    pub fn env(mut self, name: &str, value: &str) -> Self {
+        self.environment.insert(name.to_owned(), value.to_owned());
+        self
+    }
+
     /// A screen script the operator of positioned ACCEPTs plays, as `ironwork run --screens` reads it.
     pub fn screens(mut self, script: &str) -> Self {
         self.screens = Some(script.to_owned());
@@ -163,7 +171,7 @@ impl Harness {
         let compiled = compiled.unwrap_or_else(|e| panic!("{e:?}"));
         programs.extend(self.classes.iter().map(|c| syntax::parse(c).unwrap_or_else(|e| panic!("{e}\n{c}"))));
         let fingerprint = rt::sql::fingerprint(&format!("{}\n{}", self.source, self.flags.join(" ")));
-        let library = unit::Library { programs, dirs: self.dirs, copy, flags: self.flags, trace_statements: Some(unit::StatementFilter::All), trace_input: true, statement_limit: self.statement_limit, program_ids: None, screen: None };
+        let library = unit::Library { programs, dirs: self.dirs, copy, flags: self.flags, trace_statements: Some(unit::StatementFilter::All), trace_input: true, statement_limit: self.statement_limit, program_ids: None, screen: None, environment: self.environment };
         let lowered = check_lowering(&compiled, fingerprint, None);
         for program in &library.programs {
             // Compiled as `RunUnit::load` compiles a CALLed program; one that does not compile is left out.

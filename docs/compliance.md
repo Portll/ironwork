@@ -48,7 +48,9 @@ character (`compile::as_characters`), and a test runs it on both and gives its m
 level. IWX0019-W, a table at level 01 or 77, is read before the layout into an unnamed record
 holding the table one level down, which both executors run as any table. IWX0020-W, the screen, has
 no Enterprise COBOL form: both executors write and read it through `rt::crt`, and the LIR carries
-its ops `ScreenDisplay` and `ScreenAccept`.
+its ops `ScreenDisplay` and `ScreenAccept`. IWX0021-W, the environment, has none either: both
+executors read and set the run unit's variables (`rt::environment`), and the LIR carries its
+`Environment` op and the ACCEPT source ENVIRONMENT-VALUE.
 
 ### IWX0001-W free-form source
 
@@ -537,6 +539,28 @@ place an item gives are refused with IWR0057.
 
 In the census, after the level-01 tables, positioned DISPLAY and ACCEPT were the first refusal of
 19 distinct sources that cobc compiles, and the SCREEN SECTION of 17.
+
+### IWX0021-W the environment
+
+`IWX0021-W ACCEPT ... FROM ENVIRONMENT (Micro Focus and GnuCOBOL; Enterprise COBOL reads and sets no
+environment variable): V receives the value of the environment variable named, or spaces and the
+exception when it is not set`, at the statement.
+
+    ACCEPT item FROM ENVIRONMENT {literal | item} [ON EXCEPTION ...] [NOT ON EXCEPTION ...]
+    ACCEPT item FROM ENVIRONMENT-VALUE [ON EXCEPTION ...] [NOT ON EXCEPTION ...]
+    DISPLAY {literal | item} UPON ENVIRONMENT-NAME
+    DISPLAY {literal | item} UPON ENVIRONMENT-VALUE
+    SET ENVIRONMENT {literal | item} TO {literal | item}
+
+DISPLAY UPON ENVIRONMENT-NAME names the variable the next ENVIRONMENT-VALUE reads or sets, and
+DISPLAY UPON ENVIRONMENT-VALUE sets it; a name and a value lose their trailing spaces. ACCEPT ... FROM
+ENVIRONMENT name is DISPLAY name UPON ENVIRONMENT-NAME then ACCEPT ... FROM ENVIRONMENT-VALUE, and
+SET ENVIRONMENT name TO value the two DISPLAYs, as GnuCOBOL documents them. A variable that is not
+set gives the receiver spaces and takes ON EXCEPTION; cobc 3.2 then runs NOT ON EXCEPTION too, which
+ironwork does not. The variables are those `ironwork run --env NAME=VALUE` gives and those the run
+sets, never the process's own, so a run gives what its command line says (assumption C464). Each
+value ACCEPT reads is the run's input, as a SYSIN record is. Strict refuses each as before: IWS0055,
+IWS0060, IWS0061, and IWC0073 for DISPLAY UPON.
 
 ## How the six were chosen
 

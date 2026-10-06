@@ -11,7 +11,8 @@ use crate::vocab::{AcceptFrom, Figurative, Pos};
 use numeric::{Dialect, Switched};
 
 /// `name` is the receiver's, which the message at the end of SYSIN gives. True when ARGUMENT-VALUE
-/// finds no word left: the exception, the receiver unchanged.
+/// finds no word left, the exception, the receiver unchanged; or when ENVIRONMENT-VALUE finds no
+/// variable of the name, the exception, the receiver taking spaces.
 pub fn accept<H: Clone, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, dest: Loc, from: AcceptFrom, name: &str, pos: Pos) -> Result<bool, Abend> {
     let (seconds, hundredths) = unit.now();
     let c = civil(seconds);
@@ -29,6 +30,13 @@ pub fn accept<H: Clone, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUn
         AcceptFrom::ArgumentValue => match unit.arguments.take().map(str::to_owned) {
             Some(word) => Val::Bytes(encoded(facts, &word)),
             None => return Ok(true),
+        },
+        AcceptFrom::EnvironmentValue => match unit.environment.value().map(str::to_owned) {
+            Some(value) => Val::Bytes(encoded(facts, &value)),
+            None => {
+                store::assign(facts, unit, dest, Val::Fig(Figurative::Space), None, pos)?;
+                return Ok(true);
+            }
         },
         AcceptFrom::Sysin if dest.kind == Kind::National => match sysin_record(facts, unit, pos)? {
             Some(record) => Val::Bytes(record),
@@ -57,6 +65,7 @@ pub fn accept<H: Clone, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUn
     let input = match from {
         AcceptFrom::Sysin => true,
         AcceptFrom::CommandLine | AcceptFrom::ArgumentNumber | AcceptFrom::ArgumentValue => !unit.arguments.text.is_empty(),
+        AcceptFrom::EnvironmentValue => true,
         _ => false,
     };
     if input {

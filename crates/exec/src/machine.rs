@@ -330,6 +330,10 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 });
             }
             Stmt::PerformInline { body, repeat, pos } => return self.repeat(repeat, *pos, &mut |m: &mut Self| m.run_block(body)),
+            Stmt::Display { items, upon: Some(upon), pos, .. } if matches!(upon.device.as_str(), "ENVIRONMENT-NAME" | "ENVIRONMENT-VALUE") => {
+                let text = self.display_text(items, false, *pos)?;
+                if upon.device == "ENVIRONMENT-VALUE" { self.unit.environment.set(&text) } else { self.unit.environment.name(&text) }
+            }
             Stmt::Display { items, upon: Some(upon), pos, .. } if upon.device == "ARGUMENT-NUMBER" => {
                 let n = match items.as_slice() {
                     [item] => self.integer(&Expr::Operand(item.clone()), *pos)?,
@@ -432,7 +436,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 let raised = rt::crt::accept(&self.facts(), self.unit, &inputs, *pos)?;
                 return self.overflow_branch(raised, &exception.on, &exception.not_on);
             }
-            Stmt::Accept { target, from: from @ AcceptFrom::ArgumentValue, exception, pos, .. } => {
+            Stmt::Accept { target, from: from @ (AcceptFrom::ArgumentValue | AcceptFrom::EnvironmentValue), exception, pos, .. } => {
                 let raised = self.accept(target, *from, *pos)?;
                 return self.overflow_branch(raised, &exception.on, &exception.not_on);
             }

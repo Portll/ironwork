@@ -481,9 +481,10 @@ fn run_main<'w>(
 ) -> Result<(Ending, i16), Abend> {
     oo::refuse_to_run(&compiled.program)?;
     let (statements, taint) = (library.trace_statements.clone(), library.trace_input.then(rt::taint::Taint::default));
-    let (limit, screen) = (library.statement_limit, library.screen.clone());
+    let (limit, screen, environment) = (library.statement_limit, library.screen.clone(), library.environment.clone());
     let mut run_unit = unit::RunUnit::new(library, dds, sysin, clock, out, err);
     run_unit.crt = screen;
+    run_unit.environment = rt::environment::Environment::of(environment);
     run_unit.observer = observer;
     run_unit.statements = statements;
     run_unit.taint = taint;

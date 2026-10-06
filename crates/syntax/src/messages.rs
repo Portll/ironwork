@@ -828,6 +828,7 @@ catalogue! {
     IWX0018 Warning "a numeric argument to FUNCTION {name} (GnuCOBOL; Enterprise COBOL takes an alphabetic, alphanumeric or national one): {item}'s digits are read as its characters";
     IWX0019 Warning "OCCURS at level {level} (Micro Focus and GnuCOBOL; Enterprise COBOL takes OCCURS only at levels 02 to 49): {name} is read as a table in a record of its own";
     IWX0020 Warning "{DISPLAY or ACCEPT} on the screen (Micro Focus and GnuCOBOL; Enterprise COBOL has none): at {where}";
+    IWX0021 Warning "{the environment form} (Micro Focus and GnuCOBOL; Enterprise COBOL reads and sets no environment variable): {what it does}";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

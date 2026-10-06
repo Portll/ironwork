@@ -99,4 +99,7 @@ pub enum AcceptFrom {
     ArgumentNumber,
     /// Under `--compliance extended`, the next word of the PARM's program arguments.
     ArgumentValue,
+    /// Under `--compliance extended`, the value of the environment variable DISPLAY UPON
+    /// ENVIRONMENT-NAME named.
+    EnvironmentValue,
 }

@@ -545,7 +545,7 @@ fn resolve_report(program: &Program, layout: &Layout, ri: usize, r: &rw::Report,
     let children = &layout.items[root].children;
     let child = |ordinal: usize| children[ordinal];
     let paged = r.page.is_some();
-    let mut check = crate::Check { layout, program, errors, debugging: false, max_digits: 31, inline_performs: 0, functions: None, alphabetic: &[], at: r.pos, paragraph: 0, extended: false };
+    let mut check = crate::Check { layout, program, errors, debugging: false, max_digits: 31, inline_performs: 0, functions: None, alphabetic: &[], at: r.pos, paragraph: 0, extended: false, environment_named: None };
     let mut controls = Vec::new();
     for (c, &(saved, len)) in r.controls.iter().zip(&draft.controls) {
         check.reference(c);

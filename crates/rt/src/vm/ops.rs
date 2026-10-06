@@ -141,6 +141,10 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 let n = self.int(value, pos)?;
                 self.unit.arguments.position(n);
             }
+            Op::Environment { display, value } => {
+                let text = self.display_text(*display, pos)?;
+                if *value { self.unit.environment.set(&text) } else { self.unit.environment.name(&text) }
+            }
             Op::ScreenDisplay { display, screen } => {
                 let text = self.display_text(*display, pos)?;
                 let at = self.screen_at(screen, pos)?;
@@ -163,7 +167,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 let dest = self.loc_written(*target)?;
                 let name = self.sym(p.places[*target as usize].name);
                 let exception = accept::accept(&self.facts(), self.unit, dest, *from, name, pos)?;
-                if *from == AcceptFrom::ArgumentValue {
+                if matches!(from, AcceptFrom::ArgumentValue | AcceptFrom::EnvironmentValue) {
                     return Ok(Step::Arm(u8::from(exception)));
                 }
             }

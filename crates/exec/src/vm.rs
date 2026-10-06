@@ -182,9 +182,10 @@ fn run_unit<'w>(
     observer: Option<Observer<'w>>,
 ) -> RunUnit<'w, Rc<Code>, VmLibrary> {
     let (statements, taint) = (library.source.trace_statements.clone(), library.source.trace_input.then(rt::taint::Taint::default));
-    let (limit, screen) = (library.source.statement_limit, library.source.screen.clone());
+    let (limit, screen, environment) = (library.source.statement_limit, library.source.screen.clone(), library.source.environment.clone());
     let mut run_unit = RunUnit::new(library, dds, sysin, clock, out, err);
     run_unit.crt = screen;
+    run_unit.environment = rt::environment::Environment::of(environment);
     run_unit.observer = observer;
     run_unit.statements = statements;
     run_unit.taint = taint;

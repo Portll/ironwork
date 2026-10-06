@@ -296,6 +296,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         at: Pos::default(),
         paragraph: 0,
         extended: options.compliance == numeric::Compliance::Extended,
+        environment_named: None,
     };
     for k in 0..program.files.len() {
         check.file_keys(k);
@@ -963,6 +964,9 @@ struct Check<'a> {
     paragraph: usize,
     /// `--compliance extended` is in force.
     extended: bool,
+    /// Where an ACCEPT ... FROM ENVIRONMENT's DISPLAY UPON ENVIRONMENT-NAME is, whose ACCEPT the
+    /// message is given at.
+    environment_named: Option<Pos>,
 }
 
 impl Check<'_> {
@@ -1071,6 +1075,10 @@ impl Check<'_> {
                     self.screen("DISPLAY", screen);
                 }
                 if let Some(upon) = upon
+                    && matches!(upon.device.as_str(), "ENVIRONMENT-NAME" | "ENVIRONMENT-VALUE")
+                {
+                    self.environment_display(upon, *pos);
+                } else if let Some(upon) = upon
                     && upon.device == "ARGUMENT-NUMBER"
                 {
                     self.argument_number(items, *pos);
@@ -1745,8 +1753,20 @@ impl Check<'_> {
     /// GnuCOBOL's, which `--compliance extended` reads from the job step's PARM with IWX0010-W
     /// (assumption C442); ON EXCEPTION goes with ARGUMENT-VALUE alone.
     fn accept_source(&mut self, from: AcceptFrom, exception: &Handlers, target: &Ref, pos: Pos) {
-        if (exception.on.is_some() || exception.not_on.is_some()) && from != AcceptFrom::ArgumentValue {
-            self.errors.push(syntax::messages::IWC0256.at(pos, "ACCEPT ... ON EXCEPTION: of the ACCEPT statements, only ACCEPT ... FROM ARGUMENT-VALUE under --compliance extended has an exception"));
+        if (exception.on.is_some() || exception.not_on.is_some()) && !matches!(from, AcceptFrom::ArgumentValue | AcceptFrom::EnvironmentValue) {
+            self.errors.push(syntax::messages::IWC0256.at(pos, "ACCEPT ... ON EXCEPTION: of the ACCEPT statements, only ACCEPT ... FROM ARGUMENT-VALUE and the environment under --compliance extended have an exception"));
+        }
+        if from == AcceptFrom::EnvironmentValue {
+            let named = self.environment_named.take() == Some(pos);
+            let written = if named { "ACCEPT ... FROM ENVIRONMENT" } else { "ACCEPT ... FROM ENVIRONMENT-VALUE" };
+            if self.extended {
+                self.errors.push(syntax::messages::IWX0021.at(pos, format!("{written} (Micro Focus and GnuCOBOL; Enterprise COBOL reads and sets no environment variable): {} receives the value of the environment variable named, or spaces and the exception when it is not set", target.name)));
+            } else if named {
+                self.errors.push(syntax::messages::IWS0055.at(pos, "ACCEPT ... FROM ENVIRONMENT is GnuCOBOL's, not Enterprise COBOL's"));
+            } else {
+                self.errors.push(syntax::messages::IWS0060.at(pos, "ACCEPT ... FROM ENVIRONMENT-VALUE: GnuCOBOL's, not Enterprise COBOL's"));
+            }
+            return;
         }
         let (name, what) = match from {
             AcceptFrom::CommandLine => ("COMMAND-LINE", "the job step's PARM program arguments"),
@@ -1758,6 +1778,25 @@ impl Check<'_> {
             self.errors.push(syntax::messages::IWX0010.at(pos, format!("ACCEPT ... FROM {name} (Micro Focus and GnuCOBOL; Enterprise COBOL reads no command line): {} receives {what}", target.name)));
         } else {
             self.errors.push(syntax::messages::IWC0257.at(pos, format!("ACCEPT ... FROM {name}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it from the job step's PARM")));
+        }
+    }
+
+    /// DISPLAY UPON ENVIRONMENT-NAME or ENVIRONMENT-VALUE, written or standing for ACCEPT ... FROM
+    /// ENVIRONMENT's naming or SET ENVIRONMENT, Micro Focus's and GnuCOBOL's: under `--compliance
+    /// extended` a warning saying what it does, refused under strict. ACCEPT ... FROM
+    /// ENVIRONMENT's message is given at its ACCEPT, and SET ENVIRONMENT's at its value.
+    fn environment_display(&mut self, upon: &Upon, pos: Pos) {
+        let value = upon.device == "ENVIRONMENT-VALUE";
+        match upon.name.as_str() {
+            "ENVIRONMENT" => self.environment_named = Some(pos),
+            "SET ENVIRONMENT" if !value => {}
+            "SET ENVIRONMENT" if self.extended => self.errors.push(syntax::messages::IWX0021.at(pos, "SET ENVIRONMENT (Micro Focus and GnuCOBOL; Enterprise COBOL reads and sets no environment variable): the environment variable named takes the value")),
+            "SET ENVIRONMENT" => self.errors.push(syntax::messages::IWS0061.at(pos, "SET ENVIRONMENT is GnuCOBOL's, not Enterprise COBOL's")),
+            _ if self.extended => {
+                let what = if value { "the environment variable ENVIRONMENT-NAME last named takes the value" } else { "names the environment variable ENVIRONMENT-VALUE reads and sets next" };
+                self.errors.push(syntax::messages::IWX0021.at(pos, format!("DISPLAY UPON {} (Micro Focus and GnuCOBOL; Enterprise COBOL reads and sets no environment variable): {what}", upon.device)));
+            }
+            _ => self.errors.push(syntax::messages::IWC0073.at(pos, format!("DISPLAY UPON {}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it", upon.name))),
         }
     }
 

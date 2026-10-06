@@ -51,6 +51,9 @@ pub enum Op {
     /// DISPLAY ... UPON ARGUMENT-NUMBER under `--compliance extended`: the next ACCEPT ... FROM
     /// ARGUMENT-VALUE takes the PARM argument word this numbers.
     ArgumentNumber(IntExpr),
+    /// DISPLAY UPON ENVIRONMENT-NAME, or with `value` UPON ENVIRONMENT-VALUE, under `--compliance
+    /// extended`: plan `display`'s text names the environment variable, or becomes its value.
+    Environment { display: DisplayId, value: bool },
     /// DISPLAY on the screen under `--compliance extended`: plan `display`'s text written where
     /// `screen` puts it.
     ScreenDisplay { display: DisplayId, screen: ScreenPlan },
@@ -261,6 +264,7 @@ codec_enum!(Op {
     ArgumentNumber(value) = 36,
     ScreenDisplay { display, screen } = 37,
     ScreenAccept { inputs, handled } = 38,
+    Environment { display, value } = 39,
 });
 codec_enum!(Step { Next = 0, Arm(arm) = 1, GoTo(para) = 2, End(ending) = 3, Return(frame) = 4, Resume(resume) = 5 });
 codec_enum!(Terminator {

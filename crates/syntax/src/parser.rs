@@ -126,7 +126,7 @@ pub const DEVICE_ENVIRONMENT_NAMES: &[&str] = &["SYSIN", "SYSIPT", "SYSOUT", "SY
 const ACCEPT_DEVICES: &[&str] = &["SYSIN", "SYSIPT", "CONSOLE"];
 
 /// GnuCOBOL's sources for ACCEPT ... FROM that neither Enterprise COBOL nor `--compliance extended` reads.
-const GNUCOBOL_ACCEPT_SOURCES: &[&str] = &["ENVIRONMENT-VALUE", "ESCAPE", "EXCEPTION", "LINES", "COLUMNS", "CRT", "USER"];
+const GNUCOBOL_ACCEPT_SOURCES: &[&str] = &["ESCAPE", "EXCEPTION", "LINES", "COLUMNS", "CRT", "USER"];
 
 /// The environment-names a WRITE ADVANCING mnemonic-name can stand for (Language Reference,
 /// SPECIAL-NAMES, Table 5): channels C01 to C12, CSP, pockets S01 to S05, and AFP-5A.
@@ -261,6 +261,12 @@ fn function_name(name: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// DISPLAY UPON ENVIRONMENT-NAME or ENVIRONMENT-VALUE of `item`, which ACCEPT ... FROM ENVIRONMENT
+/// and SET ENVIRONMENT stand for; `written`, the UPON name, is the statement written.
+fn environment_display(item: Operand, written: &str, device: &str, pos: Pos) -> Stmt {
+    Stmt::Display { items: vec![item], upon: Some(Upon { name: written.to_owned(), device: device.to_owned() }), no_advancing: false, screen: None, pos }
+}
+
 /// The environment-names DISPLAY UPON and ACCEPT FROM give for Micro Focus's and GnuCOBOL's
 /// screen.
 const CRT_DEVICES: &[&str] = &["CRT", "CRT-UNDER"];
@@ -301,6 +307,9 @@ fn usage_word(word: &str) -> Option<Usage> {
 struct Parser<'a> {
     tokens: &'a [Token],
     at: usize,
+    /// Statements one statement as written stands for, which go before it: ACCEPT ... FROM
+    /// ENVIRONMENT's and SET ENVIRONMENT's DISPLAY UPON ENVIRONMENT-NAME.
+    before: Vec<Stmt>,
     /// DATA DIVISION EXEC blocks of the program being parsed.
     exec_declarations: Vec<ExecBlock>,
     /// Whether the program being parsed has EXEC CICS, so the translator's additions apply.
@@ -353,6 +362,7 @@ impl<'a> Parser<'a> {
             tokens,
             at: 0,
             exec_declarations: Vec::new(),
+            before: Vec::new(),
             cics: false,
             dli: false,
             intrinsics: Vec::new(),
@@ -1914,7 +1924,9 @@ impl Parser<'_> {
             if !self.word().is_some_and(|w| VERBS.contains(&w)) {
                 break;
             }
-            out.push(self.statement()?);
+            let statement = self.statement()?;
+            out.append(&mut self.before);
+            out.push(statement);
         }
         Ok(out)
     }
@@ -2002,6 +2014,14 @@ impl Parser<'_> {
                 }
                 Stmt::Cancel { targets, pos }
             }
+            "SET" if self.is_word("ENVIRONMENT") => {
+                self.at += 1;
+                let name = self.operand()?;
+                self.expect_word("TO")?;
+                let value = self.operand()?;
+                self.before.push(environment_display(name, "SET ENVIRONMENT", "ENVIRONMENT-NAME", pos));
+                environment_display(value, "SET ENVIRONMENT", "ENVIRONMENT-VALUE", pos)
+            }
             "SET" => Stmt::Set { set: self.set()?, pos },
             "STRING" => Stmt::String(Box::new(self.string(pos)?)),
             "UNSTRING" => Stmt::Unstring(Box::new(self.unstring(pos)?)),
@@ -2020,10 +2040,14 @@ impl Parser<'_> {
                     screen = Some(Box::new(ScreenPhrases { pos, ..ScreenPhrases::default() }));
                 }
                 let screen = self.screen_phrases(screen)?;
+                let mut named = None;
                 if self.is_word("FROM") && self.word_at(1) == Some("ENVIRONMENT") {
-                    return Err(crate::messages::IWS0055.at(pos, "ACCEPT ... FROM ENVIRONMENT is GnuCOBOL's, not Enterprise COBOL's"));
+                    self.at += 2;
+                    named = Some(environment_display(self.operand()?, "ENVIRONMENT", "ENVIRONMENT-NAME", pos));
                 }
-                let from = if screen.is_none() && self.accept_word("FROM") {
+                let from = if named.is_some() {
+                    AcceptFrom::EnvironmentValue
+                } else if screen.is_none() && self.accept_word("FROM") {
                     let at = self.pos();
                     match self.name("SYSIN, SYSIPT, CONSOLE, a mnemonic-name for one, DATE, DAY, DAY-OF-WEEK or TIME")?.as_str() {
                         "DATE" => AcceptFrom::Date { four_digit_year: self.accept_word("YYYYMMDD") },
@@ -2033,6 +2057,7 @@ impl Parser<'_> {
                         "COMMAND-LINE" => AcceptFrom::CommandLine,
                         "ARGUMENT-NUMBER" => AcceptFrom::ArgumentNumber,
                         "ARGUMENT-VALUE" => AcceptFrom::ArgumentValue,
+                        "ENVIRONMENT-VALUE" => AcceptFrom::EnvironmentValue,
                         name => {
                             self.accept_device(name, at)?;
                             AcceptFrom::Sysin
@@ -2047,6 +2072,7 @@ impl Parser<'_> {
                     Ok(0)
                 })?;
                 self.unreserved_terminator("END-ACCEPT", "ACCEPT");
+                self.before.extend(named);
                 Stmt::Accept { target, from, exception, screen, pos }
             }
             "OPEN" => {
@@ -3183,9 +3209,6 @@ impl Parser<'_> {
     }
 
     fn set(&mut self) -> R<SetStmt> {
-        if self.is_word("ENVIRONMENT") {
-            return Err(crate::messages::IWS0061.at(self.pos(), "SET ENVIRONMENT is GnuCOBOL's, not Enterprise COBOL's"));
-        }
         if self.is_word("ADDRESS") && self.word_at(1) == Some("OF") {
             let mut targets = Vec::new();
             while self.is_word("ADDRESS") && self.word_at(1) == Some("OF") {

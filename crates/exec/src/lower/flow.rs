@@ -391,6 +391,10 @@ impl Lower<'_> {
                 self.perform(repeat, body, pos, &inner)?;
             }
             Stmt::PerformInline { body, repeat, pos: _ } => self.perform(repeat, Body::Inline(body), pos, &inner)?,
+            Stmt::Display { items, upon: Some(upon), .. } if matches!(upon.device.as_str(), "ENVIRONMENT-NAME" | "ENVIRONMENT-VALUE") => {
+                let display = self.display_plan(items, false, false, pos)?;
+                self.op(Op::Environment { display, value: upon.device == "ENVIRONMENT-VALUE" }, pos)?;
+            }
             Stmt::Display { items, upon: Some(upon), .. } if upon.device == "ARGUMENT-NUMBER" => {
                 let [item] = items.as_slice() else { return unsupported("DISPLAY UPON ARGUMENT-NUMBER of more than one item", pos) };
                 let n = self.int_expr(&Expr::Operand(item.clone()), pos)?;
@@ -483,7 +487,7 @@ impl Lower<'_> {
             Stmt::Accept { target, from, exception, screen: None, pos: _ } => {
                 let place = self.place(target, true)?;
                 let value = match from {
-                    AcceptFrom::Sysin | AcceptFrom::CommandLine | AcceptFrom::ArgumentValue => Side { value: Value::Bytes, src: None, digits: 0 },
+                    AcceptFrom::Sysin | AcceptFrom::CommandLine | AcceptFrom::ArgumentValue | AcceptFrom::EnvironmentValue => Side { value: Value::Bytes, src: None, digits: 0 },
                     AcceptFrom::ArgumentNumber => Side { value: Value::Num(Some(0)), src: None, digits: 9 },
                     AcceptFrom::Date { four_digit_year } => Side { value: Value::Num(Some(0)), src: None, digits: if *four_digit_year { 8 } else { 6 } },
                     AcceptFrom::Day { four_digit_year } => Side { value: Value::Num(Some(0)), src: None, digits: if *four_digit_year { 7 } else { 5 } },
@@ -492,7 +496,7 @@ impl Lower<'_> {
                 };
                 let plan = self.move_plan(&value, self.kind_of(place), self.place_items[place as usize])?;
                 self.op(Op::Accept { target: place, from: *from, plan }, pos)?;
-                if *from == AcceptFrom::ArgumentValue {
+                if matches!(from, AcceptFrom::ArgumentValue | AcceptFrom::EnvironmentValue) {
                     self.select(exception.on.as_deref(), exception.not_on.as_deref(), pos, &inner)?;
                 }
             }

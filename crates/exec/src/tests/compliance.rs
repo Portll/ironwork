@@ -555,3 +555,58 @@ fn a_screen_section_screen_is_shown_and_read_alike_on_both_executors() {
     let strict = diagnostics_under(SCREEN_SECTION, numeric::Compliance::Strict);
     assert_eq!(strict.iter().find(|d| d.2 == Some("IWC0298")).map(|d| d.0), Some(10), "{strict:?}");
 }
+
+/// The environment: ACCEPT ... FROM ENVIRONMENT a literal and an item, a variable not set, SET
+/// ENVIRONMENT, and DISPLAY UPON ENVIRONMENT-NAME and ENVIRONMENT-VALUE.
+const ENVIRONMENT: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. ENV1.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  V    PIC X(10) VALUE 'UNCHANGED'.\n",
+    "       01  N    PIC 9(4) VALUE 7.\n",
+    "       01  NM   PIC X(8) VALUE 'IW_TWO'.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           ACCEPT V FROM ENVIRONMENT 'IW_ONE'\n",
+    "           DISPLAY '1[' V ']'\n",
+    "           MOVE 'UNCHANGED' TO V\n",
+    "           ACCEPT V FROM ENVIRONMENT 'IW_MISSING'\n",
+    "               ON EXCEPTION DISPLAY '2 EXC [' V ']'\n",
+    "               NOT ON EXCEPTION DISPLAY '2 OK [' V ']'\n",
+    "           END-ACCEPT\n",
+    "           ACCEPT N FROM ENVIRONMENT NM\n",
+    "           DISPLAY '3[' N ']'\n",
+    "           SET ENVIRONMENT 'IW_SET' TO 'SETVAL'\n",
+    "           ACCEPT V FROM ENVIRONMENT 'IW_SET'\n",
+    "           DISPLAY '4[' V ']'\n",
+    "           DISPLAY 'IW_ONE' UPON ENVIRONMENT-NAME\n",
+    "           ACCEPT V FROM ENVIRONMENT-VALUE\n",
+    "           DISPLAY '5[' V ']'\n",
+    "           DISPLAY 'IW_NEW' UPON ENVIRONMENT-NAME\n",
+    "           DISPLAY 'NEWVAL' UPON ENVIRONMENT-VALUE\n",
+    "           ACCEPT V FROM ENVIRONMENT 'IW_NEW'\n",
+    "           DISPLAY '6[' V ']'\n",
+    "           MOVE 'UNCHANGED' TO V\n",
+    "           DISPLAY 'IW_NONE' UPON ENVIRONMENT-NAME\n",
+    "           ACCEPT V FROM ENVIRONMENT-VALUE\n",
+    "              ON EXCEPTION DISPLAY '7 EXC [' V ']'\n",
+    "           END-ACCEPT\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn the_environment_is_read_and_set_alike_on_both_executors() {
+    let run = |executor| {
+        let o = Harness::source(ENVIRONMENT).flags(EXTENDED).env("IW_ONE", "hello").env("IW_TWO", "0042").run(executor);
+        assert!(o.ending.is_ok(), "{:?}\n{}", o.ending, o.err);
+        o.out
+    };
+    let walked = run(Executor::Interpreter);
+    assert_eq!(walked, "1[hello     ]\n2 EXC [          ]\n3[0042]\n4[SETVAL    ]\n5[hello     ]\n6[NEWVAL    ]\n7 EXC [          ]\n");
+    assert_eq!(run(Executor::Vm), walked);
+    let warned = diagnostics_under(ENVIRONMENT, numeric::Compliance::Extended);
+    assert_eq!(warned.iter().filter(|d| d.2 == Some("IWX0021")).map(|d| d.0).collect::<Vec<_>>(), [9, 12, 16, 18, 19, 21, 22, 24, 25, 26, 29, 30], "{warned:?}");
+    let strict = diagnostics_under(ENVIRONMENT, numeric::Compliance::Strict);
+    let refused: Vec<(u32, Option<&str>)> = strict.iter().filter(|d| d.2 != Some("IWS0097")).map(|d| (d.0, d.2)).collect();
+    assert_eq!(refused[..4], [(9, Some("IWS0055")), (12, Some("IWS0055")), (16, Some("IWS0055")), (18, Some("IWS0061"))], "{strict:?}");
+}

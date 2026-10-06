@@ -52,6 +52,7 @@ codec_enum!(AcceptFrom {
     CommandLine = 5,
     ArgumentNumber = 6,
     ArgumentValue = 7,
+    EnvironmentValue = 8,
 });
 codec_enum!(InspectMode { Characters = 0, All = 1, Leading = 2, First = 3 });
 codec_enum!(OpenMode { Input = 0, Output = 1, Extend = 2, InputOutput = 3 });

@@ -722,6 +722,7 @@ impl<'a> Printer<'a> {
             Op::SetCount(t, odo) => format!("SetCount t{t} <- {}", self.odo(odo)),
             Op::Display(id) => self.display(*id),
             Op::ArgumentNumber(value) => format!("ArgumentNumber <- {}", self.int(value)),
+            Op::Environment { display, value } => format!("Environment{} {}", if *value { "Value" } else { "Name" }, self.display(*display)),
             Op::ScreenDisplay { display, screen } => format!("Screen{} {}", self.display(*display), self.screen(screen)),
             Op::ScreenAccept { inputs, handled } => {
                 let inputs = inputs.iter().map(|i| {
@@ -2186,6 +2187,7 @@ fn accept_from(a: AcceptFrom) -> &'static str {
         AcceptFrom::CommandLine => "COMMAND-LINE",
         AcceptFrom::ArgumentNumber => "ARGUMENT-NUMBER",
         AcceptFrom::ArgumentValue => "ARGUMENT-VALUE",
+        AcceptFrom::EnvironmentValue => "ENVIRONMENT-VALUE",
     }
 }
 

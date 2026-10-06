@@ -704,7 +704,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
             Op::Call(c) if p.services.calls.get(*c as usize).is_some_and(|plan| plan.on_exception || plan.not_on_exception) => 2,
             Op::Invoke(i) if p.services.invokes.get(*i as usize).is_some_and(|plan| plan.on_exception || plan.not_on_exception) => 2,
             Op::File(f) => p.services.file_ops.get(*f as usize).map_or(0, |op| op.arms()),
-            Op::String(_) | Op::Unstring(_) | Op::SearchAll(_) | Op::Return(_) | Op::Accept { from: AcceptFrom::ArgumentValue, .. } => 2,
+            Op::String(_) | Op::Unstring(_) | Op::SearchAll(_) | Op::Return(_) | Op::Accept { from: AcceptFrom::ArgumentValue | AcceptFrom::EnvironmentValue, .. } => 2,
             Op::Markup(m) if p.services.markup.get(*m as usize).is_some_and(|x| x.phrases() != (false, false)) => 2,
             Op::ScreenAccept { handled: true, .. } => 2,
             _ => 0,
@@ -738,6 +738,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
                 Op::SetCount(_, o) if o.check != ssrange => return Err(format!("block {b}: a SEARCH count's check that disagrees with SSRANGE")),
                 Op::SetCount(_, o) => int(&o.object)?,
                 Op::Display(d) => within("DISPLAY plan", *d, p.plans.display.len())?,
+                Op::Environment { display, .. } => within("DISPLAY plan", *display, p.plans.display.len())?,
                 Op::ScreenDisplay { display, screen } => {
                     within("DISPLAY plan", *display, p.plans.display.len())?;
                     screen_ints(screen).try_for_each(int)?;
