@@ -10,6 +10,9 @@ use zarch::ebcdic::CodePage;
 
 const HEADER: usize = 16;
 const SQLVAR: usize = 44;
+/// The scale DESCRIBE gives a decimal the backend gives no precision or scale, as DECIMAL(31,s)
+/// (assumption C403).
+const NUMERIC_SCALE: u8 = 6;
 
 /// SQLCODE -804: an SQLDA the statement cannot use, with Db2's reason code as its message token.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,6 +41,7 @@ fn sqltype(ty: &ColumnType) -> Option<(i16, [u8; 2])> {
         ColumnType::Integer => (496, length(4)),
         ColumnType::BigInt => (492, length(8)),
         ColumnType::Decimal { precision, scale } => (484, [precision, scale]),
+        ColumnType::Numeric => (484, [31, NUMERIC_SCALE]),
         ColumnType::Real => (480, length(4)),
         ColumnType::Double => (480, length(8)),
         ColumnType::Date => (384, length(10)),
@@ -61,7 +65,8 @@ pub(super) fn describe(mem: &mut [u8], at: usize, columns: Option<&[Column]>, na
     let sqln = halfword(mem, at + 12);
     let columns = columns.unwrap_or_default();
     let sqld = i16::try_from(columns.len()).map_err(|_| Ok(Invalid(7)))?;
-    if sqln < 0 || at + HEADER + SQLVAR * sqln as usize > mem.len() {
+    let described = sqld > 0 && sqld <= sqln;
+    if sqln < 0 || at + HEADER + if described { SQLVAR * columns.len() } else { 0 } > mem.len() {
         return Err(Ok(Invalid(7)));
     }
     let put = |mem: &mut [u8], from: usize, len: usize, value: Value, ty: HostType| {
@@ -70,7 +75,7 @@ pub(super) fn describe(mem: &mut [u8], at: usize, columns: Option<&[Column]>, na
     put(mem, at, 8, Value::Char("SQLDA".into()), HostType::Char(8));
     put(mem, at + 8, 4, Value::Int(i64::from(sqln) * SQLVAR as i64 + HEADER as i64), HostType::Integer { signed: true });
     put(mem, at + 14, 2, Value::Int(sqld.into()), HostType::SmallInt { signed: true });
-    if sqld == 0 || sqld > sqln {
+    if !described {
         return Ok(HEADER);
     }
     for (k, column) in columns.iter().enumerate() {
@@ -89,13 +94,27 @@ pub(super) fn describe(mem: &mut [u8], at: usize, columns: Option<&[Column]>, na
         mem[var + 4..var + 8].copy_from_slice(&u32::from(ccsid.unwrap_or(0)).to_be_bytes());
         mem[var + 8..var + 12].fill(0);
         let name = match names {
-            SqlNames::Labels => String::new(),
-            SqlNames::Names | SqlNames::Any => column.name.chars().take(30).collect(),
+            SqlNames::Labels => Vec::new(),
+            SqlNames::Names | SqlNames::Any => sqlname(&column.name, page),
         };
-        put(mem, var + 12, 2, Value::Int(name.chars().count() as i64), HostType::SmallInt { signed: true });
-        put(mem, var + 14, 30, Value::Char(name), HostType::Char(30));
+        mem[var + 12..var + 14].copy_from_slice(&(name.len() as i16).to_be_bytes());
+        mem[var + 14..var + 14 + name.len()].copy_from_slice(&name);
+        mem[var + 14 + name.len()..var + SQLVAR].fill(page.encode_char(' ').unwrap_or(0x40));
     }
     Ok(HEADER + SQLVAR * columns.len())
+}
+
+/// A column name as SQLNAME holds it: in the code page, a character it lacks as its `?`, and as
+/// many whole characters as fit 30 bytes.
+fn sqlname(name: &str, page: &CodePage) -> Vec<u8> {
+    let mut chars = name.chars().count().min(30);
+    loop {
+        let bytes = page.encode_lossy(&name.chars().take(chars).collect::<String>());
+        if bytes.len() <= 30 {
+            return bytes;
+        }
+        chars -= 1;
+    }
 }
 
 /// One SQLVAR of a USING DESCRIPTOR: the host variable SQLDATA addresses, its type from SQLTYPE and
@@ -213,6 +232,18 @@ mod tests {
         assert_eq!((halfword(&mem, 14), halfword(&mem, 16)), (0, 0));
         let other = [Column { name: "B".into(), ty: ColumnType::Other("PostgreSQL type OID 16".into()), nullable: true }];
         assert!(matches!(describe(&mut sqlda(1), 0, Some(&other), SqlNames::Names, page()), Err(Err(why)) if why.contains("OID 16")));
+    }
+
+    #[test]
+    fn an_unsized_decimal_an_odd_name_and_a_large_sqln() {
+        let columns = [Column { name: "TOTAL€✓".into(), ty: ColumnType::Numeric, nullable: true }];
+        let mut mem = sqlda(1);
+        mem[12..14].copy_from_slice(&1000i16.to_be_bytes());
+        describe(&mut mem, 0, Some(&columns), SqlNames::Names, page()).unwrap();
+        assert_eq!((halfword(&mem, 16), &mem[18..20]), (485, &[31, 6][..]));
+        assert_eq!(halfword(&mem, 28), 7);
+        assert_eq!(page().decode(&mem[30..37]), "TOTAL€?");
+        assert_eq!(page().decode(&mem[37..60]), " ".repeat(23));
     }
 
     #[test]

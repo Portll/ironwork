@@ -308,6 +308,7 @@ fn column_text(c: &Column) -> String {
         ColumnType::Timestamp(p) => format!("timestamp({p})"),
         ColumnType::Binary(n) => format!("binary({n})"),
         ColumnType::VarBinary(n) => format!("varbinary({n})"),
+        ColumnType::Numeric => "numeric".into(),
         ColumnType::Other(name) => format!("other:{}", value_text(&Value::Char(name.clone()))),
     };
     format!("{} {ty} {}", value_text(&Value::Char(c.name.clone())), if c.nullable { "null" } else { "notnull" })
@@ -343,6 +344,7 @@ fn parse_column(text: &str) -> Result<Column, String> {
             "double" => ColumnType::Double,
             "date" => ColumnType::Date,
             "time" => ColumnType::Time,
+            "numeric" => ColumnType::Numeric,
             other => match other.strip_prefix("other:").map(parse_value) {
                 Some(Ok((Value::Char(name), ""))) => ColumnType::Other(name),
                 _ => return Err(format!("{other} is not a column type")),

@@ -123,7 +123,9 @@ the runtime keeps the state they need in its session, so every backend answers a
   gives room for them all (SQLTYPE odd for a column that takes NULL, SQLLEN, the CCSID in SQLDATA
   for a string, and SQLNAME). A statement that is not a query gives SQLD 0. The columns are those
   the database's `prepare` described, which a recording keeps as `:` lines (§8), and how
-  PostgreSQL's types become Db2's is assumption C403. DESCRIBE of a name not prepared is -516.
+  PostgreSQL's types become Db2's is assumption C403: a decimal given no precision, as `SUM(x)` or
+  arithmetic gives, is DECIMAL(31,6), and a statement that needs another scale casts the column.
+  DESCRIBE of a name not prepared is -516.
 - **USING DESCRIPTOR** on EXECUTE, OPEN and FETCH takes each host variable from the SQLDA: its type
   from SQLTYPE and SQLLEN, its storage where SQLDATA points, and its indicator where SQLIND points
   when SQLTYPE is odd. An SQLDA the statement cannot use is -804 with Db2's reason code in SQLERRMC
@@ -343,7 +345,8 @@ Input rules:
     hashes `DECLARE C1 CURSOR [WITH HOLD] FOR` and the string; PREPARE's verb is `PREPARE`, with
     the statement name where a cursor stands.
   - **`:`** gives one result column of a PREPARE: its name, its type (`char(10)`,
-    `decimal(7,2)`, `timestamp(6)`, `other:"…"` for one Db2 has no type for) and `null` or
+    `decimal(7,2)`, `numeric` for a decimal given no precision, `timestamp(6)`, `other:"…"` for
+    one Db2 has no type for) and `null` or
     `notnull`, as `: char:"NAME" char(10) notnull`. DESCRIBE reads them.
   - **`>`** gives the input values, in host-variable order: a `>` line for each row of a
     multiple-row INSERT, whose text is the INSERT of one row. A rowset FETCH's text is

@@ -137,8 +137,9 @@ pub fn db2_error(state: &str) -> Option<(i32, &'static str)> {
 /// Db2's longest VARCHAR, the length a PostgreSQL string type declared without one describes as.
 const LONGEST_VARCHAR: u16 = 32704;
 
-/// A PostgreSQL result column's type as Db2's (assumption C403). A NUMERIC with no precision, and
-/// any type Db2 has no counterpart for, stays the backend's to name.
+/// A PostgreSQL result column's type as Db2's (assumption C403). A timestamp with a time zone is
+/// TIMESTAMP, as its values arrive without the zone; a type Db2 has no counterpart for stays the
+/// backend's to name.
 pub fn column_type(oid: u32, typmod: i32) -> ColumnType {
     let length = (typmod >= 4).then(|| u16::try_from(typmod - 4).unwrap_or(LONGEST_VARCHAR));
     match oid {
@@ -153,12 +154,12 @@ pub fn column_type(oid: u32, typmod: i32) -> ColumnType {
         17 => ColumnType::VarBinary(LONGEST_VARCHAR),
         1082 => ColumnType::Date,
         1083 => ColumnType::Time,
-        1114 => ColumnType::Timestamp(u8::try_from(typmod).unwrap_or(6)),
+        1114 | 1184 => ColumnType::Timestamp(u8::try_from(typmod).unwrap_or(6)),
         1700 if typmod >= 4 => {
             let packed = typmod - 4;
             ColumnType::Decimal { precision: ((packed >> 16) & 0xFFFF) as u8, scale: (packed & 0xFFFF) as u8 }
         }
-        1700 => ColumnType::Other("NUMERIC without a precision".into()),
+        1700 => ColumnType::Numeric,
         other => ColumnType::Other(format!("PostgreSQL type OID {other}")),
     }
 }
@@ -241,7 +242,8 @@ mod tests {
         assert_eq!(column_type(1042, 14), ColumnType::Char(10));
         assert_eq!(column_type(1043, -1), ColumnType::VarChar(32704));
         assert_eq!(column_type(1700, (7 << 16 | 2) + 4), ColumnType::Decimal { precision: 7, scale: 2 });
-        assert_eq!(column_type(1700, -1), ColumnType::Other("NUMERIC without a precision".into()));
+        assert_eq!(column_type(1700, -1), ColumnType::Numeric);
+        assert_eq!(column_type(1184, 3), ColumnType::Timestamp(3));
         assert_eq!(column_type(1114, -1), ColumnType::Timestamp(6));
         assert_eq!(column_type(16, -1), ColumnType::Other("PostgreSQL type OID 16".into()));
     }

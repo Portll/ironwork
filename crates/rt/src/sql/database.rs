@@ -57,6 +57,8 @@ pub enum ColumnType {
     Integer,
     BigInt,
     Decimal { precision: u8, scale: u8 },
+    /// A decimal the backend gives no precision or scale, as an expression's result may be.
+    Numeric,
     Real,
     Double,
     Date,
