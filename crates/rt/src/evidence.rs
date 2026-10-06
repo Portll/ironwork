@@ -446,7 +446,12 @@ fn running(pid: i64) -> bool {
     {
         std::process::Command::new("ps").args(["-p", &pid.to_string(), "-o", "pid="]).output().is_ok_and(|o| o.status.success() && !o.stdout.trim_ascii().is_empty())
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        let listed = std::process::Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"]).output();
+        listed.is_ok_and(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).contains(&format!("\"{pid}\"")))
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = pid;
         false

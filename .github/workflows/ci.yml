@@ -87,6 +87,9 @@ jobs:
           - { name: Windows x86-64, os: windows-latest }
     runs-on: ${{ matrix.os }}
     steps:
+      # Golden files and include_str! texts are compared byte for byte; Windows' default checkout
+      # would turn their line ends into CR LF.
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

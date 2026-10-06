@@ -289,7 +289,7 @@ fn a_module_holding_no_program_of_the_name_is_a_load_error_that_on_exception_doe
     fs::copy(dir.join("out/MISS.iwm"), dir.join("out/NOSUCH.iwm")).unwrap();
     let module = ironwork(&dir, &["run", "out/MISS.iwm"]);
     assert_eq!(ran(&module), (String::new(), Some(244)));
-    assert_eq!(abends(&module), ["MISS.cbl:4:12: ABEND IRONWORK: CALL NOSUCH: out/NOSUCH.iwm: the module holds no program NOSUCH"]);
+    assert_eq!(abends(&module), [format!("MISS.cbl:4:12: ABEND IRONWORK: CALL NOSUCH: {}: the module holds no program NOSUCH", Path::new("out").join("NOSUCH.iwm").display())]);
 }
 
 /// A copy of `module` with one byte of section `name` changed, its checksum left as it was.
@@ -313,7 +313,7 @@ fn a_damaged_module_is_refused_whether_called_or_run() {
     let called = ironwork(&dir, &["run", "out/MAIN.iwm"]);
     assert_eq!(ran(&called), (String::new(), Some(244)));
     let line = &abends(&called)[0];
-    assert!(line.starts_with("MAIN.cbl:18:12: ABEND IRONWORK: CALL SUB: out/SUB.iwm: section LIR is corrupt (checksum "), "{line}");
+    assert!(line.starts_with(&format!("MAIN.cbl:18:12: ABEND IRONWORK: CALL SUB: {}: section LIR is corrupt (checksum ", Path::new("out").join("SUB.iwm").display())), "{line}");
 
     let main = dir.join("out/MAIN.iwm");
     fs::write(dir.join("out/BAD.iwm"), damaged(&main, "LAYOUT")).unwrap();

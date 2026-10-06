@@ -235,7 +235,7 @@ fn a_catalogued_message_carries_its_id_in_text_and_json() {
     assert_eq!((text.status.code(), stderr(&text)), (Some(12), format!("{path}:8:26: IWR0001-S {REFUSED}\n")));
     for flags in [&["--diagnostics", "json"][..], &["--diagnostics=json"]] {
         let json = ironwork(&[&["check", path][..], flags].concat());
-        let object = format!("{{\"col\":26,\"file\":\"{path}\",\"id\":\"IWR0001\",\"line\":8,\"member\":null,\"message\":\"{REFUSED}\",\"severity\":\"S\"}}\n");
+        let object = format!("{{\"col\":26,\"file\":\"{}\",\"id\":\"IWR0001\",\"line\":8,\"member\":null,\"message\":\"{REFUSED}\",\"severity\":\"S\"}}\n", path.replace('\\', "\\\\"));
         assert_eq!((json.status.code(), stderr(&json)), (Some(12), object), "{flags:?}");
     }
     let ran = ironwork(&["run", path, "--diagnostics", "json"]);
@@ -244,7 +244,7 @@ fn a_catalogued_message_carries_its_id_in_text_and_json() {
 
     let picture = Source::new("picture-json", "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  X PIC 9(40).\n       PROCEDURE DIVISION.\n           GOBACK.\n");
     let json = ironwork(&["check", picture.path(), "--diagnostics", "json"]);
-    let object = format!("{{\"col\":8,\"file\":\"{}\",\"id\":\"IWC0263\",\"line\":5,\"member\":null,\"message\":\"PICTURE 9(40): more than 31 digits\",\"severity\":\"S\"}}\n", picture.path());
+    let object = format!("{{\"col\":8,\"file\":\"{}\",\"id\":\"IWC0263\",\"line\":5,\"member\":null,\"message\":\"PICTURE 9(40): more than 31 digits\",\"severity\":\"S\"}}\n", picture.path().replace('\\', "\\\\"));
     assert_eq!(stderr(&json), object);
 }
 

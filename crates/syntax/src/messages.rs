@@ -855,7 +855,7 @@ mod tests {
                     sources(&path, out);
                 }
             } else if path.extension().is_some_and(|e| e == "rs") && path.file_name().is_some_and(|n| n != "tests.rs" && n != "messages.rs") {
-                let text = std::fs::read_to_string(&path).unwrap();
+                let text = std::fs::read_to_string(&path).unwrap().replace("\r\n", "\n");
                 let code = text.find("#[cfg(test)]\nmod tests {").map_or(text.as_str(), |at| &text[..at]).to_owned();
                 out.push((path, code));
             }

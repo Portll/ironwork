@@ -445,7 +445,7 @@ fn a_cobol_steps_abend_record_names_the_source_and_line_and_other_steps_name_non
     );
     let l = log(&o);
     assert_eq!(o.status.code(), Some(240), "{l}");
-    assert_eq!(l.matches(&format!("{}:8:", dir.join("lib/DIVIDE.cbl").display())).count(), 2, "{l}");
+    assert_eq!(l.matches(&format!("{}:8:", dir.join("lib").join("DIVIDE.cbl").display())).count(), 2, "{l}");
     let runs: Vec<_> = fs::read_dir(ev.join("runs")).unwrap().flatten().collect();
     let text = fs::read_to_string(runs[0].path()).unwrap();
     let (mut steps, mut abend) = (Vec::new(), None);
