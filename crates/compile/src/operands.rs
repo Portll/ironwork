@@ -31,16 +31,23 @@ impl Class {
 /// of its class (Language Reference SC27-8713-03, pp. 589, 627, 657, 663).
 const CHARACTER_ARGUMENT: [&str; 4] = ["LOWER-CASE", "REVERSE", "TRIM", "UPPER-CASE"];
 
-/// The argument both executors evaluate for an unsigned integer DISPLAY item given to one of
-/// `CHARACTER_ARGUMENT`, which only `--compliance extended` compiles (IWX0018-W): the item
-/// reference-modified from its first character, its digits as GnuCOBOL reads them.
+/// The argument both executors evaluate in place of the item written, reference-modified from
+/// its first byte: for an unsigned integer DISPLAY item given to one of `CHARACTER_ARGUMENT`,
+/// which only `--compliance extended` compiles (IWX0018-W), its digits as GnuCOBOL reads them;
+/// for LENGTH of a numeric or pointer item, its bytes, which LENGTH counts (Language Reference
+/// SC27-8713-03, LENGTH: "in alphanumeric character positions or bytes for all other arguments").
 pub fn as_characters(layout: &Layout, f: &FunctionCall) -> Option<Expr> {
-    if !CHARACTER_ARGUMENT.contains(&f.name.as_str()) {
-        return None;
-    }
     let Some(Expr::Operand(Operand::Ref(r))) = f.args.first() else { return None };
     let Ok(Resolved::Item(i)) = layout.resolve(&r.name, &r.qualifiers, r.pos) else { return None };
-    if r.refmod.is_some() || !matches!(layout.items[i].kind, Kind::Zoned { scale: 0, signed: false, .. }) {
+    let kind = &layout.items[i].kind;
+    let rewritten = match f.name.as_str() {
+        "LENGTH" => matches!(
+            kind,
+            Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } | Kind::Float(_) | Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer
+        ),
+        name => CHARACTER_ARGUMENT.contains(&name) && matches!(kind, Kind::Zoned { scale: 0, signed: false, .. }),
+    };
+    if r.refmod.is_some() || !rewritten {
         return None;
     }
     let start = Box::new(Expr::Operand(Operand::Literal(Literal::Number("1".into()))));

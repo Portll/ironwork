@@ -159,6 +159,34 @@ fn the_character_functions_read_storage_as_it_is() {
     assert_eq!(lines[7], "--4--");
 }
 
+/// LENGTH counts a numeric or pointer item's bytes and a national item's characters (Language
+/// Reference SC27-8713-03, LENGTH), on both executors.
+#[test]
+fn length_of_an_item_is_its_bytes_and_of_a_national_item_its_characters() {
+    let data = concat!(
+        "       01  BIN PIC S9(4) COMP-5.\n",
+        "       01  PAC PIC S9(7) COMP-3.\n",
+        "       01  ZON PIC S9(5) SIGN LEADING SEPARATE.\n",
+        "       01  FLT COMP-2.\n",
+        "       01  PTR POINTER.\n",
+        "       01  TXT PIC X(3).\n",
+        "       01  NAT PIC N(3).\n",
+        "       01  TBL.\n",
+        "           05  E PIC S9(4) COMP OCCURS 3.\n",
+        "       01  L PIC 9.\n",
+    );
+    let body: String = ["BIN", "PAC", "ZON", "FLT", "PTR", "TXT", "NAT", "E(2)"]
+        .iter()
+        .flat_map(|item| [line(&format!("COMPUTE L = FUNCTION LENGTH({item})")), line("DISPLAY L")])
+        .chain([line("GOBACK.")])
+        .collect();
+    let source = program("", data, &body);
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let o = Harness::source(&source).run(executor);
+        assert_eq!((o.out.as_str(), o.ending.as_ref().ok()), ("2\n4\n6\n8\n4\n3\n3\n2\n", Some(&Ending::Goback)), "{}", o.err);
+    }
+}
+
 #[test]
 fn the_numval_tests_and_numval_f_take_ibms_formats() {
     let out = displays(
