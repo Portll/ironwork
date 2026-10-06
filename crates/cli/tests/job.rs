@@ -457,7 +457,7 @@ fn a_cobol_steps_abend_record_names_the_source_and_line_and_other_steps_name_non
         }
     }
     assert_eq!(steps.len(), 5, "{text}");
-    let divided = "ABEND S0CB: DecimalDivide exception";
+    let divided = "ABEND S0CB: CEE3211S The system detected a decimal-divide exception (System Completion Code=0CB).";
     assert_eq!(steps[..3], [
         ("OWN", divided, Some(("S0CB", Some("DIVIDE.cbl"), Some("8")))),
         ("CALLS", divided, Some(("S0CB", Some("DIVIDE.cbl"), Some("8")))),

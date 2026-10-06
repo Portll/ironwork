@@ -353,6 +353,7 @@ pub const UNHANDLED_FILE_STATUS: &str = "C451";
 pub const FUNCTION_ARGUMENT_MESSAGES: &str = "C452";
 pub const RUNTIME_RULE_MESSAGES: &str = "C453";
 pub const CICS_TRANSACTION_4038: &str = "C454";
+pub const PROGRAM_CHECK_MESSAGES: &str = "C455";
 pub const OUT_OF_SCOPE_CALL_NOT_FOUND: &str = "C470";
 pub const BINARY_CHAR: &str = "C460";
 pub const TOP_LEVEL_TABLE: &str = "C461";
@@ -802,7 +803,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: NO_METHOD_ABEND,
-        claim: "An INVOKE without ON EXCEPTION that finds no method raises IBM's severity-3 Language Environment condition, which ends the run with abend U4038",
+        claim: "An INVOKE without ON EXCEPTION that finds no method raises IBM's severity-3 Language Environment condition, which ends the run with abend U4038 and IGZ0045S, 'Unable to invoke method method-name on line number line number in COBOL program program-name' (LE Runtime Messages), ironwork's detail in parentheses in place of the method's and the program's names",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -1690,7 +1691,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: PARMCHECK_MESSAGE,
-        claim: "IBM documents what PARMCHECK's message holds but not its number or text: under MSG a runtime warning with the name of the parameter, the line number of the CALL statement and the program name, issued after the CALL, and under ABD a similar message at a terminating level that causes an abend (Programming Guide SC27-8714-03, p. 397); the corpus of public job output searched has PARMCHECK only in option listings. The message is ironwork's, with no IGZ number: 'PARMCHECK: SUB, called at line 14 of program MAIN, wrote past the end of WORKING-STORAGE, beyond parameter LAST-ITEM', the program being the one with the CALL. Under MSG it goes to standard error after 'ironwork: line:column: ' and the run goes on; under ABD the run ends with U4038, as a Language Environment condition of severity 3 that nothing handles ends it under the default ABTERMENC(ABEND), as an SSRANGE failure does. The parameter named is chosen: of the CALL's arguments whose storage starts in the calling program's own WORKING-STORAGE, so BY REFERENCE ones (a BY CONTENT or BY VALUE argument is a copy elsewhere), a LINKAGE item counting when its address is there, the one starting nearest the buffer, since a called program that declares it longer reaches the buffer soonest; of two starting at the same byte, the later in the USING list. With no such argument the message names none. Which bytes changed is not reported",
+        claim: "IBM documents what PARMCHECK's message holds: under MSG a runtime warning with the name of the parameter, the line number of the CALL statement and the program name, issued after the CALL, and under ABD a similar message at a terminating level that causes an abend (Programming Guide SC27-8714-03, p. 397). Language Environment's messages for a subprogram that changed data past the section holding its argument are IGZ0317S and IGZ0318W, 'The CALL statement on line line-number in program program-name caused corruption of data beyond the end of the section-name SECTION' (LE Runtime Messages); they do not name PARMCHECK, and ironwork reads them as its messages, the S one under ABD and the W one under MSG, a deduction. The message is IBM's text with ironwork's detail in parentheses: 'IGZ0317S The CALL statement on line 14 in program MAIN caused corruption of data beyond the end of the WORKING-STORAGE SECTION. (SUB wrote past it, beyond parameter LAST-ITEM)', the program being the one with the CALL. Under MSG it goes to standard error after 'ironwork: line:column: ' and the run goes on; under ABD the run ends with U4038, as a Language Environment condition of severity 3 that nothing handles ends it under the default ABTERMENC(ABEND), as an SSRANGE failure does. The parameter named is chosen: of the CALL's arguments whose storage starts in the calling program's own WORKING-STORAGE, so BY REFERENCE ones (a BY CONTENT or BY VALUE argument is a copy elsewhere), a LINKAGE item counting when its address is there, the one starting nearest the buffer, since a called program that declares it longer reaches the buffer soonest; of two starting at the same byte, the later in the USING list. With no such argument the message names none. Which bytes changed is not reported",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -1702,7 +1703,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: NUMCHECK_MESSAGE,
-        claim: "NUMCHECK's run-time message names the item, its bytes in hexadecimal, the program and, by its position, the line, as IBM's does (Programming Guide SC27-8714-03, p. 391), in ironwork's words with no IGZ message number, since no Enterprise COBOL output ironwork has shows one. Under MSG it is written to the error stream and the statement runs; under ABD the run ends with U4038, the abend a Language Environment condition of severity 3 gives, as SSRANGE's does",
+        claim: "NUMCHECK's run-time message names the item, its bytes in hexadecimal, the program and the line, as IBM's does (Programming Guide SC27-8714-03, p. 391): IGZ0278S under ABD and IGZ0279W under MSG for a zoned or packed item, IGZ0315S and IGZ0316W for a binary one (LE Runtime Messages), IBM's text without the statement's verb number, which ironwork does not count, and with the item, its bytes, the program and the fault in parentheses. Under MSG it is written to the error stream and the statement runs; under ABD the run ends with U4038, the abend a Language Environment condition of severity 3 gives, as SSRANGE's does",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -1930,7 +1931,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: RECURSIVE_CALL_OF_AN_ACTIVE_PROGRAM,
-        claim: "With the RECURSIVE clause a program can be reentered while a previous invocation is still active, and without it an active program cannot be (Language Reference SC27-8713-03, p. 102); only a RECURSIVE program can execute a CALL that directly or indirectly calls itself (p. 318). A recursive CALL of a program without RECURSIVE signals a condition, and if it is unhandled the run unit ends (Programming Guide SC27-8714-03, p. 557): IGZ0064S, 'A recursive call to active program program-name in compilation unit compilation-unit was attempted', and the application is terminated (z/OS 3.1 Language Environment Runtime Messages, IGZ0064S, cs00499). ironwork ends the run with U4038 and that message, as it ends one for an SSRANGE condition nothing handles (L19), naming the outermost program of the CALLed program's source as the compilation unit. The run unit's first program is no exception: a RECURSIVE main program can CALL itself, as the Programming Guide's factorial program does (p. 15), finding its WORKING-STORAGE in its last-used state, and a program stays active when a CALL of it returns while an earlier activation of it is still running. Under CICS a program is active only in its own run unit (C145): a CALL of the task's first program in a run unit a LINK or XCTL started runs a fresh copy, and one in the first program's own run unit is a recursive call. ironwork's run unit holds no handle for the first program, so each activation carries a reference to it (C148); a function or a method, whose activation does not, cannot CALL it, an ironwork refusal",
+        claim: "With the RECURSIVE clause a program can be reentered while a previous invocation is still active, and without it an active program cannot be (Language Reference SC27-8713-03, p. 102); only a RECURSIVE program can execute a CALL that directly or indirectly calls itself (p. 318). A recursive CALL of a program without RECURSIVE signals a condition, and if it is unhandled the run unit ends (Programming Guide SC27-8714-03, p. 557): IGZ0064S, 'A recursive call to active program program-name in compilation unit compilation-unit was attempted', for a contained program, and IGZ0015S, 'A recursive call was attempted to a program that was already active. The program name is program-name', for an outermost one; the application is terminated (z/OS 3.1 Language Environment Runtime Messages, IGZ0064S, cs00499; IGZ0015S). ironwork ends the run with U4038 and that message, as it ends one for an SSRANGE condition nothing handles (L19), naming the outermost program of the CALLed program's source as the compilation unit. The run unit's first program is no exception: a RECURSIVE main program can CALL itself, as the Programming Guide's factorial program does (p. 15), finding its WORKING-STORAGE in its last-used state, and a program stays active when a CALL of it returns while an earlier activation of it is still running. Under CICS a program is active only in its own run unit (C145): a CALL of the task's first program in a run unit a LINK or XCTL started runs a fresh copy, and one in the first program's own run unit is a recursive call. ironwork's run unit holds no handle for the first program, so each activation carries a reference to it (C148); a function or a method, whose activation does not, cannot CALL it, an ironwork refusal",
         basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -2208,6 +2209,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: CALL_BY_PROGRAM_ID,
         claim: "A CALL of a name that no member of the program libraries has, as a file named for it, finds the .cbl or .cob file there whose PROGRAM-ID is the name: the directories in order, each one's files in name order, the first that holds the program. z/OS finds a called program as a member of STEPLIB, JOBLIB or the link list by its member name, and C450 says how a CALL that none answers ends; a build that link-edits each program under its PROGRAM-ID gives every program a member of that name, and ironwork's libraries are source directories, whose file names need not be. A member of the name comes first, as before",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PROGRAM_CHECK_MESSAGES,
+        claim: "A program check that ends the run gives Language Environment's message for it, as IBM's does with the system completion code: CEE3206S 'The system detected a specification exception (System Completion Code=0C6).', CEE3207S for a data exception (0C7), CEE3208S fixed-point overflow (0C8), CEE3209S fixed-point divide (0C9), CEE3210S decimal-overflow (0CA), CEE3211S decimal-divide (0CB), CEE3212S exponent-overflow (0CC), CEE3213S exponent-underflow (0CD), CEE3214S significance (0CE) and CEE3215S floating-point divide (0CF) (LE Runtime Messages). A protection exception, S0C4, keeps ironwork's message, which names what was addressed",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {

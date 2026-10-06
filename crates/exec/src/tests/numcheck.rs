@@ -18,8 +18,9 @@ fn ran(card: &str, statements: &[&str]) -> (String, String, Result<Ending, Abend
     run_with(&program(card, DATA, &body.concat()), &[])
 }
 
-fn messages(err: &str) -> Vec<&str> {
-    err.lines().filter_map(|l| l.split_once("NUMCHECK: ").map(|(_, m)| m)).collect()
+/// What each run-time report says of the item, the detail after IBM's text, with what follows it.
+fn messages(err: &str) -> Vec<String> {
+    err.lines().filter(|l| l.contains("IGZ0279W ") || l.contains("IGZ0316W ")).filter_map(|l| l.rsplit_once(" (").map(|(_, m)| m.replacen(')', "", 1))).collect()
 }
 
 #[test]
@@ -36,7 +37,10 @@ fn a_zoned_sender_that_is_not_numeric_is_reported_and_the_statement_runs_under_m
 fn abd_ends_the_run_with_u4038_before_the_statement() {
     let (out, _, ending) = ran("NUMCHECK(ABD)", &["COMPUTE W = Z + 1", "DISPLAY W"]);
     let abend = ending.unwrap_err();
-    assert_eq!((abend.code, abend.message.as_str()), (AbendCode::user(4038), "NUMCHECK: Z X'40F1F2' in program T is not NUMERIC"));
+    assert_eq!(
+        (abend.code, abend.message.as_str()),
+        (AbendCode::user(4038), "IGZ0278S The contents of data item Z at the time of reference on line 23 failed the NUMERIC class test or contained a value larger than the PICTURE clause as detected by the NUMCHECK compiler option. (Z X'40F1F2' in program T is not NUMERIC)")
+    );
     assert_eq!(out, "");
 }
 
@@ -127,7 +131,7 @@ fn ran_redefined(card: &str) -> Vec<String> {
     let body: String = statements.iter().map(|s| line(s)).collect();
     let (_, err, ending) = run_with(&program(card, REDEFINED, &body), &[]);
     assert!(ending.is_ok(), "{ending:?}");
-    messages(&err).into_iter().map(str::to_owned).collect()
+    messages(&err)
 }
 
 #[test]
@@ -210,8 +214,8 @@ fn compiled_messages(source: &str) -> Vec<(String, String)> {
 /// Each run-time report's position and item.
 fn reported(err: &str) -> BTreeSet<(String, String)> {
     err.lines()
-        .filter_map(|l| l.strip_prefix("ironwork: ")?.split_once(": NUMCHECK: "))
-        .map(|(pos, m)| (pos.to_owned(), m.split(' ').next().unwrap_or_default().to_owned()))
+        .filter_map(|l| l.strip_prefix("ironwork: ")?.split_once(": IGZ02").or_else(|| l.strip_prefix("ironwork: ")?.split_once(": IGZ03")).zip(l.rsplit_once(" (")))
+        .map(|((pos, _), (_, m))| (pos.to_owned(), m.split(' ').next().unwrap_or_default().to_owned()))
         .collect()
 }
 
@@ -262,7 +266,7 @@ fn on_both(source: &str) -> (Vec<String>, Result<Ending, Abend>) {
     let walker = Harness::source(source).run(Executor::Interpreter);
     let vm = Harness::source(source).run(Executor::Vm);
     assert_eq!((&vm.out, &vm.err, &vm.ending), (&walker.out, &walker.err, &walker.ending));
-    (messages(&walker.err).into_iter().map(str::to_owned).collect(), walker.ending)
+    (messages(&walker.err), walker.ending)
 }
 
 /// E(2) and the subscript I that reaches it hold a space, B is binary zero, and SUB takes one

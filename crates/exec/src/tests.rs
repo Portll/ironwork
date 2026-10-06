@@ -1785,10 +1785,10 @@ fn a_recursive_main_program_calls_itself() {
 }
 
 #[test]
-fn a_call_of_an_active_program_that_is_not_recursive_ends_the_run_with_igz0064s() {
+fn a_call_of_an_active_program_that_is_not_recursive_ends_the_run_with_igz0015s_or_igz0064s() {
     let main = two_programs("", &[line("CALL 'SUB'"), line("GOBACK.")].concat(), "SUB", "", &["       PROCEDURE DIVISION.\n".into(), line("CALL 'MAIN'"), line("GOBACK.")].concat());
     let abend = run_unit(&main, vec![], "").2.unwrap_err();
-    assert_eq!((abend.code.to_string(), abend.message.as_str()), ("U4038".into(), "IGZ0064S A recursive call to active program MAIN in compilation unit MAIN was attempted."));
+    assert_eq!((abend.code.to_string(), abend.message.as_str()), ("U4038".into(), "IGZ0015S A recursive call was attempted to a program that was already active. The program name is MAIN."));
     let nested = [
         "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OUTER.\n       PROCEDURE DIVISION.\n",
         &line("CALL 'A'"),

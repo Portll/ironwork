@@ -41,7 +41,8 @@ pub fn test<'a, H, L: Loader<H>>(
     // The argument starting nearest the buffer; max_by_key keeps the later of two at one byte.
     let parameter = arguments.into_iter().filter(|&(a, _)| (base..at).contains(&a)).max_by_key(|&(a, _)| a);
     let beyond = parameter.map_or(String::new(), |(_, name)| format!(", beyond parameter {name}"));
-    let message = format!("PARMCHECK: {}, called at line {} of program {caller}, wrote past the end of WORKING-STORAGE{beyond}", called(unit), pos.line);
+    let id = if abd { "IGZ0317S" } else { "IGZ0318W" };
+    let message = format!("{id} The CALL statement on line {} in program {caller} caused corruption of data beyond the end of the WORKING-STORAGE SECTION. ({} wrote past it{beyond})", pos.line, called(unit));
     if abd {
         return Err(Abend { code: AbendCode::user(4038), message, pos, file: None });
     }

@@ -19,8 +19,23 @@ pub struct Abend {
 }
 
 impl Abend {
+    /// A program check, with Language Environment's message for it (assumption C455).
     pub fn check(c: ProgramCheck, pos: Pos) -> Self {
-        Self { code: AbendCode::Check(c), message: format!("{c:?} exception"), pos, file: None }
+        let (id, what) = match c {
+            ProgramCheck::Specification => ("CEE3206S", "a specification"),
+            ProgramCheck::Data => ("CEE3207S", "a data"),
+            ProgramCheck::FixedPointOverflow => ("CEE3208S", "a fixed-point overflow"),
+            ProgramCheck::FixedPointDivide => ("CEE3209S", "a fixed-point divide"),
+            ProgramCheck::DecimalOverflow => ("CEE3210S", "a decimal-overflow"),
+            ProgramCheck::DecimalDivide => ("CEE3211S", "a decimal-divide"),
+            ProgramCheck::HfpExponentOverflow => ("CEE3212S", "an exponent-overflow"),
+            ProgramCheck::HfpExponentUnderflow => ("CEE3213S", "an exponent-underflow"),
+            ProgramCheck::HfpSignificance => ("CEE3214S", "a significance"),
+            ProgramCheck::HfpDivide => ("CEE3215S", "a floating-point divide"),
+        };
+        let code = AbendCode::Check(c);
+        let message = format!("{id} The system detected {what} exception (System Completion Code={}).", &code.as_str()[1..]);
+        Self { code, message, pos, file: None }
     }
 
     pub fn ironwork(message: impl Into<String>, pos: Pos) -> Self {

@@ -222,7 +222,7 @@ fn an_argument_outside_a_functions_domain_ends_the_run() {
     assert!(ending("COMPUTE X = FUNCTION ACOS(2)").contains("FUNCTION ACOS(2): the argument must be from -1 to +1"));
     assert_eq!(ending("COMPUTE X = FUNCTION FACTORIAL(29)"), "IGZ0156S Argument-1 for function FACTORIAL was less than zero or greater than 28. (29)");
     assert_eq!(ending("MOVE FUNCTION HEX-TO-CHAR('ABC') TO X"), "IGZ0348S Argument-1 for function HEX-TO-CHAR had a length that was not a multiple of 2 bytes. (3)");
-    assert!(ending("COMPUTE X = FUNCTION EXP(200)").contains("HfpExponentOverflow"));
+    assert!(ending("COMPUTE X = FUNCTION EXP(200)").starts_with("CEE3212S The system detected an exponent-overflow exception (System Completion Code=0CC)."));
 }
 
 /// An argument Language Environment names a message for ends the run U4038 with it (assumption C452).

@@ -71,6 +71,7 @@ const ALIASES: &[(&str, Condition)] = &[("DSIDERR", Condition::FILENOTFOUND)];
 /// condition not listed abends AEIP.
 const DEFAULT_ABENDS: &[(Condition, &str)] = &[
     (Condition::NOTFND, "AEIM"),
+    (Condition::INVMPSZ, "AEYB"),
     (Condition::DUPREC, "AEIN"),
     (Condition::DUPKEY, "AEIO"),
     (Condition::IOERR, "AEIQ"),
@@ -497,9 +498,9 @@ mod tests {
             assert!(DEFAULT_ABENDS[..i].iter().all(|&(d, _)| d != c), "{c:?} is listed twice");
             assert_eq!(c.default_abend(), abend);
         }
-        assert_eq!(DEFAULT_ABENDS.len(), 37);
+        assert_eq!(DEFAULT_ABENDS.len(), 38);
         let codes = [Condition::QIDERR, Condition::ROLLEDBACK, Condition::FILENOTFOUND, Condition::INVREQ, Condition::INVMPSZ].map(Condition::default_abend);
-        assert_eq!(codes, ["AEYH", "AEXJ", "AEIL", "AEIP", "AEIP"]);
+        assert_eq!(codes, ["AEYH", "AEXJ", "AEIL", "AEIP", "AEYB"]);
     }
 
     #[test]

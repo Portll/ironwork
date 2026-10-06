@@ -251,10 +251,15 @@ pub fn in_loaded<H: Clone, L: Loader<H>>(unit: &RunUnit<'_, H, L>, index: usize,
 
 /// A CALL of `program`, of compilation unit `unit`, while it is active and not RECURSIVE: the
 /// condition Language Environment signals, which nothing handles, ends the run unit with U4038
-/// (Programming Guide SC27-8714-03, p. 557; C127).
+/// (Programming Guide SC27-8714-03, p. 557; C127), IGZ0015S for an outermost program and IGZ0064S
+/// for a contained one (LE Runtime Messages).
 pub fn recursive_call(program: &str, unit: &str, pos: Pos) -> Abend {
     let (program, unit) = (program.to_ascii_uppercase(), unit.to_ascii_uppercase());
-    let message = format!("IGZ0064S A recursive call to active program {program} in compilation unit {unit} was attempted.");
+    let message = if program == unit {
+        format!("IGZ0015S A recursive call was attempted to a program that was already active. The program name is {program}.")
+    } else {
+        format!("IGZ0064S A recursive call to active program {program} in compilation unit {unit} was attempted.")
+    };
     Abend { code: AbendCode::user(4038), message, pos, file: None }
 }
 

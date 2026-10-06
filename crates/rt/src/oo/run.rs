@@ -362,7 +362,7 @@ fn no_method<P, O, S>(plan: &InvokePlan<P, O, S>, what: String, pos: Pos) -> R<S
     }
     Err(Abend {
         code: AbendCode::user(4038),
-        message: format!("{what}: no method matches it, and the INVOKE has no ON EXCEPTION (a severity-3 Language Environment condition)"),
+        message: format!("IGZ0045S Unable to invoke method on line number {}. ({what}: no method matches it, and the INVOKE has no ON EXCEPTION)", pos.line),
         pos,
         file: None,
     })

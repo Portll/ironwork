@@ -31,8 +31,8 @@ fn under_parmcheck_msg_a_call_that_writes_past_working_storage_is_a_warning_and_
     assert_eq!(out, "ZZZZ ZZZZ\n");
     assert_eq!(
         err,
-        "ironwork: 9:12: PARMCHECK: LONGER, called at line 9 of program MAIN, wrote past the end of WORKING-STORAGE, beyond parameter LAST-ITEM\n\
-         ironwork: 10:12: PARMCHECK: LONGER, called at line 10 of program MAIN, wrote past the end of WORKING-STORAGE, beyond parameter FIRST-ITEM\n"
+        "ironwork: 9:12: IGZ0318W The CALL statement on line 9 in program MAIN caused corruption of data beyond the end of the WORKING-STORAGE SECTION. (LONGER wrote past it, beyond parameter LAST-ITEM)\n\
+         ironwork: 10:12: IGZ0318W The CALL statement on line 10 in program MAIN caused corruption of data beyond the end of the WORKING-STORAGE SECTION. (LONGER wrote past it, beyond parameter FIRST-ITEM)\n"
     );
 }
 
@@ -42,7 +42,7 @@ fn under_parmcheck_abd_a_call_that_writes_past_working_storage_ends_the_run_with
     let (out, err, ending) = run_unit(&source, vec![], "");
     let abend = ending.unwrap_err();
     assert_eq!(abend.code, "U4038");
-    assert_eq!(abend.message, "PARMCHECK: LONGER, called at line 9 of program MAIN, wrote past the end of WORKING-STORAGE, beyond parameter LAST-ITEM");
+    assert_eq!(abend.message, "IGZ0317S The CALL statement on line 9 in program MAIN caused corruption of data beyond the end of the WORKING-STORAGE SECTION. (LONGER wrote past it, beyond parameter LAST-ITEM)");
     assert_eq!((out.as_str(), err.as_str()), ("", ""));
 }
 
@@ -64,7 +64,7 @@ fn parmcheck_checks_a_call_of_a_language_environment_service() {
     let source = program("PARMCHECK", data, &[line("CALL 'CEEGMTO' USING HOURS MINUTES SECONDS FC"), line("GOBACK.")].concat());
     let (_, err, ending) = run_unit(&source, vec![], "");
     assert!(ending.is_ok(), "{ending:?} {err}");
-    assert_eq!(err, "ironwork: 11:12: PARMCHECK: CEEGMTO, called at line 11 of program T, wrote past the end of WORKING-STORAGE, beyond parameter FC\n");
+    assert_eq!(err, "ironwork: 11:12: IGZ0318W The CALL statement on line 11 in program T caused corruption of data beyond the end of the WORKING-STORAGE SECTION. (CEEGMTO wrote past it, beyond parameter FC)\n");
 }
 
 /// The run on the VM alone, which fails where the VM stops.
