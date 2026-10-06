@@ -2030,7 +2030,7 @@ impl Parser<'_> {
             // STOP literal waits for the operator, whom ironwork does not have (assumption C132).
             "STOP" if self.starts_operand() && !self.starts_ref() => Stmt::Display { items: vec![self.operand()?], upon: Some(Upon { name: "CONSOLE".into(), device: "CONSOLE".into() }), no_advancing: false, pos },
             "STOP" => return Err(self.error("RUN or a literal after STOP")),
-            "CONTINUE" => Stmt::Continue,
+            "CONTINUE" => Stmt::Continue { pos },
             "EXIT" if self.is_word("FUNCTION") => return Err(crate::messages::IWS0056.at(pos, "EXIT FUNCTION: Enterprise COBOL does not yet support the format 4 EXIT statement; GOBACK ends a user-defined function")),
             "EXIT" => match self.accept_any(&["PROGRAM", "PARAGRAPH", "SECTION", "PERFORM", "METHOD"]).as_deref() {
                 Some("PROGRAM") => Stmt::ExitProgram { pos },

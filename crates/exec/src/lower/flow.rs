@@ -507,7 +507,7 @@ impl Lower<'_> {
                 self.end(Terminator::ExitProgram { next }, pos)?;
                 self.switch(next)?;
             }
-            Stmt::Continue | Stmt::SentenceEnd | Stmt::Exit { kind: ExitKind::Plain, pos: _ } => {}
+            Stmt::Continue { .. } | Stmt::SentenceEnd | Stmt::Exit { kind: ExitKind::Plain, pos: _ } => {}
             Stmt::Exit { kind: ExitKind::Paragraph, pos: _ } => self.leave(ctx.para + 1, ctx, pos)?,
             Stmt::Exit { kind: ExitKind::Section, pos: _ } => self.leave(crate::section_end(self.program, ctx.para) + 1, ctx, pos)?,
             Stmt::Exit { kind: ExitKind::Perform, pos: _ } => match ctx.loops.last() {
@@ -909,6 +909,7 @@ fn stmt_pos(s: &Stmt) -> Option<Pos> {
             Sorting::Sort(st) => st.pos,
             Sorting::Release { pos, .. } | Sorting::Return { pos, .. } => *pos,
         },
-        Stmt::NextSentence | Stmt::SentenceEnd | Stmt::Continue | Stmt::Exit { .. } => return None,
+        Stmt::Continue { pos } | Stmt::Exit { pos, .. } => *pos,
+        Stmt::NextSentence | Stmt::SentenceEnd => return None,
     })
 }

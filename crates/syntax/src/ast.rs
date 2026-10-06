@@ -544,7 +544,7 @@ pub enum Stmt {
     ExitMethod { pos: Pos },
     Sorting(Box<Sorting>),
     StopRun { pos: Pos },
-    Continue,
+    Continue { pos: Pos },
     Exit { kind: ExitKind, pos: Pos },
 }
 

@@ -1864,7 +1864,7 @@ fn each_statement_with_a_position_starts_once_where_its_first_op_or_terminator_i
         p.debug.statements.iter().enumerate().flat_map(|(b, s)| s.iter().map(move |&(k, at)| (b, k, at))).map(|(b, k, at)| (b, k, p.debug.positions[at as usize].line)).collect();
     let mut lines: Vec<u32> = starts.iter().map(|s| s.2).collect();
     lines.sort_unstable();
-    let mut expected: Vec<u32> = ["MOVE 1", "IF N", "'A'", "'B'", "GO TO", "'NEVER'", "STOP RUN"].map(line_of).to_vec();
+    let mut expected: Vec<u32> = ["MOVE 1", "IF N", "'A'", "'B'", "CONTINUE", "GO TO", "'NEVER'", "STOP RUN"].map(line_of).to_vec();
     expected.sort_unstable();
     assert_eq!(lines, expected);
     starts.retain(|s| s.2 == line_of("MOVE 1") || s.2 == line_of("GO TO"));

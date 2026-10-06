@@ -451,7 +451,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Stmt::Exit { kind: ExitKind::Section, .. } => return Ok(Flow::ExitSection),
             Stmt::Exit { kind: ExitKind::Perform, .. } => return Ok(Flow::ExitPerform),
             Stmt::Exit { kind: ExitKind::PerformCycle, .. } => return Ok(Flow::ExitPerformCycle),
-            Stmt::Continue | Stmt::Exit { kind: ExitKind::Plain, .. } => {}
+            Stmt::Continue { .. } | Stmt::Exit { kind: ExitKind::Plain, .. } => {}
         }
         Ok(Flow::Next)
     }

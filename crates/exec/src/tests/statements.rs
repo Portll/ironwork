@@ -50,10 +50,10 @@ fn looped() -> String {
 }
 
 #[test]
-fn each_statement_that_starts_is_told_in_order_and_one_with_no_position_is_not() {
+fn each_statement_that_starts_is_told_in_order_continue_among_them() {
     let source = looped();
     let at = |text: &str| (String::new(), line_of(&source, text));
-    let expected = [at("MOVE 0"), at("PERFORM P2"), at("ADD 1"), at("ADD 1"), at("IF N"), at("'TWO'"), at("STOP RUN")];
+    let expected = [at("MOVE 0"), at("PERFORM P2"), at("ADD 1"), at("ADD 1"), at("IF N"), at("'TWO'"), at("CONTINUE"), at("STOP RUN")];
     assert_eq!(statements(&source, Some(unit::StatementFilter::All)), expected);
 }
 

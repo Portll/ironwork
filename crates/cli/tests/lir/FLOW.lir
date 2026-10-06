@@ -23,6 +23,7 @@ b3:
     Jump b26
 paragraph 4 SHOW-EXIT abandoned a1  @31:8
 b4:
+    statement 32:12
     Jump b27
 b5:
     Unnest 1  @11:12
@@ -76,6 +77,7 @@ b20:
     statement 22:31
     Jump b1
 b21:
+    statement 23:27
     Jump b19
 b22:
     Jump b20

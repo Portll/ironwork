@@ -1329,7 +1329,7 @@ impl Check<'_> {
                 let exit = if *kind == ExitKind::Perform { "EXIT PERFORM" } else { "EXIT PERFORM CYCLE" };
                 self.errors.push(syntax::messages::IWC0080.at(*pos, format!("{exit} must be inside an inline PERFORM")));
             }
-            Stmt::Goback { .. } | Stmt::StopRun { .. } | Stmt::ExitProgram { .. } | Stmt::ExitMethod { .. } | Stmt::Continue | Stmt::Exit { .. } | Stmt::NextSentence | Stmt::SentenceEnd => {}
+            Stmt::Goback { .. } | Stmt::StopRun { .. } | Stmt::ExitProgram { .. } | Stmt::ExitMethod { .. } | Stmt::Continue { .. } | Stmt::Exit { .. } | Stmt::NextSentence | Stmt::SentenceEnd => {}
             Stmt::Corresponding(_) => unreachable!("CORRESPONDING is expanded before Check"),
         }
     }

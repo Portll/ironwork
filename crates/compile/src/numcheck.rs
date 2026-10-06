@@ -340,7 +340,7 @@ impl Tested<'_> {
             | Stmt::SentenceEnd
             | Stmt::Exec(_)
             | Stmt::Report(_)
-            | Stmt::Continue
+            | Stmt::Continue { .. }
             | Stmt::Exit { .. }
             | Stmt::Corresponding(_) => {}
         }
