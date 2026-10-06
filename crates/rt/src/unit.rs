@@ -724,9 +724,9 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
 
     /// Where EXTERNAL record `name` is, or EXTERNAL file `name`'s record area when `file`: storage
     /// of `size` bytes, zeroed, the first time a program describes it. A description of another
-    /// size is refused (assumption C180), except under gnucobol a shorter record's, which
-    /// shares the storage with a warning, as cobc's does.
-    pub fn external(&mut self, name: &str, file: bool, size: usize, dialect: Dialect) -> Result<usize, String> {
+    /// size ends the run U4038 with IGZ0066S, or IGZ0075S for a file (assumption C180), except under
+    /// gnucobol a shorter record's, which shares the storage with a warning, as cobc's does.
+    pub fn external(&mut self, name: &str, file: bool, size: usize, dialect: Dialect, program: &str) -> Result<usize, Abend> {
         let key = (file, name.to_owned());
         if let Some(&(at, had)) = self.externals.storage.get(&key) {
             return if had == size {
@@ -735,8 +735,12 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
                 let _ = writeln!(self.err, "ironwork: EXTERNAL record {name} has {had} bytes in the run unit, and this program describes {size}");
                 Ok(at)
             } else {
-                let what = if file { "the record area of EXTERNAL file" } else { "EXTERNAL record" };
-                Err(format!("{what} {name} has {had} bytes in the run unit, and this program describes {size}"))
+                let message = if file {
+                    format!("IGZ0075S Inconsistencies were found in EXTERNAL file {name} in program {program}. The following file attributes did not match those of the established external file: the record length. ({had} bytes in the run unit, {size} here)")
+                } else {
+                    format!("IGZ0066S The length of external data record {name} in program {program} did not match the existing length of the record. ({had} bytes in the run unit, {size} here)")
+                };
+                Err(Abend { code: crate::abend::AbendCode::user(4038), message, pos: Pos::default(), file: None })
             };
         }
         let at = self.allocate(size);

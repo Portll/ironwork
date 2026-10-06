@@ -239,6 +239,16 @@ fn is_open<P: Copy, X: Copy>(x: &mut impl Files<P, X>, k: usize) -> bool {
     x.slot(k).is_some()
 }
 
+/// A STOP RUN, GOBACK or EXIT PROGRAM that ended an input or output procedure: IGZ0012S, a
+/// severity-3 condition that ends the run U4038 (assumption C453).
+fn ended_inside(verb: &str, name: &str, ending: Ending, pos: Pos) -> Abend {
+    let how = match ending {
+        Ending::StopRun => "STOP RUN",
+        _ => "GOBACK or EXIT PROGRAM",
+    };
+    Abend { code: AbendCode::user(4038), message: format!("IGZ0012S There was an invalid attempt to end a sort or merge. ({how} in a procedure of {verb} {name})"), pos, file: None }
+}
+
 /// Opens a USING or GIVING file, which must not be open already.
 fn open_for_sort<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, k: usize, mode: OpenMode, pos: Pos) -> R<Outcome> {
     let name = x.sort_file(k).file.name;
@@ -652,14 +662,15 @@ fn run_sort_procedure<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, pr
 }
 
 /// A SORT or MERGE of a file. A failure is reported as DFSORT reports one on SYSOUT, with
-/// SORT-RETURN 16, and the run goes on; a STOP RUN or GOBACK in a procedure ends it.
+/// SORT-RETURN 16, and the run goes on; a STOP RUN, GOBACK or EXIT PROGRAM in a procedure ends it
+/// U4038 (`ended_inside`).
 pub fn sort<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, plan: &FileSort<H::Register, H::Procedure, H::Keys, H::File>, pos: Pos) -> R<Option<Ending>> {
     crate::host::unfollowed(x, "SORT and MERGE");
     let sd = usize::from(plan.sd);
     let name = x.sort_file(sd).file.name;
     let verb = if plan.merge { "MERGE" } else { "SORT" };
     if x.active().is_some() {
-        return Err(Abend::ironwork(format!("{verb} {name}: another SORT or MERGE is in progress"), pos));
+        return Err(Abend { code: AbendCode::user(4038), message: format!("IGZ0173S There was an invalid attempt to start a sort or merge. ({verb} {name} while another is in progress)"), pos, file: None });
     }
     refuse_control_statements(x, plan.sort_control, pos)?;
     set_register(x, plan.sort_return, 0, pos)?;
@@ -683,7 +694,7 @@ pub fn sort<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, plan: &FileS
             let (ended, active) = run_sort_procedure(x, *procedure, active, Procedure::SortInput, pos)?;
             match ended {
                 Err(why) => return end(x, Err(why)),
-                Ok(Some(e)) => return Ok(Some(e)),
+                Ok(Some(e)) => return Err(ended_inside(verb, name, e, pos)),
                 Ok(None) => {}
             }
             if x.register_value(plan.sort_return, pos)? == 16 {
@@ -707,7 +718,7 @@ pub fn sort<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, plan: &FileS
             let kind = if plan.merge { Procedure::MergeOutput } else { Procedure::SortOutput };
             match run_sort_procedure(x, *procedure, active, kind, pos)?.0 {
                 Err(why) => end(x, Err(why)),
-                Ok(Some(e)) => Ok(Some(e)),
+                Ok(Some(e)) => Err(ended_inside(verb, name, e, pos)),
                 Ok(None) => end(x, Ok(())),
             }
         }

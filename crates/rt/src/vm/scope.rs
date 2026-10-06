@@ -65,13 +65,13 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     pub(super) fn bind_shared(&mut self) -> Result<(), Abend> {
         let p = self.p;
         let scope = &p.services.scope;
-        let external = |m: String| Abend::ironwork(m, Pos::default());
+        let program = self.sym(p.id);
         for (ordinal, binding) in &scope.records {
             let address = match *binding {
-                Binding::External { name, size } => Some(self.unit.external(self.sym(name), false, size as usize, p.options.options.dialect_of(Switched::ExternalStorage)).map_err(external)?),
+                Binding::External { name, size } => Some(self.unit.external(self.sym(name), false, size as usize, p.options.options.dialect_of(Switched::ExternalStorage), program)?),
                 Binding::ExternalFile(k) => {
                     let k = usize::from(k);
-                    Some(self.unit.external(self.sym(p.services.files[k].name), true, p.storage.file_areas[k].1 as usize, p.options.options.dialect_of(Switched::ExternalStorage)).map_err(external)?)
+                    Some(self.unit.external(self.sym(p.services.files[k].name), true, p.storage.file_areas[k].1 as usize, p.options.options.dialect_of(Switched::ExternalStorage), program)?)
                 }
                 Binding::Global { program, section, name } => self.global_address(self.sym(program), section, self.sym(name))?,
             };

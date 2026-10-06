@@ -152,6 +152,7 @@ impl<'p> Machine<'p, '_, '_> {
             self.unit.release_temporaries(mark);
             match flow? {
                 Flow::Next => {}
+                Flow::End(ending) if ending != Ending::StopRun => return Err(rt::xml::ended_inside(x.pos)),
                 other => return Ok(other),
             }
             // What the procedure left in XML-CODE decides what follows (Programming Guide

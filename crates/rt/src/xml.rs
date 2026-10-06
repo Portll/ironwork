@@ -897,3 +897,10 @@ impl<'r> Scanner<'r> {
 
 #[cfg(test)]
 mod tests;
+
+/// A GOBACK or EXIT PROGRAM that ended an XML PARSE's processing procedure in the program that
+/// started it: IGZ0227S, a severity-3 condition that ends the run U4038 (assumption C453); STOP RUN
+/// may end one.
+pub fn ended_inside(pos: crate::vocab::Pos) -> crate::abend::Abend {
+    crate::abend::Abend { code: crate::abend::AbendCode::user(4038), message: "IGZ0227S There was an invalid attempt to end an XML PARSE statement. (GOBACK or EXIT PROGRAM in its processing procedure)".into(), pos, file: None }
+}

@@ -42,13 +42,13 @@ impl<'p> Machine<'p, '_, '_> {
     pub(super) fn bind_shared(&mut self) -> R<()> {
         let layout = self.layout;
         for (ordinal, binding) in layout.bindings.iter().enumerate() {
-            let external = |m: String| Abend::ironwork(m, Pos::default());
+            let program = &self.program.id;
             self.linkage[ordinal] = match binding {
                 Binding::Argument => continue,
-                Binding::External { name, size } => Some(self.unit.external(name, false, *size as usize, self.options.dialect_of(Switched::ExternalStorage)).map_err(external)?),
+                Binding::External { name, size } => Some(self.unit.external(name, false, *size as usize, self.options.dialect_of(Switched::ExternalStorage), program)?),
                 Binding::ExternalFile(k) => {
                     let k = usize::from(*k);
-                    Some(self.unit.external(&self.program.files[k].name, true, layout.file_areas[k].1 as usize, self.options.dialect_of(Switched::ExternalStorage)).map_err(external)?)
+                    Some(self.unit.external(&self.program.files[k].name, true, layout.file_areas[k].1 as usize, self.options.dialect_of(Switched::ExternalStorage), program)?)
                 }
                 Binding::Global { program, record, section } => self.global_address(program, record, section)?,
             };

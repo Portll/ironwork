@@ -282,7 +282,7 @@ pub fn cancel<H: Clone, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, name: &str, 
         return Ok(());
     }
     if unit.programs[index].active {
-        return Err(Abend::ironwork(format!("CANCEL {name}: the program is active"), pos));
+        return Err(Abend { code: crate::abend::AbendCode::user(4038), message: format!("IGZ0032S A CANCEL was attempted on active program {}.", unit.programs[index].name), pos, file: None });
     }
     cancel_program(unit, index, pos)
 }

@@ -174,12 +174,12 @@ fn a_shorter_external_record_shares_the_storage_under_gnucobol() {
         "END PROGRAM SUB.",
     ]);
     let ibm = Harness::source(&source).run(Executor::Interpreter);
-    assert!(ibm.ending.unwrap_err().message.contains("EXTERNAL record SHARED has 9 bytes in the run unit, and this program describes 8"));
+    assert!(ibm.ending.unwrap_err().message.starts_with("IGZ0066S The length of external data record SHARED in program "));
     assert_eq!(under(&source, Dialect::Gnucobol), "SUB SEES [ALPHA001]\nMAIN AFTER [OMEGA0020]\n");
     let longer = source.replace("PIC X(9) EXTERNAL", "PIC X(7) EXTERNAL").replace("'ALPHA0010'", "'ALPHA00'");
     let flags = [Dialect::Gnucobol.flag()];
     let refused = Harness::source(&longer).flags(&flags).run(Executor::Interpreter);
-    assert!(refused.ending.unwrap_err().message.contains("EXTERNAL record SHARED has 7 bytes in the run unit, and this program describes 8"));
+    assert!(refused.ending.unwrap_err().message.starts_with("IGZ0066S The length of external data record SHARED in program "));
 }
 
 #[test]

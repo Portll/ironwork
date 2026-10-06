@@ -378,7 +378,8 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             match ran? {
                 Exit::Completed => {}
                 Exit::Left(step) => return Ok(Err(step)),
-                Exit::End(ending) => return Ok(Err(Step::End(ending))),
+                Exit::End(crate::abend::Ending::StopRun) => return Ok(Err(Step::End(crate::abend::Ending::StopRun))),
+                Exit::End(_) => return Err(crate::xml::ended_inside(pos).into()),
             }
             let code = self.int(&x.code_value, pos)?;
             match event.kind {

@@ -18,6 +18,7 @@ mod dbcs;
 mod declaratives;
 mod diagnostics;
 mod dialect;
+mod endings;
 mod differential;
 mod documented;
 mod function;

@@ -351,6 +351,7 @@ pub const COMMAND_LINE_FROM_PARM: &str = "C442";
 pub const MISSING_PROGRAM: &str = "C450";
 pub const UNHANDLED_FILE_STATUS: &str = "C451";
 pub const FUNCTION_ARGUMENT_MESSAGES: &str = "C452";
+pub const RUNTIME_RULE_MESSAGES: &str = "C453";
 pub const OUT_OF_SCOPE_CALL_NOT_FOUND: &str = "C470";
 pub const BINARY_CHAR: &str = "C460";
 pub const TOP_LEVEL_TABLE: &str = "C461";
@@ -1741,7 +1742,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: EXTERNAL_STORAGE,
-        claim: "An EXTERNAL data record, and an EXTERNAL file's connector and record area, are the run unit's: the first program activated that describes one allocates it, zeroed as ironwork zeroes WORKING-STORAGE before VALUE clauses, since the record takes no VALUE (Language Reference SC27-8713-03, pp. 197, 246; Programming Guide SC27-8714-03, p. 573), and every later description shares it until the run unit ends (pp. 65, 184), in a CICS task the enclave a LINK or XCTL starts (C126). A record and a file are looked up by name in separate name spaces, and a WORKING-STORAGE record that redefines an EXTERNAL one shares its storage (p. 226). A description of another size than the one in the run unit ends the run with an ironwork abend when the program describing it is activated: the manuals say the records must define the same number of bytes, and the file descriptions the same maximum record size (pp. 186, 197), but not what the runtime does when they do not. CANCEL and an INITIAL program's return leave an EXTERNAL file open (Programming Guide pp. 178, 203); the end of the run unit closes it. INDEXED BY indexes of an EXTERNAL record stay the program's own (p. 197). Under --dialect gnucobol a later description of an EXTERNAL record shorter than the run unit's shares its storage, with a warning on standard error, as cobc's does; a longer one still ends the run",
+        claim: "An EXTERNAL data record, and an EXTERNAL file's connector and record area, are the run unit's: the first program activated that describes one allocates it, zeroed as ironwork zeroes WORKING-STORAGE before VALUE clauses, since the record takes no VALUE (Language Reference SC27-8713-03, pp. 197, 246; Programming Guide SC27-8714-03, p. 573), and every later description shares it until the run unit ends (pp. 65, 184), in a CICS task the enclave a LINK or XCTL starts (C126). A record and a file are looked up by name in separate name spaces, and a WORKING-STORAGE record that redefines an EXTERNAL one shares its storage (p. 226). A description of another size than the one in the run unit ends the run when the program describing it is activated, U4038 with IGZ0066S for a record and IGZ0075S for a file, as C453 says: the manuals say the records must define the same number of bytes, and the file descriptions the same maximum record size (pp. 186, 197). CANCEL and an INITIAL program's return leave an EXTERNAL file open (Programming Guide pp. 178, 203); the end of the run unit closes it. INDEXED BY indexes of an EXTERNAL record stay the program's own (p. 197). Under --dialect gnucobol a later description of an EXTERNAL record shorter than the run unit's shares its storage, with a warning on standard error, as cobc's does; a longer one still ends the run",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -2205,6 +2206,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: CALL_BY_PROGRAM_ID,
         claim: "A CALL of a name that no member of the program libraries has, as a file named for it, finds the .cbl or .cob file there whose PROGRAM-ID is the name: the directories in order, each one's files in name order, the first that holds the program. z/OS finds a called program as a member of STEPLIB, JOBLIB or the link list by its member name, and C450 says how a CALL that none answers ends; a build that link-edits each program under its PROGRAM-ID gives every program a member of that name, and ironwork's libraries are source directories, whose file names need not be. A member of the name comes first, as before",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: RUNTIME_RULE_MESSAGES,
+        claim: "Four rules the runtime checks end the run with Language Environment's message, a severity-3 condition: 'The application was terminated' (LE Runtime Messages), user abend 4038 under the default ABTERMENC(ABEND). A STOP RUN while a SORT or MERGE is in progress, or a GOBACK or EXIT PROGRAM in an input or output procedure of the program that started it, gives IGZ0012S 'There was an invalid attempt to end a sort or merge'; a SORT or MERGE started while another is in progress IGZ0173S 'There was an invalid attempt to start a sort or merge'. A GOBACK or EXIT PROGRAM in an XML PARSE processing procedure of the program that started the parse gives IGZ0227S 'There was an invalid attempt to end an XML PARSE statement'; STOP RUN may end one (Language Reference, XML PARSE: the procedure 'must not cause the execution of any GOBACK or EXIT PROGRAM'). A CANCEL of an active program gives IGZ0032S 'A CANCEL was attempted on active program program-name'. An EXTERNAL record or file another program described with another size gives IGZ0066S or IGZ0075S (C180). The message is IBM's text, with what ended it in parentheses where IBM's has no place for it",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {

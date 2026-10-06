@@ -78,7 +78,7 @@ fn an_external_record_of_another_size_ends_the_run() {
     ]);
     let (_, _, ending) = run_unit(&(main + &cobol(SUB_EXTERNAL)), Vec::new(), "");
     let abend = ending.unwrap_err();
-    assert!(abend.message.contains("EXTERNAL record SHARED has 9 bytes in the run unit, and this program describes 8"), "{abend:?}");
+    assert_eq!((abend.code.to_string(), abend.message.as_str()), ("U4038".to_owned(), "IGZ0066S The length of external data record SHARED in program SUB did not match the existing length of the record. (9 bytes in the run unit, 8 here)"));
 }
 
 #[test]
