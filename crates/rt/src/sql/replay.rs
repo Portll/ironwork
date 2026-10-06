@@ -4,16 +4,20 @@
 //! ```text
 //! # ironwork sql recording 1
 //! @ 1 PAYROLL:3:9f2a41c0 SELECT
+//! # text: char:"SELECT AMT, NAME, DEPT FROM EMP WHERE ID = ?"
 //! > char:"00123"
 //! < 0 00000 rows=1
 //! = dec:1234.50 | char:"SMITH" | null
 //! @ 2 PAYROLL:4:1b77e0d2 PREPARE S1
+//! # text: char:"SELECT NAME FROM EMP"
 //! < 0 00000 rows=0
 //! : char:"NAME" char(10) notnull
 //! ```
 //!
 //! A multiple-row INSERT has a `>` line for each row. A CALL's `=` line gives each argument as the
-//! procedure returns it, `-` for one it does not return.
+//! procedure returns it, `-` for one it does not return. A `# text:` line gives the statement's text,
+//! which a dynamic statement's call is made from; replay then matches it whole rather than by the
+//! hash, and a recording without one is matched by the hash alone.
 
 use super::{Abandoned, Answer, Call, Column, ColumnType, Database, Outcome, Value};
 use std::io::Write;
@@ -29,6 +33,7 @@ struct Entry {
     hash: u32,
     verb: String,
     cursor: Option<String>,
+    text: Option<String>,
     inputs: Vec<Value>,
     outcome: Outcome,
 }
@@ -38,6 +43,7 @@ impl Entry {
         self.program == call.program
             && self.ordinal == call.ordinal
             && self.hash == fingerprint(call.text)
+            && self.text.as_deref().is_none_or(|t| t == call.text)
             && self.verb == call.verb
             && self.cursor.as_deref() == call.cursor
             && self.inputs == call.inputs
@@ -70,6 +76,15 @@ impl Replay {
             if line.is_empty() {
                 continue;
             }
+            if let Some(text) = line.strip_prefix("# text: ")
+                && let Some(e) = entries.last_mut().filter(|e| awaiting_outcome && e.text.is_none())
+            {
+                match parse_value(text) {
+                    Ok((Value::Char(t), "")) => e.text = Some(t),
+                    _ => return Err(fail("# text: takes one char:\"...\" value".into())),
+                }
+                continue;
+            }
             if line.starts_with('#') {
                 if let Some(version) = line.strip_prefix(VERSIONED)
                     && line != HEADER
@@ -100,7 +115,7 @@ impl Replay {
                         [c] => Some((*c).to_owned()),
                         _ => return Err(fail("@ takes at most one cursor after the verb".into())),
                     };
-                    entries.push(Entry { program: (*program).into(), ordinal, hash, verb: (*verb).into(), cursor, inputs: Vec::new(), outcome: Outcome::ok() });
+                    entries.push(Entry { program: (*program).into(), ordinal, hash, verb: (*verb).into(), cursor, text: None, inputs: Vec::new(), outcome: Outcome::ok() });
                     awaiting_outcome = true;
                 }
                 ">" => match entries.last_mut() {
@@ -268,6 +283,7 @@ impl Database for Recorder<'_> {
 fn entry_text(seq: u64, call: &Call, rows: Option<&[Vec<Value>]>, outcome: &Outcome) -> String {
     let cursor = call.cursor.map(|c| format!(" {c}")).unwrap_or_default();
     let mut text = format!("@ {seq} {}:{}:{:08x} {}{cursor}\n", call.program, call.ordinal, fingerprint(call.text), call.verb);
+    text += &format!("# text: {}\n", value_text(&Value::Char(call.text.to_owned())));
     match rows {
         Some(rows) => rows.iter().for_each(|row| text += &format!("> {}\n", values_text(row))),
         None if !call.inputs.is_empty() => text += &format!("> {}\n", values_text(call.inputs)),
@@ -537,6 +553,18 @@ mod tests {
     }
 
     #[test]
+    fn a_recorded_text_is_matched_whole() {
+        let recorded = entry_text(1, &call("DELETE", "DELETE FROM T WHERE K = 1", &[]), None, &Outcome::ok());
+        assert!(recorded.contains("\n# text: char:\"DELETE FROM T WHERE K = 1\"\n"), "{recorded}");
+        let forged = recorded.replace("K = 1", "K = 2");
+        let mut replay = Replay::parse(&format!("{HEADER}\n{forged}"), true).unwrap();
+        assert!(replay.execute(&call("DELETE", "DELETE FROM T WHERE K = 1", &[])).is_err());
+        let hashed: String = recorded.lines().filter(|l| !l.starts_with("# text")).map(|l| format!("{l}\n")).collect();
+        let mut replay = Replay::parse(&format!("{HEADER}\n{hashed}"), true).unwrap();
+        assert!(replay.execute(&call("DELETE", "DELETE FROM T WHERE K = 1", &[])).is_ok());
+    }
+
+    #[test]
     fn strict_replay_refuses_a_different_call_and_names_both() {
         let text = format!("{HEADER}\n{}", entry_text(1, &call("SELECT", "SELECT A FROM T WHERE K = ?", &[Value::Int(7)]), None, &Outcome::ok()));
         let mut replay = Replay::parse(&text, false).unwrap();
@@ -618,7 +646,7 @@ mod tests {
         assert!(text.starts_with(&format!("{HEADER}\n# source: a test double\n")), "{text}");
         let prepared = recorder.prepare(&Call { cursor: Some("S1"), ..call("PREPARE", "SELECT NAME, AMT FROM T", &[]) }).unwrap();
         let text = String::from_utf8(written.borrow().clone()).unwrap();
-        assert!(text.contains("PREPARE S1\n< 0 00000 rows=0\n: char:\"NAME\" char(10) notnull\n: char:\"AMT\" decimal(7,2) null\n"), "{text}");
+        assert!(text.contains("PREPARE S1\n# text: char:\"SELECT NAME, AMT FROM T\"\n< 0 00000 rows=0\n: char:\"NAME\" char(10) notnull\n: char:\"AMT\" decimal(7,2) null\n"), "{text}");
         let mut replay = Replay::parse(&text, false).unwrap();
         assert_eq!(replay.execute(&call("SELECT", "SELECT X, Y FROM T WHERE Z = ?", &inputs)), Ok(live));
         assert_eq!(replay.prepare(&Call { cursor: Some("S1"), ..call("PREPARE", "SELECT NAME, AMT FROM T", &[]) }), Ok(prepared));

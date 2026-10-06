@@ -332,10 +332,12 @@ Input rules:
 
       # ironwork sql recording 1
       @ 1 PAYROLL:3:9f2a41c0 SELECT
+      # text: char:"SELECT AMT, NAME, DEPT FROM EMP WHERE ID = ?"
       > char:"00123"
       < 0 00000 rows=1
       = dec:1234.50 | char:"SMITH" | null
       @ 2 PAYROLL:4:1b77e0d2 FETCH C1
+      # text: char:"FETCH C1"
       < 100 02000 rows=0
 
   - **`@`** starts a call: sequence number, statement identity, verb and cursor. OPEN's text is its
@@ -344,6 +346,9 @@ Input rules:
     call sends it, its verb is the string's command word, and a cursor for a prepared statement
     hashes `DECLARE C1 CURSOR [WITH HOLD] FOR` and the string; PREPARE's verb is `PREPARE`, with
     the statement name where a cursor stands.
+  - **`# text:`** gives the call's text in full, so a reader sees which statement, a dynamic one
+    included, each call made. Replay then matches the text whole, not by the hash alone; a
+    recording without the line, being a comment to older readers, is matched by the hash.
   - **`:`** gives one result column of a PREPARE: its name, its type (`char(10)`,
     `decimal(7,2)`, `numeric` for a decimal given no precision, `timestamp(6)`, `other:"…"` for
     one Db2 has no type for) and `null` or
