@@ -233,7 +233,8 @@ fn a_contained_program_is_out_of_reach_from_outside_its_container_unless_the_sco
     let first = source.find("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. ELSEWHERE.").unwrap();
     let reordered = format!("{}{}", &source[first..], &source[..first]);
     let strict = Harness::source(&reordered).run(Executor::Interpreter);
-    assert_eq!(strict.ending.map_err(|a| a.code), Err(AbendCode::ModuleNotFound));
+    let abend = strict.ending.unwrap_err();
+    assert!(abend.message.starts_with("CALL INNER: IEW2456E SYMBOL INNER UNRESOLVED"), "{abend:?}");
     let flexible = Harness::source(&reordered).flags(&["--program-scope=flexible"]).run(Executor::Interpreter);
     let abend = flexible.ending.unwrap_err();
     assert!(abend.message.contains("INNER uses the GLOBAL names of OUTER, which contains it and is not running"), "{abend:?}");
