@@ -12,9 +12,10 @@ use std::time::{Duration, Instant};
 use exec::evidence::{Value, canonical};
 use rt::storage::Kind;
 use rt::vocab::{AcceptFrom, OpenMode, SignPosition};
-use syntax::ast::{FileDecl, Organization, Paragraph, Program, Ref, Stmt};
+use syntax::ast::{FileDecl, Literal, Organization, Paragraph, Program, Ref, Stmt};
 use zarch::ebcdic::CodePage;
 
+pub(crate) mod dictionary;
 pub(crate) mod differential;
 pub(crate) mod interface;
 pub(crate) mod job;
@@ -56,6 +57,8 @@ pub(crate) struct Field {
 struct Shape {
     size: usize,
     fields: Vec<Field>,
+    /// The values the program compares a field with, by the field's offset (`dictionary`).
+    values: BTreeMap<usize, Vec<Vec<u8>>>,
 }
 
 /// A sequential, indexed or relative file the program reads: its DD, the longest record, the
@@ -89,11 +92,10 @@ struct Inputs {
     optimized: bool,
 }
 
-/// How many times --timeout a hang's re-check may take: a loop the input caused ends in S322 within
-/// that and --hang-limit, a run that is only slow finishes. Each re-check can take that long, so a
-/// fuzz run makes only so many.
+/// How many times --timeout a run may take. Each run also stops at --hang-limit statements, which
+/// ends a loop the input caused in S322 however loaded the machine is; the clock stops only a run
+/// too slow to reach the limit.
 const HANG_PATIENCE: u32 = 6;
-const HANG_RECHECKS: usize = 3;
 /// The CEE3501S endings a fuzz run tries a marker on, each at a CALL of its own.
 const CHOSEN_CHECKS: usize = 5;
 
@@ -269,6 +271,8 @@ impl Rng {
 
 pub(crate) const SPACE: u8 = 0x40;
 const ASTERISK: u8 = 0x5C;
+/// One field in this many whose item the program compares with literals takes one of them.
+pub(crate) const DICTIONARY_ODDS: usize = 4;
 const PLUS: u8 = 0x4E;
 const MINUS: u8 = 0x60;
 const TEXT: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ";
@@ -381,7 +385,10 @@ fn record(rng: &mut Rng, feed: &Feed) -> Vec<u8> {
     let mut r = vec![SPACE; feed.length];
     let shape = (!feed.shapes.is_empty()).then(|| &feed.shapes[rng.below(feed.shapes.len())]);
     for &f in shape.map_or(&[][..], |s| &s.fields) {
-        let bytes = field_bytes(rng, f);
+        let bytes = match shape.and_then(|s| s.values.get(&f.offset)) {
+            Some(values) if rng.below(DICTIONARY_ODDS) == 0 => values[rng.below(values.len())].clone(),
+            _ => field_bytes(rng, f),
+        };
         r[f.offset..f.offset + f.size].copy_from_slice(&bytes[..f.size]);
     }
     if let Some((shortest, longest)) = feed.variable {
@@ -443,21 +450,93 @@ fn sysin_text(lines: &[Vec<u8>]) -> Vec<u8> {
 fn generate(rng: &mut Rng, varied: &Varied) -> Inputs {
     let mut files = BTreeMap::new();
     for f in &varied.feeds {
-        let mut records: Vec<Vec<u8>> = (0..1 + rng.below(4)).map(|_| record(rng, f)).collect();
-        // An indexed file's data set holds its records in key order, no two sharing a key that allows
-        // no duplicates, as REPRO unloads it.
-        if let Some(&(at, len)) = f.keys.first() {
-            records.sort_by(|a, b| a[at..at + len].cmp(&b[at..at + len]));
-        }
-        for &(at, len) in &f.keys {
-            let mut seen = BTreeSet::new();
-            records.retain(|r| seen.insert(r[at..at + len].to_vec()));
-        }
-        files.insert(f.dd.clone(), records);
+        let records: Vec<Vec<u8>> = (0..1 + rng.below(4)).map(|_| record(rng, f)).collect();
+        files.insert(f.dd.clone(), in_key_order(f, records));
     }
     let lines = varied.lines.iter().map(|k| (k.clone(), (0..1 + rng.below(3)).map(|_| sysin_line(rng)).collect())).collect();
     let parms = varied.parms.iter().map(|k| (k.clone(), parm_text(rng))).collect();
     Inputs { files, lines, parms, ..Default::default() }
+}
+
+/// An indexed file's data set holds its records in key order, no two sharing a key that allows no
+/// duplicates, as REPRO unloads it.
+fn in_key_order(f: &Feed, mut records: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
+    if let Some(&(at, len)) = f.keys.first() {
+        records.sort_by(|a, b| a[at..at + len].cmp(&b[at..at + len]));
+    }
+    for &(at, len) in &f.keys {
+        let mut seen = BTreeSet::new();
+        records.retain(|r| seen.insert(r[at..at + len].to_vec()));
+    }
+    records
+}
+
+/// `parent` changed in one place: a field of one record drawn again (from the dictionary or as a
+/// record's fields are), every field of one record the program does not compare with a literal
+/// drawn again, a record added or dropped, a SYSIN line or a PARM drawn again.
+fn mutate(rng: &mut Rng, varied: &Varied, parent: &Inputs) -> Inputs {
+    let mut child = Inputs { files: parent.files.clone(), lines: parent.lines.clone(), parms: parent.parms.clone(), ..Default::default() };
+    let places = varied.feeds.len() + varied.lines.len() + varied.parms.len();
+    let mut k = rng.below(places);
+    if let Some(f) = varied.feeds.get(k) {
+        let records = child.files.entry(f.dd.clone()).or_default();
+        match rng.below(4) {
+            0 => records.push(record(rng, f)),
+            1 if !records.is_empty() => {
+                let at = rng.below(records.len());
+                records.remove(at);
+            }
+            _ if !records.is_empty() && !f.shapes.is_empty() => {
+                let r = rng.below(records.len());
+                let shape = &f.shapes[rng.below(f.shapes.len())];
+                let fields: Vec<&Field> = shape.fields.iter().filter(|g| g.offset + g.size <= records[r].len()).collect();
+                let compared: Vec<&Field> = fields.iter().copied().filter(|g| shape.values.contains_key(&g.offset)).collect();
+                // A field the program compares with a literal gets the change half the time there is one.
+                let pool = if !compared.is_empty() && rng.below(2) == 0 { &compared } else { &fields };
+                if rng.below(2) == 0 {
+                    for &&g in fields.iter().filter(|g| !shape.values.contains_key(&g.offset)) {
+                        records[r][g.offset..g.offset + g.size].copy_from_slice(&field_bytes(rng, g)[..g.size]);
+                    }
+                } else if !pool.is_empty() {
+                    let g = *pool[rng.below(pool.len())];
+                    let bytes = match shape.values.get(&g.offset) {
+                        Some(values) if rng.below(4) != 0 => values[rng.below(values.len())].clone(),
+                        _ => field_bytes(rng, g),
+                    };
+                    records[r][g.offset..g.offset + g.size].copy_from_slice(&bytes[..g.size]);
+                }
+            }
+            _ => records.push(record(rng, f)),
+        }
+        let ordered = in_key_order(f, std::mem::take(records));
+        child.files.insert(f.dd.clone(), ordered);
+        return child;
+    }
+    k -= varied.feeds.len();
+    if let Some(key) = varied.lines.get(k) {
+        let lines = child.lines.entry(key.clone()).or_default();
+        if lines.is_empty() || rng.below(4) == 0 {
+            lines.push(sysin_line(rng));
+        } else {
+            // ACCEPT reads from the first line, which every run that reads at all reaches.
+            let at = if rng.below(2) == 0 { 0 } else { rng.below(lines.len()) };
+            lines[at] = sysin_line(rng);
+        }
+        return child;
+    }
+    k -= varied.lines.len();
+    if let Some(key) = varied.parms.get(k) {
+        child.parms.insert(key.clone(), parm_text(rng));
+    }
+    child
+}
+
+/// The most inputs a fuzz run keeps for reaching what no earlier run did, which later runs change.
+pub(crate) const CORPUS_LIMIT: usize = 64;
+
+/// Which of `kept` inputs a run changes: the newest, which reached furthest, half the time.
+pub(crate) fn parent_of(rng: &mut Rng, kept: usize) -> usize {
+    if rng.below(2) == 0 { kept - 1 } else { rng.below(kept) }
 }
 
 /// Whether the main program's PROCEDURE DIVISION USING takes the parameter Language Environment
@@ -568,6 +647,7 @@ fn inputs_of(compiled: &exec::Compiled, rest: &[Program]) -> (Vec<Feed>, bool, O
 
 /// `inputs_of`, with the programs `roots` names entered as a CALL of a literal enters them.
 fn inputs_reaching(compiled: &exec::Compiled, rest: &[Program], roots: &[String]) -> (Vec<Feed>, bool, Others) {
+    let by_item = dictionary::literals_by_item(compiled);
     let how = |opened: &BTreeMap<String, Opened>, f: &FileDecl| opened.get(&f.name.to_ascii_uppercase()).copied().unwrap_or(Opened::Written);
     let (opened, mut sysin) = opens(&compiled.program.paragraphs);
     let mut files: Vec<(Option<usize>, &FileDecl, Opened)> = compiled.program.files.iter().enumerate().filter(|(_, f)| !f.sort).map(|(k, f)| (Some(k), f, how(&opened, f))).collect();
@@ -592,7 +672,7 @@ fn inputs_reaching(compiled: &exec::Compiled, rest: &[Program], roots: &[String]
             Opened::Extended => others.unfed.push(dd.clone()),
             Opened::Read => {
                 let shared = files.iter().filter(|(_, f, _)| f.assign == *dd).count() > 1;
-                match index.and_then(|k| feed(compiled, k, file)).filter(|_| !shared) {
+                match index.and_then(|k| feed(compiled, k, file, &by_item)).filter(|_| !shared) {
                     Some(f) => feeds.push(f),
                     None => others.unfed.push(dd.clone()),
                 }
@@ -609,7 +689,7 @@ fn inputs_reaching(compiled: &exec::Compiled, rest: &[Program], roots: &[String]
 
 /// A file the program reads as a feed: sequential, relative, or indexed with its keys inside every
 /// record a READ takes.
-fn feed(compiled: &exec::Compiled, index: usize, file: &FileDecl) -> Option<Feed> {
+fn feed(compiled: &exec::Compiled, index: usize, file: &FileDecl, by_item: &BTreeMap<usize, Vec<Literal>>) -> Option<Feed> {
     let layout = &compiled.layout;
     let &(area, _) = layout.file_areas.get(index)?;
     let variable = exec::variable_records(file, layout, index);
@@ -640,7 +720,10 @@ fn feed(compiled: &exec::Compiled, index: usize, file: &FileDecl) -> Option<Feed
         .iter()
         .enumerate()
         .filter(|(_, item)| item.level == 1 && item.file == Some(index as u16))
-        .map(|(i, item)| Shape { size: (item.size as usize).min(length), fields: elementary(layout, i, area, length) })
+        .map(|(i, item)| {
+            let fields = elementary_items(layout, i, area, length);
+            Shape { size: (item.size as usize).min(length), fields: fields.iter().map(|(f, _)| *f).collect(), values: dictionary::values(&fields, by_item) }
+        })
         .collect();
     let variable = variable.then_some((shortest.min(length), length));
     Some(Feed { dd: file.assign.clone(), length, variable, shapes, keys, relative: file.organization == Organization::Relative })
@@ -650,6 +733,11 @@ fn feed(compiled: &exec::Compiled, index: usize, file: &FileDecl) -> Option<Feed
 /// by offset from `base`, those within `length` bytes. Elementary items do not overlap, so there
 /// are no more fields than the item has bytes.
 pub(crate) fn elementary(layout: &exec::layout::Layout, root: usize, base: u32, length: usize) -> Vec<Field> {
+    elementary_items(layout, root, base, length).into_iter().map(|(f, _)| f).collect()
+}
+
+/// `elementary`, each field with the index of its item in the layout.
+pub(crate) fn elementary_items(layout: &exec::layout::Layout, root: usize, base: u32, length: usize) -> Vec<(Field, usize)> {
     let mut out = Vec::new();
     let mut stack = vec![root];
     while let Some(i) = stack.pop() {
@@ -669,7 +757,7 @@ pub(crate) fn elementary(layout: &exec::layout::Layout, root: usize, base: u32, 
         for &(stride, count) in &item.dims {
             offsets = offsets.iter().flat_map(|&o| (0..count as usize).map(move |k| o + k * stride as usize).take_while(|&at| at + size <= length)).collect();
         }
-        out.extend(offsets.into_iter().filter(|&at| at + size <= length).map(|offset| Field { offset, size, kind: item.kind }));
+        out.extend(offsets.into_iter().filter(|&at| at + size <= length).map(|offset| (Field { offset, size, kind: item.kind }, i)));
     }
     out
 }
@@ -743,6 +831,8 @@ pub(crate) struct RunCoverage {
     runs: i64,
     statements: BTreeMap<(String, i64), (i64, i64)>,
     paragraphs: BTreeMap<(String, String, i64), (i64, i64)>,
+    /// Whether the last report taken started a statement or entered a paragraph no earlier one had.
+    pub(crate) novel: std::rc::Rc<std::cell::Cell<bool>>,
 }
 
 /// Where run `count` writes its coverage: a kept run's report under the output directory, any
@@ -758,11 +848,14 @@ impl RunCoverage {
         if !kept {
             let _ = fs::remove_file(path);
         }
+        self.novel.set(false);
         let Some(report) = report else { return };
         self.runs += 1;
+        let mut novel = false;
         for s in json_items(&report, "statements") {
             if let (Some(file), Some(line), Some(n)) = (json_text(s, "file"), json_int(s, "line"), json_int(s, "started")) {
                 let e = self.statements.entry((file.to_string(), line)).or_default();
+                novel |= e.1 == 0 && n > 0;
                 e.0 += 1;
                 e.1 += n;
             }
@@ -772,11 +865,13 @@ impl RunCoverage {
             for d in json_items(p, "detail") {
                 if let (Some(name), Some(line), Some(n)) = (json_text(d, "name"), json_int(d, "line"), json_int(d, "entered")) {
                     let e = self.paragraphs.entry((program.to_string(), name.to_string(), line)).or_default();
+                    novel |= e.1 == 0 && n > 0;
                     e.0 += i64::from(n > 0);
                     e.1 += n;
                 }
             }
         }
+        self.novel.set(novel);
     }
 
     /// Writes the coverage as `coverage/runs.json` under `out` (docs/evidence.md §5) and returns the
@@ -1080,13 +1175,18 @@ pub(crate) fn write_manifest_in(format: &str, out: &Path, header: &Header, input
 /// runs crashed ironwork, with the first crash.
 pub(crate) struct Tally {
     pub(crate) counts: BTreeMap<&'static str, i64>,
-    refused: Option<String>,
+    /// Each place or reason runs were refused at, in the order first met: the first refusal's
+    /// account and how many runs it took.
+    refusals: Vec<(String, String, usize)>,
     crashes: Option<(usize, String)>,
 }
 
+/// How many kinds of refusal standard error lists one by one.
+const REFUSALS_LISTED: usize = 10;
+
 impl Tally {
     pub(crate) fn new() -> Tally {
-        Tally { counts: [("runs", 0), ("clean", 0), ("abend", 0), ("timeout", 0), ("refused", 0)].into_iter().collect(), refused: None, crashes: None }
+        Tally { counts: [("runs", 0), ("clean", 0), ("abend", 0), ("timeout", 0), ("refused", 0)].into_iter().collect(), refusals: Vec::new(), crashes: None }
     }
 
     pub(crate) fn add(&mut self, outcome: &Outcome) {
@@ -1094,7 +1194,7 @@ impl Tally {
             Outcome::Clean => "clean",
             Outcome::Timeout | Outcome::Waiting => "timeout",
             Outcome::Refused(why) => {
-                self.refused.get_or_insert_with(|| why.clone());
+                self.refusal(why.clone(), why.clone());
                 "refused"
             }
             Outcome::Crash(why) => {
@@ -1102,7 +1202,7 @@ impl Tally {
                 "refused"
             }
             Outcome::Abend { code, file, line, message } if not_the_input(code, message) => {
-                self.refused.get_or_insert_with(|| format!("{file}:{line} {code} {message}"));
+                self.refusal(format!("{file}:{line} {code}"), format!("{file}:{line} {code} {message}"));
                 "refused"
             }
             Outcome::Abend { .. } => "abend",
@@ -1112,14 +1212,40 @@ impl Tally {
         }
     }
 
+    fn refusal(&mut self, kind: String, told: String) {
+        match self.refusals.iter_mut().find(|(k, _, _)| *k == kind) {
+            Some((_, _, n)) => *n += 1,
+            None => self.refusals.push((kind, told, 1)),
+        }
+    }
+
     /// Standard error's account of the runs that say nothing of the program's input.
     pub(crate) fn report(&self) {
-        if let Some(first) = &self.refused {
-            eprintln!("ironwork fuzz: {} runs refused; the first: {first}", self.counts["refused"] - self.crashes.as_ref().map_or(0, |c| c.0 as i64));
+        for line in self.report_lines() {
+            eprintln!("ironwork fuzz: {line}");
+        }
+    }
+
+    /// The first refusal, then, where runs stopped at more than one place or for more than one
+    /// reason, each with its count, the most frequent first; then the runs that crashed ironwork.
+    fn report_lines(&self) -> Vec<String> {
+        let mut lines = Vec::new();
+        if let Some((_, first, _)) = self.refusals.first() {
+            lines.push(format!("{} runs refused; the first: {first}", self.counts["refused"] - self.crashes.as_ref().map_or(0, |c| c.0 as i64)));
+        }
+        if self.refusals.len() > 1 {
+            let mut kinds: Vec<&(String, String, usize)> = self.refusals.iter().collect();
+            kinds.sort_by_key(|(_, _, n)| std::cmp::Reverse(*n));
+            lines.push(format!("the refused runs stopped in {} ways:", kinds.len()));
+            lines.extend(kinds.iter().take(REFUSALS_LISTED).map(|(_, told, n)| format!("  {n} {}: {told}", if *n == 1 { "run" } else { "runs" })));
+            if kinds.len() > REFUSALS_LISTED {
+                lines.push(format!("  and {} more", kinds.len() - REFUSALS_LISTED));
+            }
         }
         if let Some((n, first)) = &self.crashes {
-            eprintln!("ironwork fuzz: {n} runs crashed ironwork itself and are counted as refused; the first panicked at {first}");
+            lines.push(format!("{n} runs crashed ironwork itself and are counted as refused; the first panicked at {first}"));
         }
+        lines
     }
 
     /// The last line a fuzz run prints. A kept S322 came from a timeout and a kept CEE3501S from a
@@ -1210,6 +1336,9 @@ pub fn run(req: Request) -> ExitCode {
         return fail(format!("{} takes PROCEDURE DIVISION USING parameters that are not a PARM's halfword length and text: fuzz runs a main program", compiled.program.id));
     }
     let (feeds, sysin, others) = inputs_of(&compiled, &rest);
+    for short in interface::short_calls(&file, &compiled, &rest, &req.flags) {
+        eprintln!("ironwork fuzz: {short}");
+    }
     if feeds.is_empty() && !sysin && !parm {
         let unfed = if others.unfed.is_empty() { String::new() } else { format!(" (not varied: {})", others.unfed.join(", ")) };
         return fail(format!("{} reads no sequential, indexed or relative file on a DD of its own{unfed}, no SYSIN and no PARM, so there is nothing to vary", compiled.program.id));
@@ -1221,7 +1350,8 @@ pub fn run(req: Request) -> ExitCode {
     let rdw = feeds.iter().filter(|f| f.variable.is_some()).map(|f| f.dd.clone()).collect();
     let mut runner = Runner { req: &req, work, count: 0, rdw, covered: RunCoverage::default() };
     let varied = Varied { feeds, lines: sysin.then(|| "SYSIN".to_string()).into_iter().collect(), parms: parm.then(|| "PARM".to_string()).into_iter().collect() };
-    let found = drive(&req.out, req.runs, req.seed, req.hang_limit, &varied, &mut |inputs, evidence| runner.run(inputs, &others, evidence));
+    let novel = runner.covered.novel.clone();
+    let found = drive(&req.out, req.runs, req.seed, req.hang_limit, &varied, &novel, &mut |inputs, evidence| runner.run(inputs, &others, evidence));
     let _ = fs::remove_dir_all(&runner.work);
     let found = match found {
         Ok(f) => f,
@@ -1266,7 +1396,7 @@ struct Found {
 /// The loop every entry shares: a run on empty input, whose abend is no input's doing and is not
 /// kept; `runs` generated inputs; then each new abend once, on the smallest input that still gives
 /// it, run with evidence and coverage in `out`, and once more compiled with OPTIMIZE(2).
-fn drive(out: &Path, runs: u32, seed: u64, hang_limit: u64, varied: &Varied, run: &mut RunInput) -> Result<Found, String> {
+fn drive(out: &Path, runs: u32, seed: u64, hang_limit: u64, varied: &Varied, novel: &std::cell::Cell<bool>, run: &mut RunInput) -> Result<Found, String> {
     let evidence = out.join("evidence");
     let coverage = out.join("coverage");
     let started = |e: std::io::Error| format!("a run could not start: {e}");
@@ -1274,31 +1404,31 @@ fn drive(out: &Path, runs: u32, seed: u64, hang_limit: u64, varied: &Varied, run
         files: varied.feeds.iter().map(|f| (f.dd.clone(), Vec::new())).collect(),
         lines: varied.lines.iter().map(|k| (k.clone(), Vec::new())).collect(),
         parms: varied.parms.iter().map(|k| (k.clone(), Vec::new())).collect(),
+        limit: Some(hang_limit),
         ..Default::default()
     };
-    let mut ended_empty = run(&empty, None).map_err(started)?;
-    if ended_empty == Outcome::Timeout {
-        ended_empty = run(&Inputs { limit: Some(hang_limit), ..empty }, None).map_err(started)?;
-    }
+    let ended_empty = run(&empty, None).map_err(started)?;
     let baseline = ended_empty.place();
     let mut rng = Rng(seed.max(1));
     let mut tally = Tally::new();
     let mut kept: Vec<((String, String, i64), Inputs, Outcome)> = Vec::new();
     let mut chosen: Vec<((String, String, i64), String, Inputs)> = Vec::new();
-    let mut rechecks = 0;
+    let mut corpus: Vec<Inputs> = Vec::new();
     for _ in 0..runs {
-        let inputs = generate(&mut rng, varied);
+        // Half the runs change an input that reached what no earlier run did, once there is one.
+        let drawn = if corpus.is_empty() || rng.below(2) == 0 {
+            generate(&mut rng, varied)
+        } else {
+            let parent = parent_of(&mut rng, corpus.len());
+            mutate(&mut rng, varied, &corpus[parent])
+        };
+        let inputs = Inputs { limit: Some(hang_limit), ..drawn };
         let outcome = run(&inputs, None).map_err(started)?;
+        if novel.get() && corpus.len() < CORPUS_LIMIT {
+            corpus.push(inputs.clone());
+        }
         tally.add(&outcome);
         let found = match &outcome {
-            // A timeout is a finding only where a longer limit ends the same input in S322, in a
-            // loop the empty input does not run.
-            Outcome::Timeout if rechecks < HANG_RECHECKS => {
-                rechecks += 1;
-                let limited = Inputs { limit: Some(hang_limit), ..inputs };
-                let hang = run(&limited, None).map_err(started)?;
-                hang.place().filter(|p| p.0 == "S322" && !same_loop(&hang, &ended_empty)).map(|p| (p, limited, hang))
-            }
             // A CALL of a missing program is a finding only where the name came from the input,
             // which a marker in the name's place shows at the end.
             Outcome::Abend { code, file, line, message } if missing_module(code, message).is_some() => {
@@ -1311,7 +1441,8 @@ fn drive(out: &Path, runs: u32, seed: u64, hang_limit: u64, varied: &Varied, run
                 }
                 None
             }
-            outcome => outcome.place().map(|p| (p, inputs, outcome.clone())),
+            // An S322 is a finding only in a loop the empty input does not run.
+            outcome => outcome.place().filter(|p| p.0 != "S322" || !same_loop(outcome, &ended_empty)).map(|p| (p, inputs, outcome.clone())),
         };
         if let Some((place, inputs, outcome)) = found
             && Some(&place) != baseline.as_ref()
@@ -1324,7 +1455,8 @@ fn drive(out: &Path, runs: u32, seed: u64, hang_limit: u64, varied: &Varied, run
     let (mut inputs_out, mut runs_out, mut codes) = (Vec::new(), Vec::new(), Vec::new());
     let mut n = 0;
     for (place, found, _) in kept {
-        let budget = if found.limit.is_some() { 10 } else { 200 };
+        let hang = place.0 == "S322";
+        let budget = if hang { 10 } else { 200 };
         let (small, minimized) = minimize(run, &varied.feeds, found, &place, budget);
         let before = journals(&evidence);
         let cover = coverage.join(format!("{n}.json"));
@@ -1334,7 +1466,7 @@ fn drive(out: &Path, runs: u32, seed: u64, hang_limit: u64, varied: &Varied, run
         match journal {
             Some(journal) => {
                 let optimized = place.0 == "S322" || gives_again(run, &small, &place).map_err(started)?;
-                runs_out.push(kept_run(listed(&small, varied, n, minimized, &mut inputs_out), &outcome, optimized, small.limit, journal, n));
+                runs_out.push(kept_run(listed(&small, varied, n, minimized, &mut inputs_out), &outcome, optimized, small.limit.filter(|_| hang), journal, n));
                 codes.push(place.0.clone());
             }
             None => {
@@ -1400,6 +1532,30 @@ pub(crate) fn journals(evidence: &Path) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refusals_are_reported_by_where_they_stopped_the_most_frequent_first() {
+        let abend = |code: &str, line: i64, message: &str| Outcome::Abend { code: code.into(), file: "P.cbl".into(), line, message: message.into() };
+        let mut tally = Tally::new();
+        tally.add(&abend("IO-35", 9, "IN-FILE: no DD INDD was given"));
+        for _ in 0..3 {
+            tally.add(&abend("U4038", 14, "CEE3501S The module LOGGER was not found."));
+        }
+        tally.add(&abend("S0C7", 20, "data exception"));
+        tally.add(&Outcome::Clean);
+        assert_eq!(
+            tally.report_lines(),
+            [
+                "4 runs refused; the first: P.cbl:9 IO-35 IN-FILE: no DD INDD was given",
+                "the refused runs stopped in 2 ways:",
+                "  3 runs: P.cbl:14 U4038 CEE3501S The module LOGGER was not found.",
+                "  1 run: P.cbl:9 IO-35 IN-FILE: no DD INDD was given",
+            ]
+        );
+        let mut one_way = Tally::new();
+        one_way.add(&abend("IRONWORK", 3, "CALL X: IEW2456E SYMBOL X UNRESOLVED"));
+        assert_eq!(one_way.report_lines().len(), 1);
+    }
 
     #[test]
     fn no_sysin_card_starts_as_the_end_of_in_stream_data() {
@@ -1484,7 +1640,7 @@ mod tests {
     #[test]
     fn variable_records_lie_within_the_longest_and_carry_rdws_and_relative_slots_may_be_empty() {
         let alnum = |offset, size| Field { offset, size, kind: Kind::Alnum { justified: false } };
-        let shapes = vec![Shape { size: 4, fields: vec![alnum(0, 4)] }, Shape { size: 10, fields: vec![alnum(0, 4), alnum(4, 6)] }];
+        let shapes = vec![Shape { size: 4, fields: vec![alnum(0, 4)], values: BTreeMap::new() }, Shape { size: 10, fields: vec![alnum(0, 4), alnum(4, 6)], values: BTreeMap::new() }];
         let feed = Feed { dd: "VB".into(), length: 10, variable: Some((4, 10)), shapes, keys: Vec::new(), relative: true };
         let mut rng = Rng(9);
         let (mut lengths, mut empty) = (BTreeSet::new(), 0);
@@ -1504,7 +1660,7 @@ mod tests {
     #[test]
     fn an_indexed_feed_holds_its_records_in_key_order_and_repeats_no_unique_key() {
         let alnum = |offset, size| Field { offset, size, kind: Kind::Alnum { justified: false } };
-        let shapes = vec![Shape { size: 3, fields: vec![alnum(0, 2), alnum(2, 1)] }];
+        let shapes = vec![Shape { size: 3, fields: vec![alnum(0, 2), alnum(2, 1)], values: BTreeMap::new() }];
         let varied = Varied { feeds: vec![Feed { dd: "KS".into(), length: 3, variable: None, shapes, keys: vec![(0, 2), (2, 1)], relative: false }], lines: Vec::new(), parms: Vec::new() };
         let mut rng = Rng(3);
         for _ in 0..200 {

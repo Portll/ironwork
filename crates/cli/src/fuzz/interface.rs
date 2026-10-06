@@ -10,9 +10,9 @@ use exec::evidence::Value;
 use exec::layout::{Layout, Resolved};
 use rt::storage::Kind;
 use rt::vocab::SignPosition;
-use syntax::ast::{Arg, ExecKind, Expr, Literal, Operand, Program, Stmt};
+use syntax::ast::{Arg, ArgMode, ExecKind, Expr, Literal, Operand, Program, Stmt};
 
-use super::{Field, Header, Outcome, Request, Rng, SPACE, Tally, base64, elementary, field_bytes, neutral, obj};
+use super::{Field, Header, Outcome, Request, Rng, SPACE, Tally, base64, elementary_items, field_bytes, neutral, obj};
 
 /// The shape an interface run's manifest takes, which docs/fuzz-interface-manifest.schema.json
 /// describes: a reader of `ironwork-fuzz/v1` would take its arguments for a main program's inputs.
@@ -40,6 +40,8 @@ pub(crate) struct Param {
     pub(crate) fields: Vec<Field>,
     /// Each OCCURS DEPENDING ON object in the record, with its table's fewest and most occurrences.
     pub(crate) counts: Vec<(Field, u32, u32)>,
+    /// The values the subprogram compares a field with, by the field's offset (`dictionary`).
+    pub(crate) values: BTreeMap<usize, Vec<Vec<u8>>>,
 }
 
 /// What one CALL passes in one USING position.
@@ -156,6 +158,7 @@ pub(crate) fn refusal(compiled: &exec::Compiled) -> Option<String> {
 /// The program's USING items in order, each from its LINKAGE record.
 pub(crate) fn params(compiled: &exec::Compiled) -> Vec<Param> {
     let layout = &compiled.layout;
+    let by_item = super::dictionary::literals_by_item(compiled);
     let record_of = |name: &str| layout.linkage_roots.iter().copied().find(|&i| layout.items[i].name.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(name)));
     compiled
         .program
@@ -180,7 +183,8 @@ pub(crate) fn params(compiled: &exec::Compiled) -> Vec<Param> {
                 }
                 stack.extend(table.children.iter().copied());
             }
-            Some(Param { name: param.name.clone(), size, fields: elementary(layout, root, record.offset, size), counts })
+            let fields = elementary_items(layout, root, record.offset, size);
+            Some(Param { name: param.name.clone(), size, fields: fields.iter().map(|(f, _)| *f).collect(), counts, values: super::dictionary::values(&fields, &by_item) })
         })
         .collect()
 }
@@ -233,7 +237,11 @@ fn count_bytes(f: Field, n: u32) -> Vec<u8> {
 fn record(rng: &mut Rng, param: &Param, varied: usize, draw_counts: bool) -> Vec<u8> {
     let mut buf = vec![SPACE; param.size];
     for &f in &param.fields {
-        let bytes = if f.offset + f.size <= varied { field_bytes(rng, f) } else { neutral(f) };
+        let bytes = match param.values.get(&f.offset) {
+            _ if f.offset + f.size > varied => neutral(f),
+            Some(values) if rng.below(super::DICTIONARY_ODDS) == 0 => values[rng.below(values.len())].clone(),
+            _ => field_bytes(rng, f),
+        };
         buf[f.offset..f.offset + f.size].copy_from_slice(&bytes);
     }
     for &(f, min, max) in &param.counts {
@@ -257,6 +265,37 @@ pub(crate) fn arguments(rng: &mut Rng, params: &[Param], site: Option<&CallSite>
             Passes::Unknown => Some(record(rng, p, usize::MAX, true)),
         })
         .collect()
+}
+
+/// `parent` changed in one passed argument: one field drawn again, from the dictionary or as fields
+/// are, or every field the subprogram does not compare with a literal drawn again, keeping the
+/// path the compared ones chose while the data along it changes.
+fn mutated(rng: &mut Rng, params: &[Param], parent: &Arguments) -> Arguments {
+    let mut child = parent.clone();
+    let passed: Vec<usize> = (0..child.len()).filter(|&i| child[i].is_some() && params.get(i).is_some_and(|p| !p.fields.is_empty())).collect();
+    if passed.is_empty() {
+        return child;
+    }
+    let i = passed[rng.below(passed.len())];
+    let (param, Some(argument)) = (&params[i], child[i].as_mut()) else { return child };
+    let fields: Vec<&Field> = param.fields.iter().filter(|f| f.offset + f.size <= argument.len()).collect();
+    if rng.below(2) == 0 {
+        for &&f in fields.iter().filter(|f| !param.values.contains_key(&f.offset)) {
+            argument[f.offset..f.offset + f.size].copy_from_slice(&field_bytes(rng, f)[..f.size]);
+        }
+        return child;
+    }
+    let compared: Vec<&Field> = fields.iter().copied().filter(|f| param.values.contains_key(&f.offset)).collect();
+    // A field the program compares with a literal gets the change half the time it has one.
+    let pool = if !compared.is_empty() && rng.below(2) == 0 { &compared } else { &fields };
+    if let Some(&f) = (!pool.is_empty()).then(|| pool[rng.below(pool.len())]) {
+        let bytes = match param.values.get(&f.offset) {
+            Some(values) if rng.below(4) != 0 => values[rng.below(values.len())].clone(),
+            _ => field_bytes(rng, f),
+        };
+        argument[f.offset..f.offset + f.size].copy_from_slice(&bytes[..f.size]);
+    }
+    child
 }
 
 /// Every param passed, every field neutral and every count at its most: the input whose abend is
@@ -308,6 +347,59 @@ pub(crate) fn call_sites(name: &str, callers: &[(String, exec::Compiled)]) -> Ve
         }
     }
     sites
+}
+
+/// Each argument a CALL of `name` in `callers` passes BY REFERENCE or BY CONTENT that is shorter
+/// than the USING item `params` describes in its place, told with both. The Language Reference's
+/// CALL statement says the called program "must describe the same number of character positions"
+/// as the caller, and that an alphanumeric literal's parameter is PIC X(n) of the literal's length:
+/// a longer item reads past what was passed.
+pub(crate) fn short_arguments(name: &str, callers: &[(String, &exec::Compiled)], params: &[Param]) -> Vec<String> {
+    let mut out = Vec::new();
+    for (file, compiled) in callers {
+        let program = &compiled.program;
+        for s in all_statements(program) {
+            let Stmt::Call(call) = s else { continue };
+            let Operand::Literal(Literal::Alnum(target)) = &call.target else { continue };
+            if !target.trim().eq_ignore_ascii_case(name) {
+                continue;
+            }
+            for (arg, param) in call.using.iter().zip(params).filter(|(a, _)| a.mode != ArgMode::Value) {
+                let (what, len) = match passes_of(arg, &compiled.layout, compiled) {
+                    Passes::Item(n) => ("an item", n),
+                    Passes::Literal(bytes) => ("a literal", bytes.len()),
+                    _ => continue,
+                };
+                if len < param.size {
+                    let file = match call.pos.file {
+                        0 => file.clone(),
+                        n => program.sources.get(n as usize).cloned().unwrap_or_else(|| file.clone()),
+                    };
+                    out.push(format!("{file}:{} passes {what} of {len} bytes as {}'s {} of {}: the called program reads past it", call.pos.line, name.trim(), param.name, param.size));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// `short_arguments` for each CALL of a literal in `compiled` and the programs it reaches, against
+/// the program it names among `rest`.
+pub(crate) fn short_calls(file: &str, compiled: &exec::Compiled, rest: &[Program], flags: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = BTreeSet::new();
+    for s in all_statements(&compiled.program) {
+        let Stmt::Call(call) = s else { continue };
+        let Operand::Literal(Literal::Alnum(target)) = &call.target else { continue };
+        let name = target.trim().to_ascii_uppercase();
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        let Some(callee) = rest.iter().find(|p| !p.is_prototype() && (p.id.eq_ignore_ascii_case(&name) || p.load_name().eq_ignore_ascii_case(&name))) else { continue };
+        let Ok(callee) = exec::compile(callee.clone(), flags) else { continue };
+        out.extend(short_arguments(&name, &[(file.to_owned(), compiled)], &params(&callee)));
+    }
+    out
 }
 
 /// Every program that could CALL the subprogram: each COBOL source in its own directory and the -L
@@ -409,7 +501,8 @@ impl Runner<'_> {
             command.arg("--evidence").arg(journal);
         }
         let roots = self.req.roots();
-        let outcome = super::finish(command, &dir, self.req.timeout, &given, |l| super::abend_line(l, &roots));
+        command.arg("--statement-limit").arg(self.req.hang_limit.to_string());
+        let outcome = super::finish(command, &dir, self.req.timeout * super::HANG_PATIENCE, &given, |l| super::abend_line(l, &roots));
         self.covered.take(&cover, evidence.is_some());
         outcome
     }
@@ -560,29 +653,72 @@ const NAME_WIDTH: usize = 8;
 /// the offset in it.
 type NameSlot = (usize, usize);
 
-/// Where each CALL whose target is an item of a USING record takes its program name from, with
-/// that item's name in upper case.
+/// Where each CALL of a data item takes its program name from in the arguments, with the item's
+/// name in upper case: the item itself where it lies in a USING record, or the field a chain of
+/// MOVEs, of up to `MOVE_HOPS`, carries into it from one.
 fn linkage_targets(compiled: &exec::Compiled) -> Vec<(NameSlot, String)> {
     let layout = &compiled.layout;
     let records: Vec<usize> = compiled.program.using.iter().filter_map(|p| layout.linkage_roots.iter().copied().find(|&i| layout.items[i].name.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(&p.name)))).collect();
+    let statements = all_statements(&compiled.program);
+    let item_of = |r: &syntax::ast::Ref| match layout.resolve(&r.name, &r.qualifiers, r.pos) {
+        Ok(Resolved::Item(i)) if r.refmod.is_none() => Some(i),
+        _ => None,
+    };
+    let moves: Vec<(usize, usize)> = statements
+        .iter()
+        .filter_map(|s| if let Stmt::Move { from: Operand::Ref(from), to, .. } = s { item_of(from).map(|f| (f, to)) } else { None })
+        .flat_map(|(f, to)| to.iter().filter_map(&item_of).map(move |t| (f, t)))
+        .collect();
     let mut slots: Vec<(NameSlot, String)> = Vec::new();
-    for s in all_statements(&compiled.program) {
+    for s in &statements {
         let Stmt::Call(call) = s else { continue };
         let Operand::Ref(r) = &call.target else { continue };
-        let Ok(Resolved::Item(i)) = layout.resolve(&r.name, &r.qualifiers, r.pos) else { continue };
+        let Some(i) = item_of(r) else { continue };
         let item = &layout.items[i];
-        let within = |root: &usize| {
-            let record = &layout.items[*root];
-            item.linkage == record.linkage && item.offset >= record.offset && item.offset < record.offset + record.size
-        };
-        if let Some(k) = records.iter().position(within) {
-            let slot = (k, (item.offset - layout.items[records[k]].offset) as usize);
+        for slot in origins(layout, &records, &moves, Byte { linkage: item.linkage, file: item.file, offset: item.offset }, MOVE_HOPS) {
             if !slots.iter().any(|(s, _)| *s == slot) {
                 slots.push((slot, r.name.to_ascii_uppercase()));
             }
         }
     }
     slots
+}
+
+/// How many MOVEs a CALL target's value is traced back through to an argument.
+const MOVE_HOPS: u8 = 4;
+
+/// A byte of the program's storage: the area it is in and its offset there.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Byte {
+    linkage: Option<u16>,
+    file: Option<u16>,
+    offset: u32,
+}
+
+/// Whether item `i` holds `place`.
+fn holds(layout: &Layout, i: usize, place: Byte) -> bool {
+    let item = &layout.items[i];
+    item.linkage == place.linkage && item.file == place.file && place.offset >= item.offset && place.offset < item.offset + item.size
+}
+
+/// The argument places `place`'s value comes from: its own where a USING record holds it, else,
+/// through each MOVE whose receiver holds it, the matching byte of the sender's, `hops` deep.
+fn origins(layout: &Layout, records: &[usize], moves: &[(usize, usize)], place: Byte, hops: u8) -> Vec<NameSlot> {
+    if let Some(k) = records.iter().position(|&r| holds(layout, r, place)) {
+        return vec![(k, (place.offset - layout.items[records[k]].offset) as usize)];
+    }
+    if hops == 0 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for &(from, to) in moves.iter().filter(|&&(_, to)| holds(layout, to, place)) {
+        let (sender, shift) = (&layout.items[from], place.offset - layout.items[to].offset);
+        if shift < sender.size {
+            let back = Byte { linkage: sender.linkage, file: sender.file, offset: sender.offset + shift };
+            out.extend(origins(layout, records, moves, back, hops - 1).into_iter().filter(|slot| !out.contains(slot)).collect::<Vec<_>>());
+        }
+    }
+    out
 }
 
 /// Where `name` first stands in `arguments`, as EBCDIC.
@@ -615,13 +751,23 @@ fn drive(req: &Request, compiled: &exec::Compiled, params: &[Param], sites: &[Ca
     for ((i, at), names) in &slots {
         eprintln!("ironwork fuzz: a CALL takes its program name from {} at offset {at}; runs give it one of {}", params[*i].name, names.join(", "));
     }
+    let mut corpus: Vec<Arguments> = Vec::new();
     for _ in 0..req.runs {
         let site = (!sites.is_empty()).then(|| &sites[rng.below(sites.len())]);
-        let mut generated = arguments(&mut rng, params, site);
+        // Half the runs change arguments that reached what no earlier run did, once there are any.
+        let mut generated = if corpus.is_empty() || rng.below(2) == 0 {
+            arguments(&mut rng, params, site)
+        } else {
+            let parent = super::parent_of(&mut rng, corpus.len());
+            mutated(&mut rng, params, &corpus[parent])
+        };
         for (slot, names) in &slots {
             with_name(&mut generated, params, *slot, &names[rng.below(names.len())]);
         }
         let outcome = runner.run(&generated, false, None).map_err(started)?;
+        if runner.covered.novel.get() && corpus.len() < super::CORPUS_LIMIT {
+            corpus.push(generated.clone());
+        }
         tally.add(&outcome);
         // A CALL that took its program name from the arguments ends CEE3501S on a generated name;
         // later runs give that place a name the libraries hold, as a caller would.
@@ -687,6 +833,10 @@ pub fn run(req: Request) -> ExitCode {
     let params = params(&compiled);
     let callers = callers(&req);
     let sites = call_sites(&compiled.program.id, &callers);
+    let callers_compiled: Vec<(String, &exec::Compiled)> = callers.iter().map(|(f, c)| (f.clone(), c)).collect();
+    for short in short_arguments(compiled.program.load_name(), &callers_compiled, &params).into_iter().chain(short_calls(&file, &compiled, &rest, &req.flags)) {
+        eprintln!("ironwork fuzz: {short}");
+    }
     let (candidates, named) = candidates(&compiled, &callers, &req);
     rest.extend(named);
     let names: Vec<String> = candidates.iter().map(|c| c.name.clone()).collect();

@@ -349,12 +349,13 @@ fuzz flags:
   --runs N   how many generated inputs to run, 200 without it
   --seed N   the generator's seed, 1 without it; the same seed gives the same inputs
   --timeout SECONDS
-             how long one run may take before it is stopped and counted a timeout, 10 without it.
-             A timed-out input is run again, up to three per fuzz run, with --statement-limit
-             --hang-limit and six times as long: an S322 there, unless the run had found SYSIN at
-             its end, is kept as a loop the input caused
+             six times this is how long one run may take before it is stopped and counted a
+             timeout, 10 without it; each run stops at --hang-limit statements first unless the
+             machine is too slow to reach them
   --hang-limit N
-             the statements a timed-out input may start when it is run again, 10000000 without it
+             the statements each run may start, 10000000 without it: a run past them ends S322,
+             kept as a loop the input caused unless the empty input's run loops there too or the
+             run had found SYSIN at its end
   --root DIR the repository root the manifest names the program from, the current directory without it
   --job      fuzz the job in the JCL file through ironwork job: each data set a COBOL step reads
              before any step creates it is built from that program's file description, each
@@ -849,9 +850,6 @@ fn driver() -> ExitCode {
         let Some(out) = out_dir else { return usage_error("fuzz needs -o DIR") };
         if [fuzz_job, fuzz_cics, fuzz_interface, fuzz_differential].iter().filter(|&&on| on).count() > 1 {
             return usage_error("fuzz takes one of --job, --cics, --interface and --differential");
-        }
-        if fuzz_interface && hang_limit.is_some() {
-            return usage_error("--hang-limit is for fuzz and fuzz --job; fuzz --interface does not run a timed-out input again");
         }
         if fuzz_cics && hang_limit.is_some() {
             return usage_error("--hang-limit is for fuzz and fuzz --job; fuzz --cics does not run a timed-out task again");

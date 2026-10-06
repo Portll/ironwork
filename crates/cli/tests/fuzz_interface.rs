@@ -282,3 +282,180 @@ fn a_call_target_an_argument_supplies_is_given_a_program_the_callers_name() {
     let manifest = read_manifest(&dir.join("run"));
     assert!(manifest.contains("\"code\":\"S0C7\",\"file\":\"NAMESUB.cbl\",\"line\":10"), "{manifest}");
 }
+
+/// A called program whose USING item is longer than what a CALL passes is told before the runs,
+/// from the subprogram's side and from its caller's.
+#[test]
+fn an_argument_shorter_than_the_called_program_describes_is_told_before_the_runs() {
+    let dir = repo("short", false);
+    let callee = [
+        "       IDENTIFICATION DIVISION.",
+        "       PROGRAM-ID. DATAPROG.",
+        "       DATA DIVISION.",
+        "       WORKING-STORAGE SECTION.",
+        "       01  OPERATION-TYPE PIC X(6).",
+        "       LINKAGE SECTION.",
+        "       01  PASSED-OPERATION PIC X(6).",
+        "       PROCEDURE DIVISION USING PASSED-OPERATION.",
+        "           MOVE PASSED-OPERATION TO OPERATION-TYPE",
+        "           GOBACK.",
+    ];
+    let caller = [
+        "       IDENTIFICATION DIVISION.",
+        "       PROGRAM-ID. OPSPROG.",
+        "       DATA DIVISION.",
+        "       LINKAGE SECTION.",
+        "       01  CHOICE PIC X(6).",
+        "       PROCEDURE DIVISION USING CHOICE.",
+        "           CALL 'DATAPROG' USING 'READ'",
+        "           GOBACK.",
+    ];
+    fs::write(dir.join("repo/src/DATAPROG.cbl"), callee.join("\n") + "\n").unwrap();
+    fs::write(dir.join("repo/src/OPSPROG.cbl"), caller.join("\n") + "\n").unwrap();
+    let told = "ironwork fuzz: src/OPSPROG.cbl:7 passes a literal of 4 bytes as DATAPROG's PASSED-OPERATION of 6: the called program reads past it\n";
+    for program in ["src/DATAPROG.cbl", "src/OPSPROG.cbl"] {
+        let o = fuzz(&dir, program);
+        assert!(stderr(&o).contains(told), "{program}: {}", stderr(&o));
+        let _ = fs::remove_dir_all(dir.join("run"));
+    }
+}
+
+/// A field the subprogram compares with a literal now and then holds that literal, so the runs reach
+/// the branch it guards, which random text would not.
+#[test]
+fn a_field_takes_the_value_the_program_compares_it_with() {
+    let dir = repo("dictionary", false);
+    let source = [
+        "       IDENTIFICATION DIVISION.",
+        "       PROGRAM-ID. GUARDED.",
+        "       DATA DIVISION.",
+        "       WORKING-STORAGE SECTION.",
+        "       01  TOTAL PIC 9(7) VALUE 0.",
+        "       LINKAGE SECTION.",
+        "       01  REQ.",
+        "           05 OP PIC X(6).",
+        "           05 QTY PIC 9(5).",
+        "       PROCEDURE DIVISION USING REQ.",
+        "           IF OP = 'READ'",
+        "              ADD QTY TO TOTAL",
+        "           END-IF",
+        "           GOBACK.",
+    ];
+    fs::write(dir.join("repo/src/GUARDED.cbl"), source.join("\n") + "\n").unwrap();
+    let o = fuzz(&dir, "src/GUARDED.cbl");
+    assert!(o.status.success(), "{}", stderr(&o));
+    let manifest = read_manifest(&dir.join("run"));
+    assert!(manifest.contains("\"code\":\"S0C7\",\"file\":\"GUARDED.cbl\",\"line\":12"), "{manifest}");
+}
+
+/// Each run stops at --hang-limit statements, so a loop the arguments cause ends in S322 and is kept,
+/// whatever the machine's load does to the clock.
+#[test]
+fn a_loop_the_arguments_cause_ends_at_the_statement_limit_and_is_kept() {
+    let dir = repo("hang", false);
+    let source = [
+        "       IDENTIFICATION DIVISION.",
+        "       PROGRAM-ID. SPINNER.",
+        "       DATA DIVISION.",
+        "       LINKAGE SECTION.",
+        "       01  REQ.",
+        "           05 OP PIC X(6).",
+        "       PROCEDURE DIVISION USING REQ.",
+        "           PERFORM UNTIL OP NOT = 'LOOP'",
+        "              CONTINUE",
+        "           END-PERFORM",
+        "           GOBACK.",
+    ];
+    fs::write(dir.join("repo/src/SPINNER.cbl"), source.join("\n") + "\n").unwrap();
+    let out = dir.join("run");
+    let o = ironwork(&dir, &["fuzz", "--interface", "src/SPINNER.cbl", "-L", "src", "--runs", "40", "--hang-limit", "20000", "--timeout", "60", "-o", out.to_str().unwrap()]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let manifest = read_manifest(&out);
+    assert!(manifest.contains("\"code\":\"S322\",\"file\":\"SPINNER.cbl\",\"line\":9"), "{manifest}");
+    assert!(String::from_utf8_lossy(&o.stdout).contains(" 0 timeout"), "{}", String::from_utf8_lossy(&o.stdout));
+}
+
+/// A CALL target that MOVEs carry from an argument, a group MOVE among them, is found before the
+/// runs, so no run CALLs a generated name.
+#[test]
+fn a_call_target_moves_carry_from_an_argument_is_found_before_the_runs() {
+    let dir = repo("chain", false);
+    let source = [
+        "       IDENTIFICATION DIVISION.",
+        "       PROGRAM-ID. CHAINSUB.",
+        "       DATA DIVISION.",
+        "       WORKING-STORAGE SECTION.",
+        "       01  WS-COPY.",
+        "           05 WS-COPY-PROGRAM PIC X(8).",
+        "           05 WS-COPY-QTY PIC 9(5).",
+        "       01  WS-PGM PIC X(8).",
+        "       LINKAGE SECTION.",
+        "       01  REQ.",
+        "           05 LOG-PROGRAM PIC X(8).",
+        "           05 QTY PIC 9(5).",
+        "       PROCEDURE DIVISION USING REQ.",
+        "           MOVE REQ TO WS-COPY",
+        "           MOVE WS-COPY-PROGRAM TO WS-PGM",
+        "           CALL WS-PGM",
+        "           GOBACK.",
+    ];
+    let caller = [
+        "       IDENTIFICATION DIVISION.",
+        "       PROGRAM-ID. CHAINMN.",
+        "       DATA DIVISION.",
+        "       WORKING-STORAGE SECTION.",
+        "       01  WS-PGM PIC X(8).",
+        "       PROCEDURE DIVISION.",
+        "           MOVE 'LOGGIT' TO WS-PGM",
+        "           CALL 'CHAINSUB' USING WS-PGM",
+        "           GOBACK.",
+    ];
+    fs::write(dir.join("repo/src/CHAINSUB.cbl"), source.join("\n") + "\n").unwrap();
+    fs::write(dir.join("repo/src/CHAINMN.cbl"), caller.join("\n") + "\n").unwrap();
+    fs::write(dir.join("repo/src/LOGGIT.cbl"), "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. LOGGIT.\n       PROCEDURE DIVISION.\n           GOBACK.\n").unwrap();
+    let o = fuzz(&dir, "src/CHAINSUB.cbl");
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(stderr(&o).contains("a CALL takes its program name from REQ at offset 0; runs give it one of LOGGIT\n"), "{}", stderr(&o));
+    assert!(String::from_utf8_lossy(&o.stdout).contains(" 0 refused"), "{}", String::from_utf8_lossy(&o.stdout));
+}
+
+/// Runs that reach statements no earlier run did are kept and changed, so an abend four nested
+/// comparisons deep, which a fresh draw reaches about once in 256 runs, is found within 120.
+#[test]
+fn inputs_that_reach_new_statements_are_changed_until_a_deep_branch_is_reached() {
+    let dir = repo("guided", false);
+    let source = [
+        "       IDENTIFICATION DIVISION.",
+        "       PROGRAM-ID. NESTED.",
+        "       DATA DIVISION.",
+        "       WORKING-STORAGE SECTION.",
+        "       01  TOTAL PIC 9(7) VALUE 0.",
+        "       LINKAGE SECTION.",
+        "       01  REQ.",
+        "           05 K1 PIC XX.",
+        "           05 K2 PIC XX.",
+        "           05 K3 PIC XX.",
+        "           05 K4 PIC XX.",
+        "           05 QTY PIC 9(5).",
+        "       PROCEDURE DIVISION USING REQ.",
+        "           IF K1 = 'A1'",
+        "              DISPLAY 'ONE'",
+        "              IF K2 = 'B2'",
+        "                 DISPLAY 'TWO'",
+        "                 IF K3 = 'C3'",
+        "                    DISPLAY 'THREE'",
+        "                    IF K4 = 'D4'",
+        "                       ADD QTY TO TOTAL",
+        "                    END-IF",
+        "                 END-IF",
+        "              END-IF",
+        "           END-IF",
+        "           GOBACK.",
+    ];
+    fs::write(dir.join("repo/src/NESTED.cbl"), source.join("\n") + "\n").unwrap();
+    let out = dir.join("run");
+    let o = ironwork(&dir, &["fuzz", "--interface", "src/NESTED.cbl", "-L", "src", "--runs", "120", "-o", out.to_str().unwrap()]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    let manifest = read_manifest(&out);
+    assert!(manifest.contains("\"code\":\"S0C7\",\"file\":\"NESTED.cbl\",\"line\":21"), "{manifest}");
+}

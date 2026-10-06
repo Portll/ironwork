@@ -220,7 +220,8 @@ pub fn run(req: Request) -> ExitCode {
         Err(e) => return fail(e),
     };
     let mut runner = Runner { req: &req, plan: &plan, work: work.clone(), count: 0, covered: super::RunCoverage::default() };
-    let found = super::drive(&req.fuzz.out, req.fuzz.runs, req.fuzz.seed, req.fuzz.hang_limit, varied, &mut |inputs, evidence| runner.run(inputs, evidence));
+    let novel = runner.covered.novel.clone();
+    let found = super::drive(&req.fuzz.out, req.fuzz.runs, req.fuzz.seed, req.fuzz.hang_limit, varied, &novel, &mut |inputs, evidence| runner.run(inputs, evidence));
     let _ = fs::remove_dir_all(&work);
     let found = match found {
         Ok(f) => f,

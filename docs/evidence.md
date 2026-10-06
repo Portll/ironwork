@@ -285,7 +285,17 @@ cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
    are built field by field, every occurrence of a table included, from their level-01
    descriptions: mostly values the PICTURE allows (a packed field's pad nibble zero, a national
    field UTF-16 text), sometimes its boundary, and sometimes the bytes that break it (spaces or
-   asterisks in a zoned number, a packed field of spaces). A file whose records have more than one
+   asterisks in a zoned number, a packed field of spaces). A field whose item the program compares
+   with literals (a relation with a literal, an EVALUATE subject's WHEN values, the values of its
+   condition-names) holds one of them, as the field stores it, one time in four, so a branch only
+   an exact value reaches is run; a literal the field cannot hold is not used. Each input whose
+   run started a statement or entered a paragraph no earlier run had is kept, 64 at most, and
+   once there is one, half the runs change one of them in place of a new draw, the newest half of
+   those times: one field of one record drawn again (a field the program compares with a literal
+   half the time there is one, most often given one of its literals), every field of one record
+   the program does not compare drawn again, which keeps the path and changes the data along it,
+   a record added or dropped, or a SYSIN line or the PARM drawn again. The manifest lists each
+   kept run's inputs whole, and the same seed gives the same runs on the same build. A file whose records have more than one
    length gets each record behind an RDW, at its level-01 record's length, at a length READ allows
    (VLR decides which), or now and then shorter than READ allows. A line-sequential file, an
    indexed file whose keys lie past its shortest record, a file the program OPENs EXTEND and does
@@ -308,7 +318,9 @@ cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
    neither fed nor given is empty. A step that abends at no COBOL statement, and a JCL error, are
    counted as refused.
 2. Each run is its own `ironwork run`, or `ironwork job` with `--job`, with the given `--clock`
-   (2026-01-01 without it), stopped after `--timeout` seconds. Every data set is written inside DIR
+   (2026-01-01 without it) and `--statement-limit` `--hang-limit` (10,000,000 statements without
+   it), stopped after six times `--timeout` seconds only when too slow to reach that many
+   statements, so a run's outcome does not depend on how loaded the machine is. Every data set is written inside DIR
    under a name of its own, never under its DD name, since ASSIGN may name a path. `--seed` fixes
    the inputs, so the same seed gives the same runs.
 3. An abend the program gives on empty input is not the input's doing and is not kept. Every other
@@ -320,22 +332,20 @@ cobolwork scan --only abend ROOT`; `crates/cli/src/fuzz.rs`):
    the code, the file and the line. DIR is refused inside the program's directory or a library, as
    that run would refuse its evidence directory. A found abend that is not kept is named on
    standard error with what its last run did instead.
-   Every run the fuzz run makes, generated, re-checked, minimizing or kept, writes its coverage,
+   Every run the fuzz run makes, generated, minimizing or kept, writes its coverage,
    and the fuzz run adds them up in `DIR/coverage/runs.json`: `runs`, how many runs reported
    coverage (a run stopped at `--timeout` writes none), `statements` (`file`, `line`, `runs` that
    started a statement there, `started` in all), and `paragraphs` (`program`, `name`, `line`,
    `runs` that entered it, `entered` in all), every paragraph of an outlined program listed, those
    no run entered with 0. A fuzzed run carries no marker, so this says which statements ran
    under fuzzing, never that a value failed to arrive (cobolwork `docs/spec/reach.md` §9.8).
-5. Two outcomes that are counted and never kept become findings under strict conditions. A
-   timeout, up to three per fuzz run, is run again on the same input under `--statement-limit`
-   (`--hang-limit`, 10,000,000 statements without it) for six times `--timeout`; if that run ends
-   in S322 it is kept as an input that keeps the program running past the limit, at the first
-   statement of the loop it is in (assumption C241), which the message names with the loop's
-   lines. It is not kept when the empty input's run ends in S322 in the same loop (in the same
-   file, sharing a line), nor a second time for a loop already kept. A run that had ACCEPT find
-   SYSIN at its end, stopped at its timeout or its limit, is a program waiting for input, not
-   looping on it: it is counted as a timeout and not run again. A kept S322 says the run passed
+5. Two outcomes become findings only under strict conditions. A run that ends in S322 at the
+   statement limit is kept as an input that keeps the program running past the limit, at the
+   first statement of the loop it is in (assumption C241), which the message names with the
+   loop's lines. It is not kept when the empty input's run ends in S322 in the same loop (in the
+   same file, sharing a line), nor a second time for a loop already kept. A run that had ACCEPT
+   find SYSIN at its end, stopped at its timeout or its limit, is a program waiting for input, not
+   looping on it: it is counted as a timeout. A kept S322 says the run passed
    the limit; it does not show the loop would never end. A dynamic CALL of a missing program, which ends
    U4038 with CEE3501S (C450), up to five per fuzz run, each at a CALL of its own, is kept only
    where the module its message names is in the input
@@ -368,8 +378,9 @@ kept: IRONWORK, a construct ironwork does not run (a static CALL of a program no
 holds among them), U4038 with CEE3501S, a dynamic CALL of one, S806, a job step's program no
 library holds, EXEC, an EXEC statement with no database or region behind it, and IO-35, an OPEN of a file no DD
 gives; so do a run ironwork refused, told by its exit status from 241 up, and a run in which
-ironwork itself panicked, 255; standard error gives the first refusal's reason and the first
-panic) and `runs`,
+ironwork itself panicked, 255; standard error gives the first refusal's reason, then, where runs
+were refused at more than one place or for more than one reason, each with its count, the most
+frequent first and ten at most, and the first panic) and `runs`,
 one per kept abend (`input` ids, `outcome` `abend`, `abend` with `code`, `file` relative to the
 program's directory or the library it came from, `line`, `message` and `optimized` (item 6),
 `journal` the run id, `coverage`, and `limit`, the statement limit a kept S322's runs were given,
@@ -436,17 +447,25 @@ each run an `ironwork cics`, and writes the same directory with `entry` `cics`
    which `--cics` runs. A user-defined function (FUNCTION-ID) is refused, as `ironwork run` does
    not enter one.
 2. Each argument is built field by field from its LINKAGE record, as a record is (§5 item 1), with
-   each OCCURS DEPENDING ON object in the record kept within its table's bounds.
+   each OCCURS DEPENDING ON object in the record kept within its table's bounds; arguments that
+   reached what no earlier run did are kept and changed as §5's inputs are, one field or every
+   field the subprogram does not compare at a time.
 3. Where a source in the subprogram's directory or an `-L` library CALLs it by name, a run takes
    the shape of one such CALL, drawn per run: an OMITTED position stays OMITTED, a literal is passed
    as written, padded with spaces, and of an item the caller passes, only as much as it holds is
-   varied. With no such CALL, every field of every argument is varied.
+   varied. With no such CALL, every field of every argument is varied. Before the runs, standard
+   error tells each such CALL that passes BY REFERENCE or BY CONTENT fewer bytes than the USING
+   item in its place describes, and each CALL of a literal the subprogram makes that does so to a
+   program its source or the libraries hold: the Language Reference's CALL statement has the
+   called program describe the same number of character positions as the caller, an alphanumeric
+   literal's parameter PIC X(n) of the literal's length. A fuzz without `--interface` tells the
+   second kind for the program it runs.
 4. `ironwork run --argument` gives the program the arguments in USING order, each pushed as input,
    OMITTED as a null address, and runs it as a subprogram: EXIT PROGRAM returns. The subprogram's
    files, and those of the programs it contains or reaches by a CALL of a literal, get data sets
    as §5 gives the files it does not vary: an empty one for each file read or extended and a new
    one for each only written, so an OPEN does not end the run IO-35; their records are not varied,
-   the arguments being the inputs. A CALL whose target is a field of an argument, or whose CEE3501S
+   the arguments being the inputs. A CALL whose target is a field of an argument, or an item up to four MOVEs (a group MOVE among them) carry such a field into, or whose CEE3501S
    names bytes a run generated in one, is given in that place a program name a caller would pass:
    an alphanumeric literal that the subprogram, or a source naming it in a literal, MOVEs or gives
    as a VALUE, that names a program the libraries hold and that compiles. Where a caller stores
@@ -456,7 +475,9 @@ each run an `ironwork cics`, and writes the same directory with `entry` `cics`
    records. With no such literal the field is varied as any other. An abend on
    arguments that break nothing is not kept; every other is kept once, its arguments made as small
    as still give it within 200 runs, then run with `--evidence` and `--coverage` and once more with
-   `--optimize=2`, as in §5. A timeout and a CEE3501S are counted, never kept.
+   `--optimize=2`, as in §5. Each run stops at `--hang-limit` statements as §5's do, and an S322
+   in a loop the neutral arguments do not run is kept. A timeout and a CEE3501S are counted, never
+   kept.
 5. The manifest's `format` is `ironwork-fuzz-interface/v1`
    ([fuzz-interface-manifest.schema.json](fuzz-interface-manifest.schema.json)): `entry`
    `interface`; `callers`, each CALL a run may take its shape from (`file` from `--root`, `line`);

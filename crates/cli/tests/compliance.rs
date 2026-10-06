@@ -142,7 +142,7 @@ fn job_and_fuzz_compile_their_programs_under_the_level() {
     let sysin = FREE.replace("    PERFORM UNTIL", "    ACCEPT WS-N\n    COMPUTE WS-N = LIMIT / WS-N\n    PERFORM UNTIL");
     fs::create_dir_all(dir.join("repo")).unwrap();
     fs::write(dir.join("repo/SYSPGM.cbl"), sysin.replace("FREEPGM", "SYSPGM")).unwrap();
-    let fuzz = |out: &str, extra: &[&str]| ironwork(&dir, &[&["fuzz", "repo/SYSPGM.cbl", "-o", out, "--runs", "30"][..], extra].concat());
+    let fuzz = |out: &str, extra: &[&str]| ironwork(&dir, &[&["fuzz", "repo/SYSPGM.cbl", "-o", out, "--runs", "60"][..], extra].concat());
     assert_ne!(fuzz("strict", &[]).status.code(), Some(0));
     let fuzzed = fuzz("extended", &["--compliance", "extended"]);
     assert_eq!(fuzzed.status.code(), Some(0), "{}", text(&fuzzed.stderr));
