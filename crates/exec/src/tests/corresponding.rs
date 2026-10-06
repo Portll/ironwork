@@ -14,7 +14,7 @@ fn move_corresponding_moves_the_pairs_ibms_rules_allow() {
         "           05  H PIC X(3).\n",
     ]
     .concat();
-    let procedure = [line("MOVE ALL '*' TO B"), line("MOVE CORRESPONDING A TO B"), line("DISPLAY B.")].concat();
+    let procedure = [line("MOVE ALL '*' TO B"), line("MOVE CORRESPONDING A TO B"), line("DISPLAY B."), line("GOBACK.")].concat();
     assert_eq!(run(&program("", &data, &procedure)), "ABC12157*********hi \n");
 }
 
@@ -34,6 +34,7 @@ fn add_and_subtract_corresponding_share_rounded_and_size_error() {
         line("END-ADD"),
         line("SUBTRACT CORRESPONDING S FROM R"),
         line("DISPLAY R."),
+        line("GOBACK."),
     ]
     .concat();
     assert_eq!(run(&program("", &data, &procedure)), "SIZE 23513\n10412\n");
@@ -47,7 +48,7 @@ fn corresponding_groups_take_their_subscripts_and_qualifiers() {
         "       01  I PIC 9 VALUE 2.\n",
     ]
     .concat();
-    let procedure = [line("INITIALIZE TAB"), line("MOVE CORR ONE TO E OF TAB (I)"), line("ADD CORR ONE TO E (1)"), line("DISPLAY TAB.")].concat();
+    let procedure = [line("INITIALIZE TAB"), line("MOVE CORR ONE TO E OF TAB (I)"), line("ADD CORR ONE TO E (1)"), line("DISPLAY TAB."), line("GOBACK.")].concat();
     assert_eq!(run(&program("", &data, &procedure)), "4 4Q\n");
 }
 

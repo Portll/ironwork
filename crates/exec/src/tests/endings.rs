@@ -110,3 +110,25 @@ fn a_cancel_of_an_active_program_ends_the_run_with_igz0032s() {
     let (code, message, _) = ended(&source);
     assert_eq!((code.as_str(), message.as_str()), ("U4038", "IGZ0032S A CANCEL was attempted on active program A."));
 }
+
+/// A main program that runs past its last statement ends the run with IGZ0037S; a called one returns
+/// there, as an implicit EXIT PROGRAM does (assumption C456).
+#[test]
+fn a_main_program_past_its_last_line_ends_with_igz0037s_and_a_called_one_returns() {
+    let source = cobol(&[
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. MAIN.",
+        "PROCEDURE DIVISION.",
+        "    CALL 'SUB'",
+        "    DISPLAY 'BACK IN MAIN'.",
+        "END PROGRAM MAIN.",
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. SUB.",
+        "PROCEDURE DIVISION.",
+        "    DISPLAY 'IN SUB'.",
+        "END PROGRAM SUB.",
+    ]);
+    let (code, message, out) = ended(&source);
+    assert_eq!(out, "IN SUB\nBACK IN MAIN\n");
+    assert_eq!((code.as_str(), message.as_str()), ("U4038", "IGZ0037S The flow of control in program MAIN proceeded beyond the last line of the program."));
+}

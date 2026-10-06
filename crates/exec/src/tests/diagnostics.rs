@@ -17,10 +17,12 @@ fn hello() -> String {
 }
 
 #[test]
-fn a_program_with_no_stop_run_goback_or_exit_program_is_warned_and_runs() {
+fn a_program_with_no_stop_run_goback_or_exit_program_is_warned_and_ends_past_its_last_line() {
     let source = program("", "", &line("DISPLAY 'HELLO'."));
     assert_eq!(diagnostics(&source), [(Severity::Warning, "no STOP RUN, GOBACK or EXIT PROGRAM in the program: check that it ends".to_owned())]);
-    assert_eq!(run(&source), "HELLO\n");
+    let (out, _, ending) = run_with(&source, &[]);
+    let abend = ending.unwrap_err();
+    assert_eq!((out.as_str(), abend.code.to_string(), abend.message.as_str()), ("HELLO\n", "U4038".to_owned(), "IGZ0037S The flow of control in program T proceeded beyond the last line of the program."));
     for end in ["STOP RUN", "GOBACK", "EXIT PROGRAM"] {
         let nested = program("", "       01  A PIC X.\n", &[line("DISPLAY 'HELLO'"), line(&format!("IF A = 'Y' {end} END-IF."))].concat());
         assert_eq!(diagnostics(&nested), [], "{end}");

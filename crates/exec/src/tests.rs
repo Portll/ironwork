@@ -1711,6 +1711,7 @@ fn condition_names_reach_a_filler_or_repeated_variable_by_its_item() {
             line("SET S-SET (2) TO TRUE"),
             line("IF S-SET (2) AND NOT S-SET (1) DISPLAY 'ROW 2' END-IF"),
             line("DISPLAY A B T."),
+            line("GOBACK."),
         ]
         .concat(),
     ));

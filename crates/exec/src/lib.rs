@@ -499,6 +499,7 @@ fn run_main<'w>(
         }
         m.run_procedure()
     });
+    let ending = ending.and_then(|e| past_the_end(e, passed.main(), &compiled.program.id));
     let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(&compiled.program.id, ending.is_ok()).map(drop));
     let closed = run_unit.close_all(trap_off && ending.as_ref().is_err_and(|a| a.code.bypasses_trap_off()));
     *kept = Some(unit::Remains::of(&run_unit));
@@ -506,6 +507,17 @@ fn run_main<'w>(
     settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default(), file: None })?;
     closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default(), file: None })?;
     Ok((ending, run_unit.return_code()))
+}
+
+/// A main program whose control ran past its last statement: IGZ0037S, a severity-3 condition that
+/// ends the run U4038 (assumption C456). A program a caller passed arguments to returns there, as an
+/// implicit EXIT PROGRAM does.
+pub(crate) fn past_the_end(ending: Ending, main: bool, program: &str) -> Result<Ending, Abend> {
+    if main && ending == Ending::EndOfProgram {
+        let message = format!("IGZ0037S The flow of control in program {} proceeded beyond the last line of the program.", program.to_ascii_uppercase());
+        return Err(Abend { code: AbendCode::user(4038), message, pos: Pos::default(), file: None });
+    }
+    Ok(ending)
 }
 
 /// A job step's PARM as Language Environment passes it, at the end of memory: input.

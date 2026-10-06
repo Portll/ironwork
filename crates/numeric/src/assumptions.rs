@@ -354,6 +354,7 @@ pub const FUNCTION_ARGUMENT_MESSAGES: &str = "C452";
 pub const RUNTIME_RULE_MESSAGES: &str = "C453";
 pub const CICS_TRANSACTION_4038: &str = "C454";
 pub const PROGRAM_CHECK_MESSAGES: &str = "C455";
+pub const PAST_THE_LAST_LINE: &str = "C456";
 pub const OUT_OF_SCOPE_CALL_NOT_FOUND: &str = "C470";
 pub const BINARY_CHAR: &str = "C460";
 pub const TOP_LEVEL_TABLE: &str = "C461";
@@ -2209,6 +2210,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: CALL_BY_PROGRAM_ID,
         claim: "A CALL of a name that no member of the program libraries has, as a file named for it, finds the .cbl or .cob file there whose PROGRAM-ID is the name: the directories in order, each one's files in name order, the first that holds the program. z/OS finds a called program as a member of STEPLIB, JOBLIB or the link list by its member name, and C450 says how a CALL that none answers ends; a build that link-edits each program under its PROGRAM-ID gives every program a member of that name, and ironwork's libraries are source directories, whose file names need not be. A member of the name comes first, as before",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PAST_THE_LAST_LINE,
+        claim: "A main program whose control runs past its last statement ends the run with IGZ0037S, 'The flow of control in program program-name proceeded beyond the last line of the program', and the application is terminated (LE Runtime Messages), user abend 4038: the Language Reference leaves the flow undefined there except under a CALL (Transfer of control: 'the program flow of control is undefined unless the program execution is in the nondeclarative procedures portion of a program under control of a CALL statement, in which case an implicit EXIT PROGRAM statement is executed'), and the Migration Guide says of the current compiler that 'a main program that executes beyond the last line of the program will still abend' (NOCMPR2). A program a caller passed arguments to, as an interface run passes them, and a CALLed program return there as an implicit EXIT PROGRAM does. A CICS task's first program is left as it was",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {

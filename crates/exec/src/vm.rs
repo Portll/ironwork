@@ -200,7 +200,7 @@ fn run_main(code: &Code, id: &str, me: usize, run_unit: &mut RunUnit<'_, Rc<Code
     let trap_off = matches!(passed, Passed::Parm(p) if rt::le::parm::trap_off(p));
     passed.apply_parm(run_unit);
     let addresses = passed.addresses(run_unit, page);
-    let ending = rt::vm::run(code, me, run_unit, &addresses, passed.main());
+    let ending = rt::vm::run(code, me, run_unit, &addresses, passed.main()).and_then(|e| crate::past_the_end(e, passed.main(), id).map_err(Halt::Abend));
     let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(id, ending.is_ok()).map(drop));
     let closed = run_unit.close_all(trap_off && matches!(&ending, Err(Halt::Abend(a)) if a.code.bypasses_trap_off()));
     let ending = ending?;
