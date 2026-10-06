@@ -70,14 +70,34 @@ pub fn read_file_debugging(input: &str, file: u16) -> Result<Source, Error> {
 /// Reads one file's text under `compliance`, with its debugging lines as program text when
 /// `debugging` is set.
 pub fn read_under(input: &str, file: u16, debugging: bool, compliance: Compliance) -> Result<Source, Error> {
-    read_lines(input, file, debugging, compliance == Compliance::Extended, false)
+    read_with_margin(input, file, debugging, compliance == Compliance::Extended, false)
 }
 
 /// Reads a COPY member's text as [`read_under`] does, starting in free form when the line that
 /// copies it is free form, as GnuCOBOL and Micro Focus carry the source format into a member.
 pub fn read_copied(input: &str, file: u16, debugging: bool, compliance: Compliance, copied_free: bool) -> Result<Source, Error> {
     let extended = compliance == Compliance::Extended;
-    read_lines(input, file, debugging, extended, extended && copied_free)
+    read_with_margin(input, file, debugging, extended, extended && copied_free)
+}
+
+/// Reads the file; under `--compliance extended`, a fixed-form file that a literal running past
+/// column 72 stops, on a line with no continuation after it, is read again in free form, as `cobc
+/// -free` reads it, with IWX0001-W. No file that reads in fixed form holds such a line.
+fn read_with_margin(input: &str, file: u16, debugging: bool, extended: bool, copied_free: bool) -> Result<Source, Error> {
+    let fixed = read_lines(input, file, debugging, extended, copied_free);
+    let Err(e) = &fixed else { return fixed };
+    let long = |l: &str| l.trim_end_matches('\r').chars().count() > TEXT_END;
+    let past_margin = (e.id == Some("IWS0092") && e.pos.line > 1 && input.lines().nth(e.pos.line as usize - 2).is_some_and(long)) || (e.id == Some("IWS0024") && input.lines().any(long));
+    if !extended || copied_free || !past_margin {
+        return fixed;
+    }
+    let mut free = read_lines(input, file, debugging, extended, true)?;
+    let first = input.lines().position(long).unwrap_or(0) as u32 + 1;
+    let why = format!("{FREE_FORM}: a literal runs past column 72, where fixed form ends, so the file is read in free form, as cobc -free reads it");
+    if let Some(span) = free.free.first_mut() {
+        span.warning = Some(crate::messages::IWX0001.at(Pos { file, line: first, col: TEXT_END as u32 + 1 }, why));
+    }
+    Ok(free)
 }
 
 fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_free: bool) -> Result<Source, Error> {
@@ -561,6 +581,18 @@ mod tests {
     }
 
     #[test]
+    fn a_literal_past_column_72_makes_the_file_free_form_under_extended_alone() {
+        let long = format!("       IDENTIFICATION DIVISION.\n           DISPLAY \"{}\"\n           STOP RUN.\n", "-".repeat(70));
+        assert_eq!(read(&long).err().and_then(|e| e.id), Some("IWS0092"));
+        let s = extended(&long).unwrap();
+        assert!(s.text.contains(&format!("\"{}\"", "-".repeat(70))), "{}", s.text);
+        let warning = s.free[0].warning.as_ref().unwrap();
+        assert_eq!((warning.id, warning.pos.line, warning.pos.col), (Some("IWX0001"), 2, 73));
+        let sequenced = format!("       IDENTIFICATION DIVISION.{}00000100\n", " ".repeat(40));
+        assert!(extended(&sequenced).unwrap().free.is_empty());
+    }
+
+    #[test]
     fn a_file_that_cannot_be_fixed_form_is_read_in_free_form_under_extended_alone() {
         let text = "*\nIDENTIFICATION DIVISION.\n* a comment line\n*> another\nPROGRAM-ID. F.\n    DISPLAY 'A *> B' *> gone\n";
         let s = extended(text).unwrap();
@@ -626,7 +658,8 @@ mod tests {
         let copied = read_copied(member, 2, false, Compliance::Extended, true).unwrap();
         assert!(copied.text.contains("02 B PIC X(80)") && copied.text.trim_end().ends_with("whole as it reads it'."), "{}", copied.text);
         assert_eq!((copied.free.len(), copied.free[0].first, copied.free[0].warning.clone()), (1, 1, None));
-        assert!(read_copied(member, 2, false, Compliance::Extended, false).is_err());
+        let fixed_copied = read_copied(member, 2, false, Compliance::Extended, false).unwrap();
+        assert_eq!(fixed_copied.free[0].warning.as_ref().and_then(|w| w.id), Some("IWX0001"));
         assert!(read_copied(member, 2, false, Compliance::Strict, true).is_err());
     }
 

@@ -70,6 +70,10 @@ A file is read in free form:
   than a space, `*`, `/`, `-`, `D` or `d`. A tab counts as reaching the next column after a multiple
   of 8 for this test, as both compilers place it. Neither compiler guesses the form; ironwork does,
   by a rule no fixed-form line Enterprise COBOL accepts can meet. The warning is at that column 7;
+- from its first line, when read in fixed form a literal runs past column 72, where fixed form
+  ends, on a line with no continuation after it: its author compiles it with `cobc -free`. No file
+  that reads in fixed form holds such a line. The warning is at column 73 of the first line longer
+  than 72 columns;
 - when it is a COPY member copied from a free-form line: GnuCOBOL and Micro Focus carry the format
   into the member. Such a member has no warning of its own; its own directive or lines can still
   switch it.
