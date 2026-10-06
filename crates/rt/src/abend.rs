@@ -26,6 +26,18 @@ impl Abend {
     pub fn ironwork(message: impl Into<String>, pos: Pos) -> Self {
         Self { code: AbendCode::Ironwork, message: message.into(), pos, file: None }
     }
+
+    /// Zero raised to a negative power: IGZ0050S, a severity-3 condition that ends the run U4038,
+    /// which ON SIZE ERROR takes as a size error (assumption C334).
+    pub fn zero_power(pos: Pos) -> Self {
+        Self { code: AbendCode::user(4038), message: "IGZ0050S A zero base was raised to a negative power in an exponentiation expression.".into(), pos, file: None }
+    }
+
+    /// Whether an arithmetic statement with ON SIZE ERROR takes this abend as a size error: a zero
+    /// divisor's program check, or zero raised to a negative power.
+    pub fn size_error(&self) -> bool {
+        self.code.zero_divisor() || self.code == AbendCode::user(4038) && self.message.starts_with("IGZ0050S ")
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

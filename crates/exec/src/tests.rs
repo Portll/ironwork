@@ -2755,7 +2755,7 @@ fn first_program_task(body: &[&str]) -> (String, Option<String>) {
 
 #[test]
 fn a_call_of_the_tasks_first_program_is_recursive_in_its_run_unit_and_fresh_in_another() {
-    assert_eq!(first_program_task(&["CALL 'CALLM' USING DFHEIBLK"]), (String::new(), Some("U4038".into())));
+    assert_eq!(first_program_task(&["CALL 'CALLM' USING DFHEIBLK"]), (String::new(), Some("4038".into())));
     let linked = first_program_task(&["EXEC CICS LINK PROGRAM('CALLM') COMMAREA('LINK')", "    LENGTH(4) END-EXEC", "ADD 1 TO N"]);
     assert_eq!(linked, ("MAIN AGAIN 1 LINK\nMAIN ENDS 2\n".into(), None));
 }
@@ -2914,6 +2914,17 @@ fn a_program_check_in_a_cics_task_is_asra() {
     let abend = ending.unwrap_err();
     assert_eq!(abend.code, "ASRA");
     assert!(abend.message.contains("S0C4"));
+}
+
+/// A Language Environment condition nothing handles ends a CICS task with transaction abend 4038
+/// (assumption C454).
+#[test]
+fn a_language_environment_condition_in_a_cics_task_is_transaction_abend_4038() {
+    let source = cics_program("CICS8", "       01  X COMP-2.\n", "", &line("COMPUTE X = FUNCTION RANDOM(-1)."));
+    let (_, ending) = run_cics(&source, task("TR08"), None, unit::Clock::System);
+    let abend = ending.unwrap_err();
+    assert_eq!(abend.code, "4038");
+    assert_eq!(abend.message, "IGZ0163S Argument-1 for function RANDOM was less than zero. (-1) (U4038, which CICS reports as transaction abend 4038)");
 }
 
 #[test]

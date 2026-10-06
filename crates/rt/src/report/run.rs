@@ -349,7 +349,7 @@ impl<'w, X, C, V, U, H: ReportHost<'w, X, C, V, U>> Reporting<'w, '_, H, X, C, V
     fn accumulate(&mut self, ri: usize, sum: usize, origin: &Origin<X, V>, pos: Pos) -> R<()> {
         let value = match origin {
             Origin::Source(e) => match self.x.value(e, pos) {
-                Err(a) if a.code.zero_divisor() => {
+                Err(a) if a.size_error() => {
                     let _ = writeln!(self.x.err(), "ironwork: {pos}: report writer run-time error 10: a SOURCE expression divided by zero; nothing was added to the total");
                     return Ok(());
                 }
@@ -711,7 +711,7 @@ impl<'w, X, C, V, U, H: ReportHost<'w, X, C, V, U>> Reporting<'w, '_, H, X, C, V
                 }
                 None => {
                     let overflow = match self.x.value(e, pos) {
-                        Err(a) if a.code.zero_divisor() => true,
+                        Err(a) if a.size_error() => true,
                         Err(a) => return Err(a),
                         Ok(v) => self.x.store_value(dest, v, f.rounded, true, pos)?,
                     };

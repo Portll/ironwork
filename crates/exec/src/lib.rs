@@ -408,10 +408,12 @@ impl<'a> First<'a> {
     }
 }
 
-/// A program check in a CICS task, which CICS reports as ASRA.
+/// How a CICS task reports its ending: a program check as ASRA, and a Language Environment
+/// condition nothing handled, U4038 in batch, as transaction abend 4038 (assumption C454).
 pub(crate) fn asra(a: Abend) -> Abend {
     match a.code {
         AbendCode::Check(_) | AbendCode::Protection => Abend { message: format!("{} ({}, which CICS reports as ASRA)", a.message, a.code), code: AbendCode::Cics("ASRA".into()), pos: a.pos, file: a.file },
+        ref u if *u == AbendCode::user(4038) => Abend { message: format!("{} (U4038, which CICS reports as transaction abend 4038)", a.message), code: AbendCode::Cics("4038".into()), pos: a.pos, file: a.file },
         _ => a,
     }
 }

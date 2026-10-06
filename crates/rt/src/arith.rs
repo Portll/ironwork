@@ -102,16 +102,16 @@ pub fn float_binop(x: Hfp, op: BinOp, y: Hfp, p: Precision, pos: Pos) -> R<Hfp> 
 }
 
 /// x ** y in floating point of precision `p`, nearest to the exact power (assumption C334). Zero
-/// to a positive power is zero, to the power zero 1, and to a negative power an HFP divide
-/// exception, which ON SIZE ERROR takes as a size error; a negative base to a power that is not an
-/// integer is taken as its absolute value (Language Reference SC27-8713-03, pp. 296-297, Table 32).
+/// to a positive power is zero, to the power zero 1, and to a negative power IGZ0050S, which ON SIZE
+/// ERROR takes as a size error; a negative base to a power that is not an integer is taken as its
+/// absolute value (Language Reference SC27-8713-03, pp. 296-297, Table 32).
 pub fn float_pow(x: Hfp, y: Hfp, p: Precision, pos: Pos) -> R<Hfp> {
     let (base, power) = (Real::from_hfp(x), Real::from_hfp(y));
     let value = if base.is_zero() {
         match power.compare(Real::ZERO) {
             Ordering::Greater => Real::ZERO,
             Ordering::Equal => Real::ONE,
-            Ordering::Less => return Err(Abend::check(ProgramCheck::HfpDivide, pos)),
+            Ordering::Less => return Err(Abend::zero_power(pos)),
         }
     } else {
         math::pow(base, power)
@@ -131,11 +131,11 @@ pub fn remainder(x: Fixed, y: Fixed, quotient_scale: u32, dmax: u32, arith: Arit
     Ok(Some(r))
 }
 
-/// A receiver's result when `handled` (ON or NOT ON SIZE ERROR is written): a zero divisor is then
-/// a size error, None, and the receiver keeps its value.
+/// A receiver's result when `handled` (ON or NOT ON SIZE ERROR is written): a zero divisor or zero
+/// to a negative power is then a size error, None, and the receiver keeps its value.
 pub fn size_error(outcome: R<Val>, handled: bool) -> R<Option<Val>> {
     match outcome {
-        Err(a) if handled && a.code.zero_divisor() => Ok(None),
+        Err(a) if handled && a.size_error() => Ok(None),
         other => other.map(Some),
     }
 }

@@ -352,6 +352,7 @@ pub const MISSING_PROGRAM: &str = "C450";
 pub const UNHANDLED_FILE_STATUS: &str = "C451";
 pub const FUNCTION_ARGUMENT_MESSAGES: &str = "C452";
 pub const RUNTIME_RULE_MESSAGES: &str = "C453";
+pub const CICS_TRANSACTION_4038: &str = "C454";
 pub const OUT_OF_SCOPE_CALL_NOT_FOUND: &str = "C470";
 pub const BINARY_CHAR: &str = "C460";
 pub const TOP_LEVEL_TABLE: &str = "C461";
@@ -2114,7 +2115,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: FLOAT_EXPONENTIATION,
-        claim: "An exponent with decimal places, or one holding a division or an exponentiation when dmax is above zero, makes its expression floating point, as a floating-point operand or function does (Programming Guide SC27-8714-03, pp. 796, 800). ironwork takes an operand's decimal places from its description, a function's only from a user-defined function's RETURNING item, and dmax as the statement's or the evaluated expression's. A floating-point exponentiation is evaluated in long precision, extended under ARITH(EXTEND) (p. 800); the manuals do not give Language Environment's algorithm, and ironwork gives the value nearest the exact power, computed as the floating-point functions are (C110): an integer exponent by repeated squaring, any other as e^(y ln |x|). Zero to a positive power is zero. Table 32 of the Language Reference (SC27-8713-03, pp. 296-297) gives the rest: zero to a negative power is a size error, and without ON SIZE ERROR the program ends abnormally, which ironwork does with the HFP divide exception, S0CF, a division by zero raises; zero to the power zero is 1, and a negative number to a fractional power is computed with the base's absolute value, each with a message, when no SIZE ERROR phrase is written. ironwork gives those two values whether or not ON SIZE ERROR is written, issues no message, and does not run the phrase for them",
+        claim: "An exponent with decimal places, or one holding a division or an exponentiation when dmax is above zero, makes its expression floating point, as a floating-point operand or function does (Programming Guide SC27-8714-03, pp. 796, 800). ironwork takes an operand's decimal places from its description, a function's only from a user-defined function's RETURNING item, and dmax as the statement's or the evaluated expression's. A floating-point exponentiation is evaluated in long precision, extended under ARITH(EXTEND) (p. 800); the manuals do not give Language Environment's algorithm, and ironwork gives the value nearest the exact power, computed as the floating-point functions are (C110): an integer exponent by repeated squaring, any other as e^(y ln |x|). Zero to a positive power is zero. Table 32 of the Language Reference (SC27-8713-03, pp. 296-297) gives the rest: zero to a negative power is a size error, and without ON SIZE ERROR the program ends abnormally, as IGZ0050S 'A zero base was raised to a negative power in an exponentiation expression', a severity-3 condition that ends the run U4038 (LE Runtime Messages); zero to the power zero is 1, and a negative number to a fractional power is computed with the base's absolute value, each with a message, when no SIZE ERROR phrase is written. ironwork gives those two values whether or not ON SIZE ERROR is written, issues no message, and does not run the phrase for them",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -2206,6 +2207,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: CALL_BY_PROGRAM_ID,
         claim: "A CALL of a name that no member of the program libraries has, as a file named for it, finds the .cbl or .cob file there whose PROGRAM-ID is the name: the directories in order, each one's files in name order, the first that holds the program. z/OS finds a called program as a member of STEPLIB, JOBLIB or the link list by its member name, and C450 says how a CALL that none answers ends; a build that link-edits each program under its PROGRAM-ID gives every program a member of that name, and ironwork's libraries are source directories, whose file names need not be. A member of the name comes first, as before",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: CICS_TRANSACTION_4038,
+        claim: "In a CICS task, a Language Environment condition of severity 3 that nothing handles, which ends a batch run with user abend 4038 (SSRANGE, CEE3501S, NUMCHECK, PARMCHECK, and C451 to C453's messages), ends the task with transaction abend 4038: 'a transaction 4038 abend is used in a CICS environment' (Language Environment Programming Guide, ABTERMENC). The message keeps Language Environment's text and adds the batch code. Whether a HANDLE ABEND exit is given that abend IBM's pages do not say; ironwork gives the exit none, as it gave none to U4038",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
