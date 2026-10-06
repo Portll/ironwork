@@ -681,3 +681,42 @@ fn locking_phrases_change_nothing_a_run_unit_does_alike_on_both_executors() {
     let strict = syntax::parse(&program("", "       01  A PIC X(4).\n", &line("READ F WITH LOCK."))).unwrap_err();
     assert_eq!((strict.id, strict.message.as_str()), (Some("IWC0299"), "READ ... WITH LOCK: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it"));
 }
+
+/// INSPECT ... TRAILING, tallying and replacing, alone, with BEFORE and AFTER, and beside LEADING.
+const INSPECT_TRAILING: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. INSP.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  T    PIC X(12) VALUE 'AB  CD  XX  '.\n",
+    "       01  U    PIC X(10) VALUE '00123000  '.\n",
+    "       01  N    PIC 99 VALUE 0.\n",
+    "       01  M    PIC 99 VALUE 0.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           INSPECT T TALLYING N FOR TRAILING SPACES\n",
+    "           DISPLAY 'N=' N\n",
+    "           INSPECT U TALLYING M FOR TRAILING '0' TRAILING ' '\n",
+    "           DISPLAY 'M=' M\n",
+    "           INSPECT T REPLACING TRAILING SPACES BY '*'\n",
+    "           DISPLAY 'T=' T\n",
+    "           MOVE 0 TO N\n",
+    "           INSPECT U TALLYING N FOR TRAILING '0' AFTER '1'\n",
+    "           DISPLAY 'N2=' N\n",
+    "           MOVE '00123000' TO U\n",
+    "           INSPECT U REPLACING TRAILING '0' BY '9' BEFORE INITIAL ' '\n",
+    "           DISPLAY 'U=' U\n",
+    "           MOVE 'XXAB' TO T\n",
+    "           INSPECT T REPLACING LEADING 'X' BY 'Y' TRAILING ' ' BY '-'\n",
+    "           DISPLAY 'T2=' T\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn inspect_trailing_takes_the_run_at_the_end_of_its_region_alike_on_both_executors() {
+    let walked = Harness::source(INSPECT_TRAILING).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("N=02\nM=02\nT=AB  CD  XX**\nN2=00\nU=00123999  \nT2=YYAB--------\n", Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(INSPECT_TRAILING).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    let warned = diagnostics_under(INSPECT_TRAILING, numeric::Compliance::Extended);
+    assert_eq!(warned.iter().filter(|d| d.2 == Some("IWX0023")).count(), 7, "{warned:?}");
+}

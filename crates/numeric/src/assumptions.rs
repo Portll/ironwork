@@ -362,6 +362,7 @@ pub const SCREEN_MODEL: &str = "C462";
 pub const SCREEN_SECTION_LAYOUT: &str = "C463";
 pub const ENVIRONMENT_VARIABLES: &str = "C464";
 pub const RECORD_LOCKS: &str = "C465";
+pub const INSPECT_TRAILING: &str = "C466";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2254,6 +2255,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: MISSING_PROGRAM,
         claim: "A dynamic CALL (of an identifier, or of a literal under DYNAM), SET TO ENTRY or user-defined function invocation that finds no program of the name, with no ON EXCEPTION phrase, raises CEE3501S 'The module name was not found.' (Language Environment Runtime Messages, CEE3501S: 'Module is not loaded. The application might abend'); IBM's own example of a COBOL dynamic CALL of a nonexistent program ends so, the condition unhandled (Language Environment Debugging Guide, 'Calling a nonexistent subroutine'). A condition of severity 3 that nothing handles ends the run U4038 under the default ABTERMENC(ABEND), as an SSRANGE failure does, the message given as IBM words it. Under NODYNAM a CALL of a literal is resolved by the binder, which reports a name no library holds as IEW2456E 'SYMBOL name UNRESOLVED' (MVS System Messages, IEW2456E) and leaves a load module that does not run: ironwork, which binds nothing, stops at the CALL with that message as its own refusal, and by its own choice still runs such a CALL's ON EXCEPTION phrase, which IBM's binder leaves no run to reach. A Language Environment callable service ironwork does not provide is its own refusal too, the service existing on z/OS. A job step whose EXEC PGM= names no program still ends S806, as the system's fetch of it does",
         basis: Basis::Documented,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: INSPECT_TRAILING,
+        claim: "Under --compliance extended, GnuCOBOL's INSPECT ... TALLYING FOR TRAILING and REPLACING TRAILING take the occurrences of their operand that run on to the end of the phrase's region, after its BEFORE and AFTER bounds: in INSPECT's left-to-right scan a TRAILING phrase matches at a position when the data, as it was before the scan, holds its operand from there to the region's end, over and over, so it fits among the other phrases as LEADING does, the first phrase that matches at a position taking it. cobc 3.2 gives the same results on the probes checked, TRAILING beside LEADING and with BEFORE and AFTER among them",
+        basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {

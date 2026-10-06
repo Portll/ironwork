@@ -30,8 +30,11 @@ pub fn region(data: &[u8], unit: usize, before: Option<&[u8]>, after: Option<&[u
 
 /// Scans `data` left to right; at each position the first phrase that applies and matches takes
 /// the characters it matches. Returns how many times each phrase matched, replacing as it goes
-/// when phrases carry a BY value. A character position is `unit` bytes.
+/// when phrases carry a BY value. A character position is `unit` bytes. A TRAILING phrase matches
+/// where the data as it was before the scan holds its pattern from there to the end of its region,
+/// over and over.
 pub fn inspect(data: &mut [u8], unit: usize, phrases: &[Phrase]) -> Vec<i64> {
+    let original = phrases.iter().any(|p| p.mode == InspectMode::Trailing).then(|| data.to_vec());
     let mut counts = vec![0i64; phrases.len()];
     let mut active = vec![true; phrases.len()];
     let mut next_leading: Vec<usize> = phrases.iter().map(|p| p.start).collect();
@@ -48,7 +51,12 @@ pub fn inspect(data: &mut [u8], unit: usize, phrases: &[Phrase]) -> Vec<i64> {
             }
             let len = if phrase.mode == InspectMode::Characters { unit } else { phrase.pattern.len() };
             let fits = len > 0 && at + len <= phrase.end;
-            let hit = fits && (phrase.mode == InspectMode::Characters || data[at..at + len] == phrase.pattern[..]);
+            let hit = fits
+                && match (phrase.mode, &original) {
+                    (InspectMode::Characters, _) => true,
+                    (InspectMode::Trailing, Some(before)) => (phrase.end - at) % len == 0 && before[at..phrase.end].chunks(len).all(|c| c == &phrase.pattern[..]),
+                    _ => data[at..at + len] == phrase.pattern[..],
+                };
             if !hit {
                 if phrase.mode == InspectMode::Leading {
                     active[k] = false;
@@ -144,6 +152,20 @@ mod tests {
     fn a_leading_run_ends_at_the_first_other_character() {
         let mut data = b"**A**".to_vec();
         assert_eq!(inspect(&mut data, 1, &[phrase(InspectMode::Leading, "*", None, (0, 5))]), [2]);
+    }
+
+    #[test]
+    fn trailing_takes_the_run_that_reaches_the_end_of_its_region() {
+        let mut data = b"AB  CD  XX  ".to_vec();
+        let n = data.len();
+        assert_eq!(inspect(&mut data, 1, &[phrase(InspectMode::Trailing, " ", None, (0, n))]), [2]);
+        let mut data = b"00123000  ".to_vec();
+        assert_eq!(inspect(&mut data, 1, &[phrase(InspectMode::Trailing, "0", None, (0, 10)), phrase(InspectMode::Trailing, " ", None, (0, 10))]), [0, 2]);
+        inspect(&mut data, 1, &[phrase(InspectMode::Trailing, "0", Some("9"), (0, 8))]);
+        assert_eq!(data, b"00123999  ");
+        let mut data = b"XXAB        ".to_vec();
+        inspect(&mut data, 1, &[phrase(InspectMode::Leading, "X", Some("Y"), (0, 12)), phrase(InspectMode::Trailing, " ", Some("-"), (0, 12))]);
+        assert_eq!(data, b"YYAB--------");
     }
 
     #[test]

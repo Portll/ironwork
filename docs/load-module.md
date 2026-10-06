@@ -574,7 +574,8 @@ SSRANGE checks against their tables at the `LIR` section's end, and the `--assum
 `OPTIONS` section's end, each written only when there is one, and adds `program_scope`,
 `unresolved_calls` and `le_services` to `Options` (§5.1) and a `Native` of `BinaryChar` for
 BINARY-CHAR under `--compliance extended` (§5.2), the screen ops `ScreenDisplay` and `ScreenAccept`,
-and the environment's `Environment` op and `AcceptFrom` 8 (lir.md §9.1). A 0.x module is refused, and compiling the
+the environment's `Environment` op and `AcceptFrom` 8
+(lir.md §9.1), and `InspectMode` 4, TRAILING. A 0.x module is refused, and compiling the
 source again is the remedy (question 1).
 
 | The reader finds | It does |

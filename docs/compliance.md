@@ -51,7 +51,8 @@ no Enterprise COBOL form: both executors write and read it through `rt::crt`, an
 its ops `ScreenDisplay` and `ScreenAccept`. IWX0021-W, the environment, has none either: both
 executors read and set the run unit's variables (`rt::environment`), and the LIR carries its
 `Environment` op and the ACCEPT source ENVIRONMENT-VALUE. IWX0022-W, record locking, is read by the
-parser and changes nothing either executor runs.
+parser and changes nothing either executor runs. IWX0023-W, INSPECT ... TRAILING, is a mode of
+INSPECT's scan that both executors run (`rt::strings::inspect`, `InspectMode` tag 4).
 
 ### IWX0001-W free-form source
 
@@ -586,6 +587,21 @@ I/O waits or fails for one: the phrases are read, each with the warning, and cha
 UNLOCK does nothing. cobc 3.2 refuses a READ lock phrase on a file of LOCK MODE AUTOMATIC, which
 ironwork reads. Assumption C465. Strict refuses LOCK MODE and SHARING as before (IWR0008), the
 statement phrases with IWC0299, and UNLOCK is no statement there.
+
+### IWX0023-W INSPECT ... TRAILING
+
+`IWX0023-W INSPECT ... TRAILING (GnuCOBOL; Enterprise COBOL has ALL, LEADING, FIRST and CHARACTERS):
+the occurrences that run on to the end of the phrase's region`, at TRAILING.
+
+    INSPECT item TALLYING counter FOR TRAILING operand [BEFORE | AFTER INITIAL operand]...
+    INSPECT item REPLACING TRAILING operand BY operand [BEFORE | AFTER INITIAL operand]...
+
+A TRAILING phrase takes the occurrences of its operand that run on to the end of its region, after
+its BEFORE and AFTER bounds: `INSPECT T TALLYING N FOR TRAILING SPACES` counts the spaces at the end
+of T. In INSPECT's left-to-right scan it matches at a position when the data, as it was before the
+scan, holds its operand from there to the region's end, over and over; among the other phrases it
+fits as LEADING does, the first phrase that matches at a position taking it. cobc 3.2 gives the
+same results on the probes checked. Assumption C466. Strict refuses TRAILING as before.
 
 ## How the six were chosen
 

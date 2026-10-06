@@ -807,3 +807,4 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0020 | W | `{DISPLAY or ACCEPT} on the screen (Micro Focus and GnuCOBOL; Enterprise COBOL has none): at {where}` |
 | IWX0021 | W | `{the environment form} (Micro Focus and GnuCOBOL; Enterprise COBOL reads and sets no environment variable): {what it does}` |
 | IWX0022 | W | `{a locking phrase} (Micro Focus and GnuCOBOL; Enterprise COBOL has no record locks of its own): the run unit is the file's only user, so nothing it locks waits and the phrase changes nothing` |
+| IWX0023 | W | `INSPECT ... TRAILING (GnuCOBOL; Enterprise COBOL has ALL, LEADING, FIRST and CHARACTERS): the occurrences that run on to the end of the phrase's region` |

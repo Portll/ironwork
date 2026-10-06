@@ -3174,6 +3174,17 @@ impl Parser<'_> {
         Ok(Stmt::Initialize { targets, with, pos })
     }
 
+    /// GnuCOBOL's INSPECT ... TRAILING, under `--compliance extended` alone, with IWX0023-W.
+    fn trailing(&mut self) -> Option<String> {
+        if !self.extended || !self.is_word("TRAILING") {
+            return None;
+        }
+        let at = self.pos();
+        self.at += 1;
+        self.messages.push(crate::messages::IWX0023.at(at, "INSPECT ... TRAILING (GnuCOBOL; Enterprise COBOL has ALL, LEADING, FIRST and CHARACTERS): the occurrences that run on to the end of the phrase's region"));
+        Some("TRAILING".into())
+    }
+
     fn inspect(&mut self, pos: Pos) -> R<Inspect> {
         let target = if self.is_word("FUNCTION") { self.operand()? } else { Operand::Ref(self.reference()?) };
         let (mut tallying, mut replacing, mut converting) = (Vec::new(), Vec::new(), None);
@@ -3184,12 +3195,16 @@ impl Parser<'_> {
                 loop {
                     if self.accept_word("CHARACTERS") {
                         tallying.push(InspectPhrase { mode: InspectMode::Characters, pattern: None, by: None, counter: Some(counter.clone()), bounds: self.bounds()? });
-                    } else if let Some(mode) = self.accept_any(&["ALL", "LEADING"]) {
-                        let mode = if mode == "ALL" { InspectMode::All } else { InspectMode::Leading };
+                    } else if let Some(mode) = self.accept_any(&["ALL", "LEADING"]).or_else(|| self.trailing()) {
+                        let mode = match mode.as_str() {
+                            "ALL" => InspectMode::All,
+                            "LEADING" => InspectMode::Leading,
+                            _ => InspectMode::Trailing,
+                        };
                         loop {
                             let pattern = self.operand()?;
                             tallying.push(InspectPhrase { mode, pattern: Some(pattern), by: None, counter: Some(counter.clone()), bounds: self.bounds()? });
-                            if !self.starts_operand() || self.word_at(1) == Some("FOR") || self.is_word("ALL") || self.is_word("LEADING") {
+                            if !self.starts_operand() || self.word_at(1) == Some("FOR") || self.is_word("ALL") || self.is_word("LEADING") || self.is_word("TRAILING") {
                                 break;
                             }
                         }
@@ -3205,18 +3220,19 @@ impl Parser<'_> {
                     self.expect_word("BY")?;
                     let by = self.operand()?;
                     replacing.push(InspectPhrase { mode: InspectMode::Characters, pattern: None, by: Some(by), counter: None, bounds: self.bounds()? });
-                } else if let Some(mode) = self.accept_any(&["ALL", "LEADING", "FIRST"]) {
+                } else if let Some(mode) = self.accept_any(&["ALL", "LEADING", "FIRST"]).or_else(|| self.trailing()) {
                     let mode = match mode.as_str() {
                         "ALL" => InspectMode::All,
                         "LEADING" => InspectMode::Leading,
-                        _ => InspectMode::First,
+                        "FIRST" => InspectMode::First,
+                        _ => InspectMode::Trailing,
                     };
                     loop {
                         let pattern = self.operand()?;
                         self.expect_word("BY")?;
                         let by = self.operand()?;
                         replacing.push(InspectPhrase { mode, pattern: Some(pattern), by: Some(by), counter: None, bounds: self.bounds()? });
-                        if !self.starts_operand() || self.is_word("ALL") || self.is_word("LEADING") || self.is_word("FIRST") {
+                        if !self.starts_operand() || self.is_word("ALL") || self.is_word("LEADING") || self.is_word("FIRST") || self.is_word("TRAILING") {
                             break;
                         }
                     }

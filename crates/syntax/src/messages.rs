@@ -831,6 +831,7 @@ catalogue! {
     IWX0020 Warning "{DISPLAY or ACCEPT} on the screen (Micro Focus and GnuCOBOL; Enterprise COBOL has none): at {where}";
     IWX0021 Warning "{the environment form} (Micro Focus and GnuCOBOL; Enterprise COBOL reads and sets no environment variable): {what it does}";
     IWX0022 Warning "{a locking phrase} (Micro Focus and GnuCOBOL; Enterprise COBOL has no record locks of its own): the run unit is the file's only user, so nothing it locks waits and the phrase changes nothing";
+    IWX0023 Warning "INSPECT ... TRAILING (GnuCOBOL; Enterprise COBOL has ALL, LEADING, FIRST and CHARACTERS): the occurrences that run on to the end of the phrase's region";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

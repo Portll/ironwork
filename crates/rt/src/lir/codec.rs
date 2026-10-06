@@ -54,7 +54,7 @@ codec_enum!(AcceptFrom {
     ArgumentValue = 7,
     EnvironmentValue = 8,
 });
-codec_enum!(InspectMode { Characters = 0, All = 1, Leading = 2, First = 3 });
+codec_enum!(InspectMode { Characters = 0, All = 1, Leading = 2, First = 3, Trailing = 4 });
 codec_enum!(OpenMode { Input = 0, Output = 1, Extend = 2, InputOutput = 3 });
 codec_enum!(Closing { Volume = 0, NoRewind = 1, Lock = 2 });
 codec_enum!(Format { Fixed = 0, Variable = 1, Text = 2 });

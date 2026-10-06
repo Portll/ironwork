@@ -860,6 +860,7 @@ impl<'a> Printer<'a> {
             InspectMode::Characters => "CHARACTERS",
             InspectMode::All => "ALL",
             InspectMode::Leading => "LEADING",
+            InspectMode::Trailing => "TRAILING",
             InspectMode::First => "FIRST",
         };
         if let Some(pattern) = &phrase.pattern {

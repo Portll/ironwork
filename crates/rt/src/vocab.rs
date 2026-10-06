@@ -36,6 +36,9 @@ pub enum InspectMode {
     All,
     Leading,
     First,
+    /// GnuCOBOL's TRAILING under `--compliance extended`: the occurrences that run on to the end of
+    /// the phrase's region.
+    Trailing,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

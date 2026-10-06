@@ -1199,7 +1199,7 @@ fn initialize_display_and_search_all_round_trip_with_every_tag() {
 
 #[test]
 fn inspect_string_and_unstring_round_trip_with_every_tag() {
-    every_variant(&[InspectMode::Characters, InspectMode::All, InspectMode::Leading, InspectMode::First], 4);
+    every_variant(&[InspectMode::Characters, InspectMode::All, InspectMode::Leading, InspectMode::First, InspectMode::Trailing], 5);
     every_variant(&[Chars::Literal(vec![0x6B]), Chars::Place(3), Chars::Value(Operand::Function(1))], 3);
     every_variant(&[Replacement::Chars(Chars::Place(4)), Replacement::Fill(0x40)], 2);
     let built = ConvertTable::Built(vec![(0x81, 0xC1), (0x82, 0xC2)]);
