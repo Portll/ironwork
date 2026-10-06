@@ -42,6 +42,10 @@ five on both executors and compares the runs, and another gives each one's messa
 The sixteenth, IWX0016-W, BINARY-CHAR, has no Enterprise COBOL form: it is a binary item of
 one byte, which a module records as its `Native` (load-module.md §5.2), and a test runs a program
 using it on both executors and compares the runs with cobc's.
+IWX0018-W, a numeric argument to LOWER-CASE, REVERSE, TRIM or UPPER-CASE, is a form Enterprise COBOL
+refuses: both executors evaluate the argument as the item reference-modified from its first
+character (`compile::as_characters`), and a test runs it on both and gives its message under each
+level.
 
 ### IWX0001-W free-form source
 
@@ -387,6 +391,34 @@ compiled cleanly in the 3185-repository sample (34 repositories) and 106 of 1,42
 500-repository sample (14) now compile at return code 8, most of them whole programs indented from
 column 8; they still run. Reading `GOBACK.` and `EXIT.` in Area A as statements compiles 7 programs
 under extended that it refused before.
+
+### IWX0018-W a numeric argument to LOWER-CASE, REVERSE, TRIM or UPPER-CASE
+
+`IWX0018-W a numeric argument to FUNCTION TRIM (GnuCOBOL; Enterprise COBOL takes an alphabetic,
+alphanumeric or national one): N's digits are read as its characters`, for an unsigned integer
+item of USAGE DISPLAY.
+
+The argument of each of the four "must be" of class alphabetic, alphanumeric, national or UTF-8
+(Language Reference SC27-8713-03, pp. 589, 627, 657, 663), and a numeric item, a numeric literal or
+an arithmetic expression is none of them. Strict refuses it with `IWC0297-S FUNCTION TRIM: N is
+numeric, where TRIM takes an alphabetic, alphanumeric or national argument`. A numeric-edited item
+is of class alphanumeric and is taken, as is a reference-modified numeric item (p. 75).
+
+cobc 3.2 accepts each of the four with a numeric argument, under `-std=ibm-strict` too, and reads
+it as characters in a way that depends on the item: an unsigned integer DISPLAY item as its digits
+(`005` for `PIC 9(3) VALUE 5`), a signed one with a leading sign (`-005`), one with decimal places
+with a point (`01.5`), and a packed item as neither its bytes nor its value. Only the first is the
+item's own characters, the ones reference modification gives, so extended reads that one, with the
+warning, on both executors as cobc does, and refuses the rest with IWC0297-S. Before this,
+ironwork compiled all of them silently and ended the run at the function with an IRONWORK abend,
+and an IF comparing the result with an alphanumeric literal was refused with IWC0143-S, which named
+the function as numeric.
+
+In the census samples (3,000 programs of each corpus, seed 1, at b51ae02 and with this change on
+it), strict compiles the same 1,027 and 1,314 programs: no program either sample compiles holds the
+form. Extended compiles the same 1,382 and 1,485. Three of them, copies of one training program in
+three repositories, now carry IWX0018-W, and they run to the end on both executors with cobc's
+output, where they ended with the abend before.
 
 ### What the four change
 

@@ -5,6 +5,7 @@ mod classes;
 pub mod collating;
 mod corresponding;
 pub use corresponding::is_alphabetic;
+pub use operands::as_characters;
 pub mod declaratives;
 pub mod function;
 mod initcheck;

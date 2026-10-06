@@ -2,9 +2,9 @@
 //! numeric operand, and a function's arguments are what the function takes.
 
 use crate::Check;
-use crate::layout::Resolved;
+use crate::layout::{Layout, Resolved};
 use rt::storage::Kind;
-use syntax::ast::{Expr, Figurative, FunctionCall, Literal, Operand};
+use syntax::ast::{Expr, Figurative, FunctionCall, Literal, Operand, Ref, RefMod};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Class {
@@ -25,6 +25,26 @@ impl Class {
             Class::Dbcs => "DBCS",
         }
     }
+}
+
+/// Functions whose argument-1 is alphabetic, alphanumeric, national or UTF-8, and whose value is
+/// of its class (Language Reference SC27-8713-03, pp. 589, 627, 657, 663).
+const CHARACTER_ARGUMENT: [&str; 4] = ["LOWER-CASE", "REVERSE", "TRIM", "UPPER-CASE"];
+
+/// The argument both executors evaluate for an unsigned integer DISPLAY item given to one of
+/// `CHARACTER_ARGUMENT`, which only `--compliance extended` compiles (IWX0018-W): the item
+/// reference-modified from its first character, its digits as GnuCOBOL reads them.
+pub fn as_characters(layout: &Layout, f: &FunctionCall) -> Option<Expr> {
+    if !CHARACTER_ARGUMENT.contains(&f.name.as_str()) {
+        return None;
+    }
+    let Some(Expr::Operand(Operand::Ref(r))) = f.args.first() else { return None };
+    let Ok(Resolved::Item(i)) = layout.resolve(&r.name, &r.qualifiers, r.pos) else { return None };
+    if r.refmod.is_some() || !matches!(layout.items[i].kind, Kind::Zoned { scale: 0, signed: false, .. }) {
+        return None;
+    }
+    let start = Box::new(Expr::Operand(Operand::Literal(Literal::Number("1".into()))));
+    Some(Expr::Operand(Operand::Ref(Ref { refmod: Some(RefMod { start, length: None }), ..r.clone() })))
 }
 
 impl Check<'_> {
@@ -51,6 +71,25 @@ impl Check<'_> {
         let intrinsic = crate::FUNCTIONS.contains(&f.name.as_str()) || rt::intrinsic::FUNCTIONS.contains(&f.name.as_str());
         if intrinsic && f.args.iter().any(|a| matches!(a, Expr::Operand(Operand::Literal(Literal::Figurative(_) | Literal::All(_))))) {
             self.errors.push(syntax::messages::IWC0141.at(f.pos, format!("FUNCTION {}: a figurative constant is an argument only inside an arithmetic expression", f.name)));
+        }
+        if intrinsic
+            && CHARACTER_ARGUMENT.contains(&f.name.as_str())
+            && let Some(first) = f.args.first()
+            && self.class(first) == Some(Class::Numeric)
+        {
+            let argument = match first {
+                Expr::Operand(Operand::Ref(r)) => r.name.clone(),
+                Expr::Operand(Operand::Literal(_)) => "a numeric literal".into(),
+                Expr::Operand(Operand::Function(g)) => format!("FUNCTION {}", g.name),
+                _ => "an arithmetic expression".into(),
+            };
+            if self.extended && as_characters(self.layout, f).is_some() {
+                let message = format!("a numeric argument to FUNCTION {} (GnuCOBOL; Enterprise COBOL takes an alphabetic, alphanumeric or national one): {argument}'s digits are read as its characters", f.name);
+                self.errors.push(syntax::messages::IWX0018.at(f.pos, message));
+            } else {
+                let message = format!("FUNCTION {}: {argument} is numeric, where {} takes an alphabetic, alphanumeric or national argument", f.name, f.name);
+                self.errors.push(syntax::messages::IWC0297.at(f.pos, message));
+            }
         }
         if !matches!(f.name.as_str(), "MAX" | "MIN" | "ORD-MAX" | "ORD-MIN") {
             return;
@@ -156,7 +195,8 @@ impl Check<'_> {
             return Some(Class::Numeric);
         }
         match name {
-            "MAX" | "MIN" | "UPPER-CASE" | "LOWER-CASE" | "REVERSE" | "TRIM" => f.args.first().and_then(|a| self.class(a)),
+            "MAX" | "MIN" => f.args.first().and_then(|a| self.class(a)),
+            _ if CHARACTER_ARGUMENT.contains(&name) => f.args.first().and_then(|a| self.class(a)).map(|c| if c == Class::Numeric { Class::Alphanumeric } else { c }),
             "NATIONAL-OF" => Some(Class::National),
             "CONTENT-OF" | "USUBSTR" => None,
             _ => Some(Class::Alphanumeric),

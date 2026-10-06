@@ -259,6 +259,36 @@ fn extended_warns_of_each_form_and_strict_gives_ibms_severity() {
     assert_eq!(given("IWC0002"), [(11, Severity::Severe), (12, Severity::Severe)], "the two names are one name in their first 30 characters");
 }
 
+const DIGITS_AS_CHARACTERS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. DIGITS.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  N PIC 9(3) VALUE 5.\n",
+    "       01  S PIC S9(3) VALUE 5.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY '[' FUNCTION TRIM(N) '|' FUNCTION REVERSE(N) ']'\n",
+    "           IF FUNCTION UPPER-CASE(N) = '005' DISPLAY 'EQ' END-IF\n",
+    "           GOBACK.\n",
+);
+
+/// cobc 3.2 gives the output this test expects; a signed item's characters are not its digits,
+/// and stay refused.
+#[test]
+fn extended_reads_an_unsigned_integers_digits_as_a_character_functions_argument() {
+    let walked = Harness::source(DIGITS_AS_CHARACTERS).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("[005|500]\nEQ\n", Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(DIGITS_AS_CHARACTERS).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    let warning = |line, col| (line, col, Some("IWX0018"), Severity::Warning);
+    assert_eq!(diagnostics_under(DIGITS_AS_CHARACTERS, numeric::Compliance::Extended), [warning(8, 24), warning(8, 45), warning(9, 15)]);
+    let strict: Vec<_> = diagnostics_under(DIGITS_AS_CHARACTERS, numeric::Compliance::Strict).into_iter().map(|m| (m.0, m.2, m.3)).collect();
+    assert_eq!(strict, [8, 8, 9].map(|line| (line, Some("IWC0297"), Severity::Severe)));
+    let signed = DIGITS_AS_CHARACTERS.replace("REVERSE(N)", "REVERSE(S)");
+    let refused: Vec<_> = diagnostics_under(&signed, numeric::Compliance::Extended).into_iter().filter(|m| m.3 == Severity::Severe).map(|m| m.2).collect();
+    assert_eq!(refused, [Some("IWC0297")]);
+}
+
 /// Enterprise COBOL compiles a statement in Area A, or a name of more than 30 characters, with an
 /// error (return code 8) and runs it under its default NOCOMPILE(S), the statement read as though
 /// it began in Area B and the name as its first 30 characters.

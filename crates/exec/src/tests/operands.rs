@@ -56,3 +56,17 @@ fn function_arguments_are_of_the_kinds_and_numbers_the_function_takes() {
         assert_eq!(refused(accepted), Vec::<String>::new(), "{accepted}");
     }
 }
+
+#[test]
+fn a_character_function_takes_no_numeric_argument() {
+    let refused = refused_in("       01  N PIC 9(3) VALUE 5.\n       01  E PIC Z9.\n       01  X PIC X(3).\n");
+    let rule = |f: &str, a: &str| format!("FUNCTION {f}: {a} is numeric, where {f} takes an alphabetic, alphanumeric or national argument");
+    assert_eq!(refused("DISPLAY FUNCTION TRIM(N)"), [rule("TRIM", "N")]);
+    assert_eq!(refused("IF FUNCTION TRIM(N) = 'A' CONTINUE END-IF"), [rule("TRIM", "N")]);
+    assert_eq!(refused("MOVE FUNCTION REVERSE(N + 1) TO X"), [rule("REVERSE", "an arithmetic expression")]);
+    assert_eq!(refused("MOVE FUNCTION UPPER-CASE(FUNCTION NUMVAL(X)) TO X"), [rule("UPPER-CASE", "FUNCTION NUMVAL")]);
+    assert_eq!(refused("MOVE FUNCTION LOWER-CASE(5) TO X"), [rule("LOWER-CASE", "a numeric literal")]);
+    for accepted in ["DISPLAY FUNCTION TRIM(E)", "MOVE FUNCTION REVERSE(N(1:2)) TO X", "IF FUNCTION UPPER-CASE(X) = 'A' CONTINUE END-IF", "COMPUTE N = FUNCTION MAX(N 1)"] {
+        assert_eq!(refused(accepted), Vec::<String>::new(), "{accepted}");
+    }
+}

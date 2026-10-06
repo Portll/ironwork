@@ -109,7 +109,9 @@ impl<'p> Machine<'p, '_, '_> {
     /// arithmetic `within` names, keeping its own decimal places where they are more.
     pub(super) fn function_arguments(&mut self, f: &FunctionCall, within: Within) -> R<Vec<Val>> {
         let mut out = Vec::with_capacity(f.args.len());
+        let characters = compile::as_characters(self.layout, f);
         for (i, a) in f.args.iter().enumerate() {
+            let a = if i == 0 { characters.as_ref().unwrap_or(a) } else { a };
             match (f.all_subscripts.iter().find(|(k, _)| *k == i), a) {
                 (Some((_, positions)), Expr::Operand(Operand::Ref(table))) => {
                     for element in self.all_elements(table, positions)? {
