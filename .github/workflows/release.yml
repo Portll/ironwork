@@ -15,7 +15,8 @@ permissions:
 
 jobs:
   # Gates the run: the tag names the workspace version at its commit, the commit is on main, and
-  # main's CI passed for it. A dispatch runs the same gates without the tag.
+  # main's CI passed for it. A dispatch runs the same gates without the tag. It also fixes the Rust
+  # version every build uses, which the release names for anyone rebuilding it.
   check:
     name: tag, main and CI
     runs-on: ubuntu-latest
@@ -24,6 +25,7 @@ jobs:
       actions: read
     outputs:
       version: ${{ steps.read.outputs.version }}
+      rust: ${{ steps.rust.outputs.rust }}
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -50,6 +52,62 @@ jobs:
         run: |
           runs=$(gh run list --workflow ci.yml --commit "$GITHUB_SHA" --status success --json databaseId --jq length)
           if [ "$runs" -lt 1 ]; then echo "ci.yml has no successful run for $GITHUB_SHA"; exit 1; fi
+      - id: rust
+        name: Rust version
+        run: |
+          rustup toolchain install stable --profile minimal
+          echo "rust=$(rustc +stable --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+
+  # Each published crate's API against its last release on crates.io: a change that breaks it
+  # needs the version bump semver asks for, which before 1.0 is the minor.
+  semver:
+    name: semver against crates.io
+    needs: check
+    runs-on: ubuntu-latest
+    env:
+      RUST: ${{ needs.check.outputs.rust }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: |
+          rustup toolchain install "$RUST" --profile minimal
+          rustup default "$RUST"
+      - name: cargo-semver-checks
+        run: cargo install --locked cargo-semver-checks --version 0.51.0
+      - name: Check
+        run: cargo semver-checks --workspace
+
+  # CycloneDX bills of materials for the two builds: the workspace and the TLS one.
+  sbom:
+    name: bills of materials
+    needs: check
+    runs-on: ubuntu-latest
+    env:
+      RUST: ${{ needs.check.outputs.rust }}
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: |
+          rustup toolchain install "$RUST" --profile minimal
+          rustup default "$RUST"
+      - name: cargo-cyclonedx
+        run: cargo install --locked cargo-cyclonedx --version 0.5.9
+      - name: Generate
+        run: |
+          cargo cyclonedx --format json --describe binaries --manifest-path crates/cli/Cargo.toml
+          cargo cyclonedx --format json --describe binaries --manifest-path tls/Cargo.toml
+          mkdir sbom
+          cp crates/cli/ironwork_bin.cdx.json "sbom/ironwork-$VERSION.cdx.json"
+          cp tls/ironwork_bin.cdx.json "sbom/ironwork-tls-$VERSION.cdx.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom
+          path: sbom/
 
   binaries:
     name: binary (${{ matrix.target }})
@@ -66,6 +124,7 @@ jobs:
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
     env:
       TARGET: ${{ matrix.target }}
+      RUST: ${{ needs.check.outputs.rust }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -73,8 +132,8 @@ jobs:
       - name: Toolchain
         shell: bash
         run: |
-          rustup toolchain install stable --profile minimal --target "$TARGET"
-          rustup default stable
+          rustup toolchain install "$RUST" --profile minimal --target "$TARGET"
+          rustup default "$RUST"
       - name: Build
         shell: bash
         run: cargo build --release --locked -p ironwork --target "$TARGET"
@@ -105,6 +164,7 @@ jobs:
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
     env:
       TARGET: ${{ matrix.target }}
+      RUST: ${{ needs.check.outputs.rust }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -112,8 +172,8 @@ jobs:
       - name: Toolchain
         shell: bash
         run: |
-          rustup toolchain install stable --profile minimal --target "$TARGET"
-          rustup default stable
+          rustup toolchain install "$RUST" --profile minimal --target "$TARGET"
+          rustup default "$RUST"
       # ring compiles C and assembly, so a musl target needs musl's C compiler.
       - name: C compiler for musl
         if: contains(matrix.target, 'musl')
@@ -157,6 +217,7 @@ jobs:
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.target }}
+          rust-toolchain: ${{ needs.check.outputs.rust }}
           manylinux: auto
           args: --release --locked --out wheels
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -215,7 +276,7 @@ jobs:
   release:
     name: GitHub release
     if: github.event_name == 'push'
-    needs: [check, binaries, tls-binaries, wheels, sdist, npm]
+    needs: [check, semver, sbom, binaries, tls-binaries, wheels, sdist, npm]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -223,6 +284,7 @@ jobs:
       attestations: write
     env:
       VERSION: ${{ needs.check.outputs.version }}
+      RUST: ${{ needs.check.outputs.rust }}
       TAG: ${{ github.ref_name }}
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -241,6 +303,10 @@ jobs:
         with:
           name: npm
           path: npm/
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: sbom
+          path: sbom/
       - name: Archive
         run: |
           mkdir out
@@ -262,17 +328,27 @@ jobs:
               tar -czf "out/ironwork-tls-$VERSION-$target.tar.gz" -C "$dir" ironwork LICENSE THIRD-PARTY-NOTICES.md
             fi
           done
-          cp npm/portll-ironwork-*.tgz out/
+          cp npm/portll-ironwork-*.tgz sbom/*.cdx.json out/
           (cd out && sha256sum -- * > SHA256SUMS)
       # SLSA build provenance for each archive, signed through GitHub's OIDC identity:
       # gh attestation verify <file> -R Portll/ironwork
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: 'out/*'
+      # Each build's bill of materials, bound to its archives:
+      # gh attestation verify <file> -R Portll/ironwork --predicate-type https://cyclonedx.org/bom
+      - uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: 'out/ironwork-${{ needs.check.outputs.version }}-*'
+          sbom-path: 'out/ironwork-${{ needs.check.outputs.version }}.cdx.json'
+      - uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: 'out/ironwork-tls-${{ needs.check.outputs.version }}-*'
+          sbom-path: 'out/ironwork-tls-${{ needs.check.outputs.version }}.cdx.json'
       - name: Publish
         run: |
           gh release create "$TAG" out/* --verify-tag --title "ironwork $VERSION" \
-            --notes "ironwork for COBOL $VERSION. Builds for Linux (static), macOS and Windows, and the npm package @portll/ironwork. The ironwork-tls archives are the same builds with TLS for --sql-db (rustls, sslmode=verify-full). The Python package is on PyPI as ironwork, and the crates are on crates.io. Each file carries SLSA build provenance: gh attestation verify <file> -R Portll/ironwork."
+            --notes "ironwork for COBOL $VERSION. Builds for Linux (static), macOS and Windows, and the npm package @portll/ironwork. The ironwork-tls archives are the same builds with TLS for --sql-db (rustls, sslmode=verify-full). The Python package is on PyPI as ironwork, and the crates are on crates.io. Each file carries SLSA build provenance: gh attestation verify <file> -R Portll/ironwork. Built with Rust $RUST; SECURITY.md says how to check a download and rebuild it."
 
   npm-publish:
     name: publish to npm

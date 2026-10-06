@@ -35,8 +35,11 @@ It prints PASS, FAIL or TODO for each step and exits 1 on any FAIL.
    whose CI passed. Pushing the tag runs `release.yml`.
    Its `check` job fails the run unless the tag is `v` plus the version at the tagged commit, the
    commit is an ancestor of `origin/main`, and `ci.yml` has a successful run for that commit; every
-   other job then skips. The builds run next, with provenance, and nothing publishes until all of
-   them pass. Publishing is one job per registry, in order: GitHub release, npm, crates.io, PyPI. Each
+   other job then skips. It also fixes the stable Rust version of the moment, which every build
+   uses and the release notes name. The builds run next, with provenance, beside `semver`, which
+   fails when `cargo semver-checks` finds a published crate's API broken by a change the version
+   bump does not allow, and `sbom`, which writes each build's CycloneDX bill of materials. Nothing
+   publishes until all of them pass. Publishing is one job per registry, in order: GitHub release, npm, crates.io, PyPI. Each
    job needs every build and the job before it. The GitHub release job has no environment and
    runs when the builds pass; each registry job then waits in the run's "Review deployments"
    until the operator approves it.
@@ -46,8 +49,8 @@ It prints PASS, FAIL or TODO for each step and exits 1 on any FAIL.
    fails and the jobs after it wait. To check the workflow without a release, run `gh workflow run
    release.yml -R Portll/ironwork --ref main -f dry_run=true`: the checks and builds run and every
    publish job is skipped.
-6. **Notes.** The release job creates the GitHub release with `SHA256SUMS`, provenance and the npm
-   tarball; its notes carry only the install paragraph. Add what the release contains with `gh
+6. **Notes.** The release job creates the GitHub release with `SHA256SUMS`, provenance, the npm
+   tarball and the two bills of materials, each attested for its build's archives; its notes carry only the install paragraph. Add what the release contains with `gh
    release edit v<version> --notes-file <file>`, opening with a `## Summary` section, which the
    site renders as the release's row: the first paragraph is the benefit, each line opening with a
    hyphen a sub-item, a paragraph opening `**Limit:**` the limit. Until the release has that

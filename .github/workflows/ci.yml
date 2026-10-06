@@ -115,3 +115,32 @@ jobs:
         run: cargo +1.95.0 check --workspace --all-targets --locked
       - name: Check the TLS build
         run: cargo +1.95.0 check --all-targets --locked --manifest-path tls/Cargo.toml
+
+  # A release binary rebuilt from the same commit with the same Rust is the same bytes: two builds
+  # from separate checkouts, at different paths with their own target directories, are compared.
+  reproducible:
+    name: release build reproduces
+    runs-on: ubuntu-latest
+    env:
+      TARGET: x86_64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: first
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: second/elsewhere
+          persist-credentials: false
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --target "$TARGET"
+          rustup default stable
+      - name: Build twice
+        run: |
+          (cd first && cargo build --release --locked -p ironwork --target "$TARGET")
+          (cd second/elsewhere && cargo build --release --locked -p ironwork --target "$TARGET")
+      - name: Compare
+        run: |
+          sha256sum "first/target/$TARGET/release/ironwork" "second/elsewhere/target/$TARGET/release/ironwork"
+          cmp "first/target/$TARGET/release/ironwork" "second/elsewhere/target/$TARGET/release/ironwork"

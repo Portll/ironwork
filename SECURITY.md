@@ -14,6 +14,23 @@ not to be.
 ironwork for COBOL is before 1.0 and is in public preview. The `main` branch is the supported
 version, and fixes are not backported.
 
+## Checking a download
+
+Each GitHub release carries `SHA256SUMS`, a CycloneDX bill of materials for each build, and
+attestations GitHub signs for the release run that built them.
+
+- **Checksums.** `sha256sum -c SHA256SUMS --ignore-missing`, in the directory holding the
+  downloads.
+- **Provenance.** `gh attestation verify <file> -R Portll/ironwork` checks that the file was
+  built by this repository's release workflow from the tagged commit.
+- **Bill of materials.** `ironwork-<version>.cdx.json` and `ironwork-tls-<version>.cdx.json` list
+  the crates each build is made from. `gh attestation verify <archive> -R Portll/ironwork
+  --predicate-type https://cyclonedx.org/bom` checks the one attested for that archive.
+- **Rebuilding.** The release notes name the Rust version every build used. At the tag, with that
+  version, `cargo build --release --locked -p ironwork --target x86_64-unknown-linux-musl` gives
+  the bytes of the Linux x86-64 archive's binary. CI checks on every commit that two such builds,
+  from checkouts at different paths, are the same bytes.
+
 ## What counts as a vulnerability here
 
 ironwork compiles and runs COBOL programs, which may come from anywhere. A running program is
