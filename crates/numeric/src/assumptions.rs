@@ -349,6 +349,7 @@ pub const ACCEPT_FROM_CONSOLE: &str = "C440";
 pub const CALL_BY_PROGRAM_ID: &str = "C441";
 pub const COMMAND_LINE_FROM_PARM: &str = "C442";
 pub const MISSING_PROGRAM: &str = "C450";
+pub const UNHANDLED_FILE_STATUS: &str = "C451";
 pub const OUT_OF_SCOPE_CALL_NOT_FOUND: &str = "C470";
 pub const BINARY_CHAR: &str = "C460";
 pub const TOP_LEVEL_TABLE: &str = "C461";
@@ -2202,6 +2203,12 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         id: CALL_BY_PROGRAM_ID,
         claim: "A CALL of a name that no member of the program libraries has, as a file named for it, finds the .cbl or .cob file there whose PROGRAM-ID is the name: the directories in order, each one's files in name order, the first that holds the program. z/OS finds a called program as a member of STEPLIB, JOBLIB or the link list by its member name, and C450 says how a CALL that none answers ends; a build that link-edits each program under its PROGRAM-ID gives every program a member of that name, and ironwork's libraries are source directories, whose file names need not be. A member of the name comes first, as before",
         basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: UNHANDLED_FILE_STATUS,
+        claim: "A failing file status that no FILE STATUS clause holds and no EXCEPTION/ERROR procedure takes ends the run as IBM documents: 'a severity-3 Language Environment condition is signaled, which causes the run unit to end if the condition is not handled' (Programming Guide, 'Handling errors in input and output operations'), user abend 4038 under the default ABTERMENC(ABEND), as C450's CEE3501S does. A failed OPEN or CLOSE gives IGZ0035S 'There was an unsuccessful OPEN or CLOSE of file file-name in program program-name ... Neither FILE STATUS nor an ERROR declarative were specified. The status code was status-code.', and a logic error, a 4x status such as a WRITE to a file opened INPUT, IGZ0020S 'A logic error occurred. Neither FILE STATUS nor a declarative was specified for file file-name in program program-name ... The status code was status-code.' (LE Runtime Messages). ironwork leaves out IBM's relative location, the abend's place giving the statement, and adds what failed in parentheses. An OPEN or CLOSE of a VSAM file, indexed or relative (C220), returns control whatever its status: 'All OPEN and CLOSE errors with a VSAM file ... return control to your COBOL program even if you coded no DECLARATIVE and no FILE STATUS clause' (Programming Guide, 'Handling errors in VSAM files'). The statuses IBM's messages do not settle, an AT END (1x) or INVALID KEY (2x) no phrase takes and the 3x and 9x permanent errors of a READ or WRITE, end with the status as before, IO- and its two digits",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {

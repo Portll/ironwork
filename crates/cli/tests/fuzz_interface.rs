@@ -159,7 +159,7 @@ fn a_subprogram_s_files_are_given_data_sets_so_its_runs_get_past_open() {
     assert!(stderr(&o).contains("ironwork fuzz: not varied, given empty: INDD"), "{}", stderr(&o));
     let manifest = read_manifest(&dir.join("run"));
     assert!(manifest.contains("\"code\":\"S0C7\",\"file\":\"FILESUB.cbl\",\"line\":22"), "{manifest}");
-    assert!(!manifest.contains("IO-35"), "{manifest}");
+    assert!(!manifest.contains("IGZ0035S"), "{manifest}");
 }
 
 const LOGGING_SUBPROGRAM: &[&str] = &[
@@ -209,7 +209,7 @@ fn a_called_program_s_files_are_given_data_sets_and_an_extended_one_exists() {
     assert!(stderr(&o).contains("ironwork fuzz: not varied, given empty: LOGDD"), "{}", stderr(&o));
     let manifest = read_manifest(&dir.join("run"));
     assert!(manifest.contains("\"code\":\"S0C7\",\"file\":\"LOGSUB.cbl\",\"line\":9"), "{manifest}");
-    assert!(!manifest.contains("IO-35"), "{manifest}");
+    assert!(!manifest.contains("IGZ0035S"), "{manifest}");
 }
 
 /// A source that holds only a user-defined function is refused before any run.

@@ -142,7 +142,8 @@ fn a_file_not_open_has_no_open_mode_and_other_programs_procedures_do_not_apply()
     );
     let (out, _, ending) = run_files(&source, &[]);
     assert_eq!(out, "");
-    assert_eq!(ending.unwrap_err().code, "IO-47");
+    let abend = ending.unwrap_err();
+    assert!(abend.code == "U4038" && abend.message.starts_with("IGZ0020S A logic error occurred.") && abend.message.contains("The status code was 47."), "{abend:?}");
     let nested = [
         cobol(&["IDENTIFICATION DIVISION.", "PROGRAM-ID. OUTER.", "PROCEDURE DIVISION.", "DECLARATIVES.", "E SECTION.", "    USE AFTER ERROR PROCEDURE ON INPUT.", "E-1.", "    DISPLAY 'OUTER'.", "END DECLARATIVES.", "M SECTION.", "    CALL 'INNER'", "    GOBACK."]),
         cobol(&["IDENTIFICATION DIVISION.", "PROGRAM-ID. INNER.", "ENVIRONMENT DIVISION.", "INPUT-OUTPUT SECTION.", "FILE-CONTROL.", "    SELECT G ASSIGN TO NODD."]),
@@ -151,7 +152,8 @@ fn a_file_not_open_has_no_open_mode_and_other_programs_procedures_do_not_apply()
     .concat();
     let (out, _, ending) = run_files(&nested, &[]);
     assert_eq!(out, "");
-    assert_eq!(ending.unwrap_err().code, "IO-35");
+    let abend = ending.unwrap_err();
+    assert!(abend.code == "U4038" && abend.message.starts_with("IGZ0035S ") && abend.message.contains(" in program INNER."), "{abend:?}");
 }
 
 /// SORT S USING A B GIVING O, with `declarative`; `cbl` is a CBL card, or nothing.
@@ -182,7 +184,7 @@ fn a_using_file_procedure_lets_the_sort_go_on_unless_it_sets_sort_return_to_16()
     assert_eq!(out, "SORT-RETURN 16\n");
     assert!(err.contains("SORT-RETURN was set to 16"), "{err}");
     let (_, _, ending) = run_files(&sort_program(&["N SECTION.", "    USE AFTER ERROR PROCEDURE ON A."], ""), &dds);
-    assert_eq!(ending.unwrap_err().code, "IO-35");
+    assert_eq!(ending.unwrap_err().code, "U4038");
 }
 
 #[test]

@@ -1324,7 +1324,8 @@ pub enum StartKey { Prime, Named { key: u8, span: RecordSpan }, Relative(IntExpr
   written goes where `Arm(0)` goes. `conclude` sets FILE STATUS before the phrase runs, and a
   failing status with no phrase to run takes the file's error path: a USE AFTER EXCEPTION/ERROR
   procedure the op runs through `Procedures::run`, whose leaving the op returns as its `Step`
-  (§9.10), else `IO-xx` when the file has no FILE STATUS.
+  (§9.10), else, when the file has no FILE STATUS, the ending `fileio::unhandled` gives (C451):
+  U4038 with IGZ0035S or IGZ0020S, control back after a VSAM file's OPEN or CLOSE, or `IO-xx`.
 - **One op per file.** OPEN and CLOSE name several files; the walker opens each in turn and stops at
   the first abend, as a block of ops does.
 - **Which phrase READ takes** is fixed by the file: AT END for a sequential file, sequential access,
@@ -1343,7 +1344,7 @@ pub enum StartKey { Prime, Named { key: u8, span: RecordSpan }, Relative(IntExpr
   walker locates it, each time, and is never a receiving item.
 - **A FILE STATUS that names no data item.** The walker looks the name up only when `set_status`
   runs, on a statement that names the file, a SORT or MERGE that uses or gives it, or a report
-  written to it, and abends there; and a file with a FILE STATUS clause takes no `IO-xx` abend
+  written to it, and abends there; and a file with a FILE STATUS clause takes no unhandled-status ending (C451)
   however it is named. Lowering leaves `status` None when no lowered statement names the file,
   which gives the walker's result, and refuses the program otherwise.
 - **Fixed at lowering:** the file by name; each key's span, from its place, which must be a static
@@ -1923,8 +1924,8 @@ statement (§8.7). `Completed` goes back into the statement, which carries on as
 (`conclude` returns, OPEN stops, WRITE skips the page update). `Left(step)` abandons the statement
 and the op returns `step`: a GO TO out, STOP RUN or GOBACK, a return to an active PERFORM, or a
 resume after one control left, which the VM then carries out as it would the statement's own
-(§8.4). With neither procedure, the file's error path is as before: `IO-xx` when it has no FILE
-STATUS. Which procedure applies is known only at run time, from the file's open mode, so lowering
+(§8.4). With neither procedure, the file's error path is as before: C451's ending when it has no
+FILE STATUS. Which procedure applies is known only at run time, from the file's open mode, so lowering
 gives the op both and refuses no file statement.
 
 **USE FOR DEBUGGING** under the DEBUG runtime option, when `Table.triggers` is not empty (`exec`,
@@ -2405,7 +2406,7 @@ position comes from where the walker takes it:
 |---|---|---|
 | Locating a place: S0C4, SSRANGE, bounds | The reference (machine.rs:538-590) | The place's `at` |
 | Invalid data in an operand: S0C7 | The reference (machine.rs:672) | The place's `at` |
-| Divide by zero without SIZE ERROR (S0CB), stores, IO-xx, a missing program (C450), nesting depth | The statement | The op's entry |
+| Divide by zero without SIZE ERROR (S0CB), stores, an unhandled file status (C451), a missing program (C450), nesting depth | The statement | The op's entry |
 | A FUNCTION's own failure | The function (machine.rs:1220) | The plan's `at` |
 | EXEC CICS, EXEC SQL, other EXEC | The EXEC block | The op's entry |
 | Invalid data in any SQL input | The first host variable (machine/sql.rs:212) | The op's entry, which holds that position |

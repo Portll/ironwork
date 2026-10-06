@@ -151,9 +151,9 @@ impl<'p, L: Loader<Rc<Code>>> SortHost<'p, Handle<'p>, &'p IntExpr> for Io<'_, '
         })
     }
 
-    fn fail(&mut self, k: usize, status: FileStatus, mode: Option<OpenMode>, message: String, pos: Pos) -> Result<(), Abend> {
+    fn fail(&mut self, k: usize, status: FileStatus, mode: Option<OpenMode>, open_or_close: bool, message: String, pos: Pos) -> Result<(), Abend> {
         let file = self.vm.file_desc(k);
-        self.io_failure(&file, status, mode, message, pos)
+        self.io_failure(&file, status, mode, open_or_close, message, pos)
     }
 
     fn has_error_procedure(&self, k: usize, mode: OpenMode) -> bool {

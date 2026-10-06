@@ -221,8 +221,8 @@ impl<'p> SortHost<'p, &'p Ref, Int<'p>> for Machine<'p, '_, '_> {
         self.fails(k, |m| m.write_record(k, loc, None, &NO_HANDLERS, pos).map(drop))
     }
 
-    fn fail(&mut self, k: usize, status: FileStatus, mode: Option<OpenMode>, message: String, pos: Pos) -> R<()> {
-        self.io_failure(k, status, mode, message, pos)
+    fn fail(&mut self, k: usize, status: FileStatus, mode: Option<OpenMode>, open_or_close: bool, message: String, pos: Pos) -> R<()> {
+        self.io_failure(k, status, mode, open_or_close, message, pos)
     }
 
     fn has_error_procedure(&self, k: usize, mode: OpenMode) -> bool {

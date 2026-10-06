@@ -259,7 +259,7 @@ impl<'p, L: Loader<Rc<Code>>> Io<'_, 'p, '_, '_, L> {
     pub(super) fn settle(&mut self, file: &FileOf<'p>, outcome: Outcome, end_of_page: Option<Phrase>, pos: Pos) -> Result<Option<u8>, Abend> {
         Ok(match outcome {
             Outcome::Failed(f) => {
-                self.io_failure(file, f.status, f.mode, f.message, pos)?;
+                self.io_failure(file, f.status, f.mode, f.open_or_close, f.message, pos)?;
                 None
             }
             Outcome::Page { end_of_page: true } => end_of_page.filter(|p| p.on).map(|_| 3),
@@ -270,12 +270,12 @@ impl<'p, L: Loader<Rc<Code>>> Io<'_, 'p, '_, '_, L> {
 
     fn io_status(&mut self, file: &FileOf<'p>, status: FileStatus, message: String, pos: Pos) -> Result<(), Abend> {
         let mode = self.slot(file.index).as_ref().map(|f| f.mode);
-        self.io_failure(file, status, mode, message, pos)
+        self.io_failure(file, status, mode, false, message, pos)
     }
 
     /// `io_failure`: FILE STATUS, then for a failing status the file's EXCEPTION/ERROR procedure,
     /// or a containing program's GLOBAL one, or with none and no FILE STATUS the run's end.
-    pub(super) fn io_failure(&mut self, file: &FileOf<'p>, status: FileStatus, mode: Option<OpenMode>, message: String, pos: Pos) -> Result<(), Abend> {
+    pub(super) fn io_failure(&mut self, file: &FileOf<'p>, status: FileStatus, mode: Option<OpenMode>, open_or_close: bool, message: String, pos: Pos) -> Result<(), Abend> {
         fileio::set_status(self, file, status, pos)?;
         if status.covers('0') {
             return Ok(());
@@ -288,8 +288,10 @@ impl<'p, L: Loader<Rc<Code>>> Io<'_, 'p, '_, '_, L> {
         if self.vm.global_procedure(k, mode, pos)? {
             return Ok(());
         }
-        if file.status.is_none() && status.ends_the_run() {
-            return Err(Abend { code: AbendCode::Io(status), message, pos, file: None });
+        if file.status.is_none()
+            && let Some(abend) = fileio::unhandled(status, file.organization, open_or_close, file.name, self.vm.sym(self.vm.p.id), message, pos)
+        {
+            return Err(abend);
         }
         Ok(())
     }

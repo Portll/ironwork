@@ -20,14 +20,14 @@ impl<'p> Machine<'p, '_, '_> {
     /// Records an I/O status of file k in the mode it is open in.
     pub(super) fn io_status(&mut self, k: usize, status: impl Into<FileStatus>, message: String, pos: Pos) -> R<()> {
         let mode = self.unit.file_ref(self.me, k).as_ref().map(|f| f.mode);
-        self.io_failure(k, status, mode, message, pos)
+        self.io_failure(k, status, mode, false, message, pos)
     }
 
     /// Records an I/O status of file k, open in `mode` or being opened in it. A failing status runs
     /// the file's EXCEPTION/ERROR procedure, once FILE STATUS holds it
     /// ([`numeric::assumptions::ERROR_DECLARATIVE_STATUSES`]); with none, and no FILE STATUS either,
     /// it ends the run.
-    pub(super) fn io_failure(&mut self, k: usize, status: impl Into<FileStatus>, mode: Option<OpenMode>, message: String, pos: Pos) -> R<()> {
+    pub(super) fn io_failure(&mut self, k: usize, status: impl Into<FileStatus>, mode: Option<OpenMode>, open_or_close: bool, message: String, pos: Pos) -> R<()> {
         let status = status.into();
         self.set_status(k, status, pos)?;
         if status.covers('0') {
@@ -40,8 +40,10 @@ impl<'p> Machine<'p, '_, '_> {
         if self.global_declarative(k, mode, pos)? {
             return Ok(());
         }
-        if self.program.files[k].status.is_none() && status.ends_the_run() {
-            return Err(Abend { code: AbendCode::Io(status), message, pos, file: None });
+        if self.program.files[k].status.is_none()
+            && let Some(abend) = fileio::unhandled(status, self.file_desc(k).organization, open_or_close, &self.program.files[k].name, &self.program.id, message, pos)
+        {
+            return Err(abend);
         }
         Ok(())
     }
@@ -154,7 +156,7 @@ impl<'p> Machine<'p, '_, '_> {
     /// or END-OF-PAGE or NOT END-OF-PAGE.
     fn settle(&mut self, k: usize, outcome: Outcome, end_of_page: Option<&'p Handlers>, pos: Pos) -> R<Flow> {
         let phrase = match outcome {
-            Outcome::Failed(f) => return self.io_failure(k, f.status, f.mode, f.message, pos).map(|()| Flow::Next),
+            Outcome::Failed(f) => return self.io_failure(k, f.status, f.mode, f.open_or_close, f.message, pos).map(|()| Flow::Next),
             Outcome::Page { end_of_page: true } => end_of_page.and_then(|h| h.on.as_deref()),
             Outcome::Page { end_of_page: false } => end_of_page.and_then(|h| h.not_on.as_deref()),
             Outcome::Done | Outcome::Status { .. } => None,

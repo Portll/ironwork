@@ -205,13 +205,18 @@ pub(crate) enum Outcome {
 
 /// Abends that say what the run's surroundings lack, not what its input did: a construct ironwork
 /// does not run, a job step's program no library holds, an EXEC statement with no database or
-/// region behind it, and an OPEN of a file no DD gives. A dynamic CALL of a program no library
-/// holds, which ends U4038, is one too (`missing_module`).
-const NOT_THE_INPUT: &[&str] = &["IRONWORK", "S806", "EXEC", "IO-35"];
+/// region behind it. A dynamic CALL of a program no library holds and an OPEN of a file no DD
+/// gives, which end U4038, are ones too (`missing_module`, `missing_data_set`).
+const NOT_THE_INPUT: &[&str] = &["IRONWORK", "S806", "EXEC"];
 
 /// Whether an abend says what the run's surroundings lack rather than what its input did.
 fn not_the_input(code: &str, message: &str) -> bool {
-    NOT_THE_INPUT.contains(&code) || missing_module(code, message).is_some()
+    NOT_THE_INPUT.contains(&code) || missing_module(code, message).is_some() || missing_data_set(code, message)
+}
+
+/// Whether an ending is IGZ0035S's for an OPEN that found no data set, status 35 (assumption C451).
+fn missing_data_set(code: &str, message: &str) -> bool {
+    code == "U4038" && message.starts_with("IGZ0035S ") && message.contains(" The status code was 35.")
 }
 
 impl Outcome {
@@ -1537,7 +1542,7 @@ mod tests {
     fn refusals_are_reported_by_where_they_stopped_the_most_frequent_first() {
         let abend = |code: &str, line: i64, message: &str| Outcome::Abend { code: code.into(), file: "P.cbl".into(), line, message: message.into() };
         let mut tally = Tally::new();
-        tally.add(&abend("IO-35", 9, "IN-FILE: no DD INDD was given"));
+        tally.add(&abend("U4038", 9, "IGZ0035S There was an unsuccessful OPEN or CLOSE of file IN-FILE in program P. Neither FILE STATUS nor an ERROR declarative were specified. The status code was 35. (no DD INDD was given)"));
         for _ in 0..3 {
             tally.add(&abend("U4038", 14, "CEE3501S The module LOGGER was not found."));
         }
@@ -1546,10 +1551,10 @@ mod tests {
         assert_eq!(
             tally.report_lines(),
             [
-                "4 runs refused; the first: P.cbl:9 IO-35 IN-FILE: no DD INDD was given",
+                "4 runs refused; the first: P.cbl:9 U4038 IGZ0035S There was an unsuccessful OPEN or CLOSE of file IN-FILE in program P. Neither FILE STATUS nor an ERROR declarative were specified. The status code was 35. (no DD INDD was given)",
                 "the refused runs stopped in 2 ways:",
                 "  3 runs: P.cbl:14 U4038 CEE3501S The module LOGGER was not found.",
-                "  1 run: P.cbl:9 IO-35 IN-FILE: no DD INDD was given",
+                "  1 run: P.cbl:9 U4038 IGZ0035S There was an unsuccessful OPEN or CLOSE of file IN-FILE in program P. Neither FILE STATUS nor an ERROR declarative were specified. The status code was 35. (no DD INDD was given)",
             ]
         );
         let mut one_way = Tally::new();

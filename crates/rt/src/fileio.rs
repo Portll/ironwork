@@ -99,11 +99,41 @@ pub enum Outcome {
     Failed(Failure),
 }
 
-/// `mode` is the mode the file is open in, or being opened in.
+/// `mode` is the mode the file is open in, or being opened in; `open_or_close` whether the
+/// statement that failed is an OPEN or a CLOSE.
 pub struct Failure {
     pub status: FileStatus,
     pub mode: Option<OpenMode>,
+    pub open_or_close: bool,
     pub message: String,
+}
+
+/// How a failing status ends the run when no FILE STATUS holds it and no EXCEPTION/ERROR
+/// procedure takes it (assumption C451); None where control returns to the program. An OPEN or
+/// CLOSE of a VSAM file (indexed or relative, C220) returns control whatever its status (Programming
+/// Guide, 'Handling errors in VSAM files'); any other OPEN or CLOSE ends U4038 with IGZ0035S, and a
+/// logic error (a 4x status) with IGZ0020S, as a severity-3 condition nothing handles does (LE
+/// Runtime Messages; Programming Guide, 'Handling errors in input and output operations'). Statuses
+/// IBM's messages do not settle end with the status itself, `IO-` and its two digits.
+/// Whether `abend` is the ending `unhandled` gives a failing status.
+pub fn is_unhandled_io(abend: &Abend) -> bool {
+    matches!(abend.code, crate::abend::AbendCode::Io(_)) || abend.code == crate::abend::AbendCode::user(4038) && (abend.message.starts_with("IGZ0035S ") || abend.message.starts_with("IGZ0020S "))
+}
+
+pub fn unhandled(status: FileStatus, organization: Organization, open_or_close: bool, file: &str, program: &str, detail: String, pos: Pos) -> Option<Abend> {
+    use crate::abend::AbendCode;
+    if !status.ends_the_run() || open_or_close && matches!(organization, Organization::Indexed | Organization::Relative) {
+        return None;
+    }
+    let code = status.as_str();
+    let (abend, message) = if open_or_close {
+        (AbendCode::user(4038), format!("IGZ0035S There was an unsuccessful OPEN or CLOSE of file {file} in program {program}. Neither FILE STATUS nor an ERROR declarative were specified. The status code was {code}. ({detail})"))
+    } else if status.covers('4') {
+        (AbendCode::user(4038), format!("IGZ0020S A logic error occurred. Neither FILE STATUS nor a declarative was specified for file {file} in program {program}. The status code was {code}. ({detail})"))
+    } else {
+        (AbendCode::Io(status), detail)
+    };
+    Some(Abend { code: abend, message, pos, file: None })
 }
 
 /// What the file verbs ask of the executor beyond [`Host`].
@@ -145,9 +175,9 @@ fn receiver<P: Copy>(x: &mut impl Host<P>, p: P) -> R<Loc> {
 }
 
 /// A failure in the mode file `k` is open in now.
-fn failed<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, status: FileStatus, message: String) -> Outcome {
+fn failed<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, status: FileStatus, open_or_close: bool, message: String) -> Outcome {
     let mode = x.slot(file.index).as_ref().map(|f| f.mode);
-    Outcome::Failed(Failure { status, mode, message })
+    Outcome::Failed(Failure { status, mode, open_or_close, message })
 }
 
 pub fn sequential<P, X>(file: &File<'_, P, X>) -> bool {
@@ -330,7 +360,7 @@ fn assigned_dd<P: Copy, X: Copy>(x: &mut impl Files<P, X>, item: P, select: Pos)
 fn open_on<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, mode: OpenMode, pos: Pos, assigned: Option<&(String, String)>) -> R<Outcome> {
     let (k, name) = (file.index, file.name);
     let assign = assigned.map_or(file.assign, |(dd, _)| dd.as_str());
-    let failure = |status, message| Ok(Outcome::Failed(Failure { status, mode: Some(mode), message }));
+    let failure = |status, message| Ok(Outcome::Failed(Failure { status, mode: Some(mode), open_or_close: true, message }));
     if *x.locked(k) {
         return failure(FileStatus::ClosedWithLock, format!("{name} was closed WITH LOCK"));
     }
@@ -383,7 +413,7 @@ fn open_on<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, mo
         };
         opened(x, file, f, status, pos)?;
         return Ok(match (status, vsam) {
-            (FileStatus::SuccessVerified, Some(d)) => failed(x, file, status, format!("{name}: {} was left open for output, and OPEN verified it", d.path.display())),
+            (FileStatus::SuccessVerified, Some(d)) => failed(x, file, status, true, format!("{name}: {} was left open for output, and OPEN verified it", d.path.display())),
             _ => Outcome::Done,
         });
     }
@@ -455,7 +485,7 @@ pub fn close<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, 
         return Ok(Outcome::Done);
     }
     match x.slot(file.index).take() {
-        None => Ok(failed(x, file, FileStatus::NotOpen, format!("{name} is not open"))),
+        None => Ok(failed(x, file, FileStatus::NotOpen, true, format!("{name} is not open"))),
         Some(f) => {
             let (mode, assigned) = (Some(f.mode), f.assigned.clone());
             match f.close() {
@@ -471,7 +501,7 @@ pub fn close<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, 
                     set_status(x, file, status, pos)?;
                     Ok(Outcome::Done)
                 }
-                Err(e) => Ok(Outcome::Failed(Failure { status: FileStatus::PermanentError, mode, message: format!("{name}: {e}") })),
+                Err(e) => Ok(Outcome::Failed(Failure { status: FileStatus::PermanentError, mode, open_or_close: true, message: format!("{name}: {e}") })),
             }
         }
     }
@@ -554,7 +584,7 @@ fn read_stream<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>
         return at_end(FileStatus::NotOpenInput);
     }
     let (record, wrong_length) = match read {
-        Err(e) => return Ok(failed(x, file, FileStatus::PermanentError, format!("READ {}: {e}", file.name))),
+        Err(e) => return Ok(failed(x, file, FileStatus::PermanentError, false, format!("READ {}: {e}", file.name))),
         Ok(Record::End) => return at_end(FileStatus::AtEnd),
         Ok(Record::Data(bytes)) => (bytes, false),
         Ok(Record::WrongLength(bytes)) => (bytes, true),
@@ -691,11 +721,11 @@ pub fn write_stream<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, 
 fn put_line<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, loc: Loc, controls: Option<Controls>, text: (Option<Move>, Option<Move>), pos: Pos) -> R<Outcome> {
     let (k, name) = (file.index, file.name);
     let Some(mut f) = x.slot(k).take() else {
-        return Ok(failed(x, file, FileStatus::NotOpenOutput, format!("WRITE {name}: {}", FileStatus::NotOpenOutput.meaning())));
+        return Ok(failed(x, file, FileStatus::NotOpenOutput, false, format!("WRITE {name}: {}", FileStatus::NotOpenOutput.meaning())));
     };
     if f.mode == OpenMode::Input {
         *x.slot(k) = Some(f);
-        return Ok(failed(x, file, FileStatus::NotOpenOutput, format!("WRITE {name}: {}", FileStatus::NotOpenOutput.meaning())));
+        return Ok(failed(x, file, FileStatus::NotOpenOutput, false, format!("WRITE {name}: {}", FileStatus::NotOpenOutput.meaning())));
     }
     let reserved = usize::from(file.carriage.is_some_and(|c| c.reserved));
     if let Some(c) = controls.filter(|_| reserved == 1 && loc.len > 0) {
@@ -723,7 +753,7 @@ fn put_line<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, l
     *x.slot(k) = Some(f);
     match written {
         Ok(()) => set_status(x, file, FileStatus::Success, pos).map(|()| Outcome::Done),
-        Err(e) => Ok(failed(x, file, FileStatus::PermanentError, format!("WRITE {name}: {e}"))),
+        Err(e) => Ok(failed(x, file, FileStatus::PermanentError, false, format!("WRITE {name}: {e}"))),
     }
 }
 

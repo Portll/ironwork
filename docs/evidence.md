@@ -376,8 +376,8 @@ false when the 200 runs ran out first), `counts` (`runs`, `clean`, `abend`, `tim
 over the generated runs; an abend that says what the surroundings lack counts as refused and is not
 kept: IRONWORK, a construct ironwork does not run (a static CALL of a program no `-L` library
 holds among them), U4038 with CEE3501S, a dynamic CALL of one, S806, a job step's program no
-library holds, EXEC, an EXEC statement with no database or region behind it, and IO-35, an OPEN of a file no DD
-gives; so do a run ironwork refused, told by its exit status from 241 up, and a run in which
+library holds, EXEC, an EXEC statement with no database or region behind it, and U4038 with IGZ0035S
+and status 35, an OPEN of a file no DD gives; so do a run ironwork refused, told by its exit status from 241 up, and a run in which
 ironwork itself panicked, 255; standard error gives the first refusal's reason, then, where runs
 were refused at more than one place or for more than one reason, each with its count, the most
 frequent first and ten at most, and the first panic) and `runs`,
@@ -464,7 +464,7 @@ each run an `ironwork cics`, and writes the same directory with `entry` `cics`
    OMITTED as a null address, and runs it as a subprogram: EXIT PROGRAM returns. The subprogram's
    files, and those of the programs it contains or reaches by a CALL of a literal, get data sets
    as §5 gives the files it does not vary: an empty one for each file read or extended and a new
-   one for each only written, so an OPEN does not end the run IO-35; their records are not varied,
+   one for each only written, so an OPEN does not end the run with IGZ0035S; their records are not varied,
    the arguments being the inputs. A CALL whose target is a field of an argument, or an item up to four MOVEs (a group MOVE among them) carry such a field into, or whose CEE3501S
    names bytes a run generated in one, is given in that place a program name a caller would pass:
    an alphanumeric literal that the subprogram, or a source naming it in a literal, MOVEs or gives

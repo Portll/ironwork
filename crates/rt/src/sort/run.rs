@@ -98,8 +98,8 @@ pub trait SortHost<'a, P: Copy, X: Copy>: Files<P, X> {
     /// WRITE of the record at `loc` to file `k`, with no phrases; true when it failed.
     fn put(&mut self, k: usize, loc: Loc, pos: Pos) -> R<bool>;
     /// Records a status of file `k`, open in `mode` or being opened in it, and takes the file's
-    /// error path when it fails.
-    fn fail(&mut self, k: usize, status: FileStatus, mode: Option<OpenMode>, message: String, pos: Pos) -> R<()>;
+    /// error path when it fails; `open_or_close` whether the SORT or MERGE was opening or closing it.
+    fn fail(&mut self, k: usize, status: FileStatus, mode: Option<OpenMode>, open_or_close: bool, message: String, pos: Pos) -> R<()>;
     /// Whether an EXCEPTION/ERROR procedure applies to file `k` in `mode`.
     fn has_error_procedure(&self, k: usize, mode: OpenMode) -> bool;
     /// Runs an input or output procedure; the Ending of a STOP RUN or GOBACK in it.
@@ -243,7 +243,7 @@ fn is_open<P: Copy, X: Copy>(x: &mut impl Files<P, X>, k: usize) -> bool {
 fn open_for_sort<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, k: usize, mode: OpenMode, pos: Pos) -> R<Outcome> {
     let name = x.sort_file(k).file.name;
     if is_open(x, k) {
-        x.fail(k, FileStatus::AlreadyOpen, Some(mode), format!("{name} is open, and a SORT or MERGE opens it itself"), pos)?;
+        x.fail(k, FileStatus::AlreadyOpen, Some(mode), true, format!("{name} is open, and a SORT or MERGE opens it itself"), pos)?;
         return Ok(Err(format!("{name} is already open (file status {})", FileStatus::AlreadyOpen.as_str())));
     }
     x.open(k, mode, pos)?;
@@ -258,7 +258,7 @@ fn close_for_sort<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, k: usi
 /// Records an I/O status of file k in the mode it is open in.
 fn io_status<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, k: usize, status: FileStatus, message: String, pos: Pos) -> R<()> {
     let mode = x.slot(k).as_ref().map(|f| f.mode);
-    x.fail(k, status, mode, message, pos)
+    x.fail(k, status, mode, false, message, pos)
 }
 
 /// The next record of an open USING file, with the file status READ would set. A print file's
@@ -507,7 +507,7 @@ fn by_dfsort<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>, T>(x: &mut H, k: usize
     }
     let was_open = is_open(x, k);
     let result = match op(x) {
-        Err(a) if matches!(a.code, AbendCode::Io(_)) => Ok(Err(a.message)),
+        Err(a) if fileio::is_unhandled_io(&a) => Ok(Err(a.message)),
         other => other,
     };
     if !was_open && let Some(f) = x.slot(k).take() {

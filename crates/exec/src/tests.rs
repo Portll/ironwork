@@ -708,7 +708,7 @@ fn only_an_abend_trap_off_keeps_from_language_environment_leaves_a_vsam_data_set
         ("CONTINUE", "", None, [false; 3]),
         ("DIVIDE Z INTO N", "", Some("S0CB"), [false; 3]),
         ("CLOSE K-FILE R-FILE S-FILE DIVIDE Z INTO N", "/TRAP(OFF)", Some("S0CB"), [false; 3]),
-        ("READ S-FILE", "/TRAP(OFF)", Some("IO-47"), [false; 3]),
+        ("READ S-FILE", "/TRAP(OFF)", Some("U4038"), [false; 3]),
         ("DIVIDE Z INTO N", "/TRAP(OFF)", Some("S0CB"), [true, true, false]),
     ];
     for (end, parm, abend, marked) in cases {
@@ -807,13 +807,29 @@ fn file_status_codes_and_optional_files() {
     assert_eq!(out, "05\nEND 10\n35\n47\n");
 }
 
+/// An OPEN or CLOSE of a VSAM file returns control with no FILE STATUS or declarative to take its
+/// failure (assumption C451); the READ of the file it left closed is a logic error, IGZ0020S.
+#[test]
+fn a_vsam_open_returns_control_and_the_read_after_it_ends_with_igz0020s() {
+    let select = "           SELECT K-F ASSIGN TO NODD\n               ORGANIZATION IS INDEXED\n               RECORD KEY IS K-KEY.\n";
+    let fd = "       FD  K-F.\n       01  K-REC.\n           05 K-KEY PIC X(4).\n";
+    let source = file_program(select, fd, "", &[line("OPEN INPUT K-F"), line("DISPLAY 'AFTER OPEN'"), line("READ K-F"), line("GOBACK.")].concat());
+    for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+        let o = Harness::source(&source).run(executor);
+        assert_eq!(o.out, "AFTER OPEN\n", "{name} {}", o.err);
+        let abend = o.ending.unwrap_err();
+        assert!(abend.code == "U4038" && abend.message.starts_with("IGZ0020S A logic error occurred.") && abend.message.contains("The status code was 47."), "{name} {abend:?}");
+    }
+}
+
 #[test]
 fn an_unhandled_io_failure_ends_the_run() {
     let source = file_program("           SELECT X-F ASSIGN TO NODD.\n", "       FD  X-F.\n       01  X-REC PIC X.\n", "", &[line("OPEN INPUT X-F"), line("GOBACK.")].concat());
     let (_, _, ending) = run_files(&source, &[]);
     let abend = ending.unwrap_err();
-    assert_eq!(abend.code, "IO-35");
-    assert!(abend.message.contains("--dd NODD=path"));
+    assert_eq!(abend.code, "U4038");
+    assert!(abend.message.starts_with("IGZ0035S There was an unsuccessful OPEN or CLOSE of file X-F in program "), "{}", abend.message);
+    assert!(abend.message.contains("The status code was 35.") && abend.message.contains("--dd NODD=path"), "{}", abend.message);
 }
 
 fn ebcdic_text(bytes: &[u8]) -> String {

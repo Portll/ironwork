@@ -207,7 +207,8 @@ fn a_using_file_with_no_dd_and_no_file_status_ends_the_run() {
         &[line("SORT S-FILE ON ASCENDING KEY S-REC USING IN-A GIVING OUT-F"), line("GOBACK.")].concat(),
     );
     let (_, _, ending) = run_files(&source, &[]);
-    assert_eq!(ending.unwrap_err().code, "IO-35");
+    let abend = ending.unwrap_err();
+    assert!(abend.code == "U4038" && abend.message.starts_with("IGZ0035S ") && abend.message.contains("of file IN-A "), "{abend:?}");
 }
 
 #[test]
@@ -568,7 +569,7 @@ fn fastsrt_leaves_file_status_and_relative_key_alone_and_fails_the_sort_on_an_io
     let (stdout, err, ending) = run_flagged(&format!("       CBL FASTSRT\n{missing}"), &dds, &[]);
     assert!(ending.is_ok(), "{ending:?} {err}");
     assert_eq!(stdout, "16 XX YY 0007\n");
-    assert_eq!(run_flagged(&missing, &dds, &[]).2.unwrap_err().code, "IO-35");
+    assert_eq!(run_flagged(&missing, &dds, &[]).2.unwrap_err().code, "U4038");
 }
 
 #[test]
