@@ -150,9 +150,12 @@ mod tests {
 
     #[test]
     fn the_tables_hold_every_row() {
-        assert_eq!((commands().len(), resp_table().len(), tables().cvda.len()), (67, 121, 1061));
+        assert_eq!((commands().len(), resp_table().len(), tables().cvda.len()), (128, 121, 1061));
         assert_eq!(every_command_options().iter().map(|o| o.name).collect::<Vec<_>>(), ["RESP", "RESP2"]);
-        assert!(commands().iter().all(|c| c.doc.starts_with("https://www.ibm.com/docs/") && c.page.is_some()), "every command cites IBM");
+        assert!(commands().iter().all(|c| c.doc.starts_with("https://www.ibm.com/docs/")), "every command cites IBM");
+        // The asynchronous API came after the 5.3 reference the pages are from.
+        let unpaged: Vec<&str> = commands().iter().filter(|c| c.page.is_none()).map(|c| c.name).collect();
+        assert_eq!(unpaged, ["FETCH ANY", "FETCH CHILD", "FREE CHILD", "RUN TRANSID"]);
     }
 
     #[test]
