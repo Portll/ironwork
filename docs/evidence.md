@@ -484,3 +484,24 @@ each run an `ironwork cics`, and writes the same directory with `entry` `cics`
    `runCoverage`, every run's coverage added up, as in §5; and inputs of `kind` `argument`, `name` the USING item, `position` its place in the USING list,
    and `omitted` true for an OMITTED one. Its kept runs are described as §5's are. An abend found
    this way shows that a caller passing those bytes ends the subprogram, not that any caller does.
+
+## 6. Compliance frameworks
+
+What each kind of evidence above answers in a compliance framework is mapped in cobolwork, the same
+way for both tools: the `evidence` rows of cobolwork's `rules/compliance-*.json`, written by its
+`diag/map-compliance.mjs`, each NIST quote matched against the instrument's text (cobolwork
+`docs/spec/evidence.md` §9).
+
+| Evidence | NIST SP 800-53 r5 | COBIT 2019 |
+|---|---|---|
+| A run journal's records (§1) | AU-3 Content of Audit Records | DSS06.05 |
+| The journal and ledger chain, which `cobolwork evidence verify` recomputes | AU-9(3) Cryptographic Protection | DSS06.05 |
+| The provenance statement (§2) | SR-4 Provenance | DSS06.05 |
+| The options in force, `--compliance` and `--dialect` among them (§2's `optionsInForce`; §1's `open.argv`) | CM-6 Configuration Settings | BAI10.04 |
+| The assumptions register (`ironwork assumptions`) | none | none |
+
+DORA (Articles 8 and 9) and the FFIEC booklets cobolwork reads hold no clause on keeping or
+protecting a program's run records, and each file says so for every kind. COBIT 2019 follows NIST at
+the control and is given as identifiers only; the practice numbers have not been checked against a
+licensed copy of the framework. `cobolwork evidence verify` reports the clauses of what it checked,
+the journal and its chain, in its verdict's `compliance`.
