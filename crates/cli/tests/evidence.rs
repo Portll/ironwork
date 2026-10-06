@@ -280,7 +280,7 @@ fn an_abend_in_a_called_program_names_that_programs_source_on_stderr_and_in_the_
     ];
     for (program, file, line) in cases {
         let ev = dir.join(format!("ev-{program}"));
-        let run = |extra: &[&std::ffi::OsStr]| Command::new(env!("CARGO_BIN_EXE_ironwork")).arg("run").arg(dir.join(format!("src/{program}.cbl"))).arg("-L").arg(dir.join("lib")).args(extra).output().unwrap();
+        let run = |extra: &[&std::ffi::OsStr]| Command::new(env!("CARGO_BIN_EXE_ironwork")).arg("run").arg(dir.join("src").join(format!("{program}.cbl"))).arg("-L").arg(dir.join("lib")).args(extra).output().unwrap();
         let place = format!("{}:{line}:", dir.join(file.replace('/', std::path::MAIN_SEPARATOR_STR)).display());
         for out in [run(&["--evidence".as_ref(), ev.as_os_str()]), run(&["--vm".as_ref()])] {
             let stderr = String::from_utf8_lossy(&out.stderr);
