@@ -235,6 +235,40 @@ fn an_exponent_with_decimal_places_is_evaluated_in_floating_point() {
     assert_eq!(on_both(&source), "00010000000{\n+2000000\n+1414214\n+2000000\n-8000000\n+2000000\nSIZE\n+2000000\n");
 }
 
+/// Programming Guide, 'Fixed-point data and intermediate results': an integral exponent multiplies
+/// the base by itself |n| - 1 times at dmax places, a negative one then divides 1 by that power, and
+/// an exponent of more than nine digits keeps nine. Zero to a negative power is IGZ0050S, which ON
+/// SIZE ERROR takes; a power that truncates to zero under a negative exponent is IGZ0222S (C334).
+#[test]
+fn an_integral_exponent_in_fixed_point_may_be_negative_or_past_31() {
+    let data = "       01  R PIC 9(13)V9(4).\n       01  A PIC 9 VALUE 2.\n       01  Z PIC 9 VALUE 0.\n       01  N PIC S9(10) VALUE -2.\n       01  B PIC S9(10) VALUE 40.\n       01  T PIC S9(10) VALUE 1000000002.\n       01  F PIC V9 VALUE .1.\n       01  G PIC 9V9.\n       01  M PIC S99 VALUE -40.\n";
+    let powers = [
+        line("COMPUTE R = A ** N"),
+        line("DISPLAY R"),
+        line("COMPUTE R = A ** B"),
+        line("DISPLAY R"),
+        line("COMPUTE R = A ** T"),
+        line("DISPLAY R"),
+        line("COMPUTE R = Z ** N"),
+        line("    ON SIZE ERROR DISPLAY 'SIZE'"),
+        line("END-COMPUTE"),
+        line("DISPLAY R"),
+    ]
+    .concat();
+    assert_eq!(on_both(&program("", data, &[powers.as_str(), &line("GOBACK.")].concat())), "00000000000002500\n10995116277760000\n00000000000040000\nSIZE\n00000000000040000\n");
+    for (statement, ending) in [
+        ("COMPUTE R = Z ** N.", "IGZ0050S A zero base was raised to a negative power in an exponentiation expression."),
+        ("COMPUTE G = F ** M.", "IGZ0222S No significant digits remain in a fixed-point exponentiation operation due to excessive decimal positions specified in the operands or receivers."),
+    ] {
+        let source = program("", data, &line(statement));
+        let walker = Harness::source(&source).run(Executor::Interpreter);
+        let vm = Harness::source(&source).run(Executor::Vm);
+        assert_eq!(vm.ending, walker.ending, "{statement}");
+        let abend = walker.ending.unwrap_err();
+        assert_eq!((abend.code.to_string(), abend.message.as_str()), ("U4038".to_owned(), ending), "{statement}");
+    }
+}
+
 /// Language Reference SC27-8713-03, p. 246: a numeric item's VALUE literal must be numeric; a
 /// numeric-edited item's is alphanumeric, and a figurative constant stands for either.
 #[test]

@@ -14,7 +14,8 @@ fn out_of_range(message: String, pos: Pos) -> Abend {
     Abend { code: AbendCode::user(4038), message, pos, file: None }
 }
 
-/// A LINKAGE record's address; S0C4 while no argument or SET ADDRESS OF has given it one.
+/// A LINKAGE record's address; S0C4 while no argument or SET ADDRESS OF has given it one
+/// (assumption C458).
 pub fn linkage_base(address: Option<usize>, name: &str, pos: Pos) -> R<usize> {
     address.ok_or_else(|| Abend {
         code: AbendCode::Protection,
@@ -78,10 +79,11 @@ pub fn refmod(len: i64, start: i64, length: Option<i64>, check: bool, name: &str
     Ok((start - 1, length))
 }
 
-/// The offset and length, refused when they reach outside run-unit memory of `mem_len` bytes.
+/// The offset and length; S0C4 when they reach outside run-unit memory of `mem_len` bytes, as no
+/// SSRANGE check stopped them first (assumption C458).
 pub fn within(offset: i64, len: i64, mem_len: usize, name: &str, pos: Pos) -> R<(usize, usize)> {
     if offset < 0 || len < 0 || offset + len > mem_len as i64 {
-        return Err(Abend::ironwork(format!("{name} reaches outside the run unit's storage"), pos));
+        return Err(Abend { code: AbendCode::Protection, message: format!("{name} reaches outside the run unit's storage"), pos, file: None });
     }
     Ok((offset as usize, len as usize))
 }

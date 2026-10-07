@@ -373,7 +373,7 @@ pub enum IntExpr { Const(i64), Item(PlaceId), Fixed { expr: ExprId, dmax: u32, p
 
 pub enum Expr {
     Operand(Operand), Neg(ExprId), Bin(ExprId, BinOp, ExprId),
-    /// An exponent from 0 to 31, else abend IRONWORK (machine.rs:1439-1449).
+    /// An integral exponent, negative or past 31 too (`arith::pow`, C334).
     Pow(ExprId, IntExpr),
 }
 
@@ -556,7 +556,7 @@ rounding of its own for them.
 
 ### 7.3 What stays dynamic
 
-- **Values,** with their S0C7 checks, and an exponent held in a data item, checked to be 0 to 31.
+- **Values,** with their S0C7 checks, and an exponent held in a data item.
 - **The places of intermediate values.** `precision::Fixed` carries them at run time; NUMVAL and
   NUMVAL-C give places that depend on the text (machine.rs:2067-2072), MIN and MAX on which argument
   wins (machine.rs:1314-1330).
@@ -1337,7 +1337,8 @@ pub enum StartKey { Prime, Named { key: u8, span: RecordSpan }, Relative(IntExpr
   failing status with no phrase to run takes the file's error path: a USE AFTER EXCEPTION/ERROR
   procedure the op runs through `Procedures::run`, whose leaving the op returns as its `Step`
   (§9.10), else, when the file has no FILE STATUS, the ending `fileio::unhandled` gives (C451):
-  U4038 with IGZ0035S or IGZ0020S, control back after a VSAM file's OPEN or CLOSE, or `IO-xx`.
+  U4038 with IBM's message where it names one (IGZ0035S, IGZ0020S, IGZ0197S, IGZ0002S), or control
+  back after a VSAM file's OPEN or CLOSE.
 - **One op per file.** OPEN and CLOSE name several files; the walker opens each in turn and stops at
   the first abend, as a block of ops does.
 - **Which phrase READ takes** is fixed by the file: AT END for a sequential file, sequential access,

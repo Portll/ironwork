@@ -379,6 +379,12 @@ fn loop_of(recent: &VecDeque<Started>, now: Started) -> Overrun {
     Overrun { head, lines, grace: LOOP_WINDOW }
 }
 
+/// The return code a job step ends with: RETURN-CODE modulo 4096, a negative value by the same
+/// arithmetic (assumption C457).
+pub fn step_return_code(return_code: i16) -> u16 {
+    i32::from(return_code).rem_euclid(4096) as u16
+}
+
 impl<H, L: Loader<H>> RunUnit<'_, H, L> {
     /// Copies `bytes` into memory at `offset`; under taint they may hold input when the running
     /// statement has read a byte that may. Every write of data to memory goes through here or

@@ -838,7 +838,6 @@ severity S before the text, under the abend code IRONWORK, EXEC or JAVA.
 | IWR0066 | S | `DISPLAY of a floating-point value is not supported yet` |
 | IWR0067 | S | `DISPLAY of a pointer, index or object reference is not supported` |
 | IWR0068 | S | `ADVANCING {name} on {file}, whose FD has LINAGE, is not supported yet` |
-| IWR0069 | S | `exponentiation other than by an integer from 0 to 31 is not supported yet` |
 | IWR0070 | S | `this BY VALUE argument is not supported` |
 | IWR0071 | S | `this INVOKE argument is not supported` |
 | IWR0072 | S | `{statement}: {name} is a Language Environment callable service that ironwork for COBOL does not provide yet` |

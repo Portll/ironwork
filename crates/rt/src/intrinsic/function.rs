@@ -214,7 +214,7 @@ pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args
                 other => {
                     let b = scaled(&number(&args[1])?)?;
                     if b == 0 {
-                        return Err(Abend::ironwork(format!("FUNCTION {other} by zero"), pos));
+                        return Err(Abend::check(ProgramCheck::DecimalDivide, pos));
                     }
                     let r = a % b;
                     if other == "MOD" && r != 0 && (r < 0) != (b < 0) { r + b } else { r }
@@ -299,7 +299,7 @@ fn float_function(facts: &dyn ProgramFacts, name: &str, args: &[Val], pos: Pos) 
         "REM" => {
             let y = float(&args[1])?;
             if y.fraction == 0 {
-                return Err(Abend::ironwork("FUNCTION REM by zero", pos));
+                return Err(Abend::check(ProgramCheck::HfpDivide, pos));
             }
             let part = check(x.div(y, ProgramMask::default()))?.integer_part();
             Val::Float(check(x.sub(check(y.mul(part, p, ProgramMask::default()))?, ProgramMask::default()))?)
@@ -445,6 +445,31 @@ fn format_argument(facts: &dyn ProgramFacts, v: &Val, name: &str, pos: Pos) -> R
     datetime::Format::parse(&written).ok_or_else(|| Abend::ironwork(format!("FUNCTION {name}: {written} is not a date and time format (Language Reference SC27-8713-03, p. 504)"), pos))
 }
 
+/// The Language Environment math-services condition an argument outside a function's domain
+/// signals, of severity 2, which ends the run U4038 when nothing handles it (assumption C112): the
+/// routine is CEESD's long-precision service, CEESQ's under ARITH(EXTEND), and SIN, COS and TAN
+/// signal CEE2017E from pi*(2**50), and 2**100 for CEESQ.
+fn math_condition(name: &str, x: Real, p: Precision, pos: Pos) -> Option<Abend> {
+    let (id, routine, condition) = match name {
+        "SQRT" if x.is_negative() => ("CEE2010E", "SQT", "The argument was less than 0"),
+        "LOG" if x.is_negative() || x.is_zero() => ("CEE2012E", "LOG", "The argument was less than or equal to 0"),
+        "LOG10" if x.is_negative() || x.is_zero() => ("CEE2012E", "LG1", "The argument was less than or equal to 0"),
+        "ASIN" | "ACOS" if x.abs().compare(Real::ONE) == Ordering::Greater => ("CEE2016E", if name == "ASIN" { "ASN" } else { "ACS" }, "The absolute value of the argument was greater than 1"),
+        "SIN" | "COS" | "TAN" => {
+            let long = p == Precision::Long;
+            let limit = if long { math::pi().scaled(50) } else { Real::from_u128(1 << 100) };
+            if x.abs().compare(limit) == Ordering::Less {
+                return None;
+            }
+            let condition = if long { "The absolute value of the argument was greater than or equal to pi*(2**50)" } else { "The absolute value of the argument was greater than or equal to 2**100" };
+            ("CEE2017E", &name[..3], condition)
+        }
+        _ => return None,
+    };
+    let service = if p == Precision::Long { "CEESD" } else { "CEESQ" };
+    Some(Abend { code: AbendCode::user(4038), message: format!("{id} {condition} in math routine {service}{routine}. ({})", x.to_f64()), pos, file: None })
+}
+
 /// An argument outside what a function takes: IBM's message `id` and its text, a severity-3
 /// condition that ends the run U4038 (assumption C452), what the argument held in parentheses.
 fn out_of_range(id: &str, text: String, held: impl std::fmt::Display, pos: Pos) -> Abend {
@@ -501,20 +526,23 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
         "SQRT" | "EXP" | "EXP10" | "LOG" | "LOG10" | "SIN" | "COS" | "TAN" | "ASIN" | "ACOS" | "ATAN" => {
             arity(1..=1, args)?;
             let x = real(&args[0], p, name, pos)?;
-            let (value, why) = match name {
-                "SQRT" => (math::sqrt(x), "the argument must be zero or positive"),
-                "EXP" => (Some(math::exp(x)), ""),
-                "EXP10" => (Some(math::exp10(x)), ""),
-                "LOG" => (math::ln(x), "the argument must be greater than zero"),
-                "LOG10" => (math::log10(x), "the argument must be greater than zero"),
-                "SIN" => (math::sin(x), "the argument is beyond the range ironwork for COBOL reduces"),
-                "COS" => (math::cos(x), "the argument is beyond the range ironwork for COBOL reduces"),
-                "TAN" => (math::tan(x), "the argument is beyond the range ironwork for COBOL reduces"),
-                "ASIN" => (math::asin(x), "the argument must be from -1 to +1"),
-                "ACOS" => (math::acos(x), "the argument must be from -1 to +1"),
-                _ => (Some(math::atan(x)), ""),
+            if let Some(abend) = math_condition(name, x, p, pos) {
+                return Err(abend);
+            }
+            let value = match name {
+                "SQRT" => math::sqrt(x),
+                "EXP" => Some(math::exp(x)),
+                "EXP10" => Some(math::exp10(x)),
+                "LOG" => math::ln(x),
+                "LOG10" => math::log10(x),
+                "SIN" => math::sin(x),
+                "COS" => math::cos(x),
+                "TAN" => math::tan(x),
+                "ASIN" => math::asin(x),
+                "ACOS" => math::acos(x),
+                _ => Some(math::atan(x)),
             };
-            float_result(value.ok_or_else(|| outside(x, why))?, p, pos)
+            float_result(value.ok_or_else(|| outside(x, "the argument is beyond the range ironwork for COBOL reduces"))?, p, pos)
         }
         "E" | "PI" => {
             arity(0..=0, args)?;
@@ -690,7 +718,10 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             let parsed = if name == "HEX-TO-CHAR" { text::hex_to_char(&text) } else { text::bit_to_char(&text) };
             parsed.map(Val::Bytes).map_err(|at| match at {
                 0 => out_of_range("IGZ0348S", format!("Argument-1 for function {name} had a length that was not a multiple of {} bytes.", if name == "HEX-TO-CHAR" { 2 } else { 8 }), text.len(), pos),
-                at => Abend::ironwork(format!("FUNCTION {name}: character {at} of the argument is not a {}", if name == "HEX-TO-CHAR" { "hexadecimal digit" } else { "0 or 1" }), pos),
+                at => {
+                    let c = text.chars().nth(at - 1).unwrap_or(' ');
+                    Abend { code: AbendCode::user(4038), message: format!("IGZ0152S Invalid character {c} was found in column {at} in argument-1 for function {name}."), pos, file: None }
+                }
             })
         }
         "DISPLAY-OF" => {

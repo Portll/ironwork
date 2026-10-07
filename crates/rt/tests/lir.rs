@@ -7,7 +7,7 @@ use std::fmt;
 mod common;
 
 use common::payroll;
-use ironwork_rt::abend::{AbendCode, Ending, FileStatus, Signal};
+use ironwork_rt::abend::{AbendCode, Ending, FileStatus, LeCondition, Signal};
 use ironwork_rt::cics::{Assign, Cics, Condition, Control, Datum, FileControl, FileOptions, Record, Resp, Sink, Transfer};
 use ironwork_rt::files::Format;
 use ironwork_rt::lir::*;
@@ -264,8 +264,12 @@ fn abend_codes_round_trip_with_every_tag() {
         AbendCode::SqlReplay,
         AbendCode::Java,
         AbendCode::Signal(Signal::SortStopped),
+        AbendCode::TimeLimit,
+        AbendCode::Le(LeCondition::FileStatus),
+        AbendCode::Requested { code: "U0999".into(), clean_up: false },
     ];
-    every_variant(&codes, 12);
+    every_variant(&codes, 15);
+    every_variant(&[LeCondition::ZeroPower, LeCondition::FileStatus], 2);
     let signals = [Signal::StopRun, Signal::GoBack, Signal::SortStopped, Signal::ClosedOutput, Signal::DeclarativeExit];
     every_variant(&signals, 5);
     every_variant(&[Ending::Goback, Ending::StopRun, Ending::EndOfProgram], 3);

@@ -110,30 +110,44 @@ pub struct Failure {
 
 /// Whether `abend` is the ending `unhandled` gives a failing status.
 pub fn is_unhandled_io(abend: &Abend) -> bool {
-    matches!(abend.code, crate::abend::AbendCode::Io(_)) || abend.code == crate::abend::AbendCode::user(4038) && (abend.message.starts_with("IGZ0035S ") || abend.message.starts_with("IGZ0020S "))
+    use crate::abend::{AbendCode, LeCondition};
+    matches!(abend.code, AbendCode::Io(_) | AbendCode::Le(LeCondition::FileStatus))
 }
 
 /// How a failing status ends the run when no FILE STATUS holds it and no EXCEPTION/ERROR
 /// procedure takes it (assumption C451); None where control returns to the program. An OPEN or
 /// CLOSE of a VSAM file (indexed or relative, C220) returns control whatever its status (Programming
-/// Guide, 'Handling errors in VSAM files'); any other OPEN or CLOSE ends U4038 with IGZ0035S, and a
-/// logic error (a 4x status) with IGZ0020S, as a severity-3 condition nothing handles does (LE
-/// Runtime Messages; Programming Guide, 'Handling errors in input and output operations'). Statuses
-/// IBM's messages do not settle end with the status itself, `IO-` and its two digits.
+/// Guide, 'Handling errors in VSAM files'). Any other failure is a severity-3 condition nothing
+/// handles, which ends the run U4038 with a message (Programming Guide, 'Handling errors in input and
+/// output operations' and its two flow figures): IGZ0035S for an OPEN or CLOSE, IGZ0020S for a logic
+/// error (4x), IGZ0197S for a line-sequential (z/OS UNIX) file's permanent error and IGZ0002S, QSAM's
+/// SYNAD message, for a sequential file's. IBM names no message for an AT END or INVALID KEY no
+/// phrase takes, or a VSAM file's permanent error; ironwork says which phrase was missing.
 pub fn unhandled(status: FileStatus, organization: Organization, open_or_close: bool, file: &str, program: &str, detail: String, pos: Pos) -> Option<Abend> {
-    use crate::abend::AbendCode;
+    use crate::abend::{AbendCode, LeCondition};
     if !status.ends_the_run() || open_or_close && matches!(organization, Organization::Indexed | Organization::Relative) {
         return None;
     }
     let code = status.as_str();
-    let (abend, message) = if open_or_close {
-        (AbendCode::user(4038), format!("IGZ0035S There was an unsuccessful OPEN or CLOSE of file {file} in program {program}. Neither FILE STATUS nor an ERROR declarative were specified. The status code was {code}. ({detail})"))
+    let message = if open_or_close {
+        format!("IGZ0035S There was an unsuccessful OPEN or CLOSE of file {file} in program {program}. Neither FILE STATUS nor an ERROR declarative were specified. The status code was {code}. ({detail})")
     } else if status.covers('4') {
-        (AbendCode::user(4038), format!("IGZ0020S A logic error occurred. Neither FILE STATUS nor a declarative was specified for file {file} in program {program}. The status code was {code}. ({detail})"))
+        format!("IGZ0020S A logic error occurred. Neither FILE STATUS nor a declarative was specified for file {file} in program {program}. The status code was {code}. ({detail})")
+    } else if status.covers('3') && organization == Organization::LineSequential {
+        format!("IGZ0197S There was an unsuccessful READ or WRITE of file {file} in program {program}. Neither FILE STATUS nor an ERROR declarative were specified. The file status code was {code}. ({detail})")
+    } else if status.covers('3') && organization == Organization::Sequential {
+        format!("IGZ0002S {detail}")
     } else {
-        (AbendCode::Io(status), detail)
+        let phrase = if status.covers('1') {
+            "an AT END phrase, "
+        } else if status.covers('2') {
+            "an INVALID KEY phrase, "
+        } else {
+            ""
+        };
+        format!("Neither {phrase}FILE STATUS nor a declarative was specified for file {file} in program {program}. The status code was {code}. ({detail})")
     };
-    Some(Abend { code: abend, message, pos, file: None })
+    Some(Abend { code: AbendCode::Le(LeCondition::FileStatus), message, pos, file: None })
 }
 
 /// What the file verbs ask of the executor beyond [`Host`].

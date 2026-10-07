@@ -1195,7 +1195,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                 report(name, runner.settle());
                 match outcome {
                     Ok(rc) => {
-                        let rc = rc.clamp(0, 4095) as u16;
+                        let rc = rt::unit::step_return_code(rc);
                         log(name, &step.pgm, format!("RC={rc:04}"));
                         report(name, runner.dispose(disposals, false));
                         ran.push(Ran { name: step.name.clone(), caller: step.caller.clone(), rc: Some(rc), abend: None });

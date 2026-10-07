@@ -61,16 +61,41 @@ pub fn fixed_binop(x: Fixed, op: BinOp, y: Fixed, dmax: u32, arith: Arith, pos: 
     result.map_err(|e| fixed_error(e, pos))
 }
 
-/// `x` to the power `n`, an integer from 0 to 31, by repeated multiplication at `dmax` places.
+/// `x` to the integer power `n` at `dmax` places, as Enterprise COBOL takes an integral exponent in
+/// fixed point (assumption C334): `x` multiplied by itself |n| - 1 times, 1 for an `n` of 0, and for
+/// a negative `n` 1 divided by that power. Zero to a negative power is IGZ0050S; a power that
+/// truncates to zero under a negative `n` is IGZ0222S. An exponent of more than nine digits keeps
+/// its last nine. Past 31 the power is taken by squaring, so an exponent costs its bits, not its value.
 pub fn pow(x: Fixed, n: i64, dmax: u32, arith: Arith, pos: Pos) -> R<Fixed> {
-    if !(0..=31).contains(&n) {
-        return Err(crate::refusal::IWR0069.abend("exponentiation other than by an integer from 0 to 31 is not supported yet", pos));
+    if n < 0 && x.magnitude.is_zero() {
+        return Err(Abend::zero_power(pos));
     }
-    let mut acc = Fixed::new(1, Places::new(1, 0));
-    for _ in 0..n {
-        acc = acc.mul(x, dmax, arith).map_err(|e| fixed_error(e, pos))?;
+    let mul = |a: Fixed, b: Fixed| a.mul(b, dmax, arith).map_err(|e| fixed_error(e, pos));
+    let one = Fixed::new(1, Places::new(1, 0));
+    let magnitude = n.unsigned_abs() % 1_000_000_000;
+    let power = if magnitude <= 31 {
+        (0..magnitude).try_fold(one, |acc, _| mul(acc, x))?
+    } else {
+        let (mut acc, mut square, mut k) = (one, x, magnitude);
+        while k > 0 {
+            if k & 1 == 1 {
+                acc = mul(acc, square)?;
+            }
+            k >>= 1;
+            if k > 0 {
+                square = mul(square, square)?;
+            }
+        }
+        acc
+    };
+    if n >= 0 {
+        return Ok(power);
     }
-    Ok(acc)
+    if power.magnitude.is_zero() {
+        let message = "IGZ0222S No significant digits remain in a fixed-point exponentiation operation due to excessive decimal positions specified in the operands or receivers.";
+        return Err(Abend { code: crate::abend::AbendCode::user(4038), message: message.into(), pos, file: None });
+    }
+    one.div(power, dmax, arith).map_err(|e| fixed_error(e, pos))
 }
 
 /// An operand's value in floating point of precision `p`.

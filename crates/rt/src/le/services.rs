@@ -152,7 +152,8 @@ impl<H: Clone, L: Loader<H>> Services<'_, '_, H, L> {
         if self.unit.cics.is_some() {
             return Abend { code: AbendCode::Cics(format!("{user:04}")), message: format!("CALL CEE3ABD: transaction abend {user:04}"), pos: call.pos, file: None };
         }
-        Abend { code: AbendCode::user(user), message: format!("CALL CEE3ABD: user abend {user} {how}"), pos: call.pos, file: None }
+        let code = AbendCode::Requested { code: format!("U{user:04}"), clean_up: clean_up.is_some_and(|c| c > 0) };
+        Abend { code, message: format!("CALL CEE3ABD: user abend {user} {how}"), pos: call.pos, file: None }
     }
 
     fn ceedays_or_secs(&mut self, call: &LeCall, reading: Reading) -> Outcome {

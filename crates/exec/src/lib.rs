@@ -414,7 +414,7 @@ impl<'a> First<'a> {
 pub(crate) fn asra(a: Abend) -> Abend {
     match a.code {
         AbendCode::Check(_) | AbendCode::Protection => Abend { message: format!("{} ({}, which CICS reports as ASRA)", a.message, a.code), code: AbendCode::Cics("ASRA".into()), pos: a.pos, file: a.file },
-        ref u if *u == AbendCode::user(4038) => Abend { message: format!("{} (U4038, which CICS reports as transaction abend 4038)", a.message), code: AbendCode::Cics("4038".into()), pos: a.pos, file: a.file },
+        ref u if *u == "U4038" => Abend { message: format!("{} (U4038, which CICS reports as transaction abend 4038)", a.message), code: AbendCode::Cics("4038".into()), pos: a.pos, file: a.file },
         _ => a,
     }
 }
@@ -504,7 +504,7 @@ fn run_main<'w>(
     let last_paragraph = compiled.program.paragraphs.last().map(|p| p.pos);
     let ending = ending.and_then(|e| past_the_end(e, passed.main(), &compiled.program.id, last_paragraph));
     let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(&compiled.program.id, ending.is_ok()).map(drop));
-    let closed = run_unit.close_all(trap_off && ending.as_ref().is_err_and(|a| a.code.bypasses_trap_off()));
+    let closed = run_unit.close_all(ending.as_ref().is_err_and(|a| a.code.skips_termination(trap_off)));
     *kept = Some(unit::Remains::of(&run_unit));
     let ending = ending?;
     settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default(), file: None })?;

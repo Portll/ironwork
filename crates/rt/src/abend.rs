@@ -45,14 +45,25 @@ impl Abend {
     /// Zero raised to a negative power: IGZ0050S, a severity-3 condition that ends the run U4038,
     /// which ON SIZE ERROR takes as a size error (assumption C334).
     pub fn zero_power(pos: Pos) -> Self {
-        Self { code: AbendCode::user(4038), message: "IGZ0050S A zero base was raised to a negative power in an exponentiation expression.".into(), pos, file: None }
+        Self { code: AbendCode::Le(LeCondition::ZeroPower), message: "IGZ0050S A zero base was raised to a negative power in an exponentiation expression.".into(), pos, file: None }
     }
 
-    /// Whether an arithmetic statement with ON SIZE ERROR takes this abend as a size error: a zero
-    /// divisor's program check, or zero raised to a negative power.
+    /// Whether an arithmetic statement with ON SIZE ERROR takes this abend as a size error.
     pub fn size_error(&self) -> bool {
-        self.code.zero_divisor() || self.code == AbendCode::user(4038) && self.message.starts_with("IGZ0050S ")
+        self.code.size_error()
     }
+}
+
+/// A severity-3 Language Environment condition the runtime signals and a statement may take before
+/// it ends the run U4038: ON SIZE ERROR takes the arithmetic ones, and FASTSRT turns a USING or
+/// GIVING file's failing status into SORT-RETURN 16. The message carries IBM's text; this carries
+/// which condition it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LeCondition {
+    /// IGZ0050S: zero raised to a negative power.
+    ZeroPower,
+    /// A failing file status no FILE STATUS, declarative or AT END or INVALID KEY phrase takes (C451).
+    FileStatus,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,6 +89,10 @@ pub enum AbendCode {
     Cics(String),
     /// U and four decimal digits.
     User(String),
+    /// U4038 for a condition another part of the runtime may take.
+    Le(LeCondition),
+    /// The user abend CEE3ABD issues, U and four digits, and whether it asked for clean-up.
+    Requested { code: String, clean_up: bool },
     Ironwork,
     Exec,
     Sql,
@@ -159,6 +174,8 @@ impl AbendCode {
             Self::TimeLimit => "S322",
             Self::Io(status) => status.abend_code(),
             Self::Cics(code) | Self::User(code) => code,
+            Self::Le(_) => "U4038",
+            Self::Requested { code, .. } => code,
             Self::Ironwork => "IRONWORK",
             Self::Exec => "EXEC",
             Self::Sql => "SQL",
@@ -174,10 +191,21 @@ impl AbendCode {
         matches!(self, Self::Check(_) | Self::Protection | Self::TimeLimit)
     }
 
-    /// The program check a zero divisor raises: decimal, fixed-point or HFP divide. An arithmetic
-    /// statement with ON SIZE ERROR takes it as a size error instead.
-    pub fn zero_divisor(&self) -> bool {
-        matches!(self, Self::Check(ProgramCheck::DecimalDivide | ProgramCheck::FixedPointDivide | ProgramCheck::HfpDivide))
+    /// Whether the run ends without Language Environment's termination activities, which leaves its
+    /// files unclosed: a program check or system abend under TRAP(OFF), and CEE3ABD's abend without
+    /// clean-up, or with it under TRAP(OFF), where 'CEE3ABD behaves in a similar manner to clean-up
+    /// 0' (assumption L6).
+    pub fn skips_termination(&self, trap_off: bool) -> bool {
+        match self {
+            Self::Requested { clean_up, .. } => !clean_up || trap_off,
+            _ => trap_off && self.bypasses_trap_off(),
+        }
+    }
+
+    /// What an arithmetic statement with ON SIZE ERROR takes as a size error: the program check a
+    /// zero divisor raises (decimal, fixed-point or HFP divide), and zero raised to a negative power.
+    pub fn size_error(&self) -> bool {
+        matches!(self, Self::Check(ProgramCheck::DecimalDivide | ProgramCheck::FixedPointDivide | ProgramCheck::HfpDivide) | Self::Le(LeCondition::ZeroPower))
     }
 }
 
@@ -364,5 +392,24 @@ mod tests {
         assert_eq!(AbendCode::from("U4038"), AbendCode::user(4038));
         assert_eq!(AbendCode::from("IO-46"), AbendCode::Io(FileStatus::NoNextRecord));
         assert_eq!(AbendCode::from("SORT-STOPPED"), AbendCode::Signal(Signal::SortStopped));
+    }
+
+    #[test]
+    fn a_condition_another_statement_takes_is_known_by_its_code_not_its_text() {
+        let at = Pos::default();
+        assert!(Abend::zero_power(at).size_error());
+        assert!(Abend::check(ProgramCheck::DecimalDivide, at).size_error());
+        let reworded = Abend { message: "zero to the power -1".into(), ..Abend::zero_power(at) };
+        assert!(reworded.size_error());
+        let text_alone = Abend { code: AbendCode::user(4038), ..Abend::zero_power(at) };
+        assert!(!text_alone.size_error());
+        assert!(!Abend { code: AbendCode::Le(LeCondition::FileStatus), ..Abend::zero_power(at) }.size_error());
+        let file_status = |code, message: &str| crate::fileio::is_unhandled_io(&Abend { code, message: message.into(), pos: at, file: None });
+        assert!(file_status(AbendCode::Le(LeCondition::FileStatus), "a status no FILE STATUS took"));
+        assert!(file_status(AbendCode::Io(FileStatus::PermanentError), ""));
+        assert!(!file_status(AbendCode::user(4038), "IGZ0035S There was an unsuccessful OPEN or CLOSE of file F."));
+        for c in [LeCondition::ZeroPower, LeCondition::FileStatus] {
+            assert_eq!(AbendCode::Le(c), "U4038");
+        }
     }
 }

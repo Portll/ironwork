@@ -225,6 +225,20 @@ fn a_job_exits_with_its_highest_step_return_code_and_says_one_outside_0_to_238()
     assert!(stderr(&out).ends_with("ironwork: the highest step return code 1000 exits 239\n"), "{}", stderr(&out));
 }
 
+/// A step's return code is RETURN-CODE modulo 4096, a negative value by the same arithmetic
+/// (assumption C457).
+#[test]
+fn a_step_return_code_is_return_code_modulo_4096() {
+    let dir = Dir::new("job-modulo");
+    dir.program("WIDE", &[], &["MOVE 5000 TO RETURN-CODE.", "GOBACK."]);
+    dir.program("WRAPS", &[], &["MOVE 4096 TO RETURN-CODE.", "GOBACK."]);
+    dir.program("NEG", &[], &["MOVE -1 TO RETURN-CODE.", "GOBACK."]);
+    let out = dir.job("//S1 EXEC PGM=WIDE\n//S2 EXEC PGM=WRAPS\n//S3 EXEC PGM=NEG\n", &[]);
+    let log = stderr(&out);
+    assert!(log.contains("S1 PGM=WIDE RC=0904") && log.contains("S2 PGM=WRAPS RC=0000") && log.contains("S3 PGM=NEG RC=4095"), "{log}");
+    assert!(log.ends_with("ironwork: the highest step return code 4095 exits 239\n"), "{log}");
+}
+
 #[test]
 fn a_job_exits_as_its_first_step_that_ended_without_a_return_code_says() {
     let dir = Dir::new("job-first");

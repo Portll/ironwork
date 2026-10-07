@@ -217,9 +217,14 @@ fn a_floating_point_function_makes_its_expression_floating_point() {
 #[test]
 fn an_argument_outside_a_functions_domain_ends_the_run() {
     let ending = |statement: &str| run_at_noon(&program("", "       01  X COMP-2.\n", &[line(statement), line("GOBACK.")].concat())).1.unwrap_err().message;
-    assert!(ending("COMPUTE X = FUNCTION SQRT(-1)").contains("FUNCTION SQRT(-1): the argument must be zero or positive"));
-    assert!(ending("COMPUTE X = FUNCTION LOG(0)").contains("FUNCTION LOG(0): the argument must be greater than zero"));
-    assert!(ending("COMPUTE X = FUNCTION ACOS(2)").contains("FUNCTION ACOS(2): the argument must be from -1 to +1"));
+    assert_eq!(ending("COMPUTE X = FUNCTION SQRT(-1)"), "CEE2010E The argument was less than 0 in math routine CEESDSQT. (-1)");
+    assert_eq!(ending("COMPUTE X = FUNCTION LOG(0)"), "CEE2012E The argument was less than or equal to 0 in math routine CEESDLOG. (0)");
+    assert_eq!(ending("COMPUTE X = FUNCTION LOG10(-2)"), "CEE2012E The argument was less than or equal to 0 in math routine CEESDLG1. (-2)");
+    assert_eq!(ending("COMPUTE X = FUNCTION ACOS(2)"), "CEE2016E The absolute value of the argument was greater than 1 in math routine CEESDACS. (2)");
+    assert_eq!(ending("COMPUTE X = FUNCTION SIN(4000000000000000)"), "CEE2017E The absolute value of the argument was greater than or equal to pi*(2**50) in math routine CEESDSIN. (4000000000000000)");
+    assert!(ending("COMPUTE X = FUNCTION MOD(7 0)").starts_with("CEE3211S The system detected a decimal-divide exception (System Completion Code=0CB)."));
+    assert!(ending("COMPUTE X = FUNCTION REM(X 0)").starts_with("CEE3215S The system detected a floating-point divide exception (System Completion Code=0CF)."));
+    assert_eq!(ending("MOVE FUNCTION HEX-TO-CHAR('1G') TO X"), "IGZ0152S Invalid character G was found in column 2 in argument-1 for function HEX-TO-CHAR.");
     assert_eq!(ending("COMPUTE X = FUNCTION FACTORIAL(29)"), "IGZ0156S Argument-1 for function FACTORIAL was less than zero or greater than 28. (29)");
     assert_eq!(ending("MOVE FUNCTION HEX-TO-CHAR('ABC') TO X"), "IGZ0348S Argument-1 for function HEX-TO-CHAR had a length that was not a multiple of 2 bytes. (3)");
     assert!(ending("COMPUTE X = FUNCTION EXP(200)").starts_with("CEE3212S The system detected an exponent-overflow exception (System Completion Code=0CC)."));

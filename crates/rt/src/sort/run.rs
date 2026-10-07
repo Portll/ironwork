@@ -825,7 +825,7 @@ pub fn return_record<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &mut H, fil
 pub fn sort_table<P: Copy, H: Host<P>>(x: &mut H, base: usize, count: usize, stride: usize, keys: impl FnOnce(&mut H) -> R<Vec<ItemKey>>, name: &str, pos: Pos) -> R<()> {
     crate::host::unfollowed(x, "SORT and MERGE");
     if base + count * stride > x.mem().len() {
-        return Err(Abend::ironwork(format!("SORT {name} reaches outside the run unit's storage"), pos));
+        return Err(Abend { code: AbendCode::Protection, message: format!("SORT {name} reaches outside the run unit's storage"), pos, file: None });
     }
     let keys = keys(x)?;
     let mut entries = Vec::with_capacity(count);

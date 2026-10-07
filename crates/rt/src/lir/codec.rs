@@ -1,6 +1,6 @@
 //! Codecs for the types the LIR borrows from `rt`, `numeric` and `zarch`, with load-module.md's tags.
 
-use crate::abend::{AbendCode, Ending, FileStatus, Signal};
+use crate::abend::{AbendCode, Ending, FileStatus, LeCondition, Signal};
 use crate::files::Format;
 use crate::module::ModuleError;
 use crate::module::codec::{Decode, Encode, Reader, Writer};
@@ -116,7 +116,10 @@ codec_enum!(AbendCode {
     Java = 10,
     Signal(signal) = 11,
     TimeLimit = 12,
+    Le(condition) = 13,
+    Requested { code, clean_up } = 14,
 });
+codec_enum!(LeCondition { ZeroPower = 0, FileStatus = 1 });
 codec_enum!(Signal { StopRun = 0, GoBack = 1, SortStopped = 2, ClosedOutput = 3, DeclarativeExit = 4 });
 codec_enum!(FileStatus {
     Success = 0,

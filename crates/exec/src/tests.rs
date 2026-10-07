@@ -652,7 +652,7 @@ fn left_open_program(card: &str, declaratives: &str, body: &[&str]) -> String {
     let program = file_program(
         "           SELECT K-FILE ASSIGN TO KDD ORGANIZATION INDEXED\n               RECORD KEY K-KEY FILE STATUS IS FS.\n           SELECT R-FILE ASSIGN TO RDD ORGANIZATION RELATIVE\n               RELATIVE KEY R-NUM FILE STATUS IS FS.\n           SELECT S-FILE ASSIGN TO SDD.\n",
         "       FD  K-FILE.\n       01  K-REC.\n           05 K-KEY PIC X(4).\n       FD  R-FILE.\n       01  R-REC PIC X(4).\n       FD  S-FILE.\n       01  S-REC PIC X(4).\n",
-        "       01  FS PIC XX.\n       01  R-NUM PIC 9(4).\n       01  N PIC S9(3) COMP-3 VALUE 1.\n       01  Z PIC S9(3) COMP-3 VALUE 0.\n",
+        "       01  FS PIC XX.\n       01  R-NUM PIC 9(4).\n       01  N PIC S9(3) COMP-3 VALUE 1.\n       01  Z PIC S9(3) COMP-3 VALUE 0.\n       01  ABCODE PIC S9(9) BINARY VALUE 999.\n       01  CLEAN-0 PIC S9(9) BINARY VALUE 0.\n       01  CLEAN-1 PIC S9(9) BINARY VALUE 1.\n",
         &[declaratives, &body.iter().map(|l| line(l)).collect::<String>()].concat(),
     );
     format!("{card}{program}")
@@ -702,16 +702,22 @@ impl LeftOpen {
     }
 }
 
+/// An ending without Language Environment's termination activities leaves a VSAM data set marked
+/// open: a program check under TRAP(OFF), and CEE3ABD without clean-up or under TRAP(OFF)
+/// (assumptions L6 and TRAP_OFF_LEAVES_FILES_OPEN).
 #[test]
-fn only_an_abend_trap_off_keeps_from_language_environment_leaves_a_vsam_data_set_open() {
+fn only_an_ending_without_termination_activities_leaves_a_vsam_data_set_open() {
     let data = LeftOpen::new("left-open");
-    let cases: [(&str, &str, Option<&str>, [bool; 3]); 6] = [
+    let cases: [(&str, &str, Option<&str>, [bool; 3]); 9] = [
         ("CLOSE K-FILE R-FILE S-FILE", "", None, [false; 3]),
         ("CONTINUE", "", None, [false; 3]),
         ("DIVIDE Z INTO N", "", Some("S0CB"), [false; 3]),
         ("CLOSE K-FILE R-FILE S-FILE DIVIDE Z INTO N", "/TRAP(OFF)", Some("S0CB"), [false; 3]),
         ("READ S-FILE", "/TRAP(OFF)", Some("U4038"), [false; 3]),
         ("DIVIDE Z INTO N", "/TRAP(OFF)", Some("S0CB"), [true, true, false]),
+        ("CALL 'CEE3ABD' USING ABCODE CLEAN-0", "", Some("U0999"), [true, true, false]),
+        ("CALL 'CEE3ABD' USING ABCODE CLEAN-1", "", Some("U0999"), [false; 3]),
+        ("CALL 'CEE3ABD' USING ABCODE CLEAN-1", "/TRAP(OFF)", Some("U0999"), [true, true, false]),
     ];
     for (end, parm, abend, marked) in cases {
         let ending = data.write(end, parm);
@@ -1027,8 +1033,31 @@ fn an_indexed_file_loads_from_a_text_dd_and_an_unhandled_invalid_key_abends() {
     let (out, _, ending) = run_files(&source, &[format!("KDD={}:text", path.display())]);
     assert_eq!(out, "TWO\n");
     let abend = ending.unwrap_err();
-    assert_eq!(abend.code, "IO-23");
+    assert_eq!(abend.code, "U4038");
+    assert!(abend.message.starts_with("Neither an INVALID KEY phrase, FILE STATUS nor a declarative was specified for file K in program F. The status code was 23."), "{}", abend.message);
     assert!(abend.message.contains("no record with that key"), "{}", abend.message);
+}
+
+/// A READ at the end of a file with no AT END phrase, FILE STATUS or declarative ends the run U4038
+/// on both executors: the Programming Guide's flow figures terminate the run unit with a message,
+/// and IBM names none (assumption C451).
+#[test]
+fn an_at_end_no_phrase_takes_ends_the_run_u4038() {
+    let path = temp("at-end.txt");
+    std::fs::write(&path, "ONE\n").unwrap();
+    let source = file_program(
+        "           SELECT S ASSIGN TO SDD.\n",
+        "       FD  S.\n       01  S-REC PIC X(3).\n",
+        "",
+        &[line("OPEN INPUT S"), line("READ S"), line("DISPLAY S-REC"), line("READ S"), line("DISPLAY 'NOT HERE'"), line("GOBACK.")].concat(),
+    );
+    let dds = [format!("SDD={}:text", path.display())];
+    let walker = Harness::source(&source).dds(&dds).run(Executor::Interpreter);
+    let vm = Harness::source(&source).dds(&dds).run(Executor::Vm);
+    assert_eq!((&vm.out, &vm.ending), (&walker.out, &walker.ending));
+    let abend = walker.ending.unwrap_err();
+    assert_eq!((walker.out.as_str(), abend.code.to_string()), ("ONE\n", "U4038".to_owned()));
+    assert!(abend.message.starts_with("Neither an AT END phrase, FILE STATUS nor a declarative was specified for file S in program F. The status code was 10."), "{}", abend.message);
 }
 
 #[test]
