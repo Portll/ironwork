@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "ironwork-compile"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "ironwork-numeric",
  "ironwork-rt",
@@ -144,7 +144,7 @@ dependencies = [
 
 [[package]]
 name = "ironwork-exec"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "ironwork-compile",
  "ironwork-numeric",
@@ -155,21 +155,21 @@ dependencies = [
 
 [[package]]
 name = "ironwork-jcl"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "ironwork-syntax",
 ]
 
 [[package]]
 name = "ironwork-numeric"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "ironwork-zarch",
 ]
 
 [[package]]
 name = "ironwork-rt"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "ironwork-numeric",
  "ironwork-zarch",
@@ -177,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "ironwork-syntax"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "ironwork-numeric",
  "ironwork-rt",
@@ -185,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "ironwork-tls"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "ironwork-exec",
  "ironwork-jcl",
@@ -200,7 +200,7 @@ dependencies = [
 
 [[package]]
 name = "ironwork-zarch"
-version = "0.8.0"
+version = "0.9.0"
 
 [[package]]
 name = "lazy_static"
