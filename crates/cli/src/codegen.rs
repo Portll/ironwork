@@ -4,18 +4,43 @@
 //! path that answers None before it stores, runs as the VM runs it (`rt::vm::Machine`). A fast path
 //! computes what the VM's own count path computes, in the same order, from the same functions.
 
-use rt::count::const_number;
+use numeric::precision::Places;
+use rt::count::{const_number, mod_places, result_places};
 use rt::fixed::places_of;
 use rt::lir::{ArithPlan, Argument, Base, Comparand, Compare, Cond, CondId, Count, Expr, ExprId, Func, IntExpr, Mode, Op, Operand, Place, PlaceId, Program, Terminator};
 use rt::storage::Kind;
-use rt::vocab::RelOp;
+use rt::vocab::{BinOp, RelOp};
 use numeric::Numproc;
 use std::fmt::Write;
+
+const PRELUDE: &str = "use ironwork_rt::fast::*;\nuse ironwork_rt::vm::{Exit, Machine, Next, Stop};\n";
+const LINTS: &str = "#![forbid(unsafe_code)]\n#![allow(clippy::all, unused_labels, unused_mut, unused_variables)]\n";
 
 /// The executable's main.rs: each program's generated code, then `main` handing the module and that
 /// code to the runtime.
 pub fn main_text(module: &str, programs: &[Program]) -> String {
-    let mut out = String::from("#![forbid(unsafe_code)]\n#![allow(clippy::all, unused_labels, unused_mut, unused_variables)]\n\nuse ironwork_rt::fast::*;\nuse ironwork_rt::vm::{Exit, Machine, Next, Stop};\n");
+    let mut out = format!("{LINTS}\n{PRELUDE}");
+    out.push_str(&programs_text(module, programs));
+    let _ = write!(out, "\nfn main() -> std::process::ExitCode {{\n    ironwork_rt::native::main({module:?}, MODULE, &NATIVES)\n}}\n");
+    out
+}
+
+/// A test harness's main.rs: every module's generated code in a module of its own, and `main` running
+/// the one its first argument names, with the rest of its arguments.
+pub fn harness_text(modules: &[(String, Vec<Program>)]) -> String {
+    let mut out = LINTS.to_owned();
+    let mut arms = String::new();
+    for (k, (module, programs)) in modules.iter().enumerate() {
+        let _ = write!(out, "\nmod module_{k} {{\n{PRELUDE}{}}}\n", programs_text(module, programs));
+        let _ = writeln!(arms, "        Some({module:?}) => ironwork_rt::native::main_with({module:?}, module_{k}::MODULE, &module_{k}::NATIVES, args.collect()),");
+    }
+    let _ = write!(out, "\nfn main() -> std::process::ExitCode {{\n    let mut args = std::env::args().skip(1);\n    match args.next().as_deref() {{\n{arms}        _ => {{\n            eprintln!(\"usage: harness <module.iwm> [run flags]\");\n            std::process::ExitCode::from(2)\n        }}\n    }}\n}}\n");
+    out
+}
+
+/// Each of a module's programs' generated code, its `NATIVES` table and the module's bytes.
+fn programs_text(module: &str, programs: &[Program]) -> String {
+    let mut out = String::new();
     let mut natives = Vec::new();
     for (k, p) in programs.iter().enumerate() {
         if p.services.class.is_some() {
@@ -25,8 +50,8 @@ pub fn main_text(module: &str, programs: &[Program]) -> String {
         natives.push(format!("Some(program_{k})"));
         out.push_str(&Gen { k, p, fns: String::new() }.program());
     }
-    let _ = write!(out, "\nstatic NATIVES: [Option<ironwork_rt::vm::Native>; {}] = [{}];\n", natives.len(), natives.join(", "));
-    let _ = write!(out, "\nfn main() -> std::process::ExitCode {{\n    ironwork_rt::native::main({module:?}, include_bytes!({module:?}), &NATIVES)\n}}\n");
+    let _ = write!(out, "\npub static NATIVES: [Option<ironwork_rt::vm::Native>; {}] = [{}];\n", natives.len(), natives.join(", "));
+    let _ = writeln!(out, "\npub static MODULE: &[u8] = include_bytes!({module:?});");
     out
 }
 
@@ -104,10 +129,10 @@ impl Gen<'_> {
                 let dest = self.at(*var)?;
                 stored(dest.kind, self.p.places[*var as usize].scaling)?;
                 let mut body = self.locates(prepass)?;
-                let x = self.count_of(*var)?;
-                let y = self.expr(*by, plan.dmax, plan.dmax)?;
-                let arith = self.p.options.options.arith;
-                let _ = write!(body, "    let dest = {}?;\n    let next = int_binop({x}, BinOp::Add, {y}, {}, Arith::{arith:?})?;\n    s.store(dest, {}, {}, next, false, false)\n", dest.expr, plan.dmax, dest.len, kind(dest.kind)?);
+                let (x, px) = self.count_of(*var)?;
+                let (y, py) = self.expr(*by, plan.dmax, plan.dmax)?;
+                let to = result_places(px, BinOp::Add, py, plan.dmax, self.p.options.options.arith)?;
+                let _ = write!(body, "    let dest = {}?;\n    let next = binop({x}, {}, BinOp::Add, {y}, {}, {})?;\n    s.store(dest, {}, {}, (next, {}), false, false)\n", dest.expr, places(px), places(py), places(to), dest.len, kind(dest.kind)?, places(to));
                 (body, false)
             }
             Op::SetInt { target, value } => {
@@ -116,7 +141,7 @@ impl Gen<'_> {
                 let store = match dest.kind {
                     Kind::Index => "s.set_index(dest, n)?;\n    Some(false)".to_owned(),
                     k if stored(k, self.p.places[*target as usize].scaling).is_some() => {
-                        format!("s.store(dest, {}, {}, Number::Int(n, Places::new(19, 0)), false, false)", dest.len, kind(k)?)
+                        format!("s.store(dest, {}, {}, (n, Places::new(19, 0)), false, false)", dest.len, kind(k)?)
                     }
                     _ => return None,
                 };
@@ -132,18 +157,16 @@ impl Gen<'_> {
                     return None;
                 }
                 let from = self.at(*src)?;
-                let places = places_of(from.kind);
                 (
                     format!(
-                        "    let dest = {}?;\n    let from = {}?;\n    let n = s.integer(from, {}, {})?;\n    s.store(dest, {}, {}, Number::Int(n, Places::new({}, {})), false, false)\n",
+                        "    let dest = {}?;\n    let from = {}?;\n    let n = s.integer(from, {}, {})?;\n    s.store(dest, {}, {}, (n, {}), false, false)\n",
                         dest.expr,
                         from.expr,
                         from.len,
                         kind(from.kind)?,
                         dest.len,
                         kind(dest.kind)?,
-                        places.int,
-                        places.dec
+                        places(places_of(from.kind))
                     ),
                     false,
                 )
@@ -173,17 +196,19 @@ impl Gen<'_> {
             _ => (step.expr, None),
         };
         let last = if own.is_some() { plan.inner_dmax } else { plan.dmax };
-        let value = self.expr(shared, last, plan.inner_dmax)?;
+        let (value, pv) = self.expr(shared, last, plan.inner_dmax)?;
         let _ = write!(body, "    let value = {value};\n    let at = {}?;\n", target.expr);
-        let result = match own {
+        let (result, to) = match own {
             Some((op, receiver_first)) => {
-                let current = format!("s.count(at, {}, {})?", target.len, kind(target.kind)?);
-                let (x, y) = if receiver_first { (current, "value".to_owned()) } else { ("value".to_owned(), current) };
-                format!("int_binop({x}, BinOp::{op:?}, {y}, {}, Arith::{:?})?", plan.dmax, plan.arith)
+                let current = (format!("s.digits(at, {}, {})?", target.len, kind(target.kind)?), places_of(target.kind));
+                let value = ("value".to_owned(), pv);
+                let ((x, px), (y, py)) = if receiver_first { (current, value) } else { (value, current) };
+                let to = result_places(px, op, py, plan.dmax, plan.arith)?;
+                (format!("binop({x}, {}, BinOp::{op:?}, {y}, {}, {})?", places(px), places(py), places(to)), to)
             }
-            None => "value".to_owned(),
+            None => ("value".to_owned(), pv),
         };
-        let _ = write!(body, "    let result = {result};\n    s.store(at, {}, {}, result, {}, {})\n", target.len, kind(target.kind)?, step.rounded, plan.handled);
+        let _ = write!(body, "    let result = {result};\n    s.store(at, {}, {}, (result, {}), {}, {})\n", target.len, kind(target.kind)?, places(to), step.rounded, plan.handled);
         Some((body, plan.handled))
     }
 
@@ -197,42 +222,50 @@ impl Gen<'_> {
         Some(out)
     }
 
-    /// `Vm::eval_number_at`: `e` as a count expression, its top operation at `last` places and every
-    /// one below at `inner`.
-    fn expr(&self, e: ExprId, last: u32, inner: u32) -> Option<String> {
+    /// `Vm::eval_number_at`: `e` as an expression of a count, its top operation at `last` places and
+    /// every one below at `inner`, with the places the count is at, which code generation works out.
+    fn expr(&self, e: ExprId, last: u32, inner: u32) -> Option<(String, Places)> {
         Some(match &self.p.exprs[e as usize] {
             Expr::Operand(o) => self.operand(*o)?,
-            Expr::Neg(x) => format!("match {} {{ Number::Int(n, p) if n != i64::MIN => Number::Int(-n, p), _ => return None }}", self.expr(*x, inner, inner)?),
-            Expr::Bin(a, op, b) => format!("int_binop({}, BinOp::{op:?}, {}, {last}, Arith::{:?})?", self.expr(*a, inner, inner)?, self.expr(*b, inner, inner)?, self.p.options.options.arith),
+            Expr::Neg(x) => {
+                let (x, px) = self.expr(*x, inner, inner)?;
+                (format!("negated({x})?"), px)
+            }
+            Expr::Bin(a, op, b) => {
+                let ((x, px), (y, py)) = (self.expr(*a, inner, inner)?, self.expr(*b, inner, inner)?);
+                let to = result_places(px, *op, py, last, self.p.options.options.arith)?;
+                (format!("binop({x}, {}, BinOp::{op:?}, {y}, {}, {})?", places(px), places(py), places(to)), to)
+            }
             Expr::Pow(..) => return None,
         })
     }
 
     /// `Vm::operand_number`: an item read as a count, a numeric literal, or FUNCTION MOD of two
     /// arguments `Vm::countable` takes.
-    fn operand(&self, o: Operand) -> Option<String> {
+    fn operand(&self, o: Operand) -> Option<(String, Places)> {
         match o {
             Operand::Load(p) => self.count_of(p),
             Operand::Const(c) => {
                 let (n, places) = const_number(&self.p.consts[c as usize])?;
-                Some(format!("literal({n}, {}, {})", places.int, places.dec))
+                Some((format!("{n}i64"), places))
             }
             Operand::Function(f) => {
                 let plan = &self.p.plans.function[f as usize];
                 let (Func::Mod, None, [Argument::Value(a), Argument::Value(b)]) = (plan.func, &plan.refmod, plan.args.as_slice()) else { return None };
-                Some(format!("count_mod({}, {})?", self.argument(a)?, self.argument(b)?))
+                let ((x, pa), (y, pb)) = (self.argument(a)?, self.argument(b)?);
+                Some((format!("modulo({x}, {}, {y}, {})?", places(pa), places(pb)), mod_places(pa, pb)))
             }
             _ => None,
         }
     }
 
     /// `Vm::comparand_number` of an argument `Vm::countable` takes.
-    fn argument(&self, c: &Comparand) -> Option<String> {
+    fn argument(&self, c: &Comparand) -> Option<(String, Places)> {
         match c {
             Comparand::Expr { expr, dmax, mode: Mode::Fixed, prepass } => {
                 let located = self.locates(prepass)?.replace('\n', " ");
-                let value = self.expr(*expr, *dmax, *dmax)?;
-                Some(if located.is_empty() { value } else { format!("{{ {located} {value} }}") })
+                let (value, at) = self.expr(*expr, *dmax, *dmax)?;
+                Some((if located.is_empty() { value } else { format!("{{ {located} {value} }}") }, at))
             }
             Comparand::Operand(Operand::Load(p)) if !matches!(self.p.places[*p as usize].kind, Kind::Index) => self.count_of(*p),
             Comparand::Operand(o @ Operand::Const(_)) => self.operand(*o),
@@ -240,20 +273,20 @@ impl Gen<'_> {
         }
     }
 
-    /// An item of a numeric kind and no PICTURE P read as a count.
-    fn count_of(&self, p: PlaceId) -> Option<String> {
+    /// An item of a numeric kind and no PICTURE P read as a count, at the places of its kind.
+    fn count_of(&self, p: PlaceId) -> Option<(String, Places)> {
         let place = &self.p.places[p as usize];
         if place.scaling != 0 || !plain(place) || !matches!(place.kind, Kind::Index | Kind::Binary { .. } | Kind::Packed { .. } | Kind::Zoned { .. }) {
             return None;
         }
         let at = self.at(p)?;
-        Some(format!("s.count({}?, {}, {})?", at.expr, at.len, kind(at.kind)?))
+        Some((format!("s.digits({}?, {}, {})?", at.expr, at.len, kind(at.kind)?), places_of(at.kind)))
     }
 
     /// `Vm::int`: an integer as the VM takes one.
     fn int(&self, e: &IntExpr) -> Option<String> {
         match e {
-            IntExpr::Const(n) => Some(n.to_string()),
+            IntExpr::Const(n) => Some(format!("{n}i64")),
             IntExpr::Item(p) => {
                 let place = &self.p.places[*p as usize];
                 if place.scaling != 0 || !plain(place) {
@@ -264,7 +297,8 @@ impl Gen<'_> {
             }
             IntExpr::Fixed { expr, dmax, prepass } => {
                 let located = self.locates(prepass)?.replace('\n', " ");
-                Some(format!("{{ {located} match {} {{ Number::Int(n, p) if p.dec == 0 => n, _ => return None }} }}", self.expr(*expr, *dmax, *dmax)?))
+                let (value, at) = self.expr(*expr, *dmax, *dmax)?;
+                (at.dec == 0).then(|| format!("{{ {located} {value} }}"))
             }
             IntExpr::Walk(_) => None,
         }
@@ -322,8 +356,12 @@ impl Gen<'_> {
     fn cond(&self, c: CondId) -> Option<String> {
         Some(match &self.p.conds[c as usize] {
             Cond::Rel { a, op, b, how: Compare::Fixed } => {
-                let (x, y) = (self.comparand(a)?, self.comparand(b)?);
-                let ordering = format!("compare({x}, {y})?");
+                let ((x, px), (y, py)) = (self.comparand(a)?, self.comparand(b)?);
+                let by_value = format!("order({x}, {}, {y}, {})", px.dec, py.dec);
+                let ordering = match (self.zoned(a), self.zoned(b)) {
+                    (Some((pa, ka)), Some((pb, kb))) if ka == kb => format!("s.zoned_order({}?, {}?, {}).or_else(|| {by_value})?", pa.expr, pb.expr, pa.len),
+                    _ => format!("{by_value}?"),
+                };
                 let test = match op {
                     RelOp::Eq => "is_eq",
                     RelOp::Ne => "is_ne",
@@ -349,9 +387,21 @@ impl Gen<'_> {
         })
     }
 
+    /// A comparison's operand that is an unsigned zoned item with no SIGN clause and no PICTURE P,
+    /// where it is and its kind.
+    fn zoned(&self, c: &Comparand) -> Option<(At, Kind)> {
+        let Comparand::Operand(Operand::Load(p)) = c else { return None };
+        let place = &self.p.places[*p as usize];
+        if place.scaling != 0 || !plain(place) || !matches!(place.kind, Kind::Zoned { signed: false, sign: None, .. }) {
+            return None;
+        }
+        let at = self.at(*p)?;
+        Some((at, place.kind))
+    }
+
     /// `Vm::number_of` of a comparison's operand: an item `store::read_digits` reads, other than a
     /// packed one under NUMPROC(PFD), or a numeric literal.
-    fn comparand(&self, c: &Comparand) -> Option<String> {
+    fn comparand(&self, c: &Comparand) -> Option<(String, Places)> {
         match c {
             Comparand::Operand(Operand::Load(p)) => {
                 let place = &self.p.places[*p as usize];
@@ -360,10 +410,7 @@ impl Gen<'_> {
                 }
                 self.count_of(*p)
             }
-            Comparand::Operand(Operand::Const(k)) => {
-                let (n, places) = const_number(&self.p.consts[*k as usize])?;
-                Some(format!("literal({n}, {}, {})", places.int, places.dec))
-            }
+            Comparand::Operand(o @ Operand::Const(_)) => self.operand(*o),
             _ => None,
         }
     }
@@ -396,4 +443,9 @@ fn kind(kind: Kind) -> Option<String> {
         }
         _ => return None,
     })
+}
+
+/// Places as Rust source.
+fn places(p: Places) -> String {
+    format!("Places::new({}, {})", p.int, p.dec)
 }

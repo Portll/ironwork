@@ -13,6 +13,7 @@ const ZONED_MAX: usize = 2 * PACKED_MAX - 1;
 const U64_DIGITS: usize = 18;
 
 /// A packed field. Under NUMPROC(NOPFD) an unsigned field's sign nibble is forced to F first.
+#[inline]
 pub fn packed(bytes: &[u8], signed: bool, numproc: Numproc) -> Result<Decimal, ProgramCheck> {
     if signed || numproc != Numproc::Nopfd {
         return decimal::decode(bytes);
@@ -32,6 +33,7 @@ pub fn packed(bytes: &[u8], signed: bool, numproc: Numproc) -> Result<Decimal, P
 }
 
 /// A zoned field, entering through PACK, which keeps only the sign's zone.
+#[inline]
 pub fn zoned(bytes: &[u8], signed: bool, sign: Option<SignClause>, numproc: Numproc) -> Result<Decimal, ProgramCheck> {
     if matches!(sign, None | Some(SignClause { separate: false, position: SignPosition::Trailing })) && (1..=ZONED_MAX).contains(&bytes.len()) {
         return packed_zoned(bytes, signed, numproc);
@@ -76,6 +78,7 @@ pub fn zoned(bytes: &[u8], signed: bool, sign: Option<SignClause>, numproc: Nump
 
 /// What `packed` gives for PACK of 1 to 31 zoned bytes: their digit nibbles, after a zero nibble
 /// when there are evenly many, then the last zone as the sign.
+#[inline]
 fn packed_zoned(zoned: &[u8], signed: bool, numproc: Numproc) -> Result<Decimal, ProgramCheck> {
     let mut digit_bad = false;
     let mut digit = |b: &u8| {

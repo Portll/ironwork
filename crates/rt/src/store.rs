@@ -119,7 +119,7 @@ pub fn read_digits(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc) -> Option<i64
 
 /// `read_digits` of an item with no PICTURE P whose bytes are `bytes`, the compile options read
 /// only for a packed or zoned item.
-#[inline]
+#[inline(always)]
 pub fn digits(bytes: &[u8], kind: Kind, options: impl FnOnce() -> Options) -> Option<i64> {
     let decimal = |d: Decimal| i64::try_from(d.magnitude).ok().map(|m| if d.negative { -m } else { m });
     match kind {

@@ -19,6 +19,8 @@ pub struct Request {
     pub source_prefix: Option<String>,
     /// Build each module into an executable too, against this runtime.
     pub native: Option<crate::native::Runtime>,
+    /// Build every module written into one test harness instead, against this runtime.
+    pub harness: Option<crate::native::Runtime>,
 }
 
 /// A source's programs in ordinal order, with their directory entries, the files each one's debug
@@ -73,6 +75,7 @@ pub fn run(r: Request) -> ExitCode {
         }
     };
     let mut status = 0u8;
+    let mut written = Vec::new();
     let bundled = if r.bundle.is_some() { bundled_programs(&r) } else { Vec::new() };
     let lowered: Vec<Option<Lowered>> = r
         .sources
@@ -138,6 +141,13 @@ pub fn run(r: Request) -> ExitCode {
             eprintln!("ironwork: {name}: {e}");
             status = status.max(16);
         }
+        written.push(name);
+    }
+    if let Some(runtime) = &r.harness
+        && let Err(e) = crate::native::build_harness(&r.out, &written, runtime)
+    {
+        eprintln!("ironwork: harness: {e}");
+        status = status.max(16);
     }
     ExitCode::from(status)
 }

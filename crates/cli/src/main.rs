@@ -267,6 +267,10 @@ compile flags:
              runs it as run runs the module, from the runtime alone: CALL finds a program in it,
              then NAME.iwm in its -L directories, and never compiles source. cargo builds it, so a
              Rust toolchain must be on PATH; the crate is written under DIR/.ironwork-native
+  --native-harness
+             build every module written into one test executable, DIR/harness, which runs the
+             module its first argument names as that module's own --native executable would,
+             given the rest of its arguments: for testing native code against run
   --runtime DIR
              the crates directory of an ironwork checkout to build --native against, rather than
              the published ironwork-rt of this version
@@ -639,7 +643,7 @@ fn driver() -> ExitCode {
     let mut proclibs: Vec<std::path::PathBuf> = Vec::new();
     let mut user: Option<String> = None;
     let (mut out_dir, mut bundle, mut source_prefix): (Option<std::path::PathBuf>, Option<String>, Option<String>) = (None, None, None);
-    let (mut native, mut runtime): (bool, Option<std::path::PathBuf>) = (false, None);
+    let (mut native, mut harness, mut runtime): (bool, bool, Option<std::path::PathBuf>) = (false, false, None);
     let mut dump_options = dump::Options { check: true, ..Default::default() };
     let mut clock_text: Option<String> = None;
     let mut fuzz_root: Option<std::path::PathBuf> = None;
@@ -838,6 +842,7 @@ fn driver() -> ExitCode {
                 None => refuse!("--source-prefix needs a directory"),
             },
             "--native" => native = true,
+            "--native-harness" => harness = true,
             "--runtime" => match args.next() {
                 Some(dir) => runtime = Some(std::path::PathBuf::from(dir)),
                 None => refuse!("--runtime needs a directory"),
@@ -1050,10 +1055,10 @@ fn driver() -> ExitCode {
     if fuzz_flags {
         return usage_error("--runs, --seed, --timeout, --hang-limit, --root, --job, --cics, --interface and --differential are for fuzz");
     }
-    if runtime.is_some() && !native {
-        return usage_error("--runtime is for --native");
+    if runtime.is_some() && !native && !harness {
+        return usage_error("--runtime is for --native and --native-harness");
     }
-    let compile_flags = out_dir.is_some() || bundle.is_some() || source_prefix.is_some() || native;
+    let compile_flags = out_dir.is_some() || bundle.is_some() || source_prefix.is_some() || native || harness;
     match rest.split_first() {
         Some((c, sources)) if c == "compile" => {
             if sources.is_empty() {
@@ -1069,7 +1074,8 @@ fn driver() -> ExitCode {
                 libraries,
                 flags,
                 source_prefix,
-                native: native.then(|| runtime.map_or(native::Runtime::Published, native::Runtime::Checkout)),
+                native: native.then(|| runtime.clone().map_or(native::Runtime::Published, native::Runtime::Checkout)),
+                harness: harness.then(|| runtime.map_or(native::Runtime::Published, native::Runtime::Checkout)),
             });
         }
         Some((c, files)) if c == "dump" => {

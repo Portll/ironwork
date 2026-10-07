@@ -137,7 +137,12 @@ fn usage(message: &str) -> ExitCode {
 /// The executable's whole run, as `ironwork run module.iwm` gives it: on a thread with the driver's
 /// stack, a panic exiting as ironwork's internal error.
 pub fn main(path: &'static str, module: &'static [u8], natives: &'static [Option<Native>]) -> ExitCode {
-    match std::thread::Builder::new().stack_size(64 << 20).spawn(move || batch(path, module, natives)).map(|t| t.join()) {
+    main_with(path, module, natives, std::env::args().skip(1).collect())
+}
+
+/// [`main`] given its arguments.
+pub fn main_with(path: &'static str, module: &'static [u8], natives: &'static [Option<Native>], args: Vec<String>) -> ExitCode {
+    match std::thread::Builder::new().stack_size(64 << 20).spawn(move || batch(path, module, natives, args)).map(|t| t.join()) {
         Ok(Ok(code)) => code,
         _ => exit::status(Outcome::Internal),
     }
@@ -145,10 +150,10 @@ pub fn main(path: &'static str, module: &'static [u8], natives: &'static [Option
 
 /// Its arguments read, the module read and its first program checked, the run, an abend or a
 /// construct the VM does not run said on standard error, and the exit status.
-fn batch(path: &str, module: &[u8], natives: &[Option<Native>]) -> ExitCode {
+fn batch(path: &str, module: &[u8], natives: &[Option<Native>], args: Vec<String>) -> ExitCode {
     exit::follow(Convention::Band);
     let (mut dirs, mut dds, mut clock, mut parm) = (Vec::new(), Vec::new(), Clock::System, None);
-    let mut args = std::env::args().skip(1);
+    let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         if arg == "--exit-code" {
             exit::follow(Convention::Verdict);

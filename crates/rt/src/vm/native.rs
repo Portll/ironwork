@@ -68,6 +68,6 @@ impl<L: Loader<Rc<Code>>> Machine for Vm<'_, '_, '_, L> {
     }
 
     fn storage(&mut self) -> Storage<'_> {
-        Storage { mem: &mut self.unit.mem, program: self.base, local: self.local_base, linkage: &self.linkage, options: self.p.options.options }
+        Storage { mem: &mut self.unit.mem, program: self.base, local: self.local_base, linkage: &self.linkage, options: &self.p.options.options }
     }
 }

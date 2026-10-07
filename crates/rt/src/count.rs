@@ -11,6 +11,7 @@ use std::cmp::Ordering;
 
 /// A constant as `operand_number` takes it while it fits an `i64` count of its last decimal place,
 /// other than a negative zero.
+#[inline]
 pub fn const_number(c: &Const) -> Option<(i64, Places)> {
     match c {
         Const::Number(f) => match Number::of(*f) {
@@ -31,6 +32,7 @@ pub enum Number {
 
 impl Number {
     /// `f` as a count of its last decimal place where that fits an `i64`.
+    #[inline]
     pub fn of(f: Fixed) -> Self {
         match f.to_i128().and_then(|n| i64::try_from(n).ok()) {
             Some(n) if !(f.negative && f.magnitude.is_zero()) => Self::Int(n, f.places),
@@ -38,6 +40,7 @@ impl Number {
         }
     }
 
+    #[inline]
     pub fn fixed(self) -> Fixed {
         match self {
             Self::Int(n, places) => Fixed::new(i128::from(n), places),
@@ -49,10 +52,31 @@ impl Number {
 /// ADD, SUBTRACT, MULTIPLY or DIVIDE of two counts as `Fixed` gives them: the exact result, or the
 /// truncated quotient, kept to the places carried; None where a step leaves `i128`, the result does
 /// not fit an `i64`, or the divisor is zero, which `Fixed` reports.
+#[inline]
 pub fn int_binop(x: Number, op: BinOp, y: Number, dmax: u32, arith: Arith) -> Option<Number> {
     let (Number::Int(x, px), Number::Int(y, py)) = (x, y) else { return None };
+    let to = result_places(px, op, py, dmax, arith)?;
+    binop(x, px, op, y, py, to).map(|n| Number::Int(n, to))
+}
+
+/// The places `x op y` carries at `dmax` under `arith`, from its operands' places alone; None for
+/// an exponentiation.
+#[inline]
+pub fn result_places(px: Places, op: BinOp, py: Places, dmax: u32, arith: Arith) -> Option<Places> {
+    Some(match op {
+        BinOp::Add | BinOp::Sub => carried(sum_places(px, py), dmax, arith),
+        BinOp::Mul => carried(product_places(px, py), dmax, arith),
+        BinOp::Div => carried(quotient_places(px, py, dmax), dmax, arith),
+        BinOp::Pow => return None,
+    })
+}
+
+/// `int_binop` of counts `x` at `px` and `y` at `py`, its result kept to `to`, the places
+/// `result_places` gives it.
+#[inline]
+pub fn binop(x: i64, px: Places, op: BinOp, y: i64, py: Places, to: Places) -> Option<i64> {
     let (x, y) = (i128::from(x), i128::from(y));
-    let (exact, ir) = match op {
+    let (exact, from) = match op {
         BinOp::Add | BinOp::Sub => {
             let (x, y) = aligned(x, px.dec, y, py.dec)?;
             let exact = if op == BinOp::Add { x.checked_add(y)? } else { x.checked_sub(y)? };
@@ -60,28 +84,53 @@ pub fn int_binop(x: Number, op: BinOp, y: Number, dmax: u32, arith: Arith) -> Op
         }
         BinOp::Mul => (x * y, product_places(px, py)),
         BinOp::Div if y != 0 => {
-            let to = carried(quotient_places(px, py, dmax), dmax, arith);
             let (numerator, denominator) = aligned(x, px.dec, y, py.dec + to.dec)?;
             return kept(numerator / denominator, to, to);
         }
         BinOp::Div | BinOp::Pow => return None,
     };
-    kept(exact, ir, carried(ir, dmax, arith))
+    kept(exact, from, to)
 }
 
 /// FUNCTION MOD of two counts as the intrinsic gives it: a - b * FLOOR(a / b) at the arguments'
 /// greater decimal places, with the integer places of the shorter argument, high-order digits
 /// dropped; None where either is not a count, or `b` is zero, which the intrinsic reports.
+#[inline]
 pub fn count_mod(a: Number, b: Number) -> Option<Number> {
     let (Number::Int(a, pa), Number::Int(b, pb)) = (a, b) else { return None };
+    modulo(a, pa, b, pb).map(|n| Number::Int(n, mod_places(pa, pb)))
+}
+
+/// The places of FUNCTION MOD of arguments at `pa` and `pb`.
+#[inline]
+pub fn mod_places(pa: Places, pb: Places) -> Places {
+    Places::new(pa.int.min(pb.int), pa.dec.max(pb.dec))
+}
+
+/// `count_mod` of counts `a` at `pa` and `b` at `pb`, at `mod_places`.
+#[inline]
+pub fn modulo(a: i64, pa: Places, b: i64, pb: Places) -> Option<i64> {
     let (a, b) = aligned(i128::from(a), pa.dec, i128::from(b), pb.dec)?;
     if b == 0 {
         return None;
     }
     let r = a % b;
     let r = if r != 0 && (r < 0) != (b < 0) { r + b } else { r };
-    let places = Places::new(pa.int.min(pb.int), pa.dec.max(pb.dec));
+    let places = mod_places(pa, pb);
     kept(r, places, places)
+}
+
+/// A count negated, as `Vm::eval_number_at` negates one; None for the one an `i64` cannot negate.
+#[inline]
+pub fn negated(n: i64) -> Option<i64> {
+    (n != i64::MIN).then(|| -n)
+}
+
+/// Counts `x` at `dx` and `y` at `dy` decimal places compared by value; None past `i128`.
+#[inline]
+pub fn order(x: i64, dx: u32, y: i64, dy: u32) -> Option<Ordering> {
+    let (x, y) = aligned(i128::from(x), dx, i128::from(y), dy)?;
+    Some(x.cmp(&y))
 }
 
 /// Ten to each power an `i128` holds.
@@ -112,7 +161,8 @@ pub fn aligned(x: i128, dx: u32, y: i128, dy: u32) -> Option<(i128, i128)> {
 
 /// `Fixed::fit`: `exact`, held at `from`'s decimal places, kept to `to.dec` decimal places, the rest
 /// truncated, and `to.int` integer places, the high-order digits dropped.
-fn kept(exact: i128, from: Places, to: Places) -> Option<Number> {
+#[inline]
+fn kept(exact: i128, from: Places, to: Places) -> Option<i64> {
     let mut magnitude = exact.unsigned_abs();
     if to.dec < from.dec {
         magnitude = pow10(from.dec - to.dec).map_or(0, |d| quotient(magnitude, d.unsigned_abs()));
@@ -123,10 +173,11 @@ fn kept(exact: i128, from: Places, to: Places) -> Option<Number> {
         magnitude -= quotient(magnitude, cap) * cap;
     }
     let kept = i64::try_from(magnitude).ok()?.checked_mul(i64::try_from(pow10(to.dec.saturating_sub(from.dec))?).ok()?)?;
-    Some(Number::Int(if exact < 0 { -kept } else { kept }, to))
+    Some(if exact < 0 { -kept } else { kept })
 }
 
 /// `m / d`, by the 64-bit divide where both fit it.
+#[inline]
 fn quotient(m: u128, d: u128) -> u128 {
     match (u64::try_from(m), u64::try_from(d)) {
         (Ok(m), Ok(d)) => u128::from(m / d),
