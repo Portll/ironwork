@@ -350,7 +350,7 @@ impl<'w, X, C, V, U, H: ReportHost<'w, X, C, V, U>> Reporting<'w, '_, H, X, C, V
         let value = match origin {
             Origin::Source(e) => match self.x.value(e, pos) {
                 Err(a) if a.size_error() => {
-                    let _ = writeln!(self.x.err(), "ironwork: {pos}: report writer run-time error 10: a SOURCE expression divided by zero; nothing was added to the total");
+                    let _ = writeln!(self.x.err(), "ironwork: {pos}: report writer run-time error 10: a SOURCE expression divided by zero or raised zero to a negative power; nothing was added to the total");
                     return Ok(());
                 }
                 other => other?,
@@ -717,7 +717,7 @@ impl<'w, X, C, V, U, H: ReportHost<'w, X, C, V, U>> Reporting<'w, '_, H, X, C, V
                     };
                     if overflow {
                         self.blank(dest);
-                        let _ = writeln!(self.x.err(), "ironwork: {pos}: report writer run-time error 10: a SOURCE expression overflowed or divided by zero; the field is left blank");
+                        let _ = writeln!(self.x.err(), "ironwork: {pos}: report writer run-time error 10: a SOURCE expression overflowed, divided by zero or raised zero to a negative power; the field is left blank");
                     }
                 }
             },

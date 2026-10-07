@@ -217,7 +217,7 @@ cobc option removes one, it is named.
 | Character codes: hexadecimal literals, ORD and CHAR, HIGH-VALUE and LOW-VALUE shown, an overpunched sign seen through an alphanumeric item, the card images ACCEPT transfers, a character CCSID 1140 has no byte for | test programs; corpus |
 | JSON and XML GENERATE write UTF-8 into an alphanumeric receiver; DISPLAY then reads the bytes in the program's EBCDIC code page | corpus |
 | Floating point: IBM hexadecimal under ironwork, IEEE under cobc, in COMP-1 and COMP-2 values, the floating-point functions, and an exponent beyond HFP's range (S0CC) | test programs |
-| The same failure in another form: S0C4 for a LINKAGE item with no address where cobc takes SIGSEGV, CEE3501S and U4038, or ironwork's IEW2456E refusal, where cobc says `module not found` | test programs |
+| The same failure in another form: S0C4 for a LINKAGE item with no address where cobc takes SIGSEGV, CEE3501S and U4038, or ironwork's IEW2456E refusal, where cobc says `module not found`; U4038 with IGZ0035S or IGZ0020S for an I/O failure no FILE STATUS or declarative takes (C451), where libcob names the status, `file does not exist (status = 35)` | test programs; probe |
 | Setting the UPSI switches: the runtime option UPSI(nnnnnnnn) in the PARM under ironwork (C411), `COB_SWITCH_0` to `COB_SWITCH_7` set to `ON` in the environment under cobc | CCVS85 NC108M, NC211A, NC254A; probe |
 
 ### 5.2 IBM documents it, and cobc -std=ibm-strict does otherwise
@@ -246,6 +246,9 @@ cobc option removes one, it is named.
 | INTEGER, INTEGER-PART and MOD of fixed-point arguments | INTEGER one digit more than its argument, INTEGER-PART as many, MOD as many as its shorter argument (Language Reference SC27-8713-03, p. 601; Programming Guide SC27-8714-03, pp. 798-799; C392): `FUNCTION MOD(N H)`, N `S9` -3, H `999` 100, is 7 | a field as large as the value: 97 | probe |
 | MOVE of an integer or numeric function to an alphanumeric item, which Enterprise COBOL refuses (Programming Guide SC27-8714-03, p. 119) | refused when compiled under `--compliance strict` (C394); under `extended`, with IWX0008-W, the value at the function's precision, moved as a numeric item of that precision is: an integer's digits, `00005` for MAX(N M) with N `999` 5 and M `9(5)` 4, and a value with decimal places refused at run time (Language Reference SC27-8713-03, p. 404) | the digits of the field cobc's function returns: the winning argument's own for MAX and MIN (`005`, and `825` for 8.25), nine for most others (`000000008` for INTEGER(8.25)) | probe |
 | Invalid decimal data, and a zero divisor outside ON SIZE ERROR | the program check: S0C7, S0CB or S0C9 | runs on, the receiver unchanged by the division; under `-debug` invalid data stops the run | test programs; corpus |
+| A main program whose control runs past its last statement | U4038 with IGZ0037S, placed at the last paragraph (Language Reference, Transfer of control; C456) | ends normally, return code 0 | probe; 4.6% of corpus programs have no STOP RUN, GOBACK or EXIT PROGRAM |
+| An OPEN or CLOSE of an indexed or relative file that fails, with no FILE STATUS and no declarative | control returns, and the next statement on the file is a logic error, U4038 with IGZ0020S (Programming Guide, Handling errors in VSAM files; C451) | the run ends at the OPEN: `libcob: error: file does not exist (status = 35)` | probe |
+| An intrinsic function's argument outside what it takes, such as `FUNCTION CHAR(0)` and `FUNCTION RANDOM(-1)` | U4038 with Language Environment's message, IGZ0162S and IGZ0163S for these (C452) | a value, and the run goes on: CHAR(0) gives a space | probe |
 
 ### 5.3 cobc bugs
 

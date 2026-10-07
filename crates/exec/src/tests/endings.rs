@@ -132,3 +132,20 @@ fn a_main_program_past_its_last_line_ends_with_igz0037s_and_a_called_one_returns
     assert_eq!(out, "IN SUB\nBACK IN MAIN\n");
     assert_eq!((code.as_str(), message.as_str()), ("U4038", "IGZ0037S The flow of control in program MAIN proceeded beyond the last line of the program."));
 }
+
+/// IGZ0037S is placed at the last paragraph, the one control ran out of, on both executors.
+#[test]
+fn igz0037s_is_placed_at_the_last_paragraph() {
+    let source = cobol(&[
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. MAIN.",
+        "PROCEDURE DIVISION.",
+        "FIRST-P.",
+        "    DISPLAY 'ONE'.",
+        "LAST-P.",
+        "    DISPLAY 'TWO'.",
+    ]);
+    let (code, _, out) = ended(&source);
+    let abend = Harness::source(&source).run(Executor::Vm).ending.unwrap_err();
+    assert_eq!((code.as_str(), out.as_str(), abend.pos.line), ("U4038", "ONE\nTWO\n", 6));
+}

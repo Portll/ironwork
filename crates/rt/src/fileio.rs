@@ -108,6 +108,11 @@ pub struct Failure {
     pub message: String,
 }
 
+/// Whether `abend` is the ending `unhandled` gives a failing status.
+pub fn is_unhandled_io(abend: &Abend) -> bool {
+    matches!(abend.code, crate::abend::AbendCode::Io(_)) || abend.code == crate::abend::AbendCode::user(4038) && (abend.message.starts_with("IGZ0035S ") || abend.message.starts_with("IGZ0020S "))
+}
+
 /// How a failing status ends the run when no FILE STATUS holds it and no EXCEPTION/ERROR
 /// procedure takes it (assumption C451); None where control returns to the program. An OPEN or
 /// CLOSE of a VSAM file (indexed or relative, C220) returns control whatever its status (Programming
@@ -115,11 +120,6 @@ pub struct Failure {
 /// logic error (a 4x status) with IGZ0020S, as a severity-3 condition nothing handles does (LE
 /// Runtime Messages; Programming Guide, 'Handling errors in input and output operations'). Statuses
 /// IBM's messages do not settle end with the status itself, `IO-` and its two digits.
-/// Whether `abend` is the ending `unhandled` gives a failing status.
-pub fn is_unhandled_io(abend: &Abend) -> bool {
-    matches!(abend.code, crate::abend::AbendCode::Io(_)) || abend.code == crate::abend::AbendCode::user(4038) && (abend.message.starts_with("IGZ0035S ") || abend.message.starts_with("IGZ0020S "))
-}
-
 pub fn unhandled(status: FileStatus, organization: Organization, open_or_close: bool, file: &str, program: &str, detail: String, pos: Pos) -> Option<Abend> {
     use crate::abend::AbendCode;
     if !status.ends_the_run() || open_or_close && matches!(organization, Organization::Indexed | Organization::Relative) {

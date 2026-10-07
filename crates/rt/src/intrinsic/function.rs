@@ -446,7 +446,7 @@ fn format_argument(facts: &dyn ProgramFacts, v: &Val, name: &str, pos: Pos) -> R
 }
 
 /// An argument outside what a function takes: IBM's message `id` and its text, a severity-3
-/// condition that ends the run U4038 (assumption C112), what the argument held in parentheses.
+/// condition that ends the run U4038 (assumption C452), what the argument held in parentheses.
 fn out_of_range(id: &str, text: String, held: impl std::fmt::Display, pos: Pos) -> Abend {
     Abend { code: AbendCode::user(4038), message: format!("{id} {text} ({held})"), pos, file: None }
 }
