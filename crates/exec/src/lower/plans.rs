@@ -6,7 +6,7 @@ use super::data::{Side, Value, Within, scale};
 use super::{Lower, R, push, unsupported};
 use numeric::precision::Dmax;
 use numeric::{Dialect, Native, Numproc, Switched};
-use crate::machine::divided_exponent;
+use compile::arith::divided_exponent;
 use compile::values::value_kind;
 use rt::lir::{
     self, ArithId, ArithPlan, ArithStep, DisplayId, DisplayItem, ExprId, FloatFrom, Image, InitField, InitId, InitPlan, InitValue, Mode, MovePlan,

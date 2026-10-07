@@ -1,6 +1,7 @@
 //! ironwork for COBOL, the compiler: a parsed program checked against IBM's rules, with its
 //! WORKING-STORAGE laid out as IBM lays it out, ready for the interpreter or for lowering.
 
+pub mod arith;
 mod classes;
 pub mod collating;
 mod corresponding;

@@ -9,6 +9,7 @@ use rt::storage::{Loc, Val};
 pub(crate) use rt::storage::literal_fixed;
 use crate::unit::{ADDRESS_BASE, Event, LoadError, OS_COMMAND_ROUTINES, RETURN_CODE, RunUnit};
 use crate::Compiled;
+use compile::arith::{decimal_exponent, divided_exponent, function_dmax};
 use compile::values::value_kind;
 use numeric::precision::{Dmax, Fixed, Places};
 use numeric::{LeServices, Options, ProgramScope, Switched};
@@ -35,7 +36,6 @@ mod facts;
 mod file_io;
 mod function;
 mod intrinsic;
-pub(crate) use intrinsic::function_dmax;
 use intrinsic::Within;
 mod json;
 mod le_services;
@@ -1807,35 +1807,6 @@ pub(crate) fn key_term<'c>(terms: &[&'c Cond], key: &str) -> Option<(&'c Expr, &
         Cond::Rel(a, RelOp::Eq, b) if is_key(b) => Some((b, a)),
         _ => None,
     })
-}
-
-/// Whether an exponent has decimal places, a literal or an operand with any by `scale`: such an
-/// exponent makes its expression floating point (Programming Guide SC27-8714-03, pp. 796, 800).
-pub(crate) fn decimal_exponent<E>(e: &Expr, scale: &mut impl FnMut(&Operand) -> Result<u32, E>) -> Result<bool, E> {
-    Ok(match e {
-        Expr::Operand(Operand::Literal(Literal::Number(t))) => literal_fixed(t).is_some_and(|f| f.places.dec > 0),
-        Expr::Operand(op) => scale(op)? > 0,
-        Expr::Neg(inner) => decimal_exponent(inner, scale)?,
-        Expr::Bin(a, _, b) => decimal_exponent(a, scale)? || decimal_exponent(b, scale)?,
-    })
-}
-
-/// Whether an exponent in `e` holds a division or an exponentiation, which makes `e` floating
-/// point when its dmax is above zero (Programming Guide SC27-8714-03, p. 800).
-pub(crate) fn divided_exponent(e: &Expr) -> bool {
-    fn quotient_or_power(e: &Expr) -> bool {
-        match e {
-            Expr::Operand(_) => false,
-            Expr::Neg(inner) => quotient_or_power(inner),
-            Expr::Bin(_, BinOp::Div | BinOp::Pow, _) => true,
-            Expr::Bin(a, _, b) => quotient_or_power(a) || quotient_or_power(b),
-        }
-    }
-    match e {
-        Expr::Operand(_) => false,
-        Expr::Neg(inner) => divided_exponent(inner),
-        Expr::Bin(a, op, b) => divided_exponent(a) || divided_exponent(b) || (*op == BinOp::Pow && quotient_or_power(b)),
-    }
 }
 
 /// Whether DISPLAY writes to the console, whose national data is converted (Language Reference

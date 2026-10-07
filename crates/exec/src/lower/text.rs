@@ -4,7 +4,7 @@
 use super::data::{Side, Value};
 use super::flow::Ctx;
 use super::{Lower, R, push, unsupported};
-use crate::machine::literal_fixed;
+use rt::storage::literal_fixed;
 use rt::fixed::zoned_digits;
 use rt::lir::{
     Bound, Chars, ConvertTable, Converting, DelimiterIn, InspectId, InspectPhrase, InspectPlan, Inspected, Op, PlaceId, Replacement, StepPlan,

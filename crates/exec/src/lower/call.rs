@@ -4,7 +4,7 @@
 use super::flow::Ctx;
 use super::{Lower, LowerError, R, push, unsupported};
 use crate::layout::Resolved;
-use crate::machine::literal_fixed;
+use rt::storage::literal_fixed;
 use crate::oo::{item_type, operand_type};
 use rt::lir::{self, AbendId, CallArg, CallId, CallPlan, CallTarget, Chars, InvokeId, InvokePlan, LeService, MethodName, Op, Receiver, Terminator};
 use rt::storage::Kind;

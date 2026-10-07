@@ -3,7 +3,8 @@
 use super::{Lower, R, is_static, push, unsupported};
 use zarch::hfp::Precision;
 use crate::layout::Resolved;
-use crate::machine::{decimal_exponent, divided_exponent, literal_fixed};
+use compile::arith::{decimal_exponent, divided_exponent};
+use rt::storage::literal_fixed;
 use numeric::precision::Fixed;
 use rt::abend::AbendCode;
 use rt::lir::{self, Comparand, ConstId, ExprId, IntExpr, Mode, PlaceId};
@@ -328,7 +329,7 @@ impl Lower<'_> {
                 let p = self.place(r, false)?;
                 scale(self.kind_of(p))
             }
-            Expr::Operand(Operand::Function(f)) => crate::machine::function_dmax(self.layout, &self.c.functions, f),
+            Expr::Operand(Operand::Function(f)) => compile::arith::function_dmax(self.layout, &self.c.functions, f),
             Expr::Operand(_) => 0,
             Expr::Neg(inner) => self.dmax(inner)?,
             Expr::Bin(a, BinOp::Div | BinOp::Pow, _) => self.dmax(a)?,
