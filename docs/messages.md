@@ -321,6 +321,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0297 | S | `FUNCTION {name}: {argument} is numeric, where {name} takes an alphabetic, alphanumeric or national argument` |
 | IWC0298 | S | `{DISPLAY or ACCEPT on the screen, or the SCREEN SECTION}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0299 | S | `{a locking phrase}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0300 | S | `CALL ... RETURNING {OMITTED, NOTHING or NULL}: GnuCOBOL's, not Enterprise COBOL's, whose RETURNING names a data item; --compliance extended reads it` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
@@ -808,3 +809,4 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0021 | W | `{the environment form} (Micro Focus and GnuCOBOL; Enterprise COBOL reads and sets no environment variable): {what it does}` |
 | IWX0022 | W | `{a locking phrase} (Micro Focus and GnuCOBOL; Enterprise COBOL has no record locks of its own): the run unit is the file's only user, so nothing it locks waits and the phrase changes nothing` |
 | IWX0023 | W | `INSPECT ... TRAILING (GnuCOBOL; Enterprise COBOL has ALL, LEADING, FIRST and CHARACTERS): the occurrences that run on to the end of the phrase's region` |
+| IWX0024 | W | `CALL ... RETURNING {OMITTED, NOTHING or NULL} (GnuCOBOL; Enterprise COBOL's RETURNING names a data item): the CALL leaves the caller's RETURN-CODE as it was` |

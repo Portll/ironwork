@@ -720,3 +720,87 @@ fn inspect_trailing_takes_the_run_at_the_end_of_its_region_alike_on_both_executo
     let warned = diagnostics_under(INSPECT_TRAILING, numeric::Compliance::Extended);
     assert_eq!(warned.iter().filter(|d| d.2 == Some("IWX0023")).count(), 7, "{warned:?}");
 }
+
+/// GnuCOBOL's CALL ... RETURNING OMITTED, NOTHING and NULL, with exception phrases and a program
+/// that is not there, before a subprogram that sets RETURN-CODE to 3.
+const CALL_RETURNING_OMITTED: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. OMITCALL.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  D PIC 9(4).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE 7 TO RETURN-CODE\n",
+    "           CALL 'SETS3'\n",
+    "           MOVE RETURN-CODE TO D\n",
+    "           DISPLAY 'PLAIN ' D\n",
+    "           MOVE 7 TO RETURN-CODE\n",
+    "           CALL 'SETS3' RETURNING OMITTED\n",
+    "           MOVE RETURN-CODE TO D\n",
+    "           DISPLAY 'OMITTED ' D\n",
+    "           MOVE 7 TO RETURN-CODE\n",
+    "           CALL 'SETS3' RETURNING NOTHING\n",
+    "           MOVE RETURN-CODE TO D\n",
+    "           DISPLAY 'NOTHING ' D\n",
+    "           MOVE 7 TO RETURN-CODE\n",
+    "           IF D = 7\n",
+    "               CALL 'SETS3' RETURNING NULL\n",
+    "                   ON EXCEPTION MOVE 99 TO D\n",
+    "                   NOT ON EXCEPTION MOVE RETURN-CODE TO D\n",
+    "                       DISPLAY 'NULL ' D\n",
+    "               END-CALL\n",
+    "           END-IF\n",
+    "           CALL 'NOSUCH' RETURNING OMITTED\n",
+    "               ON EXCEPTION DISPLAY 'MISSING'\n",
+    "           END-CALL\n",
+    "           MOVE RETURN-CODE TO D\n",
+    "           DISPLAY 'AFTER MISSING ' D\n",
+    "           MOVE 0 TO RETURN-CODE\n",
+    "           GOBACK.\n",
+    "       END PROGRAM OMITCALL.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. SETS3.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE 3 TO RETURN-CODE\n",
+    "           GOBACK.\n",
+    "       END PROGRAM SETS3.\n",
+);
+
+#[test]
+fn call_returning_omitted_leaves_the_callers_return_code_alike_on_both_executors() {
+    // cobc 3.2's output.
+    let expected = "PLAIN 0003\nOMITTED 0007\nNOTHING 0007\nNULL 0007\nMISSING\nAFTER MISSING 0007\n";
+    let walked = Harness::source(CALL_RETURNING_OMITTED).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (expected, Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(CALL_RETURNING_OMITTED).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+}
+
+#[test]
+fn call_returning_omitted_is_refused_under_strict_and_warned_under_extended() {
+    let caller = CALL_RETURNING_OMITTED.split_inclusive("END PROGRAM OMITCALL.\n").next().unwrap();
+    let at = [(12, 35), (16, 35), (21, 39), (27, 36)];
+    let warned = diagnostics_under(caller, numeric::Compliance::Extended);
+    assert_eq!(warned, at.map(|(line, col)| (line, col, Some("IWX0024"), Severity::Warning)));
+    let refused = diagnostics_under(caller, numeric::Compliance::Strict);
+    assert_eq!(refused, at.map(|(line, col)| (line, col, Some("IWC0300"), Severity::Severe)));
+}
+
+#[test]
+fn call_returning_nothing_names_an_item_a_program_declares_nothing() {
+    let source = concat!(
+        "       IDENTIFICATION DIVISION.\n",
+        "       PROGRAM-ID. NAMED.\n",
+        "       DATA DIVISION.\n",
+        "       WORKING-STORAGE SECTION.\n",
+        "       01  NOTHING PIC S9(4) BINARY VALUE 5.\n",
+        "       PROCEDURE DIVISION.\n",
+        "           CALL 'SETS3' RETURNING NOTHING\n",
+        "           GOBACK.\n",
+    );
+    assert_eq!(diagnostics_under(source, numeric::Compliance::Strict), []);
+    assert_eq!(diagnostics_under(source, numeric::Compliance::Extended), []);
+    let compiled = compile(syntax::parse(source).unwrap(), &[]).unwrap_or_else(|e| panic!("{e:?}"));
+    let Stmt::Call(call) = &compiled.program.paragraphs[0].statements[0] else { panic!("{:?}", compiled.program.paragraphs[0].statements) };
+    assert_eq!(call.returning.as_ref().map(|r| r.name.as_str()), Some("NOTHING"));
+}

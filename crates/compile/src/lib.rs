@@ -13,6 +13,7 @@ pub mod layout;
 pub mod linage;
 pub mod markup;
 pub mod numcheck;
+mod omitted;
 pub mod oo;
 mod operands;
 pub mod picture;
@@ -222,6 +223,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     }
     let inherited = scope::inherit(&mut program);
     let own_linkage = scope::own_linkage(&program);
+    omitted::rewrite(&mut program, &inherited.entries, options.compliance == numeric::Compliance::Extended, &mut errors);
     let linkage: Vec<DataEntry> = program.linkage.iter().chain(&inherited.entries).cloned().collect();
     let files: Vec<(&[DataEntry], Option<u32>)> = program.files.iter().map(|f| (f.records.as_slice(), f.record_max)).collect();
     let shared = layout::record_area_owners(&program.files, &program.environment).unwrap_or_else(|e| {

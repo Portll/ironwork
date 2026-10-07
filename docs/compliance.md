@@ -52,7 +52,9 @@ its ops `ScreenDisplay` and `ScreenAccept`. IWX0021-W, the environment, has none
 executors read and set the run unit's variables (`rt::environment`), and the LIR carries its
 `Environment` op and the ACCEPT source ENVIRONMENT-VALUE. IWX0022-W, record locking, is read by the
 parser and changes nothing either executor runs. IWX0023-W, INSPECT ... TRAILING, is a mode of
-INSPECT's scan that both executors run (`rt::strings::inspect`, `InspectMode` tag 4).
+INSPECT's scan that both executors run (`rt::strings::inspect`, `InspectMode` tag 4). IWX0024-W,
+CALL ... RETURNING OMITTED, NOTHING or NULL, is rewritten by the compiler into statements Enterprise
+COBOL has, which both executors run as any others.
 
 ### IWX0001-W free-form source
 
@@ -602,6 +604,33 @@ of T. In INSPECT's left-to-right scan it matches at a position when the data, as
 scan, holds its operand from there to the region's end, over and over; among the other phrases it
 fits as LEADING does, the first phrase that matches at a position taking it. cobc 3.2 gives the
 same results on the probes checked. Assumption C466. Strict refuses TRAILING as before.
+
+### IWX0024-W CALL ... RETURNING OMITTED, NOTHING or NULL
+
+`IWX0024-W CALL ... RETURNING OMITTED (GnuCOBOL; Enterprise COBOL's RETURNING names a data item): the
+CALL leaves the caller's RETURN-CODE as it was`, at the word after RETURNING.
+
+    CALL program [USING ...] RETURNING {OMITTED | NOTHING | NULL} [ON EXCEPTION ...] [NOT ON EXCEPTION ...]
+
+cobc 3.2 reads the three alike: the CALL returns nothing, and the caller's RETURN-CODE is what it was
+before the CALL, whatever the called program set; a plain CALL gives the caller the called program's
+RETURN-CODE. In ironwork RETURN-CODE is one location the whole run unit shares, so the compiler
+rewrites each such CALL before the layout is built (`compile::omitted`): a MOVE of RETURN-CODE to an
+item no source can name, `RETURN-CODE SAVED`, PIC S9(4) BINARY as RETURN-CODE is, goes before the
+CALL, and a MOVE of it back to RETURN-CODE first in NOT ON EXCEPTION. A CALL that fails leaves
+RETURN-CODE as it was in both compilers. The item is in WORKING-STORAGE, or in LOCAL-STORAGE in a
+RECURSIVE program, where each level of a recursion keeps its own. NOTHING is not reserved in
+Enterprise COBOL: in a program that declares an item named NOTHING, `RETURNING NOTHING` names it.
+OMITTED and NULL are reserved, and are read as the form wherever they are written, with no
+qualifier, subscript or reference modification. Strict refuses the three with IWC0300.
+
+Probes under `/tmp/callret2` gave the same output under `ironwork run --compliance extended`, with
+and without `--vm`, as under `cobc -x`, byte for byte: each word after `MOVE 7 TO RETURN-CODE` and
+a CALL of a program that sets 3; the form in IF and inline PERFORM; ON EXCEPTION and NOT ON
+EXCEPTION bodies; a CALL of a missing program with ON EXCEPTION; and a called program using the
+form in its own CALL. They differ in a RECURSIVE program that CALLs itself: cobc keeps a
+RETURN-CODE for each program, which the levels of a recursion share, so the caller's RETURN-CODE
+is what the deeper level last set; in ironwork each level gets back its own.
 
 ## How the six were chosen
 

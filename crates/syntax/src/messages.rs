@@ -345,6 +345,7 @@ catalogue! {
     IWC0297 Severe "FUNCTION {name}: {argument} is numeric, where {name} takes an alphabetic, alphanumeric or national argument";
     IWC0298 Severe "{DISPLAY or ACCEPT on the screen, or the SCREEN SECTION}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0299 Severe "{a locking phrase}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
+    IWC0300 Severe "CALL ... RETURNING {OMITTED, NOTHING or NULL}: GnuCOBOL's, not Enterprise COBOL's, whose RETURNING names a data item; --compliance extended reads it";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
     IWJ0003 Severe "unbalanced parentheses or quotes in {text}";
@@ -832,6 +833,7 @@ catalogue! {
     IWX0021 Warning "{the environment form} (Micro Focus and GnuCOBOL; Enterprise COBOL reads and sets no environment variable): {what it does}";
     IWX0022 Warning "{a locking phrase} (Micro Focus and GnuCOBOL; Enterprise COBOL has no record locks of its own): the run unit is the file's only user, so nothing it locks waits and the phrase changes nothing";
     IWX0023 Warning "INSPECT ... TRAILING (GnuCOBOL; Enterprise COBOL has ALL, LEADING, FIRST and CHARACTERS): the occurrences that run on to the end of the phrase's region";
+    IWX0024 Warning "CALL ... RETURNING {OMITTED, NOTHING or NULL} (GnuCOBOL; Enterprise COBOL's RETURNING names a data item): the CALL leaves the caller's RETURN-CODE as it was";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.
