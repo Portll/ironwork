@@ -87,6 +87,47 @@ fn pure_expr(p: &Program, e: ExprId, known: &mut [Option<bool>]) -> bool {
     }
 }
 
+/// A static place whose kind holds a whole number `store::read_integer` can read.
+pub(super) fn integer_item(place: &Place) -> bool {
+    let whole = matches!(place.kind, Kind::Index | Kind::Binary { scale: 0, .. } | Kind::Packed { scale: 0, .. } | Kind::Zoned { scale: 0, .. });
+    whole && place.scaling == 0 && is_static(place)
+}
+
+/// A subscripted place whose address is its base's plus a constant plus what each subscript adds,
+/// each subscript a literal or a data item with a constant address: located from these alone while
+/// nothing watches the walker's locates (`Vm::quick`).
+pub(super) struct Quick {
+    subscripts: Vec<(QuickSubscript, u32)>,
+}
+
+enum QuickSubscript {
+    Const(i64),
+    Item { base: Base, offset: u32, len: u32, kind: Kind, item: PlaceId },
+}
+
+pub(super) fn quick_places(p: &Program) -> Vec<Option<Quick>> {
+    p.places.iter().map(|place| quick_place(p, place)).collect()
+}
+
+fn quick_place(p: &Program, place: &Place) -> Option<Quick> {
+    let fixed = matches!(place.base, Base::Program | Base::Local | Base::ReturnCode);
+    if !fixed || place.subscripts.is_empty() || !place.moved.is_empty() || !place.odo.is_empty() || place.refmod.is_some() {
+        return None;
+    }
+    let subscripts = place.subscripts.iter().map(|s| {
+        let value = match s.value {
+            IntExpr::Const(n) => QuickSubscript::Const(n),
+            IntExpr::Item(q) if is_static(&p.places[q as usize]) => {
+                let item = &p.places[q as usize];
+                QuickSubscript::Item { base: item.base, offset: item.offset, len: item.len, kind: item.kind, item: q }
+            }
+            _ => return None,
+        };
+        Some((value, s.stride))
+    });
+    Some(Quick { subscripts: subscripts.collect::<Option<_>>()? })
+}
+
 /// The `Loc`s of pure places located while a comparison runs, which writes nothing: the walker
 /// locates its operands again, and those locates are taken from here. Held only while neither
 /// taint nor NUMCHECK, whose reads a locate makes, can tell.
@@ -184,6 +225,13 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 return Ok(loc);
             }
         }
+        if let Some(quick) = &self.code.quick[id as usize]
+            && fixed.is_empty()
+            && self.unseen()
+            && let Some(loc) = self.quick(id, place, quick)
+        {
+            return Ok(loc);
+        }
         let pos = self.pos(place.at);
         let name = self.sym(place.name);
         let base = match place.base {
@@ -237,6 +285,45 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         Ok(loc)
     }
 
+    fn base_of(&self, base: Base) -> usize {
+        match base {
+            Base::Program => self.base,
+            Base::Local => self.local_base,
+            _ => RETURN_CODE,
+        }
+    }
+
+    /// `evaluate` of a quick place, where taint and NUMCHECK are off: each subscript item is read
+    /// where it lies. None where an item is not a plain integer or a check fails, which `evaluate`
+    /// then gives in full, as these places are pure.
+    fn quick(&self, id: PlaceId, place: &Place, quick: &Quick) -> Option<Loc> {
+        let facts = self.facts();
+        let mut composed = 0;
+        for (subscript, stride) in &quick.subscripts {
+            let value = match *subscript {
+                QuickSubscript::Const(n) => n,
+                QuickSubscript::Item { base, offset, len, kind, item } => {
+                    let offset = self.base_of(base) + offset as usize;
+                    if offset + len as usize > self.unit.mem.len() {
+                        return None;
+                    }
+                    store::read_integer(&facts, &self.unit.mem, Loc { offset, len: len as usize, kind, item: item as usize })?
+                }
+            };
+            composed += loc::subscript(value, *stride);
+        }
+        if let Some(t) = place.table {
+            let from = i64::from(t.displacement) + composed;
+            if from < 0 || from + i64::from(place.len) > i64::from(t.extent) {
+                return None;
+            }
+        }
+        let offset = i64::try_from(self.base_of(place.base) + place.offset as usize).ok()? + composed;
+        let len = place.len as usize;
+        let fits = offset >= 0 && offset as usize + len <= self.unit.mem.len();
+        fits.then_some(Loc { offset: offset as usize, len, kind: place.kind, item: id as usize })
+    }
+
     /// `Machine::integer`: the dmax pass's locates, then the value, its whole part.
     pub(super) fn int(&mut self, e: &IntExpr, pos: Pos) -> R<i64> {
         match e {
@@ -258,8 +345,25 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         }
     }
 
+    /// A static integer item's value read where it lies, while taint and NUMCHECK, which its locate
+    /// and read would tell, are off; None where `loc` and `read` must take it.
+    pub(super) fn static_integer(&self, p: PlaceId) -> Option<i64> {
+        if !self.code.integers[p as usize] || !self.unseen() {
+            return None;
+        }
+        let place = &self.p.places[p as usize];
+        let (offset, len) = (self.base_of(place.base) + place.offset as usize, place.len as usize);
+        if offset + len > self.unit.mem.len() {
+            return None;
+        }
+        store::read_integer(&self.facts(), &self.unit.mem, Loc { offset, len, kind: place.kind, item: p as usize })
+    }
+
     /// `Machine::integer` of a data item: located for its dmax, then located and read.
     pub(super) fn int_place(&mut self, p: PlaceId, pos: Pos) -> R<i64> {
+        if let Some(n) = self.static_integer(p) {
+            return Ok(n);
+        }
         let place = &self.p.places[p as usize];
         if !is_static(place) {
             self.loc(p)?;

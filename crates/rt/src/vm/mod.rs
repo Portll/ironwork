@@ -116,6 +116,11 @@ struct Lowered {
     receivers: HashMap<PlaceId, SymId>,
     variables: HashMap<PlaceId, Option<String>>,
     pure: Vec<bool>,
+    quick: Vec<Option<place::Quick>>,
+    /// Each place `static_integer` reads: a static one whose kind holds a whole number.
+    integers: Vec<bool>,
+    /// Each constant's value as `operand_number` takes it where it is an integer.
+    ints: Vec<Option<(i64, numeric::precision::Places)>>,
 }
 
 impl Code {
@@ -159,7 +164,10 @@ impl Lowered {
         let receivers = receivers(&program);
         let variables = if program.options.options.numcheck.is_some() { cond::conditional_variables(&program) } else { HashMap::new() };
         let pure = place::pure_places(&program);
-        Self { program, collation, ordinals, high_value, low_value, entry_of, receivers, variables, pure }
+        let quick = place::quick_places(&program);
+        let ints = program.consts.iter().map(value::const_int).collect();
+        let integers = program.places.iter().map(place::integer_item).collect();
+        Self { program, collation, ordinals, high_value, low_value, entry_of, receivers, variables, pure, quick, integers, ints }
     }
 }
 
@@ -482,3 +490,4 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
         }
     }
 }
+

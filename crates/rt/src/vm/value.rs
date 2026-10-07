@@ -160,6 +160,9 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         match o {
             Operand::Load(p) => {
                 let place = &self.p.places[p as usize];
+                if let Some(n) = self.static_integer(p) {
+                    return Ok(Number::Int(n, places_of(place.kind)));
+                }
                 let loc = self.loc(p)?;
                 let at = self.pos(place.at);
                 self.numcheck(loc, SenderCheck::Item, at)?;
@@ -171,9 +174,9 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 let val = self.read(loc, at)?;
                 Ok(Number::Fixed(arith::fixed_operand(val, dmax, pos)?))
             }
-            Operand::Const(c) => match &self.p.consts[c as usize] {
-                Const::Number(f) if f.places.dec == 0 && !(f.negative && f.magnitude.is_zero()) && let Some(n) = f.to_i128().and_then(|n| i64::try_from(n).ok()) => Ok(Number::Int(n, f.places)),
-                _ => {
+            Operand::Const(c) => match self.code.ints[c as usize] {
+                Some((n, places)) => Ok(Number::Int(n, places)),
+                None => {
                     let val = self.value(o)?;
                     Ok(Number::Fixed(arith::fixed_operand(val, dmax, pos)?))
                 }
@@ -370,6 +373,15 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             Val::Bytes(b) => Ok(self.facts().page().decode(&b).trim().to_ascii_uppercase()),
             _ => Err(Abend::ironwork("a program name must be alphanumeric", pos).into()),
         }
+    }
+}
+
+/// A constant as `operand_number` takes it while it is an integer: a whole number that fits an
+/// `i64`, other than a negative zero.
+pub(super) fn const_int(c: &Const) -> Option<(i64, Places)> {
+    match c {
+        Const::Number(f) if f.places.dec == 0 && !(f.negative && f.magnitude.is_zero()) => f.to_i128().and_then(|n| i64::try_from(n).ok()).map(|n| (n, f.places)),
+        _ => None,
     }
 }
 
