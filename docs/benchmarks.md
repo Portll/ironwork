@@ -5,9 +5,10 @@ Step 0 of [codegen-runtime.md](codegen-runtime.md) §14: four programs timed und
 
 **Status:** the interpreter and cobc measured 2026-09-30 as the base; the VM measured 2026-10-04
 with the VM performance commits 6489a92..bbf9941, meeting the [VM target](#vm-target) on all four
-programs on an M5 Pro (see VM results). On GitHub's hosted runners, 2026-10-07, the VM misses the
-target for `callheavy` and `packed` on Linux x86-64 and for `callheavy` on macOS (see
-[Hosted runners](#hosted-runners)).
+programs on an M5 Pro (see VM results). On GitHub's hosted runners the VM missed the target for
+`callheavy` and `packed` on Linux x86-64 and for `callheavy` on macOS until the arithmetic and CALL
+work of 2026-10-07; at f60f7833 it meets every target on both runners (see
+[Hosted runners](#hosted-runners)), which settles decision D-4 for 0.9.0.
 
 ## Method
 
@@ -93,11 +94,19 @@ ratio within about 0.03 of its target needs a second run.
 | macOS arm64 | e74a3fc7 | 0.189 | **0.255** | 0.313 | 0.77 |
 | Linux x86-64 (AMD EPYC 9V45, 4 cores) | 2337cd82 | 0.198 | **0.254** | **0.372** | 0.89 |
 | Linux x86-64 (AMD EPYC 7763, 4 cores) | e74a3fc7 | **0.207** | **0.285** | **0.378** | 1.17 |
+| macOS arm64 (Apple M1, virtual, 3 cores) | 932aff97, on main as f60f7833 | 0.14 | 0.14 | 0.15 | 0.6 |
+| Linux x86-64 (AMD EPYC 7763, 4 cores) | 932aff97, on main as f60f7833 | 0.16 | 0.17 | 0.14 | 0.8 |
 | Target | | 0.20 | 0.20 | 0.33 | 1.25 |
 
 - On Linux x86-64 the VM missed `callheavy` and `packed` already at 2337cd82, the commit that met
   every target on the M5 Pro: the VM gains less over the interpreter on that platform.
 - From 2337cd82 to e74a3fc7 every ratio rose on both runners, by about 5 to 15 percent.
+- At 932aff97 (Bench run 37606998129; rustc 1.99.0 and GnuCOBOL 3.2.0 on both runners), after the
+  scaled fixed-point arithmetic, the zoned and packed codecs and the CALL path of 15.6.5 to 15.6.7,
+  every target is met on both runners, each with room: `callheavy` 0.14 and 0.17 against 0.20,
+  `packed` 0.15 and 0.14 against 0.33, `tblsrch` 0.14 and 0.16 against 0.20, and `seqio` 0.6 and
+  0.8 times cobc against 1.25. The VM's times there: macOS 2.21, 0.89, 1.77 and 1.32 s; Linux 2.13,
+  0.78, 1.61 and 1.83 s for `seqio`, `packed`, `tblsrch` and `callheavy`.
 - A profile of the VM at e74a3fc7 (macOS `sample`, release build) puts most of its time in work the
   interpreter does not share: resolving operands and addresses on each execution (50% of
   `tblsrch`, 37 to 38% of `callheavy` and `packed`), instruction dispatch (14 to 19%), and setting
