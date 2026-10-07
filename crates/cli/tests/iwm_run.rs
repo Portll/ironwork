@@ -133,7 +133,7 @@ fn static_and_dynamic_call_cancel_and_a_function_run_as_the_source_runs() {
     compiled(&dir, &["MAIN.cbl", "-o", "app"]);
     compiled(&dir, &["lib/SUB.cbl", "-o", "mods"]);
     let shown = text(&ironwork(&dir, &["dump", "--section", "DIRECTORY", "app/MAIN.iwm"]).stdout);
-    assert!(shown.contains("program 1 DOUBLE parent - common no dynamic yes using [reference] returning yes\nprogram 1 external dbl\n"), "{shown}");
+    assert!(shown.contains("program 1 DOUBLE parent - common no dynamic yes using [reference] returning yes\nprogram 1 external DBL\n"), "{shown}");
     let module = ironwork(&dir, &["run", "app/MAIN.iwm", "-L", "mods"]);
     assert_eq!(ran(&module), ran(&source), "{}", text(&module.stderr));
     assert_eq!(text(&module.stderr), "");

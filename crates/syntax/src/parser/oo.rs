@@ -184,11 +184,17 @@ impl Parser<'_> {
         if let [(all, _)] = names
             && all == "ALL"
         {
+            if let Some(user) = self.repository_functions.iter().find(|f| crate::ast::is_intrinsic_name(f)) {
+                return Err(crate::messages::IWS0080.at(names[0].1, intrinsic_and_user(user)));
+            }
             let every = rt::intrinsic::FIRST.iter().chain(rt::intrinsic::FUNCTIONS).filter(|n| **n != "WHEN-COMPILED");
             self.intrinsics.extend(every.map(|n| (*n).to_owned()));
             return Ok(());
         }
         for (name, pos) in names {
+            if self.repository_functions.contains(name) {
+                return Err(crate::messages::IWS0080.at(*pos, intrinsic_and_user(name)));
+            }
             if name == "WHEN-COMPILED" {
                 return Err(crate::messages::IWS0076.at(*pos, "WHEN-COMPILED is a special register too, so the REPOSITORY paragraph cannot name it"));
             }
@@ -202,18 +208,21 @@ impl Parser<'_> {
 
     /// FUNCTION user-defined-function-name: each name invoked without the word FUNCTION, which may
     /// not be LENGTH, RANDOM, SIGN, SUM or WHEN-COMPILED (Language Reference, REPOSITORY paragraph).
+    /// An intrinsic function's name that INTRINSIC lists in the same paragraph is no user-defined
+    /// word there.
     fn repository_functions(&mut self, names: &[(String, Pos)]) -> R<()> {
         for (name, pos) in names {
-            if matches!(name.as_str(), "LENGTH" | "RANDOM" | "SIGN" | "SUM" | "WHEN-COMPILED") {
+            if super::UNTAKEN_INTRINSIC_NAMES.contains(&name.as_str()) {
                 return Err(crate::messages::IWS0078.at(*pos, format!("FUNCTION {name}: a user-defined function in the REPOSITORY paragraph cannot be named {name}")));
             }
             if name == "ALL" {
                 return Err(crate::messages::IWS0079.at(*pos, "FUNCTION ALL: INTRINSIC follows ALL, which names every intrinsic function"));
             }
-            if rt::intrinsic::FIRST.contains(&name.as_str()) || rt::intrinsic::FUNCTIONS.contains(&name.as_str()) {
-                return Err(crate::messages::IWS0080.at(*pos, format!("FUNCTION {name}: an intrinsic function is listed with INTRINSIC, and no user-defined function takes its name (assumption C271)")));
+            if crate::ast::is_intrinsic_name(name) && self.intrinsics.contains(name) && !self.repository_functions.contains(name) {
+                return Err(crate::messages::IWS0080.at(*pos, intrinsic_and_user(name)));
             }
             self.intrinsics.push(name.clone());
+            self.repository_functions.push(name.clone());
         }
         Ok(())
     }
@@ -354,6 +363,10 @@ impl Parser<'_> {
         self.accept_word("END-INVOKE");
         Ok(Invoke { target, method, using, returning, on_exception: exception.on, not_on_exception: exception.not_on, pos })
     }
+}
+
+fn intrinsic_and_user(name: &str) -> String {
+    format!("FUNCTION {name}: the REPOSITORY paragraph lists {name} with INTRINSIC, so no user-defined function takes its name here")
 }
 
 #[cfg(test)]

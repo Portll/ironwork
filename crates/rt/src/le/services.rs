@@ -6,7 +6,7 @@ use super::{Condition, Reading, Stamp};
 use crate::abend::{Abend, AbendCode};
 use crate::calendar;
 use crate::lir::LeService;
-use crate::unit::{ADDRESS_BASE, Loader, RunUnit, UnitHost};
+use crate::unit::{ADDRESS_BASE, Loader, RETURN_CODE, RunUnit, UnitHost};
 use crate::vocab::Pos;
 use std::io::Write;
 use zarch::ebcdic::CodePage;
@@ -79,6 +79,7 @@ impl<H: Clone, L: Loader<H>> Services<'_, '_, H, L> {
         match (args.get(required).copied().flatten(), failed) {
             (Some(fc), failed) => {
                 self.le_store(fc, &failed.map_or([0; 12], Condition::token));
+                self.clear_return_code();
                 Ok(())
             }
             (None, Some(c)) if c.severity >= 2 => Err(Abend {
@@ -87,8 +88,18 @@ impl<H: Clone, L: Loader<H>> Services<'_, '_, H, L> {
                 pos,
                 file: None,
             }),
-            (None, _) => Ok(()),
+            (None, None) => {
+                self.clear_return_code();
+                Ok(())
+            }
+            (None, Some(_)) => Ok(()),
         }
+    }
+
+    /// RETURN-CODE after a service: 0, except after a failure with fc OMITTED, which leaves it alone.
+    fn clear_return_code(&mut self) {
+        self.unit.mem[RETURN_CODE..RETURN_CODE + 2].fill(0);
+        self.unit.mark_input(RETURN_CODE, 2, false);
     }
 
     /// The address of parameter `i`; an OMITTED one is a null address the service stores through.

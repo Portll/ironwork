@@ -91,7 +91,7 @@ pub const LE_SECONDS_HFP: &str = "L8";
 pub const LE_PICTURE_OUTPUT: &str = "L9";
 pub const LE_PICTURE_INPUT: &str = "L10";
 pub const LE_CENTURY_WINDOW: &str = "L11";
-pub const LE_RETURN_CODE_UNCHANGED: &str = "L12";
+pub const LE_RETURN_CODE: &str = "L12";
 pub const LE_MESSAGE_AND_DUMP_FILES: &str = "L13";
 pub const LE_HEAP: &str = "L14";
 pub const LE_UNDER_CICS: &str = "L15";
@@ -626,7 +626,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: LE_CEE3ABD,
-        claim: "CEE3ABD ends the run with user abend abcode modulo 4096, the ABEND macro's user completion code, to which SA38-0683-60 says abcode passes unchecked; with clean-up 0, or a value CEE3ABD does not take, 'termination activities are not performed' and the abend is issued without clean-up, so the run unit's files are left as an abend under TRAP(OFF) leaves them (TRAP_OFF_LEAVES_FILES_OPEN); with clean-up 1 to 5 'normal termination activities are performed' and open files are closed, as at any U code (C152), unless TRAP(OFF) is in effect, when 'CEE3ABD behaves in a similar manner to clean-up 0' (z/OS 3.1 Language Environment Programming Reference, CEE3ABD). Neither a CEEDUMP nor a system dump is written",
+        claim: "CEE3ABD ends the run with user abend abcode modulo 4096, the ABEND macro's user completion code, to which SA38-0683-60 says abcode passes unchecked; with clean-up 0, or a value CEE3ABD does not take, 'termination activities are not performed' and the abend is issued without clean-up, so the run unit's files are left as an abend under TRAP(OFF) leaves them (C152); with clean-up 1 to 5 'normal termination activities are performed' and open files are closed, as at any U code (C152), unless TRAP(OFF) is in effect, when 'CEE3ABD behaves in a similar manner to clean-up 0' (z/OS 3.1 Language Environment Programming Reference, CEE3ABD). Clean-up 0 'stops the run unit immediately, and a system dump is requested when the abend is issued' (Programming Guide SC27-8714-03, p. 242); ironwork writes no system dump, whatever SYSUDUMP, SYSABEND or SYSMDUMP DD the step has, nor a CEEDUMP",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -661,9 +661,9 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
-        id: LE_RETURN_CODE_UNCHANGED,
-        claim: "A CALL of a callable service leaves RETURN-CODE as it was; SA38-0683-60 leaves register 15 undefined on return",
-        basis: Basis::Chosen,
+        id: LE_RETURN_CODE,
+        claim: "A CALL of a callable service sets RETURN-CODE to 0 when it passes a feedback code, and when it omits one and the service succeeds; with the feedback code omitted a failure signals its condition and leaves RETURN-CODE as it was (Programming Guide SC27-8714-03, p. 790), and every condition ironwork's services give is of severity 2 or more, which ends the run. SA38-0683-60 leaves register 15 undefined on return",
+        basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
@@ -1808,13 +1808,13 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: FUNCTION_SOURCE_ORDER,
-        claim: "A run enters the first program of its source, ahead of the user-defined functions and function prototypes before it. IBM makes the first program or user-defined function of a batch compilation the default entry point, and asks for a binder ENTRY statement naming the main program when a function comes first, as IBM requires of a function with no prototype (Programming Guide, 'Structuring user-defined functions' and 'Link-editing user-defined functions'); ironwork runs as if that ENTRY statement were given. `run` and `check` compile the source's functions and prototypes with the program and report their messages first, as IBM compiles the whole compilation group; a function that does not compile stops the run, and a source of functions alone has no program to run. A function is loaded by its external name, AS literal-1 or else its function-name, matched without regard to case and without PGMNAME's truncation, as CALL matches program names",
+        claim: "A run enters the first program of its source, ahead of the user-defined functions and function prototypes before it. IBM makes the first program or user-defined function of a batch compilation the default entry point, and asks for a binder ENTRY statement naming the main program when a function comes first, as IBM requires of a function with no prototype (Programming Guide, 'Structuring user-defined functions' and 'Link-editing user-defined functions'); ironwork runs as if that ENTRY statement were given. `run` and `check` compile the source's functions and prototypes with the program and report their messages first, as IBM compiles the whole compilation group; a function that does not compile stops the run, and a source of functions alone has no program to run. A function is loaded by its external name, AS literal-1 or else its function-name, as PGMNAME forms it: under PGMNAME(COMPAT), the default, folded to upper case, truncated to eight characters, hyphens made 0 and a leading digit made a letter; under LONGUPPER the same without the truncation; under LONGMIXED as written (Programming Guide SC27-8714-03, pp. 398, 600). The CBL and PROCESS cards of the source holding the FUNCTION-ID decide, for a definition and a prototype alike, and a library member holding a function is named by its external name. Two functions whose external names agree, as GET-RECORD-NOW and GET-RECORD-NEXT do under COMPAT, load as the one defined first, where IBM's binder finds two definitions of one name. Names match without regard to case, and LONGMIXED's rule that every function definition has an AS phrase is not checked",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
     Assumption {
         id: FUNCTION_NAMED_AS_INTRINSIC,
-        claim: "No user-defined function takes an intrinsic function's name, neither in FUNCTION-ID nor in the REPOSITORY paragraph without INTRINSIC. The Language Reference forbids LENGTH, RANDOM, SIGN, SUM and WHEN-COMPILED as a REPOSITORY paragraph's user-defined function names ('REPOSITORY paragraph') and says nothing of the other intrinsic names, nor whether FUNCTION name then invokes the intrinsic function or the user's; ironwork refuses the name rather than guess which, so Enterprise COBOL may compile a program ironwork refuses",
+        claim: "A user-defined function may take an intrinsic function's name, except LENGTH, RANDOM, SIGN, SUM and WHEN-COMPILED, in FUNCTION-ID and in the REPOSITORY paragraph (Language Reference SC27-8713-03, p. 14 and 'REPOSITORY paragraph'). The manuals do not say which function FUNCTION name then invokes. Within the scope of a REPOSITORY paragraph that names it without INTRINSIC, as its user-defined-function-name, the name invokes the user's function; anywhere else the intrinsic function, so a program that does not name the user's function keeps IBM's documented meaning. A REPOSITORY paragraph that lists the name, or ALL, with INTRINSIC and also names it as a user-defined function is refused, since an intrinsic function name it lists 'shall not be specified as a user-defined word within the scope of this REPOSITORY paragraph'",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -1958,7 +1958,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: TRAP_OFF_LEAVES_FILES_OPEN,
-        claim: "When the run unit ends normally, all open files are closed, and when it ends abnormally they are closed if TRAP(ON) is in effect (Programming Guide SC27-8714-03, p. 203), Language Environment's default (z/OS 3.1 Language Environment Programming Reference, TRAP, ceea300/cltrap). Under TRAP(OFF), Language Environment is not told of a program check or an abend and does not close the files high-level languages opened, so records might be lost (cltrap), and the VSAM CLOSE the abend invokes does not update the data set's catalog information (z/OS 3.1 DFSMS Using Data Sets, idad400/clds9), which leaves a VSAM data set opened for output marked open (C220). ironwork reads TRAP from the runtime options of a job step's PARM or run's --parm, after the last slash (C250), the last TRAP there deciding, as cltrap has the last of several STAE or SPIE decide; a CICS task takes the default. ironwork takes S0C4 to S0CF and S322 as the program checks and abends TRAP(OFF) hides; a failing I/O status or a U code ends the run through a condition Language Environment handles under either setting (CEESGL is unaffected by TRAP, cltrap), closing the files as ironwork's own stops do. A file left open is written as CLOSE writes it, every record reaching the data set, where on z/OS buffers are not flushed",
+        claim: "When the run unit ends normally, all open files are closed, and when it ends abnormally they are closed if TRAP(ON) is in effect (Programming Guide SC27-8714-03, p. 203), Language Environment's default (z/OS 3.1 Language Environment Programming Reference, TRAP, ceea300/cltrap). Under TRAP(OFF), Language Environment is not told of a program check or an abend and does not close the files high-level languages opened, so records might be lost (cltrap), and the VSAM CLOSE the abend invokes does not update the data set's catalog information (z/OS 3.1 DFSMS Using Data Sets, idad400/clds9), which leaves a VSAM data set opened for output marked open (C220). ironwork reads TRAP from the runtime options of a job step's PARM or run's --parm, after the last slash (C250), the last TRAP there deciding, as cltrap has the last of several STAE or SPIE decide; a CICS task takes the default. ironwork takes S0C4 to S0CF and S322 as the program checks and abends TRAP(OFF) hides; a failing I/O status or a U code ends the run through a condition Language Environment handles under either setting (CEESGL is unaffected by TRAP, cltrap), closing the files as ironwork's own stops do, except CEE3ABD's abend without clean-up, or with clean-up under TRAP(OFF), which leaves them as TRAP(OFF) does (L6). A file left open is written as CLOSE writes it, every record reaching the data set, where on z/OS buffers are not flushed",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

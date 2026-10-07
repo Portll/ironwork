@@ -236,7 +236,7 @@ fn the_function_syntax_ibm_refuses_is_refused() {
     assert!(parse_error(&r).ends_with("EXIT FUNCTION: Enterprise COBOL does not yet support the format 4 EXIT statement; GOBACK ends a user-defined function"));
     let nested = program(&[], &[], &["GOBACK."]).replace("       END PROGRAM MAIN.\n", &(function("F", &[], &[], "", &[]) + "       END PROGRAM MAIN.\n"));
     assert!(parse_error(&nested).ends_with("a user-defined function or prototype cannot be nested within a program, function, method or class"));
-    assert!(parse_error(&function("MAX", &[], &[], "", &[])).ends_with("FUNCTION-ID MAX: MAX is an intrinsic function's name (assumption C271)"));
+    assert!(parse_error(&function("SUM", &[], &[], "", &[])).ends_with("FUNCTION-ID SUM: a user-defined function cannot be named SUM"));
     assert!(parse_error(&function("-F", &[], &[], "", &[])).contains("a function name"));
     let unended = function("F", &[], &["01 R PIC X."], "RETURNING R", &["GOBACK."]).replace("       END FUNCTION F.\n", "");
     assert!(parse_error(&unended).contains("END FUNCTION F, which ends a user-defined function"));
@@ -281,4 +281,37 @@ fn an_invocation_lowers_to_a_plan_and_a_definition_names_its_records() {
         Err(lower::LowerError::Unsupported(what, _)) => assert_eq!(what, "a user-defined function's parameter or RETURNING record holding an OCCURS DEPENDING ON table"),
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn a_function_takes_an_intrinsic_name_where_the_repository_names_it() {
+    let upper = function("UPPER-CASE", &[], &["01 S PIC X(3).", "01 R PIC X(5)."], "USING S RETURNING R", &["MOVE '<' TO R(1:1)", "MOVE S TO R(2:3)", "MOVE '>' TO R(5:1)", "GOBACK."]);
+    let body = ["DISPLAY FUNCTION UPPER-CASE('abc')", "GOBACK."];
+    let named = upper.clone() + &program(&["FUNCTION UPPER-CASE"], &[], &body);
+    let unnamed = upper.clone() + &program(&[], &[], &body);
+    for name in ["interpreter", "vm"] {
+        let x = || if name == "vm" { Executor::Vm } else { Executor::Interpreter };
+        assert_eq!(Harness::source(&named).run(x()).out, "<abc>\n", "{name}");
+        assert_eq!(Harness::source(&unnamed).run(x()).out, "ABC\n", "{name}");
+    }
+    assert_eq!(run(&(upper.clone() + &program(&["FUNCTION UPPER-CASE"], &[], &["DISPLAY UPPER-CASE('xyz')", "GOBACK."]))).0, "<xyz>\n");
+    let both = program(&["FUNCTION UPPER-CASE INTRINSIC", "FUNCTION UPPER-CASE"], &[], &body);
+    assert!(parse_error(&(upper.clone() + &both)).ends_with("FUNCTION UPPER-CASE: the REPOSITORY paragraph lists UPPER-CASE with INTRINSIC, so no user-defined function takes its name here"));
+    let all = program(&["FUNCTION UPPER-CASE", "FUNCTION ALL INTRINSIC"], &[], &body);
+    assert!(parse_error(&(upper + &all)).ends_with("FUNCTION UPPER-CASE: the REPOSITORY paragraph lists UPPER-CASE with INTRINSIC, so no user-defined function takes its name here"));
+}
+
+#[test]
+fn pgmname_forms_a_functions_external_name() {
+    let named = |name: &str, value: &str| function(name, &[], &["01 R PIC X(4)."], "RETURNING R", &[&format!("MOVE '{value}' TO R"), "GOBACK."]);
+    let source = named("GET-RECORD-NOW", "AAAA") + &named("GET-RECORD-NEXT", "BBBB") + &program(&[], &[], &["DISPLAY FUNCTION GET-RECORD-NOW FUNCTION GET-RECORD-NEXT", "GOBACK."]);
+    assert_eq!(run(&source).0, "AAAAAAAA\n");
+    assert_eq!(run(&format!("       CBL PGMNAME(LONGUPPER)\n{source}")).0, "AAAABBBB\n");
+    let library = temp("udf-pgmname");
+    std::fs::create_dir_all(&library).unwrap();
+    std::fs::write(library.join("GET0RECO.cbl"), named("GET-RECORD-NOW", "CCCC")).unwrap();
+    let prototype = "       IDENTIFICATION DIVISION.\n       FUNCTION-ID. GET-RECORD-NOW IS PROTOTYPE.\n       DATA DIVISION.\n       LINKAGE SECTION.\n       01 R PIC X(4).\n       PROCEDURE DIVISION RETURNING R.\n       END FUNCTION GET-RECORD-NOW.\n";
+    let main = program(&[], &[], &["DISPLAY FUNCTION GET-RECORD-NOW", "GOBACK."]);
+    let o = Harness::source(&(prototype.to_owned() + &main)).dirs(vec![library.clone()]).run(Executor::Interpreter);
+    assert_eq!(o.out, "CCCC\n", "{}", o.err);
 }

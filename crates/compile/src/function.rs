@@ -71,7 +71,9 @@ pub fn signature(p: &Prototype, qualify: Qualify) -> Result<Udf, Error> {
 }
 
 /// The functions a program may invoke, each laid out once. A prototype that does not lay out is
-/// left out here: compiling it reports why, and an invocation of it is then unknown.
+/// left out here: compiling it reports why, and an invocation of it is then unknown. One named as an
+/// intrinsic function is left out unless the REPOSITORY paragraph names it, as the name then
+/// invokes the intrinsic function (assumption C271).
 pub fn functions(program: &Program, qualify: Qualify, errors: &mut Vec<Error>) -> Vec<Udf> {
     let own = program.function.as_ref().map(|f| f.pos);
     let mut out = Vec::new();
@@ -86,6 +88,7 @@ pub fn functions(program: &Program, qualify: Qualify, errors: &mut Vec<Error>) -
         definition_rules(program, &out, own, errors);
     }
     facilities(program, errors);
+    out.retain(|u| !program.intrinsic(&u.name));
     out
 }
 

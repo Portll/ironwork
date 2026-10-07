@@ -56,7 +56,7 @@ program being compiled is never its own member. CALL finds a program among the o
 source, then in the program's directory and each `-L` library, by name, and failing that in the
 `.cbl` or `.cob` file there whose PROGRAM-ID it is (assumption C441); a dynamic CALL can name only
 such a member, never a path. A user-defined function's definition is found the same way, by its
-external name. `run` and `check` compile a source's functions and function prototypes with its first
+external name as PGMNAME forms it, eight characters under the default COMPAT (C270). `run` and `check` compile a source's functions and function prototypes with its first
 program, which is the one a run enters even when functions come before it (assumption C270).
 `ASSIGN` names a DD, and a program reaches only the files its DDs are given, by `--dd` or `DD_NAME`
 in the environment, as JCL gives them on z/OS; DD SYSIN is what ACCEPT reads, standard input
@@ -103,8 +103,9 @@ CEEDAYS; QUALIFY(EXTEND), under which a complete set of qualifiers names its one
 which starts every program from its VALUE clauses on each CALL, and which THREAD drops; and
 VLR(COMPAT), under which a READ checks a variable-length record only against RECORD VARYING.
 VSAMOPENFS(SUCC) makes 00 the status of an OPEN that verifies an indexed or relative data set a
-run left open for output, 97 under COMPAT; a run leaves one open only when an abend that TRAP(OFF)
-in its PARM keeps from Language Environment ends it (C152).
+run left open for output, 97 under COMPAT; a run leaves one open only when it ends without Language
+Environment's termination activities: an abend that TRAP(OFF) in its PARM keeps from Language
+Environment, or CEE3ABD without clean-up (C152, L6).
 Assumptions C210 to C220 hold what the manuals leave open. INITCHECK (or IC) warns at compile time,
 return code 4, of each statement that uses a WORKING-STORAGE or LOCAL-STORAGE item no path to the
 statement sets, and INITCHECK(STRICT) of each that some path leaves unset, following PERFORM, GO TO
@@ -526,7 +527,9 @@ The subset the interpreter runs today:
   parameter describes it (C272), and a prototype and the definition of its name must agree. The
   RETURNING item's value is the function's, reference-modifiable when alphanumeric or national.
   Functions are recursive, each activation with its own LOCAL-STORAGE, and STOP RUN in one ends the
-  run (C274). EXIT FUNCTION, a nested definition, an intrinsic function's name (C271), BY VALUE
+  run (C274). A function may take an intrinsic function's name but LENGTH, RANDOM, SIGN, SUM and
+  WHEN-COMPILED, and the name invokes it where the REPOSITORY paragraph names it (C271). EXIT
+  FUNCTION, a nested definition, BY VALUE
   parameters other than binary, floating-point, pointers and single characters, and SQL or CICS with
   functions (C273) are refused. Lowering refuses an invocation, so `compile` writes no module for a
   program that invokes a function.
@@ -650,7 +653,8 @@ The subset the interpreter runs today:
   minutes, seconds, fractions and AM/PM; CEELOCT, CEEGMT, CEEUTC and CEEGMTO read the `--clock`,
   taking local time as UTC; CEEMOUT writes to DD SYSOUT and CEE3DMP to DD CEEDUMP, or both to
   standard error; CEEGTST and CEEFRST get and free heap storage. Each returns its 12-byte
-  feedback code, and with the feedback code OMITTED a failure ends the run with U4038. A CALL
+  feedback code and sets RETURN-CODE to 0, and with the feedback code OMITTED a failure ends the
+  run with U4038 (L12). A CALL
   that passes fewer arguments than the service takes, as `CALL 'CEE3ABD'` with no USING does,
   ends the run with ironwork's own abend, since what z/OS does then is unpredictable. COPY
   CEEIGZCT, when no library holds it, names the 723 symbolic feedback codes of the Language

@@ -292,6 +292,60 @@ pub enum IntDate {
     Lilian,
 }
 
+/// How an external program-name or user-defined function-name is formed (Programming Guide
+/// SC27-8714-03, pp. 398-399, PGMNAME).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Pgmname {
+    /// Folded to upper case, truncated to eight characters, hyphens made 0, a leading digit made a
+    /// letter.
+    #[default]
+    Compat,
+    /// As `Compat`, without the truncation.
+    LongUpper,
+    /// As written.
+    LongMixed,
+}
+
+impl Pgmname {
+    pub fn named(sub: &str) -> Option<Self> {
+        match sub {
+            "COMPAT" | "CO" => Some(Self::Compat),
+            "LONGUPPER" | "UPPER" | "LU" | "U" => Some(Self::LongUpper),
+            "LONGMIXED" | "MIXED" | "LM" | "M" => Some(Self::LongMixed),
+            _ => None,
+        }
+    }
+
+    /// The setting the last valid PGMNAME among the option cards gives. It forms names as the
+    /// source is read, so the compiled program does not carry it.
+    pub fn of(options: &[String]) -> Self {
+        let named = |o: &String| {
+            let o = o.trim().to_ascii_uppercase();
+            let (name, sub) = o.split_once('(')?;
+            spelled(name.trim()).filter(|(d, _)| d.name == "PGMNAME")?;
+            Self::named(sub.trim_end_matches(')').trim())
+        };
+        options.iter().rev().find_map(named).unwrap_or_default()
+    }
+
+    /// The external name `name` becomes under this setting.
+    pub fn external(self, name: &str) -> String {
+        if self == Self::LongMixed {
+            return name.to_owned();
+        }
+        let kept = if self == Self::Compat { name.chars().take(8).collect::<String>() } else { name.to_owned() };
+        let mut out: String = kept.chars().map(|c| if c == '-' { '0' } else { c.to_ascii_uppercase() }).collect();
+        if let Some(first) = out.chars().next().filter(|c| !c.is_ascii_alphabetic() && *c != '_') {
+            let letter = match first {
+                '1'..='9' => char::from(b'A' + (first as u8 - b'1')),
+                _ => 'J',
+            };
+            out.replace_range(..first.len_utf8(), &letter.to_string());
+        }
+        out
+    }
+}
+
 /// Whether a reference must be unique by the standard's rules (`Compat`), or resolves to the one
 /// item a complete set of qualifiers names (`Extend`) (Programming Guide SC27-8714-03, p. 400).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -944,6 +998,8 @@ impl Options {
                     _ => return Err(bad()),
                 }
             }
+            "PGMNAME" if Pgmname::named(sub).is_some() => {}
+            "PGMNAME" => return Err(bad()),
             "QUALIFY" => {
                 self.qualify = match sub {
                     "COMPAT" | "C" => Qualify::Compat,
@@ -1373,6 +1429,10 @@ mod tests {
         assert_eq!(given(&["DS(S)"]).dispsign, DispSign::Sep);
         assert_eq!(given(&["DISPSIGN(SEP)", "DISPSIGN(COMPAT)"]).dispsign, DispSign::Compat);
         assert_eq!(given(&["INTDATE(LILIAN)"]).intdate, IntDate::Lilian);
+        let cards = |c: &[&str]| Pgmname::of(&c.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
+        assert_eq!(cards(&[]), Pgmname::Compat);
+        assert_eq!(cards(&["PGMN(LM)"]), Pgmname::LongMixed);
+        assert_eq!(cards(&["PGMNAME(LONGUPPER)", "PGMNAME(U)", "PGMNAME(X)"]), Pgmname::LongUpper);
         assert_eq!(given(&["QUA(E)"]).qualify, Qualify::Extend);
         assert_eq!(given(&["QUALIFY(EXTEND)", "QUA(C)"]).qualify, Qualify::Compat);
         assert!(given(&["INITIAL"]).initial);
@@ -1381,7 +1441,7 @@ mod tests {
         assert_eq!(given(&["VLR(COMPAT)", "VLR(STANDARD)"]).vlr, Vlr::Standard);
         assert_eq!(given(&["VS(S)"]).vsamopenfs, VsamOpenFs::Succ);
         assert_eq!(given(&["VSAMOPENFS(SUCC)", "VSAMOPENFS(COMPAT)"]).vsamopenfs, VsamOpenFs::Compat);
-        for bad in ["APOST(X)", "NSYMBOL(N)", "DS(X)", "INTDATE(JULIAN)", "QUA(X)", "INITIAL(Y)", "VLR(X)", "VS(X)", "INTDATE"] {
+        for bad in ["APOST(X)", "NSYMBOL(N)", "DS(X)", "INTDATE(JULIAN)", "QUA(X)", "INITIAL(Y)", "VLR(X)", "VS(X)", "INTDATE", "PGMNAME(X)", "PGMNAME"] {
             assert!(matches!(Options::default().apply(bad), Err(OptionError::BadSuboption { .. })), "{bad}");
         }
     }
@@ -1563,5 +1623,16 @@ mod tests {
         ] {
             assert_eq!(Assumed::parse(spec), Err(said.to_owned()), "{spec}");
         }
+    }
+
+    #[test]
+    fn pgmname_forms_the_external_name_as_the_programming_guide_lists() {
+        assert_eq!(Pgmname::Compat.external("docalc"), "DOCALC");
+        assert_eq!(Pgmname::Compat.external("Get-Record-Now"), "GET0RECO");
+        assert_eq!(Pgmname::Compat.external("1st-pass"), "AST0PASS");
+        assert_eq!(Pgmname::Compat.external("0abc"), "JABC");
+        assert_eq!(Pgmname::Compat.external("_under"), "_UNDER");
+        assert_eq!(Pgmname::LongUpper.external("Get-Record-Now"), "GET0RECORD0NOW");
+        assert_eq!(Pgmname::LongMixed.external("Get-Record-Now"), "Get-Record-Now");
     }
 }

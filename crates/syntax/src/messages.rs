@@ -746,7 +746,7 @@ catalogue! {
     IWS0029 Severe "a user-defined function or prototype cannot be nested within a program, function, method or class";
     IWS0030 Severe "ENTRY cannot be used in a nested program";
     IWS0031 Severe "FUNCTION-ID {name}: {why}";
-    IWS0032 Severe "FUNCTION-ID {name}: {name} is an intrinsic function's name (assumption C271)";
+    IWS0032 Severe "FUNCTION-ID {name}: a user-defined function cannot be named {name}";
     IWS0033 Severe "a second definition of user-defined function {name}";
     IWS0034 Severe "FUNCTION-ID {name}: a user-defined function contains no programs, but {inner} is inside it";
     IWS0035 Severe "END FUNCTION {end} ends function {name}";
@@ -794,7 +794,7 @@ catalogue! {
     IWS0077 Severe "FUNCTION {name} INTRINSIC: {name} is not an intrinsic function ironwork for COBOL knows";
     IWS0078 Severe "FUNCTION {name}: a user-defined function in the REPOSITORY paragraph cannot be named {name}";
     IWS0079 Severe "FUNCTION ALL: INTRINSIC follows ALL, which names every intrinsic function";
-    IWS0080 Severe "FUNCTION {name}: an intrinsic function is listed with INTRINSIC, and no user-defined function takes its name (assumption C271)";
+    IWS0080 Severe "FUNCTION {name}: the REPOSITORY paragraph lists {name} with INTRINSIC, so no user-defined function takes its name here";
     IWS0081 Severe "{section}: the DATA DIVISION of a {kind} paragraph has only a WORKING-STORAGE SECTION";
     IWS0082 Severe "a class definition cannot contain EXEC statements";
     IWS0083 Severe "method \"{name}\" contains a program: a method cannot contain nested programs";

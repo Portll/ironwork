@@ -459,6 +459,7 @@ enum Side {
 /// over a program or method that has otherwise checked.
 struct Rules<'a> {
     layout: &'a Layout,
+    program: &'a Program,
     method: bool,
     uses_oo: bool,
     errors: &'a mut Vec<Error>,
@@ -467,7 +468,7 @@ struct Rules<'a> {
 pub(crate) fn check(layout: &Layout, program: &Program, errors: &mut Vec<Error>) {
     let oo = program.oo.as_deref();
     let method = oo.and_then(Oo::method).is_some();
-    let mut rules = Rules { layout, method, uses_oo: oo.is_some_and(|o| !o.repository.is_empty()), errors };
+    let mut rules = Rules { layout, program, method, uses_oo: oo.is_some_and(|o| !o.repository.is_empty()), errors };
     for item in &layout.items {
         if item.kind == Kind::ObjectReference {
             rules.uses_oo = true;
@@ -798,7 +799,7 @@ impl Rules<'_> {
                 Some(Kind::Alnum { .. } | Kind::Group) | None => None,
                 Some(_) => Some(format!("{} must be an alphanumeric or alphabetic item", r.name)),
             },
-            Operand::Function(f) if crate::FUNCTIONS.contains(&f.name.as_str()) || rt::intrinsic::FUNCTIONS.contains(&f.name.as_str()) => Some(format!("FUNCTION {} is an intrinsic function, not a user-defined function returning a pointer", f.name)),
+            Operand::Function(f) if self.program.intrinsic(&f.name) => Some(format!("FUNCTION {} is an intrinsic function, not a user-defined function returning a pointer", f.name)),
             Operand::Function(_) => None,
             Operand::LengthOf(_) | Operand::AddressOf(_) => Some("the entry must be a literal or identifier".to_owned()),
         };

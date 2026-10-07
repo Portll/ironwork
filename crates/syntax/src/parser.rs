@@ -120,6 +120,9 @@ const XML_PHRASES: &[&str] =
 
 /// The environment-names of ACCEPT's and DISPLAY's devices (Language Reference SC27-8713-03, p. 126,
 /// Table 5).
+/// The intrinsic function names no user-defined function may take (Language Reference SC27-8713-03,
+/// p. 14 and the REPOSITORY paragraph).
+pub(crate) const UNTAKEN_INTRINSIC_NAMES: &[&str] = &["LENGTH", "RANDOM", "SIGN", "SUM", "WHEN-COMPILED"];
 pub const DEVICE_ENVIRONMENT_NAMES: &[&str] = &["SYSIN", "SYSIPT", "SYSOUT", "SYSLIST", "SYSLST", "SYSPUNCH", "SYSPCH", "CONSOLE"];
 
 /// The environment-names ACCEPT reads from (Language Reference SC27-8713-03, p. 126, Table 5).
@@ -330,6 +333,9 @@ struct Parser<'a> {
     /// The intrinsic functions the REPOSITORY paragraph lets the program, and the programs it
     /// contains, invoke without the word FUNCTION.
     intrinsics: Vec<String>,
+    /// The user-defined functions the REPOSITORY paragraph names, kept apart from the intrinsic
+    /// ones so that one may take an intrinsic function's name.
+    repository_functions: Vec<String>,
     /// The SPECIAL-NAMES mnemonic-names in scope, for WRITE ADVANCING and DISPLAY UPON: the
     /// program's own, then those of the programs containing it, whose configuration section applies
     /// to it too.
@@ -377,6 +383,7 @@ impl<'a> Parser<'a> {
             cics: false,
             dli: false,
             intrinsics: Vec::new(),
+            repository_functions: Vec::new(),
             sql: SqlState::default(),
             mnemonics: Vec::new(),
             switches: Vec::new(),
@@ -487,9 +494,9 @@ impl Parser<'_> {
         let (start, first) = (self.at, out.len());
         let outer = (std::mem::take(&mut self.exec_declarations), std::mem::take(&mut self.cics), std::mem::take(&mut self.dli), std::mem::take(&mut self.sql.blocks), self.mnemonics.clone(), self.debugging);
         let outer_messages = std::mem::take(&mut self.messages);
-        let (outer_intrinsics, outer_switches, outer_classes) = (self.intrinsics.clone(), self.switches.clone(), self.classes.clone());
+        let (outer_intrinsics, outer_functions, outer_switches, outer_classes) = (self.intrinsics.clone(), self.repository_functions.clone(), self.switches.clone(), self.classes.clone());
         let parsed = self.one_program(options, out);
-        (self.intrinsics, self.switches, self.classes) = (outer_intrinsics, outer_switches, outer_classes);
+        (self.intrinsics, self.repository_functions, self.switches, self.classes) = (outer_intrinsics, outer_functions, outer_switches, outer_classes);
         (self.exec_declarations, self.cics, self.dli, self.sql.blocks, self.mnemonics, self.debugging) = outer;
         let own = std::mem::replace(&mut self.messages, outer_messages);
         parsed?;
@@ -667,6 +674,7 @@ impl Parser<'_> {
             environment,
             nested: contained,
             prototypes: self.functions.clone(),
+            repository_functions: self.repository_functions.clone(),
             screens,
             ..Program::default()
         });
@@ -682,8 +690,8 @@ impl Parser<'_> {
         self.accept(&Tok::Period);
         let name = self.name("a function name")?;
         function_name(&name).map_err(|why| crate::messages::IWS0031.at(self.tokens[self.at - 1].pos, format!("FUNCTION-ID {name}: {why}")))?;
-        if rt::intrinsic::FIRST.contains(&name.as_str()) || rt::intrinsic::FUNCTIONS.contains(&name.as_str()) {
-            return Err(crate::messages::IWS0032.at(pos, format!("FUNCTION-ID {name}: {name} is an intrinsic function's name (assumption C271)")));
+        if UNTAKEN_INTRINSIC_NAMES.contains(&name.as_str()) {
+            return Err(crate::messages::IWS0032.at(pos, format!("FUNCTION-ID {name}: a user-defined function cannot be named {name}")));
         }
         let (mut external, mut prototype) = (name.clone(), false);
         while !self.accept(&Tok::Period) {
@@ -706,6 +714,7 @@ impl Parser<'_> {
                 return Err(self.error("AS, IS PROTOTYPE, ENTRY-NAME, ENTRY-INTERFACE or the period ending the FUNCTION-ID paragraph"));
             }
         }
+        let external = numeric::Pgmname::of(options).external(&external);
         if !prototype && self.defined.contains(&name) {
             return Err(crate::messages::IWS0033.at(pos, format!("a second definition of user-defined function {name}")));
         }

@@ -75,7 +75,7 @@ impl Check<'_> {
             let message = format!("FUNCTION {}: an ALL subscript stands for a varying number of arguments, and {} takes {takes}", f.name, f.name);
             self.errors.push(syntax::messages::IWC0287.at(f.pos, message));
         }
-        let intrinsic = crate::FUNCTIONS.contains(&f.name.as_str()) || rt::intrinsic::FUNCTIONS.contains(&f.name.as_str());
+        let intrinsic = self.intrinsic(&f.name);
         if intrinsic && f.args.iter().any(|a| matches!(a, Expr::Operand(Operand::Literal(Literal::Figurative(_) | Literal::All(_))))) {
             self.errors.push(syntax::messages::IWC0141.at(f.pos, format!("FUNCTION {}: a figurative constant is an argument only inside an arithmetic expression", f.name)));
         }
@@ -194,8 +194,7 @@ impl Check<'_> {
     /// An intrinsic function's class where its name or its first argument decides it.
     fn function_class(&self, f: &FunctionCall) -> Option<Class> {
         let name = f.name.as_str();
-        let intrinsic = crate::FUNCTIONS.contains(&name) || rt::intrinsic::FUNCTIONS.contains(&name);
-        if !intrinsic {
+        if !self.intrinsic(name) {
             return None;
         }
         if !rt::intrinsic::CHARACTER_VALUED.contains(&name) {

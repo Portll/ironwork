@@ -704,7 +704,7 @@ impl LeftOpen {
 
 /// An ending without Language Environment's termination activities leaves a VSAM data set marked
 /// open: a program check under TRAP(OFF), and CEE3ABD without clean-up or under TRAP(OFF)
-/// (assumptions L6 and TRAP_OFF_LEAVES_FILES_OPEN).
+/// (assumptions L6 and C152).
 #[test]
 fn only_an_ending_without_termination_activities_leaves_a_vsam_data_set_open() {
     let data = LeftOpen::new("left-open");

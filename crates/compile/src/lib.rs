@@ -1755,7 +1755,7 @@ impl Check<'_> {
     /// pp. 77, 359; assumption C190).
     fn inspected_function(&mut self, f: &FunctionCall, i: &Inspect) {
         let name = f.name.as_str();
-        let known = FUNCTIONS.contains(&name) || rt::intrinsic::FUNCTIONS.contains(&name);
+        let known = self.intrinsic(name);
         let numeric_udf = self.functions.into_iter().flatten().any(|u| u.name == name && !u.character_valued());
         if known && !rt::intrinsic::CHARACTER_VALUED.contains(&name) || numeric_udf {
             self.errors.push(syntax::messages::IWC0099.at(f.pos, format!("INSPECT FUNCTION {name}: an integer or numeric function can be used only where an arithmetic expression can, not as the inspected item")));
@@ -1776,10 +1776,8 @@ impl Check<'_> {
     /// identifiers and literals (assumption C332).
     fn displayed_function(&mut self, f: &FunctionCall) {
         let name = f.name.as_str();
-        let intrinsic = FUNCTIONS.contains(&name) || rt::intrinsic::FUNCTIONS.contains(&name);
-        let user_defined = self.functions.into_iter().flatten().any(|u| u.name == name);
         let numeric = !rt::intrinsic::CHARACTER_VALUED.contains(&name) || self.numeric_max_or_min(f);
-        if intrinsic && !user_defined && numeric {
+        if self.intrinsic(name) && numeric {
             self.errors.push(syntax::messages::IWC0101.at(f.pos, format!("DISPLAY FUNCTION {name}: an integer or numeric function can be used only where an arithmetic expression can, and DISPLAY takes none")));
         }
     }
@@ -1888,10 +1886,8 @@ impl Check<'_> {
     /// value with IWX0008-W.
     fn moved_function(&mut self, f: &FunctionCall) {
         let name = f.name.as_str();
-        let intrinsic = FUNCTIONS.contains(&name) || rt::intrinsic::FUNCTIONS.contains(&name);
-        let user_defined = self.functions.into_iter().flatten().any(|u| u.name == name);
         let numeric = !rt::intrinsic::CHARACTER_VALUED.contains(&name) || self.numeric_max_or_min(f);
-        if !intrinsic || user_defined || !numeric {
+        if !self.intrinsic(name) || !numeric {
             return;
         }
         if self.extended {
@@ -1966,6 +1962,12 @@ impl Check<'_> {
         }
     }
 
+    /// Whether FUNCTION `name` invokes an intrinsic function: a user-defined function this program
+    /// may invoke takes the name over.
+    fn intrinsic(&self, name: &str) -> bool {
+        (FUNCTIONS.contains(&name) || rt::intrinsic::FUNCTIONS.contains(&name)) && !self.functions.into_iter().flatten().any(|u| u.name == name)
+    }
+
     fn operand(&mut self, op: &Operand) {
         match op {
             Operand::LengthOf(r) => self.reference(&self.layout.length_of_ref(r)),
@@ -1975,7 +1977,7 @@ impl Check<'_> {
             }
             Operand::Literal(_) => {}
             Operand::Function(f) => {
-                if !FUNCTIONS.contains(&f.name.as_str()) && !rt::intrinsic::FUNCTIONS.contains(&f.name.as_str()) {
+                if !self.intrinsic(&f.name) {
                     match self.functions.map(|all| all.iter().find(|u| u.name == f.name)) {
                         Some(Some(udf)) => function::check_invocation(udf, f, self.layout, self.alphabetic, self.program.environment.decimal_point_comma, self.errors),
                         Some(None) => self.errors.push(syntax::messages::IWC0106.at(f.pos, format!("FUNCTION {}: neither an intrinsic function nor a user-defined function defined or prototyped before this program", f.name))),

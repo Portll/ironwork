@@ -721,7 +721,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWS0029 | S | `a user-defined function or prototype cannot be nested within a program, function, method or class` |
 | IWS0030 | S | `ENTRY cannot be used in a nested program` |
 | IWS0031 | S | `FUNCTION-ID {name}: {why}` |
-| IWS0032 | S | `FUNCTION-ID {name}: {name} is an intrinsic function's name (assumption C271)` |
+| IWS0032 | S | `FUNCTION-ID {name}: a user-defined function cannot be named {name}` |
 | IWS0033 | S | `a second definition of user-defined function {name}` |
 | IWS0034 | S | `FUNCTION-ID {name}: a user-defined function contains no programs, but {inner} is inside it` |
 | IWS0035 | S | `END FUNCTION {end} ends function {name}` |
@@ -769,7 +769,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWS0077 | S | `FUNCTION {name} INTRINSIC: {name} is not an intrinsic function ironwork for COBOL knows` |
 | IWS0078 | S | `FUNCTION {name}: a user-defined function in the REPOSITORY paragraph cannot be named {name}` |
 | IWS0079 | S | `FUNCTION ALL: INTRINSIC follows ALL, which names every intrinsic function` |
-| IWS0080 | S | `FUNCTION {name}: an intrinsic function is listed with INTRINSIC, and no user-defined function takes its name (assumption C271)` |
+| IWS0080 | S | `FUNCTION {name}: the REPOSITORY paragraph lists {name} with INTRINSIC, so no user-defined function takes its name here` |
 | IWS0081 | S | `{section}: the DATA DIVISION of a {kind} paragraph has only a WORKING-STORAGE SECTION` |
 | IWS0082 | S | `a class definition cannot contain EXEC statements` |
 | IWS0083 | S | `method "{name}" contains a program: a method cannot contain nested programs` |

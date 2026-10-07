@@ -63,6 +63,21 @@ pub struct Program {
     /// The user-defined functions it may invoke: those defined or prototyped before it in its
     /// source, and a function itself.
     pub prototypes: Vec<Prototype>,
+    /// The user-defined functions its REPOSITORY paragraph, or its outermost program's, names. One
+    /// with an intrinsic function's name is invoked by that name only where it is named here.
+    pub repository_functions: Vec<String>,
+}
+
+impl Program {
+    /// Whether FUNCTION `name` invokes an intrinsic function rather than a user-defined one.
+    pub fn intrinsic(&self, name: &str) -> bool {
+        is_intrinsic_name(name) && !self.repository_functions.iter().any(|f| f == name)
+    }
+}
+
+/// Whether `name` is an intrinsic function's name.
+pub fn is_intrinsic_name(name: &str) -> bool {
+    rt::intrinsic::FIRST.contains(&name) || rt::intrinsic::FUNCTIONS.contains(&name)
 }
 
 impl Program {

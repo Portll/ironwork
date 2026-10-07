@@ -463,3 +463,23 @@ fn the_vm_runs_the_services_with_input_in_their_arguments() {
     let abend = vm.ending.unwrap_err();
     assert_eq!(abend.code, "U4038", "{abend:?}");
 }
+
+#[test]
+fn a_callable_service_sets_return_code_to_zero() {
+    let mut body = set("IN", "2024-02-30");
+    body.extend(set("PIC", "YYYY-MM-DD"));
+    for call in ["CALL 'CEEDATE' USING LILIAN PIC-STR OUT-80 FC", "CALL 'CEEDAYS' USING IN-STR PIC-STR LILIAN FC", "CALL 'CEEDATE' USING LILIAN PIC-STR OUT-80 OMITTED"] {
+        body.push(line("MOVE 148138 TO LILIAN"));
+        body.push(line("MOVE 7 TO RETURN-CODE"));
+        body.push(line(call));
+        body.push(line("DISPLAY RETURN-CODE ' ' FC-MSG"));
+    }
+    body.push(line("MOVE 0 TO RETURN-CODE"));
+    let source = program("", &body);
+    for (x, name) in [(Executor::Interpreter, "interpreter"), (Executor::Vm, "vm")] {
+        let o = Harness::source(&source).clock(CLOCK).run(x);
+        assert!(o.ending.is_ok(), "{name}: {:?}\n{}", o.ending, o.err);
+        let shown: Vec<&str> = o.out.lines().collect();
+        assert_eq!(shown, ["0000 0000", "0000 2508", "0000 2508"], "{name}");
+    }
+}
