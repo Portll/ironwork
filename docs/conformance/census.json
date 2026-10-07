@@ -4,17 +4,17 @@
  "population": 133343,
  "sample": 3000,
  "seed": 1,
- "compiled": 1027,
+ "compiled": 972,
  "return_codes": {
-  "0": 985,
+  "0": 930,
   "4": 42,
-  "8": 118,
-  "12": 1855
+  "8": 126,
+  "12": 1902
  },
  "refused": [
   {
    "reason": "IWS0092",
-   "programs": 479
+   "programs": 478
   },
   {
    "reason": "IWS0001 expected ID",
@@ -25,12 +25,12 @@
    "programs": 216
   },
   {
-   "reason": "IWS0001",
-   "programs": 134
+   "reason": "IWS0100",
+   "programs": 121
   },
   {
-   "reason": "IWS0100",
-   "programs": 116
+   "reason": "IWS0001",
+   "programs": 113
   },
   {
    "reason": "IWS0002 COPY member not found",
@@ -38,15 +38,19 @@
   },
   {
    "reason": "IWS0026",
-   "programs": 109
+   "programs": 108
   },
   {
    "reason": "IWC0102",
    "programs": 66
   },
   {
+   "reason": "IWC0324",
+   "programs": 55
+  },
+  {
    "reason": "IWC0001 undefined name",
-   "programs": 34
+   "programs": 38
   },
   {
    "reason": "IWS0097",
@@ -57,12 +61,12 @@
    "programs": 25
   },
   {
-   "reason": "IWS0093",
+   "reason": "IWC0298",
    "programs": 20
   },
   {
-   "reason": "IWC0298",
-   "programs": 19
+   "reason": "IWS0093",
+   "programs": 20
   },
   {
    "reason": "IWS0006",
@@ -73,23 +77,19 @@
    "programs": 14
   },
   {
+   "reason": "IWS0065",
+   "programs": 14
+  },
+  {
+   "reason": "IWS0001 expected ')'",
+   "programs": 13
+  },
+  {
    "reason": "IWS0003",
    "programs": 13
   },
   {
-   "reason": "IWS0065",
-   "programs": 13
-  },
-  {
-   "reason": "IWS0001 expected ')'",
-   "programs": 12
-  },
-  {
    "reason": "IWS0002",
-   "programs": 12
-  },
-  {
-   "reason": "IWS0020",
    "programs": 12
   },
   {
@@ -97,12 +97,12 @@
    "programs": 11
   },
   {
-   "reason": "IWR0006 COMMUNICATION SECTION",
+   "reason": "IWC0027",
    "programs": 10
   },
   {
-   "reason": "IWC0027",
-   "programs": 9
+   "reason": "IWS0020",
+   "programs": 10
   },
   {
    "reason": "IWR0003 data clause BINARY-SHORT",
@@ -117,6 +117,10 @@
    "programs": 8
   },
   {
+   "reason": "IWS0061",
+   "programs": 8
+  },
+  {
    "reason": "IWC0069",
    "programs": 7
   },
@@ -125,11 +129,15 @@
    "programs": 6
   },
   {
+   "reason": "IWC0313",
+   "programs": 6
+  },
+  {
    "reason": "IWS0001 expected a data description clause or a period",
    "programs": 6
   },
   {
-   "reason": "IWS0061",
+   "reason": "IWS0101",
    "programs": 6
   },
   {
@@ -141,15 +149,7 @@
    "programs": 5
   },
   {
-   "reason": "IWR0003 data clause FLOAT-SHORT",
-   "programs": 5
-  },
-  {
    "reason": "IWR0004 USAGE BINARY-LONG",
-   "programs": 5
-  },
-  {
-   "reason": "IWS0001 expected a period after the PROCEDURE DIVISION header",
    "programs": 5
   },
   {
@@ -165,11 +165,15 @@
    "programs": 4
   },
   {
-   "reason": "IWP0003",
+   "reason": "IWC0307",
    "programs": 4
   },
   {
-   "reason": "IWR0003 data clause PROCEDURE",
+   "reason": "IWC0318",
+   "programs": 4
+  },
+  {
+   "reason": "IWP0003",
    "programs": 4
   },
   {
@@ -185,11 +189,11 @@
    "programs": 4
   },
   {
-   "reason": "IWS0001 expected SECTION",
+   "reason": "IWS0001 expected a DATA DIVISION section",
    "programs": 4
   },
   {
-   "reason": "IWS0001 expected a DATA DIVISION section",
+   "reason": "IWS0001 expected a period after the PROCEDURE DIVISION header",
    "programs": 4
   },
   {
@@ -201,15 +205,19 @@
    "programs": 4
   },
   {
-   "reason": "IWC0106 FUNCTION STORED-CHAR-LENGTH",
-   "programs": 3
-  },
-  {
    "reason": "IWC0188 reserved word as a name",
    "programs": 3
   },
   {
+   "reason": "IWC0312",
+   "programs": 3
+  },
+  {
    "reason": "IWS0001 expected GIVING",
+   "programs": 3
+  },
+  {
+   "reason": "IWS0001 expected SECTION",
    "programs": 3
   },
   {
@@ -225,6 +233,14 @@
    "programs": 3
   },
   {
+   "reason": "IWS0102",
+   "programs": 3
+  },
+  {
+   "reason": "IWS0105",
+   "programs": 3
+  },
+  {
    "reason": "IWC0034",
    "programs": 2
   },
@@ -233,11 +249,15 @@
    "programs": 2
   },
   {
-   "reason": "IWR0003 data clause BINARY-LONG",
+   "reason": "IWC0306",
    "programs": 2
   },
   {
-   "reason": "IWR0003 data clause COMP-X",
+   "reason": "IWC0314",
+   "programs": 2
+  },
+  {
+   "reason": "IWR0003 data clause BINARY-LONG",
    "programs": 2
   },
   {
@@ -258,10 +278,6 @@
   },
   {
    "reason": "IWR0004 USAGE BIT",
-   "programs": 2
-  },
-  {
-   "reason": "IWR0004 USAGE PROGRAM-POINTER",
    "programs": 2
   },
   {
@@ -295,6 +311,10 @@
   {
    "reason": "IWS0099",
    "programs": 2
+  },
+  {
+   "reason": "IWC0004",
+   "programs": 1
   },
   {
    "reason": "IWC0015",
@@ -385,19 +405,35 @@
    "programs": 1
   },
   {
-   "reason": "IWR0003 data clause ANY",
+   "reason": "IWC0300",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0302",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0308",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0310",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0316",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0320",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0323",
    "programs": 1
   },
   {
    "reason": "IWR0003 data clause AS",
-   "programs": 1
-  },
-  {
-   "reason": "IWR0003 data clause BASED",
-   "programs": 1
-  },
-  {
-   "reason": "IWR0003 data clause FLOAT-LONG",
    "programs": 1
   },
   {
