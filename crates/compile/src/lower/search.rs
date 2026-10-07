@@ -5,7 +5,7 @@
 use super::flow::Ctx;
 use super::{Lower, R, unsupported};
 use crate::layout::Resolved;
-use compile::statements::{flatten_and, key_term};
+use crate::statements::{flatten_and, key_term};
 use rt::lir::{self, Count, IntExpr, Op, PlaceId, SearchAllPlan, SearchKey, Terminator};
 use rt::storage::Kind;
 use syntax::Pos;

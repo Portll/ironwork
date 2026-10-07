@@ -5,7 +5,7 @@ use super::data::{Side, UNRESOLVED, Value};
 use super::flow::Ctx;
 use super::{Lower, LowerError, R, is_static, push, unsupported};
 use crate::layout::Resolved;
-use compile::printer::{self, Space};
+use crate::printer::{self, Space};
 use rt::files::Format;
 use rt::lir::{
     self, Advance, FileDesc, FileOp, FileVerb, FromMove, IndexKeys, Op, Phrase, RecordDepending, RecordSpan, RelativeKey, Spacing, StartKey, StartRel, Terminator,
@@ -48,7 +48,7 @@ impl Lower<'_> {
         let depending = match &f.record_depending {
             None => None,
             Some(r) => {
-                let (shortest, longest) = compile::varying_lengths(f, self.layout, k);
+                let (shortest, longest) = crate::varying_lengths(f, self.layout, k);
                 Some(RecordDepending { item: self.place(r, false)?, lengths: (shortest, longest) })
             }
         };
@@ -99,11 +99,11 @@ impl Lower<'_> {
             optional: f.optional,
             format: match f.organization {
                 Organization::LineSequential => Format::Text,
-                _ if compile::variable_records(f, self.layout, k) => Format::Variable,
+                _ if crate::variable_records(f, self.layout, k) => Format::Variable,
                 _ => Format::Fixed,
             },
-            read_lengths: compile::read_lengths(f, self.layout, k, self.c.options.vlr),
-            fixed: !compile::variable_records(f, self.layout, k),
+            read_lengths: crate::read_lengths(f, self.layout, k, self.c.options.vlr),
+            fixed: !crate::variable_records(f, self.layout, k),
             record_min: f.record_min,
             depending,
             status,

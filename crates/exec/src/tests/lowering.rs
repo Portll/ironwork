@@ -1,4 +1,6 @@
 use super::*;
+use compile::lower::*;
+use syntax::ast;
 use crate::testing::{check_lowering, encoded, line};
 use rt::lir::{
     ArithPlan, Base, CallArg, CallTarget, Chars, Collating, Comparand, Cond as LirCond, Const, DisplayItem, Image, InitField, InitValue, IntExpr, LeService,

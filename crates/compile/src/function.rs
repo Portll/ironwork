@@ -47,7 +47,7 @@ impl Udf {
 pub fn signature(p: &Prototype, qualify: Qualify) -> Result<Udf, Error> {
     let layout = layout::build(&[], &[], &[], &p.linkage, &[], Notation::of(&p.environment), qualify, None)?;
     let alphabetic: Vec<Pos> = p.linkage.iter().filter(|e| e.picture.as_deref().is_some_and(is_alphabetic)).map(|e| e.pos).collect();
-    let formal = |name: &str, by_value: bool| {
+    let formal = |name: &str, by_value: bool| -> Result<Formal, Error> {
         let root = layout.linkage_roots.iter().copied().find(|&i| layout.items[i].name.as_deref() == Some(name));
         let item = &layout.items[root.ok_or_else(|| syntax::messages::IWC0016.at(p.pos, format!("FUNCTION-ID {}: {name} is not an 01 or 77 item of the LINKAGE SECTION", p.name)))?];
         let edit = match item.kind {

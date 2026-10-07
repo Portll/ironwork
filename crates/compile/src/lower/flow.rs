@@ -241,7 +241,7 @@ impl Lower<'_> {
                 }
                 _ => {}
             }
-            for body in compile::oo::bodies(s) {
+            for body in crate::oo::bodies(s) {
                 self.collect(body)?;
             }
         }
@@ -406,7 +406,7 @@ impl Lower<'_> {
                 self.op(Op::ScreenDisplay { display, screen }, pos)?;
             }
             Stmt::Display { items, upon, no_advancing, screen: None, pos: _ } => {
-                let plan = self.display_plan(items, compile::statements::upon_console(upon.as_ref()), *no_advancing, pos)?;
+                let plan = self.display_plan(items, crate::statements::upon_console(upon.as_ref()), *no_advancing, pos)?;
                 self.op(Op::Display(plan), pos)?;
             }
             Stmt::Initialize { targets, with, pos: _ } => {
@@ -513,7 +513,7 @@ impl Lower<'_> {
                 self.go_to(t, ctx, pos)?;
             }
             Stmt::Exec(block) => {
-                // `compile::cics_bind::bind` reads CICS options; the typed `sql` holds SQL's host
+                // `crate::cics_bind::bind` reads CICS options; the typed `sql` holds SQL's host
                 // variables and text.
                 let ExecBlock { kind, command, options: _, host_variables: _, sql: _, text: _, pos: _ } = &**block;
                 match kind {

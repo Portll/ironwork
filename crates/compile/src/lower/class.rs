@@ -13,13 +13,13 @@ impl Lower<'_> {
         if program.oo.as_deref().and_then(|o| o.class()).is_none() {
             return Ok(None);
         }
-        let (code, _) = compile::oo::class_code(program, &flags(&self.c.options), self.c.when_compiled).map_err(|errors| {
+        let (code, _) = crate::oo::class_code(program, &flags(&self.c.options), self.c.when_compiled).map_err(|errors| {
             let first = syntax::most_severe(&errors).map(|e| e.message.clone()).unwrap_or_default();
             LowerError::Invalid(format!("the class definition does not compile again: {first}"))
         })?;
         let options = self.c.options;
         let same = |compiled: &crate::Compiled| if compiled.options == options { Ok(()) } else { Err(LowerError::Invalid("a method or class data compiled with other options than its class".into())) };
-        let part = |p: Option<&compile::oo::Part>| -> R<Option<lir::ClassPart>> {
+        let part = |p: Option<&crate::oo::Part>| -> R<Option<lir::ClassPart>> {
             let Some(p) = p else { return Ok(None) };
             same(&p.data)?;
             Ok(Some(lir::ClassPart { data: lower(&p.data)?, records: p.records.clone() }))
@@ -38,7 +38,7 @@ impl Lower<'_> {
                 code: lower(&m.code)?,
             });
         }
-        let external = compile::oo::defined_class(program).unwrap_or_default();
+        let external = crate::oo::defined_class(program).unwrap_or_default();
         Ok(Some(Box::new(lir::Class { external: self.sym(&external), parent: self.sym(&code.parent), factory, object, methods })))
     }
 }

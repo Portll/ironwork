@@ -31,8 +31,6 @@ mod text;
 mod user_function;
 mod verify;
 
-#[cfg(test)]
-mod tests;
 
 pub use verify::verify;
 
@@ -132,7 +130,7 @@ pub fn lower(compiled: &Compiled) -> Result<lir::Program, LowerError> {
             cards: compiled.program.options.clone(),
             collating: collating(&compiled.collating),
             decimal_point_comma: compiled.program.environment.decimal_point_comma,
-            numval_currency: compile::statements::numval_currency(&compiled.program.environment.currency),
+            numval_currency: crate::statements::numval_currency(&compiled.program.environment.currency),
             when_compiled: l.plans.function.iter().any(|f| f.func == lir::Func::WhenCompiled).then_some(compiled.when_compiled),
         },
         initial: compiled.program.initial,
@@ -286,7 +284,7 @@ impl<'c> Lower<'c> {
     /// what it reported and any abend.
     fn storage(&mut self) -> R<lir::Storage> {
         let layout = self.layout;
-        let initial = compile::values::initial(self.c);
+        let initial = crate::values::initial(self.c);
         let init_reports = initial.reports.iter().map(|l| self.sym(l)).collect();
         let init_abend = match initial.abend {
             Some(a) => Some(self.abend(a.code.clone(), &a.message, Some(a.pos))?),

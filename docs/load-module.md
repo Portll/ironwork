@@ -624,7 +624,7 @@ started with, then each `-L` in order. A program is found in this order:
 
 - **The name check comes first.** `member_name` (`rt::module`) refuses a name outside the member
   character set before any path is built, so `CALL '../X'` never reaches the filesystem.
-- **A program from a module is checked** with lir.md's verifier (`exec::lower::verify`) when it is
+- **A program from a module is checked** with lir.md's verifier (`compile::lower::verify`) when it is
   taken, since a module is untrusted input. The VM holds it with its ENTRY names, file count and
   storage size from its LIR, and with the PROGRAM-IDs of the programs it directly contains, the
   directory entries whose `parent` it is.

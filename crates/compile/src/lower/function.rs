@@ -76,7 +76,7 @@ impl Lower<'_> {
     /// subscripts as its elements.
     fn arguments(&mut self, f: &FunctionCall) -> R<(Vec<Argument>, Vec<Arg>)> {
         let (mut args, mut sides) = (Vec::with_capacity(f.args.len()), Vec::with_capacity(f.args.len()));
-        let characters = compile::as_characters(self.layout, f);
+        let characters = crate::as_characters(self.layout, f);
         for (i, a) in f.args.iter().enumerate() {
             let a = if i == 0 { characters.as_ref().unwrap_or(a) } else { a };
             match (f.all_subscripts.iter().find(|(k, _)| *k == i), a) {

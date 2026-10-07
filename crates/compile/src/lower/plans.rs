@@ -6,8 +6,8 @@ use super::data::{Side, Value, Within, scale};
 use super::{Lower, R, push, unsupported};
 use numeric::precision::Dmax;
 use numeric::{Dialect, Native, Numproc, Switched};
-use compile::arith::divided_exponent;
-use compile::values::value_kind;
+use crate::arith::divided_exponent;
+use crate::values::value_kind;
 use rt::lir::{
     self, ArithId, ArithPlan, ArithStep, DisplayId, DisplayItem, ExprId, FloatFrom, Image, InitField, InitId, InitPlan, InitValue, Mode, MovePlan,
     NationalFrom, NumericFrom, PlaceId, RemainderPlan, StorePlan,

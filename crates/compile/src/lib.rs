@@ -14,6 +14,7 @@ pub mod function;
 mod initcheck;
 pub mod layout;
 pub mod linage;
+pub mod lower;
 pub mod markup;
 pub mod numcheck;
 mod omitted;

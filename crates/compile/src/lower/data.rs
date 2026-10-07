@@ -3,7 +3,7 @@
 use super::{Lower, R, is_static, push, unsupported};
 use zarch::hfp::Precision;
 use crate::layout::Resolved;
-use compile::arith::{decimal_exponent, divided_exponent};
+use crate::arith::{decimal_exponent, divided_exponent};
 use rt::storage::literal_fixed;
 use numeric::precision::Fixed;
 use rt::abend::AbendCode;
@@ -137,7 +137,7 @@ impl Lower<'_> {
             let place = lir::Place { base, offset: 0, len: 4, kind, scaling: 0, moved: Vec::new(), subscripts: Vec::new(), odo: Vec::new(), refmod: None, name: self.sym(&r.name), at: self.at(r.pos), numcheck: Default::default(), table: None };
             return self.push_place(place, None);
         }
-        if compile::markup::xml_register(layout, r) {
+        if crate::markup::xml_register(layout, r) {
             let place = self.xml_register(r)?;
             return self.push_place(place, None);
         }
@@ -329,7 +329,7 @@ impl Lower<'_> {
                 let p = self.place(r, false)?;
                 scale(self.kind_of(p))
             }
-            Expr::Operand(Operand::Function(f)) => compile::arith::function_dmax(self.layout, &self.c.functions, f),
+            Expr::Operand(Operand::Function(f)) => crate::arith::function_dmax(self.layout, &self.c.functions, f),
             Expr::Operand(_) => 0,
             Expr::Neg(inner) => self.dmax(inner)?,
             Expr::Bin(a, BinOp::Div | BinOp::Pow, _) => self.dmax(a)?,

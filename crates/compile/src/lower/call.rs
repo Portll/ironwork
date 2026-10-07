@@ -5,7 +5,7 @@ use super::flow::Ctx;
 use super::{Lower, LowerError, R, push, unsupported};
 use crate::layout::Resolved;
 use rt::storage::literal_fixed;
-use compile::oo::{item_type, operand_type};
+use crate::oo::{item_type, operand_type};
 use rt::lir::{self, AbendId, CallArg, CallId, CallPlan, CallTarget, Chars, InvokeId, InvokePlan, LeService, MethodName, Op, Receiver, Terminator};
 use rt::storage::Kind;
 use syntax::Pos;

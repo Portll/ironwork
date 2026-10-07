@@ -27,6 +27,7 @@ mod intrinsic;
 mod json;
 mod json_parse;
 mod linage;
+mod lowering;
 mod numcheck;
 mod oo;
 mod operands;

@@ -1,10 +1,10 @@
-//! Report Writer (lir.md §9.6): the reports `compile::report` resolved, held in `Services.report`
+//! Report Writer (lir.md §9.6): the reports `crate::report` resolved, held in `Services.report`
 //! with each SOURCE and SUM operand a comparand, each CONTROL a place, each VALUE and CODE a
 //! constant, each data item a static place's id and each USE BEFORE REPORTING section a range; and
 //! INITIATE, GENERATE, TERMINATE and SUPPRESS PRINTING as `Op::Report` naming them by index.
 
 use super::{Lower, R, unsupported};
-use compile::report::{self, generate_target};
+use crate::report::{self, generate_target};
 use rt::lir::{self, ConstId, Op, RangeKind, ReportOp, Terminator};
 use rt::report::{Control, Field, FieldContent, Group, Line, Origin, Report, Subtotal, Sum, Writer};
 use syntax::Pos;

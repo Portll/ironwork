@@ -3,7 +3,7 @@
 
 use super::data::{Side, Within, value_of};
 use super::{Lower, R, push, unsupported};
-use compile::function::Udf;
+use crate::function::Udf;
 use rt::fixed::places_of;
 use rt::lir::{self, FunctionDefinition, PlaceId, RefMod, UserArgument, UserFunctionPlan};
 use rt::storage::Kind;

@@ -15,7 +15,7 @@ pub use compile::layout;
 pub mod le;
 pub use rt::lir;
 pub mod loader;
-pub mod lower;
+pub use compile::lower;
 pub mod machine;
 pub use rt::module;
 pub use rt::refusal;
