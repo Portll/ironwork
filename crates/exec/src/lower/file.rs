@@ -5,7 +5,7 @@ use super::data::{Side, UNRESOLVED, Value};
 use super::flow::Ctx;
 use super::{Lower, LowerError, R, is_static, push, unsupported};
 use crate::layout::Resolved;
-use crate::printer::{self, Space};
+use compile::printer::{self, Space};
 use rt::files::Format;
 use rt::lir::{
     self, Advance, FileDesc, FileOp, FileVerb, FromMove, IndexKeys, Op, Phrase, RecordDepending, RecordSpan, RelativeKey, Spacing, StartKey, StartRel, Terminator,

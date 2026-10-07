@@ -5,10 +5,9 @@
 //! map the walker finds by name becomes SEND MAP's FROM or RECEIVE MAP's INTO.
 
 use super::{Lower, LowerError, R, push, unsupported};
-use crate::Abend;
 use crate::layout::Resolved;
 use compile::cics_bind;
-use rt::abend::AbendCode;
+use rt::abend::{Abend, AbendCode};
 use rt::cics::{Cics, CicsCommand, Datum, Handles, Resp};
 use rt::lir::{self, Op, PlaceId, SymId};
 use syntax::Pos;

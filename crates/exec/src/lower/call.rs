@@ -210,7 +210,7 @@ fn le_service(name: &str, pos: Pos) -> R<Option<LeService>> {
         "CEEMOUT" => LeService::Ceemout,
         "CEESECS" => LeService::Ceesecs,
         "CEEUTC" => LeService::Ceeutc,
-        _ if crate::le::provides(name) => return unsupported("an LE callable service the LIR does not name", pos),
+        _ if rt::le::provides(name) => return unsupported("an LE callable service the LIR does not name", pos),
         _ => return Ok(None),
     };
     Ok(Some(service))

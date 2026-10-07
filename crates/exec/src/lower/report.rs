@@ -4,7 +4,7 @@
 //! INITIATE, GENERATE, TERMINATE and SUPPRESS PRINTING as `Op::Report` naming them by index.
 
 use super::{Lower, R, unsupported};
-use crate::report::{self, generate_target};
+use compile::report::{self, generate_target};
 use rt::lir::{self, ConstId, Op, RangeKind, ReportOp, Terminator};
 use rt::report::{Control, Field, FieldContent, Group, Line, Origin, Report, Subtotal, Sum, Writer};
 use syntax::Pos;
