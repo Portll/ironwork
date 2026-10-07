@@ -955,6 +955,15 @@ cobc 3.2 runs it. Strict keeps IWS0058.
 `IWX0052-W INITIALISE (Micro Focus and GnuCOBOL; Enterprise COBOL spells it INITIALIZE): it is read
 as INITIALIZE`, at the verb. ACAS writes it so. Under strict INITIALISE is no verb.
 
+### IWX0053-W FUNCTION CONCATENATE
+
+`IWX0053-W FUNCTION CONCATENATE (GnuCOBOL; Enterprise COBOL has no such function): its arguments'
+characters joined, a number's as its digits`, at the function.
+
+An alphanumeric value of the arguments' characters in order, a numeric argument giving its digits
+unsigned, as a MOVE to an alphanumeric item shows them, as cobc 3.2 gives it. Strict refuses it
+(IWC0319).
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

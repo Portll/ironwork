@@ -1838,3 +1838,36 @@ fn initialise_and_an_inline_perform_with_after_run_alike_on_both_executors() {
     let refused = syntax::parse(&INITIALISE_AND_AFTER.replace("INITIALISE", "INITIALIZE")).unwrap_err();
     assert_eq!((refused.pos.line, refused.id), (14, Some("IWS0058")), "{refused}");
 }
+
+/// FUNCTION CONCATENATE of an item, a literal and a number, of a function's value, and its length.
+const CONCATENATE: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. CONCAT.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  A PIC X(5) VALUE \"AB\".\n",
+    "       01  N PIC 9(3) VALUE 42.\n",
+    "       01  R PIC X(20).\n",
+    "       01  L PIC 9(9).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE FUNCTION CONCATENATE(A \"-\" N) TO R\n",
+    "           DISPLAY \"[\" R \"]\"\n",
+    "           DISPLAY FUNCTION CONCATENATE(\"X\" FUNCTION TRIM(A) \"Y\")\n",
+    "           COMPUTE L = FUNCTION LENGTH(FUNCTION CONCATENATE(A A))\n",
+    "           DISPLAY L\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn concatenate_joins_its_arguments_alike_on_both_executors() {
+    // cobc 3.2's output.
+    let expected = "[AB   -042           ]\nXABY\n000000010\n";
+    let walked = Harness::source(CONCATENATE).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{}", walked.err);
+    let vm = Harness::source(CONCATENATE).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    let warned: Vec<_> = diagnostics_under(CONCATENATE, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0053")).map(|d| d.0).collect();
+    assert_eq!(warned, [10, 12, 13]);
+    let refused = diagnostics_under(CONCATENATE, numeric::Compliance::Strict);
+    assert_eq!(refused.iter().filter(|d| d.2 == Some("IWC0319")).count(), 3, "{refused:?}");
+}

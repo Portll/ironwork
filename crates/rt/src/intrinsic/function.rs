@@ -886,6 +886,22 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             };
             Ok(Val::Num(Fixed::new(n as i128, Places::new(9, 0))))
         }
+        "CONCATENATE" => {
+            arity(1..=usize::MAX, args)?;
+            let mut joined = Vec::new();
+            for v in args.iter() {
+                match v {
+                    Val::Bytes(b) | Val::All(b) => joined.extend_from_slice(b),
+                    // A number as a MOVE to an alphanumeric item shows it: its digits, unsigned.
+                    Val::Num(n) => {
+                        let digits = n.magnitude.to_u128().map(|m| format!("{m:0width$}", width = n.places.total() as usize)).ok_or_else(|| Abend::ironwork(format!("FUNCTION {name}: a number of more than 38 digits"), pos))?;
+                        joined.extend(facts.page().encode(&digits).map_err(|e| Abend::ironwork(e.to_string(), pos))?);
+                    }
+                    _ => return Err(crate::refusal::IWR0065.abend("FUNCTION CONCATENATE of this argument is not supported yet", pos)),
+                }
+            }
+            Ok(Val::Bytes(joined))
+        }
         "HEAP ALLOCATE" => {
             arity(1..=1, args)?;
             let size = match &args[0] {

@@ -1848,6 +1848,7 @@ functions! {
     StoredCharLength = 84, "STORED-CHAR-LENGTH", 1..=1;
     HeapAllocate = 85, "HEAP ALLOCATE", 1..=1;
     HeapFree = 86, "HEAP FREE", 1..=1;
+    Concatenate = 87, "CONCATENATE", 1..=usize::MAX;
 }
 ```
 
@@ -1857,7 +1858,8 @@ the eight that follow in it: ULENGTH, UPOS, USUBSTR, USUPPLEMENTARY, UVALID, UWI
 COMBINED-DATETIME and CONTENT-OF, 82 GnuCOBOL's MODULE-CALLER-ID under `--compliance extended`, and
 83 ARGUMENT LENGTH, which no source can name: the length of the argument in a USING position, which
 compile's ANY LENGTH rewrite moves into a parameter's count as the procedure starts, 84
-GnuCOBOL's STORED-CHAR-LENGTH, and 85 and 86, which no source can name either: ALLOCATE's and
+GnuCOBOL's STORED-CHAR-LENGTH, 87 GnuCOBOL's CONCATENATE, and 85 and 86, which no source can name
+either: ALLOCATE's and
 FREE's heap storage, the address of the bytes obtained and NULL once a block is released, which
 the parser's SET statements for ALLOCATE and FREE take.
 Every function the walker runs has a row.

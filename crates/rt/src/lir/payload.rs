@@ -358,6 +358,7 @@ functions! {
     StoredCharLength = 84, "STORED-CHAR-LENGTH", 1..=1;
     HeapAllocate = 85, "HEAP ALLOCATE", 1..=1;
     HeapFree = 86, "HEAP FREE", 1..=1;
+    Concatenate = 87, "CONCATENATE", 1..=usize::MAX;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -364,6 +364,7 @@ catalogue! {
     IWC0316 Severe "BASED: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0317 Severe "FREE {name}: GnuCOBOL's FREE of a record, not Enterprise COBOL's, which frees through a pointer; --compliance extended reads it";
     IWC0318 Severe "conditional compilation: {why}";
+    IWC0319 Severe "FUNCTION CONCATENATE: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0323 Severe "{verb} {item}: a receiving operand of an arithmetic statement must be numeric or numeric-edited, and {item} is {class}";
     IWC0324 Severe "LABEL RECORDS {name}: not defined as a data-name";
     IWC0325 Severe "FD {file}: RECORDING MODE F, but its records are {shortest} to {longest} bytes";
@@ -889,6 +890,7 @@ catalogue! {
     IWX0050 Warning ">>D (GnuCOBOL; Enterprise COBOL marks a debugging line with D in column 7): the line is a debugging line, compiled only WITH DEBUGGING MODE";
     IWX0051 Warning "an inline PERFORM with AFTER phrases (GnuCOBOL and Micro Focus; Enterprise COBOL takes them only when PERFORM names a procedure): the body runs for each combination, the last AFTER varying fastest";
     IWX0052 Warning "INITIALISE (Micro Focus and GnuCOBOL; Enterprise COBOL spells it INITIALIZE): it is read as INITIALIZE";
+    IWX0053 Warning "FUNCTION CONCATENATE (GnuCOBOL; Enterprise COBOL has no such function): its arguments' characters joined, a number's as its digits";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

@@ -338,6 +338,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0316 | S | `BASED: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0317 | S | `FREE {name}: GnuCOBOL's FREE of a record, not Enterprise COBOL's, which frees through a pointer; --compliance extended reads it` |
 | IWC0318 | S | `conditional compilation: {why}` |
+| IWC0319 | S | `FUNCTION CONCATENATE: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0323 | S | `{verb} {item}: a receiving operand of an arithmetic statement must be numeric or numeric-edited, and {item} is {class}` |
 | IWC0324 | S | `LABEL RECORDS {name}: not defined as a data-name` |
 | IWC0325 | S | `FD {file}: RECORDING MODE F, but its records are {shortest} to {longest} bytes` |
@@ -863,6 +864,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0050 | W | `>>D (GnuCOBOL; Enterprise COBOL marks a debugging line with D in column 7): the line is a debugging line, compiled only WITH DEBUGGING MODE` |
 | IWX0051 | W | `an inline PERFORM with AFTER phrases (GnuCOBOL and Micro Focus; Enterprise COBOL takes them only when PERFORM names a procedure): the body runs for each combination, the last AFTER varying fastest` |
 | IWX0052 | W | `INITIALISE (Micro Focus and GnuCOBOL; Enterprise COBOL spells it INITIALIZE): it is read as INITIALIZE` |
+| IWX0053 | W | `FUNCTION CONCATENATE (GnuCOBOL; Enterprise COBOL has no such function): its arguments' characters joined, a number's as its digits` |
 
 ## Run-time refusals
 

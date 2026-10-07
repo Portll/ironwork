@@ -2145,6 +2145,13 @@ impl Check<'_> {
                         syntax::messages::IWC0305.at(f.pos, "FUNCTION MODULE-CALLER-ID: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it")
                     });
                 }
+                if f.name == "CONCATENATE" && self.intrinsic(&f.name) {
+                    self.errors.push(if self.extended {
+                        syntax::messages::IWX0053.at(f.pos, "FUNCTION CONCATENATE (GnuCOBOL; Enterprise COBOL has no such function): its arguments' characters joined, a number's as its digits")
+                    } else {
+                        syntax::messages::IWC0319.at(f.pos, "FUNCTION CONCATENATE: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it")
+                    });
+                }
                 if f.name == "STORED-CHAR-LENGTH" && self.intrinsic(&f.name) {
                     self.errors.push(if self.extended {
                         syntax::messages::IWX0042.at(f.pos, "FUNCTION STORED-CHAR-LENGTH (GnuCOBOL; Enterprise COBOL has no such function): the argument's length in characters without its trailing spaces")
