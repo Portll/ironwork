@@ -2551,7 +2551,10 @@ differ, each program's share, and each differing input kept. CPU time is each fu
 and system time with its runs', so the figure does not depend on the machine's load. The
 Differential campaign workflow (`.github/workflows/differential.yml`, run by hand) builds a release
 binary, takes NIST's CCVS85 routines with their X-cards filled in as the corpus, shares it among 8
-hosted runners at 3 CPU-hours each, and fails if any input differs.
+hosted runners at 3 CPU-hours each, and fails if any input differs. Its run at c910734c (Actions run
+37565007802) spent 24.0 CPU-hours on the 165 routines fuzz can vary: 3,281,480 generated inputs, each
+alike on both executors, 4,802 of them ending at the statement limit; none timed out, stopped on
+the VM or differed.
 
 **NIST.** `tools/nist.py --vm` runs NIST's CCVS85 audit routines on the interpreter and then on the
 VM, from the same files and with the clock and WHEN-COMPILED fixed, and compares the exit status,
