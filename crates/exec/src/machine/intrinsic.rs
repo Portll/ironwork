@@ -1,7 +1,7 @@
 //! A FUNCTION's arguments, evaluated here; the functions themselves are `rt::intrinsic`'s.
 
 use super::*;
-use super::facts::Facts;
+use compile::facts::Facts;
 use compile::function::Udf;
 use rt::intrinsic::function::{self as intrinsic_function, Evaluator};
 use rt::intrinsic;

@@ -1,7 +1,7 @@
 //! EXEC SQL in the walker: a block's host variables and SQLCA fields resolved into the
 //! `SqlEntry` and `Sqlca` that `rt::sql::run` runs, and the WHENEVER branch in force taken.
 
-use super::facts::Facts;
+use compile::facts::Facts;
 use super::*;
 use crate::sql::{self, HostType, Session, SqlHost};
 use rt::host::Host;

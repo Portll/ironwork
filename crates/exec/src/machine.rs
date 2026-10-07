@@ -9,6 +9,7 @@ use rt::storage::{Loc, Val};
 pub(crate) use rt::storage::literal_fixed;
 use crate::unit::{ADDRESS_BASE, Event, LoadError, OS_COMMAND_ROUTINES, RETURN_CODE, RunUnit};
 use crate::Compiled;
+use compile::values::value_kind;
 use numeric::precision::{Dmax, Fixed, Places};
 use numeric::{LeServices, Options, ProgramScope, Switched, Trunc};
 use rt::fixed::{align, places_of};
@@ -24,7 +25,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use syntax::Pos;
 use syntax::ast::*;
-use zarch::ebcdic::{self, CodePage, Collation};
+use zarch::ebcdic::{self, CodePage};
 use zarch::hfp::{Hfp, Precision};
 
 mod cics;
@@ -134,13 +135,6 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         m.initial_values(fresh)
     }
 
-    /// An activation with no EXTERNAL or GLOBAL record bound, which VALUE clauses never reach:
-    /// the storage lowering keeps as a program's initial image.
-    pub fn unbound(compiled: &'p Compiled, me: usize, unit: &'u mut RunUnit<'w>) -> R<Self> {
-        let (base, fresh) = unit.activate(me, compiled.program.initial);
-        Self::over(compiled, me, base, unit, true).initial_values(fresh)
-    }
-
     fn initial_values(mut self, fresh: bool) -> R<Self> {
         let (local, size) = (self.layout.local_size as usize, self.layout.size as usize);
         if local > 0 {
@@ -197,19 +191,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     /// Applies VALUE clauses: to WORKING-STORAGE and file records, or to LOCAL-STORAGE.
     fn initialize_values(&mut self, local: bool) -> R<()> {
         let base = if local { self.local_base } else { self.base };
-        for index in 0..self.layout.items.len() {
-            let item = &self.layout.items[index];
-            let Some(value) = item.value.clone().filter(|_| item.linkage.is_none() && item.local == local) else { continue };
-            let occurrences: u32 = item.dims.iter().map(|&(_, n)| n).product::<u32>().max(1);
-            let kind = value_kind(item.kind, &value);
-            for k in 0..occurrences {
-                let offset = base + item.offset as usize + loc::occurrence_offset(&item.dims, k);
-                let loc = Loc { offset, len: item.size as usize, kind, item: index };
-                let val = self.literal_value(&value, item.pos)?;
-                self.assign(loc, val, None, item.pos)?;
-            }
-        }
-        Ok(())
+        compile::values::initialize(self.compiled, self.unit, base, local)
     }
 
     pub fn run_procedure(&mut self) -> R<Ending> {
@@ -780,20 +762,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn literal_value(&self, lit: &Literal, pos: Pos) -> R<Val> {
-        Ok(match lit {
-            Literal::Alnum(s) => Val::Bytes(self.page.encode(s).map_err(|e| Abend::ironwork(e.to_string(), pos))?),
-            Literal::Hex(b) => Val::Bytes(b.clone()),
-            Literal::National(s) => Val::National(s.encode_utf16().flat_map(u16::to_be_bytes).collect()),
-            Literal::Dbcs(s) => Val::Dbcs(store::dbcs_literal(self.page, s).map_err(|m| Abend::ironwork(m, pos))?),
-            Literal::Number(t) => Val::Num(literal_fixed(t).ok_or_else(|| Abend::ironwork(format!("the literal {t} has more than 31 digits"), pos))?),
-            Literal::Figurative(f) => Val::Fig(*f),
-            Literal::All(inner) => match self.literal_value(inner, pos)? {
-                Val::Bytes(b) | Val::Dbcs(b) => Val::All(b),
-                Val::National(n) => Val::AllNational(n),
-                Val::Fig(f) => Val::Fig(f),
-                _ => return Err(Abend::ironwork("ALL takes an alphanumeric or national literal", pos)),
-            },
-        })
+        compile::values::literal_value(self.page, lit, pos)
     }
 
     /// What a DECIMAL-POINT IS COMMA program shows for a decimal point.
@@ -1800,15 +1769,6 @@ pub(crate) fn numval_currency(signs: &[CurrencySign]) -> String {
 }
 
 static NO_PHRASES: InitializeWith = InitializeWith { filler: false, value: Vec::new(), replacing: Vec::new(), default: false };
-
-/// The kind a VALUE clause's literal is placed as: editing is ignored, so an alphanumeric VALUE fills
-/// a numeric-edited or alphanumeric-edited item as alphanumeric data (Language Reference p. 246).
-pub(crate) fn value_kind(kind: Kind, value: &Literal) -> Kind {
-    match (kind, value) {
-        (Kind::NumericEdited { .. } | Kind::AlnumEdited { .. }, Literal::Alnum(_) | Literal::Figurative(_) | Literal::All(_)) => Kind::Alnum { justified: false },
-        (kind, _) => kind,
-    }
-}
 
 /// A CALL's USING phrase as `rt::callee` takes it: a data item BY REFERENCE by its place, BY VALUE
 /// by its value, and anything else as BY CONTENT copies it.

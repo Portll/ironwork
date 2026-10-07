@@ -434,6 +434,35 @@ fn storage_is_the_image_value_clauses_leave_with_their_trunc_reports() {
 }
 
 #[test]
+fn storage_is_the_image_and_reports_the_walkers_first_activation_leaves() {
+    let source = [
+        "       CBL TRUNC(OPT)\n       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n",
+        "       01  A PIC X(5) VALUE 'AB'.\n       01  N PIC S9(5)V99 COMP-3 VALUE -123.45.\n       01  H PIC 9(2) BINARY VALUE 123.\n",
+        "       01  T.\n           05 V PIC 9(3) OCCURS 4 VALUE 7.\n           05 W PIC X(2) OCCURS 2 VALUE ALL '*'.\n",
+        "       01  E PIC ZZ9.99 VALUE 'AB'.\n       01  G PIC N(3) VALUE N'AB'.\n",
+        "       LOCAL-STORAGE SECTION.\n       01  L PIC 9(3) VALUE 7.\n       01  LT.\n           05 LV PIC X OCCURS 3 VALUE 'Q'.\n",
+        "       01  LH PIC 9(2) COMP VALUE 456.\n       PROCEDURE DIVISION.\n",
+        &line("GOBACK."),
+    ]
+    .concat();
+    let c = compiled(&source);
+    let p = lower(&c).unwrap_or_else(|e| panic!("{e}"));
+    let (size, local) = (c.layout.size as usize, c.layout.local_size as usize);
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let (image, local_image) = {
+        let mut unit = crate::unit::RunUnit::new(crate::unit::Library::default(), crate::files::Dds::default(), None, crate::unit::Clock::Fixed(0, 0), &mut out, &mut err);
+        let me = crate::unit::AddProgram::add(&mut unit, None, &c.program, size);
+        crate::machine::Machine::activation(&c, me, &mut unit, true).map(drop).unwrap_or_else(|a| panic!("{a:?}"));
+        let base = unit.programs[me].base;
+        (unit.mem[base..base + size].to_vec(), unit.mem[unit.mem.len() - local..].to_vec())
+    };
+    let reports: Vec<&str> = p.storage.init_reports.iter().map(|&r| p.symbols[r as usize].as_str()).collect();
+    assert_eq!((p.storage.image, p.storage.local_image), (image, local_image));
+    assert_eq!(reports, String::from_utf8_lossy(&err).lines().collect::<Vec<_>>());
+    assert_eq!((reports.len(), p.storage.init_abend), (2, None));
+}
+
+#[test]
 fn every_op_and_terminator_names_a_position() {
     let p = lowered(&program("", "       01  K PIC 9.\n", &[line("MOVE 1 TO K"), line("DISPLAY K"), line("GOBACK.")].concat()));
     for (block, ids) in p.blocks.iter().zip(&p.debug.ops) {

@@ -38,8 +38,6 @@ pub use verify::verify;
 
 use crate::Compiled;
 use crate::layout::{Layout, Resolved};
-use crate::machine::Machine;
-use crate::unit::{AddProgram, Clock, Library, RunUnit};
 use rt::abend::AbendCode;
 use rt::lir::{self, AbendId, BlockId, ConstId, DebugId, PlaceId, RangeId, SymId};
 use std::collections::{BTreeSet, HashMap};
@@ -284,23 +282,13 @@ impl<'c> Lower<'c> {
         self.abend(AbendCode::Ironwork, message, None)
     }
 
-    /// The slab and LOCAL-STORAGE as the walker's own VALUE initialization leaves them, run once
-    /// in a run unit of their own, with what it reported and any abend.
+    /// The slab and LOCAL-STORAGE as VALUE initialization leaves them on a first activation, with
+    /// what it reported and any abend.
     fn storage(&mut self) -> R<lir::Storage> {
         let layout = self.layout;
-        let (size, local) = (layout.size as usize, layout.local_size as usize);
-        let (mut out, mut err) = (Vec::new(), Vec::new());
-        let (image, local_image, abend) = {
-            let mut unit = RunUnit::new(Library::default(), crate::files::Dds::default(), None, Clock::Fixed(0, 0), &mut out, &mut err);
-            let me = unit.add(None, self.program, size);
-            let abend = Machine::unbound(self.c, me, &mut unit).err();
-            let base = unit.programs[me].base;
-            let image = unit.mem[base..base + size].to_vec();
-            let local_image = if local > 0 { unit.mem[unit.mem.len() - local..].to_vec() } else { Vec::new() };
-            (image, local_image, abend)
-        };
-        let init_reports = String::from_utf8_lossy(&err).lines().map(|l| self.sym(l)).collect();
-        let init_abend = match abend {
+        let initial = compile::values::initial(self.c);
+        let init_reports = initial.reports.iter().map(|l| self.sym(l)).collect();
+        let init_abend = match initial.abend {
             Some(a) => Some(self.abend(a.code.clone(), &a.message, Some(a.pos))?),
             None => None,
         };
@@ -324,8 +312,8 @@ impl<'c> Lower<'c> {
         };
         Ok(lir::Storage {
             size: layout.size,
-            image,
-            local_image,
+            image: initial.image,
+            local_image: initial.local_image,
             init_reports,
             init_abend,
             linkage: layout.linkage_roots.iter().map(|&i| layout.items[i].size).collect(),

@@ -7,6 +7,7 @@ mod corresponding;
 pub use corresponding::is_alphabetic;
 pub use operands::as_characters;
 pub mod declaratives;
+pub mod facts;
 pub mod function;
 mod initcheck;
 pub mod layout;
@@ -25,6 +26,7 @@ mod screens;
 pub mod sort;
 pub mod sql;
 mod switches;
+pub mod values;
 
 use layout::Layout;
 use numeric::{Options, Vlr};

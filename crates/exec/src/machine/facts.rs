@@ -1,83 +1,17 @@
-//! What `rt` asks of the running program, answered from the interpreter's layout, and the
-//! statement inputs `rt` takes, built from the AST with the walker's references as handles.
+//! What `rt` asks of the running program, and the statement inputs `rt` takes, built from the AST
+//! with the walker's references as handles.
 
 use super::*;
-use crate::collating::Sequence;
-use crate::picture::Sym;
+use compile::facts::Facts;
 use crate::files::{Dd, Keying, Open};
 use crate::printer::{self, Space};
 use rt::callee::Arguments;
 use rt::fileio::{self, Advance, Files};
 use rt::host::{Host, Values};
 use rt::lir::{self, Chars, Replacement};
-use rt::store::{LaxRedefinition, ProgramFacts};
 use rt::text;
 use rt::unit::UnitHost;
 use std::rc::Rc;
-
-#[derive(Clone, Copy)]
-pub struct Facts<'p> {
-    layout: &'p Layout,
-    collating: &'p Sequence,
-    options: Options,
-    page: &'static CodePage,
-    decimal_point: char,
-}
-
-impl ProgramFacts for Facts<'_> {
-    fn options(&self) -> Options {
-        self.options
-    }
-
-    fn page(&self) -> &'static CodePage {
-        self.page
-    }
-
-    fn figurative(&self, f: Figurative) -> u8 {
-        self.collating.figurative(f)
-    }
-
-    fn collation(&self) -> &Collation {
-        self.collating.collation()
-    }
-
-    fn ordinal(&self, byte: u8) -> u16 {
-        self.collating.ordinal(byte)
-    }
-
-    fn character(&self, ordinal: i64) -> Option<u8> {
-        self.collating.character(ordinal)
-    }
-
-    fn characters(&self) -> usize {
-        self.collating.count()
-    }
-
-    fn decimal_point(&self) -> char {
-        self.decimal_point
-    }
-
-    fn edit(&self, edit: u32) -> (&[Sym], &str) {
-        (&self.layout.edits[edit as usize], &self.layout.currencies[edit as usize])
-    }
-
-    fn scaling(&self, item: usize) -> u32 {
-        self.layout.items.get(item).map_or(0, |i| i.scaling)
-    }
-
-    /// RETURN-CODE has no item of its own.
-    fn item_name(&self, item: usize) -> String {
-        self.layout.items.get(item).map_or("RETURN-CODE".into(), |i| i.name.clone().unwrap_or_else(|| "FILLER".into()))
-    }
-
-    fn lax_redefinition(&self, item: usize) -> Option<LaxRedefinition> {
-        self.layout.numcheck.lax(item)
-    }
-
-    fn numcheck_removed(&self, item: usize, pos: Pos) -> bool {
-        self.layout.numcheck.removed(item, pos)
-    }
-}
 
 impl<'p> Machine<'p, '_, '_> {
     /// Holds no borrow of the machine, so a call can take it beside `self.unit`.
