@@ -1,7 +1,8 @@
 //! Conditions, as the walker's `condition`, `class` and `compare` evaluate them (lir.md §6).
 
-use super::value::constant;
+use super::value::{aligned, constant};
 use super::{Code, R, Vm, not_yet};
+use crate::fixed::places_of;
 use crate::lir::{Base, Comparand, Compare, Cond, CondId, Const, Item, Operand, PlaceId, Program, SenderCheck};
 use crate::oo;
 use crate::storage::{Kind, Loc, Val};
@@ -9,6 +10,7 @@ use crate::store::{self, ProgramFacts};
 use crate::unit::Loader;
 use crate::vocab::{Figurative, Pos, RelOp};
 use numeric::Numproc;
+use numeric::precision::Places;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -126,23 +128,21 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         }
         if how == Compare::Fixed
             && self.unseen()
-            && let Some(o) = self.compare_integers(a, b)?
+            && let Some(o) = self.compare_numbers(a, b)?
         {
             return Ok(o);
         }
         self.memoized(|vm| vm.compare_located(a, b, how, pos))
     }
 
-    /// Two integer operands, each a pure place or a literal, compared as `store::compare` compares
+    /// Two numeric operands, each a pure place or a literal, compared as `store::compare` compares
     /// their values, each place located as the walker first locates it, the second's first; None
-    /// where either is not an integer that reads without an abend.
-    fn compare_integers(&mut self, a: &Comparand, b: &Comparand) -> R<Option<Ordering>> {
+    /// where either does not read without an abend as a count of its last decimal place.
+    fn compare_numbers(&mut self, a: &Comparand, b: &Comparand) -> R<Option<Ordering>> {
         let lb = self.located(b)?;
         let la = self.located(a)?;
-        Ok(match (self.integer_of(a, la), self.integer_of(b, lb)) {
-            (Some(x), Some(y)) => Some(x.cmp(&y)),
-            _ => None,
-        })
+        let (Some((x, px)), Some((y, py))) = (self.number_of(a, la), self.number_of(b, lb)) else { return Ok(None) };
+        Ok(aligned(i128::from(x), px.dec, i128::from(y), py.dec).map(|(x, y)| x.cmp(&y)))
     }
 
     fn located(&mut self, c: &Comparand) -> R<Option<Loc>> {
@@ -152,15 +152,16 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         }
     }
 
-    /// An operand `store::compare` would compare as an integer, where it reads as one without an
-    /// abend: an item as `store::read_integer` reads it, or an integer literal.
-    fn integer_of(&self, c: &Comparand, loc: Option<Loc>) -> Option<i64> {
+    /// An operand `store::compare` would compare as a number, where it reads as one without an
+    /// abend: an item as `store::read_digits` reads it, or a literal, with its places.
+    #[inline]
+    fn number_of(&self, c: &Comparand, loc: Option<Loc>) -> Option<(i64, Places)> {
         match (c, loc) {
             (Comparand::Operand(Operand::Load(_)), Some(loc)) => {
                 let packed_pfd = matches!(loc.kind, Kind::Packed { .. }) && self.p.options.options.numproc == Numproc::Pfd;
-                if packed_pfd { None } else { store::read_integer(&self.facts(), &self.unit.mem, loc) }
+                if packed_pfd { None } else { store::read_digits(&self.facts(), &self.unit.mem, loc).map(|n| (n, places_of(loc.kind))) }
             }
-            (Comparand::Operand(Operand::Const(k)), _) => self.code.ints[*k as usize].map(|(n, _)| n),
+            (Comparand::Operand(Operand::Const(k)), _) => self.code.literals[*k as usize],
             _ => None,
         }
     }

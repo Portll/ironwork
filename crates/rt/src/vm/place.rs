@@ -5,7 +5,7 @@ use super::value::Number;
 use super::{Code, R, Vm, not_yet};
 use crate::abend::Abend;
 use crate::arith;
-use crate::fixed::align;
+use crate::fixed::{align, places_of};
 use crate::lir::{Base, Count, Expr, ExprId, IntExpr, Odo, Operand, Place, PlaceId, Program, SenderCheck};
 use crate::loc;
 use crate::oo;
@@ -27,6 +27,7 @@ pub(super) fn is_static(place: &Place) -> bool {
     matches!(place.base, Base::Program | Base::Local | Base::ReturnCode) && place.moved.is_empty() && place.subscripts.is_empty() && place.odo.is_empty() && place.refmod.is_none()
 }
 
+#[inline]
 fn scale(kind: Kind) -> u32 {
     kind.digits_scale().map_or(0, |(_, s)| s)
 }
@@ -93,10 +94,10 @@ pub(super) fn direct(place: &Place) -> bool {
     plain(place) && place.moved.is_empty() && place.subscripts.is_empty() && place.odo.is_empty() && place.refmod.is_none()
 }
 
-/// A static place whose kind holds a whole number `store::read_integer` can read.
-pub(super) fn integer_item(place: &Place) -> bool {
-    let whole = matches!(place.kind, Kind::Index | Kind::Binary { scale: 0, .. } | Kind::Packed { scale: 0, .. } | Kind::Zoned { scale: 0, .. });
-    whole && place.scaling == 0 && is_static(place)
+/// A static place whose kind `store::read_digits` can read.
+pub(super) fn number_item(place: &Place) -> bool {
+    let digits = matches!(place.kind, Kind::Index | Kind::Binary { .. } | Kind::Packed { .. } | Kind::Zoned { .. });
+    digits && place.scaling == 0 && is_static(place)
 }
 
 /// A subscripted place whose address is its base's plus a constant plus what each subscript adds,
@@ -370,10 +371,25 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         }
     }
 
-    /// A static integer item's value read where it lies, while taint and NUMCHECK, which its locate
+    /// A static numeric item's value read where it lies, while taint and NUMCHECK, which its locate
     /// and read would tell, are off; None where `loc` and `read` must take it.
+    #[inline]
+    pub(super) fn static_number(&self, p: PlaceId) -> Option<Number> {
+        let n = self.static_digits(p)?;
+        Some(Number::Int(n, places_of(self.p.places[p as usize].kind)))
+    }
+
+    #[inline]
     pub(super) fn static_integer(&self, p: PlaceId) -> Option<i64> {
-        if !self.code.integers[p as usize] || !self.unseen() {
+        if scale(self.p.places[p as usize].kind) != 0 {
+            return None;
+        }
+        self.static_digits(p)
+    }
+
+    #[inline]
+    fn static_digits(&self, p: PlaceId) -> Option<i64> {
+        if !self.code.numbers[p as usize] || !self.unseen() {
             return None;
         }
         let place = &self.p.places[p as usize];
@@ -381,7 +397,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         if offset + len > self.unit.mem.len() {
             return None;
         }
-        store::read_integer(&self.facts(), &self.unit.mem, Loc { offset, len, kind: place.kind, item: p as usize })
+        store::read_digits(&self.facts(), &self.unit.mem, Loc { offset, len, kind: place.kind, item: p as usize })
     }
 
     /// `Machine::integer` of a data item: located for its dmax, then located and read.

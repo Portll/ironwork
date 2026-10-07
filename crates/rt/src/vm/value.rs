@@ -12,7 +12,8 @@ use crate::store::{self, ProgramFacts};
 use crate::unit::{ADDRESS_BASE, Loader};
 use crate::vocab::{BinOp, Figurative, Pos};
 use numeric::Arith;
-use numeric::precision::{Fixed, Places, carried, product_places, sum_places};
+use numeric::precision::{Fixed, Places, carried, product_places, quotient_places, sum_places};
+use std::cmp::Ordering;
 use std::rc::Rc;
 use zarch::hfp::{Hfp, Precision};
 
@@ -159,22 +160,22 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     pub(super) fn operand_number(&mut self, o: Operand, dmax: u32, pos: Pos) -> R<Number> {
         match o {
             Operand::Load(p) => {
-                let place = &self.p.places[p as usize];
-                if let Some(n) = self.static_integer(p) {
-                    return Ok(Number::Int(n, places_of(place.kind)));
+                if let Some(n) = self.static_number(p) {
+                    return Ok(n);
                 }
+                let place = &self.p.places[p as usize];
                 let loc = self.loc(p)?;
                 let at = self.pos(place.at);
                 self.numcheck(loc, SenderCheck::Item, at)?;
                 if super::place::plain(place)
-                    && let Some(n) = store::read_integer(&self.facts(), &self.unit.mem, loc)
+                    && let Some(n) = store::read_digits(&self.facts(), &self.unit.mem, loc)
                 {
                     return Ok(Number::Int(n, places_of(loc.kind)));
                 }
                 let val = self.read(loc, at)?;
                 Ok(Number::Fixed(arith::fixed_operand(val, dmax, pos)?))
             }
-            Operand::Const(c) => match self.code.ints[c as usize] {
+            Operand::Const(c) => match self.code.literals[c as usize] {
                 Some((n, places)) => Ok(Number::Int(n, places)),
                 None => {
                     let val = self.value(o)?;
@@ -376,16 +377,20 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     }
 }
 
-/// A constant as `operand_number` takes it while it is an integer: a whole number that fits an
-/// `i64`, other than a negative zero.
-pub(super) fn const_int(c: &Const) -> Option<(i64, Places)> {
+/// A constant as `operand_number` takes it while it fits an `i64` count of its last decimal place,
+/// other than a negative zero.
+pub(super) fn const_number(c: &Const) -> Option<(i64, Places)> {
     match c {
-        Const::Number(f) if f.places.dec == 0 && !(f.negative && f.magnitude.is_zero()) => f.to_i128().and_then(|n| i64::try_from(n).ok()).map(|n| (n, f.places)),
+        Const::Number(f) => match Number::of(*f) {
+            Number::Int(n, places) => Some((n, places)),
+            Number::Fixed(_) => None,
+        },
         _ => None,
     }
 }
 
-/// A fixed-point value, held as an integer with its places while it is one that fits an `i64`.
+/// A fixed-point value, held as a count of its last decimal place with its places while that fits
+/// an `i64`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Number {
     Int(i64, Places),
@@ -393,10 +398,10 @@ pub(super) enum Number {
 }
 
 impl Number {
-    /// `f` as an integer where it is one that fits an `i64`.
+    /// `f` as a count of its last decimal place where that fits an `i64`.
     pub(super) fn of(f: Fixed) -> Self {
         match f.to_i128().and_then(|n| i64::try_from(n).ok()) {
-            Some(n) if f.places.dec == 0 && !(f.negative && f.magnitude.is_zero()) => Self::Int(n, f.places),
+            Some(n) if !(f.negative && f.magnitude.is_zero()) => Self::Int(n, f.places),
             _ => Self::Fixed(f),
         }
     }
@@ -409,27 +414,77 @@ impl Number {
     }
 }
 
-/// ADD, SUBTRACT or MULTIPLY of two integers as `Fixed` gives them: the exact result kept to the
-/// integer places carried; None where it is not an integer that fits an `i64`.
+/// ADD, SUBTRACT, MULTIPLY or DIVIDE of two counts as `Fixed` gives them: the exact result, or the
+/// truncated quotient, kept to the places carried; None where a step leaves `i128`, the result does
+/// not fit an `i64`, or the divisor is zero, which `Fixed` reports.
 pub(super) fn int_binop(x: Number, op: BinOp, y: Number, dmax: u32, arith: Arith) -> Option<Number> {
     let (Number::Int(x, px), Number::Int(y, py)) = (x, y) else { return None };
-    if px.dec != 0 || py.dec != 0 {
-        return None;
-    }
     let (x, y) = (i128::from(x), i128::from(y));
     let (exact, ir) = match op {
-        BinOp::Add => (x + y, sum_places(px, py)),
-        BinOp::Sub => (x - y, sum_places(px, py)),
+        BinOp::Add | BinOp::Sub => {
+            let (x, y) = aligned(x, px.dec, y, py.dec)?;
+            let exact = if op == BinOp::Add { x.checked_add(y)? } else { x.checked_sub(y)? };
+            (exact, sum_places(px, py))
+        }
         BinOp::Mul => (x * y, product_places(px, py)),
+        BinOp::Div if y != 0 => {
+            let to = carried(quotient_places(px, py, dmax), dmax, arith);
+            let (numerator, denominator) = aligned(x, px.dec, y, py.dec + to.dec)?;
+            return kept(numerator / denominator, to, to);
+        }
         BinOp::Div | BinOp::Pow => return None,
     };
-    let to = carried(ir, dmax, arith);
-    if to.dec != 0 {
-        return None;
+    kept(exact, ir, carried(ir, dmax, arith))
+}
+
+/// Ten to each power an `i128` holds.
+const POW10: [i128; 39] = {
+    let mut table = [1; 39];
+    let mut k = 1;
+    while k < table.len() {
+        table[k] = table[k - 1] * 10;
+        k += 1;
     }
-    let (magnitude, cap) = (exact.unsigned_abs(), 10u128.checked_pow(to.int)?);
-    let kept = i64::try_from(if magnitude < cap { magnitude } else { magnitude % cap }).ok()?;
+    table
+};
+
+#[inline]
+fn pow10(n: u32) -> Option<i128> {
+    POW10.get(n as usize).copied()
+}
+
+/// Counts `x` of `dx` and `y` of `dy` decimal places, held at the greater; None past `i128`.
+#[inline]
+pub(super) fn aligned(x: i128, dx: u32, y: i128, dy: u32) -> Option<(i128, i128)> {
+    match dx.cmp(&dy) {
+        Ordering::Equal => Some((x, y)),
+        Ordering::Less => Some((x.checked_mul(pow10(dy - dx)?)?, y)),
+        Ordering::Greater => Some((x, y.checked_mul(pow10(dx - dy)?)?)),
+    }
+}
+
+/// `Fixed::fit`: `exact`, held at `from`'s decimal places, kept to `to.dec` decimal places, the rest
+/// truncated, and `to.int` integer places, the high-order digits dropped.
+fn kept(exact: i128, from: Places, to: Places) -> Option<Number> {
+    let mut magnitude = exact.unsigned_abs();
+    if to.dec < from.dec {
+        magnitude = pow10(from.dec - to.dec).map_or(0, |d| quotient(magnitude, d.unsigned_abs()));
+    }
+    if let Some(cap) = pow10(to.int + from.dec.min(to.dec)).map(i128::unsigned_abs)
+        && magnitude >= cap
+    {
+        magnitude -= quotient(magnitude, cap) * cap;
+    }
+    let kept = i64::try_from(magnitude).ok()?.checked_mul(i64::try_from(pow10(to.dec.saturating_sub(from.dec))?).ok()?)?;
     Some(Number::Int(if exact < 0 { -kept } else { kept }, to))
+}
+
+/// `m / d`, by the 64-bit divide where both fit it.
+fn quotient(m: u128, d: u128) -> u128 {
+    match (u64::try_from(m), u64::try_from(d)) {
+        (Ok(m), Ok(d)) => u128::from(m / d),
+        _ => m / d,
+    }
 }
 
 /// What `binary_operands` has found so far: the items, and whether an operand it took to be one
@@ -521,5 +576,40 @@ mod tests {
             }
         }
         assert!(fast > 40_000, "only {fast} operations were integers");
+    }
+
+    #[test]
+    fn scaled_operands_add_subtract_multiply_and_divide_as_fixed_point_does() {
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move || {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            state.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        };
+        let mut fast = [0; 4];
+        for _ in 0..40_000 {
+            let mut operand = || {
+                let digits = 1 + (next() % 18) as u32;
+                let dec = (next() % u64::from(digits + 1)) as u32;
+                let n = (next() % 10u64.pow(digits)) as i64;
+                (if next() % 2 == 0 { -n } else { n }, Places::new(digits - dec, dec))
+            };
+            let ((x, px), (y, py)) = (operand(), operand());
+            let (dmax, arith) = ((next() % 10) as u32, if next() % 2 == 0 { Arith::Compat } else { Arith::Extend });
+            for (k, op) in [BinOp::Add, BinOp::Sub, BinOp::Mul, BinOp::Div].into_iter().enumerate() {
+                let (a, b) = (Number::Int(x, px), Number::Int(y, py));
+                let expected = arith::fixed_binop(a.fixed(), op, b.fixed(), dmax, arith, Pos::default());
+                match (int_binop(a, op, b, dmax, arith), expected) {
+                    (Some(r), Ok(expected)) => {
+                        fast[k] += 1;
+                        assert_eq!(r.fixed(), expected, "{x} {op:?} {y} at {px:?} {py:?}, dmax {dmax}, {arith:?}");
+                    }
+                    (Some(r), Err(e)) => panic!("{x} {op:?} {y} gave {r:?} where fixed point gives {e:?}"),
+                    (None, _) => {}
+                }
+            }
+        }
+        assert!(fast.iter().all(|&n| n > 20_000), "operations taken as counts: {fast:?}");
     }
 }

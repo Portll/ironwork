@@ -120,10 +120,10 @@ struct Lowered {
     quick: Vec<Option<place::Quick>>,
     /// Each place `loc_with` takes straight from its base (`place::direct`).
     direct: Vec<bool>,
-    /// Each place `static_integer` reads: a static one whose kind holds a whole number.
-    integers: Vec<bool>,
-    /// Each constant's value as `operand_number` takes it where it is an integer.
-    ints: Vec<Option<(i64, numeric::precision::Places)>>,
+    /// Each place `static_number` reads: a static one of a numeric kind.
+    numbers: Vec<bool>,
+    /// Each constant's value as `operand_number` takes it where it is a number that fits an `i64`.
+    literals: Vec<Option<(i64, numeric::precision::Places)>>,
 }
 
 impl Code {
@@ -172,10 +172,10 @@ impl Lowered {
         let variables = if program.options.options.numcheck.is_some() { cond::conditional_variables(&program) } else { HashMap::new() };
         let pure = place::pure_places(&program);
         let quick = place::quick_places(&program);
-        let ints = program.consts.iter().map(value::const_int).collect();
-        let integers = program.places.iter().map(place::integer_item).collect();
+        let literals = program.consts.iter().map(value::const_number).collect();
+        let numbers = program.places.iter().map(place::number_item).collect();
         let direct = program.places.iter().map(place::direct).collect();
-        Self { program, collation, ordinals, high_value, low_value, entry_of, receivers, variables, pure, quick, direct, integers, ints }
+        Self { program, collation, ordinals, high_value, low_value, entry_of, receivers, variables, pure, quick, direct, numbers, literals }
     }
 }
 

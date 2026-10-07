@@ -101,13 +101,23 @@ pub fn read(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<Val> 
 /// The value `read` gives an integer item, an index or an unscaled binary, packed or zoned item,
 /// when it reads without an abend and fits an `i64`; None where it must be read as `read` reads it.
 pub fn read_integer(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc) -> Option<i64> {
+    match loc.kind {
+        Kind::Index | Kind::Binary { scale: 0, .. } | Kind::Packed { scale: 0, .. } | Kind::Zoned { scale: 0, .. } => read_digits(facts, mem, loc),
+        _ => None,
+    }
+}
+
+/// The digits an index or a binary, packed or zoned item of any scale holds, as a signed count of
+/// its last decimal place: the value `read` gives times ten to the scale, where it reads without an
+/// abend, has no PICTURE P and fits an `i64`.
+pub fn read_digits(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc) -> Option<i64> {
     let bytes = bytes(mem, loc);
     let decimal = |d: Decimal| i64::try_from(d.magnitude).ok().map(|m| if d.negative { -m } else { m });
     match loc.kind {
         Kind::Index => Some(i64::from(i32::from_be_bytes(bytes.try_into().ok()?))),
         _ if facts.scaling(loc.item) != 0 => None,
-        Kind::Binary { digits, scale: 0, signed, native } => i64::try_from(Binary { digits: digits as u8, signed, native }.load(bytes)).ok(),
-        Kind::Packed { scale: 0, signed, .. } | Kind::Zoned { scale: 0, signed, .. } => {
+        Kind::Binary { digits, signed, native, .. } => i64::try_from(Binary { digits: digits as u8, signed, native }.load(bytes)).ok(),
+        Kind::Packed { signed, .. } | Kind::Zoned { signed, .. } => {
             let options = facts.options();
             if options.invdata.is_some_and(|i| i.cleansign) {
                 return None;
