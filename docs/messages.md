@@ -128,7 +128,6 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0104 | S | `SEARCH {table} VARYING {value}: not an index-name, an index data item or an elementary integer item` |
 | IWC0105 | S | `the literal {t} has more than {min} digits` |
 | IWC0106 | S | `FUNCTION {file}: neither an intrinsic function nor a user-defined function defined or prototyped before this program` |
-| IWC0107 | S | `FUNCTION {file}: a user-defined function is not supported here yet` |
 | IWC0108 | S | `WRITE ... END-OF-PAGE: the FD of {file} has no LINAGE clause` |
 | IWC0109 | S | `LINAGE-COUNTER can be read, but no statement can change it` |
 | IWC0110 | S | `NUMCHECK: {name} {why} wherever this statement reads it: its VALUE clauses give it X'{hex}' and no statement changes it, so the test is removed (see {NUMCHECK ALWAYS FAILS})` |
@@ -692,6 +691,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWR0055 | S | `a national-edited PICTURE is not supported yet` |
 | IWR0056 | S | `a {category} PICTURE with USAGE {usage} is not supported yet` |
 | IWR0057 | S | `{a SCREEN SECTION form ironwork does not run} is not supported yet` |
+| IWR0075 | S | `FUNCTION {name}: a user-defined function is not supported here yet` |
 | IWS0001 | S | `{what the syntax takes there}, found {the word or token there}` |
 | IWS0002 | S | `{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries` |
 | IWS0003 | S | `COPY: {message}` |

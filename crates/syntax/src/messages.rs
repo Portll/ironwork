@@ -153,7 +153,7 @@ catalogue! {
     IWC0104 Severe "SEARCH {table} VARYING {value}: not an index-name, an index data item or an elementary integer item";
     IWC0105 Severe "the literal {t} has more than {min} digits";
     IWC0106 Severe "FUNCTION {file}: neither an intrinsic function nor a user-defined function defined or prototyped before this program";
-    IWC0107 Severe "FUNCTION {file}: a user-defined function is not supported here yet";
+    // IWC0107 is not given to another message: releases up to 0.8.0 used it for what IWR0075 says.
     IWC0108 Severe "WRITE ... END-OF-PAGE: the FD of {file} has no LINAGE clause";
     IWC0109 Severe "LINAGE-COUNTER can be read, but no statement can change it";
     IWC0110 Severe "NUMCHECK: {name} {why} wherever this statement reads it: its VALUE clauses give it X'{hex}' and no statement changes it, so the test is removed (see {NUMCHECK ALWAYS FAILS})";
@@ -717,6 +717,7 @@ catalogue! {
     IWR0055 Severe "a national-edited PICTURE is not supported yet";
     IWR0056 Severe "a {category} PICTURE with USAGE {usage} is not supported yet";
     IWR0057 Severe "{a SCREEN SECTION form ironwork does not run} is not supported yet";
+    IWR0075 Severe "FUNCTION {name}: a user-defined function is not supported here yet";
     IWS0001 Severe "{what the syntax takes there}, found {the word or token there}";
     IWS0002 Severe "{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries";
     IWS0003 Severe "COPY: {message}";
