@@ -311,6 +311,40 @@ fn gnucobol_float(word: &str, pos: Pos) -> Option<Error> {
     Some(crate::messages::IWS0101.at(pos, format!("{word}: GnuCOBOL's and Micro Focus's floating point, not Enterprise COBOL's; --compliance extended reads it as {ibm}")))
 }
 
+/// GnuCOBOL's special register for the key that ended a screen ACCEPT.
+pub const CRT_STATUS: &str = "COB-CRT-STATUS";
+
+/// `77 COB-CRT-STATUS PIC 9(4) VALUE 0`, as GnuCOBOL declares the register.
+fn crt_status_entry(pos: Pos) -> DataEntry {
+    DataEntry {
+        level: 77,
+        name: Some(CRT_STATUS.into()),
+        spelled: None,
+        picture: Some("9(4)".into()),
+        usage: None,
+        value: Some(Literal::Number("0".into())),
+        redefines: None,
+        occurs: None,
+        occurs_min: None,
+        depending_on: None,
+        sign: None,
+        justified: false,
+        sync: false,
+        blank_when_zero: false,
+        indexed_by: Vec::new(),
+        keys: Vec::new(),
+        condition_values: Vec::new(),
+        false_value: None,
+        renames: None,
+        object_class: None,
+        external: false,
+        global: false,
+        any_length: false,
+        based: false,
+        pos,
+    }
+}
+
 fn usage_word(word: &str) -> Option<Usage> {
     Some(match word {
         "DISPLAY" => Usage::Display,
@@ -638,6 +672,7 @@ impl Parser<'_> {
         let records = linkage.iter().chain(working_storage.iter().chain(&local_storage).filter(|e| e.based));
         self.unstored = records.filter(|e| matches!(e.level, 1 | 77)).filter_map(|e| e.name.clone()).collect();
         let (mut using, mut returning) = (Vec::new(), None);
+        let procedure_from = self.at;
         let paragraphs = if self.at_division(&["PROCEDURE"]) {
             self.at += 2;
             if self.accept_word("USING") {
@@ -666,6 +701,12 @@ impl Parser<'_> {
         let declares = |entries: &[DataEntry], name: &str| entries.iter().any(|e| e.name.as_deref() == Some(name));
         if self.dli && !declares(&working_storage, "DIBSTAT") && !declares(&linkage, "DIBSTAT") {
             working_storage.splice(0..0, system_entries("DLZDIB")?);
+        }
+        let names_crt_status = self.tokens[procedure_from..self.at].iter().any(|t| matches!(&t.tok, Tok::Word(w) if w == CRT_STATUS));
+        if self.extended && names_crt_status && !declares(&working_storage, CRT_STATUS) && !declares(&local_storage, CRT_STATUS) && !declares(&linkage, CRT_STATUS) {
+            let pos = self.tokens[procedure_from..self.at].iter().find(|t| matches!(&t.tok, Tok::Word(w) if w == CRT_STATUS)).map_or_else(Pos::default, |t| t.pos);
+            self.messages.push(crate::messages::IWX0057.at(pos, "COB-CRT-STATUS (GnuCOBOL's special register; Enterprise COBOL has no screen ACCEPT): it holds the key that ended the last screen ACCEPT, as GnuCOBOL's screenio.cpy numbers the keys"));
+            working_storage.push(crt_status_entry(pos));
         }
         let exec_declarations = std::mem::take(&mut self.exec_declarations);
         let (mut nested, mut contained) = (Vec::new(), Vec::new());

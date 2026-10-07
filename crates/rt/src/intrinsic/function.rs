@@ -47,6 +47,8 @@ pub trait Evaluator {
     /// The length of the argument in USING position `position`, from 1, of the running
     /// activation: 0 for one omitted or not passed, and in the main program.
     fn argument_length(&mut self, position: usize) -> usize;
+    /// The CRT STATUS code of the key that ended the last screen ACCEPT, 0 before any.
+    fn crt_status(&mut self) -> u16;
     /// The run's argument in position `position`, from 1: the word of the job step's PARM there.
     fn run_argument(&mut self, position: usize) -> Option<String>;
     /// ALLOCATE's storage of `size` bytes and its address, NULL when none is granted.
@@ -887,6 +889,10 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
                 _ => return Err(crate::refusal::IWR0065.abend("FUNCTION STORED-CHAR-LENGTH of this argument is not supported yet", pos)),
             };
             Ok(Val::Num(Fixed::new(n as i128, Places::new(9, 0))))
+        }
+        "CRT STATUS" => {
+            arity(0..=0, args)?;
+            Ok(Val::Num(Fixed::new(i128::from(x.crt_status()), Places::new(4, 0))))
         }
         "CHAINING ARGUMENT" => {
             arity(2..=2, args)?;

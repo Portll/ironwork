@@ -377,6 +377,11 @@ pub fn parse_inbound(stream: &[u8]) -> Result<Inbound, String> {
 }
 
 /// The AID byte a key sends: ENTER, CLEAR, PA1-PA3, PF1-PF24.
+/// The PF key number, 1 to 24, an AID byte stands for.
+pub fn pf_number(aid: u8) -> Option<u8> {
+    (1..=24).find(|n| aid_of(&format!("PF{n}")) == Some(aid))
+}
+
 pub fn aid_of(key: &str) -> Option<u8> {
     let key = key.to_ascii_uppercase();
     let pf = |n: u8| -> u8 {

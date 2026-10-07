@@ -18,6 +18,20 @@ pub const ROWS: usize = 24;
 pub const COLUMNS: usize = 80;
 
 /// The line and column an AT phrase's number gives: four digits as LLCC, six as LLLCCC.
+/// The CRT STATUS code of an AID key, as GnuCOBOL's screenio.cpy numbers the keys (assumption C489):
+/// ENTER 0, PF1 to PF24 1001 to 1024, CLEAR as Esc 2005, PA1 and PA2 as page up and page down 2001
+/// and 2002, PA3 as print 2006.
+pub fn crt_status(key: u8) -> u16 {
+    match key {
+        crate::terminal::AID_ENTER => 0,
+        crate::terminal::AID_CLEAR => 2005,
+        crate::terminal::AID_PA1 => 2001,
+        crate::terminal::AID_PA2 => 2002,
+        crate::terminal::AID_PA3 => 2006,
+        _ => crate::terminal::pf_number(key).map_or(9000, |n| 1000 + u16::from(n)),
+    }
+}
+
 pub fn line_column(at: u64) -> (usize, usize) {
     if at > 9999 { ((at / 1000) as usize, (at % 1000) as usize) } else { ((at / 100) as usize, (at % 100) as usize) }
 }
@@ -134,6 +148,8 @@ pub struct Crt {
     pub shown: Vec<String>,
     /// Whether a positioned DISPLAY or ACCEPT has used the screen.
     pub used: bool,
+    /// The key that ended the last screen ACCEPT.
+    pub last_key: Option<u8>,
 }
 
 impl std::fmt::Debug for Crt {
@@ -144,7 +160,7 @@ impl std::fmt::Debug for Crt {
 
 impl Crt {
     pub fn new(rows: usize, columns: usize, actions: Vec<Action>) -> Self {
-        Self { rows, columns, cells: vec![' '; rows * columns], cursor: 0, actions: actions.into(), shown: Vec::new(), used: false }
+        Self { rows, columns, cells: vec![' '; rows * columns], cursor: 0, actions: actions.into(), shown: Vec::new(), used: false, last_key: None }
     }
 
     /// The cursor's 1-based row and column.
@@ -244,6 +260,7 @@ impl Crt {
                     cursor = spans.get(next).map_or(cursor, |s| s.0);
                 }
                 Action::Key(key) => {
+                    self.last_key = Some(key);
                     for (k, f) in fields.iter().enumerate() {
                         self.paint(*f, spans[k], &values[k]);
                     }

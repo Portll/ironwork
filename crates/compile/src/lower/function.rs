@@ -344,6 +344,7 @@ fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
         | Func::Uwidth
         | Func::ArgumentLength
         | Func::StoredCharLength => integer(9),
+        Func::CrtStatus => integer(4),
         Func::Factorial => integer(if arith == Arith::Extend { 31 } else { 30 }),
         // The argument's own value.
         Func::ContentOf => match args.first() {

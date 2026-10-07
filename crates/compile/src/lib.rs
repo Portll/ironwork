@@ -4,6 +4,7 @@
 pub mod any_length;
 pub mod arith;
 pub mod cics_bind;
+mod crt_status;
 mod classes;
 pub mod constructs;
 pub mod collating;
@@ -241,6 +242,9 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     let own_linkage = scope::own_linkage(&program);
     omitted::rewrite(&mut program, &inherited.entries, options.compliance == numeric::Compliance::Extended, &mut errors);
     any_length::rewrite(&mut program, &mut errors);
+    if options.compliance == numeric::Compliance::Extended {
+        crt_status::rewrite(&mut program, &inherited.entries);
+    }
     declare_assign_items(&mut program, &inherited.entries);
     let linkage: Vec<DataEntry> = program.linkage.iter().chain(&inherited.entries).cloned().collect();
     let files: Vec<(&[DataEntry], Option<u32>)> = program.files.iter().map(|f| (f.records.as_slice(), f.record_max)).collect();

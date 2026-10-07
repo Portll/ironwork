@@ -623,6 +623,10 @@ impl<'p, L: Loader<Rc<Code>>> Evaluator for Call<'_, 'p, '_, '_, L> {
         unit.caller_of(self.vm.me).map(|p| unit.programs[p].name.clone())
     }
 
+    fn crt_status(&mut self) -> u16 {
+        self.vm.unit.crt.as_ref().and_then(|c| c.borrow().last_key).map_or(0, crate::crt::crt_status)
+    }
+
     fn run_argument(&mut self, position: usize) -> Option<String> {
         position.checked_sub(1).and_then(|k| self.vm.unit.arguments.words.get(k)).cloned()
     }
@@ -783,6 +787,10 @@ mod tests {
 
         fn run_argument(&mut self, _: usize) -> Option<String> {
             None
+        }
+
+        fn crt_status(&mut self) -> u16 {
+            0
         }
 
         fn heap_allocate(&mut self, _: usize) -> u32 {

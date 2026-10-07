@@ -995,6 +995,18 @@ is written to the run's standard error`, at the DISPLAY.
 The line goes to the run's standard error, with or without NO ADVANCING, as cobc 3.2 writes it; it
 reaches the VM as `Op::DisplayError`, tag 40. Strict keeps IWC0073.
 
+### IWX0057-W COB-CRT-STATUS
+
+`IWX0057-W COB-CRT-STATUS (GnuCOBOL's special register; Enterprise COBOL has no screen ACCEPT): it holds
+the key that ended the last screen ACCEPT, as GnuCOBOL's screenio.cpy numbers the keys`, at the
+first reference.
+
+A program that names COB-CRT-STATUS and declares no item of that name gets `77 COB-CRT-STATUS PIC
+9(4) VALUE 0`. Each screen ACCEPT then sets it to the code of the key that ended it, before its ON
+EXCEPTION or NOT ON EXCEPTION phrase runs: the screen script's ENTER is 0, PF1 to PF24 the
+function keys 1001 to 1024, CLEAR Esc 2005, PA1 and PA2 page up and page down 2001 and 2002, and PA3
+print 2006, GnuCOBOL's screenio.cpy codes, which ACAS compares it with. Assumption C489.
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

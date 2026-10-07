@@ -360,6 +360,7 @@ functions! {
     HeapFree = 86, "HEAP FREE", 1..=1;
     Concatenate = 87, "CONCATENATE", 1..=usize::MAX;
     ChainingArgument = 88, "CHAINING ARGUMENT", 2..=2;
+    CrtStatus = 89, "CRT STATUS", 0..=0;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

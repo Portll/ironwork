@@ -388,6 +388,7 @@ pub const DELETE_FILE: &str = "C485";
 pub const BASED_ITEMS: &str = "C486";
 pub const ALLOCATE_HEAP: &str = "C487";
 pub const CHAINING: &str = "C488";
+pub const CRT_STATUS_CODES: &str = "C489";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2749,6 +2750,13 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended), S(Move)]],
+    },
+    Assumption {
+        id: CRT_STATUS_CODES,
+        claim: "Under --compliance extended, COB-CRT-STATUS, GnuCOBOL's special register, is a PIC 9(4) item declared where a program names it and declares none, and it takes the code of the key that ended each screen ACCEPT, after the ACCEPT and first in its ON EXCEPTION and NOT ON EXCEPTION phrases. A screen script's 3270 keys stand for a PC keyboard's as GnuCOBOL's screenio.cpy numbers them: ENTER 0, PF1 to PF24 the function keys 1001 to 1024, CLEAR Esc 2005, PA1 and PA2 page up and page down 2001 and 2002, and PA3 print 2006. Before any screen ACCEPT it holds 0",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(Screen)]],
     },
     Assumption {
         id: COMMAND_LINE_FROM_PARM,

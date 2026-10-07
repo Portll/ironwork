@@ -59,6 +59,10 @@ impl<'p> Evaluator for Call<'_, 'p, '_, '_, '_> {
         unit.caller_of(self.machine.me).map(|p| unit.programs[p].name.clone())
     }
 
+    fn crt_status(&mut self) -> u16 {
+        self.machine.unit.crt.as_ref().and_then(|c| c.borrow().last_key).map_or(0, rt::crt::crt_status)
+    }
+
     fn run_argument(&mut self, position: usize) -> Option<String> {
         position.checked_sub(1).and_then(|k| self.machine.unit.arguments.words.get(k)).cloned()
     }

@@ -1924,3 +1924,36 @@ fn display_upon_syserr_writes_standard_error_alike_on_both_executors() {
     assert_eq!(warned, [5, 6]);
     assert!(diagnostics_under(SYSERR, numeric::Compliance::Strict).iter().any(|d| (d.0, d.2) == (5, Some("IWC0073"))));
 }
+
+/// COB-CRT-STATUS before any screen ACCEPT, after one PF1 ends, in the exception phrase of one CLEAR
+/// ends, and after one ENTER ends.
+const CRT_STATUS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. CRTST.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  REPLY PIC X(3).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY 'BEFORE ' COB-CRT-STATUS\n",
+    "           ACCEPT REPLY AT 0101\n",
+    "           DISPLAY 'F1 ' COB-CRT-STATUS\n",
+    "           ACCEPT REPLY AT 0101\n",
+    "               ON EXCEPTION DISPLAY 'IN HANDLER ' COB-CRT-STATUS\n",
+    "           END-ACCEPT\n",
+    "           ACCEPT REPLY AT 0101\n",
+    "           DISPLAY 'ENTER ' COB-CRT-STATUS ' ' REPLY\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn cob_crt_status_holds_the_key_that_ended_a_screen_accept_alike_on_both_executors() {
+    // The codes GnuCOBOL's screenio.cpy gives F1, Esc and ENTER.
+    let script = "PF1\nCLEAR\nstring abc\nENTER\n";
+    let shown = |out: &str| out.lines().filter(|l| ["BEFORE", "F1", "IN HANDLER", "ENTER"].iter().any(|w| l.contains(w))).map(str::trim_end).collect::<Vec<_>>().join("|");
+    let walked = Harness::source(CRT_STATUS).flags(EXTENDED).screens(script).run(Executor::Interpreter);
+    assert_eq!(shown(&walked.out), "BEFORE 0000|F1 1001|IN HANDLER 2005|ENTER 0000 abc", "{}", walked.err);
+    let vm = Harness::source(CRT_STATUS).flags(EXTENDED).screens(script).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    let warned: Vec<_> = diagnostics_under(CRT_STATUS, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0057")).map(|d| d.0).collect();
+    assert_eq!(warned, [7]);
+}
