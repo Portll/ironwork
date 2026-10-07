@@ -289,11 +289,11 @@ fn copy_span(out: &mut Source, chars: &[char], positions: &[Pos], range: std::op
 
 fn apply(src: &Source, replacing: &[Replacing]) -> Source {
     if replacing.is_empty() {
-        return Source { text: src.text.clone(), positions: src.positions.clone(), options: Vec::new(), debugging: None, free: Vec::new() };
+        return Source { text: src.text.clone(), positions: src.positions.clone(), options: Vec::new(), debugging: None, free: Vec::new(), notes: Vec::new() };
     }
     let chars: Vec<char> = src.text.chars().collect();
     let words = text_words(&chars);
-    let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new(), debugging: None, free: Vec::new() };
+    let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new(), debugging: None, free: Vec::new(), notes: Vec::new() };
     let emit = |out: &mut Source, text: &str, pos: Pos| {
         for c in text.chars() {
             out.text.push(c);
@@ -364,7 +364,7 @@ fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>,
     if !words.iter().any(|w| w.text.eq_ignore_ascii_case("COPY") || w.text.eq_ignore_ascii_case("INCLUDE")) {
         return Ok(source);
     }
-    let mut out = Source { text: String::new(), positions: Vec::new(), options: source.options.clone(), debugging: source.debugging.clone(), free: source.free.clone() };
+    let mut out = Source { text: String::new(), positions: Vec::new(), options: source.options.clone(), debugging: source.debugging.clone(), free: source.free.clone(), notes: source.notes.clone() };
     let read = |text: &str, file: u16| source::read_under(text, file, source.debugging.is_some(), libraries.compliance());
     let (mut cursor, mut i) = (0usize, 0usize);
     while i < words.len() {
@@ -417,6 +417,7 @@ fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>,
             lines.extend(copied);
         }
         out.free.extend(member.free.iter().cloned());
+        out.notes.extend(member.notes.iter().cloned());
         let replaced = apply(&member, &replacing);
         out.text.push_str(&replaced.text);
         out.positions.extend(replaced.positions);
@@ -440,9 +441,9 @@ pub fn replace(source: Source) -> Result<Source, Error> {
     if !(0..words.len()).any(starts) {
         return Ok(source);
     }
-    let mut out = Source { text: String::new(), positions: Vec::new(), options: source.options.clone(), debugging: source.debugging.clone(), free: source.free.clone() };
+    let mut out = Source { text: String::new(), positions: Vec::new(), options: source.options.clone(), debugging: source.debugging.clone(), free: source.free.clone(), notes: source.notes.clone() };
     let segment = |out: &mut Source, range: std::ops::Range<usize>, active: &[Replacing]| {
-        let text = Source { text: chars[range.clone()].iter().collect(), positions: source.positions[range].to_vec(), options: Vec::new(), debugging: None, free: Vec::new() };
+        let text = Source { text: chars[range.clone()].iter().collect(), positions: source.positions[range].to_vec(), options: Vec::new(), debugging: None, free: Vec::new(), notes: Vec::new() };
         let replaced = apply(&text, active);
         out.text.push_str(&replaced.text);
         out.positions.extend(replaced.positions);

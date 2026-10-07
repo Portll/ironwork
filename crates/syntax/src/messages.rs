@@ -363,6 +363,7 @@ catalogue! {
     IWC0314 Severe "PROGRAM-POINTER: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it as PROCEDURE-POINTER";
     IWC0316 Severe "BASED: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0317 Severe "FREE {name}: GnuCOBOL's FREE of a record, not Enterprise COBOL's, which frees through a pointer; --compliance extended reads it";
+    IWC0318 Severe "conditional compilation: {why}";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
     IWJ0003 Severe "unbalanced parentheses or quotes in {text}";
@@ -880,6 +881,9 @@ catalogue! {
     IWX0044 Warning "PROGRAM-POINTER (GnuCOBOL and Micro Focus; Enterprise COBOL writes PROCEDURE-POINTER): it is read as PROCEDURE-POINTER, set by SET ... TO ENTRY and called by CALL";
     IWX0046 Warning "BASED (GnuCOBOL and Micro Focus; Enterprise COBOL describes such an item in the LINKAGE SECTION): {name} has no storage until SET ADDRESS OF gives it some";
     IWX0047 Warning "FREE {name} (GnuCOBOL; Enterprise COBOL frees through a pointer): the storage ADDRESS OF {name} names is released, and the record has none";
+    IWX0048 Warning "{>>DEFINE or >>IF} (COBOL 2002 and GnuCOBOL; Enterprise COBOL 6.3 has it too): {what it does}";
+    IWX0049 Warning ">>{directive} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such directive): it is read and has no effect";
+    IWX0050 Warning ">>D (GnuCOBOL; Enterprise COBOL marks a debugging line with D in column 7): the line is a debugging line, compiled only WITH DEBUGGING MODE";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

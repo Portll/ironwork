@@ -378,7 +378,9 @@ FUNCTION MODULE-CALLER-ID (IWX0031-W), STOP RUN or GOBACK RETURNING (IWX0033-W),
 condition (IWX0034-W), ANY LENGTH parameters (IWX0035-W), START KEY < and NOT > (IWX0036-W), an
 FD with no FILE SECTION header (IWX0037-W), PERFORM UNTIL EXIT (IWX0038-W), ASSIGN TO DISK
 (IWX0039-W), split keys (IWX0040-W), periods after a period (IWX0041-W), FUNCTION
-STORED-CHAR-LENGTH (IWX0042-W), DELETE FILE (IWX0043-W), PROGRAM-POINTER (IWX0044-W), BASED (IWX0046-W) and FREE of a record (IWX0047-W).
+STORED-CHAR-LENGTH (IWX0042-W), DELETE FILE (IWX0043-W), PROGRAM-POINTER (IWX0044-W), BASED
+(IWX0046-W), FREE of a record (IWX0047-W), conditional compilation with >>DEFINE and >>IF
+(IWX0048-W), >>TURN, >>LISTING and >>PAGE (IWX0049-W) and >>D debugging lines (IWX0050-W).
 [docs/compliance.md](docs/compliance.md) gives each one's meaning, the census that chose them, and
 what stays refused and why.
 

@@ -905,6 +905,42 @@ Enterprise COBOL's FREE names pointers (C487). GnuCOBOL's also takes a LINKAGE o
 the storage ALLOCATE gave it is released and ADDRESS OF it becomes NULL, as cobc 3.2 does. Strict
 refuses it (IWC0317).
 
+### IWX0048-W Conditional compilation
+
+`IWX0048-W >>IF (COBOL 2002 and GnuCOBOL; Enterprise COBOL 6.3 has it too): the lines it chooses are
+compiled and the others are not`, at each >>DEFINE and >>IF on a compiled line.
+
+    >>DEFINE name [AS] {literal | OFF | PARAMETER} [OVERRIDE]
+    >>IF condition ... [>>ELIF condition ...] [>>ELSE ...] >>END-IF
+
+The lines an >>IF, >>ELIF or >>ELSE chooses are read and the others are not, nested as written. A
+condition is `name [IS] [NOT] DEFINED`, or a defined name compared with a literal or another
+defined name by =, <, >, <=, >= or their words, as numbers where both are numbers, and terms may
+be joined by AND and OR, read left to right; a comparison of a name not defined is false.
+PARAMETER, a value from the compiler's options, leaves the name undefined, as ironwork takes no
+such option. cobc 3.2 gives the same lines on the probes checked. An >>IF with no >>END-IF, an
+>>ELSE, >>ELIF or >>END-IF with no >>IF, and a condition of another form are refused (IWC0318).
+GnuCOBOL's >>DEFINE CONSTANT, a constant for the program text, stays refused, as do >>EVALUATE and
+the directives no section here names (IWS0094). Enterprise COBOL 6.3 reads >>DEFINE and >>IF too;
+ironwork reads them under extended only for now.
+
+### IWX0049-W >>TURN, >>LISTING and >>PAGE
+
+`IWX0049-W >>TURN (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such directive): it is read and
+has no effect`, at the directive.
+
+>>TURN switches exception checks on and off, and >>LISTING and >>PAGE control the listing; ironwork
+reads them and changes nothing. cobc 3.2 ignores a word after >>D that is no directive, as
+>>DMOVE, as an invalid directive, and ironwork reads it the same way, with this warning.
+
+### IWX0050-W >>D
+
+`IWX0050-W >>D (GnuCOBOL; Enterprise COBOL marks a debugging line with D in column 7): the line is a
+debugging line, compiled only WITH DEBUGGING MODE`, at >>D.
+
+The text after `>>D ` is a debugging line in fixed or free form, read only where SOURCE-COMPUTER
+says WITH DEBUGGING MODE, as a D in column 7 is.
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

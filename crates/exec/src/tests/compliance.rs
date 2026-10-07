@@ -1733,3 +1733,72 @@ fn free_of_a_based_record_releases_its_storage_alike_on_both_executors() {
     let refused = syntax::parse(&linkage).unwrap_err();
     assert_eq!((refused.pos.line, refused.id), (11, Some("IWC0317")), "{refused}");
 }
+
+/// Conditional compilation, >>TURN and a >>D debugging line in fixed form, with debugging mode.
+const DIRECTIVES_FIXED: &str = concat!(
+    "       >>DEFINE MODE AS 'TEST'\n",
+    "       >>DEFINE LEVEL AS 3\n",
+    "       >>TURN EC-SIZE CHECKING ON\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. DIRS.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       CONFIGURATION SECTION.\n",
+    "       SOURCE-COMPUTER. X WITH DEBUGGING MODE.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  N PIC 9 VALUE 1.\n",
+    "       PROCEDURE DIVISION.\n",
+    "       >>IF MODE = 'TEST'\n",
+    "           DISPLAY 'MODE IS TEST'\n",
+    "       >>ELSE\n",
+    "           DISPLAY 'MODE IS NOT TEST'\n",
+    "       >>END-IF\n",
+    "       >>IF UNSET IS DEFINED\n",
+    "           DISPLAY 'UNSET DEFINED'\n",
+    "       >>ELIF LEVEL > 2\n",
+    "           DISPLAY 'LEVEL ABOVE 2'\n",
+    "           >>IF LEVEL = 3\n",
+    "           DISPLAY 'LEVEL 3'\n",
+    "           >>END-IF\n",
+    "       >>ELSE\n",
+    "           DISPLAY 'ELSE'\n",
+    "       >>END-IF\n",
+    "       >>IF NOTHING NOT DEFINED\n",
+    "           DISPLAY 'NOTHING NOT DEFINED'\n",
+    "       >>END-IF\n",
+    "       >>D DISPLAY 'DEBUG LINE'\n",
+    "           DISPLAY 'END'\n",
+    "           STOP RUN.\n",
+);
+
+/// Conditional compilation and >>D debugging lines in free form, one a word cobc ignores.
+const DIRECTIVES_FREE: &str = concat!(
+    ">>SOURCE FORMAT IS FREE\n",
+    "IDENTIFICATION DIVISION.\n",
+    "PROGRAM-ID. FREEDIR.\n",
+    "ENVIRONMENT DIVISION.\n",
+    "CONFIGURATION SECTION.\n",
+    "SOURCE-COMPUTER. X WITH DEBUGGING MODE.\n",
+    "PROCEDURE DIVISION.\n",
+    ">>IF docpass NOT DEFINED\n",
+    "    DISPLAY \"no docpass\"\n",
+    ">>ELSE\n",
+    "    DISPLAY \"docpass\"\n",
+    ">>END-IF\n",
+    ">>D DISPLAY \"dbg one\"\n",
+    ">>Ddisplay \"dbg two\"\n",
+    "    STOP RUN.\n",
+);
+
+#[test]
+fn compiler_directives_choose_the_lines_compiled_alike_on_both_executors() {
+    // cobc 3.2's output.
+    for (source, expected) in [(DIRECTIVES_FIXED, "MODE IS TEST\nLEVEL ABOVE 2\nLEVEL 3\nNOTHING NOT DEFINED\nDEBUG LINE\nEND\n"), (DIRECTIVES_FREE, "no docpass\ndbg one\n")] {
+        let walked = Harness::source(source).flags(EXTENDED).run(Executor::Interpreter);
+        assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{}", walked.err);
+        let vm = Harness::source(source).flags(EXTENDED).run(Executor::Vm);
+        assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    }
+    let warned: Vec<_> = diagnostics_under(DIRECTIVES_FREE, numeric::Compliance::Extended).into_iter().filter(|d| d.2.is_some_and(|id| id >= "IWX0048")).map(|d| (d.0, d.2)).collect();
+    assert_eq!(warned, [(8, Some("IWX0048")), (13, Some("IWX0050")), (14, Some("IWX0049"))]);
+}

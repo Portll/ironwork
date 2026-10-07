@@ -16,6 +16,8 @@ pub struct Source {
     pub debugging: Option<Vec<(u16, u32)>>,
     /// The lines read in free form.
     pub free: Vec<FreeSpan>,
+    /// The warnings of the compiler directives read, which the first token carries.
+    pub notes: Vec<Error>,
 }
 
 /// Lines `first` to `last` of file `file`, read in free form, and the warning that says so; a
@@ -101,7 +103,8 @@ fn read_with_margin(input: &str, file: u16, debugging: bool, extended: bool, cop
 }
 
 fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_free: bool) -> Result<Source, Error> {
-    let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new(), debugging: debugging.then(Vec::new), free: Vec::new() };
+    let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new(), debugging: debugging.then(Vec::new), free: Vec::new(), notes: Vec::new() };
+    let mut conditions = crate::directives::Conditions::default();
     let mut seen_program = false;
     let mut open_quote: Option<char> = None;
     let mut closed_at_72: Option<char> = None;
@@ -114,6 +117,36 @@ fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_fr
     };
     for (index, chars) in lines.iter().enumerate() {
         let line = index as u32 + 1;
+        let debugging_text;
+        let mut chars = chars.as_slice();
+        if extended && let Some(found) = crate::directives::read(chars, Pos { file, line, col: 1 }) {
+            match found? {
+                crate::directives::Directive::Ignored(note) => {
+                    if conditions.active() {
+                        out.notes.push(note);
+                    }
+                    continue;
+                }
+                crate::directives::Directive::Debugging(text, note) => {
+                    if !conditions.active() {
+                        continue;
+                    }
+                    out.notes.push(note);
+                    // The text as a debugging line of the form the line is read in.
+                    let indicator: &[char] = if free.is_some() { &['D', ' '] } else { &[' ', ' ', ' ', ' ', ' ', ' ', 'D', ' '] };
+                    debugging_text = [indicator, text.as_slice()].concat();
+                    chars = &debugging_text;
+                }
+                d => {
+                    let col = chars.iter().position(|c| *c != ' ').unwrap_or(0) as u32 + 1;
+                    conditions.apply(d, Pos { file, line, col }, &mut out.notes)?;
+                    continue;
+                }
+            }
+        }
+        if !conditions.active() {
+            continue;
+        }
         if extended && let Some(found) = directive(chars, Pos { file, line, col: 1 }) {
             let (format, pos) = found?;
             match format {
@@ -254,6 +287,7 @@ fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_fr
     if let Some((first, warning)) = free {
         out.free.push(FreeSpan { file, first, last: u32::MAX, warning });
     }
+    conditions.finish()?;
     Ok(out)
 }
 
@@ -633,9 +667,41 @@ mod tests {
         assert_eq!(words, ["IDENTIFICATION", "DIVISION.", "PROGRAM-ID.", "P.", "DATA", "DIVISION."]);
         let spans: Vec<(u32, u32, Option<Pos>)> = s.free.iter().map(|f| (f.first, f.last, f.warning.as_ref().map(|w| w.pos))).collect();
         assert_eq!(spans, [(2, 2, Some(Pos { file: 0, line: 1, col: 7 })), (6, u32::MAX, Some(Pos { file: 0, line: 5, col: 3 }))]);
-        let Err(other) = extended("       >>IF X DEFINED\n") else { panic!("another directive is refused") };
-        assert!(other.message.starts_with(">>IF X DEFINED: the source-format directives"), "{}", other.message);
+        let Err(other) = extended("       >>CALL-CONVENTION COBOL\n") else { panic!("another directive is refused") };
+        assert!(other.message.starts_with(">>CALL-CONVENTION COBOL: the source-format directives"), "{}", other.message);
         assert_eq!(other.pos.col, 8);
+    }
+
+    #[test]
+    fn conditional_compilation_keeps_the_lines_its_conditions_choose() {
+        let text = concat!(
+            "       >>DEFINE MODE AS 'TEST'\n",
+            "       >>IF MODE = 'TEST'\n",
+            "       KEPT-1.\n",
+            "       >>ELSE\n",
+            "       DROPPED-1.\n",
+            "       >>END-IF\n",
+            "       >>IF GONE IS DEFINED\n",
+            "       DROPPED-2.\n",
+            "       >>ELIF MODE NOT = 'LIVE'\n",
+            "       KEPT-2.\n",
+            "       >>ELSE\n",
+            "       DROPPED-3.\n",
+            "       >>END-IF\n",
+            "       >>DEFINE MODE AS OFF\n",
+            "       >>IF MODE DEFINED\n",
+            "       DROPPED-4.\n",
+            "       >>END-IF\n",
+            "       >>TURN EC-ALL CHECKING ON\n",
+        );
+        let s = extended(text).unwrap();
+        assert_eq!(s.text.split_whitespace().collect::<Vec<_>>(), ["KEPT-1.", "KEPT-2."]);
+        let notes: Vec<(u32, Option<&str>)> = s.notes.iter().map(|n| (n.pos.line, n.id)).collect();
+        assert_eq!(notes, [(1, Some("IWX0048")), (2, Some("IWX0048")), (7, Some("IWX0048")), (14, Some("IWX0048")), (15, Some("IWX0048")), (18, Some("IWX0049"))]);
+        for (text, why) in [("       >>IF X DEFINED\n", ">>IF with no >>END-IF after it"), ("       >>END-IF\n", ">>END-IF with no >>IF before it"), ("       >>IF X ~ 1\n       >>END-IF\n", ">>IF X ~ 1: a condition")] {
+            let Err(e) = extended(text) else { panic!("{text} is refused") };
+            assert!(e.id == Some("IWC0318") && e.message.starts_with(why), "{text}: {}", e.message);
+        }
     }
 
     #[test]

@@ -337,6 +337,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0314 | S | `PROGRAM-POINTER: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it as PROCEDURE-POINTER` |
 | IWC0316 | S | `BASED: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0317 | S | `FREE {name}: GnuCOBOL's FREE of a record, not Enterprise COBOL's, which frees through a pointer; --compliance extended reads it` |
+| IWC0318 | S | `conditional compilation: {why}` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
@@ -854,6 +855,9 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0044 | W | `PROGRAM-POINTER (GnuCOBOL and Micro Focus; Enterprise COBOL writes PROCEDURE-POINTER): it is read as PROCEDURE-POINTER, set by SET ... TO ENTRY and called by CALL` |
 | IWX0046 | W | `BASED (GnuCOBOL and Micro Focus; Enterprise COBOL describes such an item in the LINKAGE SECTION): {name} has no storage until SET ADDRESS OF gives it some` |
 | IWX0047 | W | `FREE {name} (GnuCOBOL; Enterprise COBOL frees through a pointer): the storage ADDRESS OF {name} names is released, and the record has none` |
+| IWX0048 | W | `{>>DEFINE or >>IF} (COBOL 2002 and GnuCOBOL; Enterprise COBOL 6.3 has it too): {what it does}` |
+| IWX0049 | W | `>>{directive} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such directive): it is read and has no effect` |
+| IWX0050 | W | `>>D (GnuCOBOL; Enterprise COBOL marks a debugging line with D in column 7): the line is a debugging line, compiled only WITH DEBUGGING MODE` |
 
 ## Run-time refusals
 
