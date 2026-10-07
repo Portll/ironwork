@@ -21,8 +21,8 @@ The PyPI and npm packages carry builds for Linux (static, x64 and arm64), macOS 
 Windows (x64). The same builds are attached to each [release](https://github.com/Portll/ironwork/releases).
 From a checkout:
 
-    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never] [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
-    cargo run -p ironwork -- check program.cbl [-warnings-block] [--cics-return-warning=once|always|never] [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind] [-I copylib]...
+    cargo run -p ironwork -- run program.cbl [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never] [--compliance strict|extended] [--source-format auto|fixed|free] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind] [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--clock 2026-09-27T12:00:00]
+    cargo run -p ironwork -- check program.cbl [-warnings-block] [--cics-return-warning=once|always|never] [--compliance strict|extended] [--source-format auto|fixed|free] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind] [-I copylib]...
     cargo run -p ironwork -- compile program.cbl... [-o dir] [--bundle NAME] [--source-prefix DIR] [run's compile flags] [-I copylib]...
     cargo run -p ironwork -- dump [--section NAME]... [--strings] [--no-check] program.iwm
     cargo run -p ironwork -- run program.iwm [-I copylib]... [-L proglib]... [--dd NAME=path[:text]]... [--coverage FILE] [--evidence DIR]

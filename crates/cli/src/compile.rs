@@ -165,7 +165,7 @@ fn lower_source(source: &Path, r: &Request, at: exec::lir::CompileTime, bundled:
     };
     let own_directory = source.parent().map(Path::to_path_buf).unwrap_or_default();
     let dirs: Vec<PathBuf> = std::iter::once(own_directory).chain(r.libraries.iter().cloned()).collect();
-    let libraries = syntax::copy::Libraries::new(dirs.clone()).with_program(source).with_compliance(numeric::Compliance::of(&r.flags));
+    let libraries = syntax::copy::Libraries::new(dirs.clone()).with_program(source).with_flags(&r.flags);
     let parsed = match syntax::parse_all_with(&text, &libraries) {
         Ok(p) => p,
         Err(e) => return Err(crate::report(std::slice::from_ref(&e), &shown).max(12)),

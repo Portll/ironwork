@@ -896,6 +896,7 @@ catalogue! {
     IWX0055 Warning "PROCEDURE DIVISION CHAINING (GnuCOBOL and Micro Focus; Enterprise COBOL's main program takes its PARM through USING): each item takes the run's argument in its position, its bytes left-justified, where one is given";
     IWX0056 Warning "DISPLAY UPON SYSERR (GnuCOBOL and Micro Focus; Enterprise COBOL has no such device): the line is written to the run's standard error";
     IWX0057 Warning "COB-CRT-STATUS (GnuCOBOL's special register; Enterprise COBOL has no screen ACCEPT): it holds the key that ended the last screen ACCEPT, as GnuCOBOL's screenio.cpy numbers the keys";
+    IWX0058 Warning "tab stops (GnuCOBOL and Micro Focus; Enterprise COBOL source holds no tab): {why each tab reaches the next column after a multiple of 8}";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

@@ -77,9 +77,22 @@ A file is read in free form:
   ends, on a line with no continuation after it: its author compiles it with `cobc -free`. No file
   that reads in fixed form holds such a line. The warning is at column 73 of the first line longer
   than 72 columns;
+- from its first line, when read in fixed form it does not parse (with a tab as one column or at
+  cobc's tab stops, IWX0058-W), or a line's word or literal runs on from column 72 into column 73,
+  where fixed form cuts it, and read in free form it parses: its author compiles it with `cobc
+  -free`. A fixed-form file rarely parses in free form, since its comment lines (`*` in column 7)
+  and sequence numbers are program text there. The warning says which, at line 1 or at column 73
+  of the cut line;
+- from its first line, under `--source-format free`, as `cobc -free` reads every file. The warning is
+  at line 1;
 - when it is a COPY member copied from a free-form line: GnuCOBOL and Micro Focus carry the format
   into the member. Such a member has no warning of its own; its own directive or lines can still
   switch it.
+
+The rules from the first line apply under `--source-format auto`, the default. `--source-format
+fixed` keeps every file and member in fixed form unless a directive switches it, and `free` reads
+every file in free form from its first line. Both are for `--compliance extended`; strict reads fixed
+form alone and refuses the flag.
 
 In free form there is no sequence area, indicator column or Area A: a line's text runs from column
 1 to the end of the line, whatever its length. `*>` begins a comment anywhere outside a literal. A
@@ -91,8 +104,9 @@ ends with its line, as GnuCOBOL ends it. Since Area A does not exist, a paragrap
 or digits, that comes right after a separator period, is not a reserved word, and is followed by a
 period: what the parser takes from Area A in fixed form.
 
-Any other compiler directive (`>>IF`, `>>DEFINE`, `>>TURN`, `>>D`, `$SET` with another directive)
-is refused, naming the directive: ironwork evaluates none of them.
+The conditional compilation directives, `>>TURN`, `>>LISTING`, `>>PAGE` and `>>D` are read as
+IWX0048-W to IWX0050-W say. Any other compiler directive (`$SET` with another directive, `>>` with
+a word none of these is) is refused, naming the directive.
 
 ### IWX0002-W constant entries
 
@@ -1008,6 +1022,19 @@ A program that names COB-CRT-STATUS and declares no item of that name gets `77 C
 EXCEPTION or NOT ON EXCEPTION phrase runs: the screen script's ENTER is 0, PF1 to PF24 the
 function keys 1001 to 1024, CLEAR Esc 2005, PA1 and PA2 page up and page down 2001 and 2002, and PA3
 print 2006, GnuCOBOL's screenio.cpy codes, which ACAS compares it with. Assumption C489.
+
+### IWX0058-W Tab stops
+
+`IWX0058-W tab stops (GnuCOBOL and Micro Focus; Enterprise COBOL source holds no tab)`, followed
+by why, at the file's first tab.
+
+A tab is one column, as under strict. Under `--source-format auto`, a file that does not parse that
+way and holds a tab is read again with each tab reaching the next column after a multiple of 8, as
+cobc places it (its default `-ftab-width`), so `<tab><tab>IDENTIFICATION DIVISION.` starts in column
+17; where it parses then, it is read so. Files indented with narrower tabs, such as CardDemo's
+CUSTREC copybook, which runs past column 72 at cobc's stops and which cobc refuses, keep reading a
+tab as one column. A COPY member is read with a tab as one column. Enterprise COBOL's source comes
+from fixed-length records with no tab characters.
 
 ## How the six were chosen
 

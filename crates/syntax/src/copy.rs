@@ -9,13 +9,14 @@ use crate::{Error, Pos};
 use std::path::{Path, PathBuf};
 
 /// Directories searched for COPY members, in order. A `COPY X OF LIB` looks in `<dir>/LIB` first.
-/// The file being compiled, when named, is never one of its own members. The compliance level is
-/// how the program and its members are read.
+/// The file being compiled, when named, is never one of its own members. The compliance level and
+/// source format are how the program and its members are read.
 #[derive(Clone, Debug, Default)]
 pub struct Libraries {
     dirs: Vec<PathBuf>,
     program: Option<PathBuf>,
     compliance: numeric::Compliance,
+    source_format: numeric::SourceFormat,
 }
 
 const COPYBOOKS: &[&str] = &[".cpy", ".CPY", ".copy", ".COPY"];
@@ -25,7 +26,7 @@ const MAX_DEPTH: usize = 32;
 
 impl Libraries {
     pub fn new(dirs: Vec<PathBuf>) -> Self {
-        Self { dirs, program: None, compliance: numeric::Compliance::Strict }
+        Self { dirs, program: None, compliance: numeric::Compliance::Strict, source_format: numeric::SourceFormat::Auto }
     }
 
     /// These libraries, for compiling the program in `program`.
@@ -40,6 +41,20 @@ impl Libraries {
 
     pub fn compliance(&self) -> numeric::Compliance {
         self.compliance
+    }
+
+    /// These libraries, read under the compliance level and source format `flags` give.
+    pub fn with_flags(&self, flags: &[String]) -> Self {
+        Self { compliance: numeric::Compliance::of(flags), source_format: numeric::SourceFormat::of(flags), ..self.clone() }
+    }
+
+    /// These libraries, read in `format` under `--compliance extended`.
+    pub fn with_source_format(&self, source_format: numeric::SourceFormat) -> Self {
+        Self { source_format, ..self.clone() }
+    }
+
+    pub fn source_format(&self) -> numeric::SourceFormat {
+        self.source_format
     }
 
     /// A round of extensions searches every library before the next round starts, so a copybook in
@@ -397,7 +412,8 @@ fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>,
         let (key, member) = match (path, mapset) {
             (Some(path), _) => {
                 let copied_free = source.free_at(pos).is_some();
-                let copied = |text: &str, file: u16| source::read_copied(text, file, source.debugging.is_some(), libraries.compliance(), copied_free);
+                let detect = libraries.source_format() != numeric::SourceFormat::Fixed;
+                let copied = |text: &str, file: u16| source::read_copied(text, file, source.debugging.is_some(), libraries.compliance(), copied_free, detect);
                 (path.display().to_string(), read_member(&path, pos, files, &copied)?)
             }
             (None, Some((path, mapset))) => {

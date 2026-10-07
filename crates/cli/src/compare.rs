@@ -243,7 +243,7 @@ fn run_side(program: &Path, source: &[u8], req: &Request, specs: &[Spec], snapsh
     }
     let text = syntax::copy::decode(source);
     let own = program.parent().map(Path::to_path_buf).unwrap_or_default();
-    let libraries = syntax::copy::Libraries::new(std::iter::once(own.clone()).chain(req.libraries.iter().cloned()).collect()).with_program(program).with_compliance(numeric::Compliance::of(&req.flags));
+    let libraries = syntax::copy::Libraries::new(std::iter::once(own.clone()).chain(req.libraries.iter().cloned()).collect()).with_program(program).with_flags(&req.flags);
     let mut programs = match syntax::parse_all_with(&text, &libraries) {
         Ok(p) => p,
         Err(e) => return fail(outcome, e.place(&program.display().to_string()).to_string()),

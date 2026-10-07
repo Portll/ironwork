@@ -61,12 +61,12 @@ pub fn read(input: &str) -> Result<Source, Error> {
 /// Reads one file's text; `file` indexes its name in the program's file table. A comment-entry is
 /// left out of the text, so neither COPY nor the lexer sees it (LR pp. 117, 700).
 pub fn read_file(input: &str, file: u16) -> Result<Source, Error> {
-    read_lines(input, file, false, false, false)
+    read_lines(input, file, false, false, false, false)
 }
 
 /// Reads one file's text with its debugging lines as program text.
 pub fn read_file_debugging(input: &str, file: u16) -> Result<Source, Error> {
-    read_lines(input, file, true, false, false)
+    read_lines(input, file, true, false, false, false)
 }
 
 /// Reads one file's text under `compliance`, with its debugging lines as program text when
@@ -75,25 +75,103 @@ pub fn read_under(input: &str, file: u16, debugging: bool, compliance: Complianc
     read_with_margin(input, file, debugging, compliance == Compliance::Extended, false)
 }
 
-/// Reads a COPY member's text as [`read_under`] does, starting in free form when the line that
-/// copies it is free form, as GnuCOBOL and Micro Focus carry the source format into a member.
-pub fn read_copied(input: &str, file: u16, debugging: bool, compliance: Compliance, copied_free: bool) -> Result<Source, Error> {
+/// How a compile's own file starts being read under `--compliance extended`.
+#[derive(Clone)]
+pub enum Start {
+    /// Fixed form, or free form where the file shows it is (`--source-format auto`).
+    Detect,
+    /// Fixed form, its directives alone switching it (`--source-format fixed`).
+    Fixed,
+    /// Free form from the first line, the warning saying why.
+    Free(Error),
+    /// As `Detect`, each tab reaching the next column after a multiple of 8, as cobc places it, the
+    /// warning saying why.
+    TabStops(Error),
+}
+
+/// Reads a compile's own file as `start` says; strict reads fixed form alone.
+pub fn read_from(input: &str, file: u16, debugging: bool, compliance: Compliance, start: Start) -> Result<Source, Error> {
     let extended = compliance == Compliance::Extended;
+    match start {
+        Start::Free(warning) if extended => {
+            let mut free = read_lines(input, file, debugging, extended, true, false)?;
+            if let Some(span) = free.free.first_mut() {
+                span.warning = Some(warning);
+            }
+            Ok(free)
+        }
+        Start::Fixed => read_lines(input, file, debugging, extended, false, false),
+        Start::TabStops(warning) if extended => {
+            let expanded: Vec<String> = input.lines().map(|line| expand_tabs(line.trim_end_matches('\r')).into_iter().collect()).collect();
+            let mut source = read_with_margin(&expanded.join("\n"), file, debugging, extended, false)?;
+            source.notes.insert(0, warning);
+            Ok(source)
+        }
+        _ => read_with_margin(input, file, debugging, extended, false),
+    }
+}
+
+/// Reads a COPY member's text as [`read_under`] does, starting in free form when the line that
+/// copies it is free form, as GnuCOBOL and Micro Focus carry the source format into a member;
+/// without `detect` only its directives make it free form.
+pub fn read_copied(input: &str, file: u16, debugging: bool, compliance: Compliance, copied_free: bool, detect: bool) -> Result<Source, Error> {
+    let extended = compliance == Compliance::Extended;
+    if !detect && !copied_free {
+        return read_lines(input, file, debugging, extended, false, false);
+    }
     read_with_margin(input, file, debugging, extended, extended && copied_free)
+}
+
+/// The first line read in fixed form whose text runs on from column 72 into column 73 in the middle
+/// of a word or literal, which fixed form cuts there; None where the file has a free-form line.
+pub fn cut_at_the_margin(input: &str, source: &Source) -> Option<Pos> {
+    if !source.free.is_empty() {
+        return None;
+    }
+    let part_of_a_word = |c: char| c.is_alphanumeric() || matches!(c, '-' | '_' | '\'' | '"');
+    input.lines().enumerate().find_map(|(index, raw)| {
+        let chars: Vec<char> = raw.trim_end_matches('\r').chars().map(|c| if c == '\t' { ' ' } else { c }).collect();
+        let comment = matches!(chars.get(TEXT_START - 1), Some('*' | '/'));
+        let mut quote = None;
+        let floating = (TEXT_START..TEXT_END.min(chars.len())).any(|i| {
+            let starts = floating_comment(&chars, i, quote);
+            match (quote, chars[i]) {
+                (None, c @ ('\'' | '"')) => quote = Some(c),
+                (Some(q), c) if c == q => quote = None,
+                _ => {}
+            }
+            starts
+        });
+        let cut = !comment && !floating && chars.len() > TEXT_END && part_of_a_word(chars[TEXT_END - 1]) && part_of_a_word(chars[TEXT_END]);
+        cut.then_some(Pos { file: 0, line: index as u32 + 1, col: TEXT_END as u32 + 1 })
+    })
+}
+
+/// A line's characters, each tab advancing to the next column after a multiple of 8, as GnuCOBOL
+/// and Micro Focus place it.
+pub fn expand_tabs(line: &str) -> Vec<char> {
+    let mut chars = Vec::new();
+    for c in line.chars() {
+        match c {
+            '\t' => chars.resize((chars.len() / 8 + 1) * 8, ' '),
+            c => chars.push(c),
+        }
+    }
+    chars
 }
 
 /// Reads the file; under `--compliance extended`, a fixed-form file that a literal running past
 /// column 72 stops, on a line with no continuation after it, is read again in free form, as `cobc
 /// -free` reads it, with IWX0001-W. No file that reads in fixed form holds such a line.
 fn read_with_margin(input: &str, file: u16, debugging: bool, extended: bool, copied_free: bool) -> Result<Source, Error> {
-    let fixed = read_lines(input, file, debugging, extended, copied_free);
+    let fixed = read_lines(input, file, debugging, extended, copied_free, true);
     let Err(e) = &fixed else { return fixed };
     let long = |l: &str| l.trim_end_matches('\r').chars().count() > TEXT_END;
     let past_margin = (e.id == Some("IWS0092") && e.pos.line > 1 && input.lines().nth(e.pos.line as usize - 2).is_some_and(long)) || (e.id == Some("IWS0024") && input.lines().any(long));
     if !extended || copied_free || !past_margin {
         return fixed;
     }
-    let mut free = read_lines(input, file, debugging, extended, true)?;
+    let mut free = read_lines(input, file, debugging, extended, true, true)?;
     let first = input.lines().position(long).unwrap_or(0) as u32 + 1;
     let why = format!("{FREE_FORM}: a literal runs past column 72, where fixed form ends, so the file is read in free form, as cobc -free reads it");
     if let Some(span) = free.free.first_mut() {
@@ -102,7 +180,9 @@ fn read_with_margin(input: &str, file: u16, debugging: bool, extended: bool, cop
     Ok(free)
 }
 
-fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_free: bool) -> Result<Source, Error> {
+/// Reads the lines, a tab as one column; under extended a file is free form from its first line
+/// where `copied_free` says so, or where `detect` lets [`free_from_the_start`] find it is.
+fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_free: bool, detect: bool) -> Result<Source, Error> {
     let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new(), debugging: debugging.then(Vec::new), free: Vec::new(), notes: Vec::new() };
     let mut conditions = crate::directives::Conditions::default();
     let mut seen_program = false;
@@ -110,10 +190,10 @@ fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_fr
     let mut closed_at_72: Option<char> = None;
     let (mut identification, mut comment_entry) = (false, false);
     let lines: Vec<Vec<char>> = input.lines().map(|raw| raw.trim_end_matches('\r').chars().map(|c| if c == '\t' { ' ' } else { c }).collect()).collect();
-    let mut free = match (extended, copied_free) {
-        (true, true) => Some((1, None)),
-        (true, false) => free_from_the_start(input, file).map(|(first, warning)| (first, Some(warning))),
-        (false, _) => None,
+    let mut free = match (extended, copied_free, detect) {
+        (true, true, _) => Some((1, None)),
+        (true, false, true) => free_from_the_start(input, file).map(|(first, warning)| (first, Some(warning))),
+        _ => None,
     };
     for (index, chars) in lines.iter().enumerate() {
         let line = index as u32 + 1;
@@ -307,13 +387,7 @@ fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_fr
 fn free_from_the_start(input: &str, file: u16) -> Option<(u32, Error)> {
     for (index, raw) in input.lines().enumerate() {
         let line = index as u32 + 1;
-        let mut chars = Vec::new();
-        for c in raw.trim_end_matches('\r').chars() {
-            match c {
-                '\t' => chars.resize((chars.len() / 8 + 1) * 8, ' '),
-                c => chars.push(c),
-            }
-        }
+        let chars = expand_tabs(raw.trim_end_matches('\r'));
         if directive(&chars, Pos { file, line, col: 1 }).is_some() {
             return None;
         }
@@ -738,12 +812,12 @@ mod tests {
     #[test]
     fn a_member_copied_from_a_free_form_line_starts_free_with_no_warning_of_its_own() {
         let member = "    *> a member indented as free form\n    02 B PIC X(80) VALUE 'past column seventy-two, which free form keeps whole as it reads it'.\n";
-        let copied = read_copied(member, 2, false, Compliance::Extended, true).unwrap();
+        let copied = read_copied(member, 2, false, Compliance::Extended, true, true).unwrap();
         assert!(copied.text.contains("02 B PIC X(80)") && copied.text.trim_end().ends_with("whole as it reads it'."), "{}", copied.text);
         assert_eq!((copied.free.len(), copied.free[0].first, copied.free[0].warning.clone()), (1, 1, None));
-        let fixed_copied = read_copied(member, 2, false, Compliance::Extended, false).unwrap();
+        let fixed_copied = read_copied(member, 2, false, Compliance::Extended, false, true).unwrap();
         assert_eq!(fixed_copied.free[0].warning.as_ref().and_then(|w| w.id), Some("IWX0001"));
-        assert!(read_copied(member, 2, false, Compliance::Strict, true).is_err());
+        assert!(read_copied(member, 2, false, Compliance::Strict, true, true).is_err());
     }
 
     #[test]
@@ -764,5 +838,41 @@ mod tests {
         .unwrap();
         let words: Vec<&str> = s.text.split_whitespace().collect();
         assert_eq!(words, ["01", "A", "PIC", "X.", "01", "B", "PIC", "X.", "MOVE", "TITLE", "TO", "EJECT.", "EJECT", "X."]);
+    }
+
+    #[test]
+    fn tab_stops_put_a_tab_at_the_next_multiple_of_8_and_carry_their_warning() {
+        let text = "\tMOVE 1 TO X.\n";
+        let warning = Error::warning(Pos { file: 0, line: 1, col: 1 }, "w");
+        let stops = read_from(text, 0, false, Compliance::Extended, Start::TabStops(warning.clone())).unwrap();
+        assert_eq!(stops.positions[stops.text.find("MOVE").unwrap()].col, 9);
+        assert_eq!(stops.notes, [warning]);
+        let detect = read_from(text, 0, false, Compliance::Extended, Start::Detect).unwrap();
+        assert!(detect.notes.is_empty() && !detect.text.contains("MOVE"), "{}", detect.text);
+    }
+
+    #[test]
+    fn a_word_running_on_from_column_72_is_cut_by_fixed_form() {
+        let cut_line = format!("{:<66}A-LONG-NAME.", "           MOVE 1 TO");
+        let text = format!("           DISPLAY 'A'.\n{cut_line}\n");
+        let source = read_under(&text, 0, false, Compliance::Extended).unwrap();
+        assert_eq!(cut_at_the_margin(&text, &source), Some(Pos { file: 0, line: 2, col: 73 }));
+        let tagged = format!("{:<72}SEQ00010\n", "           MOVE 1 TO X.");
+        let comment = format!("      *{}COMMENT\n", " ".repeat(64));
+        let floating = format!("       *>{}\n", "-".repeat(70));
+        for text in [tagged, comment, floating] {
+            assert_eq!(cut_at_the_margin(&text, &read_under(&text, 0, false, Compliance::Extended).unwrap()), None, "{text}");
+        }
+        let free = read_from(&text, 0, false, Compliance::Extended, Start::Free(Error::warning(Pos::default(), "w"))).unwrap();
+        assert_eq!(cut_at_the_margin(&text, &free), None);
+    }
+
+    #[test]
+    fn a_fixed_start_finds_no_free_form_but_its_directives() {
+        let text = "PROGRAM-ID. P.\n";
+        assert!(!read_from(text, 0, false, Compliance::Extended, Start::Detect).unwrap().free.is_empty());
+        assert!(read_from(text, 0, false, Compliance::Extended, Start::Fixed).unwrap().free.is_empty());
+        let switched = read_from("       >>SOURCE FREE\nPROGRAM-ID. P.\n", 0, false, Compliance::Extended, Start::Fixed).unwrap();
+        assert_eq!(switched.free.len(), 1);
     }
 }

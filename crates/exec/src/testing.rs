@@ -161,7 +161,7 @@ impl Harness {
     /// and the two must agree in everything [`Run`] holds (docs/lir.md §12.3); what the VM does
     /// not run yet is counted, not failed.
     pub fn run(self, executor: Executor) -> Outcome {
-        let copy = syntax::copy::Libraries::default().with_compliance(numeric::Compliance::of(&self.flags));
+        let copy = syntax::copy::Libraries::default().with_flags(&self.flags);
         let mut programs = syntax::parse_all_with(&self.source, &copy).unwrap_or_else(|e| panic!("{e}"));
         let main = programs.remove(0);
         let compiled = match self.when_compiled {

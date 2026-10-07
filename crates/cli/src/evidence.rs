@@ -61,7 +61,8 @@ pub fn root_of(path: &Path, roots: &[PathBuf]) -> i64 {
 
 /// Option names only, and the program by file name: a value may be a path or a URL with a password.
 /// A statement, time or storage limit is kept, since whether and where the run ends depends on it.
-/// The compliance level's value is kept, being one of two words that decide what compiles.
+/// The compliance level's and source format's values are kept, being words that decide what
+/// compiles.
 /// The dialect's value is kept, being one of two words that change the run's results, and so is
 /// each `--assume` ID=VALUE.
 fn recorded_argv(command: &str, program: &str) -> Vec<String> {
@@ -70,7 +71,7 @@ fn recorded_argv(command: &str, program: &str) -> Vec<String> {
     while let Some(a) = args.next() {
         if a.starts_with('-') {
             out.push(a.clone());
-            if a == "--compliance" || a == "--dialect" || a == "--assume" {
+            if a == "--compliance" || a == "--source-format" || a == "--dialect" || a == "--assume" {
                 out.extend(args.next());
             } else if args.peek().is_some_and(|v| !v.starts_with('-')) && !matches!(a.as_str(), "-silent" | "-strict-sort-keys" | "--exit-code") {
                 let value = args.next().unwrap_or_default();

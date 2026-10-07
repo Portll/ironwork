@@ -11,7 +11,7 @@ usage:
                [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT | --argument path|OMITTED... [--arguments-out DIR]]
                [--exit-code] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
-               [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind] [--screens path]
+               [--source-format auto|fixed|free] [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind] [--screens path]
                [--env NAME=VALUE]...
                                                        compile and run; CBL and PROCESS cards set the options
   ironwork run <module.iwm> [-L <dir>]... [-I <dir>]... [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
@@ -22,7 +22,7 @@ usage:
                                                        it was compiled with
   ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]...
                [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
-               [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
+               [--source-format auto|fixed|free] [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
                                                        compile only
   ironwork cics <program.cbl> [run flags] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
                [--commarea path[:text]] [--commarea-out path[:text]] [--task-out path] [--file SPEC]... [--td QUEUE=path]...
@@ -38,7 +38,7 @@ usage:
                [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never]
                [--optimize=0|1|2] [--diagnostics text|json]
                [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [-I <dir>]... [-L <dir>]...
-               [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
+               [--source-format auto|fixed|free] [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
                                                        compile and lower each source's programs to a load module
   ironwork dump [--section NAME]... [--strings] [--no-check] <module.iwm>
                                                        print a load module, one fact per line
@@ -50,7 +50,7 @@ usage:
                [--root DIR] [--clock <time>]
                [-I <dir>]... [-L <dir>]... [-silent] [-strict-sort-keys] [-debug] [--optimize=0|1|2]
                [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]...
-               [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
+               [--source-format auto|fixed|free] [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
                [--datasets DIR] [--proclib DIR]... [--user ID]
                                                        run a batch program, or with --job a job, on generated input
                                                        and keep each abend; with --differential, each input on
@@ -88,6 +88,13 @@ flags:
              Focus and GnuCOBOL forms docs/compliance.md lists, each with an IWX warning naming it
              and where it is: check's return code is 4, and run runs the program. For run, check,
              cics, compile, job, fuzz and compare. --compliance=extended works too
+  --source-format auto|fixed|free
+             how --compliance extended reads a source: auto (the default) reads fixed form, and free
+             form where a directive says so, where the file cannot be fixed form, or where read in
+             fixed form it does not parse or has a word cut at column 72 and it parses in free form;
+             fixed reads fixed form unless a directive says otherwise; free reads every source in
+             free form from its first line, as cobc -free does. IWX0001 names each file read in free
+             form and why. --source-format=free works too
   --optimize=0|1|2
              the compiler invocation's OPTIMIZE level; a CBL or PROCESS card's OPTIMIZE wins over it.
              Under NOINVDATA, 1 and 2 compare an unsigned zoned item with zero, or with one of its
@@ -854,6 +861,14 @@ fn driver() -> ExitCode {
                 Some(c) => flags.push(c.flag().to_owned()),
                 None => refuse!("--compliance needs strict or extended"),
             },
+            "--source-format" => match args.next().as_deref().and_then(numeric::SourceFormat::named) {
+                Some(f) => flags.push(format!("--source-format={}", f.name())),
+                None => refuse!("--source-format needs fixed, free or auto"),
+            },
+            f if f.starts_with("--source-format=") => match numeric::SourceFormat::named(&f["--source-format=".len()..]) {
+                Some(_) => flags.push(a),
+                None => refuse!("--source-format needs fixed, free or auto"),
+            },
             f if f.starts_with("--fastsrt-adv-print") => match f {
                 "--fastsrt-adv-print=exclude" | "--fastsrt-adv-print=include" => flags.push(a),
                 _ => refuse!("--fastsrt-adv-print needs =exclude or =include"),
@@ -913,6 +928,9 @@ fn driver() -> ExitCode {
     }
     if exit_code && !banded {
         return usage_error("--exit-code is for run, cics and job, and not with --expected");
+    }
+    if numeric::SourceFormat::of(&flags) != numeric::SourceFormat::Auto && numeric::Compliance::of(&flags) == numeric::Compliance::Strict {
+        return usage_error("--source-format is for --compliance extended: Enterprise COBOL reads fixed form alone");
     }
     if json.is_some() && !matches!(rest.first().map(String::as_str), Some("check" | "run" | "cics" | "compile")) {
         return usage_error("--diagnostics is for check, run, cics and compile");
@@ -1169,7 +1187,7 @@ fn driver() -> ExitCode {
         },
         None => None,
     };
-    let libraries = syntax::copy::Libraries::new(std::iter::once(own_directory.clone()).chain(libraries).collect()).with_program(std::path::Path::new(path)).with_compliance(numeric::Compliance::of(&flags));
+    let libraries = syntax::copy::Libraries::new(std::iter::once(own_directory.clone()).chain(libraries).collect()).with_program(std::path::Path::new(path)).with_flags(&flags);
     let mut programs = match syntax::parse_all_with(&text, &libraries) {
         Ok(p) => p,
         Err(e) => return no_program(journal, command, path, report(std::slice::from_ref(&e), path)),

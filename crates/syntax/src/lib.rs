@@ -176,16 +176,54 @@ pub fn program_ids(text: &str, compliance: numeric::Compliance) -> Vec<String> {
 }
 
 /// Every program in the source, in order, nested programs after the one that contains them. The
-/// libraries' compliance level says how the source and its members are read. Debugging lines are
-/// program text through COPY and REPLACE, and comments after them outside a program compiled WITH
-/// DEBUGGING MODE (Language Reference SC27-8713-03, p. 693). Outside debugging mode Enterprise
-/// COBOL accepts a debugging line that does not read as text, such as one holding an unclosed
-/// literal; then every debugging line is read as a comment.
+/// libraries' compliance level and source format say how the source and its members are read.
+/// Debugging lines are program text through COPY and REPLACE, and comments after them outside a
+/// program compiled WITH DEBUGGING MODE (Language Reference SC27-8713-03, p. 693). Outside debugging
+/// mode Enterprise COBOL accepts a debugging line that does not read as text, such as one holding an
+/// unclosed literal; then every debugging line is read as a comment.
+///
+/// Under `--compliance extended` and `--source-format auto`, a file read in fixed form that does not
+/// parse is read again with cobc's tab stops where it holds a tab, and in free form where that
+/// parses; so is one whose text fixed form cuts at column 72, in free form.
 pub fn parse_all_with(text: &str, libraries: &copy::Libraries) -> Result<Vec<ast::Program>, Error> {
+    use numeric::{Compliance, SourceFormat};
+    let start = match (libraries.compliance(), libraries.source_format()) {
+        (Compliance::Extended, SourceFormat::Fixed) => source::Start::Fixed,
+        (Compliance::Extended, SourceFormat::Free) => source::Start::Free(messages::IWX0001.at(Pos { file: 0, line: 1, col: 1 }, format!("{}: --source-format free reads the file in free form", source::FREE_FORM))),
+        _ => source::Start::Detect,
+    };
+    let detect = libraries.compliance() == Compliance::Extended && libraries.source_format() == SourceFormat::Auto;
+    let fixed = parse_from(text, libraries, start);
+    if !detect {
+        return fixed.map(|(programs, _)| programs);
+    }
+    let (at, why) = match &fixed {
+        Ok((_, None)) => return fixed.map(|(programs, _)| programs),
+        Ok((_, Some(cut))) => (*cut, format!("line {} runs on past column 72, where fixed form ends, in the middle of a word or literal", cut.line)),
+        Err(e) => {
+            let stops = format!("it stops {} ({})", if e.pos.file == 0 { format!("at line {}", e.pos.line) } else { "in a COPY member".to_owned() }, e.labelled());
+            if let Some((line, col)) = text.lines().enumerate().find_map(|(i, l)| l.find('\t').map(|c| (i as u32 + 1, l[..c].chars().count() as u32 + 1))) {
+                let warning = messages::IWX0058.at(Pos { file: 0, line, col }, format!("tab stops (GnuCOBOL and Micro Focus; Enterprise COBOL source holds no tab): read with each tab one column {stops}, and with each reaching the next column after a multiple of 8, as cobc places it, the file parses"));
+                if let Ok((programs, None)) = parse_from(text, libraries, source::Start::TabStops(warning)) {
+                    return Ok(programs);
+                }
+            }
+            (Pos { file: 0, line: 1, col: 1 }, format!("read in fixed form {stops}"))
+        }
+    };
+    let warning = messages::IWX0001.at(at, format!("{}: {why}, and the file reads in free form, as cobc -free reads it", source::FREE_FORM));
+    match parse_from(text, libraries, source::Start::Free(warning)) {
+        Ok((programs, _)) => Ok(programs),
+        Err(_) => fixed.map(|(programs, _)| programs),
+    }
+}
+
+/// The programs, and where a file read wholly in fixed form has text cut at column 72.
+fn parse_from(text: &str, libraries: &copy::Libraries, start: source::Start) -> Result<(Vec<ast::Program>, Option<Pos>), Error> {
     let compliance = libraries.compliance();
     let mut files = vec![String::new()];
     let read = |debugging: bool, files: &mut Vec<String>| -> Result<(source::Source, Vec<lexer::Token>), Error> {
-        let source = source::read_under(text, 0, debugging, compliance).and_then(|s| copy::expand(s, libraries, files)).and_then(copy::replace).map_err(|e| e.in_files(files))?;
+        let source = source::read_from(text, 0, debugging, compliance, start.clone()).and_then(|s| copy::expand(s, libraries, files)).and_then(copy::replace).map_err(|e| e.in_files(files))?;
         let tokens = lexer::lex_under(&source, compliance).map_err(|e| e.in_files(files))?;
         Ok((source, tokens))
     };
@@ -203,6 +241,7 @@ pub fn parse_all_with(text: &str, libraries: &copy::Libraries) -> Result<Vec<ast
             (source, tokens)
         }
     };
+    let cut = source::cut_at_the_margin(text, &source);
     if compliance == numeric::Compliance::Extended {
         tokens = extended::rewrite(tokens, &source.options).map_err(|e| e.in_files(&files))?;
     }
@@ -210,7 +249,7 @@ pub fn parse_all_with(text: &str, libraries: &copy::Libraries) -> Result<Vec<ast
     for p in &mut programs {
         p.sources = files.clone();
     }
-    Ok(programs)
+    Ok((programs, cut))
 }
 
 #[cfg(test)]
@@ -260,5 +299,56 @@ mod tests {
         let in_member = Error::warning(Pos { file: 1, line: 3, col: 8 }, "m3").in_files(&[String::new(), "COPYA".into()]);
         assert_eq!(in_member.place("p.cbl"), "COPYA:3:8: warning: m3");
         assert_eq!(message(Severity::Severe, 3).to_string(), "3:8: m3");
+    }
+
+    fn free_form_note(program: &ast::Program) -> Option<String> {
+        program.messages.iter().find(|m| m.id == Some("IWX0001")).map(|m| m.message.clone())
+    }
+
+    fn under(text: &str, format: &str) -> Result<ast::Program, Error> {
+        let flags = ["--compliance=extended".to_owned(), format!("--source-format={format}")];
+        parse_with(text, &copy::Libraries::default().with_flags(&flags))
+    }
+
+    const HEAD: &str = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n";
+
+    #[test]
+    fn auto_reads_free_form_where_fixed_form_cuts_a_word_at_column_72_and_free_form_parses() {
+        let text = format!("{HEAD}       01 A-LONG-NAME PIC X.\n       PROCEDURE DIVISION.\n{:<66}A-LONG-NAME.\n           GOBACK.\n", "           MOVE 'X' TO");
+        let note = free_form_note(&under(&text, "auto").unwrap()).unwrap();
+        assert!(note.contains("line 7 runs on past column 72") && note.ends_with("as cobc -free reads it"), "{note}");
+        assert_eq!(free_form_note(&under(&text, "fixed").unwrap()), None);
+        let strict = parse_with(&text, &copy::Libraries::default());
+        assert!(strict.is_ok_and(|p| free_form_note(&p).is_none()));
+    }
+
+    #[test]
+    fn auto_reads_free_form_where_fixed_form_does_not_parse_and_free_form_does() {
+        let text = format!("{HEAD}01 B PIC X.\n       PROCEDURE DIVISION.\n           GOBACK.\n");
+        let note = free_form_note(&under(&text, "auto").unwrap()).unwrap();
+        assert!(note.contains("read in fixed form it stops at line 5 (IWS"), "{note}");
+        assert!(under(&text, "fixed").is_err());
+        let neither = format!("{HEAD}01 B PIC X VALUE.\n       PROCEDURE DIVISION.\n");
+        assert!(under(&neither, "auto").is_err());
+    }
+
+    #[test]
+    fn auto_reads_cobcs_tab_stops_where_a_tab_as_one_column_does_not_parse() {
+        let text = "\t\tIDENTIFICATION DIVISION.\n\t\tPROGRAM-ID. P.\n\t\tPROCEDURE DIVISION.\n\t\t    GOBACK.\n";
+        let program = under(text, "auto").unwrap();
+        let note = program.messages.iter().find(|m| m.id == Some("IWX0058")).unwrap();
+        assert_eq!((note.pos.line, note.pos.col), (1, 1));
+        assert!(note.message.contains("read with each tab one column it stops at line 1"), "{}", note.message);
+        assert!(free_form_note(&program).is_none());
+        assert!(under(text, "fixed").is_err());
+        let tabbed = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       PROCEDURE DIVISION.\n\t    GOBACK.\n";
+        assert!(under(tabbed, "auto").unwrap().messages.iter().all(|m| m.id != Some("IWX0058")));
+    }
+
+    #[test]
+    fn free_reads_every_line_in_free_form_and_says_the_option_did() {
+        let text = "IDENTIFICATION DIVISION.\nPROGRAM-ID. P.\nPROCEDURE DIVISION.\nGOBACK.\n";
+        let note = free_form_note(&under(text, "free").unwrap()).unwrap();
+        assert!(note.ends_with("--source-format free reads the file in free form"), "{note}");
     }
 }

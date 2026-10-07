@@ -437,7 +437,7 @@ fn compile(req: &fuzz::Request) -> Result<(exec::Compiled, String, syntax::copy:
     let bytes = fs::read(&req.program).map_err(|e| format!("{path}: {e}"))?;
     let text = syntax::copy::decode(&bytes);
     let own = req.program.parent().map(Path::to_path_buf).unwrap_or_default();
-    let libraries = syntax::copy::Libraries::new(std::iter::once(own).chain(req.libraries.iter().cloned()).collect()).with_program(&req.program).with_compliance(numeric::Compliance::of(&req.flags));
+    let libraries = syntax::copy::Libraries::new(std::iter::once(own).chain(req.libraries.iter().cloned()).collect()).with_program(&req.program).with_flags(&req.flags);
     let mut programs = syntax::parse_all_with(&text, &libraries).map_err(|e| e.place(&path))?;
     let compiled = exec::compile(programs.remove(0), &req.flags).map_err(|messages| messages.iter().map(|m| m.place(&path)).collect::<Vec<_>>().join("\n"))?;
     Ok((compiled, text, libraries))

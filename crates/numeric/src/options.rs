@@ -565,6 +565,37 @@ impl Compliance {
     }
 }
 
+/// How a source file is read under `--compliance extended`: in fixed form unless the file shows it
+/// is free form (`Auto`), in fixed form unless a directive in it says otherwise (`Fixed`), or in free
+/// form from its first line (`Free`) (`--source-format`). Strict reads fixed form alone.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SourceFormat {
+    #[default]
+    Auto,
+    Fixed,
+    Free,
+}
+
+impl SourceFormat {
+    /// The value `--source-format` takes for it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Fixed => "fixed",
+            Self::Free => "free",
+        }
+    }
+
+    pub fn named(value: &str) -> Option<Self> {
+        [Self::Auto, Self::Fixed, Self::Free].into_iter().find(|f| f.name() == value)
+    }
+
+    /// The format the last `--source-format=` flag among `flags` gives, auto without one.
+    pub fn of(flags: &[String]) -> Self {
+        flags.iter().rev().find_map(|f| f.strip_prefix("--source-format=").and_then(Self::named)).unwrap_or_default()
+    }
+}
+
 /// Which contained programs a CALL reaches: Enterprise COBOL's scope rules (`Strict`, Language
 /// Reference, Conventions for program-names), or any program of the run unit by its name
 /// (`Flexible`, `--program-scope=flexible`).
@@ -1058,6 +1089,12 @@ impl Options {
                 Some(c) => self.compliance = c,
                 None => return Err(OptionError::UnknownFlag(flag.to_owned())),
             },
+            // How the source was read, which the syntax crate has done before options apply.
+            f if f.starts_with("--source-format=") => {
+                if SourceFormat::named(&f["--source-format=".len()..]).is_none() {
+                    return Err(OptionError::UnknownFlag(flag.to_owned()));
+                }
+            }
             f if f.starts_with("--dialect=") => match Dialect::named(&f["--dialect=".len()..]) {
                 Some(d) => self.dialect = d,
                 None => return Err(OptionError::UnknownFlag(flag.to_owned())),
@@ -1552,6 +1589,23 @@ mod tests {
         assert_eq!(flags(&[]), Compliance::Strict);
         assert_eq!(flags(&["-silent", "--compliance=extended"]), Compliance::Extended);
         assert_eq!(flags(&["--compliance=extended", "--compliance=strict"]), Compliance::Strict);
+    }
+
+    #[test]
+    fn the_source_format_is_auto_unless_the_flag_says_fixed_or_free() {
+        let mut o = Options::default();
+        for format in [SourceFormat::Auto, SourceFormat::Fixed, SourceFormat::Free] {
+            o.apply_flag(&format!("--source-format={}", format.name())).unwrap();
+            assert_eq!(SourceFormat::named(format.name()), Some(format));
+        }
+        assert_eq!(o, Options::default());
+        for bad in ["--source-format=FREE", "--source-format=", "--source-format", "--source-format=variable"] {
+            assert!(o.apply_flag(bad).is_err(), "{bad}");
+        }
+        let flags = |given: &[&str]| SourceFormat::of(&given.iter().map(|f| f.to_string()).collect::<Vec<_>>());
+        assert_eq!(flags(&[]), SourceFormat::Auto);
+        assert_eq!(flags(&["--source-format=free", "-silent"]), SourceFormat::Free);
+        assert_eq!(flags(&["--source-format=free", "--source-format=fixed"]), SourceFormat::Fixed);
     }
 
     #[test]
