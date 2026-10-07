@@ -1,7 +1,7 @@
 //! The exit status of `run`, `cics` and `job`: how the run ended, as a code of the reserved band
 //! or, with `--exit-code`, as a verdict. Both come from one mapping, [`Outcome::codes`].
 
-use exec::abend::AbendCode;
+use crate::abend::AbendCode;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU8, Ordering};
 
@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn ironwork_s_own_abend_codes_say_what_it_does_not_run() {
-        use exec::abend::AbendCode;
+        use crate::abend::AbendCode;
         for text in NOT_RUN {
             assert_eq!(Outcome::of_abend(&AbendCode::from(text)), Outcome::NotRun, "{text}");
         }

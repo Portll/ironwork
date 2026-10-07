@@ -17,6 +17,8 @@ pub struct Request {
     pub libraries: Vec<PathBuf>,
     pub flags: Vec<String>,
     pub source_prefix: Option<String>,
+    /// Build each module into an executable too, against this runtime.
+    pub native: Option<crate::native::Runtime>,
 }
 
 /// A source's programs in ordinal order, with their directory entries, the files each one's debug
@@ -127,6 +129,13 @@ pub fn run(r: Request) -> ExitCode {
         let path = r.out.join(&name);
         if let Err(e) = fs::create_dir_all(&r.out).and_then(|()| replace(&path, &bytes)) {
             eprintln!("ironwork: {}: {e}", path.display());
+            status = status.max(16);
+            continue;
+        }
+        if let Some(runtime) = &r.native
+            && let Err(e) = crate::native::build(&r.out, &name, runtime)
+        {
+            eprintln!("ironwork: {name}: {e}");
             status = status.max(16);
         }
     }

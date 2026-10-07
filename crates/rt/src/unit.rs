@@ -175,6 +175,26 @@ pub enum Clock {
     Fixed(i64, u32),
 }
 
+impl Clock {
+    /// A fixed clock from `YYYY-MM-DDTHH:MM:SS[.hh]`; None for any other text.
+    pub fn parse(text: &str) -> Option<Self> {
+        let (date, time) = text.split_once('T')?;
+        let mut d = date.split('-').map(|p| p.parse::<i64>().ok());
+        let (year, month, day) = (d.next()??, d.next()??, d.next()??);
+        let (time, hundredths) = match time.split_once('.') {
+            Some((t, h)) => (t, h.parse::<u32>().ok()?),
+            None => (time, 0),
+        };
+        let mut t = time.split(':').map(|p| p.parse::<i64>().ok());
+        let (hour, minute, second) = (t.next()??, t.next()??, t.next()??);
+        if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 || hundredths > 99 {
+            return None;
+        }
+        let days = crate::calendar::days_from_civil(year, month, day);
+        Some(Self::Fixed(days * crate::calendar::SECONDS_PER_DAY + hour * 3600 + minute * 60 + second, hundredths))
+    }
+}
+
 /// What a run did that its evidence journal records: each file as it is opened and closed, each
 /// program CALL loads, with the source it was read from when a library supplied it, and each
 /// operation an input could steer, with its operand as the program's code page reads it.

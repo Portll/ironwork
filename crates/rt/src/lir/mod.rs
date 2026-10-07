@@ -17,6 +17,7 @@ mod sort;
 mod sql;
 mod text;
 mod value;
+pub mod verify;
 
 pub use arith::{ArithPlan, ArithStep, Mode, RemainderPlan, StepPlan, StorePlan, UpDown};
 pub use call::{CallArg, CallPlan, CallTarget, EntryPoint, FunctionDefinition, LeService, UserArgument, UserFunctionPlan};

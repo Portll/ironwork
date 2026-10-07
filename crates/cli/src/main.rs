@@ -34,7 +34,7 @@ usage:
                [--file SPEC]... [--td QUEUE=path]... [--screens path [--transaction TRAN=PROGRAM]... [--csd path]]
                                                        run a load module's first program on the VM as the first
                                                        program of a CICS task; --serve takes a source
-  ironwork compile <program.cbl>... [-o <dir>] [--bundle NAME] [--source-prefix DIR] [-silent] [-strict-sort-keys]
+  ironwork compile <program.cbl>... [-o <dir>] [--bundle NAME] [--source-prefix DIR] [--native [--runtime DIR]] [-silent] [-strict-sort-keys]
                [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never]
                [--optimize=0|1|2] [--diagnostics text|json]
                [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [-I <dir>]... [-L <dir>]...
@@ -263,6 +263,13 @@ compile flags:
   --source-prefix DIR
              the directory the debug table puts before each source's file name, which is
              otherwise the file name alone; COPY members are named relative to their library
+  --native   also build each module into an executable beside it, NAME (NAME.exe on Windows), that
+             runs it as run runs the module, from the runtime alone: CALL finds a program in it,
+             then NAME.iwm in its -L directories, and never compiles source. cargo builds it, so a
+             Rust toolchain must be on PATH; the crate is written under DIR/.ironwork-native
+  --runtime DIR
+             the crates directory of an ironwork checkout to build --native against, rather than
+             the published ironwork-rt of this version
 dump flags:
   --section NAME
              print only the named sections (STRINGS, DIRECTORY, OPTIONS, LAYOUT, LIR, SQL, BMS,
@@ -508,11 +515,12 @@ mod dfsort;
 mod dfsort_number;
 mod dump;
 mod evidence;
-mod exit;
+use rt::exit;
 mod fuzz;
 mod fuzz_cics;
 mod job;
 mod module;
+mod native;
 mod provenance;
 
 /// The statements a run tells its observer of: every one when it writes coverage, which counts
@@ -630,6 +638,7 @@ fn driver() -> ExitCode {
     let mut proclibs: Vec<std::path::PathBuf> = Vec::new();
     let mut user: Option<String> = None;
     let (mut out_dir, mut bundle, mut source_prefix): (Option<std::path::PathBuf>, Option<String>, Option<String>) = (None, None, None);
+    let (mut native, mut runtime): (bool, Option<std::path::PathBuf>) = (false, None);
     let mut dump_options = dump::Options { check: true, ..Default::default() };
     let mut clock_text: Option<String> = None;
     let mut fuzz_root: Option<std::path::PathBuf> = None;
@@ -826,6 +835,11 @@ fn driver() -> ExitCode {
             "--source-prefix" => match args.next() {
                 Some(prefix) => source_prefix = Some(prefix),
                 None => refuse!("--source-prefix needs a directory"),
+            },
+            "--native" => native = true,
+            "--runtime" => match args.next() {
+                Some(dir) => runtime = Some(std::path::PathBuf::from(dir)),
+                None => refuse!("--runtime needs a directory"),
             },
             "--section" => match args.next().as_deref().map(|n| (n.to_owned(), dump::section_named(n))) {
                 Some((_, Some(section))) => dump_options.only.push(section),
@@ -1035,7 +1049,10 @@ fn driver() -> ExitCode {
     if fuzz_flags {
         return usage_error("--runs, --seed, --timeout, --hang-limit, --root, --job, --cics, --interface and --differential are for fuzz");
     }
-    let compile_flags = out_dir.is_some() || bundle.is_some() || source_prefix.is_some();
+    if runtime.is_some() && !native {
+        return usage_error("--runtime is for --native");
+    }
+    let compile_flags = out_dir.is_some() || bundle.is_some() || source_prefix.is_some() || native;
     match rest.split_first() {
         Some((c, sources)) if c == "compile" => {
             if sources.is_empty() {
@@ -1051,6 +1068,7 @@ fn driver() -> ExitCode {
                 libraries,
                 flags,
                 source_prefix,
+                native: native.then(|| runtime.map_or(native::Runtime::Published, native::Runtime::Checkout)),
             });
         }
         Some((c, files)) if c == "dump" => {
@@ -1060,7 +1078,7 @@ fn driver() -> ExitCode {
             }
             return dump::run(dump::Request { file: file.into(), options: dump_options });
         }
-        _ if compile_flags => return usage_error("-o, --bundle and --source-prefix are for compile"),
+        _ if compile_flags => return usage_error("-o, --bundle, --source-prefix and --native are for compile"),
         _ if dump_flags => return usage_error("--section, --strings and --no-check are for dump"),
         _ => {}
     }
@@ -2074,20 +2092,7 @@ fn cics_run<'w>(
 
 /// `YYYY-MM-DDTHH:MM:SS[.hh]` as seconds since the epoch and hundredths, UTC.
 fn parse_clock(text: &str) -> Option<exec::unit::Clock> {
-    let (date, time) = text.split_once('T')?;
-    let mut d = date.split('-').map(|p| p.parse::<i64>().ok());
-    let (year, month, day) = (d.next()??, d.next()??, d.next()??);
-    let (time, hundredths) = match time.split_once('.') {
-        Some((t, h)) => (t, h.parse::<u32>().ok()?),
-        None => (time, 0),
-    };
-    let mut t = time.split(':').map(|p| p.parse::<i64>().ok());
-    let (hour, minute, second) = (t.next()??, t.next()??, t.next()??);
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 || hundredths > 99 {
-        return None;
-    }
-    let days = exec::calendar::days_from_civil(year, month, day);
-    Some(exec::unit::Clock::Fixed(days * exec::calendar::SECONDS_PER_DAY + hour * 3600 + minute * 60 + second, hundredths))
+    exec::unit::Clock::parse(text)
 }
 
 #[cfg(test)]

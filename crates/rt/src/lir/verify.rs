@@ -2,14 +2,14 @@
 //! the control-flow graph is closed, every op has its debug entry, and places carry SSRANGE checks
 //! exactly when the program has SSRANGE.
 
-use rt::cics::Handles;
-use rt::lir::{
+use crate::cics::Handles;
+use crate::lir::{
     Advance, Argument, Base, Binding, Bound, CallArg, CallTarget, Ccsid, Chars, Comparand, Compare, Cond, Const, Convert, ConvertTable, Count, DisplayItem, InitValue, Inspected, Expr, FileVerb, Flag, Func, HostPlace, IntExpr,
     GlobalAt, JsonValue, Marker, Markup, MethodName, MovePlan, Named, Op, Operand, ParseValue, Place, PlaceId, Program, RangeKind, Receiver, Replacement, ReportOp, RowCount, SenderCheck, SetTo, SortIo, SortPlan,
     SqlStatement, StartKey, StorePlan, SymId, Terminator, UpDown, UserArgument, XmlValue,
 };
-use rt::report::{FieldContent, GroupKind, Origin};
-use rt::vocab::AcceptFrom;
+use crate::report::{FieldContent, GroupKind, Origin};
+use crate::vocab::AcceptFrom;
 
 type Check<'a, T> = &'a dyn Fn(T) -> Result<(), String>;
 
@@ -918,16 +918,16 @@ fn verify_scope(p: &Program, range: &dyn Fn(u32, RangeKind) -> Result<(), String
 }
 
 /// The integers a screen phrase evaluates.
-fn screen_ints(screen: &rt::lir::ScreenPlan) -> impl Iterator<Item = &IntExpr> {
+fn screen_ints(screen: &crate::lir::ScreenPlan) -> impl Iterator<Item = &IntExpr> {
     position_ints(&screen.at)
 }
 
 /// The integers a screen position evaluates.
-fn position_ints(at: &rt::lir::ScreenPosition) -> impl Iterator<Item = &IntExpr> {
+fn position_ints(at: &crate::lir::ScreenPosition) -> impl Iterator<Item = &IntExpr> {
     let (a, b, c) = match at {
-        rt::lir::ScreenPosition::Cursor => (None, None, None),
-        rt::lir::ScreenPosition::Combined(at) => (Some(at), None, None),
-        rt::lir::ScreenPosition::LineColumn { line, column } => (None, line.as_ref(), column.as_ref()),
+        crate::lir::ScreenPosition::Cursor => (None, None, None),
+        crate::lir::ScreenPosition::Combined(at) => (Some(at), None, None),
+        crate::lir::ScreenPosition::LineColumn { line, column } => (None, line.as_ref(), column.as_ref()),
     };
     a.into_iter().chain(b).chain(c)
 }

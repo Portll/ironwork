@@ -29,10 +29,9 @@ mod sort;
 mod sql;
 mod text;
 mod user_function;
-mod verify;
 
 
-pub use verify::verify;
+pub use rt::lir::verify::verify;
 
 use crate::Compiled;
 use crate::layout::{Layout, Resolved};
