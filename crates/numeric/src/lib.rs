@@ -5,6 +5,7 @@
 pub mod assumptions;
 pub mod binary;
 pub mod float;
+pub mod governs;
 pub mod options;
 pub mod precision;
 pub mod sign;
