@@ -221,6 +221,15 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         native.quote = options.quote;
         native
     });
+    if options.compliance == numeric::Compliance::Extended && options.arith == numeric::options::Arith::Compat && !program.options.iter().any(|o| names_arith(o)) {
+        let notation = crate::picture::Notation::of(&program.environment);
+        let compat = numeric::options::Arith::Compat.max_picture_digits();
+        if let Some(e) = data_entries(&program).find(|e| picture_positions(e, notation).is_some_and(|n| n > compat)) {
+            options.arith = numeric::options::Arith::Extend;
+            let picture = e.picture.as_deref().unwrap_or_default();
+            errors.push(syntax::messages::IWX0060.at(e.pos, format!("PICTURE {picture} (GnuCOBOL and Micro Focus; Enterprise COBOL's ARITH(COMPAT) allows 18 digits): the program is compiled with ARITH(EXTEND), which allows 31")));
+        }
+    }
     digit_limits(&program, options.arith, &mut errors);
     binary_chars(&program, &options, &mut errors);
     forever_names(&program, &mut errors);
@@ -1055,16 +1064,13 @@ fn digit_limits(program: &Program, arith: numeric::options::Arith, errors: &mut 
         numeric::options::Arith::Compat => "ARITH(COMPAT)",
         numeric::options::Arith::Extend => "ARITH(EXTEND)",
     };
-    let entries = program.working_storage.iter().chain(&program.local_storage).chain(&program.linkage).chain(program.files.iter().flat_map(|f| &f.records));
-    for e in entries {
-        if let Some(p) = e.picture.as_deref()
-            && let Ok(pic) = picture::analyse_with(p, crate::picture::Notation::of(&program.environment))
-            && matches!(pic.category, picture::Category::Numeric | picture::Category::NumericEdited)
+    let notation = crate::picture::Notation::of(&program.environment);
+    for e in data_entries(program) {
+        if let Some(positions) = picture_positions(e, notation)
+            && positions > max
         {
-            let positions = pic.digits + pic.scaling + pic.scale.saturating_sub(pic.digits);
-            if positions > max {
-                errors.push(syntax::messages::IWC0069.at(e.pos, format!("PICTURE {p}: {positions} digit positions, more than the {max} {option} allows")));
-            }
+            let p = e.picture.as_deref().unwrap_or_default();
+            errors.push(syntax::messages::IWC0069.at(e.pos, format!("PICTURE {p}: {positions} digit positions, more than the {max} {option} allows")));
         }
         let values = e.value.iter().chain(e.condition_values.iter().flat_map(|(low, high)| std::iter::once(low).chain(high))).chain(&e.false_value);
         for v in values {
@@ -1075,6 +1081,22 @@ fn digit_limits(program: &Program, arith: numeric::options::Arith, errors: &mut 
             }
         }
     }
+}
+
+fn data_entries(program: &Program) -> impl Iterator<Item = &DataEntry> {
+    program.working_storage.iter().chain(&program.local_storage).chain(&program.linkage).chain(program.files.iter().flat_map(|f| &f.records))
+}
+
+/// A numeric or numeric-edited PICTURE's digit positions, scaling positions counted.
+fn picture_positions(e: &DataEntry, notation: crate::picture::Notation) -> Option<u32> {
+    let pic = picture::analyse_with(e.picture.as_deref()?, notation).ok()?;
+    matches!(pic.category, picture::Category::Numeric | picture::Category::NumericEdited).then(|| pic.digits + pic.scaling + pic.scale.saturating_sub(pic.digits))
+}
+
+/// Whether a CBL or PROCESS option is ARITH, or its abbreviation AR.
+fn names_arith(option: &str) -> bool {
+    let upper = option.to_ascii_uppercase();
+    upper.starts_with("ARITH(") || upper.starts_with("AR(")
 }
 
 fn literal_digits(t: &str) -> usize {

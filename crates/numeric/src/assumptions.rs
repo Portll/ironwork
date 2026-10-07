@@ -389,6 +389,7 @@ pub const BASED_ITEMS: &str = "C486";
 pub const ALLOCATE_HEAP: &str = "C487";
 pub const CHAINING: &str = "C488";
 pub const CRT_STATUS_CODES: &str = "C489";
+pub const WIDE_PICTURES: &str = "C490";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2757,6 +2758,13 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended), S(Screen)]],
+    },
+    Assumption {
+        id: WIDE_PICTURES,
+        claim: "Under --compliance extended, a program with a numeric PICTURE of 19 to 31 digit positions, which GnuCOBOL and Micro Focus accept and ARITH(COMPAT) refuses, is compiled with ARITH(EXTEND) where no CBL or PROCESS card names ARITH: its arithmetic then has Enterprise COBOL's ARITH(EXTEND) intermediate precision, not cobc's. A PICTURE of more than 31 digit positions stays refused",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(Arithmetic)]],
     },
     Assumption {
         id: COMMAND_LINE_FROM_PARM,

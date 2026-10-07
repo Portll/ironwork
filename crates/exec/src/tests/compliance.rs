@@ -409,10 +409,13 @@ const GNUCOBOL_BINARY: &str = concat!(
     "       01  B UNSIGNED-SHORT.\n",
     "       01  D UNSIGNED-INT.\n",
     "       01  F UNSIGNED-LONG.\n",
+    "       01  G BINARY-INT.\n",
     "       PROCEDURE DIVISION.\n",
     "           MOVE -1 TO B D F\n",
     "           MOVE 70000 TO A\n",
-    "           DISPLAY A ' ' B ' ' D ' ' F\n",
+    "           MOVE 2147483647 TO G\n",
+    "           ADD 1 TO G\n",
+    "           DISPLAY A ' ' B ' ' D ' ' F ' ' G\n",
     "           GOBACK.\n",
 );
 
@@ -420,7 +423,7 @@ const GNUCOBOL_BINARY: &str = concat!(
 fn gnucobols_binary_usages_keep_their_bytes_as_cobc_does_on_both_executors() {
     let flags = ["--compliance=extended", "--dialect=gnucobol"];
     let walked = Harness::source(GNUCOBOL_BINARY).flags(&flags).run(Executor::Interpreter);
-    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("+04464 00001 0000000001 00000000000000000001\n", Some(&Ending::Goback)), "{}", walked.err);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("+04464 00001 0000000001 00000000000000000001 -2147483648\n", Some(&Ending::Goback)), "{}", walked.err);
     let vm = Harness::source(GNUCOBOL_BINARY).flags(&flags).run(Executor::Vm);
     assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
 }
@@ -1956,4 +1959,36 @@ fn cob_crt_status_holds_the_key_that_ended_a_screen_accept_alike_on_both_executo
     assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
     let warned: Vec<_> = diagnostics_under(CRT_STATUS, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0057")).map(|d| d.0).collect();
     assert_eq!(warned, [7]);
+}
+
+/// PICTUREs of 20 and 27 digit positions, and one of 18 that carries.
+const WIDE_PICTURES: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. WIDE.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 A PIC 9(20) VALUE 12345678901234567890.\n",
+    "       01 B PIC 9(25)V99.\n",
+    "       01 C PIC 9(18) VALUE 999999999999999999.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           ADD 1 TO A\n",
+    "           COMPUTE B = A * 1000 + 0.5\n",
+    "           ADD 1 TO C\n",
+    "           DISPLAY A ' ' B ' ' C\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn a_picture_past_18_digits_compiles_the_program_with_arith_extend_under_extended() {
+    let walked = Harness::source(WIDE_PICTURES).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("12345678901234567891 001234567890123456789100050 000000000000000000\n", Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(WIDE_PICTURES).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    assert_eq!(diagnostics_under(WIDE_PICTURES, numeric::Compliance::Extended), [(5, 8, Some("IWX0060"), Severity::Warning)]);
+    assert!(diagnostics_under(WIDE_PICTURES, numeric::Compliance::Strict).iter().any(|d| d.2 == Some("IWC0069")));
+    let card = format!("       CBL ARITH(COMPAT)\n{WIDE_PICTURES}");
+    assert!(diagnostics_under(&card, numeric::Compliance::Extended).iter().any(|d| d.2 == Some("IWC0069")));
+    let past_31 = WIDE_PICTURES.replace("9(25)V99", "9(30)V99");
+    let shown = diagnostics_under(&past_31, numeric::Compliance::Extended);
+    assert!(shown.iter().any(|d| d.0 == 6 && d.3 == Severity::Severe), "{shown:?}");
 }

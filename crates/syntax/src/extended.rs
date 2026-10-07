@@ -33,6 +33,7 @@ const BINARY_USAGES: &[BinaryUsage] = &[
     BinaryUsage { word: "BINARY-LONG", digits: "9(9)", signed: None, origin: BINARY_USAGE },
     BinaryUsage { word: "BINARY-DOUBLE", digits: "9(18)", signed: None, origin: BINARY_USAGE },
     BinaryUsage { word: "BINARY-LONG-LONG", digits: "9(18)", signed: None, origin: GNUCOBOL_BINARY_USAGE },
+    BinaryUsage { word: "BINARY-INT", digits: "9(9)", signed: None, origin: GNUCOBOL_BINARY_USAGE },
     BinaryUsage { word: "SIGNED-SHORT", digits: "9(4)", signed: Some(true), origin: GNUCOBOL_BINARY_USAGE },
     BinaryUsage { word: "UNSIGNED-SHORT", digits: "9(4)", signed: Some(false), origin: GNUCOBOL_BINARY_USAGE },
     BinaryUsage { word: "SIGNED-INT", digits: "9(9)", signed: Some(true), origin: GNUCOBOL_BINARY_USAGE },
@@ -393,10 +394,11 @@ mod tests {
         assert_eq!(p.working_storage[1].value, Some(Literal::Number("7".into())));
         let shown: Vec<String> = p.messages.iter().map(|m| m.message.clone()).collect();
         assert_eq!(shown[1], format!("{}: BINARY-SHORT UNSIGNED is read as PIC 9(4) COMP-5", super::BINARY_USAGE));
-        let data = "       01  F UNSIGNED-INT.\n       01  G SIGNED-SHORT.\n       01  H BINARY-LONG-LONG UNSIGNED.\n       01  I UNSIGNED-LONG.\n";
+        let data = "       01  F UNSIGNED-INT.\n       01  G SIGNED-SHORT.\n       01  H BINARY-LONG-LONG UNSIGNED.\n       01  I UNSIGNED-LONG.\n       01  J BINARY-INT.\n       01  K BINARY-INT UNSIGNED.\n";
         let p = extended(&source(data, "")).unwrap();
         let read: Vec<(Option<&str>, Option<Usage>)> = p.working_storage.iter().map(|e| (e.picture.as_deref(), e.usage)).collect();
-        assert_eq!(read, [(Some("9(9)"), Some(Usage::NativeBinary)), (Some("S9(4)"), Some(Usage::NativeBinary)), (Some("9(18)"), Some(Usage::NativeBinary)), (Some("9(18)"), Some(Usage::NativeBinary))]);
+        let binary = |p: &'static str| (Some(p), Some(Usage::NativeBinary));
+        assert_eq!(read, [binary("9(9)"), binary("S9(4)"), binary("9(18)"), binary("9(18)"), binary("S9(9)"), binary("9(9)")]);
         assert_eq!(p.messages[0].message, format!("{}: UNSIGNED-INT is read as PIC 9(9) COMP-5", super::GNUCOBOL_BINARY_USAGE));
         let p = extended(&source("       01  D BINARY-CHAR UNSIGNED.\n       01  E USAGE BINARY-CHAR SIGNED.\n", "")).unwrap();
         let read: Vec<(Option<&str>, Option<Usage>)> = p.working_storage.iter().map(|e| (e.picture.as_deref(), e.usage)).collect();

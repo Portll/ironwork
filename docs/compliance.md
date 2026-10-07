@@ -168,7 +168,7 @@ GnuCOBOL's own binary usages are read the same way, with `GnuCOBOL's binary usag
 COBOL's)` in the warning: `BINARY-LONG-LONG [SIGNED|UNSIGNED]` as BINARY-DOUBLE; `SIGNED-SHORT` and
 `UNSIGNED-SHORT` as `PIC S9(4)` and `9(4)` `COMP-5`; `SIGNED-INT` and `UNSIGNED-INT` as `S9(9)` and
 `9(9)`; `SIGNED-LONG` and `UNSIGNED-LONG` as `S9(18)` and `9(18)`. These take no SIGNED or UNSIGNED
-after them. They are cobc 3.2's sizes, two, four and eight bytes, and its results: MOVE 70000 to a
+after them. `BINARY-INT [SIGNED|UNSIGNED]` is BINARY-LONG, as cobc's default dialect reads it. They are cobc 3.2's sizes, two, four and eight bytes, and its results: MOVE 70000 to a
 SIGNED-SHORT gives 4464, and MOVE -1 to an UNSIGNED-INT gives 1. `BINARY-C-LONG`, whose size is the
 C compiler's `long`, stays refused.
 
@@ -1036,6 +1036,18 @@ cobc places it (its default `-ftab-width`), so `<tab><tab>IDENTIFICATION DIVISIO
 CUSTREC copybook, which runs past column 72 at cobc's stops and which cobc refuses, keep reading a
 tab as one column. A COPY member is read with a tab as one column. Enterprise COBOL's source comes
 from fixed-length records with no tab characters.
+
+### IWX0060-W PICTUREs of 19 to 31 digits
+
+`IWX0060-W PICTURE {picture} (GnuCOBOL and Micro Focus; Enterprise COBOL's ARITH(COMPAT) allows 18
+digits): the program is compiled with ARITH(EXTEND), which allows 31`, at the first such PICTURE.
+
+GnuCOBOL and Micro Focus accept numeric PICTUREs of up to 38 digits; Enterprise COBOL takes up to
+18 under ARITH(COMPAT), its default, and 31 under ARITH(EXTEND). Under extended, a program with a
+numeric or numeric-edited PICTURE of 19 to 31 digit positions, and no CBL or PROCESS card naming
+ARITH, is compiled as though a card said ARITH(EXTEND): its literals may have 31 digits too, and its
+arithmetic has ARITH(EXTEND)'s intermediate precision, not cobc's (assumption C490). A card that
+names ARITH keeps its choice, and a PICTURE of more than 31 digits stays refused.
 
 ## Relaxed
 
