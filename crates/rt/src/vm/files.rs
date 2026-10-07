@@ -8,7 +8,7 @@ use crate::abend::{Abend, AbendCode, Signal};
 use crate::fileio::{self, File, Files, Outcome, Read};
 use crate::files::{Dd, FileStatus, KeySpan, Keying, Open};
 use crate::host::Host;
-use crate::lir::{Advance, DebugId, FileOp, FileVerb, FromMove, IntExpr, Organization, Phrase, PlaceId, RangeId, RecordSpan, RelativeKey, Spacing, StartKey, Step};
+use crate::lir::{Advance, DebugId, FileOp, FileVerb, FromMove, IndexKeys, IntExpr, Organization, Phrase, PlaceId, RangeId, RecordSpan, RelativeKey, Spacing, StartKey, Step};
 use crate::sort::Active;
 use crate::storage::{Loc, Val};
 use crate::store;
@@ -61,7 +61,15 @@ pub(super) fn mode_index(mode: OpenMode) -> usize {
 }
 
 fn key_span(span: RecordSpan) -> KeySpan {
-    KeySpan { offset: span.offset as usize, len: span.len as usize }
+    KeySpan::new(span.offset as usize, span.len as usize)
+}
+
+/// Key `which` of `keys`: its span, or the pieces a split key joins.
+fn index_key(keys: &IndexKeys, which: usize, span: RecordSpan) -> KeySpan {
+    match keys.split.iter().find(|(key, _)| usize::from(*key) == which) {
+        Some((_, pieces)) => KeySpan::joined(pieces.iter().map(|p| (p.offset as usize, p.len as usize)).collect()),
+        None => key_span(span),
+    }
 }
 
 fn advance(a: &Advance) -> fileio::Advance<'static, &IntExpr> {
@@ -380,18 +388,31 @@ impl<'p, L: Loader<Rc<Code>>> Files<Handle<'p>, &'p IntExpr> for Io<'_, 'p, '_, 
         let d = &self.vm.p.services.files[k];
         Ok(match (d.organization, &d.keys) {
             (Organization::Relative, _) => Keying::Relative,
-            (Organization::Indexed, Some(keys)) => Keying::Indexed { prime: key_span(keys.prime), alternates: keys.alternates.iter().map(|&(span, duplicates)| (key_span(span), duplicates)).collect() },
+            (Organization::Indexed, Some(keys)) => Keying::Indexed {
+                prime: index_key(keys, 0, keys.prime),
+                alternates: keys.alternates.iter().enumerate().map(|(n, &(span, duplicates))| (index_key(keys, n + 1, span), duplicates)).collect(),
+            },
             _ => Keying::Position,
         })
     }
 
-    fn key_value(&mut self, k: usize, _keying: &Keying, key: Handle<'p>, _partial: bool, pos: Pos) -> Result<(usize, Vec<u8>), Abend> {
+    fn key_value(&mut self, k: usize, keying: &Keying, key: Handle<'p>, _partial: bool, pos: Pos) -> Result<(usize, Vec<u8>), Abend> {
         let Handle::Key(which, span) = key else { return Err(self.not_a_place(pos)) };
         let (offset, size) = self.vm.file_desc(k).area;
         let span = key_span(span);
+        let keys = keying.keys();
+        let named = match keys.get(which) {
+            Some(&key) if !key.split.is_empty() && (key.offset, key.len) == (span.offset, span.len) => key.clone(),
+            _ => span,
+        };
         if let Some(taint) = self.taint() {
-            taint.read(offset + span.offset, span.len);
+            if named.split.is_empty() {
+                taint.read(offset + named.offset, named.len);
+            }
+            for &(at, len) in &named.split {
+                taint.read(offset + at, len);
+            }
         }
-        Ok((which, span.of(&self.vm.unit.mem[offset..offset + size])))
+        Ok((which, named.of(&self.vm.unit.mem[offset..offset + size])))
     }
 }

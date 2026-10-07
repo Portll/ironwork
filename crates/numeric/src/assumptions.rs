@@ -383,6 +383,7 @@ pub const RETURNING_ON_STOP: &str = "C480";
 pub const ANY_LENGTH: &str = "C481";
 pub const ASSIGN_TO_DISK: &str = "C482";
 pub const START_BACKWARD: &str = "C483";
+pub const SPLIT_KEYS: &str = "C484";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2706,6 +2707,13 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: START_BACKWARD,
         claim: "Under --compliance extended, START ... KEY < and KEY NOT > or <=, Micro Focus's and GnuCOBOL's, position the file at the last record whose key, compared over the value's length, is less than the value, or not greater; the READ NEXT or READ PREVIOUS that follows reads that record first and goes on in its direction, as cobc 3.2 does with its BDB handler. With duplicates of an alternate key the last of them written is the one positioned at. No such record gives INVALID KEY, status 23, and no position. Enterprise COBOL's START takes =, >, NOT < and >= only",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(FileIo), U(IndexedFile)]],
+    },
+    Assumption {
+        id: SPLIT_KEYS,
+        claim: "Under --compliance extended, Micro Focus's split key, RECORD KEY or ALTERNATE RECORD KEY IS key-name = data-name ..., is the named items' bytes joined in the order written, wherever they lie in the record: records are held, read in sequence and found by that joined value, as cobc 3.2 holds them with its BDB handler, and a duplicate joined prime key is status 22. START and READ ... KEY IS key-name take the value from the items as the record area holds them, joined the same way, START comparing over its whole length. Enterprise COBOL's key is one data item",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended), S(FileIo), U(IndexedFile)]],

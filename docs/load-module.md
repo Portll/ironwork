@@ -3,7 +3,7 @@
 The `.iwm` file format, and how a run unit loads it. It details §8 of
 [codegen-runtime.md](codegen-runtime.md) and serves invariants 6 and 7 of its §10.
 
-**Status:** format 1.1, frozen at major 1 (§8.1). The container, the encoding rules and every section's
+**Status:** format 1.2, frozen at major 1 (§8.1). The container, the encoding rules and every section's
 codec (§3 to §7, §9) are built in `rt::module`; `ironwork compile` writes modules, with the mapsets
 their programs name (§5.3) and the files their compile read (§9.2), and `ironwork dump` (§11)
 prints them. The loader (§8.2) is built: `ironwork run x.iwm` runs a module's first program on the
@@ -141,7 +141,7 @@ sections before it can decode anything else. Section bodies use the rules of §4
 | 2 | `DIRECTORY` | The program directory (§6) | yes |
 | 3 | `OPTIONS` | Per program: `Program.options`; then, only when a program was compiled with `--assume`, each such program's choices as (program, `Assumed`) (§5.1) | yes |
 | 4 | `LAYOUT` | Per program: `Program.storage`, `items` and `edits` (§5.2) | yes |
-| 5 | `LIR` | Per program: the rest of `Program`; then, only when a file takes its name from a data item or a place carries a table range, each such file as (program, file, item) (lir.md `FileDesc::assign_item`), and then, only when a place carries one, each such place as (program, place, `TableRange`) (lir.md `Place::table`) | yes |
+| 5 | `LIR` | Per program: the rest of `Program`; then, only when a file takes its name from a data item or a place carries a table range, each such file as (program, file, item) (lir.md `FileDesc::assign_item`), and then, only when a place carries one or a key is split, each such place as (program, place, `TableRange`) (lir.md `Place::table`), and then, since 1.2 and only when a file has a split key, each such key as (program, file, key, pieces) (lir.md `IndexKeys::split`) | yes |
 | 6 | `SQL` | Per program: `Program.sql`, the SQL statement table (§7) | yes |
 | 7 | `BMS` | The map models of the mapsets the module's programs use (§5.3) | yes |
 | 8 | `DEBUG` | Per program: `Program.debug`, then the file each of its sources names (§9) | yes |
@@ -586,7 +586,7 @@ error if it meets one. `HostType::Zoned`'s sign is `rt::SignClause`.
 
 ### 8.1 Versions
 
-The format version is `major.minor`; this ironwork writes 1.1 and reads every 1.x minor, from
+The format version is `major.minor`; this ironwork writes 1.2 and reads every 1.x minor, from
 `Version::OLDEST_READABLE` in `rt::module`, which is 1.0. 1.0 is the first frozen format. It holds
 what the 0.x formats came to hold, the files that take their name from a data item and the places
 SSRANGE checks against their tables at the `LIR` section's end, and the `--assume` choices at the
@@ -595,8 +595,10 @@ SSRANGE checks against their tables at the `LIR` section's end, and the `--assum
 `CompX` and `Comp5Bytes` for BINARY-CHAR, COMP-X and PIC X(n) COMP-5 under `--compliance extended`
 (§5.2), the screen ops `ScreenDisplay` and `ScreenAccept`,
 the environment's `Environment` op and `AcceptFrom` 8
-(lir.md §9.1), and `InspectMode` 4, TRAILING. 1.1 adds the optional `FACTS` section (§5.4). A
-0.x module is refused, and compiling the source again is the remedy (question 1).
+(lir.md §9.1), and `InspectMode` 4, TRAILING. 1.1 adds the optional `FACTS` section (§5.4). 1.2 adds
+Micro Focus's split keys at the `LIR` section's end, after the table ranges, and `StartRel` 3 and 4,
+KEY < and NOT >, both under `--compliance extended`; a 1.1 reader refuses a module holding a split
+key as malformed, rather than read its keys wrong. A 0.x module is refused, and compiling the source again is the remedy (question 1).
 
 | The reader finds | It does |
 |---|---|

@@ -89,7 +89,18 @@ impl<'p> Machine<'p, '_, '_> {
         if loc.offset < start || loc.offset + loc.len > start + size {
             return Err(Abend::ironwork(format!("{} is not in a record of {}", r.name, self.program.files[k].name), pos));
         }
-        Ok(KeySpan { offset: loc.offset - start, len: loc.len })
+        Ok(KeySpan::new(loc.offset - start, loc.len))
+    }
+
+    /// File k's key `r`: its record span, or the pieces a split key joins.
+    fn key_span(&mut self, k: usize, r: &Ref, pos: Pos) -> R<KeySpan> {
+        let Some(items) = self.program.files[k].split_key(&r.name) else { return self.record_span(k, r, pos) };
+        let mut pieces = Vec::with_capacity(items.len());
+        for item in items {
+            let span = self.record_span(k, item, pos)?;
+            pieces.push((span.offset, span.len));
+        }
+        Ok(KeySpan::joined(pieces))
     }
 
     /// How file k finds its records by key. OPEN takes each key's place in the record and reads
@@ -108,10 +119,10 @@ impl<'p> Machine<'p, '_, '_> {
             Organization::Relative => Keying::Relative,
             Organization::Indexed => {
                 let prime = decl.record_key.as_ref().ok_or_else(|| Abend::ironwork(format!("{} has no RECORD KEY", decl.name), pos))?;
-                let prime = self.record_span(k, prime, pos)?;
+                let prime = self.key_span(k, prime, pos)?;
                 let mut alternates = Vec::new();
                 for (r, duplicates) in &decl.alternate_keys {
-                    alternates.push((self.record_span(k, r, pos)?, *duplicates));
+                    alternates.push((self.key_span(k, r, pos)?, *duplicates));
                 }
                 Keying::Indexed { prime, alternates }
             }
@@ -122,6 +133,15 @@ impl<'p> Machine<'p, '_, '_> {
     /// Which key of an indexed file a data item names (0 the prime key, then each alternate), and
     /// its value. With `partial` (START) it may be a leading part of the key.
     pub(super) fn key_named(&mut self, k: usize, keying: &Keying, r: &Ref, partial: bool, pos: Pos) -> R<(usize, Vec<u8>)> {
+        let decl = &self.program.files[k];
+        if decl.split_key(&r.name).is_some() {
+            let names = decl.record_key.iter().chain(decl.alternate_keys.iter().map(|(a, _)| a));
+            if let Some(which) = names.into_iter().position(|n| n.name == r.name)
+                && let Some(key) = keying.keys().get(which)
+            {
+                return Ok((which, key.of(self.record_area(k))));
+            }
+        }
         let span = self.record_span(k, r, pos)?;
         let not_a_key = || Abend::ironwork(format!("{} is not a key of {}", r.name, self.program.files[k].name), pos);
         let Keying::Indexed { prime, alternates } = keying else { return Err(not_a_key()) };

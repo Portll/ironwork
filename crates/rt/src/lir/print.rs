@@ -1378,6 +1378,10 @@ impl<'a> Printer<'a> {
             for (span, duplicates) in &keys.alternates {
                 text += &format!(" alternate +{} len {}{}", span.offset, span.len, if *duplicates { " duplicates" } else { "" });
             }
+            for (key, pieces) in &keys.split {
+                let pieces: Vec<String> = pieces.iter().map(|p| format!("+{} len {}", p.offset, p.len)).collect();
+                text += &format!(" split {key} = {}", pieces.join(", "));
+            }
         }
         if let Some(r) = &d.relative {
             let digits = r.digits.map_or_else(String::new, |n| format!(" digits {n}"));

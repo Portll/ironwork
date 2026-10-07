@@ -269,8 +269,9 @@ pub struct Services {
     pub scope: Scope,
 }
 
-// The whole program as one value, the files' data items and the --assume choices last, as the load
-// module's LIR and OPTIONS sections carry them after their records (load-module.md §3.4, §5.1).
+// The whole program as one value, the files' data items, the --assume choices, the table ranges and
+// the split keys last, as the load module's LIR and OPTIONS sections carry them after their records
+// (load-module.md §3.4, §5.1).
 impl crate::module::codec::Encode for Program {
     fn encode(&self, w: &mut crate::module::codec::Writer) {
         let Program { id, options, initial, recursive, storage, items, paragraphs, procedure_start, ranges, blocks, places, exprs, conds, consts, plans, services, sql, abends, edits, symbols, debug } = self;
@@ -300,6 +301,8 @@ impl crate::module::codec::Encode for Program {
         options.options.assumed.encode(w);
         let ranges: Vec<(u32, TableRange)> = places.iter().enumerate().filter_map(|(k, p)| Some((k as u32, p.table?))).collect();
         ranges.encode(w);
+        let split: Vec<(u32, u8, Vec<RecordSpan>)> = services.files.iter().enumerate().flat_map(|(k, f)| f.keys.iter().flat_map(|keys| &keys.split).map(move |(key, pieces)| (k as u32, *key, pieces.clone()))).collect();
+        split.encode(w);
     }
 }
 
@@ -338,6 +341,10 @@ impl crate::module::codec::Decode for Program {
         for (k, range) in Vec::<(u32, TableRange)>::decode(r)? {
             let place = program.places.get_mut(k as usize).ok_or_else(|| r.malformed(at, format!("a table range for place {k}")))?;
             place.table = Some(range);
+        }
+        for (k, key, pieces) in Vec::<(u32, u8, Vec<RecordSpan>)>::decode(r)? {
+            let keys = program.services.files.get_mut(k as usize).and_then(|f| f.keys.as_mut()).ok_or_else(|| r.malformed(at, format!("a split key for file {k}")))?;
+            keys.split.push((key, pieces));
         }
         program_valid(&program).map_err(|reason| r.malformed(at, reason))?;
         Ok(program)

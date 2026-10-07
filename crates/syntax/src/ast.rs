@@ -148,6 +148,9 @@ pub struct FileDecl {
     pub record_key: Option<Ref>,
     /// ALTERNATE RECORD KEY items, and whether each allows duplicates.
     pub alternate_keys: Vec<(Ref, bool)>,
+    /// Micro Focus's split keys under `--compliance extended`, KEY IS name = item ...: the name a
+    /// record or alternate key above gives, and the items it joins, in order.
+    pub split_keys: Vec<(String, Vec<Ref>)>,
     pub relative_key: Option<Ref>,
     pub optional: bool,
     pub status: Option<Ref>,
@@ -176,6 +179,13 @@ pub struct FileDecl {
     /// For a GLOBAL file of a program containing this one, that program's PROGRAM-ID.
     pub declared_in: Option<String>,
     pub pos: Pos,
+}
+
+impl FileDecl {
+    /// The items split key `name` joins, where `name` is one of the file's split keys.
+    pub fn split_key(&self, name: &str) -> Option<&[Ref]> {
+        self.split_keys.iter().find(|(key, _)| key == name).map(|(_, pieces)| pieces.as_slice())
+    }
 }
 
 /// ASSIGN TO a name, or ASSIGN TO DYNAMIC or USING a data-name: Micro Focus and GnuCOBOL take a

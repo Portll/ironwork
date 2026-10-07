@@ -1378,3 +1378,124 @@ fn micro_focus_file_forms_are_warned_under_extended_and_refused_under_strict() {
     let refused = syntax::parse(&until_exit).unwrap_err();
     assert_eq!((refused.pos.line, refused.id), (49, Some("IWC0309")), "{refused}");
 }
+
+/// Micro Focus's split keys: a prime key joining two items out of record order, and an alternate
+/// key with duplicates joining two others, written, read in each key's order, started on and read
+/// by key.
+const SPLIT_KEYS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. SPLITKEY.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       INPUT-OUTPUT SECTION.\n",
+    "       FILE-CONTROL.\n",
+    "           SELECT SK ASSIGN TO SKDD\n",
+    "               ORGANIZATION IS INDEXED\n",
+    "               ACCESS MODE IS DYNAMIC\n",
+    "               RECORD KEY IS SK-PRIME = SK-B SK-A\n",
+    "               ALTERNATE RECORD KEY IS SK-ALT = SK-C SK-A\n",
+    "                   WITH DUPLICATES\n",
+    "               FILE STATUS IS FS.\n",
+    "       DATA DIVISION.\n",
+    "       FILE SECTION.\n",
+    "       FD  SK.\n",
+    "       01  SK-REC.\n",
+    "           05 SK-A PIC X(2).\n",
+    "           05 SK-C PIC X(1).\n",
+    "           05 SK-B PIC X(2).\n",
+    "           05 SK-D PIC X(3).\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  FS PIC XX.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           OPEN OUTPUT SK\n",
+    "           MOVE 'a1' TO SK-A\n",
+    "           MOVE 'z' TO SK-C\n",
+    "           MOVE 'b2' TO SK-B\n",
+    "           MOVE 'one' TO SK-D\n",
+    "           WRITE SK-REC\n",
+    "           DISPLAY 'WRITE ' FS\n",
+    "           MOVE 'a2' TO SK-A\n",
+    "           MOVE 'y' TO SK-C\n",
+    "           MOVE 'b1' TO SK-B\n",
+    "           MOVE 'two' TO SK-D\n",
+    "           WRITE SK-REC\n",
+    "           DISPLAY 'WRITE ' FS\n",
+    "           MOVE 'a0' TO SK-A\n",
+    "           MOVE 'z' TO SK-C\n",
+    "           MOVE 'b2' TO SK-B\n",
+    "           MOVE 'thr' TO SK-D\n",
+    "           WRITE SK-REC\n",
+    "           DISPLAY 'WRITE ' FS\n",
+    "           MOVE 'a1' TO SK-A\n",
+    "           MOVE 'x' TO SK-C\n",
+    "           MOVE 'b2' TO SK-B\n",
+    "           MOVE 'dup' TO SK-D\n",
+    "           WRITE SK-REC\n",
+    "           DISPLAY 'WRITE DUP PRIME ' FS\n",
+    "           CLOSE SK\n",
+    "           OPEN INPUT SK\n",
+    "           PERFORM 3 TIMES\n",
+    "               READ SK NEXT\n",
+    "               DISPLAY 'BY PRIME ' FS ' ' SK-REC\n",
+    "           END-PERFORM\n",
+    "           MOVE 'b2' TO SK-B MOVE 'a0' TO SK-A\n",
+    "           START SK KEY IS > SK-PRIME\n",
+    "           DISPLAY 'START > ' FS\n",
+    "           READ SK NEXT\n",
+    "           DISPLAY 'NEXT ' FS ' ' SK-REC\n",
+    "           MOVE 'z' TO SK-C MOVE SPACES TO SK-A\n",
+    "           START SK KEY IS NOT < SK-ALT\n",
+    "           DISPLAY 'START ALT ' FS\n",
+    "           PERFORM 3 TIMES\n",
+    "               READ SK NEXT\n",
+    "               DISPLAY 'BY ALT ' FS ' ' SK-REC\n",
+    "           END-PERFORM\n",
+    "           MOVE 'y' TO SK-C MOVE 'a2' TO SK-A\n",
+    "           READ SK KEY IS SK-ALT\n",
+    "           DISPLAY 'READ KEY ALT ' FS ' ' SK-REC\n",
+    "           MOVE 'b2' TO SK-B MOVE 'a1' TO SK-A\n",
+    "           READ SK KEY IS SK-PRIME\n",
+    "           DISPLAY 'READ KEY PRIME ' FS ' ' SK-REC\n",
+    "           CLOSE SK\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn split_keys_order_start_and_read_alike_on_both_executors() {
+    // cobc 3.2's output, its BDB handler giving the indexed file.
+    let expected = "WRITE 00\nWRITE 00\nWRITE 00\nWRITE DUP PRIME 22\nBY PRIME 00 a2yb1two\nBY PRIME 00 a0zb2thr\nBY PRIME 00 a1zb2one\nSTART > 00\nNEXT 00 a1zb2one\nSTART ALT 00\nBY ALT 00 a0zb2thr\nBY ALT 00 a1zb2one\nBY ALT 10 a1zb2one\nREAD KEY ALT 00 a2yb1two\nREAD KEY PRIME 00 a1zb2one\n";
+    let dir = temp("split-keys");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, executor) in [("interpreter", Executor::Interpreter), ("vm", Executor::Vm)] {
+        let file = dir.join(format!("{name}.dat"));
+        let _ = std::fs::remove_file(&file);
+        let ran = Harness::source(SPLIT_KEYS).flags(EXTENDED).dds(&[format!("SKDD={}", file.display())]).run(executor);
+        assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{name}: {}", ran.err);
+    }
+}
+
+#[test]
+fn split_keys_are_warned_under_extended_and_refused_under_strict() {
+    let warned: Vec<_> = diagnostics_under(SPLIT_KEYS, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0040")).map(|d| (d.0, d.1)).collect();
+    assert_eq!(warned, [(9, 39), (10, 47)]);
+    let refused = syntax::parse(SPLIT_KEYS).unwrap_err();
+    assert_eq!((refused.pos.line, refused.pos.col, refused.id), (9, 39, Some("IWC0311")), "{refused}");
+    let outside = SPLIT_KEYS.replace("SK-C SK-A\n", "SK-C FS\n");
+    let refused = diagnostics_under(&outside, numeric::Compliance::Extended);
+    assert!(refused.iter().any(|d| (d.0, d.2) == (10, Some("IWC0090"))), "{refused:?}");
+}
+
+#[test]
+fn a_load_module_carries_the_split_keys_after_the_lir_records_and_prints_them() {
+    let parsed = syntax::parse_with(SPLIT_KEYS, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap_or_else(|e| panic!("{e}"));
+    let Ok(compiled) = compile(parsed, &EXTENDED.iter().map(|f| f.to_string()).collect::<Vec<_>>()) else { panic!("SPLIT_KEYS did not compile") };
+    let lowered = crate::lower::lower(&compiled).unwrap_or_else(|e| panic!("{e:?}"));
+    let keys = lowered.services.files[0].keys.clone().unwrap();
+    let span = |offset, len| rt::lir::RecordSpan { offset, len };
+    assert_eq!(keys.split, [(0, vec![span(3, 2), span(0, 2)]), (1, vec![span(2, 1), span(0, 2)])]);
+    assert_eq!((keys.prime, keys.alternates[0].0), (span(3, 4), span(2, 3)));
+    let printed = rt::lir::Listing::of(&lowered).to_string();
+    assert!(printed.contains(" split 0 = +3 len 2, +0 len 2 split 1 = +2 len 1, +0 len 2"), "{printed}");
+    let bytes = rt::module::write(std::slice::from_ref(&lowered));
+    let module = rt::module::read(&bytes).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(module.programs[0].services.files[0].keys.as_ref().map(|k| &k.split), Some(&keys.split), "the LIR section's end carries them");
+}

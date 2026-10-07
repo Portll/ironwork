@@ -89,6 +89,10 @@ pub struct RecordSpan {
 pub struct IndexKeys {
     pub prime: RecordSpan,
     pub alternates: Vec<(RecordSpan, bool)>,
+    /// Micro Focus's split keys under `--compliance extended`: a key's number (0 the prime key) and
+    /// the pieces it joins, in order, its span above the first's offset and their summed length.
+    /// The LIR section carries them after its records (load-module.md §5.2).
+    pub split: Vec<(u8, Vec<RecordSpan>)>,
 }
 
 /// The RELATIVE KEY: read as `value`, stored by `store` when a sequential READ or WRITE sets it,
@@ -274,7 +278,7 @@ codec_struct!(RecordDepending { item, lengths });
 codec_enum!(Organization { Sequential = 0, LineSequential = 1, Indexed = 2, Relative = 3 });
 codec_enum!(Access { Sequential = 0, Random = 1, Dynamic = 2 });
 codec_struct!(RecordSpan { offset, len });
-codec_struct!(IndexKeys { prime, alternates });
+codec_struct!(IndexKeys { prime, alternates } default { split } check crate::module::codec::unchecked);
 codec_struct!(RelativeKey { place, value, store, digits });
 codec_struct!(Linage { lines, footing, top, bottom, counter });
 codec_struct!(Carriage { machine, reserved });

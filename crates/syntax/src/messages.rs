@@ -357,6 +357,7 @@ catalogue! {
     IWC0308 Severe "ANY LENGTH: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0309 Severe "PERFORM UNTIL EXIT: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0310 Severe "a file description with no FILE SECTION header: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
+    IWC0311 Severe "KEY IS {name} = ...: Micro Focus's split key, not Enterprise COBOL's; --compliance extended reads it";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
     IWJ0003 Severe "unbalanced parentheses or quotes in {text}";
@@ -864,6 +865,7 @@ catalogue! {
     IWX0037 Warning "a file description with no FILE SECTION header (Micro Focus and GnuCOBOL; Enterprise COBOL writes FILE SECTION first): it is read as though FILE SECTION came first";
     IWX0038 Warning "PERFORM UNTIL EXIT (GnuCOBOL and Micro Focus; Enterprise COBOL has no such condition): it repeats until EXIT PERFORM, GO TO, GOBACK or STOP RUN leaves it";
     IWX0039 Warning "ASSIGN TO DISK (Micro Focus and GnuCOBOL; Enterprise COBOL's ASSIGN names a DD): DISK is the device, and what follows names the file";
+    IWX0040 Warning "KEY IS {name} = ... (Micro Focus; Enterprise COBOL's key is one data item): the key joins {n} items of the record, in the order written";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

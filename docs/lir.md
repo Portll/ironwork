@@ -4,7 +4,7 @@ The lowered program the VM runs and a Rust emitter would read: its types, how ea
 interpreter runs lowers into it, and how lowering is checked.
 
 **Status:** built. Code generation (`compile::lower`) writes the LIR, the VM (`rt::vm`) runs it and
-`ironwork run` uses it by default, and load modules hold it at format 1.1. It details §7 of
+`ironwork run` uses it by default, and load modules hold it at format 1.2. It details §7 of
 [codegen-runtime.md](codegen-runtime.md).
 [semantics-library.md](semantics-library.md) gives the library the LIR calls, and
 [load-module.md](load-module.md) the file that holds it.
@@ -1291,7 +1291,10 @@ pub struct FileDesc {
     pub sort: bool, pub error: Option<RangeId>, pub assign_item: Option<AssignItem>,
 }
 pub struct AssignItem { pub place: PlaceId, pub select: Pos }
-pub struct IndexKeys { pub prime: RecordSpan, pub alternates: Vec<(RecordSpan, bool)> }
+/// `split`: Micro Focus's split keys under `--compliance extended`, a key's number (0 the prime key)
+/// and the pieces it joins in order; that key's span above is the first piece's offset and their
+/// summed length. Not in the record's encoding: the LIR section carries it after its records.
+pub struct IndexKeys { pub prime: RecordSpan, pub alternates: Vec<(RecordSpan, bool)>, pub split: Vec<(u8, Vec<RecordSpan>)> }
 pub struct RecordSpan { pub offset: u32, pub len: u32 }
 /// RECORD IS VARYING DEPENDING ON (`fileio::Depending`): the item, read as an integer and stored as
 /// `set_integer` stores, and the shortest and longest record the clause allows (`compile::varying_lengths`).

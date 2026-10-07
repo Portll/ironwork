@@ -8,7 +8,7 @@ use crate::bms::Mapset;
 use crate::codec_struct;
 use crate::lir::{AssignItem, 
     AbendText, Block, Code, Cond, Const, Debug, Edit, Expr, Item, ParaId, Paragraph, Place, Plans, Program, ProgramOptions, Range,
-    Services, SqlEntry, Storage, SymId, TableRange,
+    RecordSpan, Services, SqlEntry, Storage, SymId, TableRange,
 };
 
 /// A program's line in the `DIRECTORY` section (load-module.md §6).
@@ -271,12 +271,15 @@ fn encode_module(programs: &[Program], directory: &[DirectoryEntry], mapsets: &[
     });
     m.section(Section::LIR, |w| {
         per_program(w, programs, |p, w| p.encode_lir(w));
-        let (assigned, ranges) = (assign_items(programs), table_ranges(programs));
-        if !assigned.is_empty() || !ranges.is_empty() {
+        let (assigned, ranges, split) = (assign_items(programs), table_ranges(programs), split_keys(programs));
+        if !assigned.is_empty() || !ranges.is_empty() || !split.is_empty() {
             assigned.encode(w);
         }
-        if !ranges.is_empty() {
+        if !ranges.is_empty() || !split.is_empty() {
             ranges.encode(w);
+        }
+        if !split.is_empty() {
+            split.encode(w);
         }
     });
     m.section(Section::SQL, |w| per_program(w, programs, |p, w| p.sql.encode(w)));
@@ -368,8 +371,22 @@ fn table_ranges(programs: &[Program]) -> Vec<(u32, u32, TableRange)> {
     out
 }
 
-/// The LIR section's body: a record per program, then the files' data items [`assign_items`] wrote
-/// and the places' table ranges [`table_ranges`] wrote.
+/// Each split key's pieces, as (program, file, key, pieces): the LIR section's last field, after
+/// the table ranges, written only when there is one (load-module.md §3.4).
+fn split_keys(programs: &[Program]) -> Vec<(u32, u32, u8, Vec<RecordSpan>)> {
+    let mut out = Vec::new();
+    for (n, program) in programs.iter().enumerate() {
+        for (k, file) in program.services.files.iter().enumerate() {
+            for (key, pieces) in file.keys.iter().flat_map(|keys| &keys.split) {
+                out.push((n as u32, k as u32, *key, pieces.clone()));
+            }
+        }
+    }
+    out
+}
+
+/// The LIR section's body: a record per program, then the files' data items [`assign_items`]
+/// wrote, the places' table ranges [`table_ranges`] wrote and the split keys [`split_keys`] wrote.
 pub struct LirRecords(pub Vec<LirRecord>);
 
 impl Decode for LirRecords {
@@ -396,6 +413,19 @@ impl Decode for LirRecords {
                 let places = body.places.len();
                 let place = body.places.get_mut(k as usize).ok_or_else(|| r.malformed(at, format!("a table range for place {k} of {places} in program {n}")))?;
                 place.table = Some(range);
+            }
+        }
+        if r.remaining() > 0 {
+            let at = r.position();
+            let count = bodies.len();
+            for (n, k, key, pieces) in Vec::<(u32, u32, u8, Vec<RecordSpan>)>::decode(r)? {
+                let body = bodies.get_mut(n as usize).ok_or_else(|| r.malformed(at, format!("a split key for program {n} of {count}")))?;
+                let file = body.services.files.get_mut(k as usize).ok_or_else(|| r.malformed(at, format!("a split key for file {k} of program {n}")))?;
+                let keys = file.keys.as_mut().ok_or_else(|| r.malformed(at, format!("a split key for file {k} of program {n}, which has no keys")))?;
+                if usize::from(key) > keys.alternates.len() || pieces.is_empty() {
+                    return Err(r.malformed(at, format!("split key {key} of file {k} of program {n}")));
+                }
+                keys.split.push((key, pieces));
             }
         }
         Ok(Self(bodies))

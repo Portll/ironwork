@@ -1116,7 +1116,7 @@ fn master() -> FileDesc {
         record_min: Some(26),
         depending: Some(RecordDepending { item: 6, lengths: (26, 280) }),
         status: Some((3, ALNUM)),
-        keys: Some(IndexKeys { prime: span, alternates: vec![(RecordSpan { offset: 6, len: 20 }, true)] }),
+        keys: Some(IndexKeys { prime: span, alternates: vec![(RecordSpan { offset: 6, len: 20 }, true)], split: Vec::new() }),
         relative: None,
         linage: Some(Linage { lines: IntExpr::Const(60), footing: Some(IntExpr::Item(4)), top: None, bottom: Some(IntExpr::Const(3)), counter: Some((5, PACKED)) }),
         carriage: Some(Carriage { machine: true, reserved: false }),

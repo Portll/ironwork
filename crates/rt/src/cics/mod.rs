@@ -146,7 +146,7 @@ impl FileDef {
     /// How files::open_keyed keys the data set.
     pub fn keying(&self) -> Keying {
         match &self.data_set {
-            DataSet::Ksds { key } => Keying::Indexed { prime: *key, alternates: vec![] },
+            DataSet::Ksds { key } => Keying::Indexed { prime: key.clone(), alternates: vec![] },
             DataSet::Rrds => Keying::Relative,
         }
     }
@@ -182,7 +182,7 @@ pub fn parse_file(spec: &str) -> Result<(String, FileDef), String> {
                 .ok_or_else(|| format!("{spec}: bad key spec {val}"))?;
             let off: usize = off.parse().map_err(|_| format!("{spec}: bad key offset {off}"))?;
             let len: usize = len.parse().map_err(|_| format!("{spec}: bad key length {len}"))?;
-            key = Some(KeySpan { offset: off, len });
+            key = Some(KeySpan::new(off, len));
         } else if let Some(val) = part.strip_prefix("len=") {
             record_len = Some(
                 val.parse()

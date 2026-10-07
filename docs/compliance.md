@@ -829,6 +829,22 @@ alphanumeric item of 4,095 bytes in WORKING-STORAGE, as cobc 3.2 declares it und
 COBSOFT builds a path in it before each OPEN. Assumption C482. Strict reads DISK as the
 assignment-name, as Enterprise COBOL does, and the name after it has no effect.
 
+### IWX0040-W Split keys
+
+`IWX0040-W KEY IS F00100-CHAVE = ... (Micro Focus; Enterprise COBOL's key is one data item): the key
+joins 4 items of the record, in the order written`, at the equals sign.
+
+    RECORD KEY IS key-name = data-name-1 data-name-2 ...
+    ALTERNATE RECORD KEY IS key-name = data-name-1 data-name-2 ... [WITH DUPLICATES]
+
+The key is the items' bytes joined in the order written, wherever they lie in the record and in
+whatever order: records are held, read in sequence and found by that joined value, as cobc 3.2
+holds them with its BDB handler. START and READ ... KEY IS name the key by key-name, and take its
+value from the items as the record area holds them. Each item must be in the file's records
+(IWC0090). COBSOFT keys all 26 of its files this way. A load module holding a split key is format
+1.2, the pieces following the `LIR` section's records (load-module.md §8.1). Assumption C484.
+Strict refuses the form (IWC0311).
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

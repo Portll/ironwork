@@ -164,7 +164,9 @@ pub(crate) fn check(program: &Program, layout: &Layout, errors: &mut Vec<Error>)
     }
     for f in &program.files {
         let Some(declarer) = &f.declared_in else { continue };
-        let refs = f.status.iter().map(|r| ("FILE STATUS", r)).chain(f.record_key.iter().map(|r| ("RECORD KEY", r))).chain(f.alternate_keys.iter().map(|(r, _)| ("ALTERNATE RECORD KEY", r))).chain(f.relative_key.iter().map(|r| ("RELATIVE KEY", r)));
+        let keys = f.record_key.iter().map(|r| ("RECORD KEY", r)).chain(f.alternate_keys.iter().map(|(r, _)| ("ALTERNATE RECORD KEY", r)));
+        let keys = keys.flat_map(|(clause, r)| f.split_key(&r.name).map_or_else(|| vec![(clause, r)], |pieces| pieces.iter().map(|p| (clause, p)).collect()));
+        let refs = f.status.iter().map(|r| ("FILE STATUS", r)).chain(keys).chain(f.relative_key.iter().map(|r| ("RELATIVE KEY", r)));
         for (clause, r) in refs {
             if !declared_by(layout, r, declarer) {
                 errors.push(syntax::messages::IWR0020.at(r.pos, format!("{}, a GLOBAL file of {declarer}: its {clause} {} is not a GLOBAL name of {declarer}, which is not supported yet", f.name, r.name)));

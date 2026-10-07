@@ -90,19 +90,37 @@ enum Handle {
     Empty,
 }
 
-/// Where a key lies in a record.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Where a key lies in a record: `len` bytes from `offset`, or for Micro Focus's split key the
+/// pieces it joins, in order, `offset` the first's and `len` their sum.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct KeySpan {
     pub offset: usize,
     pub len: usize,
+    pub split: Vec<(usize, usize)>,
 }
 
 impl KeySpan {
-    pub fn of(&self, record: &[u8]) -> Vec<u8> {
-        let mut key: Vec<u8> = record.iter().skip(self.offset).take(self.len).copied().collect();
-        key.resize(self.len, ebcdic::SPACE);
-        key
+    pub fn new(offset: usize, len: usize) -> Self {
+        Self { offset, len, split: Vec::new() }
     }
+
+    /// The key joining `pieces`, each an offset and a length, in order.
+    pub fn joined(pieces: Vec<(usize, usize)>) -> Self {
+        Self { offset: pieces.first().map_or(0, |p| p.0), len: pieces.iter().map(|p| p.1).sum(), split: pieces }
+    }
+
+    pub fn of(&self, record: &[u8]) -> Vec<u8> {
+        let piece = |offset: usize, len: usize| {
+            let mut bytes: Vec<u8> = record.iter().skip(offset).take(len).copied().collect();
+            bytes.resize(len, ebcdic::SPACE);
+            bytes
+        };
+        if self.split.is_empty() {
+            return piece(self.offset, self.len);
+        }
+        self.split.iter().flat_map(|&(offset, len)| piece(offset, len)).collect()
+    }
+
 }
 
 /// How the records of a file held in memory are keyed. Record numbers and positions are held as
@@ -116,6 +134,16 @@ pub enum Keying {
     Relative,
     /// An indexed file: the prime key, then each alternate key and whether it allows duplicates.
     Indexed { prime: KeySpan, alternates: Vec<(KeySpan, bool)> },
+}
+
+impl Keying {
+    /// An indexed file's keys, the prime key first; none for another file.
+    pub fn keys(&self) -> Vec<&KeySpan> {
+        match self {
+            Self::Indexed { prime, alternates } => std::iter::once(prime).chain(alternates.iter().map(|(span, _)| span)).collect(),
+            _ => Vec::new(),
+        }
+    }
 }
 
 /// The highest relative record number: past it WRITE is a boundary violation (status 24). It
@@ -193,7 +221,7 @@ impl Keyed {
     fn new(keying: Keying, path: Option<PathBuf>, record_len: usize, page: &'static CodePage) -> Self {
         let alternates = match &keying {
             Keying::Indexed { alternates, .. } => {
-                alternates.iter().map(|&(span, duplicates)| Alternate { span, duplicates, index: BTreeSet::new(), arrival: HashMap::new() }).collect()
+                alternates.iter().map(|(span, duplicates)| Alternate { span: span.clone(), duplicates: *duplicates, index: BTreeSet::new(), arrival: HashMap::new() }).collect()
             }
             _ => Vec::new(),
         };

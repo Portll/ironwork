@@ -959,6 +959,7 @@ impl Parser<'_> {
             access: Access::Sequential,
             record_key: None,
             alternate_keys: Vec::new(),
+            split_keys: Vec::new(),
             relative_key: None,
             optional,
             status: None,
@@ -1043,7 +1044,9 @@ impl Parser<'_> {
                 "RECORD" if !self.is_word("SEQUENTIAL") => {
                     self.accept_word("KEY");
                     self.accept_word("IS");
-                    f.record_key = Some(self.reference()?);
+                    let key = self.reference()?;
+                    self.split_key(&mut f, &key)?;
+                    f.record_key = Some(key);
                 }
                 "RELATIVE" if self.is_word("KEY") || self.is_word("IS") || self.starts_ref() && !self.word().is_some_and(|w| SELECT_CLAUSES.contains(&w)) => {
                     self.accept_word("KEY");
@@ -1055,6 +1058,7 @@ impl Parser<'_> {
                     self.accept_word("KEY");
                     self.accept_word("IS");
                     let key = self.reference()?;
+                    self.split_key(&mut f, &key)?;
                     let duplicates = self.accept_word("WITH") | self.is_word("DUPLICATES");
                     if duplicates {
                         self.expect_word("DUPLICATES")?;
@@ -1699,6 +1703,29 @@ impl Parser<'_> {
         }
         self.messages.push(crate::messages::IWX0034.at(at, format!("{written} (GnuCOBOL and Micro Focus; Enterprise COBOL writes ADDRESS OF {0} = NULL): it is read as ADDRESS OF {0} = NULL, true when the caller passed OMITTED or no argument there", r.name)));
         Ok(Cond::Rel(Expr::Operand(Operand::AddressOf(r.clone())), RelOp::Eq, Expr::Operand(Operand::Literal(Literal::Figurative(Figurative::Null)))))
+    }
+
+    /// `= item ...` after a key's name, Micro Focus's split key: under `--compliance extended` the
+    /// key joins the items, in order, with IWX0040-W; refused under strict.
+    fn split_key(&mut self, f: &mut FileDecl, key: &Ref) -> R<()> {
+        if self.peek() != Some(&Tok::Eq) {
+            return Ok(());
+        }
+        let at = self.pos();
+        self.at += 1;
+        if !self.extended {
+            return Err(crate::messages::IWC0311.at(at, format!("KEY IS {} = ...: Micro Focus's split key, not Enterprise COBOL's; --compliance extended reads it", key.name)));
+        }
+        let mut pieces = Vec::new();
+        while self.starts_ref() && !self.word().is_some_and(|w| SELECT_CLAUSES.contains(&w) || matches!(w, "WITH" | "DUPLICATES" | "SOURCE")) {
+            pieces.push(self.reference()?);
+        }
+        if pieces.is_empty() {
+            return Err(self.error("the data items a split key joins"));
+        }
+        self.messages.push(crate::messages::IWX0040.at(at, format!("KEY IS {} = ... (Micro Focus; Enterprise COBOL's key is one data item): the key joins {} items of the record, in the order written", key.name, pieces.len())));
+        f.split_keys.push((key.name.clone(), pieces));
+        Ok(())
     }
 
     fn locked(&mut self, phrase: &str, at: Pos) {

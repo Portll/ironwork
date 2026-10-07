@@ -1227,7 +1227,6 @@ impl Check<'_> {
                     self.reference(into);
                 }
                 if let Some(key) = &r.key {
-                    self.reference(key);
                     self.key_of(&r.file, key, false);
                 }
                 self.handlers(&r.at_end);
@@ -1270,7 +1269,6 @@ impl Check<'_> {
                     } else if !matches!(op, RelOp::Eq | RelOp::Gt | RelOp::Ge) {
                         self.errors.push(syntax::messages::IWC0076.at(*pos, "START KEY takes =, >, NOT < or >="));
                     }
-                    self.reference(r);
                     self.key_of(file, r, true);
                 }
                 self.handlers(invalid);
@@ -1606,7 +1604,11 @@ impl Check<'_> {
     /// The KEY of READ or START on an indexed file: a record key or alternate key of the file, or
     /// for START (`partial`) an item that starts where one does and is no longer.
     fn key_of(&mut self, file: &str, key: &Ref, partial: bool) {
-        let Some(f) = self.program.files.iter().find(|f| f.name == file) else { return };
+        let Some(f) = self.program.files.iter().find(|f| f.name == file) else { return self.reference(key) };
+        if key.qualifiers.is_empty() && f.split_key(&key.name).is_some() {
+            return;
+        }
+        self.reference(key);
         if f.organization != Organization::Indexed {
             return;
         }
@@ -1629,7 +1631,9 @@ impl Check<'_> {
                 if f.record_key.is_none() {
                     self.errors.push(syntax::messages::IWC0089.at(f.pos, format!("{}: an indexed file needs a RECORD KEY", f.name)));
                 }
-                for r in f.record_key.iter().chain(f.alternate_keys.iter().map(|(r, _)| r)) {
+                let keys = f.record_key.iter().chain(f.alternate_keys.iter().map(|(r, _)| r));
+                let items: Vec<Ref> = keys.flat_map(|r| f.split_key(&r.name).map_or_else(|| vec![r.clone()], <[Ref]>::to_vec)).collect();
+                for r in &items {
                     self.reference(r);
                     if self.item(r).is_some() && !in_records(self, r) {
                         self.errors.push(syntax::messages::IWC0090.at(r.pos, format!("{}: a key of {} must be in its records", r.name, f.name)));

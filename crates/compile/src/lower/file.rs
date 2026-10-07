@@ -35,12 +35,13 @@ impl Lower<'_> {
         };
         let keys = match (f.organization, &f.record_key) {
             (Organization::Indexed, Some(prime)) => {
-                let prime = self.record_span(k, prime)?;
+                let mut split = Vec::new();
+                let prime = self.key_span(k, f, prime, 0, &mut split)?;
                 let mut alternates = Vec::with_capacity(f.alternate_keys.len());
-                for (r, duplicates) in &f.alternate_keys {
-                    alternates.push((self.record_span(k, r)?, *duplicates));
+                for (n, (r, duplicates)) in f.alternate_keys.iter().enumerate() {
+                    alternates.push((self.key_span(k, f, r, n + 1, &mut split)?, *duplicates));
                 }
-                Some(IndexKeys { prime, alternates })
+                Some(IndexKeys { prime, alternates, split })
             }
             (Organization::Indexed, None) => return unsupported("an indexed file without a RECORD KEY", f.pos),
             _ => None,
@@ -180,7 +181,26 @@ impl Lower<'_> {
 
     /// `key_named`: which key of indexed file k a data item names, 0 for the prime key, and its
     /// span; with `partial` (START) it may be a leading part of the key.
+    /// Key number `which` of file k, named `r`: its record span, or for a split key the span of its
+    /// first piece's offset and its pieces' summed length, the pieces put in `split`.
+    fn key_span(&mut self, k: usize, f: &FileDecl, r: &Ref, which: usize, split: &mut Vec<(u8, Vec<RecordSpan>)>) -> R<RecordSpan> {
+        let Some(items) = f.split_key(&r.name) else { return self.record_span(k, r) };
+        let mut pieces = Vec::with_capacity(items.len());
+        for item in items {
+            pieces.push(self.record_span(k, item)?);
+        }
+        let joined = RecordSpan { offset: pieces[0].offset, len: pieces.iter().map(|p| p.len).sum() };
+        split.push((u8::try_from(which).map_err(|_| LowerError::Unsupported("a split key past the 255th key of its file", r.pos))?, pieces));
+        Ok(joined)
+    }
+
     fn key_of_reference(&mut self, k: usize, keys: &IndexKeys, r: &Ref, partial: bool) -> R<(u8, RecordSpan)> {
+        if let Some(which) = self.program.files[k].alternate_keys.iter().position(|(a, _)| a.name == r.name).map(|n| n + 1).or_else(|| self.program.files[k].record_key.as_ref().filter(|p| p.name == r.name).map(|_| 0))
+            && let Some((_, pieces)) = keys.split.iter().find(|(key, _)| usize::from(*key) == which)
+        {
+            let span = RecordSpan { offset: pieces[0].offset, len: pieces.iter().map(|p| p.len).sum() };
+            return Ok((which as u8, span));
+        }
         let span = self.record_span(k, r)?;
         let fits = |key: &RecordSpan| key.offset == span.offset && (span.len == key.len || partial && span.len < key.len);
         let which = std::iter::once(&keys.prime).chain(keys.alternates.iter().map(|(s, _)| s)).position(fits);
