@@ -845,6 +845,7 @@ catalogue! {
     IWX0027 Warning "{FLOAT-SHORT or FLOAT-LONG} (GnuCOBOL and Micro Focus; Enterprise COBOL writes COMP-1 and COMP-2): it is read as {COMP-1 or COMP-2}, IBM's hexadecimal floating point";
     IWX0028 Warning "PERFORM ... FOREVER (Micro Focus and GnuCOBOL; Enterprise COBOL has no FOREVER phrase): it repeats until EXIT PERFORM, GO TO, GOBACK or STOP RUN leaves it";
     IWX0029 Warning "ACCEPT ... FROM {LINES, COLUMNS or COLS} (GnuCOBOL; Enterprise COBOL has no screen): the screen's {24 lines or 80 columns}";
+    IWX0030 Warning "WRITE ... BEFORE ADVANCING on the line-sequential file {file} (GnuCOBOL and Micro Focus; Enterprise COBOL allows only AFTER there): the line, then the lines or page it names";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

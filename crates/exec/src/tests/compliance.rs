@@ -952,3 +952,46 @@ fn accept_from_lines_and_columns_give_the_screen_size_under_extended() {
     let refused = syntax::parse(&source).unwrap_err();
     assert_eq!(refused.id, Some("IWS0060"), "{refused}");
 }
+
+/// A line-sequential report's headings written BEFORE ADVANCING, as ACAS writes its first page's.
+const BEFORE_ADVANCING: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. BEFADV.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       INPUT-OUTPUT SECTION.\n",
+    "       FILE-CONTROL.\n",
+    "           SELECT P ASSIGN TO 'rpt.txt'\n",
+    "               ORGANIZATION LINE SEQUENTIAL.\n",
+    "       DATA DIVISION.\n",
+    "       FILE SECTION.\n",
+    "       FD  P.\n",
+    "       01  R PIC X(4).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           OPEN OUTPUT P\n",
+    "           MOVE 'AAAA' TO R WRITE R BEFORE 1\n",
+    "           MOVE 'BBBB' TO R WRITE R BEFORE 2\n",
+    "           MOVE 'CCCC' TO R WRITE R AFTER 1\n",
+    "           MOVE 'DD' TO R WRITE R BEFORE PAGE\n",
+    "           MOVE 'EEEE' TO R WRITE R\n",
+    "           CLOSE P\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn before_advancing_on_a_line_sequential_file_writes_the_line_then_moves_alike_on_both_executors() {
+    let dir = temp("before-advancing");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("rpt.txt");
+    let dds = [format!("RPT.TXT={}:text", path.display())];
+    let walked = Harness::source(BEFORE_ADVANCING).flags(EXTENDED).dds(&dds).run(Executor::Interpreter);
+    assert_eq!(walked.ending.as_ref().ok(), Some(&Ending::Goback), "{}", walked.err);
+    let written = std::fs::read(&path).unwrap();
+    assert_eq!(String::from_utf8_lossy(&written), "AAAA\nBBBB\n\n\nCCCC\rDD\n\x0c\nEEEE\n");
+    std::fs::remove_file(&path).unwrap();
+    let vm = Harness::source(BEFORE_ADVANCING).flags(EXTENDED).dds(&dds).run(Executor::Vm);
+    assert_eq!(vm.ending, walked.ending);
+    assert_eq!(std::fs::read(&path).unwrap(), written);
+    let warned = diagnostics_under(BEFORE_ADVANCING, numeric::Compliance::Extended);
+    assert_eq!(warned.iter().filter(|d| d.2 == Some("IWX0030")).map(|d| d.0).collect::<Vec<_>>(), [14, 15, 17], "{warned:?}");
+    assert!(diagnostics_under(BEFORE_ADVANCING, numeric::Compliance::Strict).iter().any(|d| d.2 == Some("IWC0145")));
+}

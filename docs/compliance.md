@@ -697,6 +697,19 @@ and ACCEPT use (assumption C462), as a MOVE of 24 or 80 gives it. cobc asks curs
 terminal's size, which the clean screen model does not have; ACAS reads it to lay out its
 screens, taking at least 24. Strict refuses both (IWS0060), as before.
 
+### IWX0030-W WRITE ... BEFORE ADVANCING on a line-sequential file
+
+`IWX0030-W WRITE ... BEFORE ADVANCING on the line-sequential file P (GnuCOBOL and Micro Focus;
+Enterprise COBOL allows only AFTER there): the line, then the lines or page it names`, at the WRITE.
+
+Enterprise COBOL takes only AFTER ADVANCING for a LINE SEQUENTIAL file. Under extended BEFORE
+ADVANCING n LINES and BEFORE ADVANCING PAGE are taken too, and the file is written as a text DD shows
+any print file: the line, then n line feeds, or a line feed and a form feed for PAGE. A line written
+BEFORE straight after one written AFTER prints over it, shown with a carriage return, as a printer
+prints it; cobc writes the two lines one after the other on one line. ACAS writes its first page's
+headings BEFORE 1 and the others AFTER. ADVANCING a mnemonic-name stays refused there (IWC0145), as
+does BEFORE under strict.
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

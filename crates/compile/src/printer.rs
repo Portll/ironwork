@@ -77,8 +77,9 @@ fn file_of(layout: &Layout, record: &Ref) -> Option<usize> {
     }
 }
 
-/// What the Language Reference allows of a WRITE's ADVANCING phrase beyond its operand.
-pub(crate) fn check_write(program: &Program, layout: &Layout, record: &Ref, advancing: &Advancing, pos: syntax::Pos, errors: &mut Vec<Error>) {
+/// What the Language Reference allows of a WRITE's ADVANCING phrase beyond its operand; under
+/// `--compliance extended` a line-sequential file also takes BEFORE, as GnuCOBOL's does.
+pub(crate) fn check_write(program: &Program, layout: &Layout, record: &Ref, advancing: &Advancing, extended: bool, pos: syntax::Pos, errors: &mut Vec<Error>) {
     if let Advancing::Mnemonic { name, environment, .. } = advancing
         && mnemonic_space(environment).is_none()
     {
@@ -87,6 +88,9 @@ pub(crate) fn check_write(program: &Program, layout: &Layout, record: &Ref, adva
     let Some(f) = file_of(layout, record).map(|k| &program.files[k]) else { return };
     match f.organization {
         Organization::Indexed | Organization::Relative => errors.push(syntax::messages::IWC0144.at(pos, format!("WRITE ... ADVANCING: {} is not a sequential file", f.name))),
+        Organization::LineSequential if extended && advancing.before() && !matches!(advancing, Advancing::Mnemonic { .. }) => {
+            errors.push(syntax::messages::IWX0030.at(pos, format!("WRITE ... BEFORE ADVANCING on the line-sequential file {} (GnuCOBOL and Micro Focus; Enterprise COBOL allows only AFTER there): the line, then the lines or page it names", f.name)));
+        }
         Organization::LineSequential if advancing.before() || matches!(advancing, Advancing::Mnemonic { .. }) => {
             errors.push(syntax::messages::IWC0145.at(pos, format!("WRITE ... BEFORE ADVANCING, or ADVANCING a mnemonic-name, is not allowed for the line-sequential file {}", f.name)));
         }

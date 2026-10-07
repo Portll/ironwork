@@ -1195,7 +1195,7 @@ impl Check<'_> {
                         if let Advancing::Lines { count, .. } = a {
                             self.expr(count);
                         }
-                        printer::check_write(self.program, self.layout, record, a, *pos, self.errors);
+                        printer::check_write(self.program, self.layout, record, a, self.extended, *pos, self.errors);
                     }
                     linage::check_write(self.program, self.layout, record, advancing.as_ref(), end_of_page, *pos, self.errors);
                     self.handlers(end_of_page);
