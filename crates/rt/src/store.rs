@@ -277,24 +277,26 @@ fn integer_image(facts: &dyn ProgramFacts, loc: Loc, value: &Fixed) -> Option<(I
 }
 
 /// `store_fixed_checked` of a value held as `n` counts of the last of `places`' decimal places into a
-/// packed item of at most 16 bytes with no PICTURE P; None for any other store, or one past 128
-/// bits, which takes the value as a `Fixed`.
-pub fn store_packed_count<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, loc: Loc, count: (i64, Places), rounded: bool, keep_on_size_error: bool, pos: Pos) -> Option<R<bool>> {
-    let (image, size_error) = match packed_count_image(facts, loc, count, rounded, pos)? {
+/// binary, packed or zoned item with no PICTURE P; None for any other store, one past 128 bits, or
+/// a TRUNC(OPT) store that reports, which takes the value as a `Fixed`.
+pub fn store_count<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, loc: Loc, count: (i64, Places), rounded: bool, keep_on_size_error: bool, pos: Pos) -> Option<R<bool>> {
+    let mut held = [0; MAX_DIGITS + 1];
+    let (len, size_error) = match count_image(facts, loc, count, rounded, &mut held, pos)? {
         Ok(stored) => stored,
         Err(abend) => return Some(Err(abend)),
     };
     if size_error && keep_on_size_error {
         return Some(Ok(true));
     }
-    unit.write(loc.offset, image.bytes());
+    unit.write(loc.offset, &held[..len]);
     Some(Ok(size_error))
 }
 
-/// What `image_of` gives `store_packed_count`'s value and receiver.
-fn packed_count_image(facts: &dyn ProgramFacts, loc: Loc, (n, places): (i64, Places), rounded: bool, pos: Pos) -> Option<R<(Image, bool)>> {
-    let Kind::Packed { digits, scale, signed } = loc.kind else { return None };
-    if loc.len > 16 || facts.scaling(loc.item) != 0 {
+/// What `image_of` writes for `store_count`'s value and receiver, written over the start of `out`:
+/// its length, and whether it is a size error.
+fn count_image(facts: &dyn ProgramFacts, loc: Loc, (n, places): (i64, Places), rounded: bool, out: &mut [u8; MAX_DIGITS + 1], pos: Pos) -> Option<R<(usize, bool)>> {
+    let (Kind::Binary { digits, scale, .. } | Kind::Packed { digits, scale, .. } | Kind::Zoned { digits, scale, .. }) = loc.kind else { return None };
+    if facts.scaling(loc.item) != 0 {
         return None;
     }
     let magnitude = u128::from(n.unsigned_abs());
@@ -305,16 +307,44 @@ fn packed_count_image(facts: &dyn ProgramFacts, loc: Loc, (n, places): (i64, Pla
         let (q, r) = (magnitude / d, magnitude % d);
         q + u128::from(rounded && r >= d / 2)
     };
-    let cap = 10u128.checked_pow(digits)?;
-    let kept = if m < cap { m } else { m % cap };
-    let mut out = Image::zeroed(loc.len);
-    if let Err(c) = decimal::encode(out.bytes_mut(), Decimal { negative: signed && n < 0 && kept != 0, magnitude: kept }) {
-        return Some(Err(Abend::check(c, pos)));
-    }
-    if !signed {
-        *out.bytes_mut().last_mut().unwrap() |= 0x0F;
-    }
-    Some(Ok((out, m >= cap)))
+    let negative = n < 0;
+    Some(Ok(match loc.kind {
+        Kind::Packed { signed, .. } => {
+            let cap = 10u128.checked_pow(digits)?;
+            let kept = if m < cap { m } else { m % cap };
+            let image = out.get_mut(..loc.len).filter(|image| image.len() <= 16)?;
+            if let Err(c) = decimal::encode(image, Decimal { negative: signed && negative && kept != 0, magnitude: kept }) {
+                return Some(Err(Abend::check(c, pos)));
+            }
+            if !signed {
+                *image.last_mut().unwrap() |= 0x0F;
+            }
+            (loc.len, m >= cap)
+        }
+        Kind::Zoned { signed, sign, .. } => {
+            let cap = 10u128.checked_pow(digits)?;
+            let kept = if m < cap { m } else { m % cap };
+            let len = digits as usize + usize::from(sign.is_some_and(|s| s.separate));
+            zoned_image_into(out.get_mut(..len)?, kept, signed, signed && negative && kept != 0, sign);
+            (len, m >= cap)
+        }
+        Kind::Binary { signed, native, .. } => {
+            let magnitude = i128::try_from(m).ok()?;
+            let v = if negative { -magnitude } else { magnitude };
+            let item = Binary { digits: digits as u8, signed, native };
+            let options = facts.options();
+            let (kept, divergence) = binary::kept(item, v, &options);
+            if divergence.is_some() {
+                return None;
+            }
+            let bits = 8 * item.bytes() as u32;
+            let binary_range = if signed { v >= -(1i128 << (bits - 1)) && v < (1i128 << (bits - 1)) } else { (0..(1i128 << bits)).contains(&v.abs()) };
+            let exceeds = if native.is_native() || options.trunc == Trunc::Bin { !binary_range } else { v.unsigned_abs() >= 10u128.checked_pow(digits)? };
+            out[..item.bytes()].copy_from_slice(&kept.to_be_bytes()[16 - item.bytes()..]);
+            (item.bytes(), exceeds)
+        }
+        _ => return None,
+    }))
 }
 
 /// The bytes a store of `value` into `loc` writes, and whether it is a size error, with a TRUNC(OPT)
@@ -1287,7 +1317,7 @@ mod tests {
     }
 
     #[test]
-    fn a_count_stores_into_packed_as_any_fixed_value_stores() {
+    fn a_count_stores_as_any_fixed_value_stores() {
         let mut state = 0x9E37_79B9_7F4A_7C15u64;
         let mut next = move || {
             state ^= state >> 12;
@@ -1296,36 +1326,36 @@ mod tests {
             state.wrapping_mul(0x2545_F491_4F6C_DD1D)
         };
         let mut fast = 0;
-        for signed in [false, true] {
-            for digits in [1, 2, 5, 7, 9, 15, 18, 19, 31] {
-                for scale in [0, 2, 5] {
-                    let loc = Loc { offset: 0, len: digits as usize / 2 + 1, kind: Kind::Packed { digits, scale, signed }, item: 0 };
-                    for _ in 0..400 {
-                        let bits = next() % 64;
-                        let n = (next() >> (63 - bits)) as i64;
-                        let n = if next() % 2 == 0 { n.wrapping_neg() } else { n };
-                        let dec = (next() % 10) as u32;
-                        let places = Places::new(1 + (next() % 20) as u32, dec);
-                        let rounded = next() % 2 == 0;
-                        for scaling in [0, 1] {
-                            let facts = Facts { options: Options::default(), scaling, collation: Collation::Native };
-                            let Some(image) = packed_count_image(&facts, loc, (n, places), rounded, Pos::default()) else { continue };
-                            fast += 1;
-                            let value = Fixed::new(i128::from(n), places);
-                            let general = image_of(&facts, &mut Vec::new(), loc, &value, rounded, Pos::default());
-                            match (image, general) {
-                                (Ok((image, size_error)), Ok((general, general_size_error))) => {
-                                    assert_eq!((image.bytes(), size_error), (general.bytes(), general_size_error), "{value:?} into {:?}, rounded {rounded}", loc.kind);
-                                }
-                                (Err(a), Err(b)) => assert_eq!(a, b),
-                                (a, b) => panic!("{value:?} into {:?}: {:?} where image_of gives {:?}", loc.kind, a.map(|(i, e)| (i.bytes().to_vec(), e)), b.map(|(i, e)| (i.bytes().to_vec(), e))),
+        for (kind, len) in kinds() {
+            let loc = Loc { offset: 0, len, kind, item: 0 };
+            for _ in 0..150 {
+                let bits = next() % 64;
+                let n = (next() >> (63 - bits)) as i64;
+                let n = if next() % 2 == 0 { n.wrapping_neg() } else { n };
+                let places = Places::new(1 + (next() % 20) as u32, (next() % 10) as u32);
+                let rounded = next() % 2 == 0;
+                for trunc in [Trunc::Std, Trunc::Bin, Trunc::Opt] {
+                    for scaling in [0, 1] {
+                        let facts = Facts { options: Options { trunc, ..Options::default() }, scaling, collation: Collation::Native };
+                        let mut out = [0xEE; MAX_DIGITS + 1];
+                        let Some(image) = count_image(&facts, loc, (n, places), rounded, &mut out, Pos::default()) else { continue };
+                        fast += 1;
+                        let value = Fixed::new(i128::from(n), places);
+                        let mut report = Vec::new();
+                        let general = image_of(&facts, &mut report, loc, &value, rounded, Pos::default());
+                        assert!(report.is_empty(), "{value:?} into {kind:?} under {trunc:?} reports");
+                        match (image, general) {
+                            (Ok((len, size_error)), Ok((general, general_size_error))) => {
+                                assert_eq!((&out[..len], size_error), (general.bytes(), general_size_error), "{value:?} into {kind:?} under {trunc:?}, rounded {rounded}");
                             }
+                            (Err(a), Err(b)) => assert_eq!(a, b),
+                            (a, b) => panic!("{value:?} into {kind:?}: {a:?} where image_of gives {:?}", b.map(|(i, e)| (i.bytes().to_vec(), e))),
                         }
                     }
                 }
             }
         }
-        assert!(fast > 20_000, "only {fast} stores took the count path");
+        assert!(fast > 60_000, "only {fast} stores took the count path");
     }
 
     #[test]

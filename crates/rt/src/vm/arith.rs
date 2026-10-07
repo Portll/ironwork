@@ -27,6 +27,9 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             self.loc(q)?;
         }
         if let [step] = plan.steps.as_slice() {
+            if step.mode == Mode::Fixed && plan.remainder.is_none() {
+                return self.counted(plan, step, pos);
+            }
             let evaluated = self.evaluated(plan, step, pos)?;
             return self.stored(plan, [evaluated], pos);
         }
@@ -35,6 +38,56 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             results.push(self.evaluated(plan, step, pos)?);
         }
         self.stored(plan, results, pos)
+    }
+
+    /// `evaluated` then `stored` of a plan's one fixed-point step with no REMAINDER, in the same
+    /// order of locates, reads and held abend, its value held as a `Number` until it stores.
+    fn counted(&mut self, plan: &ArithPlan, step: &ArithStep, pos: Pos) -> R<Step> {
+        for &q in &step.probe {
+            self.loc(q)?;
+        }
+        let (shared, own) = self.shared(plan, step);
+        let last = if own.is_some() { plan.inner_dmax } else { plan.dmax };
+        let outcome = match self.eval_number_at(shared, last, plan.inner_dmax, pos).map_err(Stop::halt) {
+            Err(Halt::Unimplemented(what)) => return Err(Halt::Unimplemented(what).into()),
+            Err(Halt::Abend(a)) => Err(a),
+            Ok(Number::Fixed(f)) => Ok(Number::of(f)),
+            Ok(n) => Ok(n),
+        };
+        let loc = self.loc(step.target)?;
+        let outcome = match (own, outcome) {
+            (Some((op, receiver_first, receiver)), Ok(value)) => {
+                let current = self.operand_number(Operand::Load(step.target), plan.dmax, pos)?;
+                let (x, y) = if receiver_first { (current, value) } else { (value, current) };
+                match int_binop(x, op, y, plan.dmax, plan.arith) {
+                    Some(r) => Ok(r),
+                    None => {
+                        let (x, y) = (x.fixed(), y.fixed());
+                        if arith::divides_by_zero(op, &y) {
+                            let binary = self.binary_division(receiver, shared)?;
+                            Err(arith::zero_divide(binary, pos))
+                        } else {
+                            arith::fixed_binop(x, op, y, plan.dmax, plan.arith, pos).map(Number::Fixed)
+                        }
+                    }
+                }
+            }
+            (_, outcome) => outcome,
+        };
+        let value = match outcome {
+            Ok(value) => value,
+            Err(a) if plan.handled && a.size_error() => return Ok(Step::Arm(1)),
+            Err(a) => return Err(a.into()),
+        };
+        let counted = match value {
+            Number::Int(n, places) => store::store_count(&self.facts(), self.unit, loc, (n, places), step.rounded, plan.handled, pos),
+            Number::Fixed(_) => None,
+        };
+        let size_error = match counted {
+            Some(stored) => stored?,
+            None => store::store_value(&self.facts(), self.unit, loc, Val::Num(value.fixed()), step.rounded, plan.handled, pos)?,
+        };
+        Ok(if plan.handled { Step::Arm(u8::from(size_error)) } else { Step::Next })
     }
 
     fn evaluated<'s>(&mut self, plan: &ArithPlan, step: &'s ArithStep, pos: Pos) -> R<Evaluated<'s>> {
@@ -110,11 +163,12 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         Ok(if plan.handled { Step::Arm(u8::from(size_error)) } else { Step::Next })
     }
 
-    /// `store::store_value`, a number held as a count stored into a packed item without a `Fixed`.
+    /// `store::store_value`, a number held as a count stored into a binary, packed or zoned item
+    /// without a `Fixed`.
     fn store_result(&mut self, loc: Loc, value: Val, rounded: bool, handled: bool, pos: Pos) -> R<bool> {
-        if let (Kind::Packed { .. }, Val::Num(f)) = (loc.kind, &value)
+        if let (Kind::Binary { .. } | Kind::Packed { .. } | Kind::Zoned { .. }, Val::Num(f)) = (loc.kind, &value)
             && let Number::Int(n, places) = Number::of(*f)
-            && let Some(stored) = store::store_packed_count(&self.facts(), self.unit, loc, (n, places), rounded, handled, pos)
+            && let Some(stored) = store::store_count(&self.facts(), self.unit, loc, (n, places), rounded, handled, pos)
         {
             return Ok(stored?);
         }
