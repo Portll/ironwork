@@ -50,7 +50,7 @@ pub fn build(out: &Path, module: &str, runtime: &Runtime) -> Result<PathBuf, Str
 pub fn build_harness(out: &Path, modules: &[String], runtime: &Runtime) -> Result<PathBuf, String> {
     let read = modules.iter().map(|m| Ok((m.clone(), read_programs(out, m)?))).collect::<Result<Vec<_>, String>>()?;
     let names: Vec<&str> = modules.iter().map(String::as_str).collect();
-    cargo(out, "harness", "cobol-harness", &manifest("cobol-harness", runtime, "opt-level = 1\ncodegen-units = 256\nincremental = true"), &crate::codegen::harness_text(&read), &names)
+    cargo(out, "harness", "cobol-harness", &manifest("cobol-harness", runtime, "opt-level = 0\ncodegen-units = 256\ndebug = false\ndebug-assertions = false\noverflow-checks = false"), &crate::codegen::harness_text(&read), &names)
 }
 
 fn read_programs(out: &Path, module: &str) -> Result<Vec<Program>, String> {

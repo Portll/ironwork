@@ -62,6 +62,92 @@ struct Gen<'a> {
     fns: String,
 }
 
+/// What a program's dispatch is written from: each op's and each branch's fast path, worked out once.
+struct Code<'a> {
+    k: usize,
+    p: &'a Program,
+    entries: &'a [u32],
+    ops: &'a [Vec<Option<(String, bool)>>],
+    conds: &'a [Option<String>],
+}
+
+impl Code<'_> {
+    /// Block `b` as a labelled block expression of type Next, from op `from`: that op run as the VM
+    /// runs it where `general_first`, each other by its fast path where it has one, then the
+    /// terminator.
+    fn block(&self, b: usize, from: usize, general_first: bool) -> String {
+        let block = &self.p.blocks[b];
+        let mut out = String::from("'b: {\n");
+        if from == 0 && self.entries.contains(&(b as u32)) {
+            let _ = writeln!(out, "                m.entered({b});");
+        }
+        if !block.ops.is_empty() {
+            let _ = writeln!(out, "                let mut arm = None;");
+        }
+        for i in from..block.ops.len() {
+            let general = format!("if let Some(next) = m.run_op({b}, {i}, &mut arm, floor)? {{\n                    break 'b next;\n                }}");
+            match &self.ops[b][i] {
+                Some((name, arms)) if !(general_first && i == from) => {
+                    let taken = if *arms { "Some(size_error) => arm = Some(u8::from(size_error))," } else { "Some(_) => {}" };
+                    let _ = write!(out, "                let fast = {name}(&mut m.storage());\n                match fast {{\n                    {taken}\n                    None => {{\n                        {general}\n                    }}\n                }}\n");
+                }
+                _ => {
+                    let _ = writeln!(out, "                {general}");
+                }
+            }
+        }
+        let arm = if block.ops.is_empty() { "None" } else { "arm" };
+        let end = format!("m.end({b}, {arm}, floor)?");
+        match (&block.end, &self.conds[b]) {
+            (Terminator::Jump(t), _) => {
+                let _ = writeln!(out, "                Next::Block({t})");
+            }
+            (Terminator::Branch { then, otherwise, .. }, Some(name)) => {
+                let _ = write!(out, "                let fast = {name}(&m.storage());\n                match fast {{\n                    Some(true) => Next::Block({then}),\n                    Some(false) => Next::Block({otherwise}),\n                    None => {end},\n                }}\n");
+            }
+            _ => {
+                let _ = writeln!(out, "                {end}");
+            }
+        }
+        out.push_str("            }");
+        out
+    }
+
+    /// The program's fast blocks run in a loop of their own over one storage handle, from the one
+    /// control enters, until control reaches another block or a fast path declines. Where an op's
+    /// does, `resume` runs it as the VM runs it and its block on from there; where a branch's
+    /// does, the VM ends the block.
+    fn region(&self, fast: &[bool]) -> String {
+        let k = self.k;
+        let mut out = format!("\nfn region_{k}(m: &mut dyn Machine, mut block: u32, floor: usize) -> Result<Next, Stop> {{\n    let leave = {{\n        let mut s = m.storage();\n        loop {{\n            match block {{\n");
+        let mut resume = format!("\nfn resume_{k}(m: &mut dyn Machine, block: u32, op: usize, floor: usize) -> Result<Next, Stop> {{\n    Ok(match (block, op) {{\n");
+        let go = |t: u32| if fast[t as usize] { format!("block = {t}") } else { format!("break Leave::To({t})") };
+        for (b, block) in self.p.blocks.iter().enumerate().filter(|&(b, _)| fast[b]) {
+            let _ = writeln!(out, "                {b} => {{");
+            for (i, op) in self.ops[b].iter().enumerate() {
+                let Some((name, _)) = op else { unreachable!("a fast block's op has a fast path") };
+                let _ = writeln!(out, "                    if {name}(&mut s).is_none() {{\n                        break Leave::Op({b}, {i});\n                    }}");
+                let _ = writeln!(resume, "        ({b}, {i}) => {},", self.block(b, i, true));
+            }
+            match (&block.end, &self.conds[b]) {
+                (Terminator::Jump(t), _) => {
+                    let _ = writeln!(out, "                    {};", go(*t));
+                }
+                (Terminator::Branch { then, otherwise, .. }, Some(name)) => {
+                    let _ = write!(out, "                    match {name}(&s) {{\n                        Some(true) => {},\n                        Some(false) => {},\n                        None => break Leave::End({b}),\n                    }}\n", go(*then), go(*otherwise));
+                }
+                _ => unreachable!("a fast block ends in a jump or a fast branch"),
+            }
+            let _ = writeln!(out, "                }}");
+        }
+        out.push_str("                _ => unreachable!(\"block {block} is not fast\"),\n            }\n        }\n    };\n    match leave {\n        Leave::To(t) => Ok(Next::Block(t)),\n        Leave::End(b) => m.end(b, None, floor),\n        Leave::Op(b, i) => resume_");
+        let _ = write!(out, "{k}(m, b, i, floor),\n    }}\n}}\n");
+        resume.push_str("        _ => unreachable!(\"op {op} of block {block} is not in a fast block\"),\n    })\n}\n");
+        out.push_str(&resume);
+        out
+    }
+}
+
 /// A place's storage as generated code reaches it: an address expression of type Option<usize>.
 struct At {
     expr: String,
@@ -73,49 +159,37 @@ impl Gen<'_> {
     fn program(mut self) -> String {
         let (k, p) = (self.k, self.p);
         let entries: Vec<u32> = p.paragraphs.iter().map(|para| para.entry).collect();
+        let ops: Vec<Vec<Option<(String, bool)>>> = p.blocks.iter().enumerate().map(|(b, block)| block.ops.iter().enumerate().map(|(i, op)| self.op(b, i, op)).collect()).collect();
+        let conds: Vec<Option<String>> = p.blocks.iter().map(|block| if let Terminator::Branch { cond, .. } = block.end { self.cond_fn(cond) } else { None }).collect();
+        // A block that runs whole in generated code: no paragraph begins at it, each op has a fast
+        // path that gives no arm, and its terminator is a jump or a branch with a fast condition.
+        let fast: Vec<bool> = p
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(b, block)| {
+                let ends = match block.end {
+                    Terminator::Jump(_) => true,
+                    Terminator::Branch { .. } => conds[b].is_some(),
+                    _ => false,
+                };
+                ends && !entries.contains(&(b as u32)) && ops[b].iter().all(|o| matches!(o, Some((_, false))))
+            })
+            .collect();
+        let code = Code { k, p, entries: &entries, ops: &ops, conds: &conds };
         let mut out = format!("\nfn program_{k}(m: &mut dyn Machine, block: u32, floor: usize) -> Option<Result<Exit, Stop>> {{\n    if m.watched() {{\n        return None;\n    }}\n    Some(blocks_{k}(m, block, floor))\n}}\n");
         let _ = write!(out, "\nfn blocks_{k}(m: &mut dyn Machine, mut block: u32, floor: usize) -> Result<Exit, Stop> {{\n    loop {{\n        let next = match block {{\n");
-        for (b, block) in p.blocks.iter().enumerate() {
-            let _ = writeln!(out, "            {b} => 'b: {{");
-            if entries.contains(&(b as u32)) {
-                let _ = writeln!(out, "                m.entered({b});");
+        for (b, &whole) in fast.iter().enumerate() {
+            if whole {
+                let _ = writeln!(out, "            {b} => region_{k}(m, {b}, floor)?,");
+            } else {
+                let _ = writeln!(out, "            {b} => {},", code.block(b, 0, false));
             }
-            if !block.ops.is_empty() {
-                let _ = writeln!(out, "                let mut arm = None;");
-            }
-            for (i, op) in block.ops.iter().enumerate() {
-                let general = format!("if let Some(next) = m.run_op({b}, {i}, &mut arm, floor)? {{\n                    break 'b next;\n                }}");
-                match self.op(b, i, op) {
-                    Some((name, arms)) => {
-                        let taken = if arms { "Some(size_error) => arm = Some(u8::from(size_error))," } else { "Some(_) => {}" };
-                        let _ = write!(out, "                let fast = {name}(&mut m.storage());\n                match fast {{\n                    {taken}\n                    None => {{\n                        {general}\n                    }}\n                }}\n");
-                    }
-                    None => {
-                        let _ = writeln!(out, "                {general}");
-                    }
-                }
-            }
-            let arm = if block.ops.is_empty() { "None" } else { "arm" };
-            let end = format!("m.end({b}, {arm}, floor)?");
-            match &block.end {
-                Terminator::Jump(t) => {
-                    let _ = writeln!(out, "                Next::Block({t})");
-                }
-                Terminator::Branch { cond, then, otherwise } => match self.cond_fn(*cond) {
-                    Some(name) => {
-                        let _ = write!(out, "                let fast = {name}(&m.storage());\n                match fast {{\n                    Some(true) => Next::Block({then}),\n                    Some(false) => Next::Block({otherwise}),\n                    None => {end},\n                }}\n");
-                    }
-                    None => {
-                        let _ = writeln!(out, "                {end}");
-                    }
-                },
-                _ => {
-                    let _ = writeln!(out, "                {end}");
-                }
-            }
-            let _ = writeln!(out, "            }}");
         }
         out.push_str("            _ => unreachable!(\"block {block} of a verified program\"),\n        };\n        match next {\n            Next::Block(b) => block = b,\n            Next::Exit(exit) => return Ok(exit),\n        }\n    }\n}\n");
+        if fast.contains(&true) {
+            out.push_str(&code.region(&fast));
+        }
         out.push_str(&self.fns);
         out
     }
@@ -171,6 +245,7 @@ impl Gen<'_> {
                     false,
                 )
             }
+            Op::SearchAll(id) => (self.search_all(&self.p.plans.search_all[*id as usize])?, true),
             _ => return None,
         };
         let _ = write!(self.fns, "\n#[inline]\nfn {name}(s: &mut Storage) -> Option<bool> {{\n{body}}}\n");
@@ -210,6 +285,31 @@ impl Gen<'_> {
         };
         let _ = write!(body, "    let result = {result};\n    s.store(at, {}, {}, (result, {}), {}, {})\n", target.len, kind(target.kind)?, places(to), step.rounded, plan.handled);
         Some((body, plan.handled))
+    }
+
+    /// `Vm::search_all`: the binary search over a table of a fixed count, its index set to each
+    /// occurrence tried, each key compared in turn; true, the arm the VM gives, where no occurrence
+    /// matches. A fast path that declines midway has set the index, which the VM's own search, run
+    /// from the start, sets again before it reads it.
+    fn search_all(&self, plan: &rt::lir::SearchAllPlan) -> Option<String> {
+        let Count::Fixed(count) = plan.count else { return None };
+        let index = self.at(plan.index)?;
+        if index.kind != Kind::Index {
+            return None;
+        }
+        let mut keys = String::new();
+        for key in &plan.keys {
+            if key.how != Compare::Fixed {
+                return None;
+            }
+            let ordering = self.ordering(&key.key, &key.value)?;
+            let ordering = if key.ascending { ordering } else { format!("{ordering}.reverse()") };
+            let _ = write!(keys, "        outcome = {ordering};\n        if outcome != std::cmp::Ordering::Equal {{\n            break 'keys;\n        }}\n");
+        }
+        Some(format!(
+            "    let (mut low, mut high) = (1i64, {count}i64);\n    while low <= high {{\n        let mid = (low + high) / 2;\n        let dest = {}?;\n        s.set_index(dest, mid)?;\n        let mut outcome = std::cmp::Ordering::Equal;\n        'keys: {{\n{keys}        }}\n        match outcome {{\n            std::cmp::Ordering::Less => low = mid + 1,\n            std::cmp::Ordering::Greater => high = mid - 1,\n            std::cmp::Ordering::Equal => return Some(false),\n        }}\n    }}\n    Some(true)\n",
+            index.expr
+        ))
     }
 
     /// Each place of `places` located, as the VM locates them before it evaluates, None for one the
@@ -356,12 +456,7 @@ impl Gen<'_> {
     fn cond(&self, c: CondId) -> Option<String> {
         Some(match &self.p.conds[c as usize] {
             Cond::Rel { a, op, b, how: Compare::Fixed } => {
-                let ((x, px), (y, py)) = (self.comparand(a)?, self.comparand(b)?);
-                let by_value = format!("order({x}, {}, {y}, {})", px.dec, py.dec);
-                let ordering = match (self.zoned(a), self.zoned(b)) {
-                    (Some((pa, ka)), Some((pb, kb))) if ka == kb => format!("s.zoned_order({}?, {}?, {}).or_else(|| {by_value})?", pa.expr, pb.expr, pa.len),
-                    _ => format!("{by_value}?"),
-                };
+                let ordering = self.ordering(a, b)?;
                 let test = match op {
                     RelOp::Eq => "is_eq",
                     RelOp::Ne => "is_ne",
@@ -384,6 +479,17 @@ impl Gen<'_> {
             Cond::And(x, y) => format!("({} && {})", self.cond(*x)?, self.cond(*y)?),
             Cond::Or(x, y) => format!("({} || {})", self.cond(*x)?, self.cond(*y)?),
             _ => return None,
+        })
+    }
+
+    /// `Vm::compare` of two operands under `Compare::Fixed` where `Vm::compare_numbers` decides it, as
+    /// an expression of type Ordering.
+    fn ordering(&self, a: &Comparand, b: &Comparand) -> Option<String> {
+        let ((x, px), (y, py)) = (self.comparand(a)?, self.comparand(b)?);
+        let by_value = format!("order({x}, {}, {y}, {})", px.dec, py.dec);
+        Some(match (self.zoned(a), self.zoned(b)) {
+            (Some((pa, ka)), Some((pb, kb))) if ka == kb => format!("s.zoned_order({}?, {}?, {}).or_else(|| {by_value})?", pa.expr, pb.expr, pa.len),
+            _ => format!("{by_value}?"),
         })
     }
 

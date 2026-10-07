@@ -14,6 +14,14 @@ use crate::store;
 use crate::unit::RETURN_CODE;
 use std::cmp::Ordering;
 
+/// How generated code leaves a loop of blocks it runs whole: to another block, at a branch whose
+/// condition its fast path did not decide, or at an op whose fast path declined.
+pub enum Leave {
+    To(u32),
+    End(u32),
+    Op(u32, usize),
+}
+
 /// An activation's storage as generated code reaches it.
 pub struct Storage<'a> {
     pub mem: &'a mut [u8],
