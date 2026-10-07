@@ -1643,6 +1643,22 @@ impl Parser<'_> {
         Ok(())
     }
 
+    /// RETURNING or GIVING after STOP RUN or GOBACK, GnuCOBOL's and Micro Focus's: under
+    /// `--compliance extended` a MOVE of its value to RETURN-CODE ahead of the statement, with
+    /// IWX0033-W (assumption C480); refused under strict.
+    fn returning_code(&mut self, verb: &str) -> R<()> {
+        let at = self.pos();
+        let Some(word) = self.accept_any(&["RETURNING", "GIVING"]) else { return Ok(()) };
+        if !self.extended {
+            return Err(crate::messages::IWC0306.at(at, format!("{verb} {word}: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's, where a MOVE to RETURN-CODE comes first; --compliance extended reads it")));
+        }
+        let from = self.operand()?;
+        self.messages.push(crate::messages::IWX0033.at(at, format!("{verb} {word} (GnuCOBOL and Micro Focus; Enterprise COBOL moves the value to RETURN-CODE first): the value is moved to RETURN-CODE, then {verb} ends the program")));
+        let to = Ref { name: "RETURN-CODE".into(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos: at };
+        self.before.push(Stmt::Move { from, to: vec![to], pos: at });
+        Ok(())
+    }
+
     fn locked(&mut self, phrase: &str, at: Pos) {
         self.messages.push(crate::messages::IWX0022.at(at, format!("{phrase} (Micro Focus and GnuCOBOL; Enterprise COBOL has no record locks of its own): the run unit is the file's only user, so nothing it locks waits and the phrase changes nothing")));
     }
@@ -2383,8 +2399,14 @@ impl Parser<'_> {
             }
             "EVALUATE" => self.evaluate(pos)?,
             "INITIATE" | "GENERATE" | "TERMINATE" | "SUPPRESS" => Stmt::Report(Box::new(self.report_statement(&verb, pos)?)),
-            "GOBACK" => Stmt::Goback { pos },
-            "STOP" if self.accept_word("RUN") => Stmt::StopRun { pos },
+            "GOBACK" => {
+                self.returning_code("GOBACK")?;
+                Stmt::Goback { pos }
+            }
+            "STOP" if self.accept_word("RUN") => {
+                self.returning_code("STOP RUN")?;
+                Stmt::StopRun { pos }
+            }
             // STOP literal waits for the operator, whom ironwork does not have (assumption C132).
             "STOP" if self.starts_operand() && !self.starts_ref() => Stmt::Display { items: vec![self.operand()?], upon: Some(Upon { name: "CONSOLE".into(), device: "CONSOLE".into() }), no_advancing: false, screen: None, pos },
             "STOP" => return Err(self.error("RUN or a literal after STOP")),

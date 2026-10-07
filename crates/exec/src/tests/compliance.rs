@@ -1078,3 +1078,61 @@ fn module_caller_id_names_the_calling_program_alike_on_both_executors() {
     let refused = diagnostics_under(main, numeric::Compliance::Strict);
     assert_eq!(refused.iter().map(|d| (d.0, d.2)).collect::<Vec<_>>(), [(8, Some("IWC0305")), (9, Some("IWC0305"))]);
 }
+
+/// GOBACK RETURNING a literal, GOBACK GIVING a LINKAGE item, and STOP RUN RETURNING an item.
+const STOP_RETURNING: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. RETCALL.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  N PIC 9(3) VALUE 42.\n",
+    "       01  D PIC 9(4).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           CALL 'GIVES4'\n",
+    "           MOVE RETURN-CODE TO D\n",
+    "           DISPLAY 'GIVES4 ' D\n",
+    "           MOVE 300 TO N\n",
+    "           CALL 'GIVESN' USING N\n",
+    "           MOVE RETURN-CODE TO D\n",
+    "           DISPLAY 'GIVESN ' D\n",
+    "           IF D = 300\n",
+    "               STOP RUN RETURNING N\n",
+    "           END-IF\n",
+    "           DISPLAY 'NOT HERE'\n",
+    "           GOBACK.\n",
+    "       END PROGRAM RETCALL.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. GIVES4.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           GOBACK RETURNING 4.\n",
+    "       END PROGRAM GIVES4.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. GIVESN.\n",
+    "       DATA DIVISION.\n",
+    "       LINKAGE SECTION.\n",
+    "       01  L PIC 9(3).\n",
+    "       PROCEDURE DIVISION USING L.\n",
+    "           GOBACK GIVING L.\n",
+    "       END PROGRAM GIVESN.\n",
+);
+
+#[test]
+fn stop_run_and_goback_returning_set_return_code_alike_on_both_executors() {
+    // cobc 3.2's output; its exit status is 300 modulo 256.
+    let expected = "GIVES4 0004\nGIVESN 0300\n";
+    let walked = Harness::source(STOP_RETURNING).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok(), walked.return_code), (expected, Some(&Ending::StopRun), 300), "{}", walked.err);
+    let vm = Harness::source(STOP_RETURNING).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending, vm.return_code), (walked.out, walked.ending, walked.return_code));
+}
+
+#[test]
+fn stop_run_and_goback_returning_are_refused_under_strict_and_warned_under_extended() {
+    let (main, called) = STOP_RETURNING.split_at(STOP_RETURNING.find("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. GIVES4").unwrap());
+    assert_eq!(diagnostics_under(main, numeric::Compliance::Extended), [(16, 25, Some("IWX0033"), Severity::Warning)]);
+    assert_eq!(diagnostics_under(called, numeric::Compliance::Extended), [(4, 19, Some("IWX0033"), Severity::Warning)]);
+    let refused = syntax::parse(main).unwrap_err();
+    assert_eq!((refused.pos.line, refused.pos.col, refused.id), (16, 25, Some("IWC0306")), "{refused}");
+    let refused = syntax::parse(called).unwrap_err();
+    assert_eq!((refused.pos.line, refused.pos.col, refused.id), (4, 19, Some("IWC0306")), "{refused}");
+}

@@ -326,6 +326,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0303 | S | `PIC X({n}) {COMP-X or COMP-5}: {n} bytes of binary, and ironwork's binary items hold at most eight` |
 | IWC0304 | S | `{paragraph or section} FOREVER: under --compliance extended PERFORM FOREVER is Micro Focus's and GnuCOBOL's endless loop, not a PERFORM of it; compile the program under strict` |
 | IWC0305 | S | `FUNCTION MODULE-CALLER-ID: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0306 | S | `{STOP RUN or GOBACK} {RETURNING or GIVING}: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's, where a MOVE to RETURN-CODE comes first; --compliance extended reads it` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
@@ -825,6 +826,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0030 | W | `WRITE ... BEFORE ADVANCING on the line-sequential file {file} (GnuCOBOL and Micro Focus; Enterprise COBOL allows only AFTER there): the line, then the lines or page it names` |
 | IWX0031 | W | `FUNCTION MODULE-CALLER-ID (GnuCOBOL; Enterprise COBOL has no such function): the PROGRAM-ID of the program that called this one, empty in the main program` |
 | IWX0032 | W | `a level-66 entry before the end of its record (GnuCOBOL's IBM and Micro Focus dialects; Enterprise COBOL writes a record's RENAMES entries after its last entry): {name} is read as following {record}'s last entry` |
+| IWX0033 | W | `{STOP RUN or GOBACK} {RETURNING or GIVING} (GnuCOBOL and Micro Focus; Enterprise COBOL moves the value to RETURN-CODE first): the value is moved to RETURN-CODE, then {STOP RUN or GOBACK} ends the program` |
 
 ## Run-time refusals
 

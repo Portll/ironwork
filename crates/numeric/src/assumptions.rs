@@ -379,6 +379,7 @@ pub const INSPECT_TRAILING: &str = "C466";
 pub const COMP_X: &str = "C467";
 pub const PIC_X_COMP_5: &str = "C468";
 pub const GNUCOBOL_FLOATS: &str = "C469";
+pub const RETURNING_ON_STOP: &str = "C480";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2677,6 +2678,13 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended), U(NativeBinary)]],
+    },
+    Assumption {
+        id: RETURNING_ON_STOP,
+        claim: "Under --compliance extended, STOP RUN or GOBACK followed by RETURNING or GIVING and a value, GnuCOBOL's and Micro Focus's, is read as a MOVE of the value to RETURN-CODE and then the STOP RUN or GOBACK, as cobc 3.2 runs it: a subprogram's caller receives the value as its RETURN-CODE. RETURN-CODE stays Enterprise COBOL's binary halfword (C105) and takes the value as any MOVE to it does, where cobc's RETURN-CODE holds nine digits, so a value beyond four digits differs. The run's exit status is ironwork's band of RETURN-CODE, not cobc's value modulo 256",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(Move)]],
     },
     Assumption {
         id: COMMAND_LINE_FROM_PARM,

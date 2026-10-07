@@ -740,6 +740,21 @@ RENAMES covers what it names, as cobc lays it out. One followed by a level-88 en
 In the 500-repository corpus it is the first refusal of 137 of the 194 batch programs of
 Pavansai0522_CABS-MAINFRAME-DEMO-TIER5, through one shared copybook.
 
+### IWX0033-W STOP RUN and GOBACK with RETURNING or GIVING
+
+`IWX0033-W STOP RUN RETURNING (GnuCOBOL and Micro Focus; Enterprise COBOL moves the value to
+RETURN-CODE first): the value is moved to RETURN-CODE, then STOP RUN ends the program`, at RETURNING
+or GIVING.
+
+    STOP RUN {RETURNING | GIVING} identifier-or-literal
+    GOBACK {RETURNING | GIVING} identifier-or-literal
+
+The statement runs as a MOVE of the value to RETURN-CODE and then the STOP RUN or GOBACK, as cobc
+3.2 runs it, and a caller receives the value as its RETURN-CODE. RETURN-CODE stays Enterprise
+COBOL's binary halfword, where cobc's holds nine digits, so a value beyond four digits differs; the
+exit status is ironwork's band of RETURN-CODE, where cobc exits with the value modulo 256. ACAS ends
+two programs with `GOBACK RETURNING 4`. Assumption C480. Strict refuses the phrase (IWC0306).
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:
