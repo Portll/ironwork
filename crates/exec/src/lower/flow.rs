@@ -406,7 +406,7 @@ impl Lower<'_> {
                 self.op(Op::ScreenDisplay { display, screen }, pos)?;
             }
             Stmt::Display { items, upon, no_advancing, screen: None, pos: _ } => {
-                let plan = self.display_plan(items, crate::machine::upon_console(upon.as_ref()), *no_advancing, pos)?;
+                let plan = self.display_plan(items, compile::statements::upon_console(upon.as_ref()), *no_advancing, pos)?;
                 self.op(Op::Display(plan), pos)?;
             }
             Stmt::Initialize { targets, with, pos: _ } => {

@@ -26,6 +26,7 @@ mod scope;
 mod screens;
 pub mod sort;
 pub mod sql;
+pub mod statements;
 mod switches;
 pub mod values;
 

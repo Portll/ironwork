@@ -10,6 +10,7 @@ pub(crate) use rt::storage::literal_fixed;
 use crate::unit::{ADDRESS_BASE, Event, LoadError, OS_COMMAND_ROUTINES, RETURN_CODE, RunUnit};
 use crate::Compiled;
 use compile::arith::{decimal_exponent, divided_exponent, function_dmax};
+use compile::statements::{flatten_and, key_term, numval_currency, upon_console};
 use compile::values::value_kind;
 use numeric::precision::{Dmax, Fixed, Places};
 use numeric::{LeServices, Options, ProgramScope, Switched};
@@ -1755,14 +1756,6 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 }
 
-/// The cs of NUMVAL-C and TEST-NUMVAL-C without argument-2 (assumption C102).
-pub(crate) fn numval_currency(signs: &[CurrencySign]) -> String {
-    match signs {
-        [only] => only.value.clone(),
-        _ => "$".to_owned(),
-    }
-}
-
 static NO_PHRASES: InitializeWith = InitializeWith { filler: false, value: Vec::new(), replacing: Vec::new(), default: false };
 
 /// A CALL's USING phrase as `rt::callee` takes it: a data item BY REFERENCE by its place, BY VALUE
@@ -1789,33 +1782,7 @@ fn initial_default(kind: Kind) -> Val {
     }
 }
 
-pub(crate) fn flatten_and<'c>(cond: &'c Cond, out: &mut Vec<&'c Cond>) {
-    match cond {
-        Cond::And(a, b) => {
-            flatten_and(a, out);
-            flatten_and(b, out);
-        }
-        other => out.push(other),
-    }
-}
-
-/// In a SEARCH ALL condition, the key item and the value it must equal.
-pub(crate) fn key_term<'c>(terms: &[&'c Cond], key: &str) -> Option<(&'c Expr, &'c Expr)> {
-    let is_key = |e: &Expr| matches!(e, Expr::Operand(Operand::Ref(r)) if r.name == key);
-    terms.iter().find_map(|t| match t {
-        Cond::Rel(a, RelOp::Eq, b) if is_key(a) => Some((a, b)),
-        Cond::Rel(a, RelOp::Eq, b) if is_key(b) => Some((b, a)),
-        _ => None,
-    })
-}
-
-/// Whether DISPLAY writes to the console, whose national data is converted (Language Reference
-/// SC27-8713-03, p. 333).
 /// What a screen DISPLAY clears before it writes.
 pub(crate) fn clearing(screen: &ScreenPhrases) -> rt::crt::Clearing {
     rt::crt::Clearing { screen: screen.blank_screen, line: screen.blank_line, to_line_end: screen.erase_eol, to_screen_end: screen.erase_eos }
-}
-
-pub(crate) fn upon_console(upon: Option<&Upon>) -> bool {
-    upon.is_some_and(|u| u.device == "CONSOLE")
 }
