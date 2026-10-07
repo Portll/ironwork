@@ -283,7 +283,9 @@ fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
         | Func::WhenCompiled
         | Func::ModuleCallerId
         | Func::Concatenate
-        | Func::ChainingArgument => of(Value::Bytes),
+        | Func::ChainingArgument
+        | Func::Substitute
+        | Func::SubstituteCase => of(Value::Bytes),
         Func::HeapAllocate | Func::HeapFree => of(Value::Address),
         Func::NationalOf => of(Value::National),
         Func::UpperCase

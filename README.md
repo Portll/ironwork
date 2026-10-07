@@ -380,9 +380,15 @@ FD with no FILE SECTION header (IWX0037-W), PERFORM UNTIL EXIT (IWX0038-W), ASSI
 (IWX0039-W), split keys (IWX0040-W), periods after a period (IWX0041-W), FUNCTION
 STORED-CHAR-LENGTH (IWX0042-W), DELETE FILE (IWX0043-W), PROGRAM-POINTER (IWX0044-W), BASED
 (IWX0046-W), FREE of a record (IWX0047-W), conditional compilation with >>DEFINE and >>IF
-(IWX0048-W), >>TURN, >>LISTING and >>PAGE (IWX0049-W) and >>D debugging lines (IWX0050-W), an inline PERFORM with AFTER (IWX0051-W), INITIALISE
-(IWX0052-W), FUNCTION CONCATENATE (IWX0053-W), COPY name.. (IWX0054-W), PROCEDURE DIVISION CHAINING
-(IWX0055-W), DISPLAY UPON SYSERR (IWX0056-W) and COB-CRT-STATUS (IWX0057-W).
+(IWX0048-W), >>TURN, >>LISTING and >>PAGE (IWX0049-W) and >>D debugging lines (IWX0050-W), an
+inline PERFORM with AFTER (IWX0051-W), INITIALISE (IWX0052-W), FUNCTION CONCATENATE (IWX0053-W),
+COPY name.. (IWX0054-W), PROCEDURE DIVISION CHAINING (IWX0055-W), DISPLAY UPON SYSERR (IWX0056-W),
+COB-CRT-STATUS (IWX0057-W), cobc's tab stops (IWX0058-W), PICTUREs of 19 to 31 digits (IWX0060-W),
+paragraph headers in Area B (IWX0061-W) and FUNCTION SUBSTITUTE and SUBSTITUTE-CASE (IWX0062-W).
+`--source-format auto|fixed|free` says how a source is read; auto, the default, reads free form
+where a file shows it is. `--compliance relaxed` compiles what extended still refuses in a
+PROCEDURE DIVISION sentence or statement as a hole (IWX0059-W), which ends a run that reaches it
+with IWR0078.
 [docs/compliance.md](docs/compliance.md) gives each one's meaning, the census that chose them, and
 what stays refused and why.
 

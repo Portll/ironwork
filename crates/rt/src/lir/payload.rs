@@ -361,6 +361,8 @@ functions! {
     Concatenate = 87, "CONCATENATE", 1..=usize::MAX;
     ChainingArgument = 88, "CHAINING ARGUMENT", 2..=2;
     CrtStatus = 89, "CRT STATUS", 0..=0;
+    Substitute = 90, "SUBSTITUTE", 3..=usize::MAX;
+    SubstituteCase = 91, "SUBSTITUTE-CASE", 3..=usize::MAX;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

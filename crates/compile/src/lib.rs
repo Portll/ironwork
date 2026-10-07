@@ -2238,6 +2238,14 @@ impl Check<'_> {
                         syntax::messages::IWC0319.at(f.pos, "FUNCTION CONCATENATE: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it")
                     });
                 }
+                if matches!(f.name.as_str(), "SUBSTITUTE" | "SUBSTITUTE-CASE") && self.intrinsic(&f.name) {
+                    let name = &f.name;
+                    self.errors.push(if self.extended {
+                        syntax::messages::IWX0062.at(f.pos, format!("FUNCTION {name} (GnuCOBOL; Enterprise COBOL has no such function): each text found is replaced, the pairs tried in order at each position"))
+                    } else {
+                        syntax::messages::IWC0321.at(f.pos, format!("FUNCTION {name}: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it"))
+                    });
+                }
                 if f.name == "STORED-CHAR-LENGTH" && self.intrinsic(&f.name) {
                     self.errors.push(if self.extended {
                         syntax::messages::IWX0042.at(f.pos, "FUNCTION STORED-CHAR-LENGTH (GnuCOBOL; Enterprise COBOL has no such function): the argument's length in characters without its trailing spaces")

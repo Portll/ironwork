@@ -1853,21 +1853,21 @@ functions! {
     Concatenate = 87, "CONCATENATE", 1..=usize::MAX;
     ChainingArgument = 88, "CHAINING ARGUMENT", 2..=2;
     CrtStatus = 89, "CRT STATUS", 0..=0;
+    Substitute = 90, "SUBSTITUTE", 3..=usize::MAX;
+    SubstituteCase = 91, "SUBSTITUTE-CASE", 3..=usize::MAX;
 }
 ```
 
 Tags 0 to 20 are the walker's first twenty-one functions (`rt::intrinsic::function::evaluate`),
 21 to 72 the alphabetical first part of `rt::intrinsic::FUNCTIONS`, 73 WHEN-COMPILED, and 74 to 81
 the eight that follow in it: ULENGTH, UPOS, USUBSTR, USUPPLEMENTARY, UVALID, UWIDTH,
-COMBINED-DATETIME and CONTENT-OF, 82 GnuCOBOL's MODULE-CALLER-ID under `--compliance extended`, and
-83 ARGUMENT LENGTH, which no source can name: the length of the argument in a USING position, which
-compile's ANY LENGTH rewrite moves into a parameter's count as the procedure starts, 84
-GnuCOBOL's STORED-CHAR-LENGTH, 87 GnuCOBOL's CONCATENATE, 88 CHAINING's argument in a position or the item's own bytes, 89 the last screen key's CRT
-STATUS code, and 85
-and 86, which no source can name
-either: ALLOCATE's and
-FREE's heap storage, the address of the bytes obtained and NULL once a block is released, which
-the parser's SET statements for ALLOCATE and FREE take.
+COMBINED-DATETIME and CONTENT-OF. Under `--compliance extended` 82 is GnuCOBOL's MODULE-CALLER-ID,
+84 its STORED-CHAR-LENGTH, 87 its CONCATENATE, and 90 and 91 its SUBSTITUTE and SUBSTITUTE-CASE.
+No source can name the rest: 83 ARGUMENT LENGTH, the length of the argument in a USING position,
+which compile's ANY LENGTH rewrite moves into a parameter's count as the procedure starts; 85 and
+86, ALLOCATE's and FREE's heap storage, the address of the bytes obtained and NULL once a block is
+released, which the parser's SET statements for ALLOCATE and FREE take; 88 CHAINING's argument in a
+position or the item's own bytes; and 89 the last screen key's CRT STATUS code.
 Every function the walker runs has a row.
 
 - **The walker's order** (machine.rs `function`): every argument by `expr_value`, which is

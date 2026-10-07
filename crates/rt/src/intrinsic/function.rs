@@ -907,17 +907,37 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             arity(1..=usize::MAX, args)?;
             let mut joined = Vec::new();
             for v in args.iter() {
-                match v {
-                    Val::Bytes(b) | Val::All(b) => joined.extend_from_slice(b),
-                    // A number as a MOVE to an alphanumeric item shows it: its digits, unsigned.
-                    Val::Num(n) => {
-                        let digits = n.magnitude.to_u128().map(|m| format!("{m:0width$}", width = n.places.total() as usize)).ok_or_else(|| Abend::ironwork(format!("FUNCTION {name}: a number of more than 38 digits"), pos))?;
-                        joined.extend(facts.page().encode(&digits).map_err(|e| Abend::ironwork(e.to_string(), pos))?);
-                    }
-                    _ => return Err(crate::refusal::IWR0065.abend("FUNCTION CONCATENATE of this argument is not supported yet", pos)),
-                }
+                joined.extend(characters(facts, name, v, pos)?);
             }
             Ok(Val::Bytes(joined))
+        }
+        "SUBSTITUTE" | "SUBSTITUTE-CASE" => {
+            arity(3..=usize::MAX, args)?;
+            if args.len().is_multiple_of(2) {
+                return Err(Abend::ironwork(format!("FUNCTION {name}: a text, then pairs of what to find and what to put in its place"), pos));
+            }
+            let page = facts.page();
+            let text = |v: &Val| characters(facts, name, v, pos).map(|b| page.decode(&b).chars().collect::<Vec<char>>());
+            let subject = text(&args[0])?;
+            let pairs = args[1..].chunks(2).map(|p| Ok((text(&p[0])?, text(&p[1])?))).collect::<Result<Vec<_>, Abend>>()?;
+            let fold = |c: &char| if name == "SUBSTITUTE-CASE" { c.to_lowercase().next().unwrap_or(*c) } else { *c };
+            let mut out = String::new();
+            let mut i = 0;
+            // At each position the first pair whose text is there is replaced, and the scan goes on after it, as cobc 3.2 does.
+            while i < subject.len() {
+                let found = pairs.iter().find(|(from, _)| !from.is_empty() && subject[i..].len() >= from.len() && subject[i..i + from.len()].iter().map(fold).eq(from.iter().map(fold)));
+                match found {
+                    Some((from, to)) => {
+                        out.extend(to);
+                        i += from.len();
+                    }
+                    None => {
+                        out.push(subject[i]);
+                        i += 1;
+                    }
+                }
+            }
+            Ok(Val::Bytes(page.encode(&out).map_err(|e| Abend::ironwork(e.to_string(), pos))?))
         }
         "HEAP ALLOCATE" => {
             arity(1..=1, args)?;
@@ -953,6 +973,19 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             text_value(facts, &text::uuid4(random), pos)
         }
         other => Err(crate::refusal::IWR0064.abend(format_args!("FUNCTION {other} is not supported yet"), pos)),
+    }
+}
+
+/// An argument's characters as GnuCOBOL's CONCATENATE and SUBSTITUTE take them: an alphanumeric
+/// value's bytes, and a number's digits, unsigned, as a MOVE to an alphanumeric item shows them.
+fn characters(facts: &dyn ProgramFacts, name: &str, v: &Val, pos: Pos) -> R<Vec<u8>> {
+    match v {
+        Val::Bytes(b) | Val::All(b) => Ok(b.clone()),
+        Val::Num(n) => {
+            let digits = n.magnitude.to_u128().map(|m| format!("{m:0width$}", width = n.places.total() as usize)).ok_or_else(|| Abend::ironwork(format!("FUNCTION {name}: a number of more than 38 digits"), pos))?;
+            facts.page().encode(&digits).map_err(|e| Abend::ironwork(e.to_string(), pos))
+        }
+        _ => Err(crate::refusal::IWR0065.abend(format!("FUNCTION {name} of this argument is not supported yet"), pos)),
     }
 }
 

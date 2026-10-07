@@ -1060,6 +1060,20 @@ paragraph. Enterprise COBOL takes a header from Area A alone, and in Area B such
 statement, so no program Enterprise COBOL compiles reads differently. In free form every such word is
 a header already (IWX0001).
 
+### IWX0062-W FUNCTION SUBSTITUTE and SUBSTITUTE-CASE
+
+`IWX0062-W FUNCTION {name} (GnuCOBOL; Enterprise COBOL has no such function): each text found is
+replaced, the pairs tried in order at each position`, at the function.
+
+`FUNCTION SUBSTITUTE(text from-1 to-1 [from-2 to-2]...)` scans `text` from the left; at each position
+the first pair whose `from` is there puts its `to` in its place and the scan goes on after it, the
+replacement not scanned again. Otherwise the character is kept. The value is alphanumeric, its
+length what the replacements make it. `SUBSTITUTE-CASE` compares without regard to case. A number
+argument stands for its digits, unsigned, as in CONCATENATE. Both executors give cobc 3.2's output.
+One difference: cobc reads a zero-length literal `''` as a space, with a warning, where ironwork
+reads it as no characters, so `SUBSTITUTE(T 'x' '')` deletes each `x` where cobc puts a space. Strict
+refuses either function with IWC0321-S.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

@@ -1992,3 +1992,39 @@ fn a_picture_past_18_digits_compiles_the_program_with_arith_extend_under_extende
     let shown = diagnostics_under(&past_31, numeric::Compliance::Extended);
     assert!(shown.iter().any(|d| d.0 == 6 && d.3 == Severity::Severe), "{shown:?}");
 }
+
+/// FUNCTION SUBSTITUTE and SUBSTITUTE-CASE: several pairs, the order they are tried in, a number's
+/// digits and a value's length.
+const SUBSTITUTE: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. SUBST.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 T PIC X(20) VALUE \"abcabc xyz\".\n",
+    "       01 N PIC 9(9).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY \"[\" FUNCTION SUBSTITUTE(T \"abc\" \"Q\") \"]\"\n",
+    "           DISPLAY \"[\" FUNCTION SUBSTITUTE(T \"b\" \"BBB\" \"xyz\" \"!\") \"]\"\n",
+    "           DISPLAY \"[\" FUNCTION SUBSTITUTE-CASE(T \"ABC\" \"z\") \"]\"\n",
+    "           COMPUTE N = FUNCTION LENGTH(FUNCTION SUBSTITUTE(T \"abc\" \"Q\"))\n",
+    "           DISPLAY N\n",
+    "           DISPLAY \"[\" FUNCTION SUBSTITUTE(\"abc\" \"ab\" \"X\" \"abc\" \"Y\") \"]\"\n",
+    "           DISPLAY \"[\" FUNCTION SUBSTITUTE(\"abc\" \"abc\" \"Y\" \"ab\" \"X\") \"]\"\n",
+    "           DISPLAY \"[\" FUNCTION SUBSTITUTE(\"aaa\" \"aa\" \"b\") \"]\"\n",
+    "           DISPLAY \"[\" FUNCTION SUBSTITUTE(\"a1a\" 1 \"x\") \"]\"\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn substitute_replaces_the_first_pair_found_at_each_position_alike_on_both_executors() {
+    // cobc 3.2's output.
+    let expected = "[QQ xyz          ]\n[aBBBcaBBBc !          ]\n[zz xyz          ]\n000000016\n[Xc]\n[Y]\n[ba]\n[axa]\n";
+    let walked = Harness::source(SUBSTITUTE).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (expected, Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(SUBSTITUTE).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    let warned: Vec<_> = diagnostics_under(SUBSTITUTE, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0062")).map(|d| d.0).collect();
+    assert_eq!(warned, [8, 9, 10, 11, 13, 14, 15, 16]);
+    let refused = diagnostics_under(SUBSTITUTE, numeric::Compliance::Strict);
+    assert_eq!(refused.iter().filter(|d| d.2 == Some("IWC0321")).count(), 8, "{refused:?}");
+}

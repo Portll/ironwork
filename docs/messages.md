@@ -340,6 +340,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0318 | S | `conditional compilation: {why}` |
 | IWC0319 | S | `FUNCTION CONCATENATE: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0320 | S | `PROCEDURE DIVISION CHAINING: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0321 | S | `FUNCTION {name}: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0323 | S | `{verb} {item}: a receiving operand of an arithmetic statement must be numeric or numeric-edited, and {item} is {class}` |
 | IWC0324 | S | `LABEL RECORDS {name}: not defined as a data-name` |
 | IWC0325 | S | `FD {file}: RECORDING MODE F, but its records are {shortest} to {longest} bytes` |
@@ -874,6 +875,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0059 | W | `{construct} (--compliance relaxed): {why ironwork refuses it}; it compiles as a hole, and a run that reaches it ends with IWR0078` |
 | IWX0060 | W | `PICTURE {picture} (GnuCOBOL and Micro Focus; Enterprise COBOL's ARITH(COMPAT) allows 18 digits): the program is compiled with ARITH(EXTEND), which allows 31` |
 | IWX0061 | W | `{name}. in Area B (Micro Focus and GnuCOBOL; Enterprise COBOL puts a paragraph header in Area A): a name and a period after a separator period is read as a paragraph header` |
+| IWX0062 | W | `FUNCTION {name} (GnuCOBOL; Enterprise COBOL has no such function): each text found is replaced, the pairs tried in order at each position` |
 
 ## Run-time refusals
 

@@ -366,6 +366,7 @@ catalogue! {
     IWC0318 Severe "conditional compilation: {why}";
     IWC0319 Severe "FUNCTION CONCATENATE: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0320 Severe "PROCEDURE DIVISION CHAINING: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it";
+    IWC0321 Severe "FUNCTION {name}: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0323 Severe "{verb} {item}: a receiving operand of an arithmetic statement must be numeric or numeric-edited, and {item} is {class}";
     IWC0324 Severe "LABEL RECORDS {name}: not defined as a data-name";
     IWC0325 Severe "FD {file}: RECORDING MODE F, but its records are {shortest} to {longest} bytes";
@@ -900,6 +901,7 @@ catalogue! {
     IWX0059 Warning "{construct} (--compliance relaxed): {why ironwork refuses it}; it compiles as a hole, and a run that reaches it ends with IWR0078";
     IWX0060 Warning "PICTURE {picture} (GnuCOBOL and Micro Focus; Enterprise COBOL's ARITH(COMPAT) allows 18 digits): the program is compiled with ARITH(EXTEND), which allows 31";
     IWX0061 Warning "{name}. in Area B (Micro Focus and GnuCOBOL; Enterprise COBOL puts a paragraph header in Area A): a name and a period after a separator period is read as a paragraph header";
+    IWX0062 Warning "FUNCTION {name} (GnuCOBOL; Enterprise COBOL has no such function): each text found is replaced, the pairs tried in order at each position";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.
