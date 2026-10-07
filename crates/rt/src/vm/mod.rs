@@ -25,7 +25,7 @@ mod value;
 
 use crate::abend::{Abend, Ending};
 use crate::cics::Handlers;
-use crate::lir::{AbendId, Base, Block, Collating, DebugId, Frame, FrameKind, MovePlan, Op, Place, PlaceId, Program, ReturnPoint, Returns, StorePlan, SymId, UpDown};
+use crate::lir::{AbendId, Base, Block, CallPlan, Collating, DebugId, Frame, FrameKind, MovePlan, Op, Place, PlaceId, Program, ReturnPoint, Returns, StorePlan, SymId, UpDown};
 use crate::oo::Running;
 use crate::picture::Sym;
 use crate::sql::Ran;
@@ -360,6 +360,9 @@ struct Vm<'p, 'u, 'w, L: Loader<Rc<Code>>> {
     /// The programs containing this one, innermost first, as they are running.
     containers: Vec<scope::Container<'p>>,
     memo: Option<place::Memo>,
+    /// The last static CALL this activation ran and the program and entry it reached, which a
+    /// static CALL's name always reaches once found.
+    called: Option<(&'p CallPlan, usize, Option<usize>)>,
     /// What the activations this one CALLs leave, for the next.
     spare: Spare,
     unit: &'u mut RunUnit<'w, Rc<Code>, L>,
@@ -469,6 +472,7 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
             method: None,
             containers,
             memo: None,
+            called: None,
             spare: Spare::default(),
             unit,
         }

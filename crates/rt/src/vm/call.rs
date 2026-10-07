@@ -60,14 +60,13 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         {
             return self.le_call(plan, service, &name, pos);
         }
-        let strict = options.program_scope == ProgramScope::Strict;
-        let scope = &self.p.services.scope;
-        let (hidden, callable) = (callee::names(scope.hidden.iter().map(|&s| self.sym(s)), &name), callee::names(scope.callable.iter().map(|&s| self.sym(s)), &name));
-        let found = if strict && hidden { Err(LoadError::NotFound) } else { self.unit.load_entry(&name, callee::entry_copy(dynamic, options.dialect_of(Switched::EntryCalls))) };
-        let found = found.and_then(|(index, entry)| {
-            let contained = self.unit.programs[index].compiled.as_deref().and_then(|c| c.lowered.as_ref().ok()).is_some_and(|l| !l.program.services.scope.containers.is_empty());
-            if strict && contained && !callable { Err(LoadError::NotFound) } else { Ok((index, entry)) }
-        });
+        let found = match self.called {
+            Some((site, index, entry)) if std::ptr::eq(site, plan) => Ok((index, entry)),
+            _ => self.find_called(&name, dynamic),
+        };
+        if let (CallTarget::Named { .. }, Ok((index, entry))) = (&plan.target, &found) {
+            self.called = Some((plan, *index, *entry));
+        }
         let (index, entry) = match found {
             Ok(found) => found,
             Err(LoadError::NotFound) => {
@@ -101,6 +100,20 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let result = self.call_nested(plan, index, entry, lowered, suspends, pos);
         self.unit.depth = self.unit.depth.saturating_sub(1);
         result
+    }
+
+    /// The program and entry a CALL of `name` reaches, as program scope lets it: loaded the first
+    /// time, found by name after.
+    fn find_called(&mut self, name: &str, dynamic: bool) -> Result<(usize, Option<usize>), LoadError> {
+        let options = self.p.options.options;
+        let strict = options.program_scope == ProgramScope::Strict;
+        let scope = &self.p.services.scope;
+        let (hidden, callable) = (callee::names(scope.hidden.iter().map(|&s| self.sym(s)), name), callee::names(scope.callable.iter().map(|&s| self.sym(s)), name));
+        let found = if strict && hidden { Err(LoadError::NotFound) } else { self.unit.load_entry(name, callee::entry_copy(dynamic, options.dialect_of(Switched::EntryCalls))) };
+        found.and_then(|(index, entry)| {
+            let contained = self.unit.programs[index].compiled.as_deref().and_then(|c| c.lowered.as_ref().ok()).is_some_and(|l| !l.program.services.scope.containers.is_empty());
+            if strict && contained && !callable { Err(LoadError::NotFound) } else { Ok((index, entry)) }
+        })
     }
 
     fn call_nested(&mut self, plan: &CallPlan, index: usize, entry: Option<usize>, lowered: &Lowered, suspends: bool, pos: Pos) -> R<Step> {
@@ -191,6 +204,9 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     /// `addresses`, the called program's name worked out by `called` only when the buffer changed.
     pub(super) fn parmcheck_test(&mut self, plan: &CallPlan, addresses: &[Option<usize>], called: impl FnOnce(&RunUnit<'_, Rc<Code>, L>) -> String, pos: Pos) -> R<()> {
         let p = self.p;
+        if p.storage.parmcheck.is_none() {
+            return Ok(());
+        }
         let arguments = plan.args.iter().zip(addresses).filter_map(|(arg, &address)| match (arg, address) {
             (CallArg::Reference(q) | CallArg::Content(Chars::Place(q)) | CallArg::Value(Operand::Load(q)), Some(a)) => Some((a, p.symbols[p.places[*q as usize].name as usize].as_str())),
             _ => None,

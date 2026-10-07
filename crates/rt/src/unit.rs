@@ -625,6 +625,9 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
     /// Releases arguments pushed since `mark`, unless a program's storage, heap storage or EXTERNAL
     /// storage was placed behind them.
     pub fn release_temporaries(&mut self, mark: usize) {
+        if self.mem.len() <= mark {
+            return;
+        }
         let external = self.externals.storage.values().all(|&(at, _)| at < mark);
         if self.programs.iter().all(|p| !p.placed || p.base + p.size <= mark) && self.le.heap_end() <= mark && external {
             self.mem.truncate(mark.max(RESERVED));
