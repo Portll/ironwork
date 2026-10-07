@@ -237,7 +237,21 @@ fn an_in_stream_procedure_expands_with_its_symbols_and_overrides() {
     assert_eq!((s[1].parm.as_deref(), s[1].cond.tests[0].code), (Some("X"), 4));
     assert_eq!(dd(2, "SYSUT1").source, Source::Dataset { dsn: "TEST.IN".into(), member: None });
     assert_eq!(dd(2, "SYSIN").source, Source::InStream(vec!["CARD".into()]));
-    assert_eq!(s[3].parm.as_deref(), Some("&HLQ"), "a symbol in apostrophes stays as written");
+    assert_eq!(s[3].parm.as_deref(), Some("TEST"), "a symbol in a PARM's apostrophes takes its value");
+}
+
+#[test]
+fn a_parms_apostrophes_take_defined_symbols_and_keep_the_rest_as_text() {
+    let j = job(concat!(
+        "//  SET XXX=VALUE\n",
+        "//S1 EXEC PGM=A,PARM='&INPUT&XXX'\n",
+        "//S2 EXEC PGM=A,PARM='3462&&5,&XXX.Z'\n",
+        "//S3 EXEC PGM=A,PARM='&ABCDEFGHI'\n",
+        "//S4 EXEC PGM=A,PARM='O''NEIL'\n",
+    ))
+    .unwrap();
+    let s = steps(&j);
+    assert_eq!(s.iter().map(|s| s.parm.as_deref().unwrap()).collect::<Vec<_>>(), ["&INPUTVALUE", "3462&5,VALUE.Z", "&ABCDEFGHI", "O'NEIL"]);
 }
 
 #[test]

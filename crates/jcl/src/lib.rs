@@ -271,14 +271,55 @@ fn unquote(value: &str) -> String {
 }
 
 /// `text` with each `&NAME` outside apostrophes replaced by its value; a period after the name
-/// ends it and is dropped. `&&` begins a temporary data set name and is kept.
+/// ends it and is dropped. `&&` begins a temporary data set name and is kept. Inside the
+/// apostrophes of PARM, ACCT, AMP, PATH and SUBSYS a symbol with a value is replaced too, ended by
+/// the first character that is not alphanumeric or national within nine of the ampersand, and any
+/// other `&` is text (z/OS MVS JCL Reference, "Coding symbols in apostrophes").
 fn substitute(text: &str, symbols: &HashMap<String, String>, line: usize) -> Result<String, Error> {
     let chars: Vec<char> = text.chars().collect();
-    let (mut out, mut i, mut quoted) = (String::new(), 0, false);
+    let (mut out, mut i, mut quoted, mut depth) = (String::new(), 0, false, 0i32);
+    let (mut keyword_from, mut in_keyword_quotes) = (0usize, false);
+    let national = |c: char| c.is_ascii_uppercase() || c.is_ascii_digit() || matches!(c, '#' | '$' | '@');
     while i < chars.len() {
         let c = chars[i];
         if c == '\'' {
             quoted = !quoted;
+            if quoted {
+                let keyword: String = chars[keyword_from..i].iter().collect();
+                let base = keyword.split('=').next().unwrap_or("").split('.').next().unwrap_or("");
+                in_keyword_quotes = matches!(base, "PARM" | "ACCT" | "AMP" | "PATH" | "SUBSYS");
+            }
+        } else if !quoted {
+            match c {
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                ',' if depth == 0 => keyword_from = i + 1,
+                _ => {}
+            }
+        }
+        if c == '&' && quoted && in_keyword_quotes {
+            if chars.get(i + 1) == Some(&'&') {
+                out.push_str("&&");
+                i += 2;
+                continue;
+            }
+            let start = i + 1;
+            let mut end = start;
+            while end < chars.len() && national(chars[end]) {
+                end += 1;
+            }
+            let name: String = chars[start..end].iter().collect();
+            match symbols.get(&name) {
+                Some(value) if end - start <= 8 && is_name(&name) => {
+                    out.push_str(value);
+                    i = end;
+                }
+                _ => {
+                    out.push(c);
+                    i += 1;
+                }
+            }
+            continue;
         }
         if c != '&' || quoted {
             out.push(c);
@@ -296,7 +337,7 @@ fn substitute(text: &str, symbols: &HashMap<String, String>, line: usize) -> Res
         }
         let start = i + 1;
         let mut end = start;
-        while end < chars.len() && end - start < 8 && (chars[end].is_ascii_uppercase() || chars[end].is_ascii_digit() || matches!(chars[end], '#' | '$' | '@')) {
+        while end < chars.len() && end - start < 8 && national(chars[end]) {
             end += 1;
         }
         let name: String = chars[start..end].iter().collect();
@@ -772,9 +813,14 @@ fn as_step(item: &mut Item) -> &mut Step {
     }
 }
 
+/// A PARM's value: an ampersand that is part of it is coded as two (z/OS MVS JCL Reference, PARM
+/// parameter).
 fn parm_value(v: &str) -> String {
     let v = v.strip_prefix('(').and_then(|v| v.strip_suffix(')')).unwrap_or(v);
-    unquote(v)
+    match v.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')) {
+        Some(inner) => inner.replace("''", "'").replace("&&", "&"),
+        None => v.to_string(),
+    }
 }
 
 /// The step an EXEC PGM= runs, or None for an EXEC that calls a procedure.
