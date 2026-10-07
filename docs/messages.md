@@ -322,6 +322,9 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0298 | S | `{DISPLAY or ACCEPT on the screen, or the SCREEN SECTION}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0299 | S | `{a locking phrase}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0300 | S | `CALL ... RETURNING {OMITTED, NOTHING or NULL}: GnuCOBOL's, not Enterprise COBOL's, whose RETURNING names a data item; --compliance extended reads it` |
+| IWC0301 | S | `COMP-X: Micro Focus's binary in the fewest bytes its digits need, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0302 | S | `PIC X(n) COMP-5: Micro Focus's and GnuCOBOL's binary of n bytes, where Enterprise COBOL's COMP-5 takes a numeric PICTURE; --compliance extended reads it` |
+| IWC0303 | S | `PIC X({n}) {COMP-X or COMP-5}: {n} bytes of binary, and ironwork's binary items hold at most eight` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
@@ -810,3 +813,5 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0022 | W | `{a locking phrase} (Micro Focus and GnuCOBOL; Enterprise COBOL has no record locks of its own): the run unit is the file's only user, so nothing it locks waits and the phrase changes nothing` |
 | IWX0023 | W | `INSPECT ... TRAILING (GnuCOBOL; Enterprise COBOL has ALL, LEADING, FIRST and CHARACTERS): the occurrences that run on to the end of the phrase's region` |
 | IWX0024 | W | `CALL ... RETURNING {OMITTED, NOTHING or NULL} (GnuCOBOL; Enterprise COBOL's RETURNING names a data item): the CALL leaves the caller's RETURN-CODE as it was` |
+| IWX0025 | W | `COMP-X (Micro Focus; Enterprise COBOL's binary items are two, four or eight bytes): {name} is {n} bytes of binary, {range}, shown in {digits} digits` |
+| IWX0026 | W | `PIC X(n) COMP-5 (Micro Focus and GnuCOBOL; Enterprise COBOL's COMP-5 takes a numeric PICTURE): {name} is {n} bytes of binary, {range}` |

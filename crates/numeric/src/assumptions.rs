@@ -363,6 +363,8 @@ pub const SCREEN_SECTION_LAYOUT: &str = "C463";
 pub const ENVIRONMENT_VARIABLES: &str = "C464";
 pub const RECORD_LOCKS: &str = "C465";
 pub const INSPECT_TRAILING: &str = "C466";
+pub const COMP_X: &str = "C467";
+pub const PIC_X_COMP_5: &str = "C468";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -465,7 +467,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: DISPLAY_OF_NONDISPLAY_NUMERIC,
-        claim: "DISPLAY shows a packed or binary item as zoned digits of its PICTURE, a negative value's sign overpunched on the last digit and a positive value's digits unsigned (Programming Guide SC27-8714-03, p. 363, Table 48; Language Reference SC27-8713-03, p. 334); a COMP-5 item, or any binary item under TRUNC(BIN), shows its whole binary value in 5, 10, or 19 (signed) or 20 digits for a halfword, fullword or doubleword, and a BINARY-CHAR under --compliance extended in 3 for its byte (C460). Under --dialect gnucobol DISPLAY shows them as cobc -std=ibm-strict does, whatever DISPSIGN says: a signed item's sign, + or -, before its digits, a packed item's digits those of its PICTURE, and any binary item's whole value in 3, 5, 10 or 20 digits for a byte, halfword, fullword or doubleword",
+        claim: "DISPLAY shows a packed or binary item as zoned digits of its PICTURE, a negative value's sign overpunched on the last digit and a positive value's digits unsigned (Programming Guide SC27-8714-03, p. 363, Table 48; Language Reference SC27-8713-03, p. 334); a COMP-5 item, or any binary item under TRUNC(BIN), shows its whole binary value in 5, 10, or 19 (signed) or 20 digits for a halfword, fullword or doubleword, a BINARY-CHAR under --compliance extended in 3 for its byte (C460), a PIC X(n) COMP-5 item in the 3, 5, 8, 10, 13, 15, 17 or 20 digits its n bytes hold (C468), and a COMP-X item in its PICTURE's digits (C467). Under --dialect gnucobol DISPLAY shows them as cobc -std=ibm-strict does, whatever DISPSIGN says: a signed item's sign, + or -, before its digits, a packed or COMP-X item's digits those of its PICTURE, and any other binary item's whole value in the digits its bytes hold, 3, 5, 10 or 20 for a byte, halfword, fullword or doubleword",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },
@@ -2296,6 +2298,18 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: BINARY_CHAR,
         claim: "Under --compliance extended, BINARY-CHAR [SIGNED|UNSIGNED], Micro Focus's and GnuCOBOL's one-byte binary, is one byte holding -128 to 127, or 0 to 255 when UNSIGNED, SIGNED being the default; a value it receives keeps its low-order byte whatever TRUNC says, as a COMP-5 item's keeps its bytes, so MOVE 300 to an unsigned one gives 44 and ADD 1 to one holding 255 gives 0, as cobc 3.2 gives them. It takes no PICTURE, counts as three integer digits wherever a PICTURE's digits are asked for, and SYNCHRONIZED leaves it where it is. Enterprise COBOL has no one-byte binary item",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: COMP_X,
+        claim: "Under --compliance extended, Micro Focus's COMP-X is binary in the fewest bytes that hold its PICTURE's digits: one byte for 1 or 2 digits, two for 3 or 4, three for 5 to 7, four for 8 or 9, five for 10 to 12, six for 13 or 14, seven for 15 or 16 and eight for 17 or 18, a signed PICTURE taking the same bytes, as cobc 3.2 gives them. PIC X(n) COMP-X is n bytes, one to eight, unsigned, with the 2, 4, 7, 9, 12, 14, 16 or 19 digit positions Micro Focus documents, where cobc 3.2 gives eight bytes 18. A value it receives keeps its low-order bytes whatever TRUNC says, ON SIZE ERROR is taken where a result does not fit them, and DISPLAY and a MOVE to an alphanumeric item show its digit positions, the value's low-order digits, as cobc 3.2 gives them. Its bytes are big-endian, as Micro Focus's are. SYNCHRONIZED aligns one of two or four bytes on its size, one of eight on four, and leaves the others where they are. Enterprise COBOL has no COMP-X",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+    },
+    Assumption {
+        id: PIC_X_COMP_5,
+        claim: "Under --compliance extended, COMP-5 with an alphanumeric PICTURE, Micro Focus's and GnuCOBOL's PIC X(n) COMP-5, is n bytes of unsigned binary, one to eight, limited by its bytes as any COMP-5 item is. DISPLAY shows its whole value in the 3, 5, 8, 10, 13, 15, 17 or 20 digits its bytes hold, and a MOVE to an alphanumeric item the 2, 4, 7, 9, 12, 14, 16 or 19 digit positions Micro Focus gives PIC X(n) COMP-X, as cobc 3.2 does but for eight bytes, which cobc moves as 18. Its bytes are big-endian, z/Architecture's order, where cobc on x86-64 writes them little-endian. SYNCHRONIZED aligns it as COMP-X (C467). Enterprise COBOL's COMP-5 takes a numeric PICTURE",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
     },

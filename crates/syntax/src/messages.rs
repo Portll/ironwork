@@ -346,6 +346,9 @@ catalogue! {
     IWC0298 Severe "{DISPLAY or ACCEPT on the screen, or the SCREEN SECTION}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0299 Severe "{a locking phrase}: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0300 Severe "CALL ... RETURNING {OMITTED, NOTHING or NULL}: GnuCOBOL's, not Enterprise COBOL's, whose RETURNING names a data item; --compliance extended reads it";
+    IWC0301 Severe "COMP-X: Micro Focus's binary in the fewest bytes its digits need, not Enterprise COBOL's; --compliance extended reads it";
+    IWC0302 Severe "PIC X(n) COMP-5: Micro Focus's and GnuCOBOL's binary of n bytes, where Enterprise COBOL's COMP-5 takes a numeric PICTURE; --compliance extended reads it";
+    IWC0303 Severe "PIC X({n}) {COMP-X or COMP-5}: {n} bytes of binary, and ironwork's binary items hold at most eight";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
     IWJ0003 Severe "unbalanced parentheses or quotes in {text}";
@@ -834,6 +837,8 @@ catalogue! {
     IWX0022 Warning "{a locking phrase} (Micro Focus and GnuCOBOL; Enterprise COBOL has no record locks of its own): the run unit is the file's only user, so nothing it locks waits and the phrase changes nothing";
     IWX0023 Warning "INSPECT ... TRAILING (GnuCOBOL; Enterprise COBOL has ALL, LEADING, FIRST and CHARACTERS): the occurrences that run on to the end of the phrase's region";
     IWX0024 Warning "CALL ... RETURNING {OMITTED, NOTHING or NULL} (GnuCOBOL; Enterprise COBOL's RETURNING names a data item): the CALL leaves the caller's RETURN-CODE as it was";
+    IWX0025 Warning "COMP-X (Micro Focus; Enterprise COBOL's binary items are two, four or eight bytes): {name} is {n} bytes of binary, {range}, shown in {digits} digits";
+    IWX0026 Warning "PIC X(n) COMP-5 (Micro Focus and GnuCOBOL; Enterprise COBOL's COMP-5 takes a numeric PICTURE): {name} is {n} bytes of binary, {range}";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

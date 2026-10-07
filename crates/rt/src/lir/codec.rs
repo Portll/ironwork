@@ -36,7 +36,7 @@ codec_enum!(Kind {
     ProgramPointer = 12,
     Dbcs { justified, edit } = 13,
 });
-codec_enum!(Native { No = 0, Comp5 = 1, BinaryChar = 2 });
+codec_enum!(Native { No = 0, Comp5 = 1, BinaryChar = 2, CompX = 3, Comp5Bytes = 4 });
 codec_struct!(SignClause { position, separate });
 codec_struct!(Pos { file, line, col });
 codec_enum!(SignPosition { Leading = 0, Trailing = 1 });

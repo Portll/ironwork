@@ -6,7 +6,7 @@ use crate::fixed::{pow10, zoned_digits};
 use crate::storage::{Kind, Loc, Val};
 use crate::store::{self, ProgramFacts};
 use crate::vocab::{Pos, SignClause, SignPosition};
-use numeric::{Dialect, DispSign, Switched, Trunc};
+use numeric::{Dialect, DispSign, Native, Switched};
 use std::io::Write;
 use zarch::decimal;
 use zarch::ebcdic::CodePage;
@@ -28,6 +28,7 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos, upon_cons
         Kind::Packed { digits, signed, .. } | Kind::Binary { digits, signed, .. } if facts.options().dialect_of(Switched::DisplayOfNondisplayNumeric) == Dialect::Gnucobol => {
             let Val::Num(f) = store::read_stored(facts, mem, loc, pos)? else { unreachable!() };
             let shown = match loc.kind {
+                Kind::Binary { native: Native::CompX, .. } => zoned_digits(f.magnitude.div_rem(pow10(digits)).1.to_u128().unwrap_or(0), digits as usize, decimal::UNSIGNED),
                 Kind::Binary { .. } => zoned_digits(f.magnitude.to_u128().unwrap_or(0), whole_binary_digits(loc.len), decimal::UNSIGNED),
                 _ => zoned_digits(f.magnitude.div_rem(pow10(digits)).1.to_u128().unwrap_or(0), digits as usize, decimal::UNSIGNED),
             };
@@ -37,16 +38,13 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos, upon_cons
             let Val::Num(f) = store::read_stored(facts, mem, loc, pos)? else { unreachable!() };
             let zone = if signed && !separate && f.negative { decimal::MINUS } else { decimal::UNSIGNED };
             let whole = match loc.kind {
-                Kind::Binary { native, .. } => native.is_native() || facts.options().trunc == Trunc::Bin,
+                Kind::Binary { native, .. } => native.shows_whole(facts.options().trunc),
                 _ => false,
             };
             let shown = if whole {
                 let width = match loc.len {
-                    1 => 3,
-                    2 => 5,
-                    4 => 10,
-                    _ if signed => 19,
-                    _ => 20,
+                    8 if signed => 19,
+                    len => whole_binary_digits(len),
                 };
                 zoned_digits(f.magnitude.to_u128().unwrap_or(0), width, zone)
             } else {
@@ -69,16 +67,11 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos, upon_cons
     })
 }
 
-/// The digits that hold any value of a binary item of `len` bytes: 3 for a BINARY-CHAR's byte, 5, 10
-/// or 20 for a halfword, fullword or doubleword. cobc -std=ibm-strict shows any binary item in
-/// them, whatever its PICTURE.
+/// The digits that hold any value of a binary item of `len` bytes, 1 to 8: 3 for a BINARY-CHAR's
+/// byte, 5, 10 or 20 for a halfword, fullword or doubleword. cobc -std=ibm-strict shows any binary
+/// item in them, whatever its PICTURE.
 pub const fn whole_binary_digits(len: usize) -> usize {
-    match len {
-        1 => 3,
-        2 => 5,
-        4 => 10,
-        _ => 20,
-    }
+    [3, 5, 8, 10, 13, 15, 17, 20][len - 1]
 }
 
 /// Zoned digits after a separate sign, as DISPSIGN(SEP) shows a signed item.

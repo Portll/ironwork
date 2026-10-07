@@ -14,15 +14,37 @@ pub enum Native {
     /// GnuCOBOL's and Micro Focus's BINARY-CHAR under `--compliance extended`: one byte, never
     /// truncated to its three digits.
     BinaryChar,
+    /// Micro Focus's COMP-X under `--compliance extended`: the fewest bytes that hold the PICTURE's
+    /// digits, never truncated to them, and shown in them.
+    CompX,
+    /// PIC X(n) COMP-5 under `--compliance extended`: n bytes, unsigned, never truncated, and shown
+    /// in the digits that hold its whole value.
+    Comp5Bytes,
 }
 
 impl Native {
     pub const fn is_native(self) -> bool {
         !matches!(self, Native::No)
     }
+
+    /// Whether DISPLAY, a MOVE to an alphanumeric item, JSON and XML show the digits that hold any
+    /// value of the item's bytes rather than its PICTURE's digits.
+    pub fn shows_whole(self, trunc: Trunc) -> bool {
+        match self {
+            Native::No => trunc == Trunc::Bin,
+            Native::CompX => false,
+            Native::Comp5 | Native::BinaryChar | Native::Comp5Bytes => true,
+        }
+    }
 }
 
-/// A USAGE BINARY, COMP or COMP-4 item, COMP-5 or BINARY-CHAR as `native` says.
+/// The digit positions Micro Focus gives a PIC X(n) COMP-X item, `n` from 1 to 8: the digits any
+/// value of its n bytes can hold in full.
+pub const fn alphanumeric_digits(n: u32) -> u8 {
+    [2, 4, 7, 9, 12, 14, 16, 19][n as usize - 1]
+}
+
+/// A USAGE BINARY, COMP or COMP-4 item, or COMP-5, BINARY-CHAR or COMP-X as `native` says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Binary {
     pub digits: u8,
@@ -34,6 +56,13 @@ impl Binary {
     pub const fn bytes(self) -> usize {
         match (self.native, self.digits) {
             (Native::BinaryChar, _) => 1,
+            (Native::CompX | Native::Comp5Bytes, 0..=2) => 1,
+            (Native::CompX | Native::Comp5Bytes, 3..=4) => 2,
+            (Native::CompX | Native::Comp5Bytes, 5..=7) => 3,
+            (Native::CompX | Native::Comp5Bytes, 8..=9) => 4,
+            (Native::CompX | Native::Comp5Bytes, 10..=12) => 5,
+            (Native::CompX | Native::Comp5Bytes, 13..=14) => 6,
+            (Native::CompX | Native::Comp5Bytes, 15..=16) => 7,
             (_, 0..=4) => 2,
             (_, 5..=9) => 4,
             _ => 8,
@@ -147,6 +176,17 @@ mod tests {
         assert_eq!(store(byte(false), 300, &with(Trunc::Std)).value, 44);
         assert_eq!(store(byte(true), 200, &with(Trunc::Std)).value, -56);
         assert_eq!(byte(true).load(&[0x80]), -128);
+    }
+
+    #[test]
+    fn comp_x_takes_the_fewest_bytes_for_its_digits_and_keeps_what_they_hold() {
+        let comp_x = |digits| Binary { digits, signed: false, native: Native::CompX };
+        let sizes: Vec<usize> = (1..=18).map(|d| comp_x(d).bytes()).collect();
+        assert_eq!(sizes, [1, 1, 2, 2, 3, 3, 3, 4, 4, 5, 5, 5, 6, 6, 7, 7, 8, 8]);
+        assert_eq!(store(comp_x(2), 250, &with(Trunc::Std)).value, 250);
+        assert_eq!(store(comp_x(2), 300, &with(Trunc::Std)).value, 44);
+        let pic_x = |n| Binary { digits: alphanumeric_digits(n), signed: false, native: Native::Comp5Bytes }.bytes();
+        assert_eq!((1..=7).map(pic_x).collect::<Vec<_>>(), [1, 2, 3, 4, 5, 6, 7]);
     }
 
     #[test]

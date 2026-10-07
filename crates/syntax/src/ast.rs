@@ -229,6 +229,9 @@ pub enum Usage {
     NativeBinary,
     /// GnuCOBOL's and Micro Focus's BINARY-CHAR [SIGNED|UNSIGNED]: one byte of binary, no PICTURE.
     BinaryChar { signed: bool },
+    /// Micro Focus's COMP-X: binary in the fewest bytes that hold the PICTURE's digits, or n bytes
+    /// for PIC X(n).
+    CompX,
     Packed,
     Float1,
     Float2,

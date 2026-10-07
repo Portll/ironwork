@@ -291,6 +291,7 @@ fn usage_word(word: &str) -> Option<Usage> {
         "DISPLAY" => Usage::Display,
         "BINARY" | "COMP" | "COMPUTATIONAL" | "COMP-4" | "COMPUTATIONAL-4" => Usage::Binary,
         "COMP-5" | "COMPUTATIONAL-5" => Usage::NativeBinary,
+        "COMP-X" | "COMPUTATIONAL-X" => Usage::CompX,
         "BINARY-CHAR" => Usage::BinaryChar { signed: true },
         "PACKED-DECIMAL" | "COMP-3" | "COMPUTATIONAL-3" => Usage::Packed,
         "COMP-1" | "COMPUTATIONAL-1" => Usage::Float1,

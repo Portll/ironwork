@@ -8,7 +8,7 @@ use super::flow::Ctx;
 use super::{Lower, LowerError, R, push, unsupported};
 use crate::layout::Resolved;
 use numeric::binary::Binary;
-use numeric::{Native, Trunc};
+use numeric::Native;
 use rt::abend::AbendCode;
 use rt::lir::{self, AbendId, Ccsid, Convert, Count, IntExpr, Markup, MarkupId, Named, NumberInto, Op, PlaceId, RangeId, RangeKind, SetTo, StorePlan, Terminator, XmlForm, XmlRegister};
 use rt::storage::Kind;
@@ -225,7 +225,7 @@ impl Lower<'_> {
         let scaling = i.scaling;
         let fixed = |integers: u32| if scaling > 0 { Convert::Scaled { integers, scaling } } else { Convert::Fixed { integers } };
         let binary_integers = |digits: u32, scale: u32, signed: bool, native: Native| {
-            if native.is_native() || self.c.options.trunc == Trunc::Bin {
+            if native.shows_whole(self.c.options.trunc) {
                 let whole = rt::display::whole_binary_digits(Binary { digits: digits as u8, signed, native }.bytes()) as u32;
                 whole - scale.min(whole)
             } else {

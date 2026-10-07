@@ -1962,6 +1962,8 @@ fn native_word(native: Native) -> &'static str {
         Native::No => "",
         Native::Comp5 => " native",
         Native::BinaryChar => " binary-char",
+        Native::CompX => " comp-x",
+        Native::Comp5Bytes => " native-bytes",
     }
 }
 

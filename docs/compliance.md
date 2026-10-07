@@ -632,6 +632,32 @@ form in its own CALL. They differ in a RECURSIVE program that CALLs itself: cobc
 RETURN-CODE for each program, which the levels of a recursion share, so the caller's RETURN-CODE
 is what the deeper level last set; in ironwork each level gets back its own.
 
+### IWX0025-W COMP-X and IWX0026-W PIC X(n) COMP-5
+
+`IWX0025-W COMP-X (Micro Focus; Enterprise COBOL's binary items are two, four or eight bytes): N7 is
+3 bytes of binary, 0 to 16777215, shown in 7 digits` and `IWX0026-W PIC X(n) COMP-5 (Micro Focus
+and GnuCOBOL; Enterprise COBOL's COMP-5 takes a numeric PICTURE): F2 is 2 bytes of binary, 0 to
+65535`, at the data entry.
+
+`PIC 9(n) COMP-X` is binary in the fewest bytes that hold n digits: one byte for 1 or 2 digits, two
+for 3 or 4, three for 5 to 7, four for 8 or 9, and so on to eight bytes for 17 or 18, a signed
+PICTURE taking the same bytes, as cobc 3.2 gives them. `PIC X(n) COMP-X` is n bytes of unsigned
+binary, one to eight, with the 2, 4, 7, 9, 12, 14, 16 or 19 digit positions Micro Focus documents.
+A value either receives keeps its low-order bytes whatever TRUNC says, and ON SIZE ERROR is taken
+where a result does not fit them: `PIC 99 COMP-X` holds 250, and ADD 10 to it is a size error.
+DISPLAY and a MOVE to an alphanumeric item show the item's digits, the value's low-order ones, so
+that 250 in `PIC 99 COMP-X` shows as `50`, as cobc gives it. Assumption C467.
+
+`PIC X(n) COMP-5` is n bytes of unsigned binary, one to eight, limited by its bytes as any COMP-5
+item is. DISPLAY shows its whole value in the 3, 5, 8, 10, 13, 15, 17 or 20 digits its bytes hold,
+and a MOVE to an alphanumeric item its COMP-X digit positions, as cobc does. Its bytes are
+big-endian, z/Architecture's order; cobc on x86-64 writes them little-endian. Assumption C468.
+
+SYNCHRONIZED aligns either on two or four bytes for an item of that size, on four for eight bytes,
+and leaves the others where they are. An alphanumeric PICTURE of more than eight bytes is refused
+(IWC0303); Micro Focus takes up to sixteen. Strict refuses COMP-X (IWC0301) and an alphanumeric
+PICTURE with COMP-5 (IWC0302).
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

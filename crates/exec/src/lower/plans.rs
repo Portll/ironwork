@@ -5,7 +5,7 @@
 use super::data::{Side, Value, Within, scale};
 use super::{Lower, R, push, unsupported};
 use numeric::precision::Dmax;
-use numeric::{Dialect, Numproc, Switched, Trunc};
+use numeric::{Dialect, Native, Numproc, Switched};
 use crate::machine::divided_exponent;
 use compile::values::value_kind;
 use rt::lir::{
@@ -270,15 +270,13 @@ impl Lower<'_> {
                         Kind::National => DisplayItem::Bytes(place),
                         Kind::Packed { digits, signed, .. } => DisplayItem::Digits { place, digits, signed },
                         Kind::Binary { digits, signed, native, .. } => {
-                            let whole = native.is_native() || self.c.options.trunc == Trunc::Bin;
+                            let whole = native.shows_whole(self.c.options.trunc);
                             let digits = match self.places[place as usize].len {
+                                _ if native == Native::CompX => digits,
                                 len if self.c.options.dialect_of(Switched::DisplayOfNondisplayNumeric) == Dialect::Gnucobol => rt::display::whole_binary_digits(len as usize) as u32,
                                 _ if !whole => digits,
-                                1 => 3,
-                                2 => 5,
-                                4 => 10,
-                                _ if signed => 19,
-                                _ => 20,
+                                8 if signed => 19,
+                                len => rt::display::whole_binary_digits(len as usize) as u32,
                             };
                             DisplayItem::Digits { place, digits, signed }
                         }

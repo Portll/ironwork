@@ -674,6 +674,11 @@ fn ancestors(items: &[Item], i: usize) -> impl Iterator<Item = usize> + '_ {
 fn alignment(kind: Kind) -> u32 {
     match kind {
         Kind::Binary { native: Native::BinaryChar, .. } => 1,
+        Kind::Binary { digits, signed, native: native @ (Native::CompX | Native::Comp5Bytes), .. } => match (numeric::binary::Binary { digits: digits as u8, signed, native }).bytes() {
+            bytes @ (2 | 4) => bytes as u32,
+            8 => 4,
+            _ => 1,
+        },
         Kind::Binary { digits: 0..=4, .. } => 2,
         Kind::Binary { .. } | Kind::Float(Precision::Short) | Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer => 4,
         Kind::Float(_) => 8,
@@ -741,10 +746,23 @@ fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, sign: Option<SignClaus
         }
         (Category::Numeric, Usage::Display) => Kind::Zoned { digits: pic.digits, scale: pic.scale, signed: pic.signed, sign: sign.filter(|_| pic.signed) },
         (Category::Numeric, Usage::Packed) => Kind::Packed { digits: pic.digits, scale: pic.scale, signed: pic.signed },
-        (Category::Numeric, Usage::Binary | Usage::NativeBinary) if pic.digits <= 18 => {
-            Kind::Binary { digits: pic.digits, scale: pic.scale, signed: pic.signed, native: if usage == Usage::NativeBinary { Native::Comp5 } else { Native::No } }
+        (Category::Numeric, Usage::Binary | Usage::NativeBinary | Usage::CompX) if pic.digits <= 18 => {
+            let native = match usage {
+                Usage::NativeBinary => Native::Comp5,
+                Usage::CompX => Native::CompX,
+                _ => Native::No,
+            };
+            Kind::Binary { digits: pic.digits, scale: pic.scale, signed: pic.signed, native }
         }
-        (Category::Numeric, Usage::Binary | Usage::NativeBinary) => return Err(err(syntax::messages::IWC0241, "a binary item holds at most 18 digits".into())),
+        (Category::Numeric, Usage::Binary | Usage::NativeBinary | Usage::CompX) => return Err(err(syntax::messages::IWC0241, "a binary item holds at most 18 digits".into())),
+        (Category::Alphanumeric, Usage::CompX | Usage::NativeBinary) if pic.size <= 8 => {
+            let native = if usage == Usage::CompX { Native::CompX } else { Native::Comp5Bytes };
+            Kind::Binary { digits: u32::from(numeric::binary::alphanumeric_digits(pic.size)), scale: 0, signed: false, native }
+        }
+        (Category::Alphanumeric, Usage::CompX | Usage::NativeBinary) => {
+            let usage = if usage == Usage::CompX { "COMP-X" } else { "COMP-5" };
+            return Err(err(syntax::messages::IWC0303, format!("PIC X({}) {usage}: {} bytes of binary, and ironwork's binary items hold at most eight", pic.size, pic.size)));
+        }
         (Category::Alphanumeric, Usage::Display) => Kind::Alnum { justified: e.justified },
         (Category::Dbcs | Category::National, Usage::Dbcs) => {
             if pic.edit.is_some() && e.justified {

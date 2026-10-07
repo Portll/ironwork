@@ -527,7 +527,8 @@ pub enum StorePlan {
     Zoned { digits: u32, scale: u32, signed: bool, sign: Option<SignClause> },
     Packed { digits: u32, scale: u32, signed: bool },
     /// `name` labels a TRUNC(OPT) report (machine.rs:1596-1608).
-    /// `native`: `No` for BINARY, COMP and COMP-4, `Comp5`, or `BinaryChar`, one byte (load-module.md §5.2).
+    /// `native`: `No` for BINARY, COMP and COMP-4, `Comp5`, `BinaryChar` (one byte), `CompX` or
+    /// `Comp5Bytes` for PIC X(n) COMP-5 (load-module.md §5.2).
     Binary { digits: u32, scale: u32, signed: bool, native: Native, name: SymId },
     NumericEdited { edit: u32, digits: u32, scale: u32, blank_when_zero: bool },
     Float(Precision),

@@ -210,6 +210,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     });
     digit_limits(&program, options.arith, &mut errors);
     binary_chars(&program, &options, &mut errors);
+    micro_focus_binaries(&program, &options, &mut errors);
     let drafts = report::prepare(&mut program, options.adv, options.qualify, &mut errors);
     let linage_counters = linage::add_counters(&mut program, options.qualify);
     if whole {
@@ -862,6 +863,41 @@ fn binary_chars(program: &Program, options: &Options, errors: &mut Vec<Error>) {
         let name = e.name.as_deref().unwrap_or("FILLER");
         let range = if signed { "-128 to 127" } else { "0 to 255" };
         errors.push(syntax::messages::IWX0016.at(e.pos, format!("BINARY-CHAR (Micro Focus and GnuCOBOL; Enterprise COBOL's binary items are two, four or eight bytes): {name} is one byte of binary, {range}")));
+    }
+}
+
+/// COMP-X, and COMP-5 with an alphanumeric PICTURE, Micro Focus's binary of one to eight bytes: a
+/// warning naming its bytes and range under `--compliance extended` (assumptions C467 and C468),
+/// refused under strict. Layout refuses a PIC X(n) of more than eight bytes.
+fn micro_focus_binaries(program: &Program, options: &Options, errors: &mut Vec<Error>) {
+    let entries = program.working_storage.iter().chain(&program.local_storage).chain(&program.linkage).chain(program.files.iter().flat_map(|f| &f.records));
+    for e in entries {
+        let Some(usage @ (Usage::CompX | Usage::NativeBinary)) = e.usage else { continue };
+        let Some(pic) = e.picture.as_deref().and_then(|p| picture::analyse(p).ok()) else { continue };
+        let (native, digits, signed) = match (usage, pic.category) {
+            (Usage::CompX, picture::Category::Numeric) if pic.digits <= 18 => (numeric::Native::CompX, pic.digits as u8, pic.signed),
+            (Usage::CompX, picture::Category::Alphanumeric) if pic.size <= 8 => (numeric::Native::CompX, numeric::binary::alphanumeric_digits(pic.size), false),
+            (Usage::NativeBinary, picture::Category::Alphanumeric) if pic.size <= 8 => (numeric::Native::Comp5Bytes, numeric::binary::alphanumeric_digits(pic.size), false),
+            _ => continue,
+        };
+        if options.compliance == numeric::Compliance::Strict {
+            errors.push(if native == numeric::Native::CompX {
+                syntax::messages::IWC0301.at(e.pos, "COMP-X: Micro Focus's binary in the fewest bytes its digits need, not Enterprise COBOL's; --compliance extended reads it")
+            } else {
+                syntax::messages::IWC0302.at(e.pos, "PIC X(n) COMP-5: Micro Focus's and GnuCOBOL's binary of n bytes, where Enterprise COBOL's COMP-5 takes a numeric PICTURE; --compliance extended reads it")
+            });
+            continue;
+        }
+        let name = e.name.as_deref().unwrap_or("FILLER");
+        let bytes = numeric::binary::Binary { digits, signed, native }.bytes();
+        let bits = 8 * bytes as u32;
+        let range = if signed { format!("-{} to {}", 1u64 << (bits - 1), (1u64 << (bits - 1)) - 1) } else { format!("0 to {}", u64::MAX >> (64 - bits)) };
+        let plural = if bytes == 1 { "" } else { "s" };
+        errors.push(if native == numeric::Native::CompX {
+            syntax::messages::IWX0025.at(e.pos, format!("COMP-X (Micro Focus; Enterprise COBOL's binary items are two, four or eight bytes): {name} is {bytes} byte{plural} of binary, {range}, shown in {digits} digits"))
+        } else {
+            syntax::messages::IWX0026.at(e.pos, format!("PIC X(n) COMP-5 (Micro Focus and GnuCOBOL; Enterprise COBOL's COMP-5 takes a numeric PICTURE): {name} is {bytes} byte{plural} of binary, {range}"))
+        });
     }
 }
 

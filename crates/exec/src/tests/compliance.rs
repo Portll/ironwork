@@ -804,3 +804,59 @@ fn call_returning_nothing_names_an_item_a_program_declares_nothing() {
     let Stmt::Call(call) = &compiled.program.paragraphs[0].statements[0] else { panic!("{:?}", compiled.program.paragraphs[0].statements) };
     assert_eq!(call.returning.as_ref().map(|r| r.name.as_str()), Some("NOTHING"));
 }
+
+/// COMP-X items of a numeric and an alphanumeric PICTURE stored past their digits, and a PIC XX
+/// COMP-5 item past its bytes.
+const COMP_X: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. COMPX.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  V2  PIC 99 COMP-X.\n",
+    "       01  N7  PIC 9(7) COMP-X.\n",
+    "       01  X1  PIC X COMP-X.\n",
+    "       01  X2  PIC XX COMP-X VALUE 258.\n",
+    "       01  F2  PIC XX COMP-5.\n",
+    "       01  X8  PIC X(8) COMP-X.\n",
+    "       01  X8R REDEFINES X8 PIC X(8).\n",
+    "       01  A6  PIC X(6).\n",
+    "       01  L   PIC 9.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE 250 TO V2\n",
+    "           ADD 10 TO V2 ON SIZE ERROR DISPLAY 'SIZE' END-ADD\n",
+    "           COMPUTE V2 = V2 + 5\n",
+    "           MOVE 300 TO X1\n",
+    "           MOVE 70000 TO F2\n",
+    "           COMPUTE L = FUNCTION LENGTH(N7)\n",
+    "           DISPLAY V2 ' ' X1 ' ' X2 ' ' F2 ' ' L\n",
+    "           MOVE V2 TO A6\n",
+    "           MOVE HIGH-VALUES TO X8R\n",
+    "           DISPLAY A6 ' ' X8 ' ' FUNCTION HEX-OF(X2)\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn comp_x_is_limited_by_its_bytes_and_shown_in_its_digits_alike_on_both_executors() {
+    let walked = Harness::source(COMP_X).flags(EXTENDED).run(Executor::Interpreter);
+    assert!(walked.ending.is_ok(), "{:?}\n{}", walked.ending, walked.err);
+    assert_eq!(walked.out, "SIZE\n55 44 0258 04464 3\n55     8446744073709551615 0102\n");
+    let vm = Harness::source(COMP_X).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+}
+
+#[test]
+fn comp_x_and_pic_x_comp_5_are_warnings_naming_their_bytes_under_extended_and_refused_under_strict() {
+    let warned = diagnostics_under(COMP_X, numeric::Compliance::Extended);
+    let ids: Vec<(u32, Option<&str>)> = warned.iter().map(|d| (d.0, d.2)).collect();
+    assert_eq!(ids, [(5, Some("IWX0025")), (6, Some("IWX0025")), (7, Some("IWX0025")), (8, Some("IWX0025")), (9, Some("IWX0026")), (10, Some("IWX0025"))]);
+    let parsed = syntax::parse_with(COMP_X, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap();
+    let compiled = compile(parsed, &EXTENDED.iter().map(|f| f.to_string()).collect::<Vec<_>>()).unwrap_or_else(|e| panic!("{e:?}"));
+    let messages: Vec<&str> = compiled.diagnostics.iter().map(|m| m.message.as_str()).collect();
+    assert!(messages[1].ends_with("N7 is 3 bytes of binary, 0 to 16777215, shown in 7 digits"), "{}", messages[1]);
+    assert!(messages[4].ends_with("F2 is 2 bytes of binary, 0 to 65535"), "{}", messages[4]);
+    let refused = diagnostics_under(COMP_X, numeric::Compliance::Strict);
+    let ids: Vec<(u32, Option<&str>)> = refused.iter().map(|d| (d.0, d.2)).collect();
+    assert_eq!(ids, [(5, Some("IWC0301")), (6, Some("IWC0301")), (7, Some("IWC0301")), (8, Some("IWC0301")), (9, Some("IWC0302")), (10, Some("IWC0301"))]);
+    let nine = program("", "       01  P PIC X(9) COMP-X.\n", &line("GOBACK."));
+    assert!(diagnostics_under(&nine, numeric::Compliance::Extended).iter().any(|d| d.2 == Some("IWC0303")));
+}

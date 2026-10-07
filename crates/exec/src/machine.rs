@@ -11,7 +11,7 @@ use crate::unit::{ADDRESS_BASE, Event, LoadError, OS_COMMAND_ROUTINES, RETURN_CO
 use crate::Compiled;
 use compile::values::value_kind;
 use numeric::precision::{Dmax, Fixed, Places};
-use numeric::{LeServices, Options, ProgramScope, Switched, Trunc};
+use numeric::{LeServices, Options, ProgramScope, Switched};
 use rt::fixed::{align, places_of};
 use rt::arith;
 use rt::callee::{self, Bindings, By, Callee};
