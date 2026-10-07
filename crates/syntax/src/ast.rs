@@ -600,6 +600,9 @@ pub enum Stmt {
     StopRun { pos: Pos },
     Continue { pos: Pos },
     Exit { kind: ExitKind, pos: Pos },
+    /// What `--compliance relaxed` compiled in place of a sentence or statement ironwork refuses:
+    /// a run that reaches it ends with IWR0078, naming `construct` and `why` it was refused.
+    Hole { construct: String, why: String, pos: Pos },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

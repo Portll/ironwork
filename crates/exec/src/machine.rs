@@ -466,6 +466,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Stmt::Exit { kind: ExitKind::Perform, .. } => return Ok(Flow::ExitPerform),
             Stmt::Exit { kind: ExitKind::PerformCycle, .. } => return Ok(Flow::ExitPerformCycle),
             Stmt::Continue { .. } | Stmt::Exit { kind: ExitKind::Plain, .. } => {}
+            Stmt::Hole { construct, why, pos } => {
+                return Err(rt::refusal::IWR0078.abend(format_args!("{construct} was reached: under --compliance relaxed it compiled as a hole, since {why}"), *pos));
+            }
         }
         Ok(Flow::Next)
     }

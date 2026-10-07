@@ -342,6 +342,7 @@ impl Tested<'_> {
             | Stmt::Exec(_)
             | Stmt::Report(_)
             | Stmt::Continue { .. }
+            | Stmt::Hole { .. }
             | Stmt::Exit { .. }
             | Stmt::Corresponding(_) => {}
         }

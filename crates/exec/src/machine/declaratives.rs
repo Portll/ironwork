@@ -97,7 +97,7 @@ pub(super) fn statement_pos(s: &Stmt) -> Option<Pos> {
             Sorting::Sort(st) => st.pos,
             Sorting::Release { pos, .. } | Sorting::Return { pos, .. } => *pos,
         },
-        Stmt::Continue { pos } | Stmt::Exit { pos, .. } => *pos,
+        Stmt::Continue { pos } | Stmt::Exit { pos, .. } | Stmt::Hole { pos, .. } => *pos,
         Stmt::NextSentence | Stmt::SentenceEnd => return None,
     })
 }

@@ -932,7 +932,7 @@ impl<'w, 'p> Walk<'w, 'p> {
                     self.call_out(&mut st);
                 }
             }
-            Stmt::Report(_) | Stmt::Continue { .. } => {}
+            Stmt::Report(_) | Stmt::Continue { .. } | Stmt::Hole { .. } => {}
             Stmt::JsonGenerate(g) => {
                 self.read(&g.from, g.pos, &st);
                 if let Some(Encoding::Ccsid(op)) = &g.encoding {

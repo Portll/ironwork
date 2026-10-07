@@ -245,7 +245,7 @@ fn parse_from(text: &str, libraries: &copy::Libraries, start: source::Start) -> 
     if compliance == numeric::Compliance::Extended {
         tokens = extended::rewrite(tokens, &source.options).map_err(|e| e.in_files(&files))?;
     }
-    let mut programs = parser::parse(&tokens, source.options, compliance).map_err(|e| e.in_files(&files))?;
+    let mut programs = parser::parse(&tokens, source.options, compliance, libraries.relaxed()).map_err(|e| e.in_files(&files))?;
     for p in &mut programs {
         p.sources = files.clone();
     }
@@ -343,6 +343,18 @@ mod tests {
         assert!(under(text, "fixed").is_err());
         let tabbed = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       PROCEDURE DIVISION.\n\t    GOBACK.\n";
         assert!(under(tabbed, "auto").unwrap().messages.iter().all(|m| m.id != Some("IWX0058")));
+    }
+
+    #[test]
+    fn relaxed_makes_a_sentence_that_does_not_parse_a_hole_up_to_its_period() {
+        let text = format!("{HEAD}       PROCEDURE DIVISION.\n           DISPLAY 'A'.\n           FROB X\n               WIBBLE.\n           DISPLAY 'B'.\n");
+        let flags = ["--compliance=extended".to_owned(), numeric::RELAXED.to_owned()];
+        let program = parse_with(&text, &copy::Libraries::default().with_flags(&flags)).unwrap();
+        let statements = &program.paragraphs[0].statements;
+        assert!(matches!(&statements[2], ast::Stmt::Hole { construct, why, pos } if construct == "the sentence at line 7" && why == "IWS0001-S a statement, found FROB" && pos.line == 7), "{statements:?}");
+        assert!(matches!(&statements[4], ast::Stmt::Display { pos, .. } if pos.line == 9), "{statements:?}");
+        assert_eq!(program.messages.iter().filter(|m| m.id == Some("IWX0059")).count(), 1);
+        assert!(parse_with(&text, &copy::Libraries::default().with_flags(&flags[..1])).is_err());
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::lexer::{Tok, Token};
-use crate::messages::{IWS0097, IWS0098, IWS0100, IWS0104, IWX0013, IWX0014, IWX0017};
+use crate::messages::{IWS0097, IWS0098, IWS0100, IWS0104, IWX0013, IWX0014, IWX0017, IWX0059};
 use crate::{Error, Pos};
 
 mod communication;
@@ -63,9 +63,10 @@ fn scope(programs: &mut [Program]) {
 /// Every program in the source, first to last, with nested programs after the one containing them,
 /// except that the first program comes ahead of the user-defined functions and prototypes before
 /// it, as the binder's ENTRY statement makes it the one a run enters (assumption C270).
-pub fn parse(tokens: &[Token], options: Vec<String>, compliance: numeric::Compliance) -> Result<Vec<Program>, Error> {
+pub fn parse(tokens: &[Token], options: Vec<String>, compliance: numeric::Compliance, relaxed: bool) -> Result<Vec<Program>, Error> {
     let mut parser = Parser::new(tokens);
     parser.extended = compliance == numeric::Compliance::Extended;
+    parser.relaxed = parser.extended && relaxed;
     let mut programs = Vec::new();
     parser.program(&options, &mut programs)?;
     while parser.peek().is_some() {
@@ -412,6 +413,8 @@ struct Parser<'a> {
     in_prototype: bool,
     /// `--compliance extended` is in force.
     extended: bool,
+    /// `--compliance relaxed` is: a sentence that does not parse becomes a hole.
+    relaxed: bool,
     /// The CD names of the program being parsed.
     cds: Vec<String>,
     /// The 01 and 77 items of the program being parsed that have no storage of their own: its
@@ -454,6 +457,7 @@ impl<'a> Parser<'a> {
             defined: Vec::new(),
             in_prototype: false,
             extended: false,
+            relaxed: false,
             cds: Vec::new(),
             unstored: Vec::new(),
         }
@@ -2166,9 +2170,41 @@ impl Parser<'_> {
             if self.is_word("DECLARATIVES") {
                 return Err(self.error("DECLARATIVES must begin the PROCEDURE DIVISION"));
             }
-            self.procedure_item(&mut paragraphs)?;
+            let start = self.at;
+            match self.procedure_item(&mut paragraphs) {
+                Err(e) if self.relaxed => self.hole(start, e, &mut paragraphs),
+                result => {
+                    result?;
+                }
+            }
         }
         Ok(paragraphs)
+    }
+
+    /// Under `--compliance relaxed`, the sentence from token `start` that gave `error`, up to its
+    /// period or the next header, as a hole with IWX0059-W.
+    fn hole(&mut self, start: usize, error: Error, paragraphs: &mut Vec<Paragraph>) {
+        self.at = start;
+        self.before.clear();
+        let pos = self.pos();
+        let mut moved = false;
+        while self.peek().is_some() && !self.at_end_program() && !self.at_division(&["IDENTIFICATION", "ID"]) && !(moved && (self.paragraph_header() || self.section_header())) {
+            let period = self.peek() == Some(&Tok::Period);
+            self.at += 1;
+            moved = true;
+            if period {
+                break;
+            }
+        }
+        let construct = format!("the sentence at line {}", pos.line);
+        let why = error.labelled();
+        self.messages.push(IWX0059.at(pos, format!("{construct} (--compliance relaxed): {why}; it compiles as a hole, and a run that reaches it ends with IWR0078")));
+        if paragraphs.is_empty() {
+            paragraphs.push(Paragraph { name: String::new(), statements: Vec::new(), section: None, is_section: false, priority: 0, pos });
+        }
+        let statements = &mut paragraphs.last_mut().unwrap().statements;
+        statements.push(Stmt::Hole { construct, why, pos });
+        statements.push(Stmt::SentenceEnd);
     }
 
     /// A section or paragraph header, a separator period, or statements, added to `paragraphs`; true for a section header.

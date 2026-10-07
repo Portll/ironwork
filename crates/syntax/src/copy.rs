@@ -17,6 +17,7 @@ pub struct Libraries {
     program: Option<PathBuf>,
     compliance: numeric::Compliance,
     source_format: numeric::SourceFormat,
+    relaxed: bool,
 }
 
 const COPYBOOKS: &[&str] = &[".cpy", ".CPY", ".copy", ".COPY"];
@@ -26,7 +27,7 @@ const MAX_DEPTH: usize = 32;
 
 impl Libraries {
     pub fn new(dirs: Vec<PathBuf>) -> Self {
-        Self { dirs, program: None, compliance: numeric::Compliance::Strict, source_format: numeric::SourceFormat::Auto }
+        Self { dirs, program: None, compliance: numeric::Compliance::Strict, source_format: numeric::SourceFormat::Auto, relaxed: false }
     }
 
     /// These libraries, for compiling the program in `program`.
@@ -45,7 +46,12 @@ impl Libraries {
 
     /// These libraries, read under the compliance level and source format `flags` give.
     pub fn with_flags(&self, flags: &[String]) -> Self {
-        Self { compliance: numeric::Compliance::of(flags), source_format: numeric::SourceFormat::of(flags), ..self.clone() }
+        Self { compliance: numeric::Compliance::of(flags), source_format: numeric::SourceFormat::of(flags), relaxed: numeric::Compliance::relaxed(flags), ..self.clone() }
+    }
+
+    /// Under `--compliance relaxed`.
+    pub fn relaxed(&self) -> bool {
+        self.relaxed
     }
 
     /// These libraries, read in `format` under `--compliance extended`.

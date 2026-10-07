@@ -563,7 +563,16 @@ impl Compliance {
     pub fn of(flags: &[String]) -> Self {
         flags.iter().rev().find_map(|f| f.strip_prefix("--compliance=").and_then(Self::named)).unwrap_or_default()
     }
+
+    /// Whether `flags` ask for `--compliance relaxed`: extended, with what it still refuses compiled
+    /// as holes that end a run reaching them.
+    pub fn relaxed(flags: &[String]) -> bool {
+        Self::of(flags) == Self::Extended && flags.iter().any(|f| f == RELAXED)
+    }
 }
+
+/// The flag `--compliance relaxed` adds to `--compliance=extended`.
+pub const RELAXED: &str = "--relaxed";
 
 /// How a source file is read under `--compliance extended`: in fixed form unless the file shows it
 /// is free form (`Auto`), in fixed form unless a directive in it says otherwise (`Fixed`), or in free
@@ -1089,7 +1098,9 @@ impl Options {
                 Some(c) => self.compliance = c,
                 None => return Err(OptionError::UnknownFlag(flag.to_owned())),
             },
-            // How the source was read, which the syntax crate has done before options apply.
+            // How the source was read and its holes made, which the syntax crate and the compiler's
+            // checks have done before options apply.
+            RELAXED => {}
             f if f.starts_with("--source-format=") => {
                 if SourceFormat::named(&f["--source-format=".len()..]).is_none() {
                     return Err(OptionError::UnknownFlag(flag.to_owned()));
@@ -1589,6 +1600,10 @@ mod tests {
         assert_eq!(flags(&[]), Compliance::Strict);
         assert_eq!(flags(&["-silent", "--compliance=extended"]), Compliance::Extended);
         assert_eq!(flags(&["--compliance=extended", "--compliance=strict"]), Compliance::Strict);
+        let relaxed = |given: &[&str]| Compliance::relaxed(&given.iter().map(|f| f.to_string()).collect::<Vec<_>>());
+        assert!(relaxed(&["--compliance=extended", RELAXED]));
+        assert!(!relaxed(&[RELAXED]) && !relaxed(&["--compliance=extended"]));
+        o.apply_flag(RELAXED).unwrap();
     }
 
     #[test]

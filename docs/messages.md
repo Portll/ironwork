@@ -871,6 +871,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0056 | W | `DISPLAY UPON SYSERR (GnuCOBOL and Micro Focus; Enterprise COBOL has no such device): the line is written to the run's standard error` |
 | IWX0057 | W | `COB-CRT-STATUS (GnuCOBOL's special register; Enterprise COBOL has no screen ACCEPT): it holds the key that ended the last screen ACCEPT, as GnuCOBOL's screenio.cpy numbers the keys` |
 | IWX0058 | W | `tab stops (GnuCOBOL and Micro Focus; Enterprise COBOL source holds no tab): {why each tab reaches the next column after a multiple of 8}` |
+| IWX0059 | W | `{construct} (--compliance relaxed): {why ironwork refuses it}; it compiles as a hole, and a run that reaches it ends with IWR0078` |
 
 ## Run-time refusals
 
@@ -895,3 +896,4 @@ severity S before the text, under the abend code IRONWORK, EXEC or JAVA.
 | IWR0072 | S | `{statement}: {name} is a Language Environment callable service that ironwork for COBOL does not provide yet` |
 | IWR0073 | S | `the VM does not run {construct} yet; run it with --interpret` |
 | IWR0074 | S | `{file}, a GLOBAL file of {declarer}, is written as a print file in one of {declarer} and {program} and not the other, which is not supported yet` |
+| IWR0078 | S | `{construct} was reached: under --compliance relaxed it compiled as a hole, since {why}` |

@@ -1,4 +1,4 @@
-# Compliance level: `--compliance strict|extended`
+# Compliance level: `--compliance strict|extended|relaxed`
 
 ironwork's target is IBM Enterprise COBOL for z/OS, and by default it refuses what Enterprise
 COBOL refuses. Real programs are also written for Micro Focus and GnuCOBOL. `--compliance
@@ -9,6 +9,7 @@ compiles and runs them; anything else stays refused with the message strict give
 |---|---|
 | `strict` (the default) | A construct Enterprise COBOL does not have is refused, and a form IBM's compiler flags gets IBM's message at IBM's severity |
 | `extended` | The extensions below are read as Micro Focus and GnuCOBOL read them, each with a warning |
+| `relaxed` | `extended`, and a PROCEDURE DIVISION sentence or statement extended refuses compiles as a hole that ends a run reaching it ([below](#relaxed)) |
 
 The flag is `--compliance strict|extended` (or `--compliance=extended`) on `run`, `check`, `cics`,
 `compile`, `job`, `fuzz` and `compare`. It is a compile option: `numeric::Options::compliance`,
@@ -1035,6 +1036,32 @@ cobc places it (its default `-ftab-width`), so `<tab><tab>IDENTIFICATION DIVISIO
 CUSTREC copybook, which runs past column 72 at cobc's stops and which cobc refuses, keep reading a
 tab as one column. A COPY member is read with a tab as one column. Enterprise COBOL's source comes
 from fixed-length records with no tab characters.
+
+## Relaxed
+
+`--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and
+more programs compile: what extended refuses in the PROCEDURE DIVISION becomes a hole, with
+`IWX0059-W {construct} (--compliance relaxed): {why}; it compiles as a hole, and a run that reaches
+it ends with IWR0078`, where `{why}` is the message extended gives.
+
+- A sentence that does not parse is a hole from its first token to its period, or to the next
+  paragraph or section header. The statements before it and after its period compile as ever.
+- A statement whose check gives a severe message (an undefined name, a GO TO of no paragraph, a
+  function ironwork does not have) is a hole. The innermost such statement is the hole, so an IF
+  whose THEN branch names no item keeps its condition and ELSE; the IF is a hole itself only where
+  its own part is refused.
+- A run that reaches a hole ends there with `ABEND IRONWORK: IWR0078-S {construct} was reached:
+  under --compliance relaxed it compiled as a hole, since {why}`, exit status 244, on the
+  interpreter and the VM alike; a load module carries the hole as an abend like any other. A run
+  that never reaches one runs as it would under extended.
+
+Relaxed changes nothing a program that compiles under extended does: such a program has no hole,
+and check, run and the load module are the same. What it does not make holes of: the IDENTIFICATION,
+ENVIRONMENT and DATA DIVISIONs (a refused data description, PICTURE or USAGE stays refused, with the
+message extended gives), the PROCEDURE DIVISION header, and messages of severity E, which compile as
+they do under every level (return code 8). The flag is kept with its value in an evidence journal's
+`argv`; a load module records `extended`, so a source a module CALLs when it runs is read under
+extended.
 
 ## How the six were chosen
 

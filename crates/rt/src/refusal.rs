@@ -54,4 +54,5 @@ catalogue! {
     IWR0072 "{statement}: {name} is a Language Environment callable service that ironwork for COBOL does not provide yet";
     IWR0073 "the VM does not run {construct} yet; run it with --interpret";
     IWR0074 "{file}, a GLOBAL file of {declarer}, is written as a print file in one of {declarer} and {program} and not the other, which is not supported yet";
+    IWR0078 "{construct} was reached: under --compliance relaxed it compiled as a hole, since {why}";
 }

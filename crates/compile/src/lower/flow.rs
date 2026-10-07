@@ -532,6 +532,11 @@ impl Lower<'_> {
                     }
                 }
             }
+            Stmt::Hole { construct, why, pos: _ } => {
+                let message = rt::refusal::IWR0078.message(format_args!("{construct} was reached: under --compliance relaxed it compiled as a hole, since {why}"));
+                let abend = self.abend(AbendCode::Ironwork, &message, None)?;
+                self.end(Terminator::Abend(abend), pos)?;
+            }
             Stmt::JsonGenerate(_) | Stmt::JsonParse(_) | Stmt::XmlGenerate(_) | Stmt::XmlParse(_) => self.markup(s, pos, &inner)?,
             Stmt::Sorting(so) => self.sorting(so, pos, &inner)?,
             Stmt::Report(r) => self.report_statement(r, pos)?,
@@ -951,7 +956,7 @@ fn stmt_pos(s: &Stmt) -> Option<Pos> {
             Sorting::Sort(st) => st.pos,
             Sorting::Release { pos, .. } | Sorting::Return { pos, .. } => *pos,
         },
-        Stmt::Continue { pos } | Stmt::Exit { pos, .. } => *pos,
+        Stmt::Continue { pos } | Stmt::Exit { pos, .. } | Stmt::Hole { pos, .. } => *pos,
         Stmt::NextSentence | Stmt::SentenceEnd => return None,
     })
 }

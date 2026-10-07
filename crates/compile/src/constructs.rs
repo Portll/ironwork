@@ -352,6 +352,7 @@ impl Walk<'_> {
             | Stmt::SentenceEnd
             | Stmt::ExitMethod { .. }
             | Stmt::Continue { .. }
+            | Stmt::Hole { .. }
             | Stmt::Exit { .. } => {}
         }
     }

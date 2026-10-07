@@ -308,19 +308,40 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         .filter(|e| e.picture.as_deref().is_some_and(is_alphabetic))
         .map(|e| e.pos)
         .collect();
-    let mut check = Check {
-        layout: &layout,
-        program: &program,
-        errors: &mut errors,
-        debugging: false,
-        max_digits: options.arith.max_picture_digits(),
-        inline_performs: 0,
-        functions: Some(&functions),
-        alphabetic: &alphabetic,
-        at: Pos::default(),
-        paragraph: 0,
-        extended: options.compliance == numeric::Compliance::Extended,
-        environment_named: None,
+    let relaxed = numeric::Compliance::relaxed(flags);
+    let mut check = loop {
+        let mut check = Check {
+            layout: &layout,
+            program: &program,
+            errors: &mut errors,
+            debugging: false,
+            max_digits: options.arith.max_picture_digits(),
+            inline_performs: 0,
+            functions: Some(&functions),
+            alphabetic: &alphabetic,
+            at: Pos::default(),
+            paragraph: 0,
+            extended: options.compliance == numeric::Compliance::Extended,
+            environment_named: None,
+        };
+        if !relaxed {
+            break check;
+        }
+        let mut found = Vec::new();
+        for (i, p) in program.paragraphs.iter().enumerate() {
+            check.debugging = debugging.iter().any(|&(first, last)| (first..=last).contains(&i));
+            check.paragraph = i;
+            check.holes(&p.statements, &mut vec![i], &mut found);
+        }
+        if found.is_empty() {
+            break check;
+        }
+        for (path, refusal) in found {
+            let construct = format!("the statement at line {}", refusal.pos.line);
+            let why = refusal.labelled();
+            errors.push(syntax::messages::IWX0059.at(refusal.pos, format!("{construct} (--compliance relaxed): {why}; it compiles as a hole, and a run that reaches it ends with IWR0078")));
+            *statement_at(&mut program.paragraphs[path[0]].statements, &path[1..]) = Stmt::Hole { construct, why, pos: refusal.pos };
+        }
     };
     for k in 0..program.files.len() {
         check.file_keys(k);
@@ -636,6 +657,16 @@ fn program_names(program: &Program, options: &Options, errors: &mut Vec<Error>) 
 }
 
 /// Every statement inside `stmts`, at any depth.
+/// The statement `path` reaches in `stmts`: a statement index, then a non-empty body's index and a
+/// statement index in it, and so on.
+fn statement_at<'s>(stmts: &'s mut [Stmt], path: &[usize]) -> &'s mut Stmt {
+    let s = &mut stmts[path[0]];
+    match path.get(1) {
+        None => s,
+        Some(&b) => statement_at(oo::bodies_mut(s).into_iter().filter(|b| !b.is_empty()).nth(b).expect("a body the path names"), &path[2..]),
+    }
+}
+
 fn inner_statements<'s>(stmts: &'s [Stmt], out: &mut Vec<&'s Stmt>) {
     for s in stmts {
         out.push(s);
@@ -1133,6 +1164,30 @@ impl Check<'_> {
         }
     }
 
+    /// Under `--compliance relaxed`, the statements of `stmts` whose check gives a severe message,
+    /// each by its path after `path` (statement index, then non-empty body index, and so on), and
+    /// the message. A statement holding such a statement is left for a later round.
+    fn holes(&mut self, stmts: &[Stmt], path: &mut Vec<usize>, out: &mut Vec<(Vec<usize>, Error)>) {
+        for (j, s) in stmts.iter().enumerate() {
+            let before = self.errors.len();
+            self.statement(s);
+            let refusal = self.errors[before..].iter().find(|e| e.severity >= Severity::Severe).cloned();
+            self.errors.truncate(before);
+            let Some(refusal) = refusal else { continue };
+            path.push(j);
+            let found = out.len();
+            for (b, body) in oo::bodies(s).into_iter().filter(|b| !b.is_empty()).enumerate() {
+                path.push(b);
+                self.holes(body, path, out);
+                path.pop();
+            }
+            if out.len() == found {
+                out.push((path.clone(), refusal));
+            }
+            path.pop();
+        }
+    }
+
     fn statement(&mut self, s: &Stmt) {
         linage::check_receivers(self.layout, s, self.errors);
         if let Stmt::If { pos, .. } | Stmt::Evaluate { pos, .. } | Stmt::PerformInline { pos, .. } | Stmt::PerformProc { pos, .. } = s {
@@ -1568,7 +1623,7 @@ impl Check<'_> {
                 let exit = if *kind == ExitKind::Perform { "EXIT PERFORM" } else { "EXIT PERFORM CYCLE" };
                 self.errors.push(syntax::messages::IWC0080.at(*pos, format!("{exit} must be inside an inline PERFORM")));
             }
-            Stmt::Goback { .. } | Stmt::StopRun { .. } | Stmt::ExitProgram { .. } | Stmt::ExitMethod { .. } | Stmt::Continue { .. } | Stmt::Exit { .. } | Stmt::NextSentence | Stmt::SentenceEnd => {}
+            Stmt::Goback { .. } | Stmt::StopRun { .. } | Stmt::ExitProgram { .. } | Stmt::ExitMethod { .. } | Stmt::Continue { .. } | Stmt::Exit { .. } | Stmt::NextSentence | Stmt::SentenceEnd | Stmt::Hole { .. } => {}
             Stmt::Corresponding(_) => unreachable!("CORRESPONDING is expanded before Check"),
         }
     }
