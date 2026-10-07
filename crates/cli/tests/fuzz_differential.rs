@@ -66,17 +66,17 @@ fn generated_records_abend_and_run_alike_on_both_executors() {
     let dir = temp("alike", &[]);
     let o = fuzz(&dir, &["--runs", "30"]);
     assert_eq!(o.status.code(), Some(0), "{}{}", text(&o.stdout), text(&o.stderr));
-    assert!(text(&o.stdout).contains("30 runs, 30 agree, 0 both at the statement limit, 0 stopped by the VM, 0 differ (0 kept)"), "{}", text(&o.stdout));
+    assert!(text(&o.stdout).contains("30 runs, 30 agree (0 at the statement limit), 0 timed out, 0 stopped by the VM, 0 differ (0 kept)"), "{}", text(&o.stdout));
     assert_eq!(fs::read_dir(dir.join("run")).unwrap().count(), 0, "no divergence is kept and the work directory is gone");
 }
 
 #[test]
-fn inputs_that_loop_reach_the_statement_limit_on_both_and_pass() {
+fn inputs_that_loop_stop_at_the_same_statement_on_both_and_are_compared() {
     let dir = temp("loop", &[("                 ADD IN-QTY TO WS-TOTAL", "                 PERFORM UNTIL IN-QTY < 50000\n                    ADD 1 TO WS-TOTAL\n                 END-PERFORM")]);
     let o = fuzz(&dir, &["--runs", "30", "--hang-limit", "5000"]);
     assert_eq!(o.status.code(), Some(0), "{}{}", text(&o.stdout), text(&o.stderr));
     let out = text(&o.stdout);
-    let limited: u32 = out.split(" both at the statement limit").next().and_then(|s| s.rsplit(", ").next()).and_then(|n| n.parse().ok()).unwrap();
+    let limited: u32 = out.split(" at the statement limit)").next().and_then(|s| s.rsplit(" agree (").next()).and_then(|n| n.parse().ok()).unwrap();
     assert!(limited > 0, "{out}");
     assert!(out.contains(" 0 differ "), "{out}");
 }
@@ -86,7 +86,7 @@ fn a_run_that_reaches_what_the_vm_does_not_run_is_counted_and_passes() {
     let dir = temp("unimplemented", &[("           OPEN INPUT", "           DISPLAY FUNCTION UUID4\n           OPEN INPUT")]);
     let o = fuzz(&dir, &["--runs", "10"]);
     assert_eq!(o.status.code(), Some(0), "{}{}", text(&o.stdout), text(&o.stderr));
-    assert!(text(&o.stdout).contains("0 agree, 0 both at the statement limit, 10 stopped by the VM"), "{}", text(&o.stdout));
+    assert!(text(&o.stdout).contains("0 agree (0 at the statement limit), 0 timed out, 10 stopped by the VM"), "{}", text(&o.stdout));
     assert!(text(&o.stderr).contains("10 runs reached what the VM does not run yet: FUNCTION UUID4,"), "{}", text(&o.stderr));
 }
 

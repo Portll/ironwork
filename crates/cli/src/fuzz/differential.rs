@@ -59,8 +59,9 @@ impl Ran {
 
 enum Verdict {
     Agree,
-    /// Both ran to the statement limit or the timeout.
-    Limited,
+    /// One ran to the timeout and the other to the timeout or the statement limit, so nothing is
+    /// compared. Two runs ended at the statement limit stopped at the same statement and are compared.
+    TimedOut,
     Unimplemented(String),
     /// What differs, the first of each kind.
     Differ(Vec<String>),
@@ -77,8 +78,8 @@ fn first_line_differing(what: &str, a: &[u8], b: &[u8]) -> Option<String> {
 }
 
 fn verdict(interpreter: &Ran, vm: &Ran) -> Verdict {
-    if interpreter.at_limit() && vm.at_limit() {
-        return Verdict::Limited;
+    if (interpreter.timed_out || vm.timed_out) && interpreter.at_limit() && vm.at_limit() {
+        return Verdict::TimedOut;
     }
     if interpreter == vm {
         return Verdict::Agree;
@@ -350,15 +351,18 @@ pub fn run(req: Request) -> ExitCode {
 /// differed.
 fn drive(req: &Request, runner: &Runner, varied: &Varied) -> std::io::Result<bool> {
     let mut rng = Rng(req.seed.max(1));
-    let (mut agree, mut limited, mut differ) = (0, 0, 0);
+    let (mut agree, mut at_limit, mut timed_out, mut differ) = (0, 0, 0, 0);
     let mut unimplemented: BTreeMap<String, usize> = BTreeMap::new();
     let mut kept: Vec<(String, Inputs)> = Vec::new();
     for _ in 0..req.runs {
         let inputs = super::generate(&mut rng, varied);
         let (interpreter, vm) = runner.both(&inputs)?;
         match verdict(&interpreter, &vm) {
-            Verdict::Agree => agree += 1,
-            Verdict::Limited => limited += 1,
+            Verdict::Agree => {
+                agree += 1;
+                at_limit += usize::from(interpreter.at_limit());
+            }
+            Verdict::TimedOut => timed_out += 1,
             Verdict::Unimplemented(what) => *unimplemented.entry(what).or_default() += 1,
             Verdict::Differ(found) => {
                 differ += 1;
@@ -385,7 +389,7 @@ fn drive(req: &Request, runner: &Runner, varied: &Varied) -> std::io::Result<boo
     }
     let stopped: usize = unimplemented.values().sum();
     println!(
-        "ironwork fuzz --differential: {} runs, {agree} agree, {limited} both at the statement limit, {stopped} stopped by the VM, {differ} differ ({} kept): {}",
+        "ironwork fuzz --differential: {} runs, {agree} agree ({at_limit} at the statement limit), {timed_out} timed out, {stopped} stopped by the VM, {differ} differ ({} kept): {}",
         req.runs,
         kept.len(),
         req.out.display()
@@ -418,10 +422,14 @@ mod tests {
     }
 
     #[test]
-    fn both_at_the_limit_pass_and_the_vm_stopping_is_counted_not_failed() {
+    fn a_timeout_is_not_compared_the_statement_limit_is_and_the_vm_stopping_is_counted_not_failed() {
         let limited = ran(240, "A\n", "P.cbl:9:12: ABEND S322: the run reached its statement limit\n");
         let timed_out = Ran { timed_out: true, status: None, ..ran(0, "", "") };
-        assert!(matches!(verdict(&limited, &timed_out), Verdict::Limited));
+        assert!(matches!(verdict(&limited, &timed_out), Verdict::TimedOut));
+        assert!(matches!(verdict(&limited, &limited), Verdict::Agree));
+        let elsewhere = ran(240, "A\n", "P.cbl:12:12: ABEND S322: the run reached its statement limit\n");
+        let Verdict::Differ(found) = verdict(&limited, &elsewhere) else { panic!("they stopped at different statements") };
+        assert_eq!(found[0], "the ending differs: interpreter S322 at P.cbl:9:12, VM S322 at P.cbl:12:12");
         let stopped = ran(243, "", "ironwork: P.cbl: the VM does not run FUNCTION UUID4, which gives another value on every run yet; run it with --interpret\n");
         assert!(matches!(verdict(&ran(0, "X\n", ""), &stopped), Verdict::Unimplemented(what) if what == "FUNCTION UUID4, which gives another value on every run"));
         let refused = ran(242, "", "P.cbl:4:12: lowering: INITIALIZE with FILLER is not lowered yet\n");

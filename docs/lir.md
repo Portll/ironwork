@@ -2537,8 +2537,9 @@ The front-end fuzz test's mutated programs that compile run through the `Harness
 limit of 20,000 (exec/src/tests/differential.rs), so one that loops ends in S322 at the same
 statement on both; each failing input is written to the temp directory.
 `ironwork fuzz --differential` runs each input it generates for a batch program on both, under one
-statement limit, and passes when they agree or both stop at it; a run the VM stops at what it does
-not run yet is counted. It keeps each input on which they differ, made smaller, with what each
+statement limit, and passes when they agree. Two runs that reach the limit stop at the same statement
+and are compared like any other; a run either executor ends at the timeout is counted as timed out
+and not compared, and a run the VM stops at what it does not run yet is counted. It keeps each input on which they differ, made smaller, with what each
 executor wrote and the command that repeats the run. The golden programs of §12.2 run in both,
 which exercises C99.
 
