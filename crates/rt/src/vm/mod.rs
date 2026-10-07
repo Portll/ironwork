@@ -360,6 +360,15 @@ struct Vm<'p, 'u, 'w, L: Loader<Rc<Code>>> {
     unit: &'u mut RunUnit<'w, Rc<Code>, L>,
 }
 
+/// What an activation cannot lay out yet, refused before the program is activated.
+fn check_storage(code: &Lowered) -> R<()> {
+    let storage = &code.program.storage;
+    if !storage.local_image.is_empty() && (storage.init_abend.is_some() || !storage.init_reports.is_empty()) {
+        return Err(not_yet("VALUE initialization that reports or abends in a program with LOCAL-STORAGE"));
+    }
+    Ok(())
+}
+
 /// The tables an activation the VM CALLs takes, a CALL's argument lists and a FUNCTION's arguments,
 /// kept from one to the next.
 #[derive(Default)]
@@ -382,30 +391,35 @@ impl<'p, 'u, 'w, L: Loader<Rc<Code>>> Vm<'p, 'u, 'w, L> {
     /// An activation of a contained program, called with the programs containing it running, its
     /// tables taken from `spare`.
     fn activation_within(code: &'p Lowered, me: usize, unit: &'u mut RunUnit<'w, Rc<Code>, L>, main: bool, containers: Vec<scope::Container<'p>>, spare: Spare) -> R<Self> {
-        let p = &code.program;
-        let storage = &p.storage;
-        if !storage.local_image.is_empty() && (storage.init_abend.is_some() || !storage.init_reports.is_empty()) {
-            return Err(not_yet("VALUE initialization that reports or abends in a program with LOCAL-STORAGE"));
-        }
-        let (base, fresh) = unit.activate(me, p.initial);
+        check_storage(code)?;
+        let (base, fresh) = unit.activate(me, code.program.initial);
         let mut vm = Self::over_reusing(code, me, base, unit, main, containers, spare);
-        vm.bind_shared()?;
+        vm.start_storage(fresh)?;
+        Ok(vm)
+    }
+
+    /// Binds the shared records and lays out storage as an activation starts: LOCAL-STORAGE each
+    /// time, and on a `fresh` activation the program's initial image, with what it reported.
+    fn start_storage(&mut self, fresh: bool) -> R<()> {
+        let storage = &self.p.storage;
+        self.bind_shared()?;
         if !storage.local_image.is_empty() {
-            vm.local_base = vm.unit.push_temporary(&storage.local_image);
-            vm.unit.mark_input(vm.local_base, storage.local_image.len(), false);
+            self.local_base = self.unit.push_temporary(&storage.local_image);
+            self.unit.mark_input(self.local_base, storage.local_image.len(), false);
         }
         if fresh {
-            vm.unit.mem[base..base + storage.image.len()].copy_from_slice(&storage.image);
-            vm.unit.mark_input(base, storage.image.len(), false);
+            let base = self.base;
+            self.unit.mem[base..base + storage.image.len()].copy_from_slice(&storage.image);
+            self.unit.mark_input(base, storage.image.len(), false);
             for &report in &storage.init_reports {
-                let _ = writeln!(vm.unit.err, "{}", vm.sym(report));
+                let _ = writeln!(self.unit.err, "{}", self.sym(report));
             }
             if let Some(abend) = storage.init_abend {
-                return Err(vm.abend(abend, None).into());
+                return Err(self.abend(abend, None).into());
             }
-            vm.unit.initialized(me);
+            self.unit.initialized(self.me);
         }
-        Ok(vm)
+        Ok(())
     }
 
     /// Program `me` over its storage at `base`, with nothing bound or initialized.

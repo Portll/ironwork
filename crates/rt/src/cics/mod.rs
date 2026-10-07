@@ -32,7 +32,7 @@ macro_rules! conditions {
     ($($name:ident)*) => {
         /// A CICS exception condition, one variant per name DFHRESP knows, spelt as IBM spells it.
         #[allow(clippy::upper_case_acronyms)]
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
         pub enum Condition {
             $($name,)*
         }

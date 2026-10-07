@@ -12,7 +12,7 @@ use crate::store::{self, ProgramFacts};
 use crate::unit::{ADDRESS_BASE, Loader, RunUnit, UnitHost};
 use crate::vocab::Pos;
 use numeric::precision::{Fixed, Places};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use zarch::decimal::{self, Decimal};
 use zarch::ebcdic::{self, CodePage};
 
@@ -66,9 +66,9 @@ pub trait CicsHost<'w, P: Copy, O, S>: Host<P> + UnitHost<'w> {
 /// program CALLed at it shares them (C234).
 #[derive(Clone, Debug, Default)]
 pub struct Handlers {
-    pub conditions: HashMap<Condition, Handler>,
+    pub conditions: BTreeMap<Condition, Handler>,
     /// What each PUSH HANDLE at this logical level suspended.
-    pub stack: Vec<(HashMap<Condition, Handler>, Option<AbendExit>)>,
+    pub stack: Vec<(BTreeMap<Condition, Handler>, Option<AbendExit>)>,
     pub abend: Option<AbendExit>,
 }
 
@@ -101,8 +101,8 @@ impl Handlers {
     /// stack, each exit the stack holds kept, and no HANDLE CONDITION or IGNORE CONDITION, which
     /// belong to the program XCTL releases, pushed or not (C146).
     pub fn xctl(&mut self) -> Handlers {
-        let stack = std::mem::take(&mut self.stack).into_iter().map(|(_, abend)| (HashMap::new(), abend)).collect();
-        Handlers { conditions: HashMap::new(), stack, abend: self.abend.take() }
+        let stack = std::mem::take(&mut self.stack).into_iter().map(|(_, abend)| (BTreeMap::new(), abend)).collect();
+        Handlers { conditions: BTreeMap::new(), stack, abend: self.abend.take() }
     }
 
     /// Takes the level's handlers back from a CALLed program that has ended, as it left them; with

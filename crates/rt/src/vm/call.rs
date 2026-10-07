@@ -3,7 +3,7 @@
 //! activation run by Rust recursion, RETURNING, and what an observer is told. A name no program has
 //! may be an LE callable service or a job for the virtual printer.
 
-use super::{Code, Halt, Lowered, R, Spare, Stop, Vm, not_yet};
+use super::{Code, Halt, Lowered, R, Spare, Stop, Vm, check_storage, not_yet};
 use crate::abend::{Abend, Ending};
 use crate::callee::{self, Arguments, Bindings, By, Callee};
 use crate::cics;
@@ -116,7 +116,11 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let (ending, returned) = callee::run(self, &Callee { index, by, mark: Some(mark), pos }, |caller| {
             let spare = &mut caller.spare;
             let tables = Spare { linkage: std::mem::take(&mut spare.linkage), armed: std::mem::take(&mut spare.armed), frames: std::mem::take(&mut spare.frames), ..Spare::default() };
-            let mut vm = Vm::activation_within(lowered, index, &mut *caller.unit, false, containers, tables)?;
+            // Built where it runs and initialized there: returning the activation would copy it.
+            check_storage(lowered)?;
+            let (base, fresh) = caller.unit.activate(index, program.initial);
+            let mut vm = Vm::over_reusing(lowered, index, base, &mut *caller.unit, false, containers, tables);
+            vm.start_storage(fresh)?;
             let entry = entry.and_then(|k| program.services.entries.get(k));
             let mut using = std::mem::take(&mut caller.spare.using);
             using.clear();
