@@ -49,7 +49,7 @@ const VERBS: &[&str] = &["ENABLE", "DISABLE", "RECEIVE", "SEND", "PURGE"];
 
 impl Parser<'_> {
     pub(super) fn is_verb(&self, w: &str) -> bool {
-        super::VERBS.contains(&w) || !self.cds.is_empty() && VERBS.contains(&w)
+        super::VERBS.contains(&w) || !self.cds.is_empty() && VERBS.contains(&w) || self.extended && w == "INITIALISE"
     }
 
     pub(super) fn at_enable_or_disable(&self) -> bool {

@@ -858,6 +858,8 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0048 | W | `{>>DEFINE or >>IF} (COBOL 2002 and GnuCOBOL; Enterprise COBOL 6.3 has it too): {what it does}` |
 | IWX0049 | W | `>>{directive} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such directive): it is read and has no effect` |
 | IWX0050 | W | `>>D (GnuCOBOL; Enterprise COBOL marks a debugging line with D in column 7): the line is a debugging line, compiled only WITH DEBUGGING MODE` |
+| IWX0051 | W | `an inline PERFORM with AFTER phrases (GnuCOBOL and Micro Focus; Enterprise COBOL takes them only when PERFORM names a procedure): the body runs for each combination, the last AFTER varying fastest` |
+| IWX0052 | W | `INITIALISE (Micro Focus and GnuCOBOL; Enterprise COBOL spells it INITIALIZE): it is read as INITIALIZE` |
 
 ## Run-time refusals
 

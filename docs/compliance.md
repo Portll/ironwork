@@ -941,6 +941,20 @@ debugging line, compiled only WITH DEBUGGING MODE`, at >>D.
 The text after `>>D ` is a debugging line in fixed or free form, read only where SOURCE-COMPUTER
 says WITH DEBUGGING MODE, as a D in column 7 is.
 
+### IWX0051-W An inline PERFORM with AFTER phrases
+
+`IWX0051-W an inline PERFORM with AFTER phrases (GnuCOBOL and Micro Focus; Enterprise COBOL takes them
+only when PERFORM names a procedure): the body runs for each combination, the last AFTER varying
+fastest`, at the PERFORM.
+
+The inline body runs as a performed procedure would under the same VARYING and AFTER phrases, as
+cobc 3.2 runs it. Strict keeps IWS0058.
+
+### IWX0052-W INITIALISE
+
+`IWX0052-W INITIALISE (Micro Focus and GnuCOBOL; Enterprise COBOL spells it INITIALIZE): it is read
+as INITIALIZE`, at the verb. ACAS writes it so. Under strict INITIALISE is no verb.
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

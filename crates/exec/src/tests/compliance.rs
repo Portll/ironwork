@@ -1802,3 +1802,39 @@ fn compiler_directives_choose_the_lines_compiled_alike_on_both_executors() {
     let warned: Vec<_> = diagnostics_under(DIRECTIVES_FREE, numeric::Compliance::Extended).into_iter().filter(|d| d.2.is_some_and(|id| id >= "IWX0048")).map(|d| (d.0, d.2)).collect();
     assert_eq!(warned, [(8, Some("IWX0048")), (13, Some("IWX0050")), (14, Some("IWX0049"))]);
 }
+
+/// INITIALISE, and an inline PERFORM VARYING with an AFTER phrase.
+const INITIALISE_AND_AFTER: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. BATCH3.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  REC.\n",
+    "           05 R-A PIC X(3) VALUE 'ABC'.\n",
+    "           05 R-N PIC 9(3) VALUE 42.\n",
+    "       01  D2 PIC 9V9 VALUE 7.\n",
+    "       01  I PIC 9.\n",
+    "       01  J PIC 9.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           INITIALISE REC\n",
+    "           DISPLAY 'REC [' REC ']'\n",
+    "           PERFORM VARYING I FROM 1 BY 1 UNTIL I > 2\n",
+    "                   AFTER J FROM 1 BY 1 UNTIL J > 3\n",
+    "               DISPLAY I J\n",
+    "           END-PERFORM\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn initialise_and_an_inline_perform_with_after_run_alike_on_both_executors() {
+    // cobc 3.2's output.
+    let expected = "REC [   000]\n11\n12\n13\n21\n22\n23\n";
+    let walked = Harness::source(INITIALISE_AND_AFTER).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{}", walked.err);
+    let vm = Harness::source(INITIALISE_AND_AFTER).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    let warned: Vec<_> = diagnostics_under(INITIALISE_AND_AFTER, numeric::Compliance::Extended).into_iter().filter(|d| matches!(d.2, Some("IWX0051" | "IWX0052"))).map(|d| (d.0, d.2)).collect();
+    assert_eq!(warned, [(12, Some("IWX0052")), (14, Some("IWX0051"))]);
+    let refused = syntax::parse(&INITIALISE_AND_AFTER.replace("INITIALISE", "INITIALIZE")).unwrap_err();
+    assert_eq!((refused.pos.line, refused.id), (14, Some("IWS0058")), "{refused}");
+}

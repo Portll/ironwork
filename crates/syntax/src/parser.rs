@@ -2265,6 +2265,10 @@ impl Parser<'_> {
                 Stmt::Display { items, upon, no_advancing, screen, pos }
             }
             "INITIALIZE" => self.initialize(pos)?,
+            "INITIALISE" => {
+                self.messages.push(crate::messages::IWX0052.at(pos, "INITIALISE (Micro Focus and GnuCOBOL; Enterprise COBOL spells it INITIALIZE): it is read as INITIALIZE"));
+                self.initialize(pos)?
+            }
             "ALLOCATE" => self.allocate(pos)?,
             "FREE" => self.free(pos)?,
             "CALL" => Stmt::Call(Box::new(self.call(pos)?)),
@@ -2750,7 +2754,10 @@ impl Parser<'_> {
         }
         let repeat = self.repeat()?;
         if matches!(&repeat, Loop::Varying { after, .. } if !after.is_empty()) {
-            return Err(crate::messages::IWS0058.at(pos, "an inline PERFORM cannot have AFTER phrases: Enterprise COBOL takes them only when PERFORM names a procedure"));
+            if !self.extended {
+                return Err(crate::messages::IWS0058.at(pos, "an inline PERFORM cannot have AFTER phrases: Enterprise COBOL takes them only when PERFORM names a procedure"));
+            }
+            self.messages.push(crate::messages::IWX0051.at(pos, "an inline PERFORM with AFTER phrases (GnuCOBOL and Micro Focus; Enterprise COBOL takes them only when PERFORM names a procedure): the body runs for each combination, the last AFTER varying fastest"));
         }
         let body = self.block(&["END-PERFORM"])?;
         self.expect_word("END-PERFORM")?;
