@@ -250,7 +250,9 @@ and otherwise when a run reaches it, which ends the run with that message under 
 IRONWORK, EXEC or JAVA (exit status 244). What Enterprise COBOL refuses,
 `--compliance strict`, the default, refuses too, with IBM's message at IBM's severity where IBM's
 compiler flags it. Micro Focus and GnuCOBOL forms run only under `--compliance extended`, each with
-its IWX warning. [docs/messages.md](docs/messages.md) lists every message.
+its IWX warning. The 1985 standard's Communication feature (the COMMUNICATION SECTION and ENABLE,
+DISABLE, RECEIVE, SEND, PURGE and ACCEPT MESSAGE COUNT), which Enterprise COBOL does not compile, is
+refused under every option, each item where it stands (IWS0102). [docs/messages.md](docs/messages.md) lists every message.
 
 **What waits on goldens** is every behaviour the manuals leave open: 244 of the register's 336
 assumptions are Chosen, ironwork's reading where IBM documents none. A run behaves as its assumption

@@ -114,8 +114,17 @@ impl Parser<'_> {
                     return Err(crate::messages::IWS0067.at(pos, "USE FOR DEBUGGING ON ALL: Enterprise COBOL debugs procedures, by name or as ALL PROCEDURES, and no other items"));
                 }
             } else {
+                let mut cds = false;
                 while self.peek().is_some_and(|t| *t != Tok::Period) {
+                    if self.debugging_on_cd() {
+                        cds = true;
+                        continue;
+                    }
                     procedures.push(self.proc_name()?);
+                }
+                if procedures.is_empty() && cds {
+                    self.expect(&Tok::Period, "a period after the USE statement")?;
+                    return Ok(Use::Comment);
                 }
                 if procedures.is_empty() {
                     return Err(self.error("ALL PROCEDURES or a procedure name"));

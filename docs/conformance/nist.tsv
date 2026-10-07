@@ -1,13 +1,13 @@
 program	class	stderr	vm	vm detail
-CM101M	refused	CM101M.CBL:230:8: IWR0006-S the COMMUNICATION SECTION is not supported yet	-	
-CM102M	refused	CM102M.CBL:278:8: IWR0006-S the COMMUNICATION SECTION is not supported yet	-	
-CM103M	refused	CM103M.CBL:181:8: IWR0006-S the COMMUNICATION SECTION is not supported yet	-	
-CM104M	refused	CM104M.CBL:177:8: IWR0006-S the COMMUNICATION SECTION is not supported yet	-	
-CM105M	refused	CM105M.CBL:176:8: IWR0006-S the COMMUNICATION SECTION is not supported yet	-	
-CM201M	refused	CM201M.CBL:45:8: IWR0006-S the COMMUNICATION SECTION is not supported yet	-	
-CM202M	refused	CM202M.CBL:208:8: IWR0006-S the COMMUNICATION SECTION is not supported yet	-	
-CM303M	exit-12	CM303M.CBL:17:8: IWR0006-S the COMMUNICATION SECTION is not supported yet	-	
-CM401M	exit-12	CM401M.CBL:15:8: IWR0006-S the COMMUNICATION SECTION is not supported yet	-	
+CM101M	refused	CM101M.CBL:229:8: IWS0102-S the Communication feature (COMMUNICATION SECTION) is not part of Enterprise COBOL, which does not compile it	-	
+CM102M	refused	CM102M.CBL:277:8: IWS0102-S the Communication feature (COMMUNICATION SECTION) is not part of Enterprise COBOL, which does not compile it	-	
+CM103M	refused	CM103M.CBL:180:8: IWS0102-S the Communication feature (COMMUNICATION SECTION) is not part of Enterprise COBOL, which does not compile it	-	
+CM104M	refused	CM104M.CBL:176:8: IWS0102-S the Communication feature (COMMUNICATION SECTION) is not part of Enterprise COBOL, which does not compile it	-	
+CM105M	refused	CM105M.CBL:175:8: IWS0102-S the Communication feature (COMMUNICATION SECTION) is not part of Enterprise COBOL, which does not compile it	-	
+CM201M	refused	CM201M.CBL:44:8: IWS0102-S the Communication feature (COMMUNICATION SECTION) is not part of Enterprise COBOL, which does not compile it	-	
+CM202M	refused	CM202M.CBL:207:8: IWS0102-S the Communication feature (COMMUNICATION SECTION) is not part of Enterprise COBOL, which does not compile it	-	
+CM303M	exit-12	CM303M.CBL:16:8: IWS0102-S the Communication feature (COMMUNICATION SECTION) is not part of Enterprise COBOL, which does not compile it	-	
+CM401M	exit-12	CM401M.CBL:14:8: IWS0102-S the Communication feature (COMMUNICATION SECTION) is not part of Enterprise COBOL, which does not compile it	-	
 DB101A	failed		same	
 DB102A	clean		same	
 DB103M	clean		same	
@@ -17,11 +17,11 @@ DB201A	refused	DB201A.CBL:232:12: IWS0067-S USE FOR DEBUGGING ON ALL: Enterprise
 DB202A	refused	DB202A.CBL:269:12: IWS0067-S USE FOR DEBUGGING ON ALL: Enterprise COBOL debugs procedures, by name or as ALL PROCEDURES, and no other items	-	
 DB203A	refused	DB203A.CBL:277:12: IWC0012-S USE FOR DEBUGGING ON IND-FILE: no paragraph or section named IND-FILE	-	
 DB204A	failed		same	
-DB205A	refused	DB205A.CBL:173:8: IWR0006-S the COMMUNICATION SECTION is not supported yet	-	
+DB205A	refused	DB205A.CBL:172:8: IWS0102-S the Communication feature (COMMUNICATION SECTION) is not part of Enterprise COBOL, which does not compile it	-	
 DB301M	compiled	DB301M.CBL:37:8: informational: IWS0066-I BUGGING-2 SECTION: no paragraph-name after its USE statement	-	
 DB302M	compiled	DB302M.CBL:36:8: informational: IWS0066-I BUGGING SECTION: no paragraph-name after its USE statement	-	
 DB303M	exit-12	DB303M.CBL:33:12: IWS0067-S USE FOR DEBUGGING ON ALL: Enterprise COBOL debugs procedures, by name or as ALL PROCEDURES, and no other items	-	
-DB304M	exit-12	DB304M.CBL:17:8: IWR0006-S the COMMUNICATION SECTION is not supported yet	-	
+DB304M	exit-12	DB304M.CBL:15:8: IWS0102-S the Communication feature (COMMUNICATION SECTION) is not part of Enterprise COBOL, which does not compile it	-	
 DB305M	compiled	DB305M.CBL:36:8: informational: IWS0066-I BUGGING SECTION: no paragraph-name after its USE statement	-	
 IC101A	clean		same	
 IC102A	called		-	

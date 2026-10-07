@@ -792,6 +792,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWS0099 | E | `{word}: a user-defined word has at most 30 characters, and this one has {count}; it is read as its first 30, {the first 30}` |
 | IWS0100 | E | `{word} begins in Area A, where Enterprise COBOL puts no statement: it is read as though it began in Area B` |
 | IWS0101 | S | `{FLOAT-SHORT or FLOAT-LONG}: GnuCOBOL's and Micro Focus's floating point, not Enterprise COBOL's; --compliance extended reads it as {COMP-1 or COMP-2}` |
+| IWS0102 | S | `the Communication feature ({a COMMUNICATION SECTION item or statement}) is not part of Enterprise COBOL, which does not compile it` |
 | IWX0001 | W | `free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}` |
 | IWX0002 | W | `constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry` |
 | IWX0003 | W | `<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =` |

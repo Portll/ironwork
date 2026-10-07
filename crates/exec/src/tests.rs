@@ -10,6 +10,7 @@ mod arguments;
 mod assign;
 mod classes;
 mod collating;
+mod communication;
 mod compliance;
 mod corresponding;
 mod data;

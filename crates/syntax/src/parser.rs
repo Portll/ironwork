@@ -3,6 +3,7 @@ use crate::lexer::{Tok, Token};
 use crate::messages::{IWS0097, IWS0098, IWS0100, IWX0013, IWX0014, IWX0017};
 use crate::{Error, Pos};
 
+mod communication;
 mod declaratives;
 mod oo;
 mod report;
@@ -360,6 +361,8 @@ struct Parser<'a> {
     in_prototype: bool,
     /// `--compliance extended` is in force.
     extended: bool,
+    /// The CD names of the program being parsed.
+    cds: Vec<String>,
 }
 
 /// The WHENEVER actions in force, which carry on in listing order, and the EXEC SQL blocks the
@@ -395,6 +398,7 @@ impl<'a> Parser<'a> {
             defined: Vec::new(),
             in_prototype: false,
             extended: false,
+            cds: Vec::new(),
         }
     }
 }
@@ -572,13 +576,16 @@ impl Parser<'_> {
         let (mut working_storage, mut local_storage, mut linkage, mut screens) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         let mut report_writer = crate::report::ReportWriter::default();
         let mut declaratives = Declaratives::default();
+        let mut communication = Vec::new();
         if self.at_division(&["DATA"]) {
             self.at += 2;
             self.expect(&Tok::Period, "a period")?;
+            self.cds.clear();
             while !self.at_division(&["PROCEDURE", "IDENTIFICATION", "ID"]) && !self.at_end_program() && self.peek().is_some() {
                 if self.data_exec()? {
                     continue;
                 }
+                let header = self.pos();
                 let section = self.name("a DATA DIVISION section")?;
                 self.expect_word("SECTION")?;
                 self.expect(&Tok::Period, "a period")?;
@@ -589,10 +596,12 @@ impl Parser<'_> {
                     "FILE" => self.file_section(&mut files)?,
                     "REPORT" => report_writer.reports.extend(self.report_section()?),
                     "SCREEN" => screens = self.screen_section()?,
+                    "COMMUNICATION" => communication = self.communication_section(header)?,
                     other => return Err(crate::messages::IWR0006.at(self.pos(), format!("the {other} SECTION is not supported yet"))),
                 }
             }
         }
+        working_storage.extend(communication);
         let (mut using, mut returning) = (Vec::new(), None);
         let paragraphs = if self.at_division(&["PROCEDURE"]) {
             self.at += 2;
@@ -2024,7 +2033,7 @@ impl Parser<'_> {
                 out.push(Stmt::Exec(Box::new(block)));
                 continue;
             }
-            if !self.word().is_some_and(|w| VERBS.contains(&w) || self.extended && w == "UNLOCK") {
+            if !self.word().is_some_and(|w| self.is_verb(w) || self.extended && w == "UNLOCK") && !self.at_enable_or_disable() {
                 break;
             }
             let statement = self.statement()?;
@@ -2137,6 +2146,9 @@ impl Parser<'_> {
             }
             "ACCEPT" => {
                 let target = self.reference()?;
+                if let Some(refused) = self.accept_message_count(pos) {
+                    return Ok(refused);
+                }
                 if let Some(size) = self.screen_size() {
                     self.unreserved_terminator("END-ACCEPT", "ACCEPT");
                     return Ok(Stmt::Move { from: Operand::Literal(Literal::Number(size.into())), to: vec![target], pos });
@@ -2377,6 +2389,7 @@ impl Parser<'_> {
             "STOP" if self.starts_operand() && !self.starts_ref() => Stmt::Display { items: vec![self.operand()?], upon: Some(Upon { name: "CONSOLE".into(), device: "CONSOLE".into() }), no_advancing: false, screen: None, pos },
             "STOP" => return Err(self.error("RUN or a literal after STOP")),
             "CONTINUE" => Stmt::Continue { pos },
+            "ENABLE" | "DISABLE" | "RECEIVE" | "SEND" | "PURGE" => self.communication_statement(&verb, pos)?,
             "UNLOCK" => {
                 self.name("a file name")?;
                 self.accept_any(&["RECORD", "RECORDS"]);
@@ -2544,12 +2557,12 @@ impl Parser<'_> {
     fn words_ahead_include(&self, word: &str) -> bool {
         self.tokens[self.at..]
             .iter()
-            .take_while(|t| t.tok != Tok::Period && !matches!(&t.tok, Tok::Word(w) if VERBS.contains(&w.as_str()) && w != word))
+            .take_while(|t| t.tok != Tok::Period && !matches!(&t.tok, Tok::Word(w) if self.is_verb(w) && w != word))
             .any(|t| matches!(&t.tok, Tok::Word(w) if w == word))
     }
 
     fn perform(&mut self, pos: Pos) -> R<Stmt> {
-        let named = (self.word().is_some_and(|w| !VERBS.contains(&w) && !PHRASE_WORDS.contains(&w) && w != "TEST") || self.peek().is_some_and(digits))
+        let named = (self.word().is_some_and(|w| !self.is_verb(w) && !PHRASE_WORDS.contains(&w) && w != "TEST") || self.peek().is_some_and(digits))
             && !self.times_ahead()
             && !(self.extended && self.is_word("FOREVER"));
         if named {
@@ -3543,7 +3556,7 @@ impl Parser<'_> {
     }
 
     fn starts_ref(&self) -> bool {
-        self.word().is_some_and(|w| !VERBS.contains(&w) && !PHRASE_WORDS.contains(&w) && figurative(w).is_none() && w != "FUNCTION")
+        self.word().is_some_and(|w| !self.is_verb(w) && !PHRASE_WORDS.contains(&w) && figurative(w).is_none() && w != "FUNCTION")
             && !self.paragraph_header()
     }
 
