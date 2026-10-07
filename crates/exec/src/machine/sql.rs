@@ -5,8 +5,9 @@ use compile::facts::Facts;
 use super::*;
 use crate::sql::{self, HostType, Session, SqlHost};
 use rt::host::Host;
-use rt::lir::{AbendId, HostArray, HostPlace, RowCount, SqlEntry, SqlNames, SqlStatement, Sqlca, SqlcaField};
-use syntax::sql::{Action, ChangeKind, HostVar, Names, Rows, Statement, Whenever};
+use compile::sql::{sql_names, sqlca_fields};
+use rt::lir::{AbendId, HostArray, HostPlace, RowCount, SqlEntry, SqlStatement, Sqlca, SqlcaField};
+use syntax::sql::{Action, ChangeKind, HostVar, Rows, Statement, Whenever};
 
 type Entry<'b> = SqlEntry<&'b Ref, String>;
 
@@ -202,35 +203,6 @@ impl<'p, 'w> Machine<'p, '_, 'w> {
             }
         }
     }
-}
-
-pub(crate) fn sql_names(names: Names) -> SqlNames {
-    match names {
-        Names::Names => SqlNames::Names,
-        Names::Labels => SqlNames::Labels,
-        Names::Any => SqlNames::Any,
-    }
-}
-
-/// The SQLCA's fields by name, in the order they are filled.
-pub(crate) fn sqlca_fields(pos: Pos) -> Vec<(SqlcaField, Ref)> {
-    let named = |name: &str, subscript: Option<u8>| {
-        let subscripts = subscript.map(|n| vec![Expr::Operand(Operand::Literal(Literal::Number(n.to_string())))]).unwrap_or_default();
-        Ref { name: name.into(), qualifiers: Vec::new(), subscripts, refmod: None, pos }
-    };
-    let mut fields = vec![
-        (SqlcaField::CaId, named("SQLCAID", None)),
-        (SqlcaField::CaBc, named("SQLCABC", None)),
-        (SqlcaField::Code, named("SQLCODE", None)),
-        (SqlcaField::ErrMl, named("SQLERRML", None)),
-        (SqlcaField::ErrMc, named("SQLERRMC", None)),
-        (SqlcaField::ErrP, named("SQLERRP", None)),
-        (SqlcaField::State, named("SQLSTATE", None)),
-    ];
-    fields.extend((1..=6).map(|n| (SqlcaField::ErrD(n), named("SQLERRD", Some(n)))));
-    let warnings = ["SQLWARN0", "SQLWARN1", "SQLWARN2", "SQLWARN3", "SQLWARN4", "SQLWARN5", "SQLWARN6", "SQLWARN7", "SQLWARN8", "SQLWARN9", "SQLWARNA"];
-    fields.extend((0..).zip(warnings).map(|(n, name)| (SqlcaField::Warn(n), named(name, None))));
-    fields
 }
 
 impl<'a, 'p> Host<&'a Ref> for Bound<'_, 'p, '_, '_> {

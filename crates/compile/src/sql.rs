@@ -1,9 +1,13 @@
 //! The host type of a declared item, which EXEC SQL binds by: what `rt::sql` needs from the layout.
+//! The SQLCA's fields by name, and what DESCRIBE puts in each SQLNAME, as `rt::lir` has them.
 
 use crate::layout::Layout;
-use rt::lir::Dimension;
+use rt::lir::{Dimension, SqlNames, SqlcaField};
 use rt::sql::HostType;
 use rt::storage::Kind;
+use syntax::Pos;
+use syntax::ast::{Expr, Literal, Operand, Ref};
+use syntax::sql::Names;
 use zarch::hfp::Precision;
 
 /// The host type of layout item `item`, or why it cannot be a host variable.
@@ -85,4 +89,33 @@ fn structure(layout: &Layout, item: usize, name: &str) -> Result<HostType, Strin
         return Err(format!("{name}: a group with no members"));
     }
     Ok(HostType::Structure(out))
+}
+
+pub fn sql_names(names: Names) -> SqlNames {
+    match names {
+        Names::Names => SqlNames::Names,
+        Names::Labels => SqlNames::Labels,
+        Names::Any => SqlNames::Any,
+    }
+}
+
+/// The SQLCA's fields by name, in the order they are filled.
+pub fn sqlca_fields(pos: Pos) -> Vec<(SqlcaField, Ref)> {
+    let named = |name: &str, subscript: Option<u8>| {
+        let subscripts = subscript.map(|n| vec![Expr::Operand(Operand::Literal(Literal::Number(n.to_string())))]).unwrap_or_default();
+        Ref { name: name.into(), qualifiers: Vec::new(), subscripts, refmod: None, pos }
+    };
+    let mut fields = vec![
+        (SqlcaField::CaId, named("SQLCAID", None)),
+        (SqlcaField::CaBc, named("SQLCABC", None)),
+        (SqlcaField::Code, named("SQLCODE", None)),
+        (SqlcaField::ErrMl, named("SQLERRML", None)),
+        (SqlcaField::ErrMc, named("SQLERRMC", None)),
+        (SqlcaField::ErrP, named("SQLERRP", None)),
+        (SqlcaField::State, named("SQLSTATE", None)),
+    ];
+    fields.extend((1..=6).map(|n| (SqlcaField::ErrD(n), named("SQLERRD", Some(n)))));
+    let warnings = ["SQLWARN0", "SQLWARN1", "SQLWARN2", "SQLWARN3", "SQLWARN4", "SQLWARN5", "SQLWARN6", "SQLWARN7", "SQLWARN8", "SQLWARN9", "SQLWARNA"];
+    fields.extend((0..).zip(warnings).map(|(n, name)| (SqlcaField::Warn(n), named(name, None))));
+    fields
 }

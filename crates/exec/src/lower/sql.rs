@@ -97,7 +97,7 @@ impl Lower<'_> {
             Statement::Prepare { name, source, into } => {
                 let source = self.host_places(std::slice::from_ref(source), command)?;
                 let statement = match into {
-                    Some((d, names)) => SqlStatement::PrepareInto { name: self.sym(name), source, descriptor: self.place(&d.var, true)?, names: crate::machine::sql::sql_names(*names) },
+                    Some((d, names)) => SqlStatement::PrepareInto { name: self.sym(name), source, descriptor: self.place(&d.var, true)?, names: compile::sql::sql_names(*names) },
                     None => SqlStatement::Prepare { name: self.sym(name), source },
                 };
                 (statement, format!("PREPARE {name}"), false)
@@ -111,7 +111,7 @@ impl Lower<'_> {
                 (statement, format!("EXECUTE {name}"), false)
             }
             Statement::Describe { name, descriptor, names } => {
-                let describe = SqlStatement::Describe { name: self.sym(name), descriptor: self.place(&descriptor.var, true)?, names: crate::machine::sql::sql_names(*names) };
+                let describe = SqlStatement::Describe { name: self.sym(name), descriptor: self.place(&descriptor.var, true)?, names: compile::sql::sql_names(*names) };
                 (describe, format!("DESCRIBE {name}"), false)
             }
             Statement::Whenever { .. } | Statement::Declaration | Statement::DeclareCursor(_) | Statement::DeclareUnsupported { .. } => (SqlStatement::Declaration, String::new(), false),
@@ -222,7 +222,7 @@ impl Lower<'_> {
     fn sqlca(&mut self, pos: Pos) -> R<Sqlca> {
         let layout = self.layout;
         let mut fields = Vec::new();
-        for (field, r) in crate::machine::sql::sqlca_fields(pos) {
+        for (field, r) in compile::sql::sqlca_fields(pos) {
             let Ok(Resolved::Item(item)) = layout.resolve(&r.name, &r.qualifiers, r.pos) else { continue };
             let Ok(ty) = host_type(layout, item) else { continue };
             if r.subscripts.len() != layout.items[item].dims.len() {
