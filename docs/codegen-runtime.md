@@ -2,8 +2,9 @@
 
 A specification for compiling COBOL ahead of time, and for the runtime that compiled programs link.
 
-**Status:** draft, updated 2026-10-03, for the operator's review. Step 0 is measured and step 1 is
-done. It builds on the operator's rulings of 2026-09-29:
+**Status:** steps 0 to 5 of §14 are done: the VM runs programs by default. Step 6 waits on the
+performance measurements, and step 7's text on a practitioner's review. It builds on the
+operator's rulings of 2026-09-29:
 
 - **The runtime licence.** The runtime is AGPL-3.0-or-later with a runtime exception, so a program
   compiled by ironwork is not bound by the AGPL. The exception is published as
@@ -294,11 +295,11 @@ Each is argued in the document named, and none blocks step 1.
 | Q5 | lir | Answered: MOVE CORRESPONDING, PERFORM VARYING … AFTER and GO TO … DEPENDING ON are all parsed and run; the compiler expands CORRESPONDING before lowering. |
 | Q6 | [sem](semantics-library.md) | Answered: `syntax` depends on `rt` and re-exports the shared vocabulary. |
 | Q7 | sem | Does the runtime exception cover `tn3270.rs`, the TN3270 server? |
-| Q8 | [lm](load-module.md) | Is a reader kept for the previous major version of the format? |
-| Q9 | lm | Is a checksum enough, or do modules carry a keyed signature? |
-| Q10 | lm | Are modules without a debug table (`--strip-debug`) allowed? |
+| Q8 | [lm](load-module.md) | Answered: no reader is kept for a previous major version; a module is compiled again. |
+| Q9 | lm | Answered: CRC-32 only; a module carries no keyed signature. |
+| Q10 | lm | Answered: no `--strip-debug`; every module has its debug table. |
 | Q11 | lm | Answered: a `NAME.iwm` beside newer source runs, and a compile that fails leaves it in place. |
-| Q12 | lm | Is an unresolved NODYNAM CALL a compile error, and do LE services bind statically? |
-| Q13 | lm | Does ironwork adopt IBM's program scope (non-COMMON nested programs hidden, duplicate ids an error), and how far does COMMON reach? |
-| Q14 | lm | Does Enterprise COBOL agree with the chosen CANCEL of static and nested callees? |
-| Q15 | lm | Is a bare file name in abend lines acceptable, given that modules record no absolute paths? |
+| Q12 | lm | Answered: a run-time CALL by default; `--unresolved-calls fail` and `--le-services bind` give the other readings. |
+| Q13 | lm | Answered: IBM's program scope by default, COMMON as the Language Reference gives it; `--program-scope flexible` reaches every program by name. |
+| Q14 | lm | Answered: CANCEL acts only on a program a dynamic CALL entered, as the Language Reference documents. |
+| Q15 | lm | Answered: abend lines name the bare file; `--source-prefix` gives a path. |

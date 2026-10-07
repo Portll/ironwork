@@ -6,8 +6,10 @@ them, hexadecimal floating point, and the ARITH, TRUNC, NUMPROC and CODEPAGE opt
 IBM's compiler honours them.
 
 What exists: a model of what the machine and IBM's compiler do with the bytes, an oracle that tests
-that model against the real compiler, and a front end and interpreter that run a first subset of
-COBOL on EBCDIC storage through that model. Code generation does not exist yet.
+that model against the real compiler, a front end, and code generation to a VM that runs programs
+on EBCDIC storage through that model, with an interpreter beside it. `ironwork run` runs a program
+on the VM, `ironwork compile` writes load modules, and `job` and `cics` run JCL and CICS tasks.
+[STABILITY.md](STABILITY.md) says what a release keeps working.
 
 Install it from whichever registry you already use; each gives you the `ironwork` command:
 

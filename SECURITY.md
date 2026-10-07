@@ -11,8 +11,10 @@ not to be.
 
 ## Supported versions
 
-ironwork for COBOL is before 1.0 and is in public preview. The `main` branch is the supported
-version, and fixes are not backported.
+Before 1.0, the `main` branch is the supported version, and fixes are not backported. From 1.0,
+the latest minor release of the latest major version gets security fixes, as a patch release;
+an older minor is not patched, and upgrading within the major is the remedy.
+[STABILITY.md](STABILITY.md) says what a minor release may change.
 
 ## Checking a download
 

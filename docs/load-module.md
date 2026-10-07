@@ -3,15 +3,15 @@
 The `.iwm` file format, and how a run unit loads it. It details §8 of
 [codegen-runtime.md](codegen-runtime.md) and serves invariants 6 and 7 of its §10.
 
-**Status:** draft, for the operator's review. The container, the encoding rules and every section's
+**Status:** format 1.0, frozen (§8.1). The container, the encoding rules and every section's
 codec (§3 to §7, §9) are built in `rt::module`; `ironwork compile` writes modules, with the mapsets
 their programs name (§5.3) and the files their compile read (§9.2), and `ironwork dump` (§11)
 prints them. The loader (§8.2) is built: `ironwork run x.iwm` runs a module's first program on the
 VM, `ironwork cics x.iwm` runs it as the first program of a CICS task, each with the coverage report
 and evidence journal a run of its source gives, and on the VM CALL, CANCEL, a user-defined
 function, INVOKE and EXEC CICS LINK and XCTL reach programs and classes in modules. A
-static CALL is resolved when it runs, not at compile time (§8.3), within IBM's scope rules. The
-format is 1.0, frozen (§8.1), and §14's questions are decided. The types a module holds are [lir.md](lir.md)'s; this document gives the
+static CALL is resolved when it runs, not at compile time (§8.3), within IBM's scope rules. §14's
+questions are decided. The types a module holds are [lir.md](lir.md)'s; this document gives the
 container, the encoding rules, which apply to any of them, and the program directory.
 
 ## 1. Scope and constraints
