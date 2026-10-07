@@ -938,3 +938,17 @@ fn perform_forever_beside_a_paragraph_named_forever_is_refused_under_extended() 
     let refused = diagnostics_under(&named, numeric::Compliance::Extended);
     assert!(refused.iter().any(|d| (d.0, d.2) == (19, Some("IWC0304"))), "{refused:?}");
 }
+
+#[test]
+fn accept_from_lines_and_columns_give_the_screen_size_under_extended() {
+    let data = "       01  L PIC 999.\n       01  C PIC 999.\n       01  X PIC X(4).\n";
+    let body = [line("ACCEPT L FROM LINES"), line("ACCEPT C FROM COLUMNS END-ACCEPT"), line("ACCEPT X FROM LINES"), line("DISPLAY L ' ' C ' [' X ']'"), line("GOBACK.")].concat();
+    let source = program("", data, &body);
+    let walked = Harness::source(&source).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!(walked.out, "024 080 [24  ]\n", "{:?}\n{}", walked.ending, walked.err);
+    let vm = Harness::source(&source).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    assert_eq!(diagnostics_under(&source, numeric::Compliance::Extended).iter().filter(|d| d.2 == Some("IWX0029")).count(), 3);
+    let refused = syntax::parse(&source).unwrap_err();
+    assert_eq!(refused.id, Some("IWS0060"), "{refused}");
+}

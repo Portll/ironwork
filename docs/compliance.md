@@ -687,6 +687,16 @@ FOREVER` performs a procedure of that name; strict reads it so. Under extended a
 performs FOREVER and names a paragraph or section FOREVER is refused (IWC0304), as the two readings
 differ there.
 
+### IWX0029-W ACCEPT ... FROM LINES and FROM COLUMNS or COLS
+
+`IWX0029-W ACCEPT ... FROM LINES (GnuCOBOL; Enterprise COBOL has no screen): the screen's 24 lines`,
+at LINES or COLUMNS.
+
+The item receives the size of the one screen of 24 lines of 80 characters that positioned DISPLAY
+and ACCEPT use (assumption C462), as a MOVE of 24 or 80 gives it. cobc asks curses for the
+terminal's size, which the clean screen model does not have; ACAS reads it to lay out its
+screens, taking at least 24. Strict refuses both (IWS0060), as before.
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

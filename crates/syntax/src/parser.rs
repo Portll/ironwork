@@ -129,7 +129,7 @@ pub const DEVICE_ENVIRONMENT_NAMES: &[&str] = &["SYSIN", "SYSIPT", "SYSOUT", "SY
 const ACCEPT_DEVICES: &[&str] = &["SYSIN", "SYSIPT", "CONSOLE"];
 
 /// GnuCOBOL's sources for ACCEPT ... FROM that neither Enterprise COBOL nor `--compliance extended` reads.
-const GNUCOBOL_ACCEPT_SOURCES: &[&str] = &["ESCAPE", "EXCEPTION", "LINES", "COLUMNS", "CRT", "USER"];
+const GNUCOBOL_ACCEPT_SOURCES: &[&str] = &["ESCAPE", "EXCEPTION", "LINES", "COLUMNS", "COLS", "CRT", "USER"];
 
 /// The environment-names a WRITE ADVANCING mnemonic-name can stand for (Language Reference,
 /// SPECIAL-NAMES, Table 5): channels C01 to C12, CSP, pockets S01 to S05, and AFP-5A.
@@ -2137,6 +2137,10 @@ impl Parser<'_> {
             }
             "ACCEPT" => {
                 let target = self.reference()?;
+                if let Some(size) = self.screen_size() {
+                    self.unreserved_terminator("END-ACCEPT", "ACCEPT");
+                    return Ok(Stmt::Move { from: Operand::Literal(Literal::Number(size.into())), to: vec![target], pos });
+                }
                 let mut screen = None;
                 if self.is_word("FROM") && self.word_at(1).is_some_and(|w| CRT_DEVICES.contains(&w)) {
                     self.at += 2;
@@ -3321,6 +3325,22 @@ impl Parser<'_> {
         }
         self.accept_word("END-SEARCH");
         Ok(Search { table, all, varying, at_end, whens, pos })
+    }
+
+    /// GnuCOBOL's ACCEPT ... FROM LINES, or COLUMNS or COLS, under `--compliance extended`, taken with its
+    /// words: the screen's 24 lines or 80 columns (assumption C462), with IWX0029-W.
+    fn screen_size(&mut self) -> Option<&'static str> {
+        let size = match (self.extended && self.is_word("FROM"), self.word_at(1)) {
+            (true, Some("LINES")) => "24",
+            (true, Some("COLUMNS" | "COLS")) => "80",
+            _ => return None,
+        };
+        let at = self.tokens[self.at + 1].pos;
+        let word = self.word_at(1).unwrap_or_default().to_owned();
+        let unit = if size == "24" { "lines" } else { "columns" };
+        self.at += 2;
+        self.messages.push(crate::messages::IWX0029.at(at, format!("ACCEPT ... FROM {word} (GnuCOBOL; Enterprise COBOL has no screen): the screen's {size} {unit}")));
+        Some(size)
     }
 
     /// ACCEPT's FROM operand other than the date and time: SYSIN, SYSIPT or CONSOLE, or a

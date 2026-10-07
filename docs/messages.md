@@ -819,6 +819,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0026 | W | `PIC X(n) COMP-5 (Micro Focus and GnuCOBOL; Enterprise COBOL's COMP-5 takes a numeric PICTURE): {name} is {n} bytes of binary, {range}` |
 | IWX0027 | W | `{FLOAT-SHORT or FLOAT-LONG} (GnuCOBOL and Micro Focus; Enterprise COBOL writes COMP-1 and COMP-2): it is read as {COMP-1 or COMP-2}, IBM's hexadecimal floating point` |
 | IWX0028 | W | `PERFORM ... FOREVER (Micro Focus and GnuCOBOL; Enterprise COBOL has no FOREVER phrase): it repeats until EXIT PERFORM, GO TO, GOBACK or STOP RUN leaves it` |
+| IWX0029 | W | `ACCEPT ... FROM {LINES, COLUMNS or COLS} (GnuCOBOL; Enterprise COBOL has no screen): the screen's {24 lines or 80 columns}` |
 
 ## Run-time refusals
 
