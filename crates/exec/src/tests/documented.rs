@@ -241,7 +241,7 @@ fn an_exponent_with_decimal_places_is_evaluated_in_floating_point() {
 /// SIZE ERROR takes; a power that truncates to zero under a negative exponent is IGZ0222S (C334).
 #[test]
 fn an_integral_exponent_in_fixed_point_may_be_negative_or_past_31() {
-    let data = "       01  R PIC 9(13)V9(4).\n       01  A PIC 9 VALUE 2.\n       01  Z PIC 9 VALUE 0.\n       01  N PIC S9(10) VALUE -2.\n       01  B PIC S9(10) VALUE 40.\n       01  T PIC S9(10) VALUE 1000000002.\n       01  F PIC V9 VALUE .1.\n       01  G PIC 9V9.\n       01  M PIC S99 VALUE -40.\n";
+    let data = "       01  R PIC 9(13)V9(4).\n       01  A PIC 9 VALUE 2.\n       01  Z PIC 9 VALUE 0.\n       01  N PIC S9(10) VALUE -2.\n       01  B PIC S9(10) VALUE 40.\n       01  T PIC S9(10) VALUE 1000000002.\n       01  F PIC V9 VALUE .1.\n       01  G PIC 9V9.\n       01  M PIC S99 VALUE -40.\n       01  E PIC S9(10) VALUE -1000000000.\n";
     let powers = [
         line("COMPUTE R = A ** N"),
         line("DISPLAY R"),
@@ -249,13 +249,15 @@ fn an_integral_exponent_in_fixed_point_may_be_negative_or_past_31() {
         line("DISPLAY R"),
         line("COMPUTE R = A ** T"),
         line("DISPLAY R"),
+        line("COMPUTE R = Z ** E"),
+        line("DISPLAY R"),
         line("COMPUTE R = Z ** N"),
         line("    ON SIZE ERROR DISPLAY 'SIZE'"),
         line("END-COMPUTE"),
         line("DISPLAY R"),
     ]
     .concat();
-    assert_eq!(on_both(&program("", data, &[powers.as_str(), &line("GOBACK.")].concat())), "00000000000002500\n10995116277760000\n00000000000040000\nSIZE\n00000000000040000\n");
+    assert_eq!(on_both(&program("", data, &[powers.as_str(), &line("GOBACK.")].concat())), "00000000000002500\n10995116277760000\n00000000000040000\n00000000000010000\nSIZE\n00000000000010000\n");
     for (statement, ending) in [
         ("COMPUTE R = Z ** N.", "IGZ0050S A zero base was raised to a negative power in an exponentiation expression."),
         ("COMPUTE G = F ** M.", "IGZ0222S No significant digits remain in a fixed-point exponentiation operation due to excessive decimal positions specified in the operands or receivers."),

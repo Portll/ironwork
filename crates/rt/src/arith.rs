@@ -67,12 +67,13 @@ pub fn fixed_binop(x: Fixed, op: BinOp, y: Fixed, dmax: u32, arith: Arith, pos: 
 /// truncates to zero under a negative `n` is IGZ0222S. An exponent of more than nine digits keeps
 /// its last nine. Past 31 the power is taken by squaring, so an exponent costs its bits, not its value.
 pub fn pow(x: Fixed, n: i64, dmax: u32, arith: Arith, pos: Pos) -> R<Fixed> {
+    let n = n % 1_000_000_000;
     if n < 0 && x.magnitude.is_zero() {
         return Err(Abend::zero_power(pos));
     }
     let mul = |a: Fixed, b: Fixed| a.mul(b, dmax, arith).map_err(|e| fixed_error(e, pos));
     let one = Fixed::new(1, Places::new(1, 0));
-    let magnitude = n.unsigned_abs() % 1_000_000_000;
+    let magnitude = n.unsigned_abs();
     let power = if magnitude <= 31 {
         (0..magnitude).try_fold(one, |acc, _| mul(acc, x))?
     } else {
