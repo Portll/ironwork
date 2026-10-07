@@ -325,6 +325,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0301 | S | `COMP-X: Micro Focus's binary in the fewest bytes its digits need, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0302 | S | `PIC X(n) COMP-5: Micro Focus's and GnuCOBOL's binary of n bytes, where Enterprise COBOL's COMP-5 takes a numeric PICTURE; --compliance extended reads it` |
 | IWC0303 | S | `PIC X({n}) {COMP-X or COMP-5}: {n} bytes of binary, and ironwork's binary items hold at most eight` |
+| IWC0304 | S | `{paragraph or section} FOREVER: under --compliance extended PERFORM FOREVER is Micro Focus's and GnuCOBOL's endless loop, not a PERFORM of it; compile the program under strict` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
@@ -817,6 +818,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0025 | W | `COMP-X (Micro Focus; Enterprise COBOL's binary items are two, four or eight bytes): {name} is {n} bytes of binary, {range}, shown in {digits} digits` |
 | IWX0026 | W | `PIC X(n) COMP-5 (Micro Focus and GnuCOBOL; Enterprise COBOL's COMP-5 takes a numeric PICTURE): {name} is {n} bytes of binary, {range}` |
 | IWX0027 | W | `{FLOAT-SHORT or FLOAT-LONG} (GnuCOBOL and Micro Focus; Enterprise COBOL writes COMP-1 and COMP-2): it is read as {COMP-1 or COMP-2}, IBM's hexadecimal floating point` |
+| IWX0028 | W | `PERFORM ... FOREVER (Micro Focus and GnuCOBOL; Enterprise COBOL has no FOREVER phrase): it repeats until EXIT PERFORM, GO TO, GOBACK or STOP RUN leaves it` |
 
 ## Run-time refusals
 

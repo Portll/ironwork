@@ -487,6 +487,9 @@ pub enum Loop {
     Once,
     Times(Expr),
     Until { cond: Cond, test_after: bool },
+    /// Micro Focus's and GnuCOBOL's FOREVER under `--compliance extended`: until EXIT PERFORM, GO
+    /// TO, GOBACK or STOP RUN leaves it.
+    Forever,
     /// VARYING, and each AFTER phrase, outermost first.
     Varying { varying: Box<Varying>, after: Vec<Varying>, test_after: bool },
 }

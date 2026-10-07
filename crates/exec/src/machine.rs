@@ -517,6 +517,13 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     }
                 }
             }
+            Loop::Forever => loop {
+                match run(self)? {
+                    Step::Again => {}
+                    Step::Leave => break,
+                    Step::Out(f) => return Ok(f),
+                }
+            },
             Loop::Until { cond, test_after } => loop {
                 if !test_after && self.condition(cond, pos)? {
                     break;

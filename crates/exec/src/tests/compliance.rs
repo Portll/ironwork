@@ -894,3 +894,47 @@ fn float_short_and_float_long_are_comp_1_and_comp_2_shown_as_ibm_shows_them_on_b
     let refused = syntax::parse(GNUCOBOL_FLOATS).unwrap_err();
     assert_eq!((refused.pos.line, refused.id), (6, Some("IWS0101")), "{refused}");
 }
+
+/// PERFORM FOREVER inline, left by EXIT PERFORM, and naming a paragraph, left by GO TO.
+const PERFORM_FOREVER: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. PF.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  N PIC 99 VALUE 0.\n",
+    "       01  M PIC 99 VALUE 0.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           PERFORM FOREVER\n",
+    "               ADD 1 TO N\n",
+    "               IF N > 3 EXIT PERFORM END-IF\n",
+    "               DISPLAY 'N ' N\n",
+    "           END-PERFORM\n",
+    "           PERFORM BUMP FOREVER\n",
+    "           DISPLAY 'AFTER BUMP ' M\n",
+    "           STOP RUN.\n",
+    "       BUMP.\n",
+    "           ADD 1 TO M\n",
+    "           IF M > 2 DISPLAY 'M ' M GO TO DONE END-IF.\n",
+    "       DONE.\n",
+    "           DISPLAY 'DONE ' M\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn perform_forever_repeats_until_left_alike_on_both_executors() {
+    // cobc 3.2's output.
+    let expected = "N 01\nN 02\nN 03\nM 03\nDONE 03\n";
+    let walked = Harness::source(PERFORM_FOREVER).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!(walked.out, expected, "{:?}\n{}", walked.ending, walked.err);
+    let vm = Harness::source(PERFORM_FOREVER).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    let warned = diagnostics_under(PERFORM_FOREVER, numeric::Compliance::Extended);
+    assert_eq!(warned, [(8, 20, Some("IWX0028"), Severity::Warning), (13, 25, Some("IWX0028"), Severity::Warning)]);
+}
+
+#[test]
+fn perform_forever_beside_a_paragraph_named_forever_is_refused_under_extended() {
+    let named = PERFORM_FOREVER.replace("       DONE.\n", "       FOREVER.\n").replace("GO TO DONE", "GO TO FOREVER");
+    let refused = diagnostics_under(&named, numeric::Compliance::Extended);
+    assert!(refused.iter().any(|d| (d.0, d.2) == (19, Some("IWC0304"))), "{refused:?}");
+}

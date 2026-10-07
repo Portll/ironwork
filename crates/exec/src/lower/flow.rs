@@ -750,6 +750,12 @@ impl Lower<'_> {
                 self.op(Op::DecTemp(temp), pos)?;
                 self.run_body(&body, head, exit, None, pos, ctx)?;
             }
+            Loop::Forever => {
+                let run = self.new_block()?;
+                self.jump(run, pos)?;
+                self.switch(run)?;
+                self.run_body(&body, run, exit, None, pos, ctx)?;
+            }
             Loop::Until { cond, test_after } => {
                 let until = self.test(cond, pos)?;
                 let run = self.new_block()?;

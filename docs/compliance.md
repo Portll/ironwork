@@ -671,6 +671,22 @@ where cobc shows `-0.001`. The other floating-point usages, FLOAT-DECIMAL-16 and
 FLOAT-BINARY-32, -64 and -128, FLOAT-EXTENDED and z390's FLOAT-HEX-7, -15 and -30, stay refused.
 Assumption C469. Strict refuses FLOAT-SHORT and FLOAT-LONG (IWS0101).
 
+### IWX0028-W PERFORM ... FOREVER
+
+`IWX0028-W PERFORM ... FOREVER (Micro Focus and GnuCOBOL; Enterprise COBOL has no FOREVER phrase): it
+repeats until EXIT PERFORM, GO TO, GOBACK or STOP RUN leaves it`, at FOREVER.
+
+    PERFORM FOREVER statements END-PERFORM
+    PERFORM procedure-name [THRU procedure-name] FOREVER
+
+FOREVER takes the place of TIMES, UNTIL or VARYING: the body, or the procedures, run again and
+again, and EXIT PERFORM leaves an inline one as it leaves any inline PERFORM. ACAS reads a file
+this way, `PERFORM FOREVER`, `READ ... AT END EXIT PERFORM`. cobc 3.2 gives the same output for
+both forms on the probes checked. In Enterprise COBOL FOREVER is not reserved, and `PERFORM
+FOREVER` performs a procedure of that name; strict reads it so. Under extended a program that both
+performs FOREVER and names a paragraph or section FOREVER is refused (IWC0304), as the two readings
+differ there.
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

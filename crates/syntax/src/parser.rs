@@ -2537,7 +2537,8 @@ impl Parser<'_> {
 
     fn perform(&mut self, pos: Pos) -> R<Stmt> {
         let named = (self.word().is_some_and(|w| !VERBS.contains(&w) && !PHRASE_WORDS.contains(&w) && w != "TEST") || self.peek().is_some_and(digits))
-            && !self.times_ahead();
+            && !self.times_ahead()
+            && !(self.extended && self.is_word("FOREVER"));
         if named {
             let from = self.proc_name()?;
             let thru = if self.accept_any(&["THRU", "THROUGH"]).is_some() { Some(self.proc_name()?) } else { None };
@@ -3471,6 +3472,12 @@ impl Parser<'_> {
         }
         if self.accept_word("UNTIL") {
             return Ok(Loop::Until { cond: self.cond()?, test_after });
+        }
+        if self.extended && self.is_word("FOREVER") {
+            let at = self.pos();
+            self.at += 1;
+            self.messages.push(crate::messages::IWX0028.at(at, "PERFORM ... FOREVER (Micro Focus and GnuCOBOL; Enterprise COBOL has no FOREVER phrase): it repeats until EXIT PERFORM, GO TO, GOBACK or STOP RUN leaves it"));
+            return Ok(Loop::Forever);
         }
         if self.accept_word("VARYING") {
             let varying = Box::new(self.varying()?);

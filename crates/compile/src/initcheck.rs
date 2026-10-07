@@ -1013,6 +1013,7 @@ impl<'w, 'p> Walk<'w, 'p> {
     fn looped(&mut self, repeat: &'p Loop, pos: Pos, before: State, body: Body<'p>) -> State {
         match repeat {
             Loop::Once => self.body(&body, before),
+            Loop::Forever => self.at_least_once(before, &body),
             Loop::Times(e) => {
                 self.expr(e, pos, &before);
                 let at_least_once = matches!(e, Expr::Operand(Operand::Literal(Literal::Number(n))) if n.trim_start_matches('+').parse::<u64>().is_ok_and(|n| n > 0));

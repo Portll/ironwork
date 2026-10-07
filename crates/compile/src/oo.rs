@@ -516,7 +516,7 @@ fn execs(paragraphs: &[Paragraph]) -> Vec<(ExecKind, Pos)> {
 }
 
 /// Every statement, and every statement nested in it.
-fn each(stmts: &[Stmt], f: &mut dyn FnMut(&Stmt)) {
+pub fn each(stmts: &[Stmt], f: &mut dyn FnMut(&Stmt)) {
     for s in stmts {
         f(s);
         for body in bodies(s) {

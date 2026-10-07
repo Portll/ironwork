@@ -213,6 +213,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     });
     digit_limits(&program, options.arith, &mut errors);
     binary_chars(&program, &options, &mut errors);
+    forever_names(&program, &mut errors);
     micro_focus_binaries(&program, &options, &mut errors);
     let drafts = report::prepare(&mut program, options.adv, options.qualify, &mut errors);
     let linage_counters = linage::add_counters(&mut program, options.qualify);
@@ -818,9 +819,6 @@ pub fn procedure(program: &Program, p: &ProcName) -> Result<(usize, usize), Unna
     }
 }
 
-/// Under ARITH(COMPAT) a numeric or numeric-edited PICTURE, scaling positions P included, and a
-/// fixed-point numeric literal hold at most 18 digits, and under ARITH(EXTEND) 31 (Language
-/// Reference SC27-8713-03, pp. 45, 209, 217-218; Programming Guide SC27-8714-03, p. 349).
 /// An 01 or 77 entry with OCCURS, which Micro Focus and GnuCOBOL take and Enterprise COBOL does not,
 /// read under `--compliance extended` as an unnamed 01 group holding the table one level down, its
 /// subordinate entries a level lower too, with IWX0019-W. An entry REDEFINES, EXTERNAL or GLOBAL
@@ -851,6 +849,22 @@ fn top_level_tables(entries: &mut Vec<DataEntry>, errors: &mut Vec<Error>) -> Ve
         at = end + 1;
     }
     inserted
+}
+
+/// A paragraph or section named FOREVER where PERFORM FOREVER is read as the endless loop
+/// (`--compliance extended`): Enterprise COBOL would perform it.
+fn forever_names(program: &Program, errors: &mut Vec<Error>) {
+    let mut endless = false;
+    for p in &program.paragraphs {
+        oo::each(&p.statements, &mut |s| endless |= matches!(s, Stmt::PerformInline { repeat: Loop::Forever, .. } | Stmt::PerformProc { repeat: Loop::Forever, .. }));
+    }
+    if !endless {
+        return;
+    }
+    for p in program.paragraphs.iter().filter(|p| p.name == "FOREVER") {
+        let what = if p.is_section { "SECTION" } else { "paragraph" };
+        errors.push(syntax::messages::IWC0304.at(p.pos, format!("{what} FOREVER: under --compliance extended PERFORM FOREVER is Micro Focus's and GnuCOBOL's endless loop, not a PERFORM of it; compile the program under strict")));
+    }
 }
 
 /// BINARY-CHAR, Micro Focus's and GnuCOBOL's one-byte binary: a warning naming its range under
@@ -904,6 +918,9 @@ fn micro_focus_binaries(program: &Program, options: &Options, errors: &mut Vec<E
     }
 }
 
+/// Under ARITH(COMPAT) a numeric or numeric-edited PICTURE, scaling positions P included, and a
+/// fixed-point numeric literal hold at most 18 digits, and under ARITH(EXTEND) 31 (Language
+/// Reference SC27-8713-03, pp. 45, 209, 217-218; Programming Guide SC27-8714-03, p. 349).
 fn digit_limits(program: &Program, arith: numeric::options::Arith, errors: &mut Vec<Error>) {
     let max = arith.max_picture_digits();
     let option = match arith {
@@ -1450,7 +1467,7 @@ impl Check<'_> {
 
     fn repeat(&mut self, repeat: &Loop) {
         match repeat {
-            Loop::Once => {}
+            Loop::Once | Loop::Forever => {}
             Loop::Times(e) => self.expr(e),
             Loop::Until { cond, .. } => self.cond(cond),
             Loop::Varying { varying, after, .. } => {

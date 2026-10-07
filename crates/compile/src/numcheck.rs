@@ -364,7 +364,7 @@ impl Tested<'_> {
 
     fn repeat(&mut self, repeat: &Loop) {
         match repeat {
-            Loop::Once => {}
+            Loop::Once | Loop::Forever => {}
             Loop::Times(e) => self.arithmetic(e),
             Loop::Until { cond, .. } => self.cond(cond),
             Loop::Varying { varying, after, .. } => {
