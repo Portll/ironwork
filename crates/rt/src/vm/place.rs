@@ -87,6 +87,12 @@ fn pure_expr(p: &Program, e: ExprId, known: &mut [Option<bool>]) -> bool {
     }
 }
 
+/// A place whose address is its base's plus a constant: no subscripts, OCCURS DEPENDING ON or
+/// reference modification, on a base `evaluate` takes without a check.
+pub(super) fn direct(place: &Place) -> bool {
+    plain(place) && place.moved.is_empty() && place.subscripts.is_empty() && place.odo.is_empty() && place.refmod.is_none()
+}
+
 /// A static place whose kind holds a whole number `store::read_integer` can read.
 pub(super) fn integer_item(place: &Place) -> bool {
     let whole = matches!(place.kind, Kind::Index | Kind::Binary { scale: 0, .. } | Kind::Packed { scale: 0, .. } | Kind::Zoned { scale: 0, .. });
@@ -172,6 +178,12 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     /// `place` with each subscript `fixed` names set to its constant, as the walker writes an ALL
     /// subscript as a literal for each element.
     pub(super) fn loc_with(&mut self, place: PlaceId, fixed: &[(u32, i64)]) -> R<Loc> {
+        if self.code.direct[place as usize]
+            && let Some(loc) = self.direct_loc(place)
+        {
+            self.unit.taint_read(loc);
+            return Ok(loc);
+        }
         let memo = fixed.is_empty() && self.memo.is_some() && self.code.pure[place as usize];
         if memo && let Some(loc) = self.memo.as_ref().and_then(|m| m.get(place)) {
             return Ok(loc);
@@ -283,6 +295,19 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let loc = Loc { offset, len, kind: place.kind, item: id as usize };
         self.unit.taint_read(loc);
         Ok(loc)
+    }
+
+    /// `evaluate`'s first step for a direct place, without its memo and counting: its base's
+    /// address plus its offset, None where a LINKAGE record has no address or the place lies
+    /// outside storage, which `evaluate` then reports.
+    fn direct_loc(&self, id: PlaceId) -> Option<Loc> {
+        let place = &self.p.places[id as usize];
+        let base = match place.base {
+            Base::Linkage(record) => self.linkage[record as usize]?,
+            base => self.base_of(base),
+        };
+        let (offset, len) = (base + place.offset as usize, place.len as usize);
+        (offset + len <= self.unit.mem.len()).then_some(Loc { offset, len, kind: place.kind, item: id as usize })
     }
 
     fn base_of(&self, base: Base) -> usize {

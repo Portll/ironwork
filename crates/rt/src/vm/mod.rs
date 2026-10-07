@@ -117,6 +117,8 @@ struct Lowered {
     variables: HashMap<PlaceId, Option<String>>,
     pure: Vec<bool>,
     quick: Vec<Option<place::Quick>>,
+    /// Each place `loc_with` takes straight from its base (`place::direct`).
+    direct: Vec<bool>,
     /// Each place `static_integer` reads: a static one whose kind holds a whole number.
     integers: Vec<bool>,
     /// Each constant's value as `operand_number` takes it where it is an integer.
@@ -167,7 +169,8 @@ impl Lowered {
         let quick = place::quick_places(&program);
         let ints = program.consts.iter().map(value::const_int).collect();
         let integers = program.places.iter().map(place::integer_item).collect();
-        Self { program, collation, ordinals, high_value, low_value, entry_of, receivers, variables, pure, quick, integers, ints }
+        let direct = program.places.iter().map(place::direct).collect();
+        Self { program, collation, ordinals, high_value, low_value, entry_of, receivers, variables, pure, quick, direct, integers, ints }
     }
 }
 
