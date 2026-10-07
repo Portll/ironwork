@@ -1659,6 +1659,20 @@ impl Parser<'_> {
         Ok(())
     }
 
+    /// `name [NOT] OMITTED`, GnuCOBOL's and Micro Focus's test of a parameter the caller passed
+    /// OMITTED or not at all: under `--compliance extended` ADDRESS OF name = NULL, with
+    /// IWX0034-W; refused under strict.
+    fn omitted(&mut self, r: &Ref, negated: bool) -> R<Cond> {
+        let at = self.pos();
+        self.at += 1;
+        let written = format!("{}{} OMITTED", r.name, if negated { " NOT" } else { "" });
+        if !self.extended {
+            return Err(crate::messages::IWC0307.at(at, format!("{written}: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's, which writes ADDRESS OF {} = NULL; --compliance extended reads it", r.name)));
+        }
+        self.messages.push(crate::messages::IWX0034.at(at, format!("{written} (GnuCOBOL and Micro Focus; Enterprise COBOL writes ADDRESS OF {0} = NULL): it is read as ADDRESS OF {0} = NULL, true when the caller passed OMITTED or no argument there", r.name)));
+        Ok(Cond::Rel(Expr::Operand(Operand::AddressOf(r.clone())), RelOp::Eq, Expr::Operand(Operand::Literal(Literal::Figurative(Figurative::Null)))))
+    }
+
     fn locked(&mut self, phrase: &str, at: Pos) {
         self.messages.push(crate::messages::IWX0022.at(at, format!("{phrase} (Micro Focus and GnuCOBOL; Enterprise COBOL has no record locks of its own): the run unit is the file's only user, so nothing it locks waits and the phrase changes nothing")));
     }
@@ -3888,6 +3902,11 @@ impl Parser<'_> {
                 _ => Class::Zero,
             };
             return Ok(wrap(Cond::Class(left, class)));
+        }
+        if let Expr::Operand(Operand::Ref(r)) = &left
+            && self.is_word("OMITTED")
+        {
+            return self.omitted(r, negated).map(wrap);
         }
         if negated {
             return Err(self.error("a relational operator or class after NOT"));

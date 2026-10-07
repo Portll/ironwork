@@ -755,6 +755,18 @@ COBOL's binary halfword, where cobc's holds nine digits, so a value beyond four 
 exit status is ironwork's band of RETURN-CODE, where cobc exits with the value modulo 256. ACAS ends
 two programs with `GOBACK RETURNING 4`. Assumption C480. Strict refuses the phrase (IWC0306).
 
+### IWX0034-W name [NOT] OMITTED
+
+`IWX0034-W P1 OMITTED (GnuCOBOL and Micro Focus; Enterprise COBOL writes ADDRESS OF P1 = NULL): it is
+read as ADDRESS OF P1 = NULL, true when the caller passed OMITTED or no argument there`, at OMITTED.
+
+    identifier IS [NOT] OMITTED
+
+The condition is ADDRESS OF identifier = NULL, Enterprise COBOL's way of asking whether a parameter
+came: true when the CALL passed OMITTED in its place or passed fewer arguments, and cobc 3.2 gives
+the same answers for both. cobcurses tests its optional parameters this way. Strict refuses it
+(IWC0307).
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

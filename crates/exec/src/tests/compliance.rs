@@ -1136,3 +1136,62 @@ fn stop_run_and_goback_returning_are_refused_under_strict_and_warned_under_exten
     let refused = syntax::parse(called).unwrap_err();
     assert_eq!((refused.pos.line, refused.pos.col, refused.id), (4, 19, Some("IWC0306")), "{refused}");
 }
+
+/// A parameter passed, passed OMITTED, and not passed at all, tested with [NOT] OMITTED.
+const OMITTED_PARAMETERS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. OMITMAIN.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  A PIC X(3) VALUE 'AAA'.\n",
+    "       01  B PIC X(3) VALUE 'BBB'.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           CALL 'OMITSUB' USING A B\n",
+    "           CALL 'OMITSUB' USING A OMITTED\n",
+    "           CALL 'OMITSUB' USING OMITTED B\n",
+    "           CALL 'OMITSUB' USING A\n",
+    "           CALL 'OMITSUB' USING BY REFERENCE OMITTED OMITTED\n",
+    "           STOP RUN.\n",
+    "       END PROGRAM OMITMAIN.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. OMITSUB.\n",
+    "       DATA DIVISION.\n",
+    "       LINKAGE SECTION.\n",
+    "       01  P1 PIC X(3).\n",
+    "       01  P2 PIC X(3).\n",
+    "       PROCEDURE DIVISION USING P1 P2.\n",
+    "           IF P1 OMITTED\n",
+    "               DISPLAY 'P1 OMITTED' WITH NO ADVANCING\n",
+    "           ELSE\n",
+    "               DISPLAY 'P1 ' P1 WITH NO ADVANCING\n",
+    "           END-IF\n",
+    "           IF P2 IS NOT OMITTED\n",
+    "               DISPLAY ' P2 ' P2\n",
+    "           ELSE\n",
+    "               DISPLAY ' P2 OMITTED'\n",
+    "           END-IF\n",
+    "           IF (P1 OMITTED) OR (P2 OMITTED)\n",
+    "               DISPLAY 'ONE IS OMITTED'\n",
+    "           END-IF\n",
+    "           GOBACK.\n",
+    "       END PROGRAM OMITSUB.\n",
+);
+
+#[test]
+fn omitted_tests_a_parameter_passed_omitted_or_not_passed_alike_on_both_executors() {
+    // cobc 3.2's output.
+    let expected = "P1 AAA P2 BBB\nP1 AAA P2 OMITTED\nONE IS OMITTED\nP1 OMITTED P2 BBB\nONE IS OMITTED\nP1 AAA P2 OMITTED\nONE IS OMITTED\nP1 OMITTED P2 OMITTED\nONE IS OMITTED\n";
+    let walked = Harness::source(OMITTED_PARAMETERS).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{}", walked.err);
+    let vm = Harness::source(OMITTED_PARAMETERS).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+}
+
+#[test]
+fn omitted_is_refused_under_strict_and_warned_under_extended() {
+    let called = &OMITTED_PARAMETERS[OMITTED_PARAMETERS.find("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OMITSUB").unwrap()..];
+    let at = [(8, 18), (13, 25), (18, 19), (18, 35)];
+    assert_eq!(diagnostics_under(called, numeric::Compliance::Extended), at.map(|(line, col)| (line, col, Some("IWX0034"), Severity::Warning)));
+    let refused = syntax::parse(called).unwrap_err();
+    assert_eq!((refused.pos.line, refused.pos.col, refused.id), (8, 18, Some("IWC0307")), "{refused}");
+}
