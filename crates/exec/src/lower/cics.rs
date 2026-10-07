@@ -1,4 +1,4 @@
-//! EXEC CICS (lir.md §9.5): each block bound by the walker's own `cics_bind::bind`, its handles
+//! EXEC CICS (lir.md §9.5): each block bound by `compile::cics_bind::bind`, its handles
 //! lowered, as one `Op::Cics`. HANDLE CONDITION keeps the paragraphs its labels name, which the op
 //! returns as `Step::GoTo` when a condition takes one; HANDLE ABEND keeps its LABEL's. A block the
 //! walker refuses as it binds it lowers to `Cics::Refused` with the walker's message. A symbolic
@@ -7,7 +7,7 @@
 use super::{Lower, LowerError, R, push, unsupported};
 use crate::Abend;
 use crate::layout::Resolved;
-use crate::machine::cics_bind;
+use compile::cics_bind;
 use rt::abend::AbendCode;
 use rt::cics::{Cics, CicsCommand, Datum, Handles, Resp};
 use rt::lir::{self, Op, PlaceId, SymId};

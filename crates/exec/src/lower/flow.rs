@@ -513,7 +513,7 @@ impl Lower<'_> {
                 self.go_to(t, ctx, pos)?;
             }
             Stmt::Exec(block) => {
-                // The walker's `cics_bind::bind` reads CICS options; the typed `sql` holds SQL's host
+                // `compile::cics_bind::bind` reads CICS options; the typed `sql` holds SQL's host
                 // variables and text.
                 let ExecBlock { kind, command, options: _, host_variables: _, sql: _, text: _, pos: _ } = &**block;
                 match kind {

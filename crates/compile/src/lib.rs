@@ -2,6 +2,7 @@
 //! WORKING-STORAGE laid out as IBM lays it out, ready for the interpreter or for lowering.
 
 pub mod arith;
+pub mod cics_bind;
 mod classes;
 pub mod collating;
 mod corresponding;
