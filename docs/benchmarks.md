@@ -122,7 +122,7 @@ ratio within about 0.03 of its target needs a second run.
 ## VM target
 
 Fixed per program class before the VM's timing run on a quiet machine (operator, 2026-10-03,
-decision D-4). Native code is built only if the VM misses it. Each target is a ratio measured in
+decision D-4). Native code follows in 1.1 whether or not the VM meets it. Each target is a ratio measured in
 one interleaved `tools/bench.sh` run on the runner being judged, Linux x86-64 or macOS. The seconds
 are the reference on the machine above, from the 2026-09-30 interpreter and cobc times.
 

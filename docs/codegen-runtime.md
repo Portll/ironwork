@@ -2,8 +2,8 @@
 
 A specification for compiling COBOL ahead of time, and for the runtime that compiled programs link.
 
-**Status:** steps 0 to 5 of §14 are done: the VM runs programs by default. Step 6 waits on the
-performance measurements, and step 7's text on a practitioner's review. It builds on the
+**Status:** steps 0 to 5 of §14 are done: the VM runs programs by default. Step 6, native code, is
+scheduled for 1.1, and step 7's text waits on a practitioner's review. It builds on the
 operator's rulings of 2026-09-29:
 
 - **The runtime licence.** The runtime is AGPL-3.0-or-later with a runtime exception, so a program
@@ -90,7 +90,7 @@ The detail lives in four companion documents:
 
 ## 5. Recommendation
 
-**Lower first; run the LIR on a VM; emit Rust from the same LIR only if the VM misses its target.**
+**Lower first; run the LIR on a VM; then emit Rust from the same LIR, in ironwork 1.1.**
 
 - The LIR is needed by every backend, including a future native one, so building it first
   wastes nothing.
@@ -256,8 +256,9 @@ integrated in the interpreter and landing on main. The LIR lowers each of them (
 
 ## 13. Decisions for the operator
 
-- **D1.** Build the LIR VM first, and native Rust emission only if the VM misses B6. Settled by the
-  operator on 2026-09-29: SQL first, then the VM, with the interpreter kept.
+- **D1.** Build the LIR VM first, then native Rust emission. Settled by the operator on 2026-09-29:
+  SQL first, then the VM, with the interpreter kept. On 2026-10-07 the operator scheduled native
+  code for 1.1, whether or not the VM meets B6.
 - **D2.** Accept a Rust toolchain as a build-time requirement for native output.
 - **D3.** Keep the no-dependencies rule, which excludes Cranelift and LLVM.
 - **D4.** Keep the BMS parser in the compiler, with map models in the runtime.
@@ -275,7 +276,7 @@ The companion documents carry their own open questions for the operator, listed 
 | 3 | **Build the VM** in `rt` on the semantics library. Run the interpreter and the VM on every test and oracle case as a permanent CI job. Extend the fuzz target. | B2 passes |
 | 4 | **Add the load module**, `ironwork compile`, and module loading in `RunUnit`. | B1 and B4 pass for programs that lower: cli/tests/iwm_run.rs runs modules against their sources ([load-module.md](load-module.md) §12, L5 and L8) |
 | 5 | **Make the VM the default.** `ironwork run file.cbl` compiles in memory and runs the VM; `--interpret` keeps the interpreter. | Tests pass in both executors |
-| 6 | **Emit Rust**, only if step 3's measurements miss B6. | B5, and B6 native |
+| 6 | **Emit Rust**, in 1.1 (ironwork-roadmap 25). | B5, and B6 native |
 | 7 | **Publish the exception.** `RUNTIME-EXCEPTION.md`, SPDX headers, and README and NOTICE are on main (6a6da25). | Text reviewed by a practitioner (D5) |
 
 **Verification.** Every step keeps today's tests and oracle cases passing. V1, V2, and any assumption
