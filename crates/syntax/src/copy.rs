@@ -173,9 +173,11 @@ struct Statement {
     replacing: Vec<Replacing>,
     /// Index of the word after the terminating period.
     next: usize,
+    /// The warning for a name read without the periods after it, under `--compliance extended`.
+    note: Option<Error>,
 }
 
-fn copy_statement(words: &[Word], chars: &[char], at: usize, pos: Pos) -> Result<Statement, Error> {
+fn copy_statement(words: &[Word], chars: &[char], at: usize, pos: Pos, extended: bool) -> Result<Statement, Error> {
     let err = |m: &str| crate::messages::IWS0003.at(pos, format!("COPY: {m}"));
     let text = |i: usize| words.get(i).map(|w| w.text.as_str());
     let mut i = at + 1;
@@ -189,6 +191,14 @@ fn copy_statement(words: &[Word], chars: &[char], at: usize, pos: Pos) -> Result
         Ok(unquote(s))
     };
     let first = text(i).ok_or_else(|| err("a member name"))?;
+    let mut note = None;
+    let first = match first.trim_end_matches('.') {
+        bare if extended && bare.len() < first.len() && !bare.is_empty() && !quoted(first) && text(i + 1).is_none_or(|w| !w.eq_ignore_ascii_case("OF") && !w.eq_ignore_ascii_case("IN")) => {
+            note = Some(crate::messages::IWX0054.at(pos, format!("COPY {first}. (GnuCOBOL and Micro Focus; Enterprise COBOL reads the name as {first}): the member is {bare}, and the periods after it end the statement")));
+            bare
+        }
+        _ => first,
+    };
     let (name, literal) = (word(first)?, quoted(first));
     i += 1;
     let mut library = None;
@@ -206,7 +216,7 @@ fn copy_statement(words: &[Word], chars: &[char], at: usize, pos: Pos) -> Result
     if text(i) != Some(".") {
         return Err(err("a period to end the statement"));
     }
-    Ok(Statement { name, literal, library, replacing, next: i + 1 })
+    Ok(Statement { name, literal, library, replacing, next: i + 1, note })
 }
 
 /// The operand pairs of COPY REPLACING or of REPLACE, from word `at` to the period that ends the
@@ -370,7 +380,8 @@ fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>,
     while i < words.len() {
         let pos = source.positions[words[i].start];
         let (name, literal, library, replacing, next, sql) = if words[i].text.eq_ignore_ascii_case("COPY") {
-            let st = copy_statement(&words, &chars, i, pos)?;
+            let st = copy_statement(&words, &chars, i, pos, libraries.compliance() == numeric::Compliance::Extended)?;
+            out.notes.extend(st.note);
             (st.name, st.literal, st.library, st.replacing, st.next, false)
         } else if let Some((name, literal, next)) = sql_include(&words, i) {
             (name, literal, None, Vec::new(), next, true)
@@ -745,5 +756,21 @@ mod tests {
         let at = out.text.find('Y').unwrap();
         assert_eq!(out.positions[at].file, 1);
         assert!(files[1].ends_with("POS.cpy"));
+    }
+
+    #[test]
+    fn under_extended_a_name_followed_by_two_periods_names_the_member_without_them() {
+        let dir = std::env::temp_dir().join(format!("iw-copy-dots-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("CSTMT.cpy"), "           DISPLAY 'FROM COPY'.\n").unwrap();
+        let main = "       PROCEDURE DIVISION.\n           COPY CSTMT..\n";
+        let libraries = Libraries::new(vec![dir.clone()]).with_compliance(numeric::Compliance::Extended);
+        let source = crate::source::read_under(main, 0, false, numeric::Compliance::Extended).unwrap();
+        let expanded = expand(source, &libraries, &mut Vec::new()).unwrap();
+        assert!(expanded.text.contains("DISPLAY 'FROM COPY'"), "{}", expanded.text);
+        assert_eq!(expanded.notes.iter().map(|n| (n.pos.line, n.id)).collect::<Vec<_>>(), [(2, Some("IWX0054"))]);
+        let strict = expand(crate::source::read_under(main, 0, false, numeric::Compliance::Strict).unwrap(), &Libraries::new(vec![dir.clone()]), &mut Vec::new());
+        assert_eq!(strict.err().map(|e| e.id), Some(Some("IWS0004")));
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

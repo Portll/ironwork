@@ -964,6 +964,16 @@ An alphanumeric value of the arguments' characters in order, a numeric argument 
 unsigned, as a MOVE to an alphanumeric item shows them, as cobc 3.2 gives it. Strict refuses it
 (IWC0319).
 
+### IWX0054-W COPY name..
+
+`IWX0054-W COPY CSTMT.. (GnuCOBOL and Micro Focus; Enterprise COBOL reads the name as CSTMT.): the
+member is CSTMT, and the periods after it end the statement`, at COPY.
+
+Enterprise COBOL takes the second period as the one that ends the statement, so the name is `X.`
+(C88), and strict keeps IWS0004. cobc 3.2 copies member X and leaves the extra period in the text,
+which ends an empty sentence in the PROCEDURE DIVISION and is refused elsewhere; ironwork copies
+member X wherever the statement stands.
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

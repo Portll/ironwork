@@ -865,6 +865,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0051 | W | `an inline PERFORM with AFTER phrases (GnuCOBOL and Micro Focus; Enterprise COBOL takes them only when PERFORM names a procedure): the body runs for each combination, the last AFTER varying fastest` |
 | IWX0052 | W | `INITIALISE (Micro Focus and GnuCOBOL; Enterprise COBOL spells it INITIALIZE): it is read as INITIALIZE` |
 | IWX0053 | W | `FUNCTION CONCATENATE (GnuCOBOL; Enterprise COBOL has no such function): its arguments' characters joined, a number's as its digits` |
+| IWX0054 | W | `COPY {name}. (GnuCOBOL and Micro Focus; Enterprise COBOL reads the name as {name}.): the member is {name}, and the periods after it end the statement` |
 
 ## Run-time refusals
 
