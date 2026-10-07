@@ -2045,6 +2045,13 @@ impl Check<'_> {
                         syntax::messages::IWC0305.at(f.pos, "FUNCTION MODULE-CALLER-ID: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it")
                     });
                 }
+                if f.name == "STORED-CHAR-LENGTH" && self.intrinsic(&f.name) {
+                    self.errors.push(if self.extended {
+                        syntax::messages::IWX0042.at(f.pos, "FUNCTION STORED-CHAR-LENGTH (GnuCOBOL; Enterprise COBOL has no such function): the argument's length in characters without its trailing spaces")
+                    } else {
+                        syntax::messages::IWC0312.at(f.pos, "FUNCTION STORED-CHAR-LENGTH: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it")
+                    });
+                }
                 if !self.intrinsic(&f.name) {
                     match self.functions.map(|all| all.iter().find(|u| u.name == f.name)) {
                         Some(Some(udf)) => function::check_invocation(udf, f, self.layout, self.alphabetic, self.program.environment.decimal_point_comma, self.errors),

@@ -355,6 +355,7 @@ functions! {
     ContentOf = 81, "CONTENT-OF", 1..=1;
     ModuleCallerId = 82, "MODULE-CALLER-ID", 0..=0;
     ArgumentLength = 83, "ARGUMENT LENGTH", 1..=1;
+    StoredCharLength = 84, "STORED-CHAR-LENGTH", 1..=1;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

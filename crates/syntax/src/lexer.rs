@@ -293,6 +293,11 @@ impl Lexer<'_> {
                 self.at += 1;
                 self.emit(Tok::Period, pos);
             }
+            '.' if self.extended && next == Some('.') && self.separator_follows(self.periods()) => {
+                self.pending.push(crate::messages::IWX0041.at(pos, "periods after a period (GnuCOBOL and Micro Focus; Enterprise COBOL ends a sentence with one): the periods after the first are ignored"));
+                self.at += self.periods();
+                self.emit(Tok::Period, pos);
+            }
             '+' | '-' if next.is_some_and(|n| n.is_ascii_digit() || (n == point && self.peek(2).is_some_and(|d| d.is_ascii_digit()))) => {
                 self.at += 1;
                 let digits = self.number_or_word(pos)?;
@@ -412,6 +417,11 @@ impl Lexer<'_> {
                 }
             }
         }
+    }
+
+    /// How many periods follow one another from here.
+    fn periods(&self) -> usize {
+        (0..).take_while(|&k| self.peek(k) == Some('.')).count()
     }
 
     fn number_or_word(&mut self, pos: Pos) -> Result<Tok, Error> {

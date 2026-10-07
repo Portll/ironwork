@@ -1499,3 +1499,59 @@ fn a_load_module_carries_the_split_keys_after_the_lir_records_and_prints_them() 
     let module = rt::module::read(&bytes).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(module.programs[0].services.files[0].keys.as_ref().map(|k| &k.split), Some(&keys.split), "the LIR section's end carries them");
 }
+
+/// FUNCTION STORED-CHAR-LENGTH of alphanumeric, all-space, national and literal arguments.
+const STORED_CHAR_LENGTH: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. SCL.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  A PIC X(10) VALUE \"AB  C\".\n",
+    "       01  B PIC X(4) VALUE SPACES.\n",
+    "       01  N PIC N(4) VALUE N\"XY\".\n",
+    "       01  L PIC 9(4).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE FUNCTION STORED-CHAR-LENGTH(A) TO L DISPLAY L\n",
+    "           MOVE FUNCTION STORED-CHAR-LENGTH(B) TO L DISPLAY L\n",
+    "           MOVE FUNCTION STORED-CHAR-LENGTH(N) TO L DISPLAY L\n",
+    "           MOVE FUNCTION STORED-CHAR-LENGTH(\"XYZ  \") TO L DISPLAY L\n",
+    "           STOP RUN.\n",
+);
+
+/// Sentences ended with two periods, in the DATA and PROCEDURE DIVISIONs, and a period alone.
+const DOUBLED_PERIODS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. DOTS.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  N PIC 9 VALUE 1..\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY N..\n",
+    "           DISPLAY \"TWO\".\n",
+    "           .\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn stored_char_length_and_doubled_periods_run_alike_on_both_executors() {
+    // cobc 3.2's output, but for the national argument: cobc, whose NATIONAL handling it calls
+    // unfinished, gives 4 there, and ironwork its two characters.
+    for (source, expected) in [(STORED_CHAR_LENGTH, "0005\n0000\n0002\n0003\n"), (DOUBLED_PERIODS, "1\nTWO\n")] {
+        let walked = Harness::source(source).flags(EXTENDED).run(Executor::Interpreter);
+        assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{}", walked.err);
+        let vm = Harness::source(source).flags(EXTENDED).run(Executor::Vm);
+        assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    }
+}
+
+#[test]
+fn stored_char_length_and_doubled_periods_are_warned_under_extended_and_refused_under_strict() {
+    let warned: Vec<_> = diagnostics_under(STORED_CHAR_LENGTH, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0042")).map(|d| d.0).collect();
+    assert_eq!(warned, [10, 11, 12, 13]);
+    let refused = diagnostics_under(STORED_CHAR_LENGTH, numeric::Compliance::Strict);
+    assert_eq!(refused.iter().filter(|d| d.2 == Some("IWC0312")).count(), 4, "{refused:?}");
+    let warned: Vec<_> = diagnostics_under(DOUBLED_PERIODS, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0041")).map(|d| (d.0, d.1)).collect();
+    assert_eq!(warned, [(5, 27), (7, 21)]);
+    let refused = syntax::parse(DOUBLED_PERIODS).unwrap_err();
+    assert_eq!((refused.pos.line, refused.id), (5, Some("IWS0026")), "{refused}");
+}

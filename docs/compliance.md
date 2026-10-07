@@ -845,6 +845,25 @@ value from the items as the record area holds them. Each item must be in the fil
 1.2, the pieces following the `LIR` section's records (load-module.md §8.1). Assumption C484.
 Strict refuses the form (IWC0311).
 
+### IWX0041-W Periods after a period
+
+`IWX0041-W periods after a period (GnuCOBOL and Micro Focus; Enterprise COBOL ends a sentence with
+one): the periods after the first are ignored`, at the first.
+
+`DISPLAY 'BAD'..` and `VALUE 0..` end the sentence or entry once, as cobc 3.2 reads them with a
+warning; the z390 test programs copied into the bug datasets end many sentences so. Strict refuses
+the second period (IWS0026).
+
+### IWX0042-W FUNCTION STORED-CHAR-LENGTH
+
+`IWX0042-W FUNCTION STORED-CHAR-LENGTH (GnuCOBOL; Enterprise COBOL has no such function): the
+argument's length in characters without its trailing spaces`, at the function.
+
+An integer: the characters of an alphanumeric argument up to its last that is not a space, 0 when
+all are spaces, as cobc 3.2 gives it. A national argument counts its characters up to the last that
+is not a national space, where cobc 3.2, whose national handling it calls unfinished, counts more.
+CobolCraft measures names and channels with it. Strict refuses it (IWC0312).
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

@@ -872,6 +872,16 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             let caller = x.caller().unwrap_or_default();
             text_value(facts, &caller, pos)
         }
+        "STORED-CHAR-LENGTH" => {
+            arity(1..=1, args)?;
+            let n = match &args[0] {
+                Val::Bytes(b) | Val::All(b) => b.iter().rposition(|&c| c != ebcdic::SPACE).map_or(0, |last| last + 1),
+                Val::National(b) => b.chunks(2).rposition(|c| c != [0x00, 0x20]).map_or(0, |last| last + 1),
+                Val::Dbcs(b) => b.chunks(2).rposition(|c| c != [ebcdic::SPACE, ebcdic::SPACE]).map_or(0, |last| last + 1),
+                _ => return Err(crate::refusal::IWR0065.abend("FUNCTION STORED-CHAR-LENGTH of this argument is not supported yet", pos)),
+            };
+            Ok(Val::Num(Fixed::new(n as i128, Places::new(9, 0))))
+        }
         "ARGUMENT LENGTH" => {
             arity(1..=1, args)?;
             let position = usize::try_from(whole(&args[0], name, pos)?).unwrap_or_default();

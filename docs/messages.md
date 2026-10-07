@@ -332,6 +332,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0309 | S | `PERFORM UNTIL EXIT: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0310 | S | `a file description with no FILE SECTION header: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0311 | S | `KEY IS {name} = ...: Micro Focus's split key, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0312 | S | `FUNCTION STORED-CHAR-LENGTH: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
@@ -840,6 +841,8 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0038 | W | `PERFORM UNTIL EXIT (GnuCOBOL and Micro Focus; Enterprise COBOL has no such condition): it repeats until EXIT PERFORM, GO TO, GOBACK or STOP RUN leaves it` |
 | IWX0039 | W | `ASSIGN TO DISK (Micro Focus and GnuCOBOL; Enterprise COBOL's ASSIGN names a DD): DISK is the device, and what follows names the file` |
 | IWX0040 | W | `KEY IS {name} = ... (Micro Focus; Enterprise COBOL's key is one data item): the key joins {n} items of the record, in the order written` |
+| IWX0041 | W | `periods after a period (GnuCOBOL and Micro Focus; Enterprise COBOL ends a sentence with one): the periods after the first are ignored` |
+| IWX0042 | W | `FUNCTION STORED-CHAR-LENGTH (GnuCOBOL; Enterprise COBOL has no such function): the argument's length in characters without its trailing spaces` |
 
 ## Run-time refusals
 
