@@ -312,7 +312,14 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 Func::Random if self.locating > 0 => return Err(not_yet("FUNCTION RANDOM in a subscript, reference modification or OCCURS DEPENDING ON")),
                 _ => {}
             }
-            let result = intrinsic::evaluate(&mut Call { vm: self, plan }, plan.func.name(), plan.side, &mut args, pos);
+            let counted = match (plan.func, args.as_slice()) {
+                (Func::Mod, [Val::Num(a), Val::Num(b)]) => count_mod(Number::of(*a), Number::of(*b)),
+                _ => None,
+            };
+            let result = match counted {
+                Some(n) => Ok(Val::Num(n.fixed())),
+                None => intrinsic::evaluate(&mut Call { vm: self, plan }, plan.func.name(), plan.side, &mut args, pos),
+            };
             args.clear();
             self.spare.args = args;
             self.settle(result)?
@@ -435,6 +442,21 @@ pub(super) fn int_binop(x: Number, op: BinOp, y: Number, dmax: u32, arith: Arith
         BinOp::Div | BinOp::Pow => return None,
     };
     kept(exact, ir, carried(ir, dmax, arith))
+}
+
+/// FUNCTION MOD of two counts as the intrinsic gives it: a - b * FLOOR(a / b) at the arguments'
+/// greater decimal places, with the integer places of the shorter argument, high-order digits
+/// dropped; None where either is not a count, or `b` is zero, which the intrinsic reports.
+pub(super) fn count_mod(a: Number, b: Number) -> Option<Number> {
+    let (Number::Int(a, pa), Number::Int(b, pb)) = (a, b) else { return None };
+    let (a, b) = aligned(i128::from(a), pa.dec, i128::from(b), pb.dec)?;
+    if b == 0 {
+        return None;
+    }
+    let r = a % b;
+    let r = if r != 0 && (r < 0) != (b < 0) { r + b } else { r };
+    let places = Places::new(pa.int.min(pb.int), pa.dec.max(pb.dec));
+    kept(r, places, places)
 }
 
 /// Ten to each power an `i128` holds.
@@ -615,5 +637,111 @@ mod tests {
             }
         }
         assert!(fast.iter().all(|&n| n > 20_000), "operations taken as counts: {fast:?}");
+    }
+
+    #[derive(Clone, Copy)]
+    struct Plain;
+
+    impl ProgramFacts for Plain {
+        fn options(&self) -> numeric::Options {
+            numeric::Options::default()
+        }
+        fn page(&self) -> &'static zarch::ebcdic::CodePage {
+            numeric::Options::default().code_page()
+        }
+        fn figurative(&self, _: Figurative) -> u8 {
+            0
+        }
+        fn collation(&self) -> &zarch::ebcdic::Collation {
+            &zarch::ebcdic::Collation::Native
+        }
+        fn ordinal(&self, byte: u8) -> u16 {
+            u16::from(byte) + 1
+        }
+        fn character(&self, _: i64) -> Option<u8> {
+            None
+        }
+        fn characters(&self) -> usize {
+            256
+        }
+        fn decimal_point(&self) -> char {
+            '.'
+        }
+        fn edit(&self, _: u32) -> (&[crate::picture::Sym], &str) {
+            (&[], "")
+        }
+        fn scaling(&self, _: usize) -> u32 {
+            0
+        }
+        fn item_name(&self, _: usize) -> String {
+            String::new()
+        }
+    }
+
+    struct Nothing(Option<u32>);
+
+    impl Evaluator for Nothing {
+        type Facts = Plain;
+        fn facts(&self) -> Plain {
+            Plain
+        }
+        fn integer(&mut self, _: usize, pos: Pos) -> Result<i64, Abend> {
+            Err(Abend::ironwork("no integer argument", pos))
+        }
+        fn written(&self) -> usize {
+            2
+        }
+        fn now(&self) -> (i64, u32) {
+            (0, 0)
+        }
+        fn compiled(&self) -> (i64, u32) {
+            (0, 0)
+        }
+        fn random(&mut self) -> &mut Option<u32> {
+            &mut self.0
+        }
+        fn currency(&self) -> String {
+            String::new()
+        }
+        fn caller(&mut self) -> Option<String> {
+            None
+        }
+        fn argument_length(&mut self, _: usize) -> usize {
+            0
+        }
+    }
+
+    #[test]
+    fn mod_of_two_counts_is_the_intrinsic_s() {
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        let mut next = move || {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            state.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        };
+        let mut fast = 0;
+        for _ in 0..40_000 {
+            let mut operand = || {
+                let digits = 1 + (next() % 18) as u32;
+                let dec = (next() % u64::from(digits + 1)) as u32;
+                let n = (next() % 10u64.pow(digits)) as i64;
+                let n = if next() % 4 == 0 { n % 10 } else { n };
+                (if next() % 2 == 0 { -n } else { n }, Places::new(digits - dec, dec))
+            };
+            let ((x, px), (y, py)) = (operand(), operand());
+            let (a, b) = (Number::Int(x, px), Number::Int(y, py));
+            let mut args = vec![Val::Num(a.fixed()), Val::Num(b.fixed())];
+            let general = intrinsic::evaluate(&mut Nothing(None), "MOD", None, &mut args, Pos::default());
+            match (count_mod(a, b), general) {
+                (Some(r), Ok(Val::Num(general))) => {
+                    fast += 1;
+                    assert_eq!(r.fixed(), general, "MOD({x} at {px:?}, {y} at {py:?})");
+                }
+                (Some(r), other) => panic!("MOD({x} at {px:?}, {y} at {py:?}) gave {r:?} where the intrinsic gives {other:?}"),
+                (None, _) => assert!(y == 0, "MOD({x} at {px:?}, {y} at {py:?}) left the counts"),
+            }
+        }
+        assert!(fast > 35_000, "only {fast} MODs taken as counts");
     }
 }
