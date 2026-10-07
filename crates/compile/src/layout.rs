@@ -8,6 +8,7 @@ use numeric::{Native, Qualify};
 use syntax::ast::{DataEntry, Environment, FileDecl, Literal, Organization, Ref, SignClause, Usage};
 use syntax::messages::{IWC0001, IWC0002, Message};
 use syntax::{Error, Pos};
+use std::collections::HashMap;
 use zarch::hfp::Precision;
 
 pub use rt::storage::Kind;
@@ -105,6 +106,10 @@ pub enum Section {
 pub struct Layout {
     pub items: Vec<Item>,
     pub conditions: Vec<Condition>,
+    /// The items and the condition-names of each name, in declaration order: the candidates
+    /// [`Layout::resolve`] qualifies.
+    named_items: HashMap<String, Vec<usize>>,
+    named_conditions: HashMap<String, Vec<usize>>,
     /// The positions of each edited PICTURE.
     pub edits: Vec<Vec<Sym>>,
     /// The currency sign value each edited PICTURE's currency symbol stands for, empty without one.
@@ -547,6 +552,8 @@ pub fn build(
         *lengths = Some(lengths.map_or((least, most), |(l, m)| (l.min(least), m.max(most))));
     }
     Ok(Layout {
+        named_items: by_name(items.iter().map(|i| i.name.as_deref())),
+        named_conditions: by_name(conditions.iter().map(|c| Some(c.name.as_str()))),
         items,
         conditions,
         edits,
@@ -568,6 +575,17 @@ pub fn build(
     })
 }
 
+
+/// The index of each entry under its name, ascending; an unnamed entry is under none.
+fn by_name<'a>(names: impl Iterator<Item = Option<&'a str>>) -> HashMap<String, Vec<usize>> {
+    let mut index: HashMap<String, Vec<usize>> = HashMap::new();
+    for (k, name) in names.enumerate() {
+        if let Some(name) = name {
+            index.entry(name.to_owned()).or_default().push(k);
+        }
+    }
+    index
+}
 
 /// The names of item `start` and each group above it, nearest first: the hierarchy of names that
 /// qualifies an item `start` holds or a condition-name of `start`. FILLER and unnamed items give
@@ -1065,16 +1083,11 @@ impl Layout {
                 Some(file) => wanted.next().is_none() && self.file_qualifying(own) == Some(file.as_str()),
             }
         };
-        let mut found: Vec<Resolved> = self
-            .items
-            .iter()
-            .enumerate()
-            .filter(|(i, it)| it.name.as_deref() == Some(name) && within(it.parent, *i))
-            .map(|(i, _)| Resolved::Item(i))
-            .collect();
-        found.extend(
-            self.conditions.iter().enumerate().filter(|(_, c)| c.name == name && within(Some(c.item), c.item)).map(|(i, _)| Resolved::Condition(i)),
-        );
+        fn candidates<'a>(named: &'a HashMap<String, Vec<usize>>, name: &str) -> &'a [usize] {
+            named.get(name).map_or(&[], Vec::as_slice)
+        }
+        let mut found: Vec<Resolved> = candidates(&self.named_items, name).iter().filter(|&&i| within(self.items[i].parent, i)).map(|&i| Resolved::Item(i)).collect();
+        found.extend(candidates(&self.named_conditions, name).iter().filter(|&&c| within(Some(self.conditions[c].item), self.conditions[c].item)).map(|&c| Resolved::Condition(c)));
         if found.len() > 1 {
             let nearest = found.iter().map(|&r| self.depth(r)).min().unwrap_or_default();
             found.retain(|&r| self.depth(r) == nearest);
