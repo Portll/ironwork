@@ -20,7 +20,7 @@ fn sql_blocks<'s>(stmts: &'s [Stmt], out: &mut Vec<&'s ExecBlock>) {
         {
             out.push(block);
         }
-        for body in crate::oo::bodies(s) {
+        for body in compile::oo::bodies(s) {
             sql_blocks(body, out);
         }
     }

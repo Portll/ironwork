@@ -241,7 +241,7 @@ impl Lower<'_> {
                 }
                 _ => {}
             }
-            for body in crate::oo::bodies(s) {
+            for body in compile::oo::bodies(s) {
                 self.collect(body)?;
             }
         }
