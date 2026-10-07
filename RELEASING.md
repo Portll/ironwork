@@ -21,9 +21,14 @@ It prints PASS, FAIL or TODO for each step and exits 1 on any FAIL.
    `cargo +<stable> clippy --workspace --all-targets --locked -- -D warnings`.
    Bump the cobolwork `ref` in `.github/workflows/ci.yml` deliberately and only to a cobolwork commit whose shared tables ironwork's drift tests pass against.
 3. **Notes.** Start from the commits `--before` lists since the previous release. Each feature and
-   fix there is either named in the notes or left out on purpose.
+   fix there is either named in the notes or left out on purpose. Commit the notes as
+   `docs/releases/<version>.md` before the tag. They open with a `## Summary` section, which the
+   site renders as the release's row: the first paragraph is the benefit, each line opening with a
+   hyphen a sub-item, a paragraph opening `**Limit:**` the limit. A change to anything
+   [STABILITY.md](STABILITY.md) lists is named there.
 4. **Version.** One commit bumps both workspaces: `version` under `[workspace.package]` in
-   `Cargo.toml`, every internal `version = "x"` pin in `crates/*/Cargo.toml`, and
+   `Cargo.toml`, every internal `version = "=x"` pin in `crates/*/Cargo.toml` (exact, so a
+   release builds only with its own crates), and
    `tls/Cargo.toml`. Then `cargo update -w` and `cargo update -w --manifest-path tls/Cargo.toml`,
    and `cargo check --locked --all-targets` and `cargo check --locked --manifest-path
    tls/Cargo.toml`, reading each exit code. `tls/` is a second workspace with its own lock. The
@@ -33,13 +38,14 @@ It prints PASS, FAIL or TODO for each step and exits 1 on any FAIL.
 
 5. **Tag.** An annotated tag `v<version>` with the message `ironwork <version>`, on the commit
    whose CI passed. Pushing the tag runs `release.yml`.
-   Its `check` job fails the run unless the tag is `v` plus the version at the tagged commit, the
-   commit is an ancestor of `origin/main`, and `ci.yml` has a successful run for that commit; every
+   Its `check` job fails the run unless the tag is `v` plus the version at the tagged commit, that
+   commit holds `docs/releases/<version>.md`, the commit is an ancestor of `origin/main`, and
+   `ci.yml` has a successful run for that commit; every
    other job then skips. It also fixes the stable Rust version of the moment, which every build
    uses and the release notes name. The builds run next, with provenance, beside `semver`, which
-   fails when `cargo semver-checks` finds a published crate's API broken by a change the version
-   bump does not allow, and `sbom`, which writes each build's CycloneDX bill of materials. Nothing
-   publishes until all of them pass. Publishing is one job per registry, in order: GitHub release, npm, crates.io, PyPI. Each
+   reports what `cargo semver-checks` finds changed in a published crate's API and gates nothing,
+   since the crates' Rust API carries no promise (STABILITY.md), and `sbom`, which writes each
+   build's CycloneDX bill of materials. Nothing publishes until the builds and `sbom` pass. Publishing is one job per registry, in order: GitHub release, npm, crates.io, PyPI. Each
    job needs every build and the job before it. The GitHub release job has no environment and
    runs when the builds pass; each registry job then waits in the run's "Review deployments"
    until the operator approves it.
@@ -48,14 +54,11 @@ It prints PASS, FAIL or TODO for each step and exits 1 on any FAIL.
    @portll/ironwork --repo Portll/ironwork --file release.yml --env npm --allow-publish`), the npm job
    fails and the jobs after it wait. To check the workflow without a release, run `gh workflow run
    release.yml -R Portll/ironwork --ref main -f dry_run=true`: the checks and builds run and every
-   publish job is skipped. A dry run's `semver` job reports the API changes since the last release
-   without failing the run, since main keeps that release's version until step 4.
-6. **Notes.** The release job creates the GitHub release with `SHA256SUMS`, provenance, the npm
-   tarball and the two bills of materials, each attested for its build's archives; its notes carry only the install paragraph. Add what the release contains with `gh
-   release edit v<version> --notes-file <file>`, opening with a `## Summary` section, which the
-   site renders as the release's row: the first paragraph is the benefit, each line opening with a
-   hyphen a sub-item, a paragraph opening `**Limit:**` the limit. Until the release has that
-   section, every cobolwork-web deploy fails at its build step.
+   publish job is skipped.
+6. **GitHub release.** The release job creates the GitHub release with `SHA256SUMS`, provenance,
+   the npm tarball and the two bills of materials, each attested for its build's archives. Its
+   notes are `docs/releases/<version>.md` from the tagged commit, which step 3 committed, followed
+   by an `## Install` section the job writes.
 7. **crates.io.** The crates.io job publishes with `cargo publish --workspace --locked` after
    `rust-lang/crates-io-auth-action` trades the run's identity for a short-lived token; cargo
    orders the crates, and a crate new since the last release publishes the same way. Trusted
@@ -80,3 +83,27 @@ It prints PASS, FAIL or TODO for each step and exits 1 on any FAIL.
 11. **SPINE.** Complete the cut task and its parent, with the tag, the registries and the site
     version in the result.
 12. **This file.** When a step changes, change it here in the same cut.
+
+## Withdrawing a release
+
+A release tag cannot be moved or deleted, and a registry keeps a version once published, so a bad
+release is withdrawn where it is offered and fixed by the next patch release, as 0.4.1 followed
+0.4.0. In order:
+
+1. **Say so.** Open an issue naming the version, what is wrong and the version to use, and add a
+   line opening `**Withdrawn:**` to the top of the release's notes with `gh release edit
+   v<version> --notes-file <file>`. For a vulnerability, follow [SECURITY.md](SECURITY.md) and
+   publish the advisory with the fix.
+2. **GitHub.** Mark the previous good release latest: `gh release edit v<previous> --latest`.
+3. **npm.** `npm dist-tag add @portll/ironwork@<previous> latest`, then `npm deprecate
+   @portll/ironwork@<version> "<reason>; use <previous>"`. Do not unpublish: npm never lets the
+   version be published again, and anyone who pinned it breaks.
+4. **crates.io.** `cargo yank --version <version> <crate>` for each workspace crate, `ironwork`
+   first. A yanked version is not chosen for a new install or lock, and a lock that holds it keeps
+   building. `cargo yank --undo` reverses it.
+5. **PyPI.** Yank the release on its page at pypi.org (Manage, Options, Yank), giving the reason.
+   pip then installs it only when asked for that version exactly.
+6. **The fix.** Fix main, cut `<version>` plus one patch with the steps above, and once it is
+   published undo steps 2 and 3 for the new version: it becomes GitHub's latest by its own release,
+   and `latest` on npm by its publish.
+7. **SPINE.** Record the withdrawal and the fix on the cut task.

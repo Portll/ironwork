@@ -13,7 +13,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-zarch = { package = "ironwork-zarch", path = "../zarch", version = "0.8.0" }
+zarch = { package = "ironwork-zarch", path = "../zarch", version = "=0.8.0" }
 
 [lints]
 workspace = true

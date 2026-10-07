@@ -40,7 +40,10 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "ironwork") | .version')
-          if [ "$EVENT" = push ] && [ "v$version" != "$TAG" ]; then echo "tag $TAG does not match ironwork $version"; exit 1; fi
+          if [ "$EVENT" = push ]; then
+            if [ "v$version" != "$TAG" ]; then echo "tag $TAG does not match ironwork $version"; exit 1; fi
+            if [ ! -f "docs/releases/$version.md" ]; then echo "docs/releases/$version.md, the release notes, is not at the tagged commit"; exit 1; fi
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Commit is on main
         run: |
@@ -58,14 +61,13 @@ jobs:
           rustup toolchain install stable --profile minimal
           echo "rust=$(rustc +stable --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
 
-  # Each published crate's API against its last release on crates.io: a change that breaks it
-  # needs the version bump semver asks for, which before 1.0 is the minor. A dry run reports what it
-  # finds without failing, since main keeps the last release's version until the cut bumps it.
+  # Each published crate's API against its last release on crates.io, as a report: the crates'
+  # Rust API carries no promise (STABILITY.md), and nothing waits on this job.
   semver:
     name: semver against crates.io
     needs: check
     runs-on: ubuntu-latest
-    continue-on-error: ${{ github.event_name != 'push' }}
+    continue-on-error: true
     env:
       RUST: ${{ needs.check.outputs.rust }}
     steps:
@@ -278,7 +280,7 @@ jobs:
   release:
     name: GitHub release
     if: github.event_name == 'push'
-    needs: [check, semver, sbom, binaries, tls-binaries, wheels, sdist, npm]
+    needs: [check, sbom, binaries, tls-binaries, wheels, sdist, npm]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -291,6 +293,11 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: notes
+          sparse-checkout: docs/releases
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: bin-*
@@ -349,8 +356,12 @@ jobs:
           sbom-path: 'out/ironwork-tls-${{ needs.check.outputs.version }}.cdx.json'
       - name: Publish
         run: |
-          gh release create "$TAG" out/* --verify-tag --title "ironwork $VERSION" \
-            --notes "ironwork for COBOL $VERSION. Builds for Linux (static), macOS and Windows, and the npm package @portll/ironwork. The ironwork-tls archives are the same builds with TLS for --sql-db (rustls, sslmode=verify-full). The Python package is on PyPI as ironwork, and the crates are on crates.io. Each file carries SLSA build provenance: gh attestation verify <file> -R Portll/ironwork. Built with Rust $RUST; SECURITY.md says how to check a download and rebuild it."
+          {
+            cat "notes/docs/releases/$VERSION.md"
+            printf '\n## Install\n\n'
+            echo "ironwork for COBOL $VERSION. Builds for Linux (static), macOS and Windows, and the npm package @portll/ironwork. The ironwork-tls archives are the same builds with TLS for --sql-db (rustls, sslmode=verify-full). The Python package is on PyPI as ironwork, and the crates are on crates.io. Each file carries SLSA build provenance: gh attestation verify <file> -R Portll/ironwork. Built with Rust $RUST; SECURITY.md says how to check a download and rebuild it."
+          } > notes.md
+          gh release create "$TAG" out/* --verify-tag --title "ironwork $VERSION" --notes-file notes.md
 
   npm-publish:
     name: publish to npm
