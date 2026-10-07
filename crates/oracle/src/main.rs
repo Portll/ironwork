@@ -139,6 +139,7 @@ fn smoke(dir: &Path) -> Result<bool, String> {
 
 fn hercules_run(dir: &Path) -> Result<bool, String> {
     let results = hercules::run(dir, "hercules")?;
+    println!("{} against ironwork {}\n", hercules_version("hercules"), env!("CARGO_PKG_VERSION"));
     let mut by_instruction: BTreeMap<String, (usize, usize)> = BTreeMap::new();
     let mut disagreements = Vec::new();
     for (case, seen, expected) in &results {
@@ -159,6 +160,15 @@ fn hercules_run(dir: &Path) -> Result<bool, String> {
     }
     println!("\n{} agree, {} disagree", results.len() - disagreements.len(), disagreements.len());
     Ok(disagreements.is_empty())
+}
+
+fn hercules_version(hercules: &str) -> String {
+    let said = Command::new(hercules).arg("--version").output().map(|o| [o.stdout, o.stderr].concat()).unwrap_or_default();
+    let text = String::from_utf8_lossy(&said);
+    match text.split_once("Hercules version ") {
+        Some((_, rest)) => format!("Hercules {}", rest.split_whitespace().next().unwrap_or("")),
+        None => "Hercules, version not reported".into(),
+    }
 }
 
 fn operands(case: &Case) -> String {
