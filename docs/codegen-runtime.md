@@ -3,7 +3,8 @@
 A specification for compiling COBOL ahead of time, and for the runtime that compiled programs link.
 
 **Status:** steps 0 to 5 of §14 are done: the VM runs programs by default. Step 6, native code, is
-scheduled for 1.1, and step 7's text waits on a practitioner's review. It builds on the
+under way for 1.1 (§14): `ironwork compile --native` builds a program into an executable, and step
+7's text waits on a practitioner's review. It builds on the
 operator's rulings of 2026-09-29:
 
 - **The runtime licence.** The runtime is AGPL-3.0-or-later with a runtime exception, so a program
@@ -276,8 +277,29 @@ The companion documents carry their own open questions for the operator, listed 
 | 3 | **Build the VM** in `rt` on the semantics library. Run the interpreter and the VM on every test and oracle case as a permanent CI job. Extend the fuzz target. | B2 passes |
 | 4 | **Add the load module**, `ironwork compile`, and module loading in `RunUnit`. | B1 and B4 pass for programs that lower: cli/tests/iwm_run.rs runs modules against their sources ([load-module.md](load-module.md) §12, L5 and L8) |
 | 5 | **Make the VM the default.** `ironwork run file.cbl` compiles in memory and runs the VM; `--interpret` keeps the interpreter. | Tests pass in both executors |
-| 6 | **Emit Rust**, in 1.1 (ironwork-roadmap 25). | B5, and B6 native |
+| 6 | **Emit Rust**, in 1.1 (ironwork-roadmap 25). Under way: `ironwork compile --native` writes each module as a crate that runs it from the runtime alone (`rt::native`), its programs' blocks as generated Rust (`cli/src/codegen.rs`) that the VM's dispatch hands control to, and builds it with cargo. See §14.1. | B5, and B6 native |
 | 7 | **Publish the exception.** `RUNTIME-EXCEPTION.md`, SPDX headers, and README and NOTICE are on main (6a6da25). | Text reviewed by a practitioner (D5) |
+
+### 14.1 Native code
+
+- **One semantics by construction.** A program's generated code is the VM's dispatch loop over its
+  blocks, written out. An op or a branch the generator has a fast path for runs in generated code
+  over the activation's storage (`rt::fast`); any other, and a fast path that declines, runs as the
+  VM runs it (`rt::vm::Machine`). A fast path computes what the VM's own count path computes, from
+  the same functions (`rt::count`, `store::digits`, `store::count_bytes`), and writes nothing where
+  it declines. A run anything watches (taint, statement tracing, limits, an observer, NUMCHECK) is
+  the VM's alone.
+- **Places at code generation.** Each value's places follow from its PICTURE, its literal, or its
+  operands' places, dmax and ARITH (`count::result_places`), so generated code carries bare `i64`
+  counts and the places as constants.
+- **The run.** A native executable runs as `ironwork run module.iwm` does: the same flags for a
+  batch run, messages and exit statuses (`rt::exit`, `rt::batch`). With no compiler at hand, CALL
+  finds a program in its module or as `NAME.iwm` in its `-L` directories, never from source.
+- **Testing.** `ironwork compile --native-harness` builds every module written into one test
+  executable, and `tools/native-diff.py` runs each NIST CCVS85 program as `ironwork run X.iwm` and
+  natively, comparing exit status, standard output, standard error and files.
+- **B6, M5 Pro cycles against `cobc -O2`:** packed, callheavy and seqio are within it (0.7, 1.0 and
+  0.4 times); tblsrch's linear SEARCH is 3.8 times.
 
 **Verification.** Every step keeps today's tests and oracle cases passing. V1, V2, and any assumption
 lowering forces, are recorded in `numeric::assumptions::ASSUMPTIONS` with their basis, and settled
