@@ -1,0 +1,460 @@
+{
+ "ironwork": "ironwork for COBOL 0.8.0",
+ "corpus": "3185RecentCobolRepos",
+ "population": 133343,
+ "sample": 3000,
+ "seed": 1,
+ "compiled": 1027,
+ "return_codes": {
+  "0": 985,
+  "4": 42,
+  "8": 118,
+  "12": 1855
+ },
+ "refused": [
+  {
+   "reason": "IWS0092",
+   "programs": 479
+  },
+  {
+   "reason": "IWS0001 expected ID",
+   "programs": 277
+  },
+  {
+   "reason": "IWC0235",
+   "programs": 216
+  },
+  {
+   "reason": "IWS0001",
+   "programs": 134
+  },
+  {
+   "reason": "IWS0100",
+   "programs": 116
+  },
+  {
+   "reason": "IWS0002 COPY member not found",
+   "programs": 112
+  },
+  {
+   "reason": "IWS0026",
+   "programs": 109
+  },
+  {
+   "reason": "IWC0102",
+   "programs": 66
+  },
+  {
+   "reason": "IWC0001 undefined name",
+   "programs": 34
+  },
+  {
+   "reason": "IWS0097",
+   "programs": 27
+  },
+  {
+   "reason": "IWR0008",
+   "programs": 25
+  },
+  {
+   "reason": "IWS0093",
+   "programs": 20
+  },
+  {
+   "reason": "IWC0298",
+   "programs": 19
+  },
+  {
+   "reason": "IWS0006",
+   "programs": 17
+  },
+  {
+   "reason": "IWR0003 data clause UNSIGNED-INT",
+   "programs": 14
+  },
+  {
+   "reason": "IWS0003",
+   "programs": 13
+  },
+  {
+   "reason": "IWS0065",
+   "programs": 13
+  },
+  {
+   "reason": "IWS0001 expected ')'",
+   "programs": 12
+  },
+  {
+   "reason": "IWS0002",
+   "programs": 12
+  },
+  {
+   "reason": "IWS0020",
+   "programs": 12
+  },
+  {
+   "reason": "IWS0055",
+   "programs": 11
+  },
+  {
+   "reason": "IWR0006 COMMUNICATION SECTION",
+   "programs": 10
+  },
+  {
+   "reason": "IWC0027",
+   "programs": 9
+  },
+  {
+   "reason": "IWR0003 data clause BINARY-SHORT",
+   "programs": 8
+  },
+  {
+   "reason": "IWR0003 data clause FLOAT-HEX-7",
+   "programs": 8
+  },
+  {
+   "reason": "IWS0021",
+   "programs": 8
+  },
+  {
+   "reason": "IWC0069",
+   "programs": 7
+  },
+  {
+   "reason": "IWC0299",
+   "programs": 6
+  },
+  {
+   "reason": "IWS0001 expected a data description clause or a period",
+   "programs": 6
+  },
+  {
+   "reason": "IWS0061",
+   "programs": 6
+  },
+  {
+   "reason": "IWC0090",
+   "programs": 5
+  },
+  {
+   "reason": "IWR0003 data clause CONSTANT",
+   "programs": 5
+  },
+  {
+   "reason": "IWR0003 data clause FLOAT-SHORT",
+   "programs": 5
+  },
+  {
+   "reason": "IWR0004 USAGE BINARY-LONG",
+   "programs": 5
+  },
+  {
+   "reason": "IWS0001 expected a period after the PROCEDURE DIVISION header",
+   "programs": 5
+  },
+  {
+   "reason": "IWC0002 ambiguous name",
+   "programs": 4
+  },
+  {
+   "reason": "IWC0035",
+   "programs": 4
+  },
+  {
+   "reason": "IWC0257",
+   "programs": 4
+  },
+  {
+   "reason": "IWP0003",
+   "programs": 4
+  },
+  {
+   "reason": "IWR0003 data clause PROCEDURE",
+   "programs": 4
+  },
+  {
+   "reason": "IWR0003 data clause TYPEDEF",
+   "programs": 4
+  },
+  {
+   "reason": "IWS0001 expected END-PERFORM",
+   "programs": 4
+  },
+  {
+   "reason": "IWS0001 expected PROGRAM-ID",
+   "programs": 4
+  },
+  {
+   "reason": "IWS0001 expected SECTION",
+   "programs": 4
+  },
+  {
+   "reason": "IWS0001 expected a DATA DIVISION section",
+   "programs": 4
+  },
+  {
+   "reason": "IWS0022",
+   "programs": 4
+  },
+  {
+   "reason": "IWS0098",
+   "programs": 4
+  },
+  {
+   "reason": "IWC0106 FUNCTION STORED-CHAR-LENGTH",
+   "programs": 3
+  },
+  {
+   "reason": "IWC0188 reserved word as a name",
+   "programs": 3
+  },
+  {
+   "reason": "IWS0001 expected GIVING",
+   "programs": 3
+  },
+  {
+   "reason": "IWS0004",
+   "programs": 3
+  },
+  {
+   "reason": "IWS0005",
+   "programs": 3
+  },
+  {
+   "reason": "IWS0072",
+   "programs": 3
+  },
+  {
+   "reason": "IWC0034",
+   "programs": 2
+  },
+  {
+   "reason": "IWC0292",
+   "programs": 2
+  },
+  {
+   "reason": "IWR0003 data clause BINARY-LONG",
+   "programs": 2
+  },
+  {
+   "reason": "IWR0003 data clause COMP-X",
+   "programs": 2
+  },
+  {
+   "reason": "IWR0003 data clause IS",
+   "programs": 2
+  },
+  {
+   "reason": "IWR0003 data clause RONIZED",
+   "programs": 2
+  },
+  {
+   "reason": "IWR0003 data clause SEPARA",
+   "programs": 2
+  },
+  {
+   "reason": "IWR0003 data clause XXXXX086",
+   "programs": 2
+  },
+  {
+   "reason": "IWR0004 USAGE BIT",
+   "programs": 2
+  },
+  {
+   "reason": "IWR0004 USAGE PROGRAM-POINTER",
+   "programs": 2
+  },
+  {
+   "reason": "IWR0007 ORGANIZATION BINARY",
+   "programs": 2
+  },
+  {
+   "reason": "IWS0024",
+   "programs": 2
+  },
+  {
+   "reason": "IWS0045",
+   "programs": 2
+  },
+  {
+   "reason": "IWS0056",
+   "programs": 2
+  },
+  {
+   "reason": "IWS0058",
+   "programs": 2
+  },
+  {
+   "reason": "IWS0060",
+   "programs": 2
+  },
+  {
+   "reason": "IWS0067",
+   "programs": 2
+  },
+  {
+   "reason": "IWS0099",
+   "programs": 2
+  },
+  {
+   "reason": "IWC0015",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0016",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0037",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0050",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0052",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0073",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0078",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0097",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0101",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0106 FUNCTION SUBSTITUTE-CASE",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0141",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0198",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0204",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0209",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0211",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0244",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0260",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0261",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0271",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0274",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0275",
+   "programs": 1
+  },
+  {
+   "reason": "IWC0293",
+   "programs": 1
+  },
+  {
+   "reason": "IWR0003 data clause ANY",
+   "programs": 1
+  },
+  {
+   "reason": "IWR0003 data clause AS",
+   "programs": 1
+  },
+  {
+   "reason": "IWR0003 data clause BASED",
+   "programs": 1
+  },
+  {
+   "reason": "IWR0003 data clause FLOAT-LONG",
+   "programs": 1
+  },
+  {
+   "reason": "IWR0003 data clause FROM",
+   "programs": 1
+  },
+  {
+   "reason": "IWR0003 data clause GROUP-USAGE",
+   "programs": 1
+  },
+  {
+   "reason": "IWR0003 data clause SIGNED-INT",
+   "programs": 1
+  },
+  {
+   "reason": "IWR0003 data clause TO",
+   "programs": 1
+  },
+  {
+   "reason": "IWR0004 USAGE BINARY-INT",
+   "programs": 1
+  },
+  {
+   "reason": "IWR0004 USAGE COMP-6",
+   "programs": 1
+  },
+  {
+   "reason": "IWR0004 USAGE MESSAGE-TAG",
+   "programs": 1
+  },
+  {
+   "reason": "IWR0006 WORKINGSTORAGE SECTION",
+   "programs": 1
+  },
+  {
+   "reason": "IWR0016 FD XDM-F: LINAGE on an EXTERNAL file",
+   "programs": 1
+  },
+  {
+   "reason": "IWR0026 CONTROL CX: a subscripted or reference-modified control",
+   "programs": 1
+  },
+  {
+   "reason": "IWR0057 a SCREEN SECTION LINE or COLUMN that is not an integer literal",
+   "programs": 1
+  },
+  {
+   "reason": "IWS0001 expected a data name",
+   "programs": 1
+  },
+  {
+   "reason": "IWS0018",
+   "programs": 1
+  },
+  {
+   "reason": "IWS0019",
+   "programs": 1
+  }
+ ]
+}

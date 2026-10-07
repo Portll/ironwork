@@ -20,6 +20,12 @@ It prints PASS, FAIL or TODO for each step and exits 1 on any FAIL.
    CI runs clippy from the latest stable Rust, so run that version locally too:
    `cargo +<stable> clippy --workspace --all-targets --locked -- -D warnings`.
    Bump the cobolwork `ref` in `.github/workflows/ci.yml` deliberately and only to a cobolwork commit whose shared tables ironwork's drift tests pass against.
+   Refresh what CI cannot measure in `docs/conformance/` with a release build of main's head, and
+   commit it before the version commit: `tools/census.py <binary> <corpus> 3000 1 --json
+   docs/conformance/census.json`, `cargo run --release -p ironwork-oracle -- hercules <dir> >
+   docs/conformance/hercules.txt` (it exits 1 while cases disagree), and `nist.tsv` from CI's
+   `conformance` artifact when a program's class has changed. Read the report CI writes: the release
+   attaches it as `conformance-ironwork-<version>.md`.
 3. **Notes.** Start from the commits `--before` lists since the previous release. Each feature and
    fix there is either named in the notes or left out on purpose. Commit the notes as
    `docs/releases/<version>.md` before the tag. They open with a `## Summary` section, which the
@@ -56,7 +62,8 @@ It prints PASS, FAIL or TODO for each step and exits 1 on any FAIL.
    release.yml -R Portll/ironwork --ref main -f dry_run=true`: the checks and builds run and every
    publish job is skipped.
 6. **GitHub release.** The release job creates the GitHub release with `SHA256SUMS`, provenance,
-   the npm tarball and the two bills of materials, each attested for its build's archives. Its
+   the npm tarball, the two bills of materials, each attested for its build's archives, and
+   `conformance-ironwork-<version>.md`, which the `conformance` job writes from the tag. Its
    notes are `docs/releases/<version>.md` from the tagged commit, which step 3 committed, followed
    by an `## Install` section the job writes.
 7. **crates.io.** The crates.io job publishes with `cargo publish --workspace --locked` after

@@ -36,7 +36,8 @@ EBCDIC, and on standard output.
   exit-N   any other exit status; timeout after --timeout seconds
 
 The results file has a line per program: name, class, and the first line ironwork wrote to
-standard error, with the work directory's path removed.
+standard error, with the work directory's path removed. The tally after the run gives each CCVS85
+module, which a program's first two letters name, and its programs in each class.
 
 --vm runs each program that runs on the interpreter again on the VM (`ironwork run --vm`), from
 the same files and both with the clock and WHEN-COMPILED (SOURCE_DATE_EPOCH) fixed at CLOCK, and
@@ -66,6 +67,22 @@ UPSI_PARM = "/UPSI(10000000)"
 CLASSES = ("clean", "failed", "refused", "abend", "called", "compiled")
 X_CARD = re.compile(r"\bXXXXX\d{3}\b")
 FLAGGING_TEST = re.compile(r"^[A-Z]{2}[34]\d\dM$")
+# The CCVS85 User Guide's modules, which name a program by their first two letters.
+MODULES = {
+    "NC": "Nucleus",
+    "SQ": "Sequential I-O",
+    "RL": "Relative I-O",
+    "IX": "Indexed I-O",
+    "ST": "Sort-Merge",
+    "SM": "Source Text Manipulation",
+    "IC": "Inter-Program Communication",
+    "CM": "Communication",
+    "DB": "Debug",
+    "SG": "Segmentation",
+    "RW": "Report Writer",
+    "IF": "Intrinsic Function",
+    "OB": "Obsolete Elements",
+}
 X_CARD_TEXT = {
     **{f"{n:03d}": f'"CCVS{n:03d}"' for n in range(30, 44)},  # queue names and passwords of a CD
     "051": "UPSI-0",
@@ -266,6 +283,18 @@ def sysin(src, name):
     with open(path, "rb") as f:
         return f.read()
 
+def module_table(results):
+    """A line per CCVS85 module: its programs, then how many fell in each class."""
+    columns = (*CLASSES, "other")
+    rows = collections.defaultdict(collections.Counter)
+    for name, cls, *_ in results:
+        rows[name[:2]][cls if cls in CLASSES else "other"] += 1
+    lines = [f"{'module':<32}{'programs':>9}" + "".join(f"{c:>9}" for c in columns)]
+    for code in sorted(rows, key=lambda c: (list(MODULES).index(c) if c in MODULES else len(MODULES), c)):
+        label = f"{code} {MODULES.get(code, '')}".rstrip()
+        lines.append(f"{label:<32}{sum(rows[code].values()):>9}" + "".join(f"{rows[code][c]:>9}" for c in columns))
+    return "\n".join(lines)
+
 def read_results(path):
     with open(path) as f:
         rows = [line.rstrip("\n").split("\t") for line in f][1:]
@@ -303,6 +332,7 @@ def main():
     tally = collections.Counter(row[1] for row in results)
     others = sorted(set(tally) - set(CLASSES))
     print(f"{len(results)} programs: " + ", ".join(f"{cls} {tally[cls]}" for cls in (*CLASSES, *others)))
+    print(module_table(results))
 
     differ = False
     if a.vm:

@@ -65,7 +65,17 @@ jobs:
       - name: NIST CCVS85 on the interpreter and the VM
         run: |
           cargo build --locked -p ironwork
-          python3 tools/nist.py target/debug/ironwork nistcobol85/src --vm
+          python3 tools/nist.py target/debug/ironwork nistcobol85/src --vm --baseline docs/conformance/nist.tsv --out nist.tsv
+      - name: Conformance report
+        if: ${{ !cancelled() }}
+        run: python3 tools/conformance.py target/debug/ironwork --nist nist.tsv --out conformance.md
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: conformance
+          path: |
+            nist.tsv
+            conformance.md
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # tls/ is a workspace of its own with rustls, so the one above stays free of dependencies.

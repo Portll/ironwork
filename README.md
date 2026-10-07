@@ -639,7 +639,8 @@ anywhere in the run unit's storage, as on z/OS, but never outside it.
 
 `tools/census.py` runs `ironwork check` over a sample of a COBOL corpus and tallies why programs are
 refused, which is how the next gaps are chosen. A program checked with warnings alone, return code 4,
-counts as compiling.
+counts as compiling. `--json` writes the tally as counts alone, with how many programs ended with
+each return code, and never a program's path.
 
 `tools/differ.py` runs each program under `ironwork run` and compiled by GCC's gcobol, and reports
 where what DISPLAY wrote, the return code or an abend differ. gcobol keeps storage in ASCII and has
@@ -670,13 +671,31 @@ with the PARM `/UPSI(10000000)`, the settings its tests expect. `--baseline` nam
 and lists every program whose class changed; the exit status is 1 when one that was clean is no
 longer. `--vm` runs each program again on the VM from the same files and compares the exit status,
 standard output, standard error and every file the two runs leave; the exit status is 1 when any
-program differs. CI runs it so on every push:
+program differs. After the run it tallies each CCVS85 module's programs by class. CI runs it on
+every push against the baseline `docs/conformance/nist.tsv`:
 
-    tools/nist.py target/release/ironwork ../nistcobol85/src --out nist.tsv --baseline before.tsv
-    tools/nist.py target/release/ironwork ../nistcobol85/src --vm
+    tools/nist.py target/release/ironwork ../nistcobol85/src --vm --baseline docs/conformance/nist.tsv --out nist.tsv
 
 `ironwork assumptions` lists the register of assumptions (`numeric::assumptions::ASSUMPTIONS`), one
 per line; `--c-series` puts each entry's number in a single C series first, with its own id beside it.
+
+### The conformance report
+
+`tools/conformance.py` writes what each kind of evidence says about how closely ironwork follows
+IBM, and says that no IBM compiler has witnessed it: NIST's CCVS85 module by module, the interpreter
+against the VM on the same programs, IBM's compile listings of CCVS85, the register of assumptions by
+basis with every Chosen, Observed and Recalled claim listed, the census by what each refusal rests
+on, the machine against Hercules, and Db2 for Linux. CI writes it on every push from that run's NIST
+results, and the release attaches it as `conformance-ironwork-<version>.md`:
+
+    tools/conformance.py target/release/ironwork --nist nist.tsv --out conformance.md
+
+What CI cannot measure is kept in `docs/conformance/` and refreshed at each cut (RELEASING.md):
+`nist.tsv`, the baseline; `census.json`, from `tools/census.py --json` over the 3,000-program sample
+of a public corpus (seed 1), counts alone; `hercules.txt`, from `cargo run -p ironwork-oracle --
+hercules`, which names the Hercules and ironwork versions in its first line; and
+`ibm-listings.json`, IBM's side of the compile listings, from `tools/ibm-listings.py` over the
+directory of listings, with `--results` to print the join with a NIST run.
 
 ## Code pages
 

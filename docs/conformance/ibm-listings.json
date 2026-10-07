@@ -1,0 +1,1640 @@
+{
+ "source": "eclipse-che4z/che-che4z-lsp-for-cobol at e019ebe8 (EPL-2.0), tests/test_files/Cobol85PositiveTestsSuite/compileListing",
+ "notes": {
+  "IGYGR1174-S": "X-card XXXXX084 left unexpanded in the source the listing was made from; EXEC85 gives it a value",
+  "IGYOS4007-U": "the source given to the compiler ended early"
+ },
+ "listings": [
+  {
+   "file": "DB1014.2.cbl",
+   "compiler": "6.3.0",
+   "program": "DB101A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "DB1024.2.cbl",
+   "compiler": "6.3.0",
+   "program": "DB102A",
+   "return_code": 12,
+   "first_severe": "IGYGR1174-S"
+  },
+  {
+   "file": "DB1034.2.cbl",
+   "compiler": "6.3.0",
+   "program": "DB103M",
+   "return_code": 12,
+   "first_severe": "IGYGR1174-S"
+  },
+  {
+   "file": "DB1044.2.cbl",
+   "compiler": "6.3.0",
+   "program": "DB104A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "DB1054.2.cbl",
+   "compiler": "6.3.0",
+   "program": "DB105A",
+   "return_code": 12,
+   "first_severe": "IGYGR1174-S"
+  },
+  {
+   "file": "DB3014.2.cbl",
+   "compiler": "6.3.0",
+   "program": "DB301M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "DB3024.2.cbl",
+   "compiler": "6.3.0",
+   "program": "DB302M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "DB3054.2.cbl",
+   "compiler": "6.3.0",
+   "program": "DB305M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "EXEC84.2.cbl",
+   "compiler": "6.3.0",
+   "program": "EXEC85",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "IC1014.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC101A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC1024.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC102A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC1034.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC103A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC1044.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC104A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC1054.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC105A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC1064.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC106A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC1074.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC107A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC1084.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC108A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC1094.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC109A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC1104.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC110A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC1114.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC111A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC1134.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC113A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC1144.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC114A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC1164.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC116M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC1174.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC117M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC1184.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC118M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2014.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC201A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2024.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC202A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2034.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC203A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2044.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC204A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2054.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC205A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2064.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC206A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2074.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC207A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2084.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC208A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2094.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC209A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2104.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC210A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2114.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC211A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2124.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC212A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2134.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC213A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2144.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC214A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2154.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC215A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2164.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC216A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2174.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC217A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2224.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC222A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "IC2234.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC223A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "IC2244.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC224A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "IC2254.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC225A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "IC2264.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC226A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "IC2274.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC227A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "IC2284.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC228A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2334.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC233A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2344.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC234A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IC2354.2.cbl",
+   "compiler": "6.3.0",
+   "program": null,
+   "return_code": 16,
+   "first_severe": "IGYOS4007-U"
+  },
+  {
+   "file": "IC2374.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC237A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "IC4014.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IC401M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1014.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF101A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1024.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF102A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1034.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF103A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1044.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF104A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1054.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF105A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1064.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF106A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1074.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF107A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1084.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF108A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1094.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF109A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1104.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF110A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1114.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF111A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1124.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF112A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1134.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF113A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1144.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF114A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1154.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF115A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1164.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF116A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1174.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF117A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1184.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF118A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1194.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF119A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1204.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF120A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1214.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF121A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1224.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF122A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1234.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF123A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1244.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF124A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "IF1254.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF125A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1264.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF126A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1274.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF127A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1284.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF128A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1294.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF129A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1304.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF130A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1314.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF131A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "IF1324.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF132A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1334.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF133A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1344.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF134A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1354.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF135A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1364.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF136A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1374.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF137A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1384.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF138A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1394.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF139A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1404.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF140A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1414.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF141A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF1424.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF142A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF4014.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF401M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF4024.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF402M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IF4034.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IF403M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1014.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX101A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1024.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX102A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1034.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX103A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1044.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX104A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1054.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX105A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1064.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX106A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1084.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX108A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1094.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX109A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1114.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX111A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1124.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX112A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1134.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX113A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1144.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX114A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1154.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX115A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1164.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX116A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1174.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX117A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1184.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX118A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1194.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX119A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1204.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX120A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX1214.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX121A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX2014.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX201A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX2024.2.cbl",
+   "compiler": "6.3.0",
+   "program": null,
+   "return_code": 16,
+   "first_severe": "IGYOS4007-U"
+  },
+  {
+   "file": "IX2034.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX203A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX2044.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX204A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX2054.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX205A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX2094.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX209A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX2104.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX210A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX2114.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX211A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX2124.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX212A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX2134.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX213A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX2144.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX214A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX2154.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX215A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX2164.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX216A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX2174.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX217A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX2184.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX218A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX3014.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX301M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "IX4014.2.cbl",
+   "compiler": "6.3.0",
+   "program": "IX401M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1014.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC101A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1024.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC102A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "NC1064.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC106A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1104.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC110M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1114.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC111A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1124.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC112A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1134.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC113M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1154.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC115A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1164.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC116A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1174.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC117A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1184.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC118A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1194.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC119A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1204.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC120A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1214.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC121M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1224.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC122A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1234.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC123A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1244.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC124A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "NC1254.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC125A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "NC1264.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC126A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1274.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC127A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1314.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC131A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1324.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC132A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1334.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC133A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1344.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC134A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1354.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC135A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1364.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC136A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1374.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC137A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1384.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC138A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1394.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC139A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1404.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC140A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1414.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC141A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1704.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC170A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1714.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC171A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1724.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC172A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1734.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC173A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1754.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC175A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1764.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC176A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC1774.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC177A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2014.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC201A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "NC2024.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC202A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "NC2054.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC205A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2064.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC206A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2074.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC207A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2084.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC208A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "NC2094.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC209A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "NC2104.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC210A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2144.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC214M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2154.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC215A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2164.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC216A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2174.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC217A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2184.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC218A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "NC2194.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC219A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2214.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC221A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2224.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC222A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "NC2234.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC223A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2244.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC224A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2254.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC225A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2314.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC231A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2324.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC232A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2334.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC233A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2344.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC234A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2354.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC235A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2364.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC236A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2374.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC237A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2384.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC238A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2394.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC239A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2404.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC240A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2414.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC241A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2424.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC242A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2434.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC243A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2444.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC244A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2454.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC245A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2464.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC246A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2474.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC247A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2484.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC248A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2504.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC250A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2514.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC251A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "NC2524.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC252A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "NC2534.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC253A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "NC3034.2.cbl",
+   "compiler": "6.3.0",
+   "program": "NC303M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "OBIC14.2.cbl",
+   "compiler": "6.3.0",
+   "program": "OBIC1A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "OBIC24.2.cbl",
+   "compiler": "6.3.0",
+   "program": "OBIC2A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "OBIC34.2.cbl",
+   "compiler": "6.3.0",
+   "program": "OBIC3A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "OBNC24.2.cbl",
+   "compiler": "6.3.0",
+   "program": "OBNC2M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "OBSQ34.2.cbl",
+   "compiler": "6.3.0",
+   "program": "OBSQ3A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "OBSQ44.2.cbl",
+   "compiler": "6.3.0",
+   "program": "OBSQ4A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "OBSQ54.2.cbl",
+   "compiler": "6.3.0",
+   "program": "OBSQ5A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "RL3014.2.cbl",
+   "compiler": "6.3.0",
+   "program": "RL301M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "RL4014.2.cbl",
+   "compiler": "6.3.0",
+   "program": "RL401M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "SG3034.2.cbl",
+   "compiler": "6.3.0",
+   "program": "SG303M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "SG4014.2.cbl",
+   "compiler": "6.3.0",
+   "program": "SG401M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "SM1064.2.cbl",
+   "compiler": "6.3.0",
+   "program": "SM106A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "SM1074.2.cbl",
+   "compiler": "6.3.0",
+   "program": "SM107A",
+   "return_code": 4,
+   "first_severe": null
+  },
+  {
+   "file": "SQ3034.2.cbl",
+   "compiler": "6.3.0",
+   "program": "SQ303M",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "ST1084.2.cbl",
+   "compiler": "6.3.0",
+   "program": "ST108A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "ST1184.2.cbl",
+   "compiler": "6.3.0",
+   "program": "ST118A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "ST1274.2.cbl",
+   "compiler": "6.3.0",
+   "program": "ST127A",
+   "return_code": 0,
+   "first_severe": null
+  },
+  {
+   "file": "ST3014.2.cbl",
+   "compiler": "6.3.0",
+   "program": "ST301M",
+   "return_code": 0,
+   "first_severe": null
+  }
+ ]
+}

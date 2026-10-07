@@ -1,0 +1,532 @@
+Hercules 4.9.1.0-SDL against ironwork 0.8.0
+
+instruction  agree  disagree
+ADR             74         0
+AER             74         0
+AP              47         0
+AUR             74         0
+AWR             74         0
+AXR             74         0
+CDR             74         0
+CER             74         0
+CP              44         0
+CVB             46         0
+CVD             44         0
+DDR             74         0
+DER             74         0
+DP              45         0
+HDR             74         0
+HER             74         0
+LDXR            29        45
+LEDR            74         0
+MDR             74         0
+MER             74         0
+MP              45         0
+MXDR            20        54
+MXR             74         0
+PACK            44         0
+SDR             74         0
+SER             74         0
+SP              43         0
+SRP             49         0
+SXR             74         0
+TP              46         0
+UNPK            43         0
+ZAP             45         0
+
+DISAGREE Mxdr-zeros-mask0
+  operands   op1=0000000000000000 op2=0000000000000000 mask=0
+  hercules   result=000000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-zeros-significance-mask1
+  operands   op1=0000000000000000 op2=0000000000000000 mask=1
+  hercules   result=000000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-one-and-one-mask0
+  operands   op1=4110000000000000 op2=4110000000000000 mask=0
+  hercules   result=411000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=41100000000000003300000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-cancel-mask0
+  operands   op1=4110000000000000 op2=C110000000000000 mask=0
+  hercules   result=C11000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=C110000000000000B300000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-cancel-significance-mask1
+  operands   op1=4110000000000000 op2=C110000000000000 mask=1
+  hercules   result=C11000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=C110000000000000B300000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-zero-fraction-with-characteristic-mask0
+  operands   op1=C100000000000000 op2=4110000000000000 mask=0
+  hercules   result=000000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-underflow-difference-mask0
+  operands   op1=0010000000000000 op2=800FFFFFFFFFFFFF mask=0
+  hercules   result=000000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-underflow-product-mask0
+  operands   op1=0110000000000000 op2=0110000000000000 mask=0
+  hercules   result=000000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-divide-by-zero-mask0
+  operands   op1=4110000000000000 op2=4100000000000000 mask=0
+  hercules   result=000000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-divide-zero-dividend-mask0
+  operands   op1=4100000000000000 op2=4110000000000000 mask=0
+  hercules   result=000000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-divide-by-three-mask0
+  operands   op1=4110000000000000 op2=4130000000000000 mask=0
+  hercules   result=413000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=41300000000000003300000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-divide-unnormalized-mask0
+  operands   op1=4101000000000000 op2=4130000000000000 mask=0
+  hercules   result=403000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=40300000000000003200000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-unnormalized-sum-mask0
+  operands   op1=4100100000000000 op2=4100100000000000 mask=0
+  hercules   result=3D1000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=3D100000000000002F00000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-unnormalized-cancel-mask0
+  operands   op1=4100000100000000 op2=C100000100000000 mask=0
+  hercules   result=B71000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=B710000000000000A900000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-unnormalized-cancel-significance-mask1
+  operands   op1=4100000100000000 op2=C100000100000000 mask=1
+  hercules   result=B71000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=B710000000000000A900000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-guard-digit-mask0
+  operands   op1=4110000000000000 op2=C0FFFFFFFFFFFFFF mask=0
+  hercules   result=C0FFFFFFFFFFFFFF32FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=C0FFFFFFFFFFFFFFB200000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-digit-shifted-past-guard-mask0
+  operands   op1=4210000000000000 op2=C0FFFFFFFFFFFFFF mask=0
+  hercules   result=C1FFFFFFFFFFFFFF32FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=C1FFFFFFFFFFFFFFB300000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-halve-smallest-mask0
+  operands   op1=0010000000000000 op2=0010000000000000 mask=0
+  hercules   result=000000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-round-carries-into-exponent-mask0
+  operands   op1=0000000000000000 op2=41FFFFFFFFFFFFFF mask=0
+  hercules   result=000000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-round-carry-overflows-mask0
+  operands   op1=0000000000000000 op2=7FFFFFFFFFFFFFFF mask=0
+  hercules   result=000000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-round-no-carry-mask0
+  operands   op1=0000000000000000 op2=4112345678000000 mask=0
+  hercules   result=000000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-compare-equal-mask0
+  operands   op1=4110000000000000 op2=4110000000000000 mask=0
+  hercules   result=411000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=41100000000000003300000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-compare-low-mask0
+  operands   op1=4110000000000000 op2=4120000000000000 mask=0
+  hercules   result=412000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=41200000000000003300000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-compare-high-mask0
+  operands   op1=4120000000000000 op2=4110000000000000 mask=0
+  hercules   result=412000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=41200000000000003300000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-compare-unnormalized-equal-mask0
+  operands   op1=4110000000000000 op2=4201000000000000 mask=0
+  hercules   result=411000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=41100000000000003300000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-compare-negative-mask0
+  operands   op1=C110000000000000 op2=4110000000000000 mask=0
+  hercules   result=C11000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=C110000000000000B300000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-compare-zero-signs-mask0
+  operands   op1=8000000000000000 op2=0000000000000000 mask=0
+  hercules   result=000000000000000032FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-compare-guard-mask0
+  operands   op1=4110000000000000 op2=40FFFFFFFFFFFFFF mask=0
+  hercules   result=40FFFFFFFFFFFFFF32FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=40FFFFFFFFFFFFFF3200000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-one-and-one-mask0
+  operands   op1=4110000000000000 op2=41100000000000003300000000000000 mask=0
+  hercules   result=4110000000000001 cc=- interruption=none
+  zarch      result=4110000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-cancel-mask0
+  operands   op1=4110000000000000 op2=C110000000000000B300000000000000 mask=0
+  hercules   result=C110000000000001 cc=- interruption=none
+  zarch      result=C110000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-cancel-significance-mask1
+  operands   op1=4110000000000000 op2=C110000000000000B300000000000000 mask=1
+  hercules   result=C110000000000001 cc=- interruption=none
+  zarch      result=C110000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-zero-fraction-with-characteristic-mask0
+  operands   op1=C100000000000000 op2=41100000000000003300000000000000 mask=0
+  hercules   result=4110000000000001 cc=- interruption=none
+  zarch      result=4110000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-underflow-difference-mask0
+  operands   op1=0010000000000000 op2=800FFFFFFFFFFFFFF2FFFFFFFFFFFFFF mask=0
+  hercules   result=800FFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=8010000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-underflow-difference-masked-on-mask2
+  operands   op1=0010000000000000 op2=800FFFFFFFFFFFFFF2FFFFFFFFFFFFFF mask=2
+  hercules   result=800FFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=8010000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-underflow-product-mask0
+  operands   op1=0110000000000000 op2=01100000000000007300000000000000 mask=0
+  hercules   result=0110000000000001 cc=- interruption=none
+  zarch      result=0110000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-underflow-product-masked-on-mask2
+  operands   op1=0110000000000000 op2=01100000000000007300000000000000 mask=2
+  hercules   result=0110000000000001 cc=- interruption=none
+  zarch      result=0110000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-overflow-product-mask0
+  operands   op1=7F10000000000000 op2=7F100000000000007100000000000000 mask=0
+  hercules   result=7F10000000000001 cc=- interruption=none
+  zarch      result=7F10000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-divide-by-zero-mask0
+  operands   op1=4110000000000000 op2=41000000000000003300000000000000 mask=0
+  hercules   result=4100000000000001 cc=- interruption=none
+  zarch      result=4100000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-divide-zero-dividend-mask0
+  operands   op1=4100000000000000 op2=41100000000000003300000000000000 mask=0
+  hercules   result=4110000000000001 cc=- interruption=none
+  zarch      result=4110000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-divide-by-three-mask0
+  operands   op1=4110000000000000 op2=41300000000000003300000000000000 mask=0
+  hercules   result=4130000000000001 cc=- interruption=none
+  zarch      result=4130000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-divide-unnormalized-mask0
+  operands   op1=4101000000000000 op2=41300000000000003300000000000000 mask=0
+  hercules   result=4130000000000001 cc=- interruption=none
+  zarch      result=4130000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-unnormalized-sum-mask0
+  operands   op1=4100100000000000 op2=41001000000000003300000000000000 mask=0
+  hercules   result=4100100000000001 cc=- interruption=none
+  zarch      result=4100100000000000 cc=- interruption=none
+
+DISAGREE Ldxr-unnormalized-cancel-mask0
+  operands   op1=4100000100000000 op2=C100000100000000B300000000000000 mask=0
+  hercules   result=C100000100000001 cc=- interruption=none
+  zarch      result=C100000100000000 cc=- interruption=none
+
+DISAGREE Ldxr-unnormalized-cancel-significance-mask1
+  operands   op1=4100000100000000 op2=C100000100000000B300000000000000 mask=1
+  hercules   result=C100000100000001 cc=- interruption=none
+  zarch      result=C100000100000000 cc=- interruption=none
+
+DISAGREE Ldxr-guard-digit-mask0
+  operands   op1=4110000000000000 op2=C0FFFFFFFFFFFFFFB2FFFFFFFFFFFFFF mask=0
+  hercules   result=C0FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=C110000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-digit-shifted-past-guard-mask0
+  operands   op1=4210000000000000 op2=C0FFFFFFFFFFFFFFB2FFFFFFFFFFFFFF mask=0
+  hercules   result=C0FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=C110000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-round-no-carry-mask0
+  operands   op1=0000000000000000 op2=41123456780000003300000000000000 mask=0
+  hercules   result=4112345678000001 cc=- interruption=none
+  zarch      result=4112345678000000 cc=- interruption=none
+
+DISAGREE Ldxr-compare-equal-mask0
+  operands   op1=4110000000000000 op2=41100000000000003300000000000000 mask=0
+  hercules   result=4110000000000001 cc=- interruption=none
+  zarch      result=4110000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-compare-low-mask0
+  operands   op1=4110000000000000 op2=41200000000000003300000000000000 mask=0
+  hercules   result=4120000000000001 cc=- interruption=none
+  zarch      result=4120000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-compare-high-mask0
+  operands   op1=4120000000000000 op2=41100000000000003300000000000000 mask=0
+  hercules   result=4110000000000001 cc=- interruption=none
+  zarch      result=4110000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-compare-negative-mask0
+  operands   op1=C110000000000000 op2=41100000000000003300000000000000 mask=0
+  hercules   result=4110000000000001 cc=- interruption=none
+  zarch      result=4110000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-compare-guard-mask0
+  operands   op1=4110000000000000 op2=40FFFFFFFFFFFFFF32FFFFFFFFFFFFFF mask=0
+  hercules   result=40FFFFFFFFFFFFFF cc=- interruption=none
+  zarch      result=4110000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-random-1
+  operands   op1=0000000000000000 op2=83000000CDA21DD3 mask=2
+  hercules   result=000000000000000030E049093C125A55 cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-random-5
+  operands   op1=7E46D88D70DD9354 op2=016C26FCC63F2394 mask=3
+  hercules   result=3F1DEE25C4A46CAE30E049093C125A55 cc=- interruption=none
+  zarch      result=3F1DEE25C4A46CAE31162D5DC4E9A890 cc=- interruption=none
+
+DISAGREE Mxdr-random-6
+  operands   op1=7E12F98F7E6EA25B op2=8139B8883A83D995 mask=7
+  hercules   result=BE4473E6B340D2D630E049093C125A55 cc=- interruption=none
+  zarch      result=BE4473E6B340D2D6B034E6E1094A1F70 cc=- interruption=none
+
+DISAGREE Mxdr-random-7
+  operands   op1=CDFE0FB8A69A34D0 op2=816E7072984B2429 mask=4
+  hercules   result=0E6D9A59F283487A30E049093C125A55 cc=- interruption=none
+  zarch      result=0E6D9A59F283487A00115F29570FB550 cc=- interruption=none
+
+DISAGREE Mxdr-random-9
+  operands   op1=80D4AADC0A7147D6 op2=0096C3EC48C72C8F mask=4
+  hercules   result=000000000000000030E049093C125A55 cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-random-11
+  operands   op1=FFA0FCF8C15FFA66 op2=00D2C92186EC7178 mask=9
+  hercules   result=BF848DFFC365BB7630E049093C125A55 cc=- interruption=none
+  zarch      result=BF848DFFC365BB76B15040A83C8C65D0 cc=- interruption=none
+
+DISAGREE Mxdr-random-12
+  operands   op1=01CDF36148686961 op2=FF00060EDA00CDDB mask=4
+  hercules   result=BD4DFA6F8EADBEB030E049093C125A55 cc=- interruption=none
+  zarch      result=BD4DFA6F8EADBEB0AFE3F27B4D2FB000 cc=- interruption=none
+
+DISAGREE Mxdr-random-14
+  operands   op1=4000000000A10250 op2=FF00000000BC7956 mask=6
+  hercules   result=EF768A02EE96E00030E049093C125A55 cc=- interruption=none
+  zarch      result=EF768A02EE96E000E100000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-random-17
+  operands   op1=BD3700BA8D997BC1 op2=3D3700BA8D997BC0 mask=0
+  hercules   result=B9BD150295FE53E130E049093C125A55 cc=- interruption=none
+  zarch      result=B9BD150295FE53E1AB1421134EB8BC00 cc=- interruption=none
+
+DISAGREE Mxdr-random-18
+  operands   op1=7C00000508ECDBFB op2=021B7FD636BDF904 mask=B
+  hercules   result=388A749F3E38DBD930E049093C125A55 cc=- interruption=none
+  zarch      result=388A749F3E38DBD92ADFF992EC000000 cc=- interruption=none
+
+DISAGREE Mxdr-random-19
+  operands   op1=37289E8D09D6E3D0 op2=7F8F3D122F2A993B mask=8
+  hercules   result=7616BA4172BC2A5E30E049093C125A55 cc=- interruption=none
+  zarch      result=7616BA4172BC2A5E68A57B1742CDD0F0 cc=- interruption=none
+
+DISAGREE Mxdr-random-20
+  operands   op1=FD00000000000000 op2=4000000000000008 mask=8
+  hercules   result=000000000000000030E049093C125A55 cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-random-21
+  operands   op1=81E54AF11ED4981D op2=FC110C59F45AE08F mask=5
+  hercules   result=3CF450A18443714C30E049093C125A55 cc=- interruption=none
+  zarch      result=3CF450A18443714C2E68D785C0C58330 cc=- interruption=none
+
+DISAGREE Mxdr-random-26
+  operands   op1=49000000000459C7 op2=7D86F53573996CBE mask=D
+  hercules   result=7D24B28FE0022E6030E049093C125A55 cc=- interruption=none
+  zarch      result=7D24B28FE0022E606F995B2000000000 cc=- interruption=none
+
+DISAGREE Mxdr-random-28
+  operands   op1=805BBA88A9181A92 op2=005BBA88A9181A92 mask=C
+  hercules   result=000000000000000030E049093C125A55 cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-random-29
+  operands   op1=4DA7FEEC32EB5676 op2=CDA7FEEC32EB5676 mask=4
+  hercules   result=DA6E3E9603FE03B930E049093C125A55 cc=- interruption=none
+  zarch      result=DA6E3E9603FE03B9CC8E57ADF1D77E64 cc=- interruption=none
+
+DISAGREE Mxdr-random-30
+  operands   op1=80319B483FD457F1 op2=BBCDB50758BF0170 mask=C
+  hercules   result=000000000000000030E049093C125A55 cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-random-31
+  operands   op1=CA0000000000006A op2=83719495F8643CEB mask=9
+  hercules   result=012F078618D9813930E049093C125A55 cc=- interruption=none
+  zarch      result=012F078618D98139734E000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-random-32
+  operands   op1=7F00061279BE765C op2=02C8B8435381E79C mask=F
+  hercules   result=3E4C2CDFD1E4C11930E049093C125A55 cc=- interruption=none
+  zarch      result=3E4C2CDFD1E4C1193028A85392410000 cc=- interruption=none
+
+DISAGREE Mxdr-random-33
+  operands   op1=0185CE6254B52EEA op2=0185CE6254B52EEB mask=1
+  hercules   result=000000000000000030E049093C125A55 cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-random-34
+  operands   op1=00DD5073508C5DF6 op2=7DE73F9D46979750 mask=C
+  hercules   result=3DC7EA96D16D408530E049093C125A55 cc=- interruption=none
+  zarch      result=3DC7EA96D16D40852FD736E6A76376E0 cc=- interruption=none
+
+DISAGREE Mxdr-random-35
+  operands   op1=830000000000000D op2=FD8B5BE6F103C26A mask=4
+  hercules   result=33713AABA3D30DF630E049093C125A55 cc=- interruption=none
+  zarch      result=33713AABA3D30DF62520000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-random-36
+  operands   op1=009B3D27580F14E7 op2=FFEBD7FBA2C04140 mask=E
+  hercules   result=BF8F041C1187A88530E049093C125A55 cc=- interruption=none
+  zarch      result=BF8F041C1187A885B1F65D38B353E0C0 cc=- interruption=none
+
+DISAGREE Mxdr-random-37
+  operands   op1=0354896944CD38E3 op2=8354896944CD38E3 mask=4
+  hercules   result=000000000000000030E049093C125A55 cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-random-38
+  operands   op1=83680904B4FB3D89 op2=3B523369CCF3F2BF mask=5
+  hercules   result=000000000000000030E049093C125A55 cc=- interruption=none
+  zarch      result=00000000000000000000000000000000 cc=- interruption=none
+
+DISAGREE Mxdr-random-39
+  operands   op1=FF8005D046B9D6A4 op2=0263B8456ED9D82F mask=F
+  hercules   result=C131DE66720D472C30E049093C125A55 cc=- interruption=none
+  zarch      result=C131DE66720D472CB32154DF323CC81C cc=- interruption=none
+
+DISAGREE Ldxr-random-0
+  operands   op1=4E9C99DC0809FA2B op2=3A7859D0D159C7C22CB01C1BA9766AB4 mask=6
+  hercules   result=3A7859D0D159C7C2 cc=- interruption=none
+  zarch      result=3A7859D0D159C7C3 cc=- interruption=none
+
+DISAGREE Ldxr-random-1
+  operands   op1=00F855DD6FBC6758 op2=0342A43A790E192B751ECB7A79075A45 mask=F
+  hercules   result=0342A43A790E192C cc=- interruption=none
+  zarch      result=0342A43A790E192B cc=- interruption=none
+
+DISAGREE Ldxr-random-2
+  operands   op1=FF00000000000B52 op2=82E5774371DEE9A1F48EA1B80475A714 mask=A
+  hercules   result=82E5774371DEE9A1 cc=- interruption=none
+  zarch      result=82E5774371DEE9A2 cc=- interruption=none
+
+DISAGREE Ldxr-random-3
+  operands   op1=41FF2C590C7EC666 op2=BDBF674D96D75BD2AF747ADEA4394C35 mask=B
+  hercules   result=BDBF674D96D75BD3 cc=- interruption=none
+  zarch      result=BDBF674D96D75BD2 cc=- interruption=none
+
+DISAGREE Ldxr-random-4
+  operands   op1=48C179611D87C3CE op2=FF627C2252363AA9F1557D42B1F05CD6 mask=B
+  hercules   result=FF627C2252363AAA cc=- interruption=none
+  zarch      result=FF627C2252363AA9 cc=- interruption=none
+
+DISAGREE Ldxr-random-7
+  operands   op1=FF00000000000000 op2=B317D44F17C1606DA52C41A1B791B6E2 mask=A
+  hercules   result=B317D44F17C1606E cc=- interruption=none
+  zarch      result=B317D44F17C1606D cc=- interruption=none
+
+DISAGREE Ldxr-random-9
+  operands   op1=7FB3798821DFDD94 op2=FCA2D5FF75571BE0EEF5497B15D71B75 mask=A
+  hercules   result=FCA2D5FF75571BE0 cc=- interruption=none
+  zarch      result=FCA2D5FF75571BE1 cc=- interruption=none
+
+DISAGREE Ldxr-random-13
+  operands   op1=B983B66AEFEFC0E4 op2=7E7DA7D29A0BBD7770AA876F9B1E70EA mask=F
+  hercules   result=7E7DA7D29A0BBD77 cc=- interruption=none
+  zarch      result=7E7DA7D29A0BBD78 cc=- interruption=none
+
+DISAGREE Ldxr-random-14
+  operands   op1=B1932BBB73CE201D op2=FD00000000000000EF00000000000000 mask=7
+  hercules   result=FD00000000000001 cc=- interruption=none
+  zarch      result=FD00000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-random-18
+  operands   op1=01F91668CC9B4857 op2=0312C896C3822E927526EA865A1F4EAA mask=2
+  hercules   result=0312C896C3822E93 cc=- interruption=none
+  zarch      result=0312C896C3822E92 cc=- interruption=none
+
+DISAGREE Ldxr-random-20
+  operands   op1=80081B3C6EF3AE89 op2=7D00000000000B886F422EC76E374A74 mask=0
+  hercules   result=7D00000000000B89 cc=- interruption=none
+  zarch      result=7D00000000000B88 cc=- interruption=none
+
+DISAGREE Ldxr-random-21
+  operands   op1=7F229EBBECC4C75F op2=03000000000000007500A75EB8F9840C mask=D
+  hercules   result=0300000000000001 cc=- interruption=none
+  zarch      result=0300000000000000 cc=- interruption=none
+
+DISAGREE Ldxr-random-22
+  operands   op1=7DE479F64DB43121 op2=319B2188B91F9C082320175AD35A0AA3 mask=D
+  hercules   result=319B2188B91F9C09 cc=- interruption=none
+  zarch      result=319B2188B91F9C08 cc=- interruption=none
+
+DISAGREE Ldxr-random-23
+  operands   op1=00B9D536F380D6A0 op2=CF59E6B032C926CBC13FE37762AC2534 mask=D
+  hercules   result=CF59E6B032C926CC cc=- interruption=none
+  zarch      result=CF59E6B032C926CB cc=- interruption=none
+
+DISAGREE Ldxr-random-24
+  operands   op1=7F38D9CC525CF9F2 op2=4595988DCFDB4C5E372A4DBF1BBF17FA mask=0
+  hercules   result=4595988DCFDB4C5F cc=- interruption=none
+  zarch      result=4595988DCFDB4C5E cc=- interruption=none
+
+DISAGREE Ldxr-random-25
+  operands   op1=01121EB5AD966EA3 op2=FFAD26CF43E26630F126AEF5562D3C22 mask=8
+  hercules   result=FFAD26CF43E26631 cc=- interruption=none
+  zarch      result=FFAD26CF43E26630 cc=- interruption=none
+
+DISAGREE Ldxr-random-30
+  operands   op1=FEF64A7E238710D0 op2=37E28F5F3BEE5E81294532116EB1CE02 mask=6
+  hercules   result=37E28F5F3BEE5E82 cc=- interruption=none
+  zarch      result=37E28F5F3BEE5E81 cc=- interruption=none
+
+DISAGREE Ldxr-random-31
+  operands   op1=FF6D1E0099181186 op2=B7FA540158F92720A92F9A0A226AE115 mask=3
+  hercules   result=B7FA540158F92721 cc=- interruption=none
+  zarch      result=B7FA540158F92720 cc=- interruption=none
+
+DISAGREE Ldxr-random-33
+  operands   op1=3000026FEC8AFBFF op2=FCF25A0F826DA2B7EEC135A9954041F9 mask=3
+  hercules   result=FCF25A0F826DA2B7 cc=- interruption=none
+  zarch      result=FCF25A0F826DA2B8 cc=- interruption=none
+
+DISAGREE Ldxr-random-36
+  operands   op1=7C23A17C08C91C9E op2=7C1843F7DC5BDB586EABBCC9E70675AC mask=A
+  hercules   result=7C1843F7DC5BDB58 cc=- interruption=none
+  zarch      result=7C1843F7DC5BDB59 cc=- interruption=none
+
+DISAGREE Ldxr-random-39
+  operands   op1=80D9A9F38C921E4B op2=FFE322F0C07A0F0CF17888BDB808993B mask=5
+  hercules   result=FFE322F0C07A0F0D cc=- interruption=none
+  zarch      result=FFE322F0C07A0F0C cc=- interruption=none
+
+1922 agree, 99 disagree

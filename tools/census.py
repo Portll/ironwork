@@ -15,9 +15,13 @@ in sorted order, the directories a z/OS build of its repository would concatenat
 A .cbl or .cob file holding a PROGRAM-ID is a program, never a member, since SYSLIB holds
 copybooks; an absolute or backslashed path names no member.
 
-usage: census.py <ironwork binary> <corpus dir> [sample size] [seed]
+usage: census.py <ironwork binary> <corpus dir> [sample size] [seed] [--json tally.json]
+
+--json writes the whole tally as counts, with no program's path, for tools/conformance.py, and how
+many programs `ironwork check` ended with each return code: 8 is a compile with E-level messages,
+which still gives a program to run, and the tally counts it among the refused by its first message.
 """
-import collections, os, random, re, subprocess, sys
+import collections, json, os, random, re, subprocess, sys
 
 def copy_libraries(root):
     """For each repository under the corpus root, the directories that hold copybooks."""
@@ -126,14 +130,19 @@ def reason(stderr):
     return id or re.sub(r"\d+", "N", message)[:80]
 
 def main():
-    binary, root = sys.argv[1], sys.argv[2]
-    size = int(sys.argv[3]) if len(sys.argv) > 3 else 3000
-    seed = int(sys.argv[4]) if len(sys.argv) > 4 else 20260927
+    args, out = sys.argv[1:], None
+    if "--json" in args:
+        i = args.index("--json")
+        out = args[i + 1]
+        del args[i:i + 2]
+    binary, root = args[0], args[1]
+    size = int(args[2]) if len(args) > 2 else 3000
+    seed = int(args[3]) if len(args) > 3 else 20260927
     population = sorted(programs(root))
     sample = random.Random(seed).sample(population, min(size, len(population)))
     libraries = copy_libraries(root)
     files, repositories = repository_files(root), {}
-    tally, accepted = collections.Counter(), 0
+    tally, accepted, codes = collections.Counter(), 0, collections.Counter()
     for path in sample:
         repo = os.path.relpath(path, root).split(os.sep)[0]
         if repo not in repositories:
@@ -145,7 +154,9 @@ def main():
             r = subprocess.run([binary, "check", path, *flags], capture_output=True, text=True, timeout=20)
         except subprocess.TimeoutExpired:
             tally["(timeout)"] += 1
+            codes["timeout"] += 1
             continue
+        codes[str(r.returncode)] += 1
         if r.returncode in (0, 4):
             accepted += 1
         else:
@@ -153,6 +164,15 @@ def main():
     print(f"{accepted} of {len(sample)} programs compile ({100 * accepted / len(sample):.1f}%), sample of {len(population)} (seed {seed})")
     for why, n in tally.most_common(40):
         print(f"{n:6d}  {why}")
+    if out:
+        version = subprocess.run([binary, "--version"], capture_output=True, text=True).stdout.strip()
+        with open(out, "w") as f:
+            json.dump({"ironwork": version, "corpus": os.path.basename(os.path.normpath(root)), "population": len(population),
+                       "sample": len(sample), "seed": seed, "compiled": accepted,
+                       "return_codes": dict(sorted(codes.items(), key=lambda x: (not x[0].isdigit(), int(x[0]) if x[0].isdigit() else 0))),
+                       "refused": [{"reason": why, "programs": n} for why, n in sorted(tally.items(), key=lambda x: (-x[1], x[0]))]},
+                      f, indent=1)
+            f.write("\n")
 
 if __name__ == "__main__":
     main()
