@@ -75,9 +75,9 @@ pub fn run(r: Request<'_>) -> ExitCode {
             Ok(mut j) => {
                 evidence::recorded_sources(&mut j, module.files.first().map(Vec::as_slice).unwrap_or_default());
                 let names = recorded_names(&module);
-                let mut facts = exec::module::held_facts(module.facts.first().copied().flatten(), main);
-                facts.union(exec::constructs::of_run(r.command == "cics", false, r.parm.is_some(), library.statement_limit.is_some()));
-                let run = evidence::Run::new(j, &r.reads, path, e.marker.as_deref()).with_statements(e.statements.clone()).with_input(e.input).with_facts(facts);
+                let program = exec::module::held_facts(module.facts.first().copied().flatten(), main);
+                let ran = exec::constructs::of_run(r.command == "cics", false, r.parm.is_some(), library.statement_limit.is_some());
+                let run = evidence::Run::new(j, &r.reads, path, e.marker.as_deref()).with_statements(e.statements.clone()).with_input(e.input).with_facts(program, ran);
                 Some(run.with_recorded(names.iter().map(|(name, file)| (name.as_str(), *file))))
             }
             Err(err) => {

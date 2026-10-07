@@ -614,7 +614,7 @@ fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database
     let library = exec::unit::Library { programs, dirs: std::iter::once(own).chain(req.program_dirs.iter().cloned()).collect(), copy: libraries, flags: req.flags.clone(), trace_statements: req.coverage.is_some().then_some(exec::unit::StatementFilter::All), trace_input: false, statement_limit: req.statement_limit, time_limit: req.time_limit, storage_limit: req.storage_limit, program_ids: None, screen: None, environment: Default::default() };
     let compiled = exec::compile(first, &req.flags).map_err(|errors| Failed::before(Outcome::Refused, syntax::most_severe(&errors).map(|e| e.place(&path.display().to_string()).to_string()).unwrap_or_default()))?;
     if let Some(run) = evidence {
-        run.borrow_mut().add_facts(exec::constructs::of(&compiled));
+        run.borrow_mut().add_program(exec::constructs::of(&compiled));
     }
     let specs: Vec<String> = dds.iter().map(|d| format!("{}={}{}{}", d.name, d.path.display(), if d.text { ":text" } else { "" }, if d.append { ":mod" } else { "" })).collect();
     let dds = exec::files::Dds::new(&specs, false).map_err(|m| Failed::abend(AbendCode::Ironwork, m))?;
@@ -1162,7 +1162,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                 };
                 let run = journal.borrow_mut().take().map(|j| {
                     let mut r = crate::evidence::Run::new(j, roots, &source, runner.req.trace_marker.as_deref());
-                    r.add_facts(exec::constructs::of_run(false, true, step.parm.is_some(), runner.req.statement_limit.is_some()));
+                    r.add_run_facts(exec::constructs::of_run(false, true, step.parm.is_some(), runner.req.statement_limit.is_some()));
                     for d in dds.iter().filter(|d| d.dataset) {
                         r.track(&d.name, &d.path);
                     }

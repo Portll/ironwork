@@ -1,7 +1,8 @@
 //! What an assumption of the register governs, and what a run holds of it: the statement kinds and
-//! data usages of the programs it entered, and the options in force. An assumption governs a run
-//! when every trigger of one of its conjunctions is among the run's facts, so the ids a run names
-//! are those its outcome could have rested on, at program granularity: an over-approximation.
+//! data usages of each program it entered, with the options in force for it. An assumption governs
+//! a run when every trigger of one of its conjunctions is among one program's facts, so the ids a
+//! run names are those its outcome could have rested on, at program granularity: an
+//! over-approximation.
 
 use crate::options::{DispSign, IntDate, Qualify, Quote, Trunc};
 use crate::{Compliance, Numproc, Options};

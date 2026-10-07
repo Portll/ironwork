@@ -45,8 +45,8 @@ pub struct Assumption {
     pub basis: Basis,
     pub oracle: Oracle,
     /// The statement kinds, usages and options the claim could bear on: any of the conjunctions,
-    /// each met when the run holds all of its triggers. An over-approximation, at program
-    /// granularity.
+    /// each met when one program the run entered holds all of its triggers, with the run's own
+    /// facts. An over-approximation, at program granularity.
     pub governs: Governs,
 }
 
@@ -2753,6 +2753,18 @@ pub fn governed(facts: &Facts) -> Vec<&'static str> {
     ids
 }
 
+/// The ids met within some one of `programs`, each program's facts joined with the run's own, in
+/// byte order: a conjunction's triggers must all hold in one program.
+pub fn governed_by_programs(programs: &[Facts], run: Facts) -> Vec<&'static str> {
+    let mut ids = std::collections::BTreeSet::new();
+    for program in programs {
+        let mut facts = *program;
+        facts.union(run);
+        ids.extend(governed(&facts));
+    }
+    ids.into_iter().collect()
+}
+
 /// The register as one C series: each entry's number is its 1-based position, so the numbers hold
 /// only while the register is appended to and never reordered or trimmed.
 pub fn c_series() -> impl Iterator<Item = (usize, &'static Assumption)> {
@@ -2847,6 +2859,24 @@ mod tests {
         let always = ASSUMPTIONS.iter().filter(|a| a.governs == [[Always].as_slice()]).count();
         assert_eq!(governed(&Facts::default()).len(), always);
         assert_eq!(governed(&Facts::every_construct()).len(), ASSUMPTIONS.iter().filter(|a| a.governs.iter().any(|all| all.iter().all(|t| !matches!(t, O(_))))).count());
+    }
+
+    #[test]
+    fn a_conjunction_is_met_within_one_program_and_run_facts_join_each() {
+        let mut opt = Facts::default();
+        opt.option(TruncOpt);
+        let mut binary = Facts::default();
+        binary.usage(Binary);
+        assert!(!governed_by_programs(&[opt, binary], Facts::default()).contains(&TRUNC_OPT_IS_BINARY));
+        let mut both = opt;
+        both.union(binary);
+        assert!(governed_by_programs(&[both, Facts::default()], Facts::default()).contains(&TRUNC_OPT_IS_BINARY));
+        let mut calls = Facts::default();
+        calls.statement(Call);
+        let mut cics = Facts::default();
+        cics.option(CicsTask);
+        assert!(governed_by_programs(&[calls], cics).contains(&LE_UNDER_CICS));
+        assert!(governed_by_programs(&[], cics).is_empty());
     }
 
     #[test]

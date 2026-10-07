@@ -830,3 +830,29 @@ fn the_close_record_names_the_assumptions_the_programs_the_run_entered_could_res
     assert!(!check.contains("\"assumptions\""), "{check}");
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn an_assumption_is_named_only_when_one_program_meets_all_its_conditions() {
+    let dir = temp("assumptions-per-program");
+    let main = |id: &str, data: &[&str]| {
+        let lines: Vec<String> = ["IDENTIFICATION DIVISION.".to_owned(), format!("PROGRAM-ID. {id}."), "DATA DIVISION.".into(), "WORKING-STORAGE SECTION.".into()]
+            .into_iter()
+            .chain(data.iter().map(|l| (*l).to_owned()))
+            .chain(["PROCEDURE DIVISION.", "    CALL 'BINSUB'", "    GOBACK."].map(String::from))
+            .collect();
+        format!("       CBL TRUNC(OPT)\n{}", source(&lines.iter().map(String::as_str).collect::<Vec<_>>()))
+    };
+    put(&dir, "src/APART.cbl", &main("APART", &["01  Z PIC 9(4) VALUE 7."]));
+    put(&dir, "src/TOGETHER.cbl", &main("TOGETHER", &["01  B PIC S9(4) COMP VALUE 7."]));
+    put(
+        &dir,
+        "lib/BINSUB.cbl",
+        &source(&["IDENTIFICATION DIVISION.", "PROGRAM-ID. BINSUB.", "DATA DIVISION.", "WORKING-STORAGE SECTION.", "01  B PIC S9(4) COMP VALUE 1.", "PROCEDURE DIVISION.", "    ADD 1 TO B", "    GOBACK."]),
+    );
+    let apart = assumptions(on_both_executors(&dir, &["run", "src/APART.cbl", "-L", "lib"], &[]).last().unwrap());
+    assert!(!apart.contains(&"C2".to_owned()), "TRUNC(OPT) and binary data are in different programs: {apart:?}");
+    assert!(apart.contains(&"C1".to_owned()) && apart.contains(&"C11".to_owned()), "{apart:?}");
+    let together = assumptions(on_both_executors(&dir, &["run", "src/TOGETHER.cbl", "-L", "lib"], &[]).last().unwrap());
+    assert!(together.contains(&"C2".to_owned()), "{together:?}");
+    fs::remove_dir_all(dir).unwrap();
+}

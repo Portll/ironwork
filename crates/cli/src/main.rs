@@ -437,8 +437,9 @@ assumptions flags:
              original id beside it (C36 L1); the stored ids do not change
   --json
              the register as one JSON array of {id, basis, oracle, claim, governs}; governs is any
-             of its lists, each met when a run holds all of its triggers (statement:sort,
-             usage:packed, option:TRUNC(OPT) or always), which a run journal's close record names
+             of its lists, each met when one program a run entered holds all of its triggers
+             (statement:sort, usage:packed, option:TRUNC(OPT) or always), which a run journal's
+             close record names
 compare flags: ironwork compare --base OLD.cbl --head NEW.cbl [--dd NAME=path]... [--sql-replay file]
   --base, --head
              the two versions of the program; each runs in its own directory on copies of every DD,
@@ -1267,8 +1268,8 @@ fn driver() -> ExitCode {
         Err(code) => return code,
     };
     if command == "cics" {
-        let facts = ran_facts(&compiled, exec::constructs::of_run(true, false, false, false));
-        let run = journal.map(|j| evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()).with_input(trace_input).with_facts(facts));
+        let (program, ran) = (exec::constructs::of(&compiled), exec::constructs::of_run(true, false, false, false));
+        let run = journal.map(|j| evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()).with_input(trace_input).with_facts(program, ran));
         let coverage = coverage_file.as_deref().map(|file| (file, outlines.as_slice(), reads.as_slice()));
         return run_cics(&compiled, path, library, dds, clock, database, &cics_options, run, executor, coverage);
     }
@@ -1279,8 +1280,8 @@ fn driver() -> ExitCode {
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
     let shared = journal.map(|mut j| {
         j.executor = Some(if code.is_some() { "vm" } else { "interpreter" });
-        let facts = ran_facts(&compiled, exec::constructs::of_run(false, false, parm.is_some(), statement_limit.is_some()));
-        std::rc::Rc::new(std::cell::RefCell::new(evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()).with_input(trace_input).with_facts(facts)))
+        let (program, ran) = (exec::constructs::of(&compiled), exec::constructs::of_run(false, false, parm.is_some(), statement_limit.is_some()));
+        std::rc::Rc::new(std::cell::RefCell::new(evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()).with_input(trace_input).with_facts(program, ran)))
     });
     let covered = coverage_file.as_ref().map(|_| std::rc::Rc::new(std::cell::RefCell::new(coverage::Coverage::naming(path, &reads))));
     let observer = (shared.is_some() || covered.is_some()).then(|| {
@@ -1355,12 +1356,6 @@ fn write_arguments(dir: &std::path::Path, arguments: &[Option<Vec<u8>>]) -> io::
         }
     }
     Ok(())
-}
-
-/// What a run of `compiled` holds before it loads anything: the program's own facts and the run's.
-fn ran_facts(compiled: &exec::Compiled, mut run: numeric::governs::Facts) -> numeric::governs::Facts {
-    run.union(exec::constructs::of(compiled));
-    run
 }
 
 /// Closes the journal on how the run ended and gives the exit status.

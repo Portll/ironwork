@@ -37,10 +37,12 @@ by `prev` and `seq`.
 
 - `assumptions` names, in byte order, the ids of the register's assumptions (`ironwork assumptions
   --json`) the run could have rested on. Each assumption governs statement kinds, data usages and
-  options: any of its lists, each met when the run holds all of its triggers. The run holds what
-  each program it entered holds, its first and each one a CALL, LINK, XCTL or function invocation
-  loaded and each COBOL class an INVOKE loaded, with the options each was compiled with, and how
-  the run was made: a CICS task, a job step, a PARM, a statement limit. Facts are taken at program
+  options: any of its lists, each met when one program the run entered holds all of its triggers.
+  A program holds its own statement kinds and usages, the options it was compiled with, and how
+  the run was made: a CICS task, a job step, a PARM, a statement limit. The programs are the run's
+  first, each one a CALL, LINK, XCTL or function invocation loaded, and each COBOL class an INVOKE
+  loaded, taken whole; the list is every id met within some one of them, so TRUNC(OPT) in one
+  program and binary data only in another meet no assumption that needs both. Facts are taken at program
   granularity, not from the statements that ran, so the list is a superset of the assumptions the
   run did rest on: a program that holds a SORT names the SORT assumptions whether or not the SORT
   ran. A program from a load module without its statement kinds and usages (load-module.md §5.4)

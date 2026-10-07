@@ -286,9 +286,9 @@ pub struct Journal {
     started: Instant,
     /// Which ran the program, `vm` or `interpreter`, for the close record.
     pub executor: Option<&'static str>,
-    /// What the programs the run entered hold and how it was made, whose assumptions the close
-    /// record names; None for a command that ran no program.
-    pub facts: Option<numeric::governs::Facts>,
+    /// The ids of the register's assumptions the run could have rested on, in byte order, for the
+    /// close record; None for a command that ran no program.
+    pub assumptions: Option<Vec<&'static str>>,
 }
 
 /// Where a closed run's tip went.
@@ -306,7 +306,7 @@ impl Journal {
         let id = format!("{stamp}Z-{}", hex(&random(8)));
         let path = dir.join("runs").join(format!("{id}.jsonl"));
         let file = open_new(&path)?;
-        let mut journal = Self { id, path, dir, file, chain: Chain { chain: hex(&random(16)), seq: 0, prev: ZERO.into() }, counts: BTreeMap::new(), started: Instant::now(), executor: None, facts: None };
+        let mut journal = Self { id, path, dir, file, chain: Chain { chain: hex(&random(16)), seq: 0, prev: ZERO.into() }, counts: BTreeMap::new(), started: Instant::now(), executor: None, assumptions: None };
         let roots = reads.iter().map(|r| Value::Str(r.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())).collect();
         journal.append_at(
             "open",
@@ -350,8 +350,8 @@ impl Journal {
         if let Some(executor) = self.executor {
             close.insert("executor".into(), executor.into());
         }
-        if let Some(facts) = &self.facts {
-            close.insert("assumptions".into(), Value::Arr(numeric::assumptions::governed(facts).into_iter().map(Value::from).collect()));
+        if let Some(ids) = self.assumptions.take() {
+            close.insert("assumptions".into(), Value::Arr(ids.into_iter().map(Value::from).collect()));
         }
         self.append("close", close)?;
         self.file.sync_all()?;

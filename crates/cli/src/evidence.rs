@@ -168,7 +168,8 @@ pub struct Run {
     sinks: BTreeSet<SinkRecord>,
     input: bool,
     statements: BTreeMap<(String, u32), u32>,
-    facts: Facts,
+    programs: Vec<Facts>,
+    run_facts: Facts,
     failed: Option<String>,
 }
 
@@ -184,20 +185,26 @@ impl Run {
             sinks: BTreeSet::new(),
             input: false,
             statements: BTreeMap::new(),
-            facts: Facts::default(),
+            programs: Vec::new(),
+            run_facts: Facts::default(),
             failed: None,
         }
     }
 
     /// What the run's first program holds and how the run was made; each program and class the
     /// run loads adds its own.
-    pub fn with_facts(mut self, facts: Facts) -> Self {
-        self.add_facts(facts);
+    pub fn with_facts(mut self, program: Facts, run: Facts) -> Self {
+        self.add_program(program);
+        self.add_run_facts(run);
         self
     }
 
-    pub fn add_facts(&mut self, facts: Facts) {
-        self.facts.union(facts);
+    pub fn add_program(&mut self, program: Facts) {
+        self.programs.push(program);
+    }
+
+    pub fn add_run_facts(&mut self, run: Facts) {
+        self.run_facts.union(run);
     }
 
     /// Records at each sink whether an input byte may be in its operand, as the run unit's taint
@@ -263,9 +270,9 @@ impl Run {
             }
             Event::Close { dd, path } => self.dd(dd, "close", None, path),
             Event::Paragraph { .. } => {}
-            Event::Class { facts, .. } => self.facts.union(facts),
+            Event::Class { facts, .. } => self.add_program(facts),
             Event::Load { program, source, recorded, facts } => {
-                self.facts.union(facts);
+                self.add_program(facts);
                 let mut f = fields([("program", program.into())]);
                 if let Some((sha, _)) = source.and_then(digest) {
                     f.insert("sha256".into(), sha.into());
@@ -326,9 +333,16 @@ impl Run {
     }
 
     /// Records each opened DD as the run left it, and the abend if there was one, and gives the
-    /// close record the assumptions the run's facts meet.
+    /// close record the assumptions met within some program the run entered, with those a job's
+    /// earlier steps met.
     pub fn end(mut self, abend: Option<(String, Option<&str>, i64)>) -> Journal {
-        self.journal.facts.get_or_insert_default().union(self.facts);
+        if !self.programs.is_empty() {
+            let met = numeric::assumptions::governed_by_programs(&self.programs, self.run_facts);
+            let ids = self.journal.assumptions.get_or_insert_default();
+            ids.extend(met);
+            ids.sort_unstable();
+            ids.dedup();
+        }
         for (dd, path) in std::mem::take(&mut self.opened) {
             self.dd(&dd, "end", None, &path);
         }
