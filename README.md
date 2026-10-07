@@ -723,7 +723,9 @@ What CI cannot measure is kept in `docs/conformance/` and refreshed at each cut 
 of a public corpus (seed 1), counts alone; `hercules.txt`, from `cargo run -p ironwork-oracle --
 hercules`, which names the Hercules and ironwork versions in its first line; and
 `ibm-listings.json`, IBM's side of the compile listings, from `tools/ibm-listings.py` over the
-directory of listings, with `--results` to print the join with a NIST run.
+directory of listings, with `--results` to print the join with a NIST run; and `differential.json`,
+the totals of a differential campaign (`.github/workflows/differential.yml`'s total job, or
+`tools/differential-campaign.py total`), which the report shows beside the NIST comparison.
 
 ## Code pages
 

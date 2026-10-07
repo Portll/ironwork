@@ -23,7 +23,9 @@ It prints PASS, FAIL or TODO for each step and exits 1 on any FAIL.
    Refresh what CI cannot measure in `docs/conformance/` with a release build of main's head, and
    commit it before the version commit: `tools/census.py <binary> <corpus> 3000 1 --json
    docs/conformance/census.json`, `cargo run --release -p ironwork-oracle -- hercules <dir> >
-   docs/conformance/hercules.txt` (it exits 1 while cases disagree), and `nist.tsv` from CI's
+   docs/conformance/hercules.txt` (it exits 1 while cases disagree), `differential.json` from a
+   run of `differential.yml` on main's head (`gh run download <run> -p 'campaign-*' -D shards`, then
+   `tools/differential-campaign.py total shards/*/campaign.json`), and `nist.tsv` from CI's
    `conformance` artifact when a program's class has changed. Read the report CI writes: the release
    attaches it as `conformance-ironwork-<version>.md`.
 3. **Notes.** Start from the commits `--before` lists since the previous release. Each feature and

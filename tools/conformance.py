@@ -8,6 +8,8 @@ It reads, beside the binary's own register of assumptions (`ironwork assumptions
   docs/conformance/ibm-listings.json tools/ibm-listings.py --json: IBM's compile listings of CCVS85
   docs/conformance/census.json       tools/census.py --json: counts over a third-party corpus
   docs/conformance/hercules.txt      ironwork-oracle hercules: the machine model against Hercules
+  docs/conformance/differential.json tools/differential-campaign.py total: generated inputs run on
+                                     the interpreter and the VM, when a campaign has been kept
   tools/db2-probe/observed-12.1.5.txt  what Db2 for Linux answered the SQL probes
   docs/messages.md                   the catalogue, for each refusal's text and area
 
@@ -17,6 +19,7 @@ import argparse, collections, json, os, re, subprocess, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INPUTS = os.path.join(ROOT, "docs", "conformance")
+DIFFERENTIAL = os.path.join(INPUTS, "differential.json")
 MODULES = {
     "NC": "Nucleus",
     "SQ": "Sequential I-O",
@@ -112,6 +115,24 @@ def vm_section(results):
     odd = [r for r in ran if r["vm"] != "same"]
     if odd:
         out += [table(["Program", "VM", "What it rests on"], [[r["program"], r["vm"], r.get("vm detail", "")] for r in odd]), ""]
+    return out
+
+def differential_section(campaign):
+    by_commit = collections.Counter(l.split()[0][:8] for l in campaign.get("labels", []) if l)
+    shards = ", ".join(f"{c}, {n} shard{'s' if n > 1 else ''}" for c, n in by_commit.items())
+    out = [f"A differential campaign runs `ironwork fuzz --differential` on the batch programs of CCVS85 for a budget of CPU "
+           f"time: each generated input runs on the interpreter and on the VM, and the two runs are compared. "
+           f"{', '.join(campaign['ironwork'])}, {campaign['cpuHours']:,} CPU-hours"
+           + (f" ({shards})" if shards else "") + f": of {campaign['candidates']:,} candidate programs "
+           f"{campaign['fuzzed']:,} were fuzzed and {campaign['refused']:,} left the campaign, as fuzz refused them or lowering did. "
+           f"Of {campaign['runs']:,} runs, {campaign['agree']:,} agree, {campaign['atLimit']:,} of them with both executors at the "
+           f"statement limit; {campaign['timedOut']:,} timed out, {campaign['stopped']:,} stopped on the VM and "
+           f"{campaign['differ']:,} differ.", ""]
+    if campaign.get("stoppedAt"):
+        out += [table(["The VM stopped at", "Runs"], [[w, f"{n:,}"] for w, n in campaign["stoppedAt"].items()]), ""]
+    if campaign.get("divergences"):
+        out += [table(["Program", "Seed", "Inputs that differ", "What differed"],
+                      [[os.path.basename(d["program"]), d["seed"], d["differ"], "; ".join(d.get("said", []))] for d in campaign["divergences"]]), ""]
     return out
 
 def listings_section(listings, results):
@@ -250,6 +271,7 @@ def main():
         "",
         *nist_section(results),
         *vm_section(results),
+        *(differential_section(read_json(DIFFERENTIAL)) if os.path.exists(DIFFERENTIAL) else []),
         *listings_section(read_json(os.path.join(INPUTS, "ibm-listings.json")), results),
         *assumptions_section(register),
         *census_section(read_json(os.path.join(INPUTS, "census.json")), areas, messages),

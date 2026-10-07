@@ -1,0 +1,29 @@
+{
+  "campaigns": 8,
+  "ironwork": [
+    "ironwork for COBOL 0.8.0"
+  ],
+  "labels": [
+    "c910734cdaee4ea5538b493d50924014f1c1d315 shard 1/8",
+    "c910734cdaee4ea5538b493d50924014f1c1d315 shard 2/8",
+    "c910734cdaee4ea5538b493d50924014f1c1d315 shard 3/8",
+    "c910734cdaee4ea5538b493d50924014f1c1d315 shard 4/8",
+    "c910734cdaee4ea5538b493d50924014f1c1d315 shard 5/8",
+    "c910734cdaee4ea5538b493d50924014f1c1d315 shard 6/8",
+    "c910734cdaee4ea5538b493d50924014f1c1d315 shard 7/8",
+    "c910734cdaee4ea5538b493d50924014f1c1d315 shard 8/8"
+  ],
+  "cpuHours": 24.043,
+  "candidates": 437,
+  "fuzzed": 165,
+  "refused": 272,
+  "runs": 3281480,
+  "agree": 3281480,
+  "atLimit": 4802,
+  "timedOut": 0,
+  "stopped": 0,
+  "differ": 0,
+  "wallHours": 1.081,
+  "stoppedAt": {},
+  "divergences": []
+}
