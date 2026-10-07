@@ -360,6 +360,9 @@ catalogue! {
     IWC0311 Severe "KEY IS {name} = ...: Micro Focus's split key, not Enterprise COBOL's; --compliance extended reads it";
     IWC0312 Severe "FUNCTION STORED-CHAR-LENGTH: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0313 Severe "DELETE FILE: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
+    IWC0314 Severe "PROGRAM-POINTER: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it as PROCEDURE-POINTER";
+    IWC0315 Severe "PROCEDURE DIVISION after a data description entry with no period: GnuCOBOL's and Micro Focus's reading, not Enterprise COBOL's; --compliance extended reads it";
+    IWC0316 Severe "BASED: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
     IWJ0003 Severe "unbalanced parentheses or quotes in {text}";
@@ -727,6 +730,7 @@ catalogue! {
     IWR0057 Severe "{a SCREEN SECTION form ironwork does not run} is not supported yet";
     IWR0075 Severe "FUNCTION {name}: a user-defined function is not supported here yet";
     IWR0076 Severe "ANY LENGTH on {name}: ironwork reads it on an alphanumeric 01 or 77 parameter, and {why}";
+    IWR0077 Severe "BASED on {name}: ironwork reads BASED on an 01 or 77 entry";
     IWS0001 Severe "{what the syntax takes there}, found {the word or token there}";
     IWS0002 Severe "{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries";
     IWS0003 Severe "COPY: {message}";
@@ -871,6 +875,9 @@ catalogue! {
     IWX0041 Warning "periods after a period (GnuCOBOL and Micro Focus; Enterprise COBOL ends a sentence with one): the periods after the first are ignored";
     IWX0042 Warning "FUNCTION STORED-CHAR-LENGTH (GnuCOBOL; Enterprise COBOL has no such function): the argument's length in characters without its trailing spaces";
     IWX0043 Warning "DELETE FILE (Micro Focus and GnuCOBOL; Enterprise COBOL has no such statement): each closed file's data set is removed";
+    IWX0044 Warning "PROGRAM-POINTER (GnuCOBOL and Micro Focus; Enterprise COBOL writes PROCEDURE-POINTER): it is read as PROCEDURE-POINTER, set by SET ... TO ENTRY and called by CALL";
+    IWX0045 Warning "a data description entry with no period before PROCEDURE DIVISION (GnuCOBOL and Micro Focus; Enterprise COBOL ends each entry with one): the entry ends there";
+    IWX0046 Warning "BASED (GnuCOBOL and Micro Focus; Enterprise COBOL describes such an item in the LINKAGE SECTION): {name} has no storage until SET ADDRESS OF gives it some";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

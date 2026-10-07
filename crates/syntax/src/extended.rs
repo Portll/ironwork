@@ -1,11 +1,12 @@
 //! What `--compliance extended` does to the tokens before the parser reads them: each constant
 //! entry comes out and every later use of its name stands for its value, literals joined by `&`
 //! become one literal, BINARY-SHORT, BINARY-LONG and BINARY-DOUBLE become COMP-5 PICTUREs,
-//! FLOAT-SHORT and FLOAT-LONG become COMP-1 and COMP-2, and RETURNING OMITTED leaves a program's
+//! FLOAT-SHORT and FLOAT-LONG become COMP-1 and COMP-2, PROGRAM-POINTER becomes PROCEDURE-POINTER,
+//! and RETURNING OMITTED leaves a program's
 //! PROCEDURE DIVISION header (docs/compliance.md).
 
 use crate::lexer::{Tok, Token};
-use crate::messages::{IWX0002, IWX0004, IWX0005, IWX0006, IWX0009, IWX0027};
+use crate::messages::{IWX0002, IWX0004, IWX0005, IWX0006, IWX0009, IWX0027, IWX0044};
 use crate::{Error, Pos};
 use std::collections::HashMap;
 
@@ -81,6 +82,10 @@ pub fn rewrite(tokens: Vec<Token>, cards: &[String]) -> Result<Vec<Token>, Error
             }
             Tok::Word(w) if data && (w == "FLOAT-SHORT" || w == "FLOAT-LONG") => {
                 r.float_usage();
+                continue;
+            }
+            Tok::Word(w) if data && w == "PROGRAM-POINTER" => {
+                r.program_pointer();
                 continue;
             }
             Tok::Word(w) if w == "PROGRAM-ID" && !ends_with_header(&r.out) => r.identification_header(),
@@ -238,6 +243,16 @@ impl Rewrite {
         let shown = format!("{usage} (GnuCOBOL and Micro Focus; Enterprise COBOL writes COMP-1 and COMP-2): it is read as {ibm}, IBM's hexadecimal floating point");
         token.messages.insert(0, IWX0027.at(token.pos, shown));
         token.tok = Tok::Word(ibm.into());
+        token.spelled = None;
+        self.at += 1;
+        self.push(token);
+    }
+
+    /// PROGRAM-POINTER read as PROCEDURE-POINTER, which IBM sets and CALLs the same way.
+    fn program_pointer(&mut self) {
+        let mut token = self.tokens[self.at].clone();
+        token.messages.insert(0, IWX0044.at(token.pos, "PROGRAM-POINTER (GnuCOBOL and Micro Focus; Enterprise COBOL writes PROCEDURE-POINTER): it is read as PROCEDURE-POINTER, set by SET ... TO ENTRY and called by CALL"));
+        token.tok = Tok::Word("PROCEDURE-POINTER".into());
         token.spelled = None;
         self.at += 1;
         self.push(token);

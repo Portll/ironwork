@@ -194,6 +194,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         for entries in [working_storage, local_storage, linkage].into_iter().chain(files.iter_mut().map(|f| &mut f.records)) {
             renames_inside_records(entries, &mut errors);
         }
+        declared = based_items(&mut program, declared, &mut errors);
     }
     screens::expand(&mut program, options.compliance == numeric::Compliance::Extended, &mut errors);
     let page = options.code_page();
@@ -864,7 +865,7 @@ fn top_level_tables(entries: &mut Vec<DataEntry>, errors: &mut Vec<Error>) -> Ve
         }
         let name = e.name.clone().unwrap_or_else(|| "FILLER".into());
         errors.push(syntax::messages::IWX0019.at(e.pos, format!("OCCURS at level {:02} (Micro Focus and GnuCOBOL; Enterprise COBOL takes OCCURS only at levels 02 to 49): {name} is read as a table in a record of its own", e.level)));
-        let record = DataEntry { level: 1, name: None, spelled: None, picture: None, usage: None, value: None, redefines: None, occurs: None, occurs_min: None, depending_on: None, sign: None, justified: false, sync: false, blank_when_zero: false, indexed_by: Vec::new(), keys: Vec::new(), condition_values: Vec::new(), false_value: None, renames: None, object_class: None, external: false, global: false, any_length: false, pos: e.pos };
+        let record = DataEntry { level: 1, name: None, spelled: None, picture: None, usage: None, value: None, redefines: None, occurs: None, occurs_min: None, depending_on: None, sign: None, justified: false, sync: false, blank_when_zero: false, indexed_by: Vec::new(), keys: Vec::new(), condition_values: Vec::new(), false_value: None, renames: None, object_class: None, external: false, global: false, any_length: false, based: false, pos: e.pos };
         for d in &mut entries[at..end] {
             if d.level != 88 {
                 d.level = if d.level == 77 { 2 } else { d.level + 1 };
@@ -920,6 +921,40 @@ fn forever_names(program: &Program, errors: &mut Vec<Error>) {
         let what = if p.is_section { "SECTION" } else { "paragraph" };
         errors.push(syntax::messages::IWC0304.at(p.pos, format!("{what} FOREVER: under --compliance extended PERFORM FOREVER is Micro Focus's and GnuCOBOL's endless loop, not a PERFORM of it; compile the program under strict")));
     }
+}
+
+/// BASED records of WORKING-STORAGE and LOCAL-STORAGE, GnuCOBOL's and Micro Focus's items with no
+/// storage until SET ADDRESS OF gives them some, moved with what is subordinate to them to the
+/// LINKAGE SECTION, where Enterprise COBOL describes such items, with IWX0046-W (assumption C486).
+/// Gives `declared`, the count of WORKING-STORAGE entries the source declares, less those moved.
+fn based_items(program: &mut Program, declared: usize, errors: &mut Vec<Error>) -> usize {
+    let mut moved = Vec::new();
+    let mut declared_left = declared;
+    for (entries, storage) in [(&mut program.working_storage, true), (&mut program.local_storage, false)] {
+        let mut kept = Vec::with_capacity(entries.len());
+        let mut taking = false;
+        for (k, e) in std::mem::take(entries).into_iter().enumerate() {
+            if e.based && !matches!(e.level, 1 | 77) {
+                errors.push(syntax::messages::IWR0077.at(e.pos, format!("BASED on {}: ironwork reads BASED on an 01 or 77 entry", e.name.as_deref().unwrap_or("FILLER"))));
+            }
+            if matches!(e.level, 1 | 77) {
+                taking = e.based;
+                if taking {
+                    let name = e.name.as_deref().unwrap_or("FILLER");
+                    errors.push(syntax::messages::IWX0046.at(e.pos, format!("BASED (GnuCOBOL and Micro Focus; Enterprise COBOL describes such an item in the LINKAGE SECTION): {name} has no storage until SET ADDRESS OF gives it some")));
+                }
+            }
+            if taking {
+                declared_left -= usize::from(storage && k < declared);
+                moved.push(e);
+            } else {
+                kept.push(e);
+            }
+        }
+        *entries = kept;
+    }
+    program.linkage.extend(moved);
+    declared_left
 }
 
 /// BINARY-CHAR, Micro Focus's and GnuCOBOL's one-byte binary: a warning naming its range under

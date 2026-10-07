@@ -385,6 +385,7 @@ pub const ASSIGN_TO_DISK: &str = "C482";
 pub const START_BACKWARD: &str = "C483";
 pub const SPLIT_KEYS: &str = "C484";
 pub const DELETE_FILE: &str = "C485";
+pub const BASED_ITEMS: &str = "C486";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2725,6 +2726,13 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended), S(FileIo)]],
+    },
+    Assumption {
+        id: BASED_ITEMS,
+        claim: "Under --compliance extended, a WORKING-STORAGE or LOCAL-STORAGE 01 or 77 entry written BASED, GnuCOBOL's and Micro Focus's, is read with what is subordinate to it as a record of the LINKAGE SECTION that no USING names, as Enterprise COBOL describes such an item: it has no storage, ADDRESS OF it is NULL, until SET ADDRESS OF gives it some, and a reference to it before then ends as a reference to unowned storage does (C458). PROGRAM-POINTER is read as PROCEDURE-POINTER, and a last data description entry with no period before PROCEDURE DIVISION ends there, as cobc 3.2 reads both",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended)]],
     },
     Assumption {
         id: COMMAND_LINE_FROM_PARM,

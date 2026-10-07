@@ -334,6 +334,9 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0311 | S | `KEY IS {name} = ...: Micro Focus's split key, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0312 | S | `FUNCTION STORED-CHAR-LENGTH: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0313 | S | `DELETE FILE: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0314 | S | `PROGRAM-POINTER: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it as PROCEDURE-POINTER` |
+| IWC0315 | S | `PROCEDURE DIVISION after a data description entry with no period: GnuCOBOL's and Micro Focus's reading, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0316 | S | `BASED: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
@@ -701,6 +704,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWR0057 | S | `{a SCREEN SECTION form ironwork does not run} is not supported yet` |
 | IWR0075 | S | `FUNCTION {name}: a user-defined function is not supported here yet` |
 | IWR0076 | S | `ANY LENGTH on {name}: ironwork reads it on an alphanumeric 01 or 77 parameter, and {why}` |
+| IWR0077 | S | `BASED on {name}: ironwork reads BASED on an 01 or 77 entry` |
 | IWS0001 | S | `{what the syntax takes there}, found {the word or token there}` |
 | IWS0002 | S | `{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries` |
 | IWS0003 | S | `COPY: {message}` |
@@ -845,6 +849,9 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0041 | W | `periods after a period (GnuCOBOL and Micro Focus; Enterprise COBOL ends a sentence with one): the periods after the first are ignored` |
 | IWX0042 | W | `FUNCTION STORED-CHAR-LENGTH (GnuCOBOL; Enterprise COBOL has no such function): the argument's length in characters without its trailing spaces` |
 | IWX0043 | W | `DELETE FILE (Micro Focus and GnuCOBOL; Enterprise COBOL has no such statement): each closed file's data set is removed` |
+| IWX0044 | W | `PROGRAM-POINTER (GnuCOBOL and Micro Focus; Enterprise COBOL writes PROCEDURE-POINTER): it is read as PROCEDURE-POINTER, set by SET ... TO ENTRY and called by CALL` |
+| IWX0045 | W | `a data description entry with no period before PROCEDURE DIVISION (GnuCOBOL and Micro Focus; Enterprise COBOL ends each entry with one): the entry ends there` |
+| IWX0046 | W | `BASED (GnuCOBOL and Micro Focus; Enterprise COBOL describes such an item in the LINKAGE SECTION): {name} has no storage until SET ADDRESS OF gives it some` |
 
 ## Run-time refusals
 

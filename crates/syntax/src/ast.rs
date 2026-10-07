@@ -319,6 +319,9 @@ pub struct DataEntry {
     /// ANY LENGTH, GnuCOBOL's and Micro Focus's parameter as long as its argument, read under
     /// `--compliance extended`.
     pub any_length: bool,
+    /// BASED, GnuCOBOL's and Micro Focus's item with no storage until SET ADDRESS OF gives it some,
+    /// read under `--compliance extended`.
+    pub based: bool,
     pub pos: Pos,
 }
 

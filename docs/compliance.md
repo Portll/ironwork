@@ -877,6 +877,33 @@ open file gives 41, and a missing DD or data set 35, each taking the file's erro
 status does. Tangram removes its work files this way. Assumption C485. Strict refuses the statement
 (IWC0313).
 
+### IWX0044-W PROGRAM-POINTER
+
+`IWX0044-W PROGRAM-POINTER (GnuCOBOL and Micro Focus; Enterprise COBOL writes PROCEDURE-POINTER): it is
+read as PROCEDURE-POINTER, set by SET ... TO ENTRY and called by CALL`, at the word.
+
+The item is Enterprise COBOL's PROCEDURE-POINTER: SET ... TO ENTRY sets it, CALL calls the program
+it holds, and it compares and moves as one, as cobc 3.2 gives the results. CobolCraft keeps its
+callbacks in such items. Assumption C486. Strict refuses it (IWC0314).
+
+### IWX0045-W A data description entry with no period before PROCEDURE DIVISION
+
+`IWX0045-W a data description entry with no period before PROCEDURE DIVISION (GnuCOBOL and Micro
+Focus; Enterprise COBOL ends each entry with one): the entry ends there`, at PROCEDURE.
+
+cobc 3.2 calls the period "optional" there and reads on. Assumption C486. Strict refuses it
+(IWC0315).
+
+### IWX0046-W BASED
+
+`IWX0046-W BASED (GnuCOBOL and Micro Focus; Enterprise COBOL describes such an item in the LINKAGE
+SECTION): REC has no storage until SET ADDRESS OF gives it some`, at the entry.
+
+A WORKING-STORAGE or LOCAL-STORAGE 01 or 77 entry written BASED is read, with what is subordinate
+to it, as a record of the LINKAGE SECTION no USING names: ADDRESS OF it is NULL until SET ADDRESS
+OF gives it storage, as cobc 3.2 gives it. BASED on another level is refused (IWR0077). Assumption
+C486. Strict refuses the clause (IWC0316).
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

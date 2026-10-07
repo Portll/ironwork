@@ -1604,3 +1604,97 @@ fn delete_file_removes_a_closed_files_data_set_alike_on_both_executors() {
     let refused = syntax::parse(DELETE_FILE).unwrap_err();
     assert_eq!((refused.pos.line, refused.id), (18, Some("IWC0313")), "{refused}");
 }
+
+/// PROGRAM-POINTER items set by SET ... TO ENTRY and called, compared and moved.
+const PROGRAM_POINTERS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. PPMAIN.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  PP USAGE PROGRAM-POINTER.\n",
+    "       01  PQ PROGRAM-POINTER.\n",
+    "       01  N  PIC 9 VALUE 1.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           IF PP = NULL DISPLAY 'NULL AT START' END-IF\n",
+    "           SET PP TO ENTRY 'PPSUB'\n",
+    "           CALL PP USING N\n",
+    "           SET PQ TO PP\n",
+    "           CALL PQ USING N\n",
+    "           DISPLAY 'N ' N\n",
+    "           IF PP = PQ DISPLAY 'SAME' END-IF\n",
+    "           STOP RUN.\n",
+    "       END PROGRAM PPMAIN.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. PPSUB.\n",
+    "       DATA DIVISION.\n",
+    "       LINKAGE SECTION.\n",
+    "       01  L PIC 9.\n",
+    "       PROCEDURE DIVISION USING L.\n",
+    "           ADD 1 TO L\n",
+    "           DISPLAY 'IN PPSUB ' L\n",
+    "           GOBACK.\n",
+    "       END PROGRAM PPSUB.\n",
+);
+
+/// A last data description entry with no period before PROCEDURE DIVISION.
+const NO_PERIOD: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. NOPERIOD.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  A PIC 9 VALUE 7.\n",
+    "       01  B PIC 99.99\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE 1.5 TO B\n",
+    "           DISPLAY A ' ' B\n",
+    "           STOP RUN.\n",
+);
+
+/// BASED records given storage by SET ADDRESS OF.
+const BASED_ITEMS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. BASEDP.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  REC BASED.\n",
+    "           05 R-A PIC X(3).\n",
+    "           05 R-N PIC 9(3).\n",
+    "       01  OTHER-REC PIC X(6) BASED.\n",
+    "       01  P USAGE POINTER.\n",
+    "       01  HOLDER PIC X(6).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           IF ADDRESS OF REC = NULL DISPLAY 'NO STORAGE' END-IF\n",
+    "           SET ADDRESS OF REC TO ADDRESS OF HOLDER\n",
+    "           MOVE 'ABC' TO R-A MOVE 42 TO R-N\n",
+    "           DISPLAY 'REC ' REC\n",
+    "           SET P TO ADDRESS OF REC\n",
+    "           SET ADDRESS OF OTHER-REC TO P\n",
+    "           DISPLAY 'OTHER ' OTHER-REC\n",
+    "           \n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn program_pointers_missing_periods_and_based_items_run_alike_on_both_executors() {
+    // cobc 3.2's output.
+    for (source, expected) in [(PROGRAM_POINTERS, "NULL AT START\nIN PPSUB 2\nIN PPSUB 3\nN 3\nSAME\n"), (NO_PERIOD, "7 01.50\n"), (BASED_ITEMS, "NO STORAGE\nREC ABC042\nOTHER ABC042\n")] {
+        let walked = Harness::source(source).flags(EXTENDED).run(Executor::Interpreter);
+        assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{}", walked.err);
+        let vm = Harness::source(source).flags(EXTENDED).run(Executor::Vm);
+        assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    }
+}
+
+#[test]
+fn program_pointers_missing_periods_and_based_items_are_warned_under_extended_and_refused_under_strict() {
+    let warned = |source: &str, id: &str| diagnostics_under(source, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some(id)).map(|d| d.0).collect::<Vec<_>>();
+    assert_eq!(warned(PROGRAM_POINTERS, "IWX0044"), [5, 6]);
+    assert_eq!(warned(NO_PERIOD, "IWX0045"), [7]);
+    assert_eq!(warned(BASED_ITEMS, "IWX0046"), [5, 8]);
+    for (source, line, id) in [(PROGRAM_POINTERS, 5, "IWC0314"), (NO_PERIOD, 7, "IWC0315"), (BASED_ITEMS, 5, "IWC0316")] {
+        let refused = syntax::parse(source).unwrap_err();
+        assert_eq!((refused.pos.line, refused.id), (line, Some(id)), "{refused}");
+    }
+    let nested = BASED_ITEMS.replace("05 R-A PIC X(3).", "05 R-A PIC X(3) BASED.");
+    assert!(diagnostics_under(&nested, numeric::Compliance::Extended).iter().any(|d| (d.0, d.2) == (6, Some("IWR0077"))));
+}
