@@ -5,7 +5,9 @@ Step 0 of [codegen-runtime.md](codegen-runtime.md) §14: four programs timed und
 
 **Status:** the interpreter and cobc measured 2026-09-30 as the base; the VM measured 2026-10-04
 with the VM performance commits 6489a92..bbf9941, meeting the [VM target](#vm-target) on all four
-programs (see VM results).
+programs on an M5 Pro (see VM results). On GitHub's hosted runners, 2026-10-07, the VM misses the
+target for `callheavy` and `packed` on Linux x86-64 and for `callheavy` on macOS (see
+[Hosted runners](#hosted-runners)).
 
 ## Method
 
@@ -72,6 +74,35 @@ Against the [VM target](#vm-target):
   7.25 s. Each ratio is against this run's interpreter.
 - `tblsrch` and `callheavy` are within 0.02 of their target. `callheavy`'s VM median, 1.27 s, is
   above the 1.24 s reference in the target table, while its ratio is within the target.
+
+## Hosted runners
+
+The Bench workflow (`.github/workflows/bench.yml`) runs `tools/bench.sh` on a hosted Linux x86-64
+runner and a hosted macOS arm64 runner, with GnuCOBOL 3.2 on both, and writes each table to the
+run's summary and an artifact. It runs on demand, where its `ref` input times any commit with that
+commit's own `bench.sh` and programs, and on pushes to `bench/` branches. Each ratio is judged on the
+runner it was measured on, as the VM target asks. A hosted runner is small (3 or 4 cores) and its
+times move between runs: `callheavy` on macOS gave 0.21 and 0.26 in two runs of one commit, so a
+ratio within about 0.03 of its target needs a second run.
+
+`RUNS=5`, 2026-10-07, VM time over interpreter time (`seqio`: VM time over cobc's):
+
+| Runner | Commit | `tblsrch` | `callheavy` | `packed` | `seqio` |
+|---|---|---|---|---|---|
+| macOS arm64 (Apple M1, virtual, 3 cores) | 2337cd82 | 0.167 | 0.202 | 0.286 | 0.73 |
+| macOS arm64 | e74a3fc7 | 0.189 | **0.255** | 0.313 | 0.77 |
+| Linux x86-64 (AMD EPYC 9V45, 4 cores) | 2337cd82 | 0.198 | **0.254** | **0.372** | 0.89 |
+| Linux x86-64 (AMD EPYC 7763, 4 cores) | e74a3fc7 | **0.207** | **0.285** | **0.378** | 1.17 |
+| Target | | 0.20 | 0.20 | 0.33 | 1.25 |
+
+- On Linux x86-64 the VM missed `callheavy` and `packed` already at 2337cd82, the commit that met
+  every target on the M5 Pro: the VM gains less over the interpreter on that platform.
+- From 2337cd82 to e74a3fc7 every ratio rose on both runners, by about 5 to 15 percent.
+- A profile of the VM at e74a3fc7 (macOS `sample`, release build) puts most of its time in work the
+  interpreter does not share: resolving operands and addresses on each execution (50% of
+  `tblsrch`, 37 to 38% of `callheavy` and `packed`), instruction dispatch (14 to 19%), and setting
+  up each CALL's storage (20% of `callheavy`). Zoned, packed and binary conversion (12 to 32%) is the
+  semantics library both executors use, so speeding it lowers both times and moves the ratio little.
 
 ## Correctness
 
