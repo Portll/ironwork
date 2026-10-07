@@ -47,6 +47,9 @@ pub enum Op {
     /// abending as it abends, and held in the top frame's counter `temp`, which `Count::Temp` reads.
     SetCount(TempId, Odo),
     Display(DisplayId),
+    /// DISPLAY UPON SYSERR under `--compliance extended`: the line written to the run's standard
+    /// error.
+    DisplayError(DisplayId),
     Accept { target: PlaceId, from: AcceptFrom, plan: MovePlan },
     /// DISPLAY ... UPON ARGUMENT-NUMBER under `--compliance extended`: the next ACCEPT ... FROM
     /// ARGUMENT-VALUE takes the PARM argument word this numbers.
@@ -265,6 +268,7 @@ codec_enum!(Op {
     ScreenDisplay { display, screen } = 37,
     ScreenAccept { inputs, handled } = 38,
     Environment { display, value } = 39,
+    DisplayError(id) = 40,
 });
 codec_enum!(Step { Next = 0, Arm(arm) = 1, GoTo(para) = 2, End(ending) = 3, Return(frame) = 4, Resume(resume) = 5 });
 codec_enum!(Terminator {

@@ -868,6 +868,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0053 | W | `FUNCTION CONCATENATE (GnuCOBOL; Enterprise COBOL has no such function): its arguments' characters joined, a number's as its digits` |
 | IWX0054 | W | `COPY {name}. (GnuCOBOL and Micro Focus; Enterprise COBOL reads the name as {name}.): the member is {name}, and the periods after it end the statement` |
 | IWX0055 | W | `PROCEDURE DIVISION CHAINING (GnuCOBOL and Micro Focus; Enterprise COBOL's main program takes its PARM through USING): each item takes the run's argument in its position, its bytes left-justified, where one is given` |
+| IWX0056 | W | `DISPLAY UPON SYSERR (GnuCOBOL and Micro Focus; Enterprise COBOL has no such device): the line is written to the run's standard error` |
 
 ## Run-time refusals
 

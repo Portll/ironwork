@@ -664,6 +664,8 @@ pub enum Op {
     /// DISPLAY UPON ENVIRONMENT-NAME, or with `value` UPON ENVIRONMENT-VALUE, under
     /// --compliance extended (§9.1).
     Environment { display: DisplayId, value: bool },
+    /// DISPLAY UPON SYSERR under `--compliance extended`, tag 40: the line to standard error.
+    DisplayError(DisplayId),
     File(FileOpId), Call(CallId), Cancel(Operand),
     Sort(SortId), Release(ReleaseId), Return(ReturnId), Report(ReportOp),
     Invoke(InvokeId), Cics(CicsId), Sql(SqlId),

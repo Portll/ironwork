@@ -381,8 +381,8 @@ FD with no FILE SECTION header (IWX0037-W), PERFORM UNTIL EXIT (IWX0038-W), ASSI
 STORED-CHAR-LENGTH (IWX0042-W), DELETE FILE (IWX0043-W), PROGRAM-POINTER (IWX0044-W), BASED
 (IWX0046-W), FREE of a record (IWX0047-W), conditional compilation with >>DEFINE and >>IF
 (IWX0048-W), >>TURN, >>LISTING and >>PAGE (IWX0049-W) and >>D debugging lines (IWX0050-W), an inline PERFORM with AFTER (IWX0051-W), INITIALISE
-(IWX0052-W), FUNCTION CONCATENATE (IWX0053-W), COPY name.. (IWX0054-W) and PROCEDURE DIVISION CHAINING
-(IWX0055-W).
+(IWX0052-W), FUNCTION CONCATENATE (IWX0053-W), COPY name.. (IWX0054-W), PROCEDURE DIVISION CHAINING
+(IWX0055-W) and DISPLAY UPON SYSERR (IWX0056-W).
 [docs/compliance.md](docs/compliance.md) gives each one's meaning, the census that chose them, and
 what stays refused and why.
 

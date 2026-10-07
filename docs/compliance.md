@@ -987,6 +987,14 @@ copies them: `123` into a PIC 9 item gives 1. An item with no word keeps its val
 every item of a program another one called. ACAS's posting programs take their date range this
 way. Assumption C488. Strict refuses it (IWC0320).
 
+### IWX0056-W DISPLAY UPON SYSERR
+
+`IWX0056-W DISPLAY UPON SYSERR (GnuCOBOL and Micro Focus; Enterprise COBOL has no such device): the line
+is written to the run's standard error`, at the DISPLAY.
+
+The line goes to the run's standard error, with or without NO ADVANCING, as cobc 3.2 writes it; it
+reaches the VM as `Op::DisplayError`, tag 40. Strict keeps IWC0073.
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

@@ -721,6 +721,7 @@ impl<'a> Printer<'a> {
             Op::DecTemp(t) => format!("DecTemp t{t}"),
             Op::SetCount(t, odo) => format!("SetCount t{t} <- {}", self.odo(odo)),
             Op::Display(id) => self.display(*id),
+            Op::DisplayError(id) => format!("Error{}", self.display(*id)),
             Op::ArgumentNumber(value) => format!("ArgumentNumber <- {}", self.int(value)),
             Op::Environment { display, value } => format!("Environment{} {}", if *value { "Value" } else { "Name" }, self.display(*display)),
             Op::ScreenDisplay { display, screen } => format!("Screen{} {}", self.display(*display), self.screen(screen)),

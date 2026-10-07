@@ -737,7 +737,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
                 Op::SetTemp(_, n) | Op::ArgumentNumber(n) => int(n)?,
                 Op::SetCount(_, o) if o.check != ssrange => return Err(format!("block {b}: a SEARCH count's check that disagrees with SSRANGE")),
                 Op::SetCount(_, o) => int(&o.object)?,
-                Op::Display(d) => within("DISPLAY plan", *d, p.plans.display.len())?,
+                Op::Display(d) | Op::DisplayError(d) => within("DISPLAY plan", *d, p.plans.display.len())?,
                 Op::Environment { display, .. } => within("DISPLAY plan", *display, p.plans.display.len())?,
                 Op::ScreenDisplay { display, screen } => {
                     within("DISPLAY plan", *display, p.plans.display.len())?;

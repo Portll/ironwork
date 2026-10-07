@@ -1900,3 +1900,27 @@ fn chaining_moves_each_run_argument_into_its_item_alike_on_both_executors() {
     let refused = syntax::parse(CHAINING).unwrap_err();
     assert_eq!((refused.pos.line, refused.id), (8, Some("IWC0320")), "{refused}");
 }
+
+/// DISPLAY UPON SYSERR, with and without NO ADVANCING, between DISPLAYs of the output.
+const SYSERR: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. SYSERRP.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY \"TO OUT\"\n",
+    "           DISPLAY \"TO ERR \" 42 UPON SYSERR\n",
+    "           DISPLAY \"AGAIN\" UPON SYSERR WITH NO ADVANCING\n",
+    "           DISPLAY \"OUT END\"\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn display_upon_syserr_writes_standard_error_alike_on_both_executors() {
+    // cobc 3.2's standard output and standard error.
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let ran = Harness::source(SYSERR).flags(EXTENDED).run(executor);
+        assert_eq!((ran.out.as_str(), ran.err.as_str(), ran.ending.as_ref().ok()), ("TO OUT\nOUT END\n", "TO ERR 42\nAGAIN", Some(&Ending::StopRun)));
+    }
+    let warned: Vec<_> = diagnostics_under(SYSERR, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0056")).map(|d| d.0).collect();
+    assert_eq!(warned, [5, 6]);
+    assert!(diagnostics_under(SYSERR, numeric::Compliance::Strict).iter().any(|d| (d.0, d.2) == (5, Some("IWC0073"))));
+}

@@ -405,6 +405,10 @@ impl Lower<'_> {
                 let screen = self.screen_plan(screen, pos)?;
                 self.op(Op::ScreenDisplay { display, screen }, pos)?;
             }
+            Stmt::Display { items, upon: Some(upon), no_advancing, screen: None, pos: _ } if upon.device == "SYSERR" => {
+                let plan = self.display_plan(items, false, *no_advancing, pos)?;
+                self.op(Op::DisplayError(plan), pos)?;
+            }
             Stmt::Display { items, upon, no_advancing, screen: None, pos: _ } => {
                 let plan = self.display_plan(items, crate::statements::upon_console(upon.as_ref()), *no_advancing, pos)?;
                 self.op(Op::Display(plan), pos)?;

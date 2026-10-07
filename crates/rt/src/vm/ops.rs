@@ -137,6 +137,13 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 }
             }
             Op::Display(id) => self.display(*id, pos)?,
+            Op::DisplayError(id) => {
+                let shown = self.display_text(*id, pos)?;
+                if self.unit.observed() {
+                    self.sink("log", pos, &shown);
+                }
+                display::write(&mut *self.unit.err, &shown, self.p.plans.display[*id as usize].no_advancing, pos)?;
+            }
             Op::ArgumentNumber(value) => {
                 let n = self.int(value, pos)?;
                 self.unit.arguments.position(n);

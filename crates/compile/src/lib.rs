@@ -1247,6 +1247,11 @@ impl Check<'_> {
                 {
                     self.argument_number(items, *pos);
                 } else if let Some(upon) = upon
+                    && upon.device == "SYSERR"
+                    && self.extended
+                {
+                    self.errors.push(syntax::messages::IWX0056.at(*pos, "DISPLAY UPON SYSERR (GnuCOBOL and Micro Focus; Enterprise COBOL has no such device): the line is written to the run's standard error"));
+                } else if let Some(upon) = upon
                     && !DISPLAY_DEVICES.contains(&upon.device.as_str())
                 {
                     let why = if upon.name == upon.device {

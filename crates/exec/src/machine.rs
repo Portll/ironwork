@@ -329,6 +329,13 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 let at = self.screen_at(screen, *pos)?;
                 rt::crt::display(self.unit, at, &text, clearing(screen));
             }
+            Stmt::Display { items, upon: Some(upon), no_advancing, pos, .. } if upon.device == "SYSERR" => {
+                let text = self.display_text(items, false, *pos)?;
+                if self.unit.observed() {
+                    self.sink("log", *pos, &text);
+                }
+                rt::display::write(&mut *self.unit.err, &text, *no_advancing, *pos)?;
+            }
             Stmt::Display { items, upon, no_advancing, pos, .. } => self.display(items, upon_console(upon.as_ref()), *no_advancing, *pos)?,
             Stmt::Open { files, pos } => {
                 for (mode, name) in files {
