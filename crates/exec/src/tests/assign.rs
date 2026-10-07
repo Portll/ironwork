@@ -213,3 +213,52 @@ fn the_input_trace_has_each_files_name_at_its_select_with_its_own_input() {
     let vm = Harness::source(&source).flags(EXTENDED).dds(&dds).sysin("SECOND\n").run(Executor::Vm);
     assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
 }
+
+/// An indexed file and a sequential one, each ASSIGNed with a label before its DD name.
+const LABELLED: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. T.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       INPUT-OUTPUT SECTION.\n",
+    "       FILE-CONTROL.\n",
+    "           SELECT KF ASSIGN TO DA-MASTER\n",
+    "               ORGANIZATION IS INDEXED ACCESS MODE IS DYNAMIC\n",
+    "               RECORD KEY IS K-KEY FILE STATUS IS FS.\n",
+    "           SELECT SF ASSIGN TO TAPE-NAMES FILE STATUS IS FS.\n",
+    "       DATA DIVISION.\n",
+    "       FILE SECTION.\n",
+    "       FD  KF.\n",
+    "       01  K-REC.\n",
+    "           05 K-KEY  PIC X(4).\n",
+    "           05 K-DATA PIC X(4).\n",
+    "       FD  SF.\n",
+    "       01  S-REC PIC X(6).\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  FS PIC XX.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           OPEN INPUT KF SF\n",
+    "           MOVE '0002' TO K-KEY\n",
+    "           READ KF KEY IS K-KEY\n",
+    "           READ SF\n",
+    "           DISPLAY FS ' ' K-DATA ' ' S-REC\n",
+    "           CLOSE KF SF\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn an_assign_label_documents_the_device_and_the_dd_is_the_name_after_it_on_both_executors() {
+    let dir = temp("assign-label");
+    std::fs::create_dir_all(&dir).unwrap();
+    let (master, names, written) = (dir.join("master.txt"), dir.join("names.txt"), dir.join("written.txt"));
+    std::fs::write(&master, "0001AAAA\n0002BBBB\n").unwrap();
+    std::fs::write(&names, "ALPHA \n").unwrap();
+    std::fs::write(&written, "0002WWWW\n").unwrap();
+    let dds = [format!("MASTER={}:text", master.display()), format!("NAMES={}:text", names.display())];
+    let walked = Harness::source(LABELLED).dds(&dds).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.is_ok()), ("00 BBBB ALPHA \n", true), "{}", walked.err);
+    let vm = Harness::source(LABELLED).dds(&dds).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    let both = [dds[0].clone(), dds[1].clone(), format!("DA-MASTER={}:text", written.display())];
+    let o = Harness::source(LABELLED).dds(&both).run(Executor::Interpreter);
+    assert_eq!(o.out, "00 WWWW ALPHA \n", "a DD named as ASSIGN writes it is found first: {}", o.err);
+}

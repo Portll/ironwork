@@ -142,7 +142,8 @@ flags:
              interpreter reads source only
   --dd NAME=path[:format][:mod]
              the file a DD name stands for, as JCL would give it; DD_NAME in the environment also
-             works. Binary files hold z/OS records (fixed, or variable behind 4-byte RDWs); :text
+             works. A file whose ASSIGN carries a label, as DA-MASTER does, opens DD MASTER when no
+             DD is named as the ASSIGN writes it. Binary files hold z/OS records (fixed, or variable behind 4-byte RDWs); :text
              reads and writes UTF-8 lines through the program's code page. A print file's records
              carry a printer control character, which :text shows as line spacing. :mod is
              DISP=MOD: OPEN OUTPUT of a sequential file keeps its records and writes after them. An

@@ -372,7 +372,7 @@ impl<'p, L: Loader<Rc<Code>>> Files<Handle<'p>, &'p IntExpr> for Io<'_, 'p, '_, 
     }
 
     fn dd(&self, assign: &str) -> Option<Dd> {
-        self.vm.unit.dds.get(assign)
+        self.vm.unit.dds.assigned(assign)
     }
 
     fn notify(&mut self, event: Event<'_>) {

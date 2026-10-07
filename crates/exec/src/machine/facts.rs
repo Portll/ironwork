@@ -187,7 +187,7 @@ impl<'a> Files<&'a Ref, Int<'a>> for Machine<'_, '_, '_> {
     }
 
     fn dd(&self, assign: &str) -> Option<Dd> {
-        self.unit.dds.get(assign)
+        self.unit.dds.assigned(assign)
     }
 
     fn notify(&mut self, event: Event<'_>) {

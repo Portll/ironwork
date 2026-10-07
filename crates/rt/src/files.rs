@@ -81,6 +81,17 @@ impl Dds {
         }
         std::env::var(format!("DD_{name}")).ok().and_then(|v| dd_value(&v).ok())
     }
+
+    /// The DD a file's ASSIGN names: as written, or else the DD name after its label, which only
+    /// documents the device (`DA-MASTER` is DD MASTER; Language Reference, ASSIGN clause).
+    pub fn assigned(&self, assign: &str) -> Option<Dd> {
+        self.get(assign).or_else(|| {
+            let (_, name) = assign.rsplit_once('-')?;
+            let b = name.as_bytes();
+            let dd_name = !b.is_empty() && b.len() <= 8 && matches!(b[0], b'A'..=b'Z' | b'#' | b'$' | b'@') && b[1..].iter().all(|c| matches!(c, b'A'..=b'Z' | b'0'..=b'9' | b'#' | b'$' | b'@'));
+            if dd_name { self.get(name) } else { None }
+        })
+    }
 }
 
 enum Handle {
@@ -723,6 +734,10 @@ mod tests {
         assert_eq!(dds.get("IN"), Some(Dd { path: "/tmp/a.txt".into(), format: Some(Format::Text), append: false }));
         assert_eq!(dds.get("OUT").unwrap().format, None);
         assert!(dds.get("NONE").is_none());
+        let labelled = Dds::new(&["MASTER=/tmp/m".into(), "UT-S-X=/tmp/x".into()], false).unwrap();
+        assert_eq!(labelled.assigned("DA-MASTER").map(|d| d.path), Some("/tmp/m".into()));
+        assert_eq!(labelled.assigned("UT-S-X").map(|d| d.path), Some("/tmp/x".into()));
+        assert!(labelled.assigned("DA-NOTHERE").is_none() && labelled.assigned("A-TOOLONGNAME").is_none() && labelled.assigned("DA-9BAD").is_none());
         assert!(Dds::new(&["NOEQUALS".into()], false).is_err());
     }
 
