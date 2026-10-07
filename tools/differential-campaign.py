@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""Run `ironwork fuzz --differential` over a corpus of batch programs until a stated number of
-CPU-hours is spent, and report how many generated inputs the interpreter and the VM ran alike
-(docs/lir.md §12.3).
+"""Run `ironwork fuzz --differential` over a corpus of programs until a stated number of CPU-hours
+is spent, and report how many generated inputs the interpreter and the VM ran alike (docs/lir.md
+§12.3).
 
 Each repository given, or each directory under a --corpus directory, is one repository: its
-programs (.cbl, .cob, .cobol) are fuzzed with -I for each directory of its copybooks and -L for each
-directory of its programs, as `ironwork fuzz` is given them for a CALL to reach its subprogram. A
-program is a candidate where it has a PROCEDURE DIVISION, no EXEC CICS, and a SELECT, an ACCEPT or a
-PROCEDURE DIVISION USING; a program whose bytes match one already taken is a copy and is not run
-again. Each candidate is probed with PROBE_RUNS runs: one fuzz refuses (nothing to vary, a USING
-that is not a PARM, a source it cannot compile) or whose lowering is refused leaves the campaign,
-with its reason in campaign.json, and so does one none of whose probe runs was compared, as each
-timed out or reached what the VM does not run yet.
+programs (.cbl, .cob, .cobol) are fuzzed with -I for each directory of its copybooks and BMS maps
+and -L for each directory of its programs, as `ironwork fuzz` is given them for a CALL to reach its
+subprogram. A program is a candidate where it has a PROCEDURE DIVISION and EXEC CICS, or a SELECT,
+an ACCEPT or a PROCEDURE DIVISION USING; a program whose bytes match one already taken is a copy and
+is not run again. Each program is fuzzed in the mode that fits it: one with EXEC CICS as a CICS
+task (`--cics --differential`), one whose PROCEDURE DIVISION USING is not a PARM as a subprogram at
+its interface (`--interface --differential`, chosen when the batch probe is refused for its USING
+items), and any other as a batch program. Each candidate is probed with PROBE_RUNS runs: one fuzz
+refuses in its mode (nothing to vary, an IMS program, a source it cannot compile) or whose lowering
+is refused leaves the campaign, with its reason and mode in campaign.json, and so does one none of
+whose probe runs was compared, as each timed out or reached what the VM does not run yet.
 
 The campaign then runs rounds. Round k runs every program left with --seed k and --runs RUNS, and
 rounds go on until the CPU time spent reaches the budget or --rounds is reached. CPU time is user
@@ -22,7 +25,7 @@ The probes count towards it.
 Each fuzz output with a divergence is kept as divergences/<program>/seed-<k>; the others are
 removed. campaign.json holds the ironwork version, the budget and what was spent, and the totals:
 runs, agree, both at the statement limit, stopped by the VM (and at what), differ, with each
-program's own.
+program's own and its mode, and how many programs were fuzzed in each mode (modes).
 
 A line on standard error every PROGRESS seconds says what has been spent and counted so far.
 
@@ -33,17 +36,22 @@ usage: differential-campaign.py <ironwork binary> [repository]... [--corpus dir]
 
 --shard i/n takes the i-th of n parts of the candidates, in the order of their digests, so n
 machines can share a corpus. `total` adds up the campaign.json of each shard and prints the totals
-as JSON. Exit status: 0 nothing differed, 1 some input differed, 2 usage.
+as JSON, with the programs fuzzed in each mode (modes) where the shards record them. Exit status:
+0 nothing differed, 1 some input differed, 2 usage.
 """
 import argparse, concurrent.futures, hashlib, json, os, re, shutil, signal, socket, subprocess, sys, threading, time
 
 PROGRAM = (".cbl", ".cob", ".cobol")
-COPYBOOK = (".cpy", ".copy", ".cbk", ".inc")
+COPYBOOK = (".cpy", ".copy", ".cbk", ".inc", ".bms")
 PROBE_RUNS = 2
 # A repository with more directories than this is given only its first ones, as corpus runs are.
 DIRS = 30
 SUMMARY = re.compile(r"^ironwork fuzz --differential: (\d+) runs, (\d+) agree \((\d+) at the statement limit\), (\d+) timed out, (\d+) stopped by the VM, (\d+) differ \((\d+) kept\)", re.M)
 STOPPED = re.compile(r"^ironwork fuzz: (\d+) runs reached what the VM does not run yet: (.*)$", re.M)
+# The flags each mode gives `ironwork fuzz` beside --differential.
+MODES = {"batch": [], "cics": ["--cics"], "interface": ["--interface"]}
+# What a batch fuzz says of a subprogram, which is then fuzzed at its interface.
+NOT_A_PARM = "takes PROCEDURE DIVISION USING parameters that are not a PARM's"
 TOTALS = ("runs", "agree", "atLimit", "timedOut", "stopped", "differ")
 PROGRESS = 300
 
@@ -66,11 +74,12 @@ def candidates(repository):
         except OSError:
             continue
         text = data.decode("latin-1")
-        if not re.search(r"PROCEDURE\s+DIVISION", text, re.I) or re.search(r"EXEC\s+CICS", text, re.I):
+        if not re.search(r"PROCEDURE\s+DIVISION", text, re.I):
             continue
-        if not re.search(r"\bSELECT\b|\bACCEPT\b|PROCEDURE\s+DIVISION\s+USING", text, re.I):
+        cics = re.search(r"EXEC\s+CICS", text, re.I)
+        if not cics and not re.search(r"\bSELECT\b|\bACCEPT\b|PROCEDURE\s+DIVISION\s+USING", text, re.I):
             continue
-        yield {"path": f, "repository": repository, "digest": hashlib.sha256(data).hexdigest(), "copyDirs": copy_dirs, "programDirs": program_dirs}
+        yield {"path": f, "repository": repository, "digest": hashlib.sha256(data).hexdigest(), "copyDirs": copy_dirs, "programDirs": program_dirs, "mode": "cics" if cics else "batch"}
 
 def key(program):
     rel = os.path.relpath(program["path"], os.path.dirname(program["repository"]))
@@ -78,7 +87,7 @@ def key(program):
 
 def fuzz(binary, program, out, runs, seed, timeout):
     """One `ironwork fuzz --differential`: its exit status, CPU seconds, and its output text."""
-    argv = [binary, "fuzz", "--differential", program["path"], "-o", out, "--root", program["repository"], "--runs", str(runs), "--seed", str(seed), "--timeout", str(timeout)]
+    argv = [binary, "fuzz", *MODES[program["mode"]], "--differential", program["path"], "-o", out, "--root", program["repository"], "--runs", str(runs), "--seed", str(seed), "--timeout", str(timeout)]
     for d in program["copyDirs"]:
         argv += ["-I", d]
     for d in program["programDirs"]:
@@ -114,6 +123,12 @@ def total(paths):
     out = {"campaigns": len(shards), "ironwork": sorted({s["ironwork"] for s in shards}), "labels": sorted({s["label"] for s in shards})}
     for k in ("cpuHours", "candidates", "fuzzed", "refused", *TOTALS):
         out[k] = round(sum(s[k] for s in shards), 3)
+    modes = {}
+    for s in shards:
+        for m, n in s.get("modes", {}).items():
+            modes[m] = modes.get(m, 0) + n
+    if modes:
+        out["modes"] = dict(sorted(modes.items()))
     out["wallHours"] = max(s["wallHours"] for s in shards)
     stopped_at = {}
     for s in shards:
@@ -136,7 +151,7 @@ def main():
     ap.add_argument("--jobs", type=int, default=os.cpu_count())
     ap.add_argument("--runs", type=int, default=50)
     ap.add_argument("--rounds", type=int, default=1_000_000)
-    ap.add_argument("--timeout", type=float, default=60)
+    ap.add_argument("--timeout", type=int, default=60)
     ap.add_argument("--shard", default="1/1")
     ap.add_argument("--label", default="")
     a = ap.parse_args()
@@ -185,7 +200,7 @@ def main():
         got = counted(text)
         with lock:
             if got:
-                row = per_program.setdefault(name, {"path": program["path"], **{k: 0 for k in TOTALS}, "cpuSeconds": 0.0, "seeds": 0})
+                row = per_program.setdefault(name, {"path": program["path"], "mode": program["mode"], **{k: 0 for k in TOTALS}, "cpuSeconds": 0.0, "seeds": 0})
                 for k in TOTALS:
                     row[k] += got[k]
                     totals[k] += got[k]
@@ -197,7 +212,7 @@ def main():
                 kept = os.path.join(a.out, "divergences", name, f"seed-{seed}")
                 os.makedirs(os.path.dirname(kept), exist_ok=True)
                 shutil.move(out, kept)
-                divergences.append({"program": program["path"], "seed": seed, "differ": got["differ"], "kept": os.path.relpath(kept, a.out), "said": [l for l in text.splitlines() if "divergence-" in l]})
+                divergences.append({"program": program["path"], "mode": program["mode"], "seed": seed, "differ": got["differ"], "kept": os.path.relpath(kept, a.out), "said": [l for l in text.splitlines() if "divergence-" in l]})
             else:
                 shutil.rmtree(out, ignore_errors=True)
             if time.time() - state["said"] >= PROGRESS:
@@ -206,14 +221,22 @@ def main():
                       f"{totals['runs']} runs, {totals['agree']} agree, {totals['timedOut']} timed out, {totals['stopped']} stopped, {totals['differ']} differ", file=sys.stderr, flush=True)
         return code, got, text
 
+    def probe(program):
+        """Probes runs of `program` in its mode, a subprogram's again at its interface; the result."""
+        code, got, text = one(program, PROBE_RUNS, 1)
+        if got is None and program["mode"] == "batch" and NOT_A_PARM in text:
+            program["mode"] = "interface"
+            code, got, text = one(program, PROBE_RUNS, 1)
+        return code, got, text
+
     left = []
     with concurrent.futures.ThreadPoolExecutor(a.jobs) as pool:
-        probes = {pool.submit(one, p, PROBE_RUNS, 1): p for p in programs}
+        probes = {pool.submit(probe, p): p for p in programs}
         for f in concurrent.futures.as_completed(probes):
             p = probes[f]
             code, got, text = f.result()
             if got is None:
-                refused[key(p)] = {"path": p["path"], "exit": code, "why": refusal(text)}
+                refused[key(p)] = {"path": p["path"], "mode": p["mode"], "exit": code, "why": refusal(text)}
             elif got["agree"] or got["differ"]:
                 left.append(p)
         left.sort(key=lambda p: p["digest"])
@@ -250,6 +273,7 @@ def main():
         "candidates": len(programs),
         "copiesSkipped": copies,
         "fuzzed": len(left),
+        "modes": {m: n for m in MODES if (n := sum(p["mode"] == m for p in left))},
         "refused": len(refused),
         **totals,
         "stoppedAt": dict(sorted(stopped_at.items(), key=lambda kv: -kv[1])),

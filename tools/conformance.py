@@ -120,7 +120,11 @@ def vm_section(results):
 def differential_section(campaign):
     by_commit = collections.Counter(l.split()[0][:8] for l in campaign.get("labels", []) if l)
     shards = ", ".join(f"{c}, {n} shard{'s' if n > 1 else ''}" for c, n in by_commit.items())
-    out = [f"A differential campaign runs `ironwork fuzz --differential` on the batch programs of CCVS85 for a budget of CPU "
+    as_what = {"batch": "as batch programs", "cics": "as CICS tasks", "interface": "as subprograms at their interface"}
+    modes = campaign.get("modes", {})
+    programs = ("the batch programs of CCVS85" if set(modes) <= {"batch"}
+                else "the programs of CCVS85 (" + ", ".join(f"{n:,} {as_what.get(m, m)}" for m, n in modes.items()) + ")")
+    out = [f"A differential campaign runs `ironwork fuzz --differential` on {programs} for a budget of CPU "
            f"time: each generated input runs on the interpreter and on the VM, and the two runs are compared. "
            f"{', '.join(campaign['ironwork'])}, {campaign['cpuHours']:,} CPU-hours"
            + (f" ({shards})" if shards else "") + f": of {campaign['candidates']:,} candidate programs "
