@@ -1,0 +1,118 @@
+name: Differential campaign
+
+# The interpreter against the VM on generated inputs for a stated number of CPU-hours
+# (tools/differential-campaign.py, docs/lir.md §12.3). Each shard fuzzes its part of the corpus
+# until it has spent its CPU-hours; the last job adds the shards up and fails if any input differed.
+on:
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: Runners to share the corpus (a public repository runs 20 at once)
+        default: '8'
+      cpu-hours:
+        description: CPU-hours each shard spends (8 x 3 is the 24 the campaign states)
+        default: '3'
+      runs:
+        description: Generated inputs per program per seed
+        default: '50'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.shards.outputs.list }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: z390development/nistcobol85
+          ref: 272a401985c66dfca4302ff9bb037def167bc5f3
+          path: nistcobol85
+          persist-credentials: false
+          sparse-checkout: src/
+          sparse-checkout-cone-mode: false
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Build
+        run: cargo build --release --locked -p ironwork
+      # nist.py writes each CCVS85 routine with its X-cards filled in, and the copy library, to the
+      # work directory; those are the corpus.
+      - name: Corpus
+        run: |
+          python3 tools/nist.py target/release/ironwork nistcobol85/src --workdir nist-work
+          mkdir -p campaign/corpus/ccvs85
+          cp nist-work/*.CBL campaign/corpus/ccvs85/
+          cp -R nist-work/copy campaign/corpus/ccvs85/
+          cp target/release/ironwork campaign/
+      - id: shards
+        env:
+          SHARDS: ${{ inputs.shards }}
+        run: echo "list=$(python3 -c 'import json, os; print(json.dumps(list(range(1, int(os.environ["SHARDS"]) + 1))))')" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: campaign-input
+          path: campaign/
+          retention-days: 3
+
+  shard:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.build.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: campaign-input
+          path: campaign
+      - name: Fuzz
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ inputs.shards }}
+          CPU_HOURS: ${{ inputs.cpu-hours }}
+          RUNS: ${{ inputs.runs }}
+        run: |
+          chmod +x campaign/ironwork
+          python3 tools/differential-campaign.py campaign/ironwork --corpus campaign/corpus -o out \
+            --shard "$SHARD/$SHARDS" --cpu-hours "$CPU_HOURS" --runs "$RUNS" --jobs "$(nproc)" \
+            --label "$GITHUB_SHA shard $SHARD/$SHARDS"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: campaign-${{ matrix.shard }}
+          path: out/
+          retention-days: 30
+
+  total:
+    needs: shard
+    if: always() && needs.shard.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: campaign-[0-9]*
+          path: shards
+      - name: Total
+        run: |
+          status=0
+          python3 tools/differential-campaign.py total shards/*/campaign.json > total.json || status=$?
+          { echo '```json'; cat total.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          cat total.json
+          exit "$status"

@@ -2543,6 +2543,15 @@ and not compared, and a run the VM stops at what it does not run yet is counted.
 executor wrote and the command that repeats the run. The golden programs of §12.2 run in both,
 which exercises C99.
 
+**Campaign.** `tools/differential-campaign.py` runs `fuzz --differential` over a corpus of batch
+programs, round after round with a new seed, until it has spent a stated number of CPU-hours, and
+writes `campaign.json`: the runs, how many agree, time out, stop at what the VM does not run yet or
+differ, each program's share, and each differing input kept. CPU time is each fuzz process's user
+and system time with its runs', so the figure does not depend on the machine's load. The
+Differential campaign workflow (`.github/workflows/differential.yml`, run by hand) builds a release
+binary, takes NIST's CCVS85 routines with their X-cards filled in as the corpus, shares it among 8
+hosted runners at 3 CPU-hours each, and fails if any input differs.
+
 **NIST.** `tools/nist.py --vm` runs NIST's CCVS85 audit routines on the interpreter and then on the
 VM, from the same files and with the clock and WHEN-COMPILED fixed, and compares the exit status,
 standard output, standard error and every file the two runs leave, the print file among them. CI
